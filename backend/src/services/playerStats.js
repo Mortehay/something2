@@ -12,6 +12,11 @@
 // the game handed everyone 100.
 
 const C = require('./progressionConstants.js');
+// SOMET-513. statComposition.js is a PURE leaf module (no requires of its own),
+// so this cannot cycle. RULE_IDENTITIES is imported rather than re-declared
+// precisely because it is derived from RULE_COMBINE: a rule added there is
+// present here automatically, and the two cannot drift.
+const { RULE_IDENTITIES } = require('./statComposition.js');
 
 const DEFAULT_PROGRESSION = Object.freeze({
   experience: 0,
@@ -134,6 +139,56 @@ function hitStatusesOf(progression) {
   return Array.isArray(s) ? s : NO_STATUSES;
 }
 
+// SOMET-513. composeStats' whole `rules` aggregate, carried onto the derived
+// bundle UNCHANGED -- this module composes nothing from it, it is only the
+// courier, exactly like damageMult/resists/hitStatuses above.
+//
+// WHY ONE PASSTHROUGH OBJECT AND NOT ONE NAMED FIELD PER RULE. The passive
+// tree epic (SOMET-512) takes the vocabulary from four rules to thirteen.
+// `ruleLifeCostMultiplier` below is the pre-495 shape -- one accessor per rule
+// -- and nine more copies of it would be nine copies of the same three-line
+// guard, each an independent chance to forget one. The aggregates SOMET-495
+// added chose the other shape and that is the one that scales.
+//
+// WHY IT RIDES `stats` AT ALL. `stats` is the only bundle every re-derive path
+// already refreshes -- join, level-up, chest XP, socket, allocate, respec all
+// go through derivePlayerStats and then applyDerivedStats. A rule written onto
+// the player object instead would be set once at join and go stale the moment
+// a node was allocated: the silent half-wired shape this epic exists to stop.
+//
+// A progression object with no tree context -- DEFAULT_PROGRESSION, a unit-test
+// literal, a row read before the tree was seeded -- has no `rules` and gets
+// RULE_IDENTITIES: every rule present, at the value that means "no node
+// allocated". Consumers therefore read `stats.rules.attackSpeedMult` and get a
+// number, never `undefined` (which multiplies to NaN).
+function rulesOf(progression) {
+  const r = progression == null ? null : progression.rules;
+  return r && typeof r === 'object' ? r : RULE_IDENTITIES;
+}
+
+// SOMET-514. THE CONSUMER of the tree's `cooldownFloor` rule.
+//
+// This rule was declared in RULE_KEYS from the start, naming THIS function as
+// its consumer -- and no such read existed. cooldownMult was floored with the
+// bare C.MIN_COOLDOWN_MULT constant, so `ks_dex_fleet` ("your cooldown floor
+// drops from 0.40 to 0.32") did nothing, and so did the ARCHER'S START NODE,
+// whose only grant is cooldownFloor 0.38. Every Archer began the game with no
+// class identity whatsoever. See passive_rules.test.js's source gate, which
+// now makes that state unshippable.
+//
+// The combine mode is `min` with a NULL identity, deliberately: a player with
+// no such node allocated must land on C.MIN_COOLDOWN_MULT, not on 0. A 0 floor
+// removes the bound entirely and lets a stack of haste drive the attack
+// interval toward zero.
+//
+// `n > 0` rather than `Number.isFinite(n)` for exactly that reason -- null, 0
+// and a negative all mean "no usable floor" and all fall back to the constant.
+function cooldownFloorOf(progression) {
+  const v = rulesOf(progression).cooldownFloor;
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) && n > 0 ? n : C.MIN_COOLDOWN_MULT;
+}
+
 // The single source of every number a stat affects.
 //
 // `classPools` is `{ maxHp, maxMana }` -- the class's BASE pools, before any
@@ -161,10 +216,23 @@ function derivePlayerStats(progression, classPools = null) {
     meleeMult: round4(1 + C.MELEE_PER_STR * above('strength')),
     spellMult: round4(1 + C.SPELL_PER_INT * above('intelligence')),
     // Lower is faster. Floored so attack rate stays bounded.
+    // SOMET-514: the floor is the tree's `cooldownFloor` rule when a node
+    // supplies one, and C.MIN_COOLDOWN_MULT otherwise. Until this ticket it
+    // was always the constant, which is what made the Archer's start node and
+    // ks_dex_fleet inert.
     cooldownMult: Math.max(
-      C.MIN_COOLDOWN_MULT,
+      cooldownFloorOf(progression),
       round4(1 / (1 + C.HASTE_PER_DEX * above('dexterity'))),
     ),
+    // SOMET-519. The RESOLVED floor, carried so the authority can bound the
+    // cooldown AFTER it has applied attackSpeedMult/castSpeedMult.
+    //
+    // Flooring `cooldownMult` above is not enough on its own: the authority
+    // divides it by a speed multiplier, and `Math.max(floor, x) / speed` is
+    // unbounded below. Exposing the same resolved number both places read is
+    // what stops world.js re-deriving its own floor from C.MIN_COOLDOWN_MULT
+    // and silently ignoring a player's cooldownFloor node.
+    cooldownFloor: cooldownFloorOf(progression),
     manaRegen: round4(C.MANA_REGEN_BASE + C.MANA_REGEN_PER_WIS * above('wisdom')),
     // The fraction of an item's value a merchant pays. Capped strictly below
     // 1.0: see SELL_FRACTION_MAX in progressionConstants.js -- this is a
@@ -177,7 +245,16 @@ function derivePlayerStats(progression, classPools = null) {
     // NOT derived from any stat -- it is a passive-tree rule, carried here
     // only so it reaches the authority by the same route every other derived
     // number does.
+    //
+    // SOMET-513: this is now ALSO reachable as `rules.lifeCostMultiplier`. The
+    // named field is kept deliberately -- lifeCost.js and its call sites read
+    // it, and rewriting them is not this epic's business. The two are the same
+    // value from the same source (`progression.rules`), so they cannot
+    // disagree; do not add a second named field for any other rule.
     lifeCostMultiplier: ruleLifeCostMultiplier(progression),
+    // SOMET-513. The whole rules aggregate, for the nine rules SOMET-512 adds.
+    // See rulesOf's header for why this is one object rather than nine fields.
+    rules: rulesOf(progression),
     // SOMET-495, carried the same way and for the same reason. Read by
     // world.js's weaponDamage (damageMult), by the mitigation rebuild in
     // world.js (resists) and by effects.js's applyHitStatuses at every player

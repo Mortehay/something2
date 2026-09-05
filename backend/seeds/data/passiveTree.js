@@ -17,7 +17,9 @@
 // the one piece of indirection: a minor/notable template written for "the
 // sector's own stat" writes `stat: '@sector'`, and the generator substitutes
 // the sector key. That is what lets one template serve all six sectors, which
-// is the whole reason 40 templates cover 1770 sector nodes.
+// is the whole reason ~50 templates cover 1770 sector nodes. SOMET-516 added
+// `@other`, which resolves to one of the five stats a sector is NOT named
+// after -- see generatePassiveTree.js's nextOtherStat.
 
 // Element names are NOT re-declared here. They are read from the damage
 // authority so this file can never drift from the five elements the combat
@@ -56,13 +58,72 @@ const RULE_KEYS = {
     combine: 'sum',
     consumer: 'backend/src/services/charm.js — charmBudget() (contract §2, Group B T5)',
   },
+  // SOMET-514 WIRED THESE TWO. Both previously said "wiring is a follow-up"
+  // here and had no consumer at all, which made the Archer and Monk start
+  // nodes -- whose only grants these are -- grant nothing whatsoever. The
+  // `consumer` field below is now true, and passive_rules.test.js's source
+  // gate reads backend/src/ to keep it true.
   cooldownFloor: {
     combine: 'min',
-    consumer: 'backend/src/services/playerStats.js — MIN_COOLDOWN_MULT (wiring is a follow-up: playerStats.js belongs to Group A T2 under the contract)',
+    consumer: 'backend/src/services/playerStats.js — cooldownFloorOf(), floors cooldownMult',
   },
   regenLifeShare: {
     combine: 'sum',
-    consumer: 'backend/src/authority/world.js — the mana-regen tick (wiring is a follow-up)',
+    consumer: 'backend/src/authority/world.js — tick()\'s mana-regen line, heals a share of the mana actually regenerated',
+  },
+  // SOMET-519. Two rules, not one, so the weapon KIND decides which applies:
+  // a Warrior's attack-speed nodes must not accelerate a socketed spell stone.
+  attackSpeedMult: {
+    combine: 'product',
+    consumer: 'backend/src/authority/world.js — applyAttackCooldown(), melee branch',
+  },
+  castSpeedMult: {
+    combine: 'product',
+    consumer: 'backend/src/authority/world.js — applyAttackCooldown(), projectile branch',
+  },
+  // SOMET-520. Resolved ONCE at the top of attack()'s melee branch and passed
+  // to all four sites that need it -- including the attack descriptor, so the
+  // client draws the same arc the server hit-tested.
+  meleeReachBonus: {
+    combine: 'sum',
+    consumer: 'backend/src/authority/world.js — attack(), melee branch `reach` (pixels)',
+  },
+  meleeArcBonus: {
+    combine: 'sum',
+    consumer: 'backend/src/authority/world.js — attack(), melee branch `arc` (radians, clamped at TAU)',
+  },
+  // SOMET-521. The volley. Cost and cooldown are paid once per volley, not per
+  // projectile -- see attack()'s projectile branch.
+  projectileCount: {
+    combine: 'sum',
+    consumer: 'backend/src/authority/world.js — attack(), projectile branch spawns 1 + this, fanned',
+  },
+  projectileSpeedMult: {
+    combine: 'product',
+    consumer: 'backend/src/authority/world.js — attack(), scales shotWeapon.projectile_speed',
+  },
+  pierceBonus: {
+    combine: 'sum',
+    consumer: 'backend/src/authority/world.js — attack(), shotWeapon.pierce, applied BEFORE spawn\'s aoe clamp',
+  },
+  // SOMET-522. The Cultist's leech aura, resolved once a second in tick().
+  auraLeech: {
+    combine: 'sum',
+    consumer: 'backend/src/authority/world.js — tick()\'s aura pass, life per hostile per second',
+  },
+  auraRadius: {
+    combine: 'sum',
+    consumer: 'backend/src/authority/world.js — tick()\'s aura pass, pixels on top of AURA_BASE_RADIUS',
+  },
+  // SOMET-527. The price a wide swing pays.
+  meleeDamageMult: {
+    combine: 'product',
+    consumer: 'backend/src/authority/world.js — weaponDamage(), melee branch only',
+  },
+  // SOMET-528. Above zero means a swing leaves a lingering wave.
+  meleeWaveShare: {
+    combine: 'sum',
+    consumer: 'backend/src/authority/world.js — attack() spawns the wave, tick() damages through it',
   },
 };
 
@@ -99,11 +160,20 @@ const LAYOUT = {
   // which would otherwise stack every keystone in a sector on one radial line.
   keystoneOffset: 7,
   keystoneStagger: 5,
+  // SOMET-517. Same idea for the `greater` tier, with different constants so
+  // greaters and keystones do not land on each other's nudged positions.
+  greaterOffset: 11,
+  greaterStagger: 3,
+  // SOMET-518. Epic clusters sit OUTSIDE ring 3 (whose outermost row is at
+  // 700 + 2*70 = 840), far enough out that a hub and its satellites cannot
+  // overlap the grid they hang off.
+  clusterRadius: 960,
+  clusterSatelliteRadius: 62,
   rings: [
     null, // index 0 is the core + the start nodes, which are not laid out on a grid
     { rows: 4, cols: 17, baseRadius: 260, rowStep: 45, minor: 60, notable: 8, keystone: 0 },
     { rows: 4, cols: 29, baseRadius: 460, rowStep: 55, minor: 100, notable: 14, keystone: 2 },
-    { rows: 3, cols: 37, baseRadius: 700, rowStep: 70, minor: 90, notable: 18, keystone: 3 },
+    { rows: 3, cols: 37, baseRadius: 700, rowStep: 70, minor: 84, notable: 18, keystone: 3, greater: 6 },
   ],
 };
 
@@ -123,45 +193,57 @@ const TEMPLATES = [
   { key: 'core_stam', kind: 'minor', sectors: ['core'], rings: [0], label: 'Stamina', grants: [{ type: 'resource', pool: 'stamina', value: 8 }] },
   { key: 'core_res', kind: 'minor', sectors: ['core'], rings: [0], label: 'Toughness', grants: [{ type: 'resist', element: 'physical', value: 1 }] },
 
-  // --- minors (the connective tissue: all 6 attributes + sector core) ---
-  { key: 'min_sinew', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Sinew', grants: [{ type: 'stat', stat: '@sector', value: 2 }] },
-  { key: 'min_might', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Might', grants: [{ type: 'stat', stat: 'strength', value: 2 }] },
-  { key: 'min_agility', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Agility', grants: [{ type: 'stat', stat: 'dexterity', value: 2 }] },
-  { key: 'min_vitality', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Vitality', grants: [{ type: 'stat', stat: 'constitution', value: 2 }] },
-  { key: 'min_scholar', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Scholar', grants: [{ type: 'stat', stat: 'intelligence', value: 2 }] },
-  { key: 'min_clarity', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Clarity', grants: [{ type: 'stat', stat: 'wisdom', value: 2 }] },
-  { key: 'min_presence', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Presence', grants: [{ type: 'stat', stat: 'charisma', value: 2 }] },
-
-  // --- hybrid stat + resource/resist minors ---
-  { key: 'min_focus', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Focus', grants: [{ type: 'stat', stat: 'wisdom', value: 2 }, { type: 'resource', pool: 'mana', value: 6 }] },
-  { key: 'min_vigour', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Vigour', grants: [{ type: 'stat', stat: 'constitution', value: 2 }, { type: 'resource', pool: 'hp', value: 8 }] },
-  { key: 'min_insight', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Insight', grants: [{ type: 'stat', stat: 'intelligence', value: 2 }, { type: 'resource', pool: 'mana', value: 6 }] },
-  { key: 'min_wind', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Wind', grants: [{ type: 'stat', stat: 'dexterity', value: 2 }, { type: 'resource', pool: 'stamina', value: 5 }] },
-  { key: 'min_temper', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Temper', grants: [{ type: 'stat', stat: 'strength', value: 2 }, { type: 'resist', element: 'physical', value: 1 }] },
-  { key: 'min_charm', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Charm', grants: [{ type: 'stat', stat: 'charisma', value: 2 }, { type: 'resource', pool: 'stamina', value: 5 }] },
-
-  // --- pure resource / defense minors ---
+  // --- minors (the connective tissue) ---
+  //
+  // SOMET-516. THE 70/30 SPLIT. Before this ticket every one of these granted
+  // `@sector`, so the constitution sector held ZERO intelligence -- while a
+  // Cultist casts with spellMult, which derives from INTELLIGENCE. Building a
+  // caster meant leaving your own sector on the first node.
+  //
+  // `@other` rotates through the five stats that are not this sector's own, so
+  // ~30% of a sector's stat grants are off-stat, spread evenly across the five.
+  // Sector identity survives on the remaining 70%: walking the strength sector
+  // still makes you mostly stronger.
+  //
+  // WEIGHTS ARE WHAT SET THE RATIO. templatePool expands by weight before the
+  // `pool[i % length]` pick, so the mix is stated here rather than being an
+  // accident of how many objects sit in this array. The guard test in
+  // passive_tree_generator.test.js measures the realized ratio per sector.
+  //
+  // Off-stat variants carry the SAME magnitudes as their own-stat twins. The
+  // six stats are symmetric in progressionConstants.js -- each buys exactly one
+  // derived number -- so discounting off-stat nodes would be a balance claim
+  // nothing supports.
+  { key: 'min_sinew', kind: 'minor', sectors: '*', rings: [1, 2, 3], weight: 7, label: 'Sinew', grants: [{ type: 'stat', stat: '@sector', value: 2 }] },
+  { key: 'min_focus', kind: 'minor', sectors: '*', rings: [1, 2, 3], weight: 7, label: 'Focus', grants: [{ type: 'stat', stat: '@sector', value: 3 }] },
+  { key: 'min_vigour', kind: 'minor', sectors: '*', rings: [1, 2, 3], weight: 5, label: 'Vigour', grants: [{ type: 'stat', stat: '@sector', value: 2 }, { type: 'resource', pool: 'hp', value: 8 }] },
+  { key: 'min_insight', kind: 'minor', sectors: '*', rings: [1, 2, 3], weight: 5, label: 'Insight', grants: [{ type: 'stat', stat: '@sector', value: 2 }, { type: 'resource', pool: 'mana', value: 6 }] },
+  { key: 'min_wind', kind: 'minor', sectors: '*', rings: [1, 2, 3], weight: 5, label: 'Wind', grants: [{ type: 'stat', stat: '@sector', value: 2 }, { type: 'resource', pool: 'stamina', value: 5 }] },
+  // The off-stat connective tissue. Labels are distinct from their own-stat
+  // twins on purpose: two nodes both called "Sinew" granting different stats
+  // is a tooltip that lies.
+  { key: 'min_versatility', kind: 'minor', sectors: '*', rings: [1, 2, 3], weight: 5, label: 'Versatility', grants: [{ type: 'stat', stat: '@other', value: 2 }] },
+  { key: 'min_breadth', kind: 'minor', sectors: '*', rings: [1, 2, 3], weight: 4, label: 'Breadth', grants: [{ type: 'stat', stat: '@other', value: 3 }] },
+  { key: 'min_crosstrain', kind: 'minor', sectors: '*', rings: [1, 2, 3], weight: 3, label: 'Cross-Training', grants: [{ type: 'stat', stat: '@other', value: 2 }, { type: 'resource', pool: 'hp', value: 8 }] },
+  { key: 'min_dabbler', kind: 'minor', sectors: '*', rings: [1, 2, 3], weight: 3, label: 'Dabbler', grants: [{ type: 'stat', stat: '@other', value: 2 }, { type: 'resource', pool: 'mana', value: 6 }] },
   { key: 'min_hardy', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Hardy', grants: [{ type: 'resource', pool: 'hp', value: 15 }] },
   { key: 'min_reserve', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Reserve', grants: [{ type: 'resource', pool: 'mana', value: 12 }] },
   { key: 'min_callus', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Callus', grants: [{ type: 'resist', element: 'physical', value: 2 }] },
   { key: 'min_edge', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Edge', grants: [{ type: 'damage', element: 'physical', value: 3 }] },
+  { key: 'min_temper', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Temper', grants: [{ type: 'stat', stat: '@sector', value: 2 }, { type: 'resist', element: 'physical', value: 1 }] },
   { key: 'min_second_wind', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Second Wind', grants: [{ type: 'resource', pool: 'stamina', value: 10 }] },
-  { key: 'min_discipline', kind: 'minor', sectors: '*', rings: [2, 3], label: 'Discipline', grants: [{ type: 'stat', stat: '@sector', value: 4 }] },
+  { key: 'min_discipline', kind: 'minor', sectors: '*', rings: [2, 3], weight: 5, label: 'Discipline', grants: [{ type: 'stat', stat: '@sector', value: 4 }] },
+  { key: 'min_polymath', kind: 'minor', sectors: '*', rings: [2, 3], weight: 2, label: 'Polymath', grants: [{ type: 'stat', stat: '@other', value: 4 }] },
 
-  // --- notables: dedicated stat notables for all 6 attributes ---
-  { key: 'not_great_sinew', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Great Sinew', grants: [{ type: 'stat', stat: '@sector', value: 8 }] },
-  { key: 'not_brawn', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Brawn', grants: [{ type: 'stat', stat: 'strength', value: 8 }] },
-  { key: 'not_precision', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Precision', grants: [{ type: 'stat', stat: 'dexterity', value: 8 }] },
-  { key: 'not_fortitude', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Fortitude', grants: [{ type: 'stat', stat: 'constitution', value: 8 }] },
-  { key: 'not_prodigy', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Prodigy', grants: [{ type: 'stat', stat: 'intelligence', value: 8 }] },
-  { key: 'not_enlightenment', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Enlightenment', grants: [{ type: 'stat', stat: 'wisdom', value: 8 }] },
-  { key: 'not_splendor', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Splendor', grants: [{ type: 'stat', stat: 'charisma', value: 8 }] },
-
-  // --- sector scaling notables ---
-  { key: 'not_mastery', kind: 'notable', sectors: '*', rings: [2, 3], label: 'Mastery', grants: [{ type: 'stat', stat: '@sector', value: 12 }] },
-  { key: 'not_apotheosis', kind: 'notable', sectors: '*', rings: [3], label: 'Apotheosis', grants: [{ type: 'stat', stat: '@sector', value: 16 }] },
-
-  // --- resource & combat notables ---
+  // --- notables ---
+  { key: 'not_great_sinew', kind: 'notable', sectors: '*', rings: [1, 2, 3], weight: 5, label: 'Great Sinew', grants: [{ type: 'stat', stat: '@sector', value: 8 }] },
+  { key: 'not_mastery', kind: 'notable', sectors: '*', rings: [2, 3], weight: 4, label: 'Mastery', grants: [{ type: 'stat', stat: '@sector', value: 12 }] },
+  { key: 'not_apotheosis', kind: 'notable', sectors: '*', rings: [3], weight: 3, label: 'Apotheosis', grants: [{ type: 'stat', stat: '@sector', value: 16 }] },
+  // SOMET-516: the off-stat notables. An 8/12/16 off-stat notable is what lets
+  // a Cultist reach real INT, or a Monk real STR, without leaving home.
+  { key: 'not_broad_study', kind: 'notable', sectors: '*', rings: [1, 2, 3], weight: 2, label: 'Broad Study', grants: [{ type: 'stat', stat: '@other', value: 8 }] },
+  { key: 'not_second_discipline', kind: 'notable', sectors: '*', rings: [2, 3], weight: 2, label: 'Second Discipline', grants: [{ type: 'stat', stat: '@other', value: 12 }] },
+  { key: 'not_renaissance', kind: 'notable', sectors: '*', rings: [3], weight: 1, label: 'Renaissance', grants: [{ type: 'stat', stat: '@other', value: 16 }] },
   { key: 'not_deep_reserve', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Deep Reserve', grants: [{ type: 'resource', pool: 'mana', value: 15 }] },
   { key: 'not_thick_skin', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Thick Skin', grants: [{ type: 'resource', pool: 'hp', value: 40 }] },
   { key: 'not_endurance', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Endurance', grants: [{ type: 'resource', pool: 'stamina', value: 30 }] },
@@ -175,19 +257,30 @@ const TEMPLATES = [
   { key: 'not_warm_blood', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Warm Blood', grants: [{ type: 'resist', element: 'ice', value: 8 }] },
   { key: 'not_grounding', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Grounding', grants: [{ type: 'resist', element: 'lightning', value: 8 }] },
   { key: 'not_null_field', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Null Field', grants: [{ type: 'resist', element: 'arcane', value: 8 }] },
-
-  // --- hybrid stat + effect notables ---
-  { key: 'not_ox_blood', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Ox Blood', grants: [{ type: 'stat', stat: 'constitution', value: 8 }, { type: 'resource', pool: 'hp', value: 25 }] },
-  { key: 'not_wellspring', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Wellspring', grants: [{ type: 'stat', stat: 'wisdom', value: 8 }, { type: 'resource', pool: 'mana', value: 20 }] },
-  { key: 'not_honed', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Honed', grants: [{ type: 'stat', stat: 'strength', value: 8 }, { type: 'damage', element: 'physical', value: 5 }] },
-  { key: 'not_quickening', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Quickening', grants: [{ type: 'stat', stat: 'dexterity', value: 8 }] },
-  { key: 'not_arcane_mind', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Arcane Mind', grants: [{ type: 'stat', stat: 'intelligence', value: 8 }, { type: 'damage', element: 'arcane', value: 6 }] },
-  { key: 'not_majesty', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Majesty', grants: [{ type: 'stat', stat: 'charisma', value: 8 }, { type: 'resource', pool: 'hp', value: 20 }] },
-
+  { key: 'not_ox_blood', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Ox Blood', grants: [{ type: 'stat', stat: '@sector', value: 8 }, { type: 'resource', pool: 'hp', value: 25 }] },
+  { key: 'not_wellspring', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Wellspring', grants: [{ type: 'stat', stat: '@sector', value: 8 }, { type: 'resource', pool: 'mana', value: 20 }] },
+  { key: 'not_honed', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Honed', grants: [{ type: 'stat', stat: '@sector', value: 8 }, { type: 'damage', element: 'physical', value: 5 }] },
+  { key: 'not_quickening', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Quickening', grants: [{ type: 'stat', stat: 'dexterity', value: 6 }] },
   { key: 'not_ward', kind: 'notable', sectors: '*', rings: [2, 3], label: 'Ward', grants: [{ type: 'resist', element: 'arcane', value: 6 }, { type: 'resist', element: 'fire', value: 6 }] },
   { key: 'not_searing_blows', kind: 'notable', sectors: '*', rings: [3], label: 'Searing Blows', grants: [{ type: 'status', status: 'burn', value: 1 }] },
   { key: 'not_numbing_blows', kind: 'notable', sectors: '*', rings: [3], label: 'Numbing Blows', grants: [{ type: 'status', status: 'chill', value: 1 }] },
   { key: 'not_jarring_blows', kind: 'notable', sectors: '*', rings: [3], label: 'Jarring Blows', grants: [{ type: 'status', status: 'shock', value: 1 }] },
+
+  // --- greaters (SOMET-517) -------------------------------------------------
+  //
+  // A fourth tier between a notable and a keystone, RING 3 ONLY. Before this
+  // the biggest stat node in the tree was not_apotheosis at +16, and the next
+  // step up was one of a sector's five keystones -- nothing in between, and no
+  // repeatable reward for going deep.
+  //
+  // A greater grants +25 or +30 of a SINGLE stat, own or off. Ring 3 is where
+  // it belongs: a +30 INT for a Cultist should be a genuine cross-map
+  // commitment, not a freebie two nodes from the start. The off-stat variants
+  // are what make a real cross-class build reachable at all.
+  { key: 'grt_ascendance', kind: 'greater', sectors: '*', rings: [3], weight: 3, label: 'Ascendance', grants: [{ type: 'stat', stat: '@sector', value: 25 }] },
+  { key: 'grt_paragon', kind: 'greater', sectors: '*', rings: [3], weight: 2, label: 'Paragon', grants: [{ type: 'stat', stat: '@sector', value: 30 }] },
+  { key: 'grt_wanderers_gift', kind: 'greater', sectors: '*', rings: [3], weight: 2, label: "Wanderer's Gift", grants: [{ type: 'stat', stat: '@other', value: 25 }] },
+  { key: 'grt_apostasy', kind: 'greater', sectors: '*', rings: [3], weight: 1, label: 'Apostasy', grants: [{ type: 'stat', stat: '@other', value: 30 }] },
 ];
 
 // --- Keystones -------------------------------------------------------------
@@ -203,7 +296,11 @@ const KEYSTONES = {
     { key: 'ks_wis_meditation', label: 'Meditation — +120 maximum mana', grants: [{ type: 'resource', pool: 'mana', value: 120 }] },
     { key: 'ks_wis_spirit_ward', label: 'Spirit Ward — +20% arcane resistance', grants: [{ type: 'resist', element: 'arcane', value: 20 }] },
     { key: 'ks_wis_iron_body', label: 'Iron Body — +20 WIS and +20 CON', grants: [{ type: 'stat', stat: 'wisdom', value: 20 }, { type: 'stat', stat: 'constitution', value: 20 }] },
-    { key: 'ks_wis_clarity', label: 'Clarity — mana regeneration also restores 20% as much life', grants: [{ type: 'rule', rule: 'regenLifeShare', value: 0.2 }] },
+    // SOMET-518 moved Clarity to a CLUSTER (hub + 4 satellites). This slot
+    // becomes a plain stat keystone rather than being deleted: the generator
+    // places exactly five keystones per sector from this array, so removing
+    // one would leave a ring-3 keystone slot with nothing to fill it.
+    { key: 'ks_wis_transcendence', label: 'Transcendence — +35 WIS and +25 INT', grants: [{ type: 'stat', stat: 'wisdom', value: 35 }, { type: 'stat', stat: 'intelligence', value: 25 }] },
   ],
   intelligence: [
     { key: 'ks_int_pyromancy', label: 'Pyromancy — +35% fire damage', grants: [{ type: 'damage', element: 'fire', value: 35 }] },
@@ -238,9 +335,165 @@ const KEYSTONES = {
     { key: 'ks_cha_eternal_hawk', label: 'Eternal Hawk — Infinite Hawk Form (+30 DEX and +20% ice resistance)', grants: [{ type: 'stat', stat: 'dexterity', value: 30 }, { type: 'resist', element: 'ice', value: 20 }] },
     { key: 'ks_cha_eternal_wolf', label: 'Eternal Wolf — Infinite Wolf Form (+20 STR, +20 DEX and +20 CHA)', grants: [{ type: 'stat', stat: 'strength', value: 20 }, { type: 'stat', stat: 'dexterity', value: 20 }, { type: 'stat', stat: 'charisma', value: 20 }] },
     { key: 'ks_cha_pack_leader', label: 'Pack Leader — +3 to your charm budget', grants: [{ type: 'rule', rule: 'treeCharmBonus', value: 3 }] },
-    { key: 'ks_cha_beast_bond', label: 'Beast Bond — +5 to your charm budget', grants: [{ type: 'rule', rule: 'treeCharmBonus', value: 5 }] },
+    // SOMET-518 moved Beast Bond to a CLUSTER, for the same reason as Clarity.
+    { key: 'ks_cha_menagerie', label: 'Menagerie — +35 CHA and +25 CON', grants: [{ type: 'stat', stat: 'charisma', value: 35 }, { type: 'stat', stat: 'constitution', value: 25 }] },
   ],
 };
+
+// --- Epic clusters (SOMET-518) ---------------------------------------------
+//
+// A HUB plus 2 or 4 SATELLITES. The generator places the hub beyond ring 3 and
+// wires edges HUB<->SATELLITE ONLY -- no satellite touches the rest of the
+// graph.
+//
+// THAT WIRING IS THE WHOLE MECHANISM. isAllocatable walks the undirected
+// adjacency out from the start node, so a satellite is unreachable until its
+// hub is allocated. The gate is structural rather than a rule someone has to
+// remember to write, which is the difference between a guarantee and a
+// convention.
+//
+// UNITS. Reach and radius are PIXELS -- what w.reach and every world
+// coordinate already use. A tile is 64px, so the brief's "+0.5m" is +32.
+// Arcs are RADIANS. Speed rules are multipliers (1.10 = +10%) and compound.
+//
+// Each cluster names the class it is for. It sits in that class's own sector,
+// so the epic option a class wants is at the far edge of the tree they start
+// in -- a long walk, but their own.
+const CLUSTERS = [
+  {
+    key: 'clu_str_cleaving', sector: 'strength', hubLabel: 'Cleaving Reach',
+    hubGrants: [{ type: 'rule', rule: 'meleeReachBonus', value: 32 }],
+    satellites: [
+      { label: 'Long Guard', grants: [{ type: 'rule', rule: 'meleeReachBonus', value: 16 }] },
+      { label: 'Extended Guard', grants: [{ type: 'rule', rule: 'meleeReachBonus', value: 16 }] },
+    ],
+  },
+  {
+    key: 'clu_str_whirlwind', sector: 'strength', hubLabel: 'Whirlwind',
+    // 6.3 rad on top of a typical 1.8 arc clamps to a full turn at the
+    // authority, so this reads as "your swing becomes circular".
+    //
+    // SOMET-527 ADDED THE PENALTY. Shipped in SOMET-520 as a pure upgrade --
+    // a circle that cost nothing but points, and therefore not a choice. It
+    // now trades 30% of swung damage for hitting everything around you, which
+    // is what makes Spearpoint and Sweep worth considering against it.
+    hubGrants: [
+      { type: 'rule', rule: 'meleeArcBonus', value: 6.3 },
+      { type: 'rule', rule: 'meleeDamageMult', value: 0.7 },
+    ],
+    satellites: [
+      { label: 'Momentum', grants: [{ type: 'rule', rule: 'attackSpeedMult', value: 1.1 }] },
+      { label: 'Follow-Through', grants: [{ type: 'rule', rule: 'attackSpeedMult', value: 1.1 }] },
+      { label: 'Whirling Step', grants: [{ type: 'rule', rule: 'attackSpeedMult', value: 1.1 }] },
+      { label: 'Unending Swing', grants: [{ type: 'rule', rule: 'attackSpeedMult', value: 1.1 }] },
+    ],
+  },
+  {
+    // SOMET-527. The opposite trade to Whirlwind: everything in one direction.
+    // The negative arc is why meleeArcBonus was made a `sum` rather than a
+    // product -- narrowing is just an authored minus sign.
+    key: 'clu_str_spearpoint', sector: 'strength', hubLabel: 'Spearpoint',
+    hubGrants: [
+      { type: 'rule', rule: 'meleeReachBonus', value: 64 },
+      { type: 'rule', rule: 'meleeArcBonus', value: -0.9 },
+    ],
+    satellites: [
+      { label: 'Lunge', grants: [{ type: 'rule', rule: 'meleeReachBonus', value: 32 }] },
+      { label: 'Pike Drill', grants: [{ type: 'rule', rule: 'meleeReachBonus', value: 32 }] },
+    ],
+  },
+  {
+    // Wide but close: crowd control that gives up the range Spearpoint buys.
+    // SOMET-528. The swing keeps burning the ground it swept for ~2s. Pairs
+    // deliberately with the SHAPE clusters: a lingering Spearpoint line and a
+    // lingering Sweep fan are different tools, which is why shapes shipped
+    // first.
+    key: 'clu_str_afterimage', sector: 'strength', hubLabel: 'Afterimage',
+    hubGrants: [{ type: 'rule', rule: 'meleeWaveShare', value: 0.3 }],
+    satellites: [
+      { label: 'Lingering Edge', grants: [{ type: 'rule', rule: 'meleeWaveShare', value: 0.1 }] },
+      { label: 'Slow Burn', grants: [{ type: 'rule', rule: 'meleeWaveShare', value: 0.1 }] },
+    ],
+  },
+  {
+    key: 'clu_str_sweep', sector: 'strength', hubLabel: 'Sweep',
+    hubGrants: [
+      { type: 'rule', rule: 'meleeArcBonus', value: 2 },
+      { type: 'rule', rule: 'meleeReachBonus', value: -24 },
+    ],
+    satellites: [
+      { label: 'Wide Stance', grants: [{ type: 'rule', rule: 'meleeArcBonus', value: 0.5 }] },
+      { label: 'Scything Blow', grants: [{ type: 'rule', rule: 'meleeArcBonus', value: 0.5 }] },
+    ],
+  },
+  {
+    key: 'clu_dex_volley', sector: 'dexterity', hubLabel: 'Volley',
+    hubGrants: [{ type: 'rule', rule: 'projectileCount', value: 1 }],
+    satellites: [
+      { label: 'Split Arrow', grants: [{ type: 'rule', rule: 'projectileCount', value: 1 }] },
+      { label: 'Scattershot', grants: [{ type: 'rule', rule: 'projectileCount', value: 1 }] },
+    ],
+  },
+  {
+    key: 'clu_dex_swiftshot', sector: 'dexterity', hubLabel: 'Swiftshot',
+    hubGrants: [{ type: 'rule', rule: 'projectileSpeedMult', value: 1.25 }],
+    satellites: [
+      { label: 'Taut String', grants: [{ type: 'rule', rule: 'projectileSpeedMult', value: 1.1 }] },
+      { label: 'Fletching', grants: [{ type: 'rule', rule: 'projectileSpeedMult', value: 1.1 }] },
+      { label: 'Draw Weight', grants: [{ type: 'rule', rule: 'projectileSpeedMult', value: 1.1 }] },
+      { label: 'Loosed Wind', grants: [{ type: 'rule', rule: 'projectileSpeedMult', value: 1.1 }] },
+    ],
+  },
+  {
+    key: 'clu_int_quickcast', sector: 'intelligence', hubLabel: 'Quickcast',
+    hubGrants: [{ type: 'rule', rule: 'castSpeedMult', value: 1.2 }],
+    satellites: [
+      { label: 'Swift Incant', grants: [{ type: 'rule', rule: 'castSpeedMult', value: 1.08 }] },
+      { label: 'Practised Cadence', grants: [{ type: 'rule', rule: 'castSpeedMult', value: 1.08 }] },
+      { label: 'Sharp Syllables', grants: [{ type: 'rule', rule: 'castSpeedMult', value: 1.08 }] },
+      { label: 'Thoughtform', grants: [{ type: 'rule', rule: 'castSpeedMult', value: 1.08 }] },
+    ],
+  },
+  {
+    key: 'clu_int_spellpierce', sector: 'intelligence', hubLabel: 'Spellpierce',
+    hubGrants: [{ type: 'rule', rule: 'pierceBonus', value: 2 }],
+    satellites: [
+      { label: 'Rending Bolt', grants: [{ type: 'rule', rule: 'pierceBonus', value: 1 }] },
+      { label: 'Unspent Force', grants: [{ type: 'rule', rule: 'pierceBonus', value: 1 }] },
+    ],
+  },
+  {
+    key: 'clu_con_sanguine', sector: 'constitution', hubLabel: 'Sanguine Aura',
+    hubGrants: [{ type: 'rule', rule: 'auraLeech', value: 2 }],
+    satellites: [
+      { label: 'Crimson Thirst', grants: [{ type: 'rule', rule: 'auraLeech', value: 1 }] },
+      { label: 'Deepening Thirst', grants: [{ type: 'rule', rule: 'auraLeech', value: 1 }] },
+      { label: 'Spreading Stain', grants: [{ type: 'rule', rule: 'auraRadius', value: 40 }] },
+      { label: 'Wide Communion', grants: [{ type: 'rule', rule: 'auraRadius', value: 40 }] },
+    ],
+  },
+  {
+    // REPLACES ks_wis_clarity, which granted the same rule. Shipping both
+    // would pay the Monk twice for one idea.
+    key: 'clu_wis_clarity', sector: 'wisdom', hubLabel: 'Clarity',
+    hubGrants: [{ type: 'rule', rule: 'regenLifeShare', value: 0.2 }],
+    satellites: [
+      { label: 'Still Water', grants: [{ type: 'rule', rule: 'regenLifeShare', value: 0.05 }] },
+      { label: 'Even Breath', grants: [{ type: 'rule', rule: 'regenLifeShare', value: 0.05 }] },
+      { label: 'Quiet Mind', grants: [{ type: 'rule', rule: 'regenLifeShare', value: 0.05 }] },
+      { label: 'Open Palm', grants: [{ type: 'rule', rule: 'regenLifeShare', value: 0.05 }] },
+    ],
+  },
+  {
+    // REPLACES ks_cha_beast_bond, for the same reason.
+    key: 'clu_cha_beast_bond', sector: 'charisma', hubLabel: 'Beast Bond',
+    hubGrants: [{ type: 'rule', rule: 'treeCharmBonus', value: 5 }],
+    satellites: [
+      { label: 'Kindred Call', grants: [{ type: 'rule', rule: 'treeCharmBonus', value: 1 }] },
+      { label: 'Wider Pack', grants: [{ type: 'rule', rule: 'treeCharmBonus', value: 1 }] },
+    ],
+  },
+];
 
 // The six rim start positions. A start node is GRANTED, never allocated: it
 // costs no point, never appears in character_passives, and is the seed the
@@ -319,9 +572,10 @@ const PASSIVE_TREE_SPEC = {
   templates: TEMPLATES,
   keystones: KEYSTONES,
   startNodes: START_NODES,
+  clusters: CLUSTERS,
 };
 
 module.exports = {
-  PASSIVE_TREE_SPEC, SECTORS, LAYOUT, TEMPLATES, KEYSTONES, START_NODES,
+  PASSIVE_TREE_SPEC, SECTORS, LAYOUT, TEMPLATES, KEYSTONES, START_NODES, CLUSTERS,
   GRANT_TYPES, RULE_KEYS, STAT_KEYS, RESOURCE_POOLS, STATUSES,
 };

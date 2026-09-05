@@ -8,7 +8,9 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { generatePassiveTree } = require('../seeds/generatePassiveTree.js');
-const { PASSIVE_TREE_SPEC, RULE_KEYS } = require('../seeds/data/passiveTree.js');
+const {
+  PASSIVE_TREE_SPEC, RULE_KEYS, TEMPLATES, CLUSTERS,
+} = require('../seeds/data/passiveTree.js');
 const { ELEMENTS } = require('../src/authority/damage.js');
 
 // The whole vocabulary, hand-written. Deliberately NOT imported from
@@ -20,7 +22,16 @@ const STATS = ['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom'
 const POOLS = ['hp', 'mana', 'stamina'];
 const ELS = ['physical', 'arcane', 'fire', 'ice', 'lightning'];
 const STATUSES = ['burn', 'chill', 'shock'];
-const RULES = ['lifeCostMultiplier', 'treeCharmBonus', 'cooldownFloor', 'regenLifeShare'];
+// Hand-written, like every other expectation here -- importing RULE_COMBINE
+// would make this a tautology. Grew from 4 to 13 across SOMET-514..522; a rule
+// authored into a node but missing from this list fails guard 3, which is the
+// point.
+const RULES = [
+  'lifeCostMultiplier', 'treeCharmBonus', 'cooldownFloor', 'regenLifeShare',
+  'attackSpeedMult', 'castSpeedMult', 'meleeReachBonus', 'meleeArcBonus',
+  'projectileCount', 'projectileSpeedMult', 'pierceBonus',
+  'auraLeech', 'auraRadius', 'meleeDamageMult', 'meleeWaveShare',
+];
 
 const tree = generatePassiveTree(PASSIVE_TREE_SPEC);
 
@@ -29,12 +40,16 @@ test('the hand-written element list still matches the combat authority', () => {
 });
 
 // ---- guard 4: node count within 5% of 1800, keystones exactly as specced ----
-test('guard 4: 1806 nodes — 1530 minor, 240 notable, 30 keystone, 6 start', () => {
-  assert.strictEqual(tree.nodes.length, 1806);
+test('guard 4: 1852 nodes — 1494 minor, 274 notable, 36+12 greater, 30 keystone, 6 start', () => {
+  assert.strictEqual(tree.nodes.length, 1852);
 
   const byKind = {};
   for (const n of tree.nodes) byKind[n.kind] = (byKind[n.kind] || 0) + 1;
-  assert.deepStrictEqual(byKind, { minor: 1530, notable: 240, keystone: 30, start: 6 });
+  // greater 47 = 36 placed on the ring-3 grid (SOMET-517) + 11 cluster hubs
+  // (SOMET-518, plus SOMET-527's Spearpoint and Sweep). notable 272 = 240 grid
+  // + 32 cluster satellites.
+  assert.deepStrictEqual(byKind,
+    { minor: 1494, notable: 274, greater: 48, keystone: 30, start: 6 });
 
   // The spec's own tolerance, restated as a literal band rather than a formula.
   assert.ok(tree.nodes.length >= 1710 && tree.nodes.length <= 1890,
@@ -42,19 +57,32 @@ test('guard 4: 1806 nodes — 1530 minor, 240 notable, 30 keystone, 6 start', ()
 
   // Per sector, so a bug that loses one whole sector cannot hide inside a
   // total that some other sector's overcount restores.
+  // SOMET-518: a sector now also carries its epic clusters, and they are NOT
+  // evenly distributed (strength/dexterity/intelligence have two each, the
+  // rest one). The expected contribution is counted from the AUTHORED cluster
+  // list, which makes this a cross-check that the generator emitted exactly
+  // what the spec asked for -- not a tautology, since the two are produced by
+  // different code.
+  const clusterNodesIn = (sector) => CLUSTERS
+    .filter((c) => c.sector === sector)
+    .reduce((a, c) => a + 1 + c.satellites.length, 0);
   for (const sector of ['wisdom', 'intelligence', 'dexterity', 'strength', 'constitution', 'charisma']) {
     const inSector = tree.nodes.filter((n) => n.sector === sector);
-    assert.strictEqual(inSector.length, 296, `${sector} node count`); // 295 ring nodes + 1 start
+    // 295 ring nodes + 1 start, plus this sector's cluster nodes.
+    assert.strictEqual(inSector.length, 296 + clusterNodesIn(sector), `${sector} node count`);
     assert.strictEqual(inSector.filter((n) => n.kind === 'keystone').length, 5, `${sector} keystones`);
-    assert.strictEqual(inSector.filter((n) => n.kind === 'notable').length, 40, `${sector} notables`);
+    const satellites = CLUSTERS.filter((c) => c.sector === sector)
+      .reduce((a, c) => a + c.satellites.length, 0);
+    assert.strictEqual(inSector.filter((n) => n.kind === 'notable').length, 40 + satellites,
+      `${sector} notables`);
   }
   assert.strictEqual(tree.nodes.filter((n) => n.sector === 'core').length, 30);
 });
 
-test('every key is unique, and 2382 edges are produced', () => {
+test('every key is unique, and 2428 edges are produced', () => {
   const keys = new Set(tree.nodes.map((n) => n.key));
-  assert.strictEqual(keys.size, 1806);
-  assert.strictEqual(tree.edges.length, 2382);
+  assert.strictEqual(keys.size, 1852);
+  assert.strictEqual(tree.edges.length, 2428);
 });
 
 test('the six start nodes are the only nodes carrying a start_class', () => {
@@ -115,7 +143,7 @@ test('guard 1: every node is reachable from every one of the six start nodes', (
     const unreachable = tree.nodes.map((n) => n.key).filter((k) => !seen.has(k));
     assert.deepStrictEqual(unreachable.slice(0, 10), [],
       `${unreachable.length} node(s) unreachable from ${start}`);
-    assert.strictEqual(seen.size, 1806, `reachable-from-${start} count`);
+    assert.strictEqual(seen.size, 1852, `reachable-from-${start} count`);
   }
 });
 
@@ -141,6 +169,8 @@ test('guard 3: every grant validates against the known grant vocabulary', () => 
       }
       // '@sector' must be substituted by the generator, never persisted.
       if (g.stat === '@sector') fail('unsubstituted @sector placeholder');
+      // SOMET-516's second placeholder, same rule: it must never be persisted.
+      if (g.stat === '@other') fail('unsubstituted @other placeholder');
     }
   }
   assert.deepStrictEqual(bad.slice(0, 10), []);
@@ -254,7 +284,250 @@ test('coordinates are rounded to 2dp and stay inside the specced radius', () => 
   for (const n of tree.nodes) {
     assert.strictEqual(Math.round(n.x * 100) / 100, n.x, `${n.key} x is not 2dp`);
     assert.strictEqual(Math.round(n.y * 100) / 100, n.y, `${n.key} y is not 2dp`);
-    // Outer ring is baseRadius 700 + 2 * rowStep 70 = 840; nothing may exceed it.
-    assert.ok(Math.hypot(n.x, n.y) <= 840.01, `${n.key} is outside the outer ring`);
+    // Outer ring is baseRadius 700 + 2 * rowStep 70 = 840. SOMET-518's epic
+    // clusters sit deliberately OUTSIDE that, at clusterRadius 960 with
+    // satellites 62px around their hub, so the outermost thing in the tree is
+    // at 1022. Hand-computed, not read from LAYOUT: deriving the bound from
+    // the same constants the generator uses would assert nothing.
+    assert.ok(Math.hypot(n.x, n.y) <= 1022.01, `${n.key} is outside the cluster ring`);
   }
+});
+
+// ===========================================================================
+// SOMET-515 / SOMET-516: the stat spread.
+//
+// Before these tickets every connective minor granted `@sector`, so the
+// constitution sector contained ZERO intelligence nodes -- while a Cultist
+// casts with spellMult, which derivePlayerStats derives from INTELLIGENCE.
+// Building a caster meant leaving your own sector on the very first node.
+//
+// These are the tests that keep the ratio real. Without them "70/30" is a
+// comment, and the next balance pass drifts it without anyone noticing.
+// ===========================================================================
+
+function statGrantsBySector() {
+  const { nodes } = generatePassiveTree(PASSIVE_TREE_SPEC);
+  const per = new Map();
+  for (const n of nodes) {
+    // Ring 0 is the core and the start nodes: no sector stat, no stat grants.
+    if (n.ring === 0) continue;
+    for (const g of n.grants) {
+      if (g.type !== 'stat') continue;
+      if (!per.has(n.sector)) per.set(n.sector, { own: 0, off: new Map() });
+      const rec = per.get(n.sector);
+      if (g.stat === n.sector) rec.own += 1;
+      else rec.off.set(g.stat, (rec.off.get(g.stat) || 0) + 1);
+    }
+  }
+  return per;
+}
+
+test('every sector grants its own stat about 70% of the time', () => {
+  const per = statGrantsBySector();
+  assert.equal(per.size, 6, 'all six sectors must grant stats');
+  for (const [sector, rec] of per) {
+    const off = [...rec.off.values()].reduce((a, b) => a + b, 0);
+    const share = rec.own / (rec.own + off);
+    assert.ok(share >= 0.67 && share <= 0.73,
+      `${sector} own-stat share is ${(share * 100).toFixed(1)}%, expected 70% +-3`);
+  }
+});
+
+// "Evenly across the other five" is a claim, and this is what checks it. A
+// hash-based off-stat pick would clump and pass the ratio test above while
+// leaving one stat nearly absent from a sector.
+test('off-stat grants are spread evenly over the other five stats', () => {
+  const per = statGrantsBySector();
+  for (const [sector, rec] of per) {
+    assert.equal(rec.off.size, 5, `${sector} must offer all five other stats`);
+    assert.ok(!rec.off.has(sector), `${sector} must not count its own stat as off-stat`);
+    const counts = [...rec.off.values()];
+    const lo = Math.min(...counts);
+    const hi = Math.max(...counts);
+    assert.ok(hi - lo <= Math.max(4, hi * 0.35),
+      `${sector} off-stat spread is uneven: ${JSON.stringify([...rec.off])}`);
+  }
+});
+
+// The point of the whole exercise, stated as a number rather than a feeling:
+// a Cultist must be able to build real INT inside the constitution sector.
+// Measured in POINTS, not nodes: a node is worth 2, 3, 4, 8, 12 or 16, so a
+// node count says nothing about whether a build is reachable. 34 points on a
+// base stat of 5 is roughly a sevenfold increase, entirely inside the
+// Cultist's own sector -- which is the whole point of the 70/30 change.
+test('a Cultist can reach substantial INT without leaving their own sector', () => {
+  const { nodes } = generatePassiveTree(PASSIVE_TREE_SPEC);
+  let points = 0;
+  for (const n of nodes) {
+    if (n.ring === 0 || n.sector !== 'constitution') continue;
+    for (const g of n.grants) {
+      if (g.type === 'stat' && g.stat === 'intelligence') points += g.value;
+    }
+  }
+  assert.ok(points >= 30,
+    `the constitution sector offers only ${points} points of INT; a Cultist casts with INT`);
+});
+
+// The same must hold in the other direction and for every pairing -- a Monk
+// who wants to melee needs STR at home just as much. Asserting all thirty
+// sector/off-stat pairs is what stops one lucky sector standing in for the
+// rest.
+test('every sector offers a usable amount of every other stat', () => {
+  const { nodes } = generatePassiveTree(PASSIVE_TREE_SPEC);
+  const points = new Map();
+  for (const n of nodes) {
+    if (n.ring === 0) continue;
+    for (const g of n.grants) {
+      if (g.type !== 'stat' || g.stat === n.sector) continue;
+      const key = `${n.sector}->${g.stat}`;
+      points.set(key, (points.get(key) || 0) + g.value);
+    }
+  }
+  assert.equal(points.size, 30, 'six sectors x five off-stats');
+  for (const [pair, total] of points) {
+    assert.ok(total >= 30, `${pair} offers only ${total} points`);
+  }
+});
+
+// Determinism is contractual: no Math.random(), no Date.now(). The round-robin
+// cursor is state, so this is the test that proves the state does not leak
+// between runs.
+test('the tree is byte-identical across runs after the spread change', () => {
+  const a = generatePassiveTree(PASSIVE_TREE_SPEC);
+  const b = generatePassiveTree(PASSIVE_TREE_SPEC);
+  assert.deepStrictEqual(a, b);
+});
+
+// A core node has no sector, so `@other` there has no meaning. The generator
+// deliberately does not fall back -- a fallback would make the mistake
+// invisible -- so the spec must never put one on a core template.
+test('no core template asks for an off-stat', () => {
+  const core = TEMPLATES.filter((t) => t.sectors !== '*' && t.sectors.includes('core'));
+  for (const t of core) {
+    for (const g of t.grants) {
+      assert.notEqual(g.stat, '@other', `core template ${t.key} cannot resolve @other`);
+    }
+  }
+});
+
+// Weights are what make the ratio authored rather than accidental. A weight of
+// 0 or a negative would silently drop a template from every pool.
+test('every template weight is a positive integer when present', () => {
+  for (const t of TEMPLATES) {
+    if (t.weight === undefined) continue;
+    assert.ok(Number.isInteger(t.weight) && t.weight > 0,
+      `template ${t.key} has weight ${t.weight}`);
+  }
+});
+
+// ===========================================================================
+// SOMET-518: epic clusters.
+//
+// A hub plus 2 or 4 satellites. The satellites' edge topology IS the feature:
+// each has exactly one neighbour, its own hub, so isAllocatable's walk cannot
+// reach an increaser until the epic it increases has been bought. Structural,
+// not a rule anyone has to remember to enforce.
+// ===========================================================================
+
+const { buildAdjacency, isAllocatable } = require('../src/services/passiveRules.js');
+
+function clusterTree() { return generatePassiveTree(PASSIVE_TREE_SPEC); }
+
+test('every authored cluster produces a hub and all of its satellites', () => {
+  const { nodes } = clusterTree();
+  const byKey = new Map(nodes.map((n) => [n.key, n]));
+  for (const c of CLUSTERS) {
+    const hub = byKey.get(`${c.key}-hub`);
+    assert.ok(hub, `${c.key} has no hub node`);
+    assert.equal(hub.label, c.hubLabel);
+    assert.equal(hub.sector, c.sector, 'a cluster must sit in its own class sector');
+    c.satellites.forEach((sat, i) => {
+      const s = byKey.get(`${c.key}-sat${i}`);
+      assert.ok(s, `${c.key} satellite ${i} missing`);
+      assert.equal(s.label, sat.label);
+    });
+  }
+});
+
+// THE TEST THE TICKET WAS WRITTEN AROUND.
+test('a satellite is adjacent to exactly its own hub and nothing else', () => {
+  const { edges } = clusterTree();
+  const adj = buildAdjacency(edges);
+  for (const c of CLUSTERS) {
+    c.satellites.forEach((_, i) => {
+      const key = `${c.key}-sat${i}`;
+      const neighbours = adj.get(key) || [];
+      assert.deepStrictEqual(neighbours, [`${c.key}-hub`],
+        `${key} must have exactly one neighbour, its own hub`);
+    });
+  }
+});
+
+// The same fact stated through the real allocation rule rather than through
+// the edge list -- if isAllocatable ever stopped consulting adjacency, the
+// topology test above would still pass while the gate was gone.
+test('a satellite is not allocatable until its hub is', () => {
+  const { edges } = clusterTree();
+  const adj = buildAdjacency(edges);
+  const c = CLUSTERS[0];
+  const hub = `${c.key}-hub`;
+  const sat = `${c.key}-sat0`;
+  // Pretend the whole tree except this cluster is allocated: still no.
+  const everythingElse = new Set([...adj.keys()].filter((k) => k !== hub && k !== sat));
+  assert.equal(isAllocatable(sat, everythingElse, adj, 'start-strength'), false,
+    'a satellite must be unreachable while its hub is unallocated');
+  assert.equal(isAllocatable(sat, new Set([hub]), adj, 'start-strength'), true,
+    'and reachable once the hub is taken');
+});
+
+// A hub that nothing links to would be an unreachable island: the cluster
+// would exist in the database and be unbuyable.
+test('every hub is reachable from the rest of the graph', () => {
+  const { edges } = clusterTree();
+  const adj = buildAdjacency(edges);
+  for (const c of CLUSTERS) {
+    const key = `${c.key}-hub`;
+    const neighbours = adj.get(key) || [];
+    const outside = neighbours.filter((n) => !n.startsWith(`${c.key}-`));
+    assert.ok(outside.length >= 1, `${key} has no edge to the rest of the tree`);
+  }
+});
+
+// Every cluster grant must name a rule the runtime actually reads. A typo here
+// is a node that looks epic and does nothing -- the exact failure SOMET-514
+// spent a ticket undoing.
+test('every cluster grants a rule that exists in the vocabulary', () => {
+  for (const c of CLUSTERS) {
+    for (const g of [...c.hubGrants, ...c.satellites.flatMap((s) => s.grants)]) {
+      assert.equal(g.type, 'rule', `${c.key} grants a non-rule`);
+      assert.ok(RULE_KEYS[g.rule], `${c.key} grants unknown rule "${g.rule}"`);
+    }
+  }
+});
+
+// Clusters replaced ks_wis_clarity and ks_cha_beast_bond. Shipping both would
+// pay the Monk and the Druid twice for one idea.
+// Narrowly: the two keystones the clusters REPLACED must be gone, by key. It
+// is fine and intended for other keystones to grant a smaller step of the same
+// rule -- ks_cha_pack_leader's +3 charm sits deliberately between the Druid
+// start node's +1 and the Beast Bond cluster's +5. What must not happen is
+// shipping the replaced keystone AND its cluster, which would pay the class
+// twice for one idea.
+test('the two keystones the clusters replaced are gone', () => {
+  const { nodes } = clusterTree();
+  const labels = new Set(nodes.map((n) => n.label));
+  const keys = new Set(nodes.map((n) => n.key));
+  for (const gone of ['ks_wis_clarity', 'ks_cha_beast_bond']) {
+    assert.ok(!keys.has(gone), `${gone} was replaced by a cluster and must not be generated`);
+  }
+  // And each replaced idea now exists exactly once, as the cluster hub.
+  for (const label of ['Clarity', 'Beast Bond']) {
+    const count = nodes.filter((n) => n.label === label).length;
+    assert.equal(count, 1, `"${label}" must exist exactly once, as the cluster hub`);
+  }
+  // Keystone labels carry their description ("Transcendence — +35 WIS ..."),
+  // so this matches the name, not the whole string.
+  const named = (name) => [...labels].some((l) => l.startsWith(name));
+  assert.ok(named('Transcendence'), 'the wisdom keystone slot must be refilled');
+  assert.ok(named('Menagerie'), 'the charisma keystone slot must be refilled');
 });

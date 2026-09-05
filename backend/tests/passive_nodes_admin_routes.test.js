@@ -105,13 +105,13 @@ test('passive node admin routes', { skip }, async (t) => {
       .set('Authorization', `Bearer ${admin}`);
     assert.strictEqual(res.status, 200);
     assert.strictEqual(res.body.nodes.length, 25);
-    assert.strictEqual(res.body.total, 1806);
+    assert.strictEqual(res.body.total, 1852);
     assert.deepStrictEqual(Object.keys(res.body.nodes[0]).sort(),
       ['grants', 'id', 'key', 'kind', 'label', 'ring', 'sector', 'start_class', 'x', 'y']);
   });
 
   await t.test('offset walks the same ordering without repeating or skipping a row', async () => {
-    // AC1's real content: 1806 rows must not arrive in one pass, and the pages
+    // AC1's real content: 1852 rows must not arrive in one pass, and the pages
     // must tile. A LIMIT with no ORDER BY, or an offset the route ignores,
     // both fail here rather than in the browser at page 12.
     const head = (await request(app).get('/api/passive-nodes?limit=10&offset=0')
@@ -131,13 +131,16 @@ test('passive node admin routes', { skip }, async (t) => {
     assert.strictEqual(res.status, 200);
     assert.ok(res.body.nodes.length <= 200,
       `expected the limit to be capped, got ${res.body.nodes.length} rows`);
-    assert.strictEqual(res.body.total, 1806);
+    assert.strictEqual(res.body.total, 1852);
   });
 
   await t.test('filters by sector, by kind and by a key/label search', async () => {
     const bySector = await request(app).get('/api/passive-nodes?sector=charisma&limit=5')
       .set('Authorization', `Bearer ${admin}`);
-    assert.strictEqual(bySector.body.total, 296);
+    // 296 grid nodes + 1 start, plus SOMET-518's charisma cluster (the Beast
+    // Bond hub and its 2 satellites). Clusters are NOT evenly distributed
+    // across sectors, so this number is charisma's specifically.
+    assert.strictEqual(bySector.body.total, 299);
     assert.deepStrictEqual([...new Set(bySector.body.nodes.map((n) => n.sector))], ['charisma']);
 
     const byKind = await request(app).get('/api/passive-nodes?kind=keystone&limit=100')
@@ -167,13 +170,30 @@ test('passive node admin routes', { skip }, async (t) => {
   await t.test('a LIKE wildcard in the search is matched literally', async () => {
     // Parameterising a query does NOT escape `%` and `_` -- they are pattern
     // syntax inside ILIKE, not SQL syntax. A bare `%` typed into the search box
-    // would otherwise match all 1806 rows and read as "search is broken".
-    // 13 authored labels contain a literal per-cent sign ("+35% fire damage"),
-    // so an ESCAPED `%` finds exactly those. An UNESCAPED one is a wildcard and
-    // finds all 1806 -- which is the bug, and is what this number distinguishes.
+    // would otherwise match every row and read as "search is broken". An
+    // ESCAPED `%` finds only the labels that literally contain one ("+35% fire
+    // damage"); an UNESCAPED one is a wildcard and finds them all.
+    //
+    // The expected count is COUNTED, not written down. It used to be the
+    // literal 13, which is authored content: adding one node whose label
+    // mentions a percentage broke this test with "14 !== 13", a failure that
+    // says nothing about escaping and everything about the tree having grown.
+    //
+    // The oracle is deliberately JavaScript's `includes`, not another LIKE:
+    // `includes` has no pattern syntax at all, so it cannot share the very bug
+    // under test. Counting with `LIKE '%\\%%'` would be comparing the query
+    // against a restatement of itself.
+    const allLabels = (await pool.query('SELECT label FROM passive_nodes')).rows;
+    const literalPct = allLabels.filter((r) => String(r.label).includes('%')).length;
+    assert.ok(literalPct > 0 && literalPct < allLabels.length,
+      `the discrimination needs some-but-not-all labels to contain a literal % `
+      + `(got ${literalPct} of ${allLabels.length})`);
+
     const pct = await request(app).get(`/api/passive-nodes?search=${encodeURIComponent('%')}`)
       .set('Authorization', `Bearer ${admin}`);
-    assert.strictEqual(pct.body.total, 13);
+    assert.strictEqual(pct.body.total, literalPct);
+    assert.notStrictEqual(pct.body.total, allLabels.length,
+      'an unescaped % matched every row -- the wildcard is reaching ILIKE as pattern syntax');
     const underscore = await request(app).get(`/api/passive-nodes?search=${encodeURIComponent('start_strength')}`)
       .set('Authorization', `Bearer ${admin}`);
     assert.strictEqual(underscore.body.total, 0,
@@ -184,7 +204,7 @@ test('passive node admin routes', { skip }, async (t) => {
     const res = await request(app).get('/api/passive-nodes?sector=nowhere&kind=legendary&limit=1')
       .set('Authorization', `Bearer ${admin}`);
     assert.strictEqual(res.status, 200);
-    assert.strictEqual(res.body.total, 1806);
+    assert.strictEqual(res.body.total, 1852);
   });
 
   await t.test('updates label, kind and grants', async () => {

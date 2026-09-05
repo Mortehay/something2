@@ -9,7 +9,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const {
   PASSIVE_TREE_SPEC, SECTORS, LAYOUT, TEMPLATES, KEYSTONES, START_NODES,
-  GRANT_TYPES, RULE_KEYS,
+  GRANT_TYPES, RULE_KEYS, CLUSTERS,
 } = require('../seeds/data/passiveTree.js');
 const { ELEMENTS } = require('../src/authority/damage.js');
 
@@ -30,7 +30,9 @@ test('ring geometry multiplies out to the specced per-ring composition', () => {
   assert.deepStrictEqual(
     [1, 2, 3].map((r) => {
       const g = LAYOUT.rings[r];
-      return [g.rows * g.cols, g.minor + g.notable + g.keystone];
+      // SOMET-517 added `greater` to ring 3's composition, taken out of the
+      // minor budget so the ring's total is unchanged.
+      return [g.rows * g.cols, g.minor + g.notable + g.keystone + (g.greater || 0)];
     }),
     [[68, 68], [116, 116], [111, 111]],
   );
@@ -42,12 +44,22 @@ test('ring geometry multiplies out to the specced per-ring composition', () => {
 // archetype templates", so 40 is the correct number and 38 was the typo. The
 // count is pinned anyway, because a template silently dropped in a merge
 // shrinks a pool and re-labels every node that pool served.
-test('40 archetype templates, none of them a keystone', () => {
-  assert.strictEqual(TEMPLATES.length, 40);
-  assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'minor').length, 16);
-  assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'notable').length, 24);
+// 48 since SOMET-516, which added the off-stat half of the connective tissue:
+// 5 minors (Versatility, Breadth, Cross-Training, Dabbler, Polymath) and
+// 3 notables (Broad Study, Second Discipline, Renaissance). The count is
+// pinned because a template silently dropped in a merge shrinks a pool and
+// re-labels every node that pool served.
+test('52 archetype templates, none of them a keystone', () => {
+  assert.strictEqual(TEMPLATES.length, 52);
+  assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'minor').length, 21);
+  assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'notable').length, 27);
+  // SOMET-517's ring-3 tier.
+  assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'greater').length, 4);
   assert.strictEqual(TEMPLATES.some((t) => t.kind === 'keystone'), false);
-  assert.strictEqual(new Set(TEMPLATES.map((t) => t.key)).size, 40);
+  assert.strictEqual(new Set(TEMPLATES.map((t) => t.key)).size, 52);
+  // Distinct labels: two nodes both called "Sinew" granting different stats is
+  // a tooltip that lies.
+  assert.strictEqual(new Set(TEMPLATES.map((t) => t.label)).size, 52);
 });
 
 test('every (kind, sector, ring) combination the generator will ask for has a pool', () => {
@@ -82,9 +94,12 @@ test('the two keystones the spec names by hand exist and grant what it says', ()
   const bloodPact = KEYSTONES.constitution.find((k) => k.key === 'ks_con_blood_pact');
   assert.deepStrictEqual(bloodPact.grants,
     [{ type: 'rule', rule: 'lifeCostMultiplier', value: 0.75 }]);
-  const beastBond = KEYSTONES.charisma.find((k) => k.key === 'ks_cha_beast_bond');
-  assert.deepStrictEqual(beastBond.grants,
-    [{ type: 'rule', rule: 'treeCharmBonus', value: 5 }]);
+  // SOMET-518 moved Beast Bond from a keystone to a CLUSTER hub, so the
+  // keystone is gone and the charm rule now lives on the cluster. Pack Leader
+  // (+3) stays as the intermediate step it always was.
+  assert.strictEqual(KEYSTONES.charisma.find((k) => k.key === 'ks_cha_beast_bond'), undefined);
+  const bond = CLUSTERS.find((c) => c.key === 'clu_cha_beast_bond');
+  assert.deepStrictEqual(bond.hubGrants, [{ type: 'rule', rule: 'treeCharmBonus', value: 5 }]);
 });
 
 test('one start node per sector, each naming a distinct class', () => {
@@ -99,8 +114,13 @@ test('the element vocabulary is the authority\'s, not a second copy that can dri
 });
 
 test('every rule key names the module that consumes it and how duplicates combine', () => {
+  // EXHAUSTIVE on purpose: adding a rule must be a deliberate edit here, not
+  // something that slips in. SOMET-519 added the two speed rules.
   assert.deepStrictEqual(Object.keys(RULE_KEYS).sort(),
-    ['cooldownFloor', 'lifeCostMultiplier', 'regenLifeShare', 'treeCharmBonus']);
+    ['attackSpeedMult', 'auraLeech', 'auraRadius', 'castSpeedMult', 'cooldownFloor',
+      'lifeCostMultiplier', 'meleeArcBonus', 'meleeDamageMult', 'meleeReachBonus',
+      'meleeWaveShare', 'pierceBonus', 'projectileCount', 'projectileSpeedMult',
+      'regenLifeShare', 'treeCharmBonus']);
   for (const [key, def] of Object.entries(RULE_KEYS)) {
     assert.ok(['sum', 'product', 'min'].includes(def.combine), `${key}.combine`);
     assert.ok(typeof def.consumer === 'string' && def.consumer.length > 0, `${key}.consumer`);
@@ -108,9 +128,30 @@ test('every rule key names the module that consumes it and how duplicates combin
   assert.strictEqual(RULE_KEYS.lifeCostMultiplier.combine, 'product');
   assert.strictEqual(RULE_KEYS.treeCharmBonus.combine, 'sum');
   assert.strictEqual(RULE_KEYS.cooldownFloor.combine, 'min');
+  // SOMET-519: `product`, so four +10% satellites compound to x1.46 rather
+  // than adding to +40%. That is what keeps a cluster's last satellite worth
+  // taking.
+  assert.strictEqual(RULE_KEYS.attackSpeedMult.combine, 'product');
+  assert.strictEqual(RULE_KEYS.castSpeedMult.combine, 'product');
+  // SOMET-520: `sum`, so satellites add flat increments and an arc can reach a
+  // full turn by addition rather than compounding toward it forever.
+  assert.strictEqual(RULE_KEYS.meleeReachBonus.combine, 'sum');
+  assert.strictEqual(RULE_KEYS.meleeArcBonus.combine, 'sum');
+  // SOMET-521: whole extra shots and whole extra targets add; speed compounds.
+  assert.strictEqual(RULE_KEYS.projectileCount.combine, 'sum');
+  assert.strictEqual(RULE_KEYS.pierceBonus.combine, 'sum');
+  assert.strictEqual(RULE_KEYS.projectileSpeedMult.combine, 'product');
+  // SOMET-522: satellites add flat life-per-enemy and flat pixels of radius.
+  assert.strictEqual(RULE_KEYS.auraLeech.combine, 'sum');
+  assert.strictEqual(RULE_KEYS.auraRadius.combine, 'sum');
+  // SOMET-527: `product`, and authored BELOW 1 -- it is a price, not a bonus.
+  assert.strictEqual(RULE_KEYS.meleeDamageMult.combine, 'product');
+  // SOMET-528: `sum`, so satellites add flat share to a hub and an
+  // unallocated player leaves no wave at all.
+  assert.strictEqual(RULE_KEYS.meleeWaveShare.combine, 'sum');
 });
 
 test('PASSIVE_TREE_SPEC is the single bundle the generator takes', () => {
   assert.deepStrictEqual(Object.keys(PASSIVE_TREE_SPEC).sort(),
-    ['keystones', 'layout', 'sectors', 'startNodes', 'templates']);
+    ['clusters', 'keystones', 'layout', 'sectors', 'startNodes', 'templates']);
 });

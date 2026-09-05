@@ -14,7 +14,7 @@ function mockPool(handlers) {
     query: async (sql, params) => {
       if (isUserLookup(sql)) return ADMIN_USER_ROW;
       calls.push({ sql, params });
-      for (const [re, fn] of handlers) if (re.test(sql)) return fn(params);
+      for (const [re, fn] of handlers) if (re.test(sql)) return fn(params, sql);
       throw new Error(`unexpected query: ${sql}`);
     },
   };
@@ -40,7 +40,16 @@ test('PUT /api/tile-types/:id sends prompt, wall_height and place_order, and poi
     // name is unchanged ('grass' -> 'grass'), so the rename guard's reference
     // checks are skipped entirely.
     [/SELECT name FROM tile_types WHERE id/i, () => ({ rows: [{ name: 'grass' }] })],
-    [/UPDATE tile_types/i, (p) => ({ rows: [{ id: Number(p[9]), name: p[0], prompt: p[6] }] })],
+    // Echoes the row the way the real UPDATE ... RETURNING * would, locating
+    // prompt by its placeholder rather than by a memorised index -- a fixture
+    // pinned to a column position goes quietly wrong the moment one is added.
+    [/UPDATE tile_types/i, (p, sql) => ({
+      rows: [{
+        id: Number(p[p.length - 1]),
+        name: p[0],
+        prompt: p[Number(/prompt\s*=\s*\$(\d+)/.exec(sql)[1]) - 1],
+      }],
+    })],
   ]);
   __setPool(pool);
   const res = await request(app).put('/api/tile-types/9').set(...AUTH).send({
@@ -50,9 +59,19 @@ test('PUT /api/tile-types/:id sends prompt, wall_height and place_order, and poi
   });
   assert.equal(res.status, 200);
   const call = pool.calls.find((c) => /UPDATE tile_types/i.test(c.sql));
-  assert.equal(call.params[6], 'edited meadow grass', 'prompt must be UPDATE $7');
-  assert.equal(call.params[7], 40, 'wall_height must be UPDATE $8');
-  assert.equal(call.params[8], 1, 'place_order must be UPDATE $9');
+  // Read each column's placeholder out of the SET clause instead of hardcoding
+  // an index, for exactly the reason the WHERE assertion below already gives:
+  // a fixed index asserts the right thing only by coincidence and breaks every
+  // time a column is added or removed. What matters is that the value lands in
+  // ITS OWN column, which is what this now checks.
+  const paramFor = (col) => {
+    const m = new RegExp(`${col}\\s*=\\s*\\$(\\d+)`).exec(call.sql);
+    assert.ok(m, `${col} must still be written by this UPDATE`);
+    return call.params[Number(m[1]) - 1];
+  };
+  assert.equal(paramFor('prompt'), 'edited meadow grass');
+  assert.equal(paramFor('wall_height'), 40);
+  assert.equal(paramFor('place_order'), 1);
   // The id is read out of the WHERE clause rather than pinned to a fixed
   // position. SOMET-342 added the two pin columns and moved it from $10 to
   // $13, and the ONLY thing that assertion ever needed to protect is that the
@@ -62,6 +81,39 @@ test('PUT /api/tile-types/:id sends prompt, wall_height and place_order, and poi
   assert.equal(String(call.params[wherePlaceholder - 1]), '9', 'WHERE id must carry the id from the URL');
   assert.equal(wherePlaceholder, call.params.length, 'the id stays the last param');
   assert.equal(res.body.prompt, 'edited meadow grass');
+});
+
+test('PUT /api/tile-types/:id does not write image, so Save Changes cannot undo an Approve', async () => {
+  // The reported failure: generate a texture, Approve it, press Save Changes,
+  // and the tile silently goes back to the previous picture -- both requests
+  // answering 200, so it reads as the generator having failed.
+  //
+  // The form has no image input. It snapshots `image` when the modal opens and
+  // sends it back untouched, so after an Approve that snapshot is the PREVIOUS
+  // key. The route used to write `image = COALESCE(NULLIF($5, ''), image)`,
+  // which only protected the empty case -- i.e. a tile getting its FIRST
+  // texture. For a tile that already had one, the stale key sailed through.
+  const pool = mockPool([
+    [/SELECT name FROM tile_types WHERE id/i, () => ({ rows: [{ name: 'rocks' }] })],
+    [/UPDATE tile_types/i, (p) => ({ rows: [{ id: Number(p[p.length - 1]) }] })],
+  ]);
+  __setPool(pool);
+  const stale = 'sprites/tiles/rocks/rmt_OLDJOB/static.png';
+  const res = await request(app).put('/api/tile-types/5').set(...AUTH).send({
+    name: 'rocks', color: '#888', walkable: true, speed: 0.8,
+    image: stale, valid_neighbors: [], prompt: 'grey rocky stone ground',
+    wall_height: 0, place_order: 0,
+  });
+  assert.equal(res.status, 200);
+  const call = pool.calls.find((c) => /UPDATE tile_types/i.test(c.sql));
+  // Two independent checks: the column is not in the SET clause at all, and
+  // the key never reaches the parameter list. Either alone could pass while
+  // the other leaked -- a column assigned from a literal, or a parameter
+  // carried for some other purpose.
+  assert.doesNotMatch(call.sql, /\bimage\s*=/,
+    'image is owned by POST /:id/image; this route must not assign it');
+  assert.ok(!call.params.includes(stale),
+    'a stale image key from the form must not reach the UPDATE at all');
 });
 
 test('POST defaults prompt to empty string when omitted', async () => {

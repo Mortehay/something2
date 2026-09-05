@@ -8,13 +8,43 @@
 // NOTE: no world is assigned a biome set here. worlds.biomes defaults to '[]',
 // which the generator reads as "band all terrain globally, exactly as before" —
 // so every existing world keeps its current terrain and its cached chunks.
+// SOMET: the original five carry their P4 line ALONGSIDE their legacy fauna.
+//
+// biome_catalog_integrity.test.js records how the 27 P3 biomes were left at
+// `creature_types: []` because P4 authored the 288 "{Line} {Rung}" creatures
+// into entity_types and never came back to fill this field. The original five
+// hit the same gap for the opposite reason: they were already populated with
+// the four legacy names, so nothing flagged them, and they were never
+// revisited. The result was a ceiling -- Meadow, Deep Forest, Arid Dunes,
+// Frozen Waste and Mire admit only Slime/Wolf/Bat/Skeleton BETWEEN THEM, so a
+// region built from surface biomes tops out at four creature kinds no matter
+// how it is authored.
+//
+// The line each one gains is not an editorial choice: scripts/bestiary/
+// template.js's LINES table already declares every P4 line's home biome, and
+// these five are exactly the five it names (Beast/Meadow, Woodland/Deep
+// Forest, Desert/Arid Dunes, Tundra/Frozen Waste, Swamp/Mire). This is
+// transcribing that mapping, not inventing one. The [Swarm, Skirmisher, Line]
+// rung set matches what all 27 other biomes ship.
+//
+// WHY THIS CANNOT CHANGE A LIVE WORLD: creatureTileCandidates
+// (services/mapService.js) intersects a world's allowed_creature_types with
+// its biome's list -- "the world's allowlist stays authoritative, a biome can
+// only REMOVE candidates from it, never add one". A world allowing only
+// ['Slime'] still spawns only Slime. Widening a biome raises the CEILING for
+// specs that ask for these creatures; it changes nothing that is already
+// seeded.
+//
+// The legacy names stay. Removing them would rewrite shipped content
+// (vale_hub allows ['Slime']) and break the invariant tests that assert the
+// four legacy types share one profile.
 const STARTER_BIOMES = [
   {
     name: 'Meadow',
     path_tile: 'road_dirt',
     terrain_tiles: ['grass', 'highgrass', 'earth'],
     flora_types: ['bush', 'rose_bush', 'Tree', 'Stone'],
-    creature_types: ['Slime', 'Wolf'],
+    creature_types: ['Slime', 'Wolf', 'Beast Swarm', 'Beast Skirmisher', 'Beast Line'],
     palette: ['spring green', 'wildflower yellow', 'warm brown'],
     art_style: 'lush hand-drawn fantasy, soft daylight',
     exclusions: 'no snow, no ice, no dead trees',
@@ -26,7 +56,7 @@ const STARTER_BIOMES = [
     path_tile: 'road_dirt',
     terrain_tiles: ['leafs', 'highgrass', 'earth'],
     flora_types: ['Tree', 'pine_tree', 'dead_tree', 'bush', 'Stone'],
-    creature_types: ['Wolf', 'Bat', 'Skeleton'],
+    creature_types: ['Wolf', 'Bat', 'Skeleton', 'Woodland Swarm', 'Woodland Skirmisher', 'Woodland Line'],
     palette: ['deep green', 'moss', 'bark brown'],
     art_style: 'dense hand-drawn fantasy, dappled shade',
     exclusions: 'no sand, no snow',
@@ -38,7 +68,7 @@ const STARTER_BIOMES = [
     path_tile: 'road_sand',
     terrain_tiles: ['sand', 'rocks', 'dirt'],
     flora_types: ['dead_tree', 'Stone'],
-    creature_types: ['Skeleton', 'Bat'],
+    creature_types: ['Skeleton', 'Bat', 'Desert Swarm', 'Desert Skirmisher', 'Desert Line'],
     palette: ['ochre', 'gold', 'burnt sienna'],
     art_style: 'sun-bleached hand-drawn fantasy, harsh light',
     exclusions: 'no grass, no snow, no ice, no leaves',
@@ -50,7 +80,7 @@ const STARTER_BIOMES = [
     path_tile: 'road_snow',
     terrain_tiles: ['snow', 'ice', 'rocks'],
     flora_types: ['IceRock', 'pine_tree'],
-    creature_types: ['Bat', 'Skeleton'],
+    creature_types: ['Bat', 'Skeleton', 'Tundra Swarm', 'Tundra Skirmisher', 'Tundra Line'],
     palette: ['pale blue', 'white', 'slate grey'],
     art_style: 'cold hand-drawn fantasy, flat overcast light',
     exclusions: 'no grass, no sand, no flowers',
@@ -62,7 +92,7 @@ const STARTER_BIOMES = [
     path_tile: 'road_dirt',
     terrain_tiles: ['swamp', 'water', 'earth'],
     flora_types: ['dead_tree', 'bush', 'Stone'],
-    creature_types: ['Slime', 'Bat'],
+    creature_types: ['Slime', 'Bat', 'Swamp Swarm', 'Swamp Skirmisher', 'Swamp Line'],
     palette: ['murky olive', 'peat brown', 'sickly green'],
     art_style: 'damp hand-drawn fantasy, low misty light',
     exclusions: 'no snow, no ice, no sand',

@@ -382,4 +382,13 @@ module.exports = {
   respecPassives,
   respecQuote,
   composeProgression,
+  // Exported for passive_tree_allocation_db.test.js, which pins the invariant
+  // composeProgression above DEPENDS on: the bundle carries the allocated ids
+  // and their grants and NOT the wallet, because composeProgression adds
+  // passivePoints itself from the row. If the bundle ever grew a passivePoints
+  // of its own, the two would silently disagree about which is authoritative.
+  // The test importing it was already written; only the export was missing, so
+  // it died on `passiveBundle is not a function` and the invariant went
+  // unchecked.
+  passiveBundle,
 };

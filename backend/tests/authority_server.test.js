@@ -1627,3 +1627,93 @@ test('a player who joins with a real CON-15 progression row receives derived sta
 
   ws.close(); handle.close(); server.close();
 });
+
+// ---------------------------------------------------------------------------
+// SOMET-365: the state frame is scoped to the recipient's neighbourhood.
+//
+// Creature, item and chest broadcasts were already AOI-scoped; players were
+// not -- World.snapshot()'s array went to every socket BY REFERENCE. That was
+// O(P^2) bandwidth per tick, it pushed every remote player into the client's
+// per-frame drawables to be sorted, and it handed every client the live
+// position of every player in the world.
+//
+// playerAoi.test.js pins the scoping rule itself. These two drive the REAL
+// server, because the rule being right is not the same claim as the tick loop
+// actually using it -- the failure this epic keeps meeting is a correct value
+// that nothing downstream consumes.
+//
+// chunk_size is 8 and MAP_TILE_SIZE is 100, so a chunk is 800 world px and the
+// broadcast neighbourhood is the 3x3 block around the recipient.
+// ---------------------------------------------------------------------------
+
+test('SOMET-365: a player in a distant chunk is not in another player\'s state frame', async () => {
+  const { url, handle, server } = await boot();
+  const a = connect(url, 1);
+  const b = connect(url, 2);
+  await Promise.all([
+    new Promise((r) => a.on('open', r)),
+    new Promise((r) => b.on('open', r)),
+  ]);
+  a.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
+  b.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
+  await nextMsg(a, 'joined');
+  await nextMsg(b, 'joined');
+
+  // Both spawn together; shove 2 five chunks east, straight on the world.
+  const world = handle.worlds.get('w1').world;
+  const pb = world.getPlayer('2');
+  pb.x += 800 * 5;
+
+  // Read several frames: the move lands on whichever tick follows it, and a
+  // single frame could be the one still in flight from before the shove.
+  let sawFar = false;
+  let sawSelf = false;
+  for (let i = 0; i < 12; i++) {
+    const s = await nextMsg(a, 'state');
+    const ids = s.players.map((pl) => pl.id);
+    if (ids.includes('2')) sawFar = true;
+    if (ids.includes('1')) sawSelf = true;
+  }
+  assert.equal(sawFar, false, 'a player five chunks away must not appear in the frame');
+  assert.ok(sawSelf, 'the recipient must still receive its OWN row every tick');
+
+  a.close(); b.close();
+  handle.close(); server.close();
+});
+
+// The regression that matters more than the saving: over-filtering makes other
+// players vanish in ordinary co-op. Asserted across a CHUNK BOUNDARY rather
+// than in the same chunk, because same-chunk would pass even on a filter that
+// wrongly used exact chunk equality instead of the neighbourhood.
+test('SOMET-365: players in adjacent chunks still see each other', async () => {
+  const { url, handle, server } = await boot();
+  const a = connect(url, 1);
+  const b = connect(url, 2);
+  await Promise.all([
+    new Promise((r) => a.on('open', r)),
+    new Promise((r) => b.on('open', r)),
+  ]);
+  a.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
+  b.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
+  await nextMsg(a, 'joined');
+  await nextMsg(b, 'joined');
+
+  const world = handle.worlds.get('w1').world;
+  const pa = world.getPlayer('1');
+  const pb = world.getPlayer('2');
+  // Put them in DIFFERENT but adjacent chunks: a at the end of one, b just
+  // over the line. A few pixels apart on screen, a chunk apart in the index.
+  pa.x = 800 - 20; pa.y = 400;
+  pb.x = 800 + 20; pb.y = 400;
+
+  let both = false;
+  for (let i = 0; i < 12 && !both; i++) {
+    const s = await nextMsg(a, 'state');
+    const ids = s.players.map((pl) => pl.id).sort();
+    if (ids.includes('1') && ids.includes('2')) both = true;
+  }
+  assert.ok(both, 'players either side of a chunk boundary must still see each other');
+
+  a.close(); b.close();
+  handle.close(); server.close();
+});

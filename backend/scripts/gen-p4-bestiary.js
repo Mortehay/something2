@@ -10,6 +10,11 @@ const path = require('path');
 const { LINES, RUNGS } = require('./bestiary/template');
 const { deriveResistances, deriveLevelBand } = require('./bestiary/derive');
 const { pickDropItem } = require('./bestiary/dropMapping');
+// promptFor() below calls styleEntityPrompt and this import was missing, so every
+// call threw ReferenceError -- the generator could not run at all. Same helper
+// seeds/data/entityTypes.js and decorationTypes.js use, so a regenerated
+// bestiary is styled identically to the hand-authored catalogs.
+const { styleEntityPrompt } = require('../seeds/data/spritePrompt.js');
 
 // Deterministic color per line, shade per rung -- every creature in a line shares a hue family,
 // darker at higher rungs (bigger, tougher). Placeholder-quality; a later hand-polish pass is

@@ -22,7 +22,7 @@ const path = require('path');
 const fs = require('fs');
 const dotenv = require('dotenv');
 const { Pool } = require('pg');
-const { validateMapSpec, villagesOf } = require('../seeds/mapSpec.js');
+const { validateMapSpec, implicitBandBoundaries, villagesOf } = require('../seeds/mapSpec.js');
 const {
   fetchLinks, setLink, setPortalLink, pruneCompassLinks,
 } = require('../src/services/mapLinks.js');
@@ -167,6 +167,22 @@ async function applyMapSpec(pool, spec) {
   const errors = validateMapSpec(spec, catalogs);
   if (errors.length) {
     throw new Error(`invalid spec "${spec.name}":\n  - ${errors.join('\n  - ')}`);
+  }
+
+  // LOUD, above the work, and not an error: an omitted level_band is legal and
+  // seeds as 1-1, which is right for a starting ring and wrong for a step in a
+  // ramp. Nothing downstream can tell those apart afterwards -- 1-1 is a valid
+  // band -- so this is the only point at which the difference is visible.
+  const implicitBands = implicitBandBoundaries(spec);
+  if (implicitBands.length) {
+    console.warn(
+      `\nWARNING: ${implicitBands.length} world(s) in "${spec.name}" will seed as LEVEL 1-1 `
+      + 'because they declare no level_band, yet they open onto a higher band:');
+    for (const b of implicitBands) console.warn(`  - ${b.message}`);
+    console.warn(
+      'If those worlds are meant to be a level-1 area this is correct and can be ignored.\n'
+      + 'If they are steps in a ramp, declare an explicit level_band on each -- an absent key\n'
+      + 'and a null are both read as 1-1.\n');
   }
 
   const client = await pool.connect();

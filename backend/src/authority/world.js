@@ -17,7 +17,12 @@ const { unequipBlockers } = require('./equipRequirements.js');
 const { loadProgression } = require('../services/progressionStore.js');
 const { GroundItemSim } = require('./groundItems');
 const { derivePlayerStats, DEFAULT_PROGRESSION } = require('../services/playerStats.js');
-const { STAMINA_BASE } = require('../services/progressionConstants.js');
+const {
+  STAMINA_BASE, PROJECTILE_FAN_RAD,
+  AURA_BASE_RADIUS, AURA_MAX_TARGETS, AURA_INTERVAL_S,
+  MIN_MELEE_REACH, MIN_MELEE_ARC,
+  WAVE_DURATION_S, WAVE_MAX_STACKS, WAVE_INTERVAL_S,
+} = require('../services/progressionConstants.js');
 const { lifeCostFor, canPayLife } = require('../services/lifeCost.js');
 const { getSkillById, checkGemRequirements } = require('../../seeds/data/skills.js');
 
@@ -32,6 +37,11 @@ const MAX_CREATURE_PROJECTILES = 120;
 const PLAYER_W = 64;
 const PLAYER_H = 64;
 const PLAYER_SPEED = 200; // client: this.speed(100) * speedMultiplier(2)
+// SOMET-520. A full turn, the ceiling on a widened melee arc. inArc compares
+// against cos(arc/2), so half a turn already reaches behind the attacker and
+// anything past a full turn is meaningless -- but an unclamped arc would keep
+// growing and read as if more stacking still helped.
+const TAU = Math.PI * 2;
 const PLAYER_MAX_HP = 100;
 const PLAYER_MAX_MANA = 100;
 const PLAYER_MANA_REGEN = 10; // per second
@@ -74,7 +84,18 @@ function sign(v) { return v > 0.3 ? 1 : v < -0.3 ? -1 : 0; }
 // already in the air.
 function weaponDamage(p, w) {
   const mult = (w.element && w.element !== 'physical') ? p.stats.spellMult : p.stats.meleeMult;
-  return w.damage * mult * elementDamageMult(p.stats, w.element);
+  // SOMET-527. THE CONSUMER of `meleeDamageMult`: the price a shape node pays
+  // for its coverage, so a full circle is a trade rather than a strict upgrade.
+  //
+  // Branched on w.kind, NOT on element -- the same reading applyAttackCooldown
+  // uses. The cost is for swinging in a wide arc; a stone-augmented sword is
+  // still a sword. Note this deliberately differs from the `mult` line above,
+  // which IS element-based because it is asking a different question (does STR
+  // or INT scale this?).
+  //
+  // Identity is 1, so every weapon with no shape node allocated is unmoved.
+  const shape = w.kind === 'melee' ? (p.stats.rules.meleeDamageMult || 1) : 1;
+  return w.damage * mult * elementDamageMult(p.stats, w.element) * shape;
 }
 
 // SOMET-495. The passive tree's `damage` grants, as a PER-ELEMENT multiplier.
@@ -102,8 +123,67 @@ function elementDamageMult(stats, element) {
 // (melee and projectile) call this; a test asserts the source contains
 // exactly one reference to that field so a third site cannot silently
 // reappear.
+// SOMET-522. This player's aura radius in pixels, or 0 when they have no aura
+// node allocated. ONE definition, read by the tick that applies the heal and by
+// the snapshot that tells the client what ring to draw -- two copies is how the
+// drawn ring stops matching the healed area.
+function auraRadiusOf(p) {
+  const rules = p.stats.rules;
+  if (!(rules.auraLeech > 0)) return 0;
+  return AURA_BASE_RADIUS + (rules.auraRadius || 0);
+}
+
+// SOMET-528. Damage one wave deals per second: a share of the swing that made
+// it. Derived from weaponDamage so every multiplier the swing itself respected
+// -- STR/INT scaling, the tree's element multipliers, SOMET-527's shape
+// penalty -- is already inside it, rather than being re-derived here and
+// drifting from the swing it is supposed to echo.
+function waveTickDamage(p, w) {
+  return weaponDamage(p, w) * (p.stats.rules.meleeWaveShare || 0);
+}
+
 function applyAttackCooldown(p, w) {
-  p._attackCd = w.cooldown * p.stats.cooldownMult;
+  // SOMET-519. The tree's attack-rate rules, applied at the ONE site that
+  // reads w.cooldown (a test asserts there is exactly one).
+  //
+  // THE BRANCH IS THE FEATURE. `kind` is always the WEAPON's own -- items.js's
+  // activeWeaponType spreads `...type` and overrides only element, mana_cost,
+  // damage and cooldown, so a socketed spell stone on a sword is still
+  // kind:'melee'. That is the intended reading: the weapon decides whether you
+  // are swinging or shooting, so a Warrior's attack-speed cluster speeds up
+  // that stone-augmented sword, and a Mage's Quickcast does not.
+  //
+  // Without the branch these would be one stat wearing two labels.
+  const speed = w.kind === 'melee'
+    ? p.stats.rules.attackSpeedMult
+    : p.stats.rules.castSpeedMult;
+  const scaled = p.stats.cooldownMult / (speed > 0 ? speed : 1);
+  // FLOORED HERE, not in derivePlayerStats. cooldownMult arrives already
+  // floored, but `floor / speed` is unbounded below -- flooring one factor
+  // does not bound a product, and a stack of speed nodes would otherwise drive
+  // the attack interval toward zero. stats.cooldownFloor is the SAME resolved
+  // number derivePlayerStats used, so a player's cooldownFloor node is honored
+  // here rather than being replaced by the bare constant.
+  //
+  // SOMET-531: THE CARRY. `_attackCd` is <= 0 whenever this runs -- both
+  // callers gate on `_attackCd > 0` and return early -- and how far BELOW zero
+  // it sits is the overshoot: the part of the last cooldown that expired
+  // between ticks. Adding it (a non-positive number) hands that remainder to
+  // the next cooldown instead of discarding it.
+  //
+  // Without this, every interval is independently rounded UP to a whole tick,
+  // so any speed bonus too small to cross a 50ms boundary buys NOTHING. That
+  // was a dead passive node, not a rounding curiosity: a 0.25s knife wasted
+  // three of Whirlwind's four satellites, and on the live stack a Mage's
+  // second Quickcast satellite measured an identical 552ms to the first.
+  //
+  // Individual gaps still land on tick boundaries -- the server only acts on
+  // ticks -- but they no longer all round the same way, so the AVERAGE rate
+  // converges on cd/mult and every authored multiplier does something. The
+  // credit is bounded to one tick by tick()'s own clamp, so idling cannot bank
+  // a burst -- tick() rests on the first value at or below zero, so the carry
+  // is the true overshoot and never more; see authority_player_stats.test.js.
+  p._attackCd = w.cooldown * Math.max(p.stats.cooldownFloor, scaled) + Math.min(0, p._attackCd);
 }
 
 // THE ONE ATTACK RESOURCE GATE (SOMET-472; spec 8.3: "the check lives in the
@@ -217,6 +297,13 @@ class World {
     this.weapons = weaponsById;
     this.defaultWeaponId = defaultWeaponId;
     this.projectiles = new ProjectileSim();
+    // SOMET-528. Lingering melee waves, world-wide, oldest first.
+    //
+    // A plain array rather than a Sim class: a wave has no per-chunk identity,
+    // never moves, and lives about two seconds, so the indexing a Sim buys is
+    // not worth the surface. Ordered by spawn time, which is what lets the
+    // per-owner cap drop the STALEST wave rather than an arbitrary one.
+    this.waves = [];
     this.groundItems = new GroundItemSim(chunkSize);
     // Monotonic world clock in ms, advanced only by tick(). effects.js is pure
     // and never reads a clock itself, so this is the single source of `now`
@@ -443,9 +530,77 @@ class World {
     }
 
     for (const p of this.players.values()) {
-      if (p._attackCd > 0) p._attackCd = Math.max(0, p._attackCd - dt);
-      if (p.mana < p.maxMana) p.mana = Math.min(p.maxMana, p.mana + p.stats.manaRegen * dt);
+      // SOMET-531: no Math.max. Clamping at zero threw away the overshoot --
+      // the part of the cooldown that expired between ticks -- which is what
+      // applyAttackCooldown's carry now spends.
+      //
+      // The `> 0` guard is what bounds it, and it does so exactly: the
+      // countdown is stepped only while it is still positive, so it comes to
+      // rest on the FIRST value at or below zero and stays there. That value
+      // is the true overshoot, always in (-dt, 0].
+      //
+      // An earlier draft floored at -dt instead. That kept draining a countdown
+      // that had already expired, so a player standing still drifted to a full
+      // -dt and banked a tick of credit they never earned -- a real refusal
+      // test caught it (`a refusal still costs nothing, cooldown included`),
+      // which is the whole reason that assertion is written as an equality.
+      if (p._attackCd > 0) p._attackCd = p._attackCd - dt;
+      // SOMET-514. THE CONSUMER of the tree's `regenLifeShare` rule, which
+      // RULE_KEYS has named this tick as since the rule was introduced -- while
+      // no such read existed. ks_wis_clarity ("mana regeneration also restores
+      // 20% as much life") did nothing, and neither did the MONK'S START NODE,
+      // whose only grant is regenLifeShare 0.1: every Monk began the game with
+      // no class identity at all.
+      //
+      // The share is taken on the mana ACTUALLY regenerated this tick, not on
+      // the nominal manaRegen rate. That is what the label promises -- no
+      // regeneration, no life -- and it means a Monk sitting at full mana
+      // gains nothing, which is the difference between a regen rider and a
+      // free second health regen.
+      if (p.mana < p.maxMana) {
+        const manaBefore = p.mana;
+        p.mana = Math.min(p.maxMana, p.mana + p.stats.manaRegen * dt);
+        const share = p.stats.rules.regenLifeShare;
+        if (share > 0 && p.hp < p.maxHp) {
+          p.hp = Math.min(p.maxHp, p.hp + (p.mana - manaBefore) * share);
+        }
+      }
       if (p.stamina < p.maxStamina) p.stamina = Math.min(p.maxStamina, p.stamina + PLAYER_STAMINA_REGEN * dt);
+      // SOMET-522. THE LEECH AURA -- the Cultist's Sanguine Aura cluster.
+      //
+      // Resolved once a SECOND, not once a frame: the numbers are authored as
+      // life-per-enemy-per-second, so a per-frame heal would scale with tick
+      // rate and quietly become sixty times stronger on a faster server.
+      //
+      // Always on. Allocating the hub turns it on permanently -- no toggle, no
+      // new input, no toggle state on the wire.
+      //
+      // It HEALS and never drains, so there is no path by which it can kill
+      // its owner while they stand idle, and nothing here can lower hp.
+      const leech = p.stats.rules.auraLeech;
+      if (leech > 0 && p.hp > 0) {
+        p._auraAcc = (p._auraAcc || 0) + dt;
+        // EPSILON, and it is not cosmetic. dt arrives as a float and ten
+        // 0.1s frames sum to 0.9999999999999999, so a bare `>=` never fires
+        // on an exact-second boundary -- at 60Hz the aura would land a frame
+        // late every second and read as slightly slower than advertised. A
+        // test that ticks 10x0.1s caught this; it is left in place below.
+        if (p._auraAcc >= AURA_INTERVAL_S - 1e-9) {
+          // Whole seconds only; the remainder carries so a 0.4s tick rate
+          // still fires exactly once per second rather than drifting.
+          const seconds = Math.max(1, Math.floor(p._auraAcc / AURA_INTERVAL_S + 1e-9));
+          p._auraAcc -= seconds * AURA_INTERVAL_S;
+          if (p.hp < p.maxHp) {
+            const counted = this.creatures.countHostilesWithin(
+              p.x + p.width / 2, p.y + p.height / 2,
+              auraRadiusOf(p), AURA_MAX_TARGETS, this.now, p.userId,
+            );
+            if (counted > 0) {
+              p.hp = Math.min(p.maxHp, p.hp + leech * counted * seconds);
+            }
+          }
+        }
+      }
       const r = resolveMove(this.map, p, p.input.dx, p.input.dy, dt);
       p.x = r.x;
       p.y = r.y;
@@ -473,6 +628,12 @@ class World {
       shoveAwayFrom(this.map, src.x + src.width / 2, src.y + src.height / 2, p,
         CHARM_REPEL_SPEED * dt);
     }
+    // SOMET-528. Lingering waves resolve LAST in the tick, after movement:
+    // a creature that walked into a wave this frame is standing in it by the
+    // time the wave is applied, which is the whole point of a wave that
+    // persists. Their kills join the same list every other death uses, so
+    // credit and cleanup need no special case.
+    kills.push(...this._tickWaves(dt));
     return { kills };
   }
 
@@ -632,6 +793,67 @@ class World {
     return { ok: true, weapon: w, reason: null };
   }
 
+  // SOMET-528. Lay a lingering wave for this swing, if the player has one.
+  //
+  // THE CAP IS THE BALANCE. Waves STACK -- a deliberate product decision taken
+  // with its risk stated: attackSpeedMult is itself a tree option, so a fast
+  // attacker lays waves faster than they expire and wave damage would scale
+  // with attack speed without bound. WAVE_MAX_STACKS is the only thing that
+  // bounds it, which is why the oldest wave is DROPPED rather than the new one
+  // refused: a player who keeps swinging keeps their newest ground, but never
+  // holds more than the cap. Refusing the new one instead would make a fast
+  // attacker's later swings silently free of effect, which reads as a bug.
+  _spawnWave(p, cx, cy, nx, ny, reach, arc, w) {
+    const damage = waveTickDamage(p, w);
+    if (!(damage > 0)) return;                       // no node allocated: no wave
+    const mine = this.waves.filter((v) => v.ownerId === p.userId);
+    if (mine.length >= WAVE_MAX_STACKS) {
+      // Oldest first, so [0] is the stalest of THIS owner's waves.
+      const stalest = mine[0];
+      this.waves.splice(this.waves.indexOf(stalest), 1);
+    }
+    this.waves.push({
+      ownerId: p.userId,
+      x: cx, y: cy, nx, ny, reach, arc,
+      damage,
+      element: w.element || null,
+      expiresAt: this.now + WAVE_DURATION_S * 1000,
+      acc: 0,
+    });
+  }
+
+  // Resolved once a SECOND, not once a frame -- the share is authored as
+  // damage-per-second, and a per-frame application would scale with tick rate
+  // and be sixty times stronger on a faster server.
+  //
+  // The epsilon is not cosmetic and is the same one the aura needs: dt is a
+  // float and ten 0.1s frames sum to 0.9999999999999999, so a bare `>=` never
+  // fires on an exact-second boundary.
+  _tickWaves(dt) {
+    if (this.waves.length === 0) return [];
+    const kills = [];
+    const alive = [];
+    for (const v of this.waves) {
+      v.acc += dt;
+      if (v.acc >= WAVE_INTERVAL_S - 1e-9) {
+        const seconds = Math.max(1, Math.floor(v.acc / WAVE_INTERVAL_S + 1e-9));
+        v.acc -= seconds * WAVE_INTERVAL_S;
+        // The wave's OWN frozen geometry, never the owner's current facing or
+        // position -- the owner may have moved, turned, respecced or died.
+        const killed = this.creatures.applyMeleeArc(
+          v.x, v.y, v.nx, v.ny, v.reach, v.arc,
+          v.damage * seconds, v.element, this.now, v.ownerId,
+        );
+        for (const id of killed) kills.push({ id, killerUserId: v.ownerId });
+      }
+      // Expiry is checked AFTER the tick, so a wave always gets the second it
+      // was alive for rather than being dropped a frame early.
+      if (this.now < v.expiresAt) alive.push(v);
+    }
+    this.waves = alive;
+    return kills;
+  }
+
   // Attack in the aim direction with the equipped weapon. Melee resolves an arc
   // hit against creatures + other players; projectile spawns a mana-gated
   // projectile. Returns the killed creatures (id + killer) for the caller to
@@ -691,6 +913,37 @@ class World {
       const f = facingFromInput(sign(nx), sign(ny));
       if (f) p.facing = f;
       spendResources(p, w);
+      // SOMET-520. This swing's geometry, resolved ONCE, exactly like
+      // originLift and pacifiedFrom above and for a stronger reason: these two
+      // numbers are read at FOUR sites below -- the creature arc scan, the
+      // damage application, the player sweep, and the attack DESCRIPTOR the
+      // client draws the swing from.
+      //
+      // The descriptor is the one that matters. If the server hit-tests a
+      // widened arc while the client draws the catalog's, the swing connects
+      // outside its own animation: invisible to every unit test and obvious to
+      // the first human who plays it. Resolving once and passing `reach`/`arc`
+      // everywhere makes that mismatch impossible rather than merely unlikely,
+      // which is why w.reach and w.arc_width must not appear below this line.
+      //
+      // Bonuses are in PIXELS and RADIANS -- the units w.reach and w.arc_width
+      // already use. A tile is 64px, so the brief's "+0.5m" is +32.
+      // FLOORED (SOMET-527). The bonus is a `sum`, so a shape node can author a
+      // NEGATIVE to trade reach away -- Sweep does. Without the floor, enough
+      // negatives give a swing that reaches nothing at all.
+      const reach = Math.max(MIN_MELEE_REACH, w.reach + (p.stats.rules.meleeReachBonus || 0));
+      // Clamped at a full turn: past 2*PI a wider arc means nothing (inArc
+      // compares against cos(arc/2), and half a turn already reaches behind
+      // the attacker), but an unclamped value would keep growing and read as
+      // if further stacking still helped.
+      // Clamped at BOTH ends (SOMET-527). The upper bound is a full turn: past
+      // it a wider arc means nothing, but an unclamped value would keep growing
+      // and read as if more stacking still helped. The lower bound matters more
+      // -- Spearpoint narrows the arc deliberately, and a negative half-angle
+      // makes inArc's `dot >= cos(arc/2)` test meaningless rather than merely
+      // tight, which is a swing that behaves inexplicably rather than narrowly.
+      const arc = Math.min(TAU,
+        Math.max(MIN_MELEE_ARC, w.arc_width + (p.stats.rules.meleeArcBonus || 0)));
       // Queried BEFORE applyMeleeArc, which deletes whatever it kills: after
       // the fact a one-shot kill would look like a miss.
       // SOMET-286: one scan, two lists -- what the swing may damage, and what
@@ -700,7 +953,7 @@ class World {
       // as it was.
       const {
         hit: creatureTargets, blocked: blockedTargets,
-      } = this.creatures.meleeArcScan(cx, cy, nx, ny, w.reach, w.arc_width, pacifiedFrom);
+      } = this.creatures.meleeArcScan(cx, cy, nx, ny, reach, arc, pacifiedFrom);
       // Slice C (SOMET-160): where each impact happened. Captured HERE, before
       // applyMeleeArc, for exactly the reason creatureTargets is -- a
       // one-shot kill removes the creature, and reading its position
@@ -741,7 +994,7 @@ class World {
         }
       }
       const killed = this.creatures.applyMeleeArc(
-        cx, cy, nx, ny, w.reach, w.arc_width, weaponDamage(p, w), w.element, this.now, userId,
+        cx, cy, nx, ny, reach, arc, weaponDamage(p, w), w.element, this.now, userId,
         // SOMET-332: the augment stone's bonus packet, or null. Passed rather
         // than folded into weaponDamage above so the bonus is mitigated by the
         // AUGMENT's element, not the weapon's.
@@ -789,7 +1042,7 @@ class World {
         // sparks off a target it did no damage to reads as a bug.
         if (pacifiedFrom != null && other.userId === pacifiedFrom) continue;
         const ocx = other.x + other.width / 2, ocy = other.y + other.height / 2;
-        if (inArc(cx, cy, nx, ny, ocx, ocy, w.reach, w.arc_width)
+        if (inArc(cx, cy, nx, ny, ocx, ocy, reach, arc)
             && hasLineOfSight(this.map, cx, cy, ocx, ocy)) {
           applyDamageWithEffects(other, weaponDamage(p, w), w.element, other.mit || NO_MITIGATION,
             this.now, playerKey(userId));
@@ -843,6 +1096,17 @@ class World {
       // the unit of "a hit" from the player's perspective (matches the
       // descriptor's own single boolean `hit`, not a per-target count).
       const stoneHit = (w.stoneItemId != null && landed) ? { stoneItemId: w.stoneItemId } : null;
+
+      // SOMET-528. The lingering wave: this swing keeps damaging the ground it
+      // swept for WAVE_DURATION_S.
+      //
+      // EVERYTHING IS FROZEN HERE, at swing time -- origin, aim, reach, arc,
+      // damage, element -- for the same reason a projectile snapshots its
+      // damage at launch: the wave is already in the world, and turning,
+      // walking away or respeccing must not move it, resize it or restrengthen
+      // it. `reach` and `arc` are the SAME resolved values the hit-test and the
+      // descriptor used, so the wave covers exactly the ground the swing did.
+      this._spawnWave(p, cx, cy, nx, ny, reach, arc, w);
       // The descriptor exposes facts this method already computed — the aim
       // vector, the attacker's centre, the catalog's reach/arc. Nothing here
       // is derived, and the effect NAME is resolved on this side so the
@@ -866,7 +1130,7 @@ class World {
           // this attacker's feet. See attackOrigin.js for why a resolved
           // number travels rather than the authored origin NAME.
           o: originLift,
-          reach: w.reach, arc: w.arc_width,
+          reach, arc,
           hit: landed,
         }],
         // Slice C: exactly the targets this swing damaged, each with the
@@ -893,14 +1157,55 @@ class World {
     // projectile
     const f = facingFromInput(sign(nx), sign(ny));
     if (f) p.facing = f;
+    // SOMET-521: spent ONCE, for the whole volley, and deliberately left above
+    // the loop below. A volley that charged per projectile would make Volley a
+    // DOWNGRADE -- three shots for three times the mana -- and moving the spawn
+    // into a loop is exactly the edit that sweeps the cost in with it.
+    // applyAttackCooldown is likewise called once, after the loop. Ammo is
+    // spent by server.js before attack() runs, so one shot costs one arrow
+    // however many projectiles leave the bow.
     spendResources(p, w);
-    this.projectiles.spawn({
-      ownerId: userId, x: cx, y: cy, nx, ny,
+
+    // SOMET-521. This volley's weapon, adjusted by the tree's projectile rules.
+    // Built ONCE and shared by every shot: `w` is the shared in-memory catalog
+    // row, so it is spread rather than mutated -- writing to it would leak one
+    // player's tree onto every other player's weapon (the same reason the
+    // augment packet is spread).
+    //
+    // pierce is adjusted BEFORE spawn's merged-state clamp, which is the
+    // correct side: a contact detonator still collapses to 1, so pierceBonus
+    // cannot hand an AoE shot the pierce that item_types_aoe_pierce_check
+    // exists to forbid. A max_range shot keeps the bonus, because that shot is
+    // DEFINED by flying through what it meets.
+    const shotRules = p.stats.rules;
+    const speedMult = shotRules.projectileSpeedMult > 0 ? shotRules.projectileSpeedMult : 1;
+    const pierceBonus = Math.max(0, Math.floor(shotRules.pierceBonus || 0));
+    const shotWeapon = {
+      ...(augment === null ? w : { ...w, augment }),
+      projectile_speed: w.projectile_speed * speedMult,
+      pierce: w.pierce + pierceBonus,
+    };
+
+    // 1 + the tree's extra shots, fanned symmetrically about the aim vector so
+    // three projectiles are centre/left/right rather than three on one line.
+    const extraShots = Math.max(0, Math.floor(shotRules.projectileCount || 0));
+    const shots = 1 + extraShots;
+    for (let i = 0; i < shots; i += 1) {
+      // Symmetric about 0: a single shot gets offset 0 and flies exactly where
+      // it was aimed, so an unallocated player's shot is byte-identical to
+      // before this ticket.
+      const offset = (i - (shots - 1) / 2) * PROJECTILE_FAN_RAD;
+      const cosO = Math.cos(offset);
+      const sinO = Math.sin(offset);
+      const fnx = nx * cosO - ny * sinO;
+      const fny = nx * sinO + ny * cosO;
+      this.projectiles.spawn({
+      ownerId: userId, x: cx, y: cy, nx: fnx, ny: fny,
       // SOMET-495: the weapon with its augment packet already scaled by the
       // tree's per-element multiplier (see `augment` above). Spread rather than
       // mutated -- `w` is the shared in-memory catalog row, and writing to it
       // would leak one player's tree onto every other player's weapon.
-      weapon: augment === null ? w : { ...w, augment },
+      weapon: shotWeapon,
       damage: weaponDamage(p, w),
       // SOMET-495: the tree's on-hit riders, snapshotted at LAUNCH for the same
       // reason `damage` and `pacifiedFrom` are -- a respec mid-flight must not
@@ -920,7 +1225,8 @@ class World {
       // the charm can lapse mid-flight, and an arrow loosed while pacified must
       // not become lethal to the charmer because it took 300ms to arrive.
       pacifiedFrom,
-    });
+      });
+    }
     applyAttackCooldown(p, w);
     // Projectiles already render as a moving dot; their trail effects are
     // slice D, so slice A emits no descriptor for them. A projectile never
@@ -1210,6 +1516,15 @@ class World {
         // activeEffectKeys. Read on the client as `p.effects || []`.
         const fx = activeEffectKeys(p, this.now);
         if (fx) out.effects = fx;
+        // SOMET-522. The aura ring's radius, RESOLVED, for the same reason
+        // attackLift travels resolved: the client must never need the passive
+        // catalog. Omitted entirely when the player has no aura, so a quiet
+        // frame costs no bytes -- the client reads `p.aura || 0`.
+        //
+        // It comes from auraRadiusOf, the SAME function the heal uses, so the
+        // ring the player sees is exactly the area that leeches.
+        const auraR = auraRadiusOf(p);
+        if (auraR > 0) out.aura = auraR;
         if (p.buffs && p.buffs.size > 0) {
           out.buffs = Array.from(p.buffs.values()).map((b) => ({
             id: b.id,
@@ -1224,6 +1539,25 @@ class World {
         return out;
       }),
       projectiles: this.projectiles.snapshot(),
+      // SOMET-528. Live waves, so the client can draw the ground that is still
+      // dangerous. The GEOMETRY travels resolved -- origin, aim, reach, arc --
+      // for the same reason attackLift and the aura radius do: the client has
+      // no weapon catalog and no passive catalog, and a wave outlives the swing
+      // that made it, so there is nothing left to derive it from.
+      //
+      // Omitted entirely when there are none (the overwhelmingly common case),
+      // so a quiet frame costs no bytes; the client reads `msg.waves || []`.
+      // `damage` is deliberately NOT sent: the client never renders numbers
+      // from it and it is the one field worth withholding.
+      ...(this.waves.length > 0 ? {
+        waves: this.waves.map((v) => ({
+          x: v.x, y: v.y, nx: v.nx, ny: v.ny, reach: v.reach, arc: v.arc,
+          el: v.element,
+          // Milliseconds left, so the client can fade it out without needing a
+          // synchronised clock.
+          ms: Math.max(0, Math.round(v.expiresAt - this.now)),
+        })),
+      } : {}),
     };
   }
 }

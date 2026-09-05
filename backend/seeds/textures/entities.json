@@ -2,7 +2,7 @@
   {
     "name": "Bat",
     "file": "Bat.png",
-    "bytes": 284847,
+    "bytes": 79736,
     "prompt": "pixel art, a small brown cave bat, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -10,7 +10,7 @@
   {
     "name": "Beast Apex",
     "file": "Beast_Apex.png",
-    "bytes": 290969,
+    "bytes": 98967,
     "prompt": "pixel art, a towering beast creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -18,7 +18,7 @@
   {
     "name": "Beast Brute",
     "file": "Beast_Brute.png",
-    "bytes": 246806,
+    "bytes": 94780,
     "prompt": "pixel art, a hulking beast creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -26,7 +26,7 @@
   {
     "name": "Beast Caster",
     "file": "Beast_Caster.png",
-    "bytes": 175012,
+    "bytes": 79468,
     "prompt": "pixel art, a skilled beast creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -34,7 +34,7 @@
   {
     "name": "Beast Champion",
     "file": "Beast_Champion.png",
-    "bytes": 120080,
+    "bytes": 55208,
     "prompt": "pixel art, a commanding beast creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -42,7 +42,7 @@
   {
     "name": "Beast Heavy",
     "file": "Beast_Heavy.png",
-    "bytes": 53679,
+    "bytes": 29440,
     "prompt": "pixel art, an armoured beast creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -50,7 +50,7 @@
   {
     "name": "Beast Line",
     "file": "Beast_Line.png",
-    "bytes": 199281,
+    "bytes": 87010,
     "prompt": "pixel art, a lean beast creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -58,7 +58,7 @@
   {
     "name": "Beast Ranged",
     "file": "Beast_Ranged.png",
-    "bytes": 183154,
+    "bytes": 68034,
     "prompt": "pixel art, an armed beast creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -66,7 +66,7 @@
   {
     "name": "Beast Skirmisher",
     "file": "Beast_Skirmisher.png",
-    "bytes": 322437,
+    "bytes": 115838,
     "prompt": "pixel art, a small beast creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -74,7 +74,7 @@
   {
     "name": "Beast Swarm",
     "file": "Beast_Swarm.png",
-    "bytes": 79184,
+    "bytes": 38161,
     "prompt": "pixel art, a tiny beast creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -82,7 +82,7 @@
   {
     "name": "Blight Apex",
     "file": "Blight_Apex.png",
-    "bytes": 200047,
+    "bytes": 58647,
     "prompt": "pixel art, a towering physical-touched blight creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -90,7 +90,7 @@
   {
     "name": "Blight Brute",
     "file": "Blight_Brute.png",
-    "bytes": 209203,
+    "bytes": 93407,
     "prompt": "pixel art, a hulking physical-touched blight creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -98,7 +98,7 @@
   {
     "name": "Blight Caster",
     "file": "Blight_Caster.png",
-    "bytes": 98558,
+    "bytes": 60259,
     "prompt": "pixel art, a skilled physical-touched blight creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -106,7 +106,7 @@
   {
     "name": "Blight Champion",
     "file": "Blight_Champion.png",
-    "bytes": 189724,
+    "bytes": 51126,
     "prompt": "pixel art, a commanding physical-touched blight creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -114,7 +114,7 @@
   {
     "name": "Blight Heavy",
     "file": "Blight_Heavy.png",
-    "bytes": 160889,
+    "bytes": 61876,
     "prompt": "pixel art, an armoured physical-touched blight creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -122,16 +122,15 @@
   {
     "name": "Blight Line",
     "file": "Blight_Line.png",
-    "bytes": 199535,
+    "bytes": 116271,
     "prompt": "pixel art, a lean physical-touched blight creature, single object, solid transparent background",
     "is_creature": true,
-    "cutout": true,
-    "needs_regen": true
+    "cutout": true
   },
   {
     "name": "Blight Ranged",
     "file": "Blight_Ranged.png",
-    "bytes": 360314,
+    "bytes": 130032,
     "prompt": "pixel art, an armed physical-touched blight creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -139,7 +138,7 @@
   {
     "name": "Blight Skirmisher",
     "file": "Blight_Skirmisher.png",
-    "bytes": 176533,
+    "bytes": 49639,
     "prompt": "pixel art, a small physical-touched blight creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -147,7 +146,7 @@
   {
     "name": "Blight Swarm",
     "file": "Blight_Swarm.png",
-    "bytes": 215700,
+    "bytes": 83716,
     "prompt": "pixel art, a tiny physical-touched blight creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -155,7 +154,7 @@
   {
     "name": "Bonelord Apex",
     "file": "Bonelord_Apex.png",
-    "bytes": 146481,
+    "bytes": 50779,
     "prompt": "pixel art, a towering ice-touched bonelord creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -163,7 +162,7 @@
   {
     "name": "Bonelord Brute",
     "file": "Bonelord_Brute.png",
-    "bytes": 86912,
+    "bytes": 43402,
     "prompt": "pixel art, a hulking ice-touched bonelord creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -171,7 +170,7 @@
   {
     "name": "Bonelord Caster",
     "file": "Bonelord_Caster.png",
-    "bytes": 255896,
+    "bytes": 89831,
     "prompt": "pixel art, a skilled ice-touched bonelord creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -179,7 +178,7 @@
   {
     "name": "Bonelord Champion",
     "file": "Bonelord_Champion.png",
-    "bytes": 220522,
+    "bytes": 100268,
     "prompt": "pixel art, a commanding ice-touched bonelord creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -187,7 +186,7 @@
   {
     "name": "Bonelord Heavy",
     "file": "Bonelord_Heavy.png",
-    "bytes": 148375,
+    "bytes": 75199,
     "prompt": "pixel art, an armoured ice-touched bonelord creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -195,7 +194,7 @@
   {
     "name": "Bonelord Line",
     "file": "Bonelord_Line.png",
-    "bytes": 101540,
+    "bytes": 51340,
     "prompt": "pixel art, a lean ice-touched bonelord creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -203,7 +202,7 @@
   {
     "name": "Bonelord Ranged",
     "file": "Bonelord_Ranged.png",
-    "bytes": 203490,
+    "bytes": 67205,
     "prompt": "pixel art, an armed ice-touched bonelord creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -211,7 +210,7 @@
   {
     "name": "Bonelord Skirmisher",
     "file": "Bonelord_Skirmisher.png",
-    "bytes": 384317,
+    "bytes": 132455,
     "prompt": "pixel art, a small ice-touched bonelord creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -219,7 +218,7 @@
   {
     "name": "Bonelord Swarm",
     "file": "Bonelord_Swarm.png",
-    "bytes": 199541,
+    "bytes": 97585,
     "prompt": "pixel art, a tiny ice-touched bonelord creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -227,7 +226,7 @@
   {
     "name": "bush",
     "file": "bush.png",
-    "bytes": 304758,
+    "bytes": 115965,
     "prompt": "pixel art, a dense round leafy green shrub with thick full foliage, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
@@ -235,7 +234,7 @@
   {
     "name": "Cave Apex",
     "file": "Cave_Apex.png",
-    "bytes": 83206,
+    "bytes": 41258,
     "prompt": "pixel art, a towering physical-touched cave creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -243,7 +242,7 @@
   {
     "name": "Cave Brute",
     "file": "Cave_Brute.png",
-    "bytes": 208014,
+    "bytes": 57247,
     "prompt": "pixel art, a hulking physical-touched cave creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -251,7 +250,7 @@
   {
     "name": "Cave Caster",
     "file": "Cave_Caster.png",
-    "bytes": 165864,
+    "bytes": 47628,
     "prompt": "pixel art, a skilled physical-touched cave creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -259,7 +258,7 @@
   {
     "name": "Cave Champion",
     "file": "Cave_Champion.png",
-    "bytes": 39868,
+    "bytes": 20494,
     "prompt": "pixel art, a commanding physical-touched cave creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -267,7 +266,7 @@
   {
     "name": "Cave Heavy",
     "file": "Cave_Heavy.png",
-    "bytes": 290273,
+    "bytes": 107308,
     "prompt": "pixel art, an armoured physical-touched cave creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -275,7 +274,7 @@
   {
     "name": "Cave Line",
     "file": "Cave_Line.png",
-    "bytes": 164129,
+    "bytes": 56082,
     "prompt": "pixel art, a lean physical-touched cave creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -283,7 +282,7 @@
   {
     "name": "Cave Ranged",
     "file": "Cave_Ranged.png",
-    "bytes": 244725,
+    "bytes": 83483,
     "prompt": "pixel art, an armed physical-touched cave creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -291,7 +290,7 @@
   {
     "name": "Cave Skirmisher",
     "file": "Cave_Skirmisher.png",
-    "bytes": 109413,
+    "bytes": 42095,
     "prompt": "pixel art, a small physical-touched cave creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -299,7 +298,7 @@
   {
     "name": "Cave Swarm",
     "file": "Cave_Swarm.png",
-    "bytes": 289373,
+    "bytes": 106442,
     "prompt": "pixel art, a tiny physical-touched cave creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -307,7 +306,7 @@
   {
     "name": "Chaos Apex",
     "file": "Chaos_Apex.png",
-    "bytes": 58874,
+    "bytes": 25510,
     "prompt": "pixel art, a towering lightning-touched chaos creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -315,7 +314,7 @@
   {
     "name": "Chaos Brute",
     "file": "Chaos_Brute.png",
-    "bytes": 37081,
+    "bytes": 19360,
     "prompt": "pixel art, a hulking lightning-touched chaos creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -323,16 +322,15 @@
   {
     "name": "Chaos Caster",
     "file": "Chaos_Caster.png",
-    "bytes": 263768,
+    "bytes": 219735,
     "prompt": "pixel art, a skilled lightning-touched chaos creature, single object, solid transparent background",
     "is_creature": true,
-    "cutout": true,
-    "needs_regen": true
+    "cutout": true
   },
   {
     "name": "Chaos Champion",
     "file": "Chaos_Champion.png",
-    "bytes": 185234,
+    "bytes": 112519,
     "prompt": "pixel art, a commanding lightning-touched chaos creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -340,7 +338,7 @@
   {
     "name": "Chaos Heavy",
     "file": "Chaos_Heavy.png",
-    "bytes": 189604,
+    "bytes": 74133,
     "prompt": "pixel art, an armoured lightning-touched chaos creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -348,7 +346,7 @@
   {
     "name": "Chaos Line",
     "file": "Chaos_Line.png",
-    "bytes": 212876,
+    "bytes": 72080,
     "prompt": "pixel art, a lean lightning-touched chaos creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -356,7 +354,7 @@
   {
     "name": "Chaos Ranged",
     "file": "Chaos_Ranged.png",
-    "bytes": 197667,
+    "bytes": 70483,
     "prompt": "pixel art, an armed lightning-touched chaos creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -364,7 +362,7 @@
   {
     "name": "Chaos Skirmisher",
     "file": "Chaos_Skirmisher.png",
-    "bytes": 121407,
+    "bytes": 64744,
     "prompt": "pixel art, a small lightning-touched chaos creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -372,7 +370,7 @@
   {
     "name": "Chaos Swarm",
     "file": "Chaos_Swarm.png",
-    "bytes": 192337,
+    "bytes": 65230,
     "prompt": "pixel art, a tiny lightning-touched chaos creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -380,7 +378,7 @@
   {
     "name": "Construct Apex",
     "file": "Construct_Apex.png",
-    "bytes": 136034,
+    "bytes": 60882,
     "prompt": "pixel art, a towering physical-touched construct creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -388,7 +386,7 @@
   {
     "name": "Construct Brute",
     "file": "Construct_Brute.png",
-    "bytes": 257152,
+    "bytes": 104785,
     "prompt": "pixel art, a hulking physical-touched construct creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -396,7 +394,7 @@
   {
     "name": "Construct Caster",
     "file": "Construct_Caster.png",
-    "bytes": 202742,
+    "bytes": 72007,
     "prompt": "pixel art, a skilled physical-touched construct creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -404,7 +402,7 @@
   {
     "name": "Construct Champion",
     "file": "Construct_Champion.png",
-    "bytes": 218607,
+    "bytes": 88210,
     "prompt": "pixel art, a commanding physical-touched construct creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -412,7 +410,7 @@
   {
     "name": "Construct Heavy",
     "file": "Construct_Heavy.png",
-    "bytes": 152492,
+    "bytes": 65533,
     "prompt": "pixel art, an armoured physical-touched construct creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -420,7 +418,7 @@
   {
     "name": "Construct Line",
     "file": "Construct_Line.png",
-    "bytes": 136681,
+    "bytes": 63383,
     "prompt": "pixel art, a lean physical-touched construct creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -428,7 +426,7 @@
   {
     "name": "Construct Ranged",
     "file": "Construct_Ranged.png",
-    "bytes": 51101,
+    "bytes": 27833,
     "prompt": "pixel art, an armed physical-touched construct creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -436,7 +434,7 @@
   {
     "name": "Construct Skirmisher",
     "file": "Construct_Skirmisher.png",
-    "bytes": 111216,
+    "bytes": 48238,
     "prompt": "pixel art, a small physical-touched construct creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -444,7 +442,7 @@
   {
     "name": "Construct Swarm",
     "file": "Construct_Swarm.png",
-    "bytes": 312969,
+    "bytes": 104541,
     "prompt": "pixel art, a tiny physical-touched construct creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -452,7 +450,7 @@
   {
     "name": "Crystal Apex",
     "file": "Crystal_Apex.png",
-    "bytes": 173398,
+    "bytes": 55978,
     "prompt": "pixel art, a towering lightning-touched crystal creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -460,7 +458,7 @@
   {
     "name": "Crystal Brute",
     "file": "Crystal_Brute.png",
-    "bytes": 176379,
+    "bytes": 57914,
     "prompt": "pixel art, a hulking lightning-touched crystal creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -468,16 +466,15 @@
   {
     "name": "Crystal Caster",
     "file": "Crystal_Caster.png",
-    "bytes": 275588,
+    "bytes": 217320,
     "prompt": "pixel art, a skilled lightning-touched crystal creature, single object, solid transparent background",
     "is_creature": true,
-    "cutout": true,
-    "needs_regen": true
+    "cutout": true
   },
   {
     "name": "Crystal Champion",
     "file": "Crystal_Champion.png",
-    "bytes": 173937,
+    "bytes": 75301,
     "prompt": "pixel art, a commanding lightning-touched crystal creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -485,7 +482,7 @@
   {
     "name": "Crystal Heavy",
     "file": "Crystal_Heavy.png",
-    "bytes": 112720,
+    "bytes": 53782,
     "prompt": "pixel art, an armoured lightning-touched crystal creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -493,7 +490,7 @@
   {
     "name": "Crystal Line",
     "file": "Crystal_Line.png",
-    "bytes": 136894,
+    "bytes": 54211,
     "prompt": "pixel art, a lean lightning-touched crystal creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -501,15 +498,16 @@
   {
     "name": "Crystal Ranged",
     "file": "Crystal_Ranged.png",
-    "bytes": 238728,
+    "bytes": 99312,
     "prompt": "pixel art, an armed lightning-touched crystal creature, single object, solid transparent background",
     "is_creature": true,
-    "cutout": true
+    "cutout": true,
+    "needs_regen": true
   },
   {
     "name": "Crystal Skirmisher",
     "file": "Crystal_Skirmisher.png",
-    "bytes": 372951,
+    "bytes": 121691,
     "prompt": "pixel art, a small lightning-touched crystal creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -517,7 +515,7 @@
   {
     "name": "Crystal Swarm",
     "file": "Crystal_Swarm.png",
-    "bytes": 128057,
+    "bytes": 68633,
     "prompt": "pixel art, a tiny lightning-touched crystal creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -525,7 +523,7 @@
   {
     "name": "dead_tree",
     "file": "dead_tree.png",
-    "bytes": 116757,
+    "bytes": 115660,
     "prompt": "pixel art, a bare dead tree with broken branches, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
@@ -533,7 +531,7 @@
   {
     "name": "Demonic Apex",
     "file": "Demonic_Apex.png",
-    "bytes": 208744,
+    "bytes": 50522,
     "prompt": "pixel art, a towering fire-touched demonic creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -541,7 +539,7 @@
   {
     "name": "Demonic Brute",
     "file": "Demonic_Brute.png",
-    "bytes": 50478,
+    "bytes": 25733,
     "prompt": "pixel art, a hulking fire-touched demonic creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -549,7 +547,7 @@
   {
     "name": "Demonic Caster",
     "file": "Demonic_Caster.png",
-    "bytes": 210240,
+    "bytes": 63759,
     "prompt": "pixel art, a skilled fire-touched demonic creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -557,7 +555,7 @@
   {
     "name": "Demonic Champion",
     "file": "Demonic_Champion.png",
-    "bytes": 279438,
+    "bytes": 122661,
     "prompt": "pixel art, a commanding fire-touched demonic creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -565,7 +563,7 @@
   {
     "name": "Demonic Heavy",
     "file": "Demonic_Heavy.png",
-    "bytes": 198396,
+    "bytes": 71097,
     "prompt": "pixel art, an armoured fire-touched demonic creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -573,7 +571,7 @@
   {
     "name": "Demonic Line",
     "file": "Demonic_Line.png",
-    "bytes": 188988,
+    "bytes": 103192,
     "prompt": "pixel art, a lean fire-touched demonic creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -581,7 +579,7 @@
   {
     "name": "Demonic Ranged",
     "file": "Demonic_Ranged.png",
-    "bytes": 247748,
+    "bytes": 90241,
     "prompt": "pixel art, an armed fire-touched demonic creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -589,7 +587,7 @@
   {
     "name": "Demonic Skirmisher",
     "file": "Demonic_Skirmisher.png",
-    "bytes": 150632,
+    "bytes": 34674,
     "prompt": "pixel art, a small fire-touched demonic creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -597,7 +595,7 @@
   {
     "name": "Demonic Swarm",
     "file": "Demonic_Swarm.png",
-    "bytes": 149007,
+    "bytes": 70651,
     "prompt": "pixel art, a tiny fire-touched demonic creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -605,7 +603,7 @@
   {
     "name": "Desert Apex",
     "file": "Desert_Apex.png",
-    "bytes": 286691,
+    "bytes": 89586,
     "prompt": "pixel art, a towering fire-touched desert creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -613,7 +611,7 @@
   {
     "name": "Desert Brute",
     "file": "Desert_Brute.png",
-    "bytes": 128876,
+    "bytes": 57358,
     "prompt": "pixel art, a hulking fire-touched desert creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -621,7 +619,7 @@
   {
     "name": "Desert Caster",
     "file": "Desert_Caster.png",
-    "bytes": 50203,
+    "bytes": 25388,
     "prompt": "pixel art, a skilled fire-touched desert creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -629,7 +627,7 @@
   {
     "name": "Desert Champion",
     "file": "Desert_Champion.png",
-    "bytes": 208332,
+    "bytes": 101467,
     "prompt": "pixel art, a commanding fire-touched desert creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -637,7 +635,7 @@
   {
     "name": "Desert Heavy",
     "file": "Desert_Heavy.png",
-    "bytes": 321972,
+    "bytes": 89847,
     "prompt": "pixel art, an armoured fire-touched desert creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -645,7 +643,7 @@
   {
     "name": "Desert Line",
     "file": "Desert_Line.png",
-    "bytes": 264020,
+    "bytes": 88729,
     "prompt": "pixel art, a lean fire-touched desert creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -653,7 +651,7 @@
   {
     "name": "Desert Ranged",
     "file": "Desert_Ranged.png",
-    "bytes": 231203,
+    "bytes": 83728,
     "prompt": "pixel art, an armed fire-touched desert creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -661,7 +659,7 @@
   {
     "name": "Desert Skirmisher",
     "file": "Desert_Skirmisher.png",
-    "bytes": 204794,
+    "bytes": 79731,
     "prompt": "pixel art, a small fire-touched desert creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -669,7 +667,7 @@
   {
     "name": "Desert Swarm",
     "file": "Desert_Swarm.png",
-    "bytes": 250425,
+    "bytes": 129531,
     "prompt": "pixel art, a tiny fire-touched desert creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -677,7 +675,7 @@
   {
     "name": "Drowned Apex",
     "file": "Drowned_Apex.png",
-    "bytes": 254571,
+    "bytes": 93773,
     "prompt": "pixel art, a towering ice-touched drowned creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -685,7 +683,7 @@
   {
     "name": "Drowned Brute",
     "file": "Drowned_Brute.png",
-    "bytes": 183529,
+    "bytes": 81407,
     "prompt": "pixel art, a hulking ice-touched drowned creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -693,7 +691,7 @@
   {
     "name": "Drowned Caster",
     "file": "Drowned_Caster.png",
-    "bytes": 251568,
+    "bytes": 63974,
     "prompt": "pixel art, a skilled ice-touched drowned creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -701,7 +699,7 @@
   {
     "name": "Drowned Champion",
     "file": "Drowned_Champion.png",
-    "bytes": 160489,
+    "bytes": 73810,
     "prompt": "pixel art, a commanding ice-touched drowned creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -709,7 +707,7 @@
   {
     "name": "Drowned Heavy",
     "file": "Drowned_Heavy.png",
-    "bytes": 163550,
+    "bytes": 68240,
     "prompt": "pixel art, an armoured ice-touched drowned creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -717,7 +715,7 @@
   {
     "name": "Drowned Line",
     "file": "Drowned_Line.png",
-    "bytes": 42757,
+    "bytes": 24116,
     "prompt": "pixel art, a lean ice-touched drowned creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -725,7 +723,7 @@
   {
     "name": "Drowned Ranged",
     "file": "Drowned_Ranged.png",
-    "bytes": 123236,
+    "bytes": 55164,
     "prompt": "pixel art, an armed ice-touched drowned creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -733,15 +731,16 @@
   {
     "name": "Drowned Skirmisher",
     "file": "Drowned_Skirmisher.png",
-    "bytes": 162412,
+    "bytes": 55968,
     "prompt": "pixel art, a small ice-touched drowned creature, single object, solid transparent background",
     "is_creature": true,
-    "cutout": true
+    "cutout": true,
+    "needs_regen": true
   },
   {
     "name": "Drowned Swarm",
     "file": "Drowned_Swarm.png",
-    "bytes": 168205,
+    "bytes": 74725,
     "prompt": "pixel art, a tiny ice-touched drowned creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -749,7 +748,7 @@
   {
     "name": "Eldritch Apex",
     "file": "Eldritch_Apex.png",
-    "bytes": 51363,
+    "bytes": 20589,
     "prompt": "pixel art, a towering physical-touched eldritch creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -757,15 +756,16 @@
   {
     "name": "Eldritch Brute",
     "file": "Eldritch_Brute.png",
-    "bytes": 119352,
+    "bytes": 58571,
     "prompt": "pixel art, a hulking physical-touched eldritch creature, single object, solid transparent background",
     "is_creature": true,
-    "cutout": true
+    "cutout": true,
+    "needs_regen": true
   },
   {
     "name": "Eldritch Caster",
     "file": "Eldritch_Caster.png",
-    "bytes": 181009,
+    "bytes": 60624,
     "prompt": "pixel art, a skilled physical-touched eldritch creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -773,7 +773,7 @@
   {
     "name": "Eldritch Champion",
     "file": "Eldritch_Champion.png",
-    "bytes": 128577,
+    "bytes": 54807,
     "prompt": "pixel art, a commanding physical-touched eldritch creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -781,7 +781,7 @@
   {
     "name": "Eldritch Heavy",
     "file": "Eldritch_Heavy.png",
-    "bytes": 168110,
+    "bytes": 56712,
     "prompt": "pixel art, an armoured physical-touched eldritch creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -789,7 +789,7 @@
   {
     "name": "Eldritch Line",
     "file": "Eldritch_Line.png",
-    "bytes": 327267,
+    "bytes": 92032,
     "prompt": "pixel art, a lean physical-touched eldritch creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -797,7 +797,7 @@
   {
     "name": "Eldritch Ranged",
     "file": "Eldritch_Ranged.png",
-    "bytes": 260681,
+    "bytes": 209543,
     "prompt": "pixel art, an armed physical-touched eldritch creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true,
@@ -806,16 +806,15 @@
   {
     "name": "Eldritch Skirmisher",
     "file": "Eldritch_Skirmisher.png",
-    "bytes": 251298,
+    "bytes": 109863,
     "prompt": "pixel art, a small physical-touched eldritch creature, single object, solid transparent background",
     "is_creature": true,
-    "cutout": true,
-    "needs_regen": true
+    "cutout": true
   },
   {
     "name": "Eldritch Swarm",
     "file": "Eldritch_Swarm.png",
-    "bytes": 314376,
+    "bytes": 141553,
     "prompt": "pixel art, a tiny physical-touched eldritch creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -823,7 +822,7 @@
   {
     "name": "Ember Apex",
     "file": "Ember_Apex.png",
-    "bytes": 186250,
+    "bytes": 85507,
     "prompt": "pixel art, a towering fire-touched ember creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -831,7 +830,7 @@
   {
     "name": "Ember Brute",
     "file": "Ember_Brute.png",
-    "bytes": 75418,
+    "bytes": 31766,
     "prompt": "pixel art, a hulking fire-touched ember creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -839,7 +838,7 @@
   {
     "name": "Ember Caster",
     "file": "Ember_Caster.png",
-    "bytes": 200531,
+    "bytes": 43524,
     "prompt": "pixel art, a skilled fire-touched ember creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -847,7 +846,7 @@
   {
     "name": "Ember Champion",
     "file": "Ember_Champion.png",
-    "bytes": 166411,
+    "bytes": 56596,
     "prompt": "pixel art, a commanding fire-touched ember creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -855,7 +854,7 @@
   {
     "name": "Ember Heavy",
     "file": "Ember_Heavy.png",
-    "bytes": 43487,
+    "bytes": 24887,
     "prompt": "pixel art, an armoured fire-touched ember creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -863,7 +862,7 @@
   {
     "name": "Ember Line",
     "file": "Ember_Line.png",
-    "bytes": 117911,
+    "bytes": 44683,
     "prompt": "pixel art, a lean fire-touched ember creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -871,7 +870,7 @@
   {
     "name": "Ember Ranged",
     "file": "Ember_Ranged.png",
-    "bytes": 200341,
+    "bytes": 87840,
     "prompt": "pixel art, an armed fire-touched ember creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -879,16 +878,15 @@
   {
     "name": "Ember Skirmisher",
     "file": "Ember_Skirmisher.png",
-    "bytes": 167977,
+    "bytes": 39410,
     "prompt": "pixel art, a small fire-touched ember creature, single object, solid transparent background",
     "is_creature": true,
-    "cutout": true,
-    "needs_regen": true
+    "cutout": true
   },
   {
     "name": "Ember Swarm",
     "file": "Ember_Swarm.png",
-    "bytes": 170118,
+    "bytes": 51567,
     "prompt": "pixel art, a tiny fire-touched ember creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -896,7 +894,7 @@
   {
     "name": "Fallen Apex",
     "file": "Fallen_Apex.png",
-    "bytes": 214354,
+    "bytes": 52047,
     "prompt": "pixel art, a towering ice-touched fallen creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -904,7 +902,7 @@
   {
     "name": "Fallen Brute",
     "file": "Fallen_Brute.png",
-    "bytes": 141701,
+    "bytes": 65757,
     "prompt": "pixel art, a hulking ice-touched fallen creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -912,7 +910,7 @@
   {
     "name": "Fallen Caster",
     "file": "Fallen_Caster.png",
-    "bytes": 209150,
+    "bytes": 82648,
     "prompt": "pixel art, a skilled ice-touched fallen creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -920,7 +918,7 @@
   {
     "name": "Fallen Champion",
     "file": "Fallen_Champion.png",
-    "bytes": 145960,
+    "bytes": 55236,
     "prompt": "pixel art, a commanding ice-touched fallen creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -928,7 +926,7 @@
   {
     "name": "Fallen Heavy",
     "file": "Fallen_Heavy.png",
-    "bytes": 156188,
+    "bytes": 66713,
     "prompt": "pixel art, an armoured ice-touched fallen creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -936,7 +934,7 @@
   {
     "name": "Fallen Line",
     "file": "Fallen_Line.png",
-    "bytes": 253765,
+    "bytes": 102840,
     "prompt": "pixel art, a lean ice-touched fallen creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -944,7 +942,7 @@
   {
     "name": "Fallen Ranged",
     "file": "Fallen_Ranged.png",
-    "bytes": 151083,
+    "bytes": 61174,
     "prompt": "pixel art, an armed ice-touched fallen creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -952,16 +950,15 @@
   {
     "name": "Fallen Skirmisher",
     "file": "Fallen_Skirmisher.png",
-    "bytes": 197230,
+    "bytes": 116112,
     "prompt": "pixel art, a small ice-touched fallen creature, single object, solid transparent background",
     "is_creature": true,
-    "cutout": true,
-    "needs_regen": true
+    "cutout": true
   },
   {
     "name": "Fallen Swarm",
     "file": "Fallen_Swarm.png",
-    "bytes": 128793,
+    "bytes": 54886,
     "prompt": "pixel art, a tiny ice-touched fallen creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -969,7 +966,7 @@
   {
     "name": "Fungal Apex",
     "file": "Fungal_Apex.png",
-    "bytes": 284491,
+    "bytes": 129315,
     "prompt": "pixel art, a towering lightning-touched fungal creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -977,7 +974,7 @@
   {
     "name": "Fungal Brute",
     "file": "Fungal_Brute.png",
-    "bytes": 231874,
+    "bytes": 72513,
     "prompt": "pixel art, a hulking lightning-touched fungal creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -985,7 +982,7 @@
   {
     "name": "Fungal Caster",
     "file": "Fungal_Caster.png",
-    "bytes": 162375,
+    "bytes": 48096,
     "prompt": "pixel art, a skilled lightning-touched fungal creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -993,7 +990,7 @@
   {
     "name": "Fungal Champion",
     "file": "Fungal_Champion.png",
-    "bytes": 265659,
+    "bytes": 92839,
     "prompt": "pixel art, a commanding lightning-touched fungal creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1001,7 +998,7 @@
   {
     "name": "Fungal Heavy",
     "file": "Fungal_Heavy.png",
-    "bytes": 116286,
+    "bytes": 49035,
     "prompt": "pixel art, an armoured lightning-touched fungal creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1009,16 +1006,15 @@
   {
     "name": "Fungal Line",
     "file": "Fungal_Line.png",
-    "bytes": 264325,
+    "bytes": 176648,
     "prompt": "pixel art, a lean lightning-touched fungal creature, single object, solid transparent background",
     "is_creature": true,
-    "cutout": true,
-    "needs_regen": true
+    "cutout": true
   },
   {
     "name": "Fungal Ranged",
     "file": "Fungal_Ranged.png",
-    "bytes": 304399,
+    "bytes": 94604,
     "prompt": "pixel art, an armed lightning-touched fungal creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1026,7 +1022,7 @@
   {
     "name": "Fungal Skirmisher",
     "file": "Fungal_Skirmisher.png",
-    "bytes": 140329,
+    "bytes": 58085,
     "prompt": "pixel art, a small lightning-touched fungal creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1034,7 +1030,7 @@
   {
     "name": "Fungal Swarm",
     "file": "Fungal_Swarm.png",
-    "bytes": 65486,
+    "bytes": 29826,
     "prompt": "pixel art, a tiny lightning-touched fungal creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1042,7 +1038,7 @@
   {
     "name": "Gloom Apex",
     "file": "Gloom_Apex.png",
-    "bytes": 228352,
+    "bytes": 72544,
     "prompt": "pixel art, a towering ice-touched gloom creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1050,7 +1046,7 @@
   {
     "name": "Gloom Brute",
     "file": "Gloom_Brute.png",
-    "bytes": 323940,
+    "bytes": 113171,
     "prompt": "pixel art, a hulking ice-touched gloom creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1058,7 +1054,7 @@
   {
     "name": "Gloom Caster",
     "file": "Gloom_Caster.png",
-    "bytes": 52317,
+    "bytes": 26119,
     "prompt": "pixel art, a skilled ice-touched gloom creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1066,7 +1062,7 @@
   {
     "name": "Gloom Champion",
     "file": "Gloom_Champion.png",
-    "bytes": 130755,
+    "bytes": 52772,
     "prompt": "pixel art, a commanding ice-touched gloom creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1074,7 +1070,7 @@
   {
     "name": "Gloom Heavy",
     "file": "Gloom_Heavy.png",
-    "bytes": 228567,
+    "bytes": 92479,
     "prompt": "pixel art, an armoured ice-touched gloom creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1082,7 +1078,7 @@
   {
     "name": "Gloom Line",
     "file": "Gloom_Line.png",
-    "bytes": 189947,
+    "bytes": 54991,
     "prompt": "pixel art, a lean ice-touched gloom creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1090,7 +1086,7 @@
   {
     "name": "Gloom Ranged",
     "file": "Gloom_Ranged.png",
-    "bytes": 250607,
+    "bytes": 109822,
     "prompt": "pixel art, an armed ice-touched gloom creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1098,7 +1094,7 @@
   {
     "name": "Gloom Skirmisher",
     "file": "Gloom_Skirmisher.png",
-    "bytes": 236113,
+    "bytes": 73821,
     "prompt": "pixel art, a small ice-touched gloom creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1106,7 +1102,7 @@
   {
     "name": "Gloom Swarm",
     "file": "Gloom_Swarm.png",
-    "bytes": 235011,
+    "bytes": 94078,
     "prompt": "pixel art, a tiny ice-touched gloom creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1114,16 +1110,15 @@
   {
     "name": "Highland Apex",
     "file": "Highland_Apex.png",
-    "bytes": 220225,
+    "bytes": 27058,
     "prompt": "pixel art, a towering physical-touched highland creature, single object, solid transparent background",
     "is_creature": true,
-    "cutout": true,
-    "needs_regen": true
+    "cutout": true
   },
   {
     "name": "Highland Brute",
     "file": "Highland_Brute.png",
-    "bytes": 133643,
+    "bytes": 60628,
     "prompt": "pixel art, a hulking physical-touched highland creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1131,7 +1126,7 @@
   {
     "name": "Highland Caster",
     "file": "Highland_Caster.png",
-    "bytes": 107266,
+    "bytes": 47481,
     "prompt": "pixel art, a skilled physical-touched highland creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1139,7 +1134,7 @@
   {
     "name": "Highland Champion",
     "file": "Highland_Champion.png",
-    "bytes": 267577,
+    "bytes": 92020,
     "prompt": "pixel art, a commanding physical-touched highland creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1147,7 +1142,7 @@
   {
     "name": "Highland Heavy",
     "file": "Highland_Heavy.png",
-    "bytes": 210345,
+    "bytes": 83358,
     "prompt": "pixel art, an armoured physical-touched highland creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1155,7 +1150,7 @@
   {
     "name": "Highland Line",
     "file": "Highland_Line.png",
-    "bytes": 197854,
+    "bytes": 77828,
     "prompt": "pixel art, a lean physical-touched highland creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1163,7 +1158,7 @@
   {
     "name": "Highland Ranged",
     "file": "Highland_Ranged.png",
-    "bytes": 153521,
+    "bytes": 46540,
     "prompt": "pixel art, an armed physical-touched highland creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1171,7 +1166,7 @@
   {
     "name": "Highland Skirmisher",
     "file": "Highland_Skirmisher.png",
-    "bytes": 149066,
+    "bytes": 86092,
     "prompt": "pixel art, a small physical-touched highland creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1179,7 +1174,7 @@
   {
     "name": "Highland Swarm",
     "file": "Highland_Swarm.png",
-    "bytes": 346174,
+    "bytes": 118469,
     "prompt": "pixel art, a tiny physical-touched highland creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1187,7 +1182,7 @@
   {
     "name": "Hive Apex",
     "file": "Hive_Apex.png",
-    "bytes": 104695,
+    "bytes": 47831,
     "prompt": "pixel art, a towering physical-touched hive creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1195,7 +1190,7 @@
   {
     "name": "Hive Brute",
     "file": "Hive_Brute.png",
-    "bytes": 95672,
+    "bytes": 52525,
     "prompt": "pixel art, a hulking physical-touched hive creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1203,7 +1198,7 @@
   {
     "name": "Hive Caster",
     "file": "Hive_Caster.png",
-    "bytes": 206069,
+    "bytes": 98485,
     "prompt": "pixel art, a skilled physical-touched hive creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1211,7 +1206,7 @@
   {
     "name": "Hive Champion",
     "file": "Hive_Champion.png",
-    "bytes": 236814,
+    "bytes": 105046,
     "prompt": "pixel art, a commanding physical-touched hive creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1219,7 +1214,7 @@
   {
     "name": "Hive Heavy",
     "file": "Hive_Heavy.png",
-    "bytes": 225626,
+    "bytes": 85995,
     "prompt": "pixel art, an armoured physical-touched hive creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1227,7 +1222,7 @@
   {
     "name": "Hive Line",
     "file": "Hive_Line.png",
-    "bytes": 81116,
+    "bytes": 40039,
     "prompt": "pixel art, a lean physical-touched hive creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1235,7 +1230,7 @@
   {
     "name": "Hive Ranged",
     "file": "Hive_Ranged.png",
-    "bytes": 185065,
+    "bytes": 44158,
     "prompt": "pixel art, an armed physical-touched hive creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1243,7 +1238,7 @@
   {
     "name": "Hive Skirmisher",
     "file": "Hive_Skirmisher.png",
-    "bytes": 170152,
+    "bytes": 51338,
     "prompt": "pixel art, a small physical-touched hive creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1251,7 +1246,7 @@
   {
     "name": "Hive Swarm",
     "file": "Hive_Swarm.png",
-    "bytes": 66649,
+    "bytes": 24433,
     "prompt": "pixel art, a tiny physical-touched hive creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1259,7 +1254,7 @@
   {
     "name": "IceRock",
     "file": "IceRock.png",
-    "bytes": 96327,
+    "bytes": 97018,
     "prompt": "pixel art, a jagged pale blue ice boulder, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
@@ -1267,7 +1262,7 @@
   {
     "name": "Jungle Apex",
     "file": "Jungle_Apex.png",
-    "bytes": 323682,
+    "bytes": 146600,
     "prompt": "pixel art, a towering lightning-touched jungle creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1275,7 +1270,7 @@
   {
     "name": "Jungle Brute",
     "file": "Jungle_Brute.png",
-    "bytes": 228309,
+    "bytes": 65095,
     "prompt": "pixel art, a hulking lightning-touched jungle creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1283,7 +1278,7 @@
   {
     "name": "Jungle Caster",
     "file": "Jungle_Caster.png",
-    "bytes": 110799,
+    "bytes": 57583,
     "prompt": "pixel art, a skilled lightning-touched jungle creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1291,7 +1286,7 @@
   {
     "name": "Jungle Champion",
     "file": "Jungle_Champion.png",
-    "bytes": 305860,
+    "bytes": 123051,
     "prompt": "pixel art, a commanding lightning-touched jungle creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1299,7 +1294,7 @@
   {
     "name": "Jungle Heavy",
     "file": "Jungle_Heavy.png",
-    "bytes": 248050,
+    "bytes": 71305,
     "prompt": "pixel art, an armoured lightning-touched jungle creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1307,7 +1302,7 @@
   {
     "name": "Jungle Line",
     "file": "Jungle_Line.png",
-    "bytes": 195865,
+    "bytes": 68930,
     "prompt": "pixel art, a lean lightning-touched jungle creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1315,7 +1310,7 @@
   {
     "name": "Jungle Ranged",
     "file": "Jungle_Ranged.png",
-    "bytes": 179592,
+    "bytes": 51498,
     "prompt": "pixel art, an armed lightning-touched jungle creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1323,7 +1318,7 @@
   {
     "name": "Jungle Skirmisher",
     "file": "Jungle_Skirmisher.png",
-    "bytes": 225058,
+    "bytes": 81396,
     "prompt": "pixel art, a small lightning-touched jungle creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1331,7 +1326,7 @@
   {
     "name": "Jungle Swarm",
     "file": "Jungle_Swarm.png",
-    "bytes": 274086,
+    "bytes": 96239,
     "prompt": "pixel art, a tiny lightning-touched jungle creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1339,7 +1334,7 @@
   {
     "name": "Nightmare Apex",
     "file": "Nightmare_Apex.png",
-    "bytes": 244738,
+    "bytes": 67106,
     "prompt": "pixel art, a towering physical-touched nightmare creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1347,7 +1342,7 @@
   {
     "name": "Nightmare Brute",
     "file": "Nightmare_Brute.png",
-    "bytes": 144727,
+    "bytes": 76227,
     "prompt": "pixel art, a hulking physical-touched nightmare creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1355,7 +1350,7 @@
   {
     "name": "Nightmare Caster",
     "file": "Nightmare_Caster.png",
-    "bytes": 152354,
+    "bytes": 64484,
     "prompt": "pixel art, a skilled physical-touched nightmare creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1363,7 +1358,7 @@
   {
     "name": "Nightmare Champion",
     "file": "Nightmare_Champion.png",
-    "bytes": 266085,
+    "bytes": 113919,
     "prompt": "pixel art, a commanding physical-touched nightmare creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1371,7 +1366,7 @@
   {
     "name": "Nightmare Heavy",
     "file": "Nightmare_Heavy.png",
-    "bytes": 256259,
+    "bytes": 96297,
     "prompt": "pixel art, an armoured physical-touched nightmare creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1379,7 +1374,7 @@
   {
     "name": "Nightmare Line",
     "file": "Nightmare_Line.png",
-    "bytes": 304758,
+    "bytes": 115965,
     "prompt": "pixel art, a lean physical-touched nightmare creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1387,7 +1382,7 @@
   {
     "name": "Nightmare Ranged",
     "file": "Nightmare_Ranged.png",
-    "bytes": 245870,
+    "bytes": 113693,
     "prompt": "pixel art, an armed physical-touched nightmare creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1395,7 +1390,7 @@
   {
     "name": "Nightmare Skirmisher",
     "file": "Nightmare_Skirmisher.png",
-    "bytes": 94245,
+    "bytes": 56827,
     "prompt": "pixel art, a small physical-touched nightmare creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1403,7 +1398,7 @@
   {
     "name": "Nightmare Swarm",
     "file": "Nightmare_Swarm.png",
-    "bytes": 206069,
+    "bytes": 98485,
     "prompt": "pixel art, a tiny physical-touched nightmare creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1411,7 +1406,7 @@
   {
     "name": "pine_tree",
     "file": "pine_tree.png",
-    "bytes": 245870,
+    "bytes": 113693,
     "prompt": "pixel art, a tall dense dark green pine tree with a thick trunk and full layered branches, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
@@ -1419,7 +1414,7 @@
   {
     "name": "Plague Apex",
     "file": "Plague_Apex.png",
-    "bytes": 236814,
+    "bytes": 105046,
     "prompt": "pixel art, a towering fire-touched plague creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1427,7 +1422,7 @@
   {
     "name": "Plague Brute",
     "file": "Plague_Brute.png",
-    "bytes": 225626,
+    "bytes": 85995,
     "prompt": "pixel art, a hulking fire-touched plague creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1435,7 +1430,7 @@
   {
     "name": "Plague Caster",
     "file": "Plague_Caster.png",
-    "bytes": 81116,
+    "bytes": 40039,
     "prompt": "pixel art, a skilled fire-touched plague creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1443,15 +1438,23 @@
   {
     "name": "Plague Champion",
     "file": "Plague_Champion.png",
-    "bytes": 185065,
+    "bytes": 44158,
     "prompt": "pixel art, a commanding fire-touched plague creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Plague Heavy",
+    "file": "Plague_Heavy.png",
+    "bytes": 57755,
+    "prompt": "pixel art, an armoured fire-touched plague creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
   },
   {
     "name": "Plague Line",
     "file": "Plague_Line.png",
-    "bytes": 170152,
+    "bytes": 51338,
     "prompt": "pixel art, a lean fire-touched plague creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1459,7 +1462,7 @@
   {
     "name": "Plague Ranged",
     "file": "Plague_Ranged.png",
-    "bytes": 66649,
+    "bytes": 24433,
     "prompt": "pixel art, an armed fire-touched plague creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1467,7 +1470,7 @@
   {
     "name": "Plague Skirmisher",
     "file": "Plague_Skirmisher.png",
-    "bytes": 323682,
+    "bytes": 146600,
     "prompt": "pixel art, a small fire-touched plague creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1475,15 +1478,24 @@
   {
     "name": "Plague Swarm",
     "file": "Plague_Swarm.png",
-    "bytes": 228309,
+    "bytes": 65095,
     "prompt": "pixel art, a tiny fire-touched plague creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
   },
   {
+    "name": "Player",
+    "file": "Player.png",
+    "bytes": 237055,
+    "prompt": "pixel art, a human adventurer in leather armour, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true,
+    "needs_regen": true
+  },
+  {
     "name": "Rime Apex",
     "file": "Rime_Apex.png",
-    "bytes": 110799,
+    "bytes": 57583,
     "prompt": "pixel art, a towering ice-touched rime creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1491,7 +1503,7 @@
   {
     "name": "Rime Brute",
     "file": "Rime_Brute.png",
-    "bytes": 305860,
+    "bytes": 123051,
     "prompt": "pixel art, a hulking ice-touched rime creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1499,7 +1511,7 @@
   {
     "name": "Rime Caster",
     "file": "Rime_Caster.png",
-    "bytes": 248050,
+    "bytes": 71305,
     "prompt": "pixel art, a skilled ice-touched rime creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1507,7 +1519,7 @@
   {
     "name": "Rime Champion",
     "file": "Rime_Champion.png",
-    "bytes": 195865,
+    "bytes": 68930,
     "prompt": "pixel art, a commanding ice-touched rime creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1515,7 +1527,7 @@
   {
     "name": "Rime Heavy",
     "file": "Rime_Heavy.png",
-    "bytes": 179592,
+    "bytes": 51498,
     "prompt": "pixel art, an armoured ice-touched rime creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1523,7 +1535,7 @@
   {
     "name": "Rime Line",
     "file": "Rime_Line.png",
-    "bytes": 225058,
+    "bytes": 81396,
     "prompt": "pixel art, a lean ice-touched rime creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1531,7 +1543,7 @@
   {
     "name": "Rime Ranged",
     "file": "Rime_Ranged.png",
-    "bytes": 274086,
+    "bytes": 96239,
     "prompt": "pixel art, an armed ice-touched rime creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1539,7 +1551,7 @@
   {
     "name": "Rime Skirmisher",
     "file": "Rime_Skirmisher.png",
-    "bytes": 244738,
+    "bytes": 67106,
     "prompt": "pixel art, a small ice-touched rime creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1547,7 +1559,7 @@
   {
     "name": "Rime Swarm",
     "file": "Rime_Swarm.png",
-    "bytes": 144727,
+    "bytes": 76227,
     "prompt": "pixel art, a tiny ice-touched rime creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1555,7 +1567,7 @@
   {
     "name": "rose_bush",
     "file": "rose_bush.png",
-    "bytes": 94245,
+    "bytes": 56827,
     "prompt": "pixel art, a dense leafy green shrub with thick foliage covered in red roses, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
@@ -1563,7 +1575,7 @@
   {
     "name": "Ruin Apex",
     "file": "Ruin_Apex.png",
-    "bytes": 152354,
+    "bytes": 64484,
     "prompt": "pixel art, a towering ice-touched ruin creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1571,7 +1583,7 @@
   {
     "name": "Ruin Brute",
     "file": "Ruin_Brute.png",
-    "bytes": 266085,
+    "bytes": 113919,
     "prompt": "pixel art, a hulking ice-touched ruin creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1579,7 +1591,7 @@
   {
     "name": "Ruin Caster",
     "file": "Ruin_Caster.png",
-    "bytes": 256259,
+    "bytes": 96297,
     "prompt": "pixel art, a skilled ice-touched ruin creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1587,7 +1599,7 @@
   {
     "name": "Ruin Champion",
     "file": "Ruin_Champion.png",
-    "bytes": 304758,
+    "bytes": 115965,
     "prompt": "pixel art, a commanding ice-touched ruin creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1595,25 +1607,812 @@
   {
     "name": "Ruin Heavy",
     "file": "Ruin_Heavy.png",
-    "bytes": 245870,
+    "bytes": 113693,
     "prompt": "pixel art, an armoured ice-touched ruin creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Ruin Line",
+    "file": "Ruin_Line.png",
+    "bytes": 94245,
+    "prompt": "pixel art, a lean ice-touched ruin creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Ruin Ranged",
+    "file": "Ruin_Ranged.png",
+    "bytes": 49676,
+    "prompt": "pixel art, an armed ice-touched ruin creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Ruin Skirmisher",
+    "file": "Ruin_Skirmisher.png",
+    "bytes": 126928,
+    "prompt": "pixel art, a small ice-touched ruin creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Ruin Swarm",
+    "file": "Ruin_Swarm.png",
+    "bytes": 221533,
+    "prompt": "pixel art, a tiny ice-touched ruin creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Skeleton",
+    "file": "Skeleton.png",
+    "bytes": 88656,
+    "prompt": "pixel art, an undead skeleton warrior, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Slime",
+    "file": "Slime.png",
+    "bytes": 230093,
+    "prompt": "pixel art, a translucent green slime blob, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
   },
   {
     "name": "Stone",
     "file": "Stone.png",
-    "bytes": 46703,
+    "bytes": 46397,
     "prompt": "pixel art, a large grey rock covered in green moss, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
   },
   {
+    "name": "Stoneborn Apex",
+    "file": "Stoneborn_Apex.png",
+    "bytes": 266628,
+    "prompt": "pixel art, a towering fire-touched stoneborn creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Stoneborn Brute",
+    "file": "Stoneborn_Brute.png",
+    "bytes": 278825,
+    "prompt": "pixel art, a hulking fire-touched stoneborn creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Stoneborn Caster",
+    "file": "Stoneborn_Caster.png",
+    "bytes": 170086,
+    "prompt": "pixel art, a skilled fire-touched stoneborn creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Stoneborn Champion",
+    "file": "Stoneborn_Champion.png",
+    "bytes": 176338,
+    "prompt": "pixel art, a commanding fire-touched stoneborn creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Stoneborn Heavy",
+    "file": "Stoneborn_Heavy.png",
+    "bytes": 86360,
+    "prompt": "pixel art, an armoured fire-touched stoneborn creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Stoneborn Line",
+    "file": "Stoneborn_Line.png",
+    "bytes": 148023,
+    "prompt": "pixel art, a lean fire-touched stoneborn creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Stoneborn Ranged",
+    "file": "Stoneborn_Ranged.png",
+    "bytes": 116538,
+    "prompt": "pixel art, an armed fire-touched stoneborn creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Stoneborn Skirmisher",
+    "file": "Stoneborn_Skirmisher.png",
+    "bytes": 86875,
+    "prompt": "pixel art, a small fire-touched stoneborn creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Stoneborn Swarm",
+    "file": "Stoneborn_Swarm.png",
+    "bytes": 216005,
+    "prompt": "pixel art, a tiny fire-touched stoneborn creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Storm Apex",
+    "file": "Storm_Apex.png",
+    "bytes": 204170,
+    "prompt": "pixel art, a towering lightning-touched storm creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Storm Brute",
+    "file": "Storm_Brute.png",
+    "bytes": 122640,
+    "prompt": "pixel art, a hulking lightning-touched storm creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Storm Caster",
+    "file": "Storm_Caster.png",
+    "bytes": 246076,
+    "prompt": "pixel art, a skilled lightning-touched storm creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Storm Champion",
+    "file": "Storm_Champion.png",
+    "bytes": 57046,
+    "prompt": "pixel art, a commanding lightning-touched storm creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Storm Heavy",
+    "file": "Storm_Heavy.png",
+    "bytes": 112025,
+    "prompt": "pixel art, an armoured lightning-touched storm creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Storm Line",
+    "file": "Storm_Line.png",
+    "bytes": 202410,
+    "prompt": "pixel art, a lean lightning-touched storm creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Storm Ranged",
+    "file": "Storm_Ranged.png",
+    "bytes": 50367,
+    "prompt": "pixel art, an armed lightning-touched storm creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Storm Skirmisher",
+    "file": "Storm_Skirmisher.png",
+    "bytes": 144465,
+    "prompt": "pixel art, a small lightning-touched storm creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Storm Swarm",
+    "file": "Storm_Swarm.png",
+    "bytes": 77958,
+    "prompt": "pixel art, a tiny lightning-touched storm creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Swamp Apex",
+    "file": "Swamp_Apex.png",
+    "bytes": 233928,
+    "prompt": "pixel art, a towering physical-touched swamp creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true,
+    "needs_regen": true
+  },
+  {
+    "name": "Swamp Brute",
+    "file": "Swamp_Brute.png",
+    "bytes": 246941,
+    "prompt": "pixel art, a hulking physical-touched swamp creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Swamp Caster",
+    "file": "Swamp_Caster.png",
+    "bytes": 97561,
+    "prompt": "pixel art, a skilled physical-touched swamp creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Swamp Champion",
+    "file": "Swamp_Champion.png",
+    "bytes": 75752,
+    "prompt": "pixel art, a commanding physical-touched swamp creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Swamp Heavy",
+    "file": "Swamp_Heavy.png",
+    "bytes": 75858,
+    "prompt": "pixel art, an armoured physical-touched swamp creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Swamp Line",
+    "file": "Swamp_Line.png",
+    "bytes": 110453,
+    "prompt": "pixel art, a lean physical-touched swamp creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Swamp Ranged",
+    "file": "Swamp_Ranged.png",
+    "bytes": 55810,
+    "prompt": "pixel art, an armed physical-touched swamp creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Swamp Skirmisher",
+    "file": "Swamp_Skirmisher.png",
+    "bytes": 57931,
+    "prompt": "pixel art, a small physical-touched swamp creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Swamp Swarm",
+    "file": "Swamp_Swarm.png",
+    "bytes": 87212,
+    "prompt": "pixel art, a tiny physical-touched swamp creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Titan Apex",
+    "file": "Titan_Apex.png",
+    "bytes": 243959,
+    "prompt": "pixel art, a towering physical-touched titan creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Titan Brute",
+    "file": "Titan_Brute.png",
+    "bytes": 186346,
+    "prompt": "pixel art, a hulking physical-touched titan creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Titan Caster",
+    "file": "Titan_Caster.png",
+    "bytes": 94640,
+    "prompt": "pixel art, a skilled physical-touched titan creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Titan Champion",
+    "file": "Titan_Champion.png",
+    "bytes": 65958,
+    "prompt": "pixel art, a commanding physical-touched titan creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Titan Heavy",
+    "file": "Titan_Heavy.png",
+    "bytes": 116515,
+    "prompt": "pixel art, an armoured physical-touched titan creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Titan Line",
+    "file": "Titan_Line.png",
+    "bytes": 70404,
+    "prompt": "pixel art, a lean physical-touched titan creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Titan Ranged",
+    "file": "Titan_Ranged.png",
+    "bytes": 99858,
+    "prompt": "pixel art, an armed physical-touched titan creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Titan Skirmisher",
+    "file": "Titan_Skirmisher.png",
+    "bytes": 160018,
+    "prompt": "pixel art, a small physical-touched titan creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Titan Swarm",
+    "file": "Titan_Swarm.png",
+    "bytes": 47589,
+    "prompt": "pixel art, a tiny physical-touched titan creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "Tree",
     "file": "Tree.png",
-    "bytes": 155276,
+    "bytes": 155469,
     "prompt": "pixel art, a tall broadleaf tree with a thick trunk, single object, solid transparent background",
     "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "Tundra Apex",
+    "file": "Tundra_Apex.png",
+    "bytes": 136164,
+    "prompt": "pixel art, a towering ice-touched tundra creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Tundra Brute",
+    "file": "Tundra_Brute.png",
+    "bytes": 89099,
+    "prompt": "pixel art, a hulking ice-touched tundra creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Tundra Caster",
+    "file": "Tundra_Caster.png",
+    "bytes": 132039,
+    "prompt": "pixel art, a skilled ice-touched tundra creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Tundra Champion",
+    "file": "Tundra_Champion.png",
+    "bytes": 108853,
+    "prompt": "pixel art, a commanding ice-touched tundra creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Tundra Heavy",
+    "file": "Tundra_Heavy.png",
+    "bytes": 95933,
+    "prompt": "pixel art, an armoured ice-touched tundra creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Tundra Line",
+    "file": "Tundra_Line.png",
+    "bytes": 185220,
+    "prompt": "pixel art, a lean ice-touched tundra creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true,
+    "needs_regen": true
+  },
+  {
+    "name": "Tundra Ranged",
+    "file": "Tundra_Ranged.png",
+    "bytes": 136222,
+    "prompt": "pixel art, an armed ice-touched tundra creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Tundra Skirmisher",
+    "file": "Tundra_Skirmisher.png",
+    "bytes": 186405,
+    "prompt": "pixel art, a small ice-touched tundra creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Tundra Swarm",
+    "file": "Tundra_Swarm.png",
+    "bytes": 100586,
+    "prompt": "pixel art, a tiny ice-touched tundra creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Umbral Apex",
+    "file": "Umbral_Apex.png",
+    "bytes": 113362,
+    "prompt": "pixel art, a towering physical-touched umbral creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Umbral Brute",
+    "file": "Umbral_Brute.png",
+    "bytes": 180357,
+    "prompt": "pixel art, a hulking physical-touched umbral creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Umbral Caster",
+    "file": "Umbral_Caster.png",
+    "bytes": 138932,
+    "prompt": "pixel art, a skilled physical-touched umbral creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Umbral Champion",
+    "file": "Umbral_Champion.png",
+    "bytes": 118677,
+    "prompt": "pixel art, a commanding physical-touched umbral creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Umbral Heavy",
+    "file": "Umbral_Heavy.png",
+    "bytes": 96455,
+    "prompt": "pixel art, an armoured physical-touched umbral creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Umbral Line",
+    "file": "Umbral_Line.png",
+    "bytes": 156715,
+    "prompt": "pixel art, a lean physical-touched umbral creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Umbral Ranged",
+    "file": "Umbral_Ranged.png",
+    "bytes": 98048,
+    "prompt": "pixel art, an armed physical-touched umbral creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Umbral Skirmisher",
+    "file": "Umbral_Skirmisher.png",
+    "bytes": 100511,
+    "prompt": "pixel art, a small physical-touched umbral creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Umbral Swarm",
+    "file": "Umbral_Swarm.png",
+    "bytes": 27609,
+    "prompt": "pixel art, a tiny physical-touched umbral creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Undead Apex",
+    "file": "Undead_Apex.png",
+    "bytes": 219080,
+    "prompt": "pixel art, a towering ice-touched undead creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Undead Brute",
+    "file": "Undead_Brute.png",
+    "bytes": 234093,
+    "prompt": "pixel art, a hulking ice-touched undead creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Undead Caster",
+    "file": "Undead_Caster.png",
+    "bytes": 105451,
+    "prompt": "pixel art, a skilled ice-touched undead creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Undead Champion",
+    "file": "Undead_Champion.png",
+    "bytes": 106126,
+    "prompt": "pixel art, a commanding ice-touched undead creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Undead Heavy",
+    "file": "Undead_Heavy.png",
+    "bytes": 183852,
+    "prompt": "pixel art, an armoured ice-touched undead creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Undead Line",
+    "file": "Undead_Line.png",
+    "bytes": 91242,
+    "prompt": "pixel art, a lean ice-touched undead creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Undead Ranged",
+    "file": "Undead_Ranged.png",
+    "bytes": 141185,
+    "prompt": "pixel art, an armed ice-touched undead creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Undead Skirmisher",
+    "file": "Undead_Skirmisher.png",
+    "bytes": 79999,
+    "prompt": "pixel art, a small ice-touched undead creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Undead Swarm",
+    "file": "Undead_Swarm.png",
+    "bytes": 62448,
+    "prompt": "pixel art, a tiny ice-touched undead creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Village Guard",
+    "file": "Village_Guard.png",
+    "bytes": 184434,
+    "prompt": "pixel art, a village guard in leather armour holding a spear, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true,
+    "needs_regen": true
+  },
+  {
+    "name": "Void Apex",
+    "file": "Void_Apex.png",
+    "bytes": 243658,
+    "prompt": "pixel art, a towering physical-touched void creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Void Brute",
+    "file": "Void_Brute.png",
+    "bytes": 167485,
+    "prompt": "pixel art, a hulking physical-touched void creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Void Caster",
+    "file": "Void_Caster.png",
+    "bytes": 177378,
+    "prompt": "pixel art, a skilled physical-touched void creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Void Champion",
+    "file": "Void_Champion.png",
+    "bytes": 215648,
+    "prompt": "pixel art, a commanding physical-touched void creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Void Heavy",
+    "file": "Void_Heavy.png",
+    "bytes": 189664,
+    "prompt": "pixel art, an armoured physical-touched void creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Void Line",
+    "file": "Void_Line.png",
+    "bytes": 64558,
+    "prompt": "pixel art, a lean physical-touched void creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Void Ranged",
+    "file": "Void_Ranged.png",
+    "bytes": 160224,
+    "prompt": "pixel art, an armed physical-touched void creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Void Skirmisher",
+    "file": "Void_Skirmisher.png",
+    "bytes": 230869,
+    "prompt": "pixel art, a small physical-touched void creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Void Swarm",
+    "file": "Void_Swarm.png",
+    "bytes": 133911,
+    "prompt": "pixel art, a tiny physical-touched void creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Volcanic Apex",
+    "file": "Volcanic_Apex.png",
+    "bytes": 147627,
+    "prompt": "pixel art, a towering fire-touched volcanic creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Volcanic Brute",
+    "file": "Volcanic_Brute.png",
+    "bytes": 134505,
+    "prompt": "pixel art, a hulking fire-touched volcanic creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Volcanic Caster",
+    "file": "Volcanic_Caster.png",
+    "bytes": 96313,
+    "prompt": "pixel art, a skilled fire-touched volcanic creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Volcanic Champion",
+    "file": "Volcanic_Champion.png",
+    "bytes": 147086,
+    "prompt": "pixel art, a commanding fire-touched volcanic creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Volcanic Heavy",
+    "file": "Volcanic_Heavy.png",
+    "bytes": 182397,
+    "prompt": "pixel art, an armoured fire-touched volcanic creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Volcanic Line",
+    "file": "Volcanic_Line.png",
+    "bytes": 108110,
+    "prompt": "pixel art, a lean fire-touched volcanic creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Volcanic Ranged",
+    "file": "Volcanic_Ranged.png",
+    "bytes": 129697,
+    "prompt": "pixel art, an armed fire-touched volcanic creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Volcanic Skirmisher",
+    "file": "Volcanic_Skirmisher.png",
+    "bytes": 145864,
+    "prompt": "pixel art, a small fire-touched volcanic creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Volcanic Swarm",
+    "file": "Volcanic_Swarm.png",
+    "bytes": 304472,
+    "prompt": "pixel art, a tiny fire-touched volcanic creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Wolf",
+    "file": "Wolf.png",
+    "bytes": 101411,
+    "prompt": "pixel art, a grey meadow wolf, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Woodland Apex",
+    "file": "Woodland_Apex.png",
+    "bytes": 163242,
+    "prompt": "pixel art, a towering woodland creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Woodland Brute",
+    "file": "Woodland_Brute.png",
+    "bytes": 238921,
+    "prompt": "pixel art, a hulking woodland creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Woodland Caster",
+    "file": "Woodland_Caster.png",
+    "bytes": 27813,
+    "prompt": "pixel art, a skilled woodland creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Woodland Champion",
+    "file": "Woodland_Champion.png",
+    "bytes": 167569,
+    "prompt": "pixel art, a commanding woodland creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Woodland Heavy",
+    "file": "Woodland_Heavy.png",
+    "bytes": 66415,
+    "prompt": "pixel art, an armoured woodland creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Woodland Line",
+    "file": "Woodland_Line.png",
+    "bytes": 203988,
+    "prompt": "pixel art, a lean woodland creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Woodland Ranged",
+    "file": "Woodland_Ranged.png",
+    "bytes": 53094,
+    "prompt": "pixel art, an armed woodland creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Woodland Skirmisher",
+    "file": "Woodland_Skirmisher.png",
+    "bytes": 41037,
+    "prompt": "pixel art, a small woodland creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Woodland Swarm",
+    "file": "Woodland_Swarm.png",
+    "bytes": 71225,
+    "prompt": "pixel art, a tiny woodland creature, single object, solid transparent background",
+    "is_creature": true,
     "cutout": true
   }
 ]

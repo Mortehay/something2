@@ -9,6 +9,13 @@ const fs = require('fs');
 const path = require('path');
 const { generateChunk, generateChunkDecorations, generateWorldPreview, isBoundedWorld, CREATURE_TILE_PX, generateWorldOverview, overviewOrigin } = require('./services/mapService');
 const { fetchLinks, setLink, clearLink } = require('./services/mapLinks');
+const worldGen = require('./services/worldGenService.js');
+const { validateMapSpec } = require('../seeds/mapSpec.js');
+// applyMapSpec is the seeding script's own applier, imported rather than
+// reimplemented so the admin seed route and `make seed-map` cannot drift into
+// applying a spec two different ways. seed-map.js guards its CLI body behind
+// require.main === module, so importing it starts nothing.
+const { applyMapSpec } = require('../scripts/seed-map.js');
 const {
   fetchVillages, createVillage, rederiveVillageGuards, VILLAGE_LIMITS, villageGeometryError,
 } = require('./services/villages');
@@ -67,12 +74,13 @@ console.log(describePolicy(process.env.CORS_ORIGINS));
 // route, none of which had any limiter at all. Factored out (default limit
 // applied below) so a test can build a much lower-ceiling instance on a
 // scratch app instead of firing 300 real requests to prove it works.
-function apiRateLimiter(limit = 300, windowMs = 60 * 1000) {
+function apiRateLimiter(limit = 300, windowMs = 60 * 1000, { skip } = {}) {
   return rateLimit({
     windowMs,
     limit,
     standardHeaders: true,
     legacyHeaders: false,
+    ...(skip ? { skip } : {}),
     // SOMET-437. The default key is req.ip, which behind cloudflared -> caddy
     // is the Caddy container for every player, making this one ceiling shared
     // by everybody. clientIpKey resolves the real client where the deployment
@@ -81,7 +89,31 @@ function apiRateLimiter(limit = 300, windowMs = 60 * 1000) {
     keyGenerator: (req) => clientIpKey(req),
   });
 }
-app.use(apiRateLimiter());
+
+// Static generated art does NOT belong in the API budget. /api/assets/* is a
+// read-only MinIO passthrough for job-id-scoped, immutable blobs, and joining a
+// world preloads ONE image per sprited entity type -- 194 of them against the
+// live catalog today (Game.preloadSprites), plus the tile textures, in a single
+// burst. That alone is most of a 300/min ceiling before the player has taken a
+// step, and the burst was starving the calls that actually matter: confirmed
+// live from the browser console, where the sprite flood was followed by 429s on
+// /api/worlds/:id/overview and /api/player/waypoints, so the minimap and the
+// travel list stayed dead for the whole session.
+//
+// So assets get their own, much higher ceiling and the global limiter skips
+// them. Note the ORDER and the skip together: mounting a path limiter alone
+// would not help, because the request falls through to the global limiter
+// afterwards and gets counted there anyway.
+//
+// A separate ceiling, not none: this route is unauthenticated, so leaving it
+// unlimited turns it into a bandwidth amplifier. 1200/min per client covers
+// several world joins inside one window (and /api/assets sends
+// Cache-Control: max-age=300, so a reload inside 5 minutes mostly never
+// reaches us).
+const ASSET_PATH_PREFIX = '/api/assets/';
+const isAssetRequest = (req) => req.path.startsWith(ASSET_PATH_PREFIX);
+app.use(ASSET_PATH_PREFIX.slice(0, -1), apiRateLimiter(1200, 60 * 1000));
+app.use(apiRateLimiter(300, 60 * 1000, { skip: isAssetRequest }));
 
 // Body-size ceiling (SOMET-189 / F-009). express.json/urlencoded ran as
 // app-level middleware ahead of routing AND ahead of every auth guard at a
@@ -269,8 +301,13 @@ function evictOrWarn(worldId) {
 const aiProviders = require('./services/aiProviders');
 const providerDiscovery = require('./services/providerDiscovery');
 const remoteImageProvider = require('./services/remoteImageProvider');
-const { resolveGenerationTarget, loadTypeOverride } = require('./services/generationTarget');
+const {
+  resolveGenerationTarget, loadTypeOverride, typeTableForKind,
+} = require('./services/generationTarget');
 const bulkImageRegeneration = require('./services/bulkImageRegeneration');
+const catalogSubjects = require('./services/catalogSubjects.js');
+const artJobQueue = require('./services/artJobQueue.js');
+const artDispatcher = require('./services/artDispatcher.js');
 const {
   pinProvided, providerPinFieldError, providerPinError, providerPinValues,
 } = require('./services/providerPin.js');
@@ -1868,7 +1905,7 @@ app.post('/api/tile-types', adminGuard, async (req, res) => {
 app.put('/api/tile-types/:id', adminGuard, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, color, walkable, speed, image, valid_neighbors, prompt, wall_height, place_order,
+    const { name, color, walkable, speed, valid_neighbors, prompt, wall_height, place_order,
       art_biome } = req.body;
     if (catalogNameTooLong(name)) {
       return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
@@ -1905,22 +1942,31 @@ app.put('/api/tile-types/:id', adminGuard, async (req, res) => {
     }
 
     // image/render_mode/sprite are owned by the generate+approve flow, NOT this
-    // property-edit form. The form captures `image` at modal-open (often empty,
-    // before the user approves a texture), so writing it verbatim would clobber a
-    // just-approved texture back to ''. COALESCE(NULLIF(...)) preserves the stored
-    // image when the form sends '' or nothing; an explicit key still updates it.
+    // property-edit form, and this route therefore does not write them AT ALL.
+    //
+    // It used to write `image = COALESCE(NULLIF($5, ''), image)`, which guarded
+    // only half the problem. The form has no image input; it snapshots
+    // `image: editingTile.image || ''` when the modal opens and sends it back
+    // untouched. For a tile with NO texture yet that snapshot is '' and the
+    // NULLIF saved it -- which is the case the guard was written for and
+    // tested against. For a tile that ALREADY has one, the snapshot is the
+    // PRE-approval key, NULLIF passes it straight through, and Save Changes
+    // silently reverts a texture the user just approved. Both requests answer
+    // 200, so nothing anywhere reports a failure. That is the regeneration
+    // case -- the common one -- and it is what SOMET made "generation works
+    // but the result doesn't save" look like a generator problem.
     const result = await pool.query(
       `UPDATE tile_types SET name = $1, color = $2, walkable = $3, speed = $4,
-        image = COALESCE(NULLIF($5, ''), image), valid_neighbors = $6, prompt = $7,
-        wall_height = $8, place_order = $9,
-        ai_provider_mode = CASE WHEN $10::boolean THEN $11 ELSE tile_types.ai_provider_mode END,
-        ai_provider_id = CASE WHEN $10::boolean THEN $12 ELSE tile_types.ai_provider_id END,
+        valid_neighbors = $5, prompt = $6,
+        wall_height = $7, place_order = $8,
+        ai_provider_mode = CASE WHEN $9::boolean THEN $10 ELSE tile_types.ai_provider_mode END,
+        ai_provider_id = CASE WHEN $9::boolean THEN $11 ELSE tile_types.ai_provider_id END,
         -- COALESCE, so a caller that omits the key keeps the stored context;
         -- an explicit '' is the user choosing "— none —" and DOES clear it.
-        art_biome = COALESCE($13, tile_types.art_biome),
+        art_biome = COALESCE($12, tile_types.art_biome),
         updated_at = CURRENT_TIMESTAMP
-       WHERE id = $14 RETURNING *`,
-      [name, color, walkable, speed, image, JSON.stringify(valid_neighbors), prompt || '',
+       WHERE id = $13 RETURNING *`,
+      [name, color, walkable, speed, JSON.stringify(valid_neighbors), prompt || '',
         Number(wall_height) || 0, Number(place_order) || 0,
         pinSent, pin.mode, pin.id,
         typeof art_biome === 'string' ? art_biome : null, id]
@@ -2668,6 +2714,224 @@ app.post('/api/ai-providers/:id/test', adminGuard, async (req, res) => {
   }
 });
 
+// --- World-spec service (remote region generator) -------------------------
+//
+// A separate remote service from the image providers, reached over the SAME
+// host and credential -- see services/worldGenService.js for why it does not
+// ride the AI-provider path (it carries JSON, not images) and why the token is
+// read from an ai_providers row rather than duplicated into its own record.
+//
+// EVERY route is adminGuard'd, reads included, for the same reason the
+// ai-providers reads are: the responses name a host inside the operator's own
+// network, and seeding a region rewrites the world graph players navigate.
+//
+// The browser never receives the bearer token. The preview PNG is PROXIED
+// through this process rather than linked directly, because an <img src>
+// pointing at the generator would either need the credential in a query string
+// or fail -- and a token in a URL ends up in history and logs.
+
+// The two catalog reads validateMapSpec needs, identical to the ones
+// scripts/seed-map.js's applyMapSpec performs. Kept here rather than imported
+// so this route does not depend on the seeding script for a read-only check.
+async function mapSpecCatalogs(db) {
+  const biomeRows = (await db.query('SELECT name, creature_types FROM biomes')).rows;
+  return {
+    biomeNames: new Set(biomeRows.map((r) => r.name)),
+    biomeCreatureTypes: new Map(
+      biomeRows.map((r) => [r.name, Array.isArray(r.creature_types) ? r.creature_types : []])),
+    creatureTypeNames: new Set(
+      (await db.query('SELECT name FROM entity_types WHERE is_creature = true')).rows.map((r) => r.name)),
+  };
+}
+
+// One place that turns a WorldGenError into a response, so every route reports
+// an auth failure and an unreachable host as a MESSAGE with a status, never as
+// an empty body. The generator's own author shipped the opposite -- both
+// failures rendering as an empty list, indistinguishable from "nothing
+// generated yet" -- and it is the failure mode this whole surface is most
+// likely to reproduce.
+function sendWorldGenError(res, err, fallback) {
+  if (err && err.name === 'WorldGenError') {
+    return res.status(err.status).json({ error: err.message, code: err.code });
+  }
+  console.error(err);
+  return res.status(500).json({ error: fallback });
+}
+
+app.get('/api/world-gen/worlds', adminGuard, async (req, res) => {
+  try {
+    res.json(await worldGen.listWorlds(pool));
+  } catch (err) {
+    sendWorldGenError(res, err, 'Failed to list generated regions');
+  }
+});
+
+app.get('/api/world-gen/worlds/:name', adminGuard, async (req, res) => {
+  try {
+    const spec = await worldGen.getWorldSpec(pool, req.params.name);
+    // Validated on the way through, so the UI can show "this will not seed"
+    // BEFORE anyone downloads it. The spec is returned either way -- a spec
+    // that fails validation is exactly the one an author needs to look at.
+    const errors = validateMapSpec(spec, await mapSpecCatalogs(pool));
+    res.json({ spec, valid: errors.length === 0, errors });
+  } catch (err) {
+    sendWorldGenError(res, err, 'Failed to fetch region spec');
+  }
+});
+
+app.get('/api/world-gen/worlds/:name/report', adminGuard, async (req, res) => {
+  try {
+    res.json(await worldGen.getWorldReport(pool, req.params.name));
+  } catch (err) {
+    sendWorldGenError(res, err, 'Failed to fetch region report');
+  }
+});
+
+app.get('/api/world-gen/worlds/:name/preview.png', adminGuard, async (req, res) => {
+  try {
+    const { buffer, contentType } = await worldGen.getPreview(pool, req.params.name);
+    res.set('Content-Type', contentType);
+    // The generator rewrites a region in place on PATCH and keeps the URL, so
+    // a cached preview would show the state before an edit -- which is the one
+    // thing the edit flow's acceptance criterion asks a person to look at.
+    res.set('Cache-Control', 'no-store');
+    res.send(buffer);
+  } catch (err) {
+    sendWorldGenError(res, err, 'Failed to fetch region preview');
+  }
+});
+
+app.post('/api/world-gen/worlds', adminGuard, async (req, res) => {
+  try {
+    res.status(201).json(await worldGen.createWorld(pool, req.body));
+  } catch (err) {
+    sendWorldGenError(res, err, 'Failed to create region');
+  }
+});
+
+app.patch('/api/world-gen/worlds/:name', adminGuard, async (req, res) => {
+  try {
+    res.json(await worldGen.patchWorld(pool, req.params.name, req.body));
+  } catch (err) {
+    sendWorldGenError(res, err, 'Failed to edit region');
+  }
+});
+
+app.delete('/api/world-gen/worlds/:name', adminGuard, async (req, res) => {
+  try {
+    res.json(await worldGen.deleteWorld(pool, req.params.name));
+  } catch (err) {
+    sendWorldGenError(res, err, 'Failed to delete region');
+  }
+});
+
+// Download: fetch the spec, VALIDATE IT, and only then write it into
+// seeds/maps/ where `make seed-map SPEC=<name>` can find it.
+//
+// Validation before writing, not after: seeds/maps/ is a checked-in authoring
+// directory, and a file that cannot seed sitting beside ones that can is a
+// trap for whoever next runs the seeder. The refusal returns the errors so
+// they can be sent back to whoever generated the spec.
+app.post('/api/world-gen/worlds/:name/download', adminGuard, async (req, res) => {
+  try {
+    const name = worldGen.assertName(req.params.name);
+    const spec = await worldGen.getWorldSpec(pool, name);
+    const errors = validateMapSpec(spec, await mapSpecCatalogs(pool));
+    if (errors.length) {
+      return res.status(422).json({
+        error: `"${name}" does not validate, so it was not written`,
+        code: 'invalid_spec',
+        errors,
+      });
+    }
+    // path.join with a name already constrained to [A-Za-z0-9_-] by
+    // assertName; the regex is what makes this safe, not the join.
+    const file = path.join(__dirname, '..', 'seeds', 'maps', `${name}.map.json`);
+    const existed = fs.existsSync(file);
+    fs.writeFileSync(file, `${JSON.stringify(spec, null, 2)}\n`, 'utf8');
+    res.json({
+      written: `seeds/maps/${name}.map.json`,
+      overwrote: existed,
+      worlds: Array.isArray(spec.worlds) ? spec.worlds.length : 0,
+      seedCommand: `make seed-map SPEC=${name}`,
+    });
+  } catch (err) {
+    sendWorldGenError(res, err, 'Failed to download region spec');
+  }
+});
+
+// Seed: apply a downloaded spec to THIS database.
+//
+// GUARDED BY AN ECHOED NAME, not a boolean. This is the most destructive
+// button in the admin UI: applyMapSpec removes live doorway rows the spec does
+// not declare, and the README's one-spec-per-database rule means seeding a
+// second region leaves the first one's worlds unreachable. A `confirm: true`
+// checkbox is too easy to click past for an action that can strand every
+// player in the current world, so the caller must send back the region's own
+// name.
+//
+// `linksRemoved` is returned rather than logged, for the reason SOMET-355
+// gives at the seeding script's own warning: an operator has to be able to see
+// WHICH connections the players lost.
+app.post('/api/world-gen/worlds/:name/seed', adminGuard, async (req, res) => {
+  try {
+    const name = worldGen.assertName(req.params.name);
+    if (!req.body || req.body.confirm !== name) {
+      return res.status(400).json({
+        error: `To seed "${name}" send {"confirm": "${name}"}. Seeding rewrites the world `
+          + 'graph players navigate and removes any live doorway this spec does not declare.',
+        code: 'confirm_required',
+      });
+    }
+    const spec = await worldGen.getWorldSpec(pool, name);
+
+    // THE FRONT DOOR. A spec that declares is_entry moves it: setEntryWorld
+    // sets the target true and every other world false in one statement, so
+    // seeding a generated region takes the entry away from whatever holds it
+    // and players land in the new region instead. The existing worlds keep
+    // rendering and stay in the database -- they simply stop being where the
+    // game begins, which is the part nobody notices until they log in.
+    //
+    // A generated region is an ADDITIONAL option, not a replacement for the
+    // authored maps, so this is opt-in per request rather than implied by
+    // seeding. `keep_entry` defaults to TRUE: the safe reading of "add this
+    // region" is the one that does not move the front door.
+    const claimsEntry = Array.isArray(spec.worlds) && spec.worlds.some((w) => w.is_entry);
+    const keepEntry = req.body.keep_entry !== false;
+    const before = claimsEntry
+      ? (await pool.query('SELECT id, name FROM worlds WHERE is_entry')).rows[0] || null
+      : null;
+
+    const applied = await applyMapSpec(pool, spec);
+
+    // Restored immediately after the apply rather than by suppressing the
+    // spec's own flag: applyMapSpec is the shared applier the CLI uses too, and
+    // a route that fed it a doctored spec would be seeding something other than
+    // what it validated and what the file on disk says.
+    let entry = null;
+    if (before && keepEntry && before.id) {
+      await setEntryWorld(pool, before.id);
+      entry = { kept: before.name, note: `"${name}" declared an entry world; it was NOT made the `
+        + `game's entry. "${before.name}" still is. Pass {"keep_entry": false} to hand it over.` };
+    } else if (before && !keepEntry) {
+      entry = { moved_from: before.name, note: 'THE GAME\'S ENTRY WORLD HAS MOVED. Players now '
+        + `start in "${name}". "${before.name}" and its region are still present and still render, `
+        + 'but nothing routes players there on login.' };
+    }
+
+    res.json({
+      seeded: name,
+      ...applied,
+      entry,
+      note: 'RESTART THE BACKEND: this process cannot clear its world-preview cache, its '
+        + 'minimap overview cache, or its in-memory copy of a live world, so those keep '
+        + 'serving the old terrain.',
+    });
+  } catch (err) {
+    sendWorldGenError(res, err, 'Failed to seed region');
+  }
+});
+
 // Report the sprite-gen service's detected hardware capability so the entity
 // editor can show the tier and pick the right generation options.
 app.get('/api/sprite-capability', async (req, res) => {
@@ -2686,9 +2950,50 @@ app.get('/api/sprite-capability', async (req, res) => {
 // When the caller doesn't pin a backend/tier we auto-select the tier from
 // detected hardware; the sprite-gen recipe then fills backend/frames/steps
 // for that tier.
+// The seed a single interactive generation should use.
+//
+// Replaces a flat `seed = 0`, which was wrong in two ways that only look like
+// one. bulkImageRegeneration.seedFor's comment carries the measurement for the
+// first: at seed 0 every subject starts from the SAME noise, and four tiles so
+// generated had a mean pairwise structural correlation of +0.83 (two of them
+// +0.94, effectively one picture). That reads as the model collapsing and is
+// actually the caller's fault -- which is why the bulk path stopped doing it.
+//
+// The second only shows up on this interactive path. Generation is fully
+// deterministic: the same request twice returns a byte-identical PNG (verified
+// against the LAN provider -- same sha256, same 81.9% cutout transparency). So
+// pressing "Generate image" again reproduced the previous picture exactly, and
+// a provider-side refusal like "cutout produced no transparency (0.0%)" was
+// PERMANENT for that subject -- no number of retries could ever differ, and
+// the only escape was rewording the prompt.
+//
+// Hence: the bulk path's per-subject seed, shifted by how many generations this
+// subject has already had. The first attempt is reproducible and agrees with a
+// bulk run; every retry genuinely resamples. An explicit seed from the caller
+// still wins, so a reproduction is still expressible.
+async function resolveGenerationSeed(db, requested, kind, subject) {
+  if (requested != null && requested !== '' && Number.isFinite(Number(requested))) {
+    return Number(requested);
+  }
+  let attempts = 0;
+  try {
+    const r = await db.query(
+      'SELECT COUNT(*)::int AS n FROM sprite_sets WHERE creature = $1', [subject],
+    );
+    attempts = (r.rows[0] && r.rows[0].n) || 0;
+  } catch (err) {
+    // Counting is an improvement to the seed, not a precondition of generating
+    // at all: a failure here falls back to the plain per-subject seed rather
+    // than failing a generation the admin asked for.
+    console.error('seed attempt-count lookup failed:', err);
+  }
+  return bulkImageRegeneration.seedFor({ table: typeTableForKind(kind), name: subject }, attempts);
+}
+
 async function startGenerationJob(req, res, { subject, kind, defaultFrames, failureMessage }) {
   try {
-    const { base_prompt, biome, backend, frames, seed = 0, tier } = req.body;
+    const { base_prompt, biome, backend, frames, tier } = req.body;
+    const seed = await resolveGenerationSeed(pool, req.body.seed, kind, subject);
     // Biome art context (palette / style / exclusions) is composed into the
     // base prompt HERE so all three job kinds get it and sprite-gen's
     // prompts.py stays untouched. An unknown biome name degrades to the plain
@@ -2893,6 +3198,188 @@ app.get('/api/bulk-image-jobs/current', adminGuard, (req, res) => {
 app.post('/api/bulk-image-jobs/cancel', adminGuard, (req, res) => {
   const cancelled = bulkImageRegeneration.cancelRun();
   res.json({ cancelled, run: bulkImageRegeneration.getRun() });
+});
+
+// --- Catalog art: the batch queue (SOMET-540) -----------------------------
+//
+// The subjects that had no art path at all -- items (the merchant's goods),
+// class skills and passive-tree labels, 617 of them. These are what SOMET-538's
+// paginated table drives.
+//
+// Deliberately NOT the same endpoints as /api/bulk-image-jobs. That one holds
+// its whole run in memory and starts again from nothing after a restart, which
+// is fine for 50 tiles and not for a batch measured in hours against a machine
+// we do not control. Here the work list is rows in art_jobs, so a restart of
+// ours OR of the remote resumes instead of re-running.
+
+// The subject kinds this install can generate, for the console's filter. Read
+// from the registry rather than hardcoded in the client, so adding a sixth kind
+// is one entry here and not an edit in two places.
+app.get('/api/art-subjects', adminGuard, (req, res) => {
+  res.json({
+    kinds: catalogSubjects.subjectKinds().map((k) => ({
+      kind: k, generation_kind: catalogSubjects.registryFor(k).generationKind,
+    })),
+  });
+});
+
+// One page of a subject kind, annotated with whether it already has art.
+//
+// `missing_only` is what makes a batch resumable without a progress counter:
+// the answer comes from the catalog itself, so a subject generated an hour ago
+// simply stops appearing.
+app.get('/api/art-subjects/:kind', adminGuard, async (req, res) => {
+  try {
+    if (!catalogSubjects.registryFor(req.params.kind)) {
+      return res.status(400).json({
+        error: `unknown subject kind "${req.params.kind}"`,
+        kinds: catalogSubjects.subjectKinds(),
+      });
+    }
+    const perPage = Math.min(Math.max(parseInt(req.query.per_page, 10) || 100, 1), 500);
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    let subjects = await catalogSubjects.listWithArtState(pool, req.params.kind);
+    if (req.query.missing_only === 'true') subjects = subjects.filter((x) => !x.hasArt);
+
+    const start = (page - 1) * perPage;
+    res.json({
+      kind: req.params.kind,
+      page,
+      per_page: perPage,
+      total: subjects.length,
+      // `row` carries the whole catalogue row and the client reads none of it.
+      // Naming the fields keeps a 189-item page from shipping the catalog twice
+      // -- the same lesson bulkImageRegeneration's publicView records.
+      subjects: subjects.slice(start, start + perPage).map((x) => ({
+        kind: x.kind,
+        key: x.key,
+        name: x.name,
+        base_prompt: x.basePrompt,
+        has_art: x.hasArt,
+        image: x.image,
+        updated_at: x.updatedAt,
+        job_state: x.jobState,
+        job_error: x.jobError,
+        // Only entities have one; the console shows it because promoting a
+        // deliberate colour-box type to real art is a choice worth seeing.
+        render_mode: (x.row && x.row.render_mode) || null,
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to list art subjects' });
+  }
+});
+
+// Queue a selection. Enqueueing a subject that is already queued or running is
+// not an error and does not create a second job -- a partial unique index makes
+// that the database's guarantee rather than a check-then-act race between two
+// admins on overlapping pages.
+app.post('/api/art-jobs', adminGuard, async (req, res) => {
+  try {
+    const kind = req.body.kind;
+    if (!catalogSubjects.registryFor(kind)) {
+      return res.status(400).json({ error: `unknown subject kind "${kind}"` });
+    }
+    const keys = Array.isArray(req.body.keys) ? req.body.keys.filter((k) => typeof k === 'string') : [];
+    if (keys.length === 0) return res.status(400).json({ error: 'keys must be a non-empty array' });
+    const backend = req.body.backend === 'local' ? 'local' : 'connector';
+
+    // Per-subject provider pins resolved HERE, at enqueue, so a pinned tile or
+    // entity keeps its own provider instead of silently taking the batch's.
+    const active = await aiProviders.loadActiveProviderWithSecret(pool).catch(() => null);
+
+    // Omitting provider_id means "the active provider", which is what the
+    // console's default option says. Only when there is no active provider
+    // EITHER is this a bad request -- and then the message says so, because
+    // "provider_id is required" sends the admin looking for a field they
+    // deliberately left on its default.
+    const providerId = Number.isInteger(req.body.provider_id)
+      ? req.body.provider_id
+      : (active ? active.id : null);
+    if (backend === 'connector' && !providerId) {
+      return res.status(400).json({
+        error: 'no provider chosen and no active provider is set -- pick one in the '
+          + 'Provider list, or mark a provider active under AI Providers',
+      });
+    }
+    const { subjects, unknown } = await catalogSubjects.subjectsForEnqueue(
+      pool, kind, keys, { active, fallbackProviderId: providerId },
+    );
+    const rows = await artJobQueue.enqueue(pool, subjects, { backend, providerId });
+    res.status(201).json({
+      requested: keys.length,
+      queued: rows.length,
+      // Each named rather than implied: "I asked for 100 and 3 were queued" is
+      // confusing until you know the other 97 were already in flight, and a key
+      // that has left the catalogue is a different thing again.
+      already_live: keys.length - rows.length - unknown.length,
+      unknown,
+      stats: await artJobQueue.stats(pool),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to queue art jobs' });
+  }
+});
+
+// The queue by state, plus whether a drain is running. Progress in the table
+// comes from /api/art-subjects (has_art), not from a counter here -- a counter
+// drifts, a catalog commit cannot.
+app.get('/api/art-jobs', adminGuard, async (req, res) => {
+  try {
+    res.json({ stats: await artJobQueue.stats(pool), run: artDispatcher.runStatus() });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to read the art queue' });
+  }
+});
+
+// Start draining. Returns immediately; poll GET /api/art-jobs.
+app.post('/api/art-jobs/dispatch', adminGuard, async (req, res) => {
+  try {
+    const providerId = Number.isInteger(req.body.provider_id) ? req.body.provider_id : null;
+    if (!providerId) return res.status(400).json({ error: 'provider_id is required' });
+    const provider = await aiProviders.loadProviderWithSecret(pool, providerId);
+    if (!provider) return res.status(404).json({ error: 'provider not found' });
+
+    const status = artDispatcher.startDrain(pool, {
+      provider,
+      limit: Math.min(Math.max(parseInt(req.body.limit, 10) || 10, 1), 100),
+      concurrency: Math.min(Math.max(parseInt(req.body.concurrency, 10) || 2, 1), 8),
+    });
+    res.status(202).json(status);
+  } catch (err) {
+    if (err.code === 'ALREADY_RUNNING') {
+      return res.status(409).json({ error: err.message, run: artDispatcher.runStatus() });
+    }
+    // The resolution precondition. A 400 rather than a 500 because this is a
+    // configuration the admin can fix, and the message says how -- below SDXL's
+    // native size the model returns sprite sheets that look like art and pass
+    // every check but the eye.
+    if (err.code === 'PROVIDER_TOO_SMALL') return res.status(400).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Failed to start the art batch' });
+  }
+});
+
+// Stops after the subjects in flight. Idempotent.
+app.post('/api/art-jobs/stop', adminGuard, (req, res) => {
+  res.json({ stopping: artDispatcher.stopDrain(), run: artDispatcher.runStatus() });
+});
+
+// Returns jobs stranded by a worker that died to the queue. Manual rather than
+// on a timer: an automatic sweep cannot tell a dead worker from a slow one, and
+// stealing a job from a live worker generates the same subject twice.
+app.post('/api/art-jobs/requeue-stale', adminGuard, async (req, res) => {
+  try {
+    const olderThanMs = Math.max(parseInt(req.body.older_than_ms, 10) || 3600000, 60000);
+    const rows = await artJobQueue.requeueStale(pool, olderThanMs);
+    res.json({ requeued: rows.length, stats: await artJobQueue.stats(pool) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to requeue stale art jobs' });
+  }
 });
 
 // Shared by entity-types/:id/image, tile-types/:id/image and

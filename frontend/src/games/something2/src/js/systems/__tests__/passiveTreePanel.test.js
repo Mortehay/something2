@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   buildTreeIndex, worldToScreen, screenToWorld, visibleNodeIds, allocatableSet,
   clampZoom, zoomAbout, layoutPassiveTree, hitNodeAt, respecDisabled,
-  GRID_CELL, NODE_R, MIN_ZOOM, MAX_ZOOM, DEFAULT_ZOOM,
+  GRID_CELL, NODE_R, nodeRadius, MIN_ZOOM, MAX_ZOOM, DEFAULT_ZOOM,
 } from "../passiveTreePanel.js";
 import { GAME_WIDTH, GAME_HEIGHT } from "../../core/constants.js";
 
@@ -175,7 +175,9 @@ describe("layout", () => {
   });
 
   it("scales a node's radius with the zoom and by its kind", () => {
-    expect(NODE_R).toEqual({ minor: 7, notable: 12, keystone: 18, start: 16 });
+    // Exhaustive: SOMET-517 added greater, and a kind appearing here without
+    // a draw branch in the panel renders as a plain circle nobody chose.
+    expect(NODE_R).toEqual({ minor: 7, notable: 12, greater: 15, keystone: 18, start: 16 });
     const l = layoutPassiveTree(baseState({ view: { panX: 640, panY: 360, zoom: 2 } }));
     const start = l.nodes.find((n) => n.id === 1);
     const minor = l.nodes.find((n) => n.id === 2);
@@ -452,5 +454,35 @@ describe("the single-writer rule survives this feature", () => {
     // source rather than the behaviour because the handler needs a live
     // RenderSystem; the layout half of the same rule is asserted above.
     expect(game).toMatch(/if \(!node \|\| node\.state !== 'allocatable'\) return;/);
+  });
+});
+
+// ===========================================================================
+// SOMET-517: the `greater` node kind, and the NaN-radius trap it exposed.
+// ===========================================================================
+describe("node radii and unknown kinds", () => {
+  it("gives greater its own radius, between notable and keystone", () => {
+    expect(NODE_R.greater).toBeGreaterThan(NODE_R.notable);
+    expect(NODE_R.greater).toBeLessThan(NODE_R.keystone);
+  });
+
+  // THE POINT OF nodeRadius(). `NODE_R[kind] * zoom` on an unknown kind is
+  // NaN, and Canvas 2D silently drops a path with non-finite coordinates --
+  // no error, nothing drawn, and the hit area (computed from the same r) is
+  // NaN too, so the node is invisible AND unclickable. A server sending a new
+  // kind to a client that has not been redeployed would lose those nodes
+  // entirely and look like a rendering glitch rather than version skew.
+  it("returns a finite radius for a kind it has never heard of", () => {
+    for (const unknown of ["mythic", "", null, undefined, 42]) {
+      const r = nodeRadius(unknown);
+      expect(Number.isFinite(r)).toBe(true);
+      expect(r).toBeGreaterThan(0);
+    }
+  });
+
+  it("returns the exact radius for every kind the server can send", () => {
+    for (const kind of ["minor", "notable", "greater", "keystone", "start"]) {
+      expect(nodeRadius(kind)).toBe(NODE_R[kind]);
+    }
   });
 });

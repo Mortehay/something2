@@ -11,7 +11,7 @@ const {
 const { resolveEffectName } = require('./vfx.js');
 const { bodyLift } = require('./attackOrigin.js');
 const {
-  applyElementEffect, applyHitStatuses, activeEffectKeys, canAct,
+  applyElementEffect, applyHitStatuses, activeEffectKeys, canAct, charmerOf,
 } = require('./effects');
 const { resolveBehavior, DEFAULT_BEHAVIOR, DEFAULT_ABILITY } = require('../services/creatureBehaviors');
 const { shoveAwayFrom } = require('./knockback');
@@ -2155,6 +2155,40 @@ class CreatureSim {
   // guard's own strike on a hostile is untouched.
   meleeArcTargets(ox, oy, nx, ny, reach, arcWidth, pacifiedFrom = null) {
     return this.meleeArcScan(ox, oy, nx, ny, reach, arcWidth, pacifiedFrom).hit;
+  }
+
+  // SOMET-522. How many living, hostile creatures stand within `radius` of a
+  // point, counting no further than `cap`.
+  //
+  // THE CAP IS NOT AN OPTIMISATION, IT IS THE BALANCE. The aura that consumes
+  // this heals per creature counted, and a world can hold 12-creature packs
+  // (see world.js's header) -- uncapped, standing in a pack would be
+  // unkillable sustain. Stopping the count at `cap` is what bounds the heal,
+  // so the cap lives HERE, where it cannot be forgotten by a second caller.
+  //
+  // A charmed creature does not count. It is fighting FOR the player, and
+  // leeching off your own pet is not what the node promises; charmerOf is the
+  // same single reader every damage path resolves pacify state through, so
+  // this cannot hold a different opinion about who is hostile.
+  //
+  // Line of sight is deliberately NOT tested: an aura is a field around the
+  // body, not a swing, and a creature pressed against the far side of a wall
+  // is close enough to bleed into it.
+  countHostilesWithin(ox, oy, radius, cap, now = 0, ownerUserId = null) {
+    if (!(radius > 0) || !(cap > 0)) return 0;
+    const r2 = radius * radius;
+    let n = 0;
+    for (const c of this.creatures.values()) {
+      if (c.hp <= 0) continue;
+      if (ownerUserId != null && charmerOf(c, now) === ownerUserId) continue;
+      const cc = center(c);
+      const dx = cc.x - ox;
+      const dy = cc.y - oy;
+      if (dx * dx + dy * dy > r2) continue;
+      n += 1;
+      if (n >= cap) return cap;
+    }
+    return n;
   }
 
   // SOMET-286: the same arc, split by whether the swing was allowed to land.

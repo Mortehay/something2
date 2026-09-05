@@ -31,8 +31,59 @@ const RULE_COMBINE = {
   treeCharmBonus: 'sum',
   cooldownFloor: 'min',
   regenLifeShare: 'sum',
+  // SOMET-519. Attack rate, split in two so a Warrior's attack-speed nodes
+  // cannot accelerate a socketed spell stone and a Mage's cast-speed nodes
+  // cannot speed up a sword. `product` because each node is authored as a
+  // multiplier (1.10 = +10%), so four of them compound rather than adding to
+  // +40% -- which is what makes a cluster's fourth satellite still feel worth
+  // taking. Read by world.js's applyAttackCooldown.
+  attackSpeedMult: 'product',
+  castSpeedMult: 'product',
+  // SOMET-520. Melee geometry, in the units the weapon row already uses:
+  // reach in PIXELS (a tile is 64), arc in RADIANS. `sum` because a cluster's
+  // satellites add flat increments to a hub, and because an arc must be able
+  // to reach a full turn by addition rather than by compounding toward it.
+  meleeReachBonus: 'sum',
+  meleeArcBonus: 'sum',
+  // SOMET-521. Projectile rules. count and pierce are `sum` because they are
+  // whole extra shots and whole extra targets -- +1 and +1 is +2, never x1.
+  // Speed is `product` for the same reason the attack-rate rules are: each
+  // node is authored as a multiplier.
+  projectileCount: 'sum',
+  pierceBonus: 'sum',
+  projectileSpeedMult: 'product',
+  // SOMET-522. The leech aura. Both `sum`: satellites add flat life-per-enemy
+  // and flat pixels of radius to their hub.
+  auraLeech: 'sum',
+  auraRadius: 'sum',
+  // SOMET-527. A multiplier on SWUNG damage, so a shape node can pay for its
+  // coverage. `product`, and authored below 1: Whirlwind's full circle costs
+  // damage, which is what stops it being a strict upgrade over a narrower arc.
+  // Applied on weapon KIND, not element -- the cost is for swinging in a
+  // circle, whatever the blade is enchanted with.
+  meleeDamageMult: 'product',
+  // SOMET-528. The fraction of a swing's damage its lingering wave deals PER
+  // SECOND, for WAVE_DURATION_S. `sum`, identity 0 -- so a player with no wave
+  // node leaves no wave at all, and satellites add flat increments to a hub.
+  meleeWaveShare: 'sum',
 };
 const RULE_IDENTITY = { product: 1, sum: 0, min: null };
+
+// SOMET-513. The "no tree context" rules map: every rule at its identity.
+//
+// Built from RULE_COMBINE at module load rather than written out by hand, so a
+// rule added above is automatically present here at the right identity. A
+// hand-maintained second literal is how a new rule ends up reaching a consumer
+// as `undefined` -- which multiplies to NaN for a `product` rule, and NaN
+// damage is an immortal target (see damage.js's own note).
+//
+// Frozen and shared, for the same reason NO_DAMAGE_MULT / NO_RESISTS /
+// NO_STATUSES in playerStats.js are: it is handed to every progression row
+// that has no tree context, and a mutable shared default is a cross-player
+// leak waiting to happen.
+const RULE_IDENTITIES = Object.freeze(
+  Object.fromEntries(Object.entries(RULE_COMBINE).map(([key, mode]) => [key, RULE_IDENTITY[mode]])),
+);
 
 // SOMET-495. The other four grant kinds, each with the ONE consumer that reads
 // the aggregate this module produces. Re-declared here rather than imported
@@ -261,6 +312,6 @@ function withComposedStats(row, composed) {
 
 module.exports = {
   composeStats, withComposedStats, modifierToEntry, detailOf,
-  STAT_KEYS, RULE_COMBINE, BASE_STAT,
+  STAT_KEYS, RULE_COMBINE, RULE_IDENTITIES, BASE_STAT,
   POOL_KEYS, ELEMENT_KEYS, STATUS_KEYS, PERCENT, DETAIL_KEY,
 };

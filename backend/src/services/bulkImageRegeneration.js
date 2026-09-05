@@ -381,6 +381,7 @@ function __reset() {
 module.exports = {
   KINDS,
   pngHasAlpha,
+  readObjectHead,
   seedFor,
   CATALOG_UPDATE,
   loadSubjects,

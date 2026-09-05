@@ -429,7 +429,6 @@ function TileTypesAdmin() {
     speed: 1.0,
     wall_height: 0,
     place_order: 0,
-    image: '',
     prompt: '',
     valid_neighbors: []
   });
@@ -443,7 +442,11 @@ function TileTypesAdmin() {
         speed: editingTile.speed,
         wall_height: editingTile.wall_height || 0,
         place_order: editingTile.place_order || 0,
-        image: editingTile.image || '',
+        // `image` is deliberately NOT held here. There is no image input in
+        // this form -- it was snapshotted at modal-open and sent straight back
+        // on save, which reverted any texture approved in between. The texture
+        // is owned by Approve (POST /api/tile-types/:id/image) and the PUT no
+        // longer writes the column at all.
         prompt: editingTile.prompt || '',
         valid_neighbors: editingTile.valid_neighbors || [],
         // SOMET-342: the stored pin as one <select> value; split back into
@@ -462,7 +465,6 @@ function TileTypesAdmin() {
         speed: 1.0,
         wall_height: 0,
         place_order: 0,
-        image: '',
         prompt: '',
         valid_neighbors: [],
         provider_pin: '',

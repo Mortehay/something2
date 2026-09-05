@@ -69,53 +69,42 @@ const dotenv = require('dotenv');
 const { Pool } = require('pg');
 const aiProviders = require('../src/services/aiProviders.js');
 const remoteImageProvider = require('../src/services/remoteImageProvider.js');
+const { authHeaders } = require('../src/services/providerDiscovery.js');
 const spriteGen = require('../src/services/spriteGen.js');
 const { resolveProvider, parseArgs } = require('./generate-tile-textures.js');
 
-// The backdrop colour every entity is drawn against, and the one the cutout
-// step keys out. Magenta rather than white, which is what sprite-gen asks for
-// locally: white is a terrible chroma key here because the catalog is full of
-// pale subjects -- ice boulders, bone, snow-covered rock, marble -- and keying
-// white punches holes straight through them. Nothing in this catalog is
-// naturally magenta.
-//
-// Changing this string means changing tools/cutout-entity-textures.py's
-// expectation with it; they are one contract in two files.
-const BACKDROP = 'flat solid magenta background';
-
-// Mirrors sprite-gen/app/prompts.py build_object_prompt in intent, not in
-// wording. Two deliberate departures, both measured on this provider:
-//
-//   * "isolated on a solid white background" became the magenta backdrop
-//     above, for the keying reason.
-//   * "single ... object" alone was not enough -- SDXL with a pixel-art LoRA
-//     answers a bare subject with a TILESET of that subject (a forest for one
-//     pine tree). "one single" plus "centered" plus "nothing else in frame"
-//     is what stops it, and the provider's negative prompt names the failure
-//     modes as well.
-function buildObjectPrompt(base) {
-  // "only X and nothing else" leads, and that word order is doing work. Asked
-  // for "a single pine tree" this model returns a FOREST, and asked for an
-  // object on a background it returns the object as framed art on a card --
-  // it has been trained on asset sheets and gallery images, so the default
-  // reading of any subject is "a picture of that subject". Naming the
-  // exclusions first, before any styling, is what stops it.
-  return `only ${base} and nothing else, one single object, centered, `
-    + `${BACKDROP}, no frame, no border, no picture frame, no card, `
-    + 'no ground, no floor, no shadow, no scenery, no other objects, '
-    + 'pixel art RPG game asset, isometric 3/4 top-down view, crisp clean pixels, '
-    + 'limited palette, sharp outline, cut out on a plain flat background';
-}
+// The isolated-object prompt contract now lives in services/objectPrompt.js --
+// catalog art (SOMET-540) needs the same wrapper, and a service cannot sanely
+// require a CLI script. Re-exported below so this module's public surface is
+// unchanged.
+const { BACKDROP, buildObjectPrompt } = require('../src/services/objectPrompt.js');
 
 // Generate through the LOCAL sprite-gen service instead of a remote provider.
 //
-// WHY THIS EXISTS, stated plainly because it contradicts the point of the
-// remote-provider feature: the remote SDXL + pixel-art LoRA is excellent at
-// ground textures and unusable for isolated objects. Asked for one tree it
-// returns a tileset of trees, a framed gallery card, or a tree on a checkered
-// backdrop -- measured across four prompt revisions and three cutout
-// strategies. There is nothing to key out of a checkerboard, so no
-// post-processing rescues it.
+// WHY THIS EXISTS -- and the correction that now bounds it.
+//
+// The original reason was that the remote SDXL + pixel-art LoRA was "excellent
+// at ground textures and unusable for isolated objects": asked for one tree it
+// returned a tileset of trees, a framed gallery card, or a tree on a checkered
+// backdrop, measured across four prompt revisions and three cutout strategies.
+// That observation was real but the conclusion drawn from it was wrong. The
+// cause was not the model and not the prompt -- it was RESOLUTION. Every one of
+// those attempts rendered at 512x512, half SDXL's 1024 training resolution, and
+// off-native SDXL repeats its subject rather than scaling it. What looked like
+// "the model insists on drawing a sheet" was the tiling artifact.
+//
+// Measured 2026-09-04 against the GPU box, same model, same prompts, same
+// seeds, resolution as the ONLY variable (8 icon subjects):
+//   512x512  -- 2/8 usable; hammer and "focus" came back as 3x4 sprite sheets,
+//               fireball as a grid of gems, leaf as a plant in a room.
+//   1024x1024 -- 6/8 usable, each a single centered object that keys cleanly
+//               and stays legible downscaled to a 48px slot.
+// The two remaining misses are subject problems, not rendering ones: an
+// abstract label ("Focus") gives the model nothing concrete to draw.
+//
+// So the local path is no longer the only way to get an isolated object. It
+// stays because it needs no GPU box and no network, which is the honest reason
+// to keep it -- not because the remote cannot do this.
 //
 // sprite-gen is built for this case: build_object_prompt asks for an isolated
 // subject on a flat white field and cutout_background() keys it out inside
@@ -192,9 +181,15 @@ async function generateViaCore(pool, provider, entity, { pollMs = 5000, maxWaitM
   // happened to be open. The moment it enforced keys, all ten regenerations
   // failed with 401 while the txt2img path, which does send the header, would
   // have kept working. Same credential, same row, all three calls below.
-  const auth = provider.auth_header_name && provider.auth_token
-    ? { [provider.auth_header_name]: provider.auth_token }
-    : {};
+  // Shared with discovery and txt2img rather than re-derived here. This was a
+  // THIRD copy of the rule, and it carried the same defect the other two had:
+  // requiring both halves meant a token stored with no header name -- which the
+  // admin form allows, since the header-name box is optional -- was silently
+  // dropped, and every call here answered 401 while the message blamed a
+  // missing key. authHeaders() defaults a nameless token to
+  // `Authorization: Bearer <token>` and leaves an explicitly named header
+  // verbatim.
+  const auth = authHeaders(provider);
   const assetsUrl = `${origin}/api/assets?source=image&kind=core&limit=1`;
 
   // Remember the newest concept BEFORE submitting. The submit call answers

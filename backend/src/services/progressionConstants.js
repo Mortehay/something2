@@ -56,6 +56,56 @@ const SPELL_PER_INT = 0.05;
 const HASTE_PER_DEX = 0.03;
 const MIN_COOLDOWN_MULT = 0.4;
 
+// SOMET-521. The angle between adjacent projectiles in a multi-shot volley,
+// in radians (~9 degrees). A volley is fanned symmetrically about the aim
+// vector, so three shots are centre/left/right rather than three stacked on
+// one line -- which is what makes +2 projectiles read as a spread rather than
+// as one thicker arrow.
+const PROJECTILE_FAN_RAD = 0.16;
+
+// SOMET-522. The leech aura (the Cultist's Sanguine Aura cluster).
+//
+// AURA_MAX_TARGETS is the balance, not a performance guard. The aura heals per
+// hostile creature standing inside it, and a world can hold 12-creature packs
+// -- uncapped, walking into a pack would be unkillable sustain. Six is the
+// most a single node may be worth.
+// SOMET-528. The lingering arc wave: a swing that keeps damaging the ground
+// it swept for a couple of seconds.
+//
+// WAVE_MAX_STACKS IS THE BALANCE, NOT A NICETY -- the same role AURA_MAX_TARGETS
+// plays for the aura. Waves STACK (a deliberate product decision), and
+// attackSpeedMult is itself a tree option, so a fast attacker lays waves faster
+// than they expire. Without the cap, wave damage scales with attack speed
+// without bound. With it, a player's total wave output is capped no matter how
+// fast they swing.
+const WAVE_DURATION_S = 2;
+const WAVE_MAX_STACKS = 3;
+// Resolved once a second, like the aura, so the authored share is
+// damage-per-second and does not scale with tick rate.
+const WAVE_INTERVAL_S = 1;
+
+// SOMET-527. Floors for a melee swing's geometry.
+//
+// meleeReachBonus and meleeArcBonus are both `sum`, which is what lets a shape
+// node NARROW or SHORTEN a swing by authoring a negative -- Spearpoint trades
+// arc for reach, Sweep trades reach for arc. Without a floor, stacking
+// negatives produces a swing that cannot hit anything (reach <= 0) or one whose
+// half-angle is negative, which makes inArc's cos(arc/2) comparison
+// meaningless rather than merely narrow.
+//
+// MIN_MELEE_REACH is set so a floored swing still reaches a creature standing
+// against you: a creature is 48px and measurement is centre-to-centre.
+const MIN_MELEE_REACH = 48;
+// ~17 degrees. Narrow enough to be a real drawback, wide enough to remain a
+// usable weapon rather than a bug report.
+const MIN_MELEE_ARC = 0.3;
+
+const AURA_BASE_RADIUS = 120;
+const AURA_MAX_TARGETS = 6;
+// The aura resolves once a second rather than per frame, so its cost does not
+// scale with tick rate and its numbers are authored in life-per-second.
+const AURA_INTERVAL_S = 1;
+
 // WIS -> mana regen. Base matches PLAYER_MANA_REGEN (authority/world.js:19).
 // Contrary to the design doc, mana regen ALREADY EXISTS -- WIS scales a live
 // constant here, it does not introduce a new tick.
@@ -123,6 +173,9 @@ module.exports = {
   BASE_STAT, STAT_KEYS, MAX_LEVEL,
   HP_BASE, HP_PER_CON, MANA_BASE, MANA_PER_INT, STAMINA_BASE,
   MELEE_PER_STR, SPELL_PER_INT, HASTE_PER_DEX, MIN_COOLDOWN_MULT,
+  PROJECTILE_FAN_RAD, AURA_BASE_RADIUS, AURA_MAX_TARGETS, AURA_INTERVAL_S,
+  MIN_MELEE_REACH, MIN_MELEE_ARC,
+  WAVE_DURATION_S, WAVE_MAX_STACKS, WAVE_INTERVAL_S,
   MANA_REGEN_BASE, MANA_REGEN_PER_WIS,
   PRICE_PER_CHA, SELL_FRACTION_BASE, SELL_FRACTION_MAX,
   XP_BASE, XP_EXPONENT, XP_KILL_BASE, XP_LEVEL_DIFF_SLOPE, XP_LEVEL_DIFF_MAX,

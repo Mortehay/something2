@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const net = require('node:net');
 const { spawn } = require('node:child_process');
 
 // SOMET-401. This listener is reachable from the internet through the tunnel,
@@ -13,6 +14,29 @@ const { spawn } = require('node:child_process');
 // than asserted about the source.
 
 const SERVER = path.join(__dirname, '..', '..', 'compose', 'orangepi', 'deploy-hook', 'server.js');
+
+// A port nothing else holds, obtained from the OS rather than guessed.
+//
+// This used to be `19000 + random(2000)`, which overlaps the dev stack's own
+// published ports -- MinIO binds 127.0.0.1:19000 and :19001 (see
+// compose/develop/docker-compose.yml). Whenever the stack was up, a run could
+// land on MinIO, and the test then talked to MinIO for its whole lifetime and
+// failed with a 404 that had nothing to do with the hook. It passed in
+// isolation and failed in a full suite, which is the worst shape a flake takes.
+//
+// Binding to port 0 makes the kernel pick a free one; closing before the child
+// binds it leaves a small race, but the range is the OS's whole ephemeral pool
+// rather than a 2000-wide window that overlaps known-busy ports.
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.on('error', reject);
+    srv.listen(0, '127.0.0.1', () => {
+      const { port } = srv.address();
+      srv.close((err) => (err ? reject(err) : resolve(port)));
+    });
+  });
+}
 const SECRET = 'test-secret-not-a-real-one';
 
 function sign(body, secret = SECRET) {
@@ -28,7 +52,7 @@ async function startServer(env = {}) {
   fs.writeFileSync(script, `#!/usr/bin/env bash\nprintf 'args:%s\\n' "$*" >> ${JSON.stringify(marker)}\nsleep "\${FAKE_DEPLOY_SECONDS:-0}"\nexit \${FAKE_DEPLOY_EXIT:-0}\n`);
   fs.chmodSync(script, 0o755);
 
-  const port = 19000 + Math.floor(Math.random() * 2000);
+  const port = await freePort();
   const child = spawn(process.execPath, [SERVER], {
     env: { ...process.env, DEPLOY_HOOK_SECRET: SECRET, DEPLOY_HOOK_PORT: String(port), DEPLOY_SCRIPT: script, ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -37,15 +61,22 @@ async function startServer(env = {}) {
   child.stdout.on('data', (c) => { log += c; });
   child.stderr.on('data', (c) => { log += c; });
 
+  // Wait for OUR hook, not for "something answered".
+  //
+  // The previous version broke out of this loop on ANY response. That is not
+  // pedantry: with a guessed port it could break out on a reply from an
+  // unrelated service that happened to hold the port, then run the whole test
+  // against that service and fail with a baffling 404. Checking the health
+  // BODY is what makes "the server is ready" mean this server.
   const deadline = Date.now() + 8000;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) break;
     try {
-      await fetch(`http://127.0.0.1:${port}/deploy-hook/health`);
-      break;
-    } catch {
-      await new Promise((r) => setTimeout(r, 50));
-    }
+      const r = await fetch(`http://127.0.0.1:${port}/deploy-hook/health`);
+      const body = await r.json();
+      if (r.status === 200 && body && body.status === 'ok') break;
+    } catch { /* not listening yet */ }
+    await new Promise((r) => setTimeout(r, 50));
   }
   return {
     port, child, marker, dir,

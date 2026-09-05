@@ -28,7 +28,12 @@ function spreadIndices(total, count) {
   return out;
 }
 
-function ringKinds(total, notableCount, keystoneCount, layout) {
+// SOMET-517 added `greaterCount`. Keystones are placed first (they are the
+// scarcest and must land on their staggered positions), then greaters, then
+// notables fill what is left -- `place` walks forward off a taken slot, so the
+// LAST kind placed is the one that gets displaced, and notables are the kind
+// there are most of and which care least where they sit.
+function ringKinds(total, notableCount, keystoneCount, layout, greaterCount = 0) {
   const kinds = new Array(total).fill('minor');
   const taken = new Set();
   const place = (raw, kind) => {
@@ -40,24 +45,85 @@ function ringKinds(total, notableCount, keystoneCount, layout) {
   spreadIndices(total, keystoneCount).forEach((i, k) => {
     place(i + layout.keystoneOffset + k * layout.keystoneStagger, 'keystone');
   });
+  // Offset and staggered like the keystones, and for the identical reason:
+  // total/count divides evenly, so without a nudge every greater in a sector
+  // would stack on one radial line.
+  spreadIndices(total, greaterCount).forEach((i, k) => {
+    place(i + layout.greaterOffset + k * layout.greaterStagger, 'greater');
+  });
   spreadIndices(total, notableCount).forEach((i) => place(i, 'notable'));
   return kinds;
 }
 
+// SOMET-515. The pool a (kind, sector, ring) draws from, EXPANDED BY WEIGHT.
+//
+// Selection below is `pool[i % pool.length]`, so before weights existed the
+// own/off-stat ratio was an accident of how many template OBJECTS happened to
+// sit in the array -- adding one off-stat template moved it. A template's
+// `weight` is how many slots it occupies, which makes the ratio something the
+// data file states rather than something the array length implies.
+//
+// Weight defaults to 1, so every pre-515 template keeps exactly its old share.
 function templatePool(templates, kind, sector, ring) {
-  return templates.filter((t) => t.kind === kind
+  const matching = templates.filter((t) => t.kind === kind
     && (t.sectors === '*' ? sector !== 'core' : t.sectors.includes(sector))
     && t.rings.includes(ring));
+  const pool = [];
+  for (const t of matching) {
+    const weight = Number.isFinite(t.weight) && t.weight > 0 ? Math.floor(t.weight) : 1;
+    for (let i = 0; i < weight; i += 1) pool.push(t);
+  }
+  return pool;
 }
 
-function grantsFor(template, sector) {
-  return template.grants.map((g) => (g.stat === '@sector' ? { ...g, stat: sector } : { ...g }));
+// SOMET-515. The off-stat a `@other` grant resolves to.
+//
+// Round-robin through the five stats that are NOT this sector's own, in
+// sector-declaration order, advanced by a per-sector counter. Two properties
+// matter and both are load-bearing:
+//
+//   DETERMINISTIC. The generator is contractually free of Math.random() and
+//   byte-identical across runs, which is what makes a tree change a reviewable
+//   diff. Generation order is fixed, so a counter is as deterministic as an
+//   index -- and unlike a raw node index it cannot be knocked out of step by
+//   the four different call sites using four different loop variables.
+//
+//   EVEN. Over a sector's ~295 nodes each of the other five stats receives
+//   close to a fifth of the off-stat budget, which is the distribution this
+//   epic chose. A hash would clump; a round-robin cannot.
+//
+// The stat list comes from the SPEC's own sectors rather than a re-declared
+// STAT_KEYS, so the generator stays a pure function of the spec it is handed
+// and cannot drift from the six sectors that actually exist.
+function nextOtherStat(sectorKeys, sector, otherSeq) {
+  const others = sectorKeys.filter((k) => k !== sector);
+  const n = otherSeq.get(sector) || 0;
+  otherSeq.set(sector, n + 1);
+  return others[n % others.length];
+}
+
+// `@sector` -> this sector's own stat. `@other` -> one of the other five.
+// A core node has no sector stat, so `@other` must never appear on a core
+// template; the spec guard test enforces that rather than a silent fallback
+// here, because a fallback would make the mistake invisible.
+function grantsFor(template, sector, sectorKeys, otherSeq) {
+  return template.grants.map((g) => {
+    if (g.stat === '@sector') return { ...g, stat: sector };
+    if (g.stat === '@other') return { ...g, stat: nextOtherStat(sectorKeys, sector, otherSeq) };
+    return { ...g };
+  });
 }
 
 function generatePassiveTree(spec) {
-  const { sectors, layout, templates, keystones, startNodes } = spec;
+  const { sectors, layout, templates, keystones, startNodes, clusters = [] } = spec;
   const nodes = [];
   const edgeKeys = new Set();
+  // SOMET-515. The six stat keys, straight off the spec, and the per-sector
+  // round-robin cursor `@other` advances. Declared once here so every call
+  // site below shares ONE cursor per sector -- a cursor per call site would
+  // restart the rotation four times and clump the distribution.
+  const sectorKeys = sectors.map((s) => s.key);
+  const otherSeq = new Map();
 
   const addEdge = (a, b) => {
     if (!a || !b || a === b) return;
@@ -76,7 +142,7 @@ function generatePassiveTree(spec) {
       layout.sectorAxisDeg0 + (i * 360) / layout.core.rowA.count);
     rowA.push(push({
       key: `core-a-${i}`, sector: 'core', ring: 0, x, y,
-      kind: 'minor', label: t.label, grants: grantsFor(t, 'core'), start_class: null,
+      kind: 'minor', label: t.label, grants: grantsFor(t, 'core', sectorKeys, otherSeq), start_class: null,
     }));
   }
   const rowB = [];
@@ -86,7 +152,7 @@ function generatePassiveTree(spec) {
       layout.sectorAxisDeg0 + (k * 360) / layout.core.rowB.count);
     rowB.push(push({
       key: `core-b-${k}`, sector: 'core', ring: 0, x, y,
-      kind: 'minor', label: t.label, grants: grantsFor(t, 'core'), start_class: null,
+      kind: 'minor', label: t.label, grants: grantsFor(t, 'core', sectorKeys, otherSeq), start_class: null,
     }));
   }
   const spokeStep = layout.core.rowB.count / layout.core.rowA.count; // 24 / 6 = 4
@@ -119,7 +185,7 @@ function generatePassiveTree(spec) {
     for (let ring = 1; ring <= 3; ring += 1) {
       const rg = layout.rings[ring];
       const total = rg.rows * rg.cols;
-      const kinds = ringKinds(total, rg.notable, rg.keystone, layout);
+      const kinds = ringKinds(total, rg.notable, rg.keystone, layout, rg.greater || 0);
 
       // "Через 1" on the highway: 9, 15, 19 highway nodes
       let numHighwayCols = 9;
@@ -163,7 +229,7 @@ function generatePassiveTree(spec) {
           const pool = templatePool(templates, kind, sector, ring);
           const t = pool[flat % pool.length];
           label = t.label;
-          grants = grantsFor(t, sector);
+          grants = grantsFor(t, sector, sectorKeys, otherSeq);
         }
 
         const row = 0;
@@ -209,6 +275,12 @@ function generatePassiveTree(spec) {
         }
         const keystonesInCluster = clusterKinds.filter(k => k === 'keystone');
         const notablesInCluster = clusterKinds.filter(k => k === 'notable');
+        // SOMET-517. Greaters are carried through this distribution explicitly.
+        // These filters are exhaustive by construction -- a kind that matches
+        // none of them is DROPPED silently and the ring quietly loses nodes,
+        // which is exactly what happened when `greater` was first added and the
+        // tree generated zero of them while every existing test stayed green.
+        const greatersInCluster = clusterKinds.filter(k => k === 'greater');
         const minors = clusterKinds.filter(k => k === 'minor');
 
         // Central hub gets a minor node:
@@ -217,6 +289,8 @@ function generatePassiveTree(spec) {
           minors.shift();
         } else if (notablesInCluster.length > 0) {
           hubKind = notablesInCluster.shift();
+        } else if (greatersInCluster.length > 0) {
+          hubKind = greatersInCluster.shift();
         } else if (keystonesInCluster.length > 0) {
           hubKind = keystonesInCluster.shift();
         }
@@ -241,6 +315,25 @@ function generatePassiveTree(spec) {
         const apex = Math.floor(outerCount / 2);
         if (keystonesInCluster.length > 0) {
           outerKinds[apex] = keystonesInCluster.shift();
+        }
+
+        // SOMET-517. Greaters sit at odd offsets from the apex, so they
+        // interleave with the notables below rather than competing for the
+        // same slots and being dropped when those are taken.
+        for (const off of [1, -1, 3, -3, 5, -5]) {
+          const idx = apex + off;
+          if (idx > 0 && idx < outerCount && greatersInCluster.length > 0
+              && outerKinds[idx] === 'minor') {
+            outerKinds[idx] = greatersInCluster.shift();
+          }
+        }
+        // Anything that still did not fit goes to the first free outer slot --
+        // a greater that fell off the end would be silently lost.
+        for (let i = 0; i < outerCount && greatersInCluster.length > 0; i += 1) {
+          if (outerKinds[i] === 'minor') outerKinds[i] = greatersInCluster.shift();
+        }
+        for (let i = 0; i < innerCount && greatersInCluster.length > 0; i += 1) {
+          if (innerKinds[i] === 'minor') innerKinds[i] = greatersInCluster.shift();
         }
 
         // Place Notables strictly at alternating even offsets:
@@ -307,7 +400,7 @@ function generatePassiveTree(spec) {
           const pool = templatePool(templates, hubKind, sector, ring);
           const t = pool[hubFlat % pool.length];
           hubLabel = t.label;
-          hubGrants = grantsFor(t, sector);
+          hubGrants = grantsFor(t, sector, sectorKeys, otherSeq);
         }
         const hubRow = 1 + Math.floor((hubFlat - numHighwayCols) / rg.cols);
         const hubCol = (hubFlat - numHighwayCols) % rg.cols;
@@ -338,7 +431,7 @@ function generatePassiveTree(spec) {
             const pool = templatePool(templates, kind, sector, ring);
             const t = pool[flat % pool.length];
             label = t.label;
-            grants = grantsFor(t, sector);
+            grants = grantsFor(t, sector, sectorKeys, otherSeq);
           }
 
           const row = 1 + Math.floor((flat - numHighwayCols) / rg.cols);
@@ -372,7 +465,7 @@ function generatePassiveTree(spec) {
             const pool = templatePool(templates, kind, sector, ring);
             const t = pool[flat % pool.length];
             label = t.label;
-            grants = grantsFor(t, sector);
+            grants = grantsFor(t, sector, sectorKeys, otherSeq);
           }
 
           const row = 1 + Math.floor((flat - numHighwayCols) / rg.cols);
@@ -467,6 +560,64 @@ function generatePassiveTree(spec) {
       const nextH = sectorRings[nextS][ring].highway;
       addEdge(curH[curH.length - 1], nextH[0]);
     }
+  }
+
+  // ---- epic clusters (SOMET-518) ----------------------------------------
+  //
+  // A hub plus 2 or 4 satellites, placed OUTSIDE ring 3 on the sector's own
+  // axis. Deliberately appended after the grid rather than woven into it: a
+  // cluster's defining property is its edge topology, and threading it through
+  // the ring/row/column bookkeeping would put that topology at the mercy of
+  // the collision walk that shuffles kinds between slots.
+  //
+  // EDGES: hub -> one ring-3 anchor, and hub -> each satellite. NOTHING ELSE.
+  // A satellite has exactly one neighbour, its own hub, so isAllocatable's
+  // walk cannot reach it until the hub is allocated. That is what makes an
+  // increaser unbuyable without the epic it increases -- structurally, not by
+  // a rule anyone has to remember.
+  const clustersBySector = new Map();
+  for (const c of clusters) {
+    if (!clustersBySector.has(c.sector)) clustersBySector.set(c.sector, []);
+    clustersBySector.get(c.sector).push(c);
+  }
+  for (let s = 0; s < sectors.length; s += 1) {
+    const sector = sectors[s].key;
+    const list = clustersBySector.get(sector) || [];
+    const axis = layout.sectorAxisDeg0 + s * 360 / sectors.length;
+    const half = layout.sectorSpanDeg / 2;
+    const ring3 = sectorRings[s][3];
+    list.forEach((c, ci) => {
+      // Spread the sector's clusters across its wedge so two do not overlap.
+      const frac = list.length === 1 ? 0.5 : (ci + 0.5) / list.length;
+      const hubAngle = axis - half + frac * layout.sectorSpanDeg;
+      const hubRadius = layout.clusterRadius;
+      const hp = polar(hubRadius, hubAngle);
+      const hubKey = push({
+        key: `${c.key}-hub`, sector, ring: 3, x: hp.x, y: hp.y,
+        kind: 'greater', label: c.hubLabel,
+        grants: c.hubGrants.map((g) => ({ ...g })), start_class: null,
+      });
+      // The anchor: the ring-3 highway node nearest this cluster's angle, so
+      // the hub is reachable by a walk that stays in the player's own sector.
+      const highway = ring3.highway;
+      const anchorIdx = Math.min(highway.length - 1,
+        Math.max(0, Math.round(frac * (highway.length - 1))));
+      addEdge(highway[anchorIdx], hubKey);
+      // Satellites ring the hub. Their ONLY edge is back to it.
+      c.satellites.forEach((sat, si) => {
+        const a = hubAngle * DEG + (si / c.satellites.length) * Math.PI * 2;
+        const sp = {
+          x: round2(hp.x + layout.clusterSatelliteRadius * Math.cos(a)),
+          y: round2(hp.y + layout.clusterSatelliteRadius * Math.sin(a)),
+        };
+        const satKey = push({
+          key: `${c.key}-sat${si}`, sector, ring: 3, x: sp.x, y: sp.y,
+          kind: 'notable', label: sat.label,
+          grants: sat.grants.map((g) => ({ ...g })), start_class: null,
+        });
+        addEdge(hubKey, satKey);
+      });
+    });
   }
 
   // Sorted rather than left in insertion order:
