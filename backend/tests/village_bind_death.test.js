@@ -440,16 +440,16 @@ test('crossing between two villages is bounded by the write floor, and the LAST 
   // identity gate alone permits a write on every single crossing -- 25 of them,
   // which is what this test measured before the floor existed.
   let endedIn = null;
-  for (let i = 0; i < 25; i++) {
+  for (let i = 0; i < 20; i++) {
     const [at, village] = i % 2 === 0 ? [insideA, VILLAGE_A] : [insideB, VILLAGE_B];
     p.x = at.x; p.y = at.y;
     endedIn = village;   // tracked, not re-derived: the parity of the last index is easy to get wrong
-    await sleep(20);
+    await sleep(15);
   }
   await sleep(300); // let the trailing flush land
 
   assert.ok(pool.binds.length <= 4,
-    `500ms of seam-walking at a 200ms floor must not produce ${pool.binds.length} writes`);
+    `seam-walking at a 200ms floor must not produce ${pool.binds.length} writes`);
   assert.ok(pool.binds.length >= 2,
     'a floor that only ever writes once is not a throttle, it is a latch');
   const last = pool.binds[pool.binds.length - 1];

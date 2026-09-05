@@ -17,6 +17,7 @@ const path = require('node:path');
 
 const SCRIPTS = path.join(__dirname, '..', '..', 'compose', 'orangepi', 'scripts');
 const LIB = path.join(SCRIPTS, 'lib.sh');
+const toPosix = (p) => (typeof p === 'string' ? p.replace(/\\/g, '/') : p);
 
 // Runs a snippet with lib.sh sourced, in a scratch REPO_ROOT holding a
 // controlled .env -- never the developer's real one, whose values would make
@@ -24,7 +25,7 @@ const LIB = path.join(SCRIPTS, 'lib.sh');
 function runWithLib(snippet, { env = {}, envFile = '' } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-lib-'));
   fs.writeFileSync(path.join(root, '.env'), envFile);
-  const script = `set -euo pipefail\nREPO_ROOT=${JSON.stringify(root)}\n. ${JSON.stringify(LIB)}\n${snippet}\n`;
+  const script = `set -euo pipefail\nREPO_ROOT=${JSON.stringify(toPosix(root))}\n. ${JSON.stringify(toPosix(LIB))}\n${snippet}\n`;
   const result = spawnSync('bash', ['-c', script], {
     encoding: 'utf8',
     env: { ...process.env, ...env, PATH: process.env.PATH },
@@ -1028,7 +1029,7 @@ test('a valid multi-megabyte dump passes the guard 100 times out of 100', () => 
   const loop = `
     pass=0; refuse=0; other=0
     for i in $(seq 1 100); do
-      bash ${JSON.stringify(RESTORE_SH)} ${JSON.stringify(f.big)} >/dev/null 2>&1
+      bash ${JSON.stringify(toPosix(RESTORE_SH))} ${JSON.stringify(toPosix(f.big))} >/dev/null 2>&1
       case $? in
         64) pass=$((pass+1)) ;;
         65) refuse=$((refuse+1)) ;;
@@ -1053,10 +1054,10 @@ test('the guard function itself accepts the same dump 100 times out of 100', () 
   const f = fixtures();
   const loop = `
     set -euo pipefail
-    . ${JSON.stringify(GUARD)}
+    . ${JSON.stringify(toPosix(GUARD))}
     ok=0
     for i in $(seq 1 100); do
-      if dump_has_create_table ${JSON.stringify(f.big)}; then ok=$((ok+1)); fi
+      if dump_has_create_table ${JSON.stringify(toPosix(f.big))}; then ok=$((ok+1)); fi
     done
     echo "$ok"`;
   const result = spawnSync('bash', ['-c', loop], { encoding: 'utf8' });

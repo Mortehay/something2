@@ -26,7 +26,7 @@ async function openPool() {
     return pool;
   } catch (err) {
     await pool.end().catch(() => {});
-    return { unreachable: err.message };
+    return { unreachable: err && err.message ? err.message : 'connection failed' };
   }
 }
 
@@ -1001,7 +1001,9 @@ test('isWorldLive reflects a real connected player, then clears once they discon
   const closed = new Promise((res) => ws.on('close', res));
   ws.close();
   await closed;
-  // The close handler removes the empty world entry synchronously.
+  for (let i = 0; i < 50 && handle.isWorldLive('w1'); i++) {
+    await new Promise((r) => setTimeout(r, 10));
+  }
   assert.equal(handle.isWorldLive('w1'), false, 'no longer live once the only player disconnects');
 
   handle.close(); server.close();

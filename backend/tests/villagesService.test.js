@@ -27,6 +27,7 @@ test('fetchVillages maps snake_case columns to camelCase', async () => {
     gateEdge: 'S', spawnX: 650, spawnY: 550,
     merchantX: 950, merchantY: 850,
     bankX: 1050, bankY: 850,
+    gemMerchantX: 850, gemMerchantY: 850,
   }]);
 });
 

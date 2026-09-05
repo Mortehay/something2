@@ -9,7 +9,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const makefile = fs.readFileSync(path.resolve(__dirname, '../../Makefile'), 'utf8');
+const makefile = fs.readFileSync(path.resolve(__dirname, '../../Makefile'), 'utf8').replace(/\r\n/g, '\n');
 
 test('seed-passive-tree is declared .PHONY', () => {
   const phony = makefile.slice(0, makefile.indexOf('COMPOSE_FILE'));

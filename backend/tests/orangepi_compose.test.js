@@ -14,7 +14,7 @@ const ORANGEPI = path.join(__dirname, '..', '..', 'compose', 'orangepi');
 const CADDYFILE = path.join(ORANGEPI, 'caddy', 'Caddyfile');
 
 function read(file) {
-  return fs.readFileSync(file, 'utf8');
+  return fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
 }
 
 // Slices a single `handle ... { ... }` block out of the Caddyfile so an

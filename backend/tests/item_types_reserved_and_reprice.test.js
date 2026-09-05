@@ -304,7 +304,7 @@ const DB_URL = process.env.TEST_DATABASE_URL
 async function openPool() {
   const pool = new Pool({ connectionString: DB_URL, connectionTimeoutMillis: 2000, max: 2 });
   try { await pool.query('SELECT 1'); return pool; }
-  catch (err) { await pool.end().catch(() => {}); return { unreachable: err.message }; }
+  catch (err) { await pool.end().catch(() => {}); return { unreachable: err && err.message ? err.message : 'connection failed' }; }
 }
 
 // Rows a real village has after a sale: base-catalog rows for two item types

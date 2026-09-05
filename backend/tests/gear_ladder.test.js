@@ -5,20 +5,20 @@ const { GEAR_TIERS, GEAR_FAMILIES } = require('../seeds/data/gearLadder.js');
 
 const SPEC = { tiers: GEAR_TIERS, families: GEAR_FAMILIES };
 
-test('the ladder is 15 families x 10 tiers = 150 rows with unique names', () => {
+test('the ladder is 24 families x 10 tiers = 240 rows with unique names', () => {
   const rows = generateGearLadder(SPEC);
-  assert.strictEqual(rows.length, 150);
-  assert.strictEqual(new Set(rows.map((r) => r.name)).size, 150);
+  assert.strictEqual(rows.length, 240);
+  assert.strictEqual(new Set(rows.map((r) => r.name)).size, 240);
 });
 
 test('every one of the eight paper-doll slots is covered', () => {
   const rows = generateGearLadder(SPEC);
   const bySlot = {};
   for (const r of rows) bySlot[r.slot] = (bySlot[r.slot] || 0) + 1;
-  // Hand-written: 3 main_hand families, 2 each for off_hand/head/chest/hands/feet,
+  // Hand-written: 12 main_hand families, 2 each for off_hand/head/chest/hands/feet,
   // 1 each for ring1/ring2, times 10 tiers.
   assert.deepStrictEqual(bySlot, {
-    main_hand: 30, off_hand: 20, head: 20, chest: 20, hands: 20, feet: 20, ring1: 10, ring2: 10,
+    main_hand: 120, off_hand: 20, head: 20, chest: 20, hands: 20, feet: 20, ring1: 10, ring2: 10,
   });
 });
 
@@ -30,7 +30,7 @@ test('the ten req_level rungs are exactly the specced ladder', () => {
 
 test('tier 1 demands nothing beyond level 1 so a fresh character can wear it', () => {
   const rows = generateGearLadder(SPEC).filter((r) => r.tier === 1);
-  assert.strictEqual(rows.length, 15);
+  assert.strictEqual(rows.length, 24);
   for (const r of rows) {
     assert.strictEqual(r.req_level, 1, r.name);
     for (const s of ['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma']) {

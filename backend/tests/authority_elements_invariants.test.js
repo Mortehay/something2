@@ -34,7 +34,7 @@ async function openPool() {
     return pool;
   } catch (err) {
     await pool.end().catch(() => {});
-    return { unreachable: err.message };
+    return { unreachable: err && err.message ? err.message : 'connection failed' };
   }
 }
 
