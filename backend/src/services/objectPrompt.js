@@ -81,7 +81,23 @@ const CUTOUT_BACKDROP = 'flat solid neutral grey background';
 //     pine tree). "one single" plus "centered" plus "nothing else in frame"
 //     is what stops it, and the provider's negative prompt names the failure
 //     modes as well.
-function buildObjectPrompt(base, { backdrop = BACKDROP } = {}) {
+function buildObjectPrompt(base, { backdrop = BACKDROP, corrections = [] } = {}) {
+  // SOMET-548. Per-subject corrections land HERE, with the exclusions and
+  // BEFORE the styling, not appended at the end.
+  //
+  // That placement is the whole reason this is not a one-line concatenation.
+  // The comment below explains why the exclusions lead: this model answers a
+  // bare subject with a tileset, and a subject-on-a-background with framed art,
+  // so what comes first is what holds. A correction appended after "pixel art
+  // RPG game asset, isometric 3/4 top-down view, ..." would sit in the weakest
+  // position in the prompt -- exactly where an instruction the operator wrote
+  // BECAUSE the model already ignored their intent is least likely to be
+  // honoured.
+  const fixes = corrections
+    .map((c) => String(c || '').trim())
+    .filter(Boolean)
+    .join(', ');
+
   // "only X and nothing else" leads, and that word order is doing work. Asked
   // for "a single pine tree" this model returns a FOREST, and asked for an
   // object on a background it returns the object as framed art on a card --
@@ -91,6 +107,7 @@ function buildObjectPrompt(base, { backdrop = BACKDROP } = {}) {
   return `only ${base} and nothing else, one single object, centered, `
     + `${backdrop}, no frame, no border, no picture frame, no card, `
     + 'no ground, no floor, no shadow, no scenery, no other objects, '
+    + (fixes ? `${fixes}, ` : '')
     + 'pixel art RPG game asset, isometric 3/4 top-down view, crisp clean pixels, '
     + 'limited palette, sharp outline, cut out on a plain flat background';
 }

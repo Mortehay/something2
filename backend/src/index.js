@@ -310,6 +310,7 @@ const artJobQueue = require('./services/artJobQueue.js');
 const artDispatcher = require('./services/artDispatcher.js');
 const artFailures = require('./services/artFailures.js');
 const artGenerations = require('./services/artGenerations.js');
+const artPromptNotes = require('./services/artPromptNotes.js');
 const {
   pinProvided, providerPinFieldError, providerPinError, providerPinValues,
 } = require('./services/providerPin.js');
@@ -3292,6 +3293,54 @@ app.get('/api/art-subjects/:kind/:key/history', adminGuard, async (req, res) => 
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to read the generation history' });
+  }
+});
+
+// SOMET-548. Per-subject prompt corrections.
+//
+// Returns EVERY note, active or not: the generation history records prompts
+// that contained notes since revoked, and a prompt nobody can explain
+// afterwards is not much of a record.
+app.get('/api/art-subjects/:kind/:key/notes', adminGuard, async (req, res) => {
+  try {
+    if (!catalogSubjects.registryFor(req.params.kind)) {
+      return res.status(400).json({ error: `unknown subject kind "${req.params.kind}"` });
+    }
+    res.json({ notes: await artPromptNotes.listAll(pool, req.params.kind, req.params.key) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to read the prompt notes' });
+  }
+});
+
+app.post('/api/art-subjects/:kind/:key/notes', adminGuard, async (req, res) => {
+  try {
+    if (!catalogSubjects.registryFor(req.params.kind)) {
+      return res.status(400).json({ error: `unknown subject kind "${req.params.kind}"` });
+    }
+    const note = await artPromptNotes.create(pool, req.params.kind, req.params.key, {
+      note: req.body.note, region: req.body.region,
+    });
+    // An empty note is a client mistake, not a server error, and saying so
+    // beats storing a blank correction that quietly does nothing to a prompt.
+    if (!note) return res.status(400).json({ error: 'note must not be empty' });
+    res.status(201).json({ note });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to save the prompt note' });
+  }
+});
+
+// Deactivates rather than deletes -- see the migration header.
+app.delete('/api/art-subjects/:kind/:key/notes/:id', adminGuard, async (req, res) => {
+  try {
+    if (invalidId(req.params.id)) return res.status(400).json({ error: 'id must be an integer' });
+    const ok = await artPromptNotes.deactivate(pool, Number(req.params.id));
+    if (!ok) return res.status(404).json({ error: 'note not found, or already inactive' });
+    res.json({ deactivated: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to remove the prompt note' });
   }
 });
 

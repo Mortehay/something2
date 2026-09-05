@@ -18,6 +18,7 @@ import styled from 'styled-components';
 import {
   useArtSubjects, useArtQueue, useEnqueueArt, useStartArtBatch, useStopArtBatch,
   useRequeueStale, useRequeueFailures, useArtHistory,
+  useArtNotes, useAddArtNote, useRemoveArtNote,
 } from './useArtConsole.js';
 import { useAiProviders } from './useAiProviders.js';
 import { assetUrlVersioned } from './useTileSprites.js';
@@ -170,6 +171,29 @@ const Close = styled.button`
   color: var(--s2-text-muted); font-size: 1.4rem; line-height: 1; cursor: pointer;
   &:hover { color: var(--s2-text); }
 `;
+// Prompt corrections, inside the preview.
+const Notes = styled.div`
+  margin-top: 1rem; border-top: 1px solid var(--s2-border); padding-top: 0.75rem;
+  h4 { margin: 0 0 0.5rem; font-size: 0.9rem; color: var(--s2-text); }
+  ul { list-style: none; margin: 0 0 0.5rem; padding: 0; }
+  li {
+    display: flex; align-items: baseline; gap: 0.5rem; font-size: 0.82rem;
+    padding: 0.2rem 0; color: var(--s2-text);
+  }
+  li.off { color: var(--s2-text-dim); text-decoration: line-through; }
+  form { display: flex; gap: 0.5rem; }
+  input {
+    flex: 1; background: var(--s2-bg-sunken); color: var(--s2-text);
+    border: 1px solid var(--s2-border-strong); border-radius: 4px;
+    padding: 0.4rem; font-size: 0.85rem;
+  }
+`;
+const Drop = styled.button`
+  background: none; border: none; color: var(--s2-text-muted); cursor: pointer;
+  font-size: 0.9rem; line-height: 1; padding: 0 0.2rem;
+  &:hover { color: var(--s2-danger); }
+`;
+
 // The generation history, inside the preview.
 const History = styled.div`
   margin-top: 1rem; border-top: 1px solid var(--s2-border); padding-top: 0.75rem;
@@ -220,6 +244,10 @@ function ArtConsoleAdmin() {
   const [sort, setSort] = useState({ by: 'subject', dir: 'asc' });
   const [preview, setPreview] = useState(null);
   const { history, isLoadingHistory } = useArtHistory(preview);
+  const { notes } = useArtNotes(preview);
+  const addNote = useAddArtNote(preview);
+  const removeNote = useRemoveArtNote(preview);
+  const [noteText, setNoteText] = useState('');
 
   // The frozen order, held only while a batch is running and the table is
   // sorted by a MOVING column. Without it every landed generation reshuffles
@@ -540,6 +568,52 @@ function ArtConsoleAdmin() {
               {preview.base_prompt && <><dt>Prompt</dt><dd>{preview.base_prompt}</dd></>}
               {preview.job_error && <><dt>Error</dt><dd>{preview.job_error}</dd></>}
             </dl>
+
+            <Notes>
+              <h4>Prompt corrections</h4>
+              {/* Stated plainly, because the alternative reading -- that this
+                  edits the image you are looking at -- is the obvious one and
+                  is wrong. */}
+              <Hint>
+                These are added to the prompt on the NEXT generation. They do not
+                change the image above.
+              </Hint>
+              <ul>
+                {notes.map((n) => (
+                  <li key={n.id} className={n.active ? '' : 'off'}>
+                    <span>{n.note}</span>
+                    {/* A revoked note stays listed, struck through: the history
+                        records prompts that contained it, and a prompt nobody
+                        can explain afterwards is not much of a record. */}
+                    {n.active && (
+                      <Drop
+                        type="button"
+                        aria-label={`Remove note ${n.id}`}
+                        onClick={() => removeNote.mutate(n.id)}
+                      >×</Drop>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!noteText.trim()) return;
+                  addNote.mutate({ note: noteText }, { onSuccess: () => setNoteText('') });
+                }}
+              >
+                <input
+                  value={noteText}
+                  onChange={(e) => setNoteText(e.target.value)}
+                  placeholder="e.g. throwing darts, not a dartboard"
+                  aria-label="New prompt correction"
+                  maxLength={300}
+                />
+                <Secondary type="submit" disabled={addNote.isPending || !noteText.trim()}>
+                  Add
+                </Secondary>
+              </form>
+            </Notes>
 
             <History>
               <h4>Generation history</h4>

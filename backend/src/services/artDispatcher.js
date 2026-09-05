@@ -6,6 +6,7 @@ const { alphaProfile, MIN_TRANSPARENT_PCT } = require('./pngAlpha.js');
 const assetStore = require('./assetStore.js');
 const aiProviders = require('./aiProviders.js');
 const history = require('./artGenerations.js');
+const promptNotes = require('./artPromptNotes.js');
 const { buildObjectPrompt, BACKDROP, CUTOUT_BACKDROP } = require('./objectPrompt.js');
 
 // SOMET-540. The loop that turns queued art jobs into images.
@@ -119,9 +120,17 @@ async function requestForSubject(db, job, subject, reg, provider) {
   // A kind that composes its own prompt does so (tiles need their biome's
   // palette and exclusions, which is a database read). Everything else is an
   // isolated object and takes the shared wrapper.
+  // SOMET-548. A kind that composes its own prompt (tiles) is left alone:
+  // corrections are an OBJECT feature, and a tile's prompt is built from its
+  // biome's palette rather than from a subject description.
+  const corrections = reg.composePrompt
+    ? []
+    : (await promptNotes.listActive(db, job.subject_kind, job.subject_key)).map((n) => n.note);
   const prompt = reg.composePrompt
     ? await reg.composePrompt(db, subject)
-    : buildObjectPrompt(subject.basePrompt, { backdrop: backdropFor(provider) });
+    : buildObjectPrompt(subject.basePrompt, {
+      backdrop: backdropFor(provider), corrections,
+    });
 
   const req = {
     subject: subject.name || subject.key,

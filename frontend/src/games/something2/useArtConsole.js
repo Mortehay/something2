@@ -111,6 +111,57 @@ export function useArtHistory(subject) {
   return { history: data?.history || [], isLoadingHistory: isLoading };
 }
 
+// SOMET-548. A subject's prompt corrections. Returns EVERY note, active or
+// not: the history records prompts that contained notes since revoked, and a
+// prompt nobody can explain afterwards is not much of a record.
+const notesKey = (s) => ['art-notes', s?.kind, s?.key];
+
+export function useArtNotes(subject) {
+  const { data } = useQuery({
+    queryKey: notesKey(subject),
+    enabled: Boolean(subject),
+    queryFn: () => getJson(
+      `${API_URL}/api/art-subjects/${encodeURIComponent(subject.kind)}`
+      + `/${encodeURIComponent(subject.key)}/notes`,
+      'the prompt notes',
+    ),
+  });
+  return { notes: data?.notes || [] };
+}
+
+function noteMutation(run, successMessage) {
+  return function useNoteMutation(subject) {
+    const qc = useQueryClient();
+    return useMutation({
+      mutationFn: (arg) => run(subject, arg),
+      onSuccess: () => {
+        toast.success(successMessage);
+        qc.invalidateQueries({ queryKey: notesKey(subject) });
+      },
+      onError: (err) => toast.error(err.message),
+    });
+  };
+}
+
+export const useAddArtNote = noteMutation(async (subject, body) => {
+  const { res, json } = await post(
+    `/api/art-subjects/${encodeURIComponent(subject.kind)}`
+    + `/${encodeURIComponent(subject.key)}/notes`, body,
+  );
+  if (!res.ok) throw new Error(json.error || 'Failed to save the note');
+  return json;
+}, 'Note saved -- it applies to the next generation');
+
+export const useRemoveArtNote = noteMutation(async (subject, id) => {
+  const res = await apiFetch(
+    `${API_URL}/api/art-subjects/${encodeURIComponent(subject.kind)}`
+    + `/${encodeURIComponent(subject.key)}/notes/${id}`,
+    { method: 'DELETE', headers: authHeaders() },
+  );
+  if (!res.ok) throw new Error('Failed to remove the note');
+  return res.json().catch(() => ({}));
+}, 'Note removed');
+
 async function post(path, body) {
   const res = await apiFetch(`${API_URL}${path}`, {
     method: 'POST', headers: authHeaders(), body: JSON.stringify(body || {}),
