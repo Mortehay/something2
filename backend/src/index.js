@@ -308,6 +308,7 @@ const bulkImageRegeneration = require('./services/bulkImageRegeneration');
 const catalogSubjects = require('./services/catalogSubjects.js');
 const artJobQueue = require('./services/artJobQueue.js');
 const artDispatcher = require('./services/artDispatcher.js');
+const artFailures = require('./services/artFailures.js');
 const {
   pinProvided, providerPinFieldError, providerPinError, providerPinValues,
 } = require('./services/providerPin.js');
@@ -3328,7 +3329,19 @@ app.post('/api/art-jobs', adminGuard, async (req, res) => {
 // drifts, a catalog commit cannot.
 app.get('/api/art-jobs', adminGuard, async (req, res) => {
   try {
-    res.json({ stats: await artJobQueue.stats(pool), run: artDispatcher.runStatus() });
+    // Failures come back GROUPED BY CAUSE rather than as a flat list. The list
+    // was already visible per-row in the table; what an admin could not get
+    // was "68 of these are the same GPU fault and will clear themselves, ONE
+    // needs a decision". The grouping is the actionable part.
+    const { rows: failed } = await pool.query(
+      `SELECT subject_kind, subject_key, last_error
+         FROM art_jobs WHERE state = 'failed' ORDER BY updated_at DESC`,
+    );
+    res.json({
+      stats: await artJobQueue.stats(pool),
+      run: artDispatcher.runStatus(),
+      failures: artFailures.groupFailures(failed),
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to read the art queue' });
@@ -3360,6 +3373,71 @@ app.post('/api/art-jobs/dispatch', adminGuard, async (req, res) => {
     if (err.code === 'PROVIDER_TOO_SMALL') return res.status(400).json({ error: err.message });
     console.error(err);
     res.status(500).json({ error: 'Failed to start the art batch' });
+  }
+});
+
+// Return failed subjects of ONE cause to the queue.
+//
+// Scoped by cause, not by id: the admin's actual intent is "the GPU was down,
+// put those back", and asking them to select 68 checkboxes to express it is
+// how the SQL-by-hand habit started.
+//
+// THE RULE IS ENFORCED HERE, not merely displayed. A content failure is
+// refused a plain requeue, because artJobQueue.seedFor derives the seed from
+// the subject: the retry would regenerate a byte-identical image and fail the
+// same way, burning a generation to learn nothing. Passing reseed:true is the
+// caller stating they want a DIFFERENT take, which changes the seed's salt and
+// therefore the image. A UI that merely hid the button would leave the rule
+// unenforced for anything calling the API directly.
+app.post('/api/art-jobs/requeue', adminGuard, async (req, res) => {
+  try {
+    const kind = String(req.body.kind || '');
+    const reseed = req.body.reseed === true;
+    if (!Object.values(artFailures.KINDS).includes(kind)) {
+      return res.status(400).json({ error: `unknown failure kind "${kind}"` });
+    }
+
+    const { rows: failed } = await pool.query(
+      "SELECT id, subject_kind, subject_key, last_error FROM art_jobs WHERE state = 'failed'",
+    );
+    const mine = failed.filter((r) => artFailures.classify(r.last_error).kind === kind);
+    if (mine.length === 0) return res.json({ requeued: 0, stats: await artJobQueue.stats(pool) });
+
+    const { retryable, action } = artFailures.classify(mine[0].last_error);
+    if (!retryable && !reseed) {
+      return res.status(409).json({
+        error: action === 'reseed'
+          ? 'these failed for a reason a retry cannot fix -- the seed is derived from the '
+            + 'subject, so the same image comes back. Pass reseed:true for a different take.'
+          : 'these failed for a reason a retry cannot fix -- change the configuration first.',
+        action,
+      });
+    }
+    if (!retryable && reseed && action !== 'reseed') {
+      return res.status(409).json({ error: 'a new seed cannot fix a configuration problem', action });
+    }
+
+    // Re-seeded jobs get a fresh salt so the image genuinely differs; the new
+    // seed is written to the row, which stays the record of what was drawn.
+    let requeued = 0;
+    for (const row of mine) {
+      const seed = reseed
+        ? artJobQueue.seedFor(row.subject_kind, row.subject_key, Date.now() % 1000000)
+        : null;
+      // eslint-disable-next-line no-await-in-loop
+      const r = await pool.query(
+        `UPDATE art_jobs
+            SET state = 'queued', attempts = 0, not_before = NULL, last_error = NULL,
+                claimed_at = NULL, seed = COALESCE($2, seed), updated_at = now()
+          WHERE id = $1 AND state = 'failed'`,
+        [row.id, seed],
+      );
+      requeued += r.rowCount;
+    }
+    res.json({ requeued, reseeded: reseed, stats: await artJobQueue.stats(pool) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to requeue art jobs' });
   }
 });
 

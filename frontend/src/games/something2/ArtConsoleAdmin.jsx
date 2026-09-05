@@ -17,7 +17,7 @@ import { useMemo, useState } from 'react';
 import styled from 'styled-components';
 import {
   useArtSubjects, useArtQueue, useEnqueueArt, useStartArtBatch, useStopArtBatch,
-  useRequeueStale,
+  useRequeueStale, useRequeueFailures,
 } from './useArtConsole.js';
 import { useAiProviders } from './useAiProviders.js';
 import { assetUrlVersioned } from './useTileSprites.js';
@@ -105,14 +105,41 @@ const Pill = styled.span`
 const Fail = styled(Pill)`color: var(--s2-danger);`;
 const Mono = styled.td`font-family: ui-monospace, SFMono-Regular, Menlo, monospace;`;
 
+// Failures grouped BY CAUSE, above the table.
+//
+// The table already showed a red pill per row, which answers "did this fail"
+// but not "is this 68 subjects hit by one GPU fault that will clear itself, or
+// one subject that needs a decision". Those need opposite responses, and the
+// per-row view made the difference invisible: it read as 69 identical
+// problems. Reading order is set by the server (most-actionable first).
+const Failures = styled.section`
+  border: 1px solid var(--s2-border); border-radius: 8px;
+  background: var(--s2-surface-raised); padding: 0.75rem 1rem; margin: 0.75rem 0;
+`;
+const FailGroup = styled.div`
+  & + & { border-top: 1px solid var(--s2-border); margin-top: 0.75rem; padding-top: 0.75rem; }
+  h4 { margin: 0 0 0.2rem; font-size: 0.95rem; color: var(--s2-text); }
+  p  { margin: 0 0 0.4rem; font-size: 0.85rem; color: var(--s2-text-muted); }
+  code {
+    display: block; font-size: 0.75rem; color: var(--s2-text-dim);
+    background: var(--s2-bg-sunken); border-radius: 4px; padding: 0.35rem 0.5rem;
+    margin-bottom: 0.5rem; overflow-x: auto; white-space: pre-wrap; word-break: break-word;
+  }
+`;
+const Subjects = styled.p`
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem !important;
+`;
+
 function ArtConsoleAdmin() {
   const { kinds, subjects, isLoadingSubjects, subjectsError } = useArtSubjects();
-  const { stats, run } = useArtQueue();
+  const { stats, run, failures } = useArtQueue();
   const { providers, activeProvider } = useAiProviders();
   const enqueue = useEnqueueArt();
   const startBatch = useStartArtBatch();
   const stopBatch = useStopArtBatch();
   const requeue = useRequeueStale();
+  const requeueFailures = useRequeueFailures();
 
   const [kind, setKind] = useState('all');
   const [art, setArt] = useState('missing');   // the resume filter, by default
@@ -272,6 +299,43 @@ function ArtConsoleAdmin() {
       {notice && <Hint>{notice}</Hint>}
       {failure && <Err>{failure}</Err>}
       {run?.error && <Err>Batch stopped: {run.error}</Err>}
+
+      {failures.length > 0 && (
+        <Failures>
+          <strong>Failed subjects, by cause</strong>
+          {failures.map((g) => (
+            <FailGroup key={g.kind}>
+              <h4>{g.label} · {g.count}</h4>
+              <p>{g.detail}</p>
+              {/* The provider's OWN words, not only our label: the label says
+                  what kind of problem it is, the excerpt says what actually
+                  came back, and a prompt fix needs the latter. */}
+              {g.example && <code>{String(g.example).slice(0, 260)}</code>}
+              <Subjects>{g.subjects.map((x) => x.key).join(', ')}
+                {g.count > g.subjects.length && ` … and ${g.count - g.subjects.length} more`}
+              </Subjects>
+              {/* Two different buttons, never one with a flag: a plain requeue
+                  of a content failure is refused by the server (409) because
+                  the derived seed would reproduce the same image. */}
+              {g.retryable && (
+                <Secondary
+                  disabled={requeueFailures.isPending}
+                  onClick={() => requeueFailures.mutate({ kind: g.kind })}
+                >Requeue all {g.count}</Secondary>
+              )}
+              {g.action === 'reseed' && (
+                <Secondary
+                  disabled={requeueFailures.isPending}
+                  onClick={() => requeueFailures.mutate({ kind: g.kind, reseed: true })}
+                >Retry {g.count} with a new seed</Secondary>
+              )}
+              {g.action === 'fix_config' && (
+                <Hint>Change the provider under AI Providers, then requeue.</Hint>
+              )}
+            </FailGroup>
+          ))}
+        </Failures>
+      )}
 
       {pager}
 

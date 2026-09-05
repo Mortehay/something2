@@ -57,7 +57,39 @@ export function useArtQueue() {
     refetchInterval: (q) => (q.state.data?.run?.running ? 2000 : false),
     queryFn: () => getJson(`${API_URL}/api/art-jobs`, 'the art queue'),
   });
-  return { stats: data?.stats || null, run: data?.run || null };
+  // `failures` arrives already GROUPED AND CLASSIFIED by the server. The rule
+  // that decides whether a failure is the provider's fault or the subject's
+  // lives in backend/src/services/artFailures.js and is not duplicated here --
+  // this repo already carries one rule copied across the front/back split and
+  // that is a standing hazard. The page renders what it is told.
+  return { stats: data?.stats || null, run: data?.run || null, failures: data?.failures || [] };
+}
+
+// Return every failed subject of ONE cause to the queue.
+//
+// `reseed` is not a UI nicety: the backend REFUSES a plain requeue for a
+// content failure with 409, because the seed is derived from the subject and
+// the retry would regenerate the identical image. The button that sends it is
+// therefore a different button, not the same one with a flag.
+export function useRequeueFailures() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ kind, reseed }) => {
+      const { res, json } = await post('/api/art-jobs/requeue', { kind, reseed: !!reseed });
+      // 409 is the server enforcing the rule. Surfaced verbatim -- it explains
+      // WHY a retry cannot work, which is the thing the admin needs to know.
+      if (!res.ok) throw new Error(json.error || 'Failed to requeue');
+      return json;
+    },
+    onSuccess: (json) => {
+      toast.success(json.reseeded
+        ? `${json.requeued} queued again with a new seed`
+        : `${json.requeued} returned to the queue`);
+      qc.invalidateQueries({ queryKey: QUEUE_KEY });
+      qc.invalidateQueries({ queryKey: SUBJECTS_KEY });
+    },
+    onError: (err) => toast.error(err.message),
+  });
 }
 
 async function post(path, body) {

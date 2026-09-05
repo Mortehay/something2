@@ -309,3 +309,74 @@ test('every art route is behind the admin guard', async (t) => {
       `${method.toUpperCase()} ${path} answered ${res.status} without a token`);
   }
 });
+
+// --- SOMET-544: requeue is scoped by CAUSE, and refuses pointless retries ---
+//
+// The rule is enforced SERVER-SIDE on purpose. Hiding the button would leave
+// it unenforced for anything calling the API directly, and the reason it must
+// not be retried is a property of the data model (seedFor derives the seed
+// from the subject), not of the UI.
+lockedTest('a plain requeue of a content failure is refused, with the reason', async (t, pool) => {
+  const [job] = await queue.enqueue(pool, [{ kind: 'skill', key: 'rq_content' }],
+    { backend: 'connector' });
+  await pool.query(
+    `UPDATE art_jobs SET state='failed', attempts=3,
+        last_error='provider answered 422: {"detail":"cutout removed 97.9% of the image"}'
+      WHERE id=$1`, [job.id],
+  );
+
+  const refused = await request(app).post('/api/art-jobs/requeue')
+    .set(...AUTH).send({ kind: 'content_cutout' });
+  assert.equal(refused.status, 409, 'a retry that cannot work must be refused, not accepted');
+  assert.match(refused.body.error, /same image/i, 'and it must say WHY');
+  assert.equal(refused.body.action, 'reseed');
+
+  const still = await pool.query('SELECT state FROM art_jobs WHERE id=$1', [job.id]);
+  assert.equal(still.rows[0].state, 'failed', 'the refusal must not have queued it anyway');
+
+  // The same call WITH reseed is allowed, and must change the seed -- a
+  // requeue that kept the seed would be the refused operation wearing a flag.
+  const before = await pool.query('SELECT seed FROM art_jobs WHERE id=$1', [job.id]);
+  const ok = await request(app).post('/api/art-jobs/requeue')
+    .set(...AUTH).send({ kind: 'content_cutout', reseed: true });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.requeued, 1);
+  const after = await pool.query('SELECT state, seed FROM art_jobs WHERE id=$1', [job.id]);
+  assert.equal(after.rows[0].state, 'queued');
+  assert.notEqual(String(after.rows[0].seed), String(before.rows[0].seed),
+    'reseed must actually change the seed, or the retry reproduces the same image');
+});
+
+lockedTest('a new seed is refused for a CONFIG failure -- it cannot help', async (t, pool) => {
+  const [job] = await queue.enqueue(pool, [{ kind: 'skill', key: 'rq_config' }],
+    { backend: 'connector' });
+  await pool.query(
+    `UPDATE art_jobs SET state='failed', attempts=3,
+        last_error='provider "x" renders at 512x512, below the 1024px minimum for an isolated object'
+      WHERE id=$1`, [job.id],
+  );
+  const res = await request(app).post('/api/art-jobs/requeue')
+    .set(...AUTH).send({ kind: 'config', reseed: true });
+  assert.equal(res.status, 409, 'a different seed does not fix a misconfigured provider');
+  assert.equal(res.body.action, 'fix_config');
+});
+
+lockedTest('a provider failure requeues plainly, keeping its seed', async (t, pool) => {
+  const [job] = await queue.enqueue(pool, [{ kind: 'skill', key: 'rq_prov' }],
+    { backend: 'connector' });
+  await pool.query(
+    `UPDATE art_jobs SET state='failed', attempts=3,
+        last_error='provider answered 500: {"detail":"!handles_.at(i) INTERNAL ASSERT FAILED"}'
+      WHERE id=$1`, [job.id],
+  );
+  const before = await pool.query('SELECT seed FROM art_jobs WHERE id=$1', [job.id]);
+  const res = await request(app).post('/api/art-jobs/requeue').set(...AUTH)
+    .send({ kind: 'provider_fault' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.requeued, 1);
+  const after = await pool.query('SELECT state, attempts, seed FROM art_jobs WHERE id=$1', [job.id]);
+  assert.equal(after.rows[0].state, 'queued');
+  assert.equal(after.rows[0].attempts, 0, 'a provider fault should not count against the subject');
+  assert.equal(String(after.rows[0].seed), String(before.rows[0].seed),
+    'a provider failure keeps its seed -- the image was never the problem');
+});
