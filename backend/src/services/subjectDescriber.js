@@ -47,6 +47,10 @@ const RULES = [
   'No sentences, no preamble, no quotes, no trailing full stop.',
   'Describe only what is visible. Never name the art style, the medium, the',
   '  background, the framing, or the view angle -- those are added later.',
+  'The object must have a PHYSICAL FORM you could hold or point at. Wind, auras,',
+  '  light, overlays and "energy" are not forms -- asked for those this model',
+  '  returns a generic grey stone disc, measured. If the effect has no natural',
+  '  physical form, name the WEAPON, TOOL or EMBLEM associated with it instead.',
   'Never mention a person, a character, a hand, or who uses the thing.',
   'Use a colour only when the name or effect implies one.',
 ].join('\n');
@@ -76,6 +80,9 @@ const CONTRACTS = {
       ['Bone Storm (Cultist, magic)', 'cluster of jagged bone shards'],
       ['Thunder Strike (Warrior, magic)', 'forked lightning bolt'],
       ['Fan of Knives (Archer, melee)', 'five throwing knives spread in a fan'],
+      // The formless case, shown rather than described: a whirlwind has no
+      // form, so the exemplar names a PROP that suggests it.
+      ['Whirlwind (Warrior, melee)', 'battle axe with a spiral-etched blade'],
     ],
   },
   // The hardest kind: the subject is one abstract word. The catalogue holds the
@@ -139,6 +146,18 @@ function clean(text, length) {
   out = out.replace(/^["'`]+|["'`]+$/g, '');
   out = out.split('\n')[0].trim();
   out = out.replace(/[.]+$/, '');
+  // STRIP A LEADING ARTICLE. The exemplars never use one, but the model adds it
+  // anyway and gets it wrong: measured output included "a arrow",
+  // "a ice-tipped rapier" and "a five throwing knives spread in a fan".
+  // buildObjectPrompt wraps this as "only X and nothing else", which supplies
+  // the determiner, so the article is redundant even when correct.
+  //
+  // The catalogue TEMPLATE has the same defect ("a apprentice staff",
+  // "a arbalest") -- pre-existing, and not fixed here, but this must not add
+  // to it. A prompt that opens on a grammatical error spends its first token
+  // badly, which is the reasoning catalogSubjects already records for
+  // "a pile of gold" over "a gold".
+  out = out.replace(/^(a|an|the)\s+/i, '');
   // A model that ignores the word budget produces a paragraph; truncating at a
   // word boundary is better than sending it, and better than a token cut.
   const words = out.split(/\s+/).filter(Boolean);
