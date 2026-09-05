@@ -4,6 +4,7 @@ const { Pool } = require('pg');
 const queue = require('../src/services/artJobQueue.js');
 const remote = require('../src/services/remoteImageProvider.js');
 const { dispatch } = require('../src/services/artDispatcher.js');
+const dispatcher = require('../src/services/artDispatcher.js');
 const { withAdvisoryLock, ART_JOBS_LOCK_KEY } = require('./helpers/advisoryLock.js');
 
 // SOMET-540. The dispatcher, against a real Postgres and a stubbed generator.
@@ -251,3 +252,59 @@ lockedTest('a SUCCESSFUL generation is written to the history with its image',
     assert.ok(rows[0].image_key, 'a success must record WHICH image it produced');
     await pool.query("DELETE FROM art_generations WHERE subject_key LIKE 'sk_%'");
   });
+
+// --- SOMET-543: the circuit breaker ---------------------------------------
+//
+// Backoff bounds how often ONE subject retries. It does not bound the
+// AGGREGATE rate: a hundred subjects failing instantly still make a hundred
+// requests before any of them waits. Only stopping does that.
+lockedTest('a drain stops once several DIFFERENT subjects fail on the provider',
+  async (t, pool, providerId) => {
+    for (let i = 1; i <= 6; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await queue.enqueue(pool, [S(i)], { backend: 'connector', providerId });
+    }
+    const status = dispatcher.startDrain(pool, {
+      provider: PROVIDER(providerId),
+      generate: failWith('provider answered 500: !handles_.at(i) INTERNAL ASSERT FAILED'),
+      buildRequest,
+      limit: 6,
+    });
+    assert.equal(status.running, true);
+    // Let the drain run itself out.
+    for (let i = 0; i < 60 && dispatcher.runStatus().running; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((r) => { setTimeout(r, 100); });
+    }
+    const final = dispatcher.runStatus();
+    assert.equal(final.running, false);
+    assert.match(final.error || '', /different subjects failed on the provider/,
+      'the drain must stop and SAY the provider looks down');
+    // The queue is not destroyed -- the subjects are still there to retry.
+    const { rows } = await pool.query(
+      "SELECT count(*)::int AS n FROM art_jobs WHERE state = 'queued' AND subject_key LIKE 'sk_%'",
+    );
+    assert.ok(rows[0].n > 0, 'stopping must leave work queued, not consume it');
+  });
+
+// The distinction that a naive breaker gets wrong, and that an external
+// watchdog here DID get wrong: a subject whose own image cannot be keyed says
+// nothing about the provider's health.
+lockedTest('CONTENT failures do not trip the breaker', async (t, pool, providerId) => {
+  for (let i = 20; i <= 25; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    await queue.enqueue(pool, [S(i)], { backend: 'connector', providerId });
+  }
+  dispatcher.startDrain(pool, {
+    provider: PROVIDER(providerId),
+    generate: failWith('provider answered 422: cutout removed 97.9% of the image'),
+    buildRequest,
+    limit: 6,
+  });
+  for (let i = 0; i < 60 && dispatcher.runStatus().running; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((r) => { setTimeout(r, 100); });
+  }
+  assert.equal(dispatcher.runStatus().error, null,
+    'a batch of unkeyable subjects is not a dead provider, and must not be stopped as one');
+});

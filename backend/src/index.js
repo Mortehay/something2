@@ -3427,7 +3427,11 @@ app.post('/api/art-jobs/dispatch', adminGuard, async (req, res) => {
     const status = artDispatcher.startDrain(pool, {
       provider,
       limit: Math.min(Math.max(parseInt(req.body.limit, 10) || 10, 1), 100),
-      concurrency: Math.min(Math.max(parseInt(req.body.concurrency, 10) || 2, 1), 8),
+      // Defaults to ONE. The remote card's effective headroom is under one
+      // SDXL pipeline, so two concurrent generations ask the driver for memory
+      // that is not there -- the ENOMEM behind every fault this provider has
+      // had. A caller that knows its provider has room can still say so.
+      concurrency: Math.min(Math.max(parseInt(req.body.concurrency, 10) || 1, 1), 8),
     });
     res.status(202).json(status);
   } catch (err) {

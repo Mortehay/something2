@@ -7,6 +7,7 @@ const assetStore = require('./assetStore.js');
 const aiProviders = require('./aiProviders.js');
 const history = require('./artGenerations.js');
 const promptNotes = require('./artPromptNotes.js');
+const failures = require('./artFailures.js');
 const { buildObjectPrompt, BACKDROP, CUTOUT_BACKDROP } = require('./objectPrompt.js');
 
 // SOMET-540. The loop that turns queued art jobs into images.
@@ -27,7 +28,25 @@ const { buildObjectPrompt, BACKDROP, CUTOUT_BACKDROP } = require('./objectPrompt
 
 // A cap, not a target. The remote decides how much parallelism actually helps;
 // this only stops us from opening 617 sockets at once.
-const DEFAULT_CONCURRENCY = () => parseInt(process.env.ART_DISPATCH_CONCURRENCY || '2', 10);
+// ONE AT A TIME, measured rather than cautious. The remote card's effective
+// headroom -- free VRAM plus what torch has reserved and can reuse -- sits
+// UNDER 7GB in normal operation, which is one SDXL pipeline. Two concurrent
+// generations need two pipelines' worth of activations, so a default of 2 was
+// asking the driver for memory that is not there; that request is the
+// dxgkio_make_resident ENOMEM behind every fault this provider has had.
+//
+// Raise it only for a provider known to have headroom for it.
+const DEFAULT_CONCURRENCY = () => parseInt(process.env.ART_DISPATCH_CONCURRENCY || '1', 10);
+
+// How many DIFFERENT subjects may fail in a row before the drain gives up.
+//
+// Distinct subjects is the whole point: one subject failing three times is a
+// bad subject and the attempt cap already handles it. Three different subjects
+// failing in a row is the PROVIDER, and continuing then just converts the rest
+// of the queue into failures at whatever rate the failures come back -- which,
+// when a provider is faulted and answering in 60ms, is fast. Concurrency does
+// not bound that; only stopping does.
+const BREAKER_TRIP = () => parseInt(process.env.ART_BREAKER_TRIP || '3', 10);
 
 // --- The resolution precondition ------------------------------------------
 //
@@ -206,7 +225,10 @@ async function runOne(db, job, {
       job, provider, req: sentOrIntended(), outcome: 'failed', error: message,
     });
     await queue.fail(db, job.id, new Error(message));
-    return { id: job.id, ok: false, error: message };
+    return {
+      id: job.id, ok: false, error: message,
+      subject: `${job.subject_kind}/${job.subject_key}`,
+    };
   };
   // Only an OBJECT gets the cutout guards. A tile is legitimately opaque, and
   // checking it as an object would refuse every tile in the catalogue.
@@ -266,7 +288,10 @@ async function runOne(db, job, {
     job, provider, req: sentOrIntended(), outcome: 'done', imageKey,
   });
   await queue.complete(db, job.id);
-  return { id: job.id, ok: true, imageKey, result: doc.result };
+  return {
+    id: job.id, ok: true, imageKey, result: doc.result,
+    subject: `${job.subject_kind}/${job.subject_key}`,
+  };
 }
 
 // Point the subject at its new image, through SOMET-535's registry -- items
@@ -536,6 +561,10 @@ function startDrain(db, opts = {}) {
     finishedAt: null, passes: 0, done: 0, failed: 0, error: null,
     waitingUntil: null,
   };
+  // Distinct subjects that have failed on the PROVIDER since the last success.
+  // A Set, not a counter: the same subject failing repeatedly says nothing
+  // about the provider, and the attempt cap already ends that.
+  const brokenSubjects = new Set();
   const self = run;
 
   (async () => {
@@ -546,6 +575,25 @@ function startDrain(db, opts = {}) {
         self.passes += 1;
         self.done += out.done;
         self.failed += out.failed;
+
+        // THE CIRCUIT BREAKER. Results arrive in completion order, so walking
+        // them in order is walking the sequence of outcomes as they happened.
+        //
+        // Only PROVIDER-class failures count. A subject whose cutout keyed
+        // away its own image says nothing about the provider's health, and
+        // tripping on it would stop a perfectly good batch -- which is exactly
+        // the mistake an external watchdog made here before the distinction
+        // existed.
+        for (const r of out.results) {
+          if (r.ok) { brokenSubjects.clear(); continue; }
+          if (failures.classify(r.error).retryable) brokenSubjects.add(r.subject);
+        }
+        if (brokenSubjects.size >= BREAKER_TRIP()) {
+          self.error = `stopped after ${brokenSubjects.size} different subjects failed on the `
+            + 'provider in a row -- it looks down rather than the subjects being bad. '
+            + 'Nothing was lost: they are queued and will retry.';
+          break;
+        }
         // SOMET-543. Nothing claimed no longer means the queue is empty: it
         // also happens when every remaining job is serving its retry backoff.
         // Treating the second as the first would END A BATCH with 90 subjects
