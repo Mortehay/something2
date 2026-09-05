@@ -161,9 +161,16 @@ test('an unknown subject kind throws rather than resolving to nothing', async ()
 // colour, one of them an empty magenta frame. Structurally perfect and
 // unusable.
 
-test('a provider that cuts out server-side is asked for a WHITE backdrop', () => {
+test('a provider that cuts out server-side is asked for a GREY backdrop', () => {
   assert.equal(d.backdropFor({ request_template: { cutout: true } }), CUTOUT_BACKDROP);
-  assert.match(CUTOUT_BACKDROP, /white/);
+  // Grey, not white and not a saturated colour. White cost 21 of 101 subjects
+  // on 2026-09-05 (the provider's cutout is a colour key, so a pale subject on
+  // white shares its backdrop's colour); a saturated backdrop bleeds its hue
+  // into the subject, which is what the magenta finding measured. Grey is the
+  // only candidate that avoids both, so this assertion pins BOTH properties.
+  assert.match(CUTOUT_BACKDROP, /grey|gray/, 'the cutout backdrop must be grey');
+  assert.doesNotMatch(CUTOUT_BACKDROP, /white|magenta|green|blue/,
+    'a saturated or pale backdrop reintroduces a measured, expensive bug');
 });
 
 // A provider that does NOT cut out is feeding the chroma-key step, which keys
@@ -179,8 +186,12 @@ test('a provider that does NOT cut out keeps magenta, for the chroma key', () =>
 test('the composed request carries the backdrop its provider needs', async () => {
   const cut = await d.requestForSubject({}, { seed: 1 }, { key: 'k', basePrompt: 'a sword' },
     OBJECT_REG, { request_template: { cutout: true } });
-  assert.match(cut.prompt, /white background/);
+  assert.match(cut.prompt, /grey background/);
+  // Both exclusions matter and for DIFFERENT measured reasons: magenta bleeds
+  // its hue into the subject, and white shares a colour with pale subjects so
+  // the provider's flood-fill cutout eats them.
   assert.ok(!/magenta/.test(cut.prompt), 'naming magenta tints the subject magenta');
+  assert.ok(!/white/.test(cut.prompt), 'white lost 21 of 101 subjects to the cutout');
 
   const keyed = await d.requestForSubject({}, { seed: 1 }, { key: 'k', basePrompt: 'a sword' },
     OBJECT_REG, { request_template: { cutout: false } });

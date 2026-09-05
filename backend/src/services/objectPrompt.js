@@ -36,12 +36,40 @@ const BACKDROP = 'flat solid magenta background';
 //   white     39 / 19 /  12 /  45 /  99 %
 //   none      43 / 32 /   4 /  19 /  n/a (one 422)
 //
-// White is safe HERE, though it would not be for chroma keying: the objection
-// to white -- "it punches holes straight through pale subjects" -- is an
-// objection to KEYING it. A provider doing real background removal has no such
-// problem, and a pale grey helm came back intact. Keep magenta for the path
-// that genuinely keys a colour.
-const CUTOUT_BACKDROP = 'flat solid white background';
+// WHITE WAS WRONG, and the reasoning that chose it contained the refutation.
+//
+// It was picked on the argument that "the objection to white -- it punches
+// holes straight through pale subjects -- is an objection to KEYING it, and a
+// provider doing real background removal has no such problem". That last step
+// does not hold: this provider's background removal IS a colour key. It flood
+// fills from the edges, so a pale subject on white shares a colour with its
+// backdrop exactly as it would in a downstream chroma key. The objection never
+// went away; it moved to the other side of the wire.
+//
+// It cost 21 of 101 subjects in the 2026-09-05 batch, in two shapes that look
+// unrelated and are one cause:
+//
+//   thin + pale (staff, wand, spear, arrow, dart, signet, band)
+//       -> the fill eats the subject: "cutout removed 97.9%, no subject left"
+//   bulky, fills the frame (plate, gauntlets, hood)
+//       -> too little background to key: 17-21% clear, under our 25% floor
+//
+// Measured, same subjects, same seeds, backdrop the only variable, transparency
+// read with alphaProfile and judged against the real floor:
+//
+//                       white   grey
+//     8 failing subjects  0/8     8/8      (grey: 79-97% clear)
+//     4 working controls  4/4     4/4      (grey within ~1pt, worst -8pt)
+//
+// GREY RATHER THAN A SATURATED COLOUR, deliberately. Green and magenta both
+// key cleanly here too -- but the bleed measured above is a bleed of HUE, and
+// grey has no hue to bleed. It is the one candidate that cannot reintroduce
+// the bug the magenta finding fixed. That is also why this is not simply
+// reverting to magenta: magenta keys well and ruins the subject.
+//
+// Magenta stays the default for the path that genuinely chroma-keys downstream
+// (tools/cutout-entity-textures.py keys that exact colour).
+const CUTOUT_BACKDROP = 'flat solid neutral grey background';
 
 // Mirrors sprite-gen/app/prompts.py build_object_prompt in intent, not in
 // wording. Two deliberate departures, both measured on this provider:
