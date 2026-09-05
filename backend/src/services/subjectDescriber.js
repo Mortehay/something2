@@ -38,7 +38,12 @@ const LENGTHS = {
 };
 
 const RULES = [
-  'Reply with ONE noun phrase and nothing else.',
+  'Reply with ONE noun phrase naming ONE physical object.',
+  'Never describe an action, an event, or two things interacting. "axe cleaving',
+  '  through stone" is wrong -- it names two objects and a verb, and the model',
+  '  renders the dominant noun and drops the rest. "heavy war axe with a chipped',
+  '  blade" is right. Measured: the first form produced a stone well; the second',
+  '  form is what this rule exists to force.',
   'No sentences, no preamble, no quotes, no trailing full stop.',
   'Describe only what is visible. Never name the art style, the medium, the',
   '  background, the framing, or the view angle -- those are added later.',
@@ -59,13 +64,18 @@ const CONTRACTS = {
   },
   // An ability is not an object. Asking for one draws the caster.
   skill: {
-    role: 'You name the ICON for a fantasy game ABILITY. The icon is a symbol of '
-      + 'the effect, never the character who uses it.',
-    ask: 'Describe a single emblem or object that stands for this ability.',
+    role: 'You name the ICON for a fantasy game ABILITY. The icon is ONE physical '
+      + 'object that suggests the effect -- never the character who uses it, and '
+      + 'never the action itself.',
+    ask: 'Name the single object that would appear on this ability\'s icon.',
+    // Every exemplar is ONE object. The earlier set used phrases like "forked
+    // lightning bolt STRIKING an anvil", and the model copied the form: it
+    // answered with actions, and SDXL rendered the anvil and dropped the bolt.
+    // Few-shot teaches shape as much as content.
     examples: [
-      ['Bone Storm (Cultist, magic)', 'swirling vortex of jagged bone shards'],
-      ['Thunder Strike (Warrior, magic)', 'forked lightning bolt striking an anvil'],
-      ['Fan of Knives (Archer, melee)', 'spread of five throwing knives in an arc'],
+      ['Bone Storm (Cultist, magic)', 'cluster of jagged bone shards'],
+      ['Thunder Strike (Warrior, magic)', 'forked lightning bolt'],
+      ['Fan of Knives (Archer, melee)', 'five throwing knives spread in a fan'],
     ],
   },
   // The hardest kind: the subject is one abstract word. The catalogue holds the
@@ -75,9 +85,9 @@ const CONTRACTS = {
       + 'emblem standing for the effect, never a person.',
     ask: 'Describe a single emblem that stands for this bonus.',
     examples: [
-      ['Fleet - cooldown floor drops from 0.40 to 0.32', 'winged boot with trailing speed lines'],
-      ['Cryomancy - +35% ice damage, hits chill', 'jagged ice crystal wreathed in frost'],
-      ['Sanguine Aura', 'ringed drop of blood with a soft halo'],
+      ['Fleet - cooldown floor drops from 0.40 to 0.32', 'winged boot'],
+      ['Cryomancy - +35% ice damage, hits chill', 'jagged ice crystal'],
+      ['Sanguine Aura', 'red gemstone ringed in gold'],
     ],
   },
 };
