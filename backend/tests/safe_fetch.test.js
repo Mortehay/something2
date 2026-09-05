@@ -121,7 +121,7 @@ test('discovery refuses a file:// base_url at call time, not just at save time',
 // memory-exhaustion primitive. A stubbed .json() would not prove the cap, so
 // these build an actual ReadableStream.
 
-const { readCapped, readJsonCapped } = require('../src/services/safeFetch');
+const { readCapped, readJsonCapped, errorDetail, MAX_ERROR_CHARS } = require('../src/services/safeFetch');
 
 function streamedResponse(text) {
   const bytes = Buffer.from(text, 'utf8');
@@ -181,4 +181,56 @@ test('readJsonCapped reports malformed JSON rather than throwing', async () => {
 test('a body that is neither streamable nor bufferable is reported, not silently uncapped', async () => {
   const out = await readCapped({ ok: true, status: 200 }, 1024);
   assert.match(out.error || '', /not readable/);
+});
+
+// --- errorDetail: the provider's own words -------------------------------
+
+test('errorDetail pulls the message out of a FastAPI error body', async () => {
+  // The real case this exists for: a 504 whose body is the only thing that
+  // says whether the remote worker is wedged or the generation simply ran long.
+  const s = streamedResponse(JSON.stringify({
+    detail: 'Generation did not finish within 240s: The operation timed out.',
+  }));
+  assert.strictEqual(await errorDetail(s.res),
+    'Generation did not finish within 240s: The operation timed out.');
+});
+
+test('errorDetail reads the other common error keys', async () => {
+  for (const [key, value] of [['error', 'model not found'], ['message', 'invalid api key'], ['msg', 'busy']]) {
+    const s = streamedResponse(JSON.stringify({ [key]: value }));
+    assert.strictEqual(await errorDetail(s.res), value, `${key} must be read`);
+  }
+});
+
+test('errorDetail stringifies a non-string detail rather than printing [object Object]', async () => {
+  // FastAPI validation errors put an ARRAY of objects in `detail`.
+  const s = streamedResponse(JSON.stringify({ detail: [{ loc: ['body', 'width'], msg: 'not an integer' }] }));
+  const out = await errorDetail(s.res);
+  assert.ok(!out.includes('[object Object]'), out);
+  assert.match(out, /not an integer/);
+});
+
+test('errorDetail falls back to the raw body when it is not JSON or has no known key', async () => {
+  const html = streamedResponse('<html><body>\n  502 Bad Gateway\n</body></html>');
+  // Whitespace collapsed: this string is rendered inline in the admin UI.
+  assert.strictEqual(await errorDetail(html.res), '<html><body> 502 Bad Gateway </body></html>');
+
+  const odd = streamedResponse(JSON.stringify({ unexpected: 'shape' }));
+  assert.strictEqual(await errorDetail(odd.res), '{"unexpected":"shape"}');
+});
+
+test('errorDetail truncates a body that is a whole page or a stack trace', async () => {
+  const s = streamedResponse('y'.repeat(5000));
+  const out = await errorDetail(s.res);
+  assert.strictEqual(out.length, MAX_ERROR_CHARS + 1, 'truncated to the cap plus the ellipsis');
+  assert.ok(out.endsWith('…'));
+});
+
+test('errorDetail returns empty rather than throwing when the body cannot be read', async () => {
+  // Reading the explanation must never fail the job harder than it already has.
+  assert.strictEqual(await errorDetail({ ok: false, status: 504 }), '');
+  assert.strictEqual(await errorDetail({
+    ok: false, status: 504, body: { getReader: () => ({ read: async () => { throw new Error('socket died'); } }) },
+  }), '');
+  assert.strictEqual(await errorDetail(streamedResponse('   \n  ').res), '', 'a blank body carries nothing');
 });

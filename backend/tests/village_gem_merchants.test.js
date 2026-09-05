@@ -21,7 +21,11 @@ test('villageGemMerchantPost derives valid coordinates in settlement interior', 
 
 test('SKILLS seed data enriched as PoE Skill Gems with 6 attribute & level requirements', () => {
   assert.equal(SKILLS.length, 300);
+  const classCounters = {};
   for (const s of SKILLS) {
+    classCounters[s.class] = (classCounters[s.class] || 0) + 1;
+    const idx = classCounters[s.class];
+
     assert.equal(s.isGem, true);
     assert.ok(['red', 'green', 'blue', 'purple', 'orange', 'hybrid'].includes(s.gemColor));
     assert.ok(s.reqLvl >= 1);
@@ -31,7 +35,11 @@ test('SKILLS seed data enriched as PoE Skill Gems with 6 attribute & level requi
     assert.ok(typeof s.reqInt === 'number');
     assert.ok(typeof s.reqWis === 'number');
     assert.ok(typeof s.reqCha === 'number');
-    assert.ok(s.gemPrice >= 25);
+    if (idx === 1) {
+      assert.equal(s.gemPrice, 30);
+    } else {
+      assert.ok(s.gemPrice >= 250);
+    }
     assert.ok(s.reqWeapon);
   }
 });

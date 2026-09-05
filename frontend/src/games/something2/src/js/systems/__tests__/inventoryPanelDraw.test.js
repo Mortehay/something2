@@ -59,6 +59,51 @@ describe("drawInventory", () => {
     expect(cold.texts.some((t) => t.text.includes("dmg 5"))).toBe(false);
   });
 
+  it("draws a tooltip with stat bonuses and requirements for a hovered cell", () => {
+    const ring = {
+      id: 2,
+      name: "Ring of Charisma",
+      category: "armor",
+      slot: "ring1",
+      defense: 2,
+      stat_bonus_stat: "charisma",
+      stat_bonus_amount: 2,
+      req_level: 10,
+    };
+    const i = inv({ types: [ring], items: [{ id: "r1", typeId: 2, quantity: 1 }] });
+    const layout = layoutInventory({ inventory: i });
+    const cell = layout.cells[0];
+
+    const ctx = stubCtx();
+    drawInventory(ctx, layout, { inventory: i, hoverX: cell.x + 2, hoverY: cell.y + 2 });
+    expect(ctx.texts.some((t) => t.text === "Ring of Charisma")).toBe(true);
+    expect(ctx.texts.some((t) => t.text === "+2 to Charisma")).toBe(true);
+    expect(ctx.texts.some((t) => t.text.includes("Requires: Level 10"))).toBe(true);
+  });
+
+  it("draws a tooltip for an equipped paperdoll slot when hovered", () => {
+    const armor = {
+      id: 3,
+      name: "Steel Plate",
+      category: "armor",
+      slot: "chest",
+      defense: 25,
+      resistances: { fire: 8 },
+      stat_bonus_stat: "constitution",
+      stat_bonus_amount: 4,
+    };
+    const i = inv({ types: [armor], items: [{ id: "c1", typeId: 3, quantity: 1 }], equipment: { chest: "c1" } });
+    const layout = layoutInventory({ inventory: i });
+    const slot = layout.slots.find((s) => s.slot === "chest");
+
+    const ctx = stubCtx();
+    drawInventory(ctx, layout, { inventory: i, hoverX: slot.x + 2, hoverY: slot.y + 2 });
+    expect(ctx.texts.some((t) => t.text === "Steel Plate")).toBe(true);
+    expect(ctx.texts.some((t) => t.text === "def 25")).toBe(true);
+    expect(ctx.texts.some((t) => t.text === "+8% fire resistance")).toBe(true);
+    expect(ctx.texts.some((t) => t.text === "+4 to Constitution")).toBe(true);
+  });
+
   it("keeps the tooltip inside the canvas for a cell at the right edge", () => {
     const items = [];
     for (let n = 0; n < 8; n += 1) items.push({ id: `i${n}`, typeId: 1, quantity: 1 });

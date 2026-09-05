@@ -24,7 +24,9 @@ const { selectOne } = require('./pointerPath');
 // generation still came back 401.
 const { authHeaders } = require('./providerDiscovery');
 const assetStore = require('./assetStore');
-const { safeFetch, redactUrl, readCapped, readJsonCapped } = require('./safeFetch');
+const {
+  safeFetch, redactUrl, readCapped, readJsonCapped, errorDetail,
+} = require('./safeFetch');
 const { manifestForSheet } = require('./spriteSheet');
 
 // Image generation on CPU can take a minute or more. This is NOT the 30s
@@ -291,7 +293,18 @@ async function runGeneration(jobId, provider, req, deps = {}) {
     return;
   }
   if (!res.ok) {
-    setJob(jobId, { status: 'error', error: `provider answered ${res.status}` });
+    // The status code alone is not diagnosable from this side: a 504 from the
+    // remote can mean its worker is wedged, its model never loaded, or the
+    // generation genuinely ran long, and only its body says which. Reading it
+    // cannot fail the job any harder than it already has -- errorDetail
+    // returns '' rather than throwing, and the code stands alone as before.
+    const detail = await errorDetail(res);
+    setJob(jobId, {
+      status: 'error',
+      error: detail
+        ? `provider answered ${res.status}: ${detail}`
+        : `provider answered ${res.status}`,
+    });
     return;
   }
 

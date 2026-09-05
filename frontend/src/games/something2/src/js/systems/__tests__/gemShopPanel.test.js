@@ -9,7 +9,11 @@ import {
 describe("PoE Skill Gems Data & Requirements", () => {
   it("enriches all 300 skills with PoE Gem attributes (gemColor, reqLvl, reqStr, reqDex, reqCon, reqInt, reqWis, reqCha, reqWeapon, gemPrice)", () => {
     expect(SKILLS.length).toBe(300);
+    const classCounters = {};
     for (const gem of SKILLS) {
+      classCounters[gem.class] = (classCounters[gem.class] || 0) + 1;
+      const idx = classCounters[gem.class];
+
       expect(gem.isGem).toBe(true);
       expect(["red", "green", "blue", "purple", "orange", "hybrid"]).toContain(gem.gemColor);
       expect(gem.reqLvl).toBeGreaterThanOrEqual(1);
@@ -19,7 +23,11 @@ describe("PoE Skill Gems Data & Requirements", () => {
       expect(typeof gem.reqInt).toBe("number");
       expect(typeof gem.reqWis).toBe("number");
       expect(typeof gem.reqCha).toBe("number");
-      expect(gem.gemPrice).toBeGreaterThanOrEqual(25);
+      if (idx === 1) {
+        expect(gem.gemPrice).toBe(30);
+      } else {
+        expect(gem.gemPrice).toBeGreaterThanOrEqual(250);
+      }
       expect(gem.reqWeapon).toBeDefined();
     }
   });

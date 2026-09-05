@@ -2451,8 +2451,9 @@ export function enrichSkillGems(list) {
       s.reqWeapon = isTransform ? 'any' : (s.type === 'magic' ? 'staff_wand' : 'any');
     }
 
-    // Gem Price in Gold for Gem Merchant (25g to 250g)
-    s.gemPrice = Math.max(25, Math.min(300, Math.round(25 + reqLvl * 4.5)));
+    // Gem Price in Gold for Gem Merchant (First gem of each class stays at starter price ~30g; all subsequent gems increased 10x minimum: 390g to 3000g)
+    const basePrice = Math.max(25, Math.min(300, Math.round(25 + reqLvl * 4.5)));
+    s.gemPrice = idx === 1 ? basePrice : basePrice * 10;
 
     // Gem Tags
     const tags = [];

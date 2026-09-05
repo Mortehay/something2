@@ -4,8 +4,25 @@
 // paints exactly what this returns and decides nothing itself.
 import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
 import { SLOTS, typeOf, canEquipClient } from "../core/inventory.js";
-import { rarityBorderColor } from "./itemDisplay.js";
-import { layoutCharacterTab, drawCharacterTab } from "./characterTab.js";
+import { rarityBorderColor, affixModifier } from "./itemDisplay.js";
+import { layoutCharacterTab, drawCharacterTab, formatModifier, STAT_ABBR } from "./characterTab.js";
+
+export const STAT_NAMES = {
+  strength: "Strength",
+  dexterity: "Dexterity",
+  constitution: "Constitution",
+  intelligence: "Intelligence",
+  wisdom: "Wisdom",
+  charisma: "Charisma",
+};
+
+const RESIST_COLORS = {
+  physical: "#94a3b8",
+  fire: "#f87171",
+  ice: "#38bdf8",
+  lightning: "#facc15",
+  arcane: "#c084fc",
+};
 
 export const PANEL_W = 820;
 // Sized to its content, not to the old list panel: title 30 + preview 190 +
@@ -118,10 +135,16 @@ export function layoutInventory(state) {
     const y = slotsTop + row * (SLOT_H + 6);
     const equippedId = inventory.equipment[slot];
     const equippedType = equippedId != null ? typeOf(inventory, equippedId) : null;
+    const equippedItem = equippedId != null
+      ? (inventory.items || []).find((it) => it.id === equippedId) || { id: equippedId, typeId: equippedType ? equippedType.id : null }
+      : null;
     const disabled = candidateItemId != null && !canEquipClient(inventory, candidateItemId, slot);
     return {
       slot, x, y, w: SLOT_W, h: SLOT_H,
+      equippedId,
       equippedName: equippedType ? equippedType.name : null,
+      equippedType,
+      equippedItem,
       disabled,
     };
   });
@@ -232,6 +255,117 @@ export function statLine(type) {
   }
   const res = Object.entries(type.resistances || {});
   return `def ${type.defense ?? 0}${res.length ? "  " + res.map(([el, v]) => `${el} ${v}`).join(", ") : ""}`;
+}
+
+export function formatItemTooltipLines(item, type) {
+  if (!type) return [];
+  const lines = [];
+
+  // 1. Name
+  const name = type.name || "Unknown Item";
+  lines.push({
+    text: name,
+    color: rarityBorderColor(item ? item.rarity : null, "#e5e7eb"),
+    font: "bold 13px monospace",
+  });
+
+  // 2. Category / Subtype / Slot
+  let catText = "";
+  if (type.category === "weapon") {
+    catText = `${type.two_handed ? "Two-Handed " : ""}${type.kind === "projectile" ? "Ranged" : "Melee"} Weapon · Main Hand${type.tier ? " (Tier " + type.tier + ")" : ""}`;
+  } else if (type.category === "armor") {
+    catText = `${(type.slot ? type.slot.replace("_", " ") : "Armor").toUpperCase()}${type.tier ? " (Tier " + type.tier + ")" : ""}`;
+  } else if (type.category === "stone") {
+    catText = `Magic Stone${type.stone_mode ? " (" + type.stone_mode + ")" : ""}`;
+  } else if (type.category === "consumable") {
+    catText = "Consumable";
+  } else if (type.category === "ammo") {
+    catText = "Ammunition";
+  }
+  if (catText) {
+    lines.push({ text: catText, color: "#9ca3af", font: "11px monospace" });
+  }
+
+  // 3. Core Combat / Defense Stats
+  if (type.category === "weapon") {
+    const dps = (type.damage > 0 && type.cooldown > 0) ? ` (${(type.damage / type.cooldown).toFixed(1)} DPS)` : "";
+    lines.push({
+      text: `dmg ${type.damage}  cd ${type.cooldown}s${type.two_handed ? "  (2H)" : ""}${dps}`,
+      color: "#e5e7eb",
+      font: "11px monospace",
+    });
+    if (type.element && type.element !== "physical") {
+      lines.push({ text: `Element: ${type.element}`, color: RESIST_COLORS[type.element] || "#e5e7eb", font: "11px monospace" });
+    }
+    if (type.range) lines.push({ text: `Range: ${type.range}`, color: "#9ca3af", font: "11px monospace" });
+    if (type.reach) lines.push({ text: `Reach: ${type.reach}`, color: "#9ca3af", font: "11px monospace" });
+    if (type.stamina_cost > 0) lines.push({ text: `Stamina Cost: ${type.stamina_cost}`, color: "#fbbf24", font: "11px monospace" });
+    if (type.mana_cost > 0) lines.push({ text: `Mana Cost: ${type.mana_cost}`, color: "#60a5fa", font: "11px monospace" });
+    if (type.bonus_damage > 0) lines.push({ text: `+${type.bonus_damage} Bonus Damage`, color: "#f87171", font: "11px monospace" });
+    if (type.knockback > 0) lines.push({ text: `Knockback: ${type.knockback}`, color: "#9ca3af", font: "11px monospace" });
+  } else if (type.category === "armor") {
+    if (type.defense != null && type.defense > 0) {
+      lines.push({ text: `def ${type.defense}`, color: "#60a5fa", font: "11px monospace" });
+    }
+    if (type.resistances && typeof type.resistances === "object") {
+      for (const [el, val] of Object.entries(type.resistances)) {
+        if (val && Number(val) !== 0) {
+          lines.push({
+            text: `+${val}% ${el} resistance`,
+            color: RESIST_COLORS[el] || "#9ca3af",
+            font: "11px monospace",
+          });
+        }
+      }
+    }
+  }
+
+  // 4. Inherent Stat Bonus (e.g. +2 to Charisma)
+  if (type.stat_bonus_stat && type.stat_bonus_amount != null) {
+    const sName = STAT_NAMES[type.stat_bonus_stat] || type.stat_bonus_stat;
+    lines.push({
+      text: `+${type.stat_bonus_amount} to ${sName}`,
+      color: "#4ade80",
+      font: "bold 11px monospace",
+    });
+  }
+
+  // 5. Rolled Affixes
+  if (item && Array.isArray(item.affixes) && item.affixes.length > 0) {
+    for (const a of item.affixes) {
+      const mod = affixModifier(a);
+      const formatted = formatModifier(mod);
+      if (formatted) {
+        lines.push({ text: formatted, color: "#86efac", font: "11px monospace" });
+      }
+    }
+  }
+
+  // 6. Requirements
+  const reqs = [];
+  if (type.req_level && type.req_level > 1) {
+    reqs.push(`Level ${type.req_level}`);
+  }
+  for (const s of ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"]) {
+    const rVal = type[`req_${s}`];
+    if (rVal && rVal > 0) {
+      reqs.push(`${rVal} ${STAT_ABBR[s] || s.toUpperCase()}`);
+    }
+  }
+  if (reqs.length > 0) {
+    lines.push({
+      text: `Requires: ${reqs.join(", ")}`,
+      color: "#94a3b8",
+      font: "10px monospace",
+    });
+  }
+
+  // 7. Soulbound
+  if (item && item.soulbound) {
+    lines.push({ text: "Soulbound", color: "#a78bfa", font: "10px monospace" });
+  }
+
+  return lines;
 }
 
 function inside(rect, x, y) {
@@ -383,25 +517,53 @@ export function drawInventory(ctx, layout, state) {
   // Tooltip last, so nothing paints over it. Suppressed mid-drag: the ghost is
   // already following the cursor and two floating boxes read as a glitch.
   if (!drag && hoverX != null && hoverY != null) {
+    let hoveredItem = null;
+    let hoveredType = null;
+
     const cell = layout.cells.find((c) => c.item && inside(c, hoverX, hoverY));
     if (cell) {
-      const name = (cell.type && cell.type.name) || "unknown item";
-      const stats = statLine(cell.type);
-      const w = Math.max(ctx.measureText(name).width, ctx.measureText(stats).width) + 16;
-      const h = 38;
-      // Clamped to the canvas: a cell in the right-hand column would otherwise
-      // push its tooltip off-screen, and the right-hand column is exactly
-      // where the grid ends.
-      const tx = Math.min(hoverX + 12, GAME_WIDTH - w - 4);
-      const ty = Math.min(hoverY + 12, GAME_HEIGHT - h - 4);
-      ctx.fillStyle = "rgba(10,10,18,0.95)";
-      ctx.fillRect(tx, ty, w, h);
-      ctx.strokeStyle = "#4a9eff";
-      ctx.strokeRect(tx, ty, w, h);
-      ctx.fillStyle = "#e5e7eb";
-      ctx.fillText(name, tx + 8, ty + 5);
-      ctx.fillStyle = "#9ca3af";
-      ctx.fillText(stats, tx + 8, ty + 20);
+      hoveredItem = cell.item;
+      hoveredType = cell.type;
+    } else {
+      const slot = layout.slots.find((s) => s.equippedType && inside(s, hoverX, hoverY));
+      if (slot) {
+        hoveredItem = slot.equippedItem;
+        hoveredType = slot.equippedType;
+      }
+    }
+
+    if (hoveredType) {
+      const lines = formatItemTooltipLines(hoveredItem, hoveredType);
+      if (lines.length > 0) {
+        let maxW = 120;
+        for (const line of lines) {
+          ctx.font = line.font || "11px monospace";
+          const w = ctx.measureText(line.text).width;
+          if (w > maxW) maxW = w;
+        }
+        const boxW = Math.max(160, Math.ceil(maxW) + 20);
+        const lineH = 15;
+        const padV = 8;
+        const boxH = padV * 2 + lines.length * lineH;
+
+        // Clamped to the canvas:
+        const tx = Math.min(Math.max(4, hoverX + 12), GAME_WIDTH - boxW - 4);
+        const ty = Math.min(Math.max(4, hoverY + 12), GAME_HEIGHT - boxH - 4);
+
+        ctx.fillStyle = "rgba(10,10,18,0.96)";
+        ctx.fillRect(tx, ty, boxW, boxH);
+        ctx.strokeStyle = rarityBorderColor(hoveredItem ? hoveredItem.rarity : null, "#4a9eff");
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(tx, ty, boxW, boxH);
+
+        let curY = ty + padV;
+        for (const line of lines) {
+          ctx.font = line.font || "11px monospace";
+          ctx.fillStyle = line.color || "#e5e7eb";
+          ctx.fillText(line.text, tx + 10, curY);
+          curY += lineH;
+        }
+      }
     }
   }
 

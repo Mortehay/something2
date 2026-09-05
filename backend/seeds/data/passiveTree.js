@@ -123,24 +123,45 @@ const TEMPLATES = [
   { key: 'core_stam', kind: 'minor', sectors: ['core'], rings: [0], label: 'Stamina', grants: [{ type: 'resource', pool: 'stamina', value: 8 }] },
   { key: 'core_res', kind: 'minor', sectors: ['core'], rings: [0], label: 'Toughness', grants: [{ type: 'resist', element: 'physical', value: 1 }] },
 
-  // --- minors (the connective tissue: +2 to the sector's own stat) ---
+  // --- minors (the connective tissue: all 6 attributes + sector core) ---
   { key: 'min_sinew', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Sinew', grants: [{ type: 'stat', stat: '@sector', value: 2 }] },
-  { key: 'min_focus', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Focus', grants: [{ type: 'stat', stat: '@sector', value: 3 }] },
-  { key: 'min_vigour', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Vigour', grants: [{ type: 'stat', stat: '@sector', value: 2 }, { type: 'resource', pool: 'hp', value: 8 }] },
-  { key: 'min_insight', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Insight', grants: [{ type: 'stat', stat: '@sector', value: 2 }, { type: 'resource', pool: 'mana', value: 6 }] },
-  { key: 'min_wind', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Wind', grants: [{ type: 'stat', stat: '@sector', value: 2 }, { type: 'resource', pool: 'stamina', value: 5 }] },
+  { key: 'min_might', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Might', grants: [{ type: 'stat', stat: 'strength', value: 2 }] },
+  { key: 'min_agility', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Agility', grants: [{ type: 'stat', stat: 'dexterity', value: 2 }] },
+  { key: 'min_vitality', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Vitality', grants: [{ type: 'stat', stat: 'constitution', value: 2 }] },
+  { key: 'min_scholar', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Scholar', grants: [{ type: 'stat', stat: 'intelligence', value: 2 }] },
+  { key: 'min_clarity', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Clarity', grants: [{ type: 'stat', stat: 'wisdom', value: 2 }] },
+  { key: 'min_presence', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Presence', grants: [{ type: 'stat', stat: 'charisma', value: 2 }] },
+
+  // --- hybrid stat + resource/resist minors ---
+  { key: 'min_focus', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Focus', grants: [{ type: 'stat', stat: 'wisdom', value: 2 }, { type: 'resource', pool: 'mana', value: 6 }] },
+  { key: 'min_vigour', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Vigour', grants: [{ type: 'stat', stat: 'constitution', value: 2 }, { type: 'resource', pool: 'hp', value: 8 }] },
+  { key: 'min_insight', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Insight', grants: [{ type: 'stat', stat: 'intelligence', value: 2 }, { type: 'resource', pool: 'mana', value: 6 }] },
+  { key: 'min_wind', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Wind', grants: [{ type: 'stat', stat: 'dexterity', value: 2 }, { type: 'resource', pool: 'stamina', value: 5 }] },
+  { key: 'min_temper', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Temper', grants: [{ type: 'stat', stat: 'strength', value: 2 }, { type: 'resist', element: 'physical', value: 1 }] },
+  { key: 'min_charm', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Charm', grants: [{ type: 'stat', stat: 'charisma', value: 2 }, { type: 'resource', pool: 'stamina', value: 5 }] },
+
+  // --- pure resource / defense minors ---
   { key: 'min_hardy', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Hardy', grants: [{ type: 'resource', pool: 'hp', value: 15 }] },
   { key: 'min_reserve', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Reserve', grants: [{ type: 'resource', pool: 'mana', value: 12 }] },
   { key: 'min_callus', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Callus', grants: [{ type: 'resist', element: 'physical', value: 2 }] },
   { key: 'min_edge', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Edge', grants: [{ type: 'damage', element: 'physical', value: 3 }] },
-  { key: 'min_temper', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Temper', grants: [{ type: 'stat', stat: '@sector', value: 2 }, { type: 'resist', element: 'physical', value: 1 }] },
   { key: 'min_second_wind', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Second Wind', grants: [{ type: 'resource', pool: 'stamina', value: 10 }] },
   { key: 'min_discipline', kind: 'minor', sectors: '*', rings: [2, 3], label: 'Discipline', grants: [{ type: 'stat', stat: '@sector', value: 4 }] },
 
-  // --- notables ---
+  // --- notables: dedicated stat notables for all 6 attributes ---
   { key: 'not_great_sinew', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Great Sinew', grants: [{ type: 'stat', stat: '@sector', value: 8 }] },
+  { key: 'not_brawn', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Brawn', grants: [{ type: 'stat', stat: 'strength', value: 8 }] },
+  { key: 'not_precision', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Precision', grants: [{ type: 'stat', stat: 'dexterity', value: 8 }] },
+  { key: 'not_fortitude', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Fortitude', grants: [{ type: 'stat', stat: 'constitution', value: 8 }] },
+  { key: 'not_prodigy', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Prodigy', grants: [{ type: 'stat', stat: 'intelligence', value: 8 }] },
+  { key: 'not_enlightenment', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Enlightenment', grants: [{ type: 'stat', stat: 'wisdom', value: 8 }] },
+  { key: 'not_splendor', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Splendor', grants: [{ type: 'stat', stat: 'charisma', value: 8 }] },
+
+  // --- sector scaling notables ---
   { key: 'not_mastery', kind: 'notable', sectors: '*', rings: [2, 3], label: 'Mastery', grants: [{ type: 'stat', stat: '@sector', value: 12 }] },
   { key: 'not_apotheosis', kind: 'notable', sectors: '*', rings: [3], label: 'Apotheosis', grants: [{ type: 'stat', stat: '@sector', value: 16 }] },
+
+  // --- resource & combat notables ---
   { key: 'not_deep_reserve', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Deep Reserve', grants: [{ type: 'resource', pool: 'mana', value: 15 }] },
   { key: 'not_thick_skin', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Thick Skin', grants: [{ type: 'resource', pool: 'hp', value: 40 }] },
   { key: 'not_endurance', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Endurance', grants: [{ type: 'resource', pool: 'stamina', value: 30 }] },
@@ -154,10 +175,15 @@ const TEMPLATES = [
   { key: 'not_warm_blood', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Warm Blood', grants: [{ type: 'resist', element: 'ice', value: 8 }] },
   { key: 'not_grounding', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Grounding', grants: [{ type: 'resist', element: 'lightning', value: 8 }] },
   { key: 'not_null_field', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Null Field', grants: [{ type: 'resist', element: 'arcane', value: 8 }] },
-  { key: 'not_ox_blood', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Ox Blood', grants: [{ type: 'stat', stat: '@sector', value: 8 }, { type: 'resource', pool: 'hp', value: 25 }] },
-  { key: 'not_wellspring', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Wellspring', grants: [{ type: 'stat', stat: '@sector', value: 8 }, { type: 'resource', pool: 'mana', value: 20 }] },
-  { key: 'not_honed', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Honed', grants: [{ type: 'stat', stat: '@sector', value: 8 }, { type: 'damage', element: 'physical', value: 5 }] },
-  { key: 'not_quickening', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Quickening', grants: [{ type: 'stat', stat: 'dexterity', value: 6 }] },
+
+  // --- hybrid stat + effect notables ---
+  { key: 'not_ox_blood', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Ox Blood', grants: [{ type: 'stat', stat: 'constitution', value: 8 }, { type: 'resource', pool: 'hp', value: 25 }] },
+  { key: 'not_wellspring', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Wellspring', grants: [{ type: 'stat', stat: 'wisdom', value: 8 }, { type: 'resource', pool: 'mana', value: 20 }] },
+  { key: 'not_honed', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Honed', grants: [{ type: 'stat', stat: 'strength', value: 8 }, { type: 'damage', element: 'physical', value: 5 }] },
+  { key: 'not_quickening', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Quickening', grants: [{ type: 'stat', stat: 'dexterity', value: 8 }] },
+  { key: 'not_arcane_mind', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Arcane Mind', grants: [{ type: 'stat', stat: 'intelligence', value: 8 }, { type: 'damage', element: 'arcane', value: 6 }] },
+  { key: 'not_majesty', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Majesty', grants: [{ type: 'stat', stat: 'charisma', value: 8 }, { type: 'resource', pool: 'hp', value: 20 }] },
+
   { key: 'not_ward', kind: 'notable', sectors: '*', rings: [2, 3], label: 'Ward', grants: [{ type: 'resist', element: 'arcane', value: 6 }, { type: 'resist', element: 'fire', value: 6 }] },
   { key: 'not_searing_blows', kind: 'notable', sectors: '*', rings: [3], label: 'Searing Blows', grants: [{ type: 'status', status: 'burn', value: 1 }] },
   { key: 'not_numbing_blows', kind: 'notable', sectors: '*', rings: [3], label: 'Numbing Blows', grants: [{ type: 'status', status: 'chill', value: 1 }] },

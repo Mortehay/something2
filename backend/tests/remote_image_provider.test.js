@@ -151,6 +151,30 @@ function okJson(body) {
   };
 }
 
+// Unlike okJson, this carries a REAL streamed body: errorDetail reads the body
+// rather than calling .json(), because a non-2xx body is often not JSON at all
+// -- an HTML page from a proxy sitting in front of the service, say.
+function errorRes(status, body) {
+  const bytes = Buffer.from(typeof body === 'string' ? body : JSON.stringify(body), 'utf8');
+  let sent = 0;
+  return {
+    ok: false,
+    status,
+    headers: { get: () => 'application/json' },
+    body: {
+      getReader: () => ({
+        read: async () => {
+          if (sent >= bytes.length) return { done: true, value: undefined };
+          const chunk = bytes.subarray(sent);
+          sent += chunk.length;
+          return { done: false, value: new Uint8Array(chunk) };
+        },
+        cancel: async () => {},
+      }),
+    },
+  };
+}
+
 test('a successful generation stores a PNG and reports the sprite-gen job shape', async (t) => {
   t.after(__resetJobs);
   const store = fakeStore();
@@ -373,4 +397,33 @@ test('a __proto__ key in a template is sent, not silently dropped', async () => 
     'the key must survive into the serialized body');
   // And nothing global is harmed.
   assert.notStrictEqual({}.a, 1);
+});
+
+test("a non-2xx job error carries the provider's own explanation", async (t) => {
+  t.after(__resetJobs);
+  // The case this came from: the remote's 504 body said "Generation did not
+  // finish within 240s", and the job error said only "provider answered 504",
+  // sending the admin to a machine they could not see for a message this
+  // process already had.
+  const jobId = createJob();
+  await runGeneration(jobId, provider, { subject: 'grass', kind: 'tile', prompt: 'g' }, {
+    fetchImpl: async () => errorRes(504, { detail: 'Generation did not finish within 240s.' }),
+    store: fakeStore(),
+  });
+  const job = getJob(jobId);
+  assert.strictEqual(job.status, 'error');
+  assert.match(job.error, /provider answered 504/);
+  assert.match(job.error, /did not finish within 240s/);
+});
+
+test('a non-2xx with an unreadable body still reports the status code alone', async (t) => {
+  t.after(__resetJobs);
+  // Reading the explanation is a best effort; it must never make the job's
+  // error worse than the plain status code it replaced.
+  const jobId = createJob();
+  await runGeneration(jobId, provider, { subject: 'grass', kind: 'tile', prompt: 'g' }, {
+    fetchImpl: async () => ({ ok: false, status: 500, headers: { get: () => 'application/json' } }),
+    store: fakeStore(),
+  });
+  assert.strictEqual(getJob(jobId).error, 'provider answered 500');
 });

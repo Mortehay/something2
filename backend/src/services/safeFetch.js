@@ -170,6 +170,98 @@ async function readJsonCapped(res, maxBytes) {
   }
 }
 
+// The provider's own words about why it said no.
+//
+// A non-2xx body is where the ONE fact that explains the failure lives --
+// "Generation did not finish within 240s", "model not found", "invalid api
+// key". Reporting only the status code sends the admin to a machine they may
+// not be able to see, hunting for a message this process already had in hand.
+//
+// Its own small cap, because an error body is a sentence, not an image; and it
+// never throws, because failing to read the explanation must not turn a clean
+// "answered 504" into something less useful than it already was. Returns '' in
+// every such case, leaving the status code to stand alone.
+const MAX_ERROR_BYTES = () => parseInt(process.env.AI_PROVIDER_MAX_ERROR_BYTES || '4096', 10);
+
+// One line, bounded: an error body can be a whole HTML page or a stack trace,
+// and neither belongs verbatim in a field the admin UI renders inline.
+const MAX_ERROR_CHARS = 300;
+
+function condenseError(value) {
+  const flat = String(value).replace(/\s+/g, ' ').trim();
+  if (flat.length <= MAX_ERROR_CHARS) return flat;
+  return `${flat.slice(0, MAX_ERROR_CHARS)}…`;
+}
+
+// Reads at most maxBytes and KEEPS what it read, rather than abandoning an
+// oversized body the way readCapped does. The difference is deliberate:
+// readCapped guards a result that must be complete to be usable (an image),
+// while this one wants a PREFIX. The first line of a 5 KB proxy error page
+// still names the problem, and returning nothing for it would reproduce the
+// very blindness errorDetail exists to remove. Returns null when there is no
+// readable body at all.
+async function readPrefix(res, maxBytes) {
+  if (!res.body || typeof res.body.getReader !== 'function') {
+    if (typeof res.arrayBuffer !== 'function') return null;
+    return Buffer.from(await res.arrayBuffer()).subarray(0, maxBytes);
+  }
+  const reader = res.body.getReader();
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    // eslint-disable-next-line no-await-in-loop
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(Buffer.from(value));
+    total += value.length;
+    if (total >= maxBytes) {
+      reader.cancel().catch(() => {});
+      break;
+    }
+  }
+  return Buffer.concat(chunks, total).subarray(0, maxBytes);
+}
+
+async function errorDetail(res) {
+  let text;
+  try {
+    const prefix = await readPrefix(res, MAX_ERROR_BYTES());
+    if (!prefix) return '';
+    text = prefix.toString('utf8');
+  } catch (_) {
+    return '';
+  }
+
+  let message = text;
+  try {
+    const body = JSON.parse(text);
+    // FastAPI says `detail`, A1111 says `error`, most others say `message`.
+    // `detail` can also be an array of validation objects, so anything that is
+    // not already a string is stringified rather than printed as [object
+    // Object]. An unrecognised shape falls through to the raw body, which is
+    // still more than the status code alone.
+    if (body && typeof body === 'object' && !Array.isArray(body)) {
+      const picked = ['detail', 'error', 'message', 'msg']
+        .map((key) => body[key])
+        .find((v) => v !== undefined && v !== null && v !== '');
+      if (picked !== undefined) {
+        message = typeof picked === 'string' ? picked : JSON.stringify(picked);
+      }
+    }
+  } catch (_) {
+    // Not JSON -- an HTML error page or plain text. Use it as written.
+  }
+  return condenseError(message);
+}
+
 module.exports = {
-  assertSafeUrl, unsafeUrlReason, redactUrl, safeFetch, readCapped, readJsonCapped, MAX_REDIRECTS,
+  assertSafeUrl,
+  unsafeUrlReason,
+  redactUrl,
+  safeFetch,
+  readCapped,
+  readJsonCapped,
+  errorDetail,
+  MAX_REDIRECTS,
+  MAX_ERROR_CHARS,
 };
