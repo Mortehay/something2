@@ -3,6 +3,7 @@ import styled from 'styled-components';
 import { useGameSettings, useUpdateGameSetting } from './useGameSettings.js';
 import { SETTING_FIELDS, parseSettingInput } from './gameSettingsForm.js';
 import PassiveNodesAdmin from './PassiveNodesAdmin.jsx';
+import AdminLoading from './AdminLoading.jsx';
 
 const AdminContainer = styled.div`
   padding: 2rem; color: var(--s2-text); max-width: 1200px; margin: 0 auto;
@@ -100,7 +101,7 @@ export default function ProgressionAdmin() {
           with a migration attached.
         </Hint>
         {settingsError && <Err role="alert">{settingsError.message}</Err>}
-        {isLoadingSettings && <Hint>Loading…</Hint>}
+        {isLoadingSettings && <AdminLoading label="Loading settings…" inline size={16} />}
         {!isLoadingSettings && SETTING_FIELDS.map((field) => (
           <SettingRow
             key={field.key}

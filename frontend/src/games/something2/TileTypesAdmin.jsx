@@ -12,6 +12,7 @@ import { entityTypesReferencingTile } from './catalogReferences.js';
 import { withOptionalBiome, withOptionalProvider } from './generationJobPayload.js';
 import { ProviderChoice, ProviderAnimationNote } from './ProviderChoice.jsx';
 import BulkRegenerateButton from './BulkRegenerateButton.jsx';
+import AdminLoading from './AdminLoading.jsx';
 
 const AdminContainer = styled.div`
   padding: 2rem;
@@ -535,7 +536,7 @@ function TileTypesAdmin() {
     });
   };
 
-  if (isLoadingTileTypes) return <div>Loading registry...</div>;
+  if (isLoadingTileTypes) return <AdminContainer><AdminLoading label="Loading tile types…" /></AdminContainer>;
 
   return (
     <AdminContainer>

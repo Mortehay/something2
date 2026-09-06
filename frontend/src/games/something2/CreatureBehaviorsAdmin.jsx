@@ -10,6 +10,7 @@ import {
 } from './useCreatureBehaviors.js';
 import { behaviorToForm, behaviorFormToPayload, ATTACK_KINDS, CHASE_STYLES } from './behaviorForm.js';
 import { abilityToForm, abilityFormToPayload, ELEMENTS } from './abilityForm.js';
+import AdminLoading from './AdminLoading.jsx';
 
 const AdminContainer = styled.div`
   padding: 2rem;
@@ -364,7 +365,7 @@ function CreatureBehaviorsAdmin() {
   const guardNeedsMelee = formData.chase_style === 'guard'
     && abilities.some((a) => a.attack_kind !== 'melee');
 
-  if (isLoadingBehaviors) return <div>Loading creature behaviors...</div>;
+  if (isLoadingBehaviors) return <AdminContainer><AdminLoading label="Loading creature behaviours…" /></AdminContainer>;
 
   return (
     <AdminContainer>

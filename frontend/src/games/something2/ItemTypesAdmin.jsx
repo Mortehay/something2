@@ -9,6 +9,7 @@ import {
   isReservedItemType, catalogNames,
 } from './itemTypeForm.js';
 import { useWeaponCatalogs } from './useWeaponCatalogs.js';
+import AdminLoading from './AdminLoading.jsx';
 
 const AdminContainer = styled.div`
   padding: 2rem;
@@ -429,7 +430,7 @@ function ItemTypesAdmin() {
     }
   };
 
-  if (isLoadingItemTypes) return <div>Loading item catalog...</div>;
+  if (isLoadingItemTypes) return <AdminContainer><AdminLoading label="Loading the item catalogue…" /></AdminContainer>;
 
   return (
     <AdminContainer>

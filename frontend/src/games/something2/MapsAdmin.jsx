@@ -9,6 +9,7 @@ import { useBiomes } from './useBiomes.js';
 import { orderBiomeNames } from './biomeForm.js';
 import { groupWorldsByRegion, filterWorlds, defaultOpenGroups } from './mapListView.js';
 import { matchCreatureTypes } from './creaturePicker.js';
+import AdminLoading from './AdminLoading.jsx';
 
 const AdminContainer = styled.div`
   padding: 2rem; color: var(--s2-text); max-width: 1200px; margin: 0 auto;
@@ -420,7 +421,7 @@ function MapsAdmin() {
       { onSuccess: () => setName('') });
   };
 
-  if (isLoadingWorlds) return <AdminContainer>Loading maps…</AdminContainer>;
+  if (isLoadingWorlds) return <AdminContainer><AdminLoading label="Loading maps…" /></AdminContainer>;
 
   return (
     <AdminContainer>

@@ -9,6 +9,7 @@ import {
   useCreateRegion, useEditRegion, useDeleteRegion, useDownloadRegion, useSeedRegion,
 } from './useWorldGen.js';
 import { ACHIEVABLE, nearestAchievable, isMisleading } from './densityTargets.js';
+import AdminLoading from './AdminLoading.jsx';
 
 const AdminContainer = styled.div`
   padding: 2rem; color: var(--s2-text); max-width: 1200px; margin: 0 auto;
@@ -100,7 +101,7 @@ function AchievablePicks({ onPick }) {
 // download button rather than after it.
 function PreviewPanel({ name, version }) {
   const { previewUrl, previewError, isLoadingPreview } = useRegionPreview(name, version);
-  if (isLoadingPreview) return <Stat>Loading preview…</Stat>;
+  if (isLoadingPreview) return <Stat><AdminLoading label="Loading preview…" inline size={16} /></Stat>;
   if (previewError) {
     return (
       <ErrorBanner>
@@ -385,7 +386,7 @@ export default function WorldGenAdmin() {
 
       <CreateForm />
 
-      {isLoadingRegions && <Stat>Loading regions…</Stat>}
+      {isLoadingRegions && <Stat><AdminLoading label="Loading regions…" inline size={16} /></Stat>}
       {!isLoadingRegions && !regionsError && regions.length === 0 && (
         <Stat>The generator is reachable and holds no regions yet. Generate one above.</Stat>
       )}

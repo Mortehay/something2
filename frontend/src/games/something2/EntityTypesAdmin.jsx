@@ -22,6 +22,7 @@ import {
   buildBiomeIndex, biomesWithEntities, filterByBiomeTab, filterBySearch, paginate,
   ALL_TAB, UNASSIGNED_TAB,
 } from './entityFilters.js';
+import AdminLoading from './AdminLoading.jsx';
 
 const PAGE_SIZE = 6;
 
@@ -1110,7 +1111,7 @@ function EntityTypesAdmin() {
     });
   };
 
-  if (isLoadingEntityTypes) return <div>Loading entity registry...</div>;
+  if (isLoadingEntityTypes) return <AdminContainer><AdminLoading label="Loading the entity registry…" /></AdminContainer>;
 
   return (
     <AdminContainer>

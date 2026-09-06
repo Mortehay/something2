@@ -27,6 +27,7 @@ import {
   isPageFullySelected, selectAllMatching, selectAllLabel, byKind, subjectId,
   enqueueSummary, coverage, selectionOutsideFilter, PAGE_SIZE,
 } from './artSelection.js';
+import AdminLoading from './AdminLoading.jsx';
 
 // The house admin-root style, shared verbatim with the eight other admin
 // panels. Load-bearing rather than cosmetic: GameShell's ContentArea is
@@ -375,7 +376,7 @@ function ArtConsoleAdmin() {
     <Wrap>
       <h2>Art generation</h2>
       <Hint>
-        {isLoadingSubjects ? 'Loading the catalogue…' : (
+        {isLoadingSubjects ? <AdminLoading label="Loading the catalogue…" inline size={16} /> : (
           <>
             {cover.withArt} of {cover.total} subjects have art
             {cover.missing > 0 && <> · {cover.missing} missing</>}
@@ -677,7 +678,7 @@ function ArtConsoleAdmin() {
 
             <History>
               <h4>Generation history</h4>
-              {isLoadingHistory && <Hint>Loading…</Hint>}
+              {isLoadingHistory && <AdminLoading label="Loading history…" inline size={16} />}
               {!isLoadingHistory && history.length === 0 && (
                 <Hint>
                   Nothing recorded. History began on 2026-09-05; images made

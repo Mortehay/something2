@@ -9,6 +9,7 @@ import {
   emptyProviderForm, providerToForm, providerFormToPayload, validateProviderForm,
   parseTemplate, templateWarning, PLACEHOLDERS,
 } from './providerForm.js';
+import AdminLoading from './AdminLoading.jsx';
 
 const AdminContainer = styled.div`
   padding: 2rem; color: var(--s2-text); max-width: 1200px; margin: 0 auto;
@@ -277,7 +278,7 @@ export default function SettingsAdmin() {
       {adding && <ProviderCard provider={null} />}
 
       {isLoadingProviders ? (
-        <Hint>Loading…</Hint>
+        <AdminLoading label="Loading AI providers…" inline size={16} />
       ) : providers.length === 0 ? (
         <Hint>No providers registered yet.</Hint>
       ) : (
