@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { authHeaders, apiFetch } from "./src/js/net/auth.js";
@@ -95,6 +96,7 @@ export function useSetLink() {
     },
     onSuccess: (data, v) => {
       qc.invalidateQueries({ queryKey: ["worldLinks", v.id] });
+      qc.invalidateQueries({ queryKey: ["worldsSummary"] });
       qc.invalidateQueries({ queryKey: ["worlds"] });
       // The World Map tab reads links through ["worldGraph"]; without this it
       // keeps drawing a link the Maps tab just changed.
@@ -118,6 +120,7 @@ export function useClearLink() {
     },
     onSuccess: (data, v) => {
       qc.invalidateQueries({ queryKey: ["worldLinks", v.id] });
+      qc.invalidateQueries({ queryKey: ["worldsSummary"] });
       qc.invalidateQueries({ queryKey: ["worlds"] });
       qc.invalidateQueries({ queryKey: ["worldGraph"] });
       toast.success("Link cleared");
@@ -150,7 +153,11 @@ export function useAddVillage() {
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to add village");
       return res.json();
     },
-    onSuccess: (data, v) => { qc.invalidateQueries({ queryKey: ["worldVillages", v.id] }); toast.success("Village added"); warnIfLive(data); },
+    onSuccess: (data, v) => {
+      qc.invalidateQueries({ queryKey: ["worldVillages", v.id] });
+      qc.invalidateQueries({ queryKey: ["worldsSummary"] });
+      toast.success("Village added"); warnIfLive(data);
+    },
     onError: (err) => toast.error(err.message),
   });
 }
@@ -166,7 +173,38 @@ export function useDeleteVillage() {
       // See useClearLink above: 204 carries no body, the warning is a header.
       return { liveWarning: liveWarningFromHeader(res.headers.get("X-Live-World-Pending")) };
     },
-    onSuccess: (data, v) => { qc.invalidateQueries({ queryKey: ["worldVillages", v.id] }); toast.success("Village deleted"); warnIfLive(data); },
+    onSuccess: (data, v) => {
+      qc.invalidateQueries({ queryKey: ["worldVillages", v.id] });
+      qc.invalidateQueries({ queryKey: ["worldsSummary"] });
+      toast.success("Village deleted"); warnIfLive(data);
+    },
     onError: (err) => toast.error(err.message),
   });
+}
+
+// SOMET-554. One request for what used to be 200: the Maps tab renders a
+// collapsed row per world, and each row wants that world's portal and village
+// counts. Fetching them per row meant two XHRs per card on mount.
+//
+// Deliberately NOT folded into GET /api/worlds: that route is playerGuard'd and
+// GameShell/GameView read it on every session, so admin-only aggregates there
+// would ride along in every player's payload.
+//
+// Returns a plain object keyed by world id so a row can look itself up without
+// scanning; a world with no row in the response (created since the last fetch)
+// simply renders no counts rather than a confident zero.
+export function useWorldsSummary() {
+  const { data } = useQuery({
+    queryKey: ["worldsSummary"],
+    queryFn: async () => {
+      const res = await apiFetch(`${API_URL}/api/worlds/summary`, { headers: authHeaders() });
+      if (!res.ok) throw new Error("Failed to load map summary");
+      return res.json();
+    },
+  });
+  return useMemo(() => {
+    const by = {};
+    for (const row of data || []) by[row.id] = row;
+    return by;
+  }, [data]);
 }

@@ -3779,6 +3779,52 @@ app.delete('/api/worlds/:id', adminGuard, async (req, res) => {
   }
 });
 
+// SOMET-554. Batched counts for the Maps admin tab's collapsed rows. That tab
+// used to mount a full card per world, each firing GET :id/links and
+// GET :id/villages -- 200 requests on a 100-world database, which is what made
+// the page look hung. One row per world, one request.
+//
+// MUST stay registered ABOVE `/api/worlds/:id`: Express matches in declaration
+// order, so below it the literal path would be swallowed as an `:id` of
+// "summary" and answered with a 404 from the uuid lookup.
+//
+// adminGuard, not playerGuard: this is an admin surface, and unlike
+// GET /api/worlds there is no per-player projection here to hide unvisited
+// worlds behind. Deliberately a separate route rather than extra columns on
+// GET /api/worlds, which GameShell and GameView read on every session.
+app.get('/api/worlds/summary', adminGuard, async (req, res) => {
+  try {
+    // Aggregated in subqueries rather than by joining both tables and grouping:
+    // a world with 3 links and 2 villages would otherwise produce 6 rows and
+    // count each side 6 times.
+    const result = await pool.query(
+      `SELECT w.id,
+              COALESCE(l.link_count, 0)    AS link_count,
+              COALESCE(l.portal_count, 0)  AS portal_count,
+              COALESCE(v.village_count, 0) AS village_count
+         FROM worlds w
+         LEFT JOIN (SELECT from_world_id,
+                           COUNT(*)                                  AS link_count,
+                           COUNT(*) FILTER (WHERE edge = 'PORTAL')   AS portal_count
+                      FROM map_links GROUP BY from_world_id) l ON l.from_world_id = w.id
+         LEFT JOIN (SELECT world_id, COUNT(*) AS village_count
+                      FROM villages GROUP BY world_id) v ON v.world_id = w.id`);
+    // COUNT() comes back from pg as a string (int8 has no lossless JS number
+    // type, so node-postgres does not parse it). Left alone, the row renders
+    // "0 villages" correctly but `portal_count > 0` is a string comparison and
+    // "0" is truthy -- every world would claim to be a dungeon.
+    res.json(result.rows.map((r) => ({
+      id: r.id,
+      link_count: Number(r.link_count),
+      portal_count: Number(r.portal_count),
+      village_count: Number(r.village_count),
+    })));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load world summary' });
+  }
+});
+
 // Same guard + projection as the list route above (SOMET-276 AC #4). No
 // frontend caller uses this directly today (checked via grep for
 // `api/worlds/${` excluding the sibling sub-routes), but it must not be a
