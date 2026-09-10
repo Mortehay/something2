@@ -1,7 +1,16 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const request = require('supertest');
+// SOMET-559: this route is behind playerGuard now. helpers/auth.js MUST be
+// required before ../src/index.js -- it sets JWT_SECRET before the guards read it.
+const { playerToken, isUserLookup, userRowFor } = require('./helpers/auth.js');
 const { app, __setPool } = require('../src/index.js');
+
+// A plain PLAYER token, not an admin one: the real caller here is the game
+// client, and using a player identity means these tests would catch the route
+// being tightened to adminGuard by mistake.
+const AUTH = ['Authorization', `Bearer ${playerToken()}`];
+
 const { generateChunk, generateChunkDecorations } = require('../src/services/mapService');
 const { buildWorldGenConfig } = require('../src/services/worldGenConfig');
 
@@ -10,6 +19,9 @@ function mockPool(handlers) {
   return {
     calls,
     query: async (sql, params) => {
+      // Answered ahead of calls.push so the guard's user lookup never lands
+      // in `calls` -- these tests count queries.
+      if (isUserLookup(sql)) return userRowFor(params);
       calls.push({ sql, params });
       for (const [re, fn] of handlers) if (re.test(sql)) return fn(params);
       throw new Error(`unexpected query: ${sql}`);
@@ -53,7 +65,7 @@ function expectedWorldCfg(world = WORLD_ROW) {
 
 test('GET /chunk (cache miss) returns decorations matching generateChunkDecorations', async () => {
   __setPool(poolFor());
-  const res = await request(app).get('/api/worlds/w1/chunk?cx=0&cy=0');
+  const res = await request(app).get('/api/worlds/w1/chunk?cx=0&cy=0').set(...AUTH);
   assert.equal(res.status, 200);
 
   const cfg = expectedWorldCfg();
@@ -76,7 +88,7 @@ test('GET /chunk (cache hit) also returns decorations, computed over the cached 
   const pool = poolFor({ cached: cachedData });
   __setPool(pool);
 
-  const res = await request(app).get('/api/worlds/w1/chunk?cx=0&cy=0');
+  const res = await request(app).get('/api/worlds/w1/chunk?cx=0&cy=0').set(...AUTH);
   assert.equal(res.status, 200);
 
   const expectedDecorations = generateChunkDecorations(cfg, 0, 0, cachedData, [DECORATION_DEF]);
@@ -97,7 +109,7 @@ test('GET /chunk includes entry_spawn in the world config so spawn exclusion mat
   const world = { ...WORLD_ROW, entry_spawn: { x: 250, y: 250 } };
   __setPool(poolFor({ world }));
 
-  const res = await request(app).get('/api/worlds/w1/chunk?cx=0&cy=0');
+  const res = await request(app).get('/api/worlds/w1/chunk?cx=0&cy=0').set(...AUTH);
   assert.equal(res.status, 200);
 
   for (const d of res.body.decorations) {
@@ -108,6 +120,48 @@ test('GET /chunk includes entry_spawn in the world config so spawn exclusion mat
 
 test('GET /chunk 404s for an unknown world', async () => {
   __setPool(poolFor({ world: null }));
-  const res = await request(app).get('/api/worlds/nope/chunk?cx=0&cy=0');
+  const res = await request(app).get('/api/worlds/nope/chunk?cx=0&cy=0').set(...AUTH);
   assert.equal(res.status, 404);
+});
+
+// --- SOMET-559: the route is behind playerGuard ---------------------------
+// The auth_protection suite proves a guard is present in the router stack;
+// these prove the running server actually refuses, and actually serves. Both
+// halves matter: a guard that rejects everyone would pass a "is it guarded?"
+// check while breaking terrain streaming for every player.
+
+test('GET /chunk without a token is 401, and returns no terrain', async () => {
+  __setPool(poolFor());
+  const res = await request(app).get('/api/worlds/w1/chunk?cx=0&cy=0');
+  assert.equal(res.status, 401);
+  assert.equal(res.body.data, undefined, 'a rejected request must not leak the tile grid');
+  assert.equal(res.body.decorations, undefined);
+});
+
+test('GET /chunk admits a plain player, not just an admin', async () => {
+  // The whole point of playerGuard here. If this route is ever tightened to
+  // adminGuard, every non-admin stops being able to load the map and this
+  // fails with 403 rather than silently shipping.
+  __setPool(poolFor());
+  const res = await request(app).get('/api/worlds/w1/chunk?cx=0&cy=0').set(...AUTH);
+  assert.equal(res.status, 200, `a player token must be accepted, got ${res.status}`);
+  assert.ok(Array.isArray(res.body.data), 'the player must actually receive the tile grid');
+});
+
+test('GET /chunk rejects a token whose token_version is stale (revocation is live)', async () => {
+  // The guard's DB lookup exists to make revocation real -- a signature-only
+  // check would accept this token forever. Bumping the stored version is what
+  // logout-everywhere and a password change do.
+  // A RAW pool, not mockPool(): mockPool answers the guard's lookup itself with
+  // a current-version row, which would authenticate this token and make the
+  // test vacuous (it 500'd on the un-stubbed follow-up queries instead of
+  // 401'ing, which is how that was caught).
+  __setPool({
+    query: async (sql) => {
+      if (isUserLookup(sql)) return { rows: [{ token_version: 99, role: 'player' }] };
+      throw new Error(`request should have been rejected before querying: ${sql}`);
+    },
+  });
+  const res = await request(app).get('/api/worlds/w1/chunk?cx=0&cy=0').set(...AUTH);
+  assert.equal(res.status, 401);
 });

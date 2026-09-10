@@ -4626,7 +4626,23 @@ app.delete('/api/worlds/:id/links/:edge', adminGuard, async (req, res) => {
   }
 });
 
-app.get('/api/worlds/:id/chunk', async (req, res) => {
+// SOMET-559: playerGuard, NOT adminGuard -- every signed-in player streams
+// chunks for the world they are standing in, so this must stay open to the
+// player role. Unauthenticated it handed any world's terrain to anyone who
+// could reach the port.
+//
+// The cost objection SOMET-555 recorded against guarding this route was
+// measured and did not survive: the guard adds ~4.8ms (one primary-key
+// SELECT on users) to a route that already issues about seven queries per
+// request -- the world row, tile types, decoration defs, links, villages,
+// biomes and the world_chunks probe -- on the cache-HIT path as well as the
+// miss path. That is +15%, not a new order of cost.
+//
+// /overview is deliberately still open (see PUBLIC_GETS in
+// tests/auth_protection.test.js): a warm /overview is served entirely from
+// worldOverviewCache and touches the DB zero times, so the same guard nearly
+// doubles it. That one is a real tradeoff and is still the user's call.
+app.get('/api/worlds/:id/chunk', playerGuard, async (req, res) => {
   try {
     const cx = Number(req.query.cx);
     const cy = Number(req.query.cy);
@@ -4691,7 +4707,12 @@ app.get('/api/worlds/:id/chunk', async (req, res) => {
   }
 });
 
-app.get('/api/worlds/:id/preview', async (req, res) => {
+// SOMET-559: playerGuard. Same exposure as /chunk (a world's terrain, at
+// preview resolution) and no per-player projection. Not a per-frame path
+// despite living next to the canvas fetchers -- WorldPreview.jsx requests it
+// once per world through TanStack Query, so the guard's cost is paid once per
+// world rather than once per rendered tile.
+app.get('/api/worlds/:id/preview', playerGuard, async (req, res) => {
   try {
     const worldId = req.params.id;
     if (worldPreviewCache.has(worldId)) {

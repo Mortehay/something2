@@ -114,7 +114,7 @@ const TILE_ROWS = [
 
 test('GET chunk rejects non-integer cx/cy', async () => {
   __setPool(mockPool([]));
-  const res = await request(app).get('/api/worlds/w1/chunk?cx=foo&cy=0');
+  const res = await request(app).get('/api/worlds/w1/chunk?cx=foo&cy=0').set(...AUTH);
   assert.equal(res.status, 400);
 });
 
@@ -131,7 +131,7 @@ test('GET chunk cache MISS generates and returns an NxN grid WITHOUT inserting',
     // issues either of those queries, mockPool throws.
   ]);
   __setPool(pool);
-  const res = await request(app).get('/api/worlds/w1/chunk?cx=1&cy=-2');
+  const res = await request(app).get('/api/worlds/w1/chunk?cx=1&cy=-2').set(...AUTH);
   assert.equal(res.status, 200);
   assert.equal(res.body.world_id, 'w1');
   assert.equal(res.body.cx, 1);
@@ -162,7 +162,7 @@ test('GET chunk cache HIT returns cached data without regenerating, plus decorat
     [/FROM villages WHERE world_id/i, () => ({ rows: [] })],
   ]);
   __setPool(pool);
-  const res = await request(app).get('/api/worlds/w1/chunk?cx=0&cy=0');
+  const res = await request(app).get('/api/worlds/w1/chunk?cx=0&cy=0').set(...AUTH);
   assert.equal(res.status, 200);
   assert.deepEqual(res.body.data, cached);
   assert.deepEqual(res.body.decorations, []);
@@ -174,7 +174,7 @@ test('GET chunk returns 404 for an unknown world on cache miss', async () => {
     [/FROM worlds WHERE id/i, () => ({ rows: [] })],          // no such world
   ]);
   __setPool(pool);
-  const res = await request(app).get('/api/worlds/ghost/chunk?cx=0&cy=0');
+  const res = await request(app).get('/api/worlds/ghost/chunk?cx=0&cy=0').set(...AUTH);
   assert.equal(res.status, 404);
 });
 
