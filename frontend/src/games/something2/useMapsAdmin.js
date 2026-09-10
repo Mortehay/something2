@@ -76,7 +76,9 @@ export function useWorldLinks(worldId) {
     queryKey: ["worldLinks", worldId],
     enabled: !!worldId,
     queryFn: async () => {
-      const res = await apiFetch(`${API_URL}/api/worlds/${worldId}/links`);
+      // SOMET-555: adminGuard'd now, and apiFetch does not attach the token
+      // on its own -- see the sibling villages query, which already did this.
+      const res = await apiFetch(`${API_URL}/api/worlds/${worldId}/links`, { headers: authHeaders() });
       if (!res.ok) throw new Error("Failed to fetch links");
       return res.json();
     },

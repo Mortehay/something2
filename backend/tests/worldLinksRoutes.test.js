@@ -19,7 +19,7 @@ function mockPool(handlers) {
 
 test('GET /api/worlds/:id/links lists edges', async () => {
   __setPool(mockPool([[/FROM map_links/i, () => ({ rows: [{ edge: 'E', to_world_id: 'B', to_width: 16, to_height: 16 }] })]]));
-  const res = await request(app).get('/api/worlds/A/links');
+  const res = await request(app).get('/api/worlds/A/links').set(...AUTH);
   assert.equal(res.status, 200);
   assert.equal(res.body[0].edge, 'E');
   assert.equal(res.body[0].to_world_id, 'B');

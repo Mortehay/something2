@@ -74,7 +74,7 @@ test('a failed village create rolls back: the village does not appear in a later
     .send({ min_row: 5, min_col: 5, width: 6, height: 4, gate_edge: 'S', spawn_x: 650, spawn_y: 650 });   // 6x4: SOMET-282 caps width + height at 10
   assert.equal(createRes.status, 500);
 
-  const listRes = await request(app).get('/api/worlds/w1/villages');
+  const listRes = await request(app).get('/api/worlds/w1/villages').set(...AUTH);
   assert.equal(listRes.status, 200);
   assert.equal(listRes.body.length, 0, 'a partially-failed village create must not be visible after rollback');
 });
@@ -89,7 +89,7 @@ test('a successful village create is visible in a later GET (control for the rol
     .send({ min_row: 5, min_col: 5, width: 6, height: 4, gate_edge: 'S', spawn_x: 650, spawn_y: 650 });   // 6x4: SOMET-282 caps width + height at 10
   assert.equal(createRes.status, 200);
 
-  const listRes = await request(app).get('/api/worlds/w1/villages');
+  const listRes = await request(app).get('/api/worlds/w1/villages').set(...AUTH);
   assert.equal(listRes.status, 200);
   assert.equal(listRes.body.length, 1, 'a successful create must commit and be visible');
 });

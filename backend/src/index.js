@@ -4258,7 +4258,12 @@ app.put('/api/worlds/:id/graph-position', adminGuard, async (req, res) => {
 // swap which dungeon branch renders in which column on every refetch. Adding
 // from_x, from_y fully disambiguates: a partial unique index already makes
 // (from_world_id, from_x, from_y) unique for PORTAL rows.
-app.get('/api/world-graph', async (req, res) => {
+// SOMET-555: adminGuard. This is an admin surface -- the only caller is
+// the admin World Map Editor (useMapGraph.js). It carries no per-player projection, unlike
+// GET /api/worlds, so serving it unauthenticated handed every world's
+// topology (every world plus every map link) to anyone who could reach the port. Players get their own
+// character-scoped view from GET /api/player/world-map instead.
+app.get('/api/world-graph', adminGuard, async (req, res) => {
   try {
     const [worldsRes, linksRes] = await Promise.all([
       pool.query(
@@ -4398,7 +4403,12 @@ app.post('/api/worlds/:id/creatures', adminGuard, async (req, res) => {
 
 const EDGES = new Set(['N', 'E', 'S', 'W']);
 
-app.get('/api/worlds/:id/links', async (req, res) => {
+// SOMET-555: adminGuard. This is an admin surface -- the only caller is
+// the Maps tab's card body (useMapsAdmin.js). It carries no per-player projection, unlike
+// GET /api/worlds, so serving it unauthenticated handed every world's
+// edge and portal links to anyone who could reach the port. Players get their own
+// character-scoped view from GET /api/player/world-map instead.
+app.get('/api/worlds/:id/links', adminGuard, async (req, res) => {
   try {
     const rows = await fetchLinks(pool, req.params.id);
     res.json(rows.map((r) => ({ edge: r.edge, to_world_id: r.to_world_id })));
@@ -4473,7 +4483,12 @@ function validateVillageBody(body, worldRow, existing) {
   return null;
 }
 
-app.get('/api/worlds/:id/villages', async (req, res) => {
+// SOMET-555: adminGuard. This is an admin surface -- the only caller is
+// the Maps tab's card body (useMapsAdmin.js). It carries no per-player projection, unlike
+// GET /api/worlds, so serving it unauthenticated handed every world's
+// village boxes, gates and spawn points to anyone who could reach the port. Players get their own
+// character-scoped view from GET /api/player/world-map instead.
+app.get('/api/worlds/:id/villages', adminGuard, async (req, res) => {
   try {
     const r = await pool.query(
       `SELECT id, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y, merchant_x, merchant_y
