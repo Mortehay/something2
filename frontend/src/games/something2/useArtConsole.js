@@ -267,9 +267,39 @@ export function useRequeueStale() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => (await post('/api/art-jobs/requeue-stale', {})).json,
-    onSuccess: ({ requeued }) => {
-      toast.success(requeued ? `Returned ${requeued} stranded job(s) to the queue`
-        : 'No stranded jobs');
+    // "No stranded jobs" was the same sentence for two opposite situations,
+    // and the page had just told the admin to press this button. When a live
+    // drain still owns the claimed rows, saying so is the whole answer --
+    // otherwise the button looks broken. See SOMET-558.
+    onSuccess: ({ requeued, drain_running: draining, claimed }) => {
+      if (requeued) toast.success(`Returned ${requeued} stranded job(s) to the queue`);
+      else if (claimed && draining) {
+        toast(`${claimed} claimed, but the batch is still running -- press Stop first`);
+      } else if (claimed) toast(`${claimed} claimed less than a minute ago; try again shortly`);
+      else toast.success('No stranded jobs');
+      qc.invalidateQueries({ queryKey: QUEUE_KEY });
+      qc.invalidateQueries({ queryKey: SUBJECTS_KEY });
+    },
+    onError: (err) => toast.error(err.message),
+  });
+}
+
+// Throw away the pending queue. `done` and `failed` rows are NOT touched --
+// they are the record the failures panel is built from.
+export function useClearArtQueue() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const { res, json } = await post('/api/art-jobs/clear', {});
+      // 409 is the server refusing to delete rows a worker is mid-generation
+      // on. Surfaced verbatim: it names the fix (press Stop first).
+      if (!res.ok) throw new Error(json.error || 'Failed to clear the queue');
+      return json;
+    },
+    onSuccess: ({ cleared, claimed }) => {
+      toast.success(cleared
+        ? `Cleared ${cleared} pending job(s)${claimed ? `, ${claimed} of them claimed` : ''}`
+        : 'Nothing pending to clear');
       qc.invalidateQueries({ queryKey: QUEUE_KEY });
       qc.invalidateQueries({ queryKey: SUBJECTS_KEY });
     },

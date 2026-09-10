@@ -17,7 +17,7 @@ import { useEffect, useMemo, useState } from 'react';
 import styled from 'styled-components';
 import {
   useArtSubjects, useArtQueue, useEnqueueArt, useStartArtBatch, useStopArtBatch,
-  useRequeueStale, useRequeueFailures, useArtHistory,
+  useRequeueStale, useRequeueFailures, useArtHistory, useClearArtQueue,
   useArtNotes, useAddArtNote, useRemoveArtNote,
 } from './useArtConsole.js';
 import { useAiProviders } from './useAiProviders.js';
@@ -287,6 +287,7 @@ function ArtConsoleAdmin() {
   const startBatch = useStartArtBatch();
   const stopBatch = useStopArtBatch();
   const requeue = useRequeueStale();
+  const clearQueue = useClearArtQueue();
   const requeueFailures = useRequeueFailures();
 
   const [kind, setKind] = useState('all');
@@ -522,6 +523,27 @@ function ArtConsoleAdmin() {
         </Button>
         {run?.running && <Secondary onClick={() => stopBatch.mutate()}>Stop</Secondary>}
         <Secondary onClick={() => requeue.mutate()}>Rescue stranded jobs</Secondary>
+        {/* CONFIRMED, because it is not undoable: the rows are deleted, and
+            re-queuing means re-selecting the subjects. The text names the
+            exact counts rather than saying "are you sure", so the admin is
+            agreeing to a number and not to a word. `done` and `failed` are
+            untouched -- the failures panel is built from them. */}
+        {progress.remaining > 0 && (
+          <Secondary
+            disabled={running || clearQueue.isPending}
+            title={running ? 'Press Stop first -- a worker is mid-generation' : undefined}
+            onClick={() => {
+              const claimedNote = claimed.drawing.length + claimed.waiting.length
+                ? ` (${claimed.drawing.length + claimed.waiting.length} already claimed)` : '';
+              if (window.confirm(
+                `Delete ${progress.remaining} pending art job(s)${claimedNote}?\n\n`
+                + 'Finished and failed jobs are kept. This cannot be undone.',
+              )) clearQueue.mutate();
+            }}
+          >
+            Clear {progress.remaining} pending
+          </Secondary>
+        )}
       </Bar>
 
       {/* THE ANSWER TO "is it generating?", in one box (SOMET-558).

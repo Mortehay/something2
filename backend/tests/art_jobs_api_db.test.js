@@ -296,6 +296,121 @@ lockedTest('requeue-stale rescues a job whose worker died, and spares a live one
     assert.equal(dead.body.stats.queued, 2);
   });
 
+// THE DEFECT THIS FIXES. The console told the admin "press Rescue stranded
+// jobs" and the button answered "No stranded jobs" for a full hour, because the
+// route's fallback threshold was 3600000ms regardless of whether anything was
+// draining. A claimed row can only legitimately be in progress if a drain owns
+// it, and no drain was running -- there was nothing to protect.
+lockedTest('rescues a claimed job promptly when NO drain owns it', async (t, pool, providerId) => {
+  dispatcher.__resetRun();                       // nothing is draining
+  const keys = (await cs.SUBJECTS.skill.list()).slice(0, 2).map((s) => s.key);
+  await queue.enqueue(pool, keys.map((key) => ({ kind: 'skill', key })),
+    { backend: 'connector', providerId });
+  await queue.claim(pool, 2);
+  // Twenty minutes: far short of the old hour, and the exact age at which the
+  // live page reported ten unrecoverable rows.
+  await pool.query("UPDATE art_jobs SET claimed_at = now() - interval '20 minutes'");
+
+  const res = await request(app).post('/api/art-jobs/requeue-stale').set(...AUTH).send({});
+  assert.equal(res.status, 200);
+  assert.equal(res.body.requeued, 2, 'an abandoned claim must be recoverable without waiting an hour');
+  assert.equal(res.body.drain_running, false);
+  assert.equal(res.body.stats.queued, 2);
+});
+
+// The other half of the same rule, and the reason it is not simply "always 60s":
+// a slow subject on a cold pipeline must not be yanked out from under the
+// worker that is still generating it.
+//
+// Driven through a REAL startDrain with a generate that hangs, as the dispatch
+// case above is. A fake "pretend it is running" flag would assert the flag.
+lockedTest('leaves a claimed job alone while a drain IS running', async (t, pool, providerId) => {
+  const keys = (await cs.SUBJECTS.skill.list()).slice(0, 4).map((s) => s.key);
+  await queue.enqueue(pool, keys.map((key) => ({ kind: 'skill', key })),
+    { backend: 'connector', providerId });
+  // Two abandoned-looking claims, backdated well past the no-drain threshold.
+  const old = await queue.claim(pool, 2);
+  await pool.query('UPDATE art_jobs SET claimed_at = now() - $1::interval WHERE id = ANY($2)',
+    ['20 minutes', old.map((r) => r.id)]);
+
+  dispatcher.__resetRun();
+  // Real work left for it, or the drain finds an empty queue and exits before
+  // the request lands -- the trap the dispatch case documents above.
+  dispatcher.startDrain(pool, {
+    provider: { id: providerId, request_template: { width: 1024, height: 1024 } },
+    generate: async () => new Promise((r) => { setTimeout(r, 1500); }),
+    concurrency: 1,
+  });
+  t.after(() => { dispatcher.stopDrain(); dispatcher.__resetRun(); });
+
+  const res = await request(app).post('/api/art-jobs/requeue-stale').set(...AUTH).send({});
+  assert.equal(res.body.drain_running, true, 'precondition: the drain must actually be running');
+  assert.equal(res.body.requeued, 0, '20 minutes is not stale while a worker may still hold it');
+  assert.ok(res.body.claimed >= 2, 'the count is reported so the UI can explain the refusal');
+});
+
+// --- Clearing the queue ---------------------------------------------------
+
+lockedTest('clear removes pending work and KEEPS the record of what happened',
+  async (t, pool, providerId) => {
+    dispatcher.__resetRun();
+    const keys = (await cs.SUBJECTS.skill.list()).slice(0, 4).map((s) => s.key);
+    await queue.enqueue(pool, keys.map((key) => ({ kind: 'skill', key })),
+      { backend: 'connector', providerId });
+    const [a, b] = await queue.claim(pool, 2);      // 2 claimed, 2 still queued
+    await queue.complete(pool, a.id);               // one done
+    await pool.query("UPDATE art_jobs SET state = 'failed', attempts = 3 WHERE id = $1", [b.id]);
+
+    const res = await request(app).post('/api/art-jobs/clear').set(...AUTH).send({});
+    assert.equal(res.status, 200);
+    assert.equal(res.body.cleared, 2, 'only the two still queued are pending work');
+
+    // THE PART THAT MATTERS. The failures panel is built from these rows; a
+    // "clear all" that emptied them would silently delete the only view that
+    // explains a bad batch.
+    const { rows } = await pool.query(
+      'SELECT state, count(*)::int n FROM art_jobs GROUP BY state ORDER BY state');
+    assert.deepEqual(rows, [{ state: 'done', n: 1 }, { state: 'failed', n: 1 }]);
+  });
+
+lockedTest('clear also takes claimed rows that no drain owns', async (t, pool, providerId) => {
+  dispatcher.__resetRun();
+  const keys = (await cs.SUBJECTS.skill.list()).slice(0, 3).map((s) => s.key);
+  await queue.enqueue(pool, keys.map((key) => ({ kind: 'skill', key })),
+    { backend: 'connector', providerId });
+  await queue.claim(pool, 2);
+
+  const res = await request(app).post('/api/art-jobs/clear').set(...AUTH).send({});
+  assert.equal(res.body.cleared, 3);
+  assert.equal(res.body.claimed, 2, 'the claimed ones are counted separately, because they cost attempts');
+  assert.equal(res.body.stats.queued, undefined, 'nothing pending may survive');
+});
+
+// Deleting a row a worker is mid-generation on would have the drain resolve a
+// job that no longer exists.
+lockedTest('clear is REFUSED while a batch is running', async (t, pool, providerId) => {
+  const keys = (await cs.SUBJECTS.skill.list()).slice(0, 4).map((s) => s.key);
+  await queue.enqueue(pool, keys.map((key) => ({ kind: 'skill', key })),
+    { backend: 'connector', providerId });
+
+  dispatcher.__resetRun();
+  dispatcher.startDrain(pool, {
+    provider: { id: providerId, request_template: { width: 1024, height: 1024 } },
+    generate: async () => new Promise((r) => { setTimeout(r, 1500); }),
+    concurrency: 1,
+  });
+  t.after(() => { dispatcher.stopDrain(); dispatcher.__resetRun(); });
+
+  const res = await request(app).post('/api/art-jobs/clear').set(...AUTH).send({});
+  assert.equal(res.status, 409);
+  assert.match(res.body.error, /Stop/, 'the refusal must name the fix');
+
+  // Counted across every state: the drain has claimed some of them by now, so
+  // scoping this to `queued` would pass even if the claimed rows were deleted.
+  const { rows } = await pool.query('SELECT count(*)::int n FROM art_jobs');
+  assert.equal(rows[0].n, 4, 'a refused clear must delete nothing');
+});
+
 // --- The guard ------------------------------------------------------------
 
 test('every art route is behind the admin guard', async (t) => {
@@ -303,6 +418,7 @@ test('every art route is behind the admin guard', async (t) => {
     ['get', '/api/art-subjects/skill'], ['get', '/api/art-jobs'],
     ['post', '/api/art-jobs'], ['post', '/api/art-jobs/dispatch'],
     ['post', '/api/art-jobs/stop'], ['post', '/api/art-jobs/requeue-stale'],
+    ['post', '/api/art-jobs/clear'],
   ]) {
     const res = await request(app)[method](path).send({});
     assert.ok(res.status === 401 || res.status === 403,

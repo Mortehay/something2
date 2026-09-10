@@ -3643,12 +3643,70 @@ app.post('/api/art-jobs/stop', adminGuard, (req, res) => {
 // stealing a job from a live worker generates the same subject twice.
 app.post('/api/art-jobs/requeue-stale', adminGuard, async (req, res) => {
   try {
-    const olderThanMs = Math.max(parseInt(req.body.older_than_ms, 10) || 3600000, 60000);
+    // THE THRESHOLD DEPENDS ON WHETHER A DRAIN IS RUNNING (SOMET-558).
+    //
+    // A claimed row can only legitimately be in progress if something is
+    // draining the queue, because the claim is taken by the drain and by
+    // nothing else. When no drain is running, every `running` row is by
+    // definition abandoned and an hour of waiting protects nothing -- it just
+    // leaves the admin staring at ten rows they cannot recover, having pressed
+    // the button the page told them to press and been answered "No stranded
+    // jobs". Measured today: a drain died four minutes into a batch and its
+    // ten claimed rows stayed unrecoverable for the next hour.
+    //
+    // The hour stays when a drain IS running, and that is the case it was
+    // written for: a slow subject on a cold pipeline must not be yanked out
+    // from under the worker still generating it.
+    const running = artDispatcher.runStatus().running;
+    const fallbackMs = running ? 3600000 : 60000;
+    const olderThanMs = Math.max(parseInt(req.body.older_than_ms, 10) || fallbackMs, 60000);
     const rows = await artJobQueue.requeueStale(pool, olderThanMs);
-    res.json({ requeued: rows.length, stats: await artJobQueue.stats(pool) });
+    res.json({
+      requeued: rows.length,
+      // Reported so the UI can say WHY nothing was rescued. "No stranded jobs"
+      // is the same sentence for "nothing was claimed" and "ten are claimed but
+      // a live drain still owns them", and those need opposite responses.
+      drain_running: running,
+      claimed: (await artJobQueue.inFlight(pool)).length,
+      stats: await artJobQueue.stats(pool),
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to requeue stale art jobs' });
+  }
+});
+
+// Throw away the PENDING queue: everything queued, plus any claimed row that
+// no drain owns (SOMET-558).
+//
+// DELIBERATELY NOT "all jobs". `done` and `failed` rows are the record of what
+// was attempted and why it went wrong -- the failures panel is built from them,
+// and deleting them would silently empty the one view that explains a bad
+// batch. What an admin means by "clear the jobs" is "forget the work I have not
+// done yet", and that is what this removes.
+//
+// REFUSED WHILE A DRAIN IS RUNNING, like dispatch is. Deleting rows a worker
+// is mid-generation on would have it resolve a job that no longer exists, and
+// the drain would report failures for subjects nobody asked it to stop.
+app.post('/api/art-jobs/clear', adminGuard, async (req, res) => {
+  try {
+    if (artDispatcher.runStatus().running) {
+      return res.status(409).json({
+        error: 'a batch is running -- press Stop and let the subjects in flight finish first',
+      });
+    }
+    const { rows } = await pool.query(
+      "DELETE FROM art_jobs WHERE state IN ('queued', 'running') RETURNING state",
+    );
+    res.json({
+      cleared: rows.length,
+      queued: rows.filter((r) => r.state === 'queued').length,
+      claimed: rows.filter((r) => r.state === 'running').length,
+      stats: await artJobQueue.stats(pool),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to clear the art queue' });
   }
 });
 
