@@ -84,6 +84,26 @@ const PickerOption = styled.button`
   &:hover { color: var(--s2-text); border-color: var(--s2-accent); }
 `;
 
+// SOMET-556. The Add village form used to seed 6x5, and the server rejects any
+// box whose width + height exceeds VILLAGE_LIMITS.maxSum (10 today) -- so the
+// button could never work until the admin edited the size fields first.
+//
+// The real constraint is on the SUM, not on either axis: backend maxW is 8 and
+// maxH is 6, which independently permit an illegal 14. That width is deliberate
+// (services/villages.js:95-98 keeps them wide so index.js's "between 3 and 8
+// tiles" / "between 3 and 6 tiles" messages stay true), so the defaults are what
+// has to be legal.
+//
+// Not mirroring maxSum here on purpose: it is DERIVED --
+// largestTileSumWithinBudget searches for the largest tile sum whose on-screen
+// box stays within a quarter of the viewport, so it moves with ISO_K and the
+// screen budget. A copy of "10" in this file would drift silently the first time
+// that budget changes. village_form_defaults.test.js pins the backend limit
+// against these numbers instead, so a shrinking budget goes red and names this
+// file rather than quietly restoring the always-fails behaviour.
+const VILLAGE_DEFAULT_W = 5;
+const VILLAGE_DEFAULT_H = 5;
+
 function bounded(w) { return !!(w.width && w.height); }
 
 // SOMET-554. Replaces a grid of one checkbox per creature type. On the dev
@@ -188,8 +208,8 @@ function MapCard({ world, creatureTypes, allMaps, biomes, biomesLoading }) {
   const delVillage = useDeleteVillage();
   const [vMinRow, setVMinRow] = useState(1);
   const [vMinCol, setVMinCol] = useState(1);
-  const [vW, setVW] = useState(6);
-  const [vH, setVH] = useState(5);
+  const [vW, setVW] = useState(VILLAGE_DEFAULT_W);
+  const [vH, setVH] = useState(VILLAGE_DEFAULT_H);
   const [vGate, setVGate] = useState('S');
   const others = (allMaps || []).filter(m => m.id !== world.id);
   const linkFor = (edge) => links.find(l => l.edge === edge)?.to_world_id || '';
