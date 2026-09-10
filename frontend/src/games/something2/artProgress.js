@@ -189,3 +189,31 @@ export function claimedAgo(claimedAt, now = Date.now()) {
   const secs = elapsedSince(claimedAt, now);
   return secs === null ? null : formatElapsed(secs);
 }
+
+// How many subject names to print before summarising the rest.
+//
+// The list answers "are these the rows I meant to queue", and that question is
+// settled by the first screenful: a batch of 512 is checked by recognising the
+// first dozen keys, not by reading all 512 in a panel above the table that
+// already lists every one of them. The server caps its payload separately and
+// lower caps win, so this number can only ever shorten what is drawn.
+export const QUEUE_PREVIEW = 12;
+export const WAITING_PREVIEW = 6;
+
+// A capped list of subject names plus how many were not named.
+//
+// `total` IS PASSED IN rather than taken from rows.length, because the rows are
+// already a server-side preview of a longer queue -- deriving the count from
+// what arrived would print "12 queued" over a backlog of 512, which is the
+// exact class of confident-but-wrong count this panel exists to remove.
+//
+// Clamped at zero so a total that lags the rows by a poll (a job claimed
+// between the two reads) can never render "+-1 more".
+export function previewNames(rows, total, limit = QUEUE_PREVIEW) {
+  const list = Array.isArray(rows) ? rows : [];
+  const names = list.slice(0, Math.max(0, limit))
+    .map((j) => `${j.subject_kind}/${j.subject_key}`);
+  const n = Number(total);
+  const size = Number.isFinite(n) ? Math.max(n, list.length) : list.length;
+  return { names, more: Math.max(0, size - names.length) };
+}

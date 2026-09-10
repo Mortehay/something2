@@ -217,6 +217,14 @@ lockedTest('GET /api/art-jobs reports the queue by state', async (t, pool, provi
   assert.equal(res.status, 200);
   assert.equal(res.body.stats.queued, 3);
   assert.equal(res.body.run.running, false);
+
+  // WHICH subjects, not merely how many. A count alone cannot tell an admin
+  // whether the rows they queued off a filtered page are the rows they meant,
+  // and the console renders exactly what this field says.
+  assert.equal(res.body.queued.total, 3);
+  assert.deepEqual(res.body.queued.rows.map((r) => r.subject_key), keys);
+  assert.equal(res.body.queued.rows[0].subject_kind, 'skill');
+  assert.equal(res.body.queued.backoff, 0);
 });
 
 // --- Dispatch -------------------------------------------------------------

@@ -93,6 +93,11 @@ export function useArtQueue() {
     // the dispatcher's memory -- a backend restarted mid-batch has no run
     // object, and the claimed rows still answer "what is being drawn".
     inFlight: data?.in_flight || [],
+    // WHAT is waiting, in claim order -- a capped preview plus the true total,
+    // both from the server's one query so the list and its count cannot
+    // disagree. The shape is always present so the component never branches on
+    // undefined during the first poll.
+    queued: data?.queued || { rows: [], total: 0, backoff: 0 },
     failures: data?.failures || [],
   };
 }

@@ -3506,6 +3506,11 @@ app.get('/api/art-jobs', adminGuard, async (req, res) => {
       // claim is what the durable row records -- a backend that restarted
       // mid-batch has no run object at all, and this still answers.
       in_flight: await artJobQueue.inFlight(pool),
+      // WHAT is waiting, in claim order, capped to a preview. The count in
+      // `stats` says a batch exists; it cannot say whether the rows are the
+      // ones the admin meant to queue, and a mis-set filter produces exactly
+      // the same sentence as a correct one.
+      queued: await artJobQueue.queued(pool),
       failures: artFailures.groupFailures(failed),
     });
   } catch (err) {

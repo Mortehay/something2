@@ -30,8 +30,8 @@ import {
   enqueueSummary, coverage, selectionOutsideFilter, PAGE_SIZE,
 } from './artSelection.js';
 import {
-  batchProgress, formatDuration, claimedAgo, partitionInFlight,
-  IDLE_QUEUED, RUNNING, FINISHED,
+  batchProgress, formatDuration, claimedAgo, partitionInFlight, previewNames,
+  QUEUE_PREVIEW, WAITING_PREVIEW, IDLE_QUEUED, RUNNING, FINISHED,
 } from './artProgress.js';
 import AdminLoading from './AdminLoading.jsx';
 
@@ -139,6 +139,22 @@ const Drawing = styled.p`
   margin: 0.35rem 0 0; font-size: 0.85rem; color: var(--s2-text);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   em { font-style: normal; color: var(--s2-text-muted); }
+`;
+// The backlog: which subjects are waiting, in the order they will be drawn.
+//
+// Separated from Drawing by a rule rather than by wording alone, because the
+// two make opposite claims -- one subject is on the provider, these are not
+// being worked on at all -- and a reader skimming a monospace block of keys
+// will not re-read the verb on each line.
+const Queued = styled.div`
+  margin: 0.5rem 0 0; padding-top: 0.5rem; border-top: 1px solid var(--s2-border);
+  strong { font-size: 0.85rem; color: var(--s2-text); }
+  p {
+    margin: 0.25rem 0 0; font-size: 0.8rem; color: var(--s2-text-muted);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    word-break: break-word;
+  }
+  em { font-style: normal; color: var(--s2-text-dim); }
 `;
 const Fail = styled(Pill)`color: var(--s2-danger);`;
 const Mono = styled.td`font-family: ui-monospace, SFMono-Regular, Menlo, monospace;`;
@@ -415,7 +431,7 @@ function ArtConsoleAdmin() {
   // The queue is read FIRST because the catalogue query depends on it: the
   // table only polls while a drain is running, and it cannot know that on its
   // own.
-  const { stats, run, inFlight, failures } = useArtQueue();
+  const { stats, run, inFlight, queued, failures } = useArtQueue();
   const { kinds, subjects, isLoadingSubjects, subjectsError } = useArtSubjects({
     live: Boolean(run?.running),
   });
@@ -506,6 +522,12 @@ function ArtConsoleAdmin() {
   // waiting is the safe direction to be wrong in -- the opposite mistake
   // claimed ten simultaneous generations.
   const claimed = partitionInFlight(inFlight, run?.concurrency || 1);
+  // The two waiting lists, named rather than counted. `queued.total` comes
+  // from the server's own window count over the whole queue, so a capped
+  // preview still reports the real backlog; the claimed-but-waiting rows
+  // arrive in full, so their own length is the honest total.
+  const waiting = previewNames(claimed.waiting, claimed.waiting.length, WAITING_PREVIEW);
+  const backlog = previewNames(queued.rows, queued.total, QUEUE_PREVIEW);
 
   const frozenOrder = useMemo(
     () => (running && sort.by === 'updated'
@@ -770,8 +792,32 @@ function ArtConsoleAdmin() {
         ))}
         {claimed.waiting.length > 0 && (
           <Drawing>
-            <em>+ {claimed.waiting.length} more claimed, waiting their turn</em>
+            <em>+ {claimed.waiting.length} more claimed, waiting their turn: </em>
+            {waiting.names.join(', ')}
+            {waiting.more > 0 && <em> +{waiting.more} more</em>}
           </Drawing>
+        )}
+
+        {/* WHICH subjects are queued, not just how many.
+            The count above says a batch exists; it cannot say whether these
+            are the rows the admin meant -- queueing the wrong filter produces
+            the identical sentence. Listed in claim order, so the first name is
+            genuinely the next image. */}
+        {backlog.names.length > 0 && (
+          <Queued>
+            <strong>Queued · {queued.total}</strong>
+            <p>
+              {backlog.names.join(', ')}
+              {backlog.more > 0 && <em>, +{backlog.more} more</em>}
+            </p>
+            {/* A queued job serving a retry backoff is still owed an image and
+                still counted above, but nothing will claim it yet. Without
+                this line an admin watching a drain sit idle over a non-empty
+                queue has no way to tell a wait from a stall. */}
+            {queued.backoff > 0 && (
+              <p><em>{queued.backoff} of them are waiting out a retry backoff</em></p>
+            )}
+          </Queued>
         )}
       </Progress>
 

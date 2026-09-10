@@ -233,6 +233,66 @@ lockedTest('inFlight names the subjects being drawn, not merely how many', async
   }
 });
 
+// SOMET-558. The other end of the same argument: "17 queued" says a batch
+// exists and nothing about WHAT is in it, so an admin who queued a filtered
+// page cannot tell a correct selection from a mis-set filter -- both print the
+// identical sentence.
+lockedTest('queued names the waiting subjects, in claim order', async (t, pool) => {
+  assert.deepEqual(await q.queued(pool), { rows: [], total: 0, backoff: 0 });
+
+  const made = await q.enqueue(pool, [S(1), S(2), S(3)], { backend: 'connector' });
+  const listed = await q.queued(pool);
+  assert.equal(listed.total, 3);
+  // CLAIM ORDER, not insertion-time order or whatever the planner returns:
+  // claim() takes `ORDER BY id`, so the first name here must be the subject
+  // the provider will actually draw next, or the list is decoration.
+  assert.deepEqual(listed.rows.map((r) => r.id), [...made].map((r) => r.id).sort((a, b) => Number(a) - Number(b)));
+  assert.deepEqual(listed.rows.map((r) => r.subject_key), ['sk_1', 'sk_2', 'sk_3']);
+  assert.equal(listed.rows[0].subject_kind, 'skill');
+
+  // A claimed job is NOT queued. It appears in inFlight() instead, and
+  // counting it in both would overstate the work left by the batch in flight.
+  await q.claim(pool, 1);
+  const after = await q.queued(pool);
+  assert.equal(after.total, 2);
+  assert.deepEqual(after.rows.map((r) => r.subject_key), ['sk_2', 'sk_3']);
+});
+
+// THE COUNT MUST SURVIVE THE CAP. The endpoint returns a preview, and a total
+// derived from the rows that arrived would print the preview's size over a
+// backlog many times larger -- the exact confident-wrong number the panel
+// exists to remove. count(*) OVER () is evaluated before LIMIT; this is what
+// proves it.
+lockedTest('queued reports the whole backlog even when the list is capped', async (t, pool) => {
+  const many = Array.from({ length: 12 }, (_, i) => S(100 + i));
+  await q.enqueue(pool, many, { backend: 'connector' });
+
+  const capped = await q.queued(pool, 4);
+  assert.equal(capped.rows.length, 4, 'the preview is capped');
+  assert.equal(capped.total, 12, 'the count is not');
+  assert.equal(capped.backoff, 0, 'nothing has failed, so nothing is waiting');
+});
+
+// A job serving a retry backoff is still queued and still owed an image, so it
+// stays in the list -- hiding it would shrink the list below the count beside
+// it. The separate `backoff` number is what tells an admin that a drain
+// sitting idle over a non-empty queue is waiting rather than stalled.
+lockedTest('queued counts the jobs that are waiting out a backoff', async (t, pool) => {
+  await q.enqueue(pool, [S(1), S(2)], { backend: 'connector' });
+  const [first] = await q.claim(pool, 1);
+  await q.fail(pool, first.id, new Error('provider said no'), { delayMs: 60000 });
+
+  const listed = await q.queued(pool);
+  assert.equal(listed.total, 2, 'a backed-off job is still queued');
+  assert.equal(listed.rows.length, 2, 'and is still listed');
+  assert.equal(listed.backoff, 1, 'but is not claimable yet');
+
+  // The claimable one is what claim() actually takes, which is the fact the
+  // number is describing.
+  const [next] = await q.claim(pool, 1);
+  assert.equal(next.subject_key, 'sk_2');
+});
+
 // A resolved job leaves the flight list, or the console would show a subject
 // being drawn forever after the batch ended.
 lockedTest('inFlight empties as jobs resolve, whether they succeed or fail', async (t, pool) => {

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   batchProgress, formatDuration, formatElapsed, elapsedSince, shouldPollQueue,
-  partitionInFlight, claimedAgo,
+  partitionInFlight, claimedAgo, previewNames,
   IDLE, IDLE_QUEUED, RUNNING, FINISHED,
 } from '../artProgress.js';
 
@@ -244,5 +244,42 @@ describe('claimed vs drawing', () => {
     expect(claimedAgo(claimedAt, t + 67000)).toBe('1m 07s');
     expect(claimedAgo(claimedAt, t + 68000)).not.toBe(claimedAgo(claimedAt, t + 67000));
     expect(claimedAgo('nonsense')).toBeNull();
+  });
+});
+
+
+// The queued list. "17 queued" says a batch exists and nothing about whether
+// it holds the rows the admin meant -- a mis-set filter queues the wrong
+// subjects and prints the same sentence.
+describe('naming the subjects that are waiting', () => {
+  const job = (n) => ({ id: n, subject_kind: 'item', subject_key: `obsidian-${n}` });
+  const rows = [1, 2, 3].map(job);
+
+  it('names them as kind/key, in the order they arrived', () => {
+    const { names, more } = previewNames(rows, 3);
+    expect(names).toEqual(['item/obsidian-1', 'item/obsidian-2', 'item/obsidian-3']);
+    expect(more).toBe(0);
+  });
+
+  // THE TRAP THIS GUARDS. The rows are a SERVER-SIDE PREVIEW of a longer
+  // queue, so counting what arrived would print "12 queued" over a backlog of
+  // 512 -- a confident wrong number, which is the failure the whole panel
+  // exists to remove. The total is the server's count over the whole queue.
+  it('reports the real backlog, not the size of the preview it was given', () => {
+    const { names, more } = previewNames(rows, 512, 2);
+    expect(names).toHaveLength(2);
+    expect(more).toBe(510);
+  });
+
+  // A job claimed between the server's two reads leaves the total one behind
+  // the rows. "+-1 more" would be worse than saying nothing.
+  it('never reports a negative remainder when the total lags the rows', () => {
+    expect(previewNames(rows, 1).more).toBe(0);
+    expect(previewNames(rows, null).more).toBe(0);
+  });
+
+  it('survives an absent queue', () => {
+    expect(previewNames(undefined, 0)).toEqual({ names: [], more: 0 });
+    expect(previewNames(null, 5).names).toEqual([]);
   });
 });
