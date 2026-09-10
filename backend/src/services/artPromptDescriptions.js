@@ -92,6 +92,35 @@ async function subjectPhrase(db, subjectKind, subjectKey, fallback) {
   return { phrase: active.text, promptModel: active.model || 'human' };
 }
 
+// Has anything that FEEDS THE PROMPT changed for this subject since `since`?
+//
+// WHY THIS EXISTS. artFailures classifies a cutout failure as not-retryable
+// because the seed is derived from the subject, so a plain retry regenerates a
+// byte-identical image. That reasoning is exactly right, and it holds only
+// while THE PROMPT IS UNCHANGED -- a caveat SOMET-544 recorded as a known
+// limitation. Descriptions make it actively wrong: rewrite a subject's
+// description and the retry produces a DIFFERENT image, so refusing it makes
+// the operator use "retry with a new seed" for a reason that no longer applies
+// and lose the reproducible seed for nothing.
+//
+// Reads BOTH tables on purpose. "The recipe" is the description plus the
+// notes; either changing is enough to make a retry meaningful, and asking only
+// one of them would refuse a retry the other had already justified.
+async function recipeChangedSince(db, subjectKind, subjectKey, since) {
+  if (!since) return false;
+  const { rows } = await db.query(
+    `SELECT
+       EXISTS (SELECT 1 FROM art_prompt_descriptions
+                WHERE subject_kind = $1 AND subject_key = $2 AND created_at > $3)
+       OR
+       EXISTS (SELECT 1 FROM art_prompt_notes
+                WHERE subject_kind = $1 AND subject_key = $2 AND created_at > $3)
+       AS changed`,
+    [subjectKind, subjectKey, since],
+  );
+  return Boolean(rows[0] && rows[0].changed);
+}
+
 module.exports = {
-  getActive, listAll, replace, clear, subjectPhrase, MAX_TEXT,
+  getActive, listAll, replace, clear, subjectPhrase, recipeChangedSince, MAX_TEXT,
 };

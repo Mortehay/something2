@@ -64,13 +64,30 @@ function labelSubject(label) {
 // and "a fantasy weapon" is the honest amount of extra context we actually
 // have -- inventing "a broadsword with a leather grip" would be authoring art
 // direction from a slug.
+// "a" or "an", by the letter the word starts with.
+//
+// THIS EXISTS BECAUSE 51 OF 189 ITEM NAMES START WITH A VOWEL. "a apprentice
+// staff", "a arbalest", "a arcane ward" -- 27% of the catalogue opened its
+// prompt on a grammatical error, which is the very thing the currency comment
+// below already calls a bad first token to spend.
+//
+// The letter rule is not the pronunciation rule: "a unicorn" and "a euro" take
+// "a" despite the vowel, and "an hour" takes "an" despite the consonant. The
+// catalogue was checked -- the only u-word is "unarmed", where "an" is right --
+// so the simple rule is correct HERE. A future name like "unicorn horn" would
+// need the exception, which is why this is a named function rather than a
+// ternary buried in a template string.
+function article(word) {
+  return /^[aeiou]/i.test(String(word || '')) ? 'an' : 'a';
+}
+
 function itemPrompt(row) {
   const subject = deslug(row.name);
   // Currency is a mass noun -- "a gold" is wrong and reads as a typo to a
   // model as much as to a person. It is one row in the catalog, but a prompt
   // that starts with a grammatical error is a bad first token to spend.
   if (row.category === 'currency') return `a pile of ${subject}`;
-  const parts = [`a ${subject}`];
+  const parts = [`${article(subject)} ${subject}`];
   if (row.category) parts.push(`a fantasy ${row.category}`);
   if (row.element) parts.push(`${row.element} element`);
   return parts.join(', ');
@@ -361,5 +378,5 @@ async function latestJobByKey(db, kind) {
 module.exports = {
   SUBJECTS, subjectKinds, registryFor, listWithArtState,
   subjectsForEnqueue, pinnedProviderId,
-  deslug, labelSubject, itemPrompt, skillPrompt, writeCatalogArt,
+  deslug, article, labelSubject, itemPrompt, skillPrompt, writeCatalogArt,
 };

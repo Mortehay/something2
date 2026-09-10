@@ -3537,21 +3537,60 @@ app.post('/api/art-jobs/requeue', adminGuard, async (req, res) => {
       return res.status(400).json({ error: `unknown failure kind "${kind}"` });
     }
 
+    // A failed row whose subject ALREADY has a live job is superseded: the
+    // subject is queued and will be attempted again, and the old row is only a
+    // record of why it failed last time.
+    //
+    // Excluded here rather than skipped in the loop, because requeueing one
+    // violates art_jobs_one_live_per_subject and the endpoint answered 500 --
+    // measured, with all five failed subjects in exactly that state. That is a
+    // crash where the honest answer is "nothing to do, they are already
+    // queued", and the operator cannot tell those apart from a real fault.
     const { rows: failed } = await pool.query(
-      "SELECT id, subject_kind, subject_key, last_error FROM art_jobs WHERE state = 'failed'",
+      `SELECT f.id, f.subject_kind, f.subject_key, f.last_error, f.updated_at,
+              EXISTS (SELECT 1 FROM art_jobs l
+                       WHERE l.subject_kind = f.subject_kind
+                         AND l.subject_key = f.subject_key
+                         AND l.state IN ('queued', 'running')) AS superseded
+         FROM art_jobs f WHERE f.state = 'failed'`,
     );
-    const mine = failed.filter((r) => artFailures.classify(r.last_error).kind === kind);
-    if (mine.length === 0) return res.json({ requeued: 0, stats: await artJobQueue.stats(pool) });
+    const ofKind = failed.filter((r) => artFailures.classify(r.last_error).kind === kind);
+    let mine = ofKind.filter((r) => !r.superseded);
+    const alreadyQueued = ofKind.length - mine.length;
+    if (mine.length === 0) {
+      return res.json({
+        requeued: 0,
+        already_queued: alreadyQueued,
+        stats: await artJobQueue.stats(pool),
+      });
+    }
 
     const { retryable, action } = artFailures.classify(mine[0].last_error);
     if (!retryable && !reseed) {
-      return res.status(409).json({
-        error: action === 'reseed'
-          ? 'these failed for a reason a retry cannot fix -- the seed is derived from the '
-            + 'subject, so the same image comes back. Pass reseed:true for a different take.'
-          : 'these failed for a reason a retry cannot fix -- change the configuration first.',
-        action,
-      });
+      // SOMET-551 lifts SOMET-544's known limitation. "A retry cannot fix this"
+      // rests on the prompt being unchanged -- true when the only input was the
+      // catalogue template, and no longer true now a subject can be re-described.
+      // A subject whose description or notes changed since it failed WILL
+      // produce a different image from the same seed, so refusing that retry
+      // would push the operator to reseed and throw away a reproducible seed
+      // for no reason.
+      const changed = await Promise.all(mine.map(
+        (r) => artDescriptions.recipeChangedSince(pool, r.subject_kind, r.subject_key, r.updated_at),
+      ));
+      const eligible = mine.filter((_, i) => changed[i]);
+      if (eligible.length === 0) {
+        return res.status(409).json({
+          error: action === 'reseed'
+            ? 'these failed for a reason a retry cannot fix -- the seed is derived from the '
+              + 'subject, so the same image comes back. Rewrite the description, or pass '
+              + 'reseed:true for a different take.'
+            : 'these failed for a reason a retry cannot fix -- change the configuration first.',
+          action,
+        });
+      }
+      // Only the subjects whose recipe actually changed. Requeueing the rest
+      // would burn a generation to reproduce an image we already have.
+      mine = eligible;
     }
     if (!retryable && reseed && action !== 'reseed') {
       return res.status(409).json({ error: 'a new seed cannot fix a configuration problem', action });
@@ -3574,7 +3613,15 @@ app.post('/api/art-jobs/requeue', adminGuard, async (req, res) => {
       );
       requeued += r.rowCount;
     }
-    res.json({ requeued, reseeded: reseed, stats: await artJobQueue.stats(pool) });
+    res.json({
+      requeued,
+      reseeded: reseed,
+      // Named rather than silently folded into `requeued`: "5 failed, 0
+      // requeued" reads as a bug until you know the other 5 were already on
+      // their way.
+      already_queued: alreadyQueued,
+      stats: await artJobQueue.stats(pool),
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to requeue art jobs' });

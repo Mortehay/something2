@@ -380,3 +380,34 @@ lockedTest('a provider failure requeues plainly, keeping its seed', async (t, po
   assert.equal(String(after.rows[0].seed), String(before.rows[0].seed),
     'a provider failure keeps its seed -- the image was never the problem');
 });
+
+// SOMET-551. A failed row whose subject already has a live job is SUPERSEDED.
+//
+// Requeueing one violates art_jobs_one_live_per_subject, and the endpoint
+// answered 500 -- measured on the dev database with all five failed subjects
+// in exactly that state. A crash is the wrong answer to "nothing to do".
+lockedTest('a superseded failure is reported, not crashed on', async (t, pool) => {
+  const SUBJ = { kind: 'skill', key: 'rq_superseded' };
+  const [job] = await queue.enqueue(pool, [SUBJ], { backend: 'connector' });
+  await pool.query(
+    `UPDATE art_jobs SET state='failed', attempts=3,
+        last_error='provider answered 500: !handles_.at(i) INTERNAL ASSERT FAILED'
+      WHERE id=$1`, [job.id],
+  );
+  // A second, live job for the SAME subject -- the state the dev database was
+  // actually in, and the one the partial unique index exists to allow.
+  const [live] = await queue.enqueue(pool, [SUBJ], { backend: 'connector' });
+  assert.ok(live, 'setup: a live job for the same subject must be creatable');
+
+  const res = await request(app).post('/api/art-jobs/requeue')
+    .set(...AUTH).send({ kind: 'provider_fault' });
+
+  assert.equal(res.status, 200, 'a superseded failure must not 500');
+  assert.equal(res.body.requeued, 0);
+  assert.equal(res.body.already_queued, 1,
+    'and must SAY why nothing was requeued, or "0 requeued" reads as a bug');
+
+  const after = await pool.query('SELECT state FROM art_jobs WHERE id=$1', [job.id]);
+  assert.equal(after.rows[0].state, 'failed',
+    'the superseded row stays as the record of why it failed');
+});

@@ -119,3 +119,51 @@ dbTest('an over-long description is capped, not rejected', async (t, pool) => {
   const saved = await desc.replace(pool, 'item', 'ds_long', { text: 'x'.repeat(2000) });
   assert.equal(saved.text.length, desc.MAX_TEXT);
 });
+
+// --- SOMET-551: a changed recipe makes a "pointless" retry meaningful ------
+//
+// artFailures marks a cutout failure not-retryable because the seed is derived
+// from the subject, so a plain retry returns the identical image. That was true
+// when the only prompt input was the catalogue template. It is not true once a
+// subject can be re-described, and SOMET-544 recorded the gap as a known
+// limitation rather than fixing it. These pin the fix.
+dbTest('a rewritten description makes the subject retryable again', async (t, pool) => {
+  const failedAt = new Date(Date.now() - 60000);
+
+  // Nothing has changed since it failed: a retry really would be pointless.
+  assert.equal(await desc.recipeChangedSince(pool, 'item', 'ds_recipe', failedAt), false);
+
+  await desc.replace(pool, 'item', 'ds_recipe', { text: 'a genuinely different subject' });
+  assert.equal(await desc.recipeChangedSince(pool, 'item', 'ds_recipe', failedAt), true,
+    'rewriting the description changes the image the same seed produces');
+});
+
+dbTest('a description written BEFORE the failure does not justify a retry',
+  async (t, pool) => {
+    await desc.replace(pool, 'item', 'ds_before', { text: 'written first' });
+    // The job failed AFTER that description was already in force, so the
+    // description is what produced the failure -- retrying reproduces it.
+    const failedAt = new Date(Date.now() + 1000);
+    assert.equal(await desc.recipeChangedSince(pool, 'item', 'ds_before', failedAt), false,
+      'only a change SINCE the failure can make the retry different');
+  });
+
+dbTest('a note counts as a recipe change too, not only a description',
+  async (t, pool) => {
+    const notes = require('../src/services/artPromptNotes.js');
+    const failedAt = new Date(Date.now() - 60000);
+    try {
+      await notes.create(pool, 'item', 'ds_note', { note: 'no shadow beneath it' });
+      assert.equal(await desc.recipeChangedSince(pool, 'item', 'ds_note', failedAt), true,
+        'the recipe is the description PLUS the notes');
+    } finally {
+      await pool.query("DELETE FROM art_prompt_notes WHERE subject_key = 'ds_note'").catch(() => {});
+    }
+  });
+
+dbTest('no timestamp is treated as "nothing changed", not as "everything did"',
+  async (t, pool) => {
+    await desc.replace(pool, 'item', 'ds_nots', { text: 'x' });
+    // A missing updated_at must not silently unlock every refused retry.
+    assert.equal(await desc.recipeChangedSince(pool, 'item', 'ds_nots', null), false);
+  });
