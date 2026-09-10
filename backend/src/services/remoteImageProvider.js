@@ -335,7 +335,7 @@ function startGeneration(provider, req, deps = {}) {
 
 async function runGeneration(jobId, provider, req, deps = {}) {
   const { fetchImpl = fetch, store = assetStore } = deps;
-  const { subject, kind = 'object', prompt, seed = 0, frames = 1 } = req;
+  const { subject, kind = 'object', prompt, seed = 0, frames = 1, negative = [] } = req;
 
   setJob(jobId, { status: 'running' });
 
@@ -351,6 +351,30 @@ async function runGeneration(jobId, provider, req, deps = {}) {
     height: req.height || size.height,
     frames: frameCount,
   });
+
+  // SOMET-558. Operator exclusions join negative_prompt, APPENDED to whatever
+  // the template already lists rather than replacing it -- the template's terms
+  // are the house style (no frame, no poster, no scene) and are not the
+  // caller's to discard.
+  //
+  // Done HERE rather than as a {{negative}} placeholder, because a placeholder
+  // only works in templates that already contain one: every provider registered
+  // before today has a literal negative_prompt, so a placeholder would silently
+  // drop the operator's exclusion for exactly the providers in use. Merging
+  // after substitution needs no change to a stored provider row.
+  //
+  // The key is CREATED when the template omits it. This is an assumption worth
+  // naming: every provider registered here speaks the sdapi/v1/txt2img shape,
+  // where negative_prompt is standard. The alternative -- skipping silently --
+  // would discard the operator's words with nothing to show for it, which is
+  // the failure this whole change exists to end.
+  const extraNegative = (Array.isArray(negative) ? negative : [])
+    .map((n) => String(n || '').trim())
+    .filter(Boolean);
+  if (extraNegative.length) {
+    const existing = String(body.negative_prompt || '').trim();
+    body.negative_prompt = [existing, ...extraNegative].filter(Boolean).join(', ');
+  }
 
   // SOMET-547. Publish the FINAL payload on the registry entry so the history
   // can record what was actually sent. Until this existed the dispatcher only

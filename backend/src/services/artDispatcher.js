@@ -143,12 +143,19 @@ async function requestForSubject(db, job, subject, reg, provider) {
   // SOMET-548. A kind that composes its own prompt (tiles) is left alone:
   // corrections are an OBJECT feature, and a tile's prompt is built from its
   // biome's palette rather than from a subject description.
-  const corrections = reg.composePrompt
-    ? []
-    : (await promptNotes.listActive(db, job.subject_kind, job.subject_key))
-      // SOMET-549: the note's words PLUS its region as a phrase, composed in
-      // one place so the prompt cannot disagree with what the UI showed.
-      .map(promptNotes.noteToCorrection);
+  // SOMET-558. Notes now take TWO routes, because negation does not survive the
+  // positive prompt: CLIP has no reliable "not", so an exclusion written there
+  // conditions the very thing it names IN. `splitNotes` decides which is which
+  // from the stored kind -- it is not guessed from the text.
+  //
+  // SOMET-549 still holds for the reshape half: the note's words PLUS its
+  // region as a phrase, composed in one place so the prompt cannot disagree
+  // with what the UI showed.
+  const { corrections, avoid } = reg.composePrompt
+    ? { corrections: [], avoid: [] }
+    : promptNotes.splitNotes(
+      await promptNotes.listActive(db, job.subject_kind, job.subject_key),
+    );
   // SOMET-551. A written description replaces the catalogue's templated
   // subject phrase when one exists. With none stored this resolves to
   // subject.basePrompt and the composed prompt is byte-for-byte unchanged --
@@ -176,6 +183,9 @@ async function requestForSubject(db, job, subject, reg, provider) {
     promptModel,
     seed: Number(job.seed),
     frames: 1,                       // never a sheet
+    // Terms for negative_prompt rather than the prompt. Merged into the
+    // provider body by remoteImageProvider, which owns the template.
+    negative: avoid,
   };
   // THE NATIVE-RESOLUTION ASK IS FOR OBJECTS ONLY. A seamless tile is not an
   // isolated subject and does not tile-repeat the way an off-native object

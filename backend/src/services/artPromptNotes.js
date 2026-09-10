@@ -16,7 +16,7 @@ const MAX_NOTE = 300;
 // here: an unstable prompt makes two runs incomparable.
 async function listActive(db, subjectKind, subjectKey) {
   const { rows } = await db.query(
-    `SELECT id, note, region, created_at
+    `SELECT id, note, region, kind, created_at
        FROM art_prompt_notes
       WHERE subject_kind = $1 AND subject_key = $2 AND active
       ORDER BY created_at ASC, id ASC`,
@@ -30,7 +30,7 @@ async function listActive(db, subjectKind, subjectKey) {
 // explain afterwards is not much of a record.
 async function listAll(db, subjectKind, subjectKey) {
   const { rows } = await db.query(
-    `SELECT id, note, region, active, created_at
+    `SELECT id, note, region, kind, active, created_at
        FROM art_prompt_notes
       WHERE subject_kind = $1 AND subject_key = $2
       ORDER BY created_at DESC, id DESC`,
@@ -53,15 +53,54 @@ function normaliseRegion(region) {
   return { x: clamp(x), y: clamp(y), w: clamp(w), h: clamp(h) };
 }
 
-async function create(db, subjectKind, subjectKey, { note, region } = {}) {
+// The two routings a note can take (SOMET-558). RESHAPE is the default and the
+// historical behaviour; AVOID is the one that had nowhere to go.
+const KINDS = ['reshape', 'avoid'];
+
+// Anything unrecognised becomes 'reshape' rather than being rejected.
+//
+// Same reasoning as normaliseRegion above: the note's TEXT is the valuable
+// half. Refusing to save a correction because a client sent an unknown kind
+// would lose the operator's words over a routing detail, and 'reshape' is the
+// behaviour every note had before this column existed.
+function normaliseKind(kind) {
+  return KINDS.includes(kind) ? kind : 'reshape';
+}
+
+async function create(db, subjectKind, subjectKey, { note, region, kind } = {}) {
   const text = String(note == null ? '' : note).trim().slice(0, MAX_NOTE);
   if (!text) return null;
   const { rows } = await db.query(
-    `INSERT INTO art_prompt_notes (subject_kind, subject_key, note, region)
-     VALUES ($1, $2, $3, $4) RETURNING id, note, region, active, created_at`,
-    [subjectKind, subjectKey, text, normaliseRegion(region)],
+    `INSERT INTO art_prompt_notes (subject_kind, subject_key, note, region, kind)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id, note, region, kind, active, created_at`,
+    [subjectKind, subjectKey, text, normaliseRegion(region), normaliseKind(kind)],
   );
   return rows[0];
+}
+
+// Split active notes by where they must go.
+//
+// A RESHAPE note becomes a correction phrase, region and all, exactly as
+// before. An AVOID note contributes its bare text to negative_prompt and
+// DELIBERATELY DROPS ITS REGION: "beneath it" is a spatial instruction that
+// only means anything alongside a description, and a negative prompt is an
+// unordered bag of terms the model steers away from. Appending the region
+// phrase there would add the words "beneath it" to the things being avoided,
+// which is not what the operator asked for.
+function splitNotes(notes) {
+  const corrections = [];
+  const avoid = [];
+  for (const n of notes || []) {
+    if (n && n.kind === 'avoid') {
+      const text = String((n.note || '')).trim();
+      if (text) avoid.push(text);
+    } else {
+      const phrase = noteToCorrection(n);
+      if (phrase) corrections.push(phrase);
+    }
+  }
+  return { corrections, avoid };
 }
 
 async function deactivate(db, id) {
@@ -124,6 +163,6 @@ function noteToCorrection(note) {
 }
 
 module.exports = {
-  listActive, listAll, create, deactivate, normaliseRegion,
-  regionPhrase, noteToCorrection, MAX_NOTE,
+  listActive, listAll, create, deactivate, normaliseRegion, normaliseKind,
+  regionPhrase, noteToCorrection, splitNotes, KINDS, MAX_NOTE,
 };

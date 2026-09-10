@@ -660,3 +660,72 @@ test('trimForStorage never throws, whatever it is handed', () => {
     assert.strictEqual(out.skipped, 'unreadable');
   }
 });
+
+// --- Operator exclusions reach negative_prompt (SOMET-558) ----------------
+//
+// THE BUG THIS FIXES. Every prompt correction used to be appended to the
+// POSITIVE prompt, including exclusions. CLIP has no reliable negation, so
+// "no grey shadow" conditions *shadow* IN and the correction makes the image
+// worse than no correction at all. Measured on item/arrow, where an operator
+// wrote "you drawn a rocket" and the word rocket went into the positive prompt.
+function captureBody() {
+  const sent = [];
+  return {
+    sent,
+    fetchImpl: async (url, init) => {
+      sent.push(JSON.parse(init.body));
+      return okJson({ images: [PNG_B64] });
+    },
+  };
+}
+
+test('exclusions are APPENDED to the template negative_prompt, not substituted for it',
+  async (t) => {
+    t.after(__resetJobs);
+    const { sent, fetchImpl } = captureBody();
+    const withNegative = {
+      ...provider,
+      request_template: { prompt: '{{prompt}}', negative_prompt: 'picture frame, poster' },
+    };
+    await runGeneration(createJob(), withNegative,
+      { subject: 'darts', prompt: 'three darts', negative: ['grey shadow', 'dartboard'] },
+      { fetchImpl, store: fakeStore() });
+
+    // The template's own terms are the house style and are NOT the caller's to
+    // discard; the operator's terms join them.
+    assert.strictEqual(sent[0].negative_prompt,
+      'picture frame, poster, grey shadow, dartboard');
+    // AND THE OTHER HALF: none of it may leak into the positive prompt, which
+    // is the entire point of the change.
+    assert.strictEqual(sent[0].prompt, 'three darts');
+    assert.ok(!sent[0].prompt.includes('shadow'));
+  });
+
+test('a template with no negative_prompt still carries the exclusion', async (t) => {
+  t.after(__resetJobs);
+  const { sent, fetchImpl } = captureBody();
+  // `provider` above has no negative_prompt key at all -- the shape a provider
+  // registered before this feature has. Dropping the operator's words here
+  // would be the silent loss this change exists to end.
+  await runGeneration(createJob(), provider,
+    { subject: 'darts', prompt: 'three darts', negative: ['grey shadow'] },
+    { fetchImpl, store: fakeStore() });
+  assert.strictEqual(sent[0].negative_prompt, 'grey shadow');
+});
+
+test('no exclusions leaves the body exactly as the template wrote it', async (t) => {
+  t.after(__resetJobs);
+  const { sent, fetchImpl } = captureBody();
+  const withNegative = {
+    ...provider,
+    request_template: { prompt: '{{prompt}}', negative_prompt: 'picture frame' },
+  };
+  // Empty, absent and blank must all be no-ops: the 87 subjects with no notes
+  // must send a byte-identical body to the one they sent before this feature.
+  for (const negative of [[], undefined, ['', '   ']]) {
+    // eslint-disable-next-line no-await-in-loop
+    await runGeneration(createJob(), withNegative,
+      { subject: 'grass', prompt: 'grass', negative }, { fetchImpl, store: fakeStore() });
+  }
+  for (const body of sent) assert.strictEqual(body.negative_prompt, 'picture frame');
+});

@@ -190,3 +190,72 @@ test('noteToCorrection joins the words with the place, and survives either missi
   assert.equal(notes.noteToCorrection({ note: '  ', region: { x: 0, y: 0.8, w: 1, h: 0.2 } }), '');
   assert.equal(notes.noteToCorrection(null), '');
 });
+
+// --- Two routes, not one (SOMET-558) --------------------------------------
+//
+// THE VACUOUS TEST HERE would assert that `kind` is stored. What matters is
+// that an 'avoid' note leaves the POSITIVE prompt entirely and turns up in the
+// negative terms instead -- storing a column that nothing reads is precisely
+// the shape of dead feature this repo keeps finding green.
+dbTest('an avoid note leaves the positive prompt and becomes a negative term',
+  async (t, pool) => {
+    await notes.create(pool, 'item', 'nt_darts', { note: 'throwing darts, not a dartboard' });
+    await notes.create(pool, 'item', 'nt_darts', { note: 'grey shadow', kind: 'avoid' });
+
+    const active = await notes.listActive(pool, 'item', 'nt_darts');
+    // Precondition: the kind must survive the round trip, or the split below
+    // is measuring a default rather than a decision.
+    assert.deepEqual(active.map((n) => n.kind).sort(), ['avoid', 'reshape']);
+
+    const { corrections, avoid } = notes.splitNotes(active);
+    assert.deepEqual(avoid, ['grey shadow']);
+    assert.deepEqual(corrections, ['throwing darts, not a dartboard']);
+
+    // The end of the chain: the composed prompt must not contain the excluded
+    // word at all. Appending "grey shadow" to a positive prompt is what
+    // conditions a shadow IN, which is the defect this replaces.
+    const prompt = buildObjectPrompt('three throwing darts', { corrections });
+    assert.ok(prompt.includes('throwing darts, not a dartboard'));
+    assert.ok(!prompt.includes('grey shadow'),
+      'an exclusion in the positive prompt conditions the thing it names IN');
+  });
+
+// The default is load-bearing: every note written before this column existed
+// must keep reaching the prompt exactly as it did.
+dbTest('a note written with no kind still reshapes, as every existing note does',
+  async (t, pool) => {
+    const made = await notes.create(pool, 'item', 'nt_arrow', { note: 'fletched wooden shaft' });
+    assert.equal(made.kind, 'reshape');
+    const { corrections, avoid } = notes.splitNotes(await notes.listActive(pool, 'item', 'nt_arrow'));
+    assert.deepEqual(corrections, ['fletched wooden shaft']);
+    assert.deepEqual(avoid, []);
+  });
+
+// An unknown kind must not lose the operator's words.
+dbTest('an unrecognised kind falls back to reshape rather than being refused',
+  async (t, pool) => {
+    const made = await notes.create(pool, 'item', 'nt_arrow', { note: 'steel broadhead', kind: 'nonsense' });
+    assert.equal(made.kind, 'reshape', 'the CHECK constraint must never be reached with junk');
+    assert.equal(made.note, 'steel broadhead');
+  });
+
+// THE REGION IS DROPPED for an avoid note, and that is deliberate. "beneath
+// it" is a spatial instruction that only means something beside a description;
+// a negative prompt is an unordered bag of terms to steer away from, so the
+// region phrase would add the words "beneath it" to the things being avoided.
+dbTest('an avoid note contributes its words without its region phrase', async (t, pool) => {
+  // Its OWN subject key, and the nt_ prefix that dbTest's cleanup matches --
+  // without the prefix nothing is deleted, rows accumulate across runs, and
+  // which case fails depends on how many times the file has been run.
+  await notes.create(pool, 'item', 'nt_shadow', {
+    note: 'grey shadow', kind: 'avoid', region: { x: 0.3, y: 0.72, w: 0.25, h: 0.16 },
+  });
+  const active = await notes.listActive(pool, 'item', 'nt_shadow');
+  assert.equal(active.length, 1, 'precondition: exactly this note');
+  assert.ok(active[0].region, 'precondition: the region must actually be stored');
+  const { avoid } = notes.splitNotes(active);
+  assert.deepEqual(avoid, ['grey shadow']);
+  // Proof the region phrase exists and was deliberately not used, rather than
+  // this passing because regionPhrase happened to return nothing.
+  assert.ok(notes.regionPhrase(active[0].region), 'regionPhrase must be non-empty here');
+});

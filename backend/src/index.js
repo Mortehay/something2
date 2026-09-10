@@ -3408,7 +3408,11 @@ app.post('/api/art-subjects/:kind/:key/notes', adminGuard, async (req, res) => {
       return res.status(400).json({ error: `unknown subject kind "${req.params.kind}"` });
     }
     const note = await artPromptNotes.create(pool, req.params.kind, req.params.key, {
-      note: req.body.note, region: req.body.region,
+      // SOMET-558. 'reshape' (the default) joins the positive prompt as before;
+      // 'avoid' joins negative_prompt instead. An unknown value falls back to
+      // 'reshape' rather than 400-ing -- the operator's words are the valuable
+      // half and must not be lost over a routing field.
+      note: req.body.note, region: req.body.region, kind: req.body.kind,
     });
     // An empty note is a client mistake, not a server error, and saying so
     // beats storing a blank correction that quietly does nothing to a prompt.
