@@ -109,9 +109,57 @@ async function trimStoredTextures(store, { apply = false, limit = 0, log = conso
   return stats;
 }
 
-module.exports = { trimStoredTextures, classify };
+// --- the checked-in seed art ------------------------------------------------
+//
+// The other place entity art lives. seed-entity-textures.js trims on upload, so
+// the object store ends up correct either way; this exists so the committed
+// PNGs are correct on their own terms, for anyone reading or using them outside
+// the seeder.
+//
+// The manifest records a `bytes` field per entry, so it has to be rewritten in
+// the same pass or it starts lying about files it describes.
+async function trimSeedFiles({ apply = false, log = console.log } = {}) {
+  // Required lazily: this half touches no object store, and importing the
+  // manifest paths at module load would make the store-side entry point depend
+  // on the seed directory existing.
+  // eslint-disable-next-line global-require
+  const fs = require('fs');
+  // eslint-disable-next-line global-require
+  const { IN_DIR, MANIFEST } = require('./seed-entity-textures.js');
 
-if (require.main === module) {
+  const manifest = JSON.parse(fs.readFileSync(MANIFEST, 'utf8'));
+  const stats = { scanned: 0, trimmed: 0, alreadyTight: 0, unreadable: 0, missing: 0 };
+
+  for (const entry of manifest) {
+    const file = path.join(IN_DIR, entry.file);
+    if (!fs.existsSync(file)) { stats.missing += 1; continue; }
+    stats.scanned += 1;
+
+    const buf = fs.readFileSync(file);
+    const out = trimForStorage(buf, 'object');
+    if (out.skipped === 'unreadable') { stats.unreadable += 1; continue; }
+    if (out.ratio >= 1) { stats.alreadyTight += 1; continue; }
+
+    stats.trimmed += 1;
+    log(`  ${apply ? 'trim ' : 'would'} ${entry.file}  ratio ${out.ratio.toFixed(3)}  `
+      + `${buf.length} -> ${out.buffer.length} bytes`);
+    if (apply) {
+      fs.writeFileSync(file, out.buffer);
+      entry.bytes = out.buffer.length;
+    }
+  }
+
+  if (apply && stats.trimmed) {
+    // Trailing newline: the file is committed, and a missing one makes every
+    // future regeneration show a spurious last-line diff.
+    fs.writeFileSync(MANIFEST, `${JSON.stringify(manifest, null, 2)}\n`);
+  }
+  return stats;
+}
+
+module.exports = { trimStoredTextures, trimSeedFiles, classify };
+
+function main() {
   dotenv.config({ path: path.resolve(__dirname, '../../.env') });
   const apply = process.argv.includes('--apply');
   const limitArg = process.argv.find((a) => a.startsWith('--limit='));
@@ -120,6 +168,20 @@ if (require.main === module) {
   if (!apply) {
     console.log('DRY RUN -- nothing will be written. Pass --apply to write.\n');
   }
+
+  // --files trims the committed seed PNGs instead of the object store. They are
+  // two separate populations and conflating them in one run would make the
+  // summary meaningless, so it is one mode or the other.
+  if (process.argv.includes('--files')) {
+    trimSeedFiles({ apply })
+      .then((s) => {
+        console.log(`\n${apply ? 'trimmed' : 'would trim'} ${s.trimmed} of ${s.scanned} seed files`
+          + ` (${s.alreadyTight} already tight, ${s.unreadable} unreadable, ${s.missing} missing)`);
+      })
+      .catch((e) => { console.error(e.message); process.exitCode = 1; });
+    return;
+  }
+
   trimStoredTextures(assetStore, { apply, limit })
     .then((s) => {
       const saved = s.bytesBefore - s.bytesAfter;
@@ -132,3 +194,5 @@ if (require.main === module) {
     })
     .catch((e) => { console.error(e.message); process.exitCode = 1; });
 }
+
+if (require.main === module) main();
