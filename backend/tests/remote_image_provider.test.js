@@ -3,6 +3,7 @@ const assert = require('node:assert');
 const {
   substituteTemplate, decodeImage, stripDataUri, storageKey, isRemoteJobId,
   startGeneration, runGeneration, createJob, getJob, setJob, __resetJobs,
+  trimForStorage,
 } = require('../src/services/remoteImageProvider');
 
 // A one-pixel PNG, so "did a real image land in storage" is checkable rather
@@ -161,8 +162,13 @@ test('a successful generation stores a PNG and reports the sprite-gen job shape'
 
   const job = getJob(jobId);
   assert.strictEqual(job.status, 'done', job.error);
-  // The shape the admin UI already polls for.
-  assert.deepStrictEqual(Object.keys(job).sort(), ['error', 'id', 'progress', 'result', 'status']);
+  // The shape the admin UI already polls for. `sentBody` joined it in
+  // SOMET-547 ("history recorded what we asked for, not what was sent") and
+  // this assertion was left behind, so the file has been one test red on main
+  // ever since; adding the field here rather than loosening the assertion,
+  // because an exact key set is the point of the check.
+  assert.deepStrictEqual(Object.keys(job).sort(),
+    ['error', 'id', 'progress', 'result', 'sentBody', 'status']);
   assert.strictEqual(job.result.image_key, `sprites/tiles/grass/${jobId}/static.png`);
   // And a real image actually landed under that key.
   assert.deepStrictEqual(store.written.get(job.result.image_key), PNG_BYTES);
@@ -497,4 +503,160 @@ test('a genuinely refused connection still reads as unreachable', async (t) => {
   const job = getJob(jobId);
   assert.match(getJob(jobId).error, /could not reach/);
   assert.match(job.error, /ECONNREFUSED/);
+});
+
+// --- SOMET-563: the trim runs on the way to storage ------------------------
+//
+// These tests exist because the failure this repo keeps shipping is a green
+// suite over a feature nothing calls. pngTrim being correct (SOMET-562) says
+// nothing about whether a generated image ever reaches it, so every assertion
+// below reads the bytes that LANDED IN THE STORE, never the job document's
+// own account of itself.
+
+const fs = require('node:fs');
+const path = require('node:path');
+const { decodeRGBA, CLEAR } = require('../src/services/pngAlpha.js');
+
+// A real remote-generated image: 256x256 with the subject spanning 14% of the
+// width. Synthetic input would not prove much here -- the point is that art
+// this provider actually produced comes out tight.
+const OFFCENTRE = fs.readFileSync(
+  path.join(__dirname, 'fixtures', 'art', 'offcentre-darts.png'),
+);
+const OFFCENTRE_B64 = OFFCENTRE.toString('base64');
+
+function fillOf(buf) {
+  const img = decodeRGBA(buf);
+  let left = img.width; let right = -1;
+  for (let y = 0; y < img.height; y += 1) {
+    for (let x = 0; x < img.width; x += 1) {
+      if (img.px[(y * img.width + x) * 4 + 3] >= CLEAR) {
+        if (x < left) left = x;
+        if (x > right) right = x;
+      }
+    }
+  }
+  return { fill: (right - left + 1) / img.width, width: img.width, height: img.height };
+}
+
+test('an object image is trimmed before it is stored', async (t) => {
+  t.after(__resetJobs);
+  const store = fakeStore();
+  const jobId = createJob();
+  await runGeneration(jobId, provider, { subject: 'darts', kind: 'object', prompt: 'darts' },
+    { fetchImpl: async () => okJson({ images: [OFFCENTRE_B64] }), store });
+
+  const job = getJob(jobId);
+  assert.strictEqual(job.status, 'done', job.error);
+  const written = store.written.get(job.result.image_key);
+
+  // Precondition: the input really was mostly empty, or this proves nothing.
+  assert.ok(fillOf(OFFCENTRE).fill < 0.2, 'fixture should start mostly empty');
+  // The bytes that landed are NOT the bytes that arrived...
+  assert.notDeepStrictEqual(written, OFFCENTRE);
+  // ...and the subject now fills its canvas.
+  const after = fillOf(written);
+  assert.ok(after.fill > 0.9, `stored image still only ${after.fill} full`);
+  assert.ok(after.width < 256, `canvas was not cropped: ${after.width}`);
+});
+
+test('the job reports how much the trim actually changed', async (t) => {
+  // The number that makes a no-op trim visible instead of inferred from a
+  // success that did nothing.
+  t.after(__resetJobs);
+  const store = fakeStore();
+  const jobId = createJob();
+  await runGeneration(jobId, provider, { subject: 'darts', kind: 'object', prompt: 'darts' },
+    { fetchImpl: async () => okJson({ images: [OFFCENTRE_B64] }), store });
+
+  const { result } = getJob(jobId);
+  assert.strictEqual(result.trim_skipped, null);
+  assert.ok(result.trim_ratio < 0.2, `expected a large crop, got ${result.trim_ratio}`);
+  // And the reported ratio matches the image that was actually stored.
+  const written = store.written.get(result.image_key);
+  const img = decodeRGBA(written);
+  const measured = (img.width * img.height) / (256 * 256);
+  assert.ok(Math.abs(result.trim_ratio - measured) < 1e-9);
+});
+
+test('a tile is stored exactly as the provider sent it', async (t) => {
+  // Ground is full-bleed and must never be cropped -- a trimmed tile is a hole
+  // in the world. Fed the same off-centre image as the object test above, so
+  // the ONLY difference is `kind`.
+  t.after(__resetJobs);
+  const store = fakeStore();
+  const jobId = createJob();
+  await runGeneration(jobId, provider, { subject: 'grass', kind: 'tile', prompt: 'grass' },
+    { fetchImpl: async () => okJson({ images: [OFFCENTRE_B64] }), store });
+
+  const job = getJob(jobId);
+  assert.deepStrictEqual(store.written.get(job.result.image_key), OFFCENTRE);
+  assert.strictEqual(job.result.trim_skipped, 'tile');
+  assert.strictEqual(job.result.trim_ratio, 1);
+});
+
+test('a multi-frame atlas is stored untrimmed', async (t) => {
+  // Trimming a sheet as one image would desync it from the manifest computed
+  // beside it and crop every frame wrongly. The sheet branch returns before
+  // the trim, so this is structural -- and this test is what keeps it that way
+  // if the branches are ever reordered.
+  t.after(__resetJobs);
+  const store = fakeStore();
+  const jobId = createJob();
+  const sheet = Buffer.from(sheetPngB64(512, 1280), 'base64');
+  await runGeneration(jobId, { ...provider, sheet_layout: 'directional' },
+    { subject: 'Wolf', kind: 'object', prompt: 'wolf', frames: 4 },
+    { fetchImpl: async () => okJson({ images: [sheetPngB64(512, 1280)] }), store });
+
+  const job = getJob(jobId);
+  assert.strictEqual(job.status, 'done', job.error);
+  assert.deepStrictEqual(store.written.get(job.result.atlas_key), sheet);
+});
+
+test('an image we cannot decode is stored unchanged rather than lost', async (t) => {
+  // Generation is the expensive half -- a minute or more of remote GPU time.
+  // Trading a cosmetic defect for a lost generation would be the worse bug, so
+  // anything pngTrim will not touch degrades to the original bytes.
+  //
+  // THE FIRST VERSION OF THIS TEST USED PNG_B64 AND TESTED NOTHING. That 1x1
+  // image is perfectly good 8-bit RGBA (colour type 6, depth 8), so it decodes,
+  // trims to a no-op and never goes near the degrade path the test is named
+  // after. A truncated PNG -- header, no IDAT -- is what decodeRGBA actually
+  // refuses.
+  t.after(__resetJobs);
+  const store = fakeStore();
+  const jobId = createJob();
+  const undecodable = Buffer.from(sheetPngB64(64, 64), 'base64');
+  await runGeneration(jobId, provider, { subject: 'thing', kind: 'object', prompt: 'thing' },
+    { fetchImpl: async () => okJson({ images: [sheetPngB64(64, 64)] }), store });
+
+  const job = getJob(jobId);
+  assert.strictEqual(job.status, 'done', job.error);
+  assert.strictEqual(job.result.trim_skipped, 'unreadable');
+  assert.strictEqual(job.result.trim_ratio, 1);
+  assert.deepStrictEqual(store.written.get(job.result.image_key), undecodable);
+});
+
+test('an already-tight object image is stored byte-identical', async (t) => {
+  // Idempotence at the wiring level: re-running a generation that needs no
+  // trim must not churn the bytes, or every repair pass rewrites every image.
+  t.after(__resetJobs);
+  const store = fakeStore();
+  const jobId = createJob();
+  await runGeneration(jobId, provider, { subject: 'dot', kind: 'object', prompt: 'dot' },
+    { fetchImpl: async () => okJson({ images: [PNG_B64] }), store });
+
+  const job = getJob(jobId);
+  assert.strictEqual(job.result.trim_ratio, 1);
+  assert.deepStrictEqual(store.written.get(job.result.image_key), PNG_BYTES);
+});
+
+test('trimForStorage never throws, whatever it is handed', () => {
+  // The degrade path, exercised directly: the wiring's promise is that a
+  // broken trim cannot fail a job.
+  for (const input of [null, undefined, Buffer.alloc(0), Buffer.from('rubbish'), 42]) {
+    const out = trimForStorage(input, 'object');
+    assert.strictEqual(out.ratio, 1);
+    assert.strictEqual(out.skipped, 'unreadable');
+  }
 });
