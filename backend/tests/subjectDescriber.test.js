@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const {
-  clean, buildMessages, subjectContext, grantsPhrase, CONTRACTS, TEMPERATURE,
+  clean, buildMessages, subjectContext, grantsPhrase, RULE_PHRASES, CONTRACTS, TEMPERATURE,
 } = require('../src/services/subjectDescriber.js');
 
 // SOMET-550. The contract that turns a catalogue row into a subject phrase.
@@ -138,7 +138,11 @@ test('every grant type renders, because an unhandled one is a silent blank', () 
     { type: 'rule', rule: 'cooldownFloor', value: 0.32 },
   ]);
   // These six are every type in passive_nodes, checked against the live table.
-  for (const word of ['strength', 'fire damage', 'ice resistance', 'mana', 'chill', 'cooldownFloor']) {
+  // SOMET-568: the rule entry used to expect the literal identifier
+  // 'cooldownFloor'. That assertion described the defect -- it passed precisely
+  // BECAUSE the identifier reached the prompt raw -- so it is now the English
+  // the rule renders as.
+  for (const word of ['strength', 'fire damage', 'ice resistance', 'mana', 'chill', 'recharge faster']) {
     assert.ok(all.includes(word), `"${word}" is missing from "${all}"`);
   }
   assert.equal(grantsPhrase([]), '', 'and no grants is no Effect line, not an empty one');
@@ -184,4 +188,55 @@ test('temperature defaults low, because a description that moves is not a record
     if (before === undefined) delete process.env.ART_DESCRIBER_TEMPERATURE;
     else process.env.ART_DESCRIBER_TEMPERATURE = before;
   }
+});
+
+// SOMET-568. A rule grant names a FORMULA, and its identifier is that formula's
+// name in the code. Rendering it raw put `meleeWaveShare 0.3` into the prompt
+// for the 54 labels whose only grant is a rule -- 42% of the tree.
+test('a rule grant reaches the prompt as English, never as its identifier', () => {
+  const phrase = grantsPhrase([{ type: 'rule', rule: 'meleeWaveShare', value: 0.3 }]);
+  assert.match(phrase, /shockwave/, `"${phrase}" should describe the effect`);
+  assert.doesNotMatch(phrase, /meleeWaveShare/, 'the identifier must not survive into a prompt');
+  // No digits: these values are multipliers, floors and shares whose direction
+  // is not readable from the number, and a model given them may draw them.
+  assert.doesNotMatch(phrase, /[0-9]/, `"${phrase}" carries a number the model cannot interpret`);
+});
+
+test('an unmapped rule is dropped, not passed through as camelCase', () => {
+  assert.equal(grantsPhrase([{ type: 'rule', rule: 'aRuleAddedTomorrow', value: 5 }]), '',
+    'consistent with an unknown grant TYPE being dropped rather than rendered as undefined');
+  // and it must not take a legitimate sibling down with it
+  assert.equal(
+    grantsPhrase([{ type: 'stat', stat: 'wisdom', value: 2 },
+      { type: 'rule', rule: 'aRuleAddedTomorrow', value: 5 }]),
+    '+2 wisdom');
+});
+
+// THE STALENESS GUARD, and the reason it reads passiveTree rather than the
+// database: RULE_KEYS is the AUTHORED vocabulary, so a rule becomes reachable
+// the moment it is added there -- before any node is seeded with it. Asserting
+// against passive_nodes instead would leave a window where a rule is authorable
+// and silently unrenderable, which is the exact shape of the SOMET-552 defect
+// (a branch that could not fire, with a test that never noticed).
+test('every rule the tree can author has words', () => {
+  const { RULE_KEYS } = require('../seeds/data/passiveTree.js');
+  const missing = Object.keys(RULE_KEYS).filter((k) => !RULE_PHRASES[k]);
+  assert.deepEqual(missing, [],
+    `these rules would reach a prompt as camelCase, or be dropped silently: ${missing.join(', ')}`);
+  // The converse: a phrase for a rule that no longer exists is dead weight that
+  // makes the table look more complete than it is.
+  const orphans = Object.keys(RULE_PHRASES).filter((k) => !RULE_KEYS[k]);
+  assert.deepEqual(orphans, [], `no such rule in the tree: ${orphans.join(', ')}`);
+});
+
+// Two phrases were read off their CONSUMER because the identifier misleads.
+// Pinned so a later "tidy-up" cannot quietly reintroduce the wrong fact.
+test('the two rules whose names mislead say what the code actually does', () => {
+  // world.js on auraLeech: "It HEALS and never drains."
+  assert.match(RULE_PHRASES.auraLeech, /heal/i);
+  assert.doesNotMatch(RULE_PHRASES.auraLeech, /drain|steal|enem/i,
+    'auraLeech heals its owner; describing it as draining enemies is a wrong fact');
+  // world.js on regenLifeShare: the share rides MANA regeneration --
+  // "no regeneration, no life" -- so it is not a second health regen.
+  assert.match(RULE_PHRASES.regenLifeShare, /mana/i);
 });

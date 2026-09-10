@@ -138,6 +138,48 @@ const CONTRACTS = {
 // "strength". Units are deliberately not asserted: the tree stores 35 for +35%
 // ice damage and 2 for +2 strength, and claiming a unit we have not checked
 // would put a wrong fact in every icon prompt.
+// SOMET-568. A `rule` grant names a FORMULA, and its identifier is the name of
+// that formula in the code -- `meleeWaveShare`, `cooldownFloor`. SOMET-552
+// carried grants into the prompt and rendered this type raw, so 54 of the 128
+// labels (the ones whose ONLY grant is a rule) went from being described by one
+// English word to being described by one camelCase token. That is not an
+// improvement, it is a different opaque string.
+//
+// EACH PHRASE WAS READ OFF ITS CONSUMER, not guessed from its name, because two
+// of them are the opposite of what the name suggests:
+//
+//   auraLeech      "leech" reads as draining an enemy. world.js is explicit --
+//                  "It HEALS and never drains" -- so it is a healing aura, and
+//                  the obvious phrasing would have put a wrong fact in the
+//                  prompt for every label carrying it.
+//   regenLifeShare not a second health regen. The share is taken on the mana
+//                  ACTUALLY regenerated, so "no regeneration, no life".
+//
+// NO NUMBERS HERE, deliberately, and for a stronger reason than the units rule
+// SOMET-552 applied to stats. These values are multipliers, floors and shares
+// whose direction is not readable from the number: cooldownFloor 0.32 is a
+// BETTER floor than 0.40, and lifeCostMultiplier 0.75 is a DISCOUNT. A model
+// asked to draw "cooldownFloor 0.32" cannot recover any of that, and a model
+// given the number alongside the words would be as likely to draw the digits.
+// The words are what decide the drawing.
+const RULE_PHRASES = {
+  lifeCostMultiplier: 'abilities cost less life',
+  treeCharmBonus: 'charms more creatures to fight alongside you',
+  cooldownFloor: 'abilities recharge faster',
+  regenLifeShare: 'regenerating mana also restores life',
+  attackSpeedMult: 'attacks faster',
+  castSpeedMult: 'casts spells faster',
+  meleeReachBonus: 'strikes from further away',
+  meleeArcBonus: 'strikes through a wider arc',
+  projectileCount: 'fires extra projectiles',
+  projectileSpeedMult: 'projectiles fly faster',
+  pierceBonus: 'projectiles pierce through enemies',
+  auraLeech: 'a healing aura',
+  auraRadius: 'a wider aura',
+  meleeDamageMult: 'heavier melee blows',
+  meleeWaveShare: 'melee blows send out a shockwave',
+};
+
 function grantsPhrase(grants) {
   if (!Array.isArray(grants) || !grants.length) return '';
   const words = grants.map((g) => {
@@ -148,7 +190,13 @@ function grantsPhrase(grants) {
       case 'resist': return `+${g.value} ${g.element} resistance`;
       case 'resource': return `+${g.value} ${g.pool}`;
       case 'status': return `inflicts ${g.status}`;
-      case 'rule': return `${g.rule} ${g.value}`;
+      // An UNMAPPED rule is DROPPED rather than passed through as camelCase.
+      // Same rule as the `default` below: a prompt is better off missing a
+      // clause than carrying an identifier no model can read. The test
+      // against passiveTree's RULE_KEYS is what stops that being a silent
+      // hole -- add a rule to the tree and this file fails until it has
+      // words.
+      case 'rule': return RULE_PHRASES[g.rule] || '';
       default: return '';
     }
   }).filter(Boolean);
@@ -247,6 +295,6 @@ async function describeSubject(subject, { length = 'medium', fetchImpl = fetch }
 }
 
 module.exports = {
-  describeSubject, buildMessages, clean, subjectContext, grantsPhrase,
+  describeSubject, buildMessages, clean, subjectContext, grantsPhrase, RULE_PHRASES,
   LENGTHS, CONTRACTS, MODEL, TEMPERATURE,
 };
