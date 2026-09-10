@@ -101,10 +101,49 @@ function chunk(type, data) {
   return Buffer.concat([len, body, crc]);
 }
 
-// Every scanline goes out with filter 0 (none). The adaptive filters exist to
-// help compression, and the extra bytes are not worth a second place for an
-// off-by-one to hide -- these images are already deflated below the sizes the
-// providers hand us.
+// Choose a per-scanline filter, the way every real encoder does.
+//
+// THIS WAS FILTER 0 (NONE) FOR EVERY ROW AND IT WAS A MEASURABLE MISTAKE. The
+// comment defending it said the extra bytes were not worth the complexity;
+// the repair pass's dry run then reported the whole corpus growing from 58MB
+// to 78MB. rose_bush went from 94,245 to 126,197 bytes while being cropped to
+// 28% of its area -- roughly 4.7x the bytes per pixel. Deflate on raw RGBA
+// gradients does badly; deflate on filtered residuals does well, and that gap
+// is what PNG filtering exists for. On a project already fighting an asset
+// burst that trips a rate limiter, shipping images 3-4x heavier per pixel to
+// save fifty lines here would have been the wrong trade.
+//
+// The heuristic is the standard one from the PNG spec's own guidance: filter
+// each row five ways, keep the one whose residuals have the smallest summed
+// magnitude, treating each byte as signed. It is not optimal -- optimal needs
+// a search across rows -- but it is what libpng does by default and it
+// recovers essentially all of the difference.
+const FILTERS = 5;
+
+function paeth(a, b, c) {
+  const p = a + b - c;
+  const pa = Math.abs(p - a);
+  const pb = Math.abs(p - b);
+  const pc = Math.abs(p - c);
+  if (pa <= pb && pa <= pc) return a;
+  return pb <= pc ? b : c;
+}
+
+// Residual of `type` at byte i of `row`, given the raw bytes of the row above.
+function residual(type, row, prev, i, bpp) {
+  const x = row[i];
+  const a = i >= bpp ? row[i - bpp] : 0;
+  const b = prev ? prev[i] : 0;
+  const c = (prev && i >= bpp) ? prev[i - bpp] : 0;
+  switch (type) {
+    case 1: return (x - a) & 0xff;
+    case 2: return (x - b) & 0xff;
+    case 3: return (x - ((a + b) >> 1)) & 0xff;
+    case 4: return (x - paeth(a, b, c)) & 0xff;
+    default: return x;
+  }
+}
+
 function encodeRGBA(width, height, px) {
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(width, 0);
@@ -115,11 +154,32 @@ function encodeRGBA(width, height, px) {
   ihdr[11] = 0;     // filter method: adaptive
   ihdr[12] = 0;     // interlace: none
 
-  const stride = width * 4;
+  const bpp = 4;
+  const stride = width * bpp;
   const raw = Buffer.alloc((stride + 1) * height);
+  const candidate = Buffer.alloc(stride);
   for (let y = 0; y < height; y += 1) {
-    raw[y * (stride + 1)] = 0;
-    px.copy(raw, y * (stride + 1) + 1, y * stride, (y + 1) * stride);
+    const row = px.subarray(y * stride, (y + 1) * stride);
+    const prev = y > 0 ? px.subarray((y - 1) * stride, y * stride) : null;
+
+    let bestType = 0;
+    let bestScore = Infinity;
+    for (let type = 0; type < FILTERS; type += 1) {
+      let score = 0;
+      for (let i = 0; i < stride; i += 1) {
+        const v = residual(type, row, prev, i, bpp);
+        // Signed magnitude: a residual of 255 is -1, which deflate likes as
+        // much as 1. Scoring it as 255 would reject the best filter.
+        score += v < 128 ? v : 256 - v;
+      }
+      if (score < bestScore) { bestScore = score; bestType = type; }
+    }
+
+    for (let i = 0; i < stride; i += 1) {
+      candidate[i] = residual(bestType, row, prev, i, bpp);
+    }
+    raw[y * (stride + 1)] = bestType;
+    candidate.copy(raw, y * (stride + 1) + 1);
   }
 
   return Buffer.concat([

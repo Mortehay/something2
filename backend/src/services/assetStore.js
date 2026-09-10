@@ -109,8 +109,23 @@ async function putObject(key, buffer, contentType = 'image/png') {
 // lets a test change MINIO_* and see the effect.
 const __setAssetClient = (impl) => { client = impl; };
 
+// Every object key in the bucket. SOMET-564: the repair pass needs to walk
+// what is already stored, and reaching around this module for its client would
+// put MinIO specifics into a script and bypass the __setAssetClient seam that
+// makes any of this testable.
+async function listObjectKeys(prefix = '') {
+  const c = getClient();
+  return new Promise((resolve, reject) => {
+    const keys = [];
+    const stream = c.listObjects(BUCKET(), prefix, true);
+    stream.on('data', (o) => keys.push(o.name));
+    stream.on('end', () => resolve(keys));
+    stream.on('error', reject);
+  });
+}
+
 module.exports = {
-  getObjectStream, putObject, ensureBucket, __setAssetClient, BUCKET,
+  getObjectStream, putObject, ensureBucket, listObjectKeys, __setAssetClient, BUCKET,
   // Exported for the configuration tests: the point of this module is the
   // settings it derives, and asserting them through a live connection would
   // need a live store.

@@ -290,3 +290,58 @@ test('the reported ratio is the real area change', () => {
     `reported ${out.ratio} but the image is ${measured}`);
   assert.ok(out.ratio < 0.1, `expected a large crop, got ${out.ratio}`);
 });
+
+// --- encoder efficiency ----------------------------------------------------
+
+test('scanlines are filtered adaptively, not all written as type 0', () => {
+  // REGRESSION GUARD, and it earned its place. Every row originally went out
+  // with filter 0 (none), which decodes perfectly and looks fine in a unit
+  // test -- but deflate does badly on raw RGBA gradients. The repair pass's
+  // dry run over the real corpus reported it growing from 58MB to 78MB:
+  // rose_bush went 94,245 -> 126,197 bytes while being cropped to 28% of its
+  // area, about 4.7x the bytes per pixel. Nothing in the test suite noticed,
+  // because size is not correctness -- until you are shipping every entity
+  // image to a browser through a rate limiter.
+  const width = 64;
+  const height = 64;
+  const px = Buffer.alloc(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const i = (y * width + x) * 4;
+      px[i] = x * 4;              // a smooth horizontal ramp, which Sub predicts
+      px[i + 1] = y * 4;          // and a vertical one, which Up predicts
+      px[i + 2] = 128;
+      px[i + 3] = 255;
+    }
+  }
+  const encoded = encodeRGBA(width, height, px);
+
+  // Read the filter byte off each scanline of the decompressed IDAT.
+  const chunks = [];
+  let off = 8;
+  while (off + 8 <= encoded.length) {
+    const len = encoded.readUInt32BE(off);
+    const type = encoded.toString('ascii', off + 4, off + 8);
+    if (type === 'IDAT') chunks.push(encoded.subarray(off + 8, off + 8 + len));
+    off += 12 + len;
+  }
+  const raw = zlib.inflateSync(Buffer.concat(chunks));
+  const stride = width * 4;
+  const used = new Set();
+  for (let y = 0; y < height; y += 1) used.add(raw[y * (stride + 1)]);
+
+  assert.ok(!(used.size === 1 && used.has(0)),
+    'every scanline used filter 0 -- adaptive selection is not running');
+
+  // And the point of it: the result is materially smaller than the same
+  // pixels written unfiltered.
+  const unfiltered = Buffer.alloc((stride + 1) * height);
+  for (let y = 0; y < height; y += 1) {
+    unfiltered[y * (stride + 1)] = 0;
+    px.copy(unfiltered, y * (stride + 1) + 1, y * stride, (y + 1) * stride);
+  }
+  const naive = zlib.deflateSync(unfiltered, { level: 9 }).length;
+  const actual = zlib.deflateSync(raw, { level: 9 }).length;
+  assert.ok(actual < naive * 0.9,
+    `filtering saved little: ${actual} vs ${naive} bytes unfiltered`);
+});
