@@ -37,7 +37,27 @@ const Ring = styled.span`
   }
 `;
 
-const Wrap = styled.div`
+// A SPAN, not a div, and that is load-bearing rather than stylistic.
+//
+// `inline` exists so this can sit in a row of content, and the content it sits
+// in is often a <p>: ArtConsoleAdmin's coverage line, and the same shape on
+// several other tabs, wrap it in the shared `Hint` (styled.p). A <p> may
+// contain only phrasing content, so a <div> here is invalid HTML at every one
+// of those call sites -- React reported "In HTML, <div> cannot be a descendant
+// of <p>" and warned of a hydration error. The browser also silently CLOSES
+// the <p> before a block child, so the text after the spinner ends up in a
+// different element than the markup says.
+//
+// Fixed here rather than at the call sites because there are 15 of them across
+// 13 pages, and a span is valid in both a <p> and a <div> -- so this cannot be
+// reintroduced by the next page that uses it. Ring and Label were already
+// spans; nesting depth would not have saved us anyway, since a <div> anywhere
+// under a <p> is the same violation.
+//
+// `display: flex` is kept exactly as it was. Display is CSS and has no bearing
+// on the HTML validity; switching to inline-flex would have changed the box on
+// all 15 call sites to fix a problem that is only about the tag.
+const Wrap = styled.span`
   display: flex;
   align-items: center;
   justify-content: ${p => (p.$inline ? 'flex-start' : 'center')};
