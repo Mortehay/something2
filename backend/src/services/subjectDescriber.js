@@ -27,6 +27,16 @@ const ENDPOINT = () => process.env.ART_DESCRIBER_URL
   || 'http://localhost:20434/v1/chat/completions';
 const MODEL = () => process.env.ART_DESCRIBER_MODEL || 'qwen2.5-coder:7b';
 const TIMEOUT_MS = () => parseInt(process.env.ART_DESCRIBER_TIMEOUT_MS || '120000', 10);
+// SOMET-552. Measured: at 0.4 the SAME subject came back differently on 13 of
+// 20 re-runs -- "curved saber with a thick, sinewy tendon" one run, "curved
+// saber with a looped cord" the next. That instability is not a style choice,
+// it defeats the point of storing the description at all: a re-run is supposed
+// to be a deliberate new artefact, not a coin flip, and comparing two runs of
+// anything is impossible when the baseline moves on its own.
+const TEMPERATURE = () => {
+  const raw = parseFloat(process.env.ART_DESCRIBER_TEMPERATURE);
+  return Number.isFinite(raw) ? raw : 0.15;
+};
 
 // Word budgets rather than token counts: the model obeys "at most N words" far
 // better than a token cap, and a token cap truncates mid-phrase, which yields a
@@ -193,7 +203,7 @@ async function describeSubject(subject, { length = 'medium', fetchImpl = fetch }
       model: MODEL(),
       messages: buildMessages(subject, length),
       max_tokens: budget.tokens,
-      temperature: 0.4,
+      temperature: TEMPERATURE(),
       stream: false,
     }),
     signal: AbortSignal.timeout(TIMEOUT_MS()),
@@ -208,5 +218,6 @@ async function describeSubject(subject, { length = 'medium', fetchImpl = fetch }
 }
 
 module.exports = {
-  describeSubject, buildMessages, clean, subjectContext, LENGTHS, CONTRACTS, MODEL,
+  describeSubject, buildMessages, clean, subjectContext,
+  LENGTHS, CONTRACTS, MODEL, TEMPERATURE,
 };

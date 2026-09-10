@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const {
-  clean, buildMessages, subjectContext, CONTRACTS,
+  clean, buildMessages, subjectContext, CONTRACTS, TEMPERATURE,
 } = require('../src/services/subjectDescriber.js');
 
 // SOMET-550. The contract that turns a catalogue row into a subject phrase.
@@ -133,4 +133,26 @@ test('the contract forbids styling, backdrop and framing words', () => {
   const sys = buildMessages({ kind: 'item', key: 'k', name: 'K' }, 'short')[0].content;
   assert.match(sys, /Never name the art style/i);
   assert.match(sys, /background/i);
+});
+
+// SOMET-552. Sampling temperature is the difference between a description you
+// can reason about and one that moves under you. Measured over the same 20
+// warrior abilities, two runs apart: temperature 0.4 agreed on 7 of 20,
+// temperature 0.15 on 15 of 20.
+test('temperature defaults low, because a description that moves is not a record', () => {
+  const before = process.env.ART_DESCRIBER_TEMPERATURE;
+  try {
+    delete process.env.ART_DESCRIBER_TEMPERATURE;
+    assert.ok(TEMPERATURE() <= 0.2, `default is ${TEMPERATURE()}, which re-rolls the answer`);
+    process.env.ART_DESCRIBER_TEMPERATURE = '0.8';
+    assert.equal(TEMPERATURE(), 0.8, 'and is tunable, for deliberately exploring alternatives');
+    // A junk value must not become NaN in the request body -- the provider
+    // rejects it, and every description in the run fails for a reason that
+    // points at the model rather than at the env var.
+    process.env.ART_DESCRIBER_TEMPERATURE = 'warm';
+    assert.ok(Number.isFinite(TEMPERATURE()));
+  } finally {
+    if (before === undefined) delete process.env.ART_DESCRIBER_TEMPERATURE;
+    else process.env.ART_DESCRIBER_TEMPERATURE = before;
+  }
 });
