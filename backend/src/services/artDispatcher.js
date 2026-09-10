@@ -234,6 +234,13 @@ async function runOne(db, job, {
     return (doc && doc.sentBody) || req;
   };
 
+  // When the provider call began, for the fast-fault refund below. Set at the
+  // top rather than beside `generate` so a failure BEFORE the call (an unknown
+  // subject, a missing registry) is also measured -- those are our own faults
+  // and resolve instantly, and charging the subject an attempt for them is the
+  // same mistake in a different coat.
+  const startedAt = Date.now();
+
   // SOMET-547. Every failure in this function goes through `fail`, and every
   // success through the tail, so those two points are the whole history.
   const fail = async (message) => {
@@ -243,7 +250,15 @@ async function runOne(db, job, {
       // field, and reading it from there would silently record null forever.
       promptModel: req && req.promptModel,
     });
-    await queue.fail(db, job.id, new Error(message));
+    // SOMET-558. A fault the provider returned faster than it could possibly
+    // have drawn anything is not an attempt at this subject, so it does not
+    // cost one. Gated on the failure being PROVIDER-class as well as fast: a
+    // subject whose own cutout keyed it away is a real attempt however quickly
+    // it came back, and refunding that would retry a hopeless subject forever.
+    const elapsed = Date.now() - startedAt;
+    const refundAttempt = elapsed < queue.FAST_FAULT_MS()
+      && failures.classify(message).retryable;
+    await queue.fail(db, job.id, new Error(message), { refundAttempt });
     return {
       id: job.id, ok: false, error: message,
       subject: `${job.subject_kind}/${job.subject_key}`,
@@ -454,6 +469,7 @@ async function dispatch(db, {
   provider,
   limit = 10,
   concurrency = DEFAULT_CONCURRENCY(),
+  onResult = null,
   generate,
   buildRequest,
   writeArt,
@@ -476,11 +492,18 @@ async function dispatch(db, {
   const resolveSubject = subjectResolver(db, subjects);
   const results = [];
   let cursor = 0;
+  // SOMET-558. `onResult` may stop the pass. Without it the breaker could only
+  // be consulted AFTER a whole pass returned, so its threshold was unreachable:
+  // a wedged provider answering in 200ms resolved all ten claimed jobs in under
+  // two seconds, and BREAKER_TRIP=3 tripped at ten every time. The guard was
+  // real, configured, and disarmed by the granularity of the thing it guarded.
+  let aborted = false;
   // A fixed pool of workers pulling from a shared cursor, rather than slicing
   // the list into equal chunks: subjects do not take equal time, and chunking
   // would leave one worker finishing long after the others idled.
   const workers = Array.from({ length: Math.max(1, concurrency) }, async () => {
     for (;;) {
+      if (aborted) return;
       const i = cursor;
       cursor += 1;
       if (i >= claimed.length) return;
@@ -489,13 +512,26 @@ async function dispatch(db, {
       const jobProvider = buildRequest
         ? provider
         : await resolveJobProvider(db, job.provider_id, provider, loadProvider);
-      results.push(await runOne(db, job, {
+      const result = await runOne(db, job, {
         provider: jobProvider, generate, buildRequest, writeArt, resolveSubject,
         subjects, deps,
-      }));
+      });
+      results.push(result);
+      // Checked the instant a result lands, so the pass stops on the third
+      // consecutive provider failure rather than on the tenth.
+      if (onResult && onResult(result) === 'stop') { aborted = true; return; }
     }
   });
   await Promise.all(workers);
+
+  // An aborted pass must not leave its untouched remainder claimed. claim()
+  // stamped every one of them, so without this the breaker would strand
+  // `limit - processed` jobs in `running` for an hour -- trading the failure
+  // this fix prevents for a different one.
+  if (aborted) {
+    const resolved = new Set(results.map((r) => r.id));
+    await queue.release(db, claimed.filter((j) => !resolved.has(j.id)).map((j) => j.id));
+  }
 
   return {
     claimed: claimed.length,
@@ -591,24 +627,30 @@ function startDrain(db, opts = {}) {
     try {
       for (;;) {
         if (self.stopping) break;
-        const out = await dispatch(db, opts);
+        // The breaker now runs as each result lands (SOMET-558), so a wedged
+        // provider stops the pass at BREAKER_TRIP instead of after all `limit`
+        // claimed jobs have been converted into failures.
+        let tripped = false;
+        const onResult = (r) => {
+          if (r.ok) { brokenSubjects.clear(); return null; }
+          // Only PROVIDER-class failures count. A subject whose cutout keyed
+          // away its own image says nothing about the provider's health, and
+          // tripping on it would stop a perfectly good batch -- exactly the
+          // mistake an external watchdog made here before the distinction
+          // existed.
+          if (!failures.classify(r.error).retryable) return null;
+          brokenSubjects.add(r.subject);
+          if (brokenSubjects.size < BREAKER_TRIP()) return null;
+          tripped = true;
+          return 'stop';
+        };
+        const out = await dispatch(db, { ...opts, onResult });
         self.passes += 1;
         self.done += out.done;
         self.failed += out.failed;
 
-        // THE CIRCUIT BREAKER. Results arrive in completion order, so walking
-        // them in order is walking the sequence of outcomes as they happened.
-        //
-        // Only PROVIDER-class failures count. A subject whose cutout keyed
-        // away its own image says nothing about the provider's health, and
-        // tripping on it would stop a perfectly good batch -- which is exactly
-        // the mistake an external watchdog made here before the distinction
-        // existed.
-        for (const r of out.results) {
-          if (r.ok) { brokenSubjects.clear(); continue; }
-          if (failures.classify(r.error).retryable) brokenSubjects.add(r.subject);
-        }
-        if (brokenSubjects.size >= BREAKER_TRIP()) {
+        // THE CIRCUIT BREAKER fired inside the pass; this only reports it.
+        if (tripped) {
           self.error = `stopped after ${brokenSubjects.size} different subjects failed on the `
             + 'provider in a row -- it looks down rather than the subjects being bad. '
             + 'Nothing was lost: they are queued and will retry.';

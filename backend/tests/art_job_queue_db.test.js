@@ -246,3 +246,64 @@ lockedTest('inFlight empties as jobs resolve, whether they succeed or fail', asy
   await q.fail(pool, b.id, new Error('provider said no'));
   assert.deepEqual(await q.inFlight(pool), [], 'a failed job is resolved, not still drawing');
 });
+
+// SOMET-558. A fault the provider returned faster than it could have drawn
+// anything is not an attempt at the subject, so it must not cost one.
+//
+// THE DAMAGE THIS PREVENTS, measured 2026-09-10: the remote box answered a CUDA
+// allocator assert in ~200ms, a claimed batch of ten failed in under two
+// seconds, and three such windows left seven subjects permanently in `failed`
+// having never once been drawn.
+lockedTest('a refunded failure does not spend an attempt, and stays queued', async (t, pool) => {
+  await q.enqueue(pool, [S(1)], { backend: 'connector' });
+  const [job] = await q.claim(pool, 1);
+  assert.equal(job.attempts, 1, 'claim() charges the attempt up front');
+
+  const back = await q.fail(pool, job.id, new Error('provider answered 500: CUDA assert'),
+    { refundAttempt: true });
+  assert.equal(back.attempts, 0, 'the attempt must be given back');
+  assert.equal(back.state, 'queued');
+
+  // The whole point: a subject can survive more fault windows than it has
+  // attempts, because the faults never counted.
+  for (let i = 0; i < 5; i++) {
+    // A refunded failure still serves its retry backoff -- the subject is not
+    // at fault but the provider is still down, so hammering it is wrong.
+    // Cleared here so the test measures the ATTEMPT accounting rather than
+    // waiting out five real 30-second waits.
+    await pool.query('UPDATE art_jobs SET not_before = NULL WHERE id = $1', [job.id]);
+    const [again] = await q.claim(pool, 1);
+    assert.ok(again, `still claimable on fault window ${i + 1}`);
+    await q.fail(pool, again.id, new Error('provider answered 500'), { refundAttempt: true });
+  }
+  const { rows } = await pool.query('SELECT state, attempts FROM art_jobs WHERE id = $1', [job.id]);
+  assert.deepEqual(rows[0], { state: 'queued', attempts: 0 },
+    'six provider faults must not exhaust a three-attempt subject');
+});
+
+// The other half, and the reason a refund cannot simply always apply: a real
+// attempt must still be charged, or a hopeless subject retries forever.
+lockedTest('a normal failure still spends its attempt and still terminates', async (t, pool) => {
+  await q.enqueue(pool, [S(2)], { backend: 'connector' });
+  for (let i = 1; i <= q.MAX_ATTEMPTS(); i++) {
+    const [job] = await q.claim(pool, 1);
+    assert.ok(job, `claimable on attempt ${i}`);
+    assert.equal(job.attempts, i);
+    await q.fail(pool, job.id, new Error('cutout removed 97.9% of the image'));
+    await pool.query('UPDATE art_jobs SET not_before = NULL WHERE state = $1', ['queued']);
+  }
+  const { rows } = await pool.query('SELECT state, attempts FROM art_jobs');
+  assert.deepEqual(rows[0], { state: 'failed', attempts: q.MAX_ATTEMPTS() },
+    'without a refund the attempt cap must still be reached');
+});
+
+// The refund must not push a job below zero, and must not resurrect one that
+// has already reached the cap by legitimate attempts.
+lockedTest('a refund floors at zero rather than going negative', async (t, pool) => {
+  await q.enqueue(pool, [S(3)], { backend: 'connector' });
+  const [job] = await q.claim(pool, 1);
+  await q.fail(pool, job.id, new Error('provider answered 500'), { refundAttempt: true });
+  const twice = await q.fail(pool, job.id, new Error('provider answered 500'), { refundAttempt: true });
+  assert.equal(twice.attempts, 0, 'attempts must never go negative');
+  assert.equal(twice.state, 'queued');
+});

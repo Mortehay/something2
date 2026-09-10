@@ -115,17 +115,33 @@ lockedTest('a provider failure requeues the job and records the reason', async (
   });
   assert.equal(out.failed, 1);
 
-  const { rows } = await pool.query('SELECT state, attempts, last_error FROM art_jobs');
+  const { rows } = await pool.query(
+    'SELECT state, attempts, fault_refunds, last_error FROM art_jobs');
   assert.equal(rows[0].state, 'queued', 'one failure must not end the job while attempts remain');
-  assert.equal(rows[0].attempts, 1);
+  // SOMET-558. The stub answers instantly, which is what a WEDGED provider does
+  // -- nothing draws an image in under 2s -- so the attempt is refunded and
+  // counted as a refund instead. A real 20-second provider failure still costs
+  // an attempt; that path is covered in art_job_queue_db.test.js.
+  assert.equal(rows[0].attempts, 0, 'a sub-second provider fault must not cost the subject an attempt');
+  assert.equal(rows[0].fault_refunds, 1, 'and it must be counted, so refunds stay bounded');
   assert.match(rows[0].last_error, /out of memory/,
     'the provider message must survive to the row -- a swallowed error is unfixable');
 });
 
+// THE HAZARD THE REFUND INTRODUCED, and the reason refunds are capped.
+//
+// Before SOMET-558 this needed MAX_ATTEMPTS passes. A refund that applied
+// without limit would make it need INFINITELY many: a subject that fails fast
+// for its own reasons would be re-claimed every backoff forever and keep a
+// 530-subject batch from ever ending. The circuit breaker does not save us,
+// because other subjects succeeding in between clear its consecutive set.
+//
+// So the bound is now MAX_FAULT_REFUNDS + MAX_ATTEMPTS, and this asserts the
+// job genuinely reaches `failed` rather than cycling.
 lockedTest('a job that keeps failing eventually stops rather than cycling', async (t, pool, providerId) => {
   await queue.enqueue(pool, [S(1)], { backend: 'connector', providerId });
   const max = queue.MAX_ATTEMPTS();
-  for (let i = 0; i < max; i++) {
+  for (let i = 0; i < queue.MAX_FAULT_REFUNDS() + max; i++) {
     // SOMET-543: clear the retry backoff between passes. Without this the
     // second dispatch claims nothing and the job never reaches its cap --
     // which is the new behaviour working, not a regression. The delay itself
@@ -135,9 +151,11 @@ lockedTest('a job that keeps failing eventually stops rather than cycling', asyn
     // eslint-disable-next-line no-await-in-loop
     await dispatch(pool, { provider: PROVIDER(providerId), generate: failWith('nope'), buildRequest });
   }
-  const { rows } = await pool.query('SELECT state, attempts FROM art_jobs');
-  assert.equal(rows[0].state, 'failed');
+  const { rows } = await pool.query('SELECT state, attempts, fault_refunds FROM art_jobs');
+  assert.equal(rows[0].state, 'failed', 'it must terminate, not cycle');
   assert.equal(rows[0].attempts, max);
+  assert.equal(rows[0].fault_refunds, queue.MAX_FAULT_REFUNDS(),
+    'the refunds must be exhausted, not still accruing');
   assert.equal((await dispatch(pool, { provider: PROVIDER(providerId), generate: succeed(), buildRequest })).claimed, 0,
     'a failed job must not be picked up again on its own');
 });
@@ -308,3 +326,66 @@ lockedTest('CONTENT failures do not trip the breaker', async (t, pool, providerI
   assert.equal(dispatcher.runStatus().error, null,
     'a batch of unkeyable subjects is not a dead provider, and must not be stopped as one');
 });
+
+// SOMET-558. HOW MANY subjects a dead provider is allowed to burn.
+//
+// The breaker was configured at 3 and tripped at 10, every time, because it
+// could only be consulted AFTER dispatch() returned a whole pass: a wedged
+// provider answering in ~200ms resolved all `limit` claimed jobs in under two
+// seconds, so brokenSubjects was already at `limit` by the time the check ran.
+// The guard was real, configured, and disarmed by the granularity of the thing
+// it guarded -- and the test above could not see it, because it asserts only
+// that the drain stopped, never at what cost.
+lockedTest('the breaker stops the PASS at its threshold, not at the claim limit',
+  async (t, pool, providerId) => {
+    for (let i = 30; i <= 41; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await queue.enqueue(pool, [S(i)], { backend: 'connector', providerId });
+    }
+    dispatcher.__resetRun();
+    dispatcher.startDrain(pool, {
+      provider: PROVIDER(providerId),
+      generate: failWith('provider answered 500: !handles_.at(i) INTERNAL ASSERT FAILED'),
+      buildRequest,
+      limit: 12,          // deliberately far above the breaker's threshold
+      concurrency: 1,
+    });
+    t.after(() => { dispatcher.stopDrain(); dispatcher.__resetRun(); });
+    for (let i = 0; i < 80 && dispatcher.runStatus().running; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((r) => { setTimeout(r, 50); });
+    }
+
+    const final = dispatcher.runStatus();
+    assert.equal(final.running, false, 'precondition: the drain must have stopped');
+    const TRIP = 3;                          // BREAKER_TRIP's default
+    assert.equal(final.failed, TRIP,
+      `a dead provider must cost ${TRIP} subjects, not the whole claimed batch of 12`);
+
+    // AND THE REMAINDER MUST NOT BE STRANDED. claim() stamps every job in the
+    // batch up front, so an aborted pass that simply walked away would leave
+    // nine rows in `running` with an attempt spent and nothing to resolve them.
+    const { rows } = await pool.query(
+      `SELECT state, count(*)::int n FROM art_jobs WHERE subject_key LIKE 'sk_3%' OR subject_key LIKE 'sk_4%'
+         GROUP BY state ORDER BY state`,
+    );
+    const byState = Object.fromEntries(rows.map((r) => [r.state, r.n]));
+    assert.equal(byState.running, undefined, 'no job may be left claimed by an aborted pass');
+    // All twelve are back in the queue, and that is two different mercies: the
+    // three that ran were refunded (a sub-second fault is not an attempt), and
+    // the nine that never ran were released untried.
+    assert.equal(byState.queued, 12, 'nothing may be consumed by a provider being down');
+
+    // The distinction that matters, since both groups now read `queued`: only
+    // the three the breaker actually ran carry an error.
+    const { rows: split } = await pool.query(
+      `SELECT (last_error IS NOT NULL) AS tried, count(*)::int n, max(attempts) AS worst
+         FROM art_jobs WHERE subject_key LIKE 'sk_3%' OR subject_key LIKE 'sk_4%'
+        GROUP BY 1 ORDER BY 1`,
+    );
+    assert.deepEqual(split.map((r) => [r.tried, r.n]), [[false, 12 - TRIP], [true, TRIP]],
+      'exactly the breaker threshold may have been attempted');
+    for (const r of split) {
+      assert.equal(r.worst, 0, 'neither group may be left holding a spent attempt');
+    }
+  });
