@@ -129,8 +129,22 @@ lockedTest('items list every catalog row and report which have art', async (t, p
   assert.equal(typeof withArt, 'number');
   for (const s of subjects.slice(0, 3)) {
     assert.equal(s.kind, 'item');
-    assert.ok(s.basePrompt.startsWith('a '), `"${s.basePrompt}" should read as a subject`);
+    assert.ok(/^an? /.test(s.basePrompt), `"${s.basePrompt}" should read as a subject`);
   }
+  // SOMET-551 gave itemPrompt an article rule because 51 of the 189 names
+  // start with a vowel. This assertion USED to be startsWith('a '), which the
+  // fix turned red -- so check the whole catalogue, and check the article is
+  // the RIGHT one rather than merely present. Getting it backwards ("an sword")
+  // would satisfy a looser test and read worse than the bug it replaced.
+  const wrong = subjects.filter((s) => {
+    const m = /^(an?) ([a-z])/i.exec(s.basePrompt);
+    if (!m) return false;                        // currency: "a pile of gold"
+    return m[1].toLowerCase() !== (/[aeiou]/i.test(m[2]) ? 'an' : 'a');
+  });
+  assert.deepEqual(wrong.map((s) => s.basePrompt), [],
+    'every item prompt must open on the article its own first letter takes');
+  assert.ok(subjects.some((s) => s.basePrompt.startsWith('an ')),
+    'and the vowel case must actually occur, or this proves nothing');
 });
 
 lockedTest('passive labels are DISTINCT, far fewer than the nodes', async (t, pool) => {

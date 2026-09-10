@@ -167,3 +167,50 @@ dbTest('no timestamp is treated as "nothing changed", not as "everything did"',
     // A missing updated_at must not silently unlock every refused retry.
     assert.equal(await desc.recipeChangedSince(pool, 'item', 'ds_nots', null), false);
   });
+
+// --- SOMET-552: a description is a SECOND source of truth -------------------
+//
+// The plan flagged this before slice 3 was allowed to write 530 of them: "if a
+// catalogue row is renamed, its description goes stale silently". Storing the
+// catalogue phrase the description was written from is what makes it not
+// silent. See the migration header for why a stale description is still USED.
+dbTest('a description written from a phrase the catalogue no longer uses is stale',
+  async (t, pool) => {
+    await desc.replace(pool, 'item', 'ds_stale', {
+      text: 'long iron spear with a leaf-shaped head',
+      sourcePrompt: 'a iron-spear, a fantasy weapon',
+    });
+
+    const same = await desc.subjectPhrase(pool, 'item', 'ds_stale', 'a iron-spear, a fantasy weapon');
+    assert.equal(same.stale, false, 'an unchanged catalogue phrase is not stale');
+
+    // The article fix (SOMET-551) changed exactly this phrase for 51 items.
+    const moved = await desc.subjectPhrase(pool, 'item', 'ds_stale', 'an iron-spear, a fantasy weapon');
+    assert.equal(moved.stale, true);
+    assert.equal(moved.phrase, 'long iron spear with a leaf-shaped head',
+      'STALE MEANS FLAGGED, NOT DISCARDED -- dropping it would silently revert art direction');
+  });
+
+dbTest('a description with no recorded source is treated as fresh, not as stale',
+  async (t, pool) => {
+    // Every row written before this column existed looks like this. Calling
+    // them stale would flag the whole table at once, which reads as noise.
+    await pool.query(
+      `INSERT INTO art_prompt_descriptions (subject_kind, subject_key, text)
+       VALUES ('item', 'ds_nosrc', 'written before the column existed')`,
+    );
+    const out = await desc.subjectPhrase(pool, 'item', 'ds_nosrc', 'anything at all');
+    assert.equal(out.stale, false);
+  });
+
+dbTest('listActive answers for a whole kind in one query', async (t, pool) => {
+  await desc.replace(pool, 'item', 'ds_a', { text: 'one', sourcePrompt: 'p1' });
+  await desc.replace(pool, 'item', 'ds_b', { text: 'two', sourcePrompt: 'p2' });
+  await desc.replace(pool, 'item', 'ds_b', { text: 'two again', sourcePrompt: 'p2' });
+  await desc.clear(pool, 'item', 'ds_a');
+
+  const active = await desc.listActive(pool, 'item');
+  assert.equal(active.has('ds_a'), false, 'a cleared description is not active');
+  assert.equal(active.get('ds_b').text, 'two again', 'only the current one, not the history');
+  assert.equal(active.get('ds_b').source_prompt, 'p2');
+});

@@ -3,7 +3,7 @@
         redis-shell admin-password admin-password-rotate seed-catalogs seed-map seed-passive-tree \
         tiles-generate tiles-export tiles-seamless tiles-seed \
         entities-generate entities-export entities-cutout entities-seed \
-        entities-restyle-prompts \
+        entities-restyle-prompts art-describe \
         clear-maps list-maps list-specs reseed-map dev dev-stop dev-status \
         migrate-up migrate-status migrate-repair tunnel tunnel-stop verify-routing \
         pi-keygen pi-provision pi-deploy pi-up pi-down pi-restart pi-logs pi-status \
@@ -314,6 +314,27 @@ tiles-seed:
 # so a seed-file change cannot reach rows that already exist. DRY=1 to preview.
 entities-restyle-prompts:
 	$(COMPOSE) exec -T backend node scripts/restyle-entity-prompts.js $(if $(DRY),--dry-run)
+
+# --- Art prompt descriptions ---------------------------------------------
+#
+# SOMET-552. Ask the local LLM to write a real subject description for every
+# subject that still needs one, instead of the template
+# `a <name>, a fantasy <category>` -- which produced "a darts, a fantasy
+# weapon" and drew a DARTBOARD.
+#
+# CPU work, hours long, and RESUMABLE: a subject that already has a
+# description is skipped, so it is safe to interrupt and re-run. Start with
+# LIMIT=20 DRY=1 and read what it writes before spending the whole catalogue.
+#
+#   make art-describe DRY=1 LIMIT=20         preview, store nothing
+#   make art-describe KIND=passive_label     one kind at a time
+#   make art-describe LENGTH=short           short | medium | long
+#   make art-describe STALE=1                also redo ones the catalogue moved under
+art-describe:
+	$(COMPOSE) exec -T backend node scripts/describe-subjects.js \
+		$(if $(KIND),--kind "$(KIND)") $(if $(LENGTH),--length "$(LENGTH)") \
+		$(if $(LIMIT),--limit "$(LIMIT)") $(if $(DRY),--dry-run) \
+		$(if $(STALE),--stale) $(if $(REDO),--redo) $(if $(WITHART),--with-art)
 
 entities-generate:
 	$(COMPOSE) exec -T backend node scripts/generate-entity-textures.js \

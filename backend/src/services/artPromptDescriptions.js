@@ -13,7 +13,7 @@ const MAX_TEXT = 400;
 
 async function getActive(db, subjectKind, subjectKey) {
   const { rows } = await db.query(
-    `SELECT id, text, length, model, created_at
+    `SELECT id, text, length, model, source_prompt, created_at
        FROM art_prompt_descriptions
       WHERE subject_kind = $1 AND subject_key = $2 AND active
       LIMIT 1`,
@@ -27,13 +27,28 @@ async function getActive(db, subjectKind, subjectKey) {
 // can explain afterwards is not much of a record.
 async function listAll(db, subjectKind, subjectKey) {
   const { rows } = await db.query(
-    `SELECT id, text, length, model, active, created_at
+    `SELECT id, text, length, model, source_prompt, active, created_at
        FROM art_prompt_descriptions
       WHERE subject_kind = $1 AND subject_key = $2
       ORDER BY created_at DESC, id DESC`,
     [subjectKind, subjectKey],
   );
   return rows;
+}
+
+// Every subject of a kind that currently HAS an active description, keyed by
+// subject_key. One query instead of one per subject: the batch pass in
+// scripts/describe-subjects.js asks this about ~1000 subjects at a time, and
+// asking per subject is what makes a resumable pass take longer to decide what
+// to skip than to do the work.
+async function listActive(db, subjectKind) {
+  const { rows } = await db.query(
+    `SELECT subject_key, id, text, length, model, source_prompt, created_at
+       FROM art_prompt_descriptions
+      WHERE subject_kind = $1 AND active`,
+    [subjectKind],
+  );
+  return new Map(rows.map((r) => [r.subject_key, r]));
 }
 
 // Replace the active description, keeping the old one readable.
@@ -43,7 +58,9 @@ async function listAll(db, subjectKind, subjectKey) {
 // transaction leaves a window where a concurrent re-run inserts first and this
 // one fails -- or worse, where a crash between them leaves a subject with NO
 // active description and silently back on the template.
-async function replace(db, subjectKind, subjectKey, { text, length = null, model = null }) {
+async function replace(
+  db, subjectKind, subjectKey, { text, length = null, model = null, sourcePrompt = null },
+) {
   const body = String(text == null ? '' : text).trim().slice(0, MAX_TEXT);
   if (!body) return null;
 
@@ -57,10 +74,11 @@ async function replace(db, subjectKind, subjectKey, { text, length = null, model
       [subjectKind, subjectKey],
     );
     const { rows } = await run.query(
-      `INSERT INTO art_prompt_descriptions (subject_kind, subject_key, text, length, model)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, text, length, model, active, created_at`,
-      [subjectKind, subjectKey, body, length, model],
+      `INSERT INTO art_prompt_descriptions
+         (subject_kind, subject_key, text, length, model, source_prompt)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, text, length, model, source_prompt, active, created_at`,
+      [subjectKind, subjectKey, body, length, model, sourcePrompt || null],
     );
     if (client) await run.query('COMMIT');
     return rows[0];
@@ -83,13 +101,34 @@ async function clear(db, subjectKind, subjectKey) {
   return rows.length > 0;
 }
 
+// SOMET-552. Is this description still describing the subject the catalogue
+// describes? `current` is the catalogue's own phrase for the subject right now.
+//
+// NULL source_prompt is FRESH, not stale. Rows written before the column
+// existed cannot answer the question, and answering "stale" for them would
+// flag every description in the database on the day this shipped -- a warning
+// that fires on everything is read as noise and then ignored, which costs the
+// real cases.
+function isStale(description, current) {
+  if (!description || !description.source_prompt || !current) return false;
+  return description.source_prompt.trim() !== String(current).trim();
+}
+
 // The subject phrase to build a prompt from: the written description when one
 // exists, otherwise the catalogue's own. Returns the model too, so the history
-// can record WHO wrote the prompt it is storing.
+// can record WHO wrote the prompt it is storing, and whether the description
+// still matches the catalogue it was written from.
+//
+// A STALE DESCRIPTION IS STILL RETURNED -- see the migration header for why
+// dropping it would be the more damaging half of the same mistake.
 async function subjectPhrase(db, subjectKind, subjectKey, fallback) {
   const active = await getActive(db, subjectKind, subjectKey);
-  if (!active) return { phrase: fallback, promptModel: null };
-  return { phrase: active.text, promptModel: active.model || 'human' };
+  if (!active) return { phrase: fallback, promptModel: null, stale: false };
+  return {
+    phrase: active.text,
+    promptModel: active.model || 'human',
+    stale: isStale(active, fallback),
+  };
 }
 
 // Has anything that FEEDS THE PROMPT changed for this subject since `since`?
@@ -122,5 +161,6 @@ async function recipeChangedSince(db, subjectKind, subjectKey, since) {
 }
 
 module.exports = {
-  getActive, listAll, replace, clear, subjectPhrase, recipeChangedSince, MAX_TEXT,
+  getActive, listAll, listActive, replace, clear, subjectPhrase,
+  recipeChangedSince, isStale, MAX_TEXT,
 };

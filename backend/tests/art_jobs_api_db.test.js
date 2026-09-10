@@ -527,3 +527,59 @@ lockedTest('a superseded failure is reported, not crashed on', async (t, pool) =
   assert.equal(after.rows[0].state, 'failed',
     'the superseded row stays as the record of why it failed');
 });
+
+// --- SOMET-552: a description knows what the catalogue said ----------------
+//
+// The batch pass records the catalogue phrase it wrote from. A description
+// typed in the console has to record it too, or half the descriptions in the
+// database can never be told stale from fresh -- and the console's is the half
+// a person cared enough to write by hand.
+lockedTest('a hand-written description records the catalogue phrase it replaced',
+  async (t, pool) => {
+    const KEY = 'war_crushing_blow';
+    await pool.query(
+      "DELETE FROM art_prompt_descriptions WHERE subject_kind='skill' AND subject_key=$1", [KEY],
+    );
+    try {
+      const post = await request(app).post(`/api/art-subjects/skill/${KEY}/description`)
+        .set(...AUTH).send({ text: 'heavy war axe with a chipped blade' });
+      assert.equal(post.status, 201);
+
+      const { rows } = await pool.query(
+        `SELECT text, source_prompt FROM art_prompt_descriptions
+          WHERE subject_kind='skill' AND subject_key=$1 AND active`, [KEY],
+      );
+      const subject = (await cs.registryFor('skill').list(pool)).find((s) => s.key === KEY);
+      assert.equal(rows[0].source_prompt, subject.basePrompt,
+        'without this the description can never be told stale from fresh');
+
+      const get = await request(app).get(`/api/art-subjects/skill/${KEY}/description`).set(...AUTH);
+      assert.equal(get.body.stale, false);
+      assert.equal(get.body.catalogPrompt, subject.basePrompt,
+        'the console has to be able to show what it is being compared against');
+
+      // Now move the catalogue out from under it, which is the whole risk:
+      // the description stays in force and the console says so.
+      await pool.query(
+        `UPDATE art_prompt_descriptions SET source_prompt = 'something else entirely'
+          WHERE subject_kind='skill' AND subject_key=$1 AND active`, [KEY],
+      );
+      const drifted = await request(app)
+        .get(`/api/art-subjects/skill/${KEY}/description`).set(...AUTH);
+      assert.equal(drifted.body.stale, true);
+      assert.equal(drifted.body.active.text, 'heavy war axe with a chipped blade',
+        'stale means flagged, not withdrawn');
+    } finally {
+      await pool.query(
+        "DELETE FROM art_prompt_descriptions WHERE subject_kind='skill' AND subject_key=$1", [KEY],
+      ).catch(() => {});
+    }
+  });
+
+lockedTest('a description for a subject that is not in the catalogue is refused',
+  async (t) => {
+    const res = await request(app).post('/api/art-subjects/skill/not_a_real_skill/description')
+      .set(...AUTH).send({ text: 'anything' });
+    assert.equal(res.status, 404,
+      'storing one would create a description nothing can ever use');
+  });

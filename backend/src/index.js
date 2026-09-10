@@ -3308,11 +3308,22 @@ app.get('/api/art-subjects/:kind/:key/description', adminGuard, async (req, res)
     if (!catalogSubjects.registryFor(req.params.kind)) {
       return res.status(400).json({ error: `unknown subject kind "${req.params.kind}"` });
     }
-    const [active, all] = await Promise.all([
-      artDescriptions.getActive(pool, req.params.kind, req.params.key),
-      artDescriptions.listAll(pool, req.params.kind, req.params.key),
+    const { kind, key } = req.params;
+    const [active, all, subjects] = await Promise.all([
+      artDescriptions.getActive(pool, kind, key),
+      artDescriptions.listAll(pool, kind, key),
+      catalogSubjects.registryFor(kind).list(pool),
     ]);
-    res.json({ active, history: all });
+    // SOMET-552. Whether the catalogue has moved under this description since
+    // it was written. It is still the description in force -- see the
+    // migration header -- so this is a flag to show, not a reason to hide it.
+    const subject = subjects.find((sub) => sub.key === key) || null;
+    res.json({
+      active,
+      history: all,
+      stale: artDescriptions.isStale(active, subject && subject.basePrompt),
+      catalogPrompt: subject ? subject.basePrompt : null,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to read the description' });
@@ -3332,17 +3343,23 @@ app.post('/api/art-subjects/:kind/:key/description', adminGuard, async (req, res
       return res.status(409).json({ error: `${kind} builds its own prompt and takes no description` });
     }
 
+    // The subject is fetched even when the text was typed by a person, because
+    // its catalogue phrase is what makes the description's staleness knowable
+    // later (SOMET-552). Writing a description without recording what the
+    // catalogue said at the time is the exact hole this slice closes, and a
+    // hand-written one goes stale the same way a generated one does.
+    const subject = (await reg.list(pool)).find((s) => s.key === key);
+    if (!subject) return res.status(404).json({ error: `unknown subject ${kind}/${key}` });
+
     let text = req.body.text;
     let model = null;
     if (!text) {
-      const subject = (await reg.list(pool)).find((s) => s.key === key);
-      if (!subject) return res.status(404).json({ error: `unknown subject ${kind}/${key}` });
       const written = await subjectDescriber.describeSubject(subject, { length: req.body.length });
       text = written.text;
       model = written.model;
     }
     const saved = await artDescriptions.replace(pool, kind, key, {
-      text, length: req.body.length || null, model,
+      text, length: req.body.length || null, model, sourcePrompt: subject.basePrompt,
     });
     if (!saved) return res.status(400).json({ error: 'description must not be empty' });
     res.status(201).json({ description: saved });
