@@ -102,6 +102,33 @@ can never be reproduced. That is the intent — it is what makes a correction
 visibly do something — but it forecloses holding composition fixed to A/B
 prompt wording. Accepted; no escape hatch planned.
 
+## Ownership — read this before starting a slice
+
+**Slice 1, and the editing half of Slice 2, are being built by another session
+under SOMET-553.** Discovered 2026-09-10 while about to start Slice 1: 209
+uncommitted lines were already in the shared main checkout, in exactly the two
+files this plan's Slice 1 names.
+
+```
+ M frontend/src/games/something2/ArtConsoleAdmin.jsx   (+144, "Subject description")
+ M frontend/src/games/something2/useArtConsole.js      (+65,  useArtDescription)
+ M backend/src/index.js, backend/src/services/catalogSubjects.js
+?? frontend/src/games/something2/artDescriptionDraft.js (+ test)
+```
+
+Their version is further along than this plan's Slice 1: an editor with a
+length selector, a staleness warning driven by `source_prompt`, a delete path,
+and a pure draft module that already separates "the field is empty" from "there
+is no description".
+
+This is the shared-checkout hazard, and it is not hypothetical here — several
+sessions work in one working directory. **Run `git status` before starting any
+slice below**, and treat uncommitted work in the files a slice names as that
+slice already being owned.
+
+Scope confirmation was requested from that session; until it answers, the
+conflict-free work is the seed rule (Slice 2's backend half) and Slice 4.
+
 ## Slices
 
 Vertical, each independently verifiable. Slice 1 needs no GPU, which matters
