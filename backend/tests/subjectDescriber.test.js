@@ -73,6 +73,33 @@ test('every skill and passive exemplar is ONE object, never an action', () => {
   }
 });
 
+// SOMET-552. Every one of these was measured on a 20-skill sample, and each
+// exists because the model broke a rule the contract did not state.
+test('the rule that the name\'s own object wins is stated', () => {
+  const sys = buildMessages({ kind: 'skill', key: 'k', name: 'K' }, 'short')[0].content;
+  // "Shield Slam" returned "heavy war hammer": it read the verb and ignored
+  // the noun beside it.
+  assert.match(sys, /IF THE NAME ALREADY CONTAINS A PHYSICAL OBJECT/);
+  assert.ok(CONTRACTS.skill.examples.some(([q]) => /Shield Slam/.test(q)),
+    'and is taught by an exemplar, because few-shot teaches shape');
+});
+
+test('no exemplar names a body part', () => {
+  // "Skull Splitter" -> "crushing fist with a shattered skull". A fist is how
+  // this model puts a person into an icon it was told to keep people out of.
+  for (const kind of ['skill', 'passive_label', 'item']) {
+    for (const [, answer] of CONTRACTS[kind].examples) {
+      assert.doesNotMatch(answer, /\b(fist|hand|skull|claw|arm|finger)\b/i,
+        `${kind} exemplar teaches a body part: "${answer}"`);
+    }
+  }
+});
+
+test('the distinctiveness rule is stated, because 16 of 20 were the same weapon', () => {
+  const sys = buildMessages({ kind: 'skill', key: 'k', name: 'K' }, 'short')[0].content;
+  assert.match(sys, /could NOT be said of a plain sword/);
+});
+
 test('the physical-form rule is stated, because formless subjects fail', () => {
   const sys = buildMessages({ kind: 'skill', key: 'k', name: 'K' }, 'short')[0].content;
   // Measured: "circular gust of wind" produced a grey stone disc, twice.

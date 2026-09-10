@@ -52,7 +52,20 @@ const RULES = [
   '  returns a generic grey stone disc, measured. If the effect has no natural',
   '  physical form, name the WEAPON, TOOL or EMBLEM associated with it instead.',
   'Never mention a person, a character, a hand, or who uses the thing.',
+  'Never name a BODY PART. No fist, no hand, no skull, no claw -- measured, a',
+  '  fist is how this model smuggles a person into an icon it was told not to',
+  '  put one in ("Skull Splitter" returned "crushing fist with a shattered',
+  '  skull", breaking three rules in five words).',
+  'IF THE NAME ALREADY CONTAINS A PHYSICAL OBJECT, THAT OBJECT IS THE ANSWER.',
+  '  "Shield Slam" is a SHIELD. Measured, this model answered "heavy war',
+  '  hammer" -- it read the verb and ignored the noun standing right next to',
+  '  it. Name the object from the name, then describe it.',
   'Use a colour only when the name or effect implies one.',
+  'The answer must contain something that could NOT be said of a plain sword.',
+  '  Measured over 20 warrior abilities: 16 came back as an axe, a sword or a',
+  '  hammer with an ordinary adjective, which draws 16 near-identical icons.',
+  '  Take the distinguishing detail from the name -- blood, bone, chain, wave,',
+  '  steel, thunder -- and put it in the object.',
 ].join('\n');
 
 // One contract per kind. The differences are the point of this module.
@@ -83,6 +96,12 @@ const CONTRACTS = {
       // The formless case, shown rather than described: a whirlwind has no
       // form, so the exemplar names a PROP that suggests it.
       ['Whirlwind (Warrior, melee)', 'battle axe with a spiral-etched blade'],
+      // The name-carries-the-object case, shown rather than described: this
+      // exact subject returned "heavy war hammer" before the rule existed.
+      ['Shield Slam (Warrior, melee)', 'round iron shield with a spiked boss'],
+      // And the distinctiveness case: "Blood Harvest" is not a plain axe, it
+      // is an axe you can tell apart from the other five axes.
+      ['Blood Harvest (Warrior, melee)', 'curved reaping scythe with a blood-filled groove'],
     ],
   },
   // The hardest kind: the subject is one abstract word. The catalogue holds the
