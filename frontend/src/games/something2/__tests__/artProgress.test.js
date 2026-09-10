@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   batchProgress, formatDuration, formatElapsed, elapsedSince, shouldPollQueue,
+  partitionInFlight, claimedAgo,
   IDLE, IDLE_QUEUED, RUNNING, FINISHED,
 } from '../artProgress.js';
 
@@ -189,5 +190,59 @@ describe('polling', () => {
   it('stops polling once nothing is outstanding', () => {
     expect(shouldPollQueue({ running: false, done: 97 }, { queued: 0, running: 0 })).toBe(false);
     expect(shouldPollQueue(null, null)).toBe(false);
+  });
+});
+
+describe('claimed vs drawing', () => {
+  // THE DEFECT THIS FIXES, seen live: ten rows in state='running' listed as
+  // ten simultaneous generations. dispatch() claims `limit` (10) jobs in ONE
+  // update and feeds them to `concurrency` (1) workers, so ten are claimed and
+  // exactly one is on the provider. The panel read as a batch fired off all at
+  // once rather than chained, which is not what the dispatcher does.
+  const claimedAt = '2026-09-10T09:25:45.961Z';
+  const rows = [244, 235, 240, 238].map((id) => ({
+    id, subject_kind: 'item', subject_key: `k${id}`, attempts: 1, claimed_at: claimedAt,
+  }));
+
+  it('treats only `concurrency` of the claimed jobs as drawing', () => {
+    const p = partitionInFlight(rows, 1);
+    expect(p.drawing).toHaveLength(1);
+    expect(p.waiting).toHaveLength(3);
+  });
+
+  // ORDERED BY id, and this is the whole reason the helper exists rather than
+  // a slice at the call site. One UPDATE stamps every claimed row with the
+  // IDENTICAL claimed_at, so the server's `ORDER BY claimed_at` is a tie across
+  // the batch and may return any of them first. claim() orders by id and the
+  // worker cursor walks that array in order, so the lowest id still running is
+  // the one actually on the provider.
+  it('names the lowest id, because ties on claimed_at cannot order them', () => {
+    expect(new Set(rows.map((r) => r.claimed_at)).size).toBe(1);   // the tie is real
+    expect(partitionInFlight(rows, 1).drawing[0].id).toBe(235);
+    // Input order must not matter: the same set reversed gives the same answer.
+    expect(partitionInFlight([...rows].reverse(), 1).drawing[0].id).toBe(235);
+  });
+
+  it('follows a higher concurrency when the drain reports one', () => {
+    const p = partitionInFlight(rows, 3);
+    expect(p.drawing.map((r) => r.id)).toEqual([235, 238, 240]);
+    expect(p.waiting.map((r) => r.id)).toEqual([244]);
+  });
+
+  it('never reports zero drawing while rows are claimed', () => {
+    expect(partitionInFlight(rows, 0).drawing).toHaveLength(1);
+    expect(partitionInFlight([], 1).drawing).toHaveLength(0);
+    expect(partitionInFlight(null, 1).waiting).toHaveLength(0);
+  });
+
+  // "claimed Xs ago", not "drawing for Xs": for every job after the first,
+  // claimed_at precedes the provider reaching it by however long the ones
+  // ahead took, so "drawing for" would add the queue-ahead time to it.
+  it('phrases the elapsed time as time since the claim, and keeps it moving', () => {
+    const t = Date.parse(claimedAt);
+    expect(claimedAgo(claimedAt, t + 47000)).toBe('47s');
+    expect(claimedAgo(claimedAt, t + 67000)).toBe('1m 07s');
+    expect(claimedAgo(claimedAt, t + 68000)).not.toBe(claimedAgo(claimedAt, t + 67000));
+    expect(claimedAgo('nonsense')).toBeNull();
   });
 });

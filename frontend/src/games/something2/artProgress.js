@@ -151,3 +151,41 @@ export function shouldPollQueue(run, stats) {
   if (run?.running) return true;
   return Number(stats?.queued || 0) + Number(stats?.running || 0) > 0;
 }
+
+// Which of the claimed jobs is actually ON the provider (SOMET-558).
+//
+// THE TRAP THIS EXISTS FOR. dispatch() claims `limit` jobs in ONE update --
+// ten by default -- and then runs them through `concurrency` workers pulling
+// from a shared cursor, one by default. So ten rows sit in state='running'
+// while a single subject is being drawn, and listing them all as "drawing"
+// claims ten parallel generations against a card measured to have headroom for
+// exactly one pipeline.
+//
+// SORTED BY id, NOT BY claimed_at. A single UPDATE stamps every claimed row
+// with the identical timestamp, so ordering by it is a tie across the whole
+// batch and the browser may show any of them first. claim() orders by id and
+// the worker cursor walks that array in order, so ascending id IS the
+// processing order -- the lowest id still running is the one on the provider.
+export function partitionInFlight(rows, concurrency = 1) {
+  const list = [...(Array.isArray(rows) ? rows : [])]
+    .sort((a, b) => Number(a.id) - Number(b.id));
+  const n = Math.max(1, concurrency);
+  return { drawing: list.slice(0, n), waiting: list.slice(n) };
+}
+
+// "claimed 2m 14s ago", never "drawing for 2m 14s".
+//
+// claimed_at is when the job was TAKEN, not when the provider started on it,
+// and for every job after the first in a claimed batch those differ by however
+// long the ones ahead of it took. Saying "drawing for" would overstate the
+// second subject's time by the first subject's whole generation. The number
+// still moves once a second, which is what it is there for; only the claim it
+// makes is narrowed to one that is true.
+//
+// An accurate "drawing for" needs the dispatcher to stamp a row when a worker
+// actually picks it up, which is a schema change and a backend restart -- and
+// restarting the backend kills the in-memory drain of any batch in flight.
+export function claimedAgo(claimedAt, now = Date.now()) {
+  const secs = elapsedSince(claimedAt, now);
+  return secs === null ? null : formatElapsed(secs);
+}

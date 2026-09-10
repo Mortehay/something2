@@ -28,7 +28,7 @@ import {
   enqueueSummary, coverage, selectionOutsideFilter, PAGE_SIZE,
 } from './artSelection.js';
 import {
-  batchProgress, formatDuration, formatElapsed, elapsedSince,
+  batchProgress, formatDuration, claimedAgo, partitionInFlight,
   IDLE_QUEUED, RUNNING, FINISHED,
 } from './artProgress.js';
 import AdminLoading from './AdminLoading.jsx';
@@ -362,6 +362,12 @@ function ArtConsoleAdmin() {
   // this file renders the answer. `tick` is passed as `now` rather than read
   // inside, so the ETA is a pure function of its inputs.
   const progress = batchProgress(run, stats, { now: tick });
+  // Defaults to 1, which is what the dispatcher defaults to and what the
+  // remote card has headroom for. runStatus() does not report the drain's
+  // actual concurrency yet; until it does, over-reporting one subject as
+  // waiting is the safe direction to be wrong in -- the opposite mistake
+  // claimed ten simultaneous generations.
+  const claimed = partitionInFlight(inFlight, run?.concurrency || 1);
 
   const frozenOrder = useMemo(
     () => (running && sort.by === 'updated'
@@ -582,20 +588,32 @@ function ArtConsoleAdmin() {
 
         {/* WHICH subject, not just how many. "1 running" for twenty minutes
             reads the same for a slow subject and a wedged provider; the key
-            plus a climbing elapsed time separates them. */}
-        {inFlight.map((j) => {
-          const secs = elapsedSince(j.claimed_at, tick);
-          return (
-            <Drawing key={j.id}>
-              drawing {j.subject_kind}/{j.subject_key}
-              {/* formatElapsed, NOT formatDuration: the ETA may be coarse,
-                  this may not. Coarsened to "1m" the counter sits unchanged
-                  for a full minute and reads as a frozen page. */}
-              {secs !== null && <em> — {formatElapsed(secs)}</em>}
-              {j.attempts > 1 && <em> · attempt {j.attempts}</em>}
-            </Drawing>
-          );
-        })}
+            plus a climbing elapsed time separates them.
+
+            CLAIMED IS NOT DRAWING. dispatch() claims ten rows in one UPDATE
+            and then feeds them to ONE worker, so ten rows sit in
+            state='running' while a single subject is on the provider. Listing
+            all ten as "drawing" claimed ten parallel generations against a
+            card with headroom for one pipeline -- it read as a batch fired off
+            all at once rather than chained, which is not what the dispatcher
+            does. Only the first `concurrency` are drawing; the rest are
+            waiting their turn, and are summarised rather than listed. */}
+        {claimed.drawing.map((j) => (
+          <Drawing key={j.id}>
+            drawing {j.subject_kind}/{j.subject_key}
+            {/* "claimed Xs ago", never "drawing for Xs". claimed_at is when
+                the row was TAKEN; every job after the first in a claimed batch
+                was taken long before the provider reached it, so "drawing for"
+                would add the whole queue-ahead time to its generation. */}
+            {claimedAgo(j.claimed_at, tick) && <em> — claimed {claimedAgo(j.claimed_at, tick)} ago</em>}
+            {j.attempts > 1 && <em> · attempt {j.attempts}</em>}
+          </Drawing>
+        ))}
+        {claimed.waiting.length > 0 && (
+          <Drawing>
+            <em>+ {claimed.waiting.length} more claimed, waiting their turn</em>
+          </Drawing>
+        )}
       </Progress>
 
       {/* Selection survives a filter change on purpose, but silently doing so
