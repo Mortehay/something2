@@ -39,6 +39,24 @@ except ImportError:                                          # pragma: no cover
 DEFAULT_DIR = os.path.join(os.path.dirname(__file__), '..', 'backend', 'seeds', 'textures', 'entities')
 MANIFEST = os.path.join(os.path.dirname(__file__), '..', 'backend', 'seeds', 'textures', 'entities.json')
 
+# SOMET-565. The trim rule. THREE COPIES OF THESE TWO NUMBERS EXIST and they
+# must agree; this file is a standalone host script and the others run in two
+# different containers, so there is nowhere shared to import from:
+#
+#   backend/src/services/pngTrim.js   CONTENT_ALPHA / MARGIN_PCT
+#   sprite-gen/app/postproc.py        CONTENT_ALPHA / TRIM_MARGIN_PCT
+#   this file
+#
+# CONTENT_ALPHA is the floor for "this pixel is content". It is the same cut
+# border_opacity() below already uses, and it is load-bearing: a bare getbbox()
+# is an alpha > 0 test, so one feathered speckle in a corner makes the bounding
+# box the whole canvas and the crop a silent no-op.
+CONTENT_ALPHA = 16
+# Margin as a percentage of EACH AXIS, never a uniform count off the longer
+# side -- that distorts the output canvas's aspect ratio, which the renderer
+# then stretches.
+TRIM_MARGIN_PCT = 3.0
+
 
 def near(a, b, tol):
     return abs(a[0] - b[0]) <= tol and abs(a[1] - b[1]) <= tol and abs(a[2] - b[2]) <= tol
@@ -179,19 +197,38 @@ def cutout(img, tol=60, feather=1, passes=8):
     # whatever margin the generator felt like leaving, and since
     # display_width/display_height scale the WHOLE image, two props drawn with
     # different margins render at visibly different sizes for no reason.
-    box = out.getbbox()
+    #
+    # SOMET-565: THIS USED TO PAD OUT TO A SQUARE, and that was wrong for this
+    # renderer. display_width/display_height are authored with real aspect
+    # ratios -- pine_tree 64x104, dead_tree 56x92 -- and RenderSystem stretches
+    # the WHOLE image into that box. Squaring a tall subject therefore leaves
+    # transparent margin down both sides, and the tree renders skinny inside
+    # its own footprint. Measured across the 301 checked-in seeds this cost a
+    # mean fill of 80.9% of the width against 91.5% of the height: exactly the
+    # signature of a square pad over portrait subjects.
+    #
+    # Tight crop plus a per-axis margin keeps outW:outH equal to
+    # contentW:contentH, so the subject's proportions survive drawImage. Same
+    # rule as backend/src/services/pngTrim.js and sprite-gen's crop_to_content.
+    #
+    # The alpha floor matters as much as the crop: getbbox() alone is an
+    # alpha > 0 test, and one feathered speckle in a corner makes the bounding
+    # box the whole canvas, turning this into a silent no-op.
+    keyed = out.getchannel('A').point(lambda v: 255 if v >= CONTENT_ALPHA else 0)
+    box = keyed.getbbox()
     if box:
         sub = out.crop(box)
-        side = max(sub.size)
-        square = Image.new('RGBA', (side, side), (0, 0, 0, 0))
-        square.paste(sub, ((side - sub.size[0]) // 2, (side - sub.size[1]) // 2))
+        mx = max(1, round(sub.width * TRIM_MARGIN_PCT / 100))
+        my = max(1, round(sub.height * TRIM_MARGIN_PCT / 100))
         # Kept at the SUBJECT's own resolution, never scaled back up to the
         # canvas it was drawn on. A concept generator centres a small object in
         # a large frame, so restoring the original size would upscale a ~70px
         # boulder to 512 and turn crisp pixel art into blur. The renderer
         # scales to display_width/display_height regardless, so the only thing
         # an upscale here buys is lost detail.
-        out = square
+        padded = Image.new('RGBA', (sub.width + mx * 2, sub.height + my * 2), (0, 0, 0, 0))
+        padded.paste(sub, (mx, my))
+        out = padded
     return out
 
 
