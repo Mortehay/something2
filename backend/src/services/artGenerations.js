@@ -43,14 +43,14 @@ function paramsFrom(req) {
 }
 
 async function record(db, {
-  job, provider, req, outcome, error = null, imageKey = null,
+  job, provider, req, outcome, error = null, imageKey = null, promptModel = null,
 }) {
   try {
     await db.query(
       `INSERT INTO art_generations
          (subject_kind, subject_key, art_job_id, composed_prompt, seed, model,
-          provider_id, params, image_key, outcome, error)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+          provider_id, params, image_key, outcome, error, prompt_model)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
       [
         job.subject_kind,
         job.subject_key,
@@ -65,6 +65,11 @@ async function record(db, {
         // Capped: a provider can return a stack trace, and this column is read
         // back into a browser.
         error == null ? null : String(error).slice(0, 2000),
+        // SOMET-551. WHICH MODEL WROTE THE PROMPT, as distinct from which model
+        // drew the image. Null means the catalogue template wrote it, which is
+        // itself the useful fact once descriptions exist: it says this subject
+        // has never been described.
+        promptModel,
       ],
     );
   } catch (err) {
@@ -77,7 +82,7 @@ async function record(db, {
 async function list(db, subjectKind, subjectKey, limit = 50) {
   const { rows } = await db.query(
     `SELECT id, art_job_id, composed_prompt, seed, model, provider_id, params,
-            image_key, outcome, error, created_at
+            image_key, outcome, error, prompt_model, created_at
        FROM art_generations
       WHERE subject_kind = $1 AND subject_key = $2
       ORDER BY created_at DESC, id DESC

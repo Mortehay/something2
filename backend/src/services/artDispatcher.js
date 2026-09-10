@@ -7,6 +7,7 @@ const assetStore = require('./assetStore.js');
 const aiProviders = require('./aiProviders.js');
 const history = require('./artGenerations.js');
 const promptNotes = require('./artPromptNotes.js');
+const descriptions = require('./artPromptDescriptions.js');
 const failures = require('./artFailures.js');
 const { buildObjectPrompt, BACKDROP, CUTOUT_BACKDROP } = require('./objectPrompt.js');
 
@@ -148,9 +149,21 @@ async function requestForSubject(db, job, subject, reg, provider) {
       // SOMET-549: the note's words PLUS its region as a phrase, composed in
       // one place so the prompt cannot disagree with what the UI showed.
       .map(promptNotes.noteToCorrection);
+  // SOMET-551. A written description replaces the catalogue's templated
+  // subject phrase when one exists. With none stored this resolves to
+  // subject.basePrompt and the composed prompt is byte-for-byte unchanged --
+  // which matters: 87 items already have art generated from the template, and
+  // a silent prompt change would alter a regeneration for reasons nobody could
+  // see. Tiles are exempt for the same reason they are exempt from notes.
+  const { phrase, promptModel } = reg.composePrompt
+    ? { phrase: null, promptModel: null }
+    : await descriptions.subjectPhrase(
+      db, job.subject_kind, job.subject_key, subject.basePrompt,
+    );
+
   const prompt = reg.composePrompt
     ? await reg.composePrompt(db, subject)
-    : buildObjectPrompt(subject.basePrompt, {
+    : buildObjectPrompt(phrase, {
       backdrop: backdropFor(provider), corrections,
     });
 
@@ -158,6 +171,9 @@ async function requestForSubject(db, job, subject, reg, provider) {
     subject: subject.name || subject.key,
     kind: generationKind,
     prompt,
+    // Carried so the history can record WHO wrote the prompt, not only which
+    // image model drew it. Stripped before the provider sees the body.
+    promptModel,
     seed: Number(job.seed),
     frames: 1,                       // never a sheet
   };
@@ -223,6 +239,9 @@ async function runOne(db, job, {
   const fail = async (message) => {
     await history.record(db, {
       job, provider, req: sentOrIntended(), outcome: 'failed', error: message,
+      // From OUR request, not the sent body -- the provider payload has no such
+      // field, and reading it from there would silently record null forever.
+      promptModel: req && req.promptModel,
     });
     await queue.fail(db, job.id, new Error(message));
     return {
@@ -286,6 +305,7 @@ async function runOne(db, job, {
 
   await history.record(db, {
     job, provider, req: sentOrIntended(), outcome: 'done', imageKey,
+    promptModel: req && req.promptModel,
   });
   await queue.complete(db, job.id);
   return {

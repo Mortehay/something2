@@ -311,6 +311,8 @@ const artDispatcher = require('./services/artDispatcher.js');
 const artFailures = require('./services/artFailures.js');
 const artGenerations = require('./services/artGenerations.js');
 const artPromptNotes = require('./services/artPromptNotes.js');
+const artDescriptions = require('./services/artPromptDescriptions.js');
+const subjectDescriber = require('./services/subjectDescriber.js');
 const {
   pinProvided, providerPinFieldError, providerPinError, providerPinValues,
 } = require('./services/providerPin.js');
@@ -3293,6 +3295,72 @@ app.get('/api/art-subjects/:kind/:key/history', adminGuard, async (req, res) => 
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to read the generation history' });
+  }
+});
+
+// SOMET-551. The written description that replaces the catalogue template.
+//
+// Returns every version, active or not: art_generations records prompts built
+// from descriptions since replaced, and a prompt nobody can explain afterwards
+// is not much of a record.
+app.get('/api/art-subjects/:kind/:key/description', adminGuard, async (req, res) => {
+  try {
+    if (!catalogSubjects.registryFor(req.params.kind)) {
+      return res.status(400).json({ error: `unknown subject kind "${req.params.kind}"` });
+    }
+    const [active, all] = await Promise.all([
+      artDescriptions.getActive(pool, req.params.kind, req.params.key),
+      artDescriptions.listAll(pool, req.params.kind, req.params.key),
+    ]);
+    res.json({ active, history: all });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to read the description' });
+  }
+});
+
+// Write one, replacing whatever was active. `text` given writes it verbatim
+// (a human edit); omitted asks the local model for one.
+app.post('/api/art-subjects/:kind/:key/description', adminGuard, async (req, res) => {
+  try {
+    const { kind, key } = req.params;
+    const reg = catalogSubjects.registryFor(kind);
+    if (!reg) return res.status(400).json({ error: `unknown subject kind "${kind}"` });
+    // A tile composes its prompt from its biome's palette; a subject phrase
+    // could never reach it, so accepting one would be a silent no-op.
+    if (reg.generationKind !== 'object') {
+      return res.status(409).json({ error: `${kind} builds its own prompt and takes no description` });
+    }
+
+    let text = req.body.text;
+    let model = null;
+    if (!text) {
+      const subject = (await reg.list(pool)).find((s) => s.key === key);
+      if (!subject) return res.status(404).json({ error: `unknown subject ${kind}/${key}` });
+      const written = await subjectDescriber.describeSubject(subject, { length: req.body.length });
+      text = written.text;
+      model = written.model;
+    }
+    const saved = await artDescriptions.replace(pool, kind, key, {
+      text, length: req.body.length || null, model,
+    });
+    if (!saved) return res.status(400).json({ error: 'description must not be empty' });
+    res.status(201).json({ description: saved });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: `Failed to write the description: ${err.message}` });
+  }
+});
+
+// Drop back to the catalogue template.
+app.delete('/api/art-subjects/:kind/:key/description', adminGuard, async (req, res) => {
+  try {
+    const cleared = await artDescriptions.clear(pool, req.params.kind, req.params.key);
+    if (!cleared) return res.status(404).json({ error: 'no active description' });
+    res.json({ cleared: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to clear the description' });
   }
 });
 

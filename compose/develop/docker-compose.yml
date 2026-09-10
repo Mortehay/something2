@@ -47,11 +47,25 @@ services:
       # Registration stays open on a workstation; production chooses explicitly.
       - REGISTRATION_MODE=${REGISTRATION_MODE:-open}
       - SPRITE_GEN_URL=http://sprite-gen:8100
+      # SOMET-551. The prompt-writing model runs on the HOST, not in compose:
+      # it is CPU-only and deliberately kept off the GPU box, whose effective
+      # VRAM headroom is under one SDXL pipeline. `localhost` is the right
+      # default for a backend run directly on the host, and wrong inside a
+      # container -- where it means the container itself. host.docker.internal
+      # is resolved by the extra_hosts entry below rather than by a hardcoded
+      # bridge IP, which drifts whenever the compose network is recreated.
+      - ART_DESCRIBER_URL=${ART_DESCRIBER_URL:-http://host.docker.internal:20434/v1/chat/completions}
+      - ART_DESCRIBER_MODEL=${ART_DESCRIBER_MODEL:-qwen2.5-coder:7b}
       - SPRITE_GEN_SHARED_SECRET=${SPRITE_GEN_SHARED_SECRET:?SPRITE_GEN_SHARED_SECRET must be set in .env}
       # Preserves the existing dev experience: `make up` migrates and serves in
       # one step. compose/orangepi does NOT set this -- there, migrations are
       # their own deploy stage (see backend/src/index.js's shouldMigrateOnBoot).
       - MIGRATE_ON_BOOT=true
+    # Makes host.docker.internal resolve on Linux, where Docker does not
+    # provide it by default. Without it the backend cannot reach any service
+    # running on the workstation itself.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - db
       - minio

@@ -235,3 +235,76 @@ test('a tile does NOT get prompt notes', async () => {
     { request_template: {} });
   assert.equal(queried, false, 'a tile must not query for notes it cannot use');
 });
+
+// --- SOMET-551: the dispatcher must USE a stored description ---------------
+//
+// artPromptDescriptions has its own tests, but they call subjectPhrase()
+// directly and would stay green against a dispatcher that never calls it --
+// the orphaned-helper hole that the history and notes slices both had. These
+// assert the wiring.
+//
+// The stub routes by SQL because requestForSubject now makes two reads (notes
+// and description) and a blanket `rows: []` cannot tell them apart.
+function dbWith({ description = null, notes = [] } = {}) {
+  return {
+    query: async (sql) => {
+      if (/art_prompt_descriptions/.test(sql)) {
+        return { rows: description ? [description] : [] };
+      }
+      if (/art_prompt_notes/.test(sql)) return { rows: notes };
+      return { rows: [] };
+    },
+  };
+}
+
+test('a stored description replaces the catalogue phrase in the composed prompt', async () => {
+  const req = await d.requestForSubject(
+    dbWith({ description: { text: 'gnarled wand tipped with a blue crystal', model: 'test-llm' } }),
+    { seed: 1 }, { key: 'wand', basePrompt: 'a wand, a fantasy weapon' },
+    OBJECT_REG, { request_template: { cutout: true } },
+  );
+  assert.match(req.prompt, /gnarled wand tipped with a blue crystal/);
+  assert.doesNotMatch(req.prompt, /a fantasy weapon/,
+    'the template phrase must be REPLACED, not appended to');
+  assert.equal(req.promptModel, 'test-llm',
+    'the history needs to record who wrote the prompt, not only who drew it');
+});
+
+// The case every existing subject depends on. 87 items already have art built
+// from the template; a silent change here would alter their regenerations.
+test('with NO description the composed prompt is unchanged', async () => {
+  const withNone = await d.requestForSubject(dbWith(), { seed: 1 },
+    { key: 'wand', basePrompt: 'a wand, a fantasy weapon' },
+    OBJECT_REG, { request_template: { cutout: true } });
+  assert.match(withNone.prompt, /only a wand, a fantasy weapon and nothing else/);
+  assert.equal(withNone.promptModel, null,
+    'null says "never described", which is the fact the history wants');
+});
+
+test('a description and a note compose together, description first', async () => {
+  const req = await d.requestForSubject(
+    dbWith({
+      description: { text: 'gnarled wand', model: 'm' },
+      notes: [{ id: 1, note: 'no shadow' }],
+    }),
+    { seed: 1 }, { key: 'wand', basePrompt: 'ignored' },
+    OBJECT_REG, { request_template: { cutout: true } },
+  );
+  // The description is WHAT THE THING IS and leads; the note is a correction
+  // and sits with the exclusions. Losing that order would bury the subject.
+  assert.ok(req.prompt.indexOf('gnarled wand') < req.prompt.indexOf('no shadow'));
+});
+
+test('a tile takes no description -- it composes its own prompt', async () => {
+  let asked = false;
+  const spy = {
+    query: async (sql) => {
+      if (/art_prompt_descriptions/.test(sql)) asked = true;
+      return { rows: [] };
+    },
+  };
+  await d.requestForSubject(spy, { seed: 1 }, { key: 't', basePrompt: 'grass' },
+    { generationKind: 'tile', composePrompt: async () => 'a grass tile' },
+    { request_template: {} });
+  assert.equal(asked, false, 'a tile must not be queried for a phrase it cannot use');
+});
