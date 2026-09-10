@@ -165,11 +165,37 @@ async function describeAll(pool, {
   return stats;
 }
 
-module.exports = { describeAll, selectSubjects, DEFAULT_KINDS, CONSECUTIVE_FAILURE_LIMIT };
+module.exports = {
+  describeAll, selectSubjects, flagValue, unknownFlags,
+  DEFAULT_KINDS, CONSECUTIVE_FAILURE_LIMIT,
+};
 
-function flagValue(name, fallback) {
-  const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
-  return hit ? hit.slice(name.length + 3) : fallback;
+// BOTH FORMS. `--kind=skill` and `--kind skill` are the same thing to anyone
+// typing this, and make passes the second one. Reading only the first was
+// silent: the run took the DEFAULT kinds and an unlimited limit, printed a
+// sensible-looking header, and started working through the whole catalogue.
+// A flag that is ignored rather than rejected is the worst of the three
+// possible behaviours.
+function flagValue(argv, name, fallback) {
+  const eq = argv.find((a) => a.startsWith(`--${name}=`));
+  if (eq) return eq.slice(name.length + 3);
+  const at = argv.indexOf(`--${name}`);
+  if (at >= 0) {
+    const next = argv[at + 1];
+    // `--dry-run --kind` with nothing after it must not swallow the next flag.
+    if (next && !next.startsWith('--')) return next;
+  }
+  return fallback;
+}
+
+// Every flag this understands. An unknown one is a typo, and a typo that is
+// silently ignored is how a "limit 20" run describes 617 subjects.
+const KNOWN_FLAGS = ['kind', 'length', 'limit', 'dry-run', 'redo', 'stale', 'with-art'];
+
+function unknownFlags(argv) {
+  return argv.filter((a) => a.startsWith('--'))
+    .map((a) => a.slice(2).split('=')[0])
+    .filter((n) => !KNOWN_FLAGS.includes(n));
 }
 
 if (require.main === module) {
@@ -177,12 +203,19 @@ if (require.main === module) {
   const url = process.env.DATABASE_URL || env.DATABASE_URL;
   if (!url) { console.error('DATABASE_URL is not set'); process.exit(1); }
 
-  const length = flagValue('length', 'medium');
+  const bad = unknownFlags(process.argv.slice(2));
+  if (bad.length) {
+    console.error(`unknown flag${bad.length > 1 ? 's' : ''}: ${bad.map((b) => `--${b}`).join(', ')}`);
+    console.error(`known: ${KNOWN_FLAGS.map((f) => `--${f}`).join(', ')}`);
+    process.exit(1);
+  }
+
+  const length = flagValue(process.argv, 'length', 'medium');
   if (!LENGTHS[length]) {
     console.error(`unknown length "${length}" -- one of ${Object.keys(LENGTHS).join(', ')}`);
     process.exit(1);
   }
-  const kinds = flagValue('kind', DEFAULT_KINDS.join(',')).split(',').map((k) => k.trim());
+  const kinds = flagValue(process.argv, 'kind', DEFAULT_KINDS.join(',')).split(',').map((k) => k.trim());
   const opts = {
     kinds,
     length,
@@ -190,7 +223,7 @@ if (require.main === module) {
     redo: process.argv.includes('--redo'),
     includeStale: process.argv.includes('--stale'),
     withArt: process.argv.includes('--with-art'),
-    limit: parseInt(flagValue('limit', '0'), 10) || 0,
+    limit: parseInt(flagValue(process.argv, 'limit', '0'), 10) || 0,
   };
 
   const pool = new Pool({ connectionString: url });

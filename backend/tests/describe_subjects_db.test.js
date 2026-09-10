@@ -1,7 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
-const { describeAll, selectSubjects } = require('../scripts/describe-subjects.js');
+const {
+  describeAll, selectSubjects, flagValue, unknownFlags,
+} = require('../scripts/describe-subjects.js');
 const descriptions = require('../src/services/artPromptDescriptions.js');
 
 // SOMET-552. The batch authoring pass.
@@ -196,4 +198,29 @@ dbTest('an unstorable answer counts as a failure, not as a write', async (t, poo
   });
   assert.equal(stats.written, 0);
   assert.ok(stats.failed >= 3);
+});
+
+// --- the flags -------------------------------------------------------------
+//
+// MEASURED, not imagined: `make art-describe DRY=1 LIMIT=20 KIND=skill` passes
+// `--kind skill --limit 20`, and the first version of this script read only
+// `--kind=skill`. It printed a plausible header and started describing the
+// WHOLE catalogue with no limit. Nothing failed; it was just doing something
+// else than it was asked.
+test('a flag written with a space is the same flag as one written with =', () => {
+  assert.equal(flagValue(['--kind=skill'], 'kind', 'D'), 'skill');
+  assert.equal(flagValue(['--kind', 'skill'], 'kind', 'D'), 'skill');
+  assert.equal(flagValue(['--limit', '20'], 'limit', '0'), '20');
+});
+
+test('a value-less flag does not swallow the next flag', () => {
+  assert.equal(flagValue(['--kind', '--dry-run'], 'kind', 'D'), 'D',
+    'taking "--dry-run" as the kind would run over a kind that does not exist');
+  assert.equal(flagValue([], 'kind', 'D'), 'D');
+});
+
+test('a mistyped flag is refused rather than ignored', () => {
+  assert.deepEqual(unknownFlags(['--kind', 'skill', '--limt', '5']), ['limt'],
+    'an ignored --limt is how a "20 subjects" run describes the whole catalogue');
+  assert.deepEqual(unknownFlags(['--kind=skill', '--dry-run', '--stale', '--limit=5']), []);
 });
