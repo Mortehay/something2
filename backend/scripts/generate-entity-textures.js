@@ -77,7 +77,7 @@ const { resolveProvider, parseArgs } = require('./generate-tile-textures.js');
 // catalog art (SOMET-540) needs the same wrapper, and a service cannot sanely
 // require a CLI script. Re-exported below so this module's public surface is
 // unchanged.
-const { BACKDROP, buildObjectPrompt } = require('../src/services/objectPrompt.js');
+const { BACKDROP, buildObjectPrompt, OBJECT_NEGATIVES } = require('../src/services/objectPrompt.js');
 
 // Generate through the LOCAL sprite-gen service instead of a remote provider.
 //
@@ -270,6 +270,10 @@ async function generateOne(pool, provider, entity) {
     subject: entity.name,
     kind: 'object',
     prompt: buildObjectPrompt(entity.prompt),
+    // SOMET-558. The framing exclusions left the positive prompt; this path
+    // has to carry them too, or entity textures generated here lose the eight
+    // terms the dispatcher's path still applies.
+    negative: OBJECT_NEGATIVES,
     seed: 0,
     frames: 1,
   });

@@ -9,7 +9,9 @@ const history = require('./artGenerations.js');
 const promptNotes = require('./artPromptNotes.js');
 const descriptions = require('./artPromptDescriptions.js');
 const failures = require('./artFailures.js');
-const { buildObjectPrompt, BACKDROP, CUTOUT_BACKDROP } = require('./objectPrompt.js');
+const {
+  buildObjectPrompt, BACKDROP, CUTOUT_BACKDROP, OBJECT_NEGATIVES,
+} = require('./objectPrompt.js');
 
 // SOMET-540. The loop that turns queued art jobs into images.
 //
@@ -185,7 +187,11 @@ async function requestForSubject(db, job, subject, reg, provider) {
     frames: 1,                       // never a sheet
     // Terms for negative_prompt rather than the prompt. Merged into the
     // provider body by remoteImageProvider, which owns the template.
-    negative: avoid,
+    //
+    // The house framing exclusions lead, then the operator's. Objects ONLY:
+    // a tile is legitimately full of ground and floor, and steering a terrain
+    // texture away from them would ruin every tile in the catalogue.
+    negative: generationKind === 'object' ? [...OBJECT_NEGATIVES, ...avoid] : avoid,
   };
   // THE NATIVE-RESOLUTION ASK IS FOR OBJECTS ONLY. A seamless tile is not an
   // isolated subject and does not tile-repeat the way an off-native object

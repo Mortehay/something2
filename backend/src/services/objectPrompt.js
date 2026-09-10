@@ -81,6 +81,37 @@ const CUTOUT_BACKDROP = 'flat solid neutral grey background';
 //     pine tree). "one single" plus "centered" plus "nothing else in frame"
 //     is what stops it, and the provider's negative prompt names the failure
 //     modes as well.
+// The framing exclusions, as NEGATIVE terms (SOMET-558).
+//
+// These nine used to be spelled "no frame, no border, no picture frame, no
+// card, no ground, no floor, no shadow, no scenery, no other objects" inside
+// the POSITIVE prompt. That is the same defect this ticket fixed for operator
+// corrections, at larger scale and in our own house wording: CLIP has no
+// reliable negation, so every one of those nouns was being conditioned IN by
+// the very clause asking for its absence.
+//
+// NOTHING IS LOST BY MOVING THEM, and that is the argument for doing it without
+// an A/B first. Each term is carried to the provider as a negative instead of
+// dropped, so the model is still steered away from all nine -- and it now works
+// through negative_prompt, which is the mechanism that actually expresses
+// absence. The desktop provider's own template already listed eight of the nine
+// there, so for that provider this is mostly de-duplication.
+//
+// Exported rather than inlined at the dispatcher, because the LIST and the
+// prompt that no longer contains it are one contract: a term deleted here and
+// not added there is silently unenforced.
+const OBJECT_NEGATIVES = [
+  'picture frame', 'border', 'trading card',
+  'ground', 'floor', 'shadow',
+  'scenery', 'multiple objects',
+];
+
+// WHAT DELIBERATELY STAYS IN THE POSITIVE PROMPT, because it was measured to
+// work and this change must not undo it: "only X and nothing else", "one single
+// object" and "centered". Asked for a bare subject this model answers with a
+// TILESET of it -- a forest for one pine tree -- and that trio is what stops
+// it. They are constraints on what the image IS, not names of things to omit,
+// so the negation objection does not apply to them.
 function buildObjectPrompt(base, { backdrop = BACKDROP, corrections = [] } = {}) {
   // SOMET-548. Per-subject corrections land HERE, with the exclusions and
   // BEFORE the styling, not appended at the end.
@@ -105,11 +136,10 @@ function buildObjectPrompt(base, { backdrop = BACKDROP, corrections = [] } = {})
   // reading of any subject is "a picture of that subject". Naming the
   // exclusions first, before any styling, is what stops it.
   return `only ${base} and nothing else, one single object, centered, `
-    + `${backdrop}, no frame, no border, no picture frame, no card, `
-    + 'no ground, no floor, no shadow, no scenery, no other objects, '
+    + `${backdrop}, `
     + (fixes ? `${fixes}, ` : '')
     + 'pixel art RPG game asset, isometric 3/4 top-down view, crisp clean pixels, '
     + 'limited palette, sharp outline, cut out on a plain flat background';
 }
 
-module.exports = { BACKDROP, CUTOUT_BACKDROP, buildObjectPrompt };
+module.exports = { BACKDROP, CUTOUT_BACKDROP, OBJECT_NEGATIVES, buildObjectPrompt };

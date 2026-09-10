@@ -1,7 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const d = require('../src/services/artDispatcher.js');
-const { buildObjectPrompt, BACKDROP, CUTOUT_BACKDROP } = require('../src/services/objectPrompt.js');
+const {
+  buildObjectPrompt, BACKDROP, CUTOUT_BACKDROP, OBJECT_NEGATIVES,
+} = require('../src/services/objectPrompt.js');
 
 // SOMET-548: requestForSubject now reads the subject's prompt notes, so it
 // needs a db. NO_NOTES is a subject with none -- the default state for
@@ -307,4 +309,41 @@ test('a tile takes no description -- it composes its own prompt', async () => {
     { generationKind: 'tile', composePrompt: async () => 'a grass tile' },
     { request_template: {} });
   assert.equal(asked, false, 'a tile must not be queried for a phrase it cannot use');
+});
+
+// SOMET-558. The house framing exclusions reach the provider as NEGATIVE
+// terms, and only for objects.
+//
+// The seam that matters: objectPrompt exports the list and the dispatcher has
+// to attach it. A term deleted from one and not the other is silently
+// unenforced, which is exactly the "moved it and lost it" failure this guards.
+test('an object request carries the framing exclusions as negatives', async () => {
+  const req = await d.requestForSubject(NO_NOTES, { seed: 1 },
+    { key: 'arrow', name: 'arrow', basePrompt: 'an arrow, a fantasy ammo' }, OBJECT_REG, null);
+  assert.ok(Array.isArray(req.negative), 'the request must carry a negative list');
+  for (const term of OBJECT_NEGATIVES) {
+    assert.ok(req.negative.includes(term), `missing negative term: ${term}`);
+  }
+  // And the other half: none of them may still be in the positive prompt.
+  //
+  // WORD BOUNDARIES, not includes(). "background" contains "ground", and the
+  // prompt legitimately says "flat solid neutral grey background" twice -- a
+  // substring check calls that a leak and fails on correct output.
+  for (const term of OBJECT_NEGATIVES) {
+    assert.ok(!new RegExp(`\\b${term}\\b`).test(req.prompt),
+      `"${term}" is still in the positive prompt, where it conditions itself IN`);
+  }
+});
+
+// A TILE IS LEGITIMATELY FULL OF GROUND AND FLOOR. Steering a terrain texture
+// away from them would ruin every tile in the catalogue, so the house list is
+// object-only.
+test('a tile request does NOT carry the object framing exclusions', async () => {
+  const req = await d.requestForSubject(NO_NOTES, { seed: 1 },
+    { key: 'grass', name: 'grass', basePrompt: 'lush grass', biome: 'forest' }, TILE_REG, null);
+  const carried = req.negative || [];
+  for (const term of ['ground', 'floor', 'scenery']) {
+    assert.ok(!carried.includes(term),
+      `a tile must not be steered away from "${term}"`);
+  }
 });
