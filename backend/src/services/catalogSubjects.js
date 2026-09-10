@@ -155,15 +155,32 @@ const SUBJECTS = Object.freeze({
   passive_label: {
     kind: 'passive_label',
     generationKind: 'object',
+    // SOMET-552. The GRANTS come with the label, and they are the only thing
+    // that says what the label MEANS. "Versatility" is one English word; its
+    // grants say "+2 to a stat", and that is the difference between an icon
+    // that stands for the bonus and a machine lever on a stone plinth (which
+    // is what "Versatility" actually drew, measured 2026-09-10).
+    //
+    // DISTINCT over the grant ELEMENTS, not over the arrays: a label spans
+    // many nodes and 105 of the 128 resolve to exactly one grant once
+    // duplicates collapse. The other 23 genuinely span several (Versatility is
+    // +2 to any one of four stats), and listing all of them is the honest
+    // context -- inventing one would be authoring the tree's meaning here.
     async list(db) {
       const { rows } = await db.query(
-        'SELECT DISTINCT label FROM passive_nodes WHERE label <> \'\' ORDER BY label',
+        `SELECT p.label, jsonb_agg(DISTINCT e) AS grants
+           FROM passive_nodes p
+           LEFT JOIN LATERAL jsonb_array_elements(p.grants) e ON true
+          WHERE p.label <> ''
+          GROUP BY p.label
+          ORDER BY p.label`,
       );
       return rows.map((r) => ({
         kind: 'passive_label',
         key: r.label,
         name: r.label,
         basePrompt: labelSubject(r.label),
+        grants: (r.grants || []).filter(Boolean),
         row: r,
       }));
     },

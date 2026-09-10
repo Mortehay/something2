@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const {
-  clean, buildMessages, subjectContext, CONTRACTS, TEMPERATURE,
+  clean, buildMessages, subjectContext, grantsPhrase, CONTRACTS, TEMPERATURE,
 } = require('../src/services/subjectDescriber.js');
 
 // SOMET-550. The contract that turns a catalogue row into a subject phrase.
@@ -106,16 +106,45 @@ test('the physical-form rule is stated, because formless subjects fail', () => {
   assert.match(sys, /PHYSICAL FORM/);
 });
 
-// The template throws this away: a passive label's key carries its mechanical
+// The template throws this away: a passive node's GRANTS carry its mechanical
 // effect, and the effect is exactly what says what to draw.
-test('a passive label contributes its effect text, not just its name', () => {
+//
+// THIS TEST USED TO PASS OVER A DEAD BRANCH. It passed `key` and `name` as
+// DIFFERENT strings, and the code read `subject.key !== name` -- but
+// catalogSubjects sets both to the same label text for all 128 labels, so the
+// effect line never appeared in production. The fixture was the only place the
+// condition was ever true. It now uses the shape catalogSubjects actually
+// produces: key === name, effect carried by `grants`.
+test('a passive label contributes its effect, not just its name', () => {
   const ctx = subjectContext({
     kind: 'passive_label',
-    key: 'Fleet — your cooldown floor drops from 0.40 to 0.32',
-    name: 'Fleet',
+    key: 'Cryomancy',
+    name: 'Cryomancy',                     // EQUAL, as the catalogue emits them
+    grants: [{ type: 'damage', element: 'ice', value: 35 },
+      { type: 'status', status: 'chill', value: 1 }],
   });
-  assert.match(ctx, /Name: Fleet/);
-  assert.match(ctx, /cooldown floor drops/, 'the effect is the useful half');
+  assert.match(ctx, /Name: Cryomancy/);
+  assert.match(ctx, /ice damage/, 'the effect is the useful half');
+  assert.match(ctx, /chill/);
+});
+
+test('every grant type renders, because an unhandled one is a silent blank', () => {
+  const all = grantsPhrase([
+    { type: 'stat', stat: 'strength', value: 2 },
+    { type: 'damage', element: 'fire', value: 35 },
+    { type: 'resist', element: 'ice', value: 20 },
+    { type: 'resource', pool: 'mana', value: 60 },
+    { type: 'status', status: 'chill', value: 1 },
+    { type: 'rule', rule: 'cooldownFloor', value: 0.32 },
+  ]);
+  // These six are every type in passive_nodes, checked against the live table.
+  for (const word of ['strength', 'fire damage', 'ice resistance', 'mana', 'chill', 'cooldownFloor']) {
+    assert.ok(all.includes(word), `"${word}" is missing from "${all}"`);
+  }
+  assert.equal(grantsPhrase([]), '', 'and no grants is no Effect line, not an empty one');
+  assert.equal(grantsPhrase(undefined), '');
+  assert.equal(grantsPhrase([{ type: 'something_new' }]), '',
+    'an unknown type is dropped rather than rendered as undefined');
 });
 
 test('an item contributes its catalogue fields', () => {

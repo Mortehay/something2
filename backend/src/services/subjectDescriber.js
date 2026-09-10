@@ -133,12 +133,41 @@ const CONTRACTS = {
 // ("Fleet - your cooldown floor drops from 0.40 to 0.32") and the template
 // sends only the word "Fleet"; the effect is exactly what tells a model what to
 // draw, so it goes in.
+// A passive node's grants, as words a model can draw from. The NUMBERS matter
+// least here -- what tells you what to draw is "ice", "chill", "mana",
+// "strength". Units are deliberately not asserted: the tree stores 35 for +35%
+// ice damage and 2 for +2 strength, and claiming a unit we have not checked
+// would put a wrong fact in every icon prompt.
+function grantsPhrase(grants) {
+  if (!Array.isArray(grants) || !grants.length) return '';
+  const words = grants.map((g) => {
+    if (!g || typeof g !== 'object') return '';
+    switch (g.type) {
+      case 'stat': return `+${g.value} ${g.stat}`;
+      case 'damage': return `+${g.value} ${g.element} damage`;
+      case 'resist': return `+${g.value} ${g.element} resistance`;
+      case 'resource': return `+${g.value} ${g.pool}`;
+      case 'status': return `inflicts ${g.status}`;
+      case 'rule': return `${g.rule} ${g.value}`;
+      default: return '';
+    }
+  }).filter(Boolean);
+  return words.join(', ');
+}
+
 function subjectContext(subject) {
   const bits = [];
   const name = subject.name || subject.key;
   bits.push(`Name: ${name}`);
-  if (subject.kind === 'passive_label' && subject.key && subject.key !== name) {
-    bits.push(`Effect: ${subject.key}`);
+  // SOMET-552. THIS BRANCH USED TO BE DEAD. It read
+  // `subject.key !== name`, and catalogSubjects sets a passive label's key AND
+  // name to the same label text -- always equal, so all 128 labels were
+  // described from one English word with their mechanical effect thrown away.
+  // Measured 2026-09-10: "Versatility" (+2 to a stat) became "gear shift" and
+  // drew a machine lever on a stone plinth.
+  if (subject.kind === 'passive_label') {
+    const effect = grantsPhrase(subject.grants);
+    if (effect) bits.push(`Effect: ${effect}`);
   }
   if (subject.row) {
     for (const [label, field] of [['Category', 'category'], ['Element', 'element'],
@@ -218,6 +247,6 @@ async function describeSubject(subject, { length = 'medium', fetchImpl = fetch }
 }
 
 module.exports = {
-  describeSubject, buildMessages, clean, subjectContext,
+  describeSubject, buildMessages, clean, subjectContext, grantsPhrase,
   LENGTHS, CONTRACTS, MODEL, TEMPERATURE,
 };

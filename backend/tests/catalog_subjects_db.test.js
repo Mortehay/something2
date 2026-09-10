@@ -147,6 +147,27 @@ lockedTest('items list every catalog row and report which have art', async (t, p
     'and the vowel case must actually occur, or this proves nothing');
 });
 
+// SOMET-552. The grants are the only thing that says what a one-word label
+// MEANS, and the describer had no access to them: subjectContext gated its
+// effect line on key !== name, and both are the label text.
+lockedTest('a passive label carries its grants, not just its word', async (t, pool) => {
+  const subjects = await cs.listWithArtState(pool, 'passive_label');
+  const described = subjects.filter((s) => s.grants && s.grants.length);
+  assert.ok(described.length > subjects.length * 0.9,
+    `only ${described.length} of ${subjects.length} labels carry an effect`);
+
+  // DISTINCT over grant ELEMENTS, not over the arrays: a label spans many
+  // nodes, and without the collapse "Versatility" would carry one entry per
+  // node rather than the handful of stats it actually grants.
+  const versatility = subjects.find((s) => s.key === 'Versatility');
+  if (versatility) {
+    assert.ok(versatility.grants.length <= 8,
+      `Versatility carries ${versatility.grants.length} grants -- duplicates are not collapsing`);
+    assert.ok(versatility.grants.every((g) => g && g.type),
+      'a null from the LEFT JOIN must never reach the prompt');
+  }
+});
+
 lockedTest('passive labels are DISTINCT, far fewer than the nodes', async (t, pool) => {
   const subjects = await cs.listWithArtState(pool, 'passive_label');
   const { rows } = await pool.query('SELECT count(*)::int n FROM passive_nodes');
