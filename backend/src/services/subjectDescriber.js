@@ -26,7 +26,17 @@
 const ENDPOINT = () => process.env.ART_DESCRIBER_URL
   || 'http://localhost:20434/v1/chat/completions';
 const MODEL = () => process.env.ART_DESCRIBER_MODEL || 'qwen2.5-coder:7b';
-const TIMEOUT_MS = () => parseInt(process.env.ART_DESCRIBER_TIMEOUT_MS || '120000', 10);
+// 120000 was not enough, and it failed in the worst possible place: the FIRST
+// request after the model has been evicted from memory, which is exactly when
+// a person clicks "Write with the model" in the console.
+//
+// MEASURED on this host: ~8-15s with the model warm, but ~108s to load it cold
+// -- and the load happens BEFORE any tokens are generated. A 120s budget left
+// about 12s of headroom for the actual work, so a cold click on a loaded
+// machine aborted, returned 500, and read as a broken button. Observed:
+// stuck on "Writing..." for the full timeout, then a silent revert, while the
+// identical request by hand answered 201 in 45s once the model was resident.
+const TIMEOUT_MS = () => parseInt(process.env.ART_DESCRIBER_TIMEOUT_MS || '300000', 10);
 // SOMET-552. Measured: at 0.4 the SAME subject came back differently on 13 of
 // 20 re-runs -- "curved saber with a thick, sinewy tendon" one run, "curved
 // saber with a looped cord" the next. That instability is not a style choice,
@@ -248,5 +258,5 @@ async function describeSubject(subject, { length = 'medium', fetchImpl = fetch }
 
 module.exports = {
   describeSubject, buildMessages, clean, subjectContext, grantsPhrase,
-  LENGTHS, CONTRACTS, MODEL, TEMPERATURE,
+  LENGTHS, CONTRACTS, MODEL, TEMPERATURE, TIMEOUT_MS,
 };

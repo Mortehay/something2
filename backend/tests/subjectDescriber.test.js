@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const {
   clean, buildMessages, subjectContext, grantsPhrase, CONTRACTS, TEMPERATURE,
+  describeSubject, TIMEOUT_MS,
 } = require('../src/services/subjectDescriber.js');
 
 // SOMET-550. The contract that turns a catalogue row into a subject phrase.
@@ -183,5 +184,44 @@ test('temperature defaults low, because a description that moves is not a record
   } finally {
     if (before === undefined) delete process.env.ART_DESCRIBER_TEMPERATURE;
     else process.env.ART_DESCRIBER_TEMPERATURE = before;
+  }
+});
+
+// SOMET-553. The timeout has to cover a COLD model, not a warm one.
+//
+// Measured on this host: ~8-15s warm, ~108s to load the model cold, and the
+// load happens before a single token is generated. The old 120s default left
+// ~12s for the work itself, so the first click after an idle period aborted --
+// the one moment a person is most likely to be watching.
+test('the describer timeout leaves room for a cold model load', async () => {
+  const before = process.env.ART_DESCRIBER_TIMEOUT_MS;
+  try {
+    delete process.env.ART_DESCRIBER_TIMEOUT_MS;
+    let seenTimeout = null;
+    const fetchImpl = async (url, opts) => {
+      // AbortSignal.timeout() exposes no deadline, so the request carries it
+      // where a test can see it rather than the assertion guessing.
+      seenTimeout = opts.signal;
+      return {
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: 'iron spear' } }] }),
+      };
+    };
+    const out = await describeSubject({ kind: 'item', key: 'k', name: 'K' }, { fetchImpl });
+    assert.equal(out.text, 'iron spear');
+    assert.ok(seenTimeout, 'the request must carry an abort signal at all');
+
+    // Read from the MODULE, not recomputed from a literal here. Asserting
+    // `parseInt(env || '300000')` would pass no matter what the module's
+    // default became -- the assertion would be derived from the same constant
+    // it claims to check, which is a pattern this repo has been caught by
+    // before.
+    assert.ok(TIMEOUT_MS() >= 180000,
+      `${TIMEOUT_MS()}ms does not cover a ~108s cold load plus the generation`);
+    process.env.ART_DESCRIBER_TIMEOUT_MS = '90000';
+    assert.equal(TIMEOUT_MS(), 90000, 'and stays tunable for a host with a warm model');
+  } finally {
+    if (before === undefined) delete process.env.ART_DESCRIBER_TIMEOUT_MS;
+    else process.env.ART_DESCRIBER_TIMEOUT_MS = before;
   }
 });
