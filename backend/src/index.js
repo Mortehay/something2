@@ -3268,6 +3268,10 @@ app.get('/api/art-subjects/:kind', adminGuard, async (req, res) => {
         // Only entities have one; the console shows it because promoting a
         // deliberate colour-box type to real art is a choice worth seeing.
         render_mode: (x.row && x.row.render_mode) || null,
+        // SOMET-553. The console greys the description editor out for the
+        // kinds the server refuses one from, and asks the server which those
+        // are rather than deciding for itself.
+        takes_description: catalogSubjects.takesDescription(req.params.kind),
       })),
     });
   } catch (err) {
@@ -3339,7 +3343,7 @@ app.post('/api/art-subjects/:kind/:key/description', adminGuard, async (req, res
     if (!reg) return res.status(400).json({ error: `unknown subject kind "${kind}"` });
     // A tile composes its prompt from its biome's palette; a subject phrase
     // could never reach it, so accepting one would be a silent no-op.
-    if (reg.generationKind !== 'object') {
+    if (!catalogSubjects.takesDescription(reg)) {
       return res.status(409).json({ error: `${kind} builds its own prompt and takes no description` });
     }
 

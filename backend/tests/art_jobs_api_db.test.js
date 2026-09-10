@@ -98,7 +98,7 @@ lockedTest('a page carries only the named fields, not the whole catalogue row', 
   assert.equal(res.status, 200);
   assert.deepEqual(Object.keys(res.body.subjects[0]).sort(),
     ['base_prompt', 'has_art', 'image', 'job_error', 'job_state', 'key', 'kind',
-      'name', 'render_mode', 'updated_at']);
+      'name', 'render_mode', 'takes_description', 'updated_at']);
   assert.equal(res.body.subjects[0].row, undefined,
     'the catalogue row must never be shipped -- it doubles every page');
 });
@@ -582,4 +582,36 @@ lockedTest('a description for a subject that is not in the catalogue is refused'
       .set(...AUTH).send({ text: 'anything' });
     assert.equal(res.status, 404,
       'storing one would create a description nothing can ever use');
+  });
+
+// SOMET-553. Which kinds take a written description is a SERVER rule, and the
+// console greys its editor out from this field rather than deciding for
+// itself. If the two ever disagree, the console offers an editor whose Save
+// the server answers with a 409.
+lockedTest('the listing says which kinds take a description, and it matches the route',
+  async (t) => {
+    for (const [kind, expected] of [['skill', true], ['item', true],
+      ['passive_label', true], ['entity', true], ['tile', false]]) {
+      // eslint-disable-next-line no-await-in-loop
+      const res = await request(app).get(`/api/art-subjects/${kind}?per_page=1`).set(...AUTH);
+      assert.equal(res.status, 200);
+      const row = res.body.subjects[0];
+      assert.equal(row.takes_description, expected, `${kind} listing`);
+
+      // The route is the authority; the flag has to agree with it. A tile
+      // composes its prompt from its biome, so a subject phrase could never
+      // reach it and accepting one would be a silent no-op.
+      // eslint-disable-next-line no-await-in-loop
+      const post = await request(app)
+        .post(`/api/art-subjects/${kind}/${encodeURIComponent(row.key)}/description`)
+        .set(...AUTH).send({ text: 'a probe that is rolled back below' });
+      assert.equal(post.status !== 409, expected,
+        `${kind}: the listing flag and the route disagree`);
+      if (post.status === 201) {
+        // eslint-disable-next-line no-await-in-loop
+        await request(app)
+          .delete(`/api/art-subjects/${kind}/${encodeURIComponent(row.key)}/description`)
+          .set(...AUTH);
+      }
+    }
   });

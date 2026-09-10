@@ -194,6 +194,71 @@ export const useRemoveArtNote = noteMutation(async (subject, id) => {
   return res.json().catch(() => ({}));
 }, 'Note removed');
 
+// SOMET-553. The written description that replaces the catalogue template.
+//
+// Returns every version, not only the active one: art_generations records
+// prompts built from descriptions since replaced, and the console is where
+// someone asks "why did it draw that" about an image made weeks ago.
+const descriptionKey = (s) => ['art-description', s?.kind, s?.key];
+
+export function useArtDescription(subject) {
+  const { data, isLoading } = useQuery({
+    queryKey: descriptionKey(subject),
+    enabled: Boolean(subject),
+    queryFn: () => getJson(
+      `${API_URL}/api/art-subjects/${encodeURIComponent(subject.kind)}`
+      + `/${encodeURIComponent(subject.key)}/description`,
+      'the subject description',
+    ),
+  });
+  return {
+    description: data?.active || null,
+    descriptionHistory: data?.history || [],
+    // Whether the catalogue has moved since the description was written. It is
+    // still the description in force -- see the migration header for why
+    // dropping a stale one would be the more damaging half of the mistake.
+    isStale: Boolean(data?.stale),
+    catalogPrompt: data?.catalogPrompt || null,
+    isLoadingDescription: isLoading,
+  };
+}
+
+function descriptionMutation(run, successMessage) {
+  return function useDescriptionMutation(subject) {
+    const qc = useQueryClient();
+    return useMutation({
+      mutationFn: (arg) => run(subject, arg),
+      onSuccess: () => {
+        toast.success(successMessage);
+        qc.invalidateQueries({ queryKey: descriptionKey(subject) });
+      },
+      onError: (err) => toast.error(err.message),
+    });
+  };
+}
+
+// `text` given writes it verbatim (a human edit); omitted asks the local model
+// for one, which takes 10-100s on CPU -- the caller must show that it is
+// working or the button reads as broken.
+export const useWriteDescription = descriptionMutation(async (subject, body) => {
+  const { res, json } = await post(
+    `/api/art-subjects/${encodeURIComponent(subject.kind)}`
+    + `/${encodeURIComponent(subject.key)}/description`, body,
+  );
+  if (!res.ok) throw new Error(json.error || 'Failed to write the description');
+  return json;
+}, 'Description saved -- it applies to the next generation');
+
+export const useClearDescription = descriptionMutation(async (subject) => {
+  const res = await apiFetch(
+    `${API_URL}/api/art-subjects/${encodeURIComponent(subject.kind)}`
+    + `/${encodeURIComponent(subject.key)}/description`,
+    { method: 'DELETE', headers: authHeaders() },
+  );
+  if (!res.ok) throw new Error('Failed to clear the description');
+  return res.json().catch(() => ({}));
+}, 'Description cleared -- back to the catalogue phrase');
+
 async function post(path, body) {
   const res = await apiFetch(`${API_URL}${path}`, {
     method: 'POST', headers: authHeaders(), body: JSON.stringify(body || {}),

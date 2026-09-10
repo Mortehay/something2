@@ -346,6 +346,19 @@ function pinnedProviderId(subject, active, fallbackProviderId) {
   return fallbackProviderId;
 }
 
+// Does this kind take a WRITTEN DESCRIPTION (SOMET-551/553)?
+//
+// A tile's prompt is composed from its biome's palette and style, so a subject
+// phrase could never reach it and accepting one would be a silent no-op. That
+// rule lives here rather than in the route that enforces it, because the
+// console has to grey the editor out for the same kinds the server refuses --
+// and a client that decided this for itself would drift the day a sixth kind
+// is added.
+function takesDescription(kind) {
+  const reg = typeof kind === 'string' ? registryFor(kind) : kind;
+  return Boolean(reg) && reg.generationKind === 'object';
+}
+
 function subjectKinds() {
   return Object.keys(SUBJECTS);
 }
@@ -393,7 +406,7 @@ async function latestJobByKey(db, kind) {
 }
 
 module.exports = {
-  SUBJECTS, subjectKinds, registryFor, listWithArtState,
+  SUBJECTS, subjectKinds, registryFor, listWithArtState, takesDescription,
   subjectsForEnqueue, pinnedProviderId,
   deslug, article, labelSubject, itemPrompt, skillPrompt, writeCatalogArt,
 };

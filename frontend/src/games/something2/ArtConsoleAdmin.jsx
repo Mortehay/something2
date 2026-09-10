@@ -19,9 +19,11 @@ import {
   useArtSubjects, useArtQueue, useEnqueueArt, useStartArtBatch, useStopArtBatch,
   useRequeueStale, useRequeueFailures, useArtHistory, useClearArtQueue,
   useArtNotes, useAddArtNote, useRemoveArtNote,
+  useArtDescription, useWriteDescription, useClearDescription,
 } from './useArtConsole.js';
 import { useAiProviders } from './useAiProviders.js';
 import { assetUrlVersioned } from './useTileSprites.js';
+import { draftText, draftLength, isDirty } from './artDescriptionDraft.js';
 import {
   sortSubjects, freezeOrder, applyFilters, clampPage, pageCount, toggle, selectPage, deselectPage,
   isPageFullySelected, selectAllMatching, selectAllLabel, byKind, subjectId,
@@ -240,6 +242,34 @@ const Notes = styled.div`
     padding: 0.4rem; font-size: 0.85rem;
   }
 `;
+// SOMET-553. The written subject description, inside the preview.
+const Description = styled.div`
+  margin-top: 1rem; border-top: 1px solid var(--s2-border); padding-top: 0.75rem;
+  h4 { margin: 0 0 0.5rem; font-size: 0.9rem; color: var(--s2-text); }
+  textarea {
+    width: 100%; box-sizing: border-box; min-height: 3.4rem; resize: vertical;
+    background: var(--s2-bg-sunken); color: var(--s2-text);
+    border: 1px solid var(--s2-border-strong); border-radius: 4px;
+    padding: 0.4rem; font-size: 0.85rem; font-family: inherit;
+  }
+  .row { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.5rem; flex-wrap: wrap; }
+  select {
+    background: var(--s2-bg-sunken); color: var(--s2-text);
+    border: 1px solid var(--s2-border-strong); border-radius: 4px;
+    padding: 0.35rem; font-size: 0.85rem;
+  }
+  ol { list-style: none; margin: 0.5rem 0 0; padding: 0; }
+  li {
+    font-size: 0.78rem; color: var(--s2-text-dim); padding: 0.25rem 0;
+    border-bottom: 1px solid var(--s2-border);
+  }
+  li:last-child { border-bottom: none; }
+`;
+// A stale description is still the one in force, so this reads as a notice
+// rather than an error -- nothing is broken and nothing has been withdrawn.
+const Stale = styled.p`
+  color: var(--s2-warning, var(--s2-danger)); font-size: 0.8rem; margin: 0.25rem 0;
+`;
 const Drop = styled.button`
   background: none; border: none; color: var(--s2-text-muted); cursor: pointer;
   font-size: 0.9rem; line-height: 1; padding: 0 0.2rem;
@@ -273,6 +303,113 @@ const Subjects = styled.p`
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.75rem !important;
 `;
+
+// SOMET-553. The written subject description, and the length to re-write it at.
+//
+// KEYED BY SUBJECT at the call site, so opening a different subject MOUNTS A
+// NEW PANEL rather than carrying the previous one's half-typed draft into it.
+// The alternative -- an effect that resets state when the subject changes --
+// is the shape this file has already been bitten by twice.
+//
+// The draft starts as null and means "no local edit": what is rendered is the
+// server's text until someone types, and any successful write clears it back
+// to null so the panel shows what was actually stored rather than what was
+// asked for. The two differ -- the store trims and caps at 400 characters.
+function DescriptionPanel({ subject }) {
+  const {
+    description, descriptionHistory, isStale, catalogPrompt, isLoadingDescription,
+  } = useArtDescription(subject);
+  const write = useWriteDescription(subject);
+  const clear = useClearDescription(subject);
+  const [draft, setDraft] = useState(null);
+  const [length, setLength] = useState(null);
+
+  const text = draftText(draft, description);
+  const len = draftLength(length, description);
+  const dirty = isDirty(draft, description);
+  const busy = write.isPending || clear.isPending;
+  const done = () => setDraft(null);
+
+  return (
+    <Description>
+      <h4>Subject description</h4>
+      <Hint>
+        This REPLACES the catalogue phrase in the prompt. Corrections below are
+        layered on top of it, and neither changes the image above.
+      </Hint>
+      {isLoadingDescription && <AdminLoading label="Loading description…" inline size={16} />}
+      {isStale && (
+        <Stale>
+          The catalogue phrase has changed since this was written. It is still
+          the description in use — re-write it if the subject really is different now.
+        </Stale>
+      )}
+      <textarea
+        value={text}
+        onChange={(e) => setDraft(e.target.value)}
+        placeholder={catalogPrompt || 'No description — the catalogue phrase is used'}
+        aria-label="Subject description"
+        maxLength={400}
+        disabled={busy}
+      />
+      <div className="row">
+        <select
+          value={len}
+          onChange={(e) => setLength(e.target.value)}
+          aria-label="Description length"
+          disabled={busy}
+        >
+          <option value="short">short</option>
+          <option value="medium">medium</option>
+          <option value="long">long</option>
+        </select>
+        <Secondary
+          type="button"
+          disabled={busy || !dirty || !text.trim()}
+          onClick={() => write.mutate({ text, length: len }, { onSuccess: done })}
+        >
+          Save
+        </Secondary>
+        {/* No `text` in the body is what asks the model to write one. It runs
+            on CPU and takes 10-100s, so the label has to say it is working. */}
+        <Secondary
+          type="button"
+          disabled={busy}
+          onClick={() => write.mutate({ length: len }, { onSuccess: done })}
+        >
+          {write.isPending ? 'Writing…' : 'Write with the model'}
+        </Secondary>
+        {description && (
+          <Drop
+            type="button"
+            aria-label="Clear the description"
+            title="Back to the catalogue phrase"
+            disabled={busy}
+            onClick={() => clear.mutate(undefined, { onSuccess: done })}
+          >×</Drop>
+        )}
+      </div>
+      {catalogPrompt && (
+        <Hint>
+          Catalogue phrase: <code>{catalogPrompt}</code>
+        </Hint>
+      )}
+      {/* Superseded descriptions stay listed for the same reason revoked notes
+          do: the generation history holds prompts built from them. */}
+      {descriptionHistory.length > 1 && (
+        <ol>
+          {descriptionHistory.filter((d) => !d.active).map((d) => (
+            <li key={d.id}>
+              {String(d.created_at).slice(0, 10)}
+              {d.model ? ` · ${d.model}` : ' · typed by hand'}
+              {d.length ? ` · ${d.length}` : ''} — {d.text}
+            </li>
+          ))}
+        </ol>
+      )}
+    </Description>
+  );
+}
 
 function ArtConsoleAdmin() {
   // The queue is read FIRST because the catalogue query depends on it: the
@@ -812,6 +949,13 @@ function ArtConsoleAdmin() {
               {preview.base_prompt && <><dt>Prompt</dt><dd>{preview.base_prompt}</dd></>}
               {preview.job_error && <><dt>Error</dt><dd>{preview.job_error}</dd></>}
             </dl>
+
+            {/* Not every kind takes one: a tile composes its prompt from its
+                biome, and the SERVER says which kinds those are (SOMET-553) so
+                this cannot drift from what the route accepts. */}
+            {preview.takes_description && (
+              <DescriptionPanel key={`${preview.kind}/${preview.key}`} subject={preview} />
+            )}
 
             <Notes>
               <h4>Prompt corrections</h4>
