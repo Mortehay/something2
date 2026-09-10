@@ -1,0 +1,31 @@
+{
+  "//": [
+    "SOMET-558. WATCH src/ ONLY, never the whole of backend/.",
+    "",
+    "nodemon's default watch is its working directory, recursively. The dev",
+    "compose service bind-mounts ./backend to /app and runs `nodemon",
+    "src/index.js` there, so before this file a restart was triggered by any",
+    "change under tests/, scripts/, seeds/, migrations/ or the Makefile --",
+    "including edits made by a DIFFERENT session sharing this checkout.",
+    "",
+    "That is not cosmetic. An art-generation batch lives only in backend",
+    "memory (artDispatcher's module-level `run`), so a restart kills it and",
+    "strands every claimed job in state='running'. Measured 2026-09-10: a",
+    "batch claimed 10 subjects at 09:25:45Z and a concurrent session writing",
+    "tests/helpers/entryWorld.js at 09:29:52Z ended it with 0 done and 0",
+    "failed. A 530-image run is hours long; unrelated test edits must not be",
+    "able to end it.",
+    "",
+    "Not watching migrations/ is a second fix, not an oversight. MIGRATE_ON_BOOT",
+    "is true for this service, so a restart runs migrations -- and a restart",
+    "triggered by the migration file being SAVED runs it half-written, straight",
+    "off the bind mount. That has already happened here once.",
+    "",
+    "The cost is that a change outside src/ needs a manual restart. That is the",
+    "right trade: everything outside src/ is run deliberately (npm test, a",
+    "migrate command), never by the server picking it up."
+  ],
+  "watch": ["src"],
+  "ext": "js,json",
+  "ignore": ["src/**/*.test.js", "src/**/__tests__/**"]
+}
