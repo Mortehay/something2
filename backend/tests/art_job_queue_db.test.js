@@ -207,3 +207,42 @@ lockedTest('stats reports the queue by state', async (t, pool) => {
   assert.equal(s.queued, 2);
   assert.equal(s.done, 1);
 });
+
+// SOMET-558. The console showed "1 running" and nothing else, which is the one
+// fact an admin cannot act on: twenty minutes at "1 running" reads identically
+// for a slow subject, a wedged provider, and a row requeueStale is about to
+// reclaim. inFlight() is what separates them.
+lockedTest('inFlight names the subjects being drawn, not merely how many', async (t, pool) => {
+  await q.enqueue(pool, [S(1), S(2), S(3)], { backend: 'connector' });
+  assert.deepEqual(await q.inFlight(pool), [], 'a queued job is not in flight -- nobody has it');
+
+  const claimed = await q.claim(pool, 2);
+  assert.equal(claimed.length, 2);
+
+  const live = await q.inFlight(pool);
+  assert.equal(live.length, 2, 'exactly the claimed jobs, never the queued third');
+  assert.deepEqual(live.map((r) => r.subject_key).sort(), claimed.map((r) => r.subject_key).sort());
+
+  for (const row of live) {
+    // The two fields the "drawing now" line is built from. A missing claimed_at
+    // would make every elapsed time read as zero, which is worse than absent:
+    // it would assert every generation had just begun.
+    assert.equal(row.subject_kind, 'skill');
+    assert.ok(row.claimed_at instanceof Date, 'claimed_at must be a real timestamp');
+    assert.ok(row.attempts >= 1, 'claim() increments attempts, and a retry must be visible');
+  }
+});
+
+// A resolved job leaves the flight list, or the console would show a subject
+// being drawn forever after the batch ended.
+lockedTest('inFlight empties as jobs resolve, whether they succeed or fail', async (t, pool) => {
+  await q.enqueue(pool, [S(1), S(2)], { backend: 'connector' });
+  const [a, b] = await q.claim(pool, 2);
+  assert.equal((await q.inFlight(pool)).length, 2);
+
+  await q.complete(pool, a.id);
+  assert.deepEqual((await q.inFlight(pool)).map((r) => r.id), [b.id]);
+
+  await q.fail(pool, b.id, new Error('provider said no'));
+  assert.deepEqual(await q.inFlight(pool), [], 'a failed job is resolved, not still drawing');
+});

@@ -14,6 +14,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { authHeaders, apiFetch } from './src/js/net/auth.js';
+import { shouldPollQueue } from './artProgress.js';
 import { API_URL } from '../../config.js';
 
 const SUBJECTS_KEY = ['art-subjects'];
@@ -25,9 +26,22 @@ async function getJson(url, what) {
   return res.json();
 }
 
-export function useArtSubjects() {
+// `live` polls the catalogue while a batch is draining (SOMET-558).
+//
+// Without it the table is FROZEN for the whole run: this query had no
+// refetchInterval at all, so Status pills and thumbnails kept whatever they
+// said when the page loaded, and an admin watching a two-hour batch saw
+// nothing land until they reloaded by hand. The queue counters ticked while
+// the rows they described did not, which is worse than either alone.
+//
+// 15s, not the queue's 2s. This is one request per kind over ~1000 rows, and
+// at the default concurrency of one image per ~20s at most a handful of rows
+// can have changed; polling it at the counters' rate would spend the API
+// budget re-fetching an unchanged catalogue. Off entirely when idle.
+export function useArtSubjects({ live = false } = {}) {
   const { data, isLoading, error } = useQuery({
     queryKey: SUBJECTS_KEY,
+    refetchInterval: live ? 15000 : false,
     queryFn: async () => {
       const { kinds } = await getJson(`${API_URL}/api/art-subjects`, 'the subject kinds');
       // per_page is above every kind's row count, so one request each.
@@ -48,13 +62,23 @@ export function useArtSubjects() {
   };
 }
 
-// The queue and the running drain. Polled only while something is running -- a
-// finished run is a static object and re-fetching it every 2s for the rest of
-// the session would be pure noise.
+// The queue and the running drain. Polled while anything is OUTSTANDING, which
+// is deliberately wider than "a drain is running" (SOMET-558).
+//
+// The original condition was `run.running`, and it made the single state an
+// admin most needs to watch invisible: 530 rows queued with nothing draining
+// them refreshed never, so the page showed one frozen count and no hint that
+// pressing Queue had not started anything. A finished run with an empty queue
+// is still static and still stops polling -- that part was right.
+//
+// The predicate lives in artProgress.js so it is testable without a fake
+// query client; this only supplies the data.
 export function useArtQueue() {
   const { data } = useQuery({
     queryKey: QUEUE_KEY,
-    refetchInterval: (q) => (q.state.data?.run?.running ? 2000 : false),
+    refetchInterval: (q) => (
+      shouldPollQueue(q.state.data?.run, q.state.data?.stats) ? 2000 : false
+    ),
     queryFn: () => getJson(`${API_URL}/api/art-jobs`, 'the art queue'),
   });
   // `failures` arrives already GROUPED AND CLASSIFIED by the server. The rule
@@ -62,7 +86,15 @@ export function useArtQueue() {
   // lives in backend/src/services/artFailures.js and is not duplicated here --
   // this repo already carries one rule copied across the front/back split and
   // that is a standing hazard. The page renders what it is told.
-  return { stats: data?.stats || null, run: data?.run || null, failures: data?.failures || [] };
+  return {
+    stats: data?.stats || null,
+    run: data?.run || null,
+    // The subjects on the provider RIGHT NOW, from art_jobs rather than from
+    // the dispatcher's memory -- a backend restarted mid-batch has no run
+    // object, and the claimed rows still answer "what is being drawn".
+    inFlight: data?.in_flight || [],
+    failures: data?.failures || [],
+  };
 }
 
 // Return every failed subject of ONE cause to the queue.

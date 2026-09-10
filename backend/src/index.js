@@ -3476,6 +3476,11 @@ app.get('/api/art-jobs', adminGuard, async (req, res) => {
     res.json({
       stats: await artJobQueue.stats(pool),
       run: artDispatcher.runStatus(),
+      // SOMET-558. WHICH subject is on the provider right now. Read from
+      // art_jobs rather than from the dispatcher's in-memory run, because the
+      // claim is what the durable row records -- a backend that restarted
+      // mid-batch has no run object at all, and this still answers.
+      in_flight: await artJobQueue.inFlight(pool),
       failures: artFailures.groupFailures(failed),
     });
   } catch (err) {
