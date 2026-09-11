@@ -34,7 +34,7 @@ from collections import deque
 try:
     from PIL import Image, ImageFilter
 except ImportError:                                          # pragma: no cover
-    sys.exit("Pillow is required: pip install --user Pillow")
+    sys.exit("Pillow is required: sudo apt install python3-pil  OR  pip install --user Pillow --break-system-packages")
 
 DEFAULT_DIR = os.path.join(os.path.dirname(__file__), '..', 'backend', 'seeds', 'textures', 'entities')
 MANIFEST = os.path.join(os.path.dirname(__file__), '..', 'backend', 'seeds', 'textures', 'entities.json')

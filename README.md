@@ -655,3 +655,46 @@ See **[docs/ai-providers.md](docs/ai-providers.md)** for the full round trip —
 the exact request that goes out, the response expected back, where the result is
 stored, sprite-sheet grids, worked Automatic1111 / OpenAI-compatible templates,
 and troubleshooting.
+
+## Common issues & troubleshooting
+
+### 1. `make entities-cutout` fails with `Pillow is required` / `externally-managed-environment`
+Running `make entities-cutout` executes the host script `tools/cutout-entity-textures.py`, which requires the Python `Pillow` library. On Debian 12+ or Ubuntu 24.04+ (including WSL), Python 3.12 enforces PEP 668 and blocks plain `pip install --user Pillow`.
+
+**Fix**: Install Pillow using system apt packages:
+```bash
+sudo apt update && sudo apt install -y python3-pil
+```
+Or with pip using the override flag:
+```bash
+pip install --user Pillow --break-system-packages
+```
+
+### 2. Frontend error `[plugin:vite:oxc] Transform failed: Encountered diff marker`
+If a git merge or pull left unresolved conflict markers (`<<<<<<< HEAD`, `=======`, `>>>>>>>`) inside any frontend JavaScript/JSX files, Vite's parser will fail with a compilation error overlay.
+
+**Fix**: Search for any diff markers in the repository and resolve the conflicts:
+```bash
+git diff --check
+git status
+```
+After resolving all conflicts and removing the marker lines, save the files and Vite HMR will reload cleanly.
+
+### 3. Backend refuses to boot with `JWT_SECRET` error
+The backend strictly refuses to start with the placeholder secret shipped in `.env.example`.
+
+**Fix**: Generate a random 32-byte hexadecimal secret and set it in your `.env` file:
+```bash
+openssl rand -hex 32
+# Copy the output into .env: JWT_SECRET=<generated_secret>
+```
+
+### 4. Line ending issues on Windows / WSL (`\r: command not found`)
+If git cloned with `core.autocrlf=true`, shell scripts get CRLF line endings and fail inside Linux containers.
+
+**Fix**: Configure git for LF line endings and reset the repository:
+```bash
+git config --global core.autocrlf false
+git checkout-index --force --all
+```
+Always clone the repository inside WSL's native filesystem (`~/something2`), not under `/mnt/c/`.
