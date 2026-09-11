@@ -136,6 +136,10 @@ needing a GPU to see the game as intended; nothing here downscales them.
 
 ## Not covered
 
+- **Skill / passive / item icons are not committed yet.** A full export of
+  those three kinds is ~96 MB of 1024px PNGs (measured 2026-09-11). SOMET-573
+  adds a downscale on export; until it lands, `make art-export` for them
+  works but the result should not be committed.
 - Directional / animated sprite sets (atlas + manifest) -- still sprite-gen's
   business.
 - The Orange Pi targets (`pi-seed-*`) do not yet wrap `art-seed`.
