@@ -1,7 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { pickBiome, parseArgs } = require('../scripts/generate-tile-textures.js');
-const { seededKey } = require('../scripts/seed-tile-textures.js');
+const { seededKey: seededArtKey } = require('../src/services/artSeed.js');
+// The tile-only signature the old seeder exposed; the kind is now explicit.
+const seededKey = (bucket, name) => seededArtKey(bucket, 'tile', name);
 const { DEFAULT_TILE_TYPES } = require('../seeds/data/tileTypes.js');
 
 // The three pure decisions in the tile-texture pipeline. Everything else in

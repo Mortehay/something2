@@ -111,7 +111,7 @@ async function trimStoredTextures(store, { apply = false, limit = 0, log = conso
 
 // --- the checked-in seed art ------------------------------------------------
 //
-// The other place entity art lives. seed-entity-textures.js trims on upload, so
+// The other place entity art lives. seed-art.js trims on upload, so
 // the object store ends up correct either way; this exists so the committed
 // PNGs are correct on their own terms, for anyone reading or using them outside
 // the seeder.
@@ -125,7 +125,9 @@ async function trimSeedFiles({ apply = false, log = console.log } = {}) {
   // eslint-disable-next-line global-require
   const fs = require('fs');
   // eslint-disable-next-line global-require
-  const { IN_DIR, MANIFEST } = require('./seed-entity-textures.js');
+  const { SEED_POLICY, SEEDS_ROOT } = require('../src/services/artSeed.js');
+  const IN_DIR = path.join(SEEDS_ROOT, SEED_POLICY.entity.dir);
+  const MANIFEST = path.join(SEEDS_ROOT, SEED_POLICY.entity.manifest);
 
   const manifest = JSON.parse(fs.readFileSync(MANIFEST, 'utf8'));
   const stats = { scanned: 0, trimmed: 0, alreadyTight: 0, unreadable: 0, missing: 0 };

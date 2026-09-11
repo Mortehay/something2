@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   subjectId, sortSubjects, freezeOrder, clampPage, pageCount, toggle, selectPage, deselectPage,
   isPageFullySelected, selectAllMatching, selectAllLabel, byKind, applyFilters,
-  enqueueSummary, coverage, selectionOutsideFilter, PAGE_SIZE,
+  enqueueSummary, coverage, selectionOutsideFilter, PAGE_SIZE, filtersFromParams,
 } from '../artSelection.js';
 
 const S = (kind, key, extra = {}) => ({ kind, key, name: key, has_art: false, ...extra });
@@ -278,5 +278,25 @@ describe('freezeOrder', () => {
 
   it('falls back to the given order when there is no snapshot', () => {
     expect(freezeOrder([S('b'), S('a')], []).map((r) => r.key)).toEqual(['b', 'a']);
+  });
+});
+
+describe('filtersFromParams', () => {
+  // SOMET-571. The Skill Tree tab links to one subject; the console must open
+  // ALREADY filtered to it, art filter widened past the resume default.
+  it('seeds kind, art and search from the URL', () => {
+    expect(filtersFromParams(new URLSearchParams('kind=skill&art=all&q=war_whirlwind')))
+      .toEqual({ kind: 'skill', art: 'all', search: 'war_whirlwind' });
+  });
+
+  it('keeps the console defaults when the URL says nothing', () => {
+    expect(filtersFromParams(new URLSearchParams('')))
+      .toEqual({ kind: 'all', art: 'missing', search: '' });
+  });
+
+  it('ignores an art value the console has no filter for', () => {
+    // A hand-edited or stale link must not put the table into a state no
+    // control can get it out of.
+    expect(filtersFromParams(new URLSearchParams('art=bogus')).art).toBe('missing');
   });
 });

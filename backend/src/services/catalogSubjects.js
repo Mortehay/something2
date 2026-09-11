@@ -105,8 +105,9 @@ function skillPrompt(skill) {
 }
 
 const SUBJECTS = Object.freeze({
-  // The merchant's goods, and the one subject that renders as literally
-  // nothing today: item_types.icon is empty on all 189 rows.
+  // The merchant's goods. item_types.icon was empty on all 189 rows when this
+  // registry was written; the icons exist now, and SOMET-572 exports and
+  // seeds them through artSeed.js like every other kind here.
   item: {
     kind: 'item',
     generationKind: 'object',

@@ -149,6 +149,27 @@ export function selectionOutsideFilter(selected, matching) {
 
 // --- Filtering ------------------------------------------------------------
 
+// The art filter's whole vocabulary, in one place: applyFilters reads it and
+// filtersFromParams validates against it.
+export const ART_FILTERS = Object.freeze(['all', 'missing', 'has', 'failed']);
+
+// SOMET-571. The console's initial filters from a deep link (`?kind=&art=&q=`),
+// so the Skill Tree tab can land on exactly one subject. Anything absent keeps
+// the console's own default -- art=missing, the resume filter -- and an art
+// value the console has no control for is dropped rather than trapping the
+// table in a state nothing on screen can leave.
+//
+// `kind` is not validated here: the kinds come from the server, and the
+// console's <select> simply shows no such option for an unknown one.
+export function filtersFromParams(params) {
+  const art = params.get('art');
+  return {
+    kind: params.get('kind') || 'all',
+    art: ART_FILTERS.includes(art) ? art : 'missing',
+    search: params.get('q') || '',
+  };
+}
+
 export function applyFilters(subjects, { kind = 'all', art = 'all', search = '' } = {}) {
   const q = search.trim().toLowerCase();
   return subjects.filter((s) => {
