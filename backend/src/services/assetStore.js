@@ -103,6 +103,19 @@ async function putObject(key, buffer, contentType = 'image/png') {
   return key;
 }
 
+// SOMET-572: the seeder needs "is this key actually here" without pulling
+// the bytes. A missing object is an answer, not an error; anything else
+// (network, auth) still throws, because "not here" would then be a lie.
+async function objectExists(key) {
+  try {
+    await getClient().statObject(BUCKET(), key);
+    return true;
+  } catch (err) {
+    if (err && (err.code === 'NotFound' || err.code === 'NoSuchKey')) return false;
+    throw err;
+  }
+}
+
 // Test seam: inject a fake client ({ getObject(bucket, key) -> Readable,
 // bucketExists, makeBucket, putObject }). Passing null drops the cached client
 // so the next call rebuilds it from the current environment -- which is what
@@ -125,7 +138,7 @@ async function listObjectKeys(prefix = '') {
 }
 
 module.exports = {
-  getObjectStream, putObject, ensureBucket, listObjectKeys, __setAssetClient, BUCKET,
+  getObjectStream, putObject, ensureBucket, listObjectKeys, objectExists, __setAssetClient, BUCKET,
   // Exported for the configuration tests: the point of this module is the
   // settings it derives, and asserting them through a live connection would
   // need a live store.

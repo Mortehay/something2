@@ -57,12 +57,24 @@ function seededKey(bucket, kind, key) {
   return `${bucket}/${KEY_PREFIX[kind]}${safeName(key)}/seeded/static.png`;
 }
 
+// "Already has art" is judged by what the row HOLDS -- an image key or a
+// sprite atlas -- never by its render_mode. seed-catalogs inserts the
+// decoration types with render_mode 'static' and no image, so on a fresh
+// machine the mode said "art" while the client drew the fallback colour box;
+// the seeder read the mode, counted the row as "already had art", and the
+// green rectangle looked like a seed that had run. A has-art skip carries
+// the key so seedArt can check the object is actually in the store.
+function hasArt(row) {
+  return Boolean((row.image && row.image !== '') || row.sprite);
+}
+
 // Shared by the three catalog-art kinds: "does this subject already have
 // art" is the whole gate, and the registry's artIndex already answers it.
 function catalogArtGate(kind) {
   return async (db, entry, { force = false } = {}) => {
     const index = await SUBJECTS[kind].artIndex(db);
-    if (index.has(entry.key) && !force) return { skip: 'has-art' };
+    const art = index.get(entry.key);
+    if (art && !force) return { skip: 'has-art', image: art.image };
     return null;
   };
 }
@@ -98,9 +110,9 @@ const SEED_POLICY = Object.freeze({
       }));
     },
     async gate(db, entry, { force = false } = {}) {
-      const { rows } = await db.query('SELECT id, render_mode FROM tile_types WHERE name = $1', [entry.name]);
+      const { rows } = await db.query('SELECT id, render_mode, image, sprite FROM tile_types WHERE name = $1', [entry.name]);
       if (!rows[0]) return { skip: 'missing-row' };
-      if (rows[0].render_mode !== 'color' && !force) return { skip: 'has-art' };
+      if (hasArt(rows[0]) && !force) return { skip: 'has-art', image: rows[0].image };
       return null;
     },
     async link(db, entry, key) {
@@ -164,12 +176,14 @@ const SEED_POLICY = Object.freeze({
       // be, which is worse than the coloured rectangle it would replace.
       if (entry.needs_regen) return { skip: 'needs-regen' };
       if (!entry.cutout) return { skip: 'not-cut-out' };
-      const { rows } = await db.query('SELECT id, render_mode FROM entity_types WHERE name = $1', [entry.name]);
+      const { rows } = await db.query('SELECT id, render_mode, image, sprite FROM entity_types WHERE name = $1', [entry.name]);
       if (!rows[0]) return { skip: 'missing-row' };
-      // 'rect' is "no art". Anything else is art this machine already has,
-      // and a directional set in particular must not be flattened to one
-      // still by a seed run. --force is the one deliberate way to do it.
-      if (rows[0].render_mode !== 'rect' && !force) return { skip: 'has-art' };
+      // A still in `image` or an atlas in `sprite` is art this machine
+      // already has, and a directional set in particular must not be
+      // flattened to one still by a seed run. --force is the one deliberate
+      // way to do it. A `static` row with nothing in either column is NOT
+      // art, whatever its render_mode says (see hasArt).
+      if (hasArt(rows[0]) && !force) return { skip: 'has-art', image: rows[0].image };
       return null;
     },
     async link(db, entry, key) {
@@ -378,11 +392,24 @@ async function seedArt({
 
     await store.ensureBucket();
     const bucket = store.BUCKET();
-    const stats = { linked: 0, skipped: 0, needsRegen: 0, notCutOut: 0, missingFile: 0, missingRow: 0, trimmed: 0 };
+    const stats = {
+      linked: 0, skipped: 0, dangling: 0, needsRegen: 0, notCutOut: 0, missingFile: 0, missingRow: 0, trimmed: 0,
+    };
 
     for (const entry of wanted) {
       const entryKey = entryId(entry);
-      const verdict = await policy.gate(db, { ...entry, key: entryKey }, { force });
+      let verdict = await policy.gate(db, { ...entry, key: entryKey }, { force });
+      // A row can point at a still whose bytes never left the machine that
+      // drew it -- the pointer is a row and cloned with the database dump or
+      // the catalog seed, the pixels are in a bucket that did not come along.
+      // "Already had art" has to mean the art is actually here; otherwise the
+      // row is treated as bare and seeded. A row holding only a sprite atlas
+      // (image empty) is left alone: that is not this seed's business.
+      if (verdict && verdict.skip === 'has-art' && verdict.image && !(await store.objectExists(verdict.image))) {
+        log(`  ${entry.name}: image ${verdict.image} is not in the store -- re-seeding`);
+        stats.dangling += 1;
+        verdict = null;
+      }
       if (verdict) {
         if (verdict.skip === 'has-art') stats.skipped += 1;
         else if (verdict.skip === 'needs-regen') stats.needsRegen += 1;

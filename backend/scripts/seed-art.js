@@ -30,7 +30,7 @@ if (require.main === module) {
   })
     .then((results) => {
       for (const [kind, s] of Object.entries(results)) {
-        console.log(`seeded ${s.linked} ${kind} images (${s.trimmed} trimmed), `
+        console.log(`seeded ${s.linked} ${kind} images (${s.trimmed} trimmed, ${s.dangling} re-seeded over a missing object), `
           + `${s.skipped} already had art, ${s.needsRegen} awaiting a redraw, ${s.notCutOut} not cut out, `
           + `${s.missingFile} missing files, ${s.missingRow} unknown subjects`);
       }
