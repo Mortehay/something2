@@ -21,7 +21,10 @@
 //   * skills / passive labels / items have one image column and no render
 //     mode: gate on "already has art", trim as an object, key by SUBJECT KEY
 //     -- the generator stores skills under their display name (`Tumble`), and
-//     display names are not unique across classes; ids are.
+//     display names are not unique across classes; ids are. Their COMMITTED
+//     copy is capped at 256 px on the longest edge (SOMET-573): the game
+//     draws them at 30-48 px, and uncapped they were 96 MB. The object store
+//     keeps the original; tiles and entities are never resampled.
 //
 // A kind in SUBJECTS with no entry here is a test failure, not a silent gap.
 //
@@ -35,6 +38,7 @@ const fs = require('fs');
 const path = require('path');
 const { SUBJECTS } = require('./catalogSubjects.js');
 const { SKILLS } = require('../../seeds/data/skills.js');
+const { shrinkToEdge } = require('./pngResample.js');
 
 const SEEDS_ROOT = path.resolve(__dirname, '../../seeds/textures');
 
@@ -69,12 +73,18 @@ function catalogArtLink(kind) {
 
 const SKILL_BY_ID = new Map(SKILLS.map((s) => [s.id, s]));
 
+// Longest edge of a committed icon. Measured 2026-09-11 over all 593: p50
+// 45 KB, p90 62 KB, max 78 KB, 26 MB total; 192 would be 17 MB but only 4x
+// over the 48 px skill grid, which is too little margin for a 2x display.
+const ICON_MAX_EDGE = 256;
+
 const SEED_POLICY = Object.freeze({
   tile: {
     kind: 'tile',
     dir: 'tiles',
     manifest: 'tiles.json',
     trim: null,
+    maxEdge: null,
     // The prompt and biome ride along so a reader can tell what a committed
     // PNG was drawn from without the database it came out of.
     async exportRows(db) {
@@ -109,6 +119,7 @@ const SEED_POLICY = Object.freeze({
     // SOMET-564: trim on the way up rather than rewriting the checked-in
     // files. The PNGs on disk stay as the generator drew them -- source.
     trim: 'object',
+    maxEdge: null,
     // ONLY `static` rows. A 'directional' or 'animated' entity carries an
     // atlas plus a manifest, and pretending one PNG represents it would
     // quietly downgrade it on the next seed.
@@ -158,6 +169,7 @@ const SEED_POLICY = Object.freeze({
     dir: 'skills',
     manifest: 'skills.json',
     trim: 'object',
+    maxEdge: ICON_MAX_EDGE,
     // catalog_art can outlive a skill that was renamed or removed from
     // seeds/data/skills.js. Art with no subject is not exported: nothing
     // could seed it back, and its manifest entry would only mislead.
@@ -180,6 +192,7 @@ const SEED_POLICY = Object.freeze({
     dir: 'passives',
     manifest: 'passives.json',
     trim: 'object',
+    maxEdge: ICON_MAX_EDGE,
     // Keyed by the label text, which is the subject key by design (art is per
     // label, and the key survives a --force reseed that renumbers node ids).
     async exportRows(db) {
@@ -196,6 +209,7 @@ const SEED_POLICY = Object.freeze({
     dir: 'items',
     manifest: 'items.json',
     trim: 'object',
+    maxEdge: ICON_MAX_EDGE,
     async exportRows(db) {
       const index = await SUBJECTS.item.artIndex(db);
       return [...index].map(([key, art]) => ({ key, name: key, image: art.image }))
@@ -269,7 +283,11 @@ async function exportArt({
     let bytes = 0;
     for (const r of rows) {
       try {
-        const buf = await readObject(store, r.image);
+        const raw = await readObject(store, r.image);
+        // The committed copy of a capped kind is display-sized; `source`
+        // records what it was reduced from. Uncapped kinds are byte-for-byte.
+        const shrunk = policy.maxEdge ? shrinkToEdge(raw, policy.maxEdge) : null;
+        const buf = shrunk ? shrunk.buffer : raw;
         const file = `${safeName(r.key)}.png`;
         const dest = path.join(outDir, file);
         fs.writeFileSync(dest, buf);
@@ -279,9 +297,10 @@ async function exportArt({
         // Tiles and entities keep their historical shape (name-first, no key).
         const entry = (kind === 'tile' || kind === 'entity')
           ? { name: r.name, file, bytes: buf.length, ...omit(manifestFields, ['key', 'name']) }
-          : { ...manifestFields, file, bytes: buf.length };
+          : { ...manifestFields, file, bytes: buf.length, ...(shrunk ? { source: shrunk.source } : {}) };
         fresh.push(entry);
-        log(`  ${r.name}: ${(buf.length / 1024).toFixed(0)} KB`);
+        log(`  ${r.name}: ${(buf.length / 1024).toFixed(0)} KB`
+          + (shrunk && shrunk.resized ? ` (from ${shrunk.source.width}x${shrunk.source.height})` : ''));
       } catch (err) {
         // A row pointing at a key the store no longer has is worth reporting,
         // not crashing on: it means that subject needs regenerating.

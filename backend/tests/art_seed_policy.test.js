@@ -238,7 +238,9 @@ test('exportArt writes one PNG per row plus a manifest, and seedArt replays it u
   assert.strictEqual(ex.skill.exported, 1);
   assert.deepStrictEqual(ex.skill.failed, []);
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'skills.json'), 'utf8'));
-  assert.deepStrictEqual(manifest, [{ key: 'arc_tumble', name: 'Tumble', file: 'arc_tumble.png', bytes: PNG.length }]);
+  // `source: null` is the honest record for a capped kind whose bytes could
+  // not be decoded: committed as they came, not resampled.
+  assert.deepStrictEqual(manifest, [{ key: 'arc_tumble', name: 'Tumble', file: 'arc_tumble.png', bytes: PNG.length, source: null }]);
   assert.ok(fs.existsSync(path.join(root, 'skills', 'arc_tumble.png')));
 
   const seedDb = stubDb([[/INSERT INTO catalog_art/, [{ subject_key: 'arc_tumble' }]]]);
@@ -345,4 +347,42 @@ test('parseArgs reads the flags the Makefile passes', () => {
 
 test('parseArgs rejects an unknown kind instead of silently exporting nothing', () => {
   assert.throws(() => parseArgs(['--kind=sprites']), /unknown kind/);
+});
+
+// --- SOMET-573: display-sized committed copies --------------------------
+
+test('only the three icon kinds are capped on export; tiles and entities are written as drawn', () => {
+  assert.strictEqual(SEED_POLICY.tile.maxEdge, null);
+  assert.strictEqual(SEED_POLICY.entity.maxEdge, null);
+  for (const kind of ['skill', 'passive_label', 'item']) {
+    assert.strictEqual(SEED_POLICY[kind].maxEdge, 256, kind);
+  }
+});
+
+test('exportArt shrinks a capped kind to the cap and records the source size in the manifest', async () => {
+  const { encodeRGBA } = require('../src/services/pngTrim.js');
+  const { decodeRGBA } = require('../src/services/pngAlpha.js');
+  const big = encodeRGBA(512, 384, Buffer.alloc(512 * 384 * 4, 200));
+  const root = tmpRoot();
+  const store = stubStore(new Map([['sprites/objects/A/j/static.png', big]]));
+  const db = stubDb([[/FROM item_types/, [{ name: 'a', image: 'sprites/objects/A/j/static.png' }]]]);
+  await exportArt({ db, store, root, kinds: ['item'], log: () => {} });
+  const written = decodeRGBA(fs.readFileSync(path.join(root, 'items', 'a.png')));
+  assert.strictEqual(written.width, 256);
+  assert.strictEqual(written.height, 192);
+  const [entry] = JSON.parse(fs.readFileSync(path.join(root, 'items.json'), 'utf8'));
+  assert.deepStrictEqual(entry.source, { width: 512, height: 384 });
+  assert.ok(entry.bytes < big.length);
+});
+
+test('exportArt writes an uncapped kind byte-for-byte, even when it is large', async () => {
+  const { encodeRGBA } = require('../src/services/pngTrim.js');
+  const big = encodeRGBA(512, 512, Buffer.alloc(512 * 512 * 4, 90));
+  const root = tmpRoot();
+  const store = stubStore(new Map([['sprites/tiles/grass/j/static.png', big]]));
+  const db = stubDb([[/FROM tile_types/, [{ name: 'grass', image: 'sprites/tiles/grass/j/static.png', prompt: 'p', art_biome: '' }]]]);
+  await exportArt({ db, store, root, kinds: ['tile'], log: () => {} });
+  assert.ok(fs.readFileSync(path.join(root, 'tiles', 'grass.png')).equals(big));
+  const [entry] = JSON.parse(fs.readFileSync(path.join(root, 'tiles.json'), 'utf8'));
+  assert.strictEqual(entry.source, undefined);
 });

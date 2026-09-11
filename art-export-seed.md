@@ -103,6 +103,14 @@ These are what keep a seed run from destroying local work. They live in
 - **Entities flagged `needs_regen` by the cutout pass are never seeded.** A
   box or a blank where a sprite should be is worse than the coloured
   rectangle it would replace.
+- **Skill, passive and item icons are committed at 256 px max edge**
+  (SOMET-573). The generator draws them at 1024 px and the game shows them
+  at 30-48 px; uncapped, the three sets were 96 MB, capped they are 26 MB.
+  The export resamples (area average over premultiplied alpha, so edges do
+  not darken) and records the original size as `source` in the manifest.
+  This is a bounded loss on the committed copy only -- the object store on
+  the generating machine keeps the original. Tiles and entities are never
+  resampled.
 - **Tiles are stored as drawn; everything else is trimmed on upload** with
   the same `trimForStorage` the live generation path uses. The PNGs on disk
   stay as the generator drew them -- they are source (SOMET-564).
@@ -130,16 +138,13 @@ catalogue back through `tiles-seamless`.
 
 ## Size
 
-Tiles are 512px PNGs at roughly 300-500 KB each; objects are 1024px cutouts.
-A full catalogue is tens of MB of binary in git. That is the cost of not
-needing a GPU to see the game as intended; nothing here downscales them.
+Tiles are 512px PNGs at roughly 300-500 KB each; entities are 1024px
+cutouts; icons are capped at 256 px (p50 45 KB, p90 62 KB). The whole
+catalogue is ~50 MB of binary in git. That is the cost of not needing a GPU
+to see the game as intended. Tiles and entities are never downscaled.
 
 ## Not covered
 
-- **Skill / passive / item icons are not committed yet.** A full export of
-  those three kinds is ~96 MB of 1024px PNGs (measured 2026-09-11). SOMET-573
-  adds a downscale on export; until it lands, `make art-export` for them
-  works but the result should not be committed.
 - Directional / animated sprite sets (atlas + manifest) -- still sprite-gen's
   business.
 - The Orange Pi targets (`pi-seed-*`) do not yet wrap `art-seed`.
