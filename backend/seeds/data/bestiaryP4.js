@@ -4932,2017 +4932,2017 @@ const BESTIARY_P4_CREATURES = [
 const BESTIARY_P4_DROPS = [
   {
     "creature": "Beast Swarm",
-    "item": "knife",
-    "chance": 0.2,
+    "item": "crude-blade",
+    "chance": 0.22,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Beast Skirmisher",
-    "item": "knife",
+    "item": "crude-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Beast Line",
-    "item": "knife",
+    "item": "iron-wand",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Beast Ranged",
-    "item": "knife",
-    "chance": 0.2,
+    "item": "steel-blade",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Beast Caster",
-    "item": "knife",
-    "chance": 0.2,
+    "item": "runed-spear",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Beast Brute",
-    "item": "knife",
-    "chance": 0.2,
+    "item": "runed-wand",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Beast Heavy",
-    "item": "knife",
-    "chance": 0.2,
+    "item": "void-blade",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Beast Champion",
-    "item": "knife",
-    "chance": 0.2,
+    "item": "void-spear",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Beast Apex",
-    "item": "knife",
-    "chance": 0.2,
+    "item": "dragon-wand",
+    "chance": 0.09,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Woodland Swarm",
-    "item": "knife",
-    "chance": 0.2,
+    "item": "crude-blade",
+    "chance": 0.22,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Woodland Skirmisher",
-    "item": "knife",
+    "item": "crude-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Woodland Line",
-    "item": "knife",
+    "item": "iron-wand",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Woodland Ranged",
-    "item": "knife",
-    "chance": 0.2,
+    "item": "steel-blade",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Woodland Caster",
-    "item": "knife",
-    "chance": 0.2,
+    "item": "runed-spear",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Woodland Brute",
-    "item": "knife",
-    "chance": 0.2,
+    "item": "runed-wand",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Woodland Heavy",
-    "item": "knife",
-    "chance": 0.2,
+    "item": "void-blade",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Woodland Champion",
-    "item": "knife",
-    "chance": 0.2,
+    "item": "void-spear",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Woodland Apex",
-    "item": "knife",
-    "chance": 0.2,
+    "item": "dragon-wand",
+    "chance": 0.09,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Desert Swarm",
-    "item": "flame staff",
+    "item": "dagger",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Desert Skirmisher",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "iron-blade",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Desert Line",
-    "item": "flame staff",
+    "item": "iron-wand",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Desert Ranged",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "steel-blade",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Desert Caster",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "runed-spear",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Desert Brute",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "runed-wand",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Desert Heavy",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "astral-spear",
+    "chance": 0.1,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Desert Champion",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "astral-wand",
+    "chance": 0.1,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Desert Apex",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "dragon-wand",
+    "chance": 0.09,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Tundra Swarm",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "crude-blade",
+    "chance": 0.22,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Tundra Skirmisher",
-    "item": "frost staff",
+    "item": "crude-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Tundra Line",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "steel-wand",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Tundra Ranged",
-    "item": "frost staff",
+    "item": "iron-blade",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Tundra Caster",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "tempered-spear",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Tundra Brute",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "tempered-wand",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Tundra Heavy",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "void-spear",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Tundra Champion",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "obsidian-blade",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Tundra Apex",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "mythic-wand",
+    "chance": 0.07,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Swamp Swarm",
-    "item": "club",
-    "chance": 0.2,
+    "item": "crude-blade",
+    "chance": 0.22,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Swamp Skirmisher",
-    "item": "club",
+    "item": "crude-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Swamp Line",
-    "item": "club",
+    "item": "iron-blade",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Swamp Ranged",
-    "item": "club",
+    "item": "iron-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Swamp Caster",
-    "item": "club",
-    "chance": 0.2,
+    "item": "tempered-wand",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Swamp Brute",
-    "item": "club",
-    "chance": 0.2,
+    "item": "runed-blade",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Swamp Heavy",
-    "item": "club",
-    "chance": 0.2,
+    "item": "void-blade",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Swamp Champion",
-    "item": "club",
-    "chance": 0.2,
+    "item": "void-spear",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Swamp Apex",
-    "item": "club",
-    "chance": 0.2,
+    "item": "dragon-blade",
+    "chance": 0.09,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Highland Swarm",
-    "item": "club",
-    "chance": 0.2,
+    "item": "crude-blade",
+    "chance": 0.22,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Highland Skirmisher",
-    "item": "club",
+    "item": "crude-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Highland Line",
-    "item": "club",
+    "item": "iron-blade",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Highland Ranged",
-    "item": "club",
+    "item": "iron-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Highland Caster",
-    "item": "club",
-    "chance": 0.2,
+    "item": "tempered-wand",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Highland Brute",
-    "item": "club",
-    "chance": 0.2,
+    "item": "runed-blade",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Highland Heavy",
-    "item": "club",
-    "chance": 0.2,
+    "item": "void-blade",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Highland Champion",
-    "item": "club",
-    "chance": 0.2,
+    "item": "void-spear",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Highland Apex",
-    "item": "club",
-    "chance": 0.2,
+    "item": "dragon-blade",
+    "chance": 0.09,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Jungle Swarm",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "stick",
+    "chance": 0.22,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Jungle Skirmisher",
-    "item": "storm staff",
+    "item": "dagger",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Jungle Line",
-    "item": "storm staff",
+    "item": "iron-wand",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Jungle Ranged",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "steel-blade",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Jungle Caster",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "runed-spear",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Jungle Brute",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "runed-wand",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Jungle Heavy",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "obsidian-wand",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Jungle Champion",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "astral-blade",
+    "chance": 0.1,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Jungle Apex",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "dragon-wand",
+    "chance": 0.09,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Storm Swarm",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "stick",
+    "chance": 0.22,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Storm Skirmisher",
-    "item": "storm staff",
+    "item": "dagger",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Storm Line",
-    "item": "storm staff",
+    "item": "iron-wand",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Storm Ranged",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "steel-blade",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Storm Caster",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "runed-spear",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Storm Brute",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "runed-wand",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Storm Heavy",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "obsidian-wand",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Storm Champion",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "astral-blade",
+    "chance": 0.1,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Storm Apex",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "dragon-wand",
+    "chance": 0.09,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Ruin Swarm",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "crude-blade",
+    "chance": 0.22,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Ruin Skirmisher",
-    "item": "frost staff",
+    "item": "crude-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Ruin Line",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "steel-wand",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Ruin Ranged",
-    "item": "frost staff",
+    "item": "iron-blade",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Ruin Caster",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "tempered-spear",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Ruin Brute",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "tempered-wand",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Ruin Heavy",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "void-spear",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Ruin Champion",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "obsidian-blade",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Ruin Apex",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "mythic-wand",
+    "chance": 0.07,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Volcanic Swarm",
-    "item": "flame staff",
+    "item": "dagger",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Volcanic Skirmisher",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "iron-blade",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Volcanic Line",
-    "item": "flame staff",
+    "item": "iron-wand",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Volcanic Ranged",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "steel-blade",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Volcanic Caster",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "runed-spear",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Volcanic Brute",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "runed-wand",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Volcanic Heavy",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "astral-spear",
+    "chance": 0.1,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Volcanic Champion",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "astral-wand",
+    "chance": 0.1,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Volcanic Apex",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "dragon-wand",
+    "chance": 0.09,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Undead Swarm",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "crude-blade",
+    "chance": 0.22,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Undead Skirmisher",
-    "item": "frost staff",
+    "item": "crude-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Undead Line",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "steel-wand",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Undead Ranged",
-    "item": "frost staff",
+    "item": "iron-blade",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Undead Caster",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "tempered-spear",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Undead Brute",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "tempered-wand",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Undead Heavy",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "void-spear",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Undead Champion",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "obsidian-blade",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Undead Apex",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "mythic-wand",
+    "chance": 0.07,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Bonelord Swarm",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "crude-blade",
+    "chance": 0.22,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Bonelord Skirmisher",
-    "item": "frost staff",
+    "item": "crude-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Bonelord Line",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "steel-wand",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Bonelord Ranged",
-    "item": "frost staff",
+    "item": "iron-blade",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Bonelord Caster",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "tempered-spear",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Bonelord Brute",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "tempered-wand",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Bonelord Heavy",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "void-spear",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Bonelord Champion",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "obsidian-blade",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Bonelord Apex",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "mythic-wand",
+    "chance": 0.07,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Cave Swarm",
-    "item": "club",
-    "chance": 0.2,
+    "item": "crude-blade",
+    "chance": 0.22,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Cave Skirmisher",
-    "item": "club",
+    "item": "crude-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Cave Line",
-    "item": "club",
+    "item": "iron-blade",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Cave Ranged",
-    "item": "club",
+    "item": "iron-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Cave Caster",
-    "item": "club",
-    "chance": 0.2,
+    "item": "tempered-wand",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Cave Brute",
-    "item": "club",
-    "chance": 0.2,
+    "item": "runed-blade",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Cave Heavy",
-    "item": "club",
-    "chance": 0.2,
+    "item": "void-blade",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Cave Champion",
-    "item": "club",
-    "chance": 0.2,
+    "item": "void-spear",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Cave Apex",
-    "item": "club",
-    "chance": 0.2,
+    "item": "dragon-blade",
+    "chance": 0.09,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Fungal Swarm",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "stick",
+    "chance": 0.22,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Fungal Skirmisher",
-    "item": "storm staff",
+    "item": "dagger",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Fungal Line",
-    "item": "storm staff",
+    "item": "iron-wand",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Fungal Ranged",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "steel-blade",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Fungal Caster",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "runed-spear",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Fungal Brute",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "runed-wand",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Fungal Heavy",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "obsidian-wand",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Fungal Champion",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "astral-blade",
+    "chance": 0.1,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Fungal Apex",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "dragon-wand",
+    "chance": 0.09,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Ember Swarm",
-    "item": "flame staff",
+    "item": "dagger",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Ember Skirmisher",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "iron-blade",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Ember Line",
-    "item": "flame staff",
+    "item": "iron-wand",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Ember Ranged",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "steel-blade",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Ember Caster",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "runed-spear",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Ember Brute",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "runed-wand",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Ember Heavy",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "astral-spear",
+    "chance": 0.1,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Ember Champion",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "astral-wand",
+    "chance": 0.1,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Ember Apex",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "dragon-wand",
+    "chance": 0.09,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Rime Swarm",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "crude-blade",
+    "chance": 0.22,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Rime Skirmisher",
-    "item": "frost staff",
+    "item": "crude-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Rime Line",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "steel-wand",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Rime Ranged",
-    "item": "frost staff",
+    "item": "iron-blade",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Rime Caster",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "tempered-spear",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Rime Brute",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "tempered-wand",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Rime Heavy",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "void-spear",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Rime Champion",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "obsidian-blade",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Rime Apex",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "mythic-wand",
+    "chance": 0.07,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Construct Swarm",
-    "item": "long sword",
-    "chance": 0.2,
+    "item": "crude-blade",
+    "chance": 0.22,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Construct Skirmisher",
-    "item": "long sword",
+    "item": "crude-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Construct Line",
-    "item": "long sword",
+    "item": "iron-blade",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Construct Ranged",
-    "item": "long sword",
+    "item": "iron-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Construct Caster",
-    "item": "long sword",
-    "chance": 0.2,
+    "item": "tempered-wand",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Construct Brute",
-    "item": "long sword",
-    "chance": 0.2,
+    "item": "runed-blade",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Construct Heavy",
-    "item": "long sword",
-    "chance": 0.2,
+    "item": "void-blade",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Construct Champion",
-    "item": "long sword",
-    "chance": 0.2,
+    "item": "void-spear",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Construct Apex",
-    "item": "long sword",
-    "chance": 0.2,
+    "item": "dragon-blade",
+    "chance": 0.09,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Hive Swarm",
-    "item": "long sword",
-    "chance": 0.2,
+    "item": "crude-blade",
+    "chance": 0.22,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Hive Skirmisher",
-    "item": "long sword",
+    "item": "crude-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Hive Line",
-    "item": "long sword",
+    "item": "iron-blade",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Hive Ranged",
-    "item": "long sword",
+    "item": "iron-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Hive Caster",
-    "item": "long sword",
-    "chance": 0.2,
+    "item": "tempered-wand",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Hive Brute",
-    "item": "long sword",
-    "chance": 0.2,
+    "item": "runed-blade",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Hive Heavy",
-    "item": "long sword",
-    "chance": 0.2,
+    "item": "void-blade",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Hive Champion",
-    "item": "long sword",
-    "chance": 0.2,
+    "item": "void-spear",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Hive Apex",
-    "item": "long sword",
-    "chance": 0.2,
+    "item": "dragon-blade",
+    "chance": 0.09,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Drowned Swarm",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "crude-blade",
+    "chance": 0.22,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Drowned Skirmisher",
-    "item": "frost staff",
+    "item": "crude-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Drowned Line",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "steel-wand",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Drowned Ranged",
-    "item": "frost staff",
+    "item": "iron-blade",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Drowned Caster",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "tempered-spear",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Drowned Brute",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "tempered-wand",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Drowned Heavy",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "void-spear",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Drowned Champion",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "obsidian-blade",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Drowned Apex",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "mythic-wand",
+    "chance": 0.07,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Umbral Swarm",
-    "item": "pike",
-    "chance": 0.2,
+    "item": "crude-blade",
+    "chance": 0.22,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Umbral Skirmisher",
-    "item": "pike",
+    "item": "crude-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Umbral Line",
-    "item": "pike",
+    "item": "iron-blade",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Umbral Ranged",
-    "item": "pike",
+    "item": "iron-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Umbral Caster",
-    "item": "pike",
-    "chance": 0.2,
+    "item": "tempered-wand",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Umbral Brute",
-    "item": "pike",
-    "chance": 0.2,
+    "item": "runed-blade",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Umbral Heavy",
-    "item": "pike",
-    "chance": 0.2,
+    "item": "void-blade",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Umbral Champion",
-    "item": "pike",
-    "chance": 0.2,
+    "item": "void-spear",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Umbral Apex",
-    "item": "pike",
-    "chance": 0.2,
+    "item": "dragon-blade",
+    "chance": 0.09,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Crystal Swarm",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "stick",
+    "chance": 0.22,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Crystal Skirmisher",
-    "item": "storm staff",
+    "item": "dagger",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Crystal Line",
-    "item": "storm staff",
+    "item": "iron-wand",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Crystal Ranged",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "steel-blade",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Crystal Caster",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "runed-spear",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Crystal Brute",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "runed-wand",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Crystal Heavy",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "obsidian-wand",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Crystal Champion",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "astral-blade",
+    "chance": 0.1,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Crystal Apex",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "dragon-wand",
+    "chance": 0.09,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Blight Swarm",
-    "item": "long sword",
-    "chance": 0.2,
+    "item": "crude-blade",
+    "chance": 0.22,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Blight Skirmisher",
-    "item": "long sword",
+    "item": "crude-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Blight Line",
-    "item": "long sword",
+    "item": "iron-blade",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Blight Ranged",
-    "item": "long sword",
+    "item": "iron-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Blight Caster",
-    "item": "long sword",
-    "chance": 0.2,
+    "item": "tempered-wand",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Blight Brute",
-    "item": "long sword",
-    "chance": 0.2,
+    "item": "runed-blade",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Blight Heavy",
-    "item": "long sword",
-    "chance": 0.2,
+    "item": "void-blade",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Blight Champion",
-    "item": "long sword",
-    "chance": 0.2,
+    "item": "void-spear",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Blight Apex",
-    "item": "long sword",
-    "chance": 0.2,
+    "item": "dragon-blade",
+    "chance": 0.09,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Gloom Swarm",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "crude-blade",
+    "chance": 0.22,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Gloom Skirmisher",
-    "item": "frost staff",
+    "item": "crude-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Gloom Line",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "steel-wand",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Gloom Ranged",
-    "item": "frost staff",
+    "item": "iron-blade",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Gloom Caster",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "tempered-spear",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Gloom Brute",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "tempered-wand",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Gloom Heavy",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "void-spear",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Gloom Champion",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "obsidian-blade",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Gloom Apex",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "mythic-wand",
+    "chance": 0.07,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Stoneborn Swarm",
-    "item": "flame staff",
+    "item": "dagger",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Stoneborn Skirmisher",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "iron-blade",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Stoneborn Line",
-    "item": "flame staff",
+    "item": "iron-wand",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Stoneborn Ranged",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "steel-blade",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Stoneborn Caster",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "runed-spear",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Stoneborn Brute",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "runed-wand",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Stoneborn Heavy",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "astral-spear",
+    "chance": 0.1,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Stoneborn Champion",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "astral-wand",
+    "chance": 0.1,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Stoneborn Apex",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "dragon-wand",
+    "chance": 0.09,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Void Swarm",
-    "item": "pike",
-    "chance": 0.2,
+    "item": "crude-blade",
+    "chance": 0.22,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Void Skirmisher",
-    "item": "pike",
+    "item": "crude-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Void Line",
-    "item": "pike",
+    "item": "iron-blade",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Void Ranged",
-    "item": "pike",
+    "item": "iron-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Void Caster",
-    "item": "pike",
-    "chance": 0.2,
+    "item": "tempered-wand",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Void Brute",
-    "item": "pike",
-    "chance": 0.2,
+    "item": "runed-blade",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Void Heavy",
-    "item": "pike",
-    "chance": 0.2,
+    "item": "void-blade",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Void Champion",
-    "item": "pike",
-    "chance": 0.2,
+    "item": "void-spear",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Void Apex",
-    "item": "pike",
-    "chance": 0.2,
+    "item": "dragon-blade",
+    "chance": 0.09,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Demonic Swarm",
-    "item": "flame staff",
+    "item": "dagger",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Demonic Skirmisher",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "iron-blade",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Demonic Line",
-    "item": "flame staff",
+    "item": "iron-wand",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Demonic Ranged",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "steel-blade",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Demonic Caster",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "runed-spear",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Demonic Brute",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "runed-wand",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Demonic Heavy",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "astral-spear",
+    "chance": 0.1,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Demonic Champion",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "astral-wand",
+    "chance": 0.1,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Demonic Apex",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "dragon-wand",
+    "chance": 0.09,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Chaos Swarm",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "stick",
+    "chance": 0.22,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Chaos Skirmisher",
-    "item": "storm staff",
+    "item": "dagger",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Chaos Line",
-    "item": "storm staff",
+    "item": "iron-wand",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Chaos Ranged",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "steel-blade",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Chaos Caster",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "runed-spear",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Chaos Brute",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "runed-wand",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Chaos Heavy",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "obsidian-wand",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Chaos Champion",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "astral-blade",
+    "chance": 0.1,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Chaos Apex",
-    "item": "storm staff",
-    "chance": 0.2,
+    "item": "dragon-wand",
+    "chance": 0.09,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Fallen Swarm",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "crude-blade",
+    "chance": 0.22,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Fallen Skirmisher",
-    "item": "frost staff",
+    "item": "crude-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Fallen Line",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "steel-wand",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Fallen Ranged",
-    "item": "frost staff",
+    "item": "iron-blade",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Fallen Caster",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "tempered-spear",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Fallen Brute",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "tempered-wand",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Fallen Heavy",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "void-spear",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Fallen Champion",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "obsidian-blade",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Fallen Apex",
-    "item": "frost staff",
-    "chance": 0.2,
+    "item": "mythic-wand",
+    "chance": 0.07,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Nightmare Swarm",
-    "item": "pike",
-    "chance": 0.2,
+    "item": "crude-blade",
+    "chance": 0.22,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Nightmare Skirmisher",
-    "item": "pike",
+    "item": "crude-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Nightmare Line",
-    "item": "pike",
+    "item": "iron-blade",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Nightmare Ranged",
-    "item": "pike",
+    "item": "iron-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Nightmare Caster",
-    "item": "pike",
-    "chance": 0.2,
+    "item": "tempered-wand",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Nightmare Brute",
-    "item": "pike",
-    "chance": 0.2,
+    "item": "runed-blade",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Nightmare Heavy",
-    "item": "pike",
-    "chance": 0.2,
+    "item": "void-blade",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Nightmare Champion",
-    "item": "pike",
-    "chance": 0.2,
+    "item": "void-spear",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Nightmare Apex",
-    "item": "pike",
-    "chance": 0.2,
+    "item": "dragon-blade",
+    "chance": 0.09,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Titan Swarm",
-    "item": "pike",
-    "chance": 0.2,
+    "item": "crude-blade",
+    "chance": 0.22,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Titan Skirmisher",
-    "item": "pike",
+    "item": "crude-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Titan Line",
-    "item": "pike",
+    "item": "iron-blade",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Titan Ranged",
-    "item": "pike",
+    "item": "iron-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Titan Caster",
-    "item": "pike",
-    "chance": 0.2,
+    "item": "tempered-wand",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Titan Brute",
-    "item": "pike",
-    "chance": 0.2,
+    "item": "runed-blade",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Titan Heavy",
-    "item": "pike",
-    "chance": 0.2,
+    "item": "void-blade",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Titan Champion",
-    "item": "pike",
-    "chance": 0.2,
+    "item": "void-spear",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Titan Apex",
-    "item": "pike",
-    "chance": 0.2,
+    "item": "dragon-blade",
+    "chance": 0.09,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Plague Swarm",
-    "item": "flame staff",
+    "item": "dagger",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Plague Skirmisher",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "iron-blade",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Plague Line",
-    "item": "flame staff",
+    "item": "iron-wand",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Plague Ranged",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "steel-blade",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Plague Caster",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "runed-spear",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Plague Brute",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "runed-wand",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Plague Heavy",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "astral-spear",
+    "chance": 0.1,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Plague Champion",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "astral-wand",
+    "chance": 0.1,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Plague Apex",
-    "item": "flame staff",
-    "chance": 0.2,
+    "item": "dragon-wand",
+    "chance": 0.09,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Eldritch Swarm",
-    "item": "pike",
-    "chance": 0.2,
+    "item": "crude-blade",
+    "chance": 0.22,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Eldritch Skirmisher",
-    "item": "pike",
+    "item": "crude-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Eldritch Line",
-    "item": "pike",
+    "item": "iron-blade",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Eldritch Ranged",
-    "item": "pike",
+    "item": "iron-spear",
     "chance": 0.2,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Eldritch Caster",
-    "item": "pike",
-    "chance": 0.2,
+    "item": "tempered-wand",
+    "chance": 0.15,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Eldritch Brute",
-    "item": "pike",
-    "chance": 0.2,
+    "item": "runed-blade",
+    "chance": 0.12,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Eldritch Heavy",
-    "item": "pike",
-    "chance": 0.2,
+    "item": "void-blade",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Eldritch Champion",
-    "item": "pike",
-    "chance": 0.2,
+    "item": "void-spear",
+    "chance": 0.08,
     "min_qty": 1,
     "max_qty": 1
   },
   {
     "creature": "Eldritch Apex",
-    "item": "pike",
-    "chance": 0.2,
+    "item": "dragon-blade",
+    "chance": 0.09,
     "min_qty": 1,
     "max_qty": 1
   }

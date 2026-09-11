@@ -22,6 +22,7 @@ import { usePassiveNodes, useUpdatePassiveNode } from './usePassiveNodes.js';
 import {
   KINDS, SECTORS, GRANT_TYPES, nodeToForm, formToPayload, validateNodeForm, grantSummary,
 } from './passiveNodeForm.js';
+import AdminLoading from './AdminLoading.jsx';
 
 const PAGE = 50;
 
@@ -109,11 +110,13 @@ function PassiveNodesAdmin() {
 
   return (
     <Wrap>
-      <Hint>
-        {isLoadingNodes
-          ? 'Loading…'
-          : `${total} node(s) match — ${PAGE} per page. Structure (key, sector, ring, position) comes from the generator and is read-only here.`}
-      </Hint>
+      {isLoadingNodes ? (
+        <AdminLoading label="Loading passive nodes…" inline size={16} />
+      ) : (
+        <Hint>
+          {`${total} node(s) match — ${PAGE} per page. Structure (key, sector, ring, position) comes from the generator and is read-only here.`}
+        </Hint>
+      )}
       {nodesError && <Err role="alert">{nodesError.message}</Err>}
 
       <Filters>

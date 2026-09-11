@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  subjectId, sortSubjects, clampPage, pageCount, toggle, selectPage, deselectPage,
+  subjectId, sortSubjects, freezeOrder, clampPage, pageCount, toggle, selectPage, deselectPage,
   isPageFullySelected, selectAllMatching, selectAllLabel, byKind, applyFilters,
   enqueueSummary, coverage, selectionOutsideFilter, PAGE_SIZE,
 } from '../artSelection.js';
@@ -203,5 +203,80 @@ describe('reporting', () => {
 describe('page size', () => {
   it('is the 100 the ticket asks for', () => {
     expect(PAGE_SIZE).toBe(100);
+  });
+});
+
+
+// --- Sorting by date (SOMET-546) -------------------------------------------
+//
+// The default order is deliberately immutable (kind, then key) so a live batch
+// cannot reshuffle the table. These cases pin the added behaviour AND that the
+// default is unchanged -- the second is the one that would catch a careless
+// edit, because every existing caller passes no options at all.
+describe('sortSubjects by date', () => {
+  const S = (key, updated_at) => ({ kind: 'item', key, updated_at });
+
+  it('leaves the default order exactly as it was', () => {
+    const rows = [S('b', '2026-01-02'), S('a', '2026-09-09')];
+    // No options: must still be kind+key, NOT the newest first.
+    expect(sortSubjects(rows).map((r) => r.key)).toEqual(['a', 'b']);
+  });
+
+  it('newest first when descending', () => {
+    const rows = [S('old', '2026-01-01'), S('new', '2026-09-05'), S('mid', '2026-05-05')];
+    expect(sortSubjects(rows, { by: 'updated', dir: 'desc' }).map((r) => r.key))
+      .toEqual(['new', 'mid', 'old']);
+  });
+
+  it('oldest first when ascending', () => {
+    const rows = [S('new', '2026-09-05'), S('old', '2026-01-01')];
+    expect(sortSubjects(rows, { by: 'updated', dir: 'asc' }).map((r) => r.key))
+      .toEqual(['old', 'new']);
+  });
+
+  it('puts never-generated subjects LAST in BOTH directions', () => {
+    const rows = [S('none', null), S('dated', '2026-05-05')];
+    // Ascending is the case that matters: treating "no date" as the epoch would
+    // bury every real result under hundreds of blank rows.
+    expect(sortSubjects(rows, { by: 'updated', dir: 'asc' }).map((r) => r.key))
+      .toEqual(['dated', 'none']);
+    expect(sortSubjects(rows, { by: 'updated', dir: 'desc' }).map((r) => r.key))
+      .toEqual(['dated', 'none']);
+  });
+
+  it('never drops or duplicates a row', () => {
+    const rows = [S('a', '2026-01-01'), S('b', null), S('c', '2026-02-02')];
+    const out = sortSubjects(rows, { by: 'updated', dir: 'desc' });
+    expect(out).toHaveLength(3);
+    expect(new Set(out.map((r) => r.key))).toEqual(new Set(['a', 'b', 'c']));
+  });
+
+  it('does not mutate its input', () => {
+    const rows = [S('z', '2026-01-01'), S('a', '2026-09-09')];
+    const before = rows.map((r) => r.key);
+    sortSubjects(rows, { by: 'updated', dir: 'desc' });
+    expect(rows.map((r) => r.key)).toEqual(before);
+  });
+});
+
+describe('freezeOrder', () => {
+  const S = (key) => ({ kind: 'item', key });
+
+  it('holds a captured order even as the underlying data changes', () => {
+    const order = ['item/c', 'item/a', 'item/b'];
+    // Same subjects, arriving in a different order (a generation landed).
+    const out = freezeOrder([S('a'), S('b'), S('c')], order);
+    expect(out.map((r) => r.key)).toEqual(['c', 'a', 'b']);
+  });
+
+  it('appends subjects the snapshot has never seen instead of dropping them', () => {
+    // A filter widening while the freeze is held must not hide rows -- showing
+    // them late is a nuisance, omitting them is a correctness bug.
+    const out = freezeOrder([S('a'), S('new')], ['item/a']);
+    expect(out.map((r) => r.key)).toEqual(['a', 'new']);
+  });
+
+  it('falls back to the given order when there is no snapshot', () => {
+    expect(freezeOrder([S('b'), S('a')], []).map((r) => r.key)).toEqual(['b', 'a']);
   });
 });

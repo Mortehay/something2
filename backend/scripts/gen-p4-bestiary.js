@@ -96,7 +96,7 @@ function generateBestiary() {
         level_max: band.max,
         behavior_name: BEHAVIOR_OVERRIDES[name] ?? rung.name, // resolved to a real behavior_id at seed time (Task 6)
       });
-      const drop = pickDropItem(line.element, line.tier);
+      const drop = pickDropItem(line.element, line.tier, rung.index);
       drops.push({
         creature: name,
         item: drop.item,

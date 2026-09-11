@@ -64,13 +64,30 @@ function labelSubject(label) {
 // and "a fantasy weapon" is the honest amount of extra context we actually
 // have -- inventing "a broadsword with a leather grip" would be authoring art
 // direction from a slug.
+// "a" or "an", by the letter the word starts with.
+//
+// THIS EXISTS BECAUSE 51 OF 189 ITEM NAMES START WITH A VOWEL. "a apprentice
+// staff", "a arbalest", "a arcane ward" -- 27% of the catalogue opened its
+// prompt on a grammatical error, which is the very thing the currency comment
+// below already calls a bad first token to spend.
+//
+// The letter rule is not the pronunciation rule: "a unicorn" and "a euro" take
+// "a" despite the vowel, and "an hour" takes "an" despite the consonant. The
+// catalogue was checked -- the only u-word is "unarmed", where "an" is right --
+// so the simple rule is correct HERE. A future name like "unicorn horn" would
+// need the exception, which is why this is a named function rather than a
+// ternary buried in a template string.
+function article(word) {
+  return /^[aeiou]/i.test(String(word || '')) ? 'an' : 'a';
+}
+
 function itemPrompt(row) {
   const subject = deslug(row.name);
   // Currency is a mass noun -- "a gold" is wrong and reads as a typo to a
   // model as much as to a person. It is one row in the catalog, but a prompt
   // that starts with a grammatical error is a bad first token to spend.
   if (row.category === 'currency') return `a pile of ${subject}`;
-  const parts = [`a ${subject}`];
+  const parts = [`${article(subject)} ${subject}`];
   if (row.category) parts.push(`a fantasy ${row.category}`);
   if (row.element) parts.push(`${row.element} element`);
   return parts.join(', ');
@@ -138,15 +155,32 @@ const SUBJECTS = Object.freeze({
   passive_label: {
     kind: 'passive_label',
     generationKind: 'object',
+    // SOMET-552. The GRANTS come with the label, and they are the only thing
+    // that says what the label MEANS. "Versatility" is one English word; its
+    // grants say "+2 to a stat", and that is the difference between an icon
+    // that stands for the bonus and a machine lever on a stone plinth (which
+    // is what "Versatility" actually drew, measured 2026-09-10).
+    //
+    // DISTINCT over the grant ELEMENTS, not over the arrays: a label spans
+    // many nodes and 105 of the 128 resolve to exactly one grant once
+    // duplicates collapse. The other 23 genuinely span several (Versatility is
+    // +2 to any one of four stats), and listing all of them is the honest
+    // context -- inventing one would be authoring the tree's meaning here.
     async list(db) {
       const { rows } = await db.query(
-        'SELECT DISTINCT label FROM passive_nodes WHERE label <> \'\' ORDER BY label',
+        `SELECT p.label, jsonb_agg(DISTINCT e) AS grants
+           FROM passive_nodes p
+           LEFT JOIN LATERAL jsonb_array_elements(p.grants) e ON true
+          WHERE p.label <> ''
+          GROUP BY p.label
+          ORDER BY p.label`,
       );
       return rows.map((r) => ({
         kind: 'passive_label',
         key: r.label,
         name: r.label,
         basePrompt: labelSubject(r.label),
+        grants: (r.grants || []).filter(Boolean),
         row: r,
       }));
     },
@@ -312,6 +346,19 @@ function pinnedProviderId(subject, active, fallbackProviderId) {
   return fallbackProviderId;
 }
 
+// Does this kind take a WRITTEN DESCRIPTION (SOMET-551/553)?
+//
+// A tile's prompt is composed from its biome's palette and style, so a subject
+// phrase could never reach it and accepting one would be a silent no-op. That
+// rule lives here rather than in the route that enforces it, because the
+// console has to grey the editor out for the same kinds the server refuses --
+// and a client that decided this for itself would drift the day a sixth kind
+// is added.
+function takesDescription(kind) {
+  const reg = typeof kind === 'string' ? registryFor(kind) : kind;
+  return Boolean(reg) && reg.generationKind === 'object';
+}
+
 function subjectKinds() {
   return Object.keys(SUBJECTS);
 }
@@ -359,7 +406,7 @@ async function latestJobByKey(db, kind) {
 }
 
 module.exports = {
-  SUBJECTS, subjectKinds, registryFor, listWithArtState,
+  SUBJECTS, subjectKinds, registryFor, listWithArtState, takesDescription,
   subjectsForEnqueue, pinnedProviderId,
-  deslug, labelSubject, itemPrompt, skillPrompt, writeCatalogArt,
+  deslug, article, labelSubject, itemPrompt, skillPrompt, writeCatalogArt,
 };

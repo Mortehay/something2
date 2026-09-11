@@ -77,7 +77,7 @@ const { resolveProvider, parseArgs } = require('./generate-tile-textures.js');
 // catalog art (SOMET-540) needs the same wrapper, and a service cannot sanely
 // require a CLI script. Re-exported below so this module's public surface is
 // unchanged.
-const { BACKDROP, buildObjectPrompt } = require('../src/services/objectPrompt.js');
+const { BACKDROP, buildObjectPrompt, OBJECT_NEGATIVES } = require('../src/services/objectPrompt.js');
 
 // Generate through the LOCAL sprite-gen service instead of a remote provider.
 //
@@ -245,8 +245,15 @@ async function generateViaCore(pool, provider, entity, { pollMs = 5000, maxWaitM
     const store = require('../src/services/assetStore.js');
     const safe = String(entity.name).replace(/[^A-Za-z0-9_-]/g, '_');
     const key = `${store.BUCKET()}/${safe}/concept/static.png`;
+    // SOMET-563. The OTHER generation path, and the one easiest to miss: the
+    // concept route stores its image itself instead of going through
+    // remoteImageProvider.runGeneration the way generateOne below does. Trimming
+    // only the provider would have left this half of the feature dead while
+    // every test stayed green -- the failure this repo keeps repeating. Same
+    // function, so there is one rule and not two.
+    const trimmed = remoteImageProvider.trimForStorage(buf, 'object');
     // eslint-disable-next-line no-await-in-loop
-    await store.putObject(key, buf, 'image/png');
+    await store.putObject(key, trimmed.buffer, 'image/png');
     // eslint-disable-next-line no-await-in-loop
     await pool.query(
       `UPDATE entity_types SET image = $1, sprite = NULL, render_mode = 'static',
@@ -263,6 +270,10 @@ async function generateOne(pool, provider, entity) {
     subject: entity.name,
     kind: 'object',
     prompt: buildObjectPrompt(entity.prompt),
+    // SOMET-558. The framing exclusions left the positive prompt; this path
+    // has to carry them too, or entity textures generated here lose the eight
+    // terms the dispatcher's path still applies.
+    negative: OBJECT_NEGATIVES,
     seed: 0,
     frames: 1,
   });

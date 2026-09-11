@@ -2452,6 +2452,46 @@ function resolveSkillVfx(skill) {
   return 'generic_slash';
 }
 
+function getSkillIndexInClass(skill) {
+  if (!skill) return 0;
+  const classList = SKILLS_BY_CLASS[skill.class] || [];
+  const idx = classList.findIndex(s => s.id === skill.id);
+  return idx >= 0 ? idx : 0;
+}
+
+function getSkillPrice(skill) {
+  if (!skill) return 250;
+  if (typeof skill.price === 'number') return skill.price;
+  const idx = getSkillIndexInClass(skill);
+  // Progressive curve from 250 gold (early skill) to 10,000 gold (ultimate skill)
+  const raw = 250 + (10000 - 250) * Math.pow(idx / 49, 1.25);
+  return Math.round(raw / 25) * 25;
+}
+
+function getSkillTier(skill) {
+  if (!skill) return 1;
+  if (typeof skill.tier === 'number') return skill.tier;
+  const idx = getSkillIndexInClass(skill);
+  if (idx < 10) return 1;
+  if (idx < 20) return 2;
+  if (idx < 30) return 3;
+  if (idx < 40) return 4;
+  return 5;
+}
+
+function getSkillLevelReq(skill) {
+  if (!skill) return 1;
+  if (typeof skill.levelReq === 'number') return skill.levelReq;
+  const idx = getSkillIndexInClass(skill);
+  return Math.min(50, Math.max(1, Math.floor(idx * 1.02) + 1));
+}
+
+for (const s of SKILLS) {
+  s.price = getSkillPrice(s);
+  s.tier = getSkillTier(s);
+  s.levelReq = getSkillLevelReq(s);
+}
+
 module.exports = {
   SKILLS,
   SKILLS_BY_CLASS,
@@ -2463,4 +2503,8 @@ module.exports = {
   isWeaponCompatible,
   getWeaponRequirementName,
   checkGemRequirements,
+  getSkillIndexInClass,
+  getSkillPrice,
+  getSkillTier,
+  getSkillLevelReq,
 };

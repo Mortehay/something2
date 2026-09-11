@@ -3,7 +3,8 @@ from .backends import get_backend
 from .config import DIRECTIONS
 from .poses import pose_for
 from .prompts import build_prompt, build_tile_prompt, build_object_prompt
-from .postproc import key_near_white, remove_background, crop_to_content, pack_atlas
+from .postproc import (key_near_white, remove_background, crop_to_content,
+                       pack_atlas, TRIM_MARGIN_PCT)
 
 def generate_creature(creature: str, base_prompt: str, backend_name: str,
                       seed: int, n_frames: int, size=(128, 160), steps: int = 20,
@@ -25,7 +26,7 @@ def generate_creature(creature: str, base_prompt: str, backend_name: str,
             img = backend.generate(prompt=prompt, pose=pose, seed=frame_seed,
                                    steps=steps, size=size)
             # Entities are drawn over the world, so the backdrop must go.
-            img = crop_to_content(remove_background(img, matting))
+            img = crop_to_content(remove_background(img, matting), TRIM_MARGIN_PCT)
             raw[f"{direction}/{frame}"] = img
             done += 1
             if progress:
@@ -54,7 +55,10 @@ def _generate_flat(prompt_builder, base_prompt: str, backend_name: str,
         # Tiles ARE the ground: they keep the pre-existing near-white keying
         # only, with no border flood-fill that would eat into a snow texture.
         img = remove_background(img, matting) if transparent else key_near_white(img)
-        img = crop_to_content(img)
+        # SOMET-565: the margin is for OBJECTS only. `transparent` is what
+        # distinguishes them from tiles here, and a tile with a transparent
+        # border is a seam in the ground.
+        img = crop_to_content(img, TRIM_MARGIN_PCT if transparent else 0)
         raw[str(frame)] = img
         if progress:
             progress(frame + 1, total)

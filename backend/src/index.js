@@ -308,6 +308,11 @@ const bulkImageRegeneration = require('./services/bulkImageRegeneration');
 const catalogSubjects = require('./services/catalogSubjects.js');
 const artJobQueue = require('./services/artJobQueue.js');
 const artDispatcher = require('./services/artDispatcher.js');
+const artFailures = require('./services/artFailures.js');
+const artGenerations = require('./services/artGenerations.js');
+const artPromptNotes = require('./services/artPromptNotes.js');
+const artDescriptions = require('./services/artPromptDescriptions.js');
+const subjectDescriber = require('./services/subjectDescriber.js');
 const {
   pinProvided, providerPinFieldError, providerPinError, providerPinValues,
 } = require('./services/providerPin.js');
@@ -3263,6 +3268,10 @@ app.get('/api/art-subjects/:kind', adminGuard, async (req, res) => {
         // Only entities have one; the console shows it because promoting a
         // deliberate colour-box type to real art is a choice worth seeing.
         render_mode: (x.row && x.row.render_mode) || null,
+        // SOMET-553. The console greys the description editor out for the
+        // kinds the server refuses one from, and asks the server which those
+        // are rather than deciding for itself.
+        takes_description: catalogSubjects.takesDescription(req.params.kind),
       })),
     });
   } catch (err) {
@@ -3275,6 +3284,159 @@ app.get('/api/art-subjects/:kind', adminGuard, async (req, res) => {
 // not an error and does not create a second job -- a partial unique index makes
 // that the database's guarantee rather than a check-then-act race between two
 // admins on overlapping pages.
+// SOMET-547. One subject's generation history, newest first.
+//
+// Every ATTEMPT, not every image: three rows against a faulted GPU is what
+// makes "failed the same way three times" distinguishable from "failed three
+// different ways", and the prompts that failed are the ones worth reading.
+app.get('/api/art-subjects/:kind/:key/history', adminGuard, async (req, res) => {
+  try {
+    if (!catalogSubjects.registryFor(req.params.kind)) {
+      return res.status(400).json({ error: `unknown subject kind "${req.params.kind}"` });
+    }
+    const rows = await artGenerations.list(pool, req.params.kind, req.params.key, req.query.limit);
+    res.json({ history: rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to read the generation history' });
+  }
+});
+
+// SOMET-551. The written description that replaces the catalogue template.
+//
+// Returns every version, active or not: art_generations records prompts built
+// from descriptions since replaced, and a prompt nobody can explain afterwards
+// is not much of a record.
+app.get('/api/art-subjects/:kind/:key/description', adminGuard, async (req, res) => {
+  try {
+    if (!catalogSubjects.registryFor(req.params.kind)) {
+      return res.status(400).json({ error: `unknown subject kind "${req.params.kind}"` });
+    }
+    const { kind, key } = req.params;
+    const [active, all, subjects] = await Promise.all([
+      artDescriptions.getActive(pool, kind, key),
+      artDescriptions.listAll(pool, kind, key),
+      catalogSubjects.registryFor(kind).list(pool),
+    ]);
+    // SOMET-552. Whether the catalogue has moved under this description since
+    // it was written. It is still the description in force -- see the
+    // migration header -- so this is a flag to show, not a reason to hide it.
+    const subject = subjects.find((sub) => sub.key === key) || null;
+    res.json({
+      active,
+      history: all,
+      stale: artDescriptions.isStale(active, subject && subject.basePrompt),
+      catalogPrompt: subject ? subject.basePrompt : null,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to read the description' });
+  }
+});
+
+// Write one, replacing whatever was active. `text` given writes it verbatim
+// (a human edit); omitted asks the local model for one.
+app.post('/api/art-subjects/:kind/:key/description', adminGuard, async (req, res) => {
+  try {
+    const { kind, key } = req.params;
+    const reg = catalogSubjects.registryFor(kind);
+    if (!reg) return res.status(400).json({ error: `unknown subject kind "${kind}"` });
+    // A tile composes its prompt from its biome's palette; a subject phrase
+    // could never reach it, so accepting one would be a silent no-op.
+    if (!catalogSubjects.takesDescription(reg)) {
+      return res.status(409).json({ error: `${kind} builds its own prompt and takes no description` });
+    }
+
+    // The subject is fetched even when the text was typed by a person, because
+    // its catalogue phrase is what makes the description's staleness knowable
+    // later (SOMET-552). Writing a description without recording what the
+    // catalogue said at the time is the exact hole this slice closes, and a
+    // hand-written one goes stale the same way a generated one does.
+    const subject = (await reg.list(pool)).find((s) => s.key === key);
+    if (!subject) return res.status(404).json({ error: `unknown subject ${kind}/${key}` });
+
+    let text = req.body.text;
+    let model = null;
+    if (!text) {
+      const written = await subjectDescriber.describeSubject(subject, { length: req.body.length });
+      text = written.text;
+      model = written.model;
+    }
+    const saved = await artDescriptions.replace(pool, kind, key, {
+      text, length: req.body.length || null, model, sourcePrompt: subject.basePrompt,
+    });
+    if (!saved) return res.status(400).json({ error: 'description must not be empty' });
+    res.status(201).json({ description: saved });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: `Failed to write the description: ${err.message}` });
+  }
+});
+
+// Drop back to the catalogue template.
+app.delete('/api/art-subjects/:kind/:key/description', adminGuard, async (req, res) => {
+  try {
+    const cleared = await artDescriptions.clear(pool, req.params.kind, req.params.key);
+    if (!cleared) return res.status(404).json({ error: 'no active description' });
+    res.json({ cleared: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to clear the description' });
+  }
+});
+
+// SOMET-548. Per-subject prompt corrections.
+//
+// Returns EVERY note, active or not: the generation history records prompts
+// that contained notes since revoked, and a prompt nobody can explain
+// afterwards is not much of a record.
+app.get('/api/art-subjects/:kind/:key/notes', adminGuard, async (req, res) => {
+  try {
+    if (!catalogSubjects.registryFor(req.params.kind)) {
+      return res.status(400).json({ error: `unknown subject kind "${req.params.kind}"` });
+    }
+    res.json({ notes: await artPromptNotes.listAll(pool, req.params.kind, req.params.key) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to read the prompt notes' });
+  }
+});
+
+app.post('/api/art-subjects/:kind/:key/notes', adminGuard, async (req, res) => {
+  try {
+    if (!catalogSubjects.registryFor(req.params.kind)) {
+      return res.status(400).json({ error: `unknown subject kind "${req.params.kind}"` });
+    }
+    const note = await artPromptNotes.create(pool, req.params.kind, req.params.key, {
+      // SOMET-558. 'reshape' (the default) joins the positive prompt as before;
+      // 'avoid' joins negative_prompt instead. An unknown value falls back to
+      // 'reshape' rather than 400-ing -- the operator's words are the valuable
+      // half and must not be lost over a routing field.
+      note: req.body.note, region: req.body.region, kind: req.body.kind,
+    });
+    // An empty note is a client mistake, not a server error, and saying so
+    // beats storing a blank correction that quietly does nothing to a prompt.
+    if (!note) return res.status(400).json({ error: 'note must not be empty' });
+    res.status(201).json({ note });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to save the prompt note' });
+  }
+});
+
+// Deactivates rather than deletes -- see the migration header.
+app.delete('/api/art-subjects/:kind/:key/notes/:id', adminGuard, async (req, res) => {
+  try {
+    if (invalidId(req.params.id)) return res.status(400).json({ error: 'id must be an integer' });
+    const ok = await artPromptNotes.deactivate(pool, Number(req.params.id));
+    if (!ok) return res.status(404).json({ error: 'note not found, or already inactive' });
+    res.json({ deactivated: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to remove the prompt note' });
+  }
+});
+
 app.post('/api/art-jobs', adminGuard, async (req, res) => {
   try {
     const kind = req.body.kind;
@@ -3328,7 +3490,29 @@ app.post('/api/art-jobs', adminGuard, async (req, res) => {
 // drifts, a catalog commit cannot.
 app.get('/api/art-jobs', adminGuard, async (req, res) => {
   try {
-    res.json({ stats: await artJobQueue.stats(pool), run: artDispatcher.runStatus() });
+    // Failures come back GROUPED BY CAUSE rather than as a flat list. The list
+    // was already visible per-row in the table; what an admin could not get
+    // was "68 of these are the same GPU fault and will clear themselves, ONE
+    // needs a decision". The grouping is the actionable part.
+    const { rows: failed } = await pool.query(
+      `SELECT subject_kind, subject_key, last_error
+         FROM art_jobs WHERE state = 'failed' ORDER BY updated_at DESC`,
+    );
+    res.json({
+      stats: await artJobQueue.stats(pool),
+      run: artDispatcher.runStatus(),
+      // SOMET-558. WHICH subject is on the provider right now. Read from
+      // art_jobs rather than from the dispatcher's in-memory run, because the
+      // claim is what the durable row records -- a backend that restarted
+      // mid-batch has no run object at all, and this still answers.
+      in_flight: await artJobQueue.inFlight(pool),
+      // WHAT is waiting, in claim order, capped to a preview. The count in
+      // `stats` says a batch exists; it cannot say whether the rows are the
+      // ones the admin meant to queue, and a mis-set filter produces exactly
+      // the same sentence as a correct one.
+      queued: await artJobQueue.queued(pool),
+      failures: artFailures.groupFailures(failed),
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to read the art queue' });
@@ -3346,7 +3530,11 @@ app.post('/api/art-jobs/dispatch', adminGuard, async (req, res) => {
     const status = artDispatcher.startDrain(pool, {
       provider,
       limit: Math.min(Math.max(parseInt(req.body.limit, 10) || 10, 1), 100),
-      concurrency: Math.min(Math.max(parseInt(req.body.concurrency, 10) || 2, 1), 8),
+      // Defaults to ONE. The remote card's effective headroom is under one
+      // SDXL pipeline, so two concurrent generations ask the driver for memory
+      // that is not there -- the ENOMEM behind every fault this provider has
+      // had. A caller that knows its provider has room can still say so.
+      concurrency: Math.min(Math.max(parseInt(req.body.concurrency, 10) || 1, 1), 8),
     });
     res.status(202).json(status);
   } catch (err) {
@@ -3363,6 +3551,118 @@ app.post('/api/art-jobs/dispatch', adminGuard, async (req, res) => {
   }
 });
 
+// Return failed subjects of ONE cause to the queue.
+//
+// Scoped by cause, not by id: the admin's actual intent is "the GPU was down,
+// put those back", and asking them to select 68 checkboxes to express it is
+// how the SQL-by-hand habit started.
+//
+// THE RULE IS ENFORCED HERE, not merely displayed. A content failure is
+// refused a plain requeue, because artJobQueue.seedFor derives the seed from
+// the subject: the retry would regenerate a byte-identical image and fail the
+// same way, burning a generation to learn nothing. Passing reseed:true is the
+// caller stating they want a DIFFERENT take, which changes the seed's salt and
+// therefore the image. A UI that merely hid the button would leave the rule
+// unenforced for anything calling the API directly.
+app.post('/api/art-jobs/requeue', adminGuard, async (req, res) => {
+  try {
+    const kind = String(req.body.kind || '');
+    const reseed = req.body.reseed === true;
+    if (!Object.values(artFailures.KINDS).includes(kind)) {
+      return res.status(400).json({ error: `unknown failure kind "${kind}"` });
+    }
+
+    // A failed row whose subject ALREADY has a live job is superseded: the
+    // subject is queued and will be attempted again, and the old row is only a
+    // record of why it failed last time.
+    //
+    // Excluded here rather than skipped in the loop, because requeueing one
+    // violates art_jobs_one_live_per_subject and the endpoint answered 500 --
+    // measured, with all five failed subjects in exactly that state. That is a
+    // crash where the honest answer is "nothing to do, they are already
+    // queued", and the operator cannot tell those apart from a real fault.
+    const { rows: failed } = await pool.query(
+      `SELECT f.id, f.subject_kind, f.subject_key, f.last_error, f.updated_at,
+              EXISTS (SELECT 1 FROM art_jobs l
+                       WHERE l.subject_kind = f.subject_kind
+                         AND l.subject_key = f.subject_key
+                         AND l.state IN ('queued', 'running')) AS superseded
+         FROM art_jobs f WHERE f.state = 'failed'`,
+    );
+    const ofKind = failed.filter((r) => artFailures.classify(r.last_error).kind === kind);
+    let mine = ofKind.filter((r) => !r.superseded);
+    const alreadyQueued = ofKind.length - mine.length;
+    if (mine.length === 0) {
+      return res.json({
+        requeued: 0,
+        already_queued: alreadyQueued,
+        stats: await artJobQueue.stats(pool),
+      });
+    }
+
+    const { retryable, action } = artFailures.classify(mine[0].last_error);
+    if (!retryable && !reseed) {
+      // SOMET-551 lifts SOMET-544's known limitation. "A retry cannot fix this"
+      // rests on the prompt being unchanged -- true when the only input was the
+      // catalogue template, and no longer true now a subject can be re-described.
+      // A subject whose description or notes changed since it failed WILL
+      // produce a different image from the same seed, so refusing that retry
+      // would push the operator to reseed and throw away a reproducible seed
+      // for no reason.
+      const changed = await Promise.all(mine.map(
+        (r) => artDescriptions.recipeChangedSince(pool, r.subject_kind, r.subject_key, r.updated_at),
+      ));
+      const eligible = mine.filter((_, i) => changed[i]);
+      if (eligible.length === 0) {
+        return res.status(409).json({
+          error: action === 'reseed'
+            ? 'these failed for a reason a retry cannot fix -- the seed is derived from the '
+              + 'subject, so the same image comes back. Rewrite the description, or pass '
+              + 'reseed:true for a different take.'
+            : 'these failed for a reason a retry cannot fix -- change the configuration first.',
+          action,
+        });
+      }
+      // Only the subjects whose recipe actually changed. Requeueing the rest
+      // would burn a generation to reproduce an image we already have.
+      mine = eligible;
+    }
+    if (!retryable && reseed && action !== 'reseed') {
+      return res.status(409).json({ error: 'a new seed cannot fix a configuration problem', action });
+    }
+
+    // Re-seeded jobs get a fresh salt so the image genuinely differs; the new
+    // seed is written to the row, which stays the record of what was drawn.
+    let requeued = 0;
+    for (const row of mine) {
+      const seed = reseed
+        ? artJobQueue.seedFor(row.subject_kind, row.subject_key, Date.now() % 1000000)
+        : null;
+      // eslint-disable-next-line no-await-in-loop
+      const r = await pool.query(
+        `UPDATE art_jobs
+            SET state = 'queued', attempts = 0, not_before = NULL, last_error = NULL,
+                claimed_at = NULL, seed = COALESCE($2, seed), updated_at = now()
+          WHERE id = $1 AND state = 'failed'`,
+        [row.id, seed],
+      );
+      requeued += r.rowCount;
+    }
+    res.json({
+      requeued,
+      reseeded: reseed,
+      // Named rather than silently folded into `requeued`: "5 failed, 0
+      // requeued" reads as a bug until you know the other 5 were already on
+      // their way.
+      already_queued: alreadyQueued,
+      stats: await artJobQueue.stats(pool),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to requeue art jobs' });
+  }
+});
+
 // Stops after the subjects in flight. Idempotent.
 app.post('/api/art-jobs/stop', adminGuard, (req, res) => {
   res.json({ stopping: artDispatcher.stopDrain(), run: artDispatcher.runStatus() });
@@ -3373,12 +3673,70 @@ app.post('/api/art-jobs/stop', adminGuard, (req, res) => {
 // stealing a job from a live worker generates the same subject twice.
 app.post('/api/art-jobs/requeue-stale', adminGuard, async (req, res) => {
   try {
-    const olderThanMs = Math.max(parseInt(req.body.older_than_ms, 10) || 3600000, 60000);
+    // THE THRESHOLD DEPENDS ON WHETHER A DRAIN IS RUNNING (SOMET-558).
+    //
+    // A claimed row can only legitimately be in progress if something is
+    // draining the queue, because the claim is taken by the drain and by
+    // nothing else. When no drain is running, every `running` row is by
+    // definition abandoned and an hour of waiting protects nothing -- it just
+    // leaves the admin staring at ten rows they cannot recover, having pressed
+    // the button the page told them to press and been answered "No stranded
+    // jobs". Measured today: a drain died four minutes into a batch and its
+    // ten claimed rows stayed unrecoverable for the next hour.
+    //
+    // The hour stays when a drain IS running, and that is the case it was
+    // written for: a slow subject on a cold pipeline must not be yanked out
+    // from under the worker still generating it.
+    const running = artDispatcher.runStatus().running;
+    const fallbackMs = running ? 3600000 : 60000;
+    const olderThanMs = Math.max(parseInt(req.body.older_than_ms, 10) || fallbackMs, 60000);
     const rows = await artJobQueue.requeueStale(pool, olderThanMs);
-    res.json({ requeued: rows.length, stats: await artJobQueue.stats(pool) });
+    res.json({
+      requeued: rows.length,
+      // Reported so the UI can say WHY nothing was rescued. "No stranded jobs"
+      // is the same sentence for "nothing was claimed" and "ten are claimed but
+      // a live drain still owns them", and those need opposite responses.
+      drain_running: running,
+      claimed: (await artJobQueue.inFlight(pool)).length,
+      stats: await artJobQueue.stats(pool),
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to requeue stale art jobs' });
+  }
+});
+
+// Throw away the PENDING queue: everything queued, plus any claimed row that
+// no drain owns (SOMET-558).
+//
+// DELIBERATELY NOT "all jobs". `done` and `failed` rows are the record of what
+// was attempted and why it went wrong -- the failures panel is built from them,
+// and deleting them would silently empty the one view that explains a bad
+// batch. What an admin means by "clear the jobs" is "forget the work I have not
+// done yet", and that is what this removes.
+//
+// REFUSED WHILE A DRAIN IS RUNNING, like dispatch is. Deleting rows a worker
+// is mid-generation on would have it resolve a job that no longer exists, and
+// the drain would report failures for subjects nobody asked it to stop.
+app.post('/api/art-jobs/clear', adminGuard, async (req, res) => {
+  try {
+    if (artDispatcher.runStatus().running) {
+      return res.status(409).json({
+        error: 'a batch is running -- press Stop and let the subjects in flight finish first',
+      });
+    }
+    const { rows } = await pool.query(
+      "DELETE FROM art_jobs WHERE state IN ('queued', 'running') RETURNING state",
+    );
+    res.json({
+      cleared: rows.length,
+      queued: rows.filter((r) => r.state === 'queued').length,
+      claimed: rows.filter((r) => r.state === 'running').length,
+      stats: await artJobQueue.stats(pool),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to clear the art queue' });
   }
 });
 
@@ -3629,6 +3987,52 @@ app.delete('/api/worlds/:id', adminGuard, async (req, res) => {
   }
 });
 
+// SOMET-554. Batched counts for the Maps admin tab's collapsed rows. That tab
+// used to mount a full card per world, each firing GET :id/links and
+// GET :id/villages -- 200 requests on a 100-world database, which is what made
+// the page look hung. One row per world, one request.
+//
+// MUST stay registered ABOVE `/api/worlds/:id`: Express matches in declaration
+// order, so below it the literal path would be swallowed as an `:id` of
+// "summary" and answered with a 404 from the uuid lookup.
+//
+// adminGuard, not playerGuard: this is an admin surface, and unlike
+// GET /api/worlds there is no per-player projection here to hide unvisited
+// worlds behind. Deliberately a separate route rather than extra columns on
+// GET /api/worlds, which GameShell and GameView read on every session.
+app.get('/api/worlds/summary', adminGuard, async (req, res) => {
+  try {
+    // Aggregated in subqueries rather than by joining both tables and grouping:
+    // a world with 3 links and 2 villages would otherwise produce 6 rows and
+    // count each side 6 times.
+    const result = await pool.query(
+      `SELECT w.id,
+              COALESCE(l.link_count, 0)    AS link_count,
+              COALESCE(l.portal_count, 0)  AS portal_count,
+              COALESCE(v.village_count, 0) AS village_count
+         FROM worlds w
+         LEFT JOIN (SELECT from_world_id,
+                           COUNT(*)                                  AS link_count,
+                           COUNT(*) FILTER (WHERE edge = 'PORTAL')   AS portal_count
+                      FROM map_links GROUP BY from_world_id) l ON l.from_world_id = w.id
+         LEFT JOIN (SELECT world_id, COUNT(*) AS village_count
+                      FROM villages GROUP BY world_id) v ON v.world_id = w.id`);
+    // COUNT() comes back from pg as a string (int8 has no lossless JS number
+    // type, so node-postgres does not parse it). Left alone, the row renders
+    // "0 villages" correctly but `portal_count > 0` is a string comparison and
+    // "0" is truthy -- every world would claim to be a dungeon.
+    res.json(result.rows.map((r) => ({
+      id: r.id,
+      link_count: Number(r.link_count),
+      portal_count: Number(r.portal_count),
+      village_count: Number(r.village_count),
+    })));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load world summary' });
+  }
+});
+
 // Same guard + projection as the list route above (SOMET-276 AC #4). No
 // frontend caller uses this directly today (checked via grep for
 // `api/worlds/${` excluding the sibling sub-routes), but it must not be a
@@ -3867,7 +4271,12 @@ app.put('/api/worlds/:id/graph-position', adminGuard, async (req, res) => {
 // swap which dungeon branch renders in which column on every refetch. Adding
 // from_x, from_y fully disambiguates: a partial unique index already makes
 // (from_world_id, from_x, from_y) unique for PORTAL rows.
-app.get('/api/world-graph', async (req, res) => {
+// SOMET-555: adminGuard. This is an admin surface -- the only caller is
+// the admin World Map Editor (useMapGraph.js). It carries no per-player projection, unlike
+// GET /api/worlds, so serving it unauthenticated handed every world's
+// topology (every world plus every map link) to anyone who could reach the port. Players get their own
+// character-scoped view from GET /api/player/world-map instead.
+app.get('/api/world-graph', adminGuard, async (req, res) => {
   try {
     const [worldsRes, linksRes] = await Promise.all([
       pool.query(
@@ -4007,7 +4416,12 @@ app.post('/api/worlds/:id/creatures', adminGuard, async (req, res) => {
 
 const EDGES = new Set(['N', 'E', 'S', 'W']);
 
-app.get('/api/worlds/:id/links', async (req, res) => {
+// SOMET-555: adminGuard. This is an admin surface -- the only caller is
+// the Maps tab's card body (useMapsAdmin.js). It carries no per-player projection, unlike
+// GET /api/worlds, so serving it unauthenticated handed every world's
+// edge and portal links to anyone who could reach the port. Players get their own
+// character-scoped view from GET /api/player/world-map instead.
+app.get('/api/worlds/:id/links', adminGuard, async (req, res) => {
   try {
     const rows = await fetchLinks(pool, req.params.id);
     res.json(rows.map((r) => ({ edge: r.edge, to_world_id: r.to_world_id })));
@@ -4082,7 +4496,12 @@ function validateVillageBody(body, worldRow, existing) {
   return null;
 }
 
-app.get('/api/worlds/:id/villages', async (req, res) => {
+// SOMET-555: adminGuard. This is an admin surface -- the only caller is
+// the Maps tab's card body (useMapsAdmin.js). It carries no per-player projection, unlike
+// GET /api/worlds, so serving it unauthenticated handed every world's
+// village boxes, gates and spawn points to anyone who could reach the port. Players get their own
+// character-scoped view from GET /api/player/world-map instead.
+app.get('/api/worlds/:id/villages', adminGuard, async (req, res) => {
   try {
     const r = await pool.query(
       `SELECT id, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y, merchant_x, merchant_y
@@ -4220,7 +4639,23 @@ app.delete('/api/worlds/:id/links/:edge', adminGuard, async (req, res) => {
   }
 });
 
-app.get('/api/worlds/:id/chunk', async (req, res) => {
+// SOMET-559: playerGuard, NOT adminGuard -- every signed-in player streams
+// chunks for the world they are standing in, so this must stay open to the
+// player role. Unauthenticated it handed any world's terrain to anyone who
+// could reach the port.
+//
+// The cost objection SOMET-555 recorded against guarding this route was
+// measured and did not survive: the guard adds ~4.8ms (one primary-key
+// SELECT on users) to a route that already issues about seven queries per
+// request -- the world row, tile types, decoration defs, links, villages,
+// biomes and the world_chunks probe -- on the cache-HIT path as well as the
+// miss path. That is +15%, not a new order of cost.
+//
+// /overview is deliberately still open (see PUBLIC_GETS in
+// tests/auth_protection.test.js): a warm /overview is served entirely from
+// worldOverviewCache and touches the DB zero times, so the same guard nearly
+// doubles it. That one is a real tradeoff and is still the user's call.
+app.get('/api/worlds/:id/chunk', playerGuard, async (req, res) => {
   try {
     const cx = Number(req.query.cx);
     const cy = Number(req.query.cy);
@@ -4285,7 +4720,12 @@ app.get('/api/worlds/:id/chunk', async (req, res) => {
   }
 });
 
-app.get('/api/worlds/:id/preview', async (req, res) => {
+// SOMET-559: playerGuard. Same exposure as /chunk (a world's terrain, at
+// preview resolution) and no per-player projection. Not a per-frame path
+// despite living next to the canvas fetchers -- WorldPreview.jsx requests it
+// once per world through TanStack Query, so the guard's cost is paid once per
+// world rather than once per rendered tile.
+app.get('/api/worlds/:id/preview', playerGuard, async (req, res) => {
   try {
     const worldId = req.params.id;
     if (worldPreviewCache.has(worldId)) {

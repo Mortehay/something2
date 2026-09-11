@@ -1,13 +1,25 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const request = require('supertest');
+// SOMET-559: this route is behind playerGuard now. helpers/auth.js MUST be
+// required before ../src/index.js -- it sets JWT_SECRET before the guards read it.
+const { playerToken, isUserLookup, userRowFor } = require('./helpers/auth.js');
 const { app, __setPool } = require('../src/index.js');
+
+// A plain PLAYER token, not an admin one: the real caller here is the game
+// client, and using a player identity means these tests would catch the route
+// being tightened to adminGuard by mistake.
+const AUTH = ['Authorization', `Bearer ${playerToken()}`];
+
 
 function mockPool(handlers) {
   const calls = [];
   return {
     calls,
     query: async (sql, params) => {
+      // Answered ahead of calls.push so the guard's user lookup never lands
+      // in `calls` -- these tests count queries.
+      if (isUserLookup(sql)) return userRowFor(params);
       calls.push({ sql, params });
       for (const [re, fn] of handlers) if (re.test(sql)) return fn(params);
       throw new Error(`unexpected query: ${sql}`);
@@ -28,7 +40,7 @@ test('GET /preview returns a 64x64 grid for a known world', async () => {
     [/FROM villages WHERE world_id/i, () => ({ rows: [] })],
   ]);
   __setPool(pool);
-  const res = await request(app).get('/api/worlds/w1/preview');
+  const res = await request(app).get('/api/worlds/w1/preview').set(...AUTH);
   assert.equal(res.status, 200);
   assert.equal(res.body.world_id, 'w1');
   assert.equal(res.body.data.length, 64);
@@ -43,7 +55,7 @@ test('GET /preview 404s for an unknown world', async () => {
   __setPool(mockPool([
     [/FROM worlds WHERE id/i, () => ({ rows: [] })],
   ]));
-  const res = await request(app).get('/api/worlds/nope/preview');
+  const res = await request(app).get('/api/worlds/nope/preview').set(...AUTH);
   assert.equal(res.status, 404);
 });
 
@@ -66,7 +78,7 @@ test('GET /preview restricts terrain to the world\'s declared biome', async () =
     ] })],
   ]);
   __setPool(pool);
-  const res = await request(app).get('/api/worlds/biomePreview/preview');
+  const res = await request(app).get('/api/worlds/biomePreview/preview').set(...AUTH);
   assert.equal(res.status, 200);
   const seen = new Set(res.body.data.flat());
   assert.ok(!seen.has('water'), 'water is outside the declared biome and must not appear');
@@ -85,9 +97,23 @@ test('GET /preview memoizes: a second request does not re-query the world', asyn
     [/FROM villages WHERE world_id/i, () => ({ rows: [] })],
   ]);
   __setPool(pool);
-  const a = await request(app).get('/api/worlds/memo1/preview');
-  const b = await request(app).get('/api/worlds/memo1/preview');
+  const a = await request(app).get('/api/worlds/memo1/preview').set(...AUTH);
+  const b = await request(app).get('/api/worlds/memo1/preview').set(...AUTH);
   assert.deepEqual(a.body.data, b.body.data);
   const worldQueries = pool.calls.filter((c) => /FROM worlds WHERE id/i.test(c.sql)).length;
   assert.equal(worldQueries, 1, 'second request should hit the memo, not the DB');
+});
+
+// --- SOMET-559: the route is behind playerGuard ---------------------------
+
+test('GET /preview without a token is 401, and returns no grid', async () => {
+  __setPool(mockPool([
+    [/FROM worlds WHERE id/i, () => ({ rows: [{ id: 'guard1', seed: '7', chunk_size: 64 }] })],
+    [/FROM tile_types/i, () => tileRows],
+    [/FROM map_links/i, () => ({ rows: [] })],
+    [/FROM villages WHERE world_id/i, () => ({ rows: [] })],
+  ]));
+  const res = await request(app).get('/api/worlds/guard1/preview');
+  assert.equal(res.status, 401);
+  assert.equal(res.body.data, undefined, 'a rejected request must not leak the preview grid');
 });

@@ -7,6 +7,40 @@ const { withAdvisoryLock } = require('./advisoryLock.js');
 // Any fixed integer; it only has to be the same in every process.
 const ENTRY_LOCK_KEY = 626526517;
 
+// How long a READER of this key should wait before giving up (SOMET-534).
+//
+// The 6s default is calibrated for a key whose holders are a handful of
+// queries. This one's holders each apply a whole map spec. A reader on the
+// default never got in: four whole-database invariants in
+// villageScreenBudget_db.test.js skipped on EVERY full run -- measured at 4
+// skips per run, for months.
+//
+// THE NUMBER COMES FROM THE LONGEST SINGLE HOLD, measured rather than averaged:
+//
+//     p5-descent   first 61.6s   second 58.8s
+//     vale-region  first 13.9s   second 11.4s
+//
+// The applies are NOT uniform -- p5-descent seeds 66 worlds and ~98k creatures
+// against vale-region's 34 and ~29k. Dividing the old 121s window by four
+// applies suggests ~30s and is wrong; a 45s wait was tried on that arithmetic
+// and still lost twice per run, because one apply alone exceeds it.
+//
+// 90s is ~1.5x the longest measured hold. It is NOT a budget for the file: a
+// reader can never wait longer than a writer actually holds, so the four
+// acquisitions together cannot exceed the ~146s of total holding -- comfortably
+// inside the runner's 420s per-file timeout. The cap only has to clear the
+// longest single hold, and it is stated as an absolute so that reading this
+// tells you what it does.
+//
+// This is only workable because the 121-SECOND single window in
+// seed_map_db.test.js has been split into one window per apply. Against that
+// hold no wait short of the file's whole budget would have worked, which is why
+// the ticket originally wrote off waiting as a dead end.
+//
+// IF p5-descent GROWS, this number has to grow with it. That coupling is the
+// real cost of the approach; the alternative is making seeding itself faster.
+const ENTRY_LOCK_WAIT_MS = 90000;
+
 // Save whichever world is currently is_entry, run fn, restore it -- and hold a
 // Postgres advisory lock for the whole window so no other test process can be
 // inside its own save/restore at the same time.
@@ -183,5 +217,6 @@ async function entryWorldForJoin(pool) {
 }
 
 module.exports = {
-  withEntryPreserved, ENTRY_LOCK_KEY, entryWorldForJoin, joinableEntryWorldName,
+  withEntryPreserved, ENTRY_LOCK_KEY, ENTRY_LOCK_WAIT_MS,
+  entryWorldForJoin, joinableEntryWorldName,
 };

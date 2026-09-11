@@ -5,7 +5,13 @@ const { pngHasAlpha, readObjectHead } = require('./bulkImageRegeneration.js');
 const { alphaProfile, MIN_TRANSPARENT_PCT } = require('./pngAlpha.js');
 const assetStore = require('./assetStore.js');
 const aiProviders = require('./aiProviders.js');
-const { buildObjectPrompt, BACKDROP, CUTOUT_BACKDROP } = require('./objectPrompt.js');
+const history = require('./artGenerations.js');
+const promptNotes = require('./artPromptNotes.js');
+const descriptions = require('./artPromptDescriptions.js');
+const failures = require('./artFailures.js');
+const {
+  buildObjectPrompt, BACKDROP, CUTOUT_BACKDROP, OBJECT_NEGATIVES,
+} = require('./objectPrompt.js');
 
 // SOMET-540. The loop that turns queued art jobs into images.
 //
@@ -25,7 +31,25 @@ const { buildObjectPrompt, BACKDROP, CUTOUT_BACKDROP } = require('./objectPrompt
 
 // A cap, not a target. The remote decides how much parallelism actually helps;
 // this only stops us from opening 617 sockets at once.
-const DEFAULT_CONCURRENCY = () => parseInt(process.env.ART_DISPATCH_CONCURRENCY || '2', 10);
+// ONE AT A TIME, measured rather than cautious. The remote card's effective
+// headroom -- free VRAM plus what torch has reserved and can reuse -- sits
+// UNDER 7GB in normal operation, which is one SDXL pipeline. Two concurrent
+// generations need two pipelines' worth of activations, so a default of 2 was
+// asking the driver for memory that is not there; that request is the
+// dxgkio_make_resident ENOMEM behind every fault this provider has had.
+//
+// Raise it only for a provider known to have headroom for it.
+const DEFAULT_CONCURRENCY = () => parseInt(process.env.ART_DISPATCH_CONCURRENCY || '1', 10);
+
+// How many DIFFERENT subjects may fail in a row before the drain gives up.
+//
+// Distinct subjects is the whole point: one subject failing three times is a
+// bad subject and the attempt cap already handles it. Three different subjects
+// failing in a row is the PROVIDER, and continuing then just converts the rest
+// of the queue into failures at whatever rate the failures come back -- which,
+// when a provider is faulted and answering in 60ms, is fast. Concurrency does
+// not bound that; only stopping does.
+const BREAKER_TRIP = () => parseInt(process.env.ART_BREAKER_TRIP || '3', 10);
 
 // --- The resolution precondition ------------------------------------------
 //
@@ -118,16 +142,56 @@ async function requestForSubject(db, job, subject, reg, provider) {
   // A kind that composes its own prompt does so (tiles need their biome's
   // palette and exclusions, which is a database read). Everything else is an
   // isolated object and takes the shared wrapper.
+  // SOMET-548. A kind that composes its own prompt (tiles) is left alone:
+  // corrections are an OBJECT feature, and a tile's prompt is built from its
+  // biome's palette rather than from a subject description.
+  // SOMET-558. Notes now take TWO routes, because negation does not survive the
+  // positive prompt: CLIP has no reliable "not", so an exclusion written there
+  // conditions the very thing it names IN. `splitNotes` decides which is which
+  // from the stored kind -- it is not guessed from the text.
+  //
+  // SOMET-549 still holds for the reshape half: the note's words PLUS its
+  // region as a phrase, composed in one place so the prompt cannot disagree
+  // with what the UI showed.
+  const { corrections, avoid } = reg.composePrompt
+    ? { corrections: [], avoid: [] }
+    : promptNotes.splitNotes(
+      await promptNotes.listActive(db, job.subject_kind, job.subject_key),
+    );
+  // SOMET-551. A written description replaces the catalogue's templated
+  // subject phrase when one exists. With none stored this resolves to
+  // subject.basePrompt and the composed prompt is byte-for-byte unchanged --
+  // which matters: 87 items already have art generated from the template, and
+  // a silent prompt change would alter a regeneration for reasons nobody could
+  // see. Tiles are exempt for the same reason they are exempt from notes.
+  const { phrase, promptModel } = reg.composePrompt
+    ? { phrase: null, promptModel: null }
+    : await descriptions.subjectPhrase(
+      db, job.subject_kind, job.subject_key, subject.basePrompt,
+    );
+
   const prompt = reg.composePrompt
     ? await reg.composePrompt(db, subject)
-    : buildObjectPrompt(subject.basePrompt, { backdrop: backdropFor(provider) });
+    : buildObjectPrompt(phrase, {
+      backdrop: backdropFor(provider), corrections,
+    });
 
   const req = {
     subject: subject.name || subject.key,
     kind: generationKind,
     prompt,
+    // Carried so the history can record WHO wrote the prompt, not only which
+    // image model drew it. Stripped before the provider sees the body.
+    promptModel,
     seed: Number(job.seed),
     frames: 1,                       // never a sheet
+    // Terms for negative_prompt rather than the prompt. Merged into the
+    // provider body by remoteImageProvider, which owns the template.
+    //
+    // The house framing exclusions lead, then the operator's. Objects ONLY:
+    // a tile is legitimately full of ground and floor, and steering a terrain
+    // texture away from them would ruin every tile in the catalogue.
+    negative: generationKind === 'object' ? [...OBJECT_NEGATIVES, ...avoid] : avoid,
   };
   // THE NATIVE-RESOLUTION ASK IS FOR OBJECTS ONLY. A seamless tile is not an
   // isolated subject and does not tile-repeat the way an off-native object
@@ -172,12 +236,50 @@ async function runOne(db, job, {
   subjects = catalogSubjects,
   deps = {},
 } = {}) {
-  const fail = async (message) => {
-    await queue.fail(db, job.id, new Error(message));
-    return { id: job.id, ok: false, error: message };
+  let req;
+  let registryId = null;
+
+  // What was ACTUALLY sent, when we can see it. runGeneration publishes the
+  // final payload on the registry entry once the template has been merged, so
+  // this reports steps, cfg_scale and the sampler rather than only the size the
+  // dispatcher asked for. Before that point (or after an eviction) it falls
+  // back to our own request, which is honest: a subject that never reached the
+  // provider has no sent payload, and recording the intent is the useful fact.
+  const sentOrIntended = () => {
+    const doc = registryId ? remote.getJob(registryId) : null;
+    return (doc && doc.sentBody) || req;
   };
 
-  let req;
+  // When the provider call began, for the fast-fault refund below. Set at the
+  // top rather than beside `generate` so a failure BEFORE the call (an unknown
+  // subject, a missing registry) is also measured -- those are our own faults
+  // and resolve instantly, and charging the subject an attempt for them is the
+  // same mistake in a different coat.
+  const startedAt = Date.now();
+
+  // SOMET-547. Every failure in this function goes through `fail`, and every
+  // success through the tail, so those two points are the whole history.
+  const fail = async (message) => {
+    await history.record(db, {
+      job, provider, req: sentOrIntended(), outcome: 'failed', error: message,
+      // From OUR request, not the sent body -- the provider payload has no such
+      // field, and reading it from there would silently record null forever.
+      promptModel: req && req.promptModel,
+    });
+    // SOMET-558. A fault the provider returned faster than it could possibly
+    // have drawn anything is not an attempt at this subject, so it does not
+    // cost one. Gated on the failure being PROVIDER-class as well as fast: a
+    // subject whose own cutout keyed it away is a real attempt however quickly
+    // it came back, and refunding that would retry a hopeless subject forever.
+    const elapsed = Date.now() - startedAt;
+    const refundAttempt = elapsed < queue.FAST_FAULT_MS()
+      && failures.classify(message).retryable;
+    await queue.fail(db, job.id, new Error(message), { refundAttempt });
+    return {
+      id: job.id, ok: false, error: message,
+      subject: `${job.subject_kind}/${job.subject_key}`,
+    };
+  };
   // Only an OBJECT gets the cutout guards. A tile is legitimately opaque, and
   // checking it as an object would refuse every tile in the catalogue.
   // Defaults to 'object' for an injected buildRequest, which is what every
@@ -199,7 +301,7 @@ async function runOne(db, job, {
     generationKind = reg.generationKind;
   }
 
-  const registryId = remote.createJob();
+  registryId = remote.createJob();
   try {
     await generate(registryId, provider, req, deps);
   } catch (err) {
@@ -232,8 +334,15 @@ async function runOne(db, job, {
       + `${err && err.message ? err.message : err}`);
   }
 
+  await history.record(db, {
+    job, provider, req: sentOrIntended(), outcome: 'done', imageKey,
+    promptModel: req && req.promptModel,
+  });
   await queue.complete(db, job.id);
-  return { id: job.id, ok: true, imageKey, result: doc.result };
+  return {
+    id: job.id, ok: true, imageKey, result: doc.result,
+    subject: `${job.subject_kind}/${job.subject_key}`,
+  };
 }
 
 // Point the subject at its new image, through SOMET-535's registry -- items
@@ -376,6 +485,7 @@ async function dispatch(db, {
   provider,
   limit = 10,
   concurrency = DEFAULT_CONCURRENCY(),
+  onResult = null,
   generate,
   buildRequest,
   writeArt,
@@ -398,11 +508,18 @@ async function dispatch(db, {
   const resolveSubject = subjectResolver(db, subjects);
   const results = [];
   let cursor = 0;
+  // SOMET-558. `onResult` may stop the pass. Without it the breaker could only
+  // be consulted AFTER a whole pass returned, so its threshold was unreachable:
+  // a wedged provider answering in 200ms resolved all ten claimed jobs in under
+  // two seconds, and BREAKER_TRIP=3 tripped at ten every time. The guard was
+  // real, configured, and disarmed by the granularity of the thing it guarded.
+  let aborted = false;
   // A fixed pool of workers pulling from a shared cursor, rather than slicing
   // the list into equal chunks: subjects do not take equal time, and chunking
   // would leave one worker finishing long after the others idled.
   const workers = Array.from({ length: Math.max(1, concurrency) }, async () => {
     for (;;) {
+      if (aborted) return;
       const i = cursor;
       cursor += 1;
       if (i >= claimed.length) return;
@@ -411,13 +528,26 @@ async function dispatch(db, {
       const jobProvider = buildRequest
         ? provider
         : await resolveJobProvider(db, job.provider_id, provider, loadProvider);
-      results.push(await runOne(db, job, {
+      const result = await runOne(db, job, {
         provider: jobProvider, generate, buildRequest, writeArt, resolveSubject,
         subjects, deps,
-      }));
+      });
+      results.push(result);
+      // Checked the instant a result lands, so the pass stops on the third
+      // consecutive provider failure rather than on the tenth.
+      if (onResult && onResult(result) === 'stop') { aborted = true; return; }
     }
   });
   await Promise.all(workers);
+
+  // An aborted pass must not leave its untouched remainder claimed. claim()
+  // stamped every one of them, so without this the breaker would strand
+  // `limit - processed` jobs in `running` for an hour -- trading the failure
+  // this fix prevents for a different one.
+  if (aborted) {
+    const resolved = new Set(results.map((r) => r.id));
+    await queue.release(db, claimed.filter((j) => !resolved.has(j.id)).map((j) => j.id));
+  }
 
   return {
     claimed: claimed.length,
@@ -503,16 +633,45 @@ function startDrain(db, opts = {}) {
     finishedAt: null, passes: 0, done: 0, failed: 0, error: null,
     waitingUntil: null,
   };
+  // Distinct subjects that have failed on the PROVIDER since the last success.
+  // A Set, not a counter: the same subject failing repeatedly says nothing
+  // about the provider, and the attempt cap already ends that.
+  const brokenSubjects = new Set();
   const self = run;
 
   (async () => {
     try {
       for (;;) {
         if (self.stopping) break;
-        const out = await dispatch(db, opts);
+        // The breaker now runs as each result lands (SOMET-558), so a wedged
+        // provider stops the pass at BREAKER_TRIP instead of after all `limit`
+        // claimed jobs have been converted into failures.
+        let tripped = false;
+        const onResult = (r) => {
+          if (r.ok) { brokenSubjects.clear(); return null; }
+          // Only PROVIDER-class failures count. A subject whose cutout keyed
+          // away its own image says nothing about the provider's health, and
+          // tripping on it would stop a perfectly good batch -- exactly the
+          // mistake an external watchdog made here before the distinction
+          // existed.
+          if (!failures.classify(r.error).retryable) return null;
+          brokenSubjects.add(r.subject);
+          if (brokenSubjects.size < BREAKER_TRIP()) return null;
+          tripped = true;
+          return 'stop';
+        };
+        const out = await dispatch(db, { ...opts, onResult });
         self.passes += 1;
         self.done += out.done;
         self.failed += out.failed;
+
+        // THE CIRCUIT BREAKER fired inside the pass; this only reports it.
+        if (tripped) {
+          self.error = `stopped after ${brokenSubjects.size} different subjects failed on the `
+            + 'provider in a row -- it looks down rather than the subjects being bad. '
+            + 'Nothing was lost: they are queued and will retry.';
+          break;
+        }
         // SOMET-543. Nothing claimed no longer means the queue is empty: it
         // also happens when every remaining job is serving its retry backoff.
         // Treating the second as the first would END A BATCH with 90 subjects

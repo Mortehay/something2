@@ -475,7 +475,7 @@ test("PUT /api/worlds/:id changing the biome set busts the preview cache too", a
   ]);
   __setPool(pool);
 
-  const first = await request(app).get('/api/worlds/wPrev/preview');
+  const first = await request(app).get('/api/worlds/wPrev/preview').set(ADMIN_HEADERS);
   assert.equal(first.status, 200);
   assert.equal(worldSelectCount, 1, 'sanity: the first GET must populate the preview cache from the DB');
 
@@ -484,7 +484,7 @@ test("PUT /api/worlds/:id changing the biome set busts the preview cache too", a
   });
   assert.equal(put.status, 200);
 
-  const second = await request(app).get('/api/worlds/wPrev/preview');
+  const second = await request(app).get('/api/worlds/wPrev/preview').set(ADMIN_HEADERS);
   assert.equal(second.status, 200);
   assert.equal(worldSelectCount, 2,
     'a biome-set change must bust the preview cache, not just world_chunks -- ' +

@@ -342,6 +342,25 @@ function generateConnectingRoads(cfg, defaultPathTile) {
     }
   }
 
+  // Connect each village's main gate to its Skill House gate with a wide visible road
+  if (Array.isArray(cfg.villages)) {
+    for (const v of cfg.villages) {
+      const mainExit = villageGateExit(v);
+      const skHouse = villageSkillHouse(v);
+      const skExit = villageGateExit(skHouse);
+      const [r1, c1] = mainExit.exit;
+      const [r2, c2] = skExit.exit;
+      addRoad([[r1, c1], [r2, c1], [r2, c2]]);
+      if (v.gateEdge === 'E' || v.gateEdge === 'W') {
+        const offsetCol = v.gateEdge === 'E' ? -1 : 1;
+        addRoad([[r1, c1 + offsetCol], [r2 - 1, c1 + offsetCol], [r2 - 1, c2]]);
+      } else {
+        const offsetRow = v.gateEdge === 'S' ? -1 : 1;
+        addRoad([[r1 + offsetRow, c1], [r1 + offsetRow, c2], [r2, c2]]);
+      }
+    }
+  }
+
   // Doorway highways and village avenues
   if (cfg.bounds && cfg.bounds.doorways && cfg.bounds.width && cfg.bounds.height) {
     const w = cfg.bounds.width, h = cfg.bounds.height;
@@ -538,7 +557,10 @@ function generateRegion(world, rMin, cMin, rows, cols) {
   }
   if (cfg.bounds) stampBounds(grid, rMin, cMin, rows, cols, cfg.bounds);
   if (cfg.villages) {
-    for (const v of cfg.villages) stampVillage(grid, rMin, cMin, rows, cols, v);
+    for (const v of cfg.villages) {
+      stampVillage(grid, rMin, cMin, rows, cols, v);
+      stampVillage(grid, rMin, cMin, rows, cols, villageSkillHouse(v));
+    }
   }
   return grid;
 }
@@ -692,6 +714,10 @@ function isExcludedBlockerCell(cfg, spawn, portals, gRow, gCol) {
       if (gRow >= v.minRow - VILLAGE_RING && gRow < v.minRow + v.height + VILLAGE_RING &&
           gCol >= v.minCol - VILLAGE_RING && gCol < v.minCol + v.width + VILLAGE_RING) return true;
       if (inGateCorridor(v, gRow, gCol)) return true;
+      const sk = villageSkillHouse(v);
+      if (gRow >= sk.minRow - VILLAGE_RING && gRow < sk.minRow + sk.height + VILLAGE_RING &&
+          gCol >= sk.minCol - VILLAGE_RING && gCol < sk.minCol + sk.width + VILLAGE_RING) return true;
+      if (inGateCorridor(sk, gRow, gCol)) return true;
     }
   }
   if (inDoorwayApproach(cfg.bounds, gRow, gCol)) return true;
@@ -954,8 +980,15 @@ function safeContextFor(cfg) {
   const hit = SAFE_CTX.get(cfg);
   if (hit) return hit;
   const radius = Number(cfg.safeRoadRadius) || 0;
+  const allVillages = [];
+  if (Array.isArray(cfg.villages)) {
+    for (const v of cfg.villages) {
+      allVillages.push(v);
+      allVillages.push(villageSkillHouse(v));
+    }
+  }
   const ctx = buildSafeContext({
-    villages: cfg.villages,
+    villages: allVillages,
     pathCells: radius > 0 && cfg.bounds
       ? new Set(collectPathCells(cfg, 0, 0, cfg.bounds.height, cfg.bounds.width).keys())
       : new Set(),
@@ -1304,6 +1337,8 @@ function villageContaining(gRow, gCol, villages) {
   if (!villages) return null;
   for (const v of villages) {
     if (pointInVillageBox(gRow, gCol, v)) return v;
+    const sk = villageSkillHouse(v);
+    if (pointInVillageBox(gRow, gCol, sk)) return sk;
   }
   return null;
 }
@@ -1501,6 +1536,44 @@ function villageGemMerchantPost(v, merchant = null) {
 
   // Degenerate 3x3 fallback
   return { x: mCol * 100 + 50, y: mRow * 100 + 50 };
+}
+
+// Dedicated house/building for the Skill Merchant / Trainer.
+// Stamped as a 4x4 building with wooden walls and gate near the village.
+function villageSkillHouse(v) {
+  const w = 4, h = 4;
+  let minRow, minCol, gateEdge;
+  if (v.gateEdge === 'S' || v.gateEdge === 'N') {
+    minRow = v.minRow;
+    minCol = v.minCol + v.width + 2;
+    gateEdge = 'W';
+  } else if (v.gateEdge === 'W') {
+    minRow = v.minRow + v.height + 2;
+    minCol = v.minCol + Math.max(0, v.width - w);
+    gateEdge = 'N';
+  } else {
+    // 'E'
+    minRow = v.minRow + v.height + 2;
+    minCol = v.minCol;
+    gateEdge = 'N';
+  }
+  return {
+    minRow,
+    minCol,
+    width: w,
+    height: h,
+    gateEdge,
+    wallTile: 'wooden_wall',
+    gateTile: 'village_gate',
+  };
+}
+
+// Skill Merchant post: stands inside the dedicated Skill House.
+function villageSkillMerchantPost(v) {
+  const house = villageSkillHouse(v);
+  const row = house.minRow + 1;
+  const col = house.minCol + 1;
+  return { x: col * 100 + 50, y: row * 100 + 50 };
 }
 
 function stampVillage(grid, rMin, cMin, rows, cols, village) {
@@ -1829,6 +1902,8 @@ module.exports = {
     villageMerchantPost,
     villageBankPost,
     villageGemMerchantPost,
+    villageSkillMerchantPost,
+    villageSkillHouse,
     DOORWAY_TILES,
     // SOMET-510: the decoration clearance rule and the geometry it is built
     // from, exported so the rule can be tested cell-by-cell rather than only

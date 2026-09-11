@@ -29,7 +29,7 @@ export function bindGameCanvas(existingGame, canvasEl, createGame) {
   if (!canvasEl) return existingGame;
   const game = existingGame || createGame();
   game.canvas = canvasEl;
-  game.ctx = canvasEl.getContext('2d');
+  game.ctx = canvasEl.getContext('2d', { willReadFrequently: true });
   if (typeof game.resizeCanvas === 'function') game.resizeCanvas();
   return game;
 }

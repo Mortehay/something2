@@ -94,10 +94,60 @@ function getXpToNext(level) {
   return l >= MAX_LEVEL ? Infinity : levelWorth(l);
 }
 
+// SOMET-569. Where a sprite actually goes inside the box it was given.
+//
+// THE BUG THIS REPLACES. Every sprite was blitted with the five-argument
+// drawImage(img, x, y, w, h), which STRETCHES the whole source canvas into the
+// destination box. A subject therefore rendered with its true shape only when
+// its canvas aspect happened to equal its box aspect -- an invisible coupling
+// between an image file and a database column, with nothing anywhere asserting
+// it. It was broken in both directions at once:
+//
+//   - all 301 creatures render into a hardcoded square 48x48 (CREATURE_SIZE in
+//     authority/creatures.js; display_width/display_height are NULL for every
+//     one of them and never consulted), so trimming their art to a tight
+//     non-square crop squashed them -- a staff came out 7.04x too wide.
+//   - pine_tree (64x104), dead_tree (56x92), Tree (64x96) and rose_bush (40x44)
+//     carry SQUARE art in non-square boxes, and had been rendering distorted
+//     0.61-0.67x for as long as they have existed.
+//
+// Fitting instead of stretching deletes the coupling rather than working around
+// it: the canvas aspect stops mattering, so art can be trimmed as tightly as
+// possible and still render true.
+//
+// BOTTOM-ALIGNED, NOT CENTRED, and this is the part that is easy to get wrong.
+// The caller places the box so the actor's FEET sit on drawY + h -- the
+// projection of the world-box centre that movement and collision resolve
+// against (see the SOMET-319 note in drawCreature). Centring the fitted sprite
+// vertically would lift those feet off the anchor by half the leftover space,
+// so a short-and-wide creature would hover above the ground it is standing on.
+// Horizontally there is no such constraint, so it centres.
+//
+// NOT FOR TILES OR WALLS. Ground is full-bleed by definition: a fitted tile
+// would leave transparent gaps between diamonds. The tile path at line ~317
+// deliberately still stretches.
+export function fitSpriteRect(imgW, imgH, boxX, boxY, boxW, boxH) {
+  // A width/height of 0 is what an Image reports before it has decoded, and
+  // scaling by 0/0 yields NaN -- which Canvas 2D silently drops, so the sprite
+  // would vanish with no error anywhere. Fall back to the box.
+  if (!(imgW > 0) || !(imgH > 0)) {
+    return { dx: boxX, dy: boxY, dw: boxW, dh: boxH };
+  }
+  const scale = Math.min(boxW / imgW, boxH / imgH);
+  const dw = imgW * scale;
+  const dh = imgH * scale;
+  return {
+    dx: boxX + (boxW - dw) / 2,     // centred across
+    dy: boxY + (boxH - dh),         // feet on the box's bottom edge
+    dw,
+    dh,
+  };
+}
+
 export class RenderSystem {
   constructor(canvas, imageManager) {
     this.canvas = canvas;
-    this.ctx = canvas.getContext("2d");
+    this.ctx = canvas.getContext("2d", { willReadFrequently: true });
     this.ctx.imageSmoothingEnabled = false;
     this.imageManager = imageManager;
     // Global render-mode override (dev toggle). null = use each entity's own
@@ -234,6 +284,8 @@ export class RenderSystem {
     // Dedicated Skill Gem Merchant
     gemMerchants = [], gemShopOpen = false, gemShopColorFilter = "all", gemShopClassFilter = "all",
     gemShopPage = 0, gemShopSelectedGemId = null,
+    // Skill Trainer / Merchant
+    skillMerchants = [],
     // SOMET-310. Same join-frame fixed-world-point shape as `merchants`.
     banks = [], bank = null, bankOpen = false, bankView = null,
     // SOMET-372 -- WORLD chests (guarded, lootable), not the account chest
@@ -272,7 +324,7 @@ export class RenderSystem {
     skillsOpen = false, skillsTab = "inventory", skillsPage = 0, skillsClassFilter = "all",
     selectedSkillId = null, skillDrag = null, hotbarSkills = null, inventoryGems = [],
     skillHoverSlot = null, playerClass = null, activeForm = null, flashSlot = null,
-    skillCooldowns = null, activeBuffs = [],
+    skillCooldowns = null, activeBuffs = [], unlockedSkills = null,
     hoveredSkill = null, cursorX = null, cursorY = null,
   }) {
     if (vfxDefs) this.vfxDefs = vfxDefs;
@@ -381,6 +433,9 @@ export class RenderSystem {
     for (const gm of gemMerchants) {
       drawables.push({ kind: "gem_merchant", ref: gm, order: 0, depth: depthKey(gm.x, gm.y) });
     }
+    for (const sm of skillMerchants) {
+      drawables.push({ kind: "skillMerchant", ref: sm, order: 0, depth: depthKey(sm.x, sm.y) });
+    }
     // Bank posts are the same kind of fixed world point as merchants, and go
     // through the same depth sort — a chest one tile behind the merchant must
     // draw behind them, which a separate later pass would get wrong.
@@ -407,6 +462,7 @@ export class RenderSystem {
       else if (d.kind === "grounditem") this.drawGroundItem(d.ref, inventory, player);
       else if (d.kind === "merchant") this.drawMerchant(d.ref, player);
       else if (d.kind === "gem_merchant") this.drawGemMerchant(d.ref, player);
+      else if (d.kind === "skillMerchant") this.drawSkillMerchant(d.ref, player);
       else if (d.kind === "bank") this.drawBank(d.ref, player);
       else if (d.kind === "worldchest") this.drawWorldChest(d.ref, player);
       else if (d.kind === "decoration") this.drawEntity(d.ref);
@@ -476,6 +532,9 @@ export class RenderSystem {
         equippedWeapon,
         hotbarSkills: hotbarSkills || new Map(),
         inventoryGems: inventoryGems || [],
+        playerGold: gold ?? 0,
+        playerLevel: (progression && progression.level) || 1,
+        unlockedSkills,
       }, this._skillsHitAreas);
     }
 
@@ -2250,7 +2309,54 @@ export class RenderSystem {
         this.ctx.fillText("[e] Skill Gems", dx, dy + r + 14);
       }
     }
+    this.ctx.restore();
+  }
 
+  // Skill Merchant / Trainer: fixed world marker opposite the bank chest.
+  // Azure/cyan diamond (#38bdf8) with star symbol and "[e] Skills" prompt.
+  drawSkillMerchant(sm, player = null) {
+    const s = worldToScreen(sm.x, sm.y);
+    const dx = s.x, dy = s.y;
+    const r = 11;
+    this.ctx.save();
+    this.ctx.fillStyle = "#38bdf8";
+    this.ctx.strokeStyle = "rgba(0,0,0,0.6)";
+    this.ctx.lineWidth = 2;
+    this.ctx.beginPath();
+    this.ctx.moveTo(dx, dy - r);
+    this.ctx.lineTo(dx + r, dy);
+    this.ctx.lineTo(dx, dy + r);
+    this.ctx.lineTo(dx - r, dy);
+    this.ctx.closePath();
+    this.ctx.fill();
+    this.ctx.stroke();
+
+    // Star icon in center
+    this.ctx.fillStyle = "#ffffff";
+    this.ctx.font = "bold 10px sans-serif";
+    this.ctx.textAlign = "center";
+    this.ctx.textBaseline = "middle";
+    this.ctx.fillText("✦", dx, dy);
+
+    this.ctx.font = "12px sans-serif";
+    this.ctx.textBaseline = "alphabetic";
+    this.ctx.fillStyle = "#fff";
+    this.ctx.fillText("Skill Trainer", dx, dy - r - 6);
+
+    // Show prompt when player is within interact range
+    if (player) {
+      const pcx = player.x + (player.width || 0) / 2;
+      const pcy = player.y + (player.height || 0) / 2;
+      const d = Math.hypot(sm.x - pcx, sm.y - pcy);
+      if (d <= WORLD_CHEST_PROMPT_R) {
+        this.ctx.font = "bold 11px sans-serif";
+        this.ctx.fillStyle = "#38bdf8";
+        this.ctx.strokeStyle = "rgba(0,0,0,0.85)";
+        this.ctx.lineWidth = 2;
+        this.ctx.strokeText("[e] Skills", dx, dy + r + 14);
+        this.ctx.fillText("[e] Skills", dx, dy + r + 14);
+      }
+    }
     this.ctx.restore();
   }
 
@@ -2548,7 +2654,9 @@ export class RenderSystem {
     const img = this.imageManager.get(imageKey);
     this.ctx.globalAlpha = alpha;
     if (img) {
-      this.ctx.drawImage(img, drawX, drawY, w, h);
+      // SOMET-569: fit, do not stretch. See fitSpriteRect.
+      const r = fitSpriteRect(img.width, img.height, drawX, drawY, w, h);
+      this.ctx.drawImage(img, r.dx, r.dy, r.dw, r.dh);
     } else {
       // Mid-body of the box the image path draws (drawY .. drawY + h), so the
       // placeholder occupies the same footprint as a real sprite would.
@@ -2612,7 +2720,12 @@ export class RenderSystem {
     const sprite = RenderSystem.resolveSprite(e, this.imageManager, mode, this.nowMs);
     if (sprite) {
       const [sx, sy, sw, sh] = sprite.crop;
-      this.ctx.drawImage(sprite.img, sx, sy, sw, sh, drawX, drawY, w, h);
+      // SOMET-569: the FRAME's dimensions decide the fit, not the atlas's. A
+      // sheet is a grid of cells and each cell is as aspect-sensitive as a
+      // standalone image; using the atlas size here would fit against the whole
+      // sheet and squash every frame in it.
+      const r = fitSpriteRect(sw, sh, drawX, drawY, w, h);
+      this.ctx.drawImage(sprite.img, sx, sy, sw, sh, r.dx, r.dy, r.dw, r.dh);
     } else {
       // Legacy single-image fallback (whole image) still honored in sprite modes;
       // then degrade to a rectangle so a missing asset never leaves a hole.
@@ -2620,7 +2733,11 @@ export class RenderSystem {
         ? this.imageManager.get(e.image)
         : null;
       if (img) {
-        this.ctx.drawImage(img, drawX, drawY, w, h);
+        // SOMET-569: fit, do not stretch. This is the path the four
+        // non-square decorations take (pine_tree, dead_tree, Tree, rose_bush),
+        // which is why they had been rendering squashed to 0.61-0.67x.
+        const r = fitSpriteRect(img.width, img.height, drawX, drawY, w, h);
+        this.ctx.drawImage(img, r.dx, r.dy, r.dw, r.dh);
       } else {
         this.ctx.fillStyle = e.color || "#c0392b";
         this.ctx.fillRect(drawX, drawY, w, h);
@@ -3780,4 +3897,5 @@ export class RenderSystem {
 
     ctx.restore();
   }
+
 }

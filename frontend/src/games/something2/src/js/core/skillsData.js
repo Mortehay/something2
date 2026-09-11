@@ -2184,6 +2184,69 @@ export function getSkillById(id) {
   return SKILLS_BY_ID.get(id) || null;
 }
 
+export function getSkillIndexInClass(skill) {
+  if (!skill) return 0;
+  const classList = SKILLS_BY_CLASS[skill.class] || [];
+  const idx = classList.findIndex(s => s.id === skill.id);
+  return idx >= 0 ? idx : 0;
+}
+
+export function getSkillPrice(skill) {
+  if (!skill) return 250;
+  if (typeof skill.price === 'number') return skill.price;
+  const idx = getSkillIndexInClass(skill);
+  // Progressive curve from 250 gold (early skill) to 10,000 gold (ultimate skill)
+  const raw = 250 + (10000 - 250) * Math.pow(idx / 49, 1.25);
+  return Math.round(raw / 25) * 25;
+}
+
+export function getSkillTier(skill) {
+  if (!skill) return 1;
+  if (typeof skill.tier === 'number') return skill.tier;
+  const idx = getSkillIndexInClass(skill);
+  if (idx < 10) return 1;
+  if (idx < 20) return 2;
+  if (idx < 30) return 3;
+  if (idx < 40) return 4;
+  return 5;
+}
+
+export function getSkillTierName(tier) {
+  switch (tier) {
+    case 1: return 'Novice';
+    case 2: return 'Adept';
+    case 3: return 'Expert';
+    case 4: return 'Master';
+    case 5: return 'Grandmaster';
+    default: return 'Novice';
+  }
+}
+
+export function getSkillTierNameUk(tier) {
+  switch (tier) {
+    case 1: return 'Початківець';
+    case 2: return 'Адепт';
+    case 3: return 'Експерт';
+    case 4: return 'Майстер';
+    case 5: return 'Грандмайстер';
+    default: return 'Початківець';
+  }
+}
+
+export function getSkillLevelReq(skill) {
+  if (!skill) return 1;
+  if (typeof skill.levelReq === 'number') return skill.levelReq;
+  const idx = getSkillIndexInClass(skill);
+  return Math.min(50, Math.max(1, Math.floor(idx * 1.02) + 1));
+}
+
+// Enrich each skill in SKILLS
+for (const s of SKILLS) {
+  s.price = getSkillPrice(s);
+  s.tier = getSkillTier(s);
+  s.levelReq = getSkillLevelReq(s);
+}
+
 export function getRequiredForm(skill) {
   if (!skill) return null;
   if (skill.requiredForm) return skill.requiredForm;

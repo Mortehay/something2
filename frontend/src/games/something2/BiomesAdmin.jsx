@@ -4,6 +4,7 @@ import { HiOutlinePlus, HiOutlineTrash } from 'react-icons/hi2';
 import { useTileTypes, useEntityTypes } from './useMaps.js';
 import { useBiomes, useCreateBiome, useUpdateBiome, useDeleteBiome } from './useBiomes.js';
 import { emptyBiomeForm, biomeToForm, biomeFormToPayload } from './biomeForm.js';
+import AdminLoading from './AdminLoading.jsx';
 
 const AdminContainer = styled.div`
   padding: 2rem; color: var(--s2-text); max-width: 1200px; margin: 0 auto;
@@ -127,7 +128,7 @@ function BiomesAdmin() {
   const creatureNames = (entityTypes || []).filter(e => e.is_creature).map(e => e.name);
   const lists = { tileNames, floraNames, creatureNames };
 
-  if (isLoadingBiomes) return <AdminContainer>Loading biomes…</AdminContainer>;
+  if (isLoadingBiomes) return <AdminContainer><AdminLoading label="Loading biomes…" /></AdminContainer>;
 
   return (
     <AdminContainer>

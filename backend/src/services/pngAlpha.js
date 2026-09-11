@@ -111,7 +111,13 @@ function unfilter(raw, width, height, bpp) {
 const OPAQUE = 200;          // an alpha this high is visibly solid
 const CLEAR = 16;            // and this low is visibly gone
 
-function alphaProfile(buf) {
+// Decode to a flat RGBA byte array, or null for anything we cannot read.
+//
+// SOMET-562 pulled this out of alphaProfile so pngTrim could reuse it. It is
+// one function rather than two copies on purpose: the "which PNGs do we
+// understand" rule below is the same question for both callers, and a second
+// copy is a second place for it to drift.
+function decodeRGBA(buf) {
   const png = readChunks(buf);
   if (!png) return null;
   // Only the shape every provider on this path actually returns. Anything else
@@ -130,10 +136,17 @@ function alphaProfile(buf) {
   const px = unfilter(raw, width, height, bpp);
   if (!px) return null;
 
-  const stride = width * bpp;
+  return { width, height, px };
+}
+
+function alphaProfile(buf) {
+  const img = decodeRGBA(buf);
+  if (!img) return null;
+  const { width, height, px } = img;
+
   let clear = 0;
   const total = width * height;
-  for (let i = 3; i < px.length; i += bpp) if (px[i] < CLEAR) clear += 1;
+  for (let i = 3; i < px.length; i += 4) if (px[i] < CLEAR) clear += 1;
 
   return { width, height, transparentPct: (clear * 100) / total };
 }
@@ -144,4 +157,6 @@ function alphaProfile(buf) {
 // frame should pass, and the failure this catches is not marginal.
 const MIN_TRANSPARENT_PCT = () => parseFloat(process.env.ART_MIN_TRANSPARENT_PCT || '25');
 
-module.exports = { alphaProfile, MIN_TRANSPARENT_PCT, OPAQUE, CLEAR };
+module.exports = {
+  alphaProfile, decodeRGBA, MIN_TRANSPARENT_PCT, OPAQUE, CLEAR,
+};

@@ -27,7 +27,7 @@ const { Pool } = require('pg');
 const { villageMerchantPost, villageGatePosts } = require('../src/services/mapService.js');
 const { villageGeometryError, villageSizeError, GUARD_TYPE } = require('../src/services/villages.js');
 const { readingUnderLock } = require('./helpers/advisoryLock.js');
-const { ENTRY_LOCK_KEY } = require('./helpers/entryWorld.js');
+const { ENTRY_LOCK_KEY, ENTRY_LOCK_WAIT_MS } = require('./helpers/entryWorld.js');
 
 // SOMET-351. Every test below asserts an invariant over the WHOLE live
 // database -- every village, the single is_entry world, every creature standing
@@ -88,7 +88,11 @@ const { ENTRY_LOCK_KEY } = require('./helpers/entryWorld.js');
 // of a guard is how one of them gets forgotten. The reasoning above is left
 // intact because it is the evidence for why the shared helper skips rather
 // than fails.
-const readingLiveWorld = (pool, t, fn) => readingUnderLock(pool, ENTRY_LOCK_KEY, t, fn);
+// The 45s wait, not the 6s default (SOMET-534). Every holder of this key
+// applies a whole map spec, so a reader on the default never got in and all
+// four invariants below skipped on EVERY full run -- measured, 4 skips per run.
+const readingLiveWorld = (pool, t, fn) => readingUnderLock(
+  pool, ENTRY_LOCK_KEY, t, fn, { waitMs: ENTRY_LOCK_WAIT_MS });
 
 const TILE = 100;
 const DB_URL = process.env.TEST_DATABASE_URL

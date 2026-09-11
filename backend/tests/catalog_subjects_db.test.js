@@ -129,7 +129,42 @@ lockedTest('items list every catalog row and report which have art', async (t, p
   assert.equal(typeof withArt, 'number');
   for (const s of subjects.slice(0, 3)) {
     assert.equal(s.kind, 'item');
-    assert.ok(s.basePrompt.startsWith('a '), `"${s.basePrompt}" should read as a subject`);
+    assert.ok(/^an? /.test(s.basePrompt), `"${s.basePrompt}" should read as a subject`);
+  }
+  // SOMET-551 gave itemPrompt an article rule because 51 of the 189 names
+  // start with a vowel. This assertion USED to be startsWith('a '), which the
+  // fix turned red -- so check the whole catalogue, and check the article is
+  // the RIGHT one rather than merely present. Getting it backwards ("an sword")
+  // would satisfy a looser test and read worse than the bug it replaced.
+  const wrong = subjects.filter((s) => {
+    const m = /^(an?) ([a-z])/i.exec(s.basePrompt);
+    if (!m) return false;                        // currency: "a pile of gold"
+    return m[1].toLowerCase() !== (/[aeiou]/i.test(m[2]) ? 'an' : 'a');
+  });
+  assert.deepEqual(wrong.map((s) => s.basePrompt), [],
+    'every item prompt must open on the article its own first letter takes');
+  assert.ok(subjects.some((s) => s.basePrompt.startsWith('an ')),
+    'and the vowel case must actually occur, or this proves nothing');
+});
+
+// SOMET-552. The grants are the only thing that says what a one-word label
+// MEANS, and the describer had no access to them: subjectContext gated its
+// effect line on key !== name, and both are the label text.
+lockedTest('a passive label carries its grants, not just its word', async (t, pool) => {
+  const subjects = await cs.listWithArtState(pool, 'passive_label');
+  const described = subjects.filter((s) => s.grants && s.grants.length);
+  assert.ok(described.length > subjects.length * 0.9,
+    `only ${described.length} of ${subjects.length} labels carry an effect`);
+
+  // DISTINCT over grant ELEMENTS, not over the arrays: a label spans many
+  // nodes, and without the collapse "Versatility" would carry one entry per
+  // node rather than the handful of stats it actually grants.
+  const versatility = subjects.find((s) => s.key === 'Versatility');
+  if (versatility) {
+    assert.ok(versatility.grants.length <= 8,
+      `Versatility carries ${versatility.grants.length} grants -- duplicates are not collapsing`);
+    assert.ok(versatility.grants.every((g) => g && g.type),
+      'a null from the LEFT JOIN must never reach the prompt');
   }
 });
 

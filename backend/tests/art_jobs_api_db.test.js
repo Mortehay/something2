@@ -98,7 +98,7 @@ lockedTest('a page carries only the named fields, not the whole catalogue row', 
   assert.equal(res.status, 200);
   assert.deepEqual(Object.keys(res.body.subjects[0]).sort(),
     ['base_prompt', 'has_art', 'image', 'job_error', 'job_state', 'key', 'kind',
-      'name', 'render_mode', 'updated_at']);
+      'name', 'render_mode', 'takes_description', 'updated_at']);
   assert.equal(res.body.subjects[0].row, undefined,
     'the catalogue row must never be shipped -- it doubles every page');
 });
@@ -217,6 +217,14 @@ lockedTest('GET /api/art-jobs reports the queue by state', async (t, pool, provi
   assert.equal(res.status, 200);
   assert.equal(res.body.stats.queued, 3);
   assert.equal(res.body.run.running, false);
+
+  // WHICH subjects, not merely how many. A count alone cannot tell an admin
+  // whether the rows they queued off a filtered page are the rows they meant,
+  // and the console renders exactly what this field says.
+  assert.equal(res.body.queued.total, 3);
+  assert.deepEqual(res.body.queued.rows.map((r) => r.subject_key), keys);
+  assert.equal(res.body.queued.rows[0].subject_kind, 'skill');
+  assert.equal(res.body.queued.backoff, 0);
 });
 
 // --- Dispatch -------------------------------------------------------------
@@ -296,6 +304,121 @@ lockedTest('requeue-stale rescues a job whose worker died, and spares a live one
     assert.equal(dead.body.stats.queued, 2);
   });
 
+// THE DEFECT THIS FIXES. The console told the admin "press Rescue stranded
+// jobs" and the button answered "No stranded jobs" for a full hour, because the
+// route's fallback threshold was 3600000ms regardless of whether anything was
+// draining. A claimed row can only legitimately be in progress if a drain owns
+// it, and no drain was running -- there was nothing to protect.
+lockedTest('rescues a claimed job promptly when NO drain owns it', async (t, pool, providerId) => {
+  dispatcher.__resetRun();                       // nothing is draining
+  const keys = (await cs.SUBJECTS.skill.list()).slice(0, 2).map((s) => s.key);
+  await queue.enqueue(pool, keys.map((key) => ({ kind: 'skill', key })),
+    { backend: 'connector', providerId });
+  await queue.claim(pool, 2);
+  // Twenty minutes: far short of the old hour, and the exact age at which the
+  // live page reported ten unrecoverable rows.
+  await pool.query("UPDATE art_jobs SET claimed_at = now() - interval '20 minutes'");
+
+  const res = await request(app).post('/api/art-jobs/requeue-stale').set(...AUTH).send({});
+  assert.equal(res.status, 200);
+  assert.equal(res.body.requeued, 2, 'an abandoned claim must be recoverable without waiting an hour');
+  assert.equal(res.body.drain_running, false);
+  assert.equal(res.body.stats.queued, 2);
+});
+
+// The other half of the same rule, and the reason it is not simply "always 60s":
+// a slow subject on a cold pipeline must not be yanked out from under the
+// worker that is still generating it.
+//
+// Driven through a REAL startDrain with a generate that hangs, as the dispatch
+// case above is. A fake "pretend it is running" flag would assert the flag.
+lockedTest('leaves a claimed job alone while a drain IS running', async (t, pool, providerId) => {
+  const keys = (await cs.SUBJECTS.skill.list()).slice(0, 4).map((s) => s.key);
+  await queue.enqueue(pool, keys.map((key) => ({ kind: 'skill', key })),
+    { backend: 'connector', providerId });
+  // Two abandoned-looking claims, backdated well past the no-drain threshold.
+  const old = await queue.claim(pool, 2);
+  await pool.query('UPDATE art_jobs SET claimed_at = now() - $1::interval WHERE id = ANY($2)',
+    ['20 minutes', old.map((r) => r.id)]);
+
+  dispatcher.__resetRun();
+  // Real work left for it, or the drain finds an empty queue and exits before
+  // the request lands -- the trap the dispatch case documents above.
+  dispatcher.startDrain(pool, {
+    provider: { id: providerId, request_template: { width: 1024, height: 1024 } },
+    generate: async () => new Promise((r) => { setTimeout(r, 1500); }),
+    concurrency: 1,
+  });
+  t.after(() => { dispatcher.stopDrain(); dispatcher.__resetRun(); });
+
+  const res = await request(app).post('/api/art-jobs/requeue-stale').set(...AUTH).send({});
+  assert.equal(res.body.drain_running, true, 'precondition: the drain must actually be running');
+  assert.equal(res.body.requeued, 0, '20 minutes is not stale while a worker may still hold it');
+  assert.ok(res.body.claimed >= 2, 'the count is reported so the UI can explain the refusal');
+});
+
+// --- Clearing the queue ---------------------------------------------------
+
+lockedTest('clear removes pending work and KEEPS the record of what happened',
+  async (t, pool, providerId) => {
+    dispatcher.__resetRun();
+    const keys = (await cs.SUBJECTS.skill.list()).slice(0, 4).map((s) => s.key);
+    await queue.enqueue(pool, keys.map((key) => ({ kind: 'skill', key })),
+      { backend: 'connector', providerId });
+    const [a, b] = await queue.claim(pool, 2);      // 2 claimed, 2 still queued
+    await queue.complete(pool, a.id);               // one done
+    await pool.query("UPDATE art_jobs SET state = 'failed', attempts = 3 WHERE id = $1", [b.id]);
+
+    const res = await request(app).post('/api/art-jobs/clear').set(...AUTH).send({});
+    assert.equal(res.status, 200);
+    assert.equal(res.body.cleared, 2, 'only the two still queued are pending work');
+
+    // THE PART THAT MATTERS. The failures panel is built from these rows; a
+    // "clear all" that emptied them would silently delete the only view that
+    // explains a bad batch.
+    const { rows } = await pool.query(
+      'SELECT state, count(*)::int n FROM art_jobs GROUP BY state ORDER BY state');
+    assert.deepEqual(rows, [{ state: 'done', n: 1 }, { state: 'failed', n: 1 }]);
+  });
+
+lockedTest('clear also takes claimed rows that no drain owns', async (t, pool, providerId) => {
+  dispatcher.__resetRun();
+  const keys = (await cs.SUBJECTS.skill.list()).slice(0, 3).map((s) => s.key);
+  await queue.enqueue(pool, keys.map((key) => ({ kind: 'skill', key })),
+    { backend: 'connector', providerId });
+  await queue.claim(pool, 2);
+
+  const res = await request(app).post('/api/art-jobs/clear').set(...AUTH).send({});
+  assert.equal(res.body.cleared, 3);
+  assert.equal(res.body.claimed, 2, 'the claimed ones are counted separately, because they cost attempts');
+  assert.equal(res.body.stats.queued, undefined, 'nothing pending may survive');
+});
+
+// Deleting a row a worker is mid-generation on would have the drain resolve a
+// job that no longer exists.
+lockedTest('clear is REFUSED while a batch is running', async (t, pool, providerId) => {
+  const keys = (await cs.SUBJECTS.skill.list()).slice(0, 4).map((s) => s.key);
+  await queue.enqueue(pool, keys.map((key) => ({ kind: 'skill', key })),
+    { backend: 'connector', providerId });
+
+  dispatcher.__resetRun();
+  dispatcher.startDrain(pool, {
+    provider: { id: providerId, request_template: { width: 1024, height: 1024 } },
+    generate: async () => new Promise((r) => { setTimeout(r, 1500); }),
+    concurrency: 1,
+  });
+  t.after(() => { dispatcher.stopDrain(); dispatcher.__resetRun(); });
+
+  const res = await request(app).post('/api/art-jobs/clear').set(...AUTH).send({});
+  assert.equal(res.status, 409);
+  assert.match(res.body.error, /Stop/, 'the refusal must name the fix');
+
+  // Counted across every state: the drain has claimed some of them by now, so
+  // scoping this to `queued` would pass even if the claimed rows were deleted.
+  const { rows } = await pool.query('SELECT count(*)::int n FROM art_jobs');
+  assert.equal(rows[0].n, 4, 'a refused clear must delete nothing');
+});
+
 // --- The guard ------------------------------------------------------------
 
 test('every art route is behind the admin guard', async (t) => {
@@ -303,9 +426,200 @@ test('every art route is behind the admin guard', async (t) => {
     ['get', '/api/art-subjects/skill'], ['get', '/api/art-jobs'],
     ['post', '/api/art-jobs'], ['post', '/api/art-jobs/dispatch'],
     ['post', '/api/art-jobs/stop'], ['post', '/api/art-jobs/requeue-stale'],
+    ['post', '/api/art-jobs/clear'],
   ]) {
     const res = await request(app)[method](path).send({});
     assert.ok(res.status === 401 || res.status === 403,
       `${method.toUpperCase()} ${path} answered ${res.status} without a token`);
   }
 });
+
+// --- SOMET-544: requeue is scoped by CAUSE, and refuses pointless retries ---
+//
+// The rule is enforced SERVER-SIDE on purpose. Hiding the button would leave
+// it unenforced for anything calling the API directly, and the reason it must
+// not be retried is a property of the data model (seedFor derives the seed
+// from the subject), not of the UI.
+lockedTest('a plain requeue of a content failure is refused, with the reason', async (t, pool) => {
+  const [job] = await queue.enqueue(pool, [{ kind: 'skill', key: 'rq_content' }],
+    { backend: 'connector' });
+  await pool.query(
+    `UPDATE art_jobs SET state='failed', attempts=3,
+        last_error='provider answered 422: {"detail":"cutout removed 97.9% of the image"}'
+      WHERE id=$1`, [job.id],
+  );
+
+  const refused = await request(app).post('/api/art-jobs/requeue')
+    .set(...AUTH).send({ kind: 'content_cutout' });
+  assert.equal(refused.status, 409, 'a retry that cannot work must be refused, not accepted');
+  assert.match(refused.body.error, /same image/i, 'and it must say WHY');
+  assert.equal(refused.body.action, 'reseed');
+
+  const still = await pool.query('SELECT state FROM art_jobs WHERE id=$1', [job.id]);
+  assert.equal(still.rows[0].state, 'failed', 'the refusal must not have queued it anyway');
+
+  // The same call WITH reseed is allowed, and must change the seed -- a
+  // requeue that kept the seed would be the refused operation wearing a flag.
+  const before = await pool.query('SELECT seed FROM art_jobs WHERE id=$1', [job.id]);
+  const ok = await request(app).post('/api/art-jobs/requeue')
+    .set(...AUTH).send({ kind: 'content_cutout', reseed: true });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.requeued, 1);
+  const after = await pool.query('SELECT state, seed FROM art_jobs WHERE id=$1', [job.id]);
+  assert.equal(after.rows[0].state, 'queued');
+  assert.notEqual(String(after.rows[0].seed), String(before.rows[0].seed),
+    'reseed must actually change the seed, or the retry reproduces the same image');
+});
+
+lockedTest('a new seed is refused for a CONFIG failure -- it cannot help', async (t, pool) => {
+  const [job] = await queue.enqueue(pool, [{ kind: 'skill', key: 'rq_config' }],
+    { backend: 'connector' });
+  await pool.query(
+    `UPDATE art_jobs SET state='failed', attempts=3,
+        last_error='provider "x" renders at 512x512, below the 1024px minimum for an isolated object'
+      WHERE id=$1`, [job.id],
+  );
+  const res = await request(app).post('/api/art-jobs/requeue')
+    .set(...AUTH).send({ kind: 'config', reseed: true });
+  assert.equal(res.status, 409, 'a different seed does not fix a misconfigured provider');
+  assert.equal(res.body.action, 'fix_config');
+});
+
+lockedTest('a provider failure requeues plainly, keeping its seed', async (t, pool) => {
+  const [job] = await queue.enqueue(pool, [{ kind: 'skill', key: 'rq_prov' }],
+    { backend: 'connector' });
+  await pool.query(
+    `UPDATE art_jobs SET state='failed', attempts=3,
+        last_error='provider answered 500: {"detail":"!handles_.at(i) INTERNAL ASSERT FAILED"}'
+      WHERE id=$1`, [job.id],
+  );
+  const before = await pool.query('SELECT seed FROM art_jobs WHERE id=$1', [job.id]);
+  const res = await request(app).post('/api/art-jobs/requeue').set(...AUTH)
+    .send({ kind: 'provider_fault' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.requeued, 1);
+  const after = await pool.query('SELECT state, attempts, seed FROM art_jobs WHERE id=$1', [job.id]);
+  assert.equal(after.rows[0].state, 'queued');
+  assert.equal(after.rows[0].attempts, 0, 'a provider fault should not count against the subject');
+  assert.equal(String(after.rows[0].seed), String(before.rows[0].seed),
+    'a provider failure keeps its seed -- the image was never the problem');
+});
+
+// SOMET-551. A failed row whose subject already has a live job is SUPERSEDED.
+//
+// Requeueing one violates art_jobs_one_live_per_subject, and the endpoint
+// answered 500 -- measured on the dev database with all five failed subjects
+// in exactly that state. A crash is the wrong answer to "nothing to do".
+lockedTest('a superseded failure is reported, not crashed on', async (t, pool) => {
+  const SUBJ = { kind: 'skill', key: 'rq_superseded' };
+  const [job] = await queue.enqueue(pool, [SUBJ], { backend: 'connector' });
+  await pool.query(
+    `UPDATE art_jobs SET state='failed', attempts=3,
+        last_error='provider answered 500: !handles_.at(i) INTERNAL ASSERT FAILED'
+      WHERE id=$1`, [job.id],
+  );
+  // A second, live job for the SAME subject -- the state the dev database was
+  // actually in, and the one the partial unique index exists to allow.
+  const [live] = await queue.enqueue(pool, [SUBJ], { backend: 'connector' });
+  assert.ok(live, 'setup: a live job for the same subject must be creatable');
+
+  const res = await request(app).post('/api/art-jobs/requeue')
+    .set(...AUTH).send({ kind: 'provider_fault' });
+
+  assert.equal(res.status, 200, 'a superseded failure must not 500');
+  assert.equal(res.body.requeued, 0);
+  assert.equal(res.body.already_queued, 1,
+    'and must SAY why nothing was requeued, or "0 requeued" reads as a bug');
+
+  const after = await pool.query('SELECT state FROM art_jobs WHERE id=$1', [job.id]);
+  assert.equal(after.rows[0].state, 'failed',
+    'the superseded row stays as the record of why it failed');
+});
+
+// --- SOMET-552: a description knows what the catalogue said ----------------
+//
+// The batch pass records the catalogue phrase it wrote from. A description
+// typed in the console has to record it too, or half the descriptions in the
+// database can never be told stale from fresh -- and the console's is the half
+// a person cared enough to write by hand.
+lockedTest('a hand-written description records the catalogue phrase it replaced',
+  async (t, pool) => {
+    const KEY = 'war_crushing_blow';
+    await pool.query(
+      "DELETE FROM art_prompt_descriptions WHERE subject_kind='skill' AND subject_key=$1", [KEY],
+    );
+    try {
+      const post = await request(app).post(`/api/art-subjects/skill/${KEY}/description`)
+        .set(...AUTH).send({ text: 'heavy war axe with a chipped blade' });
+      assert.equal(post.status, 201);
+
+      const { rows } = await pool.query(
+        `SELECT text, source_prompt FROM art_prompt_descriptions
+          WHERE subject_kind='skill' AND subject_key=$1 AND active`, [KEY],
+      );
+      const subject = (await cs.registryFor('skill').list(pool)).find((s) => s.key === KEY);
+      assert.equal(rows[0].source_prompt, subject.basePrompt,
+        'without this the description can never be told stale from fresh');
+
+      const get = await request(app).get(`/api/art-subjects/skill/${KEY}/description`).set(...AUTH);
+      assert.equal(get.body.stale, false);
+      assert.equal(get.body.catalogPrompt, subject.basePrompt,
+        'the console has to be able to show what it is being compared against');
+
+      // Now move the catalogue out from under it, which is the whole risk:
+      // the description stays in force and the console says so.
+      await pool.query(
+        `UPDATE art_prompt_descriptions SET source_prompt = 'something else entirely'
+          WHERE subject_kind='skill' AND subject_key=$1 AND active`, [KEY],
+      );
+      const drifted = await request(app)
+        .get(`/api/art-subjects/skill/${KEY}/description`).set(...AUTH);
+      assert.equal(drifted.body.stale, true);
+      assert.equal(drifted.body.active.text, 'heavy war axe with a chipped blade',
+        'stale means flagged, not withdrawn');
+    } finally {
+      await pool.query(
+        "DELETE FROM art_prompt_descriptions WHERE subject_kind='skill' AND subject_key=$1", [KEY],
+      ).catch(() => {});
+    }
+  });
+
+lockedTest('a description for a subject that is not in the catalogue is refused',
+  async (t) => {
+    const res = await request(app).post('/api/art-subjects/skill/not_a_real_skill/description')
+      .set(...AUTH).send({ text: 'anything' });
+    assert.equal(res.status, 404,
+      'storing one would create a description nothing can ever use');
+  });
+
+// SOMET-553. Which kinds take a written description is a SERVER rule, and the
+// console greys its editor out from this field rather than deciding for
+// itself. If the two ever disagree, the console offers an editor whose Save
+// the server answers with a 409.
+lockedTest('the listing says which kinds take a description, and it matches the route',
+  async (t) => {
+    for (const [kind, expected] of [['skill', true], ['item', true],
+      ['passive_label', true], ['entity', true], ['tile', false]]) {
+      // eslint-disable-next-line no-await-in-loop
+      const res = await request(app).get(`/api/art-subjects/${kind}?per_page=1`).set(...AUTH);
+      assert.equal(res.status, 200);
+      const row = res.body.subjects[0];
+      assert.equal(row.takes_description, expected, `${kind} listing`);
+
+      // The route is the authority; the flag has to agree with it. A tile
+      // composes its prompt from its biome, so a subject phrase could never
+      // reach it and accepting one would be a silent no-op.
+      // eslint-disable-next-line no-await-in-loop
+      const post = await request(app)
+        .post(`/api/art-subjects/${kind}/${encodeURIComponent(row.key)}/description`)
+        .set(...AUTH).send({ text: 'a probe that is rolled back below' });
+      assert.equal(post.status !== 409, expected,
+        `${kind}: the listing flag and the route disagree`);
+      if (post.status === 201) {
+        // eslint-disable-next-line no-await-in-loop
+        await request(app)
+          .delete(`/api/art-subjects/${kind}/${encodeURIComponent(row.key)}/description`)
+          .set(...AUTH);
+      }
+    }
+  });

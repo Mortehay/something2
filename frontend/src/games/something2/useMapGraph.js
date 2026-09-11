@@ -22,7 +22,10 @@ export function useWorldGraph() {
   const { data, isLoading, error: graphError } = useQuery({
     queryKey: ["worldGraph"],
     queryFn: async () => {
-      const res = await apiFetch(`${API_URL}/api/world-graph`);
+      // SOMET-555: the route is adminGuard'd now. apiFetch only adds 401
+      // handling -- it does NOT attach the token, so the header has to be
+      // passed explicitly or every load of this tab 401s.
+      const res = await apiFetch(`${API_URL}/api/world-graph`, { headers: authHeaders() });
       if (!res.ok) throw new Error("Failed to load the world graph");
       return res.json();
     },

@@ -61,7 +61,7 @@ export function markerScreenRect(p, radius) {
   return { x: s.x - radius, y: s.y - radius, w: radius * 2, h: radius * 2 };
 }
 
-const MARKER_RADII = { grounditem: 9, merchant: 11, gem_merchant: 11, bank: 11, worldchest: 12 };
+const MARKER_RADII = { grounditem: 9, merchant: 11, gem_merchant: 11, skillMerchant: 11, bank: 11, worldchest: 12 };
 
 // The screen rect for any drawable renderChunked built, or null for kinds the
 // card does not describe (walls and floor tiles: hovering terrain should not
@@ -272,6 +272,14 @@ export function describeTarget(d, { entityDefs = null, itemTypes = null, localPl
     return {
       kind: "gem_merchant", title: "Skill Gem Merchant", subtitle: "Gemcutter & Jeweller",
       description: "Stand next to them and press E to buy PoE-style Skill Gems.",
+      hp: null, mp: null, aggression: null,
+    };
+  }
+
+  if (d.kind === "skillMerchant") {
+    return {
+      kind: "skillMerchant", title: "Skill Merchant", subtitle: "Ability Master",
+      description: "Stand next to them and press E or click to browse and equip combat skills.",
       hp: null, mp: null, aggression: null,
     };
   }

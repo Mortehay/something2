@@ -1,5 +1,6 @@
 from PIL import Image
-from app.postproc import cutout_background, crop_to_content, remove_background
+from app.postproc import (cutout_background, crop_to_content, remove_background,
+                          TRIM_MARGIN_PCT)
 
 def _alpha(img, x, y):
     return img.convert("RGBA").getpixel((x, y))[3]
@@ -56,7 +57,88 @@ def test_crop_to_content_after_cutout_trims_to_the_subject():
             img.putpixel((x, y), (10, 120, 30, 255))
     out = crop_to_content(cutout_background(img))
 
+    # No margin by default -- the tile path relies on that, because a tile with
+    # a transparent border is a seam in the ground.
     assert out.size == (8, 8)
+
+
+def test_crop_to_content_margin_is_taken_per_axis():
+    # SOMET-565. A uniform margin off the LONGER side would give this narrow,
+    # tall subject the same pixel margin across as down, so the content would
+    # fill a very different fraction of each axis. The renderer stretches the
+    # whole canvas into the entity's display box, so that comes out as a shape
+    # change: the staff renders fat.
+    #
+    # Sized like the real thing (the measured fixture is 32x216 inside 256x256)
+    # rather than a few pixels across, because the one-pixel floor below
+    # dominates at toy sizes and would make this assertion say more about the
+    # floor than about the rule.
+    img = Image.new("RGBA", (512, 512), (0, 0, 0, 0))
+    for y in range(100, 340):        # 240 tall
+        for x in range(240, 280):    # 40 wide
+            img.putpixel((x, y), (10, 120, 30, 255))
+
+    out = crop_to_content(img, TRIM_MARGIN_PCT)
+    fill_w = 40 / out.width
+    fill_h = 240 / out.height
+    assert abs(fill_w - fill_h) < 0.02, (
+        f"content fills {fill_w:.2f} of the width but {fill_h:.2f} of the height"
+    )
+    # A uniform margin off the longer side would have been 7px each way, so the
+    # width would be 54 and fill_w 0.74. Naming the number the old rule gives,
+    # so this cannot pass under it.
+    assert out.width == 42, out.size
+
+
+def test_the_margin_never_rounds_away_to_nothing():
+    # The floor, stated as its own behaviour rather than smuggled into the test
+    # above with a loose tolerance. 3% of an 8px subject rounds to zero, and a
+    # zero margin puts the feathered cutout edge flush against the frame, which
+    # reads as a hard cut line over terrain. One pixel is the minimum, and at
+    # these sizes it does cost some proportional accuracy -- an acceptable
+    # trade, because real subjects are hundreds of pixels across.
+    img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    for y in range(20, 44):
+        for x in range(28, 36):
+            img.putpixel((x, y), (10, 120, 30, 255))
+
+    out = crop_to_content(img, TRIM_MARGIN_PCT)
+    assert out.size == (10, 26), out.size
+
+
+def test_a_tall_subject_stays_tall():
+    # The square pad this replaced would have returned a 24x24 canvas here,
+    # making an 8-wide subject fill a third of the width. Guarding the shape
+    # directly, so the pad cannot come back unnoticed.
+    img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    for y in range(20, 44):
+        for x in range(28, 36):
+            img.putpixel((x, y), (10, 120, 30, 255))
+
+    out = crop_to_content(img, TRIM_MARGIN_PCT)
+    assert out.height > out.width * 2, f"subject was squared: {out.size}"
+
+
+def test_a_faint_corner_speckle_does_not_defeat_the_crop():
+    # The real failure mode. A feathered cutout leaves an all-but-invisible
+    # pixel in a corner; at the alpha > 0 threshold a bare getbbox() uses, that
+    # single pixel makes the bounding box the whole canvas and the crop a
+    # silent no-op that still looks like it worked.
+    img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    img.putpixel((0, 0), (255, 0, 255, 3))
+    img.putpixel((63, 63), (255, 0, 255, 2))
+    for y in range(28, 36):
+        for x in range(28, 36):
+            img.putpixel((x, y), (10, 120, 30, 255))
+
+    out = crop_to_content(img)
+    assert out.size == (8, 8), f"speckle defeated the crop: {out.size}"
+
+
+def test_a_fully_transparent_image_is_left_alone():
+    # Cropping to an empty box would produce a 0x0 image, which nothing accepts.
+    img = Image.new("RGBA", (16, 16), (0, 0, 0, 0))
+    assert crop_to_content(img, TRIM_MARGIN_PCT).size == (16, 16)
 
 def test_remove_background_falls_back_to_the_flood_fill(monkeypatch):
     # rembg is optional and fails silently when onnxruntime is missing, so the

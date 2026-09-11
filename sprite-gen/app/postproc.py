@@ -166,10 +166,51 @@ def cutout_background(img: Image.Image, tolerance: int = 48) -> Image.Image:
                 stack.append((nx, ny))
     return img
 
-def crop_to_content(img: Image.Image) -> Image.Image:
+# SOMET-565. The trim rule, kept identical to backend/src/services/pngTrim.js.
+#
+# CONTENT_ALPHA is the floor for "this pixel is content". Load-bearing: a
+# feathered cutout leaves alpha-1 and alpha-2 speckles, and at the obvious
+# threshold (alpha > 0, which is what a bare getbbox() uses) one such pixel
+# drags the bounding box out to the full canvas and the crop silently becomes a
+# no-op. Both real fixtures measured in SOMET-561 carry such speckles.
+CONTENT_ALPHA = 16
+
+# Breathing room around the subject, as a percentage of EACH AXIS -- never a
+# uniform pixel count off the longer side, which would give an elongated
+# subject a canvas whose aspect ratio differs from its content's. The renderer
+# stretches that canvas into the entity's display box, so the subject would
+# come out the wrong shape.
+TRIM_MARGIN_PCT = 3.0
+
+
+def crop_to_content(img: Image.Image, margin_pct: float = 0.0) -> Image.Image:
+    """Crop to the subject, optionally leaving a margin.
+
+    WHY THE MARGIN IS OPT-IN AND DEFAULTS TO ZERO. This is called on the tile
+    path too (_generate_flat runs it for tiles and objects alike), and a tile is
+    the ground itself: giving it a transparent border puts seams in the terrain.
+    Tiles pass 0 and keep exactly the behaviour they had; objects ask for the
+    margin explicitly.
+    """
     img = img.convert("RGBA")
-    bbox = img.split()[3].getbbox()  # alpha channel bbox
-    return img.crop(bbox) if bbox else img
+    alpha = img.split()[3]
+    # point() first so the bbox ignores sub-threshold speckles; a bare
+    # getbbox() on the alpha channel is the alpha > 0 version described above.
+    bbox = alpha.point(lambda v: 255 if v >= CONTENT_ALPHA else 0).getbbox()
+    if not bbox:
+        return img
+    sub = img.crop(bbox)
+    if margin_pct <= 0:
+        return sub
+
+    # At least a pixel each side whatever the arithmetic says: the margin
+    # exists to keep a feathered edge off the frame, and that need does not
+    # shrink because the subject is small.
+    mx = max(1, round(sub.width * margin_pct / 100))
+    my = max(1, round(sub.height * margin_pct / 100))
+    out = Image.new("RGBA", (sub.width + mx * 2, sub.height + my * 2), (0, 0, 0, 0))
+    out.paste(sub, (mx, my))
+    return out
 
 def pack_atlas(frames: Dict[str, Image.Image]) -> Tuple[Image.Image, dict]:
     if not frames:

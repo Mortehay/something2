@@ -26,12 +26,39 @@ function authHeaders() {
   return { Authorization: `Bearer ${adminToken()}` };
 }
 
+// A non-admin identity (SOMET-559). Routes behind playerGuard must accept this;
+// routes behind adminGuard must reject it with 403. Without a second identity a
+// test suite cannot tell the two guards apart -- both merely "require a token" --
+// and swapping one for the other stays green while breaking the game for every
+// non-admin player.
+const PLAYER_ID = 2;
+const PLAYER_TOKEN_VERSION = 1;
+
+function playerToken() {
+  return signToken({
+    userId: PLAYER_ID,
+    username: 'player',
+    role: 'player',
+    tokenVersion: PLAYER_TOKEN_VERSION,
+  });
+}
+
 // The middleware runs: SELECT token_version, role FROM users WHERE id = $1
 function isUserLookup(sql) {
   return /FROM users/i.test(sql) && /token_version/i.test(sql);
 }
 
 const ADMIN_USER_ROW = { rows: [{ token_version: ADMIN_TOKEN_VERSION, role: 'admin' }] };
+const PLAYER_USER_ROW = { rows: [{ token_version: PLAYER_TOKEN_VERSION, role: 'player' }] };
+
+// Answer the guard's lookup with whichever identity the token claims, keyed on
+// the id the middleware passes as $1. A fixture that always returns the admin
+// row would make a player token silently authenticate AS an admin, which would
+// turn a 403 test into a false pass.
+function userRowFor(params) {
+  const id = Array.isArray(params) ? params[0] : undefined;
+  return Number(id) === PLAYER_ID ? PLAYER_USER_ROW : ADMIN_USER_ROW;
+}
 
 // Wrap a plain query(sql, params) fn so the guard's user lookup is answered with
 // a current-version admin row; every other query falls through to `queryFn`.
@@ -50,4 +77,9 @@ module.exports = {
   isUserLookup,
   ADMIN_USER_ROW,
   withAuth,
+  PLAYER_ID,
+  PLAYER_TOKEN_VERSION,
+  playerToken,
+  PLAYER_USER_ROW,
+  userRowFor,
 };

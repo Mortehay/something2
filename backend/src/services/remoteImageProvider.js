@@ -28,6 +28,7 @@ const {
   safeFetch, redactUrl, readCapped, readJsonCapped,
 } = require('./safeFetch');
 const { manifestForSheet } = require('./spriteSheet');
+const { trimToContent } = require('./pngTrim');
 
 // Image generation on CPU can take a minute or more. This is NOT the 30s
 // control-plane budget spriteGen.js uses -- there the long work happens
@@ -270,6 +271,41 @@ function decodeImage({ contentType, json, body }, pointer) {
 //   <bucket>/<name>/<job_id>/static.png             for creatures
 // Matching it is what lets the existing GET /api/assets/* route serve these
 // with no change, and keeps the MinIO console browsable in one scheme.
+// SOMET-563. Apply the trim rule, or decline to, and never throw either way.
+//
+// THE THREE EXCLUSIONS, each of which is a way to break the world:
+//
+// 1. TILES, by kind. A ground tile is the terrain itself -- full-bleed and
+//    meant to be opaque -- so it has no subject to crop to. It measures as a
+//    no-op today (all 50 checked-in tiles fill 100% of their canvas), but the
+//    exclusion is explicit rather than relying on that: a tile that ever
+//    acquired a transparent border would otherwise be cropped into a hole in
+//    the ground.
+// 2. ATLASES, structurally. A multi-frame sheet is stored by the branch above
+//    and returns before reaching here, so a sheet cannot arrive at this
+//    function. That matters because trimming a sheet as one image would desync
+//    it from the manifest computed just above it and crop every frame wrongly.
+// 3. ANYTHING UNREADABLE. trimToContent returns null for a PNG outside the
+//    8-bit RGBA non-interlaced shape, and the answer to that is the original
+//    bytes -- the same "refuse what we can positively see is wrong, never
+//    reject what we merely cannot read" rule pngAlpha already follows.
+//
+// A FAILED TRIM MUST NOT FAIL THE JOB. Generation is the expensive part -- a
+// minute or more of remote GPU time -- and losing it to a cropping bug would
+// trade a cosmetic defect for a real one. Anything unexpected degrades to
+// storing exactly what the provider sent.
+function trimForStorage(buffer, kind) {
+  if (kind === 'tile') return { buffer, ratio: 1, skipped: 'tile' };
+  let out = null;
+  try {
+    out = trimToContent(buffer);
+  } catch {
+    out = null;                     // a broken trim is not a broken generation
+  }
+  if (!out) return { buffer, ratio: 1, skipped: 'unreadable' };
+  return { buffer: out.buffer, ratio: out.ratio, skipped: null };
+}
+
 function storageKey({ bucket, kind, subject, jobId, file = 'static.png' }) {
   const safe = String(subject).replace(/[^A-Za-z0-9_-]/g, '_');
   if (kind === 'tile') return `${bucket}/tiles/${safe}/${jobId}/${file}`;
@@ -301,7 +337,7 @@ function startGeneration(provider, req, deps = {}) {
 
 async function runGeneration(jobId, provider, req, deps = {}) {
   const { fetchImpl = fetch, store = assetStore } = deps;
-  const { subject, kind = 'object', prompt, seed = 0, frames = 1 } = req;
+  const { subject, kind = 'object', prompt, seed = 0, frames = 1, negative = [] } = req;
 
   setJob(jobId, { status: 'running' });
 
@@ -317,6 +353,43 @@ async function runGeneration(jobId, provider, req, deps = {}) {
     height: req.height || size.height,
     frames: frameCount,
   });
+
+  // SOMET-558. Operator exclusions join negative_prompt, APPENDED to whatever
+  // the template already lists rather than replacing it -- the template's terms
+  // are the house style (no frame, no poster, no scene) and are not the
+  // caller's to discard.
+  //
+  // Done HERE rather than as a {{negative}} placeholder, because a placeholder
+  // only works in templates that already contain one: every provider registered
+  // before today has a literal negative_prompt, so a placeholder would silently
+  // drop the operator's exclusion for exactly the providers in use. Merging
+  // after substitution needs no change to a stored provider row.
+  //
+  // The key is CREATED when the template omits it. This is an assumption worth
+  // naming: every provider registered here speaks the sdapi/v1/txt2img shape,
+  // where negative_prompt is standard. The alternative -- skipping silently --
+  // would discard the operator's words with nothing to show for it, which is
+  // the failure this whole change exists to end.
+  const extraNegative = (Array.isArray(negative) ? negative : [])
+    .map((n) => String(n || '').trim())
+    .filter(Boolean);
+  if (extraNegative.length) {
+    const existing = String(body.negative_prompt || '').trim();
+    body.negative_prompt = [existing, ...extraNegative].filter(Boolean).join(', ');
+  }
+
+  // SOMET-547. Publish the FINAL payload on the registry entry so the history
+  // can record what was actually sent. Until this existed the dispatcher only
+  // ever saw its own request object, which has never held steps, cfg_scale or
+  // the sampler -- those live in the provider's request_template and are merged
+  // right here. A history that records the subject but not the parameters
+  // cannot answer "why did this run differ from that one" after a template
+  // edit, which is most of the point of keeping one.
+  //
+  // The whole body is published rather than a subset: the consumer whitelists
+  // what it stores, and duplicating that whitelist here would be a second copy
+  // of the same rule, free to disagree.
+  setJob(jobId, { sentBody: body });
 
   let res;
   try {
@@ -430,14 +503,28 @@ async function runGeneration(jobId, provider, req, deps = {}) {
       });
       return;
     }
+    // SOMET-563. Trim LAST: after every validation above, and before the image
+    // is ever persisted, so a rejected generation never reaches the trim and
+    // the trimmed version is the only one that exists.
+    const stored = trimForStorage(decoded.buffer, kind);
     const key = storageKey({ bucket, kind, subject, jobId });
-    await store.putObject(key, decoded.buffer, 'image/png');
+    await store.putObject(key, stored.buffer, 'image/png');
     setJob(jobId, {
       status: 'done',
       progress: { done: 1, total: 1 },
       // Same field names sprite-gen's _put_flat returns, so TileTypesAdmin's
       // `result.image_key` and its approve mutation work unchanged.
-      result: { image_key: key, frames: 1, provider_id: provider.id },
+      // trim_ratio is additive: a consumer that does not know the field is
+      // unaffected, and one that does can tell a trim that did nothing from a
+      // trim that never ran -- which is the difference this whole feature
+      // turns on.
+      result: {
+        image_key: key,
+        frames: 1,
+        provider_id: provider.id,
+        trim_ratio: stored.ratio,
+        trim_skipped: stored.skipped,
+      },
     });
   } catch (err) {
     setJob(jobId, { status: 'error', error: `could not store the generated image: ${err.message}` });
@@ -451,6 +538,7 @@ module.exports = {
   decodeImage,
   stripDataUri,
   storageKey,
+  trimForStorage,
   defaultSize,
   startGeneration,
   runGeneration,

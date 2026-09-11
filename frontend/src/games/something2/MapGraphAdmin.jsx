@@ -14,6 +14,7 @@ import {
 } from './mapGraphLint.js';
 import { planLinkChange } from './mapGraphActions.js';
 import { biomeRingSvg } from './biomeRingSvg.js';
+import AdminLoading from './AdminLoading.jsx';
 
 // Registered once at module scope, not inside the component: `cytoscape.use`
 // mutates the shared cytoscape module-level registry, so re-registering on
@@ -620,7 +621,7 @@ function MapGraphAdmin() {
     }
   };
 
-  if (isLoadingGraph) return <AdminContainer>Loading world graph…</AdminContainer>;
+  if (isLoadingGraph) return <AdminContainer><AdminLoading label="Loading world graph…" /></AdminContainer>;
   // useWorldGraph already toasts this (see toastGraphError in useMapGraph.js).
   // Gated on `worlds.length === 0`, not on `graphError` alone: TanStack Query
   // retains the previous `data` when a background refetch fails (it only

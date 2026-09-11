@@ -207,3 +207,163 @@ lockedTest('stats reports the queue by state', async (t, pool) => {
   assert.equal(s.queued, 2);
   assert.equal(s.done, 1);
 });
+
+// SOMET-558. The console showed "1 running" and nothing else, which is the one
+// fact an admin cannot act on: twenty minutes at "1 running" reads identically
+// for a slow subject, a wedged provider, and a row requeueStale is about to
+// reclaim. inFlight() is what separates them.
+lockedTest('inFlight names the subjects being drawn, not merely how many', async (t, pool) => {
+  await q.enqueue(pool, [S(1), S(2), S(3)], { backend: 'connector' });
+  assert.deepEqual(await q.inFlight(pool), [], 'a queued job is not in flight -- nobody has it');
+
+  const claimed = await q.claim(pool, 2);
+  assert.equal(claimed.length, 2);
+
+  const live = await q.inFlight(pool);
+  assert.equal(live.length, 2, 'exactly the claimed jobs, never the queued third');
+  assert.deepEqual(live.map((r) => r.subject_key).sort(), claimed.map((r) => r.subject_key).sort());
+
+  for (const row of live) {
+    // The two fields the "drawing now" line is built from. A missing claimed_at
+    // would make every elapsed time read as zero, which is worse than absent:
+    // it would assert every generation had just begun.
+    assert.equal(row.subject_kind, 'skill');
+    assert.ok(row.claimed_at instanceof Date, 'claimed_at must be a real timestamp');
+    assert.ok(row.attempts >= 1, 'claim() increments attempts, and a retry must be visible');
+  }
+});
+
+// SOMET-558. The other end of the same argument: "17 queued" says a batch
+// exists and nothing about WHAT is in it, so an admin who queued a filtered
+// page cannot tell a correct selection from a mis-set filter -- both print the
+// identical sentence.
+lockedTest('queued names the waiting subjects, in claim order', async (t, pool) => {
+  assert.deepEqual(await q.queued(pool), { rows: [], total: 0, backoff: 0 });
+
+  const made = await q.enqueue(pool, [S(1), S(2), S(3)], { backend: 'connector' });
+  const listed = await q.queued(pool);
+  assert.equal(listed.total, 3);
+  // CLAIM ORDER, not insertion-time order or whatever the planner returns:
+  // claim() takes `ORDER BY id`, so the first name here must be the subject
+  // the provider will actually draw next, or the list is decoration.
+  assert.deepEqual(listed.rows.map((r) => r.id), [...made].map((r) => r.id).sort((a, b) => Number(a) - Number(b)));
+  assert.deepEqual(listed.rows.map((r) => r.subject_key), ['sk_1', 'sk_2', 'sk_3']);
+  assert.equal(listed.rows[0].subject_kind, 'skill');
+
+  // A claimed job is NOT queued. It appears in inFlight() instead, and
+  // counting it in both would overstate the work left by the batch in flight.
+  await q.claim(pool, 1);
+  const after = await q.queued(pool);
+  assert.equal(after.total, 2);
+  assert.deepEqual(after.rows.map((r) => r.subject_key), ['sk_2', 'sk_3']);
+});
+
+// THE COUNT MUST SURVIVE THE CAP. The endpoint returns a preview, and a total
+// derived from the rows that arrived would print the preview's size over a
+// backlog many times larger -- the exact confident-wrong number the panel
+// exists to remove. count(*) OVER () is evaluated before LIMIT; this is what
+// proves it.
+lockedTest('queued reports the whole backlog even when the list is capped', async (t, pool) => {
+  const many = Array.from({ length: 12 }, (_, i) => S(100 + i));
+  await q.enqueue(pool, many, { backend: 'connector' });
+
+  const capped = await q.queued(pool, 4);
+  assert.equal(capped.rows.length, 4, 'the preview is capped');
+  assert.equal(capped.total, 12, 'the count is not');
+  assert.equal(capped.backoff, 0, 'nothing has failed, so nothing is waiting');
+});
+
+// A job serving a retry backoff is still queued and still owed an image, so it
+// stays in the list -- hiding it would shrink the list below the count beside
+// it. The separate `backoff` number is what tells an admin that a drain
+// sitting idle over a non-empty queue is waiting rather than stalled.
+lockedTest('queued counts the jobs that are waiting out a backoff', async (t, pool) => {
+  await q.enqueue(pool, [S(1), S(2)], { backend: 'connector' });
+  const [first] = await q.claim(pool, 1);
+  await q.fail(pool, first.id, new Error('provider said no'), { delayMs: 60000 });
+
+  const listed = await q.queued(pool);
+  assert.equal(listed.total, 2, 'a backed-off job is still queued');
+  assert.equal(listed.rows.length, 2, 'and is still listed');
+  assert.equal(listed.backoff, 1, 'but is not claimable yet');
+
+  // The claimable one is what claim() actually takes, which is the fact the
+  // number is describing.
+  const [next] = await q.claim(pool, 1);
+  assert.equal(next.subject_key, 'sk_2');
+});
+
+// A resolved job leaves the flight list, or the console would show a subject
+// being drawn forever after the batch ended.
+lockedTest('inFlight empties as jobs resolve, whether they succeed or fail', async (t, pool) => {
+  await q.enqueue(pool, [S(1), S(2)], { backend: 'connector' });
+  const [a, b] = await q.claim(pool, 2);
+  assert.equal((await q.inFlight(pool)).length, 2);
+
+  await q.complete(pool, a.id);
+  assert.deepEqual((await q.inFlight(pool)).map((r) => r.id), [b.id]);
+
+  await q.fail(pool, b.id, new Error('provider said no'));
+  assert.deepEqual(await q.inFlight(pool), [], 'a failed job is resolved, not still drawing');
+});
+
+// SOMET-558. A fault the provider returned faster than it could have drawn
+// anything is not an attempt at the subject, so it must not cost one.
+//
+// THE DAMAGE THIS PREVENTS, measured 2026-09-10: the remote box answered a CUDA
+// allocator assert in ~200ms, a claimed batch of ten failed in under two
+// seconds, and three such windows left seven subjects permanently in `failed`
+// having never once been drawn.
+lockedTest('a refunded failure does not spend an attempt, and stays queued', async (t, pool) => {
+  await q.enqueue(pool, [S(1)], { backend: 'connector' });
+  const [job] = await q.claim(pool, 1);
+  assert.equal(job.attempts, 1, 'claim() charges the attempt up front');
+
+  const back = await q.fail(pool, job.id, new Error('provider answered 500: CUDA assert'),
+    { refundAttempt: true });
+  assert.equal(back.attempts, 0, 'the attempt must be given back');
+  assert.equal(back.state, 'queued');
+
+  // The whole point: a subject can survive more fault windows than it has
+  // attempts, because the faults never counted.
+  for (let i = 0; i < 5; i++) {
+    // A refunded failure still serves its retry backoff -- the subject is not
+    // at fault but the provider is still down, so hammering it is wrong.
+    // Cleared here so the test measures the ATTEMPT accounting rather than
+    // waiting out five real 30-second waits.
+    await pool.query('UPDATE art_jobs SET not_before = NULL WHERE id = $1', [job.id]);
+    const [again] = await q.claim(pool, 1);
+    assert.ok(again, `still claimable on fault window ${i + 1}`);
+    await q.fail(pool, again.id, new Error('provider answered 500'), { refundAttempt: true });
+  }
+  const { rows } = await pool.query('SELECT state, attempts FROM art_jobs WHERE id = $1', [job.id]);
+  assert.deepEqual(rows[0], { state: 'queued', attempts: 0 },
+    'six provider faults must not exhaust a three-attempt subject');
+});
+
+// The other half, and the reason a refund cannot simply always apply: a real
+// attempt must still be charged, or a hopeless subject retries forever.
+lockedTest('a normal failure still spends its attempt and still terminates', async (t, pool) => {
+  await q.enqueue(pool, [S(2)], { backend: 'connector' });
+  for (let i = 1; i <= q.MAX_ATTEMPTS(); i++) {
+    const [job] = await q.claim(pool, 1);
+    assert.ok(job, `claimable on attempt ${i}`);
+    assert.equal(job.attempts, i);
+    await q.fail(pool, job.id, new Error('cutout removed 97.9% of the image'));
+    await pool.query('UPDATE art_jobs SET not_before = NULL WHERE state = $1', ['queued']);
+  }
+  const { rows } = await pool.query('SELECT state, attempts FROM art_jobs');
+  assert.deepEqual(rows[0], { state: 'failed', attempts: q.MAX_ATTEMPTS() },
+    'without a refund the attempt cap must still be reached');
+});
+
+// The refund must not push a job below zero, and must not resurrect one that
+// has already reached the cap by legitimate attempts.
+lockedTest('a refund floors at zero rather than going negative', async (t, pool) => {
+  await q.enqueue(pool, [S(3)], { backend: 'connector' });
+  const [job] = await q.claim(pool, 1);
+  await q.fail(pool, job.id, new Error('provider answered 500'), { refundAttempt: true });
+  const twice = await q.fail(pool, job.id, new Error('provider answered 500'), { refundAttempt: true });
+  assert.equal(twice.attempts, 0, 'attempts must never go negative');
+  assert.equal(twice.state, 'queued');
+});

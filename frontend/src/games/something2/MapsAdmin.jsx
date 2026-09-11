@@ -1,12 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import styled from 'styled-components';
 import toast from 'react-hot-toast';
-import { HiOutlinePlus, HiOutlineTrash, HiOutlineArrowPath, HiOutlineSparkles, HiOutlineStar } from 'react-icons/hi2';
+import { HiOutlinePlus, HiOutlineTrash, HiOutlineArrowPath, HiOutlineSparkles, HiOutlineStar, HiOutlineChevronRight, HiOutlineChevronDown } from 'react-icons/hi2';
 import { useWorlds, useCreateWorld, useDeleteWorld } from './useWorlds.js';
 import { useEntityTypes } from './useMaps.js';
-import { useUpdateWorld, useRegenerateWorld, useRerollCreatures, useWorldLinks, useSetLink, useClearLink, useWorldVillages, useAddVillage, useDeleteVillage } from './useMapsAdmin.js';
+import { useUpdateWorld, useRegenerateWorld, useRerollCreatures, useWorldLinks, useSetLink, useClearLink, useWorldVillages, useAddVillage, useDeleteVillage, useWorldsSummary } from './useMapsAdmin.js';
 import { useBiomes } from './useBiomes.js';
 import { orderBiomeNames } from './biomeForm.js';
+import { groupWorldsByRegion, filterWorlds, defaultOpenGroups } from './mapListView.js';
+import { matchCreatureTypes } from './creaturePicker.js';
+import AdminLoading from './AdminLoading.jsx';
 
 const AdminContainer = styled.div`
   padding: 2rem; color: var(--s2-text); max-width: 1200px; margin: 0 auto;
@@ -24,15 +27,179 @@ const Card = styled.div`
 `;
 const Row = styled.div`display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin: 0.4rem 0;`;
 const Input = styled.input`background: var(--s2-bg-sunken); color: var(--s2-text); border: 1px solid var(--s2-border-strong); border-radius: 4px; padding: 0.4rem;`;
-const CheckGrid = styled.div`display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 0.4rem 0;`;
+
+// SOMET-554. A region's worlds sit inside a header that collapses, so an admin
+// with 39 regions sees 39 lines rather than every world at once.
+const GroupHeader = styled.div`
+  display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;
+  color: var(--s2-text); font-weight: 600; padding: 0.45rem 0.6rem; margin-top: 0.6rem;
+  background: var(--s2-surface-raised); border: 1px solid var(--s2-border); border-radius: 6px;
+  &:hover { border-color: var(--s2-border-strong); }
+`;
+const SummaryRow = styled.div`
+  display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; cursor: pointer;
+  padding: 0.45rem 0.6rem; margin: 0.3rem 0 0.3rem 1.2rem;
+  background: var(--s2-surface-raised);
+  border: 1px solid ${p => p.$entry ? 'var(--s2-selected)' : 'var(--s2-border)'};
+  border-radius: 6px;
+  &:hover { border-color: var(--s2-border-strong); }
+`;
+const Chip = styled.span`
+  font-size: 0.78em; padding: 1px 7px; border-radius: 10px;
+  background: var(--s2-bg-sunken); color: var(--s2-text-secondary);
+  border: 1px solid var(--s2-border);
+`;
+// Biomes and creature types both render as chips on the same row, and with one
+// shared style "Highland Swarm / Highland Skirmisher / Highlands" reads as three
+// creatures. A biome chip carries the biome's own catalog colour as a swatch so
+// the two lists stay tellable apart at a glance -- which is the whole point of
+// putting them on the collapsed row.
+const BiomeChip = styled(Chip)`
+  border-style: dashed; color: var(--s2-text-dim);
+`;
+const Swatch = styled.span`
+  display: inline-block; width: 8px; height: 8px; border-radius: 2px;
+  margin-right: 5px; vertical-align: middle; background: ${p => p.$color || 'var(--s2-border-strong)'};
+`;
+// The removable chip in the creature picker. `aria-label` lives on the button so
+// the control is reachable without a DOM test being able to render it (see
+// creaturePicker.js on why the logic, not the markup, carries the tests).
+const RemoveChip = styled.button`
+  font-size: 0.78em; padding: 1px 7px 1px 9px; border-radius: 10px; cursor: pointer;
+  background: var(--s2-bg-sunken); color: var(--s2-text); border: 1px solid var(--s2-border-strong);
+  display: inline-flex; align-items: center; gap: 5px;
+  &:hover { border-color: var(--s2-danger); }
+`;
+const Muted = styled.span`color: var(--s2-text-dim); font-size: 0.85em;`;
+// Results drop below the search box; capped height so a two-letter query that
+// matches 80 types cannot push the rest of the card off screen.
+const PickerResults = styled.div`
+  display: flex; flex-wrap: wrap; gap: 0.4rem; max-height: 170px; overflow-y: auto;
+  padding: 0.5rem; margin: 0.3rem 0; background: var(--s2-bg-sunken);
+  border: 1px solid var(--s2-border); border-radius: 6px;
+`;
+const PickerOption = styled.button`
+  font-size: 0.8em; padding: 2px 8px; border-radius: 10px; cursor: pointer;
+  background: var(--s2-surface-raised); color: var(--s2-text-secondary); border: 1px solid var(--s2-border);
+  &:hover { color: var(--s2-text); border-color: var(--s2-accent); }
+`;
+
+// SOMET-556. The Add village form used to seed 6x5, and the server rejects any
+// box whose width + height exceeds VILLAGE_LIMITS.maxSum (10 today) -- so the
+// button could never work until the admin edited the size fields first.
+//
+// The real constraint is on the SUM, not on either axis: backend maxW is 8 and
+// maxH is 6, which independently permit an illegal 14. That width is deliberate
+// (services/villages.js:95-98 keeps them wide so index.js's "between 3 and 8
+// tiles" / "between 3 and 6 tiles" messages stay true), so the defaults are what
+// has to be legal.
+//
+// Not mirroring maxSum here on purpose: it is DERIVED --
+// largestTileSumWithinBudget searches for the largest tile sum whose on-screen
+// box stays within a quarter of the viewport, so it moves with ISO_K and the
+// screen budget. A copy of "10" in this file would drift silently the first time
+// that budget changes. village_form_defaults.test.js pins the backend limit
+// against these numbers instead, so a shrinking budget goes red and names this
+// file rather than quietly restoring the always-fails behaviour.
+const VILLAGE_DEFAULT_W = 5;
+const VILLAGE_DEFAULT_H = 5;
 
 function bounded(w) { return !!(w.width && w.height); }
+
+// SOMET-554. Replaces a grid of one checkbox per creature type. On the dev
+// database that grid was 293 checkboxes per card to express a selection that is
+// never larger than 6 -- every bounded world allows between 1 and 6 types. The
+// selection renders as chips (so it stays readable at a glance) and the long
+// tail is reached by searching rather than by scrolling past 287 unchecked boxes.
+function CreaturePicker({ creatureTypes, allowed, onAdd, onRemove }) {
+  const [query, setQuery] = useState('');
+  const matches = useMemo(
+    () => matchCreatureTypes(creatureTypes, query, { exclude: allowed }),
+    [creatureTypes, query, allowed],
+  );
+
+  return (
+    <>
+      <Row>
+        <label style={{ color: 'var(--s2-text-muted)' }}>Creature types:</label>
+        {allowed.size === 0 && <Muted>none — this map will scatter no creatures</Muted>}
+        {[...allowed].map((n) => (
+          <RemoveChip key={n} type="button" aria-label={`Remove ${n}`} onClick={() => onRemove(n)}>
+            {n} <span aria-hidden="true">×</span>
+          </RemoveChip>
+        ))}
+      </Row>
+      <Row>
+        <Input
+          placeholder={`Search ${(creatureTypes || []).length} creature types…`}
+          value={query} style={{ width: 260 }}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        {query.trim() !== '' && (
+          <Muted>
+            {matches.total === 0
+              ? 'no match'
+              : `${matches.shown.length} of ${matches.total} shown`}
+          </Muted>
+        )}
+      </Row>
+      {query.trim() !== '' && matches.shown.length > 0 && (
+        <PickerResults>
+          {matches.shown.map((t) => (
+            <PickerOption key={t.id ?? t.name} type="button" onClick={() => { onAdd(t.name); }}>
+              + {t.name}
+            </PickerOption>
+          ))}
+        </PickerResults>
+      )}
+    </>
+  );
+}
+
+// SOMET-554. The always-rendered half of a map. Everything here reads off
+// /api/worlds plus the batched /api/worlds/summary, so a hundred of these cost
+// a hundred rows and zero extra requests -- the per-world links/villages queries
+// live in the expanded body below and only run for the one card that is open.
+function MapRow({ world, summary, biomeColors = {}, open, onToggle, onDelete }) {
+  const allowed = world.allowed_creature_types || [];
+  const worldBiomes = world.biomes || [];
+  const portals = summary?.portal_count ?? 0;
+  const villages = summary?.village_count ?? 0;
+
+  return (
+    <SummaryRow $entry={world.is_entry} onClick={onToggle}>
+      {open ? <HiOutlineChevronDown /> : <HiOutlineChevronRight />}
+      <b>{world.name}</b>
+      <Muted>{world.width}×{world.height}</Muted>
+      {world.is_entry && <HiOutlineStar style={{ color: 'var(--s2-selected)' }} title="Player entry" />}
+      {/* summary is undefined until /api/worlds/summary resolves; render nothing
+          rather than a confident "No Dungeon" that may flip a moment later. */}
+      {summary && (portals > 0
+        ? <Chip style={{ color: 'var(--s2-tab-items)', borderColor: 'var(--s2-tab-items)' }}>
+            🏰 {portals} portal{portals > 1 ? 's' : ''}
+          </Chip>
+        : <Chip>🌿 no dungeon</Chip>)}
+      {summary && villages > 0 && <Chip>🏘 {villages} village{villages > 1 ? 's' : ''}</Chip>}
+      <Muted>{world.creature_count ?? 0} creatures</Muted>
+      {allowed.map((n) => <Chip key={n}>{n}</Chip>)}
+      {worldBiomes.map((n) => (
+        <BiomeChip key={`b-${n}`} title={`Biome: ${n}`}>
+          <Swatch $color={biomeColors[n]} />{n}
+        </BiomeChip>
+      ))}
+      <HiOutlineTrash
+        style={{ color: 'var(--s2-danger)', cursor: 'pointer', marginLeft: 'auto' }}
+        title="Delete this map"
+        onClick={(e) => { e.stopPropagation(); onDelete(); }}
+      />
+    </SummaryRow>
+  );
+}
 
 function MapCard({ world, creatureTypes, allMaps, biomes, biomesLoading }) {
   const update = useUpdateWorld();
   const regen = useRegenerateWorld();
   const reroll = useRerollCreatures();
-  const del = useDeleteWorld();
   const links = useWorldLinks(world.id);
   const setLink = useSetLink();
   const clearLink = useClearLink();
@@ -41,8 +208,8 @@ function MapCard({ world, creatureTypes, allMaps, biomes, biomesLoading }) {
   const delVillage = useDeleteVillage();
   const [vMinRow, setVMinRow] = useState(1);
   const [vMinCol, setVMinCol] = useState(1);
-  const [vW, setVW] = useState(6);
-  const [vH, setVH] = useState(5);
+  const [vW, setVW] = useState(VILLAGE_DEFAULT_W);
+  const [vH, setVH] = useState(VILLAGE_DEFAULT_H);
   const [vGate, setVGate] = useState('S');
   const others = (allMaps || []).filter(m => m.id !== world.id);
   const linkFor = (edge) => links.find(l => l.edge === edge)?.to_world_id || '';
@@ -56,6 +223,14 @@ function MapCard({ world, creatureTypes, allMaps, biomes, biomesLoading }) {
   // (SOMET-246). Read straight off the prop so it always shows what is
   // persisted rather than a stale first-render copy.
   const creatureCount = world.creature_count ?? 0;
+  // SOMET-554: this card now mounts when its row is expanded and unmounts when
+  // it is collapsed, so these snapshots are taken fresh each time the form is
+  // opened. That is deliberately NOT the same as syncing them from props on
+  // every render -- Re-roll and Regenerate both invalidate ["worlds"], and
+  // re-seeding the form on that would throw away whatever the admin had just
+  // typed. The one existing sync below is is_entry, which is a special case:
+  // setting a different map as entry clears this one's flag server-side, so the
+  // checkbox has to follow a change this card did not make.
   const [allowed, setAllowed] = useState(new Set(world.allowed_creature_types || []));
   const [isEntry, setIsEntry] = useState(!!world.is_entry);
   const cx = world.width ? Math.floor((world.width * 100) / 2) : 0;
@@ -67,8 +242,9 @@ function MapCard({ world, creatureTypes, allMaps, biomes, biomesLoading }) {
 
   useEffect(() => { setIsEntry(!!world.is_entry); }, [world.is_entry]);
 
-  const toggle = (n) => setAllowed(prev => {
-    const next = new Set(prev); next.has(n) ? next.delete(n) : next.add(n); return next;
+  const addAllowed = (n) => setAllowed(prev => new Set(prev).add(n));
+  const removeAllowed = (n) => setAllowed(prev => {
+    const next = new Set(prev); next.delete(n); return next;
   });
   const toggleBiome = (n) => setWorldBiomes(prev => {
     const next = new Set(prev); next.has(n) ? next.delete(n) : next.add(n); return next;
@@ -101,8 +277,9 @@ function MapCard({ world, creatureTypes, allMaps, biomes, biomesLoading }) {
   const hasDungeon = portalLinks.length > 0;
 
   return (
-    <Card $entry={world.is_entry}>
+    <Card $entry={world.is_entry} style={{ marginLeft: '1.2rem' }}>
       <Row>
+        <label style={{ color: 'var(--s2-text-muted)' }}>Name:</label>
         <Input value={name} onChange={e => setName(e.target.value)} />
         <span style={{ color: 'var(--s2-text-dim)' }}>{world.width}×{world.height} tiles</span>
         {hasDungeon ? (
@@ -114,9 +291,6 @@ function MapCard({ world, creatureTypes, allMaps, biomes, biomesLoading }) {
             🌿 No Dungeon
           </span>
         )}
-        {world.is_entry && <HiOutlineStar style={{ color: 'var(--s2-selected)' }} title="Player entry" />}
-        <HiOutlineTrash style={{ color: 'var(--s2-danger)', cursor: 'pointer', marginLeft: 'auto' }}
-          onClick={() => window.confirm('Delete this map?') && del.mutate(world.id)} />
       </Row>
       <Row>
         <label style={{ color: 'var(--s2-text-muted)' }}>Creatures scattered:</label>
@@ -131,13 +305,10 @@ function MapCard({ world, creatureTypes, allMaps, biomes, biomesLoading }) {
           or change the tier in the map spec and re-seed.
         </span>
       </Row>
-      <CheckGrid>
-        {creatureTypes.map(t => (
-          <label key={t.id} style={{ color: 'var(--s2-text-secondary)' }}>
-            <input type="checkbox" checked={allowed.has(t.name)} onChange={() => toggle(t.name)} /> {t.name}
-          </label>
-        ))}
-      </CheckGrid>
+      <CreaturePicker
+        creatureTypes={creatureTypes} allowed={allowed}
+        onAdd={addAllowed} onRemove={removeAllowed}
+      />
       <Row>
         <label style={{ color: 'var(--s2-text-muted)' }}>
           <input type="checkbox" checked={isEntry} onChange={e => setIsEntry(e.target.checked)} /> Player entry
@@ -224,13 +395,45 @@ function MapsAdmin() {
   const { worlds, isLoadingWorlds } = useWorlds();
   const { entityTypes } = useEntityTypes();
   const { biomes, isLoadingBiomes } = useBiomes();
+  const summaryByWorld = useWorldsSummary();
   const createWorld = useCreateWorld();
+  const del = useDeleteWorld();
   const [name, setName] = useState('');
   const [width, setWidth] = useState(24);
   const [height, setHeight] = useState(24);
+  const [query, setQuery] = useState('');
+  // Which single map card is expanded. One at a time on purpose: it is what
+  // keeps the tab's cost flat as regions keep being added, since the expanded
+  // body is the only thing that builds the four ~100-option link selects and
+  // fires the per-world links/villages queries.
+  const [openId, setOpenId] = useState(null);
+  // null means "follow the defaults for the current filter state". A click on a
+  // group header replaces it with an explicit set; typing in the filter puts it
+  // back to null so newly matching groups open themselves.
+  const [openGroups, setOpenGroups] = useState(null);
 
-  const creatureTypes = (entityTypes || []).filter(t => t.is_creature);
-  const boundedMaps = (worlds || []).filter(bounded);
+  const creatureTypes = useMemo(
+    () => (entityTypes || []).filter(t => t.is_creature),
+    [entityTypes],
+  );
+  const boundedMaps = useMemo(() => (worlds || []).filter(bounded), [worlds]);
+  const biomeColors = useMemo(() => {
+    const by = {};
+    for (const b of biomes || []) by[b.name] = b.color;
+    return by;
+  }, [biomes]);
+  const filtering = query.trim() !== '';
+  const visible = useMemo(() => filterWorlds(boundedMaps, query), [boundedMaps, query]);
+  const groups = useMemo(() => groupWorldsByRegion(visible), [visible]);
+
+  useEffect(() => { setOpenGroups(null); }, [query]);
+
+  const effectiveOpenGroups = openGroups ?? defaultOpenGroups(groups, { filtered: filtering });
+  const toggleGroup = (region) => setOpenGroups(() => {
+    const next = new Set(effectiveOpenGroups);
+    next.has(region) ? next.delete(region) : next.add(region);
+    return next;
+  });
 
   const generate = () => {
     if (!name.trim()) return toast.error('Name is required');
@@ -238,7 +441,7 @@ function MapsAdmin() {
       { onSuccess: () => setName('') });
   };
 
-  if (isLoadingWorlds) return <AdminContainer>Loading maps…</AdminContainer>;
+  if (isLoadingWorlds) return <AdminContainer><AdminLoading label="Loading maps…" /></AdminContainer>;
 
   return (
     <AdminContainer>
@@ -253,8 +456,45 @@ function MapsAdmin() {
           <Button onClick={generate} disabled={createWorld.isPending}><HiOutlinePlus /> Generate map</Button>
         </Row>
       </Card>
+      <Row>
+        <Input placeholder="Filter maps by name…" value={query} style={{ width: 280 }}
+          onChange={e => setQuery(e.target.value)} />
+        <Muted>
+          {filtering
+            ? `${visible.length} of ${boundedMaps.length} maps`
+            : `${boundedMaps.length} maps in ${groups.length} groups`}
+        </Muted>
+      </Row>
       {boundedMaps.length === 0 && <p style={{ color: 'var(--s2-text-dim)' }}>No bounded maps yet. Generate one above.</p>}
-      {boundedMaps.map(w => <MapCard key={w.id} world={w} creatureTypes={creatureTypes} allMaps={boundedMaps} biomes={biomes} biomesLoading={isLoadingBiomes} />)}
+      {boundedMaps.length > 0 && visible.length === 0 && (
+        <p style={{ color: 'var(--s2-text-dim)' }}>No map matches “{query.trim()}”.</p>
+      )}
+      {groups.map(g => {
+        const groupOpen = effectiveOpenGroups.has(g.region);
+        return (
+          <div key={g.region}>
+            <GroupHeader onClick={() => toggleGroup(g.region)}>
+              {groupOpen ? <HiOutlineChevronDown /> : <HiOutlineChevronRight />}
+              {g.region}
+              <Muted>{g.worlds.length} map{g.worlds.length > 1 ? 's' : ''}</Muted>
+            </GroupHeader>
+            {groupOpen && g.worlds.map(w => (
+              <div key={w.id}>
+                <MapRow
+                  world={w} summary={summaryByWorld[w.id]} biomeColors={biomeColors}
+                  open={openId === w.id}
+                  onToggle={() => setOpenId(prev => (prev === w.id ? null : w.id))}
+                  onDelete={() => window.confirm('Delete this map?') && del.mutate(w.id)}
+                />
+                {openId === w.id && (
+                  <MapCard world={w} creatureTypes={creatureTypes} allMaps={boundedMaps}
+                    biomes={biomes} biomesLoading={isLoadingBiomes} />
+                )}
+              </div>
+            ))}
+          </div>
+        );
+      })}
     </AdminContainer>
   );
 }

@@ -36,12 +36,40 @@ const BACKDROP = 'flat solid magenta background';
 //   white     39 / 19 /  12 /  45 /  99 %
 //   none      43 / 32 /   4 /  19 /  n/a (one 422)
 //
-// White is safe HERE, though it would not be for chroma keying: the objection
-// to white -- "it punches holes straight through pale subjects" -- is an
-// objection to KEYING it. A provider doing real background removal has no such
-// problem, and a pale grey helm came back intact. Keep magenta for the path
-// that genuinely keys a colour.
-const CUTOUT_BACKDROP = 'flat solid white background';
+// WHITE WAS WRONG, and the reasoning that chose it contained the refutation.
+//
+// It was picked on the argument that "the objection to white -- it punches
+// holes straight through pale subjects -- is an objection to KEYING it, and a
+// provider doing real background removal has no such problem". That last step
+// does not hold: this provider's background removal IS a colour key. It flood
+// fills from the edges, so a pale subject on white shares a colour with its
+// backdrop exactly as it would in a downstream chroma key. The objection never
+// went away; it moved to the other side of the wire.
+//
+// It cost 21 of 101 subjects in the 2026-09-05 batch, in two shapes that look
+// unrelated and are one cause:
+//
+//   thin + pale (staff, wand, spear, arrow, dart, signet, band)
+//       -> the fill eats the subject: "cutout removed 97.9%, no subject left"
+//   bulky, fills the frame (plate, gauntlets, hood)
+//       -> too little background to key: 17-21% clear, under our 25% floor
+//
+// Measured, same subjects, same seeds, backdrop the only variable, transparency
+// read with alphaProfile and judged against the real floor:
+//
+//                       white   grey
+//     8 failing subjects  0/8     8/8      (grey: 79-97% clear)
+//     4 working controls  4/4     4/4      (grey within ~1pt, worst -8pt)
+//
+// GREY RATHER THAN A SATURATED COLOUR, deliberately. Green and magenta both
+// key cleanly here too -- but the bleed measured above is a bleed of HUE, and
+// grey has no hue to bleed. It is the one candidate that cannot reintroduce
+// the bug the magenta finding fixed. That is also why this is not simply
+// reverting to magenta: magenta keys well and ruins the subject.
+//
+// Magenta stays the default for the path that genuinely chroma-keys downstream
+// (tools/cutout-entity-textures.py keys that exact colour).
+const CUTOUT_BACKDROP = 'flat solid neutral grey background';
 
 // Mirrors sprite-gen/app/prompts.py build_object_prompt in intent, not in
 // wording. Two deliberate departures, both measured on this provider:
@@ -53,7 +81,54 @@ const CUTOUT_BACKDROP = 'flat solid white background';
 //     pine tree). "one single" plus "centered" plus "nothing else in frame"
 //     is what stops it, and the provider's negative prompt names the failure
 //     modes as well.
-function buildObjectPrompt(base, { backdrop = BACKDROP } = {}) {
+// The framing exclusions, as NEGATIVE terms (SOMET-558).
+//
+// These nine used to be spelled "no frame, no border, no picture frame, no
+// card, no ground, no floor, no shadow, no scenery, no other objects" inside
+// the POSITIVE prompt. That is the same defect this ticket fixed for operator
+// corrections, at larger scale and in our own house wording: CLIP has no
+// reliable negation, so every one of those nouns was being conditioned IN by
+// the very clause asking for its absence.
+//
+// NOTHING IS LOST BY MOVING THEM, and that is the argument for doing it without
+// an A/B first. Each term is carried to the provider as a negative instead of
+// dropped, so the model is still steered away from all nine -- and it now works
+// through negative_prompt, which is the mechanism that actually expresses
+// absence. The desktop provider's own template already listed eight of the nine
+// there, so for that provider this is mostly de-duplication.
+//
+// Exported rather than inlined at the dispatcher, because the LIST and the
+// prompt that no longer contains it are one contract: a term deleted here and
+// not added there is silently unenforced.
+const OBJECT_NEGATIVES = [
+  'picture frame', 'border', 'trading card',
+  'ground', 'floor', 'shadow',
+  'scenery', 'multiple objects',
+];
+
+// WHAT DELIBERATELY STAYS IN THE POSITIVE PROMPT, because it was measured to
+// work and this change must not undo it: "only X and nothing else", "one single
+// object" and "centered". Asked for a bare subject this model answers with a
+// TILESET of it -- a forest for one pine tree -- and that trio is what stops
+// it. They are constraints on what the image IS, not names of things to omit,
+// so the negation objection does not apply to them.
+function buildObjectPrompt(base, { backdrop = BACKDROP, corrections = [] } = {}) {
+  // SOMET-548. Per-subject corrections land HERE, with the exclusions and
+  // BEFORE the styling, not appended at the end.
+  //
+  // That placement is the whole reason this is not a one-line concatenation.
+  // The comment below explains why the exclusions lead: this model answers a
+  // bare subject with a tileset, and a subject-on-a-background with framed art,
+  // so what comes first is what holds. A correction appended after "pixel art
+  // RPG game asset, isometric 3/4 top-down view, ..." would sit in the weakest
+  // position in the prompt -- exactly where an instruction the operator wrote
+  // BECAUSE the model already ignored their intent is least likely to be
+  // honoured.
+  const fixes = corrections
+    .map((c) => String(c || '').trim())
+    .filter(Boolean)
+    .join(', ');
+
   // "only X and nothing else" leads, and that word order is doing work. Asked
   // for "a single pine tree" this model returns a FOREST, and asked for an
   // object on a background it returns the object as framed art on a card --
@@ -61,10 +136,10 @@ function buildObjectPrompt(base, { backdrop = BACKDROP } = {}) {
   // reading of any subject is "a picture of that subject". Naming the
   // exclusions first, before any styling, is what stops it.
   return `only ${base} and nothing else, one single object, centered, `
-    + `${backdrop}, no frame, no border, no picture frame, no card, `
-    + 'no ground, no floor, no shadow, no scenery, no other objects, '
+    + `${backdrop}, `
+    + (fixes ? `${fixes}, ` : '')
     + 'pixel art RPG game asset, isometric 3/4 top-down view, crisp clean pixels, '
     + 'limited palette, sharp outline, cut out on a plain flat background';
 }
 
-module.exports = { BACKDROP, CUTOUT_BACKDROP, buildObjectPrompt };
+module.exports = { BACKDROP, CUTOUT_BACKDROP, OBJECT_NEGATIVES, buildObjectPrompt };

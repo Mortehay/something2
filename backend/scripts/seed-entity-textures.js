@@ -19,6 +19,7 @@ const path = require('path');
 const dotenv = require('dotenv');
 const { Pool } = require('pg');
 const assetStore = require('../src/services/assetStore.js');
+const { trimForStorage } = require('../src/services/remoteImageProvider.js');
 
 const IN_DIR = path.resolve(__dirname, '../seeds/textures/entities');
 const MANIFEST = path.resolve(__dirname, '../seeds/textures/entities.json');
@@ -46,7 +47,10 @@ async function seedEntityTextures(pool, { force = false, only = null } = {}) {
 
   await assetStore.ensureBucket();
   const bucket = assetStore.BUCKET();
-  const stats = { uploaded: 0, linked: 0, skipped: 0, missingFile: 0, missingEntity: 0, needsRegen: 0 };
+  const stats = {
+    uploaded: 0, linked: 0, skipped: 0, missingFile: 0, missingEntity: 0,
+    needsRegen: 0, trimmed: 0,
+  };
 
   for (const entry of wanted) {
     // Flagged by the cutout pass as still carrying a background or as an
@@ -77,9 +81,24 @@ async function seedEntityTextures(pool, { force = false, only = null } = {}) {
       continue;
     }
 
+    // SOMET-564. Trim on the way up, rather than re-trimming the checked-in
+    // files and committing 15MB of rewritten binaries.
+    //
+    // WHY HERE AND NOT IN THE FILES. A repair that only fixes the object store
+    // is undone by the next seed run -- the shape recorded in SOMET-335, where
+    // two migrations repaired the entry world's spawn and both were silently
+    // reverted by re-seeding. Trimming at the seam that does the re-seeding
+    // closes that by construction: there is no state to drift back to, because
+    // the rule is applied every time the art is uploaded. The PNGs on disk stay
+    // as the generator drew them, which is what they are -- source.
+    //
+    // Same trimForStorage the live generation path uses, so seeded art and
+    // freshly generated art cannot disagree.
     const key = seededKey(bucket, entry.name);
-    await assetStore.putObject(key, fs.readFileSync(file), 'image/png');
+    const trimmed = trimForStorage(fs.readFileSync(file), 'object');
+    await assetStore.putObject(key, trimmed.buffer, 'image/png');
     stats.uploaded += 1;
+    if (trimmed.ratio < 1) stats.trimmed += 1;
     await pool.query(
       `UPDATE entity_types SET image = $1, sprite = NULL, render_mode = 'static',
         updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
@@ -100,7 +119,8 @@ if (require.main === module) {
   const pool = new Pool({ connectionString: url });
   seedEntityTextures(pool, { force })
     .then((s) => {
-      console.log(`seeded ${s.linked} entity images (${s.uploaded} uploaded), `
+      console.log(`seeded ${s.linked} entity images (${s.uploaded} uploaded, `
+        + `${s.trimmed} trimmed), `
         + `${s.skipped} already had art, ${s.needsRegen} awaiting a redraw, `
         + `${s.missingFile} missing files, ${s.missingEntity} unknown entities`);
     })

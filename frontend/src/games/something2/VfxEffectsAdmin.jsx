@@ -8,6 +8,7 @@ import {
   VFX_SHAPES, VFX_EASES, emptyVfxForm, vfxToForm, vfxFormToPayload, validateVfxForm,
 } from './vfxForm.js';
 import { drawVfxPreview } from './vfxPreview.js';
+import AdminLoading from './AdminLoading.jsx';
 
 const AdminContainer = styled.div`
   padding: 2rem; color: var(--s2-text); max-width: 1200px; margin: 0 auto;
@@ -209,7 +210,7 @@ export default function VfxEffectsAdmin() {
       </Row>
 
       {adding && <EffectCard effect={null} onDone={() => setAdding(false)} />}
-      {isLoadingEffects && <p style={{ color: 'var(--s2-text-muted)' }}>Loading…</p>}
+      {isLoadingEffects && <AdminLoading label="Loading effects…" inline size={16} />}
       {filteredEffects.map(e => <EffectCard key={e.id} effect={e} />)}
       {!isLoadingEffects && filteredEffects.length === 0 && !adding && (
         <p style={{ color: 'var(--s2-text-muted)' }}>

@@ -306,6 +306,11 @@ test('a spec that fails validation writes nothing', async (t) => {
 // observation. IF YOU SEE THIS TEST NEAR 300s AGAIN, the specs have grown
 // another 60% and the fix is to split the loop into one subtest per spec (each
 // then gets its own budget) rather than to keep raising one number.
+// Long enough for a peer polling every 50ms to win the key, short enough that
+// four of them are noise against a ~150s test. See the call sites.
+const ENTRY_KEY_YIELD_MS = 300;
+const yieldEntryKey = () => new Promise((r) => { setTimeout(r, ENTRY_KEY_YIELD_MS); });
+
 test('every shipped spec applies cleanly', { timeout: 420000 }, async (t) => {
   // Gate ABOVE the CI check, not below it: a CI environment that sets
   // DATABASE_URL (so pool.unreachable would be false) but not
@@ -328,22 +333,32 @@ test('every shipped spec applies cleanly', { timeout: 420000 }, async (t) => {
   }
   const dir = path.join(__dirname, '..', 'seeds', 'maps');
   try {
-    // withEntryPreserved, like EVERY other applyMapSpec call in this file --
-    // this test was the one exception, and that exception is SOMET-265's
-    // deterministic cause, not a race.
+    // EVERY applyMapSpec here runs inside withEntryPreserved -- but ONE WINDOW
+    // PER APPLY, not one window across the whole loop (SOMET-534).
     //
-    // applyMapSpec CLEARS is_entry everywhere before setting the spec's own.
-    // hub-vale.map.json currently THROWS partway through (world "mire" is
-    // sealed -- SOMET-273), so the clear lands and the set never does, and
-    // the run ends with ZERO entry worlds. Auto-join then has nowhere to send
-    // a player with no last world, which is the "I can't log in to the map"
-    // symptom. Reproduced live on 2026-08-11: a full `npm test` with
-    // TEST_DATABASE_URL set left the shared dev database with no entry world,
-    // and `node scripts/dungeon/restore-entry.js "Old Trailhead"` put it back.
+    // Why it must be wrapped at all: applyMapSpec CLEARS is_entry everywhere
+    // before setting the spec's own. If it throws partway through, the clear
+    // lands and the set never does, and the run ends with ZERO entry worlds --
+    // auto-join then has nowhere to send a player with no last world, the "I
+    // can't log in to the map" symptom. Reproduced live on 2026-08-11: a full
+    // `npm test` left the shared dev database with no entry world, and
+    // `node scripts/dungeon/restore-entry.js "Old Trailhead"` put it back. The
+    // restore is in withEntryPreserved's `finally`, so it runs on the throwing
+    // path -- which is the only path that matters here.
     //
-    // The restore is in withEntryPreserved's `finally`, so it runs on the
-    // throwing path -- which is the only path that matters here.
-    await withEntryPreserved(pool, async () => {
+    // Why per apply rather than once around the loop: the single window was a
+    // 121-SECOND hold on a key whose median hold is 199ms, and every peer that
+    // arrived inside it timed out at 6s and ran unguarded. The measured cost
+    // was four whole-database invariants in villageScreenBudget_db.test.js
+    // skipping on EVERY full run -- not failing, starving. Splitting the window
+    // does not weaken the guarantee above: each apply still has its own
+    // snapshot -> apply -> restore, mutually exclusive with every peer's.
+    //
+    // Releasing BETWEEN applies is safe because no concurrently-running peer
+    // touches these subjects. Peers apply their own zz* fixture specs, so
+    // neither the vale-region village pre-count below nor the first/second
+    // idempotency pair is contended -- and the post-loop assertions read
+    // vale-region's own named worlds, which nothing else writes.
     // This test intentionally never tears down what it seeds (see the note
     // above the test suite), so on a re-run against the same DB, hub-vale's
     // village will already exist -- the applier's `existing.rowCount === 0`
@@ -373,8 +388,22 @@ test('every shipped spec applies cleanly', { timeout: 420000 }, async (t) => {
     const results = {};
     for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.map.json'))) {
       const s = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
-      const first = await applyMapSpec(pool, s);          // must not throw
-      const second = await applyMapSpec(pool, s);          // idempotent
+      // One preservation window each, with a YIELD between them. See the note
+      // above the loop for why the window is split; the yield is why splitting
+      // it was not enough on its own.
+      //
+      // withAdvisoryLock polls pg_try_advisory_lock every 50ms and there is no
+      // queue, so releasing and re-acquiring in the same tick starves every
+      // waiter: p5-descent's two applies are 61.6s and 58.8s back to back, and
+      // a reader arriving just before them waits ~120s against a key that is
+      // free only for microseconds at a time. Measured: splitting the window
+      // alone took villageScreenBudget's skips from 4 per run to 2, and a 90s
+      // reader wait took it to 1 -- the last one lost to exactly this convoy.
+      // A deliberate gap gives any waiter ~6 poll attempts to win the key.
+      const first = await withEntryPreserved(pool, () => applyMapSpec(pool, s));   // must not throw
+      await yieldEntryKey();
+      const second = await withEntryPreserved(pool, () => applyMapSpec(pool, s));  // idempotent
+      await yieldEntryKey();
       results[s.name] = { spec: s, first, second };
       // NOT tautological: applyMapSpec (scripts/seed-map.js) counts
       // worlds/links from real loop iterations completed, not by echoing
@@ -464,7 +493,6 @@ test('every shipped spec applies cleanly', { timeout: 420000 }, async (t) => {
       'North neighbour must land at -y (screen-up) — a sign flip here mirrors the World Map tab vertically');
     assert.ok(Number(byName['Blackfen Sinks'].graph_y) > 0,
       'South neighbour must land at +y (screen-down)');
-    });
   } finally { await pool.end(); }
 });
 

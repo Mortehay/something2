@@ -1,7 +1,7 @@
 // frontend/src/games/something2/src/js/core/__tests__/skillsHotbar.test.js
 import { describe, it, expect, beforeEach } from "vitest";
 import { Game } from "../Game.js";
-import { getSkillById } from "../skillsData.js";
+import { getSkillById, getSkillPrice, getSkillLevelReq, SKILLS } from "../skillsData.js";
 
 function makeTestGame() {
   const canvas = {
@@ -15,8 +15,11 @@ function makeTestGame() {
   g.setupInput();
   g.state = "playing";
   g.chunked = true;
+  g.authorityClient = { sendCastSkill: () => {}, sendInteract: () => {} };
+  g._canvasPoint = (e) => ({ x: g._cursorX ?? (e ? e.clientX : 0), y: g._cursorY ?? (e ? e.clientY : 0) });
   g.player = { x: 100, y: 100, width: 32, height: 32, hp: 100, maxHp: 100, className: "Warrior" };
   g.playerClass = "Warrior";
+  g.unlockedSkills = new Set(SKILLS.map((s) => s.id));
   return g;
 }
 
@@ -412,5 +415,152 @@ describe("Skills Panel & Hotbar Interactions", () => {
     expect(g.skillVisuals[0].kind).toBe("mirror_images");
   });
 });
+
+describe("Skills Purchasing & Unlocking Mechanics", () => {
+  let g;
+  let lastToast = null;
+
+  beforeEach(() => {
+    g = makeTestGame();
+    g.unlockedSkills = new Set(); // start with zero unlocked skills
+    g.characterId = "char_test_1";
+    g.gold = 1000;
+    g.progression = { level: 10 };
+    lastToast = null;
+    g.showToast = (msg) => { lastToast = msg; };
+  });
+
+  it("blocks dragging locked skills to the hotbar", () => {
+    const lockedSkill = getSkillById("war_shield_slam");
+    g.skillsOpen = true;
+    g.renderSystem = {
+      _skillsHitAreas: [
+        { kind: "skills_item", skillId: "war_shield_slam", skill: lockedSkill, box: { x: 50, y: 50, w: 100, h: 40 } },
+      ],
+    };
+    g._cursorX = 60;
+    g._cursorY = 60;
+    g._canvasPoint = () => ({ x: 60, y: 60 });
+
+    g._mouseDownHandler({ button: 0 });
+    expect(g.skillDrag).toBeNull();
+    expect(lastToast).toContain("Buy this skill from the Skill Trainer first");
+  });
+
+  it("allows dragging and binding unlocked skills to the hotbar", () => {
+    const skill = getSkillById("war_shield_slam");
+    g.unlockedSkills.add("war_shield_slam");
+    g.skillsOpen = true;
+    g.renderSystem = {
+      _skillsHitAreas: [
+        { kind: "skills_item", skillId: "war_shield_slam", skill, box: { x: 50, y: 50, w: 100, h: 40 } },
+      ],
+      _skillSlotHitAreas: [
+        { slot: 1, box: { x: 200, y: 200, w: 40, h: 40 } },
+      ],
+    };
+    g._cursorX = 60;
+    g._cursorY = 60;
+    g._canvasPoint = () => ({ x: 60, y: 60 });
+
+    // Mouse down starts drag
+    g._mouseDownHandler({ button: 0 });
+    expect(g.skillDrag).toBeDefined();
+    expect(g.skillDrag.skillId).toBe("war_shield_slam");
+
+    // Mouse up over slot 1
+    g._cursorX = 210;
+    g._cursorY = 210;
+    g._canvasPoint = () => ({ x: 210, y: 210 });
+    g._mouseUpHandler({ button: 0 });
+
+    expect(g.hotbarSkills.get(1)).toBeDefined();
+    expect(g.hotbarSkills.get(1).id).toBe("war_shield_slam");
+  });
+
+  it("purchases a skill when clicking buy button if player has enough gold and level", () => {
+    const skill = getSkillById("war_shield_slam");
+    const price = getSkillPrice(skill);
+    const lvlReq = getSkillLevelReq(skill);
+
+    g.gold = 5000;
+    g.progression = { level: 20 };
+    g.skillsOpen = true;
+    g.renderSystem = {
+      _skillsHitAreas: [
+        { kind: "skills_buy", skillId: "war_shield_slam", skill, price, levelReq: lvlReq, box: { x: 300, y: 50, w: 120, h: 28 } },
+      ],
+    };
+    g._cursorX = 310;
+    g._cursorY = 60;
+    g._canvasPoint = () => ({ x: 310, y: 60 });
+
+    g._mouseDownHandler({ button: 0 });
+
+    expect(g.gold).toBe(5000 - price);
+    expect(g.unlockedSkills.has("war_shield_slam")).toBe(true);
+    expect(lastToast).toContain("Learned:");
+    expect(g.blasts.length).toBeGreaterThan(0);
+  });
+
+  it("prevents purchasing a skill when player has insufficient gold", () => {
+    const skill = getSkillById("war_shield_slam");
+    const price = getSkillPrice(skill);
+    const lvlReq = getSkillLevelReq(skill);
+
+    g.gold = 10; // Not enough gold
+    g.progression = { level: 20 };
+    g.skillsOpen = true;
+    g.renderSystem = {
+      _skillsHitAreas: [
+        { kind: "skills_buy", skillId: "war_shield_slam", skill, price, levelReq: lvlReq, box: { x: 300, y: 50, w: 120, h: 28 } },
+      ],
+    };
+    g._cursorX = 310;
+    g._cursorY = 60;
+    g._canvasPoint = () => ({ x: 310, y: 60 });
+
+    g._mouseDownHandler({ button: 0 });
+
+    expect(g.gold).toBe(10);
+    expect(g.unlockedSkills.has("war_shield_slam")).toBe(false);
+    expect(lastToast).toContain("Not enough gold");
+  });
+
+  it("prevents purchasing a skill when player level is too low", () => {
+    const skill = getSkillById("war_shield_slam");
+    const price = getSkillPrice(skill);
+    const lvlReq = 40; // Needs level 40
+
+    g.gold = 10000;
+    g.progression = { level: 5 }; // Player is only level 5
+    g.skillsOpen = true;
+    g.renderSystem = {
+      _skillsHitAreas: [
+        { kind: "skills_buy", skillId: "war_shield_slam", skill, price, levelReq: lvlReq, box: { x: 300, y: 50, w: 120, h: 28 } },
+      ],
+    };
+    g._cursorX = 310;
+    g._cursorY = 60;
+    g._canvasPoint = () => ({ x: 310, y: 60 });
+
+    g._mouseDownHandler({ button: 0 });
+
+    expect(g.gold).toBe(10000);
+    expect(g.unlockedSkills.has("war_shield_slam")).toBe(false);
+    expect(lastToast).toContain("Level too low");
+  });
+
+  it("blocks casting a skill directly if it is not unlocked", () => {
+    const skill = getSkillById("war_shield_slam");
+    g.characterId = "char_locked_unlearned";
+    g.hotbarSkills.set(1, skill);
+    g.unlockedSkills.clear();
+
+    g._activateHotbarSkill(1);
+    expect(lastToast).toContain("is not learned! Buy from Skill Trainer");
+  });
+});
+
 
 
