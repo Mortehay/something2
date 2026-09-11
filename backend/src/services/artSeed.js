@@ -209,7 +209,9 @@ const SEED_POLICY = Object.freeze({
 // The export runs as root inside the backend container and writes onto a bind
 // mount, so without this every exported PNG lands root-owned and the host user
 // cannot re-touch it -- the seamless/cutout tools, an editor, or a plain rm
-// all fail with EPERM. Match whatever owns the seeds root. Best effort.
+// all fail with EPERM. Match whatever owns the PARENT of the textures root
+// (backend/seeds, which the host user cloned): textures/ itself was created
+// by an earlier root export and matching it would be a no-op. Best effort.
 function matchOwner(target, referenceDir) {
   try {
     const ref = fs.statSync(referenceDir);
@@ -247,6 +249,8 @@ async function exportArt({
     const outDir = path.join(root, policy.dir);
     const manifestPath = path.join(root, policy.manifest);
     fs.mkdirSync(outDir, { recursive: true });
+    const owner = path.dirname(root);
+    matchOwner(root, owner);
 
     const all = await policy.exportRows(db);
     const rows = only ? all.filter((r) => only.includes(r.key) || only.includes(r.name)) : all;
@@ -269,7 +273,7 @@ async function exportArt({
         const file = `${safeName(r.key)}.png`;
         const dest = path.join(outDir, file);
         fs.writeFileSync(dest, buf);
-        matchOwner(dest, root);
+        matchOwner(dest, owner);
         bytes += buf.length;
         const { image, ...manifestFields } = r;
         // Tiles and entities keep their historical shape (name-first, no key).
@@ -293,8 +297,8 @@ async function exportArt({
     }
     manifest.sort((a, b) => String(entryId(a)).localeCompare(String(entryId(b))));
     fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-    matchOwner(manifestPath, root);
-    matchOwner(outDir, root);
+    matchOwner(manifestPath, owner);
+    matchOwner(outDir, owner);
     results[kind] = { exported: fresh.length, bytes, failed };
   }
   return results;
