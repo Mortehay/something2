@@ -1,0 +1,2882 @@
+[
+  {
+    "key": "arc_aimed_shot",
+    "name": "Aimed Shot",
+    "file": "arc_aimed_shot.png",
+    "bytes": 57793,
+    "source": {
+      "width": 644,
+      "height": 747
+    }
+  },
+  {
+    "key": "arc_ambush_flurry",
+    "name": "Ambush Flurry",
+    "file": "arc_ambush_flurry.png",
+    "bytes": 45533,
+    "source": {
+      "width": 297,
+      "height": 397
+    }
+  },
+  {
+    "key": "arc_barrage",
+    "name": "Barrage",
+    "file": "arc_barrage.png",
+    "bytes": 46929,
+    "source": {
+      "width": 240,
+      "height": 315
+    }
+  },
+  {
+    "key": "arc_bear_trap",
+    "name": "Bear Trap",
+    "file": "arc_bear_trap.png",
+    "bytes": 68929,
+    "source": {
+      "width": 697,
+      "height": 747
+    }
+  },
+  {
+    "key": "arc_blinding_shot",
+    "name": "Blinding Shot",
+    "file": "arc_blinding_shot.png",
+    "bytes": 42933,
+    "source": {
+      "width": 391,
+      "height": 568
+    }
+  },
+  {
+    "key": "arc_bow_bash",
+    "name": "Bow Bash",
+    "file": "arc_bow_bash.png",
+    "bytes": 65072,
+    "source": {
+      "width": 612,
+      "height": 611
+    }
+  },
+  {
+    "key": "arc_camouflage",
+    "name": "Camouflage",
+    "file": "arc_camouflage.png",
+    "bytes": 65584,
+    "source": {
+      "width": 410,
+      "height": 416
+    }
+  },
+  {
+    "key": "arc_chin_jab",
+    "name": "Chin Jab",
+    "file": "arc_chin_jab.png",
+    "bytes": 29673,
+    "source": {
+      "width": 424,
+      "height": 296
+    }
+  },
+  {
+    "key": "arc_concussive_shot",
+    "name": "Concussive Shot",
+    "file": "arc_concussive_shot.png",
+    "bytes": 57197,
+    "source": {
+      "width": 297,
+      "height": 281
+    }
+  },
+  {
+    "key": "arc_crippling_shot",
+    "name": "Crippling Shot",
+    "file": "arc_crippling_shot.png",
+    "bytes": 48795,
+    "source": {
+      "width": 348,
+      "height": 416
+    }
+  },
+  {
+    "key": "arc_eagle_eye",
+    "name": "Eagle Eye",
+    "file": "arc_eagle_eye.png",
+    "bytes": 44252,
+    "source": {
+      "width": 474,
+      "height": 322
+    }
+  },
+  {
+    "key": "arc_enfeebling_poison",
+    "name": "Enfeebling Poison",
+    "file": "arc_enfeebling_poison.png",
+    "bytes": 44605,
+    "source": {
+      "width": 314,
+      "height": 500
+    }
+  },
+  {
+    "key": "arc_entangling_net",
+    "name": "Entangling Net",
+    "file": "arc_entangling_net.png",
+    "bytes": 50603,
+    "source": {
+      "width": 392,
+      "height": 526
+    }
+  },
+  {
+    "key": "arc_explosive_arrow",
+    "name": "Explosive Arrow",
+    "file": "arc_explosive_arrow.png",
+    "bytes": 16103,
+    "source": {
+      "width": 177,
+      "height": 670
+    }
+  },
+  {
+    "key": "arc_explosive_trap",
+    "name": "Explosive Trap",
+    "file": "arc_explosive_trap.png",
+    "bytes": 54593,
+    "source": {
+      "width": 308,
+      "height": 398
+    }
+  },
+  {
+    "key": "arc_expose_weakness",
+    "name": "Expose Weakness",
+    "file": "arc_expose_weakness.png",
+    "bytes": 41539,
+    "source": {
+      "width": 364,
+      "height": 493
+    }
+  },
+  {
+    "key": "arc_fan_of_knives",
+    "name": "Fan of Knives",
+    "file": "arc_fan_of_knives.png",
+    "bytes": 48292,
+    "source": {
+      "width": 281,
+      "height": 315
+    }
+  },
+  {
+    "key": "arc_frost_arrow",
+    "name": "Frost Arrow",
+    "file": "arc_frost_arrow.png",
+    "bytes": 52226,
+    "source": {
+      "width": 245,
+      "height": 263
+    }
+  },
+  {
+    "key": "arc_gale_arrow",
+    "name": "Gale Arrow",
+    "file": "arc_gale_arrow.png",
+    "bytes": 30929,
+    "source": {
+      "width": 255,
+      "height": 501
+    }
+  },
+  {
+    "key": "arc_heartseeker",
+    "name": "Heartseeker",
+    "file": "arc_heartseeker.png",
+    "bytes": 33127,
+    "source": {
+      "width": 171,
+      "height": 451
+    }
+  },
+  {
+    "key": "arc_hunters_instinct",
+    "name": "Hunter's Instinct",
+    "file": "arc_hunters_instinct.png",
+    "bytes": 45223,
+    "source": {
+      "width": 358,
+      "height": 543
+    }
+  },
+  {
+    "key": "arc_hunters_mark",
+    "name": "Hunter's Mark",
+    "file": "arc_hunters_mark.png",
+    "bytes": 37096,
+    "source": {
+      "width": 308,
+      "height": 569
+    }
+  },
+  {
+    "key": "arc_hunters_trip",
+    "name": "Hunter's Trip",
+    "file": "arc_hunters_trip.png",
+    "bytes": 68097,
+    "source": {
+      "width": 800,
+      "height": 806
+    }
+  },
+  {
+    "key": "arc_kidney_strike",
+    "name": "Kidney Strike",
+    "file": "arc_kidney_strike.png",
+    "bytes": 64183,
+    "source": {
+      "width": 780,
+      "height": 799
+    }
+  },
+  {
+    "key": "arc_lightning_arrow",
+    "name": "Lightning Arrow",
+    "file": "arc_lightning_arrow.png",
+    "bytes": 50697,
+    "source": {
+      "width": 332,
+      "height": 374
+    }
+  },
+  {
+    "key": "arc_marker_arrow",
+    "name": "Marker Arrow",
+    "file": "arc_marker_arrow.png",
+    "bytes": 34182,
+    "source": {
+      "width": 366,
+      "height": 568
+    }
+  },
+  {
+    "key": "arc_neurotoxin",
+    "name": "Neurotoxin",
+    "file": "arc_neurotoxin.png",
+    "bytes": 34605,
+    "source": {
+      "width": 240,
+      "height": 570
+    }
+  },
+  {
+    "key": "arc_piercing_shot",
+    "name": "Piercing Shot",
+    "file": "arc_piercing_shot.png",
+    "bytes": 46545,
+    "source": {
+      "width": 316,
+      "height": 484
+    }
+  },
+  {
+    "key": "arc_pocket_sand",
+    "name": "Pocket Sand",
+    "file": "arc_pocket_sand.png",
+    "bytes": 52312,
+    "source": {
+      "width": 357,
+      "height": 366
+    }
+  },
+  {
+    "key": "arc_poison_shiv",
+    "name": "Poison Shiv",
+    "file": "arc_poison_shiv.png",
+    "bytes": 41013,
+    "source": {
+      "width": 383,
+      "height": 637
+    }
+  },
+  {
+    "key": "arc_preys_dread",
+    "name": "Prey's Dread",
+    "file": "arc_preys_dread.png",
+    "bytes": 32132,
+    "source": {
+      "width": 206,
+      "height": 424
+    }
+  },
+  {
+    "key": "arc_rain_of_arrows",
+    "name": "Rain of Arrows",
+    "file": "arc_rain_of_arrows.png",
+    "bytes": 50393,
+    "source": {
+      "width": 485,
+      "height": 444
+    }
+  },
+  {
+    "key": "arc_rapid_fire",
+    "name": "Rapid Fire",
+    "file": "arc_rapid_fire.png",
+    "bytes": 56925,
+    "source": {
+      "width": 281,
+      "height": 263
+    }
+  },
+  {
+    "key": "arc_rend_armor",
+    "name": "Rend Armor",
+    "file": "arc_rend_armor.png",
+    "bytes": 38056,
+    "source": {
+      "width": 307,
+      "height": 560
+    }
+  },
+  {
+    "key": "arc_ricochet_shot",
+    "name": "Ricochet Shot",
+    "file": "arc_ricochet_shot.png",
+    "bytes": 46332,
+    "source": {
+      "width": 240,
+      "height": 322
+    }
+  },
+  {
+    "key": "arc_riposte_roll",
+    "name": "Riposte Roll",
+    "file": "arc_riposte_roll.png",
+    "bytes": 39854,
+    "source": {
+      "width": 292,
+      "height": 365
+    }
+  },
+  {
+    "key": "arc_scattershot",
+    "name": "Scattershot",
+    "file": "arc_scattershot.png",
+    "bytes": 41535,
+    "source": {
+      "width": 466,
+      "height": 576
+    }
+  },
+  {
+    "key": "arc_shadow_shot",
+    "name": "Shadow Shot",
+    "file": "arc_shadow_shot.png",
+    "bytes": 19820,
+    "source": {
+      "width": 204,
+      "height": 620
+    }
+  },
+  {
+    "key": "arc_shadowstep",
+    "name": "Shadowstep",
+    "file": "arc_shadowstep.png",
+    "bytes": 46835,
+    "source": {
+      "width": 331,
+      "height": 501
+    }
+  },
+  {
+    "key": "arc_sniper_stance",
+    "name": "Sniper Stance",
+    "file": "arc_sniper_stance.png",
+    "bytes": 39194,
+    "source": {
+      "width": 576,
+      "height": 543
+    }
+  },
+  {
+    "key": "arc_starfall_arrow",
+    "name": "Starfall Arrow",
+    "file": "arc_starfall_arrow.png",
+    "bytes": 42631,
+    "source": {
+      "width": 298,
+      "height": 375
+    }
+  },
+  {
+    "key": "arc_tailwind_aura",
+    "name": "Tailwind Aura",
+    "file": "arc_tailwind_aura.png",
+    "bytes": 45419,
+    "source": {
+      "width": 283,
+      "height": 316
+    }
+  },
+  {
+    "key": "arc_tar_trap",
+    "name": "Tar Trap",
+    "file": "arc_tar_trap.png",
+    "bytes": 45586,
+    "source": {
+      "width": 390,
+      "height": 602
+    }
+  },
+  {
+    "key": "arc_throat_slit",
+    "name": "Throat Slit",
+    "file": "arc_throat_slit.png",
+    "bytes": 53784,
+    "source": {
+      "width": 553,
+      "height": 636
+    }
+  },
+  {
+    "key": "arc_tumble",
+    "name": "Tumble",
+    "file": "arc_tumble.png",
+    "bytes": 47723,
+    "source": {
+      "width": 248,
+      "height": 263
+    }
+  },
+  {
+    "key": "arc_vault",
+    "name": "Vault",
+    "file": "arc_vault.png",
+    "bytes": 58129,
+    "source": {
+      "width": 780,
+      "height": 833
+    }
+  },
+  {
+    "key": "arc_venom_arrow",
+    "name": "Venom Arrow",
+    "file": "arc_venom_arrow.png",
+    "bytes": 43697,
+    "source": {
+      "width": 297,
+      "height": 432
+    }
+  },
+  {
+    "key": "arc_whirling_blades",
+    "name": "Whirling Blades",
+    "file": "arc_whirling_blades.png",
+    "bytes": 46165,
+    "source": {
+      "width": 485,
+      "height": 578
+    }
+  },
+  {
+    "key": "cul_abyssal_beam",
+    "name": "Abyssal Beam",
+    "file": "cul_abyssal_beam.png",
+    "bytes": 67328,
+    "source": {
+      "width": 376,
+      "height": 417
+    }
+  },
+  {
+    "key": "cul_black_plague",
+    "name": "Black Plague",
+    "file": "cul_black_plague.png",
+    "bytes": 41029,
+    "source": {
+      "width": 247,
+      "height": 384
+    }
+  },
+  {
+    "key": "cul_black_sun",
+    "name": "Black Sun",
+    "file": "cul_black_sun.png",
+    "bytes": 79774,
+    "source": {
+      "width": 475,
+      "height": 460
+    }
+  },
+  {
+    "key": "cul_blood_boil",
+    "name": "Blood Boil",
+    "file": "cul_blood_boil.png",
+    "bytes": 59993,
+    "source": {
+      "width": 458,
+      "height": 408
+    }
+  },
+  {
+    "key": "cul_blood_lance",
+    "name": "Blood Lance",
+    "file": "cul_blood_lance.png",
+    "bytes": 35024,
+    "source": {
+      "width": 308,
+      "height": 578
+    }
+  },
+  {
+    "key": "cul_blood_orb",
+    "name": "Blood Orb",
+    "file": "cul_blood_orb.png",
+    "bytes": 77930,
+    "source": {
+      "width": 748,
+      "height": 747
+    }
+  },
+  {
+    "key": "cul_blood_pact",
+    "name": "Blood Pact",
+    "file": "cul_blood_pact.png",
+    "bytes": 44776,
+    "source": {
+      "width": 187,
+      "height": 273
+    }
+  },
+  {
+    "key": "cul_blood_rebirth",
+    "name": "Blood Rebirth",
+    "file": "cul_blood_rebirth.png",
+    "bytes": 40350,
+    "source": {
+      "width": 274,
+      "height": 443
+    }
+  },
+  {
+    "key": "cul_blood_scythe",
+    "name": "Blood Scythe",
+    "file": "cul_blood_scythe.png",
+    "bytes": 41745,
+    "source": {
+      "width": 432,
+      "height": 375
+    }
+  },
+  {
+    "key": "cul_bone_armor",
+    "name": "Bone Armor",
+    "file": "cul_bone_armor.png",
+    "bytes": 48785,
+    "source": {
+      "width": 443,
+      "height": 611
+    }
+  },
+  {
+    "key": "cul_bone_spear",
+    "name": "Bone Spear",
+    "file": "cul_bone_spear.png",
+    "bytes": 41717,
+    "source": {
+      "width": 349,
+      "height": 568
+    }
+  },
+  {
+    "key": "cul_bone_storm",
+    "name": "Bone Storm",
+    "file": "cul_bone_storm.png",
+    "bytes": 46793,
+    "source": {
+      "width": 390,
+      "height": 629
+    }
+  },
+  {
+    "key": "cul_circle_of_agony",
+    "name": "Circle of Agony",
+    "file": "cul_circle_of_agony.png",
+    "bytes": 65592,
+    "source": {
+      "width": 898,
+      "height": 868
+    }
+  },
+  {
+    "key": "cul_corpse_cleave",
+    "name": "Corpse Cleave",
+    "file": "cul_corpse_cleave.png",
+    "bytes": 40006,
+    "source": {
+      "width": 374,
+      "height": 542
+    }
+  },
+  {
+    "key": "cul_corpse_explosion",
+    "name": "Corpse Explosion",
+    "file": "cul_corpse_explosion.png",
+    "bytes": 44916,
+    "source": {
+      "width": 398,
+      "height": 535
+    }
+  },
+  {
+    "key": "cul_curse_of_aging",
+    "name": "Curse of Aging",
+    "file": "cul_curse_of_aging.png",
+    "bytes": 63590,
+    "source": {
+      "width": 308,
+      "height": 316
+    }
+  },
+  {
+    "key": "cul_curse_of_doom",
+    "name": "Curse of Doom",
+    "file": "cul_curse_of_doom.png",
+    "bytes": 42432,
+    "source": {
+      "width": 349,
+      "height": 637
+    }
+  },
+  {
+    "key": "cul_curse_of_frailty",
+    "name": "Curse of Frailty",
+    "file": "cul_curse_of_frailty.png",
+    "bytes": 26266,
+    "source": {
+      "width": 144,
+      "height": 179
+    }
+  },
+  {
+    "key": "cul_curse_of_vulnerability",
+    "name": "Curse of Vulnerability",
+    "file": "cul_curse_of_vulnerability.png",
+    "bytes": 44293,
+    "source": {
+      "width": 323,
+      "height": 492
+    }
+  },
+  {
+    "key": "cul_dark_blessing",
+    "name": "Dark Blessing",
+    "file": "cul_dark_blessing.png",
+    "bytes": 41884,
+    "source": {
+      "width": 248,
+      "height": 451
+    }
+  },
+  {
+    "key": "cul_dark_star_fall",
+    "name": "Dark Star Fall",
+    "file": "cul_dark_star_fall.png",
+    "bytes": 40441,
+    "source": {
+      "width": 400,
+      "height": 602
+    }
+  },
+  {
+    "key": "cul_death_decay",
+    "name": "Death Decay",
+    "file": "cul_death_decay.png",
+    "bytes": 32232,
+    "source": {
+      "width": 172,
+      "height": 349
+    }
+  },
+  {
+    "key": "cul_defiled_strike",
+    "name": "Defiled Strike",
+    "file": "cul_defiled_strike.png",
+    "bytes": 32505,
+    "source": {
+      "width": 951,
+      "height": 992
+    }
+  },
+  {
+    "key": "cul_fanatic_frenzy",
+    "name": "Fanatic Frenzy",
+    "file": "cul_fanatic_frenzy.png",
+    "bytes": 55683,
+    "source": {
+      "width": 383,
+      "height": 364
+    }
+  },
+  {
+    "key": "cul_final_rite",
+    "name": "Final Rite",
+    "file": "cul_final_rite.png",
+    "bytes": 47503,
+    "source": {
+      "width": 766,
+      "height": 664
+    }
+  },
+  {
+    "key": "cul_flesh_siphon_strike",
+    "name": "Flesh Siphon Strike",
+    "file": "cul_flesh_siphon_strike.png",
+    "bytes": 73924,
+    "source": {
+      "width": 391,
+      "height": 382
+    }
+  },
+  {
+    "key": "cul_heartstopper",
+    "name": "Heartstopper",
+    "file": "cul_heartstopper.png",
+    "bytes": 48516,
+    "source": {
+      "width": 536,
+      "height": 721
+    }
+  },
+  {
+    "key": "cul_hemophilia",
+    "name": "Hemophilia",
+    "file": "cul_hemophilia.png",
+    "bytes": 36685,
+    "source": {
+      "width": 180,
+      "height": 316
+    }
+  },
+  {
+    "key": "cul_horror_of_the_void",
+    "name": "Horror of the Void",
+    "file": "cul_horror_of_the_void.png",
+    "bytes": 44441,
+    "source": {
+      "width": 383,
+      "height": 596
+    }
+  },
+  {
+    "key": "cul_martyrdom_aura",
+    "name": "Martyrdom Aura",
+    "file": "cul_martyrdom_aura.png",
+    "bytes": 40019,
+    "source": {
+      "width": 205,
+      "height": 384
+    }
+  },
+  {
+    "key": "cul_martyrs_flail",
+    "name": "Martyr's Flail",
+    "file": "cul_martyrs_flail.png",
+    "bytes": 29096,
+    "source": {
+      "width": 246,
+      "height": 460
+    }
+  },
+  {
+    "key": "cul_mind_rot",
+    "name": "Mind Rot",
+    "file": "cul_mind_rot.png",
+    "bytes": 44631,
+    "source": {
+      "width": 266,
+      "height": 342
+    }
+  },
+  {
+    "key": "cul_minion_sacrifice",
+    "name": "Minion Sacrifice",
+    "file": "cul_minion_sacrifice.png",
+    "bytes": 51174,
+    "source": {
+      "width": 255,
+      "height": 314
+    }
+  },
+  {
+    "key": "cul_plague_globule",
+    "name": "Plague Globule",
+    "file": "cul_plague_globule.png",
+    "bytes": 42261,
+    "source": {
+      "width": 266,
+      "height": 408
+    }
+  },
+  {
+    "key": "cul_sacrificial_brand",
+    "name": "Sacrificial Brand",
+    "file": "cul_sacrificial_brand.png",
+    "bytes": 67617,
+    "source": {
+      "width": 773,
+      "height": 712
+    }
+  },
+  {
+    "key": "cul_sacrificial_stab",
+    "name": "Sacrificial Stab",
+    "file": "cul_sacrificial_stab.png",
+    "bytes": 64575,
+    "source": {
+      "width": 638,
+      "height": 611
+    }
+  },
+  {
+    "key": "cul_sanguine_pool",
+    "name": "Sanguine Pool",
+    "file": "cul_sanguine_pool.png",
+    "bytes": 62127,
+    "source": {
+      "width": 288,
+      "height": 273
+    }
+  },
+  {
+    "key": "cul_shadow_grasp",
+    "name": "Shadow Grasp",
+    "file": "cul_shadow_grasp.png",
+    "bytes": 43530,
+    "source": {
+      "width": 494,
+      "height": 720
+    }
+  },
+  {
+    "key": "cul_shadow_veil",
+    "name": "Shadow Veil",
+    "file": "cul_shadow_veil.png",
+    "bytes": 36242,
+    "source": {
+      "width": 384,
+      "height": 781
+    }
+  },
+  {
+    "key": "cul_soul_drain",
+    "name": "Soul Drain",
+    "file": "cul_soul_drain.png",
+    "bytes": 47778,
+    "source": {
+      "width": 509,
+      "height": 536
+    }
+  },
+  {
+    "key": "cul_spike_of_agony",
+    "name": "Spike of Agony",
+    "file": "cul_spike_of_agony.png",
+    "bytes": 47114,
+    "source": {
+      "width": 350,
+      "height": 622
+    }
+  },
+  {
+    "key": "cul_summon_blood_golem",
+    "name": "Summon Blood Golem",
+    "file": "cul_summon_blood_golem.png",
+    "bytes": 49760,
+    "source": {
+      "width": 501,
+      "height": 816
+    }
+  },
+  {
+    "key": "cul_tentacles_of_the_deep",
+    "name": "Tentacles of the Deep",
+    "file": "cul_tentacles_of_the_deep.png",
+    "bytes": 63744,
+    "source": {
+      "width": 645,
+      "height": 568
+    }
+  },
+  {
+    "key": "cul_undead_resilience",
+    "name": "Undead Resilience",
+    "file": "cul_undead_resilience.png",
+    "bytes": 49116,
+    "source": {
+      "width": 298,
+      "height": 399
+    }
+  },
+  {
+    "key": "cul_vampiric_bite",
+    "name": "Vampiric Bite",
+    "file": "cul_vampiric_bite.png",
+    "bytes": 46830,
+    "source": {
+      "width": 375,
+      "height": 444
+    }
+  },
+  {
+    "key": "cul_vampiric_embrace",
+    "name": "Vampiric Embrace",
+    "file": "cul_vampiric_embrace.png",
+    "bytes": 33409,
+    "source": {
+      "width": 331,
+      "height": 628
+    }
+  },
+  {
+    "key": "cul_vein_ripper",
+    "name": "Vein Ripper",
+    "file": "cul_vein_ripper.png",
+    "bytes": 46596,
+    "source": {
+      "width": 590,
+      "height": 535
+    }
+  },
+  {
+    "key": "cul_wave_of_torment",
+    "name": "Wave of Torment",
+    "file": "cul_wave_of_torment.png",
+    "bytes": 19604,
+    "source": {
+      "width": 465,
+      "height": 909
+    }
+  },
+  {
+    "key": "dru_barkskin",
+    "name": "Barkskin",
+    "file": "dru_barkskin.png",
+    "bytes": 36410,
+    "source": {
+      "width": 248,
+      "height": 459
+    }
+  },
+  {
+    "key": "dru_bear_charge",
+    "name": "Bear Charge",
+    "file": "dru_bear_charge.png",
+    "bytes": 55144,
+    "source": {
+      "width": 426,
+      "height": 383
+    }
+  },
+  {
+    "key": "dru_bear_earth_stomp",
+    "name": "Bear Earth Stomp",
+    "file": "dru_bear_earth_stomp.png",
+    "bytes": 58771,
+    "source": {
+      "width": 281,
+      "height": 297
+    }
+  },
+  {
+    "key": "dru_bear_form",
+    "name": "Bear Form",
+    "file": "dru_bear_form.png",
+    "bytes": 53427,
+    "source": {
+      "width": 365,
+      "height": 443
+    }
+  },
+  {
+    "key": "dru_bear_frenzy",
+    "name": "Grizzly Frenzy",
+    "file": "dru_bear_frenzy.png",
+    "bytes": 53269,
+    "source": {
+      "width": 376,
+      "height": 493
+    }
+  },
+  {
+    "key": "dru_bear_mangle",
+    "name": "Bear Mangle",
+    "file": "dru_bear_mangle.png",
+    "bytes": 43964,
+    "source": {
+      "width": 397,
+      "height": 678
+    }
+  },
+  {
+    "key": "dru_bear_slam",
+    "name": "Bear Slam",
+    "file": "dru_bear_slam.png",
+    "bytes": 49586,
+    "source": {
+      "width": 443,
+      "height": 664
+    }
+  },
+  {
+    "key": "dru_bramble_burst",
+    "name": "Bramble Burst",
+    "file": "dru_bramble_burst.png",
+    "bytes": 51752,
+    "source": {
+      "width": 543,
+      "height": 799
+    }
+  },
+  {
+    "key": "dru_charm_creature",
+    "name": "Charm Creature",
+    "file": "dru_charm_creature.png",
+    "bytes": 50769,
+    "source": {
+      "width": 342,
+      "height": 536
+    }
+  },
+  {
+    "key": "dru_constricting_vines",
+    "name": "Constricting Vines",
+    "file": "dru_constricting_vines.png",
+    "bytes": 44711,
+    "source": {
+      "width": 221,
+      "height": 280
+    }
+  },
+  {
+    "key": "dru_demoralizing_roar",
+    "name": "Demoralizing Roar",
+    "file": "dru_demoralizing_roar.png",
+    "bytes": 57872,
+    "source": {
+      "width": 255,
+      "height": 221
+    }
+  },
+  {
+    "key": "dru_entangling_roots",
+    "name": "Entangling Roots",
+    "file": "dru_entangling_roots.png",
+    "bytes": 49489,
+    "source": {
+      "width": 433,
+      "height": 576
+    }
+  },
+  {
+    "key": "dru_feral_bite",
+    "name": "Wolf Bite",
+    "file": "dru_feral_bite.png",
+    "bytes": 55793,
+    "source": {
+      "width": 527,
+      "height": 637
+    }
+  },
+  {
+    "key": "dru_hawk_aerial_evade_strike",
+    "name": "Hawk Soaring Strike",
+    "file": "dru_hawk_aerial_evade_strike.png",
+    "bytes": 47534,
+    "source": {
+      "width": 611,
+      "height": 586
+    }
+  },
+  {
+    "key": "dru_hawk_dive_slash",
+    "name": "Hawk Dive Slash",
+    "file": "dru_hawk_dive_slash.png",
+    "bytes": 46276,
+    "source": {
+      "width": 454,
+      "height": 375
+    }
+  },
+  {
+    "key": "dru_hawk_feather_flurry",
+    "name": "Hawk Wing Flurry",
+    "file": "dru_hawk_feather_flurry.png",
+    "bytes": 30133,
+    "source": {
+      "width": 629,
+      "height": 382
+    }
+  },
+  {
+    "key": "dru_hawk_form",
+    "name": "Hawk Form",
+    "file": "dru_hawk_form.png",
+    "bytes": 55021,
+    "source": {
+      "width": 473,
+      "height": 628
+    }
+  },
+  {
+    "key": "dru_hawk_razor_feathers",
+    "name": "Hawk Razor Feathers",
+    "file": "dru_hawk_razor_feathers.png",
+    "bytes": 45013,
+    "source": {
+      "width": 443,
+      "height": 483
+    }
+  },
+  {
+    "key": "dru_hawk_talon_strike",
+    "name": "Hawk Talon Strike",
+    "file": "dru_hawk_talon_strike.png",
+    "bytes": 62935,
+    "source": {
+      "width": 247,
+      "height": 222
+    }
+  },
+  {
+    "key": "dru_hawk_wind_slash",
+    "name": "Hawk Wind Slash",
+    "file": "dru_hawk_wind_slash.png",
+    "bytes": 52713,
+    "source": {
+      "width": 966,
+      "height": 841
+    }
+  },
+  {
+    "key": "dru_healing_touch",
+    "name": "Healing Touch",
+    "file": "dru_healing_touch.png",
+    "bytes": 49727,
+    "source": {
+      "width": 410,
+      "height": 639
+    }
+  },
+  {
+    "key": "dru_hibernate",
+    "name": "Hibernate",
+    "file": "dru_hibernate.png",
+    "bytes": 39136,
+    "source": {
+      "width": 411,
+      "height": 732
+    }
+  },
+  {
+    "key": "dru_insect_swarm",
+    "name": "Insect Swarm",
+    "file": "dru_insect_swarm.png",
+    "bytes": 51684,
+    "source": {
+      "width": 280,
+      "height": 349
+    }
+  },
+  {
+    "key": "dru_mark_of_the_wild",
+    "name": "Mark of the Wild",
+    "file": "dru_mark_of_the_wild.png",
+    "bytes": 39142,
+    "source": {
+      "width": 298,
+      "height": 637
+    }
+  },
+  {
+    "key": "dru_maul",
+    "name": "Bear Maul",
+    "file": "dru_maul.png",
+    "bytes": 55218,
+    "source": {
+      "width": 221,
+      "height": 239
+    }
+  },
+  {
+    "key": "dru_moonfire",
+    "name": "Moonfire",
+    "file": "dru_moonfire.png",
+    "bytes": 47554,
+    "source": {
+      "width": 342,
+      "height": 296
+    }
+  },
+  {
+    "key": "dru_natures_curse",
+    "name": "Nature's Curse",
+    "file": "dru_natures_curse.png",
+    "bytes": 69934,
+    "source": {
+      "width": 876,
+      "height": 960
+    }
+  },
+  {
+    "key": "dru_natures_swiftness",
+    "name": "Nature's Swiftness",
+    "file": "dru_natures_swiftness.png",
+    "bytes": 64484,
+    "source": {
+      "width": 410,
+      "height": 467
+    }
+  },
+  {
+    "key": "dru_paralytic_spores",
+    "name": "Paralytic Spores",
+    "file": "dru_paralytic_spores.png",
+    "bytes": 73007,
+    "source": {
+      "width": 459,
+      "height": 468
+    }
+  },
+  {
+    "key": "dru_poison_ivy",
+    "name": "Poison Ivy",
+    "file": "dru_poison_ivy.png",
+    "bytes": 51876,
+    "source": {
+      "width": 399,
+      "height": 568
+    }
+  },
+  {
+    "key": "dru_rejuvenation",
+    "name": "Rejuvenation",
+    "file": "dru_rejuvenation.png",
+    "bytes": 50884,
+    "source": {
+      "width": 240,
+      "height": 330
+    }
+  },
+  {
+    "key": "dru_rot_wood",
+    "name": "Rot Wood",
+    "file": "dru_rot_wood.png",
+    "bytes": 53203,
+    "source": {
+      "width": 570,
+      "height": 799
+    }
+  },
+  {
+    "key": "dru_solar_beam",
+    "name": "Solar Beam",
+    "file": "dru_solar_beam.png",
+    "bytes": 46014,
+    "source": {
+      "width": 390,
+      "height": 509
+    }
+  },
+  {
+    "key": "dru_spore_cloud",
+    "name": "Spore Cloud",
+    "file": "dru_spore_cloud.png",
+    "bytes": 43830,
+    "source": {
+      "width": 263,
+      "height": 486
+    }
+  },
+  {
+    "key": "dru_starfall",
+    "name": "Starfall",
+    "file": "dru_starfall.png",
+    "bytes": 58747,
+    "source": {
+      "width": 238,
+      "height": 228
+    }
+  },
+  {
+    "key": "dru_storm_lightning",
+    "name": "Storm Lightning",
+    "file": "dru_storm_lightning.png",
+    "bytes": 42144,
+    "source": {
+      "width": 240,
+      "height": 478
+    }
+  },
+  {
+    "key": "dru_summon_treant",
+    "name": "Summon Treant",
+    "file": "dru_summon_treant.png",
+    "bytes": 58961,
+    "source": {
+      "width": 502,
+      "height": 569
+    }
+  },
+  {
+    "key": "dru_summon_wolfpack",
+    "name": "Summon Wolfpack",
+    "file": "dru_summon_wolfpack.png",
+    "bytes": 49295,
+    "source": {
+      "width": 475,
+      "height": 542
+    }
+  },
+  {
+    "key": "dru_thorn_staff_strike",
+    "name": "Thorn Staff Strike",
+    "file": "dru_thorn_staff_strike.png",
+    "bytes": 19818,
+    "source": {
+      "width": 183,
+      "height": 611
+    }
+  },
+  {
+    "key": "dru_thorns_aura",
+    "name": "Thorns Aura",
+    "file": "dru_thorns_aura.png",
+    "bytes": 41191,
+    "source": {
+      "width": 231,
+      "height": 375
+    }
+  },
+  {
+    "key": "dru_tranquility",
+    "name": "Tranquility",
+    "file": "dru_tranquility.png",
+    "bytes": 53348,
+    "source": {
+      "width": 553,
+      "height": 755
+    }
+  },
+  {
+    "key": "dru_ursocs_wrath",
+    "name": "Ursoc's Wrath",
+    "file": "dru_ursocs_wrath.png",
+    "bytes": 53205,
+    "source": {
+      "width": 518,
+      "height": 808
+    }
+  },
+  {
+    "key": "dru_wolf_flurry",
+    "name": "Wolf Flurry",
+    "file": "dru_wolf_flurry.png",
+    "bytes": 58559,
+    "source": {
+      "width": 468,
+      "height": 655
+    }
+  },
+  {
+    "key": "dru_wolf_form",
+    "name": "Wolf Form",
+    "file": "dru_wolf_form.png",
+    "bytes": 57748,
+    "source": {
+      "width": 610,
+      "height": 672
+    }
+  },
+  {
+    "key": "dru_wolf_pounce",
+    "name": "Wolf Pounce",
+    "file": "dru_wolf_pounce.png",
+    "bytes": 52359,
+    "source": {
+      "width": 298,
+      "height": 383
+    }
+  },
+  {
+    "key": "dru_wolf_rend",
+    "name": "Wolf Rend",
+    "file": "dru_wolf_rend.png",
+    "bytes": 47989,
+    "source": {
+      "width": 409,
+      "height": 645
+    }
+  },
+  {
+    "key": "dru_wolf_throat_rip",
+    "name": "Wolf Throat Rip",
+    "file": "dru_wolf_throat_rip.png",
+    "bytes": 52711,
+    "source": {
+      "width": 486,
+      "height": 552
+    }
+  },
+  {
+    "key": "dru_wrath",
+    "name": "Wrath",
+    "file": "dru_wrath.png",
+    "bytes": 50681,
+    "source": {
+      "width": 366,
+      "height": 595
+    }
+  },
+  {
+    "key": "mag_arcane_beam",
+    "name": "Arcane Beam",
+    "file": "mag_arcane_beam.png",
+    "bytes": 43703,
+    "source": {
+      "width": 621,
+      "height": 868
+    }
+  },
+  {
+    "key": "mag_arcane_brilliance",
+    "name": "Arcane Brilliance",
+    "file": "mag_arcane_brilliance.png",
+    "bytes": 47369,
+    "source": {
+      "width": 289,
+      "height": 348
+    }
+  },
+  {
+    "key": "mag_arcane_dagger",
+    "name": "Arcane Dagger",
+    "file": "mag_arcane_dagger.png",
+    "bytes": 15371,
+    "source": {
+      "width": 186,
+      "height": 815
+    }
+  },
+  {
+    "key": "mag_arcane_sweep",
+    "name": "Arcane Sweep",
+    "file": "mag_arcane_sweep.png",
+    "bytes": 38476,
+    "source": {
+      "width": 298,
+      "height": 493
+    }
+  },
+  {
+    "key": "mag_arcane_vulnerability",
+    "name": "Arcane Vulnerability",
+    "file": "mag_arcane_vulnerability.png",
+    "bytes": 36475,
+    "source": {
+      "width": 266,
+      "height": 478
+    }
+  },
+  {
+    "key": "mag_ball_lightning",
+    "name": "Ball Lightning",
+    "file": "mag_ball_lightning.png",
+    "bytes": 61547,
+    "source": {
+      "width": 475,
+      "height": 509
+    }
+  },
+  {
+    "key": "mag_blast_wave",
+    "name": "Blast Wave",
+    "file": "mag_blast_wave.png",
+    "bytes": 43431,
+    "source": {
+      "width": 273,
+      "height": 475
+    }
+  },
+  {
+    "key": "mag_blink",
+    "name": "Blink",
+    "file": "mag_blink.png",
+    "bytes": 42106,
+    "source": {
+      "width": 307,
+      "height": 433
+    }
+  },
+  {
+    "key": "mag_blizzard",
+    "name": "Blizzard",
+    "file": "mag_blizzard.png",
+    "bytes": 50335,
+    "source": {
+      "width": 248,
+      "height": 357
+    }
+  },
+  {
+    "key": "mag_chain_lightning",
+    "name": "Chain Lightning",
+    "file": "mag_chain_lightning.png",
+    "bytes": 25534,
+    "source": {
+      "width": 306,
+      "height": 698
+    }
+  },
+  {
+    "key": "mag_combustion_touch",
+    "name": "Combustion Touch",
+    "file": "mag_combustion_touch.png",
+    "bytes": 39944,
+    "source": {
+      "width": 443,
+      "height": 655
+    }
+  },
+  {
+    "key": "mag_deep_chill",
+    "name": "Deep Chill",
+    "file": "mag_deep_chill.png",
+    "bytes": 63707,
+    "source": {
+      "width": 296,
+      "height": 273
+    }
+  },
+  {
+    "key": "mag_deep_comet",
+    "name": "Deep Comet",
+    "file": "mag_deep_comet.png",
+    "bytes": 33750,
+    "source": {
+      "width": 349,
+      "height": 892
+    }
+  },
+  {
+    "key": "mag_disintegrate",
+    "name": "Disintegrate",
+    "file": "mag_disintegrate.png",
+    "bytes": 32530,
+    "source": {
+      "width": 416,
+      "height": 932
+    }
+  },
+  {
+    "key": "mag_elemental_focus",
+    "name": "Elemental Focus",
+    "file": "mag_elemental_focus.png",
+    "bytes": 69830,
+    "source": {
+      "width": 535,
+      "height": 493
+    }
+  },
+  {
+    "key": "mag_elemental_hex",
+    "name": "Elemental Hex",
+    "file": "mag_elemental_hex.png",
+    "bytes": 65558,
+    "source": {
+      "width": 636,
+      "height": 646
+    }
+  },
+  {
+    "key": "mag_ethereal_form",
+    "name": "Ethereal Form",
+    "file": "mag_ethereal_form.png",
+    "bytes": 33441,
+    "source": {
+      "width": 289,
+      "height": 603
+    }
+  },
+  {
+    "key": "mag_fireball",
+    "name": "Fireball",
+    "file": "mag_fireball.png",
+    "bytes": 63417,
+    "source": {
+      "width": 425,
+      "height": 478
+    }
+  },
+  {
+    "key": "mag_flash_blind",
+    "name": "Flash Blind",
+    "file": "mag_flash_blind.png",
+    "bytes": 46083,
+    "source": {
+      "width": 228,
+      "height": 296
+    }
+  },
+  {
+    "key": "mag_frost_nova",
+    "name": "Frost Nova",
+    "file": "mag_frost_nova.png",
+    "bytes": 59850,
+    "source": {
+      "width": 392,
+      "height": 418
+    }
+  },
+  {
+    "key": "mag_frost_rapier",
+    "name": "Frost Rapier",
+    "file": "mag_frost_rapier.png",
+    "bytes": 13847,
+    "source": {
+      "width": 197,
+      "height": 721
+    }
+  },
+  {
+    "key": "mag_frostbolt",
+    "name": "Frostbolt",
+    "file": "mag_frostbolt.png",
+    "bytes": 54926,
+    "source": {
+      "width": 656,
+      "height": 783
+    }
+  },
+  {
+    "key": "mag_gravity_singularity",
+    "name": "Gravity Singularity",
+    "file": "mag_gravity_singularity.png",
+    "bytes": 49172,
+    "source": {
+      "width": 417,
+      "height": 451
+    }
+  },
+  {
+    "key": "mag_haste",
+    "name": "Haste",
+    "file": "mag_haste.png",
+    "bytes": 47209,
+    "source": {
+      "width": 426,
+      "height": 630
+    }
+  },
+  {
+    "key": "mag_ice_armor",
+    "name": "Ice Armor",
+    "file": "mag_ice_armor.png",
+    "bytes": 50906,
+    "source": {
+      "width": 410,
+      "height": 434
+    }
+  },
+  {
+    "key": "mag_illusionary_jab",
+    "name": "Illusionary Jab",
+    "file": "mag_illusionary_jab.png",
+    "bytes": 39006,
+    "source": {
+      "width": 306,
+      "height": 553
+    }
+  },
+  {
+    "key": "mag_immolation_aura",
+    "name": "Immolation Aura",
+    "file": "mag_immolation_aura.png",
+    "bytes": 46017,
+    "source": {
+      "width": 433,
+      "height": 596
+    }
+  },
+  {
+    "key": "mag_magic_missiles",
+    "name": "Magic Missiles",
+    "file": "mag_magic_missiles.png",
+    "bytes": 49440,
+    "source": {
+      "width": 543,
+      "height": 712
+    }
+  },
+  {
+    "key": "mag_mana_blades",
+    "name": "Mana Blades",
+    "file": "mag_mana_blades.png",
+    "bytes": 29481,
+    "source": {
+      "width": 179,
+      "height": 356
+    }
+  },
+  {
+    "key": "mag_mana_burn",
+    "name": "Mana Burn",
+    "file": "mag_mana_burn.png",
+    "bytes": 57344,
+    "source": {
+      "width": 333,
+      "height": 384
+    }
+  },
+  {
+    "key": "mag_mana_shield",
+    "name": "Mana Shield",
+    "file": "mag_mana_shield.png",
+    "bytes": 61106,
+    "source": {
+      "width": 966,
+      "height": 967
+    }
+  },
+  {
+    "key": "mag_mana_surge",
+    "name": "Mana Surge",
+    "file": "mag_mana_surge.png",
+    "bytes": 42811,
+    "source": {
+      "width": 620,
+      "height": 678
+    }
+  },
+  {
+    "key": "mag_mana_tap",
+    "name": "Mana Tap",
+    "file": "mag_mana_tap.png",
+    "bytes": 61282,
+    "source": {
+      "width": 410,
+      "height": 503
+    }
+  },
+  {
+    "key": "mag_meteor_shower",
+    "name": "Meteor Shower",
+    "file": "mag_meteor_shower.png",
+    "bytes": 45613,
+    "source": {
+      "width": 409,
+      "height": 594
+    }
+  },
+  {
+    "key": "mag_mirror_image",
+    "name": "Mirror Image",
+    "file": "mag_mirror_image.png",
+    "bytes": 48094,
+    "source": {
+      "width": 262,
+      "height": 324
+    }
+  },
+  {
+    "key": "mag_overload_discharge",
+    "name": "Overload Discharge",
+    "file": "mag_overload_discharge.png",
+    "bytes": 48049,
+    "source": {
+      "width": 543,
+      "height": 875
+    }
+  },
+  {
+    "key": "mag_point_blank_burst",
+    "name": "Point-Blank Burst",
+    "file": "mag_point_blank_burst.png",
+    "bytes": 30685,
+    "source": {
+      "width": 297,
+      "height": 617
+    }
+  },
+  {
+    "key": "mag_polymorph",
+    "name": "Polymorph",
+    "file": "mag_polymorph.png",
+    "bytes": 38108,
+    "source": {
+      "width": 484,
+      "height": 720
+    }
+  },
+  {
+    "key": "mag_prismatic_burst",
+    "name": "Prismatic Burst",
+    "file": "mag_prismatic_burst.png",
+    "bytes": 67813,
+    "source": {
+      "width": 746,
+      "height": 764
+    }
+  },
+  {
+    "key": "mag_scorched_flesh",
+    "name": "Scorched Flesh",
+    "file": "mag_scorched_flesh.png",
+    "bytes": 40889,
+    "source": {
+      "width": 323,
+      "height": 620
+    }
+  },
+  {
+    "key": "mag_silence",
+    "name": "Silence",
+    "file": "mag_silence.png",
+    "bytes": 54366,
+    "source": {
+      "width": 356,
+      "height": 425
+    }
+  },
+  {
+    "key": "mag_slow_field",
+    "name": "Slow Field",
+    "file": "mag_slow_field.png",
+    "bytes": 58213,
+    "source": {
+      "width": 637,
+      "height": 621
+    }
+  },
+  {
+    "key": "mag_spell_ward",
+    "name": "Spell Ward",
+    "file": "mag_spell_ward.png",
+    "bytes": 37888,
+    "source": {
+      "width": 246,
+      "height": 416
+    }
+  },
+  {
+    "key": "mag_staff_shock",
+    "name": "Staff Shock",
+    "file": "mag_staff_shock.png",
+    "bytes": 45874,
+    "source": {
+      "width": 187,
+      "height": 247
+    }
+  },
+  {
+    "key": "mag_static_charge",
+    "name": "Static Charge",
+    "file": "mag_static_charge.png",
+    "bytes": 49312,
+    "source": {
+      "width": 466,
+      "height": 561
+    }
+  },
+  {
+    "key": "mag_static_palm",
+    "name": "Static Palm",
+    "file": "mag_static_palm.png",
+    "bytes": 51708,
+    "source": {
+      "width": 467,
+      "height": 629
+    }
+  },
+  {
+    "key": "mag_temporal_warp",
+    "name": "Temporal Warp",
+    "file": "mag_temporal_warp.png",
+    "bytes": 35748,
+    "source": {
+      "width": 220,
+      "height": 383
+    }
+  },
+  {
+    "key": "mag_thunderstorm",
+    "name": "Thunderstorm",
+    "file": "mag_thunderstorm.png",
+    "bytes": 50853,
+    "source": {
+      "width": 452,
+      "height": 656
+    }
+  },
+  {
+    "key": "mag_wall_of_fire",
+    "name": "Wall of Fire",
+    "file": "mag_wall_of_fire.png",
+    "bytes": 54693,
+    "source": {
+      "width": 340,
+      "height": 452
+    }
+  },
+  {
+    "key": "mnk_chi_wave",
+    "name": "Chi Wave",
+    "file": "mnk_chi_wave.png",
+    "bytes": 42285,
+    "source": {
+      "width": 282,
+      "height": 486
+    }
+  },
+  {
+    "key": "mnk_crane_beak",
+    "name": "Crane Beak",
+    "file": "mnk_crane_beak.png",
+    "bytes": 39699,
+    "source": {
+      "width": 171,
+      "height": 314
+    }
+  },
+  {
+    "key": "mnk_diamond_skin",
+    "name": "Diamond Skin",
+    "file": "mnk_diamond_skin.png",
+    "bytes": 48828,
+    "source": {
+      "width": 272,
+      "height": 382
+    }
+  },
+  {
+    "key": "mnk_disorienting_palm",
+    "name": "Disorienting Palm",
+    "file": "mnk_disorienting_palm.png",
+    "bytes": 51920,
+    "source": {
+      "width": 382,
+      "height": 509
+    }
+  },
+  {
+    "key": "mnk_dragon_kick",
+    "name": "Dragon Kick",
+    "file": "mnk_dragon_kick.png",
+    "bytes": 52024,
+    "source": {
+      "width": 678,
+      "height": 526
+    }
+  },
+  {
+    "key": "mnk_dragons_breath",
+    "name": "Dragon's Breath",
+    "file": "mnk_dragons_breath.png",
+    "bytes": 42033,
+    "source": {
+      "width": 297,
+      "height": 494
+    }
+  },
+  {
+    "key": "mnk_drunken_brawler_stance",
+    "name": "Drunken Brawler Stance",
+    "file": "mnk_drunken_brawler_stance.png",
+    "bytes": 42897,
+    "source": {
+      "width": 350,
+      "height": 637
+    }
+  },
+  {
+    "key": "mnk_echo_of_pain",
+    "name": "Echo of Pain",
+    "file": "mnk_echo_of_pain.png",
+    "bytes": 47219,
+    "source": {
+      "width": 205,
+      "height": 281
+    }
+  },
+  {
+    "key": "mnk_echo_palm",
+    "name": "Echo Palm",
+    "file": "mnk_echo_palm.png",
+    "bytes": 48747,
+    "source": {
+      "width": 342,
+      "height": 528
+    }
+  },
+  {
+    "key": "mnk_ego_crusher",
+    "name": "Ego Crusher",
+    "file": "mnk_ego_crusher.png",
+    "bytes": 46623,
+    "source": {
+      "width": 426,
+      "height": 595
+    }
+  },
+  {
+    "key": "mnk_exploding_palm",
+    "name": "Exploding Palm",
+    "file": "mnk_exploding_palm.png",
+    "bytes": 54145,
+    "source": {
+      "width": 232,
+      "height": 213
+    }
+  },
+  {
+    "key": "mnk_falling_star",
+    "name": "Falling Star",
+    "file": "mnk_falling_star.png",
+    "bytes": 41375,
+    "source": {
+      "width": 240,
+      "height": 443
+    }
+  },
+  {
+    "key": "mnk_fast_mana_aura",
+    "name": "Fast Mana Aura",
+    "file": "mnk_fast_mana_aura.png",
+    "bytes": 45376,
+    "source": {
+      "width": 425,
+      "height": 697
+    }
+  },
+  {
+    "key": "mnk_five_element_combo",
+    "name": "Five Element Combo",
+    "file": "mnk_five_element_combo.png",
+    "bytes": 48346,
+    "source": {
+      "width": 307,
+      "height": 424
+    }
+  },
+  {
+    "key": "mnk_flowing_strike",
+    "name": "Flowing Strike",
+    "file": "mnk_flowing_strike.png",
+    "bytes": 38789,
+    "source": {
+      "width": 154,
+      "height": 296
+    }
+  },
+  {
+    "key": "mnk_heavenly_discharge",
+    "name": "Heavenly Discharge",
+    "file": "mnk_heavenly_discharge.png",
+    "bytes": 38212,
+    "source": {
+      "width": 282,
+      "height": 602
+    }
+  },
+  {
+    "key": "mnk_hundred_fists",
+    "name": "Hundred Fists",
+    "file": "mnk_hundred_fists.png",
+    "bytes": 60750,
+    "source": {
+      "width": 391,
+      "height": 384
+    }
+  },
+  {
+    "key": "mnk_inner_peace",
+    "name": "Inner Peace",
+    "file": "mnk_inner_peace.png",
+    "bytes": 54541,
+    "source": {
+      "width": 887,
+      "height": 671
+    }
+  },
+  {
+    "key": "mnk_iron_palm",
+    "name": "Iron Palm",
+    "file": "mnk_iron_palm.png",
+    "bytes": 49597,
+    "source": {
+      "width": 332,
+      "height": 391
+    }
+  },
+  {
+    "key": "mnk_jade_body",
+    "name": "Jade Body",
+    "file": "mnk_jade_body.png",
+    "bytes": 40331,
+    "source": {
+      "width": 400,
+      "height": 833
+    }
+  },
+  {
+    "key": "mnk_jade_serpent_beam",
+    "name": "Jade Serpent Beam",
+    "file": "mnk_jade_serpent_beam.png",
+    "bytes": 53751,
+    "source": {
+      "width": 528,
+      "height": 544
+    }
+  },
+  {
+    "key": "mnk_joint_lock",
+    "name": "Joint Lock",
+    "file": "mnk_joint_lock.png",
+    "bytes": 18618,
+    "source": {
+      "width": 400,
+      "height": 875
+    }
+  },
+  {
+    "key": "mnk_karma_redirection",
+    "name": "Karma Redirection",
+    "file": "mnk_karma_redirection.png",
+    "bytes": 51514,
+    "source": {
+      "width": 204,
+      "height": 281
+    }
+  },
+  {
+    "key": "mnk_karmic_burden",
+    "name": "Karmic Burden",
+    "file": "mnk_karmic_burden.png",
+    "bytes": 65475,
+    "source": {
+      "width": 714,
+      "height": 628
+    }
+  },
+  {
+    "key": "mnk_leaf_storm",
+    "name": "Leaf Storm",
+    "file": "mnk_leaf_storm.png",
+    "bytes": 41543,
+    "source": {
+      "width": 485,
+      "height": 856
+    }
+  },
+  {
+    "key": "mnk_mantis_strike",
+    "name": "Mantis Strike",
+    "file": "mnk_mantis_strike.png",
+    "bytes": 42649,
+    "source": {
+      "width": 197,
+      "height": 323
+    }
+  },
+  {
+    "key": "mnk_mist_walk",
+    "name": "Mist Walk",
+    "file": "mnk_mist_walk.png",
+    "bytes": 26128,
+    "source": {
+      "width": 274,
+      "height": 746
+    }
+  },
+  {
+    "key": "mnk_muffle",
+    "name": "Muffle",
+    "file": "mnk_muffle.png",
+    "bytes": 40282,
+    "source": {
+      "width": 256,
+      "height": 486
+    }
+  },
+  {
+    "key": "mnk_off_balance",
+    "name": "Off-Balance",
+    "file": "mnk_off_balance.png",
+    "bytes": 37694,
+    "source": {
+      "width": 273,
+      "height": 510
+    }
+  },
+  {
+    "key": "mnk_paralysis_touch",
+    "name": "Paralysis Touch",
+    "file": "mnk_paralysis_touch.png",
+    "bytes": 62212,
+    "source": {
+      "width": 228,
+      "height": 231
+    }
+  },
+  {
+    "key": "mnk_pressure_point_strike",
+    "name": "Pressure Point Strike",
+    "file": "mnk_pressure_point_strike.png",
+    "bytes": 46367,
+    "source": {
+      "width": 289,
+      "height": 384
+    }
+  },
+  {
+    "key": "mnk_sphere_of_harmony",
+    "name": "Sphere of Harmony",
+    "file": "mnk_sphere_of_harmony.png",
+    "bytes": 59017,
+    "source": {
+      "width": 440,
+      "height": 468
+    }
+  },
+  {
+    "key": "mnk_spinning_crane_kick",
+    "name": "Spinning Crane Kick",
+    "file": "mnk_spinning_crane_kick.png",
+    "bytes": 63592,
+    "source": {
+      "width": 347,
+      "height": 350
+    }
+  },
+  {
+    "key": "mnk_spirit_blindness",
+    "name": "Spirit Blindness",
+    "file": "mnk_spirit_blindness.png",
+    "bytes": 42281,
+    "source": {
+      "width": 187,
+      "height": 307
+    }
+  },
+  {
+    "key": "mnk_spirit_burst",
+    "name": "Spirit Burst",
+    "file": "mnk_spirit_burst.png",
+    "bytes": 41499,
+    "source": {
+      "width": 296,
+      "height": 451
+    }
+  },
+  {
+    "key": "mnk_tidal_sweep",
+    "name": "Tidal Sweep",
+    "file": "mnk_tidal_sweep.png",
+    "bytes": 45406,
+    "source": {
+      "width": 375,
+      "height": 655
+    }
+  },
+  {
+    "key": "mnk_tiger_claw",
+    "name": "Tiger Claw",
+    "file": "mnk_tiger_claw.png",
+    "bytes": 49646,
+    "source": {
+      "width": 460,
+      "height": 789
+    }
+  },
+  {
+    "key": "mnk_tiger_stance",
+    "name": "Tiger Stance",
+    "file": "mnk_tiger_stance.png",
+    "bytes": 56190,
+    "source": {
+      "width": 384,
+      "height": 603
+    }
+  },
+  {
+    "key": "mnk_touch_of_life",
+    "name": "Touch of Life",
+    "file": "mnk_touch_of_life.png",
+    "bytes": 42530,
+    "source": {
+      "width": 231,
+      "height": 382
+    }
+  },
+  {
+    "key": "mnk_twin_serpent_strike",
+    "name": "Twin Serpent Strike",
+    "file": "mnk_twin_serpent_strike.png",
+    "bytes": 54887,
+    "source": {
+      "width": 232,
+      "height": 274
+    }
+  },
+  {
+    "key": "mnk_weakened_flesh",
+    "name": "Weakened Flesh",
+    "file": "mnk_weakened_flesh.png",
+    "bytes": 47405,
+    "source": {
+      "width": 247,
+      "height": 314
+    }
+  },
+  {
+    "key": "mnk_wind_palm",
+    "name": "Wind Palm",
+    "file": "mnk_wind_palm.png",
+    "bytes": 52091,
+    "source": {
+      "width": 290,
+      "height": 391
+    }
+  },
+  {
+    "key": "mnk_winded",
+    "name": "Winded",
+    "file": "mnk_winded.png",
+    "bytes": 38953,
+    "source": {
+      "width": 357,
+      "height": 508
+    }
+  },
+  {
+    "key": "mnk_zen_bell_resonance",
+    "name": "Zen Bell Resonance",
+    "file": "mnk_zen_bell_resonance.png",
+    "bytes": 51584,
+    "source": {
+      "width": 526,
+      "height": 655
+    }
+  },
+  {
+    "key": "mnk_zen_focus",
+    "name": "Zen Focus",
+    "file": "mnk_zen_focus.png",
+    "bytes": 38480,
+    "source": {
+      "width": 213,
+      "height": 417
+    }
+  },
+  {
+    "key": "mnk_zen_strike",
+    "name": "Zen Strike",
+    "file": "mnk_zen_strike.png",
+    "bytes": 55028,
+    "source": {
+      "width": 314,
+      "height": 306
+    }
+  },
+  {
+    "key": "war_banner_of_victory",
+    "name": "Banner of Victory",
+    "file": "war_banner_of_victory.png",
+    "bytes": 33414,
+    "source": {
+      "width": 409,
+      "height": 789
+    }
+  },
+  {
+    "key": "war_battle_shout",
+    "name": "Battle Shout",
+    "file": "war_battle_shout.png",
+    "bytes": 57544,
+    "source": {
+      "width": 542,
+      "height": 494
+    }
+  },
+  {
+    "key": "war_berzerker_rampage",
+    "name": "Berzerker Rampage",
+    "file": "war_berzerker_rampage.png",
+    "bytes": 57128,
+    "source": {
+      "width": 404,
+      "height": 485
+    }
+  },
+  {
+    "key": "war_bleeding_cleave",
+    "name": "Bleeding Cleave",
+    "file": "war_bleeding_cleave.png",
+    "bytes": 41903,
+    "source": {
+      "width": 459,
+      "height": 569
+    }
+  },
+  {
+    "key": "war_blood_harvest",
+    "name": "Blood Harvest",
+    "file": "war_blood_harvest.png",
+    "bytes": 34284,
+    "source": {
+      "width": 534,
+      "height": 390
+    }
+  },
+  {
+    "key": "war_bloodlust_stance",
+    "name": "Bloodlust Stance",
+    "file": "war_bloodlust_stance.png",
+    "bytes": 60374,
+    "source": {
+      "width": 553,
+      "height": 577
+    }
+  },
+  {
+    "key": "war_colossus_stance",
+    "name": "Colossus Stance",
+    "file": "war_colossus_stance.png",
+    "bytes": 54854,
+    "source": {
+      "width": 341,
+      "height": 484
+    }
+  },
+  {
+    "key": "war_cracked_bones",
+    "name": "Cracked Bones",
+    "file": "war_cracked_bones.png",
+    "bytes": 43060,
+    "source": {
+      "width": 399,
+      "height": 629
+    }
+  },
+  {
+    "key": "war_crushing_blow",
+    "name": "Crushing Blow",
+    "file": "war_crushing_blow.png",
+    "bytes": 25227,
+    "source": {
+      "width": 331,
+      "height": 645
+    }
+  },
+  {
+    "key": "war_decapitate",
+    "name": "Decapitate",
+    "file": "war_decapitate.png",
+    "bytes": 38638,
+    "source": {
+      "width": 331,
+      "height": 501
+    }
+  },
+  {
+    "key": "war_deep_wound",
+    "name": "Deep Wound",
+    "file": "war_deep_wound.png",
+    "bytes": 42769,
+    "source": {
+      "width": 231,
+      "height": 356
+    }
+  },
+  {
+    "key": "war_demoralize",
+    "name": "Demoralize",
+    "file": "war_demoralize.png",
+    "bytes": 40263,
+    "source": {
+      "width": 313,
+      "height": 560
+    }
+  },
+  {
+    "key": "war_disarming_bash",
+    "name": "Disarming Bash",
+    "file": "war_disarming_bash.png",
+    "bytes": 40351,
+    "source": {
+      "width": 306,
+      "height": 410
+    }
+  },
+  {
+    "key": "war_duelist_focus",
+    "name": "Duelist Focus",
+    "file": "war_duelist_focus.png",
+    "bytes": 43528,
+    "source": {
+      "width": 239,
+      "height": 399
+    }
+  },
+  {
+    "key": "war_earth_stride",
+    "name": "Earth Stride",
+    "file": "war_earth_stride.png",
+    "bytes": 46650,
+    "source": {
+      "width": 298,
+      "height": 408
+    }
+  },
+  {
+    "key": "war_flame_edge",
+    "name": "Flame Edge",
+    "file": "war_flame_edge.png",
+    "bytes": 38309,
+    "source": {
+      "width": 288,
+      "height": 537
+    }
+  },
+  {
+    "key": "war_flurry_of_steel",
+    "name": "Flurry of Steel",
+    "file": "war_flurry_of_steel.png",
+    "bytes": 54130,
+    "source": {
+      "width": 366,
+      "height": 424
+    }
+  },
+  {
+    "key": "war_frostforge_strike",
+    "name": "Frostforge Strike",
+    "file": "war_frostforge_strike.png",
+    "bytes": 46584,
+    "source": {
+      "width": 511,
+      "height": 765
+    }
+  },
+  {
+    "key": "war_gouge",
+    "name": "Gouge",
+    "file": "war_gouge.png",
+    "bytes": 49654,
+    "source": {
+      "width": 281,
+      "height": 434
+    }
+  },
+  {
+    "key": "war_ground_breaker",
+    "name": "Ground Breaker",
+    "file": "war_ground_breaker.png",
+    "bytes": 49367,
+    "source": {
+      "width": 272,
+      "height": 365
+    }
+  },
+  {
+    "key": "war_hamstring_slash",
+    "name": "Hamstring Slash",
+    "file": "war_hamstring_slash.png",
+    "bytes": 46057,
+    "source": {
+      "width": 501,
+      "height": 459
+    }
+  },
+  {
+    "key": "war_hilt_strike",
+    "name": "Hilt Strike",
+    "file": "war_hilt_strike.png",
+    "bytes": 16920,
+    "source": {
+      "width": 222,
+      "height": 687
+    }
+  },
+  {
+    "key": "war_ignite_blade",
+    "name": "Ignite Blade",
+    "file": "war_ignite_blade.png",
+    "bytes": 37106,
+    "source": {
+      "width": 323,
+      "height": 544
+    }
+  },
+  {
+    "key": "war_intimidating_roar",
+    "name": "Intimidating Roar",
+    "file": "war_intimidating_roar.png",
+    "bytes": 48364,
+    "source": {
+      "width": 482,
+      "height": 433
+    }
+  },
+  {
+    "key": "war_iron_will",
+    "name": "Iron Will",
+    "file": "war_iron_will.png",
+    "bytes": 59829,
+    "source": {
+      "width": 383,
+      "height": 467
+    }
+  },
+  {
+    "key": "war_last_stand",
+    "name": "Last Stand",
+    "file": "war_last_stand.png",
+    "bytes": 58136,
+    "source": {
+      "width": 332,
+      "height": 306
+    }
+  },
+  {
+    "key": "war_maim",
+    "name": "Maim",
+    "file": "war_maim.png",
+    "bytes": 32013,
+    "source": {
+      "width": 246,
+      "height": 664
+    }
+  },
+  {
+    "key": "war_overpowering_smash",
+    "name": "Overpowering Smash",
+    "file": "war_overpowering_smash.png",
+    "bytes": 28586,
+    "source": {
+      "width": 349,
+      "height": 764
+    }
+  },
+  {
+    "key": "war_piercing_thrust",
+    "name": "Piercing Thrust",
+    "file": "war_piercing_thrust.png",
+    "bytes": 44876,
+    "source": {
+      "width": 374,
+      "height": 500
+    }
+  },
+  {
+    "key": "war_punishing_strike",
+    "name": "Punishing Strike",
+    "file": "war_punishing_strike.png",
+    "bytes": 37132,
+    "source": {
+      "width": 187,
+      "height": 364
+    }
+  },
+  {
+    "key": "war_shield_slam",
+    "name": "Shield Slam",
+    "file": "war_shield_slam.png",
+    "bytes": 73777,
+    "source": {
+      "width": 680,
+      "height": 721
+    }
+  },
+  {
+    "key": "war_shield_wall",
+    "name": "Shield Wall",
+    "file": "war_shield_wall.png",
+    "bytes": 67934,
+    "source": {
+      "width": 519,
+      "height": 578
+    }
+  },
+  {
+    "key": "war_shockwave",
+    "name": "Shockwave",
+    "file": "war_shockwave.png",
+    "bytes": 52311,
+    "source": {
+      "width": 323,
+      "height": 485
+    }
+  },
+  {
+    "key": "war_skull_splitter",
+    "name": "Skull Splitter",
+    "file": "war_skull_splitter.png",
+    "bytes": 53949,
+    "source": {
+      "width": 314,
+      "height": 409
+    }
+  },
+  {
+    "key": "war_steel_tempering",
+    "name": "Steel Tempering",
+    "file": "war_steel_tempering.png",
+    "bytes": 57063,
+    "source": {
+      "width": 338,
+      "height": 308
+    }
+  },
+  {
+    "key": "war_stoneskin_burst",
+    "name": "Stoneskin Burst",
+    "file": "war_stoneskin_burst.png",
+    "bytes": 42625,
+    "source": {
+      "width": 170,
+      "height": 273
+    }
+  },
+  {
+    "key": "war_sunder_armor",
+    "name": "Sunder Armor",
+    "file": "war_sunder_armor.png",
+    "bytes": 43788,
+    "source": {
+      "width": 280,
+      "height": 458
+    }
+  },
+  {
+    "key": "war_sweeping_strike",
+    "name": "Sweeping Strike",
+    "file": "war_sweeping_strike.png",
+    "bytes": 49219,
+    "source": {
+      "width": 270,
+      "height": 281
+    }
+  },
+  {
+    "key": "war_taunt",
+    "name": "Taunt",
+    "file": "war_taunt.png",
+    "bytes": 41786,
+    "source": {
+      "width": 392,
+      "height": 713
+    }
+  },
+  {
+    "key": "war_tendon_rupture",
+    "name": "Tendon Rupture",
+    "file": "war_tendon_rupture.png",
+    "bytes": 45796,
+    "source": {
+      "width": 424,
+      "height": 611
+    }
+  },
+  {
+    "key": "war_terrifying_glare",
+    "name": "Terrifying Glare",
+    "file": "war_terrifying_glare.png",
+    "bytes": 45451,
+    "source": {
+      "width": 316,
+      "height": 534
+    }
+  },
+  {
+    "key": "war_thunder_strike",
+    "name": "Thunder Strike",
+    "file": "war_thunder_strike.png",
+    "bytes": 44785,
+    "source": {
+      "width": 289,
+      "height": 466
+    }
+  },
+  {
+    "key": "war_titanic_impact",
+    "name": "Titanic Impact",
+    "file": "war_titanic_impact.png",
+    "bytes": 61227,
+    "source": {
+      "width": 636,
+      "height": 645
+    }
+  },
+  {
+    "key": "war_twin_slash",
+    "name": "Twin Slash",
+    "file": "war_twin_slash.png",
+    "bytes": 51020,
+    "source": {
+      "width": 249,
+      "height": 306
+    }
+  },
+  {
+    "key": "war_unstoppable",
+    "name": "Unstoppable",
+    "file": "war_unstoppable.png",
+    "bytes": 42510,
+    "source": {
+      "width": 399,
+      "height": 603
+    }
+  },
+  {
+    "key": "war_war_avatar",
+    "name": "War Avatar",
+    "file": "war_war_avatar.png",
+    "bytes": 52665,
+    "source": {
+      "width": 433,
+      "height": 452
+    }
+  },
+  {
+    "key": "war_wave_cleaver",
+    "name": "Wave Cleaver",
+    "file": "war_wave_cleaver.png",
+    "bytes": 16929,
+    "source": {
+      "width": 196,
+      "height": 637
+    }
+  },
+  {
+    "key": "war_whirlwind",
+    "name": "Whirlwind",
+    "file": "war_whirlwind.png",
+    "bytes": 47568,
+    "source": {
+      "width": 375,
+      "height": 485
+    }
+  },
+  {
+    "key": "war_windblade",
+    "name": "Windblade",
+    "file": "war_windblade.png",
+    "bytes": 44714,
+    "source": {
+      "width": 467,
+      "height": 739
+    }
+  }
+]
