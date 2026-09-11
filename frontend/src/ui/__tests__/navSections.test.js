@@ -43,9 +43,9 @@ describe('visibleSections', () => {
     expect(items.every((i) => !i.adminType)).toBe(true);
   });
 
-  it('shows an admin the two player screens plus all twelve admin screens', () => {
+  it('shows an admin the two player screens plus all thirteen admin screens', () => {
     const items = allItems(visibleSections(true));
-    expect(items).toHaveLength(14);
+    expect(items).toHaveLength(15);
     expect(items.map((i) => i.path)).toEqual([
       '/game', '/game/map', '/game/tiles', '/game/entities', '/game/items',
       '/game/maps', '/game/biomes', '/game/creature-behaviors', '/game/vfx', '/game/world-map',
@@ -56,6 +56,10 @@ describe('visibleSections', () => {
       // affix (T12) and passive-node (T9) admin sections land in. It is NOT at
       // /game/settings -- that path is already AI Providers.
       '/game/admin/progression',
+      // SOMET-571: the passive tree and class skills with their generated
+      // icons drawn in place. Content, beside Progression which owns the
+      // nodes it draws.
+      '/game/admin/skill-tree',
       // SOMET-538: the mass-generation console, directly above AI Providers --
       // you point the game at a machine there, then drive a batch through it
       // here.

@@ -1,7 +1,7 @@
 import {
   HiOutlinePuzzlePiece, HiOutlineWrenchScrewdriver, HiOutlineBeaker,
   HiOutlineCube, HiOutlineMap, HiOutlineGlobeAlt, HiOutlineShare, HiOutlineBolt, HiOutlineSparkles,
-  HiOutlineCpuChip, HiOutlineChartBar, HiOutlineGlobeAmericas, HiOutlinePhoto,
+  HiOutlineCpuChip, HiOutlineChartBar, HiOutlineGlobeAmericas, HiOutlinePhoto, HiOutlineRectangleGroup,
 } from "react-icons/hi2";
 
 // One source of truth for the sidebar: label, route, icon and the admin colour
@@ -49,6 +49,11 @@ export const NAV_SECTIONS = [
       // land in. Content rather than configuration, so it sits above the
       // AI Providers entry.
       { id: 'progression', label: 'Progression', path: '/game/admin/progression', Icon: HiOutlineChartBar, adminType: 'entity' },
+      // SOMET-571: the passive tree and the class skills with their generated
+      // icons drawn in place, view-only. Beside Progression because that page
+      // owns the nodes this one draws, and above Art Generation because you
+      // look here and go there to fix what you saw.
+      { id: 'skill-tree', label: 'Skill Tree', path: '/game/admin/skill-tree', Icon: HiOutlineRectangleGroup, adminType: 'entity' },
       // SOMET-538: the mass-generation console. Sits directly above AI
       // Providers because the two are used together -- you point the game at a
       // machine there, then drive a batch through it here -- and because both
