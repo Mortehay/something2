@@ -38,16 +38,15 @@ import {
     mergeLevelInfo, buildCharacterView,
 } from "./progressionExtras.js";
 import { fetchProgression } from "../net/progressionClient.js";
-<<<<<<< HEAD
 import {
     getSkillById, getSkillsForClass, getRequiredForm, isTransformationSkill,
     isDruidExclusiveSkill, resolveSkillVfx, checkGemRequirements, getWeaponCategory,
+    getSkillPrice, getSkillLevelReq,
 } from "./skillsData.js";
-import { loadHotbarForCharacter, saveHotbarForCharacter } from "./hotbarStorage.js";
-=======
-import { getSkillById, getSkillsForClass, getRequiredForm, isTransformationSkill, isDruidExclusiveSkill, resolveSkillVfx, getSkillPrice, getSkillLevelReq } from "./skillsData.js";
-import { loadHotbarForCharacter, saveHotbarForCharacter, loadUnlockedSkillsForCharacter, unlockSkillForCharacter, isSkillUnlocked } from "./hotbarStorage.js";
->>>>>>> 5b2db11a1af5b3feb3d12e4afd650615748c7634
+import {
+    loadHotbarForCharacter, saveHotbarForCharacter,
+    loadUnlockedSkillsForCharacter, unlockSkillForCharacter, isSkillUnlocked,
+} from "./hotbarStorage.js";
 import { createSkillVisual, updateSkillVisuals, pruneSkillVisuals } from "./skillVisuals.js";
 import { API_URL } from "../../../../../config.js";
 
