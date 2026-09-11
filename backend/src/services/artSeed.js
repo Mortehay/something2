@@ -16,7 +16,7 @@
 //
 //   * tiles are ground: never trimmed, gated on render_mode = 'color';
 //   * entities are silhouettes: export only `static` rows (a directional set
-//     is an atlas, not one still), refuse a manifest that skipped the cutout,
+//     is an atlas, not one still), seed only entries that have been cut out,
 //     never flatten existing art unless --force, trim on the way up;
 //   * skills / passive labels / items have one image column and no render
 //     mode: gate on "already has art", trim as an object, key by SUBJECT KEY
@@ -39,6 +39,7 @@ const path = require('path');
 const { SUBJECTS } = require('./catalogSubjects.js');
 const { SKILLS } = require('../../seeds/data/skills.js');
 const { shrinkToEdge } = require('./pngResample.js');
+const { alphaProfile } = require('./pngAlpha.js');
 
 const SEEDS_ROOT = path.resolve(__dirname, '../../seeds/textures');
 
@@ -132,13 +133,28 @@ const SEED_POLICY = Object.freeze({
         key: r.name, name: r.name, image: r.image, prompt: r.prompt, is_creature: r.is_creature,
       }));
     },
-    // Refuse art that never had its backdrop removed. Without the cutout every
-    // prop ships as a subject inside an opaque square, which looks like a
-    // rendering bug rather than a missing pipeline step -- and it would be
-    // committed and spread to every other machine.
+    // The store already holds keyed silhouettes for most entities (sprite-gen
+    // and the CORE path cut the backdrop out before upload), so a fresh
+    // export can tell from the bytes whether an image needs the host-side
+    // cutout pass. Marking it here is what lets `make art-seed` accept a
+    // fresh export without a destructive re-cut of already-feathered edges.
+    // The threshold mirrors the cutout tool's own "backdrop survived" rule
+    // (coverage > 90%). `needs_regen` is never set here: that is the tool's
+    // judgment about a subject, not a property of the bytes.
+    annotate(buffer) {
+      const profile = alphaProfile(buffer);
+      if (profile && profile.transparentPct >= 10) return { cutout: true };
+      return {};
+    },
+    // Refuse a manifest where NOTHING was cut out: the step was skipped and
+    // every prop would ship inside an opaque square, which looks like a
+    // rendering bug rather than a missing pipeline step. A manifest that is
+    // mostly cut out with a few opaque stragglers is not that case -- those
+    // wait individually (see gate) while the rest seed. One opaque file used
+    // to block all 308, which read as "the seed is missing art".
     preflight(entries) {
-      if (entries.length && !entries.every((m) => m.cutout)) {
-        throw new Error('these images have not been cut out -- run `make entities-cutout` first, '
+      if (entries.length && !entries.some((m) => m.cutout)) {
+        throw new Error('none of these images have been cut out -- run `make entities-cutout` first, '
           + 'or they will render as subjects inside opaque rectangles');
       }
     },
@@ -147,6 +163,7 @@ const SEED_POLICY = Object.freeze({
       // erased subject. Seeding one puts a visible box where a sprite should
       // be, which is worse than the coloured rectangle it would replace.
       if (entry.needs_regen) return { skip: 'needs-regen' };
+      if (!entry.cutout) return { skip: 'not-cut-out' };
       const { rows } = await db.query('SELECT id, render_mode FROM entity_types WHERE name = $1', [entry.name]);
       if (!rows[0]) return { skip: 'missing-row' };
       // 'rect' is "no art". Anything else is art this machine already has,
@@ -295,9 +312,10 @@ async function exportArt({
         bytes += buf.length;
         const { image, ...manifestFields } = r;
         // Tiles and entities keep their historical shape (name-first, no key).
+        const marks = policy.annotate ? policy.annotate(buf) : {};
         const entry = (kind === 'tile' || kind === 'entity')
-          ? { name: r.name, file, bytes: buf.length, ...omit(manifestFields, ['key', 'name']) }
-          : { ...manifestFields, file, bytes: buf.length, ...(shrunk ? { source: shrunk.source } : {}) };
+          ? { name: r.name, file, bytes: buf.length, ...omit(manifestFields, ['key', 'name']), ...marks }
+          : { ...manifestFields, file, bytes: buf.length, ...(shrunk ? { source: shrunk.source } : {}), ...marks };
         fresh.push(entry);
         log(`  ${r.name}: ${(buf.length / 1024).toFixed(0)} KB`
           + (shrunk && shrunk.resized ? ` (from ${shrunk.source.width}x${shrunk.source.height})` : ''));
@@ -353,7 +371,7 @@ async function seedArt({
 
     await store.ensureBucket();
     const bucket = store.BUCKET();
-    const stats = { linked: 0, skipped: 0, needsRegen: 0, missingFile: 0, missingRow: 0, trimmed: 0 };
+    const stats = { linked: 0, skipped: 0, needsRegen: 0, notCutOut: 0, missingFile: 0, missingRow: 0, trimmed: 0 };
 
     for (const entry of wanted) {
       const entryKey = entryId(entry);
@@ -361,6 +379,10 @@ async function seedArt({
       if (verdict) {
         if (verdict.skip === 'has-art') stats.skipped += 1;
         else if (verdict.skip === 'needs-regen') stats.needsRegen += 1;
+        else if (verdict.skip === 'not-cut-out') {
+          log(`  ${entry.name}: SKIP (not cut out -- run \`make entities-cutout\`)`);
+          stats.notCutOut += 1;
+        }
         else if (verdict.skip === 'missing-row') {
           log(`  ${entry.name}: SKIP (no such ${kind} -- seed the catalogue first)`);
           stats.missingRow += 1;

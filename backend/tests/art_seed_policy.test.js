@@ -169,13 +169,24 @@ test('entity gate: needs_regen waits, non-rect art is kept, a missing row is rep
   assert.strictEqual((await p.gate(stubDb([]), { name: 'Ghost', cutout: true }, {})).skip, 'missing-row');
 });
 
-test('entity preflight refuses a manifest that has not been cut out', () => {
+test('entity preflight refuses a manifest where NOTHING has been cut out -- the step was skipped', () => {
   assert.throws(
-    () => SEED_POLICY.entity.preflight([{ name: 'A', cutout: true }, { name: 'B' }]),
+    () => SEED_POLICY.entity.preflight([{ name: 'A' }, { name: 'B' }]),
     /entities-cutout/,
   );
   assert.doesNotThrow(() => SEED_POLICY.entity.preflight([{ name: 'A', cutout: true }]));
   assert.doesNotThrow(() => SEED_POLICY.entity.preflight([]));
+});
+
+test('entity gate: one un-cut entry is skipped on its own, not the whole kind', async () => {
+  // One opaque file used to block all 308: "these images have not been cut
+  // out" fired if ANY entry lacked the flag. Now the un-cut one waits and
+  // the rest seed.
+  const mixed = [{ name: 'A', cutout: true }, { name: 'B' }];
+  assert.doesNotThrow(() => SEED_POLICY.entity.preflight(mixed));
+  const rect = stubDb([[/FROM entity_types/, [{ id: 2, render_mode: 'rect' }]]]);
+  assert.strictEqual((await SEED_POLICY.entity.gate(rect, mixed[1], { force: false })).skip, 'not-cut-out');
+  assert.strictEqual(await SEED_POLICY.entity.gate(rect, mixed[0], { force: false }), null);
 });
 
 test('catalog-art gates: skip when the subject already has art unless forced', async () => {
@@ -385,4 +396,49 @@ test('exportArt writes an uncapped kind byte-for-byte, even when it is large', a
   assert.ok(fs.readFileSync(path.join(root, 'tiles', 'grass.png')).equals(big));
   const [entry] = JSON.parse(fs.readFileSync(path.join(root, 'tiles.json'), 'utf8'));
   assert.strictEqual(entry.source, undefined);
+});
+
+// --- export marks the cutout state from the bytes it writes ---------------
+
+test('entity export marks an already-transparent PNG cutout:true and an opaque one not', async () => {
+  const { encodeRGBA } = require('../src/services/pngTrim.js');
+  const W = 20; const H = 20;
+  // Half the frame transparent: a keyed silhouette.
+  const keyed = Buffer.alloc(W * H * 4);
+  for (let i = 0; i < W * H; i += 1) keyed.set([200, 50, 50, i % W < 10 ? 255 : 0], i * 4);
+  const opaque = Buffer.alloc(W * H * 4, 255);
+  const root = tmpRoot();
+  const store = stubStore(new Map([
+    ['sprites/Wolf/j/static.png', encodeRGBA(W, H, keyed)],
+    ['sprites/Crate/j/static.png', encodeRGBA(W, H, opaque)],
+  ]));
+  const db = stubDb([[/FROM entity_types/, [
+    { name: 'Wolf', image: 'sprites/Wolf/j/static.png', prompt: 'p', is_creature: true },
+    { name: 'Crate', image: 'sprites/Crate/j/static.png', prompt: 'p', is_creature: false },
+  ]]]);
+  await exportArt({ db, store, root, kinds: ['entity'], log: () => {} });
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, 'entities.json'), 'utf8'));
+  const byName = Object.fromEntries(manifest.map((m) => [m.name, m]));
+  assert.strictEqual(byName.Wolf.cutout, true);
+  assert.strictEqual(byName.Crate.cutout, undefined);
+  // Never invents the redraw flag: that is the cutout tool's judgment.
+  assert.strictEqual(byName.Wolf.needs_regen, undefined);
+  assert.strictEqual(byName.Crate.needs_regen, undefined);
+});
+
+test('seedArt with a mixed entity manifest seeds the cut-out entry and counts the other as waiting', async () => {
+  const root = tmpRoot();
+  fs.mkdirSync(path.join(root, 'entities'));
+  fs.writeFileSync(path.join(root, 'entities', 'A.png'), PNG);
+  fs.writeFileSync(path.join(root, 'entities', 'B.png'), PNG);
+  fs.writeFileSync(path.join(root, 'entities.json'), JSON.stringify([
+    { name: 'A', file: 'A.png', bytes: 1, cutout: true },
+    { name: 'B', file: 'B.png', bytes: 1 },
+  ]));
+  const store = stubStore();
+  const db = stubDb([[/FROM entity_types/, [{ id: 1, render_mode: 'rect' }]], [/UPDATE entity_types/, [{}]]]);
+  const r = await seedArt({ db, store, root, kinds: ['entity'], log: () => {} });
+  assert.strictEqual(r.entity.linked, 1);
+  assert.strictEqual(r.entity.notCutOut, 1);
+  assert.deepStrictEqual(store.puts.map((p) => p.key), ['sprites/A/seeded/static.png']);
 });

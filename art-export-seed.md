@@ -69,10 +69,14 @@ git add backend/seeds/textures
 git commit -m "feat(art): export regenerated <what> (SOMET-NNN)"
 ```
 
-Tiles must go through `tiles-seamless` and entities through
-`entities-cutout` before they are committed; `art-seed` refuses an entity
-manifest that has not been cut out. Skills, passive labels and items need no
-post-processing -- the generator already keys their backdrop out.
+Tiles must go through `tiles-seamless` before they are committed. Entities
+usually do NOT need `entities-cutout` any more: the object store already
+holds keyed silhouettes for most of them, and the export marks an entry
+`cutout: true` when its bytes are already transparent. Run
+`make entities-cutout` only for the entries the export left unmarked (the
+seed log names them as "not cut out"); re-running it over already-cut files
+eats their feathered edges. Skills, passive labels and items need no
+post-processing.
 
 ### On the other machine
 
@@ -100,9 +104,14 @@ These are what keep a seed run from destroying local work. They live in
   `animated` entity is an atlas plus a manifest, not one still; exporting one
   PNG for it would quietly downgrade it on the next seed. `FORCE=1` on seed is
   the one deliberate way to flatten such an entity, and it does exactly that.
+- **Entities are seeded one by one on their `cutout` flag.** An entry
+  without it is skipped and named in the log ("not cut out"); only a
+  manifest where NOTHING is cut out is refused outright, because that means
+  the step was skipped. One opaque file no longer blocks the other 307.
 - **Entities flagged `needs_regen` by the cutout pass are never seeded.** A
   box or a blank where a sprite should be is worse than the coloured
-  rectangle it would replace.
+  rectangle it would replace. If a subject shows as a coloured rectangle on
+  another machine, check its manifest entry for this flag first.
 - **Skill, passive and item icons are committed at 256 px max edge**
   (SOMET-573). The generator draws them at 1024 px and the game shows them
   at 30-48 px; uncapped, the three sets were 96 MB, capped they are 26 MB.
