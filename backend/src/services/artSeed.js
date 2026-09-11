@@ -232,7 +232,14 @@ const SEED_POLICY = Object.freeze({
       return [...index].map(([key, art]) => ({ key, name: key, image: art.image }))
         .sort((a, b) => a.key.localeCompare(b.key));
     },
-    gate: catalogArtGate('item'),
+    // Unlike skills and passive labels, an item's art lives ON its row, so a
+    // subject with no row cannot be seeded -- report it, as tiles and
+    // entities do, rather than count a no-op UPDATE as linked.
+    async gate(db, entry, opts) {
+      const { rows } = await db.query('SELECT id FROM item_types WHERE name = $1', [entry.key]);
+      if (!rows[0]) return { skip: 'missing-row' };
+      return catalogArtGate('item')(db, entry, opts);
+    },
     link: catalogArtLink('item'),
   },
 });

@@ -192,10 +192,13 @@ test('entity gate: one un-cut entry is skipped on its own, not the whole kind', 
 test('catalog-art gates: skip when the subject already has art unless forced', async () => {
   for (const kind of ['skill', 'passive_label', 'item']) {
     const p = SEED_POLICY[kind];
-    const has = stubDb([[/FROM (catalog_art|item_types)/, [{ name: 'k', image: 'sprites/objects/k/j/static.png' }]]]);
+    // The item gate also looks the row up; give it one so this test is about
+    // the art state, not row existence (covered separately below).
+    const row = [[/SELECT id FROM item_types WHERE name/, [{ id: 1 }]]];
+    const has = stubDb([...row, [/FROM (catalog_art|item_types)/, [{ name: 'k', image: 'sprites/objects/k/j/static.png' }]]]);
     assert.strictEqual((await p.gate(has, { key: 'k', name: 'k' }, { force: false })).skip, 'has-art', kind);
     assert.strictEqual(await p.gate(has, { key: 'k', name: 'k' }, { force: true }), null, kind);
-    assert.strictEqual(await p.gate(stubDb([]), { key: 'k', name: 'k' }, { force: false }), null, kind);
+    assert.strictEqual(await p.gate(stubDb(row), { key: 'k', name: 'k' }, { force: false }), null, kind);
   }
 });
 
@@ -441,4 +444,11 @@ test('seedArt with a mixed entity manifest seeds the cut-out entry and counts th
   assert.strictEqual(r.entity.linked, 1);
   assert.strictEqual(r.entity.notCutOut, 1);
   assert.deepStrictEqual(store.puts.map((p) => p.key), ['sprites/A/seeded/static.png']);
+});
+
+test('item gate reports a subject with no item_types row instead of counting a no-op UPDATE as linked', async () => {
+  const noRow = stubDb([[/SELECT .* FROM item_types WHERE name/, []]]);
+  assert.strictEqual((await SEED_POLICY.item.gate(noRow, { key: 'ghost-blade', name: 'ghost-blade' }, { force: false })).skip, 'missing-row');
+  const hasRow = stubDb([[/SELECT .* FROM item_types WHERE name/, [{ id: 1 }]]]);
+  assert.strictEqual(await SEED_POLICY.item.gate(hasRow, { key: 'void-blade', name: 'void-blade' }, { force: false }), null);
 });
