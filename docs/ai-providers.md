@@ -320,6 +320,10 @@ make tiles-seamless                           # make each texture tile against i
 make tiles-seed                               # committed PNGs -> MinIO, on any machine
 ```
 
+`tiles-export` and `tiles-seed` are aliases for `make art-export KIND=tile` and
+`make art-seed KIND=tile`; the same pair also moves entity, skill, passive-label
+and item art. See [art-export-seed.md](../art-export-seed.md).
+
 `tiles-generate` does what the UI does, in the same order: it pins every tile to
 the provider (**Generation service**), gives each tile a biome art context if it
 has none, then draws on that provider (**Generate with**) and points the catalog
@@ -438,6 +442,9 @@ make entities-export
 make entities-cutout
 make entities-seed
 ```
+
+(`entities-export` / `entities-seed` are `make art-export KIND=entity` /
+`make art-seed KIND=entity` -- see [art-export-seed.md](../art-export-seed.md).)
 
 ### CORE=1 is not optional on this provider
 

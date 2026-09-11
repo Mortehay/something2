@@ -1,7 +1,7 @@
 .PHONY: up down build logs restart rebuild clean nuke shell-backend shell-frontend db-shell \
         engine-build engine-test engine-up engine-down engine-logs engine-shell engine-rebuild \
         redis-shell admin-password admin-password-rotate seed-catalogs seed-map seed-passive-tree \
-        tiles-generate tiles-export tiles-seamless tiles-seed \
+        art-export art-seed tiles-generate tiles-export tiles-seamless tiles-seed \
         entities-generate entities-export entities-cutout entities-seed \
         entities-restyle-prompts art-describe \
         clear-maps list-maps list-specs reseed-map dev dev-stop dev-status \
@@ -236,6 +236,29 @@ admin-password-rotate:
 seed-catalogs:
 	$(COMPOSE) exec -T backend node scripts/seed-catalogs.js
 
+# --- Catalog art: export / seed (SOMET-572) ------------------------------
+#
+# Every generated image lives in MinIO with a job-scoped key in a catalog row;
+# neither survives a clone. These two targets move the art through git so a
+# machine with no GPU shows the same game. Full usage: art-export-seed.md.
+#
+#   make art-export                        every kind -> backend/seeds/textures/
+#   make art-export KIND=skill,item        some kinds
+#   make art-export ONLY=Wolf,grass        some subjects (manifest merged)
+#   make art-seed                          committed art -> MinIO + catalog rows
+#   make art-seed KIND=tile FORCE=1        overwrite art this machine already has
+#
+# KIND is any of: tile entity skill passive_label item. The per-kind targets
+# below (tiles-export, entities-seed, ...) are aliases kept for the documented
+# generate -> export -> seamless/cutout -> seed order.
+art-export:
+	$(COMPOSE) exec -T backend node scripts/export-art.js \
+		$(if $(KIND),--kind="$(KIND)") $(if $(ONLY),--only="$(ONLY)")
+
+art-seed:
+	$(COMPOSE) exec -T backend node scripts/seed-art.js \
+		$(if $(KIND),--kind="$(KIND)") $(if $(ONLY),--only="$(ONLY)") $(if $(FORCE),--force)
+
 # --- Tile textures -------------------------------------------------------
 #
 # Three targets, in the order you use them. The first needs an AI provider and
@@ -261,7 +284,7 @@ tiles-generate:
 		$(if $(ONLY),--only "$(ONLY)") $(if $(DRY),--dry-run) $(if $(NOPIN),--no-pin) $(if $(NOBIOME),--no-biome)
 
 tiles-export:
-	$(COMPOSE) exec -T backend node scripts/export-tile-textures.js
+	$(MAKE) art-export KIND=tile
 
 # Make the exported textures tile against themselves. Runs on the HOST (needs
 # Pillow), not in a container, because no service image carries an image
@@ -275,7 +298,7 @@ tiles-seamless:
 		$(if $(REPEAT),--repeat $(REPEAT),--repeat 2) $(if $(FORCE),--force)
 
 tiles-seed:
-	$(COMPOSE) exec -T backend node scripts/seed-tile-textures.js $(if $(FORCE),--force)
+	$(MAKE) art-seed KIND=tile
 
 # --- Entity art ----------------------------------------------------------
 #
@@ -343,13 +366,13 @@ entities-generate:
 		$(if $(OBJECTS),--objects-only) $(if $(CREATURES),--creatures-only) $(if $(LOCAL),--local) $(if $(CORE),--core)
 
 entities-export:
-	$(COMPOSE) exec -T backend node scripts/export-entity-textures.js
+	$(MAKE) art-export KIND=entity
 
 entities-cutout:
 	python3 tools/cutout-entity-textures.py $(if $(CHECK),--check) $(if $(FORCE),--force)
 
 entities-seed:
-	$(COMPOSE) exec -T backend node scripts/seed-entity-textures.js $(if $(FORCE),--force)
+	$(MAKE) art-seed KIND=entity
 # Regenerate the passive tree and upsert it. Safe to re-run: nodes are upserted
 # by their stable generated key, never deleted, so no character_passives row is
 # ever orphaned. An admin's edited kind/label/grants survive a plain run --
