@@ -146,7 +146,7 @@ export function fitSpriteRect(imgW, imgH, boxX, boxY, boxW, boxH) {
 export class RenderSystem {
   constructor(canvas, imageManager) {
     this.canvas = canvas;
-    this.ctx = canvas.getContext("2d");
+    this.ctx = canvas.getContext("2d", { willReadFrequently: true });
     this.ctx.imageSmoothingEnabled = false;
     this.imageManager = imageManager;
     // Global render-mode override (dev toggle). null = use each entity's own
@@ -280,6 +280,8 @@ export class RenderSystem {
     waves = [],
     skillVisuals = [],
     merchants = [], shop = null, shopOpen = false, shopView = null, decoTypes = null,
+    // Skill Trainer / Merchant
+    skillMerchants = [],
     // SOMET-310. Same join-frame fixed-world-point shape as `merchants`.
     banks = [], bank = null, bankOpen = false, bankView = null,
     // SOMET-372 -- WORLD chests (guarded, lootable), not the account chest
@@ -317,7 +319,7 @@ export class RenderSystem {
     skillsOpen = false, skillsTab = "all", skillsPage = 0, skillsClassFilter = "all",
     selectedSkillId = null, skillDrag = null, hotbarSkills = null,
     skillHoverSlot = null, playerClass = null, activeForm = null, flashSlot = null,
-    skillCooldowns = null, activeBuffs = [],
+    skillCooldowns = null, activeBuffs = [], unlockedSkills = null,
     hoveredSkill = null, cursorX = null, cursorY = null,
   }) {
     if (vfxDefs) this.vfxDefs = vfxDefs;
@@ -422,6 +424,9 @@ export class RenderSystem {
     for (const m of merchants) {
       drawables.push({ kind: "merchant", ref: m, order: 0, depth: depthKey(m.x, m.y) });
     }
+    for (const sm of skillMerchants) {
+      drawables.push({ kind: "skillMerchant", ref: sm, order: 0, depth: depthKey(sm.x, sm.y) });
+    }
     // Bank posts are the same kind of fixed world point as merchants, and go
     // through the same depth sort — a chest one tile behind the merchant must
     // draw behind them, which a separate later pass would get wrong.
@@ -447,6 +452,7 @@ export class RenderSystem {
       else if (d.kind === "remote") this.drawCreature(d.ref, "player", 0.85, d.userId);
       else if (d.kind === "grounditem") this.drawGroundItem(d.ref, inventory, player);
       else if (d.kind === "merchant") this.drawMerchant(d.ref, player);
+      else if (d.kind === "skillMerchant") this.drawSkillMerchant(d.ref, player);
       else if (d.kind === "bank") this.drawBank(d.ref, player);
       else if (d.kind === "worldchest") this.drawWorldChest(d.ref, player);
       else if (d.kind === "decoration") this.drawEntity(d.ref);
@@ -512,6 +518,9 @@ export class RenderSystem {
         page: skillsPage || 0,
         selectedSkillId,
         drag: skillDrag,
+        playerGold: gold ?? 0,
+        playerLevel: (progression && progression.level) || 1,
+        unlockedSkills,
       }, this._skillsHitAreas);
     }
 
@@ -2224,6 +2233,55 @@ export class RenderSystem {
     this.ctx.restore();
   }
 
+  // Skill Merchant / Trainer: fixed world marker opposite the bank chest.
+  // Azure/cyan diamond (#38bdf8) with star symbol and "[e] Skills" prompt.
+  drawSkillMerchant(sm, player = null) {
+    const s = worldToScreen(sm.x, sm.y);
+    const dx = s.x, dy = s.y;
+    const r = 11;
+    this.ctx.save();
+    this.ctx.fillStyle = "#38bdf8";
+    this.ctx.strokeStyle = "rgba(0,0,0,0.6)";
+    this.ctx.lineWidth = 2;
+    this.ctx.beginPath();
+    this.ctx.moveTo(dx, dy - r);
+    this.ctx.lineTo(dx + r, dy);
+    this.ctx.lineTo(dx, dy + r);
+    this.ctx.lineTo(dx - r, dy);
+    this.ctx.closePath();
+    this.ctx.fill();
+    this.ctx.stroke();
+
+    // Star icon in center
+    this.ctx.fillStyle = "#ffffff";
+    this.ctx.font = "bold 10px sans-serif";
+    this.ctx.textAlign = "center";
+    this.ctx.textBaseline = "middle";
+    this.ctx.fillText("✦", dx, dy);
+
+    this.ctx.font = "12px sans-serif";
+    this.ctx.textBaseline = "alphabetic";
+    this.ctx.fillStyle = "#fff";
+    this.ctx.fillText("Skill Trainer", dx, dy - r - 6);
+
+    // Show prompt when player is within interact range
+    if (player) {
+      const pcx = player.x + (player.width || 0) / 2;
+      const pcy = player.y + (player.height || 0) / 2;
+      const d = Math.hypot(sm.x - pcx, sm.y - pcy);
+      if (d <= WORLD_CHEST_PROMPT_R) {
+        this.ctx.font = "bold 11px sans-serif";
+        this.ctx.fillStyle = "#38bdf8";
+        this.ctx.strokeStyle = "rgba(0,0,0,0.85)";
+        this.ctx.lineWidth = 2;
+        this.ctx.strokeText("[e] Skills", dx, dy + r + 14);
+        this.ctx.fillText("[e] Skills", dx, dy + r + 14);
+      }
+    }
+
+    this.ctx.restore();
+  }
+
   // SOMET-310 — the account chest's world marker, drawn beside the merchant it
   // shares a village with. Same diamond footprint and label placement as
   // drawMerchant above so the two read as a matched pair of village services;
@@ -3754,4 +3812,5 @@ export class RenderSystem {
 
     ctx.restore();
   }
+
 }

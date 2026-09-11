@@ -27,6 +27,7 @@ test('fetchVillages maps snake_case columns to camelCase', async () => {
     gateEdge: 'S', spawnX: 650, spawnY: 550,
     merchantX: 950, merchantY: 850,
     bankX: 1050, bankY: 850,
+    skillMerchantX: 1750, skillMerchantY: 650,
   }]);
 });
 
@@ -50,6 +51,8 @@ test('fetchVillages maps null merchant columns to null', async () => {
   // shares the merchant's tile instead of landing on the impassable wall ring.
   assert.equal(out[0].bankX, 250);
   assert.equal(out[0].bankY, 250);
+  assert.equal(out[0].skillMerchantX, 750);
+  assert.equal(out[0].skillMerchantY, 250);
 });
 
 // The bank must sit inside the walkable interior of EVERY legal village, on
@@ -88,5 +91,25 @@ test('the bank does not share the merchant tile when the interior has room', () 
     const merchant = villageMerchantPost(v);
     const bank = villageBankPost(v, merchant);
     assert.notDeepEqual(bank, merchant, `gate ${gateEdge}: bank stacked on the merchant`);
+  }
+});
+
+test('the skill merchant sits inside the skill house and never stacks on bank or merchant', () => {
+  const { villageBankPost, villageMerchantPost, villageSkillMerchantPost, villageSkillHouse } = require('../src/services/mapService');
+
+  for (const gateEdge of ['N', 'S', 'E', 'W']) {
+    const v = { minRow: 10, minCol: 10, width: 6, height: 4, gateEdge };
+    const merchant = villageMerchantPost(v);
+    const bank = villageBankPost(v, merchant);
+    const skill = villageSkillMerchantPost(v);
+    const house = villageSkillHouse(v);
+
+    assert.notDeepEqual(skill, merchant, `gate ${gateEdge}: skill stacked on merchant`);
+    assert.notDeepEqual(skill, bank, `gate ${gateEdge}: skill stacked on bank`);
+
+    const sRow = Math.floor(skill.y / 100);
+    const sCol = Math.floor(skill.x / 100);
+    assert.ok(sRow >= house.minRow + 1 && sRow <= house.minRow + house.height - 2, 'skill inside house row');
+    assert.ok(sCol >= house.minCol + 1 && sCol <= house.minCol + house.width - 2, 'skill inside house col');
   }
 });

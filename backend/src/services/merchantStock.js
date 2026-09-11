@@ -36,12 +36,16 @@ function mapRow(r) {
 // still the only caller today, but seedItemAcrossVillages below shares this
 // same "don't duplicate an existing base-catalog row" invariant, so both
 // functions need it to stay correct together).
+//
+// Starter/basic gear only (tier <= 2): strong and endgame gear (tier >= 3)
+// is excluded from village shops so players find them from mob drops.
 async function seedBaseCatalog(pool, worldId, villageId) {
   await pool.query(
     `INSERT INTO merchant_stock (world_id, village_id, item_type_id, price, seller_user_id, expires_at, quantity)
      SELECT $1, $2, id, value, NULL, NULL, 1
        FROM item_types
       WHERE category IN ('weapon','armor') AND value > 0
+        AND (tier IS NULL OR tier <= 2)
         AND NOT EXISTS (
           SELECT 1 FROM merchant_stock ms
            WHERE ms.village_id = $2 AND ms.item_type_id = item_types.id AND ms.seller_user_id IS NULL
@@ -64,6 +68,7 @@ async function seedItemAcrossVillages(pool, itemTypeId) {
        FROM villages v
        JOIN item_types it ON it.id = $1
       WHERE it.category IN ('weapon','armor') AND it.value > 0
+        AND (it.tier IS NULL OR it.tier <= 2)
         AND NOT EXISTS (
           SELECT 1 FROM merchant_stock ms
            WHERE ms.village_id = v.id AND ms.item_type_id = it.id AND ms.seller_user_id IS NULL

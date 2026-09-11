@@ -1409,7 +1409,8 @@
     "bytes": 113693,
     "prompt": "pixel art, a tall dense dark green pine tree with a thick trunk and full layered branches, single object, solid transparent background",
     "is_creature": false,
-    "cutout": true
+    "cutout": true,
+    "needs_regen": true
   },
   {
     "name": "Plague Apex",

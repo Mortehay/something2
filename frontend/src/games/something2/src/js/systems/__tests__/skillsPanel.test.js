@@ -1,7 +1,10 @@
 // frontend/src/games/something2/src/js/systems/__tests__/skillsPanel.test.js
 import { describe, it, expect } from "vitest";
 import { layoutSkillsPanel, drawSkillsPanel, PANEL_W, PANEL_H, SKILL_TABS } from "../skillsPanel.js";
-import { getSkillsForClass, getSkillById, SKILLS, SKILLS_BY_CLASS } from "../../core/skillsData.js";
+import {
+  getSkillsForClass, getSkillById, getSkillPrice, getSkillTier,
+  getSkillTierName, getSkillLevelReq, SKILLS, SKILLS_BY_CLASS
+} from "../../core/skillsData.js";
 
 describe("Skills Catalog Data (300 skills total)", () => {
   it("contains exactly 300 skills across all 6 classes (50 each)", () => {
@@ -28,6 +31,38 @@ describe("Skills Catalog Data (300 skills total)", () => {
     }
   });
 
+  it("scales skill prices from 250 gold (first skill) up to 10,000 gold (last skill) per class", () => {
+    const classes = ["Warrior", "Mage", "Monk", "Cultist", "Archer", "Druid"];
+    for (const c of classes) {
+      const classSkills = getSkillsForClass(c);
+      const firstSkill = classSkills[0];
+      const lastSkill = classSkills[classSkills.length - 1];
+
+      expect(getSkillPrice(firstSkill)).toBe(250);
+      expect(getSkillPrice(lastSkill)).toBe(10000);
+      expect(firstSkill.price).toBe(250);
+      expect(lastSkill.price).toBe(10000);
+
+      // Verify prices strictly increase
+      for (let i = 1; i < classSkills.length; i++) {
+        expect(getSkillPrice(classSkills[i])).toBeGreaterThanOrEqual(getSkillPrice(classSkills[i - 1]));
+      }
+    }
+  });
+
+  it("assigns progressive levels (1 to 50) and tiers (1 to 5) across class skills", () => {
+    const classes = ["Warrior", "Mage", "Monk", "Cultist", "Archer", "Druid"];
+    for (const c of classes) {
+      const classSkills = getSkillsForClass(c);
+      expect(getSkillLevelReq(classSkills[0])).toBe(1);
+      expect(getSkillLevelReq(classSkills[classSkills.length - 1])).toBe(50);
+      expect(getSkillTier(classSkills[0])).toBe(1);
+      expect(getSkillTier(classSkills[classSkills.length - 1])).toBe(5);
+      expect(getSkillTierName(1)).toBe("Novice");
+      expect(getSkillTierName(5)).toBe("Grandmaster");
+    }
+  });
+
   it("checks Druid transformations include Bear, Hawk, and Wolf forms", () => {
     const druidSkills = getSkillsForClass("Druid");
     const formSkills = druidSkills.filter(s => s.id.includes("form"));
@@ -46,6 +81,9 @@ describe("Skills Panel Layout & Render", () => {
       tab: "all",
       page: 0,
       selectedSkillId: "dru_maul",
+      playerGold: 1000,
+      playerLevel: 10,
+      unlockedSkills: new Set(["dru_strike"]),
     });
 
     expect(layout.panel.w).toBe(PANEL_W);
@@ -56,9 +94,35 @@ describe("Skills Panel Layout & Render", () => {
     expect(layout.totalCount).toBe(300);
     expect(layout.totalPages).toBe(60); // ceil(300/5) = 60
     expect(layout.nextBtn).toBeTruthy();
+    expect(layout.playerGold).toBe(1000);
+    expect(layout.playerLevel).toBe(10);
+  });
 
-    const selectedRow = layout.rows.find(r => r.skill.id === "dru_maul");
-    // dru_maul is further in page index for all skills, or on its specific page
+  it("creates buy buttons for locked skills and learned badges for unlocked skills", () => {
+    const firstWarSkill = getSkillsForClass("Warrior")[0].id;
+    const unlocked = new Set([firstWarSkill]);
+    const layout = layoutSkillsPanel({
+      className: "Warrior",
+      classFilter: "Warrior",
+      tab: "all",
+      page: 0,
+      playerGold: 500,
+      playerLevel: 5,
+      unlockedSkills: unlocked,
+    });
+
+    const unlockedRow = layout.rows.find(r => r.skill.id === firstWarSkill);
+    expect(unlockedRow.isUnlocked).toBe(true);
+    expect(unlockedRow.buyBtn).toBeNull();
+
+    const lockedRow = layout.rows.find(r => !unlocked.has(r.skill.id));
+    expect(lockedRow.isUnlocked).toBe(false);
+    expect(lockedRow.buyBtn).toBeDefined();
+    expect(lockedRow.buyBtn.price).toBeGreaterThanOrEqual(250);
+
+    const buyHit = layout.hitAreas.find(h => h.kind === "skills_buy");
+    expect(buyHit).toBeDefined();
+    expect(buyHit.skillId).toBe(lockedRow.skill.id);
   });
 
   it("filters skills by class and tab category", () => {
@@ -102,6 +166,9 @@ describe("Skills Panel Layout & Render", () => {
       className: "Archer",
       tab: "all",
       page: 0,
+      playerGold: 2000,
+      playerLevel: 25,
+      unlockedSkills: new Set(),
     });
 
     expect(() => drawSkillsPanel(ctx, layout, {})).not.toThrow();

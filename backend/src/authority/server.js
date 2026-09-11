@@ -1781,6 +1781,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
           banks: (entry.villages || [])
             .filter((v) => v.bankX != null && v.bankY != null)
             .map((v) => ({ villageId: v.id, x: v.bankX, y: v.bankY })),
+          skillMerchants: (entry.villages || [])
+            .filter((v) => v.skillMerchantX != null && v.skillMerchantY != null)
+            .map((v) => ({ villageId: v.id, x: v.skillMerchantX, y: v.skillMerchantY })),
           // SOMET-297. Built from the Maps loadWorld already holds, plus one
           // per-join read of this character's activations -- no second loader.
           //

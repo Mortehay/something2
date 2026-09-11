@@ -5,6 +5,7 @@
 import { getSkillById, getSkillsForClass } from './skillsData.js';
 
 export const HOTBAR_STORAGE_PREFIX = 'something2.hotbar.';
+export const UNLOCKED_SKILLS_PREFIX = 'something2.unlocked_skills.';
 
 function getStorage() {
   try {
@@ -20,22 +21,91 @@ function getStorage() {
 const memoryStorage = new Map();
 
 /**
- * Returns default starter active skills for a given class in slots 1, 2, 3.
- * @param {string} className
- * @returns {Map<number, object>} Map of slot (1..9) -> Skill object
+ * Loads the set of learned/unlocked skill IDs for a character.
+ * @param {string|number} characterId
+ * @returns {Set<string>}
  */
-export function getDefaultHotbarForClass(className) {
-  const result = new Map();
-  const classSkills = getSkillsForClass(className || 'Warrior');
-  if (!classSkills || classSkills.length === 0) return result;
+export function loadUnlockedSkillsForCharacter(characterId) {
+  const result = new Set();
+  if (characterId == null) return result;
 
-  // Prefer first 3 active skills of the class
-  const starterSkills = classSkills.slice(0, 3);
-  starterSkills.forEach((skill, idx) => {
-    result.set(idx + 1, skill);
-  });
+  const key = `${UNLOCKED_SKILLS_PREFIX}${characterId}`;
+  let raw = memoryStorage.get(key) || null;
+
+  const s = getStorage();
+  if (!raw && s) {
+    try {
+      raw = s.getItem(key);
+    } catch {
+      raw = null;
+    }
+  }
+
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        for (const id of parsed) {
+          if (typeof id === 'string') result.add(id);
+        }
+        return result;
+      }
+    } catch {
+      // JSON parse error
+    }
+  }
 
   return result;
+}
+
+/**
+ * Persists an unlocked skill ID for a character.
+ * @param {string|number} characterId
+ * @param {string} skillId
+ * @returns {Set<string>} Updated set of unlocked skill IDs
+ */
+export function unlockSkillForCharacter(characterId, skillId) {
+  const set = loadUnlockedSkillsForCharacter(characterId);
+  if (!skillId) return set;
+  set.add(skillId);
+
+  if (characterId == null) return set;
+  const key = `${UNLOCKED_SKILLS_PREFIX}${characterId}`;
+  const json = JSON.stringify(Array.from(set));
+  memoryStorage.set(key, json);
+
+  const s = getStorage();
+  if (s) {
+    try {
+      s.setItem(key, json);
+    } catch {
+      // Quota exceeded
+    }
+  }
+
+  return set;
+}
+
+/**
+ * Checks whether a specific skill is unlocked for a character.
+ * @param {string|number} characterId
+ * @param {string} skillId
+ * @returns {boolean}
+ */
+export function isSkillUnlocked(characterId, skillId) {
+  if (!skillId) return false;
+  const set = loadUnlockedSkillsForCharacter(characterId);
+  return set.has(skillId);
+}
+
+/**
+ * Returns default starter hotbar for a given character/class.
+ * Returns an empty Map so players start with an unassigned skill bar.
+ * @param {string} [className]
+ * @returns {Map<number, object>} Map of slot (1..9) -> Skill object (initially empty)
+ */
+export function getDefaultHotbarForClass(className) {
+  return new Map();
 }
 
 /**
@@ -66,27 +136,23 @@ export function loadHotbarForCharacter(characterId, className = 'Warrior') {
     try {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === 'object') {
-        let count = 0;
         for (let slot = 1; slot <= 9; slot++) {
           const skillId = parsed[slot] || parsed[String(slot)];
           if (skillId) {
             const skill = getSkillById(skillId);
             if (skill) {
               result.set(slot, skill);
-              count++;
             }
           }
         }
-        if (count > 0) {
-          return result;
-        }
+        return result;
       }
     } catch {
       // JSON parse error, fall back to default
     }
   }
 
-  // If no saved hotbar exists yet for this character, initialize with class defaults
+  // If no saved hotbar exists yet for this character, initialize with empty defaults
   const defaults = getDefaultHotbarForClass(className);
   saveHotbarForCharacter(characterId, defaults);
   return defaults;

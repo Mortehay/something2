@@ -21,22 +21,17 @@ describe('Hotbar Storage and Persistence', () => {
     };
   });
 
-  it('provides default starter active skills for each class', () => {
+  it('provides empty default starter hotbar for classes', () => {
     const warriorHotbar = getDefaultHotbarForClass('Warrior');
-    expect(warriorHotbar.size).toBe(3);
-    expect(warriorHotbar.get(1).id).toBe('war_crushing_blow');
-    expect(warriorHotbar.get(2).id).toBe('war_whirlwind');
-    expect(warriorHotbar.get(3).id).toBe('war_hamstring_slash');
+    expect(warriorHotbar.size).toBe(0);
 
     const mageHotbar = getDefaultHotbarForClass('Mage');
-    expect(mageHotbar.size).toBe(3);
-    expect(mageHotbar.get(1).class).toBe('Mage');
+    expect(mageHotbar.size).toBe(0);
   });
 
-  it('loads default class hotbar when character has no saved hotbar', () => {
+  it('loads empty default class hotbar when character has no saved hotbar', () => {
     const hotbar = loadHotbarForCharacter(42, 'Druid');
-    expect(hotbar.size).toBeGreaterThanOrEqual(1);
-    expect(hotbar.get(1).class).toBe('Druid');
+    expect(hotbar.size).toBe(0);
     // And it automatically saves it to storage
     expect(fakeStorage[`${HOTBAR_STORAGE_PREFIX}42`]).toBeDefined();
   });

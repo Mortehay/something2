@@ -3,7 +3,18 @@
 // Supports all 300 skills across all 6 classes, category filters, class filters, and form indicators.
 
 import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
-import { getSkillsForClass, getRequiredForm, isTransformationSkill, SKILLS } from "../core/skillsData.js";
+import {
+  getSkillsForClass,
+  getRequiredForm,
+  isTransformationSkill,
+  getSkillPrice,
+  getSkillTier,
+  getSkillTierName,
+  getSkillTierNameUk,
+  getSkillLevelReq,
+  resolveSkillDamage,
+  SKILLS,
+} from "../core/skillsData.js";
 
 export const PANEL_W = 760;
 export const PANEL_H = 510;
@@ -40,6 +51,9 @@ export function layoutSkillsPanel(state) {
     page = 0,
     selectedSkillId = null,
     drag = null,
+    playerGold = 0,
+    playerLevel = 1,
+    unlockedSkills = null,
   } = state;
 
   const effectiveClass = classFilter || "all";
@@ -54,6 +68,7 @@ export function layoutSkillsPanel(state) {
     w: PANEL_W,
     h: TITLE_H,
     label: `Ability Book & Skills — ${effectiveClass === "all" ? "All Classes (300 Skills)" : effectiveClass}`,
+    gold: typeof playerGold === "number" ? playerGold : (typeof state.gold === "number" ? state.gold : 0),
   };
 
   const close = {
@@ -113,9 +128,39 @@ export function layoutSkillsPanel(state) {
   // Skill rows (5 items per page)
   const listY = ty + CAT_TAB_H + 8;
   const rows = [];
+  const currentGold = typeof playerGold === "number" ? playerGold : (typeof state.gold === "number" ? state.gold : 0);
+  const currentLevel = typeof playerLevel === "number" ? playerLevel : 1;
+
   for (let i = 0; i < visible.length; i++) {
     const s = visible[i];
     const ry = listY + i * (ITEM_H + 6);
+    const isUnlocked = unlockedSkills instanceof Set
+      ? unlockedSkills.has(s.id)
+      : (Array.isArray(unlockedSkills) ? unlockedSkills.includes(s.id) : (unlockedSkills === null ? true : false));
+    const price = s.price || getSkillPrice(s);
+    const tier = s.tier || getSkillTier(s);
+    const tierName = getSkillTierName(tier);
+    const levelReq = s.levelReq || getSkillLevelReq(s);
+    const damageInfo = s.damageInfo || resolveSkillDamage(s);
+    const canAfford = currentGold >= price;
+    const meetsLevel = currentLevel >= levelReq;
+
+    const btnW = 126;
+    const btnH = 26;
+    const btnX = px + PANEL_W - PAD - btnW - 6;
+    const btnY = ry + Math.round((ITEM_H - btnH) / 2);
+
+    const buyBtn = !isUnlocked ? {
+      x: btnX,
+      y: btnY,
+      w: btnW,
+      h: btnH,
+      price,
+      canAfford,
+      meetsLevel,
+      skillId: s.id,
+    } : null;
+
     rows.push({
       skill: s,
       x: px + PAD,
@@ -126,6 +171,13 @@ export function layoutSkillsPanel(state) {
       dragged: drag && drag.skillId === s.id,
       reqForm: getRequiredForm(s),
       isTransform: isTransformationSkill(s),
+      isUnlocked,
+      price,
+      tier,
+      tierName,
+      levelReq,
+      damageInfo,
+      buyBtn,
     });
   }
 
@@ -142,7 +194,8 @@ export function layoutSkillsPanel(state) {
     { kind: "skills_close", box: close },
     ...classTabs.map(c => ({ kind: "skills_class_filter", key: c.key, box: c })),
     ...tabs.map(t => ({ kind: "skills_tab", key: t.key, box: t })),
-    ...rows.map(r => ({ kind: "skills_item", skillId: r.skill.id, skill: r.skill, box: r })),
+    ...rows.map(r => ({ kind: "skills_item", skillId: r.skill.id, skill: r.skill, isUnlocked: r.isUnlocked, box: r })),
+    ...rows.filter(r => r.buyBtn).map(r => ({ kind: "skills_buy", skillId: r.skill.id, skill: r.skill, price: r.price, levelReq: r.levelReq, box: r.buyBtn })),
   ];
   if (prevBtn) hitAreas.push({ kind: "skills_page_prev", box: prevBtn });
   if (nextBtn) hitAreas.push({ kind: "skills_page_next", box: nextBtn });
@@ -161,13 +214,15 @@ export function layoutSkillsPanel(state) {
     totalPages,
     totalCount: pool.length,
     hitAreas,
+    playerGold: currentGold,
+    playerLevel: currentLevel,
   };
 }
 
 export function drawSkillsPanel(ctx, layout, state) {
   const {
     panel, title, close, classTabs, tabs, rows,
-    prevBtn, nextBtn, footerY, currentPage, totalPages, totalCount,
+    prevBtn, nextBtn, footerY, currentPage, totalPages, totalCount, playerGold,
   } = layout;
 
   ctx.save();
@@ -191,6 +246,13 @@ export function drawSkillsPanel(ctx, layout, state) {
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   ctx.fillText(title.label, title.x + 12, title.y + title.h / 2);
+
+  // Player Gold Display in Title Bar
+  const goldText = `💰 ${typeof playerGold === "number" ? playerGold.toLocaleString() : 0} Gold`;
+  ctx.font = "bold 12px monospace";
+  ctx.textAlign = "right";
+  ctx.fillStyle = "#facc15";
+  ctx.fillText(goldText, close.x - 14, title.y + title.h / 2);
 
   // Close Button
   ctx.fillStyle = "rgba(185, 28, 28, 0.85)";
@@ -242,7 +304,7 @@ export function drawSkillsPanel(ctx, layout, state) {
     ctx.fillText(t.label, t.x + t.w / 2, t.y + t.h / 2);
   }
 
-  // 5. Skill Rows (Clean English display, class & form tags, non-overlapping)
+  // 5. Skill Rows (With Stats, Tier, Damage, Price & Buy Button)
   for (const r of rows) {
     const s = r.skill;
     ctx.save();
@@ -271,7 +333,10 @@ export function drawSkillsPanel(ctx, layout, state) {
     const iconBoxS = 48;
     ctx.fillStyle = "rgba(8, 5, 15, 0.95)";
     ctx.fillRect(iconBoxX, iconBoxY, iconBoxS, iconBoxS);
-    ctx.strokeStyle = s.iconColor || "#a855f7";
+
+    // Border color based on Tier
+    const tierBorderColors = ["#4ade80", "#60a5fa", "#c084fc", "#facc15", "#f43f5e"];
+    ctx.strokeStyle = tierBorderColors[(r.tier || 1) - 1] || (s.iconColor || "#a855f7");
     ctx.lineWidth = 1.5;
     ctx.strokeRect(iconBoxX, iconBoxY, iconBoxS, iconBoxS);
 
@@ -281,58 +346,120 @@ export function drawSkillsPanel(ctx, layout, state) {
     ctx.fillText(s.icon || "⚔️", iconBoxX + iconBoxS / 2, iconBoxY + iconBoxS / 2 + 1);
 
     // Text details
-    const textX = iconBoxX + iconBoxS + 12;
+    const textX = iconBoxX + iconBoxS + 10;
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
 
-    // Line 1: Skill Name + Class Tag + Type Tag + Form Requirement Badge
+    // Line 1: Skill Name + Class Tag + Type Tag + Tier Badge + Req Level
     ctx.font = "bold 13px sans-serif";
     ctx.fillStyle = "#ffffff";
-    ctx.fillText(s.nameEn || s.nameUk, textX, r.y + 6);
+    ctx.fillText(s.nameEn || s.nameUk, textX, r.y + 5);
     const nameWidth = ctx.measureText(s.nameEn || s.nameUk).width;
 
     // Badges
     let badgeX = textX + nameWidth + 8;
     ctx.font = "bold 9px monospace";
 
+    // Tier badge
+    const tierColors = ["#4ade80", "#60a5fa", "#c084fc", "#facc15", "#f43f5e"];
+    ctx.fillStyle = tierColors[(r.tier || 1) - 1] || "#c084fc";
+    const tierLabel = `[T${r.tier || 1} ${r.tierName || "NOVICE"}]`;
+    ctx.fillText(tierLabel, badgeX, r.y + 6);
+    badgeX += ctx.measureText(tierLabel).width + 5;
+
+    // Level requirement badge
+    ctx.fillStyle = r.levelReq > 1 ? "#38bdf8" : "#94a3b8";
+    const lvlLabel = `[LVL ${r.levelReq || 1}]`;
+    ctx.fillText(lvlLabel, badgeX, r.y + 6);
+    badgeX += ctx.measureText(lvlLabel).width + 5;
+
     // Class badge
     ctx.fillStyle = "#facc15";
-    ctx.fillText(`[${(s.class || "ALL").toUpperCase()}]`, badgeX, r.y + 7);
-    badgeX += ctx.measureText(`[${(s.class || "ALL").toUpperCase()}]`).width + 6;
-
-    // Type badge
-    ctx.fillStyle = s.type === "melee" ? "#f87171" : (s.type === "magic" ? "#60a5fa" : (s.type === "buff" ? "#4ade80" : "#c084fc"));
-    ctx.fillText(`[${(s.type || "skill").toUpperCase()}]`, badgeX, r.y + 7);
-    badgeX += ctx.measureText(`[${(s.type || "skill").toUpperCase()}]`).width + 6;
+    ctx.fillText(`[${(s.class || "ALL").toUpperCase()}]`, badgeX, r.y + 6);
+    badgeX += ctx.measureText(`[${(s.class || "ALL").toUpperCase()}]`).width + 5;
 
     // Form badge
     if (r.isTransform) {
       ctx.fillStyle = "#38bdf8";
-      ctx.fillText("[TRANSFORMATION]", badgeX, r.y + 7);
-      badgeX += ctx.measureText("[TRANSFORMATION]").width + 6;
-      ctx.fillStyle = "#34d399";
-      ctx.fillText("[DRUID ONLY]", badgeX, r.y + 7);
+      ctx.fillText("[TRANSFORMATION]", badgeX, r.y + 6);
+      badgeX += ctx.measureText("[TRANSFORMATION]").width + 5;
     } else if (r.reqForm) {
       ctx.fillStyle = "#fb923c";
-      ctx.fillText(`[REQUIRES ${r.reqForm.toUpperCase()} FORM]`, badgeX, r.y + 7);
-      badgeX += ctx.measureText(`[REQUIRES ${r.reqForm.toUpperCase()} FORM]`).width + 6;
-      ctx.fillStyle = "#34d399";
-      ctx.fillText("[DRUID ONLY]", badgeX, r.y + 7);
+      ctx.fillText(`[${r.reqForm.toUpperCase()} FORM]`, badgeX, r.y + 6);
+      badgeX += ctx.measureText(`[${r.reqForm.toUpperCase()} FORM]`).width + 5;
     }
 
-    // Line 2: Cost, Cooldown, Range
+    // Line 2: Damage/Power, Cost, Cooldown, Range
     ctx.font = "11px monospace";
+    const dmgText = r.damageInfo ? `⚡ ${r.damageInfo.text}` : "";
     const costText = `${s.cost} ${s.costType.toUpperCase()}`;
     const cdText = `${s.cooldown}s CD`;
-    const rangeText = s.range > 60 ? `Ranged (${s.range}px)` : `Melee (${s.range}px)`;
-    ctx.fillStyle = s.costType === "hp" ? "#fca5a5" : (s.costType === "mana" ? "#93c5fd" : "#fde047");
-    ctx.fillText(`${costText}  ·  ${cdText}  ·  ${rangeText}`, textX, r.y + 24);
+    const rangeText = s.range > 60 ? `Range ${s.range}px` : `Melee ${s.range}px`;
+    ctx.fillStyle = "#a5f3fc";
+    ctx.fillText(`${dmgText}  ·  ${costText}  ·  ${cdText}  ·  ${rangeText}`, textX, r.y + 23);
 
-    // Line 3: Description (English)
+    // Line 3: Description
     ctx.font = "11px sans-serif";
     ctx.fillStyle = "#cbd5e1";
-    const maxDescW = r.w - (textX - r.x) - 12;
+    const maxDescW = r.w - (textX - r.x) - 145;
     ctx.fillText(s.descEn || s.descUk, textX, r.y + 41, maxDescW);
+
+    // Right Action: Unlocked badge or Buy button
+    if (r.isUnlocked) {
+      // Unlocked indicator
+      const unlX = r.x + r.w - 135;
+      const unlY = r.y + Math.round((ITEM_H - 24) / 2);
+      ctx.fillStyle = "rgba(22, 101, 52, 0.4)";
+      ctx.fillRect(unlX, unlY, 126, 24);
+      ctx.strokeStyle = "#22c55e";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(unlX, unlY, 126, 24);
+
+      ctx.fillStyle = "#4ade80";
+      ctx.font = "bold 10px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("✓ LEARNED", unlX + 63, unlY + 12);
+    } else if (r.buyBtn) {
+      const b = r.buyBtn;
+      ctx.save();
+      if (!b.meetsLevel) {
+        ctx.fillStyle = "rgba(127, 29, 29, 0.75)";
+        ctx.strokeStyle = "#ef4444";
+        ctx.fillRect(b.x, b.y, b.w, b.h);
+        ctx.strokeRect(b.x, b.y, b.w, b.h);
+        ctx.fillStyle = "#fca5a5";
+        ctx.font = "bold 10px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(`🔒 Requires Lvl ${r.levelReq}`, b.x + b.w / 2, b.y + b.h / 2);
+      } else if (!b.canAfford) {
+        ctx.fillStyle = "rgba(120, 53, 15, 0.8)";
+        ctx.strokeStyle = "#f59e0b";
+        ctx.fillRect(b.x, b.y, b.w, b.h);
+        ctx.strokeRect(b.x, b.y, b.w, b.h);
+        ctx.fillStyle = "#fde68a";
+        ctx.font = "bold 10px monospace";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(`🪙 ${b.price.toLocaleString()}g (Need Gold)`, b.x + b.w / 2, b.y + b.h / 2);
+      } else {
+        const btnGrad = ctx.createLinearGradient(b.x, b.y, b.x, b.y + b.h);
+        btnGrad.addColorStop(0, "rgba(217, 119, 6, 0.95)");
+        btnGrad.addColorStop(1, "rgba(146, 64, 14, 0.95)");
+        ctx.fillStyle = btnGrad;
+        ctx.fillRect(b.x, b.y, b.w, b.h);
+        ctx.strokeStyle = "#fbbf24";
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(b.x, b.y, b.w, b.h);
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 11px monospace";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(`🪙 Buy: ${b.price.toLocaleString()}g`, b.x + b.w / 2, b.y + b.h / 2);
+      }
+      ctx.restore();
+    }
 
     ctx.restore();
   }
@@ -342,7 +469,7 @@ export function drawSkillsPanel(ctx, layout, state) {
   ctx.fillStyle = "#c084fc";
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
-  const hintText = "💡 Drag & Drop onto hotbar slots 1–9 or select and press 1–9";
+  const hintText = "💡 Purchase abilities from Skill Trainer and drag learned skills onto slots 1–9";
   ctx.fillText(hintText, panel.x + panel.w / 2, footerY - 12);
 
   // Page info

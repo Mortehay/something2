@@ -1,5 +1,6 @@
 const {
   villageGatePosts, villageGatePoint, villageMerchantPost, villageBankPost,
+  villageSkillMerchantPost,
 } = require('./mapService');
 const { seedBaseCatalog } = require('./merchantStock');
 const { MAP_TILE_SIZE } = require('../authority/coords');
@@ -302,6 +303,10 @@ async function fetchVillages(pool, worldId) {
       geometry,
       merchantX == null || merchantY == null ? null : { x: merchantX, y: merchantY },
     );
+    const skillMerchant = villageSkillMerchantPost(
+      geometry,
+      merchantX == null || merchantY == null ? null : { x: merchantX, y: merchantY },
+    );
     return {
       id: v.id,
       ...geometry,
@@ -309,6 +314,7 @@ async function fetchVillages(pool, worldId) {
       merchantX,
       merchantY,
       bankX: bank.x, bankY: bank.y,
+      skillMerchantX: skillMerchant.x, skillMerchantY: skillMerchant.y,
     };
   });
 }

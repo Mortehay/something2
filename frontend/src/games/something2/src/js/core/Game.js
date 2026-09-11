@@ -38,8 +38,8 @@ import {
     mergeLevelInfo, buildCharacterView,
 } from "./progressionExtras.js";
 import { fetchProgression } from "../net/progressionClient.js";
-import { getSkillById, getSkillsForClass, getRequiredForm, isTransformationSkill, isDruidExclusiveSkill, resolveSkillVfx } from "./skillsData.js";
-import { loadHotbarForCharacter, saveHotbarForCharacter } from "./hotbarStorage.js";
+import { getSkillById, getSkillsForClass, getRequiredForm, isTransformationSkill, isDruidExclusiveSkill, resolveSkillVfx, getSkillPrice, getSkillLevelReq } from "./skillsData.js";
+import { loadHotbarForCharacter, saveHotbarForCharacter, loadUnlockedSkillsForCharacter, unlockSkillForCharacter, isSkillUnlocked } from "./hotbarStorage.js";
 import { createSkillVisual, updateSkillVisuals, pruneSkillVisuals } from "./skillVisuals.js";
 import { API_URL } from "../../../../../config.js";
 
@@ -151,6 +151,7 @@ export class Game {
         this.skillDrag = null;
         this.skillHoverSlot = null;
         this.hotbarSkills = new Map();
+        this.unlockedSkills = new Set();
         this.skillVisuals = [];
         this.activeForm = null;
         this.hotbarFlashSlot = null;
@@ -238,6 +239,7 @@ export class Game {
         // and `shopOpen` gates the panel render/input independently of
         // `shop` itself staying populated across a close/reopen.
         this.merchants = [];
+        this.skillMerchants = [];
         // SOMET-297. Empty until a `joined` frame arrives, and reset here on
         // the same line merchants is -- both are per-world join payload.
         this.landmarks = [];
@@ -459,7 +461,7 @@ export class Game {
         if (this.animationFrameId) {
             cancelAnimationFrame(this.animationFrameId);
         }
-        this.ctx = this.canvas.getContext("2d");
+        this.ctx = this.canvas.getContext("2d", { willReadFrequently: true });
         this.state = "playing";
         this.chunked = true;
         this.worldId = worldId;
@@ -523,8 +525,10 @@ export class Game {
         if (className) this.passiveStartClass = className;
         this.mainStat = mainStat;
         this.hotbarSkills = loadHotbarForCharacter(characterId, this.className || className || 'Warrior');
+        this.unlockedSkills = loadUnlockedSkillsForCharacter(characterId);
         this.skillVisuals = [];
         this.merchants = [];
+        this.skillMerchants = [];
         // SOMET-297. Empty until a `joined` frame arrives, and reset here on
         // the same line merchants is -- both are per-world join payload.
         this.landmarks = [];
@@ -582,6 +586,7 @@ export class Game {
                     this.autoLoot = msg.autoLoot === true;
                     this.gold = Number(msg.gold) || 0;
                     this.merchants = Array.isArray(msg.merchants) ? msg.merchants : [];
+                    this.skillMerchants = Array.isArray(msg.skillMerchants) ? msg.skillMerchants : [];
                     this.landmarks = Array.isArray(msg.landmarks) ? msg.landmarks : [];
                     this.doorways = Array.isArray(msg.doorways) ? msg.doorways : [];
                     this.banks = Array.isArray(msg.banks) ? msg.banks : [];
@@ -1330,6 +1335,7 @@ export class Game {
                 activeBuffs: this.activeBuffs ? Array.from(this.activeBuffs.values()) : [],
                 flashSlot: (nowMs < this.hotbarFlashUntil) ? this.hotbarFlashSlot : null,
                 skillCooldowns: this.skillCooldowns,
+                unlockedSkills: this.unlockedSkills || loadUnlockedSkillsForCharacter(this.characterId),
                 playerClass: this.className || this.passiveStartClass || (this.player && this.player.className) || "Druid",
                 hoveredSkill,
                 cursorX: this._cursorX,
@@ -1349,6 +1355,7 @@ export class Game {
                 worldChests: this.worldChests,
                 gold: this.gold,
                 merchants: this.merchants,
+                skillMerchants: this.skillMerchants,
                 landmarks: this.landmarks,
                 doorways: this.doorways,
                 shop: this.shop,
@@ -1657,6 +1664,7 @@ export class Game {
     loadHotbar(characterId, className) {
         this.characterId = characterId;
         this.hotbarSkills = loadHotbarForCharacter(characterId, className || this.className || 'Warrior');
+        this.unlockedSkills = loadUnlockedSkillsForCharacter(characterId);
     }
 
     _activateHotbarSkill(slotNum) {
@@ -1667,6 +1675,13 @@ export class Game {
             }
             this.skillsOpen = true;
             if (this.showToast) this.showToast(`Slot ${slotNum} is empty — select a skill`);
+            return;
+        }
+
+        const unlocked = (this.unlockedSkills && this.unlockedSkills.has(s.id)) || isSkillUnlocked(this.characterId, s.id);
+        if (!unlocked) {
+            const price = getSkillPrice(s);
+            if (this.showToast) this.showToast(`🔒 ${s.nameEn || s.nameUk} is not learned! Buy from Skill Trainer (${price.toLocaleString()}g)`);
             return;
         }
 
@@ -2039,10 +2054,19 @@ export class Game {
             // the radius out of the client is also what stops a second copy of
             // INTERACT_RADIUS from drifting from the first.
 
-            // Merchant shop ('e'): closes an open shop, or asks the server
-            // whether a merchant is in range.
+            // Merchant shop ('e') or Skill Trainer ('e'): closes an open panel,
+            // or opens the skill book / asks server to open merchant shop.
             if (isKey('e') && this.state === 'playing' && this.chunked && !e.repeat && !this.inventoryOpen && !this.bankOpen) {
                 if (this.shopOpen) { this.shopOpen = false; return; }
+                if (this.skillsOpen) { this.skillsOpen = false; return; }
+                const pcx = this.player.x + (this.player.width || 0) / 2;
+                const pcy = this.player.y + (this.player.height || 0) / 2;
+                const nearSkillMerchant = (Array.isArray(this.skillMerchants) ? this.skillMerchants : [])
+                    .some((sm) => Math.hypot(sm.x - pcx, sm.y - pcy) <= 120);
+                if (nearSkillMerchant) {
+                    this.skillsOpen = true;
+                    return;
+                }
                 if (this.authorityClient) this.authorityClient.sendInteract();
                 return;
             }
@@ -2177,6 +2201,35 @@ export class Game {
             if (this.skillsOpen) {
                 const x = this._cursorX ?? 0, y = this._cursorY ?? 0;
                 const areas = (this.renderSystem && this.renderSystem._skillsHitAreas) || [];
+
+                // 1. Buy button clicks
+                const buyHit = areas.find((a) => a.kind === 'skills_buy' && x >= a.box.x && x <= a.box.x + a.box.w && y >= a.box.y && y <= a.box.y + a.box.h);
+                if (buyHit) {
+                    const price = buyHit.price ?? getSkillPrice(buyHit.skill);
+                    const lvlReq = buyHit.levelReq ?? getSkillLevelReq(buyHit.skill);
+                    const playerLvl = (this.progression && this.progression.level) || 1;
+                    if (playerLvl < lvlReq) {
+                        if (this.showToast) this.showToast(`🔒 Level too low! Requires Lvl ${lvlReq} (you are Lvl ${playerLvl})`);
+                        return;
+                    }
+                    if ((this.gold || 0) < price) {
+                        if (this.showToast) this.showToast(`🪙 Not enough gold! Requires ${price.toLocaleString()}g (you have ${(this.gold || 0).toLocaleString()}g)`);
+                        return;
+                    }
+                    this.gold -= price;
+                    unlockSkillForCharacter(this.characterId, buyHit.skillId);
+                    if (!this.unlockedSkills) this.unlockedSkills = new Set();
+                    this.unlockedSkills.add(buyHit.skillId);
+
+                    const px = (this.player && this.player.x) || 0;
+                    const py = (this.player && this.player.y) || 0;
+                    const nowMs = performance.now();
+                    addBlasts(this.blasts, [{ x: px, y: py, radius: 60, element: 'holy' }], nowMs);
+                    addEffects(this.vfx, [{ shape: 'sparkle', x: px, y: py, reach: 45, element: 'holy' }], nowMs);
+                    if (this.showToast) this.showToast(`✨ Learned: ${buyHit.skill.nameEn || buyHit.skill.nameUk} (-${price.toLocaleString()}g)`);
+                    return;
+                }
+
                 const hit = areas.find((a) => x >= a.box.x && x <= a.box.x + a.box.w && y >= a.box.y && y <= a.box.y + a.box.h);
                 if (hit) {
                     if (hit.kind === 'skills_close') {
@@ -2203,6 +2256,12 @@ export class Game {
                     }
                     if (hit.kind === 'skills_item') {
                         this.selectedSkillId = hit.skillId;
+                        const unlocked = (this.unlockedSkills && this.unlockedSkills.has(hit.skillId)) || isSkillUnlocked(this.characterId, hit.skillId);
+                        if (!unlocked) {
+                            const price = getSkillPrice(hit.skill);
+                            if (this.showToast) this.showToast(`🔒 Buy this skill from the Skill Trainer first for ${price.toLocaleString()}g!`);
+                            return;
+                        }
                         this.skillDrag = {
                             skillId: hit.skillId,
                             skill: hit.skill,
@@ -2296,6 +2355,9 @@ export class Game {
                 for (const m of (Array.isArray(this.merchants) ? this.merchants : [])) {
                     if (pointedAt(m)) { this.authorityClient.sendInteract(); return; }
                 }
+                for (const sm of (Array.isArray(this.skillMerchants) ? this.skillMerchants : [])) {
+                    if (pointedAt(sm)) { this.skillsOpen = !this.skillsOpen; return; }
+                }
                 for (const b of (Array.isArray(this.banks) ? this.banks : [])) {
                     if (pointedAt(b)) { this.authorityClient.sendOpenBank(); return; }
                 }
@@ -2333,6 +2395,11 @@ export class Game {
                 if (targetSlot) {
                     const s = sDrag.skill || getSkillById(sDrag.skillId);
                     if (s) {
+                        const unlocked = (this.unlockedSkills && this.unlockedSkills.has(s.id)) || isSkillUnlocked(this.characterId, s.id);
+                        if (!unlocked) {
+                            if (this.showToast) this.showToast(`🔒 Skill is locked! Buy it from Skill Trainer first.`);
+                            return;
+                        }
                         this.hotbarSkills.set(targetSlot, s);
                         this.saveHotbar();
                         if (this.showToast) this.showToast(`Bound: ${s.nameEn} -> Slot ${targetSlot}`);
