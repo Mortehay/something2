@@ -98,6 +98,45 @@ export function panViewBox(box, dx, dy, unitsPerPx) {
   return { ...box, x: box.x - dx * unitsPerPx, y: box.y - dy * unitsPerPx };
 }
 
+// --- Drag gate ---------------------------------------------------------------
+//
+// Pan and click share the same pointer, and the browser fires `click` AFTER
+// `pointerup`. A guard that forgets the drag on pointerup therefore sees no
+// drag by the time the click arrives, and releasing a pan over a node
+// navigated to the Art console (observed live, 2026-09-11). So the state
+// outlives the release: pointerup records whether the press MOVED, and the
+// click that follows consumes that record.
+//
+// State is a plain object the component keeps in a ref; null means no press.
+
+const DRAG_THRESHOLD_PX = 3;
+
+export function dragStart(x, y) {
+  return { x, y, moved: false, pressed: true };
+}
+
+// The delta since the previous move, and the updated state. Nothing to report
+// when there is no press in progress.
+export function dragMove(state, x, y) {
+  if (!state || !state.pressed) return { state, dx: 0, dy: 0 };
+  const dx = x - state.x;
+  const dy = y - state.y;
+  const moved = state.moved || Math.abs(dx) + Math.abs(dy) >= DRAG_THRESHOLD_PX;
+  return { state: { ...state, x, y, moved }, dx, dy };
+}
+
+export function dragEnd(state) {
+  if (!state) return null;
+  return { ...state, pressed: false };
+}
+
+// Whether the click may act. A click after a moved press is the tail of the
+// drag and is swallowed -- once: the record is cleared with it.
+export function dragClick(state) {
+  if (!state) return { state: null, allow: true };
+  return { state: null, allow: !state.moved };
+}
+
 // --- Navigation --------------------------------------------------------------
 
 // The console defaults to art=missing (the resume filter). A link to a subject

@@ -25,7 +25,7 @@ import { SKILLS_BY_CLASS } from './src/js/core/skillsData.js';
 import { SECTOR_HUES, nodeRadius, grantLine } from './src/js/systems/passiveTreePanel.js';
 import {
   indexArt, artFor, artCoverage, distinctLabels, onlyMissing,
-  treeBounds, zoomViewBox, panViewBox, artConsoleLink,
+  treeBounds, zoomViewBox, panViewBox, artConsoleLink, dragStart, dragMove, dragEnd, dragClick,
 } from './skillTreeView.js';
 import AdminLoading from './AdminLoading.jsx';
 
@@ -185,24 +185,27 @@ function TreeGraph({ nodes, edges, art, dimLabels, onHover, onPick }) {
     // and re-binding on every render is what keeps the focus point correct.
   });
 
+  // The press/move/release/click sequence is the drag gate in skillTreeView.js;
+  // this only feeds it events. In particular pointerup does NOT forget the
+  // press -- the click that follows a pan needs to know it was a pan.
   const onPointerDown = (e) => {
-    drag.current = { x: e.clientX, y: e.clientY, moved: false };
+    drag.current = dragStart(e.clientX, e.clientY);
     e.currentTarget.setPointerCapture(e.pointerId);
   };
   const onPointerMove = (e) => {
-    if (!drag.current) return;
-    const dx = e.clientX - drag.current.x;
-    const dy = e.clientY - drag.current.y;
-    if (Math.abs(dx) + Math.abs(dy) > 2) drag.current.moved = true;
-    drag.current.x = e.clientX;
-    drag.current.y = e.clientY;
+    const { state, dx, dy } = dragMove(drag.current, e.clientX, e.clientY);
+    drag.current = state;
+    if (!state || !state.pressed) return;
     const upp = unitsPerPx();
     setBox((b) => panViewBox(b || bounds, dx, dy, upp));
   };
-  const onPointerUp = () => { drag.current = null; };
+  const onPointerUp = () => { drag.current = dragEnd(drag.current); };
 
-  // A click that was really the end of a drag must not navigate away.
-  const pick = (node) => { if (!(drag.current && drag.current.moved)) onPick(node); };
+  const pick = (node) => {
+    const { state, allow } = dragClick(drag.current);
+    drag.current = state;
+    if (allow) onPick(node);
+  };
 
   const kinds = useMemo(() => [...new Set(nodes.map((n) => n.kind))], [nodes]);
 

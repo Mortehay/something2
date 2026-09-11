@@ -35,7 +35,7 @@ describe('SkillTreeAdmin', () => {
   });
 
   it('decides art lookup, coverage and links in skillTreeView.js, not inline', () => {
-    for (const fn of ['indexArt', 'artFor', 'artCoverage', 'distinctLabels', 'treeBounds', 'zoomViewBox', 'panViewBox', 'artConsoleLink', 'onlyMissing']) {
+    for (const fn of ['indexArt', 'artFor', 'artCoverage', 'distinctLabels', 'treeBounds', 'zoomViewBox', 'panViewBox', 'artConsoleLink', 'onlyMissing', 'dragStart', 'dragMove', 'dragEnd', 'dragClick']) {
       expect(admin, `${fn} must be imported from skillTreeView.js`)
         .toMatch(new RegExp(`import\\s*\\{[^}]*\\b${fn}\\b[^}]*\\}\\s*from\\s*'\\./skillTreeView\\.js'`));
       expect(admin, `${fn} must actually be called`).toMatch(new RegExp(`\\b${fn}\\(`));

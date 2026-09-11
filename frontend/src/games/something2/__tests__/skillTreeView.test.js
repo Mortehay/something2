@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   indexArt, artFor, artCoverage, distinctLabels, treeBounds, zoomViewBox, panViewBox,
-  artConsoleLink, onlyMissing,
+  artConsoleLink, onlyMissing, dragStart, dragMove, dragEnd, dragClick,
 } from '../skillTreeView.js';
 
 // SOMET-571. The Skill Tree tab's rules, testable without an SVG.
@@ -121,6 +121,42 @@ describe('panViewBox', () => {
     // LEFT by 100 world units, so the content follows the cursor.
     expect(panViewBox({ x: 10, y: 10, w: 400, h: 200 }, 50, -25, 2))
       .toEqual({ x: -90, y: 60, w: 400, h: 200 });
+  });
+});
+
+describe('drag gate', () => {
+  // The browser fires `click` AFTER `pointerup`. A guard that clears its drag
+  // state on pointerup therefore sees no drag by the time the click arrives,
+  // and the release of a pan navigates away (observed live, 2026-09-11).
+  it('a press-move-release swallows the click that follows it', () => {
+    let s = dragStart(10, 10);
+    ({ state: s } = dragMove(s, 30, 10));
+    s = dragEnd(s);
+    const { state: afterClick, allow } = dragClick(s);
+    expect(allow).toBe(false);
+    // Only that one click is swallowed; the next is a real click.
+    expect(dragClick(afterClick).allow).toBe(true);
+  });
+
+  it('a press-release with no movement lets the click through', () => {
+    let s = dragStart(10, 10);
+    ({ state: s } = dragMove(s, 11, 10)); // sub-threshold jitter
+    s = dragEnd(s);
+    expect(dragClick(s).allow).toBe(true);
+  });
+
+  it('reports each move as a delta from the previous position', () => {
+    let s = dragStart(0, 0);
+    let r = dragMove(s, 5, -3);
+    expect([r.dx, r.dy]).toEqual([5, -3]);
+    r = dragMove(r.state, 7, -3);
+    expect([r.dx, r.dy]).toEqual([2, 0]);
+  });
+
+  it('ignores moves when no press is in progress', () => {
+    const r = dragMove(null, 5, 5);
+    expect(r.state).toBeNull();
+    expect([r.dx, r.dy]).toEqual([0, 0]);
   });
 });
 
