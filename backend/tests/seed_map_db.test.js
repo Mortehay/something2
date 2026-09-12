@@ -133,7 +133,12 @@ test('applying a spec twice produces identical rows', async (t) => {
         // worlds have exactly the one link it declares, so the prune pass ran
         // and correctly found nothing undeclared to remove.
         { worlds: 2, links: 1, villages: 1, villagesMoved: 0, portalGuards: 0, creatures: 0,
-          vaultChests: 0, waypoints: 0, waypointsRemoved: 0, linksRemoved: [], penCreatures: 0 },
+          vaultChests: 0, waypoints: 0, waypointsRemoved: 0, linksRemoved: [], penCreatures: 0,
+          // Art bindings (SOMET-581): this fixture authors no `art:` fields, so
+          // every UPDATE pass still runs and reports what it touched -- one
+          // village (beta-village) and nothing else -- not that the pass is
+          // missing (same rule as waypoints/penCreatures above).
+          artCounts: { portals: 0, waypoints: 0, villages: 1, chests: 0 } },
         'applyMapSpec must report exactly what it wrote, not just resolve');
 
       // Correctness rule 3: is_entry must actually be set on the spec's
