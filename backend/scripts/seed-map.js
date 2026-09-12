@@ -36,6 +36,7 @@ const {
 } = require('../src/services/pens.js');
 const { insertPortalGuards } = require('../src/services/dungeonGuards.js');
 const { insertVaultChest } = require('../src/services/chests.js');
+const { applyPointArt, loadPointTypeNames } = require('../src/services/pointArt.js');
 const {
   upsertWaypoint, pruneWaypoints, foreignWaypointNames, guardedWaypointViolations,
 } = require('../src/services/waypoints.js');
@@ -163,6 +164,7 @@ async function applyMapSpec(pool, spec) {
       biomeRows.map((r) => [r.name, Array.isArray(r.creature_types) ? r.creature_types : []])),
     creatureTypeNames: new Set(
       (await pool.query('SELECT name FROM entity_types WHERE is_creature = true')).rows.map((r) => r.name)),
+    pointArtTypes: await loadPointTypeNames(pool),
   };
   const errors = validateMapSpec(spec, catalogs);
   if (errors.length) {
@@ -609,6 +611,12 @@ async function applyMapSpec(pool, spec) {
       }
     }
 
+    // Art bindings (SOMET-581). Last of the instance passes so every portal
+    // row, waypoint row, village row and vault chest this spec authors exists
+    // to be updated. Converges to the spec: a binding the spec no longer
+    // names is written back to NULL (the kind default), never left behind.
+    const artCounts = await applyPointArt(client, spec, idByKey);
+
     // Pens (SOMET-289). AFTER villages, because the pen placer refuses village
     // tiles and needs the village rows to know where they are, and BEFORE
     // populateWorld -- deliberately, even though the ordering is not forced.
@@ -821,6 +829,7 @@ async function applyMapSpec(pool, spec) {
       // a player. The CLI prints every one of them as a warning.
       linksRemoved,
       penCreatures,
+      artCounts,
     };
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -848,7 +857,9 @@ if (require.main === module) {
         + `${n.villages} villages (${n.villagesMoved} moved), `
         + `${n.portalGuards} portal guards, ${n.creatures} creatures, ${n.vaultChests} vault chests, `
         + `${n.waypoints} waypoints (${n.waypointsRemoved} removed), `
-        + `${n.penCreatures} pen creatures`);
+        + `${n.penCreatures} pen creatures, `
+        + `art: ${n.artCounts.portals} portals, ${n.artCounts.waypoints} waypoints, `
+        + `${n.artCounts.villages} villages, ${n.artCounts.chests} chests`);
       // SOMET-355. LOUD, per row, and above the restart note rather than buried
       // in the summary line: the ticket's whole finding was that a re-seed
       // dropped ten live doorways with nothing warning. A count in the tally
