@@ -640,3 +640,66 @@ test('PUT /api/entity-types/:id leaves point_kind alone when omitted and clears 
   assert.strictEqual(res.status, 200);
   assert.deepStrictEqual(seen, [[false, null], [true, null], [true, 'portal']]);
 });
+
+// SOMET-576 / spec D2: a point-kind type's walkable/spawn_tiles/is_creature
+// are meant to be ignored by the world, but loadDecorationDefs scatters any
+// non-creature type with a non-empty spawn_tiles and the spawn path reads
+// is_creature directly -- so the field-level check must reject the
+// combination rather than let the seeded [] / false values be the only thing
+// keeping the promise true.
+test('POST /api/entity-types rejects a point-kind type with spawn_tiles', async () => {
+  __setPool({ query: withAuth(async () => { throw new Error('must not write'); }) });
+  const res = await request(app).post('/api/entity-types').set(...AUTH)
+    .send({ name: 'portal_gate', color: '#fff', point_kind: 'portal', spawn_tiles: ['grass'] });
+  assert.strictEqual(res.status, 400);
+  assert.match(res.body.error, /point-kind/);
+});
+
+test('POST /api/entity-types rejects a point-kind type marked is_creature', async () => {
+  __setPool({ query: withAuth(async () => { throw new Error('must not write'); }) });
+  const res = await request(app).post('/api/entity-types').set(...AUTH)
+    .send({ name: 'portal_gate', color: '#fff', point_kind: 'portal', is_creature: true });
+  assert.strictEqual(res.status, 400);
+  assert.match(res.body.error, /point-kind/);
+});
+
+test('POST /api/entity-types allows a point-kind type with empty spawn_tiles and is_creature false', async () => {
+  __setPool({ query: withAuth(async () => ({ rows: [{ id: 1 }] })) });
+  const res = await request(app).post('/api/entity-types').set(...AUTH)
+    .send({ name: 'portal_gate', color: '#fff', point_kind: 'portal', spawn_tiles: [], is_creature: false });
+  assert.strictEqual(res.status, 201);
+});
+
+// SOMET-576: default_entity_type_id must never outlive the kind it was set
+// for -- a PUT that changes/clears a type's point_kind runs the cleanup
+// UPDATE inside the same transaction; a PUT that never mentions point_kind
+// must not touch world_point_kinds at all.
+test('PUT /api/entity-types/:id clears stale world_point_kinds defaults when point_kind changes', async () => {
+  const queries = [];
+  __setPool(putMock('portal', async (sql, params) => {
+    queries.push({ sql, params });
+    if (/UPDATE entity_types/i.test(sql)) return { rows: [{ id: 1 }] };
+    return { rows: [] };
+  }));
+  const base = { name: 'portal', color: '#fff', walkable: true, spawn_tiles: [], chance: 0 };
+
+  const res = await request(app).put('/api/entity-types/1').set(...AUTH).send({ ...base, point_kind: null });
+  assert.strictEqual(res.status, 200);
+  const cleanup = queries.find((q) => /UPDATE world_point_kinds/i.test(q.sql));
+  assert.ok(cleanup, 'expected an UPDATE world_point_kinds cleanup query');
+  assert.deepStrictEqual(cleanup.params, ['1', null]);
+});
+
+test('PUT /api/entity-types/:id does not touch world_point_kinds when point_kind is omitted', async () => {
+  const queries = [];
+  __setPool(putMock('portal', async (sql, params) => {
+    queries.push({ sql, params });
+    if (/UPDATE entity_types/i.test(sql)) return { rows: [{ id: 1 }] };
+    return { rows: [] };
+  }));
+  const base = { name: 'portal', color: '#fff', walkable: true, spawn_tiles: [], chance: 0 };
+
+  const res = await request(app).put('/api/entity-types/1').set(...AUTH).send(base);
+  assert.strictEqual(res.status, 200);
+  assert.ok(!queries.some((q) => /UPDATE world_point_kinds/i.test(q.sql)), 'must not issue the cleanup query');
+});

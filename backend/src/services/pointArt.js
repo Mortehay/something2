@@ -9,6 +9,16 @@
 //
 // Imports nothing from the authority (the authority requires this).
 const { VILLAGE_POST_KINDS, villageArtColumn } = require('../../seeds/data/pointTypes.js');
+// SOMET-576: reuse mapSpec.js's villagesOf rather than keep a private copy.
+// The private copy here concatenated `village` AND `villages` when both were
+// present; mapSpec's version (shared by the validator and scripts/seed-map.js)
+// treats `villages` as authoritative and ignores `village` whenever `villages`
+// is an array. Two different answers for "which villages does this world
+// have" is exactly the kind of drift VILLAGE_LIMITS is already shared to
+// avoid -- see mapSpec.js's own comment on this function. mapSpec.js is
+// already required by seed-map.js at import time, so this adds no new
+// require-time cost.
+const { villagesOf } = require('../../seeds/mapSpec.js');
 
 function chestPointKind(chestKind) {
   if (chestKind === 'vault') return 'chest_vault';
@@ -39,13 +49,6 @@ async function loadPointTypeNames(db) {
     'SELECT name, point_kind FROM entity_types WHERE point_kind IS NOT NULL ORDER BY id ASC',
   );
   return new Map(r.rows.map((row) => [row.name, row.point_kind]));
-}
-
-function villagesOf(w) {
-  const list = [];
-  if (w.village) list.push(w.village);
-  if (Array.isArray(w.villages)) list.push(...w.villages);
-  return list;
 }
 
 // Seed convergence. `idByKey` is seed-map's Map<world key, world id>. Runs

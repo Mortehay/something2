@@ -751,6 +751,19 @@ function entityTypeFieldError(body) {
   if (body.point_kind != null && (typeof body.point_kind !== 'string' || body.point_kind === '')) {
     return 'point_kind must be a non-empty string or null';
   }
+  // SOMET-576 / spec D2: a point-kind type's walkable/spawn_tiles/is_creature
+  // are supposed to be ignored by the world -- but that was only true by
+  // accident, because the seeded rows all happen to carry spawn_tiles: [] and
+  // is_creature: false. loadDecorationDefs (services/decorationDefs.js)
+  // scatters ANY non-creature type with a non-empty spawn_tiles, and the
+  // creature-spawn path reads is_creature directly, so a point-kind type with
+  // either set would still scatter/spawn today. Reject that combination here
+  // rather than let it reach a runtime nobody promised would honor it.
+  if (typeof body.point_kind === 'string' && body.point_kind !== ''
+      && (body.is_creature === true
+          || (Array.isArray(body.spawn_tiles) && body.spawn_tiles.length > 0))) {
+    return 'a point-kind type cannot be a creature or have spawn tiles';
+  }
   return null;
 }
 
@@ -1021,6 +1034,20 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
     if (result.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Entity type not found' });
+    }
+    // SOMET-576: a kind default (world_point_kinds.default_entity_type_id)
+    // must never outlive the kind it was set for. If this type's point_kind
+    // was just changed (or cleared) and it was previously the default for
+    // some OTHER kind, that kind's default now points at a type the editor no
+    // longer lists under it -- the world would keep drawing it anyway. Only
+    // runs when the request actually named point_kind (pointKindProvided);
+    // an omitted field leaves both the entity row and every kind default
+    // alone, same posture as the rest of this route.
+    if (pointKindProvided) {
+      await client.query(
+        'UPDATE world_point_kinds SET default_entity_type_id = NULL WHERE default_entity_type_id = $1 AND kind IS DISTINCT FROM $2',
+        [id, point_kind ?? null],
+      );
     }
     await client.query('COMMIT');
     const body = result.rows[0];
