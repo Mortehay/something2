@@ -66,6 +66,16 @@ describe('planLandmarkBodies', () => {
     expect(plan.bodies).toEqual([]);
     expect(plan.skipBody.size).toBe(0);
   });
+  it('skips a landmark with a non-finite coordinate entirely (SOMET-576)', () => {
+    // Mirrors drawLandmarks' own Number.isFinite guard: a NaN x/y must yield
+    // neither a body nor a skipBody entry, since a NaN depthKey would scramble
+    // the depth sort for every other body in the same pass.
+    const nanLandmark = { kind: 'portal', x: NaN, y: 3450, name: 'Broken', art: 'portal' };
+    const plan = planLandmarkBodies([nanLandmark, portal], DEFS);
+    expect(plan.bodies.map((b) => b.landmark)).toEqual([portal]);
+    expect(plan.skipBody.has(nanLandmark)).toBe(false);
+    expect(plan.skipBody.has(portal)).toBe(true);
+  });
 });
 
 describe('resolveSprite stateKey seam', () => {

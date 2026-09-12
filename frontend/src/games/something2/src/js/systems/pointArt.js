@@ -61,6 +61,13 @@ export function planLandmarkBodies(landmarks, entityDefs) {
   );
   for (const l of landmarks) {
     if (!l) continue;
+    // Mirrors drawLandmarks' own guard (landmarkRenderer.js): a landmark with
+    // a non-finite x/y is skipped entirely, neither a body nor a skipBody
+    // entry. Without this, a NaN coordinate would still produce a body here
+    // -- its depthKey (derived from x/y in RenderSystem's depth sort) would
+    // then be NaN too, and a NaN comparison result scrambles the whole sort
+    // order for every OTHER body sharing that pass, not just this one.
+    if (!Number.isFinite(l.x) || !Number.isFinite(l.y)) continue;
     const def = pointArtDef(l.art, entityDefs);
     if (!def) continue;
     if (l.kind === "waypoint" && portalArtTiles.has(tileKey(l))) {
