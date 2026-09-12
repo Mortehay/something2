@@ -2023,3 +2023,11 @@ Live verification (Task 9, SOMET-585) against the isolated stack (backend :13201
 **Teardown (check 11 — held).** Killed the three isolated-stack listeners by port owner, removed `frontend/vite.verify.config.mjs` and a temporary `backend/probe-join.tmp.js`, reverted the chest state and the make-default change (both confirmed above), left the `wpa/*` MinIO objects, the `s2_wpa` catalog rows (portal/merchant_post/waypoint_stone/chest_vault/stone_gate images and `point_kind`/default assignments) and the extra `stone_gate` entity type in place — branch-DB-only, per instructions. `git status --short` in the worktree shows no unintended changes.
 
 Screenshots and the admin token live in the scratchpad only; none are committed.
+
+### Re-verified after 9982ccc
+
+Re-brought the isolated stack up fresh (new vite process against the updated worktree code, new headless Chrome, same branch DB and MinIO images) and re-checked the two placement defects `9982ccc` fixes. Both held.
+
+`t9b-merchant.png` — entry-village merchant post: the "Merchant" caption now sits fully above the arch (previously the arch's top clipped into the caption's baseline); `[e] Trade` renders below it when adjacent. No overlap between caption text and the art body.
+
+`t9b-portal.png` — Blackfen Sinks portal: the 🌀 "To Catacomb Threshold" pill is now fully readable, drawn on top of the arch with clear contrast (previously "To ...hold" was clipped/partly hidden behind the body). `t9b-portal-behind.png` (best-effort, player one tile north/behind the gate): the pill remains correctly on top and a nearby decoration is visibly occluded by the arch's body, consistent with the overlay-after-body draw order; the player's own sprite was not distinctly identifiable in this particular frame (a Blackfen Sinks guard was already engaging the character, HP 845/1050), so this shot is offered as supporting evidence for the fix rather than a clean isolated occlusion proof.
