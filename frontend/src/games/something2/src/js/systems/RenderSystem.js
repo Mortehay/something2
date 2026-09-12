@@ -2,6 +2,7 @@ import { GAME_WIDTH, GAME_HEIGHT, ISO_TILE_H, ISO_TILE_W, MAP_TILE_SIZE } from "
 import { worldToScreen, depthKey } from "../core/iso.js";
 import { compareDrawables, wallRevealed, drawWall } from "./wallRenderer.js";
 import { drawLandmarks } from "./landmarkRenderer.js";
+import { pointArtDef, pointBodyRef, pointStateTreatment, planLandmarkBodies } from "./pointArt.js";
 import { drawPlaceholder } from "./placeholderSprite.js";
 import { frameRect, staticFrameKey, animatedFrameKey, facingToDir, tileFrameKey, resolveTileVisual, stateFrameKey } from "./spriteAtlas.js";
 import { TileDiamondCache, TILE_DIAMOND_PAD } from "./tileTexture.js";
@@ -281,6 +282,10 @@ export class RenderSystem {
     waves = [],
     skillVisuals = [],
     merchants = [], shop = null, shopOpen = false, shopView = null, decoTypes = null,
+    // SOMET-584 — name-keyed entity-type catalog, needed to resolve a world
+    // point's bound art name to a drawable def (same shape Game.entityDefs
+    // already is; see pointArt.js).
+    entityDefs = null,
     // Dedicated Skill Gem Merchant
     gemMerchants = [], gemShopOpen = false, gemShopColorFilter = "all", gemShopClassFilter = "all",
     gemShopPage = 0, gemShopSelectedGemId = null,
@@ -327,6 +332,9 @@ export class RenderSystem {
     skillCooldowns = null, activeBuffs = [], unlockedSkills = null,
     hoveredSkill = null, cursorX = null, cursorY = null,
   }) {
+    // SOMET-584. Set before anything below resolves art, including the
+    // landmark body plan a few lines down.
+    this.entityDefs = entityDefs;
     if (vfxDefs) this.vfxDefs = vfxDefs;
     // While any full-screen panel is up the cursor is being used to click ITS
     // rows, so the inspect card must not follow it around over the top of the
@@ -390,7 +398,8 @@ export class RenderSystem {
     // a player or creature standing on the tile draws OVER the marker and stays
     // legible. The pulse phase is this frame's timestamp, set above -- the
     // renderer never reads a clock itself.
-    drawLandmarks(this.ctx, { landmarks, phase: this.nowMs, halfW, halfH });
+    const landmarkPlan = planLandmarkBodies(landmarks, this.entityDefs);
+    drawLandmarks(this.ctx, { landmarks, phase: this.nowMs, halfW, halfH, skipBody: landmarkPlan.skipBody });
     this.drawDoorways(doorways, chunkedMap, player);
 
     // SOMET-523. The leech aura's ground ring, drawn BEFORE the depth-sorted
@@ -448,6 +457,11 @@ export class RenderSystem {
     for (const c of worldChests) {
       drawables.push({ kind: "worldchest", ref: c, order: 0, depth: depthKey(c.x, c.y) });
     }
+    // Landmark art bodies (SOMET-584) join the sort so a player walks behind a
+    // gate; the flat pass above kept only their beam and label.
+    for (const b of landmarkPlan.bodies) {
+      drawables.push({ kind: "pointart", ref: { def: b.def, x: b.landmark.x, y: b.landmark.y, treatment: b.treatment }, order: 0, depth: depthKey(b.landmark.x, b.landmark.y) });
+    }
     for (const w of wallDrawables) drawables.push(w);
     for (const d of RenderSystem.collectDecorations(chunkedMap, camera, decoTypes)) drawables.push(d);
     drawables.sort(compareDrawables);
@@ -465,6 +479,7 @@ export class RenderSystem {
       else if (d.kind === "skillMerchant") this.drawSkillMerchant(d.ref, player);
       else if (d.kind === "bank") this.drawBank(d.ref, player);
       else if (d.kind === "worldchest") this.drawWorldChest(d.ref, player);
+      else if (d.kind === "pointart") this.drawPointBody(d.ref.def, d.ref.x, d.ref.y, d.ref.treatment);
       else if (d.kind === "decoration") this.drawEntity(d.ref);
       else this.drawEntity(d.ref);
     }
@@ -2220,6 +2235,35 @@ export class RenderSystem {
     this.ctx.restore();
   }
 
+  // World point art (SOMET-584). One body path for every fixed point: the
+  // bound type draws through drawEntity exactly as a decoration does, with
+  // the treatment's alpha on top and, for an unlit waypoint, a ground ring
+  // so the state is legible on any art.
+  drawPointBody(def, x, y, treatment = { alpha: 1, ring: false, stateKey: null }) {
+    const s = worldToScreen(x, y);
+    this.ctx.save();
+    if (treatment.ring) {
+      this.ctx.globalAlpha = 0.9;
+      this.ctx.strokeStyle = "#7dd3fc";
+      this.ctx.lineWidth = 2;
+      this.ctx.beginPath();
+      this.ctx.ellipse(s.x, s.y, 28, 14, 0, 0, Math.PI * 2);
+      this.ctx.stroke();
+    }
+    this.ctx.globalAlpha = treatment.alpha;
+    this.drawEntity(pointBodyRef(def, x, y, { stateKey: treatment.stateKey }));
+    this.ctx.restore();
+  }
+
+  // True when art drew, so the caller skips its placeholder shape and keeps
+  // only its caption/prompt. False (and nothing drawn) otherwise.
+  _drawPointArtAt(artName, x, y, treatment) {
+    const def = pointArtDef(artName, this.entityDefs);
+    if (!def) return false;
+    this.drawPointBody(def, x, y, treatment);
+    return true;
+  }
+
   // A village's merchant: a fixed marker (no facing/animation) at the
   // village's merchantX/Y from the join frame. Distinct color + always-on
   // label distinguish it from a transient ground-item drop at a glance.
@@ -2228,17 +2272,20 @@ export class RenderSystem {
     const dx = s.x, dy = s.y;
     const r = 11;
     this.ctx.save();
-    this.ctx.fillStyle = "#c084fc";
-    this.ctx.strokeStyle = "rgba(0,0,0,0.6)";
-    this.ctx.lineWidth = 2;
-    this.ctx.beginPath();
-    this.ctx.moveTo(dx, dy - r);
-    this.ctx.lineTo(dx + r, dy);
-    this.ctx.lineTo(dx, dy + r);
-    this.ctx.lineTo(dx - r, dy);
-    this.ctx.closePath();
-    this.ctx.fill();
-    this.ctx.stroke();
+    const drewArt = this._drawPointArtAt(m.art, m.x, m.y, pointStateTreatment("merchant", m));
+    if (!drewArt) {
+      this.ctx.fillStyle = "#c084fc";
+      this.ctx.strokeStyle = "rgba(0,0,0,0.6)";
+      this.ctx.lineWidth = 2;
+      this.ctx.beginPath();
+      this.ctx.moveTo(dx, dy - r);
+      this.ctx.lineTo(dx + r, dy);
+      this.ctx.lineTo(dx, dy + r);
+      this.ctx.lineTo(dx - r, dy);
+      this.ctx.closePath();
+      this.ctx.fill();
+      this.ctx.stroke();
+    }
     this.ctx.fillStyle = "#fff";
     this.ctx.font = "12px sans-serif";
     this.ctx.textAlign = "center";
@@ -2268,27 +2315,30 @@ export class RenderSystem {
     const dx = s.x, dy = s.y;
     const r = 11;
     this.ctx.save();
-    this.ctx.fillStyle = "#06b6d4";
-    this.ctx.strokeStyle = "rgba(0,0,0,0.65)";
-    this.ctx.lineWidth = 2;
-    this.ctx.beginPath();
-    this.ctx.moveTo(dx, dy - r);
-    this.ctx.lineTo(dx + r, dy);
-    this.ctx.lineTo(dx, dy + r);
-    this.ctx.lineTo(dx - r, dy);
-    this.ctx.closePath();
-    this.ctx.fill();
-    this.ctx.stroke();
+    const drewArt = this._drawPointArtAt(gm.art, gm.x, gm.y, pointStateTreatment("gem_merchant", gm));
+    if (!drewArt) {
+      this.ctx.fillStyle = "#06b6d4";
+      this.ctx.strokeStyle = "rgba(0,0,0,0.65)";
+      this.ctx.lineWidth = 2;
+      this.ctx.beginPath();
+      this.ctx.moveTo(dx, dy - r);
+      this.ctx.lineTo(dx + r, dy);
+      this.ctx.lineTo(dx, dy + r);
+      this.ctx.lineTo(dx - r, dy);
+      this.ctx.closePath();
+      this.ctx.fill();
+      this.ctx.stroke();
 
-    // Inner diamond facet
-    this.ctx.fillStyle = "#a5f3fc";
-    this.ctx.beginPath();
-    this.ctx.moveTo(dx, dy - r * 0.45);
-    this.ctx.lineTo(dx + r * 0.45, dy);
-    this.ctx.lineTo(dx, dy + r * 0.45);
-    this.ctx.lineTo(dx - r * 0.45, dy);
-    this.ctx.closePath();
-    this.ctx.fill();
+      // Inner diamond facet
+      this.ctx.fillStyle = "#a5f3fc";
+      this.ctx.beginPath();
+      this.ctx.moveTo(dx, dy - r * 0.45);
+      this.ctx.lineTo(dx + r * 0.45, dy);
+      this.ctx.lineTo(dx, dy + r * 0.45);
+      this.ctx.lineTo(dx - r * 0.45, dy);
+      this.ctx.closePath();
+      this.ctx.fill();
+    }
 
     this.ctx.fillStyle = "#ecfeff";
     this.ctx.font = "bold 12px sans-serif";
@@ -2319,24 +2369,27 @@ export class RenderSystem {
     const dx = s.x, dy = s.y;
     const r = 11;
     this.ctx.save();
-    this.ctx.fillStyle = "#38bdf8";
-    this.ctx.strokeStyle = "rgba(0,0,0,0.6)";
-    this.ctx.lineWidth = 2;
-    this.ctx.beginPath();
-    this.ctx.moveTo(dx, dy - r);
-    this.ctx.lineTo(dx + r, dy);
-    this.ctx.lineTo(dx, dy + r);
-    this.ctx.lineTo(dx - r, dy);
-    this.ctx.closePath();
-    this.ctx.fill();
-    this.ctx.stroke();
+    const drewArt = this._drawPointArtAt(sm.art, sm.x, sm.y, pointStateTreatment("skill_merchant", sm));
+    if (!drewArt) {
+      this.ctx.fillStyle = "#38bdf8";
+      this.ctx.strokeStyle = "rgba(0,0,0,0.6)";
+      this.ctx.lineWidth = 2;
+      this.ctx.beginPath();
+      this.ctx.moveTo(dx, dy - r);
+      this.ctx.lineTo(dx + r, dy);
+      this.ctx.lineTo(dx, dy + r);
+      this.ctx.lineTo(dx - r, dy);
+      this.ctx.closePath();
+      this.ctx.fill();
+      this.ctx.stroke();
 
-    // Star icon in center
-    this.ctx.fillStyle = "#ffffff";
-    this.ctx.font = "bold 10px sans-serif";
-    this.ctx.textAlign = "center";
-    this.ctx.textBaseline = "middle";
-    this.ctx.fillText("✦", dx, dy);
+      // Star icon in center
+      this.ctx.fillStyle = "#ffffff";
+      this.ctx.font = "bold 10px sans-serif";
+      this.ctx.textAlign = "center";
+      this.ctx.textBaseline = "middle";
+      this.ctx.fillText("✦", dx, dy);
+    }
 
     this.ctx.font = "12px sans-serif";
     this.ctx.textBaseline = "alphabetic";
@@ -2370,22 +2423,25 @@ export class RenderSystem {
     const dx = s.x, dy = s.y;
     const r = 11;
     this.ctx.save();
-    this.ctx.fillStyle = "#caa24a";
-    this.ctx.strokeStyle = "rgba(0,0,0,0.6)";
-    this.ctx.lineWidth = 2;
-    this.ctx.beginPath();
-    this.ctx.moveTo(dx - r, dy - r * 0.55);
-    this.ctx.lineTo(dx + r, dy - r * 0.55);
-    this.ctx.lineTo(dx + r, dy + r * 0.55);
-    this.ctx.lineTo(dx - r, dy + r * 0.55);
-    this.ctx.closePath();
-    this.ctx.fill();
-    this.ctx.stroke();
-    // Lid seam, so the chest reads as a chest rather than a plain box.
-    this.ctx.beginPath();
-    this.ctx.moveTo(dx - r, dy - r * 0.1);
-    this.ctx.lineTo(dx + r, dy - r * 0.1);
-    this.ctx.stroke();
+    const drewArt = this._drawPointArtAt(b.art, b.x, b.y, pointStateTreatment("bank", b));
+    if (!drewArt) {
+      this.ctx.fillStyle = "#caa24a";
+      this.ctx.strokeStyle = "rgba(0,0,0,0.6)";
+      this.ctx.lineWidth = 2;
+      this.ctx.beginPath();
+      this.ctx.moveTo(dx - r, dy - r * 0.55);
+      this.ctx.lineTo(dx + r, dy - r * 0.55);
+      this.ctx.lineTo(dx + r, dy + r * 0.55);
+      this.ctx.lineTo(dx - r, dy + r * 0.55);
+      this.ctx.closePath();
+      this.ctx.fill();
+      this.ctx.stroke();
+      // Lid seam, so the chest reads as a chest rather than a plain box.
+      this.ctx.beginPath();
+      this.ctx.moveTo(dx - r, dy - r * 0.1);
+      this.ctx.lineTo(dx + r, dy - r * 0.1);
+      this.ctx.stroke();
+    }
     this.ctx.fillStyle = "#fff";
     this.ctx.font = "12px sans-serif";
     this.ctx.textAlign = "center";
@@ -2430,38 +2486,41 @@ export class RenderSystem {
     const s = worldToScreen(c.x, c.y);
     const dx = s.x, dy = s.y;
     const r = 13;
-    const body = state === "opened" ? "#4a4033" : state === "unlocked" ? "#e0b64e" : "#8a8f98";
     this.ctx.save();
-    this.ctx.fillStyle = body;
-    this.ctx.strokeStyle = "rgba(0,0,0,0.65)";
-    this.ctx.lineWidth = 2;
-    this.ctx.beginPath();
-    this.ctx.moveTo(dx - r, dy - r * 0.6);
-    this.ctx.lineTo(dx + r, dy - r * 0.6);
-    this.ctx.lineTo(dx + r, dy + r * 0.6);
-    this.ctx.lineTo(dx - r, dy + r * 0.6);
-    this.ctx.closePath();
-    this.ctx.fill();
-    this.ctx.stroke();
-    // An opened chest gets its lid seam drawn ABOVE the body (a raised lid)
-    // rather than across it, so a looted chest is distinguishable from an
-    // unlooted one even in greyscale or at the edge of the screen.
-    this.ctx.beginPath();
-    if (state === "opened") {
-      this.ctx.moveTo(dx - r, dy - r * 0.6);
-      this.ctx.lineTo(dx + r * 0.2, dy - r * 1.25);
-    } else {
-      this.ctx.moveTo(dx - r, dy - r * 0.15);
-      this.ctx.lineTo(dx + r, dy - r * 0.15);
-    }
-    this.ctx.stroke();
-    // Keyhole, on a closed chest only -- it is what reads as "there is
-    // something to open here" at a glance.
-    if (state !== "opened") {
-      this.ctx.fillStyle = "rgba(0,0,0,0.65)";
+    const drewArt = this._drawPointArtAt(c.art, c.x, c.y, pointStateTreatment("chest", c));
+    if (!drewArt) {
+      const body = state === "opened" ? "#4a4033" : state === "unlocked" ? "#e0b64e" : "#8a8f98";
+      this.ctx.fillStyle = body;
+      this.ctx.strokeStyle = "rgba(0,0,0,0.65)";
+      this.ctx.lineWidth = 2;
       this.ctx.beginPath();
-      this.ctx.arc(dx, dy + r * 0.1, 2.5, 0, Math.PI * 2);
+      this.ctx.moveTo(dx - r, dy - r * 0.6);
+      this.ctx.lineTo(dx + r, dy - r * 0.6);
+      this.ctx.lineTo(dx + r, dy + r * 0.6);
+      this.ctx.lineTo(dx - r, dy + r * 0.6);
+      this.ctx.closePath();
       this.ctx.fill();
+      this.ctx.stroke();
+      // An opened chest gets its lid seam drawn ABOVE the body (a raised lid)
+      // rather than across it, so a looted chest is distinguishable from an
+      // unlooted one even in greyscale or at the edge of the screen.
+      this.ctx.beginPath();
+      if (state === "opened") {
+        this.ctx.moveTo(dx - r, dy - r * 0.6);
+        this.ctx.lineTo(dx + r * 0.2, dy - r * 1.25);
+      } else {
+        this.ctx.moveTo(dx - r, dy - r * 0.15);
+        this.ctx.lineTo(dx + r, dy - r * 0.15);
+      }
+      this.ctx.stroke();
+      // Keyhole, on a closed chest only -- it is what reads as "there is
+      // something to open here" at a glance.
+      if (state !== "opened") {
+        this.ctx.fillStyle = "rgba(0,0,0,0.65)";
+        this.ctx.beginPath();
+        this.ctx.arc(dx, dy + r * 0.1, 2.5, 0, Math.PI * 2);
+        this.ctx.fill();
+      }
     }
     this.ctx.fillStyle = "#fff";
     this.ctx.font = "12px sans-serif";

@@ -65,7 +65,7 @@ function diamondPath(ctx, x, y, halfW, halfH) {
 // Call this AFTER the flat floor pass and BEFORE the depth-sorted entity pass:
 // the marker is ground decoration, so a creature or player standing on the tile
 // must draw over it and stay legible.
-export function drawLandmarks(ctx, { landmarks, phase, halfW, halfH } = {}) {
+export function drawLandmarks(ctx, { landmarks, phase, halfW, halfH, skipBody = null } = {}) {
   if (!Array.isArray(landmarks) || landmarks.length === 0) return;
 
   const alpha = landmarkPulse(phase);
@@ -86,15 +86,22 @@ export function drawLandmarks(ctx, { landmarks, phase, halfW, halfH } = {}) {
     // the same activated/unactivated distinction the travel popup already makes
     // in its list, carried onto the ground so the two cannot disagree about
     // which waypoints a player has lit.
-    const filled = l.kind !== "waypoint" || l.activated === true;
-    diamondPath(ctx, s.x, s.y, halfW, halfH);
-    if (filled) {
-      ctx.fillStyle = color;
-      ctx.fill();
-    } else {
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 2;
-      ctx.stroke();
+    // An art body (SOMET-584) replaces the diamond, drawn later inside the
+    // depth sort by RenderSystem. Beam and label stay: they are the "there
+    // is a landmark here" signal, and a gate the player cannot find is not a
+    // gate.
+    const bodyElsewhere = skipBody && typeof skipBody.has === "function" && skipBody.has(l);
+    if (!bodyElsewhere) {
+      const filled = l.kind !== "waypoint" || l.activated === true;
+      diamondPath(ctx, s.x, s.y, halfW, halfH);
+      if (filled) {
+        ctx.fillStyle = color;
+        ctx.fill();
+      } else {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
     }
 
     // A short beam above the tile, so the marker is findable when the tile

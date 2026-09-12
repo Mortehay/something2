@@ -1390,6 +1390,9 @@ export class Game {
                 bankOpen: this.bankOpen,
                 bankView: this.bankView,
                 decoTypes: this.decoTypes,
+                // SOMET-584 -- resolves a landmark/village-post/chest's bound
+                // art name to a drawable def inside renderChunked.
+                entityDefs: this.entityDefs,
                 toast: this.toast,
                 blasts: this.blasts,
                 // SOMET-528. Empty until a wave-granting node is allocated.

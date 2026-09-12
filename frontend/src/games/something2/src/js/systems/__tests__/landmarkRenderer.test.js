@@ -143,4 +143,17 @@ describe('drawLandmarks', () => {
     }
     expect(ctx.calls.filter((c) => c.name === 'closePath').length).toBe(1);
   });
+
+  it('skipBody suppresses the diamond but keeps the beam and label', () => {
+    const ctx = stubCtx();
+    ctx.fillText = ctx.calls.push.bind(ctx.calls); ctx.measureText = () => ({ width: 40 });
+    drawLandmarks(ctx, { landmarks: [PORTAL], phase: 0, halfW: 50, halfH: 25, skipBody: new Set([PORTAL]) });
+    expect(ctx.calls.filter((c) => c.name === 'fill').length).toBe(0);   // no diamond fill
+    expect(ctx.calls.filter((c) => c.name === 'fillRect').length).toBeGreaterThanOrEqual(1); // beam
+  });
+  it('without skipBody the diamond is still filled', () => {
+    const ctx = stubCtx();
+    drawLandmarks(ctx, { landmarks: [PORTAL], phase: 0, halfW: 50, halfH: 25 });
+    expect(ctx.calls.filter((c) => c.name === 'fill').length).toBe(1);
+  });
 });
