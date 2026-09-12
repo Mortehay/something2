@@ -752,7 +752,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // hand the arrival point to whichever character next joined on that
     // account.
     const pend = pendingArrivals.get(characterId);
-    const pending = (pend && pend.worldId === worldId) ? { x: pend.x, y: pend.y } : null;
+    const pending = (pend && pend.worldId === worldId) ? { x: pend.x, y: pend.y, hp: pend.hp, mana: pend.mana, stamina: pend.stamina } : null;
     if (pending) pendingArrivals.delete(characterId);
     let persisted = null;
     const r = await pool.query(
@@ -1894,7 +1894,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // other frame in this file is equally free to do, and it would need a
         // third answer on the wire (refused-for-cooldown) that the deliberately
         // generic refusal above has no room for.
-        pendingArrivals.set(characterId, { worldId: dest.worldId, x: dest.x, y: dest.y });
+        pendingArrivals.set(characterId, {
+          worldId: dest.worldId, x: dest.x, y: dest.y,
+          hp: p ? p.hp : undefined, mana: p ? p.mana : undefined, stamina: p ? p.stamina : undefined,
+        });
         send(ws, { type: 'transition', toWorldId: dest.worldId, arriveX: dest.x, arriveY: dest.y });
         // Fog of war, like every other transition push: the server has committed
         // the move, so the destination is visited whether or not the client
@@ -2795,7 +2798,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
           });
           if (t) {
             p._doorwayCdUntil = now + 1500;                       // suppress duplicate sends during reconnect
-            pendingArrivals.set(p.characterId, { worldId: t.toWorldId, x: t.arriveX, y: t.arriveY });
+            pendingArrivals.set(p.characterId, {
+              worldId: t.toWorldId, x: t.arriveX, y: t.arriveY,
+              hp: p.hp, mana: p.mana, stamina: p.stamina,
+            });
             const ws = entry.sockets.get(p.userId);
             if (ws) send(ws, { type: 'transition', toWorldId: t.toWorldId, arriveX: t.arriveX, arriveY: t.arriveY });
             // Fog of war: the destination is visited the moment the server
@@ -2850,7 +2856,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
             continue;
           }
           p._portalCdUntil = now + 1500;
-          pendingArrivals.set(p.characterId, { worldId: t.toWorldId, x: t.arriveX, y: t.arriveY });
+          pendingArrivals.set(p.characterId, {
+            worldId: t.toWorldId, x: t.arriveX, y: t.arriveY,
+            hp: p.hp, mana: p.mana, stamina: p.stamina,
+          });
           const ws = entry.sockets.get(p.userId);
           if (ws) send(ws, { type: 'transition', toWorldId: t.toWorldId, arriveX: t.arriveX, arriveY: t.arriveY });
           recordVisit(pool, p.characterId, t.toWorldId)

@@ -57,7 +57,8 @@ export function generateLightningBranches(fromX, fromY, toX, toY, branchDepth = 
 }
 
 export function resolveProjectileType(skill) {
-  if (!skill) return 'arcane_missile';
+  if (!skill) return null;
+  if (skill.type === 'melee' || skill.type === 'buff' || skill.type === 'debuff') return null;
   const id = (skill.id || '').toLowerCase();
   const nameEn = (skill.nameEn || '').toLowerCase();
   const elem = (skill.element || '').toLowerCase();
@@ -114,7 +115,7 @@ export function resolveProjectileType(skill) {
     return 'axe';
   }
   // 12. Shields
-  if (id.includes('shield') && (id.includes('throw') || id.includes('avenger') || id.includes('toss') || id.includes('slam'))) {
+  if (id.includes('shield') && (id.includes('throw') || id.includes('avenger') || id.includes('toss'))) {
     return 'shield';
   }
   // 13. Boulders / Rocks
@@ -166,8 +167,11 @@ export function resolveProjectileType(skill) {
     return 'meteor';
   }
 
-  // Fallback defaults to arcane diamond crystal rather than generic red sphere
-  return 'arcane_missile';
+  // Fallback defaults to arcane diamond crystal ONLY for magic/ranged skills
+  if (skill.type === 'magic' || skill.type === 'ranged') {
+    return 'arcane_missile';
+  }
+  return null;
 }
 
 export function resolveSlashStyle(skill) {
@@ -184,7 +188,7 @@ export function resolveSlashStyle(skill) {
     return 'ground_fissure';
   }
   // Heavy Overhead Hammer Crush
-  if (id.includes('crush') || id.includes('slam') || id.includes('smash') || id.includes('hammer') || id.includes('stomp')) {
+  if (id.includes('crush') || id.includes('slam') || id.includes('smash') || id.includes('hammer') || id.includes('stomp') || id.includes('skull_splitter')) {
     return 'crush_hammer';
   }
   // Piercing Spear Thrust
@@ -226,6 +230,27 @@ export function createSkillVisual(skill, fromX, fromY, toX, toY, aimAngle, nowMs
   const elem = skill.element || (skill.class === 'Mage' ? 'fire' : (skill.class === 'Druid' ? 'lightning' : (skill.class === 'Cultist' ? 'shadow' : 'physical')));
   const projType = resolveProjectileType(skill);
   const slashStyle = resolveSlashStyle(skill);
+
+  // 0. Melee attacks (Crushing Blow, Cleave, Whirlwind, Thrust, Claws, Shield Slam, Smite, etc.)
+  if (skill.type === 'melee') {
+    const reach = Number(skill.range) || 85;
+    return {
+      kind: 'melee_slash',
+      slashStyle,
+      id: `${id}_${Math.random()}`,
+      x: fromX,
+      y: fromY,
+      targetX: toX,
+      targetY: toY,
+      angle: aimAngle,
+      reach,
+      spread: slashStyle === 'whirlwind_ring' ? Math.PI * 2 : (slashStyle === 'thrust_spear' ? Math.PI * 0.28 : Math.PI * 0.8),
+      element: elem,
+      color: elementColor(elem) || (elem === 'physical' ? '#f59e0b' : '#38bdf8'),
+      startedAt: nowMs,
+      durationMs: 380,
+    };
+  }
 
   // 1. Mirror Images (Mage illusion clones)
   if (id.includes('mirror_image') || id.includes('clone')) {
@@ -465,9 +490,9 @@ export function createSkillVisual(skill, fromX, fromY, toX, toY, aimAngle, nowMs
   // 2. Flying Projectiles (Arrows, Daggers, Ice Shards, Boulders, Skulls, Arcane Missiles, Holy Hammers, Fireballs, Spears, Shurikens, Bombs)
   const isArcher = projType === 'arrow';
   const isFireball = projType === 'fireball';
-  const isProjectileSpell = projType !== 'orb' || skill.type === 'magic' || id.includes('bolt') || id.includes('spear') || id.includes('dart') || id.includes('orb');
+  const isProjectileSpell = Boolean(projType) && (projType !== 'orb' || skill.type === 'magic' || skill.type === 'ranged' || id.includes('bolt') || id.includes('spear') || id.includes('dart') || id.includes('orb'));
 
-  if (isProjectileSpell && skill.type !== 'buff') {
+  if (isProjectileSpell && skill.type !== 'buff' && skill.type !== 'melee' && skill.type !== 'debuff') {
     const dist = Math.hypot(toX - fromX, toY - fromY);
     const speed = isArcher ? 850 : (projType === 'dagger' || projType === 'shuriken' ? 820 : (projType === 'boulder' ? 520 : 680));
 

@@ -164,4 +164,50 @@ describe('Game interact keys', () => {
     expect(g.authorityClient.sendInteract).not.toHaveBeenCalled();
     expect(g.authorityClient.sendAttack).toHaveBeenCalledTimes(1);
   });
+
+  it("'e' opens Skill Trainer / Gem Shop when near a skillMerchant in EN or UA keyboard layouts", () => {
+    const g = makeGame({ cx: 5000, cy: 5000 });
+    g.skillMerchants = [{ id: 'sm_1', x: 5020, y: 5010 }];
+
+    // EN layout 'e'
+    g._keydownHandler({ key: 'e', code: 'KeyE', repeat: false });
+    expect(g.gemShopOpen).toBe(true);
+
+    // Press 'e' again to close
+    g._keydownHandler({ key: 'e', code: 'KeyE', repeat: false });
+    expect(g.gemShopOpen).toBe(false);
+
+    // UA layout 'у' (KeyE)
+    g.gemShopOpen = false;
+    g._keydownHandler({ key: 'у', code: 'KeyE', repeat: false });
+    expect(g.gemShopOpen).toBe(true);
+  });
+
+  it("WASD on Ukrainian layout ('ц','ф','і','в') sets movement keys without opening inventory", () => {
+    const g = makeGame({ cx: 5000, cy: 5000 });
+
+    // Press 'і' (Ukrainian S key to walk down)
+    g._keydownHandler({ key: 'і', code: 'KeyS', repeat: false });
+    expect(g.keys['s']).toBe(true);
+    expect(g.inventoryOpen).toBe(false);
+
+    // Press 'ц' (Ukrainian W key to walk up)
+    g._keydownHandler({ key: 'ц', code: 'KeyW', repeat: false });
+    expect(g.keys['w']).toBe(true);
+    expect(g.inventoryOpen).toBe(false);
+
+    // Press 'ф' (Ukrainian A key to walk left)
+    g._keydownHandler({ key: 'ф', code: 'KeyA', repeat: false });
+    expect(g.keys['a']).toBe(true);
+    expect(g.inventoryOpen).toBe(false);
+
+    // Press 'в' (Ukrainian D key to walk right)
+    g._keydownHandler({ key: 'в', code: 'KeyD', repeat: false });
+    expect(g.keys['d']).toBe(true);
+    expect(g.inventoryOpen).toBe(false);
+
+    // Press 'ш' (Ukrainian I key to open inventory)
+    g._keydownHandler({ key: 'ш', code: 'KeyI', repeat: false });
+    expect(g.inventoryOpen).toBe(true);
+  });
 });

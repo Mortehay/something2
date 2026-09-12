@@ -27,7 +27,7 @@ test('fetchVillages maps snake_case columns to camelCase', async () => {
     gateEdge: 'S', spawnX: 650, spawnY: 550,
     merchantX: 950, merchantY: 850,
     bankX: 1050, bankY: 850,
-    gemMerchantX: 850, gemMerchantY: 850,
+    gemMerchantX: null, gemMerchantY: null,
     skillMerchantX: 1750, skillMerchantY: 650,
   }]);
 });
@@ -52,6 +52,8 @@ test('fetchVillages maps null merchant columns to null', async () => {
   // shares the merchant's tile instead of landing on the impassable wall ring.
   assert.equal(out[0].bankX, 250);
   assert.equal(out[0].bankY, 250);
+  assert.equal(out[0].gemMerchantX, null);
+  assert.equal(out[0].gemMerchantY, null);
   assert.equal(out[0].skillMerchantX, 750);
   assert.equal(out[0].skillMerchantY, 250);
 });

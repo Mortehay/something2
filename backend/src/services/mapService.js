@@ -358,6 +358,21 @@ function generateConnectingRoads(cfg, defaultPathTile) {
         const offsetRow = v.gateEdge === 'S' ? -1 : 1;
         addRoad([[r1 + offsetRow, c1], [r1 + offsetRow, c2], [r2, c2]]);
       }
+
+      // Connect village gate and house entrance outward to the main road network & path lattice
+      const [dr, dc] = mainExit.dir;
+      const extR = r1 + dr * 10;
+      const extC = c1 + dc * 10;
+      addRoad([[r1, c1], [extR, extC]]);
+
+      const latticeR = Math.round(r1 / cfg.pathCell) * cfg.pathCell;
+      const latticeC = Math.round(c1 / cfg.pathCell) * cfg.pathCell;
+      addRoad([[r1, c1], [latticeR, c1], [latticeR, latticeC]]);
+      addRoad([[r1, c1], [r1, latticeC], [latticeR, latticeC]]);
+
+      // Also connect the skill house / front plaza outward
+      addRoad([[r2, c2], [latticeR, c2], [latticeR, latticeC]]);
+      addRoad([[r2, c2], [r2, latticeC], [latticeR, latticeC]]);
     }
   }
 
@@ -1479,63 +1494,12 @@ function villageBankPost(v, merchant = null) {
   return { x: col * 100 + 50, y: row * 100 + 50 };
 }
 
-function villageGemMerchantPost(v, merchant = null) {
-  const rMax = v.minRow + v.height - 1;
-  const cMax = v.minCol + v.width - 1;
-  const loR = v.minRow + 1, hiR = rMax - 1;
-  const loC = v.minCol + 1, hiC = cMax - 1;
-  const clampR = (r) => Math.min(hiR, Math.max(loR, r));
-  const clampC = (c) => Math.min(hiC, Math.max(loC, c));
-  const m = (merchant && Number.isFinite(merchant.x) && Number.isFinite(merchant.y))
-    ? merchant
-    : villageMerchantPost(v);
-  const mRow = clampR(Math.floor(m.y / 100));
-  const mCol = clampC(Math.floor(m.x / 100));
-
-  const bank = villageBankPost(v, m);
-  const bRow = clampR(Math.floor(bank.y / 100));
-  const bCol = clampC(Math.floor(bank.x / 100));
-
-  // Candidate positions in priority order (never matching merchant or bank tile)
-  const candidates = [];
-  if (v.gateEdge === 'S' || v.gateEdge === 'N') {
-    candidates.push({ r: mRow, c: mCol - 1 });
-    candidates.push({ r: mRow - 1, c: mCol });
-    candidates.push({ r: mRow + 1, c: mCol });
-    candidates.push({ r: mRow - 1, c: mCol - 1 });
-    candidates.push({ r: mRow - 1, c: mCol + 1 });
-    candidates.push({ r: mRow + 1, c: mCol - 1 });
-    candidates.push({ r: mRow + 1, c: mCol + 1 });
-  } else {
-    candidates.push({ r: mRow - 1, c: mCol });
-    candidates.push({ r: mRow + 1, c: mCol });
-    candidates.push({ r: mRow, c: mCol - 1 });
-    candidates.push({ r: mRow, c: mCol + 1 });
-    candidates.push({ r: mRow - 1, c: mCol - 1 });
-    candidates.push({ r: mRow - 1, c: mCol + 1 });
-    candidates.push({ r: mRow + 1, c: mCol - 1 });
-    candidates.push({ r: mRow + 1, c: mCol + 1 });
-  }
-
-  for (const cand of candidates) {
-    if (cand.r >= loR && cand.r <= hiR && cand.c >= loC && cand.c <= hiC) {
-      if ((cand.r !== mRow || cand.c !== mCol) && (cand.r !== bRow || cand.c !== bCol)) {
-        return { x: cand.c * 100 + 50, y: cand.r * 100 + 50 };
-      }
-    }
-  }
-
-  // Scan all interior tiles to find any empty tile
-  for (let r = loR; r <= hiR; r++) {
-    for (let c = loC; c <= hiC; c++) {
-      if ((r !== mRow || c !== mCol) && (r !== bRow || c !== bCol)) {
-        return { x: c * 100 + 50, y: r * 100 + 50 };
-      }
-    }
-  }
-
-  // Degenerate 3x3 fallback
-  return { x: mCol * 100 + 50, y: mRow * 100 + 50 };
+// Dedicated Gem Merchant post: stands inside the dedicated Skill House alongside Skill Trainer.
+function villageGemMerchantPost(v) {
+  const house = villageSkillHouse(v);
+  const row = house.minRow + 1;
+  const col = house.minCol + 2;
+  return { x: col * 100 + 50, y: row * 100 + 50 };
 }
 
 // Dedicated house/building for the Skill Merchant / Trainer.
@@ -1678,7 +1642,13 @@ function nearestPortal(portals, x, y) {
 // forgets to pass them silently never uses the fallback, which is why
 // spawn_portal_fallback.test.js asserts loadSpawn actually supplies both.
 function chooseSpawn({ pending, persisted, worldRow, chunkSize, portals = [], isWalkable = null }) {
-  if (pending) return { x: pending.x, y: pending.y, viaDoorway: true, viaPortalFallback: false };
+  if (pending) {
+    const out = { x: pending.x, y: pending.y, viaDoorway: true, viaPortalFallback: false };
+    if (pending.hp !== undefined) out.hp = pending.hp;
+    if (pending.mana !== undefined) out.mana = pending.mana;
+    if (pending.stamina !== undefined) out.stamina = pending.stamina;
+    return out;
+  }
   if (persisted) {
     if (spawnIsValid(persisted.x, persisted.y, worldRow, isWalkable)) {
       return { x: persisted.x, y: persisted.y, viaDoorway: false, viaPortalFallback: false };

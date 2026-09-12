@@ -9,9 +9,28 @@ export class ChunkedMap {
   constructor(chunkSize, mapTiles = null) {
     this.chunkSize = chunkSize;
     this.tileSize = MAP_TILE_SIZE;
-    this.mapTiles = mapTiles;
     this.chunks = new Map(); // "cx,cy" -> string[][]
     this.decorations = new Map(); // "cx,cy" -> { list, blocked: Set<"row,col"> }
+    this.setMapTiles(mapTiles);
+  }
+
+  setMapTiles(mapTiles) {
+    this.mapTiles = mapTiles;
+    this._tileDefMap = new Map();
+    if (mapTiles) {
+      if (Array.isArray(mapTiles)) {
+        for (const t of mapTiles) {
+          if (t) {
+            if (t.name) this._tileDefMap.set(t.name, t);
+            if (t.type) this._tileDefMap.set(t.type, t);
+          }
+        }
+      } else if (typeof mapTiles === 'object') {
+        for (const [k, v] of Object.entries(mapTiles)) {
+          this._tileDefMap.set(k, v);
+        }
+      }
+    }
   }
 
   setChunk(cx, cy, grid, decorations = []) {
@@ -36,7 +55,11 @@ export class ChunkedMap {
   }
 
   _tileDef(tileType) {
-    if (!tileType || !this.mapTiles) return null;
+    if (!tileType) return null;
+    if (this._tileDefMap && this._tileDefMap.has(tileType)) {
+      return this._tileDefMap.get(tileType);
+    }
+    if (!this.mapTiles) return null;
     if (Array.isArray(this.mapTiles)) {
       return this.mapTiles.find((t) => t.name === tileType || t.type === tileType) || null;
     }

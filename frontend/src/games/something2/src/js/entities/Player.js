@@ -22,7 +22,7 @@ import { resolveMove } from "../systems/movement.js";
 // bug than the one being fixed.
 export function movementKeys(state) {
     if (!state) return {};
-    return (state.inventoryOpen || state.shopOpen) ? {} : (state.keys || {});
+    return (state.inventoryOpen || state.shopOpen || state.bankOpen || state.skillsOpen || state.gemShopOpen || state.passiveTreeOpen) ? {} : (state.keys || {});
 }
 
 export function inputVector(keys) {
@@ -34,11 +34,19 @@ export function inputVector(keys) {
     return { dx, dy };
 }
 
+export function facingFromVector(dx, dy) {
+    if (dx === 0 && dy === 0) return null;
+    const v = dy < 0 ? 'n' : dy > 0 ? 's' : '';
+    const h = dx < 0 ? 'w' : dx > 0 ? 'e' : '';
+    return (v + h) || null;
+}
+
 export class Player extends Entity {
     constructor(){
         super(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, 64, 64);
         this.speed = 100;
-        this.hitboxRadius = 30;
+        this.hitboxRadius = 32;
+        this.facing = "s";
         this.damageMultiplier = 1;
         this.fireRateMultiplier = 1;
         this.speedMultiplier = 2;
@@ -50,6 +58,7 @@ export class Player extends Entity {
         this.x = WORLD_WIDTH / 2;
         this.y = WORLD_HEIGHT / 2;
         this.speed = 100;
+        this.facing = "s";
         this.fireRateMultiplier = 1;
         this.damageMultiplier = 1;
         this.speedMultiplier = 2;
@@ -62,8 +71,12 @@ export class Player extends Entity {
     // chunk -> isWalkable false) is the only boundary. `map` is always a
     // ChunkedMap now that Game's non-chunked update()/render() path (and the
     // fixed-size legacy Map it drove) is gone — see F-030/SOMET-210.
-    update(dt, keys, map){
+    update(dt, keys, map, isAttacking = false){
         const { dx, dy } = inputVector(keys);
+        if ((dx !== 0 || dy !== 0) && !isAttacking) {
+            const f = facingFromVector(dx, dy);
+            if (f) this.facing = f;
+        }
         if ((dx === 0 && dy === 0) || !map || typeof map.isWalkable !== 'function') return;
 
         const speed = this.speed * (this.speedMultiplier || 1);

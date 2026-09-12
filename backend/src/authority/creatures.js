@@ -2208,7 +2208,8 @@ class CreatureSim {
     const hit = [], blocked = [];
     for (const [id, c] of this.creatures) {
       const cc = center(c);
-      if (!inArc(ox, oy, nx, ny, cc.x, cc.y, reach, arcWidth)) continue;
+      const targetRadius = c.hitboxRadius || (c.width ? c.width / 2 : 24) || 24;
+      if (!inArc(ox, oy, nx, ny, cc.x, cc.y, reach, arcWidth, targetRadius)) continue;
       // Terrain blocks the swing, exactly as it blocks a projectile.
       if (!hasLineOfSight(this.map, ox, oy, cc.x, cc.y)) continue;
       // SOMET-473: a pacified swing at the charmer's pet is reported as

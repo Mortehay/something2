@@ -104,6 +104,7 @@ export function addEffects(list, events, nowMs, defs) {
     if (nx === 0 && ny === 0) { nx = 0; ny = 1; }
     list.push({
       def,
+      a: typeof e.a === "string" ? e.a : null,
       x: e.x, y: e.y,
       nx, ny,
       // SOMET-482: an event with no reach of its own falls back to the def's.
@@ -193,7 +194,7 @@ export const MAX_LIVE_PARTICLES = 300;
 // effect jitter frame to frame, differ between clients watching the same
 // fight, and be impossible to unit test. Seeding per (effect, index) makes
 // particlesAt a pure function of its inputs.
-function hash01(seed, i) {
+export function hash01(seed, i) {
   let h = (seed ^ (i * 0x9e3779b1)) >>> 0;
   h = Math.imul(h ^ (h >>> 16), 0x21f0aaad) >>> 0;
   h = Math.imul(h ^ (h >>> 15), 0x735a2d97) >>> 0;

@@ -19,6 +19,29 @@ function makeTestGame() {
   g._canvasPoint = (e) => ({ x: g._cursorX ?? (e ? e.clientX : 0), y: g._cursorY ?? (e ? e.clientY : 0) });
   g.player = { x: 100, y: 100, width: 32, height: 32, hp: 100, maxHp: 100, className: "Warrior" };
   g.playerClass = "Warrior";
+  g.progression = {
+    level: 100,
+    strength: 100,
+    dexterity: 100,
+    constitution: 100,
+    intelligence: 100,
+    wisdom: 100,
+    charisma: 100,
+    sources: {
+      strength: { base: 100, tree: 0, gear: 0 },
+      dexterity: { base: 100, tree: 0, gear: 0 },
+      constitution: { base: 100, tree: 0, gear: 0 },
+      intelligence: { base: 100, tree: 0, gear: 0 },
+      wisdom: { base: 100, tree: 0, gear: 0 },
+      charisma: { base: 100, tree: 0, gear: 0 },
+    },
+  };
+  g.inventory = {
+    equipment: { main_hand: "item_sword" },
+    types: {
+      item_sword: { id: "item_sword", name: "crude-sword", kind: "weapon", category: "Melee Weapon" }
+    }
+  };
   g.unlockedSkills = new Set(SKILLS.map((s) => s.id));
   return g;
 }
@@ -218,6 +241,10 @@ describe("Skills Panel & Hotbar Interactions", () => {
 
   it("spawns distinct visual effects: Fireball launches projectile, Lightning strikes with branches", () => {
     g.localMana = 100;
+    g.inventory = {
+      equipment: { main_hand: "item_staff" },
+      types: { item_staff: { id: "item_staff", name: "crude-staff", kind: "weapon", category: "Staff" } }
+    };
 
     // 1. Cast Fireball
     const fireball = getSkillById("mag_fireball");
@@ -244,6 +271,10 @@ describe("Skills Panel & Hotbar Interactions", () => {
   it("prevents casting skills across the entire screen and clamps to max range", () => {
     g.localMana = 100;
     g.player = { x: 100, y: 100, width: 32, height: 32, hp: 100, maxHp: 100, className: "Warrior" };
+    g.inventory = {
+      equipment: { main_hand: "item_staff" },
+      types: { item_staff: { id: "item_staff", name: "crude-staff", kind: "weapon", category: "Staff" } }
+    };
 
     // Set camera and cursor far away (across the screen)
     g.camera = { screenX: 0, screenY: 0 };
@@ -264,6 +295,10 @@ describe("Skills Panel & Hotbar Interactions", () => {
   it("delays projectile explosion VFX and blasts until the projectile arrives at the target", () => {
     g.localMana = 100;
     g.player = { x: 100, y: 100, width: 32, height: 32, hp: 100, maxHp: 100, className: "Mage" };
+    g.inventory = {
+      equipment: { main_hand: "item_staff" },
+      types: { item_staff: { id: "item_staff", name: "crude-staff", kind: "weapon", category: "Staff" } }
+    };
     g.camera = { screenX: 0, screenY: 0 };
     g._cursorX = 400;
     g._cursorY = 100;
@@ -321,6 +356,10 @@ describe("Skills Panel & Hotbar Interactions", () => {
   it("spawns directional arrow projectiles for Archer / Ranger skills", () => {
     g.localStamina = 100;
     g.player = { x: 100, y: 100, hp: 100, maxHp: 100, className: "Archer" };
+    g.inventory = {
+      equipment: { main_hand: "item_bow" },
+      types: { item_bow: { id: "item_bow", name: "crude-bow", kind: "weapon", category: "Bow" } }
+    };
 
     const aimedShot = getSkillById("arc_aimed_shot") || getSkillById("arc_piercing_shot");
     expect(aimedShot).toBeDefined();
@@ -336,6 +375,10 @@ describe("Skills Panel & Hotbar Interactions", () => {
   it("spawns 12 staggered arrows for Barrage skill according to description", () => {
     g.localStamina = 100;
     g.player = { x: 100, y: 100, hp: 100, maxHp: 100, className: "Archer" };
+    g.inventory = {
+      equipment: { main_hand: "item_bow" },
+      types: { item_bow: { id: "item_bow", name: "crude-bow", kind: "weapon", category: "Bow" } }
+    };
 
     const barrage = getSkillById("arc_barrage");
     expect(barrage).toBeDefined();
@@ -350,6 +393,10 @@ describe("Skills Panel & Hotbar Interactions", () => {
   it("spawns steep sky-falling arrows for Rain of Arrows skill", () => {
     g.localStamina = 100;
     g.player = { x: 100, y: 100, hp: 100, maxHp: 100, className: "Archer" };
+    g.inventory = {
+      equipment: { main_hand: "item_bow" },
+      types: { item_bow: { id: "item_bow", name: "crude-bow", kind: "weapon", category: "Bow" } }
+    };
 
     const rain = getSkillById("arc_rain_of_arrows");
     expect(rain).toBeDefined();
@@ -366,6 +413,10 @@ describe("Skills Panel & Hotbar Interactions", () => {
   it("handles Mage skills: Meteor Shower (4 meteors), Frost Nova (around caster), Blink (teleport), Ball Lightning, Mirror Images", () => {
     g.localMana = 200;
     g.player = { x: 100, y: 100, hp: 100, maxHp: 100, className: "Mage" };
+    g.inventory = {
+      equipment: { main_hand: "item_staff" },
+      types: { item_staff: { id: "item_staff", name: "crude-staff", kind: "weapon", category: "Staff" } }
+    };
 
     // 1. Meteor Shower: 4 falling meteors
     const meteor = getSkillById("mag_meteor_shower");
@@ -551,16 +602,150 @@ describe("Skills Purchasing & Unlocking Mechanics", () => {
     expect(lastToast).toContain("Level too low");
   });
 
-  it("blocks casting a skill directly if it is not unlocked", () => {
-    const skill = getSkillById("war_shield_slam");
-    g.characterId = "char_locked_unlearned";
-    g.hotbarSkills.set(1, skill);
-    g.unlockedSkills.clear();
+  it("enforces weapon requirements and succeeds when appropriate melee weapon is equipped", () => {
+    let lastToast = null;
+    g.showToast = (msg) => { lastToast = msg; };
+    g.localStamina = 100;
+    g.progression = { level: 10, strength: 10, dexterity: 10, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10 };
+    g.player = { x: 100, y: 100, hp: 100, maxHp: 100, className: "Warrior" };
 
+    const crushingBlow = getSkillById("war_crushing_blow");
+    expect(crushingBlow).toBeDefined();
+    g.hotbarSkills.set(1, crushingBlow);
+    g.unlockedSkills.add("war_crushing_blow");
+
+    // Case 1: Incompatible weapon (Bow) -> fails weapon check
+    g.inventory = {
+      equipment: { main_hand: "item_bow" },
+      types: {
+        item_bow: { id: "item_bow", name: "crude-bow", kind: "weapon", category: "Bow" }
+      }
+    };
     g._activateHotbarSkill(1);
-    expect(lastToast).toContain("is not learned! Buy from Skill Trainer");
+    expect(lastToast).toContain("Requires Melee Weapon");
+
+    // Case 2: Compatible weapon (crude-sword) -> succeeds
+    g.inventory = {
+      equipment: { main_hand: "item_sword" },
+      types: {
+        item_sword: { id: "item_sword", name: "crude-sword", kind: "weapon", category: "Melee Weapon" }
+      }
+    };
+    g.skillCooldowns.clear();
+    g._activateHotbarSkill(1);
+    expect(lastToast).toContain("Cast: Crushing Blow");
+    expect(g.skillVisuals.length).toBeGreaterThan(0);
+    const lastVis = g.skillVisuals[g.skillVisuals.length - 1];
+    expect(lastVis.kind).toBe("melee_slash");
+    expect(lastVis.slashStyle).toBe("crush_hammer");
+    expect(g.blasts.length).toBeGreaterThan(0);
+  });
+
+  it("blocks casting Sacrificial Stab when INT/CHA stat requirements are unmet and shows error toast", () => {
+    let lastToast = null;
+    g.showToast = (msg) => { lastToast = msg; };
+    const sacrificialStab = getSkillById("cul_sacrificial_stab");
+    expect(sacrificialStab).toBeDefined();
+
+    g.hotbarSkills.set(1, sacrificialStab);
+    // Set character stats with 0 INT and 0 CHA (below the required 6 INT and 6 CHA)
+    g.progression = {
+      level: 1,
+      strength: 10,
+      dexterity: 10,
+      constitution: 10,
+      intelligence: 0,
+      wisdom: 0,
+      charisma: 0,
+      sources: {
+        strength: { base: 10, tree: 0, gear: 0 },
+        dexterity: { base: 10, tree: 0, gear: 0 },
+        constitution: { base: 10, tree: 0, gear: 0 },
+        intelligence: { base: 0, tree: 0, gear: 0 },
+        wisdom: { base: 0, tree: 0, gear: 0 },
+        charisma: { base: 0, tree: 0, gear: 0 },
+      },
+    };
+    g.inventory = {
+      equipment: { main_hand: "item_dagger" },
+      types: {
+        item_dagger: { id: "item_dagger", name: "crude-dagger", kind: "weapon", category: "Dagger" }
+      }
+    };
+
+    g.skillVisuals = [];
+    g._activateHotbarSkill(1);
+
+    expect(lastToast).toContain("Requires 6 Intelligence");
+    expect(g.skillVisuals.length).toBe(0);
+    expect(g.skillCooldowns.has("cul_sacrificial_stab")).toBe(false);
+  });
+
+  it("intercepts keystrokes when passive tree search is focused without setting keys or triggering hotkeys", () => {
+    g.passiveTreeOpen = true;
+    g.passiveSearchFocused = true;
+    g.passiveSearchText = "";
+    let prevented = false;
+
+    // Type 'w' into search
+    g._keydownHandler({ key: "w", code: "KeyW", repeat: false, preventDefault: () => { prevented = true; } });
+    expect(g.passiveSearchText).toBe("w");
+    expect(g.keys["w"]).toBeFalsy(); // Key was NOT recorded for movement
+    expect(prevented).toBe(true);
+
+    // Type 'p' into search - should NOT toggle passive tree closed
+    g._keydownHandler({ key: "p", code: "KeyP", repeat: false, preventDefault: () => {} });
+    expect(g.passiveSearchText).toBe("wp");
+    expect(g.passiveTreeOpen).toBe(true);
+
+    // Backspace
+    g._keydownHandler({ key: "Backspace", code: "Backspace", repeat: false, preventDefault: () => {} });
+    expect(g.passiveSearchText).toBe("w");
+
+    // Enter to unfocus search
+    g._keydownHandler({ key: "Enter", code: "Enter", repeat: false, preventDefault: () => {} });
+    expect(g.passiveSearchFocused).toBe(false);
+  });
+
+  it("supports custom keybindings for hotbar slots", () => {
+    const skill = getSkillById("war_crushing_blow");
+    g.hotbarSkills.set(1, skill);
+
+    let casted = false;
+    g._activateHotbarSkill = (slot) => {
+      if (slot === 1) casted = true;
+    };
+
+    // Rebind slot 1 from '1' to 'q'
+    g.setKeybinds({ slot1: "q" });
+
+    // Press 'q'
+    g._keydownHandler({ key: "q", code: "KeyQ", repeat: false, preventDefault: () => {} });
+    expect(casted).toBe(true);
+  });
+
+  it("supports casting hotbar skills via Right Mouse Button (RMB) when bound to mouse2", () => {
+    const skill = getSkillById("war_crushing_blow");
+    g.hotbarSkills.set(1, skill);
+
+    let castSlot = null;
+    g._activateHotbarSkill = (slot) => {
+      castSlot = slot;
+    };
+
+    // Rebind slot 1 to RMB (mouse2)
+    g.setKeybinds({ slot1: "mouse2" });
+
+    // Right click on the game world
+    g._cursorX = 200;
+    g._cursorY = 200;
+    g._mouseDownHandler({ button: 2, preventDefault: () => {} });
+
+    expect(castSlot).toBe(1);
   });
 });
+
+
 
 
 

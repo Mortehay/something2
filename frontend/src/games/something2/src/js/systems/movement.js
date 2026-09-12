@@ -17,7 +17,7 @@ const WALL_EPS = 0.01; // clamp/inset margin so a clamped face stays inside the 
 // Scale, not a fixed size, so one rule covers every actor and 1.0 reproduces
 // the old full-box behaviour exactly. The anchor is unchanged — the footprint
 // is centred on the same box centre movement already resolved against.
-const FOOTPRINT_SCALE = 0.5;
+const FOOTPRINT_SCALE = 1.0;
 
 export function resolveMove(map, actor, dirX, dirY, dt) {
   if (dirX === 0 && dirY === 0) return { x: actor.x, y: actor.y, moved: false };

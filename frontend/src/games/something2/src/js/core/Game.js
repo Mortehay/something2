@@ -13,7 +13,7 @@ import { GroundItemManager } from "../entities/GroundItemManager.js";
 import { WorldAuthorityClient } from "../net/WorldAuthorityClient.js";
 import { getStoredToken, parseJwt } from "../net/auth.js";
 import { reconcile } from "../net/reconcile.js";
-import { inputVector, movementKeys } from "../entities/Player.js";
+import { inputVector, movementKeys, facingFromVector } from "../entities/Player.js";
 import { PLAYER_SPEED_EFFECTIVE } from "./constants.js";
 import { aimVector, cursorToWorld } from "./aim.js";
 import { createInventory, applyJoined, applyEquipment, canEquipClient, typeOf, addItem, removeItem } from "./inventory.js";
@@ -88,6 +88,26 @@ const DRAG_THRESHOLD_PX = 4;
 // work out how to dismiss.
 const INSPECT_PIN_MS = 6000;
 
+export const DEFAULT_KEYBINDS = {
+    slot1: '1',
+    slot2: '2',
+    slot3: '3',
+    slot4: '4',
+    slot5: '5',
+    slot6: '6',
+    slot7: '7',
+    slot8: '8',
+    slot9: '9',
+    inventory: 'i',
+    character: 'c',
+    passiveTree: 'p',
+    skills: 'k',
+    interact: 'e',
+    bank: 'b',
+    openChest: 'f',
+    pickup: 'g',
+};
+
 export class Game {
     constructor() {
         console.log("Game constructor");
@@ -103,6 +123,7 @@ export class Game {
         this.streamer = null;
 
         this.keys = {};
+        this.keybinds = this._loadKeybinds();
         this.lastTime = 0;
         this.state = 'menu';
         this.onStateChange = null;
@@ -600,7 +621,7 @@ export class Game {
                     this.autoLoot = msg.autoLoot === true;
                     this.gold = Number(msg.gold) || 0;
                     this.merchants = Array.isArray(msg.merchants) ? msg.merchants : [];
-                    this.gemMerchants = Array.isArray(msg.gemMerchants) ? msg.gemMerchants : (this.merchants.map(m => ({ villageId: m.villageId, x: m.x - 100, y: m.y })));
+                    this.gemMerchants = Array.isArray(msg.gemMerchants) ? msg.gemMerchants : [];
                     this.skillMerchants = Array.isArray(msg.skillMerchants) ? msg.skillMerchants : [];
                     this.landmarks = Array.isArray(msg.landmarks) ? msg.landmarks : [];
                     this.doorways = Array.isArray(msg.doorways) ? msg.doorways : [];
@@ -947,15 +968,44 @@ export class Game {
     //
     // `autoLoot` is the SERVER's value (every `state` frame overwrites it), so
     // a panel rendering from this snapshot cannot show a flip the server never
-    // agreed to. `inspect` is a pure client preference and is simply mirrored.
-    // null when not in a playing world -- the panel then shows its controls
-    // disabled rather than lying about a world it is not in.
+    _loadKeybinds() {
+        try {
+            if (typeof localStorage !== 'undefined') {
+                const raw = localStorage.getItem('something2_keybinds');
+                if (raw) {
+                    const parsed = JSON.parse(raw);
+                    return { ...DEFAULT_KEYBINDS, ...parsed };
+                }
+            }
+        } catch {
+            // ignore
+        }
+        return { ...DEFAULT_KEYBINDS };
+    }
+
+    setKeybinds(binds) {
+        this.keybinds = { ...DEFAULT_KEYBINDS, ...(binds || {}) };
+        try {
+            if (typeof localStorage !== 'undefined') {
+                localStorage.setItem('something2_keybinds', JSON.stringify(this.keybinds));
+            }
+        } catch {
+            // ignore
+        }
+    }
+
+    getKeybinds() {
+        return { ...DEFAULT_KEYBINDS, ...(this.keybinds || {}) };
+    }
+
+    // Settings panel snapshot.
     getSettingsSnapshot() {
         if (this.state !== 'playing' || !this.chunked) return null;
         return {
             autoLoot: this.autoLoot === true,
             inspect: this.inspectEnabled === true,
             constantAttack: this.constantAttack === true,
+            keybinds: this.getKeybinds(),
         };
     }
 
@@ -981,10 +1031,10 @@ export class Game {
     // second ago is not what "hold to keep attacking" means to anyone.
     _sendAttackAtCursor() {
         if (!this.authorityClient || !this.camera) return;
-        const pcx = (this.player && this.player.x != null) ? (this.player.x + (this.player.width || 32) / 2) : 0;
-        const pcy = (this.player && this.player.y != null) ? (this.player.y + (this.player.height || 32) / 2) : 0;
-        const canW = (this.canvas && this.canvas.width) || 800;
-        const canH = (this.canvas && this.canvas.height) || 600;
+        const pcx = (this.player && this.player.x != null) ? (this.player.x + (this.player.width || 64) / 2) : 0;
+        const pcy = (this.player && this.player.y != null) ? (this.player.y + (this.player.height || 64) / 2) : 0;
+        const canW = (this.canvas && this.canvas.width) || GAME_WIDTH;
+        const canH = (this.canvas && this.canvas.height) || GAME_HEIGHT;
         const { nx, ny } = aimVector(
             this._cursorX ?? canW / 2,
             this._cursorY ?? canH / 2,
@@ -992,6 +1042,10 @@ export class Game {
         );
         this.authorityClient.sendAttack(nx, ny);
         this._lastAttackSentAt = performance.now();
+        if (this.player) {
+            const f = facingFromVector(Math.sign(nx), Math.sign(ny));
+            if (f) this.player.facing = f;
+        }
     }
 
     // True while any full-screen panel owns the cursor. The same three panels
@@ -1117,8 +1171,10 @@ export class Game {
             const cx = this.player.x + this.player.width / 2;
             const cy = this.player.y + this.player.height / 2;
             this.streamer.update(cx, cy); // fire-and-forget; wanted-guard makes it safe
+            const nowMs = performance.now();
             const keys = movementKeys(this);
-            this.player.update(dt, keys, this.chunkedMap); // local prediction
+            const isAttacking = this._attackHeld || (nowMs - (this._lastAttackSentAt || 0) < 250);
+            this.player.update(dt, keys, this.chunkedMap, isAttacking); // local prediction
             // Send input to the authority; buffer actual sends for reconciliation.
             if (this.authorityClient) {
                 const { dx, dy } = inputVector(keys);
@@ -1127,11 +1183,27 @@ export class Game {
             }
             this._tickConstantAttack();
             if (this.skillVisuals && this.skillVisuals.length > 0) {
-                const nowMs = performance.now();
-                this.skillVisuals = pruneSkillVisuals(this.skillVisuals, nowMs);
-                updateSkillVisuals(this.skillVisuals, dt, nowMs, (expX, expY, expElem, expRad) => {
-                    addBlasts(this.blasts, [{ x: expX, y: expY, radius: expRad, element: expElem }], nowMs);
+                this.skillVisuals = updateSkillVisuals(this.skillVisuals, dt, nowMs, (proj) => {
+                    const elem = (proj && proj.element) || 'fire';
+                    const vfxName = (proj && proj.vfxName) || 'fireball_blast';
+                    const reach = (proj && proj.reach) || ((proj && proj.radius) ? proj.radius * 3.5 : 80);
+                    const toX = proj && proj.toX != null ? proj.toX : 0;
+                    const toY = proj && proj.toY != null ? proj.toY : 0;
+                    addEffects(this.vfx, [{
+                        v: vfxName,
+                        x: toX,
+                        y: toY,
+                        nx: (proj && proj.aimNx) || Math.cos((proj && proj.aimAngle) || 0),
+                        ny: (proj && proj.aimNy) || Math.sin((proj && proj.aimAngle) || 0),
+                        reach,
+                        arc: Math.PI * 2,
+                        el: elem,
+                        hit: true,
+                    }], nowMs, this.vfxDefs);
+                    addBlasts(this.blasts, [{ x: toX, y: toY, radius: Math.max(80, reach), element: elem }], nowMs);
+                    this.vfx = capParticles(this.vfx);
                 });
+                this.skillVisuals = pruneSkillVisuals(this.skillVisuals, nowMs);
             }
             this.creatures.interpolate(dt);
             if (this.projectiles) this.projectiles.interpolate(dt);
@@ -1168,6 +1240,9 @@ export class Game {
             // player has no aura, so a guarded assignment would leave a ring
             // on screen after a respec removed the node.
             this.player.aura = mine.aura || 0;
+            if (mine.facing && !this._attackHeld) {
+                this.player.facing = mine.facing;
+            }
             const out = reconcile(
                 { x: mine.x, y: mine.y },
                 msg.ackSeq || 0,
@@ -1227,13 +1302,33 @@ export class Game {
     // The HUD weapon name: whatever occupies main_hand, else the default
     // weapon (mirrors the server's DEFAULT_WEAPON_NAME fallback).
     _resolveWeaponName() {
-        const mainHandId = this.inventory.equipment.main_hand;
-        const equipped = mainHandId != null ? typeOf(this.inventory, mainHandId) : null;
+        const equipped = this._resolveEquippedWeapon();
         if (equipped) return equipped.name;
         for (const t of this.inventory.types.values()) {
             if (t.name === DEFAULT_WEAPON_NAME) return t.name;
         }
         return DEFAULT_WEAPON_NAME;
+    }
+
+    _resolveEquippedWeapon() {
+        if (!this.inventory || !this.inventory.equipment) return null;
+        const mainHandId = this.inventory.equipment.main_hand;
+        if (mainHandId == null) return null;
+        if (typeof mainHandId === 'object' && mainHandId !== null) return mainHandId;
+        if (Array.isArray(this.inventory.items) && this.inventory.types) {
+            const equipped = typeOf(this.inventory, mainHandId);
+            if (equipped) return equipped;
+        }
+        if (this.inventory.types) {
+            const type = typeof this.inventory.types.get === 'function'
+                ? this.inventory.types.get(mainHandId)
+                : this.inventory.types[mainHandId];
+            if (type) return type;
+        }
+        if (typeof mainHandId === 'string') {
+            return { id: mainHandId, name: mainHandId };
+        }
+        return null;
     }
 
     render(){
@@ -1274,25 +1369,6 @@ export class Game {
             // ring animation reads.
             const nowMs = performance.now();
             if (this.skillVisuals && this.skillVisuals.length > 0) {
-                this.skillVisuals = updateSkillVisuals(this.skillVisuals, 0.016, nowMs, (proj) => {
-                    // Trigger arrival explosion / impact VFX & blast when the projectile reaches its destination!
-                    const elem = proj.element || 'fire';
-                    const vfxName = proj.vfxName || 'fireball_blast';
-                    const reach = proj.reach || (proj.radius ? proj.radius * 3.5 : 80);
-                    addEffects(this.vfx, [{
-                        v: vfxName,
-                        x: proj.toX,
-                        y: proj.toY,
-                        nx: proj.aimNx || Math.cos(proj.aimAngle || 0),
-                        ny: proj.aimNy || Math.sin(proj.aimAngle || 0),
-                        reach,
-                        arc: Math.PI * 2,
-                        el: elem,
-                        hit: true,
-                    }], nowMs, this.vfxDefs);
-                    addBlasts(this.blasts, [{ x: proj.toX, y: proj.toY, radius: Math.max(80, reach), element: elem }], nowMs);
-                    this.vfx = capParticles(this.vfx);
-                });
                 this.skillVisuals = pruneSkillVisuals(this.skillVisuals, nowMs);
             }
             if (this.activeBuffs && this.activeBuffs.size > 0) {
@@ -1346,6 +1422,7 @@ export class Game {
                 skillDrag: this.skillDrag,
                 skillHoverSlot: this.skillHoverSlot,
                 hotbarSkills: this.hotbarSkills,
+                keybinds: this.keybinds,
                 inventoryGems: this.getInventoryGems(),
                 activeForm: this.activeForm,
                 activeBuffs: this.activeBuffs ? Array.from(this.activeBuffs.values()) : [],
@@ -1377,8 +1454,8 @@ export class Game {
                 gemShopClassFilter: this.gemShopClassFilter,
                 gemShopPage: this.gemShopPage,
                 gemShopSelectedGemId: this.gemShopSelectedGemId,
-                equippedWeapon: this.inventory?.equipment?.main_hand || null,
-                playerStats: this.characterView()?.stats || this.progression || null,
+                equippedWeapon: this._resolveEquippedWeapon(),
+                playerStats: this.characterView() || this.progression || null,
                 skillMerchants: this.skillMerchants,
                 landmarks: this.landmarks,
                 doorways: this.doorways,
@@ -1748,7 +1825,11 @@ export class Game {
             return;
         }
 
-        const unlocked = (this.unlockedSkills && this.unlockedSkills.has(s.id)) || isSkillUnlocked(this.characterId, s.id);
+        const unlocked = (this.unlockedSkills && this.unlockedSkills.has(s.id))
+            || isSkillUnlocked(this.characterId, s.id)
+            || this.hotbarSkills.has(slotNum)
+            || (this.ownedGems && this.ownedGems.has(s.id))
+            || (this.getInventoryGems && this.getInventoryGems().some(g => g.id === s.id));
         if (!unlocked) {
             const price = getSkillPrice(s);
             if (this.showToast) this.showToast(`🔒 ${s.nameEn || s.nameUk} is not learned! Buy from Skill Trainer (${price.toLocaleString()}g)`);
@@ -1762,26 +1843,15 @@ export class Game {
         const playerClass = this.className || this.passiveStartClass || (this.player && this.player.className) || "Druid";
 
         // 0. PoE Skill Gem Requirements (Weapon, Level, Attributes)
-        const equippedWeapon = this.inventory?.equipment?.main_hand || null;
-        if (equippedWeapon) {
-            const playerProg = this.characterView()?.stats || this.progression;
-            const gemReq = checkGemRequirements(s, playerProg, equippedWeapon);
-            if (!gemReq.weaponOk) {
-                if (this.showToast) this.showToast(`❌ Cannot cast ${s.nameEn}: ${gemReq.errors[0]}`);
-                return;
+        const equippedWeapon = this._resolveEquippedWeapon();
+        const playerStats = this.characterView() || this.progression || null;
+        const gemReq = checkGemRequirements(s, playerStats, equippedWeapon);
+        if (!gemReq.ok) {
+            const firstErr = gemReq.errors[0] || "Недостатньо характеристик або непідходяща зброя";
+            if (this.showToast) {
+                this.showToast(`❌ ${s.nameUk || s.nameEn}: ${firstErr}`);
             }
-            if (this.progression && !gemReq.levelOk) {
-                if (this.showToast) this.showToast(`❌ Cannot cast ${s.nameEn}: Requires Level ${s.reqLvl} (You are Lv ${this.progression.level || 1})`);
-                return;
-            }
-            if (this.progression && (!gemReq.strOk || !gemReq.dexOk || !gemReq.conOk || !gemReq.intOk || !gemReq.wisOk || !gemReq.chaOk)) {
-                const statErrors = gemReq.errors.filter(e =>
-                    e.includes('Strength') || e.includes('Dexterity') || e.includes('Constitution') ||
-                    e.includes('Intelligence') || e.includes('Wisdom') || e.includes('Charisma')
-                );
-                if (this.showToast) this.showToast(`❌ Cannot cast ${s.nameEn}: ${statErrors.join(', ')}`);
-                return;
-            }
+            return;
         }
 
         // 1. Check Druid exclusivity for transformations and form-dependent skills
@@ -1863,8 +1933,25 @@ export class Game {
         // 6. Target resolution & Max Range enforcement (prevents casting across the whole screen)
         const canW = (this.canvas && this.canvas.width) || 800;
         const canH = (this.canvas && this.canvas.height) || 600;
-        let targetX = px + 35, targetY = py + 35, aimAngle = 0;
-        if (this.camera) {
+        let aimNx = 1, aimNy = 0;
+        if (this.player && this.player.facing) {
+            const f = this.player.facing;
+            if (f === 'up') { aimNx = 0; aimNy = -1; }
+            else if (f === 'down') { aimNx = 0; aimNy = 1; }
+            else if (f === 'left') { aimNx = -1; aimNy = 0; }
+            else if (f === 'right') { aimNx = 1; aimNy = 0; }
+            else if (f === 'up-right' || f === 'up_right') { aimNx = Math.SQRT1_2; aimNy = -Math.SQRT1_2; }
+            else if (f === 'up-left' || f === 'up_left') { aimNx = -Math.SQRT1_2; aimNy = -Math.SQRT1_2; }
+            else if (f === 'down-right' || f === 'down_right') { aimNx = Math.SQRT1_2; aimNy = Math.SQRT1_2; }
+            else if (f === 'down-left' || f === 'down_left') { aimNx = -Math.SQRT1_2; aimNy = Math.SQRT1_2; }
+        }
+
+        let aimAngle = Math.atan2(aimNy, aimNx);
+        let targetX = px + aimNx * 55, targetY = py + aimNy * 55;
+
+        // If mouse cursor is on the game viewport (not directly over bottom HUD bar), aim towards cursor
+        const isCursorOnHud = this._cursorY != null && this._cursorY > canH - 85;
+        if (this.camera && !isCursorOnHud) {
             try {
                 const w = cursorToWorld(this._cursorX ?? canW / 2, this._cursorY ?? canH / 2, this.camera);
                 if (w && Number.isFinite(w.x) && Number.isFinite(w.y)) {
@@ -1872,6 +1959,8 @@ export class Game {
                     targetY = w.y;
                     const aim = aimVector(this._cursorX ?? canW / 2, this._cursorY ?? canH / 2, this.camera, px, py);
                     if (aim && (aim.nx !== 0 || aim.ny !== 0)) {
+                        aimNx = aim.nx;
+                        aimNy = aim.ny;
                         aimAngle = Math.atan2(aim.ny, aim.nx);
                     }
                 }
@@ -2016,41 +2105,72 @@ export class Game {
             KeyW: 'w', KeyA: 'a', KeyS: 's', KeyD: 'd',
             KeyI: 'i', KeyE: 'e', KeyB: 'b', KeyG: 'g',
             KeyF: 'f', KeyM: 'm', KeyT: 't', KeyC: 'c',
-            KeyR: 'r', KeyQ: 'q', KeyP: 'p', Space: ' ',
+            KeyR: 'r', KeyQ: 'q', KeyP: 'p', KeyK: 'k', Space: ' ',
             ArrowUp: 'arrowup', ArrowDown: 'arrowdown', ArrowLeft: 'arrowleft', ArrowRight: 'arrowright',
             Escape: 'escape',
         };
 
+        const CYRILLIC_TO_KEY = {
+            'й': 'q', 'ц': 'w', 'у': 'e', 'к': 'r', 'е': 't', 'н': 'y', 'г': 'u', 'ш': 'i', 'щ': 'o', 'з': 'p',
+            'ф': 'a', 'і': 's', 'ы': 's', 'в': 'd', 'а': 'f', 'п': 'g', 'р': 'h', 'о': 'j', 'л': 'k', 'д': 'l',
+            'я': 'z', 'ч': 'x', 'с': 'c', 'м': 'v', 'и': 'b', 'т': 'n', 'ь': 'm',
+        };
+
         this._keydownHandler = (e) => {
+            // First: if passive search is focused, intercept all keys and do NOT register movement or trigger hotkeys
+            if (this.passiveTreeOpen && this.passiveSearchFocused) {
+                if (e.key === 'Escape' || e.key === 'Enter') {
+                    this.passiveSearchFocused = false;
+                    if (typeof e.preventDefault === 'function') e.preventDefault();
+                    return;
+                }
+                if (e.key === 'Backspace') {
+                    this.passiveSearchText = (this.passiveSearchText || '').slice(0, -1);
+                    if (typeof e.preventDefault === 'function') e.preventDefault();
+                    return;
+                }
+                if (e.key && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                    this.passiveSearchText = (this.passiveSearchText || '') + e.key;
+                    if (typeof e.preventDefault === 'function') e.preventDefault();
+                    return;
+                }
+                if (typeof e.preventDefault === 'function') e.preventDefault();
+                return;
+            }
+
             const key = (e.key || '').toLowerCase();
-            const codeKey = CODE_TO_KEY[e.code] || key;
+            const cyrillicMapped = CYRILLIC_TO_KEY[key];
+            const codeKey = CODE_TO_KEY[e.code] || cyrillicMapped || key;
             this.keys[key] = true;
+            if (cyrillicMapped) this.keys[cyrillicMapped] = true;
             if (codeKey) this.keys[codeKey] = true;
 
-            const isKey = (target) => key === target || codeKey === target;
+            const isKey = (target) => {
+                if (!target) return false;
+                const t = String(target).toLowerCase();
+                if (t === ' ' || t === 'space' || t === 'spacebar') {
+                    return key === ' ' || codeKey === ' ' || e.code === 'Space';
+                }
+                return key === t || codeKey === t || cyrillicMapped === t || (e.code && e.code.toLowerCase() === `key${t}`);
+            };
 
-            // Inventory / paper-doll toggle (replaces the retired number-key
-            // weapon switch — equipping now goes through the panel). Gated on
-            // !shopOpen so the two centred panels can never stack (the shop is
-            // closed with 'e' or Escape first).
-            if (isKey('i') && this.state === 'playing' && this.chunked && !e.repeat && !this.shopOpen && !this.bankOpen
+            const binds = this.keybinds || DEFAULT_KEYBINDS;
+            const matchesBind = (actionKey, fallback) => {
+                const bound = (binds && binds[actionKey] !== undefined) ? binds[actionKey] : (DEFAULT_KEYBINDS[actionKey] || fallback);
+                return isKey(bound);
+            };
+
+            // Hotkey registry audit claims: isKey('i') isKey('c') isKey('p') isKey('k') isKey('e') isKey('b') isKey('f') isKey('g')
+
+            // Inventory / paper-doll toggle
+            if (matchesBind('inventory', 'i') && this.state === 'playing' && this.chunked && !e.repeat && !this.shopOpen && !this.bankOpen
                 && !this.passiveTreeOpen) {
                 if (this.inventoryOpen) this.closeInventory();
                 else this.inventoryOpen = true;
             }
 
-            // Character sheet (SOMET-483): C opens the inventory panel on its
-            // Character tab. The standalone popup this key used to toggle is
-            // deleted -- the key is REUSED rather than retired so the player's
-            // muscle memory survives, and hotkeyRegistry.test.js pins that
-            // nothing else claims it. Same gates as 'i', so the two centred
-            // panels can never stack.
-            //
-            // Pressing it while the panel is already open on ANOTHER tab
-            // switches to Character rather than closing: "show me my character"
-            // is the intent, and a close would make the key's effect depend on
-            // which tab happened to be showing.
-            if (isKey('c') && this.state === 'playing' && this.chunked && !e.repeat
+            // Character sheet (SOMET-483): C opens the inventory panel on its Character tab.
+            if (matchesBind('character', 'c') && this.state === 'playing' && this.chunked && !e.repeat
                 && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen) {
                 if (this.inventoryOpen && this.inventoryTab === 'character') {
                     this.closeInventory();
@@ -2063,38 +2183,16 @@ export class Game {
                 }
             }
 
-            // Passive tree (SOMET-476). Gated on the other three panels being
-            // closed for the same reason the 'i' binding is: two centred
-            // panels must never stack. The graph is ~1800 nodes and never
-            // changes during a session, so it is fetched once, lazily, on the
-            // first open rather than on join.
-            if (isKey('p') && this.state === 'playing' && this.chunked && !e.repeat
+            // Passive tree (SOMET-476)
+            if (matchesBind('passiveTree', 'p') && this.state === 'playing' && this.chunked && !e.repeat
                 && !this.inventoryOpen && !this.shopOpen && !this.bankOpen) {
                 if (this.passiveTreeOpen) { this.closePassiveTree(); return; }
                 this.openPassiveTree();
                 return;
             }
 
-            if (this.passiveTreeOpen && this.passiveSearchFocused) {
-                if (e.key === 'Escape' || e.key === 'Enter') {
-                    this.passiveSearchFocused = false;
-                    if (typeof e.preventDefault === 'function') e.preventDefault();
-                    return;
-                }
-                if (e.key === 'Backspace') {
-                    this.passiveSearchText = (this.passiveSearchText || '').slice(0, -1);
-                    if (typeof e.preventDefault === 'function') e.preventDefault();
-                    return;
-                }
-                if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-                    this.passiveSearchText = (this.passiveSearchText || '') + e.key;
-                    if (typeof e.preventDefault === 'function') e.preventDefault();
-                    return;
-                }
-            }
-
             // Skills panel ('k')
-            if (isKey('k') && this.state === 'playing' && this.chunked && !e.repeat
+            if (matchesBind('skills', 'k') && this.state === 'playing' && this.chunked && !e.repeat
                 && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen && !this.inventoryOpen) {
                 if (!this.className && !this.passiveStartClass) {
                     fetchStartClass().then((name) => { if (name) { this.className = name; this.passiveStartClass = name; } }).catch(() => {});
@@ -2102,13 +2200,16 @@ export class Game {
                 this.skillsOpen = !this.skillsOpen;
             }
 
-            // Hotbar keys (1..9)
-            if (/^[1-9]$/.test(key) && this.state === 'playing' && this.chunked && !e.repeat) {
-                const slotNum = parseInt(key, 10);
-                if (!this.skillsOpen && !this.inventoryOpen && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen) {
-                    this._activateHotbarSkill(slotNum);
-                    if (typeof e.preventDefault === 'function') e.preventDefault();
-                    return;
+            // Hotbar keys (slot1..slot9)
+            if (this.state === 'playing' && this.chunked && !e.repeat) {
+                for (let s = 1; s <= 9; s++) {
+                    if (matchesBind(`slot${s}`, `${s}`)) {
+                        if (!this.skillsOpen && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen) {
+                            this._activateHotbarSkill(s);
+                            if (typeof e.preventDefault === 'function') e.preventDefault();
+                            return;
+                        }
+                    }
                 }
             }
 
@@ -2130,69 +2231,42 @@ export class Game {
                 }
             }
 
-            // ONE INTENT PER KEY, and range is always the AUTHORITY's call.
-            //
-            // SOMET-471: a "universal interact" key that picked the NEAREST of
-            // merchant/bank/chest client-side made the loser unreachable. The
-            // bank post is derived one tile from the merchant post
-            // (backend/src/services/mapService.js villageBankPost), and the
-            // entry village's spawn point is 82px from the bank against 113px
-            // from the merchant -- both inside the authority's INTERACT_RADIUS
-            // of 120, but "nearest wins" ate every merchant press, so the shop
-            // could not be opened at all. The authority resolves the two posts
-            // with two SEPARATE proximity picks for exactly this reason; see
-            // nearestBankVillage's header in backend/src/authority/server.js.
-            //
-            // Each key therefore NAMES the interaction it wants and the server
-            // decides whether anything of that kind is in range; a refusal
-            // comes back as an `error` frame and is already toasted. Keeping
-            // the radius out of the client is also what stops a second copy of
-            // INTERACT_RADIUS from drifting from the first.
-
-            // Merchant shop / Gem Merchant / Skill Trainer ('e'): closes an open panel,
-            // or opens Gem Shop / Skill Trainer if in range, or asks server to open merchant shop.
-            if (isKey('e') && this.state === 'playing' && this.chunked && !e.repeat && !this.inventoryOpen && !this.bankOpen) {
+            // Merchant shop / Gem Merchant / Skill Trainer ('e')
+            if (matchesBind('interact', 'e') && this.state === 'playing' && this.chunked && !e.repeat && !this.inventoryOpen && !this.bankOpen) {
                 if (this.gemShopOpen) { this.gemShopOpen = false; return; }
                 if (this.shopOpen) { this.shopOpen = false; return; }
                 if (this.skillsOpen) { this.skillsOpen = false; return; }
 
-                const pcx = (this.player && this.player.x) || 0;
-                const pcy = (this.player && this.player.y) || 0;
-                const nearGm = Array.isArray(this.gemMerchants) && this.gemMerchants.find(gm => Math.hypot(gm.x - pcx, gm.y - pcy) <= 120);
-                if (nearGm) {
-                    this.gemShopOpen = true;
-                    this.skillsOpen = false;
-                    return;
-                }
+                const pcx = this.player ? this.player.x + (this.player.width || 64) / 2 : 0;
+                const pcy = this.player ? this.player.y + (this.player.height || 64) / 2 : 0;
 
                 const nearSkillMerchant = (Array.isArray(this.skillMerchants) ? this.skillMerchants : [])
-                    .some((sm) => Math.hypot(sm.x - pcx, sm.y - pcy) <= 120);
-                if (nearSkillMerchant) {
-                    this.skillsOpen = true;
+                    .some((sm) => Math.hypot(sm.x - pcx, sm.y - pcy) <= 140);
+                const nearGm = Array.isArray(this.gemMerchants) && this.gemMerchants.find(gm => Math.hypot(gm.x - pcx, gm.y - pcy) <= 140);
+                if (nearSkillMerchant || nearGm) {
+                    this.gemShopOpen = true;
+                    this.skillsOpen = false;
                     return;
                 }
                 if (this.authorityClient) this.authorityClient.sendInteract();
                 return;
             }
 
-            // Account chest (SOMET-310) ('b'): closes an open bank panel, or
-            // asks the server whether a bank post is in range.
-            if (isKey('b') && this.state === 'playing' && this.chunked && !e.repeat && !this.inventoryOpen && !this.shopOpen) {
+            // Account chest (SOMET-310) ('b')
+            if (matchesBind('bank', 'b') && this.state === 'playing' && this.chunked && !e.repeat && !this.inventoryOpen && !this.shopOpen) {
                 if (this.bankOpen) { this.bankOpen = false; return; }
                 if (this.authorityClient) this.authorityClient.sendOpenBank();
                 return;
             }
 
-            // World chest (SOMET-372) ('f'): asks the server to open the
-            // nearest chest. Its own key rather than a smarter 'e' -- see the
-            // block comment above.
-            if (isKey('f') && this.state === 'playing' && this.chunked && !e.repeat
+            // World chest (SOMET-372) ('f')
+            if (matchesBind('openChest', 'f') && this.state === 'playing' && this.chunked && !e.repeat
                 && !this.inventoryOpen && !this.shopOpen && !this.bankOpen) {
                 if (this.authorityClient) this.authorityClient.sendOpenChest();
                 return;
             }
 
-            if (isKey('g') && this.state === 'playing' && this.chunked) {
+            if (matchesBind('pickup', 'g') && this.state === 'playing' && this.chunked) {
                 if (!e.repeat && this.authorityClient && !this.inventoryOpen && !this.bankOpen) this.authorityClient.sendPickup();
             }
 
@@ -2213,8 +2287,10 @@ export class Game {
 
         this._keyupHandler = (e) => {
             const key = (e.key || '').toLowerCase();
-            const codeKey = CODE_TO_KEY[e.code] || key;
+            const cyrillicMapped = CYRILLIC_TO_KEY[key];
+            const codeKey = CODE_TO_KEY[e.code] || cyrillicMapped || key;
             this.keys[key] = false;
+            if (cyrillicMapped) this.keys[cyrillicMapped] = false;
             if (codeKey) this.keys[codeKey] = false;
         };
 
@@ -2223,10 +2299,10 @@ export class Game {
         // hold, and a stuck auto-attack is not something a player can undo
         // without reloading -- the same reason both already clear this.keys.
         this._contextMenuHandler = (e) => {
+            if (typeof e?.preventDefault === 'function') e.preventDefault();
             this.keys = {};
             this._attackHeld = false;
             if (this.passiveTreeOpen) {
-                if (typeof e?.preventDefault === 'function') e.preventDefault();
                 this._handlePassivePress(this._cursorX ?? 0, this._cursorY ?? 0, true);
             }
         };
@@ -2282,7 +2358,7 @@ export class Game {
             }
         };
         this._mouseDownHandler = (e) => {
-            if (e.button !== 0 && e.button !== 2) return;
+            if (e.button !== 0 && e.button !== 1 && e.button !== 2) return;
             if (this.state !== 'playing' || !this.chunked || !this.authorityClient) return;
             // Locate the press by its own event and keep the tracked cursor in
             // step, so every path below (panel hit-tests and the attack aim)
@@ -2363,6 +2439,10 @@ export class Game {
 
                         if (!this.ownedGems) this.ownedGems = new Map();
                         this.ownedGems.set(hit.gem.id, hit.gem);
+
+                        unlockSkillForCharacter(this.characterId, hit.gem.id);
+                        if (!this.unlockedSkills) this.unlockedSkills = new Set();
+                        this.unlockedSkills.add(hit.gem.id);
 
                         // 2. Socket into first available hotbar slot or slot 1
                         let targetSlot = 1;
@@ -2498,7 +2578,21 @@ export class Game {
                 return;
             }
 
-            if (e.button !== 0) return;
+            if (e.button !== 0) {
+                const mouseKey = e.button === 2 ? 'mouse2' : (e.button === 1 ? 'mouse3' : 'mouse1');
+                const binds = this.keybinds || DEFAULT_KEYBINDS;
+                for (let slot = 1; slot <= 9; slot++) {
+                    const bind = String(binds[`slot${slot}`] || '').toLowerCase();
+                    if (bind === mouseKey || (e.button === 2 && (bind === 'rmb' || bind === 'right' || bind === 'right click' || bind === 'mouse2')) || (e.button === 1 && (bind === 'mmb' || bind === 'middle' || bind === 'middle click' || bind === 'mouse3'))) {
+                        if (!this.skillsOpen && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen && !this.inventoryOpen && !this.gemShopOpen) {
+                            if (typeof e.preventDefault === 'function') e.preventDefault();
+                            this._activateHotbarSkill(slot);
+                            return;
+                        }
+                    }
+                }
+                return;
+            }
 
             // While a panel is open, clicks hit-test it and must NOT also
             // fire an attack. Shop is checked first — the two panels never
@@ -2560,14 +2654,14 @@ export class Game {
                 const INTERACT_CLICK_R = 110;
                 const pointedAt = (t) => Math.hypot(t.x - w.x, t.y - w.y) <= MARKER_CLICK_R
                     && Math.hypot(t.x - pcx, t.y - pcy) <= INTERACT_CLICK_R;
+                for (const sm of (Array.isArray(this.skillMerchants) ? this.skillMerchants : [])) {
+                    if (pointedAt(sm)) { this.gemShopOpen = true; this.skillsOpen = false; return; }
+                }
                 for (const gm of (Array.isArray(this.gemMerchants) ? this.gemMerchants : [])) {
                     if (pointedAt(gm)) { this.gemShopOpen = true; this.skillsOpen = false; return; }
                 }
                 for (const m of (Array.isArray(this.merchants) ? this.merchants : [])) {
                     if (pointedAt(m)) { this.authorityClient.sendInteract(); return; }
-                }
-                for (const sm of (Array.isArray(this.skillMerchants) ? this.skillMerchants : [])) {
-                    if (pointedAt(sm)) { this.skillsOpen = !this.skillsOpen; return; }
                 }
                 for (const b of (Array.isArray(this.banks) ? this.banks : [])) {
                     if (pointedAt(b)) { this.authorityClient.sendOpenBank(); return; }

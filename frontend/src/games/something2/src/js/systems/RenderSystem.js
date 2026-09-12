@@ -17,11 +17,11 @@ import { layoutInventory, drawInventory } from "./inventoryPanel.js";
 import { layoutPassiveTree, drawPassiveTree } from "./passiveTreePanel.js";
 import { layoutSkillsPanel, drawSkillsPanel } from "./skillsPanel.js";
 import { layoutGemShopPanel, drawGemShopPanel } from "./gemShopPanel.js";
-import { isTransformationSkill, getRequiredForm, resolveSkillDamage } from "../core/skillsData.js";
+import { isTransformationSkill, getRequiredForm, resolveSkillDamage, checkGemRequirements, getWeaponRequirementName } from "../core/skillsData.js";
 import {
   blastProgress, blastScreenRadiusX, elementColor, auraRingGeometry,
 } from "../core/blasts.js";
-import { effectProgress, effectAlpha, isoArcAngle, particlesAt } from "../core/vfx.js";
+import { effectProgress, effectAlpha, isoArcAngle, particlesAt, effectSeed, hash01 } from "../core/vfx.js";
 import { anchorY } from "../core/attackAnchor.js";
 import { elementTint } from "../core/elements.js";
 import { normalizeEffects, effectColor, effectHudLine } from "../core/statusEffects.js";
@@ -325,7 +325,7 @@ export class RenderSystem {
     selectedSkillId = null, skillDrag = null, hotbarSkills = null, inventoryGems = [],
     skillHoverSlot = null, playerClass = null, activeForm = null, flashSlot = null,
     skillCooldowns = null, activeBuffs = [], unlockedSkills = null,
-    hoveredSkill = null, cursorX = null, cursorY = null,
+    hoveredSkill = null, cursorX = null, cursorY = null, keybinds = null,
   }) {
     if (vfxDefs) this.vfxDefs = vfxDefs;
     // While any full-screen panel is up the cursor is being used to click ITS
@@ -455,8 +455,7 @@ export class RenderSystem {
     const actors = RenderSystem.collectActors(player, remotePlayers, creatures);
     for (const d of drawables) {
       if (d.kind === "wall") {
-        const alpha = wallRevealed(d, actors, WALL_REVEAL_R) ? 0.3 : 1;
-        drawWall(this.ctx, { s: d.s, def: d.def, visual: d.visual, H: d.H, alpha, halfW, halfH, tileCache: this._tileCache });
+        drawWall(this.ctx, { s: d.s, def: d.def, visual: d.visual, H: d.H, alpha: 1, halfW, halfH, tileCache: this._tileCache });
       } else if (d.kind === "player") this.drawCreature(d.ref, "player", 1);
       else if (d.kind === "remote") this.drawCreature(d.ref, "player", 0.85, d.userId);
       else if (d.kind === "grounditem") this.drawGroundItem(d.ref, inventory, player);
@@ -497,7 +496,7 @@ export class RenderSystem {
     }
 
     this.drawBlasts(blasts);
-    this.drawVfx(vfx);
+    this.drawVfx(vfx, { player, remotePlayers, creatures, localUserId });
     this.drawSkillVisuals(skillVisuals);
 
     camera.reset(this.ctx);
@@ -507,6 +506,7 @@ export class RenderSystem {
       weaponName, ammo, noAmmoFlash, effects, gold, progression,
       skills: hotbarSkills, hitAreas: this._skillSlotHitAreas, hoverSlot: skillHoverSlot, drag: skillDrag,
       activeForm, flashSlot, skillCooldowns, activeBuffs,
+      playerStats: playerStats || progression, equippedWeapon, keybinds,
     });
     if (toast) this.renderToast(toast);
 
@@ -612,17 +612,17 @@ export class RenderSystem {
 
     // Skill rich tooltip on hover (over hotbar slots or skills panel)
     if (hoveredSkill && cursorX != null && cursorY != null) {
-      this._drawSkillTooltip(hoveredSkill, cursorX, cursorY);
+      this._drawSkillTooltip(hoveredSkill, cursorX, cursorY, playerStats || progression, equippedWeapon, activeForm);
     }
   }
 
-  _drawSkillTooltip(skill, cursorX, cursorY) {
+  _drawSkillTooltip(skill, cursorX, cursorY, playerStats = null, equippedWeapon = null, activeForm = null) {
     if (!skill) return;
     const ctx = this.ctx;
     ctx.save();
 
     const pad = 12;
-    const cardW = 300;
+    const cardW = 320;
 
     // Parse description words into wrapped lines
     const descText = skill.descEn || skill.desc || '';
@@ -642,8 +642,46 @@ export class RenderSystem {
     if (currentLine) descLines.push(currentLine);
 
     const descH = descLines.length * 15;
-    const hasReq = !!getRequiredForm(skill);
-    const cardH = 126 + descH + (hasReq ? 20 : 0);
+    const hasReqForm = !!getRequiredForm(skill);
+    const reqForm = getRequiredForm(skill);
+    const isFormOk = !reqForm || reqForm === activeForm;
+
+    // Requirements analysis
+    const req = checkGemRequirements(skill, playerStats, equippedWeapon);
+    const pLvl = req.lvl;
+    const pStr = req.str;
+    const pDex = req.dex;
+    const pCon = req.con;
+    const pInt = req.int;
+    const pWis = req.wis;
+    const pCha = req.cha;
+
+    const reqBadges = [];
+    reqBadges.push({ label: `Lv ${skill.reqLvl || 1}`, ok: req.levelOk });
+    if (skill.reqStr > 0) reqBadges.push({ label: `${skill.reqStr} STR`, ok: req.strOk });
+    if (skill.reqDex > 0) reqBadges.push({ label: `${skill.reqDex} DEX`, ok: req.dexOk });
+    if (skill.reqCon > 0) reqBadges.push({ label: `${skill.reqCon} CON`, ok: req.conOk });
+    if (skill.reqInt > 0) reqBadges.push({ label: `${skill.reqInt} INT`, ok: req.intOk });
+    if (skill.reqWis > 0) reqBadges.push({ label: `${skill.reqWis} WIS`, ok: req.wisOk });
+    if (skill.reqCha > 0) reqBadges.push({ label: `${skill.reqCha} CHA`, ok: req.chaOk });
+    if (skill.reqWeapon && skill.reqWeapon !== 'any') {
+      reqBadges.push({ label: getWeaponRequirementName(skill.reqWeapon), ok: req.weaponOk });
+    }
+
+    const allReqsMet = req.ok && isFormOk;
+    const unmetWarnings = [];
+    if (!req.levelOk) unmetWarnings.push(`Needs Lv ${skill.reqLvl} (You: ${pLvl})`);
+    if (!req.strOk) unmetWarnings.push(`Needs ${skill.reqStr} STR (You: ${pStr})`);
+    if (!req.dexOk) unmetWarnings.push(`Needs ${skill.reqDex} DEX (You: ${pDex})`);
+    if (!req.conOk) unmetWarnings.push(`Needs ${skill.reqCon} CON (You: ${pCon})`);
+    if (!req.intOk) unmetWarnings.push(`Needs ${skill.reqInt} INT (You: ${pInt})`);
+    if (!req.wisOk) unmetWarnings.push(`Needs ${skill.reqWis} WIS (You: ${pWis})`);
+    if (!req.chaOk) unmetWarnings.push(`Needs ${skill.reqCha} CHA (You: ${pCha})`);
+    if (!req.weaponOk) unmetWarnings.push(`Needs ${getWeaponRequirementName(skill.reqWeapon)}`);
+    if (!isFormOk) unmetWarnings.push(`Requires ${reqForm.toUpperCase()} Form`);
+
+    const reqBlockH = 34 + (unmetWarnings.length > 0 ? 18 : 0);
+    const cardH = 135 + reqBlockH + descH + (hasReqForm ? 20 : 0);
 
     // Calculate positioning with screen bounds clamping
     let cardX = cursorX + 16;
@@ -664,7 +702,7 @@ export class RenderSystem {
     ctx.fillStyle = grad;
     ctx.fill();
 
-    ctx.strokeStyle = skill.iconColor || '#a855f7';
+    ctx.strokeStyle = allReqsMet ? (skill.iconColor || '#a855f7') : '#f43f5e';
     ctx.lineWidth = 1.5;
     ctx.stroke();
 
@@ -741,19 +779,55 @@ export class RenderSystem {
     ctx.lineTo(cardX + cardW - pad, div2Y);
     ctx.stroke();
 
-    // 3. Description Paragraph
+    // 3. Requirements Section (Level, Stats, Weapon, Form)
+    const reqY = div2Y + 6;
+    ctx.font = 'bold 10px sans-serif';
+    ctx.fillStyle = '#94a3b8';
+    ctx.fillText('Requires:', cardX + pad, reqY);
+
+    let badgeCurX = cardX + pad + 54;
+    ctx.font = '10px monospace';
+    for (let bIdx = 0; bIdx < reqBadges.length; bIdx++) {
+      const b = reqBadges[bIdx];
+      ctx.fillStyle = b.ok ? '#34d399' : '#fb7185';
+      ctx.fillText(b.label, badgeCurX, reqY);
+      badgeCurX += ctx.measureText(b.label).width;
+      if (bIdx < reqBadges.length - 1) {
+        ctx.fillStyle = '#64748b';
+        ctx.fillText(' · ', badgeCurX, reqY);
+        badgeCurX += ctx.measureText(' · ').width;
+      }
+    }
+
+    let nextY = reqY + 14;
+    if (unmetWarnings.length > 0) {
+      ctx.font = 'bold 10px sans-serif';
+      ctx.fillStyle = '#fb7185';
+      ctx.fillText(`⚠️ Unmet: ${unmetWarnings.join(', ')}`, cardX + pad, nextY, cardW - pad * 2);
+      nextY += 15;
+    }
+
+    // Divider 3
+    const div3Y = nextY + 4;
+    ctx.strokeStyle = 'rgba(168, 85, 247, 0.3)';
+    ctx.beginPath();
+    ctx.moveTo(cardX + pad, div3Y);
+    ctx.lineTo(cardX + cardW - pad, div3Y);
+    ctx.stroke();
+
+    // 4. Description Paragraph
     ctx.font = '11px sans-serif';
     ctx.fillStyle = '#cbd5e1';
     for (let i = 0; i < descLines.length; i++) {
-      ctx.fillText(descLines[i], cardX + pad, div2Y + 7 + i * 15);
+      ctx.fillText(descLines[i], cardX + pad, div3Y + 7 + i * 15);
     }
 
-    // 4. Form Requirement (if Druid form required)
-    if (hasReq) {
-      const reqY = div2Y + 7 + descLines.length * 15 + 4;
+    // 5. Form Requirement (if Druid form required)
+    if (hasReqForm) {
+      const formY = div3Y + 7 + descLines.length * 15 + 4;
       ctx.font = 'bold 10px monospace';
-      ctx.fillStyle = '#facc15';
-      ctx.fillText(`🔒 Requires: ${getRequiredForm(skill).toUpperCase()} FORM`, cardX + pad, reqY);
+      ctx.fillStyle = isFormOk ? '#34d399' : '#facc15';
+      ctx.fillText(`🔒 Requires: ${reqForm.toUpperCase()} FORM`, cardX + pad, formY);
     }
 
     ctx.restore();
@@ -1006,37 +1080,75 @@ export class RenderSystem {
   // world radius. None of them re-derive the iso projection, so none of them
   // can disagree with the arc (or with the blast ring) about where a given
   // world offset lands.
-  drawVfx(effects) {
+  _resolveVfxOrigin(fx, actors) {
+    if (fx && fx.a && typeof fx.a === 'string') {
+      const a = fx.a;
+      if (a.startsWith('p:')) {
+        const uid = a.slice(2);
+        const pl = actors && actors.player;
+        if (pl && (pl.userId === uid || pl.id === uid || (actors.localUserId && String(actors.localUserId) === uid) || (this.localUserId && String(this.localUserId) === uid))) {
+          const w = pl.width || 64;
+          const h = pl.height || 64;
+          return { x: pl.x + w / 2, y: pl.y + h / 2 };
+        }
+        const rem = actors && actors.remotePlayers;
+        if (rem && rem.get && rem.has(uid)) {
+          const rp = rem.get(uid);
+          if (rp) {
+            const w = rp.width || 64;
+            const h = rp.height || 64;
+            return { x: rp.x + w / 2, y: rp.y + h / 2 };
+          }
+        }
+      } else if (a.startsWith('c:')) {
+        const cid = a.slice(2);
+        const crs = actors && actors.creatures;
+        if (crs) {
+          const c = crs.get ? (crs.get(cid) || crs.get(Number(cid))) : (Array.isArray(crs) ? crs.find((x) => String(x.id) === cid) : null);
+          if (c) {
+            const w = c.width || 48;
+            const h = c.height || 48;
+            return { x: c.x + w / 2, y: c.y + h / 2 };
+          }
+        }
+      }
+    }
+    return { x: fx.x, y: fx.y };
+  }
+
+  drawVfx(effects, actors = null) {
     if (!effects || effects.length === 0) return;
     const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : 0;
     this.ctx.save();
     for (const fx of effects) {
       if (!fx.def) continue;
+      const origin = this._resolveVfxOrigin(fx, actors);
+      const fxLive = (origin.x !== fx.x || origin.y !== fx.y) ? { ...fx, x: origin.x, y: origin.y } : fx;
       // Slice C: particles are drawn for ANY shape that carries them, before
       // the geometry, so the body of the effect sits on top of its own spray.
-      this._drawVfxParticles(fx, now);
-      if (fx.def.shape !== "arc") { this._drawVfxShape(fx, now); continue; }
-      const t = effectProgress(fx, now);
+      this._drawVfxParticles(fxLive, now);
+      if (fxLive.def.shape !== "arc") { this._drawVfxShape(fxLive, now); continue; }
+      const t = effectProgress(fxLive, now);
       // Same conversion as drawBlasts above — worldToScreen gives the tile
       // diamond's CENTRE, and the anchor lift puts the swing at the height
       // this attacker's weapon launches from (SOMET-326) rather than flat on
       // the ground. Do not add a further offset.
-      const s = worldToScreen(fx.x, fx.y);
-      const cy = anchorY(s.y, fx.o);
+      const s = worldToScreen(fxLive.x, fxLive.y);
+      const cy = anchorY(s.y, fxLive.o);
       // A world circle projects to a 2:1 ellipse, not a circle — the same
       // ground-plane projection the blast ring uses, reused rather than
       // re-derived so the two can never disagree.
-      const rx = blastScreenRadiusX(fx.reach);
+      const rx = blastScreenRadiusX(fxLive.reach);
       if (rx <= 0) continue;
-      const half = (fx.arc || 0) / 2;
+      const half = (fxLive.arc || 0) / 2;
       // PARAMETRIC angle, not the world angle: see isoArcAngle.
-      const phi = isoArcAngle(fx.nx, fx.ny);
+      const phi = isoArcAngle(fxLive.nx, fxLive.ny);
       const from = phi - half;
-      const to = from + (fx.arc || 0) * t;      // the sweep opens over the lifetime
+      const to = from + (fxLive.arc || 0) * t;      // the sweep opens over the lifetime
 
-      this.ctx.globalAlpha = effectAlpha(fx, now);
-      this.ctx.strokeStyle = fx.def.color || "#dddddd";
-      this.ctx.lineWidth = Number(fx.def.width) || 2;
+      this.ctx.globalAlpha = effectAlpha(fxLive, now);
+      this.ctx.strokeStyle = fxLive.def.color || "#dddddd";
+      this.ctx.lineWidth = Number(fxLive.def.width) || 2;
       this.ctx.beginPath();
       this.ctx.ellipse(s.x, cy, rx, rx / 2, 0, from, to);
       this.ctx.stroke();
@@ -1121,21 +1233,30 @@ export class RenderSystem {
     const t = (now - fx.startedAt) / life;
     if (t < 0 || t > 1) return;
 
-    const parts = particlesAt(fx, t);
-    if (parts.length === 0) return;
-
     const tint = RenderSystem.tintFor(fx.el);
     const size = Math.max(0, Number(def.particle_size) || 2);
     if (size === 0) return;
 
+    const seed = effectSeed(fx);
+    const spread = Number(def.particle_spread);
+    const speed = Number(def.particle_speed) || 0;
+    const gravity = Number(def.particle_gravity) || 0;
+    const arc = Number.isFinite(spread) ? spread : Math.PI * 2;
+    const base = Math.atan2(Number(fx.ny) || 0, Number(fx.nx) || 0);
+    const lifeSec = life / 1000;
+    const age = t * lifeSec;
+    const alpha = 1 - t;
+    const halfSize = size / 2;
+
     this.ctx.fillStyle = tint || def.color || "#ffffff";
-    for (const pt of parts) {
-      // Each particle is a world-space offset from the impact point, so it
-      // goes through the SAME projection as everything else rather than being
-      // nudged in screen space.
-      const s = worldToScreen(fx.x + pt.dx, fx.y + pt.dy);
-      this.ctx.globalAlpha = pt.alpha;
-      this.ctx.fillRect(s.x - size / 2, anchorY(s.y, fx.o) - size / 2, size, size);
+    this.ctx.globalAlpha = alpha;
+    for (let i = 0; i < count; i++) {
+      const a = base + (hash01(seed, i) - 0.5) * arc;
+      const v = speed * (0.5 + hash01(seed, i + 1013) * 0.5);
+      const dx = Math.cos(a) * v * age;
+      const dy = Math.sin(a) * v * age + 0.5 * gravity * age * age;
+      const s = worldToScreen(fx.x + dx, fx.y + dy);
+      this.ctx.fillRect(s.x - halfSize, anchorY(s.y, fx.o) - halfSize, size, size);
     }
     this.ctx.globalAlpha = 1;
   }
@@ -2010,86 +2131,223 @@ export class RenderSystem {
         } else if (v.kind === 'melee_slash') {
           // Distinct Melee Slashes / Claws / Fissures / Hammers / Thrusts
           this.ctx.save();
-          this.ctx.globalAlpha = alpha;
+          this.ctx.globalAlpha = Math.min(1, alpha * 1.3);
           const s = worldToScreen(v.x, v.y);
-          const rx = blastScreenRadiusX(v.reach || 50);
+          const rx = blastScreenRadiusX(v.reach || 65);
+          const aimNx = Number.isFinite(v.aimNx) ? v.aimNx : Math.cos(v.angle || 0);
+          const aimNy = Number.isFinite(v.aimNy) ? v.aimNy : Math.sin(v.angle || 0);
+          const phi = isoArcAngle(aimNx, aimNy);
 
-          if (v.slashStyle === 'beast_claw') {
-            // 3 parallel red/crimson razor claw swipes
-            this.ctx.strokeStyle = '#ef4444';
-            this.ctx.lineWidth = 2.5;
-            for (let offset = -8; offset <= 8; offset += 8) {
-              const fromAngle = (v.angle || 0) - Math.PI * 0.35;
-              const toAngle = fromAngle + Math.PI * 0.7 * progress;
+          const targetScreen = (Number.isFinite(v.targetX) && Number.isFinite(v.targetY))
+            ? worldToScreen(v.targetX, v.targetY)
+            : { x: s.x + Math.cos(phi) * (rx * 0.75), y: s.y + (Math.sin(phi) * (rx * 0.75)) / 2 };
+
+          if (v.slashStyle === 'crush_hammer') {
+            // Heavy downward overhead hammer impact & seismic shockwave
+            const shockR = Math.max(8, rx * (0.35 + 0.65 * progress));
+            const color = v.color || '#f59e0b';
+
+            // 1. Descending overhead power slam line (crashing down into ground)
+            const dropDist = 38 * (1 - progress);
+            this.ctx.strokeStyle = '#ffffff';
+            this.ctx.shadowColor = color;
+            this.ctx.shadowBlur = 16;
+            this.ctx.lineWidth = 4 * (1 - progress * 0.5);
+            this.ctx.beginPath();
+            this.ctx.moveTo(targetScreen.x, targetScreen.y - dropDist - 16);
+            this.ctx.lineTo(targetScreen.x, targetScreen.y);
+            this.ctx.stroke();
+
+            // 2. Outer glowing seismic shockwave ring on ground
+            this.ctx.strokeStyle = color;
+            this.ctx.lineWidth = Math.max(1.5, 4.5 * (1 - progress));
+            this.ctx.beginPath();
+            this.ctx.ellipse(targetScreen.x, targetScreen.y, shockR, shockR / 2, 0, 0, Math.PI * 2);
+            this.ctx.stroke();
+
+            // 3. Inner bright white-hot impact core
+            this.ctx.strokeStyle = '#fef08a';
+            this.ctx.lineWidth = Math.max(1, 2.5 * (1 - progress));
+            this.ctx.beginPath();
+            this.ctx.ellipse(targetScreen.x, targetScreen.y, shockR * 0.5, (shockR * 0.5) / 2, 0, 0, Math.PI * 2);
+            this.ctx.stroke();
+
+            // 4. Radial impact sparks
+            const sparkCount = 8;
+            for (let i = 0; i < sparkCount; i++) {
+              const spAngle = (Math.PI * 2 * i) / sparkCount + (i % 2 === 0 ? 0.2 : -0.2);
+              const spDist = shockR * (0.6 + 0.5 * progress);
+              const spX = targetScreen.x + Math.cos(spAngle) * spDist;
+              const spY = targetScreen.y + (Math.sin(spAngle) * spDist) / 2;
+              this.ctx.fillStyle = i % 2 === 0 ? '#ffffff' : color;
               this.ctx.beginPath();
-              this.ctx.ellipse(s.x + offset, s.y + offset / 2, rx, rx / 2, 0, fromAngle, toAngle);
+              this.ctx.arc(spX, spY, Math.max(1, 3.5 * (1 - progress)), 0, Math.PI * 2);
+              this.ctx.fill();
+            }
+
+            // 5. Impact center flash
+            if (progress < 0.6) {
+              const flashAlpha = (1 - progress / 0.6);
+              this.ctx.fillStyle = '#ffffff';
+              this.ctx.globalAlpha = alpha * flashAlpha;
+              this.ctx.beginPath();
+              this.ctx.arc(targetScreen.x, targetScreen.y, 8 * flashAlpha, 0, Math.PI * 2);
+              this.ctx.fill();
+            }
+          } else if (v.slashStyle === 'beast_claw') {
+            // 3 parallel sharp razor claw swipes
+            const clawColor = v.color || '#ef4444';
+            this.ctx.shadowColor = clawColor;
+            this.ctx.shadowBlur = 12;
+            const spreadAngle = Math.PI * 0.6;
+            const fromAngle = phi - spreadAngle / 2;
+            const toAngle = fromAngle + spreadAngle * progress;
+
+            for (let offset = -10; offset <= 10; offset += 10) {
+              const curRx = Math.max(10, rx + offset * 0.8);
+              this.ctx.strokeStyle = offset === 0 ? '#ffffff' : clawColor;
+              this.ctx.lineWidth = offset === 0 ? 3 : 2;
+              this.ctx.beginPath();
+              this.ctx.ellipse(s.x + offset * 0.6, s.y + offset * 0.3, curRx, curRx / 2, 0, fromAngle, toAngle);
               this.ctx.stroke();
             }
           } else if (v.slashStyle === 'ground_fissure') {
-            // Linear jagged glowing magma cracking fissure
-            const len = rx * 1.3 * progress;
-            const cosA = Math.cos(v.angle || 0);
-            const sinA = Math.sin(v.angle || 0);
-            this.ctx.strokeStyle = '#ea580c';
-            this.ctx.shadowColor = '#f97316';
-            this.ctx.shadowBlur = 10;
-            this.ctx.lineWidth = 4;
+            // Linear jagged glowing magma fissure with sparks
+            const len = rx * 1.4 * progress;
+            const cosA = Math.cos(phi);
+            const sinA = Math.sin(phi);
+            this.ctx.strokeStyle = '#f97316';
+            this.ctx.shadowColor = '#ea580c';
+            this.ctx.shadowBlur = 14;
+            this.ctx.lineWidth = Math.max(1.5, 4.5 * (1 - progress * 0.5));
             this.ctx.beginPath();
             this.ctx.moveTo(s.x, s.y);
-            const steps = 6;
+            const steps = 7;
             for (let st = 1; st <= steps; st++) {
               const fract = st / steps;
-              const zig = (st % 2 === 0 ? 1 : -1) * 6;
-              const px = s.x + cosA * len * fract - sinA * zig;
+              const zig = (st % 2 === 0 ? 1 : -1) * 7 * (1 - fract * 0.3);
+              const px = s.x + cosA * len * fract - sinA * (zig * 0.5);
               const py = s.y + (sinA * len * fract + cosA * zig) / 2;
               this.ctx.lineTo(px, py);
             }
             this.ctx.stroke();
-          } else if (v.slashStyle === 'crush_hammer') {
-            // Heavy downward overhead hammer impact shockwave
-            const shockR = rx * progress;
-            this.ctx.strokeStyle = '#f59e0b';
-            this.ctx.lineWidth = 4;
-            this.ctx.beginPath();
-            this.ctx.ellipse(s.x + Math.cos(v.angle || 0) * (rx * 0.7), s.y + (Math.sin(v.angle || 0) * rx * 0.7) / 2, shockR, shockR / 2, 0, 0, Math.PI * 2);
-            this.ctx.stroke();
           } else if (v.slashStyle === 'thrust_spear') {
-            // Piercing concentrated spear thrust beam
-            const len = rx * 1.4 * Math.sin(progress * Math.PI);
-            const px = s.x + Math.cos(v.angle || 0) * len;
-            const py = s.y + (Math.sin(v.angle || 0) * len) / 2;
-            this.ctx.strokeStyle = '#e2e8f0';
-            this.ctx.shadowColor = '#60a5fa';
-            this.ctx.shadowBlur = 8;
-            this.ctx.lineWidth = 3;
+            // Piercing concentrated spear thrust beam & glint
+            const len = rx * 1.5 * Math.sin(progress * Math.PI);
+            const px = s.x + Math.cos(phi) * len;
+            const py = s.y + (Math.sin(phi) * len) / 2;
+            this.ctx.strokeStyle = v.color || '#e2e8f0';
+            this.ctx.shadowColor = v.color || '#60a5fa';
+            this.ctx.shadowBlur = 12;
+            this.ctx.lineWidth = 4 * (1 - progress * 0.4);
             this.ctx.beginPath();
             this.ctx.moveTo(s.x, s.y);
             this.ctx.lineTo(px, py);
             this.ctx.stroke();
 
-            // Glint star at tip
+            // Bright core line
+            this.ctx.strokeStyle = '#ffffff';
+            this.ctx.lineWidth = 2;
+            this.ctx.beginPath();
+            this.ctx.moveTo(s.x, s.y);
+            this.ctx.lineTo(px, py);
+            this.ctx.stroke();
+
+            // Glint starburst at tip
             this.ctx.fillStyle = '#ffffff';
             this.ctx.beginPath();
-            this.ctx.arc(px, py, 4, 0, Math.PI * 2);
+            this.ctx.arc(px, py, Math.max(1, 5 * (1 - progress)), 0, Math.PI * 2);
             this.ctx.fill();
           } else if (v.slashStyle === 'whirlwind_ring') {
-            // 360 spin dual steel blade storm ring
-            this.ctx.strokeStyle = '#cbd5e1';
-            this.ctx.lineWidth = 3;
+            // 360 spin double steel blade storm ring
+            const color = v.color || '#38bdf8';
+            this.ctx.strokeStyle = color;
+            this.ctx.shadowColor = color;
+            this.ctx.shadowBlur = 10;
+            this.ctx.lineWidth = Math.max(1.5, 3.5 * (1 - progress));
             this.ctx.beginPath();
             this.ctx.ellipse(s.x, s.y, rx, rx / 2, progress * Math.PI * 4, 0, Math.PI * 2);
             this.ctx.stroke();
-          } else {
-            // Greatsword cleave / standard wide slash arc
-            const halfSpread = (v.spread || Math.PI * 0.6) / 2;
-            const fromAngle = (v.angle || 0) - halfSpread;
-            const toAngle = fromAngle + (v.spread || Math.PI * 0.6) * progress;
 
-            this.ctx.strokeStyle = v.color || '#f59e0b';
+            this.ctx.strokeStyle = '#ffffff';
+            this.ctx.lineWidth = 1.5;
+            this.ctx.beginPath();
+            this.ctx.ellipse(s.x, s.y, rx * 0.65, (rx * 0.65) / 2, -progress * Math.PI * 4, 0, Math.PI * 2);
+            this.ctx.stroke();
+          } else if (v.slashStyle === 'holy_smite') {
+            // Descending radiant golden sword of light
+            const color = '#fde047';
+            this.ctx.strokeStyle = '#ffffff';
+            this.ctx.shadowColor = color;
+            this.ctx.shadowBlur = 16;
+            this.ctx.lineWidth = 4;
+            const dropDist = 45 * (1 - progress);
+            this.ctx.beginPath();
+            this.ctx.moveTo(targetScreen.x, targetScreen.y - dropDist - 25);
+            this.ctx.lineTo(targetScreen.x, targetScreen.y);
+            this.ctx.stroke();
+
+            // Golden cross flash on ground
+            const crossLen = rx * 0.7 * (1 - progress);
+            this.ctx.strokeStyle = color;
+            this.ctx.lineWidth = 2.5;
+            this.ctx.beginPath();
+            this.ctx.moveTo(targetScreen.x - crossLen, targetScreen.y);
+            this.ctx.lineTo(targetScreen.x + crossLen, targetScreen.y);
+            this.ctx.moveTo(targetScreen.x, targetScreen.y - crossLen / 2);
+            this.ctx.lineTo(targetScreen.x, targetScreen.y + crossLen / 2);
+            this.ctx.stroke();
+          } else if (v.slashStyle === 'shadow_strike') {
+            // Dark purple void cross slash
+            const color = '#a855f7';
+            this.ctx.strokeStyle = color;
+            this.ctx.shadowColor = '#581c87';
+            this.ctx.shadowBlur = 14;
             this.ctx.lineWidth = 3.5;
+            const arm = rx * 0.8 * progress;
+            this.ctx.beginPath();
+            this.ctx.moveTo(targetScreen.x - arm, targetScreen.y - arm / 2);
+            this.ctx.lineTo(targetScreen.x + arm, targetScreen.y + arm / 2);
+            this.ctx.moveTo(targetScreen.x + arm, targetScreen.y - arm / 2);
+            this.ctx.lineTo(targetScreen.x - arm, targetScreen.y + arm / 2);
+            this.ctx.stroke();
+          } else {
+            // Greatsword cleave / standard sweeping blade arc
+            const spread = v.spread || Math.PI * 0.75;
+            const halfSpread = spread / 2;
+            const fromAngle = phi - halfSpread;
+            const toAngle = fromAngle + spread * progress;
+            const color = v.color || '#f59e0b';
+
+            // Outer elemental glowing arc
+            this.ctx.strokeStyle = color;
+            this.ctx.shadowColor = color;
+            this.ctx.shadowBlur = 12;
+            this.ctx.lineWidth = Math.max(1.5, 4.5 * (1 - progress * 0.3));
             this.ctx.beginPath();
             this.ctx.ellipse(s.x, s.y, rx, rx / 2, 0, fromAngle, toAngle);
             this.ctx.stroke();
+
+            // Inner bright razor blade core
+            this.ctx.strokeStyle = '#ffffff';
+            this.ctx.lineWidth = 2;
+            this.ctx.beginPath();
+            this.ctx.ellipse(s.x, s.y, rx, rx / 2, 0, fromAngle, toAngle);
+            this.ctx.stroke();
+
+            // Leading blade edge spoke
+            const tipX = s.x + rx * Math.cos(toAngle);
+            const tipY = s.y + (rx / 2) * Math.sin(toAngle);
+            this.ctx.beginPath();
+            this.ctx.moveTo(s.x, s.y);
+            this.ctx.lineTo(tipX, tipY);
+            this.ctx.stroke();
+
+            // Tip spark glint
+            this.ctx.fillStyle = '#ffffff';
+            this.ctx.beginPath();
+            this.ctx.arc(tipX, tipY, Math.max(1, 4 * (1 - progress)), 0, Math.PI * 2);
+            this.ctx.fill();
           }
 
           this.ctx.restore();
@@ -2808,6 +3066,11 @@ export class RenderSystem {
         grad.addColorStop(0.2, "#e11d48");
         grad.addColorStop(0.6, "#991b1b");
         grad.addColorStop(1, "#450a0a");
+      } else if (colorType === "stamina") {
+        grad.addColorStop(0, "#4ade80");
+        grad.addColorStop(0.2, "#22c55e");
+        grad.addColorStop(0.6, "#15803d");
+        grad.addColorStop(1, "#052e16");
       } else {
         grad.addColorStop(0, "#38bdf8");
         grad.addColorStop(0.2, "#2563eb");
@@ -2823,7 +3086,9 @@ export class RenderSystem {
         const halfWidth = Math.sqrt(Math.max(0, rInner * rInner - Math.pow(liquidTopY - cy, 2)));
         ctx.beginPath();
         ctx.ellipse(cx, liquidTopY, halfWidth, 3, 0, 0, Math.PI * 2);
-        ctx.fillStyle = colorType === "life" ? "rgba(255, 200, 210, 0.85)" : "rgba(200, 240, 255, 0.85)";
+        ctx.fillStyle = colorType === "life"
+          ? "rgba(255, 200, 210, 0.85)"
+          : (colorType === "stamina" ? "rgba(210, 255, 220, 0.85)" : "rgba(200, 240, 255, 0.85)");
         ctx.fill();
       }
 
@@ -2890,7 +3155,7 @@ export class RenderSystem {
     ctx.font = "bold 11px sans-serif";
     ctx.lineWidth = 3;
     ctx.strokeStyle = "rgba(0, 0, 0, 0.95)";
-    ctx.fillStyle = colorType === "life" ? "#fca5a5" : "#93c5fd";
+    ctx.fillStyle = colorType === "life" ? "#fca5a5" : (colorType === "stamina" ? "#86efac" : "#93c5fd");
     ctx.strokeText(label, cx, cy - 9);
     ctx.fillText(label, cx, cy - 9);
 
@@ -2905,6 +3170,201 @@ export class RenderSystem {
     ctx.fillStyle = "#ffffff";
     ctx.strokeText(valString, cx, cy + 9);
     ctx.fillText(valString, cx, cy + 9);
+
+    ctx.restore();
+  }
+
+  _drawPoEDualOrb(cx, cy, radius, manaCurrent, manaMax, staminaCurrent, staminaMax) {
+    const ctx = this.ctx;
+    const curMana = manaCurrent != null ? Number(manaCurrent) : 0;
+    const maxManaVal = manaMax != null && Number(manaMax) > 0 ? Number(manaMax) : 100;
+    const manaPct = Math.max(0, Math.min(1, curMana / maxManaVal));
+
+    const curStam = staminaCurrent != null ? Number(staminaCurrent) : 100;
+    const maxStamVal = staminaMax != null && Number(staminaMax) > 0 ? Number(staminaMax) : 100;
+    const stamPct = Math.max(0, Math.min(1, curStam / maxStamVal));
+
+    const rInner = radius - 4;
+
+    ctx.save();
+
+    // 1. Dark translucent backdrop for empty glass container
+    ctx.beginPath();
+    ctx.arc(cx, cy, rInner, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(10, 12, 22, 0.6)";
+    ctx.fill();
+
+    // 2. Liquid fills
+    // Left half: Mana (Blue liquid, bottom to top)
+    if (manaPct > 0) {
+      ctx.save();
+      // Clip to left semicircle
+      ctx.beginPath();
+      ctx.arc(cx, cy, rInner, Math.PI * 0.5, Math.PI * 1.5, false);
+      ctx.closePath();
+      ctx.clip();
+
+      const liquidHeight = 2 * rInner * manaPct;
+      const liquidTopY = (cy + rInner) - liquidHeight;
+
+      const grad = ctx.createLinearGradient(cx, liquidTopY, cx, cy + rInner);
+      grad.addColorStop(0, "#38bdf8");
+      grad.addColorStop(0.2, "#2563eb");
+      grad.addColorStop(0.6, "#1d4ed8");
+      grad.addColorStop(1, "#0f172a");
+
+      ctx.fillStyle = grad;
+      ctx.fillRect(cx - rInner - 2, liquidTopY, rInner + 3, liquidHeight + 4);
+
+      // Glowing liquid surface edge (meniscus)
+      if (manaPct > 0.02 && manaPct < 0.98) {
+        const halfWidth = Math.sqrt(Math.max(0, rInner * rInner - Math.pow(liquidTopY - cy, 2)));
+        ctx.beginPath();
+        ctx.ellipse(cx, liquidTopY, halfWidth, 3, 0, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(200, 240, 255, 0.85)";
+        ctx.fill();
+      }
+
+      ctx.restore();
+    }
+
+    // Right half: Stamina (Green liquid, bottom to top)
+    if (stamPct > 0) {
+      ctx.save();
+      // Clip to right semicircle
+      ctx.beginPath();
+      ctx.arc(cx, cy, rInner, -Math.PI * 0.5, Math.PI * 0.5, false);
+      ctx.closePath();
+      ctx.clip();
+
+      const liquidHeight = 2 * rInner * stamPct;
+      const liquidTopY = (cy + rInner) - liquidHeight;
+
+      const grad = ctx.createLinearGradient(cx, liquidTopY, cx, cy + rInner);
+      grad.addColorStop(0, "#4ade80");
+      grad.addColorStop(0.2, "#22c55e");
+      grad.addColorStop(0.6, "#15803d");
+      grad.addColorStop(1, "#052e16");
+
+      ctx.fillStyle = grad;
+      ctx.fillRect(cx - 1, liquidTopY, rInner + 3, liquidHeight + 4);
+
+      // Glowing liquid surface edge (meniscus)
+      if (stamPct > 0.02 && stamPct < 0.98) {
+        const halfWidth = Math.sqrt(Math.max(0, rInner * rInner - Math.pow(liquidTopY - cy, 2)));
+        ctx.beginPath();
+        ctx.ellipse(cx, liquidTopY, halfWidth, 3, 0, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(210, 255, 220, 0.85)";
+        ctx.fill();
+      }
+
+      ctx.restore();
+    }
+
+    // 3. Inner orb depth vignette and subtle vertical divider
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, rInner, 0, Math.PI * 2);
+    ctx.clip();
+
+    const vignette = ctx.createRadialGradient(cx, cy, rInner * 0.4, cx, cy, rInner);
+    vignette.addColorStop(0, "rgba(0, 0, 0, 0)");
+    vignette.addColorStop(0.8, "rgba(0, 0, 0, 0.15)");
+    vignette.addColorStop(1, "rgba(0, 0, 0, 0.6)");
+    ctx.fillStyle = vignette;
+    ctx.fillRect(cx - rInner, cy - rInner, 2 * rInner, 2 * rInner);
+
+    // Subtle glass center seam / divider
+    const dividerGrad = ctx.createLinearGradient(cx, cy - rInner, cx, cy + rInner);
+    dividerGrad.addColorStop(0, "rgba(255, 255, 255, 0.4)");
+    dividerGrad.addColorStop(0.5, "rgba(15, 23, 42, 0.9)");
+    dividerGrad.addColorStop(1, "rgba(255, 255, 255, 0.4)");
+    ctx.strokeStyle = dividerGrad;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - rInner);
+    ctx.lineTo(cx, cy + rInner);
+    ctx.stroke();
+
+    ctx.restore();
+
+    // 4. Glass specular reflection highlight (top-left 3D dome)
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, rInner, 0, Math.PI * 2);
+    ctx.clip();
+
+    const specGrad = ctx.createLinearGradient(cx, cy - rInner, cx, cy);
+    specGrad.addColorStop(0, "rgba(255, 255, 255, 0.45)");
+    specGrad.addColorStop(0.5, "rgba(255, 255, 255, 0.08)");
+    specGrad.addColorStop(1, "rgba(255, 255, 255, 0)");
+
+    ctx.beginPath();
+    ctx.ellipse(cx, cy - rInner * 0.45, rInner * 0.6, rInner * 0.3, 0, 0, Math.PI * 2);
+    ctx.fillStyle = specGrad;
+    ctx.fill();
+    ctx.restore();
+
+    // 5. Outer metallic bezel ring
+    const bezelGrad = ctx.createLinearGradient(cx - radius, cy - radius, cx + radius, cy + radius);
+    bezelGrad.addColorStop(0, "#94a3b8");
+    bezelGrad.addColorStop(0.3, "#475569");
+    bezelGrad.addColorStop(0.7, "#1e293b");
+    bezelGrad.addColorStop(1, "#0f172a");
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius - 2, 0, Math.PI * 2);
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = bezelGrad;
+    ctx.stroke();
+
+    // Outer edge rim
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.85)";
+    ctx.stroke();
+
+    // Inner rim
+    ctx.beginPath();
+    ctx.arc(cx, cy, rInner, 0, Math.PI * 2);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.6)";
+    ctx.stroke();
+
+    // 6. Labels & Numerical readouts
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    // Small category labels
+    ctx.font = "bold 11px sans-serif";
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.95)";
+
+    // Left Label: MP
+    ctx.fillStyle = "#93c5fd";
+    ctx.strokeText("MP", cx - 18, cy - 9);
+    ctx.fillText("MP", cx - 18, cy - 9);
+
+    // Right Label: SP
+    ctx.fillStyle = "#86efac";
+    ctx.strokeText("SP", cx + 18, cy - 9);
+    ctx.fillText("SP", cx + 18, cy - 9);
+
+    // Number values
+    const displayMana = manaCurrent != null ? Math.round(manaCurrent) : "-";
+    const displayStam = staminaCurrent != null ? Math.round(staminaCurrent) : "-";
+
+    ctx.font = "bold 11px monospace";
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.95)";
+    ctx.fillStyle = "#ffffff";
+
+    ctx.strokeText(`${displayMana}`, cx - 18, cy + 9);
+    ctx.fillText(`${displayMana}`, cx - 18, cy + 9);
+
+    ctx.strokeText(`${displayStam}`, cx + 18, cy + 9);
+    ctx.fillText(`${displayStam}`, cx + 18, cy + 9);
 
     ctx.restore();
   }
@@ -3022,7 +3482,7 @@ export class RenderSystem {
     ctx.restore();
   }
 
-  _drawSkillBar(skills = null, hitAreas = null, hoverSlot = null, drag = null, activeForm = null, flashSlot = null, skillCooldowns = null) {
+  _drawSkillBar(skills = null, hitAreas = null, hoverSlot = null, drag = null, activeForm = null, flashSlot = null, skillCooldowns = null, playerStats = null, equippedWeapon = null, keybinds = null) {
     const ctx = this.ctx;
     if (!ctx) return;
 
@@ -3121,6 +3581,12 @@ export class RenderSystem {
       const reqForm = skill ? getRequiredForm(skill) : null;
       const isFormLocked = reqForm && reqForm !== activeForm;
 
+      // PoE Gem Requirement check (Attributes, Level, Weapon)
+      const req = (skill && (playerStats || equippedWeapon))
+        ? checkGemRequirements(skill, playerStats, equippedWeapon)
+        : null;
+      const isReqUnmet = req && !req.ok;
+
       // Cooldown state
       const readyAt = (skill && skillCooldowns)
         ? (typeof skillCooldowns.get === 'function' ? skillCooldowns.get(skill.id) : skillCooldowns[skill.id])
@@ -3143,6 +3609,9 @@ export class RenderSystem {
       } else if (isFormActive) {
         slotGrad.addColorStop(0, "rgba(21, 128, 61, 0.95)");
         slotGrad.addColorStop(1, "rgba(22, 101, 52, 0.98)");
+      } else if (isReqUnmet) {
+        slotGrad.addColorStop(0, "rgba(42, 12, 18, 0.92)");
+        slotGrad.addColorStop(1, "rgba(22, 8, 12, 0.96)");
       } else if (isHovered) {
         slotGrad.addColorStop(0, "rgba(76, 29, 149, 0.95)");
         slotGrad.addColorStop(1, "rgba(46, 16, 101, 0.98)");
@@ -3160,6 +3629,9 @@ export class RenderSystem {
       } else if (isFormActive) {
         ctx.lineWidth = 2;
         ctx.strokeStyle = "#4ade80";
+      } else if (isReqUnmet) {
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = isHovered ? "rgba(248, 113, 113, 0.9)" : "rgba(239, 68, 68, 0.7)";
       } else if (isHovered) {
         ctx.lineWidth = 2;
         ctx.strokeStyle = "#fbbf24";
@@ -3180,17 +3652,29 @@ export class RenderSystem {
       // Skill slot content or placeholder glyph
       if (skill && (skill.nameUk || skill.nameEn || skill.name)) {
         const sName = skill.nameUk || skill.nameEn || skill.name;
+        if (isReqUnmet) {
+          ctx.save();
+          ctx.globalAlpha = 0.38;
+        }
         if (skill.icon) {
           ctx.font = "18px sans-serif";
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
           ctx.fillText(skill.icon, sx + slotSize / 2, sy + slotSize / 2 + 1);
         } else {
-          ctx.fillStyle = "#ffffff";
+          ctx.fillStyle = isReqUnmet ? "#94a3b8" : "#ffffff";
           ctx.font = "bold 11px sans-serif";
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
           ctx.fillText(sName.slice(0, 2).toUpperCase(), sx + slotSize / 2, sy + slotSize / 2);
+        }
+        if (isReqUnmet) {
+          ctx.restore();
+          // Warning indicator on top-right of slot
+          ctx.font = "bold 9px sans-serif";
+          ctx.textAlign = "right";
+          ctx.textBaseline = "top";
+          ctx.fillText("⚠️", sx + slotSize - 1, sy + 1);
         }
 
         // If form requirement is not met, show dimmed lock overlay
@@ -3248,15 +3732,23 @@ export class RenderSystem {
         ctx.stroke();
       }
 
-      // Hotkey badge (1..9) in top-left
+      // Hotkey badge in top-left
+      const boundKey = (keybinds && keybinds[`slot${keyNum}`]) || `${keyNum}`;
+      let label = String(boundKey).toUpperCase();
+      if (label === 'MOUSE2' || label === 'RMB' || label === 'RIGHT CLICK' || label === 'RIGHTCLICK') label = 'RMB';
+      else if (label === 'MOUSE1' || label === 'LMB' || label === 'LEFT CLICK' || label === 'LEFTCLICK') label = 'LMB';
+      else if (label === 'MOUSE3' || label === 'MMB') label = 'MMB';
+      else if (label === 'SPACE' || label === ' ') label = 'SPC';
+      else if (label.length > 3) label = label.slice(0, 3);
+
       ctx.font = "bold 10px monospace";
       ctx.lineWidth = 2.5;
       ctx.strokeStyle = "rgba(0, 0, 0, 0.95)";
-      ctx.fillStyle = isHovered ? "#fef08a" : "#d8b4fe";
+      ctx.fillStyle = isHovered ? "#fef08a" : (isReqUnmet ? "#f87171" : "#d8b4fe");
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
-      ctx.strokeText(`${keyNum}`, sx + 3, sy + 2);
-      ctx.fillText(`${keyNum}`, sx + 3, sy + 2);
+      ctx.strokeText(label, sx + 3, sy + 2);
+      ctx.fillText(label, sx + 3, sy + 2);
     }
 
     ctx.restore();
@@ -3358,7 +3850,13 @@ export class RenderSystem {
     ctx.restore();
   }
 
-  renderHud({ player, remotePlayers, localUserId, mana = null, maxMana = null, showMana = true, stamina = null, maxStamina = null, weaponName = null, ammo = null, noAmmoFlash = false, effects = null, gold = null, progression = null, skills = null, hitAreas = null, hoverSlot = null, drag = null, activeForm = null, flashSlot = null, skillCooldowns = null, activeBuffs = [] }) {
+  renderHud({
+    player, remotePlayers, localUserId, mana = null, maxMana = null, showMana = true,
+    stamina = null, maxStamina = null, weaponName = null, ammo = null, noAmmoFlash = false,
+    effects = null, gold = null, progression = null, skills = null, hitAreas = null,
+    hoverSlot = null, drag = null, activeForm = null, flashSlot = null, skillCooldowns = null,
+    activeBuffs = [], playerStats = null, equippedWeapon = null, keybinds = null
+  }) {
     if (!player) return;
 
     const orbRadius = 48;
@@ -3371,15 +3869,21 @@ export class RenderSystem {
     const effectiveHp = player.hp != null ? player.hp + hpBonus : effectiveMaxHp;
     this._drawPoEOrb(hpX, hpY, orbRadius, effectiveHp, effectiveMaxHp, "HP", "life");
 
-    // Bottom-right Mana / MP Orb (Path of Exile style)
+    // Bottom-right Resource Orb (Path of Exile style): Dual Mana/Stamina or Single Stamina for Cultist
+    const mpX = GAME_WIDTH - orbRadius - 16;
+    const mpY = GAME_HEIGHT - orbRadius - 16;
+    const curStamina = stamina != null ? stamina : (player.stamina != null ? player.stamina : 100);
+    const curMaxStamina = maxStamina != null && Number(maxStamina) > 0 ? maxStamina : (player.maxStamina != null ? player.maxStamina : 100);
+
     if (showMana) {
-      const mpX = GAME_WIDTH - orbRadius - 16;
-      const mpY = GAME_HEIGHT - orbRadius - 16;
-      this._drawPoEOrb(mpX, mpY, orbRadius, mana, maxMana, "MP", "mana");
+      this._drawPoEDualOrb(mpX, mpY, orbRadius, mana, maxMana, curStamina, curMaxStamina);
+    } else {
+      // For Cultist (usesLifeCost === true / showMana === false): show ONLY stamina
+      this._drawPoEOrb(mpX, mpY, orbRadius, curStamina, curMaxStamina, "SP", "stamina");
     }
 
     // Skills panel (slots 1-9) right above the level bar
-    this._drawSkillBar(skills, hitAreas, hoverSlot, drag, activeForm, flashSlot, skillCooldowns);
+    this._drawSkillBar(skills, hitAreas, hoverSlot, drag, activeForm, flashSlot, skillCooldowns, playerStats, equippedWeapon, keybinds);
 
     // Active buffs list panel in top-left
     this._drawActiveBuffs(activeBuffs);

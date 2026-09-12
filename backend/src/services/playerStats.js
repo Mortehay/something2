@@ -233,7 +233,8 @@ function derivePlayerStats(progression, classPools = null) {
     // what stops world.js re-deriving its own floor from C.MIN_COOLDOWN_MULT
     // and silently ignoring a player's cooldownFloor node.
     cooldownFloor: cooldownFloorOf(progression),
-    manaRegen: round4(C.MANA_REGEN_BASE + C.MANA_REGEN_PER_WIS * above('wisdom')),
+    hpRegen: Math.max(0, round4(C.HP_REGEN_BASE + C.HP_REGEN_PER_CON * above('constitution') + (rulesOf(progression).hpRegen || 0))),
+    manaRegen: round4(C.MANA_REGEN_BASE + C.MANA_REGEN_PER_WIS * above('wisdom') + C.MANA_REGEN_PER_INT * above('intelligence') + (rulesOf(progression).manaRegen || 0)),
     // The fraction of an item's value a merchant pays. Capped strictly below
     // 1.0: see SELL_FRACTION_MAX in progressionConstants.js -- this is a
     // safety bound against an infinite-gold loop, not a balance knob.
@@ -262,6 +263,14 @@ function derivePlayerStats(progression, classPools = null) {
     damageMult: damageMultOf(progression),
     resists: resistsOf(progression),
     hitStatuses: hitStatusesOf(progression),
+    level: progression?.level ?? 1,
+    strength: stat(progression, 'strength'),
+    dexterity: stat(progression, 'dexterity'),
+    constitution: stat(progression, 'constitution'),
+    intelligence: stat(progression, 'intelligence'),
+    wisdom: stat(progression, 'wisdom'),
+    charisma: stat(progression, 'charisma'),
+    sources: (progression && progression.sources) || null,
   };
 }
 

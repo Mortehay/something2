@@ -1,4 +1,4 @@
-// backend/seeds/generatePassiveTree.js
+  // backend/seeds/generatePassiveTree.js
 //
 // Expands the authored spec in data/passiveTree.js into the ~1800 rows the
 // database holds. PURE, and deterministic in the strongest sense the contract

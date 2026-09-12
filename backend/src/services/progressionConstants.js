@@ -106,11 +106,16 @@ const AURA_MAX_TARGETS = 6;
 // scale with tick rate and its numbers are authored in life-per-second.
 const AURA_INTERVAL_S = 1;
 
-// WIS -> mana regen. Base matches PLAYER_MANA_REGEN (authority/world.js:19).
-// Contrary to the design doc, mana regen ALREADY EXISTS -- WIS scales a live
+// WIS & INT -> mana regen. Base matches PLAYER_MANA_REGEN (authority/world.js:19).
+// Contrary to the design doc, mana regen ALREADY EXISTS -- WIS and INT scale a live
 // constant here, it does not introduce a new tick.
 const MANA_REGEN_BASE = 10;
 const MANA_REGEN_PER_WIS = 0.5;
+const MANA_REGEN_PER_INT = 0.5;
+
+// Base passive HP regeneration (HP/s) and CON scaling.
+const HP_REGEN_BASE = 1;
+const HP_REGEN_PER_CON = 0.1;
 
 // CHA -> merchant sell price. SELL_FRACTION_BASE matches merchantStock.js's
 // existing SELL_FRACTION.
@@ -171,12 +176,12 @@ const RESPEC_BASE = 50;
 
 module.exports = {
   BASE_STAT, STAT_KEYS, MAX_LEVEL,
-  HP_BASE, HP_PER_CON, MANA_BASE, MANA_PER_INT, STAMINA_BASE,
+  HP_BASE, HP_PER_CON, HP_REGEN_BASE, HP_REGEN_PER_CON, MANA_BASE, MANA_PER_INT, STAMINA_BASE,
   MELEE_PER_STR, SPELL_PER_INT, HASTE_PER_DEX, MIN_COOLDOWN_MULT,
   PROJECTILE_FAN_RAD, AURA_BASE_RADIUS, AURA_MAX_TARGETS, AURA_INTERVAL_S,
   MIN_MELEE_REACH, MIN_MELEE_ARC,
   WAVE_DURATION_S, WAVE_MAX_STACKS, WAVE_INTERVAL_S,
-  MANA_REGEN_BASE, MANA_REGEN_PER_WIS,
+  MANA_REGEN_BASE, MANA_REGEN_PER_WIS, MANA_REGEN_PER_INT,
   PRICE_PER_CHA, SELL_FRACTION_BASE, SELL_FRACTION_MAX,
   XP_BASE, XP_EXPONENT, XP_KILL_BASE, XP_LEVEL_DIFF_SLOPE, XP_LEVEL_DIFF_MAX,
   DEATH_PENALTY_MIN, DEATH_PENALTY_MAX, RESPEC_BASE,

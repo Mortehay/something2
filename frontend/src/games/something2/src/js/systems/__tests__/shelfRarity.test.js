@@ -384,8 +384,8 @@ describe("SOMET-500/502: one instance, one colour, on every screen that lists it
 // growing back.
 
 describe("the panels resolve rarity through the shared module, not their own copy", () => {
-  const RENDER_SRC = readFileSync(new URL("../RenderSystem.js", import.meta.url), "utf8");
-  const PANEL_SRC = readFileSync(new URL("../inventoryPanel.js", import.meta.url), "utf8");
+  const RENDER_SRC = readFileSync(new URL("../RenderSystem.js", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  const PANEL_SRC = readFileSync(new URL("../inventoryPanel.js", import.meta.url), "utf8").replace(/\r\n/g, "\n");
 
   function methodBody(name) {
     const start = RENDER_SRC.indexOf(`\n  ${name}(ctx`);

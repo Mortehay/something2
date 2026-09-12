@@ -30,6 +30,7 @@ export const RULE_KEYS = [
   'attackSpeedMult', 'castSpeedMult', 'meleeReachBonus', 'meleeArcBonus',
   'projectileCount', 'projectileSpeedMult', 'pierceBonus',
   'auraLeech', 'auraRadius', 'meleeDamageMult', 'meleeWaveShare',
+  'hpRegen', 'manaRegen',
 ];
 
 // `field` is the extra key this grant type carries, and `options` is what the

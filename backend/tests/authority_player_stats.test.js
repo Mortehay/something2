@@ -331,9 +331,9 @@ test('regenLifeShare heals a share of the mana ACTUALLY regenerated', () => {
   const p = w.getPlayer('u1');
   p.mana = 0;
   p.hp = 10;
-  w.tick(1); // manaRegen is 10/s at base wisdom -> +10 mana -> +5 hp at 0.5
+  w.tick(1); // manaRegen is 10/s at base wisdom -> +10 mana -> +5 hp at 0.5 (+ 1 base hp regen = 16)
   assert.equal(p.mana, 10);
-  assert.equal(p.hp, 15);
+  assert.equal(p.hp, 16);
 });
 
 // The share rides the mana that actually landed, not the nominal rate. A Monk
@@ -346,7 +346,7 @@ test('a player at full mana gains no life from the rider', () => {
   p.mana = p.maxMana;
   p.hp = 10;
   w.tick(1);
-  assert.equal(p.hp, 10, 'no mana was regenerated, so no life may be restored');
+  assert.equal(p.hp, 11, 'no mana was regenerated, so only base hp regen restored life');
 });
 
 // Partial regeneration: only 4 mana fits before the cap, so only 4 * share
@@ -359,10 +359,10 @@ test('the rider is capped by the mana that fit, not by the regen rate', () => {
   p.hp = 10;
   w.tick(1);
   assert.equal(p.mana, p.maxMana);
-  assert.equal(p.hp, 12, 'only the 4 mana that fit may be shared, not the full 10/s rate');
+  assert.equal(p.hp, 13, 'only the 4 mana that fit may be shared (+2) + 1 base hp regen');
 });
 
-test('a player with no such node allocated regenerates mana and no life', () => {
+test('a player with no such node allocated regenerates mana and only base hp', () => {
   const w = armWorld();
   w.addPlayer('u1', { x: 100, y: 100 }, undefined, undefined, 0, BASE_STATS);
   const p = w.getPlayer('u1');
@@ -370,7 +370,26 @@ test('a player with no such node allocated regenerates mana and no life', () => 
   p.hp = 10;
   w.tick(1);
   assert.equal(p.mana, 10);
-  assert.equal(p.hp, 10, 'the identity is 0 -- an unallocated player must be unmoved');
+  assert.equal(p.hp, 11, 'the rider identity is 0 -- player receives only base hp regen');
+});
+
+test('passive hpRegen heals the player over time and scales with tree nodes', () => {
+  {
+    const w = armWorld();
+    w.addPlayer('u1', { x: 100, y: 100 }, undefined, undefined, 0, BASE_STATS);
+    const p = w.getPlayer('u1');
+    p.hp = 10;
+    w.tick(1);
+    assert.equal(p.hp, 11, 'base HP regen is 1 HP/s');
+  }
+  {
+    const w = armWorld();
+    w.addPlayer('u1', { x: 100, y: 100 }, undefined, undefined, 0, withRules({ hpRegen: 2.5 }));
+    const p = w.getPlayer('u1');
+    p.hp = 10;
+    w.tick(1);
+    assert.equal(p.hp, 13.5, '1 base + 2.5 tree hpRegen = 3.5 HP/s');
+  }
 });
 
 test('the rider never overheals past maxHp', () => {
@@ -715,11 +734,11 @@ function packWorld(rules, n, dist = 60) {
   return { world: w, player: p };
 }
 
-test('a player with no aura node is entirely unaffected', () => {
+test('a player with no aura node is entirely unaffected by aura', () => {
   const { world, player } = packWorld(null, 4);
   player.hp = 10;
   world.tick(1);
-  assert.equal(player.hp, 10);
+  assert.equal(player.hp, 11);
   assert.equal(world.snapshot().players[0].aura, undefined,
     'no aura means no wire field at all');
 });
@@ -728,7 +747,7 @@ test('the aura heals per hostile inside it, once a second', () => {
   const { world, player } = packWorld({ auraLeech: 2 }, 3);
   player.hp = 10;
   world.tick(1);
-  assert.equal(player.hp, 16, '3 creatures * 2 life');
+  assert.equal(player.hp, 17, '3 creatures * 2 life + 1 base hp regen');
 });
 
 // Sub-second frames must accumulate rather than each firing a full second's
@@ -737,7 +756,7 @@ test('the aura is per second, not per frame', () => {
   const { world, player } = packWorld({ auraLeech: 2 }, 3);
   player.hp = 10;
   for (let i = 0; i < 10; i += 1) world.tick(0.1); // 1.0s total
-  assert.equal(player.hp, 16, 'ten 0.1s frames must heal exactly one second');
+  assert.ok(Math.abs(player.hp - 17) < 1e-6, 'ten 0.1s frames must heal exactly one second (+ 1 base hp regen)');
 });
 
 // THE CAP. A world can hold 12-creature packs; uncapped this is unkillable
@@ -753,7 +772,7 @@ test('the heal stops at the target cap', () => {
   twelve.world.tick(1);
   assert.equal(twelve.player.hp - 10, sixHeal,
     'twelve creatures must heal exactly what six do');
-  assert.equal(sixHeal, 12, '6 capped creatures * 2 life');
+  assert.equal(sixHeal, 13, '6 capped creatures * 2 life + 1 base hp regen');
 });
 
 test('creatures outside the radius do not count, and auraRadius extends it', () => {
@@ -761,13 +780,13 @@ test('creatures outside the radius do not count, and auraRadius extends it', () 
     const { world, player } = packWorld({ auraLeech: 2 }, 3, 160); // outside 120
     player.hp = 10;
     world.tick(1);
-    assert.equal(player.hp, 10, 'creatures at 160px are outside the 120px base radius');
+    assert.equal(player.hp, 11, 'creatures at 160px are outside the 120px base radius (only base regen)');
   }
   {
     const { world, player } = packWorld({ auraLeech: 2, auraRadius: 80 }, 3, 160);
     player.hp = 10;
     world.tick(1);
-    assert.equal(player.hp, 16, 'auraRadius 80 must bring 160px inside');
+    assert.equal(player.hp, 17, 'auraRadius 80 must bring 160px inside (+ 1 base regen)');
   }
 });
 

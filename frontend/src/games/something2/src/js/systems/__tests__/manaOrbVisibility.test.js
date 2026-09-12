@@ -17,31 +17,41 @@ import { RenderSystem } from "../RenderSystem.js";
 function hudWithOrbSpy(props) {
   const rs = Object.create(RenderSystem.prototype);
   const orbs = [];
-  rs._drawPoEOrb = (cx, cy, radius, current, max, label) => {
-    orbs.push({ label, current, max });
+  rs._drawPoEOrb = (cx, cy, radius, current, max, label, colorType) => {
+    orbs.push({ kind: "single", label, current, max, colorType });
+  };
+  rs._drawPoEDualOrb = (cx, cy, radius, manaCurrent, manaMax, staminaCurrent, staminaMax) => {
+    orbs.push({ kind: "dual", label: "MP/SP", manaCurrent, manaMax, staminaCurrent, staminaMax });
   };
   rs._drawXpBar = () => {};
   rs.renderHud({ player: { hp: 42, maxHp: 110 }, ...props });
   return orbs;
 }
 
-describe("renderHud mana orb", () => {
-  it("draws both orbs for an ordinary mana class", () => {
-    const orbs = hudWithOrbSpy({ mana: 30, maxMana: 100, showMana: true });
-    expect(orbs.map((o) => o.label)).toEqual(["HP", "MP"]);
+describe("renderHud resource orbs", () => {
+  it("draws HP orb and dual MP/SP orb for an ordinary mana class", () => {
+    const orbs = hudWithOrbSpy({ mana: 30, maxMana: 100, stamina: 80, maxStamina: 100, showMana: true });
+    expect(orbs.map((o) => o.label)).toEqual(["HP", "MP/SP"]);
+    expect(orbs[1]).toEqual({
+      kind: "dual",
+      label: "MP/SP",
+      manaCurrent: 30,
+      manaMax: 100,
+      staminaCurrent: 80,
+      staminaMax: 100,
+    });
   });
 
-  it("still draws both orbs when showMana is not supplied at all", () => {
-    // Every pre-472 caller omits the flag; the default must be the old HUD.
-    const orbs = hudWithOrbSpy({ mana: 30, maxMana: 100 });
-    expect(orbs.map((o) => o.label)).toEqual(["HP", "MP"]);
+  it("still draws dual orb when showMana is not supplied at all", () => {
+    const orbs = hudWithOrbSpy({ mana: 30, maxMana: 100, stamina: 50, maxStamina: 100 });
+    expect(orbs.map((o) => o.label)).toEqual(["HP", "MP/SP"]);
   });
 
-  it("draws NO mana orb for a life-cost class, rather than an empty one", () => {
-    const orbs = hudWithOrbSpy({ mana: 90, maxMana: 90, showMana: false });
-    expect(orbs.map((o) => o.label)).toEqual(["HP"]);
-    // The HP orb is untouched -- it is the Cultist's whole resource readout.
-    expect(orbs[0]).toEqual({ label: "HP", current: 42, max: 110 });
+  it("draws SP (stamina) orb for a life-cost class (Cultist), instead of MP", () => {
+    const orbs = hudWithOrbSpy({ mana: 90, maxMana: 90, stamina: 75, maxStamina: 100, showMana: false });
+    expect(orbs.map((o) => o.label)).toEqual(["HP", "SP"]);
+    expect(orbs[0]).toEqual({ kind: "single", label: "HP", current: 42, max: 110, colorType: "life" });
+    expect(orbs[1]).toEqual({ kind: "single", label: "SP", current: 75, max: 100, colorType: "stamina" });
   });
 });
 

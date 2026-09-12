@@ -24,7 +24,7 @@ describe("PoE Skill Gems Data & Requirements", () => {
       expect(typeof gem.reqWis).toBe("number");
       expect(typeof gem.reqCha).toBe("number");
       if (idx === 1) {
-        expect(gem.gemPrice).toBe(30);
+        expect(gem.gemPrice).toBe(100);
       } else {
         expect(gem.gemPrice).toBeGreaterThanOrEqual(250);
       }

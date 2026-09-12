@@ -1,41 +1,16 @@
 // frontend/src/games/something2/GameSettings.jsx
 //
-// SOMET-493 -- the in-game Settings panel, pinned directly below "How to play"
-// in the same always-visible HUD stack.
-//
-// Two settings live here, and they are owned by two different things, which is
-// the whole reason this component polls rather than holding local state for
-// both:
-//
-//   Auto-loot   SERVER-owned. Every authority `state` frame overwrites
-//               Game.autoLoot, so the checkbox must render from that mirror,
-//               not from a local useState the server never agreed to. It used
-//               to be a button drawn inside the canvas inventory panel; it is
-//               a preference, not an inventory operation, and burying it
-//               behind `i` made it something players had to be told about.
-//
-//   Inspect     CLIENT-owned. Persisted here in localStorage (the same
-//               convention Minimap.jsx and WaypointTravel.jsx use for their
-//               visibility) and pushed into the Game instance.
-//
-// The push is re-asserted on every poll tick rather than only in an effect on
-// change. GameShell throws the Game instance away and builds a new one on a
-// character switch (see `gameEpoch`), and a fresh Game starts with
-// inspectEnabled false -- a change-only effect would leave the panel reading
-// ON against an engine that had quietly reset to OFF.
+// SOMET-493 / SOMET-494 -- the in-game Settings panel with preferences and hotkey customization.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import styled from 'styled-components';
 import { HiOutlineCog6Tooth } from 'react-icons/hi2';
+import { DEFAULT_KEYBINDS } from './src/js/core/Game.js';
 
 const LS_INSPECT = 'something2.settings.inspect';
 const LS_CONSTANT_ATTACK = 'something2.settings.constantAttack';
-// Matches Minimap.jsx's own poll cadence. This reads two booleans off an
-// in-memory object; there is nothing here worth a rAF subscription.
+const LS_KEYBINDS = 'something2_keybinds';
 const POLL_MS = 500;
 
-// Same shape as GameView's HowToButton, deliberately: these are one stack of
-// controls and a second visual language for the middle item would read as a
-// different kind of thing.
 const SettingsButton = styled.button`
   position: absolute;
   top: 296px;
@@ -54,38 +29,78 @@ const SettingsButton = styled.button`
   font-weight: 600;
   cursor: pointer;
   pointer-events: auto;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
 
   svg { font-size: 16px; }
   &:hover { background: var(--s2-panel-veil-solid); color: var(--s2-accent); }
 `;
 
-// Anchored under the button rather than centred behind a scrim like the Help
-// card: these are toggles you flip while looking at the world, and a
-// full-screen backdrop would hide the very thing the inspect toggle changes.
 const Panel = styled.div`
   position: absolute;
   top: 338px;
   right: 16px;
   z-index: 25;
-  width: 288px;
-  padding: 14px 16px 12px;
-  border-radius: 12px;
+  width: 360px;
+  max-height: 520px;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 16px 14px;
+  border-radius: 14px;
   border: 1px solid var(--s2-border);
   background: var(--s2-panel-veil-solid);
-  backdrop-filter: blur(10px);
-  box-shadow: 0 8px 32px var(--s2-shadow);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 12px 36px var(--s2-shadow);
   pointer-events: auto;
 
   h3 {
     margin: 0 0 2px;
-    font-size: 14px;
+    font-size: 15px;
+    font-weight: 700;
     color: var(--s2-text-strong);
   }
   p.sub {
-    margin: 0 0 12px;
+    margin: 0 0 10px;
     font-size: 11px;
     color: var(--s2-text-dim);
+  }
+`;
+
+const Tabs = styled.div`
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--s2-border);
+  padding-bottom: 6px;
+`;
+
+const TabButton = styled.button`
+  background: ${(p) => (p.$active ? 'rgba(251, 191, 36, 0.15)' : 'transparent')};
+  border: 1px solid ${(p) => (p.$active ? 'var(--s2-accent)' : 'transparent')};
+  color: ${(p) => (p.$active ? 'var(--s2-accent)' : 'var(--s2-text-dim)')};
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+
+  &:hover {
+    color: var(--s2-text-strong);
+    background: rgba(255, 255, 255, 0.05);
+  }
+`;
+
+const TabContent = styled.div`
+  overflow-y: auto;
+  padding-right: 4px;
+  max-height: 380px;
+
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 3px;
   }
 `;
 
@@ -122,10 +137,76 @@ const Row = styled.label`
   }
 `;
 
-// Read once at module scope would be wrong (a second character switch must not
-// re-read a stale value), so this is a function called from the initialiser.
-// A browser with storage blocked throws on access rather than returning null,
-// which would otherwise take the whole HUD down.
+const KeybindRow = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+
+  &:first-of-type { border-top: none; }
+
+  .label-group {
+    display: flex;
+    flex-direction: column;
+  }
+  .name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--s2-text);
+  }
+  .desc {
+    font-size: 10px;
+    color: var(--s2-text-dim);
+  }
+`;
+
+const KeyButton = styled.button`
+  min-width: 64px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid ${(p) => (p.$listening ? '#fbbf24' : 'var(--s2-border)')};
+  background: ${(p) => (p.$listening ? 'rgba(251, 191, 36, 0.25)' : 'rgba(255, 255, 255, 0.06)')};
+  color: ${(p) => (p.$listening ? '#fbbf24' : 'var(--s2-text-strong)')};
+  font-size: 11px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.15s;
+  box-shadow: ${(p) => (p.$listening ? '0 0 10px rgba(251, 191, 36, 0.4)' : 'none')};
+
+  &:hover {
+    background: ${(p) => (p.$listening ? 'rgba(251, 191, 36, 0.35)' : 'rgba(255, 255, 255, 0.12)')};
+    border-color: var(--s2-accent);
+  }
+
+  &:focus {
+    outline: none;
+    border-color: #fbbf24;
+  }
+`;
+
+const ResetButton = styled.button`
+  margin-top: 12px;
+  width: 100%;
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--s2-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--s2-text-dim);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+
+  &:hover {
+    background: rgba(239, 68, 68, 0.15);
+    color: #f87171;
+    border-color: rgba(239, 68, 68, 0.3);
+  }
+`;
+
 function readPref(key) {
   try {
     return localStorage.getItem(key) === '1';
@@ -138,45 +219,95 @@ function writePref(key, on) {
   try {
     localStorage.setItem(key, on ? '1' : '0');
   } catch {
-    // Storage blocked (private window, site data off). The setting still
-    // applies to this session; only its persistence is lost, and losing the
-    // toggle entirely would be the worse failure.
+    // storage blocked
   }
 }
 
+function readKeybinds() {
+  try {
+    const raw = localStorage.getItem(LS_KEYBINDS);
+    if (raw) {
+      return { ...DEFAULT_KEYBINDS, ...JSON.parse(raw) };
+    }
+  } catch {
+    // ignore
+  }
+  return { ...DEFAULT_KEYBINDS };
+}
+
+function writeKeybinds(binds) {
+  try {
+    localStorage.setItem(LS_KEYBINDS, JSON.stringify(binds));
+  } catch {
+    // ignore
+  }
+}
+
+export function formatKeyDisplay(keyStr) {
+  if (!keyStr) return '—';
+  const k = String(keyStr).toLowerCase();
+  if (k === 'mouse1' || k === 'lmb') return 'LMB';
+  if (k === 'mouse2' || k === 'rmb' || k === 'right' || k === 'right click') return 'RMB';
+  if (k === 'mouse3' || k === 'mmb' || k === 'middle' || k === 'middle click') return 'MMB';
+  if (k === ' ' || k === 'space' || k === 'spacebar') return 'SPACE';
+  return k.toUpperCase();
+}
+
+const KEYBIND_DEFINITIONS = [
+  { key: 'slot1', name: 'Skill Slot 1', desc: 'Hotkey for Hotbar Slot 1' },
+  { key: 'slot2', name: 'Skill Slot 2', desc: 'Hotkey for Hotbar Slot 2' },
+  { key: 'slot3', name: 'Skill Slot 3', desc: 'Hotkey for Hotbar Slot 3' },
+  { key: 'slot4', name: 'Skill Slot 4', desc: 'Hotkey for Hotbar Slot 4' },
+  { key: 'slot5', name: 'Skill Slot 5', desc: 'Hotkey for Hotbar Slot 5' },
+  { key: 'slot6', name: 'Skill Slot 6', desc: 'Hotkey for Hotbar Slot 6' },
+  { key: 'slot7', name: 'Skill Slot 7', desc: 'Hotkey for Hotbar Slot 7' },
+  { key: 'slot8', name: 'Skill Slot 8', desc: 'Hotkey for Hotbar Slot 8' },
+  { key: 'slot9', name: 'Skill Slot 9', desc: 'Hotkey for Hotbar Slot 9' },
+  { key: 'inventory', name: 'Inventory', desc: 'Toggle Inventory & Equipment' },
+  { key: 'character', name: 'Character Sheet', desc: 'Toggle Character Stats panel' },
+  { key: 'passiveTree', name: 'Passive Skill Tree', desc: 'Toggle Passive Skill Graph' },
+  { key: 'skills', name: 'Skills & Gems', desc: 'Open Skill Gems & Sockets panel' },
+  { key: 'interact', name: 'Interact / Shop', desc: 'Interact with NPCs / Gem Merchant' },
+  { key: 'bank', name: 'Bank / Stash', desc: 'Open Account Chest' },
+  { key: 'openChest', name: 'Open Chest', desc: 'Open nearest world chest' },
+  { key: 'pickup', name: 'Pick Up', desc: 'Pick up items from ground' },
+];
+
 export default function GameSettings({ gameRef }) {
   const [open, setOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState('general'); // 'general' | 'keybinds'
   const [inspect, setInspect] = useState(() => readPref(LS_INSPECT));
   const [constantAttack, setConstantAttack] = useState(() => readPref(LS_CONSTANT_ATTACK));
-  // null = not in a playing world yet, so the controls render disabled rather
-  // than claiming a state they cannot reach.
   const [autoLoot, setAutoLoot] = useState(null);
+  const [keybinds, setKeybinds] = useState(() => readKeybinds());
+  const [listeningAction, setListeningAction] = useState(null);
 
-  // The poll needs the CURRENT preference without re-subscribing every time it
-  // changes; the ref is that, and setInterval below depends only on gameRef.
   const inspectRef = useRef(inspect);
   useEffect(() => { inspectRef.current = inspect; });
   const constantAttackRef = useRef(constantAttack);
   useEffect(() => { constantAttackRef.current = constantAttack; });
+  const keybindsRef = useRef(keybinds);
+  useEffect(() => { keybindsRef.current = keybinds; });
 
   useEffect(() => {
     const tick = () => {
       const game = gameRef.current;
       const snap = game && game.getSettingsSnapshot ? game.getSettingsSnapshot() : null;
       setAutoLoot(snap ? snap.autoLoot : null);
-      // Re-assert the client preference onto whatever Game instance is live
-      // now. See the module header: a new instance starts OFF.
       if (snap && game.setInspectEnabled && snap.inspect !== inspectRef.current) {
         game.setInspectEnabled(inspectRef.current);
       }
       if (snap && game.setConstantAttack && snap.constantAttack !== constantAttackRef.current) {
         game.setConstantAttack(constantAttackRef.current);
       }
+      if (game && game.setKeybinds && !listeningAction) {
+        game.setKeybinds(keybindsRef.current);
+      }
     };
     tick();
     const id = setInterval(tick, POLL_MS);
     return () => clearInterval(id);
-  }, [gameRef]);
+  }, [gameRef, listeningAction]);
 
   const toggleInspect = useCallback((next) => {
     setInspect(next);
@@ -192,13 +323,28 @@ export default function GameSettings({ gameRef }) {
     if (game && game.setConstantAttack) game.setConstantAttack(next);
   }, [gameRef]);
 
-  // Auto-loot is only mirrored locally if the intent actually reached the
-  // server -- setAutoLoot returns false on a dead socket. The optimistic
-  // update is kept so the checkbox moves before the next state frame lands.
   const toggleAutoLoot = useCallback((next) => {
     const game = gameRef.current;
     if (!game || !game.setAutoLoot) return;
     if (game.setAutoLoot(next)) setAutoLoot(next);
+  }, [gameRef]);
+
+  const applyNewKeybind = useCallback((actionKey, newBoundKey) => {
+    setKeybinds((prev) => {
+      const updated = { ...prev, [actionKey]: newBoundKey };
+      writeKeybinds(updated);
+      const game = gameRef.current;
+      if (game && game.setKeybinds) game.setKeybinds(updated);
+      return updated;
+    });
+    setListeningAction(null);
+  }, [gameRef]);
+
+  const resetKeybindsToDefault = useCallback(() => {
+    setKeybinds({ ...DEFAULT_KEYBINDS });
+    writeKeybinds({ ...DEFAULT_KEYBINDS });
+    const game = gameRef.current;
+    if (game && game.setKeybinds) game.setKeybinds({ ...DEFAULT_KEYBINDS });
   }, [gameRef]);
 
   const inWorld = autoLoot !== null;
@@ -208,7 +354,7 @@ export default function GameSettings({ gameRef }) {
       <SettingsButton
         type="button"
         $open={open}
-        title="Settings — auto-loot and hover inspect"
+        title="Settings — preferences & hotkeys"
         aria-label="Settings"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
@@ -219,54 +365,142 @@ export default function GameSettings({ gameRef }) {
       {open && (
         <Panel role="dialog" aria-label="Settings">
           <h3>Settings</h3>
-          <p className="sub">Preferences for this character.</p>
+          <p className="sub">Preferences & keybindings for this character.</p>
 
-          <Row $disabled={!inWorld}>
-            <input
-              type="checkbox"
-              checked={autoLoot === true}
-              disabled={!inWorld}
-              onChange={(e) => toggleAutoLoot(e.target.checked)}
-            />
-            <span className="label">
-              Auto-loot
-              <span className="hint">
-                Walk over items to collect them without pressing G.
-              </span>
-            </span>
-          </Row>
+          <Tabs>
+            <TabButton
+              type="button"
+              $active={activeTab === 'general'}
+              onClick={() => { setActiveTab('general'); setListeningAction(null); }}
+            >
+              Preferences
+            </TabButton>
+            <TabButton
+              type="button"
+              $active={activeTab === 'keybinds'}
+              onClick={() => setActiveTab('keybinds')}
+            >
+              Keybindings
+            </TabButton>
+          </Tabs>
 
-          <Row>
-            <input
-              type="checkbox"
-              checked={inspect}
-              onChange={(e) => toggleInspect(e.target.checked)}
-            />
-            <span className="label">
-              Inspect on hover
-              <span className="hint">
-                Hover anything in the world for a card describing it. Creatures
-                also show their level, HP and MP bars, and how aggressive they
-                are. Click to keep the card up while you read it.
-              </span>
-            </span>
-          </Row>
+          <TabContent>
+            {activeTab === 'general' && (
+              <>
+                <Row $disabled={!inWorld}>
+                  <input
+                    type="checkbox"
+                    checked={autoLoot === true}
+                    disabled={!inWorld}
+                    onChange={(e) => toggleAutoLoot(e.target.checked)}
+                  />
+                  <span className="label">
+                    Auto-loot
+                    <span className="hint">
+                      Walk over items to collect them without pressing pickup key.
+                    </span>
+                  </span>
+                </Row>
 
-          <Row>
-            <input
-              type="checkbox"
-              checked={constantAttack}
-              onChange={(e) => toggleConstantAttack(e.target.checked)}
-            />
-            <span className="label">
-              Constant attack
-              <span className="hint">
-                Hold the left mouse button to keep attacking instead of clicking
-                each time. Stops on its own when you run out of mana, life,
-                stamina or ammo — hold again once you have recovered.
-              </span>
-            </span>
-          </Row>
+                <Row>
+                  <input
+                    type="checkbox"
+                    checked={inspect}
+                    onChange={(e) => toggleInspect(e.target.checked)}
+                  />
+                  <span className="label">
+                    Inspect on hover
+                    <span className="hint">
+                      Hover anything in the world for a card describing it. Creatures
+                      also show their level, HP/MP bars, and aggression.
+                    </span>
+                  </span>
+                </Row>
+
+                <Row>
+                  <input
+                    type="checkbox"
+                    checked={constantAttack}
+                    onChange={(e) => toggleConstantAttack(e.target.checked)}
+                  />
+                  <span className="label">
+                    Constant attack
+                    <span className="hint">
+                      Hold the left mouse button to keep attacking continuously instead of clicking each time.
+                    </span>
+                  </span>
+                </Row>
+              </>
+            )}
+
+            {activeTab === 'keybinds' && (
+              <>
+                {KEYBIND_DEFINITIONS.map((def) => {
+                  const currentBind = keybinds[def.key] ?? DEFAULT_KEYBINDS[def.key];
+                  const isListening = listeningAction === def.key;
+                  return (
+                    <KeybindRow key={def.key}>
+                      <div className="label-group">
+                        <span className="name">{def.name}</span>
+                        <span className="desc">{def.desc}</span>
+                      </div>
+                      <KeyButton
+                        type="button"
+                        $listening={isListening}
+                        autoFocus={isListening}
+                        onClick={(e) => {
+                          if (!isListening) {
+                            setListeningAction(def.key);
+                          }
+                        }}
+                        onMouseDown={(e) => {
+                          if (isListening) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const mouseMap = { 0: 'mouse1', 1: 'mouse3', 2: 'mouse2' };
+                            const boundMouse = mouseMap[e.button] || `mouse${e.button + 1}`;
+                            applyNewKeybind(def.key, boundMouse);
+                          }
+                        }}
+                        onContextMenu={(e) => {
+                          if (isListening) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            applyNewKeybind(def.key, 'mouse2');
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          if (isListening) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (e.key === 'Escape') {
+                              setListeningAction(null);
+                              return;
+                            }
+                            let keyVal = (e.key || '').toLowerCase();
+                            if (keyVal === ' ') keyVal = 'space';
+                            applyNewKeybind(def.key, keyVal);
+                          }
+                        }}
+                        onBlur={() => {
+                          if (isListening) {
+                            setListeningAction(null);
+                          }
+                        }}
+                        title={isListening ? "Press any key, mouse click (LMB/RMB/MMB), or Esc to cancel" : `Change hotkey for ${def.name}`}
+                      >
+                        {isListening ? '...' : formatKeyDisplay(currentBind)}
+                      </KeyButton>
+                    </KeybindRow>
+                  );
+                })}
+
+                <ResetButton type="button" onClick={resetKeybindsToDefault}>
+                  ↺ Reset Keybinds to Default
+                </ResetButton>
+              </>
+            )}
+          </TabContent>
         </Panel>
       )}
     </>

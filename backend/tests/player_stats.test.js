@@ -18,17 +18,21 @@ test('a base character reproduces the pre-A2 numbers exactly', () => {
   assert.equal(s.meleeMult, 1);
   assert.equal(s.spellMult, 1);
   assert.equal(s.cooldownMult, 1);
+  assert.equal(s.hpRegen, 1);
   assert.equal(s.manaRegen, 10);
   assert.equal(s.priceMult, 0.5);
 });
 
 test('each stat moves its own output and nothing else', () => {
   assert.equal(derivePlayerStats(at({ constitution: 7 })).maxHp, 120);
+  assert.equal(derivePlayerStats(at({ constitution: 7 })).hpRegen, 1.2);
   assert.equal(derivePlayerStats(at({ constitution: 7 })).maxMana, 100);
   assert.equal(derivePlayerStats(at({ intelligence: 8 })).maxMana, 130);
+  assert.equal(derivePlayerStats(at({ intelligence: 8 })).manaRegen, 11.5);
   assert.equal(derivePlayerStats(at({ strength: 15 })).meleeMult, 1.5);
   assert.equal(derivePlayerStats(at({ strength: 15 })).spellMult, 1);
   assert.equal(derivePlayerStats(at({ intelligence: 15 })).spellMult, 1.5);
+  assert.equal(derivePlayerStats(at({ intelligence: 15 })).manaRegen, 15);
   assert.equal(derivePlayerStats(at({ wisdom: 25 })).manaRegen, 20);
   assert.equal(derivePlayerStats(at({ charisma: 15 })).priceMult, 0.7);
 });
@@ -355,4 +359,10 @@ test('a zero, negative or null floor falls back to the constant rather than unbo
     const p = at({ ...FLOORED, rules: { ...RULE_IDENTITIES, cooldownFloor: bad } });
     assert.equal(derivePlayerStats(p).cooldownMult, 0.4, `floor ${String(bad)} must not unbound the cooldown`);
   }
+});
+
+test('manaRegen rule boosts mana regen on top of wisdom scaling', () => {
+  const s = derivePlayerStats(at({ wisdom: 10, rules: { ...RULE_IDENTITIES, manaRegen: 4.5 } }));
+  // Base 10 + 0.5 * 5 (above 5) + 4.5 = 17
+  assert.equal(s.manaRegen, 17);
 });

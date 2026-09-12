@@ -303,10 +303,6 @@ async function fetchVillages(pool, worldId) {
       geometry,
       merchantX == null || merchantY == null ? null : { x: merchantX, y: merchantY },
     );
-    const gemMerchant = villageGemMerchantPost(
-      geometry,
-      merchantX == null || merchantY == null ? null : { x: merchantX, y: merchantY },
-    );
     const skillMerchant = villageSkillMerchantPost(
       geometry,
       merchantX == null || merchantY == null ? null : { x: merchantX, y: merchantY },
@@ -318,7 +314,8 @@ async function fetchVillages(pool, worldId) {
       merchantX,
       merchantY,
       bankX: bank.x, bankY: bank.y,
-      gemMerchantX: gemMerchant.x, gemMerchantY: gemMerchant.y,
+      gemMerchantX: null,
+      gemMerchantY: null,
       skillMerchantX: skillMerchant.x, skillMerchantY: skillMerchant.y,
     };
   });

@@ -95,8 +95,9 @@ export function buildCharacterView({ progression, extras, className, mainStat })
   if (!progression) return null;
   const e = extras || emptyExtras();
   return {
-    className: className || null,
-    mainStat: mainStat || null,
+    ...progression,
+    className: className || progression.className || null,
+    mainStat: mainStat || progression.mainStat || null,
     level: progression.level,
     experience: progression.experience,
     xpFloor: e.xpFloor,

@@ -1,21 +1,22 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { villageGemMerchantPost, villageMerchantPost, villageBankPost } = require('../src/services/mapService.js');
+const { villageSkillMerchantPost, villageMerchantPost, villageBankPost, villageSkillHouse } = require('../src/services/mapService.js');
 const { SKILLS, getSkillById, checkGemRequirements } = require('../seeds/data/skills.js');
 
-test('villageGemMerchantPost derives valid coordinates in settlement interior', () => {
+test('villageSkillMerchantPost derives valid coordinates in skill house interior', () => {
   for (const gateEdge of ['N', 'S', 'E', 'W']) {
     const v = { minRow: 4, minCol: 7, width: 6, height: 6, gateEdge };
     const merchant = villageMerchantPost(v);
     const bank = villageBankPost(v, merchant);
-    const gemMerchant = villageGemMerchantPost(v, merchant);
+    const skillMerchant = villageSkillMerchantPost(v);
+    const skHouse = villageSkillHouse(v);
 
-    const row = Math.floor(gemMerchant.y / 100);
-    const col = Math.floor(gemMerchant.x / 100);
-    assert.ok(row >= v.minRow + 1 && row <= v.minRow + v.height - 2);
-    assert.ok(col >= v.minCol + 1 && col <= v.minCol + v.width - 2);
-    assert.notDeepEqual(gemMerchant, merchant, `gate ${gateEdge}: gem merchant stacked on merchant`);
-    assert.notDeepEqual(gemMerchant, bank, `gate ${gateEdge}: gem merchant stacked on bank`);
+    const row = Math.floor(skillMerchant.y / 100);
+    const col = Math.floor(skillMerchant.x / 100);
+    assert.ok(row >= skHouse.minRow + 1 && row <= skHouse.minRow + skHouse.height - 2);
+    assert.ok(col >= skHouse.minCol + 1 && col <= skHouse.minCol + skHouse.width - 2);
+    assert.notDeepEqual(skillMerchant, merchant, `gate ${gateEdge}: skill merchant stacked on merchant`);
+    assert.notDeepEqual(skillMerchant, bank, `gate ${gateEdge}: skill merchant stacked on bank`);
   }
 });
 
@@ -36,7 +37,7 @@ test('SKILLS seed data enriched as PoE Skill Gems with 6 attribute & level requi
     assert.ok(typeof s.reqWis === 'number');
     assert.ok(typeof s.reqCha === 'number');
     if (idx === 1) {
-      assert.equal(s.gemPrice, 30);
+      assert.equal(s.gemPrice, 100);
     } else {
       assert.ok(s.gemPrice >= 250);
     }

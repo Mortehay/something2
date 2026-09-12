@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { World } = require('../src/authority/world.js');
 
-function makeTestWorld() {
+function makeTestWorld(weapon = { id: 'item_sword', name: 'sword', category: 'weapon', kind: 'melee' }) {
   const map = {
     isWalkable: () => true,
     width: 2000,
@@ -10,15 +10,41 @@ function makeTestWorld() {
     decorations: [],
   };
   const weapons = new Map();
-  return new World(map, weapons, 'fists');
+  if (weapon) weapons.set(weapon.id, weapon);
+  return new World(map, weapons, weapon ? weapon.id : 'fists');
+}
+
+function addTestPlayer(world, userId, spawn = { x: 100, y: 100 }, inv = { items: [], equipment: {} }) {
+  const stats = {
+    meleeMult: 1,
+    spellMult: 1,
+    level: 100,
+    strength: 100,
+    dexterity: 100,
+    constitution: 100,
+    intelligence: 100,
+    wisdom: 100,
+    charisma: 100,
+    damageMult: { physical: 1, arcane: 1, fire: 1, ice: 1, lightning: 1, shadow: 1, holy: 1 },
+    resists: {},
+    rules: {},
+    sources: {
+      strength: { base: 100, tree: 0, gear: 0 },
+      dexterity: { base: 100, tree: 0, gear: 0 },
+      constitution: { base: 100, tree: 0, gear: 0 },
+      intelligence: { base: 100, tree: 0, gear: 0 },
+      wisdom: { base: 100, tree: 0, gear: 0 },
+      charisma: { base: 100, tree: 0, gear: 0 },
+    },
+  };
+  world.addPlayer(userId, spawn, inv, spawn, 0, stats);
+  return world.getPlayer(userId);
 }
 
 test('castSkill damages creatures in area and deducts mana authoritatively', () => {
-  const world = makeTestWorld();
+  const world = makeTestWorld({ id: 'item_staff', name: 'staff', category: 'weapon', kind: 'melee' });
   const userId = 'u_caster';
-  world.addPlayer(userId, { x: 100, y: 100 });
-
-  const player = world.getPlayer(userId);
+  const player = addTestPlayer(world, userId, { x: 100, y: 100 });
   player.mana = 100;
   player.maxMana = 100;
 
@@ -45,11 +71,9 @@ test('castSkill damages creatures in area and deducts mana authoritatively', () 
 });
 
 test('castSkill executes melee skill damage and respects range', () => {
-  const world = makeTestWorld();
+  const world = makeTestWorld({ id: 'item_sword', name: 'sword', category: 'weapon', kind: 'melee' });
   const userId = 'u_warrior';
-  world.addPlayer(userId, { x: 100, y: 100 });
-
-  const player = world.getPlayer(userId);
+  const player = addTestPlayer(world, userId, { x: 100, y: 100 });
   player.stamina = 100;
 
   // Add creature in front
@@ -77,11 +101,9 @@ test('castSkill executes melee skill damage and respects range', () => {
 });
 
 test('castSkill executes buff skills, restores resources, and applies player buff', () => {
-  const world = makeTestWorld();
+  const world = makeTestWorld({ id: 'item_sword', name: 'sword', category: 'weapon', kind: 'melee' });
   const userId = 'u_paladin';
-  world.addPlayer(userId, { x: 100, y: 100 });
-
-  const player = world.getPlayer(userId);
+  const player = addTestPlayer(world, userId, { x: 100, y: 100 });
   player.hp = 40;
   player.maxHp = 100;
   player.mana = 100;
@@ -103,11 +125,9 @@ test('castSkill executes buff skills, restores resources, and applies player buf
 });
 
 test('castSkill executes Barrage with individual arrow damage hits in shotgun cone', () => {
-  const world = makeTestWorld();
+  const world = makeTestWorld({ id: 'item_bow', name: 'bow', category: 'weapon', kind: 'projectile' });
   const userId = 'u_archer';
-  world.addPlayer(userId, { x: 100, y: 100 });
-
-  const player = world.getPlayer(userId);
+  const player = addTestPlayer(world, userId, { x: 100, y: 100 });
   player.stamina = 100;
 
   // Creature standing point-blank directly in line of fire
@@ -134,11 +154,9 @@ test('castSkill executes Barrage with individual arrow damage hits in shotgun co
 });
 
 test('castSkill executes Rain of Arrows dealing damage in target area', () => {
-  const world = makeTestWorld();
+  const world = makeTestWorld({ id: 'item_bow', name: 'bow', category: 'weapon', kind: 'projectile' });
   const userId = 'u_archer2';
-  world.addPlayer(userId, { x: 100, y: 100 });
-
-  const player = world.getPlayer(userId);
+  const player = addTestPlayer(world, userId, { x: 100, y: 100 });
   player.stamina = 100;
 
   world.creatures.creatures.set('c_group', {
@@ -160,11 +178,9 @@ test('castSkill executes Rain of Arrows dealing damage in target area', () => {
 });
 
 test('castSkill executes Mage Blink and teleports player forward', () => {
-  const world = makeTestWorld();
+  const world = makeTestWorld({ id: 'item_staff', name: 'staff', category: 'weapon', kind: 'melee' });
   const userId = 'u_mage_blink';
-  world.addPlayer(userId, { x: 100, y: 100 });
-
-  const player = world.getPlayer(userId);
+  const player = addTestPlayer(world, userId, { x: 100, y: 100 });
   player.mana = 100;
 
   const res = world.castSkill(userId, 'mag_blink', 300, 100, 1, 0);
@@ -173,11 +189,9 @@ test('castSkill executes Mage Blink and teleports player forward', () => {
 });
 
 test('castSkill executes Frost Nova centered on caster', () => {
-  const world = makeTestWorld();
+  const world = makeTestWorld({ id: 'item_staff', name: 'staff', category: 'weapon', kind: 'melee' });
   const userId = 'u_mage_nova';
-  world.addPlayer(userId, { x: 200, y: 200 });
-
-  const player = world.getPlayer(userId);
+  const player = addTestPlayer(world, userId, { x: 200, y: 200 });
   player.mana = 100;
 
   world.creatures.creatures.set('c_surrounding', {
@@ -200,11 +214,9 @@ test('castSkill executes Frost Nova centered on caster', () => {
 });
 
 test('castSkill executes Gravity Singularity and pulls creatures towards center', () => {
-  const world = makeTestWorld();
+  const world = makeTestWorld({ id: 'item_staff', name: 'staff', category: 'weapon', kind: 'melee' });
   const userId = 'u_mage_rift';
-  world.addPlayer(userId, { x: 100, y: 100 });
-
-  const player = world.getPlayer(userId);
+  const player = addTestPlayer(world, userId, { x: 100, y: 100 });
   player.mana = 100;
 
   world.creatures.creatures.set('c_rift_mob', {
@@ -227,7 +239,7 @@ test('castSkill executes Gravity Singularity and pulls creatures towards center'
 });
 
 test('castSkill validates weapon requirements for skill gems and rejects mismatches', () => {
-  const world = makeTestWorld();
+  const world = makeTestWorld({ id: 'item_sword', name: 'sword', category: 'weapon', kind: 'melee' });
   const userId = 'u_archer_equip';
   
   // Equip a melee dagger in main_hand
@@ -237,9 +249,8 @@ test('castSkill validates weapon requirements for skill gems and rejects mismatc
       main_hand: { id: 'item_dagger', name: 'dagger', category: 'weapon', kind: 'melee' },
     },
   };
-  world.addPlayer(userId, { x: 100, y: 100 }, inv);
+  const player = addTestPlayer(world, userId, { x: 100, y: 100 }, inv);
 
-  const player = world.getPlayer(userId);
   player.stamina = 100;
   player.mana = 100;
 

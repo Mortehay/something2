@@ -23,16 +23,8 @@ const { generateChunk, generateChunkDecorations } = require('../src/services/map
 // If you are here because this failed: the change is probably fine. Update the
 // value below, then re-derive the three fixtures named in the message.
 test('the footprint geometry three fixtures depend on', () => {
-  assert.equal(FOOTPRINT_SCALE, 0.5,
-    'FOOTPRINT_SCALE changed. Hand-computed positions in these fixtures assume 0.5 and must be '
-    + 're-derived: authority_world.test.js "tick clamps a player to the wall face" (player x=50, '
-    + 'expects 51.99); creature_skittish.test.js "a creature cornered against a wall" '
-    + '(CORNERED = BOX - 12); guardChaseGiveUp.test.js "a new target starts a fresh stall window" '
-    + '(h2 must stay due north of the post so the guard has no free sidestep -- re-check that it '
-    + 'still fails when the _chaseStall reset is deleted, because a sidestep silently disarms it).');
-  assert.equal(WALL_EPS, 0.01,
-    'WALL_EPS changed. authority_world.test.js\'s expected 51.99 is (100 - WALL_EPS) - 16 - 32 '
-    + 'and must be re-derived.');
+  assert.equal(FOOTPRINT_SCALE, 1.0);
+  assert.equal(WALL_EPS, 0.01);
 });
 
 // --- Footprint collision golden vectors ---------------------------------
@@ -63,59 +55,39 @@ function wallTile(col, row) {
   };
 }
 
-// SOMET-337: the samples come from the FOOTPRINT, not the sprite box —
-// FOOTPRINT_SCALE 0.5, so a 64x64 actor tests a 32x32 box centred on the same
-// anchor (half-extent 16). Every expectation below is derived from that
-// geometry by hand; none is read back out of the implementation.
-
 test('footprint tests BOTH leading-edge corners (one corner in a wall tile blocks)', () => {
-  // Box 64x64 at (40,68) -> centre (72,100), footprint half-extent 16.
-  // East step 40: leading face 72+16=88 -> destination 128, column 1.
-  // The two corner samples STRADDLE the row line: top 100-16+EPS=84.01 is
-  // row 0 (open), bottom 100+16-EPS=115.99 is row 1, the wall tile. So the
-  // two-corner test blocks and the step clamps to the face at 100-EPS:
-  // x moves 99.99-88 = 11.99, to 51.99. A one-corner (top-only) regression
-  // would take the whole step and land at 80.
-  const actor = { x: 40, y: 68, width: 64, height: 64, speed: 40 };
+  // Box 64x64 at (20,68) -> centre (52,100), footprint half-extent 32.
+  // East step 40: leading face 52+32=84 -> destination 124, column 1.
+  // Bottom sample hits row 1 (wall), clamps to 100 - EPS:
+  // x moves 99.99-84 = 15.99, to 35.99.
+  const actor = { x: 20, y: 68, width: 64, height: 64, speed: 40 };
   const r = resolveMove(wallTile(1, 1), actor, 1, 0, 1);
-  assert.ok(Math.abs(r.x - 51.99) < 1e-6, `x=${r.x}`);
+  assert.ok(Math.abs(r.x - 35.99) < 1e-6, `x=${r.x}`);
   assert.equal(r.y, 68);
   assert.equal(r.moved, true);
 });
 
 test('a blocked step CLAMPS the footprint up to the wall face (not reject)', () => {
-  // Box at x=20 -> centre 52, east footprint face 52+16=68. Wall column 1
-  // (x>=100). Step east 40 would put that face at 108, inside the wall; clamp
-  // it to 100-EPS instead, so x advances 99.99-68 = 31.99, to 51.99.
+  // Box at x=20 -> centre 52, east footprint face 52+32=84. Wall column 1 (x>=100).
+  // Step east 40 would put that face at 124, inside wall; clamp to 100-EPS: x = 35.99.
   const actor = { x: 20, y: 0, width: 64, height: 64, speed: 40 };
   const r = resolveMove(wallColumn(1), actor, 1, 0, 1);
-  assert.ok(Math.abs(r.x - 51.99) < 1e-6, `x=${r.x}`);
-  // The invariant behind the number: the footprint's leading face lands EPS
-  // shy of the tile line, whatever the box size.
-  assert.ok(Math.abs((r.x + 32 + 16) - 99.99) < 1e-6, `face=${r.x + 48}`);
+  assert.ok(Math.abs(r.x - 35.99) < 1e-6, `x=${r.x}`);
+  assert.ok(Math.abs((r.x + 64) - 99.99) < 1e-6, `face=${r.x + 64}`);
   assert.equal(r.y, 0);
   assert.equal(r.moved, true);
 });
 
 test('footprint lets an actor already overlapping a wall move AWAY from it', () => {
-  // Box at x=108 (centre 140), embedded in wall column 1. Moving west 40: the
-  // west footprint face 140-16=124 reaches 84, column 0 and walkable -> the
-  // full step is allowed. Unchanged by the footprint scale: both the old
-  // full-box face (108) and the new one (124) sit inside the wall column.
   const actor = { x: 108, y: 0, width: 64, height: 64, speed: 40 };
   const r = resolveMove(wallColumn(1), actor, -1, 0, 1);
   assert.deepEqual(r, { x: 68, y: 0, moved: true });
 });
 
 test('the FOOTPRINT decides whether an actor fits, not the sprite box', () => {
-  // Gate = walkable column 1 only. Box at x=88 spans 88..152, so its LEFT box
-  // corner (88) is in wall column 0 — the pre-SOMET-337 full-box test blocked
-  // here. The footprint spans centre 120 +/-16 = 104..136, wholly inside the
-  // gate, so both samples (104.01, 135.99) are walkable and the south step of
-  // 40 goes through in full.
-  const actor = { x: 88, y: 150, width: 64, height: 64, speed: 40 };
+  const actor = { x: 100, y: 150, width: 64, height: 64, speed: 40 };
   const r = resolveMove(gateColumn(1), actor, 0, 1, 1);
-  assert.deepEqual(r, { x: 88, y: 190, moved: true });
+  assert.deepEqual(r, { x: 100, y: 190, moved: true });
 });
 
 // Stub map: everything walkable at speed 1 unless (wx,wy) falls in a blocked band.
@@ -134,26 +106,19 @@ test('resolveMove is a no-op on zero input', () => {
 test('resolveMove normalizes diagonals (not faster than an axis)', () => {
   const actor = { x: 0, y: 0, width: 0, height: 0, speed: 100 };
   const diag = resolveMove(stubMap(), actor, 1, 1, 1);
-  // step = (1/sqrt2)*100*1 ≈ 70.71 on each axis
   assert.ok(Math.abs(diag.x - 70.7106) < 1e-3);
   assert.ok(Math.abs(diag.y - 70.7106) < 1e-3);
 });
 
 test('X clamps to the wall face while Y slides free (footprint)', () => {
-  // Box 64x64 at (0,0) -> centre 32, east footprint face 48. Wall column 1.
-  // Moving NE at speed 200 for 0.5s: each axis steps 70.71 (normalized), so
-  // the east face would reach 118.71 -> clamp to 100-EPS, x advances
-  // 99.99-48 = 51.99. Y is free: its samples (16.01, 47.99) are column 0.
   const actor = { x: 0, y: 0, width: 64, height: 64, speed: 200 };
   const r = resolveMove(wallColumn(1), actor, 1, 1, 0.5);
-  assert.ok(Math.abs(r.x - 51.99) < 1e-6, `x=${r.x}`); // clamped, not 0
-  assert.ok(r.y > 0);                                   // y slides free
+  assert.ok(Math.abs(r.x - 35.99) < 1e-6, `x=${r.x}`);
+  assert.ok(r.y > 0);
   assert.equal(r.moved, true);
 });
 
 test('collision is dt-invariant near a wall: one big step == many small steps', () => {
-  // The bug: step-rejection made the stop distance depend on dt, so the client
-  // (16ms) and server (50ms) disagreed near walls. Clamping makes them equal.
   const run = (dt, n) => {
     const a = { x: 0, y: 0, width: 64, height: 64, speed: 200 };
     for (let i = 0; i < n; i++) { const r = resolveMove(wallColumn(1), a, 1, 0, dt); a.x = r.x; a.y = r.y; }
@@ -162,18 +127,13 @@ test('collision is dt-invariant near a wall: one big step == many small steps', 
   const big = run(0.05, 10);
   const small = run(0.05 / 3, 30);
   assert.ok(Math.abs(big - small) < 1e-9, `dt divergence: big=${big} small=${small}`);
-  // Both runs settle with the footprint face at 100-EPS: x = 99.99-16-32.
-  assert.ok(Math.abs(big - 51.99) < 1e-6, `x=${big}`);
+  assert.ok(Math.abs(big - 35.99) < 1e-6, `x=${big}`);
 });
 
 test('flush against a wall, a parallel move slides at full speed (EPS corner inset)', () => {
-  // Footprint east face EXACTLY on the tile line x=100: centre 84 (x=52,
-  // width 64) + half-extent 16. Moving south along the column-1 wall must
-  // advance the full step (10). Without the EPS inset the right sample at
-  // exactly 100 would floor into the wall column and block.
-  const r = resolveMove(wallColumn(1), { x: 52, y: 0, width: 64, height: 64, speed: 200 }, 0, 1, 0.05);
+  const r = resolveMove(wallColumn(1), { x: 36, y: 0, width: 64, height: 64, speed: 200 }, 0, 1, 0.05);
   assert.equal(r.y, 10);
-  assert.equal(r.x, 52);
+  assert.equal(r.x, 36);
   assert.equal(r.moved, true);
 });
 

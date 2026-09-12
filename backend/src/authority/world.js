@@ -1,7 +1,7 @@
 const { resolveMove } = require('./collision');
 const { CreatureSim, CREATURE_SIZE, shoveCreature } = require('./creatures');
 const { shoveAwayFrom } = require('./knockback');
-const { normalizeAim, inArc, hasLineOfSight } = require('./weapons');
+const { normalizeAim, inArc, hasLineOfSight, weaponStaminaCost } = require('./weapons');
 const { resolveEffectName, momentForAttack, blockedImpact } = require('./vfx.js');
 const { attackLift, bodyLift } = require('./attackOrigin.js');
 const { ProjectileSim } = require('./projectiles');
@@ -197,7 +197,8 @@ function applyAttackCooldown(p, w) {
 // refused it. A refusal costs NOTHING: no resource is touched, no cooldown is
 // stamped. That has always been mana's rule here and it now covers life too.
 function resourceRefusal(p, w) {
-  if (p.stamina < (w.stamina_cost || 0)) return 'stamina';
+  const staminaCost = weaponStaminaCost(w);
+  if (p.stamina < staminaCost) return 'stamina';
   const manaCost = w.mana_cost || 0;
   if (manaCost <= 0) return null;
   if (p.usesLifeCost) {
@@ -214,8 +215,8 @@ function resourceRefusal(p, w) {
 // deliberately adjacent to it: a spend that could pick a different pool from
 // the check is a way to cast for free.
 function spendResources(p, w) {
-  const staminaCost = w.stamina_cost || 0;
-  if (staminaCost) p.stamina -= staminaCost;
+  const staminaCost = weaponStaminaCost(w);
+  if (staminaCost > 0) p.stamina = Math.max(0, p.stamina - staminaCost);
   const manaCost = w.mana_cost || 0;
   if (!manaCost) return;
   if (p.usesLifeCost) p.hp -= lifeCostFor(manaCost, p.stats.lifeCostMultiplier);
@@ -366,15 +367,15 @@ class World {
       input: { dx: 0, dy: 0 },
       pendingSeq: 0,
       ackSeq: 0,
-      hp: stats.maxHp,
+      hp: (spawn && spawn.hp !== undefined && Number.isFinite(spawn.hp)) ? clamp(spawn.hp, 1, stats.maxHp) : stats.maxHp,
       maxHp: stats.maxHp,
-      mana: stats.maxMana,
+      mana: (spawn && spawn.mana !== undefined && Number.isFinite(spawn.mana)) ? clamp(spawn.mana, 0, stats.maxMana) : stats.maxMana,
       maxMana: stats.maxMana,
       // SOMET-495: from the derived bundle, like hp and mana, so a tree
       // `+30 stamina` node is live at join rather than only after the next
       // re-derive. `?? PLAYER_MAX_STAMINA` covers a hand-built stats object in
       // a test that predates the field.
-      stamina: stats.maxStamina ?? PLAYER_MAX_STAMINA,
+      stamina: (spawn && spawn.stamina !== undefined && Number.isFinite(spawn.stamina)) ? clamp(spawn.stamina, 0, stats.maxStamina ?? PLAYER_MAX_STAMINA) : (stats.maxStamina ?? PLAYER_MAX_STAMINA),
       maxStamina: stats.maxStamina ?? PLAYER_MAX_STAMINA,
       inv,
       // SOMET-495: armour resistances AND the tree's, merged on one scale by
@@ -563,6 +564,12 @@ class World {
         const share = p.stats.rules.regenLifeShare;
         if (share > 0 && p.hp < p.maxHp) {
           p.hp = Math.min(p.maxHp, p.hp + (p.mana - manaBefore) * share);
+        }
+      }
+      if (p.hp > 0 && p.hp < p.maxHp) {
+        const hpRegenRate = p.stats.hpRegen ?? 1;
+        if (hpRegenRate > 0) {
+          p.hp = Math.min(p.maxHp, p.hp + hpRegenRate * dt);
         }
       }
       if (p.stamina < p.maxStamina) p.stamina = Math.min(p.maxStamina, p.stamina + PLAYER_STAMINA_REGEN * dt);
@@ -1042,7 +1049,8 @@ class World {
         // sparks off a target it did no damage to reads as a bug.
         if (pacifiedFrom != null && other.userId === pacifiedFrom) continue;
         const ocx = other.x + other.width / 2, ocy = other.y + other.height / 2;
-        if (inArc(cx, cy, nx, ny, ocx, ocy, reach, arc)
+        const targetRadius = other.hitboxRadius || (other.width ? other.width / 2 : 32) || 32;
+        if (inArc(cx, cy, nx, ny, ocx, ocy, reach, arc, targetRadius)
             && hasLineOfSight(this.map, cx, cy, ocx, ocy)) {
           applyDamageWithEffects(other, weaponDamage(p, w), w.element, other.mit || NO_MITIGATION,
             this.now, playerKey(userId));
@@ -1247,14 +1255,19 @@ class World {
     const skill = getSkillById(skillId);
     if (!skill) return { ok: false, kills: [] };
 
-    // Weapon compatibility verification for Skill Gems
-    if (p.inv && p.inv.equipment) {
-      const equippedWeapon = p.inv.equipment.main_hand || null;
-      const req = checkGemRequirements(skill, p.stats, equippedWeapon);
-      // If equipped weapon does not meet gem's weapon requirement (and equipment exists)
-      if (equippedWeapon && !req.weaponOk) {
-        return { ok: false, kills: [], reason: 'weapon_mismatch', error: req.errors[0] };
-      }
+    // Weapon and Stat requirements verification for Skill Gems
+    let equippedWeapon = null;
+    if (p.inv && p.inv.equipment && typeof p.inv.equipment.main_hand === 'object' && p.inv.equipment.main_hand !== null) {
+      equippedWeapon = p.inv.equipment.main_hand;
+    } else {
+      equippedWeapon = activeWeaponType(p.inv, this.weapons, this.defaultWeaponId);
+    }
+    const req = checkGemRequirements(skill, p.stats, equippedWeapon);
+    if (!req.weaponOk) {
+      return { ok: false, kills: [], reason: 'weapon_mismatch', error: req.errors[0] };
+    }
+    if (!req.ok) {
+      return { ok: false, kills: [], reason: 'requirements_unmet', error: req.errors[0] };
     }
 
     // Check resources on player
@@ -1330,7 +1343,7 @@ class World {
 
     if (skill.type === 'melee') {
       const { nx, ny } = normalizeAim(ax, ay, p.facing);
-      const reach = Math.max(90, (Number(skill.range) || 90) * 1.3);
+      const reach = Math.max(85, (Number(skill.range) || 85) * 1.25);
       const arc = Math.PI * 0.75;
       for (let h = 0; h < hitCount; h++) {
         const killed = this.creatures.applyMeleeArc(
@@ -1340,6 +1353,11 @@ class World {
         for (const kid of killed) {
           if (!kills.some(k => k.id === kid)) kills.push({ id: kid, killerUserId: userId });
         }
+      }
+      // Life leech for sacrificial / blood siphon skills
+      if (skill.id.includes('sacrificial') || skill.id.includes('siphon') || skill.id.includes('leech')) {
+        const leechAmount = Math.max(3, Math.round(damage * 0.2));
+        p.hp = Math.min(p.maxHp || 100, p.hp + leechAmount);
       }
     } else if (skill.type === 'magic' || skill.type === 'debuff') {
       const aoeRadius = Math.max(90, (Number(skill.radius) || 80) * 1.5);

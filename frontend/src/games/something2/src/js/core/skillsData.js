@@ -2175,6 +2175,8 @@ export const SKILLS_BY_CLASS = {
 
 export const SKILLS_BY_ID = new Map(SKILLS.map(s => [s.id, s]));
 
+
+
 export function getSkillsForClass(className) {
   if (!className || className === 'all' || className === 'All') return SKILLS;
   return SKILLS_BY_CLASS[className] || [];
@@ -2445,30 +2447,32 @@ export function enrichSkillGems(list) {
     const idx = classCounters[cls]; // 1..50
     
     // Level requirement curve: Level 1 to 50
+    // Starter skills (1..3) require Level 1 so players can immediately use them!
     let reqLvl = 1;
-    if (idx <= 5) reqLvl = 1 + (idx - 1) * 2; // 1, 3, 5, 7, 9
-    else if (idx <= 15) reqLvl = 10 + (idx - 6) * 2; // 10..28
-    else if (idx <= 35) reqLvl = 30 + Math.floor((idx - 16) * 0.8); // 30..45
-    else reqLvl = 45 + Math.min(15, idx - 35); // 45..60
+    if (idx <= 3) reqLvl = 1;
+    else if (idx <= 10) reqLvl = 2 + (idx - 4) * 2; // 2, 4, 6, 8, 10, 12, 14
+    else if (idx <= 25) reqLvl = 16 + Math.floor((idx - 11) * 1.5); // 16..37
+    else reqLvl = 38 + Math.floor((idx - 26) * 0.9); // 38..60
 
     s.reqLvl = reqLvl;
     s.isGem = true;
 
     // Gem Color & 6-Attribute Requirements (Strength, Dexterity, Constitution, Intelligence, Wisdom, Charisma)
+    // Starting skills have gentle requirements (5-6 primary attribute) that starting characters with 10 stats fulfill easily.
     if (cls === 'Warrior') {
       s.gemColor = 'red';
-      s.reqStr = Math.max(10, Math.round(10 + reqLvl * 1.5));
-      s.reqCon = Math.max(8, Math.round(8 + reqLvl * 1.0));
-      s.reqDex = Math.round(5 + reqLvl * 0.3);
+      s.reqStr = idx <= 3 ? 5 + idx : Math.round(6 + reqLvl * 0.5);
+      s.reqCon = idx <= 3 ? 4 + idx : Math.round(4 + reqLvl * 0.35);
+      s.reqDex = idx <= 3 ? 2 : Math.round(2 + reqLvl * 0.15);
       s.reqInt = 0;
       s.reqWis = 0;
       s.reqCha = 0;
       s.reqWeapon = s.type === 'melee' ? 'melee' : (s.type === 'magic' ? 'melee' : 'any');
     } else if (cls === 'Archer') {
       s.gemColor = 'green';
-      s.reqDex = Math.max(10, Math.round(10 + reqLvl * 1.5));
-      s.reqWis = Math.max(8, Math.round(8 + reqLvl * 0.8));
-      s.reqCon = Math.round(6 + reqLvl * 0.6);
+      s.reqDex = idx <= 3 ? 5 + idx : Math.round(6 + reqLvl * 0.5);
+      s.reqWis = idx <= 3 ? 4 + idx : Math.round(4 + reqLvl * 0.3);
+      s.reqCon = idx <= 3 ? 3 : Math.round(3 + reqLvl * 0.2);
       s.reqStr = 0;
       s.reqInt = 0;
       s.reqCha = 0;
@@ -2477,46 +2481,46 @@ export function enrichSkillGems(list) {
       s.reqWeapon = isBow ? 'bow' : (isDagger ? 'dagger' : (s.type === 'melee' ? 'dagger' : (s.type === 'buff' ? 'any' : 'bow')));
     } else if (cls === 'Mage') {
       s.gemColor = 'blue';
-      s.reqInt = Math.max(10, Math.round(10 + reqLvl * 1.5));
-      s.reqWis = Math.max(8, Math.round(8 + reqLvl * 0.9));
-      s.reqCon = Math.round(5 + reqLvl * 0.4);
+      s.reqInt = idx <= 3 ? 5 + idx : Math.round(6 + reqLvl * 0.5);
+      s.reqWis = idx <= 3 ? 4 + idx : Math.round(4 + reqLvl * 0.35);
+      s.reqCon = idx <= 3 ? 2 : Math.round(2 + reqLvl * 0.15);
       s.reqStr = 0;
       s.reqDex = 0;
       s.reqCha = 0;
       s.reqWeapon = s.type === 'buff' ? 'any' : 'staff_wand';
     } else if (cls === 'Cultist') {
       s.gemColor = 'purple';
-      s.reqCha = Math.max(10, Math.round(10 + reqLvl * 1.3));
-      s.reqInt = Math.max(10, Math.round(10 + reqLvl * 1.1));
-      s.reqCon = Math.round(8 + reqLvl * 0.9);
+      s.reqCha = idx <= 3 ? 5 + idx : Math.round(5 + reqLvl * 0.45);
+      s.reqInt = idx <= 3 ? 5 + idx : Math.round(5 + reqLvl * 0.4);
+      s.reqCon = idx <= 3 ? 3 : Math.round(3 + reqLvl * 0.3);
       s.reqStr = 0;
       s.reqDex = 0;
       s.reqWis = 0;
       s.reqWeapon = s.type === 'buff' ? 'any' : (s.type === 'melee' ? 'dagger' : 'staff_wand');
     } else if (cls === 'Monk') {
       s.gemColor = 'orange';
-      s.reqDex = Math.max(10, Math.round(10 + reqLvl * 1.1));
-      s.reqWis = Math.max(10, Math.round(10 + reqLvl * 1.1));
-      s.reqStr = Math.round(8 + reqLvl * 0.7);
-      s.reqCon = Math.round(8 + reqLvl * 0.7);
+      s.reqDex = idx <= 3 ? 5 + idx : Math.round(5 + reqLvl * 0.4);
+      s.reqWis = idx <= 3 ? 5 + idx : Math.round(5 + reqLvl * 0.4);
+      s.reqStr = idx <= 3 ? 3 : Math.round(3 + reqLvl * 0.25);
+      s.reqCon = idx <= 3 ? 3 : Math.round(3 + reqLvl * 0.25);
       s.reqInt = 0;
       s.reqCha = 0;
       s.reqWeapon = s.type === 'buff' ? 'any' : 'unarmed';
     } else if (cls === 'Druid') {
       s.gemColor = 'hybrid';
-      s.reqWis = Math.max(10, Math.round(10 + reqLvl * 1.2));
-      s.reqCon = Math.max(10, Math.round(10 + reqLvl * 1.0));
-      s.reqStr = Math.round(8 + reqLvl * 0.8);
-      s.reqDex = Math.round(6 + reqLvl * 0.6);
+      s.reqWis = idx <= 3 ? 5 + idx : Math.round(5 + reqLvl * 0.4);
+      s.reqCon = idx <= 3 ? 4 + idx : Math.round(4 + reqLvl * 0.35);
+      s.reqStr = idx <= 3 ? 3 : Math.round(3 + reqLvl * 0.25);
+      s.reqDex = idx <= 3 ? 2 : Math.round(2 + reqLvl * 0.2);
       s.reqInt = 0;
       s.reqCha = 0;
       const isTransform = s.id.includes('form') || s.id.includes('shapeshift') || s.id.includes('bear') || s.id.includes('wolf') || s.id.includes('hawk');
       s.reqWeapon = isTransform ? 'any' : (s.type === 'magic' ? 'staff_wand' : 'any');
     }
 
-    // Gem Price in Gold for Gem Merchant (First gem of each class stays at starter price ~30g; all subsequent gems increased 10x minimum: 390g to 3000g)
-    const basePrice = Math.max(25, Math.min(300, Math.round(25 + reqLvl * 4.5)));
-    s.gemPrice = idx === 1 ? basePrice : basePrice * 10;
+    // Gem Price in Gold for Gem Merchant (Starter gems 100g; subsequent gems scaled up from 350g to 7000g)
+    const basePrice = Math.max(100, Math.round(100 + reqLvl * 25 + (idx - 1) * 30));
+    s.gemPrice = idx === 1 ? 100 : Math.round(basePrice * 2.5);
 
     // Gem Tags
     const tags = [];
@@ -2543,9 +2547,10 @@ export function enrichSkillGems(list) {
 enrichSkillGems(SKILLS);
 
 export function getWeaponCategory(item) {
-  if (!item || !item.name || item.name === 'unarmed') return 'unarmed';
-  const n = (item.name || '').toLowerCase();
-  if (n.includes('bow') || n.includes('arbalest') || n.includes('sling') || n.includes('dart') || item.ammo_type_id) {
+  if (!item || item === 'unarmed') return 'unarmed';
+  const n = (typeof item === 'string' ? item : (item.name || '')).toLowerCase();
+  if (n === 'unarmed' || !n) return 'unarmed';
+  if (n.includes('bow') || n.includes('arbalest') || n.includes('sling') || n.includes('dart') || (typeof item === 'object' && item.ammo_type_id)) {
     return 'bow';
   }
   if (n.includes('staff') || n.includes('wand') || n.includes('magic-bolt') || n.includes('scepter')) {
@@ -2556,10 +2561,11 @@ export function getWeaponCategory(item) {
   }
   if (n.includes('sword') || n.includes('blade') || n.includes('spear') || n.includes('halberd') ||
       n.includes('scythe') || n.includes('club') || n.includes('stick') || n.includes('quarterstaff') ||
-      n.includes('morning star') || n.includes('pike')) {
+      n.includes('morning star') || n.includes('pike') || n.includes('axe') || n.includes('mace') ||
+      n.includes('hammer') || n.includes('flail') || n.includes('cleaver')) {
     return 'melee';
   }
-  if (item.category === 'weapon') {
+  if (typeof item === 'object' && item.category === 'weapon') {
     return item.kind === 'projectile' ? 'staff_wand' : 'melee';
   }
   return 'unarmed';
@@ -2584,15 +2590,44 @@ export function getWeaponRequirementName(reqWeapon) {
   return 'Any Weapon';
 }
 
+function getStatValue(prog, fullKey, shortKey) {
+  if (!prog) return 0;
+  let val = 0;
+  if (prog.sources && prog.sources[fullKey]) {
+    const s = prog.sources[fullKey];
+    const sum = (Number(s.base) || 0) + (Number(s.tree) || 0) + (Number(s.gear) || 0);
+    if (sum > val) val = sum;
+  }
+  if (prog[fullKey] != null && !isNaN(Number(prog[fullKey])) && Number(prog[fullKey]) > val) {
+    val = Number(prog[fullKey]);
+  }
+  if (prog[shortKey] != null && !isNaN(Number(prog[shortKey])) && Number(prog[shortKey]) > val) {
+    val = Number(prog[shortKey]);
+  }
+  if (prog.stats) {
+    if (prog.stats[fullKey] != null && !isNaN(Number(prog.stats[fullKey])) && Number(prog.stats[fullKey]) > val) {
+      val = Number(prog.stats[fullKey]);
+    }
+    if (prog.stats[shortKey] != null && !isNaN(Number(prog.stats[shortKey])) && Number(prog.stats[shortKey]) > val) {
+      val = Number(prog.stats[shortKey]);
+    }
+  }
+  const baseKey = `base${fullKey.charAt(0).toUpperCase() + fullKey.slice(1)}`;
+  if (prog[baseKey] != null && !isNaN(Number(prog[baseKey])) && Number(prog[baseKey]) > val) {
+    val = Number(prog[baseKey]);
+  }
+  return val;
+}
+
 export function checkGemRequirements(gem, playerProgression, equippedWeapon) {
   if (!gem) return { ok: true, errors: [] };
   const lvl = playerProgression?.level ?? playerProgression?.lvl ?? 1;
-  const str = playerProgression?.strength ?? playerProgression?.str ?? playerProgression?.baseStrength ?? 10;
-  const dex = playerProgression?.dexterity ?? playerProgression?.dex ?? playerProgression?.baseDexterity ?? 10;
-  const con = playerProgression?.constitution ?? playerProgression?.con ?? playerProgression?.baseConstitution ?? 10;
-  const int = playerProgression?.intelligence ?? playerProgression?.int ?? playerProgression?.baseIntelligence ?? 10;
-  const wis = playerProgression?.wisdom ?? playerProgression?.wis ?? playerProgression?.baseWisdom ?? 10;
-  const cha = playerProgression?.charisma ?? playerProgression?.cha ?? playerProgression?.baseCharisma ?? 10;
+  const str = getStatValue(playerProgression, 'strength', 'str');
+  const dex = getStatValue(playerProgression, 'dexterity', 'dex');
+  const con = getStatValue(playerProgression, 'constitution', 'con');
+  const int = getStatValue(playerProgression, 'intelligence', 'int');
+  const wis = getStatValue(playerProgression, 'wisdom', 'wis');
+  const cha = getStatValue(playerProgression, 'charisma', 'cha');
 
   const weaponCategory = getWeaponCategory(equippedWeapon);
   const weaponOk = isWeaponCompatible(gem.reqWeapon, weaponCategory);
@@ -2640,9 +2675,17 @@ export function checkGemRequirements(gem, playerProgression, equippedWeapon) {
     intOk,
     wisOk,
     chaOk,
+    lvl,
+    str,
+    dex,
+    con,
+    int,
+    wis,
+    cha,
     weaponCategory,
     reqWeaponName: getWeaponRequirementName(gem.reqWeapon),
     errors,
   };
 }
+
 

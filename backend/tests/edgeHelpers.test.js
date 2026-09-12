@@ -39,6 +39,19 @@ test('chooseSpawn: pending arrival wins', () => {
   assert.deepEqual(s, { x: 111, y: 222, viaDoorway: true, viaPortalFallback: false });
 });
 
+test('chooseSpawn: preserves hp, mana, stamina from pending arrival', () => {
+  const s = chooseSpawn({
+    pending: { x: 111, y: 222, hp: 45, mana: 30, stamina: 80 },
+    persisted: { x: 9, y: 9 },
+    worldRow: { width: 24, height: 24 },
+    chunkSize: 64,
+  });
+  assert.deepEqual(s, {
+    x: 111, y: 222, viaDoorway: true, viaPortalFallback: false,
+    hp: 45, mana: 30, stamina: 80,
+  });
+});
+
 test('chooseSpawn: persisted position when no pending', () => {
   const s = chooseSpawn({ pending: null, persisted: { x: 500, y: 600 },
     worldRow: { width: 24, height: 24 }, chunkSize: 64 });

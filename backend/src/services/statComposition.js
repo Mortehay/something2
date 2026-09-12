@@ -66,6 +66,10 @@ const RULE_COMBINE = {
   // SECOND, for WAVE_DURATION_S. `sum`, identity 0 -- so a player with no wave
   // node leaves no wave at all, and satellites add flat increments to a hub.
   meleeWaveShare: 'sum',
+  // Passive health regeneration (HP/s) flat bonus from the tree. `sum`, identity 0.
+  hpRegen: 'sum',
+  // Passive mana regeneration (mana/s) flat bonus from the tree. `sum`, identity 0.
+  manaRegen: 'sum',
 };
 const RULE_IDENTITY = { product: 1, sum: 0, min: null };
 

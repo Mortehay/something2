@@ -49,17 +49,17 @@ test('ring geometry multiplies out to the specced per-ring composition', () => {
 // 3 notables (Broad Study, Second Discipline, Renaissance). The count is
 // pinned because a template silently dropped in a merge shrinks a pool and
 // re-labels every node that pool served.
-test('52 archetype templates, none of them a keystone', () => {
-  assert.strictEqual(TEMPLATES.length, 52);
-  assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'minor').length, 21);
-  assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'notable').length, 27);
+test('70 archetype templates, none of them a keystone', () => {
+  assert.strictEqual(TEMPLATES.length, 70);
+  assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'minor').length, 33);
+  assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'notable').length, 33);
   // SOMET-517's ring-3 tier.
   assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'greater').length, 4);
   assert.strictEqual(TEMPLATES.some((t) => t.kind === 'keystone'), false);
-  assert.strictEqual(new Set(TEMPLATES.map((t) => t.key)).size, 52);
+  assert.strictEqual(new Set(TEMPLATES.map((t) => t.key)).size, 70);
   // Distinct labels: two nodes both called "Sinew" granting different stats is
   // a tooltip that lies.
-  assert.strictEqual(new Set(TEMPLATES.map((t) => t.label)).size, 52);
+  assert.strictEqual(new Set(TEMPLATES.map((t) => t.label)).size, 70);
 });
 
 test('every (kind, sector, ring) combination the generator will ask for has a pool', () => {
@@ -118,7 +118,7 @@ test('every rule key names the module that consumes it and how duplicates combin
   // something that slips in. SOMET-519 added the two speed rules.
   assert.deepStrictEqual(Object.keys(RULE_KEYS).sort(),
     ['attackSpeedMult', 'auraLeech', 'auraRadius', 'castSpeedMult', 'cooldownFloor',
-      'lifeCostMultiplier', 'meleeArcBonus', 'meleeDamageMult', 'meleeReachBonus',
+      'hpRegen', 'lifeCostMultiplier', 'manaRegen', 'meleeArcBonus', 'meleeDamageMult', 'meleeReachBonus',
       'meleeWaveShare', 'pierceBonus', 'projectileCount', 'projectileSpeedMult',
       'regenLifeShare', 'treeCharmBonus']);
   for (const [key, def] of Object.entries(RULE_KEYS)) {
@@ -128,6 +128,8 @@ test('every rule key names the module that consumes it and how duplicates combin
   assert.strictEqual(RULE_KEYS.lifeCostMultiplier.combine, 'product');
   assert.strictEqual(RULE_KEYS.treeCharmBonus.combine, 'sum');
   assert.strictEqual(RULE_KEYS.cooldownFloor.combine, 'min');
+  assert.strictEqual(RULE_KEYS.hpRegen.combine, 'sum');
+  assert.strictEqual(RULE_KEYS.manaRegen.combine, 'sum');
   // SOMET-519: `product`, so four +10% satellites compound to x1.46 rather
   // than adding to +40%. That is what keeps a cluster's last satellite worth
   // taking.

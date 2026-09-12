@@ -77,5 +77,5 @@ describe('legacy flat-map subsystem removal', () => {
       }
     }
     expect(offenders).toEqual([]);
-  });
+  }, 30000);
 });

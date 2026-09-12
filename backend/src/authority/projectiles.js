@@ -479,9 +479,9 @@ class ProjectileSim {
             // the cue fires exactly when the arrow would have connected --
             // and never for a guard the shot merely passed near.
             if (projectileBlockedBy(p, c)) {
-              const bhalf = c.width / 2;
+              const bhalf = (c.hitboxRadius || (c.width ? c.width / 2 : 24) || 24);
               const brr = p.radius + bhalf;
-              const bcx = c.x + bhalf, bcy = c.y + c.height / 2;
+              const bcx = c.x + (c.width ? c.width / 2 : bhalf), bcy = c.y + (c.height ? c.height / 2 : bhalf);
               if (dist2(p.x, p.y, bcx, bcy) <= brr * brr) {
                 recordBlock(p, c, bcx, bcy, -ux, -uy, blocks);
               }
@@ -490,8 +490,8 @@ class ProjectileSim {
           }
           const key = `c:${c.id}`;
           if (p.hitIds.has(key)) continue;
-          const half = c.width / 2;
-          const cx = c.x + half, cy = c.y + c.height / 2;
+          const half = (c.hitboxRadius || (c.width ? c.width / 2 : 24) || 24);
+          const cx = c.x + (c.width ? c.width / 2 : half), cy = c.y + (c.height ? c.height / 2 : half);
           const rr = p.radius + half;
           if (dist2(p.x, p.y, cx, cy) <= rr * rr) {
             // SOMET-343: only a CONTACT detonator goes off on touching

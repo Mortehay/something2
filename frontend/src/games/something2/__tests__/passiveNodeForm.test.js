@@ -50,6 +50,7 @@ describe('vocabulary', () => {
       'attackSpeedMult', 'castSpeedMult', 'meleeReachBonus', 'meleeArcBonus',
       'projectileCount', 'projectileSpeedMult', 'pierceBonus',
       'auraLeech', 'auraRadius', 'meleeDamageMult', 'meleeWaveShare',
+      'hpRegen', 'manaRegen',
     ]);
   });
 

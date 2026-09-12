@@ -125,6 +125,14 @@ const RULE_KEYS = {
     combine: 'sum',
     consumer: 'backend/src/authority/world.js — attack() spawns the wave, tick() damages through it',
   },
+  hpRegen: {
+    combine: 'sum',
+    consumer: "backend/src/authority/world.js — tick()'s hp-regen line / playerStats.js hpRegen",
+  },
+  manaRegen: {
+    combine: 'sum',
+    consumer: "backend/src/services/playerStats.js — derivePlayerStats()'s manaRegen",
+  },
 };
 
 // Clockwise from straight up, matching the spec §5.2 diagram exactly. ORDER IS
@@ -235,6 +243,26 @@ const TEMPLATES = [
   { key: 'min_discipline', kind: 'minor', sectors: '*', rings: [2, 3], weight: 5, label: 'Discipline', grants: [{ type: 'stat', stat: '@sector', value: 4 }] },
   { key: 'min_polymath', kind: 'minor', sectors: '*', rings: [2, 3], weight: 2, label: 'Polymath', grants: [{ type: 'stat', stat: '@other', value: 4 }] },
 
+  // Class/sector themed sustain & regeneration:
+  // Constitution (Cultist) - HP Regen
+  { key: 'min_mending', kind: 'minor', sectors: ['constitution'], rings: [1, 2, 3], weight: 2, label: 'Mending', grants: [{ type: 'rule', rule: 'hpRegen', value: 0.75 }] },
+  { key: 'min_bloodflow', kind: 'minor', sectors: ['constitution'], rings: [1, 2, 3], weight: 2, label: 'Bloodflow', grants: [{ type: 'rule', rule: 'hpRegen', value: 0.75 }] },
+  // Strength (Warrior) - HP Regen
+  { key: 'min_regrowth', kind: 'minor', sectors: ['strength'], rings: [1, 2, 3], weight: 2, label: 'Regrowth', grants: [{ type: 'rule', rule: 'hpRegen', value: 0.5 }] },
+  { key: 'min_enduring_flesh', kind: 'minor', sectors: ['strength'], rings: [1, 2, 3], weight: 2, label: 'Enduring Flesh', grants: [{ type: 'rule', rule: 'hpRegen', value: 0.5 }] },
+  // Intelligence (Mage) - Mana Regen
+  { key: 'min_arcane_recovery', kind: 'minor', sectors: ['intelligence'], rings: [1, 2, 3], weight: 2, label: 'Arcane Recovery', grants: [{ type: 'rule', rule: 'manaRegen', value: 1.5 }] },
+  { key: 'min_meditation_spark', kind: 'minor', sectors: ['intelligence'], rings: [1, 2, 3], weight: 2, label: 'Meditation Spark', grants: [{ type: 'rule', rule: 'manaRegen', value: 1.5 }] },
+  // Wisdom (Monk) - Hybrid HP + Mana Regen
+  { key: 'min_inner_harmony', kind: 'minor', sectors: ['wisdom'], rings: [1, 2, 3], weight: 2, label: 'Inner Harmony', grants: [{ type: 'rule', rule: 'hpRegen', value: 0.4 }, { type: 'rule', rule: 'manaRegen', value: 1.0 }] },
+  { key: 'min_serenity', kind: 'minor', sectors: ['wisdom'], rings: [1, 2, 3], weight: 2, label: 'Serenity', grants: [{ type: 'rule', rule: 'hpRegen', value: 0.4 }, { type: 'rule', rule: 'manaRegen', value: 1.0 }] },
+  // Dexterity (Archer) - Agility & HP Sustain
+  { key: 'min_quick_recovery', kind: 'minor', sectors: ['dexterity'], rings: [1, 2, 3], weight: 2, label: 'Quick Recovery', grants: [{ type: 'rule', rule: 'hpRegen', value: 0.4 }, { type: 'resource', pool: 'stamina', value: 5 }] },
+  { key: 'min_nimble_flow', kind: 'minor', sectors: ['dexterity'], rings: [1, 2, 3], weight: 2, label: 'Nimble Flow', grants: [{ type: 'rule', rule: 'hpRegen', value: 0.4 }] },
+  // Charisma (Druid) - Nature Mixed Rejuvenation
+  { key: 'min_wild_bloom', kind: 'minor', sectors: ['charisma'], rings: [1, 2, 3], weight: 2, label: 'Wild Bloom', grants: [{ type: 'rule', rule: 'hpRegen', value: 0.4 }, { type: 'rule', rule: 'manaRegen', value: 1.0 }] },
+  { key: 'min_natural_vigour', kind: 'minor', sectors: ['charisma'], rings: [1, 2, 3], weight: 2, label: 'Natural Vigour', grants: [{ type: 'rule', rule: 'hpRegen', value: 0.5 }] },
+
   // --- notables ---
   { key: 'not_great_sinew', kind: 'notable', sectors: '*', rings: [1, 2, 3], weight: 5, label: 'Great Sinew', grants: [{ type: 'stat', stat: '@sector', value: 8 }] },
   { key: 'not_mastery', kind: 'notable', sectors: '*', rings: [2, 3], weight: 4, label: 'Mastery', grants: [{ type: 'stat', stat: '@sector', value: 12 }] },
@@ -248,6 +276,13 @@ const TEMPLATES = [
   { key: 'not_thick_skin', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Thick Skin', grants: [{ type: 'resource', pool: 'hp', value: 40 }] },
   { key: 'not_endurance', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Endurance', grants: [{ type: 'resource', pool: 'stamina', value: 30 }] },
   { key: 'not_brutality', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Brutality', grants: [{ type: 'damage', element: 'physical', value: 12 }] },
+  // Sector-themed notables:
+  { key: 'not_sanguine_spring', kind: 'notable', sectors: ['constitution'], rings: [1, 2, 3], label: 'Sanguine Spring', grants: [{ type: 'rule', rule: 'hpRegen', value: 2.5 }] },
+  { key: 'not_iron_recovery', kind: 'notable', sectors: ['strength'], rings: [1, 2, 3], label: 'Iron Recovery', grants: [{ type: 'rule', rule: 'hpRegen', value: 2.0 }] },
+  { key: 'not_font_of_power', kind: 'notable', sectors: ['intelligence'], rings: [1, 2, 3], label: 'Font of Power', grants: [{ type: 'rule', rule: 'manaRegen', value: 4.0 }] },
+  { key: 'not_tranquil_flow', kind: 'notable', sectors: ['wisdom'], rings: [1, 2, 3], label: 'Tranquil Flow', grants: [{ type: 'rule', rule: 'hpRegen', value: 1.2 }, { type: 'rule', rule: 'manaRegen', value: 2.5 }] },
+  { key: 'not_fleeting_rest', kind: 'notable', sectors: ['dexterity'], rings: [1, 2, 3], label: 'Fleeting Rest', grants: [{ type: 'rule', rule: 'hpRegen', value: 1.2 }, { type: 'resource', pool: 'stamina', value: 15 }] },
+  { key: 'not_rejuvenation', kind: 'notable', sectors: ['charisma'], rings: [1, 2, 3], label: 'Rejuvenation', grants: [{ type: 'rule', rule: 'hpRegen', value: 1.2 }, { type: 'rule', rule: 'manaRegen', value: 2.0 }] },
   { key: 'not_kindling', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Kindling', grants: [{ type: 'damage', element: 'fire', value: 12 }] },
   { key: 'not_frostbite', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Frostbite', grants: [{ type: 'damage', element: 'ice', value: 12 }] },
   { key: 'not_charge', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Charge', grants: [{ type: 'damage', element: 'lightning', value: 12 }] },

@@ -9,6 +9,7 @@ import {
 
 export const PANEL_W = 840;
 export const PANEL_H = 550;
+const iconBoxS = 48;
 const PAD = 14;
 const TITLE_H = 34;
 const TAB_H = 24;
