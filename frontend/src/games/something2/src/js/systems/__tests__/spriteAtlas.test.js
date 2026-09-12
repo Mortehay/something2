@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { frameRect, staticFrameKey, animatedFrameKey, facingToDir } from "../spriteAtlas.js";
+import { frameRect, staticFrameKey, animatedFrameKey, facingToDir, stateFrameKey } from "../spriteAtlas.js";
 import { RenderSystem } from "../RenderSystem.js";
 
 const MANIFEST = {
@@ -78,5 +78,17 @@ describe("RenderSystem.resolveSprite", () => {
     expect(RenderSystem.resolveSprite({ sprite: { atlas_key: "missing", manifest: MANIFEST } }, im, "static")).toBeNull();
     expect(RenderSystem.resolveSprite({ sprite: { atlas_key: "atlas.png" } }, im, "static")).toBeNull();
     expect(RenderSystem.resolveSprite({}, im, "static")).toBeNull();
+  });
+});
+
+describe("stateFrameKey", () => {
+  const manifest = { frames: { "S/0": [0, 0, 8, 8], opened: [8, 0, 8, 8] } };
+  it("returns the named state frame when the manifest has it", () => {
+    expect(stateFrameKey(manifest, "opened")).toBe("opened");
+  });
+  it("returns null when absent so callers fall through to current behaviour", () => {
+    expect(stateFrameKey(manifest, "locked")).toBeNull();
+    expect(stateFrameKey(manifest, null)).toBeNull();
+    expect(stateFrameKey(null, "opened")).toBeNull();
   });
 });

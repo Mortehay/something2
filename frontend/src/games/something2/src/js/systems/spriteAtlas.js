@@ -86,3 +86,13 @@ export function resolveTileVisual(tileName, def, imageManager, nowMs, override =
   }
   return null;
 }
+
+// --- State frames ------------------------------------------------------------
+// A world point (chest, waypoint) MAY one day ship a frame per state
+// ("opened", "unlit"). Nothing generates such frames yet; this is the seam so
+// they can land as a pipeline change with no renderer edit. Null when absent,
+// so every caller falls through to the frame it would have picked anyway.
+export function stateFrameKey(manifest, stateKey) {
+  if (!stateKey || typeof stateKey !== "string") return null;
+  return frameRect(manifest, stateKey) ? stateKey : null;
+}

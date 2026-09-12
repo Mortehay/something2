@@ -3,7 +3,7 @@ import { worldToScreen, depthKey } from "../core/iso.js";
 import { compareDrawables, wallRevealed, drawWall } from "./wallRenderer.js";
 import { drawLandmarks } from "./landmarkRenderer.js";
 import { drawPlaceholder } from "./placeholderSprite.js";
-import { frameRect, staticFrameKey, animatedFrameKey, facingToDir, tileFrameKey, resolveTileVisual } from "./spriteAtlas.js";
+import { frameRect, staticFrameKey, animatedFrameKey, facingToDir, tileFrameKey, resolveTileVisual, stateFrameKey } from "./spriteAtlas.js";
 import { TileDiamondCache, TILE_DIAMOND_PAD } from "./tileTexture.js";
 import { createTextLabelCache, drawCachedLabel } from "./textLabelCache.js";
 // domCanvasFactory lives in minimapTerrainLayer because that is where the
@@ -2689,11 +2689,15 @@ export class RenderSystem {
     // the object/tile pipeline are FLAT (keys "0","1",… with no direction), so
     // fall back to the flat cycle before giving up on a single static frame.
     // Static -> a single representative frame.
-    const key = mode === "animated"
+    // A world point's stateKey (e.g. "opened", "unlit") wins in BOTH modes
+    // when the manifest has that frame -- SOMET-583's seam for state art that
+    // doesn't exist yet. Absent, this is byte-for-byte the old fallback chain.
+    const stateFrame = stateFrameKey(manifest, entity.stateKey);
+    const key = stateFrame || (mode === "animated"
       ? (animatedFrameKey(manifest, facingToDir(entity.facing), timeMs)
          || tileFrameKey(manifest, timeMs)
          || staticFrameKey(entity.sprite, manifest))
-      : staticFrameKey(entity.sprite, manifest);
+      : staticFrameKey(entity.sprite, manifest));
     const rect = frameRect(manifest, key);
     return rect ? { img: atlas, crop: rect } : null;
   }
