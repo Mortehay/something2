@@ -484,6 +484,15 @@ export class RenderSystem {
       else this.drawEntity(d.ref);
     }
 
+    // SOMET-584 review round 2 (T9 finding A). The pre-sort drawLandmarks call
+    // above (line ~402) drew NOTHING for a `skipBody` landmark -- its art body
+    // just painted, in the loop above, as a `pointart` drawable. Now that the
+    // body is down, draw ONLY that landmark's beam + label on top of it, or a
+    // tall body (a portal arch) permanently hides its own destination pill
+    // behind itself. Same `phase: this.nowMs` as the first call -- the pulse
+    // must read as one marker, not two out of sync.
+    drawLandmarks(this.ctx, { landmarks, phase: this.nowMs, halfW, halfH, skipBody: landmarkPlan.skipBody, overlayOnly: true });
+
     // SOMET-493. Resolved against the SAME `drawables` list that was just
     // painted, in the same frame, so the card can never name something that is
     // not on screen or is buried under something else. Only the resolution
@@ -2251,8 +2260,17 @@ export class RenderSystem {
       this.ctx.stroke();
     }
     this.ctx.globalAlpha = treatment.alpha;
-    this.drawEntity(pointBodyRef(def, x, y, { stateKey: treatment.stateKey }));
+    const ref = pointBodyRef(def, x, y, { stateKey: treatment.stateKey });
+    this.drawEntity(ref);
     this.ctx.restore();
+    // SOMET-584 review round 2 (T9 finding B): callers need the drawn body's
+    // on-screen height to lift a caption above it, or the caption lands
+    // inside the body (a "Merchant" label in the middle of a 100px arch).
+    // drawEntity fits the sprite INSIDE this box preserving aspect ratio, so
+    // the box height is a safe upper bound on the actual drawn pixel height
+    // -- never less than what was drawn -- without reaching into drawEntity's
+    // private fitSpriteRect math.
+    return ref.displayHeight || ref.height || 40;
   }
 
   // A resolvable def (pointArtDef already checked render_mode/image/sprite
@@ -2270,13 +2288,14 @@ export class RenderSystem {
     return !!(def.image && this.imageManager && this.imageManager.get(def.image));
   }
 
-  // True when art drew, so the caller skips its placeholder shape and keeps
-  // only its caption/prompt. False (and nothing drawn) otherwise.
+  // The drawn body's on-screen height when art drew -- callers use it to lift
+  // their caption above the body instead of a fixed placeholder radius
+  // (SOMET-584 review round 2, T9 finding B) -- or `false` when nothing drew,
+  // so the caller keeps its placeholder shape.
   _drawPointArtAt(artName, x, y, treatment) {
     const def = pointArtDef(artName, this.entityDefs);
     if (!def || !this._pointArtReady(def, treatment.stateKey)) return false;
-    this.drawPointBody(def, x, y, treatment);
-    return true;
+    return this.drawPointBody(def, x, y, treatment);
   }
 
   // planLandmarkBodies only knows the CATALOG shape (render_mode/image/sprite
@@ -2320,10 +2339,14 @@ export class RenderSystem {
       this.ctx.fill();
       this.ctx.stroke();
     }
+    // SOMET-584 review round 2 (T9 finding B): the caption must clear the
+    // ART body's real height, not the placeholder's fixed radius `r`, or it
+    // lands inside a tall body instead of above it.
+    const lift = drewArt ? drewArt : r;
     this.ctx.fillStyle = "#fff";
     this.ctx.font = "12px sans-serif";
     this.ctx.textAlign = "center";
-    this.ctx.fillText("Merchant", dx, dy - r - 6);
+    this.ctx.fillText("Merchant", dx, dy - lift - 6);
 
     // Show prompt when player is within interact range
     if (player) {
@@ -2374,10 +2397,12 @@ export class RenderSystem {
       this.ctx.fill();
     }
 
+    // SOMET-584 review round 2 (T9 finding B).
+    const lift = drewArt ? drewArt : r;
     this.ctx.fillStyle = "#ecfeff";
     this.ctx.font = "bold 12px sans-serif";
     this.ctx.textAlign = "center";
-    this.ctx.fillText("Gem Merchant", dx, dy - r - 6);
+    this.ctx.fillText("Gem Merchant", dx, dy - lift - 6);
 
     // Show prompt when player is within interact range
     if (player) {
@@ -2434,7 +2459,9 @@ export class RenderSystem {
     // other four draw methods already do outside their gate.
     this.ctx.textAlign = "center";
     this.ctx.fillStyle = "#fff";
-    this.ctx.fillText("Skill Trainer", dx, dy - r - 6);
+    // SOMET-584 review round 2 (T9 finding B).
+    const lift = drewArt ? drewArt : r;
+    this.ctx.fillText("Skill Trainer", dx, dy - lift - 6);
 
     // Show prompt when player is within interact range
     if (player) {
@@ -2482,10 +2509,12 @@ export class RenderSystem {
       this.ctx.lineTo(dx + r, dy - r * 0.1);
       this.ctx.stroke();
     }
+    // SOMET-584 review round 2 (T9 finding B).
+    const lift = drewArt ? drewArt : r;
     this.ctx.fillStyle = "#fff";
     this.ctx.font = "12px sans-serif";
     this.ctx.textAlign = "center";
-    this.ctx.fillText("Chest", dx, dy - r - 6);
+    this.ctx.fillText("Chest", dx, dy - lift - 6);
 
     // Show prompt when player is within interact range
     if (player) {
@@ -2562,11 +2591,13 @@ export class RenderSystem {
         this.ctx.fill();
       }
     }
+    // SOMET-584 review round 2 (T9 finding B).
+    const lift = drewArt ? drewArt : r;
     this.ctx.fillStyle = "#fff";
     this.ctx.font = "12px sans-serif";
     this.ctx.textAlign = "center";
     const label = state === "opened" ? "Looted" : state === "unlocked" ? "Treasure" : "Treasure (guarded)";
-    this.ctx.fillText(label, dx, dy - r - 6);
+    this.ctx.fillText(label, dx, dy - lift - 6);
     // The hint, only when the player is plausibly close enough for the key to
     // do something, and never on a chest with nothing left in it.
     if (state !== "opened" && player) {

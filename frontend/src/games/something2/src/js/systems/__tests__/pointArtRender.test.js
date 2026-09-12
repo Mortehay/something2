@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { RenderSystem } from '../RenderSystem.js';
+import { worldToScreen } from '../../core/iso.js';
 
 // The green-over-dead-feature guard (SOMET-468 x4): a bound name can reach
 // the renderer and still never hit drawImage. These tests assert the
@@ -42,9 +43,12 @@ describe('drawPointBody', () => {
 });
 
 describe('_drawPointArtAt', () => {
-  it('returns true and draws when the name resolves to art', () => {
+  it('returns the drawn body height (truthy, > 0) when the name resolves to art', () => {
+    // SOMET-584 review round 2 (T9 finding B): the return value is now the
+    // drawn body's height, not a bare boolean, so callers can lift a caption
+    // above it -- assert the shape of that contract, not a specific number.
     const r = rs();
-    expect(r._drawPointArtAt('portal', 3250, 3450, { alpha: 1, ring: false, stateKey: null })).toBe(true);
+    expect(r._drawPointArtAt('portal', 3250, 3450, { alpha: 1, ring: false, stateKey: null })).toBeGreaterThan(0);
     expect(r.ctx.drawImage).toHaveBeenCalledTimes(1);
   });
   it('returns false and draws nothing when the name has no art, so the placeholder runs', () => {
@@ -122,5 +126,23 @@ describe('readiness gating for a resolvable-but-unloaded image', () => {
     const plan = r._readyLandmarkPlan([landmark]);
     expect(plan.bodies.length).toBe(1);
     expect(plan.skipBody.has(landmark)).toBe(true);
+  });
+});
+
+// SOMET-584 review round 2 (T9 finding B). Live verification found the
+// caption sitting in the middle of a 100px arch body: it was positioned off
+// the placeholder's fixed radius `r` (11px) regardless of what actually drew.
+// Record the real (x, y) each fillText call used, the same technique the
+// textAlign test above uses, and check the caption cleared the body.
+describe('caption lifts above the drawn body, not the placeholder radius', () => {
+  it('drawMerchant with art positions "Merchant" well above the body, not at r=11', () => {
+    const r = rs();
+    const seen = [];
+    r.ctx.fillText = (text, x, y) => seen.push({ text, x, y });
+    r.drawMerchant({ x: 450, y: 450, art: 'portal' });
+    const { y: dy } = worldToScreen(450, 450);
+    const caption = seen.find((c) => c.text === 'Merchant');
+    expect(caption).toBeTruthy();
+    expect(caption.y).toBeLessThan(dy - 40);
   });
 });

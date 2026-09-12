@@ -65,7 +65,20 @@ function diamondPath(ctx, x, y, halfW, halfH) {
 // Call this AFTER the flat floor pass and BEFORE the depth-sorted entity pass:
 // the marker is ground decoration, so a creature or player standing on the tile
 // must draw over it and stay legible.
-export function drawLandmarks(ctx, { landmarks, phase, halfW, halfH, skipBody = null } = {}) {
+//
+// `overlayOnly` (SOMET-584 review round 2, T9 finding A) splits this into two
+// calls that together draw every landmark exactly once. A landmark whose body
+// is `skipBody`'d draws its art INSIDE the depth sort, after this flat pass --
+// so its beam and label, if painted here, land underneath a tall body and are
+// invisible (a portal's destination pill hidden behind its own arch). The
+// fix is to call this function twice: once here (unchanged position) with
+// `overlayOnly` false, which now draws NOTHING for a `skipBody` landmark
+// (not even the beam/label); and once more from RenderSystem AFTER the
+// depth-sorted pass, with `overlayOnly` true, which draws ONLY the beam and
+// label for exactly those `skipBody` landmarks, now safely on top of the
+// body that was just painted. Every other landmark (no body, not in
+// `skipBody`) is drawn in full by the first call only.
+export function drawLandmarks(ctx, { landmarks, phase, halfW, halfH, skipBody = null, overlayOnly = false } = {}) {
   if (!Array.isArray(landmarks) || landmarks.length === 0) return;
 
   const alpha = landmarkPulse(phase);
@@ -75,6 +88,11 @@ export function drawLandmarks(ctx, { landmarks, phase, halfW, halfH, skipBody = 
     // draws nothing on a real canvas while still costing a path, which is how
     // "it renders" and "it renders invisibly" become indistinguishable.
     if (!l || !Number.isFinite(l.x) || !Number.isFinite(l.y)) continue;
+
+    // Partition: this call owns EITHER the skipBody landmarks (overlayOnly)
+    // OR everyone else (the normal pass), never both -- see the note above.
+    const bodyElsewhere = skipBody && typeof skipBody.has === "function" && skipBody.has(l);
+    if (overlayOnly ? !bodyElsewhere : bodyElsewhere) continue;
 
     const s = worldToScreen(l.x, l.y);
     const color = landmarkColor(l.kind);
@@ -86,12 +104,13 @@ export function drawLandmarks(ctx, { landmarks, phase, halfW, halfH, skipBody = 
     // the same activated/unactivated distinction the travel popup already makes
     // in its list, carried onto the ground so the two cannot disagree about
     // which waypoints a player has lit.
-    // An art body (SOMET-584) replaces the diamond, drawn later inside the
-    // depth sort by RenderSystem. Beam and label stay: they are the "there
-    // is a landmark here" signal, and a gate the player cannot find is not a
-    // gate.
-    const bodyElsewhere = skipBody && typeof skipBody.has === "function" && skipBody.has(l);
-    if (!bodyElsewhere) {
+    //
+    // An art body (SOMET-584) replaces the diamond entirely for a `skipBody`
+    // landmark -- it never reaches this branch at all now (see the
+    // `overlayOnly` partition above), so there is nothing to gate here beyond
+    // `overlayOnly` itself: this call only ever draws a diamond for a
+    // non-skipBody landmark, in its one and only pass.
+    if (!overlayOnly) {
       const filled = l.kind !== "waypoint" || l.activated === true;
       diamondPath(ctx, s.x, s.y, halfW, halfH);
       if (filled) {

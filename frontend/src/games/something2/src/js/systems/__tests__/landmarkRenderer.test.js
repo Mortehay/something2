@@ -144,16 +144,38 @@ describe('drawLandmarks', () => {
     expect(ctx.calls.filter((c) => c.name === 'closePath').length).toBe(1);
   });
 
-  it('skipBody suppresses the diamond but keeps the beam and label', () => {
+  // SOMET-584 review round 2 (T9 finding A): a `skipBody` landmark's body now
+  // draws inside the depth sort, AFTER this flat pass, so the flat pass must
+  // draw NOTHING for it -- not even the beam/label -- or those double up with
+  // the later `overlayOnly` call. (Superseded the round-1 assertion that this
+  // call still drew the beam/label for a skipBody landmark; it no longer does.)
+  it('skipBody + no overlayOnly draws nothing at all for that landmark', () => {
     const ctx = stubCtx();
     ctx.fillText = ctx.calls.push.bind(ctx.calls); ctx.measureText = () => ({ width: 40 });
     drawLandmarks(ctx, { landmarks: [PORTAL], phase: 0, halfW: 50, halfH: 25, skipBody: new Set([PORTAL]) });
-    expect(ctx.calls.filter((c) => c.name === 'fill').length).toBe(0);   // no diamond fill
-    expect(ctx.calls.filter((c) => c.name === 'fillRect').length).toBeGreaterThanOrEqual(1); // beam
+    expect(ctx.calls.length).toBe(0);
   });
   it('without skipBody the diamond is still filled', () => {
     const ctx = stubCtx();
     drawLandmarks(ctx, { landmarks: [PORTAL], phase: 0, halfW: 50, halfH: 25 });
     expect(ctx.calls.filter((c) => c.name === 'fill').length).toBe(1);
+  });
+
+  // The two calls RenderSystem now makes partition every landmark exactly
+  // once. These two tests cover the `overlayOnly` half of that partition; the
+  // two above already cover the non-overlay half.
+  it('overlayOnly draws the beam and label for a skipBody landmark, but never its diamond', () => {
+    const ctx = stubCtx();
+    ctx.fillText = ctx.calls.push.bind(ctx.calls); ctx.measureText = () => ({ width: 40 });
+    drawLandmarks(ctx, {
+      landmarks: [PORTAL], phase: 0, halfW: 50, halfH: 25, skipBody: new Set([PORTAL]), overlayOnly: true,
+    });
+    expect(ctx.calls.filter((c) => c.name === 'fill').length).toBe(0);   // no diamond fill
+    expect(ctx.calls.filter((c) => c.name === 'fillRect').length).toBeGreaterThanOrEqual(1); // beam
+  });
+  it('overlayOnly draws nothing for a landmark NOT in skipBody -- the other call already drew it', () => {
+    const ctx = stubCtx();
+    drawLandmarks(ctx, { landmarks: [PORTAL], phase: 0, halfW: 50, halfH: 25, overlayOnly: true });
+    expect(ctx.calls.length).toBe(0);
   });
 });
