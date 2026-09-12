@@ -602,3 +602,41 @@ test('the field-level and write-level pin checks disagree about a bare "provider
   assert.equal(providerPinFieldError(bare), null, 'a form mid-edit is well-formed');
   assert.match(providerPinError(bare), /needs an ai_provider_id/, 'but it may not be stored');
 });
+
+test('POST /api/entity-types stores point_kind', async () => {
+  let captured;
+  __setPool({ query: withAuth(async (sql, params) => { captured = { sql, params }; return { rows: [{ id: 1 }] }; }) });
+  const res = await request(app).post('/api/entity-types').set(...AUTH)
+    .send({ name: 'stone_gate', color: '#fff', point_kind: 'portal' });
+  assert.strictEqual(res.status, 201);
+  assert.strictEqual(paramFor(captured.sql, captured.params, 'point_kind'), 'portal');
+});
+
+test('POST /api/entity-types rejects a non-string point_kind', async () => {
+  __setPool({ query: withAuth(async () => { throw new Error('must not write'); }) });
+  const res = await request(app).post('/api/entity-types').set(...AUTH)
+    .send({ name: 'x', color: '#fff', point_kind: 7 });
+  assert.strictEqual(res.status, 400);
+  assert.match(res.body.error, /point_kind/);
+});
+
+test('PUT /api/entity-types/:id leaves point_kind alone when omitted and clears it when null', async () => {
+  const seen = [];
+  __setPool(putMock('portal', async (sql, params) => {
+    if (/UPDATE entity_types/i.test(sql)) {
+      // pointKindProvided flag + value are adjacent params; capture both.
+      const flagIdx = sql.match(/point_kind = CASE WHEN \$(\d+)::boolean THEN \$(\d+)/);
+      seen.push([params[Number(flagIdx[1]) - 1], params[Number(flagIdx[2]) - 1]]);
+      return { rows: [{ id: 1 }] };
+    }
+    return { rows: [] };
+  }));
+  const base = { name: 'portal', color: '#fff', walkable: true, spawn_tiles: [], chance: 0 };
+  let res = await request(app).put('/api/entity-types/1').set(...AUTH).send(base);
+  assert.strictEqual(res.status, 200);
+  res = await request(app).put('/api/entity-types/1').set(...AUTH).send({ ...base, point_kind: null });
+  assert.strictEqual(res.status, 200);
+  res = await request(app).put('/api/entity-types/1').set(...AUTH).send({ ...base, point_kind: 'portal' });
+  assert.strictEqual(res.status, 200);
+  assert.deepStrictEqual(seen, [[false, null], [true, null], [true, 'portal']]);
+});

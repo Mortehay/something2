@@ -466,6 +466,9 @@ async function getEntityTypesMap() {
       displayWidth: row.display_width,
       displayHeight: row.display_height,
       isCreature: row.is_creature,
+      // SOMET-578: which world-point kind (portal / waypoint / village post /
+      // chest / ...) this type draws when placed as a point instance.
+      pointKind: row.point_kind ?? null,
       // Visual fields the renderer needs to draw a generated sprite instead of
       // a flat rectangle. Omitting these was why approved entity textures never
       // showed up in game (tile_types has always exposed its equivalents).
@@ -745,6 +748,9 @@ function entityTypeFieldError(body) {
       return `${field} must be an integer between 1 and ${MAX_ENTITY_DISPLAY_PX}`;
     }
   }
+  if (body.point_kind != null && (typeof body.point_kind !== 'string' || body.point_kind === '')) {
+    return 'point_kind must be a non-empty string or null';
+  }
   return null;
 }
 
@@ -766,7 +772,7 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
       strength, dexterity, constitution, intelligence, wisdom, charisma,
       hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
       display_width, display_height, render_mode, is_creature, prompt, place_order,
-      behavior_id, attack_element
+      behavior_id, attack_element, point_kind
     } = req.body;
     if (!name || !color) return res.status(400).json({ error: 'Name and color are required' });
     if (catalogNameTooLong(name)) {
@@ -795,18 +801,21 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
         strength, dexterity, constitution, intelligence, wisdom, charisma,
         hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
         display_width, display_height, render_mode, is_creature, prompt, place_order,
-        behavior_id, attack_element, ai_provider_mode, ai_provider_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28) RETURNING *`,
+        behavior_id, attack_element, ai_provider_mode, ai_provider_id, point_kind
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29) RETURNING *`,
       [
         name, color, walkable ?? false, JSON.stringify(spawn_tiles || []), chance ?? 0.1,
         strength ?? 0, dexterity ?? 0, constitution ?? 0, intelligence ?? 0, wisdom ?? 0, charisma ?? 0,
         hp ?? 0, max_hp ?? 0, hp_regen_rate ?? 0, mana ?? 0, max_mana ?? 0, mana_regen_rate ?? 0, image,
         display_width, display_height, render_mode ?? 'rect', is_creature ?? false, prompt ?? '', Number(place_order) || 0,
-        behavior_id ?? null, attack_element || 'physical', pin.mode, pin.id
+        behavior_id ?? null, attack_element || 'physical', pin.mode, pin.id, point_kind ?? null
       ]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
+    if (err.code === '23503' && /point_kind/.test(err.constraint || '')) {
+      return res.status(400).json({ error: `unknown point_kind "${req.body.point_kind}"` });
+    }
     console.error(err);
     res.status(500).json({ error: 'Failed to create entity type' });
   }
@@ -819,7 +828,7 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
     strength, dexterity, constitution, intelligence, wisdom, charisma,
     hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
     display_width, display_height, render_mode, is_creature, prompt, place_order,
-    behavior_id, attack_element
+    behavior_id, attack_element, point_kind
   } = req.body;
   if (catalogNameTooLong(name)) {
     return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
@@ -851,6 +860,11 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
   // there is no legitimate clear-to-null action to preserve here, and an
   // explicit null would just fail the NOT NULL constraint anyway.
   const behaviorIdProvided = 'behavior_id' in req.body;
+  // Same present-in-body rule as behaviorIdProvided above, for the same
+  // reason: an admin form that clears the "renders as" kind back to none
+  // legitimately sends point_kind: null, which a bare `?? null` COALESCE
+  // would silently fail to apply.
+  const pointKindProvided = 'point_kind' in req.body;
 
   // SOMET-228: worlds.allowed_creature_types, world_creatures.type and
   // biomes.flora_types/creature_types reference entity_types by NAME (no
@@ -970,8 +984,9 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
         -- the normalized pair, so mode and id can never disagree.
         ai_provider_mode = CASE WHEN $28::boolean THEN $29 ELSE entity_types.ai_provider_mode END,
         ai_provider_id = CASE WHEN $28::boolean THEN $30 ELSE entity_types.ai_provider_id END,
+        point_kind = CASE WHEN $31::boolean THEN $32 ELSE entity_types.point_kind END,
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $31 RETURNING *`,
+      WHERE id = $33 RETURNING *`,
       [
         name, color, walkable, JSON.stringify(spawn_tiles), chance,
         strength, dexterity, constitution, intelligence, wisdom, charisma,
@@ -997,7 +1012,10 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
         // `params[params.length - 1]` on this exact route, and that assertion
         // is worth keeping -- an id landing anywhere else in this array is a
         // WHERE clause pointed at the wrong value.
-        behaviorIdProvided, pinSent, pin.mode, pin.id, id
+        // pointKindProvided/point_kind sit here for the same reason
+        // behaviorIdProvided/pinSent do: id must stay `params[params.length - 1]`
+        // -- entityTypes.test.js asserts it on this exact route.
+        behaviorIdProvided, pinSent, pin.mode, pin.id, pointKindProvided, point_kind ?? null, id
       ]
     );
     if (result.rows.length === 0) {
@@ -1010,6 +1028,9 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
     res.json(body);
   } catch (err) {
     await client?.query('ROLLBACK').catch(() => {});
+    if (err.code === '23503' && /point_kind/.test(err.constraint || '')) {
+      return res.status(400).json({ error: `unknown point_kind "${req.body.point_kind}"` });
+    }
     console.error(err);
     res.status(500).json({ error: 'Failed to update entity type' });
   } finally {
@@ -2194,6 +2215,57 @@ app.get('/api/creature-behaviors', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch creature behaviors' });
+  }
+});
+
+// World point kinds (SOMET-578): which entity type draws a portal / waypoint
+// / village post / chest when the instance itself names none.
+const POINT_KIND_ROW = `
+  SELECT k.kind, k.default_entity_type_id, e.name AS default_name
+    FROM world_point_kinds k
+    LEFT JOIN entity_types e ON e.id = k.default_entity_type_id`;
+
+app.get('/api/world-point-kinds', async (req, res) => {
+  try {
+    const r = await pool.query(`${POINT_KIND_ROW} ORDER BY k.kind ASC`);
+    res.json(r.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch world point kinds' });
+  }
+});
+
+app.put('/api/world-point-kinds/:kind', adminGuard, async (req, res) => {
+  const { kind } = req.params;
+  const { default_entity_type_id: typeId } = req.body;
+  if (typeId != null && !Number.isInteger(typeId)) {
+    return res.status(400).json({ error: 'default_entity_type_id must be an integer or null' });
+  }
+  try {
+    if (typeId != null) {
+      // The default for a kind must be a type OF that kind, or the editor's
+      // per-kind filter and the runtime's fallback would disagree.
+      const t = await pool.query('SELECT point_kind FROM entity_types WHERE id = $1', [typeId]);
+      if (t.rows.length === 0) return res.status(400).json({ error: `unknown entity type ${typeId}` });
+      if (t.rows[0].point_kind !== kind) {
+        return res.status(400).json({
+          error: `entity type ${typeId} has point_kind "${t.rows[0].point_kind}" and cannot be the default for kind "${kind}"`,
+        });
+      }
+    }
+    const r = await pool.query(
+      `WITH upd AS (
+         UPDATE world_point_kinds SET default_entity_type_id = $1 WHERE kind = $2 RETURNING kind, default_entity_type_id
+       )
+       SELECT upd.kind, upd.default_entity_type_id, e.name AS default_name
+         FROM upd LEFT JOIN entity_types e ON e.id = upd.default_entity_type_id`,
+      [typeId ?? null, kind],
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: `unknown world point kind "${kind}"` });
+    res.json(r.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update world point kind' });
   }
 });
 
