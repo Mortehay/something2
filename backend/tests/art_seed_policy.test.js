@@ -45,6 +45,7 @@ function stubStore(objects = new Map()) {
       return Readable.from([objects.get(key)]);
     },
     async putObject(key, buffer) { puts.push({ key, buffer }); objects.set(key, buffer); return key; },
+    async objectExists(key) { return objects.has(key); },
   };
 }
 
@@ -147,24 +148,37 @@ test('item export reads icon and passive export reads catalog_art', async () => 
 
 // --- seed gates ----------------------------------------------------------
 
-test('tile gate: a tile that already draws an image is skipped unless forced', async () => {
-  const has = stubDb([[/FROM tile_types/, [{ id: 1, render_mode: 'image' }]]]);
-  assert.strictEqual((await SEED_POLICY.tile.gate(has, { name: 'grass' }, { force: false })).skip, 'has-art');
+test('tile gate: a tile that already holds an image is skipped unless forced, and the skip names the key', async () => {
+  const has = stubDb([[/FROM tile_types/, [{ id: 1, render_mode: 'image', image: 'sprites/tiles/grass/j/static.png', sprite: null }]]]);
+  const v = await SEED_POLICY.tile.gate(has, { name: 'grass' }, { force: false });
+  assert.strictEqual(v.skip, 'has-art');
+  assert.strictEqual(v.image, 'sprites/tiles/grass/j/static.png');
   assert.strictEqual(await SEED_POLICY.tile.gate(has, { name: 'grass' }, { force: true }), null);
-  const bare = stubDb([[/FROM tile_types/, [{ id: 1, render_mode: 'color' }]]]);
+  const bare = stubDb([[/FROM tile_types/, [{ id: 1, render_mode: 'color', image: '', sprite: null }]]]);
   assert.strictEqual(await SEED_POLICY.tile.gate(bare, { name: 'grass' }, { force: false }), null);
   const none = stubDb([]);
   assert.strictEqual((await SEED_POLICY.tile.gate(none, { name: 'grass' }, { force: false })).skip, 'missing-row');
 });
 
+test('a row whose render_mode says image/static but whose image column is EMPTY has no art and is seeded', async () => {
+  // seed-catalogs inserts pine_tree with render_mode 'static' and no image;
+  // on a fresh machine the old gate read the mode, called it "already had
+  // art", and the client drew the fallback colour box. The green rectangle.
+  const tile = stubDb([[/FROM tile_types/, [{ id: 1, render_mode: 'image', image: '', sprite: null }]]]);
+  assert.strictEqual(await SEED_POLICY.tile.gate(tile, { name: 'grass' }, { force: false }), null);
+  const ent = stubDb([[/FROM entity_types/, [{ id: 2, render_mode: 'static', image: null, sprite: null }]]]);
+  assert.strictEqual(await SEED_POLICY.entity.gate(ent, { name: 'pine_tree', cutout: true }, { force: false }), null);
+});
+
 test('entity gate: needs_regen waits, non-rect art is kept, a missing row is reported', async () => {
   const p = SEED_POLICY.entity;
   assert.strictEqual((await p.gate(stubDb([]), { name: 'X', cutout: true, needs_regen: true }, {})).skip, 'needs-regen');
-  const dir = stubDb([[/FROM entity_types/, [{ id: 2, render_mode: 'directional' }]]]);
+  // A directional set carries an atlas in `sprite` and may have no still.
+  const dir = stubDb([[/FROM entity_types/, [{ id: 2, render_mode: 'directional', image: null, sprite: { atlas: 'sprites/Wolf/j/atlas.png' } }]]]);
   assert.strictEqual((await p.gate(dir, { name: 'Wolf', cutout: true }, { force: false })).skip, 'has-art');
   // FORCE is the one way to flatten a directional set, and it is deliberate.
   assert.strictEqual(await p.gate(dir, { name: 'Wolf', cutout: true }, { force: true }), null);
-  const rect = stubDb([[/FROM entity_types/, [{ id: 2, render_mode: 'rect' }]]]);
+  const rect = stubDb([[/FROM entity_types/, [{ id: 2, render_mode: 'rect', image: '', sprite: null }]]]);
   assert.strictEqual(await p.gate(rect, { name: 'Wolf', cutout: true }, { force: false }), null);
   assert.strictEqual((await p.gate(stubDb([]), { name: 'Ghost', cutout: true }, {})).skip, 'missing-row');
 });
@@ -184,7 +198,7 @@ test('entity gate: one un-cut entry is skipped on its own, not the whole kind', 
   // the rest seed.
   const mixed = [{ name: 'A', cutout: true }, { name: 'B' }];
   assert.doesNotThrow(() => SEED_POLICY.entity.preflight(mixed));
-  const rect = stubDb([[/FROM entity_types/, [{ id: 2, render_mode: 'rect' }]]]);
+  const rect = stubDb([[/FROM entity_types/, [{ id: 2, render_mode: 'rect', image: '', sprite: null }]]]);
   assert.strictEqual((await SEED_POLICY.entity.gate(rect, mixed[1], { force: false })).skip, 'not-cut-out');
   assert.strictEqual(await SEED_POLICY.entity.gate(rect, mixed[0], { force: false }), null);
 });
@@ -326,7 +340,9 @@ test('seedArt honours the gates: existing art is counted as skipped, not re-uplo
     { key: 'Focus', name: 'Focus', file: 'Focus.png', bytes: PNG.length },
     { key: 'Gone', name: 'Gone', file: 'Gone.png', bytes: 1 },
   ]));
-  const store = stubStore();
+  // The row's art is really in the store; an empty store would be the
+  // dangling-pointer case, which re-seeds (tested separately).
+  const store = stubStore(new Map([['sprites/objects/Focus/j/static.png', PNG]]));
   const db = stubDb([[/SELECT .* FROM catalog_art/, [{ name: 'Focus', image: 'sprites/objects/Focus/j/static.png' }]]]);
   const r = await seedArt({ db, store, root, kinds: ['passive_label'], log: () => {} });
   assert.strictEqual(r.passive_label.skipped, 1);
@@ -439,7 +455,7 @@ test('seedArt with a mixed entity manifest seeds the cut-out entry and counts th
     { name: 'B', file: 'B.png', bytes: 1 },
   ]));
   const store = stubStore();
-  const db = stubDb([[/FROM entity_types/, [{ id: 1, render_mode: 'rect' }]], [/UPDATE entity_types/, [{}]]]);
+  const db = stubDb([[/FROM entity_types/, [{ id: 1, render_mode: 'rect', image: '', sprite: null }]], [/UPDATE entity_types/, [{}]]]);
   const r = await seedArt({ db, store, root, kinds: ['entity'], log: () => {} });
   assert.strictEqual(r.entity.linked, 1);
   assert.strictEqual(r.entity.notCutOut, 1);
@@ -451,4 +467,36 @@ test('item gate reports a subject with no item_types row instead of counting a n
   assert.strictEqual((await SEED_POLICY.item.gate(noRow, { key: 'ghost-blade', name: 'ghost-blade' }, { force: false })).skip, 'missing-row');
   const hasRow = stubDb([[/SELECT .* FROM item_types WHERE name/, [{ id: 1 }]]]);
   assert.strictEqual(await SEED_POLICY.item.gate(hasRow, { key: 'void-blade', name: 'void-blade' }, { force: false }), null);
+});
+
+test('seedArt re-seeds a row whose image key points at an object the store does not hold', async () => {
+  // The pointer survived a clone (it is a row), the pixels did not (they are
+  // in the other machine's bucket). "Already had art" must mean the art is
+  // actually there.
+  const root = tmpRoot();
+  fs.mkdirSync(path.join(root, 'tiles'));
+  fs.writeFileSync(path.join(root, 'tiles', 'grass.png'), PNG);
+  fs.writeFileSync(path.join(root, 'tiles.json'), JSON.stringify([{ name: 'grass', file: 'grass.png', bytes: PNG.length }]));
+  const store = stubStore();   // empty: the pointer dangles
+  const db = stubDb([
+    [/FROM tile_types/, [{ id: 1, render_mode: 'image', image: 'sprites/tiles/grass/rmt_other_machine/static.png', sprite: null }]],
+    [/UPDATE tile_types/, [{}]],
+  ]);
+  const r = await seedArt({ db, store, root, kinds: ['tile'], log: () => {} });
+  assert.strictEqual(r.tile.linked, 1);
+  assert.strictEqual(r.tile.dangling, 1);
+  assert.strictEqual(r.tile.skipped, 0);
+  assert.deepStrictEqual(store.puts.map((p) => p.key), ['sprites/tiles/grass/seeded/static.png']);
+  // And when the object IS there, the row is left alone.
+  const present = stubStore(new Map([['sprites/tiles/grass/rmt_other_machine/static.png', PNG]]));
+  const r2 = await seedArt({ db, store: present, root, kinds: ['tile'], log: () => {} });
+  assert.strictEqual(r2.tile.linked, 0);
+  assert.strictEqual(r2.tile.skipped, 1);
+});
+
+test('catalog-art has-art skips also carry the key so a dangling pointer is re-seeded', async () => {
+  const has = stubDb([[/FROM catalog_art/, [{ name: 'Focus', image: 'sprites/objects/Focus/rmt_x/static.png' }]]]);
+  const v = await SEED_POLICY.passive_label.gate(has, { key: 'Focus', name: 'Focus' }, { force: false });
+  assert.strictEqual(v.skip, 'has-art');
+  assert.strictEqual(v.image, 'sprites/objects/Focus/rmt_x/static.png');
 });

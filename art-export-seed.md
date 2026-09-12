@@ -97,9 +97,16 @@ These are what keep a seed run from destroying local work. They live in
 `backend/src/services/artSeed.js` (`SEED_POLICY`) and are pinned by
 `backend/tests/art_seed_policy.test.js`.
 
-- **Already has art -> skipped unless `FORCE=1`.** For tiles that means
-  `render_mode <> 'color'`; for entities `render_mode <> 'rect'`; for the
-  other three, a row/`catalog_art` entry with an image.
+- **Already has art -> skipped unless `FORCE=1`.** "Has art" means the row
+  HOLDS an image key or a sprite atlas -- never its `render_mode`.
+  `seed-catalogs` inserts the decoration types (pine_tree, bush, ...) as
+  `static` with no image, and judging by mode called those "already had art"
+  while the game drew their fallback colour box.
+- **A pointer to an object this machine's store does not hold is not art.**
+  The seeder checks the store before honouring a skip and re-seeds such a
+  row (logged as "is not in the store -- re-seeding", counted as
+  "re-seeded over a missing object"). Rows cloned with a database dump keep
+  their keys; the bucket does not come along.
 - **Entities: only `static` rows are exported.** A `directional` or
   `animated` entity is an atlas plus a manifest, not one still; exporting one
   PNG for it would quietly downgrade it on the next seed. `FORCE=1` on seed is
