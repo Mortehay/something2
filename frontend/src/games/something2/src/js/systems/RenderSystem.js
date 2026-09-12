@@ -398,7 +398,7 @@ export class RenderSystem {
     // a player or creature standing on the tile draws OVER the marker and stays
     // legible. The pulse phase is this frame's timestamp, set above -- the
     // renderer never reads a clock itself.
-    const landmarkPlan = planLandmarkBodies(landmarks, this.entityDefs);
+    const landmarkPlan = this._readyLandmarkPlan(landmarks);
     drawLandmarks(this.ctx, { landmarks, phase: this.nowMs, halfW, halfH, skipBody: landmarkPlan.skipBody });
     this.drawDoorways(doorways, chunkedMap, player);
 
@@ -2255,13 +2255,47 @@ export class RenderSystem {
     this.ctx.restore();
   }
 
+  // A resolvable def (pointArtDef already checked render_mode/image/sprite
+  // SHAPE) is not the same as art that can actually be drawn RIGHT NOW: the
+  // ImageManager may still be loading it, or it 404'd. Without this check
+  // drawPointBody would still call drawEntity, which falls through to its own
+  // `fillStyle = e.color || "#c0392b"; fillRect(...)` box -- a NEW colored
+  // rectangle, not "the old placeholder shape" the spec requires. So this
+  // mirrors drawEntity's own sprite-then-legacy-image gate, one step earlier,
+  // purely to decide readiness (no drawing happens here).
+  _pointArtReady(def, stateKey) {
+    const mode = RenderSystem.resolveRenderMode(def, this.renderModeOverride);
+    if (mode === "rect") return false;
+    if (RenderSystem.resolveSprite({ ...def, stateKey }, this.imageManager, mode, this.nowMs)) return true;
+    return !!(def.image && this.imageManager && this.imageManager.get(def.image));
+  }
+
   // True when art drew, so the caller skips its placeholder shape and keeps
   // only its caption/prompt. False (and nothing drawn) otherwise.
   _drawPointArtAt(artName, x, y, treatment) {
     const def = pointArtDef(artName, this.entityDefs);
-    if (!def) return false;
+    if (!def || !this._pointArtReady(def, treatment.stateKey)) return false;
     this.drawPointBody(def, x, y, treatment);
     return true;
+  }
+
+  // planLandmarkBodies only knows the CATALOG shape (render_mode/image/sprite
+  // fields), not whether the image is actually loaded yet. Demote any body
+  // whose art has no pixels right now back to its diamond -- pulling it out
+  // of skipBody too -- so a still-loading or 404'd image never becomes
+  // drawEntity's colored-rect fallback in place of a landmark's usual marker
+  // (SOMET-584 review fix round 1, #2). Chosen over filtering entityDefs
+  // before planLandmarkBodies runs: this way pointArt.js stays a pure
+  // function of the catalog shape, and readiness (an ImageManager / per-frame
+  // concern) is decided here, next to _pointArtReady's other call site.
+  _readyLandmarkPlan(landmarks) {
+    const plan = planLandmarkBodies(landmarks, this.entityDefs);
+    plan.bodies = plan.bodies.filter((b) => {
+      if (this._pointArtReady(b.def, b.treatment.stateKey)) return true;
+      plan.skipBody.delete(b.landmark);
+      return false;
+    });
+    return plan;
   }
 
   // A village's merchant: a fixed marker (no facing/animation) at the
@@ -2393,6 +2427,12 @@ export class RenderSystem {
 
     this.ctx.font = "12px sans-serif";
     this.ctx.textBaseline = "alphabetic";
+    // SOMET-584 review fix round 1 (#1): textAlign used to be set only inside
+    // the star-icon block above, which the art gate now skips. drawPointBody
+    // saves/restores around drawEntity, so a fresh context reaches here with
+    // no textAlign set at all -- reset it here, unconditionally, same as the
+    // other four draw methods already do outside their gate.
+    this.ctx.textAlign = "center";
     this.ctx.fillStyle = "#fff";
     this.ctx.fillText("Skill Trainer", dx, dy - r - 6);
 

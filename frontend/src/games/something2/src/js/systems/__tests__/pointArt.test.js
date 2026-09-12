@@ -54,10 +54,12 @@ describe('planLandmarkBodies', () => {
     expect(plan.skipBody.has(portal)).toBe(true);
     expect(plan.skipBody.has(wpNoArt)).toBe(false);
   });
-  it('a waypoint sharing a portal tile draws no body of its own', () => {
+  it('a waypoint sharing a portal tile draws no body of its own, but keeps its diamond', () => {
+    // SOMET-584 review fix round 1 (#3): skipBody would otherwise erase the
+    // waypoint's only on-screen activation signal.
     const plan = planLandmarkBodies([portal, wpSame], DEFS);
     expect(plan.bodies.map((b) => b.landmark)).toEqual([portal]);
-    expect(plan.skipBody.has(wpSame)).toBe(true);
+    expect(plan.skipBody.has(wpSame)).toBe(false);
   });
   it('tolerates a missing catalog', () => {
     const plan = planLandmarkBodies([portal], null);

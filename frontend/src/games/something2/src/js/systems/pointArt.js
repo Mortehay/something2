@@ -46,7 +46,12 @@ const tileKey = (l) => `${Math.floor(l.y / MAP_TILE_SIZE)},${Math.floor(l.x / MA
 // Which landmarks get an art body, and which diamonds landmarkRenderer must
 // therefore not draw. A flagged staircase (is_waypoint: true) is a portal AND
 // a waypoint on ONE tile; two bodies there would be one gate drawn twice, so
-// the portal's wins and the waypoint keeps only its beam, label and ring.
+// only the portal gets a body and joins skipBody. The waypoint gets no body
+// of its own, but stays OUT of skipBody too (fix round 1, SOMET-584 review):
+// its diamond -- filled when lit, outlined when not -- is the only on-screen
+// signal of its activation state, so it keeps drawing beneath the gate's art
+// exactly as an art-less waypoint would. Skipping it there too would leave a
+// waypoint's lit/unlit state with no signal at all.
 export function planLandmarkBodies(landmarks, entityDefs) {
   const bodies = [];
   const skipBody = new Set();
@@ -59,7 +64,6 @@ export function planLandmarkBodies(landmarks, entityDefs) {
     const def = pointArtDef(l.art, entityDefs);
     if (!def) continue;
     if (l.kind === "waypoint" && portalArtTiles.has(tileKey(l))) {
-      skipBody.add(l);
       continue;
     }
     skipBody.add(l);
