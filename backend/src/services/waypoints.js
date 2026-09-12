@@ -28,8 +28,10 @@ function waypointTileKey(x, y) {
 // world it activates, and the tick loop matches players against the result.
 async function fetchWaypoints(pool, worldId) {
   const r = await pool.query(
-    `SELECT id, world_id, x, y, name, map_link_id
-       FROM waypoints WHERE world_id = $1 ORDER BY created_at ASC`,
+    `SELECT wp.id, wp.world_id, wp.x, wp.y, wp.name, wp.map_link_id, pa.name AS art
+       FROM waypoints wp
+       LEFT JOIN entity_types pa ON pa.id = wp.entity_type_id
+      WHERE wp.world_id = $1 ORDER BY wp.created_at ASC`,
     [worldId],
   );
   return r.rows.map((w) => ({
@@ -39,6 +41,9 @@ async function fetchWaypoints(pool, worldId) {
     y: Number(w.y),
     name: w.name,
     mapLinkId: w.map_link_id,
+    // SOMET-582: the waypoint's own art binding (name, not id) -- resolved
+    // against the kind default by resolvePointArt, at the caller.
+    art: w.art ?? null,
   }));
 }
 

@@ -471,7 +471,7 @@ test("PUT /api/worlds/:id changing the biome set busts the preview cache too", a
     }],
     [/FROM tile_types/i, () => PREVIEW_TILE_ROWS],
     [/FROM map_links/i, () => ({ rows: [] })],
-    [/FROM villages WHERE world_id/i, () => ({ rows: [] })],
+    [/FROM villages v\b[\s\S]*WHERE v\.world_id/i, () => ({ rows: [] })],
   ]);
   __setPool(pool);
 

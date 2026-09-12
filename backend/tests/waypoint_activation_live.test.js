@@ -91,12 +91,16 @@ function fakeWaypointPool({ firstTimeRowCount = 1, waypointRows = null } = {}) {
         strength: 5, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5 }] };
     }
     if (/FROM map_links ml JOIN worlds/i.test(sql)) return { rows: [] };
-    if (/FROM villages WHERE/i.test(sql)) return { rows: [] };
+    // SOMET-582 joined entity_types onto fetchVillages (aliased `v`), so the
+    // match has to span the join rather than expect FROM/WHERE adjacent.
+    if (/FROM villages v\b[\s\S]*WHERE v\.world_id/i.test(sql)) return { rows: [] };
     // THE loader under test. Keyed on world_id from the caller's own params, so
     // a loadWorld that asked for a different world would get nothing -- a mock
     // that returned this row regardless of its input would prove nothing about
     // which world the authority actually loaded.
-    if (/FROM waypoints WHERE world_id/i.test(sql)) {
+    // Matches both the old "FROM waypoints WHERE world_id" shape and the
+    // SOMET-582 join ("FROM waypoints wp ... WHERE wp.world_id").
+    if (/FROM waypoints\b[\s\S]*WHERE (?:wp\.)?world_id/i.test(sql)) {
       if (params[0] !== 'w1') return { rows: [] };
       return { rows: waypointRows ?? [
         { id: WAYPOINT_ID, world_id: 'w1', x: WAYPOINT_X, y: WAYPOINT_Y, name: 'Trailhead Well', map_link_id: null },
@@ -144,7 +148,7 @@ async function joinAt(pool, { x, y }) {
 test('the authority loads waypoints for the world it is running', async () => {
   const pool = fakeWaypointPool();
   const { entry } = await joinAt(pool, { x: 500, y: 500 });
-  assert.equal(pool.matching(/FROM waypoints WHERE world_id/).length, 1,
+  assert.equal(pool.matching(/FROM waypoints\b[\s\S]*WHERE (?:wp\.)?world_id/).length, 1,
     'loadWorld must read the waypoints table -- an unread table is an inert feature');
   assert.equal(entry.waypoints.size, 1);
   // Keyed "row,col" from the waypoint's pixels: 1050/100 -> 10 on both axes.

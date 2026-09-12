@@ -13,12 +13,17 @@ const { oppositeEdge } = require('./mapService');
 // the authority's world SELECT omitted two new columns, `Number(undefined) || 0`
 // silently made the value 0, and every test passed because the seed path reads
 // the row with SELECT *.
+// `art` (SOMET-582) is the portal's own bound entity type name, joined here
+// rather than resolved -- resolvePointArt (against pointArtDefaults) is the
+// caller's job, same discipline as every other point-kind fetcher.
 async function fetchLinks(pool, worldId) {
   const r = await pool.query(
     `SELECT ml.id, ml.edge, ml.to_world_id, w.width AS to_width, w.height AS to_height,
             w.name AS to_name,
-            ml.from_x, ml.from_y, ml.to_x, ml.to_y
+            ml.from_x, ml.from_y, ml.to_x, ml.to_y,
+            pa.name AS art
      FROM map_links ml JOIN worlds w ON w.id = ml.to_world_id
+     LEFT JOIN entity_types pa ON pa.id = ml.entity_type_id
      WHERE ml.from_world_id = $1`,
     [worldId],
   );

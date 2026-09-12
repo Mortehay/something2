@@ -308,7 +308,7 @@ test('POST /api/worlds/:id/regenerate reseeds and clears chunks+creatures', asyn
     [/SELECT .* FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', seed: '42' }] })],
     [/DELETE FROM world_chunks WHERE world_id/i, () => ({ rows: [], rowCount: 2 })],
     [/DELETE FROM world_creatures WHERE world_id/i, () => ({ rows: [], rowCount: 5 })],
-    [/FROM villages WHERE world_id/i, () => ({ rows: [] })],
+    [/FROM villages v\b[\s\S]*WHERE v\.world_id/i, () => ({ rows: [] })],
     [/INSERT INTO world_creatures/i, () => ({ rows: [] })],
     [/UPDATE worlds SET seed/i, (p) => ({ rows: [{ id: 'w1', seed: String(p[0]) }] })],
   ]);
@@ -327,7 +327,7 @@ test('POST /api/worlds/:id/regenerate re-derives guards for surviving villages',
     [/DELETE FROM world_creatures WHERE world_id/i, () => ({ rows: [], rowCount: 5 })],
     // Villages survive a regenerate (separate table) — the wipe above has no
     // village_id to spare guards by, so they must be re-inserted afterward.
-    [/FROM villages WHERE world_id/i, () => ({ rows: [{
+    [/FROM villages v\b[\s\S]*WHERE v\.world_id/i, () => ({ rows: [{
       id: 'v1', min_row: 5, min_col: 5, width: 8, height: 6, gate_edge: 'S', spawn_x: 650, spawn_y: 750,
     }] })],
     [/INSERT INTO world_creatures/i, () => ({ rows: [] })],
@@ -397,7 +397,7 @@ test('POST /api/worlds/:id/creatures places creatures and reports the count', as
         projectile_speed: 0, projectile_radius: 0, aggro_radius: 400, leash_radius: 800,
         chase_style: 'charge', preferred_range: 0, move_speed_mult: 1, damage_override: null,
       }] })],
-    [/FROM villages WHERE world_id/i, () => ({ rows: [] })],
+    [/FROM villages v\b[\s\S]*WHERE v\.world_id/i, () => ({ rows: [] })],
     [/DELETE FROM world_creatures WHERE world_id/i, () => ({ rows: [], rowCount: 3 })],
     [/UPDATE worlds SET creature_count/i, (p) => { wroteCreatureCount = p[0]; return { rows: [], rowCount: 1 }; }],
     // populateWorld batches its inserts (SOMET-246 final review, finding 4):
@@ -462,7 +462,7 @@ test('POST /api/worlds/:id/creatures threads the world\'s declared biomes into p
         projectile_speed: 0, projectile_radius: 0, aggro_radius: 400, leash_radius: 800,
         chase_style: 'charge', preferred_range: 0, move_speed_mult: 1, damage_override: null,
       }] })],
-    [/FROM villages WHERE world_id/i, () => ({ rows: [] })],
+    [/FROM villages v\b[\s\S]*WHERE v\.world_id/i, () => ({ rows: [] })],
     [/FROM biomes/i, () => ({ rows: [
       { id: 1, name: 'Meadow', terrain_tiles: ['grass'], flora_types: [], creature_types: ['goblin'],
         palette: [], art_style: '', exclusions: '', color: '#5aa84f' },
@@ -521,7 +521,7 @@ test('POST /api/worlds/:id/creatures warns when a player is connected so the re-
         projectile_speed: 0, projectile_radius: 0, aggro_radius: 400, leash_radius: 800,
         chase_style: 'charge', preferred_range: 0, move_speed_mult: 1, damage_override: null,
       }] })],
-    [/FROM villages WHERE world_id/i, () => ({ rows: [] })],
+    [/FROM villages v\b[\s\S]*WHERE v\.world_id/i, () => ({ rows: [] })],
     [/DELETE FROM world_creatures WHERE world_id/i, () => ({ rows: [], rowCount: 3 })],
     [/UPDATE worlds SET creature_count/i, () => ({ rows: [], rowCount: 1 })],
     [/INSERT INTO world_creatures/i, () => ({ rows: [], rowCount: 1 })],

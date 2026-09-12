@@ -277,10 +277,21 @@ function villageGeometryError(village) {
   return villageSizeError(village) || villageSpawnPointError(village);
 }
 
+// merchant_art/bank_art/gem_merchant_art/skill_merchant_art (SOMET-582): each
+// post's own art binding, joined by NAME here so the caller can hand it
+// straight to resolvePointArt -- no id, no second query.
 async function fetchVillages(pool, worldId) {
   const r = await pool.query(
-    `SELECT id, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y, merchant_x, merchant_y
-       FROM villages WHERE world_id = $1 ORDER BY created_at ASC`,
+    `SELECT v.id, v.min_row, v.min_col, v.width, v.height, v.gate_edge, v.spawn_x, v.spawn_y,
+            v.merchant_x, v.merchant_y,
+            ma.name AS merchant_art, ba.name AS bank_art,
+            ga.name AS gem_merchant_art, sa.name AS skill_merchant_art
+       FROM villages v
+       LEFT JOIN entity_types ma ON ma.id = v.merchant_entity_type_id
+       LEFT JOIN entity_types ba ON ba.id = v.bank_entity_type_id
+       LEFT JOIN entity_types ga ON ga.id = v.gem_merchant_entity_type_id
+       LEFT JOIN entity_types sa ON sa.id = v.skill_merchant_entity_type_id
+      WHERE v.world_id = $1 ORDER BY v.created_at ASC`,
     [worldId],
   );
   return r.rows.map((v) => {
@@ -320,6 +331,12 @@ async function fetchVillages(pool, worldId) {
       bankX: bank.x, bankY: bank.y,
       gemMerchantX: gemMerchant.x, gemMerchantY: gemMerchant.y,
       skillMerchantX: skillMerchant.x, skillMerchantY: skillMerchant.y,
+      // SOMET-582: each post's own art binding (name), resolved against the
+      // kind default by the caller's resolvePointArt.
+      merchantArt: v.merchant_art ?? null,
+      bankArt: v.bank_art ?? null,
+      gemMerchantArt: v.gem_merchant_art ?? null,
+      skillMerchantArt: v.skill_merchant_art ?? null,
     };
   });
 }

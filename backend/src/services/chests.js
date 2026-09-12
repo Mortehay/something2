@@ -64,6 +64,10 @@ function mapChestRow(c) {
     state: c.state,
     openedAt: c.opened_at,
     respawnAt: c.respawn_at,
+    // SOMET-582: the chest's own art binding (name). Defaults to null for a
+    // row with no joined `art` column -- spawnFieldChest's `RETURNING *` is
+    // exactly that case: entity_type_id exists but nothing joins its name.
+    art: c.art ?? null,
   };
 }
 
@@ -73,8 +77,11 @@ function mapChestRow(c) {
 // against `entry.chests` without a query per tick.
 async function fetchChests(pool, worldId) {
   const r = await pool.query(
-    `SELECT id, x, y, kind, guard_entity_type_id, guard_level, guard_creature_ids, state, opened_at, respawn_at
-       FROM world_chests WHERE world_id = $1 ORDER BY created_at ASC`,
+    `SELECT c.id, c.x, c.y, c.kind, c.guard_entity_type_id, c.guard_level, c.guard_creature_ids,
+            c.state, c.opened_at, c.respawn_at, pa.name AS art
+       FROM world_chests c
+       LEFT JOIN entity_types pa ON pa.id = c.entity_type_id
+      WHERE c.world_id = $1 ORDER BY c.created_at ASC`,
     [worldId],
   );
   return r.rows.map(mapChestRow);
@@ -277,5 +284,5 @@ async function respawnDueFieldChests(client, { getWorld, onReset = () => {} }) {
 }
 
 module.exports = {
-  insertVaultChest, fetchChests, spawnFieldChest, nearestChest, respawnDueFieldChests,
+  insertVaultChest, fetchChests, mapChestRow, spawnFieldChest, nearestChest, respawnDueFieldChests,
 };

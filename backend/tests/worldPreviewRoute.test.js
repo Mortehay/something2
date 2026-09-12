@@ -37,7 +37,7 @@ test('GET /preview returns a 64x64 grid for a known world', async () => {
     [/FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', seed: '7', chunk_size: 64 }] })],
     [/FROM tile_types/i, () => tileRows],
     [/FROM map_links/i, () => ({ rows: [] })],
-    [/FROM villages WHERE world_id/i, () => ({ rows: [] })],
+    [/FROM villages v\b[\s\S]*WHERE v\.world_id/i, () => ({ rows: [] })],
   ]);
   __setPool(pool);
   const res = await request(app).get('/api/worlds/w1/preview').set(...AUTH);
@@ -46,7 +46,7 @@ test('GET /preview returns a 64x64 grid for a known world', async () => {
   assert.equal(res.body.data.length, 64);
   assert.ok(res.body.data.every((row) => row.length === 64));
   assert.ok(
-    pool.calls.some((c) => /FROM villages WHERE world_id/i.test(c.sql)),
+    pool.calls.some((c) => /FROM villages v\b[\s\S]*WHERE v\.world_id/i.test(c.sql)),
     'GET /preview must thread villages into the terrain config',
   );
 });
@@ -71,7 +71,7 @@ test('GET /preview restricts terrain to the world\'s declared biome', async () =
     [/FROM worlds WHERE id/i, () => ({ rows: [{ id: 'biomePreview', seed: '7', chunk_size: 64, biomes: ['Meadow'] }] })],
     [/FROM tile_types/i, () => tileRows],
     [/FROM map_links/i, () => ({ rows: [] })],
-    [/FROM villages WHERE world_id/i, () => ({ rows: [] })],
+    [/FROM villages v\b[\s\S]*WHERE v\.world_id/i, () => ({ rows: [] })],
     [/FROM biomes/i, () => ({ rows: [
       { id: 1, name: 'Meadow', terrain_tiles: ['grass'], flora_types: [], creature_types: [],
         palette: [], art_style: '', exclusions: '', color: '#5aa84f' },
@@ -94,7 +94,7 @@ test('GET /preview memoizes: a second request does not re-query the world', asyn
     [/FROM worlds WHERE id/i, () => ({ rows: [{ id: 'memo1', seed: '9', chunk_size: 64 }] })],
     [/FROM tile_types/i, () => tileRows],
     [/FROM map_links/i, () => ({ rows: [] })],
-    [/FROM villages WHERE world_id/i, () => ({ rows: [] })],
+    [/FROM villages v\b[\s\S]*WHERE v\.world_id/i, () => ({ rows: [] })],
   ]);
   __setPool(pool);
   const a = await request(app).get('/api/worlds/memo1/preview').set(...AUTH);
@@ -111,7 +111,7 @@ test('GET /preview without a token is 401, and returns no grid', async () => {
     [/FROM worlds WHERE id/i, () => ({ rows: [{ id: 'guard1', seed: '7', chunk_size: 64 }] })],
     [/FROM tile_types/i, () => tileRows],
     [/FROM map_links/i, () => ({ rows: [] })],
-    [/FROM villages WHERE world_id/i, () => ({ rows: [] })],
+    [/FROM villages v\b[\s\S]*WHERE v\.world_id/i, () => ({ rows: [] })],
   ]));
   const res = await request(app).get('/api/worlds/guard1/preview');
   assert.equal(res.status, 401);

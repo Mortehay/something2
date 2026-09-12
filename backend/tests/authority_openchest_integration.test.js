@@ -139,7 +139,9 @@ function makePool({
       if (/^\s*DELETE FROM world_items WHERE expires_at/i.test(sql)) return { rows: [], rowCount: 0 };
       if (/SELECT.*FROM world_items/i.test(sql)) return { rows: [], rowCount: 0 }; // ground-item bbox load
       // fetchChests at world load: the seeded chest plus any extras.
-      if (/FROM world_chests WHERE world_id/i.test(sql)) {
+      // SOMET-582 joined entity_types onto this query (aliased `c`), so the
+      // match has to span the join rather than expect FROM/WHERE adjacent.
+      if (/FROM world_chests c[\s\S]*WHERE c\.world_id = \$1/i.test(sql)) {
         return {
           rows: [
             {

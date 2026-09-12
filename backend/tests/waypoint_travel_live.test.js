@@ -163,8 +163,11 @@ function fakeTravelPool({ activated = [HOME.id, AWAY.id], waypointsByWorld = nul
         strength: 5, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5 }] };
     }
     if (/FROM map_links ml JOIN worlds/i.test(sql)) return { rows: [] };
-    if (/FROM villages WHERE/i.test(sql)) return { rows: [] };
-    if (/FROM waypoints WHERE world_id/i.test(sql)) return { rows: byWorld[params[0]] ?? [] };
+    // SOMET-582 joined entity_types onto fetchVillages/fetchWaypoints
+    // (aliased `v`/`wp`), so the match has to span the join rather than
+    // expect FROM/WHERE adjacent.
+    if (/FROM villages v\b[\s\S]*WHERE v\.world_id/i.test(sql)) return { rows: [] };
+    if (/FROM waypoints\b[\s\S]*WHERE (?:wp\.)?world_id/i.test(sql)) return { rows: byWorld[params[0]] ?? [] };
     // Activation, which the tick loop fires the moment the player stands on a
     // waypoint. It must NOT feed back into `lit`: the whole point of the
     // unlit-origin case is to hold the database's answer still while the player

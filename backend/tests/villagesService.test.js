@@ -5,7 +5,9 @@ const { fetchVillages } = require('../src/services/villages');
 test('fetchVillages maps snake_case columns to camelCase', async () => {
   const pool = {
     query: async (sql, params) => {
-      assert.match(sql, /FROM villages WHERE world_id = \$1/i);
+      // SOMET-582 added the four *_art joins; the query is now
+      // "FROM villages v ... WHERE v.world_id = $1".
+      assert.match(sql, /FROM villages v[\s\S]*WHERE v\.world_id = \$1/i);
       assert.deepEqual(params, ['w1']);
       return { rows: [{
         id: 'v1', min_row: 5, min_col: 6, width: 8, height: 6,
@@ -29,6 +31,10 @@ test('fetchVillages maps snake_case columns to camelCase', async () => {
     bankX: 1050, bankY: 850,
     gemMerchantX: 850, gemMerchantY: 850,
     skillMerchantX: 1750, skillMerchantY: 650,
+    // SOMET-582: no *_art column in this fixture's row, so all four default
+    // to null -- this exhaustive comparison is exactly where a silently
+    // added/dropped join column would be caught.
+    merchantArt: null, bankArt: null, gemMerchantArt: null, skillMerchantArt: null,
   }]);
 });
 
