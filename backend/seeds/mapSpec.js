@@ -136,8 +136,38 @@ const WORLD_KEYS = new Set([
 
 function validateMapSpec(spec, {
   biomeNames = null, creatureTypeNames = null, biomeCreatureTypes = null,
+  pointArtTypes = null,
 } = {}) {
   const errors = [];
+
+  // Art bindings (SOMET-580). `pointArtTypes` is Map<entity type name, point_kind>
+  // from the live catalog (seed-map) or the checked-in POINT_TYPES (fixtures);
+  // null skips the name check exactly as creatureTypeNames does.
+  const checkArt = (value, kind, label) => {
+    if (value === undefined) return;
+    if (typeof value !== 'string' || value === '') {
+      errors.push(`${label} must be an entity type name (got ${JSON.stringify(value)})`);
+      return;
+    }
+    if (pointArtTypes && pointArtTypes.get(value) !== kind) {
+      errors.push(`${label} "${value}" is not an entity type of point kind "${kind}"`);
+    }
+  };
+  const VILLAGE_ART_KEYS = ['merchant', 'bank', 'gem_merchant', 'skill_merchant'];
+  const checkVillageArt = (v, worldKey) => {
+    if (v.art === undefined) return;
+    if (!v.art || typeof v.art !== 'object' || Array.isArray(v.art)) {
+      errors.push(`world "${worldKey}" village "${v.key}" art must be an object`);
+      return;
+    }
+    for (const k of Object.keys(v.art)) {
+      if (!VILLAGE_ART_KEYS.includes(k)) {
+        errors.push(`world "${worldKey}" village "${v.key}" art has unknown key "${k}"`);
+        continue;
+      }
+      checkArt(v.art[k], k, `world "${worldKey}" village "${v.key}" art ${k}`);
+    }
+  };
   if (!spec || typeof spec !== 'object') return ['spec is not an object'];
   const worlds = Array.isArray(spec.worlds) ? spec.worlds : [];
   const links = Array.isArray(spec.links) ? spec.links : [];
@@ -419,6 +449,7 @@ function validateMapSpec(spec, {
       // new costume.
       const geomErr = villageGeometryError(v);
       if (geomErr) errors.push(`world "${w.key}" village ${geomErr}`);
+      checkVillageArt(v, w.key);
     }
     // Overlapping boxes would stamp two wall rings through each other, leaving
     // a village with a hole in it and a gate that opens into another village's
@@ -587,6 +618,7 @@ function validateMapSpec(spec, {
             worldKey: w.key, x: wp.x, y: wp.y, name: wp.name, world: w,
             label: `world "${w.key}" waypoint ${i}`,
           });
+          checkArt(wp.art, 'waypoint', `world "${w.key}" waypoint ${i} art`);
         }
       }
     }
@@ -633,10 +665,11 @@ function validateMapSpec(spec, {
           errors.push(`world "${w.key}" chest references unknown creature type "${c.guard_creature_type}"`);
         }
         for (const k of Object.keys(c)) {
-          if (!['x', 'y', 'level', 'guard_creature_type'].includes(k)) {
+          if (!['x', 'y', 'level', 'guard_creature_type', 'art'].includes(k)) {
             errors.push(`world "${w.key}" chest has unknown key "${k}"`);
           }
         }
+        checkArt(c.art, 'chest_vault', `world "${w.key}" chest art`);
       }
     }
 
@@ -794,6 +827,15 @@ function validateMapSpec(spec, {
       if (l.is_waypoint !== undefined && typeof l.is_waypoint !== 'boolean') {
         errors.push(`portal link ${l.from}->${l.to} is_waypoint must be true or false `
           + `(got ${JSON.stringify(l.is_waypoint)})`);
+      }
+      // Art bindings (SOMET-580): a portal's own art applies to both rows of
+      // the pair (one entity type, two doorway rows), while waypoint_art is
+      // only meaningful once the staircase IS a waypoint.
+      checkArt(l.art, 'portal', `portal link ${l.from}->${l.to} art`);
+      if (l.waypoint_art !== undefined && l.is_waypoint !== true) {
+        errors.push(`portal link ${l.from}->${l.to} waypoint_art requires is_waypoint: true`);
+      } else {
+        checkArt(l.waypoint_art, 'waypoint', `portal link ${l.from}->${l.to} waypoint_art`);
       }
       const coordFields = ['from_x', 'from_y', 'to_x', 'to_y'];
       const badField = coordFields.find((f) => !Number.isInteger(l[f]));
