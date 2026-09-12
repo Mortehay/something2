@@ -11,6 +11,7 @@ const { Pool } = require('pg');
 const { DEFAULT_TILE_TYPES } = require('../seeds/data/tileTypes.js');
 const { STARTER_BIOMES } = require('../seeds/data/biomes.js');
 const { NEW_DECORATIONS } = require('../seeds/data/decorationTypes.js');
+const { POINT_TYPES, POINT_KINDS } = require('../seeds/data/pointTypes.js');
 const {
   HOSTILE_CREATURES, CREATURE_DROPS, PLAYABLE_CLASSES, CLASS_LOADOUTS,
 } = require('../seeds/data/entityTypes.js');
@@ -496,6 +497,38 @@ async function seedCatalogs(pool) {
     );
     decorations += 1;
   }
+
+  // World point placeholder types (SOMET-577). Same "fill only what is empty"
+  // posture as decorations: point_kind is re-asserted (it is the catalog's
+  // own fact, not an admin edit), prompt only fills an empty one, and every
+  // visual column an admin may have set (image, sprite, render_mode, size,
+  // colour) is left alone.
+  let pointTypes = 0;
+  for (const t of POINT_TYPES) {
+    await pool.query(
+      `INSERT INTO entity_types
+        (name, is_creature, walkable, render_mode, spawn_tiles, chance,
+         display_width, display_height, color, prompt, point_kind)
+       VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11)
+       ON CONFLICT (name) DO UPDATE
+         SET point_kind = EXCLUDED.point_kind,
+             prompt = COALESCE(NULLIF(entity_types.prompt, ''), EXCLUDED.prompt)`,
+      [t.name, t.is_creature, t.walkable, t.render_mode, JSON.stringify(t.spawn_tiles),
+       t.chance, t.display_width, t.display_height, t.color, t.prompt, t.point_kind],
+    );
+    pointTypes += 1;
+  }
+  // A kind with no default yet points at its placeholder. An admin's choice
+  // (non-NULL) is never overwritten.
+  for (const t of POINT_TYPES) {
+    await pool.query(
+      `UPDATE world_point_kinds
+          SET default_entity_type_id = (SELECT id FROM entity_types WHERE name = $2)
+        WHERE kind = $1 AND default_entity_type_id IS NULL`,
+      [t.point_kind, t.name],
+    );
+  }
+  console.log(`Seeded ${pointTypes} world point types across ${POINT_KINDS.length} kinds`);
 
   // Creatures, then their drop rules. HOSTILE_CREATURES (4 legacy) and
   // BESTIARY_P4_CREATURES (288 generated, SOMET-250 Task 6) go through the
