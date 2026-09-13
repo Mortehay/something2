@@ -50,6 +50,16 @@
     }
   },
   {
+    "key": "astral-axe",
+    "name": "astral-axe",
+    "file": "astral-axe.png",
+    "bytes": 25923,
+    "source": {
+      "width": 255,
+      "height": 484
+    }
+  },
+  {
     "key": "astral-band",
     "name": "astral-band",
     "file": "astral-band.png",
@@ -80,6 +90,16 @@
     }
   },
   {
+    "key": "astral-bow",
+    "name": "astral-bow",
+    "file": "astral-bow.png",
+    "bytes": 18748,
+    "source": {
+      "width": 331,
+      "height": 841
+    }
+  },
+  {
     "key": "astral-buckler",
     "name": "astral-buckler",
     "file": "astral-buckler.png",
@@ -87,6 +107,26 @@
     "source": {
       "width": 228,
       "height": 220
+    }
+  },
+  {
+    "key": "astral-crossbow",
+    "name": "astral-crossbow",
+    "file": "astral-crossbow.png",
+    "bytes": 39920,
+    "source": {
+      "width": 645,
+      "height": 474
+    }
+  },
+  {
+    "key": "astral-dagger",
+    "name": "astral-dagger",
+    "file": "astral-dagger.png",
+    "bytes": 14393,
+    "source": {
+      "width": 197,
+      "height": 747
     }
   },
   {
@@ -150,6 +190,16 @@
     }
   },
   {
+    "key": "astral-mace",
+    "name": "astral-mace",
+    "file": "astral-mace.png",
+    "bytes": 21669,
+    "source": {
+      "width": 222,
+      "height": 672
+    }
+  },
+  {
     "key": "astral-plate",
     "name": "astral-plate",
     "file": "astral-plate.png",
@@ -160,6 +210,16 @@
     }
   },
   {
+    "key": "astral-quarterstaff",
+    "name": "astral-quarterstaff",
+    "file": "astral-quarterstaff.png",
+    "bytes": 11871,
+    "source": {
+      "width": 111,
+      "height": 664
+    }
+  },
+  {
     "key": "astral-robe",
     "name": "astral-robe",
     "file": "astral-robe.png",
@@ -167,6 +227,16 @@
     "source": {
       "width": 325,
       "height": 637
+    }
+  },
+  {
+    "key": "astral-scepter",
+    "name": "astral-scepter",
+    "file": "astral-scepter.png",
+    "bytes": 25039,
+    "source": {
+      "width": 290,
+      "height": 869
     }
   },
   {
@@ -187,6 +257,26 @@
     "source": {
       "width": 652,
       "height": 526
+    }
+  },
+  {
+    "key": "astral-staff",
+    "name": "astral-staff",
+    "file": "astral-staff.png",
+    "bytes": 14928,
+    "source": {
+      "width": 171,
+      "height": 773
+    }
+  },
+  {
+    "key": "astral-sword",
+    "name": "astral-sword",
+    "file": "astral-sword.png",
+    "bytes": 14657,
+    "source": {
+      "width": 330,
+      "height": 967
     }
   },
   {
@@ -230,6 +320,16 @@
     }
   },
   {
+    "key": "crude-axe",
+    "name": "crude-axe",
+    "file": "crude-axe.png",
+    "bytes": 29469,
+    "source": {
+      "width": 527,
+      "height": 578
+    }
+  },
+  {
     "key": "crude-band",
     "name": "crude-band",
     "file": "crude-band.png",
@@ -260,6 +360,16 @@
     }
   },
   {
+    "key": "crude-bow",
+    "name": "crude-bow",
+    "file": "crude-bow.png",
+    "bytes": 24111,
+    "source": {
+      "width": 475,
+      "height": 690
+    }
+  },
+  {
     "key": "crude-buckler",
     "name": "crude-buckler",
     "file": "crude-buckler.png",
@@ -267,6 +377,26 @@
     "source": {
       "width": 731,
       "height": 746
+    }
+  },
+  {
+    "key": "crude-crossbow",
+    "name": "crude-crossbow",
+    "file": "crude-crossbow.png",
+    "bytes": 33486,
+    "source": {
+      "width": 690,
+      "height": 443
+    }
+  },
+  {
+    "key": "crude-dagger",
+    "name": "crude-dagger",
+    "file": "crude-dagger.png",
+    "bytes": 27435,
+    "source": {
+      "width": 399,
+      "height": 610
     }
   },
   {
@@ -330,6 +460,16 @@
     }
   },
   {
+    "key": "crude-mace",
+    "name": "crude-mace",
+    "file": "crude-mace.png",
+    "bytes": 22291,
+    "source": {
+      "width": 170,
+      "height": 509
+    }
+  },
+  {
     "key": "crude-plate",
     "name": "crude-plate",
     "file": "crude-plate.png",
@@ -340,6 +480,16 @@
     }
   },
   {
+    "key": "crude-quarterstaff",
+    "name": "crude-quarterstaff",
+    "file": "crude-quarterstaff.png",
+    "bytes": 11434,
+    "source": {
+      "width": 137,
+      "height": 789
+    }
+  },
+  {
     "key": "crude-robe",
     "name": "crude-robe",
     "file": "crude-robe.png",
@@ -347,6 +497,16 @@
     "source": {
       "width": 307,
       "height": 578
+    }
+  },
+  {
+    "key": "crude-scepter",
+    "name": "crude-scepter",
+    "file": "crude-scepter.png",
+    "bytes": 19824,
+    "source": {
+      "width": 212,
+      "height": 691
     }
   },
   {
@@ -367,6 +527,26 @@
     "source": {
       "width": 238,
       "height": 697
+    }
+  },
+  {
+    "key": "crude-staff",
+    "name": "crude-staff",
+    "file": "crude-staff.png",
+    "bytes": 27973,
+    "source": {
+      "width": 367,
+      "height": 610
+    }
+  },
+  {
+    "key": "crude-sword",
+    "name": "crude-sword",
+    "file": "crude-sword.png",
+    "bytes": 12931,
+    "source": {
+      "width": 204,
+      "height": 595
     }
   },
   {
@@ -400,6 +580,16 @@
     }
   },
   {
+    "key": "dragon-axe",
+    "name": "dragon-axe",
+    "file": "dragon-axe.png",
+    "bytes": 26619,
+    "source": {
+      "width": 663,
+      "height": 748
+    }
+  },
+  {
     "key": "dragon-band",
     "name": "dragon-band",
     "file": "dragon-band.png",
@@ -430,6 +620,16 @@
     }
   },
   {
+    "key": "dragon-bow",
+    "name": "dragon-bow",
+    "file": "dragon-bow.png",
+    "bytes": 33013,
+    "source": {
+      "width": 603,
+      "height": 500
+    }
+  },
+  {
     "key": "dragon-buckler",
     "name": "dragon-buckler",
     "file": "dragon-buckler.png",
@@ -437,6 +637,26 @@
     "source": {
       "width": 637,
       "height": 739
+    }
+  },
+  {
+    "key": "dragon-crossbow",
+    "name": "dragon-crossbow",
+    "file": "dragon-crossbow.png",
+    "bytes": 20837,
+    "source": {
+      "width": 501,
+      "height": 239
+    }
+  },
+  {
+    "key": "dragon-dagger",
+    "name": "dragon-dagger",
+    "file": "dragon-dagger.png",
+    "bytes": 19705,
+    "source": {
+      "width": 274,
+      "height": 732
     }
   },
   {
@@ -500,6 +720,16 @@
     }
   },
   {
+    "key": "dragon-mace",
+    "name": "dragon-mace",
+    "file": "dragon-mace.png",
+    "bytes": 31179,
+    "source": {
+      "width": 519,
+      "height": 426
+    }
+  },
+  {
     "key": "dragon-plate",
     "name": "dragon-plate",
     "file": "dragon-plate.png",
@@ -510,6 +740,16 @@
     }
   },
   {
+    "key": "dragon-quarterstaff",
+    "name": "dragon-quarterstaff",
+    "file": "dragon-quarterstaff.png",
+    "bytes": 10619,
+    "source": {
+      "width": 135,
+      "height": 857
+    }
+  },
+  {
     "key": "dragon-robe",
     "name": "dragon-robe",
     "file": "dragon-robe.png",
@@ -517,6 +757,16 @@
     "source": {
       "width": 433,
       "height": 637
+    }
+  },
+  {
+    "key": "dragon-scepter",
+    "name": "dragon-scepter",
+    "file": "dragon-scepter.png",
+    "bytes": 20320,
+    "source": {
+      "width": 239,
+      "height": 747
     }
   },
   {
@@ -537,6 +787,26 @@
     "source": {
       "width": 240,
       "height": 678
+    }
+  },
+  {
+    "key": "dragon-staff",
+    "name": "dragon-staff",
+    "file": "dragon-staff.png",
+    "bytes": 16131,
+    "source": {
+      "width": 172,
+      "height": 671
+    }
+  },
+  {
+    "key": "dragon-sword",
+    "name": "dragon-sword",
+    "file": "dragon-sword.png",
+    "bytes": 18044,
+    "source": {
+      "width": 307,
+      "height": 926
     }
   },
   {
@@ -590,6 +860,16 @@
     }
   },
   {
+    "key": "iron-axe",
+    "name": "iron-axe",
+    "file": "iron-axe.png",
+    "bytes": 38718,
+    "source": {
+      "width": 594,
+      "height": 568
+    }
+  },
+  {
     "key": "iron-band",
     "name": "iron-band",
     "file": "iron-band.png",
@@ -620,6 +900,16 @@
     }
   },
   {
+    "key": "iron-bow",
+    "name": "iron-bow",
+    "file": "iron-bow.png",
+    "bytes": 18465,
+    "source": {
+      "width": 375,
+      "height": 882
+    }
+  },
+  {
     "key": "iron-buckler",
     "name": "iron-buckler",
     "file": "iron-buckler.png",
@@ -627,6 +917,26 @@
     "source": {
       "width": 748,
       "height": 790
+    }
+  },
+  {
+    "key": "iron-crossbow",
+    "name": "iron-crossbow",
+    "file": "iron-crossbow.png",
+    "bytes": 30598,
+    "source": {
+      "width": 444,
+      "height": 704
+    }
+  },
+  {
+    "key": "iron-dagger",
+    "name": "iron-dagger",
+    "file": "iron-dagger.png",
+    "bytes": 15426,
+    "source": {
+      "width": 263,
+      "height": 739
     }
   },
   {
@@ -690,6 +1000,16 @@
     }
   },
   {
+    "key": "iron-mace",
+    "name": "iron-mace",
+    "file": "iron-mace.png",
+    "bytes": 22519,
+    "source": {
+      "width": 315,
+      "height": 814
+    }
+  },
+  {
     "key": "iron-plate",
     "name": "iron-plate",
     "file": "iron-plate.png",
@@ -700,6 +1020,16 @@
     }
   },
   {
+    "key": "iron-quarterstaff",
+    "name": "iron-quarterstaff",
+    "file": "iron-quarterstaff.png",
+    "bytes": 19455,
+    "source": {
+      "width": 239,
+      "height": 679
+    }
+  },
+  {
     "key": "iron-robe",
     "name": "iron-robe",
     "file": "iron-robe.png",
@@ -707,6 +1037,16 @@
     "source": {
       "width": 214,
       "height": 418
+    }
+  },
+  {
+    "key": "iron-scepter",
+    "name": "iron-scepter",
+    "file": "iron-scepter.png",
+    "bytes": 18030,
+    "source": {
+      "width": 198,
+      "height": 628
     }
   },
   {
@@ -727,6 +1067,26 @@
     "source": {
       "width": 137,
       "height": 832
+    }
+  },
+  {
+    "key": "iron-staff",
+    "name": "iron-staff",
+    "file": "iron-staff.png",
+    "bytes": 13011,
+    "source": {
+      "width": 170,
+      "height": 766
+    }
+  },
+  {
+    "key": "iron-sword",
+    "name": "iron-sword",
+    "file": "iron-sword.png",
+    "bytes": 29867,
+    "source": {
+      "width": 500,
+      "height": 364
     }
   },
   {
@@ -810,6 +1170,16 @@
     }
   },
   {
+    "key": "mythic-axe",
+    "name": "mythic-axe",
+    "file": "mythic-axe.png",
+    "bytes": 25745,
+    "source": {
+      "width": 332,
+      "height": 671
+    }
+  },
+  {
     "key": "mythic-band",
     "name": "mythic-band",
     "file": "mythic-band.png",
@@ -840,6 +1210,16 @@
     }
   },
   {
+    "key": "mythic-bow",
+    "name": "mythic-bow",
+    "file": "mythic-bow.png",
+    "bytes": 24791,
+    "source": {
+      "width": 789,
+      "height": 712
+    }
+  },
+  {
     "key": "mythic-buckler",
     "name": "mythic-buckler",
     "file": "mythic-buckler.png",
@@ -847,6 +1227,26 @@
     "source": {
       "width": 713,
       "height": 823
+    }
+  },
+  {
+    "key": "mythic-crossbow",
+    "name": "mythic-crossbow",
+    "file": "mythic-crossbow.png",
+    "bytes": 40893,
+    "source": {
+      "width": 561,
+      "height": 409
+    }
+  },
+  {
+    "key": "mythic-dagger",
+    "name": "mythic-dagger",
+    "file": "mythic-dagger.png",
+    "bytes": 16919,
+    "source": {
+      "width": 187,
+      "height": 526
     }
   },
   {
@@ -910,6 +1310,16 @@
     }
   },
   {
+    "key": "mythic-mace",
+    "name": "mythic-mace",
+    "file": "mythic-mace.png",
+    "bytes": 31578,
+    "source": {
+      "width": 443,
+      "height": 417
+    }
+  },
+  {
     "key": "mythic-plate",
     "name": "mythic-plate",
     "file": "mythic-plate.png",
@@ -920,6 +1330,16 @@
     }
   },
   {
+    "key": "mythic-quarterstaff",
+    "name": "mythic-quarterstaff",
+    "file": "mythic-quarterstaff.png",
+    "bytes": 16024,
+    "source": {
+      "width": 232,
+      "height": 926
+    }
+  },
+  {
     "key": "mythic-robe",
     "name": "mythic-robe",
     "file": "mythic-robe.png",
@@ -927,6 +1347,16 @@
     "source": {
       "width": 366,
       "height": 652
+    }
+  },
+  {
+    "key": "mythic-scepter",
+    "name": "mythic-scepter",
+    "file": "mythic-scepter.png",
+    "bytes": 19482,
+    "source": {
+      "width": 222,
+      "height": 800
     }
   },
   {
@@ -950,6 +1380,26 @@
     }
   },
   {
+    "key": "mythic-staff",
+    "name": "mythic-staff",
+    "file": "mythic-staff.png",
+    "bytes": 14386,
+    "source": {
+      "width": 204,
+      "height": 902
+    }
+  },
+  {
+    "key": "mythic-sword",
+    "name": "mythic-sword",
+    "file": "mythic-sword.png",
+    "bytes": 14933,
+    "source": {
+      "width": 213,
+      "height": 663
+    }
+  },
+  {
     "key": "mythic-wand",
     "name": "mythic-wand",
     "file": "mythic-wand.png",
@@ -957,6 +1407,16 @@
     "source": {
       "width": 153,
       "height": 570
+    }
+  },
+  {
+    "key": "obsidian-axe",
+    "name": "obsidian-axe",
+    "file": "obsidian-axe.png",
+    "bytes": 35580,
+    "source": {
+      "width": 417,
+      "height": 433
     }
   },
   {
@@ -990,6 +1450,16 @@
     }
   },
   {
+    "key": "obsidian-bow",
+    "name": "obsidian-bow",
+    "file": "obsidian-bow.png",
+    "bytes": 14343,
+    "source": {
+      "width": 206,
+      "height": 663
+    }
+  },
+  {
     "key": "obsidian-buckler",
     "name": "obsidian-buckler",
     "file": "obsidian-buckler.png",
@@ -997,6 +1467,26 @@
     "source": {
       "width": 519,
       "height": 475
+    }
+  },
+  {
+    "key": "obsidian-crossbow",
+    "name": "obsidian-crossbow",
+    "file": "obsidian-crossbow.png",
+    "bytes": 51939,
+    "source": {
+      "width": 622,
+      "height": 492
+    }
+  },
+  {
+    "key": "obsidian-dagger",
+    "name": "obsidian-dagger",
+    "file": "obsidian-dagger.png",
+    "bytes": 14688,
+    "source": {
+      "width": 222,
+      "height": 705
     }
   },
   {
@@ -1060,6 +1550,16 @@
     }
   },
   {
+    "key": "obsidian-mace",
+    "name": "obsidian-mace",
+    "file": "obsidian-mace.png",
+    "bytes": 24018,
+    "source": {
+      "width": 213,
+      "height": 597
+    }
+  },
+  {
     "key": "obsidian-plate",
     "name": "obsidian-plate",
     "file": "obsidian-plate.png",
@@ -1070,6 +1570,16 @@
     }
   },
   {
+    "key": "obsidian-quarterstaff",
+    "name": "obsidian-quarterstaff",
+    "file": "obsidian-quarterstaff.png",
+    "bytes": 12046,
+    "source": {
+      "width": 111,
+      "height": 731
+    }
+  },
+  {
     "key": "obsidian-robe",
     "name": "obsidian-robe",
     "file": "obsidian-robe.png",
@@ -1077,6 +1587,16 @@
     "source": {
       "width": 426,
       "height": 867
+    }
+  },
+  {
+    "key": "obsidian-scepter",
+    "name": "obsidian-scepter",
+    "file": "obsidian-scepter.png",
+    "bytes": 18138,
+    "source": {
+      "width": 255,
+      "height": 815
     }
   },
   {
@@ -1097,6 +1617,26 @@
     "source": {
       "width": 130,
       "height": 816
+    }
+  },
+  {
+    "key": "obsidian-staff",
+    "name": "obsidian-staff",
+    "file": "obsidian-staff.png",
+    "bytes": 17684,
+    "source": {
+      "width": 154,
+      "height": 527
+    }
+  },
+  {
+    "key": "obsidian-sword",
+    "name": "obsidian-sword",
+    "file": "obsidian-sword.png",
+    "bytes": 17544,
+    "source": {
+      "width": 197,
+      "height": 526
     }
   },
   {
@@ -1130,6 +1670,16 @@
     }
   },
   {
+    "key": "runed-axe",
+    "name": "runed-axe",
+    "file": "runed-axe.png",
+    "bytes": 18183,
+    "source": {
+      "width": 306,
+      "height": 705
+    }
+  },
+  {
     "key": "runed-band",
     "name": "runed-band",
     "file": "runed-band.png",
@@ -1160,6 +1710,16 @@
     }
   },
   {
+    "key": "runed-bow",
+    "name": "runed-bow",
+    "file": "runed-bow.png",
+    "bytes": 20949,
+    "source": {
+      "width": 240,
+      "height": 596
+    }
+  },
+  {
     "key": "runed-buckler",
     "name": "runed-buckler",
     "file": "runed-buckler.png",
@@ -1167,6 +1727,26 @@
     "source": {
       "width": 698,
       "height": 679
+    }
+  },
+  {
+    "key": "runed-crossbow",
+    "name": "runed-crossbow",
+    "file": "runed-crossbow.png",
+    "bytes": 37626,
+    "source": {
+      "width": 478,
+      "height": 365
+    }
+  },
+  {
+    "key": "runed-dagger",
+    "name": "runed-dagger",
+    "file": "runed-dagger.png",
+    "bytes": 18226,
+    "source": {
+      "width": 254,
+      "height": 850
     }
   },
   {
@@ -1230,6 +1810,16 @@
     }
   },
   {
+    "key": "runed-mace",
+    "name": "runed-mace",
+    "file": "runed-mace.png",
+    "bytes": 26890,
+    "source": {
+      "width": 315,
+      "height": 706
+    }
+  },
+  {
     "key": "runed-plate",
     "name": "runed-plate",
     "file": "runed-plate.png",
@@ -1240,6 +1830,16 @@
     }
   },
   {
+    "key": "runed-quarterstaff",
+    "name": "runed-quarterstaff",
+    "file": "runed-quarterstaff.png",
+    "bytes": 22548,
+    "source": {
+      "width": 585,
+      "height": 449
+    }
+  },
+  {
     "key": "runed-robe",
     "name": "runed-robe",
     "file": "runed-robe.png",
@@ -1247,6 +1847,16 @@
     "source": {
       "width": 383,
       "height": 781
+    }
+  },
+  {
+    "key": "runed-scepter",
+    "name": "runed-scepter",
+    "file": "runed-scepter.png",
+    "bytes": 20622,
+    "source": {
+      "width": 323,
+      "height": 891
     }
   },
   {
@@ -1267,6 +1877,26 @@
     "source": {
       "width": 359,
       "height": 468
+    }
+  },
+  {
+    "key": "runed-staff",
+    "name": "runed-staff",
+    "file": "runed-staff.png",
+    "bytes": 15819,
+    "source": {
+      "width": 206,
+      "height": 823
+    }
+  },
+  {
+    "key": "runed-sword",
+    "name": "runed-sword",
+    "file": "runed-sword.png",
+    "bytes": 29173,
+    "source": {
+      "width": 721,
+      "height": 587
     }
   },
   {
@@ -1310,6 +1940,16 @@
     }
   },
   {
+    "key": "steel-axe",
+    "name": "steel-axe",
+    "file": "steel-axe.png",
+    "bytes": 20761,
+    "source": {
+      "width": 323,
+      "height": 772
+    }
+  },
+  {
     "key": "steel-band",
     "name": "steel-band",
     "file": "steel-band.png",
@@ -1340,6 +1980,16 @@
     }
   },
   {
+    "key": "steel-bow",
+    "name": "steel-bow",
+    "file": "steel-bow.png",
+    "bytes": 26324,
+    "source": {
+      "width": 679,
+      "height": 664
+    }
+  },
+  {
     "key": "steel-buckler",
     "name": "steel-buckler",
     "file": "steel-buckler.png",
@@ -1347,6 +1997,26 @@
     "source": {
       "width": 1024,
       "height": 1024
+    }
+  },
+  {
+    "key": "steel-crossbow",
+    "name": "steel-crossbow",
+    "file": "steel-crossbow.png",
+    "bytes": 40918,
+    "source": {
+      "width": 630,
+      "height": 509
+    }
+  },
+  {
+    "key": "steel-dagger",
+    "name": "steel-dagger",
+    "file": "steel-dagger.png",
+    "bytes": 19344,
+    "source": {
+      "width": 221,
+      "height": 594
     }
   },
   {
@@ -1410,6 +2080,16 @@
     }
   },
   {
+    "key": "steel-mace",
+    "name": "steel-mace",
+    "file": "steel-mace.png",
+    "bytes": 26020,
+    "source": {
+      "width": 644,
+      "height": 720
+    }
+  },
+  {
     "key": "steel-plate",
     "name": "steel-plate",
     "file": "steel-plate.png",
@@ -1420,6 +2100,16 @@
     }
   },
   {
+    "key": "steel-quarterstaff",
+    "name": "steel-quarterstaff",
+    "file": "steel-quarterstaff.png",
+    "bytes": 9156,
+    "source": {
+      "width": 110,
+      "height": 739
+    }
+  },
+  {
     "key": "steel-robe",
     "name": "steel-robe",
     "file": "steel-robe.png",
@@ -1427,6 +2117,16 @@
     "source": {
       "width": 349,
       "height": 630
+    }
+  },
+  {
+    "key": "steel-scepter",
+    "name": "steel-scepter",
+    "file": "steel-scepter.png",
+    "bytes": 16267,
+    "source": {
+      "width": 187,
+      "height": 755
     }
   },
   {
@@ -1447,6 +2147,26 @@
     "source": {
       "width": 198,
       "height": 857
+    }
+  },
+  {
+    "key": "steel-staff",
+    "name": "steel-staff",
+    "file": "steel-staff.png",
+    "bytes": 21609,
+    "source": {
+      "width": 629,
+      "height": 864
+    }
+  },
+  {
+    "key": "steel-sword",
+    "name": "steel-sword",
+    "file": "steel-sword.png",
+    "bytes": 28137,
+    "source": {
+      "width": 662,
+      "height": 731
     }
   },
   {
@@ -1570,6 +2290,16 @@
     }
   },
   {
+    "key": "tempered-axe",
+    "name": "tempered-axe",
+    "file": "tempered-axe.png",
+    "bytes": 29350,
+    "source": {
+      "width": 365,
+      "height": 603
+    }
+  },
+  {
     "key": "tempered-band",
     "name": "tempered-band",
     "file": "tempered-band.png",
@@ -1600,6 +2330,16 @@
     }
   },
   {
+    "key": "tempered-bow",
+    "name": "tempered-bow",
+    "file": "tempered-bow.png",
+    "bytes": 21161,
+    "source": {
+      "width": 358,
+      "height": 696
+    }
+  },
+  {
     "key": "tempered-buckler",
     "name": "tempered-buckler",
     "file": "tempered-buckler.png",
@@ -1607,6 +2347,26 @@
     "source": {
       "width": 662,
       "height": 705
+    }
+  },
+  {
+    "key": "tempered-crossbow",
+    "name": "tempered-crossbow",
+    "file": "tempered-crossbow.png",
+    "bytes": 46688,
+    "source": {
+      "width": 587,
+      "height": 474
+    }
+  },
+  {
+    "key": "tempered-dagger",
+    "name": "tempered-dagger",
+    "file": "tempered-dagger.png",
+    "bytes": 13401,
+    "source": {
+      "width": 254,
+      "height": 782
     }
   },
   {
@@ -1663,10 +2423,20 @@
     "key": "tempered-hood",
     "name": "tempered-hood",
     "file": "tempered-hood.png",
-    "bytes": 36509,
+    "bytes": 43227,
     "source": {
-      "width": 262,
-      "height": 543
+      "width": 281,
+      "height": 467
+    }
+  },
+  {
+    "key": "tempered-mace",
+    "name": "tempered-mace",
+    "file": "tempered-mace.png",
+    "bytes": 13590,
+    "source": {
+      "width": 221,
+      "height": 883
     }
   },
   {
@@ -1680,6 +2450,16 @@
     }
   },
   {
+    "key": "tempered-quarterstaff",
+    "name": "tempered-quarterstaff",
+    "file": "tempered-quarterstaff.png",
+    "bytes": 11522,
+    "source": {
+      "width": 84,
+      "height": 678
+    }
+  },
+  {
     "key": "tempered-robe",
     "name": "tempered-robe",
     "file": "tempered-robe.png",
@@ -1687,6 +2467,16 @@
     "source": {
       "width": 324,
       "height": 596
+    }
+  },
+  {
+    "key": "tempered-scepter",
+    "name": "tempered-scepter",
+    "file": "tempered-scepter.png",
+    "bytes": 25862,
+    "source": {
+      "width": 408,
+      "height": 663
     }
   },
   {
@@ -1707,6 +2497,26 @@
     "source": {
       "width": 206,
       "height": 884
+    }
+  },
+  {
+    "key": "tempered-staff",
+    "name": "tempered-staff",
+    "file": "tempered-staff.png",
+    "bytes": 17346,
+    "source": {
+      "width": 179,
+      "height": 535
+    }
+  },
+  {
+    "key": "tempered-sword",
+    "name": "tempered-sword",
+    "file": "tempered-sword.png",
+    "bytes": 12877,
+    "source": {
+      "width": 213,
+      "height": 755
     }
   },
   {
@@ -1740,6 +2550,16 @@
     }
   },
   {
+    "key": "void-axe",
+    "name": "void-axe",
+    "file": "void-axe.png",
+    "bytes": 23860,
+    "source": {
+      "width": 322,
+      "height": 713
+    }
+  },
+  {
     "key": "void-band",
     "name": "void-band",
     "file": "void-band.png",
@@ -1755,8 +2575,8 @@
     "file": "void-blade.png",
     "bytes": 24562,
     "source": {
-      "width": 273,
-      "height": 595
+      "width": 117,
+      "height": 256
     }
   },
   {
@@ -1770,6 +2590,16 @@
     }
   },
   {
+    "key": "void-bow",
+    "name": "void-bow",
+    "file": "void-bow.png",
+    "bytes": 20526,
+    "source": {
+      "width": 246,
+      "height": 534
+    }
+  },
+  {
     "key": "void-buckler",
     "name": "void-buckler",
     "file": "void-buckler.png",
@@ -1777,6 +2607,26 @@
     "source": {
       "width": 678,
       "height": 686
+    }
+  },
+  {
+    "key": "void-crossbow",
+    "name": "void-crossbow",
+    "file": "void-crossbow.png",
+    "bytes": 55449,
+    "source": {
+      "width": 544,
+      "height": 621
+    }
+  },
+  {
+    "key": "void-dagger",
+    "name": "void-dagger",
+    "file": "void-dagger.png",
+    "bytes": 16117,
+    "source": {
+      "width": 212,
+      "height": 604
     }
   },
   {
@@ -1840,6 +2690,16 @@
     }
   },
   {
+    "key": "void-mace",
+    "name": "void-mace",
+    "file": "void-mace.png",
+    "bytes": 30881,
+    "source": {
+      "width": 281,
+      "height": 553
+    }
+  },
+  {
     "key": "void-plate",
     "name": "void-plate",
     "file": "void-plate.png",
@@ -1850,6 +2710,16 @@
     }
   },
   {
+    "key": "void-quarterstaff",
+    "name": "void-quarterstaff",
+    "file": "void-quarterstaff.png",
+    "bytes": 14876,
+    "source": {
+      "width": 173,
+      "height": 747
+    }
+  },
+  {
     "key": "void-robe",
     "name": "void-robe",
     "file": "void-robe.png",
@@ -1857,6 +2727,16 @@
     "source": {
       "width": 400,
       "height": 875
+    }
+  },
+  {
+    "key": "void-scepter",
+    "name": "void-scepter",
+    "file": "void-scepter.png",
+    "bytes": 22348,
+    "source": {
+      "width": 255,
+      "height": 767
     }
   },
   {
@@ -1877,6 +2757,26 @@
     "source": {
       "width": 85,
       "height": 554
+    }
+  },
+  {
+    "key": "void-staff",
+    "name": "void-staff",
+    "file": "void-staff.png",
+    "bytes": 33563,
+    "source": {
+      "width": 664,
+      "height": 569
+    }
+  },
+  {
+    "key": "void-sword",
+    "name": "void-sword",
+    "file": "void-sword.png",
+    "bytes": 22858,
+    "source": {
+      "width": 603,
+      "height": 825
     }
   },
   {

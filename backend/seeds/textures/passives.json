@@ -40,6 +40,16 @@
     }
   },
   {
+    "key": "Attunement",
+    "name": "Attunement",
+    "file": "Attunement.png",
+    "bytes": 68989,
+    "source": {
+      "width": 655,
+      "height": 655
+    }
+  },
+  {
     "key": "Beast Bond",
     "name": "Beast Bond",
     "file": "Beast_Bond.png",
@@ -47,6 +57,16 @@
     "source": {
       "width": 282,
       "height": 508
+    }
+  },
+  {
+    "key": "Blood Pact — life costs are reduced 25%",
+    "name": "Blood Pact — life costs are reduced 25%",
+    "file": "Blood_Pact___life_costs_are_reduced_25_.png",
+    "bytes": 43932,
+    "source": {
+      "width": 358,
+      "height": 554
     }
   },
   {
@@ -93,10 +113,10 @@
     "key": "Callus",
     "name": "Callus",
     "file": "Callus.png",
-    "bytes": 40569,
+    "bytes": 62784,
     "source": {
-      "width": 376,
-      "height": 603
+      "width": 621,
+      "height": 576
     }
   },
   {
@@ -160,6 +180,16 @@
     }
   },
   {
+    "key": "Cryomancy — +35% ice damage, and your hits chill",
+    "name": "Cryomancy — +35% ice damage, and your hits chill",
+    "file": "Cryomancy____35__ice_damage__and_your_hits_chill.png",
+    "bytes": 58125,
+    "source": {
+      "width": 440,
+      "height": 416
+    }
+  },
+  {
     "key": "Cultist",
     "name": "Cultist",
     "file": "Cultist.png",
@@ -197,6 +227,26 @@
     "source": {
       "width": 663,
       "height": 536
+    }
+  },
+  {
+    "key": "Deep Well — +40 INT",
+    "name": "Deep Well — +40 INT",
+    "file": "Deep_Well____40_INT.png",
+    "bytes": 45187,
+    "source": {
+      "width": 451,
+      "height": 713
+    }
+  },
+  {
+    "key": "Deepening Thirst",
+    "name": "Deepening Thirst",
+    "file": "Deepening_Thirst.png",
+    "bytes": 64921,
+    "source": {
+      "width": 637,
+      "height": 621
     }
   },
   {
@@ -290,6 +340,16 @@
     }
   },
   {
+    "key": "Even Breath",
+    "name": "Even Breath",
+    "file": "Even_Breath.png",
+    "bytes": 63834,
+    "source": {
+      "width": 587,
+      "height": 543
+    }
+  },
+  {
     "key": "Executioner — +25% physical damage",
     "name": "Executioner — +25% physical damage",
     "file": "Executioner____25__physical_damage.png",
@@ -380,6 +440,16 @@
     }
   },
   {
+    "key": "Grounding",
+    "name": "Grounding",
+    "file": "Grounding.png",
+    "bytes": 56985,
+    "source": {
+      "width": 323,
+      "height": 390
+    }
+  },
+  {
     "key": "Hardy",
     "name": "Hardy",
     "file": "Hardy.png",
@@ -427,6 +497,16 @@
     "source": {
       "width": 425,
       "height": 781
+    }
+  },
+  {
+    "key": "Iron Hide — +250 maximum life",
+    "name": "Iron Hide — +250 maximum life",
+    "file": "Iron_Hide____250_maximum_life.png",
+    "bytes": 65777,
+    "source": {
+      "width": 951,
+      "height": 882
     }
   },
   {
@@ -673,10 +753,10 @@
     "key": "Quickening",
     "name": "Quickening",
     "file": "Quickening.png",
-    "bytes": 52142,
+    "bytes": 48724,
     "source": {
-      "width": 383,
-      "height": 432
+      "width": 220,
+      "height": 212
     }
   },
   {
@@ -693,10 +773,10 @@
     "key": "Reckless Swing — +40% physical damage, -15% ice resistance",
     "name": "Reckless Swing — +40% physical damage, -15% ice resistance",
     "file": "Reckless_Swing____40__physical_damage__-15__ice_resistance.png",
-    "bytes": 12558,
+    "bytes": 38456,
     "source": {
-      "width": 186,
-      "height": 696
+      "width": 841,
+      "height": 764
     }
   },
   {
@@ -720,13 +800,23 @@
     }
   },
   {
+    "key": "Reserve",
+    "name": "Reserve",
+    "file": "Reserve.png",
+    "bytes": 64452,
+    "source": {
+      "width": 712,
+      "height": 671
+    }
+  },
+  {
     "key": "Resonance",
     "name": "Resonance",
     "file": "Resonance.png",
-    "bytes": 47512,
+    "bytes": 62241,
     "source": {
-      "width": 629,
-      "height": 890
+      "width": 494,
+      "height": 500
     }
   },
   {
@@ -873,10 +963,10 @@
     "key": "Spreading Stain",
     "name": "Spreading Stain",
     "file": "Spreading_Stain.png",
-    "bytes": 56842,
+    "bytes": 56264,
     "source": {
-      "width": 374,
-      "height": 348
+      "width": 331,
+      "height": 288
     }
   },
   {
@@ -990,6 +1080,16 @@
     }
   },
   {
+    "key": "Unbreakable — +30 STR and +150 maximum life",
+    "name": "Unbreakable — +30 STR and +150 maximum life",
+    "file": "Unbreakable____30_STR_and__150_maximum_life.png",
+    "bytes": 40319,
+    "source": {
+      "width": 206,
+      "height": 341
+    }
+  },
+  {
     "key": "Undying — +40 CON",
     "name": "Undying — +40 CON",
     "file": "Undying____40_CON.png",
@@ -1037,6 +1137,16 @@
     "source": {
       "width": 773,
       "height": 807
+    }
+  },
+  {
+    "key": "Vital Surge — +300 maximum life",
+    "name": "Vital Surge — +300 maximum life",
+    "file": "Vital_Surge____300_maximum_life.png",
+    "bytes": 61491,
+    "source": {
+      "width": 375,
+      "height": 374
     }
   },
   {
@@ -1097,6 +1207,16 @@
     "source": {
       "width": 306,
       "height": 254
+    }
+  },
+  {
+    "key": "Whirling Step",
+    "name": "Whirling Step",
+    "file": "Whirling_Step.png",
+    "bytes": 66244,
+    "source": {
+      "width": 916,
+      "height": 848
     }
   },
   {

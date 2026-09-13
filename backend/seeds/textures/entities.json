@@ -298,7 +298,7 @@
   {
     "name": "Cave Skirmisher",
     "file": "Cave_Skirmisher.png",
-    "bytes": 37804,
+    "bytes": 84139,
     "prompt": "pixel art, a small physical-touched cave creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -530,7 +530,7 @@
   {
     "name": "Cultist",
     "file": "Cultist.png",
-    "bytes": 167625,
+    "bytes": 123459,
     "prompt": "",
     "is_creature": false,
     "cutout": true
@@ -762,7 +762,7 @@
   {
     "name": "Druid",
     "file": "Druid.png",
-    "bytes": 62963,
+    "bytes": 238332,
     "prompt": "",
     "is_creature": false,
     "cutout": true
@@ -1122,7 +1122,7 @@
   {
     "name": "Gloom Swarm",
     "file": "Gloom_Swarm.png",
-    "bytes": 94078,
+    "bytes": 155785,
     "prompt": "pixel art, a tiny ice-touched gloom creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1130,7 +1130,7 @@
   {
     "name": "Highland Apex",
     "file": "Highland_Apex.png",
-    "bytes": 23135,
+    "bytes": 190682,
     "prompt": "pixel art, a towering physical-touched highland creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
@@ -1226,7 +1226,7 @@
   {
     "name": "Hive Champion",
     "file": "Hive_Champion.png",
-    "bytes": 105046,
+    "bytes": 338436,
     "prompt": "pixel art, a commanding physical-touched hive creature, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
