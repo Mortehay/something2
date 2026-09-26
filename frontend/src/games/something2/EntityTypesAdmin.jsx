@@ -9,6 +9,8 @@ import BulkRegenerateButton from './BulkRegenerateButton.jsx';
 import { assetUrlVersioned } from './useTileSprites.js';
 import { useBiomes } from './useBiomes.js';
 import { useCreatureBehaviors } from './useCreatureBehaviors.js';
+import { useWorldPointKinds, useSetPointKindDefault } from './useWorldPointKinds.js';
+import { pointKindHidesWorldFields, pointKindPayload, defaultButtonState } from './pointKindForm.js';
 import { HiOutlineTrash, HiOutlinePencil, HiOutlinePlus, HiOutlineXMark, HiOutlineChevronDown, HiOutlineChevronUp } from "react-icons/hi2";
 import toast from 'react-hot-toast';
 import { validateEntityType } from './catalogValidation.js';
@@ -886,6 +888,8 @@ function EntityTypesAdmin() {
   const { entityTypes, isLoadingEntityTypes } = useEntityTypes();
   const { tileTypes } = useTileTypes();
   const { behaviors } = useCreatureBehaviors();
+  const { kinds: pointKinds } = useWorldPointKinds();
+  const setPointKindDefault = useSetPointKindDefault();
   const { biomes } = useBiomes();
   const { data: capability, isError: capabilityDown, isLoading: capabilityLoading } = useSpriteCapability();
   const createMutation = useCreateEntityType();
@@ -960,7 +964,8 @@ function EntityTypesAdmin() {
     display_height: '',
     place_order: 0,
     behavior_id: null,
-    attack_element: 'physical'
+    attack_element: 'physical',
+    point_kind: null
   });
 
   useEffect(() => {
@@ -1002,6 +1007,7 @@ function EntityTypesAdmin() {
         // not fall back to a truthy default -- same rule as damage_override.
         behavior_id: editingEntity.behavior_id ?? null,
         attack_element: editingEntity.attack_element || 'physical',
+        point_kind: editingEntity.point_kind ?? null,
         // SOMET-342: the stored pin, flattened to the single string a <select>
         // can hold. Split back into the two columns on submit.
         provider_pin: pinToSelectValue(editingEntity.ai_provider_mode, editingEntity.ai_provider_id)
@@ -1034,6 +1040,7 @@ function EntityTypesAdmin() {
         place_order: 0,
         behavior_id: null,
         attack_element: 'physical',
+        point_kind: null,
         provider_pin: ''
       });
     }
@@ -1081,6 +1088,7 @@ function EntityTypesAdmin() {
     const body = {
       ...rest,
       ...selectValueToPin(provider_pin),
+      ...pointKindPayload(formData),
       display_width: optionalPx(rest.display_width),
       display_height: optionalPx(rest.display_height),
     };
@@ -1186,6 +1194,9 @@ function EntityTypesAdmin() {
               <EntityInfo>
                 <EntityBadge entity={entity} />
                 <EntityName>{entity.name}</EntityName>
+                {entity.point_kind ? (
+                  <span style={{ fontSize: '1.1rem', opacity: 0.6 }}>{` · point: ${entity.point_kind}`}</span>
+                ) : null}
               </EntityInfo>
               <ActionButtons>
                 <IconButton onClick={() => handleOpenEdit(entity)} title="Edit">
@@ -1286,39 +1297,72 @@ function EntityTypesAdmin() {
                 />
               </FormGroup>
 
-              <div style={{ display: 'flex', gap: '2rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                  <input 
-                    type="checkbox"
-                    checked={formData.walkable}
-                    onChange={e => setFormData({...formData, walkable: e.target.checked})}
-                    style={{ width: '20px', height: '20px' }}
-                  />
-                  <label style={{ fontSize: '1.2rem', color: 'var(--s2-selected)' }}>Walkable</label>
-                </div>
+              <FormGroup>
+                <label>World point kind</label>
+                <select
+                  value={formData.point_kind ?? ''}
+                  onChange={e => setFormData({ ...formData, point_kind: e.target.value === '' ? null : e.target.value })}
+                >
+                  <option value="">— none (creature or decoration) —</option>
+                  {pointKinds.map(k => (
+                    <option key={k.kind} value={k.kind}>{k.kind}</option>
+                  ))}
+                </select>
+                {(() => {
+                  const s = defaultButtonState({
+                    pointKind: formData.point_kind, entityId: editingEntity?.id ?? null, kinds: pointKinds,
+                  });
+                  if (!s.visible) return null;
+                  return (
+                    <button
+                      type="button"
+                      disabled={s.disabled || setPointKindDefault.isPending}
+                      onClick={() => setPointKindDefault.mutate({
+                        kind: formData.point_kind, default_entity_type_id: editingEntity.id,
+                      })}
+                      style={{ marginTop: '0.5rem' }}
+                    >
+                      {s.label}
+                    </button>
+                  );
+                })()}
+              </FormGroup>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                  <input
-                    type="checkbox"
-                    checked={formData.is_creature}
-                    onChange={e => setFormData({...formData, is_creature: e.target.checked})}
-                    style={{ width: '20px', height: '20px' }}
-                  />
-                  <label style={{ fontSize: '1.2rem', color: 'var(--s2-selected)' }}>Is creature (roams the world)</label>
-                </div>
+              {!pointKindHidesWorldFields(formData.point_kind) && (
+                <div style={{ display: 'flex', gap: '2rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                    <input
+                      type="checkbox"
+                      checked={formData.walkable}
+                      onChange={e => setFormData({...formData, walkable: e.target.checked})}
+                      style={{ width: '20px', height: '20px' }}
+                    />
+                    <label style={{ fontSize: '1.2rem', color: 'var(--s2-selected)' }}>Walkable</label>
+                  </div>
 
-                <FormGroup style={{ flex: 1 }}>
-                  <label>Spawn Chance (0-1)</label>
-                  <input 
-                    type="number"
-                    step="0.05"
-                    min="0"
-                    max="1"
-                    value={formData.chance}
-                    onChange={e => setFormData({...formData, chance: parseFloat(e.target.value)})}
-                  />
-                </FormGroup>
-              </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                    <input
+                      type="checkbox"
+                      checked={formData.is_creature}
+                      onChange={e => setFormData({...formData, is_creature: e.target.checked})}
+                      style={{ width: '20px', height: '20px' }}
+                    />
+                    <label style={{ fontSize: '1.2rem', color: 'var(--s2-selected)' }}>Is creature (roams the world)</label>
+                  </div>
+
+                  <FormGroup style={{ flex: 1 }}>
+                    <label>Spawn Chance (0-1)</label>
+                    <input
+                      type="number"
+                      step="0.05"
+                      min="0"
+                      max="1"
+                      value={formData.chance}
+                      onChange={e => setFormData({...formData, chance: parseFloat(e.target.value)})}
+                    />
+                  </FormGroup>
+                </div>
+              )}
 
               {formData.is_creature && (
                 <div style={{ display: 'flex', gap: '2rem' }}>
@@ -1439,36 +1483,38 @@ function EntityTypesAdmin() {
                 />
               </FormGroup>
 
-              <FormGroup>
-                <label>Spawn Tiles</label>
-                <MultiSelect>
-                  {tileTypes?.map(t => (
-                    <div key={t.name} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1rem' }}>
-                      <input
-                        type="checkbox"
-                        checked={formData.spawn_tiles.includes(t.name)}
-                        onChange={() => toggleSpawnTile(t.name)}
-                      />
-                      {t.name}
-                    </div>
-                  ))}
-                  {/* F-027/SOMET-207: a spawn_tiles entry whose tile type was
-                      deleted used to just vanish from this list -- invisible
-                      and un-removable, so every Save Changes re-sent the
-                      dangling reference forever. Show it, greyed out with a
-                      warning, and let the admin uncheck it to actually clear it. */}
-                  {orphanedSpawnTiles(formData.spawn_tiles, tileTypes).map(name => (
-                    <div key={`orphan-${name}`} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1rem', color: 'var(--s2-danger-soft)' }}>
-                      <input
-                        type="checkbox"
-                        checked={true}
-                        onChange={() => toggleSpawnTile(name)}
-                      />
-                      {name} <span style={{ opacity: 0.7 }}>(tile no longer exists)</span>
-                    </div>
-                  ))}
-                </MultiSelect>
-              </FormGroup>
+              {!pointKindHidesWorldFields(formData.point_kind) && (
+                <FormGroup>
+                  <label>Spawn Tiles</label>
+                  <MultiSelect>
+                    {tileTypes?.map(t => (
+                      <div key={t.name} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1rem' }}>
+                        <input
+                          type="checkbox"
+                          checked={formData.spawn_tiles.includes(t.name)}
+                          onChange={() => toggleSpawnTile(t.name)}
+                        />
+                        {t.name}
+                      </div>
+                    ))}
+                    {/* F-027/SOMET-207: a spawn_tiles entry whose tile type was
+                        deleted used to just vanish from this list -- invisible
+                        and un-removable, so every Save Changes re-sent the
+                        dangling reference forever. Show it, greyed out with a
+                        warning, and let the admin uncheck it to actually clear it. */}
+                    {orphanedSpawnTiles(formData.spawn_tiles, tileTypes).map(name => (
+                      <div key={`orphan-${name}`} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1rem', color: 'var(--s2-danger-soft)' }}>
+                        <input
+                          type="checkbox"
+                          checked={true}
+                          onChange={() => toggleSpawnTile(name)}
+                        />
+                        {name} <span style={{ opacity: 0.7 }}>(tile no longer exists)</span>
+                      </div>
+                    ))}
+                  </MultiSelect>
+                </FormGroup>
+              )}
 
               <FormActions>
                 <SecondaryButton type="button" onClick={() => setIsModalOpen(false)}>Cancel</SecondaryButton>

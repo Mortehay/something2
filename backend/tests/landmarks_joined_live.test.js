@@ -104,7 +104,13 @@ function fakeLandmarkPool({ activatedRows = [], portalRows = null, waypointRows 
       ] };
     }
     if (/FROM villages WHERE/i.test(sql)) return { rows: [] };
-    if (/FROM waypoints WHERE world_id/i.test(sql)) {
+    // loadPointKindDefaults (SOMET-582). A default for 'portal' only -- no
+    // default is seeded for 'waypoint' here, so the waypoint landmark below
+    // must resolve to null, not fall through to some other kind's name.
+    if (/FROM world_point_kinds/i.test(sql)) return { rows: [{ kind: 'portal', name: 't_portal' }] };
+    // Matches both the old "FROM waypoints WHERE world_id" shape and the
+    // SOMET-582 join ("FROM waypoints wp ... WHERE wp.world_id").
+    if (/FROM waypoints\b/i.test(sql)) {
       if (params[0] !== 'w1') return { rows: [] };
       return { rows: waypointRows ?? [
         { id: WAYPOINT_ID, world_id: 'w1', x: WAYPOINT_X, y: WAYPOINT_Y, name: 'Trailhead Well', map_link_id: null },
@@ -145,9 +151,16 @@ test('the joined frame carries both landmark kinds, from the loaders that alread
   const { joined } = await join(fakeLandmarkPool());
   assert.ok(Array.isArray(joined.landmarks), 'joined must carry a landmarks array');
   assert.deepStrictEqual(joined.landmarks, [
-    { kind: 'waypoint', x: WAYPOINT_X, y: WAYPOINT_Y, name: 'Trailhead Well', activated: false },
-    { kind: 'portal', x: PORTAL_X, y: PORTAL_Y, name: 'To Windwatch Pass', activated: false },
+    { kind: 'waypoint', x: WAYPOINT_X, y: WAYPOINT_Y, name: 'Trailhead Well', activated: false, art: null },
+    // 't_portal': loadPointKindDefaults's fake row above seeds a 'portal'
+    // default and this portal's own binding is null, so it falls through.
+    { kind: 'portal', x: PORTAL_X, y: PORTAL_Y, name: 'To Windwatch Pass', activated: false, art: 't_portal' },
   ]);
+  // Named explicitly too: the kind default reaches the wire for a portal (no
+  // instance binding, one seeded default) while an un-defaulted kind (no
+  // 'waypoint' row in loadPointKindDefaults' fake response) stays null.
+  assert.strictEqual(joined.landmarks.find((l) => l.kind === 'portal').art, 't_portal');
+  assert.strictEqual(joined.landmarks.find((l) => l.kind === 'waypoint').art, null);
 });
 
 test('a waypoint this character has activated arrives lit', async () => {

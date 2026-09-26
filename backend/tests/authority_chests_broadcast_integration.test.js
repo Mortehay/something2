@@ -72,8 +72,10 @@ function makePool({ chests = [] } = {}) {
       if (/FROM world_creatures/i.test(sql)) return { rows: [] };
       if (/^\s*DELETE FROM world_items WHERE expires_at/i.test(sql)) return { rows: [], rowCount: 0 };
       if (/SELECT.*FROM world_items/i.test(sql)) return { rows: [], rowCount: 0 };
-      // fetchChests at world load (services/chests.js).
-      if (/FROM world_chests WHERE world_id/i.test(sql)) {
+      // fetchChests at world load (services/chests.js). SOMET-582 joined
+      // entity_types onto this query (aliased `c`), so the match has to span
+      // the join rather than expect FROM/WHERE adjacent.
+      if (/FROM world_chests c[\s\S]*WHERE c\.world_id = \$1/i.test(sql)) {
         return {
           rows: chests.map((c) => ({
             id: c.id, x: c.x, y: c.y, kind: c.kind,
@@ -103,7 +105,11 @@ test('a chest in entry.chests reaches a connected player on the live "chests" br
 
   const msg = await nextMsg(ws, 'chests');
   assert.equal(msg.chests.length, 1);
-  assert.deepEqual(msg.chests[0], { id: 'chest-1', x: SPAWN.x, y: SPAWN.y, kind: 'vault', state: 'locked' });
+  // art: null -- this fixture's pool has no world_point_kinds branch (falls
+  // through to the default `{ rows: [] }`) and the fetchChests row above
+  // carries no art column, so resolvePointArt has neither an instance
+  // binding nor a kind default to resolve.
+  assert.deepEqual(msg.chests[0], { id: 'chest-1', x: SPAWN.x, y: SPAWN.y, kind: 'vault', state: 'locked', art: null });
 
   ws.close(); handle.close(); server.close();
 });

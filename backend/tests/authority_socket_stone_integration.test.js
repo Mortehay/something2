@@ -93,7 +93,9 @@ function makePool({ userItems = [], stoneInstances = new Map() } = {}) {
       if (/FROM world_creatures/i.test(sql)) return { rows: [] };
       if (/^\s*DELETE FROM world_items WHERE expires_at/i.test(sql)) return { rows: [], rowCount: 0 };
       if (/SELECT.*FROM world_items/i.test(sql)) return { rows: [], rowCount: 0 };
-      if (/FROM world_chests WHERE world_id/i.test(sql)) return { rows: [] };
+      // SOMET-582 joined entity_types onto fetchChests (aliased `c`), so the
+      // match has to span the join rather than expect FROM/WHERE adjacent.
+      if (/FROM world_chests c[\s\S]*WHERE c\.world_id = \$1/i.test(sql)) return { rows: [] };
       // Column-list agnostic on purpose — see the same branch in
       // authority_use_field_chest_integration.test.js. Pinning loadInventory's
       // exact SELECT means any column added to that query silently disables

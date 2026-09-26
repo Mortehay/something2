@@ -145,7 +145,9 @@ function fakePool({ bind = null, villages = {}, links = {}, bounded = false, bin
     if (/FROM villages v JOIN worlds w/i.test(sql)) {
       return { rows: entryVillage ? [entryVillage] : [] };
     }
-    if (/FROM villages WHERE world_id/i.test(sql)) return { rows: villages[params[0]] || [] };
+    // SOMET-582 joined entity_types onto fetchVillages (aliased `v`), so the
+    // match has to span the join rather than expect FROM/WHERE adjacent.
+    if (/FROM villages v\b[\s\S]*WHERE v\.world_id/i.test(sql)) return { rows: villages[params[0]] || [] };
     if (/FROM item_types/i.test(sql)) {
       return { rows: [
         { id: 1, name: 'dagger', category: 'weapon', slot: 'main_hand', two_handed: false, kind: 'melee',

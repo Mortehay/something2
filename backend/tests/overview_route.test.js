@@ -11,7 +11,9 @@ function fakePool(worldRow, { chests = [] } = {}) {
       if (/FROM map_links/i.test(sql)) return { rows: [] };
       if (/FROM villages/i.test(sql)) return { rows: [] };
       // fetchChests (services/chests.js): world_chests row -> mapChestRow shape.
-      if (/FROM world_chests WHERE world_id/i.test(sql)) {
+      // SOMET-582 joined entity_types onto this query (aliased `c`), so the
+      // match has to span the join rather than expect FROM/WHERE adjacent.
+      if (/FROM world_chests c[\s\S]*WHERE c\.world_id = \$1/i.test(sql)) {
         return {
           rows: chests.map((c) => ({
             id: c.id, x: c.x, y: c.y, kind: c.kind,
@@ -68,7 +70,7 @@ test('overview route restricts terrain to the world\'s declared biome', async ()
         { id: 1, name: 'Meadow', terrain_tiles: ['grass'], flora_types: [], creature_types: [],
           palette: [], art_style: '', exclusions: '', color: '#5aa84f' },
       ] };
-      if (/FROM world_chests WHERE world_id/i.test(sql)) return { rows: [] };
+      if (/FROM world_chests c[\s\S]*WHERE c\.world_id = \$1/i.test(sql)) return { rows: [] };
       throw new Error(`unexpected query: ${sql}`);
     },
   });

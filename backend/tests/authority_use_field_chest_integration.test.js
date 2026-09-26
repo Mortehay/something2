@@ -166,7 +166,9 @@ function makePool({ bounded = true, userItems = [], safeRoadRadius = 0, safeRect
           rowCount: 1,
         };
       }
-      if (/FROM world_chests WHERE world_id/i.test(sql)) return { rows: [] }; // fetchChests at load: none yet
+      // SOMET-582 joined entity_types onto fetchChests (aliased `c`), so the
+      // match has to span the join rather than expect FROM/WHERE adjacent.
+      if (/FROM world_chests c[\s\S]*WHERE c\.world_id = \$1/i.test(sql)) return { rows: [] }; // fetchChests at load: none yet
       // Matched on the TABLE and the OWNERSHIP predicate, never on the column
       // list: this is loadInventory's inventory read, and pinning the exact
       // `SELECT id, item_type_id, quantity` made adding a column to that query

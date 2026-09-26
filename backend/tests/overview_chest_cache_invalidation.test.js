@@ -96,7 +96,9 @@ function makePool() {
       if (/SELECT.*FROM world_items/i.test(sql)) return { rows: [], rowCount: 0 };
       // fetchChests: world load (authority) AND the /overview route's own
       // fresh read -- both hit this same branch, both must see chestState.
-      if (/FROM world_chests WHERE world_id/i.test(sql)) {
+      // SOMET-582 joined entity_types onto this query (aliased `c`), so the
+      // match has to span the join rather than expect FROM/WHERE adjacent.
+      if (/FROM world_chests c[\s\S]*WHERE c\.world_id = \$1/i.test(sql)) {
         return {
           rows: [{
             id: 'chest-1', x: SPAWN.x, y: SPAWN.y, kind: 'vault',

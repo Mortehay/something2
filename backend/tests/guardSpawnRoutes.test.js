@@ -60,7 +60,7 @@ test('creature re-roll deletes only hostiles and re-adds guards', async () => {
     [/FROM map_links/i, () => ({ rows: [] })],
     // One real village, so the guard-refresh step has somewhere to place guards.
     // fetchVillages reads snake_case columns and maps them to camelCase.
-    [/FROM villages WHERE world_id/i, () => ({ rows: [{
+    [/FROM villages v\b[\s\S]*WHERE v\.world_id/i, () => ({ rows: [{
       id: 'v1', min_row: 5, min_col: 5, width: 8, height: 6,
       gate_edge: 'S', spawn_x: 850, spawn_y: 750,
     }] })],

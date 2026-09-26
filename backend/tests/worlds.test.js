@@ -125,7 +125,7 @@ test('GET chunk cache MISS generates and returns an NxN grid WITHOUT inserting',
     [/FROM tile_types/i, () => ({ rows: TILE_ROWS })],
     [/FROM entity_types/i, () => ({ rows: [] })],                        // decoration defs (Task C)
     [/FROM map_links/i, () => ({ rows: [] })],
-    [/FROM villages WHERE world_id/i, () => ({ rows: [] })],
+    [/FROM villages v\b[\s\S]*WHERE v\.world_id/i, () => ({ rows: [] })],
     // NO INSERT INTO world_chunks / world_creatures handlers: the authority
     // alone materializes chunks and spawns creatures now, so if the route
     // issues either of those queries, mockPool throws.
@@ -144,7 +144,7 @@ test('GET chunk cache MISS generates and returns an NxN grid WITHOUT inserting',
     'GET /chunk must not insert into world_chunks',
   );
   assert.ok(
-    pool.calls.some((c) => /FROM villages WHERE world_id/i.test(c.sql)),
+    pool.calls.some((c) => /FROM villages v\b[\s\S]*WHERE v\.world_id/i.test(c.sql)),
     'GET /chunk must thread villages into the terrain config',
   );
 });
@@ -159,7 +159,7 @@ test('GET chunk cache HIT returns cached data without regenerating, plus decorat
     [/FROM tile_types/i, () => ({ rows: TILE_ROWS })],
     [/FROM entity_types/i, () => ({ rows: [] })],
     [/FROM map_links/i, () => ({ rows: [] })],
-    [/FROM villages WHERE world_id/i, () => ({ rows: [] })],
+    [/FROM villages v\b[\s\S]*WHERE v\.world_id/i, () => ({ rows: [] })],
   ]);
   __setPool(pool);
   const res = await request(app).get('/api/worlds/w1/chunk?cx=0&cy=0').set(...AUTH);

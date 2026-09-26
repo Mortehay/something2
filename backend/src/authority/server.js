@@ -26,6 +26,7 @@ const { fetchLinks } = require('../services/mapLinks');
 const { fetchVillages } = require('../services/villages');
 const { fetchWaypoints, activateWaypoint, waypointTileKey } = require('../services/waypoints');
 const { buildLandmarks } = require('../services/landmarks');
+const { loadPointKindDefaults, resolvePointArt, chestPointKind } = require('../services/pointArt');
 const {
   fetchChests, spawnFieldChest, nearestChest, respawnDueFieldChests,
 } = require('../services/chests.js');
@@ -647,6 +648,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
           {
             id: l.id, toWorldId: l.to_world_id, toX: l.to_x, toY: l.to_y,
             fromX: l.from_x, fromY: l.from_y, toName: l.to_name,
+            // SOMET-582: this portal's own art binding (name), resolved
+            // against the kind default in buildLandmarks.
+            art: l.art ?? null,
           },
         ]));
         const villages = await fetchVillages(pool, canonicalId);
@@ -666,6 +670,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const decorationDefs = await loadDecorationDefs(pool);
         const biomes = await loadBiomes(pool, row.biomes);
         const chests = await fetchChests(pool, canonicalId);
+        // SOMET-582: one catalog read per world load, held on `entry` so
+        // resolvePointArt can be called per point without a query per point.
+        const pointArtDefaults = await loadPointKindDefaults(pool);
         // Cached once here, rather than rebuilt per spawnFieldChest call, so
         // the `use` handler can hand placeMapCreatures the exact same
         // tile-legality config the map itself was generated from. `row`
@@ -693,6 +700,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
           catalogs,
           tileTypes, creatureTypes, creatureTypeIds, creatureGold, behaviorGold, behaviorDrops,
           goldItemTypeId, links, portalLinks, compassDoorways, villages, waypoints, chests, mapGenConfig,
+          pointArtDefaults,
           activeChunks: new Set(),   // chunk keys currently in the union of player neighborhoods
           chunkLoads: new Set(),     // in-flight activation guard per chunk key
           loadedChunks: new Set(),   // chunk keys whose creatures have been successfully loaded
@@ -1381,7 +1389,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
           const { cx: ccx, cy: ccy } = chunkOf(c.x, c.y, N);
           return keys.has(CHUNK_KEY(ccx, ccy));
         })
-        .map((c) => ({ id: c.id, x: c.x, y: c.y, kind: c.kind, state: c.state }));
+        .map((c) => ({
+          id: c.id, x: c.x, y: c.y, kind: c.kind, state: c.state,
+          // SOMET-582: chestPointKind maps 'vault'/'field' onto the point-kind
+          // catalog's names ('chest_vault'/'chest_field').
+          art: resolvePointArt(chestPointKind(c.kind), c.art, entry.pointArtDefaults),
+        }));
       send(ws, { type: 'chests', chests });
     }
   }
@@ -1772,7 +1785,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
           usesLifeCost,
           merchants: (entry.villages || [])
             .filter((v) => v.merchantX != null && v.merchantY != null)
-            .map((v) => ({ villageId: v.id, x: v.merchantX, y: v.merchantY })),
+            .map((v) => ({
+              villageId: v.id, x: v.merchantX, y: v.merchantY,
+              art: resolvePointArt('merchant', v.merchantArt, entry.pointArtDefaults),
+            })),
           // SOMET-310. Same shape and same join-time delivery as `merchants`
           // above: a bank post is static village geometry, so it never needs a
           // live update frame. fetchVillages derives bankX/bankY for every
@@ -1781,13 +1797,22 @@ function attachAuthority(httpServer, pool, opts = {}) {
           // without one is skipped rather than drawn at (undefined, undefined).
           banks: (entry.villages || [])
             .filter((v) => v.bankX != null && v.bankY != null)
-            .map((v) => ({ villageId: v.id, x: v.bankX, y: v.bankY })),
+            .map((v) => ({
+              villageId: v.id, x: v.bankX, y: v.bankY,
+              art: resolvePointArt('bank', v.bankArt, entry.pointArtDefaults),
+            })),
           gemMerchants: (entry.villages || [])
             .filter((v) => v.gemMerchantX != null && v.gemMerchantY != null)
-            .map((v) => ({ villageId: v.id, x: v.gemMerchantX, y: v.gemMerchantY })),
+            .map((v) => ({
+              villageId: v.id, x: v.gemMerchantX, y: v.gemMerchantY,
+              art: resolvePointArt('gem_merchant', v.gemMerchantArt, entry.pointArtDefaults),
+            })),
           skillMerchants: (entry.villages || [])
             .filter((v) => v.skillMerchantX != null && v.skillMerchantY != null)
-            .map((v) => ({ villageId: v.id, x: v.skillMerchantX, y: v.skillMerchantY })),
+            .map((v) => ({
+              villageId: v.id, x: v.skillMerchantX, y: v.skillMerchantY,
+              art: resolvePointArt('skill_merchant', v.skillMerchantArt, entry.pointArtDefaults),
+            })),
           // SOMET-297. Built from the Maps loadWorld already holds, plus one
           // per-join read of this character's activations -- no second loader.
           //
@@ -1800,6 +1825,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
             waypoints: entry.waypoints,
             portalLinks: entry.portalLinks,
             activatedIds: activatedWaypointIds,
+            artDefaults: entry.pointArtDefaults,
           }),
           doorways: entry.compassDoorways || [],
         });

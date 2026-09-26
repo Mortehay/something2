@@ -88,7 +88,7 @@ test('a browser fetch() can read X-Live-World-Pending cross-origin on DELETE /ap
   __setPool(mockPool([
     [/DELETE FROM villages WHERE id = \$1/i, () => ({ rows: [], rowCount: 1 })],
     [/DELETE FROM world_creatures WHERE world_id = \$1 AND type = \$2/i, () => ({ rows: [], rowCount: 2 })],
-    [/FROM villages WHERE world_id = \$1/i, () => ({ rows: [] })],
+    [/FROM villages v\b[\s\S]*WHERE v\.world_id/i, () => ({ rows: [] })],
     [/DELETE FROM world_chunks/i, () => ({ rows: [], rowCount: 0 })],
   ]));
   __setAuthorityHandle({ evictWorld: () => false, isWorldLive: () => true });

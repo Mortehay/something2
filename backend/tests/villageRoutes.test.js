@@ -135,7 +135,9 @@ test('DELETE village removes the row, re-derives guards, and invalidates the wor
   const pool = mockPool([
     [/DELETE FROM villages WHERE id = \$1/i, () => ({ rows: [], rowCount: 1 })],
     [/DELETE FROM world_creatures WHERE world_id = \$1 AND type = \$2/i, () => ({ rows: [], rowCount: 2 })],
-    [/FROM villages WHERE world_id = \$1/i, () => ({ rows: [{
+    // rederiveVillageGuards' own fetchVillages call (SOMET-582 joined
+    // entity_types onto it, aliased `v`).
+    [/FROM villages v\b[\s\S]*WHERE v\.world_id/i, () => ({ rows: [{
       id: 'v2', min_row: 10, min_col: 10, width: 8, height: 6, gate_edge: 'S', spawn_x: 1150, spawn_y: 1050,
     }] })],
     [/INSERT INTO world_creatures/i, () => ({ rows: [] })],
@@ -158,7 +160,7 @@ test('DELETE village sets a header when a player is connected (204 has no body t
   const pool = mockPool([
     [/DELETE FROM villages WHERE id = \$1/i, () => ({ rows: [], rowCount: 1 })],
     [/DELETE FROM world_creatures WHERE world_id = \$1 AND type = \$2/i, () => ({ rows: [], rowCount: 2 })],
-    [/FROM villages WHERE world_id = \$1/i, () => ({ rows: [] })],
+    [/FROM villages v\b[\s\S]*WHERE v\.world_id/i, () => ({ rows: [] })],
   ]);
   __setPool(pool);
   __setAuthorityHandle({ evictWorld: () => false, isWorldLive: () => true });
@@ -173,7 +175,7 @@ test('DELETE the only village leaves zero guards (no surviving villages)', async
   const pool = mockPool([
     [/DELETE FROM villages WHERE id = \$1/i, () => ({ rows: [], rowCount: 1 })],
     [/DELETE FROM world_creatures WHERE world_id = \$1 AND type = \$2/i, () => ({ rows: [], rowCount: 2 })],
-    [/FROM villages WHERE world_id = \$1/i, () => ({ rows: [] })],
+    [/FROM villages v\b[\s\S]*WHERE v\.world_id/i, () => ({ rows: [] })],
     [/DELETE FROM world_chunks/i, () => ({ rows: [], rowCount: 0 })],
   ]);
   __setPool(pool);

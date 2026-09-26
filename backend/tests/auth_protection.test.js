@@ -72,6 +72,7 @@ const PUBLIC_GETS = {
   '/api/tile-types': 'catalog the client renders from',
   '/api/creature-behaviors': 'catalog the client renders from',
   '/api/biomes': 'catalog the client renders from',
+  '/api/world-point-kinds': 'catalog the client renders from',
 
   // Art pipeline status + asset bytes.
   '/api/sprite-capability': 'reports whether image generation is available',

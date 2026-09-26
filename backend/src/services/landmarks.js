@@ -3,7 +3,7 @@
 // A LANDMARK is a read model, not a table: the union of a world's waypoints and
 // its PORTAL source tiles, in the one shape every display surface needs.
 //
-//   { kind: 'waypoint' | 'portal', x, y, name, activated }
+//   { kind: 'waypoint' | 'portal', x, y, name, activated, art }
 //
 // WHY THIS EXISTS. SOMET-292/293 shipped a working waypoint network with no
 // visual representation anywhere -- RenderSystem.js, wallRenderer.js and
@@ -25,6 +25,10 @@
 // the two-loader split is what left a whole creature-behaviour catalog inert in
 // SOMET-249. So: no pool, no query, no I/O.
 
+// resolvePointArt is pure (no db, no authority import) -- same discipline as
+// this file's own header above: no cycle, no second loader.
+const { resolvePointArt } = require('./pointArt');
+
 // A portal row carries no name of its own -- map_links has no name column. Its
 // label is its destination, which fetchLinks supplies as `to_name`.
 function portalLabel(link) {
@@ -41,7 +45,9 @@ function portalLabel(link) {
 // the join frame is built for every world, 86 of which hold no landmark at all,
 // and a throw here would break JOINING those worlds -- not merely fail to draw
 // a marker on them.
-function buildLandmarks({ waypoints, portalLinks, activatedIds } = {}) {
+function buildLandmarks({
+  waypoints, portalLinks, activatedIds, artDefaults,
+} = {}) {
   const lit = activatedIds instanceof Set ? activatedIds : new Set();
   const out = [];
 
@@ -56,6 +62,7 @@ function buildLandmarks({ waypoints, portalLinks, activatedIds } = {}) {
         // Per character. The same waypoint reads true for one character and
         // false for another in the same world at the same moment.
         activated: lit.has(w.id),
+        art: resolvePointArt('waypoint', w.art, artDefaults),
       });
     }
   }
@@ -72,6 +79,7 @@ function buildLandmarks({ waypoints, portalLinks, activatedIds } = {}) {
         // activated -- walking into one uses it. `lit` holds waypoint ids, so
         // consulting it here would let an unrelated id collision light a portal.
         activated: false,
+        art: resolvePointArt('portal', p.art, artDefaults),
       });
     }
   }

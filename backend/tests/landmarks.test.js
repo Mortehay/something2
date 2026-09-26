@@ -23,7 +23,7 @@ test('a world with only waypoints reports them as waypoint landmarks', () => {
     activatedIds: new Set(),
   });
   assert.deepStrictEqual(out, [
-    { kind: 'waypoint', x: 3250, y: 3250, name: 'Old Trailhead Commons', activated: false },
+    { kind: 'waypoint', x: 3250, y: 3250, name: 'Old Trailhead Commons', activated: false, art: null },
   ]);
 });
 
@@ -34,7 +34,7 @@ test('a world with only portals reports them, labelled by destination', () => {
     activatedIds: new Set(),
   });
   assert.deepStrictEqual(out, [
-    { kind: 'portal', x: 3150, y: 3450, name: 'To Windwatch Pass', activated: false },
+    { kind: 'portal', x: 3150, y: 3450, name: 'To Windwatch Pass', activated: false, art: null },
   ]);
 });
 
@@ -96,4 +96,18 @@ test('absent inputs yield an empty array -- 86 live worlds have no landmarks at 
   assert.deepStrictEqual(buildLandmarks({}), []);
   assert.deepStrictEqual(buildLandmarks({ waypoints: null, portalLinks: null }), []);
   assert.deepStrictEqual(buildLandmarks(undefined), []);
+});
+
+test('landmarks resolve art: instance binding, then kind default, else null', () => {
+  const artDefaults = new Map([['portal', 'portal'], ['waypoint', 'waypoint_stone']]);
+  const out = buildLandmarks({
+    waypoints: new Map([[...wp('a', 3250, 3250, 'Commons')].map((v, i) => (i === 1 ? { ...v, art: null } : v))]),
+    portalLinks: new Map([[...portal('p', 3150, 3450, 'Pass')].map((v, i) => (i === 1 ? { ...v, art: 'stone_gate' } : v))]),
+    activatedIds: new Set(),
+    artDefaults,
+  });
+  assert.strictEqual(out.find((l) => l.kind === 'waypoint').art, 'waypoint_stone');
+  assert.strictEqual(out.find((l) => l.kind === 'portal').art, 'stone_gate');
+  const none = buildLandmarks({ waypoints: new Map([wp('a', 1, 1, 'X')]), portalLinks: new Map(), activatedIds: new Set() });
+  assert.strictEqual(none[0].art, null);
 });

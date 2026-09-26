@@ -70,6 +70,16 @@
     }
   },
   {
+    "key": "arc_cheetah_stride",
+    "name": "Cheetah Stride",
+    "file": "arc_cheetah_stride.png",
+    "bytes": 38630,
+    "source": {
+      "width": 397,
+      "height": 527
+    }
+  },
+  {
     "key": "arc_chin_jab",
     "name": "Chin Jab",
     "file": "arc_chin_jab.png",
@@ -97,6 +107,16 @@
     "source": {
       "width": 348,
       "height": 416
+    }
+  },
+  {
+    "key": "arc_disengage_slash",
+    "name": "Disengage Slash",
+    "file": "arc_disengage_slash.png",
+    "bytes": 52606,
+    "source": {
+      "width": 452,
+      "height": 553
     }
   },
   {
@@ -453,10 +473,10 @@
     "key": "arc_vault",
     "name": "Vault",
     "file": "arc_vault.png",
-    "bytes": 58129,
+    "bytes": 67400,
     "source": {
-      "width": 780,
-      "height": 833
+      "width": 611,
+      "height": 645
     }
   },
   {
@@ -487,6 +507,16 @@
     "source": {
       "width": 376,
       "height": 417
+    }
+  },
+  {
+    "key": "cul_abyssal_cloak",
+    "name": "Abyssal Cloak",
+    "file": "cul_abyssal_cloak.png",
+    "bytes": 35721,
+    "source": {
+      "width": 375,
+      "height": 747
     }
   },
   {
@@ -767,6 +797,16 @@
     "source": {
       "width": 383,
       "height": 596
+    }
+  },
+  {
+    "key": "cul_life_transfusion",
+    "name": "Life Transfusion",
+    "file": "cul_life_transfusion.png",
+    "bytes": 35646,
+    "source": {
+      "width": 273,
+      "height": 629
     }
   },
   {
@@ -1057,6 +1097,16 @@
     "source": {
       "width": 221,
       "height": 280
+    }
+  },
+  {
+    "key": "dru_cyclone",
+    "name": "Cyclone",
+    "file": "dru_cyclone.png",
+    "bytes": 38576,
+    "source": {
+      "width": 307,
+      "height": 731
     }
   },
   {
@@ -1400,6 +1450,16 @@
     }
   },
   {
+    "key": "dru_wolf_pack_strike",
+    "name": "Wolf Pack Strike",
+    "file": "dru_wolf_pack_strike.png",
+    "bytes": 44964,
+    "source": {
+      "width": 314,
+      "height": 459
+    }
+  },
+  {
     "key": "dru_wolf_pounce",
     "name": "Wolf Pounce",
     "file": "dru_wolf_pounce.png",
@@ -1597,6 +1657,16 @@
     "source": {
       "width": 636,
       "height": 646
+    }
+  },
+  {
+    "key": "mag_empower_elements",
+    "name": "Empower Elements",
+    "file": "mag_empower_elements.png",
+    "bytes": 43059,
+    "source": {
+      "width": 309,
+      "height": 432
     }
   },
   {
@@ -1930,6 +2000,26 @@
     }
   },
   {
+    "key": "mnk_astral_projection",
+    "name": "Astral Projection",
+    "file": "mnk_astral_projection.png",
+    "bytes": 31212,
+    "source": {
+      "width": 281,
+      "height": 576
+    }
+  },
+  {
+    "key": "mnk_chakra_block",
+    "name": "Chakra Block",
+    "file": "mnk_chakra_block.png",
+    "bytes": 56707,
+    "source": {
+      "width": 687,
+      "height": 542
+    }
+  },
+  {
     "key": "mnk_chi_wave",
     "name": "Chi Wave",
     "file": "mnk_chi_wave.png",
@@ -1977,6 +2067,16 @@
     "source": {
       "width": 678,
       "height": 526
+    }
+  },
+  {
+    "key": "mnk_dragon_tail_sweep",
+    "name": "Dragon Tail Sweep",
+    "file": "mnk_dragon_tail_sweep.png",
+    "bytes": 42143,
+    "source": {
+      "width": 475,
+      "height": 630
     }
   },
   {
@@ -2647,6 +2747,16 @@
     "source": {
       "width": 332,
       "height": 306
+    }
+  },
+  {
+    "key": "war_leap_slam",
+    "name": "Leap Slam",
+    "file": "war_leap_slam.png",
+    "bytes": 42813,
+    "source": {
+      "width": 189,
+      "height": 349
     }
   },
   {

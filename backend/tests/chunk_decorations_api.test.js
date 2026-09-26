@@ -48,7 +48,7 @@ function poolFor({ world = WORLD_ROW, cached = null } = {}) {
     [/FROM tile_types/i, () => TILE_ROWS],
     [/FROM entity_types/i, () => ENTITY_TYPE_ROWS],
     [/FROM map_links/i, () => ({ rows: [] })],
-    [/FROM villages WHERE world_id/i, () => ({ rows: [] })],
+    [/FROM villages v\b[\s\S]*WHERE v\.world_id/i, () => ({ rows: [] })],
   ]);
 }
 
