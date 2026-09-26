@@ -1239,16 +1239,23 @@ export class Game {
             // is one line up: the server OMITS the field entirely when the
             // player has no aura, so a guarded assignment would leave a ring
             // on screen after a respec removed the node.
-            this.player.aura = mine.aura || 0;
-            if (mine.facing && !this._attackHeld) {
+            const nowMs = performance.now();
+            const isAttacking = this._attackHeld || (nowMs - (this._lastAttackSentAt || 0) < 250);
+            if (mine.facing && !isAttacking) {
                 this.player.facing = mine.facing;
             }
+            const keys = movementKeys(this);
+            const { dx, dy } = inputVector(keys);
+            const pendingDt = (this.authorityClient && typeof this.authorityClient._accumDt === 'number')
+                ? this.authorityClient._accumDt
+                : 0;
             const out = reconcile(
                 { x: mine.x, y: mine.y },
                 msg.ackSeq || 0,
                 this._inputBuffer,
                 this.chunkedMap,
-                { width: this.player.width, height: this.player.height, speed: PLAYER_SPEED_EFFECTIVE }
+                { width: this.player.width, height: this.player.height, speed: PLAYER_SPEED_EFFECTIVE },
+                { dx, dy, dt: pendingDt }
             );
             this.player.x = out.x;
             this.player.y = out.y;

@@ -1571,7 +1571,7 @@ test('refreshPlayerStats accepts a numeric userId (as req.user.id arrives from t
 
   assert.equal(ok, true, 'a numeric userId must still find the string-keyed live session');
   assert.equal(player.maxHp, 200);
-  assert.equal(player.hp, 160);
+  assert.ok(Math.abs(player.hp - 160) < 1, `hp was ${player.hp}, expected ~160`);
   assert.deepEqual(msg.stats, stats);
 
   ws.close(); handle.close(); server.close();

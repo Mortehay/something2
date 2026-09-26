@@ -37,4 +37,15 @@ describe('reconcile', () => {
     const out = reconcile({ x: 45, y: 0 }, 1, buffer, stubMap(50), dims);
     expect(out.x).toBeCloseTo(99.99, 2);
   });
+
+  it('replays pending unsent input to avoid prediction backward snap', () => {
+    const buffer = [
+      { seq: 1, dx: 1, dy: 0, dt: 0.05 },
+    ];
+    // Server acked seq 1 and reports x=5. Client also has 0.03s of unsent input in progress.
+    const out = reconcile({ x: 5, y: 0 }, 1, buffer, stubMap(), dims, { dx: 1, dy: 0, dt: 0.03 });
+    // buffer has 0 unacked items, pendingUnsent moves +3 → x = 8.
+    expect(out.x).toBeCloseTo(8, 5);
+    expect(out.buffer).toEqual([]);
+  });
 });

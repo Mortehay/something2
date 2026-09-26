@@ -170,10 +170,13 @@ export class WorldAuthorityClient {
     this._accumDt += dt;
     if (!this.connected) return { sent: false };
     const now = this.now();
-    if (now - this._lastSentAt < this.inputIntervalMs) return { sent: false };
+    const dirChanged = (this._lastDx !== undefined && (dx !== this._lastDx || dy !== this._lastDy));
+    if (!dirChanged && (now - this._lastSentAt < this.inputIntervalMs)) return { sent: false };
     const seq = ++this._seq;
     this._send({ type: 'input', seq, dx, dy });
     this._lastSentAt = now;
+    this._lastDx = dx;
+    this._lastDy = dy;
     const sentDt = this._accumDt;
     this._accumDt = 0;
     return { sent: true, seq, dx, dy, dt: sentDt };

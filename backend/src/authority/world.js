@@ -612,7 +612,7 @@ class World {
       p.x = r.x;
       p.y = r.y;
       const f = facingFromInput(p.input.dx, p.input.dy);
-      if (f) p.facing = f;
+      if (f && !(p._attackCd > 0)) p.facing = f;
       p.ackSeq = p.pendingSeq;
     }
 
