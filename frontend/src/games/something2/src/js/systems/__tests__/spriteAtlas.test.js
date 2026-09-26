@@ -34,6 +34,9 @@ describe("staticFrameKey", () => {
 describe("facingToDir", () => {
   it("passes valid directions through, defaults to S", () => {
     expect(facingToDir("NE")).toBe("NE");
+    expect(facingToDir("ne")).toBe("NE");
+    expect(facingToDir("s")).toBe("S");
+    expect(facingToDir("nw")).toBe("NW");
     expect(facingToDir(undefined)).toBe("S");
     expect(facingToDir("nonsense")).toBe("S");
   });

@@ -95,11 +95,16 @@ export function buildCharacterView({ progression, extras, className, mainStat })
   if (!progression) return null;
   const e = extras || emptyExtras();
   return {
-    ...progression,
     className: className || progression.className || null,
     mainStat: mainStat || progression.mainStat || null,
     level: progression.level,
     experience: progression.experience,
+    strength: progression.strength != null ? progression.strength : 0,
+    dexterity: progression.dexterity != null ? progression.dexterity : 0,
+    constitution: progression.constitution != null ? progression.constitution : 0,
+    intelligence: progression.intelligence != null ? progression.intelligence : 0,
+    wisdom: progression.wisdom != null ? progression.wisdom : 0,
+    charisma: progression.charisma != null ? progression.charisma : 0,
     xpFloor: e.xpFloor,
     xpToNext: e.xpToNext,
     passivePoints: progression.passivePoints != null
@@ -110,3 +115,4 @@ export function buildCharacterView({ progression, extras, className, mainStat })
     stats: e.stats,
   };
 }
+

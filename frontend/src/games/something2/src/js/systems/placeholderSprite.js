@@ -15,7 +15,8 @@ const FACING_WORLD = {
 
 // Convert a facing to a normalized screen-space wedge direction.
 export function facingToWedge(facing) {
-  const w = FACING_WORLD[facing] || FACING_WORLD.S;
+  const upper = typeof facing === "string" ? facing.toUpperCase() : "S";
+  const w = FACING_WORLD[upper] || FACING_WORLD.S;
   // Project the direction through the iso transform (origin-relative).
   const s = worldToScreen(w.x, w.y);
   const len = Math.hypot(s.x, s.y) || 1;

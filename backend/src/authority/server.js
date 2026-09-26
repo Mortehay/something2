@@ -499,8 +499,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // from the time gate) must actually get 0, not the production default -- the
   // exact trap SOMET-275 recorded for the rate-limit options just below.
   const bindWriteMinMs = opts.bindWriteMinMs ?? BIND_WRITE_MIN_MS;
-  const RATE_LIMIT_CAPACITY = opts.rateLimitCapacity ?? 60;
-  const RATE_LIMIT_PER_SEC = opts.rateLimitPerSec ?? 40;
+  const RATE_LIMIT_CAPACITY = opts.rateLimitCapacity ?? 200;
+  const RATE_LIMIT_PER_SEC = opts.rateLimitPerSec ?? 120;
 
   // Refills `ws`'s bucket for elapsed time, then consumes one token if
   // available. Returns false (frame dropped, nothing else runs — no parse
@@ -1937,7 +1937,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
 
     input(ws, msg) {
       const entry = worlds.get(ws.worldId);
-      if (entry) entry.world.setInput(ws.userId, msg.seq, finiteOr(msg.dx, 0), finiteOr(msg.dy, 0));
+      if (entry) entry.world.setInput(ws.userId, msg.seq, finiteOr(msg.dx, 0), finiteOr(msg.dy, 0), (msg && typeof msg.dt === 'number') ? msg.dt : null);
     },
 
     attack(ws, msg) {

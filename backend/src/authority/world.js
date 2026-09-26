@@ -365,6 +365,7 @@ class World {
       effects: new Map(),
       facing: 's',
       input: { dx: 0, dy: 0 },
+      pendingInputs: [],
       pendingSeq: 0,
       ackSeq: 0,
       hp: (spawn && spawn.hp !== undefined && Number.isFinite(spawn.hp)) ? clamp(spawn.hp, 1, stats.maxHp) : stats.maxHp,
@@ -464,11 +465,37 @@ class World {
   getPlayer(userId) { return this.players.get(userId); }
   isEmpty() { return this.players.size === 0; }
 
-  setInput(userId, seq, dx, dy) {
+  setInput(userId, seq, dx, dy, dt = null) {
     const p = this.players.get(userId);
     if (!p) return;
-    p.input = { dx: clamp(dx, -1, 1), dy: clamp(dy, -1, 1) };
+    const clampedDx = clamp(dx, -1, 1);
+    const clampedDy = clamp(dy, -1, 1);
+    p.input = { dx: clampedDx, dy: clampedDy };
     p.pendingSeq = seq;
+    if (!p.pendingInputs) p.pendingInputs = [];
+    if (typeof dt === 'number' && dt > 0) {
+      p.hasExplicitDt = true;
+      p.pendingInputs.push({
+        seq,
+        dx: clampedDx,
+        dy: clampedDy,
+        dt: Math.min(1.0, dt),
+      });
+    } else if (p.hasExplicitDt) {
+      p.pendingInputs.push({
+        seq,
+        dx: clampedDx,
+        dy: clampedDy,
+        dt: null,
+      });
+    } else {
+      p.pendingInputs.push({
+        seq,
+        dx: clampedDx,
+        dy: clampedDy,
+        dt: null,
+      });
+    }
   }
 
   // Strict boolean: a truthy string from the wire must not enable auto-loot.
@@ -608,12 +635,28 @@ class World {
           }
         }
       }
-      const r = resolveMove(this.map, p, p.input.dx, p.input.dy, dt);
-      p.x = r.x;
-      p.y = r.y;
-      const f = facingFromInput(p.input.dx, p.input.dy);
-      if (f && !(p._attackCd > 0)) p.facing = f;
-      p.ackSeq = p.pendingSeq;
+      if (p.pendingInputs && p.pendingInputs.length > 0) {
+        const inputs = p.pendingInputs;
+        p.pendingInputs = [];
+        for (const inp of inputs) {
+          const stepDt = (typeof inp.dt === 'number' && inp.dt > 0) ? inp.dt : dt;
+          if (inp.dx !== 0 || inp.dy !== 0) {
+            const r = resolveMove(this.map, p, inp.dx, inp.dy, stepDt);
+            p.x = r.x;
+            p.y = r.y;
+          }
+          const f = facingFromInput(inp.dx, inp.dy);
+          if (f && !(p._attackCd > 0)) p.facing = f;
+          p.ackSeq = inp.seq;
+        }
+      } else if (!p.hasExplicitDt && (p.input.dx !== 0 || p.input.dy !== 0)) {
+        const r = resolveMove(this.map, p, p.input.dx, p.input.dy, dt);
+        p.x = r.x;
+        p.y = r.y;
+        const f = facingFromInput(p.input.dx, p.input.dy);
+        if (f && !(p._attackCd > 0)) p.facing = f;
+        p.ackSeq = p.pendingSeq;
+      }
     }
 
     // The charm's soft repel (spec 8.2). Applied AFTER each player's own

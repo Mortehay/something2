@@ -1043,7 +1043,10 @@ export class Game {
         this.authorityClient.sendAttack(nx, ny);
         this._lastAttackSentAt = performance.now();
         if (this.player) {
-            const f = facingFromVector(Math.sign(nx), Math.sign(ny));
+            const f = facingFromVector(
+                Math.abs(nx) > 0.3 ? Math.sign(nx) : 0,
+                Math.abs(ny) > 0.3 ? Math.sign(ny) : 0
+            );
             if (f) this.player.facing = f;
         }
     }
@@ -1239,13 +1242,14 @@ export class Game {
             // is one line up: the server OMITS the field entirely when the
             // player has no aura, so a guarded assignment would leave a ring
             // on screen after a respec removed the node.
-            const nowMs = performance.now();
-            const isAttacking = this._attackHeld || (nowMs - (this._lastAttackSentAt || 0) < 250);
-            if (mine.facing && !isAttacking) {
-                this.player.facing = mine.facing;
-            }
             const keys = movementKeys(this);
             const { dx, dy } = inputVector(keys);
+            const nowMs = performance.now();
+            const isAttacking = this._attackHeld || (nowMs - (this._lastAttackSentAt || 0) < 250);
+            const isMoving = (dx !== 0 || dy !== 0);
+            if (mine.facing && !isAttacking && !isMoving && !this.player.facing) {
+                this.player.facing = mine.facing;
+            }
             const pendingDt = (this.authorityClient && typeof this.authorityClient._accumDt === 'number')
                 ? this.authorityClient._accumDt
                 : 0;
@@ -1257,9 +1261,17 @@ export class Game {
                 { width: this.player.width, height: this.player.height, speed: PLAYER_SPEED_EFFECTIVE },
                 { dx, dy, dt: pendingDt }
             );
-            this.player.x = out.x;
-            this.player.y = out.y;
-            this._inputBuffer = out.buffer;
+            const errX = out.x - this.player.x;
+            const errY = out.y - this.player.y;
+            const errDist = Math.hypot(errX, errY);
+            if (errDist > 64) {
+                this.player.x = out.x;
+                this.player.y = out.y;
+            } else if (errDist >= 1.0) {
+                this.player.x += errX * 0.25;
+                this.player.y += errY * 0.25;
+            }
+            this._inputBuffer = out.buffer.length > 50 ? out.buffer.slice(-30) : out.buffer;
         }
         if (mine) {
             this.localMana = mine.mana;
@@ -1945,15 +1957,15 @@ export class Game {
         const canH = (this.canvas && this.canvas.height) || 600;
         let aimNx = 1, aimNy = 0;
         if (this.player && this.player.facing) {
-            const f = this.player.facing;
-            if (f === 'up') { aimNx = 0; aimNy = -1; }
-            else if (f === 'down') { aimNx = 0; aimNy = 1; }
-            else if (f === 'left') { aimNx = -1; aimNy = 0; }
-            else if (f === 'right') { aimNx = 1; aimNy = 0; }
-            else if (f === 'up-right' || f === 'up_right') { aimNx = Math.SQRT1_2; aimNy = -Math.SQRT1_2; }
-            else if (f === 'up-left' || f === 'up_left') { aimNx = -Math.SQRT1_2; aimNy = -Math.SQRT1_2; }
-            else if (f === 'down-right' || f === 'down_right') { aimNx = Math.SQRT1_2; aimNy = Math.SQRT1_2; }
-            else if (f === 'down-left' || f === 'down_left') { aimNx = -Math.SQRT1_2; aimNy = Math.SQRT1_2; }
+            const f = String(this.player.facing).toLowerCase();
+            if (f === 'n' || f === 'up') { aimNx = 0; aimNy = -1; }
+            else if (f === 's' || f === 'down') { aimNx = 0; aimNy = 1; }
+            else if (f === 'w' || f === 'left') { aimNx = -1; aimNy = 0; }
+            else if (f === 'e' || f === 'right') { aimNx = 1; aimNy = 0; }
+            else if (f === 'ne' || f === 'up-right' || f === 'up_right') { aimNx = Math.SQRT1_2; aimNy = -Math.SQRT1_2; }
+            else if (f === 'nw' || f === 'up-left' || f === 'up_left') { aimNx = -Math.SQRT1_2; aimNy = -Math.SQRT1_2; }
+            else if (f === 'se' || f === 'down-right' || f === 'down_right') { aimNx = Math.SQRT1_2; aimNy = Math.SQRT1_2; }
+            else if (f === 'sw' || f === 'down-left' || f === 'down_left') { aimNx = -Math.SQRT1_2; aimNy = Math.SQRT1_2; }
         }
 
         let aimAngle = Math.atan2(aimNy, aimNx);

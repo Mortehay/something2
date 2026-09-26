@@ -10,6 +10,7 @@ export class Camera {
     // of the viewport is approximated generously by these).
     this.width = GAME_WIDTH;
     this.height = GAME_HEIGHT;
+    this._initialized = false;
   }
 
   update(target) {
@@ -18,6 +19,11 @@ export class Camera {
     const s = worldToScreen(cx, cy);
     this.screenX = s.x;
     this.screenY = s.y;
+    this._initialized = true;
+  }
+
+  snap(target) {
+    this.update(target);
   }
 
   apply(ctx) {
@@ -33,3 +39,4 @@ export class Camera {
     ctx.restore();
   }
 }
+

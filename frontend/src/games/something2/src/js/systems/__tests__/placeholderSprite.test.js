@@ -14,6 +14,12 @@ describe("facingToWedge", () => {
     expect(s.dy).toBeCloseTo(-n.dy, 6);
   });
 
+  it("handles lowercase facings identically to uppercase", () => {
+    expect(facingToWedge("s")).toEqual(facingToWedge("S"));
+    expect(facingToWedge("n")).toEqual(facingToWedge("N"));
+    expect(facingToWedge("nw")).toEqual(facingToWedge("NW"));
+  });
+
   it("defaults unknown facings to S", () => {
     expect(facingToWedge("???")).toEqual(facingToWedge("S"));
   });

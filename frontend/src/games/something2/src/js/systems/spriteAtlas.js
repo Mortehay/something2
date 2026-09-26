@@ -26,7 +26,8 @@ const DIRS = new Set(["N", "NE", "E", "SE", "S", "SW", "W", "NW"]);
 // Facing (already a DIR string in this engine) -> a valid manifest direction,
 // defaulting to "S" for entities that don't face (obstacles).
 export function facingToDir(facing) {
-  return DIRS.has(facing) ? facing : "S";
+  const upper = typeof facing === "string" ? facing.toUpperCase() : "";
+  return DIRS.has(upper) ? upper : (DIRS.has(facing) ? facing : "S");
 }
 
 // The animated frame key for a direction at time `timeMs`: cycles that
