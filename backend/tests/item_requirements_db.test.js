@@ -84,11 +84,24 @@ const { loadItemTypes } = require('../src/authority/items.js');
 // bundle as a PARAMETER (`base`), so the respec tests below drive the "stats
 // just dropped" scenario by passing RESET_BASE directly -- the column values
 // were never read by any assertion here in the first place.
+const createdUsers = [];
+const createdItemTypes = [];
+
+async function cleanupFixtures(pool) {
+  for (const uid of createdUsers) {
+    await pool.query('DELETE FROM users WHERE id = $1', [uid]).catch(() => {});
+  }
+  for (const tid of createdItemTypes) {
+    await pool.query('DELETE FROM item_types WHERE id = $1', [tid]).catch(() => {});
+  }
+}
+
 async function createCharacter(pool, tag, level) {
   const username = `reqtest-${tag}-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const u = await pool.query(
     'INSERT INTO users (username, password_hash, role) VALUES ($1, \'x\', \'player\') RETURNING id', [username],
   );
+  createdUsers.push(u.rows[0].id);
   const c = await pool.query(
     `INSERT INTO characters (user_id, slot, name, entity_type_id)
      SELECT $1, 1, $2, e.id FROM entity_types e WHERE e.name = 'Warrior' RETURNING id`,
@@ -112,6 +125,7 @@ async function makeItemType(pool, name, extra) {
     [name, cols.category, cols.slot, cols.kind, cols.damage, cols.cooldown, cols.defense,
       cols.req_level ?? 1, cols.req_strength ?? 0, cols.item_level ?? 1, cols.tier ?? 1],
   );
+  createdItemTypes.push(r.rows[0].id);
   return r.rows[0].id;
 }
 
@@ -123,7 +137,7 @@ function armWorld(itemTypes) {
 test('world.setEquipment refuses an item whose level requirement the character does not meet', async (t) => {
   const pool = await openPool();
   if (pool.unreachable) { t.skip(pool.unreachable); return; }
-  t.after(async () => { await pool.end().catch(() => {}); });
+  t.after(async () => { await cleanupFixtures(pool); await pool.end().catch(() => {}); });
 
   const tag = `lvl-${Date.now()}`;
   const { characterId } = await createCharacter(pool, tag, 3);
@@ -155,7 +169,7 @@ test('world.setEquipment refuses an item whose level requirement the character d
 test('world.setEquipment still equips an item whose requirements ARE met', async (t) => {
   const pool = await openPool();
   if (pool.unreachable) { t.skip(pool.unreachable); return; }
-  t.after(async () => { await pool.end().catch(() => {}); });
+  t.after(async () => { await cleanupFixtures(pool); await pool.end().catch(() => {}); });
 
   const tag = `okeq-${Date.now()}`;
   const { characterId } = await createCharacter(pool, tag, 40);
@@ -181,7 +195,7 @@ test('world.setEquipment still equips an item whose requirements ARE met', async
 test('world.clearEquipment refuses an unequip that would orphan another item, naming it', async (t) => {
   const pool = await openPool();
   if (pool.unreachable) { t.skip(pool.unreachable); return; }
-  t.after(async () => { await pool.end().catch(() => {}); });
+  t.after(async () => { await cleanupFixtures(pool); await pool.end().catch(() => {}); });
 
   const tag = `dep-${Date.now()}`;
   const { characterId } = await createCharacter(pool, tag, 50);
@@ -193,6 +207,7 @@ test('world.clearEquipment refuses an unequip that would orphan another item, na
      VALUES ($1,'stone',NULL,NULL,0,0,'strength',20) RETURNING id`,
     [`dep-stone-${tag}`],
   )).rows[0].id;
+  createdItemTypes.push(stoneTypeId);
 
   const plate = (await pool.query('INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2) RETURNING id', [characterId, plateId])).rows[0].id;
   const helm = (await pool.query('INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2) RETURNING id', [characterId, helmId])).rows[0].id;
@@ -230,7 +245,7 @@ test('world.clearEquipment refuses an unequip that would orphan another item, na
 test('world.clearEquipment allows the unequip once nothing depends on it', async (t) => {
   const pool = await openPool();
   if (pool.unreachable) { t.skip(pool.unreachable); return; }
-  t.after(async () => { await pool.end().catch(() => {}); });
+  t.after(async () => { await cleanupFixtures(pool); await pool.end().catch(() => {}); });
 
   const tag = `free-${Date.now()}`;
   const { characterId } = await createCharacter(pool, tag, 50);
@@ -242,6 +257,7 @@ test('world.clearEquipment allows the unequip once nothing depends on it', async
      VALUES ($1,'stone',NULL,NULL,0,0,'strength',20) RETURNING id`,
     [`free-stone-${tag}`],
   )).rows[0].id;
+  createdItemTypes.push(stoneTypeId);
 
   const plate = (await pool.query('INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2) RETURNING id', [characterId, plateId])).rows[0].id;
   const helm = (await pool.query('INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2) RETURNING id', [characterId, helmId])).rows[0].id;
@@ -279,7 +295,7 @@ const RESET_BASE = {
 test('a respec auto-unequips gear that no longer qualifies, leaving it in the backpack', async (t) => {
   const pool = await openPool();
   if (pool.unreachable) { t.skip(pool.unreachable); return; }
-  t.after(async () => { await pool.end().catch(() => {}); });
+  t.after(async () => { await cleanupFixtures(pool); await pool.end().catch(() => {}); });
 
   const tag = `resp-${Date.now()}`;
   const { characterId } = await createCharacter(pool, tag, 60);
@@ -313,7 +329,7 @@ test('a respec auto-unequips gear that no longer qualifies, leaving it in the ba
 test('a respec that invalidates nothing clears nothing', async (t) => {
   const pool = await openPool();
   if (pool.unreachable) { t.skip(pool.unreachable); return; }
-  t.after(async () => { await pool.end().catch(() => {}); });
+  t.after(async () => { await cleanupFixtures(pool); await pool.end().catch(() => {}); });
 
   const tag = `noop-${Date.now()}`;
   const { characterId } = await createCharacter(pool, tag, 60);
@@ -350,7 +366,7 @@ test('a respec that invalidates nothing clears nothing', async (t) => {
 test('a respec is refused while the backpack is over its carry limit, and changes nothing', async (t) => {
   const pool = await openPool();
   if (pool.unreachable) { t.skip(pool.unreachable); return; }
-  t.after(async () => { await pool.end().catch(() => {}); });
+  t.after(async () => { await cleanupFixtures(pool); await pool.end().catch(() => {}); });
 
   const tag = `over-${Date.now()}`;
   const { characterId } = await createCharacter(pool, tag, 60);
@@ -390,7 +406,7 @@ test('a respec is refused while the backpack is over its carry limit, and change
 test('a respec at EXACTLY the carry limit still proceeds', async (t) => {
   const pool = await openPool();
   if (pool.unreachable) { t.skip(pool.unreachable); return; }
-  t.after(async () => { await pool.end().catch(() => {}); });
+  t.after(async () => { await cleanupFixtures(pool); await pool.end().catch(() => {}); });
 
   const tag = `atcap-${Date.now()}`;
   const { characterId } = await createCharacter(pool, tag, 60);
@@ -427,7 +443,7 @@ test('a respec at EXACTLY the carry limit still proceeds', async (t) => {
 test('a plate carrying its own +20 STR stone cannot satisfy its own 20-STR gate', async (t) => {
   const pool = await openPool();
   if (pool.unreachable) { t.skip(pool.unreachable); return; }
-  t.after(async () => { await pool.end().catch(() => {}); });
+  t.after(async () => { await cleanupFixtures(pool); await pool.end().catch(() => {}); });
 
   const tag = `circ-${Date.now()}`;
   const { characterId } = await createCharacter(pool, tag, 60);   // base 5 STR
@@ -439,6 +455,7 @@ test('a plate carrying its own +20 STR stone cannot satisfy its own 20-STR gate'
      VALUES ($1,'stone',NULL,NULL,0,0,'strength',20) RETURNING id`,
     [`circ-stone-${tag}`],
   )).rows[0].id;
+  createdItemTypes.push(stoneTypeId);
 
   const plate = (await pool.query('INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2) RETURNING id', [characterId, plateTypeId])).rows[0].id;
   const helm = (await pool.query('INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2) RETURNING id', [characterId, helmTypeId])).rows[0].id;

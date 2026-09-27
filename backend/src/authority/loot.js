@@ -216,6 +216,23 @@ async function spawnDrops(pool, entry, dead, {
           WHERE category IN ('weapon', 'armor')
             AND tier IS NOT NULL
             AND req_level <= $1
+            AND name NOT LIKE 'resp-%'
+            AND name NOT LIKE 'noop-%'
+            AND name NOT LIKE 'req-%'
+            AND name NOT LIKE 'ok-%'
+            AND name NOT LIKE 'dep-%'
+            AND name NOT LIKE 'free-%'
+            AND name NOT LIKE 'over-%'
+            AND name NOT LIKE 'atcap-%'
+            AND name NOT LIKE 'circ-%'
+            AND name NOT LIKE 's496_%'
+            AND name NOT LIKE 's484-%'
+            AND name NOT LIKE 's498-%'
+            AND name NOT LIKE 's500-%'
+            AND name NOT LIKE 'test-%'
+            AND name NOT LIKE '%-test-%'
+            AND name NOT LIKE 'probe-%'
+            AND name NOT LIKE 'zz-%'
           ORDER BY req_level DESC
           LIMIT 15`,
         [cLevel],

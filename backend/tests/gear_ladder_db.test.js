@@ -97,11 +97,20 @@ test('all generated ladder rows are in the catalog with the generator numbers', 
 // checks the database afterwards.
 // ---------------------------------------------------------------------------
 
+const createdUsers = [];
+
+async function cleanupFixtures(pool) {
+  for (const uid of createdUsers) {
+    await pool.query('DELETE FROM users WHERE id = $1', [uid]).catch(() => {});
+  }
+}
+
 async function createCharacter(pool, tag, level) {
   const username = `gearladder-${tag}-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const u = await pool.query(
     "INSERT INTO users (username, password_hash, role) VALUES ($1, 'x', 'player') RETURNING id", [username],
   );
+  createdUsers.push(u.rows[0].id);
   const c = await pool.query(
     `INSERT INTO characters (user_id, slot, name, entity_type_id)
      SELECT $1, 1, $2, e.id FROM entity_types e WHERE e.name = 'Warrior' RETURNING id`,
@@ -128,7 +137,7 @@ function armWorld(itemTypes) {
 test('a level-1 character fills all eight paper-doll slots through world.setEquipment', async (t) => {
   const pool = await openPool();
   if (pool.unreachable) { t.skip(pool.unreachable); return; }
-  t.after(async () => { await pool.end().catch(() => {}); });
+  t.after(async () => { await cleanupFixtures(pool); await pool.end().catch(() => {}); });
 
   const tag = `t1set-${Date.now()}`;
   const { characterId } = await createCharacter(pool, tag, 1);
@@ -188,7 +197,7 @@ test('a level-1 character fills all eight paper-doll slots through world.setEqui
 test('the same level-1 character is refused the tier-10 versions of those slots', async (t) => {
   const pool = await openPool();
   if (pool.unreachable) { t.skip(pool.unreachable); return; }
-  t.after(async () => { await pool.end().catch(() => {}); });
+  t.after(async () => { await cleanupFixtures(pool); await pool.end().catch(() => {}); });
 
   const tag = `t10deny-${Date.now()}`;
   const { characterId } = await createCharacter(pool, tag, 1);
