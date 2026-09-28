@@ -2742,6 +2742,7 @@ app.patch('/api/ai-providers/:id', adminGuard, async (req, res) => {
     if (!row) return res.status(404).json({ error: 'AI provider not found' });
     res.json(row);
   } catch (err) {
+    if (err.status === 400) return res.status(400).json({ error: err.message });
     if (isUniqueViolation(err)) {
       return res.status(409).json({ error: 'an AI provider with that name already exists' });
     }
@@ -3140,7 +3141,7 @@ async function startGenerationJob(req, res, { subject, kind, defaultFrames, fail
     if (target.source === 'remote') {
       const provider = activeProvider && activeProvider.id === target.providerId
         ? activeProvider
-        : await aiProviders.loadProviderWithSecret(pool, target.providerId);
+        : await aiProviders.loadImageProviderWithSecret(pool, target.providerId);
       if (!provider) {
         return res.status(400).json({ error: 'the selected AI provider no longer exists' });
       }
@@ -3638,7 +3639,7 @@ app.post('/api/art-jobs/dispatch', adminGuard, async (req, res) => {
   try {
     const providerId = Number.isInteger(req.body.provider_id) ? req.body.provider_id : null;
     if (!providerId) return res.status(400).json({ error: 'provider_id is required' });
-    const provider = await aiProviders.loadProviderWithSecret(pool, providerId);
+    const provider = await aiProviders.loadImageProviderWithSecret(pool, providerId);
     if (!provider) return res.status(404).json({ error: 'provider not found' });
 
     const status = artDispatcher.startDrain(pool, {

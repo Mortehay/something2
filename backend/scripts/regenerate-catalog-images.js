@@ -136,7 +136,7 @@ async function main() {
   const providerCache = new Map();
   const loadProvider = async (id) => {
     if (!providerCache.has(id)) {
-      providerCache.set(id, await aiProviders.loadProviderWithSecret(pool, id));
+      providerCache.set(id, await aiProviders.loadImageProviderWithSecret(pool, id));
     }
     return providerCache.get(id);
   };

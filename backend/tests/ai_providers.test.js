@@ -9,10 +9,40 @@ const {
   buildProviderPatch,
   setActiveProvider,
   loadActiveProviderWithSecret,
+  loadImageProviderWithSecret,
   createProvider,
 } = require('../src/services/aiProviders');
 
 const url = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
+
+// Tests below call setActiveProvider, which clears the active row of the
+// target's modality -- including a real provider someone left active on the
+// test database (e.g. the audio box profile). Snapshot the active ids first
+// and put them back after the test's own rows are deleted, so a run never
+// leaves the database without the providers it started with.
+async function snapshotActive(pool) {
+  const ids = (await pool.query('SELECT id FROM ai_providers WHERE is_active')).rows.map((r) => r.id);
+  return async function restoreActive() {
+    if (!ids.length) return;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      // Clear whatever is active in each snapshotted modality, then re-set the
+      // snapshot (the per-modality unique index forbids two at once).
+      await client.query(
+        `UPDATE ai_providers SET is_active = false
+          WHERE is_active AND id <> ALL($1)
+            AND modality IN (SELECT modality FROM ai_providers WHERE id = ANY($1))`, [ids]);
+      await client.query('UPDATE ai_providers SET is_active = true WHERE id = ANY($1) AND NOT is_active', [ids]);
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  };
+}
 
 // A stored row as Postgres hands it back.
 function row(over = {}) {
@@ -152,6 +182,7 @@ test('a partial update only validates the keys it carries', () => {
 test('exactly one provider can be active', { skip: !url ? 'no database URL' : false }, async (t) => {
   const pool = new Pool({ connectionString: url });
   const made = [];
+  const restoreActive = await snapshotActive(pool);
   // ONE after-hook, deleting before ending. node:test runs t.after hooks in
   // registration order, so a separate `t.after(() => pool.end())` registered
   // first would close the pool out from under the cleanup query and the rows
@@ -161,6 +192,7 @@ test('exactly one provider can be active', { skip: !url ? 'no database URL' : fa
       if (made.length) {
         await pool.query('DELETE FROM ai_providers WHERE id = ANY($1)', [made]);
       }
+      await restoreActive();
     } finally {
       await pool.end();
     }
@@ -182,7 +214,9 @@ test('exactly one provider can be active', { skip: !url ? 'no database URL' : fa
   await setActiveProvider(pool, a);
   await setActiveProvider(pool, b);
 
-  const active = await pool.query('SELECT id FROM ai_providers WHERE is_active');
+  // Scoped to image: one active row PER modality, and an audio provider may
+  // legitimately be active on the same database.
+  const active = await pool.query("SELECT id FROM ai_providers WHERE is_active AND modality = 'image'");
   assert.strictEqual(active.rowCount, 1, 'activating b must deactivate a');
   assert.strictEqual(active.rows[0].id, b);
 
@@ -190,7 +224,7 @@ test('exactly one provider can be active', { skip: !url ? 'no database URL' : fa
   // active providers -- the deactivation has to roll back with the failure.
   const missing = await setActiveProvider(pool, 2147483600);
   assert.strictEqual(missing, null, 'activating a missing id reports not-found');
-  const stillActive = await pool.query('SELECT id FROM ai_providers WHERE is_active');
+  const stillActive = await pool.query("SELECT id FROM ai_providers WHERE is_active AND modality = 'image'");
   assert.strictEqual(stillActive.rowCount, 1, 'a failed activation must not clear the active row');
   assert.strictEqual(stillActive.rows[0].id, b);
 });
@@ -209,14 +243,18 @@ test('providerFieldError: modality', () => {
 test('activation is per modality', { skip: !url ? 'no database URL' : false }, async (t) => {
   const pool = new Pool({ connectionString: url });
   const made = [];
+  const restoreActive = await snapshotActive(pool);
   t.after(async () => {
-    try { if (made.length) await pool.query('DELETE FROM ai_providers WHERE id = ANY($1)', [made]); }
-    finally { await pool.end(); }
+    try {
+      if (made.length) await pool.query('DELETE FROM ai_providers WHERE id = ANY($1)', [made]);
+      await restoreActive();
+    } finally { await pool.end(); }
   });
   const tag = `${process.pid}-${Date.now()}`;
   const img = await createProvider(pool, { name: `mod-img-${tag}`, base_url: 'http://127.0.0.1:9/', request_template: {} });
+  made.push(img.id);
   const aud = await createProvider(pool, { name: `mod-aud-${tag}`, base_url: 'http://127.0.0.1:9/', modality: 'audio' });
-  made.push(img.id, aud.id);
+  made.push(aud.id);
   assert.deepStrictEqual(aud.request_template, {}, 'audio create fills an empty template');
 
   await setActiveProvider(pool, img.id);
@@ -229,4 +267,69 @@ test('activation is per modality', { skip: !url ? 'no database URL' : false }, a
   assert.notStrictEqual(image && image.id, aud.id, 'the default lookup never returns an audio provider');
   const audio = await loadActiveProviderWithSecret(pool, 'audio');
   assert.strictEqual(audio.id, aud.id);
+});
+
+// --- Image paths never reach an audio provider (spec §2) -----------------
+
+test('image lookups by id never return an audio provider', { skip: !url ? 'no database URL' : false }, async (t) => {
+  const pool = new Pool({ connectionString: url });
+  const made = [];
+  t.after(async () => {
+    try { if (made.length) await pool.query('DELETE FROM ai_providers WHERE id = ANY($1)', [made]); }
+    finally { await pool.end(); }
+  });
+  const tag = `${process.pid}-${Date.now()}`;
+  const img = await createProvider(pool, { name: `pin-img-${tag}`, base_url: 'http://127.0.0.1:9/', request_template: {} });
+  made.push(img.id);
+  const aud = await createProvider(pool, { name: `pin-aud-${tag}`, base_url: 'http://127.0.0.1:9/', modality: 'audio' });
+  made.push(aud.id);
+
+  assert.strictEqual((await loadImageProviderWithSecret(pool, img.id)).id, img.id);
+  assert.strictEqual(await loadImageProviderWithSecret(pool, aud.id), null, 'an audio row is not an image provider');
+  assert.strictEqual(await loadImageProviderWithSecret(pool, 2147483600), null);
+
+  // artDispatcher: a job pinned to the audio provider degrades to the batch's
+  // provider exactly like a pin whose provider was deleted.
+  const { resolveJobProvider } = require('../src/services/artDispatcher');
+  const batch = { id: img.id, name: 'batch' };
+  const other = await resolveJobProvider(pool, aud.id, batch);
+  assert.strictEqual(other, batch, 'an audio-pinned art job must not be sent to the audio provider');
+});
+
+test('PATCH cannot change a provider\'s modality', { skip: !url ? 'no database URL' : false }, async (t) => {
+  require('./helpers/auth.js');
+  const request = require('supertest');
+  const { app, __setPool } = require('../src/index.js');
+  const { signToken } = require('../src/auth/tokens.js');
+  const pool = new Pool({ connectionString: url });
+  __setPool(pool);
+  const made = [];
+  const users = [];
+  t.after(async () => {
+    try {
+      if (made.length) await pool.query('DELETE FROM ai_providers WHERE id = ANY($1)', [made]);
+      if (users.length) await pool.query('DELETE FROM users WHERE id = ANY($1)', [users]);
+    } finally { await pool.end(); }
+  });
+  const tag = `${process.pid}-${Date.now()}`;
+  const u = (await pool.query(
+    'INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3) RETURNING id, token_version',
+    [`prov-admin-${tag}`, 'x', 'admin'])).rows[0];
+  users.push(u.id);
+  const auth = `Bearer ${signToken({ userId: u.id, username: `prov-admin-${tag}`, role: 'admin', tokenVersion: u.token_version })}`;
+  const img = await createProvider(pool, { name: `mod-lock-${tag}`, base_url: 'http://127.0.0.1:9/', request_template: {} });
+  made.push(img.id);
+
+  const res = await request(app).patch(`/api/ai-providers/${img.id}`).set('Authorization', auth)
+    .send({ modality: 'audio' });
+  assert.strictEqual(res.status, 400, JSON.stringify(res.body));
+  assert.match(res.body.error, /modality cannot be changed/);
+  const after = await pool.query('SELECT modality FROM ai_providers WHERE id = $1', [img.id]);
+  assert.strictEqual(after.rows[0].modality, 'image', 'the row is unchanged');
+
+  // The edit form always resends the current modality; that must still save.
+  const same = await request(app).patch(`/api/ai-providers/${img.id}`).set('Authorization', auth)
+    .send({ modality: 'image', model: 'renamed' });
+  assert.strictEqual(same.status, 200, JSON.stringify(same.body));
+  assert.strictEqual(same.body.model, 'renamed');
 });

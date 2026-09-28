@@ -445,12 +445,12 @@ const providerCache = new WeakMap();
 async function resolveJobProvider(db, providerId, batchProvider, loadProvider) {
   if (!Number.isInteger(providerId)) return batchProvider;
   if (batchProvider && batchProvider.id === providerId) return batchProvider;
-  const load = loadProvider || aiProviders.loadProviderWithSecret;
+  const load = loadProvider || aiProviders.loadImageProviderWithSecret;
   let cache = providerCache.get(db);
   if (!cache) { cache = new Map(); providerCache.set(db, cache); }
   if (!cache.has(providerId)) cache.set(providerId, await load(db, providerId));
   // A pin whose provider was deleted (ON DELETE SET NULL cannot help once the
-  // row is gone) degrades to the batch's rather than failing the job -- the
+  // row is gone), or that names the audio profile, degrades to the batch's rather than failing the job -- the
   // same choice resolveGenerationTarget makes for a dangling pin.
   return cache.get(providerId) || batchProvider;
 }

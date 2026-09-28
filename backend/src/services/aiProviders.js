@@ -177,6 +177,16 @@ async function loadProviderWithSecret(db, id) {
   return r.rows[0] || null;
 }
 
+// Every IMAGE lookup by id goes through this (spec §2: every image-provider
+// lookup gains modality = 'image'). A pin or batch id that names the audio
+// profile resolves to null -- the same "no such provider" each caller already
+// handles for a deleted row -- so an image job is never sent to the box's
+// audio API.
+async function loadImageProviderWithSecret(db, id) {
+  const r = await db.query("SELECT * FROM ai_providers WHERE id = $1 AND modality = 'image'", [id]);
+  return r.rows[0] || null;
+}
+
 // The provider generation falls back to when nothing more specific is chosen.
 // Disabled profiles are excluded: `enabled` is the admin's "this box is off
 // right now" switch, and an active-but-disabled profile must not silently
@@ -208,8 +218,23 @@ async function createProvider(db, body) {
 
 // Returns undefined when no row matched, so the route can 404 rather than
 // reporting a successful update of nothing.
+//
+// modality is fixed at creation: flipping an image row to audio (or back)
+// would turn every pin that names it into a pin on the wrong service. The
+// edit form resends the current value, so an unchanged modality is accepted
+// and simply not written; a different one is a 400.
 async function updateProvider(db, id, body) {
-  const { columns, values } = buildProviderPatch(body);
+  if (Object.prototype.hasOwnProperty.call(body, 'modality')) {
+    const cur = (await db.query('SELECT modality FROM ai_providers WHERE id = $1', [id])).rows[0];
+    if (!cur) return undefined;
+    if (cur.modality !== body.modality) {
+      const err = new Error('modality cannot be changed after creation');
+      err.status = 400;
+      throw err;
+    }
+  }
+  const { modality, ...rest } = body; // eslint-disable-line no-unused-vars
+  const { columns, values } = buildProviderPatch(rest);
   if (columns.length === 0) return getProvider(db, id);
   const assignments = columns.map((c, i) => `${c} = $${i + 1}`);
   const r = await db.query(
@@ -280,6 +305,7 @@ module.exports = {
   listProviders,
   getProvider,
   loadProviderWithSecret,
+  loadImageProviderWithSecret,
   loadActiveProviderWithSecret,
   createProvider,
   updateProvider,
