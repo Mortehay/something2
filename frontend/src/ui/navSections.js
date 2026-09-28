@@ -2,6 +2,7 @@ import {
   HiOutlinePuzzlePiece, HiOutlineWrenchScrewdriver, HiOutlineBeaker,
   HiOutlineCube, HiOutlineMap, HiOutlineGlobeAlt, HiOutlineShare, HiOutlineBolt, HiOutlineSparkles,
   HiOutlineCpuChip, HiOutlineChartBar, HiOutlineGlobeAmericas, HiOutlinePhoto, HiOutlineRectangleGroup,
+  HiOutlineSpeakerWave,
 } from "react-icons/hi2";
 
 // One source of truth for the sidebar: label, route, icon and the admin colour
@@ -59,6 +60,11 @@ export const NAV_SECTIONS = [
       // machine there, then drive a batch through it here -- and because both
       // are about how art gets made rather than about one catalogue.
       { id: 'art', label: 'Art Generation', path: '/game/art', Icon: HiOutlinePhoto },
+      // SOMET-590 game audio slice 1: the Audio tab -- worlds/biomes today,
+      // more subject kinds in later slices. Directly below Art Generation for
+      // the same reason that one sits where it does: both are about how
+      // content gets made, and both are used alongside AI Providers.
+      { id: 'audio', label: 'Audio', path: '/game/audio', Icon: HiOutlineSpeakerWave },
       // SOMET-330: registered remote image-generation services. Sits last
       // because it is configuration rather than content -- an admin opens it
       // once to point the game at a machine, not every session.
