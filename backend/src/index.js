@@ -156,6 +156,8 @@ const progressionRoutes = require('./api/progressionRoutes.js');
 const passiveTreeRoutes = require('./api/passiveTreeRoutes.js');
 const passiveNodesRoutes = require('./api/passiveNodesRoutes.js');
 const characterRoutes = require('./api/characterRoutes.js');
+const audioRoutes = require('./api/audioRoutes.js');
+const remoteAudioProvider = require('./services/remoteAudioProvider');
 const { DEFAULTS: GAME_SETTING_DEFAULTS, getSettings, setSetting } = require('./services/gameSettings.js');
 const { ownedCharacter } = require('./services/characters.js');
 const { listVisited } = require('./services/visitedWorlds.js');
@@ -522,6 +524,11 @@ app.use('/api/passive-nodes', passiveNodesRoutes(guardPool));
 // Character slots (SOMET-259): list / create / delete, plus the playable-class
 // catalog the creation form reads. Behind requireAuth, scoped to req.user.id.
 app.use('/api/characters', characterRoutes(guardPool));
+
+// Game audio (spec docs/superpowers/specs/2026-09-28-game-audio-design.md).
+// Player routes (world bundle, misses) and admin routes (/admin/*) share one
+// mount; each route carries its own guard.
+app.use('/api/audio', audioRoutes(guardPool));
 
 // The player's fog-of-war world map (SOMET-263). Read-only, and deliberately
 // NOT the payload the admin World Map tab reads from /api/world-graph: that one
@@ -2788,6 +2795,13 @@ app.post('/api/ai-providers/:id/refresh-models', adminGuard, async (req, res) =>
   try {
     const provider = await aiProviders.loadProviderWithSecret(pool, id);
     if (!provider) return res.status(404).json({ error: 'AI provider not found' });
+    if (provider.modality === 'audio') {
+      const r = await remoteAudioProvider.listStyles(provider);
+      if (!r.ok) return res.json({ ok: false, error: r.error, status: r.status ?? null });
+      const models = [...r.styles.map((s) => s.value), ...r.cues.map((c) => `cue:${c.value}`)];
+      await aiProviders.saveModelsCache(pool, id, models);
+      return res.json({ ok: true, models, styles: r.styles, cues: r.cues });
+    }
     const result = await providerDiscovery.fetchModels(provider);
     if (!result.ok) {
       return res.json({ ok: false, error: result.error, status: result.status ?? null });
@@ -3196,6 +3210,7 @@ app.get('/api/assets/*', async (req, res) => {
     const stream = await assetStore.getObjectStream(key);
     if (/\.png$/i.test(key)) res.type('image/png');
     else if (/\.json$/i.test(key)) res.type('application/json');
+    else if (/\.ogg$/i.test(key)) res.type('audio/ogg');
     res.set('Cache-Control', 'public, max-age=300');
     stream.on('error', () => { if (!res.headersSent) res.status(404).json({ error: 'asset not found' }); });
     stream.pipe(res);
