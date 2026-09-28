@@ -11,6 +11,7 @@ export class ChunkedMap {
     this.tileSize = MAP_TILE_SIZE;
     this.chunks = new Map(); // "cx,cy" -> string[][]
     this.decorations = new Map(); // "cx,cy" -> { list, blocked: Set<"row,col"> }
+    this.biomes = new Map(); // "cx,cy" -> string[][] (coarse biome grid, or absent)
     this.setMapTiles(mapTiles);
   }
 
@@ -33,15 +34,21 @@ export class ChunkedMap {
     }
   }
 
-  setChunk(cx, cy, grid, decorations = []) {
+  setChunk(cx, cy, grid, decorations = [], biomes = null) {
     this.chunks.set(CHUNK_KEY(cx, cy), grid);
     // Precompute the blocking-tile set for O(1) walkability checks.
     const blocked = new Set();
     for (const d of decorations) if (d.blocking) blocked.add(`${d.row},${d.col}`);
     this.decorations.set(CHUNK_KEY(cx, cy), { list: decorations, blocked });
+    if (biomes) this.biomes.set(CHUNK_KEY(cx, cy), biomes);
+    else this.biomes.delete(CHUNK_KEY(cx, cy));
   }
   hasChunk(cx, cy) { return this.chunks.has(CHUNK_KEY(cx, cy)); }
-  removeChunk(cx, cy) { this.chunks.delete(CHUNK_KEY(cx, cy)); this.decorations.delete(CHUNK_KEY(cx, cy)); }
+  removeChunk(cx, cy) {
+    this.chunks.delete(CHUNK_KEY(cx, cy));
+    this.decorations.delete(CHUNK_KEY(cx, cy));
+    this.biomes.delete(CHUNK_KEY(cx, cy));
+  }
   getChunk(cx, cy) { return this.chunks.get(CHUNK_KEY(cx, cy)) || null; }
   decorationsInChunk(cx, cy) { const e = this.decorations.get(CHUNK_KEY(cx, cy)); return e ? e.list : []; }
   loadedKeys() { return [...this.chunks.keys()]; }
@@ -82,5 +89,20 @@ export class ChunkedMap {
   speedAt(worldX, worldY) {
     const def = this._tileDef(this.getTileAt(worldX, worldY));
     return def && def.speed !== undefined ? def.speed : 1;
+  }
+
+  // Game audio: the biome under a world position, from the coarse grid the
+  // chunk route sends (grid.length cells per chunk side, so the cell step is
+  // chunkSize / grid.length -- 8x8 for a 64-tile chunk, 4x4 for a 32-tile one).
+  // null = unknown/unloaded, which the ambience tracker treats as "keep what
+  // is playing". Reuses getTileAt's world -> chunk -> local conversion.
+  biomeAt(worldX, worldY) {
+    const { cx, cy, lr, lc } = worldToChunkLocal(worldX, worldY, this.chunkSize);
+    const g = this.biomes.get(CHUNK_KEY(cx, cy));
+    if (!g) return null;
+    const step = this.chunkSize / g.length;
+    const r = Math.floor(lr / step);
+    const c = Math.floor(lc / step);
+    return (g[r] && g[r][c]) || null;
   }
 }

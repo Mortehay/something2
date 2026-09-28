@@ -15,6 +15,6 @@ export function makeChunkFetcher(worldId, apiUrl, fetchImpl = fetch) {
     const res = await fetchImpl(url, { headers: authHeaders() });
     if (!res.ok) throw new Error(`chunk fetch failed (${cx},${cy})`);
     const body = await res.json();
-    return { tiles: body.data, decorations: body.decorations || [] };
+    return { tiles: body.data, decorations: body.decorations || [], biomes: body.biomes || null };
   };
 }

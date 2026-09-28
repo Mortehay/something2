@@ -50,7 +50,7 @@ export class ChunkStreamer {
         try {
           const chunk = await this.fetchChunk(lcx, lcy);
           if (!this.wanted.has(k)) return; // neighborhood moved on; discard stale load
-          this.map.setChunk(lcx, lcy, chunk.tiles, chunk.decorations);
+          this.map.setChunk(lcx, lcy, chunk.tiles, chunk.decorations, chunk.biomes);
           loaded.push(k);
         } catch (err) {
           // Leave unloaded; a later update() retries. Don't crash the loop.
