@@ -87,6 +87,11 @@ function finish(buffer, kind, info, fallback) {
 async function generateTrack(provider, req, { fetchImpl = fetch, sleep = realSleep } = {}) {
   const { kind, name, style, prompt, slots, seed, duration_s: durationS } = req;
   if (kind !== 'music' && kind !== 'ambience') return { ok: false, error: `generateTrack kind must be music or ambience, got ${kind}` };
+  // Every generation sends an explicit seed (spec, global constraint) -- a
+  // missing seed must fail loudly here rather than silently vanish from the
+  // POST body (JSON.stringify drops an undefined field) and have the box pick
+  // one nobody recorded.
+  if (!Number.isInteger(seed)) return { ok: false, error: 'generateTrack requires an explicit integer seed' };
   const body = { kind, name, seed };
   if (style) body.style = style;
   if (prompt) body.prompt = prompt;
@@ -112,7 +117,13 @@ async function generateTrack(provider, req, { fetchImpl = fetch, sleep = realSle
     const led = await callJson(provider, 'GET',
       `/api/audio?kind=${encodeURIComponent(kind)}&name=${encodeURIComponent(name)}&limit=1`, undefined, fetchImpl);
     if (!led.ok) return led;
-    const item = led.json && Array.isArray(led.json.items) ? led.json.items[0] : null;
+    // The ledger can hold rows for other jobs (a concurrent generation, a
+    // stale/previous run under the same kind). Only a row whose name matches
+    // THIS request is ours -- anything else counts as "not yet seen" and
+    // polling continues, rather than attaching a different job's loop points,
+    // prompt and seed to the file we're about to fetch.
+    const items = led.json && Array.isArray(led.json.items) ? led.json.items : [];
+    const item = items.find((it) => it && it.name === name) || null;
     if (item && item.status === 'failed') return { ok: false, error: `audio service failed: ${item.error || 'no reason given'}` };
     if (item && item.status === 'done') row = item;
   }

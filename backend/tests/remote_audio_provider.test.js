@@ -87,6 +87,33 @@ test('generateTrack rejects a WAV, reports a failed ledger row, and marks 409 re
   assert.equal(r.retryable, true);
 });
 
+test('generateTrack ignores a ledger row for a different job while polling', async () => {
+  let polls = 0;
+  const { fetchImpl } = fakeBox({
+    'POST /api/audio': () => json({ status: 'queued' }),
+    'GET /api/audio': () => {
+      polls += 1;
+      return json({ items: [polls === 1
+        ? { name: 'other-job', status: 'done', sample_rate: 44100, loop_start: 0, loop_end: 44100, prompt: 'wrong', seed: 99 }
+        : { name: 'n3', status: 'done', sample_rate: 48000, loop_start: 0, loop_end: 96000, prompt: 'right', seed: 3 }] });
+    },
+    'GET /api/audio/music/n3': () => new Response(OGG, { status: 200, headers: { 'content-type': 'audio/ogg' } }),
+  });
+  const r = await rap.generateTrack(provider, { kind: 'music', name: 'n3', seed: 3 }, { fetchImpl, sleep: noSleep });
+  assert.equal(r.ok, true, r.error);
+  assert.equal(r.loopEndMs, 2000, 'must use n3\'s row (96000/48000), not the stale other-job row (44100/44100)');
+  assert.equal(r.prompt, 'right');
+  assert.equal(r.seed, 3);
+});
+
+test('generateTrack requires an explicit integer seed and never calls the box without one', async () => {
+  const { fetchImpl, calls } = fakeBox({});
+  const r = await rap.generateTrack(provider, { kind: 'music', name: 'noseed' }, { fetchImpl, sleep: noSleep });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /explicit integer seed/i);
+  assert.equal(calls.length, 0, 'no request should be sent without a seed');
+});
+
 test('propose passes context and kind through', async () => {
   const { fetchImpl, calls } = fakeBox({
     'POST /api/audio/propose': () => json({ kind: 'ambience', style: 'forest', slots: { mood: 'calm daytime' }, prompt: 'forest ambience' }),
