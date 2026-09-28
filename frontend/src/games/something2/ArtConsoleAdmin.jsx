@@ -437,6 +437,11 @@ function ArtConsoleAdmin() {
     live: Boolean(run?.running),
   });
   const { providers, activeProvider } = useAiProviders();
+  // Art console generation is image-only; an audio provider has no txt2img
+  // endpoint to enqueue a tile/entity job against, and activeProvider above
+  // is already image-only (useAiProviders.pickActive) -- this list must
+  // agree with it.
+  const imageProviders = (providers || []).filter((p) => (p.modality || 'image') === 'image');
   const enqueue = useEnqueueArt();
   const startBatch = useStartArtBatch();
   const stopBatch = useStopArtBatch();
@@ -659,7 +664,7 @@ function ArtConsoleAdmin() {
             Provider
             <select value={providerId} onChange={(e) => setProviderId(e.target.value)}>
               <option value="">(the active provider)</option>
-              {(providers || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              {imageProviders.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </Field>
         )}

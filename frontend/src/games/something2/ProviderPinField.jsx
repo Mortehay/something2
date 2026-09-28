@@ -43,12 +43,15 @@ export function selectValueToPin(value) {
 
 export function ProviderPinField({ value, onChange }) {
   const { providers, activeProvider, isLoadingProviders } = useAiProviders();
+  // A type's pinned generation service can only be an image provider -- an
+  // audio profile has no image generation endpoint for this to point at.
+  const imageProviders = providers.filter((p) => (p.modality || 'image') === 'image');
 
   // Same rule as ProviderChoice: with nothing registered, every option would
   // mean the same thing, so the field does not appear.
-  if (!isLoadingProviders && providers.length === 0) return null;
+  if (!isLoadingProviders && imageProviders.length === 0) return null;
 
-  const enabled = providers.filter((p) => p.enabled !== false);
+  const enabled = imageProviders.filter((p) => p.enabled !== false);
 
   // A pin can point at a provider that has since been disabled, or at one
   // deleted while this form was open (the column is ON DELETE SET NULL, so the

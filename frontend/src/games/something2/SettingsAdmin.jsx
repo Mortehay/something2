@@ -44,7 +44,7 @@ const Hint = styled.p`color: var(--s2-text-muted); font-size: 0.85rem; margin: 0
 const ErrorText = styled.p`color: var(--s2-danger, #e5484d); font-size: 0.85rem; margin: 0.25rem 0;`;
 const WarnText = styled.p`color: var(--s2-warning, #d9822b); font-size: 0.85rem; margin: 0.25rem 0;`;
 const Badge = styled.span`
-  background: var(--s2-accent); color: var(--s2-on-accent); border-radius: 999px;
+  background: ${p => p.$bg || 'var(--s2-accent)'}; color: var(--s2-on-accent); border-radius: 999px;
   padding: 0.1rem 0.6rem; font-size: 0.75rem; font-weight: bold;
 `;
 
@@ -57,6 +57,12 @@ function ProviderCard({ provider, isOnlyActive }) {
   const refresh = useRefreshModels();
   const test = useTestProvider();
   const isNew = !provider;
+  const isAudio = form.modality === 'audio';
+  // The raw styles/cues an audio provider's Refresh returned. Not the same
+  // as models_cache (which the backend flattens into plain strings, with
+  // cues prefixed "cue:") -- this keeps the labels and cue engine/entity
+  // metadata Refresh's response carries, for display only.
+  const [audioDiscovery, setAudioDiscovery] = useState(null);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   // Editing the token field is what makes the difference between "left it
@@ -82,8 +88,23 @@ function ProviderCard({ provider, isOnlyActive }) {
       <Row>
         <Label>Name</Label>
         <Input value={form.name} onChange={e => set('name', e.target.value)} placeholder="desktop GPU box" />
+        <Badge $bg="var(--s2-surface-raised)">{isAudio ? 'AUDIO' : 'IMAGE'}</Badge>
         {provider?.is_active && <Badge>ACTIVE</Badge>}
         {provider && !provider.enabled && <span style={{ color: 'var(--s2-text-muted)' }}>disabled</span>}
+      </Row>
+
+      <Row>
+        <Label>Modality</Label>
+        {isNew ? (
+          <Select value={form.modality} onChange={e => set('modality', e.target.value)}>
+            <option value="image">Image</option>
+            <option value="audio">Audio</option>
+          </Select>
+        ) : (
+          <span style={{ color: 'var(--s2-text-muted)' }}>
+            {isAudio ? 'Audio' : 'Image'} — fixed after creation
+          </span>
+        )}
       </Row>
 
       <Row>
@@ -120,71 +141,77 @@ function ProviderCard({ provider, isOnlyActive }) {
         <Hint>A token is stored. Leave the field untouched to keep it; clear it and save to remove it.</Hint>
       )}
 
-      <Row>
-        <Label>Request template</Label>
-      </Row>
-      <TemplateArea
-        value={form.request_template}
-        onChange={e => set('request_template', e.target.value)}
-        spellCheck={false}
-      />
-      <Hint>Placeholders: {PLACEHOLDERS.join('  ')} — only the prompt comes from the entity or tile.</Hint>
-      {parseError && <ErrorText>Template {parseError}</ErrorText>}
-      {!parseError && warning && <WarnText>{warning}</WarnText>}
-
-      <Row>
-        <Label>Models path</Label>
-        <Input value={form.models_path} onChange={e => set('models_path', e.target.value)} placeholder="/sdapi/v1/sd-models" />
-        <Label>Models pointer</Label>
-        <Input value={form.models_pointer} onChange={e => set('models_pointer', e.target.value)} placeholder="$[*].model_name" />
-      </Row>
-
-      <Row>
-        <Label>Image pointer</Label>
-        <Input
-          value={form.response_image_pointer}
-          onChange={e => set('response_image_pointer', e.target.value)}
-          placeholder="images[0] — blank if the response IS the image"
-          style={{ minWidth: 320 }}
-        />
-      </Row>
-
-      <Row>
-        <Label>Sprite sheet</Label>
-        <Select value={form.sheet_layout} onChange={e => set('sheet_layout', e.target.value)}>
-          <option value="">Single image (no animation)</option>
-          <option value="flat">Flat grid — frames "0","1",… (tiles, objects)</option>
-          <option value="directional">Directional — one row per facing (creatures)</option>
-        </Select>
-      </Row>
-      {form.sheet_layout && (
+      {isAudio ? (
+        <Hint>Talks to the box's /api/audio endpoints. Refresh lists its styles and cues.</Hint>
+      ) : (
         <>
           <Row>
-            <Label>Grid</Label>
-            <Input
-              type="number" min="1" style={{ minWidth: 90 }}
-              value={form.sheet_columns} onChange={e => set('sheet_columns', e.target.value)}
-              placeholder="columns"
-            />
-            <Input
-              type="number" min="1" style={{ minWidth: 90 }}
-              value={form.sheet_rows} onChange={e => set('sheet_rows', e.target.value)}
-              placeholder="rows"
-            />
-            {form.sheet_layout === 'directional' && (
-              <Input
-                value={form.sheet_directions}
-                onChange={e => set('sheet_directions', e.target.value)}
-                placeholder="S,SW,W,NW,N,NE,E,SE (row order)"
-                style={{ minWidth: 300 }}
-              />
-            )}
+            <Label>Request template</Label>
           </Row>
-          <Hint>
-            The other machine returns the whole sheet; this only says how to cut it. Blank columns
-            uses the requested frame count; blank rows uses 1 (or one per direction). The image must
-            divide evenly into the grid or the job fails rather than cropping wrongly.
-          </Hint>
+          <TemplateArea
+            value={form.request_template}
+            onChange={e => set('request_template', e.target.value)}
+            spellCheck={false}
+          />
+          <Hint>Placeholders: {PLACEHOLDERS.join('  ')} — only the prompt comes from the entity or tile.</Hint>
+          {parseError && <ErrorText>Template {parseError}</ErrorText>}
+          {!parseError && warning && <WarnText>{warning}</WarnText>}
+
+          <Row>
+            <Label>Models path</Label>
+            <Input value={form.models_path} onChange={e => set('models_path', e.target.value)} placeholder="/sdapi/v1/sd-models" />
+            <Label>Models pointer</Label>
+            <Input value={form.models_pointer} onChange={e => set('models_pointer', e.target.value)} placeholder="$[*].model_name" />
+          </Row>
+
+          <Row>
+            <Label>Image pointer</Label>
+            <Input
+              value={form.response_image_pointer}
+              onChange={e => set('response_image_pointer', e.target.value)}
+              placeholder="images[0] — blank if the response IS the image"
+              style={{ minWidth: 320 }}
+            />
+          </Row>
+
+          <Row>
+            <Label>Sprite sheet</Label>
+            <Select value={form.sheet_layout} onChange={e => set('sheet_layout', e.target.value)}>
+              <option value="">Single image (no animation)</option>
+              <option value="flat">Flat grid — frames "0","1",… (tiles, objects)</option>
+              <option value="directional">Directional — one row per facing (creatures)</option>
+            </Select>
+          </Row>
+          {form.sheet_layout && (
+            <>
+              <Row>
+                <Label>Grid</Label>
+                <Input
+                  type="number" min="1" style={{ minWidth: 90 }}
+                  value={form.sheet_columns} onChange={e => set('sheet_columns', e.target.value)}
+                  placeholder="columns"
+                />
+                <Input
+                  type="number" min="1" style={{ minWidth: 90 }}
+                  value={form.sheet_rows} onChange={e => set('sheet_rows', e.target.value)}
+                  placeholder="rows"
+                />
+                {form.sheet_layout === 'directional' && (
+                  <Input
+                    value={form.sheet_directions}
+                    onChange={e => set('sheet_directions', e.target.value)}
+                    placeholder="S,SW,W,NW,N,NE,E,SE (row order)"
+                    style={{ minWidth: 300 }}
+                  />
+                )}
+              </Row>
+              <Hint>
+                The other machine returns the whole sheet; this only says how to cut it. Blank columns
+                uses the requested frame count; blank rows uses 1 (or one per direction). The image must
+                divide evenly into the grid or the job fails rather than cropping wrongly.
+              </Hint>
+            </>
+          )}
         </>
       )}
 
@@ -201,7 +228,16 @@ function ProviderCard({ provider, isOnlyActive }) {
         {!isNew && (
           <Button
             $bg="var(--s2-surface-raised)"
-            onClick={() => refresh.mutate({ id: provider.id })}
+            onClick={() => refresh.mutate({ id: provider.id }, {
+              // Audio's response carries styles/cues alongside the flattened
+              // `models` list the query cache stores -- captured here rather
+              // than reconstructed from models_cache, whose "cue:" prefix
+              // convention would have to be un-done to get the label/engines
+              // back.
+              onSuccess: (data) => {
+                if (data.ok && isAudio) setAudioDiscovery({ styles: data.styles || [], cues: data.cues || [] });
+              },
+            })}
             disabled={refresh.isPending}
           >
             <HiOutlineArrowPath /> {refresh.isPending ? 'Refreshing…' : 'Refresh models'}
@@ -215,6 +251,15 @@ function ProviderCard({ provider, isOnlyActive }) {
       </Row>
       {provider?.models_fetched_at && (
         <Hint>{models.length} model(s) cached at {new Date(provider.models_fetched_at).toLocaleString()}</Hint>
+      )}
+      {isAudio && audioDiscovery && (
+        <Hint>
+          Styles: {audioDiscovery.styles.length > 0
+            ? audioDiscovery.styles.map(s => s.label || s.value).join(', ') : '—'}
+          <br />
+          Cues: {audioDiscovery.cues.length > 0
+            ? audioDiscovery.cues.map(c => c.label || c.value).join(', ') : '—'}
+        </Hint>
       )}
 
       <Row>

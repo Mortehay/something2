@@ -48,6 +48,11 @@ export function emptyProviderForm() {
     sheet_rows: '',
     sheet_directions: '',
     enabled: true,
+    // Game audio slice 1: 'image' (default) or 'audio'. Only meaningful at
+    // create time -- see providerToForm and the SettingsAdmin form, which
+    // renders this read-only once a row exists, because changing it would
+    // orphan clips' provider attribution.
+    modality: 'image',
     // Never populated from the server -- it cannot be. Tracks whether a token
     // exists so the UI can say so without knowing its value.
     has_token: false,
@@ -75,6 +80,7 @@ export function providerToForm(row) {
     sheet_rows: row.sheet_rows == null ? '' : String(row.sheet_rows),
     sheet_directions: row.sheet_directions || '',
     enabled: row.enabled !== false,
+    modality: row.modality || 'image',
     has_token: Boolean(row.has_token),
     token_touched: false,
   };
@@ -117,6 +123,9 @@ export function validateProviderForm(form) {
   if (url.username || url.password) {
     return 'Base URL must not embed credentials; use the auth header fields instead';
   }
+  // An audio provider has no request template -- the server fills {} for
+  // one -- so the image-only field below is not part of its validation.
+  if (form.modality === 'audio') return null;
   const parsed = parseTemplate(form.request_template);
   if (parsed.error) return `Request template ${parsed.error}`;
   return null;
@@ -136,25 +145,36 @@ export function templateWarning(text) {
 }
 
 // The PATCH/POST body. See the token rules at the top of this file.
+//
+// An audio provider omits every image-only field rather than sending empty/
+// default values for them: the backend has no use for a request template,
+// model discovery path, response pointer or sprite-sheet grid on an audio
+// row, and sending them would just be dead columns to ignore. The server
+// fills a default request_template ({}) itself when it is absent and
+// modality is 'audio'.
 export function providerFormToPayload(form) {
-  const parsed = parseTemplate(form.request_template);
+  const modality = form.modality === 'audio' ? 'audio' : 'image';
   const payload = {
     name: form.name.trim(),
     base_url: form.base_url.trim(),
     auth_header_name: form.auth_header_name.trim() || null,
-    request_template: parsed.template,
     model: form.model.trim() || null,
-    models_path: form.models_path.trim() || null,
-    models_pointer: form.models_pointer.trim() || null,
-    response_image_pointer: form.response_image_pointer.trim() || null,
-    sheet_layout: form.sheet_layout || null,
+    enabled: form.enabled !== false,
+    modality,
+  };
+  if (modality === 'image') {
+    const parsed = parseTemplate(form.request_template);
+    payload.request_template = parsed.template;
+    payload.models_path = form.models_path.trim() || null;
+    payload.models_pointer = form.models_pointer.trim() || null;
+    payload.response_image_pointer = form.response_image_pointer.trim() || null;
+    payload.sheet_layout = form.sheet_layout || null;
     // Sent as numbers or null, never as "" -- the column is integer, and an
     // empty string would be a cast error rather than "not configured".
-    sheet_columns: form.sheet_columns === '' ? null : Number(form.sheet_columns),
-    sheet_rows: form.sheet_rows === '' ? null : Number(form.sheet_rows),
-    sheet_directions: form.sheet_directions.trim() || null,
-    enabled: form.enabled !== false,
-  };
+    payload.sheet_columns = form.sheet_columns === '' ? null : Number(form.sheet_columns);
+    payload.sheet_rows = form.sheet_rows === '' ? null : Number(form.sheet_rows);
+    payload.sheet_directions = form.sheet_directions.trim() || null;
+  }
   // The three-way token decision, and the only place it is made.
   if (form.token_touched) payload.auth_token = form.auth_token;
   return payload;

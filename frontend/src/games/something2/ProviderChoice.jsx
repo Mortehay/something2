@@ -41,13 +41,18 @@ export function useWillUseLocal(choice) {
 
 export function ProviderChoice({ value, onChange }) {
   const { providers, activeProvider, isLoadingProviders } = useAiProviders();
+  // Image generation only ever offers image providers: an audio profile has
+  // no txt2img endpoint to send a tile/entity job to, and `activeProvider`
+  // above is already image-only (see useAiProviders.pickActive) -- this list
+  // must agree with it.
+  const imageProviders = providers.filter((p) => (p.modality || 'image') === 'image');
 
   // Nothing registered: render nothing at all. An admin who has never opened
   // the Settings tab should not gain a control whose every option means the
   // same thing.
-  if (!isLoadingProviders && providers.length === 0) return null;
+  if (!isLoadingProviders && imageProviders.length === 0) return null;
 
-  const enabled = providers.filter((p) => p.enabled !== false);
+  const enabled = imageProviders.filter((p) => p.enabled !== false);
   const defaultLabel = activeProvider
     ? `Default (${activeProvider.name})`
     : 'Default (local sprite-gen)';
@@ -123,15 +128,18 @@ export function providerPinToState(val) {
 // Saved with the rest of the type row (ai_provider_mode and ai_provider_id).
 export function TypeProviderPinChoice({ mode, providerId, onChange, disabled }) {
   const { providers, activeProvider, isLoadingProviders } = useAiProviders();
+  // Same rule as ProviderChoice: a type's default generation service can
+  // only ever be an image provider.
+  const imageProviders = providers.filter((p) => (p.modality || 'image') === 'image');
 
-  if (!isLoadingProviders && providers.length === 0) return null;
+  if (!isLoadingProviders && imageProviders.length === 0) return null;
 
-  const enabled = providers.filter((p) => p.enabled !== false);
+  const enabled = imageProviders.filter((p) => p.enabled !== false);
   const defaultLabel = activeProvider
     ? `Default (${activeProvider.name})`
     : 'Default (local sprite-gen)';
 
-  const selectValue = resolveProviderPinChoice(mode, providerId, providers);
+  const selectValue = resolveProviderPinChoice(mode, providerId, imageProviders);
 
   const handleChange = (newVal) => {
     onChange(providerPinToState(newVal));
