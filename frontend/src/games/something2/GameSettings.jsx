@@ -290,8 +290,6 @@ export default function GameSettings({ gameRef }) {
   useEffect(() => { constantAttackRef.current = constantAttack; });
   const keybindsRef = useRef(keybinds);
   useEffect(() => { keybindsRef.current = keybinds; });
-  const volumesRef = useRef(volumes);
-  useEffect(() => { volumesRef.current = volumes; });
 
   useEffect(() => {
     const tick = () => {
@@ -351,16 +349,20 @@ export default function GameSettings({ gameRef }) {
     if (game && game.setKeybinds) game.setKeybinds({ ...DEFAULT_KEYBINDS });
   }, [gameRef]);
 
-  // Computed from volumesRef (not inside the setState updater) so the
-  // side effects below run exactly once even under React StrictMode's
-  // double-invoke of updater functions.
+  // The updater itself stays pure (StrictMode-safe: double-invoking it is a
+  // no-op). Persisting and pushing to the live engine happens in the effect
+  // below, keyed off the committed `volumes` value, so two changeVolume
+  // calls in the same tick (e.g. two sliders dragged before a re-render)
+  // both land instead of the second silently reverting the first.
   const changeVolume = useCallback((field, value) => {
-    const next = applyVolumeChange(volumesRef.current, field, value);
-    setVolumesState(next);
-    saveVolumes(next);
+    setVolumesState((cur) => applyVolumeChange(cur, field, value));
+  }, []);
+
+  useEffect(() => {
+    saveVolumes(volumes);
     const game = gameRef.current;
-    if (game && game.audio) game.audio.setVolumes(next);
-  }, [gameRef]);
+    if (game && game.audio) game.audio.setVolumes(volumes);
+  }, [volumes, gameRef]);
 
   const inWorld = autoLoot !== null;
 
