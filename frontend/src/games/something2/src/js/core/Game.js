@@ -38,6 +38,9 @@ import {
     mergeLevelInfo, buildCharacterView,
 } from "./progressionExtras.js";
 import { fetchProgression } from "../net/progressionClient.js";
+import { AudioEngine } from "../audio/AudioEngine.js";
+import { fetchWorldAudio } from "../audio/audioClient.js";
+import { loadVolumes } from "../audio/audioSettings.js";
 import {
     getSkillById, getSkillsForClass, getRequiredForm, isTransformationSkill,
     isDruidExclusiveSkill, resolveSkillVfx, checkGemRequirements, getWeaponCategory,
@@ -500,6 +503,18 @@ export class Game {
         this.state = "playing";
         this.chunked = true;
         this.worldId = worldId;
+        // Game audio (spec §3). One engine per Game; a re-entry (new world)
+        // swaps its world rather than building a second AudioContext.
+        if (!this.audio) {
+            this.audio = new AudioEngine();
+            this.audio.setVolumes(loadVolumes());
+            if (import.meta.env && import.meta.env.DEV) window.__s2audio = () => this.audio.snapshot();
+            this._audioMissTimer = setInterval(() => this.audio && this.audio.flushMisses(), 30000);
+        }
+        this.audio.unlock(); // initChunked runs from the Play click: sticky user activation
+        fetchWorldAudio(worldId).then((bundle) => {
+            if (this.audio && this.worldId === worldId) this.audio.setWorld(bundle);
+        });
         this.renderSystem = new RenderSystem(this.canvas, this.imageManager);
         this.chunkedMap = new ChunkedMap(chunkSize, tileTypes);
         this._preloadTileAssets(tileTypes);
@@ -1164,6 +1179,8 @@ export class Game {
         if (this._windowMouseUpHandler) window.removeEventListener('mouseup', this._windowMouseUpHandler);
         if (this._wheelHandler) this.canvas.removeEventListener('wheel', this._wheelHandler);
         if (this.authorityClient) this.authorityClient.disconnect();
+        if (this._audioMissTimer) clearInterval(this._audioMissTimer);
+        if (this.audio) { this.audio.destroy(); this.audio = null; }
 
         cancelAnimationFrame(this.animationFrameId);
     }
@@ -1173,6 +1190,7 @@ export class Game {
         if (this.chunked) {
             const cx = this.player.x + this.player.width / 2;
             const cy = this.player.y + this.player.height / 2;
+            if (this.audio) this.audio.tick(this.chunkedMap.biomeAt(cx, cy), performance.now());
             this.streamer.update(cx, cy); // fire-and-forget; wanted-guard makes it safe
             const nowMs = performance.now();
             const keys = movementKeys(this);
@@ -2139,6 +2157,10 @@ export class Game {
         };
 
         this._keydownHandler = (e) => {
+            // A resumed/reconnected session can reach here with an AudioContext
+            // that started suspended because initChunked ran without a fresh
+            // gesture; any key is a valid user-activation to resume it.
+            if (this.audio) this.audio.unlock();
             // First: if passive search is focused, intercept all keys and do NOT register movement or trigger hotkeys
             if (this.passiveTreeOpen && this.passiveSearchFocused) {
                 if (e.key === 'Escape' || e.key === 'Enter') {
@@ -2380,6 +2402,9 @@ export class Game {
             }
         };
         this._mouseDownHandler = (e) => {
+            // See the same call in _keydownHandler: a click is also a valid
+            // user-activation to resume a still-suspended AudioContext.
+            if (this.audio) this.audio.unlock();
             if (e.button !== 0 && e.button !== 1 && e.button !== 2) return;
             if (this.state !== 'playing' || !this.chunked || !this.authorityClient) return;
             // Locate the press by its own event and keep the tracked cursor in

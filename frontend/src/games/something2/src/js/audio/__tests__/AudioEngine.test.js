@@ -1,0 +1,89 @@
+import { describe, it, expect } from 'vitest';
+import { AudioEngine } from '../AudioEngine.js';
+
+function fakeCtx() {
+  const sources = [];
+  const ctx = {
+    state: 'suspended', currentTime: 0, destination: { name: 'dest' },
+    resume() { this.state = 'running'; return Promise.resolve(); },
+    close() { this.state = 'closed'; return Promise.resolve(); },
+    createGain() {
+      return { gain: { value: 1, setValueAtTime(v) { this.value = v; }, linearRampToValueAtTime(v) { this.value = v; }, cancelScheduledValues() {} },
+        connect(n) { this.out = n; }, disconnect() { this.out = null; } };
+    },
+    createBufferSource() {
+      const s = { buffer: null, loop: false, loopStart: 0, loopEnd: 0, started: false, stopped: false, onended: null,
+        connect(n) { this.out = n; }, disconnect() {}, start() { this.started = true; }, stop() { this.stopped = true; } };
+      sources.push(s);
+      return s;
+    },
+    decodeAudioData: async (ab) => ({ duration: 2, tag: new TextDecoder().decode(ab) }),
+  };
+  return { ctx, sources };
+}
+
+const flush = () => new Promise((r) => setTimeout(r, 0));
+
+function engineWith(bindings, { posted = [] } = {}) {
+  const { ctx, sources } = fakeCtx();
+  const engine = new AudioEngine({
+    ctxFactory: () => ctx,
+    fetchBytes: async (url) => new TextEncoder().encode(url).buffer,
+    urlFor: (k) => `u:${k}`,
+    rand: () => 0,
+    postMisses: async (m) => { posted.push(...m); },
+  });
+  engine.setWorld({ world: 'vale', bindings });
+  return { engine, ctx, sources, posted };
+}
+
+describe('AudioEngine', () => {
+  it('plays world music and biome ambience on their own buses', async () => {
+    const { engine, sources } = engineWith({
+      'world/vale/music': [{ key: 'm.ogg', volume: 1, weight: 1, loopable: true }],
+      'biome/forest/ambience': [{ key: 'f.ogg', volume: 0.5, weight: 1, loopable: true, loop_start_ms: 0, loop_end_ms: 1500 }],
+    });
+    engine.unlock();
+    engine.tick('forest', 0);
+    await flush(); await flush();
+    const snap = engine.snapshot();
+    expect(snap.music).toMatchObject({ key: 'm.ogg', playing: true });
+    expect(snap.ambience).toMatchObject({ key: 'f.ogg', playing: true });
+    const amb = sources.find((s) => s.buffer && s.buffer.tag === 'u:f.ogg');
+    expect(amb.loop).toBe(true);
+    expect(amb.loopEnd).toBe(1.5);
+  });
+
+  it('falls back to world ambience, and logs + posts one miss when nothing is bound', async () => {
+    const { engine, posted } = engineWith({});
+    engine.unlock();
+    engine.tick('desert', 0);
+    engine.tick('desert', 600);
+    await flush();
+    expect(engine.snapshot().ambience.playing).toBe(false);
+    await engine.flushMisses();
+    expect(posted).toEqual([
+      { subject_kind: 'world', subject_key: 'vale', slot: 'music', world: 'vale' },
+      { subject_kind: 'biome', subject_key: 'desert', slot: 'ambience', world: 'vale' },
+    ]);
+  });
+
+  it('mute and volumes drive the master and bus gains', () => {
+    const { engine } = engineWith({});
+    engine.setVolumes({ master: 0.5, music: 0.2, ambience: 1, sfx: 1, muted: true });
+    expect(engine.snapshot().gains).toMatchObject({ master: 0, music: 0.2, ambience: 1 });
+    engine.setVolumes({ master: 0.5, music: 0.2, ambience: 1, sfx: 1, muted: false });
+    expect(engine.snapshot().gains.master).toBe(0.5);
+  });
+
+  it('a decode failure is silence plus a warning, never a throw', async () => {
+    const { ctx, sources } = fakeCtx();
+    ctx.decodeAudioData = async () => { throw new Error('bad data'); };
+    const engine = new AudioEngine({ ctxFactory: () => ctx, fetchBytes: async () => new ArrayBuffer(4), urlFor: (k) => k, rand: () => 0, postMisses: async () => {} });
+    engine.setWorld({ world: 'vale', bindings: { 'world/vale/music': [{ key: 'x.ogg', weight: 1, volume: 1 }] } });
+    engine.unlock();
+    await flush(); await flush();
+    expect(engine.snapshot().music.playing).toBe(false);
+    expect(sources.every((s) => !s.started)).toBe(true);
+  });
+});
