@@ -185,27 +185,32 @@ lockedTest('queueing rejects an empty selection and an unknown kind', async (t, 
 // never fires would pass that test while the default button silently 400'd.
 // That is exactly what the browser showed before this was fixed.
 lockedTest('omitting provider_id falls back to the ACTIVE provider', async (t, pool, providerId) => {
-  const prev = await pool.query('SELECT id FROM ai_providers WHERE is_active');
-  await pool.query('UPDATE ai_providers SET is_active = false WHERE is_active');
+  // Image modality only: an active AUDIO provider on the same database (one
+  // active per modality) is not this test's business and must survive it.
+  // Restored in a finally, not a t.after: freshPool's t.after was registered
+  // first, runs first and ends the pool, so a restore hook registered here
+  // failed silently and left the previously active provider deactivated.
+  const prev = await pool.query("SELECT id FROM ai_providers WHERE is_active AND modality = 'image'");
+  await pool.query("UPDATE ai_providers SET is_active = false WHERE is_active AND modality = 'image'");
   await pool.query('UPDATE ai_providers SET is_active = true WHERE id = $1', [providerId]);
-  t.after(async () => {
+  try {
+    const keys = (await cs.SUBJECTS.skill.list()).slice(0, 2).map((s) => s.key);
+    const res = await request(app).post('/api/art-jobs').set(...AUTH)
+      .send({ kind: 'skill', keys });          // no provider_id at all
+    assert.equal(res.status, 201, JSON.stringify(res.body));
+    assert.equal(res.body.queued, 2);
+
+    const { rows } = await pool.query('SELECT DISTINCT provider_id FROM art_jobs');
+    assert.deepEqual(rows.map((r) => r.provider_id), [providerId],
+      'the jobs must carry the active provider, not null');
+  } finally {
     await pool.query('UPDATE ai_providers SET is_active = false WHERE id = $1', [providerId])
       .catch(() => {});
     for (const r of prev.rows) {
       await pool.query('UPDATE ai_providers SET is_active = true WHERE id = $1', [r.id])
         .catch(() => {});
     }
-  });
-
-  const keys = (await cs.SUBJECTS.skill.list()).slice(0, 2).map((s) => s.key);
-  const res = await request(app).post('/api/art-jobs').set(...AUTH)
-    .send({ kind: 'skill', keys });          // no provider_id at all
-  assert.equal(res.status, 201, JSON.stringify(res.body));
-  assert.equal(res.body.queued, 2);
-
-  const { rows } = await pool.query('SELECT DISTINCT provider_id FROM art_jobs');
-  assert.deepEqual(rows.map((r) => r.provider_id), [providerId],
-    'the jobs must carry the active provider, not null');
+  }
 });
 
 lockedTest('GET /api/art-jobs reports the queue by state', async (t, pool, providerId) => {
