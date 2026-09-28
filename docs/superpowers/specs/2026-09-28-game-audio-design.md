@@ -262,9 +262,14 @@ Audio, no library.
 - Crossfade of 2 s on world transition.
 
 **Ambience (biome):**
-- The client works out the biome under the player from the world's biome
-  preview grid (`GET /api/worlds/:id/preview`, already cached server-side),
-  fetched once per join.
+- The client works out the biome under the player from the chunks it
+  already streams. The chunk response (`GET /api/worlds/:id/chunk`) gains
+  `biomes`: an 8×8 grid of biome names (or null) per chunk, one cell per 8×8
+  tiles, computed server-side with `mapService.sampleBiomeRegion` (the same
+  field terrain uses). That costs no extra request and no client copy of the
+  noise code.
+- (The preview grid was considered and rejected: it is a fixed 64×64 window
+  around the origin, not the whole world.)
 - It samples every 500 ms. A new biome must hold for 1.5 s before switching
   (hysteresis at borders), then the loop crossfades over 2 s.
 - Lookup: biome → world ambience → silence.
@@ -477,7 +482,7 @@ the ambience source. A green suite is not proof the feature is alive.
    - `audio_clips` / `audio_bindings` plus the subject registry (world and
      biome only);
    - single generate and upload in the Audio tab;
-   - the `.ogg` MIME type and the bindings endpoint;
+   - the `.ogg` MIME type, the bindings endpoint and the per-chunk biome grid;
    - `AudioEngine` with music and ambience buses, volume settings, misses log;
    - browser verification.
 2. **Batch + git:**
