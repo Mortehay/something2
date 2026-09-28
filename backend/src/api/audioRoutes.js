@@ -40,6 +40,27 @@ function sendError(res, err) {
   return res.status(500).json({ error: 'audio request failed' });
 }
 
+// The name the box's ledger indexes generations by (spec §2: the box caches
+// by name, and generateTrack's async/ledger path polls the ledger BY NAME).
+// It has to be collision-free for every (subject_kind, subject_key, slot,
+// seed) the admin UI can send, which the raw
+// `s2-${kind}-${key}-${slot}-${seed}`.slice(0, 120) it replaced was not:
+// subject_key can run up to 200 chars, so a long key pushed the seed past
+// the 120-char cutoff (every seed for that subject then collided on one box
+// name), two long keys sharing a ~91-char prefix collided outright, and two
+// keys that only differ in characters the slug strips ("Dark Wood" vs
+// "Dark.Wood") collided whenever the seed also matched. A short sha1 of the
+// RAW (unslugged) "kind/key" pair keeps those distinct regardless of what
+// the slug does to them, and keeping the slugged key capped at 60 chars
+// leaves the hash, slot and seed always intact -- the seed is never the part
+// that gets truncated away.
+function boxTrackName(subjectKind, subjectKey, slot, seed) {
+  const slug = (s) => String(s).replace(/[^a-zA-Z0-9_-]+/g, '-');
+  const keyHash = crypto.createHash('sha1').update(`${subjectKind}/${subjectKey}`).digest('hex').slice(0, 8);
+  const name = `s2-${slug(subjectKind)}-${slug(subjectKey).slice(0, 60)}-${keyHash}-${slug(slot)}-${seed}`;
+  return name.slice(0, 120);
+}
+
 module.exports = function audioRoutes(pool) {
   const router = express.Router();
   const admin = requireAdmin(pool);
@@ -102,7 +123,7 @@ module.exports = function audioRoutes(pool) {
       // Always an explicit seed: the box caches by request, so a repeated or
       // omitted seed hands back the previous file (spec §2).
       const seed = Number.isInteger(b.seed) ? b.seed : crypto.randomInt(1, 2 ** 31 - 1);
-      const name = `s2-${b.subject_kind}-${b.subject_key}-${b.slot}-${seed}`.replace(/[^a-zA-Z0-9_-]+/g, '-').slice(0, 120);
+      const name = boxTrackName(b.subject_kind, b.subject_key, b.slot, seed);
       const gen = await rap.generateTrack(provider, {
         kind: clipKind, name, style: b.style || null, prompt: b.prompt || null, slots: b.slots || null, seed,
       });
@@ -165,3 +186,5 @@ module.exports = function audioRoutes(pool) {
 
   return router;
 };
+
+module.exports.boxTrackName = boxTrackName;
