@@ -23,3 +23,10 @@ export function loadVolumes(storage = globalThis.localStorage) {
 export function saveVolumes(v, storage = globalThis.localStorage) {
   try { if (storage) storage.setItem(KEY, JSON.stringify(v)); } catch (_) { /* per-viewer convenience only */ }
 }
+
+export function applyVolumeChange(current, field, value) {
+  if (field === 'muted') return { ...current, muted: Boolean(value) };
+  if (!['master', 'music', 'ambience', 'sfx'].includes(field)) return current;
+  const n = Number(value);
+  return { ...current, [field]: Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : current[field] };
+}

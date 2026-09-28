@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import styled from 'styled-components';
 import { HiOutlineCog6Tooth } from 'react-icons/hi2';
 import { DEFAULT_KEYBINDS } from './src/js/core/Game.js';
+import { loadVolumes, saveVolumes, applyVolumeChange } from './src/js/audio/audioSettings.js';
 
 const LS_INSPECT = 'something2.settings.inspect';
 const LS_CONSTANT_ATTACK = 'something2.settings.constantAttack';
@@ -275,12 +276,13 @@ const KEYBIND_DEFINITIONS = [
 
 export default function GameSettings({ gameRef }) {
   const [open, setOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState('general'); // 'general' | 'keybinds'
+  const [activeTab, setActiveTab] = useState('general'); // 'general' | 'keybinds' | 'sound'
   const [inspect, setInspect] = useState(() => readPref(LS_INSPECT));
   const [constantAttack, setConstantAttack] = useState(() => readPref(LS_CONSTANT_ATTACK));
   const [autoLoot, setAutoLoot] = useState(null);
   const [keybinds, setKeybinds] = useState(() => readKeybinds());
   const [listeningAction, setListeningAction] = useState(null);
+  const [volumes, setVolumesState] = useState(() => loadVolumes());
 
   const inspectRef = useRef(inspect);
   useEffect(() => { inspectRef.current = inspect; });
@@ -288,6 +290,8 @@ export default function GameSettings({ gameRef }) {
   useEffect(() => { constantAttackRef.current = constantAttack; });
   const keybindsRef = useRef(keybinds);
   useEffect(() => { keybindsRef.current = keybinds; });
+  const volumesRef = useRef(volumes);
+  useEffect(() => { volumesRef.current = volumes; });
 
   useEffect(() => {
     const tick = () => {
@@ -347,6 +351,17 @@ export default function GameSettings({ gameRef }) {
     if (game && game.setKeybinds) game.setKeybinds({ ...DEFAULT_KEYBINDS });
   }, [gameRef]);
 
+  // Computed from volumesRef (not inside the setState updater) so the
+  // side effects below run exactly once even under React StrictMode's
+  // double-invoke of updater functions.
+  const changeVolume = useCallback((field, value) => {
+    const next = applyVolumeChange(volumesRef.current, field, value);
+    setVolumesState(next);
+    saveVolumes(next);
+    const game = gameRef.current;
+    if (game && game.audio) game.audio.setVolumes(next);
+  }, [gameRef]);
+
   const inWorld = autoLoot !== null;
 
   return (
@@ -381,6 +396,13 @@ export default function GameSettings({ gameRef }) {
               onClick={() => setActiveTab('keybinds')}
             >
               Keybindings
+            </TabButton>
+            <TabButton
+              type="button"
+              $active={activeTab === 'sound'}
+              onClick={() => { setActiveTab('sound'); setListeningAction(null); }}
+            >
+              Sound
             </TabButton>
           </Tabs>
 
@@ -498,6 +520,72 @@ export default function GameSettings({ gameRef }) {
                 <ResetButton type="button" onClick={resetKeybindsToDefault}>
                   ↺ Reset Keybinds to Default
                 </ResetButton>
+              </>
+            )}
+
+            {activeTab === 'sound' && (
+              <>
+                <Row>
+                  <input
+                    type="checkbox"
+                    checked={volumes.muted}
+                    onChange={(e) => changeVolume('muted', e.target.checked)}
+                  />
+                  <span className="label">
+                    Mute all audio
+                    <span className="hint">
+                      Silence music, ambience, and sound effects.
+                    </span>
+                  </span>
+                </Row>
+
+                <Row>
+                  <span className="label" style={{ minWidth: 60 }}>
+                    Master
+                    <span className="hint">{Math.round(volumes.master * 100)}%</span>
+                  </span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={volumes.master}
+                    onChange={(e) => changeVolume('master', e.target.value)}
+                    style={{ flex: 1, width: '100%', height: 'auto' }}
+                  />
+                </Row>
+
+                <Row>
+                  <span className="label" style={{ minWidth: 60 }}>
+                    Music
+                    <span className="hint">{Math.round(volumes.music * 100)}%</span>
+                  </span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={volumes.music}
+                    onChange={(e) => changeVolume('music', e.target.value)}
+                    style={{ flex: 1, width: '100%', height: 'auto' }}
+                  />
+                </Row>
+
+                <Row>
+                  <span className="label" style={{ minWidth: 60 }}>
+                    Ambience
+                    <span className="hint">{Math.round(volumes.ambience * 100)}%</span>
+                  </span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={volumes.ambience}
+                    onChange={(e) => changeVolume('ambience', e.target.value)}
+                    style={{ flex: 1, width: '100%', height: 'auto' }}
+                  />
+                </Row>
               </>
             )}
           </TabContent>
