@@ -453,6 +453,34 @@ function sampleBiomeRegion(cfg, gRow, gCol) {
   return cfg.biomes[Math.min(cfg.biomes.length - 1, Math.floor(v * cfg.biomes.length))];
 }
 
+// Game audio (spec §3 "Ambience"): the client needs to know which biome the
+// player stands in, and it already streams chunks -- so each chunk carries a
+// coarse grid of biome names computed from the SAME field terrain uses. One
+// cell per `step` tiles; biome regions are far larger than that, so ambience
+// is exact to within a few tiles of a border.
+//
+// Takes an already-normalized `cfg` (worldConfig()'s output), same as
+// sampleBiomeRegion/sampleTerrain/roadTileAt -- unlike generateChunk/
+// generateRegion/generateChunkDecorations, which take the raw `world` shape
+// and normalize internally. A caller holding a raw world must call
+// worldConfig() itself first, or cfg.biomeCell (unresolved) and cfg.biomes
+// (still snake_case DB rows) will not match what sampleBiomeRegion expects.
+function chunkBiomeGrid(cfg, cx, cy, chunkSize, step = 8) {
+  if (!cfg.biomes || cfg.biomes.length === 0) return null;
+  const n = Math.ceil(chunkSize / step);
+  const half = Math.floor(step / 2);
+  const grid = [];
+  for (let r = 0; r < n; r++) {
+    const row = [];
+    for (let c = 0; c < n; c++) {
+      const region = sampleBiomeRegion(cfg, cy * chunkSize + r * step + half, cx * chunkSize + c * step + half);
+      row.push(region ? region.name : null);
+    }
+    grid.push(row);
+  }
+  return grid;
+}
+
 // The tile a road cell is stamped in: the owning biome's authored road tile,
 // else the world's ambient path tile.
 //
@@ -1841,6 +1869,7 @@ module.exports = {
     worldConfig,
     sampleTerrain,
     sampleBiomeRegion,
+    chunkBiomeGrid,
     biomeTerrainNames,
     generateWorldPreview,
     overviewOrigin,

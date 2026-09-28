@@ -7,7 +7,7 @@ const { applyTrustProxy, clientIpKey } = require('./clientIp');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
-const { generateChunk, generateChunkDecorations, generateWorldPreview, isBoundedWorld, CREATURE_TILE_PX, generateWorldOverview, overviewOrigin } = require('./services/mapService');
+const { generateChunk, generateChunkDecorations, generateWorldPreview, isBoundedWorld, CREATURE_TILE_PX, generateWorldOverview, overviewOrigin, worldConfig, chunkBiomeGrid } = require('./services/mapService');
 const { fetchLinks, setLink, clearLink } = require('./services/mapLinks');
 const worldGen = require('./services/worldGenService.js');
 const { validateMapSpec } = require('../seeds/mapSpec.js');
@@ -4809,6 +4809,13 @@ app.get('/api/worlds/:id/chunk', playerGuard, async (req, res) => {
       links: linkRows,
     });
 
+    // Game audio (spec §3 "Ambience"): chunkBiomeGrid needs the NORMALIZED cfg
+    // (worldConfig()'s output, matching what sampleBiomeRegion reads) -- unlike
+    // generateChunk/generateChunkDecorations, which take the raw worldCfg and
+    // normalize internally. Computed once here since both res.json calls below
+    // need it.
+    const chunkBiomes = chunkBiomeGrid(worldConfig(worldCfg), cx, cy, world.chunk_size || 64);
+
     // Cache hit?
     const cached = await pool.query(
       'SELECT data FROM world_chunks WHERE world_id = $1 AND cx = $2 AND cy = $3',
@@ -4817,7 +4824,7 @@ app.get('/api/worlds/:id/chunk', playerGuard, async (req, res) => {
     if (cached.rows[0]) {
       const data = cached.rows[0].data;
       const decorations = generateChunkDecorations(worldCfg, cx, cy, data, decorationDefs);
-      return res.json({ world_id: worldId, cx, cy, data, decorations });
+      return res.json({ world_id: worldId, cx, cy, data, decorations, biomes: chunkBiomes });
     }
 
     // Miss: generate terrain and return it WITHOUT persisting. The authority is
@@ -4827,7 +4834,7 @@ app.get('/api/worlds/:id/chunk', playerGuard, async (req, res) => {
     const data = generateChunk(worldCfg, cx, cy);
     const decorations = generateChunkDecorations(worldCfg, cx, cy, data, decorationDefs);
 
-    res.json({ world_id: worldId, cx, cy, data, decorations });
+    res.json({ world_id: worldId, cx, cy, data, decorations, biomes: chunkBiomes });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch chunk' });
