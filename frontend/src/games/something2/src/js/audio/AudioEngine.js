@@ -66,10 +66,17 @@ export class AudioEngine {
   setVolumes(v) { this.vol = { ...this.vol, ...v }; this._ensureCtx(); this._applyGains(); }
   volumes() { return { ...this.vol }; }
 
+  // Fix (review round 1, SOMET-590): unlock() ONLY creates/resumes the
+  // context. It used to also (re)start music whenever no music key was
+  // set, but Game calls unlock() on every keydown/mousedown -- so a key
+  // pressed during the post-track gap (key=null, musicTimer armed) or
+  // while a clip's buffer is still loading (key not yet set) re-picked
+  // and re-fetched a clip on every press. setWorld already starts music
+  // on a world change, and _play already creates the context lazily, so
+  // this never needed to do it too.
   unlock() {
     const ctx = this._ensureCtx();
     if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
-    if (this.world && !this.channels.music.key) this._startMusic();
   }
 
   setWorld({ world, bindings }) {

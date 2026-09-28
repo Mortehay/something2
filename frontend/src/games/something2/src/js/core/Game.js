@@ -510,6 +510,16 @@ export class Game {
             this.audio.setVolumes(loadVolumes());
             if (import.meta.env && import.meta.env.DEV) window.__s2audio = () => this.audio.snapshot();
             this._audioMissTimer = setInterval(() => this.audio && this.audio.flushMisses(), 30000);
+        } else {
+            // Re-entry (world transition on the same Game): fetchWorldAudio
+            // below is async, so without this the OLD world's music/rotation
+            // timer keeps playing into the new world until the new bundle
+            // resolves. Flush the old world's misses (spec: "on world leave"
+            // as well as every 30s) and drop to a null world synchronously --
+            // setWorld({world:null}) stops both channels and clears the
+            // pending music-rotation timer without recording a miss.
+            this.audio.flushMisses();
+            this.audio.setWorld({ world: null, bindings: {} });
         }
         this.audio.unlock(); // initChunked runs from the Play click: sticky user activation
         fetchWorldAudio(worldId).then((bundle) => {

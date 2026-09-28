@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { AudioEngine } from '../AudioEngine.js';
 
 function fakeCtx() {
@@ -85,5 +85,84 @@ describe('AudioEngine', () => {
     await flush(); await flush();
     expect(engine.snapshot().music.playing).toBe(false);
     expect(sources.every((s) => !s.started)).toBe(true);
+  });
+
+  // Review round 1 (SOMET-590): unlock() used to also call _startMusic()
+  // whenever no music key was set. Game calls unlock() on every
+  // keydown/mousedown, so a key pressed during the post-track gap (key=null,
+  // musicTimer armed) -- or while a clip's buffer was still loading -- kept
+  // re-picking and re-fetching a clip on every press. Fix: unlock() only
+  // creates/resumes the context; only the rotation timer (or setWorld) may
+  // start a clip.
+  it('unlock() does not restart music mid-gap, and only the rotation timer starts the next clip', async () => {
+    vi.useFakeTimers();
+    try {
+      const { engine, sources } = engineWith({
+        'world/vale/music': [{ key: 'm.ogg', volume: 1, weight: 1, loopable: true }],
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(engine.snapshot().music).toMatchObject({ key: 'm.ogg', playing: true });
+      expect(sources.length).toBe(1);
+
+      // The clip ends: onended clears the key and arms the 3-8s rotation
+      // timer (rand=0 -> exactly the 3000ms floor here).
+      sources[0].onended();
+      expect(engine.snapshot().music.playing).toBe(false);
+
+      // Keys/clicks during the gap used to force a restart (or a re-fetch
+      // if a buffer was still loading). They must now be a no-op for
+      // playback -- only unlock()'s own ctx create/resume happens.
+      engine.unlock();
+      engine.unlock();
+      engine.unlock();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sources.length).toBe(1);
+      expect(engine.snapshot().music.playing).toBe(false);
+
+      // Only the armed timer, once the full gap has elapsed, starts the
+      // next clip.
+      await vi.advanceTimersByTimeAsync(8000);
+      expect(sources.length).toBe(2);
+      expect(engine.snapshot().music).toMatchObject({ key: 'm.ogg', playing: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Review round 1 (SOMET-590): on a world transition (second initChunked
+  // on the same Game), the engine used to keep the OLD world's bindings
+  // until the async fetchWorldAudio resolved, so old music/rotation could
+  // keep playing into the new world. Game.initChunked now synchronously
+  // drops to a null world first; this is the engine-level contract that
+  // relies on.
+  it('setWorld to a null world stops both channels, clears any pending rotation timer, and records no miss for the null world', async () => {
+    vi.useFakeTimers();
+    try {
+      const { engine, sources, posted } = engineWith({
+        'world/vale/music': [{ key: 'm.ogg', volume: 1, weight: 1, loopable: true }],
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(engine.snapshot().music).toMatchObject({ key: 'm.ogg', playing: true });
+
+      engine.setWorld({ world: null, bindings: {} });
+      expect(engine.snapshot()).toMatchObject({
+        world: null,
+        music: { key: null, playing: false },
+        ambience: { key: null, playing: false },
+      });
+
+      // No rotation timer survives the switch -- advancing well past the
+      // max gap must not start a new source.
+      await vi.advanceTimersByTimeAsync(9000);
+      expect(sources.length).toBe(1);
+      expect(engine.snapshot().music.playing).toBe(false);
+
+      await engine.flushMisses();
+      expect(posted).toEqual([]); // the clip resolved fine; none recorded, and none for the null world either
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
