@@ -8,6 +8,8 @@ const {
   baseUrlError,
   buildProviderPatch,
   setActiveProvider,
+  loadActiveProviderWithSecret,
+  createProvider,
 } = require('../src/services/aiProviders');
 
 const url = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
@@ -191,4 +193,40 @@ test('exactly one provider can be active', { skip: !url ? 'no database URL' : fa
   const stillActive = await pool.query('SELECT id FROM ai_providers WHERE is_active');
   assert.strictEqual(stillActive.rowCount, 1, 'a failed activation must not clear the active row');
   assert.strictEqual(stillActive.rows[0].id, b);
+});
+
+// --- Modality (game audio slice 1) ---------------------------------------
+
+test('providerFieldError: modality', () => {
+  const base = { name: 'box', base_url: 'http://192.168.0.217:8001' };
+  assert.strictEqual(providerFieldError({ ...base, modality: 'audio' }), null,
+    'an audio provider needs no request_template');
+  assert.match(providerFieldError({ ...base, modality: 'video', request_template: {} }), /modality/);
+  assert.match(providerFieldError(base), /request_template/,
+    'an image provider (the default) still requires a template');
+});
+
+test('activation is per modality', { skip: !url ? 'no database URL' : false }, async (t) => {
+  const pool = new Pool({ connectionString: url });
+  const made = [];
+  t.after(async () => {
+    try { if (made.length) await pool.query('DELETE FROM ai_providers WHERE id = ANY($1)', [made]); }
+    finally { await pool.end(); }
+  });
+  const tag = `${process.pid}-${Date.now()}`;
+  const img = await createProvider(pool, { name: `mod-img-${tag}`, base_url: 'http://127.0.0.1:9/', request_template: {} });
+  const aud = await createProvider(pool, { name: `mod-aud-${tag}`, base_url: 'http://127.0.0.1:9/', modality: 'audio' });
+  made.push(img.id, aud.id);
+  assert.deepStrictEqual(aud.request_template, {}, 'audio create fills an empty template');
+
+  await setActiveProvider(pool, img.id);
+  await setActiveProvider(pool, aud.id);
+  const active = await pool.query('SELECT id FROM ai_providers WHERE is_active AND id = ANY($1) ORDER BY id', [made]);
+  assert.deepStrictEqual(active.rows.map((r) => r.id), [img.id, aud.id].sort((a, b) => a - b),
+    'activating the audio provider must not deactivate the image one');
+
+  const image = await loadActiveProviderWithSecret(pool);
+  assert.notStrictEqual(image && image.id, aud.id, 'the default lookup never returns an audio provider');
+  const audio = await loadActiveProviderWithSecret(pool, 'audio');
+  assert.strictEqual(audio.id, aud.id);
 });
