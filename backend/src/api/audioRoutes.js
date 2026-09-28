@@ -11,7 +11,9 @@ const { requireAdmin, requireAuth } = require('../auth/middleware.js');
 const aiProviders = require('../services/aiProviders');
 const rap = require('../services/remoteAudioProvider');
 const lib = require('../services/audioLibrary');
-const { SUBJECT_KINDS, slotKind } = require('../services/audioSubjects');
+const {
+  SUBJECT_KINDS, MAX_SUBJECT_KEY, slotKind, subjectExists,
+} = require('../services/audioSubjects');
 const { checkClipBuffer } = require('../services/oggInfo');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -32,6 +34,21 @@ async function contextFor(pool, subjectKind, subjectKey) {
   }
   const b = (await pool.query('SELECT name, art_style FROM biomes WHERE name = $1', [subjectKey])).rows[0];
   return `the ${subjectKey} biome${b && b.art_style ? `: ${b.art_style}` : ''}`;
+}
+
+// Shared subject/slot validation for propose, generate and upload. Every
+// field must be a single string (a repeated query param arrives as an array),
+// the slot must be in the registry and the subject must exist (spec §3).
+// Returns { clipKind } or { error } (always a 400).
+async function checkSubject(pool, kind, key, slot) {
+  if (typeof kind !== 'string' || typeof key !== 'string' || typeof slot !== 'string'
+    || !key || key.length > MAX_SUBJECT_KEY) {
+    return { error: 'subject_kind, subject_key (1-200 chars) and slot must each be a single string' };
+  }
+  const clipKind = slotKind(kind, slot);
+  if (!clipKind) return { error: 'unknown subject or slot' };
+  if (!(await subjectExists(pool, kind, key))) return { error: 'unknown subject' };
+  return { clipKind };
 }
 
 function sendError(res, err) {
@@ -105,9 +122,9 @@ module.exports = function audioRoutes(pool) {
 
   router.post('/admin/propose', admin, async (req, res) => {
     const { subject_kind: kind, subject_key: key, slot } = req.body || {};
-    const clipKind = slotKind(kind, slot);
-    if (!clipKind || typeof key !== 'string') return res.status(400).json({ error: 'unknown subject or slot' });
     try {
+      const { clipKind, error } = await checkSubject(pool, kind, key, slot);
+      if (error) return res.status(400).json({ error });
       const provider = await resolveAudioProvider(pool, req.body.provider_id);
       if (!provider) return res.status(503).json({ error: 'No active audio provider. Add one under AI Providers with modality "audio".' });
       const r = await rap.propose(provider, { context: await contextFor(pool, kind, key), kind: clipKind });
@@ -118,12 +135,10 @@ module.exports = function audioRoutes(pool) {
 
   router.post('/admin/generate', admin, async (req, res) => {
     const b = req.body || {};
-    const clipKind = slotKind(b.subject_kind, b.slot);
-    if (!clipKind || typeof b.subject_key !== 'string' || !b.subject_key) {
-      return res.status(400).json({ error: 'unknown subject or slot' });
-    }
-    if (clipKind === 'sfx') return res.status(400).json({ error: 'sfx generation arrives in slice 2' });
     try {
+      const { clipKind, error } = await checkSubject(pool, b.subject_kind, b.subject_key, b.slot);
+      if (error) return res.status(400).json({ error });
+      if (clipKind === 'sfx') return res.status(400).json({ error: 'sfx generation arrives in slice 2' });
       const provider = await resolveAudioProvider(pool, b.provider_id);
       if (!provider) return res.status(503).json({ error: 'No active audio provider. Add one under AI Providers with modality "audio".' });
       // Always an explicit seed: the box caches by request, so a repeated or
@@ -146,12 +161,12 @@ module.exports = function audioRoutes(pool) {
 
   router.post('/admin/upload', admin, express.raw({ type: 'audio/ogg', limit: '8mb' }), async (req, res) => {
     const { subject_kind: kind, subject_key: key, slot, label } = req.query;
-    const clipKind = slotKind(kind, slot);
-    if (!clipKind || !key) return res.status(400).json({ error: 'unknown subject or slot' });
-    if (!Buffer.isBuffer(req.body)) return res.status(400).json({ error: 'send the file as Content-Type: audio/ogg' });
-    const checked = checkClipBuffer(req.body, clipKind);
-    if (!checked.ok) return res.status(400).json({ error: checked.error });
     try {
+      const { clipKind, error } = await checkSubject(pool, kind, key, slot);
+      if (error) return res.status(400).json({ error });
+      if (!Buffer.isBuffer(req.body)) return res.status(400).json({ error: 'send the file as Content-Type: audio/ogg' });
+      const checked = checkClipBuffer(req.body, clipKind);
+      if (!checked.ok) return res.status(400).json({ error: checked.error });
       const clip = await lib.storeClip(pool, {
         buffer: req.body, kind: clipKind, label: String(label || `${key} ${slot} (upload)`).slice(0, 200),
         source: 'uploaded', durationMs: checked.durationMs,

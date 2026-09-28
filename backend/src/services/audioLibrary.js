@@ -3,7 +3,9 @@
 // Clips, bindings and misses (spec §1). DB functions take `db` first so a
 // caller inside a transaction can pass its client.
 const assetStore = require('./assetStore');
-const { SUBJECT_KINDS, slotKind, isKnownSlot } = require('./audioSubjects');
+const {
+  SUBJECT_KINDS, MAX_SUBJECT_KEY, isKnownKind, slotKind, isKnownSlot, existingSubjects,
+} = require('./audioSubjects');
 
 class AudioInputError extends Error {
   constructor(message) { super(message); this.status = 400; }
@@ -27,7 +29,7 @@ async function storeClip(db, c) {
 }
 
 async function bindClip(db, { subjectKind, subjectKey, slot, clipId, volume = 1, weight = 1 }) {
-  if (!SUBJECT_KINDS[subjectKind]) throw new AudioInputError(`unknown subject kind '${subjectKind}'`);
+  if (!isKnownKind(subjectKind)) throw new AudioInputError(`unknown subject kind '${subjectKind}'`);
   const expected = slotKind(subjectKind, slot);
   if (!expected) throw new AudioInputError(`'${subjectKind}' has no slot '${slot}'`);
   const clip = (await db.query('SELECT kind FROM audio_clips WHERE id = $1', [clipId])).rows[0];
@@ -95,8 +97,8 @@ const BINDING_COLUMNS = `b.id AS binding_id, b.subject_kind, b.subject_key, b.sl
   c.loop_start_ms, c.loop_end_ms`;
 
 async function subjectSlots(db, subjectKind, subjectKey) {
+  if (!isKnownKind(subjectKind)) throw new AudioInputError(`unknown subject kind '${subjectKind}'`);
   const k = SUBJECT_KINDS[subjectKind];
-  if (!k) throw new AudioInputError(`unknown subject kind '${subjectKind}'`);
   const r = await db.query(
     `SELECT ${BINDING_COLUMNS} FROM audio_bindings b JOIN audio_clips c ON c.id = b.clip_id
       WHERE b.subject_kind = $1 AND b.subject_key = $2 ORDER BY b.sort, b.id`, [subjectKind, subjectKey]);
@@ -125,19 +127,38 @@ async function worldAudioBundle(db, worldId) {
   return { world: w.name, bindings };
 }
 
+// Spec §3: only registry kinds/slots AND subjects that exist are accepted, so
+// a client cannot fill the table with junk. Duplicates in one post collapse
+// into one row with their count (a single INSERT ... ON CONFLICT cannot touch
+// the same row twice), and the upsert is one statement over unnest'ed arrays.
 async function recordMisses(db, misses) {
   if (!Array.isArray(misses)) return 0;
-  const ok = misses.slice(0, MAX_MISSES_PER_POST).filter((m) => m
-    && typeof m.subject_key === 'string' && m.subject_key.length <= 200
+  const shaped = misses.slice(0, MAX_MISSES_PER_POST).filter((m) => m
+    && typeof m.subject_key === 'string' && m.subject_key && m.subject_key.length <= MAX_SUBJECT_KEY
     && isKnownSlot(m.subject_kind, m.slot));
-  for (const m of ok) {
+  const existing = {};
+  for (const kind of new Set(shaped.map((m) => m.subject_kind))) {
     // eslint-disable-next-line no-await-in-loop
-    await db.query(
-      `INSERT INTO audio_misses (subject_kind, subject_key, slot, world) VALUES ($1,$2,$3,$4)
-       ON CONFLICT (subject_kind, subject_key, slot)
-       DO UPDATE SET count = audio_misses.count + 1, last_seen = now(), world = EXCLUDED.world`,
-      [m.subject_kind, m.subject_key, m.slot, typeof m.world === 'string' ? m.world.slice(0, 200) : null]);
+    existing[kind] = await existingSubjects(db, kind,
+      [...new Set(shaped.filter((m) => m.subject_kind === kind).map((m) => m.subject_key))]);
   }
+  const ok = shaped.filter((m) => existing[m.subject_kind].has(m.subject_key));
+  if (!ok.length) return 0;
+  const rows = new Map();
+  for (const m of ok) {
+    const id = JSON.stringify([m.subject_kind, m.subject_key, m.slot]);
+    const row = rows.get(id) || { kind: m.subject_kind, key: m.subject_key, slot: m.slot, n: 0 };
+    row.n += 1;
+    row.world = typeof m.world === 'string' ? m.world.slice(0, 200) : null;
+    rows.set(id, row);
+  }
+  const r = [...rows.values()];
+  await db.query(
+    `INSERT INTO audio_misses (subject_kind, subject_key, slot, world, count)
+     SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::int[])
+     ON CONFLICT (subject_kind, subject_key, slot)
+     DO UPDATE SET count = audio_misses.count + EXCLUDED.count, last_seen = now(), world = EXCLUDED.world`,
+    [r.map((x) => x.kind), r.map((x) => x.key), r.map((x) => x.slot), r.map((x) => x.world), r.map((x) => x.n)]);
   return ok.length;
 }
 

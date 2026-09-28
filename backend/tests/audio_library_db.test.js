@@ -22,12 +22,13 @@ test('audio library', { skip }, async (t) => {
   const tag = `${process.pid}-${Date.now()}`;
   const worldName = `audio-test-world-${tag}`;
   const biomeName = `audio-test-biome-${tag}`;
+  const ghost = `audio-test-ghost-world-${tag}`;
   const clipIds = [];
   let worldId;
   t.after(async () => {
     try {
       if (clipIds.length) await pool.query('DELETE FROM audio_clips WHERE id = ANY($1)', [clipIds]);
-      await pool.query('DELETE FROM audio_misses WHERE subject_key IN ($1, $2)', [worldName, biomeName]);
+      await pool.query('DELETE FROM audio_misses WHERE subject_key IN ($1, $2, $3)', [worldName, biomeName, ghost]);
       if (worldId) await pool.query('DELETE FROM worlds WHERE id = $1', [worldId]);
       await pool.query('DELETE FROM biomes WHERE name = $1', [biomeName]);
     } finally { await pool.end(); }
@@ -77,6 +78,21 @@ test('audio library', { skip }, async (t) => {
     assert.equal(bundle.bindings[`biome/${biomeName}/ambience`][0].volume, 0.5);
     assert.equal(bundle.bindings[`world/${worldName}/music`][0].key, mus.storage_key);
     assert.equal(await lib.worldAudioBundle(pool, '00000000-0000-0000-0000-000000000000'), null);
+  });
+
+  await t.test('misses for subjects that do not exist, or prototype-key kinds, are dropped', async () => {
+    assert.equal(await lib.recordMisses(pool, [
+      { subject_kind: 'world', subject_key: ghost, slot: 'music', world: ghost },
+      { subject_kind: '__proto__', subject_key: 'x', slot: 'constructor' },
+      { subject_kind: 'constructor', subject_key: 'x', slot: 'music' },
+      { subject_kind: 'world', subject_key: worldName, slot: 'ambience', world: worldName },
+    ]), 1, 'only the miss for the real world is kept');
+    const junk = await pool.query(
+      "SELECT 1 FROM audio_misses WHERE subject_key = $1 OR subject_kind IN ('__proto__', 'constructor')", [ghost]);
+    assert.equal(junk.rowCount, 0, 'no row for an unknown subject');
+    const real = await pool.query(
+      "SELECT count FROM audio_misses WHERE subject_kind = 'world' AND subject_key = $1 AND slot = 'ambience'", [worldName]);
+    assert.equal(real.rows[0].count, 1);
   });
 
   await t.test('bindClip on a checked-out client runs inside the caller\'s own transaction', async () => {

@@ -35,6 +35,7 @@ test('audio routes', { skip }, async (t) => {
   assetStore.__setAssetClient({ bucketExists: async () => true, putObject: async () => {} });
   const tag = `${process.pid}-${Date.now()}`;
   const worldName = `audio-route-world-${tag}`;
+  const ghostWorld = `audio-route-ghost-${tag}`;
   const made = { users: [], providers: [], worlds: [] };
   const seen = [];
   const box = http.createServer((req, res) => {
@@ -54,8 +55,8 @@ test('audio routes', { skip }, async (t) => {
 
   t.after(async () => {
     try {
-      await pool.query(`DELETE FROM audio_clips WHERE id IN (SELECT clip_id FROM audio_bindings WHERE subject_key = $1)`, [worldName]);
-      await pool.query('DELETE FROM audio_misses WHERE subject_key = $1', [worldName]);
+      await pool.query(`DELETE FROM audio_clips WHERE id IN (SELECT clip_id FROM audio_bindings WHERE subject_key IN ($1, $2))`, [worldName, ghostWorld]);
+      await pool.query('DELETE FROM audio_misses WHERE subject_key IN ($1, $2)', [worldName, ghostWorld]);
       if (made.worlds.length) await pool.query('DELETE FROM worlds WHERE id = ANY($1)', [made.worlds]);
       if (made.providers.length) await pool.query('DELETE FROM ai_providers WHERE id = ANY($1)', [made.providers]);
       if (made.users.length) await pool.query('DELETE FROM users WHERE id = ANY($1)', [made.users]);
@@ -63,14 +64,19 @@ test('audio routes', { skip }, async (t) => {
   });
 
   const admin = await makeUser(pool, 'admin', tag);
+  made.users.push(admin.id);
   const player = await makeUser(pool, 'player', tag);
-  made.users.push(admin.id, player.id);
+  made.users.push(player.id);
   const worldId = (await pool.query(`INSERT INTO worlds (name, seed) VALUES ($1, 1) RETURNING id`, [worldName])).rows[0].id;
   made.worlds.push(worldId);
   const prov = (await pool.query(
     `INSERT INTO ai_providers (name, base_url, request_template, modality, auth_token)
      VALUES ($1, $2, '{}'::jsonb, 'audio', 'sk_route_test') RETURNING id`, [`audio-route-${tag}`, boxUrl])).rows[0].id;
   made.providers.push(prov);
+  const imageProv = (await pool.query(
+    `INSERT INTO ai_providers (name, base_url, request_template, modality, auth_token)
+     VALUES ($1, $2, '{}'::jsonb, 'image', 'sk_route_image') RETURNING id`, [`image-route-${tag}`, boxUrl])).rows[0].id;
+  made.providers.push(imageProv);
 
   await t.test('admin routes reject a player (403) and anonymous (401)', async () => {
     assert.equal((await request(app).get('/api/audio/admin/subjects').set('Authorization', bearer(player))).status, 403);
@@ -95,6 +101,60 @@ test('audio routes', { skip }, async (t) => {
     assert.equal(res.status, 400);
   });
 
+  await t.test('generate/propose/upload refuse a subject that does not exist (400, box never called)', async () => {
+    const before = seen.length;
+    const gen = await request(app).post('/api/audio/admin/generate').set('Authorization', bearer(admin))
+      .send({ subject_kind: 'world', subject_key: ghostWorld, slot: 'music', provider_id: prov });
+    assert.equal(gen.status, 400, JSON.stringify(gen.body));
+    assert.equal(gen.body.error, 'unknown subject');
+    const prop = await request(app).post('/api/audio/admin/propose').set('Authorization', bearer(admin))
+      .send({ subject_kind: 'world', subject_key: ghostWorld, slot: 'music', provider_id: prov });
+    assert.equal(prop.status, 400, JSON.stringify(prop.body));
+    assert.equal(prop.body.error, 'unknown subject');
+    const up = await request(app)
+      .post(`/api/audio/admin/upload?subject_kind=world&subject_key=${encodeURIComponent(ghostWorld)}&slot=music`)
+      .set('Authorization', bearer(admin)).set('Content-Type', 'audio/ogg').send(OGG);
+    assert.equal(up.status, 400, JSON.stringify(up.body));
+    assert.equal(up.body.error, 'unknown subject');
+    assert.equal(seen.length, before, 'no box call for an unknown subject');
+    const rows = await pool.query('SELECT 1 FROM audio_bindings WHERE subject_key = $1', [ghostWorld]);
+    assert.equal(rows.rowCount, 0);
+  });
+
+  await t.test('non-string / repeated / over-long subject fields are 400, not a crash', async () => {
+    const q = `subject_kind=world&subject_key=${encodeURIComponent(worldName)}&slot=music&slot=music`;
+    const dup = await request(app).post(`/api/audio/admin/upload?${q}`).set('Authorization', bearer(admin))
+      .set('Content-Type', 'audio/ogg').send(OGG).timeout(5000);
+    assert.equal(dup.status, 400, JSON.stringify(dup.body));
+    const arr = await request(app).post('/api/audio/admin/generate').set('Authorization', bearer(admin))
+      .send({ subject_kind: ['world'], subject_key: worldName, slot: 'music', provider_id: prov }).timeout(5000);
+    assert.equal(arr.status, 400, JSON.stringify(arr.body));
+    const long = await request(app).post('/api/audio/admin/generate').set('Authorization', bearer(admin))
+      .send({ subject_kind: 'world', subject_key: 'w'.repeat(201), slot: 'music', provider_id: prov }).timeout(5000);
+    assert.equal(long.status, 400, JSON.stringify(long.body));
+  });
+
+  await t.test('prototype-key subject kinds are 400, not a hung request', async () => {
+    for (const route of ['generate', 'propose']) {
+      // eslint-disable-next-line no-await-in-loop
+      const res = await request(app).post(`/api/audio/admin/${route}`).set('Authorization', bearer(admin))
+        .send({ subject_kind: 'constructor', subject_key: worldName, slot: 'music', provider_id: prov }).timeout(5000);
+      assert.equal(res.status, 400, `${route}: ${JSON.stringify(res.body)}`);
+    }
+    const up = await request(app)
+      .post(`/api/audio/admin/upload?subject_kind=__proto__&subject_key=x&slot=constructor`)
+      .set('Authorization', bearer(admin)).set('Content-Type', 'audio/ogg').send(OGG).timeout(5000);
+    assert.equal(up.status, 400, JSON.stringify(up.body));
+  });
+
+  await t.test('generate with an IMAGE provider id is 503 -- audio never uses an image provider', async () => {
+    const before = seen.length;
+    const res = await request(app).post('/api/audio/admin/generate').set('Authorization', bearer(admin))
+      .send({ subject_kind: 'world', subject_key: worldName, slot: 'music', provider_id: imageProv });
+    assert.equal(res.status, 503, JSON.stringify(res.body));
+    assert.equal(seen.length, before, 'the image provider was never called');
+  });
+
   await t.test('upload accepts OGG and rejects anything else', async () => {
     const q = `subject_kind=world&subject_key=${encodeURIComponent(worldName)}&slot=ambience&label=up`;
     const ok = await request(app).post(`/api/audio/admin/upload?${q}`).set('Authorization', bearer(admin))
@@ -107,10 +167,16 @@ test('audio routes', { skip }, async (t) => {
   });
 
   await t.test('admin/subjects reports filled slot counts per subject', async () => {
-    // The world now has one bound clip in `music` (the generate test above)
-    // and one in `ambience` (the upload test above) -- two DISTINCT slots
-    // filled, not two clips, so this also guards against a naive COUNT(*)
-    // that would double-count a slot with several clips bound to it.
+    // The world has one bound clip in `music` (the generate test above) and
+    // one in `ambience` (the upload test above). Bind a SECOND music clip so
+    // the world holds three clips in two DISTINCT slots: a naive COUNT(*)
+    // would report 3 here, COUNT(DISTINCT slot) reports 2.
+    const second = await request(app)
+      .post(`/api/audio/admin/upload?subject_kind=world&subject_key=${encodeURIComponent(worldName)}&slot=music&label=second`)
+      .set('Authorization', bearer(admin)).set('Content-Type', 'audio/ogg').send(OGG);
+    assert.equal(second.status, 201, JSON.stringify(second.body));
+    const clips = await pool.query('SELECT 1 FROM audio_bindings WHERE subject_kind = $1 AND subject_key = $2', ['world', worldName]);
+    assert.equal(clips.rowCount, 3, 'precondition: three clips bound across two slots');
     const res = await request(app).get('/api/audio/admin/subjects').set('Authorization', bearer(admin));
     assert.equal(res.status, 200);
     const worldGroup = res.body.find((g) => g.kind === 'world');
@@ -123,12 +189,21 @@ test('audio routes', { skip }, async (t) => {
     const b = await request(app).get(`/api/audio/world/${worldId}`).set('Authorization', bearer(player));
     assert.equal(b.status, 200);
     assert.equal(b.body.world, worldName);
-    assert.equal(b.body.bindings[`world/${worldName}/music`].length, 1);
+    assert.equal(b.body.bindings[`world/${worldName}/music`].length, 2);
     assert.equal(b.body.bindings[`world/${worldName}/ambience`].length, 1);
     const m = await request(app).post('/api/audio/misses').set('Authorization', bearer(player))
-      .send({ misses: [{ subject_kind: 'biome', subject_key: worldName, slot: 'ambience', world: worldName }] });
+      .send({ misses: [{ subject_kind: 'world', subject_key: worldName, slot: 'ambience', world: worldName }] });
     assert.equal(m.status, 200);
     assert.equal(m.body.accepted, 1);
+  });
+
+  await t.test('a miss for a world that does not exist is dropped (accepted 0, no row)', async () => {
+    const m = await request(app).post('/api/audio/misses').set('Authorization', bearer(player))
+      .send({ misses: [{ subject_kind: 'world', subject_key: ghostWorld, slot: 'music', world: ghostWorld }] });
+    assert.equal(m.status, 200);
+    assert.equal(m.body.accepted, 0);
+    const rows = await pool.query('SELECT 1 FROM audio_misses WHERE subject_key = $1', [ghostWorld]);
+    assert.equal(rows.rowCount, 0);
   });
 
   await t.test('.ogg assets are served as audio/ogg', async () => {
