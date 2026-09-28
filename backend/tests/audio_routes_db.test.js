@@ -106,6 +106,19 @@ test('audio routes', { skip }, async (t) => {
     assert.match(bad.body.error, /not an OGG/i);
   });
 
+  await t.test('admin/subjects reports filled slot counts per subject', async () => {
+    // The world now has one bound clip in `music` (the generate test above)
+    // and one in `ambience` (the upload test above) -- two DISTINCT slots
+    // filled, not two clips, so this also guards against a naive COUNT(*)
+    // that would double-count a slot with several clips bound to it.
+    const res = await request(app).get('/api/audio/admin/subjects').set('Authorization', bearer(admin));
+    assert.equal(res.status, 200);
+    const worldGroup = res.body.find((g) => g.kind === 'world');
+    assert.ok(worldGroup, 'no world group in the response');
+    assert.ok(worldGroup.subjects.includes(worldName), 'subjects must still be a plain array of names');
+    assert.equal(worldGroup.filled[worldName], 2);
+  });
+
   await t.test('player bundle + misses', async () => {
     const b = await request(app).get(`/api/audio/world/${worldId}`).set('Authorization', bearer(player));
     assert.equal(b.status, 200);

@@ -14,7 +14,7 @@ import {
 import { Link } from 'react-router-dom';
 import styled from 'styled-components';
 import {
-  useAudioSubjects, useAudioMisses, useSubjectSlots, useSubjectCoverage, slotRows,
+  useAudioSubjects, useAudioMisses, useSubjectSlots, slotRows,
 } from './useAudioAdmin.js';
 import { useAiProviders } from './useAiProviders.js';
 import AdminLoading from './AdminLoading.jsx';
@@ -108,7 +108,6 @@ function AudioAdmin() {
   const { misses } = useAudioMisses();
   const { activeAudioProvider, isLoadingProviders } = useAiProviders();
   const rows = useMemo(() => slotRows(subjects), [subjects]);
-  const coverage = useSubjectCoverage(rows);
   const [filter, setFilter] = useState('');
   const [selected, setSelected] = useState(null);
   const preview = useAudioPreview();
@@ -159,7 +158,6 @@ function AudioAdmin() {
               <h3>{g.label}</h3>
               <ul>
                 {g.rows.map((r) => {
-                  const cov = coverage[rowKey(r.kind, r.key)] || { filled: null, total: r.slots.length };
                   const active = Boolean(selected) && selected.kind === r.kind && selected.key === r.key;
                   return (
                     <li key={rowKey(r.kind, r.key)}>
@@ -169,7 +167,7 @@ function AudioAdmin() {
                         onClick={() => setSelected({ kind: r.kind, key: r.key })}
                       >
                         <span>{r.key}</span>
-                        <Pill>{cov.filled == null ? '…' : cov.filled}/{cov.total}</Pill>
+                        <Pill>{r.filled}/{r.slots.length}</Pill>
                       </SubjectButton>
                     </li>
                   );
@@ -209,7 +207,14 @@ function AudioAdmin() {
               {isLoadingSlots && <AdminLoading label="Loading clips…" inline size={16} />}
               {selectedRow.slots.map((s) => (
                 <AudioSlotCard
-                  key={s.slot}
+                  // Keyed by subject too, not just slot: every world has the
+                  // same slot names as every other world (music, ambience),
+                  // so a slot-only key let React reuse a mounted card across
+                  // a subject switch -- carrying over its draft prompt and
+                  // (before the mutationKey fix in useAudioAdmin.js) letting
+                  // a pending generation for one subject read as pending for
+                  // whichever subject the card next rendered.
+                  key={`${selectedRow.kind}/${selectedRow.key}/${s.slot}`}
                   subject={selectedRow}
                   slot={s.slot}
                   clipKind={s.clipKind}

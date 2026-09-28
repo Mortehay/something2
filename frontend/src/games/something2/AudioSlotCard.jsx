@@ -4,9 +4,10 @@
 // layout shell -- this is where the per-slot state (draft prompt, upload
 // file, elapsed generation time) actually lives.
 import { useEffect, useRef, useState } from 'react';
+import { useIsMutating } from '@tanstack/react-query';
 import styled from 'styled-components';
 import {
-  useProposeAudio, useGenerateAudio, useUploadAudio, useUpdateBinding, useUnbind,
+  useProposeAudio, useGenerateAudio, useUploadAudio, useUpdateBinding, useUnbind, generateMutationKey,
 } from './useAudioAdmin.js';
 import { assetUrl } from './src/js/net/assets.js';
 import { API_URL } from '../../config.js';
@@ -68,7 +69,7 @@ const formatKb = (bytes) => (Number.isFinite(bytes) ? `${Math.round(bytes / 1024
 // Seconds since mount. A separate component rather than state in the parent
 // so the reset-on-stop is "unmount" instead of a setState call inside an
 // effect body (which react-hooks/set-state-in-effect flags) -- mounted only
-// while a generation is in flight, via `{generate.isPending && <Elapsed />}`.
+// while a generation is in flight, via `{generating && <Elapsed />}`.
 function Elapsed() {
   const [seconds, setSeconds] = useState(0);
   useEffect(() => {
@@ -140,12 +141,21 @@ function AudioSlotCard({
   subject, slot, clipKind, rows, playingId, onPlay, onStop,
 }) {
   const propose = useProposeAudio();
-  const generate = useGenerateAudio();
+  const generate = useGenerateAudio(subject.kind, subject.key, slot);
   const upload = useUploadAudio();
   const [style, setStyle] = useState('');
   const [prompt, setPrompt] = useState('');
   const [proposedSlots, setProposedSlots] = useState(null);
   const fileRef = useRef(null);
+
+  // NOT generate.isPending: that comes from THIS hook instance, which is
+  // fresh (isPending=false) every time this card remounts -- switching
+  // subjects, or navigating away and back while a generation is still
+  // running on the GPU box. useIsMutating reads the GLOBAL mutation cache by
+  // mutationKey instead, so the pending state (and therefore the disabled
+  // button) survives the remount and a second click can't fire a duplicate
+  // request at the box.
+  const generating = useIsMutating({ mutationKey: generateMutationKey(subject.kind, subject.key, slot) }) > 0;
 
   const onSuggest = () => {
     propose.mutate(
@@ -213,8 +223,8 @@ function AudioSlotCard({
         <Secondary type="button" disabled={propose.isPending} onClick={onSuggest}>
           {propose.isPending ? 'Suggesting…' : 'Suggest'}
         </Secondary>
-        <Button type="button" disabled={generate.isPending} onClick={onGenerate}>
-          {generate.isPending ? <>Generating… <Elapsed />s</> : 'Generate'}
+        <Button type="button" disabled={generating} onClick={onGenerate}>
+          {generating ? <>Generating… <Elapsed />s</> : 'Generate'}
         </Button>
         <Secondary type="button" onClick={() => fileRef.current?.click()} disabled={upload.isPending}>
           {upload.isPending ? 'Uploading…' : 'Upload .ogg'}

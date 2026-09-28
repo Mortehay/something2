@@ -83,10 +83,16 @@ module.exports = function audioRoutes(pool) {
 
   router.get('/admin/subjects', admin, async (req, res) => {
     try {
+      // One query for filled-slot counts across every subject, not one
+      // /admin/slots request per subject -- see filledCounts' own comment.
+      const counts = await lib.filledCounts(pool);
       const out = [];
       for (const [kind, def] of Object.entries(SUBJECT_KINDS)) {
         // eslint-disable-next-line no-await-in-loop
-        out.push({ kind, label: def.label, slots: def.slots, subjects: await def.list(pool) });
+        out.push({
+          kind, label: def.label, slots: def.slots, subjects: await def.list(pool),
+          filled: counts[kind] || {},
+        });
       }
       res.json(out);
     } catch (err) { sendError(res, err); }

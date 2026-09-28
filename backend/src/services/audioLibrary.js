@@ -145,7 +145,29 @@ async function listMisses(db) {
   return (await db.query('SELECT * FROM audio_misses ORDER BY count DESC, last_seen DESC LIMIT 500')).rows;
 }
 
+// The Audio tab's "filled/total" badge, for every subject at once.
+//
+// One query for the whole catalogue rather than one /admin/slots request per
+// subject (which the admin UI originally did): with ~130 worlds+biomes in the
+// dev DB, that fan-out could burn a third of the global per-IP rate limit
+// just opening the tab. COUNT(DISTINCT slot) -- not COUNT(*) -- so a slot
+// with several clips bound to it (unlimited per spec) still counts as one
+// FILLED slot, not one per clip.
+//
+// Returns { [subject_kind]: { [subject_key]: filledSlotCount } }. A subject
+// with no bindings at all is simply absent from its kind's map -- callers
+// treat a missing key as 0 (the frontend's slotRows does this explicitly).
+async function filledCounts(db) {
+  const r = await db.query(
+    'SELECT subject_kind, subject_key, COUNT(DISTINCT slot)::int AS filled FROM audio_bindings GROUP BY 1, 2');
+  const out = {};
+  for (const row of r.rows) {
+    (out[row.subject_kind] = out[row.subject_kind] || {})[row.subject_key] = row.filled;
+  }
+  return out;
+}
+
 module.exports = {
   AudioInputError, storeClip, bindClip, updateBinding, unbind, deleteClip,
-  subjectSlots, worldAudioBundle, recordMisses, listMisses, MAX_MISSES_PER_POST,
+  subjectSlots, worldAudioBundle, recordMisses, listMisses, filledCounts, MAX_MISSES_PER_POST,
 };

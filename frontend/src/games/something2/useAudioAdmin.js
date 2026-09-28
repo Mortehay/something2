@@ -3,7 +3,7 @@
 // Every /api/audio/admin/* route is adminGuard'd -- same trap documented in
 // useArtConsole.js and useAiProviders.js -- so authHeaders() is NOT optional
 // on any call here, reads included.
-import { useMutation, useQuery, useQueries, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { authHeaders, apiFetch } from './src/js/net/auth.js';
 import { API_URL } from '../../config.js';
@@ -37,11 +37,20 @@ function fetchSlots(kind, key) {
 // one row per subject, each carrying its own slot list -- the shape both the
 // left column's subject tree and the right column's slot cards want. Pure and
 // exported so it is unit-testable without mounting the query hook.
+//
+// `filled` (the count of DISTINCT slots with >=1 clip bound) comes straight
+// from the server's one aggregate query rather than a per-subject fetch --
+// see the backend's filledCounts(). A subject absent from `group.filled`
+// simply has none bound yet, hence the `|| 0`.
 export function slotRows(subjects) {
   const out = [];
   for (const group of subjects || []) {
     const slots = Object.entries(group.slots || {}).map(([slot, clipKind]) => ({ slot, clipKind }));
-    for (const key of group.subjects || []) out.push({ kind: group.kind, label: group.label, key, slots });
+    for (const key of group.subjects || []) {
+      out.push({
+        kind: group.kind, label: group.label, key, slots, filled: (group.filled && group.filled[key]) || 0,
+      });
+    }
   }
   return out;
 }
@@ -63,32 +72,6 @@ export function useSubjectSlots(kind, key) {
   return { slots: data || {}, isLoadingSlots: isLoading };
 }
 
-// The filled/total badge in the left column's subject tree. There is no bulk
-// coverage endpoint -- /admin/subjects lists subjects and slots but not
-// bindings -- so this fans out one /admin/slots request per row via
-// useQueries, sharing the exact query key useSubjectSlots uses. Selecting a
-// subject in the right column is then a cache hit rather than a second fetch.
-// Slice 1 has two subject kinds and a small catalogue (worlds, biomes), so the
-// fan-out is a handful of requests, not hundreds.
-export function useSubjectCoverage(rows) {
-  const results = useQueries({
-    queries: rows.map((r) => ({
-      queryKey: slotsKey(r.kind, r.key),
-      queryFn: () => fetchSlots(r.kind, r.key),
-      staleTime: 30000,
-    })),
-  });
-  const coverage = {};
-  rows.forEach((r, i) => {
-    const data = results[i]?.data;
-    coverage[`${r.kind}/${r.key}`] = {
-      filled: data ? r.slots.filter((s) => (data[s.slot] || []).length > 0).length : null,
-      total: r.slots.length,
-    };
-  });
-  return coverage;
-}
-
 export function useAudioMisses() {
   const { data, isLoading } = useQuery({
     queryKey: MISSES_KEY,
@@ -108,29 +91,43 @@ export function useProposeAudio() {
   });
 }
 
-// One toast id so a second Generate press (a different slot card) replaces
-// the message rather than stacking a pile of "Generating..." toasts -- the
-// wording itself is what the brief asks for: this can take a few minutes,
-// music on the GPU box being the slow case.
-const GENERATE_TOAST_ID = 'audio-generate';
+// A per-(subject,slot) mutation key, not a bare hook-local mutation.
+//
+// Two things this buys over a plain useMutation():
+//   1. A toast id scoped to this exact slot (`audio-generate:world/vale/music`)
+//      so generating for two different subjects/slots shows two toasts
+//      instead of one clobbering the other.
+//   2. The mutation is findable in the GLOBAL mutation cache by this key via
+//      useIsMutating(), which survives a component UNMOUNT. Slot cards are
+//      keyed by subject -- switching subjects or navigating away and back
+//      remounts them, and a fresh useMutation() instance always starts
+//      isPending=false. Without this, a still-running generation (minutes,
+//      for music) looked finished the moment its card remounted, and a
+//      second press could fire a duplicate request at the GPU box.
+export function generateMutationKey(subjectKind, subjectKey, slot) {
+  return ['audio-generate', subjectKind, subjectKey, slot];
+}
 
-export function useGenerateAudio() {
+export function useGenerateAudio(subjectKind, subjectKey, slot) {
   const qc = useQueryClient();
+  const toastId = `audio-generate:${subjectKind}/${subjectKey}/${slot}`;
   return useMutation({
+    mutationKey: generateMutationKey(subjectKind, subjectKey, slot),
     mutationFn: async (body) => {
       const { res, json } = await post('/api/audio/admin/generate', body);
       if (!res.ok) throw new Error(json.error || 'Failed to generate');
       return json;
     },
     onMutate: () => {
-      toast.loading('Generating… this can take a few minutes', { id: GENERATE_TOAST_ID });
+      toast.loading('Generating… this can take a few minutes', { id: toastId });
     },
-    onSuccess: (json, vars) => {
-      toast.success('Clip generated and bound', { id: GENERATE_TOAST_ID });
-      qc.invalidateQueries({ queryKey: slotsKey(vars.subject_kind, vars.subject_key) });
+    onSuccess: () => {
+      toast.success('Clip generated and bound', { id: toastId });
+      qc.invalidateQueries({ queryKey: slotsKey(subjectKind, subjectKey) });
       qc.invalidateQueries({ queryKey: MISSES_KEY });
+      qc.invalidateQueries({ queryKey: SUBJECTS_KEY });
     },
-    onError: (err) => toast.error(err.message, { id: GENERATE_TOAST_ID }),
+    onError: (err) => toast.error(err.message, { id: toastId }),
   });
 }
 
@@ -159,6 +156,7 @@ export function useUploadAudio() {
       toast.success('Uploaded and bound');
       qc.invalidateQueries({ queryKey: slotsKey(vars.subjectKind, vars.subjectKey) });
       qc.invalidateQueries({ queryKey: MISSES_KEY });
+      qc.invalidateQueries({ queryKey: SUBJECTS_KEY });
     },
     onError: (err) => toast.error(err.message),
   });
@@ -198,6 +196,7 @@ export function useUnbind() {
       toast.success('Removed');
       qc.invalidateQueries({ queryKey: slotsKey(subjectKind, subjectKey) });
       qc.invalidateQueries({ queryKey: MISSES_KEY });
+      qc.invalidateQueries({ queryKey: SUBJECTS_KEY });
     },
     onError: (err) => toast.error(err.message),
   });
