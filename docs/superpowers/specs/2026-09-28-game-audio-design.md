@@ -194,15 +194,21 @@ enums and ranges):
   duration_s, onset_ms}], cached, served_from, generation_id}`.
   - **`cached: true` means the same request returns the same file, so
     Regenerate always sends a fresh random seed.**
-- `POST /api/audio` (music/ambience) was **not called**, to avoid forcing a
-  model switch while the box was busy with image work.
+- `POST /api/audio` (music/ambience) is **synchronous**: it returns
+  `{audio: [base64 OGG], info: {kind, name, style, prompt, author, seed,
+  duration_s, sample_rate, loop_start, loop_end, bars, seam_rms_jump_db,
+  cached, served_from, generation_id, duration_ms}}` directly, no polling
+  needed on the happy path.
+  - Measured 2026-09-28: a 30 s `forest` ambience took ~117 s **cold** (model
+    load) and ~31 s **warm**. A 126 s `medieval_fantasy` track took ~137 s and
+    came back as 2,005,648 bytes of base64 OGG.
   - The ledger (`GET /api/audio?kind=&name=`) lists rows while they run, with
     `status`, `error`, `url` and `download_url`.
   - `GET /api/audio/{kind}/{name}` returns raw `audio/ogg`.
-  - `generateTrack` therefore accepts either shape: bytes or `audio` in the
-    POST response, or else it polls the ledger by name until `status` is
-    `done` or `failed`, then fetches. The first live call in slice 1 records
-    which shape it is, in this section.
+  - `generateTrack` still tolerates the queued/async shape as a fallback --
+    no inline `audio` in the POST response falls through to polling the
+    ledger by name until `status` is `done` or `failed`, then fetching -- in
+    case a future box or a busy one answers that way instead.
 - Ledger rows carry `loop_start` / `loop_end` (in samples), `sample_rate`,
   `bars` and `seam_rms_jump_db`. We store the loop points (see
   `audio_clips.loop_start_ms` / `loop_end_ms`) and pass them to the Web Audio

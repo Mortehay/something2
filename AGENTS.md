@@ -20,7 +20,7 @@ Claude and Codex follow the same rules. This file is the source of truth for bot
 - [.ai/styleguides/backend.md](.ai/styleguides/backend.md) — Express + pg patterns
 - `.ai/decisions/` — architecture decisions go here (created as needed)
 - [docs/superpowers/specs/2026-07-24-codebase-audit-cycle-design.md](docs/superpowers/specs/2026-07-24-codebase-audit-cycle-design.md) — the audit cycle; re-run it with the `audit-cycle` skill
-- [docs/ai-providers.md](docs/ai-providers.md) — remote AI image providers (SOMET-322): registering a service, template placeholders, pointer syntax, limitations
+- [docs/ai-providers.md](docs/ai-providers.md) — remote AI image providers (SOMET-322): registering a service, template placeholders, pointer syntax, limitations; audio providers (SOMET-590)
 
 ### Trust note: AI providers
 

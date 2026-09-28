@@ -510,3 +510,63 @@ silhouette -- taller than wide, filling a reasonable share of the frame -- and
 a rock is neither. So the reference/style-profile route is for CREATURES, and
 props are served by `generate_core` plus `entities-cutout`, which is both the
 cheaper path and the only one that accepts them.
+
+---
+
+## Audio providers (modality: audio)
+
+Same `ai_providers` table, a second `modality` column (`'image'` default |
+`'audio'`). The single-active index is now `ai_providers_single_active_per_modality`
+-- **one active provider per modality** -- so activating an audio profile
+leaves the active image provider active too. Image generation (tile/entity
+jobs, the art console, the world-spec service) filters to `modality = 'image'`
+and can never pick an audio provider by accident.
+
+### Creating one
+
+Settings → **AI Providers** → modality **Audio**. Base URL is the GPU box's
+audio service, e.g. `http://192.168.0.217:8001`; token is a key created on the
+box itself (Settings → Create key on the box, not here). Image-only fields
+(request template, sprite-sheet layout) are hidden for this modality. The
+token is write-only exactly like an image provider's -- never returned by any
+endpoint, "stored" shown in its place.
+
+**Refresh** lists what the box currently offers, stored in `models_cache`:
+- music styles: `medieval_fantasy`, `tavern`, `dungeon`, `battle`, `village`
+- ambience styles: `forest`, `cave`, `village_day`, `night`, `rain`
+- cues, prefixed `cue:` so they sort apart from styles: `cue:slash`,
+  `cue:hit`, `cue:pickup`, `cue:spell`, `cue:footstep`, `cue:ui_click`,
+  `cue:miss`, `cue:chest_open`, `cue:death`, `cue:waypoint`
+
+### The adapter
+
+`backend/src/services/remoteAudioProvider.js` calls `POST /api/audio/propose`
+(prompt suggestion), then `POST /api/audio` for music/ambience generation --
+never `?master=true` (that returns the uncompressed WAV master, ~13x the size
+of the OGG we store). Every clip that comes back, generated or fetched off the
+ledger, is checked by `backend/src/services/oggInfo.js` before it is trusted:
+`OggS` magic, a Vorbis identification header for the sample rate, duration
+computed from the last page's granule position, and a size cap -- 8 MB for
+music/ambience, 1 MB for sfx. A clip that fails any check is never stored.
+Checked clips are written to MinIO as OGG Vorbis at
+`audio/<kind>/<clip-id>.ogg`, then bound to a subject slot through
+`audio_clips` / `audio_bindings` -- subjects (a world, a biome, ...) are keyed
+by **name**, not id, so a reseed that renumbers ids doesn't orphan a binding.
+
+**Every generation sends an explicit seed** (random unless the admin sets
+one) -- the box caches identical requests, so a same-seed retry would return
+the same file instead of a new take.
+
+### Assigning sounds
+
+The **Audio** sidebar tab (`/game/audio`) is where bindings are made: worlds
+(music, ambience) and biomes (ambience) in slice 1. Its **Missing sounds**
+list is fed by the game client itself, `POST /api/audio/misses` -- a slot a
+player actually hit with nothing bound, not a guess from the catalog.
+
+### Slice 1 limit: synchronous generation
+
+Generate blocks on the HTTP response -- no queue yet. Roughly 30 s for a warm
+30 s ambience clip, and up to ~2 min for a 2-minute track including a cold
+model load. Fine over the LAN; a tunnel (ngrok, Cloudflare) may time out
+before a cold generation finishes. The queue is deferred to slice 2.
