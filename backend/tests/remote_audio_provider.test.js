@@ -1,0 +1,97 @@
+// backend/tests/remote_audio_provider.test.js
+// The adapter against a fake box. Every fake reads the request it was sent, so
+// a test cannot pass while the adapter sends the wrong path/body/auth.
+const test = require('node:test');
+const assert = require('node:assert');
+const fs = require('node:fs');
+const path = require('node:path');
+const rap = require('../src/services/remoteAudioProvider');
+
+const OGG = fs.readFileSync(path.join(__dirname, 'fixtures/audio/tone.ogg'));
+const WAV = fs.readFileSync(path.join(__dirname, 'fixtures/audio/tone.wav'));
+const provider = { base_url: 'http://box.test:8001', auth_token: 'sk_test', modality: 'audio' };
+
+function fakeBox(routes) {
+  const calls = [];
+  const fetchImpl = async (url, init = {}) => {
+    const u = new URL(url);
+    const key = `${(init.method || 'GET')} ${u.pathname}`;
+    calls.push({ key, url: u, headers: init.headers || {}, body: init.body ? JSON.parse(init.body) : null });
+    const h = routes[key];
+    if (!h) return new Response('not found', { status: 404 });
+    return h(u, init, calls.length);
+  };
+  return { fetchImpl, calls };
+}
+const json = (v, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } });
+const noSleep = async () => {};
+
+test('listStyles returns styles and cues with auth', async () => {
+  const { fetchImpl, calls } = fakeBox({
+    'GET /api/audio/styles': (u) => (u.searchParams.get('kind') === 'sfx'
+      ? json([{ value: 'hit', label: 'Hit', kind: 'sfx', engines: ['realistic', 'retro'], entity_default: 'a creature' }])
+      : json([{ value: 'forest', label: 'Forest', kind: 'ambience', slots: { mood: {} } }])),
+  });
+  const r = await rap.listStyles(provider, { fetchImpl });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.styles.map((s) => s.value), ['forest']);
+  assert.deepEqual(r.cues.map((c) => c.value), ['hit']);
+  assert.equal(calls[0].headers.Authorization, 'Bearer sk_test');
+});
+
+test('generateTrack: synchronous base64 response', async () => {
+  const { fetchImpl, calls } = fakeBox({
+    'POST /api/audio': () => json({ audio: [OGG.toString('base64')], info: { loop_start: 0, loop_end: 88200, sample_rate: 44100, prompt: 'p', seed: 7 } }),
+  });
+  const r = await rap.generateTrack(provider, { kind: 'ambience', name: 'n1', style: 'forest', seed: 7 }, { fetchImpl, sleep: noSleep });
+  assert.equal(r.ok, true, r.error);
+  assert.ok(r.buffer.equals(OGG));
+  assert.equal(r.loopEndMs, 2000);
+  assert.equal(calls[0].body.seed, 7, 'the seed is sent explicitly');
+  assert.equal(calls[0].body.kind, 'ambience');
+});
+
+test('generateTrack: queued response polls the ledger then fetches the file', async () => {
+  let polls = 0;
+  const { fetchImpl, calls } = fakeBox({
+    'POST /api/audio': () => json({ id: 'x', status: 'queued', name: 'n2' }),
+    'GET /api/audio': () => { polls += 1; return json({ items: [polls < 2
+      ? { name: 'n2', status: 'running' }
+      : { name: 'n2', status: 'done', sample_rate: 48000, loop_start: 0, loop_end: 96000, prompt: 'pp', seed: 3 }] }); },
+    'GET /api/audio/music/n2': () => new Response(OGG, { status: 200, headers: { 'content-type': 'audio/ogg' } }),
+  });
+  const r = await rap.generateTrack(provider, { kind: 'music', name: 'n2', seed: 3 }, { fetchImpl, sleep: noSleep });
+  assert.equal(r.ok, true, r.error);
+  assert.equal(r.loopEndMs, 2000);
+  const fileCall = calls.find((c) => c.key === 'GET /api/audio/music/n2');
+  assert.equal(fileCall.url.searchParams.has('master'), false, 'never asks for the WAV master');
+});
+
+test('generateTrack rejects a WAV, reports a failed ledger row, and marks 409 retryable', async () => {
+  let r = await rap.generateTrack(provider, { kind: 'music', name: 'w', seed: 1 }, {
+    fetchImpl: fakeBox({ 'POST /api/audio': () => json({ audio: WAV.toString('base64') }) }).fetchImpl, sleep: noSleep });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not an OGG/i);
+
+  r = await rap.generateTrack(provider, { kind: 'music', name: 'f', seed: 1 }, {
+    fetchImpl: fakeBox({
+      'POST /api/audio': () => json({ status: 'queued' }),
+      'GET /api/audio': () => json({ items: [{ name: 'f', status: 'failed', error: 'CUDA out of memory' }] }),
+    }).fetchImpl, sleep: noSleep });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /CUDA out of memory/);
+
+  r = await rap.generateTrack(provider, { kind: 'music', name: 'b', seed: 1 }, {
+    fetchImpl: fakeBox({ 'POST /api/audio': () => json({ detail: 'switch pending' }, 409) }).fetchImpl, sleep: noSleep });
+  assert.equal(r.ok, false);
+  assert.equal(r.retryable, true);
+});
+
+test('propose passes context and kind through', async () => {
+  const { fetchImpl, calls } = fakeBox({
+    'POST /api/audio/propose': () => json({ kind: 'ambience', style: 'forest', slots: { mood: 'calm daytime' }, prompt: 'forest ambience' }),
+  });
+  const r = await rap.propose(provider, { context: 'pine forest', kind: 'ambience' }, { fetchImpl });
+  assert.equal(r.style, 'forest');
+  assert.deepEqual(calls[0].body, { context: 'pine forest', kind: 'ambience' });
+});
