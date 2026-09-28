@@ -43,9 +43,10 @@ All subject keys are **names**, never DB ids, so bindings survive a reseed
 
 `id` (uuid), `kind` (`music` | `ambience` | `sfx`), `label`, `storage_key`
 (`audio/<kind>/<id>.ogg` in the `sprites` bucket), `bytes`, `duration_ms`,
-`loopable` (bool), `source` (`generated` | `uploaded` | `seeded`),
-`provider_id` (nullable FK, `ON DELETE SET NULL`), `prompt`, `style_or_cue`,
-`seed`, `created_at`.
+`loopable` (bool), `loop_start_ms` / `loop_end_ms` (nullable; from the box's
+ledger), `source` (`generated` | `uploaded` | `seeded`), `provider_id`
+(nullable FK, `ON DELETE SET NULL`), `prompt`, `style_or_cue`, `engine`
+(`realistic` | `retro` | null), `seed`, `created_at`.
 
 A clip is independent of where it is used: one clip may be bound to many slots.
 Unbound clips stay until deleted from the library view.
@@ -86,8 +87,9 @@ An empty slot is silence, never an error.
 ### `audio_jobs` — the generation queue
 
 `id`, `batch_id`, `subject_kind`, `subject_key`, `slot`, `clip_kind`, `prompt`,
-`style`, `cue`, `entity`, `variants`, `seed`, `duration_s`, `provider_id`,
-`engine_group` (`music` | `sfx`), `state` (`queued` | `running` | `done` |
+`style`, `slots` (jsonb), `cue`, `entity`, `engine` (`realistic` | `retro`),
+`variants`, `seed`, `duration_s`, `provider_id`, `drain_group` (see
+Dispatcher), `state` (`queued` | `running` | `done` |
 `failed` | `stopped`), `attempts`, `last_error`, `not_before`, `claimed_at`,
 `created_at`, `updated_at`.
 
@@ -124,8 +126,8 @@ call:
 |---|---|---|
 | `propose` | `POST /api/audio/propose {context, kind}` | prefill the generate form; no GPU |
 | `generateTrack` | `POST /api/audio {kind, name, style?, prompt?, context?, slots?, seed?, duration_s?}` | music, ambience |
-| `generateSfx` | `POST /api/audio/sfx {cue, entity?, world?, variants, seed?}` | one cue, 1-5 variants (base64 OGG each) |
-| `generateSfxPack` | `POST /api/audio/sfx-pack {items:[{cue, entity?}], world?, variants, seed?}` | many cues, one model load; per-cue failures reported individually |
+| `generateSfx` | `POST /api/audio/sfx {cue, entity?, engine?, world?, variants, seed?}` | one cue, 1-5 variants (base64 OGG each) |
+| `generateSfxPack` | `POST /api/audio/sfx-pack {items:[{cue, entity?, engine?}], engine?, world?, variants, seed?}` | many cues, one model load; per-cue failures reported individually |
 | `fetchTrack` | `GET /api/audio/{kind}/{name}` (never `master`) | only if `generateTrack` returns a reference instead of bytes |
 
 **Every file is checked before it is stored:**
@@ -142,10 +144,21 @@ is bound to the job's slot, all in one DB transaction after the upload.
 - **One drain per process.** A second start returns 409 `ALREADY_RUNNING`
   (same as art).
 - **Claiming:** `FOR UPDATE SKIP LOCKED` with retry backoff via `not_before`.
-- **Grouped by engine so the box switches model at most once per group.** It
-  drains every queued `music` group job first, then every `sfx` job. SFX jobs
-  are packed into `sfx-pack` calls of up to `AUDIO_SFX_PACK_SIZE` cues
-  (default 12). Each cue's variants become that job's clips.
+- **Grouped so the box switches model as rarely as possible.** `drain_group`
+  is set at enqueue time, and groups drain in this fixed order:
+  1. `music` (all music tracks)
+  2. `ambience` (all ambience loops)
+  3. `sfx_realistic` (packed)
+  4. `sfx_retro` (packed; no model load)
+- Ambience runs next to realistic SFX, so if the box serves both from one model
+  (the gateway lists `audio:ace-step` and `audio:stable-audio`) it stays loaded
+  across the boundary. Whichever model each group uses, the box switches at
+  most three times per batch instead of once per clip.
+- **Packing:** SFX groups are packed into `sfx-pack` calls of up to
+  `AUDIO_SFX_PACK_SIZE` cues (default 12). Each cue's variants become that
+  job's clips.
+- **Every job sends an explicit seed, random unless the admin set one.** The
+  box caches by request, so an omitted or repeated seed returns the old file.
 - **The box's 409 on model switch, or "busy", is back off and retry.** It never
   calls `model-gateway/switch` with `force`.
 - A circuit breaker stops the run after `AUDIO_MAX_CONSECUTIVE_FAILURES`
@@ -153,20 +166,68 @@ is bound to the job's slot, all in one DB transaction after the upload.
 - **Timeout:** `AUDIO_GENERATE_TIMEOUT_MS`, default 10 min (music on the GPU
   can take minutes).
 
-### Open items: facts to record from the live box before slice 1 Task 1
+### Box contract, measured 2026-09-28
 
-The box enforces auth and its OpenAPI leaves response bodies untyped. With a
-`something2-audio` key, one read-only pass plus one small test generation must
-record, in this spec:
+Measured with the `something2-audio` key against the live box. It already
+holds a corpus of generated music, ambience and SFX.
 
-1. **`POST /api/audio`:** is it synchronous, or does it return a job to poll?
-   Which field holds the audio (base64 in JSON, or a name to `fetchTrack`)?
-2. **Cue list:** the real list from `GET /api/audio/styles?kind=sfx`, and the
-   final slot → cue map (section 4) written against it.
-3. **Codec** of the delivered OGG (Vorbis or Opus), its bitrate, and sample
-   sizes for one music track and one SFX.
+**Styles** (`GET /api/audio/styles`, `$[*].value`; each carries `slots` with
+enums and ranges):
+- music: `medieval_fantasy` (default), `tavern`, `dungeon`, `battle`, `village`;
+  slots `tempo_bpm`, `mood`, `featured`
+- ambience: `forest` (default), `cave`, `village_day`, `night`, `rain`; slots
+  `mood`, `featured`
 
-The adapter isolates all three, so the answers change one function each.
+**Cues** (`GET /api/audio/styles?kind=sfx`):
+- `slash`, `hit`, `pickup`, `spell`, `footstep`, `ui_click`, `miss`,
+  `chest_open`, `death`, `waypoint`
+- each cue has `engines` (`realistic` and/or `retro`), a `default_engine`, a
+  `duration_s` and an `entity_default`
+- `retro` renders in about 0.1 s and needs no model load; `realistic` about
+  16 s per cue
+
+**Responses:**
+- `POST /api/audio/propose` is synchronous: `{kind, style, slots, prompt,
+  author, adjusted}`.
+- `POST /api/audio/sfx` is synchronous: `{audio: [base64 OGG per variant],
+  info: {name, cue, entity, engine, prompt, seed, sample_rate, variants: [{url,
+  duration_s, onset_ms}], cached, served_from, generation_id}`.
+  - **`cached: true` means the same request returns the same file, so
+    Regenerate always sends a fresh random seed.**
+- `POST /api/audio` (music/ambience) was **not called**, to avoid forcing a
+  model switch while the box was busy with image work.
+  - The ledger (`GET /api/audio?kind=&name=`) lists rows while they run, with
+    `status`, `error`, `url` and `download_url`.
+  - `GET /api/audio/{kind}/{name}` returns raw `audio/ogg`.
+  - `generateTrack` therefore accepts either shape: bytes or `audio` in the
+    POST response, or else it polls the ledger by name until `status` is
+    `done` or `failed`, then fetches. The first live call in slice 1 records
+    which shape it is, in this section.
+- Ledger rows carry `loop_start` / `loop_end` (in samples), `sample_rate`,
+  `bars` and `seam_rms_jump_db`. We store the loop points (see
+  `audio_clips.loop_start_ms` / `loop_end_ms`) and pass them to the Web Audio
+  source's `loopStart`/`loopEnd`.
+- `?master=true` returns the WAV master (23.9 MB for a 124 s track). It is
+  never used.
+
+**Codec and size** (ffprobe on real files): OGG **Vorbis**, nominal
+128 kbps, **stereo**, 44.1 or 48 kHz.
+
+| clip | duration | bytes |
+|---|---|---|
+| music (village) | 124 s | 1.80 MB (WAV master 23.9 MB, 13×) |
+| ambience (rain loop) | 30 s | 326 KB |
+| SFX (realistic hit) | 0.54 s | 11 KB |
+| SFX (retro hit) | 0.15-0.2 s | ~5 KB |
+
+**Models:** the box's gateway lists `audio:ace-step` and `audio:stable-audio`
+alongside the image models. Which kind runs on which model is not exposed per
+request.
+
+**Box-side observation, not ours to fix:** `/audio/...` static URLs serve files
+**without auth**, while `/api/audio/*` enforces it. We never rely on the static
+path; the adapter always uses the authenticated `/api/audio/{kind}/{name}` or
+the base64 in the response.
 
 ## 3. In-game playback
 
@@ -295,11 +356,36 @@ the world editor render the same slot component filtered to that subject.
 - **Music and ambience:** context is built from the subject's data (world name
   and biome list; biome name and `art_style`) and sent to `propose`. The
   proposed style and prompt are used unless the batch template overrides them.
-- **SFX:** slot → cue, with `entity` set to the creature, item or skill name
-  where one exists. The map is written against the box's real cue list (open
-  item 2). Its intended shape: `creature/*/hurt` → `hurt`; `creature/*/death` →
-  `death`; `creature/*/nearby` → `idle`; `attack_type/melee/use` → a swing cue;
-  `attack_type/magic/hit` → a magic-impact cue.
+- **SFX:** slot → cue, from the box's real cue list. `entity` is the
+  creature, item or skill name, or the listed phrase for attack-type defaults.
+  The engine defaults to `realistic`, and a batch can choose `retro`.
+
+| slot | cue | entity |
+|---|---|---|
+| `creature/*/hurt` | `hit` | the creature name |
+| `creature/*/death` | `death` | the creature name |
+| `attack_type/melee/use` | `slash` | "a steel sword" |
+| `attack_type/melee/hit` | `hit` | "a blade on a creature" |
+| `attack_type/ranged/hit` | `hit` | "an arrow" |
+| `attack_type/magic/use` | `spell` | "a magic spell" |
+| `attack_type/magic/hit` | `hit` | "a magic blast" |
+| `item/*/use`, `item/*/hit` | as its attack type | the item name |
+| `skill/*/use`, `skill/*/hit` | `spell` / `hit` for magic skills, else as its attack type | the skill name |
+| `world_point/*/nearby` | `waypoint` | the point's name |
+| `creature/*/nearby` | **none** | — |
+| `creature/*/attack` | **none** | — |
+| `attack_type/ranged/use` | **none** | — |
+
+  **Three slots have no cue on the box today:** a creature's idle vocal, a
+  creature's attack vocal, and a bow/throw release. `SfxRequest` takes no free
+  prompt, so these slots can be filled only by **upload** until the box adds
+  cues (suggested `idle`, `attack`, `shoot`).
+  - The slot → cue map is data in the registry, so a new cue is a one-line
+    change.
+  - The Audio tab marks these slots "upload only (no cue on provider)"
+    instead of offering Generate.
+  - Slice 3 does not wait for the box: those triggers play whatever is bound
+    and log misses otherwise.
 
 ## 5. Export / seed, size, testing, slices
 
@@ -331,20 +417,23 @@ These mirror `art-export`/`art-seed` (`KIND=music,ambience,sfx`,
 
 ### Size
 
-WAV (16-bit, 44.1 kHz, stereo) is about 10.5 MB/min; OGG is 10-20× smaller.
+**Decision: store the box's OGG Vorbis exactly as delivered. Never store WAV.
+Do no re-encoding on this side.**
 
-**Targets:**
-- music: ~96 kbps stereo (≈0.7 MB/min)
-- ambience: ~64 kbps stereo
-- SFX: mono, ~48-64 kbps, typically 10-40 KB per clip
+**Measured:** a 124 s track is 1.80 MB as OGG against 23.9 MB as the WAV
+master (13×), a 30 s ambience loop is 326 KB, and a realistic SFX is about
+11 KB.
 
-**Expected library:** about 30 tracks of about 2 min plus about 500 SFX comes
-to about 45-60 MB, the same order as the 100 MB of committed textures.
+**Expected library:** 30 music tracks (≈54 MB) + 20 ambience loops (≈7 MB) +
+500 SFX (≈6 MB) ≈ **65-70 MB**, the same order as the 100 MB of committed
+textures. Music is about 80% of it.
 
-**Codec:** Vorbis vs Opus is decided from open item 3. Opus is about 35%
-smaller at equal quality and is chosen only if it decodes via
-`decodeAudioData` in every target browser. Otherwise keep Vorbis. No
-re-encoding happens on this side.
+**Why not Opus:** it would save about 40%, but it means re-encoding, and
+Safari's `decodeAudioData` support for Ogg Opus is recent. Vorbis decodes in
+every current browser.
+
+**Cheapest future cut, box-side and out of scope:** encode SFX mono and music
+at about 96 kbps. That takes about 30% off, almost all of it from music.
 
 ### Asset route
 
@@ -383,7 +472,7 @@ the ambience source. A green suite is not proof the feature is alive.
 ### Slices
 
 1. **World music + biome ambience, end to end:**
-   - open items resolved;
+   - the first live `POST /api/audio` call records its response shape in section 2;
    - `modality` plus the adapter's `propose`/`generateTrack`;
    - `audio_clips` / `audio_bindings` plus the subject registry (world and
      biome only);
