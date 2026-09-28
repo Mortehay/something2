@@ -78,4 +78,22 @@ test('audio library', { skip }, async (t) => {
     assert.equal(bundle.bindings[`world/${worldName}/music`][0].key, mus.storage_key);
     assert.equal(await lib.worldAudioBundle(pool, '00000000-0000-0000-0000-000000000000'), null);
   });
+
+  await t.test('bindClip on a checked-out client runs inside the caller\'s own transaction', async () => {
+    const mus = await store('music');
+    const client = await pool.connect();
+    let bindingId;
+    try {
+      await client.query('BEGIN');
+      const binding = await lib.bindClip(client, { subjectKind: 'world', subjectKey: worldName, slot: 'music', clipId: mus.id });
+      bindingId = binding.id;
+      const visible = await client.query('SELECT 1 FROM audio_bindings WHERE id = $1', [bindingId]);
+      assert.equal(visible.rowCount, 1, 'binding is visible on the same client before commit');
+      await client.query('ROLLBACK');
+    } finally {
+      client.release();
+    }
+    const afterRollback = await pool.query('SELECT 1 FROM audio_bindings WHERE id = $1', [bindingId]);
+    assert.equal(afterRollback.rowCount, 0, 'rolled-back binding never committed -- bindClip did not run its own transaction');
+  });
 });

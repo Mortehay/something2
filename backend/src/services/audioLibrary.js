@@ -35,24 +35,43 @@ async function bindClip(db, { subjectKind, subjectKey, slot, clipId, volume = 1,
   if (clip.kind !== expected) {
     throw new AudioInputError(`slot '${slot}' takes ${expected} clips, this clip's kind is ${clip.kind}`);
   }
-  const client = db.connect ? await db.connect() : db;
+  const insertBinding = async (client) => {
+    try {
+      const r = await client.query(
+        `INSERT INTO audio_bindings (subject_kind, subject_key, slot, clip_id, volume, weight)
+         VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+        [subjectKind, subjectKey, slot, clipId, volume, weight]);
+      await client.query(
+        'DELETE FROM audio_misses WHERE subject_kind = $1 AND subject_key = $2 AND slot = $3',
+        [subjectKind, subjectKey, slot]);
+      return r.rows[0];
+    } catch (err) {
+      if (err.code === '23505') throw new AudioInputError('that clip is already bound to this slot');
+      throw err;
+    }
+  };
+
+  // A checked-out client (e.g. pool.connect()) has .release -- that means the
+  // CALLER owns the transaction (they may already be mid-BEGIN), so we run
+  // directly on it: no BEGIN/COMMIT/ROLLBACK, no release. A pool-like db (has
+  // .connect, no .release) has no transaction of its own yet, so it gets one:
+  // check out a client, BEGIN/COMMIT/ROLLBACK around the insert, and release
+  // it here. Anything else (e.g. a bare `{ query }` stub) runs directly, like
+  // the checked-out-client case.
+  if (typeof db.release === 'function' || typeof db.connect !== 'function') {
+    return insertBinding(db);
+  }
+  const client = await db.connect();
   try {
     await client.query('BEGIN');
-    const r = await client.query(
-      `INSERT INTO audio_bindings (subject_kind, subject_key, slot, clip_id, volume, weight)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [subjectKind, subjectKey, slot, clipId, volume, weight]);
-    await client.query(
-      'DELETE FROM audio_misses WHERE subject_kind = $1 AND subject_key = $2 AND slot = $3',
-      [subjectKind, subjectKey, slot]);
+    const row = await insertBinding(client);
     await client.query('COMMIT');
-    return r.rows[0];
+    return row;
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
-    if (err.code === '23505') throw new AudioInputError('that clip is already bound to this slot');
     throw err;
   } finally {
-    if (client !== db) client.release();
+    client.release();
   }
 }
 
