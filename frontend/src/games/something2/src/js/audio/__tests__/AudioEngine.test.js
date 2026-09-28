@@ -68,6 +68,56 @@ describe('AudioEngine', () => {
     ]);
   });
 
+  // Final review F6 (SOMET-590): biomeAt says undefined for "chunk not
+  // loaded yet" and null for "loaded, no biome grid". A world with no biomes
+  // only ever samples null, which the tracker ignores -- so world ambience
+  // never played and never logged a miss. The first null now resolves the
+  // world-level ambience once.
+  it('a world without biomes plays its world ambience (null sample = loaded chunk, no grid)', async () => {
+    const { engine } = engineWith({
+      'world/vale/ambience': [{ key: 'w.ogg', volume: 1, weight: 1, loopable: true }],
+    });
+    engine.unlock();
+    engine.tick(undefined, 0);            // chunk not loaded yet: nothing decided
+    await flush(); await flush();
+    expect(engine.snapshot().ambience.playing).toBe(false);
+    engine.tick(null, 600);               // loaded, no biome grid: world fallback
+    await flush(); await flush();
+    expect(engine.snapshot().ambience).toMatchObject({ key: 'w.ogg', playing: true });
+  });
+
+  it('a world without biomes and no world ambience logs the world ambience miss', async () => {
+    const { engine, posted } = engineWith({});
+    engine.tick(null, 0);
+    await engine.flushMisses();
+    expect(posted).toContainEqual({ subject_kind: 'world', subject_key: 'vale', slot: 'ambience', world: 'vale' });
+  });
+
+  it('once a biome has played, a null sample keeps the current ambience', async () => {
+    const { engine } = engineWith({
+      'world/vale/ambience': [{ key: 'w.ogg', volume: 1, weight: 1, loopable: true }],
+      'biome/forest/ambience': [{ key: 'f.ogg', volume: 1, weight: 1, loopable: true }],
+    });
+    engine.unlock();
+    engine.tick('forest', 0);
+    await flush(); await flush();
+    engine.tick(null, 600);
+    await flush(); await flush();
+    expect(engine.snapshot().ambience).toMatchObject({ key: 'f.ogg', playing: true });
+  });
+
+  it('a biome with no clips falls back to the bound world ambience', async () => {
+    const { engine, posted } = engineWith({
+      'world/vale/ambience': [{ key: 'w.ogg', volume: 1, weight: 1, loopable: true }],
+    });
+    engine.unlock();
+    engine.tick('desert', 0);
+    await flush(); await flush();
+    expect(engine.snapshot().ambience).toMatchObject({ key: 'w.ogg', playing: true });
+    await engine.flushMisses();
+    expect(posted.some((m) => m.slot === 'ambience')).toBe(false);
+  });
+
   it('mute and volumes drive the master and bus gains', () => {
     const { engine } = engineWith({});
     engine.setVolumes({ master: 0.5, music: 0.2, ambience: 1, sfx: 1, muted: true });

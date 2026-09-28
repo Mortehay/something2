@@ -84,6 +84,7 @@ export class AudioEngine {
     this.bindings = bindings || {};
     this.tracker = new BiomeTracker({ holdMs: 1500 });
     this.biome = null;
+    this.worldAmbienceTried = false;
     this.lastBiomeSample = -Infinity;
     this._stop('ambience');
     this._stop('music');
@@ -94,7 +95,15 @@ export class AudioEngine {
     if (!this.world || nowMs - this.lastBiomeSample < BIOME_SAMPLE_MS) return;
     this.lastBiomeSample = nowMs;
     const committed = this.tracker.sample(biome, nowMs);
-    if (committed !== undefined) { this.biome = committed; this._switchAmbience(); }
+    if (committed !== undefined) { this.biome = committed; this._switchAmbience(); return; }
+    // null (loaded chunk, no biome grid) before any biome has been committed:
+    // a biome-less world. Resolve world ambience once (plays it, or logs its
+    // miss). undefined (chunk not loaded) decides nothing, and once a biome
+    // has played a null keeps the current ambience via the tracker.
+    if (biome === null && this.tracker.current === undefined && !this.worldAmbienceTried) {
+      this.worldAmbienceTried = true;
+      this._switchAmbience();
+    }
   }
 
   _resolve(chain) {

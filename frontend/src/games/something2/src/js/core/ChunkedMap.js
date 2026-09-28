@@ -94,10 +94,14 @@ export class ChunkedMap {
   // Game audio: the biome under a world position, from the coarse grid the
   // chunk route sends (grid.length cells per chunk side, so the cell step is
   // chunkSize / grid.length -- 8x8 for a 64-tile chunk, 4x4 for a 32-tile one).
-  // null = unknown/unloaded, which the ambience tracker treats as "keep what
-  // is playing". Reuses getTileAt's world -> chunk -> local conversion.
+  // undefined = chunk not loaded yet ("don't know"); null = loaded but no
+  // biome here (the world has no biome grid). The ambience engine treats both
+  // as "keep what is playing" once a biome has played, but uses null to fall
+  // back to world ambience in a biome-less world. Reuses getTileAt's
+  // world -> chunk -> local conversion.
   biomeAt(worldX, worldY) {
     const { cx, cy, lr, lc } = worldToChunkLocal(worldX, worldY, this.chunkSize);
+    if (!this.chunks.has(CHUNK_KEY(cx, cy))) return undefined;
     const g = this.biomes.get(CHUNK_KEY(cx, cy));
     if (!g) return null;
     const step = this.chunkSize / g.length;

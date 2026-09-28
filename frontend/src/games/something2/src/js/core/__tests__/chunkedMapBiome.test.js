@@ -14,14 +14,17 @@ describe('ChunkedMap.biomeAt', () => {
     expect(m.biomeAt(x0 + 2 * MAP_TILE_SIZE, 5 * MAP_TILE_SIZE)).toBe('forest');   // tile col 2 -> cell 0
     expect(m.biomeAt(x0 + 40 * MAP_TILE_SIZE, 5 * MAP_TILE_SIZE)).toBe('desert');  // tile col 40 -> cell 5
   });
-  it('is null for an unloaded chunk, a chunk without a grid, and after removal', () => {
+  // undefined = "don't know yet" (chunk not loaded), null = "loaded, this
+  // world has no biome grid here" -- the audio engine needs to tell them apart
+  // to fall back to world ambience in a biome-less world (SOMET-590 F6).
+  it('is undefined for an unloaded or removed chunk, null for a loaded chunk without a grid', () => {
     const m = new ChunkedMap(size);
-    expect(m.biomeAt(0, 0)).toBe(null);
+    expect(m.biomeAt(0, 0)).toBe(undefined);
     m.setChunk(0, 0, grid, []);
     expect(m.biomeAt(0, 0)).toBe(null);
     m.setChunk(0, 0, grid, [], biomes);
     m.removeChunk(0, 0);
-    expect(m.biomeAt(0, 0)).toBe(null);
+    expect(m.biomeAt(0, 0)).toBe(undefined);
   });
   it('derives the cell step from grid.length instead of assuming 8 (32-tile chunk, 4x4 grid)', () => {
     const smallSize = 32;
