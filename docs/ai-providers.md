@@ -520,7 +520,9 @@ Same `ai_providers` table, a second `modality` column (`'image'` default |
 -- **one active provider per modality** -- so activating an audio profile
 leaves the active image provider active too. Image generation (tile/entity
 jobs, the art console, the world-spec service) filters to `modality = 'image'`
-and can never pick an audio provider by accident.
+and can never pick an audio provider by accident -- a pin or batch id that
+names the audio profile resolves as "no such provider". A provider's modality
+is fixed at creation (PATCH refuses to change it).
 
 ### Creating one
 
@@ -569,4 +571,7 @@ player actually hit with nothing bound, not a guess from the catalog.
 Generate blocks on the HTTP response -- no queue yet. Roughly 30 s for a warm
 30 s ambience clip, and up to ~2 min for a 2-minute track including a cold
 model load. Fine over the LAN; a tunnel (ngrok, Cloudflare) may time out
-before a cold generation finishes. The queue is deferred to slice 2.
+before a cold generation finishes. Through a tunnel with a ~100 s edge timeout
+(the Cloudflare quick tunnel on the Orange Pi), a long track returns a timeout
+to the browser even though the server still stores and binds the clip --
+refresh the tab to see it. The queue is deferred to slice 2.

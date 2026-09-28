@@ -8,6 +8,7 @@ import { useIsMutating } from '@tanstack/react-query';
 import styled from 'styled-components';
 import {
   useProposeAudio, useGenerateAudio, useUploadAudio, useUpdateBinding, useUnbind, generateMutationKey,
+  generateBody,
 } from './useAudioAdmin.js';
 import { assetUrl } from './src/js/net/assets.js';
 import { API_URL } from '../../config.js';
@@ -145,7 +146,8 @@ function AudioSlotCard({
   const upload = useUploadAudio();
   const [style, setStyle] = useState('');
   const [prompt, setPrompt] = useState('');
-  const [proposedSlots, setProposedSlots] = useState(null);
+  // What Suggest returned: its style and the box slots for THAT style.
+  const [proposal, setProposal] = useState(null);
   const fileRef = useRef(null);
 
   // NOT generate.isPending: that comes from THIS hook instance, which is
@@ -164,17 +166,16 @@ function AudioSlotCard({
         onSuccess: (r) => {
           setStyle(r.style || '');
           setPrompt(r.prompt || '');
-          setProposedSlots(r.slots || null);
+          setProposal({ style: r.style || '', slots: r.slots || null });
         },
       },
     );
   };
 
   const onGenerate = () => {
-    generate.mutate({
-      subject_kind: subject.kind, subject_key: subject.key, slot,
-      style: style || undefined, prompt: prompt || undefined, slots: proposedSlots || undefined,
-    });
+    generate.mutate(generateBody({
+      subject, slot, style, prompt, proposal,
+    }));
   };
 
   const onUpload = (e) => {

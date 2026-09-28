@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { slotRows } from '../useAudioAdmin.js';
+import { slotRows, generateBody } from '../useAudioAdmin.js';
 
 describe('slotRows', () => {
   it('flattens the registry response into a subject tree with slot kinds', () => {
@@ -33,5 +33,30 @@ describe('slotRows', () => {
       },
     ]);
     expect(rows.map((r) => [r.key, r.filled])).toEqual([['vale', 2], ['ashport', 0]]);
+  });
+});
+
+// Final review F7 (SOMET-590): Suggest returns a style AND the box's slot
+// values for that style. If the admin then types a different style, those
+// slots belong to the old style and must not be sent with the new one.
+describe('generateBody', () => {
+  const subject = { kind: 'world', key: 'vale' };
+  const proposal = { style: 'village', slots: { tempo: 'slow' } };
+
+  it('sends the suggested slots with the suggested style', () => {
+    expect(generateBody({ subject, slot: 'music', style: 'village', prompt: 'p', proposal })).toEqual({
+      subject_kind: 'world', subject_key: 'vale', slot: 'music', style: 'village', prompt: 'p', slots: { tempo: 'slow' },
+    });
+  });
+
+  it('drops the suggested slots once the style was edited by hand', () => {
+    const body = generateBody({ subject, slot: 'music', style: 'dungeon', prompt: '', proposal });
+    expect(body.style).toBe('dungeon');
+    expect(body.slots).toBeUndefined();
+    expect(body.prompt).toBeUndefined();
+  });
+
+  it('sends no slots without a suggestion', () => {
+    expect(generateBody({ subject, slot: 'music', style: '', prompt: '', proposal: null }).slots).toBeUndefined();
   });
 });

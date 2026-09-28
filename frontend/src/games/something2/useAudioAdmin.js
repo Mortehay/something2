@@ -55,6 +55,18 @@ export function slotRows(subjects) {
   return out;
 }
 
+// The /admin/generate body for one slot card. Suggest's `slots` are the box's
+// values FOR the style it suggested, so they are only sent while the style
+// field still holds that style -- a hand-edited style sends none.
+export function generateBody({ subject, slot, style, prompt, proposal }) {
+  return {
+    subject_kind: subject.kind, subject_key: subject.key, slot,
+    style: style || undefined,
+    prompt: prompt || undefined,
+    slots: (proposal && proposal.slots && proposal.style === style) ? proposal.slots : undefined,
+  };
+}
+
 export function useAudioSubjects() {
   const { data, isLoading, error } = useQuery({
     queryKey: SUBJECTS_KEY,
