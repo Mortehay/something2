@@ -1,13 +1,11 @@
 // backend/src/authority/sfxEvents.js
 //
-// Game audio slice 3 (spec §3 "Wire change -- an sfx event channel"). Task 5
-// builds the frame-level `sfx` event list here; this task (Task 2, subject
-// registry) only needs ONE piece of that ahead of time: attackKindOf, the
-// single weapon -> melee/ranged/magic mapping. It is placed in the authority
-// (not audioSubjects.js) because Task 5's combat sites are the canonical
-// caller, but the subject registry (backend/src/services/audioSubjects.js)
-// needs the EXACT same mapping to resolve an item's use/hit cue, so it
-// requires this file rather than re-deriving the rule.
+// Game audio slice 3 (spec §3 "Wire change -- an sfx event channel"). The
+// frame-level `sfx` event builders live here, together with attackKindOf, the
+// single weapon -> melee/ranged/magic mapping. The subject registry
+// (backend/src/services/audioSubjects.js) needs the EXACT same mapping to
+// resolve an item's use/hit cue, so it requires this file rather than
+// re-deriving the rule.
 //
 // PURE: no authority imports, no DB, no state. That is what lets a service
 // file require it without pulling the whole authority module graph in.
@@ -52,4 +50,95 @@ function attackKindOf(w) {
   return 'magic'; // wands, staves, scepters, magic-bolt
 }
 
-module.exports = { attackKindOf };
+// A skill cast's sound family. Skills carry no weapon row; the skill catalog
+// (seeds/data/skills.js) types each skill 'melee', 'magic', 'buff' or
+// 'debuff', and castSkill resolves only 'melee' as a weapon arc -- every other
+// type is a spell effect, so it sounds like magic.
+function skillAttackKind(skill) {
+  return skill && skill.type === 'melee' ? 'melee' : 'magic';
+}
+
+// -- The frame-level `sfx` event list (spec §3 "Wire change").
+//
+// Shape: { e, k?, s?, c?, a?, x, y }. Every builder below goes through
+// sfxEvent(), which is the ONE place optional keys are dropped: a key whose
+// value is null/undefined is omitted, never sent as null, so an event carries
+// only what is known about it. Coordinates are rounded to whole world pixels
+// -- sound placement needs no sub-pixel precision, and the list rides every
+// frame.
+
+const SFX_CAP = 64; // per world per frame; overflow drops the newest
+
+const OPTIONAL_KEYS = ['k', 's', 'c', 'a'];
+
+function sfxEvent(e, fields, x, y) {
+  const ev = { e };
+  for (const key of OPTIONAL_KEYS) {
+    if (fields[key] != null) ev[key] = fields[key];
+  }
+  ev.x = Math.round(x);
+  ev.y = Math.round(y);
+  return ev;
+}
+
+// A player swings or fires the weapon `w`.
+function weaponUse(w, userId, x, y) {
+  return sfxEvent('use', { k: attackKindOf(w), s: w && w.name, a: `p:${userId}` }, x, y);
+}
+
+// A player's weapon (or a player-owned projectile) lands at x,y. `k`/`s` are
+// passed in rather than derived: a projectile resolves them once at launch.
+function weaponHit(k, s, x, y) {
+  return sfxEvent('hit', { k, s }, x, y);
+}
+
+// A creature swings, bites or looses a shot.
+function creatureUse(c, x, y) {
+  return sfxEvent('use', { c: c.type, a: `c:${c.id}` }, x, y);
+}
+
+// A creature's blow or projectile lands at x,y.
+function creatureHit(type, x, y) {
+  return sfxEvent('hit', { c: type }, x, y);
+}
+
+// A creature of `type` takes a hit at x,y.
+function creatureHurt(type, x, y) {
+  return sfxEvent('hurt', { c: type }, x, y);
+}
+
+// A creature of `type` dies at x,y.
+function creatureDeath(type, x, y) {
+  return sfxEvent('death', { c: type }, x, y);
+}
+
+// A player casts `skill`.
+function skillUse(skill, userId, x, y) {
+  return sfxEvent('use', { k: skillAttackKind(skill), s: `skill:${skill.id}`, a: `p:${userId}` }, x, y);
+}
+
+// Bounded append: every buffer events pass through (each sim's, the world's,
+// the server's per-world stash) is capped, so a world whose frames stop
+// draining can never grow one without limit. An event without a finite
+// position is dropped -- it has nowhere to be heard, and JSON would turn its
+// NaN into null on the wire. Returns whether the event was kept.
+function pushSfxEvent(list, ev) {
+  if (!ev || list.length >= SFX_CAP) return false;
+  if (!Number.isFinite(ev.x) || !Number.isFinite(ev.y)) return false;
+  list.push(ev);
+  return true;
+}
+
+module.exports = {
+  attackKindOf,
+  skillAttackKind,
+  SFX_CAP,
+  weaponUse,
+  weaponHit,
+  creatureUse,
+  creatureHit,
+  creatureHurt,
+  creatureDeath,
+  skillUse,
+  pushSfxEvent,
+};

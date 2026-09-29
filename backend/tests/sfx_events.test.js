@@ -7,7 +7,11 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
-const { attackKindOf } = require('../src/authority/sfxEvents');
+const {
+  attackKindOf, skillAttackKind, SFX_CAP,
+  weaponUse, weaponHit, creatureUse, creatureHit, creatureHurt, creatureDeath, skillUse,
+  pushSfxEvent,
+} = require('../src/authority/sfxEvents');
 
 const url = process.env.TEST_DATABASE_URL;
 const skip = !url ? 'no TEST_DATABASE_URL -- refusing to read from a real database' : false;
@@ -88,4 +92,72 @@ test('attackKindOf: edge cases', { skip }, async (t) => {
   await t.test('no weapon at all (unarmed slot) falls back to melee', () => {
     assert.equal(attackKindOf(null), 'melee');
   });
+});
+
+// -- The pure event builders (Task 5). No database: these run everywhere.
+
+test('skillAttackKind: melee skills are melee, every other skill type is magic', () => {
+  assert.equal(skillAttackKind({ id: 'war_twin_slash', type: 'melee' }), 'melee');
+  for (const type of ['magic', 'buff', 'debuff']) {
+    assert.equal(skillAttackKind({ id: 'x', type }), 'magic', type);
+  }
+  assert.equal(skillAttackKind(null), 'magic');
+});
+
+// Exactly these keys, in any order, and no undefined/null value anywhere --
+// an absent fact is an absent key, never `"s": null` on the wire.
+function assertShape(ev, keys) {
+  assert.deepEqual(Object.keys(ev).sort(), [...keys].sort());
+  for (const [key, value] of Object.entries(ev)) {
+    assert.ok(value !== undefined && value !== null, `${key} is ${value}`);
+  }
+}
+
+test('every builder returns exactly the documented keys', () => {
+  const sword = { name: 'crude blade', kind: 'melee' };
+  assertShape(weaponUse(sword, 7, 10, 20), ['e', 'k', 's', 'a', 'x', 'y']);
+  assert.deepEqual(weaponUse(sword, 7, 10, 20), { e: 'use', k: 'melee', s: 'crude blade', a: 'p:7', x: 10, y: 20 });
+
+  assertShape(weaponHit('ranged', 'bow', 1, 2), ['e', 'k', 's', 'x', 'y']);
+  assert.deepEqual(weaponHit('ranged', 'bow', 1, 2), { e: 'hit', k: 'ranged', s: 'bow', x: 1, y: 2 });
+
+  assert.deepEqual(creatureUse({ id: 'c9', type: 'Wolf' }, 3, 4), { e: 'use', c: 'Wolf', a: 'c:c9', x: 3, y: 4 });
+  assert.deepEqual(creatureHit('Wolf', 5, 6), { e: 'hit', c: 'Wolf', x: 5, y: 6 });
+  assert.deepEqual(creatureHurt('Slime', 5, 6), { e: 'hurt', c: 'Slime', x: 5, y: 6 });
+  assert.deepEqual(creatureDeath('Slime', 5, 6), { e: 'death', c: 'Slime', x: 5, y: 6 });
+
+  assert.deepEqual(
+    skillUse({ id: 'mag_fireball', type: 'magic' }, 'u1', 7, 8),
+    { e: 'use', k: 'magic', s: 'skill:mag_fireball', a: 'p:u1', x: 7, y: 8 },
+  );
+});
+
+test('absent facts are omitted keys, never undefined or null values', () => {
+  // A weapon row with no name (a creature's weapon-shaped flight object, a
+  // test double) -- `s` is dropped rather than sent empty.
+  assertShape(weaponUse({ kind: 'melee' }, 1, 0, 0), ['e', 'k', 'a', 'x', 'y']);
+  assertShape(weaponHit('magic', null, 0, 0), ['e', 'k', 'x', 'y']);
+  assertShape(weaponHit('magic', undefined, 0, 0), ['e', 'k', 'x', 'y']);
+  // A creature double with no type still yields a well-formed event.
+  assertShape(creatureUse({ id: 'c1' }, 0, 0), ['e', 'a', 'x', 'y']);
+  assertShape(creatureDeath(undefined, 0, 0), ['e', 'x', 'y']);
+});
+
+test('coordinates are whole world pixels', () => {
+  const ev = creatureHurt('Wolf', 10.4, 19.6);
+  assert.equal(ev.x, 10);
+  assert.equal(ev.y, 20);
+});
+
+test('pushSfxEvent caps the buffer and drops events with no position', () => {
+  const list = [];
+  for (let i = 0; i < SFX_CAP + 36; i++) pushSfxEvent(list, creatureHurt('Wolf', i, i));
+  assert.equal(SFX_CAP, 64);
+  assert.equal(list.length, 64);
+  assert.equal(list[63].x, 63, 'overflow drops the NEWEST, the oldest are kept');
+
+  const small = [];
+  assert.equal(pushSfxEvent(small, creatureHurt('Wolf', NaN, 0)), false);
+  assert.equal(pushSfxEvent(small, null), false);
+  assert.equal(small.length, 0);
 });

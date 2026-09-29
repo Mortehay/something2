@@ -54,6 +54,7 @@ const CHARM_RANGE = 200;
 // walk a pack somewhere with, short enough that a druid must keep re-charming.
 const CHARM_DURATION_MS = 120000;
 const { awardStoneXp, STONE_XP_PER_HIT } = require('./stoneXp.js');
+const { pushSfxEvent } = require('./sfxEvents.js');
 
 const MAP_TILE_SIZE = 100;
 
@@ -327,6 +328,23 @@ function pushImpacts(entry, impacts) {
 function drainImpacts(entry) {
   const batch = entry.pendingImpacts;
   entry.pendingImpacts = null;
+  return Array.isArray(batch) ? batch : [];
+}
+
+// Game audio slice 3: the per-world `sfx` stash, the same stash-and-drain
+// shape as attacks above. pushSfxEvent owns the cap (SFX_CAP, 64 -- the same
+// bound as MAX_PENDING_ATTACKS, for the same reason) and drops the newest on
+// overflow. Nothing is allocated for an empty push, so an idle world pays
+// nothing.
+function pushSfx(entry, events) {
+  if (!Array.isArray(events) || events.length === 0) return;
+  if (!entry.pendingSfx) entry.pendingSfx = [];
+  for (const ev of events) pushSfxEvent(entry.pendingSfx, ev);
+}
+
+function drainSfx(entry) {
+  const batch = entry.pendingSfx;
+  entry.pendingSfx = null;
   return Array.isArray(batch) ? batch : [];
 }
 
@@ -3093,6 +3111,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
       const hasAtks = atks.length > 0;
       const imps = drainImpacts(entry);
       const hasImps = imps.length > 0;
+      // Game audio slice 3: every sound the world produced since the last
+      // tick -- swings and casts from the socket handlers, bites, shots,
+      // landings and deaths from this tick -- in one capped list.
+      pushSfx(entry, entry.world.drainSfx());
+      const sfx = drainSfx(entry);
+      const hasSfx = sfx.length > 0;
       for (const [userId, ws] of entry.sockets) {
         const p = entry.world.getPlayer(userId);
         // The recipient's own row rides along unconditionally (see playerAoi):
@@ -3126,6 +3150,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // Omitted entirely when nothing was hit, exactly as detonations and
         // attacks already are -- a quiet tick must cost no bytes.
         if (hasImps) frame.impacts = imps;
+        // Omitted when empty, like the VFX lists above.
+        if (hasSfx) frame.sfx = sfx;
         send(ws, frame);
       }
       if (tick % creatureBroadcastEvery === 0) {
@@ -3558,5 +3584,5 @@ module.exports = {
   // loadCreatureTypes's separate one in creatures.js.
   CREATURE_JOINED_SELECT,
   // Stash internals, exported for unit test only. Not part of the module's API.
-  __test: { pushAttacks, drainAttacks, MAX_PENDING_ATTACKS },
+  __test: { pushAttacks, drainAttacks, MAX_PENDING_ATTACKS, pushSfx, drainSfx },
 };
