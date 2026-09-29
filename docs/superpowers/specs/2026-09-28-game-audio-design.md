@@ -231,6 +231,19 @@ enums and ranges):
 alongside the image models. Which kind runs on which model is not exposed per
 request.
 
+**SFX caching and packs (measured 2026-09-29):**
+- `/api/audio/sfx` and `/api/audio/sfx-pack` cache by `(engine, cue, entity)`
+  and IGNORE the seed: seeds 8 and 9 both returned the seed-1 file with
+  `cached:true`.
+- A different `entity` text generates fresh. Variation and regeneration
+  therefore change the entity text (`"<phrase> (take N)"`).
+- One unknown cue fails the WHOLE pack with HTTP 400
+  (`unknown cue '<x>'; see GET /api/audio/styles?kind=sfx`).
+- Pack response: `{items:[{cue, entity, engine, name, prompt, seed,
+  sample_rate, variants:[{url, duration_s, onset_ms}], audio:[base64 OGG…],
+  cached, served_from, generation_id}], count, failed}`.
+- Box-side request: include the seed in the SFX cache key.
+
 **Box-side observation, not ours to fix:** `/audio/...` static URLs serve files
 **without auth**, while `/api/audio/*` enforces it. We never rely on the static
 path; the adapter always uses the authenticated `/api/audio/{kind}/{name}` or
@@ -305,20 +318,25 @@ loops while in range instead of repeating.
 - The same clip at most 3 times within 100 ms.
 - Priority when over the cap: the player's own actions, then the nearest.
 
-### Wire change (slice 3)
+### Wire change (slice 3) — an `sfx` event channel
 
-Today `attacks` and `impacts` records carry an actor or target id and a VFX
-name only, so the client cannot tell a sword from a fireball. The authority
-adds two fields to every attack and impact record it builds (`world.js`,
-`creatures.js`, `projectiles.js`):
+Ruling, 2026-09-29: the original plan here was to add `k`/`s` fields to the VFX
+`attacks` and `impacts` records. The code does not support that:
 
-- `k`: `melee` | `ranged` | `magic`
-- `s`: item type name or skill id (omitted for creatures, which use `a`/`t` to
-  find their type)
+- player projectile and magic shots emit no attack record;
+- projectile hits emit no impact record;
+- skill casts and creature deaths emit nothing at all;
+- the client drops `t` on impacts.
 
-The server stays ignorant of audio: it labels what happened and VFX is
-untouched. The mapping from weapon/skill to `k` lives in one authority helper
-and is unit-tested against every `item_types.kind` and skill `type`.
+Tagging the VFX records would therefore leave most sounds silent.
+
+Instead the authority emits a small `sfx` list per world frame (cap 64, key
+omitted when empty):
+`{ e: 'use'|'hit'|'hurt'|'death', k?: 'melee'|'ranged'|'magic', s?: '<item name>'|'skill:<id>', c?: '<creature type>', a?: 'p:<uid>'|'c:<id>', x, y }`.
+
+It is built at the same sites. The server stays ignorant of audio, and VFX is
+untouched. `attackKindOf(weapon)` (authority `sfxEvents.js`) is the one
+weapon → `k` mapping, shared with the subject registry.
 
 ### Failure behaviour
 
