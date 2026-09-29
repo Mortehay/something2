@@ -170,4 +170,122 @@ async function generateTrack(provider, req, { fetchImpl = fetch, sleep = realSle
   return finish(read.buffer, kind, row, { prompt, seed });
 }
 
-module.exports = { listStyles, propose, generateTrack };
+// A batch of decoded, checked clips from a `POST /api/audio/sfx[-pack]`
+// response's `audio` array -- shared by generateSfx and generateSfxPack's
+// per-item loop so both check every variant the same way. Returns
+// `{ ok:false, error }` on the first bad buffer rather than partial results:
+// the box returning even one variant that isn't a usable clip is the box's
+// output being wrong (same reasoning as `finish` above), not something a
+// caller can use half of.
+function sfxClips(audio) {
+  const list = Array.isArray(audio) ? audio : (typeof audio === 'string' ? [audio] : []);
+  if (!list.length) return { ok: false, error: 'audio service returned no sfx variants' };
+  const clips = [];
+  for (const b64 of list) {
+    const buffer = Buffer.from(b64, 'base64');
+    const checked = checkClipBuffer(buffer, 'sfx');
+    if (!checked.ok) return { ok: false, error: checked.error };
+    clips.push({ buffer, durationMs: checked.durationMs, sampleRate: checked.sampleRate });
+  }
+  return { ok: true, clips };
+}
+
+async function generateSfx(provider, req, { fetchImpl = fetch } = {}) {
+  const {
+    cue, entity, engine, seed,
+  } = req;
+  const variants = Number.isInteger(req.variants) ? req.variants : 1;
+  if (typeof cue !== 'string' || !cue) return { ok: false, error: 'generateSfx requires a cue' };
+  // Every generation sends an explicit seed (spec, global constraint), even
+  // though the box's SFX cache key ignores it (spec §2 "SFX variation =
+  // entity text") -- a missing seed must still fail loudly rather than let
+  // JSON.stringify silently drop the field.
+  if (!Number.isInteger(seed)) return { ok: false, error: 'generateSfx requires an explicit integer seed' };
+  const body = { cue, variants, seed };
+  if (entity) body.entity = entity;
+  if (engine) body.engine = engine;
+
+  const r = await callJson(provider, 'POST', '/api/audio/sfx', body, fetchImpl);
+  if (!r.ok) return r;
+  const j = r.json || {};
+  const decoded = sfxClips(j.audio);
+  // A malformed/unusable clip in the response is the box's fault, same as
+  // callJson's own providerFault cases (unusable JSON, a failed ledger row).
+  if (!decoded.ok) return { ok: false, error: decoded.error, providerFault: true };
+  const info = j.info || {};
+  return {
+    ok: true,
+    clips: decoded.clips,
+    prompt: info.prompt || null,
+    seed: Number.isFinite(info.seed) ? info.seed : seed,
+    cached: Boolean(info.cached),
+  };
+}
+
+async function generateSfxPack(provider, req, { fetchImpl = fetch } = {}) {
+  const { items, engine, seed } = req;
+  const variants = Number.isInteger(req.variants) ? req.variants : 1;
+  if (!Array.isArray(items) || !items.length) return { ok: false, error: 'generateSfxPack requires at least one item' };
+  if (!Number.isInteger(seed)) return { ok: false, error: 'generateSfxPack requires an explicit integer seed' };
+  const body = {
+    items: items.map((it) => {
+      const out = { cue: it.cue };
+      if (it.entity) out.entity = it.entity;
+      if (it.engine) out.engine = it.engine;
+      return out;
+    }),
+    variants,
+    seed,
+  };
+  if (engine) body.engine = engine;
+
+  const r = await callJson(provider, 'POST', '/api/audio/sfx-pack', body, fetchImpl);
+  if (!r.ok) {
+    // A whole-pack 400 for one unknown cue names the cue in the box's own
+    // detail text (spec §2 "SFX caching and packs": `unknown cue '<x>'; see
+    // GET /api/audio/styles?kind=sfx`), already folded into r.error by
+    // callJson -- surface it as `unknownCue` so a caller can report which
+    // subject broke the pack rather than just "the pack failed". Not a
+    // providerFault: an unknown cue is OUR request being wrong (a stale
+    // registry entry, or models_cache out of date), not the box
+    // malfunctioning.
+    const m = typeof r.error === 'string' && r.error.match(/unknown cue '([^']+)'/);
+    if (m) {
+      return {
+        ok: false, error: r.error, retryable: false, providerFault: false, unknownCue: m[1],
+      };
+    }
+    return r;
+  }
+  const rows = Array.isArray(r.json && r.json.items) ? r.json.items : [];
+  const outItems = [];
+  for (const row of rows) {
+    if (!row || row.error) {
+      outItems.push({
+        ok: false, cue: row && row.cue, entity: row && row.entity, error: (row && row.error) || 'sfx pack item failed', providerFault: true,
+      });
+      continue;
+    }
+    const decoded = sfxClips(row.audio);
+    if (!decoded.ok) {
+      outItems.push({
+        ok: false, cue: row.cue, entity: row.entity, error: decoded.error, providerFault: true,
+      });
+      continue;
+    }
+    outItems.push({
+      ok: true,
+      cue: row.cue,
+      entity: row.entity,
+      clips: decoded.clips,
+      prompt: row.prompt || null,
+      seed: Number.isFinite(row.seed) ? row.seed : seed,
+      cached: Boolean(row.cached),
+    });
+  }
+  return { ok: true, items: outItems };
+}
+
+module.exports = {
+  listStyles, propose, generateTrack, generateSfx, generateSfxPack,
+};

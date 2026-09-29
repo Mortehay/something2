@@ -143,6 +143,110 @@ test('generateTrack requires an explicit integer seed and never calls the box wi
   assert.equal(calls.length, 0, 'no request should be sent without a seed');
 });
 
+// Game audio slice 3, Task 3: generateSfx / generateSfxPack against the same
+// fake-box pattern as generateTrack above.
+test('generateSfx: two variants, each checked and decoded', async () => {
+  const { fetchImpl, calls } = fakeBox({
+    'POST /api/audio/sfx': () => json({
+      audio: [OGG.toString('base64'), OGG.toString('base64')],
+      info: {
+        name: 'x', cue: 'hit', entity: 'a slime', engine: 'realistic', prompt: 'a slime being hit', seed: 5, sample_rate: 44100, cached: false,
+      },
+    }),
+  });
+  const r = await rap.generateSfx(provider, {
+    cue: 'hit', entity: 'a slime', engine: 'realistic', variants: 2, seed: 5,
+  }, { fetchImpl });
+  assert.equal(r.ok, true, r.error);
+  assert.equal(r.clips.length, 2);
+  assert.ok(r.clips[0].buffer.equals(OGG));
+  assert.equal(r.clips[0].durationMs, 2000);
+  assert.equal(r.clips[1].sampleRate, 44100);
+  assert.equal(r.cached, false);
+  assert.equal(r.seed, 5);
+  assert.equal(r.prompt, 'a slime being hit');
+  assert.deepEqual(calls[0].body, {
+    cue: 'hit', variants: 2, seed: 5, entity: 'a slime', engine: 'realistic',
+  });
+});
+
+test('generateSfx passes cached:true through', async () => {
+  const { fetchImpl } = fakeBox({
+    'POST /api/audio/sfx': () => json({ audio: [OGG.toString('base64')], info: { seed: 1, cached: true } }),
+  });
+  const r = await rap.generateSfx(provider, { cue: 'hit', entity: 'a slime', variants: 1, seed: 1 }, { fetchImpl });
+  assert.equal(r.ok, true, r.error);
+  assert.equal(r.cached, true);
+});
+
+test('generateSfx rejects a WAV variant as a providerFault, and requires an explicit seed', async () => {
+  const { fetchImpl } = fakeBox({
+    'POST /api/audio/sfx': () => json({ audio: [WAV.toString('base64')], info: { seed: 1 } }),
+  });
+  const r = await rap.generateSfx(provider, { cue: 'hit', variants: 1, seed: 1 }, { fetchImpl });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not an OGG/i);
+  assert.equal(r.providerFault, true);
+
+  const { fetchImpl: noSeedFetch, calls } = fakeBox({});
+  const r2 = await rap.generateSfx(provider, { cue: 'hit', variants: 1 }, { fetchImpl: noSeedFetch });
+  assert.equal(r2.ok, false);
+  assert.match(r2.error, /explicit integer seed/i);
+  assert.equal(calls.length, 0, 'no request should be sent without a seed');
+});
+
+test('generateSfxPack: a per-item failure is reported without failing the whole pack', async () => {
+  const { fetchImpl, calls } = fakeBox({
+    'POST /api/audio/sfx-pack': () => json({
+      items: [
+        {
+          cue: 'hit', entity: 'a slime', audio: [OGG.toString('base64')], prompt: 'p', seed: 3, cached: false,
+        },
+        { cue: 'death', entity: 'a slime', error: 'generation failed' },
+      ],
+      count: 2,
+      failed: 1,
+    }),
+  });
+  const r = await rap.generateSfxPack(provider, {
+    items: [{ cue: 'hit', entity: 'a slime' }, { cue: 'death', entity: 'a slime' }], variants: 1, seed: 3,
+  }, { fetchImpl });
+  assert.equal(r.ok, true, r.error);
+  assert.equal(r.items.length, 2);
+  assert.deepEqual(calls[0].body.items, [{ cue: 'hit', entity: 'a slime' }, { cue: 'death', entity: 'a slime' }]);
+  assert.equal(r.items[0].ok, true);
+  assert.equal(r.items[0].cue, 'hit');
+  assert.equal(r.items[0].clips.length, 1);
+  assert.equal(r.items[1].ok, false);
+  assert.equal(r.items[1].cue, 'death');
+  assert.match(r.items[1].error, /generation failed/);
+  assert.equal(r.items[1].providerFault, true);
+});
+
+test('generateSfxPack: a whole-pack 400 for an unknown cue surfaces unknownCue, not retryable, not a providerFault', async () => {
+  const { fetchImpl } = fakeBox({
+    'POST /api/audio/sfx-pack': () => json({ detail: "unknown cue 'bogus'; see GET /api/audio/styles?kind=sfx" }, 400),
+  });
+  const r = await rap.generateSfxPack(provider, { items: [{ cue: 'bogus' }], variants: 1, seed: 1 }, { fetchImpl });
+  assert.equal(r.ok, false);
+  assert.equal(r.unknownCue, 'bogus');
+  assert.equal(r.retryable, false);
+  assert.equal(r.providerFault, false);
+});
+
+test('generateSfx and generateSfxPack errors never include the provider token', async () => {
+  const { fetchImpl } = fakeBox({
+    'POST /api/audio/sfx': () => json({ detail: 'invalid token' }, 401),
+    'POST /api/audio/sfx-pack': () => json({ detail: 'invalid token' }, 401),
+  });
+  const r1 = await rap.generateSfx(provider, { cue: 'hit', variants: 1, seed: 1 }, { fetchImpl });
+  assert.equal(r1.ok, false);
+  assert.doesNotMatch(r1.error, /sk_test/, 'the provider\'s auth token must never appear in an error message');
+  const r2 = await rap.generateSfxPack(provider, { items: [{ cue: 'hit' }], variants: 1, seed: 1 }, { fetchImpl });
+  assert.equal(r2.ok, false);
+  assert.doesNotMatch(r2.error, /sk_test/, 'the provider\'s auth token must never appear in an error message');
+});
+
 test('propose passes context and kind through', async () => {
   const { fetchImpl, calls } = fakeBox({
     'POST /api/audio/propose': () => json({ kind: 'ambience', style: 'forest', slots: { mood: 'calm daytime' }, prompt: 'forest ambience' }),

@@ -115,7 +115,13 @@ module.exports = function audioRoutes(pool) {
     try {
       const { clipKind, error } = await checkSubject(pool, b.subject_kind, b.subject_key, b.slot);
       if (error) return res.status(400).json({ error });
-      if (clipKind === 'sfx') return res.status(400).json({ error: 'sfx generation arrives in slice 2' });
+      // sfx-only body fields (game audio slice 3, Task 3): `variants` is
+      // validated here, before any box call, the same way volume/weight are
+      // validated in PATCH /admin/bindings/:id above.
+      if (clipKind === 'sfx' && b.variants !== undefined
+        && !(Number.isInteger(b.variants) && b.variants >= 1 && b.variants <= 5)) {
+        return res.status(400).json({ error: 'variants must be an integer 1-5' });
+      }
       const provider = await resolveAudioProvider(pool, b.provider_id);
       if (!provider) return res.status(503).json({ error: 'No active audio provider. Add one under AI Providers with modality "audio".' });
       // Always an explicit seed: the box caches by request, so a repeated or
@@ -128,9 +134,16 @@ module.exports = function audioRoutes(pool) {
         style: b.style || null,
         prompt: b.prompt || null,
         slots: b.slots || null,
+        engine: typeof b.engine === 'string' ? b.engine : undefined,
+        variants: clipKind === 'sfx' && Number.isInteger(b.variants) ? b.variants : undefined,
         seed: Number.isInteger(b.seed) ? b.seed : undefined,
       });
       if (!gen.ok) return res.status(502).json({ error: gen.error, retryable: Boolean(gen.retryable) });
+      // sfx generates N variants at once (`{clips, bindings}`); music/ambience
+      // stay a single clip (`{clip, binding}`) -- callers of the existing
+      // shape (e.g. the Audio tab's music/ambience generate button) see no
+      // change.
+      if (clipKind === 'sfx') return res.status(201).json({ clips: gen.clips, bindings: gen.bindings });
       res.status(201).json({ clip: gen.clip, binding: gen.binding });
     } catch (err) { sendError(res, err); }
   });

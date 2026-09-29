@@ -51,6 +51,15 @@ test('audio routes', { skip }, async (t) => {
         res.setHeader('content-type', 'application/json');
         return res.end(JSON.stringify({ kind: 'music', style: 'village', slots: { mood: 'calm and sunny' }, prompt: 'p' }));
       }
+      if (req.method === 'POST' && req.url === '/api/audio/sfx') {
+        res.setHeader('content-type', 'application/json');
+        return res.end(JSON.stringify({
+          audio: [OGG.toString('base64'), OGG.toString('base64')],
+          info: {
+            cue: 'slash', entity: 'a steel sword', engine: 'realistic', prompt: 'a steel sword swinging', seed: 21, sample_rate: 44100, cached: false,
+          },
+        }));
+      }
       res.statusCode = 404; res.end('{}');
     });
   });
@@ -97,6 +106,49 @@ test('audio routes', { skip }, async (t) => {
     assert.equal(sent.auth, 'Bearer sk_route_test');
     assert.ok(Number.isInteger(JSON.parse(sent.body).seed), 'a seed is always sent');
     assert.equal(JSON.stringify(res.body).includes('sk_route_test'), false, 'the token never leaves the server');
+  });
+
+  await t.test('sfx generate: a player gets 403, an admin gets 201 with N clips', async () => {
+    // attack_type is a fixed catalog subject (melee/ranged/magic) -- no row
+    // of its own, and this provider's models_cache must carry 'cue:slash'
+    // (the allow-list) for melee/use to be anything but upload-only.
+    await pool.query('UPDATE ai_providers SET models_cache = $1::jsonb WHERE id = $2', [JSON.stringify(['cue:slash']), prov]);
+    const denied = await request(app).post('/api/audio/admin/generate').set('Authorization', bearer(player))
+      .send({
+        subject_kind: 'attack_type', subject_key: 'melee', slot: 'use', variants: 2, provider_id: prov,
+      });
+    assert.equal(denied.status, 403);
+
+    const before = seen.length;
+    const res = await request(app).post('/api/audio/admin/generate').set('Authorization', bearer(admin))
+      .send({
+        subject_kind: 'attack_type', subject_key: 'melee', slot: 'use', variants: 2, provider_id: prov,
+      });
+    assert.equal(res.status, 201, JSON.stringify(res.body));
+    assert.equal(res.body.clips.length, 2);
+    assert.equal(res.body.bindings.length, 2);
+    assert.equal(res.body.clips[0].kind, 'sfx');
+    assert.equal(res.body.clips[0].style_or_cue, 'slash');
+    const sfxCall = seen.slice(before).find((s) => s.url === '/api/audio/sfx');
+    assert.ok(sfxCall, 'the box was called at /api/audio/sfx');
+    assert.equal(sfxCall.auth, 'Bearer sk_route_test');
+    const sentBody = JSON.parse(sfxCall.body);
+    assert.equal(sentBody.cue, 'slash');
+    assert.equal(sentBody.variants, 2);
+    assert.equal(JSON.stringify(res.body).includes('sk_route_test'), false, 'the token never leaves the server');
+
+    await pool.query('DELETE FROM audio_bindings WHERE id = ANY($1)', [res.body.bindings.map((b) => b.id)]);
+    await pool.query('DELETE FROM audio_clips WHERE id = ANY($1)', [res.body.clips.map((c) => c.id)]);
+  });
+
+  await t.test('sfx generate: variants out of 1-5 is a 400, box never called', async () => {
+    const before = seen.length;
+    const res = await request(app).post('/api/audio/admin/generate').set('Authorization', bearer(admin))
+      .send({
+        subject_kind: 'attack_type', subject_key: 'melee', slot: 'use', variants: 6, provider_id: prov,
+      });
+    assert.equal(res.status, 400, JSON.stringify(res.body));
+    assert.equal(seen.length, before, 'no box call for an invalid variants count');
   });
 
   await t.test('generate rejects a slot the subject does not have', async () => {
