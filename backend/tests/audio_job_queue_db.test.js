@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
 const { withAdvisoryLock, AUDIO_JOBS_LOCK_KEY } = require('./helpers/advisoryLock.js');
-const { restoringForeignJobs } = require('./helpers/foreignAudioJobs.js');
+const { restoringForeignJobs, parkingForeignQueued } = require('./helpers/foreignAudioJobs.js');
 const q = require('../src/services/audioJobQueue');
 
 const url = process.env.TEST_DATABASE_URL;
@@ -80,7 +80,6 @@ test('audio job queue', { skip }, async (t) => {
     const again = await q.enqueue(pool, [{ subject_kind: 'world', subject_key: `${tag}-w`, slot: 'music', clip_kind: 'music' }], {});
     assert.equal(again.queued.length, 0);
     assert.deepEqual(again.already_live, [{ subject_kind: 'world', subject_key: `${tag}-w`, slot: 'music' }]);
-    assert.throws(() => q.drainGroupFor('sfx'), /slice 3/);
 
     const first = await claimMine();
     assert.equal(first.drain_group, 'music', 'music drains before ambience even though it was enqueued second');
@@ -183,5 +182,101 @@ test('audio job queue: enqueue carries slots and seed through their casts', { sk
     const row = (await pool.query('SELECT slots, seed FROM audio_jobs WHERE subject_key = $1', [tag])).rows[0];
     assert.equal(row.slots.mood, 'x');
     assert.equal(Number(row.seed), 123);
+  });
+});
+
+// Game audio slice 3, Task 4: sfx drain groups. An sfx job's engine picks
+// its group (realistic -> sfx_realistic, retro -> sfx_retro) and is stored
+// on the row; claimBatch claims up to n jobs of ONE group -- the first
+// claimable group in DRAIN_ORDER -- and never more than one music/ambience.
+test('audio job queue: sfx drain groups and claimBatch', { skip }, async (t) => {
+  const pool = new Pool({ connectionString: url });
+  const tag = `jobqsfx-${process.pid}-${Date.now()}`;
+  t.after(async () => {
+    try { await pool.query('DELETE FROM audio_jobs WHERE subject_key LIKE $1', [`${tag}%`]); }
+    finally { await pool.end(); }
+  });
+
+  assert.deepEqual(q.DRAIN_ORDER, ['music', 'ambience', 'sfx_realistic', 'sfx_retro']);
+  assert.equal(q.drainGroupFor('music'), 'music');
+  assert.equal(q.drainGroupFor('ambience'), 'ambience');
+  assert.equal(q.drainGroupFor('sfx'), 'sfx_realistic', 'realistic is the default engine');
+  assert.equal(q.drainGroupFor('sfx', 'realistic'), 'sfx_realistic');
+  assert.equal(q.drainGroupFor('sfx', 'retro'), 'sfx_retro');
+
+  await withAdvisoryLock(pool, AUDIO_JOBS_LOCK_KEY, async () => {
+    await parkingForeignQueued(pool, `${tag}%`, async () => {
+      const sfx = (key, slot, engine) => ({
+        subject_kind: 'creature', subject_key: `${tag}-${key}`, slot, clip_kind: 'sfx', engine,
+      });
+      // Enqueued retro first, realistic second, music/ambience last: the
+      // claim order must come from DRAIN_ORDER, not insertion order.
+      const r = await q.enqueue(pool, [
+        sfx('r1', 'hurt', 'retro'), sfx('r2', 'hurt', 'retro'), sfx('r3', 'hurt', 'retro'),
+        sfx('s1', 'hurt', 'realistic'), sfx('s2', 'death', undefined),
+        { subject_kind: 'biome', subject_key: `${tag}-a`, slot: 'ambience', clip_kind: 'ambience' },
+        { subject_kind: 'world', subject_key: `${tag}-m1`, slot: 'music', clip_kind: 'music' },
+        { subject_kind: 'world', subject_key: `${tag}-m2`, slot: 'music', clip_kind: 'music' },
+      ], {});
+      assert.equal(r.queued.length, 8);
+      const rows = (await pool.query(
+        'SELECT subject_key, drain_group, engine FROM audio_jobs WHERE subject_key LIKE $1 ORDER BY subject_key', [`${tag}%`],
+      )).rows;
+      const by = Object.fromEntries(rows.map((x) => [x.subject_key.slice(tag.length + 1), x]));
+      assert.deepEqual([by.r1.drain_group, by.r1.engine], ['sfx_retro', 'retro']);
+      assert.deepEqual([by.s1.drain_group, by.s1.engine], ['sfx_realistic', 'realistic']);
+      assert.deepEqual([by.s2.drain_group, by.s2.engine], ['sfx_realistic', 'realistic'], 'no engine -> realistic, stored');
+      assert.equal(by.m1.engine, null, 'music carries no engine');
+
+      const groupOf = (jobs) => [...new Set(jobs.map((j) => j.drain_group))];
+      const b1 = await q.claimBatch(pool, 12);
+      assert.deepEqual(groupOf(b1), ['music']);
+      assert.equal(b1.length, 1, 'music is claimed one at a time even when n is larger');
+      assert.ok(b1.every((j) => j.state === 'running' && j.attempts === 1));
+      const b2 = await q.claimBatch(pool, 12);
+      assert.deepEqual([groupOf(b2), b2.length], [['music'], 1]);
+      const b3 = await q.claimBatch(pool, 12);
+      assert.deepEqual([groupOf(b3), b3.length], [['ambience'], 1]);
+      const b4 = await q.claimBatch(pool, 12);
+      assert.deepEqual([groupOf(b4), b4.length], [['sfx_realistic'], 2], 'every realistic job, and no retro one');
+      const b5 = await q.claimBatch(pool, 2);
+      assert.deepEqual([groupOf(b5), b5.length], [['sfx_retro'], 2], 'n caps an sfx batch');
+      assert.ok(b5[0].id < b5[1].id, 'a batch comes back in id order');
+      const b6 = await q.claimBatch(pool, 2);
+      assert.deepEqual([groupOf(b6), b6.length], [['sfx_retro'], 1]);
+      assert.deepEqual(await q.claimBatch(pool, 12), [], 'nothing left');
+
+      // release: the claimed jobs go straight back to claimable with their
+      // attempt refunded and no backoff (used for an sfx pack's innocent
+      // bystanders when one unknown cue fails the whole request).
+      await q.release(pool, b5.map((j) => j.id));
+      const released = (await pool.query(
+        'SELECT state, attempts, not_before FROM audio_jobs WHERE id = ANY($1)', [b5.map((j) => j.id)],
+      )).rows;
+      assert.deepEqual(released, [
+        { state: 'queued', attempts: 0, not_before: null },
+        { state: 'queued', attempts: 0, not_before: null },
+      ]);
+      assert.equal((await q.claimBatch(pool, 12)).length, 2, 'released jobs are claimable at once');
+
+      // A batch never mixes provider pins: the box a pack goes to is one
+      // provider, so a pinned job and an unpinned job are separate batches.
+      await pool.query("UPDATE audio_jobs SET state = 'queued', attempts = 0 WHERE subject_key LIKE $1 AND drain_group = 'sfx_retro'", [`${tag}%`]);
+      const prov = (await pool.query(
+        `INSERT INTO ai_providers (name, base_url, request_template, modality, auth_token)
+         VALUES ($1, 'http://127.0.0.1:1', '{}'::jsonb, 'audio', 'sk') RETURNING id`, [`jobq-prov-${tag}`],
+      )).rows[0].id;
+      try {
+        await pool.query('UPDATE audio_jobs SET provider_id = $2 WHERE subject_key = $1', [`${tag}-r3`, prov]);
+        const p1 = await q.claimBatch(pool, 12);
+        const p2 = await q.claimBatch(pool, 12);
+        assert.deepEqual([p1.length, p2.length], [2, 1]);
+        assert.ok(p1.every((j) => j.provider_id === null));
+        assert.deepEqual(p2.map((j) => j.provider_id), [prov]);
+      } finally {
+        await pool.query('DELETE FROM audio_jobs WHERE subject_key LIKE $1', [`${tag}%`]);
+        await pool.query('DELETE FROM ai_providers WHERE id = $1', [prov]);
+      }
+    });
   });
 });

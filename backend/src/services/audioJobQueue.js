@@ -2,12 +2,17 @@
 //
 // The audio generation queue (spec §2 "Dispatcher"). Modelled on
 // artJobQueue.js; the differences are deliberate:
-//   * one job at a time, claimed in DRAIN_ORDER (music, then ambience) so the
-//     GPU box switches model at most once per group;
+//   * claimed in DRAIN_ORDER groups (music, ambience, then sfx split by
+//     engine) so the GPU box switches model at most once per group; music
+//     and ambience are claimed one job at a time, sfx in batches of up to n
+//     (claimBatch) because the dispatcher sends them as one sfx-pack call;
 //   * requeueOrphans runs at every drain start: a nodemon restart (ANY backend
 //     edit) kills a running drain mid-job, and art's manual "requeue stale"
 //     button is exactly the step people forget.
-const DRAIN_ORDER = ['music', 'ambience'];
+const DRAIN_ORDER = ['music', 'ambience', 'sfx_realistic', 'sfx_retro'];
+// Groups whose jobs are claimed together and sent as ONE box request.
+const PACKED_GROUPS = ['sfx_realistic', 'sfx_retro'];
+const SFX_ENGINES = ['realistic', 'retro'];
 const MAX_ATTEMPTS = Number(process.env.AUDIO_JOB_MAX_ATTEMPTS) || 3;
 // Validated like audioDispatcher's envInt (finite and > 0, else the
 // default): a stray negative or zero value here doesn't just miscompute a
@@ -19,9 +24,21 @@ const RETRY_BASE_MS = () => {
   return Number.isFinite(v) && v > 0 ? v : 30000;
 };
 
-function drainGroupFor(clipKind) {
+// The box keeps one model loaded per engine, so realistic and retro sfx are
+// separate groups. An absent engine means realistic (spec §4 "The engine
+// defaults to realistic, and a batch can choose retro").
+function drainGroupFor(clipKind, engine = 'realistic') {
   if (clipKind === 'music' || clipKind === 'ambience') return clipKind;
-  throw new Error(`no drain group for ${clipKind} until slice 3 (sfx-pack)`);
+  if (clipKind === 'sfx') return engine === 'retro' ? 'sfx_retro' : 'sfx_realistic';
+  throw new Error(`no drain group for ${clipKind}`);
+}
+
+// The engine stored on an sfx row (null for music/ambience). Stored rather
+// than re-derived from drain_group so the dispatcher sends exactly what was
+// queued.
+function engineFor(clipKind, engine) {
+  if (clipKind !== 'sfx') return null;
+  return SFX_ENGINES.includes(engine) ? engine : 'realistic';
 }
 
 function backoffMs(attempts) {
@@ -32,23 +49,27 @@ function backoffMs(attempts) {
 async function enqueue(db, items, { batchId = null, providerId = null } = {}) {
   const batch = batchId || (await db.query('SELECT gen_random_uuid() AS id')).rows[0].id;
   const cols = {
-    kind: [], key: [], slot: [], clip: [], group: [], style: [], prompt: [], slots: [], seed: [],
+    kind: [], key: [], slot: [], clip: [], group: [], style: [], prompt: [], slots: [], seed: [], engine: [],
   };
   for (const it of items) {
     cols.kind.push(it.subject_kind); cols.key.push(it.subject_key); cols.slot.push(it.slot);
-    cols.clip.push(it.clip_kind); cols.group.push(drainGroupFor(it.clip_kind));
+    const engine = engineFor(it.clip_kind, it.engine);
+    cols.clip.push(it.clip_kind); cols.group.push(drainGroupFor(it.clip_kind, engine || undefined));
+    cols.engine.push(engine);
     cols.style.push(it.style || null); cols.prompt.push(it.prompt || null);
     cols.slots.push(it.slots ? JSON.stringify(it.slots) : null);
     cols.seed.push(Number.isInteger(it.seed) ? it.seed : null);
   }
   const r = await db.query(
     `INSERT INTO audio_jobs (batch_id, provider_id, subject_kind, subject_key, slot, clip_kind, drain_group,
-                             style, prompt, slots, seed)
-     SELECT $1, $2, k, key, s, c, g, st, pr, sl::jsonb, sd
-       FROM unnest($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[], $10::text[], $11::bigint[])
-         AS u(k, key, s, c, g, st, pr, sl, sd)
+                             style, prompt, slots, seed, engine)
+     SELECT $1, $2, k, key, s, c, g, st, pr, sl::jsonb, sd, en
+       FROM unnest($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[], $10::text[], $11::bigint[],
+                   $12::text[])
+         AS u(k, key, s, c, g, st, pr, sl, sd, en)
      ON CONFLICT DO NOTHING RETURNING *`,
-    [batch, providerId, cols.kind, cols.key, cols.slot, cols.clip, cols.group, cols.style, cols.prompt, cols.slots, cols.seed],
+    [batch, providerId, cols.kind, cols.key, cols.slot, cols.clip, cols.group, cols.style, cols.prompt, cols.slots, cols.seed,
+      cols.engine],
   );
   const got = new Set(r.rows.map((j) => `${j.subject_kind}/${j.subject_key}/${j.slot}`));
   const already_live = items
@@ -71,6 +92,54 @@ async function claimNext(db) {
   return r.rows[0] || null;
 }
 
+// Claims up to `n` jobs of ONE drain group: the group (and provider pin) of
+// the first claimable job in DRAIN_ORDER. Only a PACKED group (sfx) takes
+// more than one -- music/ambience are one box call per job, so they stay one
+// job per claim whatever `n` is. Same provider_id only, because a batch is
+// one request to one box. Returned in id order.
+//
+// `first` takes its row FOR UPDATE SKIP LOCKED too, so a concurrent claimer
+// cannot pick the same head row; `pick` re-locks it in this same statement
+// (a transaction never blocks on its own lock).
+async function claimBatch(db, n) {
+  const limit = Number.isInteger(n) && n > 0 ? n : 1;
+  const r = await db.query(
+    `WITH first AS (
+       SELECT drain_group, provider_id FROM audio_jobs
+        WHERE state = 'queued' AND (not_before IS NULL OR not_before <= now())
+        ORDER BY array_position($1::text[], drain_group), id
+        FOR UPDATE SKIP LOCKED LIMIT 1
+     ), pick AS (
+       SELECT j.id FROM audio_jobs j, first f
+        WHERE j.state = 'queued' AND (j.not_before IS NULL OR j.not_before <= now())
+          AND j.drain_group = f.drain_group AND j.provider_id IS NOT DISTINCT FROM f.provider_id
+        ORDER BY j.id
+        LIMIT CASE WHEN (SELECT drain_group FROM first) = ANY($3::text[]) THEN $2::int ELSE 1 END
+        FOR UPDATE OF j SKIP LOCKED
+     )
+     UPDATE audio_jobs SET state = 'running', attempts = attempts + 1, claimed_at = now(), updated_at = now()
+      WHERE id IN (SELECT id FROM pick)
+      RETURNING *`,
+    [DRAIN_ORDER, limit, PACKED_GROUPS],
+  );
+  return r.rows.sort((a, b) => Number(a.id) - Number(b.id));
+}
+
+// Claimed jobs straight back to 'queued', attempt refunded, NO backoff. For
+// jobs that were never actually tried -- e.g. the rest of an sfx pack that
+// one unknown cue made the box refuse as a whole. fail(..., {refundAttempt})
+// is the busy-box variant: that one DOES back off, because the box said
+// "not now".
+async function release(db, ids) {
+  if (!ids.length) return 0;
+  return (await db.query(
+    `UPDATE audio_jobs SET state = 'queued', attempts = GREATEST(attempts - 1, 0), claimed_at = NULL,
+            not_before = NULL, updated_at = now()
+      WHERE id = ANY($1::bigint[]) AND state = 'running'`,
+    [ids],
+  )).rowCount;
+}
+
 async function complete(db, id, clipId) {
   await db.query(
     `UPDATE audio_jobs SET state = 'done', clip_id = $2, last_error = NULL, updated_at = now() WHERE id = $1`,
@@ -79,7 +148,7 @@ async function complete(db, id, clipId) {
 }
 
 // `refundAttempt` is for a BUSY box (HTTP 409/503, spec §2): "not now" is not
-// a strike against the job, so the attempt claimNext just spent on it is
+// a strike against the job, so the attempt the claim just spent on it is
 // given back (GREATEST(attempts-1,0), same refund requeueOrphans already
 // does for an orphaned row) and it is always requeued -- MAX_ATTEMPTS is a
 // budget for THIS job being bad, and a busy answer says nothing about that.
@@ -176,11 +245,15 @@ async function clear(db, { states = ['queued', 'failed', 'done'] } = {}) {
 
 module.exports = {
   DRAIN_ORDER,
+  PACKED_GROUPS,
+  SFX_ENGINES,
   MAX_ATTEMPTS,
   drainGroupFor,
   backoffMs,
   enqueue,
   claimNext,
+  claimBatch,
+  release,
   complete,
   fail,
   requeueOrphans,

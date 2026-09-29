@@ -4,15 +4,15 @@
 // audio_jobs rows into stored clips. Modelled on artDispatcher.js's drain
 // half (startDrain/stopDrain/runStatus) -- the differences follow directly
 // from audioJobQueue.js's own differences from art's queue:
-//   * ONE JOB AT A TIME, not a worker pool. Art bounds concurrency because the
-//     image box can (carefully) take more than one request; the audio box's
-//     queue comment says the same GPU-headroom story applies here, and
-//     audioJobQueue.claimNext already claims exactly one row, so the
-//     dispatcher mirrors that rather than reintroducing a pool it would never
-//     use above 1.
-//   * GROUPED ORDER (music before ambience) is entirely audioJobQueue's job
-//     (claimNext orders by DRAIN_ORDER, id) -- this file only has to claim
-//     in a loop and never has to know the groups exist.
+//   * ONE BOX REQUEST AT A TIME, not a worker pool. Art bounds concurrency
+//     because the image box can (carefully) take more than one request; the
+//     audio box's queue comment says the same GPU-headroom story applies
+//     here. Music/ambience are one job per request; sfx jobs (slice 3) are
+//     claimed in batches of up to AUDIO_SFX_PACK_SIZE and sent as ONE
+//     sfx-pack request (spec §2 "Packing": one model load for many cues).
+//   * GROUPED ORDER (music, ambience, sfx_realistic, sfx_retro) is entirely
+//     audioJobQueue's job (claimBatch orders by DRAIN_ORDER, id) -- this
+//     file only has to tell a packed (sfx) batch from a single job.
 //   * REQUEUE ORPHANS AT EVERY START, same reason as art: nodemon restarts on
 //     ANY backend edit, which kills a running drain mid-job and leaves its row
 //     stuck in 'running' until something notices. Doing it first, before the
@@ -45,6 +45,9 @@ function envInt(name, fallback) {
 }
 const BREAKER_TRIP = () => envInt('AUDIO_BREAKER_TRIP', 3);
 
+// How many sfx jobs one sfx-pack request carries (spec §2 "Packing").
+const SFX_PACK_SIZE = () => envInt('AUDIO_SFX_PACK_SIZE', 12);
+
 // The longest the drain will sit waiting for a backoff to expire before
 // looking again. Not a cap on the backoff itself (fail() computes that) --
 // only on how long a single wait goes without rechecking for a stop request
@@ -65,6 +68,7 @@ const MIN_IDLE_WAIT_MS = 250;
 const REAL_DEPS = {
   queue: audioJobQueue,
   generateForSlot: audioGeneration.generateForSlot,
+  generateSfxPackForJobs: audioGeneration.generateSfxPackForJobs,
   resolveAudioProvider: audioGeneration.resolveAudioProvider,
   subjectExists,
   sleep: (ms) => new Promise((resolve) => { setTimeout(resolve, ms); }),
@@ -141,6 +145,41 @@ async function bookkeep(db, deps, self, job, write) {
     return false;
   }
 }
+
+// BUSY (HTTP 409/503) is the box saying "not now", not "this job is bad" --
+// spec §2 draws that line explicitly. A busy answer must not spend an attempt
+// and must not count toward the breaker.
+function isBusy(result) {
+  return Boolean(result.retryable) && (result.status === 409 || result.status === 503);
+}
+
+// Only a PROVIDER FAULT counts toward the breaker (busy is handled before
+// this is ever asked). A provider fault is any of:
+//   * result.retryable -- a transport error, a client-side timeout, or (per
+//     callJson) a 409/503 that lost its "busy" status somewhere upstream; all
+//     are the box/network, not the subject.
+//   * result.status is a 5xx OTHER than 503 (500/502/504/...) -- the box
+//     itself errored, even though callJson only marks 409/503 retryable.
+//     Missing this was a real gap: a box answering 500 for every subject used
+//     to fail every job forever without ever tripping the breaker.
+//   * result.providerFault -- remoteAudioProvider's own signal for a fault
+//     that isn't an HTTP status at all: unusable JSON, the box's ledger
+//     reporting a failed generation (e.g. CUDA OOM), or a returned file that
+//     fails the OGG/duration check (the box's output being wrong, not the
+//     request).
+// A failure with NONE of these (a pinned-but-disabled provider, bad input, a
+// subject that no longer exists in the catalogue, an upload-only slot) says
+// nothing about the box's health, so it neither trips the breaker nor resets
+// the counter -- only a genuine success does that; three unrelated bad
+// subjects in a row must not silently reset a count a real outage is
+// building toward.
+function isProviderFault(result) {
+  return Boolean(result.retryable)
+    || (Number.isInteger(result.status) && result.status >= 500 && result.status !== 503)
+    || Boolean(result.providerFault);
+}
+
+const errorText = (err) => (err && err.message ? err.message : String(err));
 
 // --- The drain --------------------------------------------------------------
 //
@@ -224,6 +263,212 @@ function startDrain(db, opts = {}) {
   // consecutive-failure count") and is only what the breaker looks at.
   let consecutiveFailures = 0;
 
+  // A provider fault just happened: 'breaker' when it is the one that trips.
+  function recordFault() {
+    consecutiveFailures += 1;
+    return consecutiveFailures >= BREAKER_TRIP() ? 'breaker' : undefined;
+  }
+
+  // One job's failed result -> requeue (retry) or failed, counted.
+  async function failJob(job, result, opts = {}) {
+    let outcome;
+    if (await bookkeep(db, deps, self, job, async () => {
+      outcome = await deps.queue.fail(db, job.id, result.error, { retryable: Boolean(result.retryable), ...opts });
+    })) {
+      if (outcome === 'retry') self.retried += 1; else self.failed += 1;
+      self.error = String(result.error);
+    }
+  }
+
+  // One job's successful result -> done. True when the write succeeded.
+  async function completeJob(job, result) {
+    if (!(await bookkeep(db, deps, self, job, () => deps.queue.complete(db, job.id, result.clip.id)))) return false;
+    self.done += 1;
+    return true;
+  }
+
+  // Each handler below returns what the loop does next: undefined (claim the
+  // next batch), 'pause' (the box was busy: sleep before claiming again, so
+  // the very next claim doesn't immediately hammer the same busy box) or
+  // 'breaker' (stop the drain).
+
+  // A music/ambience job: one box call.
+  async function runSingle(job) {
+    self.current = {
+      id: job.id,
+      subject_kind: job.subject_kind,
+      subject_key: job.subject_key,
+      slot: job.slot,
+      drain_group: job.drain_group,
+    };
+
+    // A thrown exception anywhere in resolving the provider or generating
+    // the clip is treated as retryable:false with its message -- an
+    // unexpected exception is our own bug or a hard box fault, not a "try
+    // again in a minute" condition, and it must not take the whole drain
+    // down (that is what the top-level catch is for; this one is scoped to a
+    // single job).
+    let result;
+    try {
+      // A job can sit queued while its world/biome is deleted or renamed
+      // (subjects are keyed by name). Generating for it would burn box time
+      // on a clip that can never be bound, so it fails up front --
+      // retryable:false with no status/providerFault, so it does not count
+      // toward the breaker either.
+      const exists = await deps.subjectExists(db, job.subject_kind, job.subject_key);
+      // job.provider_id resolves that pin; null falls through to the active
+      // audio provider (resolveAudioProvider's own contract).
+      const provider = exists ? await deps.resolveAudioProvider(db, job.provider_id ?? null) : null;
+      if (!exists) {
+        result = { ok: false, error: 'subject no longer exists', retryable: false };
+      } else if (!provider) {
+        result = { ok: false, error: 'no audio provider', retryable: false };
+      } else {
+        result = await deps.generateForSlot(db, provider, {
+          subjectKind: job.subject_kind,
+          subjectKey: job.subject_key,
+          slot: job.slot,
+          clipKind: job.clip_kind,
+          style: job.style,
+          prompt: job.prompt,
+          slots: job.slots,
+          // audio_jobs.seed is bigint; pg returns it as a string, so a bare
+          // job.seed would hand generateForSlot "123" instead of 123.
+          // Number() on a present seed, undefined (not null) when absent, so
+          // generateForSlot's own Number.isInteger check picks a random seed
+          // the same way it does for a hand-typed request.
+          seed: job.seed == null ? undefined : Number(job.seed),
+        });
+      }
+    } catch (err) {
+      result = { ok: false, error: errorText(err), retryable: false };
+    }
+
+    if (result.ok) {
+      if (await completeJob(job, result)) consecutiveFailures = 0;
+      return undefined;
+    }
+    // Busy: refundAttempt undoes the claim's increment, and it never reaches
+    // the breaker -- three subjects in a row failing on a busy box says
+    // nothing about whether the box is actually broken.
+    if (isBusy(result)) {
+      await failJob(job, result, { retryable: true, refundAttempt: true });
+      return 'pause';
+    }
+    await failJob(job, result);
+    return isProviderFault(result) ? recordFault() : undefined;
+  }
+
+  // An sfx batch (slice 3): every job of one drain group and provider, sent
+  // as ONE sfx-pack request. Per-job refusals and per-item failures cost only
+  // their own job; a whole-pack failure is ONE provider outcome, so a
+  // faulting pack of 12 counts toward the breaker once, not 12 times.
+  async function runPack(jobs) {
+    const head = jobs[0];
+    self.current = {
+      id: head.id,
+      subject_kind: head.subject_kind,
+      subject_key: head.subject_key,
+      slot: head.slot,
+      drain_group: head.drain_group,
+      pack_size: jobs.length,
+    };
+
+    const live = [];
+    for (const job of jobs) {
+      let exists;
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        exists = await deps.subjectExists(db, job.subject_kind, job.subject_key);
+      } catch (err) {
+        // eslint-disable-next-line no-await-in-loop
+        await failJob(job, { error: errorText(err), retryable: false });
+        continue;
+      }
+      if (exists) live.push(job);
+      // eslint-disable-next-line no-await-in-loop
+      else await failJob(job, { error: 'subject no longer exists', retryable: false });
+    }
+    if (!live.length) return undefined;
+
+    let out;
+    try {
+      // claimBatch never mixes provider pins, so the head's pin is the batch's.
+      const provider = await deps.resolveAudioProvider(db, head.provider_id ?? null);
+      if (!provider) {
+        // eslint-disable-next-line no-await-in-loop
+        for (const job of live) await failJob(job, { error: 'no audio provider', retryable: false });
+        return undefined;
+      }
+      out = await deps.generateSfxPackForJobs(db, provider, live, {
+        // bigint comes back as a string; undefined -> a random seed.
+        seed: head.seed == null ? undefined : Number(head.seed),
+      });
+    } catch (err) {
+      const result = { ok: false, error: errorText(err), retryable: false };
+      // eslint-disable-next-line no-await-in-loop
+      for (const job of live) await failJob(job, result);
+      return undefined;
+    }
+
+    // Upload-only / cue not offered: never sent, never counted.
+    // eslint-disable-next-line no-await-in-loop
+    for (const { job, result } of out.refused) await failJob(job, result);
+    if (out.packFailure) return settlePackFailure(out.sent, out.packFailure);
+
+    let anyOk = false;
+    let anyFault = false;
+    for (const { job, result } of out.results) {
+      if (result.ok) {
+        // eslint-disable-next-line no-await-in-loop
+        if (await completeJob(job, result)) anyOk = true;
+      } else {
+        // eslint-disable-next-line no-await-in-loop
+        await failJob(job, result);
+        if (isProviderFault(result)) anyFault = true;
+      }
+    }
+    if (anyOk) {
+      consecutiveFailures = 0;
+      return undefined;
+    }
+    return anyFault ? recordFault() : undefined;
+  }
+
+  // The box refused the pack as a whole; `sent` are the jobs it held.
+  async function settlePackFailure(sent, pack) {
+    if (isBusy(pack)) {
+      // eslint-disable-next-line no-await-in-loop
+      for (const { job } of sent) await failJob(job, pack, { retryable: true, refundAttempt: true });
+      return 'pause';
+    }
+    if (pack.unknownCue) {
+      // One unknown cue fails the WHOLE pack (spec §2). Only the jobs that
+      // sent it are at fault -- our models_cache is stale for that cue, and
+      // retrying it would fail the same way. The rest were never tried:
+      // released (attempt refunded, no backoff) so the next claim re-sends
+      // them without the offending cue.
+      const bad = sent.filter((x) => x.cue === pack.unknownCue);
+      if (bad.length) {
+        // eslint-disable-next-line no-await-in-loop
+        for (const { job } of bad) await failJob(job, { error: pack.error, retryable: false });
+        const rest = sent.filter((x) => x.cue !== pack.unknownCue).map((x) => x.job);
+        try {
+          await deps.queue.release(db, rest.map((j) => j.id));
+        } catch (err) {
+          // Still 'running'; the next drain's requeueOrphans picks them up.
+          console.error('audio drain: could not release the rest of an unknown-cue pack', err);
+          self.error = errorText(err);
+        }
+        return undefined;
+      }
+    }
+    // eslint-disable-next-line no-await-in-loop
+    for (const { job } of sent) await failJob(job, pack);
+    // An unknown cue we never sent is the box misbehaving, not our request.
+    return isProviderFault(pack) || pack.unknownCue ? recordFault() : undefined;
+  }
+
   (async () => {
     try {
       // RESTART RECOVERY, BEFORE the NO_PROVIDER precondition. A nodemon
@@ -248,8 +493,8 @@ function startDrain(db, opts = {}) {
         if (self.stopping) { self.stoppedReason = 'stopped'; break; }
 
         // eslint-disable-next-line no-await-in-loop
-        const job = await deps.queue.claimNext(db);
-        if (!job) {
+        const jobs = await deps.queue.claimBatch(db, SFX_PACK_SIZE());
+        if (!jobs.length) {
           // Nothing claimable does not mean the queue is empty -- it also
           // happens when every remaining job is sitting out its retry
           // backoff. Ending the drain on that would silently strand a queue
@@ -265,141 +510,21 @@ function startDrain(db, opts = {}) {
           continue;
         }
 
-        self.current = {
-          id: job.id,
-          subject_kind: job.subject_kind,
-          subject_key: job.subject_key,
-          slot: job.slot,
-          drain_group: job.drain_group,
-        };
-
-        // A thrown exception anywhere in resolving the provider or generating
-        // the clip is treated as retryable:false with its message -- an
-        // unexpected exception is our own bug or a hard box fault, not a
-        // "try again in a minute" condition, and it must not take the whole
-        // drain down (that is what the top-level catch below is for; this
-        // one is scoped to a single job).
-        let result;
-        try {
-          // A job can sit queued while its world/biome is deleted or
-          // renamed (subjects are keyed by name). Generating for it would
-          // burn box time on a clip that can never be bound, so it fails
-          // up front -- retryable:false with no status/providerFault, so it
-          // does not count toward the breaker either.
+        // eslint-disable-next-line no-await-in-loop
+        const next = audioJobQueue.PACKED_GROUPS.includes(jobs[0].drain_group)
+          ? await runPack(jobs)
+          : await runSingle(jobs[0]);
+        self.current = null;
+        if (next === 'breaker') { self.stoppedReason = 'breaker'; break; }
+        if (next === 'pause') {
           // eslint-disable-next-line no-await-in-loop
-          const exists = await deps.subjectExists(db, job.subject_kind, job.subject_key);
-          // job.provider_id resolves that pin; null falls through to the
-          // active audio provider (resolveAudioProvider's own contract).
-          // eslint-disable-next-line no-await-in-loop
-          const provider = exists ? await deps.resolveAudioProvider(db, job.provider_id ?? null) : null;
-          if (!exists) {
-            result = { ok: false, error: 'subject no longer exists', retryable: false };
-          } else if (!provider) {
-            result = { ok: false, error: 'no audio provider', retryable: false };
-          } else {
-            // eslint-disable-next-line no-await-in-loop
-            result = await deps.generateForSlot(db, provider, {
-              subjectKind: job.subject_kind,
-              subjectKey: job.subject_key,
-              slot: job.slot,
-              clipKind: job.clip_kind,
-              style: job.style,
-              prompt: job.prompt,
-              slots: job.slots,
-              // audio_jobs.seed is bigint; pg returns it as a string, so a
-              // bare job.seed would hand generateForSlot "123" instead of
-              // 123. Number() on a present seed, undefined (not null) when
-              // absent, so generateForSlot's own Number.isInteger check picks
-              // a random seed the same way it does for a hand-typed request.
-              seed: job.seed == null ? undefined : Number(job.seed),
-            });
-          }
-        } catch (err) {
-          result = { ok: false, error: err && err.message ? err.message : String(err), retryable: false };
-        }
-
-        if (result.ok) {
-          // eslint-disable-next-line no-await-in-loop
-          if (await bookkeep(db, deps, self, job, () => deps.queue.complete(db, job.id, result.clip.id))) {
-            self.done += 1;
-            consecutiveFailures = 0;
-          }
-          self.current = null;
-        } else {
-          // BUSY (HTTP 409/503) is the box saying "not now", not "this job is
-          // bad" -- spec §2 draws that line explicitly. It must not spend an
-          // attempt (refundAttempt undoes claimNext's increment) and must not
-          // count toward the breaker: three subjects in a row failing on a
-          // busy box says nothing about whether the box is actually broken,
-          // and tripping on it would stop a drain that only needed to wait a
-          // moment. The drain itself pauses (not just the job's own
-          // not_before) so the very next claim doesn't immediately hammer the
-          // same busy box again.
-          const busy = Boolean(result.retryable) && (result.status === 409 || result.status === 503);
-          if (busy) {
-            // eslint-disable-next-line no-await-in-loop
-            if (await bookkeep(db, deps, self, job, () => deps.queue.fail(
-              db, job.id, result.error, { retryable: true, refundAttempt: true },
-            ))) {
-              self.retried += 1;
-              self.error = String(result.error);
-            }
-            self.current = null;
-            // eslint-disable-next-line no-await-in-loop
-            await sleepSliced(deps.queue.backoffMs(1), self, deps);
-            if (self.stopping) { self.stoppedReason = 'stopped'; break; }
-            continue;
-          }
-
-          let outcome;
-          // eslint-disable-next-line no-await-in-loop
-          if (await bookkeep(db, deps, self, job, async () => {
-            outcome = await deps.queue.fail(db, job.id, result.error, {
-              retryable: Boolean(result.retryable),
-            });
-          })) {
-            if (outcome === 'retry') self.retried += 1; else self.failed += 1;
-            self.error = String(result.error);
-          }
-          self.current = null;
-          // Only a PROVIDER FAULT counts toward the breaker (busy is already
-          // excluded above -- it never reaches this branch). A provider
-          // fault is any of:
-          //   * result.retryable -- a transport error, a client-side
-          //     timeout, or (per callJson) a 409/503 that lost its "busy"
-          //     status somewhere upstream; all are the box/network, not the
-          //     subject.
-          //   * result.status is a 5xx OTHER than 503 (500/502/504/...) --
-          //     the box itself errored, even though callJson only marks
-          //     409/503 retryable. Missing this was a real gap: a box
-          //     answering 500 for every subject used to fail every job
-          //     forever without ever tripping the breaker.
-          //   * result.providerFault -- remoteAudioProvider's own signal for
-          //     a fault that isn't an HTTP status at all: unusable JSON, the
-          //     box's ledger reporting a failed generation (e.g. CUDA OOM),
-          //     or a returned file that fails the OGG/duration check (the
-          //     box's output being wrong, not the request).
-          // A failure with NONE of these (a pinned-but-disabled provider,
-          // bad input, a subject that no longer exists in the catalogue)
-          // says nothing about the box's health, so it neither trips the
-          // breaker nor resets the counter -- only a genuine success does
-          // that; three unrelated bad subjects in a row must not silently
-          // reset a count a real outage is building toward.
-          const providerFault = Boolean(result.retryable)
-            || (Number.isInteger(result.status) && result.status >= 500 && result.status !== 503)
-            || Boolean(result.providerFault);
-          if (providerFault) {
-            consecutiveFailures += 1;
-            if (consecutiveFailures >= BREAKER_TRIP()) {
-              self.stoppedReason = 'breaker';
-              break;
-            }
-          }
+          await sleepSliced(deps.queue.backoffMs(1), self, deps);
+          if (self.stopping) { self.stoppedReason = 'stopped'; break; }
         }
       }
     } catch (err) {
-      // Anything that escaped the per-job try/catch above (requeueOrphans,
-      // claimNext, the NO_PROVIDER precondition, a DB connection drop) ends
+      // Anything that escaped the per-job handlers above (requeueOrphans,
+      // claimBatch, the NO_PROVIDER precondition, a DB connection drop) ends
       // the whole drain rather than the loop retrying forever against a
       // database it can no longer reach.
       self.error = err && err.message ? err.message : String(err);

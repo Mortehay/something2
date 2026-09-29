@@ -13,7 +13,7 @@ const {
   resolveAudioProvider, contextFor, boxTrackName, generateForSlot,
 } = require('../services/audioGeneration');
 const {
-  SUBJECT_KINDS, MAX_SUBJECT_KEY, slotKind, subjectExists,
+  SUBJECT_KINDS, MAX_SUBJECT_KEY, slotKind, subjectExists, cueFor,
 } = require('../services/audioSubjects');
 const { checkClipBuffer } = require('../services/oggInfo');
 const audioJobQueue = require('../services/audioJobQueue');
@@ -288,7 +288,21 @@ module.exports = function audioRoutes(pool) {
         // eslint-disable-next-line no-await-in-loop
         const { clipKind, error } = await checkSubject(pool, it.subject_kind, it.subject_key, it.slot);
         if (error) { rejected.push({ item, error }); continue; }
-        if (clipKind === 'sfx') { rejected.push({ item, error: 'sfx batches arrive in slice 3' }); continue; }
+        // sfx (slice 3): an upload-only slot has no cue on the box, so a
+        // job for it could never generate anything (spec §4) -- refused here
+        // rather than queued to fail later. The per-item engine is optional
+        // (realistic when absent) and picks the drain group.
+        if (clipKind === 'sfx') {
+          // eslint-disable-next-line no-await-in-loop
+          if (!(await cueFor(pool, it.subject_kind, it.subject_key, it.slot))) {
+            rejected.push({ item, error: 'upload only: no cue on the provider' });
+            continue;
+          }
+          if (it.engine !== undefined && !audioJobQueue.SFX_ENGINES.includes(it.engine)) {
+            rejected.push({ item, error: "engine must be 'realistic' or 'retro'" });
+            continue;
+          }
+        }
         valid.push({
           subject_kind: it.subject_kind,
           subject_key: it.subject_key,
@@ -296,6 +310,7 @@ module.exports = function audioRoutes(pool) {
           clip_kind: clipKind,
           style: it.style || null,
           prompt: it.prompt || null,
+          engine: clipKind === 'sfx' ? it.engine : undefined,
         });
       }
       const enq = await audioJobQueue.enqueue(pool, valid, { providerId });

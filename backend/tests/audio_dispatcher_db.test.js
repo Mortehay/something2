@@ -4,6 +4,7 @@ const { Pool } = require('pg');
 const { withAdvisoryLock, AUDIO_JOBS_LOCK_KEY } = require('./helpers/advisoryLock.js');
 const q = require('../src/services/audioJobQueue');
 const d = require('../src/services/audioDispatcher');
+const gen = require('../src/services/audioGeneration');
 
 const url = process.env.TEST_DATABASE_URL;
 const skip = !url ? 'no TEST_DATABASE_URL -- refusing to write to a real database' : false;
@@ -356,6 +357,202 @@ test('audio dispatcher', { skip }, async (t) => {
         assert.match(s.error, /no audio provider/);
         const row = (await pool.query('SELECT state, attempts FROM audio_jobs WHERE subject_key = $1', [`${tag}-np1`])).rows[0];
         assert.deepEqual(row, { state: 'queued', attempts: 0 }, 'the job was never claimed, so it burned no attempt');
+      });
+
+      // --- sfx packs (game audio slice 3, Task 4) --------------------------
+      //
+      // Creature subjects with tagged, made-up keys (subjectExists is faked):
+      // creature cues are fixed per slot (hurt->hit, death->death, nearby ->
+      // none, upload only). The fake box is the ADAPTER-level
+      // generateSfxPack; everything between it and the job rows -- cue
+      // checks, entity text, mapping rows back, bookkeeping -- is real.
+      const sfxProvider = { id: null, modality: 'audio', models_cache: ['cue:hit', 'cue:death'] };
+      const fakeLib = { bindClip: async () => ({}), storeAndBindClip: async () => ({ clip: { id: null }, binding: { id: null } }) };
+      const okRow = (it) => ({
+        ok: true, cue: it.cue, entity: it.entity, clips: [{ buffer: Buffer.alloc(1), durationMs: 500 }], prompt: 'p', seed: 1, cached: false,
+      });
+      const sfxDeps = (generateSfxPack, extra = {}) => ({
+        ...baseDeps,
+        resolveAudioProvider: async () => sfxProvider,
+        generateSfxPackForJobs: (db, p, jobs, opts) => gen.generateSfxPackForJobs(db, p, jobs, {
+          ...opts, rap: { generateSfxPack }, lib: fakeLib,
+        }),
+        ...extra,
+      });
+      const sfxJob = (key, slot = 'hurt', engine = 'realistic') => ({
+        subject_kind: 'creature', subject_key: `${tag}-${key}`, slot, clip_kind: 'sfx', engine,
+      });
+      const rowsLike = async (like) => (await pool.query(
+        'SELECT subject_key, slot, state, attempts, last_error FROM audio_jobs WHERE subject_key LIKE $1 ORDER BY id', [like])).rows;
+
+      await t.test('sfx: drain order is music, ambience, sfx_realistic, sfx_retro -- one pack call per sfx group', async () => {
+        d.__resetRun();
+        // The no-provider subtest above leaves its job queued on purpose.
+        await pool.query('DELETE FROM audio_jobs WHERE subject_key LIKE $1', [`${tag}-np%`]);
+        const order = [];
+        await q.enqueue(pool, [
+          sfxJob('ord-retro', 'hurt', 'retro'),
+          sfxJob('ord-real', 'hurt', 'realistic'),
+          { subject_kind: 'biome', subject_key: `${tag}-ord-amb`, slot: 'ambience', clip_kind: 'ambience' },
+          { subject_kind: 'world', subject_key: `${tag}-ord-mus`, slot: 'music', clip_kind: 'music' },
+        ], {});
+        const deps = sfxDeps(async (p, body) => {
+          order.push(`pack:${[...new Set(body.items.map((i) => i.engine))].join('+')}`);
+          return { ok: true, items: body.items.map(okRow) };
+        }, {
+          generateForSlot: async (db, p, spec) => { order.push(spec.clipKind); return { ok: true, clip: { id: null } }; },
+        });
+        d.startDrain(pool, { deps });
+        const st = await waitIdle();
+        assert.deepEqual(order, ['music', 'ambience', 'pack:realistic', 'pack:retro']);
+        assert.equal(st.done, 4);
+        assert.equal(st.stopped_reason, 'empty');
+      });
+
+      await t.test('sfx: 14 queued realistic jobs go out as two pack calls (12 + 2); the retro job gets its own', async () => {
+        d.__resetRun();
+        const calls = [];
+        await q.enqueue(pool, [
+          ...Array.from({ length: 14 }, (_, i) => sfxJob(`p14-${String(i).padStart(2, '0')}`)),
+          sfxJob('p14-retro', 'death', 'retro'),
+        ], {});
+        d.startDrain(pool, {
+          deps: sfxDeps(async (p, body) => { calls.push(body); return { ok: true, items: body.items.map(okRow) }; }),
+        });
+        const st = await waitIdle();
+        assert.deepEqual(calls.map((c) => c.items.length), [12, 2, 1]);
+        assert.deepEqual(calls.map((c) => [...new Set(c.items.map((i) => i.engine))]), [['realistic'], ['realistic'], ['retro']],
+          'each call carries one group only');
+        assert.ok(calls.every((c) => Number.isInteger(c.seed)), 'every pack sends an explicit integer seed');
+        assert.equal(st.done, 15);
+        const rows = await rowsLike(`${tag}-p14-%`);
+        assert.ok(rows.every((r) => r.state === 'done' && r.attempts === 1), JSON.stringify(rows));
+      });
+
+      await t.test('sfx: one failed item fails only its own job; the retry re-sends it alone', async () => {
+        d.__resetRun();
+        // A near-zero retry backoff so the retried item is claimable again
+        // within this subtest (fail() reads it per call).
+        const prevBase = process.env.AUDIO_JOB_RETRY_BASE_MS;
+        process.env.AUDIO_JOB_RETRY_BASE_MS = '1';
+        try {
+          await q.enqueue(pool, [sfxJob('item-a'), sfxJob('item-b'), sfxJob('item-c')], {});
+          const calls = [];
+          d.startDrain(pool, {
+            deps: sfxDeps(async (p, body) => {
+              calls.push(body.items.map((it) => it.entity.slice(-6)));
+              return {
+                ok: true,
+                items: body.items.map((it) => (calls.length === 1 && it.entity === `${tag}-item-b`.toLowerCase()
+                  ? { ok: false, cue: it.cue, entity: it.entity, error: 'cuda oom', providerFault: true }
+                  : okRow(it))),
+              };
+            }),
+          });
+          const st = await waitIdle();
+          assert.deepEqual(calls, [['item-a', 'item-b', 'item-c'], ['item-b']], 'only the failed item is sent again');
+          assert.equal(st.done, 3);
+          assert.equal(st.retried, 1);
+          assert.equal(st.stopped_reason, 'empty');
+          const rows = await rowsLike(`${tag}-item-%`);
+          assert.deepEqual(rows.map((r) => [r.subject_key.slice(-6), r.state, r.attempts]), [
+            ['item-a', 'done', 1], ['item-b', 'done', 2], ['item-c', 'done', 1],
+          ]);
+        } finally {
+          if (prevBase === undefined) delete process.env.AUDIO_JOB_RETRY_BASE_MS; else process.env.AUDIO_JOB_RETRY_BASE_MS = prevBase;
+          await pool.query('DELETE FROM audio_jobs WHERE subject_key LIKE $1', [`${tag}-item-%`]);
+        }
+      });
+
+      await t.test('sfx: a busy pack (409) refunds every job in it, pauses, and never trips the breaker', async () => {
+        d.__resetRun();
+        await q.enqueue(pool, [sfxJob('busy-a'), sfxJob('busy-b'), sfxJob('busy-c')], {});
+        let calls = 0;
+        const sleeps = [];
+        d.startDrain(pool, {
+          deps: sfxDeps(async () => {
+            calls += 1;
+            return { ok: false, status: 409, retryable: true, error: 'switch pending' };
+          }, { sleep: async (ms) => { sleeps.push(ms); } }),
+        });
+        const t0 = Date.now();
+        while (calls < 1 || sleeps.length < 1) {
+          if (Date.now() - t0 > 5000) throw new Error('no busy pack seen');
+          // eslint-disable-next-line no-await-in-loop
+          await new Promise((r) => setTimeout(r, 5));
+        }
+        d.stopDrain();
+        const st = await waitIdle();
+        assert.equal(st.stopped_reason, 'stopped');
+        assert.equal(st.retried, 3, 'all three jobs of the pack were requeued');
+        assert.equal(st.failed, 0);
+        const rows = await rowsLike(`${tag}-busy-%`);
+        assert.ok(rows.every((r) => r.state === 'queued' && r.attempts === 0), JSON.stringify(rows));
+        await pool.query('DELETE FROM audio_jobs WHERE subject_key LIKE $1', [`${tag}-busy-%`]);
+      });
+
+      await t.test('sfx: an upload-only job never reaches the box and fails without counting', async () => {
+        d.__resetRun();
+        const sentItems = [];
+        await q.enqueue(pool, [sfxJob('up-near', 'nearby'), sfxJob('up-hurt', 'hurt')], {});
+        d.startDrain(pool, {
+          deps: sfxDeps(async (p, body) => { sentItems.push(...body.items); return { ok: true, items: body.items.map(okRow) }; }),
+        });
+        const st = await waitIdle();
+        assert.deepEqual(sentItems.map((i) => [i.cue, i.entity]), [['hit', `${tag}-up-hurt`.toLowerCase()]]);
+        assert.equal(st.stopped_reason, 'empty');
+        const rows = await rowsLike(`${tag}-up-%`);
+        assert.equal(rows[0].state, 'failed');
+        assert.match(rows[0].last_error, /upload only/);
+        assert.equal(rows[1].state, 'done');
+      });
+
+      await t.test('sfx: an unknown-cue refusal fails only that cue\'s jobs; the rest are re-sent without it, attempt refunded', async () => {
+        d.__resetRun();
+        const calls = [];
+        await q.enqueue(pool, [sfxJob('uc-a', 'hurt'), sfxJob('uc-b', 'death'), sfxJob('uc-c', 'hurt')], {});
+        d.startDrain(pool, {
+          deps: sfxDeps(async (p, body) => {
+            calls.push(body.items.map((i) => i.cue));
+            if (body.items.some((i) => i.cue === 'death')) {
+              return {
+                ok: false, status: 422, retryable: false, providerFault: false, unknownCue: 'death',
+                error: "audio service answered 422 for POST /api/audio/sfx-pack: unknown cue 'death'; see GET /api/audio/styles?kind=sfx",
+              };
+            }
+            return { ok: true, items: body.items.map(okRow) };
+          }),
+        });
+        const st = await waitIdle();
+        assert.deepEqual(calls, [['hit', 'death', 'hit'], ['hit', 'hit']]);
+        assert.equal(st.stopped_reason, 'empty');
+        const rows = await rowsLike(`${tag}-uc-%`);
+        assert.deepEqual(rows.map((r) => [r.subject_key.slice(-4), r.state, r.attempts]), [
+          ['uc-a', 'done', 1], ['uc-b', 'failed', 1], ['uc-c', 'done', 1],
+        ], 'bystanders were released with their attempt refunded, then done on the next pack');
+        assert.match(rows[1].last_error, /unknown cue 'death'/);
+      });
+
+      await t.test('sfx: a faulting pack counts ONCE toward the breaker, however many jobs it held', async () => {
+        d.__resetRun();
+        const prev = process.env.AUDIO_SFX_PACK_SIZE;
+        process.env.AUDIO_SFX_PACK_SIZE = '2';
+        try {
+          await q.enqueue(pool, Array.from({ length: 8 }, (_, i) => sfxJob(`brk-${i}`)), {});
+          let calls = 0;
+          d.startDrain(pool, {
+            deps: sfxDeps(async () => { calls += 1; return { ok: false, status: 500, retryable: false, error: 'internal' }; }),
+          });
+          const st = await waitIdle();
+          assert.equal(st.stopped_reason, 'breaker');
+          assert.equal(calls, 3, 'three packs (six jobs), not three jobs, trip it');
+          assert.equal(st.failed, 6);
+          const rows = await rowsLike(`${tag}-brk-%`);
+          assert.equal(rows.filter((r) => r.state === 'queued').length, 2, 'the fourth pack was never sent');
+        } finally {
+          if (prev === undefined) delete process.env.AUDIO_SFX_PACK_SIZE; else process.env.AUDIO_SFX_PACK_SIZE = prev;
+          await pool.query('DELETE FROM audio_jobs WHERE subject_key LIKE $1', [`${tag}-brk-%`]);
+        }
       });
     } finally {
       for (const r of foreignRows) {

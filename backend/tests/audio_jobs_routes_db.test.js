@@ -178,6 +178,45 @@ test('audio job routes', { skip }, async (t) => {
         assert.equal(res.body.rejected.length, 0);
       });
 
+      // Game audio slice 3, Task 4: sfx slots are queued (the slice-2
+      // "sfx batches arrive in slice 3" refusal is gone), an upload-only slot
+      // (no cue on the box) is rejected, and the optional per-item engine
+      // picks the drain group. attack_type is a fixed catalog (melee/ranged/
+      // magic) needing no row of its own; the jobs made here are deleted by
+      // id straight after.
+      await t.test('enqueue: sfx slots queue by engine; an upload-only slot and a bad engine are rejected', async () => {
+        const res = await request(app).post('/api/audio/admin/jobs').set('Authorization', bearer(admin)).send({
+          items: [
+            { subject_kind: 'attack_type', subject_key: 'melee', slot: 'use', engine: 'retro' },
+            { subject_kind: 'attack_type', subject_key: 'magic', slot: 'hit' },
+            { subject_kind: 'attack_type', subject_key: 'ranged', slot: 'use' },
+            { subject_kind: 'attack_type', subject_key: 'ranged', slot: 'hit', engine: 'lofi' },
+          ],
+        });
+        try {
+          assert.equal(res.status, 201, JSON.stringify(res.body));
+          const byKey = Object.fromEntries(res.body.queued.map((j) => [`${j.subject_key}/${j.slot}`, j]));
+          // Strict: no other test file enqueues attack_type jobs, and this
+          // body holds AUDIO_JOBS_LOCK_KEY.
+          assert.deepEqual(Object.keys(byKey).sort(), ['magic/hit', 'melee/use'], JSON.stringify(res.body));
+          assert.deepEqual(
+            [byKey['melee/use'].clip_kind, byKey['melee/use'].drain_group, byKey['melee/use'].engine],
+            ['sfx', 'sfx_retro', 'retro'],
+          );
+          assert.deepEqual(
+            [byKey['magic/hit'].drain_group, byKey['magic/hit'].engine],
+            ['sfx_realistic', 'realistic'], 'no engine -> realistic',
+          );
+          assert.deepEqual(res.body.rejected.map((r) => [r.item.subject_key, r.item.slot, r.error]), [
+            ['ranged', 'use', 'upload only: no cue on the provider'],
+            ['ranged', 'hit', "engine must be 'realistic' or 'retro'"],
+          ]);
+        } finally {
+          const ids = (res.body.queued || []).map((j) => j.id);
+          if (ids.length) await pool.query('DELETE FROM audio_jobs WHERE id = ANY($1)', [ids]);
+        }
+      });
+
       await t.test('a provider_id that does not resolve to an active audio provider is a 400', async () => {
         const res = await request(app).post('/api/audio/admin/jobs').set('Authorization', bearer(admin)).send({
           items: [{ subject_kind: 'world', subject_key: worldName, slot: 'ambience' }],
