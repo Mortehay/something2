@@ -492,9 +492,9 @@ the ambience source. A green suite is not proof the feature is alive.
    - `AudioEngine` with music and ambience buses, volume settings, misses log;
    - browser verification.
 2. **Batch + git:**
-   - `audio_jobs` and the grouped dispatcher with `sfx-pack`;
+   - `audio_jobs` and the grouped dispatcher for music and ambience;
    - batch mode and the Missing-sounds → batch action;
-   - editor "Sounds" sections;
+   - "Sounds" sections in the world and biome editors;
    - library view;
    - `make audio-export` / `audio-seed`.
 3. **Creature and combat SFX:**
@@ -503,7 +503,10 @@ the ambience source. A green suite is not proof the feature is alive.
    - creature nearby/attack/hurt/death and attack use/hit with the chain;
    - voice caps and throttle;
    - misses for these triggers;
+   - the `sfx-pack` drain groups (`sfx_realistic`, `sfx_retro`) and the "Sounds" section in the entity-type editor;
    - browser verification in a fight.
+
+   Moved from slice 2 on 2026-09-29: no SFX subject exists before slice 3.
 
 ## Out of scope
 
