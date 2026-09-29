@@ -111,14 +111,50 @@ async function generateForSlot(db, provider, spec, { rap = defaultRap, lib = def
   };
 }
 
+// The `(take N)` suffix a generated sfx clip's label carries, when N >= 1
+// (see sfxClipLabel below). Read back by nextSfxTake to find the highest
+// take a slot has ever produced -- there is no dedicated column for this
+// (review round 1, fix 2: "prefer an existing column ... over a migration"),
+// so the take number rides on `label`, the one column that already exists
+// purely for human-readable display and has no other consumer depending on
+// its exact format (unlike `style_or_cue`, which the Audio tab groups clips
+// by, or `prompt`, which is the BOX's own returned text, not ours to shape).
+const TAKE_SUFFIX = /\(take (\d+)\)\s*$/;
+
+function sfxClipLabel(subjectKey, slot, cue, take) {
+  return `${subjectKey} ${slot} (${cue})${take >= 1 ? ` (take ${take})` : ''}`;
+}
+
+// Review round 1, fix 2: the count of CURRENT bindings is not a safe stand-in
+// for "the next take number", because deleting a clip does not un-use its
+// take on the box side -- the box's cache key is (engine, cue, entity) and
+// entity encodes the take, so an old take is cached forever regardless of
+// what our DB still has bound. Re-sending an already-used take after a
+// deletion would silently hand back the box's stale cached file as if it
+// were fresh. Instead: read every clip CURRENTLY bound to this slot, find
+// the highest take any of their labels admit to (a label with no `(take N)`
+// suffix -- an upload, or a take-0 generate -- counts as take 0), and use
+// max+1. An empty slot (no clips at all) is the only case that starts at 0.
+async function nextSfxTake(db, subjectKind, subjectKey, slot) {
+  const bound = await db.query(
+    `SELECT c.label FROM audio_bindings b JOIN audio_clips c ON c.id = b.clip_id
+      WHERE b.subject_kind = $1 AND b.subject_key = $2 AND b.slot = $3`,
+    [subjectKind, subjectKey, slot],
+  );
+  if (!bound.rows.length) return 0;
+  let maxTake = 0;
+  for (const row of bound.rows) {
+    const m = TAKE_SUFFIX.exec(row.label || '');
+    if (m) maxTake = Math.max(maxTake, Number(m[1]));
+  }
+  return maxTake + 1;
+}
+
 // SFX branch of generateForSlot (game audio slice 3, Task 3). Unlike
 // music/ambience, the cue is never taken from the caller -- it is the
 // registry's own answer for this (subjectKind, subjectKey, slot), and a slot
 // with no cue on the box today (spec §4) is upload-only, refused before any
-// box call. `take` is read fresh from the DB (a plain COUNT, not
-// lib.subjectSlots' full binding+clip join, which this doesn't need) so a
-// regenerate on an already-filled slot varies the entity text rather than
-// silently returning the box's cached file for the old text.
+// box call.
 async function generateSfxForSlot(db, provider, spec, { rap, lib }) {
   const { subjectKind, subjectKey, slot } = spec;
   const seed = Number.isInteger(spec.seed) ? spec.seed : randomSeed();
@@ -142,25 +178,29 @@ async function generateSfxForSlot(db, provider, spec, { rap, lib }) {
   // §4 "The engine defaults to realistic, and a batch can choose retro").
   const engine = typeof spec.engine === 'string' && spec.engine ? spec.engine : 'realistic';
 
-  const bound = await db.query(
-    'SELECT COUNT(*)::int AS n FROM audio_bindings WHERE subject_kind = $1 AND subject_key = $2 AND slot = $3',
-    [subjectKind, subjectKey, slot],
-  );
-  let take = bound.rows[0].n;
+  let take = await nextSfxTake(db, subjectKind, subjectKey, slot);
 
   let gen = await rap.generateSfx(provider, {
     cue, entity: sfxEntityText(phrase, take), engine, variants, seed,
   });
   // The box's cache hit (spec §2): the exact same file would come back again.
-  // One retry with take+1 gives it a different entity string; whatever that
-  // second call returns is accepted even if it is ALSO cached (e.g. someone
-  // else generated that exact take already) -- this is a best-effort nudge,
-  // not a loop hunting for a guaranteed-fresh file.
+  // One retry with take+1 gives it a different entity string.
   if (gen.ok && gen.cached) {
     take += 1;
     gen = await rap.generateSfx(provider, {
       cue, entity: sfxEntityText(phrase, take), engine, variants, seed,
     });
+    // Review round 1, fix 2: if the retry is STILL cached, storing it would
+    // write a byte-identical duplicate under a "new" take. Refuse instead of
+    // silently piling up a repeat -- not retryable, because retrying the
+    // exact same request would hit the exact same cache entry again.
+    if (gen.ok && gen.cached) {
+      return {
+        ok: false,
+        error: 'the box keeps returning a cached sound for this subject; try another engine',
+        retryable: false,
+      };
+    }
   }
   if (!gen.ok) {
     return {
@@ -168,28 +208,51 @@ async function generateSfxForSlot(db, provider, spec, { rap, lib }) {
     };
   }
 
+  // Review round 1, fix 1: storeAndBindClip can throw on any ONE variant
+  // (e.g. a transient DB error) without the box call having wasted the
+  // other variants' GPU time. Catch per variant so a mid-loop failure
+  // neither loses the variants that DID commit nor throws out of
+  // generateForSlot as an uncaught exception (which the route would turn
+  // into a bare 500, telling the caller "generate again" and piling up more
+  // clips on top of the ones that already landed).
   const clips = [];
   const bindings = [];
+  let firstStoreError = null;
   for (const c of gen.clips) {
-    // Store and bind ONE variant per transaction (spec/task: "storeAndBindClip
-    // ... in ONE transaction per variant"), same reasoning as the music/
-    // ambience path -- a partial failure here leaves whichever variants
-    // already committed bound, rather than losing all of them.
-    // eslint-disable-next-line no-await-in-loop
-    const { clip, binding } = await lib.storeAndBindClip(db, {
-      buffer: c.buffer, kind: 'sfx', label: `${subjectKey} ${slot} (${cue})`,
-      source: 'generated', providerId: provider.id ?? null, prompt: gen.prompt, styleOrCue: cue,
-      engine, seed: gen.seed, durationMs: c.durationMs,
-    }, { subjectKind, subjectKey, slot }, { bind: lib.bindClip });
-    clips.push(clip);
-    bindings.push(binding);
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const { clip, binding } = await lib.storeAndBindClip(db, {
+        buffer: c.buffer, kind: 'sfx', label: sfxClipLabel(subjectKey, slot, cue, take),
+        source: 'generated', providerId: provider.id ?? null, prompt: gen.prompt, styleOrCue: cue,
+        engine, seed: gen.seed, durationMs: c.durationMs,
+      }, { subjectKind, subjectKey, slot }, { bind: lib.bindClip });
+      clips.push(clip);
+      bindings.push(binding);
+    } catch (err) {
+      if (!firstStoreError) firstStoreError = err;
+    }
   }
-  // `clip`/`binding` (the first variant) are exposed alongside `clips`/
-  // `bindings` so the dispatcher's existing result.clip.id-based complete()
-  // path keeps working until it is rewritten for multi-clip sfx results.
-  return {
+  if (!clips.length) {
+    return {
+      ok: false, error: firstStoreError ? firstStoreError.message : 'no sfx variant could be stored', retryable: false,
+    };
+  }
+  // `clip`/`binding` (the first stored variant) are exposed alongside
+  // `clips`/`bindings` so the dispatcher's existing result.clip.id-based
+  // complete() path keeps working until it is rewritten for multi-clip sfx
+  // results.
+  const result = {
     ok: true, clips, bindings, clip: clips[0], binding: bindings[0], seed: gen.seed,
   };
+  if (firstStoreError) {
+    // Some, but not all, variants stored -- the caller (route) must see this
+    // rather than a bare 201 that looks identical to a full success, or an
+    // admin re-generating "the missing ones" would pile up more clips on
+    // top of the ones that already landed.
+    result.partial = true;
+    result.error = firstStoreError.message;
+  }
+  return result;
 }
 
 module.exports = {

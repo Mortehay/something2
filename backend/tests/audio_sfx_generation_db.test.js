@@ -2,10 +2,13 @@
 //
 // Game audio slice 3, Task 3: generateForSlot's sfx branch against a fake
 // rap (remoteAudioProvider) and the real library/DB on the scratch DB.
-// Subjects use `attack_type` (melee/ranged), a fixed catalog that needs no
-// row of its own -- this file only ever writes its OWN audio_clips/
-// audio_bindings rows, cleaned up in t.after (per common.md, never touch a
-// catalog table).
+// Subjects use `attack_type` (melee/ranged/magic), a fixed catalog that
+// needs no row of its own, plus one real `skill` id (SKILL_MELEE below,
+// read-only, never mutated -- same catalog row Task 2's
+// audio_subjects_sfx_db.test.js uses) for the review round 1 fix tests that
+// need MORE distinct (kind, key, slot) triples than attack_type alone
+// offers. This file only ever writes its OWN audio_clips/audio_bindings
+// rows, cleaned up in t.after (per common.md, never touch a catalog table).
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
@@ -19,6 +22,8 @@ const gen = require('../src/services/audioGeneration');
 const url = process.env.TEST_DATABASE_URL;
 const skip = !url ? 'no TEST_DATABASE_URL -- refusing to write to a real database' : false;
 const OGG = fs.readFileSync(path.join(__dirname, 'fixtures/audio/tone.ogg'));
+// skills.js: type='melee', nameEn='Crushing Blow' -- real, stable, read-only.
+const SKILL_MELEE = 'war_crushing_blow';
 
 test('generateForSlot: sfx', { skip }, async (t) => {
   const pool = new Pool({ connectionString: url });
@@ -147,6 +152,130 @@ test('generateForSlot: sfx', { skip }, async (t) => {
       assert.equal(rows.rowCount, 3);
       for (const c of r.clips) clipIds.push(c.id);
       for (const b of r.bindings) bindingIds.push(b.id);
+    });
+
+    // Review round 1, fix 1: a per-variant storeAndBindClip failure must not
+    // escape generateForSlot as an uncaught exception (route -> bare 500)
+    // while whichever variants DID commit stay silently bound and
+    // unreported.
+    await t.test('fix 1: a store failure on one variant is partial, not a thrown exception -- the stored variant stays bound', async () => {
+      const rap = {
+        generateSfx: async (p, body) => ({
+          ok: true,
+          clips: Array.from({ length: body.variants }, () => ({ buffer: OGG, durationMs: 2000, sampleRate: 44100 })),
+          prompt: 'p',
+          seed: body.seed,
+          cached: false,
+        }),
+      };
+      let calls = 0;
+      const flakyLib = {
+        ...lib,
+        storeAndBindClip: async (...args) => {
+          calls += 1;
+          if (calls >= 2) throw new Error('simulated store failure');
+          return lib.storeAndBindClip(...args);
+        },
+      };
+      // attack_type/ranged/hit: untouched by any earlier test in this file.
+      const r = await gen.generateForSlot(pool, providerWithCues,
+        { subjectKind: 'attack_type', subjectKey: 'ranged', slot: 'hit', clipKind: 'sfx', variants: 3, seed: 8 }, { rap, lib: flakyLib });
+      assert.equal(r.ok, true, r.error);
+      assert.equal(r.partial, true);
+      assert.match(r.error, /simulated store failure/);
+      assert.equal(r.clips.length, 1, 'only the first (successful) variant is in the result');
+      assert.equal(r.bindings.length, 1);
+      const rows = await pool.query(
+        'SELECT id FROM audio_bindings WHERE subject_kind = $1 AND subject_key = $2 AND slot = $3',
+        ['attack_type', 'ranged', 'hit']);
+      assert.equal(rows.rowCount, 1, 'exactly the one successfully-stored variant is bound in the DB');
+      clipIds.push(r.clips[0].id);
+      bindingIds.push(r.bindings[0].id);
+    });
+
+    await t.test('fix 1: a store failure on every variant is ok:false, nothing bound', async () => {
+      const rap = {
+        generateSfx: async (p, body) => ({
+          ok: true,
+          clips: Array.from({ length: body.variants }, () => ({ buffer: OGG, durationMs: 2000, sampleRate: 44100 })),
+          prompt: 'p',
+          seed: body.seed,
+          cached: false,
+        }),
+      };
+      const alwaysFailLib = {
+        ...lib,
+        storeAndBindClip: async () => { throw new Error('simulated store failure'); },
+      };
+      // attack_type/magic/hit: untouched by any earlier test in this file.
+      const r = await gen.generateForSlot(pool, providerWithCues,
+        { subjectKind: 'attack_type', subjectKey: 'magic', slot: 'hit', clipKind: 'sfx', variants: 2, seed: 8 }, { rap, lib: alwaysFailLib });
+      assert.equal(r.ok, false);
+      assert.match(r.error, /simulated store failure/);
+      assert.equal(r.retryable, false);
+      assert.equal(r.clips, undefined);
+      const rows = await pool.query(
+        'SELECT id FROM audio_bindings WHERE subject_kind = $1 AND subject_key = $2 AND slot = $3',
+        ['attack_type', 'magic', 'hit']);
+      assert.equal(rows.rowCount, 0, 'nothing bound when every variant failed to store');
+    });
+
+    // Review round 1, fix 2: take must be read from the highest surviving
+    // "(take N)" label, not a raw COUNT(*) of current bindings -- a COUNT
+    // goes stale the moment any earlier take's clip is deleted, because the
+    // box's own cache (keyed by entity text, which encodes the take) has no
+    // idea our DB deleted anything.
+    await t.test('fix 2: take is read from the highest surviving "(take N)" label, not a raw count', async () => {
+      // skill/war_crushing_blow/hit: untouched by any earlier test in this
+      // file (SKILL_MELEE is only otherwise read by Task 2's own test file).
+      const make = async (label) => {
+        const c = await lib.storeClip(pool, {
+          buffer: OGG, kind: 'sfx', label, source: 'uploaded', durationMs: 500,
+        });
+        const b = await lib.bindClip(pool, {
+          subjectKind: 'skill', subjectKey: SKILL_MELEE, slot: 'hit', clipId: c.id,
+        });
+        return { clip: c, binding: b };
+      };
+      const take0 = await make('pre-take-test'); // no suffix == take 0
+      const take1 = await make('pre-take-test (take 1)');
+      const take2 = await make('pre-take-test (take 2)');
+      clipIds.push(take0.clip.id, take1.clip.id, take2.clip.id);
+      bindingIds.push(take0.binding.id, take1.binding.id, take2.binding.id);
+
+      // Delete takes 0 and 1 -- only take 2's clip survives bound.
+      await pool.query('DELETE FROM audio_bindings WHERE id = ANY($1)', [[take0.binding.id, take1.binding.id]]);
+      await pool.query('DELETE FROM audio_clips WHERE id = ANY($1)', [[take0.clip.id, take1.clip.id]]);
+
+      const calls = [];
+      const rap = { generateSfx: async (p, body) => { calls.push(body); return oneClip(body.seed); } };
+      const r = await gen.generateForSlot(pool, providerWithCues,
+        { subjectKind: 'skill', subjectKey: SKILL_MELEE, slot: 'hit', clipKind: 'sfx', seed: 5 }, { rap, lib });
+      assert.equal(r.ok, true, r.error);
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].entity, 'Crushing Blow (take 3)',
+        'a raw COUNT(*) of the 1 surviving binding would have sent "(take 1)" -- a request the box already has cached from take1\'s deleted clip');
+      clipIds.push(r.clips[0].id);
+      bindingIds.push(r.bindings[0].id);
+    });
+
+    await t.test('fix 2: a box that is STILL cached after the retry refuses rather than storing a duplicate', async () => {
+      const calls = [];
+      const rap = {
+        generateSfx: async (p, body) => { calls.push(body); return { ...oneClip(body.seed), cached: true }; },
+      };
+      // skill/war_crushing_blow/use (cue 'slash', melee type): untouched by
+      // any earlier test in this file.
+      const r = await gen.generateForSlot(pool, providerWithCues,
+        { subjectKind: 'skill', subjectKey: SKILL_MELEE, slot: 'use', clipKind: 'sfx', seed: 2 }, { rap, lib });
+      assert.equal(r.ok, false);
+      assert.match(r.error, /keeps returning a cached sound/i);
+      assert.equal(r.retryable, false);
+      assert.equal(calls.length, 2, 'first attempt, then exactly one retry -- not a loop');
+      const rows = await pool.query(
+        'SELECT id FROM audio_bindings WHERE subject_kind = $1 AND subject_key = $2 AND slot = $3',
+        ['skill', SKILL_MELEE, 'use']);
+      assert.equal(rows.rowCount, 0, 'no duplicate was stored');
     });
   });
 });
