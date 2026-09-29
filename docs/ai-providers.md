@@ -617,8 +617,19 @@ per-group counts (done/queued/running/failed), the subject/slot currently
 generating, how many jobs are waiting out a busy-box backoff, and the last
 few failures with their error text. **Retry failed** re-queues every failed
 job (resetting its attempt count); **Clear finished** removes done and failed
-jobs and keeps anything still queued -- both are refused (409) while a drain
-is running for Clear, and Stop must be pressed first.
+jobs and keeps anything still queued; **Discard queued** removes the queued
+jobs (the confirm dialog says how many) so they are never generated. Clear
+and Discard are refused (409) while a drain is running -- press Stop first. A
+group's rows left `running` with no drain running (a backend restart
+mid-job) show as **interrupted — press Start**; Start re-queues and runs them.
+If a drain ends for any reason other than running out of work or Stop (the
+breaker, no provider, a database error), the panel says why.
+
+A queued job whose world or biome no longer exists by the time it is claimed
+fails with `subject no longer exists` without calling the box (and without
+counting toward the breaker). A clip is stored and bound in one database
+transaction, so **Delete all unbound** running at the same moment can never
+remove a clip that is about to be bound.
 
 **Env vars:**
 - `AUDIO_JOB_MAX_ATTEMPTS` (default 3) -- retries per job before it lands in
@@ -689,3 +700,21 @@ row). A binding whose world or biome no longer exists in this database is
 reported and skipped rather than failing the whole seed. The exported files
 are ordinary git content under `backend/seeds/audio/` -- nothing commits them
 automatically; that's a normal `git add`.
+
+Seeding **adds** bindings next to any that already exist on the same slot; it
+does not replace them. On a machine whose slot already has a different clip
+bound, music rotation and the ambience weighted pick then include both the
+existing clip and the seeded one -- unbind whichever you don't want. On the
+machine that did the export, the ids match, so nothing is doubled there.
+
+The size export prints for each kind is the bytes written by that run (every file it
+wrote, changed or not) -- not a diff against what git already has.
+
+### Limitations
+
+- **Renaming a world or biome orphans its sounds.** Bindings, missing-sound
+  rows and queued jobs are keyed by the subject's NAME, so after a rename they
+  stay on the old name: the renamed subject plays nothing, and its queued jobs
+  fail with `subject no longer exists`. Re-bind (or re-queue) under the new
+  name after a rename; carrying them across automatically is a planned
+  follow-up.
