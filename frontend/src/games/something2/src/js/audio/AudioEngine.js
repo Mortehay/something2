@@ -42,7 +42,8 @@ export class AudioEngine {
     this.channels = { music: { key: null, node: null, gain: null }, ambience: { key: null, node: null, gain: null } };
     this.musicTimer = null;
     this.sfxLimiter = new SfxLimiter({ now: this.now });
-    this.sfxVoices = new Map(); // voiceId -> BufferSourceNode, currently playing
+    this.sfxVoices = new Map();     // voiceId -> BufferSourceNode, STARTED and currently playing
+    this.sfxPending = new Set();    // voiceId, admitted but still awaiting its buffer -- see _startSfxVoice
     this.sfxStats = { playedTotal: 0, droppedTotal: 0 };
   }
 
@@ -131,10 +132,17 @@ export class AudioEngine {
   // throws into the caller -- Game._onWorldState calls this every frame, and
   // one bad event must not break the render loop; a failure here is silence
   // plus one warning, same contract as everything else in this file.
+  //
+  // Fix round 1, finding 4 (promoted ruling): nothing plays while the
+  // context is not 'running' -- e.g. suspended before the Play-click
+  // gesture. A BufferSourceNode scheduled on a suspended context never
+  // advances and never fires onended, so admitting it would occupy a voice
+  // slot (and a same-clip throttle slot) forever; skipping here means no
+  // admit and no fetch happen at all until the context actually resumes.
   playSfxEvents(events, { listener, ownActor } = {}) {
     if (!Array.isArray(events) || events.length === 0) return;
     const ctx = this._ensureCtx();
-    if (!ctx) return;
+    if (!ctx || ctx.state !== 'running') return;
     for (const ev of events) {
       try {
         this._playSfxEvent(ev, listener || { x: 0, y: 0 }, ownActor);
@@ -158,6 +166,10 @@ export class AudioEngine {
     const dx = (ev.x || 0) - listener.x;
     const dy = (ev.y || 0) - listener.y;
     const distance = Math.hypot(dx, dy);
+    // Fix round 1, finding 2: beyond the falloff edge a clip would play at
+    // gain 0 anyway, so cull it before it can take a voice slot or a
+    // same-clip throttle slot, and before it fetches anything.
+    if (distance >= SFX_FALLOFF_PX) return;
     const priority = ownActor && ev.a === ownActor ? 'own' : 'nearest';
     const { ok, evict, voiceId } = this.sfxLimiter.admit({ clipKey: clip.key, priority, distance });
     if (!ok) { this.sfxStats.droppedTotal += 1; return; }
@@ -165,11 +177,19 @@ export class AudioEngine {
     this._startSfxVoice(voiceId, clip, dx, distance);
   }
 
+  // Fix round 1, finding 1. Marked pending BEFORE the await (synchronous, so
+  // there is no gap for a same-tick eviction or a setWorld to miss it), and
+  // the pending set is checked again straight after: _stopSfxVoice() (called
+  // by an eviction) or _stopAllSfx() (called by setWorld/destroy) may have
+  // cancelled this voice, in the real sense of "make sure it never starts",
+  // while the buffer was loading. Starting it anyway after that point would
+  // let a voice the limiter (and the player) already believes is gone
+  // occupy a slot -- or, worse, keep playing into a world it no longer
+  // belongs to.
   async _startSfxVoice(voiceId, clip, dx, distance) {
+    this.sfxPending.add(voiceId);
     const buffer = await this._buffer(this.urlFor(clip.key));
-    // The world (or the whole engine) may have moved on while the buffer was
-    // loading -- release() is a no-op if the limiter has already forgotten
-    // this voice (evicted or the engine was destroyed).
+    if (!this.sfxPending.delete(voiceId)) return; // cancelled while loading
     if (!this.ctx) { this.sfxLimiter.release(voiceId); return; }
     if (!buffer) { this.sfxLimiter.release(voiceId); this.sfxStats.droppedTotal += 1; return; }
     const src = this.ctx.createBufferSource();
@@ -192,7 +212,13 @@ export class AudioEngine {
     src.start();
   }
 
+  // Stops (or, if it is still loading, cancels) one voice. Used both for an
+  // eviction and for a blanket stop -- the limiter has already forgotten
+  // `voiceId` by the time this runs (admit() deletes an evicted voice
+  // itself), so this only ever touches playback bookkeeping, never the
+  // limiter's.
   _stopSfxVoice(voiceId) {
+    if (this.sfxPending.delete(voiceId)) return; // still loading -- the await guard in _startSfxVoice will now bail
     const src = this.sfxVoices.get(voiceId);
     this.sfxVoices.delete(voiceId);
     if (!src) return;
@@ -200,8 +226,16 @@ export class AudioEngine {
   }
 
   _stopAllSfx() {
-    for (const voiceId of [...this.sfxVoices.keys()]) this._stopSfxVoice(voiceId);
-    this.sfxLimiter = new SfxLimiter({ now: this.now });
+    for (const voiceId of new Set([...this.sfxVoices.keys(), ...this.sfxPending])) this._stopSfxVoice(voiceId);
+    // clear(), not a new instance (fix round 1, finding 1): voice ids must
+    // stay monotonic across a reset. A voice from the world just left,
+    // still awaiting its buffer at this exact moment, is already cancelled
+    // above via sfxPending -- but a fresh SfxLimiter would also restart ids
+    // at 1, letting that stale voice's id collide with (and later release)
+    // an unrelated voice minted in the new world. Keeping the same limiter
+    // and only clearing its bookkeeping closes that off structurally, not
+    // just by timing.
+    this.sfxLimiter.clear();
   }
 
   _startMusic() {
