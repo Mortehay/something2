@@ -80,14 +80,14 @@ async function generateForSlot(db, provider, spec, { rap = defaultRap, lib = def
       ok: false, error: gen.error, retryable: Boolean(gen.retryable), status: gen.status, providerFault: Boolean(gen.providerFault),
     };
   }
-  const clip = await lib.storeClip(db, {
+  // Upload, then clip row + binding in ONE transaction (spec §2) -- see
+  // storeAndBindClip. `bind: lib.bindClip` keeps an injected lib's bindClip
+  // the one that runs inside that transaction.
+  const { clip, binding } = await lib.storeAndBindClip(db, {
     buffer: gen.buffer, kind: clipKind, label: `${subjectKey} ${slot}${style ? ` (${style})` : ''}`,
     source: 'generated', providerId: provider.id ?? null, prompt: gen.prompt, styleOrCue: style,
     seed: gen.seed, durationMs: gen.durationMs, loopStartMs: gen.loopStartMs, loopEndMs: gen.loopEndMs,
-  });
-  const binding = await lib.bindClip(db, {
-    subjectKind, subjectKey, slot, clipId: clip.id,
-  });
+  }, { subjectKind, subjectKey, slot }, { bind: lib.bindClip });
   return {
     ok: true, clip, binding, seed,
   };

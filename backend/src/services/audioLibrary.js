@@ -2,6 +2,7 @@
 //
 // Clips, bindings and misses (spec §1). DB functions take `db` first so a
 // caller inside a transaction can pass its client.
+const crypto = require('node:crypto');
 const assetStore = require('./assetStore');
 const {
   SUBJECT_KINDS, MAX_SUBJECT_KEY, isKnownKind, slotKind, isKnownSlot, existingSubjects,
@@ -13,10 +14,19 @@ class AudioInputError extends Error {
 
 const MAX_MISSES_PER_POST = 200;
 
-async function storeClip(db, c) {
-  const id = (await db.query('SELECT gen_random_uuid() AS id')).rows[0].id;
+// Storing a clip is two halves (spec §2): the object upload, which cannot be
+// part of a DB transaction, and the row insert, which can. They are split so
+// storeAndBindClip below can do the upload FIRST and then insert the row and
+// its binding in ONE transaction -- the id is minted here (not by the DB) so
+// the object key is known before any row exists.
+async function uploadClipObject(c, { store = assetStore } = {}) {
+  const id = crypto.randomUUID();
   const key = `audio/${c.kind}/${id}.ogg`;
-  await assetStore.putObject(key, c.buffer, 'audio/ogg');
+  await store.putObject(key, c.buffer, 'audio/ogg');
+  return { id, key };
+}
+
+async function insertClipRow(db, { id, key }, c) {
   const r = await db.query(
     `INSERT INTO audio_clips (id, kind, label, storage_key, bytes, duration_ms, loopable,
        loop_start_ms, loop_end_ms, source, provider_id, prompt, style_or_cue, engine, seed)
@@ -26,6 +36,42 @@ async function storeClip(db, c) {
       c.providerId ?? null, c.prompt ?? null, c.styleOrCue ?? null, c.engine ?? null, c.seed ?? null],
   );
   return r.rows[0];
+}
+
+async function storeClip(db, c) {
+  return insertClipRow(db, await uploadClipObject(c), c);
+}
+
+// Upload, then insert the clip row AND bind it in one transaction (spec §2).
+// Committing the row on its own first (storeClip + a separate bindClip) left
+// a window where the clip was committed but unbound, and a concurrent
+// "Delete all unbound" in that window deleted it (row and object) -- after
+// minutes of GPU time -- so the bind then failed on a clip that was gone.
+// Inside one transaction the uncommitted row is invisible to every other
+// connection until it is already bound. If the insert or the bind fails, the
+// transaction rolls back and the already-uploaded object is removed (best
+// effort, logged: an orphaned object is a cleanup nit, the row is the source
+// of truth). `db` must be a pool (has .connect). `bind` is a test seam.
+async function storeAndBindClip(db, c, target, { store = assetStore, bind = bindClip } = {}) {
+  const obj = await uploadClipObject(c, { store });
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const clip = await insertClipRow(client, obj, c);
+    const binding = await bind(client, { ...target, clipId: clip.id });
+    await client.query('COMMIT');
+    return { clip, binding };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    try {
+      await store.removeObject(obj.key);
+    } catch (removeErr) {
+      console.error(`storeAndBindClip: failed to remove object ${obj.key}`, removeErr);
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 async function bindClip(db, { subjectKind, subjectKey, slot, clipId, volume = 1, weight = 1 }) {
@@ -264,6 +310,6 @@ async function filledCounts(db) {
 }
 
 module.exports = {
-  AudioInputError, storeClip, bindClip, updateBinding, unbind, listClips, deleteClip, deleteUnboundClips,
+  AudioInputError, storeClip, storeAndBindClip, bindClip, updateBinding, unbind, listClips, deleteClip, deleteUnboundClips,
   subjectSlots, worldAudioBundle, recordMisses, listMisses, filledCounts, MAX_MISSES_PER_POST,
 };

@@ -130,11 +130,12 @@ module.exports = function audioRoutes(pool) {
       if (!Buffer.isBuffer(req.body)) return res.status(400).json({ error: 'send the file as Content-Type: audio/ogg' });
       const checked = checkClipBuffer(req.body, clipKind);
       if (!checked.ok) return res.status(400).json({ error: checked.error });
-      const clip = await lib.storeClip(pool, {
+      // Upload, then clip row + binding in one transaction (spec §2), same
+      // path as generate -- a concurrent delete-unbound cannot see it unbound.
+      const { clip, binding } = await lib.storeAndBindClip(pool, {
         buffer: req.body, kind: clipKind, label: String(label || `${key} ${slot} (upload)`).slice(0, 200),
         source: 'uploaded', durationMs: checked.durationMs,
-      });
-      const binding = await lib.bindClip(pool, { subjectKind: kind, subjectKey: key, slot, clipId: clip.id });
+      }, { subjectKind: kind, subjectKey: key, slot });
       res.status(201).json({ clip, binding });
     } catch (err) { sendError(res, err); }
   });
