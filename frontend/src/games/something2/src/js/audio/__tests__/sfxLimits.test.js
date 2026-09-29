@@ -8,7 +8,7 @@ function limiter(startMs = 0) {
 }
 
 describe('SfxLimiter', () => {
-  it('admits up to 12 voices and refuses a 13th when all are equal priority', () => {
+  it('admits up to 12 voices and refuses a 13th of equal priority and equal distance (a tie does not evict)', () => {
     const { l } = limiter();
     for (let i = 0; i < 12; i += 1) {
       const r = l.admit({ clipKey: `clip${i}`, priority: 'nearest', distance: 100 });
@@ -18,14 +18,16 @@ describe('SfxLimiter', () => {
     expect(refused).toEqual({ ok: false });
   });
 
-  it('a 13th voice evicts the farthest lower-priority voice when priority allows it', () => {
+  it('an own voice at capacity evicts the farthest non-own voice unconditionally, even when it is itself farther', () => {
     const { l } = limiter();
     const ids = [];
     for (let i = 0; i < 12; i += 1) {
       const r = l.admit({ clipKey: `clip${i}`, priority: 'nearest', distance: i * 10 }); // clip11 is farthest (110)
       ids.push(r.voiceId);
     }
-    const r = l.admit({ clipKey: 'clip12', priority: 'own', distance: 5 });
+    // The newcomer (distance 500) is itself farther than every held voice --
+    // 'own' still wins the slot: an own action is always worth hearing.
+    const r = l.admit({ clipKey: 'clip12', priority: 'own', distance: 500 });
     expect(r.ok).toBe(true);
     expect(r.evict).toBe(ids[11]); // farthest 'nearest' voice, not merely the newest
   });
@@ -39,13 +41,38 @@ describe('SfxLimiter', () => {
     expect(r).toEqual({ ok: false });
   });
 
-  it('a non-own voice at capacity is refused outright, never evicting another non-own voice', () => {
+  // Controller ruling ("nearest win"), fix round 1 finding 3: a non-own
+  // newcomer competes with the OTHER held non-own voices purely on distance.
+  it('a non-own voice at capacity is refused when it is not nearer than the farthest held non-own voice', () => {
     const { l } = limiter();
     for (let i = 0; i < 12; i += 1) {
-      l.admit({ clipKey: `clip${i}`, priority: 'nearest', distance: 100 }); // all farther than the newcomer
+      l.admit({ clipKey: `clip${i}`, priority: 'nearest', distance: 50 }); // all at distance 50
     }
-    const r = l.admit({ clipKey: 'clip12', priority: 'nearest', distance: 1 });
-    expect(r).toEqual({ ok: false });
+    const tooFar = l.admit({ clipKey: 'clip12', priority: 'nearest', distance: 50 }); // tied, not nearer
+    expect(tooFar).toEqual({ ok: false });
+    const farther = l.admit({ clipKey: 'clip13', priority: 'nearest', distance: 51 });
+    expect(farther).toEqual({ ok: false });
+  });
+
+  it('a non-own voice at capacity evicts the farthest held non-own voice when it is itself nearer', () => {
+    const { l } = limiter();
+    const ids = [];
+    for (let i = 0; i < 12; i += 1) {
+      ids.push(l.admit({ clipKey: `clip${i}`, priority: 'nearest', distance: i * 10 }).voiceId); // clip11 farthest (110)
+    }
+    const r = l.admit({ clipKey: 'clip12', priority: 'nearest', distance: 5 }); // nearer than 110
+    expect(r.ok).toBe(true);
+    expect(r.evict).toBe(ids[11]);
+  });
+
+  it('a non-own voice never evicts a held own voice, however near it is', () => {
+    const { l } = limiter();
+    const ids = [];
+    for (let i = 0; i < 11; i += 1) ids.push(l.admit({ clipKey: `own${i}`, priority: 'own', distance: 1000 }).voiceId);
+    ids.push(l.admit({ clipKey: 'nearest0', priority: 'nearest', distance: 50 }).voiceId); // the only non-own voice, at 12/12
+    const r = l.admit({ clipKey: 'nearest1', priority: 'nearest', distance: 0 }); // nearer than the one non-own voice
+    expect(r.ok).toBe(true);
+    expect(r.evict).toBe(ids[11]); // evicts the sole non-own voice, never one of the 11 own voices
   });
 
   it('refuses the 4th play of the same clip within the 100ms window', () => {

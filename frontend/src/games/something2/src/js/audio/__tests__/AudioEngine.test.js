@@ -282,5 +282,118 @@ describe('AudioEngine', () => {
       expect(sources.every((s) => !s.started)).toBe(true);
       expect(engine.snapshot().sfx.voices).toBe(0);
     });
+
+    // Fix round 1, finding 2.
+    it('an event at or beyond the 1600px falloff edge starts no source and fetches nothing', async () => {
+      const fetchBytes = vi.fn(async (url) => new TextEncoder().encode(url).buffer);
+      const { ctx, sources } = fakeCtx();
+      const engine = new AudioEngine({ ctxFactory: () => ctx, fetchBytes, urlFor: (k) => `u:${k}`, rand: () => 0, postMisses: async () => {} });
+      engine.setWorld({ world: 'vale', bindings: { 'creature/slime/hurt': [{ key: 'hurt.ogg', volume: 1, weight: 1 }] } });
+      engine.unlock();
+      engine.playSfxEvents([{ e: 'hurt', c: 'slime', x: 1600, y: 0 }], { listener: { x: 0, y: 0 } });
+      await flush(); await flush();
+      expect(sources.length).toBe(0);
+      expect(fetchBytes).not.toHaveBeenCalled();
+      expect(engine.snapshot().sfx).toMatchObject({ voices: 0, playedTotal: 0, droppedTotal: 0 });
+    });
+
+    // Fix round 1, finding 4 (promoted ruling).
+    it('skips sfx entirely while the context is suspended, so a slot never fills with a source that would never end', async () => {
+      const fetchBytes = vi.fn(async (url) => new TextEncoder().encode(url).buffer);
+      const { ctx, sources } = fakeCtx(); // starts 'suspended'; deliberately never unlock()ed
+      const engine = new AudioEngine({ ctxFactory: () => ctx, fetchBytes, urlFor: (k) => `u:${k}`, rand: () => 0, postMisses: async () => {} });
+      engine.setWorld({ world: 'vale', bindings: { 'creature/slime/hurt': [{ key: 'hurt.ogg', volume: 1, weight: 1 }] } });
+      engine.playSfxEvents([{ e: 'hurt', c: 'slime', x: 0, y: 0 }], { listener: { x: 0, y: 0 } });
+      await flush(); await flush();
+      expect(sources.length).toBe(0);
+      expect(fetchBytes).not.toHaveBeenCalled();
+      expect(engine.snapshot().sfx).toMatchObject({ voices: 0, playedTotal: 0 });
+    });
+
+    // Fix round 1, finding 1.
+    describe('pending-voice cancellation', () => {
+      it('an evicted voice whose buffer is still loading never starts, and its eviction still frees the slot', async () => {
+        let resolveSlow;
+        const { ctx, sources } = fakeCtx();
+        const engine = new AudioEngine({
+          ctxFactory: () => ctx,
+          fetchBytes: async (url) => {
+            if (url.includes('slow')) return new Promise((resolve) => { resolveSlow = resolve; });
+            return new TextEncoder().encode(url).buffer;
+          },
+          urlFor: (k) => `u:${k}`,
+          rand: () => 0,
+          postMisses: async () => {},
+        });
+        engine.setWorld({
+          world: 'vale',
+          bindings: {
+            'creature/slow/hurt': [{ key: 'slow.ogg', volume: 1, weight: 1 }],
+            'creature/fast/hurt': [{ key: 'fast.ogg', volume: 1, weight: 1 }],
+          },
+        });
+        engine.unlock();
+        engine.sfxLimiter.maxVoices = 1; // one slot, so the second event must contend for it
+
+        // Fills the only slot; its buffer never resolves until we say so below.
+        engine.playSfxEvents([{ e: 'hurt', c: 'slow', x: 500, y: 0 }], { listener: { x: 0, y: 0 } });
+        await flush();
+        expect(engine.snapshot().sfx.voices).toBe(0); // admitted, but not yet started -- still loading
+
+        // An own action must evict it even though it is still pending.
+        engine.playSfxEvents(
+          [{ e: 'hurt', c: 'fast', a: 'p:1', x: 0, y: 0 }],
+          { listener: { x: 0, y: 0 }, ownActor: 'p:1' },
+        );
+        await flush(); await flush();
+        expect(engine.snapshot().sfx).toMatchObject({ voices: 1, playedTotal: 1 });
+        expect(sources.some((s) => s.buffer && s.buffer.tag === 'u:fast.ogg')).toBe(true);
+
+        // Now let the evicted voice's buffer resolve. It must never start,
+        // and must not disturb the voice that took its slot.
+        resolveSlow(new TextEncoder().encode('u:slow.ogg').buffer);
+        await flush(); await flush();
+        expect(sources.some((s) => s.buffer && s.buffer.tag === 'u:slow.ogg')).toBe(false);
+        expect(engine.snapshot().sfx).toMatchObject({ voices: 1, playedTotal: 1 });
+      });
+
+      it('setWorld while a voice is still loading cancels it: it never starts and never releases a voice from the new world', async () => {
+        let resolveOld;
+        const { ctx, sources } = fakeCtx();
+        const engine = new AudioEngine({
+          ctxFactory: () => ctx,
+          fetchBytes: async (url) => {
+            if (url.includes('old')) return new Promise((resolve) => { resolveOld = resolve; });
+            return new TextEncoder().encode(url).buffer;
+          },
+          urlFor: (k) => `u:${k}`,
+          rand: () => 0,
+          postMisses: async () => {},
+        });
+        engine.setWorld({ world: 'vale', bindings: { 'creature/old/hurt': [{ key: 'old.ogg', volume: 1, weight: 1 }] } });
+        engine.unlock();
+        engine.playSfxEvents([{ e: 'hurt', c: 'old', x: 0, y: 0 }], { listener: { x: 0, y: 0 } });
+        await flush();
+        expect(engine.snapshot().sfx.voices).toBe(0); // admitted, still loading
+
+        // The world changes before that buffer resolves.
+        engine.setWorld({ world: 'other', bindings: { 'creature/new/hurt': [{ key: 'new.ogg', volume: 1, weight: 1 }] } });
+        engine.unlock();
+        engine.playSfxEvents([{ e: 'hurt', c: 'new', x: 0, y: 0 }], { listener: { x: 0, y: 0 } });
+        await flush(); await flush();
+        expect(engine.snapshot().sfx.voices).toBe(1); // the new-world voice started
+        const [newVoiceId] = [...engine.sfxLimiter.voices.keys()];
+
+        // The stale buffer resolves after the fact.
+        resolveOld(new TextEncoder().encode('u:old.ogg').buffer);
+        await flush(); await flush();
+        expect(sources.some((s) => s.buffer && s.buffer.tag === 'u:old.ogg')).toBe(false); // never started
+        // The new world's voice slot must be untouched -- not released by
+        // the stale resolution (which is what a limiter id reset would let
+        // happen if the stale voice's id had been reused).
+        expect(engine.sfxLimiter.voices.has(newVoiceId)).toBe(true);
+        expect(engine.snapshot().sfx.voices).toBe(1);
+      });
+    });
   });
 });
