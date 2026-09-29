@@ -189,6 +189,37 @@ test('audio routes', { skip }, async (t) => {
     assert.equal(worldGroup.filled[worldName], 2);
   });
 
+  // Game audio slice 3, Task 2 review round 2: every group's `cues` field
+  // (when present) is read the SAME way by the route -- def.subjectCues(pool)
+  // -- with no per-kind switch (see audioRoutes.js's comment above the
+  // handler). This asserts the actual response shape rather than just the
+  // registry function directly, so a route-level regression (wrong field
+  // name, wrong kind switched on, a kind silently dropped) would be caught
+  // here even if audioSubjects.js's own unit coverage stayed green.
+  await t.test('admin/subjects cues: uniform shape, one field, no per-kind switch', async () => {
+    const res = await request(app).get('/api/audio/admin/subjects').set('Authorization', bearer(admin));
+    assert.equal(res.status, 200);
+    const byKind = Object.fromEntries(res.body.map((g) => [g.kind, g]));
+
+    assert.equal(byKind.world.cues, undefined, 'world has no sfx slots -- no cues field at all');
+    assert.equal(byKind.biome.cues, undefined, 'biome has no sfx slots -- no cues field at all');
+
+    assert.ok(byKind.creature.cues, 'creature group is missing cues');
+    assert.deepEqual(byKind.creature.cues.Slime, {
+      nearby: null, attack: null, hurt: 'hit', death: 'death',
+    });
+
+    assert.ok(byKind.attack_type.cues, 'attack_type group is missing cues');
+    assert.deepEqual(byKind.attack_type.cues.ranged, { use: null, hit: 'hit' });
+
+    assert.ok(byKind.item.cues, 'item group is missing cues');
+    assert.deepEqual(byKind.item.cues['crude-bow'], { use: null, hit: 'hit' },
+      'a gear-ladder bow (no ammo_type_id on the row) still resolves ranged via the name fallback');
+
+    assert.ok(byKind.skill.cues, 'skill group is missing cues');
+    assert.equal(byKind.skill.cues.war_crushing_blow.use, 'slash');
+  });
+
   await t.test('player bundle + misses', async () => {
     const b = await request(app).get(`/api/audio/world/${worldId}`).set('Authorization', bearer(player));
     assert.equal(b.status, 200);

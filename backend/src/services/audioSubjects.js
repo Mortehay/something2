@@ -5,6 +5,16 @@
 // Audio tab all read THIS list, so they cannot disagree about what a legal
 // slot is. Slice 1 has world + biome; slice 3 adds creature, world_point,
 // attack_type, item and skill here.
+//
+// A kind entry MAY carry `subjectCues: (db) => Promise<{ [subjectKey]:
+// { [slot]: cue|null } }>` -- one map per subject the kind lists, covering
+// every one of its slots. GET /admin/subjects (audioRoutes.js) calls this
+// generically for whichever kinds define it and emits the result as `cues`,
+// with NO per-kind switch there: world and biome carry no sfx slots at all
+// (music/ambience have no cue concept) and simply omit the method, so their
+// groups get no `cues` field. This is the registry's own data, not the
+// route's -- a kind added here without `subjectCues` just has no cues in the
+// admin response, correctly, with no route change required.
 const { attackKindOf } = require('../authority/sfxEvents');
 const { SKILLS } = require('../../seeds/data/skills.js');
 
@@ -53,7 +63,8 @@ const SUBJECT_KINDS = {
       nearby: 'sfx', attack: 'sfx', hurt: 'sfx', death: 'sfx',
     },
     // Fixed: the same cue applies to every creature (spec §4 table). `nearby`
-    // and `attack` have no cue on the box today -- upload only.
+    // and `attack` have no cue on the box today -- upload only. Still used by
+    // cueFor directly; subjectCues below fans it out per listed creature.
     cues: {
       nearby: null, attack: null, hurt: 'hit', death: 'death',
     },
@@ -61,6 +72,14 @@ const SUBJECT_KINDS = {
       'SELECT name FROM entity_types WHERE is_creature ORDER BY name')).rows.map((r) => r.name),
     exists: async (db, keys) => new Set((await db.query(
       'SELECT name FROM entity_types WHERE is_creature AND name = ANY($1::text[])', [keys])).rows.map((r) => r.name)),
+    // subjectCues(db) -> { [name]: { [slot]: cue|null } }, one entry per
+    // listed creature -- see the module-level comment above SUBJECT_KINDS.
+    subjectCues: async (db) => {
+      const names = await SUBJECT_KINDS.creature.list(db);
+      const out = {};
+      for (const n of names) out[n] = { ...SUBJECT_KINDS.creature.cues };
+      return out;
+    },
   },
   world_point: {
     label: 'World points',
@@ -71,34 +90,43 @@ const SUBJECT_KINDS = {
     exists: async (db, keys) => new Set((await db.query(
       'SELECT name FROM entity_types WHERE point_kind IS NOT NULL AND name = ANY($1::text[])',
       [keys])).rows.map((r) => r.name)),
+    subjectCues: async (db) => {
+      const names = await SUBJECT_KINDS.world_point.list(db);
+      const out = {};
+      for (const n of names) out[n] = { ...SUBJECT_KINDS.world_point.cues };
+      return out;
+    },
   },
   attack_type: {
     label: 'Attack types',
     slots: { use: 'sfx', hit: 'sfx' },
-    // Not fixed -- cue differs per subject key. `cues: null` signals that to
-    // callers (the admin route reads ATTACK_TYPE_CUES instead); see cueFor.
-    cues: null,
     list: async () => [...ATTACK_KINDS],
     exists: async (db, keys) => new Set(keys.filter((k) => ATTACK_KINDS.includes(k))),
+    // The cue genuinely differs per subject key (melee `use` is not ranged
+    // `use`) -- ATTACK_TYPE_CUES is already keyed exactly that way, by kind.
+    subjectCues: async () => ({ ...ATTACK_TYPE_CUES }),
   },
   item: {
     label: 'Items',
     slots: { use: 'sfx', hit: 'sfx' },
-    // Not fixed -- cue depends on the item's own attack kind; see cueFor/itemCues.
-    cues: null,
     list: async (db) => (await db.query(
       "SELECT name FROM item_types WHERE category = 'weapon' ORDER BY name")).rows.map((r) => r.name),
     exists: async (db, keys) => new Set((await db.query(
       "SELECT name FROM item_types WHERE category = 'weapon' AND name = ANY($1::text[])",
       [keys])).rows.map((r) => r.name)),
+    // Cue depends on the item's own attack kind -- see itemCues below
+    // (defined further down, but a function DECLARATION so it is hoisted and
+    // safe to reference here).
+    subjectCues: async (db) => itemCues(db),
   },
   skill: {
     label: 'Skills',
     slots: { use: 'sfx', hit: 'sfx' },
-    // Not fixed -- `use` depends on the skill's own type; see cueFor/skillCues.
-    cues: null,
     list: async () => SKILLS.map((s) => s.id),
     exists: async (db, keys) => new Set(keys.filter((k) => SKILLS_BY_ID.has(k))),
+    // Cue depends on the skill's own type -- see skillCues below (also
+    // hoisted).
+    subjectCues: async () => skillCues(),
   },
 };
 
@@ -205,13 +233,10 @@ function entityPhrase(db, kind, key) {
   }
 }
 
-// GET /admin/subjects' per-subject cue maps for the two kinds whose cue is
-// not fixed across every subject (attack_type's is small enough to ship as
-// the static ATTACK_TYPE_CUES instead -- see the route).
-//
-// One query for every weapon rather than one per name (same reasoning as
-// filledCounts in audioLibrary.js): the Audio tab's item group can hold the
-// whole gear-ladder catalog (144 rows today).
+// item's subjectCues: { [name]: { use, hit } } for every weapon. One query
+// for every weapon rather than one per name (same reasoning as filledCounts
+// in audioLibrary.js): the Audio tab's item group can hold the whole
+// gear-ladder catalog (144 rows today).
 async function itemCues(db) {
   const rows = (await db.query("SELECT name, kind, ammo_type_id FROM item_types WHERE category = 'weapon'")).rows;
   const out = {};
