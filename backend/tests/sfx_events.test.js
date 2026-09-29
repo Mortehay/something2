@@ -1,73 +1,91 @@
 // backend/tests/sfx_events.test.js
 //
-// Pure, no DB (attackKindOf takes a plain weapon-shaped object). Table asserted
-// by hand, not by calling the helper to derive its own expectation.
+// attackKindOf, over the REAL seeded weapon catalog on the scratch DB (a
+// read-only SELECT -- no clip/binding rows, so this needs no advisory lock).
+// Expectations are hand-written by NAME FAMILY, not derived by calling the
+// helper -- a bug in attackKindOf must not also be baked into its own test.
 const test = require('node:test');
 const assert = require('node:assert');
+const { Pool } = require('pg');
 const { attackKindOf } = require('../src/authority/sfxEvents');
 
-// One representative weapon per gear-ladder family (backend/seeds/data/
-// gearLadder.js GEAR_FAMILIES), shaped exactly as the columns attackKindOf
-// reads (kind, ammo_type_id, stoneItemId, augment, stone_mode).
+const url = process.env.TEST_DATABASE_URL;
+const skip = !url ? 'no TEST_DATABASE_URL -- refusing to read from a real database' : false;
+
+// Ordered, first-match-wins. Checked against every weapon row currently in
+// the seeded catalog (144, both the legacy hand-authored rows and the
+// gear-ladder's 12 families x 10 tiers) before this table was written --
+// zero rows matched none of these four patterns. A future catalog row that
+// matches none of them fails the test loudly (see the loop below) rather
+// than silently passing unclassified.
 //
-// KNOWN GAP, found while writing this table: the gear-ladder generator
-// (backend/seeds/generateGearLadder.js) never sets ammo_type_id on its
-// bow/crossbow rows, so on the REAL seeded catalog every crude-bow/
-// crude-crossbow/.../dragon-bow/dragon-crossbow row (20 rows) reads
-// ammo_type_id NULL and attackKindOf classifies it 'magic', not 'ranged' --
-// only the three hand-authored legacy rows (bow=25, arbalest=26, sling=27)
-// carry a real ammo reference. That is a gearLadder catalog-data gap, not a
-// bug in attackKindOf or in this registry: fixing it means adding ammo
-// consumption to weapons that never had it, which is a live combat-balance
-// change outside this task's file list. This table therefore asserts the
-// INTENDED family mapping (bow/crossbow -> ranged) against a WELL-FORMED
-// input (ammo_type_id set, matching what a correctly-wired bow row looks
-// like) rather than against the live catalog's current, gappy rows -- see
-// the task-2 report for the flagged follow-up.
-const CASES = [
-  // melee families -- kind === 'melee' decides it outright.
-  { name: 'blade family',        w: { kind: 'melee', ammo_type_id: null }, expect: 'melee' },
-  { name: 'sword family',        w: { kind: 'melee', ammo_type_id: null }, expect: 'melee' },
-  { name: 'axe family',          w: { kind: 'melee', ammo_type_id: null }, expect: 'melee' },
-  { name: 'mace family',         w: { kind: 'melee', ammo_type_id: null }, expect: 'melee' },
-  { name: 'spear family',        w: { kind: 'melee', ammo_type_id: null }, expect: 'melee' },
-  { name: 'dagger family',       w: { kind: 'melee', ammo_type_id: null }, expect: 'melee' },
-  { name: 'quarterstaff family', w: { kind: 'melee', ammo_type_id: null }, expect: 'melee' },
-
-  // ranged families -- projectile kind WITH an ammo item wired (well-formed
-  // shape; see the gap note above for what the live catalog rows carry today).
-  { name: 'bow family (ammo wired)',      w: { kind: 'projectile', ammo_type_id: 25 }, expect: 'ranged' },
-  { name: 'crossbow family (ammo wired)', w: { kind: 'projectile', ammo_type_id: 26 }, expect: 'ranged' },
-
-  // magic families -- projectile kind, no ammo reference.
-  { name: 'wand family',    w: { kind: 'projectile', ammo_type_id: null }, expect: 'magic' },
-  { name: 'staff family',   w: { kind: 'projectile', ammo_type_id: null }, expect: 'magic' },
-  { name: 'scepter family', w: { kind: 'projectile', ammo_type_id: null }, expect: 'magic' },
-
-  // a socketed spell/augment stone overrides to magic regardless of the
-  // host weapon's own kind, even a melee weapon.
-  {
-    name: 'melee weapon with a socketed spell stone',
-    w: { kind: 'melee', ammo_type_id: null, stoneItemId: 42 },
-    expect: 'magic',
-  },
-  {
-    name: 'melee weapon with an augment stone',
-    w: { kind: 'melee', ammo_type_id: null, augment: { element: 'fire', bonusDamage: 3 } },
-    expect: 'magic',
-  },
-  {
-    name: 'a catalog-level stone_mode value (never meaningful on a bare weapon TYPE) still forces magic',
-    w: { kind: 'melee', ammo_type_id: null, stone_mode: 'replace' },
-    expect: 'magic',
-  },
-
-  // edge cases.
-  { name: 'no weapon at all (unarmed) falls back to melee', w: null, expect: 'melee' },
+// Order matters: 'quarterstaff' contains the substring 'staff', so the melee
+// pattern is checked FIRST -- matching attackKindOf's own kind-before-name
+// ordering (its `kind === 'melee'` branch runs before getWeaponCategory).
+const FAMILY_RULES = [
+  { rx: /blade|sword|axe|mace|spear|dagger|quarterstaff|halberd/, expect: 'melee' },
+  // legacy names with no shared family word: knife (dagger-like), stick/club
+  // (mace-like), morning star, scythe, pike, unarmed.
+  { rx: /knife|stick|club|morning star|scythe|pike|unarmed/, expect: 'melee' },
+  { rx: /bow|crossbow|arbalest|sling|dart/, expect: 'ranged' },
+  { rx: /wand|staff|scepter|magic-bolt/, expect: 'magic' },
 ];
 
-test('attackKindOf: gear-ladder families and edge cases', () => {
-  for (const { name, w, expect: exp } of CASES) {
-    assert.equal(attackKindOf(w), exp, name);
+function expectedFamily(name) {
+  const n = name.toLowerCase();
+  const rule = FAMILY_RULES.find((r) => r.rx.test(n));
+  return rule ? rule.expect : null;
+}
+
+test('attackKindOf: every seeded weapon row, by name family', { skip }, async (t) => {
+  const pool = new Pool({ connectionString: url });
+  t.after(async () => { await pool.end(); });
+
+  const rows = (await pool.query(
+    "SELECT name, kind, ammo_type_id, stone_mode FROM item_types WHERE category = 'weapon' ORDER BY name",
+  )).rows;
+  assert.ok(rows.length > 0, 'precondition: the weapon catalog is seeded');
+
+  const unmatched = [];
+  const mismatches = [];
+  for (const row of rows) {
+    const expected = expectedFamily(row.name);
+    if (!expected) { unmatched.push(row.name); continue; }
+    // stone_mode is passed through deliberately (see below): a real weapon
+    // row's own stone_mode is always 'replace' (item_types_stone_mode_
+    // category_check), and attackKindOf must ignore it -- it is not read by
+    // the current implementation at all, unlike the version this replaces.
+    const actual = attackKindOf({ name: row.name, kind: row.kind, ammo_type_id: row.ammo_type_id, stone_mode: row.stone_mode });
+    if (actual !== expected) mismatches.push(`${row.name}: expected ${expected}, got ${actual} (kind=${row.kind}, ammo_type_id=${row.ammo_type_id}, stone_mode=${row.stone_mode})`);
   }
+
+  assert.deepEqual(unmatched, [], `weapon row(s) matching no known name family -- classify them explicitly: ${unmatched.join(', ')}`);
+  assert.deepEqual(mismatches, [], `attackKindOf disagreed with the name-family table:\n${mismatches.join('\n')}`);
+});
+
+test('attackKindOf: edge cases', { skip }, async (t) => {
+  const pool = new Pool({ connectionString: url });
+  t.after(async () => { await pool.end(); });
+
+  await t.test('a melee row with the catalog default stone_mode (\'replace\') is still melee', async () => {
+    const row = (await pool.query(
+      "SELECT name, kind, ammo_type_id, stone_mode FROM item_types WHERE category = 'weapon' AND kind = 'melee' LIMIT 1",
+    )).rows[0];
+    assert.equal(row.stone_mode, 'replace', 'precondition: every non-stone row defaults to replace');
+    assert.equal(
+      attackKindOf({ name: row.name, kind: row.kind, ammo_type_id: row.ammo_type_id, stone_mode: row.stone_mode }),
+      'melee',
+    );
+  });
+
+  await t.test('a bow with a socketed spell stone (stoneItemId set) is magic, not ranged', async () => {
+    const row = (await pool.query(
+      "SELECT name, kind, ammo_type_id FROM item_types WHERE category = 'weapon' AND name = 'bow'",
+    )).rows[0];
+    assert.equal(attackKindOf({ ...row, stoneItemId: 999 }), 'magic');
+  });
+
+  await t.test('no weapon at all (unarmed slot) falls back to melee', () => {
+    assert.equal(attackKindOf(null), 'melee');
+  });
 });

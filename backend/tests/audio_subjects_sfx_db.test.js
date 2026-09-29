@@ -26,7 +26,12 @@ const OGG = fs.readFileSync(path.join(__dirname, 'fixtures/audio/tone.ogg'));
 const CREATURE = 'Slime'; // entity_types.is_creature
 const WORLD_POINT = 'waypoint_stone'; // entity_types.point_kind = 'waypoint'
 const ITEM_MELEE = 'dagger'; // item_types: kind='melee'
-const ITEM_RANGED = 'bow'; // item_types: kind='projectile', ammo_type_id set (25)
+// A gear-ladder bow, NOT the legacy 'bow' row -- the gear-ladder generator
+// never wires ammo_type_id (verified against the live schema), so this only
+// resolves to 'ranged' via attackKindOf's getWeaponCategory(name) fallback.
+// Using this rather than the ammo-wired legacy row is the point: it is what
+// actually proves the controller-ruling fix, not just the pure-function test.
+const ITEM_RANGED = 'crude-bow'; // item_types: kind='projectile', ammo_type_id NULL
 const ITEM_MAGIC = 'apprentice staff'; // item_types: kind='projectile', ammo_type_id NULL
 const SKILL_MELEE = 'war_crushing_blow'; // skills.js: type='melee'
 const SKILL_MAGIC = 'war_shockwave'; // skills.js: type='magic'
