@@ -211,8 +211,43 @@ export function subjectSlotsFor(subjectsResponse, kind) {
 // (SOMET-558 made the same call for the art console): a queue full of jobs
 // with nothing draining them is exactly the state an admin needs the page to
 // keep checking, not freeze on.
+//
+// QUEUED only, not queued + running: with no drain running, a 'running' row
+// is an interrupted one (a backend restart mid-job) that nothing will touch
+// until the next Start -- which flips run.running and resumes polling -- so
+// polling on it just spins forever. That also makes "Discard queued" end the
+// polling once the queue is empty.
 export function shouldPoll({ run, stats } = {}) {
   if (run && run.running) return true;
-  const t = groupTotals(stats);
-  return (t.queued + t.running) > 0;
+  return groupTotals(stats).queued > 0;
+}
+
+// How many jobs "Discard queued" would remove: the queued count, or 0 while a
+// drain runs (the server refuses clear then, and the button is disabled at 0).
+export function queuedToDiscard({ run, stats } = {}) {
+  if (run && run.running) return 0;
+  return groupTotals(stats).queued;
+}
+
+// The warning under the batch controls for how the last drain ended. 'empty'
+// (ran out of work) and 'stopped' (the admin pressed Stop) need none; every
+// other reason -- 'breaker', 'no_provider', 'error' (a DB fault that ended
+// the drain) -- is shown WITH run.error, since that is the only place the
+// admin can see why the batch stopped short.
+export function runStopWarning(run) {
+  const reason = run && run.stopped_reason;
+  if (!reason || reason === 'empty' || reason === 'stopped') return null;
+  const detail = run.error || 'no detail';
+  if (reason === 'breaker') {
+    return `Stopped after repeated provider failures (${detail}) — fix the provider, then press Start to resume.`;
+  }
+  return `Batch stopped (${reason}): ${detail} — fix the cause, then press Start to resume.`;
+}
+
+// A group pill's running count. With no drain running those rows are
+// interrupted (see shouldPoll), and "running" would claim work is happening
+// that is not -- Start is what picks them back up.
+export function groupRunningText(run, count) {
+  if (count > 0 && !(run && run.running)) return `${count} interrupted — press Start`;
+  return `${count} running`;
 }

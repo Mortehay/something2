@@ -16,7 +16,7 @@
 // to the Library tab mid-drain silently dropped every ending it missed.
 import styled from 'styled-components';
 import {
-  batchProgress, DRAIN_GROUPS_LABEL,
+  batchProgress, DRAIN_GROUPS_LABEL, queuedToDiscard, runStopWarning, groupRunningText,
 } from './audioBatch.js';
 import {
   useStartAudioDrain, useStopAudioDrain, useRetryAudioFailures, useClearAudioJobs,
@@ -91,6 +91,8 @@ function AudioBatchPanel({
   const progress = batchProgress({ run, stats });
   const failed = (recent || []).filter((r) => r.state === 'failed').slice(0, 10);
   const running = progress.phase === 'running';
+  const discardable = queuedToDiscard({ run, stats });
+  const stopWarning = runStopWarning(run);
 
   return (
     <Panel>
@@ -123,7 +125,7 @@ function AudioBatchPanel({
           };
           return (
             <GroupPill key={name} $active={progress.group === name}>
-              {label}: <b>{g.done}</b> done · {g.queued} queued · {g.running} running{g.failed ? ` · ${g.failed} failed` : ''}
+              {label}: <b>{g.done}</b> done · {g.queued} queued · {groupRunningText(run, g.running)}{g.failed ? ` · ${g.failed} failed` : ''}
             </GroupPill>
           );
         })}
@@ -160,14 +162,21 @@ function AudioBatchPanel({
         >
           Clear finished
         </Secondary>
+        <Secondary
+          type="button"
+          disabled={running || clear.isPending || discardable === 0}
+          title={running ? 'Press Stop first' : undefined}
+          onClick={() => {
+            if (window.confirm(`Discard ${discardable} queued job${discardable === 1 ? '' : 's'}? They will not be generated.`)) {
+              clear.mutate(['queued']);
+            }
+          }}
+        >
+          Discard queued
+        </Secondary>
       </Controls>
 
-      {run && run.stopped_reason === 'breaker' && (
-        <Warn>
-          Stopped after repeated provider failures ({run.error || 'no detail'}) —
-          fix the provider, then press Start to resume.
-        </Warn>
-      )}
+      {stopWarning && <Warn>{stopWarning}</Warn>}
 
       {failed.length > 0 && (
         <Failures>
