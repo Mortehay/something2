@@ -16,6 +16,8 @@ const {
   SUBJECT_KINDS, MAX_SUBJECT_KEY, slotKind, subjectExists,
 } = require('../services/audioSubjects');
 const { checkClipBuffer } = require('../services/oggInfo');
+const audioJobQueue = require('../services/audioJobQueue');
+const audioDispatcher = require('../services/audioDispatcher');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -164,6 +166,136 @@ module.exports = function audioRoutes(pool) {
 
   router.get('/admin/misses', admin, async (req, res) => {
     try { res.json(await lib.listMisses(pool)); } catch (err) { sendError(res, err); }
+  });
+
+  // --- Batch job routes (spec §2 Dispatcher, game audio slice 2) -----------
+  //
+  // The admin-facing surface over audioJobQueue.js / audioDispatcher.js,
+  // mirroring /api/art-jobs* in src/index.js. A route-started drain always
+  // runs through whatever audioDispatcher.__setDeps() last set (real
+  // generation by default; tests swap in fakes so this file never has to
+  // reach the real box to prove the routes work).
+  //
+  // Mirrors audioDispatcher's own (unexported) NO_PROVIDER precondition:
+  // "no active audio provider AND no queued job pins one that resolves" is
+  // exactly what startDrain would otherwise discover asynchronously and
+  // report as stopped_reason 'no_provider' -- after it has already answered
+  // 202/201. Checking it here first turns that into an honest 503 up front.
+  async function hasResolvableAudioProvider() {
+    if (await resolveAudioProvider(pool, null)) return true;
+    const pinned = await pool.query(
+      `SELECT DISTINCT provider_id FROM audio_jobs WHERE state = 'queued' AND provider_id IS NOT NULL LIMIT 20`,
+    );
+    for (const row of pinned.rows) {
+      // eslint-disable-next-line no-await-in-loop
+      if (await resolveAudioProvider(pool, row.provider_id)) return true;
+    }
+    return false;
+  }
+
+  router.post('/admin/jobs', admin, async (req, res) => {
+    const b = req.body || {};
+    try {
+      if (!Array.isArray(b.items) || b.items.length < 1 || b.items.length > 500) {
+        return res.status(400).json({ error: 'items must be an array of 1-500 entries' });
+      }
+      const providerId = Number.isInteger(b.provider_id) ? b.provider_id : null;
+      if (providerId !== null && !(await resolveAudioProvider(pool, providerId))) {
+        return res.status(400).json({ error: 'provider_id does not resolve to an active audio provider' });
+      }
+      const rejected = [];
+      const valid = [];
+      for (const item of b.items) {
+        const it = item && typeof item === 'object' ? item : {};
+        // eslint-disable-next-line no-await-in-loop
+        const { clipKind, error } = await checkSubject(pool, it.subject_kind, it.subject_key, it.slot);
+        if (error) { rejected.push({ item, error }); continue; }
+        if (clipKind === 'sfx') { rejected.push({ item, error: 'sfx batches arrive in slice 3' }); continue; }
+        valid.push({
+          subject_kind: it.subject_kind,
+          subject_key: it.subject_key,
+          slot: it.slot,
+          clip_kind: clipKind,
+          style: it.style || null,
+          prompt: it.prompt || null,
+        });
+      }
+      const enq = await audioJobQueue.enqueue(pool, valid, { providerId });
+      // start/reason are only meaningful (and only present in the response,
+      // JSON.stringify drops undefined) when start was actually requested --
+      // a queue-only call has nothing to report about a drain.
+      let started;
+      let reason;
+      if (b.start === true) {
+        if (!(await hasResolvableAudioProvider())) {
+          started = false;
+          reason = 'no_provider';
+        } else {
+          try {
+            audioDispatcher.startDrain(pool);
+            started = true;
+          } catch (err) {
+            // A drain already running will pick these jobs up regardless --
+            // that is a success from the caller's point of view, not a
+            // reason to fail an enqueue that already committed.
+            if (err.code === 'ALREADY_RUNNING') started = true;
+            else throw err;
+          }
+        }
+      }
+      res.status(201).json({
+        batch_id: enq.batch_id, queued: enq.queued, already_live: enq.already_live, rejected, started, reason,
+      });
+    } catch (err) { sendError(res, err); }
+  });
+
+  router.get('/admin/jobs', admin, async (req, res) => {
+    try {
+      res.json({
+        run: audioDispatcher.runStatus(),
+        stats: await audioJobQueue.stats(pool),
+        recent: await audioJobQueue.recent(pool),
+      });
+    } catch (err) { sendError(res, err); }
+  });
+
+  router.post('/admin/jobs/dispatch', admin, async (req, res) => {
+    try {
+      if (!(await hasResolvableAudioProvider())) {
+        return res.status(503).json({
+          error: 'No active audio provider, and no queued job pins one that resolves. '
+            + 'Add or activate one under AI Providers with modality "audio".',
+        });
+      }
+      res.status(202).json(audioDispatcher.startDrain(pool));
+    } catch (err) {
+      if (err.code === 'ALREADY_RUNNING') {
+        return res.status(409).json({ error: err.message, run: audioDispatcher.runStatus() });
+      }
+      sendError(res, err);
+    }
+  });
+
+  router.post('/admin/jobs/stop', admin, (req, res) => {
+    res.json(audioDispatcher.stopDrain());
+  });
+
+  router.post('/admin/jobs/retry-failed', admin, async (req, res) => {
+    try { res.json({ requeued: await audioJobQueue.retryFailed(pool) }); }
+    catch (err) { sendError(res, err); }
+  });
+
+  // Refused while a drain runs: deleting a queued row out from under a live
+  // drain would race its claim (the same reason art's /api/art-jobs/clear
+  // refuses), and audioJobQueue.clear's own default states include 'queued'.
+  router.post('/admin/jobs/clear', admin, async (req, res) => {
+    if (audioDispatcher.runStatus().running) {
+      return res.status(409).json({ error: 'a batch is running -- stop it first, or wait for it to finish' });
+    }
+    try {
+      const states = Array.isArray(req.body && req.body.states) ? req.body.states : undefined;
+      res.json({ cleared: await audioJobQueue.clear(pool, states ? { states } : {}) });
+    } catch (err) { sendError(res, err); }
   });
 
   return router;
