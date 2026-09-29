@@ -57,6 +57,18 @@ test('audio library', { skip }, async (t) => {
     await assert.rejects(lib.bindClip(pool, { subjectKind: 'dragon', subjectKey: 'x', slot: 'roar', clipId: music.id }), /subject/);
   });
 
+  // F2: no path may bind to a subject name that is not in its catalogue (a
+  // deleted/renamed world, a stale queued job) -- 400 'unknown subject'.
+  await t.test('bindClip rejects a subject that does not exist', async () => {
+    const music = await store('music');
+    await assert.rejects(
+      lib.bindClip(pool, { subjectKind: 'world', subjectKey: ghost, slot: 'music', clipId: music.id }),
+      (e) => e instanceof lib.AudioInputError && e.status === 400 && /unknown subject/.test(e.message),
+    );
+    const n = await pool.query('SELECT 1 FROM audio_bindings WHERE subject_key = $1', [ghost]);
+    assert.equal(n.rowCount, 0, 'no binding row for the ghost subject');
+  });
+
   await t.test('binding clears the matching miss; the bundle carries world + biome slots', async () => {
     assert.equal(await lib.recordMisses(pool, [
       { subject_kind: 'biome', subject_key: biomeName, slot: 'ambience', world: worldName },

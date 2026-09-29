@@ -21,6 +21,7 @@
 //     too).
 const audioJobQueue = require('./audioJobQueue');
 const audioGeneration = require('./audioGeneration');
+const { subjectExists } = require('./audioSubjects');
 
 // How many consecutive job failures end the drain rather than working
 // through the rest of the queue.
@@ -65,6 +66,7 @@ const REAL_DEPS = {
   queue: audioJobQueue,
   generateForSlot: audioGeneration.generateForSlot,
   resolveAudioProvider: audioGeneration.resolveAudioProvider,
+  subjectExists,
   sleep: (ms) => new Promise((resolve) => { setTimeout(resolve, ms); }),
   now: () => Date.now(),
 };
@@ -254,11 +256,20 @@ function startDrain(db, opts = {}) {
         // one is scoped to a single job).
         let result;
         try {
+          // A job can sit queued while its world/biome is deleted or
+          // renamed (subjects are keyed by name). Generating for it would
+          // burn box time on a clip that can never be bound, so it fails
+          // up front -- retryable:false with no status/providerFault, so it
+          // does not count toward the breaker either.
+          // eslint-disable-next-line no-await-in-loop
+          const exists = await deps.subjectExists(db, job.subject_kind, job.subject_key);
           // job.provider_id resolves that pin; null falls through to the
           // active audio provider (resolveAudioProvider's own contract).
           // eslint-disable-next-line no-await-in-loop
-          const provider = await deps.resolveAudioProvider(db, job.provider_id ?? null);
-          if (!provider) {
+          const provider = exists ? await deps.resolveAudioProvider(db, job.provider_id ?? null) : null;
+          if (!exists) {
+            result = { ok: false, error: 'subject no longer exists', retryable: false };
+          } else if (!provider) {
             result = { ok: false, error: 'no audio provider', retryable: false };
           } else {
             // eslint-disable-next-line no-await-in-loop

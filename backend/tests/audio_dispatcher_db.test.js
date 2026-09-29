@@ -69,6 +69,9 @@ test('audio dispatcher', { skip }, async (t) => {
       const seeds = {};
       const baseDeps = {
         resolveAudioProvider: async () => provider,
+        // These jobs use tagged, made-up subject keys; the real catalogue
+        // check (F2) has its own subtest below that leaves this default out.
+        subjectExists: async () => true,
         sleep: async () => {},
         generateForSlot: async (db, p, spec) => {
           seen.push(`${spec.clipKind}:${spec.subjectKey}`);
@@ -244,6 +247,29 @@ test('audio dispatcher', { skip }, async (t) => {
         const rows = (await pool.query('SELECT state FROM audio_jobs WHERE subject_key LIKE $1', [`${tag}-bad%`])).rows;
         assert.equal(rows.length, 4);
         assert.ok(rows.every((r) => r.state === 'failed'), 'a non-retryable failure lands in failed, not queued');
+      });
+
+      await t.test('a job whose subject no longer exists fails without calling the box or counting toward the breaker', async () => {
+        d.__resetRun();
+        await q.enqueue(pool, [1, 2, 3, 4].map((i) => (
+          { subject_kind: 'biome', subject_key: `${tag}-gone${i}`, slot: 'ambience', clip_kind: 'ambience' }
+        )), {});
+        let calls = 0;
+        // No subjectExists override: the REAL catalogue check runs, and none
+        // of these tagged biome names exist.
+        const { subjectExists: _unused, ...realCatalogue } = baseDeps;
+        const goneDeps = {
+          ...realCatalogue,
+          generateForSlot: async () => { calls += 1; return { ok: true, clip: { id: null } }; },
+        };
+        d.startDrain(pool, { deps: goneDeps });
+        const s = await waitIdle();
+        assert.equal(calls, 0, 'the box is never called for a missing subject');
+        assert.equal(s.stopped_reason, 'empty', 'missing subjects do not trip the breaker');
+        assert.equal(s.failed, 4);
+        const rows = (await pool.query('SELECT state, last_error FROM audio_jobs WHERE subject_key LIKE $1', [`${tag}-gone%`])).rows;
+        assert.equal(rows.length, 4);
+        assert.ok(rows.every((r) => r.state === 'failed' && /subject no longer exists/.test(r.last_error)), JSON.stringify(rows));
       });
 
       await t.test('stopDrain lets the in-flight job finish but claims nothing further', async () => {

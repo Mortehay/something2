@@ -5,7 +5,7 @@
 const crypto = require('node:crypto');
 const assetStore = require('./assetStore');
 const {
-  SUBJECT_KINDS, MAX_SUBJECT_KEY, isKnownKind, slotKind, isKnownSlot, existingSubjects,
+  SUBJECT_KINDS, MAX_SUBJECT_KEY, isKnownKind, slotKind, isKnownSlot, existingSubjects, subjectExists,
 } = require('./audioSubjects');
 
 class AudioInputError extends Error {
@@ -78,6 +78,9 @@ async function bindClip(db, { subjectKind, subjectKey, slot, clipId, volume = 1,
   if (!isKnownKind(subjectKind)) throw new AudioInputError(`unknown subject kind '${subjectKind}'`);
   const expected = slotKind(subjectKind, slot);
   if (!expected) throw new AudioInputError(`'${subjectKind}' has no slot '${slot}'`);
+  // Subjects are keyed by NAME: a deleted or renamed world/biome must not
+  // gain a binding from any path (route, generate, a stale queued job).
+  if (!(await subjectExists(db, subjectKind, subjectKey))) throw new AudioInputError('unknown subject');
   const clip = (await db.query('SELECT kind FROM audio_clips WHERE id = $1', [clipId])).rows[0];
   if (!clip) throw new AudioInputError('clip not found');
   if (clip.kind !== expected) {
