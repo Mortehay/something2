@@ -185,7 +185,19 @@ const PASSIVE_TREE_LOCK_WAIT_MS = 45000;
 // stop excluding each other.
 const ART_JOBS_LOCK_KEY = 615204773;
 
+// SOMET-591 (game audio slice 2): a fifth shared-state key, for the audio_jobs
+// queue -- the audio equivalent of ART_JOBS_LOCK_KEY above, and distinct from
+// it so an audio-queue test and an art-queue test never block each other for
+// no reason. Same shape of hazard: audio_jobs is one table that later tasks'
+// tests share (enqueue, claim, drain), node --test runs files in parallel,
+// and a claim in one file is not scoped to that file's own jobs. Every test
+// that enqueues, claims or drains audio_jobs takes this key for its whole
+// body, per common.md's QUEUE TEST ISOLATION rule, so later tasks reuse it
+// rather than declaring their own and silently drifting onto a different
+// number.
+const AUDIO_JOBS_LOCK_KEY = 977005353;
+
 module.exports = {
   withAdvisoryLock, readingUnderLock, LOCK_WAIT_MS,
-  PASSIVE_TREE_LOCK_KEY, PASSIVE_TREE_LOCK_WAIT_MS, ART_JOBS_LOCK_KEY,
+  PASSIVE_TREE_LOCK_KEY, PASSIVE_TREE_LOCK_WAIT_MS, ART_JOBS_LOCK_KEY, AUDIO_JOBS_LOCK_KEY,
 };
