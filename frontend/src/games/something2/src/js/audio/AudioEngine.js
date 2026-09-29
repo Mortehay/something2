@@ -490,15 +490,29 @@ export class AudioEngine {
   // stop this from ever starting), but builds a LOOPING source into
   // nearbyLoops instead of the one-shot sfxVoices map, since this clip never
   // ends on its own -- only _stopNearbyLoop / _fadeOutNearbyLoop end it.
+  //
+  // Fix round 3 (CRITICAL, same defect class as round 2): every cleanup
+  // below now checks `stillOurs()` before deleting nearbyLoopStarting's
+  // entry by emitterId. Without it, a STALE (already-cancelled) invocation
+  // could wipe a NEWER attempt's marker for the same point: point P leaves
+  // range (cancels v1, deletes P's marker), P returns and this time picks a
+  // different clip (v2, marker=v2), THEN v1's buffer finally resolves --
+  // its cancelled-branch used to delete P's marker unconditionally, wiping
+  // v2's still-live entry even though v2 is unrelated to v1. The next tick
+  // then saw no marker and no nearbyLoops entry, so it started a THIRD
+  // attempt (v3) -- v2 and v3 could both go on to succeed, and
+  // nearbyLoops.set() would silently overwrite one with the other, orphaning
+  // it exactly like round 2's bug. The success path also now refuses to
+  // overwrite an existing nearbyLoops entry, as a second, independent guard
+  // against two attempts for the same point both reaching success.
   async _startNearbyLoopVoice(emitterId, voiceId, clip, dx, distance) {
+    const stillOurs = () => this.nearbyLoopStarting.get(emitterId) === voiceId;
     this.sfxPending.add(voiceId);
     const buffer = await this._buffer(this.urlFor(clip.key));
-    // Fix round 2: nearbyLoopStarting is cleared on EVERY exit path below,
-    // matching admission's guarantee that it always ends up in exactly one
-    // of {refused before this ran}, {cancelled}, {failed}, or {nearbyLoops}.
-    if (!this.sfxPending.delete(voiceId)) { this.nearbyLoopStarting.delete(emitterId); return; } // cancelled (evicted, or _cancelNearbyLoopStart) while loading
-    if (!this.ctx) { this.sfxLimiter.release(voiceId); this.nearbyLoopStarting.delete(emitterId); return; }
-    if (!buffer) { this.sfxLimiter.release(voiceId); this.sfxStats.droppedTotal += 1; this.nearbyLoopStarting.delete(emitterId); return; }
+    if (!this.sfxPending.delete(voiceId)) { if (stillOurs()) this.nearbyLoopStarting.delete(emitterId); return; } // cancelled (evicted, or _cancelNearbyLoopStart) while loading
+    if (!this.ctx) { this.sfxLimiter.release(voiceId); if (stillOurs()) this.nearbyLoopStarting.delete(emitterId); return; }
+    if (!buffer) { this.sfxLimiter.release(voiceId); this.sfxStats.droppedTotal += 1; if (stillOurs()) this.nearbyLoopStarting.delete(emitterId); return; }
+    if (this.nearbyLoops.has(emitterId)) { this.sfxLimiter.release(voiceId); if (stillOurs()) this.nearbyLoopStarting.delete(emitterId); return; } // a newer attempt already won
     const src = this.ctx.createBufferSource();
     src.buffer = buffer;
     src.loop = true;
@@ -517,7 +531,7 @@ export class AudioEngine {
     panner.connect(gain);
     gain.connect(this.bus.sfx);
     this.nearbyLoops.set(emitterId, { src, gain, voiceId, key: clip.key });
-    this.nearbyLoopStarting.delete(emitterId); // success -- ownership moves to nearbyLoops
+    if (stillOurs()) this.nearbyLoopStarting.delete(emitterId); // success -- ownership moves to nearbyLoops
     this.sfxStats.playedTotal += 1;
     src.start();
   }
