@@ -601,15 +601,20 @@ function ArtConsoleAdmin() {
   // A size refusal names the queued groups that block it. Offered as ONE
   // action -- drop exactly those, then start -- because the admin's intent is
   // "run what can run"; the dropped subjects can be re-queued on a 1024
-  // provider later. Hidden once a batch is running or the refusal is stale.
-  const blocked = blockedSummary(startBatch.error?.blocked);
+  // provider later.
+  //
+  // Two sources (SOMET-594): the Start refusal, and a drain that found blocked
+  // groups queued MID-BATCH and is skipping them. The drain's list is the
+  // live one, so it wins; while it runs, removal must not also start.
+  const runBlocked = run?.blocked?.length ? run.blocked : null;
+  const blocked = blockedSummary(runBlocked || startBatch.error?.blocked);
   const onDropBlocked = () => {
     if (!window.confirm(
       `Remove ${blocked.total} queued job(s) that would render below 1024px?\n\n`
       + `${blocked.lines.join('\n')}\n\n`
       + 'Other queued jobs are kept. Re-queue these subjects on a 1024 provider to draw them.',
     )) return;
-    clearGroups.mutate(blocked.groups, { onSuccess: onStart });
+    clearGroups.mutate(blocked.groups, { onSuccess: run?.running ? undefined : onStart });
   };
 
   const onEnqueue = async () => {
@@ -738,15 +743,21 @@ function ArtConsoleAdmin() {
         )}
       </Bar>
 
-      {blocked.total > 0 && !run?.running && (
+      {blocked.total > 0 && (runBlocked || !run?.running) && (
         <Blocked role="alert">
-          <Err>{startBatch.error.message}</Err>
+          <Err>
+            {runBlocked
+              ? `${run.running ? 'Skipping' : 'Skipped'} ${blocked.total} queued job(s) that would render `
+                + 'below 1024px -- the rest of the batch '
+                + `${run.running ? 'is drawing' : 'was drawn'}. Remove them, or re-queue those subjects on a 1024 provider.`
+              : startBatch.error.message}
+          </Err>
           <ul>{blocked.lines.map((l) => <li key={l}>{l}</li>)}</ul>
           <Bar>
             <Button onClick={onDropBlocked} disabled={clearGroups.isPending || startBatch.isPending}>
-              Remove {blocked.total} blocked job(s) &amp; start
+              Remove {blocked.total} blocked job(s){run?.running ? '' : ' & start'}
             </Button>
-            <Secondary onClick={() => startBatch.reset()}>Dismiss</Secondary>
+            {!runBlocked && <Secondary onClick={() => startBatch.reset()}>Dismiss</Secondary>}
           </Bar>
         </Blocked>
       )}

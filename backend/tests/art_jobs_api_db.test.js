@@ -7,6 +7,7 @@ const { app, __setPool } = require('../src/index.js');
 const queue = require('../src/services/artJobQueue.js');
 const dispatcher = require('../src/services/artDispatcher.js');
 const cs = require('../src/services/catalogSubjects.js');
+const remote = require('../src/services/remoteImageProvider.js');
 const { withAdvisoryLock, ART_JOBS_LOCK_KEY } = require('./helpers/advisoryLock.js');
 
 // SOMET-540. The admin surface SOMET-538's table will drive.
@@ -486,6 +487,112 @@ lockedTest('clear rejects malformed groups rather than clearing everything',
     }
     const { rows } = await pool.query("SELECT count(*)::int n FROM art_jobs WHERE state='queued'");
     assert.equal(rows[0].n, 1, 'a bad request must delete nothing');
+  });
+
+// SOMET-594. A second, 512 provider for the cases that need both sizes at once.
+async function smallProvider(t, pool) {
+  const { rows } = await pool.query(
+    `INSERT INTO ai_providers (name, base_url, request_template, model)
+     VALUES ($1, 'http://stub.invalid/sdapi/v1/txt2img', '{"width":512,"height":512}'::jsonb, 'stub')
+     RETURNING id`, [`zzTestSmall ${process.pid} ${Date.now()}`]);
+  t.after(() => pool.query('DELETE FROM ai_providers WHERE id = $1', [rows[0].id]).catch(() => {}));
+  return rows[0].id;
+}
+
+async function drainOut() {
+  for (let i = 0; i < 80 && dispatcher.runStatus().running; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((r) => { setTimeout(r, 100); });
+  }
+}
+
+// THE REPORTED FAILURE: 512 items queued while a 1024 batch ran stopped the
+// whole drain on its next pass. It must skip them and draw the rest.
+lockedTest('a drain SKIPS a blocked group queued mid-batch instead of stopping',
+  async (t, pool, providerId) => {
+    const small = await smallProvider(t, pool);
+    const [good, bad] = (await cs.SUBJECTS.skill.list()).slice(0, 2);
+    await queue.enqueue(pool, [{ kind: 'skill', key: good.key }], { backend: 'connector', providerId });
+    await queue.enqueue(pool, [{ kind: 'skill', key: bad.key }], { backend: 'connector', providerId: small });
+
+    dispatcher.__resetRun();
+    dispatcher.startDrain(pool, {
+      provider: { id: providerId, name: 'big', request_template: { width: 1024, height: 1024 } },
+      generate: async (registryId) => {
+        remote.setJob(registryId, { status: 'done', result: { image_key: 'zzTest/x.png', frames: 1 } });
+      },
+      writeArt: async () => {},
+    });
+    t.after(() => { dispatcher.stopDrain(); dispatcher.__resetRun(); });
+    await drainOut();
+
+    const run = dispatcher.runStatus();
+    assert.equal(run.running, false);
+    assert.equal(run.error, null, 'a blocked group must not stop the batch');
+    assert.deepEqual(run.blocked.map((b) => [b.kind, b.provider_id, b.count]), [['skill', small, 1]]);
+    const { rows } = await pool.query(
+      'SELECT subject_key, state, attempts FROM art_jobs WHERE provider_id = $1', [small]);
+    assert.deepEqual(rows.map((r) => [r.subject_key, r.state, r.attempts]), [[bad.key, 'queued', 0]],
+      'the blocked job is left queued and untried');
+    const { rows: g } = await pool.query(
+      'SELECT state FROM art_jobs WHERE provider_id = $1', [providerId]);
+    assert.deepEqual(g.map((r) => r.state), ['done'], 'the 1024 job was drawn');
+    await pool.query("DELETE FROM art_generations WHERE image_key = 'zzTest/x.png'").catch(() => {});
+  });
+
+// Refused at the source: an object queued on a 512 provider can never be drawn.
+lockedTest('queueing an object kind on a 512 provider is refused; a tile is not',
+  async (t, pool, providerId) => {
+    const small = await smallProvider(t, pool);
+    const [item] = await cs.SUBJECTS.item.list(pool);
+    const res = await request(app).post('/api/art-jobs').set(...AUTH)
+      .send({ kind: 'item', keys: [item.key], provider_id: small });
+    assert.equal(res.status, 400);
+    assert.equal(res.body.code, 'PROVIDER_TOO_SMALL');
+    assert.match(res.body.error, /needs a 1024px provider/);
+    const { rows } = await pool.query('SELECT count(*)::int n FROM art_jobs');
+    assert.equal(rows[0].n, 0, 'nothing may be queued');
+
+    const [tile] = await cs.SUBJECTS.tile.list(pool);
+    const ok = await request(app).post('/api/art-jobs').set(...AUTH)
+      .send({ kind: 'tile', keys: [tile.key], provider_id: small });
+    assert.equal(ok.status, 201, 'tiles are drawn at 512 by design');
+
+    const big = await request(app).post('/api/art-jobs').set(...AUTH)
+      .send({ kind: 'item', keys: [item.key], provider_id: providerId });
+    assert.equal(big.status, 201);
+  });
+
+// The skipped groups can be removed WITHOUT stopping the batch: the drain never
+// claims them, so a scoped clear touches nothing a worker holds.
+lockedTest('a scoped clear is allowed while a batch runs, and un-reports the group',
+  async (t, pool, providerId) => {
+    const small = await smallProvider(t, pool);
+    const skills = (await cs.SUBJECTS.skill.list()).slice(0, 4);
+    await queue.enqueue(pool, skills.slice(0, 3).map((s) => ({ kind: 'skill', key: s.key })),
+      { backend: 'connector', providerId });
+    await queue.enqueue(pool, [{ kind: 'skill', key: skills[3].key }],
+      { backend: 'connector', providerId: small });
+
+    dispatcher.__resetRun();
+    dispatcher.startDrain(pool, {
+      provider: { id: providerId, name: 'big', request_template: { width: 1024, height: 1024 } },
+      generate: async () => new Promise((r) => { setTimeout(r, 1500); }),
+      concurrency: 1,
+    });
+    t.after(() => { dispatcher.stopDrain(); dispatcher.__resetRun(); });
+    for (let i = 0; i < 30 && !dispatcher.runStatus().blocked.length; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((r) => { setTimeout(r, 50); });
+    }
+    assert.equal(dispatcher.runStatus().blocked.length, 1);
+
+    const res = await request(app).post('/api/art-jobs/clear').set(...AUTH)
+      .send({ groups: [{ kind: 'skill', provider_id: small }] });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.cleared, 1);
+    assert.deepEqual(dispatcher.runStatus().blocked, [], 'removed groups stop being offered');
+    assert.equal(dispatcher.runStatus().running, true, 'the batch keeps running');
   });
 
 // Deleting a row a worker is mid-generation on would have the drain resolve a

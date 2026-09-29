@@ -510,18 +510,32 @@ async function dispatch(db, {
   subjects = catalogSubjects,
   loadProvider,
   deps = {},
+  skipBlocked = false,
+  onBlocked = null,
 } = {}) {
   // Checked BEFORE claiming, so a misconfigured provider costs nothing and
   // leaves the queue untouched rather than burning an attempt on every row.
   // Skipped when the caller builds its own requests -- it is then not this
   // module's business what gets sent.
+  //
+  // `skipBlocked` (SOMET-594) is the running drain's mode: a 512 group queued
+  // MID-BATCH used to stop the whole drain, taking every good 1024 subject
+  // down with it. The drain now leaves the blocked groups queued and draws the
+  // rest; the refusal still stands for them, reported as `blocked`.
+  let blocked = [];
   if (!buildRequest) {
     const err = await objectSizeRefusal(db, provider, subjects, loadProvider);
-    if (err) throw err;
+    if (err && !skipBlocked) throw err;
+    if (err) blocked = err.blocked;
   }
+  // Reported BEFORE the pass runs: a pass is `limit` generations long, and a
+  // status that only learned of a blocked group at its end would hide the
+  // group -- and the action to remove it -- for minutes.
+  if (onBlocked) onBlocked(blocked);
+  const exclude = blocked.map((b) => ({ kind: b.kind, provider_id: b.provider_id }));
 
-  const claimed = await queue.claim(db, limit);
-  if (claimed.length === 0) return { claimed: 0, done: 0, failed: 0, results: [] };
+  const claimed = await queue.claim(db, limit, { exclude });
+  if (claimed.length === 0) return { claimed: 0, done: 0, failed: 0, results: [], blocked };
 
   const resolveSubject = subjectResolver(db, subjects);
   const results = [];
@@ -572,6 +586,7 @@ async function dispatch(db, {
     done: results.filter((r) => r.ok).length,
     failed: results.filter((r) => !r.ok).length,
     results,
+    blocked,
   };
 }
 
@@ -614,6 +629,10 @@ function runStatus() {
     // null unless the drain is currently sitting out a retry backoff.
     waiting_until: run.waitingUntil || null,
     error: run.error || null,
+    // SOMET-594. Queued groups this drain is leaving alone because they would
+    // render below the object minimum -- the same shape /dispatch's 400 uses,
+    // so the console offers the same Remove action for them.
+    blocked: run.blocked || [],
   };
 }
 
@@ -638,11 +657,12 @@ function startDrain(db, opts = {}) {
   // provider alone: every queued job carries its own provider pin, so a 512
   // batch provider is correct for a tile batch and irrelevant to a pinned
   // entity batch. The /dispatch route awaits the queue-aware
-  // objectSizeRefusal before calling this, and dispatch() re-checks each pass.
+  // objectSizeRefusal before calling this, and dispatch() re-checks each pass
+  // -- skipping, not stopping on, a group that turns up blocked mid-batch.
   run = {
     running: true, stopping: false, startedAt: new Date().toISOString(),
     finishedAt: null, passes: 0, done: 0, failed: 0, error: null,
-    waitingUntil: null,
+    waitingUntil: null, blocked: [],
   };
   // Distinct subjects that have failed on the PROVIDER since the last success.
   // A Set, not a counter: the same subject failing repeatedly says nothing
@@ -671,7 +691,9 @@ function startDrain(db, opts = {}) {
           tripped = true;
           return 'stop';
         };
-        const out = await dispatch(db, { ...opts, onResult });
+        const out = await dispatch(db, {
+          ...opts, onResult, skipBlocked: true, onBlocked: (b) => { self.blocked = b; },
+        });
         self.passes += 1;
         self.done += out.done;
         self.failed += out.failed;
@@ -694,7 +716,9 @@ function startDrain(db, opts = {}) {
         // genuinely empty still ends the batch, so enqueueing more remains an
         // explicit act that starts another drain.
         if (out.claimed === 0) {
-          const next = await queue.nextClaimableAt(db);
+          const next = await queue.nextClaimableAt(db, {
+            exclude: self.blocked.map((b) => ({ kind: b.kind, provider_id: b.provider_id })),
+          });
           if (!next) break;
           const waitMs = Math.min(
             Math.max(new Date(next).getTime() - Date.now(), 0),
@@ -720,10 +744,20 @@ function startDrain(db, opts = {}) {
   return runStatus();
 }
 
+// A scoped clear removed these groups: stop reporting them as blocked. Without
+// this a finished drain's status keeps offering to remove rows already gone,
+// and a running one does until its next pass re-checks.
+function forgetBlocked(groups) {
+  if (!run || !Array.isArray(run.blocked) || !Array.isArray(groups)) return;
+  const gone = new Set(groups.map((g) => `${g.kind}|${g.provider_id ?? ''}`));
+  run.blocked = run.blocked.filter((b) => !gone.has(`${b.kind}|${b.provider_id ?? ''}`));
+}
+
 // Tests only: forget the run so one case cannot leave another looking busy.
 function __resetRun() { run = null; }
 
 module.exports.startDrain = startDrain;
 module.exports.stopDrain = stopDrain;
 module.exports.runStatus = runStatus;
+module.exports.forgetBlocked = forgetBlocked;
 module.exports.__resetRun = __resetRun;

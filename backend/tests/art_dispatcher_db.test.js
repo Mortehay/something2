@@ -225,7 +225,7 @@ lockedTest('concurrency runs several at once and every claimed job is resolved',
 
 lockedTest('dispatch on an empty queue is a no-op, not an error', async (t, pool, providerId) => {
   const out = await dispatch(pool, { provider: PROVIDER(providerId), generate: succeed(), buildRequest });
-  assert.deepEqual(out, { claimed: 0, done: 0, failed: 0, results: [] });
+  assert.deepEqual(out, { claimed: 0, done: 0, failed: 0, results: [], blocked: [] });
 });
 
 // --- SOMET-547: the dispatcher must actually RECORD history ----------------

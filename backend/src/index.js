@@ -3619,6 +3619,29 @@ app.post('/api/art-jobs', adminGuard, async (req, res) => {
     const { subjects, unknown } = await catalogSubjects.subjectsForEnqueue(
       pool, kind, keys, { active, fallbackProviderId: providerId },
     );
+
+    // SOMET-594. Refuse at the SOURCE. An object queued on a provider that
+    // renders below 1024 can never be drawn -- the drain skips it -- so
+    // accepting it only defers the error to a batch that then leaves it
+    // stranded. Checked per subject's RESOLVED provider, since a pinned type
+    // goes to its pin rather than to the one picked in the console.
+    if (backend === 'connector' && catalogSubjects.registryFor(kind).generationKind === 'object') {
+      const ids = [...new Set(subjects.map((s) => s.providerId).filter(Number.isInteger))];
+      const { rows: provs } = await pool.query(
+        "SELECT id, name, request_template FROM ai_providers WHERE modality = 'image'");
+      const tooSmall = provs.filter((p) => ids.includes(p.id) && artDispatcher.providerSizeRefusal(p));
+      if (tooSmall.length) {
+        const ok = provs.filter((p) => !artDispatcher.providerSizeRefusal(p)).map((p) => `"${p.name}"`);
+        return res.status(400).json({
+          error: `${kind} is drawn as an isolated object and needs a 1024px provider; `
+            + `${tooSmall.map((p) => `"${p.name}"`).join(', ')} renders smaller. `
+            + (ok.length ? `Pick ${ok.join(' or ')} in the Provider list.`
+              : 'Set a provider\'s request_template width/height to 1024.'),
+          code: 'PROVIDER_TOO_SMALL',
+        });
+      }
+    }
+
     const rows = await artJobQueue.enqueue(pool, subjects, { backend, providerId });
     res.status(201).json({
       requested: keys.length,
@@ -3882,11 +3905,6 @@ app.post('/api/art-jobs/requeue-stale', adminGuard, async (req, res) => {
 // the drain would report failures for subjects nobody asked it to stop.
 app.post('/api/art-jobs/clear', adminGuard, async (req, res) => {
   try {
-    if (artDispatcher.runStatus().running) {
-      return res.status(409).json({
-        error: 'a batch is running -- press Stop and let the subjects in flight finish first',
-      });
-    }
     // `groups` scopes the clear to (kind, provider_id) pairs -- what a
     // PROVIDER_TOO_SMALL refusal lists as `blocked`. QUEUED rows only when
     // scoped: the admin is dropping work that has not started, and a claimed
@@ -3908,7 +3926,17 @@ app.post('/api/art-jobs/clear', adminGuard, async (req, res) => {
           RETURNING j.state`,
         [valid.map((g) => g.kind), valid.map((g) => g.provider_id)],
       ));
+      artDispatcher.forgetBlocked(valid);
     } else {
+      // Only the UNSCOPED clear is refused mid-batch: it takes claimed rows.
+      // A scoped clear deletes queued rows only, and a running drain skips
+      // blocked groups rather than claiming them (SOMET-594), so removing
+      // them while it runs is exactly what the console offers.
+      if (artDispatcher.runStatus().running) {
+        return res.status(409).json({
+          error: 'a batch is running -- press Stop and let the subjects in flight finish first',
+        });
+      }
       ({ rows } = await pool.query(
         "DELETE FROM art_jobs WHERE state IN ('queued', 'running') RETURNING state",
       ));
