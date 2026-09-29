@@ -4,6 +4,8 @@
 import { API_URL } from '../../../../../config.js';
 import { assetUrl } from '../net/assets.js';
 import { resolveChain, pickWeighted, ambienceChain, musicChain } from './audioLookup.js';
+import { sfxChains } from './sfxResolve.js';
+import { SfxLimiter } from './sfxLimits.js';
 import { BiomeTracker } from './biomeTracker.js';
 import { MissLog } from './missLog.js';
 import { DEFAULT_VOLUMES } from './audioSettings.js';
@@ -12,6 +14,10 @@ import { postMisses as defaultPostMisses } from './audioClient.js';
 const FADE_S = 2;
 const BIOME_SAMPLE_MS = 500;
 const MUSIC_GAP_MS = [3000, 8000];
+// Spec §3 "Limits": linear falloff, silent at and beyond this distance, and
+// full pan left/right by this many px either side of the listener.
+const SFX_FALLOFF_PX = 1600;
+const SFX_PAN_PX = 600;
 
 export class AudioEngine {
   constructor({
@@ -35,6 +41,9 @@ export class AudioEngine {
     this.vol = { ...DEFAULT_VOLUMES };
     this.channels = { music: { key: null, node: null, gain: null }, ambience: { key: null, node: null, gain: null } };
     this.musicTimer = null;
+    this.sfxLimiter = new SfxLimiter({ now: this.now });
+    this.sfxVoices = new Map(); // voiceId -> BufferSourceNode, currently playing
+    this.sfxStats = { playedTotal: 0, droppedTotal: 0 };
   }
 
   _ensureCtx() {
@@ -46,9 +55,10 @@ export class AudioEngine {
       return null;
     }
     const g = () => this.ctx.createGain();
-    this.bus = { master: g(), music: g(), ambience: g() };
+    this.bus = { master: g(), music: g(), ambience: g(), sfx: g() };
     this.bus.music.connect(this.bus.master);
     this.bus.ambience.connect(this.bus.master);
+    this.bus.sfx.connect(this.bus.master);
     this.bus.master.connect(this.ctx.destination);
     this._applyGains();
     return this.ctx;
@@ -61,6 +71,7 @@ export class AudioEngine {
     this.bus.master.gain.value = this.vol.muted ? 0 : this.vol.master;
     this.bus.music.gain.value = this.vol.music;
     this.bus.ambience.gain.value = this.vol.ambience;
+    this.bus.sfx.gain.value = this.vol.sfx;
   }
 
   setVolumes(v) { this.vol = { ...this.vol, ...v }; this._ensureCtx(); this._applyGains(); }
@@ -88,6 +99,7 @@ export class AudioEngine {
     this.lastBiomeSample = -Infinity;
     this._stop('ambience');
     this._stop('music');
+    this._stopAllSfx();
     if (world) this._startMusic();
   }
 
@@ -110,6 +122,86 @@ export class AudioEngine {
     const r = resolveChain(this.bindings, chain);
     if (!r.key) this.misses.record(r.missKey, this.world);
     return r;
+  }
+
+  // Spec §3 "Triggers" / "Limits". `events` is the wire `frame.sfx` list (may
+  // be undefined/empty on a quiet tick); `listener` is where the player is
+  // (world px) and `ownActor` is this client's own `p:<uid>` actor key, used
+  // to give the player's own actions priority over everyone else's. Never
+  // throws into the caller -- Game._onWorldState calls this every frame, and
+  // one bad event must not break the render loop; a failure here is silence
+  // plus one warning, same contract as everything else in this file.
+  playSfxEvents(events, { listener, ownActor } = {}) {
+    if (!Array.isArray(events) || events.length === 0) return;
+    const ctx = this._ensureCtx();
+    if (!ctx) return;
+    for (const ev of events) {
+      try {
+        this._playSfxEvent(ev, listener || { x: 0, y: 0 }, ownActor);
+      } catch (err) {
+        this._warn('sfx-event', `[audio] sfx event failed: ${err.message}`);
+      }
+    }
+  }
+
+  _playSfxEvent(ev, listener, ownActor) {
+    for (const { keys } of sfxChains(ev)) {
+      const { clips, key } = this._resolve(keys);
+      if (!key) continue; // miss already recorded by _resolve
+      const clip = pickWeighted(clips, this.rand);
+      if (!clip) continue;
+      this._triggerSfx(clip, ev, listener, ownActor);
+    }
+  }
+
+  _triggerSfx(clip, ev, listener, ownActor) {
+    const dx = (ev.x || 0) - listener.x;
+    const dy = (ev.y || 0) - listener.y;
+    const distance = Math.hypot(dx, dy);
+    const priority = ownActor && ev.a === ownActor ? 'own' : 'nearest';
+    const { ok, evict, voiceId } = this.sfxLimiter.admit({ clipKey: clip.key, priority, distance });
+    if (!ok) { this.sfxStats.droppedTotal += 1; return; }
+    if (evict != null) this._stopSfxVoice(evict);
+    this._startSfxVoice(voiceId, clip, dx, distance);
+  }
+
+  async _startSfxVoice(voiceId, clip, dx, distance) {
+    const buffer = await this._buffer(this.urlFor(clip.key));
+    // The world (or the whole engine) may have moved on while the buffer was
+    // loading -- release() is a no-op if the limiter has already forgotten
+    // this voice (evicted or the engine was destroyed).
+    if (!this.ctx) { this.sfxLimiter.release(voiceId); return; }
+    if (!buffer) { this.sfxLimiter.release(voiceId); this.sfxStats.droppedTotal += 1; return; }
+    const src = this.ctx.createBufferSource();
+    src.buffer = buffer;
+    const gain = this.ctx.createGain();
+    const panner = this.ctx.createStereoPanner();
+    const vol = typeof clip.volume === 'number' ? clip.volume : 1;
+    const falloff = Math.max(0, 1 - distance / SFX_FALLOFF_PX);
+    gain.gain.value = vol * falloff;
+    panner.pan.value = Math.max(-1, Math.min(1, dx / SFX_PAN_PX));
+    src.connect(panner);
+    panner.connect(gain);
+    gain.connect(this.bus.sfx);
+    src.onended = () => {
+      this.sfxVoices.delete(voiceId);
+      this.sfxLimiter.release(voiceId);
+    };
+    this.sfxVoices.set(voiceId, src);
+    this.sfxStats.playedTotal += 1;
+    src.start();
+  }
+
+  _stopSfxVoice(voiceId) {
+    const src = this.sfxVoices.get(voiceId);
+    this.sfxVoices.delete(voiceId);
+    if (!src) return;
+    try { src.onended = null; src.stop(); } catch (_) { /* already stopped */ }
+  }
+
+  _stopAllSfx() {
+    for (const voiceId of [...this.sfxVoices.keys()]) this._stopSfxVoice(voiceId);
+    this.sfxLimiter = new SfxLimiter({ now: this.now });
   }
 
   _startMusic() {
@@ -209,13 +301,15 @@ export class AudioEngine {
       biome: this.biome,
       music: ch('music'),
       ambience: ch('ambience'),
-      gains: this.bus ? { master: this.bus.master.gain.value, music: this.bus.music.gain.value, ambience: this.bus.ambience.gain.value } : null,
+      sfx: { voices: this.sfxVoices.size, playedTotal: this.sfxStats.playedTotal, droppedTotal: this.sfxStats.droppedTotal },
+      gains: this.bus ? { master: this.bus.master.gain.value, music: this.bus.music.gain.value, ambience: this.bus.ambience.gain.value, sfx: this.bus.sfx.gain.value } : null,
     };
   }
 
   destroy() {
     this._stop('music');
     this._stop('ambience');
+    this._stopAllSfx();
     this.flushMisses();
     if (this.ctx) this.ctx.close().catch(() => {});
     this.ctx = null;

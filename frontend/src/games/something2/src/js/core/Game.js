@@ -1344,6 +1344,20 @@ export class Game {
             // which is exactly when a crowded fight would blow it.
             this.vfx = capParticles(this.vfx);
         }
+        // Game audio slice 3. `sfx` rides the same frame and is equally
+        // single-shot (the authority clears its stash after this broadcast),
+        // omitted entirely on a quiet tick. AudioEngine never throws out of
+        // this call -- a bad event is silence plus one warning, same
+        // contract as every other clip lookup in that module.
+        if (this.audio) {
+            this.audio.playSfxEvents(msg.sfx || [], {
+                listener: {
+                    x: this.player.x + (this.player.width || 0) / 2,
+                    y: this.player.y + (this.player.height || 0) / 2,
+                },
+                ownActor: `p:${this.localUserId}`,
+            });
+        }
     }
 
     // The HUD weapon name: whatever occupies main_hand, else the default

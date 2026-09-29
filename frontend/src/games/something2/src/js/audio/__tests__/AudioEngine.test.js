@@ -11,6 +11,9 @@ function fakeCtx() {
       return { gain: { value: 1, setValueAtTime(v) { this.value = v; }, linearRampToValueAtTime(v) { this.value = v; }, cancelScheduledValues() {} },
         connect(n) { this.out = n; }, disconnect() { this.out = null; } };
     },
+    createStereoPanner() {
+      return { pan: { value: 0 }, connect(n) { this.out = n; }, disconnect() { this.out = null; } };
+    },
     createBufferSource() {
       const s = { buffer: null, loop: false, loopStart: 0, loopEnd: 0, started: false, stopped: false, onended: null,
         connect(n) { this.out = n; }, disconnect() {}, start() { this.started = true; }, stop() { this.stopped = true; } };
@@ -214,5 +217,70 @@ describe('AudioEngine', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  describe('playSfxEvents', () => {
+    it('a bound use event starts one source on the sfx bus with pan and gain set from position', async () => {
+      const { engine, sources } = engineWith({
+        'item/Iron Sword/use': [{ key: 'sword-use.ogg', volume: 0.8, weight: 1 }],
+      });
+      engine.unlock();
+      engine.playSfxEvents(
+        [{ e: 'use', k: 'melee', s: 'Iron Sword', a: 'p:1', x: 100, y: 0 }],
+        { listener: { x: 0, y: 0 }, ownActor: 'p:1' },
+      );
+      await flush(); await flush();
+      expect(sources.length).toBe(1);
+      const src = sources[0];
+      expect(src.buffer.tag).toBe('u:sword-use.ogg');
+      expect(src.started).toBe(true);
+      // src -> panner -> gain -> bus.sfx (see AudioEngine#_startSfxVoice)
+      const panner = src.out;
+      const gain = panner.out;
+      expect(panner.pan.value).toBeCloseTo(100 / 600, 5);
+      expect(gain.gain.value).toBeCloseTo(0.8 * (1 - 100 / 1600), 5);
+      expect(engine.snapshot().sfx).toMatchObject({ voices: 1, playedTotal: 1, droppedTotal: 0 });
+    });
+
+    it('an event whose whole chain is unbound plays nothing and records one miss at the most specific key', async () => {
+      // A world/music binding is supplied so setWorld's own _startMusic()
+      // does not add an unrelated miss for this test to filter out.
+      const { engine, posted } = engineWith({
+        'world/vale/music': [{ key: 'm.ogg', volume: 1, weight: 1 }],
+      });
+      engine.unlock();
+      engine.playSfxEvents([{ e: 'hurt', c: 'unknown-creature', x: 0, y: 0 }], { listener: { x: 0, y: 0 }, ownActor: 'p:1' });
+      await flush(); await flush();
+      expect(engine.snapshot().sfx).toMatchObject({ voices: 0, playedTotal: 0 });
+      await engine.flushMisses();
+      expect(posted).toEqual([{ subject_kind: 'creature', subject_key: 'unknown-creature', slot: 'hurt', world: 'vale' }]);
+    });
+
+    it('caps at 12 started voices out of 20 same-priority events, each a distinct clip', async () => {
+      const bindings = {};
+      const events = [];
+      for (let i = 0; i < 20; i += 1) {
+        bindings[`creature/slime${i}/hurt`] = [{ key: `hurt${i}.ogg`, volume: 1, weight: 1 }];
+        events.push({ e: 'hurt', c: `slime${i}`, x: i, y: 0 });
+      }
+      const { engine, sources } = engineWith(bindings);
+      engine.unlock();
+      engine.playSfxEvents(events, { listener: { x: 0, y: 0 }, ownActor: 'p:1' });
+      await flush(); await flush();
+      expect(sources.length).toBe(12);
+      expect(engine.snapshot().sfx).toMatchObject({ voices: 12, playedTotal: 12, droppedTotal: 8 });
+    });
+
+    it('an sfx event is silence plus a warning on decode failure, never a throw', async () => {
+      const { ctx, sources } = fakeCtx();
+      ctx.decodeAudioData = async () => { throw new Error('bad data'); };
+      const engine = new AudioEngine({ ctxFactory: () => ctx, fetchBytes: async () => new ArrayBuffer(4), urlFor: (k) => k, rand: () => 0, postMisses: async () => {} });
+      engine.setWorld({ world: 'vale', bindings: { 'creature/slime/hurt': [{ key: 'hurt.ogg', weight: 1, volume: 1 }] } });
+      engine.unlock();
+      expect(() => engine.playSfxEvents([{ e: 'hurt', c: 'slime', x: 0, y: 0 }], { listener: { x: 0, y: 0 } })).not.toThrow();
+      await flush(); await flush();
+      expect(sources.every((s) => !s.started)).toBe(true);
+      expect(engine.snapshot().sfx.voices).toBe(0);
+    });
   });
 });
