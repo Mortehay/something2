@@ -1,7 +1,7 @@
 .PHONY: up down build logs restart rebuild clean nuke shell-backend shell-frontend db-shell \
         engine-build engine-test engine-up engine-down engine-logs engine-shell engine-rebuild \
         redis-shell admin-password admin-password-rotate seed-catalogs seed-map seed-passive-tree \
-        art-export art-seed tiles-generate tiles-export tiles-seamless tiles-seed \
+        art-export art-seed audio-export audio-seed tiles-generate tiles-export tiles-seamless tiles-seed \
         entities-generate entities-export entities-cutout entities-seed \
         entities-restyle-prompts art-describe \
         clear-maps list-maps list-specs reseed-map dev dev-stop dev-status \
@@ -257,6 +257,28 @@ art-export:
 
 art-seed:
 	$(COMPOSE) exec -T backend node scripts/seed-art.js \
+		$(if $(KIND),--kind="$(KIND)") $(if $(ONLY),--only="$(ONLY)") $(if $(FORCE),--force)
+
+# --- Audio clips -----------------------------------------------------------
+#
+# Same idea as art-export/art-seed, for music/ambience/sfx clips: a generated
+# clip lives in MinIO with a job-scoped storage_key in an audio_clips row, and
+# a binding wires it to a world or biome. Neither survives a clone.
+#
+#   make audio-export                       every kind -> backend/seeds/audio/
+#   make audio-export KIND=music,ambience   some kinds
+#   make audio-export ONLY=Vale,Forest      some subjects' bound clips (manifest merged)
+#   make audio-seed                         committed clips -> MinIO + bindings
+#   make audio-seed KIND=sfx FORCE=1        overwrite clips this machine already has
+#
+# KIND is any of: music ambience sfx. Only clips with at least one binding are
+# ever exported; unbound clips stay admin-library-only.
+audio-export:
+	$(COMPOSE) exec -T backend node scripts/export-audio.js \
+		$(if $(KIND),--kind="$(KIND)") $(if $(ONLY),--only="$(ONLY)")
+
+audio-seed:
+	$(COMPOSE) exec -T backend node scripts/seed-audio.js \
 		$(if $(KIND),--kind="$(KIND)") $(if $(ONLY),--only="$(ONLY)") $(if $(FORCE),--force)
 
 # --- Tile textures -------------------------------------------------------
