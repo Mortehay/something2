@@ -47,6 +47,10 @@ test('audio routes', { skip }, async (t) => {
         res.setHeader('content-type', 'application/json');
         return res.end(JSON.stringify({ audio: [OGG.toString('base64')], info: { sample_rate: 44100, loop_start: 0, loop_end: 88200, prompt: 'forest', seed: 11 } }));
       }
+      if (req.method === 'POST' && req.url === '/api/audio/propose') {
+        res.setHeader('content-type', 'application/json');
+        return res.end(JSON.stringify({ kind: 'music', style: 'village', slots: { mood: 'calm and sunny' }, prompt: 'p' }));
+      }
       res.statusCode = 404; res.end('{}');
     });
   });
@@ -195,6 +199,18 @@ test('audio routes', { skip }, async (t) => {
       .send({ misses: [{ subject_kind: 'world', subject_key: worldName, slot: 'ambience', world: worldName }] });
     assert.equal(m.status, 200);
     assert.equal(m.body.accepted, 1);
+  });
+
+  await t.test('generate with no style and no prompt proposes first, then generates with the proposed style', async () => {
+    const before = seen.length;
+    const res = await request(app).post('/api/audio/admin/generate').set('Authorization', bearer(admin))
+      .send({ subject_kind: 'world', subject_key: worldName, slot: 'music', provider_id: prov });
+    assert.equal(res.status, 201, JSON.stringify(res.body));
+    const calls = seen.slice(before).filter((s) => s.method === 'POST' && (s.url === '/api/audio/propose' || s.url === '/api/audio'));
+    assert.deepEqual(calls.map((c) => c.url), ['/api/audio/propose', '/api/audio'], 'propose is called before generate');
+    assert.equal(JSON.parse(calls[1].body).style, 'village', 'the generate call carries the proposed style');
+    assert.equal(res.body.clip.style_or_cue, 'village');
+    assert.match(res.body.clip.label, /\(village\)$/, 'the stored label carries the proposed style');
   });
 
   await t.test('a miss for a world that does not exist is dropped (accepted 0, no row)', async () => {

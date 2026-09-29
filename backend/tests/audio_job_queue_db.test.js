@@ -132,3 +132,31 @@ test('audio job queue: retryFailed drops older failed duplicates for the same sl
     assert.deepEqual(newerRow, { state: 'queued', attempts: 0, not_before: null });
   });
 });
+
+// enqueue's unnest INSERT casts slots through ::jsonb and seed through
+// ::bigint[] -- a null slots/seed item (every other test's fixtures) never
+// exercises either cast. This proves both: a non-null `slots` object
+// survives the text->jsonb round trip, and a non-null integer `seed`
+// survives the text->bigint round trip (bigint comes back from pg as a
+// string, hence the Number() wrap on the assertion below).
+test('audio job queue: enqueue carries slots and seed through their casts', { skip }, async (t) => {
+  const pool = new Pool({ connectionString: url });
+  const tag = `jobqslots-${process.pid}-${Date.now()}`;
+  t.after(async () => {
+    try { await pool.query('DELETE FROM audio_jobs WHERE subject_key = $1', [tag]); }
+    finally { await pool.end(); }
+  });
+
+  await withAdvisoryLock(pool, AUDIO_JOBS_LOCK_KEY, async () => {
+    const r = await q.enqueue(pool, [
+      {
+        subject_kind: 'world', subject_key: tag, slot: 'music', clip_kind: 'music', slots: { mood: 'x' }, seed: 123,
+      },
+    ], {});
+    assert.equal(r.queued.length, 1);
+
+    const row = (await pool.query('SELECT slots, seed FROM audio_jobs WHERE subject_key = $1', [tag])).rows[0];
+    assert.equal(row.slots.mood, 'x');
+    assert.equal(Number(row.seed), 123);
+  });
+});
