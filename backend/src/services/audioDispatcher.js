@@ -380,4 +380,12 @@ module.exports = {
   runStatus,
   __resetRun,
   __setDeps,
+  // Exported so audioRoutes.js's dispatch/enqueue-with-start preflight (the
+  // "would startDrain immediately hit NO_PROVIDER?" check, answered BEFORE
+  // starting rather than discovered asynchronously) shares this exact
+  // precondition instead of carrying its own copy of the same query and
+  // active-then-pinned loop. Callers outside startDrain pass their own
+  // `deps` (at least a `resolveAudioProvider`); REAL_DEPS is only the
+  // fallback startDrain itself uses.
+  hasResolvableProvider,
 };

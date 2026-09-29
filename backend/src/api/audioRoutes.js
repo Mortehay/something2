@@ -176,22 +176,14 @@ module.exports = function audioRoutes(pool) {
   // generation by default; tests swap in fakes so this file never has to
   // reach the real box to prove the routes work).
   //
-  // Mirrors audioDispatcher's own (unexported) NO_PROVIDER precondition:
-  // "no active audio provider AND no queued job pins one that resolves" is
-  // exactly what startDrain would otherwise discover asynchronously and
-  // report as stopped_reason 'no_provider' -- after it has already answered
-  // 202/201. Checking it here first turns that into an honest 503 up front.
-  async function hasResolvableAudioProvider() {
-    if (await resolveAudioProvider(pool, null)) return true;
-    const pinned = await pool.query(
-      `SELECT DISTINCT provider_id FROM audio_jobs WHERE state = 'queued' AND provider_id IS NOT NULL LIMIT 20`,
-    );
-    for (const row of pinned.rows) {
-      // eslint-disable-next-line no-await-in-loop
-      if (await resolveAudioProvider(pool, row.provider_id)) return true;
-    }
-    return false;
-  }
+  // audioDispatcher's own NO_PROVIDER precondition, exported so it is
+  // stated once: "no active audio provider AND no queued job pins one that
+  // resolves" is exactly what startDrain would otherwise discover
+  // asynchronously and report as stopped_reason 'no_provider' -- after it
+  // has already answered 202/201. Checking it here first turns that into an
+  // honest 503 up front, using the real resolveAudioProvider (this route
+  // never fakes generation resolution, only generateForSlot).
+  const hasResolvableAudioProvider = () => audioDispatcher.hasResolvableProvider(pool, { resolveAudioProvider });
 
   router.post('/admin/jobs', admin, async (req, res) => {
     const b = req.body || {};
