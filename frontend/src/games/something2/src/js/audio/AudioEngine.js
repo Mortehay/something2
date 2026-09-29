@@ -72,6 +72,20 @@ export class AudioEngine {
     // every creature and non-loopable point nearby.
     this.nearbyScheduler = new NearbyScheduler({ now: this.now, rand: this.rand });
     this.nearbyLoops = new Map();         // point emitter id -> {src, gain, voiceId, key} for a loop while in range
+    // Fix round 2 (CRITICAL): point emitter id -> voiceId, claimed
+    // SYNCHRONOUSLY the moment a loop start is decided, before the buffer
+    // load that _startNearbyLoop kicks off can span more than one 250ms
+    // tick. nearbyLoops.has() alone is too late a guard -- it is only set
+    // AFTER the buffer resolves, so on any real (uncached) fetch that
+    // outlasts one tick, every intervening tick called _startNearbyLoop
+    // again, each minting a fresh voiceId and awaiting the same cached
+    // buffer promise; when it resolved, EVERY attempt built and started a
+    // source, and nearbyLoops.set() simply overwrote the earlier entries --
+    // leaving all but the last as untracked orphan loops that
+    // _sweepNearbyLoops/_stopAllSfx could never find, looping forever, even
+    // into a new world. See tickNearby's skip guard, _cancelNearbyLoopStart,
+    // and every exit path of _startNearbyLoopVoice.
+    this.nearbyLoopStarting = new Map();
     // point emitter id -> boolean, cached the first time a point's binding
     // resolves, so later ticks don't have to re-resolve+pick just to learn
     // which path (loop vs scheduler cadence) it takes -- see tickNearby.
@@ -328,6 +342,15 @@ export class AudioEngine {
   _stopAllSfx() {
     for (const voiceId of new Set([...this.sfxVoices.keys(), ...this.sfxPending])) this._stopSfxVoice(voiceId);
     for (const emitterId of [...this.nearbyLoops.keys()]) this._stopNearbyLoop(emitterId);
+    // Fix round 2 (CRITICAL): an in-flight loop start's voiceId is already
+    // in sfxPending, so the first loop above already cancels its buffer
+    // continuation (the pending branch in _stopSfxVoice) -- but the MARKER
+    // itself (nearbyLoopStarting) is not touched by that, and must be
+    // cleared here too. Left alone, a stale entry could block (or, once its
+    // long-cancelled promise eventually settles, actually START a source
+    // for) an unrelated point in the NEXT world that happens to share the
+    // same synthetic id, e.g. an identical village layout.
+    this.nearbyLoopStarting.clear();
     // clear(), not a new instance (fix round 1, finding 1): voice ids must
     // stay monotonic across a reset. A voice from the world just left,
     // still awaiting its buffer at this exact moment, is already cancelled
@@ -397,7 +420,9 @@ export class AudioEngine {
       if (!p || !p.art) continue;
       const id = nearbyPointId(p);
       pointsById.set(id, p);
-      if (this.nearbyLoops.has(id)) continue; // already looping -- presence alone keeps it going; _sweepNearbyLoops handles leaving
+      // Fix round 2: skip if already looping OR a start is still in flight
+      // (buffer not yet resolved) -- see nearbyLoopStarting's comment above.
+      if (this.nearbyLoops.has(id) || this.nearbyLoopStarting.has(id)) continue;
       const dx = p.x - listener.x;
       const dy = p.y - listener.y;
       const distance = Math.hypot(dx, dy);
@@ -445,9 +470,17 @@ export class AudioEngine {
 
   // Presence-driven path (fix round 1, item 1): no NearbyScheduler slot
   // involved at all -- only the global limiter, at 'nearby' tier, bounds it.
+  //
+  // Fix round 2 (CRITICAL): nearbyLoopStarting is claimed HERE, synchronously,
+  // before admit() -- so it is already set by the time this call returns,
+  // which is before tickNearby can be invoked again (250ms later at the
+  // earliest). That closes the window where a slow buffer load let repeated
+  // ticks each start their own competing source for the same point.
   _startNearbyLoop(emitterId, clip, dx, distance) {
+    this.nearbyLoopStarting.set(emitterId, undefined); // claim it now; voiceId filled in below
     const { ok, evict, voiceId } = this.sfxLimiter.admit({ clipKey: clip.key, priority: 'nearby', distance });
-    if (!ok) { this.sfxStats.droppedTotal += 1; return; } // retried next tick -- still in range, still not in nearbyLoops
+    if (!ok) { this.nearbyLoopStarting.delete(emitterId); this.sfxStats.droppedTotal += 1; return; } // retried next tick
+    this.nearbyLoopStarting.set(emitterId, voiceId);
     if (evict != null) this._stopSfxOrLoopVoice(evict);
     this._startNearbyLoopVoice(emitterId, voiceId, clip, dx, distance);
   }
@@ -460,9 +493,12 @@ export class AudioEngine {
   async _startNearbyLoopVoice(emitterId, voiceId, clip, dx, distance) {
     this.sfxPending.add(voiceId);
     const buffer = await this._buffer(this.urlFor(clip.key));
-    if (!this.sfxPending.delete(voiceId)) return; // cancelled (evicted) while loading
-    if (!this.ctx) { this.sfxLimiter.release(voiceId); return; }
-    if (!buffer) { this.sfxLimiter.release(voiceId); this.sfxStats.droppedTotal += 1; return; }
+    // Fix round 2: nearbyLoopStarting is cleared on EVERY exit path below,
+    // matching admission's guarantee that it always ends up in exactly one
+    // of {refused before this ran}, {cancelled}, {failed}, or {nearbyLoops}.
+    if (!this.sfxPending.delete(voiceId)) { this.nearbyLoopStarting.delete(emitterId); return; } // cancelled (evicted, or _cancelNearbyLoopStart) while loading
+    if (!this.ctx) { this.sfxLimiter.release(voiceId); this.nearbyLoopStarting.delete(emitterId); return; }
+    if (!buffer) { this.sfxLimiter.release(voiceId); this.sfxStats.droppedTotal += 1; this.nearbyLoopStarting.delete(emitterId); return; }
     const src = this.ctx.createBufferSource();
     src.buffer = buffer;
     src.loop = true;
@@ -481,19 +517,37 @@ export class AudioEngine {
     panner.connect(gain);
     gain.connect(this.bus.sfx);
     this.nearbyLoops.set(emitterId, { src, gain, voiceId, key: clip.key });
+    this.nearbyLoopStarting.delete(emitterId); // success -- ownership moves to nearbyLoops
     this.sfxStats.playedTotal += 1;
     src.start();
   }
 
+  // Fix round 2 (CRITICAL): cancels an in-flight loop start (buffer not yet
+  // resolved) whose point left range or disappeared before that buffer
+  // arrived -- called only from _sweepNearbyLoops. Unlike _stopAllSfx's
+  // blanket cancellation (which follows with sfxLimiter.clear() regardless),
+  // nothing else is about to wipe the limiter here, so the voice slot must
+  // be released explicitly. Removing voiceId from sfxPending makes the
+  // async continuation's own guard (in _startNearbyLoopVoice, mirroring
+  // _startSfxVoice's) bail cleanly once it resumes, whenever that is.
+  _cancelNearbyLoopStart(emitterId) {
+    const voiceId = this.nearbyLoopStarting.get(emitterId);
+    this.nearbyLoopStarting.delete(emitterId);
+    if (voiceId == null) return; // admit() had not yet returned -- can't happen (it's synchronous), but defensive
+    if (this.sfxPending.delete(voiceId)) this.sfxLimiter.release(voiceId);
+  }
+
   // A loop never leaves the AOI on its own (no onended), so each tick checks
-  // every currently-looping point against the latest positions: gone from
-  // `points` entirely, or still present but now beyond the scheduler's
-  // radius, both fade it out the same way.
+  // every currently-looping point (and every still-loading one, fix round 2)
+  // against the latest positions: gone from `points` entirely, or still
+  // present but now beyond the scheduler's radius, both end it the same way.
   _sweepNearbyLoops(pointsById, listener) {
+    const stillNear = (p) => p && Math.hypot((p.x || 0) - listener.x, (p.y || 0) - listener.y) <= this.nearbyScheduler.radiusPx;
     for (const emitterId of [...this.nearbyLoops.keys()]) {
-      const p = pointsById.get(emitterId);
-      const stillNear = p && Math.hypot((p.x || 0) - listener.x, (p.y || 0) - listener.y) <= this.nearbyScheduler.radiusPx;
-      if (!stillNear) this._fadeOutNearbyLoop(emitterId);
+      if (!stillNear(pointsById.get(emitterId))) this._fadeOutNearbyLoop(emitterId);
+    }
+    for (const emitterId of [...this.nearbyLoopStarting.keys()]) {
+      if (!stillNear(pointsById.get(emitterId))) this._cancelNearbyLoopStart(emitterId);
     }
   }
 
