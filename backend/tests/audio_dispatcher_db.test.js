@@ -272,6 +272,44 @@ test('audio dispatcher', { skip }, async (t) => {
         assert.ok(rows.every((r) => r.state === 'failed' && /subject no longer exists/.test(r.last_error)), JSON.stringify(rows));
       });
 
+      // F5: a bookkeeping write failing (e.g. complete() hitting FK 23503
+      // because the clip was deleted in between) must cost ONE job, not the
+      // whole drain, and must not leave that job stuck in 'running'.
+      await t.test('complete() throwing once fails that job and the drain carries on to empty', async () => {
+        d.__resetRun();
+        await q.enqueue(pool, [1, 2].map((i) => (
+          { subject_kind: 'world', subject_key: `${tag}-bk${i}`, slot: 'music', clip_kind: 'music' }
+        )), {});
+        let thrown = false;
+        const flakyQueue = {
+          ...q,
+          complete: async (...args) => {
+            if (!thrown) {
+              thrown = true;
+              const err = new Error('insert or update on table "audio_jobs" violates foreign key constraint');
+              err.code = '23503';
+              throw err;
+            }
+            return q.complete(...args);
+          },
+        };
+        const errors = [];
+        const origError = console.error;
+        console.error = (...a) => { errors.push(a); };
+        let s;
+        try {
+          d.startDrain(pool, { deps: { ...baseDeps, queue: flakyQueue } });
+          s = await waitIdle();
+        } finally { console.error = origError; }
+        assert.equal(s.stopped_reason, 'empty', `the drain survived the bookkeeping error (error: ${s.error})`);
+        assert.equal(s.done, 1);
+        assert.equal(s.failed, 1);
+        const rows = (await pool.query(
+          'SELECT subject_key, state FROM audio_jobs WHERE subject_key LIKE $1 ORDER BY subject_key', [`${tag}-bk%`])).rows;
+        assert.deepEqual(rows.map((r) => r.state).sort(), ['done', 'failed'], 'neither job is left running');
+        assert.ok(errors.length >= 1, 'the bookkeeping error was logged');
+      });
+
       await t.test('stopDrain lets the in-flight job finish but claims nothing further', async () => {
         d.__resetRun();
         await q.enqueue(pool, [

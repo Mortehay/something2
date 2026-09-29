@@ -117,6 +117,31 @@ async function hasResolvableProvider(db, deps) {
   return false;
 }
 
+// A job's bookkeeping write (complete/fail) can itself throw -- e.g. FK 23503
+// when complete() points at a clip a concurrent delete removed in between.
+// Left to the drain's top-level catch, that one write ended the WHOLE drain
+// with 'error' and left the job stuck in 'running'. Instead it costs only
+// this job: logged, marked failed if the database still lets us, counted as
+// failed, and the loop moves on. Returns true when `write` succeeded.
+async function bookkeep(db, deps, self, job, write) {
+  try {
+    await write();
+    return true;
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    console.error(`audio drain: bookkeeping for job ${job.id} failed`, err);
+    try {
+      await deps.queue.fail(db, job.id, `bookkeeping failed: ${msg}`, { retryable: false });
+    } catch (failErr) {
+      // Still 'running'; the next drain's requeueOrphans picks it up.
+      console.error(`audio drain: could not mark job ${job.id} failed`, failErr);
+    }
+    self.failed += 1;
+    self.error = msg;
+    return false;
+  }
+}
+
 // --- The drain --------------------------------------------------------------
 //
 // One module-level run, same as art's: two drains against one queue is not a
@@ -295,9 +320,10 @@ function startDrain(db, opts = {}) {
 
         if (result.ok) {
           // eslint-disable-next-line no-await-in-loop
-          await deps.queue.complete(db, job.id, result.clip.id);
-          self.done += 1;
-          consecutiveFailures = 0;
+          if (await bookkeep(db, deps, self, job, () => deps.queue.complete(db, job.id, result.clip.id))) {
+            self.done += 1;
+            consecutiveFailures = 0;
+          }
           self.current = null;
         } else {
           // BUSY (HTTP 409/503) is the box saying "not now", not "this job is
@@ -312,9 +338,12 @@ function startDrain(db, opts = {}) {
           const busy = Boolean(result.retryable) && (result.status === 409 || result.status === 503);
           if (busy) {
             // eslint-disable-next-line no-await-in-loop
-            await deps.queue.fail(db, job.id, result.error, { retryable: true, refundAttempt: true });
-            self.retried += 1;
-            self.error = String(result.error);
+            if (await bookkeep(db, deps, self, job, () => deps.queue.fail(
+              db, job.id, result.error, { retryable: true, refundAttempt: true },
+            ))) {
+              self.retried += 1;
+              self.error = String(result.error);
+            }
             self.current = null;
             // eslint-disable-next-line no-await-in-loop
             await sleepSliced(deps.queue.backoffMs(1), self, deps);
@@ -322,12 +351,16 @@ function startDrain(db, opts = {}) {
             continue;
           }
 
+          let outcome;
           // eslint-disable-next-line no-await-in-loop
-          const outcome = await deps.queue.fail(db, job.id, result.error, {
-            retryable: Boolean(result.retryable),
-          });
-          if (outcome === 'retry') self.retried += 1; else self.failed += 1;
-          self.error = String(result.error);
+          if (await bookkeep(db, deps, self, job, async () => {
+            outcome = await deps.queue.fail(db, job.id, result.error, {
+              retryable: Boolean(result.retryable),
+            });
+          })) {
+            if (outcome === 'retry') self.retried += 1; else self.failed += 1;
+            self.error = String(result.error);
+          }
           self.current = null;
           // Only a PROVIDER FAULT counts toward the breaker (busy is already
           // excluded above -- it never reaches this branch). A provider
