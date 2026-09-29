@@ -59,10 +59,20 @@ function boxTrackName(subjectKind, subjectKey, slot, seed) {
 
 function randomSeed() { return crypto.randomInt(1, 2 ** 31 - 1); }
 
+// The `entity` text sent to generateSfx/generateSfxPack (spec §2 "SFX
+// variation = entity text": the box caches SFX by (engine, cue, entity) and
+// IGNORES the seed, so a different seed alone never produces a different
+// file). `take` is the count of clips already bound to the slot -- the ONLY
+// lever that makes a regenerate differ from what's already there.
+function sfxEntityText(phrase, take) {
+  return take >= 1 ? `${phrase} (take ${take})` : phrase;
+}
+
 // The one generate → store → bind path (spec §2). The synchronous
 // /admin/generate route and the batch drain both call this, so a clip made
 // either way has the same label, provenance columns and binding.
 async function generateForSlot(db, provider, spec, { rap = defaultRap, lib = defaultLib } = {}) {
+  if (spec.clipKind === 'sfx') return generateSfxForSlot(db, provider, spec, { rap, lib });
   const {
     subjectKind, subjectKey, slot, clipKind,
   } = spec;
@@ -101,6 +111,87 @@ async function generateForSlot(db, provider, spec, { rap = defaultRap, lib = def
   };
 }
 
+// SFX branch of generateForSlot (game audio slice 3, Task 3). Unlike
+// music/ambience, the cue is never taken from the caller -- it is the
+// registry's own answer for this (subjectKind, subjectKey, slot), and a slot
+// with no cue on the box today (spec §4) is upload-only, refused before any
+// box call. `take` is read fresh from the DB (a plain COUNT, not
+// lib.subjectSlots' full binding+clip join, which this doesn't need) so a
+// regenerate on an already-filled slot varies the entity text rather than
+// silently returning the box's cached file for the old text.
+async function generateSfxForSlot(db, provider, spec, { rap, lib }) {
+  const { subjectKind, subjectKey, slot } = spec;
+  const seed = Number.isInteger(spec.seed) ? spec.seed : randomSeed();
+  const variants = Number.isInteger(spec.variants) && spec.variants >= 1 && spec.variants <= 5 ? spec.variants : 3;
+
+  const cue = await subjects.cueFor(db, subjectKind, subjectKey, slot);
+  if (!cue) return { ok: false, error: 'upload only: the provider has no cue for this slot', retryable: false };
+  // The provider's own discovered allow-list (spec §2 "Cues": a provider's
+  // Refresh writes 'cue:<name>' entries into models_cache) -- never send a
+  // cue the box hasn't reported it knows about, even if the registry thinks
+  // it exists (a stale registry entry vs. a provider that hasn't been
+  // refreshed yet must fail the same way: upload only).
+  const known = Array.isArray(provider.models_cache) && provider.models_cache.includes(`cue:${cue}`);
+  if (!known) return { ok: false, error: `upload only: the provider has no cue '${cue}' registered`, retryable: false };
+
+  const phrase = subjects.entityPhrase(db, subjectKind, subjectKey);
+  // `engine` has no per-cue default available here: models_cache only holds
+  // flattened 'cue:<name>' strings (see SettingsAdmin.jsx), not the box's
+  // per-cue default_engine metadata, which only ever lives in the Refresh
+  // response, not persisted. 'realistic' is the documented fallback (spec
+  // §4 "The engine defaults to realistic, and a batch can choose retro").
+  const engine = typeof spec.engine === 'string' && spec.engine ? spec.engine : 'realistic';
+
+  const bound = await db.query(
+    'SELECT COUNT(*)::int AS n FROM audio_bindings WHERE subject_kind = $1 AND subject_key = $2 AND slot = $3',
+    [subjectKind, subjectKey, slot],
+  );
+  let take = bound.rows[0].n;
+
+  let gen = await rap.generateSfx(provider, {
+    cue, entity: sfxEntityText(phrase, take), engine, variants, seed,
+  });
+  // The box's cache hit (spec §2): the exact same file would come back again.
+  // One retry with take+1 gives it a different entity string; whatever that
+  // second call returns is accepted even if it is ALSO cached (e.g. someone
+  // else generated that exact take already) -- this is a best-effort nudge,
+  // not a loop hunting for a guaranteed-fresh file.
+  if (gen.ok && gen.cached) {
+    take += 1;
+    gen = await rap.generateSfx(provider, {
+      cue, entity: sfxEntityText(phrase, take), engine, variants, seed,
+    });
+  }
+  if (!gen.ok) {
+    return {
+      ok: false, error: gen.error, retryable: Boolean(gen.retryable), status: gen.status, providerFault: Boolean(gen.providerFault),
+    };
+  }
+
+  const clips = [];
+  const bindings = [];
+  for (const c of gen.clips) {
+    // Store and bind ONE variant per transaction (spec/task: "storeAndBindClip
+    // ... in ONE transaction per variant"), same reasoning as the music/
+    // ambience path -- a partial failure here leaves whichever variants
+    // already committed bound, rather than losing all of them.
+    // eslint-disable-next-line no-await-in-loop
+    const { clip, binding } = await lib.storeAndBindClip(db, {
+      buffer: c.buffer, kind: 'sfx', label: `${subjectKey} ${slot} (${cue})`,
+      source: 'generated', providerId: provider.id ?? null, prompt: gen.prompt, styleOrCue: cue,
+      engine, seed: gen.seed, durationMs: c.durationMs,
+    }, { subjectKind, subjectKey, slot }, { bind: lib.bindClip });
+    clips.push(clip);
+    bindings.push(binding);
+  }
+  // `clip`/`binding` (the first variant) are exposed alongside `clips`/
+  // `bindings` so the dispatcher's existing result.clip.id-based complete()
+  // path keeps working until it is rewritten for multi-clip sfx results.
+  return {
+    ok: true, clips, bindings, clip: clips[0], binding: bindings[0], seed: gen.seed,
+  };
+}
+
 module.exports = {
-  resolveAudioProvider, contextFor, boxTrackName, randomSeed, generateForSlot,
+  resolveAudioProvider, contextFor, boxTrackName, randomSeed, generateForSlot, sfxEntityText,
 };

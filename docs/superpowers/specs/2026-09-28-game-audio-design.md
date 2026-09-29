@@ -237,11 +237,33 @@ request.
   `cached:true`.
 - A different `entity` text generates fresh. Variation and regeneration
   therefore change the entity text (`"<phrase> (take N)"`).
-- One unknown cue fails the WHOLE pack with HTTP 400
-  (`unknown cue '<x>'; see GET /api/audio/styles?kind=sfx`).
+- One unknown cue fails the WHOLE pack (`unknown cue '<x>'; see GET
+  /api/audio/styles?kind=sfx`) with HTTP **422** (measured 2026-09-29 against
+  the live box, retro engine -- earlier text here said 400; the adapter's
+  `unknownCue` extraction matches on the message text, not the status, so
+  this did not need a code change, only this correction).
 - Pack response: `{items:[{cue, entity, engine, name, prompt, seed,
   sample_rate, variants:[{url, duration_s, onset_ms}], audio:[base64 OGG…],
-  cached, served_from, generation_id}], count, failed}`.
+  cached, served_from, generation_id}], count, failed}` -- confirmed live
+  2026-09-29 (retro engine, cues `hit`/`death`) against real adapter code
+  (`generateSfxPack`), not just the fake-box unit tests: the shape decodes
+  and every returned clip passes `checkClipBuffer`.
+- **Per-item failure shape: not observed.** Two attempts against the live box
+  (retro engine) found none: (1) two ordinary items with fresh unique entity
+  text both succeeded; (2) one item given a 5000-character entity string
+  still succeeded (no per-item error, no truncation observed in the
+  response). An unknown cue remains the only failure mode found, and it
+  fails the WHOLE pack, not one item -- `generateSfxPack`'s per-item
+  `{ok:false, cue, entity, error, providerFault}` branch (for a `row.error`
+  or a bad clip buffer) is defensive code for a shape the live box has not
+  yet been seen to produce.
+- **Per-item seed is NOT the request seed verbatim:** a pack sent with a
+  single `seed: 123` for both items came back with item 1 (`hit`) at
+  `seed: 123` and item 2 (`death`) at `seed: 124` -- the box appears to
+  increment the seed per item within a pack rather than reusing the same
+  seed for every cue. `generateSfxPack` already reads each item's own
+  `seed` off its response row rather than assuming the request seed, so
+  this needed no code change either.
 - Box-side request: include the seed in the SFX cache key.
 
 **Box-side observation, not ours to fix:** `/audio/...` static URLs serve files
