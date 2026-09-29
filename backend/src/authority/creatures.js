@@ -10,7 +10,9 @@ const {
 } = require('./damage');
 const { resolveEffectName } = require('./vfx.js');
 const { bodyLift } = require('./attackOrigin.js');
-const { creatureUse, creatureHit, creatureDeath, pushSfxEvent } = require('./sfxEvents.js');
+const {
+  creatureUse, creatureHit, creatureHurt, creatureDeath, pushSfxEvent,
+} = require('./sfxEvents.js');
 const {
   applyElementEffect, applyHitStatuses, activeEffectKeys, canAct, charmerOf,
 } = require('./effects');
@@ -320,6 +322,8 @@ function stampCreatureAttack(attacks, impacts, c, target, from, to, sfx = null) 
   if (sfx) {
     pushSfxEvent(sfx, creatureUse(c, from.x, from.y));
     pushSfxEvent(sfx, creatureHit(c.type, to.x, to.y));
+    // A creature target (pet or guard bite) feels it, as it does a projectile.
+    if (target.userId == null) pushSfxEvent(sfx, creatureHurt(target.type, to.x, to.y));
   }
 }
 function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; }

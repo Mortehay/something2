@@ -195,11 +195,11 @@ class ProjectileSim {
 
   // The `hit` sound of projectile `p` landing at x,y. A player's shot is
   // labelled with the weapon that fired it (resolved at launch); a creature's
-  // with the shooter's type. `k` overrides the family (detonations).
-  _pushHitSfx(p, x, y, k = p.sfxKind) {
+  // with the shooter's type.
+  _pushHitSfx(p, x, y) {
     pushSfxEvent(this.sfx, p.ownerKind === 'creature'
       ? creatureHit(p.ownerType, x, y)
-      : weaponHit(k, p.sfxSource, x, y));
+      : weaponHit(p.sfxKind, p.sfxSource, x, y));
   }
 
   // `damage` is an explicit snapshot taken by the caller (weaponDamage(p, w)
@@ -348,8 +348,9 @@ class ProjectileSim {
   // many targets it actually caught.
   _detonate(p, bx, by, { creatureList, creatures, players, map, now }, kills, stoneHits, blocks) {
     const r = p.aoeRadius;
-    // One blast sound per detonation, not one per victim.
-    this._pushHitSfx(p, bx, by, 'magic');
+    // One blast sound per detonation, not one per victim, in the shot's own
+    // family: an explosive arrow is still a ranged hit.
+    this._pushHitSfx(p, bx, by);
     for (const c of creatureList) {
       const hits = projectileHitsCreature(p, c);
       // SOMET-286: a guard runs the SAME falloff-radius and line-of-sight
