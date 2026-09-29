@@ -316,7 +316,7 @@ const artPromptNotes = require('./services/artPromptNotes.js');
 const artDescriptions = require('./services/artPromptDescriptions.js');
 const subjectDescriber = require('./services/subjectDescriber.js');
 const {
-  pinProvided, providerPinFieldError, providerPinError, providerPinValues,
+  pinProvided, providerPinFieldError, providerPinError, providerPinValues, providerPinModalityError,
 } = require('./services/providerPin.js');
 
 // SOMET-328: the three /api/*-jobs/:jobId routes serve jobs from two different
@@ -815,6 +815,12 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
       ? providerPinValues(req.body)
       : { mode: 'default', id: null };
 
+    // SOMET-591: reject a pin naming the audio profile before it is ever
+    // stored -- see providerPinModalityError for why this is not folded into
+    // providerPinError above.
+    const pinModalityErr = await providerPinModalityError(pool, pin);
+    if (pinModalityErr) return res.status(400).json({ error: pinModalityErr });
+
     const result = await pool.query(
       `INSERT INTO entity_types (
         name, color, walkable, spawn_tiles, chance,
@@ -902,6 +908,16 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
   try {
     client = await pool.connect();
     await client.query('BEGIN');
+
+    // SOMET-591: same audio-modality refusal as the POST route above. Run
+    // through `client`, not `pool` -- the transaction is already open by the
+    // time this can be checked meaningfully against the row being written,
+    // and a second connection here would just be a second round trip.
+    const pinModalityErr = await providerPinModalityError(client, pin);
+    if (pinModalityErr) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: pinModalityErr });
+    }
 
     let renamedReferences = null;
     if (name != null) {
@@ -1977,6 +1993,9 @@ app.put('/api/tile-types/:id', adminGuard, async (req, res) => {
     if (pinErr) return res.status(400).json({ error: pinErr });
     const pinSent = pinProvided(req.body);
     const pin = pinSent ? providerPinValues(req.body) : { mode: null, id: null };
+    // SOMET-591: same audio-modality refusal as the entity-type routes.
+    const pinModalityErr = await providerPinModalityError(pool, pin);
+    if (pinModalityErr) return res.status(400).json({ error: pinModalityErr });
 
     // tile_types.name is referenced by entity_types.spawn_tiles and
     // biomes.terrain_tiles, both jsonb name arrays with no FK (F-027 /
@@ -2822,6 +2841,23 @@ app.post('/api/ai-providers/:id/test', adminGuard, async (req, res) => {
   try {
     const provider = await aiProviders.loadProviderWithSecret(pool, id);
     if (!provider) return res.status(404).json({ error: 'AI provider not found' });
+    // An audio profile has no models_path and no image request template --
+    // providerDiscovery.testConnection probes base_url/models_path, which for
+    // this box is the unauthenticated root. That certifies the box is up, not
+    // that the token works or that the audio API is reachable. listStyles
+    // hits a real authenticated audio endpoint instead, so a bad token (401)
+    // or a wrong base_url fails here the same way it would fail a real job.
+    if (provider.modality === 'audio') {
+      const startedAt = Date.now();
+      const r = await remoteAudioProvider.listStyles(provider);
+      // Spread explicitly rather than returning `r`: nothing from the
+      // provider row or an unrecognised field on `r` belongs in this
+      // response, least of all auth_token.
+      res.json({
+        ok: r.ok, status: r.status ?? null, latency_ms: Date.now() - startedAt, error: r.error ?? null,
+      });
+      return;
+    }
     // Spread explicitly rather than returning the provider: nothing from the
     // row (least of all auth_token) belongs in this response.
     const { ok, status = null, latency_ms = null, error = null } =

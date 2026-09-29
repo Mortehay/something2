@@ -5,7 +5,7 @@
 // Every call goes through safeFetch (scheme/redirect/credential guard) and a
 // capped read. Every returned clip has passed checkClipBuffer, so callers can
 // store what they get without re-checking.
-const { safeFetch, readCapped, readJsonCapped, redactUrl } = require('./safeFetch');
+const { safeFetch, readCapped, readJsonCapped, redactUrl, errorDetail } = require('./safeFetch');
 const { authHeaders, resolveUrl } = require('./providerDiscovery');
 const { checkClipBuffer, AUDIO_SIZE_CAPS } = require('./oggInfo');
 
@@ -35,8 +35,19 @@ async function callJson(provider, method, pathAndQuery, body, fetchImpl) {
   const { res, error } = await call(provider, method, pathAndQuery, body, fetchImpl);
   if (error) return { ok: false, error, retryable: true };
   if (!res.ok) {
-    return { ok: false, status: res.status, retryable: res.status === 409 || res.status === 503,
-      error: `audio service answered ${res.status} for ${method} ${pathAndQuery.split('?')[0]}` };
+    // The box's own words about why it said no -- the ONE fact that explains
+    // a 500/404/etc, the same reasoning safeFetch.errorDetail was written
+    // for on the image side. Read before anything else consumes the body;
+    // bounded and condensed by errorDetail itself, so this can never grow the
+    // error past a sentence or leak more than a prefix of a runaway body.
+    const detail = await errorDetail(res);
+    return {
+      ok: false,
+      status: res.status,
+      retryable: res.status === 409 || res.status === 503,
+      error: `audio service answered ${res.status} for ${method} ${pathAndQuery.split('?')[0]}`
+        + (detail ? `: ${detail}` : ''),
+    };
   }
   const read = await readJsonCapped(res, JSON_CAP());
   // A 2xx that isn't usable JSON is the box malfunctioning, not a subject

@@ -85,6 +85,35 @@ test('generateTrack rejects a WAV, reports a failed ledger row, and marks 409 re
     fetchImpl: fakeBox({ 'POST /api/audio': () => json({ detail: 'switch pending' }, 409) }).fetchImpl, sleep: noSleep });
   assert.equal(r.ok, false);
   assert.equal(r.retryable, true);
+  assert.match(r.error, /switch pending/, 'the box\'s own detail must surface, not just the status code');
+});
+
+// SOMET-591: callJson's non-ok branch reads the box's own error body via
+// safeFetch.errorDetail, the same mechanism the image side already used --
+// "answered 500" alone sends the admin hunting on a machine they may not be
+// able to see for a message this process already had in hand.
+test('a non-2xx box response includes the box\'s own error detail and status, never the token',
+  async () => {
+    const { fetchImpl } = fakeBox({
+      'GET /api/audio/styles': () => json({ detail: 'invalid token' }, 401),
+    });
+    const r = await rap.listStyles(provider, { fetchImpl });
+    assert.equal(r.ok, false);
+    assert.equal(r.status, 401);
+    assert.match(r.error, /answered 401 for GET \/api\/audio\/styles/);
+    assert.match(r.error, /invalid token/);
+    assert.doesNotMatch(r.error, /sk_test/, 'the provider\'s auth token must never appear in an error message');
+  });
+
+test('a box error body that is not JSON still surfaces as a readable prefix', async () => {
+  const { fetchImpl } = fakeBox({
+    'GET /api/audio/styles': () => new Response('<html>502 Bad Gateway</html>', { status: 502 }),
+  });
+  const r = await rap.listStyles(provider, { fetchImpl });
+  assert.equal(r.ok, false);
+  assert.equal(r.status, 502);
+  assert.match(r.error, /answered 502 for GET \/api\/audio\/styles/);
+  assert.match(r.error, /502 Bad Gateway/);
 });
 
 test('generateTrack ignores a ledger row for a different job while polling', async () => {

@@ -10,7 +10,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
 const {
-  PIN_MODES, pinProvided, providerPinError, providerPinValues,
+  PIN_MODES, pinProvided, providerPinError, providerPinValues, providerPinModalityError,
 } = require('../src/services/providerPin.js');
 const { resolveGenerationTarget } = require('../src/services/generationTarget.js');
 
@@ -85,6 +85,36 @@ test('the pin loses to a per-job choice and beats the global default', () => {
     { source: 'remote', providerId: 9 }, 'an unpinned type follows the active provider');
 });
 
+// --- SOMET-591: a pin may not name the audio provider ----------------------
+//
+// providerPinError above stays pure and synchronous; whether an id names an
+// image or audio row is a database fact, so that half is this async
+// function, called separately at each route that persists a pin (see
+// index.js). Unit-tested here against a fake db so the rule is covered
+// without needing a real connection for every shape; the DB test further
+// down exercises the actual routes end to end.
+
+test('providerPinModalityError only refuses a pin that actually names the audio provider', async () => {
+  const fakeDb = (modality) => ({ query: async () => ({ rows: modality == null ? [] : [{ modality }] }) });
+  const refuseIfCalled = { query: async () => { throw new Error('must not query when there is no id to check'); } };
+
+  assert.strictEqual(
+    await providerPinModalityError(fakeDb('image'), { mode: 'provider', id: 3 }), null,
+    'an image provider id is allowed');
+  assert.match(
+    await providerPinModalityError(fakeDb('audio'), { mode: 'provider', id: 3 }),
+    /not an image provider/);
+  assert.strictEqual(
+    await providerPinModalityError(fakeDb(null), { mode: 'provider', id: 999 }), null,
+    'a dangling id degrades like any other pin to a deleted provider, not a rejection here');
+  assert.strictEqual(
+    await providerPinModalityError(refuseIfCalled, { mode: 'default', id: null }), null,
+    'default/local pins carry no id, so no lookup is made');
+  assert.strictEqual(
+    await providerPinModalityError(refuseIfCalled, { mode: 'provider', id: null }), null,
+    'a bare "provider" mode with no id is already refused by providerPinError before this would run');
+});
+
 const TEST_DB = process.env.TEST_DATABASE_URL;
 
 test('a pin round-trips, and survives its provider being deleted as Default',
@@ -123,4 +153,88 @@ test('a pin round-trips, and survives its provider being deleted as Default',
       await pool.query('DELETE FROM ai_providers WHERE name LIKE $1', [`zzPinProvider-${process.pid}`]).catch(() => {});
       await pool.end();
     }
+  });
+
+// The three routes that persist a pin (POST/PUT entity-types, PUT tile-types)
+// each call providerPinModalityError before writing. Exercised through the
+// real app + a real database, not a mocked pool.query -- the whole point of
+// the rule is a fact that only a database has, so it is not meaningfully
+// testable against a fake.
+test('a pin naming the audio provider is refused with 400 "not an image provider" at every write route',
+  { skip: !TEST_DB && 'TEST_DATABASE_URL not set' }, async (t) => {
+    require('./helpers/auth.js');
+    const request = require('supertest');
+    const { app, __setPool } = require('../src/index.js');
+    const { signToken } = require('../src/auth/tokens.js');
+    const pool = new Pool({ connectionString: TEST_DB });
+    __setPool(pool);
+    const made = {
+      providers: [], entityTypes: [], tileTypes: [], users: [],
+    };
+    t.after(async () => {
+      try {
+        if (made.entityTypes.length) await pool.query('DELETE FROM entity_types WHERE id = ANY($1)', [made.entityTypes]);
+        if (made.tileTypes.length) await pool.query('DELETE FROM tile_types WHERE id = ANY($1)', [made.tileTypes]);
+        if (made.providers.length) await pool.query('DELETE FROM ai_providers WHERE id = ANY($1)', [made.providers]);
+        if (made.users.length) await pool.query('DELETE FROM users WHERE id = ANY($1)', [made.users]);
+      } finally { await pool.end(); }
+    });
+
+    const tag = `${process.pid}-${Date.now()}`;
+    const u = (await pool.query(
+      'INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3) RETURNING id, token_version',
+      [`pin-modality-${tag}`, 'x', 'admin'])).rows[0];
+    made.users.push(u.id);
+    const auth = `Bearer ${signToken({
+      userId: u.id, username: `pin-modality-${tag}`, role: 'admin', tokenVersion: u.token_version,
+    })}`;
+
+    const aud = (await pool.query(
+      `INSERT INTO ai_providers (name, base_url, modality, request_template)
+       VALUES ($1, 'http://127.0.0.1:9/', 'audio', '{}'::jsonb) RETURNING id`,
+      [`pin-modality-audio-${tag}`])).rows[0];
+    made.providers.push(aud.id);
+    const img = (await pool.query(
+      `INSERT INTO ai_providers (name, base_url, request_template)
+       VALUES ($1, 'http://127.0.0.1:9/', '{}'::jsonb) RETURNING id`,
+      [`pin-modality-image-${tag}`])).rows[0];
+    made.providers.push(img.id);
+
+    // POST /api/entity-types refuses the audio id ...
+    const entityName = `pin-modality-entity-${tag}`;
+    const post = await request(app).post('/api/entity-types').set('Authorization', auth).send({
+      name: entityName, color: '#123456', ai_provider_mode: 'provider', ai_provider_id: aud.id,
+    });
+    assert.equal(post.status, 400, JSON.stringify(post.body));
+    assert.match(post.body.error, /not an image provider/);
+    const notCreated = await pool.query('SELECT id FROM entity_types WHERE name = $1', [entityName]);
+    assert.equal(notCreated.rows.length, 0, 'the refused pin must not create the row');
+
+    // ... and accepts the equivalent pin naming the image provider.
+    const postOk = await request(app).post('/api/entity-types').set('Authorization', auth).send({
+      name: entityName, color: '#123456', ai_provider_mode: 'provider', ai_provider_id: img.id,
+    });
+    assert.equal(postOk.status, 201, JSON.stringify(postOk.body));
+    made.entityTypes.push(postOk.body.id);
+
+    // PUT /api/entity-types/:id refuses it on update too, and leaves the
+    // stored pin untouched rather than half-applying the write.
+    const put = await request(app).put(`/api/entity-types/${postOk.body.id}`).set('Authorization', auth).send({
+      name: entityName, color: '#123456', ai_provider_mode: 'provider', ai_provider_id: aud.id,
+    });
+    assert.equal(put.status, 400, JSON.stringify(put.body));
+    assert.match(put.body.error, /not an image provider/);
+    const afterPut = await pool.query('SELECT ai_provider_id FROM entity_types WHERE id = $1', [postOk.body.id]);
+    assert.equal(afterPut.rows[0].ai_provider_id, img.id, 'the existing pin survives a refused write');
+
+    // PUT /api/tile-types/:id refuses it as well.
+    const tileName = `pin-modality-tile-${tag}`;
+    const tile = (await pool.query(
+      'INSERT INTO tile_types (name, color) VALUES ($1, $2) RETURNING id', [tileName, '#654321'])).rows[0];
+    made.tileTypes.push(tile.id);
+    const putTile = await request(app).put(`/api/tile-types/${tile.id}`).set('Authorization', auth).send({
+      name: tileName, color: '#654321', ai_provider_mode: 'provider', ai_provider_id: aud.id,
+    });
+    assert.equal(putTile.status, 400, JSON.stringify(putTile.body));
+    assert.match(putTile.body.error, /not an image provider/);
   });

@@ -333,3 +333,60 @@ test('PATCH cannot change a provider\'s modality', { skip: !url ? 'no database U
   assert.strictEqual(same.status, 200, JSON.stringify(same.body));
   assert.strictEqual(same.body.model, 'renamed');
 });
+
+// SOMET-591: the Test button used to run providerDiscovery.testConnection for
+// every provider, which for an audio profile probes base_url/models_path --
+// the box's unauthenticated root. That certifies the box answers HTTP, not
+// that the token works or that the audio API itself is reachable. The route
+// must instead call remoteAudioProvider.listStyles for an audio provider.
+test('POST /api/ai-providers/:id/test probes the audio API for an audio provider, never the base_url root',
+  { skip: !url ? 'no database URL' : false }, async (t) => {
+    require('./helpers/auth.js');
+    const request = require('supertest');
+    const { app, __setPool } = require('../src/index.js');
+    const { signToken } = require('../src/auth/tokens.js');
+    const pool = new Pool({ connectionString: url });
+    __setPool(pool);
+    const made = [];
+    const users = [];
+    const savedFetch = global.fetch;
+    t.after(async () => {
+      global.fetch = savedFetch;
+      try {
+        if (made.length) await pool.query('DELETE FROM ai_providers WHERE id = ANY($1)', [made]);
+        if (users.length) await pool.query('DELETE FROM users WHERE id = ANY($1)', [users]);
+      } finally { await pool.end(); }
+    });
+    const tag = `${process.pid}-${Date.now()}`;
+    const u = (await pool.query(
+      'INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3) RETURNING id, token_version',
+      [`prov-testroute-${tag}`, 'x', 'admin'])).rows[0];
+    users.push(u.id);
+    const auth = `Bearer ${signToken({
+      userId: u.id, username: `prov-testroute-${tag}`, role: 'admin', tokenVersion: u.token_version,
+    })}`;
+    const aud = await createProvider(pool, {
+      name: `test-audio-${tag}`, base_url: 'http://box.invalid:8001/', modality: 'audio', auth_token: 'sk_secret_token',
+    });
+    made.push(aud.id);
+
+    let rootHit = false;
+    global.fetch = async (u2) => {
+      const parsed = new URL(u2);
+      if (parsed.pathname === '/') { rootHit = true; return new Response('ok', { status: 200 }); }
+      if (parsed.pathname === '/api/audio/styles') {
+        return new Response(JSON.stringify({ detail: 'invalid token' }), {
+          status: 401, headers: { 'content-type': 'application/json' },
+        });
+      }
+      throw new Error(`unexpected fetch to ${u2}`);
+    };
+
+    const res = await request(app).post(`/api/ai-providers/${aud.id}/test`).set('Authorization', auth);
+    assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+    assert.strictEqual(res.body.ok, false, 'a 401 from the styles endpoint is not a reachable box');
+    assert.strictEqual(res.body.status, 401);
+    assert.match(res.body.error, /invalid token/);
+    assert.strictEqual(rootHit, false, 'the audio Test route must not probe the base_url root at all');
+    assert.doesNotMatch(JSON.stringify(res.body), /sk_secret_token/, 'the token must never leave the process');
+  });
