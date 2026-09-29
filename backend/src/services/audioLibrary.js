@@ -5,7 +5,7 @@
 const crypto = require('node:crypto');
 const assetStore = require('./assetStore');
 const {
-  SUBJECT_KINDS, MAX_SUBJECT_KEY, isKnownKind, slotKind, isKnownSlot, existingSubjects, subjectExists,
+  SUBJECT_KINDS, GLOBAL_SUBJECT_KINDS, MAX_SUBJECT_KEY, isKnownKind, slotKind, isKnownSlot, existingSubjects, subjectExists,
 } = require('./audioSubjects');
 
 class AudioInputError extends Error {
@@ -231,6 +231,11 @@ async function subjectSlots(db, subjectKind, subjectKey) {
   return out;
 }
 
+// Ruling (game audio slice 3): creature/world_point/attack_type/item/skill
+// bindings are GLOBAL, not "subjects usable in this world" -- a creature can
+// wander in, and filtering to "creature types this world's spawn tables
+// reference" needs a join this endpoint has no other reason to make. The
+// cost is bounded by catalog size (a few KB today), not by world count.
 async function worldAudioBundle(db, worldId) {
   const w = (await db.query('SELECT name, biomes FROM worlds WHERE id = $1', [worldId])).rows[0];
   if (!w) return null;
@@ -239,7 +244,8 @@ async function worldAudioBundle(db, worldId) {
     `SELECT ${BINDING_COLUMNS} FROM audio_bindings b JOIN audio_clips c ON c.id = b.clip_id
       WHERE (b.subject_kind = 'world' AND b.subject_key = $1)
          OR (b.subject_kind = 'biome' AND b.subject_key = ANY($2))
-      ORDER BY b.sort, b.id`, [w.name, biomes]);
+         OR b.subject_kind = ANY($3)
+      ORDER BY b.sort, b.id`, [w.name, biomes, GLOBAL_SUBJECT_KINDS]);
   const bindings = {};
   for (const row of r.rows) {
     const key = `${row.subject_kind}/${row.subject_key}/${row.slot}`;

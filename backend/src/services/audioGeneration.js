@@ -9,6 +9,7 @@ const crypto = require('node:crypto');
 const aiProviders = require('./aiProviders');
 const defaultRap = require('./remoteAudioProvider');
 const defaultLib = require('./audioLibrary');
+const subjects = require('./audioSubjects');
 
 async function resolveAudioProvider(pool, providerId) {
   if (providerId != null) {
@@ -24,8 +25,15 @@ async function contextFor(pool, subjectKind, subjectKey) {
     const biomes = w && Array.isArray(w.biomes) ? w.biomes.join(', ') : '';
     return `a medieval fantasy world called ${subjectKey}${biomes ? ` with ${biomes} regions` : ''}`;
   }
-  const b = (await pool.query('SELECT name, art_style FROM biomes WHERE name = $1', [subjectKey])).rows[0];
-  return `the ${subjectKey} biome${b && b.art_style ? `: ${b.art_style}` : ''}`;
+  if (subjectKind === 'biome') {
+    const b = (await pool.query('SELECT name, art_style FROM biomes WHERE name = $1', [subjectKey])).rows[0];
+    return `the ${subjectKey} biome${b && b.art_style ? `: ${b.art_style}` : ''}`;
+  }
+  // Slice 3 kinds (creature/world_point/attack_type/item/skill): reuse
+  // entityPhrase rather than re-deriving the same per-kind text here -- it
+  // already knows how to describe each of these without ever touching the
+  // biomes table, which is what this branch used to fall through to.
+  return subjects.entityPhrase(pool, subjectKind, subjectKey) || subjectKey;
 }
 
 // The name the box's ledger indexes generations by (spec §2: the box caches
