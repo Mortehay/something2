@@ -318,15 +318,33 @@ function startDrain(db, opts = {}) {
           if (outcome === 'retry') self.retried += 1; else self.failed += 1;
           self.error = String(result.error);
           self.current = null;
-          // Only a RETRYABLE, non-busy failure counts toward the breaker --
-          // e.g. a transport error, a timeout, some other 5xx. A
-          // non-retryable failure (a pinned-but-disabled provider, bad
-          // input, a subject that no longer exists) says nothing about the
-          // box's health, so it neither trips the breaker nor resets the
-          // counter (only a genuine success does that; three unrelated bad
-          // subjects in a row must not silently reset the count a real
-          // outage is building toward).
-          if (result.retryable) {
+          // Only a PROVIDER FAULT counts toward the breaker (busy is already
+          // excluded above -- it never reaches this branch). A provider
+          // fault is any of:
+          //   * result.retryable -- a transport error, a client-side
+          //     timeout, or (per callJson) a 409/503 that lost its "busy"
+          //     status somewhere upstream; all are the box/network, not the
+          //     subject.
+          //   * result.status is a 5xx OTHER than 503 (500/502/504/...) --
+          //     the box itself errored, even though callJson only marks
+          //     409/503 retryable. Missing this was a real gap: a box
+          //     answering 500 for every subject used to fail every job
+          //     forever without ever tripping the breaker.
+          //   * result.providerFault -- remoteAudioProvider's own signal for
+          //     a fault that isn't an HTTP status at all: unusable JSON, the
+          //     box's ledger reporting a failed generation (e.g. CUDA OOM),
+          //     or a returned file that fails the OGG/duration check (the
+          //     box's output being wrong, not the request).
+          // A failure with NONE of these (a pinned-but-disabled provider,
+          // bad input, a subject that no longer exists in the catalogue)
+          // says nothing about the box's health, so it neither trips the
+          // breaker nor resets the counter -- only a genuine success does
+          // that; three unrelated bad subjects in a row must not silently
+          // reset a count a real outage is building toward.
+          const providerFault = Boolean(result.retryable)
+            || (Number.isInteger(result.status) && result.status >= 500 && result.status !== 503)
+            || Boolean(result.providerFault);
+          if (providerFault) {
             consecutiveFailures += 1;
             if (consecutiveFailures >= BREAKER_TRIP()) {
               self.stoppedReason = 'breaker';

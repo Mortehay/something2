@@ -67,12 +67,19 @@ async function generateForSlot(db, provider, spec, { rap = defaultRap, lib = def
   const gen = await rap.generateTrack(provider, {
     kind: clipKind, name: boxTrackName(subjectKind, subjectKey, slot, seed), style, prompt, slots, seed,
   });
-  // `status` is carried through (undefined when the failure never got an HTTP
-  // response, e.g. a transport error or client-side timeout) so the
-  // dispatcher can tell a busy box (409/503, spec §2) apart from a genuine
-  // retryable failure -- only the box's own status code, not our classification
-  // of it, can make that distinction reliably.
-  if (!gen.ok) return { ok: false, error: gen.error, retryable: Boolean(gen.retryable), status: gen.status };
+  // `status` and `providerFault` are carried through (both undefined when the
+  // failure never got an HTTP response, e.g. a transport error or client-side
+  // timeout) so the dispatcher can classify the failure using the box's own
+  // signal rather than a re-derived guess: `status` tells a busy box (409/503,
+  // spec §2) apart from a genuine failure, and `providerFault` marks a failure
+  // remoteAudioProvider already knows is the box's fault (unusable JSON, a
+  // ledger-reported generation failure, an unreadable/invalid returned file)
+  // even when it isn't itself an HTTP status.
+  if (!gen.ok) {
+    return {
+      ok: false, error: gen.error, retryable: Boolean(gen.retryable), status: gen.status, providerFault: Boolean(gen.providerFault),
+    };
+  }
   const clip = await lib.storeClip(db, {
     buffer: gen.buffer, kind: clipKind, label: `${subjectKey} ${slot}${style ? ` (${style})` : ''}`,
     source: 'generated', providerId: provider.id ?? null, prompt: gen.prompt, styleOrCue: style,

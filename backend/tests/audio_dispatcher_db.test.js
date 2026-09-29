@@ -11,7 +11,15 @@ const skip = !url ? 'no TEST_DATABASE_URL -- refusing to write to a real databas
 async function waitIdle(timeoutMs = 10000) {
   const t0 = Date.now();
   while (d.runStatus().running) {
-    if (Date.now() - t0 > timeoutMs) throw new Error('drain did not finish');
+    if (Date.now() - t0 > timeoutMs) {
+      // Stop the drain before failing the test -- otherwise a timed-out
+      // sub-test leaves its drain running in the background (this file's own
+      // __resetRun() only forgets the tracking object, it does not stop the
+      // loop), and that zombie drain keeps claiming and mutating rows for
+      // every subtest that runs after this one.
+      d.stopDrain();
+      throw new Error('drain did not finish');
+    }
     await new Promise((r) => setTimeout(r, 20));
   }
   return d.runStatus();
@@ -134,27 +142,41 @@ test('audio dispatcher', { skip }, async (t) => {
         assert.equal(f1.attempts, 1, "requeueOrphans refunded the orphan's running attempt before the successful reclaim");
       });
 
+      // The stop must land only after all three jobs have gone through the
+      // busy path -- not merely after the fake `sleep` has been called once.
+      // A busy pause is ~30 one-second fake slices resolved as microtasks, so
+      // "sleeps.length >= 1" was satisfied after the FIRST job's pause began,
+      // well before the 3rd job (the one that would trip a breaker if busy
+      // wrongly counted) had even been claimed -- a mutation that made busy
+      // count toward the breaker still passed that version of this test 4 of
+      // 5 runs. Counting `generateForSlot` calls instead pins the assertion
+      // to "all three jobs actually went through busy handling".
       await t.test('three consecutive BUSY (409) responses do not trip the breaker; jobs are requeued without spending an attempt, and the drain pauses before claiming again', async () => {
         d.__resetRun();
         await q.enqueue(pool, [1, 2, 3].map((i) => (
           { subject_kind: 'biome', subject_key: `${tag}-busy${i}`, slot: 'ambience', clip_kind: 'ambience' }
         )), {});
         const sleeps = [];
+        let calls = 0;
         const busyDeps = {
           ...baseDeps,
           sleep: async (ms) => { sleeps.push(ms); },
-          generateForSlot: async () => ({ ok: false, error: 'switch pending', retryable: true, status: 409 }),
+          generateForSlot: async () => {
+            calls += 1;
+            return { ok: false, error: 'switch pending', retryable: true, status: 409 };
+          },
         };
         d.startDrain(pool, { deps: busyDeps });
         const t0 = Date.now();
-        while (sleeps.length < 1) {
-          if (Date.now() - t0 > 5000) throw new Error('busy pause was never observed');
+        while (calls < 3) {
+          if (Date.now() - t0 > 5000) throw new Error('generateForSlot was not called for all three busy jobs in time');
           // eslint-disable-next-line no-await-in-loop
           await new Promise((r) => setTimeout(r, 5));
         }
         d.stopDrain();
         const s = await waitIdle();
         assert.equal(s.stopped_reason, 'stopped', 'busy responses must never trip the breaker');
+        assert.notEqual(s.stopped_reason, 'breaker');
         const rows = (await pool.query('SELECT state, attempts FROM audio_jobs WHERE subject_key LIKE $1', [`${tag}-busy%`])).rows;
         assert.equal(rows.length, 3);
         assert.ok(
@@ -167,6 +189,43 @@ test('audio dispatcher', { skip }, async (t) => {
         // starve a LATER subtest's drain the same way the comment above
         // describes for `-f*`.
         await pool.query('DELETE FROM audio_jobs WHERE subject_key LIKE $1', [`${tag}-busy%`]);
+      });
+
+      await t.test('three consecutive PROVIDER-FAULT (status 500) failures trip the breaker even though retryable is false', async () => {
+        d.__resetRun();
+        await q.enqueue(pool, [1, 2, 3, 4].map((i) => (
+          { subject_kind: 'biome', subject_key: `${tag}-fault5xx${i}`, slot: 'ambience', clip_kind: 'ambience' }
+        )), {});
+        const faulting = {
+          ...baseDeps,
+          generateForSlot: async () => ({ ok: false, error: 'internal server error', retryable: false, status: 500 }),
+        };
+        d.startDrain(pool, { deps: faulting });
+        const s = await waitIdle();
+        assert.equal(s.stopped_reason, 'breaker', 'a 5xx other than 503 is a provider fault even when retryable is false');
+        assert.match(s.error, /internal server error/);
+        const rows = (await pool.query('SELECT state FROM audio_jobs WHERE subject_key LIKE $1', [`${tag}-fault5xx%`])).rows;
+        assert.equal(rows.length, 4, 'no job deleted');
+        await pool.query('DELETE FROM audio_jobs WHERE subject_key LIKE $1', [`${tag}-fault5xx%`]);
+      });
+
+      await t.test('three consecutive explicit providerFault failures trip the breaker', async () => {
+        d.__resetRun();
+        await q.enqueue(pool, [1, 2, 3, 4].map((i) => (
+          { subject_kind: 'biome', subject_key: `${tag}-faultflag${i}`, slot: 'ambience', clip_kind: 'ambience' }
+        )), {});
+        const faulting = {
+          ...baseDeps,
+          generateForSlot: async () => ({
+            ok: false, error: 'audio service did not answer with usable JSON', retryable: false, providerFault: true,
+          }),
+        };
+        d.startDrain(pool, { deps: faulting });
+        const s = await waitIdle();
+        assert.equal(s.stopped_reason, 'breaker', 'an explicit providerFault trips the breaker with no status and retryable false');
+        const rows = (await pool.query('SELECT state FROM audio_jobs WHERE subject_key LIKE $1', [`${tag}-faultflag%`])).rows;
+        assert.equal(rows.length, 4, 'no job deleted');
+        await pool.query('DELETE FROM audio_jobs WHERE subject_key LIKE $1', [`${tag}-faultflag%`]);
       });
 
       await t.test('three consecutive NON-RETRYABLE subject failures do not trip the breaker; the jobs end failed', async () => {

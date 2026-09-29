@@ -39,7 +39,10 @@ async function callJson(provider, method, pathAndQuery, body, fetchImpl) {
       error: `audio service answered ${res.status} for ${method} ${pathAndQuery.split('?')[0]}` };
   }
   const read = await readJsonCapped(res, JSON_CAP());
-  if (read.error) return { ok: false, error: `audio service did not answer with usable JSON: ${read.error}` };
+  // A 2xx that isn't usable JSON is the box malfunctioning, not a subject
+  // problem -- providerFault so the dispatcher's breaker can see it even
+  // though this is not itself an HTTP failure status.
+  if (read.error) return { ok: false, error: `audio service did not answer with usable JSON: ${read.error}`, providerFault: true };
   return { ok: true, json: read.json };
 }
 
@@ -71,7 +74,10 @@ function loopMs(info, key) {
 
 function finish(buffer, kind, info, fallback) {
   const checked = checkClipBuffer(buffer, kind);
-  if (!checked.ok) return { ok: false, error: checked.error };
+  // The box returned a file and it is not a usable clip (wrong format, too
+  // short, etc) -- that is the box's output being wrong, not the subject's
+  // fault, so it counts as a providerFault for the breaker.
+  if (!checked.ok) return { ok: false, error: checked.error, providerFault: true };
   return {
     ok: true,
     buffer,
@@ -124,7 +130,14 @@ async function generateTrack(provider, req, { fetchImpl = fetch, sleep = realSle
     // prompt and seed to the file we're about to fetch.
     const items = led.json && Array.isArray(led.json.items) ? led.json.items : [];
     const item = items.find((it) => it && it.name === name) || null;
-    if (item && item.status === 'failed') return { ok: false, error: `audio service failed: ${item.error || 'no reason given'}` };
+    // The box's own ledger reporting a failure (e.g. CUDA out of memory) is
+    // a fault in the box's generation, not something wrong with the request
+    // -- providerFault for the breaker, same as any other box malfunction.
+    if (item && item.status === 'failed') {
+      return {
+        ok: false, error: `audio service failed: ${item.error || 'no reason given'}`, providerFault: true,
+      };
+    }
     if (item && item.status === 'done') row = item;
   }
   const { res, error } = await call(provider, 'GET',
@@ -139,7 +152,10 @@ async function generateTrack(provider, req, { fetchImpl = fetch, sleep = realSle
     };
   }
   const read = await readCapped(res, AUDIO_SIZE_CAPS[kind] + 1);
-  if (read.error) return { ok: false, error: `audio file: ${read.error}` };
+  // A read/decode failure on the file the box just told us was ready is the
+  // box's output being unusable, not a transport error and not the
+  // subject's fault -- providerFault for the breaker.
+  if (read.error) return { ok: false, error: `audio file: ${read.error}`, providerFault: true };
   return finish(read.buffer, kind, row, { prompt, seed });
 }
 

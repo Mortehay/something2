@@ -9,7 +9,15 @@
 //     button is exactly the step people forget.
 const DRAIN_ORDER = ['music', 'ambience'];
 const MAX_ATTEMPTS = Number(process.env.AUDIO_JOB_MAX_ATTEMPTS) || 3;
-const RETRY_BASE_MS = () => Number(process.env.AUDIO_JOB_RETRY_BASE_MS) || 30000;
+// Validated like audioDispatcher's envInt (finite and > 0, else the
+// default): a stray negative or zero value here doesn't just miscompute a
+// backoff, it would make backoffMs(1) negative or zero, and the dispatcher's
+// busy-response pause (audioDispatcher.js, `sleepSliced(deps.queue.backoffMs(1), ...)`)
+// would then sleep for ~0ms instead of actually pausing before the next claim.
+const RETRY_BASE_MS = () => {
+  const v = Number(process.env.AUDIO_JOB_RETRY_BASE_MS);
+  return Number.isFinite(v) && v > 0 ? v : 30000;
+};
 
 function drainGroupFor(clipKind) {
   if (clipKind === 'music' || clipKind === 'ambience') return clipKind;
