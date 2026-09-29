@@ -6,35 +6,18 @@
 // The box token is read server-side only (loadProviderWithSecret /
 // loadActiveProviderWithSecret) and never appears in a response.
 const express = require('express');
-const crypto = require('node:crypto');
 const { requireAdmin, requireAuth } = require('../auth/middleware.js');
-const aiProviders = require('../services/aiProviders');
 const rap = require('../services/remoteAudioProvider');
 const lib = require('../services/audioLibrary');
+const {
+  resolveAudioProvider, contextFor, boxTrackName, generateForSlot,
+} = require('../services/audioGeneration');
 const {
   SUBJECT_KINDS, MAX_SUBJECT_KEY, slotKind, subjectExists,
 } = require('../services/audioSubjects');
 const { checkClipBuffer } = require('../services/oggInfo');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-async function resolveAudioProvider(pool, providerId) {
-  if (providerId != null) {
-    const p = await aiProviders.loadProviderWithSecret(pool, providerId);
-    return p && p.modality === 'audio' && p.enabled ? p : null;
-  }
-  return aiProviders.loadActiveProviderWithSecret(pool, 'audio');
-}
-
-async function contextFor(pool, subjectKind, subjectKey) {
-  if (subjectKind === 'world') {
-    const w = (await pool.query('SELECT name, biomes FROM worlds WHERE name = $1', [subjectKey])).rows[0];
-    const biomes = w && Array.isArray(w.biomes) ? w.biomes.join(', ') : '';
-    return `a medieval fantasy world called ${subjectKey}${biomes ? ` with ${biomes} regions` : ''}`;
-  }
-  const b = (await pool.query('SELECT name, art_style FROM biomes WHERE name = $1', [subjectKey])).rows[0];
-  return `the ${subjectKey} biome${b && b.art_style ? `: ${b.art_style}` : ''}`;
-}
 
 // Shared subject/slot validation for propose, generate and upload. Every
 // field must be a single string (a repeated query param arrives as an array),
@@ -55,27 +38,6 @@ function sendError(res, err) {
   if (err && err.status === 400) return res.status(400).json({ error: err.message });
   console.error(err);
   return res.status(500).json({ error: 'audio request failed' });
-}
-
-// The name the box's ledger indexes generations by (spec §2: the box caches
-// by name, and generateTrack's async/ledger path polls the ledger BY NAME).
-// It has to be collision-free for every (subject_kind, subject_key, slot,
-// seed) the admin UI can send, which the raw
-// `s2-${kind}-${key}-${slot}-${seed}`.slice(0, 120) it replaced was not:
-// subject_key can run up to 200 chars, so a long key pushed the seed past
-// the 120-char cutoff (every seed for that subject then collided on one box
-// name), two long keys sharing a ~91-char prefix collided outright, and two
-// keys that only differ in characters the slug strips ("Dark Wood" vs
-// "Dark.Wood") collided whenever the seed also matched. A short sha1 of the
-// RAW (unslugged) "kind/key" pair keeps those distinct regardless of what
-// the slug does to them, and keeping the slugged key capped at 60 chars
-// leaves the hash, slot and seed always intact -- the seed is never the part
-// that gets truncated away.
-function boxTrackName(subjectKind, subjectKey, slot, seed) {
-  const slug = (s) => String(s).replace(/[^a-zA-Z0-9_-]+/g, '-');
-  const keyHash = crypto.createHash('sha1').update(`${subjectKind}/${subjectKey}`).digest('hex').slice(0, 8);
-  const name = `s2-${slug(subjectKind)}-${slug(subjectKey).slice(0, 60)}-${keyHash}-${slug(slot)}-${seed}`;
-  return name.slice(0, 120);
 }
 
 module.exports = function audioRoutes(pool) {
@@ -143,19 +105,18 @@ module.exports = function audioRoutes(pool) {
       if (!provider) return res.status(503).json({ error: 'No active audio provider. Add one under AI Providers with modality "audio".' });
       // Always an explicit seed: the box caches by request, so a repeated or
       // omitted seed hands back the previous file (spec §2).
-      const seed = Number.isInteger(b.seed) ? b.seed : crypto.randomInt(1, 2 ** 31 - 1);
-      const name = boxTrackName(b.subject_kind, b.subject_key, b.slot, seed);
-      const gen = await rap.generateTrack(provider, {
-        kind: clipKind, name, style: b.style || null, prompt: b.prompt || null, slots: b.slots || null, seed,
+      const gen = await generateForSlot(pool, provider, {
+        subjectKind: b.subject_kind,
+        subjectKey: b.subject_key,
+        slot: b.slot,
+        clipKind,
+        style: b.style || null,
+        prompt: b.prompt || null,
+        slots: b.slots || null,
+        seed: Number.isInteger(b.seed) ? b.seed : undefined,
       });
       if (!gen.ok) return res.status(502).json({ error: gen.error, retryable: Boolean(gen.retryable) });
-      const clip = await lib.storeClip(pool, {
-        buffer: gen.buffer, kind: clipKind, label: `${b.subject_key} ${b.slot}${b.style ? ` (${b.style})` : ''}`,
-        source: 'generated', providerId: provider.id, prompt: gen.prompt, styleOrCue: b.style || null,
-        seed: gen.seed, durationMs: gen.durationMs, loopStartMs: gen.loopStartMs, loopEndMs: gen.loopEndMs,
-      });
-      const binding = await lib.bindClip(pool, { subjectKind: b.subject_kind, subjectKey: b.subject_key, slot: b.slot, clipId: clip.id });
-      res.status(201).json({ clip, binding });
+      res.status(201).json({ clip: gen.clip, binding: gen.binding });
     } catch (err) { sendError(res, err); }
   });
 
