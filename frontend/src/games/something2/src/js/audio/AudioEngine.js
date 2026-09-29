@@ -6,6 +6,7 @@ import { assetUrl } from '../net/assets.js';
 import { resolveChain, pickWeighted, ambienceChain, musicChain } from './audioLookup.js';
 import { sfxChains } from './sfxResolve.js';
 import { SfxLimiter } from './sfxLimits.js';
+import { NearbyScheduler } from './nearbyScheduler.js';
 import { BiomeTracker } from './biomeTracker.js';
 import { MissLog } from './missLog.js';
 import { DEFAULT_VOLUMES } from './audioSettings.js';
@@ -18,6 +19,16 @@ const MUSIC_GAP_MS = [3000, 8000];
 // full pan left/right by this many px either side of the listener.
 const SFX_FALLOFF_PX = 1600;
 const SFX_PAN_PX = 600;
+// Task 7 (spec §3 "Creature `nearby`" / "World point `nearby`"): Game.update
+// calls tickNearby() every frame; this throttles the actual scheduling work.
+const NEARBY_TICK_MS = 250;
+
+// A point (landmark/chest/merchant/bank) has no id in every source array, so
+// a static marker is identified by its art + position instead -- stable
+// across ticks since these don't move, and distinct enough in practice.
+function nearbyPointId(p) {
+  return p.id != null ? `pt:${p.id}` : `pt:${p.art}:${p.x}:${p.y}`;
+}
 
 export class AudioEngine {
   constructor({
@@ -45,6 +56,14 @@ export class AudioEngine {
     this.sfxVoices = new Map();     // voiceId -> BufferSourceNode, STARTED and currently playing
     this.sfxPending = new Set();    // voiceId, admitted but still awaiting its buffer -- see _startSfxVoice
     this.sfxStats = { playedTotal: 0, droppedTotal: 0 };
+    // Task 7: creature/world-point "nearby" ambience. The scheduler decides
+    // WHO is due (its own maxVoices cap, separate from the limiter's global
+    // 12); everything it admits still goes through sfxLimiter with priority
+    // 'nearby', the lowest tier.
+    this.nearbyScheduler = new NearbyScheduler({ now: this.now, rand: this.rand });
+    this.nearbyLoops = new Map();   // point emitter id -> {src, gain, voiceId, key} for a loopable clip while in range
+    this.sfxVoiceEnded = new Map(); // voiceId -> extra "voice ended" hook (nearby only; see _fireVoiceEnded)
+    this._lastNearbyTick = -Infinity;
   }
 
   _ensureCtx() {
@@ -173,7 +192,10 @@ export class AudioEngine {
     const priority = ownActor && ev.a === ownActor ? 'own' : 'nearest';
     const { ok, evict, voiceId } = this.sfxLimiter.admit({ clipKey: clip.key, priority, distance });
     if (!ok) { this.sfxStats.droppedTotal += 1; return; }
-    if (evict != null) this._stopSfxVoice(evict);
+    // The evicted voice may be a one-shot OR a still-looping nearby world
+    // point (Task 7's eviction ruling lets 'own'/'nearest' bump a held
+    // 'nearby' voice) -- _stopSfxOrLoopVoice checks both.
+    if (evict != null) this._stopSfxOrLoopVoice(evict);
     this._startSfxVoice(voiceId, clip, dx, distance);
   }
 
@@ -186,12 +208,17 @@ export class AudioEngine {
   // let a voice the limiter (and the player) already believes is gone
   // occupy a slot -- or, worse, keep playing into a world it no longer
   // belongs to.
-  async _startSfxVoice(voiceId, clip, dx, distance) {
+  // `onEnded` (Task 7 only) is an extra hook fired once this voice is truly
+  // gone -- normal completion, a decode failure, or being stopped outright --
+  // so the NearbyScheduler slot it occupies is freed no matter how it ends.
+  // Own/nearest sfx events pass none, so _fireVoiceEnded is a no-op for them.
+  async _startSfxVoice(voiceId, clip, dx, distance, onEnded) {
+    if (onEnded) this.sfxVoiceEnded.set(voiceId, onEnded);
     this.sfxPending.add(voiceId);
     const buffer = await this._buffer(this.urlFor(clip.key));
     if (!this.sfxPending.delete(voiceId)) return; // cancelled while loading
-    if (!this.ctx) { this.sfxLimiter.release(voiceId); return; }
-    if (!buffer) { this.sfxLimiter.release(voiceId); this.sfxStats.droppedTotal += 1; return; }
+    if (!this.ctx) { this.sfxLimiter.release(voiceId); this._fireVoiceEnded(voiceId); return; }
+    if (!buffer) { this.sfxLimiter.release(voiceId); this.sfxStats.droppedTotal += 1; this._fireVoiceEnded(voiceId); return; }
     const src = this.ctx.createBufferSource();
     src.buffer = buffer;
     const gain = this.ctx.createGain();
@@ -206,10 +233,23 @@ export class AudioEngine {
     src.onended = () => {
       this.sfxVoices.delete(voiceId);
       this.sfxLimiter.release(voiceId);
+      this._fireVoiceEnded(voiceId);
     };
     this.sfxVoices.set(voiceId, src);
     this.sfxStats.playedTotal += 1;
     src.start();
+  }
+
+  // Invokes and clears a voice's onEnded hook (see _startSfxVoice), if one
+  // was registered. Centralized here so every termination path -- normal
+  // completion, decode failure, cancelled-while-loading (via
+  // _stopSfxVoice), a forced eviction, or a manual loop stop -- frees a
+  // NearbyScheduler slot exactly once, however the voice actually ended.
+  _fireVoiceEnded(voiceId) {
+    const cb = this.sfxVoiceEnded.get(voiceId);
+    if (!cb) return;
+    this.sfxVoiceEnded.delete(voiceId);
+    cb();
   }
 
   // Stops (or, if it is still loading, cancels) one voice. Used both for an
@@ -218,15 +258,62 @@ export class AudioEngine {
   // itself), so this only ever touches playback bookkeeping, never the
   // limiter's.
   _stopSfxVoice(voiceId) {
-    if (this.sfxPending.delete(voiceId)) return; // still loading -- the await guard in _startSfxVoice will now bail
+    if (this.sfxPending.delete(voiceId)) { this._fireVoiceEnded(voiceId); return; } // still loading -- the await guard in _startSfxVoice will now bail
     const src = this.sfxVoices.get(voiceId);
     this.sfxVoices.delete(voiceId);
+    this._fireVoiceEnded(voiceId);
     if (!src) return;
     try { src.onended = null; src.stop(); } catch (_) { /* already stopped */ }
   }
 
+  // Task 7: an eviction target may be a one-shot (tracked in sfxVoices /
+  // sfxPending) or a still-looping nearby world point (tracked separately in
+  // nearbyLoops, since a loop never fires its own onended) -- this is the one
+  // place callers need to stop "whichever voice this id is", so they don't
+  // have to know which map it lives in.
+  _stopSfxOrLoopVoice(voiceId) {
+    for (const [emitterId, loop] of this.nearbyLoops) {
+      if (loop.voiceId === voiceId) { this._stopNearbyLoop(emitterId); return; }
+    }
+    this._stopSfxVoice(voiceId);
+  }
+
+  // Immediate stop (eviction, or a blanket stop on world change/destroy --
+  // same "no fade" contract a one-shot eviction already has). Always frees
+  // the limiter slot itself: unlike a one-shot, a loop never calls
+  // sfxLimiter.release() on its own, so whoever stops it must.
+  _stopNearbyLoop(emitterId) {
+    const loop = this.nearbyLoops.get(emitterId);
+    if (!loop) return;
+    this.nearbyLoops.delete(emitterId);
+    try { loop.src.onended = null; loop.src.stop(); } catch { /* already stopped */ }
+    this.sfxLimiter.release(loop.voiceId);
+    this._fireVoiceEnded(loop.voiceId);
+  }
+
+  // Spec §3 "World point `nearby`": a loopable clip fades out on leaving the
+  // radius -- unlike an eviction or a world change, an ordinary walk away
+  // from it should not click off. The slot is still freed immediately (not
+  // after the ramp finishes): the eviction rules already prefer bumping a
+  // 'nearby' voice first, so a fading-out voice contending for its own slot
+  // back would be an odd race to leave open.
+  _fadeOutNearbyLoop(emitterId) {
+    const loop = this.nearbyLoops.get(emitterId);
+    if (!loop) return;
+    this.nearbyLoops.delete(emitterId);
+    try {
+      loop.gain.gain.cancelScheduledValues(this.ctx.currentTime);
+      loop.gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + FADE_S);
+      loop.src.onended = null;
+      loop.src.stop(this.ctx.currentTime + FADE_S);
+    } catch { /* already stopped */ }
+    this.sfxLimiter.release(loop.voiceId);
+    this._fireVoiceEnded(loop.voiceId);
+  }
+
   _stopAllSfx() {
     for (const voiceId of new Set([...this.sfxVoices.keys(), ...this.sfxPending])) this._stopSfxVoice(voiceId);
+    for (const emitterId of [...this.nearbyLoops.keys()]) this._stopNearbyLoop(emitterId);
     // clear(), not a new instance (fix round 1, finding 1): voice ids must
     // stay monotonic across a reset. A voice from the world just left,
     // still awaiting its buffer at this exact moment, is already cancelled
@@ -236,6 +323,114 @@ export class AudioEngine {
     // and only clearing its bookkeeping closes that off structurally, not
     // just by timing.
     this.sfxLimiter.clear();
+    // The scheduler's emitter ids are scoped to a world's creatures/points
+    // and never reused across a world change, so a full reset (unlike the
+    // limiter's) needs no monotonic-id argument -- it just drops stale state.
+    this.nearbyScheduler.clear();
+  }
+
+  // Spec §3 "Creature `nearby`" / "World point `nearby`". Called every frame
+  // from Game.update; throttled to 250ms here so a 60fps caller doesn't spam
+  // the scheduler with duplicate work. `creatures` is the CreatureManager's
+  // raw Map (id -> {id, type, x, y, ...}) -- a delta row without `type` yet
+  // (SOMET-354) is skipped rather than producing a malformed binding key.
+  // `points` is one flat array of everything with an `art` field (landmarks,
+  // world chests, merchants, gem/skill merchants, banks) -- Game.js does the
+  // merging; this only reads x/y/art.
+  tickNearby(creatures, points, listener, nowMs = this.now()) {
+    if (!this.world) return;
+    if (nowMs - this._lastNearbyTick < NEARBY_TICK_MS) return;
+    this._lastNearbyTick = nowMs;
+    const ctx = this.ctx;
+    if (!ctx || ctx.state !== 'running') return; // same contract as playSfxEvents
+    const emitters = [];
+    const pointsById = new Map();
+    if (creatures) {
+      for (const c of creatures.values()) {
+        if (!c || !c.type || c.id == null) continue;
+        emitters.push({ id: `c:${c.id}`, key: `creature/${c.type}/nearby`, x: c.x, y: c.y, kind: 'creature' });
+      }
+    }
+    for (const p of (points || [])) {
+      if (!p || !p.art) continue;
+      const id = nearbyPointId(p);
+      pointsById.set(id, p);
+      emitters.push({ id, key: `world_point/${p.art}/nearby`, x: p.x, y: p.y, kind: 'point' });
+    }
+    for (const d of this.nearbyScheduler.tick(emitters, listener)) {
+      try {
+        this._triggerNearby(d, listener);
+      } catch (err) {
+        this._warn('nearby-event', `[audio] nearby event failed: ${err.message}`);
+        this.nearbyScheduler.ended(d.id);
+      }
+    }
+    this._sweepNearbyLoops(pointsById, listener);
+  }
+
+  _triggerNearby(d, listener) {
+    const { clips, key } = this._resolve([d.key]); // records the miss itself when unbound
+    const clip = key ? pickWeighted(clips, this.rand) : null;
+    if (!clip) { this.nearbyScheduler.ended(d.id); return; }
+    const dx = d.x - listener.x;
+    const dy = d.y - listener.y;
+    const distance = Math.hypot(dx, dy);
+    // Only a world point may hold a loopable clip (spec: "creature `nearby`"
+    // never lists loopable; a creature wanders, so looping a clip to its
+    // position would need continuous re-panning this slice doesn't do).
+    if (clip.loopable && d.kind === 'point') { this._startNearbyLoop(d, clip, dx, distance); return; }
+    const { ok, evict, voiceId } = this.sfxLimiter.admit({ clipKey: clip.key, priority: 'nearby', distance });
+    if (!ok) { this.nearbyScheduler.ended(d.id); this.sfxStats.droppedTotal += 1; return; }
+    if (evict != null) this._stopSfxOrLoopVoice(evict);
+    this._startSfxVoice(voiceId, clip, dx, distance, () => this.nearbyScheduler.ended(d.id));
+  }
+
+  _startNearbyLoop(d, clip, dx, distance) {
+    const { ok, evict, voiceId } = this.sfxLimiter.admit({ clipKey: clip.key, priority: 'nearby', distance });
+    if (!ok) { this.nearbyScheduler.ended(d.id); this.sfxStats.droppedTotal += 1; return; }
+    if (evict != null) this._stopSfxOrLoopVoice(evict);
+    this._startNearbyLoopVoice(d.id, voiceId, clip, dx, distance);
+  }
+
+  // Mirrors _startSfxVoice's pending-cancellation guard exactly (same reason:
+  // an eviction or a world change while the buffer is still loading must
+  // stop this from ever starting), but builds a LOOPING source into
+  // nearbyLoops instead of the one-shot sfxVoices map, since this clip never
+  // ends on its own -- only _stopNearbyLoop / _fadeOutNearbyLoop end it.
+  async _startNearbyLoopVoice(emitterId, voiceId, clip, dx, distance) {
+    this.sfxVoiceEnded.set(voiceId, () => this.nearbyScheduler.ended(emitterId));
+    this.sfxPending.add(voiceId);
+    const buffer = await this._buffer(this.urlFor(clip.key));
+    if (!this.sfxPending.delete(voiceId)) return; // cancelled (evicted) while loading
+    if (!this.ctx) { this.sfxLimiter.release(voiceId); this._fireVoiceEnded(voiceId); return; }
+    if (!buffer) { this.sfxLimiter.release(voiceId); this.sfxStats.droppedTotal += 1; this._fireVoiceEnded(voiceId); return; }
+    const src = this.ctx.createBufferSource();
+    src.buffer = buffer;
+    src.loop = true;
+    const gain = this.ctx.createGain();
+    const panner = this.ctx.createStereoPanner();
+    const vol = typeof clip.volume === 'number' ? clip.volume : 1;
+    const falloff = Math.max(0, 1 - distance / SFX_FALLOFF_PX);
+    gain.gain.value = vol * falloff;
+    panner.pan.value = Math.max(-1, Math.min(1, dx / SFX_PAN_PX));
+    src.connect(panner);
+    panner.connect(gain);
+    gain.connect(this.bus.sfx);
+    this.nearbyLoops.set(emitterId, { src, gain, voiceId, key: clip.key });
+    this.sfxStats.playedTotal += 1;
+    src.start();
+  }
+
+  // A loop never leaves the AOI on its own (no onended), so each tick checks
+  // every currently-looping point against the latest positions: gone from
+  // `points` entirely, or still present but now beyond the scheduler's
+  // radius, both fade it out the same way.
+  _sweepNearbyLoops(pointsById, listener) {
+    for (const emitterId of [...this.nearbyLoops.keys()]) {
+      const p = pointsById.get(emitterId);
+      const stillNear = p && Math.hypot((p.x || 0) - listener.x, (p.y || 0) - listener.y) <= this.nearbyScheduler.radiusPx;
+      if (!stillNear) this._fadeOutNearbyLoop(emitterId);
+    }
   }
 
   _startMusic() {

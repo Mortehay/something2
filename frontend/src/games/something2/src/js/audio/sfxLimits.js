@@ -3,13 +3,22 @@
 // release() when a voice ends, so this stays testable without a real
 // AudioContext.
 //
-// Priority is an ORDERED level, lowest first, so a later slice can slot a new
-// tier in without touching the comparison logic:
-//   nearby (creature ambience, Task 7) < nearest < own (the player's own
-//   actions always win a contested slot).
+// Priority is an ORDERED level, lowest first:
+//   nearby (creature/world-point ambience, Task 7) < nearest (a non-own sfx
+//   event) < own (the player's own actions always win a contested slot).
+//
+// Eviction at capacity is NOT a flat priority comparison -- see admit()'s
+// comment for the exact rule per tier, but in one line: 'own' always wins,
+// bumping a held 'nearby' voice first and a held 'nearest' voice only if no
+// 'nearby' voice is held; 'nearest' does the same (bumps 'nearby' first,
+// unconditionally, else competes with other 'nearest' voices purely on
+// distance); 'nearby' may only ever bump a farther held 'nearby' voice, never
+// 'nearest' or 'own', however near it is.
 export const SFX_PRIORITY_ORDER = ['nearby', 'nearest', 'own'];
 const TOP_PRIORITY = SFX_PRIORITY_ORDER[SFX_PRIORITY_ORDER.length - 1];
+const BOTTOM_PRIORITY = SFX_PRIORITY_ORDER[0];
 const isTop = (priority) => priority === TOP_PRIORITY;
+const isBottom = (priority) => priority === BOTTOM_PRIORITY;
 
 const MAX_VOICES = 12;
 const SAME_CLIP_WINDOW_MS = 100;
@@ -31,16 +40,25 @@ export class SfxLimiter {
   // room -- admit() has already forgotten it, so the caller only needs to
   // stop its actual playback.
   //
-  // Controller ruling ("nearest win"), fix round 1: eviction at capacity is
-  // NOT a strict priority-level comparison across the board. `own` (the top
-  // priority) always wins a slot from any non-top voice, evicting whichever
-  // held non-top voice is farthest -- unconditionally, regardless of the
-  // newcomer's own distance (an own action is always worth hearing). Below
-  // that, a non-top newcomer (today only 'nearest'; Task 7 adds 'nearby')
-  // competes with the OTHER held non-top voices purely on distance: it may
-  // only evict the farthest held non-top voice, and only when it is itself
-  // nearer than that voice. Equal distance does not win -- ties are refused,
-  // not evicted. A held 'own' voice is never evicted by a non-top newcomer.
+  // Controller ruling ("nearest win"), fix round 1, extended for the
+  // 'nearby' tier (Task 7): eviction at capacity is NOT a strict
+  // priority-level comparison across the board.
+  //   - 'own' (top) always wins a slot: it bumps the farthest held 'nearby'
+  //     voice if any is held, regardless of its own distance (an own action
+  //     is always worth hearing); only when NO 'nearby' voice is held does it
+  //     fall back to bumping the farthest held 'nearest' voice, equally
+  //     unconditionally. A held 'own' voice is never evicted.
+  //   - 'nearest' does the same in miniature: it bumps the farthest held
+  //     'nearby' voice unconditionally if one is held (a nearby ambience is
+  //     never worth keeping over a real sfx event); only with none held does
+  //     it compete with the OTHER held 'nearest' voices purely on distance --
+  //     it may evict only the farthest held 'nearest' voice, and only when it
+  //     is itself nearer. Equal distance does not win -- ties are refused.
+  //     A held 'own' voice is never evicted by 'nearest'.
+  //   - 'nearby' may only ever evict a FARTHER held 'nearby' voice, on the
+  //     same nearer-wins/no-ties rule -- never a 'nearest' or 'own' voice,
+  //     however near it is. With no 'nearby' voice held (or none farther),
+  //     it is refused, full stop.
   admit({ clipKey, priority, distance }) {
     const nowMs = this.now();
     const recent = (this.recentPlays.get(clipKey) || []).filter((t) => nowMs - t < this.sameClipWindowMs);
@@ -51,15 +69,9 @@ export class SfxLimiter {
 
     let evict;
     if (this.voices.size >= this.maxVoices) {
-      const top = isTop(priority);
-      let worst = null;
-      for (const [id, v] of this.voices) {
-        if (isTop(v.priority)) continue; // a held 'own' voice is never evicted
-        if (!worst || v.distance > worst.distance) worst = { id, distance: v.distance };
-      }
-      if (!worst) return { ok: false }; // full of 'own' voices, nothing evictable
-      if (!top && distance >= worst.distance) return { ok: false }; // nearer-wins: refused, not a tie-evict
-      evict = worst.id;
+      const target = this._evictionTarget(priority, distance);
+      if (!target) return { ok: false };
+      evict = target.id;
       this.voices.delete(evict);
     }
 
@@ -68,6 +80,36 @@ export class SfxLimiter {
     recent.push(nowMs);
     this.recentPlays.set(clipKey, recent);
     return evict !== undefined ? { ok: true, evict, voiceId } : { ok: true, voiceId };
+  }
+
+  // The farthest held voice of exactly one priority tier, or null if none is
+  // held.
+  _farthestOf(priority) {
+    let worst = null;
+    for (const [id, v] of this.voices) {
+      if (v.priority !== priority) continue;
+      if (!worst || v.distance > worst.distance) worst = { id, distance: v.distance };
+    }
+    return worst;
+  }
+
+  // Which held voice (if any) a newcomer of this priority/distance may bump,
+  // per the tier rules documented on admit() above. Returns null when the
+  // newcomer must be refused.
+  _evictionTarget(priority, distance) {
+    if (isTop(priority)) {
+      return this._farthestOf(BOTTOM_PRIORITY) || this._farthestOf('nearest');
+    }
+    if (isBottom(priority)) {
+      const nearby = this._farthestOf(BOTTOM_PRIORITY);
+      return nearby && distance < nearby.distance ? nearby : null;
+    }
+    // 'nearest': prefer bumping a held 'nearby' voice unconditionally; with
+    // none held, compete with the other held 'nearest' voices on distance.
+    const nearby = this._farthestOf(BOTTOM_PRIORITY);
+    if (nearby) return nearby;
+    const nearest = this._farthestOf('nearest');
+    return nearest && distance < nearest.distance ? nearest : null;
   }
 
   release(voiceId) {

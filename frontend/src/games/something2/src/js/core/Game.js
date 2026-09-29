@@ -1200,7 +1200,23 @@ export class Game {
         if (this.chunked) {
             const cx = this.player.x + this.player.width / 2;
             const cy = this.player.y + this.player.height / 2;
-            if (this.audio) this.audio.tick(this.chunkedMap.biomeAt(cx, cy), performance.now());
+            if (this.audio) {
+                this.audio.tick(this.chunkedMap.biomeAt(cx, cy), performance.now());
+                // Task 7 (game audio slice 3): creature/world-point "nearby"
+                // ambience. `points` merges everything with an `art` field --
+                // AudioEngine.tickNearby itself filters out anything missing
+                // one -- so a plain village (no chests/gem/skill merchants
+                // this run) still works with the rest present. Internally
+                // throttled to 250ms; safe to call every frame.
+                this.audio.tickNearby(this.creatures.creatures, [
+                    ...(this.landmarks || []),
+                    ...(this.worldChests || []),
+                    ...(this.merchants || []),
+                    ...(this.gemMerchants || []),
+                    ...(this.skillMerchants || []),
+                    ...(this.banks || []),
+                ], { x: cx, y: cy });
+            }
             this.streamer.update(cx, cy); // fire-and-forget; wanted-guard makes it safe
             const nowMs = performance.now();
             const keys = movementKeys(this);
