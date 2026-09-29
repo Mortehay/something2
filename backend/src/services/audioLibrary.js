@@ -13,12 +13,8 @@ class AudioInputError extends Error {
 
 const MAX_MISSES_PER_POST = 200;
 
-// SOMET-591 slice 2: `c.id` is optional so the audio seeder can replay a
-// committed clip under the SAME id it was exported with -- a binding row
-// keyed by clip_id must resolve after a reseed, not point at a fresh uuid
-// nothing else in the manifest knows about.
 async function storeClip(db, c) {
-  const id = c.id || (await db.query('SELECT gen_random_uuid() AS id')).rows[0].id;
+  const id = (await db.query('SELECT gen_random_uuid() AS id')).rows[0].id;
   const key = `audio/${c.kind}/${id}.ogg`;
   await assetStore.putObject(key, c.buffer, 'audio/ogg');
   const r = await db.query(

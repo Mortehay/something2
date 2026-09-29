@@ -18,9 +18,11 @@
 // in the admin library or genuinely orphaned; either way nothing would use a
 // seeded copy of it, so exporting it would just grow the repo for no reader.
 //
-// STABLE IDS. A seeded clip keeps the id it was exported with (audioLibrary's
-// storeClip now accepts one) so a binding row -- which points at a clip_id --
-// resolves after a reseed instead of dangling on a freshly generated uuid.
+// STABLE IDS. A seeded clip keeps the id it was exported with -- seedAudio
+// writes its own INSERT (see below) rather than going through
+// audioLibrary.storeClip, specifically so it can put the manifest's id
+// straight into the row. A binding row points at a clip_id, and that has to
+// resolve after a reseed instead of dangling on a freshly generated uuid.
 
 const fs = require('fs');
 const path = require('path');
@@ -126,15 +128,54 @@ async function exportAudio({
 
   const clipsPath = path.join(root, 'clips.json');
   const bindingsPath = path.join(root, 'bindings.json');
-  let clipsManifest = freshClips;
-  let bindingsManifest = freshBindings;
+  const oldClips = readManifest(clipsPath);
+  const oldBindings = readManifest(bindingsPath);
+
+  // MERGE, not truncate: a run that only asked for some kinds (KIND=music)
+  // or some subjects (ONLY=Vale) has NOT seen the rest of the catalogue, and
+  // must not act like it has. `touchedKinds` is exactly the set of kinds this
+  // run queried -- for those, this run has seen every currently-bound clip
+  // (subject-scoped or not), so a stale entry of a touched kind is either
+  // superseded by `freshClips`/`freshBindings` or genuinely gone; an entry of
+  // an untouched kind was never looked at and must survive untouched.
+  const touchedKinds = new Set(kinds);
+  const freshClipIds = new Set(clipIds);
+
+  // A clip whose kind we touched but that is not in `freshClips` this run is
+  // either stale-and-replaced (no `only`: this run saw every bound clip of
+  // that kind, so its absence means it lost its last binding) or, with
+  // `only`, simply untouched by the subjects named this run -- kept for now,
+  // resolved below once bindingsManifest is final.
+  let clipsManifest = oldClips
+    .filter((c) => !touchedKinds.has(c.kind) || (only && !freshClipIds.has(c.id)))
+    .concat(freshClips);
+
+  // Bindings: for a touched kind, drop every OLD binding whose clip falls in
+  // that kind, scoped further to `only`'s subjects when set -- an only-export
+  // has seen every CURRENT binding of those subjects, so a binding no longer
+  // present in `freshBindings` (e.g. the admin unbound it since the last
+  // export) must not survive the merge, or `audio-seed` would silently
+  // recreate it. Without `only`, the whole kind was seen, so every old
+  // binding for that kind is superseded outright.
+  const clipKindById = new Map();
+  for (const c of oldClips) clipKindById.set(c.id, c.kind);
+  for (const c of freshClips) clipKindById.set(c.id, c.kind);
+  const bindingsManifest = oldBindings
+    .filter((b) => {
+      const clipKind = clipKindById.get(b.clip_id);
+      if (!touchedKinds.has(clipKind)) return true;
+      return only ? !only.includes(b.subject_key) : false;
+    })
+    .concat(freshBindings);
+
+  // Now that bindings.json is final, a clip in a touched kind that no
+  // binding references any more (the case above deferred) is dead weight --
+  // prune it rather than leaving an orphaned entry that nothing points at.
   if (only) {
-    const touchedClipIds = new Set(clipIds);
-    clipsManifest = readManifest(clipsPath).filter((m) => !touchedClipIds.has(m.id)).concat(freshClips);
-    bindingsManifest = readManifest(bindingsPath)
-      .filter((m) => !touchedClipIds.has(m.clip_id))
-      .concat(freshBindings);
+    const referencedClipIds = new Set(bindingsManifest.map((b) => b.clip_id));
+    clipsManifest = clipsManifest.filter((c) => !(touchedKinds.has(c.kind) && !referencedClipIds.has(c.id)));
   }
+
   clipsManifest.sort((a, b) => String(a.id).localeCompare(String(b.id)));
   bindingsManifest.sort((a, b) => bindingKey(a).localeCompare(bindingKey(b)));
   fs.writeFileSync(clipsPath, `${JSON.stringify(clipsManifest, null, 2)}\n`);
@@ -147,8 +188,8 @@ async function exportAudio({
 }
 
 // Replay the committed clips into the object store and re-link their
-// bindings. Clip ids are STABLE across a reseed (see storeClip's optional
-// id), which is what lets a binding row -- keyed by clip_id -- survive one.
+// bindings. Clip ids are STABLE across a reseed (see above), which is what
+// lets a binding row -- keyed by clip_id -- survive one.
 async function seedAudio({
   db, store, root = AUDIO_SEEDS_ROOT, kinds = AUDIO_KINDS, only = null, force = false, log = console.log,
 }) {

@@ -216,3 +216,175 @@ test('audio export/seed round trip', { skip }, async (t) => {
     assert.strictEqual(r.bindings.missingSubject.length, 1);
   });
 });
+
+// SOMET-591 review fix round 1, I-1: `make audio-export KIND=music` is a
+// documented usage. Before the fix, clips.json/bindings.json hold every
+// kind, but the merge-vs-truncate branch only fired for `only` -- a
+// kind-scoped export with no `only` overwrote both files with just that
+// kind's rows, silently deleting every other kind's entries (and the next
+// `audio-seed` would then skip re-linking them, since they were simply gone).
+test('exportAudio: KIND without ONLY merges, and never truncates, the other kinds already in the manifest', { skip }, async (t) => {
+  const pool = new Pool({ connectionString: url });
+  const tag = `${process.pid}-${Date.now()}-i1`;
+  const worldName = `audio-seed-i1-world-${tag}`;
+  const biomeName = `audio-seed-i1-biome-${tag}`;
+  const clipIds = [];
+  let worldId = null;
+  const root = tmpRoot();
+  const OGG = Buffer.from(`OggS-i1-${tag}`);
+
+  t.after(async () => {
+    try {
+      if (clipIds.length) await pool.query('DELETE FROM audio_clips WHERE id = ANY($1)', [clipIds]);
+      if (worldId) await pool.query('DELETE FROM worlds WHERE id = $1', [worldId]).catch(() => {});
+      await pool.query('DELETE FROM biomes WHERE name = $1', [biomeName]);
+    } finally {
+      await pool.end();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  await pool.query('INSERT INTO biomes (name) VALUES ($1)', [biomeName]);
+  worldId = (await pool.query(
+    'INSERT INTO worlds (name, seed, biomes) VALUES ($1, 1, $2::jsonb) RETURNING id',
+    [worldName, JSON.stringify([biomeName])],
+  )).rows[0].id;
+
+  async function insertClip({ kind, label, storageKey }) {
+    const r = await pool.query(
+      `INSERT INTO audio_clips (kind, label, storage_key, bytes, duration_ms, loopable, source)
+       VALUES ($1,$2,$3,$4,$5,$6,'uploaded') RETURNING id`,
+      [kind, label, storageKey, OGG.length, 1000, kind !== 'sfx'],
+    );
+    const id = r.rows[0].id;
+    clipIds.push(id);
+    return id;
+  }
+
+  const musicKey = `audio/music/rmt_${tag}_music.ogg`;
+  const ambienceKey = `audio/ambience/rmt_${tag}_ambience.ogg`;
+  const musicClipId = await insertClip({ kind: 'music', label: `I1 Music ${tag}`, storageKey: musicKey });
+  const ambienceClipId = await insertClip({ kind: 'ambience', label: `I1 Ambience ${tag}`, storageKey: ambienceKey });
+
+  await pool.query(
+    "INSERT INTO audio_bindings (subject_kind, subject_key, slot, clip_id) VALUES ('world', $1, 'music', $2)",
+    [worldName, musicClipId],
+  );
+  await pool.query(
+    "INSERT INTO audio_bindings (subject_kind, subject_key, slot, clip_id) VALUES ('biome', $1, 'ambience', $2)",
+    [biomeName, ambienceClipId],
+  );
+
+  const store = memStore(new Map([[musicKey, OGG], [ambienceKey, OGG]]));
+
+  await exportAudio({
+    db: pool, store, root, log: () => {},
+  });
+  const clipsAfterFull = JSON.parse(fs.readFileSync(path.join(root, 'clips.json'), 'utf8'));
+  assert.strictEqual(clipsAfterFull.length, 2, 'both kinds present after the first full export');
+
+  await exportAudio({
+    db: pool, store, root, kinds: ['music'], log: () => {},
+  });
+
+  const clips = JSON.parse(fs.readFileSync(path.join(root, 'clips.json'), 'utf8'));
+  const bindings = JSON.parse(fs.readFileSync(path.join(root, 'bindings.json'), 'utf8'));
+  assert.ok(clips.some((c) => c.id === ambienceClipId), 'ambience clip entry survives a music-only export');
+  assert.ok(clips.some((c) => c.id === musicClipId), 'music clip entry is still there, freshly re-exported');
+  assert.ok(
+    bindings.some((b) => b.clip_id === ambienceClipId && b.subject_key === biomeName),
+    'ambience binding entry survives a music-only export',
+  );
+  assert.ok(bindings.some((b) => b.clip_id === musicClipId && b.subject_key === worldName));
+});
+
+// SOMET-591 review fix round 1, I-2: an `--only=X` export has seen every
+// CURRENT binding of X, so a binding the admin removed since the last export
+// must be dropped from the merge, not left to be silently recreated by the
+// next `audio-seed`. A clip left with zero bindings afterward is pruned from
+// clips.json too; a clip still bound to some OTHER, untouched subject is not.
+test('exportAudio: --only drops a subject\'s removed binding and prunes the now-orphaned clip', { skip }, async (t) => {
+  const pool = new Pool({ connectionString: url });
+  const tag = `${process.pid}-${Date.now()}-i2`;
+  const worldName = `audio-seed-i2-world-${tag}`;
+  const biomeName = `audio-seed-i2-biome-${tag}`;
+  const clipIds = [];
+  let worldId = null;
+  const root = tmpRoot();
+  const OGG = Buffer.from(`OggS-i2-${tag}`);
+
+  t.after(async () => {
+    try {
+      if (clipIds.length) await pool.query('DELETE FROM audio_clips WHERE id = ANY($1)', [clipIds]);
+      if (worldId) await pool.query('DELETE FROM worlds WHERE id = $1', [worldId]).catch(() => {});
+      await pool.query('DELETE FROM biomes WHERE name = $1', [biomeName]);
+    } finally {
+      await pool.end();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  await pool.query('INSERT INTO biomes (name) VALUES ($1)', [biomeName]);
+  worldId = (await pool.query(
+    'INSERT INTO worlds (name, seed, biomes) VALUES ($1, 1, $2::jsonb) RETURNING id',
+    [worldName, JSON.stringify([biomeName])],
+  )).rows[0].id;
+
+  async function insertClip({ kind, label, storageKey }) {
+    const r = await pool.query(
+      `INSERT INTO audio_clips (kind, label, storage_key, bytes, duration_ms, loopable, source)
+       VALUES ($1,$2,$3,$4,$5,$6,'uploaded') RETURNING id`,
+      [kind, label, storageKey, OGG.length, 1000, kind !== 'sfx'],
+    );
+    const id = r.rows[0].id;
+    clipIds.push(id);
+    return id;
+  }
+
+  const dKey = `audio/music/rmt_${tag}_d.ogg`;
+  const eKey = `audio/ambience/rmt_${tag}_e.ogg`;
+  // D is bound ONLY to the world (X in the finding); E is bound only to the
+  // biome, which this run's `only` never names, so E must be left alone.
+  const clipDId = await insertClip({ kind: 'music', label: `I2 D ${tag}`, storageKey: dKey });
+  const clipEId = await insertClip({ kind: 'ambience', label: `I2 E ${tag}`, storageKey: eKey });
+
+  await pool.query(
+    "INSERT INTO audio_bindings (subject_kind, subject_key, slot, clip_id) VALUES ('world', $1, 'music', $2)",
+    [worldName, clipDId],
+  );
+  await pool.query(
+    "INSERT INTO audio_bindings (subject_kind, subject_key, slot, clip_id) VALUES ('biome', $1, 'ambience', $2)",
+    [biomeName, clipEId],
+  );
+
+  const store = memStore(new Map([[dKey, OGG], [eKey, OGG]]));
+
+  await exportAudio({
+    db: pool, store, root, log: () => {},
+  });
+  const clipsAfterFull = JSON.parse(fs.readFileSync(path.join(root, 'clips.json'), 'utf8'));
+  assert.strictEqual(clipsAfterFull.length, 2, 'both D and E present after the first full export');
+
+  // The admin unbinds D from the world in the DB -- D now has zero bindings.
+  await pool.query(
+    "DELETE FROM audio_bindings WHERE subject_kind = 'world' AND subject_key = $1 AND clip_id = $2",
+    [worldName, clipDId],
+  );
+
+  await exportAudio({
+    db: pool, store, root, only: [worldName], log: () => {},
+  });
+
+  const clips = JSON.parse(fs.readFileSync(path.join(root, 'clips.json'), 'utf8'));
+  const bindings = JSON.parse(fs.readFileSync(path.join(root, 'bindings.json'), 'utf8'));
+  assert.ok(
+    !bindings.some((b) => b.subject_key === worldName && b.clip_id === clipDId),
+    'the removed world -> D binding is gone from bindings.json',
+  );
+  assert.ok(!clips.some((c) => c.id === clipDId), 'D is pruned from clips.json -- nothing binds it any more');
+  assert.ok(clips.some((c) => c.id === clipEId), 'E is untouched: only names the world, not the biome');
+  assert.ok(
+    bindings.some((b) => b.clip_id === clipEId && b.subject_key === biomeName),
+    'E\'s binding to the (untouched) biome survives',
+  );
+});
