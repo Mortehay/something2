@@ -242,12 +242,55 @@ lockedTest('dispatch refuses a below-native provider with an actionable 400',
       `UPDATE ai_providers SET request_template = '{"width":512,"height":512}'::jsonb
         WHERE id = $1`, [providerId],
     );
+    const skills = (await cs.SUBJECTS.skill.list()).slice(0, 2);
+    const [tile] = await cs.SUBJECTS.tile.list(pool);
+    await queue.enqueue(pool, [
+      ...skills.map((s) => ({ kind: 'skill', key: s.key })),
+      { kind: 'tile', key: tile.key },
+    ], { backend: 'connector', providerId });
+
     const res = await request(app).post('/api/art-jobs/dispatch').set(...AUTH)
       .send({ provider_id: providerId });
     assert.equal(res.status, 400);
     assert.match(res.body.error, /1024px minimum/);
     assert.match(res.body.error, /request_template/, 'the message must say how to fix it');
+    // WHICH rows block it, so the console can offer to drop exactly those.
+    // The tile is exempt and must not be listed -- dropping it would lose
+    // correct work.
+    assert.deepEqual(res.body.blocked.map(({ kind, provider_id: pid, width, count }) =>
+      ({ kind, pid, width, count })), [{ kind: 'skill', pid: providerId, width: 512, count: 2 }]);
     assert.equal(dispatcher.runStatus().running, false, 'nothing may have started');
+  });
+
+// The batch provider is only the FALLBACK for unpinned rows. Refusing a 512
+// batch provider outright blocked a queue whose objects were all pinned to a
+// 1024 provider -- the refusal named a provider no queued object would use.
+lockedTest('a 512 batch provider is not refused when queued objects are pinned elsewhere',
+  async (t, pool, providerId) => {
+    const skills = (await cs.SUBJECTS.skill.list()).slice(0, 2);
+    await queue.enqueue(pool, skills.map((s) => ({ kind: 'skill', key: s.key })),
+      { backend: 'connector', providerId });                     // pinned to 1024
+    const small = { id: providerId + 100000, name: 'terrain', request_template: { width: 512, height: 512 } };
+    assert.equal(await dispatcher.objectSizeRefusal(pool, small), null);
+
+    // Unpinned rows DO fall back to the batch provider, and are refused.
+    await pool.query('UPDATE art_jobs SET provider_id = NULL');
+    const err = await dispatcher.objectSizeRefusal(pool, small);
+    assert.ok(err, 'unpinned objects on a 512 batch provider must be refused');
+    assert.deepEqual(err.blocked.map((b) => [b.kind, b.provider_id, b.provider_name]),
+      [['skill', null, 'terrain']]);
+  });
+
+lockedTest('dispatch with nothing queued is not refused for the provider size',
+  async (t, pool, providerId) => {
+    await pool.query(
+      `UPDATE ai_providers SET request_template = '{"width":512,"height":512}'::jsonb
+        WHERE id = $1`, [providerId],
+    );
+    t.after(() => { dispatcher.stopDrain(); dispatcher.__resetRun(); });
+    const res = await request(app).post('/api/art-jobs/dispatch').set(...AUTH)
+      .send({ provider_id: providerId });
+    assert.equal(res.status, 202);
   });
 
 lockedTest('dispatch requires a provider that exists', async (t) => {
@@ -398,6 +441,52 @@ lockedTest('clear also takes claimed rows that no drain owns', async (t, pool, p
   assert.equal(res.body.claimed, 2, 'the claimed ones are counted separately, because they cost attempts');
   assert.equal(res.body.stats.queued, undefined, 'nothing pending may survive');
 });
+
+// THE "UNSELECT" ACTION behind a size refusal: drop only the blocked groups so
+// the rest of the queue can run. A tile on the same provider, a skill on a
+// different one and a CLAIMED skill all survive.
+lockedTest('clear with groups drops only the queued rows of those groups',
+  async (t, pool, providerId) => {
+    dispatcher.__resetRun();
+    const skills = (await cs.SUBJECTS.skill.list()).slice(0, 4);
+    const [tile] = await cs.SUBJECTS.tile.list(pool);
+    await queue.enqueue(pool, [
+      ...skills.map((s) => ({ kind: 'skill', key: s.key })),
+      { kind: 'tile', key: tile.key },
+    ], { backend: 'connector', providerId });
+    // One skill on a different provider (unpinned), one skill claimed.
+    await pool.query(
+      `UPDATE art_jobs SET provider_id = NULL WHERE subject_key = $1`, [skills[3].key]);
+    await pool.query(
+      `UPDATE art_jobs SET state = 'running' WHERE subject_key = $1`, [skills[2].key]);
+
+    const res = await request(app).post('/api/art-jobs/clear').set(...AUTH)
+      .send({ groups: [{ kind: 'skill', provider_id: providerId }] });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.cleared, 2);
+    const { rows } = await pool.query(
+      'SELECT subject_kind, subject_key, state FROM art_jobs ORDER BY subject_kind, subject_key');
+    assert.deepEqual(rows.map((r) => r.subject_key).sort(),
+      [skills[2].key, skills[3].key, tile.key].sort());
+
+    // A NULL group matches the unpinned row, and only it.
+    const nul = await request(app).post('/api/art-jobs/clear').set(...AUTH)
+      .send({ groups: [{ kind: 'skill', provider_id: null }] });
+    assert.equal(nul.body.cleared, 1);
+  });
+
+lockedTest('clear rejects malformed groups rather than clearing everything',
+  async (t, pool, providerId) => {
+    const [skill] = await cs.SUBJECTS.skill.list();
+    await queue.enqueue(pool, [{ kind: 'skill', key: skill.key }],
+      { backend: 'connector', providerId });
+    for (const groups of [[], [{ kind: 'skill' }], [{ kind: 3, provider_id: 1 }]]) {
+      const res = await request(app).post('/api/art-jobs/clear').set(...AUTH).send({ groups });
+      assert.equal(res.status, 400, JSON.stringify(groups));
+    }
+    const { rows } = await pool.query("SELECT count(*)::int n FROM art_jobs WHERE state='queued'");
+    assert.equal(rows[0].n, 1, 'a bad request must delete nothing');
+  });
 
 // Deleting a row a worker is mid-generation on would have the drain resolve a
 // job that no longer exists.

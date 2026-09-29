@@ -3678,6 +3678,15 @@ app.post('/api/art-jobs/dispatch', adminGuard, async (req, res) => {
     const provider = await aiProviders.loadImageProviderWithSecret(pool, providerId);
     if (!provider) return res.status(404).json({ error: 'provider not found' });
 
+    // The resolution precondition, against WHAT IS QUEUED rather than the
+    // batch provider alone: each job carries its own provider pin. `blocked`
+    // lists every queued (kind, provider) group that would be drawn below the
+    // object minimum, so the console can offer to drop exactly those rows.
+    if (!artDispatcher.runStatus().running) {
+      const refusal = await artDispatcher.objectSizeRefusal(pool, provider);
+      if (refusal) throw refusal;
+    }
+
     const status = artDispatcher.startDrain(pool, {
       provider,
       limit: Math.min(Math.max(parseInt(req.body.limit, 10) || 10, 1), 100),
@@ -3696,7 +3705,9 @@ app.post('/api/art-jobs/dispatch', adminGuard, async (req, res) => {
     // configuration the admin can fix, and the message says how -- below SDXL's
     // native size the model returns sprite sheets that look like art and pass
     // every check but the eye.
-    if (err.code === 'PROVIDER_TOO_SMALL') return res.status(400).json({ error: err.message });
+    if (err.code === 'PROVIDER_TOO_SMALL') {
+      return res.status(400).json({ error: err.message, blocked: err.blocked || [] });
+    }
     console.error(err);
     res.status(500).json({ error: 'Failed to start the art batch' });
   }
@@ -3876,9 +3887,32 @@ app.post('/api/art-jobs/clear', adminGuard, async (req, res) => {
         error: 'a batch is running -- press Stop and let the subjects in flight finish first',
       });
     }
-    const { rows } = await pool.query(
-      "DELETE FROM art_jobs WHERE state IN ('queued', 'running') RETURNING state",
-    );
+    // `groups` scopes the clear to (kind, provider_id) pairs -- what a
+    // PROVIDER_TOO_SMALL refusal lists as `blocked`. QUEUED rows only when
+    // scoped: the admin is dropping work that has not started, and a claimed
+    // row is a separate recovery (Rescue stranded jobs). provider_id null
+    // matches unpinned rows, hence IS NOT DISTINCT FROM.
+    const groups = Array.isArray(req.body.groups) ? req.body.groups : null;
+    let rows;
+    if (groups) {
+      const valid = groups.filter((g) => g && typeof g.kind === 'string'
+        && (g.provider_id === null || Number.isInteger(g.provider_id)));
+      if (valid.length === 0 || valid.length !== groups.length) {
+        return res.status(400).json({ error: 'groups must be [{ kind, provider_id }]' });
+      }
+      ({ rows } = await pool.query(
+        `DELETE FROM art_jobs j
+          USING unnest($1::text[], $2::int[]) AS g(kind, provider_id)
+          WHERE j.state = 'queued' AND j.subject_kind = g.kind
+            AND j.provider_id IS NOT DISTINCT FROM g.provider_id
+          RETURNING j.state`,
+        [valid.map((g) => g.kind), valid.map((g) => g.provider_id)],
+      ));
+    } else {
+      ({ rows } = await pool.query(
+        "DELETE FROM art_jobs WHERE state IN ('queued', 'running') RETURNING state",
+      ));
+    }
     res.json({
       cleared: rows.length,
       queued: rows.filter((r) => r.state === 'queued').length,

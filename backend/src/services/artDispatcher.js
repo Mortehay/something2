@@ -420,19 +420,37 @@ async function objectSizeRefusal(db, provider, subjects = catalogSubjects, loadP
   // pin, so the provider a subject will use is not necessarily the one this
   // batch was started with.
   const { rows } = await db.query(
-    `SELECT DISTINCT subject_kind, provider_id FROM art_jobs WHERE state = 'queued'`);
+    `SELECT subject_kind, provider_id, count(*)::int AS n
+       FROM art_jobs WHERE state = 'queued'
+      GROUP BY subject_kind, provider_id ORDER BY subject_kind, provider_id`);
+  // EVERY blocking group, not the first. The console offers to drop exactly
+  // these rows so the rest of the queue can run, and a refusal that named one
+  // group at a time would have the admin drop, retry and be refused again.
+  const blocked = [];
+  let first = null;
   for (const r of rows) {
     const reg = subjects.registryFor(r.subject_kind);
     if (!reg || reg.generationKind !== 'object') continue;   // tiles are exempt
     const p = await resolveJobProvider(db, r.provider_id, provider, loadProvider);
     const refusal = providerSizeRefusal(p);
-    if (refusal) {
-      const err = new Error(`${refusal} (queued ${r.subject_kind} jobs use it)`);
-      err.code = 'PROVIDER_TOO_SMALL';
-      return err;
-    }
+    if (!refusal) continue;
+    if (!first) first = `${refusal} (queued ${r.subject_kind} jobs use it)`;
+    blocked.push({
+      kind: r.subject_kind,
+      // The row's own value, NULL included: that is what a scoped clear has to
+      // match. An unpinned row resolves to the batch provider, named here.
+      provider_id: r.provider_id,
+      provider_name: p && p.name ? p.name : null,
+      width: templatePx(p, 'width'),
+      height: templatePx(p, 'height'),
+      count: r.n,
+    });
   }
-  return null;
+  if (!first) return null;
+  const err = new Error(first);
+  err.code = 'PROVIDER_TOO_SMALL';
+  err.blocked = blocked;
+  return err;
 }
 
 // The provider a job will actually be sent to: its own pin when it has one,
@@ -616,18 +634,11 @@ function startDrain(db, opts = {}) {
     err.code = 'ALREADY_RUNNING';
     throw err;
   }
-  // The precondition is checked HERE, synchronously, so a misconfigured
-  // provider is a 400 on the request that started it rather than an error
-  // buried in a status poll nobody reads.
-  if (!opts.buildRequest) {
-    const refusal = providerSizeRefusal(opts.provider);
-    if (refusal) {
-      const err = new Error(refusal);
-      err.code = 'PROVIDER_TOO_SMALL';
-      throw err;
-    }
-  }
-
+  // The resolution precondition is NOT checked here against the batch
+  // provider alone: every queued job carries its own provider pin, so a 512
+  // batch provider is correct for a tile batch and irrelevant to a pinned
+  // entity batch. The /dispatch route awaits the queue-aware
+  // objectSizeRefusal before calling this, and dispatch() re-checks each pass.
   run = {
     running: true, stopping: false, startedAt: new Date().toISOString(),
     finishedAt: null, passes: 0, done: 0, failed: 0, error: null,
