@@ -540,6 +540,11 @@ endpoint, "stored" shown in its place.
   `cue:hit`, `cue:pickup`, `cue:spell`, `cue:footstep`, `cue:ui_click`,
   `cue:miss`, `cue:chest_open`, `cue:death`, `cue:waypoint`
 
+**Test** calls the box's authenticated `GET /api/audio/styles` (not the
+unauthenticated root that a generic connection test would hit) -- it fails on
+a bad token or a wrong base URL the same way a real job would, instead of only
+proving the box is reachable.
+
 ### The adapter
 
 `backend/src/services/remoteAudioProvider.js` calls `POST /api/audio/propose`
@@ -566,12 +571,121 @@ The **Audio** sidebar tab (`/game/audio`) is where bindings are made: worlds
 list is fed by the game client itself, `POST /api/audio/misses` -- a slot a
 player actually hit with nothing bound, not a guess from the catalog.
 
-### Slice 1 limit: synchronous generation
+### Batch generation
 
-Generate blocks on the HTTP response -- no queue yet. Roughly 30 s for a warm
-30 s ambience clip, and up to ~2 min for a 2-minute track including a cold
-model load. Fine over the LAN; a tunnel (ngrok, Cloudflare) may time out
-before a cold generation finishes. Through a tunnel with a ~100 s edge timeout
-(the Cloudflare quick tunnel on the Orange Pi), a long track returns a timeout
-to the browser even though the server still stores and binds the clip --
-refresh the tab to see it. The queue is deferred to slice 2.
+The single-slot **Generate** button (below) is still synchronous -- fine for
+one clip, but a tunnel with a short edge timeout (the ~100 s Cloudflare quick
+tunnel on the Orange Pi) can time out a long track before a cold generation
+finishes, even though the server still stores and binds the clip -- refresh
+the tab to see it. For more than a few clips, or anything going through a
+tunnel, use **Batch mode** in the Audio tab instead: it queues jobs on the
+backend and drains them one at a time, so no single HTTP request has to
+survive the whole run.
+
+**Queuing.** In Batch mode, tick subjects in the left column and choose which
+slots per kind to include (music/ambience; sfx batches arrive in a later
+slice), or tick items in **Missing sounds** and press **Add to batch** --
+Missing sounds is fed by the game client's own `POST /api/audio/misses`, so
+it lists slots a player actually hit with nothing bound, not a guess from the
+registry. **Queue N jobs** enqueues everything selected. A slot that already
+has a queued or running job for it reports back as `already_live` instead of
+being queued twice -- re-queueing it is a no-op, not an error.
+
+**The drain.** One job at a time, `music` before `ambience`, so the GPU box
+switches model at most once per group instead of once per clip. A busy box
+(HTTP 409/503, "not now") re-queues the job with a backoff pause before the
+next claim -- it does not spend one of the job's attempts and does not count
+toward the breaker below. A **circuit breaker** stops the drain after
+`AUDIO_BREAKER_TRIP` (default 3) consecutive *provider faults* in a row --
+other 5xx responses, an unusable response (bad JSON, a returned file that
+fails the OGG check), a box-reported generation failure (the box's own
+ledger, e.g. a CUDA OOM), or a transport/timeout error. A run of unrelated
+bad subjects (a pinned-but-disabled provider, a subject that no longer
+exists) does not trip it or reset its count -- only a genuine success does
+that.
+
+**Restart recovery.** A job stuck `running` when the process dies (nodemon
+restarts the backend on *any* backend file edit, killing a running drain
+mid-job) is re-queued automatically the next time a drain starts, with its
+spent attempt refunded -- a crash never loses a job. But the drain itself
+does not resume on its own: after a restart, press **Start** again.
+
+**The progress panel** appears in the Audio tab whenever there is batch
+activity, running or not (so a full queue with nothing draining it stays
+visible). It shows overall progress and which group is currently draining,
+per-group counts (done/queued/running/failed), the subject/slot currently
+generating, how many jobs are waiting out a busy-box backoff, and the last
+few failures with their error text. **Retry failed** re-queues every failed
+job (resetting its attempt count); **Clear finished** removes done and failed
+jobs and keeps anything still queued -- both are refused (409) while a drain
+is running for Clear, and Stop must be pressed first.
+
+**Env vars:**
+- `AUDIO_JOB_MAX_ATTEMPTS` (default 3) -- retries per job before it lands in
+  `failed` (a busy-box requeue does not count against this).
+- `AUDIO_JOB_RETRY_BASE_MS` (default 30000) -- base backoff before a retry;
+  doubles per attempt with jitter.
+- `AUDIO_BREAKER_TRIP` (default 3) -- consecutive provider faults before the
+  drain stops itself.
+- `AUDIO_DRAIN_MAX_WAIT_MS` (default 60000) -- longest the drain sleeps
+  between checks while every queued job is sitting out a backoff.
+
+The single-slot **Generate** button still blocks on the HTTP response --
+roughly 30 s for a warm 30 s ambience clip, up to ~2 min for a 2-minute track
+including a cold model load. Like the batch path, when both **style** and
+**prompt** are left blank it proposes one first (the same call **Suggest**
+makes) rather than sending an empty request.
+
+### Library
+
+The **Library** tab (`/game/audio` → Library) lists every stored clip,
+independent of any subject -- filterable by kind and by **Unbound only**.
+Deleting a clip here removes the stored object from MinIO as well as its
+`audio_clips` row, cascading to every binding that pointed at it (the
+confirm dialog says how many). **Delete all unbound** removes every
+currently-unbound clip matching the kind filter, not just the current page.
+Each slot card also has a **+ From library** picker to bind an existing clip
+to another subject/slot without generating or uploading a new one.
+
+### World and biome editors
+
+The world editor (Maps admin, per-world card) and the biome editor (Biomes
+admin, per-biome card, once the biome has been saved) each embed a **Sounds**
+section -- the same slot cards as the Audio tab's Subjects view, scoped to
+that one world or biome -- so bindings can be made right where the subject is
+already being edited instead of navigating to the Audio tab. It shares the
+same registry and bindings queries as the Audio tab and renders even with no
+audio provider configured (Upload still works).
+
+### Export and seed
+
+Same problem as the image side (SOMET-572/573): a generated clip lives in two
+places git cannot see -- MinIO holds the bytes, `audio_clips` holds a
+job-scoped `storage_key` pointing at them, and `audio_bindings` points a
+subject at a clip id. `make audio-export` / `make audio-seed` move both into
+the repo and back:
+
+```
+make audio-export                        every kind -> backend/seeds/audio/
+make audio-export KIND=music,ambience     some kinds
+make audio-export ONLY=Vale,Forest        some subjects' bound clips
+make audio-seed                           committed clips -> MinIO + bindings
+make audio-seed KIND=sfx FORCE=1          overwrite clips this machine already has
+```
+
+`KIND` is any of `music`, `ambience`, `sfx`; `ONLY` is a comma-separated list
+of subject names (world/biome names, not slots). Only clips with at least one
+binding are exported -- an unbound clip stays library-only.
+
+Export writes `backend/seeds/audio/{music,ambience,sfx}/<label>-<id8>.ogg`
+plus `clips.json` and `bindings.json` at `backend/seeds/audio/`. A `KIND`- or
+`ONLY`-scoped export merges into the existing manifests rather than
+truncating them -- it has only seen the kinds/subjects it queried, so
+entries outside that scope are left as they were.
+
+Clip ids are preserved across an export/seed round trip, so re-seeding an
+already-present clip is a no-op (`FORCE=1` re-uploads it and overwrites the
+row). A binding whose world or biome no longer exists in this database is
+reported and skipped rather than failing the whole seed. The exported files
+are ordinary git content under `backend/seeds/audio/` -- nothing commits them
+automatically; that's a normal `git add`.

@@ -161,8 +161,9 @@ is bound to the job's slot, all in one DB transaction after the upload.
   box caches by request, so an omitted or repeated seed returns the old file.
 - **The box's 409 on model switch, or "busy", is back off and retry.** It never
   calls `model-gateway/switch` with `force`.
-- A circuit breaker stops the run after `AUDIO_MAX_CONSECUTIVE_FAILURES`
-  (default 3) provider failures in a row, as in art.
+- A circuit breaker stops the run after `AUDIO_BREAKER_TRIP` (default 3)
+  provider failures in a row, as in art. A busy 409/503 is back-off-and-retry
+  (above) and does not count toward this.
 - **Timeout:** `AUDIO_GENERATE_TIMEOUT_MS`, default 10 min (music on the GPU
   can take minutes).
 
