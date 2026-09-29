@@ -279,3 +279,145 @@ test('generateForSlot: sfx', { skip }, async (t) => {
     });
   });
 });
+
+// Game audio slice 3, Task 4: the pack path. One sfx-pack request for many
+// queued jobs; result rows are matched back by the box-echoed (cue, entity),
+// never by position. Subjects are `creature` with made-up, tagged keys:
+// creature cues are fixed per slot (hurt->hit, death->death, nearby->none)
+// and entityPhrase is just the lowercased key. Those subjects do not exist,
+// so bindClip would refuse them: storage goes through a RECORDING lib (the
+// real store/bind path is the same storeSfxVariants helper the single-cue
+// tests above run against the real library). nextSfxTake still reads the
+// real audio_bindings (nothing bound for these keys -> take 0), so no clip
+// is created and no clips lock is needed.
+test('generateSfxPackForJobs', { skip }, async (t) => {
+  const pool = new Pool({ connectionString: url });
+  const tag = `sfxpack-${process.pid}-${Date.now()}`;
+  t.after(() => pool.end());
+  {
+    const stored = [];
+    const lib = {
+      bindClip: async () => ({}),
+      storeAndBindClip: async (db, clipSpec, target, opts) => {
+        assert.equal(typeof opts.bind, 'function');
+        const n = stored.push({ ...clipSpec, ...target });
+        return { clip: { id: `clip-${n}`, ...clipSpec }, binding: { id: `bind-${n}`, ...target } };
+      },
+    };
+
+    const provider = { id: null, base_url: 'http://x', modality: 'audio', models_cache: ['cue:hit', 'cue:death'] };
+    const clip = () => ({ buffer: OGG, durationMs: 1000, sampleRate: 44100 });
+    let nextId = 1;
+    const job = (key, slot, engine = 'retro') => ({
+      id: String(nextId++), subject_kind: 'creature', subject_key: `${key}-${tag}`, slot, engine,
+    });
+
+    await t.test('maps rows back by (cue, entity), refuses upload-only, de-duplicates entities, and fails missing/cached/error rows per job', async () => {
+      const a = job('A', 'hurt');
+      const b = job('B', 'death');
+      const c = job('C', 'nearby'); // no cue: upload only
+      const d1 = job('Dup', 'hurt');
+      const d2 = job('DUP', 'hurt'); // same phrase once lowercased
+      const e = job('E', 'hurt');   // the box returns no row for it
+      const f = job('F', 'hurt');   // cached
+      const g = job('G', 'hurt');   // per-item error
+      const calls = [];
+      const rap = {
+        generateSfxPack: async (p, body) => {
+          calls.push(body);
+          const row = (it, extra = {}) => ({
+            ok: true, cue: it.cue, entity: it.entity, clips: [clip(), clip()], prompt: `p ${it.entity}`, seed: 77, cached: false, ...extra,
+          });
+          const by = Object.fromEntries(body.items.map((it) => [it.entity, it]));
+          const L = (k) => by[`${k}-${tag}`.toLowerCase()];
+          // Deliberately NOT in request order, plus an unattributable error row.
+          return {
+            ok: true,
+            items: [
+              { ok: false, cue: undefined, entity: undefined, error: 'mystery', providerFault: true },
+              row(by[`dup-${tag} (take 1)`]),
+              { ok: false, cue: L('G').cue, entity: L('G').entity, error: 'cuda oom', providerFault: true },
+              row(L('F'), { cached: true }),
+              row(L('B')),
+              row(L('Dup')),
+              row(L('A')),
+            ],
+          };
+        },
+      };
+      const out = await gen.generateSfxPackForJobs(pool, provider, [a, b, c, d1, d2, e, f, g], { rap, lib, seed: 5 });
+
+      assert.equal(calls.length, 1, 'one pack request');
+      assert.equal(calls[0].seed, 5);
+      assert.equal(calls[0].variants, 3);
+      assert.deepEqual(calls[0].items.map((it) => [it.cue, it.entity, it.engine]), [
+        ['hit', `a-${tag}`, 'retro'],
+        ['death', `b-${tag}`, 'retro'],
+        ['hit', `dup-${tag}`, 'retro'],
+        ['hit', `dup-${tag} (take 1)`, 'retro'],
+        ['hit', `e-${tag}`, 'retro'],
+        ['hit', `f-${tag}`, 'retro'],
+        ['hit', `g-${tag}`, 'retro'],
+      ], 'no upload-only item; the second "dup" gets a distinct take');
+
+      assert.deepEqual(out.refused.map((r) => r.job.id), [c.id]);
+      assert.match(out.refused[0].result.error, /upload only/);
+      assert.equal(out.packFailure, undefined);
+      const res = Object.fromEntries(out.results.map((r) => [r.job.id, r.result]));
+      assert.equal(out.results.length, 7);
+
+      for (const j of [a, b, d1, d2]) {
+        assert.equal(res[j.id].ok, true, `${j.subject_key}: ${res[j.id].error}`);
+        assert.equal(res[j.id].clips.length, 2);
+      }
+      const labels = async (j) => stored.filter((x) => x.subjectKey === j.subject_key && x.slot === j.slot);
+      assert.deepEqual((await labels(a)).map((r) => [r.label, r.styleOrCue, r.engine, r.kind, r.prompt, r.seed]),
+        [[`${a.subject_key} hurt (hit)`, 'hit', 'retro', 'sfx', `p a-${tag}`, 77],
+          [`${a.subject_key} hurt (hit)`, 'hit', 'retro', 'sfx', `p a-${tag}`, 77]]);
+      assert.deepEqual((await labels(b)).map((r) => [r.styleOrCue, r.prompt]),
+        [['death', `p b-${tag}`], ['death', `p b-${tag}`]], 'b got the death row, not a hit row');
+      assert.deepEqual((await labels(d2)).map((r) => [r.label, r.prompt]),
+        [[`${d2.subject_key} hurt (hit) (take 1)`, `p dup-${tag} (take 1)`], [`${d2.subject_key} hurt (hit) (take 1)`, `p dup-${tag} (take 1)`]],
+        'the bumped take is on the label, and it got ITS row');
+      assert.deepEqual((await labels(d1)).map((r) => r.prompt), [`p dup-${tag}`, `p dup-${tag}`]);
+      assert.equal(res[a.id].clip.id, res[a.id].clips[0].id);
+
+      assert.equal(res[e.id].ok, false);
+      assert.equal(res[e.id].providerFault, true, 'no matching row = a failed item, provider fault');
+      assert.equal(res[e.id].retryable, true);
+      assert.equal(res[f.id].ok, false);
+      assert.match(res[f.id].error, /keeps returning a cached sound/);
+      assert.equal(res[f.id].retryable, false);
+      assert.deepEqual(await labels(f), [], 'a cached item stores nothing');
+      assert.equal(res[g.id].ok, false);
+      assert.equal(res[g.id].error, 'cuda oom');
+      assert.equal(res[g.id].retryable, true);
+      assert.deepEqual(await labels(g), []);
+    });
+
+    await t.test('a cue missing from models_cache is refused before the request; nothing sendable means no request', async () => {
+      const calls = [];
+      const rap = { generateSfxPack: async (p, body) => { calls.push(body); return { ok: true, items: [] }; } };
+      const onlyHit = { ...provider, models_cache: ['cue:hit'] };
+      const out = await gen.generateSfxPackForJobs(pool, onlyHit, [job('N', 'death'), job('M', 'nearby')], { rap, lib, seed: 1 });
+      assert.equal(calls.length, 0, 'no box call when every job is refused');
+      assert.deepEqual(out.refused.map((r) => /upload only/.test(r.result.error)), [true, true]);
+      assert.match(out.refused[0].result.error, /'death'/);
+      assert.deepEqual(out.results, []);
+    });
+
+    await t.test('a whole-pack failure comes back as packFailure with every sent job undecided', async () => {
+      const rap = {
+        generateSfxPack: async () => ({
+          ok: false, status: 422, error: "unknown cue 'death'", retryable: false, providerFault: false, unknownCue: 'death',
+        }),
+      };
+      const x = job('X', 'hurt');
+      const y = job('Y', 'death');
+      const out = await gen.generateSfxPackForJobs(pool, provider, [x, y], { rap, lib, seed: 1 });
+      assert.equal(out.packFailure.unknownCue, 'death');
+      assert.deepEqual(out.sent.map((s) => [s.job.id, s.cue]), [[x.id, 'hit'], [y.id, 'death']]);
+      assert.deepEqual(out.results, []);
+    });
+  }
+});

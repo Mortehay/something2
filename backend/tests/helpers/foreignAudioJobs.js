@@ -45,4 +45,32 @@ async function restoringForeignJobs(pool, ownLike, states, fn) {
   return { result, foreignTouched };
 }
 
-module.exports = { restoringForeignJobs };
+// A claim (claimNext/claimBatch, or a drain) takes ANY claimable queued row,
+// not only the calling file's. This parks every claimable queued row that is
+// NOT this file's own (subject_key NOT LIKE ownLike) an hour out for the
+// duration of fn(), then puts each not_before back to its EXACT previous
+// value (NULL or a past timestamp). Same pattern audio_dispatcher_db and
+// audio_jobs_routes_db carry inline.
+async function parkingForeignQueued(pool, ownLike, fn) {
+  const rows = (await pool.query(
+    `SELECT id, not_before FROM audio_jobs
+      WHERE state = 'queued' AND (not_before IS NULL OR not_before <= now())
+        AND subject_key NOT LIKE $1`, [ownLike],
+  )).rows;
+  if (rows.length) {
+    await pool.query(
+      `UPDATE audio_jobs SET not_before = now() + interval '1 hour' WHERE id = ANY($1)`,
+      [rows.map((r) => r.id)],
+    );
+  }
+  try {
+    return await fn();
+  } finally {
+    for (const r of rows) {
+      // eslint-disable-next-line no-await-in-loop
+      await pool.query('UPDATE audio_jobs SET not_before = $2 WHERE id = $1', [r.id, r.not_before]);
+    }
+  }
+}
+
+module.exports = { restoringForeignJobs, parkingForeignQueued };

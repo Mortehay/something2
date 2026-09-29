@@ -150,16 +150,26 @@ async function nextSfxTake(db, subjectKind, subjectKey, slot) {
   return maxTake + 1;
 }
 
-// SFX branch of generateForSlot (game audio slice 3, Task 3). Unlike
-// music/ambience, the cue is never taken from the caller -- it is the
-// registry's own answer for this (subjectKind, subjectKey, slot), and a slot
-// with no cue on the box today (spec §4) is upload-only, refused before any
-// box call.
-async function generateSfxForSlot(db, provider, spec, { rap, lib }) {
-  const { subjectKind, subjectKey, slot } = spec;
-  const seed = Number.isInteger(spec.seed) ? spec.seed : randomSeed();
-  const variants = Number.isInteger(spec.variants) && spec.variants >= 1 && spec.variants <= 5 ? spec.variants : 3;
+// How many variants an sfx request asks for when the caller does not say
+// (the box's per-request limit is 1-5, spec §1 "Clips per slot"). Queued sfx
+// jobs carry no variants of their own, so a pack always uses this.
+const DEFAULT_SFX_VARIANTS = 3;
 
+// The refusal for a box answer that is still `cached` after we already sent
+// entity text meant to be fresh: storing it would write a byte-identical
+// duplicate under a "new" take. Not retryable -- the same request would hit
+// the same cache entry again.
+const SFX_CACHED_ERROR = 'the box keeps returning a cached sound for this subject; try another engine';
+
+// What one sfx (subject, slot) would send the box, or why it cannot be sent.
+// Shared by the single-cue path (generateSfxForSlot) and the pack path
+// (generateSfxPackForJobs) so both refuse the same slots the same way. The
+// cue is never taken from the caller -- it is the registry's own answer for
+// this (subjectKind, subjectKey, slot), and a slot with no cue on the box
+// today (spec §4) is upload-only, refused before any box call.
+async function sfxRequestFor(db, provider, {
+  subjectKind, subjectKey, slot, engine,
+}) {
   const cue = await subjects.cueFor(db, subjectKind, subjectKey, slot);
   if (!cue) return { ok: false, error: 'upload only: the provider has no cue for this slot', retryable: false };
   // The provider's own discovered allow-list (spec §2 "Cues": a provider's
@@ -169,62 +179,44 @@ async function generateSfxForSlot(db, provider, spec, { rap, lib }) {
   // refreshed yet must fail the same way: upload only).
   const known = Array.isArray(provider.models_cache) && provider.models_cache.includes(`cue:${cue}`);
   if (!known) return { ok: false, error: `upload only: the provider has no cue '${cue}' registered`, retryable: false };
+  return {
+    ok: true,
+    cue,
+    // `engine` has no per-cue default available here: models_cache only
+    // holds flattened 'cue:<name>' strings (see SettingsAdmin.jsx), not the
+    // box's per-cue default_engine metadata, which only ever lives in the
+    // Refresh response, not persisted. 'realistic' is the documented
+    // fallback (spec §4 "The engine defaults to realistic, and a batch can
+    // choose retro").
+    engine: typeof engine === 'string' && engine ? engine : 'realistic',
+    phrase: subjects.entityPhrase(db, subjectKind, subjectKey),
+    take: await nextSfxTake(db, subjectKind, subjectKey, slot),
+  };
+}
 
-  const phrase = subjects.entityPhrase(db, subjectKind, subjectKey);
-  // `engine` has no per-cue default available here: models_cache only holds
-  // flattened 'cue:<name>' strings (see SettingsAdmin.jsx), not the box's
-  // per-cue default_engine metadata, which only ever lives in the Refresh
-  // response, not persisted. 'realistic' is the documented fallback (spec
-  // §4 "The engine defaults to realistic, and a batch can choose retro").
-  const engine = typeof spec.engine === 'string' && spec.engine ? spec.engine : 'realistic';
-
-  let take = await nextSfxTake(db, subjectKind, subjectKey, slot);
-
-  let gen = await rap.generateSfx(provider, {
-    cue, entity: sfxEntityText(phrase, take), engine, variants, seed,
-  });
-  // The box's cache hit (spec §2): the exact same file would come back again.
-  // One retry with take+1 gives it a different entity string.
-  if (gen.ok && gen.cached) {
-    take += 1;
-    gen = await rap.generateSfx(provider, {
-      cue, entity: sfxEntityText(phrase, take), engine, variants, seed,
-    });
-    // Review round 1, fix 2: if the retry is STILL cached, storing it would
-    // write a byte-identical duplicate under a "new" take. Refuse instead of
-    // silently piling up a repeat -- not retryable, because retrying the
-    // exact same request would hit the exact same cache entry again.
-    if (gen.ok && gen.cached) {
-      return {
-        ok: false,
-        error: 'the box keeps returning a cached sound for this subject; try another engine',
-        retryable: false,
-      };
-    }
-  }
-  if (!gen.ok) {
-    return {
-      ok: false, error: gen.error, retryable: Boolean(gen.retryable), status: gen.status, providerFault: Boolean(gen.providerFault),
-    };
-  }
-
-  // Review round 1, fix 1: storeAndBindClip can throw on any ONE variant
-  // (e.g. a transient DB error) without the box call having wasted the
-  // other variants' GPU time. Catch per variant so a mid-loop failure
-  // neither loses the variants that DID commit nor throws out of
-  // generateForSlot as an uncaught exception (which the route would turn
-  // into a bare 500, telling the caller "generate again" and piling up more
-  // clips on top of the ones that already landed).
+// Store and bind every variant the box returned for ONE (subject, slot).
+// Shared by the single-cue and pack paths, so a clip made either way has the
+// same label (take suffix), provenance columns and binding.
+//
+// Review round 1, fix 1: storeAndBindClip can throw on any ONE variant
+// (e.g. a transient DB error) without the box call having wasted the other
+// variants' GPU time. Catch per variant so a mid-loop failure neither loses
+// the variants that DID commit nor throws out as an uncaught exception
+// (which the route would turn into a bare 500, telling the caller "generate
+// again" and piling up more clips on top of the ones that already landed).
+async function storeSfxVariants(db, provider, {
+  subjectKind, subjectKey, slot, cue, engine, take, clips: variants, prompt, seed,
+}, { lib }) {
   const clips = [];
   const bindings = [];
   let firstStoreError = null;
-  for (const c of gen.clips) {
+  for (const c of variants) {
     try {
       // eslint-disable-next-line no-await-in-loop
       const { clip, binding } = await lib.storeAndBindClip(db, {
         buffer: c.buffer, kind: 'sfx', label: sfxClipLabel(subjectKey, slot, cue, take),
-        source: 'generated', providerId: provider.id ?? null, prompt: gen.prompt, styleOrCue: cue,
-        engine, seed: gen.seed, durationMs: c.durationMs,
+        source: 'generated', providerId: provider.id ?? null, prompt, styleOrCue: cue,
+        engine, seed, durationMs: c.durationMs,
       }, { subjectKind, subjectKey, slot }, { bind: lib.bindClip });
       clips.push(clip);
       bindings.push(binding);
@@ -238,11 +230,10 @@ async function generateSfxForSlot(db, provider, spec, { rap, lib }) {
     };
   }
   // `clip`/`binding` (the first stored variant) are exposed alongside
-  // `clips`/`bindings` so the dispatcher's existing result.clip.id-based
-  // complete() path keeps working until it is rewritten for multi-clip sfx
-  // results.
+  // `clips`/`bindings` so the dispatcher's result.clip.id-based complete()
+  // path works the same for sfx as for music/ambience.
   const result = {
-    ok: true, clips, bindings, clip: clips[0], binding: bindings[0], seed: gen.seed,
+    ok: true, clips, bindings, clip: clips[0], binding: bindings[0], seed,
   };
   if (firstStoreError) {
     // Some, but not all, variants stored -- the caller (route) must see this
@@ -255,6 +246,150 @@ async function generateSfxForSlot(db, provider, spec, { rap, lib }) {
   return result;
 }
 
+// SFX branch of generateForSlot (game audio slice 3, Task 3).
+async function generateSfxForSlot(db, provider, spec, { rap, lib }) {
+  const { subjectKind, subjectKey, slot } = spec;
+  const seed = Number.isInteger(spec.seed) ? spec.seed : randomSeed();
+  const variants = Number.isInteger(spec.variants) && spec.variants >= 1 && spec.variants <= 5
+    ? spec.variants : DEFAULT_SFX_VARIANTS;
+
+  const req = await sfxRequestFor(db, provider, {
+    subjectKind, subjectKey, slot, engine: spec.engine,
+  });
+  if (!req.ok) return req;
+  const { cue, engine, phrase } = req;
+  let { take } = req;
+
+  let gen = await rap.generateSfx(provider, {
+    cue, entity: sfxEntityText(phrase, take), engine, variants, seed,
+  });
+  // The box's cache hit (spec §2): the exact same file would come back again.
+  // One retry with take+1 gives it a different entity string.
+  if (gen.ok && gen.cached) {
+    take += 1;
+    gen = await rap.generateSfx(provider, {
+      cue, entity: sfxEntityText(phrase, take), engine, variants, seed,
+    });
+    // Review round 1, fix 2: if the retry is STILL cached, refuse (see
+    // SFX_CACHED_ERROR).
+    if (gen.ok && gen.cached) return { ok: false, error: SFX_CACHED_ERROR, retryable: false };
+  }
+  if (!gen.ok) {
+    return {
+      ok: false, error: gen.error, retryable: Boolean(gen.retryable), status: gen.status, providerFault: Boolean(gen.providerFault),
+    };
+  }
+  return storeSfxVariants(db, provider, {
+    subjectKind, subjectKey, slot, cue, engine, take, clips: gen.clips, prompt: gen.prompt, seed: gen.seed,
+  }, { lib });
+}
+
+// A pack result row is matched back to its job by what the box echoes --
+// (cue, entity) -- never by its position in the response (Task 3 review: the
+// box's rows carry the echoed cue/entity, not the request index).
+const packKey = (cue, entity) => `${cue}\u0000${entity}`;
+
+// The pack path of the batch drain (spec §2 "Packing"): ONE sfx-pack request
+// for several queued sfx jobs of one drain group. Returns, without touching
+// any job row (bookkeeping is the dispatcher's):
+//   refused     [{job, result}]  -- upload-only / cue not offered; never sent
+//   sent        [{job, cue, entity, engine, take}] -- what went in the request
+//   packFailure the adapter's whole-request failure, when the box refused the
+//               pack as a whole (busy, a fault, an unknown cue); `results`
+//               is then empty and every `sent` job is still undecided
+//   results     [{job, result}]  -- one per `sent` job, generateForSlot's
+//               result shape: stored clips, or {ok:false, error, retryable,
+//               providerFault}
+//
+// Two jobs whose (cue, entity) would coincide within one pack (two subjects
+// whose phrases match, e.g. creature names differing only in case) could
+// not be told apart in the response. The later one's take is bumped until
+// its entity text is unique within the pack: a higher take is still a fresh
+// entity for the box, and its label records that take.
+async function generateSfxPackForJobs(db, provider, jobs, {
+  rap = defaultRap, lib = defaultLib, seed: packSeed, variants = DEFAULT_SFX_VARIANTS,
+} = {}) {
+  const refused = [];
+  const sent = [];
+  const used = new Set();
+  for (const job of jobs) {
+    // eslint-disable-next-line no-await-in-loop
+    const req = await sfxRequestFor(db, provider, {
+      subjectKind: job.subject_kind, subjectKey: job.subject_key, slot: job.slot, engine: job.engine,
+    });
+    if (!req.ok) { refused.push({ job, result: req }); continue; }
+    let { take } = req;
+    while (used.has(packKey(req.cue, sfxEntityText(req.phrase, take)))) take += 1;
+    const entity = sfxEntityText(req.phrase, take);
+    used.add(packKey(req.cue, entity));
+    sent.push({
+      job, cue: req.cue, entity, engine: req.engine, take,
+    });
+  }
+  if (!sent.length) return { refused, sent, results: [] };
+
+  const seed = Number.isInteger(packSeed) ? packSeed : randomSeed();
+  let pack;
+  try {
+    pack = await rap.generateSfxPack(provider, {
+      items: sent.map(({ cue, entity, engine }) => ({ cue, entity, engine })), variants, seed,
+    });
+  } catch (err) {
+    pack = { ok: false, error: err && err.message ? err.message : String(err), retryable: false };
+  }
+  if (!pack.ok) return { refused, sent, packFailure: pack, results: [] };
+
+  // First row per (cue, entity) wins; a row with no cue (an error row the box
+  // could not attribute) matches nothing and is ignored rather than crashing.
+  const rows = new Map();
+  for (const row of Array.isArray(pack.items) ? pack.items : []) {
+    if (!row || typeof row.cue !== 'string') continue;
+    const k = packKey(row.cue, row.entity);
+    if (!rows.has(k)) rows.set(k, row);
+  }
+
+  const results = [];
+  for (const s of sent) {
+    const row = rows.get(packKey(s.cue, s.entity));
+    let result;
+    if (!row) {
+      result = {
+        ok: false, error: 'the box returned no result for this sfx pack item', retryable: true, providerFault: true,
+      };
+    } else if (!row.ok) {
+      result = {
+        ok: false, error: row.error, retryable: Boolean(row.providerFault), providerFault: Boolean(row.providerFault),
+      };
+    } else if (row.cached) {
+      // The entity text was chosen to be fresh (nextSfxTake), so a cache hit
+      // here means storing it would duplicate a clip already made.
+      result = { ok: false, error: SFX_CACHED_ERROR, retryable: false };
+    } else {
+      // eslint-disable-next-line no-await-in-loop
+      result = await storeSfxVariants(db, provider, {
+        subjectKind: s.job.subject_kind,
+        subjectKey: s.job.subject_key,
+        slot: s.job.slot,
+        cue: s.cue,
+        engine: s.engine,
+        take: s.take,
+        clips: row.clips,
+        prompt: row.prompt,
+        seed: row.seed,
+      }, { lib });
+    }
+    results.push({ job: s.job, result });
+  }
+  return { refused, sent, results };
+}
+
 module.exports = {
-  resolveAudioProvider, contextFor, boxTrackName, randomSeed, generateForSlot, sfxEntityText,
+  resolveAudioProvider,
+  contextFor,
+  boxTrackName,
+  randomSeed,
+  generateForSlot,
+  generateSfxPackForJobs,
+  sfxEntityText,
+  DEFAULT_SFX_VARIANTS,
 };
