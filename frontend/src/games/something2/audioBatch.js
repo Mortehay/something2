@@ -189,6 +189,24 @@ export function hasBatchActivity({ run, stats } = {}) {
   return batchProgress({ run, stats }).total > 0;
 }
 
+// One kind's slot list out of the subject registry response, e.g.
+// subjectSlotsFor(subjects, 'world') -> [{slot:'music', clipKind:'music'}, ...].
+// This is useAudioAdmin.js's slotRows() narrowed to a single kind and without
+// the per-subject fan-out -- SubjectSounds.jsx (Task 7, embedded in the world
+// and biome editors) knows its kind and one subject key up front, not the
+// whole tree, so it has no use for slotRows' per-subject `filled` count or
+// its flattened kind×subject rows.
+//
+// [] for a kind absent from the registry (an unknown subject kind, or the
+// registry still loading/empty) rather than throwing -- SubjectSounds must
+// keep rendering (its slot cards) even while useAudioSubjects() is loading or
+// errored.
+export function subjectSlotsFor(subjectsResponse, kind) {
+  const group = (subjectsResponse || []).find((g) => g.kind === kind);
+  if (!group) return [];
+  return Object.entries(group.slots || {}).map(([slot, clipKind]) => ({ slot, clipKind }));
+}
+
 // Whether the jobs query is worth polling. Wider than "a drain is running"
 // (SOMET-558 made the same call for the art console): a queue full of jobs
 // with nothing draining them is exactly the state an admin needs the page to

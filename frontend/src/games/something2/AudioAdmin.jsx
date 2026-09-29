@@ -15,24 +15,25 @@
 // artSelection.js. audioBatch.js is that split's counterpart for batch
 // selection/progress arithmetic.
 import {
-  useCallback, useEffect, useMemo, useRef, useState,
+  useEffect, useMemo, useRef, useState,
 } from 'react';
 import { Link } from 'react-router-dom';
 import styled from 'styled-components';
 import { useQueryClient } from '@tanstack/react-query';
 import {
-  useAudioSubjects, useAudioMisses, useSubjectSlots, slotRows,
+  useAudioSubjects, useAudioMisses, slotRows,
   useAudioJobs, SUBJECTS_KEY, MISSES_KEY, ALL_SLOTS_KEY, CLIPS_KEY_PREFIX,
 } from './useAudioAdmin.js';
 import {
   itemsFromMisses, mergeItems, hasBatchActivity,
 } from './audioBatch.js';
 import { useAiProviders } from './useAiProviders.js';
+import { useAudioPreview } from './useAudioPreview.js';
 import AdminLoading from './AdminLoading.jsx';
-import AudioSlotCard from './AudioSlotCard.jsx';
 import AudioBatchPanel from './AudioBatchPanel.jsx';
 import AudioBatchControls from './AudioBatchControls.jsx';
 import AudioLibrary from './AudioLibrary.jsx';
+import SubjectSounds from './SubjectSounds.jsx';
 
 const Wrap = styled.div`
   padding: 2rem; color: var(--s2-text); max-width: 1200px; margin: 0 auto;
@@ -104,36 +105,6 @@ const Secondary = styled(Button)`background: var(--s2-btn-grey);`;
 const rowKey = (kind, key) => `${kind}/${key}`;
 const missId = (m) => `${m.subject_kind}/${m.subject_key}/${m.slot}`;
 
-// A single shared <audio> across the whole page: only one preview plays at a
-// time, no matter which card, tab or subject it came from. Recreated per
-// play rather than reused, so a new src always starts clean.
-function useAudioPreview() {
-  const audioRef = useRef(null);
-  const [playingId, setPlayingId] = useState(null);
-
-  const stop = useCallback(() => {
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.src = '';
-      audioRef.current = null;
-    }
-    setPlayingId(null);
-  }, []);
-
-  const play = useCallback((id, url) => {
-    stop();
-    const audio = new Audio(url);
-    audio.addEventListener('ended', () => setPlayingId((cur) => (cur === id ? null : cur)));
-    audio.play().catch(() => {});
-    audioRef.current = audio;
-    setPlayingId(id);
-  }, [stop]);
-
-  useEffect(() => () => { if (audioRef.current) audioRef.current.pause(); }, []);
-
-  return { playingId, play, stop };
-}
-
 function AudioAdmin() {
   const qc = useQueryClient();
   const { subjects, isLoadingSubjects, subjectsError } = useAudioSubjects();
@@ -197,7 +168,6 @@ function AudioAdmin() {
 
   const selectedRow = selected
     && rows.find((r) => r.kind === selected.kind && r.key === selected.key);
-  const { slots: bindings, isLoadingSlots } = useSubjectSlots(selected?.kind, selected?.key);
   // Review fix (SOMET-591): the post-drain cache refresh lives HERE, not in
   // AudioBatchPanel, and fires on run.running true -> false rather than on a
   // phase transition into finished/stopped specifically.
@@ -361,28 +331,7 @@ function AudioAdmin() {
                   {selectedRow && (
                     <>
                       <h3>{selectedRow.label} · {selectedRow.key}</h3>
-                      {isLoadingSlots && <AdminLoading label="Loading clips…" inline size={16} />}
-                      {selectedRow.slots.map((s) => (
-                        <AudioSlotCard
-                          // Keyed by subject too, not just slot: every world
-                          // has the same slot names as every other world
-                          // (music, ambience), so a slot-only key let React
-                          // reuse a mounted card across a subject switch --
-                          // carrying over its draft prompt and (before the
-                          // mutationKey fix in useAudioAdmin.js) letting a
-                          // pending generation for one subject read as
-                          // pending for whichever subject the card next
-                          // rendered.
-                          key={`${selectedRow.kind}/${selectedRow.key}/${s.slot}`}
-                          subject={selectedRow}
-                          slot={s.slot}
-                          clipKind={s.clipKind}
-                          rows={bindings[s.slot] || []}
-                          playingId={preview.playingId}
-                          onPlay={preview.play}
-                          onStop={preview.stop}
-                        />
-                      ))}
+                      <SubjectSounds kind={selectedRow.kind} subjectKey={selectedRow.key} />
                     </>
                   )}
                 </>

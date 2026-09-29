@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildBatchItems, itemsFromMisses, mergeItems, batchProgress, shouldPoll, hasBatchActivity,
+  subjectSlotsFor,
 } from '../audioBatch.js';
 
 const subjects = [
@@ -65,5 +66,28 @@ describe('audioBatch', () => {
   it('hasBatchActivity is false with no run and no stats at all', () => {
     expect(hasBatchActivity({})).toBe(false);
     expect(hasBatchActivity()).toBe(false);
+  });
+});
+
+// Task 7 (SOMET-591 slice 2, Sounds sections in the world/biome editors):
+// SubjectSounds is a thin render over this -- it looks up ONE kind's slot
+// list out of the same registry response slotRows() flattens, without
+// needing the full subject-tree fan-out slotRows does.
+describe('subjectSlotsFor', () => {
+  it("returns the matching group's slot list as {slot, clipKind} pairs", () => {
+    expect(subjectSlotsFor(subjects, 'world')).toEqual([
+      { slot: 'music', clipKind: 'music' },
+      { slot: 'ambience', clipKind: 'ambience' },
+    ]);
+    expect(subjectSlotsFor(subjects, 'biome')).toEqual([{ slot: 'ambience', clipKind: 'ambience' }]);
+  });
+
+  it('returns [] for a kind not present in the registry', () => {
+    expect(subjectSlotsFor(subjects, 'creature')).toEqual([]);
+  });
+
+  it('returns [] for a missing or empty registry response', () => {
+    expect(subjectSlotsFor(undefined, 'world')).toEqual([]);
+    expect(subjectSlotsFor([], 'world')).toEqual([]);
   });
 });
