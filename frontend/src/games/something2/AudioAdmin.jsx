@@ -19,12 +19,13 @@ import {
 } from 'react';
 import { Link } from 'react-router-dom';
 import styled from 'styled-components';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   useAudioSubjects, useAudioMisses, useSubjectSlots, slotRows,
-  useAudioJobs,
+  useAudioJobs, SUBJECTS_KEY, MISSES_KEY, ALL_SLOTS_KEY, CLIPS_KEY_PREFIX,
 } from './useAudioAdmin.js';
 import {
-  itemsFromMisses, mergeItems, batchProgress,
+  itemsFromMisses, mergeItems, hasBatchActivity,
 } from './audioBatch.js';
 import { useAiProviders } from './useAiProviders.js';
 import AdminLoading from './AdminLoading.jsx';
@@ -134,6 +135,7 @@ function useAudioPreview() {
 }
 
 function AudioAdmin() {
+  const qc = useQueryClient();
   const { subjects, isLoadingSubjects, subjectsError } = useAudioSubjects();
   const { misses } = useAudioMisses();
   const { activeAudioProvider, isLoadingProviders } = useAiProviders();
@@ -196,7 +198,30 @@ function AudioAdmin() {
   const selectedRow = selected
     && rows.find((r) => r.kind === selected.kind && r.key === selected.key);
   const { slots: bindings, isLoadingSlots } = useSubjectSlots(selected?.kind, selected?.key);
-  const jobsProgress = batchProgress({ run, stats });
+  // Review fix (SOMET-591): the post-drain cache refresh lives HERE, not in
+  // AudioBatchPanel, and fires on run.running true -> false rather than on a
+  // phase transition into finished/stopped specifically.
+  //
+  // Two things were wrong with the panel-local version: (1) AudioAdmin, not
+  // the panel, stays mounted across the Subjects/Library tab switch and owns
+  // the useAudioJobs() poll this reads from -- a drain that ended while an
+  // admin was on the Library tab (the panel unmounted) never invalidated
+  // anything. (2) Stop, the breaker, an unexpected error and no_provider all
+  // typically leave jobs still queued, so the phase after they fire is
+  // 'queued', not 'finished'/'stopped' -- watching for "left running" catches
+  // every ending, not only the two that happen to end with an empty queue.
+  const runningRef = useRef(Boolean(run && run.running));
+  useEffect(() => {
+    const runningNow = Boolean(run && run.running);
+    const justEnded = runningRef.current && !runningNow;
+    runningRef.current = runningNow;
+    if (justEnded) {
+      qc.invalidateQueries({ queryKey: SUBJECTS_KEY });
+      qc.invalidateQueries({ queryKey: MISSES_KEY });
+      qc.invalidateQueries({ queryKey: ALL_SLOTS_KEY });
+      qc.invalidateQueries({ queryKey: CLIPS_KEY_PREFIX });
+    }
+  }, [run, qc]);
 
   if (subjectsError) return <Err>{String(subjectsError.message)}</Err>;
 
@@ -225,7 +250,7 @@ function AudioAdmin() {
       {tab === 'subjects' && (
         <>
           {isLoadingSubjects && <AdminLoading label="Loading subjects…" inline size={16} />}
-          {jobsProgress.phase !== 'idle' && <AudioBatchPanel run={run} stats={stats} recent={recent} />}
+          {hasBatchActivity({ run, stats }) && <AudioBatchPanel run={run} stats={stats} recent={recent} />}
           <Columns>
             <Left>
               <FilterRow>

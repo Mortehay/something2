@@ -15,14 +15,16 @@ export const JOBS_KEY = ['audio-jobs'];
 // The clip library's cache prefix. Queried alone (no kind/unbound/page) so a
 // mutation can invalidate every page/filter combo in one call --
 // invalidateQueries matches by key PREFIX unless `exact: true`.
-const CLIPS_KEY_PREFIX = ['audio-clips'];
+export const CLIPS_KEY_PREFIX = ['audio-clips'];
 const clipsKey = (kind, unbound, page) => [...CLIPS_KEY_PREFIX, kind || null, Boolean(unbound), page || 1];
 const slotsKey = (kind, key) => ['audio-slots', kind, key];
 // Every audio-slots query, regardless of subject -- a clip delete or a
 // bind-from-library cannot know in advance which subjects it touched (a clip
 // can be bound to more than one), so mutations that only learn "N bindings
-// changed" invalidate the whole prefix rather than guessing subjects.
-const ALL_SLOTS_KEY = ['audio-slots'];
+// changed" invalidate the whole prefix rather than guessing subjects. Also
+// used by AudioAdmin's post-drain refresh (a finished batch can have bound
+// clips to ANY of the subjects it touched).
+export const ALL_SLOTS_KEY = ['audio-slots'];
 const CLIPS_PAGE_SIZE = 20;
 
 async function getJson(url, what) {

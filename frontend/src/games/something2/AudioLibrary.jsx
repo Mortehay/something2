@@ -108,6 +108,13 @@ function AudioLibrary({ playback }) {
   const {
     clips, total, pageSize, isLoadingClips, clipsError,
   } = useAudioClips({ kind: kind || undefined, unbound, page });
+  // A SEPARATE query, always `unbound: true` regardless of the checkbox
+  // above -- "Delete all unbound" always means every unbound clip of the
+  // current kind filter, not "however many rows the current page/filter
+  // combo happens to be showing". Same query key as the row list whenever
+  // the checkbox is already ticked (page 1), so TanStack Query dedupes it
+  // rather than firing a second request.
+  const { total: unboundTotal } = useAudioClips({ kind: kind || undefined, unbound: true, page: 1 });
   const deleteUnbound = useDeleteUnboundClips();
 
   const pages = Math.max(1, Math.ceil(total / pageSize));
@@ -132,14 +139,16 @@ function AudioLibrary({ playback }) {
         </Field>
         <Secondary
           type="button"
-          disabled={deleteUnbound.isPending}
+          disabled={deleteUnbound.isPending || unboundTotal === 0}
           onClick={() => {
-            if (window.confirm(`Delete every unbound${kind ? ` ${kind}` : ''} clip? This cannot be undone.`)) {
+            if (window.confirm(
+              `Delete all ${unboundTotal} unbound${kind ? ` ${kind}` : ''} clip(s)? This cannot be undone.`,
+            )) {
               deleteUnbound.mutate(kind || undefined);
             }
           }}
         >
-          Delete all unbound
+          Delete all unbound ({unboundTotal})
         </Secondary>
       </Bar>
 

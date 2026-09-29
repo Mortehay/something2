@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  buildBatchItems, itemsFromMisses, mergeItems, batchProgress, shouldPoll,
+  buildBatchItems, itemsFromMisses, mergeItems, batchProgress, shouldPoll, hasBatchActivity,
 } from '../audioBatch.js';
 
 const subjects = [
@@ -32,5 +32,38 @@ describe('audioBatch', () => {
     });
     expect(shouldPoll({ run: { running: false }, stats })).toBe(true);
     expect(shouldPoll({ run: { running: false }, stats: { groups: {}, backoff: 0 } })).toBe(false);
+  });
+
+  // Review finding: a backend restart leaves `run` as the dispatcher's
+  // zeroed default (running:false, done:0, failed:0, started_at:null) even
+  // though the done/failed ROWS survive in audio_jobs -- stats still counts
+  // them. Reading only `run.done`/`run.failed`/`run.started_at` reported
+  // 'idle' here and hid the panel (Retry/Clear/failure list) behind a done
+  // batch nobody could see.
+  it('is not idle when only stats (not run) carries done/failed rows, e.g. after a backend restart', () => {
+    const zeroedRun = {
+      running: false, started_at: null, finished_at: null, done: 0, failed: 0, stopped_reason: null,
+    };
+    const stats = {
+      groups: {
+        music: {
+          queued: 0, running: 0, done: 3, failed: 0,
+        },
+        ambience: {
+          queued: 0, running: 0, done: 0, failed: 1,
+        },
+      },
+      backoff: 0,
+    };
+    const p = batchProgress({ run: zeroedRun, stats });
+    expect(p.total).toBe(4);
+    expect(p.phase).not.toBe('idle');
+    expect(p.phase).toBe('finished');
+    expect(hasBatchActivity({ run: zeroedRun, stats })).toBe(true);
+  });
+
+  it('hasBatchActivity is false with no run and no stats at all', () => {
+    expect(hasBatchActivity({})).toBe(false);
+    expect(hasBatchActivity()).toBe(false);
   });
 });

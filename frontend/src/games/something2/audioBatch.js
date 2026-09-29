@@ -138,6 +138,16 @@ function currentGroup(stats) {
 // alone answers "phase": a finished run with an empty queue is 'finished' or
 // 'stopped' depending on WHY it stopped, and an idle page with jobs sitting
 // queued (enqueued but never dispatched) is 'queued', not 'idle'.
+//
+// THE FALLBACK IS `total > 0`, NOT `run.done || run.failed || run.started_at`.
+// `run` is the DISPATCHER'S IN-MEMORY state and is a zeroed shape
+// (running:false, done:0, failed:0, started_at:null) after a backend
+// restart -- but the done/failed ROWS in audio_jobs (what `stats` counts)
+// survive a restart just fine. Reading only `run` here left a page with
+// real failures on it reporting 'idle' the moment the backend restarted,
+// which hid Retry/Clear and the failure list behind a panel that never
+// rendered (see hasBatchActivity below, which the panel's visibility check
+// uses instead of phase !== 'idle').
 export function batchProgress({ run, stats } = {}) {
   const t = groupTotals(stats);
   const total = t.queued + t.running + t.done + t.failed;
@@ -153,8 +163,8 @@ export function batchProgress({ run, stats } = {}) {
     // is decided from run.stopped_reason directly by the panel, not folded
     // into this phase name.
     phase = 'queued';
-  } else if (run && (run.done || run.failed || run.started_at)) {
-    phase = (run.stopped_reason === 'stopped' || run.stopped_reason === 'breaker') ? 'stopped' : 'finished';
+  } else if (total > 0) {
+    phase = (run && (run.stopped_reason === 'stopped' || run.stopped_reason === 'breaker')) ? 'stopped' : 'finished';
   }
 
   return {
@@ -168,6 +178,15 @@ export function batchProgress({ run, stats } = {}) {
     group: currentGroup(stats),
     backoff: Number((stats && stats.backoff) || 0),
   };
+}
+
+// Whether AudioBatchPanel should render at all. Deliberately `total > 0`
+// rather than `phase !== 'idle'` at the call site -- with the fallback fix
+// above the two are equivalent today, but this gives the panel's visibility
+// rule its own name and its own test, so a future phase tweak can't silently
+// re-hide a panel that has real done/failed rows to show.
+export function hasBatchActivity({ run, stats } = {}) {
+  return batchProgress({ run, stats }).total > 0;
 }
 
 // Whether the jobs query is worth polling. Wider than "a drain is running"

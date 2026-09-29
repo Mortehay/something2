@@ -3,19 +3,23 @@
 // (music, ambience) drained one at a time in that order instead of a single
 // flat queue -- see audioBatch.js's batchProgress/DRAIN_GROUPS.
 //
-// Shown by AudioAdmin whenever the jobs query has ever seen a job (any
-// group with a nonzero count), not only while running -- same reasoning as
-// the art console's SOMET-558 fix: a full queue with nothing draining it is
-// exactly the state that most needs to stay visible.
-import { useEffect, useRef } from 'react';
+// Shown by AudioAdmin whenever hasBatchActivity() says so (any group with a
+// nonzero count, per audioBatch.js), not only while running -- same
+// reasoning as the art console's SOMET-558 fix: a full queue with nothing
+// draining it is exactly the state that most needs to stay visible.
+//
+// Purely presentational: it owns no invalidation of its own. The post-drain
+// refresh (SUBJECTS_KEY/MISSES_KEY/ALL_SLOTS_KEY/CLIPS_KEY_PREFIX) lives in
+// AudioAdmin, which stays mounted across the Subjects/Library tab switch and
+// owns the useAudioJobs() call this panel is fed from -- a copy of that
+// effect in here fired only while THIS component was mounted, so switching
+// to the Library tab mid-drain silently dropped every ending it missed.
 import styled from 'styled-components';
-import { useQueryClient } from '@tanstack/react-query';
 import {
   batchProgress, DRAIN_GROUPS_LABEL,
 } from './audioBatch.js';
 import {
   useStartAudioDrain, useStopAudioDrain, useRetryAudioFailures, useClearAudioJobs,
-  SUBJECTS_KEY, MISSES_KEY,
 } from './useAudioAdmin.js';
 
 const Panel = styled.section`
@@ -74,30 +78,11 @@ const Failures = styled.div`
 const GROUP_LABEL = { music: 'Music', ambience: 'Ambience' };
 
 function AudioBatchPanel({ run, stats, recent }) {
-  const qc = useQueryClient();
   const start = useStartAudioDrain();
   const stop = useStopAudioDrain();
   const retry = useRetryAudioFailures();
   const clear = useClearAudioJobs();
   const progress = batchProgress({ run, stats });
-  const prevPhase = useRef(progress.phase);
-
-  // SOMET-591: invalidate the subject/misses badges exactly once when a
-  // drain FINISHES (phase transitions into finished/stopped from something
-  // else), not on every poll -- polling invalidateQueries every 2s while
-  // running would refetch the whole subject tree for no reason, and the
-  // badges only actually change once jobs land.
-  useEffect(() => {
-    const was = prevPhase.current;
-    prevPhase.current = progress.phase;
-    const justEnded = (progress.phase === 'finished' || progress.phase === 'stopped')
-      && was !== progress.phase && was !== 'idle';
-    if (justEnded) {
-      qc.invalidateQueries({ queryKey: SUBJECTS_KEY });
-      qc.invalidateQueries({ queryKey: MISSES_KEY });
-    }
-  }, [progress.phase, qc]);
-
   const failed = (recent || []).filter((r) => r.state === 'failed').slice(0, 10);
   const running = progress.phase === 'running';
 

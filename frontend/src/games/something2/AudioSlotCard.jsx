@@ -69,6 +69,16 @@ const PickerRow = styled.div`
   &:not(:last-child) { border-bottom: 1px solid var(--s2-border); }
 `;
 const PickerLabel = styled.span`font-size: 0.8rem; color: var(--s2-text); flex: 1; min-width: 6rem;`;
+// Paging footer (SOMET-591 review fix): the library can hold far more than
+// one page's worth of clips of a given kind, and the picker used to show
+// only the newest CLIPS_PAGE_SIZE with no way to reach the rest. The
+// backend has no label/text filter today, so this is paging only -- "x-y of
+// N" rather than a search box that could not actually narrow anything past
+// the current page.
+const PickerFooter = styled.div`
+  display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem; padding-top: 0.4rem;
+  border-top: 1px solid var(--s2-border); font-size: 0.75rem; color: var(--s2-text-muted);
+`;
 
 function formatDuration(ms) {
   if (!Number.isFinite(ms)) return '—';
@@ -154,8 +164,14 @@ function ClipRow({
 function LibraryPicker({
   subject, slot, clipKind, onBound,
 }) {
-  const { clips, isLoadingClips } = useAudioClips({ kind: clipKind });
+  const [page, setPage] = useState(1);
+  const {
+    clips, total, pageSize, isLoadingClips,
+  } = useAudioClips({ kind: clipKind, page });
   const bind = useBindFromLibrary();
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const to = Math.min(page * pageSize, total);
   return (
     <Picker>
       {isLoadingClips && <AdminLoadingInline />}
@@ -177,6 +193,13 @@ function LibraryPicker({
           </Secondary>
         </PickerRow>
       ))}
+      {total > pageSize && (
+        <PickerFooter>
+          <Secondary type="button" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Prev</Secondary>
+          <span>showing {from}–{to} of {total}</span>
+          <Secondary type="button" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>Next</Secondary>
+        </PickerFooter>
+      )}
     </Picker>
   );
 }
