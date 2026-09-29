@@ -642,5 +642,103 @@ describe('AudioEngine', () => {
       await flush(); await flush();
       expect(sources.length).toBe(1);
     });
+
+    // Fix round 2 (CRITICAL): nearbyLoops.has() alone was too late a guard --
+    // it is only set AFTER a loop's buffer resolves, so a slow (real,
+    // uncached) fetch spanning more than one 250ms tick let every
+    // intervening tick call _startNearbyLoop again, each minting its own
+    // voiceId and awaiting the same cached buffer promise; when it finally
+    // resolved, every attempt built and started a source, with
+    // nearbyLoops.set() overwriting all but the last -- leaving untracked
+    // orphan loops that _sweepNearbyLoops/_stopAllSfx could never find,
+    // looping forever, even into a new world. These three tests use a
+    // manually-resolved fetchBytes so the load can be held open across
+    // several tickNearby calls, the way any real uncached fetch would be.
+    describe('in-flight loop start (fix round 2)', () => {
+      function deferredEngine(bindings) {
+        let resolveLoad;
+        const { ctx, sources } = fakeCtx();
+        const engine = new AudioEngine({
+          ctxFactory: () => ctx,
+          fetchBytes: async () => new Promise((resolve) => { resolveLoad = resolve; }),
+          urlFor: (k) => `u:${k}`,
+          rand: () => 0,
+          postMisses: async () => {},
+        });
+        engine.setWorld({ world: 'vale', bindings });
+        engine.unlock();
+        return { engine, sources, resolve: (url) => resolveLoad(new TextEncoder().encode(url).buffer) };
+      }
+
+      const bindings = { 'world_point/well/nearby': [{ key: 'well-loop.ogg', volume: 1, weight: 1, loopable: true }] };
+      const point = { id: 'w1', art: 'well', x: 0, y: 0 };
+
+      it('a slow buffer load spanning multiple ticks starts exactly one loop source, not one per tick', async () => {
+        const { engine, sources, resolve } = deferredEngine(bindings);
+
+        engine.tickNearby(new Map(), [point], { x: 0, y: 0 }, 0);
+        await flush();
+        expect(sources.length).toBe(0); // still loading
+
+        // Two more ticks, 250ms apart, while the load is still pending --
+        // before the fix, each of these would have started its own
+        // competing attempt for the same point.
+        engine.tickNearby(new Map(), [point], { x: 0, y: 0 }, 250);
+        engine.tickNearby(new Map(), [point], { x: 0, y: 0 }, 500);
+        await flush();
+        expect(sources.length).toBe(0);
+
+        resolve('u:well-loop.ogg');
+        await flush(); await flush();
+        expect(sources.length).toBe(1); // exactly one, despite three ticks having offered this point
+        expect(sources[0].loop).toBe(true);
+        expect(sources[0].started).toBe(true);
+      });
+
+      it('a point that leaves range while its buffer is loading never starts a source once it resolves, and frees its slot', async () => {
+        const { engine, sources, resolve } = deferredEngine(bindings);
+
+        engine.tickNearby(new Map(), [point], { x: 0, y: 0 }, 0);
+        await flush();
+        expect(sources.length).toBe(0);
+
+        // The point leaves the AOI on the very next tick -- offered with an
+        // empty points list, as Game.js would once it drops out of range.
+        engine.tickNearby(new Map(), [], { x: 0, y: 0 }, 250);
+
+        resolve('u:well-loop.ogg');
+        await flush(); await flush();
+        expect(sources.length).toBe(0); // never started
+
+        // The limiter slot the in-flight attempt held must have been
+        // released by the sweep's cancellation, not leaked.
+        for (let i = 0; i < 12; i += 1) {
+          expect(engine.sfxLimiter.admit({ clipKey: `c${i}`, priority: 'nearest', distance: 0 }).ok).toBe(true);
+        }
+      });
+
+      it('setWorld while a loop start is pending prevents it from ever starting, and leaves nothing to leak into the new world', async () => {
+        const { engine, sources, resolve } = deferredEngine(bindings);
+
+        engine.tickNearby(new Map(), [point], { x: 0, y: 0 }, 0);
+        await flush();
+        expect(sources.length).toBe(0);
+        expect(engine.nearbyLoopStarting.has('pt:w1')).toBe(true); // in flight
+
+        // The world changes before that buffer resolves.
+        engine.setWorld({ world: 'other', bindings: {} });
+        expect(engine.nearbyLoopStarting.size).toBe(0); // the marker itself must not survive the reset
+
+        resolve('u:well-loop.ogg');
+        await flush(); await flush();
+        expect(sources.length).toBe(0); // never started, in either world
+
+        // A fresh 12 voices must be admittable in the new world -- the
+        // in-flight reservation was actually released, not merely forgotten.
+        for (let i = 0; i < 12; i += 1) {
+          expect(engine.sfxLimiter.admit({ clipKey: `c${i}`, priority: 'nearest', distance: 0 }).ok).toBe(true);
+        }
+      });
+    });
   });
 });
