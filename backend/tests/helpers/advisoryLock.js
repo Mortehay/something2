@@ -197,7 +197,18 @@ const ART_JOBS_LOCK_KEY = 615204773;
 // number.
 const AUDIO_JOBS_LOCK_KEY = 977005353;
 
+// SOMET-591: a sixth key, for audio_clips rows that exist UNBOUND, even
+// briefly. POST /admin/clips/delete-unbound (audio_library_routes_db) deletes
+// EVERY clip with no binding in the whole database, not just its own, so a
+// peer file that inserts a clip and binds it a moment later (the seeder, the
+// library/catalog tests, fixtures that insert rows before their bindings)
+// can have its clip deleted in between -- measured: 9 of 40 victim runs failed
+// against a looping delete-unbound before this key existed. Every test that
+// calls delete-unbound, or that leaves one of its clips unbound while it
+// still relies on it, takes this key for its whole body.
+const AUDIO_CLIPS_LOCK_KEY = 591204817;
+
 module.exports = {
   withAdvisoryLock, readingUnderLock, LOCK_WAIT_MS,
-  PASSIVE_TREE_LOCK_KEY, PASSIVE_TREE_LOCK_WAIT_MS, ART_JOBS_LOCK_KEY, AUDIO_JOBS_LOCK_KEY,
+  PASSIVE_TREE_LOCK_KEY, PASSIVE_TREE_LOCK_WAIT_MS, ART_JOBS_LOCK_KEY, AUDIO_JOBS_LOCK_KEY, AUDIO_CLIPS_LOCK_KEY,
 };

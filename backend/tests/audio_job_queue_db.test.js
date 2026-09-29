@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
 const { withAdvisoryLock, AUDIO_JOBS_LOCK_KEY } = require('./helpers/advisoryLock.js');
+const { restoringForeignJobs } = require('./helpers/foreignAudioJobs.js');
 const q = require('../src/services/audioJobQueue');
 
 const url = process.env.TEST_DATABASE_URL;
@@ -46,11 +47,20 @@ test('audio job queue', { skip }, async (t) => {
   const pool = new Pool({ connectionString: url });
   const tag = `jobq-${process.pid}-${Date.now()}`;
   t.after(async () => {
-    try { await pool.query('DELETE FROM audio_jobs WHERE subject_key LIKE $1', [`${tag}%`]); }
-    finally { await pool.end(); }
+    try {
+      await pool.query('DELETE FROM audio_jobs WHERE subject_key LIKE $1', [`${tag}%`]);
+      await pool.query('DELETE FROM audio_jobs WHERE subject_key = $1', [`foreign-${tag}`]);
+    } finally { await pool.end(); }
   });
 
   await withAdvisoryLock(pool, AUDIO_JOBS_LOCK_KEY, async () => {
+    // A stand-in for ANOTHER file's failed row (keyed outside `${tag}%`):
+    // retryFailed below must not leave it re-queued.
+    await pool.query(
+      `INSERT INTO audio_jobs (batch_id, subject_kind, subject_key, slot, clip_kind, drain_group, state, attempts, last_error)
+       VALUES (gen_random_uuid(), 'world', $1, 'music', 'music', 'music', 'failed', 3, 'foreign failure')`,
+      [`foreign-${tag}`],
+    );
     const claimMine = async () => {
       for (let i = 0; i < 50; i++) {
         const j = await q.claimNext(pool);
@@ -94,9 +104,13 @@ test('audio job queue', { skip }, async (t) => {
     await pool.query("UPDATE audio_jobs SET attempts = $2 WHERE id = $1", [first.id, q.MAX_ATTEMPTS]);
     await pool.query("UPDATE audio_jobs SET state = 'running' WHERE id = $1", [first.id]);
     assert.equal(await q.fail(pool, first.id, 'still busy', { retryable: true }), 'failed', 'attempts exhausted → failed');
-    assert.equal(await q.retryFailed(pool) >= 1, true);
+    // retryFailed is database-wide: foreign failed rows are put back after.
+    const { result: requeued, foreignTouched } = await restoringForeignJobs(pool, `${tag}%`, ['failed'], () => q.retryFailed(pool));
+    assert.equal(requeued - foreignTouched, 1, 'exactly this file\'s one failed row was re-queued');
     const retried = (await pool.query('SELECT state, attempts, not_before FROM audio_jobs WHERE id = $1', [first.id])).rows[0];
     assert.deepEqual(retried, { state: 'queued', attempts: 0, not_before: null });
+    const foreign = (await pool.query('SELECT state, attempts, last_error FROM audio_jobs WHERE subject_key = $1', [`foreign-${tag}`])).rows[0];
+    assert.deepEqual(foreign, { state: 'failed', attempts: 3, last_error: 'foreign failure' }, "another file's failed row is left failed");
   });
 });
 
@@ -110,11 +124,17 @@ test('audio job queue: retryFailed drops older failed duplicates for the same sl
   const pool = new Pool({ connectionString: url });
   const tag = `jobqdup-${process.pid}-${Date.now()}`;
   t.after(async () => {
-    try { await pool.query('DELETE FROM audio_jobs WHERE subject_key = $1', [tag]); }
+    try { await pool.query('DELETE FROM audio_jobs WHERE subject_key IN ($1, $2)', [tag, `foreign-${tag}`]); }
     finally { await pool.end(); }
   });
 
   await withAdvisoryLock(pool, AUDIO_JOBS_LOCK_KEY, async () => {
+    // A stand-in for ANOTHER file's failed row, as in the test above.
+    await pool.query(
+      `INSERT INTO audio_jobs (batch_id, subject_kind, subject_key, slot, clip_kind, drain_group, state, attempts, last_error)
+       VALUES (gen_random_uuid(), 'world', $1, 'music', 'music', 'music', 'failed', 3, 'foreign failure')`,
+      [`foreign-${tag}`],
+    );
     const ins = async () => (await pool.query(
       `INSERT INTO audio_jobs (batch_id, subject_kind, subject_key, slot, clip_kind, drain_group, state)
        VALUES (gen_random_uuid(), 'world', $1, 'music', 'music', 'music', 'failed') RETURNING id`,
@@ -123,13 +143,18 @@ test('audio job queue: retryFailed drops older failed duplicates for the same sl
 
     const older = await ins();
     const newer = await ins();
-    assert.equal(await q.retryFailed(pool), 1, 'only the newest duplicate is resurrected');
+    // retryFailed is database-wide: foreign failed rows are put back after,
+    // and only this file's share of the count is asserted on.
+    const { result: requeued, foreignTouched } = await restoringForeignJobs(pool, tag, ['failed'], () => q.retryFailed(pool));
+    assert.equal(requeued - foreignTouched, 1, 'only the newest duplicate is resurrected');
 
     const olderRow = (await pool.query('SELECT state FROM audio_jobs WHERE id = $1', [older])).rows[0];
     assert.equal(olderRow, undefined, 'the older failed duplicate was deleted, not resurrected');
 
     const newerRow = (await pool.query('SELECT state, attempts, not_before FROM audio_jobs WHERE id = $1', [newer])).rows[0];
     assert.deepEqual(newerRow, { state: 'queued', attempts: 0, not_before: null });
+    const foreign = (await pool.query('SELECT state, attempts, last_error FROM audio_jobs WHERE subject_key = $1', [`foreign-${tag}`])).rows[0];
+    assert.deepEqual(foreign, { state: 'failed', attempts: 3, last_error: 'foreign failure' }, "another file's failed row is left failed");
   });
 });
 

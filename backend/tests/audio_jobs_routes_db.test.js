@@ -17,6 +17,7 @@ const { Pool } = require('pg');
 const { app, __setPool } = require('../src/index.js');
 const { signToken } = require('../src/auth/tokens.js');
 const { withAdvisoryLock, AUDIO_JOBS_LOCK_KEY } = require('./helpers/advisoryLock.js');
+const { restoringForeignJobs } = require('./helpers/foreignAudioJobs.js');
 const audioDispatcher = require('../src/services/audioDispatcher');
 
 const url = process.env.TEST_DATABASE_URL;
@@ -79,6 +80,7 @@ test('audio job routes', { skip }, async (t) => {
     audioDispatcher.__setDeps(null);
     try {
       await pool.query('DELETE FROM audio_jobs WHERE subject_key LIKE $1', [`audio-jobs%${tag}%`]);
+      await pool.query('DELETE FROM audio_jobs WHERE subject_key LIKE $1', [`foreign-sentinel-%${tag}`]);
       if (made.worlds.length) await pool.query('DELETE FROM worlds WHERE id = ANY($1)', [made.worlds]);
       if (made.providers.length) await pool.query('DELETE FROM ai_providers WHERE id = ANY($1)', [made.providers]);
       if (made.users.length) await pool.query('DELETE FROM users WHERE id = ANY($1)', [made.users]);
@@ -113,6 +115,23 @@ test('audio job routes', { skip }, async (t) => {
         [foreign.map((r) => r.id)],
       );
     }
+
+    // Stand-ins for ANOTHER file's rows: keyed outside this file's own
+    // `audio-jobs%` pattern, a failed row and a done row. clear and
+    // retry-failed below must leave both exactly as they are.
+    const sentinelFailed = `foreign-sentinel-failed-${tag}`;
+    const sentinelDone = `foreign-sentinel-done-${tag}`;
+    await pool.query(
+      `INSERT INTO audio_jobs (batch_id, subject_kind, subject_key, slot, clip_kind, drain_group, state, attempts, last_error)
+       VALUES (gen_random_uuid(), 'world', $1, 'music', 'music', 'music', 'failed', 3, 'foreign failure'),
+              (gen_random_uuid(), 'world', $2, 'music', 'music', 'music', 'done', 1, NULL)`,
+      [sentinelFailed, sentinelDone],
+    );
+    const sentinels = async () => (await pool.query(
+      'SELECT subject_key, state, attempts, last_error FROM audio_jobs WHERE subject_key IN ($1, $2) ORDER BY subject_key',
+      [sentinelDone, sentinelFailed],
+    )).rows;
+    const sentinelsBefore = await sentinels();
 
     try {
       await t.test('every jobs route rejects a player (403) and anonymous (401)', async () => {
@@ -211,7 +230,7 @@ test('audio job routes', { skip }, async (t) => {
         assert.equal(enq.body.started, true, JSON.stringify(enq.body));
         await waitForCurrent(admin, worldName2);
 
-        const busy = await request(app).post('/api/audio/admin/jobs/clear').set('Authorization', bearer(admin)).send({});
+        const busy = await request(app).post('/api/audio/admin/jobs/clear').set('Authorization', bearer(admin)).send({ states: ['done'] });
         assert.equal(busy.status, 409, JSON.stringify(busy.body));
 
         release();
@@ -219,11 +238,18 @@ test('audio job routes', { skip }, async (t) => {
         const before = (await pool.query('SELECT 1 FROM audio_jobs WHERE subject_key = $1', [worldName2])).rowCount;
         assert.equal(before, 2, 'precondition: both jobs still on record before clearing');
 
-        const cleared = await request(app).post('/api/audio/admin/jobs/clear').set('Authorization', bearer(admin)).send({});
+        // Explicit states -- the {} default also clears 'queued', which would
+        // delete other files' parked rows. clear is database-wide, so any
+        // foreign 'done' rows it deletes are put back afterwards.
+        const ownDone = (await pool.query(
+          "SELECT 1 FROM audio_jobs WHERE state = 'done' AND subject_key LIKE $1", [`audio-jobs%${tag}%`])).rowCount;
+        const { result: cleared, foreignTouched } = await restoringForeignJobs(pool, `audio-jobs%${tag}%`, ['done'], () => (
+          request(app).post('/api/audio/admin/jobs/clear').set('Authorization', bearer(admin)).send({ states: ['done'] })));
         assert.equal(cleared.status, 200, JSON.stringify(cleared.body));
-        assert.ok(cleared.body.cleared >= 2, JSON.stringify(cleared.body));
+        assert.equal(cleared.body.cleared - foreignTouched, ownDone, JSON.stringify(cleared.body));
         const after = (await pool.query('SELECT 1 FROM audio_jobs WHERE subject_key = $1', [worldName2])).rowCount;
         assert.equal(after, 0, 'both worldName2 rows were cleared');
+        assert.deepEqual(await sentinels(), sentinelsBefore, "another file's rows were not cleared");
       });
 
       await t.test('retry-failed re-queues a failed row', async () => {
@@ -233,12 +259,18 @@ test('audio job routes', { skip }, async (t) => {
            VALUES (gen_random_uuid(), 'world', $1, 'ambience', 'ambience', 'ambience', 'failed', 3, 'test failure')`,
           [failKey],
         );
-        const res = await request(app).post('/api/audio/admin/jobs/retry-failed').set('Authorization', bearer(admin)).send({});
+        // retry-failed is database-wide; foreign failed rows it re-queues are
+        // put back afterwards, and only this file's share is asserted on.
+        const ownFailed = (await pool.query(
+          "SELECT 1 FROM audio_jobs WHERE state = 'failed' AND subject_key LIKE $1", [`audio-jobs%${tag}%`])).rowCount;
+        const { result: res, foreignTouched } = await restoringForeignJobs(pool, `audio-jobs%${tag}%`, ['failed'], () => (
+          request(app).post('/api/audio/admin/jobs/retry-failed').set('Authorization', bearer(admin)).send({})));
         assert.equal(res.status, 200, JSON.stringify(res.body));
-        assert.ok(res.body.requeued >= 1, JSON.stringify(res.body));
+        assert.equal(res.body.requeued - foreignTouched, ownFailed, JSON.stringify(res.body));
         const row = (await pool.query('SELECT state, attempts FROM audio_jobs WHERE subject_key = $1', [failKey])).rows[0];
         assert.equal(row.state, 'queued');
         assert.equal(row.attempts, 0);
+        assert.deepEqual(await sentinels(), sentinelsBefore, "another file's failed row was not re-queued");
         await pool.query('DELETE FROM audio_jobs WHERE subject_key = $1', [failKey]);
       });
     } finally {

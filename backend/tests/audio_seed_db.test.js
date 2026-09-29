@@ -11,6 +11,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { Readable } = require('node:stream');
 const { Pool } = require('pg');
+const { withAdvisoryLock, AUDIO_CLIPS_LOCK_KEY } = require('./helpers/advisoryLock.js');
 const { safeName } = require('../src/services/artSeed.js');
 const {
   AUDIO_SEEDS_ROOT, AUDIO_KINDS, exportAudio, seedAudio, parseArgs,
@@ -58,162 +59,166 @@ test('parseArgs reads the flags the Makefile passes, and rejects an unknown kind
 
 test('audio export/seed round trip', { skip }, async (t) => {
   const pool = new Pool({ connectionString: url });
-  const tag = `${process.pid}-${Date.now()}`;
-  const worldName = `audio-seed-world-${tag}`;
-  const biomeName = `audio-seed-biome-${tag}`;
-  const clipIds = [];
-  let worldId = null;
-  const root = tmpRoot();
-  const OGG = Buffer.from(`OggS-fake-clip-bytes-${tag}`);
+  // AUDIO_CLIPS_LOCK_KEY: see advisoryLock.js -- delete-unbound deletes every
+  // unbound clip in the database, so clip-creating bodies are serialized with it.
+  await withAdvisoryLock(pool, AUDIO_CLIPS_LOCK_KEY, async () => {
+    const tag = `${process.pid}-${Date.now()}`;
+    const worldName = `audio-seed-world-${tag}`;
+    const biomeName = `audio-seed-biome-${tag}`;
+    const clipIds = [];
+    let worldId = null;
+    const root = tmpRoot();
+    const OGG = Buffer.from(`OggS-fake-clip-bytes-${tag}`);
 
-  t.after(async () => {
-    try {
-      if (clipIds.length) await pool.query('DELETE FROM audio_clips WHERE id = ANY($1)', [clipIds]);
-      if (worldId) await pool.query('DELETE FROM worlds WHERE id = $1', [worldId]).catch(() => {});
-      await pool.query('DELETE FROM biomes WHERE name = $1', [biomeName]);
-    } finally {
-      await pool.end();
-      fs.rmSync(root, { recursive: true, force: true });
+    t.after(async () => {
+      try {
+        if (clipIds.length) await pool.query('DELETE FROM audio_clips WHERE id = ANY($1)', [clipIds]);
+        if (worldId) await pool.query('DELETE FROM worlds WHERE id = $1', [worldId]).catch(() => {});
+        await pool.query('DELETE FROM biomes WHERE name = $1', [biomeName]);
+      } finally {
+        await pool.end();
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    await pool.query('INSERT INTO biomes (name) VALUES ($1)', [biomeName]);
+    worldId = (await pool.query(
+      'INSERT INTO worlds (name, seed, biomes) VALUES ($1, 1, $2::jsonb) RETURNING id',
+      [worldName, JSON.stringify([biomeName])],
+    )).rows[0].id;
+
+    async function insertClip({ kind, label, storageKey }) {
+      const r = await pool.query(
+        `INSERT INTO audio_clips (kind, label, storage_key, bytes, duration_ms, loopable, source)
+         VALUES ($1,$2,$3,$4,$5,$6,'uploaded') RETURNING id`,
+        [kind, label, storageKey, OGG.length, 1000, kind !== 'sfx'],
+      );
+      const id = r.rows[0].id;
+      clipIds.push(id);
+      return id;
     }
-  });
 
-  await pool.query('INSERT INTO biomes (name) VALUES ($1)', [biomeName]);
-  worldId = (await pool.query(
-    'INSERT INTO worlds (name, seed, biomes) VALUES ($1, 1, $2::jsonb) RETURNING id',
-    [worldName, JSON.stringify([biomeName])],
-  )).rows[0].id;
+    const worldLabel = `World Theme ${tag}`;
+    const biomeLabel = `Biome Amb ${tag}`;
+    const worldClipKey = `audio/music/rmt_${tag}_world.ogg`;
+    const biomeClipKey = `audio/ambience/rmt_${tag}_biome.ogg`;
+    const unboundClipKey = `audio/sfx/rmt_${tag}_unbound.ogg`;
 
-  async function insertClip({ kind, label, storageKey }) {
-    const r = await pool.query(
-      `INSERT INTO audio_clips (kind, label, storage_key, bytes, duration_ms, loopable, source)
-       VALUES ($1,$2,$3,$4,$5,$6,'uploaded') RETURNING id`,
-      [kind, label, storageKey, OGG.length, 1000, kind !== 'sfx'],
+    const worldClipId = await insertClip({ kind: 'music', label: worldLabel, storageKey: worldClipKey });
+    const biomeClipId = await insertClip({ kind: 'ambience', label: biomeLabel, storageKey: biomeClipKey });
+    await insertClip({ kind: 'sfx', label: `Unbound ${tag}`, storageKey: unboundClipKey });
+
+    await pool.query(
+      "INSERT INTO audio_bindings (subject_kind, subject_key, slot, clip_id) VALUES ('world', $1, 'music', $2)",
+      [worldName, worldClipId],
     );
-    const id = r.rows[0].id;
-    clipIds.push(id);
-    return id;
-  }
-
-  const worldLabel = `World Theme ${tag}`;
-  const biomeLabel = `Biome Amb ${tag}`;
-  const worldClipKey = `audio/music/rmt_${tag}_world.ogg`;
-  const biomeClipKey = `audio/ambience/rmt_${tag}_biome.ogg`;
-  const unboundClipKey = `audio/sfx/rmt_${tag}_unbound.ogg`;
-
-  const worldClipId = await insertClip({ kind: 'music', label: worldLabel, storageKey: worldClipKey });
-  const biomeClipId = await insertClip({ kind: 'ambience', label: biomeLabel, storageKey: biomeClipKey });
-  await insertClip({ kind: 'sfx', label: `Unbound ${tag}`, storageKey: unboundClipKey });
-
-  await pool.query(
-    "INSERT INTO audio_bindings (subject_kind, subject_key, slot, clip_id) VALUES ('world', $1, 'music', $2)",
-    [worldName, worldClipId],
-  );
-  await pool.query(
-    "INSERT INTO audio_bindings (subject_kind, subject_key, slot, clip_id) VALUES ('biome', $1, 'ambience', $2)",
-    [biomeName, biomeClipId],
-  );
-
-  const store = memStore(new Map([
-    [worldClipKey, OGG],
-    [biomeClipKey, OGG],
-    [unboundClipKey, OGG],
-  ]));
-
-  let worldFile;
-  let biomeFile;
-
-  await t.test('exportAudio writes only bound clips, correctly named, with sorted manifests', async () => {
-    const results = await exportAudio({
-      db: pool, store, root, log: () => {},
-    });
-    assert.strictEqual(results.music.exported, 1);
-    assert.strictEqual(results.ambience.exported, 1);
-    assert.strictEqual(results.sfx.exported, 0);
-
-    const clips = JSON.parse(fs.readFileSync(path.join(root, 'clips.json'), 'utf8'));
-    assert.strictEqual(clips.length, 2);
-    const sortedIds = clips.map((c) => c.id).slice().sort((a, b) => a.localeCompare(b));
-    assert.deepStrictEqual(clips.map((c) => c.id), sortedIds, 'clips.json sorted by id');
-
-    const byId = Object.fromEntries(clips.map((c) => [c.id, c]));
-    worldFile = byId[worldClipId].file;
-    biomeFile = byId[biomeClipId].file;
-    assert.strictEqual(worldFile, `music/${safeName(worldLabel)}-${worldClipId.slice(0, 8)}.ogg`);
-    assert.strictEqual(biomeFile, `ambience/${safeName(biomeLabel)}-${biomeClipId.slice(0, 8)}.ogg`);
-    assert.ok(fs.existsSync(path.join(root, worldFile)));
-    assert.ok(fs.existsSync(path.join(root, biomeFile)));
-    assert.ok(!clips.some((c) => c.label.startsWith('Unbound')), 'the unbound clip is absent');
-
-    const bindings = JSON.parse(fs.readFileSync(path.join(root, 'bindings.json'), 'utf8'));
-    assert.strictEqual(bindings.length, 2);
-    const keyOf = (b) => `${b.subject_kind}\u0000${b.subject_key}\u0000${b.slot}\u0000${b.clip_id}`;
-    const sortedKeys = bindings.map(keyOf).slice().sort((a, b) => a.localeCompare(b));
-    assert.deepStrictEqual(bindings.map(keyOf), sortedKeys, 'bindings.json sorted by (subject_kind, subject_key, slot, clip_id)');
-    assert.deepStrictEqual(
-      bindings.map((b) => [b.subject_kind, b.subject_key]).sort(),
-      [['biome', biomeName], ['world', worldName]].sort(),
+    await pool.query(
+      "INSERT INTO audio_bindings (subject_kind, subject_key, slot, clip_id) VALUES ('biome', $1, 'ambience', $2)",
+      [biomeName, biomeClipId],
     );
-  });
 
-  await t.test('deleting the clip/binding rows and the world simulates a fresh DB', async () => {
-    await pool.query('DELETE FROM audio_clips WHERE id = ANY($1)', [[worldClipId, biomeClipId]]);
-    await pool.query('DELETE FROM worlds WHERE id = $1', [worldId]);
-    worldId = null; // already gone -- t.after must not try again
-  });
+    const store = memStore(new Map([
+      [worldClipKey, OGG],
+      [biomeClipKey, OGG],
+      [unboundClipKey, OGG],
+    ]));
 
-  await t.test('seedAudio recreates both clips, binds only the biome, and flags the missing world', async () => {
-    const r = await seedAudio({
-      db: pool, store, root, log: () => {},
+    let worldFile;
+    let biomeFile;
+
+    await t.test('exportAudio writes only bound clips, correctly named, with sorted manifests', async () => {
+      const results = await exportAudio({
+        db: pool, store, root, log: () => {},
+      });
+      assert.strictEqual(results.music.exported, 1);
+      assert.strictEqual(results.ambience.exported, 1);
+      assert.strictEqual(results.sfx.exported, 0);
+
+      const clips = JSON.parse(fs.readFileSync(path.join(root, 'clips.json'), 'utf8'));
+      assert.strictEqual(clips.length, 2);
+      const sortedIds = clips.map((c) => c.id).slice().sort((a, b) => a.localeCompare(b));
+      assert.deepStrictEqual(clips.map((c) => c.id), sortedIds, 'clips.json sorted by id');
+
+      const byId = Object.fromEntries(clips.map((c) => [c.id, c]));
+      worldFile = byId[worldClipId].file;
+      biomeFile = byId[biomeClipId].file;
+      assert.strictEqual(worldFile, `music/${safeName(worldLabel)}-${worldClipId.slice(0, 8)}.ogg`);
+      assert.strictEqual(biomeFile, `ambience/${safeName(biomeLabel)}-${biomeClipId.slice(0, 8)}.ogg`);
+      assert.ok(fs.existsSync(path.join(root, worldFile)));
+      assert.ok(fs.existsSync(path.join(root, biomeFile)));
+      assert.ok(!clips.some((c) => c.label.startsWith('Unbound')), 'the unbound clip is absent');
+
+      const bindings = JSON.parse(fs.readFileSync(path.join(root, 'bindings.json'), 'utf8'));
+      assert.strictEqual(bindings.length, 2);
+      const keyOf = (b) => `${b.subject_kind}\u0000${b.subject_key}\u0000${b.slot}\u0000${b.clip_id}`;
+      const sortedKeys = bindings.map(keyOf).slice().sort((a, b) => a.localeCompare(b));
+      assert.deepStrictEqual(bindings.map(keyOf), sortedKeys, 'bindings.json sorted by (subject_kind, subject_key, slot, clip_id)');
+      assert.deepStrictEqual(
+        bindings.map((b) => [b.subject_kind, b.subject_key]).sort(),
+        [['biome', biomeName], ['world', worldName]].sort(),
+      );
     });
-    assert.strictEqual(r.clips.linked, 2);
-    assert.strictEqual(r.clips.skipped, 0);
-    assert.strictEqual(r.clips.missingFile, 0);
-    assert.strictEqual(r.bindings.bound, 1);
-    assert.strictEqual(r.bindings.missingSubject.length, 1);
-    assert.ok(r.bindings.missingSubject[0].includes(worldName));
 
-    assert.ok(store.puts.some((p) => p.key === `audio/music/${worldClipId}.ogg`));
-    assert.ok(store.puts.some((p) => p.key === `audio/ambience/${biomeClipId}.ogg`));
-
-    const rows = await pool.query(
-      'SELECT id, source FROM audio_clips WHERE id = ANY($1) ORDER BY id', [[worldClipId, biomeClipId]],
-    );
-    assert.strictEqual(rows.rowCount, 2);
-    assert.ok(rows.rows.every((row) => row.source === 'seeded'));
-
-    const boundSubjects = await pool.query(
-      'SELECT subject_kind FROM audio_bindings WHERE clip_id = ANY($1)', [[worldClipId, biomeClipId]],
-    );
-    assert.deepStrictEqual(boundSubjects.rows.map((x) => x.subject_kind), ['biome']);
-  });
-
-  await t.test('re-running seedAudio without force skips everything already there', async () => {
-    const r = await seedAudio({
-      db: pool, store, root, log: () => {},
+    await t.test('deleting the clip/binding rows and the world simulates a fresh DB', async () => {
+      await pool.query('DELETE FROM audio_clips WHERE id = ANY($1)', [[worldClipId, biomeClipId]]);
+      await pool.query('DELETE FROM worlds WHERE id = $1', [worldId]);
+      worldId = null; // already gone -- t.after must not try again
     });
-    assert.strictEqual(r.clips.linked, 0);
-    assert.strictEqual(r.clips.skipped, 2);
-    assert.strictEqual(r.bindings.bound, 0);
-  });
 
-  await t.test('force re-links both clips even though the rows already exist', async () => {
-    const r = await seedAudio({
-      db: pool, store, root, force: true, log: () => {},
-    });
-    assert.strictEqual(r.clips.linked, 2);
-    assert.strictEqual(r.clips.skipped, 0);
-  });
+    await t.test('seedAudio recreates both clips, binds only the biome, and flags the missing world', async () => {
+      const r = await seedAudio({
+        db: pool, store, root, log: () => {},
+      });
+      assert.strictEqual(r.clips.linked, 2);
+      assert.strictEqual(r.clips.skipped, 0);
+      assert.strictEqual(r.clips.missingFile, 0);
+      assert.strictEqual(r.bindings.bound, 1);
+      assert.strictEqual(r.bindings.missingSubject.length, 1);
+      assert.ok(r.bindings.missingSubject[0].includes(worldName));
 
-  await t.test('a missing on-disk file is reported, not thrown', async () => {
-    fs.rmSync(path.join(root, worldFile));
-    const r = await seedAudio({
-      db: pool, store, root, force: true, log: () => {},
+      assert.ok(store.puts.some((p) => p.key === `audio/music/${worldClipId}.ogg`));
+      assert.ok(store.puts.some((p) => p.key === `audio/ambience/${biomeClipId}.ogg`));
+
+      const rows = await pool.query(
+        'SELECT id, source FROM audio_clips WHERE id = ANY($1) ORDER BY id', [[worldClipId, biomeClipId]],
+      );
+      assert.strictEqual(rows.rowCount, 2);
+      assert.ok(rows.rows.every((row) => row.source === 'seeded'));
+
+      const boundSubjects = await pool.query(
+        'SELECT subject_kind FROM audio_bindings WHERE clip_id = ANY($1)', [[worldClipId, biomeClipId]],
+      );
+      assert.deepStrictEqual(boundSubjects.rows.map((x) => x.subject_kind), ['biome']);
     });
-    assert.strictEqual(r.clips.missingFile, 1);
-    assert.strictEqual(r.clips.linked, 1);
-    // the biome clip's row is untouched and still resolvable for bindings
-    assert.strictEqual(r.bindings.bound, 0); // already bound from the earlier run
-    assert.strictEqual(r.bindings.missingSubject.length, 1);
+
+    await t.test('re-running seedAudio without force skips everything already there', async () => {
+      const r = await seedAudio({
+        db: pool, store, root, log: () => {},
+      });
+      assert.strictEqual(r.clips.linked, 0);
+      assert.strictEqual(r.clips.skipped, 2);
+      assert.strictEqual(r.bindings.bound, 0);
+    });
+
+    await t.test('force re-links both clips even though the rows already exist', async () => {
+      const r = await seedAudio({
+        db: pool, store, root, force: true, log: () => {},
+      });
+      assert.strictEqual(r.clips.linked, 2);
+      assert.strictEqual(r.clips.skipped, 0);
+    });
+
+    await t.test('a missing on-disk file is reported, not thrown', async () => {
+      fs.rmSync(path.join(root, worldFile));
+      const r = await seedAudio({
+        db: pool, store, root, force: true, log: () => {},
+      });
+      assert.strictEqual(r.clips.missingFile, 1);
+      assert.strictEqual(r.clips.linked, 1);
+      // the biome clip's row is untouched and still resolvable for bindings
+      assert.strictEqual(r.bindings.bound, 0); // already bound from the earlier run
+      assert.strictEqual(r.bindings.missingSubject.length, 1);
+    });
   });
 });
 
@@ -225,77 +230,81 @@ test('audio export/seed round trip', { skip }, async (t) => {
 // `audio-seed` would then skip re-linking them, since they were simply gone).
 test('exportAudio: KIND without ONLY merges, and never truncates, the other kinds already in the manifest', { skip }, async (t) => {
   const pool = new Pool({ connectionString: url });
-  const tag = `${process.pid}-${Date.now()}-i1`;
-  const worldName = `audio-seed-i1-world-${tag}`;
-  const biomeName = `audio-seed-i1-biome-${tag}`;
-  const clipIds = [];
-  let worldId = null;
-  const root = tmpRoot();
-  const OGG = Buffer.from(`OggS-i1-${tag}`);
+  // AUDIO_CLIPS_LOCK_KEY: see advisoryLock.js -- delete-unbound deletes every
+  // unbound clip in the database, so clip-creating bodies are serialized with it.
+  await withAdvisoryLock(pool, AUDIO_CLIPS_LOCK_KEY, async () => {
+    const tag = `${process.pid}-${Date.now()}-i1`;
+    const worldName = `audio-seed-i1-world-${tag}`;
+    const biomeName = `audio-seed-i1-biome-${tag}`;
+    const clipIds = [];
+    let worldId = null;
+    const root = tmpRoot();
+    const OGG = Buffer.from(`OggS-i1-${tag}`);
 
-  t.after(async () => {
-    try {
-      if (clipIds.length) await pool.query('DELETE FROM audio_clips WHERE id = ANY($1)', [clipIds]);
-      if (worldId) await pool.query('DELETE FROM worlds WHERE id = $1', [worldId]).catch(() => {});
-      await pool.query('DELETE FROM biomes WHERE name = $1', [biomeName]);
-    } finally {
-      await pool.end();
-      fs.rmSync(root, { recursive: true, force: true });
+    t.after(async () => {
+      try {
+        if (clipIds.length) await pool.query('DELETE FROM audio_clips WHERE id = ANY($1)', [clipIds]);
+        if (worldId) await pool.query('DELETE FROM worlds WHERE id = $1', [worldId]).catch(() => {});
+        await pool.query('DELETE FROM biomes WHERE name = $1', [biomeName]);
+      } finally {
+        await pool.end();
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    await pool.query('INSERT INTO biomes (name) VALUES ($1)', [biomeName]);
+    worldId = (await pool.query(
+      'INSERT INTO worlds (name, seed, biomes) VALUES ($1, 1, $2::jsonb) RETURNING id',
+      [worldName, JSON.stringify([biomeName])],
+    )).rows[0].id;
+
+    async function insertClip({ kind, label, storageKey }) {
+      const r = await pool.query(
+        `INSERT INTO audio_clips (kind, label, storage_key, bytes, duration_ms, loopable, source)
+         VALUES ($1,$2,$3,$4,$5,$6,'uploaded') RETURNING id`,
+        [kind, label, storageKey, OGG.length, 1000, kind !== 'sfx'],
+      );
+      const id = r.rows[0].id;
+      clipIds.push(id);
+      return id;
     }
-  });
 
-  await pool.query('INSERT INTO biomes (name) VALUES ($1)', [biomeName]);
-  worldId = (await pool.query(
-    'INSERT INTO worlds (name, seed, biomes) VALUES ($1, 1, $2::jsonb) RETURNING id',
-    [worldName, JSON.stringify([biomeName])],
-  )).rows[0].id;
+    const musicKey = `audio/music/rmt_${tag}_music.ogg`;
+    const ambienceKey = `audio/ambience/rmt_${tag}_ambience.ogg`;
+    const musicClipId = await insertClip({ kind: 'music', label: `I1 Music ${tag}`, storageKey: musicKey });
+    const ambienceClipId = await insertClip({ kind: 'ambience', label: `I1 Ambience ${tag}`, storageKey: ambienceKey });
 
-  async function insertClip({ kind, label, storageKey }) {
-    const r = await pool.query(
-      `INSERT INTO audio_clips (kind, label, storage_key, bytes, duration_ms, loopable, source)
-       VALUES ($1,$2,$3,$4,$5,$6,'uploaded') RETURNING id`,
-      [kind, label, storageKey, OGG.length, 1000, kind !== 'sfx'],
+    await pool.query(
+      "INSERT INTO audio_bindings (subject_kind, subject_key, slot, clip_id) VALUES ('world', $1, 'music', $2)",
+      [worldName, musicClipId],
     );
-    const id = r.rows[0].id;
-    clipIds.push(id);
-    return id;
-  }
+    await pool.query(
+      "INSERT INTO audio_bindings (subject_kind, subject_key, slot, clip_id) VALUES ('biome', $1, 'ambience', $2)",
+      [biomeName, ambienceClipId],
+    );
 
-  const musicKey = `audio/music/rmt_${tag}_music.ogg`;
-  const ambienceKey = `audio/ambience/rmt_${tag}_ambience.ogg`;
-  const musicClipId = await insertClip({ kind: 'music', label: `I1 Music ${tag}`, storageKey: musicKey });
-  const ambienceClipId = await insertClip({ kind: 'ambience', label: `I1 Ambience ${tag}`, storageKey: ambienceKey });
+    const store = memStore(new Map([[musicKey, OGG], [ambienceKey, OGG]]));
 
-  await pool.query(
-    "INSERT INTO audio_bindings (subject_kind, subject_key, slot, clip_id) VALUES ('world', $1, 'music', $2)",
-    [worldName, musicClipId],
-  );
-  await pool.query(
-    "INSERT INTO audio_bindings (subject_kind, subject_key, slot, clip_id) VALUES ('biome', $1, 'ambience', $2)",
-    [biomeName, ambienceClipId],
-  );
+    await exportAudio({
+      db: pool, store, root, log: () => {},
+    });
+    const clipsAfterFull = JSON.parse(fs.readFileSync(path.join(root, 'clips.json'), 'utf8'));
+    assert.strictEqual(clipsAfterFull.length, 2, 'both kinds present after the first full export');
 
-  const store = memStore(new Map([[musicKey, OGG], [ambienceKey, OGG]]));
+    await exportAudio({
+      db: pool, store, root, kinds: ['music'], log: () => {},
+    });
 
-  await exportAudio({
-    db: pool, store, root, log: () => {},
+    const clips = JSON.parse(fs.readFileSync(path.join(root, 'clips.json'), 'utf8'));
+    const bindings = JSON.parse(fs.readFileSync(path.join(root, 'bindings.json'), 'utf8'));
+    assert.ok(clips.some((c) => c.id === ambienceClipId), 'ambience clip entry survives a music-only export');
+    assert.ok(clips.some((c) => c.id === musicClipId), 'music clip entry is still there, freshly re-exported');
+    assert.ok(
+      bindings.some((b) => b.clip_id === ambienceClipId && b.subject_key === biomeName),
+      'ambience binding entry survives a music-only export',
+    );
+    assert.ok(bindings.some((b) => b.clip_id === musicClipId && b.subject_key === worldName));
   });
-  const clipsAfterFull = JSON.parse(fs.readFileSync(path.join(root, 'clips.json'), 'utf8'));
-  assert.strictEqual(clipsAfterFull.length, 2, 'both kinds present after the first full export');
-
-  await exportAudio({
-    db: pool, store, root, kinds: ['music'], log: () => {},
-  });
-
-  const clips = JSON.parse(fs.readFileSync(path.join(root, 'clips.json'), 'utf8'));
-  const bindings = JSON.parse(fs.readFileSync(path.join(root, 'bindings.json'), 'utf8'));
-  assert.ok(clips.some((c) => c.id === ambienceClipId), 'ambience clip entry survives a music-only export');
-  assert.ok(clips.some((c) => c.id === musicClipId), 'music clip entry is still there, freshly re-exported');
-  assert.ok(
-    bindings.some((b) => b.clip_id === ambienceClipId && b.subject_key === biomeName),
-    'ambience binding entry survives a music-only export',
-  );
-  assert.ok(bindings.some((b) => b.clip_id === musicClipId && b.subject_key === worldName));
 });
 
 // SOMET-591 review fix round 1, I-2: an `--only=X` export has seen every
@@ -305,88 +314,92 @@ test('exportAudio: KIND without ONLY merges, and never truncates, the other kind
 // clips.json too; a clip still bound to some OTHER, untouched subject is not.
 test('exportAudio: --only drops a subject\'s removed binding and prunes the now-orphaned clip', { skip }, async (t) => {
   const pool = new Pool({ connectionString: url });
-  const tag = `${process.pid}-${Date.now()}-i2`;
-  const worldName = `audio-seed-i2-world-${tag}`;
-  const biomeName = `audio-seed-i2-biome-${tag}`;
-  const clipIds = [];
-  let worldId = null;
-  const root = tmpRoot();
-  const OGG = Buffer.from(`OggS-i2-${tag}`);
+  // AUDIO_CLIPS_LOCK_KEY: see advisoryLock.js -- delete-unbound deletes every
+  // unbound clip in the database, so clip-creating bodies are serialized with it.
+  await withAdvisoryLock(pool, AUDIO_CLIPS_LOCK_KEY, async () => {
+    const tag = `${process.pid}-${Date.now()}-i2`;
+    const worldName = `audio-seed-i2-world-${tag}`;
+    const biomeName = `audio-seed-i2-biome-${tag}`;
+    const clipIds = [];
+    let worldId = null;
+    const root = tmpRoot();
+    const OGG = Buffer.from(`OggS-i2-${tag}`);
 
-  t.after(async () => {
-    try {
-      if (clipIds.length) await pool.query('DELETE FROM audio_clips WHERE id = ANY($1)', [clipIds]);
-      if (worldId) await pool.query('DELETE FROM worlds WHERE id = $1', [worldId]).catch(() => {});
-      await pool.query('DELETE FROM biomes WHERE name = $1', [biomeName]);
-    } finally {
-      await pool.end();
-      fs.rmSync(root, { recursive: true, force: true });
+    t.after(async () => {
+      try {
+        if (clipIds.length) await pool.query('DELETE FROM audio_clips WHERE id = ANY($1)', [clipIds]);
+        if (worldId) await pool.query('DELETE FROM worlds WHERE id = $1', [worldId]).catch(() => {});
+        await pool.query('DELETE FROM biomes WHERE name = $1', [biomeName]);
+      } finally {
+        await pool.end();
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    await pool.query('INSERT INTO biomes (name) VALUES ($1)', [biomeName]);
+    worldId = (await pool.query(
+      'INSERT INTO worlds (name, seed, biomes) VALUES ($1, 1, $2::jsonb) RETURNING id',
+      [worldName, JSON.stringify([biomeName])],
+    )).rows[0].id;
+
+    async function insertClip({ kind, label, storageKey }) {
+      const r = await pool.query(
+        `INSERT INTO audio_clips (kind, label, storage_key, bytes, duration_ms, loopable, source)
+         VALUES ($1,$2,$3,$4,$5,$6,'uploaded') RETURNING id`,
+        [kind, label, storageKey, OGG.length, 1000, kind !== 'sfx'],
+      );
+      const id = r.rows[0].id;
+      clipIds.push(id);
+      return id;
     }
-  });
 
-  await pool.query('INSERT INTO biomes (name) VALUES ($1)', [biomeName]);
-  worldId = (await pool.query(
-    'INSERT INTO worlds (name, seed, biomes) VALUES ($1, 1, $2::jsonb) RETURNING id',
-    [worldName, JSON.stringify([biomeName])],
-  )).rows[0].id;
+    const dKey = `audio/music/rmt_${tag}_d.ogg`;
+    const eKey = `audio/ambience/rmt_${tag}_e.ogg`;
+    // D is bound ONLY to the world (X in the finding); E is bound only to the
+    // biome, which this run's `only` never names, so E must be left alone.
+    const clipDId = await insertClip({ kind: 'music', label: `I2 D ${tag}`, storageKey: dKey });
+    const clipEId = await insertClip({ kind: 'ambience', label: `I2 E ${tag}`, storageKey: eKey });
 
-  async function insertClip({ kind, label, storageKey }) {
-    const r = await pool.query(
-      `INSERT INTO audio_clips (kind, label, storage_key, bytes, duration_ms, loopable, source)
-       VALUES ($1,$2,$3,$4,$5,$6,'uploaded') RETURNING id`,
-      [kind, label, storageKey, OGG.length, 1000, kind !== 'sfx'],
+    await pool.query(
+      "INSERT INTO audio_bindings (subject_kind, subject_key, slot, clip_id) VALUES ('world', $1, 'music', $2)",
+      [worldName, clipDId],
     );
-    const id = r.rows[0].id;
-    clipIds.push(id);
-    return id;
-  }
+    await pool.query(
+      "INSERT INTO audio_bindings (subject_kind, subject_key, slot, clip_id) VALUES ('biome', $1, 'ambience', $2)",
+      [biomeName, clipEId],
+    );
 
-  const dKey = `audio/music/rmt_${tag}_d.ogg`;
-  const eKey = `audio/ambience/rmt_${tag}_e.ogg`;
-  // D is bound ONLY to the world (X in the finding); E is bound only to the
-  // biome, which this run's `only` never names, so E must be left alone.
-  const clipDId = await insertClip({ kind: 'music', label: `I2 D ${tag}`, storageKey: dKey });
-  const clipEId = await insertClip({ kind: 'ambience', label: `I2 E ${tag}`, storageKey: eKey });
+    const store = memStore(new Map([[dKey, OGG], [eKey, OGG]]));
 
-  await pool.query(
-    "INSERT INTO audio_bindings (subject_kind, subject_key, slot, clip_id) VALUES ('world', $1, 'music', $2)",
-    [worldName, clipDId],
-  );
-  await pool.query(
-    "INSERT INTO audio_bindings (subject_kind, subject_key, slot, clip_id) VALUES ('biome', $1, 'ambience', $2)",
-    [biomeName, clipEId],
-  );
+    await exportAudio({
+      db: pool, store, root, log: () => {},
+    });
+    const clipsAfterFull = JSON.parse(fs.readFileSync(path.join(root, 'clips.json'), 'utf8'));
+    assert.strictEqual(clipsAfterFull.length, 2, 'both D and E present after the first full export');
 
-  const store = memStore(new Map([[dKey, OGG], [eKey, OGG]]));
+    // The admin unbinds D from the world in the DB -- D now has zero bindings.
+    await pool.query(
+      "DELETE FROM audio_bindings WHERE subject_kind = 'world' AND subject_key = $1 AND clip_id = $2",
+      [worldName, clipDId],
+    );
 
-  await exportAudio({
-    db: pool, store, root, log: () => {},
+    await exportAudio({
+      db: pool, store, root, only: [worldName], log: () => {},
+    });
+
+    const clips = JSON.parse(fs.readFileSync(path.join(root, 'clips.json'), 'utf8'));
+    const bindings = JSON.parse(fs.readFileSync(path.join(root, 'bindings.json'), 'utf8'));
+    assert.ok(
+      !bindings.some((b) => b.subject_key === worldName && b.clip_id === clipDId),
+      'the removed world -> D binding is gone from bindings.json',
+    );
+    assert.ok(!clips.some((c) => c.id === clipDId), 'D is pruned from clips.json -- nothing binds it any more');
+    assert.ok(clips.some((c) => c.id === clipEId), 'E is untouched: only names the world, not the biome');
+    assert.ok(
+      bindings.some((b) => b.clip_id === clipEId && b.subject_key === biomeName),
+      'E\'s binding to the (untouched) biome survives',
+    );
   });
-  const clipsAfterFull = JSON.parse(fs.readFileSync(path.join(root, 'clips.json'), 'utf8'));
-  assert.strictEqual(clipsAfterFull.length, 2, 'both D and E present after the first full export');
-
-  // The admin unbinds D from the world in the DB -- D now has zero bindings.
-  await pool.query(
-    "DELETE FROM audio_bindings WHERE subject_kind = 'world' AND subject_key = $1 AND clip_id = $2",
-    [worldName, clipDId],
-  );
-
-  await exportAudio({
-    db: pool, store, root, only: [worldName], log: () => {},
-  });
-
-  const clips = JSON.parse(fs.readFileSync(path.join(root, 'clips.json'), 'utf8'));
-  const bindings = JSON.parse(fs.readFileSync(path.join(root, 'bindings.json'), 'utf8'));
-  assert.ok(
-    !bindings.some((b) => b.subject_key === worldName && b.clip_id === clipDId),
-    'the removed world -> D binding is gone from bindings.json',
-  );
-  assert.ok(!clips.some((c) => c.id === clipDId), 'D is pruned from clips.json -- nothing binds it any more');
-  assert.ok(clips.some((c) => c.id === clipEId), 'E is untouched: only names the world, not the biome');
-  assert.ok(
-    bindings.some((b) => b.clip_id === clipEId && b.subject_key === biomeName),
-    'E\'s binding to the (untouched) biome survives',
-  );
 });
 
 // SOMET-591 review fix round 2: I-2's fix introduced its own bug. A touched
@@ -396,77 +409,81 @@ test('exportAudio: --only drops a subject\'s removed binding and prunes the now-
 // binding duplicated, and duplicated again on every repeated only-export.
 test('exportAudio: --only export does not duplicate a clip\'s other bindings, even run repeatedly', { skip }, async (t) => {
   const pool = new Pool({ connectionString: url });
-  const tag = `${process.pid}-${Date.now()}-i3`;
-  const worldAName = `audio-seed-i3-worldA-${tag}`;
-  const worldBName = `audio-seed-i3-worldB-${tag}`;
-  const clipIds = [];
-  let worldAId = null;
-  let worldBId = null;
-  const root = tmpRoot();
-  const OGG = Buffer.from(`OggS-i3-${tag}`);
+  // AUDIO_CLIPS_LOCK_KEY: see advisoryLock.js -- delete-unbound deletes every
+  // unbound clip in the database, so clip-creating bodies are serialized with it.
+  await withAdvisoryLock(pool, AUDIO_CLIPS_LOCK_KEY, async () => {
+    const tag = `${process.pid}-${Date.now()}-i3`;
+    const worldAName = `audio-seed-i3-worldA-${tag}`;
+    const worldBName = `audio-seed-i3-worldB-${tag}`;
+    const clipIds = [];
+    let worldAId = null;
+    let worldBId = null;
+    const root = tmpRoot();
+    const OGG = Buffer.from(`OggS-i3-${tag}`);
 
-  t.after(async () => {
-    try {
-      if (clipIds.length) await pool.query('DELETE FROM audio_clips WHERE id = ANY($1)', [clipIds]);
-      if (worldAId) await pool.query('DELETE FROM worlds WHERE id = $1', [worldAId]).catch(() => {});
-      if (worldBId) await pool.query('DELETE FROM worlds WHERE id = $1', [worldBId]).catch(() => {});
-    } finally {
-      await pool.end();
-      fs.rmSync(root, { recursive: true, force: true });
+    t.after(async () => {
+      try {
+        if (clipIds.length) await pool.query('DELETE FROM audio_clips WHERE id = ANY($1)', [clipIds]);
+        if (worldAId) await pool.query('DELETE FROM worlds WHERE id = $1', [worldAId]).catch(() => {});
+        if (worldBId) await pool.query('DELETE FROM worlds WHERE id = $1', [worldBId]).catch(() => {});
+      } finally {
+        await pool.end();
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    worldAId = (await pool.query(
+      'INSERT INTO worlds (name, seed, biomes) VALUES ($1, 1, $2::jsonb) RETURNING id',
+      [worldAName, JSON.stringify([])],
+    )).rows[0].id;
+    worldBId = (await pool.query(
+      'INSERT INTO worlds (name, seed, biomes) VALUES ($1, 1, $2::jsonb) RETURNING id',
+      [worldBName, JSON.stringify([])],
+    )).rows[0].id;
+
+    async function insertClip({ kind, label, storageKey }) {
+      const r = await pool.query(
+        `INSERT INTO audio_clips (kind, label, storage_key, bytes, duration_ms, loopable, source)
+         VALUES ($1,$2,$3,$4,$5,$6,'uploaded') RETURNING id`,
+        [kind, label, storageKey, OGG.length, 1000, kind !== 'sfx'],
+      );
+      const id = r.rows[0].id;
+      clipIds.push(id);
+      return id;
+    }
+
+    const gKey = `audio/music/rmt_${tag}_g.ogg`;
+    const clipGId = await insertClip({ kind: 'music', label: `I3 G ${tag}`, storageKey: gKey });
+
+    await pool.query(
+      "INSERT INTO audio_bindings (subject_kind, subject_key, slot, clip_id) VALUES ('world', $1, 'music', $2)",
+      [worldAName, clipGId],
+    );
+    await pool.query(
+      "INSERT INTO audio_bindings (subject_kind, subject_key, slot, clip_id) VALUES ('world', $1, 'music', $2)",
+      [worldBName, clipGId],
+    );
+
+    const store = memStore(new Map([[gKey, OGG]]));
+
+    await exportAudio({
+      db: pool, store, root, log: () => {},
+    });
+    const readGBindings = () => JSON.parse(fs.readFileSync(path.join(root, 'bindings.json'), 'utf8'))
+      .filter((b) => b.clip_id === clipGId);
+    assert.strictEqual(readGBindings().length, 2, 'both bindings present after the full export');
+
+    for (let i = 0; i < 3; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await exportAudio({
+        db: pool, store, root, only: [worldAName], log: () => {},
+      });
+      const gBindings = readGBindings();
+      assert.strictEqual(gBindings.length, 2, `exactly one worldA and one worldB entry after only-export #${i + 1}`);
+      assert.strictEqual(gBindings.filter((b) => b.subject_key === worldAName).length, 1, `worldA #${i + 1}`);
+      assert.strictEqual(gBindings.filter((b) => b.subject_key === worldBName).length, 1, `worldB #${i + 1}`);
     }
   });
-
-  worldAId = (await pool.query(
-    'INSERT INTO worlds (name, seed, biomes) VALUES ($1, 1, $2::jsonb) RETURNING id',
-    [worldAName, JSON.stringify([])],
-  )).rows[0].id;
-  worldBId = (await pool.query(
-    'INSERT INTO worlds (name, seed, biomes) VALUES ($1, 1, $2::jsonb) RETURNING id',
-    [worldBName, JSON.stringify([])],
-  )).rows[0].id;
-
-  async function insertClip({ kind, label, storageKey }) {
-    const r = await pool.query(
-      `INSERT INTO audio_clips (kind, label, storage_key, bytes, duration_ms, loopable, source)
-       VALUES ($1,$2,$3,$4,$5,$6,'uploaded') RETURNING id`,
-      [kind, label, storageKey, OGG.length, 1000, kind !== 'sfx'],
-    );
-    const id = r.rows[0].id;
-    clipIds.push(id);
-    return id;
-  }
-
-  const gKey = `audio/music/rmt_${tag}_g.ogg`;
-  const clipGId = await insertClip({ kind: 'music', label: `I3 G ${tag}`, storageKey: gKey });
-
-  await pool.query(
-    "INSERT INTO audio_bindings (subject_kind, subject_key, slot, clip_id) VALUES ('world', $1, 'music', $2)",
-    [worldAName, clipGId],
-  );
-  await pool.query(
-    "INSERT INTO audio_bindings (subject_kind, subject_key, slot, clip_id) VALUES ('world', $1, 'music', $2)",
-    [worldBName, clipGId],
-  );
-
-  const store = memStore(new Map([[gKey, OGG]]));
-
-  await exportAudio({
-    db: pool, store, root, log: () => {},
-  });
-  const readGBindings = () => JSON.parse(fs.readFileSync(path.join(root, 'bindings.json'), 'utf8'))
-    .filter((b) => b.clip_id === clipGId);
-  assert.strictEqual(readGBindings().length, 2, 'both bindings present after the full export');
-
-  for (let i = 0; i < 3; i += 1) {
-    // eslint-disable-next-line no-await-in-loop
-    await exportAudio({
-      db: pool, store, root, only: [worldAName], log: () => {},
-    });
-    const gBindings = readGBindings();
-    assert.strictEqual(gBindings.length, 2, `exactly one worldA and one worldB entry after only-export #${i + 1}`);
-    assert.strictEqual(gBindings.filter((b) => b.subject_key === worldAName).length, 1, `worldA #${i + 1}`);
-    assert.strictEqual(gBindings.filter((b) => b.subject_key === worldBName).length, 1, `worldB #${i + 1}`);
-  }
 });
 
 // SOMET-591 review fix round 2: the dedupe is a stated safety net, not just a
@@ -475,84 +492,88 @@ test('exportAudio: --only export does not duplicate a clip\'s other bindings, ev
 // entry this run's `kinds`/`only` never touches.
 test('exportAudio dedupes bindings.json even when it was already polluted with a duplicate entry', { skip }, async (t) => {
   const pool = new Pool({ connectionString: url });
-  const tag = `${process.pid}-${Date.now()}-i3dupe`;
-  const worldName = `audio-seed-i3dupe-world-${tag}`;
-  const clipIds = [];
-  let worldId = null;
-  const root = tmpRoot();
-  const OGG = Buffer.from(`OggS-i3dupe-${tag}`);
+  // AUDIO_CLIPS_LOCK_KEY: see advisoryLock.js -- delete-unbound deletes every
+  // unbound clip in the database, so clip-creating bodies are serialized with it.
+  await withAdvisoryLock(pool, AUDIO_CLIPS_LOCK_KEY, async () => {
+    const tag = `${process.pid}-${Date.now()}-i3dupe`;
+    const worldName = `audio-seed-i3dupe-world-${tag}`;
+    const clipIds = [];
+    let worldId = null;
+    const root = tmpRoot();
+    const OGG = Buffer.from(`OggS-i3dupe-${tag}`);
 
-  t.after(async () => {
-    try {
-      if (clipIds.length) await pool.query('DELETE FROM audio_clips WHERE id = ANY($1)', [clipIds]);
-      if (worldId) await pool.query('DELETE FROM worlds WHERE id = $1', [worldId]).catch(() => {});
-    } finally {
-      await pool.end();
-      fs.rmSync(root, { recursive: true, force: true });
+    t.after(async () => {
+      try {
+        if (clipIds.length) await pool.query('DELETE FROM audio_clips WHERE id = ANY($1)', [clipIds]);
+        if (worldId) await pool.query('DELETE FROM worlds WHERE id = $1', [worldId]).catch(() => {});
+      } finally {
+        await pool.end();
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    worldId = (await pool.query(
+      'INSERT INTO worlds (name, seed, biomes) VALUES ($1, 1, $2::jsonb) RETURNING id',
+      [worldName, JSON.stringify([])],
+    )).rows[0].id;
+
+    async function insertClip({ kind, label, storageKey }) {
+      const r = await pool.query(
+        `INSERT INTO audio_clips (kind, label, storage_key, bytes, duration_ms, loopable, source)
+         VALUES ($1,$2,$3,$4,$5,$6,'uploaded') RETURNING id`,
+        [kind, label, storageKey, OGG.length, 1000, kind !== 'sfx'],
+      );
+      const id = r.rows[0].id;
+      clipIds.push(id);
+      return id;
     }
-  });
 
-  worldId = (await pool.query(
-    'INSERT INTO worlds (name, seed, biomes) VALUES ($1, 1, $2::jsonb) RETURNING id',
-    [worldName, JSON.stringify([])],
-  )).rows[0].id;
-
-  async function insertClip({ kind, label, storageKey }) {
-    const r = await pool.query(
-      `INSERT INTO audio_clips (kind, label, storage_key, bytes, duration_ms, loopable, source)
-       VALUES ($1,$2,$3,$4,$5,$6,'uploaded') RETURNING id`,
-      [kind, label, storageKey, OGG.length, 1000, kind !== 'sfx'],
+    const musicKey = `audio/music/rmt_${tag}_music.ogg`;
+    const musicClipId = await insertClip({ kind: 'music', label: `I3dupe Music ${tag}`, storageKey: musicKey });
+    await pool.query(
+      "INSERT INTO audio_bindings (subject_kind, subject_key, slot, clip_id) VALUES ('world', $1, 'music', $2)",
+      [worldName, musicClipId],
     );
-    const id = r.rows[0].id;
-    clipIds.push(id);
-    return id;
-  }
 
-  const musicKey = `audio/music/rmt_${tag}_music.ogg`;
-  const musicClipId = await insertClip({ kind: 'music', label: `I3dupe Music ${tag}`, storageKey: musicKey });
-  await pool.query(
-    "INSERT INTO audio_bindings (subject_kind, subject_key, slot, clip_id) VALUES ('world', $1, 'music', $2)",
-    [worldName, musicClipId],
-  );
+    const store = memStore(new Map([[musicKey, OGG]]));
+    await exportAudio({
+      db: pool, store, root, log: () => {},
+    });
 
-  const store = memStore(new Map([[musicKey, OGG]]));
-  await exportAudio({
-    db: pool, store, root, log: () => {},
+    // Hand-pollute both manifests with a duplicate AMBIENCE binding this run
+    // will never touch (kinds:['music']) -- simulating leftover damage a
+    // prior, buggier run already wrote to disk.
+    const dupClipId = '00000000-0000-4000-8000-0000000000aa';
+    const clipsPath = path.join(root, 'clips.json');
+    const bindingsPath = path.join(root, 'bindings.json');
+    const clips = JSON.parse(fs.readFileSync(clipsPath, 'utf8'));
+    clips.push({
+      id: dupClipId,
+      kind: 'ambience',
+      label: 'Polluted',
+      file: 'ambience/polluted.ogg',
+      bytes: 1,
+      duration_ms: 1,
+      loopable: true,
+      loop_start_ms: null,
+      loop_end_ms: null,
+      prompt: null,
+      style_or_cue: null,
+      engine: null,
+      seed: null,
+    });
+    fs.writeFileSync(clipsPath, JSON.stringify(clips, null, 2));
+    const dupBinding = {
+      subject_kind: 'biome', subject_key: `polluted-biome-${tag}`, slot: 'ambience', clip_id: dupClipId, volume: 1, weight: 1, sort: 0,
+    };
+    fs.writeFileSync(bindingsPath, JSON.stringify([dupBinding, dupBinding], null, 2));
+
+    await exportAudio({
+      db: pool, store, root, kinds: ['music'], log: () => {},
+    });
+
+    const bindings = JSON.parse(fs.readFileSync(bindingsPath, 'utf8'));
+    const dupMatches = bindings.filter((b) => b.clip_id === dupClipId);
+    assert.strictEqual(dupMatches.length, 1, 'the pre-existing duplicate is deduped even though this run never touched its kind');
   });
-
-  // Hand-pollute both manifests with a duplicate AMBIENCE binding this run
-  // will never touch (kinds:['music']) -- simulating leftover damage a
-  // prior, buggier run already wrote to disk.
-  const dupClipId = '00000000-0000-4000-8000-0000000000aa';
-  const clipsPath = path.join(root, 'clips.json');
-  const bindingsPath = path.join(root, 'bindings.json');
-  const clips = JSON.parse(fs.readFileSync(clipsPath, 'utf8'));
-  clips.push({
-    id: dupClipId,
-    kind: 'ambience',
-    label: 'Polluted',
-    file: 'ambience/polluted.ogg',
-    bytes: 1,
-    duration_ms: 1,
-    loopable: true,
-    loop_start_ms: null,
-    loop_end_ms: null,
-    prompt: null,
-    style_or_cue: null,
-    engine: null,
-    seed: null,
-  });
-  fs.writeFileSync(clipsPath, JSON.stringify(clips, null, 2));
-  const dupBinding = {
-    subject_kind: 'biome', subject_key: `polluted-biome-${tag}`, slot: 'ambience', clip_id: dupClipId, volume: 1, weight: 1, sort: 0,
-  };
-  fs.writeFileSync(bindingsPath, JSON.stringify([dupBinding, dupBinding], null, 2));
-
-  await exportAudio({
-    db: pool, store, root, kinds: ['music'], log: () => {},
-  });
-
-  const bindings = JSON.parse(fs.readFileSync(bindingsPath, 'utf8'));
-  const dupMatches = bindings.filter((b) => b.clip_id === dupClipId);
-  assert.strictEqual(dupMatches.length, 1, 'the pre-existing duplicate is deduped even though this run never touched its kind');
 });
