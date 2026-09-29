@@ -396,4 +396,144 @@ describe('AudioEngine', () => {
       });
     });
   });
+
+  describe('tickNearby', () => {
+    function creatureMap(list) {
+      const m = new Map();
+      for (const c of list) m.set(c.id, c);
+      return m;
+    }
+
+    it('two creatures of a bound type within range each start their own nearby voice on cadence', async () => {
+      const { engine, sources } = engineWith({
+        'creature/slime/nearby': [{ key: 'slime-nearby.ogg', volume: 1, weight: 1 }],
+      });
+      engine.unlock();
+      const creatures = creatureMap([
+        { id: 1, type: 'slime', x: 50, y: 0 },
+        { id: 2, type: 'slime', x: -50, y: 0 },
+      ]);
+      engine.tickNearby(creatures, [], { x: 0, y: 0 }, 0);
+      await flush(); await flush();
+      expect(sources.length).toBe(2);
+      expect(sources.every((s) => s.buffer && s.buffer.tag === 'u:slime-nearby.ogg')).toBe(true);
+      expect(engine.snapshot().sfx).toMatchObject({ voices: 2, playedTotal: 2, droppedTotal: 0 });
+
+      // Ticking again immediately (< 250ms later, same cadence window) must
+      // not start a third voice for either creature.
+      engine.tickNearby(creatures, [], { x: 0, y: 0 }, 100);
+      await flush(); await flush();
+      expect(sources.length).toBe(2);
+    });
+
+    it('a creature delta row without a type yet is skipped, not crashed on', async () => {
+      const { engine, sources } = engineWith({
+        'creature/slime/nearby': [{ key: 'slime-nearby.ogg', volume: 1, weight: 1 }],
+      });
+      engine.unlock();
+      const creatures = creatureMap([{ id: 1, x: 10, y: 0 }]); // no `type`
+      expect(() => engine.tickNearby(creatures, [], { x: 0, y: 0 }, 0)).not.toThrow();
+      await flush(); await flush();
+      expect(sources.length).toBe(0);
+    });
+
+    it('a creature outside the 8-tile radius produces no voice and no fetch', async () => {
+      const { engine, sources } = engineWith({
+        'creature/slime/nearby': [{ key: 'slime-nearby.ogg', volume: 1, weight: 1 }],
+      });
+      engine.unlock();
+      const creatures = creatureMap([{ id: 1, type: 'slime', x: 5000, y: 0 }]);
+      engine.tickNearby(creatures, [], { x: 0, y: 0 }, 0);
+      await flush(); await flush();
+      expect(sources.length).toBe(0);
+    });
+
+    it('an unbound creature nearby chain plays nothing and records one miss at the most specific key', async () => {
+      // A world/music binding is supplied so setWorld's own _startMusic()
+      // does not add an unrelated miss for this test to filter out (same
+      // trick the playSfxEvents miss test above uses).
+      const { engine, posted } = engineWith({
+        'world/vale/music': [{ key: 'm.ogg', volume: 1, weight: 1 }],
+      });
+      engine.unlock();
+      const creatures = creatureMap([{ id: 1, type: 'wolf', x: 10, y: 0 }]);
+      engine.tickNearby(creatures, [], { x: 0, y: 0 }, 0);
+      await flush(); await flush();
+      await engine.flushMisses();
+      expect(posted).toEqual([{ subject_kind: 'creature', subject_key: 'wolf', slot: 'nearby', world: 'vale' }]);
+    });
+
+    it('a loopable world-point clip loops while in range and fades out on leaving', async () => {
+      const { engine, sources } = engineWith({
+        'world_point/well/nearby': [{ key: 'well-loop.ogg', volume: 1, weight: 1, loopable: true }],
+      });
+      engine.unlock();
+      const point = { id: 'w1', art: 'well', x: 30, y: 0 };
+      engine.tickNearby(new Map(), [point], { x: 0, y: 0 }, 0);
+      await flush(); await flush();
+      expect(sources.length).toBe(1);
+      const loopSrc = sources[0];
+      expect(loopSrc.buffer.tag).toBe('u:well-loop.ogg');
+      expect(loopSrc.loop).toBe(true);
+      expect(loopSrc.started).toBe(true);
+      expect(loopSrc.stopped).toBe(false);
+      expect(engine.snapshot().sfx.voices).toBe(0); // a loop is tracked outside sfxVoices (see nearbyLoops)
+
+      // Still in range on a later tick: must not start a second loop source
+      // for the same point.
+      engine.tickNearby(new Map(), [point], { x: 0, y: 0 }, 300);
+      await flush(); await flush();
+      expect(sources.length).toBe(1);
+
+      // The point leaves the radius: the loop is faded out (stopped) and its
+      // limiter slot freed, so a fresh nearby voice can be admitted.
+      engine.tickNearby(new Map(), [], { x: 0, y: 0 }, 600);
+      await flush(); await flush();
+      expect(loopSrc.stopped).toBe(true);
+    });
+
+    it('an own/nearest sfx event may evict a held nearby voice, and a later own action still lands', async () => {
+      const { engine, sources } = engineWith({
+        'creature/slime/nearby': [{ key: 'slime-nearby.ogg', volume: 1, weight: 1 }],
+        'item/Iron Sword/use': [{ key: 'sword-use.ogg', volume: 1, weight: 1 }],
+      });
+      engine.unlock();
+      engine.sfxLimiter.maxVoices = 1; // force contention over the single slot
+      const creatures = creatureMap([{ id: 1, type: 'slime', x: 10, y: 0 }]);
+      engine.tickNearby(creatures, [], { x: 0, y: 0 }, 0);
+      await flush(); await flush();
+      expect(sources.length).toBe(1); // the nearby voice took the only slot
+
+      engine.playSfxEvents(
+        [{ e: 'use', k: 'melee', s: 'Iron Sword', a: 'p:1', x: 0, y: 0 }],
+        { listener: { x: 0, y: 0 }, ownActor: 'p:1' },
+      );
+      await flush(); await flush();
+      expect(sources.length).toBe(2);
+      expect(sources[0].stopped).toBe(true); // the nearby voice was bumped
+      expect(sources[1].buffer.tag).toBe('u:sword-use.ogg');
+      expect(sources[1].started).toBe(true);
+    });
+
+    it('setWorld stops an active nearby loop, releasing its slot and leaving no leaked source', async () => {
+      const { engine, sources } = engineWith({
+        'world_point/well/nearby': [{ key: 'well-loop.ogg', volume: 1, weight: 1, loopable: true }],
+      });
+      engine.unlock();
+      const point = { id: 'w1', art: 'well', x: 30, y: 0 };
+      engine.tickNearby(new Map(), [point], { x: 0, y: 0 }, 0);
+      await flush(); await flush();
+      expect(sources.length).toBe(1);
+      expect(sources[0].stopped).toBe(false);
+
+      engine.setWorld({ world: 'other', bindings: {} });
+      expect(sources[0].stopped).toBe(true);
+
+      // A fresh 12 voices must be admittable in the new world -- the loop's
+      // slot was actually released, not merely forgotten.
+      for (let i = 0; i < 12; i += 1) {
+        expect(engine.sfxLimiter.admit({ clipKey: `c${i}`, priority: 'nearest', distance: 0 }).ok).toBe(true);
+      }
+    });
+  });
 });
