@@ -70,14 +70,21 @@ async function complete(db, id, clipId) {
   );
 }
 
-async function fail(db, id, error, { retryable = false } = {}) {
+// `refundAttempt` is for a BUSY box (HTTP 409/503, spec §2): "not now" is not
+// a strike against the job, so the attempt claimNext just spent on it is
+// given back (GREATEST(attempts-1,0), same refund requeueOrphans already
+// does for an orphaned row) and it is always requeued -- MAX_ATTEMPTS is a
+// budget for THIS job being bad, and a busy answer says nothing about that.
+async function fail(db, id, error, { retryable = false, refundAttempt = false } = {}) {
   const row = (await db.query('SELECT attempts FROM audio_jobs WHERE id = $1', [id])).rows[0];
-  const retry = retryable && row && row.attempts < MAX_ATTEMPTS;
+  if (!row) return 'failed';
+  const attempts = refundAttempt ? Math.max(row.attempts - 1, 0) : row.attempts;
+  const retry = retryable && (refundAttempt || attempts < MAX_ATTEMPTS);
   await db.query(
-    `UPDATE audio_jobs SET state = $2, last_error = $3, updated_at = now(),
+    `UPDATE audio_jobs SET state = $2, last_error = $3, updated_at = now(), attempts = $5,
             not_before = CASE WHEN $2 = 'queued' THEN now() + ($4::int * interval '1 millisecond') ELSE NULL END
       WHERE id = $1`,
-    [id, retry ? 'queued' : 'failed', String(error).slice(0, 2000), retry ? backoffMs(row.attempts) : 0],
+    [id, retry ? 'queued' : 'failed', String(error).slice(0, 2000), retry ? backoffMs(attempts) : 0, attempts],
   );
   return retry ? 'retry' : 'failed';
 }

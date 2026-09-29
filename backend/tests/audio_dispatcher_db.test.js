@@ -17,6 +17,14 @@ async function waitIdle(timeoutMs = 10000) {
   return d.runStatus();
 }
 
+async function waitForCurrent(subjectKey, timeoutMs = 5000) {
+  const t0 = Date.now();
+  while (!(d.runStatus().current && d.runStatus().current.subject_key === subjectKey)) {
+    if (Date.now() - t0 > timeoutMs) throw new Error(`never saw ${subjectKey} as current`);
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
 // QUEUE TEST ISOLATION (game audio slice 2 common.md): the whole body runs
 // inside AUDIO_JOBS_LOCK_KEY, the same key audio_job_queue_db.test.js uses --
 // node --test runs files in parallel, and a drain here claims ANY queued job,
@@ -31,11 +39,21 @@ test('audio dispatcher', { skip }, async (t) => {
   });
 
   await withAdvisoryLock(pool, AUDIO_JOBS_LOCK_KEY, async () => {
-    // Foreign queued jobs (another file) would be claimed too; park them for
-    // the duration and restore after, touching only their not_before.
-    const foreign = (await pool.query(
-      `UPDATE audio_jobs SET not_before = now() + interval '1 hour' WHERE state = 'queued' AND not_before IS NULL
-         AND subject_key NOT LIKE $1 RETURNING id`, [`${tag}%`])).rows.map((r) => r.id);
+    // Foreign queued jobs (another file) would be claimed too -- including
+    // ones whose backoff already passed (not_before <= now()), not only
+    // never-backed-off ones. Parked for the duration by pushing not_before an
+    // hour out, and restored to their EXACT previous value afterwards (which
+    // may itself have been a past timestamp, not only NULL).
+    const foreignRows = (await pool.query(
+      `SELECT id, not_before FROM audio_jobs
+        WHERE state = 'queued' AND (not_before IS NULL OR not_before <= now())
+          AND subject_key NOT LIKE $1`, [`${tag}%`])).rows;
+    if (foreignRows.length) {
+      await pool.query(
+        `UPDATE audio_jobs SET not_before = now() + interval '1 hour' WHERE id = ANY($1)`,
+        [foreignRows.map((r) => r.id)],
+      );
+    }
 
     try {
       const provider = { id: null, modality: 'audio' };
@@ -73,13 +91,16 @@ test('audio dispatcher', { skip }, async (t) => {
         assert.strictEqual(seeds[`${tag}-m2`], 123);
       });
 
-      await t.test('three consecutive failures trip the breaker; nothing is lost', async () => {
+      await t.test('three consecutive RETRYABLE, non-busy failures trip the breaker; nothing is lost', async () => {
         d.__resetRun();
         seen.length = 0;
         await q.enqueue(pool, [1, 2, 3, 4].map((i) => (
           { subject_kind: 'biome', subject_key: `${tag}-f${i}`, slot: 'ambience', clip_kind: 'ambience' }
         )), {});
-        const failing = { ...baseDeps, generateForSlot: async () => ({ ok: false, error: 'box asleep', retryable: true }) };
+        const failing = {
+          ...baseDeps,
+          generateForSlot: async () => ({ ok: false, error: 'box asleep', retryable: true }), // no status -> not busy
+        };
         d.startDrain(pool, { deps: failing });
         const s = await waitIdle();
         assert.equal(s.stopped_reason, 'breaker');
@@ -89,15 +110,115 @@ test('audio dispatcher', { skip }, async (t) => {
         assert.ok(rows.every((r) => r.state === 'queued'), 'retryable failures went back to the queue with backoff');
       });
 
-      await t.test('an orphaned running row is re-queued at start', async () => {
+      // Runs immediately after the breaker test and clears (then fully
+      // resolves) every `-f*` row's backoff. Left any later, the `-f*` rows
+      // sit with a FUTURE not_before from the breaker test above, and every
+      // subtest here reuses the same instant fake `sleep` -- a later drain
+      // computing its idle wait against that stale future timestamp would
+      // livelock (the fake sleep never advances real wall-clock time, so the
+      // loop just spins claim/nextClaimableAt until real time genuinely
+      // catches up, which blew past this suite's 10s waitIdle budget when
+      // this ran out of order during review).
+      await t.test('an orphaned running row is re-queued (with its attempt refunded) at start', async () => {
         d.__resetRun();
         await pool.query('UPDATE audio_jobs SET not_before = NULL WHERE subject_key LIKE $1', [`${tag}-f%`]);
         await pool.query("UPDATE audio_jobs SET state = 'running', attempts = 1 WHERE subject_key = $1", [`${tag}-f1`]);
         d.startDrain(pool, { deps: baseDeps });
         const s = await waitIdle();
         assert.ok(s.requeued_orphans >= 1);
-        const f1 = (await pool.query('SELECT state FROM audio_jobs WHERE subject_key = $1', [`${tag}-f1`])).rows[0];
+        const f1 = (await pool.query('SELECT state, attempts FROM audio_jobs WHERE subject_key = $1', [`${tag}-f1`])).rows[0];
         assert.equal(f1.state, 'done');
+        // requeueOrphans refunds the orphaned attempt (1 -> 0), then the
+        // drain's own successful reclaim brings it back to exactly 1. If the
+        // refund had not happened this would read 2.
+        assert.equal(f1.attempts, 1, "requeueOrphans refunded the orphan's running attempt before the successful reclaim");
+      });
+
+      await t.test('three consecutive BUSY (409) responses do not trip the breaker; jobs are requeued without spending an attempt, and the drain pauses before claiming again', async () => {
+        d.__resetRun();
+        await q.enqueue(pool, [1, 2, 3].map((i) => (
+          { subject_kind: 'biome', subject_key: `${tag}-busy${i}`, slot: 'ambience', clip_kind: 'ambience' }
+        )), {});
+        const sleeps = [];
+        const busyDeps = {
+          ...baseDeps,
+          sleep: async (ms) => { sleeps.push(ms); },
+          generateForSlot: async () => ({ ok: false, error: 'switch pending', retryable: true, status: 409 }),
+        };
+        d.startDrain(pool, { deps: busyDeps });
+        const t0 = Date.now();
+        while (sleeps.length < 1) {
+          if (Date.now() - t0 > 5000) throw new Error('busy pause was never observed');
+          // eslint-disable-next-line no-await-in-loop
+          await new Promise((r) => setTimeout(r, 5));
+        }
+        d.stopDrain();
+        const s = await waitIdle();
+        assert.equal(s.stopped_reason, 'stopped', 'busy responses must never trip the breaker');
+        const rows = (await pool.query('SELECT state, attempts FROM audio_jobs WHERE subject_key LIKE $1', [`${tag}-busy%`])).rows;
+        assert.equal(rows.length, 3);
+        assert.ok(
+          rows.every((r) => r.state === 'queued' && r.attempts === 0),
+          'busy responses refund the claimed attempt and requeue rather than spending it',
+        );
+        assert.ok(sleeps.length >= 1, 'the drain paused before claiming again after a busy response');
+        // These rows were deliberately left mid-backoff (busy never resolves
+        // them). Deleted immediately rather than at t.after so they cannot
+        // starve a LATER subtest's drain the same way the comment above
+        // describes for `-f*`.
+        await pool.query('DELETE FROM audio_jobs WHERE subject_key LIKE $1', [`${tag}-busy%`]);
+      });
+
+      await t.test('three consecutive NON-RETRYABLE subject failures do not trip the breaker; the jobs end failed', async () => {
+        d.__resetRun();
+        await q.enqueue(pool, [1, 2, 3, 4].map((i) => (
+          { subject_kind: 'biome', subject_key: `${tag}-bad${i}`, slot: 'ambience', clip_kind: 'ambience' }
+        )), {});
+        const badSubject = {
+          ...baseDeps,
+          generateForSlot: async () => ({ ok: false, error: 'unknown style for this subject', retryable: false }),
+        };
+        d.startDrain(pool, { deps: badSubject });
+        const s = await waitIdle();
+        assert.equal(s.stopped_reason, 'empty', 'non-retryable failures must not trip the breaker either');
+        assert.equal(s.failed, 4);
+        const rows = (await pool.query('SELECT state FROM audio_jobs WHERE subject_key LIKE $1', [`${tag}-bad%`])).rows;
+        assert.equal(rows.length, 4);
+        assert.ok(rows.every((r) => r.state === 'failed'), 'a non-retryable failure lands in failed, not queued');
+      });
+
+      await t.test('stopDrain lets the in-flight job finish but claims nothing further', async () => {
+        d.__resetRun();
+        await q.enqueue(pool, [
+          { subject_kind: 'world', subject_key: `${tag}-stop1`, slot: 'music', clip_kind: 'music' },
+          { subject_kind: 'world', subject_key: `${tag}-stop2`, slot: 'music', clip_kind: 'music' },
+        ], {});
+        let release;
+        const gate = new Promise((resolve) => { release = resolve; });
+        const stopDeps = {
+          ...baseDeps,
+          generateForSlot: async (db, p, spec) => {
+            if (spec.subjectKey === `${tag}-stop1`) await gate;
+            return { ok: true, clip: { id: null } };
+          },
+        };
+        d.startDrain(pool, { deps: stopDeps });
+        await waitForCurrent(`${tag}-stop1`);
+        d.stopDrain();
+        release();
+        const s = await waitIdle();
+        assert.equal(s.stopped_reason, 'stopped');
+        assert.equal(s.done, 1);
+        const rows = (await pool.query(
+          'SELECT subject_key, state FROM audio_jobs WHERE subject_key IN ($1, $2)',
+          [`${tag}-stop1`, `${tag}-stop2`],
+        )).rows;
+        const byKey = Object.fromEntries(rows.map((r) => [r.subject_key, r.state]));
+        assert.equal(byKey[`${tag}-stop1`], 'done', 'the in-flight job finished');
+        assert.equal(byKey[`${tag}-stop2`], 'queued', 'no further job was claimed after stop');
+        // stop2 is left queued (never claimed) on purpose -- cleaned up here
+        // rather than at t.after so it cannot be claimed by a later subtest.
+        await pool.query('DELETE FROM audio_jobs WHERE subject_key LIKE $1', [`${tag}-stop%`]);
       });
 
       await t.test('no resolvable provider anywhere stops the drain without burning an attempt', async () => {
@@ -114,7 +235,10 @@ test('audio dispatcher', { skip }, async (t) => {
         assert.deepEqual(row, { state: 'queued', attempts: 0 }, 'the job was never claimed, so it burned no attempt');
       });
     } finally {
-      if (foreign.length) await pool.query('UPDATE audio_jobs SET not_before = NULL WHERE id = ANY($1)', [foreign]);
+      for (const r of foreignRows) {
+        // eslint-disable-next-line no-await-in-loop
+        await pool.query('UPDATE audio_jobs SET not_before = $2 WHERE id = $1', [r.id, r.not_before]);
+      }
     }
   });
 });

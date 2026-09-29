@@ -33,13 +33,29 @@ const audioGeneration = require('./audioGeneration');
 // whatever rate the box answers, wasting attempts on subjects that were fine.
 // Only stopping bounds that; concurrency doesn't apply here since jobs run
 // one at a time already.
-const BREAKER_TRIP = () => parseInt(process.env.AUDIO_BREAKER_TRIP || '3', 10);
+//
+// An unset/blank env var is the normal case (parseInt('', 10) -> NaN) and
+// must fall through to the default rather than making the breaker
+// unreachable; a hand-typed '0' or negative value is a misconfiguration with
+// the same fix.
+function envInt(name, fallback) {
+  const v = parseInt(process.env[name], 10);
+  return Number.isFinite(v) && v > 0 ? v : fallback;
+}
+const BREAKER_TRIP = () => envInt('AUDIO_BREAKER_TRIP', 3);
 
 // The longest the drain will sit waiting for a backoff to expire before
 // looking again. Not a cap on the backoff itself (fail() computes that) --
 // only on how long a single wait goes without rechecking for a stop request
 // or a job whose backoff already passed.
-const MAX_WAIT_MS = () => parseInt(process.env.AUDIO_DRAIN_MAX_WAIT_MS || '60000', 10);
+const MAX_WAIT_MS = () => envInt('AUDIO_DRAIN_MAX_WAIT_MS', 60000);
+
+// The floor under any computed idle wait. Without it, clock skew between
+// this process and Postgres (or a not_before that SKIP LOCKED just barely
+// missed) can compute a wait of 0ms or less, which would turn "sleep until
+// the backoff passes" into a tight claim/nextClaimableAt hot loop against the
+// database instead of an actual wait.
+const MIN_IDLE_WAIT_MS = 250;
 
 // Real defaults. Every DB access, the generate call and the sleep are
 // injected as `deps` so a test can drive the loop without a provider or a
@@ -183,6 +199,15 @@ function startDrain(db, opts = {}) {
 
   (async () => {
     try {
+      // RESTART RECOVERY, BEFORE the NO_PROVIDER precondition. A nodemon
+      // reload (any backend edit) kills a running drain mid-job and leaves
+      // its row stuck in 'running'; requeueing it first means a crash never
+      // loses a job (only costs it one refunded attempt) AND means the
+      // precondition below sees that row as 'queued' -- an orphan whose own
+      // provider_id pin is the only thing that resolves must not be mistaken
+      // for "nothing to run".
+      self.requeuedOrphans = await deps.queue.requeueOrphans(db);
+
       const resolvable = await hasResolvableProvider(db, deps);
       if (!resolvable) {
         const err = new Error(
@@ -191,12 +216,6 @@ function startDrain(db, opts = {}) {
         err.code = 'NO_PROVIDER';
         throw err;
       }
-
-      // RESTART RECOVERY. A nodemon reload (any backend edit) kills a running
-      // drain mid-job; its row is left in 'running' until something notices.
-      // Doing this first, before the first claim, means a crash never loses a
-      // job -- only costs it one refunded attempt.
-      self.requeuedOrphans = await deps.queue.requeueOrphans(db);
 
       for (;;) {
         if (self.stopping) { self.stoppedReason = 'stopped'; break; }
@@ -211,10 +230,8 @@ function startDrain(db, opts = {}) {
           // eslint-disable-next-line no-await-in-loop
           const next = await deps.queue.nextClaimableAt(db);
           if (!next) { self.stoppedReason = 'empty'; break; }
-          const waitMs = Math.min(
-            Math.max(new Date(next).getTime() - deps.now(), 0),
-            MAX_WAIT_MS(),
-          );
+          const rawWaitMs = new Date(next).getTime() - deps.now();
+          const waitMs = Math.min(Math.max(rawWaitMs, MIN_IDLE_WAIT_MS), MAX_WAIT_MS());
           // eslint-disable-next-line no-await-in-loop
           await sleepSliced(waitMs, self, deps);
           if (self.stopping) { self.stoppedReason = 'stopped'; break; }
@@ -270,21 +287,53 @@ function startDrain(db, opts = {}) {
           await deps.queue.complete(db, job.id, result.clip.id);
           self.done += 1;
           consecutiveFailures = 0;
+          self.current = null;
         } else {
+          // BUSY (HTTP 409/503) is the box saying "not now", not "this job is
+          // bad" -- spec §2 draws that line explicitly. It must not spend an
+          // attempt (refundAttempt undoes claimNext's increment) and must not
+          // count toward the breaker: three subjects in a row failing on a
+          // busy box says nothing about whether the box is actually broken,
+          // and tripping on it would stop a drain that only needed to wait a
+          // moment. The drain itself pauses (not just the job's own
+          // not_before) so the very next claim doesn't immediately hammer the
+          // same busy box again.
+          const busy = Boolean(result.retryable) && (result.status === 409 || result.status === 503);
+          if (busy) {
+            // eslint-disable-next-line no-await-in-loop
+            await deps.queue.fail(db, job.id, result.error, { retryable: true, refundAttempt: true });
+            self.retried += 1;
+            self.error = String(result.error);
+            self.current = null;
+            // eslint-disable-next-line no-await-in-loop
+            await sleepSliced(deps.queue.backoffMs(1), self, deps);
+            if (self.stopping) { self.stoppedReason = 'stopped'; break; }
+            continue;
+          }
+
           // eslint-disable-next-line no-await-in-loop
           const outcome = await deps.queue.fail(db, job.id, result.error, {
             retryable: Boolean(result.retryable),
           });
           if (outcome === 'retry') self.retried += 1; else self.failed += 1;
           self.error = String(result.error);
-          consecutiveFailures += 1;
-          if (consecutiveFailures >= BREAKER_TRIP()) {
-            self.stoppedReason = 'breaker';
-            self.current = null;
-            break;
+          self.current = null;
+          // Only a RETRYABLE, non-busy failure counts toward the breaker --
+          // e.g. a transport error, a timeout, some other 5xx. A
+          // non-retryable failure (a pinned-but-disabled provider, bad
+          // input, a subject that no longer exists) says nothing about the
+          // box's health, so it neither trips the breaker nor resets the
+          // counter (only a genuine success does that; three unrelated bad
+          // subjects in a row must not silently reset the count a real
+          // outage is building toward).
+          if (result.retryable) {
+            consecutiveFailures += 1;
+            if (consecutiveFailures >= BREAKER_TRIP()) {
+              self.stoppedReason = 'breaker';
+              break;
+            }
           }
         }
-        self.current = null;
       }
     } catch (err) {
       // Anything that escaped the per-job try/catch above (requeueOrphans,

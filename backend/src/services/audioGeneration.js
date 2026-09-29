@@ -67,7 +67,12 @@ async function generateForSlot(db, provider, spec, { rap = defaultRap, lib = def
   const gen = await rap.generateTrack(provider, {
     kind: clipKind, name: boxTrackName(subjectKind, subjectKey, slot, seed), style, prompt, slots, seed,
   });
-  if (!gen.ok) return { ok: false, error: gen.error, retryable: Boolean(gen.retryable) };
+  // `status` is carried through (undefined when the failure never got an HTTP
+  // response, e.g. a transport error or client-side timeout) so the
+  // dispatcher can tell a busy box (409/503, spec §2) apart from a genuine
+  // retryable failure -- only the box's own status code, not our classification
+  // of it, can make that distinction reliably.
+  if (!gen.ok) return { ok: false, error: gen.error, retryable: Boolean(gen.retryable), status: gen.status };
   const clip = await lib.storeClip(db, {
     buffer: gen.buffer, kind: clipKind, label: `${subjectKey} ${slot}${style ? ` (${style})` : ''}`,
     source: 'generated', providerId: provider.id ?? null, prompt: gen.prompt, styleOrCue: style,

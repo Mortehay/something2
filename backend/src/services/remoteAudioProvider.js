@@ -130,7 +130,14 @@ async function generateTrack(provider, req, { fetchImpl = fetch, sleep = realSle
   const { res, error } = await call(provider, 'GET',
     `/api/audio/${encodeURIComponent(kind)}/${encodeURIComponent(name)}`, undefined, fetchImpl);
   if (error) return { ok: false, retryable: true, error };
-  if (!res.ok) return { ok: false, error: `audio file fetch answered ${res.status}` };
+  if (!res.ok) {
+    return {
+      ok: false,
+      status: res.status,
+      retryable: res.status === 409 || res.status === 503,
+      error: `audio file fetch answered ${res.status}`,
+    };
+  }
   const read = await readCapped(res, AUDIO_SIZE_CAPS[kind] + 1);
   if (read.error) return { ok: false, error: `audio file: ${read.error}` };
   return finish(read.buffer, kind, row, { prompt, seed });
