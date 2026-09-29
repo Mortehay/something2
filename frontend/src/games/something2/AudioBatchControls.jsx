@@ -31,6 +31,11 @@ const Button = styled.button`
 const Secondary = styled(Button)`background: var(--s2-btn-grey);`;
 const Hint = styled.p`color: var(--s2-text-muted); font-size: 0.85rem; margin: 0.25rem 0;`;
 
+// SOMET-591: same tooltip as AudioSlotCard's Suggest/Generate and
+// AudioBatchPanel's Start, so the reason a generation control is disabled
+// reads the same everywhere in the tab.
+const NO_PROVIDER_TITLE = 'No audio provider — add one under AI Providers';
+
 // The slot names a kind can batch, in registry order, sfx excluded (spec:
 // sfx batches arrive in slice 3).
 function kindSlots(group) {
@@ -38,7 +43,7 @@ function kindSlots(group) {
 }
 
 function AudioBatchControls({
-  subjects, selectedSubjects, extraItems, setExtraItems, styleNames,
+  subjects, selectedSubjects, extraItems, setExtraItems, styleNames, canGenerate = true,
 }) {
   const [slotChoice, setSlotChoice] = useState({});
   const [styleChoice, setStyleChoice] = useState({});
@@ -115,7 +120,12 @@ function AudioBatchControls({
           <Secondary type="button" onClick={() => setExtraItems([])}>Clear</Secondary>
         </Hint>
       )}
-      <Button type="button" disabled={items.length === 0 || enqueue.isPending} onClick={onQueue}>
+      <Button
+        type="button"
+        disabled={items.length === 0 || enqueue.isPending || !canGenerate}
+        title={canGenerate ? undefined : NO_PROVIDER_TITLE}
+        onClick={onQueue}
+      >
         {enqueue.isPending ? 'Queuing…' : `Queue ${items.length} job${items.length === 1 ? '' : 's'}`}
       </Button>
     </BatchCard>

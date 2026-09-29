@@ -76,8 +76,14 @@ const Failures = styled.div`
 `;
 
 const GROUP_LABEL = { music: 'Music', ambience: 'Ambience' };
+// SOMET-591: same tooltip AudioSlotCard's Suggest/Generate and
+// AudioBatchControls' Queue use, so only Start (a generation control) is
+// gated -- Stop/Retry failed/Clear stay enabled with no provider.
+const NO_PROVIDER_TITLE = 'No audio provider — add one under AI Providers';
 
-function AudioBatchPanel({ run, stats, recent }) {
+function AudioBatchPanel({
+  run, stats, recent, canGenerate = true,
+}) {
   const start = useStartAudioDrain();
   const stop = useStopAudioDrain();
   const retry = useRetryAudioFailures();
@@ -132,7 +138,8 @@ function AudioBatchPanel({ run, stats, recent }) {
       <Controls>
         <Button
           type="button"
-          disabled={running || start.isPending}
+          disabled={running || start.isPending || !canGenerate}
+          title={canGenerate ? undefined : NO_PROVIDER_TITLE}
           onClick={() => start.mutate()}
         >
           {running ? 'Running…' : 'Start'}

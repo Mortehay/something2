@@ -27,7 +27,7 @@ import {
 import {
   itemsFromMisses, mergeItems, hasBatchActivity,
 } from './audioBatch.js';
-import { useAiProviders } from './useAiProviders.js';
+import { useAiProviders, audioProviderState } from './useAiProviders.js';
 import { useAudioPreview } from './useAudioPreview.js';
 import AdminLoading from './AdminLoading.jsx';
 import AudioBatchPanel from './AudioBatchPanel.jsx';
@@ -109,7 +109,10 @@ function AudioAdmin() {
   const qc = useQueryClient();
   const { subjects, isLoadingSubjects, subjectsError } = useAudioSubjects();
   const { misses } = useAudioMisses();
-  const { activeAudioProvider, isLoadingProviders } = useAiProviders();
+  const { activeAudioProvider, isLoadingProviders, providersError } = useAiProviders();
+  const { canGenerate, banner } = audioProviderState({
+    activeAudioProvider, isLoading: isLoadingProviders, error: providersError,
+  });
   const { run, stats, recent } = useAudioJobs();
   const rows = useMemo(() => slotRows(subjects), [subjects]);
   const [tab, setTab] = useState('subjects');
@@ -195,21 +198,21 @@ function AudioAdmin() {
 
   if (subjectsError) return <Err>{String(subjectsError.message)}</Err>;
 
-  if (!isLoadingSubjects && !isLoadingProviders && !activeAudioProvider) {
-    return (
-      <Wrap>
-        <h2>Audio</h2>
+  return (
+    <Wrap>
+      <h2>Audio</h2>
+      {/* Non-blocking (SOMET-591 fix): the tab below stays usable -- library,
+          upload, bind-from-library, volume/weight/remove, the batch panel's
+          Retry/Clear/Stop, and the misses list all work without a provider.
+          Only the generation controls (Suggest/Generate/Queue/Start) are
+          disabled, via canGenerate threaded down to them. */}
+      {banner === 'none' && (
         <Hint>
           No audio provider — add one under{' '}
           <Link to="/game/settings">AI Providers</Link> with modality Audio.
         </Hint>
-      </Wrap>
-    );
-  }
-
-  return (
-    <Wrap>
-      <h2>Audio</h2>
+      )}
+      {banner === 'error' && <Err>Could not load AI providers.</Err>}
       <Tabs>
         <TabButton type="button" $active={tab === 'subjects'} onClick={() => setTab('subjects')}>Subjects</TabButton>
         <TabButton type="button" $active={tab === 'library'} onClick={() => setTab('library')}>Library</TabButton>
@@ -220,7 +223,9 @@ function AudioAdmin() {
       {tab === 'subjects' && (
         <>
           {isLoadingSubjects && <AdminLoading label="Loading subjects…" inline size={16} />}
-          {hasBatchActivity({ run, stats }) && <AudioBatchPanel run={run} stats={stats} recent={recent} />}
+          {hasBatchActivity({ run, stats }) && (
+            <AudioBatchPanel run={run} stats={stats} recent={recent} canGenerate={canGenerate} />
+          )}
           <Columns>
             <Left>
               <FilterRow>
@@ -324,6 +329,7 @@ function AudioAdmin() {
                   extraItems={extraItems}
                   setExtraItems={setExtraItems}
                   styleNames={styleNames}
+                  canGenerate={canGenerate}
                 />
               ) : (
                 <>
@@ -331,7 +337,7 @@ function AudioAdmin() {
                   {selectedRow && (
                     <>
                       <h3>{selectedRow.label} · {selectedRow.key}</h3>
-                      <SubjectSounds kind={selectedRow.kind} subjectKey={selectedRow.key} />
+                      <SubjectSounds kind={selectedRow.kind} subjectKey={selectedRow.key} canGenerate={canGenerate} />
                     </>
                   )}
                 </>

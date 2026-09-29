@@ -58,6 +58,12 @@ const PromptRow = styled.div`
 const Err = styled.p`color: var(--s2-danger); font-size: 0.8rem; margin: 0.35rem 0 0;`;
 const Hint = styled.p`color: var(--s2-text-muted); font-size: 0.8rem; margin: 0.35rem 0 0;`;
 
+// SOMET-591: shown on Suggest/Generate (here) and the batch Queue/Start
+// buttons (AudioBatchControls.jsx, AudioBatchPanel.jsx) whenever `canGenerate`
+// is false -- the one line of text repeated everywhere a generation control
+// is disabled for lack of a provider.
+const NO_PROVIDER_TITLE = 'No audio provider — add one under AI Providers';
+
 // The "+ From library" picker (SOMET-591): a small inline list, not a modal --
 // it only ever shows clips of THIS slot's clip kind, which keeps it short.
 const Picker = styled.div`
@@ -213,7 +219,7 @@ function AdminLoadingInline() { return <Hint>Loading…</Hint>; }
 // clips from useSubjectSlots. Play/stop are lifted to AudioAdmin so only one
 // preview plays across every card on the page.
 function AudioSlotCard({
-  subject, slot, clipKind, rows, playingId, onPlay, onStop,
+  subject, slot, clipKind, rows, playingId, onPlay, onStop, canGenerate = true,
 }) {
   const propose = useProposeAudio();
   const generate = useGenerateAudio(subject.kind, subject.key, slot);
@@ -296,10 +302,20 @@ function AudioSlotCard({
       </PromptRow>
 
       <Controls>
-        <Secondary type="button" disabled={propose.isPending} onClick={onSuggest}>
+        <Secondary
+          type="button"
+          disabled={propose.isPending || !canGenerate}
+          title={canGenerate ? undefined : NO_PROVIDER_TITLE}
+          onClick={onSuggest}
+        >
           {propose.isPending ? 'Suggesting…' : 'Suggest'}
         </Secondary>
-        <Button type="button" disabled={generating} onClick={onGenerate}>
+        <Button
+          type="button"
+          disabled={generating || !canGenerate}
+          title={canGenerate ? undefined : NO_PROVIDER_TITLE}
+          onClick={onGenerate}
+        >
           {generating ? <>Generating… <Elapsed />s</> : 'Generate'}
         </Button>
         <Secondary type="button" onClick={() => fileRef.current?.click()} disabled={upload.isPending}>

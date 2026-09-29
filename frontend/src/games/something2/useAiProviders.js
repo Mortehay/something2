@@ -18,6 +18,30 @@ export function pickActive(providers, modality) {
     && (p.modality || 'image') === modality) || null;
 }
 
+// SOMET-591 (verification fix): the Audio admin's generation controls (Suggest,
+// Generate, Queue N jobs, Start) need an active audio provider; everything else
+// (upload, library, bind-from-library, remove, volume/weight, retry/clear/stop,
+// the misses list) works without one and must stay usable on a box with no GPU
+// provider configured yet.
+//
+// Pure so it's testable without mounting useAiProviders(), and so AudioAdmin
+// and SubjectSounds (which derives this independently for MapsAdmin/BiomesAdmin,
+// see SubjectSounds.jsx) apply the exact same rule:
+// - a query error is its own banner ("could not load", not "none exists") and
+//   never disables generation -- we don't actually know there isn't one
+// - still loading defaults to enabled, so a slow fetch doesn't flash every
+//   button disabled for a moment before re-enabling them
+// - only a settled fetch with no active audio provider disables generation
+export function audioProviderState({ activeAudioProvider, isLoading, error }) {
+  if (error) {
+    return { canGenerate: true, banner: 'error' };
+  }
+  if (!isLoading && !activeAudioProvider) {
+    return { canGenerate: false, banner: 'none' };
+  }
+  return { canGenerate: true, banner: null };
+}
+
 // SOMET-330. Follows useBiomes.js: one query hook plus a mutation factory.
 //
 // The list is admin-only server-side, so this hook is only mounted from the
