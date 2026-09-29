@@ -143,7 +143,15 @@ module.exports = function audioRoutes(pool) {
       // stay a single clip (`{clip, binding}`) -- callers of the existing
       // shape (e.g. the Audio tab's music/ambience generate button) see no
       // change.
-      if (clipKind === 'sfx') return res.status(201).json({ clips: gen.clips, bindings: gen.bindings });
+      if (clipKind === 'sfx') {
+        const body = { clips: gen.clips, bindings: gen.bindings };
+        // Review round 1, fix 1: a partial store (some variants bound, one or
+        // more failed mid-loop) is still a 201 -- the successful variants are
+        // real and already bound -- but `partial`/`error` must be visible so
+        // the caller does not treat it as identical to a full success.
+        if (gen.partial) { body.partial = true; body.error = gen.error; }
+        return res.status(201).json(body);
+      }
       res.status(201).json({ clip: gen.clip, binding: gen.binding });
     } catch (err) { sendError(res, err); }
   });
