@@ -529,11 +529,12 @@ describe('AudioEngine', () => {
       engine.setWorld({ world: 'other', bindings: {} });
       expect(sources[0].stopped).toBe(true);
 
-      // A fresh 12 voices must be admittable in the new world -- the loop's
-      // slot was actually released, not merely forgotten.
-      for (let i = 0; i < 12; i += 1) {
-        expect(engine.sfxLimiter.admit({ clipKey: `c${i}`, priority: 'nearest', distance: 0 }).ok).toBe(true);
-      }
+      // Fix round 3: same de-vacuoused assertion as the in-flight tests
+      // below -- a loop of 'nearest' admits would all succeed regardless of
+      // whether the slot leaked (an unconditional eviction of a held
+      // 'nearby' voice, not proof of release), so check the limiter's own
+      // bookkeeping directly.
+      expect(engine.sfxLimiter.voices.size).toBe(0);
     });
 
     // Fix round 1, item 1: loops used to share NearbyScheduler's 4-slot cap
@@ -710,11 +711,12 @@ describe('AudioEngine', () => {
         await flush(); await flush();
         expect(sources.length).toBe(0); // never started
 
-        // The limiter slot the in-flight attempt held must have been
-        // released by the sweep's cancellation, not leaked.
-        for (let i = 0; i < 12; i += 1) {
-          expect(engine.sfxLimiter.admit({ clipKey: `c${i}`, priority: 'nearest', distance: 0 }).ok).toBe(true);
-        }
+        // Fix round 3: a loop of 12 'nearest' admits was vacuous here -- the
+        // eviction rules let 'nearest' bump a held 'nearby' voice
+        // unconditionally, so all 12 would have succeeded even if the slot
+        // had leaked (the first admit would simply have evicted it). Assert
+        // the limiter's own bookkeeping directly instead.
+        expect(engine.sfxLimiter.voices.size).toBe(0);
       });
 
       it('setWorld while a loop start is pending prevents it from ever starting, and leaves nothing to leak into the new world', async () => {
@@ -733,11 +735,91 @@ describe('AudioEngine', () => {
         await flush(); await flush();
         expect(sources.length).toBe(0); // never started, in either world
 
-        // A fresh 12 voices must be admittable in the new world -- the
-        // in-flight reservation was actually released, not merely forgotten.
-        for (let i = 0; i < 12; i += 1) {
-          expect(engine.sfxLimiter.admit({ clipKey: `c${i}`, priority: 'nearest', distance: 0 }).ok).toBe(true);
-        }
+        // Fix round 3: same de-vacuoused assertion as the test above --
+        // check the limiter's bookkeeping directly rather than a loop of
+        // 'nearest' admits, which would all succeed regardless (an
+        // unconditional eviction, not proof the slot was actually released).
+        expect(engine.sfxLimiter.voices.size).toBe(0);
+      });
+
+      // Fix round 3 (CRITICAL, same defect class): a stale, already-cancelled
+      // continuation must not wipe a NEWER attempt's marker for the same
+      // point. Repro: point P picks clip A (v1, loading); P leaves range
+      // (sweep cancels v1, deletes P's marker); P returns and this time picks
+      // clip B (v2, marker=v2); THEN A's stale buffer resolves. Before the
+      // fix, v1's cancelled-branch deleted P's marker unconditionally --
+      // wiping v2's still-live entry -- so the next tick started a third
+      // attempt (v3), and v2/v3 could both go on to succeed with
+      // nearbyLoops.set() silently orphaning one of them.
+      it('a stale cancelled attempt must not evict a newer attempt\'s marker (leave/return with a different clip)', async () => {
+        let resolveA, resolveB;
+        const { ctx, sources } = fakeCtx();
+        let randSeq = [];
+        const rand = () => (randSeq.length ? randSeq.shift() : 0);
+        const engine = new AudioEngine({
+          ctxFactory: () => ctx,
+          fetchBytes: async (url) => {
+            if (url.includes('clipA')) return new Promise((resolve) => { resolveA = resolve; });
+            if (url.includes('clipB')) return new Promise((resolve) => { resolveB = resolve; });
+            return new TextEncoder().encode(url).buffer;
+          },
+          urlFor: (k) => `u:${k}`,
+          rand,
+          postMisses: async () => {},
+        });
+        engine.setWorld({
+          world: 'vale',
+          bindings: {
+            // Two clips in one slot's pool -- pickWeighted's draw decides
+            // which one a given resolve+pick lands on (see randSeq below).
+            'world_point/well/nearby': [
+              { key: 'clipA.ogg', volume: 1, weight: 1, loopable: true },
+              { key: 'clipB.ogg', volume: 1, weight: 1, loopable: true },
+            ],
+          },
+        });
+        engine.unlock();
+        const point = { id: 'w1', art: 'well', x: 0, y: 0 };
+
+        // Tick 1: rand()=0 -> pickWeighted's first clip, A. Starts loading (v1).
+        randSeq = [0];
+        engine.tickNearby(new Map(), [point], { x: 0, y: 0 }, 0);
+        await flush();
+        expect(sources.length).toBe(0);
+
+        // Tick 2 (250ms later): the point leaves range -- the sweep cancels
+        // v1's in-flight start (releases its slot, deletes its marker).
+        engine.tickNearby(new Map(), [], { x: 0, y: 0 }, 250);
+        expect(engine.nearbyLoopStarting.size).toBe(0);
+
+        // Tick 3 (250ms later): the point returns. rand()=0.6 -> pickWeighted
+        // lands on the second clip, B, this time. Starts loading (v2).
+        randSeq = [0.6];
+        engine.tickNearby(new Map(), [point], { x: 0, y: 0 }, 500);
+        await flush();
+        expect(sources.length).toBe(0);
+        expect(engine.nearbyLoopStarting.has('pt:w1')).toBe(true); // v2, in flight
+
+        // A's stale, already-cancelled buffer resolves now.
+        resolveA(new TextEncoder().encode('u:clipA.ogg').buffer);
+        await flush(); await flush();
+        expect(sources.length).toBe(0); // A must never start a source
+        expect(engine.nearbyLoopStarting.has('pt:w1')).toBe(true); // v2's marker must survive A's stale cleanup
+
+        // A later tick must NOT start a third attempt: the marker (v2) is
+        // still there, and the point is still in range and not yet looping.
+        engine.tickNearby(new Map(), [point], { x: 0, y: 0 }, 750);
+        await flush();
+
+        // Now B (v2's real, still-pending buffer) resolves.
+        resolveB(new TextEncoder().encode('u:clipB.ogg').buffer);
+        await flush(); await flush();
+
+        expect(sources.length).toBe(1); // exactly one source, ever
+        expect(sources[0].loop).toBe(true);
+        expect(sources[0].buffer.tag).toBe('u:clipB.ogg');
+        expect(engine.nearbyLoops.has('pt:w1')).toBe(true); // tracked, not orphaned
+        expect(engine.nearbyLoopStarting.size).toBe(0);
       });
     });
   });
