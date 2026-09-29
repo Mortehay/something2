@@ -158,10 +158,61 @@ module.exports = function audioRoutes(pool) {
     catch (err) { sendError(res, err); }
   });
 
+  // --- Clip library (SOMET-591, game audio slice 2 §1) ---------------------
+  //
+  // Every stored clip, independent of any subject -- lets an admin reuse a
+  // clip across subjects (bind-from-library, below) or clean up ones nothing
+  // points at. Sits alongside /admin/subjects (which lists SUBJECTS and their
+  // filled slots) rather than replacing it.
+  router.get('/admin/clips', admin, async (req, res) => {
+    const { kind, unbound, limit, offset } = req.query;
+    try {
+      res.json(await lib.listClips(pool, {
+        kind: typeof kind === 'string' ? kind : undefined,
+        unbound: unbound === '1' || unbound === 'true',
+        limit: limit !== undefined ? Number(limit) : undefined,
+        offset: offset !== undefined ? Number(offset) : undefined,
+      }));
+    } catch (err) { sendError(res, err); }
+  });
+
+  // 200 with { deleted, bindings } rather than 204: unlike /admin/bindings/:id
+  // (which deletes a link the caller already knows the shape of), a clip
+  // delete cascades to every binding that pointed at it, and the caller (the
+  // library UI) needs that count to tell the admin what else just vanished.
   router.delete('/admin/clips/:id', admin, async (req, res) => {
     if (!UUID.test(req.params.id)) return res.status(400).json({ error: 'id must be a uuid' });
-    try { return (await lib.deleteClip(pool, req.params.id)) ? res.status(204).end() : res.status(404).json({ error: 'clip not found' }); }
-    catch (err) { sendError(res, err); }
+    try {
+      const result = await lib.deleteClip(pool, req.params.id);
+      return result.deleted ? res.json(result) : res.status(404).json({ error: 'clip not found' });
+    } catch (err) { sendError(res, err); }
+  });
+
+  router.post('/admin/clips/delete-unbound', admin, async (req, res) => {
+    const { kind } = req.body || {};
+    try {
+      res.json(await lib.deleteUnboundClips(pool, { kind: typeof kind === 'string' ? kind : undefined }));
+    } catch (err) { sendError(res, err); }
+  });
+
+  // Bind-from-library: attach an EXISTING clip (already stored, maybe already
+  // bound elsewhere) to another subject/slot, without generating or
+  // uploading a new one. checkSubject does the same subject/slot validation
+  // as generate/upload/propose; bindClip's own clip-kind check (spec §1)
+  // rejects a clip whose kind does not match the slot's.
+  router.post('/admin/bindings', admin, async (req, res) => {
+    const {
+      subject_kind: kind, subject_key: key, slot, clip_id: clipId,
+    } = req.body || {};
+    try {
+      const { error } = await checkSubject(pool, kind, key, slot);
+      if (error) return res.status(400).json({ error });
+      if (typeof clipId !== 'string' || !UUID.test(clipId)) return res.status(400).json({ error: 'clip_id must be a uuid' });
+      const binding = await lib.bindClip(pool, {
+        subjectKind: kind, subjectKey: key, slot, clipId,
+      });
+      res.status(201).json(binding);
+    } catch (err) { sendError(res, err); }
   });
 
   router.get('/admin/misses', admin, async (req, res) => {

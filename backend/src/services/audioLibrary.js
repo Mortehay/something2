@@ -88,8 +88,83 @@ async function unbind(db, id) {
   return (await db.query('DELETE FROM audio_bindings WHERE id = $1', [id])).rowCount > 0;
 }
 
-async function deleteClip(db, clipId) {
-  return (await db.query('DELETE FROM audio_clips WHERE id = $1', [clipId])).rowCount > 0;
+// The clip library (SOMET-591, game audio slice 2 §1): every stored clip,
+// independent of any subject it happens to be bound to, so an admin can reuse
+// a clip across subjects or clean up ones nothing points at any more.
+// `unbound` filters to clips with zero bindings -- the set delete-unbound
+// operates on -- via a LEFT JOIN + HAVING rather than NOT EXISTS, so the same
+// join also produces binding_count for every row in one pass.
+async function listClips(db, {
+  kind, unbound = false, limit = 50, offset = 0,
+} = {}) {
+  const safeLimit = Math.min(Math.max(Number.isInteger(limit) ? limit : 50, 1), 200);
+  const safeOffset = Math.max(Number.isInteger(offset) ? offset : 0, 0);
+  const kindFilter = typeof kind === 'string' && kind ? kind : null;
+  const having = unbound ? 'HAVING COUNT(b.id) = 0' : '';
+  const rows = (await db.query(
+    `SELECT c.*, COUNT(b.id)::int AS binding_count
+       FROM audio_clips c LEFT JOIN audio_bindings b ON b.clip_id = c.id
+      WHERE $1::text IS NULL OR c.kind = $1
+      GROUP BY c.id
+      ${having}
+      ORDER BY c.created_at DESC
+      LIMIT $2 OFFSET $3`,
+    [kindFilter, safeLimit, safeOffset],
+  )).rows;
+  const total = (await db.query(
+    `SELECT COUNT(*)::int AS n FROM (
+       SELECT c.id FROM audio_clips c LEFT JOIN audio_bindings b ON b.clip_id = c.id
+        WHERE $1::text IS NULL OR c.kind = $1
+        GROUP BY c.id
+        ${having}
+     ) t`,
+    [kindFilter],
+  )).rows[0].n;
+  return { rows, total };
+}
+
+// Deletes the clip row (cascading to its bindings) and then its object in the
+// store. The object removal happens AFTER the row is gone and its failure is
+// only logged: the row is the source of truth for what the library shows, and
+// once it is gone a leftover, unreferenced object in the bucket is a cleanup
+// nit, not a correctness problem -- whereas leaving the row in place because
+// the store call failed would keep offering a clip whose bytes may already be
+// unreachable.
+async function deleteClip(db, clipId, { store = assetStore } = {}) {
+  const bindings = (await db.query(
+    'SELECT COUNT(*)::int AS n FROM audio_bindings WHERE clip_id = $1', [clipId],
+  )).rows[0].n;
+  const r = await db.query('DELETE FROM audio_clips WHERE id = $1 RETURNING storage_key', [clipId]);
+  if (r.rowCount === 0) return { deleted: false, bindings: 0 };
+  try {
+    await store.removeObject(r.rows[0].storage_key);
+  } catch (err) {
+    console.error(`deleteClip: failed to remove object ${r.rows[0].storage_key}`, err);
+  }
+  return { deleted: true, bindings };
+}
+
+// Bulk cousin of deleteClip, scoped to clips with zero bindings (spec: never
+// touch a bound clip). One DELETE ... RETURNING does the qualifying and the
+// deleting together -- NOT EXISTS keeps "has no binding" in one place rather
+// than a separate SELECT whose result could go stale before the DELETE runs.
+async function deleteUnboundClips(db, { kind, store = assetStore } = {}) {
+  const kindFilter = typeof kind === 'string' && kind ? kind : null;
+  const r = await db.query(
+    `DELETE FROM audio_clips c
+      WHERE NOT EXISTS (SELECT 1 FROM audio_bindings b WHERE b.clip_id = c.id)
+        AND ($1::text IS NULL OR c.kind = $1)
+      RETURNING storage_key`,
+    [kindFilter],
+  );
+  await Promise.all(r.rows.map(async (row) => {
+    try {
+      await store.removeObject(row.storage_key);
+    } catch (err) {
+      console.error(`deleteUnboundClips: failed to remove object ${row.storage_key}`, err);
+    }
+  }));
+  return { deleted: r.rowCount };
 }
 
 const BINDING_COLUMNS = `b.id AS binding_id, b.subject_kind, b.subject_key, b.slot, b.volume, b.weight,
@@ -189,6 +264,6 @@ async function filledCounts(db) {
 }
 
 module.exports = {
-  AudioInputError, storeClip, bindClip, updateBinding, unbind, deleteClip,
+  AudioInputError, storeClip, bindClip, updateBinding, unbind, listClips, deleteClip, deleteUnboundClips,
   subjectSlots, worldAudioBundle, recordMisses, listMisses, filledCounts, MAX_MISSES_PER_POST,
 };
