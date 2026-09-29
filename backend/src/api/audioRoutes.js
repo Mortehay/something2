@@ -13,7 +13,7 @@ const {
   resolveAudioProvider, contextFor, boxTrackName, generateForSlot,
 } = require('../services/audioGeneration');
 const {
-  SUBJECT_KINDS, MAX_SUBJECT_KEY, slotKind, subjectExists,
+  SUBJECT_KINDS, MAX_SUBJECT_KEY, slotKind, subjectExists, ATTACK_TYPE_CUES, itemCues, skillCues,
 } = require('../services/audioSubjects');
 const { checkClipBuffer } = require('../services/oggInfo');
 const audioJobQueue = require('../services/audioJobQueue');
@@ -66,14 +66,30 @@ module.exports = function audioRoutes(pool) {
     try {
       // One query for filled-slot counts across every subject, not one
       // /admin/slots request per subject -- see filledCounts' own comment.
-      const counts = await lib.filledCounts(pool);
+      // Same reasoning for itemCues: one query for every weapon rather than
+      // one per name.
+      const [counts, items] = await Promise.all([lib.filledCounts(pool), itemCues(pool)]);
       const out = [];
       for (const [kind, def] of Object.entries(SUBJECT_KINDS)) {
-        // eslint-disable-next-line no-await-in-loop
-        out.push({
-          kind, label: def.label, slots: def.slots, subjects: await def.list(pool),
+        const entry = {
+          kind, label: def.label, slots: def.slots,
+          // eslint-disable-next-line no-await-in-loop
+          subjects: await def.list(pool),
           filled: counts[kind] || {},
-        });
+        };
+        // Ruling (game audio slice 3, Task 2): a fixed-cue kind (same map for
+        // every subject -- world/biome carry no sfx slots at all, creature
+        // and world_point are literally fixed) gets `cues`. A kind whose cue
+        // depends on the subject itself gets its own per-subject map instead
+        // -- `${kind}Cues` -- so the shape a client reads is consistent:
+        // `cues` never varies by subject, a `*Cues` field always does.
+        // attack_type's is small and static enough to ship as the shared
+        // ATTACK_TYPE_CUES constant rather than a query.
+        if (def.cues) entry.cues = def.cues;
+        else if (kind === 'attack_type') entry.attackTypeCues = ATTACK_TYPE_CUES;
+        else if (kind === 'item') entry.itemCues = items;
+        else if (kind === 'skill') entry.skillCues = skillCues();
+        out.push(entry);
       }
       res.json(out);
     } catch (err) { sendError(res, err); }
