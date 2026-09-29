@@ -588,6 +588,22 @@ export default function GameSettings({ gameRef }) {
                     style={{ flex: 1, width: '100%', height: 'auto' }}
                   />
                 </Row>
+
+                <Row>
+                  <span className="label" style={{ minWidth: 60 }}>
+                    Sound effects
+                    <span className="hint">{Math.round(volumes.sfx * 100)}%</span>
+                  </span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={volumes.sfx}
+                    onChange={(e) => changeVolume('sfx', e.target.value)}
+                    style={{ flex: 1, width: '100%', height: 'auto' }}
+                  />
+                </Row>
               </>
             )}
           </TabContent>

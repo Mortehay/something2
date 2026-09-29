@@ -9,6 +9,8 @@ import styled from 'styled-components';
 import { useEnqueueAudioJobs } from './useAudioAdmin.js';
 import { buildBatchItems, mergeItems } from './audioBatch.js';
 
+const SFX_ENGINES = [['realistic', 'Realistic'], ['retro', 'Retro']];
+
 const BatchCard = styled.section`
   border: 1px solid var(--s2-border); border-radius: 8px;
   background: var(--s2-surface-raised); padding: 0.75rem 1rem; margin-bottom: 0.75rem;
@@ -30,16 +32,34 @@ const Button = styled.button`
 `;
 const Secondary = styled(Button)`background: var(--s2-btn-grey);`;
 const Hint = styled.p`color: var(--s2-text-muted); font-size: 0.85rem; margin: 0.25rem 0;`;
+const EngineSelect = styled.select`
+  background: var(--s2-bg-sunken); color: var(--s2-text); border: 1px solid var(--s2-border-strong);
+  border-radius: 4px; padding: 0.3rem; font-size: 0.85rem;
+`;
+const SkippedList = styled.ul`
+  list-style: none; margin: 0.5rem 0; padding: 0;
+  li { font-size: 0.78rem; color: var(--s2-text-muted); text-decoration: line-through; padding: 0.1rem 0; }
+`;
 
 // SOMET-591: same tooltip as AudioSlotCard's Suggest/Generate and
 // AudioBatchPanel's Start, so the reason a generation control is disabled
 // reads the same everywhere in the tab.
 const NO_PROVIDER_TITLE = 'No audio provider — add one under AI Providers';
 
-// The slot names a kind can batch, in registry order, sfx excluded (spec:
-// sfx batches arrive in slice 3).
+// The slot names a kind can batch, in registry order. sfx slots are included
+// (game audio slice 3) -- buildBatchItems is what drops the upload-only ones,
+// per subject, since that depends on the subject's own cue map, not the kind.
 function kindSlots(group) {
-  return Object.entries(group.slots || {}).filter(([, clipKind]) => clipKind !== 'sfx').map(([s]) => s);
+  return Object.entries(group.slots || {}).map(([s]) => s);
+}
+
+// Whether a kind's slots are all sfx (creature, world_point, attack_type,
+// item, skill) -- those have no "style" concept (spec §4: sfx is cue-driven,
+// not style/prompt-driven), so the per-kind style override select is only
+// shown for kinds that carry a music/ambience slot.
+function isSfxOnlyKind(group) {
+  const kinds = Object.values(group.slots || {});
+  return kinds.length > 0 && kinds.every((k) => k === 'sfx');
 }
 
 function AudioBatchControls({
@@ -47,7 +67,10 @@ function AudioBatchControls({
 }) {
   const [slotChoice, setSlotChoice] = useState({});
   const [styleChoice, setStyleChoice] = useState({});
+  const [engineChoice, setEngineChoice] = useState('realistic');
   const enqueue = useEnqueueAudioJobs();
+
+  const groups = useMemo(() => new Map(subjects.map((g) => [g.kind, g])), [subjects]);
 
   // Every kind gets an entry -- an untouched kind defaults to ALL its slots
   // ticked, so a fresh admin can select subjects and press Queue without
@@ -66,12 +89,15 @@ function AudioBatchControls({
     return { ...prev, [kind]: current };
   });
 
-  const items = useMemo(() => {
+  const { items, skipped } = useMemo(() => {
     const built = buildBatchItems(selectedSubjects, effectiveSlotChoice, subjects);
-    return mergeItems(built, extraItems).map((it) => (
-      styleChoice[it.subject_kind] ? { ...it, style: styleChoice[it.subject_kind] } : it
-    ));
-  }, [selectedSubjects, effectiveSlotChoice, subjects, extraItems, styleChoice]);
+    const merged = mergeItems(built.items, extraItems).map((it) => {
+      const clipKind = groups.get(it.subject_kind)?.slots?.[it.slot];
+      if (clipKind === 'sfx') return { ...it, engine: engineChoice };
+      return styleChoice[it.subject_kind] ? { ...it, style: styleChoice[it.subject_kind] } : it;
+    });
+    return { items: merged, skipped: built.skipped };
+  }, [selectedSubjects, effectiveSlotChoice, subjects, extraItems, styleChoice, engineChoice, groups]);
 
   const onQueue = () => {
     if (items.length === 0) return;
@@ -88,6 +114,7 @@ function AudioBatchControls({
         const slots = kindSlots(g);
         if (slots.length === 0) return null;
         const chosen = effectiveSlotChoice[g.kind] || new Set(slots);
+        const sfxOnly = isSfxOnlyKind(g);
         return (
           <KindBlock key={g.kind}>
             <h4>{g.label}</h4>
@@ -102,24 +129,47 @@ function AudioBatchControls({
                   {slot}
                 </CheckLabel>
               ))}
-              <StyleSelect
-                value={styleChoice[g.kind] || ''}
-                aria-label={`Style override for ${g.label}`}
-                onChange={(e) => setStyleChoice((prev) => ({ ...prev, [g.kind]: e.target.value }))}
-              >
-                <option value="">Suggest per subject</option>
-                {styleNames.map((s) => <option key={s} value={s}>{s}</option>)}
-              </StyleSelect>
+              {!sfxOnly && (
+                <StyleSelect
+                  value={styleChoice[g.kind] || ''}
+                  aria-label={`Style override for ${g.label}`}
+                  onChange={(e) => setStyleChoice((prev) => ({ ...prev, [g.kind]: e.target.value }))}
+                >
+                  <option value="">Suggest per subject</option>
+                  {styleNames.map((s) => <option key={s} value={s}>{s}</option>)}
+                </StyleSelect>
+              )}
             </SlotToggles>
           </KindBlock>
         );
       })}
+      {skipped.length > 0 && (
+        <SkippedList>
+          {skipped.map((s) => (
+            <li key={`${s.subject_kind}/${s.subject_key}/${s.slot}`}>
+              {s.subject_kind}/{s.subject_key} · {s.slot} — {s.reason}
+            </li>
+          ))}
+        </SkippedList>
+      )}
       {extraItems.length > 0 && (
         <Hint>
           {extraItems.length} item(s) added from Missing sounds.{' '}
           <Secondary type="button" onClick={() => setExtraItems([])}>Clear</Secondary>
         </Hint>
       )}
+      <SlotToggles>
+        <CheckLabel as="span">
+          SFX engine:
+          <EngineSelect
+            value={engineChoice}
+            aria-label="Engine for sfx batch items"
+            onChange={(e) => setEngineChoice(e.target.value)}
+          >
+            {SFX_ENGINES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </EngineSelect>
+        </CheckLabel>
+      </SlotToggles>
       <Button
         type="button"
         disabled={items.length === 0 || enqueue.isPending || !canGenerate}

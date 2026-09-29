@@ -4,22 +4,21 @@
 // running drain.
 
 // Claims order, mirrored from backend/src/services/audioJobQueue.js's
-// DRAIN_ORDER: music before ambience, so the box switches model at most once
-// per group. Kept here as a plain literal (not imported -- the frontend
-// bundle cannot reach into backend/src) because it only decides which group
-// batchProgress reports as "currently draining", never claim order itself.
-const DRAIN_GROUPS = ['music', 'ambience'];
+// DRAIN_ORDER: music, then ambience, then the two SFX packs (realistic
+// before retro), so the box switches model as rarely as possible. Kept here
+// as a plain literal (not imported -- the frontend bundle cannot reach into
+// backend/src) because it only decides which group batchProgress reports as
+// "currently draining", never claim order itself.
+const DRAIN_GROUPS = ['music', 'ambience', 'sfx_realistic', 'sfx_retro'];
 
 // Same order, paired with a display label -- AudioBatchPanel renders its
 // per-group pills from this rather than hardcoding the pair a second time.
-export const DRAIN_GROUPS_LABEL = [['music', 'Music'], ['ambience', 'Ambience']];
-
-// Only these two slot NAMES are batchable today (spec: sfx batches arrive in
-// slice 3). For the subject-tree path (buildBatchItems) the registry's own
-// per-slot clip kind is the source of truth; this set is used only where the
-// input has no clip-kind information at all -- the misses list, which only
-// ever carries a slot's NAME.
-const BATCHABLE_SLOTS = new Set(['music', 'ambience']);
+export const DRAIN_GROUPS_LABEL = [
+  ['music', 'Music'],
+  ['ambience', 'Ambience'],
+  ['sfx_realistic', 'SFX (realistic)'],
+  ['sfx_retro', 'SFX (retro)'],
+];
 
 function dedupeKey(it) {
   return `${it.subject_kind}/${it.subject_key}/${it.slot}`;
@@ -49,12 +48,41 @@ function sortItems(items) {
   });
 }
 
+// A (kind, key, slot) id in the same "kind/key/slot" shape AudioAdmin.jsx's
+// missId uses, so a Set built from one can be tested against the other.
+function subjectSlotId(kind, key, slot) {
+  return `${kind}/${key}/${slot}`;
+}
+
+// Every (kind, key, slot) that is upload-only -- an sfx slot whose cue is
+// `null` in the registry's per-subject cue map (spec §4: "three slots have
+// no cue on the box today"). Built once from GET /admin/subjects' `cues`
+// field so buildBatchItems/itemsFromMisses can skip them without a second
+// request. A kind with no `cues` at all (world, biome -- music/ambience have
+// no cue concept) simply contributes nothing.
+export function uploadOnlySlotIds(subjectsResponse) {
+  const out = new Set();
+  for (const group of subjectsResponse || []) {
+    for (const [key, bySlot] of Object.entries(group.cues || {})) {
+      for (const [slot, cue] of Object.entries(bySlot || {})) {
+        if (cue === null) out.add(subjectSlotId(group.kind, key, slot));
+      }
+    }
+  }
+  return out;
+}
+
 // The ticked subjects (kind/key ids) × the ticked slots per kind, filtered
-// down to slots that ACTUALLY EXIST on that kind and excluding sfx --
-// `slotChoice` is a UI convenience (one set of ticks reused across every
-// selected subject of a kind) and can therefore ask for a slot a given kind
-// doesn't have (e.g. a biome has no music slot); this is what silently drops
-// those requests instead of sending the server an item it would reject.
+// down to slots that ACTUALLY EXIST on that kind -- `slotChoice` is a UI
+// convenience (one set of ticks reused across every selected subject of a
+// kind) and can therefore ask for a slot a given kind doesn't have (e.g. a
+// biome has no music slot); this is what silently drops those requests
+// instead of sending the server an item it would reject.
+//
+// sfx slots are included, EXCEPT upload-only ones (no cue on the provider --
+// spec §4): those are reported in `skipped` with the reason, so the caller
+// can show them struck through instead of silently dropping them the way a
+// stale subject id is dropped below.
 //
 // A ticked id that no longer names a real subject (stale selection after a
 // catalogue edit) is skipped rather than sent -- the same rule
@@ -63,6 +91,7 @@ function sortItems(items) {
 export function buildBatchItems(selectedSubjects, slotChoice, subjectsResponse) {
   const groups = new Map((subjectsResponse || []).map((g) => [g.kind, g]));
   const items = [];
+  const skipped = [];
   for (const id of selectedSubjects || []) {
     const slash = id.indexOf('/');
     if (slash < 0) continue;
@@ -75,19 +104,31 @@ export function buildBatchItems(selectedSubjects, slotChoice, subjectsResponse) 
     const slotDefs = group.slots || {};
     for (const slot of wanted) {
       const clipKind = slotDefs[slot];
-      if (clipKind === undefined || clipKind === 'sfx') continue;
+      if (clipKind === undefined) continue;
+      if (clipKind === 'sfx') {
+        const cue = group.cues && group.cues[key] ? group.cues[key][slot] : undefined;
+        if (cue === null) {
+          skipped.push({
+            subject_kind: kind, subject_key: key, slot, reason: 'upload only: no cue on the provider',
+          });
+          continue;
+        }
+      }
       items.push({ subject_kind: kind, subject_key: key, slot });
     }
   }
-  return sortItems(dedupe(items));
+  return { items: sortItems(dedupe(items)), skipped };
 }
 
-// The missing-sounds rows, narrowed to music/ambience (sfx misses are real
-// but not batchable until slice 3 -- the caller disables their checkbox with
-// that exact sentence, this is the corresponding server-bound filter).
-export function itemsFromMisses(missRows) {
+// The missing-sounds rows, narrowed to whatever `uploadOnlyIds` (from
+// uploadOnlySlotIds, above) marks as upload-only -- sfx misses are now
+// batchable like music/ambience (spec, game audio slice 3), except those. A
+// missing `uploadOnlyIds` (e.g. the registry hasn't loaded yet) blocks
+// nothing, matching buildBatchItems' own "undefined cue is not null" rule.
+export function itemsFromMisses(missRows, uploadOnlyIds) {
+  const blocked = uploadOnlyIds || new Set();
   const items = (missRows || [])
-    .filter((m) => m && BATCHABLE_SLOTS.has(m.slot))
+    .filter((m) => m && !blocked.has(subjectSlotId(m.subject_kind, m.subject_key, m.slot)))
     .map((m) => ({ subject_kind: m.subject_kind, subject_key: m.subject_key, slot: m.slot }));
   return sortItems(dedupe(items));
 }

@@ -73,12 +73,20 @@ export function slotRows(subjects) {
 // The /admin/generate body for one slot card. Suggest's `slots` are the box's
 // values FOR the style it suggested, so they are only sent while the style
 // field still holds that style -- a hand-edited style sends none.
-export function generateBody({ subject, slot, style, prompt, proposal }) {
+//
+// `engine`/`variants` are sfx-only (game audio slice 3): AudioSlotCard omits
+// them entirely for music/ambience slots, so they are undefined there and
+// dropped from the JSON body the same way style/prompt/slots already are.
+export function generateBody({
+  subject, slot, style, prompt, proposal, engine, variants,
+}) {
   return {
     subject_kind: subject.kind, subject_key: subject.key, slot,
     style: style || undefined,
     prompt: prompt || undefined,
     slots: (proposal && proposal.slots && proposal.style === style) ? proposal.slots : undefined,
+    engine: engine || undefined,
+    variants: Number.isInteger(variants) ? variants : undefined,
   };
 }
 
