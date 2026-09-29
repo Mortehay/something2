@@ -13,7 +13,7 @@ const {
   resolveAudioProvider, contextFor, boxTrackName, generateForSlot,
 } = require('../services/audioGeneration');
 const {
-  SUBJECT_KINDS, MAX_SUBJECT_KEY, slotKind, subjectExists, ATTACK_TYPE_CUES, itemCues, skillCues,
+  SUBJECT_KINDS, MAX_SUBJECT_KEY, slotKind, subjectExists,
 } = require('../services/audioSubjects');
 const { checkClipBuffer } = require('../services/oggInfo');
 const audioJobQueue = require('../services/audioJobQueue');
@@ -62,13 +62,20 @@ module.exports = function audioRoutes(pool) {
     } catch (err) { sendError(res, err); }
   });
 
+  // Ruling (game audio slice 3, Task 2, revised in review): every group's
+  // cue map is read the SAME way -- `def.subjectCues(pool)`, if the kind
+  // defines one (see the SUBJECT_KINDS header comment in audioSubjects.js).
+  // No per-kind switch here: a kind with no `subjectCues` (world, biome --
+  // music/ambience have no cue concept) simply gets no `cues` field, and
+  // adding a cue-bearing kind later needs no route change, only a registry
+  // entry. Every group's `cues`, when present, is shaped the same way too:
+  // `{ [subjectKey]: { [slot]: cue|null } }`, whether the underlying rule is
+  // fixed (creature, world_point) or per-subject (attack_type, item, skill).
   router.get('/admin/subjects', admin, async (req, res) => {
     try {
       // One query for filled-slot counts across every subject, not one
       // /admin/slots request per subject -- see filledCounts' own comment.
-      // Same reasoning for itemCues: one query for every weapon rather than
-      // one per name.
-      const [counts, items] = await Promise.all([lib.filledCounts(pool), itemCues(pool)]);
+      const counts = await lib.filledCounts(pool);
       const out = [];
       for (const [kind, def] of Object.entries(SUBJECT_KINDS)) {
         const entry = {
@@ -77,18 +84,8 @@ module.exports = function audioRoutes(pool) {
           subjects: await def.list(pool),
           filled: counts[kind] || {},
         };
-        // Ruling (game audio slice 3, Task 2): a fixed-cue kind (same map for
-        // every subject -- world/biome carry no sfx slots at all, creature
-        // and world_point are literally fixed) gets `cues`. A kind whose cue
-        // depends on the subject itself gets its own per-subject map instead
-        // -- `${kind}Cues` -- so the shape a client reads is consistent:
-        // `cues` never varies by subject, a `*Cues` field always does.
-        // attack_type's is small and static enough to ship as the shared
-        // ATTACK_TYPE_CUES constant rather than a query.
-        if (def.cues) entry.cues = def.cues;
-        else if (kind === 'attack_type') entry.attackTypeCues = ATTACK_TYPE_CUES;
-        else if (kind === 'item') entry.itemCues = items;
-        else if (kind === 'skill') entry.skillCues = skillCues();
+        // eslint-disable-next-line no-await-in-loop
+        if (def.subjectCues) entry.cues = await def.subjectCues(pool);
         out.push(entry);
       }
       res.json(out);

@@ -53,9 +53,28 @@ test('audio subjects: creature/world_point/attack_type/item/skill', { skip }, as
     t.after(async () => {
       try {
         if (clipIds.length) await pool.query('DELETE FROM audio_clips WHERE id = ANY($1)', [clipIds]);
+        // Scoped to the exact (subject_kind, subject_key, slot) triples this
+        // test records via recordMisses below, AND to this test's own unique
+        // `world` tag. subject_key alone (CREATURE/'ranged'/ITEM_MELEE/
+        // SKILL_MELEE) is a real, shared catalog value -- the new subject
+        // kinds validate existence server-side, so there is no synthetic
+        // key to record a miss against instead -- and node --test runs
+        // files in parallel, so an unscoped `subject_key = ANY(...)` delete
+        // could remove a peer test file's miss row for the same subject.
+        // `world` is upserted to whichever caller recorded most recently
+        // (recordMisses' ON CONFLICT ... world = EXCLUDED.world), and
+        // worldName is unique per test run (pid + Date.now()), so adding it
+        // as a fourth condition means this can only ever match the rows
+        // THIS test's own recordMisses call touched.
         await pool.query(
-          'DELETE FROM audio_misses WHERE subject_key = ANY($1)',
-          [[CREATURE, 'ranged', ITEM_MELEE, SKILL_MELEE]],
+          `DELETE FROM audio_misses WHERE world = $4 AND (subject_kind, subject_key, slot) IN (
+             SELECT * FROM unnest($1::text[], $2::text[], $3::text[]))`,
+          [
+            ['creature', 'attack_type', 'item', 'skill'],
+            [CREATURE, 'ranged', ITEM_MELEE, SKILL_MELEE],
+            ['nearby', 'use', 'use', 'use'],
+            worldName,
+          ],
         );
         if (worldId) await pool.query('DELETE FROM worlds WHERE id = $1', [worldId]);
       } finally { await pool.end(); }
