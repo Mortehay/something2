@@ -80,6 +80,39 @@ describe('NearbyScheduler', () => {
     expect(s.tick([a, b], listener).map((d) => d.id)).toEqual(['b']); // 'a' is sounding again per its cadence, not due
   });
 
+  // Fix round 1, item 2.
+  it('a re-entering emitter after leaving range gets a fresh random offset, not an immediate fire', () => {
+    const { s, advance, setRand } = scheduler({ radiusPx: 100, maxVoices: 4, minGapMs: 4000, maxGapMs: 10000 });
+    const e = { id: 'e', key: 'k', x: 10, y: 0 };
+    setRand([0.9]); // seed offset near the top of [0, maxGap] -> nextAt = 9000
+    expect(s.tick([e], listener)).toEqual([]); // in range, not due yet
+
+    advance(15000); // now = 15000 -- well past the stale nextAt of 9000
+    expect(s.tick([], listener)).toEqual([]); // 'e' is out of range (not offered) this tick; its stale schedule is now pruned
+
+    // It returns. Without pruning it would already read as "due"
+    // (15000 >= 9000); with pruning it must be reseeded fresh instead.
+    setRand([0.5]); // fresh seed offset -> nextAt = 15000 + 0.5*10000 = 20000
+    expect(s.tick([e], listener)).toEqual([]); // NOT immediately due
+    advance(4999);
+    expect(s.tick([e], listener)).toEqual([]); // now = 19999, still not due
+    advance(1);
+    expect(s.tick([e], listener)).toHaveLength(1); // now = 20000, due
+  });
+
+  it('a still-sounding emitter is exempt from pruning even when out of range this tick', () => {
+    const { s, advance } = scheduler({ radiusPx: 100, maxVoices: 4, rand: () => 0 });
+    const e = { id: 'e', key: 'k', x: 10, y: 0 };
+    expect(s.tick([e], listener)).toHaveLength(1); // admitted; nextAt pushed to minGap..maxGap out
+    // Reported out of range (or simply not offered) while still playing --
+    // pruning must not drop its cooldown out from under it.
+    advance(1);
+    expect(s.tick([], listener)).toEqual([]);
+    s.ended('e');
+    advance(3998); // just under the 4000ms minGap from the original admission
+    expect(s.tick([e], listener)).toEqual([]); // cooldown survived the out-of-range tick
+  });
+
   it('clear() drops all scheduling state', () => {
     const { s } = scheduler({ radiusPx: 1000, maxVoices: 1, rand: () => 0 });
     const a = { id: 'a', key: 'k', x: 10, y: 0 };

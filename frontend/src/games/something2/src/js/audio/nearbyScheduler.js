@@ -54,12 +54,14 @@ export class NearbyScheduler {
     const lx = (listener && listener.x) || 0;
     const ly = (listener && listener.y) || 0;
     const due = [];
+    const inRangeIds = new Set();
     for (const e of emitters || []) {
       if (!e || e.id == null) continue;
       const dx = (e.x || 0) - lx;
       const dy = (e.y || 0) - ly;
       const distance = Math.hypot(dx, dy);
       if (distance > this.radiusPx) continue;
+      inRangeIds.add(e.id);
       let nextAt = this.nextAt.get(e.id);
       if (nextAt === undefined) {
         nextAt = nowMs + this.rand() * this.maxGapMs;
@@ -78,6 +80,17 @@ export class NearbyScheduler {
     for (const d of admitted) {
       this.sounding.add(d.id);
       this.nextAt.set(d.id, nowMs + this.minGapMs + this.rand() * (this.maxGapMs - this.minGapMs));
+    }
+    // Fix round 1: drop the schedule for anything out of range (or simply not
+    // offered) THIS tick and not currently sounding. Without this, an
+    // emitter that leaves range keeps ticking toward a next-time that is
+    // never checked while it's away; if it re-enters after that time has
+    // already passed, it would fire immediately off a stale schedule instead
+    // of getting a fresh random first offset. A still-sounding emitter is
+    // exempt -- its cooldown (set at admission, above) must survive a
+    // momentary "out of range" reading of an in-progress voice.
+    for (const id of this.nextAt.keys()) {
+      if (!inRangeIds.has(id) && !this.sounding.has(id)) this.nextAt.delete(id);
     }
     return admitted;
   }
