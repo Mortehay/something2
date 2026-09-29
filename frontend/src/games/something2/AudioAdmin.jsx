@@ -25,7 +25,7 @@ import {
   useAudioJobs, SUBJECTS_KEY, MISSES_KEY, ALL_SLOTS_KEY, CLIPS_KEY_PREFIX,
 } from './useAudioAdmin.js';
 import {
-  itemsFromMisses, mergeItems, hasBatchActivity,
+  itemsFromMisses, mergeItems, hasBatchActivity, uploadOnlySlotIds,
 } from './audioBatch.js';
 import { useAiProviders, audioProviderState } from './useAiProviders.js';
 import { useAudioPreview } from './useAudioPreview.js';
@@ -115,6 +115,7 @@ function AudioAdmin() {
   });
   const { run, stats, recent } = useAudioJobs();
   const rows = useMemo(() => slotRows(subjects), [subjects]);
+  const uploadOnly = useMemo(() => uploadOnlySlotIds(subjects), [subjects]);
   const [tab, setTab] = useState('subjects');
   const [filter, setFilter] = useState('');
   const [selected, setSelected] = useState(null);
@@ -162,7 +163,7 @@ function AudioAdmin() {
   });
   const addMissesToBatch = () => {
     const picked = misses.filter((m) => missSelected.has(missId(m)));
-    const items = itemsFromMisses(picked);
+    const items = itemsFromMisses(picked, uploadOnly);
     if (items.length === 0) return;
     setExtraItems((prev) => mergeItems(prev, items));
     setMissSelected(new Set());
@@ -286,7 +287,7 @@ function AudioAdmin() {
                 <ul>
                   {misses.map((m) => {
                     const id = missId(m);
-                    const batchable = m.slot === 'music' || m.slot === 'ambience';
+                    const batchable = !uploadOnly.has(id);
                     return (
                       <MissLi key={id}>
                         {batchMode && (
@@ -294,7 +295,7 @@ function AudioAdmin() {
                             type="checkbox"
                             aria-label={`Select ${id} for the batch`}
                             disabled={!batchable}
-                            title={batchable ? undefined : 'SFX batches arrive in slice 3'}
+                            title={batchable ? undefined : 'Upload only — the provider has no cue for this slot'}
                             checked={missSelected.has(id)}
                             onChange={() => toggleMiss(id)}
                           />

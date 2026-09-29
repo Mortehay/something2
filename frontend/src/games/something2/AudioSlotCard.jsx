@@ -57,6 +57,19 @@ const PromptRow = styled.div`
 `;
 const Err = styled.p`color: var(--s2-danger); font-size: 0.8rem; margin: 0.35rem 0 0;`;
 const Hint = styled.p`color: var(--s2-text-muted); font-size: 0.8rem; margin: 0.35rem 0 0;`;
+const EngineSelect = styled.select`
+  background: var(--s2-bg-sunken); color: var(--s2-text); border: 1px solid var(--s2-border-strong);
+  border-radius: 4px; padding: 0.3rem; font-size: 0.8rem;
+`;
+const VariantsInput = styled.input`
+  width: 3rem; background: var(--s2-bg-sunken); color: var(--s2-text);
+  border: 1px solid var(--s2-border-strong); border-radius: 4px; padding: 0.3rem; font-size: 0.8rem;
+`;
+const InlineLabel = styled.label`display: flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; color: var(--s2-text-muted);`;
+
+// The two engines the box offers for sfx (spec §4): realistic is the
+// default, retro is cheaper (no model load) but lower fidelity.
+const SFX_ENGINES = [['realistic', 'Realistic'], ['retro', 'Retro']];
 
 // SOMET-591: shown on Suggest/Generate (here) and the batch Queue/Start
 // buttons (AudioBatchControls.jsx, AudioBatchPanel.jsx) whenever `canGenerate`
@@ -218,14 +231,23 @@ function AdminLoadingInline() { return <Hint>Loading…</Hint>; }
 // the registry entry (useAudioAdmin.slotRows); `rows` are this slot's bound
 // clips from useSubjectSlots. Play/stop are lifted to AudioAdmin so only one
 // preview plays across every card on the page.
+//
+// `cue` (game audio slice 3) is this subject's cue for THIS slot, from the
+// registry's `cues` map (undefined for a music/ambience slot, which has no
+// cue concept at all): `null` means upload-only (spec §4 -- three slots have
+// no cue on the box today), any string means the slot can generate.
 function AudioSlotCard({
-  subject, slot, clipKind, rows, playingId, onPlay, onStop, canGenerate = true,
+  subject, slot, clipKind, rows, playingId, onPlay, onStop, canGenerate = true, cue,
 }) {
+  const isSfx = clipKind === 'sfx';
+  const uploadOnly = isSfx && cue === null;
   const propose = useProposeAudio();
   const generate = useGenerateAudio(subject.kind, subject.key, slot);
   const upload = useUploadAudio();
   const [style, setStyle] = useState('');
   const [prompt, setPrompt] = useState('');
+  const [engine, setEngine] = useState('realistic');
+  const [variants, setVariants] = useState(1);
   // What Suggest returned: its style and the box slots for THAT style.
   const [proposal, setProposal] = useState(null);
   const [showPicker, setShowPicker] = useState(false);
@@ -254,9 +276,9 @@ function AudioSlotCard({
   };
 
   const onGenerate = () => {
-    generate.mutate(generateBody({
-      subject, slot, style, prompt, proposal,
-    }));
+    generate.mutate(generateBody(isSfx
+      ? { subject, slot, engine, variants }
+      : { subject, slot, style, prompt, proposal }));
   };
 
   const onUpload = (e) => {
@@ -286,38 +308,73 @@ function AudioSlotCard({
       </ClipList>
       {rows.length === 0 && <Hint>No clips bound to this slot yet.</Hint>}
 
-      <PromptRow>
-        <input
-          value={style}
-          onChange={(e) => setStyle(e.target.value)}
-          placeholder="style"
-          aria-label={`Style for ${slot}`}
-        />
-        <input
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          placeholder="prompt"
-          aria-label={`Prompt for ${slot}`}
-        />
-      </PromptRow>
+      {uploadOnly && <Hint>Upload only — the provider has no cue for this slot.</Hint>}
+
+      {/* Style/prompt and Suggest are music/ambience-only (spec §4): sfx
+          generation is cue-driven, with no free prompt to suggest. */}
+      {!isSfx && (
+        <PromptRow>
+          <input
+            value={style}
+            onChange={(e) => setStyle(e.target.value)}
+            placeholder="style"
+            aria-label={`Style for ${slot}`}
+          />
+          <input
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder="prompt"
+            aria-label={`Prompt for ${slot}`}
+          />
+        </PromptRow>
+      )}
 
       <Controls>
-        <Secondary
-          type="button"
-          disabled={propose.isPending || !canGenerate}
-          title={canGenerate ? undefined : NO_PROVIDER_TITLE}
-          onClick={onSuggest}
-        >
-          {propose.isPending ? 'Suggesting…' : 'Suggest'}
-        </Secondary>
-        <Button
-          type="button"
-          disabled={generating || !canGenerate}
-          title={canGenerate ? undefined : NO_PROVIDER_TITLE}
-          onClick={onGenerate}
-        >
-          {generating ? <>Generating… <Elapsed />s</> : 'Generate'}
-        </Button>
+        {!isSfx && (
+          <Secondary
+            type="button"
+            disabled={propose.isPending || !canGenerate}
+            title={canGenerate ? undefined : NO_PROVIDER_TITLE}
+            onClick={onSuggest}
+          >
+            {propose.isPending ? 'Suggesting…' : 'Suggest'}
+          </Secondary>
+        )}
+        {isSfx && !uploadOnly && (
+          <>
+            <InlineLabel>
+              Engine
+              <EngineSelect
+                value={engine}
+                aria-label={`Engine for ${slot}`}
+                onChange={(e) => setEngine(e.target.value)}
+              >
+                {SFX_ENGINES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </EngineSelect>
+            </InlineLabel>
+            <InlineLabel>
+              Variants
+              <VariantsInput
+                type="number" min={1} max={5} value={variants}
+                aria-label={`Variants for ${slot}`}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  if (Number.isInteger(n) && n >= 1 && n <= 5) setVariants(n);
+                }}
+              />
+            </InlineLabel>
+          </>
+        )}
+        {!uploadOnly && (
+          <Button
+            type="button"
+            disabled={generating || !canGenerate}
+            title={canGenerate ? undefined : NO_PROVIDER_TITLE}
+            onClick={onGenerate}
+          >
+            {generating ? <>Generating… <Elapsed />s</> : 'Generate'}
+          </Button>
+        )}
         <Secondary type="button" onClick={() => fileRef.current?.click()} disabled={upload.isPending}>
           {upload.isPending ? 'Uploading…' : 'Upload .ogg'}
         </Secondary>

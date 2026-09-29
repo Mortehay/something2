@@ -66,6 +66,11 @@ function SubjectSounds({
 
   const slots = subjectSlotsFor(subjects, kind);
   const subject = { kind, key: subjectKey };
+  // The registry's per-subject cue map (game audio slice 3): undefined for a
+  // kind with no `cues` at all (world, biome), which AudioSlotCard reads the
+  // same way as "not sfx, ignore this prop".
+  const group = (subjects || []).find((g) => g.kind === kind);
+  const cues = (group && group.cues && group.cues[subjectKey]) || {};
 
   return (
     <Wrap>
@@ -90,6 +95,7 @@ function SubjectSounds({
           onPlay={preview.play}
           onStop={preview.stop}
           canGenerate={canGenerate}
+          cue={cues[s.slot]}
         />
       ))}
     </Wrap>

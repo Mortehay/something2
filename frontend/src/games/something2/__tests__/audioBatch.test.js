@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildBatchItems, itemsFromMisses, mergeItems, batchProgress, shouldPoll, hasBatchActivity,
-  subjectSlotsFor, queuedToDiscard, runStopWarning, groupRunningText,
+  subjectSlotsFor, queuedToDiscard, runStopWarning, groupRunningText, uploadOnlySlotIds,
 } from '../audioBatch.js';
 
 const subjects = [
@@ -9,21 +9,74 @@ const subjects = [
   { kind: 'biome', slots: { ambience: 'ambience' }, subjects: ['Meadow'] },
 ];
 
+// A creature kind carrying sfx slots, two of which (nearby/attack) have no
+// cue on the box today (spec §4) -- exercises the upload-only skip path.
+const subjectsWithSfx = [
+  ...subjects,
+  {
+    kind: 'creature',
+    slots: { nearby: 'sfx', attack: 'sfx', hurt: 'sfx', death: 'sfx' },
+    subjects: ['Slime'],
+    cues: { Slime: { nearby: null, attack: null, hurt: 'hit', death: 'death' } },
+  },
+];
+
 describe('audioBatch', () => {
   it('builds kind×slot items for the ticked subjects only, deduped and ordered', () => {
-    const items = buildBatchItems(new Set(['world/Vale', 'biome/Meadow', 'biome/Nope']),
+    const { items, skipped } = buildBatchItems(new Set(['world/Vale', 'biome/Meadow', 'biome/Nope']),
       { world: new Set(['music', 'ambience']), biome: new Set(['ambience', 'music']) }, subjects);
     expect(items).toEqual([
       { subject_kind: 'biome', subject_key: 'Meadow', slot: 'ambience' },
       { subject_kind: 'world', subject_key: 'Vale', slot: 'ambience' },
       { subject_kind: 'world', subject_key: 'Vale', slot: 'music' },
     ]);
+    expect(skipped).toEqual([]);
   });
-  it('takes only music/ambience misses and merges without duplicates', () => {
+
+  // Game audio slice 3, Task 8, Step 1: sfx slots are now batchable, except
+  // upload-only ones (no cue on the provider), which are reported separately
+  // instead of silently vanishing.
+  it('keeps sfx slots, drops upload-only ones, and records them in skipped', () => {
+    const { items, skipped } = buildBatchItems(
+      new Set(['creature/Slime']),
+      { creature: new Set(['nearby', 'attack', 'hurt', 'death']) },
+      subjectsWithSfx,
+    );
+    expect(items).toEqual([
+      { subject_kind: 'creature', subject_key: 'Slime', slot: 'death' },
+      { subject_kind: 'creature', subject_key: 'Slime', slot: 'hurt' },
+    ]);
+    expect(skipped).toEqual([
+      { subject_kind: 'creature', subject_key: 'Slime', slot: 'nearby', reason: 'upload only: no cue on the provider' },
+      { subject_kind: 'creature', subject_key: 'Slime', slot: 'attack', reason: 'upload only: no cue on the provider' },
+    ]);
+  });
+
+  it('takes music/ambience and non-upload-only sfx misses, merges without duplicates', () => {
     const m = itemsFromMisses([{ subject_kind: 'biome', subject_key: 'Meadow', slot: 'ambience' },
-      { subject_kind: 'creature', subject_key: 'Slime', slot: 'hurt' }]);
-    expect(m).toEqual([{ subject_kind: 'biome', subject_key: 'Meadow', slot: 'ambience' }]);
-    expect(mergeItems(m, m)).toHaveLength(1);
+      { subject_kind: 'creature', subject_key: 'Slime', slot: 'hurt' },
+      { subject_kind: 'creature', subject_key: 'Slime', slot: 'nearby' }],
+    uploadOnlySlotIds(subjectsWithSfx));
+    expect(m).toEqual([
+      { subject_kind: 'biome', subject_key: 'Meadow', slot: 'ambience' },
+      { subject_kind: 'creature', subject_key: 'Slime', slot: 'hurt' },
+    ]);
+    expect(mergeItems(m, m)).toHaveLength(2);
+  });
+
+  it('itemsFromMisses blocks nothing when no upload-only set is given', () => {
+    const m = itemsFromMisses([{ subject_kind: 'creature', subject_key: 'Slime', slot: 'nearby' }]);
+    expect(m).toEqual([{ subject_kind: 'creature', subject_key: 'Slime', slot: 'nearby' }]);
+  });
+
+  it('uploadOnlySlotIds collects every null-cue (kind, key, slot) and ignores kinds with no cues', () => {
+    const ids = uploadOnlySlotIds(subjectsWithSfx);
+    expect(ids.has('creature/Slime/nearby')).toBe(true);
+    expect(ids.has('creature/Slime/attack')).toBe(true);
+    expect(ids.has('creature/Slime/hurt')).toBe(false);
+    expect(ids.has('creature/Slime/death')).toBe(false);
+    expect(uploadOnlySlotIds(subjects).size).toBe(0);
+    expect(uploadOnlySlotIds(undefined).size).toBe(0);
   });
   it('reports progress and the group being drained', () => {
     const stats = { groups: { music: { queued: 0, running: 1, done: 2, failed: 0 }, ambience: { queued: 3, running: 0, done: 0, failed: 1 } }, backoff: 0 };
