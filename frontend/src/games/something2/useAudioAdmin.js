@@ -6,11 +6,24 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { authHeaders, apiFetch } from './src/js/net/auth.js';
+import { shouldPoll } from './audioBatch.js';
 import { API_URL } from '../../config.js';
 
-const SUBJECTS_KEY = ['audio-subjects'];
-const MISSES_KEY = ['audio-misses'];
+export const SUBJECTS_KEY = ['audio-subjects'];
+export const MISSES_KEY = ['audio-misses'];
+export const JOBS_KEY = ['audio-jobs'];
+// The clip library's cache prefix. Queried alone (no kind/unbound/page) so a
+// mutation can invalidate every page/filter combo in one call --
+// invalidateQueries matches by key PREFIX unless `exact: true`.
+const CLIPS_KEY_PREFIX = ['audio-clips'];
+const clipsKey = (kind, unbound, page) => [...CLIPS_KEY_PREFIX, kind || null, Boolean(unbound), page || 1];
 const slotsKey = (kind, key) => ['audio-slots', kind, key];
+// Every audio-slots query, regardless of subject -- a clip delete or a
+// bind-from-library cannot know in advance which subjects it touched (a clip
+// can be bound to more than one), so mutations that only learn "N bindings
+// changed" invalidate the whole prefix rather than guessing subjects.
+const ALL_SLOTS_KEY = ['audio-slots'];
+const CLIPS_PAGE_SIZE = 20;
 
 async function getJson(url, what) {
   const res = await apiFetch(url, { headers: authHeaders() });
@@ -209,6 +222,224 @@ export function useUnbind() {
       qc.invalidateQueries({ queryKey: slotsKey(subjectKind, subjectKey) });
       qc.invalidateQueries({ queryKey: MISSES_KEY });
       qc.invalidateQueries({ queryKey: SUBJECTS_KEY });
+    },
+    onError: (err) => toast.error(err.message),
+  });
+}
+
+// --- Batch jobs (SOMET-591, game audio slice 2) ---------------------------
+//
+// GET /api/audio/admin/jobs returns { run, stats, recent } in one shot --
+// audioBatch.js's shouldPoll/batchProgress both take exactly that shape, so
+// it is handed through untouched rather than reassembled here.
+export function useAudioJobs() {
+  const { data, isLoading, error } = useQuery({
+    queryKey: JOBS_KEY,
+    // `q.state.data` IS the { run, stats, recent } the last successful fetch
+    // returned -- shouldPoll reads run/stats straight off it. Undefined
+    // before the first fetch resolves to `false` inside shouldPoll (both
+    // destructured fields are undefined), so the first render polls once and
+    // then waits for that response before deciding whether to continue.
+    refetchInterval: (q) => (shouldPoll(q.state.data || {}) ? 2000 : false),
+    queryFn: () => getJson(`${API_URL}/api/audio/admin/jobs`, 'the audio batch queue'),
+  });
+  return {
+    run: data?.run || null,
+    stats: data?.stats || { groups: {}, backoff: 0 },
+    recent: data?.recent || [],
+    isLoadingJobs: isLoading,
+    jobsError: error || null,
+  };
+}
+
+export function useEnqueueAudioJobs() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ items, providerId }) => {
+      const { res, json } = await post('/api/audio/admin/jobs', {
+        items, start: true, provider_id: Number.isInteger(providerId) ? providerId : undefined,
+      });
+      if (!res.ok) throw new Error(json.error || 'Failed to queue the batch');
+      return json;
+    },
+    onSuccess: (json) => {
+      const queued = (json.queued || []).length;
+      const already = (json.already_live || []).length;
+      const rejected = (json.rejected || []).length;
+      const parts = [`Queued ${queued} job(s)`];
+      if (already) parts.push(`${already} already in flight`);
+      if (rejected) parts.push(`${rejected} rejected`);
+      if (json.started === false && json.reason === 'no_provider') {
+        parts.push('no audio provider -- press Start once one is active');
+      }
+      if (queued > 0 || already > 0) toast.success(parts.join(' — '));
+      else toast.error(parts.join(' — '));
+      qc.invalidateQueries({ queryKey: JOBS_KEY });
+    },
+    onError: (err) => toast.error(err.message),
+  });
+}
+
+export function useStartAudioDrain() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const { res, json } = await post('/api/audio/admin/jobs/dispatch', {});
+      // 409 is an admin pressing Start twice (or another tab already did) --
+      // not a fault, same reading useStartArtBatch gives it.
+      if (res.status === 409) throw new Error(json.error || 'A batch is already running');
+      if (res.status === 503) throw new Error(json.error || 'No active audio provider');
+      if (!res.ok) throw new Error(json.error || 'Failed to start the batch');
+      return json;
+    },
+    onSuccess: () => {
+      toast.success('Batch started');
+      qc.invalidateQueries({ queryKey: JOBS_KEY });
+    },
+    onError: (err) => toast.error(err.message),
+  });
+}
+
+export function useStopAudioDrain() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => (await post('/api/audio/admin/jobs/stop', {})).json,
+    onSuccess: (run) => {
+      // The job in flight is allowed to finish; saying so stops an admin
+      // pressing Stop again while nothing visibly changes yet.
+      toast.success(run.stopping ? 'Stopping after the current job' : 'Nothing is running');
+      qc.invalidateQueries({ queryKey: JOBS_KEY });
+    },
+    onError: (err) => toast.error(err.message),
+  });
+}
+
+export function useRetryAudioFailures() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const { res, json } = await post('/api/audio/admin/jobs/retry-failed', {});
+      if (!res.ok) throw new Error(json.error || 'Failed to retry the failed jobs');
+      return json;
+    },
+    onSuccess: ({ requeued }) => {
+      toast.success(requeued ? `${requeued} job(s) returned to the queue` : 'Nothing to retry');
+      qc.invalidateQueries({ queryKey: JOBS_KEY });
+    },
+    onError: (err) => toast.error(err.message),
+  });
+}
+
+// `states` defaults to undefined -- the server's own default clears
+// queued+failed+done, which the route already refuses (409) while a drain is
+// running. The panel's "Clear finished" button passes ['done', 'failed']
+// explicitly so it never touches a still-queued job.
+export function useClearAudioJobs() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (states) => {
+      const { res, json } = await post('/api/audio/admin/jobs/clear', states ? { states } : {});
+      if (res.status === 409) throw new Error(json.error || 'A batch is running -- stop it first');
+      if (!res.ok) throw new Error(json.error || 'Failed to clear the queue');
+      return json;
+    },
+    onSuccess: ({ cleared }) => {
+      toast.success(cleared ? `Cleared ${cleared} job(s)` : 'Nothing to clear');
+      qc.invalidateQueries({ queryKey: JOBS_KEY });
+    },
+    onError: (err) => toast.error(err.message),
+  });
+}
+
+// --- Clip library (SOMET-591) ----------------------------------------------
+
+export function useAudioClips({ kind, unbound, page = 1 } = {}) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: clipsKey(kind, unbound, page),
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (kind) params.set('kind', kind);
+      if (unbound) params.set('unbound', '1');
+      params.set('limit', String(CLIPS_PAGE_SIZE));
+      params.set('offset', String((Math.max(page, 1) - 1) * CLIPS_PAGE_SIZE));
+      return getJson(`${API_URL}/api/audio/admin/clips?${params}`, 'the clip library');
+    },
+  });
+  return {
+    clips: data?.rows || [],
+    total: data?.total || 0,
+    pageSize: CLIPS_PAGE_SIZE,
+    isLoadingClips: isLoading,
+    clipsError: error || null,
+  };
+}
+
+export function useDeleteClip() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id) => {
+      const res = await apiFetch(`${API_URL}/api/audio/admin/clips/${id}`, {
+        method: 'DELETE', headers: authHeaders(),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Failed to delete the clip');
+      return json;
+    },
+    onSuccess: ({ bindings }) => {
+      toast.success(bindings ? `Deleted — removed from ${bindings} slot(s)` : 'Deleted');
+      qc.invalidateQueries({ queryKey: CLIPS_KEY_PREFIX });
+      // A clip with zero bindings changed nothing else; only bother the
+      // subject-facing caches when this delete actually unbound something.
+      if (bindings) {
+        qc.invalidateQueries({ queryKey: ALL_SLOTS_KEY });
+        qc.invalidateQueries({ queryKey: SUBJECTS_KEY });
+        qc.invalidateQueries({ queryKey: MISSES_KEY });
+      }
+    },
+    onError: (err) => toast.error(err.message),
+  });
+}
+
+// Bulk delete of clips with ZERO bindings -- deleteUnboundClips only ever
+// touches such clips (spec: never a bound one), so no binding, subject or
+// miss cache can have changed and only the library list is invalidated.
+export function useDeleteUnboundClips() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (kind) => {
+      const { res, json } = await post('/api/audio/admin/clips/delete-unbound', kind ? { kind } : {});
+      if (!res.ok) throw new Error(json.error || 'Failed to delete the unbound clips');
+      return json;
+    },
+    onSuccess: ({ deleted }) => {
+      toast.success(deleted ? `Deleted ${deleted} unbound clip(s)` : 'Nothing unbound to delete');
+      qc.invalidateQueries({ queryKey: CLIPS_KEY_PREFIX });
+    },
+    onError: (err) => toast.error(err.message),
+  });
+}
+
+// Bind-from-library: attach an existing (maybe already-bound-elsewhere) clip
+// to another subject/slot without generating or uploading. Used by both
+// AudioSlotCard's "+ From library" picker and (indirectly) nothing else yet.
+export function useBindFromLibrary() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      subjectKind, subjectKey, slot, clipId,
+    }) => {
+      const { res, json } = await post('/api/audio/admin/bindings', {
+        subject_kind: subjectKind, subject_key: subjectKey, slot, clip_id: clipId,
+      });
+      if (!res.ok) throw new Error(json.error || 'Failed to bind the clip');
+      return json;
+    },
+    onSuccess: (_json, { subjectKind, subjectKey }) => {
+      toast.success('Bound from the library');
+      qc.invalidateQueries({ queryKey: slotsKey(subjectKind, subjectKey) });
+      qc.invalidateQueries({ queryKey: SUBJECTS_KEY });
+      qc.invalidateQueries({ queryKey: MISSES_KEY });
+      qc.invalidateQueries({ queryKey: CLIPS_KEY_PREFIX });
     },
     onError: (err) => toast.error(err.message),
   });

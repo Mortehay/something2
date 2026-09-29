@@ -1,14 +1,14 @@
 // One slot's card in the Audio admin tab (SOMET-590): the clips already bound
-// to it, plus the three ways to add one more (suggest a prompt, generate on
-// the box, upload an .ogg). Split out of AudioAdmin.jsx so that file stays a
-// layout shell -- this is where the per-slot state (draft prompt, upload
-// file, elapsed generation time) actually lives.
+// to it, plus the four ways to add one more (suggest a prompt, generate on
+// the box, upload an .ogg, or reuse one already in the library). Split out of
+// AudioAdmin.jsx so that file stays a layout shell -- this is where the
+// per-slot state (draft prompt, upload file, elapsed generation time) lives.
 import { useEffect, useRef, useState } from 'react';
 import { useIsMutating } from '@tanstack/react-query';
 import styled from 'styled-components';
 import {
   useProposeAudio, useGenerateAudio, useUploadAudio, useUpdateBinding, useUnbind, generateMutationKey,
-  generateBody,
+  generateBody, useAudioClips, useBindFromLibrary,
 } from './useAudioAdmin.js';
 import { assetUrl } from './src/js/net/assets.js';
 import { API_URL } from '../../config.js';
@@ -57,6 +57,18 @@ const PromptRow = styled.div`
 `;
 const Err = styled.p`color: var(--s2-danger); font-size: 0.8rem; margin: 0.35rem 0 0;`;
 const Hint = styled.p`color: var(--s2-text-muted); font-size: 0.8rem; margin: 0.35rem 0 0;`;
+
+// The "+ From library" picker (SOMET-591): a small inline list, not a modal --
+// it only ever shows clips of THIS slot's clip kind, which keeps it short.
+const Picker = styled.div`
+  border: 1px solid var(--s2-border); border-radius: 6px; background: var(--s2-bg-sunken);
+  margin-top: 0.5rem; padding: 0.5rem; max-height: 12rem; overflow-y: auto;
+`;
+const PickerRow = styled.div`
+  display: flex; align-items: center; gap: 0.5rem; padding: 0.25rem 0;
+  &:not(:last-child) { border-bottom: 1px solid var(--s2-border); }
+`;
+const PickerLabel = styled.span`font-size: 0.8rem; color: var(--s2-text); flex: 1; min-width: 6rem;`;
 
 function formatDuration(ms) {
   if (!Number.isFinite(ms)) return '—';
@@ -134,6 +146,45 @@ function ClipRow({
   );
 }
 
+// SOMET-591: the "+ From library" list for one slot. Fetched only while
+// open (`enabled` inside useAudioClips would need a flag this hook doesn't
+// take, so the component itself is only mounted while open -- same net
+// effect as useArtHistory's `enabled`, without adding a param this hook has
+// no other caller for).
+function LibraryPicker({
+  subject, slot, clipKind, onBound,
+}) {
+  const { clips, isLoadingClips } = useAudioClips({ kind: clipKind });
+  const bind = useBindFromLibrary();
+  return (
+    <Picker>
+      {isLoadingClips && <AdminLoadingInline />}
+      {!isLoadingClips && clips.length === 0 && <Hint>No {clipKind} clips in the library yet.</Hint>}
+      {clips.map((c) => (
+        <PickerRow key={c.id}>
+          <PickerLabel title={c.label}>{c.label}</PickerLabel>
+          <Secondary
+            type="button"
+            disabled={bind.isPending}
+            onClick={() => bind.mutate(
+              {
+                subjectKind: subject.kind, subjectKey: subject.key, slot, clipId: c.id,
+              },
+              { onSuccess: onBound },
+            )}
+          >
+            Bind
+          </Secondary>
+        </PickerRow>
+      ))}
+    </Picker>
+  );
+}
+
+// A tiny inline loading line -- pulling in AdminLoading here would add a
+// second import just for one word; this matches its "inline" look without it.
+function AdminLoadingInline() { return <Hint>Loading…</Hint>; }
+
 // SOMET-590: `subject` is `{ kind, key, label }`; `slot`/`clipKind` come from
 // the registry entry (useAudioAdmin.slotRows); `rows` are this slot's bound
 // clips from useSubjectSlots. Play/stop are lifted to AudioAdmin so only one
@@ -148,6 +199,7 @@ function AudioSlotCard({
   const [prompt, setPrompt] = useState('');
   // What Suggest returned: its style and the box slots for THAT style.
   const [proposal, setProposal] = useState(null);
+  const [showPicker, setShowPicker] = useState(false);
   const fileRef = useRef(null);
 
   // NOT generate.isPending: that comes from THIS hook instance, which is
@@ -238,10 +290,21 @@ function AudioSlotCard({
           style={{ display: 'none' }}
           aria-label={`Upload an .ogg for ${slot}`}
         />
+        <Secondary type="button" onClick={() => setShowPicker((v) => !v)}>
+          {showPicker ? 'Hide library' : '+ From library'}
+        </Secondary>
       </Controls>
       {generate.isError && <Err>{generate.error.message}</Err>}
       {propose.isError && <Err>{propose.error.message}</Err>}
       {upload.isError && <Err>{upload.error.message}</Err>}
+      {showPicker && (
+        <LibraryPicker
+          subject={subject}
+          slot={slot}
+          clipKind={clipKind}
+          onBound={() => setShowPicker(false)}
+        />
+      )}
     </Card>
   );
 }
