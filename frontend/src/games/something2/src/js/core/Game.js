@@ -1203,12 +1203,15 @@ export class Game {
             if (this.audio) {
                 this.audio.tick(this.chunkedMap.biomeAt(cx, cy), performance.now());
                 // Task 7 (game audio slice 3): creature/world-point "nearby"
-                // ambience. `points` merges everything with an `art` field --
-                // AudioEngine.tickNearby itself filters out anything missing
-                // one -- so a plain village (no chests/gem/skill merchants
-                // this run) still works with the rest present. Internally
-                // throttled to 250ms; safe to call every frame.
-                this.audio.tickNearby(this.creatures.creatures, [
+                // ambience. tickNearby is internally throttled to 250ms, so
+                // this passes a thunk (fix round 1, item 3) rather than
+                // merging the six arrays here on every one of the other ~59
+                // frames per second it does nothing with them -- the spread
+                // only actually runs on a tick that proceeds past the
+                // throttle. AudioEngine itself filters out anything missing
+                // an `art` field, so a plain village (no chests/gem/skill
+                // merchants this run) still works with the rest present.
+                this.audio.tickNearby(this.creatures.creatures, () => [
                     ...(this.landmarks || []),
                     ...(this.worldChests || []),
                     ...(this.merchants || []),

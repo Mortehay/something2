@@ -535,5 +535,112 @@ describe('AudioEngine', () => {
         expect(engine.sfxLimiter.admit({ clipKey: `c${i}`, priority: 'nearest', distance: 0 }).ok).toBe(true);
       }
     });
+
+    // Fix round 1, item 1: loops used to share NearbyScheduler's 4-slot cap
+    // with creature one-shots, so a village's handful of always-in-range
+    // loopable posts (merchant/bank/gem/skill/waypoint, ~1 tile apart) could
+    // starve every creature nearby -- and a 5th such point could never start
+    // at all. Loops are now presence-driven and never touch the scheduler.
+    it('5 loopable points in range each get their own loop, unbounded by the scheduler\'s 4-slot cap', async () => {
+      // Distinct art/clip per point (as distinct village posts genuinely
+      // would bind) -- five points sharing one clip key would instead hit
+      // the unrelated same-clip-within-100ms throttle, which is not what
+      // this test is checking.
+      const bindings = {};
+      const points = [];
+      for (let i = 0; i < 5; i += 1) {
+        bindings[`world_point/post${i}/nearby`] = [{ key: `post${i}-loop.ogg`, volume: 1, weight: 1, loopable: true }];
+        points.push({ id: `w${i}`, art: `post${i}`, x: i * 10, y: 0 });
+      }
+      const { engine, sources } = engineWith(bindings);
+      engine.unlock();
+      engine.tickNearby(new Map(), points, { x: 0, y: 0 }, 0);
+      await flush(); await flush();
+      expect(sources.length).toBe(5);
+      expect(sources.every((s) => s.loop === true && s.started === true)).toBe(true);
+    });
+
+    it('loopable points never occupy a scheduler slot, so a creature nearby still sounds with 4 loops already active', async () => {
+      const bindings = { 'creature/slime/nearby': [{ key: 'slime-nearby.ogg', volume: 1, weight: 1 }] };
+      const points = [];
+      for (let i = 0; i < 4; i += 1) {
+        bindings[`world_point/post${i}/nearby`] = [{ key: `post${i}-loop.ogg`, volume: 1, weight: 1, loopable: true }];
+        points.push({ id: `w${i}`, art: `post${i}`, x: i * 10, y: 0 });
+      }
+      const { engine, sources } = engineWith(bindings);
+      engine.unlock();
+      const creatures = creatureMap([{ id: 1, type: 'slime', x: 50, y: 0 }]);
+      engine.tickNearby(creatures, points, { x: 0, y: 0 }, 0);
+      await flush(); await flush();
+      // Before the fix, the 4 loops would have filled the scheduler's entire
+      // cap and the creature's cadence sound would never have been admitted.
+      expect(sources.length).toBe(5); // 4 loops + 1 creature one-shot
+      expect(sources.filter((s) => s.loop).length).toBe(4);
+      expect(sources.some((s) => s.buffer && s.buffer.tag === 'u:slime-nearby.ogg')).toBe(true);
+    });
+
+    // Fix round 1, item 4.
+    it('a loop fades in from silence rather than popping to full gain', async () => {
+      const { engine, ctx } = engineWith({
+        'world_point/well/nearby': [{ key: 'well-loop.ogg', volume: 1, weight: 1, loopable: true }],
+      });
+      let captured;
+      const origCreateGain = ctx.createGain.bind(ctx);
+      ctx.createGain = () => {
+        const g = origCreateGain();
+        const calls = { setValueAtTime: [], linearRampToValueAtTime: [] };
+        const origSet = g.gain.setValueAtTime.bind(g.gain);
+        const origRamp = g.gain.linearRampToValueAtTime.bind(g.gain);
+        g.gain.setValueAtTime = (v, t) => { calls.setValueAtTime.push(v); return origSet(v, t); };
+        g.gain.linearRampToValueAtTime = (v, t) => { calls.linearRampToValueAtTime.push(v); return origRamp(v, t); };
+        g._calls = calls;
+        captured = g;
+        return g;
+      };
+      engine.unlock();
+      engine.tickNearby(new Map(), [{ id: 'w1', art: 'well', x: 0, y: 0 }], { x: 0, y: 0 }, 0);
+      await flush(); await flush();
+      expect(captured._calls.setValueAtTime).toEqual([0]); // starts silent
+      expect(captured._calls.linearRampToValueAtTime).toEqual([1]); // ramps up to vol(1) * falloff(1 at distance 0)
+    });
+
+    // Fix round 1, item 5: CreatureManager stores x/y as the entity's
+    // TOP-LEFT corner (RenderSystem.drawCreature adds w/2,h/2 to reach the
+    // centre) -- distance/pan must do the same, or a creature could be
+    // wrongly admitted (or excluded) right at the radius edge.
+    it('creature distance uses the box centre, not the stored top-left x/y', async () => {
+      const { engine, sources } = engineWith({
+        'creature/slime/nearby': [{ key: 'slime-nearby.ogg', volume: 1, weight: 1 }],
+      });
+      engine.unlock();
+      // Top-left at x=780 is within the default 800px radius, but this
+      // creature's true centre (top-left + half its 48px box) at x=804 is
+      // just outside it. Using the raw top-left here would wrongly admit it.
+      const creatures = creatureMap([{ id: 1, type: 'slime', x: 780, y: 0, width: 48, height: 48 }]);
+      engine.tickNearby(creatures, [], { x: 0, y: 0 }, 0);
+      await flush(); await flush();
+      expect(sources.length).toBe(0);
+    });
+
+    // Fix round 1, item 3: Game.js now passes a thunk so the points array is
+    // only built on a tick that proceeds past the 250ms throttle -- verify
+    // tickNearby actually supports that shape (not just a plain array).
+    it('accepts a thunk for the points argument, called only when the tick proceeds', async () => {
+      const { engine, sources } = engineWith({
+        'world_point/well/nearby': [{ key: 'well-loop.ogg', volume: 1, weight: 1, loopable: true }],
+      });
+      engine.unlock();
+      let calls = 0;
+      const thunk = () => { calls += 1; return [{ id: 'w1', art: 'well', x: 0, y: 0 }]; };
+
+      engine.tickNearby(new Map(), thunk, { x: 0, y: 0 }, 0);
+      expect(calls).toBe(1);
+      // Within the same 250ms window: throttled, so the thunk must not run again.
+      engine.tickNearby(new Map(), thunk, { x: 0, y: 0 }, 100);
+      expect(calls).toBe(1);
+
+      await flush(); await flush();
+      expect(sources.length).toBe(1);
+    });
   });
 });

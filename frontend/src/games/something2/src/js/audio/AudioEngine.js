@@ -22,6 +22,9 @@ const SFX_PAN_PX = 600;
 // Task 7 (spec §3 "Creature `nearby`" / "World point `nearby`"): Game.update
 // calls tickNearby() every frame; this throttles the actual scheduling work.
 const NEARBY_TICK_MS = 250;
+// Fix round 1, item 4: a loop fades IN rather than popping to full gain the
+// instant a point comes into range.
+const NEARBY_LOOP_FADE_S = 0.75;
 
 // A point (landmark/chest/merchant/bank) has no id in every source array, so
 // a static marker is identified by its art + position instead -- stable
@@ -56,13 +59,24 @@ export class AudioEngine {
     this.sfxVoices = new Map();     // voiceId -> BufferSourceNode, STARTED and currently playing
     this.sfxPending = new Set();    // voiceId, admitted but still awaiting its buffer -- see _startSfxVoice
     this.sfxStats = { playedTotal: 0, droppedTotal: 0 };
-    // Task 7: creature/world-point "nearby" ambience. The scheduler decides
-    // WHO is due (its own maxVoices cap, separate from the limiter's global
-    // 12); everything it admits still goes through sfxLimiter with priority
-    // 'nearby', the lowest tier.
+    // Task 7: creature/world-point "nearby" ambience. The scheduler's own
+    // maxVoices cap (separate from the limiter's global 12) applies ONLY to
+    // creature one-shots and non-loopable world points -- cadence-driven
+    // sounds that take turns. A loopable world point is presence-driven
+    // instead (fix round 1, item 1): "one looping source per point while in
+    // range" is not a turn to wait for, so it never occupies a scheduler
+    // slot -- only the global 12-voice limiter (still at 'nearby' tier)
+    // bounds how many can play at once. Without this split, a handful of
+    // loopable points clustered together (a village's posts) would sit in
+    // the scheduler's 4 slots for their entire time in range and starve
+    // every creature and non-loopable point nearby.
     this.nearbyScheduler = new NearbyScheduler({ now: this.now, rand: this.rand });
-    this.nearbyLoops = new Map();   // point emitter id -> {src, gain, voiceId, key} for a loopable clip while in range
-    this.sfxVoiceEnded = new Map(); // voiceId -> extra "voice ended" hook (nearby only; see _fireVoiceEnded)
+    this.nearbyLoops = new Map();         // point emitter id -> {src, gain, voiceId, key} for a loop while in range
+    // point emitter id -> boolean, cached the first time a point's binding
+    // resolves, so later ticks don't have to re-resolve+pick just to learn
+    // which path (loop vs scheduler cadence) it takes -- see tickNearby.
+    this.nearbyPointLoopable = new Map();
+    this.sfxVoiceEnded = new Map(); // voiceId -> extra "voice ended" hook (nearby cadence path only; see _fireVoiceEnded)
     this._lastNearbyTick = -Infinity;
   }
 
@@ -281,19 +295,20 @@ export class AudioEngine {
   // Immediate stop (eviction, or a blanket stop on world change/destroy --
   // same "no fade" contract a one-shot eviction already has). Always frees
   // the limiter slot itself: unlike a one-shot, a loop never calls
-  // sfxLimiter.release() on its own, so whoever stops it must.
+  // sfxLimiter.release() on its own, so whoever stops it must. Loops never
+  // touch NearbyScheduler (fix round 1, item 1 -- they are presence-driven,
+  // not cadence-driven), so there is no scheduler slot to free here.
   _stopNearbyLoop(emitterId) {
     const loop = this.nearbyLoops.get(emitterId);
     if (!loop) return;
     this.nearbyLoops.delete(emitterId);
     try { loop.src.onended = null; loop.src.stop(); } catch { /* already stopped */ }
     this.sfxLimiter.release(loop.voiceId);
-    this._fireVoiceEnded(loop.voiceId);
   }
 
   // Spec §3 "World point `nearby`": a loopable clip fades out on leaving the
   // radius -- unlike an eviction or a world change, an ordinary walk away
-  // from it should not click off. The slot is still freed immediately (not
+  // from it should not click off. The limiter slot is freed immediately (not
   // after the ramp finishes): the eviction rules already prefer bumping a
   // 'nearby' voice first, so a fading-out voice contending for its own slot
   // back would be an odd race to leave open.
@@ -308,7 +323,6 @@ export class AudioEngine {
       loop.src.stop(this.ctx.currentTime + FADE_S);
     } catch { /* already stopped */ }
     this.sfxLimiter.release(loop.voiceId);
-    this._fireVoiceEnded(loop.voiceId);
   }
 
   _stopAllSfx() {
@@ -323,41 +337,87 @@ export class AudioEngine {
     // and only clearing its bookkeeping closes that off structurally, not
     // just by timing.
     this.sfxLimiter.clear();
-    // The scheduler's emitter ids are scoped to a world's creatures/points
-    // and never reused across a world change, so a full reset (unlike the
-    // limiter's) needs no monotonic-id argument -- it just drops stale state.
+    // The scheduler's emitter ids are scoped to a world's creatures/(non-loop)
+    // points and never reused across a world change, so a full reset (unlike
+    // the limiter's) needs no monotonic-id argument -- it just drops stale
+    // state. The loopable-ness cache is world-scoped too, for the same reason.
     this.nearbyScheduler.clear();
+    this.nearbyPointLoopable.clear();
   }
 
   // Spec §3 "Creature `nearby`" / "World point `nearby`". Called every frame
   // from Game.update; throttled to 250ms here so a 60fps caller doesn't spam
-  // the scheduler with duplicate work. `creatures` is the CreatureManager's
-  // raw Map (id -> {id, type, x, y, ...}) -- a delta row without `type` yet
-  // (SOMET-354) is skipped rather than producing a malformed binding key.
-  // `points` is one flat array of everything with an `art` field (landmarks,
-  // world chests, merchants, gem/skill merchants, banks) -- Game.js does the
-  // merging; this only reads x/y/art.
-  tickNearby(creatures, points, listener, nowMs = this.now()) {
+  // this with duplicate work -- `pointsOrThunk` may be a plain array OR a
+  // zero-arg function returning one (fix round 1, item 3): Game.js passes a
+  // thunk so building the merged points list (several array spreads) only
+  // happens on a tick that actually proceeds past the throttle, not on every
+  // frame it's called from.
+  //
+  // `creatures` is the CreatureManager's raw Map (id -> {id, type, x, y,
+  // width, height, ...}) -- a delta row without `type` yet (SOMET-354) is
+  // skipped rather than producing a malformed binding key. Creature x/y are
+  // the entity's TOP-LEFT corner (see CreatureManager / RenderSystem's
+  // drawCreature comment), so the box centre is used for distance/pan, same
+  // as Game.js already does for the player.
+  //
+  // Points resolve to one of two paths (fix round 1, item 1):
+  //   - a LOOPABLE clip is presence-driven: one looping source per point
+  //     while in range, started the moment it's seen and kept until it
+  //     leaves -- it never occupies a NearbyScheduler slot, only the global
+  //     12-voice limiter (at 'nearby' tier) bounds how many can play. This
+  //     is the fix: it used to share the scheduler's 4-slot cap with
+  //     creatures, so a village's handful of always-in-range loopable posts
+  //     could starve every creature sound nearby (and a 5th such point could
+  //     never get a source at all).
+  //   - a NON-loopable clip behaves exactly like a creature: fed into the
+  //     scheduler every tick, cadence-gated, sharing its 4-slot cap.
+  // Which path a point takes is cached in nearbyPointLoopable the first time
+  // its binding resolves, so a stable point doesn't re-resolve+pick every
+  // tick just to learn which path it's already on.
+  tickNearby(creatures, pointsOrThunk, listener, nowMs = this.now()) {
     if (!this.world) return;
     if (nowMs - this._lastNearbyTick < NEARBY_TICK_MS) return;
     this._lastNearbyTick = nowMs;
     const ctx = this.ctx;
     if (!ctx || ctx.state !== 'running') return; // same contract as playSfxEvents
-    const emitters = [];
-    const pointsById = new Map();
+    const points = typeof pointsOrThunk === 'function' ? pointsOrThunk() : pointsOrThunk;
+
+    const cadenceEmitters = [];
     if (creatures) {
       for (const c of creatures.values()) {
         if (!c || !c.type || c.id == null) continue;
-        emitters.push({ id: `c:${c.id}`, key: `creature/${c.type}/nearby`, x: c.x, y: c.y, kind: 'creature' });
+        const cx = c.x + (c.width || 0) / 2;
+        const cy = c.y + (c.height || 0) / 2;
+        cadenceEmitters.push({ id: `c:${c.id}`, key: `creature/${c.type}/nearby`, x: cx, y: cy, kind: 'creature' });
       }
     }
+
+    const pointsById = new Map();
     for (const p of (points || [])) {
       if (!p || !p.art) continue;
       const id = nearbyPointId(p);
       pointsById.set(id, p);
-      emitters.push({ id, key: `world_point/${p.art}/nearby`, x: p.x, y: p.y, kind: 'point' });
+      if (this.nearbyLoops.has(id)) continue; // already looping -- presence alone keeps it going; _sweepNearbyLoops handles leaving
+      const dx = p.x - listener.x;
+      const dy = p.y - listener.y;
+      const distance = Math.hypot(dx, dy);
+      if (distance > this.nearbyScheduler.radiusPx) continue; // out of range: nothing to (re)start
+      const key = `world_point/${p.art}/nearby`;
+      if (this.nearbyPointLoopable.get(id) === false) {
+        cadenceEmitters.push({ id, key, x: p.x, y: p.y, kind: 'point' });
+        continue;
+      }
+      // Cached true, or not yet known -- resolve+pick to (re)start the loop,
+      // or, on first sighting, to learn which path this point takes at all.
+      const { clips, key: resolvedKey } = this._resolve([key]); // records the miss itself when unbound
+      const clip = resolvedKey ? pickWeighted(clips, this.rand) : null;
+      if (!clip) continue; // unresolved -- retry next tick
+      this.nearbyPointLoopable.set(id, Boolean(clip.loopable));
+      if (clip.loopable) this._startNearbyLoop(id, clip, dx, distance);
+      else cadenceEmitters.push({ id, key, x: p.x, y: p.y, kind: 'point' });
     }
-    for (const d of this.nearbyScheduler.tick(emitters, listener)) {
+
+    for (const d of this.nearbyScheduler.tick(cadenceEmitters, listener)) {
       try {
         this._triggerNearby(d, listener);
       } catch (err) {
@@ -368,6 +428,8 @@ export class AudioEngine {
     this._sweepNearbyLoops(pointsById, listener);
   }
 
+  // Cadence path only (creatures and non-loopable points) -- a loopable
+  // point never reaches here; see tickNearby.
   _triggerNearby(d, listener) {
     const { clips, key } = this._resolve([d.key]); // records the miss itself when unbound
     const clip = key ? pickWeighted(clips, this.rand) : null;
@@ -375,21 +437,19 @@ export class AudioEngine {
     const dx = d.x - listener.x;
     const dy = d.y - listener.y;
     const distance = Math.hypot(dx, dy);
-    // Only a world point may hold a loopable clip (spec: "creature `nearby`"
-    // never lists loopable; a creature wanders, so looping a clip to its
-    // position would need continuous re-panning this slice doesn't do).
-    if (clip.loopable && d.kind === 'point') { this._startNearbyLoop(d, clip, dx, distance); return; }
     const { ok, evict, voiceId } = this.sfxLimiter.admit({ clipKey: clip.key, priority: 'nearby', distance });
     if (!ok) { this.nearbyScheduler.ended(d.id); this.sfxStats.droppedTotal += 1; return; }
     if (evict != null) this._stopSfxOrLoopVoice(evict);
     this._startSfxVoice(voiceId, clip, dx, distance, () => this.nearbyScheduler.ended(d.id));
   }
 
-  _startNearbyLoop(d, clip, dx, distance) {
+  // Presence-driven path (fix round 1, item 1): no NearbyScheduler slot
+  // involved at all -- only the global limiter, at 'nearby' tier, bounds it.
+  _startNearbyLoop(emitterId, clip, dx, distance) {
     const { ok, evict, voiceId } = this.sfxLimiter.admit({ clipKey: clip.key, priority: 'nearby', distance });
-    if (!ok) { this.nearbyScheduler.ended(d.id); this.sfxStats.droppedTotal += 1; return; }
+    if (!ok) { this.sfxStats.droppedTotal += 1; return; } // retried next tick -- still in range, still not in nearbyLoops
     if (evict != null) this._stopSfxOrLoopVoice(evict);
-    this._startNearbyLoopVoice(d.id, voiceId, clip, dx, distance);
+    this._startNearbyLoopVoice(emitterId, voiceId, clip, dx, distance);
   }
 
   // Mirrors _startSfxVoice's pending-cancellation guard exactly (same reason:
@@ -398,12 +458,11 @@ export class AudioEngine {
   // nearbyLoops instead of the one-shot sfxVoices map, since this clip never
   // ends on its own -- only _stopNearbyLoop / _fadeOutNearbyLoop end it.
   async _startNearbyLoopVoice(emitterId, voiceId, clip, dx, distance) {
-    this.sfxVoiceEnded.set(voiceId, () => this.nearbyScheduler.ended(emitterId));
     this.sfxPending.add(voiceId);
     const buffer = await this._buffer(this.urlFor(clip.key));
     if (!this.sfxPending.delete(voiceId)) return; // cancelled (evicted) while loading
-    if (!this.ctx) { this.sfxLimiter.release(voiceId); this._fireVoiceEnded(voiceId); return; }
-    if (!buffer) { this.sfxLimiter.release(voiceId); this.sfxStats.droppedTotal += 1; this._fireVoiceEnded(voiceId); return; }
+    if (!this.ctx) { this.sfxLimiter.release(voiceId); return; }
+    if (!buffer) { this.sfxLimiter.release(voiceId); this.sfxStats.droppedTotal += 1; return; }
     const src = this.ctx.createBufferSource();
     src.buffer = buffer;
     src.loop = true;
@@ -411,7 +470,12 @@ export class AudioEngine {
     const panner = this.ctx.createStereoPanner();
     const vol = typeof clip.volume === 'number' ? clip.volume : 1;
     const falloff = Math.max(0, 1 - distance / SFX_FALLOFF_PX);
-    gain.gain.value = vol * falloff;
+    const target = vol * falloff;
+    // Fix round 1, item 4: fade IN rather than popping to full gain the
+    // instant the point comes into range -- same pattern _play() already
+    // uses for music/ambience.
+    gain.gain.setValueAtTime(0, this.ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(target, this.ctx.currentTime + NEARBY_LOOP_FADE_S);
     panner.pan.value = Math.max(-1, Math.min(1, dx / SFX_PAN_PX));
     src.connect(panner);
     panner.connect(gain);
