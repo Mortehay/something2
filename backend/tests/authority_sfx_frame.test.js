@@ -105,6 +105,57 @@ test('world: a detonation is ONE magic hit however many it catches', () => {
   assert.equal(only(sfx, 'hurt').length, 0, 'a blast is one sound, not one per victim');
 });
 
+test('world: an explosive-arrow detonation keeps the bow\'s ranged family', () => {
+  const types = new Map(TYPES);
+  types.set(8, { id: 8, name: 'blast bow', category: 'weapon', kind: 'projectile', damage: 5, cooldown: 0.6, range: 700, projectile_speed: 900, projectile_radius: 8, pierce: 1, aoe_radius: 200, detonate_at: 'contact', mana_cost: 0, element: null });
+  const w = new World(openMap(), types, 1);
+  w.addPlayer('u1', { x: 100, y: 100 }, wielding(8));
+  w.creatures.addCreatures([{ id: 'c1', type: 'Slime', x: 300, y: 108, hp: 500, facing: 'S' }]);
+  w.attack('u1', 1, 0);
+  const fire = w.drainSfx();
+  assert.equal(fire[0].k, 'ranged', 'precondition: attackKindOf reads the bow as ranged');
+  for (let i = 0; i < 20 && w.projectiles.count() > 0; i++) w.tickProjectiles(0.05);
+  const sfx = w.drainSfx();
+  assert.deepEqual(only(sfx, 'hurt'), [], 'precondition: it detonated rather than hitting directly');
+  assert.deepEqual(only(sfx, 'hit').map((ev) => [ev.k, ev.s]), [['ranged', 'blast bow']]);
+});
+
+test('world: a guard biting a creature is heard as the guard\'s use + hit AND the victim\'s hurt', () => {
+  const w = new World(openMap(), new Map(), null);
+  w.addPlayer('u1', { x: 500, y: 500 });
+  w.creatures.addCreatures([
+    { id: 'guard', type: 'Village Guard', x: 500, y: 560, hp: 300, level: 20, facing: 'S', faction: 'guard', home_x: 500, home_y: 560, damage: 1 },
+    { id: 'foe', type: 'Wolf', x: 520, y: 560, hp: 500, level: 6, facing: 'S' },
+  ]);
+  const active = ['0,0', '0,1', '1,0', '1,1', '-1,0', '0,-1', '-1,-1', '1,-1', '-1,1'];
+  let sfx = [];
+  for (let i = 0; i < 20 && !sfx.some((ev) => ev.a === 'c:guard'); i++) {
+    w.tickCreatures(0.2, active);
+    sfx = sfx.concat(w.drainSfx());
+  }
+  const use = sfx.find((ev) => ev.a === 'c:guard');
+  assert.ok(use, `the guard never attacked: ${JSON.stringify(sfx)}`);
+  assert.equal(use.c, 'Village Guard');
+  const hit = sfx.find((ev) => ev.e === 'hit' && ev.c === 'Village Guard');
+  assert.ok(hit);
+  const hurt = sfx.filter((ev) => ev.e === 'hurt');
+  assert.ok(hurt.some((ev) => ev.c === 'Wolf' && ev.x === hit.x && ev.y === hit.y), JSON.stringify(sfx));
+});
+
+test('world: a creature biting a PLAYER emits no hurt (players have none)', () => {
+  const w = new World(openMap(), TYPES, 1);
+  w.addPlayer('u1', { x: 100, y: 100 });
+  w.creatures.addCreatures([{ id: 'c1', type: 'Wolf', x: 140, y: 108, hp: 500, facing: 'S', damage: 1, faction: 'hostile' }]);
+  let sfx = [];
+  for (let i = 0; i < 40 && !sfx.some((ev) => ev.e === 'use'); i++) {
+    w.tick(0.05);
+    w.tickCreatures(0.05, ['0,0', '0,1', '1,0', '1,1']);
+    sfx = sfx.concat(w.drainSfx());
+  }
+  assert.ok(sfx.some((ev) => ev.e === 'use'), 'precondition: the wolf bit');
+  assert.deepEqual(only(sfx, 'hurt'), []);
+});
+
 test('world: a creature-owned shot lands as a hit named by its shooter type', () => {
   const w = new World(openMap(), TYPES, 1);
   w.addPlayer('u1', { x: 300, y: 100 }); // centre 332,132
