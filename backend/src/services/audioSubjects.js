@@ -140,22 +140,22 @@ async function subjectExists(db, subjectKind, key) {
 // An item's own attack kind (melee/ranged/magic), via the ONE definition
 // shared with the authority (attackKindOf, backend/src/authority/sfxEvents.js).
 //
-// stone_mode is deliberately NEVER read off the item_types row here, even
-// though the column exists on it: item_types_stone_mode_category_check
-// forces every non-stone row's stone_mode to the literal string 'replace',
-// which is truthy -- passing it through would make attackKindOf's first
-// branch fire for every weapon in the catalog and read them all as magic
-// (verified against the live schema; see sfx_events.test.js's matching
-// case). A bare, unsocketed weapon TYPE has no augment/spell-stone state of
-// its own -- that only exists on a player's socketed item INSTANCE, which
-// this catalog-level lookup has no way to see -- so stone_mode is left out
-// of the object entirely rather than defaulted to a value that would lie.
+// `name` is passed through: attackKindOf's ranged branch falls back to
+// getWeaponCategory(w), which classifies by NAME when kind/ammo_type_id
+// cannot -- the gear-ladder generator never wires ammo_type_id onto its
+// bow/crossbow/dart rows, so name is the only signal that gets them to
+// 'ranged' instead of 'magic'. stone_mode is deliberately never selected
+// here: attackKindOf does not read it (a real weapon row's own stone_mode is
+// always the literal string 'replace' -- item_types_stone_mode_category_check
+// -- which would be a lie about socket state a catalog-level TYPE has no way
+// to know; only `stoneItemId`/`augment`, both runtime-only fields this bare
+// catalog lookup never sets, signal an actual socketed stone).
 async function weaponAttackKind(db, name) {
   const row = (await db.query(
-    "SELECT kind, ammo_type_id FROM item_types WHERE category = 'weapon' AND name = $1", [name],
+    "SELECT name, kind, ammo_type_id FROM item_types WHERE category = 'weapon' AND name = $1", [name],
   )).rows[0];
   if (!row) return null;
-  return attackKindOf({ kind: row.kind, ammo_type_id: row.ammo_type_id });
+  return attackKindOf({ name: row.name, kind: row.kind, ammo_type_id: row.ammo_type_id });
 }
 
 // The cue to send the box for one (kind, key, slot) -- null means "no cue on
@@ -216,7 +216,9 @@ async function itemCues(db) {
   const rows = (await db.query("SELECT name, kind, ammo_type_id FROM item_types WHERE category = 'weapon'")).rows;
   const out = {};
   for (const row of rows) {
-    const k = ATTACK_TYPE_CUES[attackKindOf({ kind: row.kind, ammo_type_id: row.ammo_type_id })];
+    // `name` matters here -- see weaponAttackKind's comment (getWeaponCategory
+    // fallback for the gear-ladder rows that carry no ammo_type_id).
+    const k = ATTACK_TYPE_CUES[attackKindOf({ name: row.name, kind: row.kind, ammo_type_id: row.ammo_type_id })];
     out[row.name] = { use: k.use, hit: k.hit };
   }
   return out;
