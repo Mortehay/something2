@@ -5,6 +5,9 @@ const { normalizeAim, inArc, hasLineOfSight, weaponStaminaCost } = require('./we
 const { resolveEffectName, momentForAttack, blockedImpact } = require('./vfx.js');
 const { attackLift, bodyLift } = require('./attackOrigin.js');
 const { ProjectileSim } = require('./projectiles');
+const {
+  weaponUse, weaponHit, creatureUse, creatureHurt, skillUse, attackKindOf, pushSfxEvent,
+} = require('./sfxEvents.js');
 const { applyDamageWithEffects, drainMana, NO_MITIGATION, playerKey } = require('./damage');
 const {
   tickEffects, effectMagnitude, applyElementEffect, applyHitStatuses,
@@ -306,6 +309,10 @@ class World {
     // per-owner cap drop the STALEST wave rather than an arbitrary one.
     this.waves = [];
     this.groundItems = new GroundItemSim(chunkSize);
+    // Game audio slice 3: the world's own `sfx` events (player swings, shots,
+    // melee hits, skill casts). CreatureSim and ProjectileSim keep their own
+    // buffers; drainSfx() takes all three at once. Capped by pushSfxEvent.
+    this.sfx = [];
     // Monotonic world clock in ms, advanced only by tick(). effects.js is pure
     // and never reads a clock itself, so this is the single source of `now`
     // for every effect apply/expiry in the world.
@@ -705,10 +712,14 @@ class World {
 
     for (const s of shots) {
       if (this.projectiles.countByOwnerKind('creature') >= MAX_CREATURE_PROJECTILES) break;
+      // Game audio slice 3: the shot is heard only if it actually spawns --
+      // past the cap above, nothing leaves the creature.
+      pushSfxEvent(this.sfx, creatureUse({ id: s.ownerId, type: s.ownerType }, s.x, s.y));
       this.projectiles.spawn({
         ownerId: s.ownerId,
         ownerKind: 'creature',
         ownerFaction: s.ownerFaction,
+        ownerType: s.ownerType,
         x: s.x, y: s.y, nx: s.nx, ny: s.ny,
         damage: s.damage,
         originLift: s.originLift,
@@ -963,6 +974,10 @@ class World {
       const f = facingFromInput(sign(nx), sign(ny));
       if (f) p.facing = f;
       spendResources(p, w);
+      // Game audio slice 3: the swing is committed (resources spent), so it
+      // is heard -- landed or not, like the attack descriptor below.
+      const sfxKind = attackKindOf(w);
+      pushSfxEvent(this.sfx, weaponUse(w, userId, cx, cy));
       // SOMET-520. This swing's geometry, resolved ONCE, exactly like
       // originLift and pacifiedFrom above and for a stronger reason: these two
       // numbers are read at FOUR sites below -- the creature arc scan, the
@@ -1025,6 +1040,11 @@ class World {
             t: `c:${id}`, x: c.x + CREATURE_SIZE / 2, y: c.y + CREATURE_SIZE / 2,
             o: bodyLift(CREATURE_SIZE, 'middle'),
           });
+          // Game audio slice 3: the blow landing, and the creature's pain, at
+          // the same target-anchored point as the impact. Read here for the
+          // same reason the impact is: a one-shot kill removes the creature.
+          pushSfxEvent(this.sfx, weaponHit(sfxKind, w.name, c.x + CREATURE_SIZE / 2, c.y + CREATURE_SIZE / 2));
+          pushSfxEvent(this.sfx, creatureHurt(c.type, c.x + CREATURE_SIZE / 2, c.y + CREATURE_SIZE / 2));
         }
       }
       // SOMET-286: the refusal cue, one per guard the swing actually reached.
@@ -1121,6 +1141,7 @@ class World {
           // Same target-anchored rule as the creature impacts above, read off
           // this player's own box rather than a shared constant.
           impactAt.push({ t: `p:${other.userId}`, x: ocx, y: ocy, o: bodyLift(other.height, 'middle') });
+          pushSfxEvent(this.sfx, weaponHit(sfxKind, w.name, ocx, ocy)); // game audio slice 3
           // Survivors only -- a player at <=0 hp is picked up by
           // resolveDeaths() and respawned elsewhere; shoving first would move
           // a position respawn is about to overwrite anyway. Written straight
@@ -1216,6 +1237,10 @@ class World {
     // spent by server.js before attack() runs, so one shot costs one arrow
     // however many projectiles leave the bow.
     spendResources(p, w);
+    // Game audio slice 3: one fire sound per volley, like the one cost above.
+    // `w` (not shotWeapon) is the weapon as equipped, stone fields included,
+    // which is what attackKindOf keys on.
+    pushSfxEvent(this.sfx, weaponUse(w, userId, cx, cy));
 
     // SOMET-521. This volley's weapon, adjusted by the tree's projectile rules.
     // Built ONCE and shared by every shot: `w` is the shared in-memory catalog
@@ -1509,6 +1534,9 @@ class World {
       });
     }
 
+    // Game audio slice 3: a cast that got this far happened; heard at the
+    // caster's position when it began (px/py, before any blink moved them).
+    pushSfxEvent(this.sfx, skillUse(skill, userId, px, py));
     return { ok: true, kills };
   }
 
@@ -1562,6 +1590,22 @@ class World {
       }
     }
     return died;
+  }
+
+  // Take every `sfx` event produced since the last drain -- this world's own
+  // plus its creature and projectile sims' -- and clear all three buffers in
+  // one step, so no caller can read them and forget to clear. server.js calls
+  // this once per tick for the frame's `sfx` list. The result is capped at
+  // SFX_CAP like each buffer; a sim double without a buffer contributes none.
+  drainSfx() {
+    const out = this.sfx;
+    this.sfx = [];
+    for (const sim of [this.creatures, this.projectiles]) {
+      if (!sim || !Array.isArray(sim.sfx) || sim.sfx.length === 0) continue;
+      for (const ev of sim.sfx) pushSfxEvent(out, ev);
+      sim.sfx = [];
+    }
+    return out;
   }
 
   snapshot() {

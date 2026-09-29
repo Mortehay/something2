@@ -26,6 +26,9 @@ const { shoveCreature, immuneToPlayerDamage } = require('./creatures');
 // on why it cannot live in either consumer) and re-exported here, which is
 // where callers have always imported it from.
 const { MAX_SUB } = require('./subStep');
+const {
+  attackKindOf, weaponHit, creatureHit, creatureHurt, pushSfxEvent,
+} = require('./sfxEvents.js');
 
 function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; }
 
@@ -185,6 +188,18 @@ class ProjectileSim {
   constructor() {
     this.projectiles = [];
     this._id = 0;
+    // Game audio slice 3: this sim's `sfx` events (projectile landings and
+    // detonations), drained by World#drainSfx. Capped by pushSfxEvent.
+    this.sfx = [];
+  }
+
+  // The `hit` sound of projectile `p` landing at x,y. A player's shot is
+  // labelled with the weapon that fired it (resolved at launch); a creature's
+  // with the shooter's type. `k` overrides the family (detonations).
+  _pushHitSfx(p, x, y, k = p.sfxKind) {
+    pushSfxEvent(this.sfx, p.ownerKind === 'creature'
+      ? creatureHit(p.ownerType, x, y)
+      : weaponHit(k, p.sfxSource, x, y));
   }
 
   // `damage` is an explicit snapshot taken by the caller (weaponDamage(p, w)
@@ -197,7 +212,7 @@ class ProjectileSim {
   // so an ammo row was spent and then contributed nothing to the shot it
   // became -- "explosive arrows" could not be authored at all.
   spawn({
-    ownerId, ownerKind = 'player', ownerFaction = null, x, y, nx, ny, weapon, damage,
+    ownerId, ownerKind = 'player', ownerFaction = null, ownerType = null, x, y, nx, ny, weapon, damage,
     originLift, ammo = null, pacifiedFrom = null, hitStatuses = null,
   }) {
     const id = String(++this._id);
@@ -298,6 +313,13 @@ class ProjectileSim {
       // a shot already in the air. null for every creature-fired ability, so a
       // creature can never carry a player's riders.
       hitStatuses,
+      // Game audio slice 3: how this shot SOUNDS when it lands, snapshotted
+      // at launch like damage -- the shooter may re-equip or die mid-flight.
+      // A player's shot carries its weapon's family and name; a creature's
+      // carries the shooter's type (its flight object has no name or kind).
+      ownerType,
+      sfxKind: ownerKind === 'creature' ? null : attackKindOf(weapon),
+      sfxSource: ownerKind === 'creature' ? null : (weapon.name ?? null),
     });
     return id;
   }
@@ -326,6 +348,8 @@ class ProjectileSim {
   // many targets it actually caught.
   _detonate(p, bx, by, { creatureList, creatures, players, map, now }, kills, stoneHits, blocks) {
     const r = p.aoeRadius;
+    // One blast sound per detonation, not one per victim.
+    this._pushHitSfx(p, bx, by, 'magic');
     for (const c of creatureList) {
       const hits = projectileHitsCreature(p, c);
       // SOMET-286: a guard runs the SAME falloff-radius and line-of-sight
@@ -505,6 +529,10 @@ class ProjectileSim {
               dead = true; break;
             }
             p.hitIds.add(key);
+            // Game audio slice 3: the landing, then the creature's pain --
+            // pushed before the damage, so a kill's `death` follows them.
+            this._pushHitSfx(p, cx, cy);
+            pushSfxEvent(this.sfx, creatureHurt(c.type, cx, cy));
             // SOMET-343: bonus first, at full strength (a direct hit has no
             // falloff). A kill here is this shot's kill; the weapon packet
             // below would find a deleted creature, so we report and stop.
@@ -563,6 +591,7 @@ class ProjectileSim {
               dead = true; break;
             }
             p.hitIds.add(key);
+            this._pushHitSfx(p, px, py); // game audio slice 3
             // SOMET-343: full-strength bonus on a direct hit, no falloff.
             applyPlayerAugment(p, pl, 1, now);
             applyDamageWithEffects(pl, p.damage, p.element, pl.mit || NO_MITIGATION,
