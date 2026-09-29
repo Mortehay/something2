@@ -40,6 +40,21 @@ function bindingKey(b) {
   return `${b.subject_kind}\u0000${b.subject_key}\u0000${b.slot}\u0000${b.clip_id}`;
 }
 
+// Collapse to one entry per (subject_kind, subject_key, slot, clip_id),
+// keeping the first occurrence. Used as a final safety net on the merged
+// bindings list -- see the comment above its call site.
+function dedupeBindings(list) {
+  const seen = new Set();
+  const out = [];
+  for (const b of list) {
+    const key = bindingKey(b);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(b);
+  }
+  return out;
+}
+
 // Copy every bound clip's bytes out of the object store into
 // seeds/audio/<kind>/ and (re)write clips.json + bindings.json. With `only`
 // (subject names), just those subjects' bound clips are re-exported and the
@@ -150,23 +165,38 @@ async function exportAudio({
     .filter((c) => !touchedKinds.has(c.kind) || (only && !freshClipIds.has(c.id)))
     .concat(freshClips);
 
-  // Bindings: for a touched kind, drop every OLD binding whose clip falls in
-  // that kind, scoped further to `only`'s subjects when set -- an only-export
-  // has seen every CURRENT binding of those subjects, so a binding no longer
-  // present in `freshBindings` (e.g. the admin unbound it since the last
-  // export) must not survive the merge, or `audio-seed` would silently
-  // recreate it. Without `only`, the whole kind was seen, so every old
-  // binding for that kind is superseded outright.
+  // Bindings: drop an OLD binding when either (a) its clip was re-exported
+  // this run -- `freshBindings` already carries that clip's COMPLETE current
+  // binding set (it is fetched by clip_id, not by subject), so keeping any
+  // of its old entries around would duplicate one the concat is about to add
+  // back -- or (b) its clip falls in a touched kind and, when `only` is set,
+  // `only` names its subject: an only-export has seen every CURRENT binding
+  // of those subjects, so an old one that is not in `freshBindings` (e.g. the
+  // admin unbound it since the last export) must not survive the merge, or
+  // `audio-seed` would silently recreate it. Without `only`, the whole kind
+  // was seen, so every old binding for that kind is superseded outright.
+  //
+  // (a) alone is not redundant with (b): a clip bound to several subjects and
+  // re-exported via just one of them (only=[worldA] on a clip also bound to
+  // worldB) needs ALL of its old bindings dropped, including the worldB one
+  // `only` never named -- otherwise the untouched worldB entry survives from
+  // oldBindings AND arrives again in freshBindings (which is clip-scoped, not
+  // subject-scoped), duplicating it, worse on every repeated only-export.
   const clipKindById = new Map();
   for (const c of oldClips) clipKindById.set(c.id, c.kind);
   for (const c of freshClips) clipKindById.set(c.id, c.kind);
-  const bindingsManifest = oldBindings
-    .filter((b) => {
-      const clipKind = clipKindById.get(b.clip_id);
-      if (!touchedKinds.has(clipKind)) return true;
-      return only ? !only.includes(b.subject_key) : false;
-    })
-    .concat(freshBindings);
+  const shouldDropOldBinding = (b) => {
+    if (freshClipIds.has(b.clip_id)) return true;
+    const clipKind = clipKindById.get(b.clip_id);
+    if (!touchedKinds.has(clipKind)) return false;
+    return only ? only.includes(b.subject_key) : true;
+  };
+  // DEDUPE as a safety net, not just a consequence of the filter above: it
+  // also heals a manifest that a prior, buggier run already polluted with
+  // duplicates, which the drop logic alone cannot undo.
+  const bindingsManifest = dedupeBindings(
+    oldBindings.filter((b) => !shouldDropOldBinding(b)).concat(freshBindings),
+  );
 
   // Now that bindings.json is final, a clip in a touched kind that no
   // binding references any more (the case above deferred) is dead weight --

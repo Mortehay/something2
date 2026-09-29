@@ -388,3 +388,171 @@ test('exportAudio: --only drops a subject\'s removed binding and prunes the now-
     'E\'s binding to the (untouched) biome survives',
   );
 });
+
+// SOMET-591 review fix round 2: I-2's fix introduced its own bug. A touched
+// clip bound to several subjects kept its untouched-subject bindings from
+// oldBindings (correct in isolation) AND got them again from freshBindings,
+// which is fetched by clip_id alone, not by subject -- so the untouched
+// binding duplicated, and duplicated again on every repeated only-export.
+test('exportAudio: --only export does not duplicate a clip\'s other bindings, even run repeatedly', { skip }, async (t) => {
+  const pool = new Pool({ connectionString: url });
+  const tag = `${process.pid}-${Date.now()}-i3`;
+  const worldAName = `audio-seed-i3-worldA-${tag}`;
+  const worldBName = `audio-seed-i3-worldB-${tag}`;
+  const clipIds = [];
+  let worldAId = null;
+  let worldBId = null;
+  const root = tmpRoot();
+  const OGG = Buffer.from(`OggS-i3-${tag}`);
+
+  t.after(async () => {
+    try {
+      if (clipIds.length) await pool.query('DELETE FROM audio_clips WHERE id = ANY($1)', [clipIds]);
+      if (worldAId) await pool.query('DELETE FROM worlds WHERE id = $1', [worldAId]).catch(() => {});
+      if (worldBId) await pool.query('DELETE FROM worlds WHERE id = $1', [worldBId]).catch(() => {});
+    } finally {
+      await pool.end();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  worldAId = (await pool.query(
+    'INSERT INTO worlds (name, seed, biomes) VALUES ($1, 1, $2::jsonb) RETURNING id',
+    [worldAName, JSON.stringify([])],
+  )).rows[0].id;
+  worldBId = (await pool.query(
+    'INSERT INTO worlds (name, seed, biomes) VALUES ($1, 1, $2::jsonb) RETURNING id',
+    [worldBName, JSON.stringify([])],
+  )).rows[0].id;
+
+  async function insertClip({ kind, label, storageKey }) {
+    const r = await pool.query(
+      `INSERT INTO audio_clips (kind, label, storage_key, bytes, duration_ms, loopable, source)
+       VALUES ($1,$2,$3,$4,$5,$6,'uploaded') RETURNING id`,
+      [kind, label, storageKey, OGG.length, 1000, kind !== 'sfx'],
+    );
+    const id = r.rows[0].id;
+    clipIds.push(id);
+    return id;
+  }
+
+  const gKey = `audio/music/rmt_${tag}_g.ogg`;
+  const clipGId = await insertClip({ kind: 'music', label: `I3 G ${tag}`, storageKey: gKey });
+
+  await pool.query(
+    "INSERT INTO audio_bindings (subject_kind, subject_key, slot, clip_id) VALUES ('world', $1, 'music', $2)",
+    [worldAName, clipGId],
+  );
+  await pool.query(
+    "INSERT INTO audio_bindings (subject_kind, subject_key, slot, clip_id) VALUES ('world', $1, 'music', $2)",
+    [worldBName, clipGId],
+  );
+
+  const store = memStore(new Map([[gKey, OGG]]));
+
+  await exportAudio({
+    db: pool, store, root, log: () => {},
+  });
+  const readGBindings = () => JSON.parse(fs.readFileSync(path.join(root, 'bindings.json'), 'utf8'))
+    .filter((b) => b.clip_id === clipGId);
+  assert.strictEqual(readGBindings().length, 2, 'both bindings present after the full export');
+
+  for (let i = 0; i < 3; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    await exportAudio({
+      db: pool, store, root, only: [worldAName], log: () => {},
+    });
+    const gBindings = readGBindings();
+    assert.strictEqual(gBindings.length, 2, `exactly one worldA and one worldB entry after only-export #${i + 1}`);
+    assert.strictEqual(gBindings.filter((b) => b.subject_key === worldAName).length, 1, `worldA #${i + 1}`);
+    assert.strictEqual(gBindings.filter((b) => b.subject_key === worldBName).length, 1, `worldB #${i + 1}`);
+  }
+});
+
+// SOMET-591 review fix round 2: the dedupe is a stated safety net, not just a
+// consequence of the drop logic -- it must also heal a bindings.json that a
+// prior (buggier) run already left polluted with a duplicate, even for an
+// entry this run's `kinds`/`only` never touches.
+test('exportAudio dedupes bindings.json even when it was already polluted with a duplicate entry', { skip }, async (t) => {
+  const pool = new Pool({ connectionString: url });
+  const tag = `${process.pid}-${Date.now()}-i3dupe`;
+  const worldName = `audio-seed-i3dupe-world-${tag}`;
+  const clipIds = [];
+  let worldId = null;
+  const root = tmpRoot();
+  const OGG = Buffer.from(`OggS-i3dupe-${tag}`);
+
+  t.after(async () => {
+    try {
+      if (clipIds.length) await pool.query('DELETE FROM audio_clips WHERE id = ANY($1)', [clipIds]);
+      if (worldId) await pool.query('DELETE FROM worlds WHERE id = $1', [worldId]).catch(() => {});
+    } finally {
+      await pool.end();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  worldId = (await pool.query(
+    'INSERT INTO worlds (name, seed, biomes) VALUES ($1, 1, $2::jsonb) RETURNING id',
+    [worldName, JSON.stringify([])],
+  )).rows[0].id;
+
+  async function insertClip({ kind, label, storageKey }) {
+    const r = await pool.query(
+      `INSERT INTO audio_clips (kind, label, storage_key, bytes, duration_ms, loopable, source)
+       VALUES ($1,$2,$3,$4,$5,$6,'uploaded') RETURNING id`,
+      [kind, label, storageKey, OGG.length, 1000, kind !== 'sfx'],
+    );
+    const id = r.rows[0].id;
+    clipIds.push(id);
+    return id;
+  }
+
+  const musicKey = `audio/music/rmt_${tag}_music.ogg`;
+  const musicClipId = await insertClip({ kind: 'music', label: `I3dupe Music ${tag}`, storageKey: musicKey });
+  await pool.query(
+    "INSERT INTO audio_bindings (subject_kind, subject_key, slot, clip_id) VALUES ('world', $1, 'music', $2)",
+    [worldName, musicClipId],
+  );
+
+  const store = memStore(new Map([[musicKey, OGG]]));
+  await exportAudio({
+    db: pool, store, root, log: () => {},
+  });
+
+  // Hand-pollute both manifests with a duplicate AMBIENCE binding this run
+  // will never touch (kinds:['music']) -- simulating leftover damage a
+  // prior, buggier run already wrote to disk.
+  const dupClipId = '00000000-0000-4000-8000-0000000000aa';
+  const clipsPath = path.join(root, 'clips.json');
+  const bindingsPath = path.join(root, 'bindings.json');
+  const clips = JSON.parse(fs.readFileSync(clipsPath, 'utf8'));
+  clips.push({
+    id: dupClipId,
+    kind: 'ambience',
+    label: 'Polluted',
+    file: 'ambience/polluted.ogg',
+    bytes: 1,
+    duration_ms: 1,
+    loopable: true,
+    loop_start_ms: null,
+    loop_end_ms: null,
+    prompt: null,
+    style_or_cue: null,
+    engine: null,
+    seed: null,
+  });
+  fs.writeFileSync(clipsPath, JSON.stringify(clips, null, 2));
+  const dupBinding = {
+    subject_kind: 'biome', subject_key: `polluted-biome-${tag}`, slot: 'ambience', clip_id: dupClipId, volume: 1, weight: 1, sort: 0,
+  };
+  fs.writeFileSync(bindingsPath, JSON.stringify([dupBinding, dupBinding], null, 2));
+
+  await exportAudio({
+    db: pool, store, root, kinds: ['music'], log: () => {},
+  });
+
+  const bindings = JSON.parse(fs.readFileSync(bindingsPath, 'utf8'));
+  const dupMatches = bindings.filter((b) => b.clip_id === dupClipId);
+  assert.strictEqual(dupMatches.length, 1, 'the pre-existing duplicate is deduped even though this run never touched its kind');
+});
