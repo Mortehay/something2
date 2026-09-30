@@ -19,6 +19,22 @@ const { checkClipBuffer } = require('../services/oggInfo');
 const audioJobQueue = require('../services/audioJobQueue');
 const audioDispatcher = require('../services/audioDispatcher');
 
+// A job id as the retry route accepts it: a positive integer, or a digit
+// string (pg hands bigint ids to the client as strings), no larger than
+// Postgres' bigint maximum -- above it the ::bigint[] cast would throw and
+// turn a bad request into a 500.
+const BIGINT_MAX = 9223372036854775807n;
+function isJobId(id) {
+  if (Number.isSafeInteger(id)) return id > 0;
+  return typeof id === 'string' && /^[1-9][0-9]{0,18}$/.test(id) && BigInt(id) <= BIGINT_MAX;
+}
+
+// POST /admin/jobs' per-request item cap. checkSubject + cueFor run once per
+// item, sequentially, so a request stays bounded. The slot table sends a
+// bigger selection in chunks of this size (audioSelection.MAX_JOB_ITEMS,
+// which a frontend test pins to this line).
+const MAX_JOB_ITEMS = 500;
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Shared subject/slot validation for propose, generate and upload. Every
@@ -74,7 +90,7 @@ module.exports = function audioRoutes(pool) {
   router.get('/admin/subjects', admin, async (req, res) => {
     try {
       // One query for per-slot clip counts across every subject, not one
-      // /admin/slots request per subject -- see filledCounts' own comment.
+      // /admin/slots request per subject -- see slotClipCounts' own comment.
       // `filled` (distinct filled slots, the badge the existing callers
       // read) is derived from the same rows; `filledSlots` (SOMET-596) is
       // the per-slot clip count the slot table shows.
@@ -304,8 +320,8 @@ module.exports = function audioRoutes(pool) {
   router.post('/admin/jobs', admin, async (req, res) => {
     const b = req.body || {};
     try {
-      if (!Array.isArray(b.items) || b.items.length < 1 || b.items.length > 500) {
-        return res.status(400).json({ error: 'items must be an array of 1-500 entries' });
+      if (!Array.isArray(b.items) || b.items.length < 1 || b.items.length > MAX_JOB_ITEMS) {
+        return res.status(400).json({ error: `items must be an array of 1-${MAX_JOB_ITEMS} entries` });
       }
       const providerId = Number.isInteger(b.provider_id) ? b.provider_id : null;
       if (providerId !== null && !(await resolveAudioProvider(pool, providerId))) {
@@ -420,8 +436,7 @@ module.exports = function audioRoutes(pool) {
     const { ids } = req.body || {};
     let scoped;
     if (ids !== undefined) {
-      const ok = Array.isArray(ids) && ids.length <= 10000
-        && ids.every((id) => (Number.isSafeInteger(id) && id > 0) || (typeof id === 'string' && /^[1-9][0-9]{0,18}$/.test(id)));
+      const ok = Array.isArray(ids) && ids.length <= 10000 && ids.every(isJobId);
       if (!ok) return res.status(400).json({ error: 'ids must be an array of job ids (positive integers)' });
       scoped = ids.map(String);
     }
@@ -446,3 +461,4 @@ module.exports = function audioRoutes(pool) {
 };
 
 module.exports.boxTrackName = boxTrackName;
+module.exports.MAX_JOB_ITEMS = MAX_JOB_ITEMS;

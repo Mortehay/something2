@@ -211,65 +211,93 @@ async function recent(db, limit = 50) {
   )).rows;
 }
 
-// failed -> queued, attempts reset. Guarded two ways:
-//   * the NOT EXISTS clause stops a retry from colliding with a live job for
-//     the same slot on audio_jobs_one_live_per_slot;
-//   * several failed rows can pile up for one slot (each retry that fails
-//     again leaves its own row rather than reusing the old one), and
-//     resurrecting all of them would still hit that same unique index the
-//     moment the second one flips to 'queued'. Delete the OLDER failed
-//     duplicates for a slot first, keeping only the newest, so the slot has
-//     at most one failed row left to resurrect.
+// "Latest job of a slot", stated once for slotJobs and retryFailed: a live
+// (queued/running) row first -- that is what is happening to the slot now --
+// then the most recently UPDATED row, then the highest id. updated_at, not
+// id alone: a retried row keeps its old id, so after it fails again it is
+// the newest event even though a later `done` row has a higher id.
+const LATEST_ORDER = `subject_kind, subject_key, slot,
+                      (state IN ('queued', 'running')) DESC, updated_at DESC, id DESC`;
+
+// failed -> queued, attempts reset (SOMET-596 rework). One transaction that
+// re-queues EXACTLY ONE row per slot -- the slot's latest job -- and only
+// for slots whose latest job overall is `failed`:
+//   * a slot that has since succeeded (latest job `done`) is not resurrected,
+//     so a stale failure behind a done row does not regenerate a slot that
+//     already has sound;
+//   * a slot with a live job has a live latest row, so it is skipped and the
+//     re-queue can never collide with audio_jobs_one_live_per_slot;
+//   * the rows flipped are named by id, so two failed rows on one slot can
+//     never both become 'queued' (the old whole-table UPDATE could, if a
+//     job failed between its DELETE and its UPDATE).
+// The slot's OLDER failed rows are deleted in the same transaction, so the
+// slot is left with one row to show.
 //
-// `ids` (SOMET-596) scopes both steps to the SLOTS those failed jobs belong
-// to: naming any failed row of a slot -- even an older duplicate -- retries
-// that slot once, through its newest failed row. Ids that are not failed
-// jobs name no slot and are ignored.
+// `ids` (the by-cause panel's "Retry these N") scopes this to the slots those
+// failed jobs belong to: naming any failed row of a slot -- even an older
+// duplicate -- retries that slot once, through its latest row. Ids that are
+// not failed jobs name no slot and are ignored.
 async function retryFailed(db, { ids } = {}) {
-  let scope = '';
-  const params = [];
-  if (ids !== undefined) {
-    const slots = (await db.query(
-      `SELECT DISTINCT subject_kind, subject_key, slot FROM audio_jobs
-        WHERE state = 'failed' AND id = ANY($1::bigint[])`, [ids],
+  const client = typeof db.connect === 'function' ? await db.connect() : db;
+  const owned = client !== db;
+  try {
+    if (owned) await client.query('BEGIN');
+    const params = [];
+    let scope = '';
+    if (ids !== undefined) {
+      params.push(ids);
+      scope = `WHERE (subject_kind, subject_key, slot) IN (
+                 SELECT subject_kind, subject_key, slot FROM audio_jobs
+                  WHERE state = 'failed' AND id = ANY($1::bigint[]))`;
+    }
+    const targets = (await client.query(
+      `SELECT id, subject_kind, subject_key, slot FROM (
+         SELECT DISTINCT ON (subject_kind, subject_key, slot) id, subject_kind, subject_key, slot, state
+           FROM audio_jobs ${scope}
+          ORDER BY ${LATEST_ORDER}
+       ) latest
+       WHERE state = 'failed'`,
+      params,
     )).rows;
-    if (!slots.length) return 0;
-    params.push(slots.map((r) => r.subject_kind), slots.map((r) => r.subject_key), slots.map((r) => r.slot));
-    scope = `AND (a.subject_kind, a.subject_key, a.slot) IN
-               (SELECT * FROM unnest($1::text[], $2::text[], $3::text[]))`;
+    let requeued = 0;
+    if (targets.length) {
+      const keep = targets.map((r) => r.id);
+      await client.query(
+        `DELETE FROM audio_jobs a
+          USING unnest($1::text[], $2::text[], $3::text[]) AS t(k, key, s)
+          WHERE a.state = 'failed' AND a.subject_kind = t.k AND a.subject_key = t.key AND a.slot = t.s
+            AND NOT (a.id = ANY($4::bigint[]))`,
+        [targets.map((r) => r.subject_kind), targets.map((r) => r.subject_key), targets.map((r) => r.slot), keep],
+      );
+      requeued = (await client.query(
+        `UPDATE audio_jobs SET state = 'queued', attempts = 0, not_before = NULL, last_error = NULL, updated_at = now()
+          WHERE id = ANY($1::bigint[]) AND state = 'failed'`,
+        [keep],
+      )).rowCount;
+    }
+    if (owned) await client.query('COMMIT');
+    return requeued;
+  } catch (err) {
+    if (owned) await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    if (owned) client.release();
   }
-  await db.query(
-    `DELETE FROM audio_jobs a
-      WHERE a.state = 'failed' ${scope}
-        AND EXISTS (SELECT 1 FROM audio_jobs b
-                     WHERE b.state = 'failed' AND b.subject_kind = a.subject_kind
-                       AND b.subject_key = a.subject_key AND b.slot = a.slot AND b.id > a.id)`,
-    params,
-  );
-  return (await db.query(
-    `UPDATE audio_jobs a SET state = 'queued', attempts = 0, not_before = NULL, last_error = NULL, updated_at = now()
-      WHERE a.state = 'failed' ${scope}
-        AND NOT EXISTS (SELECT 1 FROM audio_jobs l WHERE l.state IN ('queued','running')
-                          AND l.subject_kind = a.subject_kind AND l.subject_key = a.subject_key
-                          AND l.slot = a.slot)`,
-    params,
-  )).rowCount;
 }
 
-// The slot table's job per (kind, key, slot) (SOMET-596). The rule: take the
-// slot's LATEST row of any state -- a live (queued/running) row first, since
-// that is what is happening to the slot now, else the highest id -- and
-// report it only if it is queued, running or failed. A slot whose latest job
-// is `done` therefore shows no job at all, even with older failed rows left
-// behind: it has sound now, and listing the stale failure would put it in
-// the failed filter and the by-cause panel for a problem that is gone.
+// The slot table's job per (kind, key, slot) (SOMET-596): the slot's latest
+// job (LATEST_ORDER above), reported only if it is queued, running or
+// failed. A slot whose latest job is `done` therefore shows no job at all,
+// even with older failed rows left behind: it has sound now, and listing the
+// stale failure would put it in the failed filter and the by-cause panel for
+// a problem that is gone.
 async function slotJobs(db) {
   return (await db.query(
     `SELECT id, subject_kind, subject_key, slot, status, error, attempts, updated_at FROM (
        SELECT DISTINCT ON (subject_kind, subject_key, slot)
               id, subject_kind, subject_key, slot, state AS status, last_error AS error, attempts, updated_at
          FROM audio_jobs
-        ORDER BY subject_kind, subject_key, slot, (state IN ('queued', 'running')) DESC, id DESC
+        ORDER BY ${LATEST_ORDER}
      ) latest
      WHERE status IN ('queued', 'running', 'failed')
      ORDER BY subject_kind, subject_key, slot`,

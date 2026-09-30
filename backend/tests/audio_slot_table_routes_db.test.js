@@ -139,6 +139,18 @@ test('audio slot table routes', { skip }, async (t) => {
       assert.ok(mine[0].updated_at, 'updated_at is returned');
     });
 
+    await t.test('jobs/slots: "latest" is by updated_at, so a re-failed old row beats a newer-id done row', async () => {
+      const kR = `audio-tbl-r-${tag}`;
+      const old = await job(kR, 'music', 'failed', 'failed again after a retry');
+      await job(kR, 'music', 'done');
+      // The old row was retried and failed again AFTER the done row: same id,
+      // later updated_at.
+      await pool.query("UPDATE audio_jobs SET updated_at = now() + interval '1 minute' WHERE id = $1", [old]);
+      const res = await request(app).get('/api/audio/admin/jobs/slots').set('Authorization', bearer(admin));
+      const mine = res.body.filter((r) => r.subject_key === kR);
+      assert.deepEqual(mine.map((r) => [String(r.id), r.status, r.error]), [[String(old), 'failed', 'failed again after a retry']]);
+    });
+
     await t.test('retry-failed { ids } re-queues only those slots; bad ids are a 400', async () => {
       const kC = `audio-tbl-c-${tag}`;
       const kD = `audio-tbl-d-${tag}`;
@@ -178,21 +190,45 @@ test('audio slot table routes', { skip }, async (t) => {
       await pool.query('DELETE FROM audio_jobs WHERE id = $1', [foreignFailed]);
     });
 
-    await t.test('retry-failed with no ids still retries every failed job', async () => {
+    await t.test('retry-failed rejects an id above the bigint maximum with a 400', async () => {
+      const over = await request(app).post('/api/audio/admin/jobs/retry-failed')
+        .set('Authorization', bearer(admin)).send({ ids: ['9223372036854775808'] });
+      assert.equal(over.status, 400, JSON.stringify(over.body));
+      const max = await request(app).post('/api/audio/admin/jobs/retry-failed')
+        .set('Authorization', bearer(admin)).send({ ids: ['9223372036854775807'] });
+      assert.equal(max.status, 200, JSON.stringify(max.body));
+      assert.equal(max.body.requeued, 0);
+    });
+
+    await t.test('retry-failed with no ids retries each slot whose latest job failed, once', async () => {
+      // Self-contained: this file's own earlier rows are removed first, so
+      // the expected count below is exactly the rows made here.
+      await pool.query('DELETE FROM audio_jobs WHERE subject_key LIKE $1', [own]);
       const kF = `audio-tbl-f-${tag}`;
       const f1 = await job(kF, 'music', 'failed', 'a');
       const f2 = await job(kF, 'ambience', 'failed', 'b');
-      // Counted per SLOT: a slot's older failed duplicates are deleted, not
-      // re-queued (A/ambience above holds two failed rows).
-      const ownFailed = (await pool.query(
-        "SELECT DISTINCT subject_kind, subject_key, slot FROM audio_jobs WHERE state = 'failed' AND subject_key LIKE $1",
-        [own])).rowCount;
+      // G: a stale failure behind a later success -- the slot has sound now.
+      const kG = `audio-tbl-g-${tag}`;
+      const staleG = await job(kG, 'music', 'failed', 'old');
+      const doneG = await job(kG, 'music', 'done');
+      // H: two failed rows on one slot -- one queued row, no constraint error.
+      const kH = `audio-tbl-h-${tag}`;
+      const olderH = await job(kH, 'music', 'failed', 'x');
+      const newerH = await job(kH, 'music', 'failed', 'y');
+
       const { result: res, foreignTouched } = await restoringForeignJobs(pool, own, ['failed'], () => (
         request(app).post('/api/audio/admin/jobs/retry-failed').set('Authorization', bearer(admin)).send({})));
       assert.equal(res.status, 200, JSON.stringify(res.body));
-      assert.equal(res.body.requeued - foreignTouched, ownFailed);
+      assert.equal(res.body.requeued - foreignTouched, 3, 'F/music, F/ambience and H/music');
       assert.equal((await stateOf(f1)).state, 'queued');
       assert.equal((await stateOf(f2)).state, 'queued');
+      assert.equal((await stateOf(staleG)).state, 'failed', 'a stale failure behind a done row is not re-queued');
+      assert.equal((await stateOf(doneG)).state, 'done');
+      assert.equal(await stateOf(olderH), null, 'the older failed duplicate is deleted');
+      assert.equal((await stateOf(newerH)).state, 'queued');
+      const live = (await pool.query(
+        "SELECT count(*)::int AS n FROM audio_jobs WHERE subject_key = $1 AND state IN ('queued','running')", [kH])).rows[0].n;
+      assert.equal(live, 1);
     });
   });
 });

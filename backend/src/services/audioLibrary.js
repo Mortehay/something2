@@ -369,35 +369,18 @@ async function listMisses(db) {
   return (await db.query('SELECT * FROM audio_misses ORDER BY count DESC, last_seen DESC LIMIT 500')).rows;
 }
 
-// The Audio tab's "filled/total" badge, for every subject at once.
+// The Audio tab's per-slot clip counts (SOMET-596) and, derived from them,
+// the "filled/total" badge -- for every subject at once.
 //
 // One query for the whole catalogue rather than one /admin/slots request per
 // subject (which the admin UI originally did): with ~130 worlds+biomes in the
 // dev DB, that fan-out could burn a third of the global per-IP rate limit
-// just opening the tab. COUNT(DISTINCT slot) -- not COUNT(*) -- so a slot
-// with several clips bound to it (unlimited per spec) still counts as one
-// FILLED slot, not one per clip.
-//
-// Returns { [subject_kind]: { [subject_key]: filledSlotCount } }. A subject
-// with no bindings at all is simply absent from its kind's map -- callers
-// treat a missing key as 0 (the frontend's slotRows does this explicitly).
-async function filledCounts(db) {
-  const r = await db.query(
-    'SELECT subject_kind, subject_key, COUNT(DISTINCT slot)::int AS filled FROM audio_bindings GROUP BY 1, 2');
-  const out = {};
-  for (const row of r.rows) {
-    (out[row.subject_kind] = out[row.subject_kind] || {})[row.subject_key] = row.filled;
-  }
-  return out;
-}
-
-// The Audio tab's slot table (SOMET-596): clips bound per SLOT, for every
-// subject at once -- one grouped query, same reasoning as filledCounts above.
-// COUNT(*) here, not COUNT(DISTINCT ...): each binding is one clip in that
-// slot, and the table's Sound column shows exactly that number.
+// just opening the tab. COUNT(*) per slot: each binding is one clip in that
+// slot, and the slot table's Sound column shows exactly that number.
 //
 // Returns { [subject_kind]: { [subject_key]: { [slot]: clipCount } } }. A slot
-// with no clip is absent; callers read a missing entry as 0.
+// with no clip is absent; callers read a missing entry as 0 (the frontend's
+// audioSelection.audioSlotRows does this explicitly).
 async function slotClipCounts(db) {
   const r = await db.query(
     'SELECT subject_kind, subject_key, slot, COUNT(*)::int AS clips FROM audio_bindings GROUP BY 1, 2, 3');
@@ -409,9 +392,10 @@ async function slotClipCounts(db) {
   return out;
 }
 
-// filledCounts' shape, derived from slotClipCounts' result: the number of
-// slots with >= 1 clip is COUNT(DISTINCT slot), so the route can answer both
-// fields from the one query.
+// The badge count per subject, derived from slotClipCounts' result: the
+// number of slots with >= 1 clip (a slot holding several clips still counts
+// once), so the route answers both fields from the one query. Returns
+// { [subject_kind]: { [subject_key]: filledSlotCount } }.
 function filledFromSlotCounts(slotCounts) {
   const out = {};
   for (const [kind, byKey] of Object.entries(slotCounts || {})) {
@@ -424,5 +408,5 @@ function filledFromSlotCounts(slotCounts) {
 module.exports = {
   slotClipCounts, filledFromSlotCounts,
   AudioInputError, storeClip, storeAndBindClip, bindClip, sha1Of, boundClipSha1s, canSetLoopable, setClipLoopable, updateBinding, unbind, listClips, deleteClip, deleteUnboundClips,
-  subjectSlots, worldAudioBundle, recordMisses, listMisses, filledCounts, MAX_MISSES_PER_POST,
+  subjectSlots, worldAudioBundle, recordMisses, listMisses, MAX_MISSES_PER_POST,
 };

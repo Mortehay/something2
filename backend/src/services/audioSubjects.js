@@ -244,7 +244,7 @@ function entityPhrase(db, kind, key, slot) {
 }
 
 // item's subjectCues: { [name]: { use, hit } } for every weapon. One query
-// for every weapon rather than one per name (same reasoning as filledCounts
+// for every weapon rather than one per name (same reasoning as slotClipCounts
 // in audioLibrary.js): the Audio tab's item group can hold the whole
 // gear-ladder catalog (144 rows today).
 async function itemCues(db) {
