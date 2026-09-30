@@ -56,7 +56,9 @@ export const MIN_ICON_R = 5;
 // How much of a node's icon shows through per state. The icon covers the
 // state fill, so without this an unallocated node with art would look exactly
 // like an allocated one; the rim colour alone is too thin a cue at r=7.
-const ICON_ALPHA = { allocated: 1, allocatable: 0.8, locked: 0.45 };
+// Not lower: 0.45 was tried and, over the dark locked fill, made the icons
+// unreadable in the live tree -- and a fresh character's tree is ~all locked.
+const ICON_ALPHA = { allocated: 1, allocatable: 0.9, locked: 0.7 };
 
 const STATE_STROKE = {
   allocated: "#4ade80",
