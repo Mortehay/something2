@@ -168,6 +168,37 @@ async function bindClip(db, { subjectKind, subjectKey, slot, clipId, volume = 1,
   }
 }
 
+// SOMET-592 (I2): which slots may carry an admin-set `loopable` flag.
+// A world point's `nearby` sound is presence-driven (spec §1 "sfx, loopable
+// allowed", §3 "a loopable clip loops while in range"); every other sfx slot
+// is a one-shot, and the client only ever loops a world_point `nearby` clip.
+// Generated clips still default to loopable=false there -- a looped chime is
+// worse than the cadence -- so looping is always the admin's explicit call.
+const LOOPABLE_SFX_SLOTS = new Set(['world_point/nearby']);
+function canSetLoopable(subjectKind, slot) {
+  return LOOPABLE_SFX_SLOTS.has(`${subjectKind}/${slot}`);
+}
+
+// PATCH /admin/clips/:id {loopable}. The rule (kept minimal on purpose): a
+// clip's loopable flag may be changed only when the clip is bound to at
+// least one world_point `nearby` slot, or is not an sfx clip at all
+// (music/ambience, which loop by nature). An sfx clip bound anywhere else,
+// or not bound at all, is refused -- there is no slot where the flag would
+// mean anything. Returns the updated row, or null when there is no such clip.
+async function setClipLoopable(db, clipId, loopable) {
+  const clip = (await db.query(
+    `SELECT c.kind, EXISTS (
+        SELECT 1 FROM audio_bindings b
+         WHERE b.clip_id = c.id AND b.subject_kind = 'world_point' AND b.slot = 'nearby'
+      ) AS on_point_nearby
+       FROM audio_clips c WHERE c.id = $1`, [clipId])).rows[0];
+  if (!clip) return null;
+  if (clip.kind === 'sfx' && !clip.on_point_nearby) {
+    throw new AudioInputError('only a clip bound to a world point\'s nearby slot can be set to loop');
+  }
+  return (await db.query('UPDATE audio_clips SET loopable = $2 WHERE id = $1 RETURNING *', [clipId, loopable])).rows[0];
+}
+
 async function updateBinding(db, id, { volume, weight }) {
   const r = await db.query(
     `UPDATE audio_bindings SET volume = COALESCE($2, volume), weight = COALESCE($3, weight)
@@ -361,6 +392,6 @@ async function filledCounts(db) {
 }
 
 module.exports = {
-  AudioInputError, storeClip, storeAndBindClip, bindClip, sha1Of, boundClipSha1s, updateBinding, unbind, listClips, deleteClip, deleteUnboundClips,
+  AudioInputError, storeClip, storeAndBindClip, bindClip, sha1Of, boundClipSha1s, canSetLoopable, setClipLoopable, updateBinding, unbind, listClips, deleteClip, deleteUnboundClips,
   subjectSlots, worldAudioBundle, recordMisses, listMisses, filledCounts, MAX_MISSES_PER_POST,
 };

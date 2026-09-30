@@ -3,7 +3,9 @@
 // clip URL per session. Slice 3 adds an sfx bus beside these two.
 import { API_URL } from '../../../../../config.js';
 import { assetUrl } from '../net/assets.js';
-import { resolveChain, pickWeighted, ambienceChain, musicChain } from './audioLookup.js';
+import {
+  resolveChain, pickWeighted, ambienceChain, musicChain, nearbyPointPath,
+} from './audioLookup.js';
 import { sfxChains } from './sfxResolve.js';
 import { SfxLimiter } from './sfxLimits.js';
 import { NearbyScheduler } from './nearbyScheduler.js';
@@ -25,6 +27,10 @@ const NEARBY_TICK_MS = 250;
 // Fix round 1, item 4: a loop fades IN rather than popping to full gain the
 // instant a point comes into range.
 const NEARBY_LOOP_FADE_S = 0.75;
+// SOMET-592 (M8): an evicted loop (a combat event bumped it at a full bus)
+// fades over this long instead of stopping dead, so a fight next to a
+// humming portal ducks the hum rather than clicking it off and on.
+const NEARBY_LOOP_EVICT_FADE_S = 0.05;
 
 // A point (landmark/chest/merchant/bank) has no id in every source array, so
 // a static marker is identified by its art + position instead -- stable
@@ -299,9 +305,11 @@ export class AudioEngine {
   // nearbyLoops, since a loop never fires its own onended) -- this is the one
   // place callers need to stop "whichever voice this id is", so they don't
   // have to know which map it lives in.
+  // Every caller is an eviction, so a loop gets the short eviction fade
+  // (M8), not the hard stop a world change uses.
   _stopSfxOrLoopVoice(voiceId) {
     for (const [emitterId, loop] of this.nearbyLoops) {
-      if (loop.voiceId === voiceId) { this._stopNearbyLoop(emitterId); return; }
+      if (loop.voiceId === voiceId) { this._fadeOutNearbyLoop(emitterId, NEARBY_LOOP_EVICT_FADE_S); return; }
     }
     this._stopSfxVoice(voiceId);
   }
@@ -326,15 +334,23 @@ export class AudioEngine {
   // after the ramp finishes): the eviction rules already prefer bumping a
   // 'nearby' voice first, so a fading-out voice contending for its own slot
   // back would be an odd race to leave open.
-  _fadeOutNearbyLoop(emitterId) {
+  // `fadeS` is FADE_S for a walk-away, NEARBY_LOOP_EVICT_FADE_S for an
+  // eviction. On an eviction the limiter has already forgotten the voice
+  // (admit() deleted it), so the release below is a no-op there.
+  _fadeOutNearbyLoop(emitterId, fadeS = FADE_S) {
     const loop = this.nearbyLoops.get(emitterId);
     if (!loop) return;
     this.nearbyLoops.delete(emitterId);
     try {
-      loop.gain.gain.cancelScheduledValues(this.ctx.currentTime);
-      loop.gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + FADE_S);
+      const now = this.ctx.currentTime;
+      const g = loop.gain.gain;
+      g.cancelScheduledValues(now);
+      // Anchor the ramp at the current value, or it would start from the
+      // last scheduled event (possibly mid fade-in) instead of from "now".
+      g.setValueAtTime(g.value, now);
+      g.linearRampToValueAtTime(0, now + fadeS);
       loop.src.onended = null;
-      loop.src.stop(this.ctx.currentTime + FADE_S);
+      loop.src.stop(now + fadeS);
     } catch { /* already stopped */ }
     this.sfxLimiter.release(loop.voiceId);
   }
@@ -396,7 +412,8 @@ export class AudioEngine {
   //     scheduler every tick, cadence-gated, sharing its 4-slot cap.
   // Which path a point takes is cached in nearbyPointLoopable the first time
   // its binding resolves, so a stable point doesn't re-resolve+pick every
-  // tick just to learn which path it's already on.
+  // tick just to learn which path it's already on. The path is decided by
+  // the slot, not by one random pick (M7, see nearbyPointPath).
   tickNearby(creatures, pointsOrThunk, listener, nowMs = this.now()) {
     if (!this.world) return;
     if (nowMs - this._lastNearbyTick < NEARBY_TICK_MS) return;
@@ -432,14 +449,16 @@ export class AudioEngine {
         cadenceEmitters.push({ id, key, x: p.x, y: p.y, kind: 'point' });
         continue;
       }
-      // Cached true, or not yet known -- resolve+pick to (re)start the loop,
-      // or, on first sighting, to learn which path this point takes at all.
+      // Cached true, or not yet known -- resolve to (re)start the loop, or,
+      // on first sighting, to learn which path this point takes at all.
       const { clips, key: resolvedKey } = this._resolve([key]); // records the miss itself when unbound
-      const clip = resolvedKey ? pickWeighted(clips, this.rand) : null;
-      if (!clip) continue; // unresolved -- retry next tick
-      this.nearbyPointLoopable.set(id, Boolean(clip.loopable));
-      if (clip.loopable) this._startNearbyLoop(id, clip, dx, distance);
-      else cadenceEmitters.push({ id, key, x: p.x, y: p.y, kind: 'point' });
+      if (!resolvedKey) continue; // unresolved -- retry next tick
+      const path = nearbyPointPath(clips);
+      this.nearbyPointLoopable.set(id, path.loop);
+      if (path.loop) {
+        const clip = pickWeighted(path.clips, this.rand);
+        if (clip) this._startNearbyLoop(id, clip, dx, distance);
+      } else cadenceEmitters.push({ id, key, x: p.x, y: p.y, kind: 'point' });
     }
 
     for (const d of this.nearbyScheduler.tick(cadenceEmitters, listener)) {

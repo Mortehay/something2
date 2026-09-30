@@ -157,10 +157,23 @@ module.exports = function audioRoutes(pool) {
   });
 
   router.post('/admin/upload', admin, express.raw({ type: 'audio/ogg', limit: '8mb' }), async (req, res) => {
-    const { subject_kind: kind, subject_key: key, slot, label } = req.query;
+    const {
+      subject_kind: kind, subject_key: key, slot, label, loopable: loopParam,
+    } = req.query;
     try {
       const { clipKind, error } = await checkSubject(pool, kind, key, slot);
       if (error) return res.status(400).json({ error });
+      // `loopable` (SOMET-592, I2): the "Loop" checkbox on a world point's
+      // nearby slot. Absent = the default (sfx never loops); any other slot
+      // refuses it rather than silently storing a flag nothing reads.
+      let loopable;
+      if (loopParam !== undefined) {
+        if (loopParam !== 'true' && loopParam !== 'false') return res.status(400).json({ error: "loopable must be 'true' or 'false'" });
+        if (clipKind === 'sfx' && !lib.canSetLoopable(kind, slot)) {
+          return res.status(400).json({ error: 'only a world point\'s nearby slot takes a loopable upload' });
+        }
+        if (clipKind === 'sfx') loopable = loopParam === 'true';
+      }
       if (!Buffer.isBuffer(req.body)) return res.status(400).json({ error: 'send the file as Content-Type: audio/ogg' });
       const checked = checkClipBuffer(req.body, clipKind);
       if (!checked.ok) return res.status(400).json({ error: checked.error });
@@ -168,7 +181,7 @@ module.exports = function audioRoutes(pool) {
       // path as generate -- a concurrent delete-unbound cannot see it unbound.
       const { clip, binding } = await lib.storeAndBindClip(pool, {
         buffer: req.body, kind: clipKind, label: String(label || `${key} ${slot} (upload)`).slice(0, 200),
-        source: 'uploaded', durationMs: checked.durationMs,
+        source: 'uploaded', durationMs: checked.durationMs, loopable,
       }, { subjectKind: kind, subjectKey: key, slot });
       res.status(201).json({ clip, binding });
     } catch (err) { sendError(res, err); }
@@ -220,6 +233,18 @@ module.exports = function audioRoutes(pool) {
     try {
       const result = await lib.deleteClip(pool, req.params.id);
       return result.deleted ? res.json(result) : res.status(404).json({ error: 'clip not found' });
+    } catch (err) { sendError(res, err); }
+  });
+
+  // SOMET-592 (I2): the Loop toggle on a world point's nearby clip rows. See
+  // lib.setClipLoopable for the rule (world_point nearby, or a non-sfx clip).
+  router.patch('/admin/clips/:id', admin, async (req, res) => {
+    if (!UUID.test(req.params.id)) return res.status(400).json({ error: 'id must be a uuid' });
+    const { loopable } = req.body || {};
+    if (typeof loopable !== 'boolean') return res.status(400).json({ error: 'loopable must be a boolean' });
+    try {
+      const row = await lib.setClipLoopable(pool, req.params.id, loopable);
+      return row ? res.json(row) : res.status(404).json({ error: 'clip not found' });
     } catch (err) { sendError(res, err); }
   });
 

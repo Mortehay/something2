@@ -189,6 +189,24 @@ export function useGenerateAudio(subjectKind, subjectKey, slot) {
   });
 }
 
+// SOMET-592 (I2): the one sfx slot whose clips may loop -- a world point's
+// `nearby` (the backend enforces the same rule: audioLibrary.canSetLoopable).
+// Its card shows a "Loop" checkbox on upload and a Loop toggle per clip row.
+export function loopEditable(subjectKind, slot) {
+  return subjectKind === 'world_point' && slot === 'nearby';
+}
+
+// The upload request's query string. `loopable` is only sent when it is a
+// boolean (the Loop checkbox exists only where loopEditable is true).
+export function uploadParams({
+  subjectKind, subjectKey, slot, label, loopable,
+}) {
+  const params = new URLSearchParams({ subject_kind: subjectKind, subject_key: subjectKey, slot });
+  if (label) params.set('label', label);
+  if (typeof loopable === 'boolean') params.set('loopable', String(loopable));
+  return params;
+}
+
 // Sends the raw file with Content-Type: audio/ogg, overriding authHeaders()'s
 // default application/json -- the backend route parses the body with
 // express.raw({ type: 'audio/ogg' }), so a JSON content type here would leave
@@ -197,10 +215,11 @@ export function useUploadAudio() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({
-      subjectKind, subjectKey, slot, label, file,
+      subjectKind, subjectKey, slot, label, loopable, file,
     }) => {
-      const params = new URLSearchParams({ subject_kind: subjectKind, subject_key: subjectKey, slot });
-      if (label) params.set('label', label);
+      const params = uploadParams({
+        subjectKind, subjectKey, slot, label, loopable,
+      });
       const res = await apiFetch(`${API_URL}/api/audio/admin/upload?${params}`, {
         method: 'POST',
         headers: { ...authHeaders(), 'Content-Type': 'audio/ogg' },
@@ -235,6 +254,27 @@ export function useUpdateBinding() {
     },
     onSuccess: ({ subjectKind, subjectKey }) => {
       qc.invalidateQueries({ queryKey: slotsKey(subjectKind, subjectKey) });
+    },
+    onError: (err) => toast.error(err.message),
+  });
+}
+
+// SOMET-592 (I2): PATCH /api/audio/admin/clips/:id {loopable}. The flag lives
+// on the CLIP, so every slot showing it and every library page may be stale.
+export function useSetClipLoopable() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ clipId, loopable }) => {
+      const res = await apiFetch(`${API_URL}/api/audio/admin/clips/${clipId}`, {
+        method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ loopable }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Failed to change the loop setting');
+      return json;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ALL_SLOTS_KEY });
+      qc.invalidateQueries({ queryKey: CLIPS_KEY_PREFIX });
     },
     onError: (err) => toast.error(err.message),
   });

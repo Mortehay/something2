@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { resolveChain, pickWeighted, ambienceChain, musicChain } from '../audioLookup.js';
+import {
+  resolveChain, pickWeighted, ambienceChain, musicChain, nearbyPointPath,
+} from '../audioLookup.js';
 import { BiomeTracker } from '../biomeTracker.js';
 import { MissLog } from '../missLog.js';
 import { loadVolumes, saveVolumes, DEFAULT_VOLUMES } from '../audioSettings.js';
@@ -64,5 +66,20 @@ describe('audioSettings', () => {
     expect(loadVolumes(store).music).toBe(0.1);
     store.setItem('something2.audio.volumes', '{"music": 7, "master": "loud"}');
     expect(loadVolumes(store)).toEqual(DEFAULT_VOLUMES);     // out-of-range and wrong types fall back
+  });
+});
+
+// SOMET-592 (M7): the loop-vs-cadence choice is the slot's, not one pick's.
+describe('nearbyPointPath', () => {
+  const plain = { key: 'a.ogg', weight: 5, loopable: false };
+  const loop = { key: 'b.ogg', weight: 1, loopable: true };
+  it('loops when any bound clip is loopable, and only loopable clips are loop candidates', () => {
+    expect(nearbyPointPath([plain, loop])).toEqual({ loop: true, clips: [loop] });
+    expect(nearbyPointPath([loop, plain])).toEqual({ loop: true, clips: [loop] });
+  });
+  it('takes the cadence path, with every clip, when none is loopable', () => {
+    expect(nearbyPointPath([plain])).toEqual({ loop: false, clips: [plain] });
+    expect(nearbyPointPath([])).toEqual({ loop: false, clips: [] });
+    expect(nearbyPointPath(undefined)).toEqual({ loop: false, clips: [] });
   });
 });
