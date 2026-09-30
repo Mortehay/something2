@@ -7,14 +7,28 @@
 // describe-subjects.js). SEQUENTIAL: one text model serves one request at a
 // time, and the box's gateway swaps models -- parallel calls only queue.
 //
-// A BUSY BOX NEVER STOPS THE RUN. Without --box-only a busy box means the
-// CPU fallback answers; with it, the run waits and retries the same slot.
-// Five consecutive NON-busy failures stop it (the describer is down; writing
-// 2,300 identical failures into the log helps nobody).
+// A BUSY BOX DOES NOT STOP THE RUN AT ONCE. Without --box-only a busy box
+// means the CPU fallback answers; with it, the run waits and retries the same
+// slot -- up to BOX_ONLY_BUSY_WAIT_LIMIT waits in a row. A transport error and
+// a timeout are "busy" too, so a box that is off would otherwise be waited on
+// forever. Five consecutive NON-busy failures stop it (the describer is down;
+// writing 2,300 identical failures into the log helps nobody).
+//
+// NEVER OVER A CHANGE (final review I1). The todo list comes from ONE snapshot
+// taken at the start, and a full run lasts a day. Each save therefore expects
+// the active row the snapshot saw (null = none); a slot someone edited since
+// is a 409 from the store, counted as "changed during run" and left alone --
+// a skip, not a failure, so it never feeds the 5-in-a-row stop.
+//
+// UPLOAD-ONLY SLOTS ARE SKIPPED. An sfx slot with no cue on the box (creature
+// nearby/attack, ranged use) can never be generated, so a prompt for it is
+// CPU time for a row nobody sees; they are counted, not written.
 //
 // DUPLICATES ARE REPORTED, NOT FIXED. The art epic measured 12 of 20 skills
 // collapsing to one generic weapon; the per-kind duplicate count is how that
-// shows up here before a full run is spent on it.
+// shows up here before a full run is spent on it. Only identical text across
+// DIFFERENT subjects counts: a bat's hurt and death rightly share "a small
+// brown cave bat", since an sfx entity describes the source, not the action.
 //
 // CUE LOOKUP: one cueFor(db, ...) call per sfx slot (~2,300 slots total, of
 // which only the `item` kind's cueFor issues a DB query -- 144 weapons x 2
@@ -32,16 +46,18 @@ const { loadPromptCatalog, buildContext, isStale } = require('../src/services/au
 const writer = require('../src/services/audioPromptWriter');
 
 const CONSECUTIVE_FAILURE_LIMIT = 5;
+const BOX_ONLY_BUSY_WAIT_LIMIT = 20;
 const BUSY_WAIT_MS = () => Number(process.env.AUDIO_DESCRIBE_BUSY_WAIT_MS) || 30000;
 
 function selectSlots(slots, activeByKey, currentByKey, {
   kinds = null, slot = null, stale = false, limit = 0,
 } = {}) {
   const todo = [];
-  const skipped = { written: 0, stale: 0 };
+  const skipped = { written: 0, stale: 0, uploadOnly: 0 };
   for (const s of slots) {
     if (kinds && !kinds.includes(s.kind)) continue;
     if (slot && s.slot !== slot) continue;
+    if (s.uploadOnly) { skipped.uploadOnly += 1; continue; }
     const active = activeByKey.get(s.id);
     const isStaleRow = Boolean(active) && isStale(active, currentByKey.get(s.id));
     if (stale) {
@@ -59,13 +75,21 @@ function summarize(results) {
   const out = {};
   const seen = {};
   for (const r of results) {
-    const k = (out[r.kind] ||= { written: 0, failed: 0, box: 0, fallback: 0, duplicates: 0 });
+    const k = (out[r.kind] ||= {
+      written: 0, failed: 0, changedDuringRun: 0, box: 0, fallback: 0, duplicates: 0,
+    });
+    if (r.conflict) { k.changedDuringRun += 1; continue; }
     if (!r.ok) { k.failed += 1; continue; }
     k.written += 1;
     if (r.via === 'box') k.box += 1; else if (r.via === 'fallback') k.fallback += 1;
+    // norm -> the subject keys that wrote it. A duplicate is a text some
+    // OTHER subject already wrote; the same subject's second slot is not one.
     const norm = String(r.text || '').trim().toLowerCase();
     const bucket = (seen[r.kind] ||= new Map());
-    if (bucket.has(norm)) k.duplicates += 1; else bucket.set(norm, r.key);
+    const keys = bucket.get(norm) || new Set();
+    if ([...keys].some((key) => key !== r.key)) k.duplicates += 1;
+    keys.add(r.key);
+    bucket.set(norm, keys);
   }
   return out;
 }
@@ -83,17 +107,22 @@ async function allSlots(db) {
 }
 
 async function run(db, opts, { log = console.log, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), write = writer.writeSlotPrompt, loadStyles = writer.loadStyles } = {}) {
-  const [slots, active, catalog] = await Promise.all([allSlots(db), audioPrompts.listAllActive(db), loadPromptCatalog(db)]);
+  const [everySlot, active, catalog] = await Promise.all([allSlots(db), audioPrompts.listAllActive(db), loadPromptCatalog(db)]);
+  // `keys`: only these subject keys (a canary over named subjects, or a test
+  // over subjects it created) -- applied before the per-slot cue lookup.
+  const slots = opts.keys ? everySlot.filter((s) => opts.keys.includes(s.key)) : everySlot;
   const activeByKey = new Map(active.map((p) => [`${p.subject_kind}/${p.subject_key}/${p.slot}`, p]));
   const cues = new Map();
   const currentByKey = new Map();
   for (const s of slots) {
-    const cue = slotKind(s.kind, s.slot) === 'sfx' ? await cueFor(db, s.kind, s.key, s.slot) : null; // eslint-disable-line no-await-in-loop
+    const sfx = slotKind(s.kind, s.slot) === 'sfx';
+    const cue = sfx ? await cueFor(db, s.kind, s.key, s.slot) : null; // eslint-disable-line no-await-in-loop
     cues.set(s.id, cue);
+    if (sfx && !cue) s.uploadOnly = true;
     currentByKey.set(s.id, buildContext(catalog, s.kind, s.key, s.slot, { cue }));
   }
   const { todo, skipped } = selectSlots(slots, activeByKey, currentByKey, opts);
-  log(`${todo.length} slot(s) to write; skipped ${skipped.written} written, ${skipped.stale} stale`);
+  log(`${todo.length} slot(s) to write; skipped ${skipped.written} written, ${skipped.stale} stale, ${skipped.uploadOnly} upload-only`);
   if (opts.dryRun) {
     for (const s of todo) log(`  ${s.id}: ${currentByKey.get(s.id)}`);
     return { dryRun: true, todo: todo.length };
@@ -101,19 +130,38 @@ async function run(db, opts, { log = console.log, sleep = (ms) => new Promise((r
   const styles = await loadStyles(db);
   const results = [];
   let consecutive = 0;
+  let busyWaits = 0;
+  let busySince = 0;
   for (let i = 0; i < todo.length; i += 1) {
     const s = todo[i];
+    const snap = activeByKey.get(s.id) || null;
     // eslint-disable-next-line no-await-in-loop
-    const r = await write(db, { kind: s.kind, key: s.key, slot: s.slot }, {
-      catalog, styles, cue: cues.get(s.id), boxOnly: Boolean(opts.boxOnly),
+    const r = await write(db, {
+      kind: s.kind, key: s.key, slot: s.slot, hint: snap ? snap.hint : null,
+    }, {
+      catalog, styles, cue: cues.get(s.id), boxOnly: Boolean(opts.boxOnly), expectActiveId: snap ? snap.id : null,
     });
     if (!r.ok && r.busy && opts.boxOnly) {
-      log(`  busy, waiting: ${r.error}`);
+      if (busyWaits === 0) busySince = Date.now();
+      busyWaits += 1;
+      const elapsed = Math.round((Date.now() - busySince) / 1000);
+      if (busyWaits > BOX_ONLY_BUSY_WAIT_LIMIT) {
+        log(`stopping: the text box stayed busy or unreachable for ${BOX_ONLY_BUSY_WAIT_LIMIT} waits in a row (${elapsed}s; last: ${r.error})`);
+        break;
+      }
+      log(`  busy, waiting (wait ${busyWaits}/${BOX_ONLY_BUSY_WAIT_LIMIT}, ${elapsed}s elapsed): ${r.error}`);
       await sleep(BUSY_WAIT_MS()); // eslint-disable-line no-await-in-loop
       i -= 1;
       continue;
     }
-    results.push({ kind: s.kind, key: s.key, ok: r.ok, via: r.ok ? r.row.via : r.via, text: r.ok ? r.row.text : null });
+    busyWaits = 0;
+    results.push({
+      kind: s.kind, key: s.key, ok: r.ok, conflict: Boolean(r.conflict), via: r.ok ? r.row.via : r.via, text: r.ok ? r.row.text : null,
+    });
+    if (r.conflict) {
+      log(`  [${i + 1}/${todo.length}] ${s.id}: skipped, changed during run (${r.error})`);
+      continue;
+    }
     log(`  [${i + 1}/${todo.length}] ${s.id}: ${r.ok ? `${r.row.via} ${r.row.style ? `(${r.row.style}) ` : ''}${r.row.text}` : `FAILED ${r.error}`}`);
     consecutive = r.ok ? 0 : consecutive + 1;
     if (consecutive >= CONSECUTIVE_FAILURE_LIMIT) {
@@ -149,5 +197,5 @@ if (require.main === module) {
 }
 
 module.exports = {
-  selectSlots, summarize, run, parseArgs,
+  selectSlots, summarize, run, parseArgs, BOX_ONLY_BUSY_WAIT_LIMIT,
 };
