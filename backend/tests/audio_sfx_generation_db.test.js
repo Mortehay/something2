@@ -12,6 +12,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
+const { Readable } = require('node:stream');
 const path = require('node:path');
 const { Pool } = require('pg');
 const { withAdvisoryLock, AUDIO_CLIPS_LOCK_KEY } = require('./helpers/advisoryLock.js');
@@ -55,12 +56,21 @@ test('generateForSlot: sfx', { skip }, async (t) => {
       cached: false,
     });
 
+    // Record a result's own rows BEFORE any assertion runs, so a failing
+    // assertion cannot leak them into the scratch DB.
+    const track = (r) => {
+      if (r && Array.isArray(r.clips)) for (const c of r.clips) clipIds.push(c.id);
+      if (r && Array.isArray(r.bindings)) for (const b of r.bindings) bindingIds.push(b.id);
+      return r;
+    };
+
     await t.test('an upload-only slot (no cue on the box today) is refused with no box call', async () => {
       const calls = [];
       const rap = { generateSfx: async (...args) => { calls.push(args); return oneClip(1); } };
       // attack_type/ranged/use has no cue (ATTACK_TYPE_CUES.ranged.use = null).
       const r = await gen.generateForSlot(pool, providerWithCues,
         { subjectKind: 'attack_type', subjectKey: 'ranged', slot: 'use', clipKind: 'sfx', seed: 1 }, { rap, lib });
+      track(r);
       assert.equal(r.ok, false);
       assert.match(r.error, /upload only/i);
       assert.equal(calls.length, 0, 'no box call for an upload-only slot');
@@ -73,6 +83,7 @@ test('generateForSlot: sfx', { skip }, async (t) => {
       // has never discovered it.
       const r = await gen.generateForSlot(pool, providerNoCues,
         { subjectKind: 'attack_type', subjectKey: 'melee', slot: 'use', clipKind: 'sfx', seed: 1 }, { rap, lib });
+      track(r);
       assert.equal(r.ok, false);
       assert.match(r.error, /upload only/i);
       assert.match(r.error, /slash/);
@@ -81,9 +92,7 @@ test('generateForSlot: sfx', { skip }, async (t) => {
 
     await t.test('with 1 clip already bound, the entity sent is "<phrase> (take 1)"', async () => {
       // Pre-bind one sfx clip to attack_type/melee/hit so `take` starts at 1.
-      // entityPhrase('attack_type', 'melee') is 'a steel sword' regardless of
-      // slot (Task 2, audio_subjects_sfx_db.test.js) -- not the per-slot
-      // phrase in the spec's batch-prompt table, which Task 3 consumes as-is.
+      // The phrase is the spec §4 per-slot one for melee/hit (M2).
       const existing = await lib.storeClip(pool, {
         buffer: OGG, kind: 'sfx', label: 'pre-existing melee hit', source: 'uploaded', durationMs: 500,
       });
@@ -97,36 +106,35 @@ test('generateForSlot: sfx', { skip }, async (t) => {
       const rap = { generateSfx: async (p, body) => { calls.push(body); return oneClip(body.seed); } };
       const r = await gen.generateForSlot(pool, providerWithCues,
         { subjectKind: 'attack_type', subjectKey: 'melee', slot: 'hit', clipKind: 'sfx', seed: 9 }, { rap, lib });
+      track(r);
       assert.equal(r.ok, true, r.error);
       assert.equal(calls.length, 1, 'no cache hit, so no retry');
       assert.equal(calls[0].cue, 'hit');
-      assert.equal(calls[0].entity, 'a steel sword (take 1)');
+      assert.equal(calls[0].entity, 'a blade on a creature (take 1)');
       assert.equal(calls[0].seed, 9);
       bindingIds.push(r.bindings[0].id);
       clipIds.push(r.clips[0].id);
     });
 
-    await t.test('cached:true triggers exactly one retry with take+1, then accepts the retry\'s result', async () => {
-      // Fresh slot (attack_type/magic/use, cue 'spell') -- no pre-existing
-      // binding here, so `take` starts at 0 and the retry's take is 1.
+    // SOMET-592 (I1): `cached` means the BOX had the file -- its cache is
+    // shared by every database on the box -- not that this slot has it.
+    await t.test('I1: a cached answer whose bytes are new to the slot is stored and bound, no retry', async () => {
+      // Fresh slot (attack_type/magic/use, cue 'spell'): nothing bound.
       const providerWithSpell = { id: null, base_url: 'http://x', modality: 'audio', models_cache: ['cue:spell'] };
       const calls = [];
       const rap = {
-        generateSfx: async (p, body) => {
-          calls.push(body);
-          return calls.length === 1
-            ? { ...oneClip(body.seed), cached: true }
-            : { ...oneClip(body.seed), cached: false };
-        },
+        generateSfx: async (p, body) => { calls.push(body); return { ...oneClip(body.seed), cached: true }; },
       };
       const r = await gen.generateForSlot(pool, providerWithSpell,
         { subjectKind: 'attack_type', subjectKey: 'magic', slot: 'use', clipKind: 'sfx', seed: 4 }, { rap, lib });
+      track(r);
       assert.equal(r.ok, true, r.error);
-      assert.equal(calls.length, 2, 'exactly one retry, not a loop');
-      assert.equal(calls[0].entity, 'a magic blast', 'first attempt: take 0, phrase alone');
-      assert.equal(calls[1].entity, 'a magic blast (take 1)', 'retry: take bumped to 1');
       bindingIds.push(r.bindings[0].id);
       clipIds.push(r.clips[0].id);
+      assert.equal(calls.length, 1, 'a cached file new to this slot is not a reason to ask again');
+      assert.equal(calls[0].entity, 'a magic spell', 'take 0, phrase alone');
+      assert.equal(r.clips.length, 1);
+      assert.equal(r.clips[0].sha1, lib.sha1Of(OGG), 'the stored row records the sha1 of its bytes');
     });
 
     await t.test('N variants store and bind N clips, all in the response', async () => {
@@ -139,19 +147,25 @@ test('generateForSlot: sfx', { skip }, async (t) => {
           cached: false,
         }),
       };
+      const countUse = async () => (await pool.query(
+        'SELECT id FROM audio_bindings WHERE subject_kind = $1 AND subject_key = $2 AND slot = $3',
+        ['attack_type', 'melee', 'use'])).rowCount;
+      // Relative, not absolute: the scratch DB may hold live clips on this
+      // slot (browser checks), and ids are recorded BEFORE any assertion so a
+      // failure cannot leak this test's own rows.
+      const before = await countUse();
       const r = await gen.generateForSlot(pool, providerWithCues,
         { subjectKind: 'attack_type', subjectKey: 'melee', slot: 'use', clipKind: 'sfx', variants: 3, seed: 7 }, { rap, lib });
+      track(r);
       assert.equal(r.ok, true, r.error);
+      for (const c of r.clips) clipIds.push(c.id);
+      for (const b of r.bindings) bindingIds.push(b.id);
       assert.equal(r.clips.length, 3);
       assert.equal(r.bindings.length, 3);
       assert.equal(r.clip.id, r.clips[0].id, 'clip/binding expose the first variant for the dispatcher\'s existing path');
       assert.equal(r.binding.id, r.bindings[0].id);
       for (const c of r.clips) { assert.equal(c.kind, 'sfx'); assert.equal(c.style_or_cue, 'slash'); assert.equal(c.engine, 'realistic'); }
-      const rows = await pool.query('SELECT id FROM audio_bindings WHERE subject_kind = $1 AND subject_key = $2 AND slot = $3',
-        ['attack_type', 'melee', 'use']);
-      assert.equal(rows.rowCount, 3);
-      for (const c of r.clips) clipIds.push(c.id);
-      for (const b of r.bindings) bindingIds.push(b.id);
+      assert.equal(await countUse(), before + 3);
     });
 
     // Review round 1, fix 1: a per-variant storeAndBindClip failure must not
@@ -180,6 +194,7 @@ test('generateForSlot: sfx', { skip }, async (t) => {
       // attack_type/ranged/hit: untouched by any earlier test in this file.
       const r = await gen.generateForSlot(pool, providerWithCues,
         { subjectKind: 'attack_type', subjectKey: 'ranged', slot: 'hit', clipKind: 'sfx', variants: 3, seed: 8 }, { rap, lib: flakyLib });
+      track(r);
       assert.equal(r.ok, true, r.error);
       assert.equal(r.partial, true);
       assert.match(r.error, /simulated store failure/);
@@ -210,6 +225,7 @@ test('generateForSlot: sfx', { skip }, async (t) => {
       // attack_type/magic/hit: untouched by any earlier test in this file.
       const r = await gen.generateForSlot(pool, providerWithCues,
         { subjectKind: 'attack_type', subjectKey: 'magic', slot: 'hit', clipKind: 'sfx', variants: 2, seed: 8 }, { rap, lib: alwaysFailLib });
+      track(r);
       assert.equal(r.ok, false);
       assert.match(r.error, /simulated store failure/);
       assert.equal(r.retryable, false);
@@ -251,6 +267,7 @@ test('generateForSlot: sfx', { skip }, async (t) => {
       const rap = { generateSfx: async (p, body) => { calls.push(body); return oneClip(body.seed); } };
       const r = await gen.generateForSlot(pool, providerWithCues,
         { subjectKind: 'skill', subjectKey: SKILL_MELEE, slot: 'hit', clipKind: 'sfx', seed: 5 }, { rap, lib });
+      track(r);
       assert.equal(r.ok, true, r.error);
       assert.equal(calls.length, 1);
       assert.equal(calls[0].entity, 'Crushing Blow (take 3)',
@@ -259,23 +276,166 @@ test('generateForSlot: sfx', { skip }, async (t) => {
       bindingIds.push(r.bindings[0].id);
     });
 
-    await t.test('fix 2: a box that is STILL cached after the retry refuses rather than storing a duplicate', async () => {
+    // SOMET-592 (I1): a TRUE duplicate -- bytes equal to a clip already
+    // bound to this slot -- is never stored; the single path steps to the
+    // next take, a bounded number of times.
+    const variant = (n) => Buffer.concat([OGG, Buffer.from([n])]);
+    const bindOwn = async (subjectKey, slot, buffer, label) => {
+      const c = await lib.storeClip(pool, {
+        buffer, kind: 'sfx', label, source: 'uploaded', durationMs: 500,
+      });
+      clipIds.push(c.id);
+      const b = await lib.bindClip(pool, {
+        subjectKind: 'skill', subjectKey, slot, clipId: c.id,
+      });
+      bindingIds.push(b.id);
+      return c;
+    };
+    const boundCount = async (subjectKey, slot) => (await pool.query(
+      'SELECT id FROM audio_bindings WHERE subject_kind = $1 AND subject_key = $2 AND slot = $3',
+      ['skill', subjectKey, slot])).rowCount;
+
+    await t.test('I1: a cached duplicate steps to the next take, and the next take\'s new bytes are stored', async () => {
+      // skill/war_crushing_blow/use (cue 'slash'): untouched by any earlier
+      // test in this file.
+      await bindOwn(SKILL_MELEE, 'use', variant(1), 'dup-single');
       const calls = [];
       const rap = {
-        generateSfx: async (p, body) => { calls.push(body); return { ...oneClip(body.seed), cached: true }; },
+        generateSfx: async (p, body) => {
+          calls.push(body);
+          return {
+            ...oneClip(body.seed), clips: [{ buffer: variant(calls.length), durationMs: 500 }], cached: true,
+          };
+        },
       };
-      // skill/war_crushing_blow/use (cue 'slash', melee type): untouched by
-      // any earlier test in this file.
       const r = await gen.generateForSlot(pool, providerWithCues,
         { subjectKind: 'skill', subjectKey: SKILL_MELEE, slot: 'use', clipKind: 'sfx', seed: 2 }, { rap, lib });
+      track(r);
+      assert.equal(r.ok, true, r.error);
+      for (const c of r.clips) clipIds.push(c.id);
+      for (const b of r.bindings) bindingIds.push(b.id);
+      assert.deepEqual(calls.map((c) => c.entity), ['Crushing Blow (take 1)', 'Crushing Blow (take 2)'],
+        'take 1 came back as the bound bytes; take 2 was new');
+      assert.equal(r.clips.length, 1);
+      assert.equal(r.clips[0].sha1, lib.sha1Of(variant(2)));
+      assert.match(r.clips[0].label, /\(take 2\)$/);
+      assert.equal(await boundCount(SKILL_MELEE, 'use'), 2, 'the duplicate was not stored a second time');
+    });
+
+    await t.test('I1: a slot whose every take comes back a duplicate gives up after the bound, stores nothing, and stays retryable', async () => {
+      const SKILL = 'war_whirlwind';
+      await bindOwn(SKILL, 'use', variant(9), 'dup-always');
+      const calls = [];
+      const rap = {
+        generateSfx: async (p, body) => {
+          calls.push(body);
+          return { ...oneClip(body.seed), clips: [{ buffer: variant(9), durationMs: 500 }], cached: true };
+        },
+      };
+      const r = await gen.generateForSlot(pool, providerWithCues,
+        { subjectKind: 'skill', subjectKey: SKILL, slot: 'use', clipKind: 'sfx', seed: 2 }, { rap, lib });
+      track(r);
       assert.equal(r.ok, false);
-      assert.match(r.error, /keeps returning a cached sound/i);
-      assert.equal(r.retryable, false);
-      assert.equal(calls.length, 2, 'first attempt, then exactly one retry -- not a loop');
-      const rows = await pool.query(
-        'SELECT id FROM audio_bindings WHERE subject_kind = $1 AND subject_key = $2 AND slot = $3',
-        ['skill', SKILL_MELEE, 'use']);
-      assert.equal(rows.rowCount, 0, 'no duplicate was stored');
+      assert.equal(r.duplicate, true);
+      assert.equal(r.retryable, true, 'a duplicate is never marked retryable:false');
+      assert.match(r.error, /already bound to this slot/);
+      assert.equal(calls.length, 1 + gen.MAX_EXTRA_DUPLICATE_TAKES);
+      assert.deepEqual(calls.map((c) => c.entity), [1, 2, 3, 4].map((n) => `Whirlwind (take ${n})`));
+      assert.equal(await boundCount(SKILL, 'use'), 1, 'nothing new bound');
+    });
+
+    await t.test('I1: a legacy clip (sha1 NULL) is hashed from the asset store on demand, and the hash is kept', async () => {
+      const SKILL = 'war_whirlwind';
+      const legacy = await bindOwn(SKILL, 'hit', variant(5), 'legacy');
+      await pool.query('UPDATE audio_clips SET sha1 = NULL WHERE id = $1', [legacy.id]);
+      const reads = [];
+      assetStore.__setAssetClient({
+        bucketExists: async () => true,
+        putObject: async () => {},
+        getObject: async (bucket, key) => { reads.push(key); return Readable.from([variant(5)]); },
+      });
+      try {
+        const calls = [];
+        const rap = {
+          generateSfx: async (p, body) => {
+            calls.push(body);
+            // take 1 duplicates the legacy clip, take 2 is new.
+            return { ...oneClip(body.seed), clips: [{ buffer: variant(calls.length === 1 ? 5 : 6), durationMs: 500 }], cached: true };
+          },
+        };
+        const r = await gen.generateForSlot(pool, providerWithCues,
+          { subjectKind: 'skill', subjectKey: SKILL, slot: 'hit', clipKind: 'sfx', seed: 3 }, { rap, lib });
+        track(r);
+        assert.equal(r.ok, true, r.error);
+        for (const c of r.clips) clipIds.push(c.id);
+        for (const b of r.bindings) bindingIds.push(b.id);
+        assert.equal(calls.length, 2);
+        assert.deepEqual(reads, [legacy.storage_key], 'the legacy object is read once; the hash is written back');
+        const row = (await pool.query('SELECT sha1 FROM audio_clips WHERE id = $1', [legacy.id])).rows[0];
+        assert.equal(row.sha1, lib.sha1Of(variant(5)));
+      } finally {
+        assetStore.__setAssetClient({ bucketExists: async () => true, putObject: async () => {} });
+      }
+    });
+
+    // The pack path against the real library: a duplicate row fails its job
+    // RETRYABLE (never permanently), and the job's next attempt moves past
+    // the duplicated take.
+    await t.test('I1 pack: a cached row with new bytes is stored; a duplicate row is retryable and its retry uses a later take', async () => {
+      const SKILL = 'war_shield_slam';
+      await bindOwn(SKILL, 'use', variant(20), 'dup-pack');
+      const jobA = {
+        id: 'a', subject_kind: 'skill', subject_key: SKILL, slot: 'use', engine: 'realistic',
+      };
+      const jobB = {
+        id: 'b', subject_kind: 'skill', subject_key: SKILL, slot: 'hit', engine: 'realistic',
+      };
+      const bodies = [];
+      const bytesFor = { 1: variant(20), 2: variant(21) };
+      const rap = {
+        generateSfxPack: async (p, body) => {
+          bodies.push(body);
+          return {
+            ok: true,
+            items: body.items.map((it) => ({
+              ok: true,
+              cue: it.cue,
+              entity: it.entity,
+              // use: the bound bytes on the first pack, new bytes on the next.
+              // hit: bytes this slot has never had.
+              clips: [{ buffer: it.cue === 'slash' ? bytesFor[bodies.length] : variant(30), durationMs: 500 }],
+              prompt: 'p',
+              seed: 1,
+              cached: true,
+            })),
+          };
+        },
+      };
+      const providerSlashHit = { ...providerWithCues, models_cache: ['cue:slash', 'cue:hit'] };
+      const first = await gen.generateSfxPackForJobs(pool, providerSlashHit, [jobA, jobB], { rap, lib, seed: 1 });
+      for (const x of first.results) track(x.result);
+      const res = Object.fromEntries(first.results.map((x) => [x.job.id, x.result]));
+      assert.equal(res.b.ok, true, res.b.error);
+      for (const c of res.b.clips) clipIds.push(c.id);
+      for (const b of res.b.bindings) bindingIds.push(b.id);
+      assert.equal(res.a.ok, false);
+      assert.equal(res.a.duplicate, true);
+      assert.equal(res.a.retryable, true);
+      assert.match(res.a.error, /already bound to this slot \(take 1\)/);
+      assert.equal(await boundCount(SKILL, 'use'), 1);
+
+      // The dispatcher writes result.error into last_error; the re-sent job
+      // carries it back.
+      assert.equal(gen.takeAfterDuplicate(res.a.error), 2);
+      const second = await gen.generateSfxPackForJobs(pool, providerSlashHit,
+        [{ ...jobA, last_error: res.a.error }], { rap, lib, seed: 1 });
+      assert.equal(bodies[1].items[0].entity, 'Shield Slam (take 2)', 'the retry moves past the duplicated take');
+      for (const x of second.results) track(x.result);
+      const r2 = second.results[0].result;
+      assert.equal(r2.ok, true, r2.error);
+      for (const c of r2.clips) clipIds.push(c.id);
+      for (const b of r2.bindings) bindingIds.push(b.id);
+      assert.equal(await boundCount(SKILL, 'use'), 2);
     });
   });
 });
@@ -312,14 +472,14 @@ test('generateSfxPackForJobs', { skip }, async (t) => {
       id: String(nextId++), subject_kind: 'creature', subject_key: `${key}-${tag}`, slot, engine,
     });
 
-    await t.test('maps rows back by (cue, entity), refuses upload-only, de-duplicates entities, and fails missing/cached/error rows per job', async () => {
+    await t.test('maps rows back by (cue, entity), refuses upload-only, de-duplicates entities, stores a cached row new to its slot, and fails missing/error rows per job', async () => {
       const a = job('A', 'hurt');
       const b = job('B', 'death');
       const c = job('C', 'nearby'); // no cue: upload only
       const d1 = job('Dup', 'hurt');
       const d2 = job('DUP', 'hurt'); // same phrase once lowercased
       const e = job('E', 'hurt');   // the box returns no row for it
-      const f = job('F', 'hurt');   // cached
+      const f = job('F', 'hurt');   // cached, but nothing is bound to its slot
       const g = job('G', 'hurt');   // per-item error
       const calls = [];
       const rap = {
@@ -366,10 +526,8 @@ test('generateSfxPackForJobs', { skip }, async (t) => {
       const res = Object.fromEntries(out.results.map((r) => [r.job.id, r.result]));
       assert.equal(out.results.length, 7);
 
-      for (const j of [a, b, d1, d2]) {
-        assert.equal(res[j.id].ok, true, `${j.subject_key}: ${res[j.id].error}`);
-        assert.equal(res[j.id].clips.length, 2);
-      }
+      for (const j of [a, b, d1, d2, f]) assert.equal(res[j.id].ok, true, `${j.subject_key}: ${res[j.id].error}`);
+      for (const j of [a, b, d1, d2]) assert.equal(res[j.id].clips.length, 2);
       const labels = async (j) => stored.filter((x) => x.subjectKey === j.subject_key && x.slot === j.slot);
       assert.deepEqual((await labels(a)).map((r) => [r.label, r.styleOrCue, r.engine, r.kind, r.prompt, r.seed]),
         [[`${a.subject_key} hurt (hit)`, 'hit', 'retro', 'sfx', `p a-${tag}`, 77],
@@ -385,10 +543,11 @@ test('generateSfxPackForJobs', { skip }, async (t) => {
       assert.equal(res[e.id].ok, false);
       assert.equal(res[e.id].providerFault, true, 'no matching row = a failed item, provider fault');
       assert.equal(res[e.id].retryable, true);
-      assert.equal(res[f.id].ok, false);
-      assert.match(res[f.id].error, /keeps returning a cached sound/);
-      assert.equal(res[f.id].retryable, false);
-      assert.deepEqual(await labels(f), [], 'a cached item stores nothing');
+      // SOMET-592 (I1): the box's cache is not this slot. A cached row is
+      // stored; within one cached answer, byte-identical variants are kept
+      // once.
+      assert.equal(res[f.id].clips.length, 1, 'the two identical cached variants are stored once');
+      assert.equal((await labels(f)).length, 1);
       assert.equal(res[g.id].ok, false);
       assert.equal(res[g.id].error, 'cuda oom');
       assert.equal(res[g.id].retryable, true);

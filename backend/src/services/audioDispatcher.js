@@ -174,6 +174,9 @@ function isBusy(result) {
 // subjects in a row must not silently reset a count a real outage is
 // building toward.
 function isProviderFault(result) {
+  // A duplicate (SOMET-592, I1: the box answered with a file this slot
+  // already has) is retryable but is the box working as designed, not a fault.
+  if (result.duplicate) return false;
   return Boolean(result.retryable)
     || (Number.isInteger(result.status) && result.status >= 500 && result.status !== 503)
     || Boolean(result.providerFault);

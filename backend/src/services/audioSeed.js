@@ -28,6 +28,7 @@ const fs = require('fs');
 const path = require('path');
 const { matchOwner, readObject, safeName } = require('./artSeed.js');
 const { existingSubjects } = require('./audioSubjects.js');
+const { sha1Of } = require('./audioLibrary.js');
 
 const AUDIO_SEEDS_ROOT = path.resolve(__dirname, '../../seeds/audio');
 const AUDIO_KINDS = ['music', 'ambience', 'sfx'];
@@ -267,17 +268,17 @@ async function seedAudio({
     // eslint-disable-next-line no-await-in-loop
     await db.query(
       `INSERT INTO audio_clips (id, kind, label, storage_key, bytes, duration_ms, loopable,
-         loop_start_ms, loop_end_ms, source, prompt, style_or_cue, engine, seed)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'seeded',$10,$11,$12,$13)
+         loop_start_ms, loop_end_ms, source, prompt, style_or_cue, engine, seed, sha1)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'seeded',$10,$11,$12,$13,$14)
        ON CONFLICT (id) DO UPDATE SET
          kind = EXCLUDED.kind, label = EXCLUDED.label, storage_key = EXCLUDED.storage_key,
          bytes = EXCLUDED.bytes, duration_ms = EXCLUDED.duration_ms, loopable = EXCLUDED.loopable,
          loop_start_ms = EXCLUDED.loop_start_ms, loop_end_ms = EXCLUDED.loop_end_ms, source = 'seeded',
          prompt = EXCLUDED.prompt, style_or_cue = EXCLUDED.style_or_cue, engine = EXCLUDED.engine,
-         seed = EXCLUDED.seed`,
+         seed = EXCLUDED.seed, sha1 = EXCLUDED.sha1`,
       [c.id, c.kind, c.label, key, buffer.length, c.duration_ms, c.loopable,
         c.loop_start_ms ?? null, c.loop_end_ms ?? null, c.prompt ?? null, c.style_or_cue ?? null,
-        c.engine ?? null, c.seed ?? null],
+        c.engine ?? null, c.seed ?? null, sha1Of(buffer)],
     );
     clipStats.linked += 1;
     present.add(c.id);
