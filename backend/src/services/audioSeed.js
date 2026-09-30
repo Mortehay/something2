@@ -29,6 +29,7 @@ const path = require('path');
 const { matchOwner, readObject, safeName } = require('./artSeed.js');
 const { existingSubjects } = require('./audioSubjects.js');
 const { sha1Of } = require('./audioLibrary.js');
+const audioPrompts = require('./audioPrompts');
 
 const AUDIO_SEEDS_ROOT = path.resolve(__dirname, '../../seeds/audio');
 const AUDIO_KINDS = ['music', 'ambience', 'sfx'];
@@ -209,6 +210,18 @@ async function exportAudio({
 
   clipsManifest.sort((a, b) => String(a.id).localeCompare(String(b.id)));
   bindingsManifest.sort((a, b) => bindingKey(a).localeCompare(bindingKey(b)));
+
+  // Spec 2026-09-30 §4: prompts travel with the audio. ALWAYS the full active
+  // set -- a kind/only-filtered prompts.json would overwrite the other kinds'
+  // prompts, the merge-by-kind trap slice 2 already hit with bindings.json.
+  const promptRows = (await audioPrompts.listAllActive(db)).map((p) => ({
+    subject_kind: p.subject_kind, subject_key: p.subject_key, slot: p.slot, style: p.style, text: p.text,
+    source_input: p.source_input, hint: p.hint, model: p.model, via: p.via,
+  }));
+  const promptsPath = path.join(root, 'prompts.json');
+  fs.writeFileSync(promptsPath, `${JSON.stringify(promptRows, null, 2)}\n`);
+  matchOwner(promptsPath, owner);
+
   fs.writeFileSync(clipsPath, `${JSON.stringify(clipsManifest, null, 2)}\n`);
   fs.writeFileSync(bindingsPath, `${JSON.stringify(bindingsManifest, null, 2)}\n`);
   matchOwner(clipsPath, owner);
@@ -325,6 +338,19 @@ async function seedAudio({
     } else {
       bindingStats.skipped += 1;
     }
+  }
+
+  // Idempotent: only a missing or different (style, text) becomes a new
+  // version, so re-running a seed never piles up history rows.
+  const promptsPath = path.join(root, 'prompts.json');
+  for (const p of readManifest(promptsPath)) {
+    // eslint-disable-next-line no-await-in-loop
+    const cur = await audioPrompts.getActive(db, p.subject_kind, p.subject_key, p.slot);
+    if (cur && cur.text === p.text && (cur.style || null) === (p.style || null)) continue;
+    // eslint-disable-next-line no-await-in-loop
+    await audioPrompts.save(db, p.subject_kind, p.subject_key, p.slot, {
+      style: p.style, text: p.text, sourceInput: p.source_input, hint: p.hint, model: p.model, via: p.via,
+    });
   }
 
   return { clips: clipStats, bindings: bindingStats };
