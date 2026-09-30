@@ -706,6 +706,37 @@ lockedTest('a provider failure requeues plainly, keeping its seed', async (t, po
     'a provider failure keeps its seed -- the image was never the problem');
 });
 
+// SOMET-595. Every failed retry leaves its own row, so one subject can hold
+// several failed rows. Requeueing them all tripped art_jobs_one_live_per_subject
+// on the second: a 500 halfway through, the earlier rows already requeued.
+lockedTest('a subject with several failed rows is requeued ONCE, from its newest row',
+  async (t, pool) => {
+    const err = 'provider answered 422: cutout removed 97.9% of the image';
+    const ids = [];
+    for (let i = 0; i < 3; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      const [job] = await queue.enqueue(pool, [{ kind: 'skill', key: 'rq_dup' }], { backend: 'connector' });
+      // eslint-disable-next-line no-await-in-loop
+      await pool.query(
+        `UPDATE art_jobs SET state='failed', attempts=3, last_error=$2,
+            updated_at = now() - make_interval(mins => $3) WHERE id=$1`, [job.id, err, 10 - i]);
+      ids.push(job.id);
+    }
+    const [other] = await queue.enqueue(pool, [{ kind: 'skill', key: 'rq_single' }], { backend: 'connector' });
+    await pool.query(`UPDATE art_jobs SET state='failed', attempts=3, last_error=$2 WHERE id=$1`,
+      [other.id, err]);
+
+    const res = await request(app).post('/api/art-jobs/requeue').set(...AUTH)
+      .send({ kind: 'content_cutout', reseed: true });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(res.body.requeued, 2, 'one per subject');
+    const { rows } = await pool.query(
+      "SELECT id, state FROM art_jobs WHERE subject_key = 'rq_dup' ORDER BY id");
+    assert.deepEqual(rows.map((r) => r.state), ['failed', 'failed', 'queued'],
+      'the NEWEST row is the one requeued; the older two stay as history');
+    assert.equal(rows[2].id, ids[2]);
+  });
+
 // SOMET-551. A failed row whose subject already has a live job is SUPERSEDED.
 //
 // Requeueing one violates art_jobs_one_live_per_subject, and the endpoint

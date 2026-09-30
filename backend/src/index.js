@@ -3775,8 +3775,27 @@ app.post('/api/art-jobs/requeue', adminGuard, async (req, res) => {
          FROM art_jobs f WHERE f.state = 'failed'`,
     );
     const ofKind = failed.filter((r) => artFailures.classify(r.last_error).kind === kind);
-    let mine = ofKind.filter((r) => !r.superseded);
-    const alreadyQueued = ofKind.length - mine.length;
+    // ONE row per subject, the newest. Every failed retry leaves its own row,
+    // so a subject that failed three times has three -- and requeueing a
+    // second one after the first violates art_jobs_one_live_per_subject: a 500
+    // midway through the loop, with the rows before it already requeued
+    // (SOMET-595; 30 subjects on the dev DB held 162 failed rows). The older
+    // rows stay as the record of earlier attempts; the live job supersedes them.
+    const newest = new Map();
+    for (const r of ofKind) {
+      if (r.superseded) continue;
+      const k = `${r.subject_kind}\u0000${r.subject_key}`;
+      const prev = newest.get(k);
+      if (!prev || new Date(r.updated_at) > new Date(prev.updated_at)
+        || (+new Date(r.updated_at) === +new Date(prev.updated_at) && r.id > prev.id)) {
+        newest.set(k, r);
+      }
+    }
+    let mine = [...newest.values()];
+    // Subjects, not rows: an older failed row of a subject being requeued now
+    // is neither "requeued" nor "already queued" -- it is history.
+    const alreadyQueued = new Set(ofKind.filter((r) => r.superseded)
+      .map((r) => `${r.subject_kind}\u0000${r.subject_key}`)).size;
     if (mine.length === 0) {
       return res.json({
         requeued: 0,
