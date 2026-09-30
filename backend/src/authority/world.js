@@ -6,7 +6,7 @@ const { resolveEffectName, momentForAttack, blockedImpact } = require('./vfx.js'
 const { attackLift, bodyLift } = require('./attackOrigin.js');
 const { ProjectileSim } = require('./projectiles');
 const {
-  weaponUse, weaponHit, creatureUse, creatureHurt, skillUse, attackKindOf, pushSfxEvent,
+  weaponUse, weaponHit, creatureUse, creatureHurt, skillUse, skillAttackKind, attackKindOf, pushSfxEvent,
 } = require('./sfxEvents.js');
 const { applyDamageWithEffects, drainMana, NO_MITIGATION, playerKey } = require('./damage');
 const {
@@ -1400,6 +1400,14 @@ class World {
 
     const kills = [];
     const pacifiedFrom = charmerOf(p, this.now);
+    // SOMET-592 (I3): every creature this cast damaged, snapshotted BEFORE
+    // the damage (a kill removes it from the sim), and, for a radial AoE,
+    // the blast centre. Turned into `hit`/`hurt` sound events at the end.
+    const struck = [];
+    let aoeCentre = null;
+    const strike = (c) => ({
+      id: c.id, type: c.type, x: c.x + CREATURE_SIZE / 2, y: c.y + CREATURE_SIZE / 2,
+    });
 
     // Special: Blink / Teleport movement
     if (skill.id.includes('blink') || skill.id.includes('teleport') || skill.id.includes('shadow_step')) {
@@ -1413,6 +1421,12 @@ class World {
       const { nx, ny } = normalizeAim(ax, ay, p.facing);
       const reach = Math.max(85, (Number(skill.range) || 85) * 1.25);
       const arc = Math.PI * 0.75;
+      // The same target set applyMeleeArc resolves, read before it can
+      // remove a kill.
+      for (const id of this.creatures.meleeArcTargets(px, py, nx, ny, reach, arc, pacifiedFrom)) {
+        const c = this.creatures.get(id);
+        if (c) struck.push(strike(c));
+      }
       for (let h = 0; h < hitCount; h++) {
         const killed = this.creatures.applyMeleeArc(
           px, py, nx, ny, reach, arc, damage, element, this.now + h * 40, userId,
@@ -1468,6 +1482,7 @@ class World {
 
             // In cone (within +/- 40 deg) OR point-blank in front of archer (dist <= 85)
             if (angleDiff <= 0.70 || dist <= 85) {
+              struck.push(strike(c));
               for (let h = 0; h < hitCount; h++) {
                 const died = this.creatures.damageCreatureById(c.id, damage, element, this.now + h * 30, playerKey(userId));
                 if (died && !kills.some(k => k.id === c.id)) {
@@ -1482,6 +1497,7 @@ class World {
         // Radial spells, Frost Nova (centered on caster px, py), Rain of Arrows, and targeted AoEs
         const aoeCenterX = isFrostNova ? px : targetX;
         const aoeCenterY = isFrostNova ? py : targetY;
+        aoeCentre = { x: aoeCenterX, y: aoeCenterY };
 
         for (let h = 0; h < hitCount; h++) {
           for (const c of this.creatures.all()) {
@@ -1489,6 +1505,7 @@ class World {
             const cy = c.y + CREATURE_SIZE / 2;
             const dist = Math.hypot(cx - aoeCenterX, cy - aoeCenterY);
             if (dist <= aoeRadius) {
+              if (!struck.some((x) => x.id === c.id)) struck.push(strike(c));
               const died = this.creatures.damageCreatureById(c.id, damage, element, this.now + h * 40, playerKey(userId));
               if (died && !kills.some(k => k.id === c.id)) {
                 kills.push({ id: c.id, killerUserId: userId });
@@ -1537,6 +1554,19 @@ class World {
     // Game audio slice 3: a cast that got this far happened; heard at the
     // caster's position when it began (px/py, before any blink moved them).
     pushSfxEvent(this.sfx, skillUse(skill, userId, px, py));
+    // SOMET-592 (I3): the landing and the victims' pain, after the cast's own
+    // `use`. A radial AoE is ONE `hit` at its centre (the detonation rule); a
+    // melee arc or cone is one `hit` per landed target. A creature that died
+    // already has its `death` (CreatureSim._removeKilled), so it gets no
+    // `hurt` too -- one creature, one sound per hit.
+    const sfxKind = skillAttackKind(skill);
+    const sfxSource = `skill:${skill.id}`;
+    if (aoeCentre && struck.length) pushSfxEvent(this.sfx, weaponHit(sfxKind, sfxSource, aoeCentre.x, aoeCentre.y));
+    const killedIds = new Set(kills.map((k) => k.id));
+    for (const t of struck) {
+      if (!aoeCentre) pushSfxEvent(this.sfx, weaponHit(sfxKind, sfxSource, t.x, t.y));
+      if (!killedIds.has(t.id)) pushSfxEvent(this.sfx, creatureHurt(t.type, t.x, t.y));
+    }
     return { ok: true, kills };
   }
 
