@@ -391,7 +391,38 @@ async function filledCounts(db) {
   return out;
 }
 
+// The Audio tab's slot table (SOMET-596): clips bound per SLOT, for every
+// subject at once -- one grouped query, same reasoning as filledCounts above.
+// COUNT(*) here, not COUNT(DISTINCT ...): each binding is one clip in that
+// slot, and the table's Sound column shows exactly that number.
+//
+// Returns { [subject_kind]: { [subject_key]: { [slot]: clipCount } } }. A slot
+// with no clip is absent; callers read a missing entry as 0.
+async function slotClipCounts(db) {
+  const r = await db.query(
+    'SELECT subject_kind, subject_key, slot, COUNT(*)::int AS clips FROM audio_bindings GROUP BY 1, 2, 3');
+  const out = {};
+  for (const row of r.rows) {
+    const byKey = (out[row.subject_kind] = out[row.subject_kind] || {});
+    (byKey[row.subject_key] = byKey[row.subject_key] || {})[row.slot] = row.clips;
+  }
+  return out;
+}
+
+// filledCounts' shape, derived from slotClipCounts' result: the number of
+// slots with >= 1 clip is COUNT(DISTINCT slot), so the route can answer both
+// fields from the one query.
+function filledFromSlotCounts(slotCounts) {
+  const out = {};
+  for (const [kind, byKey] of Object.entries(slotCounts || {})) {
+    out[kind] = {};
+    for (const [key, bySlot] of Object.entries(byKey)) out[kind][key] = Object.keys(bySlot).length;
+  }
+  return out;
+}
+
 module.exports = {
+  slotClipCounts, filledFromSlotCounts,
   AudioInputError, storeClip, storeAndBindClip, bindClip, sha1Of, boundClipSha1s, canSetLoopable, setClipLoopable, updateBinding, unbind, listClips, deleteClip, deleteUnboundClips,
   subjectSlots, worldAudioBundle, recordMisses, listMisses, filledCounts, MAX_MISSES_PER_POST,
 };

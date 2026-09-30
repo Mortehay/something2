@@ -73,9 +73,13 @@ module.exports = function audioRoutes(pool) {
   // fixed (creature, world_point) or per-subject (attack_type, item, skill).
   router.get('/admin/subjects', admin, async (req, res) => {
     try {
-      // One query for filled-slot counts across every subject, not one
+      // One query for per-slot clip counts across every subject, not one
       // /admin/slots request per subject -- see filledCounts' own comment.
-      const counts = await lib.filledCounts(pool);
+      // `filled` (distinct filled slots, the badge the existing callers
+      // read) is derived from the same rows; `filledSlots` (SOMET-596) is
+      // the per-slot clip count the slot table shows.
+      const slotCounts = await lib.slotClipCounts(pool);
+      const counts = lib.filledFromSlotCounts(slotCounts);
       const out = [];
       for (const [kind, def] of Object.entries(SUBJECT_KINDS)) {
         const entry = {
@@ -83,6 +87,7 @@ module.exports = function audioRoutes(pool) {
           // eslint-disable-next-line no-await-in-loop
           subjects: await def.list(pool),
           filled: counts[kind] || {},
+          filledSlots: slotCounts[kind] || {},
         };
         // eslint-disable-next-line no-await-in-loop
         if (def.subjectCues) entry.cues = await def.subjectCues(pool);
@@ -398,8 +403,29 @@ module.exports = function audioRoutes(pool) {
     res.json(audioDispatcher.stopDrain());
   });
 
+  // SOMET-596: the slot table's Job column and its failed-by-cause panel.
+  // One row per (kind, key, slot) -- see audioJobQueue.slotJobs for which row
+  // wins when a slot has several.
+  router.get('/admin/jobs/slots', admin, async (req, res) => {
+    try { res.json(await audioJobQueue.slotJobs(pool)); }
+    catch (err) { sendError(res, err); }
+  });
+
+  // No body (or no `ids`): every failed job, as before. `ids` (SOMET-596, the
+  // by-cause panel's "Retry these N") scopes it to those jobs' slots; an id
+  // that is not a failed job is ignored, and `requeued` says how many went
+  // back. Ids are bigints, so digit strings are accepted as well as integers
+  // (pg hands bigint ids to the client as strings).
   router.post('/admin/jobs/retry-failed', admin, async (req, res) => {
-    try { res.json({ requeued: await audioJobQueue.retryFailed(pool) }); }
+    const { ids } = req.body || {};
+    let scoped;
+    if (ids !== undefined) {
+      const ok = Array.isArray(ids) && ids.length <= 10000
+        && ids.every((id) => (Number.isSafeInteger(id) && id > 0) || (typeof id === 'string' && /^[1-9][0-9]{0,18}$/.test(id)));
+      if (!ok) return res.status(400).json({ error: 'ids must be an array of job ids (positive integers)' });
+      scoped = ids.map(String);
+    }
+    try { res.json({ requeued: await audioJobQueue.retryFailed(pool, scoped ? { ids: scoped } : {}) }); }
     catch (err) { sendError(res, err); }
   });
 

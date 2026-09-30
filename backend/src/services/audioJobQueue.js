@@ -220,21 +220,60 @@ async function recent(db, limit = 50) {
 //     moment the second one flips to 'queued'. Delete the OLDER failed
 //     duplicates for a slot first, keeping only the newest, so the slot has
 //     at most one failed row left to resurrect.
-async function retryFailed(db) {
+//
+// `ids` (SOMET-596) scopes both steps to the SLOTS those failed jobs belong
+// to: naming any failed row of a slot -- even an older duplicate -- retries
+// that slot once, through its newest failed row. Ids that are not failed
+// jobs name no slot and are ignored.
+async function retryFailed(db, { ids } = {}) {
+  let scope = '';
+  const params = [];
+  if (ids !== undefined) {
+    const slots = (await db.query(
+      `SELECT DISTINCT subject_kind, subject_key, slot FROM audio_jobs
+        WHERE state = 'failed' AND id = ANY($1::bigint[])`, [ids],
+    )).rows;
+    if (!slots.length) return 0;
+    params.push(slots.map((r) => r.subject_kind), slots.map((r) => r.subject_key), slots.map((r) => r.slot));
+    scope = `AND (a.subject_kind, a.subject_key, a.slot) IN
+               (SELECT * FROM unnest($1::text[], $2::text[], $3::text[]))`;
+  }
   await db.query(
     `DELETE FROM audio_jobs a
-      WHERE a.state = 'failed'
+      WHERE a.state = 'failed' ${scope}
         AND EXISTS (SELECT 1 FROM audio_jobs b
                      WHERE b.state = 'failed' AND b.subject_kind = a.subject_kind
                        AND b.subject_key = a.subject_key AND b.slot = a.slot AND b.id > a.id)`,
+    params,
   );
   return (await db.query(
-    `UPDATE audio_jobs SET state = 'queued', attempts = 0, not_before = NULL, last_error = NULL, updated_at = now()
-      WHERE state = 'failed'
+    `UPDATE audio_jobs a SET state = 'queued', attempts = 0, not_before = NULL, last_error = NULL, updated_at = now()
+      WHERE a.state = 'failed' ${scope}
         AND NOT EXISTS (SELECT 1 FROM audio_jobs l WHERE l.state IN ('queued','running')
-                          AND l.subject_kind = audio_jobs.subject_kind AND l.subject_key = audio_jobs.subject_key
-                          AND l.slot = audio_jobs.slot)`,
+                          AND l.subject_kind = a.subject_kind AND l.subject_key = a.subject_key
+                          AND l.slot = a.slot)`,
+    params,
   )).rowCount;
+}
+
+// The slot table's job per (kind, key, slot) (SOMET-596). The rule: take the
+// slot's LATEST row of any state -- a live (queued/running) row first, since
+// that is what is happening to the slot now, else the highest id -- and
+// report it only if it is queued, running or failed. A slot whose latest job
+// is `done` therefore shows no job at all, even with older failed rows left
+// behind: it has sound now, and listing the stale failure would put it in
+// the failed filter and the by-cause panel for a problem that is gone.
+async function slotJobs(db) {
+  return (await db.query(
+    `SELECT id, subject_kind, subject_key, slot, status, error, attempts, updated_at FROM (
+       SELECT DISTINCT ON (subject_kind, subject_key, slot)
+              id, subject_kind, subject_key, slot, state AS status, last_error AS error, attempts, updated_at
+         FROM audio_jobs
+        ORDER BY subject_kind, subject_key, slot, (state IN ('queued', 'running')) DESC, id DESC
+     ) latest
+     WHERE status IN ('queued', 'running', 'failed')
+     ORDER BY subject_kind, subject_key, slot`,
+  )).rows;
 }
 
 async function clear(db, { states = ['queued', 'failed', 'done'] } = {}) {
@@ -261,5 +300,6 @@ module.exports = {
   stats,
   recent,
   retryFailed,
+  slotJobs,
   clear,
 };
