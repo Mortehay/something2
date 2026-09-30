@@ -216,8 +216,17 @@ function ProviderCard({ provider, isOnlyActive }) {
       )}
 
       <Row>
-        <Label>Model</Label>
-        {models.length > 0 ? (
+        <Label>{isAudio ? 'Styles' : 'Model'}</Label>
+        {isAudio ? (
+          // The audio adapter never reads `model` -- the style is chosen per
+          // subject by propose -- so there is nothing to pick here. models_cache
+          // holds the box's styles plus "cue:"-prefixed SFX cues; show them.
+          <Hint style={{ margin: 0 }}>
+            {models.length > 0
+              ? `${models.filter(m => !m.startsWith('cue:')).length} style(s), ${models.filter(m => m.startsWith('cue:')).length} cue(s) — chosen per subject, not here`
+              : 'refresh to list styles and cues'}
+          </Hint>
+        ) : models.length > 0 ? (
           <Select value={form.model} onChange={e => set('model', e.target.value)}>
             <option value="">— none —</option>
             {models.map(m => <option key={m} value={m}>{m}</option>)}
@@ -240,7 +249,7 @@ function ProviderCard({ provider, isOnlyActive }) {
             })}
             disabled={refresh.isPending}
           >
-            <HiOutlineArrowPath /> {refresh.isPending ? 'Refreshing…' : 'Refresh models'}
+            <HiOutlineArrowPath /> {refresh.isPending ? 'Refreshing…' : (isAudio ? 'Refresh styles' : 'Refresh models')}
           </Button>
         )}
         {!isNew && (
@@ -250,15 +259,19 @@ function ProviderCard({ provider, isOnlyActive }) {
         )}
       </Row>
       {provider?.models_fetched_at && (
-        <Hint>{models.length} model(s) cached at {new Date(provider.models_fetched_at).toLocaleString()}</Hint>
+        <Hint>{models.length} {isAudio ? 'style/cue' : 'model'}(s) cached at {new Date(provider.models_fetched_at).toLocaleString()}</Hint>
       )}
-      {isAudio && audioDiscovery && (
+      {isAudio && (audioDiscovery || models.length > 0) && (
+        // Labels from this session's Refresh when there is one; otherwise the
+        // raw values from models_cache, so the list survives a page reload.
         <Hint>
-          Styles: {audioDiscovery.styles.length > 0
-            ? audioDiscovery.styles.map(s => s.label || s.value).join(', ') : '—'}
+          Styles: {(audioDiscovery
+            ? audioDiscovery.styles.map(s => s.label || s.value)
+            : models.filter(m => !m.startsWith('cue:'))).join(', ') || '—'}
           <br />
-          Cues: {audioDiscovery.cues.length > 0
-            ? audioDiscovery.cues.map(c => c.label || c.value).join(', ') : '—'}
+          Cues: {(audioDiscovery
+            ? audioDiscovery.cues.map(c => c.label || c.value)
+            : models.filter(m => m.startsWith('cue:')).map(m => m.slice(4))).join(', ') || '—'}
         </Hint>
       )}
 
