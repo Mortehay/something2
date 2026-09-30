@@ -1,0 +1,129 @@
+// backend/src/services/audioPromptWriter.js
+//
+// Writes ONE audio slot's prompt with the text model and stores it (spec
+// 2026-09-30 §5). Two contracts:
+//   music/ambience -> { style, prompt }: style constrained by the JSON
+//     schema's enum to the box's own styles for that clip kind, and checked
+//     again here (a model that ignores the schema is the case to survive).
+//   sfx -> { entity }: a short phrase for the SOURCE of the sound, the same
+//     shape as the box's own cue defaults ("a steel sword", "an old wooden
+//     chest"). The cue already carries the action.
+//
+// One retry for a malformed answer, none for a provider failure: a busy box
+// is the caller's to handle (batch waits or falls back), and retrying it here
+// would only double the wait.
+const defaultTp = require('./textProvider');
+const defaultStore = require('./audioPrompts');
+const { buildContext } = require('./audioPromptContext');
+const { slotKind } = require('./audioSubjects');
+const aiProviders = require('./aiProviders');
+const defaultRap = require('./remoteAudioProvider');
+
+const TEMPERATURE = () => {
+  const raw = parseFloat(process.env.AUDIO_PROMPT_TEMPERATURE);
+  return Number.isFinite(raw) ? raw : 0.15;
+};
+
+const SYSTEM_MUSIC = [
+  'You write prompts for a music and ambience generator in a medieval fantasy RPG.',
+  'Pick ONE style from the allowed list, then write a prompt of at most 40 words:',
+  'instruments or sound sources, mood, tempo feel, texture. No lyrics, no vocals,',
+  'no artist or song names, no sentences about the game -- only what should be heard.',
+  'Ambience is environmental sound (wind, water, birds, crowd), never melodic music.',
+  'Answer only with the JSON object.',
+].join(' ');
+
+const SYSTEM_SFX = [
+  'You write the "entity" phrase for a sound-effect generator in a medieval fantasy RPG.',
+  'The sound cue (hit, death, slash, spell, waypoint...) is fixed; describe the SOURCE',
+  'of the sound in at most 10 words: what it is made of, how big, what voice it has.',
+  'Examples: "a heavy iron mace", "a small bat with papery wings", "an old stone shrine humming".',
+  'No verbs about the action, no sentences. Answer only with the JSON object.',
+].join(' ');
+
+function schemaFor(clipKind, styles) {
+  if (clipKind === 'sfx') {
+    return {
+      type: 'object', properties: { entity: { type: 'string' } }, required: ['entity'], additionalProperties: false,
+    };
+  }
+  return {
+    type: 'object',
+    properties: { style: { type: 'string', enum: styles }, prompt: { type: 'string' } },
+    required: ['style', 'prompt'],
+    additionalProperties: false,
+  };
+}
+
+// -> { style, text } | null
+function validate(clipKind, json, styles) {
+  if (!json || typeof json !== 'object') return null;
+  if (clipKind === 'sfx') {
+    const text = typeof json.entity === 'string' ? json.entity.trim() : '';
+    return text ? { style: null, text } : null;
+  }
+  const text = typeof json.prompt === 'string' ? json.prompt.trim() : '';
+  if (!text || !styles.includes(json.style)) return null;
+  return { style: json.style, text };
+}
+
+async function loadStyles(db, { rap = defaultRap } = {}) {
+  const provider = await aiProviders.loadActiveProviderWithSecret(db, 'audio');
+  if (!provider) return { music: [], ambience: [] };
+  const r = await rap.listStyles(provider);
+  if (!r.ok) return { music: [], ambience: [] };
+  return {
+    music: r.styles.filter((s) => s.kind === 'music').map((s) => s.value),
+    ambience: r.styles.filter((s) => s.kind === 'ambience').map((s) => s.value),
+  };
+}
+
+async function writeSlotPrompt(db, {
+  kind, key, slot, hint = null,
+}, {
+  tp = defaultTp, store = defaultStore, catalog, styles, cue = null, boxOnly = false,
+} = {}) {
+  const clipKind = slotKind(kind, slot);
+  if (!clipKind) return { ok: false, error: 'unknown subject or slot' };
+  const context = buildContext(catalog, kind, key, slot, { cue });
+  if (!context) return { ok: false, error: 'unknown subject' };
+  const allowed = clipKind === 'sfx' ? [] : (styles && styles[clipKind]) || [];
+  if (clipKind !== 'sfx' && !allowed.length) {
+    return { ok: false, error: `no ${clipKind} styles known -- add/refresh the audio provider first` };
+  }
+  const cleanHint = typeof hint === 'string' && hint.trim() ? hint.trim().slice(0, 200) : null;
+  const request = {
+    system: clipKind === 'sfx' ? SYSTEM_SFX : SYSTEM_MUSIC,
+    prompt: [
+      `Clip kind: ${clipKind}`,
+      clipKind === 'sfx' ? null : `Allowed styles: ${allowed.join(', ')}`,
+      `Subject: ${context}`,
+      cleanHint ? `Admin hint: ${cleanHint}` : null,
+    ].filter(Boolean).join('\n'),
+    jsonSchema: schemaFor(clipKind, allowed),
+    temperature: TEMPERATURE(),
+    maxTokens: clipKind === 'sfx' ? 48 : 160,
+  };
+  let last = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    const r = await tp.complete(db, request, { boxOnly });
+    if (!r.ok) return { ok: false, error: r.error, busy: Boolean(r.busy), via: r.via };
+    const good = validate(clipKind, r.json, allowed);
+    if (good) {
+      // eslint-disable-next-line no-await-in-loop
+      const row = await store.save(db, kind, key, slot, {
+        style: good.style, text: good.text, sourceInput: context, hint: cleanHint, model: r.model, via: r.via,
+      });
+      return { ok: true, row };
+    }
+    last = r;
+  }
+  return {
+    ok: false, error: `the model did not return a usable ${clipKind === 'sfx' ? 'entity' : 'style + prompt'} (twice)`, busy: false, via: last && last.via,
+  };
+}
+
+module.exports = {
+  writeSlotPrompt, loadStyles, SYSTEM_MUSIC, SYSTEM_SFX,
+};
