@@ -46,6 +46,7 @@ function selectSlots(slots, activeByKey, currentByKey, {
     const isStaleRow = Boolean(active) && isStale(active, currentByKey.get(s.id));
     if (stale) {
       if (isStaleRow) todo.push(s);
+      else if (active) skipped.written += 1;
     } else if (!active) {
       todo.push(s);
     } else if (isStaleRow) skipped.stale += 1; else skipped.written += 1;

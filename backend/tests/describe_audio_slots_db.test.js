@@ -30,3 +30,32 @@ test('describe-audio-slots run()', { skip }, async (t) => {
   assert.equal(writes.every((w) => w.opts.boxOnly === true), true);
   assert.ok(writes.some((w) => w.opts.cue === 'slash'), 'cue is passed for sfx slots');
 });
+
+test('5 consecutive non-busy failures stop the run', { skip }, async (t) => {
+  const pool = new Pool({ connectionString: url });
+  t.after(() => pool.end());
+  const calls = [];
+  const write = async (db, target) => { calls.push(target); return { ok: false, busy: false, error: 'x' }; };
+  const logs = [];
+  await run(pool, { kinds: ['attack_type'] },
+    { log: (l) => logs.push(l), write, loadStyles: async () => ({ music: [], ambience: [] }) });
+  assert.equal(calls.length, 5, 'stops after the 5th consecutive failure, out of 6 attack_type slots');
+  assert.ok(logs.some((l) => /stopping: 5 failures in a row/.test(l)), 'the stop is logged');
+});
+
+test('a success in between resets the consecutive-failure counter', { skip }, async (t) => {
+  const pool = new Pool({ connectionString: url });
+  t.after(() => pool.end());
+  const outcomes = ['fail', 'fail', 'ok', 'fail', 'fail', 'fail'];
+  const calls = [];
+  const write = async (db, target) => {
+    const outcome = outcomes[calls.length];
+    calls.push(target);
+    return outcome === 'ok'
+      ? { ok: true, row: { via: 'box', text: `r${calls.length}`, style: null } }
+      : { ok: false, busy: false, error: 'x' };
+  };
+  await run(pool, { kinds: ['attack_type'] },
+    { log: () => {}, write, loadStyles: async () => ({ music: [], ambience: [] }) });
+  assert.equal(calls.length, 6, 'the mid-run success resets the streak, so no run of 5 is ever reached');
+});

@@ -14,6 +14,7 @@ test('skip active, keep missing; stale only with --stale', () => {
   assert.deepEqual(r.skipped, { written: 1, stale: 1 });
   r = selectSlots(slots, active, current, { stale: true });
   assert.deepEqual(r.todo.map((s) => s.id), ['world/Vale/music'], '--stale rewrites stale rows ONLY');
+  assert.deepEqual(r.skipped, { written: 1, stale: 0 }, '--stale counts the active, fresh row (Wolf) it excludes');
 });
 
 test('kinds, slot and limit filter', () => {
