@@ -184,6 +184,25 @@ test('world: a killed creature emits one death with its type and last position',
   assert.deepEqual(deaths, [{ e: 'death', c: 'Wolf', x: 150 + CREATURE_SIZE / 2, y: 108 + CREATURE_SIZE / 2 }]);
 });
 
+// SOMET-592 (M3): unloading a creature whose chunk left the active set is
+// not a death. pruneInactive deletes it directly, never through
+// _removeKilled; a refactor that routed it there would make every creature
+// the player walks away from "die" audibly.
+test('world: a creature leaving the AOI (pruneInactive) plays no death', () => {
+  const w = new World(openMap(), TYPES, 1);
+  w.creatures.addCreatures([
+    { id: 'gone', type: 'Wolf', x: 5000, y: 5000, hp: 50, facing: 'S' },
+    { id: 'here', type: 'Slime', x: 10, y: 10, hp: 50, facing: 'S' },
+  ]);
+  w.creatures.clearDirty(['gone', 'here']);
+  w.drainSfx();
+  const dropped = w.creatures.pruneInactive(['0,0']);
+  assert.equal(dropped, 1, 'precondition: exactly the far creature was unloaded');
+  assert.equal(w.creatures.get('gone'), undefined, 'precondition: gone from the sim');
+  assert.ok(w.creatures.get('here'), 'precondition: the in-chunk creature stays');
+  assert.deepEqual(only(w.drainSfx(), 'death'), []);
+});
+
 test('world: a creature bite is a creature use plus a creature hit at the target', () => {
   const w = new World(openMap(), TYPES, 1);
   w.addPlayer('u1', { x: 100, y: 100 });
@@ -221,6 +240,110 @@ test('world: a successful skill cast is a use of skill:<id>', () => {
   refused.addPlayer('u1', { x: 100, y: 100 });
   assert.equal(refused.castSkill('u1', 'no_such_skill', 0, 0, 1, 0).ok, false);
   assert.deepEqual(refused.drainSfx(), [], 'a refused cast is silent');
+});
+
+// SOMET-592 (I3): skills used to push only their `use`, so every
+// skill/<id>/hit slot was dead and skill damage was silent unless a creature
+// died. A caster that meets any gem's requirements, with resources to spare.
+function skillWorld() {
+  const w = new World(openMap(), TYPES, 1);
+  w.addPlayer('u1', { x: 100, y: 100 }); // centre 132,132; default dagger (melee)
+  const p = w.getPlayer('u1');
+  p.stats = {
+    ...p.stats, level: 50, strength: 99, dexterity: 99, constitution: 99, intelligence: 99, wisdom: 99, charisma: 99,
+  };
+  p.mana = 999; p.stamina = 999; p.hp = 999; p.maxHp = 999;
+  return w;
+}
+
+test('world: a magic AoE skill hitting two creatures is ONE hit at its centre plus a hurt per victim', () => {
+  const w = skillWorld();
+  // war_shockwave: type magic, a targeted radial AoE (no cone/nova id).
+  w.creatures.addCreatures([
+    { id: 'c1', type: 'Slime', x: 380, y: 380, hp: 5000, facing: 'S' },
+    { id: 'c2', type: 'Wolf', x: 420, y: 380, hp: 5000, facing: 'S' },
+    { id: 'far', type: 'Wolf', x: 2000, y: 2000, hp: 5000, facing: 'S' },
+  ]);
+  const res = w.castSkill('u1', 'war_shockwave', 400, 400, 1, 0);
+  assert.equal(res.ok, true, `precondition: the cast succeeded (${res.reason} ${res.error || ''})`);
+  assert.ok(w.creatures.get('c1').hp < 5000 && w.creatures.get('c2').hp < 5000, 'precondition: both were damaged');
+  assert.equal(w.creatures.get('far').hp, 5000, 'precondition: the far wolf was outside the blast');
+  const sfx = w.drainSfx();
+  assert.deepEqual(only(sfx, 'hit'), [{ e: 'hit', k: 'magic', s: 'skill:war_shockwave', x: 400, y: 400 }]);
+  const hurt = only(sfx, 'hurt');
+  assert.deepEqual(hurt.map((ev) => ev.c).sort(), ['Slime', 'Wolf']);
+  assert.deepEqual(hurt.find((ev) => ev.c === 'Slime'), { e: 'hurt', c: 'Slime', x: 380 + CREATURE_SIZE / 2, y: 380 + CREATURE_SIZE / 2 });
+  assert.deepEqual(only(sfx, 'death'), []);
+  assert.equal(sfx[0].e, 'use', 'the cast is heard before its landing');
+});
+
+test('world: a melee skill hit is a hit + hurt per struck creature, once however many strikes', () => {
+  const w = skillWorld();
+  w.creatures.addCreatures([{ id: 'c1', type: 'Wolf', x: 150, y: 108, hp: 5000, facing: 'S' }]);
+  // war_twin_slash strikes twice; the sound is per landed target, not per strike.
+  const res = w.castSkill('u1', 'war_twin_slash', 0, 0, 1, 0);
+  assert.equal(res.ok, true, `precondition: the cast succeeded (${res.reason})`);
+  assert.ok(w.creatures.get('c1').hp < 5000, 'precondition: the arc connected');
+  const sfx = w.drainSfx();
+  const cx = 150 + CREATURE_SIZE / 2, cy = 108 + CREATURE_SIZE / 2;
+  assert.deepEqual(only(sfx, 'hit'), [{ e: 'hit', k: 'melee', s: 'skill:war_twin_slash', x: cx, y: cy }]);
+  assert.deepEqual(only(sfx, 'hurt'), [{ e: 'hurt', c: 'Wolf', x: cx, y: cy }]);
+});
+
+test('world: a killing skill hit is a hit + death, and no hurt', () => {
+  const w = skillWorld();
+  w.creatures.addCreatures([{ id: 'c1', type: 'Wolf', x: 150, y: 108, hp: 1, facing: 'S' }]);
+  const res = w.castSkill('u1', 'war_crushing_blow', 0, 0, 1, 0);
+  assert.equal(res.ok, true, `precondition: the cast succeeded (${res.reason})`);
+  assert.deepEqual(res.kills.map((k) => k.id), ['c1'], 'precondition: the blow killed it');
+  const sfx = w.drainSfx();
+  const cx = 150 + CREATURE_SIZE / 2, cy = 108 + CREATURE_SIZE / 2;
+  assert.deepEqual(only(sfx, 'hit'), [{ e: 'hit', k: 'melee', s: 'skill:war_crushing_blow', x: cx, y: cy }]);
+  assert.deepEqual(only(sfx, 'death'), [{ e: 'death', c: 'Wolf', x: cx, y: cy }]);
+  assert.deepEqual(only(sfx, 'hurt'), [], 'a kill already has its death');
+});
+
+test('world: a magic AoE that kills one of two victims hurts only the survivor', () => {
+  const w = skillWorld();
+  w.creatures.addCreatures([
+    { id: 'weak', type: 'Slime', x: 380, y: 380, hp: 1, facing: 'S' },
+    { id: 'tough', type: 'Wolf', x: 420, y: 380, hp: 5000, facing: 'S' },
+  ]);
+  const res = w.castSkill('u1', 'war_shockwave', 400, 400, 1, 0);
+  assert.equal(res.ok, true, `precondition: the cast succeeded (${res.reason})`);
+  assert.deepEqual(res.kills.map((k) => k.id), ['weak']);
+  const sfx = w.drainSfx();
+  assert.equal(only(sfx, 'hit').length, 1);
+  assert.deepEqual(only(sfx, 'hurt').map((ev) => ev.c), ['Wolf']);
+  assert.deepEqual(only(sfx, 'death').map((ev) => ev.c), ['Slime']);
+});
+
+test('world: a cone skill is a hit + hurt per creature in the cone', () => {
+  const w = new World(openMap(), TYPES, 1);
+  w.addPlayer('u1', { x: 100, y: 100 }, wielding(3)); // a bow: arc_piercing_shot requires one
+  const p = w.getPlayer('u1');
+  p.stats = {
+    ...p.stats, level: 50, strength: 99, dexterity: 99, constitution: 99, intelligence: 99, wisdom: 99, charisma: 99,
+  };
+  p.mana = 999; p.stamina = 999;
+  w.creatures.addCreatures([
+    { id: 'c1', type: 'Wolf', x: 250, y: 108, hp: 5000, facing: 'S' },
+    { id: 'c2', type: 'Slime', x: 330, y: 108, hp: 5000, facing: 'S' },
+  ]);
+  const res = w.castSkill('u1', 'arc_piercing_shot', 0, 0, 1, 0);
+  assert.equal(res.ok, true, `precondition: the cast succeeded (${res.reason} ${res.error || ''})`);
+  const sfx = w.drainSfx();
+  const hit = only(sfx, 'hit');
+  assert.deepEqual(hit.map((ev) => [ev.k, ev.s, ev.x]).sort(),
+    [['magic', 'skill:arc_piercing_shot', 250 + CREATURE_SIZE / 2], ['magic', 'skill:arc_piercing_shot', 330 + CREATURE_SIZE / 2]].sort());
+  assert.deepEqual(only(sfx, 'hurt').map((ev) => ev.c).sort(), ['Slime', 'Wolf']);
+});
+
+test('world: a skill that damages nothing is its use alone', () => {
+  const w = skillWorld();
+  const res = w.castSkill('u1', 'war_shockwave', 400, 400, 1, 0);
+  assert.equal(res.ok, true);
+  assert.deepEqual(w.drainSfx().map((ev) => ev.e), ['use']);
 });
 
 test('server stash: 100 events in one tick leave a frame of 64', () => {
