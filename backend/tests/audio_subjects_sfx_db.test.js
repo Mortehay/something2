@@ -196,7 +196,8 @@ test('audio subjects: creature/world_point/attack_type/item/skill', { skip }, as
       assert.equal(accepted, 4, 'the four real (kind, key, slot) misses are kept; the three unknown ones are dropped');
       const rows = await pool.query(
         `SELECT subject_kind, subject_key, slot FROM audio_misses
-          WHERE (subject_kind, subject_key) IN (('creature', $1), ('attack_type', 'ranged'), ('item', $2), ('skill', $3))`,
+          WHERE (subject_kind, subject_key, slot) IN
+                (('creature', $1, 'nearby'), ('attack_type', 'ranged', 'use'), ('item', $2, 'use'), ('skill', $3, 'use'))`,
         [CREATURE, ITEM_MELEE, SKILL_MELEE],
       );
       assert.equal(rows.rowCount, 4);
@@ -214,9 +215,12 @@ test('audio subjects: creature/world_point/attack_type/item/skill', { skip }, as
 
       const bundle = await lib.worldAudioBundle(pool, worldId);
       assert.equal(bundle.world, worldName);
-      assert.equal(bundle.bindings[`creature/${CREATURE}/death`][0].key, creatureClip.storage_key,
+      // By key, not [0]: the scratch DB can hold other (live) clips on these
+      // global slots, ordered ahead of this test's own.
+      const keysOf = (k) => (bundle.bindings[k] || []).map((x) => x.key);
+      assert.ok(keysOf(`creature/${CREATURE}/death`).includes(creatureClip.storage_key),
         'a creature binding is present even though this world never mentions the creature by name');
-      assert.equal(bundle.bindings['attack_type/melee/use'][0].key, attackClip.storage_key);
+      assert.ok(keysOf('attack_type/melee/use').includes(attackClip.storage_key));
 
       await pool.query('DELETE FROM audio_bindings WHERE id = ANY($1)', [[creatureBinding.id, attackBinding.id]]);
     });
