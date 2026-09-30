@@ -111,11 +111,22 @@ async function writeSlotPrompt(db, {
     if (!r.ok) return { ok: false, error: r.error, busy: Boolean(r.busy), via: r.via };
     const good = validate(clipKind, r.json, allowed);
     if (good) {
-      // eslint-disable-next-line no-await-in-loop
-      const row = await store.save(db, kind, key, slot, {
-        style: good.style, text: good.text, sourceInput: context, hint: cleanHint, model: r.model, via: r.via,
-      });
-      return { ok: true, row };
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const row = await store.save(db, kind, key, slot, {
+          style: good.style, text: good.text, sourceInput: context, hint: cleanHint, model: r.model, via: r.via,
+        });
+        return { ok: true, row };
+      } catch (err) {
+        if (err && err.status === 409) {
+          return {
+            ok: false, conflict: true, busy: false, via: r.via, error: err.message,
+          };
+        }
+        return {
+          ok: false, busy: false, via: r.via, error: `could not store the prompt: ${err.message}`,
+        };
+      }
     }
     last = r;
   }

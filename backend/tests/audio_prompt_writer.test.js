@@ -24,6 +24,9 @@ function fakeTp(answers) {
     complete: async (db, req, opts) => { calls.push({ req, opts }); return answers.shift(); },
   };
 }
+function fakeStoreThrows(err) {
+  return { saved: [], save: async () => { throw err; } };
+}
 
 test('music: schema enum is the box styles; stored with source_input and via', async () => {
   const store = fakeStore();
@@ -100,4 +103,41 @@ test('unknown subject: fails without calling the model', async () => {
   const r = await w.writeSlotPrompt({}, { kind: 'creature', key: 'Ghost', slot: 'hurt' }, { tp, store: fakeStore(), catalog: CAT, styles: STYLES });
   assert.equal(r.ok, false);
   assert.equal(tp.calls.length, 0);
+});
+
+test('sfx: whitespace-only entity, one retry, then fail WITHOUT storing', async () => {
+  const store = fakeStore();
+  const bad = { ok: true, json: { entity: '   ' }, model: 'q', via: 'box' };
+  const tp = fakeTp([bad, bad]);
+  const r = await w.writeSlotPrompt({}, { kind: 'creature', key: 'Wolf', slot: 'hurt' },
+    { tp, store, catalog: CAT, styles: STYLES, cue: 'hit' });
+  assert.equal(r.ok, false);
+  assert.equal(tp.calls.length, 2, 'exactly one retry');
+  assert.equal(store.saved.length, 0);
+});
+
+test('store.save rejects with a 409 conflict: no retry, ok:false, conflict:true', async () => {
+  const err = new Error('this prompt was changed by someone else; reload it');
+  err.status = 409;
+  const store = fakeStoreThrows(err);
+  const tp = fakeTp([{ ok: true, json: { style: 'village', prompt: 'ok' }, model: 'q', via: 'box' }]);
+  const r = await w.writeSlotPrompt({}, { kind: 'world', key: 'Vale', slot: 'music' }, { tp, store, catalog: CAT, styles: STYLES });
+  assert.deepEqual(
+    { ok: r.ok, conflict: r.conflict, busy: r.busy, via: r.via },
+    { ok: false, conflict: true, busy: false, via: 'box' },
+  );
+  assert.match(r.error, /changed by someone else/);
+  assert.equal(tp.calls.length, 1, 'no retry on a store failure');
+});
+
+test('store.save rejects with a non-conflict error: ok:false, error mentions could not store', async () => {
+  const store = fakeStoreThrows(new Error('connection terminated'));
+  const tp = fakeTp([{ ok: true, json: { style: 'village', prompt: 'ok' }, model: 'q', via: 'box' }]);
+  const r = await w.writeSlotPrompt({}, { kind: 'world', key: 'Vale', slot: 'music' }, { tp, store, catalog: CAT, styles: STYLES });
+  assert.equal(r.ok, false);
+  assert.equal(r.conflict, undefined);
+  assert.equal(r.busy, false);
+  assert.equal(r.via, 'box');
+  assert.match(r.error, /could not store/);
+  assert.equal(tp.calls.length, 1, 'no retry on a store failure');
 });
