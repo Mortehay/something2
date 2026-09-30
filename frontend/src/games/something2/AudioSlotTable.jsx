@@ -9,7 +9,9 @@
 // renders what it returns. The data (subjects, misses, slot jobs) is fetched
 // by AudioAdmin, which stays mounted across the Subjects/Library switch and
 // owns the post-drain refresh.
-import { useMemo, useState } from 'react';
+import {
+  useEffect, useMemo, useRef, useState,
+} from 'react';
 import toast from 'react-hot-toast';
 import { useSearchParams } from 'react-router-dom';
 import styled from 'styled-components';
@@ -133,10 +135,17 @@ function AudioSlotTable({
   const [searchParams, setSearchParams] = useSearchParams();
   const { kind, sound, search } = filtersFromParams(searchParams);
   const [page, setPage] = useState(1);
+  // The params a filter change builds on. react-router's functional
+  // setSearchParams form still hands the updater THIS render's params, so two
+  // changes in one tick would clobber each other (seen in the browser); this
+  // ref carries the pending value between them. Re-synced from the URL on
+  // every render (and so on back/forward).
+  const pendingParams = useRef(searchParams);
+  useEffect(() => { pendingParams.current = searchParams; }, [searchParams]);
   const setFilter = (patch) => {
-    // Functional form: two changes in one tick each build on the previous
-    // one's URL, not on this render's (stale) filters.
-    setSearchParams((prev) => paramsFromFilters({ ...filtersFromParams(prev), ...patch }), { replace: true });
+    const next = paramsFromFilters({ ...filtersFromParams(pendingParams.current), ...patch });
+    pendingParams.current = next;
+    setSearchParams(next, { replace: true });
     setPage(1);
   };
 
