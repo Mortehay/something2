@@ -4057,7 +4057,7 @@ export class RenderSystem {
   renderPassiveTree(ctx, state, hitAreas) {
     const layout = layoutPassiveTree(state);
     for (const a of layout.hitAreas) hitAreas.push(a);
-    drawPassiveTree(ctx, layout);
+    drawPassiveTree(ctx, layout, this.gameArt);
     return layout;
   }
 

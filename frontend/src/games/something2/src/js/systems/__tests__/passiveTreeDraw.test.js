@@ -30,10 +30,12 @@ import {
 // panel only ever writes to a context, so the geometry and the labels are what
 // is asserted against.
 function stubCtx() {
-  const fillRects = [], texts = [], arcs = [], lines = [], fills = [], strokes = [];
-  let fillStyle = null, strokeStyle = null;
+  const fillRects = [], texts = [], arcs = [], lines = [], fills = [], strokes = [], images = [];
+  let fillStyle = null, strokeStyle = null, alpha = 1;
   return {
-    fillRects, texts, arcs, lines, fills, strokes,
+    fillRects, texts, arcs, lines, fills, strokes, images,
+    drawImage(img, x, y, w, h) { images.push({ img, x, y, w, h, alpha }); },
+    imageSmoothingEnabled: false, imageSmoothingQuality: "low",
     save() {}, restore() {}, clip() {}, rect() {},
     fillRect(x, y, w, h) { fillRects.push({ x, y, w, h, fillStyle }); },
     strokeRect() {},
@@ -51,7 +53,7 @@ function stubCtx() {
     set fillStyle(v) { fillStyle = v; }, get fillStyle() { return fillStyle; },
     set strokeStyle(v) { strokeStyle = v; }, get strokeStyle() { return strokeStyle; },
     set font(_v) {}, set lineWidth(_v) {}, set textAlign(_v) {}, set textBaseline(_v) {},
-    set globalAlpha(_v) {},
+    set globalAlpha(v) { alpha = v; }, get globalAlpha() { return alpha; },
   };
 }
 
@@ -71,6 +73,65 @@ const state = (over = {}) => ({
   respecCost: null,
   view: { panX: 640, panY: 360, zoom: 1 },
   ...over,
+});
+
+describe("drawPassiveTree label icons (SOMET-599)", () => {
+  const ICON = { naturalWidth: 256, naturalHeight: 256 };
+  const artFor = (...labels) => ({
+    icon: (kind, key) => (kind === "passive_label" && labels.includes(key) ? ICON : null),
+  });
+
+  it("draws no image without art, and the same circles either way", () => {
+    const plain = stubCtx();
+    drawPassiveTree(plain, layoutPassiveTree(state()));
+    expect(plain.images).toHaveLength(0);
+
+    const withArt = stubCtx();
+    drawPassiveTree(withArt, layoutPassiveTree(state()), artFor("Sinew", "Great Sinew"));
+    expect(withArt.images).toHaveLength(2);
+    expect(withArt.images.every((i) => i.img === ICON)).toBe(true);
+    // The icon is an inlay, not a replacement: arcs, fills and rims unchanged.
+    expect(withArt.arcs).toEqual(plain.arcs);
+    expect(withArt.fills).toEqual(plain.fills);
+    expect(withArt.strokes).toEqual(plain.strokes);
+  });
+
+  it("fits the icon to the node's own circle", () => {
+    const ctx = stubCtx();
+    const layout = layoutPassiveTree(state());
+    drawPassiveTree(ctx, layout, artFor("Great Sinew"));
+    const node = layout.nodes.find((n) => n.label === "Great Sinew");
+    expect(ctx.images[0]).toMatchObject({ x: node.sx - node.r, y: node.sy - node.r, w: node.r * 2, h: node.r * 2 });
+  });
+
+  it("dims the icon of a node you cannot take, so art does not hide the state", () => {
+    const ctx = stubCtx();
+    // Start (1) allocated: Sinew (2) is allocatable, Great Sinew (3) locked.
+    const layout = layoutPassiveTree(state({ allocatedNodeIds: [1] }));
+    drawPassiveTree(ctx, layout, artFor("Sinew", "Great Sinew"));
+    const alphaOf = (label) => {
+      const n = layout.nodes.find((x) => x.label === label);
+      return ctx.images.find((i) => i.x === n.sx - n.r).alpha;
+    };
+    expect(alphaOf("Great Sinew")).toBeLessThan(alphaOf("Sinew"));
+    expect(alphaOf("Sinew")).toBeLessThan(1);
+  });
+
+  it("skips icons on nodes too small to read when zoomed out", () => {
+    const ctx = stubCtx();
+    // zoom 0.5: minor r = 3.5 (skipped), notable r = 6 (drawn).
+    drawPassiveTree(ctx, layoutPassiveTree(state({ view: { panX: 640, panY: 360, zoom: 0.5 } })), artFor("Sinew", "Great Sinew"));
+    expect(ctx.images).toHaveLength(1);
+    expect(ctx.images[0].w).toBe(12);
+  });
+
+  it("RenderSystem passes its GameArt through (the hand-off, not just the panel)", () => {
+    const rs = Object.create(RenderSystem.prototype);
+    rs.gameArt = artFor("Sinew");
+    const ctx = stubCtx();
+    rs.renderPassiveTree(ctx, state(), []);
+    expect(ctx.images).toHaveLength(1);
+  });
 });
 
 describe("drawPassiveTree", () => {
