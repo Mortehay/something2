@@ -4,6 +4,7 @@
 // caller inside a transaction can pass its client.
 const crypto = require('node:crypto');
 const assetStore = require('./assetStore');
+const { readObject } = require('./artSeed.js');
 const {
   SUBJECT_KINDS, GLOBAL_SUBJECT_KINDS, MAX_SUBJECT_KEY, isKnownKind, slotKind, isKnownSlot, existingSubjects, subjectExists,
 } = require('./audioSubjects');
@@ -26,16 +27,57 @@ async function uploadClipObject(c, { store = assetStore } = {}) {
   return { id, key };
 }
 
+// The content hash every clip row carries (SOMET-592, I1): the only honest
+// "we already have this file" test, since the box's `cached` flag is about
+// the box's own (shared, cross-database) cache, not about this database.
+function sha1Of(buffer) {
+  return crypto.createHash('sha1').update(buffer).digest('hex');
+}
+
+// `loopable` defaults to "not sfx" (music/ambience loop, a one-shot does not).
+// An explicit boolean overrides it -- only the upload route passes one, and
+// only for a world_point `nearby` slot (see canSetLoopable).
 async function insertClipRow(db, { id, key }, c) {
+  const loopable = typeof c.loopable === 'boolean' ? c.loopable : c.kind !== 'sfx';
   const r = await db.query(
     `INSERT INTO audio_clips (id, kind, label, storage_key, bytes, duration_ms, loopable,
-       loop_start_ms, loop_end_ms, source, provider_id, prompt, style_or_cue, engine, seed)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+       loop_start_ms, loop_end_ms, source, provider_id, prompt, style_or_cue, engine, seed, sha1)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
     [id, c.kind, c.label, key, c.buffer.length, c.durationMs,
-      c.kind !== 'sfx', c.loopStartMs ?? null, c.loopEndMs ?? null, c.source,
-      c.providerId ?? null, c.prompt ?? null, c.styleOrCue ?? null, c.engine ?? null, c.seed ?? null],
+      loopable, c.loopStartMs ?? null, c.loopEndMs ?? null, c.source,
+      c.providerId ?? null, c.prompt ?? null, c.styleOrCue ?? null, c.engine ?? null, c.seed ?? null,
+      sha1Of(c.buffer)],
   );
   return r.rows[0];
+}
+
+// The sha1 of every clip currently bound to one (subject, slot) -- the set a
+// returned file is checked against before it is stored (SOMET-592, I1). A
+// row stored before the sha1 column existed (sha1 NULL) is hashed on demand
+// from its object and the hash is written back, so each legacy object is
+// read at most once. An object that cannot be read is logged and left out:
+// it cannot be compared, and refusing a fresh file because of it would
+// block the slot for good.
+async function boundClipSha1s(db, { subjectKind, subjectKey, slot }, { store = assetStore } = {}) {
+  const r = await db.query(
+    `SELECT c.id, c.sha1, c.storage_key FROM audio_bindings b JOIN audio_clips c ON c.id = b.clip_id
+      WHERE b.subject_kind = $1 AND b.subject_key = $2 AND b.slot = $3`,
+    [subjectKind, subjectKey, slot],
+  );
+  const out = new Set();
+  for (const row of r.rows) {
+    if (row.sha1) { out.add(row.sha1); continue; }
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const hash = sha1Of(await readObject(store, row.storage_key));
+      out.add(hash);
+      // eslint-disable-next-line no-await-in-loop
+      await db.query('UPDATE audio_clips SET sha1 = $2 WHERE id = $1 AND sha1 IS NULL', [row.id, hash]);
+    } catch (err) {
+      console.error(`boundClipSha1s: could not hash legacy clip ${row.id} (${row.storage_key})`, err && err.message);
+    }
+  }
+  return out;
 }
 
 async function storeClip(db, c) {
@@ -319,6 +361,6 @@ async function filledCounts(db) {
 }
 
 module.exports = {
-  AudioInputError, storeClip, storeAndBindClip, bindClip, updateBinding, unbind, listClips, deleteClip, deleteUnboundClips,
+  AudioInputError, storeClip, storeAndBindClip, bindClip, sha1Of, boundClipSha1s, updateBinding, unbind, listClips, deleteClip, deleteUnboundClips,
   subjectSlots, worldAudioBundle, recordMisses, listMisses, filledCounts, MAX_MISSES_PER_POST,
 };

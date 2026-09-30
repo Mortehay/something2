@@ -104,7 +104,7 @@ module.exports = function audioRoutes(pool) {
       if (error) return res.status(400).json({ error });
       const provider = await resolveAudioProvider(pool, req.body.provider_id);
       if (!provider) return res.status(503).json({ error: 'No active audio provider. Add one under AI Providers with modality "audio".' });
-      const r = await rap.propose(provider, { context: await contextFor(pool, kind, key), kind: clipKind });
+      const r = await rap.propose(provider, { context: await contextFor(pool, kind, key, slot), kind: clipKind });
       if (!r.ok) return res.status(502).json({ error: r.error });
       res.json({ style: r.style, slots: r.slots, prompt: r.prompt });
     } catch (err) { sendError(res, err); }

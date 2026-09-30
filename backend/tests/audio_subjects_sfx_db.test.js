@@ -158,9 +158,14 @@ test('audio subjects: creature/world_point/attack_type/item/skill', { skip }, as
       assert.equal(subjects.entityPhrase(pool, 'item', ITEM_MELEE), ITEM_MELEE);
       assert.equal(subjects.entityPhrase(pool, 'world_point', WORLD_POINT), WORLD_POINT);
       assert.equal(subjects.entityPhrase(pool, 'skill', SKILL_MELEE), 'Crushing Blow');
-      assert.equal(subjects.entityPhrase(pool, 'attack_type', 'melee'), 'a steel sword');
-      assert.equal(subjects.entityPhrase(pool, 'attack_type', 'ranged'), 'an arrow');
-      assert.equal(subjects.entityPhrase(pool, 'attack_type', 'magic'), 'a magic blast');
+      // spec §4: attack_type phrases differ per slot (SOMET-592, M2).
+      assert.equal(subjects.entityPhrase(pool, 'attack_type', 'melee', 'use'), 'a steel sword');
+      assert.equal(subjects.entityPhrase(pool, 'attack_type', 'melee', 'hit'), 'a blade on a creature');
+      assert.equal(subjects.entityPhrase(pool, 'attack_type', 'ranged', 'hit'), 'an arrow');
+      assert.equal(subjects.entityPhrase(pool, 'attack_type', 'magic', 'use'), 'a magic spell');
+      assert.equal(subjects.entityPhrase(pool, 'attack_type', 'magic', 'hit'), 'a magic blast');
+      assert.equal(subjects.entityPhrase(pool, 'attack_type', 'melee'), 'a steel sword', 'no slot: the use phrase');
+      assert.equal(subjects.entityPhrase(pool, 'attack_type', 'constructor', 'use'), 'constructor', 'no inherited keys');
     });
 
     await t.test('binding an sfx clip to creature/*/hurt works; creature/*/music is a 400', async () => {

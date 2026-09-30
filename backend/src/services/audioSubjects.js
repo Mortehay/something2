@@ -35,11 +35,15 @@ const ATTACK_TYPE_CUES = {
   magic: { use: 'spell', hit: 'hit' },
 };
 
-// entityPhrase's text for the attack_type kind (spec §4 table).
+// entityPhrase's text for the attack_type kind, per (kind, slot) -- the spec
+// §4 table gives each slot its own phrase ("a steel sword" is a swing, "a
+// blade on a creature" is a hit; a `hit` cue sent "a steel sword" tends
+// toward a clang). ranged/use has no cue (upload only), so its phrase is
+// never sent; it reuses the ranged/hit phrase rather than inventing one.
 const ATTACK_TYPE_PHRASE = {
-  melee: 'a steel sword',
-  ranged: 'an arrow',
-  magic: 'a magic blast',
+  melee: { use: 'a steel sword', hit: 'a blade on a creature' },
+  ranged: { use: 'an arrow', hit: 'an arrow' },
+  magic: { use: 'a magic spell', hit: 'a magic blast' },
 };
 
 const SUBJECT_KINDS = {
@@ -218,13 +222,19 @@ async function cueFor(db, kind, key, slot) {
 
 // The `entity` text sent alongside a cue (spec §4 table). Subjects are keyed
 // by name already, so most kinds need no lookup at all; skill is the one
-// exception (its key is an id, not a display name).
-function entityPhrase(db, kind, key) {
+// exception (its key is an id, not a display name). `slot` matters only for
+// attack_type, whose phrase differs per slot; without one it falls back to
+// the `use` phrase.
+function entityPhrase(db, kind, key, slot) {
   switch (kind) {
     case 'creature': return String(key).toLowerCase();
     case 'item': return key;
     case 'world_point': return key;
-    case 'attack_type': return ATTACK_TYPE_PHRASE[key] || key;
+    case 'attack_type': {
+      const phrases = Object.hasOwn(ATTACK_TYPE_PHRASE, key) ? ATTACK_TYPE_PHRASE[key] : null;
+      if (!phrases) return key;
+      return Object.hasOwn(phrases, slot) ? phrases[slot] : phrases.use;
+    }
     case 'skill': {
       const s = SKILLS_BY_ID.get(key);
       return s ? s.nameEn : key;
