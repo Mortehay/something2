@@ -269,9 +269,17 @@ async function retryFailed(db, { ids } = {}) {
             AND NOT (a.id = ANY($4::bigint[]))`,
         [targets.map((r) => r.subject_kind), targets.map((r) => r.subject_key), targets.map((r) => r.slot), keep],
       );
+      // NOT EXISTS: an enqueue that committed a live row for the slot AFTER
+      // the SELECT above (READ COMMITTED sees it here) must win -- flipping
+      // this row too would trip audio_jobs_one_live_per_slot and 500 the
+      // whole retry. Such a slot is skipped, and rowCount counts only the
+      // rows actually re-queued.
       requeued = (await client.query(
-        `UPDATE audio_jobs SET state = 'queued', attempts = 0, not_before = NULL, last_error = NULL, updated_at = now()
-          WHERE id = ANY($1::bigint[]) AND state = 'failed'`,
+        `UPDATE audio_jobs a SET state = 'queued', attempts = 0, not_before = NULL, last_error = NULL, updated_at = now()
+          WHERE a.id = ANY($1::bigint[]) AND a.state = 'failed'
+            AND NOT EXISTS (SELECT 1 FROM audio_jobs l
+                             WHERE l.state IN ('queued', 'running') AND l.subject_kind = a.subject_kind
+                               AND l.subject_key = a.subject_key AND l.slot = a.slot)`,
         [keep],
       )).rowCount;
     }

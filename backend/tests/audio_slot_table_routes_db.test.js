@@ -22,6 +22,7 @@ const { signToken } = require('../src/auth/tokens.js');
 const assetStore = require('../src/services/assetStore');
 const { withAdvisoryLock, AUDIO_JOBS_LOCK_KEY, AUDIO_CLIPS_LOCK_KEY } = require('./helpers/advisoryLock.js');
 const { restoringForeignJobs } = require('./helpers/foreignAudioJobs.js');
+const audioJobQueue = require('../src/services/audioJobQueue');
 
 const url = process.env.TEST_DATABASE_URL;
 const skip = !url ? 'no TEST_DATABASE_URL -- refusing to mutate a real database' : false;
@@ -188,6 +189,46 @@ test('audio slot table routes', { skip }, async (t) => {
       assert.equal((await stateOf(newestE)).state, 'queued');
       assert.equal(await stateOf(olderE), null);
       await pool.query('DELETE FROM audio_jobs WHERE id = $1', [foreignFailed]);
+    });
+
+    await t.test('retry-failed { ids } does not re-queue a stale failure behind a done row', async () => {
+      const kS = `audio-tbl-s-${tag}`;
+      const stale = await job(kS, 'music', 'failed', 'old');
+      const done = await job(kS, 'music', 'done');
+      const res = await request(app).post('/api/audio/admin/jobs/retry-failed')
+        .set('Authorization', bearer(admin)).send({ ids: [String(stale)] });
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      assert.equal(res.body.requeued, 0);
+      assert.equal((await stateOf(stale)).state, 'failed');
+      assert.equal((await stateOf(done)).state, 'done');
+    });
+
+    await t.test('retryFailed skips a slot that gains a live row mid-retry, instead of erroring', async () => {
+      // The race the NOT EXISTS guards: an enqueue commits a queued row for
+      // the slot between retryFailed's SELECT of targets and its UPDATE.
+      // Driven through a client wrapper (no connect(), so retryFailed uses
+      // it as-is) that inserts that row right after the first query.
+      const kL = `audio-tbl-l-${tag}`;
+      const failed = await job(kL, 'music', 'failed', 'x');
+      const client = await pool.connect();
+      let live = null;
+      let calls = 0;
+      const racing = {
+        async query(...args) {
+          const r = await client.query(...args);
+          calls += 1;
+          if (calls === 1) live = await job(kL, 'music', 'queued');
+          return r;
+        },
+      };
+      let requeued;
+      try {
+        requeued = await audioJobQueue.retryFailed(racing, { ids: [String(failed)] });
+      } finally { client.release(); }
+      assert.ok(live, 'the racing live row was inserted');
+      assert.equal(requeued, 0, 'the slot with a live row is skipped and not counted');
+      assert.equal((await stateOf(failed)).state, 'failed');
+      assert.equal((await stateOf(live)).state, 'queued');
     });
 
     await t.test('retry-failed rejects an id above the bigint maximum with a 400', async () => {
