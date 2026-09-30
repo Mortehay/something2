@@ -193,3 +193,17 @@ export function groupRunningText(run, count) {
   if (count > 0 && !(run && run.running)) return `${count} interrupted — press Start`;
   return `${count} running`;
 }
+
+// SOMET-596 review I1: whether a job finished between two polls of the jobs
+// stats -- the moment the slot table's clip counts (and its Job column) go
+// stale. A finished slot drops out of /jobs/slots at once, but its Sound
+// column still says "missing" until the subjects query refetches, and
+// "Select all matching → Queue" would re-queue it. So AudioAdmin refreshes
+// on every rise, not only when the drain ends.
+//
+// A FALL (Clear finished deleted done rows) or the first poll (no previous
+// stats) is not a rise.
+export function doneRose(prevStats, stats) {
+  if (!prevStats || !stats) return false;
+  return groupTotals(stats).done > groupTotals(prevStats).done;
+}

@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { authHeaders, apiFetch } from './src/js/net/auth.js';
 import { shouldPoll } from './audioBatch.js';
+import { queueInChunks } from './audioSelection.js';
 import { API_URL } from '../../config.js';
 
 export const SUBJECTS_KEY = ['audio-subjects'];
@@ -320,30 +321,22 @@ export function useAudioSlotJobs({ poll = false } = {}) {
   return { slotJobs: data || [], isLoadingSlotJobs: isLoading, slotJobsError: error || null };
 }
 
+// Queues a selection of any size (SOMET-596): POST /admin/jobs caps a request
+// at MAX_JOB_ITEMS, so the items go in chunks, one request after another,
+// stopping at the first failure (audioSelection.queueInChunks). Resolves to
+// { results, error, unsent } rather than rejecting on a failed chunk: the
+// chunks before it DID queue, and the caller reports both halves.
 export function useEnqueueAudioJobs() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ items, providerId }) => {
+    mutationFn: async ({ items, providerId }) => queueInChunks(items, async (chunk) => {
       const { res, json } = await post('/api/audio/admin/jobs', {
-        items, start: true, provider_id: Number.isInteger(providerId) ? providerId : undefined,
+        items: chunk, start: true, provider_id: Number.isInteger(providerId) ? providerId : undefined,
       });
       if (!res.ok) throw new Error(json.error || 'Failed to queue the batch');
       return json;
-    },
-    onSuccess: (json) => {
-      const queued = (json.queued || []).length;
-      const already = (json.already_live || []).length;
-      const rejected = (json.rejected || []).length;
-      const parts = [`Queued ${queued} job(s)`];
-      if (already) parts.push(`${already} already in flight`);
-      if (rejected) parts.push(`${rejected} rejected`);
-      if (json.started === false && json.reason === 'no_provider') {
-        parts.push('no audio provider -- press Start once one is active');
-      }
-      if (queued > 0 || already > 0) toast.success(parts.join(' — '));
-      else toast.error(parts.join(' — '));
-      qc.invalidateQueries({ queryKey: JOBS_KEY });
-    },
+    }),
+    onSettled: () => qc.invalidateQueries({ queryKey: JOBS_KEY }),
     onError: (err) => toast.error(err.message),
   });
 }

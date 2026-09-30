@@ -10,6 +10,7 @@
 // by AudioAdmin, which stays mounted across the Subjects/Library switch and
 // owns the post-drain refresh.
 import { useMemo, useState } from 'react';
+import toast from 'react-hot-toast';
 import { useSearchParams } from 'react-router-dom';
 import styled from 'styled-components';
 import { useEnqueueAudioJobs, useRetryAudioFailures } from './useAudioAdmin.js';
@@ -18,6 +19,7 @@ import {
   audioSlotRows, jobsBySlotFrom, missesSetFrom, applyFilters, filtersFromParams, paramsFromFilters,
   PAGE_SIZE, pageCount, clampPage, toggle, selectPage, deselectPage, isPageFullySelected,
   selectAllMatching, selectionOutsideFilter, queueItems, enqueueSummary, failedByCause, soundText,
+  jobsForKnownSubjects, uploadOnlyCount, slotId,
 } from './audioSelection.js';
 import SubjectSounds from './SubjectSounds.jsx';
 
@@ -64,6 +66,11 @@ const Table = styled.table`
   tbody tr[data-active='true'] { background: var(--s2-overlay); }
 `;
 const Mono = styled.td`font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all;`;
+const SubjectButton = styled.button`
+  background: none; border: none; padding: 0; cursor: pointer; text-align: left;
+  color: var(--s2-text); font: inherit; text-decoration: underline dotted;
+  &:focus-visible { outline: 2px solid var(--s2-accent); outline-offset: 2px; }
+`;
 const Pill = styled.span`
   font-size: 0.75rem; padding: 0.1rem 0.4rem; border-radius: 999px;
   background: var(--s2-bg-sunken); color: var(--s2-text-muted); white-space: nowrap;
@@ -140,16 +147,22 @@ function AudioSlotTable({
   const [notice, setNotice] = useState(null);
   const [failure, setFailure] = useState(null);
 
+  // Jobs for subjects that no longer exist are left out everywhere: such a
+  // job can never succeed, so it has no row and no "Retry these N".
+  const knownJobs = useMemo(() => jobsForKnownSubjects(slotJobs, subjects), [slotJobs, subjects]);
   const rows = useMemo(() => audioSlotRows(
-    subjects, jobsBySlotFrom(slotJobs), missesSetFrom(misses), uploadOnlySlotIds(subjects),
-  ), [subjects, slotJobs, misses]);
+    subjects, jobsBySlotFrom(knownJobs), missesSetFrom(misses), uploadOnlySlotIds(subjects),
+  ), [subjects, knownJobs, misses]);
   const rowsById = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows]);
   const kinds = useMemo(() => (subjects || []).map((g) => [g.kind, g.label || g.kind]), [subjects]);
   const matching = useMemo(() => applyFilters(rows, { kind, sound, search }), [rows, kind, sound, search]);
-  const causes = useMemo(() => failedByCause(slotJobs), [slotJobs]);
+  const causes = useMemo(() => failedByCause(knownJobs), [knownJobs]);
 
   const shownPage = clampPage(page, matching.length);
   const pages = pageCount(matching.length);
+  // Upload-only rows match "missing" but are never selectable, so "N
+  // matching" and "Select all M matching" differ by exactly this.
+  const uploadOnlyMatching = uploadOnlyCount(matching);
   const pageRows = matching.slice((shownPage - 1) * PAGE_SIZE, shownPage * PAGE_SIZE);
   const hiddenSelected = selectionOutsideFilter(selected, matching);
   const allMatching = selectAllMatching(matching);
@@ -161,7 +174,10 @@ function AudioSlotTable({
   const pager = (
     <Pager>
       <Secondary type="button" onClick={() => setPage(shownPage - 1)} disabled={shownPage <= 1}>Prev</Secondary>
-      <span>Page {shownPage} of {pages} · {matching.length} matching</span>
+      <span>
+        Page {shownPage} of {pages} · {matching.length} matching
+        {uploadOnlyMatching > 0 && ` (${uploadOnlyMatching} upload-only)`}
+      </span>
       <Secondary type="button" onClick={() => setPage(shownPage + 1)} disabled={shownPage >= pages}>Next</Secondary>
     </Pager>
   );
@@ -170,15 +186,26 @@ function AudioSlotTable({
     const { items, skipped } = queueItems(selected, rowsById, { style, engine });
     setFailure(null);
     if (items.length === 0) {
-      setNotice(enqueueSummary({}, skipped).message);
+      setNotice(enqueueSummary([], skipped).message);
       return;
     }
-    // Caught, not left to reject: mutateAsync rethrows after the hook's own
-    // toast, and the failure should stay on screen too.
     try {
-      const json = await enqueue.mutateAsync({ items });
-      setNotice(enqueueSummary(json, skipped).message);
-      setSelected(new Set());
+      // Sent in chunks of the route's cap; a failed chunk stops the rest.
+      const out = await enqueue.mutateAsync({ items });
+      const summary = enqueueSummary(out.results, skipped, out.error);
+      if (out.error) {
+        // Keep exactly what was not sent selected, so Queue can be pressed
+        // again once the cause is fixed.
+        setSelected(new Set(out.unsent.map((it) => slotId(it.subject_kind, it.subject_key, it.slot))));
+        setNotice(null);
+        setFailure(summary.message);
+        toast.error(summary.message);
+      } else {
+        setSelected(new Set());
+        setFailure(null);
+        setNotice(summary.message);
+        toast.success(summary.message);
+      }
     } catch (err) {
       setNotice(null);
       setFailure(err.message);
@@ -297,7 +324,8 @@ function AudioSlotTable({
                 </tr>
               </thead>
               <tbody>
-                {pageRows.map((r) => {
+                {pageRows.map((r, i) => {
+                  const soundId = `audio-slot-sound-${shownPage}-${i}`;
                   const active = Boolean(subject) && subject.kind === r.kind && subject.key === r.key;
                   return (
                     <tr
@@ -313,15 +341,28 @@ function AudioSlotTable({
                           aria-label={`Select ${r.id}`}
                           disabled={r.uploadOnly}
                           title={r.uploadOnly ? UPLOAD_ONLY_TITLE : undefined}
+                          // A disabled input's title is often neither shown
+                          // nor announced; point at the visible reason.
+                          aria-describedby={r.uploadOnly ? soundId : undefined}
                           checked={selected.has(r.id)}
                           onChange={() => setSelected(toggle(selected, r.id))}
                         />
                       </td>
                       <td><Pill>{r.kindLabel}</Pill></td>
-                      <Mono>{r.key}</Mono>
+                      <Mono>
+                        {/* A real button, so a keyboard user can open the
+                            slot cards too; the row's own click is the
+                            mouse shortcut for the same thing. */}
+                        <SubjectButton
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); setSubject({ kind: r.kind, key: r.key }); }}
+                        >
+                          {r.key}
+                        </SubjectButton>
+                      </Mono>
                       <td>{r.slot}</td>
                       <td title={r.uploadOnly && r.clips === 0 ? UPLOAD_ONLY_TITLE : undefined}>
-                        {soundText(r)}
+                        <span id={soundId}>{soundText(r)}</span>
                         {r.reported && <Pill title="The game reported this sound missing"> reported</Pill>}
                       </td>
                       <JobCell job={r.job} />

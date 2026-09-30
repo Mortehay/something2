@@ -204,40 +204,129 @@ export function queueItems(selected, rowsById, { style = '', engine = 'realistic
   return { items, skipped };
 }
 
-// The enqueue response as one sentence. Enqueue is idempotent, so "3 selected,
-// 1 queued" is a normal outcome and needs its breakdown. `clientSkipped` is
-// queueItems' own count (never sent); the server's `rejected` adds to it.
-export function enqueueSummary(json, clientSkipped = 0) {
-  const queued = ((json && json.queued) || []).length;
-  const alreadyLive = ((json && json.already_live) || []).length;
-  const skipped = ((json && json.rejected) || []).length + (clientSkipped || 0);
+// POST /api/audio/admin/jobs' per-request item cap. It MUST equal the
+// route's MAX_JOB_ITEMS (backend/src/api/audioRoutes.js) -- the frontend
+// bundle cannot import backend code, so audioSelection.test.js reads that
+// file and pins the two together.
+export const MAX_JOB_ITEMS = 500;
+
+// A selection split into requests the route accepts. "Select all 1697
+// matching" is the tab's headline workflow, and one 1697-item request is a
+// 400 that queues nothing.
+export function chunkItems(items, size = MAX_JOB_ITEMS) {
+  const out = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+// Sends the chunks ONE AFTER ANOTHER (each request validates its items one
+// by one on the server; parallel requests would only contend) and stops at
+// the first failure. Returns { results, error, unsent }: the responses that
+// came back, the error that stopped it (or null), and the items of the
+// failed chunk and every chunk after it -- what the caller should keep
+// selected so the admin can press Queue again.
+export async function queueInChunks(items, send, size = MAX_JOB_ITEMS) {
+  const chunks = chunkItems(items, size);
+  const results = [];
+  for (let i = 0; i < chunks.length; i += 1) {
+    try {
+      results.push(await send(chunks[i]));
+    } catch (error) {
+      return { results, error, unsent: chunks.slice(i).flat() };
+    }
+  }
+  return { results, error: null, unsent: [] };
+}
+
+// The enqueue responses (one per chunk) as one sentence. Enqueue is
+// idempotent, so "3 selected, 1 queued" is a normal outcome and needs its
+// breakdown. `clientSkipped` is queueItems' own count (never sent); each
+// response's `rejected` adds to it. `error`, when a chunk failed, is stated
+// together with how much was queued before it.
+export function enqueueSummary(results, clientSkipped = 0, error = null) {
+  const list = Array.isArray(results) ? results : [];
+  let queued = 0;
+  let alreadyLive = 0;
+  let skipped = clientSkipped || 0;
+  let noProvider = false;
+  for (const json of list) {
+    queued += ((json && json.queued) || []).length;
+    alreadyLive += ((json && json.already_live) || []).length;
+    skipped += ((json && json.rejected) || []).length;
+    if (json && json.started === false && json.reason === 'no_provider') noProvider = true;
+  }
   const parts = [`Queued ${queued}`];
   if (alreadyLive) parts.push(`${alreadyLive} already in flight`);
   if (skipped) parts.push(`${skipped} skipped`);
-  if (json && json.started === false && json.reason === 'no_provider') parts.push('no audio provider — press Start once one is active');
+  if (noProvider) parts.push('no audio provider — press Start once one is active');
+  let message = parts.join(' — ');
+  if (error) message = `Stopped after an error: ${error.message || error}. ${message} before it; the rest stay selected.`;
   return {
-    queued, alreadyLive, skipped, message: parts.join(' — '),
+    queued, alreadyLive, skipped, message,
   };
 }
 
 // --- Failed, by cause -------------------------------------------------------
 
-const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
-const QUOTED = /'[^']*'|"[^"]*"|`[^`]*`/g;
-const NUMBER = /\d+(?:\.\d+)?/g;
+// What counts as a VARYING part of an error, and nothing else (SOMET-596
+// review): ids, uuids, hashes, file paths/object keys, long numbers and
+// quoted subject names. Short numbers are kept -- "answered 404" and
+// "answered 503" are different problems (one permanent, one a busy box) and
+// must never share a "Retry these N" button -- and so is ordinary prose.
+const PATH = /(?:\/?[\w.-]+\/)+[\w.-]*\.[A-Za-z0-9]{2,5}\b/g;
+const UUID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
+// Hex runs of 8+ that contain both a digit and a letter (a digit-only run is
+// a long number, below; a letter-only run is a word).
+const HASH = /\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{8,}\b/gi;
+// A quoted name in PROSE ("unknown subject 'Bat'", "no style 'village-x'"):
+// a short identifier-like string right after a word. Not JSON -- a value
+// after ':' is a message ("detail": "CUDA out of memory") and is kept -- and
+// not an apostrophe inside a word ("can't", "isn't").
+const QUOTED = /(?<=[A-Za-z] )(['"`])[\w .:/-]{1,64}\1(?!\w)/g;
+const LABELLED_ID = /\b(id|job|row|clip|batch)(\s*[#:=]?\s*)\d+\b/gi;
+const HASH_ID = /#\d+\b/g;
+const LONG_NUMBER = /\b\d{4,}\b/g;
 
-// An error's cause with its varying parts blanked -- quoted names and uuids
-// become '…', numbers become 'N' -- so "HTTP 500 after 812ms" and "HTTP 502
-// after 90ms" group together. Uuids go before numbers, or their digit runs
-// would turn into a string of Ns that still differs per id.
+// An error's cause with its varying parts blanked -- quoted names, paths,
+// uuids and hashes become '…', ids and long numbers become 'N' -- so the
+// same failure on different subjects groups together while different
+// failures stay apart. Order matters: paths before uuids (an object key
+// usually contains one), uuids before numbers.
 export function normalizeCause(error) {
   if (error === null || error === undefined || String(error).trim() === '') return '(no error text)';
   return String(error)
-    .replace(QUOTED, '…')
+    .replace(PATH, '…')
     .replace(UUID, '…')
-    .replace(NUMBER, 'N')
+    .replace(HASH, '…')
+    .replace(QUOTED, '…')
+    .replace(LABELLED_ID, (m, word, sep) => `${word}${sep}N`)
+    .replace(HASH_ID, '#N')
+    .replace(LONG_NUMBER, 'N')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+// Job rows whose (kind, key, slot) is still in the subjects registry. A job
+// for a deleted subject can never succeed (the server refuses it as an
+// unknown subject), so the by-cause panel and its "Retry these N" count
+// leave it out rather than offer a retry that fails again.
+export function jobsForKnownSubjects(jobRows, subjectsResponse) {
+  const known = new Map();
+  for (const g of subjectsResponse || []) {
+    known.set(g.kind, { keys: new Set(g.subjects || []), slots: g.slots || {} });
+  }
+  return (jobRows || []).filter((j) => {
+    const k = known.get(j.subject_kind);
+    return Boolean(k) && k.keys.has(j.subject_key) && Object.prototype.hasOwnProperty.call(k.slots, j.slot);
+  });
+}
+
+// How many of `rows` are upload-only -- shown beside the pager's count, since
+// they match "missing" but "Select all" skips them.
+export function uploadOnlyCount(rows) {
+  let n = 0;
+  for (const r of rows) if (r.uploadOnly) n += 1;
+  return n;
 }
 
 const SAMPLES = 12;

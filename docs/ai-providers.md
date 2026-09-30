@@ -568,9 +568,27 @@ the same file instead of a new take.
 
 The **Audio** sidebar tab (`/game/audio`) is where bindings are made: worlds
 (music, ambience), biomes (ambience), and -- for sound effects -- creatures,
-world points, attack types, weapons and skills (see **Sound effects** below). Its **Missing sounds**
-list is fed by the game client itself, `POST /api/audio/misses` -- a slot a
-player actually hit with nothing bound, not a guess from the catalog.
+world points, attack types, weapons and skills (see **Sound effects** below).
+
+Its **Subjects** view is a table with **one row per slot** (kind · subject ·
+slot · sound · job), 100 rows a page, with Prev/Next and "Page X of Y · N
+matching" above and below it. Filters (kept in the URL, so a reload or a
+shared link lands on the same view):
+
+- **Kind** -- all, or one subject kind;
+- **Sound** -- *Missing* (no clip bound; the default), *Has sound*,
+  *Reported missing in game*, *Last job failed*, or *Any*;
+- **Search** -- case-insensitive over the subject key and the slot name.
+
+*Reported missing in game* is fed by the game client itself,
+`POST /api/audio/misses` -- a slot a player actually hit with nothing bound,
+not a guess from the catalog. It covers the **top 500 reported slots** (by
+report count, then most recent); a slot reported less often than those does
+not match the filter.
+
+Clicking a row -- or its subject name, which is a button for keyboard use --
+opens that subject's slot cards beside the table; single-slot Generate,
+Upload, Loop, bind-from-library and volume/weight all live there.
 
 ### Batch generation
 
@@ -579,18 +597,34 @@ one clip, but a tunnel with a short edge timeout (the ~100 s Cloudflare quick
 tunnel on the Orange Pi) can time out a long track before a cold generation
 finishes, even though the server still stores and binds the clip -- refresh
 the tab to see it. For more than a few clips, or anything going through a
-tunnel, use **Batch mode** in the Audio tab instead: it queues jobs on the
+tunnel, queue them from the slot table instead: that queues jobs on the
 backend and drains them one at a time, so no single HTTP request has to
 survive the whole run.
 
-**Queuing.** In Batch mode, tick subjects in the left column and choose which
-slots per kind to include (music, ambience, and every sfx slot that has a
-cue -- upload-only slots are listed as skipped and never queued), or tick items in **Missing sounds** and press **Add to batch** --
-Missing sounds is fed by the game client's own `POST /api/audio/misses`, so
-it lists slots a player actually hit with nothing bound, not a guess from the
-registry. **Queue N jobs** enqueues everything selected. A slot that already
-has a queued or running job for it reports back as `already_live` instead of
-being queued twice -- re-queueing it is a no-op, not an error.
+**Queuing.** Tick rows in the slot table. The header checkbox selects **this
+page** only; **Select all N matching** selects every row the current filter
+matches, on every page (the two are deliberately separate buttons).
+The selection survives paging and filter changes, and when the filter hides
+some of it the tab says "N selected are hidden by the current filter".
+**Upload-only** slots (no cue on the box -- see **Sound effects** below) count
+as *Missing* but their checkbox is disabled and they are never selected or
+queued; the pager shows how many of the matching rows they are ("(K
+upload-only)"), which is why "N matching" and "Select all M matching" can
+differ.
+
+Above the table, choose a **Style** for music/ambience slots (or leave
+"Suggest per subject") and an **Engine** (Realistic / Retro) for sfx slots,
+then press **Queue N selected**. Queued sfx jobs always generate **3
+variants** each -- the per-slot Generate button on a slot card has its own
+variants control (1-5). A selection larger than the route's 500-item cap is
+sent in chunks of 500, one after another; if a chunk fails, the tab says how
+many were queued before it and keeps the rest selected. The result reads
+"Queued X — Y already in flight — Z skipped": a slot that already has a
+queued or running job reports back as `already_live` instead of being queued
+twice -- re-queueing it is a no-op, not an error -- and *skipped* counts
+upload-only or no-longer-existing slots. While a drain runs, the table's clip
+counts refresh every time a job finishes, so a slot that just got its sound
+leaves the *Missing* filter instead of being queued again.
 
 **The drain.** Jobs are claimed group by group in the order `music` →
 `ambience` → `sfx_realistic` → `sfx_retro`, so the GPU box switches model at
@@ -623,8 +657,9 @@ activity, running or not (so a full queue with nothing draining it stays
 visible). It shows overall progress and which group is currently draining,
 per-group counts (done/queued/running/failed), the subject/slot currently
 generating, how many jobs are waiting out a busy-box backoff, and the last
-few failures with their error text. **Retry failed** re-queues every failed
-job (resetting its attempt count); **Clear finished** removes done and failed
+few failures with their error text. **Retry failed** re-queues every slot
+whose latest job failed (resetting its attempt count; a slot that has since
+succeeded is not regenerated, and a slot's older failed rows are removed); **Clear finished** removes done and failed
 jobs and keeps anything still queued; **Discard queued** removes the queued
 jobs (the confirm dialog says how many) so they are never generated. Clear
 and Discard are refused (409) while a drain is running -- press Stop first. A
@@ -632,6 +667,16 @@ group's rows left `running` with no drain running (a backend restart
 mid-job) show as **interrupted — press Start**; Start re-queues and runs them.
 If a drain ends for any reason other than running out of work or Stop (the
 breaker, no provider, a database error), the panel says why.
+
+**Failed slots, by cause** (below the queue controls, shown whenever a slot's
+latest job failed) groups those failures by their error text, with ids,
+numbers of 4+ digits, uuids, hashes, file paths and quoted subject names
+blanked so the same fault on different subjects lands in one group -- but
+HTTP status codes are kept, so a `404` and a `503` are separate groups. Each
+group shows its count, the provider's own error text, up to 12 sample slots
+("… and N more"), and **Retry these N**, which re-queues just those slots.
+Failures for subjects that no longer exist are left out (they could never
+succeed).
 
 A queued job whose world or biome no longer exists by the time it is claimed
 fails with `subject no longer exists` without calling the box (and without
@@ -672,7 +717,8 @@ or biome -- every world plays them):
 
 A slot marked — has no cue on the box today (there is no idle, creature-attack
 or bow-release cue), so it is **upload-only**: the slot card says so, the
-Generate button is hidden, and batch selection skips it. Upload an OGG for it
+Generate button is hidden, and its checkbox in the slot table is disabled
+(it counts as *Missing* but can never be selected or queued). Upload an OGG for it
 by hand or bind one from the library. A weapon's attack type is decided from
 the catalog row: a socketed stone or augment → magic, `kind = 'melee'` →
 melee, an `ammo_type_id` or a bow-category name → ranged, anything else →
@@ -722,8 +768,8 @@ resolves each event to a lookup chain, most specific first:
   `attack_type/melee/hit`;
 - `hurt`/`death`: `creature/<type>/hurt|death`.
 
-The first bound slot plays; if none is bound, the first key is reported to
-**Missing sounds**. Playback is positional (pan + distance falloff; events
+The first bound slot plays; if none is bound, the first key is reported
+(it then matches the Audio tab's **Reported missing in game** filter). Playback is positional (pan + distance falloff; events
 beyond 1600 px are not played) and capped: at most 12 SFX voices, the same
 clip at most 3 times per 100 ms, and when full your own actions win over the
 nearest combat, which wins over ambient `nearby` sounds. Creature `nearby`

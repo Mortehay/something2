@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   batchProgress, shouldPoll, hasBatchActivity,
-  subjectSlotsFor, queuedToDiscard, runStopWarning, groupRunningText, uploadOnlySlotIds,
+  subjectSlotsFor, queuedToDiscard, runStopWarning, groupRunningText, uploadOnlySlotIds, doneRose,
 } from '../audioBatch.js';
 
 const subjects = [
@@ -145,5 +145,25 @@ describe('subjectSlotsFor', () => {
   it('returns [] for a missing or empty registry response', () => {
     expect(subjectSlotsFor(undefined, 'world')).toEqual([]);
     expect(subjectSlotsFor([], 'world')).toEqual([]);
+  });
+});
+
+describe('doneRose', () => {
+  const stats = (music, sfx) => ({
+    groups: {
+      music: { queued: 0, running: 0, done: music, failed: 0 },
+      sfx_realistic: { queued: 0, running: 0, done: sfx, failed: 1 },
+    },
+    backoff: 0,
+  });
+  it('is true when the done total across groups rose between polls', () => {
+    expect(doneRose(stats(1, 2), stats(1, 3))).toBe(true);
+    expect(doneRose(stats(1, 2), stats(2, 2))).toBe(true);
+  });
+  it('is false when it stayed the same, fell (Clear finished), or there is no previous poll', () => {
+    expect(doneRose(stats(1, 2), stats(1, 2))).toBe(false);
+    expect(doneRose(stats(4, 2), stats(0, 0))).toBe(false);
+    expect(doneRose(undefined, stats(1, 2))).toBe(false);
+    expect(doneRose(stats(1, 2), undefined)).toBe(false);
   });
 });

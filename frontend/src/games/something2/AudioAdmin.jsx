@@ -20,7 +20,7 @@ import {
   useAudioSubjects, useAudioMisses, useAudioJobs, useAudioSlotJobs,
   SUBJECTS_KEY, MISSES_KEY, ALL_SLOTS_KEY, CLIPS_KEY_PREFIX, SLOT_JOBS_KEY,
 } from './useAudioAdmin.js';
-import { hasBatchActivity, shouldPoll } from './audioBatch.js';
+import { hasBatchActivity, shouldPoll, doneRose } from './audioBatch.js';
 import { useAiProviders, audioProviderState } from './useAiProviders.js';
 import { useAudioPreview } from './useAudioPreview.js';
 import AdminLoading from './AdminLoading.jsx';
@@ -90,6 +90,23 @@ function AudioAdmin() {
       qc.invalidateQueries({ queryKey: SLOT_JOBS_KEY });
     }
   }, [run, qc]);
+
+  // SOMET-596 review I1: refresh WHILE a drain runs, not only after it. A
+  // slot whose job just finished drops out of /jobs/slots at once, but its
+  // clip count (the subjects query) would still say "missing" -- and
+  // "Select all matching → Queue" would re-queue it. So every poll on which
+  // the done total rose refetches the counts, the Job column and any open
+  // slot cards (doneRose, in audioBatch.js, is the tested rule).
+  const statsRef = useRef(stats);
+  useEffect(() => {
+    const prev = statsRef.current;
+    statsRef.current = stats;
+    if (doneRose(prev, stats)) {
+      qc.invalidateQueries({ queryKey: SUBJECTS_KEY });
+      qc.invalidateQueries({ queryKey: SLOT_JOBS_KEY });
+      qc.invalidateQueries({ queryKey: ALL_SLOTS_KEY });
+    }
+  }, [stats, qc]);
 
   if (subjectsError) return <Err>{String(subjectsError.message)}</Err>;
 

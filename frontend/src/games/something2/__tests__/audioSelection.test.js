@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import {
   slotId, audioSlotRows, jobsBySlotFrom, missesSetFrom, applyFilters, filtersFromParams, paramsFromFilters,
   PAGE_SIZE, pageCount, clampPage, toggle, selectPage, deselectPage, isPageFullySelected,
   selectAllMatching, selectionOutsideFilter, queueItems, enqueueSummary, normalizeCause, failedByCause,
-  soundText,
+  soundText, MAX_JOB_ITEMS, chunkItems, queueInChunks, jobsForKnownSubjects, uploadOnlyCount,
 } from '../audioSelection.js';
 
 // A registry response shaped like GET /api/audio/admin/subjects.
@@ -194,24 +196,87 @@ describe('queueItems', () => {
     ]);
   });
 
-  it('summarises the enqueue response', () => {
-    const s = enqueueSummary({
-      queued: [{}, {}], already_live: [{}], rejected: [{ error: 'x' }],
-    }, 2);
-    expect(s).toMatchObject({
-      queued: 2, alreadyLive: 1, skipped: 3,
-    });
-    expect(s.message).toBe('Queued 2 — 1 already in flight — 3 skipped');
-    expect(enqueueSummary({ queued: [] }, 0).message).toBe('Queued 0');
+  it('summarises the enqueue responses of every chunk', () => {
+    const s = enqueueSummary([
+      { queued: [{}, {}], already_live: [{}], rejected: [{ error: 'x' }] },
+      { queued: [{}], already_live: [], rejected: [] },
+    ], 2);
+    expect(s).toMatchObject({ queued: 3, alreadyLive: 1, skipped: 3 });
+    expect(s.message).toBe('Queued 3 — 1 already in flight — 3 skipped');
+    expect(enqueueSummary([{ queued: [] }], 0).message).toBe('Queued 0');
+    expect(enqueueSummary([], 0, new Error('boom')).message)
+      .toBe('Stopped after an error: boom. Queued 0 before it; the rest stay selected.');
+  });
+});
+
+describe('queueing in chunks', () => {
+  const make = (n) => Array.from({ length: n }, (_, i) => ({ subject_kind: 'creature', subject_key: `c${i}`, slot: 'hurt' }));
+
+  it('uses the route\'s own cap', () => {
+    const route = readFileSync(fileURLToPath(new URL('../../../../../backend/src/api/audioRoutes.js', import.meta.url)), 'utf8');
+    const m = /const MAX_JOB_ITEMS = (\d+);/.exec(route);
+    expect(m).not.toBeNull();
+    expect(MAX_JOB_ITEMS).toBe(Number(m[1]));
+  });
+
+  it('splits 1697 items into 500, 500, 500, 197 and exactly 500 into one chunk', () => {
+    expect(chunkItems(make(1697)).map((c) => c.length)).toEqual([500, 500, 500, 197]);
+    expect(chunkItems(make(500)).map((c) => c.length)).toEqual([500]);
+    expect(chunkItems([])).toEqual([]);
+    const all = chunkItems(make(1697)).flat();
+    expect(all.map((it) => it.subject_key)).toEqual(make(1697).map((it) => it.subject_key));
+  });
+
+  it('sends the chunks in order and sums what the server queued', async () => {
+    const sent = [];
+    // Answers from its input: every item it was sent is queued.
+    const send = async (chunk) => { sent.push(chunk.length); return { queued: chunk.map(() => ({})) }; };
+    const out = await queueInChunks(make(1697), send);
+    expect(sent).toEqual([500, 500, 500, 197]);
+    expect(out.error).toBeNull();
+    expect(out.unsent).toEqual([]);
+    expect(enqueueSummary(out.results).queued).toBe(1697);
+  });
+
+  it('stops at the first failing chunk and returns what was not sent', async () => {
+    let calls = 0;
+    const send = async (chunk) => {
+      calls += 1;
+      if (calls === 2) throw new Error('HTTP 502');
+      return { queued: chunk.map(() => ({})) };
+    };
+    const items = make(1697);
+    const out = await queueInChunks(items, send);
+    expect(calls).toBe(2);
+    expect(out.error.message).toBe('HTTP 502');
+    expect(enqueueSummary(out.results, 0, out.error).message)
+      .toBe('Stopped after an error: HTTP 502. Queued 500 before it; the rest stay selected.');
+    expect(out.unsent.map((it) => it.subject_key)).toEqual(items.slice(500).map((it) => it.subject_key));
   });
 });
 
 describe('failed by cause', () => {
-  it('normalizes the varying parts of an error', () => {
+  it('keeps HTTP status codes apart: a 404 and a 503 are different causes', () => {
+    const a = normalizeCause('audio service answered 404 for POST /api/audio/sfx');
+    const b = normalizeCause('audio service answered 503 for POST /api/audio/sfx');
+    expect(a).toBe('audio service answered 404 for POST /api/audio/sfx');
+    expect(a).not.toBe(b);
+  });
+
+  it('keeps different JSON details and ordinary prose apart', () => {
+    expect(normalizeCause('{"detail": "CUDA out of memory"}')).not.toBe(normalizeCause('{"detail": "unknown cue"}'));
+    expect(normalizeCause("can't reach the box, it isn't up")).toBe("can't reach the box, it isn't up");
+  });
+
+  it('blanks ids, uuids, hashes, paths, long numbers and quoted subject names', () => {
     expect(normalizeCause("unknown cue 'slash' for job 1234")).toBe('unknown cue … for job N');
-    expect(normalizeCause('clip 1f0e3c9a-1111-4222-8333-444455556666 too long (9.5s)'))
-      .toBe('clip … too long (Ns)');
-    expect(normalizeCause('  box   said\n"busy" ')).toBe('box said …');
+    expect(normalizeCause("unknown subject 'Bat'")).toBe(normalizeCause("unknown subject 'Blight Apex'"));
+    expect(normalizeCause('clip 1f0e3c9a-1111-4222-8333-444455556666 too long')).toBe('clip … too long');
+    expect(normalizeCause('failed to store audio/sfx/1f0e3c9a-1111-4222-8333-444455556666.ogg (key 99887766)'))
+      .toBe('failed to store … (key N)');
+    expect(normalizeCause('blob deadbeef12 missing')).toBe('blob … missing');
+    expect(normalizeCause('row #12 locked')).toBe('row #N locked');
+    expect(normalizeCause('  box   said\n  busy ')).toBe('box said busy');
     expect(normalizeCause(null)).toBe('(no error text)');
   });
 
@@ -220,26 +285,50 @@ describe('failed by cause', () => {
     for (let i = 0; i < 14; i += 1) {
       failing.push({
         id: String(100 + i), subject_kind: 'creature', subject_key: `c${i}`, slot: 'hurt', status: 'failed',
-        error: `HTTP 500 from box after ${i}ms`,
+        error: `audio service answered 503 for POST /api/audio/sfx (job ${5000 + i})`,
       });
     }
     failing.push({
-      id: '900', subject_kind: 'world', subject_key: 'Vale', slot: 'music', status: 'failed', error: "no style 'x'",
+      id: '900', subject_kind: 'world', subject_key: 'Vale', slot: 'music', status: 'failed',
+      error: 'audio service answered 404 for POST /api/audio/sfx (job 7777)',
     });
     failing.push({
       id: '901', subject_kind: 'world', subject_key: 'Ash', slot: 'music', status: 'queued', error: null,
     });
     const groups = failedByCause(failing);
     expect(groups).toHaveLength(2);
-    expect(groups[0]).toMatchObject({ cause: 'HTTP N from box after Nms', count: 14, more: 2 });
-    expect(groups[0].text).toBe('HTTP 500 from box after 0ms');
+    expect(groups[0]).toMatchObject({
+      cause: 'audio service answered 503 for POST /api/audio/sfx (job N)', count: 14, more: 2,
+    });
+    expect(groups[0].text).toBe('audio service answered 503 for POST /api/audio/sfx (job 5000)');
     expect(groups[0].samples).toHaveLength(12);
     expect(groups[0].samples[0]).toBe('creature/c0/hurt');
     expect(groups[0].ids).toHaveLength(14);
     expect(groups[0].ids[13]).toBe('113');
     expect(groups[1]).toMatchObject({
-      cause: 'no style …', count: 1, more: 0, ids: ['900'], samples: ['world/Vale/music'],
+      cause: 'audio service answered 404 for POST /api/audio/sfx (job N)', count: 1, more: 0, ids: ['900'], samples: ['world/Vale/music'],
     });
     expect(failedByCause([])).toEqual([]);
+  });
+});
+
+describe('jobs for subjects that still exist', () => {
+  it('drops job rows whose kind, key or slot is not in the registry', () => {
+    const jobRows = [
+      { id: '1', subject_kind: 'world', subject_key: 'Vale', slot: 'music', status: 'failed', error: 'x' },
+      { id: '2', subject_kind: 'world', subject_key: 'Deleted', slot: 'music', status: 'failed', error: 'x' },
+      { id: '3', subject_kind: 'world', subject_key: 'Vale', slot: 'gone', status: 'failed', error: 'x' },
+      { id: '4', subject_kind: 'nokind', subject_key: 'Vale', slot: 'music', status: 'failed', error: 'x' },
+    ];
+    const kept = jobsForKnownSubjects(jobRows, subjects);
+    expect(kept.map((j) => j.id)).toEqual(['1']);
+    expect(failedByCause(kept)[0].count).toBe(1);
+  });
+});
+
+describe('uploadOnlyCount', () => {
+  it('counts the upload-only rows a filter matched', () => {
+    expect(uploadOnlyCount(applyFilters(rows, { sound: 'missing' }))).toBe(1);
+    expect(uploadOnlyCount(applyFilters(rows, { kind: 'world' }))).toBe(0);
   });
 });
