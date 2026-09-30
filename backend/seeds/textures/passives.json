@@ -3,1280 +3,1280 @@
     "key": "Afterimage",
     "name": "Afterimage",
     "file": "Afterimage.png",
-    "bytes": 50032,
+    "bytes": 80286,
     "source": {
-      "width": 381,
-      "height": 349
+      "width": 762,
+      "height": 744
     }
   },
   {
     "key": "Arcane Conduit — +20 INT and +60 maximum mana",
     "name": "Arcane Conduit — +20 INT and +60 maximum mana",
     "file": "Arcane_Conduit____20_INT_and__60_maximum_mana.png",
-    "bytes": 52213,
+    "bytes": 76969,
     "source": {
-      "width": 357,
-      "height": 348
+      "width": 928,
+      "height": 906
     }
   },
   {
     "key": "Archer",
     "name": "Archer",
     "file": "Archer.png",
-    "bytes": 43863,
+    "bytes": 56262,
     "source": {
-      "width": 374,
-      "height": 621
+      "width": 886,
+      "height": 733
     }
   },
   {
     "key": "Ascendance",
     "name": "Ascendance",
     "file": "Ascendance.png",
-    "bytes": 62172,
+    "bytes": 58778,
     "source": {
-      "width": 399,
-      "height": 383
+      "width": 877,
+      "height": 919
     }
   },
   {
     "key": "Attunement",
     "name": "Attunement",
     "file": "Attunement.png",
-    "bytes": 68989,
+    "bytes": 65204,
     "source": {
-      "width": 655,
-      "height": 655
+      "width": 838,
+      "height": 813
     }
   },
   {
     "key": "Beast Bond",
     "name": "Beast Bond",
     "file": "Beast_Bond.png",
-    "bytes": 39859,
+    "bytes": 67425,
     "source": {
-      "width": 282,
-      "height": 508
+      "width": 806,
+      "height": 948
     }
   },
   {
     "key": "Blood Pact — life costs are reduced 25%",
     "name": "Blood Pact — life costs are reduced 25%",
     "file": "Blood_Pact___life_costs_are_reduced_25_.png",
-    "bytes": 43932,
+    "bytes": 49810,
     "source": {
-      "width": 358,
-      "height": 554
+      "width": 862,
+      "height": 886
     }
   },
   {
     "key": "Breadth",
     "name": "Breadth",
     "file": "Breadth.png",
-    "bytes": 44423,
+    "bytes": 49374,
     "source": {
-      "width": 466,
-      "height": 295
+      "width": 810,
+      "height": 580
     }
   },
   {
     "key": "Broad Study",
     "name": "Broad Study",
     "file": "Broad_Study.png",
-    "bytes": 60485,
+    "bytes": 75920,
     "source": {
-      "width": 349,
-      "height": 330
+      "width": 880,
+      "height": 851
     }
   },
   {
     "key": "Brutality",
     "name": "Brutality",
     "file": "Brutality.png",
-    "bytes": 41602,
+    "bytes": 76300,
     "source": {
-      "width": 315,
-      "height": 382
+      "width": 707,
+      "height": 781
     }
   },
   {
     "key": "Bulwark — +20 CON and +10% physical resistance",
     "name": "Bulwark — +20 CON and +10% physical resistance",
     "file": "Bulwark____20_CON_and__10__physical_resistance.png",
-    "bytes": 56589,
+    "bytes": 72287,
     "source": {
-      "width": 356,
-      "height": 314
+      "width": 704,
+      "height": 887
     }
   },
   {
     "key": "Callus",
     "name": "Callus",
     "file": "Callus.png",
-    "bytes": 62784,
+    "bytes": 74299,
     "source": {
-      "width": 621,
-      "height": 576
+      "width": 730,
+      "height": 816
     }
   },
   {
     "key": "Charge",
     "name": "Charge",
     "file": "Charge.png",
-    "bytes": 43593,
+    "bytes": 56203,
     "source": {
-      "width": 297,
-      "height": 416
+      "width": 744,
+      "height": 766
     }
   },
   {
     "key": "Clarity",
     "name": "Clarity",
     "file": "Clarity.png",
-    "bytes": 51410,
+    "bytes": 87018,
     "source": {
-      "width": 627,
-      "height": 508
+      "width": 628,
+      "height": 704
     }
   },
   {
     "key": "Cleaving Reach",
     "name": "Cleaving Reach",
     "file": "Cleaving_Reach.png",
-    "bytes": 44985,
+    "bytes": 89244,
     "source": {
-      "width": 357,
-      "height": 519
+      "width": 758,
+      "height": 799
     }
   },
   {
     "key": "Constitution",
     "name": "Constitution",
     "file": "Constitution.png",
-    "bytes": 57429,
+    "bytes": 65613,
     "source": {
-      "width": 730,
-      "height": 629
+      "width": 503,
+      "height": 726
     }
   },
   {
     "key": "Crimson Thirst",
     "name": "Crimson Thirst",
     "file": "Crimson_Thirst.png",
-    "bytes": 60600,
+    "bytes": 81265,
     "source": {
-      "width": 342,
-      "height": 399
+      "width": 741,
+      "height": 762
     }
   },
   {
     "key": "Cross-Training",
     "name": "Cross-Training",
     "file": "Cross-Training.png",
-    "bytes": 30072,
+    "bytes": 56994,
     "source": {
-      "width": 289,
-      "height": 587
+      "width": 858,
+      "height": 915
     }
   },
   {
     "key": "Cryomancy — +35% ice damage, and your hits chill",
     "name": "Cryomancy — +35% ice damage, and your hits chill",
     "file": "Cryomancy____35__ice_damage__and_your_hits_chill.png",
-    "bytes": 58125,
+    "bytes": 54248,
     "source": {
-      "width": 440,
-      "height": 416
+      "width": 948,
+      "height": 1016
     }
   },
   {
     "key": "Cultist",
     "name": "Cultist",
     "file": "Cultist.png",
-    "bytes": 36464,
+    "bytes": 60808,
     "source": {
-      "width": 340,
-      "height": 697
+      "width": 822,
+      "height": 1032
     }
   },
   {
     "key": "Dabbler",
     "name": "Dabbler",
     "file": "Dabbler.png",
-    "bytes": 54787,
+    "bytes": 52547,
     "source": {
-      "width": 297,
-      "height": 358
+      "width": 844,
+      "height": 785
     }
   },
   {
     "key": "Deadeye — +30 DEX",
     "name": "Deadeye — +30 DEX",
     "file": "Deadeye____30_DEX.png",
-    "bytes": 35503,
+    "bytes": 71011,
     "source": {
-      "width": 358,
-      "height": 704
+      "width": 768,
+      "height": 838
     }
   },
   {
     "key": "Deep Reserve",
     "name": "Deep Reserve",
     "file": "Deep_Reserve.png",
-    "bytes": 55869,
+    "bytes": 67521,
     "source": {
-      "width": 663,
-      "height": 536
+      "width": 685,
+      "height": 807
     }
   },
   {
     "key": "Deep Well — +40 INT",
     "name": "Deep Well — +40 INT",
     "file": "Deep_Well____40_INT.png",
-    "bytes": 45187,
+    "bytes": 90473,
     "source": {
-      "width": 451,
-      "height": 713
+      "width": 874,
+      "height": 856
     }
   },
   {
     "key": "Deepening Thirst",
     "name": "Deepening Thirst",
     "file": "Deepening_Thirst.png",
-    "bytes": 64921,
+    "bytes": 75935,
     "source": {
-      "width": 637,
-      "height": 621
+      "width": 616,
+      "height": 646
     }
   },
   {
     "key": "Discipline",
     "name": "Discipline",
     "file": "Discipline.png",
-    "bytes": 46809,
+    "bytes": 45380,
     "source": {
-      "width": 330,
-      "height": 272
+      "width": 736,
+      "height": 690
     }
   },
   {
     "key": "Draw Weight",
     "name": "Draw Weight",
     "file": "Draw_Weight.png",
-    "bytes": 67738,
+    "bytes": 82652,
     "source": {
-      "width": 645,
-      "height": 621
+      "width": 807,
+      "height": 872
     }
   },
   {
     "key": "Druid",
     "name": "Druid",
     "file": "Druid.png",
-    "bytes": 40944,
+    "bytes": 69222,
     "source": {
-      "width": 357,
-      "height": 637
+      "width": 703,
+      "height": 886
     }
   },
   {
     "key": "Edge",
     "name": "Edge",
     "file": "Edge.png",
-    "bytes": 52676,
+    "bytes": 63763,
     "source": {
-      "width": 342,
-      "height": 365
+      "width": 789,
+      "height": 703
     }
   },
   {
     "key": "Endurance",
     "name": "Endurance",
     "file": "Endurance.png",
-    "bytes": 61955,
+    "bytes": 73940,
     "source": {
-      "width": 474,
-      "height": 484
+      "width": 694,
+      "height": 698
     }
   },
   {
     "key": "Eternal Bear — Infinite Bear Form (+30 STR and +200 HP)",
     "name": "Eternal Bear — Infinite Bear Form (+30 STR and +200 HP)",
     "file": "Eternal_Bear___Infinite_Bear_Form___30_STR_and__200_HP_.png",
-    "bytes": 40208,
+    "bytes": 72467,
     "source": {
-      "width": 212,
-      "height": 296
+      "width": 727,
+      "height": 763
     }
   },
   {
     "key": "Eternal Hawk — Infinite Hawk Form (+30 DEX and +20% ice resistance)",
     "name": "Eternal Hawk — Infinite Hawk Form (+30 DEX and +20% ice resistance)",
     "file": "Eternal_Hawk___Infinite_Hawk_Form___30_DEX_and__20__ice_resistance_.png",
-    "bytes": 43270,
+    "bytes": 70814,
     "source": {
-      "width": 594,
-      "height": 452
+      "width": 860,
+      "height": 909
     }
   },
   {
     "key": "Eternal Wolf — Infinite Wolf Form (+20 STR, +20 DEX and +20 CHA)",
     "name": "Eternal Wolf — Infinite Wolf Form (+20 STR, +20 DEX and +20 CHA)",
     "file": "Eternal_Wolf___Infinite_Wolf_Form___20_STR___20_DEX_and__20_CHA_.png",
-    "bytes": 56665,
+    "bytes": 69180,
     "source": {
-      "width": 356,
-      "height": 409
+      "width": 821,
+      "height": 872
     }
   },
   {
     "key": "Evasion — +12% resistance to every element",
     "name": "Evasion — +12% resistance to every element",
     "file": "Evasion____12__resistance_to_every_element.png",
-    "bytes": 52762,
+    "bytes": 77688,
     "source": {
-      "width": 280,
-      "height": 308
+      "width": 751,
+      "height": 697
     }
   },
   {
     "key": "Even Breath",
     "name": "Even Breath",
     "file": "Even_Breath.png",
-    "bytes": 63834,
+    "bytes": 86949,
     "source": {
-      "width": 587,
-      "height": 543
+      "width": 726,
+      "height": 728
     }
   },
   {
     "key": "Executioner — +25% physical damage",
     "name": "Executioner — +25% physical damage",
     "file": "Executioner____25__physical_damage.png",
-    "bytes": 41776,
+    "bytes": 38212,
     "source": {
-      "width": 187,
-      "height": 331
+      "width": 891,
+      "height": 744
     }
   },
   {
     "key": "Extended Guard",
     "name": "Extended Guard",
     "file": "Extended_Guard.png",
-    "bytes": 70213,
+    "bytes": 43359,
     "source": {
-      "width": 841,
-      "height": 832
+      "width": 848,
+      "height": 716
     }
   },
   {
     "key": "Fireproof",
     "name": "Fireproof",
     "file": "Fireproof.png",
-    "bytes": 63761,
+    "bytes": 65664,
     "source": {
-      "width": 561,
-      "height": 577
+      "width": 922,
+      "height": 951
     }
   },
   {
     "key": "Fleet — your cooldown floor drops from 0.40 to 0.32",
     "name": "Fleet — your cooldown floor drops from 0.40 to 0.32",
     "file": "Fleet___your_cooldown_floor_drops_from_0_40_to_0_32.png",
-    "bytes": 50677,
+    "bytes": 73682,
     "source": {
-      "width": 468,
-      "height": 535
+      "width": 674,
+      "height": 733
     }
   },
   {
     "key": "Fletching",
     "name": "Fletching",
     "file": "Fletching.png",
-    "bytes": 15164,
+    "bytes": 33648,
     "source": {
-      "width": 187,
-      "height": 613
+      "width": 959,
+      "height": 946
     }
   },
   {
     "key": "Focus",
     "name": "Focus",
     "file": "Focus.png",
-    "bytes": 55400,
+    "bytes": 86144,
     "source": {
-      "width": 356,
-      "height": 322
+      "width": 622,
+      "height": 696
     }
   },
   {
     "key": "Follow-Through",
     "name": "Follow-Through",
     "file": "Follow-Through.png",
-    "bytes": 44823,
+    "bytes": 34843,
     "source": {
-      "width": 349,
-      "height": 543
+      "width": 836,
+      "height": 682
     }
   },
   {
     "key": "Frostbite",
     "name": "Frostbite",
     "file": "Frostbite.png",
-    "bytes": 64104,
+    "bytes": 75903,
     "source": {
-      "width": 375,
-      "height": 398
+      "width": 857,
+      "height": 909
     }
   },
   {
     "key": "Great Sinew",
     "name": "Great Sinew",
     "file": "Great_Sinew.png",
-    "bytes": 45391,
+    "bytes": 55692,
     "source": {
-      "width": 399,
-      "height": 466
+      "width": 848,
+      "height": 707
     }
   },
   {
     "key": "Grounding",
     "name": "Grounding",
     "file": "Grounding.png",
-    "bytes": 56985,
+    "bytes": 85242,
     "source": {
-      "width": 323,
-      "height": 390
+      "width": 804,
+      "height": 887
     }
   },
   {
     "key": "Hardy",
     "name": "Hardy",
     "file": "Hardy.png",
-    "bytes": 48152,
+    "bytes": 84146,
     "source": {
-      "width": 410,
-      "height": 612
+      "width": 929,
+      "height": 959
     }
   },
   {
     "key": "Honed",
     "name": "Honed",
     "file": "Honed.png",
-    "bytes": 63759,
+    "bytes": 56836,
     "source": {
-      "width": 440,
-      "height": 426
+      "width": 873,
+      "height": 702
     }
   },
   {
     "key": "Inner Flame — +30 WIS",
     "name": "Inner Flame — +30 WIS",
     "file": "Inner_Flame____30_WIS.png",
-    "bytes": 50410,
+    "bytes": 35615,
     "source": {
-      "width": 322,
-      "height": 383
+      "width": 521,
+      "height": 915
     }
   },
   {
     "key": "Insight",
     "name": "Insight",
     "file": "Insight.png",
-    "bytes": 51547,
+    "bytes": 73398,
     "source": {
-      "width": 330,
-      "height": 432
+      "width": 630,
+      "height": 841
     }
   },
   {
     "key": "Iron Body — +20 WIS and +20 CON",
     "name": "Iron Body — +20 WIS and +20 CON",
     "file": "Iron_Body____20_WIS_and__20_CON.png",
-    "bytes": 36416,
+    "bytes": 78627,
     "source": {
-      "width": 425,
-      "height": 781
+      "width": 809,
+      "height": 874
     }
   },
   {
     "key": "Iron Hide — +250 maximum life",
     "name": "Iron Hide — +250 maximum life",
     "file": "Iron_Hide____250_maximum_life.png",
-    "bytes": 65777,
+    "bytes": 60961,
     "source": {
-      "width": 951,
-      "height": 882
+      "width": 750,
+      "height": 644
     }
   },
   {
     "key": "Kindling",
     "name": "Kindling",
     "file": "Kindling.png",
-    "bytes": 70047,
+    "bytes": 55492,
     "source": {
-      "width": 376,
-      "height": 418
+      "width": 829,
+      "height": 648
     }
   },
   {
     "key": "Kindred Call",
     "name": "Kindred Call",
     "file": "Kindred_Call.png",
-    "bytes": 53961,
+    "bytes": 54188,
     "source": {
-      "width": 340,
-      "height": 330
+      "width": 813,
+      "height": 621
     }
   },
   {
     "key": "Lingering Edge",
     "name": "Lingering Edge",
     "file": "Lingering_Edge.png",
-    "bytes": 34141,
+    "bytes": 64316,
     "source": {
-      "width": 187,
-      "height": 349
+      "width": 837,
+      "height": 818
     }
   },
   {
     "key": "Long Guard",
     "name": "Long Guard",
     "file": "Long_Guard.png",
-    "bytes": 40944,
+    "bytes": 89202,
     "source": {
-      "width": 212,
-      "height": 348
+      "width": 880,
+      "height": 874
     }
   },
   {
     "key": "Loosed Wind",
     "name": "Loosed Wind",
     "file": "Loosed_Wind.png",
-    "bytes": 57109,
+    "bytes": 52096,
     "source": {
-      "width": 451,
-      "height": 399
+      "width": 852,
+      "height": 798
     }
   },
   {
     "key": "Lunge",
     "name": "Lunge",
     "file": "Lunge.png",
-    "bytes": 35546,
+    "bytes": 51331,
     "source": {
-      "width": 342,
-      "height": 637
+      "width": 588,
+      "height": 978
     }
   },
   {
     "key": "Mage",
     "name": "Mage",
     "file": "Mage.png",
-    "bytes": 41286,
+    "bytes": 77913,
     "source": {
-      "width": 849,
-      "height": 780
+      "width": 671,
+      "height": 779
     }
   },
   {
     "key": "Mastery",
     "name": "Mastery",
     "file": "Mastery.png",
-    "bytes": 47643,
+    "bytes": 56434,
     "source": {
-      "width": 364,
-      "height": 451
+      "width": 536,
+      "height": 818
     }
   },
   {
     "key": "Meditation — +120 maximum mana",
     "name": "Meditation — +120 maximum mana",
     "file": "Meditation____120_maximum_mana.png",
-    "bytes": 56477,
+    "bytes": 60965,
     "source": {
-      "width": 340,
-      "height": 307
+      "width": 856,
+      "height": 933
     }
   },
   {
     "key": "Menagerie — +35 CHA and +25 CON",
     "name": "Menagerie — +35 CHA and +25 CON",
     "file": "Menagerie____35_CHA_and__25_CON.png",
-    "bytes": 49714,
+    "bytes": 72502,
     "source": {
-      "width": 390,
-      "height": 382
+      "width": 699,
+      "height": 625
     }
   },
   {
     "key": "Momentum",
     "name": "Momentum",
     "file": "Momentum.png",
-    "bytes": 52016,
+    "bytes": 78288,
     "source": {
-      "width": 315,
-      "height": 282
+      "width": 785,
+      "height": 834
     }
   },
   {
     "key": "Monk",
     "name": "Monk",
     "file": "Monk.png",
-    "bytes": 38176,
+    "bytes": 45748,
     "source": {
-      "width": 281,
-      "height": 543
+      "width": 565,
+      "height": 906
     }
   },
   {
     "key": "Open Palm",
     "name": "Open Palm",
     "file": "Open_Palm.png",
-    "bytes": 53901,
+    "bytes": 72935,
     "source": {
-      "width": 281,
-      "height": 425
+      "width": 875,
+      "height": 815
     }
   },
   {
     "key": "Ox Blood",
     "name": "Ox Blood",
     "file": "Ox_Blood.png",
-    "bytes": 66582,
+    "bytes": 63215,
     "source": {
-      "width": 542,
-      "height": 544
+      "width": 664,
+      "height": 750
     }
   },
   {
     "key": "Pack Leader — +3 to your charm budget",
     "name": "Pack Leader — +3 to your charm budget",
     "file": "Pack_Leader____3_to_your_charm_budget.png",
-    "bytes": 56147,
+    "bytes": 64345,
     "source": {
-      "width": 443,
-      "height": 467
+      "width": 573,
+      "height": 836
     }
   },
   {
     "key": "Pain Ward — +15% physical and +15% fire resistance",
     "name": "Pain Ward — +15% physical and +15% fire resistance",
     "file": "Pain_Ward____15__physical_and__15__fire_resistance.png",
-    "bytes": 57386,
+    "bytes": 48566,
     "source": {
-      "width": 341,
-      "height": 374
+      "width": 849,
+      "height": 561
     }
   },
   {
     "key": "Paragon",
     "name": "Paragon",
     "file": "Paragon.png",
-    "bytes": 65901,
+    "bytes": 78881,
     "source": {
-      "width": 712,
-      "height": 646
+      "width": 777,
+      "height": 931
     }
   },
   {
     "key": "Piercing Shot — +30% physical damage",
     "name": "Piercing Shot — +30% physical damage",
     "file": "Piercing_Shot____30__physical_damage.png",
-    "bytes": 49210,
+    "bytes": 35043,
     "source": {
-      "width": 238,
-      "height": 254
+      "width": 810,
+      "height": 661
     }
   },
   {
     "key": "Pike Drill",
     "name": "Pike Drill",
     "file": "Pike_Drill.png",
-    "bytes": 24710,
+    "bytes": 46878,
     "source": {
-      "width": 263,
-      "height": 568
+      "width": 903,
+      "height": 958
     }
   },
   {
     "key": "Plating",
     "name": "Plating",
     "file": "Plating.png",
-    "bytes": 59452,
+    "bytes": 55379,
     "source": {
-      "width": 220,
-      "height": 213
+      "width": 842,
+      "height": 591
     }
   },
   {
     "key": "Polymath",
     "name": "Polymath",
     "file": "Polymath.png",
-    "bytes": 60829,
+    "bytes": 67263,
     "source": {
-      "width": 604,
-      "height": 603
+      "width": 686,
+      "height": 763
     }
   },
   {
     "key": "Practised Cadence",
     "name": "Practised Cadence",
     "file": "Practised_Cadence.png",
-    "bytes": 44443,
+    "bytes": 51567,
     "source": {
-      "width": 288,
-      "height": 459
+      "width": 904,
+      "height": 770
     }
   },
   {
     "key": "Pyromancy — +35% fire damage",
     "name": "Pyromancy — +35% fire damage",
     "file": "Pyromancy____35__fire_damage.png",
-    "bytes": 53129,
+    "bytes": 43158,
     "source": {
-      "width": 273,
-      "height": 306
+      "width": 468,
+      "height": 803
     }
   },
   {
     "key": "Quickcast",
     "name": "Quickcast",
     "file": "Quickcast.png",
-    "bytes": 49350,
+    "bytes": 83153,
     "source": {
-      "width": 822,
-      "height": 848
+      "width": 669,
+      "height": 805
     }
   },
   {
     "key": "Quickening",
     "name": "Quickening",
     "file": "Quickening.png",
-    "bytes": 48724,
+    "bytes": 75122,
     "source": {
-      "width": 220,
-      "height": 212
+      "width": 677,
+      "height": 826
     }
   },
   {
     "key": "Quiet Mind",
     "name": "Quiet Mind",
     "file": "Quiet_Mind.png",
-    "bytes": 37053,
+    "bytes": 83950,
     "source": {
-      "width": 374,
-      "height": 655
+      "width": 767,
+      "height": 798
     }
   },
   {
     "key": "Reckless Swing — +40% physical damage, -15% ice resistance",
     "name": "Reckless Swing — +40% physical damage, -15% ice resistance",
     "file": "Reckless_Swing____40__physical_damage__-15__ice_resistance.png",
-    "bytes": 38456,
+    "bytes": 49766,
     "source": {
-      "width": 841,
-      "height": 764
+      "width": 840,
+      "height": 672
     }
   },
   {
     "key": "Renaissance",
     "name": "Renaissance",
     "file": "Renaissance.png",
-    "bytes": 53325,
+    "bytes": 56952,
     "source": {
-      "width": 444,
-      "height": 603
+      "width": 620,
+      "height": 857
     }
   },
   {
     "key": "Rending Bolt",
     "name": "Rending Bolt",
     "file": "Rending_Bolt.png",
-    "bytes": 27848,
+    "bytes": 53497,
     "source": {
-      "width": 136,
-      "height": 331
+      "width": 793,
+      "height": 629
     }
   },
   {
     "key": "Reserve",
     "name": "Reserve",
     "file": "Reserve.png",
-    "bytes": 64452,
+    "bytes": 67118,
     "source": {
-      "width": 712,
-      "height": 671
+      "width": 742,
+      "height": 605
     }
   },
   {
     "key": "Resonance",
     "name": "Resonance",
     "file": "Resonance.png",
-    "bytes": 62241,
+    "bytes": 64319,
     "source": {
-      "width": 494,
-      "height": 500
+      "width": 624,
+      "height": 828
     }
   },
   {
     "key": "Sanguine Aura",
     "name": "Sanguine Aura",
     "file": "Sanguine_Aura.png",
-    "bytes": 58824,
+    "bytes": 59745,
     "source": {
-      "width": 562,
-      "height": 671
+      "width": 629,
+      "height": 873
     }
   },
   {
     "key": "Sanguine Rite — life costs are reduced a further 20%",
     "name": "Sanguine Rite — life costs are reduced a further 20%",
     "file": "Sanguine_Rite___life_costs_are_reduced_a_further_20_.png",
-    "bytes": 54176,
+    "bytes": 57687,
     "source": {
-      "width": 408,
-      "height": 510
+      "width": 841,
+      "height": 749
     }
   },
   {
     "key": "Scattershot",
     "name": "Scattershot",
     "file": "Scattershot.png",
-    "bytes": 48851,
+    "bytes": 59268,
     "source": {
-      "width": 306,
-      "height": 365
+      "width": 676,
+      "height": 635
     }
   },
   {
     "key": "Scything Blow",
     "name": "Scything Blow",
     "file": "Scything_Blow.png",
-    "bytes": 32315,
+    "bytes": 29853,
     "source": {
-      "width": 474,
-      "height": 322
+      "width": 899,
+      "height": 696
     }
   },
   {
     "key": "Searing Blows",
     "name": "Searing Blows",
     "file": "Searing_Blows.png",
-    "bytes": 55903,
+    "bytes": 61282,
     "source": {
-      "width": 460,
-      "height": 578
+      "width": 859,
+      "height": 772
     }
   },
   {
     "key": "Second Discipline",
     "name": "Second Discipline",
     "file": "Second_Discipline.png",
-    "bytes": 45093,
+    "bytes": 52656,
     "source": {
-      "width": 247,
-      "height": 349
+      "width": 814,
+      "height": 781
     }
   },
   {
     "key": "Second Wind",
     "name": "Second Wind",
     "file": "Second_Wind.png",
-    "bytes": 52026,
+    "bytes": 70787,
     "source": {
-      "width": 485,
-      "height": 543
+      "width": 638,
+      "height": 860
     }
   },
   {
     "key": "Sharp Syllables",
     "name": "Sharp Syllables",
     "file": "Sharp_Syllables.png",
-    "bytes": 58722,
+    "bytes": 75389,
     "source": {
-      "width": 909,
-      "height": 739
+      "width": 655,
+      "height": 798
     }
   },
   {
     "key": "Sinew",
     "name": "Sinew",
     "file": "Sinew.png",
-    "bytes": 54589,
+    "bytes": 55394,
     "source": {
-      "width": 262,
-      "height": 238
+      "width": 717,
+      "height": 585
     }
   },
   {
     "key": "Slow Burn",
     "name": "Slow Burn",
     "file": "Slow_Burn.png",
-    "bytes": 35409,
+    "bytes": 66799,
     "source": {
-      "width": 322,
-      "height": 519
+      "width": 786,
+      "height": 885
     }
   },
   {
     "key": "Spearpoint",
     "name": "Spearpoint",
     "file": "Spearpoint.png",
-    "bytes": 34244,
+    "bytes": 45488,
     "source": {
-      "width": 342,
-      "height": 578
+      "width": 802,
+      "height": 681
     }
   },
   {
     "key": "Spellpierce",
     "name": "Spellpierce",
     "file": "Spellpierce.png",
-    "bytes": 67477,
+    "bytes": 72976,
     "source": {
-      "width": 405,
-      "height": 416
+      "width": 833,
+      "height": 832
     }
   },
   {
     "key": "Spirit Ward — +20% arcane resistance",
     "name": "Spirit Ward — +20% arcane resistance",
     "file": "Spirit_Ward____20__arcane_resistance.png",
-    "bytes": 36321,
+    "bytes": 67671,
     "source": {
-      "width": 272,
-      "height": 576
+      "width": 776,
+      "height": 701
     }
   },
   {
     "key": "Split Arrow",
     "name": "Split Arrow",
     "file": "Split_Arrow.png",
-    "bytes": 11844,
+    "bytes": 30710,
     "source": {
-      "width": 289,
-      "height": 799
+      "width": 854,
+      "height": 644
     }
   },
   {
     "key": "Spreading Stain",
     "name": "Spreading Stain",
     "file": "Spreading_Stain.png",
-    "bytes": 56264,
+    "bytes": 69731,
     "source": {
-      "width": 331,
-      "height": 288
+      "width": 723,
+      "height": 670
     }
   },
   {
     "key": "Stamina",
     "name": "Stamina",
     "file": "Stamina.png",
-    "bytes": 59724,
+    "bytes": 94849,
     "source": {
-      "width": 390,
-      "height": 425
+      "width": 687,
+      "height": 728
     }
   },
   {
     "key": "Still Water",
     "name": "Still Water",
     "file": "Still_Water.png",
-    "bytes": 63434,
+    "bytes": 72879,
     "source": {
-      "width": 399,
-      "height": 417
+      "width": 886,
+      "height": 802
     }
   },
   {
     "key": "Storm Caller — +35% lightning damage",
     "name": "Storm Caller — +35% lightning damage",
     "file": "Storm_Caller____35__lightning_damage.png",
-    "bytes": 50009,
+    "bytes": 46123,
     "source": {
-      "width": 331,
-      "height": 314
+      "width": 934,
+      "height": 692
     }
   },
   {
     "key": "Sweep",
     "name": "Sweep",
     "file": "Sweep.png",
-    "bytes": 68817,
+    "bytes": 36658,
     "source": {
-      "width": 636,
-      "height": 610
+      "width": 864,
+      "height": 889
     }
   },
   {
     "key": "Swift Incant",
     "name": "Swift Incant",
     "file": "Swift_Incant.png",
-    "bytes": 48811,
+    "bytes": 65746,
     "source": {
-      "width": 330,
-      "height": 280
+      "width": 854,
+      "height": 877
     }
   },
   {
     "key": "Swiftshot",
     "name": "Swiftshot",
     "file": "Swiftshot.png",
-    "bytes": 65467,
+    "bytes": 80741,
     "source": {
-      "width": 475,
-      "height": 467
+      "width": 692,
+      "height": 829
     }
   },
   {
     "key": "Taut String",
     "name": "Taut String",
     "file": "Taut_String.png",
-    "bytes": 44388,
+    "bytes": 35603,
     "source": {
-      "width": 916,
-      "height": 967
+      "width": 811,
+      "height": 826
     }
   },
   {
     "key": "Temper",
     "name": "Temper",
     "file": "Temper.png",
-    "bytes": 60678,
+    "bytes": 55017,
     "source": {
-      "width": 357,
-      "height": 418
+      "width": 792,
+      "height": 657
     }
   },
   {
     "key": "Thoughtform",
     "name": "Thoughtform",
     "file": "Thoughtform.png",
-    "bytes": 41169,
+    "bytes": 91965,
     "source": {
-      "width": 221,
-      "height": 273
+      "width": 731,
+      "height": 878
     }
   },
   {
     "key": "Toughness",
     "name": "Toughness",
     "file": "Toughness.png",
-    "bytes": 70084,
+    "bytes": 85290,
     "source": {
-      "width": 577,
-      "height": 552
+      "width": 702,
+      "height": 778
     }
   },
   {
     "key": "Transcendence — +35 WIS and +25 INT",
     "name": "Transcendence — +35 WIS and +25 INT",
     "file": "Transcendence____35_WIS_and__25_INT.png",
-    "bytes": 66531,
+    "bytes": 69529,
     "source": {
-      "width": 467,
-      "height": 475
+      "width": 935,
+      "height": 910
     }
   },
   {
     "key": "Unbreakable — +30 STR and +150 maximum life",
     "name": "Unbreakable — +30 STR and +150 maximum life",
     "file": "Unbreakable____30_STR_and__150_maximum_life.png",
-    "bytes": 40319,
+    "bytes": 67120,
     "source": {
-      "width": 206,
-      "height": 341
+      "width": 649,
+      "height": 753
     }
   },
   {
     "key": "Undying — +40 CON",
     "name": "Undying — +40 CON",
     "file": "Undying____40_CON.png",
-    "bytes": 61820,
+    "bytes": 65756,
     "source": {
-      "width": 526,
-      "height": 543
+      "width": 606,
+      "height": 788
     }
   },
   {
     "key": "Unending Swing",
     "name": "Unending Swing",
     "file": "Unending_Swing.png",
-    "bytes": 35653,
+    "bytes": 40238,
     "source": {
-      "width": 273,
-      "height": 467
+      "width": 517,
+      "height": 849
     }
   },
   {
     "key": "Unspent Force",
     "name": "Unspent Force",
     "file": "Unspent_Force.png",
-    "bytes": 34843,
+    "bytes": 79670,
     "source": {
-      "width": 798,
-      "height": 764
+      "width": 695,
+      "height": 783
     }
   },
   {
     "key": "Versatility",
     "name": "Versatility",
     "file": "Versatility.png",
-    "bytes": 61935,
+    "bytes": 59795,
     "source": {
-      "width": 705,
-      "height": 747
+      "width": 784,
+      "height": 818
     }
   },
   {
     "key": "Vigour",
     "name": "Vigour",
     "file": "Vigour.png",
-    "bytes": 55358,
+    "bytes": 69472,
     "source": {
-      "width": 773,
-      "height": 807
+      "width": 734,
+      "height": 942
     }
   },
   {
     "key": "Vital Surge — +300 maximum life",
     "name": "Vital Surge — +300 maximum life",
     "file": "Vital_Surge____300_maximum_life.png",
-    "bytes": 61491,
+    "bytes": 72675,
     "source": {
-      "width": 375,
-      "height": 374
+      "width": 614,
+      "height": 722
     }
   },
   {
     "key": "Volley",
     "name": "Volley",
     "file": "Volley.png",
-    "bytes": 60069,
+    "bytes": 71063,
     "source": {
-      "width": 553,
-      "height": 576
+      "width": 747,
+      "height": 758
     }
   },
   {
     "key": "Wanderer's Gift",
     "name": "Wanderer's Gift",
     "file": "Wanderer_s_Gift.png",
-    "bytes": 62871,
+    "bytes": 85378,
     "source": {
-      "width": 475,
-      "height": 509
+      "width": 664,
+      "height": 813
     }
   },
   {
     "key": "Ward",
     "name": "Ward",
     "file": "Ward.png",
-    "bytes": 57627,
+    "bytes": 78708,
     "source": {
-      "width": 868,
-      "height": 864
+      "width": 740,
+      "height": 880
     }
   },
   {
     "key": "Warm Blood",
     "name": "Warm Blood",
     "file": "Warm_Blood.png",
-    "bytes": 59075,
+    "bytes": 39847,
     "source": {
-      "width": 289,
-      "height": 349
+      "width": 440,
+      "height": 876
     }
   },
   {
     "key": "Warrior",
     "name": "Warrior",
     "file": "Warrior.png",
-    "bytes": 45139,
+    "bytes": 50259,
     "source": {
-      "width": 171,
-      "height": 246
+      "width": 580,
+      "height": 966
     }
   },
   {
     "key": "Wellspring",
     "name": "Wellspring",
     "file": "Wellspring.png",
-    "bytes": 44939,
+    "bytes": 93518,
     "source": {
-      "width": 306,
-      "height": 254
+      "width": 778,
+      "height": 841
     }
   },
   {
     "key": "Whirling Step",
     "name": "Whirling Step",
     "file": "Whirling_Step.png",
-    "bytes": 66244,
+    "bytes": 83466,
     "source": {
-      "width": 916,
-      "height": 848
+      "width": 933,
+      "height": 853
     }
   },
   {
     "key": "Whirlwind",
     "name": "Whirlwind",
     "file": "Whirlwind.png",
-    "bytes": 69558,
+    "bytes": 59594,
     "source": {
-      "width": 822,
-      "height": 867
+      "width": 869,
+      "height": 846
     }
   },
   {
     "key": "Wide Communion",
     "name": "Wide Communion",
     "file": "Wide_Communion.png",
-    "bytes": 50307,
+    "bytes": 50687,
     "source": {
-      "width": 433,
-      "height": 542
+      "width": 591,
+      "height": 861
     }
   },
   {
     "key": "Wide Stance",
     "name": "Wide Stance",
     "file": "Wide_Stance.png",
-    "bytes": 44900,
+    "bytes": 61595,
     "source": {
-      "width": 331,
-      "height": 527
+      "width": 676,
+      "height": 967
     }
   },
   {
     "key": "Wider Pack",
     "name": "Wider Pack",
     "file": "Wider_Pack.png",
-    "bytes": 37565,
+    "bytes": 70279,
     "source": {
-      "width": 416,
-      "height": 280
+      "width": 678,
+      "height": 851
     }
   },
   {
     "key": "Wind",
     "name": "Wind",
     "file": "Wind.png",
-    "bytes": 59755,
+    "bytes": 61572,
     "source": {
-      "width": 655,
-      "height": 535
+      "width": 746,
+      "height": 896
     }
   },
   {
     "key": "Windrunner — +20 DEX and +80 maximum stamina",
     "name": "Windrunner — +20 DEX and +80 maximum stamina",
     "file": "Windrunner____20_DEX_and__80_maximum_stamina.png",
-    "bytes": 34000,
+    "bytes": 66045,
     "source": {
-      "width": 280,
-      "height": 410
+      "width": 744,
+      "height": 859
     }
   }
 ]
