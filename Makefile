@@ -3,7 +3,7 @@
         redis-shell admin-password admin-password-rotate seed-catalogs seed-map seed-passive-tree \
         art-export art-seed audio-export audio-seed tiles-generate tiles-export tiles-seamless tiles-seed \
         entities-generate entities-export entities-cutout entities-seed \
-        entities-restyle-prompts art-describe \
+        entities-restyle-prompts art-describe audio-describe \
         clear-maps list-maps list-specs reseed-map dev dev-stop dev-status \
         migrate-up migrate-status migrate-repair tunnel tunnel-stop verify-routing \
         pi-keygen pi-provision pi-deploy pi-up pi-down pi-restart pi-logs pi-status \
@@ -380,6 +380,18 @@ art-describe:
 		$(if $(KIND),--kind "$(KIND)") $(if $(LENGTH),--length "$(LENGTH)") \
 		$(if $(LIMIT),--limit "$(LIMIT)") $(if $(DRY),--dry-run) \
 		$(if $(STALE),--stale) $(if $(REDO),--redo) $(if $(WITHART),--with-art)
+
+# Audio prompt writer (spec 2026-09-30 §8). Resumable; safe to kill.
+#   make audio-describe DRY=1 LIMIT=20 KIND=creature   preview, store nothing
+#   make audio-describe KIND=world,biome               some subject kinds
+#   make audio-describe SLOT=hurt                      one slot name
+#   make audio-describe STALE=1                        rewrite stale prompts only
+#   make audio-describe BOX_ONLY=1                     never use the CPU fallback; wait for the box
+audio-describe:
+	$(COMPOSE) exec -T backend node scripts/describe-audio-slots.js \
+		$(if $(KIND),--kind "$(KIND)") $(if $(SLOT),--slot "$(SLOT)") \
+		$(if $(LIMIT),--limit "$(LIMIT)") $(if $(DRY),--dry-run) \
+		$(if $(STALE),--stale) $(if $(BOX_ONLY),--box-only)
 
 entities-generate:
 	$(COMPOSE) exec -T backend node scripts/generate-entity-textures.js \
