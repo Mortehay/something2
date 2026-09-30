@@ -208,7 +208,25 @@ const AUDIO_JOBS_LOCK_KEY = 977005353;
 // still relies on it, takes this key for its whole body.
 const AUDIO_CLIPS_LOCK_KEY = 591204817;
 
+// Audio prompt writer final review (M3): a seventh key, for WHICH ai_providers
+// row is active per modality. There is exactly one active row per modality
+// (a partial unique index), and every audio/text code path reads "the active
+// one" -- so a test that parks the real providers and activates its own fake
+// box changes what every OTHER test, and any batch running against the same
+// database, is talking to. Until this key, no test that flipped is_active held
+// a lock at all: audio_prompt_routes_db parked every active audio/text
+// provider for its whole body, and ai_providers.test.js's per-modality case
+// re-activated rows mid-run. Every test that changes is_active on an
+// audio/text provider takes this key for the span from park to restore, and
+// restores INSIDE it (a t.after hook runs after the lock is released).
+//
+// It cannot guard a real process (make audio-describe, the dev backend) --
+// those take no test lock. Do not run a provider-parking test while a batch
+// is writing to the same database.
+const AI_PROVIDERS_LOCK_KEY = 730162409;
+
 module.exports = {
   withAdvisoryLock, readingUnderLock, LOCK_WAIT_MS,
   PASSIVE_TREE_LOCK_KEY, PASSIVE_TREE_LOCK_WAIT_MS, ART_JOBS_LOCK_KEY, AUDIO_JOBS_LOCK_KEY, AUDIO_CLIPS_LOCK_KEY,
+  AI_PROVIDERS_LOCK_KEY,
 };

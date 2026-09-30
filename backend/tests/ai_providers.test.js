@@ -12,6 +12,7 @@ const {
   loadImageProviderWithSecret,
   createProvider,
 } = require('../src/services/aiProviders');
+const { withAdvisoryLock, AI_PROVIDERS_LOCK_KEY } = require('./helpers/advisoryLock.js');
 
 const url = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
 
@@ -243,30 +244,35 @@ test('providerFieldError: modality', () => {
 test('activation is per modality', { skip: !url ? 'no database URL' : false }, async (t) => {
   const pool = new Pool({ connectionString: url });
   const made = [];
-  const restoreActive = await snapshotActive(pool);
-  t.after(async () => {
+  t.after(() => pool.end());
+  // AI_PROVIDERS_LOCK_KEY (see advisoryLock.js): this flips which audio
+  // provider is active, so it serializes with the other tests that do, and
+  // deletes its rows + restores the snapshot INSIDE the lock.
+  await withAdvisoryLock(pool, AI_PROVIDERS_LOCK_KEY, async () => {
+    const restoreActive = await snapshotActive(pool);
     try {
+      const tag = `${process.pid}-${Date.now()}`;
+      const img = await createProvider(pool, { name: `mod-img-${tag}`, base_url: 'http://127.0.0.1:9/', request_template: {} });
+      made.push(img.id);
+      const aud = await createProvider(pool, { name: `mod-aud-${tag}`, base_url: 'http://127.0.0.1:9/', modality: 'audio' });
+      made.push(aud.id);
+      assert.deepStrictEqual(aud.request_template, {}, 'audio create fills an empty template');
+
+      await setActiveProvider(pool, img.id);
+      await setActiveProvider(pool, aud.id);
+      const active = await pool.query('SELECT id FROM ai_providers WHERE is_active AND id = ANY($1) ORDER BY id', [made]);
+      assert.deepStrictEqual(active.rows.map((r) => r.id), [img.id, aud.id].sort((a, b) => a - b),
+        'activating the audio provider must not deactivate the image one');
+
+      const image = await loadActiveProviderWithSecret(pool);
+      assert.notStrictEqual(image && image.id, aud.id, 'the default lookup never returns an audio provider');
+      const audio = await loadActiveProviderWithSecret(pool, 'audio');
+      assert.strictEqual(audio.id, aud.id);
+    } finally {
       if (made.length) await pool.query('DELETE FROM ai_providers WHERE id = ANY($1)', [made]);
       await restoreActive();
-    } finally { await pool.end(); }
+    }
   });
-  const tag = `${process.pid}-${Date.now()}`;
-  const img = await createProvider(pool, { name: `mod-img-${tag}`, base_url: 'http://127.0.0.1:9/', request_template: {} });
-  made.push(img.id);
-  const aud = await createProvider(pool, { name: `mod-aud-${tag}`, base_url: 'http://127.0.0.1:9/', modality: 'audio' });
-  made.push(aud.id);
-  assert.deepStrictEqual(aud.request_template, {}, 'audio create fills an empty template');
-
-  await setActiveProvider(pool, img.id);
-  await setActiveProvider(pool, aud.id);
-  const active = await pool.query('SELECT id FROM ai_providers WHERE is_active AND id = ANY($1) ORDER BY id', [made]);
-  assert.deepStrictEqual(active.rows.map((r) => r.id), [img.id, aud.id].sort((a, b) => a - b),
-    'activating the audio provider must not deactivate the image one');
-
-  const image = await loadActiveProviderWithSecret(pool);
-  assert.notStrictEqual(image && image.id, aud.id, 'the default lookup never returns an audio provider');
-  const audio = await loadActiveProviderWithSecret(pool, 'audio');
-  assert.strictEqual(audio.id, aud.id);
 });
 
 // --- Image paths never reach an audio provider (spec §2) -----------------
