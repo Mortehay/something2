@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { slotRows, generateBody, generateResultMessage } from '../useAudioAdmin.js';
+import {
+  slotRows, generateBody, generateResultMessage, loopEditable, uploadParams,
+} from '../useAudioAdmin.js';
 
 describe('slotRows', () => {
   it('flattens the registry response into a subject tree with slot kinds', () => {
@@ -93,5 +95,23 @@ describe('generateResultMessage', () => {
   it('treats a missing or falsy json as no message worth flagging', () => {
     expect(generateResultMessage(undefined, 3)).toBe('Clip generated and bound');
     expect(generateResultMessage(null, 3)).toBe('Clip generated and bound');
+  });
+});
+
+// SOMET-592 (I2): only a world point's nearby slot offers Loop, and the
+// upload sends the flag only when the checkbox exists.
+describe('loop controls', () => {
+  it('loopEditable is true for world_point/nearby only', () => {
+    expect(loopEditable('world_point', 'nearby')).toBe(true);
+    expect(loopEditable('creature', 'nearby')).toBe(false);
+    expect(loopEditable('world_point', 'use')).toBe(false);
+    expect(loopEditable('world', 'music')).toBe(false);
+  });
+  it('uploadParams carries loopable only when it is a boolean', () => {
+    const base = { subjectKind: 'world_point', subjectKey: 'merchant_post', slot: 'nearby' };
+    expect(uploadParams({ ...base, loopable: true }).get('loopable')).toBe('true');
+    expect(uploadParams({ ...base, loopable: false }).get('loopable')).toBe('false');
+    expect(uploadParams(base).has('loopable')).toBe(false);
+    expect(uploadParams({ ...base, label: 'hum' }).get('label')).toBe('hum');
   });
 });

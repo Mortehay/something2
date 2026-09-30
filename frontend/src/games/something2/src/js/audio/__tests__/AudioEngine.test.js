@@ -16,7 +16,7 @@ function fakeCtx() {
     },
     createBufferSource() {
       const s = { buffer: null, loop: false, loopStart: 0, loopEnd: 0, started: false, stopped: false, onended: null,
-        connect(n) { this.out = n; }, disconnect() {}, start() { this.started = true; }, stop() { this.stopped = true; } };
+        connect(n) { this.out = n; }, disconnect() {}, start() { this.started = true; }, stop(t) { this.stopped = true; this.stopAt = t; } };
       sources.push(s);
       return s;
     },
@@ -513,6 +513,55 @@ describe('AudioEngine', () => {
       expect(sources[0].stopped).toBe(true); // the nearby voice was bumped
       expect(sources[1].buffer.tag).toBe('u:sword-use.ogg');
       expect(sources[1].started).toBe(true);
+    });
+
+    // SOMET-592 (M7): with rand() = 0 a weighted pick lands on the FIRST
+    // clip -- the non-loopable one. The old code let that one pick choose
+    // the path, so this point would have stayed on the cadence path for the
+    // whole world visit although the admin marked a clip Loop.
+    it('a slot with any loopable clip loops, and the loop plays a loopable clip, whatever a single pick would land on', async () => {
+      const { engine, sources } = engineWith({
+        'world_point/well/nearby': [
+          { key: 'well-chime.ogg', volume: 1, weight: 5, loopable: false },
+          { key: 'well-hum.ogg', volume: 1, weight: 1, loopable: true },
+        ],
+      });
+      engine.unlock();
+      engine.tickNearby(new Map(), [{ id: 'w1', art: 'well', x: 30, y: 0 }], { x: 0, y: 0 }, 0);
+      await flush(); await flush();
+      expect(sources.length).toBe(1);
+      expect(sources[0].buffer.tag).toBe('u:well-hum.ogg');
+      expect(sources[0].loop).toBe(true);
+    });
+
+    // SOMET-592 (M8): at a full bus a combat event may bump a held loop; it
+    // fades over ~50ms instead of stopping dead.
+    it('an evicted loop fades out over ~50ms instead of stopping instantly', async () => {
+      const { engine, sources, ctx } = engineWith({
+        'world_point/well/nearby': [{ key: 'well-loop.ogg', volume: 1, weight: 1, loopable: true }],
+        'item/Iron Sword/use': [{ key: 'sword-use.ogg', volume: 1, weight: 1 }],
+      });
+      engine.unlock();
+      engine.sfxLimiter.maxVoices = 1;
+      engine.tickNearby(new Map(), [{ id: 'w1', art: 'well', x: 30, y: 0 }], { x: 0, y: 0 }, 0);
+      await flush(); await flush();
+      const loopSrc = sources[0];
+      expect(loopSrc.loop).toBe(true);
+      const loopGain = loopSrc.out.out; // src -> panner -> gain
+      const ramps = [];
+      const origRamp = loopGain.gain.linearRampToValueAtTime.bind(loopGain.gain);
+      loopGain.gain.linearRampToValueAtTime = (v, t) => { ramps.push([v, t]); return origRamp(v, t); };
+      ctx.currentTime = 10;
+
+      engine.playSfxEvents(
+        [{ e: 'use', k: 'melee', s: 'Iron Sword', a: 'p:1', x: 0, y: 0 }],
+        { listener: { x: 0, y: 0 }, ownActor: 'p:1' },
+      );
+      await flush(); await flush();
+      expect(ramps).toEqual([[0, 10.05]]);
+      expect(loopSrc.stopAt).toBeCloseTo(10.05, 5);
+      expect(sources[1].buffer.tag).toBe('u:sword-use.ogg');
+      expect(engine.nearbyLoops.size).toBe(0);
     });
 
     it('setWorld stops an active nearby loop, releasing its slot and leaving no leaked source', async () => {

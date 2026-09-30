@@ -22,3 +22,14 @@ export function pickWeighted(clips, rand = Math.random) {
 export const ambienceChain = (world, biome) =>
   (biome ? [`biome/${biome}/ambience`] : []).concat(`world/${world}/ambience`);
 export const musicChain = (world) => [`world/${world}/music`];
+
+// Which path a world point's `nearby` slot takes (SOMET-592, M7): the loop
+// path when ANY bound clip is loopable (the admin marked it Loop), the
+// cadence path otherwise. Decided by the slot, not by one weighted pick --
+// a pick would lock a mixed slot onto whichever path the first pick landed
+// on for the rest of the world visit. When looping, only the loopable clips
+// are candidates for the loop.
+export function nearbyPointPath(clips) {
+  const loopClips = Array.isArray(clips) ? clips.filter((c) => c && c.loopable) : [];
+  return loopClips.length ? { loop: true, clips: loopClips } : { loop: false, clips: clips || [] };
+}

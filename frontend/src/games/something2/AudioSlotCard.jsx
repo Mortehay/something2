@@ -8,7 +8,7 @@ import { useIsMutating } from '@tanstack/react-query';
 import styled from 'styled-components';
 import {
   useProposeAudio, useGenerateAudio, useUploadAudio, useUpdateBinding, useUnbind, generateMutationKey,
-  generateBody, useAudioClips, useBindFromLibrary,
+  generateBody, useAudioClips, useBindFromLibrary, loopEditable, useSetClipLoopable,
 } from './useAudioAdmin.js';
 import { assetUrl } from './src/js/net/assets.js';
 import { API_URL } from '../../config.js';
@@ -127,6 +127,7 @@ function ClipRow({
 }) {
   const update = useUpdateBinding();
   const unbind = useUnbind();
+  const setLoop = useSetClipLoopable();
   const [volume, setVolume] = useState(row.volume);
   const [weight, setWeight] = useState(row.weight);
   const playing = playingId === row.binding_id;
@@ -160,6 +161,21 @@ function ClipRow({
         onChange={(e) => setWeight(Number(e.target.value))}
         onBlur={() => weight > 0 && commit({ weight })}
       />
+      {/* SOMET-592 (I2): a world point's nearby clip loops while the player
+          is in range only when it is marked Loop; otherwise it plays on the
+          creature-style cadence. The flag is the clip's, not the binding's. */}
+      {loopEditable(subject.kind, slot) && (
+        <InlineLabel title="Loop this clip while the player is in range, instead of repeating it every few seconds">
+          <input
+            type="checkbox"
+            checked={Boolean(row.loopable)}
+            disabled={setLoop.isPending}
+            aria-label={`Loop ${row.label}`}
+            onChange={(e) => setLoop.mutate({ clipId: row.clip_id, loopable: e.target.checked })}
+          />
+          Loop
+        </InlineLabel>
+      )}
       <Drop
         type="button"
         aria-label={`Remove ${row.label}`}
@@ -251,6 +267,8 @@ function AudioSlotCard({
   // What Suggest returned: its style and the box slots for THAT style.
   const [proposal, setProposal] = useState(null);
   const [showPicker, setShowPicker] = useState(false);
+  const [loopUpload, setLoopUpload] = useState(false);
+  const canLoop = loopEditable(subject.kind, slot);
   const fileRef = useRef(null);
 
   // NOT generate.isPending: that comes from THIS hook instance, which is
@@ -286,7 +304,7 @@ function AudioSlotCard({
     e.target.value = '';
     if (!file) return;
     upload.mutate({
-      subjectKind: subject.kind, subjectKey: subject.key, slot, file,
+      subjectKind: subject.kind, subjectKey: subject.key, slot, file, loopable: canLoop ? loopUpload : undefined,
     });
   };
 
@@ -378,6 +396,17 @@ function AudioSlotCard({
         <Secondary type="button" onClick={() => fileRef.current?.click()} disabled={upload.isPending}>
           {upload.isPending ? 'Uploading…' : 'Upload .ogg'}
         </Secondary>
+        {canLoop && (
+          <InlineLabel title="Upload the clip as a loop (it plays continuously while the player is in range)">
+            <input
+              type="checkbox"
+              checked={loopUpload}
+              aria-label={`Upload as a loop for ${slot}`}
+              onChange={(e) => setLoopUpload(e.target.checked)}
+            />
+            Loop
+          </InlineLabel>
+        )}
         <input
           ref={fileRef}
           type="file"
