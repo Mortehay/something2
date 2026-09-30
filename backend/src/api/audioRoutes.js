@@ -208,9 +208,14 @@ module.exports = function audioRoutes(pool) {
         loadPromptCatalog(pool), clipKind === 'sfx' ? { music: [], ambience: [] } : loadStyles(pool),
       ]);
       const cue = clipKind === 'sfx' ? await cueFor(pool, kind, key, slot) : null;
-      const r = await writeSlotPrompt(pool, { kind, key, slot, hint: (req.body || {}).hint }, { catalog, styles, cue });
+      // Read BEFORE the model call: the call can take minutes, and a hand
+      // edit saved meanwhile must win over the model answer (final review I1).
+      const before = await audioPrompts.getActive(pool, kind, key, slot);
+      const r = await writeSlotPrompt(pool, { kind, key, slot, hint: (req.body || {}).hint }, {
+        catalog, styles, cue, expectActiveId: before ? before.id : null,
+      });
       if (!r.ok) {
-        if (r.conflict) return res.status(409).json({ error: r.error });
+        if (r.conflict) return res.status(409).json({ error: 'the prompt changed while the model was writing; reload it to see the current text' });
         return res.status(502).json({ error: r.error, via: r.via ?? null });
       }
       res.status(201).json(r.row);

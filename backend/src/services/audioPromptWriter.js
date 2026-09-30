@@ -9,6 +9,13 @@
 //     shape as the box's own cue defaults ("a steel sword", "an old wooden
 //     chest"). The cue already carries the action.
 //
+// NEVER OVER A CHANGE (final review I1). A write takes seconds to minutes and
+// the batch picks its slots from a snapshot a day old, so the caller passes
+// `expectActiveId` -- the active row id it saw (null = none) -- and the store
+// refuses the save with a 409 if the slot changed meanwhile; that comes back
+// as { conflict: true }. undefined skips the check (a caller that wants the
+// model answer to win regardless).
+//
 // One retry for a malformed answer, none for a provider failure: a busy box
 // is the caller's to handle (batch waits or falls back), and retrying it here
 // would only double the wait.
@@ -81,7 +88,7 @@ async function loadStyles(db, { rap = defaultRap } = {}) {
 async function writeSlotPrompt(db, {
   kind, key, slot, hint = null,
 }, {
-  tp = defaultTp, store = defaultStore, catalog, styles, cue = null, boxOnly = false,
+  tp = defaultTp, store = defaultStore, catalog, styles, cue = null, boxOnly = false, expectActiveId,
 } = {}) {
   const clipKind = slotKind(kind, slot);
   if (!clipKind) return { ok: false, error: 'unknown subject or slot' };
@@ -115,7 +122,7 @@ async function writeSlotPrompt(db, {
         // eslint-disable-next-line no-await-in-loop
         const row = await store.save(db, kind, key, slot, {
           style: good.style, text: good.text, sourceInput: context, hint: cleanHint, model: r.model, via: r.via,
-        });
+        }, { expectActiveId });
         return { ok: true, row };
       } catch (err) {
         if (err && err.status === 409) {

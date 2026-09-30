@@ -12,9 +12,15 @@ const STYLES = { music: ['medieval_fantasy', 'village'], ambience: ['forest', 'n
 
 function fakeStore() {
   const saved = [];
+  const saveOpts = [];
   return {
     saved,
-    save: async (db, kind, key, slot, body) => { saved.push({ kind, key, slot, ...body }); return { id: saved.length, kind, key, slot, ...body }; },
+    saveOpts,
+    save: async (db, kind, key, slot, body, opts) => {
+      saved.push({ kind, key, slot, ...body });
+      saveOpts.push(opts);
+      return { id: saved.length, kind, key, slot, ...body };
+    },
   };
 }
 function fakeTp(answers) {
@@ -140,4 +146,26 @@ test('store.save rejects with a non-conflict error: ok:false, error mentions cou
   assert.equal(r.via, 'box');
   assert.match(r.error, /could not store/);
   assert.equal(tp.calls.length, 1, 'no retry on a store failure');
+});
+
+// Final review I1: the model writer must not silently replace a prompt that
+// changed since the caller looked. The expectation the caller passes (an id,
+// null = "I saw no prompt", undefined = "don't check") reaches store.save
+// unchanged -- the store is what turns a mismatch into a 409.
+for (const [label, expectActiveId] of [['an id', '42'], ['null (no prompt seen)', null]]) {
+  test(`expectActiveId ${label} is passed to store.save`, async () => {
+    const store = fakeStore();
+    const tp = fakeTp([{ ok: true, json: { entity: 'a grey wolf' }, model: 'q', via: 'box' }]);
+    const r = await w.writeSlotPrompt({}, { kind: 'creature', key: 'Wolf', slot: 'hurt' },
+      { tp, store, catalog: CAT, styles: STYLES, cue: 'hit', expectActiveId });
+    assert.equal(r.ok, true, r.error);
+    assert.deepEqual(store.saveOpts[0], { expectActiveId });
+  });
+}
+
+test('no expectActiveId given: store.save is told not to check (undefined)', async () => {
+  const store = fakeStore();
+  const tp = fakeTp([{ ok: true, json: { entity: 'a grey wolf' }, model: 'q', via: 'box' }]);
+  await w.writeSlotPrompt({}, { kind: 'creature', key: 'Wolf', slot: 'hurt' }, { tp, store, catalog: CAT, styles: STYLES, cue: 'hit' });
+  assert.equal(store.saveOpts[0].expectActiveId, undefined);
 });

@@ -45,8 +45,11 @@ async function listAllActive(db) {
 }
 
 // `expectActiveId`: the active row id the caller's edit was based on (null =
-// "I saw no prompt"; undefined = "don't check", used by the batch writer,
-// which re-reads right before saving).
+// "I saw no prompt"; undefined = "don't check" -- the seeder, which applies a
+// checked-in file on purpose, and a PUT that sends no expect_active_id). The
+// card always sends one, and every model write passes one: the Write route
+// the row it read before calling the model, the batch the row its
+// start-of-run snapshot saw.
 async function save(db, kind, key, slot, {
   style = null, text, sourceInput = null, hint = null, model = null, via = null,
 }, { expectActiveId } = {}) {

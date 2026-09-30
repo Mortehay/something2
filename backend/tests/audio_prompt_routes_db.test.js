@@ -20,10 +20,12 @@ test('audio prompt routes', { skip }, async (t) => {
   const tag = `apr-${process.pid}-${Date.now()}`;
   const seen = [];
   let textStatus = 200;
+  let duringText = null; // async hook run while the fake model is "writing"
   const box = http.createServer((req, res) => {
     let body = '';
     req.on('data', (c) => { body += c; });
-    req.on('end', () => {
+    req.on('end', async () => {
+      if (req.url === '/api/text' && duringText) await duringText();
       seen.push({ url: req.url, body: body ? JSON.parse(body) : null });
       res.setHeader('content-type', 'application/json');
       if (req.url === '/api/text') {
@@ -119,29 +121,26 @@ test('audio prompt routes', { skip }, async (t) => {
   assert.equal(fail.body.via, 'box');
   assert.equal((await pool.query('SELECT count(*)::int n FROM audio_prompts WHERE subject_key = $1', [tag])).rows[0].n, before);
 
-  // write route conflict -> 409 (controller ruling, Task 6). Racing two real
-  // concurrent writes to prove this would be flaky (timing-dependent on
-  // whether both SELECT ... FOR UPDATE land before either COMMIT); instead
-  // this forces writeSlotPrompt's store.save to hit the exact 409-throwing
-  // path deterministically, by monkey-patching the shared audioPrompts
-  // module object that audioRoutes.js and audioPromptWriter.js both hold a
-  // reference to (CommonJS caches the module, so mutating the property here
-  // is visible to both). textStatus is reset first so the model call itself
-  // succeeds and save() is actually reached.
+  // write route conflict -> 409 (final review I1). A REAL race, made
+  // deterministic by the fake box: while the model is "writing", an admin
+  // hand-saves the same slot. The model's answer must not land on top of it.
+  // Before the fix the route passed no expectation, so save() deactivated
+  // the hand row and the model row won silently.
   textStatus = 200;
-  const origSave = audioPromptsSvc.save;
-  audioPromptsSvc.save = async () => {
-    const e = new Error('this prompt was changed by someone else; reload it');
-    e.status = 409;
-    throw e;
+  const handBefore = (await request(app).get(P).set('Authorization', auth)).body.music.active;
+  let handRow = null;
+  duringText = async () => {
+    handRow = await audioPromptsSvc.save(pool, 'world', tag, 'music', { style: 'village', text: 'typed while waiting' },
+      { expectActiveId: handBefore.id });
   };
-  try {
-    const conflictWrite = await request(app).post(`${P}/music/write`).set('Authorization', auth).send({});
-    assert.equal(conflictWrite.status, 409, JSON.stringify(conflictWrite.body));
-    assert.match(conflictWrite.body.error, /changed by someone else/);
-  } finally {
-    audioPromptsSvc.save = origSave;
-  }
+  const conflictWrite = await request(app).post(`${P}/music/write`).set('Authorization', auth).send({});
+  duringText = null;
+  assert.ok(handRow, 'the hand save ran while the model was writing');
+  assert.equal(conflictWrite.status, 409, JSON.stringify(conflictWrite.body));
+  assert.match(conflictWrite.body.error, /changed while the model was writing/);
+  const afterRace = await audioPromptsSvc.getActive(pool, 'world', tag, 'music');
+  assert.equal(String(afterRace.id), String(handRow.id), 'the hand edit is still the active prompt');
+  assert.equal(afterRace.text, 'typed while waiting');
 
   // unknown slot -> 400; non-admin -> 403
   assert.equal((await request(app).put(`${P}/nope`).set('Authorization', auth).send({ text: 'x' })).status, 400);
