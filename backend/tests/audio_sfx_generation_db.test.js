@@ -478,6 +478,11 @@ test('generateSfxPackForJobs', { skip }, async (t) => {
     const stored = [];
     const lib = {
       bindClip: async () => ({}),
+      // This fake stores nothing in the database, so nothing is "already
+      // stored" for the cached-row check (final review I2). Left to the
+      // default, that check read the REAL audio_clips table, and row F's plain
+      // OGG went duplicate whenever a parallel file had stored tone.ogg.
+      storedClipSha1s: async () => new Set(),
       storeAndBindClip: async (db, clipSpec, target, opts) => {
         assert.equal(typeof opts.bind, 'function');
         const n = stored.push({ ...clipSpec, ...target });
