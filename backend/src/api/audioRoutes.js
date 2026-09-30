@@ -18,6 +18,10 @@ const {
 const { checkClipBuffer } = require('../services/oggInfo');
 const audioJobQueue = require('../services/audioJobQueue');
 const audioDispatcher = require('../services/audioDispatcher');
+const audioPrompts = require('../services/audioPrompts');
+const { loadPromptCatalog, buildContext, isStale } = require('../services/audioPromptContext');
+const { writeSlotPrompt, loadStyles } = require('../services/audioPromptWriter');
+const aiProviders = require('../services/aiProviders');
 
 // A job id as the retry route accepts it: a positive integer, or a digit
 // string (pg hands bigint ids to the client as strings), no larger than
@@ -58,6 +62,17 @@ function sendError(res, err) {
   return res.status(500).json({ error: 'audio request failed' });
 }
 
+// The style a hand edit may save: one the active audio provider reported
+// (models_cache holds style values plus "cue:"-prefixed cues). With no
+// provider or an empty cache there is nothing to check against, so any
+// style is accepted -- refusing would lock editing on a box-less install.
+async function unknownStyle(pool, style) {
+  if (!style) return false;
+  const p = await aiProviders.loadActiveProviderWithSecret(pool, 'audio');
+  const known = p && Array.isArray(p.models_cache) ? p.models_cache.filter((m) => !m.startsWith('cue:')) : [];
+  return known.length > 0 && !known.includes(style);
+}
+
 module.exports = function audioRoutes(pool) {
   const router = express.Router();
   const admin = requireAdmin(pool);
@@ -96,6 +111,10 @@ module.exports = function audioRoutes(pool) {
       // the per-slot clip count the slot table shows.
       const slotCounts = await lib.slotClipCounts(pool);
       const counts = lib.filledFromSlotCounts(slotCounts);
+      // Prompt coverage (spec 2026-09-30 §7): one read of every active prompt
+      // and one catalog snapshot, never a query per slot. Stale needs the cue
+      // for sfx slots; those come from the kind's subjectCues, loaded below.
+      const [activePrompts, promptCatalog] = await Promise.all([audioPrompts.listAllActive(pool), loadPromptCatalog(pool)]);
       const out = [];
       for (const [kind, def] of Object.entries(SUBJECT_KINDS)) {
         const entry = {
@@ -107,6 +126,16 @@ module.exports = function audioRoutes(pool) {
         };
         // eslint-disable-next-line no-await-in-loop
         if (def.subjectCues) entry.cues = await def.subjectCues(pool);
+        const states = {};
+        for (const p of activePrompts) {
+          if (p.subject_kind !== kind) continue;
+          const cue = entry.cues && entry.cues[p.subject_key] ? entry.cues[p.subject_key][p.slot] || null : null;
+          let state = 'written';
+          if (!p.text) state = 'cleared';
+          else if (isStale(p, buildContext(promptCatalog, kind, p.subject_key, p.slot, { cue }))) state = 'stale';
+          (states[p.subject_key] ||= {})[p.slot] = state;
+        }
+        entry.promptStates = states;
         out.push(entry);
       }
       res.json(out);
@@ -129,6 +158,66 @@ module.exports = function audioRoutes(pool) {
       if (!r.ok) return res.status(502).json({ error: r.error });
       res.json({ style: r.style, slots: r.slots, prompt: r.prompt });
     } catch (err) { sendError(res, err); }
+  });
+
+  // Spec 2026-09-30 §7. Every slot of one subject: active prompt, history,
+  // and whether the context the prompt was written from has moved.
+  router.get('/admin/prompts/:kind/:key', admin, async (req, res) => {
+    const { kind, key } = req.params;
+    try {
+      const def = SUBJECT_KINDS[kind];
+      if (!def || !Object.hasOwn(SUBJECT_KINDS, kind)) return res.status(400).json({ error: 'unknown subject kind' });
+      const [bySlot, catalog] = await Promise.all([audioPrompts.listForSubject(pool, kind, key), loadPromptCatalog(pool)]);
+      const out = {};
+      for (const slot of Object.keys(def.slots)) {
+        // eslint-disable-next-line no-await-in-loop
+        const cue = slotKind(kind, slot) === 'sfx' ? await cueFor(pool, kind, key, slot) : null;
+        const currentInput = buildContext(catalog, kind, key, slot, { cue });
+        const entry = bySlot[slot] || { active: null, history: [] };
+        out[slot] = { ...entry, currentInput, stale: isStale(entry.active, currentInput) };
+      }
+      res.json(out);
+    } catch (err) { sendError(res, err); }
+  });
+
+  router.put('/admin/prompts/:kind/:key/:slot', admin, async (req, res) => {
+    const { kind, key, slot } = req.params;
+    const b = req.body || {};
+    try {
+      const { clipKind, error } = await checkSubject(pool, kind, key, slot);
+      if (error) return res.status(400).json({ error });
+      if (typeof b.text !== 'string') return res.status(400).json({ error: 'text must be a string' });
+      const style = clipKind === 'sfx' ? null : (typeof b.style === 'string' && b.style.trim() ? b.style.trim() : null);
+      if (await unknownStyle(pool, style)) return res.status(400).json({ error: `style '${style}' is not one the audio provider offers` });
+      const row = await audioPrompts.save(pool, kind, key, slot, { style, text: b.text }, {
+        expectActiveId: b.expect_active_id === undefined ? undefined : b.expect_active_id,
+      });
+      res.json(row);
+    } catch (err) {
+      if (err && err.status === 409) return res.status(409).json({ error: err.message });
+      sendError(res, err);
+    }
+  });
+
+  router.post('/admin/prompts/:kind/:key/:slot/write', admin, async (req, res) => {
+    const { kind, key, slot } = req.params;
+    try {
+      const { clipKind, error } = await checkSubject(pool, kind, key, slot);
+      if (error) return res.status(400).json({ error });
+      const [catalog, styles] = await Promise.all([
+        loadPromptCatalog(pool), clipKind === 'sfx' ? { music: [], ambience: [] } : loadStyles(pool),
+      ]);
+      const cue = clipKind === 'sfx' ? await cueFor(pool, kind, key, slot) : null;
+      const r = await writeSlotPrompt(pool, { kind, key, slot, hint: (req.body || {}).hint }, { catalog, styles, cue });
+      if (!r.ok) {
+        if (r.conflict) return res.status(409).json({ error: r.error });
+        return res.status(502).json({ error: r.error, via: r.via ?? null });
+      }
+      res.status(201).json(r.row);
+    } catch (err) {
+      if (err && err.status === 409) return res.status(409).json({ error: err.message });
+      sendError(res, err);
+    }
   });
 
   router.post('/admin/generate', admin, async (req, res) => {
