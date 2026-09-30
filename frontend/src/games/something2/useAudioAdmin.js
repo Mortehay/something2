@@ -143,6 +143,23 @@ export function generateMutationKey(subjectKind, subjectKey, slot) {
   return ['audio-generate', subjectKind, subjectKey, slot];
 }
 
+// The result toast text for one /admin/generate call (SOMET-592 review fix).
+// A music/ambience call (`{clip, binding}`, no `partial` concept) and a full
+// sfx success (every requested variant stored) both stay the original plain
+// message. A PARTIAL sfx store -- some variants bound, one or more failed
+// mid-loop (audioRoutes.js's `gen.partial`/`gen.error`, still a 201 because
+// the successful variants are real and already bound) -- must say so, or the
+// admin has no way to learn a generation came back short. `requestedVariants`
+// falls back to the stored count when it is missing (a music/ambience call,
+// or an sfx call whose body never set `variants`), so the message never
+// claims "N of undefined".
+export function generateResultMessage(json, requestedVariants) {
+  if (!json || !json.partial) return 'Clip generated and bound';
+  const got = Array.isArray(json.clips) ? json.clips.length : 0;
+  const requested = Number.isInteger(requestedVariants) && requestedVariants > 0 ? requestedVariants : got;
+  return `Generated ${got} of ${requested} variant(s) — ${json.error}`;
+}
+
 export function useGenerateAudio(subjectKind, subjectKey, slot) {
   const qc = useQueryClient();
   const toastId = `audio-generate:${subjectKind}/${subjectKey}/${slot}`;
@@ -156,8 +173,14 @@ export function useGenerateAudio(subjectKind, subjectKey, slot) {
     onMutate: () => {
       toast.loading('Generating… this can take a few minutes', { id: toastId });
     },
-    onSuccess: () => {
-      toast.success('Clip generated and bound', { id: toastId });
+    // `variables` is the body useGenerateAudio's caller passed to
+    // generate.mutate() -- generateBody's `variants` field, when the call was
+    // for an sfx slot -- so a partial result can report how many were asked
+    // for, not just how many arrived.
+    onSuccess: (json, variables) => {
+      const message = generateResultMessage(json, variables && variables.variants);
+      if (json.partial) toast.error(message, { id: toastId });
+      else toast.success(message, { id: toastId });
       qc.invalidateQueries({ queryKey: slotsKey(subjectKind, subjectKey) });
       qc.invalidateQueries({ queryKey: MISSES_KEY });
       qc.invalidateQueries({ queryKey: SUBJECTS_KEY });
