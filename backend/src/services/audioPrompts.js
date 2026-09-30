@@ -8,6 +8,8 @@
 // '' IS A VALUE. A stored empty text means someone cleared the prompt on
 // purpose; generation then falls through to its old path. null is never
 // stored in `text` (the column is NOT NULL); "no prompt" is "no active row".
+const { Client } = require('pg');
+
 const MAX_PROMPT_TEXT = 400;
 const COLS = 'id, subject_kind, subject_key, slot, style, text, source_input, hint, model, via, active, created_at';
 
@@ -49,10 +51,18 @@ async function save(db, kind, key, slot, {
   style = null, text, sourceInput = null, hint = null, model = null, via = null,
 }, { expectActiveId } = {}) {
   const body = String(text == null ? '' : text).trim().slice(0, MAX_PROMPT_TEXT);
-  const client = typeof db.connect === 'function' ? await db.connect() : db;
-  const release = client !== db;
+  // A bare pg Client (a PoolClient from pool.connect() is one too, via
+  // prototype chain) means the CALLER owns the transaction: run our
+  // statements on it as given, no BEGIN/COMMIT/ROLLBACK/release. Anything
+  // else (a Pool, or the app's pool proxy) gets its own connection+
+  // transaction here. `typeof db.connect === 'function'` alone can't tell
+  // them apart -- a Client has .connect() too, and calling it on an
+  // already-connected Client throws "Client has already been connected".
+  const callerOwned = db instanceof Client;
+  const client = callerOwned ? db : (typeof db.connect === 'function' ? await db.connect() : db);
+  const release = !callerOwned && client !== db;
   try {
-    await client.query('BEGIN');
+    if (!callerOwned) await client.query('BEGIN');
     const cur = await client.query(
       `SELECT id FROM audio_prompts
         WHERE subject_kind = $1 AND subject_key = $2 AND slot = $3 AND active FOR UPDATE`, [kind, key, slot]);
@@ -65,10 +75,10 @@ async function save(db, kind, key, slot, {
       `INSERT INTO audio_prompts (subject_kind, subject_key, slot, style, text, source_input, hint, model, via)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING ${COLS}`,
       [kind, key, slot, style || null, body, sourceInput, hint || null, model, via]);
-    await client.query('COMMIT');
+    if (!callerOwned) await client.query('COMMIT');
     return rows[0];
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    if (!callerOwned) await client.query('ROLLBACK').catch(() => {});
     if (err.code === '23505') throw conflict('this prompt was changed by someone else; reload it');
     throw err;
   } finally {

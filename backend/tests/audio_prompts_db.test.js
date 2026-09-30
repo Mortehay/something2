@@ -51,3 +51,44 @@ test('audioPrompts store', { skip }, async (t) => {
   assert.equal(bySlot.music.history.length, 2, 'two superseded music rows');
   assert.ok((await store.listAllActive(pool)).some((r) => r.subject_key === key && r.slot === 'music'));
 });
+
+// A PoolClient (from pool.connect()) is a pg Client under the hood. save()
+// must recognize that and run on it directly -- not call .connect() again
+// (which throws on an already-connected Client) -- and must leave
+// transaction control (COMMIT/ROLLBACK) to the caller.
+test('audioPrompts store: caller-owned client', { skip }, async (t) => {
+  const pool = new Pool({ connectionString: url });
+  const key = `ap-client-${process.pid}-${Date.now()}`;
+  t.after(async () => {
+    try { await pool.query('DELETE FROM audio_prompts WHERE subject_key = $1', [key]); } finally { await pool.end(); }
+  });
+
+  const c = await pool.connect();
+  await c.query('BEGIN');
+  const first = await store.save(c, 'world', key, 'music', { text: 'one' });
+  const second = await store.save(c, 'world', key, 'music', { text: 'two' }, { expectActiveId: first.id });
+  await c.query('COMMIT');
+  c.release();
+
+  const active = await pool.query(
+    "SELECT count(*)::int AS n FROM audio_prompts WHERE subject_key = $1 AND slot = 'music' AND active", [key]);
+  assert.equal(active.rows[0].n, 1, 'exactly one active row after commit');
+  const bySlot = await store.listForSubject(pool, 'world', key);
+  assert.equal(bySlot.music.active.id, second.id);
+  assert.equal(bySlot.music.history.length, 1, 'one superseded row');
+
+  // A stale expectActiveId must still be refused with 409 while a
+  // caller-owned transaction is open -- and since the caller owns the
+  // transaction, save() must NOT roll it back itself; that's on the caller.
+  const c2 = await pool.connect();
+  await c2.query('BEGIN');
+  await assert.rejects(
+    store.save(c2, 'world', key, 'music', { text: 'stale' }, { expectActiveId: first.id }),
+    (err) => err.status === 409, 'stale expectActiveId is refused inside the caller-owned transaction');
+  await c2.query('ROLLBACK');
+  c2.release();
+
+  const activeAfter = await pool.query(
+    "SELECT count(*)::int AS n FROM audio_prompts WHERE subject_key = $1 AND slot = 'music' AND active", [key]);
+  assert.equal(activeAfter.rows[0].n, 1, 'still exactly one active row after the rollback');
+});
