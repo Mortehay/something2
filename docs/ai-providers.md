@@ -567,7 +567,8 @@ the same file instead of a new take.
 ### Assigning sounds
 
 The **Audio** sidebar tab (`/game/audio`) is where bindings are made: worlds
-(music, ambience) and biomes (ambience) in slice 1. Its **Missing sounds**
+(music, ambience), biomes (ambience), and -- for sound effects -- creatures,
+world points, attack types, weapons and skills (see **Sound effects** below). Its **Missing sounds**
 list is fed by the game client itself, `POST /api/audio/misses` -- a slot a
 player actually hit with nothing bound, not a guess from the catalog.
 
@@ -583,16 +584,23 @@ backend and drains them one at a time, so no single HTTP request has to
 survive the whole run.
 
 **Queuing.** In Batch mode, tick subjects in the left column and choose which
-slots per kind to include (music/ambience; sfx batches arrive in a later
-slice), or tick items in **Missing sounds** and press **Add to batch** --
+slots per kind to include (music, ambience, and every sfx slot that has a
+cue -- upload-only slots are listed as skipped and never queued), or tick items in **Missing sounds** and press **Add to batch** --
 Missing sounds is fed by the game client's own `POST /api/audio/misses`, so
 it lists slots a player actually hit with nothing bound, not a guess from the
 registry. **Queue N jobs** enqueues everything selected. A slot that already
 has a queued or running job for it reports back as `already_live` instead of
 being queued twice -- re-queueing it is a no-op, not an error.
 
-**The drain.** One job at a time, `music` before `ambience`, so the GPU box
-switches model at most once per group instead of once per clip. A busy box
+**The drain.** Jobs are claimed group by group in the order `music` →
+`ambience` → `sfx_realistic` → `sfx_retro`, so the GPU box switches model at
+most once per group instead of once per clip (music runs on
+`audio:ace-step`, ambience and realistic SFX on `audio:stable-audio`, retro
+SFX need no model at all). Music and ambience jobs run one at a time; SFX
+jobs of one engine are claimed up to `AUDIO_SFX_PACK_SIZE` at a time and sent
+as ONE `POST /api/audio/sfx-pack` request, each returned clip matched back to
+its job by cue + entity text. A pack entry the box rejects (an unknown cue
+fails the whole pack with 422) fails only the jobs it names. A busy box
 (HTTP 409/503, "not now") re-queues the job with a backoff pause before the
 next claim -- it does not spend one of the job's attempts and does not count
 toward the breaker below. A **circuit breaker** stops the drain after
@@ -638,6 +646,8 @@ remove a clip that is about to be bound.
   doubles per attempt with jitter.
 - `AUDIO_BREAKER_TRIP` (default 3) -- consecutive provider faults before the
   drain stops itself.
+- `AUDIO_SFX_PACK_SIZE` (default 12) -- most sfx jobs sent in one
+  `sfx-pack` request.
 - `AUDIO_DRAIN_MAX_WAIT_MS` (default 60000) -- longest the drain sleeps
   between checks while every queued job is sitting out a backoff.
 
@@ -646,6 +656,64 @@ roughly 30 s for a warm 30 s ambience clip, up to ~2 min for a 2-minute track
 including a cold model load. Like the batch path, when both **style** and
 **prompt** are left blank it proposes one first (the same call **Suggest**
 makes) rather than sending an empty request.
+
+### Sound effects
+
+**Subjects and slots.** Five global kinds (bindings are not scoped to a world
+or biome -- every world plays them):
+
+| Kind | Key | Slots → box cue |
+|---|---|---|
+| `creature` | entity type name (`Slime`) | `nearby` → —, `attack` → —, `hurt` → `hit`, `death` → `death` |
+| `world_point` | entity type name (`portal`, `merchant_post`, ...) | `nearby` → `waypoint` |
+| `attack_type` | `melee` / `ranged` / `magic` | melee `use` → `slash`, ranged `use` → —, magic `use` → `spell`; `hit` → `hit` for all three |
+| `item` | weapon name | as its weapon's attack type |
+| `skill` | skill id | `use` → `slash` for a melee skill, `spell` otherwise; `hit` → `hit` |
+
+A slot marked — has no cue on the box today (there is no idle, creature-attack
+or bow-release cue), so it is **upload-only**: the slot card says so, the
+Generate button is hidden, and batch selection skips it. Upload an OGG for it
+by hand or bind one from the library. A weapon's attack type is decided from
+the catalog row: a socketed stone or augment → magic, `kind = 'melee'` →
+melee, an `ammo_type_id` or a bow-category name → ranged, anything else →
+magic.
+
+**Generating.** SFX slots have an **engine** choice (`realistic` =
+stable-audio, `retro` = procedural, near-instant) and a **variants** count
+(1-5; each variant is one more clip bound to the slot, and the client makes a
+weighted random pick per play). The box caches SFX by (engine, cue, entity text) and
+**ignores the seed**, so variety comes from the entity text instead: the
+first take sends the subject's phrase (`slime`, `a steel sword`, the skill's
+name), later takes send `<phrase> (take N)` where N counts the clips already
+bound to the slot. The take number is kept in the clip's label, so deleting a
+clip and regenerating still asks the box for a new take. If some variants
+fail and others succeed, the successful ones are stored and bound and the
+admin sees a "partial" toast naming what failed.
+
+**In the game.** The authority adds an `sfx` list (at most 64 events,
+omitted when empty) to each world frame: `use` (a swing, cast or shot),
+`hit` (it landed), `hurt` and `death` (a creature was damaged / killed --
+one `death` per kill). Each event carries its attack kind and item or
+`skill:<id>`, or the creature type, and a world position. The client
+resolves each event to a lookup chain, most specific first:
+
+- player `use`/`hit`: `skill/<id>/<slot>` or `item/<name>/<slot>`, then
+  `attack_type/<kind>/<slot>`;
+- creature `use`: `creature/<type>/attack`; creature `hit`:
+  `attack_type/melee/hit`;
+- `hurt`/`death`: `creature/<type>/hurt|death`.
+
+The first bound slot plays; if none is bound, the first key is reported to
+**Missing sounds**. Playback is positional (pan + distance falloff; events
+beyond 1600 px are not played) and capped: at most 12 SFX voices, the same
+clip at most 3 times per 100 ms, and when full your own actions win over the
+nearest combat, which wins over ambient `nearby` sounds. Creature `nearby`
+sounds play every 4-10 s while you are within 8 tiles (at most 4 at once);
+a world point's `nearby` clip loops while you are in range and fades when
+you leave. The Settings **SFX** slider scales all of it.
+
+**Editors.** The entity-type editor shows a **Sounds** section for creatures
+and world points (same slot cards as the Audio tab).
 
 ### Library
 
@@ -712,7 +780,8 @@ wrote, changed or not) -- not a diff against what git already has.
 
 ### Limitations
 
-- **Renaming a world or biome orphans its sounds.** Bindings, missing-sound
+- **Renaming a world, biome, creature, world point or weapon orphans its
+  sounds** (skills are keyed by id and are not affected). Bindings, missing-sound
   rows and queued jobs are keyed by the subject's NAME, so after a rename they
   stay on the old name: the renamed subject plays nothing, and its queued jobs
   fail with `subject no longer exists`. Re-bind (or re-queue) under the new
