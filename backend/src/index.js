@@ -3677,15 +3677,30 @@ app.post('/api/art-jobs', adminGuard, async (req, res) => {
 // The queue by state, plus whether a drain is running. Progress in the table
 // comes from /api/art-subjects (has_art), not from a counter here -- a counter
 // drifts, a catalog commit cannot.
+// A failed art_jobs row (aliased `f`) whose subject has NOT succeeded since.
+// SOMET-601. Shared by the failure panel and the requeue endpoint so the two
+// cannot disagree: a requeue -- above all a reseed -- of a subject that already
+// has newer art would draw over it.
+const ART_FAILURE_UNRESOLVED = `NOT EXISTS (
+  SELECT 1 FROM art_jobs d
+   WHERE d.subject_kind = f.subject_kind AND d.subject_key = f.subject_key
+     AND d.state = 'done' AND d.updated_at > f.updated_at)`;
+
 app.get('/api/art-jobs', adminGuard, async (req, res) => {
   try {
     // Failures come back GROUPED BY CAUSE rather than as a flat list. The list
     // was already visible per-row in the table; what an admin could not get
     // was "68 of these are the same GPU fault and will clear themselves, ONE
     // needs a decision". The grouping is the actionable part.
+    //
+    // SOMET-601: only failures still OUTSTANDING. A failed row whose subject
+    // has since succeeded is history; showing it put 82 already-drawn subjects
+    // under "Backdrop was not keyed out" while the real stop cause went unseen.
     const { rows: failed } = await pool.query(
-      `SELECT subject_kind, subject_key, last_error
-         FROM art_jobs WHERE state = 'failed' ORDER BY updated_at DESC`,
+      `SELECT f.subject_kind, f.subject_key, f.last_error
+         FROM art_jobs f
+        WHERE f.state = 'failed' AND ${ART_FAILURE_UNRESOLVED}
+        ORDER BY f.updated_at DESC`,
     );
     res.json({
       stats: await artJobQueue.stats(pool),
@@ -3787,7 +3802,7 @@ app.post('/api/art-jobs/requeue', adminGuard, async (req, res) => {
                        WHERE l.subject_kind = f.subject_kind
                          AND l.subject_key = f.subject_key
                          AND l.state IN ('queued', 'running')) AS superseded
-         FROM art_jobs f WHERE f.state = 'failed'`,
+         FROM art_jobs f WHERE f.state = 'failed' AND ${ART_FAILURE_UNRESOLVED}`,
     );
     const ofKind = failed.filter((r) => artFailures.classify(r.last_error).kind === kind);
     // ONE row per subject, the newest. Every failed retry leaves its own row,

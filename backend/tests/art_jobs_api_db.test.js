@@ -855,3 +855,41 @@ lockedTest('the listing says which kinds take a description, and it matches the 
       }
     }
   });
+
+// SOMET-601. A failed row whose subject has SINCE succeeded is history, not an
+// outstanding failure. The panel listed 82 of them on the dev DB, every one
+// already drawn, and a reseed of that group would have drawn over good art.
+lockedTest('a failure its subject has since recovered from is neither listed nor requeued',
+  async (t, pool) => {
+    const err = 'image x.png was generated but could not be recorded: the provider returned '
+      + 'an image that is only 24.6% transparent (floor 25%); the backdrop was not keyed out';
+    const [old] = await queue.enqueue(pool, [{ kind: 'skill', key: 'rq_recovered' }],
+      { backend: 'connector' });
+    await pool.query(`UPDATE art_jobs SET state='failed', attempts=3, last_error=$2,
+        updated_at = now() - interval '10 minutes' WHERE id=$1`, [old.id, err]);
+    const [win] = await queue.enqueue(pool, [{ kind: 'skill', key: 'rq_recovered' }],
+      { backend: 'connector' });
+    await pool.query("UPDATE art_jobs SET state='done' WHERE id=$1", [win.id]);
+    // A control that has NOT recovered, so an empty answer cannot pass by accident.
+    const [open] = await queue.enqueue(pool, [{ kind: 'skill', key: 'rq_still_failed' }],
+      { backend: 'connector' });
+    await pool.query(`UPDATE art_jobs SET state='failed', attempts=3, last_error=$2 WHERE id=$1`,
+      [open.id, err]);
+
+    const list = await request(app).get('/api/art-jobs').set(...AUTH);
+    assert.equal(list.status, 200);
+    const keys = list.body.failures.flatMap((g) => g.subjects.map((x) => x.key));
+    assert.deepEqual(keys, ['rq_still_failed'], 'only the outstanding failure is listed');
+
+    const res = await request(app).post('/api/art-jobs/requeue').set(...AUTH)
+      .send({ kind: 'content_unkeyed', reseed: true });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(res.body.requeued, 1);
+    const { rows } = await pool.query(
+      "SELECT subject_key, state FROM art_jobs WHERE id IN ($1, $2) ORDER BY subject_key",
+      [old.id, open.id]);
+    assert.deepEqual(rows, [
+      { subject_key: 'rq_recovered', state: 'failed' },
+      { subject_key: 'rq_still_failed', state: 'queued' },
+    ], 'the recovered subject must not be queued to draw over its art');
+  });

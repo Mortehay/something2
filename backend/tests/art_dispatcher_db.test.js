@@ -305,6 +305,36 @@ lockedTest('a drain stops once several DIFFERENT subjects fail on the provider',
     assert.ok(rows[0].n > 0, 'stopping must leave work queued, not consume it');
   });
 
+// SOMET-601. A revoked token trips the breaker too -- every subject fails the
+// same way -- but the message must send the operator to the token, not to a
+// GPU box that is answering fine.
+lockedTest('a run of 401s stops the drain and names the rejected token',
+  async (t, pool, providerId) => {
+    for (let i = 40; i <= 45; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await queue.enqueue(pool, [S(i)], { backend: 'connector', providerId });
+    }
+    dispatcher.startDrain(pool, {
+      provider: PROVIDER(providerId),
+      generate: failWith('provider answered 401: {"detail":"Invalid or revoked token"}'),
+      buildRequest,
+      limit: 6,
+    });
+    for (let i = 0; i < 60 && dispatcher.runStatus().running; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((r) => { setTimeout(r, 100); });
+    }
+    const final = dispatcher.runStatus();
+    assert.equal(final.running, false);
+    assert.match(final.error || '', /token/i, 'the stop must name the token');
+    assert.doesNotMatch(final.error || '', /looks down/i,
+      'a provider that answers 401 is up; saying otherwise sends the operator the wrong way');
+    const { rows } = await pool.query(
+      "SELECT count(*)::int AS n FROM art_jobs WHERE state = 'queued' AND subject_key LIKE 'sk_%'",
+    );
+    assert.ok(rows[0].n > 0, 'the subjects are fine -- they must still be queued');
+  });
+
 // The distinction that a naive breaker gets wrong, and that an external
 // watchdog here DID get wrong: a subject whose own image cannot be keyed says
 // nothing about the provider's health.

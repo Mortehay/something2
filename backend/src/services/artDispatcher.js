@@ -380,7 +380,10 @@ async function defaultWriteArt(db, job, imageKey, {
     const profile = bytes && alphaProfile(bytes);
     if (profile && profile.transparentPct < MIN_TRANSPARENT_PCT()) {
       throw new Error(`the provider returned an image that is only `
-        + `${profile.transparentPct.toFixed(0)}% transparent (floor `
+        // Floored to one decimal, never rounded: toFixed(0) turned 24.6 into
+        // "25% (floor 25%)", which reads as the guard refusing a value that
+        // met it (SOMET-601). Flooring keeps the shown value below the floor.
+        + `${(Math.floor(profile.transparentPct * 10) / 10).toFixed(1)}% transparent (floor `
         + `${MIN_TRANSPARENT_PCT()}%); the backdrop was not keyed out, so this `
         + 'would render as a coloured square rather than an icon');
     }
@@ -678,6 +681,10 @@ function startDrain(db, opts = {}) {
         // provider stops the pass at BREAKER_TRIP instead of after all `limit`
         // claimed jobs have been converted into failures.
         let tripped = false;
+        // What the LAST counted failure was, so the stop message can name it.
+        // SOMET-601: a revoked token tripped this as "looks down", and the
+        // operator went looking for a dead GPU box that was answering fine.
+        let lastCause = null;
         const onResult = (r) => {
           if (r.ok) { brokenSubjects.clear(); return null; }
           // Only PROVIDER-class failures count. A subject whose cutout keyed
@@ -685,7 +692,9 @@ function startDrain(db, opts = {}) {
           // tripping on it would stop a perfectly good batch -- exactly the
           // mistake an external watchdog made here before the distinction
           // existed.
-          if (!failures.classify(r.error).retryable) return null;
+          const cause = failures.classify(r.error);
+          if (!cause.retryable) return null;
+          lastCause = cause;
           brokenSubjects.add(r.subject);
           if (brokenSubjects.size < BREAKER_TRIP()) return null;
           tripped = true;
@@ -700,9 +709,13 @@ function startDrain(db, opts = {}) {
 
         // THE CIRCUIT BREAKER fired inside the pass; this only reports it.
         if (tripped) {
-          self.error = `stopped after ${brokenSubjects.size} different subjects failed on the `
-            + 'provider in a row -- it looks down rather than the subjects being bad. '
-            + 'Nothing was lost: they are queued and will retry.';
+          self.error = lastCause && lastCause.kind === failures.KINDS.AUTH
+            ? `stopped after ${brokenSubjects.size} different subjects in a row were refused `
+              + 'as unauthorised -- the provider rejected its token. Fix the token under AI '
+              + 'Providers, then start the batch again. Nothing was lost: they are still queued.'
+            : `stopped after ${brokenSubjects.size} different subjects failed on the `
+              + 'provider in a row -- it looks down rather than the subjects being bad. '
+              + 'Nothing was lost: they are queued and will retry.';
           break;
         }
         // SOMET-543. Nothing claimed no longer means the queue is empty: it

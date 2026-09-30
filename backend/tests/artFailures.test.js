@@ -144,3 +144,30 @@ test('groupFailures on an empty list is an empty list, not a crash', () => {
   assert.deepEqual(groupFailures([]), []);
   assert.deepEqual(groupFailures(null), []);
 });
+
+// SOMET-601. Real string, from art_generations on 2026-09-30: provider 4's
+// token had been revoked. It fell through to UNKNOWN, and the breaker stopped
+// the batch saying the provider "looks down" -- the box was answering fine.
+const REVOKED = 'provider answered 401: {"detail":"Invalid or revoked token"}';
+
+test('a rejected token is its own cause, with advice to fix the token', () => {
+  for (const err of [REVOKED, 'provider answered 403: {"detail":"Forbidden"}']) {
+    const c = classify(err);
+    assert.equal(c.kind, KINDS.AUTH, `not classified as auth: ${err.slice(0, 40)}`);
+    assert.equal(c.action, 'fix_config');
+    // Retryable: the SAME queued jobs succeed once the token is fixed, and a
+    // fast 401 must not spend their attempts while it is broken.
+    assert.equal(c.retryable, true);
+    assert.match(c.detail, /token/i);
+  }
+  // Only a status code, never a 401 buried in someone else's text.
+  assert.notEqual(classify('provider answered 500: worker 4010 died').kind, KINDS.AUTH);
+});
+
+// The transparency message now carries a decimal ("24.6%") so it can never
+// read as refusing a value equal to its floor. The classifier must still file it.
+test('a decimal transparency refusal is still an unkeyed backdrop', () => {
+  const c = classify('image x.png was generated but could not be recorded: the provider '
+    + 'returned an image that is only 24.6% transparent (floor 25%)');
+  assert.equal(c.kind, KINDS.CONTENT_UNKEYED);
+});
