@@ -25,7 +25,7 @@
 // a slow or failed subjects fetch cannot take the whole editor card down
 // with it.
 import styled from 'styled-components';
-import { useAudioSubjects, useSubjectSlots } from './useAudioAdmin.js';
+import { useAudioSubjects, useSubjectSlots, usePrompts } from './useAudioAdmin.js';
 import { subjectSlotsFor } from './audioBatch.js';
 import { useAudioPreview } from './useAudioPreview.js';
 import { useAiProviders, audioProviderState } from './useAiProviders.js';
@@ -49,6 +49,9 @@ function SubjectSounds({
 }) {
   const { subjects, isLoadingSubjects, subjectsError } = useAudioSubjects();
   const { slots: bindings, isLoadingSlots } = useSubjectSlots(kind, subjectKey);
+  // One request per subject (Task 12), not one per card: every AudioSlotCard
+  // below reads its own slot out of this single `prompts` map.
+  const { prompts } = usePrompts(kind, subjectKey);
   const { activeAudioProvider, isLoadingProviders, providersError } = useAiProviders();
   const canGenerate = canGenerateProp === undefined
     ? audioProviderState({
@@ -96,6 +99,7 @@ function SubjectSounds({
           onStop={preview.stop}
           canGenerate={canGenerate}
           cue={cues[s.slot]}
+          prompt={prompts[s.slot]}
         />
       ))}
     </Wrap>

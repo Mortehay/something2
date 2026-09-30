@@ -9,7 +9,10 @@ import styled from 'styled-components';
 import {
   useProposeAudio, useGenerateAudio, useUploadAudio, useUpdateBinding, useUnbind, generateMutationKey,
   generateBody, useAudioClips, useBindFromLibrary, loopEditable, useSetClipLoopable,
+  useSavePrompt, useWritePrompt, writePromptMutationKey,
 } from './useAudioAdmin.js';
+import { draftText, isDirty } from './artDescriptionDraft.js';
+import { provenanceText, generatePromptFields } from './audioPromptDraft.js';
 import { assetUrl } from './src/js/net/assets.js';
 import { API_URL } from '../../config.js';
 
@@ -57,6 +60,13 @@ const PromptRow = styled.div`
 `;
 const Err = styled.p`color: var(--s2-danger); font-size: 0.8rem; margin: 0.35rem 0 0;`;
 const Hint = styled.p`color: var(--s2-text-muted); font-size: 0.8rem; margin: 0.35rem 0 0;`;
+// The stale badge (Task 12): this card's own Pill, not AudioSlotTable's --
+// that one is scoped to the table and importing it here would reach across
+// components for a one-line styled span.
+const Pill = styled.span`
+  font-size: 0.75rem; padding: 0.1rem 0.4rem; border-radius: 999px; margin-left: 0.35rem;
+  background: var(--s2-bg-sunken); color: var(--s2-warning, var(--s2-danger)); white-space: nowrap;
+`;
 const EngineSelect = styled.select`
   background: var(--s2-bg-sunken); color: var(--s2-text); border: 1px solid var(--s2-border-strong);
   border-radius: 4px; padding: 0.3rem; font-size: 0.8rem;
@@ -66,6 +76,11 @@ const VariantsInput = styled.input`
   border: 1px solid var(--s2-border-strong); border-radius: 4px; padding: 0.3rem; font-size: 0.8rem;
 `;
 const InlineLabel = styled.label`display: flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; color: var(--s2-text-muted);`;
+const HintInput = styled.input`
+  background: var(--s2-bg-sunken); color: var(--s2-text);
+  border: 1px solid var(--s2-border-strong); border-radius: 4px;
+  padding: 0.3rem 0.35rem; font-size: 0.8rem; min-width: 10rem; flex: 1;
+`;
 
 // The two engines the box offers for sfx (spec §4): realistic is the
 // default, retro is cheaper (no model load) but lower fidelity.
@@ -76,6 +91,12 @@ const SFX_ENGINES = [['realistic', 'Realistic'], ['retro', 'Retro']];
 // is false -- the one line of text repeated everywhere a generation control
 // is disabled for lack of a provider.
 const NO_PROVIDER_TITLE = 'No audio provider — add one under AI Providers';
+
+// Task 12 controller ruling: for sfx, Generate never sends a request-level
+// prompt -- the stored text becomes the box `entity` server-side. A dirty
+// (unsaved) sfx draft would therefore generate from the OLD stored text
+// with no visible warning, so Generate is disabled until it's saved.
+const SFX_DIRTY_TITLE = 'Save the prompt first — SFX use the saved prompt';
 
 // The "+ From library" picker (SOMET-591): a small inline list, not a modal --
 // it only ever shows clips of THIS slot's clip kind, which keeps it short.
@@ -253,15 +274,13 @@ function AdminLoadingInline() { return <Hint>Loading…</Hint>; }
 // cue concept at all): `null` means upload-only (spec §4 -- three slots have
 // no cue on the box today), any string means the slot can generate.
 function AudioSlotCard({
-  subject, slot, clipKind, rows, playingId, onPlay, onStop, canGenerate = true, cue,
+  subject, slot, clipKind, rows, playingId, onPlay, onStop, canGenerate = true, cue, prompt,
 }) {
   const isSfx = clipKind === 'sfx';
   const uploadOnly = isSfx && cue === null;
   const propose = useProposeAudio();
   const generate = useGenerateAudio(subject.kind, subject.key, slot);
   const upload = useUploadAudio();
-  const [style, setStyle] = useState('');
-  const [prompt, setPrompt] = useState('');
   const [engine, setEngine] = useState('realistic');
   const [variants, setVariants] = useState(1);
   // What Suggest returned: its style and the box slots for THAT style.
@@ -270,6 +289,22 @@ function AudioSlotCard({
   const [loopUpload, setLoopUpload] = useState(false);
   const canLoop = loopEditable(subject.kind, slot);
   const fileRef = useRef(null);
+
+  // The slot's stored prompt (Task 12): `prompt` is `{ active, history,
+  // stale, currentInput }` or undefined while the parent's usePrompts() is
+  // still loading. null = nobody typed (show stored); '' = cleared. This
+  // replaces the old useState('') style/prompt pair, which could not tell
+  // "matches the stored prompt" from "deliberately blank".
+  const active = prompt ? prompt.active : null;
+  const [styleDraft, setStyleDraft] = useState(null);
+  const [textDraft, setTextDraft] = useState(null);
+  const [hint, setHint] = useState('');
+  const save = useSavePrompt(subject.kind, subject.key);
+  const write = useWritePrompt(subject.kind, subject.key, slot);
+  const writing = useIsMutating({ mutationKey: writePromptMutationKey(subject.kind, subject.key, slot) }) > 0;
+  const styleShown = draftText(styleDraft, active ? { text: active.style || '' } : null);
+  const textShown = draftText(textDraft, active);
+  const dirty = isDirty(styleDraft, active ? { text: active.style || '' } : null) || isDirty(textDraft, active);
 
   // NOT generate.isPending: that comes from THIS hook instance, which is
   // fresh (isPending=false) every time this card remounts -- switching
@@ -285,8 +320,10 @@ function AudioSlotCard({
       { subject_kind: subject.kind, subject_key: subject.key, slot },
       {
         onSuccess: (r) => {
-          setStyle(r.style || '');
-          setPrompt(r.prompt || '');
+          // Suggest fills the drafts as UNSAVED edits -- it never writes the
+          // prompt store itself, so Save stays the one path that commits it.
+          setStyleDraft(r.style || '');
+          setTextDraft(r.prompt || '');
           setProposal({ style: r.style || '', slots: r.slots || null });
         },
       },
@@ -296,7 +333,24 @@ function AudioSlotCard({
   const onGenerate = () => {
     generate.mutate(generateBody(isSfx
       ? { subject, slot, engine, variants }
-      : { subject, slot, style, prompt, proposal }));
+      : {
+        subject, slot, ...generatePromptFields({
+          isSfx, styleDraft, textDraft, active,
+        }), proposal,
+      }));
+  };
+
+  const onSave = () => {
+    save.mutate(
+      {
+        slot, style: isSfx ? null : styleShown, text: textShown, expectActiveId: active ? active.id : null,
+      },
+      { onSuccess: () => { setStyleDraft(null); setTextDraft(null); } },
+    );
+  };
+
+  const onWrite = () => {
+    write.mutate({ hint }, { onSuccess: () => { setStyleDraft(null); setTextDraft(null); } });
   };
 
   const onUpload = (e) => {
@@ -328,23 +382,53 @@ function AudioSlotCard({
 
       {uploadOnly && <Hint>Upload only — the provider has no cue for this slot.</Hint>}
 
-      {/* Style/prompt and Suggest are music/ambience-only (spec §4): sfx
-          generation is cue-driven, with no free prompt to suggest. */}
-      {!isSfx && (
-        <PromptRow>
-          <input
-            value={style}
-            onChange={(e) => setStyle(e.target.value)}
-            placeholder="style"
-            aria-label={`Style for ${slot}`}
-          />
-          <input
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="prompt"
-            aria-label={`Prompt for ${slot}`}
-          />
-        </PromptRow>
+      {/* The prompt editor (Task 12, spec §9): every slot that can generate
+          gets one, sfx included -- an sfx slot edits its "sound source"
+          text (no style field; see SFX_ENGINES above for its only other
+          knob), which becomes the box's `entity` server-side rather than a
+          request-level prompt. Upload-only slots have no cue and no prompt
+          row at all. */}
+      {!uploadOnly && (
+        <>
+          <PromptRow>
+            {!isSfx && (
+              <input
+                value={styleShown}
+                onChange={(e) => setStyleDraft(e.target.value)}
+                placeholder="style"
+                aria-label={`Style for ${slot}`}
+              />
+            )}
+            <input
+              value={textShown}
+              onChange={(e) => setTextDraft(e.target.value)}
+              placeholder={isSfx ? 'sound source, e.g. "a heavy iron mace"' : 'prompt'}
+              aria-label={`${isSfx ? 'Sound source' : 'Prompt'} for ${slot}`}
+            />
+          </PromptRow>
+          <Hint>
+            {provenanceText(active)}
+            {prompt && prompt.stale && (
+              <Pill title={`Written from: ${active.source_input}\nNow: ${prompt.currentInput}`}> stale</Pill>
+            )}
+          </Hint>
+          <Controls>
+            <Secondary type="button" disabled={!dirty || save.isPending} onClick={onSave}>
+              {save.isPending ? 'Saving…' : 'Save prompt'}
+            </Secondary>
+            <HintInput
+              value={hint}
+              onChange={(e) => setHint(e.target.value)}
+              placeholder="hint (optional)"
+              aria-label={`Hint for ${slot}`}
+            />
+            <Secondary type="button" disabled={writing} onClick={onWrite}>
+              {writing ? <>Writing… <Elapsed />s</> : 'Write with model'}
+            </Secondary>
+          </Controls>
+          {write.isError && <Err>{write.error.message}</Err>}
+          {save.isError && <Err>{save.error.message}</Err>}
+        </>
       )}
 
       <Controls>
@@ -386,8 +470,8 @@ function AudioSlotCard({
         {!uploadOnly && (
           <Button
             type="button"
-            disabled={generating || !canGenerate}
-            title={canGenerate ? undefined : NO_PROVIDER_TITLE}
+            disabled={generating || !canGenerate || (isSfx && dirty)}
+            title={!canGenerate ? NO_PROVIDER_TITLE : ((isSfx && dirty) ? SFX_DIRTY_TITLE : undefined)}
             onClick={onGenerate}
           >
             {generating ? <>Generating… <Elapsed />s</> : 'Generate'}

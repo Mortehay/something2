@@ -482,6 +482,76 @@ export function useDeleteUnboundClips() {
   });
 }
 
+// --- Prompts (Task 12, spec 2026-09-30 §9) ---------------------------------
+
+const promptsKey = (kind, key) => ['audio-prompts', kind, key];
+
+export function usePrompts(kind, key) {
+  const { data, isLoading } = useQuery({
+    queryKey: promptsKey(kind, key),
+    enabled: Boolean(kind && key),
+    queryFn: () => getJson(
+      `${API_URL}/api/audio/admin/prompts/${encodeURIComponent(kind)}/${encodeURIComponent(key)}`,
+      `${kind}/${key}'s prompts`,
+    ),
+  });
+  return { prompts: data || {}, isLoadingPrompts: isLoading };
+}
+
+// Both mutations refresh the subject's prompts and the table's prompt column
+// (SUBJECTS_KEY carries promptStates).
+function usePromptInvalidation(kind, key) {
+  const qc = useQueryClient();
+  return () => {
+    qc.invalidateQueries({ queryKey: promptsKey(kind, key) });
+    qc.invalidateQueries({ queryKey: SUBJECTS_KEY });
+  };
+}
+
+export function useSavePrompt(kind, key) {
+  const invalidate = usePromptInvalidation(kind, key);
+  return useMutation({
+    mutationFn: async ({
+      slot, style, text, expectActiveId,
+    }) => {
+      const res = await apiFetch(
+        `${API_URL}/api/audio/admin/prompts/${encodeURIComponent(kind)}/${encodeURIComponent(key)}/${encodeURIComponent(slot)}`,
+        {
+          method: 'PUT',
+          headers: authHeaders(),
+          body: JSON.stringify({ style, text, expect_active_id: expectActiveId ?? null }),
+        },
+      );
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Failed to save the prompt');
+      return json;
+    },
+    onSuccess: invalidate,
+    onError: (err) => toast.error(err.message),
+  });
+}
+
+export function writePromptMutationKey(kind, key, slot) {
+  return ['audio-prompt-write', kind, key, slot];
+}
+
+export function useWritePrompt(kind, key, slot) {
+  const invalidate = usePromptInvalidation(kind, key);
+  return useMutation({
+    mutationKey: writePromptMutationKey(kind, key, slot),
+    mutationFn: async ({ hint }) => {
+      const { res, json } = await post(
+        `/api/audio/admin/prompts/${encodeURIComponent(kind)}/${encodeURIComponent(key)}/${encodeURIComponent(slot)}/write`,
+        { hint },
+      );
+      if (!res.ok) throw new Error(`${json.error || 'Failed to write the prompt'}${json.via ? ` (${json.via})` : ''}`);
+      return json;
+    },
+    onSuccess: invalidate,
+    onError: (err) => toast.error(err.message),
+  });
+}
+
 // Bind-from-library: attach an existing (maybe already-bound-elsewhere) clip
 // to another subject/slot without generating or uploading. Used by both
 // AudioSlotCard's "+ From library" picker and (indirectly) nothing else yet.
