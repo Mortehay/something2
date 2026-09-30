@@ -113,3 +113,46 @@ test('listTextModels maps values', async () => {
   assert.deepEqual(r, { ok: true, models: ['qwen'] });
   assert.equal(calls[0].headers.Authorization, 'Bearer k');
 });
+
+// --- Fix round 1 ---
+
+test('malformed base_url: complete() never throws, no fetch call, no fallback', async () => {
+  const provider = { ...BOX, base_url: 'not a url' };
+  const r = await tp.complete(fakeDb(provider), REQ, { fetchImpl: async () => { throw new Error('no call expected'); } });
+  assert.deepEqual({ ok: r.ok, via: r.via, busy: r.busy }, { ok: false, via: 'box', busy: false });
+  assert.match(r.error, /base_url/);
+});
+
+test('malformed base_url: listTextModels never throws', async () => {
+  const provider = { ...BOX, base_url: 'not a url' };
+  const r = await tp.listTextModels(provider, { fetchImpl: async () => { throw new Error('no call expected'); } });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /base_url/);
+});
+
+test('db lookup rejects: complete() never throws, no fetch call', async () => {
+  const badDb = { query: async () => { throw new Error('connection refused'); } };
+  const r = await tp.complete(badDb, REQ, { fetchImpl: async () => { throw new Error('no call expected'); } });
+  assert.deepEqual({ ok: r.ok, via: r.via, busy: r.busy }, { ok: false, via: 'box', busy: false });
+  assert.match(r.error, /could not read the text provider/);
+});
+
+for (const status of [500, 502, 504]) {
+  test(`box ${status} falls back (server fault, not 409/503 busy)`, async () => {
+    const { calls, fetchImpl } = recorder([
+      ['/api/text', () => json(status, {})],
+      ['/v1/chat/completions', () => json(200, { choices: [{ message: { content: '{"entity":"a"}' } }] })],
+    ]);
+    const r = await tp.complete(fakeDb(BOX), REQ, { fetchImpl });
+    assert.equal(r.ok, true, r.error);
+    assert.equal(r.via, 'fallback');
+    assert.equal(calls.length, 2);
+  });
+}
+
+test('boxOnly + box 500: ok:false, busy:false, no fallback call', async () => {
+  const { calls, fetchImpl } = recorder([['/api/text', () => json(500, {})]]);
+  const r = await tp.complete(fakeDb(BOX), REQ, { fetchImpl, boxOnly: true });
+  assert.deepEqual({ ok: r.ok, busy: r.busy, via: r.via }, { ok: false, busy: false, via: 'box' });
+  assert.equal(calls.length, 1);
+});
