@@ -185,3 +185,27 @@ describe("skill surfaces draw art when ready, emoji otherwise", () => {
     expect(b.rec.texts.some((x) => x.t.startsWith(`${fireball.icon}  `))).toBe(false);
   });
 });
+
+// The panels are pure and take `art` as an argument, so every panel test above
+// would stay green if RenderSystem stopped passing it along -- a dead feature
+// under a green suite. These pin the hand-off itself.
+describe("RenderSystem hands its GameArt to the panels", () => {
+  function rs(art) {
+    const r = Object.create(RenderSystem.prototype);
+    r.gameArt = art;
+    return r;
+  }
+  const everything = { icon: () => IMG };
+
+  it("skills panel", () => {
+    const rec = recordingCtx();
+    rs(everything).renderSkillsPanel(rec.ctx, { tab: "all", page: 0 }, []);
+    expect(rec.images.length).toBeGreaterThan(0);
+  });
+
+  it("gem merchant", () => {
+    const rec = recordingCtx();
+    rs(everything).renderGemShopPanel(rec.ctx, { page: 0 }, []);
+    expect(rec.images.length).toBeGreaterThan(0);
+  });
+});
