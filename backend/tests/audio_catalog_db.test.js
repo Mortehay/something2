@@ -4,7 +4,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
-const { withAdvisoryLock, AUDIO_CLIPS_LOCK_KEY } = require('./helpers/advisoryLock.js');
+const { withAdvisoryLock, AUDIO_CLIPS_LOCK_KEY, AI_PROVIDERS_LOCK_KEY } = require('./helpers/advisoryLock.js');
 
 const url = process.env.TEST_DATABASE_URL;
 const skip = !url ? 'no TEST_DATABASE_URL -- refusing to write to a real database' : false;
@@ -44,19 +44,25 @@ test('audio catalog schema', { skip }, async (t) => {
       const img = await insertProvider(`schema-a-img-${tag}`, 'image');
       const aud = await insertProvider(`schema-a-aud-${tag}`, 'audio');
       const aud2 = await insertProvider(`schema-a-aud2-${tag}`, 'audio');
-      const client = await pool.connect();
-      try {
-        await client.query('BEGIN');
-        await client.query('UPDATE ai_providers SET is_active = false WHERE is_active');
-        await client.query('UPDATE ai_providers SET is_active = true WHERE id = ANY($1)', [[img, aud]]);
-        await assert.rejects(
-          client.query('UPDATE ai_providers SET is_active = true WHERE id = $1', [aud2]),
-          /duplicate key/i,
-        );
-      } finally {
-        await client.query('ROLLBACK');
-        client.release();
-      }
+      // AI_PROVIDERS_LOCK_KEY (see advisoryLock.js): the transaction below
+      // deactivates EVERY active provider, so a peer test activating its own
+      // provider mid-way makes the unique-index assertion fire on the wrong
+      // statement (seen in a parallel run of the audio files).
+      await withAdvisoryLock(pool, AI_PROVIDERS_LOCK_KEY, async () => {
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          await client.query('UPDATE ai_providers SET is_active = false WHERE is_active');
+          await client.query('UPDATE ai_providers SET is_active = true WHERE id = ANY($1)', [[img, aud]]);
+          await assert.rejects(
+            client.query('UPDATE ai_providers SET is_active = true WHERE id = $1', [aud2]),
+            /duplicate key/i,
+          );
+        } finally {
+          await client.query('ROLLBACK');
+          client.release();
+        }
+      });
     });
 
     await t.test('clips: kind check, bindings unique + cascade', async () => {

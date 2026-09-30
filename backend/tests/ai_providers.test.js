@@ -183,51 +183,46 @@ test('a partial update only validates the keys it carries', () => {
 test('exactly one provider can be active', { skip: !url ? 'no database URL' : false }, async (t) => {
   const pool = new Pool({ connectionString: url });
   const made = [];
-  const restoreActive = await snapshotActive(pool);
-  // ONE after-hook, deleting before ending. node:test runs t.after hooks in
-  // registration order, so a separate `t.after(() => pool.end())` registered
-  // first would close the pool out from under the cleanup query and the rows
-  // would survive the run.
-  t.after(async () => {
+  t.after(() => pool.end());
+  // AI_PROVIDERS_LOCK_KEY (see advisoryLock.js): this flips which image
+  // provider is active; delete + restore happen INSIDE the lock.
+  await withAdvisoryLock(pool, AI_PROVIDERS_LOCK_KEY, async () => {
+    const restoreActive = await snapshotActive(pool);
     try {
-      if (made.length) {
-        await pool.query('DELETE FROM ai_providers WHERE id = ANY($1)', [made]);
-      }
-      await restoreActive();
+      const insert = async (name) => {
+        const r = await pool.query(
+          `INSERT INTO ai_providers (name, base_url, request_template)
+           VALUES ($1, 'http://127.0.0.1:9/never-called', '{}'::jsonb) RETURNING id`,
+          [name],
+        );
+        made.push(r.rows[0].id);
+        return r.rows[0].id;
+      };
+
+      const a = await insert(`test-provider-a-${process.pid}`);
+      const b = await insert(`test-provider-b-${process.pid}`);
+
+      await setActiveProvider(pool, a);
+      await setActiveProvider(pool, b);
+
+      // Scoped to image: one active row PER modality, and an audio provider may
+      // legitimately be active on the same database.
+      const active = await pool.query("SELECT id FROM ai_providers WHERE is_active AND modality = 'image'");
+      assert.strictEqual(active.rowCount, 1, 'activating b must deactivate a');
+      assert.strictEqual(active.rows[0].id, b);
+
+      // Activating an id that does not exist must not leave the world with zero
+      // active providers -- the deactivation has to roll back with the failure.
+      const missing = await setActiveProvider(pool, 2147483600);
+      assert.strictEqual(missing, null, 'activating a missing id reports not-found');
+      const stillActive = await pool.query("SELECT id FROM ai_providers WHERE is_active AND modality = 'image'");
+      assert.strictEqual(stillActive.rowCount, 1, 'a failed activation must not clear the active row');
+      assert.strictEqual(stillActive.rows[0].id, b);
     } finally {
-      await pool.end();
+      if (made.length) await pool.query('DELETE FROM ai_providers WHERE id = ANY($1)', [made]);
+      await restoreActive();
     }
   });
-
-  const insert = async (name) => {
-    const r = await pool.query(
-      `INSERT INTO ai_providers (name, base_url, request_template)
-       VALUES ($1, 'http://127.0.0.1:9/never-called', '{}'::jsonb) RETURNING id`,
-      [name],
-    );
-    made.push(r.rows[0].id);
-    return r.rows[0].id;
-  };
-
-  const a = await insert(`test-provider-a-${process.pid}`);
-  const b = await insert(`test-provider-b-${process.pid}`);
-
-  await setActiveProvider(pool, a);
-  await setActiveProvider(pool, b);
-
-  // Scoped to image: one active row PER modality, and an audio provider may
-  // legitimately be active on the same database.
-  const active = await pool.query("SELECT id FROM ai_providers WHERE is_active AND modality = 'image'");
-  assert.strictEqual(active.rowCount, 1, 'activating b must deactivate a');
-  assert.strictEqual(active.rows[0].id, b);
-
-  // Activating an id that does not exist must not leave the world with zero
-  // active providers -- the deactivation has to roll back with the failure.
-  const missing = await setActiveProvider(pool, 2147483600);
-  assert.strictEqual(missing, null, 'activating a missing id reports not-found');
-  const stillActive = await pool.query("SELECT id FROM ai_providers WHERE is_active AND modality = 'image'");
-  assert.strictEqual(stillActive.rowCount, 1, 'a failed activation must not clear the active row');
-  assert.strictEqual(stillActive.rows[0].id, b);
 });
 
 // --- Modality (game audio slice 1) ---------------------------------------

@@ -215,10 +215,13 @@ const AUDIO_CLIPS_LOCK_KEY = 591204817;
 // box changes what every OTHER test, and any batch running against the same
 // database, is talking to. Until this key, no test that flipped is_active held
 // a lock at all: audio_prompt_routes_db parked every active audio/text
-// provider for its whole body, and ai_providers.test.js's per-modality case
-// re-activated rows mid-run. Every test that changes is_active on an
-// audio/text provider takes this key for the span from park to restore, and
-// restores INSIDE it (a t.after hook runs after the lock is released).
+// provider for its whole body, ai_providers.test.js re-activated rows mid-run,
+// and audio_catalog_db's transaction (deactivate ALL, activate two) hit the
+// unique index on the wrong statement when a peer committed an active row in
+// between -- seen in 1 of 5 parallel runs of the audio files. Every test that
+// changes is_active (any modality) takes this key for the span from park to
+// restore, and restores INSIDE it (a t.after hook runs after the lock is
+// released).
 //
 // It cannot guard a real process (make audio-describe, the dev backend) --
 // those take no test lock. Do not run a provider-parking test while a batch
