@@ -4084,7 +4084,7 @@ export class RenderSystem {
     };
     const layout = layoutInventory(state);
     for (const a of layout.hitAreas) hitAreas.push(a);
-    drawInventory(ctx, layout, state);
+    drawInventory(ctx, layout, state, this.gameArt);
     return layout;
   }
 

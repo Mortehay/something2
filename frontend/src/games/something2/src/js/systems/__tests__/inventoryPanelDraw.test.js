@@ -14,7 +14,7 @@ function stubCtx() {
     fillRect(x, y, w, h) { fillRects.push({ x, y, w, h }); },
     strokeRect() {}, beginPath() {}, moveTo() {}, lineTo() {}, stroke() {}, fill() {},
     fillText(text, x, y) { texts.push({ text, x, y }); },
-    drawImage(img, x, y, w, h) { images.push({ x, y, w, h }); },
+    drawImage(img, x, y, w, h) { images.push({ img, x, y, w, h }); },
     measureText(t) { return { width: String(t).length * 6 }; },
     set fillStyle(_v) {}, set strokeStyle(_v) {}, set font(_v) {},
     set lineWidth(_v) {}, set textAlign(_v) {}, set textBaseline(_v) {},
@@ -26,6 +26,61 @@ function inv({ items = [], equipment = {}, types = [], capacity = null } = {}) {
   return { types: new Map(types.map((t) => [t.id, t])), items, equipment, ammoCounts: new Map(), capacity };
 }
 const SWORD = { id: 1, name: "short sword", category: "weapon", slot: "main_hand", damage: 5, cooldown: 1 };
+
+// SOMET-600: generated item icons. Art for type 1 only.
+const ICON = { naturalWidth: 256, naturalHeight: 256 };
+const swordArt = { icon: (kind, key) => (kind === "item" && Number(key) === 1 ? ICON : null) };
+const iconDraws = (ctx) => ctx.images.filter((d) => d.img === ICON);
+
+describe("drawInventory item icons (SOMET-600)", () => {
+  const AXE = { id: 2, name: "iron axe", category: "weapon", slot: "main_hand", damage: 7, cooldown: 1 };
+
+  it("draws the icon in place of the initials, only for the type that has art", () => {
+    const i = inv({ types: [SWORD, AXE], items: [{ id: "s", typeId: 1, quantity: 3 }, { id: "a", typeId: 2, quantity: 1 }] });
+    const layout = layoutInventory({ inventory: i });
+
+    const plain = stubCtx();
+    drawInventory(plain, layout, { inventory: i });
+    expect(iconDraws(plain)).toHaveLength(0);
+    expect(plain.texts.some((t) => t.text === "SH")).toBe(true);
+
+    const ctx = stubCtx();
+    drawInventory(ctx, layout, { inventory: i }, swordArt);
+    expect(iconDraws(ctx)).toHaveLength(1);
+    expect(ctx.texts.some((t) => t.text === "SH")).toBe(false);
+    // No art for the axe: its initials stay.
+    expect(ctx.texts.some((t) => t.text === "IR")).toBe(true);
+    // The stack badge still rides on top of the icon.
+    expect(ctx.texts.some((t) => t.text === "3")).toBe(true);
+    const cell = layout.cells.find((c) => c.item && c.item.id === "s");
+    expect(iconDraws(ctx)[0]).toMatchObject({ x: cell.x + 3, y: cell.y + 3, w: cell.w - 6 });
+  });
+
+  it("draws the equipped item's icon in its paperdoll slot and keeps the name clear of it", () => {
+    const i = inv({ types: [SWORD], items: [{ id: "s", typeId: 1, quantity: 1 }], equipment: { main_hand: "s" } });
+    const layout = layoutInventory({ inventory: i });
+    const slot = layout.slots.find((s) => s.slot === "main_hand");
+    const ctx = stubCtx();
+    drawInventory(ctx, layout, { inventory: i }, swordArt);
+    const inSlot = iconDraws(ctx).filter((d) => d.x > slot.x && d.x < slot.x + slot.w && d.y >= slot.y && d.y < slot.y + slot.h);
+    expect(inSlot).toHaveLength(1);
+    expect(ctx.texts.some((t) => t.text === "short sword")).toBe(true);
+  });
+
+  it("draws the icon on the drag ghost", () => {
+    const i = inv({ types: [SWORD], items: [{ id: "s", typeId: 1, quantity: 1 }] });
+    const layout = layoutInventory({ inventory: i });
+    const drag = { armed: true, itemId: "s", x: 300, y: 300 };
+    const plain = stubCtx();
+    drawInventory(plain, layout, { inventory: i, drag });
+    const ctx = stubCtx();
+    drawInventory(ctx, layout, { inventory: i, drag }, swordArt);
+    // One in the (dimmed) source cell, one on the ghost.
+    expect(iconDraws(ctx)).toHaveLength(2);
+    expect(ctx.texts.filter((t) => t.text === "SH")).toHaveLength(0);
+    expect(plain.texts.filter((t) => t.text === "SH")).toHaveLength(2);
+  });
+});
 
 describe("drawInventory", () => {
   it("writes the used/capacity counter into the title bar", () => {
@@ -118,6 +173,16 @@ describe("drawInventory", () => {
 });
 
 describe("RenderSystem delegation", () => {
+  it("passes its GameArt through, so item icons reach the real panel (SOMET-600)", () => {
+    const rs = Object.create(RenderSystem.prototype);
+    rs.imageManager = { get: () => null };
+    rs.gameArt = swordArt;
+    const i = inv({ types: [SWORD], items: [{ id: "w", typeId: 1, quantity: 1 }] });
+    const ctx = stubCtx();
+    rs.renderInventory(ctx, i, [], null, false, { tab: "all", page: 0, gold: 0 });
+    expect(iconDraws(ctx)).toHaveLength(1);
+  });
+
   it("records the layout's hit areas so clicks still route", () => {
     const rs = Object.create(RenderSystem.prototype);
     rs.imageManager = { get: () => null };

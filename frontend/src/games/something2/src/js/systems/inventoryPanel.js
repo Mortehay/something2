@@ -4,7 +4,8 @@
 // paints exactly what this returns and decides nothing itself.
 import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
 import { SLOTS, typeOf, canEquipClient } from "../core/inventory.js";
-import { rarityBorderColor, affixModifier } from "./itemDisplay.js";
+import { rarityBorderColor, affixModifier, clipToWidth } from "./itemDisplay.js";
+import { artIcon, drawIconFit } from "./gameArt.js";
 import { layoutCharacterTab, drawCharacterTab, formatModifier, STAT_ABBR } from "./characterTab.js";
 
 export const STAT_NAMES = {
@@ -372,7 +373,13 @@ function inside(rect, x, y) {
   return x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h;
 }
 
-export function drawInventory(ctx, layout, state) {
+// The item type's generated icon (SOMET-600), or null -> the initials.
+function itemIcon(art, type) {
+  return type && type.id != null ? artIcon(art, "item", type.id) : null;
+}
+
+// `art` (SOMET-600) is the GameArt lookup; null draws initials as before.
+export function drawInventory(ctx, layout, state, art = null) {
   const { playerImage = null, hoverX = null, hoverY = null, drag = null } = state || {};
   const { panel, title, close } = layout;
 
@@ -426,7 +433,16 @@ export function drawInventory(ctx, layout, state) {
     ctx.fillStyle = s.disabled ? "#6b7280" : "#e5e7eb";
     ctx.fillText(s.slot, s.x + 5, s.y + 4);
     ctx.fillStyle = "#9ca3af";
-    ctx.fillText(s.equippedName || "-", s.x + 5, s.y + 16);
+    const slotIcon = itemIcon(art, s.equippedType);
+    if (slotIcon) {
+      // Icon at the right edge; the name gives up that width rather than
+      // running under it.
+      const iconS = s.h - 4;
+      drawIconFit(ctx, slotIcon, s.x + s.w - iconS - 2, s.y + 2, iconS);
+      ctx.fillText(clipToWidth(s.equippedName || "-", s.w - iconS - 12, 11), s.x + 5, s.y + 16);
+    } else {
+      ctx.fillText(s.equippedName || "-", s.x + 5, s.y + 16);
+    }
   }
 
   // Tabs.
@@ -470,9 +486,14 @@ export function drawInventory(ctx, layout, state) {
         : rarityBorderColor(c.item ? c.item.rarity : null, "#2a2a3a");
       ctx.strokeRect(c.x, c.y, c.w, c.h);
       if (c.item) {
-        ctx.fillStyle = "#e5e7eb";
-        ctx.font = "14px monospace";
-        ctx.fillText(initials(c.type && c.type.name), c.x + 8, c.y + 14);
+        const cellIcon = itemIcon(art, c.type);
+        if (cellIcon) {
+          drawIconFit(ctx, cellIcon, c.x + 3, c.y + 3, c.w - 6);
+        } else {
+          ctx.fillStyle = "#e5e7eb";
+          ctx.font = "14px monospace";
+          ctx.fillText(initials(c.type && c.type.name), c.x + 8, c.y + 14);
+        }
         // Only a real STACK is badged: a "1" on every single item is noise, and
         // the reference screenshot badges the same way.
         if (c.item.quantity > 1) {
@@ -577,9 +598,14 @@ export function drawInventory(ctx, layout, state) {
     ctx.fillRect(drag.x - CELL / 2, drag.y - CELL / 2, CELL, CELL);
     ctx.strokeStyle = "#4a9eff";
     ctx.strokeRect(drag.x - CELL / 2, drag.y - CELL / 2, CELL, CELL);
-    ctx.fillStyle = "#e5e7eb";
-    ctx.font = "14px monospace";
-    ctx.fillText(label, drag.x - CELL / 2 + 8, drag.y - 8);
+    const ghostIcon = itemIcon(art, src && src.type);
+    if (ghostIcon) {
+      drawIconFit(ctx, ghostIcon, drag.x - CELL / 2 + 3, drag.y - CELL / 2 + 3, CELL - 6);
+    } else {
+      ctx.fillStyle = "#e5e7eb";
+      ctx.font = "14px monospace";
+      ctx.fillText(label, drag.x - CELL / 2 + 8, drag.y - 8);
+    }
     ctx.globalAlpha = 1;
   }
 
