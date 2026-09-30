@@ -58,6 +58,8 @@ function ProviderCard({ provider, isOnlyActive }) {
   const test = useTestProvider();
   const isNew = !provider;
   const isAudio = form.modality === 'audio';
+  const isText = form.modality === 'text';
+  const modalityLabel = isAudio ? 'Audio' : isText ? 'Text' : 'Image';
   // The raw styles/cues an audio provider's Refresh returned. Not the same
   // as models_cache (which the backend flattens into plain strings, with
   // cues prefixed "cue:") -- this keeps the labels and cue engine/entity
@@ -88,7 +90,7 @@ function ProviderCard({ provider, isOnlyActive }) {
       <Row>
         <Label>Name</Label>
         <Input value={form.name} onChange={e => set('name', e.target.value)} placeholder="desktop GPU box" />
-        <Badge $bg="var(--s2-surface-raised)">{isAudio ? 'AUDIO' : 'IMAGE'}</Badge>
+        <Badge $bg="var(--s2-surface-raised)">{modalityLabel.toUpperCase()}</Badge>
         {provider?.is_active && <Badge>ACTIVE</Badge>}
         {provider && !provider.enabled && <span style={{ color: 'var(--s2-text-muted)' }}>disabled</span>}
       </Row>
@@ -99,10 +101,11 @@ function ProviderCard({ provider, isOnlyActive }) {
           <Select value={form.modality} onChange={e => set('modality', e.target.value)}>
             <option value="image">Image</option>
             <option value="audio">Audio</option>
+            <option value="text">Text</option>
           </Select>
         ) : (
           <span style={{ color: 'var(--s2-text-muted)' }}>
-            {isAudio ? 'Audio' : 'Image'} — fixed after creation
+            {modalityLabel} — fixed after creation
           </span>
         )}
       </Row>
@@ -143,6 +146,8 @@ function ProviderCard({ provider, isOnlyActive }) {
 
       {isAudio ? (
         <Hint>Talks to the box's /api/audio endpoints. Refresh lists its styles and cues.</Hint>
+      ) : isText ? (
+        <Hint>Talks to the box's /api/text endpoint (prompt writing). Refresh lists its models; the box's gateway loads them on demand.</Hint>
       ) : (
         <>
           <Row>
@@ -216,7 +221,7 @@ function ProviderCard({ provider, isOnlyActive }) {
       )}
 
       <Row>
-        <Label>{isAudio ? 'Styles' : 'Model'}</Label>
+        <Label>{isAudio ? 'Styles' : isText ? 'Models' : 'Model'}</Label>
         {isAudio ? (
           // The audio adapter never reads `model` -- the style is chosen per
           // subject by propose -- so there is nothing to pick here. models_cache
@@ -225,6 +230,13 @@ function ProviderCard({ provider, isOnlyActive }) {
             {models.length > 0
               ? `${models.filter(m => !m.startsWith('cue:')).length} style(s), ${models.filter(m => m.startsWith('cue:')).length} cue(s) — chosen per subject, not here`
               : 'refresh to list styles and cues'}
+          </Hint>
+        ) : isText ? (
+          // The text adapter never reads `model` either -- the box's gateway
+          // picks and loads one of its listed models on demand -- so this is
+          // display-only, same reasoning as the audio styles hint above.
+          <Hint style={{ margin: 0 }}>
+            {models.length ? `${models.join(', ')} — the box picks and loads it` : 'refresh to list models'}
           </Hint>
         ) : models.length > 0 ? (
           <Select value={form.model} onChange={e => set('model', e.target.value)}>

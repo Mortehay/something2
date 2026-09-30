@@ -123,9 +123,9 @@ export function validateProviderForm(form) {
   if (url.username || url.password) {
     return 'Base URL must not embed credentials; use the auth header fields instead';
   }
-  // An audio provider has no request template -- the server fills {} for
-  // one -- so the image-only field below is not part of its validation.
-  if (form.modality === 'audio') return null;
+  // Audio and text providers have no request template -- the server fills {}
+  // for one -- so the image-only field below is not part of their validation.
+  if (form.modality === 'audio' || form.modality === 'text') return null;
   const parsed = parseTemplate(form.request_template);
   if (parsed.error) return `Request template ${parsed.error}`;
   return null;
@@ -146,14 +146,14 @@ export function templateWarning(text) {
 
 // The PATCH/POST body. See the token rules at the top of this file.
 //
-// An audio provider omits every image-only field rather than sending empty/
-// default values for them: the backend has no use for a request template,
-// model discovery path, response pointer or sprite-sheet grid on an audio
-// row, and sending them would just be dead columns to ignore. The server
-// fills a default request_template ({}) itself when it is absent and
-// modality is 'audio'.
+// An audio or text provider omits every image-only field rather than sending
+// empty/default values for them: the backend has no use for a request
+// template, model discovery path, response pointer or sprite-sheet grid on
+// an audio or text row, and sending them would just be dead columns to
+// ignore. The server fills a default request_template ({}) itself when it is
+// absent and modality is 'audio' or 'text'.
 export function providerFormToPayload(form) {
-  const modality = form.modality === 'audio' ? 'audio' : 'image';
+  const modality = form.modality === 'audio' || form.modality === 'text' ? form.modality : 'image';
   const payload = {
     name: form.name.trim(),
     base_url: form.base_url.trim(),

@@ -102,10 +102,12 @@ function providerFieldError(body, { partial = false } = {}) {
     if (bad) return bad;
   }
   const modality = has('modality') ? body.modality : undefined;
-  if (modality !== undefined && modality !== 'image' && modality !== 'audio') {
-    return "modality must be 'image' or 'audio'";
+  if (modality !== undefined && !['image', 'audio', 'text'].includes(modality)) {
+    return "modality must be 'image', 'audio' or 'text'";
   }
-  const templateRequired = !partial && modality !== 'audio';
+  // Neither audio nor text has a request template (both have hand-written
+  // adapters); only an image provider is template-driven.
+  const templateRequired = !partial && modality !== 'audio' && modality !== 'text';
   if (templateRequired || has('request_template')) {
     // The template becomes a POST body. An array or a bare string would be
     // accepted by jsonb and then fail at generate time against the remote
@@ -201,9 +203,10 @@ async function loadActiveProviderWithSecret(db, modality = 'image') {
   return r.rows[0] || null;
 }
 
-// An audio profile has no template, but the column is NOT NULL.
+// Audio and text profiles have no template, but the column is NOT NULL.
 async function createProvider(db, body) {
-  const withDefaults = body.modality === 'audio' && body.request_template === undefined
+  const templateless = body.modality === 'audio' || body.modality === 'text';
+  const withDefaults = templateless && body.request_template === undefined
     ? { ...body, request_template: {} }
     : body;
   const { columns, values } = buildProviderPatch(withDefaults);

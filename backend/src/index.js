@@ -158,6 +158,7 @@ const passiveNodesRoutes = require('./api/passiveNodesRoutes.js');
 const characterRoutes = require('./api/characterRoutes.js');
 const audioRoutes = require('./api/audioRoutes.js');
 const remoteAudioProvider = require('./services/remoteAudioProvider');
+const textProvider = require('./services/textProvider');
 const { DEFAULTS: GAME_SETTING_DEFAULTS, getSettings, setSetting } = require('./services/gameSettings.js');
 const { ownedCharacter } = require('./services/characters.js');
 const { listVisited } = require('./services/visitedWorlds.js');
@@ -2823,6 +2824,12 @@ app.post('/api/ai-providers/:id/refresh-models', adminGuard, async (req, res) =>
       await aiProviders.saveModelsCache(pool, id, models);
       return res.json({ ok: true, models, styles: r.styles, cues: r.cues });
     }
+    if (provider.modality === 'text') {
+      const r = await textProvider.listTextModels(provider);
+      if (!r.ok) return res.json({ ok: false, error: r.error, status: r.status ?? null });
+      await aiProviders.saveModelsCache(pool, id, r.models);
+      return res.json({ ok: true, models: r.models });
+    }
     const result = await providerDiscovery.fetchModels(provider);
     if (!result.ok) {
       return res.json({ ok: false, error: result.error, status: result.status ?? null });
@@ -2854,6 +2861,16 @@ app.post('/api/ai-providers/:id/test', adminGuard, async (req, res) => {
       // Spread explicitly rather than returning `r`: nothing from the
       // provider row or an unrecognised field on `r` belongs in this
       // response, least of all auth_token.
+      res.json({
+        ok: r.ok, status: r.status ?? null, latency_ms: Date.now() - startedAt, error: r.error ?? null,
+      });
+      return;
+    }
+    // Same reasoning as audio: probe an AUTHENTICATED text endpoint, so a
+    // bad token fails here rather than on the first prompt write.
+    if (provider.modality === 'text') {
+      const startedAt = Date.now();
+      const r = await textProvider.listTextModels(provider);
       res.json({
         ok: r.ok, status: r.status ?? null, latency_ms: Date.now() - startedAt, error: r.error ?? null,
       });
