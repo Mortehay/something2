@@ -46,6 +46,7 @@ export function audioSlotRows(subjectsResponse, jobsBySlot, missesSet, uploadOnl
   for (const group of subjectsResponse || []) {
     const slots = Object.entries(group.slots || {});
     const filled = group.filledSlots || {};
+    const prompts = group.promptStates || {};
     for (const key of group.subjects || []) {
       for (const [slot, clipKind] of slots) {
         const id = slotId(group.kind, key, slot);
@@ -60,6 +61,7 @@ export function audioSlotRows(subjectsResponse, jobsBySlot, missesSet, uploadOnl
           uploadOnly: uploadOnly.has(id),
           reported: misses.has(id),
           job: jobs.get(id) || null,
+          prompt: (prompts[key] && prompts[key][slot]) || 'none',
         });
       }
     }
@@ -76,9 +78,14 @@ export function soundText(row) {
 // --- Filtering --------------------------------------------------------------
 
 export const SOUND_FILTERS = Object.freeze(['all', 'missing', 'has', 'reported', 'failed']);
+// 'cleared' is not a filter value of its own: it is a form of 'none' (see
+// applyFilters below) -- both mean generation will use no stored prompt.
+export const PROMPT_FILTERS = Object.freeze(['all', 'none', 'written', 'stale']);
 // `missing` is the default for the same reason it is art's: it is the resume
 // filter, the set an admin opens the tab to work through.
-const DEFAULT_FILTERS = Object.freeze({ kind: 'all', sound: 'missing', search: '' });
+const DEFAULT_FILTERS = Object.freeze({
+  kind: 'all', sound: 'missing', search: '', prompt: 'all',
+});
 
 // The filters live in the URL (`?kind=&sound=&q=`) so a reload or a shared
 // link lands on the same table. An unknown sound value is dropped rather than
@@ -87,23 +94,30 @@ const DEFAULT_FILTERS = Object.freeze({ kind: 'all', sound: 'missing', search: '
 // nothing (the <select> shows no such option).
 export function filtersFromParams(params) {
   const sound = params.get('sound');
+  const prompt = params.get('prompt');
   return {
     kind: params.get('kind') || DEFAULT_FILTERS.kind,
     sound: SOUND_FILTERS.includes(sound) ? sound : DEFAULT_FILTERS.sound,
     search: params.get('q') || DEFAULT_FILTERS.search,
+    prompt: PROMPT_FILTERS.includes(prompt) ? prompt : DEFAULT_FILTERS.prompt,
   };
 }
 
 // The inverse, omitting defaults so the plain tab URL stays plain.
-export function paramsFromFilters({ kind, sound, search }) {
+export function paramsFromFilters({
+  kind, sound, search, prompt,
+}) {
   const p = new URLSearchParams();
   if (kind && kind !== DEFAULT_FILTERS.kind) p.set('kind', kind);
   if (sound && sound !== DEFAULT_FILTERS.sound) p.set('sound', sound);
   if (search) p.set('q', search);
+  if (prompt && prompt !== DEFAULT_FILTERS.prompt) p.set('prompt', prompt);
   return p;
 }
 
-export function applyFilters(rows, { kind = 'all', sound = 'all', search = '' } = {}) {
+export function applyFilters(rows, {
+  kind = 'all', sound = 'all', search = '', prompt = 'all',
+} = {}) {
   const q = search.trim().toLowerCase();
   return rows.filter((r) => {
     if (kind !== 'all' && r.kind !== kind) return false;
@@ -111,6 +125,9 @@ export function applyFilters(rows, { kind = 'all', sound = 'all', search = '' } 
     if (sound === 'has' && r.clips === 0) return false;
     if (sound === 'reported' && !r.reported) return false;
     if (sound === 'failed' && !(r.job && r.job.status === 'failed')) return false;
+    // 'cleared' counts as none: in both cases generation uses no stored prompt.
+    if (prompt === 'none' && !(r.prompt === 'none' || r.prompt === 'cleared')) return false;
+    if ((prompt === 'written' || prompt === 'stale') && r.prompt !== prompt) return false;
     if (q && !`${r.key} ${r.slot}`.toLowerCase().includes(q)) return false;
     return true;
   });

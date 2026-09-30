@@ -133,7 +133,9 @@ function AudioSlotTable({
   // and written back on change, so a reload or a shared link lands on the
   // same table.
   const [searchParams, setSearchParams] = useSearchParams();
-  const { kind, sound, search } = filtersFromParams(searchParams);
+  const {
+    kind, sound, search, prompt,
+  } = filtersFromParams(searchParams);
   const [page, setPage] = useState(1);
   // The params a filter change builds on. react-router's functional
   // setSearchParams form still hands the updater THIS render's params, so two
@@ -164,7 +166,12 @@ function AudioSlotTable({
   ), [subjects, knownJobs, misses]);
   const rowsById = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows]);
   const kinds = useMemo(() => (subjects || []).map((g) => [g.kind, g.label || g.kind]), [subjects]);
-  const matching = useMemo(() => applyFilters(rows, { kind, sound, search }), [rows, kind, sound, search]);
+  const matching = useMemo(
+    () => applyFilters(rows, {
+      kind, sound, search, prompt,
+    }),
+    [rows, kind, sound, search, prompt],
+  );
   const causes = useMemo(() => failedByCause(knownJobs), [knownJobs]);
 
   const shownPage = clampPage(page, matching.length);
@@ -249,6 +256,15 @@ function AudioSlotTable({
             placeholder="subject or slot"
           />
         </Field>
+        <Field>
+          Prompt
+          <select value={prompt} aria-label="Prompt filter" onChange={(e) => setFilter({ prompt: e.target.value })}>
+            <option value="all">Any prompt</option>
+            <option value="none">No prompt</option>
+            <option value="written">Has prompt</option>
+            <option value="stale">Stale prompt</option>
+          </select>
+        </Field>
       </Bar>
 
       <Bar>
@@ -329,7 +345,7 @@ function AudioSlotTable({
                       )}
                     />
                   </th>
-                  <th>Kind</th><th>Subject</th><th>Slot</th><th>Sound</th><th>Job</th>
+                  <th>Kind</th><th>Subject</th><th>Slot</th><th>Sound</th><th>Prompt</th><th>Job</th>
                 </tr>
               </thead>
               <tbody>
@@ -374,12 +390,13 @@ function AudioSlotTable({
                         <span id={soundId}>{soundText(r)}</span>
                         {r.reported && <Pill title="The game reported this sound missing"> reported</Pill>}
                       </td>
+                      <td>{r.prompt === 'none' || r.prompt === 'cleared' ? '—' : r.prompt}</td>
                       <JobCell job={r.job} />
                     </tr>
                   );
                 })}
                 {pageRows.length === 0 && (
-                  <tr><td colSpan={6}><Hint>Nothing matches this filter.</Hint></td></tr>
+                  <tr><td colSpan={7}><Hint>Nothing matches this filter.</Hint></td></tr>
                 )}
               </tbody>
             </Table>

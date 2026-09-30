@@ -111,16 +111,28 @@ describe('filters', () => {
 
   it('reads filters from the URL, dropping an unknown sound value', () => {
     expect(filtersFromParams(new URLSearchParams('kind=creature&sound=failed&q=slime')))
-      .toEqual({ kind: 'creature', sound: 'failed', search: 'slime' });
+      .toEqual({
+        kind: 'creature', sound: 'failed', search: 'slime', prompt: 'all',
+      });
     expect(filtersFromParams(new URLSearchParams('sound=bogus')))
-      .toEqual({ kind: 'all', sound: 'missing', search: '' });
-    expect(filtersFromParams(new URLSearchParams(''))).toEqual({ kind: 'all', sound: 'missing', search: '' });
+      .toEqual({
+        kind: 'all', sound: 'missing', search: '', prompt: 'all',
+      });
+    expect(filtersFromParams(new URLSearchParams(''))).toEqual({
+      kind: 'all', sound: 'missing', search: '', prompt: 'all',
+    });
   });
 
   it('writes filters back to the URL, omitting defaults, and round-trips', () => {
-    expect(paramsFromFilters({ kind: 'all', sound: 'missing', search: '' }).toString()).toBe('');
-    const p = paramsFromFilters({ kind: 'world', sound: 'all', search: 'a b' });
-    expect(filtersFromParams(p)).toEqual({ kind: 'world', sound: 'all', search: 'a b' });
+    expect(paramsFromFilters({
+      kind: 'all', sound: 'missing', search: '', prompt: 'all',
+    }).toString()).toBe('');
+    const p = paramsFromFilters({
+      kind: 'world', sound: 'all', search: 'a b', prompt: 'all',
+    });
+    expect(filtersFromParams(p)).toEqual({
+      kind: 'world', sound: 'all', search: 'a b', prompt: 'all',
+    });
   });
 });
 
