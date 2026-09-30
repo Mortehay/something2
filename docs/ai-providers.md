@@ -683,18 +683,37 @@ stable-audio, `retro` = procedural, near-instant) and a **variants** count
 (1-5; each variant is one more clip bound to the slot, and the client makes a
 weighted random pick per play). The box caches SFX by (engine, cue, entity text) and
 **ignores the seed**, so variety comes from the entity text instead: the
-first take sends the subject's phrase (`slime`, `a steel sword`, the skill's
-name), later takes send `<phrase> (take N)` where N counts the clips already
-bound to the slot. The take number is kept in the clip's label, so deleting a
-clip and regenerating still asks the box for a new take. If some variants
-fail and others succeed, the successful ones are stored and bound and the
-admin sees a "partial" toast naming what failed.
+first take sends the subject's phrase (`slime`, the skill's name, or, for an
+attack type, the per-slot phrase: melee `use` "a steel sword", melee `hit` "a
+blade on a creature", magic `use` "a magic spell", magic `hit` "a magic
+blast", ranged "an arrow"), later takes send `<phrase> (take N)` where N is
+the highest take among the clips bound to the slot, plus 1 (a clip without a
+`(take N)` label counts as take 0). The take number is kept in the clip's
+label, so deleting a clip and regenerating still asks the box for a new take.
+If some variants fail and others succeed, the successful ones are stored and
+bound and the admin sees a "partial" toast naming what failed.
+
+**Cached answers.** The box's cache is shared by every database that uses the
+box (dev, a scratch DB, the Orange Pi), so a `cached` answer is usually a file
+*this* database has never stored -- for example a pack the box finished after
+a backend reload killed our drain, or a take another environment already
+asked for. A cached file is therefore stored and bound like any other, unless
+its bytes (sha1, recorded on every clip) match a clip already bound to the
+same slot. Only that is a duplicate: it is not stored, the next try asks for
+a later take, and a batch job stays retryable (it is re-queued, and a
+duplicate never counts toward the circuit breaker). A single **Generate**
+steps past up to 3 duplicate takes before it gives up with "the box returned
+only sounds already bound to this slot"; upload a sound or bind one from the
+library instead.
 
 **In the game.** The authority adds an `sfx` list (at most 64 events,
 omitted when empty) to each world frame: `use` (a swing, cast or shot),
 `hit` (it landed), `hurt` and `death` (a creature was damaged / killed --
 one `death` per kill). Each event carries its attack kind and item or
-`skill:<id>`, or the creature type, and a world position. The client
+`skill:<id>`, or the creature type, and a world position. Skills produce the
+full chain too: a cast is a `use`; a melee skill or cone is a `hit` per
+creature struck, and an area spell is one `hit` at its centre; every damaged
+creature that survives is a `hurt` (one it kills is a `death` instead). The client
 resolves each event to a lookup chain, most specific first:
 
 - player `use`/`hit`: `skill/<id>/<slot>` or `item/<name>/<slot>`, then
@@ -708,9 +727,16 @@ The first bound slot plays; if none is bound, the first key is reported to
 beyond 1600 px are not played) and capped: at most 12 SFX voices, the same
 clip at most 3 times per 100 ms, and when full your own actions win over the
 nearest combat, which wins over ambient `nearby` sounds. Creature `nearby`
-sounds play every 4-10 s while you are within 8 tiles (at most 4 at once);
-a world point's `nearby` clip loops while you are in range and fades when
-you leave. The Settings **SFX** slider scales all of it.
+sounds play every 4-10 s while you are within 8 tiles (at most 4 at once).
+A world point's `nearby` sound plays on the same cadence unless the admin
+marks a clip **Loop**: on that slot card, tick the **Loop** checkbox before
+**Upload .ogg**, or toggle **Loop** on a bound clip's row (only world point
+`nearby` clips offer it; generated clips start unticked, because a looped
+chime is worse than the cadence). When any clip bound to the point is
+marked Loop, one of the looping clips plays continuously while you are
+within 8 tiles and fades out when you leave; if a fight fills the voice cap
+it can bump the loop, which then fades out quickly rather than cutting off.
+The Settings **SFX** slider scales all of it.
 
 **Editors.** The entity-type editor shows a **Sounds** section for creatures
 and world points (same slot cards as the Audio tab).
