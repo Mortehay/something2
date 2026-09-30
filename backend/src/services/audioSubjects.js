@@ -279,4 +279,5 @@ module.exports = {
   itemCues,
   skillCues,
   ATTACK_TYPE_CUES,
+  ATTACK_TYPE_PHRASE,
 };
