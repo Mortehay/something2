@@ -261,7 +261,7 @@ function AudioSlotTable({
           <select value={prompt} aria-label="Prompt filter" onChange={(e) => setFilter({ prompt: e.target.value })}>
             <option value="all">Any prompt</option>
             <option value="none">No prompt</option>
-            <option value="written">Has prompt</option>
+            <option value="written">Written (current)</option>
             <option value="stale">Stale prompt</option>
           </select>
         </Field>

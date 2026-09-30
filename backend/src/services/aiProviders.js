@@ -30,9 +30,10 @@ const WRITABLE = [
   'models_pointer',
   'response_image_pointer',
   'enabled',
-  // Game audio slice 1: 'image' (default) or 'audio'. An audio profile talks
-  // to the box's fixed audio API through remoteAudioProvider.js and has no
-  // use for the image template/pointer/sheet fields.
+  // 'image' (default), 'audio' (game audio slice 1) or 'text' (audio prompt
+  // writer). An audio profile talks to the box's fixed audio API through
+  // remoteAudioProvider.js, a text profile to the box's /api/text through
+  // textProvider.js; neither uses the image template/pointer/sheet fields.
   'modality',
   // SOMET-346: how to cut a multi-frame sheet the remote returns whole.
   'sheet_layout',

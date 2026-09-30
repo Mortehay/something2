@@ -147,7 +147,12 @@ function ProviderCard({ provider, isOnlyActive }) {
       {isAudio ? (
         <Hint>Talks to the box's /api/audio endpoints. Refresh lists its styles and cues.</Hint>
       ) : isText ? (
-        <Hint>Talks to the box's /api/text endpoint (prompt writing). Refresh lists its models; the box's gateway loads them on demand.</Hint>
+        <Hint>
+          Writes audio prompts. The base URL must be the GPU box's /api/text server (the audio box):
+          any other server answers 4xx, which is treated as our bug, so there is no CPU fallback.
+          To use the local CPU fallback instead, leave Text providers inactive.
+          Refresh lists its models; the box's gateway loads them on demand.
+        </Hint>
       ) : (
         <>
           <Row>
