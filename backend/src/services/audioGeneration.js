@@ -10,6 +10,7 @@ const aiProviders = require('./aiProviders');
 const defaultRap = require('./remoteAudioProvider');
 const defaultLib = require('./audioLibrary');
 const subjects = require('./audioSubjects');
+const defaultPrompts = require('./audioPrompts');
 
 async function resolveAudioProvider(pool, providerId) {
   if (providerId != null) {
@@ -71,13 +72,22 @@ function sfxEntityText(phrase, take) {
 // The one generate → store → bind path (spec §2). The synchronous
 // /admin/generate route and the batch drain both call this, so a clip made
 // either way has the same label, provenance columns and binding.
-async function generateForSlot(db, provider, spec, { rap = defaultRap, lib = defaultLib } = {}) {
-  if (spec.clipKind === 'sfx') return generateSfxForSlot(db, provider, spec, { rap, lib });
+async function generateForSlot(db, provider, spec, {
+  rap = defaultRap, lib = defaultLib, prompts = defaultPrompts,
+} = {}) {
+  if (spec.clipKind === 'sfx') return generateSfxForSlot(db, provider, spec, { rap, lib, prompts });
   const {
     subjectKind, subjectKey, slot, clipKind,
   } = spec;
   let { style = null, prompt = null, slots = null } = spec;
   const seed = Number.isInteger(spec.seed) ? spec.seed : randomSeed();
+  // Precedence (spec 2026-09-30 §6): the request's own style/prompt, then the
+  // slot's stored prompt, then the box's propose. A stored '' means "cleared
+  // on purpose" and falls through.
+  if (!style && !prompt) {
+    const stored = await prompts.getActive(db, subjectKind, subjectKey, slot);
+    if (stored && stored.text) ({ style, prompt } = { style: stored.style, prompt: stored.text });
+  }
   if (!style && !prompt) {
     const p = await rap.propose(provider, { context: await contextFor(db, subjectKind, subjectKey, slot), kind: clipKind });
     if (p.ok) ({ style, slots, prompt } = { style: p.style, slots: p.slots, prompt: p.prompt });
@@ -206,7 +216,7 @@ async function freshVariants(db, lib, target, variants, cached) {
 // today (spec §4) is upload-only, refused before any box call.
 async function sfxRequestFor(db, provider, {
   subjectKind, subjectKey, slot, engine,
-}) {
+}, { prompts = defaultPrompts } = {}) {
   const cue = await subjects.cueFor(db, subjectKind, subjectKey, slot);
   if (!cue) return { ok: false, error: 'upload only: the provider has no cue for this slot', retryable: false };
   // The provider's own discovered allow-list (spec §2 "Cues": a provider's
@@ -216,6 +226,11 @@ async function sfxRequestFor(db, provider, {
   // refreshed yet must fail the same way: upload only).
   const known = Array.isArray(provider.models_cache) && provider.models_cache.includes(`cue:${cue}`);
   if (!known) return { ok: false, error: `upload only: the provider has no cue '${cue}' registered`, retryable: false };
+  // The slot's stored prompt, when there is one, IS the entity text (spec
+  // 2026-09-30 §6). Editing it therefore also gets past the box's global
+  // (engine, cue, entity) cache. '' = cleared -> the registry phrase.
+  const stored = await prompts.getActive(db, subjectKind, subjectKey, slot);
+  const phrase = stored && stored.text ? stored.text : subjects.entityPhrase(db, subjectKind, subjectKey, slot);
   return {
     ok: true,
     cue,
@@ -226,7 +241,7 @@ async function sfxRequestFor(db, provider, {
     // fallback (spec §4 "The engine defaults to realistic, and a batch can
     // choose retro").
     engine: typeof engine === 'string' && engine ? engine : 'realistic',
-    phrase: subjects.entityPhrase(db, subjectKind, subjectKey, slot),
+    phrase,
     take: await nextSfxTake(db, subjectKind, subjectKey, slot),
   };
 }
@@ -284,7 +299,7 @@ async function storeSfxVariants(db, provider, {
 }
 
 // SFX branch of generateForSlot (game audio slice 3, Task 3).
-async function generateSfxForSlot(db, provider, spec, { rap, lib }) {
+async function generateSfxForSlot(db, provider, spec, { rap, lib, prompts = defaultPrompts }) {
   const { subjectKind, subjectKey, slot } = spec;
   const seed = Number.isInteger(spec.seed) ? spec.seed : randomSeed();
   const variants = Number.isInteger(spec.variants) && spec.variants >= 1 && spec.variants <= 5
@@ -292,7 +307,7 @@ async function generateSfxForSlot(db, provider, spec, { rap, lib }) {
 
   const req = await sfxRequestFor(db, provider, {
     subjectKind, subjectKey, slot, engine: spec.engine,
-  });
+  }, { prompts });
   if (!req.ok) return req;
   const { cue, engine, phrase } = req;
   const target = { subjectKind, subjectKey, slot };
