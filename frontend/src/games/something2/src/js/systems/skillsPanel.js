@@ -3,6 +3,7 @@
 // Replaces the old static ability book with an interactive 9-slot PoE-style socketing board.
 
 import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
+import { artIcon, drawIconFit } from "./gameArt.js";
 import {
   getSkillsForClass, getSkillById, SKILLS, checkGemRequirements, getWeaponRequirementName,
 } from "../core/skillsData.js";
@@ -253,7 +254,8 @@ export function layoutSkillsPanel(state) {
   };
 }
 
-export function drawSkillsPanel(ctx, layout, state) {
+// `art` (SOMET-598) is the GameArt lookup; null draws every emoji as before.
+export function drawSkillsPanel(ctx, layout, state, art = null) {
   const {
     panel, title, close, sockets, tabs, gemRows,
     prevBtn, nextBtn, footerY, currentPage, totalPages, totalCount,
@@ -333,10 +335,15 @@ export function drawSkillsPanel(ctx, layout, state) {
       ctx.fill();
       ctx.globalAlpha = 1.0;
 
-      ctx.font = "20px sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(g.icon || "💎", iconX + iconS / 2, iconY + iconS / 2 + 1);
+      const gImg = artIcon(art, "skill", g.id);
+      if (gImg) {
+        drawIconFit(ctx, gImg, iconX + 2, iconY + 2, iconS - 4);
+      } else {
+        ctx.font = "20px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(g.icon || "💎", iconX + iconS / 2, iconY + iconS / 2 + 1);
+      }
 
       // Text Info
       const textX = iconX + iconS + 8;
@@ -458,10 +465,15 @@ export function drawSkillsPanel(ctx, layout, state) {
     ctx.lineWidth = 1.5;
     ctx.strokeRect(iconX, iconY, iconS, iconS);
 
-    ctx.font = "18px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(s.icon || "💎", iconX + iconS / 2, iconY + iconS / 2 + 1);
+    const sImg = artIcon(art, "skill", s.id);
+    if (sImg) {
+      drawIconFit(ctx, sImg, iconX + 2, iconY + 2, iconS - 4);
+    } else {
+      ctx.font = "18px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(s.icon || "💎", iconX + iconS / 2, iconY + iconS / 2 + 1);
+    }
 
     // Info
     const textX = iconX + iconS + 10;

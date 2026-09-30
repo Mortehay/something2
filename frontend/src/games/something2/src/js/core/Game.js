@@ -52,6 +52,8 @@ import {
 } from "./hotbarStorage.js";
 import { createSkillVisual, updateSkillVisuals, pruneSkillVisuals } from "./skillVisuals.js";
 import { API_URL } from "../../../../../config.js";
+import { GameArt } from "../systems/gameArt.js";
+import { fetchGameArt } from "../net/gameArtClient.js";
 
 // How long the "out of ammo" HUD flash stays up after the server's `noammo`
 // frame arrives.
@@ -526,6 +528,16 @@ export class Game {
             if (this.audio && this.worldId === worldId) this.audio.setWorld(bundle);
         });
         this.renderSystem = new RenderSystem(this.canvas, this.imageManager);
+        // SOMET-598: generated icons for skills / passive labels / items. The
+        // index is fetched once per session and never awaited -- a slow or
+        // failed fetch just leaves every surface on its emoji/initials fallback.
+        if (!this.gameArt) {
+            this.gameArt = new GameArt(this.imageManager, API_URL);
+            fetchGameArt()
+                .then((index) => this.gameArt.setIndex(index))
+                .catch((err) => console.warn('game art index unavailable, using fallback icons', err));
+        }
+        this.renderSystem.gameArt = this.gameArt;
         this.chunkedMap = new ChunkedMap(chunkSize, tileTypes);
         this._preloadTileAssets(tileTypes);
         // Names arrive on the wire already resolved; this is the only lookup

@@ -308,6 +308,7 @@ const {
 } = require('./services/generationTarget');
 const bulkImageRegeneration = require('./services/bulkImageRegeneration');
 const catalogSubjects = require('./services/catalogSubjects.js');
+const { loadGameArtIndex } = require('./services/gameArt.js');
 const artJobQueue = require('./services/artJobQueue.js');
 const artDispatcher = require('./services/artDispatcher.js');
 const artFailures = require('./services/artFailures.js');
@@ -3367,6 +3368,20 @@ app.post('/api/bulk-image-jobs/cancel', adminGuard, (req, res) => {
 // is fine for 50 tiles and not for a batch measured in hours against a machine
 // we do not control. Here the work list is rows in art_jobs, so a restart of
 // ours OR of the remote resumes instead of re-running.
+
+// SOMET-598: the icon pointers the GAME draws (skills, passive labels, items).
+// playerGuard, NOT adminGuard -- every signed-in player needs this, and it
+// carries nothing but object-store keys that /api/assets already serves to
+// anyone. One call per session; the images load lazily, one per surface that
+// asks, so this does not become the 194-image join burst again.
+app.get('/api/game-art', playerGuard, async (req, res) => {
+  try {
+    res.json(await loadGameArtIndex(pool));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load game art' });
+  }
+});
 
 // The subject kinds this install can generate, for the console's filter. Read
 // from the registry rather than hardcoded in the client, so adding a sixth kind

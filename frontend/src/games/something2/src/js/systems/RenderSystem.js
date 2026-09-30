@@ -31,6 +31,7 @@ import {
   drawableScreenRect, CARD,
 } from "./inspect.js";
 import { rarityGlowColor, withAlpha } from "../core/rarityColors.js";
+import { artIcon, drawIconFit } from "./gameArt.js";
 import {
   rarityBorderColor, affixLine, clipToWidth, rowTextOffsets, AFFIX_FONT_PX,
 } from "./itemDisplay.js";
@@ -151,6 +152,9 @@ export class RenderSystem {
     this.ctx = canvas.getContext("2d", { willReadFrequently: true });
     this.ctx.imageSmoothingEnabled = false;
     this.imageManager = imageManager;
+    // SOMET-598: generated skill/passive/item icons (systems/gameArt.js), set
+    // by Game after construction. null draws every icon's fallback.
+    this.gameArt = null;
     // Global render-mode override (dev toggle). null = use each entity's own
     // renderMode; a mode string forces every entity to that mode.
     this.renderModeOverride = null;
@@ -572,10 +576,15 @@ export class RenderSystem {
       ctx.strokeStyle = "#fbbf24";
       ctx.lineWidth = 2;
       ctx.strokeRect(skillDrag.x - 20, skillDrag.y - 20, 40, 40);
-      ctx.font = "20px sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(s.icon || "⚔️", skillDrag.x, skillDrag.y);
+      const dragImg = artIcon(this.gameArt, "skill", s.id);
+      if (dragImg) {
+        drawIconFit(ctx, dragImg, skillDrag.x - 17, skillDrag.y - 17, 34);
+      } else {
+        ctx.font = "20px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(s.icon || "⚔️", skillDrag.x, skillDrag.y);
+      }
       ctx.restore();
     }
 
@@ -736,7 +745,13 @@ export class RenderSystem {
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(`${skill.icon || '⚔️'}  ${sName}`, cardX + pad, cardY + pad);
+    const tipImg = artIcon(this.gameArt, 'skill', skill.id);
+    if (tipImg) {
+      drawIconFit(ctx, tipImg, cardX + pad, cardY + pad - 1, 16);
+      ctx.fillText(sName, cardX + pad + 21, cardY + pad);
+    } else {
+      ctx.fillText(`${skill.icon || '⚔️'}  ${sName}`, cardX + pad, cardY + pad);
+    }
 
     // Class & Type subtitle
     const sType = skill.type ? skill.type.toUpperCase() : 'SKILL';
@@ -3790,7 +3805,10 @@ export class RenderSystem {
           ctx.save();
           ctx.globalAlpha = 0.38;
         }
-        if (skill.icon) {
+        const barImg = artIcon(this.gameArt, "skill", skill.id);
+        if (barImg) {
+          drawIconFit(ctx, barImg, sx + 3, sy + 3, slotSize - 6);
+        } else if (skill.icon) {
           ctx.font = "18px sans-serif";
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
@@ -3891,14 +3909,14 @@ export class RenderSystem {
   renderSkillsPanel(ctx, state, hitAreas) {
     const layout = layoutSkillsPanel(state);
     for (const a of layout.hitAreas) hitAreas.push(a);
-    drawSkillsPanel(ctx, layout, state);
+    drawSkillsPanel(ctx, layout, state, this.gameArt);
     return layout;
   }
 
   renderGemShopPanel(ctx, state, hitAreas) {
     const layout = layoutGemShopPanel(state);
     for (const a of layout.hitAreas) hitAreas.push(a);
-    drawGemShopPanel(ctx, layout, state);
+    drawGemShopPanel(ctx, layout, state, this.gameArt);
     return layout;
   }
 
@@ -3953,10 +3971,15 @@ export class RenderSystem {
       ctx.fill();
 
       // Buff Emoji Icon
-      ctx.font = "16px sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(b.icon || "✨", iconBoxX + iconBoxS / 2, iconBoxY + iconBoxS / 2 + 1);
+      const buffImg = artIcon(this.gameArt, "skill", b.id);
+      if (buffImg) {
+        drawIconFit(ctx, buffImg, iconBoxX + 2, iconBoxY + 2, iconBoxS - 4);
+      } else {
+        ctx.font = "16px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(b.icon || "✨", iconBoxX + iconBoxS / 2, iconBoxY + iconBoxS / 2 + 1);
+      }
 
       // 3. Name & Remaining seconds text (English)
       const title = b.nameEn || b.name || "Buff";
