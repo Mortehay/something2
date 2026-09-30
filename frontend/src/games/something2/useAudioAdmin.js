@@ -12,6 +12,11 @@ import { API_URL } from '../../config.js';
 export const SUBJECTS_KEY = ['audio-subjects'];
 export const MISSES_KEY = ['audio-misses'];
 export const JOBS_KEY = ['audio-jobs'];
+// The slot table's per-slot jobs (SOMET-596). Deliberately UNDER JOBS_KEY:
+// invalidateQueries matches by prefix, so every mutation that already
+// invalidates JOBS_KEY (enqueue, start, stop, retry, clear) refreshes the
+// table's Job column too, with no second list of keys to keep in step.
+export const SLOT_JOBS_KEY = [...JOBS_KEY, 'slots'];
 // The clip library's cache prefix. Queried alone (no kind/unbound/page) so a
 // mutation can invalidate every page/filter combo in one call --
 // invalidateQueries matches by key PREFIX unless `exact: true`.
@@ -46,28 +51,6 @@ function fetchSlots(kind, key) {
     `${API_URL}/api/audio/admin/slots/${encodeURIComponent(kind)}/${encodeURIComponent(key)}`,
     `${kind}/${key}'s bound clips`,
   );
-}
-
-// Flattens the subject registry response (GET /api/audio/admin/subjects) into
-// one row per subject, each carrying its own slot list -- the shape both the
-// left column's subject tree and the right column's slot cards want. Pure and
-// exported so it is unit-testable without mounting the query hook.
-//
-// `filled` (the count of DISTINCT slots with >=1 clip bound) comes straight
-// from the server's one aggregate query rather than a per-subject fetch --
-// see the backend's filledCounts(). A subject absent from `group.filled`
-// simply has none bound yet, hence the `|| 0`.
-export function slotRows(subjects) {
-  const out = [];
-  for (const group of subjects || []) {
-    const slots = Object.entries(group.slots || {}).map(([slot, clipKind]) => ({ slot, clipKind }));
-    for (const key of group.subjects || []) {
-      out.push({
-        kind: group.kind, label: group.label, key, slots, filled: (group.filled && group.filled[key]) || 0,
-      });
-    }
-  }
-  return out;
 }
 
 // The /admin/generate body for one slot card. Suggest's `slots` are the box's
@@ -325,6 +308,18 @@ export function useAudioJobs() {
   };
 }
 
+// GET /admin/jobs/slots: the latest live-or-failed job per slot. `poll` is
+// the caller's shouldPoll({run, stats}) over useAudioJobs' data, so this
+// refetches on exactly the batch panel's cadence and stops when it stops.
+export function useAudioSlotJobs({ poll = false } = {}) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: SLOT_JOBS_KEY,
+    refetchInterval: poll ? 2000 : false,
+    queryFn: () => getJson(`${API_URL}/api/audio/admin/jobs/slots`, 'the slot jobs'),
+  });
+  return { slotJobs: data || [], isLoadingSlotJobs: isLoading, slotJobsError: error || null };
+}
+
 export function useEnqueueAudioJobs() {
   const qc = useQueryClient();
   return useMutation({
@@ -390,8 +385,10 @@ export function useStopAudioDrain() {
 export function useRetryAudioFailures() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async () => {
-      const { res, json } = await post('/api/audio/admin/jobs/retry-failed', {});
+    // `ids` (SOMET-596): the by-cause panel's "Retry these N". Omitted, it
+    // retries every failed job, as the batch panel's "Retry failed" does.
+    mutationFn: async (ids) => {
+      const { res, json } = await post('/api/audio/admin/jobs/retry-failed', Array.isArray(ids) ? { ids } : {});
       if (!res.ok) throw new Error(json.error || 'Failed to retry the failed jobs');
       return json;
     },

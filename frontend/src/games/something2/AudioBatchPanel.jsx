@@ -79,7 +79,7 @@ const GROUP_LABEL = {
   music: 'Music', ambience: 'Ambience', sfx_realistic: 'SFX (realistic)', sfx_retro: 'SFX (retro)',
 };
 // SOMET-591: same tooltip AudioSlotCard's Suggest/Generate and
-// AudioBatchControls' Queue use, so only Start (a generation control) is
+// AudioSlotTable's Queue use, so only Start (a generation control) is
 // gated -- Stop/Retry failed/Clear stay enabled with no provider.
 const NO_PROVIDER_TITLE = 'No audio provider — add one under AI Providers';
 

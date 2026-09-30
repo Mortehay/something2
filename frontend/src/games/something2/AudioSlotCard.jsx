@@ -72,7 +72,7 @@ const InlineLabel = styled.label`display: flex; align-items: center; gap: 0.3rem
 const SFX_ENGINES = [['realistic', 'Realistic'], ['retro', 'Retro']];
 
 // SOMET-591: shown on Suggest/Generate (here) and the batch Queue/Start
-// buttons (AudioBatchControls.jsx, AudioBatchPanel.jsx) whenever `canGenerate`
+// buttons (AudioSlotTable.jsx, AudioBatchPanel.jsx) whenever `canGenerate`
 // is false -- the one line of text repeated everywhere a generation control
 // is disabled for lack of a provider.
 const NO_PROVIDER_TITLE = 'No audio provider — add one under AI Providers';
@@ -244,7 +244,7 @@ function LibraryPicker({
 function AdminLoadingInline() { return <Hint>Loading…</Hint>; }
 
 // SOMET-590: `subject` is `{ kind, key, label }`; `slot`/`clipKind` come from
-// the registry entry (useAudioAdmin.slotRows); `rows` are this slot's bound
+// the registry entry (audioBatch.subjectSlotsFor); `rows` are this slot's bound
 // clips from useSubjectSlots. Play/stop are lifted to AudioAdmin so only one
 // preview plays across every card on the page.
 //

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  buildBatchItems, itemsFromMisses, mergeItems, batchProgress, shouldPoll, hasBatchActivity,
+  batchProgress, shouldPoll, hasBatchActivity,
   subjectSlotsFor, queuedToDiscard, runStopWarning, groupRunningText, uploadOnlySlotIds,
 } from '../audioBatch.js';
 
@@ -22,53 +22,6 @@ const subjectsWithSfx = [
 ];
 
 describe('audioBatch', () => {
-  it('builds kind×slot items for the ticked subjects only, deduped and ordered', () => {
-    const { items, skipped } = buildBatchItems(new Set(['world/Vale', 'biome/Meadow', 'biome/Nope']),
-      { world: new Set(['music', 'ambience']), biome: new Set(['ambience', 'music']) }, subjects);
-    expect(items).toEqual([
-      { subject_kind: 'biome', subject_key: 'Meadow', slot: 'ambience' },
-      { subject_kind: 'world', subject_key: 'Vale', slot: 'ambience' },
-      { subject_kind: 'world', subject_key: 'Vale', slot: 'music' },
-    ]);
-    expect(skipped).toEqual([]);
-  });
-
-  // Game audio slice 3, Task 8, Step 1: sfx slots are now batchable, except
-  // upload-only ones (no cue on the provider), which are reported separately
-  // instead of silently vanishing.
-  it('keeps sfx slots, drops upload-only ones, and records them in skipped', () => {
-    const { items, skipped } = buildBatchItems(
-      new Set(['creature/Slime']),
-      { creature: new Set(['nearby', 'attack', 'hurt', 'death']) },
-      subjectsWithSfx,
-    );
-    expect(items).toEqual([
-      { subject_kind: 'creature', subject_key: 'Slime', slot: 'death' },
-      { subject_kind: 'creature', subject_key: 'Slime', slot: 'hurt' },
-    ]);
-    expect(skipped).toEqual([
-      { subject_kind: 'creature', subject_key: 'Slime', slot: 'nearby', reason: 'upload only: no cue on the provider' },
-      { subject_kind: 'creature', subject_key: 'Slime', slot: 'attack', reason: 'upload only: no cue on the provider' },
-    ]);
-  });
-
-  it('takes music/ambience and non-upload-only sfx misses, merges without duplicates', () => {
-    const m = itemsFromMisses([{ subject_kind: 'biome', subject_key: 'Meadow', slot: 'ambience' },
-      { subject_kind: 'creature', subject_key: 'Slime', slot: 'hurt' },
-      { subject_kind: 'creature', subject_key: 'Slime', slot: 'nearby' }],
-    uploadOnlySlotIds(subjectsWithSfx));
-    expect(m).toEqual([
-      { subject_kind: 'biome', subject_key: 'Meadow', slot: 'ambience' },
-      { subject_kind: 'creature', subject_key: 'Slime', slot: 'hurt' },
-    ]);
-    expect(mergeItems(m, m)).toHaveLength(2);
-  });
-
-  it('itemsFromMisses blocks nothing when no upload-only set is given', () => {
-    const m = itemsFromMisses([{ subject_kind: 'creature', subject_key: 'Slime', slot: 'nearby' }]);
-    expect(m).toEqual([{ subject_kind: 'creature', subject_key: 'Slime', slot: 'nearby' }]);
-  });
-
   it('uploadOnlySlotIds collects every null-cue (kind, key, slot) and ignores kinds with no cues', () => {
     const ids = uploadOnlySlotIds(subjectsWithSfx);
     expect(ids.has('creature/Slime/nearby')).toBe(true);
@@ -124,8 +77,8 @@ describe('audioBatch', () => {
 
 // Task 7 (SOMET-591 slice 2, Sounds sections in the world/biome editors):
 // SubjectSounds is a thin render over this -- it looks up ONE kind's slot
-// list out of the same registry response slotRows() flattens, without
-// needing the full subject-tree fan-out slotRows does.
+// list out of the registry response, without
+// needing the slot table's full kind×subject×slot fan-out.
 // SOMET-591 final review F4/F5/F6: the panel's Discard queued button, its
 // stop-reason warning, and the per-group "running" label.
 describe('batch panel predicates', () => {
