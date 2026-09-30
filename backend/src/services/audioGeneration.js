@@ -193,18 +193,31 @@ function takeAfterDuplicate(lastError) {
 
 // The variants of one box answer that are worth storing. A fresh (not
 // cached) render is new by construction and is taken whole. A cached one is
-// checked byte-for-byte against the clips already bound to this slot, and
-// against the other variants of this same answer.
+// checked byte-for-byte against the clips already bound to this slot, against
+// EVERY clip stored in this database, and against the other variants of this
+// same answer.
+//
+// Why every stored clip (final review I2): since stored prompts, the entity
+// text is LLM-written and not unique per subject -- two items can both be "a
+// steel longsword". The box's cache is keyed on (engine, cue, entity), so the
+// second subject's take 0 comes back `cached` with the FIRST subject's file.
+// That file is not bound to this slot, but it is stored, so taking it would
+// give two subjects byte-identical sounds. Treated as a duplicate, it bumps
+// the take instead, and a later take is a different entity the box renders
+// fresh. (The duplicate message still says "bound to this slot": it is parsed
+// back from a queued job's last_error by DUPLICATE_TAKE, so it stays as is.)
 async function freshVariants(db, lib, target, variants, cached) {
   const list = Array.isArray(variants) ? variants : [];
   if (!cached) return list;
   const boundSha1s = lib.boundClipSha1s || defaultLib.boundClipSha1s;
+  const storedSha1s = lib.storedClipSha1s || defaultLib.storedClipSha1s;
+  const hashes = list.map((v) => defaultLib.sha1Of(v.buffer));
   const seen = await boundSha1s(db, target);
+  for (const h of await storedSha1s(db, hashes)) seen.add(h);
   const out = [];
-  for (const v of list) {
-    const hash = defaultLib.sha1Of(v.buffer);
-    if (!seen.has(hash)) { seen.add(hash); out.push(v); }
-  }
+  list.forEach((v, i) => {
+    if (!seen.has(hashes[i])) { seen.add(hashes[i]); out.push(v); }
+  });
   return out;
 }
 

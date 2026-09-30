@@ -24,6 +24,7 @@ const lib = require('../src/services/audioLibrary');
 const gen = require('../src/services/audioGeneration');
 const q = require('../src/services/audioJobQueue');
 const d = require('../src/services/audioDispatcher');
+const prompts = require('../src/services/audioPrompts');
 
 const url = process.env.TEST_DATABASE_URL;
 const skip = !url ? 'no TEST_DATABASE_URL -- refusing to write to a real database' : false;
@@ -32,6 +33,16 @@ const variant = (n) => Buffer.concat([OGG, Buffer.from([n])]);
 // Real, read-only skill ids (seeds/data/skills.js), used by no other audio
 // test file: melee skills, so use -> 'slash' and hit -> 'hit'.
 const SKILL = 'war_skull_splitter';
+
+// The entity text a slot sends: its stored prompt when it has one (spec
+// 2026-09-30 §6), else the registry phrase. Read at test time, because a
+// batch run (make audio-describe) may have written prompts for these fixed
+// subjects on the scratch DB -- hard-coding the registry phrase made this
+// file green on a fresh DB and red on a used one.
+async function phraseOf(pool, kind, key, slot, registry) {
+  const p = await prompts.getActive(pool, kind, key, slot);
+  return p && p.text ? p.text : registry;
+}
 
 async function waitIdle(timeoutMs = 10000) {
   const t0 = Date.now();
@@ -115,7 +126,7 @@ test('sfx drain: cached is not a duplicate; a duplicate is retryable', { skip },
         assert.equal(st.requeued_orphans, 1);
         assert.equal(st.done, 1, st.error);
         assert.equal(st.failed, 0);
-        assert.deepEqual(packCalls, [['Skull Splitter']]);
+        assert.deepEqual(packCalls, [[await phraseOf(pool, 'skill', SKILL, 'hit', 'Skull Splitter')]]);
         const row = (await pool.query('SELECT state, clip_id FROM audio_jobs WHERE id = $1', [job.id])).rows[0];
         assert.equal(row.state, 'done');
         const bound = await boundTo('hit');
@@ -148,7 +159,8 @@ test('sfx drain: cached is not a duplicate; a duplicate is retryable', { skip },
         assert.equal(st.done, 1, st.error);
         assert.equal(st.retried, 1);
         assert.equal(st.failed, 0);
-        assert.deepEqual(packCalls, [['Skull Splitter (take 1)'], ['Skull Splitter (take 2)']],
+        const useText = await phraseOf(pool, 'skill', SKILL, 'use', 'Skull Splitter');
+        assert.deepEqual(packCalls, [[`${useText} (take 1)`], [`${useText} (take 2)`]],
           'the retry moves past the duplicated take');
         const row = (await pool.query('SELECT state, attempts FROM audio_jobs WHERE id = $1', [job.id])).rows[0];
         assert.deepEqual([row.state, row.attempts], ['done', 2]);

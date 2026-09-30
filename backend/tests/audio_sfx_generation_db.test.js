@@ -19,12 +19,23 @@ const { withAdvisoryLock, AUDIO_CLIPS_LOCK_KEY } = require('./helpers/advisoryLo
 const assetStore = require('../src/services/assetStore');
 const lib = require('../src/services/audioLibrary');
 const gen = require('../src/services/audioGeneration');
+const prompts = require('../src/services/audioPrompts');
 
 const url = process.env.TEST_DATABASE_URL;
 const skip = !url ? 'no TEST_DATABASE_URL -- refusing to write to a real database' : false;
 const OGG = fs.readFileSync(path.join(__dirname, 'fixtures/audio/tone.ogg'));
 // skills.js: type='melee', nameEn='Crushing Blow' -- real, stable, read-only.
 const SKILL_MELEE = 'war_crushing_blow';
+
+// The entity text a slot sends: its stored prompt when it has one (spec
+// 2026-09-30 §6), else the registry phrase. Read at test time, because a
+// batch run (make audio-describe) may have written prompts for these fixed
+// subjects on the scratch DB -- hard-coding the registry phrase made this
+// file green on a fresh DB and red on a used one.
+async function phraseOf(pool, kind, key, slot, registry) {
+  const p = await prompts.getActive(pool, kind, key, slot);
+  return p && p.text ? p.text : registry;
+}
 
 test('generateForSlot: sfx', { skip }, async (t) => {
   const pool = new Pool({ connectionString: url });
@@ -110,7 +121,7 @@ test('generateForSlot: sfx', { skip }, async (t) => {
       assert.equal(r.ok, true, r.error);
       assert.equal(calls.length, 1, 'no cache hit, so no retry');
       assert.equal(calls[0].cue, 'hit');
-      assert.equal(calls[0].entity, 'a blade on a creature (take 1)');
+      assert.equal(calls[0].entity, `${await phraseOf(pool, 'attack_type', 'melee', 'hit', 'a blade on a creature')} (take 1)`);
       assert.equal(calls[0].seed, 9);
       bindingIds.push(r.bindings[0].id);
       clipIds.push(r.clips[0].id);
@@ -119,11 +130,18 @@ test('generateForSlot: sfx', { skip }, async (t) => {
     // SOMET-592 (I1): `cached` means the BOX had the file -- its cache is
     // shared by every database on the box -- not that this slot has it.
     await t.test('I1: a cached answer whose bytes are new to the slot is stored and bound, no retry', async () => {
-      // Fresh slot (attack_type/magic/use, cue 'spell'): nothing bound.
+      // Fresh slot (attack_type/magic/use, cue 'spell'): nothing bound. The
+      // bytes must be new to the whole DATABASE, not just the slot: since
+      // final review I2 a cached file stored for ANY subject is a duplicate,
+      // and the plain OGG is already stored by the case above.
       const providerWithSpell = { id: null, base_url: 'http://x', modality: 'audio', models_cache: ['cue:spell'] };
       const calls = [];
+      const newBytes = Buffer.concat([OGG, Buffer.from('never-stored-magic-use')]);
       const rap = {
-        generateSfx: async (p, body) => { calls.push(body); return { ...oneClip(body.seed), cached: true }; },
+        generateSfx: async (p, body) => {
+          calls.push(body);
+          return { ...oneClip(body.seed), clips: [{ buffer: newBytes, durationMs: 2000 }], cached: true };
+        },
       };
       const r = await gen.generateForSlot(pool, providerWithSpell,
         { subjectKind: 'attack_type', subjectKey: 'magic', slot: 'use', clipKind: 'sfx', seed: 4 }, { rap, lib });
@@ -132,9 +150,9 @@ test('generateForSlot: sfx', { skip }, async (t) => {
       bindingIds.push(r.bindings[0].id);
       clipIds.push(r.clips[0].id);
       assert.equal(calls.length, 1, 'a cached file new to this slot is not a reason to ask again');
-      assert.equal(calls[0].entity, 'a magic spell', 'take 0, phrase alone');
+      assert.equal(calls[0].entity, await phraseOf(pool, 'attack_type', 'magic', 'use', 'a magic spell'), 'take 0, phrase alone');
       assert.equal(r.clips.length, 1);
-      assert.equal(r.clips[0].sha1, lib.sha1Of(OGG), 'the stored row records the sha1 of its bytes');
+      assert.equal(r.clips[0].sha1, lib.sha1Of(newBytes), 'the stored row records the sha1 of its bytes');
     });
 
     await t.test('N variants store and bind N clips, all in the response', async () => {
@@ -270,7 +288,7 @@ test('generateForSlot: sfx', { skip }, async (t) => {
       track(r);
       assert.equal(r.ok, true, r.error);
       assert.equal(calls.length, 1);
-      assert.equal(calls[0].entity, 'Crushing Blow (take 3)',
+      assert.equal(calls[0].entity, `${await phraseOf(pool, 'skill', SKILL_MELEE, 'hit', 'Crushing Blow')} (take 3)`,
         'a raw COUNT(*) of the 1 surviving binding would have sent "(take 1)" -- a request the box already has cached from take1\'s deleted clip');
       clipIds.push(r.clips[0].id);
       bindingIds.push(r.bindings[0].id);
@@ -314,7 +332,8 @@ test('generateForSlot: sfx', { skip }, async (t) => {
       assert.equal(r.ok, true, r.error);
       for (const c of r.clips) clipIds.push(c.id);
       for (const b of r.bindings) bindingIds.push(b.id);
-      assert.deepEqual(calls.map((c) => c.entity), ['Crushing Blow (take 1)', 'Crushing Blow (take 2)'],
+      const useText = await phraseOf(pool, 'skill', SKILL_MELEE, 'use', 'Crushing Blow');
+      assert.deepEqual(calls.map((c) => c.entity), [`${useText} (take 1)`, `${useText} (take 2)`],
         'take 1 came back as the bound bytes; take 2 was new');
       assert.equal(r.clips.length, 1);
       assert.equal(r.clips[0].sha1, lib.sha1Of(variant(2)));
@@ -340,7 +359,8 @@ test('generateForSlot: sfx', { skip }, async (t) => {
       assert.equal(r.retryable, true, 'a duplicate is never marked retryable:false');
       assert.match(r.error, /already bound to this slot/);
       assert.equal(calls.length, 1 + gen.MAX_EXTRA_DUPLICATE_TAKES);
-      assert.deepEqual(calls.map((c) => c.entity), [1, 2, 3, 4].map((n) => `Whirlwind (take ${n})`));
+      const wwText = await phraseOf(pool, 'skill', SKILL, 'use', 'Whirlwind');
+      assert.deepEqual(calls.map((c) => c.entity), [1, 2, 3, 4].map((n) => `${wwText} (take ${n})`));
       assert.equal(await boundCount(SKILL, 'use'), 1, 'nothing new bound');
     });
 
@@ -429,7 +449,7 @@ test('generateForSlot: sfx', { skip }, async (t) => {
       assert.equal(gen.takeAfterDuplicate(res.a.error), 2);
       const second = await gen.generateSfxPackForJobs(pool, providerSlashHit,
         [{ ...jobA, last_error: res.a.error }], { rap, lib, seed: 1 });
-      assert.equal(bodies[1].items[0].entity, 'Shield Slam (take 2)', 'the retry moves past the duplicated take');
+      assert.equal(bodies[1].items[0].entity, `${await phraseOf(pool, 'skill', SKILL, 'use', 'Shield Slam')} (take 2)`, 'the retry moves past the duplicated take');
       for (const x of second.results) track(x.result);
       const r2 = second.results[0].result;
       assert.equal(r2.ok, true, r2.error);

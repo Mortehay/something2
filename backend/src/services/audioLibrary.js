@@ -58,6 +58,17 @@ async function insertClipRow(db, { id, key }, c) {
 // read at most once. An object that cannot be read is logged and left out:
 // it cannot be compared, and refusing a fresh file because of it would
 // block the slot for good.
+// Which of `hashes` belong to a clip stored ANYWHERE in this database, bound
+// or not, to any subject (final review I2 -- see freshVariants). No index on
+// sha1 by ruling: this runs only for a `cached` box answer, a few hashes at a
+// time. Legacy rows with sha1 NULL are not matched here; the per-slot check
+// in boundClipSha1s still hashes those on demand.
+async function storedClipSha1s(db, hashes) {
+  if (!hashes.length) return new Set();
+  const r = await db.query('SELECT DISTINCT sha1 FROM audio_clips WHERE sha1 = ANY($1)', [hashes]);
+  return new Set(r.rows.map((row) => row.sha1));
+}
+
 async function boundClipSha1s(db, { subjectKind, subjectKey, slot }, { store = assetStore } = {}) {
   const r = await db.query(
     `SELECT c.id, c.sha1, c.storage_key FROM audio_bindings b JOIN audio_clips c ON c.id = b.clip_id
@@ -407,6 +418,6 @@ function filledFromSlotCounts(slotCounts) {
 
 module.exports = {
   slotClipCounts, filledFromSlotCounts,
-  AudioInputError, storeClip, storeAndBindClip, bindClip, sha1Of, boundClipSha1s, canSetLoopable, setClipLoopable, updateBinding, unbind, listClips, deleteClip, deleteUnboundClips,
+  AudioInputError, storeClip, storeAndBindClip, bindClip, sha1Of, boundClipSha1s, storedClipSha1s, canSetLoopable, setClipLoopable, updateBinding, unbind, listClips, deleteClip, deleteUnboundClips,
   subjectSlots, worldAudioBundle, recordMisses, listMisses, MAX_MISSES_PER_POST,
 };
