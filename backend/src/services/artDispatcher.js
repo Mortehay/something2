@@ -515,6 +515,7 @@ async function dispatch(db, {
   deps = {},
   skipBlocked = false,
   onBlocked = null,
+  shouldStop = null,
 } = {}) {
   // Checked BEFORE claiming, so a misconfigured provider costs nothing and
   // leaves the queue untouched rather than burning an attempt on every row.
@@ -549,12 +550,17 @@ async function dispatch(db, {
   // two seconds, and BREAKER_TRIP=3 tripped at ten every time. The guard was
   // real, configured, and disarmed by the granularity of the thing it guarded.
   let aborted = false;
+  // Stop finishes the subject in flight and releases the rest. Without this
+  // the drain read its stop flag only between passes, so Stop still drew every
+  // remaining claimed subject -- up to nine at limit 10 -- one after another.
+  let stopped = false;
   // A fixed pool of workers pulling from a shared cursor, rather than slicing
   // the list into equal chunks: subjects do not take equal time, and chunking
   // would leave one worker finishing long after the others idled.
   const workers = Array.from({ length: Math.max(1, concurrency) }, async () => {
     for (;;) {
-      if (aborted) return;
+      if (aborted || stopped) return;
+      if (shouldStop && shouldStop()) { stopped = true; return; }
       const i = cursor;
       cursor += 1;
       if (i >= claimed.length) return;
@@ -579,7 +585,7 @@ async function dispatch(db, {
   // stamped every one of them, so without this the breaker would strand
   // `limit - processed` jobs in `running` for an hour -- trading the failure
   // this fix prevents for a different one.
-  if (aborted) {
+  if (aborted || stopped) {
     const resolved = new Set(results.map((r) => r.id));
     await queue.release(db, claimed.filter((j) => !resolved.has(j.id)).map((j) => j.id));
   }
@@ -702,6 +708,7 @@ function startDrain(db, opts = {}) {
         };
         const out = await dispatch(db, {
           ...opts, onResult, skipBlocked: true, onBlocked: (b) => { self.blocked = b; },
+          shouldStop: () => self.stopping,
         });
         self.passes += 1;
         self.done += out.done;
