@@ -5,8 +5,8 @@
     "file": "arc_aimed_shot.png",
     "bytes": 75527,
     "source": {
-      "width": 799,
-      "height": 855
+      "width": 239,
+      "height": 256
     }
   },
   {
@@ -15,8 +15,8 @@
     "file": "arc_ambush_flurry.png",
     "bytes": 64670,
     "source": {
-      "width": 782,
-      "height": 697
+      "width": 256,
+      "height": 228
     }
   },
   {
@@ -25,8 +25,8 @@
     "file": "arc_barrage.png",
     "bytes": 69131,
     "source": {
-      "width": 739,
-      "height": 697
+      "width": 256,
+      "height": 241
     }
   },
   {
@@ -35,8 +35,8 @@
     "file": "arc_bear_trap.png",
     "bytes": 74409,
     "source": {
-      "width": 790,
-      "height": 912
+      "width": 222,
+      "height": 256
     }
   },
   {
@@ -45,8 +45,8 @@
     "file": "arc_blinding_shot.png",
     "bytes": 74526,
     "source": {
-      "width": 808,
-      "height": 710
+      "width": 256,
+      "height": 225
     }
   },
   {
@@ -55,8 +55,8 @@
     "file": "arc_bow_bash.png",
     "bytes": 68220,
     "source": {
-      "width": 849,
-      "height": 730
+      "width": 256,
+      "height": 220
     }
   },
   {
@@ -65,18 +65,18 @@
     "file": "arc_camouflage.png",
     "bytes": 75855,
     "source": {
-      "width": 857,
-      "height": 876
+      "width": 250,
+      "height": 256
     }
   },
   {
     "key": "arc_cheetah_stride",
     "name": "Cheetah Stride",
     "file": "arc_cheetah_stride.png",
-    "bytes": 69150,
+    "bytes": 79380,
     "source": {
-      "width": 905,
-      "height": 786
+      "width": 845,
+      "height": 915
     }
   },
   {
@@ -85,8 +85,8 @@
     "file": "arc_chin_jab.png",
     "bytes": 52831,
     "source": {
-      "width": 923,
-      "height": 755
+      "width": 256,
+      "height": 209
     }
   },
   {
@@ -95,8 +95,8 @@
     "file": "arc_concussive_shot.png",
     "bytes": 74263,
     "source": {
-      "width": 822,
-      "height": 784
+      "width": 256,
+      "height": 244
     }
   },
   {
@@ -105,18 +105,18 @@
     "file": "arc_crippling_shot.png",
     "bytes": 80608,
     "source": {
-      "width": 884,
-      "height": 911
+      "width": 248,
+      "height": 256
     }
   },
   {
     "key": "arc_disengage_slash",
     "name": "Disengage Slash",
     "file": "arc_disengage_slash.png",
-    "bytes": 65219,
+    "bytes": 67136,
     "source": {
-      "width": 898,
-      "height": 825
+      "width": 845,
+      "height": 951
     }
   },
   {
@@ -125,8 +125,8 @@
     "file": "arc_eagle_eye.png",
     "bytes": 71387,
     "source": {
-      "width": 758,
-      "height": 816
+      "width": 238,
+      "height": 256
     }
   },
   {
@@ -135,8 +135,8 @@
     "file": "arc_enfeebling_poison.png",
     "bytes": 68198,
     "source": {
-      "width": 650,
-      "height": 694
+      "width": 240,
+      "height": 256
     }
   },
   {
@@ -145,8 +145,8 @@
     "file": "arc_entangling_net.png",
     "bytes": 75246,
     "source": {
-      "width": 841,
-      "height": 743
+      "width": 256,
+      "height": 226
     }
   },
   {
@@ -155,8 +155,8 @@
     "file": "arc_explosive_arrow.png",
     "bytes": 44053,
     "source": {
-      "width": 946,
-      "height": 905
+      "width": 256,
+      "height": 245
     }
   },
   {
@@ -165,8 +165,8 @@
     "file": "arc_explosive_trap.png",
     "bytes": 85483,
     "source": {
-      "width": 821,
-      "height": 814
+      "width": 256,
+      "height": 254
     }
   },
   {
@@ -175,8 +175,8 @@
     "file": "arc_expose_weakness.png",
     "bytes": 79781,
     "source": {
-      "width": 650,
-      "height": 761
+      "width": 219,
+      "height": 256
     }
   },
   {
@@ -185,8 +185,8 @@
     "file": "arc_fan_of_knives.png",
     "bytes": 37045,
     "source": {
-      "width": 902,
-      "height": 659
+      "width": 256,
+      "height": 187
     }
   },
   {
@@ -195,8 +195,8 @@
     "file": "arc_frost_arrow.png",
     "bytes": 68952,
     "source": {
-      "width": 822,
-      "height": 777
+      "width": 256,
+      "height": 242
     }
   },
   {
@@ -205,8 +205,8 @@
     "file": "arc_gale_arrow.png",
     "bytes": 61615,
     "source": {
-      "width": 793,
-      "height": 720
+      "width": 256,
+      "height": 232
     }
   },
   {
@@ -215,8 +215,8 @@
     "file": "arc_heartseeker.png",
     "bytes": 65646,
     "source": {
-      "width": 915,
-      "height": 851
+      "width": 256,
+      "height": 238
     }
   },
   {
@@ -225,8 +225,8 @@
     "file": "arc_hunters_instinct.png",
     "bytes": 64347,
     "source": {
-      "width": 694,
-      "height": 810
+      "width": 219,
+      "height": 256
     }
   },
   {
@@ -235,8 +235,8 @@
     "file": "arc_hunters_mark.png",
     "bytes": 67830,
     "source": {
-      "width": 813,
-      "height": 736
+      "width": 256,
+      "height": 232
     }
   },
   {
@@ -245,8 +245,8 @@
     "file": "arc_hunters_trip.png",
     "bytes": 62451,
     "source": {
-      "width": 648,
-      "height": 892
+      "width": 186,
+      "height": 256
     }
   },
   {
@@ -255,8 +255,8 @@
     "file": "arc_kidney_strike.png",
     "bytes": 71654,
     "source": {
-      "width": 887,
-      "height": 946
+      "width": 240,
+      "height": 256
     }
   },
   {
@@ -265,8 +265,8 @@
     "file": "arc_lightning_arrow.png",
     "bytes": 55609,
     "source": {
-      "width": 823,
-      "height": 670
+      "width": 256,
+      "height": 208
     }
   },
   {
@@ -275,8 +275,8 @@
     "file": "arc_marker_arrow.png",
     "bytes": 33053,
     "source": {
-      "width": 822,
-      "height": 694
+      "width": 256,
+      "height": 216
     }
   },
   {
@@ -285,8 +285,8 @@
     "file": "arc_neurotoxin.png",
     "bytes": 81510,
     "source": {
-      "width": 763,
-      "height": 793
+      "width": 246,
+      "height": 256
     }
   },
   {
@@ -295,8 +295,8 @@
     "file": "arc_piercing_shot.png",
     "bytes": 69525,
     "source": {
-      "width": 815,
-      "height": 877
+      "width": 238,
+      "height": 256
     }
   },
   {
@@ -305,8 +305,8 @@
     "file": "arc_pocket_sand.png",
     "bytes": 53484,
     "source": {
-      "width": 910,
-      "height": 782
+      "width": 256,
+      "height": 220
     }
   },
   {
@@ -315,8 +315,8 @@
     "file": "arc_poison_shiv.png",
     "bytes": 59261,
     "source": {
-      "width": 882,
-      "height": 847
+      "width": 256,
+      "height": 246
     }
   },
   {
@@ -325,8 +325,8 @@
     "file": "arc_preys_dread.png",
     "bytes": 81087,
     "source": {
-      "width": 856,
-      "height": 835
+      "width": 256,
+      "height": 250
     }
   },
   {
@@ -335,8 +335,8 @@
     "file": "arc_rain_of_arrows.png",
     "bytes": 48439,
     "source": {
-      "width": 860,
-      "height": 782
+      "width": 256,
+      "height": 233
     }
   },
   {
@@ -345,8 +345,8 @@
     "file": "arc_rapid_fire.png",
     "bytes": 82737,
     "source": {
-      "width": 827,
-      "height": 862
+      "width": 246,
+      "height": 256
     }
   },
   {
@@ -355,8 +355,8 @@
     "file": "arc_rend_armor.png",
     "bytes": 93157,
     "source": {
-      "width": 903,
-      "height": 969
+      "width": 239,
+      "height": 256
     }
   },
   {
@@ -365,8 +365,8 @@
     "file": "arc_ricochet_shot.png",
     "bytes": 91105,
     "source": {
-      "width": 687,
-      "height": 621
+      "width": 256,
+      "height": 231
     }
   },
   {
@@ -375,8 +375,8 @@
     "file": "arc_riposte_roll.png",
     "bytes": 44248,
     "source": {
-      "width": 797,
-      "height": 658
+      "width": 256,
+      "height": 211
     }
   },
   {
@@ -385,8 +385,8 @@
     "file": "arc_scattershot.png",
     "bytes": 58647,
     "source": {
-      "width": 871,
-      "height": 786
+      "width": 256,
+      "height": 231
     }
   },
   {
@@ -395,8 +395,8 @@
     "file": "arc_shadow_shot.png",
     "bytes": 68893,
     "source": {
-      "width": 813,
-      "height": 987
+      "width": 211,
+      "height": 256
     }
   },
   {
@@ -405,8 +405,8 @@
     "file": "arc_shadowstep.png",
     "bytes": 52725,
     "source": {
-      "width": 894,
-      "height": 769
+      "width": 256,
+      "height": 220
     }
   },
   {
@@ -415,8 +415,8 @@
     "file": "arc_sniper_stance.png",
     "bytes": 72190,
     "source": {
-      "width": 889,
-      "height": 966
+      "width": 236,
+      "height": 256
     }
   },
   {
@@ -425,8 +425,8 @@
     "file": "arc_starfall_arrow.png",
     "bytes": 52565,
     "source": {
-      "width": 886,
-      "height": 754
+      "width": 256,
+      "height": 218
     }
   },
   {
@@ -435,8 +435,8 @@
     "file": "arc_tailwind_aura.png",
     "bytes": 63224,
     "source": {
-      "width": 765,
-      "height": 960
+      "width": 204,
+      "height": 256
     }
   },
   {
@@ -445,8 +445,8 @@
     "file": "arc_tar_trap.png",
     "bytes": 74841,
     "source": {
-      "width": 895,
-      "height": 822
+      "width": 256,
+      "height": 235
     }
   },
   {
@@ -455,8 +455,8 @@
     "file": "arc_throat_slit.png",
     "bytes": 52291,
     "source": {
-      "width": 863,
-      "height": 879
+      "width": 251,
+      "height": 256
     }
   },
   {
@@ -465,8 +465,8 @@
     "file": "arc_tumble.png",
     "bytes": 79653,
     "source": {
-      "width": 922,
-      "height": 916
+      "width": 256,
+      "height": 254
     }
   },
   {
@@ -475,8 +475,8 @@
     "file": "arc_vault.png",
     "bytes": 82128,
     "source": {
-      "width": 914,
-      "height": 928
+      "width": 252,
+      "height": 256
     }
   },
   {
@@ -485,8 +485,8 @@
     "file": "arc_venom_arrow.png",
     "bytes": 102807,
     "source": {
-      "width": 829,
-      "height": 841
+      "width": 252,
+      "height": 256
     }
   },
   {
@@ -495,8 +495,8 @@
     "file": "arc_whirling_blades.png",
     "bytes": 84381,
     "source": {
-      "width": 913,
-      "height": 782
+      "width": 256,
+      "height": 219
     }
   },
   {
@@ -505,18 +505,18 @@
     "file": "cul_abyssal_beam.png",
     "bytes": 64965,
     "source": {
-      "width": 807,
-      "height": 840
+      "width": 246,
+      "height": 256
     }
   },
   {
     "key": "cul_abyssal_cloak",
     "name": "Abyssal Cloak",
     "file": "cul_abyssal_cloak.png",
-    "bytes": 57387,
+    "bytes": 54071,
     "source": {
-      "width": 684,
-      "height": 943
+      "width": 588,
+      "height": 860
     }
   },
   {
@@ -525,8 +525,8 @@
     "file": "cul_black_plague.png",
     "bytes": 66001,
     "source": {
-      "width": 860,
-      "height": 1004
+      "width": 219,
+      "height": 256
     }
   },
   {
@@ -535,8 +535,8 @@
     "file": "cul_black_sun.png",
     "bytes": 63395,
     "source": {
-      "width": 964,
-      "height": 969
+      "width": 255,
+      "height": 256
     }
   },
   {
@@ -545,8 +545,8 @@
     "file": "cul_blood_boil.png",
     "bytes": 70061,
     "source": {
-      "width": 824,
-      "height": 835
+      "width": 253,
+      "height": 256
     }
   },
   {
@@ -555,8 +555,8 @@
     "file": "cul_blood_lance.png",
     "bytes": 43052,
     "source": {
-      "width": 935,
-      "height": 854
+      "width": 256,
+      "height": 234
     }
   },
   {
@@ -565,8 +565,8 @@
     "file": "cul_blood_orb.png",
     "bytes": 64627,
     "source": {
-      "width": 780,
-      "height": 909
+      "width": 220,
+      "height": 256
     }
   },
   {
@@ -575,8 +575,8 @@
     "file": "cul_blood_pact.png",
     "bytes": 78627,
     "source": {
-      "width": 675,
-      "height": 877
+      "width": 197,
+      "height": 256
     }
   },
   {
@@ -585,8 +585,8 @@
     "file": "cul_blood_rebirth.png",
     "bytes": 88321,
     "source": {
-      "width": 930,
-      "height": 996
+      "width": 239,
+      "height": 256
     }
   },
   {
@@ -595,8 +595,8 @@
     "file": "cul_blood_scythe.png",
     "bytes": 37598,
     "source": {
-      "width": 924,
-      "height": 815
+      "width": 256,
+      "height": 226
     }
   },
   {
@@ -605,8 +605,8 @@
     "file": "cul_bone_armor.png",
     "bytes": 73623,
     "source": {
-      "width": 940,
-      "height": 906
+      "width": 256,
+      "height": 247
     }
   },
   {
@@ -615,8 +615,8 @@
     "file": "cul_bone_spear.png",
     "bytes": 38934,
     "source": {
-      "width": 915,
-      "height": 844
+      "width": 256,
+      "height": 236
     }
   },
   {
@@ -625,8 +625,8 @@
     "file": "cul_bone_storm.png",
     "bytes": 78425,
     "source": {
-      "width": 858,
-      "height": 983
+      "width": 223,
+      "height": 256
     }
   },
   {
@@ -635,8 +635,8 @@
     "file": "cul_circle_of_agony.png",
     "bytes": 78477,
     "source": {
-      "width": 822,
-      "height": 1066
+      "width": 197,
+      "height": 256
     }
   },
   {
@@ -645,8 +645,8 @@
     "file": "cul_corpse_cleave.png",
     "bytes": 76342,
     "source": {
-      "width": 713,
-      "height": 882
+      "width": 207,
+      "height": 256
     }
   },
   {
@@ -655,8 +655,8 @@
     "file": "cul_corpse_explosion.png",
     "bytes": 73914,
     "source": {
-      "width": 701,
-      "height": 820
+      "width": 219,
+      "height": 256
     }
   },
   {
@@ -665,8 +665,8 @@
     "file": "cul_curse_of_aging.png",
     "bytes": 84557,
     "source": {
-      "width": 859,
-      "height": 979
+      "width": 225,
+      "height": 256
     }
   },
   {
@@ -675,8 +675,8 @@
     "file": "cul_curse_of_doom.png",
     "bytes": 71859,
     "source": {
-      "width": 895,
-      "height": 1012
+      "width": 226,
+      "height": 256
     }
   },
   {
@@ -685,8 +685,8 @@
     "file": "cul_curse_of_frailty.png",
     "bytes": 82466,
     "source": {
-      "width": 836,
-      "height": 961
+      "width": 223,
+      "height": 256
     }
   },
   {
@@ -695,8 +695,8 @@
     "file": "cul_curse_of_vulnerability.png",
     "bytes": 86829,
     "source": {
-      "width": 955,
-      "height": 1032
+      "width": 237,
+      "height": 256
     }
   },
   {
@@ -705,8 +705,8 @@
     "file": "cul_dark_blessing.png",
     "bytes": 53139,
     "source": {
-      "width": 832,
-      "height": 955
+      "width": 223,
+      "height": 256
     }
   },
   {
@@ -715,8 +715,8 @@
     "file": "cul_dark_star_fall.png",
     "bytes": 70935,
     "source": {
-      "width": 880,
-      "height": 962
+      "width": 234,
+      "height": 256
     }
   },
   {
@@ -725,8 +725,8 @@
     "file": "cul_death_decay.png",
     "bytes": 75431,
     "source": {
-      "width": 813,
-      "height": 951
+      "width": 219,
+      "height": 256
     }
   },
   {
@@ -735,8 +735,8 @@
     "file": "cul_defiled_strike.png",
     "bytes": 59511,
     "source": {
-      "width": 984,
-      "height": 858
+      "width": 256,
+      "height": 223
     }
   },
   {
@@ -745,8 +745,8 @@
     "file": "cul_fanatic_frenzy.png",
     "bytes": 85950,
     "source": {
-      "width": 881,
-      "height": 928
+      "width": 243,
+      "height": 256
     }
   },
   {
@@ -755,8 +755,8 @@
     "file": "cul_final_rite.png",
     "bytes": 53318,
     "source": {
-      "width": 516,
-      "height": 924
+      "width": 143,
+      "height": 256
     }
   },
   {
@@ -765,8 +765,8 @@
     "file": "cul_flesh_siphon_strike.png",
     "bytes": 74032,
     "source": {
-      "width": 890,
-      "height": 979
+      "width": 233,
+      "height": 256
     }
   },
   {
@@ -775,8 +775,8 @@
     "file": "cul_heartstopper.png",
     "bytes": 75683,
     "source": {
-      "width": 826,
-      "height": 919
+      "width": 230,
+      "height": 256
     }
   },
   {
@@ -785,8 +785,8 @@
     "file": "cul_hemophilia.png",
     "bytes": 83486,
     "source": {
-      "width": 949,
-      "height": 883
+      "width": 256,
+      "height": 238
     }
   },
   {
@@ -795,18 +795,18 @@
     "file": "cul_horror_of_the_void.png",
     "bytes": 80954,
     "source": {
-      "width": 806,
-      "height": 951
+      "width": 217,
+      "height": 256
     }
   },
   {
     "key": "cul_life_transfusion",
     "name": "Life Transfusion",
     "file": "cul_life_transfusion.png",
-    "bytes": 59967,
+    "bytes": 67130,
     "source": {
-      "width": 601,
-      "height": 818
+      "width": 670,
+      "height": 829
     }
   },
   {
@@ -815,8 +815,8 @@
     "file": "cul_martyrdom_aura.png",
     "bytes": 71326,
     "source": {
-      "width": 813,
-      "height": 940
+      "width": 221,
+      "height": 256
     }
   },
   {
@@ -825,8 +825,8 @@
     "file": "cul_martyrs_flail.png",
     "bytes": 42414,
     "source": {
-      "width": 982,
-      "height": 801
+      "width": 256,
+      "height": 209
     }
   },
   {
@@ -835,8 +835,8 @@
     "file": "cul_mind_rot.png",
     "bytes": 88006,
     "source": {
-      "width": 801,
-      "height": 933
+      "width": 220,
+      "height": 256
     }
   },
   {
@@ -845,8 +845,8 @@
     "file": "cul_minion_sacrifice.png",
     "bytes": 81375,
     "source": {
-      "width": 832,
-      "height": 824
+      "width": 256,
+      "height": 254
     }
   },
   {
@@ -855,8 +855,8 @@
     "file": "cul_plague_globule.png",
     "bytes": 63639,
     "source": {
-      "width": 840,
-      "height": 981
+      "width": 219,
+      "height": 256
     }
   },
   {
@@ -865,8 +865,8 @@
     "file": "cul_sacrificial_brand.png",
     "bytes": 82806,
     "source": {
-      "width": 872,
-      "height": 1021
+      "width": 219,
+      "height": 256
     }
   },
   {
@@ -875,8 +875,8 @@
     "file": "cul_sacrificial_stab.png",
     "bytes": 39723,
     "source": {
-      "width": 877,
-      "height": 743
+      "width": 256,
+      "height": 217
     }
   },
   {
@@ -885,8 +885,8 @@
     "file": "cul_sanguine_pool.png",
     "bytes": 81029,
     "source": {
-      "width": 887,
-      "height": 832
+      "width": 256,
+      "height": 240
     }
   },
   {
@@ -895,8 +895,8 @@
     "file": "cul_shadow_grasp.png",
     "bytes": 74016,
     "source": {
-      "width": 873,
-      "height": 1030
+      "width": 217,
+      "height": 256
     }
   },
   {
@@ -905,8 +905,8 @@
     "file": "cul_shadow_veil.png",
     "bytes": 83306,
     "source": {
-      "width": 871,
-      "height": 983
+      "width": 227,
+      "height": 256
     }
   },
   {
@@ -915,8 +915,8 @@
     "file": "cul_soul_drain.png",
     "bytes": 72301,
     "source": {
-      "width": 753,
-      "height": 953
+      "width": 202,
+      "height": 256
     }
   },
   {
@@ -925,8 +925,8 @@
     "file": "cul_spike_of_agony.png",
     "bytes": 44556,
     "source": {
-      "width": 752,
-      "height": 621
+      "width": 256,
+      "height": 211
     }
   },
   {
@@ -935,8 +935,8 @@
     "file": "cul_summon_blood_golem.png",
     "bytes": 80869,
     "source": {
-      "width": 806,
-      "height": 928
+      "width": 222,
+      "height": 256
     }
   },
   {
@@ -945,8 +945,8 @@
     "file": "cul_tentacles_of_the_deep.png",
     "bytes": 94992,
     "source": {
-      "width": 941,
-      "height": 925
+      "width": 256,
+      "height": 252
     }
   },
   {
@@ -955,8 +955,8 @@
     "file": "cul_undead_resilience.png",
     "bytes": 80752,
     "source": {
-      "width": 800,
-      "height": 948
+      "width": 216,
+      "height": 256
     }
   },
   {
@@ -965,8 +965,8 @@
     "file": "cul_vampiric_bite.png",
     "bytes": 58449,
     "source": {
-      "width": 861,
-      "height": 666
+      "width": 256,
+      "height": 198
     }
   },
   {
@@ -975,8 +975,8 @@
     "file": "cul_vampiric_embrace.png",
     "bytes": 98594,
     "source": {
-      "width": 842,
-      "height": 939
+      "width": 230,
+      "height": 256
     }
   },
   {
@@ -985,8 +985,8 @@
     "file": "cul_vein_ripper.png",
     "bytes": 50053,
     "source": {
-      "width": 821,
-      "height": 752
+      "width": 256,
+      "height": 234
     }
   },
   {
@@ -995,8 +995,8 @@
     "file": "cul_wave_of_torment.png",
     "bytes": 72277,
     "source": {
-      "width": 721,
-      "height": 835
+      "width": 221,
+      "height": 256
     }
   },
   {
@@ -1005,8 +1005,8 @@
     "file": "dru_barkskin.png",
     "bytes": 78324,
     "source": {
-      "width": 698,
-      "height": 851
+      "width": 210,
+      "height": 256
     }
   },
   {
@@ -1015,8 +1015,8 @@
     "file": "dru_bear_charge.png",
     "bytes": 81643,
     "source": {
-      "width": 880,
-      "height": 908
+      "width": 248,
+      "height": 256
     }
   },
   {
@@ -1025,8 +1025,8 @@
     "file": "dru_bear_earth_stomp.png",
     "bytes": 91438,
     "source": {
-      "width": 816,
-      "height": 877
+      "width": 238,
+      "height": 256
     }
   },
   {
@@ -1035,8 +1035,8 @@
     "file": "dru_bear_form.png",
     "bytes": 86715,
     "source": {
-      "width": 774,
-      "height": 923
+      "width": 215,
+      "height": 256
     }
   },
   {
@@ -1045,8 +1045,8 @@
     "file": "dru_bear_frenzy.png",
     "bytes": 85824,
     "source": {
-      "width": 902,
-      "height": 852
+      "width": 256,
+      "height": 242
     }
   },
   {
@@ -1055,8 +1055,8 @@
     "file": "dru_bear_mangle.png",
     "bytes": 85911,
     "source": {
-      "width": 833,
-      "height": 920
+      "width": 232,
+      "height": 256
     }
   },
   {
@@ -1065,8 +1065,8 @@
     "file": "dru_bear_slam.png",
     "bytes": 76383,
     "source": {
-      "width": 877,
-      "height": 757
+      "width": 256,
+      "height": 221
     }
   },
   {
@@ -1075,8 +1075,8 @@
     "file": "dru_bramble_burst.png",
     "bytes": 77377,
     "source": {
-      "width": 872,
-      "height": 917
+      "width": 243,
+      "height": 256
     }
   },
   {
@@ -1085,8 +1085,8 @@
     "file": "dru_charm_creature.png",
     "bytes": 75959,
     "source": {
-      "width": 811,
-      "height": 989
+      "width": 210,
+      "height": 256
     }
   },
   {
@@ -1095,18 +1095,18 @@
     "file": "dru_constricting_vines.png",
     "bytes": 85693,
     "source": {
-      "width": 917,
-      "height": 893
+      "width": 256,
+      "height": 249
     }
   },
   {
     "key": "dru_cyclone",
     "name": "Cyclone",
     "file": "dru_cyclone.png",
-    "bytes": 74134,
+    "bytes": 77423,
     "source": {
-      "width": 810,
-      "height": 878
+      "width": 772,
+      "height": 907
     }
   },
   {
@@ -1115,8 +1115,8 @@
     "file": "dru_demoralizing_roar.png",
     "bytes": 79031,
     "source": {
-      "width": 816,
-      "height": 833
+      "width": 251,
+      "height": 256
     }
   },
   {
@@ -1125,8 +1125,8 @@
     "file": "dru_entangling_roots.png",
     "bytes": 89327,
     "source": {
-      "width": 861,
-      "height": 852
+      "width": 256,
+      "height": 253
     }
   },
   {
@@ -1135,8 +1135,8 @@
     "file": "dru_feral_bite.png",
     "bytes": 75432,
     "source": {
-      "width": 855,
-      "height": 934
+      "width": 234,
+      "height": 256
     }
   },
   {
@@ -1145,8 +1145,8 @@
     "file": "dru_hawk_aerial_evade_strike.png",
     "bytes": 76582,
     "source": {
-      "width": 922,
-      "height": 962
+      "width": 245,
+      "height": 256
     }
   },
   {
@@ -1155,8 +1155,8 @@
     "file": "dru_hawk_dive_slash.png",
     "bytes": 71854,
     "source": {
-      "width": 732,
-      "height": 903
+      "width": 208,
+      "height": 256
     }
   },
   {
@@ -1165,8 +1165,8 @@
     "file": "dru_hawk_feather_flurry.png",
     "bytes": 75018,
     "source": {
-      "width": 886,
-      "height": 996
+      "width": 228,
+      "height": 256
     }
   },
   {
@@ -1175,8 +1175,8 @@
     "file": "dru_hawk_form.png",
     "bytes": 67372,
     "source": {
-      "width": 931,
-      "height": 991
+      "width": 241,
+      "height": 256
     }
   },
   {
@@ -1185,8 +1185,8 @@
     "file": "dru_hawk_razor_feathers.png",
     "bytes": 48808,
     "source": {
-      "width": 837,
-      "height": 858
+      "width": 250,
+      "height": 256
     }
   },
   {
@@ -1195,8 +1195,8 @@
     "file": "dru_hawk_talon_strike.png",
     "bytes": 36652,
     "source": {
-      "width": 997,
-      "height": 841
+      "width": 256,
+      "height": 216
     }
   },
   {
@@ -1205,8 +1205,8 @@
     "file": "dru_hawk_wind_slash.png",
     "bytes": 36687,
     "source": {
-      "width": 902,
-      "height": 675
+      "width": 256,
+      "height": 192
     }
   },
   {
@@ -1215,8 +1215,8 @@
     "file": "dru_healing_touch.png",
     "bytes": 61174,
     "source": {
-      "width": 695,
-      "height": 940
+      "width": 189,
+      "height": 256
     }
   },
   {
@@ -1225,8 +1225,8 @@
     "file": "dru_hibernate.png",
     "bytes": 80937,
     "source": {
-      "width": 739,
-      "height": 864
+      "width": 219,
+      "height": 256
     }
   },
   {
@@ -1235,8 +1235,8 @@
     "file": "dru_insect_swarm.png",
     "bytes": 70286,
     "source": {
-      "width": 965,
-      "height": 966
+      "width": 256,
+      "height": 256
     }
   },
   {
@@ -1245,8 +1245,8 @@
     "file": "dru_mark_of_the_wild.png",
     "bytes": 77917,
     "source": {
-      "width": 893,
-      "height": 960
+      "width": 238,
+      "height": 256
     }
   },
   {
@@ -1255,8 +1255,8 @@
     "file": "dru_maul.png",
     "bytes": 77122,
     "source": {
-      "width": 828,
-      "height": 950
+      "width": 223,
+      "height": 256
     }
   },
   {
@@ -1265,8 +1265,8 @@
     "file": "dru_moonfire.png",
     "bytes": 58132,
     "source": {
-      "width": 705,
-      "height": 909
+      "width": 199,
+      "height": 256
     }
   },
   {
@@ -1275,8 +1275,8 @@
     "file": "dru_natures_curse.png",
     "bytes": 74138,
     "source": {
-      "width": 704,
-      "height": 872
+      "width": 207,
+      "height": 256
     }
   },
   {
@@ -1285,8 +1285,8 @@
     "file": "dru_natures_swiftness.png",
     "bytes": 92597,
     "source": {
-      "width": 923,
-      "height": 884
+      "width": 256,
+      "height": 245
     }
   },
   {
@@ -1295,8 +1295,8 @@
     "file": "dru_paralytic_spores.png",
     "bytes": 83513,
     "source": {
-      "width": 864,
-      "height": 761
+      "width": 256,
+      "height": 225
     }
   },
   {
@@ -1305,8 +1305,8 @@
     "file": "dru_poison_ivy.png",
     "bytes": 65824,
     "source": {
-      "width": 799,
-      "height": 861
+      "width": 238,
+      "height": 256
     }
   },
   {
@@ -1315,8 +1315,8 @@
     "file": "dru_rejuvenation.png",
     "bytes": 76848,
     "source": {
-      "width": 703,
-      "height": 915
+      "width": 197,
+      "height": 256
     }
   },
   {
@@ -1325,8 +1325,8 @@
     "file": "dru_rot_wood.png",
     "bytes": 57325,
     "source": {
-      "width": 852,
-      "height": 776
+      "width": 256,
+      "height": 233
     }
   },
   {
@@ -1335,8 +1335,8 @@
     "file": "dru_solar_beam.png",
     "bytes": 83983,
     "source": {
-      "width": 740,
-      "height": 748
+      "width": 253,
+      "height": 256
     }
   },
   {
@@ -1345,8 +1345,8 @@
     "file": "dru_spore_cloud.png",
     "bytes": 93375,
     "source": {
-      "width": 820,
-      "height": 835
+      "width": 251,
+      "height": 256
     }
   },
   {
@@ -1355,8 +1355,8 @@
     "file": "dru_starfall.png",
     "bytes": 54865,
     "source": {
-      "width": 785,
-      "height": 844
+      "width": 238,
+      "height": 256
     }
   },
   {
@@ -1365,8 +1365,8 @@
     "file": "dru_storm_lightning.png",
     "bytes": 60692,
     "source": {
-      "width": 739,
-      "height": 813
+      "width": 233,
+      "height": 256
     }
   },
   {
@@ -1375,8 +1375,8 @@
     "file": "dru_summon_treant.png",
     "bytes": 91055,
     "source": {
-      "width": 931,
-      "height": 984
+      "width": 242,
+      "height": 256
     }
   },
   {
@@ -1385,8 +1385,8 @@
     "file": "dru_summon_wolfpack.png",
     "bytes": 89418,
     "source": {
-      "width": 910,
-      "height": 909
+      "width": 256,
+      "height": 256
     }
   },
   {
@@ -1395,8 +1395,8 @@
     "file": "dru_thorn_staff_strike.png",
     "bytes": 45580,
     "source": {
-      "width": 940,
-      "height": 895
+      "width": 256,
+      "height": 244
     }
   },
   {
@@ -1405,8 +1405,8 @@
     "file": "dru_thorns_aura.png",
     "bytes": 72170,
     "source": {
-      "width": 662,
-      "height": 946
+      "width": 179,
+      "height": 256
     }
   },
   {
@@ -1415,8 +1415,8 @@
     "file": "dru_tranquility.png",
     "bytes": 65369,
     "source": {
-      "width": 719,
-      "height": 860
+      "width": 214,
+      "height": 256
     }
   },
   {
@@ -1425,8 +1425,8 @@
     "file": "dru_ursocs_wrath.png",
     "bytes": 80645,
     "source": {
-      "width": 954,
-      "height": 872
+      "width": 256,
+      "height": 234
     }
   },
   {
@@ -1435,8 +1435,8 @@
     "file": "dru_wolf_flurry.png",
     "bytes": 96081,
     "source": {
-      "width": 933,
-      "height": 953
+      "width": 251,
+      "height": 256
     }
   },
   {
@@ -1445,18 +1445,18 @@
     "file": "dru_wolf_form.png",
     "bytes": 73642,
     "source": {
-      "width": 841,
-      "height": 968
+      "width": 222,
+      "height": 256
     }
   },
   {
     "key": "dru_wolf_pack_strike",
     "name": "Wolf Pack Strike",
     "file": "dru_wolf_pack_strike.png",
-    "bytes": 73871,
+    "bytes": 64727,
     "source": {
-      "width": 762,
-      "height": 949
+      "width": 695,
+      "height": 850
     }
   },
   {
@@ -1465,8 +1465,8 @@
     "file": "dru_wolf_pounce.png",
     "bytes": 85033,
     "source": {
-      "width": 934,
-      "height": 872
+      "width": 256,
+      "height": 239
     }
   },
   {
@@ -1475,8 +1475,8 @@
     "file": "dru_wolf_rend.png",
     "bytes": 78903,
     "source": {
-      "width": 857,
-      "height": 951
+      "width": 231,
+      "height": 256
     }
   },
   {
@@ -1485,8 +1485,8 @@
     "file": "dru_wolf_throat_rip.png",
     "bytes": 71346,
     "source": {
-      "width": 720,
-      "height": 907
+      "width": 203,
+      "height": 256
     }
   },
   {
@@ -1495,8 +1495,8 @@
     "file": "dru_wrath.png",
     "bytes": 56523,
     "source": {
-      "width": 885,
-      "height": 802
+      "width": 256,
+      "height": 232
     }
   },
   {
@@ -1505,8 +1505,8 @@
     "file": "mag_arcane_beam.png",
     "bytes": 62815,
     "source": {
-      "width": 883,
-      "height": 916
+      "width": 247,
+      "height": 256
     }
   },
   {
@@ -1515,8 +1515,8 @@
     "file": "mag_arcane_brilliance.png",
     "bytes": 63885,
     "source": {
-      "width": 734,
-      "height": 941
+      "width": 200,
+      "height": 256
     }
   },
   {
@@ -1525,8 +1525,8 @@
     "file": "mag_arcane_dagger.png",
     "bytes": 53430,
     "source": {
-      "width": 799,
-      "height": 811
+      "width": 252,
+      "height": 256
     }
   },
   {
@@ -1535,8 +1535,8 @@
     "file": "mag_arcane_sweep.png",
     "bytes": 55040,
     "source": {
-      "width": 815,
-      "height": 802
+      "width": 256,
+      "height": 252
     }
   },
   {
@@ -1545,8 +1545,8 @@
     "file": "mag_arcane_vulnerability.png",
     "bytes": 63138,
     "source": {
-      "width": 707,
-      "height": 968
+      "width": 187,
+      "height": 256
     }
   },
   {
@@ -1555,8 +1555,8 @@
     "file": "mag_ball_lightning.png",
     "bytes": 67686,
     "source": {
-      "width": 691,
-      "height": 796
+      "width": 222,
+      "height": 256
     }
   },
   {
@@ -1565,8 +1565,8 @@
     "file": "mag_blast_wave.png",
     "bytes": 87961,
     "source": {
-      "width": 884,
-      "height": 899
+      "width": 252,
+      "height": 256
     }
   },
   {
@@ -1575,8 +1575,8 @@
     "file": "mag_blink.png",
     "bytes": 59292,
     "source": {
-      "width": 782,
-      "height": 698
+      "width": 256,
+      "height": 229
     }
   },
   {
@@ -1585,8 +1585,8 @@
     "file": "mag_blizzard.png",
     "bytes": 64529,
     "source": {
-      "width": 751,
-      "height": 894
+      "width": 215,
+      "height": 256
     }
   },
   {
@@ -1595,8 +1595,8 @@
     "file": "mag_chain_lightning.png",
     "bytes": 61579,
     "source": {
-      "width": 914,
-      "height": 886
+      "width": 256,
+      "height": 248
     }
   },
   {
@@ -1605,8 +1605,8 @@
     "file": "mag_combustion_touch.png",
     "bytes": 83398,
     "source": {
-      "width": 766,
-      "height": 820
+      "width": 239,
+      "height": 256
     }
   },
   {
@@ -1615,8 +1615,8 @@
     "file": "mag_deep_chill.png",
     "bytes": 72269,
     "source": {
-      "width": 748,
-      "height": 845
+      "width": 227,
+      "height": 256
     }
   },
   {
@@ -1625,8 +1625,8 @@
     "file": "mag_deep_comet.png",
     "bytes": 83060,
     "source": {
-      "width": 764,
-      "height": 726
+      "width": 256,
+      "height": 243
     }
   },
   {
@@ -1635,8 +1635,8 @@
     "file": "mag_disintegrate.png",
     "bytes": 59812,
     "source": {
-      "width": 575,
-      "height": 864
+      "width": 170,
+      "height": 256
     }
   },
   {
@@ -1645,8 +1645,8 @@
     "file": "mag_elemental_focus.png",
     "bytes": 69562,
     "source": {
-      "width": 809,
-      "height": 942
+      "width": 220,
+      "height": 256
     }
   },
   {
@@ -1655,18 +1655,18 @@
     "file": "mag_elemental_hex.png",
     "bytes": 67071,
     "source": {
-      "width": 811,
-      "height": 935
+      "width": 222,
+      "height": 256
     }
   },
   {
     "key": "mag_empower_elements",
     "name": "Empower Elements",
     "file": "mag_empower_elements.png",
-    "bytes": 68725,
+    "bytes": 79125,
     "source": {
-      "width": 617,
-      "height": 807
+      "width": 787,
+      "height": 904
     }
   },
   {
@@ -1675,8 +1675,8 @@
     "file": "mag_ethereal_form.png",
     "bytes": 73502,
     "source": {
-      "width": 679,
-      "height": 903
+      "width": 192,
+      "height": 256
     }
   },
   {
@@ -1685,8 +1685,8 @@
     "file": "mag_fireball.png",
     "bytes": 58827,
     "source": {
-      "width": 600,
-      "height": 764
+      "width": 201,
+      "height": 256
     }
   },
   {
@@ -1695,8 +1695,8 @@
     "file": "mag_flash_blind.png",
     "bytes": 68555,
     "source": {
-      "width": 611,
-      "height": 827
+      "width": 189,
+      "height": 256
     }
   },
   {
@@ -1705,8 +1705,8 @@
     "file": "mag_frost_nova.png",
     "bytes": 81736,
     "source": {
-      "width": 949,
-      "height": 854
+      "width": 256,
+      "height": 230
     }
   },
   {
@@ -1715,8 +1715,8 @@
     "file": "mag_frost_rapier.png",
     "bytes": 36006,
     "source": {
-      "width": 929,
-      "height": 758
+      "width": 256,
+      "height": 209
     }
   },
   {
@@ -1725,8 +1725,8 @@
     "file": "mag_frostbolt.png",
     "bytes": 54095,
     "source": {
-      "width": 793,
-      "height": 817
+      "width": 248,
+      "height": 256
     }
   },
   {
@@ -1735,8 +1735,8 @@
     "file": "mag_gravity_singularity.png",
     "bytes": 78543,
     "source": {
-      "width": 665,
-      "height": 815
+      "width": 209,
+      "height": 256
     }
   },
   {
@@ -1745,8 +1745,8 @@
     "file": "mag_haste.png",
     "bytes": 77961,
     "source": {
-      "width": 692,
-      "height": 822
+      "width": 216,
+      "height": 256
     }
   },
   {
@@ -1755,8 +1755,8 @@
     "file": "mag_ice_armor.png",
     "bytes": 74782,
     "source": {
-      "width": 632,
-      "height": 841
+      "width": 192,
+      "height": 256
     }
   },
   {
@@ -1765,8 +1765,8 @@
     "file": "mag_illusionary_jab.png",
     "bytes": 49561,
     "source": {
-      "width": 780,
-      "height": 683
+      "width": 256,
+      "height": 224
     }
   },
   {
@@ -1775,8 +1775,8 @@
     "file": "mag_immolation_aura.png",
     "bytes": 77195,
     "source": {
-      "width": 903,
-      "height": 882
+      "width": 256,
+      "height": 250
     }
   },
   {
@@ -1785,8 +1785,8 @@
     "file": "mag_magic_missiles.png",
     "bytes": 72753,
     "source": {
-      "width": 883,
-      "height": 807
+      "width": 256,
+      "height": 234
     }
   },
   {
@@ -1795,8 +1795,8 @@
     "file": "mag_mana_blades.png",
     "bytes": 34859,
     "source": {
-      "width": 953,
-      "height": 870
+      "width": 256,
+      "height": 234
     }
   },
   {
@@ -1805,8 +1805,8 @@
     "file": "mag_mana_burn.png",
     "bytes": 73435,
     "source": {
-      "width": 776,
-      "height": 843
+      "width": 236,
+      "height": 256
     }
   },
   {
@@ -1815,8 +1815,8 @@
     "file": "mag_mana_shield.png",
     "bytes": 69442,
     "source": {
-      "width": 714,
-      "height": 575
+      "width": 256,
+      "height": 206
     }
   },
   {
@@ -1825,8 +1825,8 @@
     "file": "mag_mana_surge.png",
     "bytes": 84703,
     "source": {
-      "width": 826,
-      "height": 961
+      "width": 220,
+      "height": 256
     }
   },
   {
@@ -1835,8 +1835,8 @@
     "file": "mag_mana_tap.png",
     "bytes": 54812,
     "source": {
-      "width": 847,
-      "height": 764
+      "width": 256,
+      "height": 231
     }
   },
   {
@@ -1845,8 +1845,8 @@
     "file": "mag_meteor_shower.png",
     "bytes": 72646,
     "source": {
-      "width": 672,
-      "height": 713
+      "width": 241,
+      "height": 256
     }
   },
   {
@@ -1855,8 +1855,8 @@
     "file": "mag_mirror_image.png",
     "bytes": 56214,
     "source": {
-      "width": 620,
-      "height": 875
+      "width": 181,
+      "height": 256
     }
   },
   {
@@ -1865,8 +1865,8 @@
     "file": "mag_overload_discharge.png",
     "bytes": 81085,
     "source": {
-      "width": 1018,
-      "height": 998
+      "width": 256,
+      "height": 251
     }
   },
   {
@@ -1875,8 +1875,8 @@
     "file": "mag_point_blank_burst.png",
     "bytes": 72041,
     "source": {
-      "width": 820,
-      "height": 707
+      "width": 256,
+      "height": 221
     }
   },
   {
@@ -1885,8 +1885,8 @@
     "file": "mag_polymorph.png",
     "bytes": 71128,
     "source": {
-      "width": 698,
-      "height": 844
+      "width": 212,
+      "height": 256
     }
   },
   {
@@ -1895,8 +1895,8 @@
     "file": "mag_prismatic_burst.png",
     "bytes": 72981,
     "source": {
-      "width": 954,
-      "height": 968
+      "width": 252,
+      "height": 256
     }
   },
   {
@@ -1905,8 +1905,8 @@
     "file": "mag_scorched_flesh.png",
     "bytes": 82364,
     "source": {
-      "width": 682,
-      "height": 755
+      "width": 231,
+      "height": 256
     }
   },
   {
@@ -1915,8 +1915,8 @@
     "file": "mag_silence.png",
     "bytes": 73927,
     "source": {
-      "width": 608,
-      "height": 803
+      "width": 194,
+      "height": 256
     }
   },
   {
@@ -1925,8 +1925,8 @@
     "file": "mag_slow_field.png",
     "bytes": 81622,
     "source": {
-      "width": 780,
-      "height": 892
+      "width": 224,
+      "height": 256
     }
   },
   {
@@ -1935,8 +1935,8 @@
     "file": "mag_spell_ward.png",
     "bytes": 88061,
     "source": {
-      "width": 718,
-      "height": 720
+      "width": 255,
+      "height": 256
     }
   },
   {
@@ -1945,8 +1945,8 @@
     "file": "mag_staff_shock.png",
     "bytes": 61103,
     "source": {
-      "width": 897,
-      "height": 899
+      "width": 255,
+      "height": 256
     }
   },
   {
@@ -1955,8 +1955,8 @@
     "file": "mag_static_charge.png",
     "bytes": 56809,
     "source": {
-      "width": 697,
-      "height": 921
+      "width": 194,
+      "height": 256
     }
   },
   {
@@ -1965,8 +1965,8 @@
     "file": "mag_static_palm.png",
     "bytes": 71794,
     "source": {
-      "width": 845,
-      "height": 926
+      "width": 234,
+      "height": 256
     }
   },
   {
@@ -1975,8 +1975,8 @@
     "file": "mag_temporal_warp.png",
     "bytes": 73638,
     "source": {
-      "width": 633,
-      "height": 700
+      "width": 231,
+      "height": 256
     }
   },
   {
@@ -1985,8 +1985,8 @@
     "file": "mag_thunderstorm.png",
     "bytes": 56333,
     "source": {
-      "width": 743,
-      "height": 889
+      "width": 214,
+      "height": 256
     }
   },
   {
@@ -1995,28 +1995,28 @@
     "file": "mag_wall_of_fire.png",
     "bytes": 71494,
     "source": {
-      "width": 699,
-      "height": 852
+      "width": 210,
+      "height": 256
     }
   },
   {
     "key": "mnk_astral_projection",
     "name": "Astral Projection",
     "file": "mnk_astral_projection.png",
-    "bytes": 60063,
+    "bytes": 63728,
     "source": {
-      "width": 594,
-      "height": 913
+      "width": 620,
+      "height": 816
     }
   },
   {
     "key": "mnk_chakra_block",
     "name": "Chakra Block",
     "file": "mnk_chakra_block.png",
-    "bytes": 84113,
+    "bytes": 84643,
     "source": {
-      "width": 857,
-      "height": 848
+      "width": 749,
+      "height": 840
     }
   },
   {
@@ -2025,8 +2025,8 @@
     "file": "mnk_chi_wave.png",
     "bytes": 94632,
     "source": {
-      "width": 834,
-      "height": 847
+      "width": 252,
+      "height": 256
     }
   },
   {
@@ -2035,8 +2035,8 @@
     "file": "mnk_crane_beak.png",
     "bytes": 62323,
     "source": {
-      "width": 742,
-      "height": 861
+      "width": 221,
+      "height": 256
     }
   },
   {
@@ -2045,8 +2045,8 @@
     "file": "mnk_diamond_skin.png",
     "bytes": 79018,
     "source": {
-      "width": 721,
-      "height": 693
+      "width": 256,
+      "height": 246
     }
   },
   {
@@ -2055,8 +2055,8 @@
     "file": "mnk_disorienting_palm.png",
     "bytes": 67152,
     "source": {
-      "width": 681,
-      "height": 861
+      "width": 202,
+      "height": 256
     }
   },
   {
@@ -2065,18 +2065,18 @@
     "file": "mnk_dragon_kick.png",
     "bytes": 68973,
     "source": {
-      "width": 902,
-      "height": 912
+      "width": 253,
+      "height": 256
     }
   },
   {
     "key": "mnk_dragon_tail_sweep",
     "name": "Dragon Tail Sweep",
     "file": "mnk_dragon_tail_sweep.png",
-    "bytes": 99745,
+    "bytes": 80263,
     "source": {
-      "width": 911,
-      "height": 908
+      "width": 960,
+      "height": 1022
     }
   },
   {
@@ -2085,8 +2085,8 @@
     "file": "mnk_dragons_breath.png",
     "bytes": 93902,
     "source": {
-      "width": 799,
-      "height": 863
+      "width": 237,
+      "height": 256
     }
   },
   {
@@ -2095,8 +2095,8 @@
     "file": "mnk_drunken_brawler_stance.png",
     "bytes": 61446,
     "source": {
-      "width": 918,
-      "height": 947
+      "width": 248,
+      "height": 256
     }
   },
   {
@@ -2105,8 +2105,8 @@
     "file": "mnk_echo_of_pain.png",
     "bytes": 58217,
     "source": {
-      "width": 726,
-      "height": 848
+      "width": 219,
+      "height": 256
     }
   },
   {
@@ -2115,8 +2115,8 @@
     "file": "mnk_echo_palm.png",
     "bytes": 74900,
     "source": {
-      "width": 851,
-      "height": 946
+      "width": 230,
+      "height": 256
     }
   },
   {
@@ -2125,8 +2125,8 @@
     "file": "mnk_ego_crusher.png",
     "bytes": 69997,
     "source": {
-      "width": 935,
-      "height": 887
+      "width": 256,
+      "height": 243
     }
   },
   {
@@ -2135,8 +2135,8 @@
     "file": "mnk_exploding_palm.png",
     "bytes": 88772,
     "source": {
-      "width": 957,
-      "height": 985
+      "width": 249,
+      "height": 256
     }
   },
   {
@@ -2145,8 +2145,8 @@
     "file": "mnk_falling_star.png",
     "bytes": 51424,
     "source": {
-      "width": 807,
-      "height": 752
+      "width": 256,
+      "height": 239
     }
   },
   {
@@ -2155,8 +2155,8 @@
     "file": "mnk_fast_mana_aura.png",
     "bytes": 68317,
     "source": {
-      "width": 720,
-      "height": 890
+      "width": 207,
+      "height": 256
     }
   },
   {
@@ -2165,8 +2165,8 @@
     "file": "mnk_five_element_combo.png",
     "bytes": 64190,
     "source": {
-      "width": 837,
-      "height": 955
+      "width": 224,
+      "height": 256
     }
   },
   {
@@ -2175,8 +2175,8 @@
     "file": "mnk_flowing_strike.png",
     "bytes": 60904,
     "source": {
-      "width": 683,
-      "height": 909
+      "width": 192,
+      "height": 256
     }
   },
   {
@@ -2185,8 +2185,8 @@
     "file": "mnk_heavenly_discharge.png",
     "bytes": 65552,
     "source": {
-      "width": 856,
-      "height": 997
+      "width": 220,
+      "height": 256
     }
   },
   {
@@ -2195,8 +2195,8 @@
     "file": "mnk_hundred_fists.png",
     "bytes": 63269,
     "source": {
-      "width": 886,
-      "height": 946
+      "width": 240,
+      "height": 256
     }
   },
   {
@@ -2205,8 +2205,8 @@
     "file": "mnk_inner_peace.png",
     "bytes": 61431,
     "source": {
-      "width": 734,
-      "height": 921
+      "width": 204,
+      "height": 256
     }
   },
   {
@@ -2215,8 +2215,8 @@
     "file": "mnk_iron_palm.png",
     "bytes": 41126,
     "source": {
-      "width": 826,
-      "height": 742
+      "width": 256,
+      "height": 230
     }
   },
   {
@@ -2225,8 +2225,8 @@
     "file": "mnk_jade_body.png",
     "bytes": 69401,
     "source": {
-      "width": 808,
-      "height": 954
+      "width": 217,
+      "height": 256
     }
   },
   {
@@ -2235,8 +2235,8 @@
     "file": "mnk_jade_serpent_beam.png",
     "bytes": 53122,
     "source": {
-      "width": 864,
-      "height": 791
+      "width": 256,
+      "height": 234
     }
   },
   {
@@ -2245,8 +2245,8 @@
     "file": "mnk_joint_lock.png",
     "bytes": 65663,
     "source": {
-      "width": 810,
-      "height": 898
+      "width": 231,
+      "height": 256
     }
   },
   {
@@ -2255,8 +2255,8 @@
     "file": "mnk_karma_redirection.png",
     "bytes": 78201,
     "source": {
-      "width": 895,
-      "height": 864
+      "width": 256,
+      "height": 247
     }
   },
   {
@@ -2265,8 +2265,8 @@
     "file": "mnk_karmic_burden.png",
     "bytes": 60311,
     "source": {
-      "width": 685,
-      "height": 947
+      "width": 185,
+      "height": 256
     }
   },
   {
@@ -2275,8 +2275,8 @@
     "file": "mnk_leaf_storm.png",
     "bytes": 82869,
     "source": {
-      "width": 882,
-      "height": 869
+      "width": 256,
+      "height": 252
     }
   },
   {
@@ -2285,8 +2285,8 @@
     "file": "mnk_mantis_strike.png",
     "bytes": 63864,
     "source": {
-      "width": 806,
-      "height": 986
+      "width": 209,
+      "height": 256
     }
   },
   {
@@ -2295,8 +2295,8 @@
     "file": "mnk_mist_walk.png",
     "bytes": 90752,
     "source": {
-      "width": 944,
-      "height": 966
+      "width": 250,
+      "height": 256
     }
   },
   {
@@ -2305,8 +2305,8 @@
     "file": "mnk_muffle.png",
     "bytes": 68844,
     "source": {
-      "width": 802,
-      "height": 962
+      "width": 213,
+      "height": 256
     }
   },
   {
@@ -2315,8 +2315,8 @@
     "file": "mnk_off_balance.png",
     "bytes": 82512,
     "source": {
-      "width": 835,
-      "height": 890
+      "width": 240,
+      "height": 256
     }
   },
   {
@@ -2325,8 +2325,8 @@
     "file": "mnk_paralysis_touch.png",
     "bytes": 79308,
     "source": {
-      "width": 846,
-      "height": 946
+      "width": 229,
+      "height": 256
     }
   },
   {
@@ -2335,8 +2335,8 @@
     "file": "mnk_pressure_point_strike.png",
     "bytes": 68660,
     "source": {
-      "width": 799,
-      "height": 949
+      "width": 216,
+      "height": 256
     }
   },
   {
@@ -2345,8 +2345,8 @@
     "file": "mnk_sphere_of_harmony.png",
     "bytes": 111000,
     "source": {
-      "width": 829,
-      "height": 805
+      "width": 256,
+      "height": 249
     }
   },
   {
@@ -2355,8 +2355,8 @@
     "file": "mnk_spinning_crane_kick.png",
     "bytes": 63992,
     "source": {
-      "width": 852,
-      "height": 849
+      "width": 256,
+      "height": 255
     }
   },
   {
@@ -2365,8 +2365,8 @@
     "file": "mnk_spirit_blindness.png",
     "bytes": 67614,
     "source": {
-      "width": 835,
-      "height": 930
+      "width": 230,
+      "height": 256
     }
   },
   {
@@ -2375,8 +2375,8 @@
     "file": "mnk_spirit_burst.png",
     "bytes": 76344,
     "source": {
-      "width": 722,
-      "height": 814
+      "width": 227,
+      "height": 256
     }
   },
   {
@@ -2385,8 +2385,8 @@
     "file": "mnk_tidal_sweep.png",
     "bytes": 73835,
     "source": {
-      "width": 825,
-      "height": 974
+      "width": 217,
+      "height": 256
     }
   },
   {
@@ -2395,8 +2395,8 @@
     "file": "mnk_tiger_claw.png",
     "bytes": 63027,
     "source": {
-      "width": 856,
-      "height": 625
+      "width": 256,
+      "height": 187
     }
   },
   {
@@ -2405,8 +2405,8 @@
     "file": "mnk_tiger_stance.png",
     "bytes": 81263,
     "source": {
-      "width": 811,
-      "height": 929
+      "width": 223,
+      "height": 256
     }
   },
   {
@@ -2415,8 +2415,8 @@
     "file": "mnk_touch_of_life.png",
     "bytes": 67982,
     "source": {
-      "width": 712,
-      "height": 884
+      "width": 206,
+      "height": 256
     }
   },
   {
@@ -2425,8 +2425,8 @@
     "file": "mnk_twin_serpent_strike.png",
     "bytes": 74728,
     "source": {
-      "width": 814,
-      "height": 891
+      "width": 234,
+      "height": 256
     }
   },
   {
@@ -2435,18 +2435,18 @@
     "file": "mnk_weakened_flesh.png",
     "bytes": 68667,
     "source": {
-      "width": 843,
-      "height": 969
+      "width": 223,
+      "height": 256
     }
   },
   {
     "key": "mnk_wind_blessing",
     "name": "Wind Blessing",
     "file": "mnk_wind_blessing.png",
-    "bytes": 87840,
+    "bytes": 76644,
     "source": {
-      "width": 722,
-      "height": 841
+      "width": 905,
+      "height": 991
     }
   },
   {
@@ -2455,8 +2455,8 @@
     "file": "mnk_wind_palm.png",
     "bytes": 72716,
     "source": {
-      "width": 840,
-      "height": 852
+      "width": 252,
+      "height": 256
     }
   },
   {
@@ -2465,8 +2465,8 @@
     "file": "mnk_winded.png",
     "bytes": 75198,
     "source": {
-      "width": 847,
-      "height": 966
+      "width": 224,
+      "height": 256
     }
   },
   {
@@ -2475,8 +2475,8 @@
     "file": "mnk_zen_bell_resonance.png",
     "bytes": 64645,
     "source": {
-      "width": 769,
-      "height": 919
+      "width": 214,
+      "height": 256
     }
   },
   {
@@ -2485,8 +2485,8 @@
     "file": "mnk_zen_focus.png",
     "bytes": 73231,
     "source": {
-      "width": 894,
-      "height": 840
+      "width": 256,
+      "height": 241
     }
   },
   {
@@ -2495,8 +2495,8 @@
     "file": "mnk_zen_strike.png",
     "bytes": 73722,
     "source": {
-      "width": 755,
-      "height": 850
+      "width": 227,
+      "height": 256
     }
   },
   {
@@ -2505,8 +2505,8 @@
     "file": "war_banner_of_victory.png",
     "bytes": 78209,
     "source": {
-      "width": 825,
-      "height": 961
+      "width": 220,
+      "height": 256
     }
   },
   {
@@ -2515,8 +2515,8 @@
     "file": "war_battle_shout.png",
     "bytes": 72161,
     "source": {
-      "width": 732,
-      "height": 899
+      "width": 208,
+      "height": 256
     }
   },
   {
@@ -2525,8 +2525,8 @@
     "file": "war_berzerker_rampage.png",
     "bytes": 74475,
     "source": {
-      "width": 935,
-      "height": 914
+      "width": 256,
+      "height": 250
     }
   },
   {
@@ -2535,8 +2535,8 @@
     "file": "war_bleeding_cleave.png",
     "bytes": 73555,
     "source": {
-      "width": 786,
-      "height": 908
+      "width": 222,
+      "height": 256
     }
   },
   {
@@ -2545,8 +2545,8 @@
     "file": "war_blood_harvest.png",
     "bytes": 53046,
     "source": {
-      "width": 819,
-      "height": 808
+      "width": 256,
+      "height": 253
     }
   },
   {
@@ -2555,8 +2555,8 @@
     "file": "war_bloodlust_stance.png",
     "bytes": 70055,
     "source": {
-      "width": 751,
-      "height": 881
+      "width": 218,
+      "height": 256
     }
   },
   {
@@ -2565,8 +2565,8 @@
     "file": "war_colossus_stance.png",
     "bytes": 77556,
     "source": {
-      "width": 813,
-      "height": 917
+      "width": 227,
+      "height": 256
     }
   },
   {
@@ -2575,8 +2575,8 @@
     "file": "war_cracked_bones.png",
     "bytes": 34519,
     "source": {
-      "width": 790,
-      "height": 678
+      "width": 256,
+      "height": 220
     }
   },
   {
@@ -2585,8 +2585,8 @@
     "file": "war_crushing_blow.png",
     "bytes": 45524,
     "source": {
-      "width": 939,
-      "height": 829
+      "width": 256,
+      "height": 226
     }
   },
   {
@@ -2595,8 +2595,8 @@
     "file": "war_decapitate.png",
     "bytes": 66832,
     "source": {
-      "width": 798,
-      "height": 915
+      "width": 223,
+      "height": 256
     }
   },
   {
@@ -2605,8 +2605,8 @@
     "file": "war_deep_wound.png",
     "bytes": 62748,
     "source": {
-      "width": 833,
-      "height": 807
+      "width": 256,
+      "height": 248
     }
   },
   {
@@ -2615,8 +2615,8 @@
     "file": "war_demoralize.png",
     "bytes": 73577,
     "source": {
-      "width": 802,
-      "height": 910
+      "width": 226,
+      "height": 256
     }
   },
   {
@@ -2625,8 +2625,8 @@
     "file": "war_disarming_bash.png",
     "bytes": 35298,
     "source": {
-      "width": 815,
-      "height": 589
+      "width": 256,
+      "height": 185
     }
   },
   {
@@ -2635,8 +2635,8 @@
     "file": "war_duelist_focus.png",
     "bytes": 76210,
     "source": {
-      "width": 893,
-      "height": 933
+      "width": 245,
+      "height": 256
     }
   },
   {
@@ -2645,8 +2645,8 @@
     "file": "war_earth_stride.png",
     "bytes": 107462,
     "source": {
-      "width": 825,
-      "height": 848
+      "width": 249,
+      "height": 256
     }
   },
   {
@@ -2655,8 +2655,8 @@
     "file": "war_flame_edge.png",
     "bytes": 50749,
     "source": {
-      "width": 793,
-      "height": 605
+      "width": 256,
+      "height": 195
     }
   },
   {
@@ -2665,8 +2665,8 @@
     "file": "war_flurry_of_steel.png",
     "bytes": 76658,
     "source": {
-      "width": 811,
-      "height": 867
+      "width": 239,
+      "height": 256
     }
   },
   {
@@ -2675,8 +2675,8 @@
     "file": "war_frostforge_strike.png",
     "bytes": 64613,
     "source": {
-      "width": 837,
-      "height": 768
+      "width": 256,
+      "height": 235
     }
   },
   {
@@ -2685,8 +2685,8 @@
     "file": "war_gouge.png",
     "bytes": 51334,
     "source": {
-      "width": 758,
-      "height": 756
+      "width": 256,
+      "height": 255
     }
   },
   {
@@ -2695,8 +2695,8 @@
     "file": "war_ground_breaker.png",
     "bytes": 47185,
     "source": {
-      "width": 829,
-      "height": 823
+      "width": 256,
+      "height": 254
     }
   },
   {
@@ -2705,8 +2705,8 @@
     "file": "war_hamstring_slash.png",
     "bytes": 49541,
     "source": {
-      "width": 890,
-      "height": 840
+      "width": 256,
+      "height": 242
     }
   },
   {
@@ -2715,8 +2715,8 @@
     "file": "war_hilt_strike.png",
     "bytes": 55125,
     "source": {
-      "width": 802,
-      "height": 958
+      "width": 214,
+      "height": 256
     }
   },
   {
@@ -2725,8 +2725,8 @@
     "file": "war_ignite_blade.png",
     "bytes": 52030,
     "source": {
-      "width": 837,
-      "height": 798
+      "width": 256,
+      "height": 244
     }
   },
   {
@@ -2735,8 +2735,8 @@
     "file": "war_intimidating_roar.png",
     "bytes": 81081,
     "source": {
-      "width": 954,
-      "height": 1065
+      "width": 229,
+      "height": 256
     }
   },
   {
@@ -2745,8 +2745,8 @@
     "file": "war_iron_will.png",
     "bytes": 64532,
     "source": {
-      "width": 697,
-      "height": 960
+      "width": 186,
+      "height": 256
     }
   },
   {
@@ -2755,18 +2755,18 @@
     "file": "war_last_stand.png",
     "bytes": 67435,
     "source": {
-      "width": 839,
-      "height": 891
+      "width": 241,
+      "height": 256
     }
   },
   {
     "key": "war_leap_slam",
     "name": "Leap Slam",
     "file": "war_leap_slam.png",
-    "bytes": 73836,
+    "bytes": 70067,
     "source": {
-      "width": 769,
-      "height": 953
+      "width": 878,
+      "height": 951
     }
   },
   {
@@ -2775,8 +2775,8 @@
     "file": "war_maim.png",
     "bytes": 72116,
     "source": {
-      "width": 807,
-      "height": 973
+      "width": 212,
+      "height": 256
     }
   },
   {
@@ -2785,8 +2785,8 @@
     "file": "war_overpowering_smash.png",
     "bytes": 62840,
     "source": {
-      "width": 709,
-      "height": 817
+      "width": 222,
+      "height": 256
     }
   },
   {
@@ -2795,8 +2795,8 @@
     "file": "war_piercing_thrust.png",
     "bytes": 51063,
     "source": {
-      "width": 810,
-      "height": 645
+      "width": 256,
+      "height": 204
     }
   },
   {
@@ -2805,8 +2805,8 @@
     "file": "war_punishing_strike.png",
     "bytes": 72887,
     "source": {
-      "width": 766,
-      "height": 756
+      "width": 256,
+      "height": 253
     }
   },
   {
@@ -2815,8 +2815,8 @@
     "file": "war_shield_slam.png",
     "bytes": 77726,
     "source": {
-      "width": 766,
-      "height": 990
+      "width": 198,
+      "height": 256
     }
   },
   {
@@ -2825,8 +2825,8 @@
     "file": "war_shield_wall.png",
     "bytes": 66868,
     "source": {
-      "width": 665,
-      "height": 784
+      "width": 217,
+      "height": 256
     }
   },
   {
@@ -2835,8 +2835,8 @@
     "file": "war_shockwave.png",
     "bytes": 74779,
     "source": {
-      "width": 893,
-      "height": 939
+      "width": 243,
+      "height": 256
     }
   },
   {
@@ -2845,8 +2845,8 @@
     "file": "war_skull_splitter.png",
     "bytes": 83090,
     "source": {
-      "width": 928,
-      "height": 954
+      "width": 249,
+      "height": 256
     }
   },
   {
@@ -2855,8 +2855,8 @@
     "file": "war_steel_tempering.png",
     "bytes": 68124,
     "source": {
-      "width": 868,
-      "height": 921
+      "width": 241,
+      "height": 256
     }
   },
   {
@@ -2865,8 +2865,8 @@
     "file": "war_stoneskin_burst.png",
     "bytes": 69624,
     "source": {
-      "width": 672,
-      "height": 793
+      "width": 217,
+      "height": 256
     }
   },
   {
@@ -2875,8 +2875,8 @@
     "file": "war_sunder_armor.png",
     "bytes": 64607,
     "source": {
-      "width": 628,
-      "height": 988
+      "width": 163,
+      "height": 256
     }
   },
   {
@@ -2885,8 +2885,8 @@
     "file": "war_sweeping_strike.png",
     "bytes": 81718,
     "source": {
-      "width": 748,
-      "height": 799
+      "width": 240,
+      "height": 256
     }
   },
   {
@@ -2895,8 +2895,8 @@
     "file": "war_taunt.png",
     "bytes": 76945,
     "source": {
-      "width": 915,
-      "height": 949
+      "width": 247,
+      "height": 256
     }
   },
   {
@@ -2905,8 +2905,8 @@
     "file": "war_tendon_rupture.png",
     "bytes": 75498,
     "source": {
-      "width": 748,
-      "height": 758
+      "width": 253,
+      "height": 256
     }
   },
   {
@@ -2915,8 +2915,8 @@
     "file": "war_terrifying_glare.png",
     "bytes": 80920,
     "source": {
-      "width": 818,
-      "height": 910
+      "width": 230,
+      "height": 256
     }
   },
   {
@@ -2925,8 +2925,8 @@
     "file": "war_thunder_strike.png",
     "bytes": 50162,
     "source": {
-      "width": 844,
-      "height": 867
+      "width": 249,
+      "height": 256
     }
   },
   {
@@ -2935,8 +2935,8 @@
     "file": "war_titanic_impact.png",
     "bytes": 101030,
     "source": {
-      "width": 980,
-      "height": 996
+      "width": 252,
+      "height": 256
     }
   },
   {
@@ -2945,8 +2945,8 @@
     "file": "war_twin_slash.png",
     "bytes": 35143,
     "source": {
-      "width": 833,
-      "height": 643
+      "width": 256,
+      "height": 198
     }
   },
   {
@@ -2955,8 +2955,8 @@
     "file": "war_unstoppable.png",
     "bytes": 68752,
     "source": {
-      "width": 746,
-      "height": 962
+      "width": 199,
+      "height": 256
     }
   },
   {
@@ -2965,8 +2965,8 @@
     "file": "war_war_avatar.png",
     "bytes": 60184,
     "source": {
-      "width": 735,
-      "height": 1017
+      "width": 185,
+      "height": 256
     }
   },
   {
@@ -2975,8 +2975,8 @@
     "file": "war_wave_cleaver.png",
     "bytes": 72190,
     "source": {
-      "width": 791,
-      "height": 877
+      "width": 231,
+      "height": 256
     }
   },
   {
@@ -2985,8 +2985,8 @@
     "file": "war_whirlwind.png",
     "bytes": 87985,
     "source": {
-      "width": 938,
-      "height": 904
+      "width": 256,
+      "height": 247
     }
   },
   {
@@ -2995,8 +2995,8 @@
     "file": "war_windblade.png",
     "bytes": 50661,
     "source": {
-      "width": 950,
-      "height": 941
+      "width": 256,
+      "height": 254
     }
   }
 ]

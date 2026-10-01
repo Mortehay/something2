@@ -2,451 +2,351 @@
   {
     "name": "ash_waste",
     "file": "ash_waste.png",
-    "bytes": 498950,
+    "bytes": 244302,
     "prompt": "deep soft drifts of grey ash and soot dust, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Ashfields",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Ashfields"
   },
   {
     "name": "blight_floor",
     "file": "blight_floor.png",
-    "bytes": 618085,
+    "bytes": 298735,
     "prompt": "cracked sickly grey-green crust over dead soil, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Blightworks",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Blightworks"
   },
   {
     "name": "bone_floor",
     "file": "bone_floor.png",
-    "bytes": 479671,
+    "bytes": 296608,
     "prompt": "floor of packed bone fragments, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Ossuary",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Ossuary"
   },
   {
     "name": "brimstone",
     "file": "brimstone.png",
-    "bytes": 549294,
+    "bytes": 283505,
     "prompt": "crusted yellow sulphur over dark rock, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Infernal Gate",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Infernal Gate"
   },
   {
     "name": "cave_floor",
     "file": "cave_floor.png",
-    "bytes": 414112,
+    "bytes": 236350,
     "prompt": "damp brown cave floor stone, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Cavern",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Cavern"
   },
   {
     "name": "cave_wall",
     "file": "cave_wall.png",
-    "bytes": 274668,
+    "bytes": 169086,
     "prompt": "solid rough cave rock wall, flat material surface, straight-on view, fills the entire frame, even flat lighting, no shadows, pixel art",
-    "art_biome": "Umbral Warren",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Umbral Warren"
   },
   {
     "name": "chaos_floor",
     "file": "chaos_floor.png",
-    "bytes": 384782,
+    "bytes": 252405,
     "prompt": "shifting iridescent chaos stone, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Shattered Vault",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Shattered Vault"
   },
   {
     "name": "chasm",
     "file": "chasm.png",
-    "bytes": 370944,
+    "bytes": 234703,
     "prompt": "pitch black rock, almost featureless darkness, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Abyssal Rift",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Abyssal Rift"
   },
   {
     "name": "cistern_shallows",
     "file": "cistern_shallows.png",
-    "bytes": 558818,
+    "bytes": 284813,
     "prompt": "shallow clear water covering pale stone slabs, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Sunken Cistern",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Sunken Cistern"
   },
   {
     "name": "cobblestone",
     "file": "cobblestone.png",
-    "bytes": 579110,
+    "bytes": 269557,
     "prompt": "worn grey cobblestone paving, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Sunken Ruins",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Sunken Ruins"
   },
   {
     "name": "crypt_floor",
     "file": "crypt_floor.png",
-    "bytes": 373942,
+    "bytes": 221547,
     "prompt": "cold crypt flagstone floor, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Catacombs",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Catacombs"
   },
   {
     "name": "crystal_floor",
     "file": "crystal_floor.png",
-    "bytes": 500172,
+    "bytes": 296301,
     "prompt": "pale blue crystal shard floor, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Crystal Hollows",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Crystal Hollows"
   },
   {
     "name": "dirt",
     "file": "dirt.png",
-    "bytes": 465963,
+    "bytes": 256711,
     "prompt": "dark packed dirt ground, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Arid Dunes",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Arid Dunes"
   },
   {
     "name": "dream_floor",
     "file": "dream_floor.png",
-    "bytes": 420607,
+    "bytes": 252025,
     "prompt": "hazy indigo dreamlike ground, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Dreaming Dark",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Dreaming Dark"
   },
   {
     "name": "earth",
     "file": "earth.png",
-    "bytes": 633219,
+    "bytes": 305216,
     "prompt": "bare brown soil with small clumps and pebbles, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Meadow",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Meadow"
   },
   {
     "name": "ember_rock",
     "file": "ember_rock.png",
-    "bytes": 455550,
+    "bytes": 261077,
     "prompt": "cracked rock veined with glowing embers, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Ashfields",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Ashfields"
   },
   {
     "name": "foundry_floor",
     "file": "foundry_floor.png",
-    "bytes": 483676,
+    "bytes": 229776,
     "prompt": "flat soot-blackened iron plate surface, riveted seams, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Sunken Foundry",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Sunken Foundry"
   },
   {
     "name": "fungal_floor",
     "file": "fungal_floor.png",
-    "bytes": 448916,
+    "bytes": 273611,
     "prompt": "dense pale mushroom caps and spongy mycelium, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Fungal Deep",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Fungal Deep"
   },
   {
     "name": "grass",
     "file": "grass.png",
-    "bytes": 631342,
+    "bytes": 310788,
     "prompt": "lush green meadow grass, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Meadow",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Meadow"
   },
   {
     "name": "highgrass",
     "file": "highgrass.png",
-    "bytes": 596346,
+    "bytes": 349906,
     "prompt": "tall dense green grass blades, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Meadow",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Meadow"
   },
   {
     "name": "highland_rock",
     "file": "highland_rock.png",
-    "bytes": 605877,
+    "bytes": 245092,
     "prompt": "windswept grey-green highland stone, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Highlands",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Highlands"
   },
   {
     "name": "hive_floor",
     "file": "hive_floor.png",
-    "bytes": 468371,
+    "bytes": 492258,
     "prompt": "amber honeycomb wax cells, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Hive Warrens",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Hive Warrens"
   },
   {
     "name": "ice",
     "file": "ice.png",
-    "bytes": 517799,
+    "bytes": 271904,
     "prompt": "pale blue cracked ice, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Frozen Waste",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Frozen Waste"
   },
   {
     "name": "jungle_floor",
     "file": "jungle_floor.png",
-    "bytes": 594644,
+    "bytes": 284242,
     "prompt": "fallen green leaves and creeping vines on soil, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Verdant Jungle",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Verdant Jungle"
   },
   {
     "name": "leafs",
     "file": "leafs.png",
-    "bytes": 613040,
+    "bytes": 289304,
     "prompt": "dark green forest leaf litter, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Deep Forest",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Deep Forest"
   },
   {
     "name": "map_doorway",
     "file": "map_doorway.png",
-    "bytes": 370463,
+    "bytes": 356869,
     "prompt": "heavy wooden door set in a stone frame, flat material surface, straight-on view, fills the entire frame, even flat lighting, no shadows, pixel art",
-    "art_biome": "",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": ""
   },
   {
     "name": "map_wall",
     "file": "map_wall.png",
-    "bytes": 332678,
+    "bytes": 219245,
     "prompt": "mortared grey stone block wall, flat material surface, straight-on view, fills the entire frame, even flat lighting, no shadows, pixel art",
-    "art_biome": "",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": ""
   },
   {
     "name": "maw_floor",
     "file": "maw_floor.png",
-    "bytes": 482628,
+    "bytes": 475585,
     "prompt": "raw pulsing flesh-like ground, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "The Maw",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "The Maw"
   },
   {
     "name": "plague_floor",
     "file": "plague_floor.png",
-    "bytes": 628875,
+    "bytes": 314620,
     "prompt": "sickly yellow-green slime over wet mud, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Pestilent Deep",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Pestilent Deep"
   },
   {
     "name": "rime_floor",
     "file": "rime_floor.png",
-    "bytes": 585670,
+    "bytes": 282186,
     "prompt": "frost-rimed pale stone floor, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Frostvault",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Frostvault"
   },
   {
     "name": "road_ash",
     "file": "road_ash.png",
-    "bytes": 613346,
+    "bytes": 318157,
     "prompt": "trodden grey cinders and coarse ash grit, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": ""
   },
   {
     "name": "road_dirt",
     "file": "road_dirt.png",
-    "bytes": 581399,
+    "bytes": 320758,
     "prompt": "dry tan earth with fine gravel and dust, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": ""
   },
   {
     "name": "road_sand",
     "file": "road_sand.png",
-    "bytes": 489496,
+    "bytes": 248024,
     "prompt": "dry pale desert sand, wind-scoured grit, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": ""
   },
   {
     "name": "road_snow",
     "file": "road_snow.png",
-    "bytes": 565316,
+    "bytes": 292734,
     "prompt": "grey-blue slush over packed snow, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": ""
   },
   {
     "name": "road_stone",
     "file": "road_stone.png",
-    "bytes": 507035,
+    "bytes": 238904,
     "prompt": "dressed pale flagstone paving, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": ""
   },
   {
     "name": "rocks",
     "file": "rocks.png",
-    "bytes": 423671,
+    "bytes": 234103,
     "prompt": "grey rocky stone ground, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Arid Dunes",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Arid Dunes"
   },
   {
     "name": "rubble",
     "file": "rubble.png",
-    "bytes": 418229,
+    "bytes": 243383,
     "prompt": "impassable heap of collapsed rubble, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Deepvault",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Deepvault"
   },
   {
     "name": "ruin_stone",
     "file": "ruin_stone.png",
-    "bytes": 593847,
+    "bytes": 286867,
     "prompt": "cracked weathered ruin flagstones, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Sunken Ruins",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Sunken Ruins"
   },
   {
     "name": "sanctum_floor",
     "file": "sanctum_floor.png",
-    "bytes": 517065,
+    "bytes": 296715,
     "prompt": "cream marble slabs with thin gold veins, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Fallen Sanctum",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Fallen Sanctum"
   },
   {
     "name": "sand",
     "file": "sand.png",
-    "bytes": 531881,
+    "bytes": 269069,
     "prompt": "fine golden beach sand, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Arid Dunes",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Arid Dunes"
   },
   {
     "name": "snow",
     "file": "snow.png",
-    "bytes": 562771,
+    "bytes": 289403,
     "prompt": "fresh white snow with fine granular texture, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Frozen Waste",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Frozen Waste"
   },
   {
     "name": "storm_shingle",
     "file": "storm_shingle.png",
-    "bytes": 527392,
+    "bytes": 261385,
     "prompt": "wet dark pebbles and shingle stones, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Storm Coast",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Storm Coast"
   },
   {
     "name": "swamp",
     "file": "swamp.png",
-    "bytes": 588677,
+    "bytes": 287668,
     "prompt": "murky green-brown mud with algae scum, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Mire",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Mire"
   },
   {
     "name": "titan_floor",
     "file": "titan_floor.png",
-    "bytes": 588890,
+    "bytes": 264376,
     "prompt": "colossal weathered titan masonry, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Grave of Titans",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Grave of Titans"
   },
   {
     "name": "umbral_floor",
     "file": "umbral_floor.png",
-    "bytes": 377600,
+    "bytes": 252099,
     "prompt": "lightless violet-black stone, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Umbral Warren",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Umbral Warren"
   },
   {
     "name": "vault_floor",
     "file": "vault_floor.png",
-    "bytes": 433909,
+    "bytes": 231433,
     "prompt": "flat riveted steel plates bolted flush together, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Deepvault",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Deepvault"
   },
   {
     "name": "village_gate",
     "file": "village_gate.png",
-    "bytes": 263253,
+    "bytes": 158839,
     "prompt": "heavy timber gate with iron bands, flat material surface, straight-on view, fills the entire frame, even flat lighting, no shadows, pixel art",
-    "art_biome": "",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": ""
   },
   {
     "name": "void_floor",
     "file": "void_floor.png",
-    "bytes": 310954,
+    "bytes": 187925,
     "prompt": "matte black surface with faint dark speckles, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Abyssal Rift",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Abyssal Rift"
   },
   {
     "name": "water",
     "file": "water.png",
-    "bytes": 562696,
+    "bytes": 294468,
     "prompt": "clear blue water surface, scattered foam flecks, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
-    "art_biome": "Mire",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": "Mire"
   },
   {
     "name": "wooden_wall",
     "file": "wooden_wall.png",
-    "bytes": 285529,
+    "bytes": 192071,
     "prompt": "vertical wooden plank wall, flat material surface, straight-on view, fills the entire frame, even flat lighting, no shadows, pixel art",
-    "art_biome": "",
-    "seamless": true,
-    "repeat": 2
+    "art_biome": ""
   }
 ]

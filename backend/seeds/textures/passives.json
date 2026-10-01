@@ -5,8 +5,8 @@
     "file": "Afterimage.png",
     "bytes": 80286,
     "source": {
-      "width": 762,
-      "height": 744
+      "width": 256,
+      "height": 250
     }
   },
   {
@@ -15,8 +15,8 @@
     "file": "Arcane_Conduit____20_INT_and__60_maximum_mana.png",
     "bytes": 76969,
     "source": {
-      "width": 928,
-      "height": 906
+      "width": 256,
+      "height": 250
     }
   },
   {
@@ -25,8 +25,8 @@
     "file": "Archer.png",
     "bytes": 56262,
     "source": {
-      "width": 886,
-      "height": 733
+      "width": 256,
+      "height": 212
     }
   },
   {
@@ -35,18 +35,18 @@
     "file": "Ascendance.png",
     "bytes": 58778,
     "source": {
-      "width": 877,
-      "height": 919
+      "width": 244,
+      "height": 256
     }
   },
   {
     "key": "Attunement",
     "name": "Attunement",
     "file": "Attunement.png",
-    "bytes": 65204,
+    "bytes": 72547,
     "source": {
-      "width": 838,
-      "height": 813
+      "width": 782,
+      "height": 912
     }
   },
   {
@@ -55,18 +55,18 @@
     "file": "Beast_Bond.png",
     "bytes": 67425,
     "source": {
-      "width": 806,
-      "height": 948
+      "width": 218,
+      "height": 256
     }
   },
   {
     "key": "Blood Pact — life costs are reduced 25%",
     "name": "Blood Pact — life costs are reduced 25%",
     "file": "Blood_Pact___life_costs_are_reduced_25_.png",
-    "bytes": 49810,
+    "bytes": 48242,
     "source": {
-      "width": 862,
-      "height": 886
+      "width": 804,
+      "height": 739
     }
   },
   {
@@ -75,8 +75,8 @@
     "file": "Breadth.png",
     "bytes": 49374,
     "source": {
-      "width": 810,
-      "height": 580
+      "width": 256,
+      "height": 183
     }
   },
   {
@@ -85,8 +85,8 @@
     "file": "Broad_Study.png",
     "bytes": 75920,
     "source": {
-      "width": 880,
-      "height": 851
+      "width": 256,
+      "height": 248
     }
   },
   {
@@ -95,8 +95,8 @@
     "file": "Brutality.png",
     "bytes": 76300,
     "source": {
-      "width": 707,
-      "height": 781
+      "width": 232,
+      "height": 256
     }
   },
   {
@@ -105,8 +105,8 @@
     "file": "Bulwark____20_CON_and__10__physical_resistance.png",
     "bytes": 72287,
     "source": {
-      "width": 704,
-      "height": 887
+      "width": 203,
+      "height": 256
     }
   },
   {
@@ -115,8 +115,8 @@
     "file": "Callus.png",
     "bytes": 74299,
     "source": {
-      "width": 730,
-      "height": 816
+      "width": 229,
+      "height": 256
     }
   },
   {
@@ -125,8 +125,8 @@
     "file": "Charge.png",
     "bytes": 56203,
     "source": {
-      "width": 744,
-      "height": 766
+      "width": 249,
+      "height": 256
     }
   },
   {
@@ -135,8 +135,8 @@
     "file": "Clarity.png",
     "bytes": 87018,
     "source": {
-      "width": 628,
-      "height": 704
+      "width": 228,
+      "height": 256
     }
   },
   {
@@ -145,8 +145,8 @@
     "file": "Cleaving_Reach.png",
     "bytes": 89244,
     "source": {
-      "width": 758,
-      "height": 799
+      "width": 243,
+      "height": 256
     }
   },
   {
@@ -155,8 +155,8 @@
     "file": "Constitution.png",
     "bytes": 65613,
     "source": {
-      "width": 503,
-      "height": 726
+      "width": 177,
+      "height": 256
     }
   },
   {
@@ -165,8 +165,8 @@
     "file": "Crimson_Thirst.png",
     "bytes": 81265,
     "source": {
-      "width": 741,
-      "height": 762
+      "width": 249,
+      "height": 256
     }
   },
   {
@@ -175,18 +175,18 @@
     "file": "Cross-Training.png",
     "bytes": 56994,
     "source": {
-      "width": 858,
-      "height": 915
+      "width": 240,
+      "height": 256
     }
   },
   {
     "key": "Cryomancy — +35% ice damage, and your hits chill",
     "name": "Cryomancy — +35% ice damage, and your hits chill",
     "file": "Cryomancy____35__ice_damage__and_your_hits_chill.png",
-    "bytes": 54248,
+    "bytes": 60577,
     "source": {
-      "width": 948,
-      "height": 1016
+      "width": 635,
+      "height": 731
     }
   },
   {
@@ -195,8 +195,8 @@
     "file": "Cultist.png",
     "bytes": 60808,
     "source": {
-      "width": 822,
-      "height": 1032
+      "width": 204,
+      "height": 256
     }
   },
   {
@@ -205,8 +205,8 @@
     "file": "Dabbler.png",
     "bytes": 52547,
     "source": {
-      "width": 844,
-      "height": 785
+      "width": 256,
+      "height": 238
     }
   },
   {
@@ -215,8 +215,8 @@
     "file": "Deadeye____30_DEX.png",
     "bytes": 71011,
     "source": {
-      "width": 768,
-      "height": 838
+      "width": 235,
+      "height": 256
     }
   },
   {
@@ -225,28 +225,28 @@
     "file": "Deep_Reserve.png",
     "bytes": 67521,
     "source": {
-      "width": 685,
-      "height": 807
+      "width": 217,
+      "height": 256
     }
   },
   {
     "key": "Deep Well — +40 INT",
     "name": "Deep Well — +40 INT",
     "file": "Deep_Well____40_INT.png",
-    "bytes": 90473,
+    "bytes": 83483,
     "source": {
-      "width": 874,
-      "height": 856
+      "width": 835,
+      "height": 864
     }
   },
   {
     "key": "Deepening Thirst",
     "name": "Deepening Thirst",
     "file": "Deepening_Thirst.png",
-    "bytes": 75935,
+    "bytes": 72782,
     "source": {
-      "width": 616,
-      "height": 646
+      "width": 593,
+      "height": 622
     }
   },
   {
@@ -255,8 +255,8 @@
     "file": "Discipline.png",
     "bytes": 45380,
     "source": {
-      "width": 736,
-      "height": 690
+      "width": 256,
+      "height": 240
     }
   },
   {
@@ -265,8 +265,8 @@
     "file": "Draw_Weight.png",
     "bytes": 82652,
     "source": {
-      "width": 807,
-      "height": 872
+      "width": 237,
+      "height": 256
     }
   },
   {
@@ -275,8 +275,8 @@
     "file": "Druid.png",
     "bytes": 69222,
     "source": {
-      "width": 703,
-      "height": 886
+      "width": 203,
+      "height": 256
     }
   },
   {
@@ -285,8 +285,8 @@
     "file": "Edge.png",
     "bytes": 63763,
     "source": {
-      "width": 789,
-      "height": 703
+      "width": 256,
+      "height": 228
     }
   },
   {
@@ -295,8 +295,8 @@
     "file": "Endurance.png",
     "bytes": 73940,
     "source": {
-      "width": 694,
-      "height": 698
+      "width": 255,
+      "height": 256
     }
   },
   {
@@ -305,8 +305,8 @@
     "file": "Eternal_Bear___Infinite_Bear_Form___30_STR_and__200_HP_.png",
     "bytes": 72467,
     "source": {
-      "width": 727,
-      "height": 763
+      "width": 244,
+      "height": 256
     }
   },
   {
@@ -315,8 +315,8 @@
     "file": "Eternal_Hawk___Infinite_Hawk_Form___30_DEX_and__20__ice_resistance_.png",
     "bytes": 70814,
     "source": {
-      "width": 860,
-      "height": 909
+      "width": 242,
+      "height": 256
     }
   },
   {
@@ -325,8 +325,8 @@
     "file": "Eternal_Wolf___Infinite_Wolf_Form___20_STR___20_DEX_and__20_CHA_.png",
     "bytes": 69180,
     "source": {
-      "width": 821,
-      "height": 872
+      "width": 241,
+      "height": 256
     }
   },
   {
@@ -335,18 +335,18 @@
     "file": "Evasion____12__resistance_to_every_element.png",
     "bytes": 77688,
     "source": {
-      "width": 751,
-      "height": 697
+      "width": 256,
+      "height": 238
     }
   },
   {
     "key": "Even Breath",
     "name": "Even Breath",
     "file": "Even_Breath.png",
-    "bytes": 86949,
+    "bytes": 75942,
     "source": {
-      "width": 726,
-      "height": 728
+      "width": 705,
+      "height": 801
     }
   },
   {
@@ -355,8 +355,8 @@
     "file": "Executioner____25__physical_damage.png",
     "bytes": 38212,
     "source": {
-      "width": 891,
-      "height": 744
+      "width": 256,
+      "height": 214
     }
   },
   {
@@ -365,8 +365,8 @@
     "file": "Extended_Guard.png",
     "bytes": 43359,
     "source": {
-      "width": 848,
-      "height": 716
+      "width": 256,
+      "height": 216
     }
   },
   {
@@ -375,8 +375,8 @@
     "file": "Fireproof.png",
     "bytes": 65664,
     "source": {
-      "width": 922,
-      "height": 951
+      "width": 248,
+      "height": 256
     }
   },
   {
@@ -385,8 +385,8 @@
     "file": "Fleet___your_cooldown_floor_drops_from_0_40_to_0_32.png",
     "bytes": 73682,
     "source": {
-      "width": 674,
-      "height": 733
+      "width": 235,
+      "height": 256
     }
   },
   {
@@ -395,8 +395,8 @@
     "file": "Fletching.png",
     "bytes": 33648,
     "source": {
-      "width": 959,
-      "height": 946
+      "width": 256,
+      "height": 253
     }
   },
   {
@@ -405,8 +405,8 @@
     "file": "Focus.png",
     "bytes": 86144,
     "source": {
-      "width": 622,
-      "height": 696
+      "width": 229,
+      "height": 256
     }
   },
   {
@@ -415,8 +415,8 @@
     "file": "Follow-Through.png",
     "bytes": 34843,
     "source": {
-      "width": 836,
-      "height": 682
+      "width": 256,
+      "height": 209
     }
   },
   {
@@ -425,8 +425,8 @@
     "file": "Frostbite.png",
     "bytes": 75903,
     "source": {
-      "width": 857,
-      "height": 909
+      "width": 241,
+      "height": 256
     }
   },
   {
@@ -435,18 +435,18 @@
     "file": "Great_Sinew.png",
     "bytes": 55692,
     "source": {
-      "width": 848,
-      "height": 707
+      "width": 256,
+      "height": 213
     }
   },
   {
     "key": "Grounding",
     "name": "Grounding",
     "file": "Grounding.png",
-    "bytes": 85242,
+    "bytes": 79041,
     "source": {
-      "width": 804,
-      "height": 887
+      "width": 686,
+      "height": 784
     }
   },
   {
@@ -455,8 +455,8 @@
     "file": "Hardy.png",
     "bytes": 84146,
     "source": {
-      "width": 929,
-      "height": 959
+      "width": 248,
+      "height": 256
     }
   },
   {
@@ -465,8 +465,8 @@
     "file": "Honed.png",
     "bytes": 56836,
     "source": {
-      "width": 873,
-      "height": 702
+      "width": 256,
+      "height": 206
     }
   },
   {
@@ -475,8 +475,8 @@
     "file": "Inner_Flame____30_WIS.png",
     "bytes": 35615,
     "source": {
-      "width": 521,
-      "height": 915
+      "width": 146,
+      "height": 256
     }
   },
   {
@@ -485,8 +485,8 @@
     "file": "Insight.png",
     "bytes": 73398,
     "source": {
-      "width": 630,
-      "height": 841
+      "width": 192,
+      "height": 256
     }
   },
   {
@@ -495,18 +495,18 @@
     "file": "Iron_Body____20_WIS_and__20_CON.png",
     "bytes": 78627,
     "source": {
-      "width": 809,
-      "height": 874
+      "width": 237,
+      "height": 256
     }
   },
   {
     "key": "Iron Hide — +250 maximum life",
     "name": "Iron Hide — +250 maximum life",
     "file": "Iron_Hide____250_maximum_life.png",
-    "bytes": 60961,
+    "bytes": 46363,
     "source": {
-      "width": 750,
-      "height": 644
+      "width": 846,
+      "height": 728
     }
   },
   {
@@ -515,8 +515,8 @@
     "file": "Kindling.png",
     "bytes": 55492,
     "source": {
-      "width": 829,
-      "height": 648
+      "width": 256,
+      "height": 200
     }
   },
   {
@@ -525,8 +525,8 @@
     "file": "Kindred_Call.png",
     "bytes": 54188,
     "source": {
-      "width": 813,
-      "height": 621
+      "width": 256,
+      "height": 196
     }
   },
   {
@@ -535,8 +535,8 @@
     "file": "Lingering_Edge.png",
     "bytes": 64316,
     "source": {
-      "width": 837,
-      "height": 818
+      "width": 256,
+      "height": 250
     }
   },
   {
@@ -545,8 +545,8 @@
     "file": "Long_Guard.png",
     "bytes": 89202,
     "source": {
-      "width": 880,
-      "height": 874
+      "width": 256,
+      "height": 254
     }
   },
   {
@@ -555,8 +555,8 @@
     "file": "Loosed_Wind.png",
     "bytes": 52096,
     "source": {
-      "width": 852,
-      "height": 798
+      "width": 256,
+      "height": 240
     }
   },
   {
@@ -565,8 +565,8 @@
     "file": "Lunge.png",
     "bytes": 51331,
     "source": {
-      "width": 588,
-      "height": 978
+      "width": 154,
+      "height": 256
     }
   },
   {
@@ -575,8 +575,8 @@
     "file": "Mage.png",
     "bytes": 77913,
     "source": {
-      "width": 671,
-      "height": 779
+      "width": 221,
+      "height": 256
     }
   },
   {
@@ -585,8 +585,8 @@
     "file": "Mastery.png",
     "bytes": 56434,
     "source": {
-      "width": 536,
-      "height": 818
+      "width": 168,
+      "height": 256
     }
   },
   {
@@ -595,8 +595,8 @@
     "file": "Meditation____120_maximum_mana.png",
     "bytes": 60965,
     "source": {
-      "width": 856,
-      "height": 933
+      "width": 235,
+      "height": 256
     }
   },
   {
@@ -605,8 +605,8 @@
     "file": "Menagerie____35_CHA_and__25_CON.png",
     "bytes": 72502,
     "source": {
-      "width": 699,
-      "height": 625
+      "width": 256,
+      "height": 229
     }
   },
   {
@@ -615,8 +615,8 @@
     "file": "Momentum.png",
     "bytes": 78288,
     "source": {
-      "width": 785,
-      "height": 834
+      "width": 241,
+      "height": 256
     }
   },
   {
@@ -625,8 +625,8 @@
     "file": "Monk.png",
     "bytes": 45748,
     "source": {
-      "width": 565,
-      "height": 906
+      "width": 160,
+      "height": 256
     }
   },
   {
@@ -635,8 +635,8 @@
     "file": "Open_Palm.png",
     "bytes": 72935,
     "source": {
-      "width": 875,
-      "height": 815
+      "width": 256,
+      "height": 238
     }
   },
   {
@@ -645,8 +645,8 @@
     "file": "Ox_Blood.png",
     "bytes": 63215,
     "source": {
-      "width": 664,
-      "height": 750
+      "width": 227,
+      "height": 256
     }
   },
   {
@@ -655,8 +655,8 @@
     "file": "Pack_Leader____3_to_your_charm_budget.png",
     "bytes": 64345,
     "source": {
-      "width": 573,
-      "height": 836
+      "width": 175,
+      "height": 256
     }
   },
   {
@@ -665,8 +665,8 @@
     "file": "Pain_Ward____15__physical_and__15__fire_resistance.png",
     "bytes": 48566,
     "source": {
-      "width": 849,
-      "height": 561
+      "width": 256,
+      "height": 169
     }
   },
   {
@@ -675,8 +675,8 @@
     "file": "Paragon.png",
     "bytes": 78881,
     "source": {
-      "width": 777,
-      "height": 931
+      "width": 214,
+      "height": 256
     }
   },
   {
@@ -685,8 +685,8 @@
     "file": "Piercing_Shot____30__physical_damage.png",
     "bytes": 35043,
     "source": {
-      "width": 810,
-      "height": 661
+      "width": 256,
+      "height": 209
     }
   },
   {
@@ -695,8 +695,8 @@
     "file": "Pike_Drill.png",
     "bytes": 46878,
     "source": {
-      "width": 903,
-      "height": 958
+      "width": 241,
+      "height": 256
     }
   },
   {
@@ -705,8 +705,8 @@
     "file": "Plating.png",
     "bytes": 55379,
     "source": {
-      "width": 842,
-      "height": 591
+      "width": 256,
+      "height": 180
     }
   },
   {
@@ -715,8 +715,8 @@
     "file": "Polymath.png",
     "bytes": 67263,
     "source": {
-      "width": 686,
-      "height": 763
+      "width": 230,
+      "height": 256
     }
   },
   {
@@ -725,8 +725,8 @@
     "file": "Practised_Cadence.png",
     "bytes": 51567,
     "source": {
-      "width": 904,
-      "height": 770
+      "width": 256,
+      "height": 218
     }
   },
   {
@@ -735,8 +735,8 @@
     "file": "Pyromancy____35__fire_damage.png",
     "bytes": 43158,
     "source": {
-      "width": 468,
-      "height": 803
+      "width": 149,
+      "height": 256
     }
   },
   {
@@ -745,8 +745,8 @@
     "file": "Quickcast.png",
     "bytes": 83153,
     "source": {
-      "width": 669,
-      "height": 805
+      "width": 213,
+      "height": 256
     }
   },
   {
@@ -755,8 +755,8 @@
     "file": "Quickening.png",
     "bytes": 75122,
     "source": {
-      "width": 677,
-      "height": 826
+      "width": 210,
+      "height": 256
     }
   },
   {
@@ -765,8 +765,8 @@
     "file": "Quiet_Mind.png",
     "bytes": 83950,
     "source": {
-      "width": 767,
-      "height": 798
+      "width": 246,
+      "height": 256
     }
   },
   {
@@ -775,8 +775,8 @@
     "file": "Reckless_Swing____40__physical_damage__-15__ice_resistance.png",
     "bytes": 49766,
     "source": {
-      "width": 840,
-      "height": 672
+      "width": 256,
+      "height": 205
     }
   },
   {
@@ -785,8 +785,8 @@
     "file": "Renaissance.png",
     "bytes": 56952,
     "source": {
-      "width": 620,
-      "height": 857
+      "width": 185,
+      "height": 256
     }
   },
   {
@@ -795,18 +795,18 @@
     "file": "Rending_Bolt.png",
     "bytes": 53497,
     "source": {
-      "width": 793,
-      "height": 629
+      "width": 256,
+      "height": 203
     }
   },
   {
     "key": "Reserve",
     "name": "Reserve",
     "file": "Reserve.png",
-    "bytes": 67118,
+    "bytes": 66706,
     "source": {
-      "width": 742,
-      "height": 605
+      "width": 702,
+      "height": 805
     }
   },
   {
@@ -815,8 +815,8 @@
     "file": "Resonance.png",
     "bytes": 64319,
     "source": {
-      "width": 624,
-      "height": 828
+      "width": 193,
+      "height": 256
     }
   },
   {
@@ -825,8 +825,8 @@
     "file": "Sanguine_Aura.png",
     "bytes": 59745,
     "source": {
-      "width": 629,
-      "height": 873
+      "width": 184,
+      "height": 256
     }
   },
   {
@@ -835,8 +835,8 @@
     "file": "Sanguine_Rite___life_costs_are_reduced_a_further_20_.png",
     "bytes": 57687,
     "source": {
-      "width": 841,
-      "height": 749
+      "width": 256,
+      "height": 228
     }
   },
   {
@@ -845,8 +845,8 @@
     "file": "Scattershot.png",
     "bytes": 59268,
     "source": {
-      "width": 676,
-      "height": 635
+      "width": 256,
+      "height": 240
     }
   },
   {
@@ -855,8 +855,8 @@
     "file": "Scything_Blow.png",
     "bytes": 29853,
     "source": {
-      "width": 899,
-      "height": 696
+      "width": 256,
+      "height": 198
     }
   },
   {
@@ -865,8 +865,8 @@
     "file": "Searing_Blows.png",
     "bytes": 61282,
     "source": {
-      "width": 859,
-      "height": 772
+      "width": 256,
+      "height": 230
     }
   },
   {
@@ -875,8 +875,8 @@
     "file": "Second_Discipline.png",
     "bytes": 52656,
     "source": {
-      "width": 814,
-      "height": 781
+      "width": 256,
+      "height": 246
     }
   },
   {
@@ -885,8 +885,8 @@
     "file": "Second_Wind.png",
     "bytes": 70787,
     "source": {
-      "width": 638,
-      "height": 860
+      "width": 190,
+      "height": 256
     }
   },
   {
@@ -895,8 +895,8 @@
     "file": "Sharp_Syllables.png",
     "bytes": 75389,
     "source": {
-      "width": 655,
-      "height": 798
+      "width": 210,
+      "height": 256
     }
   },
   {
@@ -905,8 +905,8 @@
     "file": "Sinew.png",
     "bytes": 55394,
     "source": {
-      "width": 717,
-      "height": 585
+      "width": 256,
+      "height": 209
     }
   },
   {
@@ -915,8 +915,8 @@
     "file": "Slow_Burn.png",
     "bytes": 66799,
     "source": {
-      "width": 786,
-      "height": 885
+      "width": 227,
+      "height": 256
     }
   },
   {
@@ -925,8 +925,8 @@
     "file": "Spearpoint.png",
     "bytes": 45488,
     "source": {
-      "width": 802,
-      "height": 681
+      "width": 256,
+      "height": 217
     }
   },
   {
@@ -935,8 +935,8 @@
     "file": "Spellpierce.png",
     "bytes": 72976,
     "source": {
-      "width": 833,
-      "height": 832
+      "width": 256,
+      "height": 256
     }
   },
   {
@@ -945,8 +945,8 @@
     "file": "Spirit_Ward____20__arcane_resistance.png",
     "bytes": 67671,
     "source": {
-      "width": 776,
-      "height": 701
+      "width": 256,
+      "height": 231
     }
   },
   {
@@ -955,8 +955,8 @@
     "file": "Split_Arrow.png",
     "bytes": 30710,
     "source": {
-      "width": 854,
-      "height": 644
+      "width": 256,
+      "height": 193
     }
   },
   {
@@ -965,8 +965,8 @@
     "file": "Spreading_Stain.png",
     "bytes": 69731,
     "source": {
-      "width": 723,
-      "height": 670
+      "width": 256,
+      "height": 237
     }
   },
   {
@@ -975,8 +975,8 @@
     "file": "Stamina.png",
     "bytes": 94849,
     "source": {
-      "width": 687,
-      "height": 728
+      "width": 242,
+      "height": 256
     }
   },
   {
@@ -985,8 +985,8 @@
     "file": "Still_Water.png",
     "bytes": 72879,
     "source": {
-      "width": 886,
-      "height": 802
+      "width": 256,
+      "height": 232
     }
   },
   {
@@ -995,8 +995,8 @@
     "file": "Storm_Caller____35__lightning_damage.png",
     "bytes": 46123,
     "source": {
-      "width": 934,
-      "height": 692
+      "width": 256,
+      "height": 190
     }
   },
   {
@@ -1005,8 +1005,8 @@
     "file": "Sweep.png",
     "bytes": 36658,
     "source": {
-      "width": 864,
-      "height": 889
+      "width": 249,
+      "height": 256
     }
   },
   {
@@ -1015,8 +1015,8 @@
     "file": "Swift_Incant.png",
     "bytes": 65746,
     "source": {
-      "width": 854,
-      "height": 877
+      "width": 249,
+      "height": 256
     }
   },
   {
@@ -1025,8 +1025,8 @@
     "file": "Swiftshot.png",
     "bytes": 80741,
     "source": {
-      "width": 692,
-      "height": 829
+      "width": 214,
+      "height": 256
     }
   },
   {
@@ -1035,8 +1035,8 @@
     "file": "Taut_String.png",
     "bytes": 35603,
     "source": {
-      "width": 811,
-      "height": 826
+      "width": 251,
+      "height": 256
     }
   },
   {
@@ -1045,8 +1045,8 @@
     "file": "Temper.png",
     "bytes": 55017,
     "source": {
-      "width": 792,
-      "height": 657
+      "width": 256,
+      "height": 212
     }
   },
   {
@@ -1055,8 +1055,8 @@
     "file": "Thoughtform.png",
     "bytes": 91965,
     "source": {
-      "width": 731,
-      "height": 878
+      "width": 213,
+      "height": 256
     }
   },
   {
@@ -1065,8 +1065,8 @@
     "file": "Toughness.png",
     "bytes": 85290,
     "source": {
-      "width": 702,
-      "height": 778
+      "width": 231,
+      "height": 256
     }
   },
   {
@@ -1075,18 +1075,18 @@
     "file": "Transcendence____35_WIS_and__25_INT.png",
     "bytes": 69529,
     "source": {
-      "width": 935,
-      "height": 910
+      "width": 256,
+      "height": 249
     }
   },
   {
     "key": "Unbreakable — +30 STR and +150 maximum life",
     "name": "Unbreakable — +30 STR and +150 maximum life",
     "file": "Unbreakable____30_STR_and__150_maximum_life.png",
-    "bytes": 67120,
+    "bytes": 77798,
     "source": {
-      "width": 649,
-      "height": 753
+      "width": 862,
+      "height": 856
     }
   },
   {
@@ -1095,8 +1095,8 @@
     "file": "Undying____40_CON.png",
     "bytes": 65756,
     "source": {
-      "width": 606,
-      "height": 788
+      "width": 197,
+      "height": 256
     }
   },
   {
@@ -1105,8 +1105,8 @@
     "file": "Unending_Swing.png",
     "bytes": 40238,
     "source": {
-      "width": 517,
-      "height": 849
+      "width": 156,
+      "height": 256
     }
   },
   {
@@ -1115,8 +1115,8 @@
     "file": "Unspent_Force.png",
     "bytes": 79670,
     "source": {
-      "width": 695,
-      "height": 783
+      "width": 227,
+      "height": 256
     }
   },
   {
@@ -1125,8 +1125,8 @@
     "file": "Versatility.png",
     "bytes": 59795,
     "source": {
-      "width": 784,
-      "height": 818
+      "width": 245,
+      "height": 256
     }
   },
   {
@@ -1135,18 +1135,18 @@
     "file": "Vigour.png",
     "bytes": 69472,
     "source": {
-      "width": 734,
-      "height": 942
+      "width": 199,
+      "height": 256
     }
   },
   {
     "key": "Vital Surge — +300 maximum life",
     "name": "Vital Surge — +300 maximum life",
     "file": "Vital_Surge____300_maximum_life.png",
-    "bytes": 72675,
+    "bytes": 74535,
     "source": {
-      "width": 614,
-      "height": 722
+      "width": 738,
+      "height": 964
     }
   },
   {
@@ -1155,8 +1155,8 @@
     "file": "Volley.png",
     "bytes": 71063,
     "source": {
-      "width": 747,
-      "height": 758
+      "width": 252,
+      "height": 256
     }
   },
   {
@@ -1165,8 +1165,8 @@
     "file": "Wanderer_s_Gift.png",
     "bytes": 85378,
     "source": {
-      "width": 664,
-      "height": 813
+      "width": 209,
+      "height": 256
     }
   },
   {
@@ -1175,8 +1175,8 @@
     "file": "Ward.png",
     "bytes": 78708,
     "source": {
-      "width": 740,
-      "height": 880
+      "width": 215,
+      "height": 256
     }
   },
   {
@@ -1185,8 +1185,8 @@
     "file": "Warm_Blood.png",
     "bytes": 39847,
     "source": {
-      "width": 440,
-      "height": 876
+      "width": 129,
+      "height": 256
     }
   },
   {
@@ -1195,8 +1195,8 @@
     "file": "Warrior.png",
     "bytes": 50259,
     "source": {
-      "width": 580,
-      "height": 966
+      "width": 154,
+      "height": 256
     }
   },
   {
@@ -1205,18 +1205,18 @@
     "file": "Wellspring.png",
     "bytes": 93518,
     "source": {
-      "width": 778,
-      "height": 841
+      "width": 237,
+      "height": 256
     }
   },
   {
     "key": "Whirling Step",
     "name": "Whirling Step",
     "file": "Whirling_Step.png",
-    "bytes": 83466,
+    "bytes": 84172,
     "source": {
-      "width": 933,
-      "height": 853
+      "width": 772,
+      "height": 767
     }
   },
   {
@@ -1225,8 +1225,8 @@
     "file": "Whirlwind.png",
     "bytes": 59594,
     "source": {
-      "width": 869,
-      "height": 846
+      "width": 256,
+      "height": 249
     }
   },
   {
@@ -1235,8 +1235,8 @@
     "file": "Wide_Communion.png",
     "bytes": 50687,
     "source": {
-      "width": 591,
-      "height": 861
+      "width": 176,
+      "height": 256
     }
   },
   {
@@ -1245,8 +1245,8 @@
     "file": "Wide_Stance.png",
     "bytes": 61595,
     "source": {
-      "width": 676,
-      "height": 967
+      "width": 179,
+      "height": 256
     }
   },
   {
@@ -1255,8 +1255,8 @@
     "file": "Wider_Pack.png",
     "bytes": 70279,
     "source": {
-      "width": 678,
-      "height": 851
+      "width": 204,
+      "height": 256
     }
   },
   {
@@ -1265,8 +1265,8 @@
     "file": "Wind.png",
     "bytes": 61572,
     "source": {
-      "width": 746,
-      "height": 896
+      "width": 213,
+      "height": 256
     }
   },
   {
@@ -1275,8 +1275,8 @@
     "file": "Windrunner____20_DEX_and__80_maximum_stamina.png",
     "bytes": 66045,
     "source": {
-      "width": 744,
-      "height": 859
+      "width": 222,
+      "height": 256
     }
   }
 ]
