@@ -510,3 +510,352 @@ silhouette -- taller than wide, filling a reasonable share of the frame -- and
 a rock is neither. So the reference/style-profile route is for CREATURES, and
 props are served by `generate_core` plus `entities-cutout`, which is both the
 cheaper path and the only one that accepts them.
+
+---
+
+## Audio providers (modality: audio)
+
+Same `ai_providers` table, a second `modality` column (`'image'` default |
+`'audio'`). The single-active index is now `ai_providers_single_active_per_modality`
+-- **one active provider per modality** -- so activating an audio profile
+leaves the active image provider active too. Image generation (tile/entity
+jobs, the art console, the world-spec service) filters to `modality = 'image'`
+and can never pick an audio provider by accident -- a pin or batch id that
+names the audio profile resolves as "no such provider". A provider's modality
+is fixed at creation (PATCH refuses to change it).
+
+### Creating one
+
+Settings → **AI Providers** → modality **Audio**. Base URL is the GPU box's
+audio service, e.g. `http://192.168.0.217:8001`; token is a key created on the
+box itself (Settings → Create key on the box, not here). Image-only fields
+(request template, sprite-sheet layout) are hidden for this modality. The
+token is write-only exactly like an image provider's -- never returned by any
+endpoint, "stored" shown in its place.
+
+**Refresh** lists what the box currently offers, stored in `models_cache`:
+- music styles: `medieval_fantasy`, `tavern`, `dungeon`, `battle`, `village`
+- ambience styles: `forest`, `cave`, `village_day`, `night`, `rain`
+- cues, prefixed `cue:` so they sort apart from styles: `cue:slash`,
+  `cue:hit`, `cue:pickup`, `cue:spell`, `cue:footstep`, `cue:ui_click`,
+  `cue:miss`, `cue:chest_open`, `cue:death`, `cue:waypoint`
+
+**Test** calls the box's authenticated `GET /api/audio/styles` (not the
+unauthenticated root that a generic connection test would hit) -- it fails on
+a bad token or a wrong base URL the same way a real job would, instead of only
+proving the box is reachable.
+
+### The adapter
+
+`backend/src/services/remoteAudioProvider.js` calls `POST /api/audio/propose`
+(prompt suggestion), then `POST /api/audio` for music/ambience generation --
+never `?master=true` (that returns the uncompressed WAV master, ~13x the size
+of the OGG we store). Every clip that comes back, generated or fetched off the
+ledger, is checked by `backend/src/services/oggInfo.js` before it is trusted:
+`OggS` magic, a Vorbis identification header for the sample rate, duration
+computed from the last page's granule position, and a size cap -- 8 MB for
+music/ambience, 1 MB for sfx. A clip that fails any check is never stored.
+Checked clips are written to MinIO as OGG Vorbis at
+`audio/<kind>/<clip-id>.ogg`, then bound to a subject slot through
+`audio_clips` / `audio_bindings` -- subjects (a world, a biome, ...) are keyed
+by **name**, not id, so a reseed that renumbers ids doesn't orphan a binding.
+
+**Every generation sends an explicit seed** (random unless the admin sets
+one) -- the box caches identical requests, so a same-seed retry would return
+the same file instead of a new take.
+
+### Assigning sounds
+
+The **Audio** sidebar tab (`/game/audio`) is where bindings are made: worlds
+(music, ambience), biomes (ambience), and -- for sound effects -- creatures,
+world points, attack types, weapons and skills (see **Sound effects** below).
+
+Its **Subjects** view is a table with **one row per slot** (kind · subject ·
+slot · sound · job), 100 rows a page, with Prev/Next and "Page X of Y · N
+matching" above and below it. Filters (kept in the URL, so a reload or a
+shared link lands on the same view):
+
+- **Kind** -- all, or one subject kind;
+- **Sound** -- *Missing* (no clip bound; the default), *Has sound*,
+  *Reported missing in game*, *Last job failed*, or *Any*;
+- **Search** -- case-insensitive over the subject key and the slot name.
+
+*Reported missing in game* is fed by the game client itself,
+`POST /api/audio/misses` -- a slot a player actually hit with nothing bound,
+not a guess from the catalog. It covers the **top 500 reported slots** (by
+report count, then most recent); a slot reported less often than those does
+not match the filter.
+
+Clicking a row -- or its subject name, which is a button for keyboard use --
+opens that subject's slot cards beside the table; single-slot Generate,
+Upload, Loop, bind-from-library and volume/weight all live there.
+
+### Batch generation
+
+The single-slot **Generate** button (below) is still synchronous -- fine for
+one clip, but a tunnel with a short edge timeout (the ~100 s Cloudflare quick
+tunnel on the Orange Pi) can time out a long track before a cold generation
+finishes, even though the server still stores and binds the clip -- refresh
+the tab to see it. For more than a few clips, or anything going through a
+tunnel, queue them from the slot table instead: that queues jobs on the
+backend and drains them one at a time, so no single HTTP request has to
+survive the whole run.
+
+**Queuing.** Tick rows in the slot table. The header checkbox selects **this
+page** only; **Select all N matching** selects every row the current filter
+matches, on every page (the two are deliberately separate buttons).
+The selection survives paging and filter changes, and when the filter hides
+some of it the tab says "N selected are hidden by the current filter".
+**Upload-only** slots (no cue on the box -- see **Sound effects** below) count
+as *Missing* but their checkbox is disabled and they are never selected or
+queued; the pager shows how many of the matching rows they are ("(K
+upload-only)"), which is why "N matching" and "Select all M matching" can
+differ.
+
+Above the table, choose a **Style** for music/ambience slots (or leave
+"Suggest per subject") and an **Engine** (Realistic / Retro) for sfx slots,
+then press **Queue N selected**. Queued sfx jobs always generate **3
+variants** each -- the per-slot Generate button on a slot card has its own
+variants control (1-5). A selection larger than the route's 500-item cap is
+sent in chunks of 500, one after another; if a chunk fails, the tab says how
+many were queued before it and keeps the rest selected. The result reads
+"Queued X — Y already in flight — Z skipped": a slot that already has a
+queued or running job reports back as `already_live` instead of being queued
+twice -- re-queueing it is a no-op, not an error -- and *skipped* counts
+upload-only or no-longer-existing slots. While a drain runs, the table's clip
+counts refresh every time a job finishes, so a slot that just got its sound
+leaves the *Missing* filter instead of being queued again.
+
+**The drain.** Jobs are claimed group by group in the order `music` →
+`ambience` → `sfx_realistic` → `sfx_retro`, so the GPU box switches model at
+most once per group instead of once per clip (music runs on
+`audio:ace-step`, ambience and realistic SFX on `audio:stable-audio`, retro
+SFX need no model at all). Music and ambience jobs run one at a time; SFX
+jobs of one engine are claimed up to `AUDIO_SFX_PACK_SIZE` at a time and sent
+as ONE `POST /api/audio/sfx-pack` request, each returned clip matched back to
+its job by cue + entity text. A pack entry the box rejects (an unknown cue
+fails the whole pack with 422) fails only the jobs it names. A busy box
+(HTTP 409/503, "not now") re-queues the job with a backoff pause before the
+next claim -- it does not spend one of the job's attempts and does not count
+toward the breaker below. A **circuit breaker** stops the drain after
+`AUDIO_BREAKER_TRIP` (default 3) consecutive *provider faults* in a row --
+other 5xx responses, an unusable response (bad JSON, a returned file that
+fails the OGG check), a box-reported generation failure (the box's own
+ledger, e.g. a CUDA OOM), or a transport/timeout error. A run of unrelated
+bad subjects (a pinned-but-disabled provider, a subject that no longer
+exists) does not trip it or reset its count -- only a genuine success does
+that.
+
+**Restart recovery.** A job stuck `running` when the process dies (nodemon
+restarts the backend on *any* backend file edit, killing a running drain
+mid-job) is re-queued automatically the next time a drain starts, with its
+spent attempt refunded -- a crash never loses a job. But the drain itself
+does not resume on its own: after a restart, press **Start** again.
+
+**The progress panel** appears in the Audio tab whenever there is batch
+activity, running or not (so a full queue with nothing draining it stays
+visible). It shows overall progress and which group is currently draining,
+per-group counts (done/queued/running/failed), the subject/slot currently
+generating, how many jobs are waiting out a busy-box backoff, and the last
+few failures with their error text. **Retry failed** re-queues every slot
+whose latest job failed (resetting its attempt count; a slot that has since
+succeeded is not regenerated, and a slot's older failed rows are removed); **Clear finished** removes done and failed
+jobs and keeps anything still queued; **Discard queued** removes the queued
+jobs (the confirm dialog says how many) so they are never generated. Clear
+and Discard are refused (409) while a drain is running -- press Stop first. A
+group's rows left `running` with no drain running (a backend restart
+mid-job) show as **interrupted — press Start**; Start re-queues and runs them.
+If a drain ends for any reason other than running out of work or Stop (the
+breaker, no provider, a database error), the panel says why.
+
+**Failed slots, by cause** (below the queue controls, shown whenever a slot's
+latest job failed) groups those failures by their error text, with ids,
+numbers of 4+ digits, uuids, hashes, file paths and quoted subject names
+blanked so the same fault on different subjects lands in one group -- but
+HTTP status codes are kept, so a `404` and a `503` are separate groups. Each
+group shows its count, the provider's own error text, up to 12 sample slots
+("… and N more"), and **Retry these N**, which re-queues just those slots.
+Failures for subjects that no longer exist are left out (they could never
+succeed).
+
+A queued job whose world or biome no longer exists by the time it is claimed
+fails with `subject no longer exists` without calling the box (and without
+counting toward the breaker). A clip is stored and bound in one database
+transaction, so **Delete all unbound** running at the same moment can never
+remove a clip that is about to be bound.
+
+**Env vars:**
+- `AUDIO_JOB_MAX_ATTEMPTS` (default 3) -- retries per job before it lands in
+  `failed` (a busy-box requeue does not count against this).
+- `AUDIO_JOB_RETRY_BASE_MS` (default 30000) -- base backoff before a retry;
+  doubles per attempt with jitter.
+- `AUDIO_BREAKER_TRIP` (default 3) -- consecutive provider faults before the
+  drain stops itself.
+- `AUDIO_SFX_PACK_SIZE` (default 12) -- most sfx jobs sent in one
+  `sfx-pack` request.
+- `AUDIO_DRAIN_MAX_WAIT_MS` (default 60000) -- longest the drain sleeps
+  between checks while every queued job is sitting out a backoff.
+
+The single-slot **Generate** button still blocks on the HTTP response --
+roughly 30 s for a warm 30 s ambience clip, up to ~2 min for a 2-minute track
+including a cold model load. Like the batch path, when both **style** and
+**prompt** are left blank it proposes one first (the same call **Suggest**
+makes) rather than sending an empty request.
+
+### Sound effects
+
+**Subjects and slots.** Five global kinds (bindings are not scoped to a world
+or biome -- every world plays them):
+
+| Kind | Key | Slots → box cue |
+|---|---|---|
+| `creature` | entity type name (`Slime`) | `nearby` → —, `attack` → —, `hurt` → `hit`, `death` → `death` |
+| `world_point` | entity type name (`portal`, `merchant_post`, ...) | `nearby` → `waypoint` |
+| `attack_type` | `melee` / `ranged` / `magic` | melee `use` → `slash`, ranged `use` → —, magic `use` → `spell`; `hit` → `hit` for all three |
+| `item` | weapon name | as its weapon's attack type |
+| `skill` | skill id | `use` → `slash` for a melee skill, `spell` otherwise; `hit` → `hit` |
+
+A slot marked — has no cue on the box today (there is no idle, creature-attack
+or bow-release cue), so it is **upload-only**: the slot card says so, the
+Generate button is hidden, and its checkbox in the slot table is disabled
+(it counts as *Missing* but can never be selected or queued). Upload an OGG for it
+by hand or bind one from the library. A weapon's attack type is decided from
+the catalog row: a socketed stone or augment → magic, `kind = 'melee'` →
+melee, an `ammo_type_id` or a bow-category name → ranged, anything else →
+magic.
+
+**Generating.** SFX slots have an **engine** choice (`realistic` =
+stable-audio, `retro` = procedural, near-instant) and a **variants** count
+(1-5; each variant is one more clip bound to the slot, and the client makes a
+weighted random pick per play). The box caches SFX by (engine, cue, entity text) and
+**ignores the seed**, so variety comes from the entity text instead: the
+first take sends the subject's phrase (`slime`, the skill's name, or, for an
+attack type, the per-slot phrase: melee `use` "a steel sword", melee `hit` "a
+blade on a creature", magic `use` "a magic spell", magic `hit` "a magic
+blast", ranged "an arrow"), later takes send `<phrase> (take N)` where N is
+the highest take among the clips bound to the slot, plus 1 (a clip without a
+`(take N)` label counts as take 0). The take number is kept in the clip's
+label, so deleting a clip and regenerating still asks the box for a new take.
+If some variants fail and others succeed, the successful ones are stored and
+bound and the admin sees a "partial" toast naming what failed.
+
+**Cached answers.** The box's cache is shared by every database that uses the
+box (dev, a scratch DB, the Orange Pi), so a `cached` answer is usually a file
+*this* database has never stored -- for example a pack the box finished after
+a backend reload killed our drain, or a take another environment already
+asked for. A cached file is therefore stored and bound like any other, unless
+its bytes (sha1, recorded on every clip) match a clip already bound to the
+same slot. Only that is a duplicate: it is not stored, the next try asks for
+a later take, and a batch job stays retryable (it is re-queued, and a
+duplicate never counts toward the circuit breaker). A single **Generate**
+steps past up to 3 duplicate takes before it gives up with "the box returned
+only sounds already bound to this slot"; upload a sound or bind one from the
+library instead.
+
+**In the game.** The authority adds an `sfx` list (at most 64 events,
+omitted when empty) to each world frame: `use` (a swing, cast or shot),
+`hit` (it landed), `hurt` and `death` (a creature was damaged / killed --
+one `death` per kill). Each event carries its attack kind and item or
+`skill:<id>`, or the creature type, and a world position. Skills produce the
+full chain too: a cast is a `use`; a melee skill or cone is a `hit` per
+creature struck, and an area spell is one `hit` at its centre; every damaged
+creature that survives is a `hurt` (one it kills is a `death` instead). The client
+resolves each event to a lookup chain, most specific first:
+
+- player `use`/`hit`: `skill/<id>/<slot>` or `item/<name>/<slot>`, then
+  `attack_type/<kind>/<slot>`;
+- creature `use`: `creature/<type>/attack`; creature `hit`:
+  `attack_type/melee/hit`;
+- `hurt`/`death`: `creature/<type>/hurt|death`.
+
+The first bound slot plays; if none is bound, the first key is reported
+(it then matches the Audio tab's **Reported missing in game** filter). Playback is positional (pan + distance falloff; events
+beyond 1600 px are not played) and capped: at most 12 SFX voices, the same
+clip at most 3 times per 100 ms, and when full your own actions win over the
+nearest combat, which wins over ambient `nearby` sounds. Creature `nearby`
+sounds play every 4-10 s while you are within 8 tiles (at most 4 at once).
+A world point's `nearby` sound plays on the same cadence unless the admin
+marks a clip **Loop**: on that slot card, tick the **Loop** checkbox before
+**Upload .ogg**, or toggle **Loop** on a bound clip's row (only world point
+`nearby` clips offer it; generated clips start unticked, because a looped
+chime is worse than the cadence). When any clip bound to the point is
+marked Loop, one of the looping clips plays continuously while you are
+within 8 tiles and fades out when you leave; if a fight fills the voice cap
+it can bump the loop, which then fades out quickly rather than cutting off.
+The Settings **SFX** slider scales all of it.
+
+**Editors.** The entity-type editor shows a **Sounds** section for creatures
+and world points (same slot cards as the Audio tab).
+
+### Library
+
+The **Library** tab (`/game/audio` → Library) lists every stored clip,
+independent of any subject -- filterable by kind and by **Unbound only**.
+Deleting a clip here removes the stored object from MinIO as well as its
+`audio_clips` row, cascading to every binding that pointed at it (the
+confirm dialog says how many). **Delete all unbound** removes every
+currently-unbound clip matching the kind filter, not just the current page.
+Each slot card also has a **+ From library** picker to bind an existing clip
+to another subject/slot without generating or uploading a new one.
+
+### World and biome editors
+
+The world editor (Maps admin, per-world card) and the biome editor (Biomes
+admin, per-biome card, once the biome has been saved) each embed a **Sounds**
+section -- the same slot cards as the Audio tab's Subjects view, scoped to
+that one world or biome -- so bindings can be made right where the subject is
+already being edited instead of navigating to the Audio tab. It shares the
+same registry and bindings queries as the Audio tab and renders even with no
+audio provider configured (Upload still works).
+
+### Export and seed
+
+Same problem as the image side (SOMET-572/573): a generated clip lives in two
+places git cannot see -- MinIO holds the bytes, `audio_clips` holds a
+job-scoped `storage_key` pointing at them, and `audio_bindings` points a
+subject at a clip id. `make audio-export` / `make audio-seed` move both into
+the repo and back:
+
+```
+make audio-export                        every kind -> backend/seeds/audio/
+make audio-export KIND=music,ambience     some kinds
+make audio-export ONLY=Vale,Forest        some subjects' bound clips
+make audio-seed                           committed clips -> MinIO + bindings
+make audio-seed KIND=sfx FORCE=1          overwrite clips this machine already has
+```
+
+`KIND` is any of `music`, `ambience`, `sfx`; `ONLY` is a comma-separated list
+of subject names (world/biome names, not slots). Only clips with at least one
+binding are exported -- an unbound clip stays library-only.
+
+Export writes `backend/seeds/audio/{music,ambience,sfx}/<label>-<id8>.ogg`
+plus `clips.json` and `bindings.json` at `backend/seeds/audio/`. A `KIND`- or
+`ONLY`-scoped export merges into the existing manifests rather than
+truncating them -- it has only seen the kinds/subjects it queried, so
+entries outside that scope are left as they were.
+
+Clip ids are preserved across an export/seed round trip, so re-seeding an
+already-present clip is a no-op (`FORCE=1` re-uploads it and overwrites the
+row). A binding whose world or biome no longer exists in this database is
+reported and skipped rather than failing the whole seed. The exported files
+are ordinary git content under `backend/seeds/audio/` -- nothing commits them
+automatically; that's a normal `git add`.
+
+Seeding **adds** bindings next to any that already exist on the same slot; it
+does not replace them. On a machine whose slot already has a different clip
+bound, music rotation and the ambience weighted pick then include both the
+existing clip and the seeded one -- unbind whichever you don't want. On the
+machine that did the export, the ids match, so nothing is doubled there.
+
+The size export prints for each kind is the bytes written by that run (every file it
+wrote, changed or not) -- not a diff against what git already has.
+
+### Limitations
+
+- **Renaming a world, biome, creature, world point or weapon orphans its
+  sounds** (skills are keyed by id and are not affected). Bindings, missing-sound
+  rows and queued jobs are keyed by the subject's NAME, so after a rename they
+  stay on the old name: the renamed subject plays nothing, and its queued jobs
+  fail with `subject no longer exists`. Re-bind (or re-queue) under the new
+  name after a rename; carrying them across automatically is a planned
+  follow-up.

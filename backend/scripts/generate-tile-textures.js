@@ -63,13 +63,14 @@ async function resolveProvider(pool, wanted) {
     }
     return active;
   }
+  // Image providers only: the audio profile is never a texture source.
   const byId = /^\d+$/.test(String(wanted))
-    ? await aiProviders.loadProviderWithSecret(pool, Number(wanted))
+    ? await aiProviders.loadImageProviderWithSecret(pool, Number(wanted))
     : null;
   if (byId) return byId;
-  const r = await pool.query('SELECT id FROM ai_providers WHERE name = $1', [wanted]);
+  const r = await pool.query("SELECT id FROM ai_providers WHERE name = $1 AND modality = 'image'", [wanted]);
   if (!r.rows[0]) throw new Error(`no AI provider named '${wanted}'`);
-  return aiProviders.loadProviderWithSecret(pool, r.rows[0].id);
+  return aiProviders.loadImageProviderWithSecret(pool, r.rows[0].id);
 }
 
 // The biome art context a tile should adopt when it has none.

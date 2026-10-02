@@ -464,5 +464,5 @@ function parseArgs(argv) {
 }
 
 module.exports = {
-  SEED_POLICY, SEEDS_ROOT, seededKey, safeName, exportArt, seedArt, parseArgs,
+  SEED_POLICY, SEEDS_ROOT, seededKey, safeName, exportArt, seedArt, parseArgs, matchOwner, readObject,
 };

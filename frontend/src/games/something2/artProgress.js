@@ -217,3 +217,23 @@ export function previewNames(rows, total, limit = QUEUE_PREVIEW) {
   const size = Number.isFinite(n) ? Math.max(n, list.length) : list.length;
   return { names, more: Math.max(0, size - names.length) };
 }
+
+// What a PROVIDER_TOO_SMALL refusal offers to drop (the `blocked` field of the
+// /dispatch 400). Each group is one (kind, provider) pair of QUEUED jobs that
+// would be drawn below the object minimum; removing exactly those lets the
+// rest of the queue -- tiles, objects pinned to a 1024 provider -- run.
+//
+// `groups` is the body /api/art-jobs/clear takes, so what the admin confirms
+// and what the server deletes come from the same list.
+export function blockedSummary(blocked) {
+  const list = Array.isArray(blocked) ? blocked : [];
+  return {
+    total: list.reduce((n, b) => n + (Number(b.count) || 0), 0),
+    lines: list.map((b) => {
+      const size = b.width || b.height ? ` (${b.width || '?'}×${b.height || '?'})` : '';
+      const who = b.provider_name ? `"${b.provider_name}"` : `provider ${b.provider_id ?? '(batch)'}`;
+      return `${b.count} queued ${b.kind} on ${who}${size}`;
+    }),
+    groups: list.map((b) => ({ kind: b.kind, provider_id: b.provider_id ?? null })),
+  };
+}

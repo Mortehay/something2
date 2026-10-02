@@ -10,6 +10,7 @@ import { orderBiomeNames } from './biomeForm.js';
 import { groupWorldsByRegion, filterWorlds, defaultOpenGroups } from './mapListView.js';
 import { matchCreatureTypes } from './creaturePicker.js';
 import AdminLoading from './AdminLoading.jsx';
+import SubjectSounds from './SubjectSounds.jsx';
 
 const AdminContainer = styled.div`
   padding: 2rem; color: var(--s2-text); max-width: 1200px; margin: 0 auto;
@@ -387,6 +388,20 @@ function MapCard({ world, creatureTypes, allMaps, biomes, biomesLoading }) {
           })} disabled={addVillage.isPending}>Add village</Button>
         </div>
       </Row>
+      {/* Task 7 (SOMET-591 slice 2): world.id gates this the same way the
+          world itself gates every other section here -- MapCard is only ever
+          mounted for a real, already-saved world, but the guard matches the
+          brief and protects against a future caller passing a draft. Keyed
+          by world.name, the SAVED name (this card's own `name` state is the
+          unsaved draft in the input above), which is what the audio registry
+          actually keys subjects by. */}
+      {world?.id && (
+        <Row style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
+          <div style={{ width: '100%' }}>
+            <SubjectSounds kind="world" subjectKey={world.name} compact />
+          </div>
+        </Row>
+      )}
     </Card>
   );
 }

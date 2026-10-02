@@ -7,7 +7,7 @@ const { applyTrustProxy, clientIpKey } = require('./clientIp');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
-const { generateChunk, generateChunkDecorations, generateWorldPreview, isBoundedWorld, CREATURE_TILE_PX, generateWorldOverview, overviewOrigin } = require('./services/mapService');
+const { generateChunk, generateChunkDecorations, generateWorldPreview, isBoundedWorld, CREATURE_TILE_PX, generateWorldOverview, overviewOrigin, worldConfig, chunkBiomeGrid } = require('./services/mapService');
 const { fetchLinks, setLink, clearLink } = require('./services/mapLinks');
 const worldGen = require('./services/worldGenService.js');
 const { validateMapSpec } = require('../seeds/mapSpec.js');
@@ -156,6 +156,8 @@ const progressionRoutes = require('./api/progressionRoutes.js');
 const passiveTreeRoutes = require('./api/passiveTreeRoutes.js');
 const passiveNodesRoutes = require('./api/passiveNodesRoutes.js');
 const characterRoutes = require('./api/characterRoutes.js');
+const audioRoutes = require('./api/audioRoutes.js');
+const remoteAudioProvider = require('./services/remoteAudioProvider');
 const { DEFAULTS: GAME_SETTING_DEFAULTS, getSettings, setSetting } = require('./services/gameSettings.js');
 const { ownedCharacter } = require('./services/characters.js');
 const { listVisited } = require('./services/visitedWorlds.js');
@@ -306,6 +308,7 @@ const {
 } = require('./services/generationTarget');
 const bulkImageRegeneration = require('./services/bulkImageRegeneration');
 const catalogSubjects = require('./services/catalogSubjects.js');
+const { loadGameArtIndex } = require('./services/gameArt.js');
 const artJobQueue = require('./services/artJobQueue.js');
 const artDispatcher = require('./services/artDispatcher.js');
 const artFailures = require('./services/artFailures.js');
@@ -314,7 +317,7 @@ const artPromptNotes = require('./services/artPromptNotes.js');
 const artDescriptions = require('./services/artPromptDescriptions.js');
 const subjectDescriber = require('./services/subjectDescriber.js');
 const {
-  pinProvided, providerPinFieldError, providerPinError, providerPinValues,
+  pinProvided, providerPinFieldError, providerPinError, providerPinValues, providerPinModalityError,
 } = require('./services/providerPin.js');
 
 // SOMET-328: the three /api/*-jobs/:jobId routes serve jobs from two different
@@ -522,6 +525,11 @@ app.use('/api/passive-nodes', passiveNodesRoutes(guardPool));
 // Character slots (SOMET-259): list / create / delete, plus the playable-class
 // catalog the creation form reads. Behind requireAuth, scoped to req.user.id.
 app.use('/api/characters', characterRoutes(guardPool));
+
+// Game audio (spec docs/superpowers/specs/2026-09-28-game-audio-design.md).
+// Player routes (world bundle, misses) and admin routes (/admin/*) share one
+// mount; each route carries its own guard.
+app.use('/api/audio', audioRoutes(guardPool));
 
 // The player's fog-of-war world map (SOMET-263). Read-only, and deliberately
 // NOT the payload the admin World Map tab reads from /api/world-graph: that one
@@ -808,6 +816,12 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
       ? providerPinValues(req.body)
       : { mode: 'default', id: null };
 
+    // SOMET-591: reject a pin naming the audio profile before it is ever
+    // stored -- see providerPinModalityError for why this is not folded into
+    // providerPinError above.
+    const pinModalityErr = await providerPinModalityError(pool, pin);
+    if (pinModalityErr) return res.status(400).json({ error: pinModalityErr });
+
     const result = await pool.query(
       `INSERT INTO entity_types (
         name, color, walkable, spawn_tiles, chance,
@@ -895,6 +909,16 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
   try {
     client = await pool.connect();
     await client.query('BEGIN');
+
+    // SOMET-591: same audio-modality refusal as the POST route above. Run
+    // through `client`, not `pool` -- the transaction is already open by the
+    // time this can be checked meaningfully against the row being written,
+    // and a second connection here would just be a second round trip.
+    const pinModalityErr = await providerPinModalityError(client, pin);
+    if (pinModalityErr) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: pinModalityErr });
+    }
 
     let renamedReferences = null;
     if (name != null) {
@@ -1970,6 +1994,9 @@ app.put('/api/tile-types/:id', adminGuard, async (req, res) => {
     if (pinErr) return res.status(400).json({ error: pinErr });
     const pinSent = pinProvided(req.body);
     const pin = pinSent ? providerPinValues(req.body) : { mode: null, id: null };
+    // SOMET-591: same audio-modality refusal as the entity-type routes.
+    const pinModalityErr = await providerPinModalityError(pool, pin);
+    if (pinModalityErr) return res.status(400).json({ error: pinModalityErr });
 
     // tile_types.name is referenced by entity_types.spawn_tiles and
     // biomes.terrain_tiles, both jsonb name arrays with no FK (F-027 /
@@ -2735,6 +2762,7 @@ app.patch('/api/ai-providers/:id', adminGuard, async (req, res) => {
     if (!row) return res.status(404).json({ error: 'AI provider not found' });
     res.json(row);
   } catch (err) {
+    if (err.status === 400) return res.status(400).json({ error: err.message });
     if (isUniqueViolation(err)) {
       return res.status(409).json({ error: 'an AI provider with that name already exists' });
     }
@@ -2788,6 +2816,13 @@ app.post('/api/ai-providers/:id/refresh-models', adminGuard, async (req, res) =>
   try {
     const provider = await aiProviders.loadProviderWithSecret(pool, id);
     if (!provider) return res.status(404).json({ error: 'AI provider not found' });
+    if (provider.modality === 'audio') {
+      const r = await remoteAudioProvider.listStyles(provider);
+      if (!r.ok) return res.json({ ok: false, error: r.error, status: r.status ?? null });
+      const models = [...r.styles.map((s) => s.value), ...r.cues.map((c) => `cue:${c.value}`)];
+      await aiProviders.saveModelsCache(pool, id, models);
+      return res.json({ ok: true, models, styles: r.styles, cues: r.cues });
+    }
     const result = await providerDiscovery.fetchModels(provider);
     if (!result.ok) {
       return res.json({ ok: false, error: result.error, status: result.status ?? null });
@@ -2807,6 +2842,23 @@ app.post('/api/ai-providers/:id/test', adminGuard, async (req, res) => {
   try {
     const provider = await aiProviders.loadProviderWithSecret(pool, id);
     if (!provider) return res.status(404).json({ error: 'AI provider not found' });
+    // An audio profile has no models_path and no image request template --
+    // providerDiscovery.testConnection probes base_url/models_path, which for
+    // this box is the unauthenticated root. That certifies the box is up, not
+    // that the token works or that the audio API is reachable. listStyles
+    // hits a real authenticated audio endpoint instead, so a bad token (401)
+    // or a wrong base_url fails here the same way it would fail a real job.
+    if (provider.modality === 'audio') {
+      const startedAt = Date.now();
+      const r = await remoteAudioProvider.listStyles(provider);
+      // Spread explicitly rather than returning `r`: nothing from the
+      // provider row or an unrecognised field on `r` belongs in this
+      // response, least of all auth_token.
+      res.json({
+        ok: r.ok, status: r.status ?? null, latency_ms: Date.now() - startedAt, error: r.error ?? null,
+      });
+      return;
+    }
     // Spread explicitly rather than returning the provider: nothing from the
     // row (least of all auth_token) belongs in this response.
     const { ok, status = null, latency_ms = null, error = null } =
@@ -3126,7 +3178,7 @@ async function startGenerationJob(req, res, { subject, kind, defaultFrames, fail
     if (target.source === 'remote') {
       const provider = activeProvider && activeProvider.id === target.providerId
         ? activeProvider
-        : await aiProviders.loadProviderWithSecret(pool, target.providerId);
+        : await aiProviders.loadImageProviderWithSecret(pool, target.providerId);
       if (!provider) {
         return res.status(400).json({ error: 'the selected AI provider no longer exists' });
       }
@@ -3196,6 +3248,7 @@ app.get('/api/assets/*', async (req, res) => {
     const stream = await assetStore.getObjectStream(key);
     if (/\.png$/i.test(key)) res.type('image/png');
     else if (/\.json$/i.test(key)) res.type('application/json');
+    else if (/\.ogg$/i.test(key)) res.type('audio/ogg');
     res.set('Cache-Control', 'public, max-age=300');
     stream.on('error', () => { if (!res.headersSent) res.status(404).json({ error: 'asset not found' }); });
     stream.pipe(res);
@@ -3315,6 +3368,20 @@ app.post('/api/bulk-image-jobs/cancel', adminGuard, (req, res) => {
 // is fine for 50 tiles and not for a batch measured in hours against a machine
 // we do not control. Here the work list is rows in art_jobs, so a restart of
 // ours OR of the remote resumes instead of re-running.
+
+// SOMET-598: the icon pointers the GAME draws (skills, passive labels, items).
+// playerGuard, NOT adminGuard -- every signed-in player needs this, and it
+// carries nothing but object-store keys that /api/assets already serves to
+// anyone. One call per session; the images load lazily, one per surface that
+// asks, so this does not become the 194-image join burst again.
+app.get('/api/game-art', playerGuard, async (req, res) => {
+  try {
+    res.json(await loadGameArtIndex(pool));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load game art' });
+  }
+});
 
 // The subject kinds this install can generate, for the console's filter. Read
 // from the registry rather than hardcoded in the client, so adding a sixth kind
@@ -3567,6 +3634,29 @@ app.post('/api/art-jobs', adminGuard, async (req, res) => {
     const { subjects, unknown } = await catalogSubjects.subjectsForEnqueue(
       pool, kind, keys, { active, fallbackProviderId: providerId },
     );
+
+    // SOMET-594. Refuse at the SOURCE. An object queued on a provider that
+    // renders below 1024 can never be drawn -- the drain skips it -- so
+    // accepting it only defers the error to a batch that then leaves it
+    // stranded. Checked per subject's RESOLVED provider, since a pinned type
+    // goes to its pin rather than to the one picked in the console.
+    if (backend === 'connector' && catalogSubjects.registryFor(kind).generationKind === 'object') {
+      const ids = [...new Set(subjects.map((s) => s.providerId).filter(Number.isInteger))];
+      const { rows: provs } = await pool.query(
+        "SELECT id, name, request_template FROM ai_providers WHERE modality = 'image'");
+      const tooSmall = provs.filter((p) => ids.includes(p.id) && artDispatcher.providerSizeRefusal(p));
+      if (tooSmall.length) {
+        const ok = provs.filter((p) => !artDispatcher.providerSizeRefusal(p)).map((p) => `"${p.name}"`);
+        return res.status(400).json({
+          error: `${kind} is drawn as an isolated object and needs a 1024px provider; `
+            + `${tooSmall.map((p) => `"${p.name}"`).join(', ')} renders smaller. `
+            + (ok.length ? `Pick ${ok.join(' or ')} in the Provider list.`
+              : 'Set a provider\'s request_template width/height to 1024.'),
+          code: 'PROVIDER_TOO_SMALL',
+        });
+      }
+    }
+
     const rows = await artJobQueue.enqueue(pool, subjects, { backend, providerId });
     res.status(201).json({
       requested: keys.length,
@@ -3587,15 +3677,30 @@ app.post('/api/art-jobs', adminGuard, async (req, res) => {
 // The queue by state, plus whether a drain is running. Progress in the table
 // comes from /api/art-subjects (has_art), not from a counter here -- a counter
 // drifts, a catalog commit cannot.
+// A failed art_jobs row (aliased `f`) whose subject has NOT succeeded since.
+// SOMET-601. Shared by the failure panel and the requeue endpoint so the two
+// cannot disagree: a requeue -- above all a reseed -- of a subject that already
+// has newer art would draw over it.
+const ART_FAILURE_UNRESOLVED = `NOT EXISTS (
+  SELECT 1 FROM art_jobs d
+   WHERE d.subject_kind = f.subject_kind AND d.subject_key = f.subject_key
+     AND d.state = 'done' AND d.updated_at > f.updated_at)`;
+
 app.get('/api/art-jobs', adminGuard, async (req, res) => {
   try {
     // Failures come back GROUPED BY CAUSE rather than as a flat list. The list
     // was already visible per-row in the table; what an admin could not get
     // was "68 of these are the same GPU fault and will clear themselves, ONE
     // needs a decision". The grouping is the actionable part.
+    //
+    // SOMET-601: only failures still OUTSTANDING. A failed row whose subject
+    // has since succeeded is history; showing it put 82 already-drawn subjects
+    // under "Backdrop was not keyed out" while the real stop cause went unseen.
     const { rows: failed } = await pool.query(
-      `SELECT subject_kind, subject_key, last_error
-         FROM art_jobs WHERE state = 'failed' ORDER BY updated_at DESC`,
+      `SELECT f.subject_kind, f.subject_key, f.last_error
+         FROM art_jobs f
+        WHERE f.state = 'failed' AND ${ART_FAILURE_UNRESOLVED}
+        ORDER BY f.updated_at DESC`,
     );
     res.json({
       stats: await artJobQueue.stats(pool),
@@ -3623,8 +3728,17 @@ app.post('/api/art-jobs/dispatch', adminGuard, async (req, res) => {
   try {
     const providerId = Number.isInteger(req.body.provider_id) ? req.body.provider_id : null;
     if (!providerId) return res.status(400).json({ error: 'provider_id is required' });
-    const provider = await aiProviders.loadProviderWithSecret(pool, providerId);
+    const provider = await aiProviders.loadImageProviderWithSecret(pool, providerId);
     if (!provider) return res.status(404).json({ error: 'provider not found' });
+
+    // The resolution precondition, against WHAT IS QUEUED rather than the
+    // batch provider alone: each job carries its own provider pin. `blocked`
+    // lists every queued (kind, provider) group that would be drawn below the
+    // object minimum, so the console can offer to drop exactly those rows.
+    if (!artDispatcher.runStatus().running) {
+      const refusal = await artDispatcher.objectSizeRefusal(pool, provider);
+      if (refusal) throw refusal;
+    }
 
     const status = artDispatcher.startDrain(pool, {
       provider,
@@ -3644,7 +3758,9 @@ app.post('/api/art-jobs/dispatch', adminGuard, async (req, res) => {
     // configuration the admin can fix, and the message says how -- below SDXL's
     // native size the model returns sprite sheets that look like art and pass
     // every check but the eye.
-    if (err.code === 'PROVIDER_TOO_SMALL') return res.status(400).json({ error: err.message });
+    if (err.code === 'PROVIDER_TOO_SMALL') {
+      return res.status(400).json({ error: err.message, blocked: err.blocked || [] });
+    }
     console.error(err);
     res.status(500).json({ error: 'Failed to start the art batch' });
   }
@@ -3686,11 +3802,30 @@ app.post('/api/art-jobs/requeue', adminGuard, async (req, res) => {
                        WHERE l.subject_kind = f.subject_kind
                          AND l.subject_key = f.subject_key
                          AND l.state IN ('queued', 'running')) AS superseded
-         FROM art_jobs f WHERE f.state = 'failed'`,
+         FROM art_jobs f WHERE f.state = 'failed' AND ${ART_FAILURE_UNRESOLVED}`,
     );
     const ofKind = failed.filter((r) => artFailures.classify(r.last_error).kind === kind);
-    let mine = ofKind.filter((r) => !r.superseded);
-    const alreadyQueued = ofKind.length - mine.length;
+    // ONE row per subject, the newest. Every failed retry leaves its own row,
+    // so a subject that failed three times has three -- and requeueing a
+    // second one after the first violates art_jobs_one_live_per_subject: a 500
+    // midway through the loop, with the rows before it already requeued
+    // (SOMET-595; 30 subjects on the dev DB held 162 failed rows). The older
+    // rows stay as the record of earlier attempts; the live job supersedes them.
+    const newest = new Map();
+    for (const r of ofKind) {
+      if (r.superseded) continue;
+      const k = `${r.subject_kind}\u0000${r.subject_key}`;
+      const prev = newest.get(k);
+      if (!prev || new Date(r.updated_at) > new Date(prev.updated_at)
+        || (+new Date(r.updated_at) === +new Date(prev.updated_at) && r.id > prev.id)) {
+        newest.set(k, r);
+      }
+    }
+    let mine = [...newest.values()];
+    // Subjects, not rows: an older failed row of a subject being requeued now
+    // is neither "requeued" nor "already queued" -- it is history.
+    const alreadyQueued = new Set(ofKind.filter((r) => r.superseded)
+      .map((r) => `${r.subject_kind}\u0000${r.subject_key}`)).size;
     if (mine.length === 0) {
       return res.json({
         requeued: 0,
@@ -3819,14 +3954,42 @@ app.post('/api/art-jobs/requeue-stale', adminGuard, async (req, res) => {
 // the drain would report failures for subjects nobody asked it to stop.
 app.post('/api/art-jobs/clear', adminGuard, async (req, res) => {
   try {
-    if (artDispatcher.runStatus().running) {
-      return res.status(409).json({
-        error: 'a batch is running -- press Stop and let the subjects in flight finish first',
-      });
+    // `groups` scopes the clear to (kind, provider_id) pairs -- what a
+    // PROVIDER_TOO_SMALL refusal lists as `blocked`. QUEUED rows only when
+    // scoped: the admin is dropping work that has not started, and a claimed
+    // row is a separate recovery (Rescue stranded jobs). provider_id null
+    // matches unpinned rows, hence IS NOT DISTINCT FROM.
+    const groups = Array.isArray(req.body.groups) ? req.body.groups : null;
+    let rows;
+    if (groups) {
+      const valid = groups.filter((g) => g && typeof g.kind === 'string'
+        && (g.provider_id === null || Number.isInteger(g.provider_id)));
+      if (valid.length === 0 || valid.length !== groups.length) {
+        return res.status(400).json({ error: 'groups must be [{ kind, provider_id }]' });
+      }
+      ({ rows } = await pool.query(
+        `DELETE FROM art_jobs j
+          USING unnest($1::text[], $2::int[]) AS g(kind, provider_id)
+          WHERE j.state = 'queued' AND j.subject_kind = g.kind
+            AND j.provider_id IS NOT DISTINCT FROM g.provider_id
+          RETURNING j.state`,
+        [valid.map((g) => g.kind), valid.map((g) => g.provider_id)],
+      ));
+      artDispatcher.forgetBlocked(valid);
+    } else {
+      // Only the UNSCOPED clear is refused mid-batch: it takes claimed rows.
+      // A scoped clear deletes queued rows only, and a running drain skips
+      // blocked groups rather than claiming them (SOMET-594), so removing
+      // them while it runs is exactly what the console offers.
+      if (artDispatcher.runStatus().running) {
+        return res.status(409).json({
+          error: 'a batch is running -- press Stop and let the subjects in flight finish first',
+        });
+      }
+      ({ rows } = await pool.query(
+        "DELETE FROM art_jobs WHERE state IN ('queued', 'running') RETURNING state",
+      ));
     }
-    const { rows } = await pool.query(
-      "DELETE FROM art_jobs WHERE state IN ('queued', 'running') RETURNING state",
-    );
     res.json({
       cleared: rows.length,
       queued: rows.filter((r) => r.state === 'queued').length,
@@ -4794,6 +4957,13 @@ app.get('/api/worlds/:id/chunk', playerGuard, async (req, res) => {
       links: linkRows,
     });
 
+    // Game audio (spec §3 "Ambience"): chunkBiomeGrid needs the NORMALIZED cfg
+    // (worldConfig()'s output, matching what sampleBiomeRegion reads) -- unlike
+    // generateChunk/generateChunkDecorations, which take the raw worldCfg and
+    // normalize internally. Computed once here since both res.json calls below
+    // need it.
+    const chunkBiomes = chunkBiomeGrid(worldConfig(worldCfg), cx, cy, world.chunk_size || 64);
+
     // Cache hit?
     const cached = await pool.query(
       'SELECT data FROM world_chunks WHERE world_id = $1 AND cx = $2 AND cy = $3',
@@ -4802,7 +4972,7 @@ app.get('/api/worlds/:id/chunk', playerGuard, async (req, res) => {
     if (cached.rows[0]) {
       const data = cached.rows[0].data;
       const decorations = generateChunkDecorations(worldCfg, cx, cy, data, decorationDefs);
-      return res.json({ world_id: worldId, cx, cy, data, decorations });
+      return res.json({ world_id: worldId, cx, cy, data, decorations, biomes: chunkBiomes });
     }
 
     // Miss: generate terrain and return it WITHOUT persisting. The authority is
@@ -4812,7 +4982,7 @@ app.get('/api/worlds/:id/chunk', playerGuard, async (req, res) => {
     const data = generateChunk(worldCfg, cx, cy);
     const decorations = generateChunkDecorations(worldCfg, cx, cy, data, decorationDefs);
 
-    res.json({ world_id: worldId, cx, cy, data, decorations });
+    res.json({ world_id: worldId, cx, cy, data, decorations, biomes: chunkBiomes });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch chunk' });

@@ -81,6 +81,35 @@ function providerPinValues(body) {
   return { mode, id };
 }
 
+// SOMET-591: a 'provider' pin whose id names the AUDIO profile is a pin that
+// would silently send this type's generation to a service that cannot
+// produce an image -- resolveGenerationTarget has no modality check of its
+// own (nothing upstream of it ever needed one, since loadImageProviderWithSecret
+// already keeps a runtime lookup from crossing modalities). This is the write-
+// time half: catch it before the pin is ever stored, not after a generation
+// silently fails against the wrong box.
+//
+// Deliberately NOT folded into providerPinError above, which stays a pure,
+// synchronous function -- naming a provider's modality is a database fact, so
+// this one is async and takes a db handle. Only called when the pin actually
+// names a provider; default/local pins carry no id to check, and
+// providerPinError already refuses a bare 'provider' with a null id before
+// this would ever run.
+//
+// Compares against 'audio' specifically, not "anything but image": a row this
+// cannot see (deleted id, or a future third modality) must not be treated as
+// a rejection here -- that degrade is providerPinValues/resolveGenerationTarget's
+// job, same as any other dangling pin.
+async function providerPinModalityError(db, pin) {
+  if (!pin || pin.mode !== 'provider' || pin.id == null) return null;
+  const r = await db.query('SELECT modality FROM ai_providers WHERE id = $1', [pin.id]);
+  if (r.rows.length && r.rows[0].modality === 'audio') {
+    return `ai_provider_id ${pin.id} is not an image provider`;
+  }
+  return null;
+}
+
 module.exports = {
   PIN_MODES, pinProvided, providerPinFieldError, providerPinError, providerPinValues,
+  providerPinModalityError,
 };

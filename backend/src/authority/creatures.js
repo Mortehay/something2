@@ -11,6 +11,9 @@ const {
 const { resolveEffectName } = require('./vfx.js');
 const { bodyLift } = require('./attackOrigin.js');
 const {
+  creatureUse, creatureHit, creatureHurt, creatureDeath, pushSfxEvent,
+} = require('./sfxEvents.js');
+const {
   applyElementEffect, applyHitStatuses, activeEffectKeys, canAct, charmerOf,
 } = require('./effects');
 const { resolveBehavior, DEFAULT_BEHAVIOR, DEFAULT_ABILITY } = require('../services/creatureBehaviors');
@@ -284,7 +287,11 @@ function center(o) { return { x: o.x + o.width / 2, y: o.y + o.height / 2 }; }
 // `reach`/`arc` are the contact geometry, not a weapon's: a creature has no
 // item_types row. CONTACT_RANGE is the distance it actually had to close to
 // land the hit, so the swing drawn is the swing that happened.
-function stampCreatureAttack(attacks, impacts, c, target, from, to) {
+//
+// Game audio slice 3: `sfx`, when given, receives the sound half of the same
+// moment -- the creature's `use` at its own centre and its `hit` at the
+// target's -- so the swing heard is the swing drawn.
+function stampCreatureAttack(attacks, impacts, c, target, from, to, sfx = null) {
   const nx0 = to.x - from.x;
   const ny0 = to.y - from.y;
   const len = Math.hypot(nx0, ny0) || 1;
@@ -312,6 +319,12 @@ function stampCreatureAttack(attacks, impacts, c, target, from, to) {
     // anchored on who was hit, never on who swung.
     o: bodyLift(target.height, 'middle'),
   });
+  if (sfx) {
+    pushSfxEvent(sfx, creatureUse(c, from.x, from.y));
+    pushSfxEvent(sfx, creatureHit(c.type, to.x, to.y));
+    // A creature target (pet or guard bite) feels it, as it does a projectile.
+    if (target.userId == null) pushSfxEvent(sfx, creatureHurt(target.type, to.x, to.y));
+  }
 }
 function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; }
 
@@ -1145,6 +1158,22 @@ class CreatureSim {
     this.rng = rng;
     this.chunkSize = map.chunkSize;
     this.creatures = new Map(); // id -> creature
+    // Game audio slice 3: this sim's `sfx` events (creature attacks and
+    // deaths), drained by World#drainSfx. Capped by pushSfxEvent.
+    this.sfx = [];
+  }
+
+  // Every creature DEATH leaves the sim through here (never pruneInactive,
+  // which unloads a live creature). The death sound is emitted at the moment
+  // of removal, the one point that still holds the creature's type and last
+  // position: by the time server.js's onCreatureDeath commits the kill, the
+  // creature is gone from memory, and every kill site (melee, projectile,
+  // burn, wave, guard, pet) funnels through one of these deletes.
+  _removeKilled(c) {
+    this.creatures.delete(c.id);
+    pushSfxEvent(this.sfx, creatureDeath(
+      c.type, c.x + (c.width || CREATURE_SIZE) / 2, c.y + (c.height || CREATURE_SIZE) / 2,
+    ));
   }
 
   addCreatures(list) {
@@ -1398,10 +1427,10 @@ class CreatureSim {
             const dmg = (bh.damageOverride ?? c.damage) * ability.damageMult * c._buff.damageMult;
             applyDamageWithEffects(tgt, dmg, ability.element || c.attackElement,
               effectiveMit(tgt), now, creatureKey(c.id));
-            stampCreatureAttack(attacks, impacts, c, tgt, cc, tc);
+            stampCreatureAttack(attacks, impacts, c, tgt, cc, tc, this.sfx);
             tgt.dirty = true;
             if (tgt.hp <= 0) {
-              this.creatures.delete(tgt.id);
+              this._removeKilled(tgt);
               killed.push(tgt.id);
               // Credited to the DRUID, not to the pet: the kill is the player's
               // doing, and commitCreatureDeath's XP and loot branches key on a
@@ -1550,10 +1579,10 @@ class CreatureSim {
             // path rather than two -- the client draws a wolf bite through
             // exactly the code that draws a halberd, and neither can be fixed
             // without fixing the other.
-            stampCreatureAttack(attacks, impacts, c, tgt, cc, tc);
+            stampCreatureAttack(attacks, impacts, c, tgt, cc, tc, this.sfx);
             tgt.dirty = true;
             c._abilityCd.set(ability.slot, ability.attackCooldown);
-            if (tgt.hp <= 0) { this.creatures.delete(tgt.id); killed.push(tgt.id); }
+            if (tgt.hp <= 0) { this._removeKilled(tgt); killed.push(tgt.id); }
             else if (ability.knockback > 0) {
               // Survivors only -- a target the line above already deleted
               // must never be shoved. `cc` (the guard's PRE-move centre, the
@@ -1960,7 +1989,7 @@ class CreatureSim {
             // in the game.
             provoke(c, playerKey(c._target), now);
             // Second of the two contact sites -- same stamp, same shape.
-            stampCreatureAttack(attacks, impacts, c, tp, center(c), center(tp));
+            stampCreatureAttack(attacks, impacts, c, tp, center(c), center(tp), this.sfx);
             c._abilityCd.set(ability.slot, ability.attackCooldown);
             // Survivors only -- a dead player is about to be respawned by
             // resolveDeaths(), and shoving them first would move a position
@@ -1985,6 +2014,9 @@ class CreatureSim {
             if (f) c.facing = f;
             shots.push({
               ownerId: c.id,
+              // Game audio slice 3: the shooter's type names its `use` and
+              // its projectile's `hit` sounds (World spawns and emits them).
+              ownerType: c.type,
               ownerFaction: c.faction || 'hostile',
               x: cc.x, y: cc.y,
               nx: (tc.x - cc.x) / d, ny: (tc.y - cc.y) / d,
@@ -2131,7 +2163,7 @@ class CreatureSim {
       applyDamageWithEffects(c, damage, element, effectiveMit(c), now, playerKey(sourceUserId));
       applyElementEffect(c, element, now);
       c.dirty = true;
-      if (c.hp <= 0) { this.creatures.delete(id); killed.push(id); }
+      if (c.hp <= 0) { this._removeKilled(c); killed.push(id); }
     }
     return killed;
   }
@@ -2275,7 +2307,7 @@ class CreatureSim {
         applyElementEffect(c, augment.element, now, sourceId);
       }
       c.dirty = true;
-      if (c.hp <= 0) { this.creatures.delete(id); killed.push(id); }
+      if (c.hp <= 0) { this._removeKilled(c); killed.push(id); }
     }
     return killed;
   }
@@ -2302,7 +2334,7 @@ class CreatureSim {
     if (!c) return false;
     applyDamageWithEffects(c, damage, element, effectiveMit(c), now, source);
     c.dirty = true;
-    if (c.hp <= 0) { this.creatures.delete(id); return true; }
+    if (c.hp <= 0) { this._removeKilled(c); return true; }
     return false;
   }
 

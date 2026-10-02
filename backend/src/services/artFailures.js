@@ -29,6 +29,7 @@
 const KINDS = {
   PROVIDER_FAULT: 'provider_fault',
   UNREACHABLE: 'unreachable',
+  AUTH: 'auth',
   CONTENT_CUTOUT: 'content_cutout',
   CONTENT_UNKEYED: 'content_unkeyed',
   CONFIG: 'config',
@@ -60,7 +61,7 @@ const RULES = [
     // Same remedy as the cutout case: the seed is derived from the subject, so
     // only a different seed can produce a different image.
     kind: KINDS.CONTENT_UNKEYED,
-    match: (e) => /no transparency|not keyed out|not separable from its background|only \d+% transparent/i
+    match: (e) => /no transparency|not keyed out|not separable from its background|only \d+(?:\.\d+)?% transparent/i
       .test(e),
     label: 'Backdrop was not keyed out',
     detail: 'The subject could not be separated from its background -- the result '
@@ -77,6 +78,22 @@ const RULES = [
       + 'Retrying reproduces the error; change the provider or its settings.',
     action: 'fix_config',
     retryable: false,
+  },
+  {
+    // SOMET-601. A revoked token (provider answered 401) fell through to
+    // UNKNOWN, so the breaker stopped the drain saying the provider "looks
+    // down" -- sending the operator to restart a GPU box that was answering
+    // perfectly well. Retryable on purpose: the subjects are fine and the SAME
+    // queued jobs succeed once the token is fixed, and a fast 401 must not
+    // spend their attempts in the meantime. What changes is the advice.
+    kind: KINDS.AUTH,
+    match: (e) => /answered 40[13]\b/i.test(e),
+    label: 'Provider rejected its credentials',
+    detail: 'The provider refused the request as unauthorised (401/403), usually a '
+      + 'revoked or mistyped token. The machine is up; retrying changes nothing until '
+      + 'the token is fixed under AI Providers.',
+    action: 'fix_config',
+    retryable: true,
   },
   {
     kind: KINDS.UNREACHABLE,
@@ -130,7 +147,7 @@ function classify(lastError) {
 // come before the long list that will fix itself on the next requeue. A
 // hundred provider faults scrolling above the one subject that needs thought
 // is how the actionable item gets missed.
-const ORDER = [KINDS.CONFIG, KINDS.CONTENT_CUTOUT, KINDS.CONTENT_UNKEYED, KINDS.UNKNOWN,
+const ORDER = [KINDS.AUTH, KINDS.CONFIG, KINDS.CONTENT_CUTOUT, KINDS.CONTENT_UNKEYED, KINDS.UNKNOWN,
   KINDS.UNREACHABLE, KINDS.PROVIDER_FAULT];
 
 function groupFailures(rows) {

@@ -30,6 +30,10 @@ const WRITABLE = [
   'models_pointer',
   'response_image_pointer',
   'enabled',
+  // Game audio slice 1: 'image' (default) or 'audio'. An audio profile talks
+  // to the box's fixed audio API through remoteAudioProvider.js and has no
+  // use for the image template/pointer/sheet fields.
+  'modality',
   // SOMET-346: how to cut a multi-frame sheet the remote returns whole.
   'sheet_layout',
   'sheet_columns',
@@ -97,7 +101,12 @@ function providerFieldError(body, { partial = false } = {}) {
     const bad = baseUrlError(body.base_url);
     if (bad) return bad;
   }
-  if (!partial || has('request_template')) {
+  const modality = has('modality') ? body.modality : undefined;
+  if (modality !== undefined && modality !== 'image' && modality !== 'audio') {
+    return "modality must be 'image' or 'audio'";
+  }
+  const templateRequired = !partial && modality !== 'audio';
+  if (templateRequired || has('request_template')) {
     // The template becomes a POST body. An array or a bare string would be
     // accepted by jsonb and then fail at generate time against the remote
     // service, which is far away from the person who typed it.
@@ -168,17 +177,36 @@ async function loadProviderWithSecret(db, id) {
   return r.rows[0] || null;
 }
 
+// Every IMAGE lookup by id goes through this (spec §2: every image-provider
+// lookup gains modality = 'image'). A pin or batch id that names the audio
+// profile resolves to null -- the same "no such provider" each caller already
+// handles for a deleted row -- so an image job is never sent to the box's
+// audio API.
+async function loadImageProviderWithSecret(db, id) {
+  const r = await db.query("SELECT * FROM ai_providers WHERE id = $1 AND modality = 'image'", [id]);
+  return r.rows[0] || null;
+}
+
 // The provider generation falls back to when nothing more specific is chosen.
 // Disabled profiles are excluded: `enabled` is the admin's "this box is off
 // right now" switch, and an active-but-disabled profile must not silently
 // swallow every generation request.
-async function loadActiveProviderWithSecret(db) {
-  const r = await db.query('SELECT * FROM ai_providers WHERE is_active AND enabled');
+//
+// Scoped by modality: the audio profile is active at the same time as the
+// image one (one active PER modality), and an image job must never be sent
+// to the audio service.
+async function loadActiveProviderWithSecret(db, modality = 'image') {
+  const r = await db.query(
+    'SELECT * FROM ai_providers WHERE is_active AND enabled AND modality = $1', [modality]);
   return r.rows[0] || null;
 }
 
+// An audio profile has no template, but the column is NOT NULL.
 async function createProvider(db, body) {
-  const { columns, values } = buildProviderPatch(body);
+  const withDefaults = body.modality === 'audio' && body.request_template === undefined
+    ? { ...body, request_template: {} }
+    : body;
+  const { columns, values } = buildProviderPatch(withDefaults);
   const placeholders = columns.map((_, i) => `$${i + 1}`);
   const r = await db.query(
     `INSERT INTO ai_providers (${columns.join(', ')})
@@ -190,8 +218,23 @@ async function createProvider(db, body) {
 
 // Returns undefined when no row matched, so the route can 404 rather than
 // reporting a successful update of nothing.
+//
+// modality is fixed at creation: flipping an image row to audio (or back)
+// would turn every pin that names it into a pin on the wrong service. The
+// edit form resends the current value, so an unchanged modality is accepted
+// and simply not written; a different one is a 400.
 async function updateProvider(db, id, body) {
-  const { columns, values } = buildProviderPatch(body);
+  if (Object.prototype.hasOwnProperty.call(body, 'modality')) {
+    const cur = (await db.query('SELECT modality FROM ai_providers WHERE id = $1', [id])).rows[0];
+    if (!cur) return undefined;
+    if (cur.modality !== body.modality) {
+      const err = new Error('modality cannot be changed after creation');
+      err.status = 400;
+      throw err;
+    }
+  }
+  const { modality, ...rest } = body; // eslint-disable-line no-unused-vars
+  const { columns, values } = buildProviderPatch(rest);
   if (columns.length === 0) return getProvider(db, id);
   const assignments = columns.map((c, i) => `${c} = $${i + 1}`);
   const r = await db.query(
@@ -208,15 +251,21 @@ async function deleteProvider(db, id) {
 }
 
 // Clearing before setting is REQUIRED, not stylistic: ai_providers_single_
-// active_index is a non-deferrable unique index, so setting a second row
-// active before clearing the first raises a duplicate key error mid-statement.
-// The transaction is what makes the pair atomic -- a crash between them must
-// not leave zero active providers when there was one before.
+// active_per_modality is a non-deferrable unique index, so setting a second
+// row active before clearing the first raises a duplicate key error
+// mid-statement. The transaction is what makes the pair atomic -- a crash
+// between them must not leave zero active providers when there was one
+// before. Only the target row's own modality is cleared, so activating an
+// audio profile never deactivates the active image one.
 async function setActiveProvider(pool, id) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query('UPDATE ai_providers SET is_active = false WHERE is_active');
+    await client.query(
+      `UPDATE ai_providers SET is_active = false
+        WHERE is_active AND modality = (SELECT modality FROM ai_providers WHERE id = $1)`,
+      [id],
+    );
     const r = await client.query(
       'UPDATE ai_providers SET is_active = true, updated_at = now() WHERE id = $1 RETURNING *',
       [id],
@@ -256,6 +305,7 @@ module.exports = {
   listProviders,
   getProvider,
   loadProviderWithSecret,
+  loadImageProviderWithSecret,
   loadActiveProviderWithSecret,
   createProvider,
   updateProvider,

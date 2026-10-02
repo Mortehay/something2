@@ -5,6 +5,9 @@ const { normalizeAim, inArc, hasLineOfSight, weaponStaminaCost } = require('./we
 const { resolveEffectName, momentForAttack, blockedImpact } = require('./vfx.js');
 const { attackLift, bodyLift } = require('./attackOrigin.js');
 const { ProjectileSim } = require('./projectiles');
+const {
+  weaponUse, weaponHit, creatureUse, creatureHurt, skillUse, skillAttackKind, attackKindOf, pushSfxEvent,
+} = require('./sfxEvents.js');
 const { applyDamageWithEffects, drainMana, NO_MITIGATION, playerKey } = require('./damage');
 const {
   tickEffects, effectMagnitude, applyElementEffect, applyHitStatuses,
@@ -306,6 +309,10 @@ class World {
     // per-owner cap drop the STALEST wave rather than an arbitrary one.
     this.waves = [];
     this.groundItems = new GroundItemSim(chunkSize);
+    // Game audio slice 3: the world's own `sfx` events (player swings, shots,
+    // melee hits, skill casts). CreatureSim and ProjectileSim keep their own
+    // buffers; drainSfx() takes all three at once. Capped by pushSfxEvent.
+    this.sfx = [];
     // Monotonic world clock in ms, advanced only by tick(). effects.js is pure
     // and never reads a clock itself, so this is the single source of `now`
     // for every effect apply/expiry in the world.
@@ -705,10 +712,14 @@ class World {
 
     for (const s of shots) {
       if (this.projectiles.countByOwnerKind('creature') >= MAX_CREATURE_PROJECTILES) break;
+      // Game audio slice 3: the shot is heard only if it actually spawns --
+      // past the cap above, nothing leaves the creature.
+      pushSfxEvent(this.sfx, creatureUse({ id: s.ownerId, type: s.ownerType }, s.x, s.y));
       this.projectiles.spawn({
         ownerId: s.ownerId,
         ownerKind: 'creature',
         ownerFaction: s.ownerFaction,
+        ownerType: s.ownerType,
         x: s.x, y: s.y, nx: s.nx, ny: s.ny,
         damage: s.damage,
         originLift: s.originLift,
@@ -963,6 +974,10 @@ class World {
       const f = facingFromInput(sign(nx), sign(ny));
       if (f) p.facing = f;
       spendResources(p, w);
+      // Game audio slice 3: the swing is committed (resources spent), so it
+      // is heard -- landed or not, like the attack descriptor below.
+      const sfxKind = attackKindOf(w);
+      pushSfxEvent(this.sfx, weaponUse(w, userId, cx, cy));
       // SOMET-520. This swing's geometry, resolved ONCE, exactly like
       // originLift and pacifiedFrom above and for a stronger reason: these two
       // numbers are read at FOUR sites below -- the creature arc scan, the
@@ -1025,6 +1040,11 @@ class World {
             t: `c:${id}`, x: c.x + CREATURE_SIZE / 2, y: c.y + CREATURE_SIZE / 2,
             o: bodyLift(CREATURE_SIZE, 'middle'),
           });
+          // Game audio slice 3: the blow landing, and the creature's pain, at
+          // the same target-anchored point as the impact. Read here for the
+          // same reason the impact is: a one-shot kill removes the creature.
+          pushSfxEvent(this.sfx, weaponHit(sfxKind, w.name, c.x + CREATURE_SIZE / 2, c.y + CREATURE_SIZE / 2));
+          pushSfxEvent(this.sfx, creatureHurt(c.type, c.x + CREATURE_SIZE / 2, c.y + CREATURE_SIZE / 2));
         }
       }
       // SOMET-286: the refusal cue, one per guard the swing actually reached.
@@ -1121,6 +1141,7 @@ class World {
           // Same target-anchored rule as the creature impacts above, read off
           // this player's own box rather than a shared constant.
           impactAt.push({ t: `p:${other.userId}`, x: ocx, y: ocy, o: bodyLift(other.height, 'middle') });
+          pushSfxEvent(this.sfx, weaponHit(sfxKind, w.name, ocx, ocy)); // game audio slice 3
           // Survivors only -- a player at <=0 hp is picked up by
           // resolveDeaths() and respawned elsewhere; shoving first would move
           // a position respawn is about to overwrite anyway. Written straight
@@ -1216,6 +1237,10 @@ class World {
     // spent by server.js before attack() runs, so one shot costs one arrow
     // however many projectiles leave the bow.
     spendResources(p, w);
+    // Game audio slice 3: one fire sound per volley, like the one cost above.
+    // `w` (not shotWeapon) is the weapon as equipped, stone fields included,
+    // which is what attackKindOf keys on.
+    pushSfxEvent(this.sfx, weaponUse(w, userId, cx, cy));
 
     // SOMET-521. This volley's weapon, adjusted by the tree's projectile rules.
     // Built ONCE and shared by every shot: `w` is the shared in-memory catalog
@@ -1375,6 +1400,14 @@ class World {
 
     const kills = [];
     const pacifiedFrom = charmerOf(p, this.now);
+    // SOMET-592 (I3): every creature this cast damaged, snapshotted BEFORE
+    // the damage (a kill removes it from the sim), and, for a radial AoE,
+    // the blast centre. Turned into `hit`/`hurt` sound events at the end.
+    const struck = [];
+    let aoeCentre = null;
+    const strike = (c) => ({
+      id: c.id, type: c.type, x: c.x + CREATURE_SIZE / 2, y: c.y + CREATURE_SIZE / 2,
+    });
 
     // Special: Blink / Teleport movement
     if (skill.id.includes('blink') || skill.id.includes('teleport') || skill.id.includes('shadow_step')) {
@@ -1388,6 +1421,12 @@ class World {
       const { nx, ny } = normalizeAim(ax, ay, p.facing);
       const reach = Math.max(85, (Number(skill.range) || 85) * 1.25);
       const arc = Math.PI * 0.75;
+      // The same target set applyMeleeArc resolves, read before it can
+      // remove a kill.
+      for (const id of this.creatures.meleeArcTargets(px, py, nx, ny, reach, arc, pacifiedFrom)) {
+        const c = this.creatures.get(id);
+        if (c) struck.push(strike(c));
+      }
       for (let h = 0; h < hitCount; h++) {
         const killed = this.creatures.applyMeleeArc(
           px, py, nx, ny, reach, arc, damage, element, this.now + h * 40, userId,
@@ -1443,6 +1482,7 @@ class World {
 
             // In cone (within +/- 40 deg) OR point-blank in front of archer (dist <= 85)
             if (angleDiff <= 0.70 || dist <= 85) {
+              struck.push(strike(c));
               for (let h = 0; h < hitCount; h++) {
                 const died = this.creatures.damageCreatureById(c.id, damage, element, this.now + h * 30, playerKey(userId));
                 if (died && !kills.some(k => k.id === c.id)) {
@@ -1457,6 +1497,7 @@ class World {
         // Radial spells, Frost Nova (centered on caster px, py), Rain of Arrows, and targeted AoEs
         const aoeCenterX = isFrostNova ? px : targetX;
         const aoeCenterY = isFrostNova ? py : targetY;
+        aoeCentre = { x: aoeCenterX, y: aoeCenterY };
 
         for (let h = 0; h < hitCount; h++) {
           for (const c of this.creatures.all()) {
@@ -1464,6 +1505,7 @@ class World {
             const cy = c.y + CREATURE_SIZE / 2;
             const dist = Math.hypot(cx - aoeCenterX, cy - aoeCenterY);
             if (dist <= aoeRadius) {
+              if (!struck.some((x) => x.id === c.id)) struck.push(strike(c));
               const died = this.creatures.damageCreatureById(c.id, damage, element, this.now + h * 40, playerKey(userId));
               if (died && !kills.some(k => k.id === c.id)) {
                 kills.push({ id: c.id, killerUserId: userId });
@@ -1509,6 +1551,22 @@ class World {
       });
     }
 
+    // Game audio slice 3: a cast that got this far happened; heard at the
+    // caster's position when it began (px/py, before any blink moved them).
+    pushSfxEvent(this.sfx, skillUse(skill, userId, px, py));
+    // SOMET-592 (I3): the landing and the victims' pain, after the cast's own
+    // `use`. A radial AoE is ONE `hit` at its centre (the detonation rule); a
+    // melee arc or cone is one `hit` per landed target. A creature that died
+    // already has its `death` (CreatureSim._removeKilled), so it gets no
+    // `hurt` too -- one creature, one sound per hit.
+    const sfxKind = skillAttackKind(skill);
+    const sfxSource = `skill:${skill.id}`;
+    if (aoeCentre && struck.length) pushSfxEvent(this.sfx, weaponHit(sfxKind, sfxSource, aoeCentre.x, aoeCentre.y));
+    const killedIds = new Set(kills.map((k) => k.id));
+    for (const t of struck) {
+      if (!aoeCentre) pushSfxEvent(this.sfx, weaponHit(sfxKind, sfxSource, t.x, t.y));
+      if (!killedIds.has(t.id)) pushSfxEvent(this.sfx, creatureHurt(t.type, t.x, t.y));
+    }
     return { ok: true, kills };
   }
 
@@ -1562,6 +1620,22 @@ class World {
       }
     }
     return died;
+  }
+
+  // Take every `sfx` event produced since the last drain -- this world's own
+  // plus its creature and projectile sims' -- and clear all three buffers in
+  // one step, so no caller can read them and forget to clear. server.js calls
+  // this once per tick for the frame's `sfx` list. The result is capped at
+  // SFX_CAP like each buffer; a sim double without a buffer contributes none.
+  drainSfx() {
+    const out = this.sfx;
+    this.sfx = [];
+    for (const sim of [this.creatures, this.projectiles]) {
+      if (!sim || !Array.isArray(sim.sfx) || sim.sfx.length === 0) continue;
+      for (const ev of sim.sfx) pushSfxEvent(out, ev);
+      sim.sfx = [];
+    }
+    return out;
   }
 
   snapshot() {

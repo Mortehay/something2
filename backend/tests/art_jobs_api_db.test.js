@@ -7,6 +7,7 @@ const { app, __setPool } = require('../src/index.js');
 const queue = require('../src/services/artJobQueue.js');
 const dispatcher = require('../src/services/artDispatcher.js');
 const cs = require('../src/services/catalogSubjects.js');
+const remote = require('../src/services/remoteImageProvider.js');
 const { withAdvisoryLock, ART_JOBS_LOCK_KEY } = require('./helpers/advisoryLock.js');
 
 // SOMET-540. The admin surface SOMET-538's table will drive.
@@ -185,27 +186,32 @@ lockedTest('queueing rejects an empty selection and an unknown kind', async (t, 
 // never fires would pass that test while the default button silently 400'd.
 // That is exactly what the browser showed before this was fixed.
 lockedTest('omitting provider_id falls back to the ACTIVE provider', async (t, pool, providerId) => {
-  const prev = await pool.query('SELECT id FROM ai_providers WHERE is_active');
-  await pool.query('UPDATE ai_providers SET is_active = false WHERE is_active');
+  // Image modality only: an active AUDIO provider on the same database (one
+  // active per modality) is not this test's business and must survive it.
+  // Restored in a finally, not a t.after: freshPool's t.after was registered
+  // first, runs first and ends the pool, so a restore hook registered here
+  // failed silently and left the previously active provider deactivated.
+  const prev = await pool.query("SELECT id FROM ai_providers WHERE is_active AND modality = 'image'");
+  await pool.query("UPDATE ai_providers SET is_active = false WHERE is_active AND modality = 'image'");
   await pool.query('UPDATE ai_providers SET is_active = true WHERE id = $1', [providerId]);
-  t.after(async () => {
+  try {
+    const keys = (await cs.SUBJECTS.skill.list()).slice(0, 2).map((s) => s.key);
+    const res = await request(app).post('/api/art-jobs').set(...AUTH)
+      .send({ kind: 'skill', keys });          // no provider_id at all
+    assert.equal(res.status, 201, JSON.stringify(res.body));
+    assert.equal(res.body.queued, 2);
+
+    const { rows } = await pool.query('SELECT DISTINCT provider_id FROM art_jobs');
+    assert.deepEqual(rows.map((r) => r.provider_id), [providerId],
+      'the jobs must carry the active provider, not null');
+  } finally {
     await pool.query('UPDATE ai_providers SET is_active = false WHERE id = $1', [providerId])
       .catch(() => {});
     for (const r of prev.rows) {
       await pool.query('UPDATE ai_providers SET is_active = true WHERE id = $1', [r.id])
         .catch(() => {});
     }
-  });
-
-  const keys = (await cs.SUBJECTS.skill.list()).slice(0, 2).map((s) => s.key);
-  const res = await request(app).post('/api/art-jobs').set(...AUTH)
-    .send({ kind: 'skill', keys });          // no provider_id at all
-  assert.equal(res.status, 201, JSON.stringify(res.body));
-  assert.equal(res.body.queued, 2);
-
-  const { rows } = await pool.query('SELECT DISTINCT provider_id FROM art_jobs');
-  assert.deepEqual(rows.map((r) => r.provider_id), [providerId],
-    'the jobs must carry the active provider, not null');
+  }
 });
 
 lockedTest('GET /api/art-jobs reports the queue by state', async (t, pool, providerId) => {
@@ -237,12 +243,55 @@ lockedTest('dispatch refuses a below-native provider with an actionable 400',
       `UPDATE ai_providers SET request_template = '{"width":512,"height":512}'::jsonb
         WHERE id = $1`, [providerId],
     );
+    const skills = (await cs.SUBJECTS.skill.list()).slice(0, 2);
+    const [tile] = await cs.SUBJECTS.tile.list(pool);
+    await queue.enqueue(pool, [
+      ...skills.map((s) => ({ kind: 'skill', key: s.key })),
+      { kind: 'tile', key: tile.key },
+    ], { backend: 'connector', providerId });
+
     const res = await request(app).post('/api/art-jobs/dispatch').set(...AUTH)
       .send({ provider_id: providerId });
     assert.equal(res.status, 400);
     assert.match(res.body.error, /1024px minimum/);
     assert.match(res.body.error, /request_template/, 'the message must say how to fix it');
+    // WHICH rows block it, so the console can offer to drop exactly those.
+    // The tile is exempt and must not be listed -- dropping it would lose
+    // correct work.
+    assert.deepEqual(res.body.blocked.map(({ kind, provider_id: pid, width, count }) =>
+      ({ kind, pid, width, count })), [{ kind: 'skill', pid: providerId, width: 512, count: 2 }]);
     assert.equal(dispatcher.runStatus().running, false, 'nothing may have started');
+  });
+
+// The batch provider is only the FALLBACK for unpinned rows. Refusing a 512
+// batch provider outright blocked a queue whose objects were all pinned to a
+// 1024 provider -- the refusal named a provider no queued object would use.
+lockedTest('a 512 batch provider is not refused when queued objects are pinned elsewhere',
+  async (t, pool, providerId) => {
+    const skills = (await cs.SUBJECTS.skill.list()).slice(0, 2);
+    await queue.enqueue(pool, skills.map((s) => ({ kind: 'skill', key: s.key })),
+      { backend: 'connector', providerId });                     // pinned to 1024
+    const small = { id: providerId + 100000, name: 'terrain', request_template: { width: 512, height: 512 } };
+    assert.equal(await dispatcher.objectSizeRefusal(pool, small), null);
+
+    // Unpinned rows DO fall back to the batch provider, and are refused.
+    await pool.query('UPDATE art_jobs SET provider_id = NULL');
+    const err = await dispatcher.objectSizeRefusal(pool, small);
+    assert.ok(err, 'unpinned objects on a 512 batch provider must be refused');
+    assert.deepEqual(err.blocked.map((b) => [b.kind, b.provider_id, b.provider_name]),
+      [['skill', null, 'terrain']]);
+  });
+
+lockedTest('dispatch with nothing queued is not refused for the provider size',
+  async (t, pool, providerId) => {
+    await pool.query(
+      `UPDATE ai_providers SET request_template = '{"width":512,"height":512}'::jsonb
+        WHERE id = $1`, [providerId],
+    );
+    t.after(() => { dispatcher.stopDrain(); dispatcher.__resetRun(); });
+    const res = await request(app).post('/api/art-jobs/dispatch').set(...AUTH)
+      .send({ provider_id: providerId });
+    assert.equal(res.status, 202);
   });
 
 lockedTest('dispatch requires a provider that exists', async (t) => {
@@ -394,6 +443,158 @@ lockedTest('clear also takes claimed rows that no drain owns', async (t, pool, p
   assert.equal(res.body.stats.queued, undefined, 'nothing pending may survive');
 });
 
+// THE "UNSELECT" ACTION behind a size refusal: drop only the blocked groups so
+// the rest of the queue can run. A tile on the same provider, a skill on a
+// different one and a CLAIMED skill all survive.
+lockedTest('clear with groups drops only the queued rows of those groups',
+  async (t, pool, providerId) => {
+    dispatcher.__resetRun();
+    const skills = (await cs.SUBJECTS.skill.list()).slice(0, 4);
+    const [tile] = await cs.SUBJECTS.tile.list(pool);
+    await queue.enqueue(pool, [
+      ...skills.map((s) => ({ kind: 'skill', key: s.key })),
+      { kind: 'tile', key: tile.key },
+    ], { backend: 'connector', providerId });
+    // One skill on a different provider (unpinned), one skill claimed.
+    await pool.query(
+      `UPDATE art_jobs SET provider_id = NULL WHERE subject_key = $1`, [skills[3].key]);
+    await pool.query(
+      `UPDATE art_jobs SET state = 'running' WHERE subject_key = $1`, [skills[2].key]);
+
+    const res = await request(app).post('/api/art-jobs/clear').set(...AUTH)
+      .send({ groups: [{ kind: 'skill', provider_id: providerId }] });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.cleared, 2);
+    const { rows } = await pool.query(
+      'SELECT subject_kind, subject_key, state FROM art_jobs ORDER BY subject_kind, subject_key');
+    assert.deepEqual(rows.map((r) => r.subject_key).sort(),
+      [skills[2].key, skills[3].key, tile.key].sort());
+
+    // A NULL group matches the unpinned row, and only it.
+    const nul = await request(app).post('/api/art-jobs/clear').set(...AUTH)
+      .send({ groups: [{ kind: 'skill', provider_id: null }] });
+    assert.equal(nul.body.cleared, 1);
+  });
+
+lockedTest('clear rejects malformed groups rather than clearing everything',
+  async (t, pool, providerId) => {
+    const [skill] = await cs.SUBJECTS.skill.list();
+    await queue.enqueue(pool, [{ kind: 'skill', key: skill.key }],
+      { backend: 'connector', providerId });
+    for (const groups of [[], [{ kind: 'skill' }], [{ kind: 3, provider_id: 1 }]]) {
+      const res = await request(app).post('/api/art-jobs/clear').set(...AUTH).send({ groups });
+      assert.equal(res.status, 400, JSON.stringify(groups));
+    }
+    const { rows } = await pool.query("SELECT count(*)::int n FROM art_jobs WHERE state='queued'");
+    assert.equal(rows[0].n, 1, 'a bad request must delete nothing');
+  });
+
+// SOMET-594. A second, 512 provider for the cases that need both sizes at once.
+async function smallProvider(t, pool) {
+  const { rows } = await pool.query(
+    `INSERT INTO ai_providers (name, base_url, request_template, model)
+     VALUES ($1, 'http://stub.invalid/sdapi/v1/txt2img', '{"width":512,"height":512}'::jsonb, 'stub')
+     RETURNING id`, [`zzTestSmall ${process.pid} ${Date.now()}`]);
+  t.after(() => pool.query('DELETE FROM ai_providers WHERE id = $1', [rows[0].id]).catch(() => {}));
+  return rows[0].id;
+}
+
+async function drainOut() {
+  for (let i = 0; i < 80 && dispatcher.runStatus().running; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((r) => { setTimeout(r, 100); });
+  }
+}
+
+// THE REPORTED FAILURE: 512 items queued while a 1024 batch ran stopped the
+// whole drain on its next pass. It must skip them and draw the rest.
+lockedTest('a drain SKIPS a blocked group queued mid-batch instead of stopping',
+  async (t, pool, providerId) => {
+    const small = await smallProvider(t, pool);
+    const [good, bad] = (await cs.SUBJECTS.skill.list()).slice(0, 2);
+    await queue.enqueue(pool, [{ kind: 'skill', key: good.key }], { backend: 'connector', providerId });
+    await queue.enqueue(pool, [{ kind: 'skill', key: bad.key }], { backend: 'connector', providerId: small });
+
+    dispatcher.__resetRun();
+    dispatcher.startDrain(pool, {
+      provider: { id: providerId, name: 'big', request_template: { width: 1024, height: 1024 } },
+      generate: async (registryId) => {
+        remote.setJob(registryId, { status: 'done', result: { image_key: 'zzTest/x.png', frames: 1 } });
+      },
+      writeArt: async () => {},
+    });
+    t.after(() => { dispatcher.stopDrain(); dispatcher.__resetRun(); });
+    await drainOut();
+
+    const run = dispatcher.runStatus();
+    assert.equal(run.running, false);
+    assert.equal(run.error, null, 'a blocked group must not stop the batch');
+    assert.deepEqual(run.blocked.map((b) => [b.kind, b.provider_id, b.count]), [['skill', small, 1]]);
+    const { rows } = await pool.query(
+      'SELECT subject_key, state, attempts FROM art_jobs WHERE provider_id = $1', [small]);
+    assert.deepEqual(rows.map((r) => [r.subject_key, r.state, r.attempts]), [[bad.key, 'queued', 0]],
+      'the blocked job is left queued and untried');
+    const { rows: g } = await pool.query(
+      'SELECT state FROM art_jobs WHERE provider_id = $1', [providerId]);
+    assert.deepEqual(g.map((r) => r.state), ['done'], 'the 1024 job was drawn');
+    await pool.query("DELETE FROM art_generations WHERE image_key = 'zzTest/x.png'").catch(() => {});
+  });
+
+// Refused at the source: an object queued on a 512 provider can never be drawn.
+lockedTest('queueing an object kind on a 512 provider is refused; a tile is not',
+  async (t, pool, providerId) => {
+    const small = await smallProvider(t, pool);
+    const [item] = await cs.SUBJECTS.item.list(pool);
+    const res = await request(app).post('/api/art-jobs').set(...AUTH)
+      .send({ kind: 'item', keys: [item.key], provider_id: small });
+    assert.equal(res.status, 400);
+    assert.equal(res.body.code, 'PROVIDER_TOO_SMALL');
+    assert.match(res.body.error, /needs a 1024px provider/);
+    const { rows } = await pool.query('SELECT count(*)::int n FROM art_jobs');
+    assert.equal(rows[0].n, 0, 'nothing may be queued');
+
+    const [tile] = await cs.SUBJECTS.tile.list(pool);
+    const ok = await request(app).post('/api/art-jobs').set(...AUTH)
+      .send({ kind: 'tile', keys: [tile.key], provider_id: small });
+    assert.equal(ok.status, 201, 'tiles are drawn at 512 by design');
+
+    const big = await request(app).post('/api/art-jobs').set(...AUTH)
+      .send({ kind: 'item', keys: [item.key], provider_id: providerId });
+    assert.equal(big.status, 201);
+  });
+
+// The skipped groups can be removed WITHOUT stopping the batch: the drain never
+// claims them, so a scoped clear touches nothing a worker holds.
+lockedTest('a scoped clear is allowed while a batch runs, and un-reports the group',
+  async (t, pool, providerId) => {
+    const small = await smallProvider(t, pool);
+    const skills = (await cs.SUBJECTS.skill.list()).slice(0, 4);
+    await queue.enqueue(pool, skills.slice(0, 3).map((s) => ({ kind: 'skill', key: s.key })),
+      { backend: 'connector', providerId });
+    await queue.enqueue(pool, [{ kind: 'skill', key: skills[3].key }],
+      { backend: 'connector', providerId: small });
+
+    dispatcher.__resetRun();
+    dispatcher.startDrain(pool, {
+      provider: { id: providerId, name: 'big', request_template: { width: 1024, height: 1024 } },
+      generate: async () => new Promise((r) => { setTimeout(r, 1500); }),
+      concurrency: 1,
+    });
+    t.after(() => { dispatcher.stopDrain(); dispatcher.__resetRun(); });
+    for (let i = 0; i < 30 && !dispatcher.runStatus().blocked.length; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((r) => { setTimeout(r, 50); });
+    }
+    assert.equal(dispatcher.runStatus().blocked.length, 1);
+
+    const res = await request(app).post('/api/art-jobs/clear').set(...AUTH)
+      .send({ groups: [{ kind: 'skill', provider_id: small }] });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.cleared, 1);
+    assert.deepEqual(dispatcher.runStatus().blocked, [], 'removed groups stop being offered');
+    assert.equal(dispatcher.runStatus().running, true, 'the batch keeps running');
+  });
+
 // Deleting a row a worker is mid-generation on would have the drain resolve a
 // job that no longer exists.
 lockedTest('clear is REFUSED while a batch is running', async (t, pool, providerId) => {
@@ -504,6 +705,37 @@ lockedTest('a provider failure requeues plainly, keeping its seed', async (t, po
   assert.equal(String(after.rows[0].seed), String(before.rows[0].seed),
     'a provider failure keeps its seed -- the image was never the problem');
 });
+
+// SOMET-595. Every failed retry leaves its own row, so one subject can hold
+// several failed rows. Requeueing them all tripped art_jobs_one_live_per_subject
+// on the second: a 500 halfway through, the earlier rows already requeued.
+lockedTest('a subject with several failed rows is requeued ONCE, from its newest row',
+  async (t, pool) => {
+    const err = 'provider answered 422: cutout removed 97.9% of the image';
+    const ids = [];
+    for (let i = 0; i < 3; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      const [job] = await queue.enqueue(pool, [{ kind: 'skill', key: 'rq_dup' }], { backend: 'connector' });
+      // eslint-disable-next-line no-await-in-loop
+      await pool.query(
+        `UPDATE art_jobs SET state='failed', attempts=3, last_error=$2,
+            updated_at = now() - make_interval(mins => $3) WHERE id=$1`, [job.id, err, 10 - i]);
+      ids.push(job.id);
+    }
+    const [other] = await queue.enqueue(pool, [{ kind: 'skill', key: 'rq_single' }], { backend: 'connector' });
+    await pool.query(`UPDATE art_jobs SET state='failed', attempts=3, last_error=$2 WHERE id=$1`,
+      [other.id, err]);
+
+    const res = await request(app).post('/api/art-jobs/requeue').set(...AUTH)
+      .send({ kind: 'content_cutout', reseed: true });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(res.body.requeued, 2, 'one per subject');
+    const { rows } = await pool.query(
+      "SELECT id, state FROM art_jobs WHERE subject_key = 'rq_dup' ORDER BY id");
+    assert.deepEqual(rows.map((r) => r.state), ['failed', 'failed', 'queued'],
+      'the NEWEST row is the one requeued; the older two stay as history');
+    assert.equal(rows[2].id, ids[2]);
+  });
 
 // SOMET-551. A failed row whose subject already has a live job is SUPERSEDED.
 //
@@ -622,4 +854,42 @@ lockedTest('the listing says which kinds take a description, and it matches the 
           .set(...AUTH);
       }
     }
+  });
+
+// SOMET-601. A failed row whose subject has SINCE succeeded is history, not an
+// outstanding failure. The panel listed 82 of them on the dev DB, every one
+// already drawn, and a reseed of that group would have drawn over good art.
+lockedTest('a failure its subject has since recovered from is neither listed nor requeued',
+  async (t, pool) => {
+    const err = 'image x.png was generated but could not be recorded: the provider returned '
+      + 'an image that is only 24.6% transparent (floor 25%); the backdrop was not keyed out';
+    const [old] = await queue.enqueue(pool, [{ kind: 'skill', key: 'rq_recovered' }],
+      { backend: 'connector' });
+    await pool.query(`UPDATE art_jobs SET state='failed', attempts=3, last_error=$2,
+        updated_at = now() - interval '10 minutes' WHERE id=$1`, [old.id, err]);
+    const [win] = await queue.enqueue(pool, [{ kind: 'skill', key: 'rq_recovered' }],
+      { backend: 'connector' });
+    await pool.query("UPDATE art_jobs SET state='done' WHERE id=$1", [win.id]);
+    // A control that has NOT recovered, so an empty answer cannot pass by accident.
+    const [open] = await queue.enqueue(pool, [{ kind: 'skill', key: 'rq_still_failed' }],
+      { backend: 'connector' });
+    await pool.query(`UPDATE art_jobs SET state='failed', attempts=3, last_error=$2 WHERE id=$1`,
+      [open.id, err]);
+
+    const list = await request(app).get('/api/art-jobs').set(...AUTH);
+    assert.equal(list.status, 200);
+    const keys = list.body.failures.flatMap((g) => g.subjects.map((x) => x.key));
+    assert.deepEqual(keys, ['rq_still_failed'], 'only the outstanding failure is listed');
+
+    const res = await request(app).post('/api/art-jobs/requeue').set(...AUTH)
+      .send({ kind: 'content_unkeyed', reseed: true });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(res.body.requeued, 1);
+    const { rows } = await pool.query(
+      "SELECT subject_key, state FROM art_jobs WHERE id IN ($1, $2) ORDER BY subject_key",
+      [old.id, open.id]);
+    assert.deepEqual(rows, [
+      { subject_key: 'rq_recovered', state: 'failed' },
+      { subject_key: 'rq_still_failed', state: 'queued' },
+    ], 'the recovered subject must not be queued to draw over its art');
   });

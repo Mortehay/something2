@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   batchProgress, formatDuration, formatElapsed, elapsedSince, shouldPollQueue,
-  partitionInFlight, claimedAgo, previewNames,
+  partitionInFlight, claimedAgo, previewNames, blockedSummary,
   IDLE, IDLE_QUEUED, RUNNING, FINISHED,
 } from '../artProgress.js';
 
@@ -281,5 +281,33 @@ describe('naming the subjects that are waiting', () => {
   it('survives an absent queue', () => {
     expect(previewNames(undefined, 0)).toEqual({ names: [], more: 0 });
     expect(previewNames(null, 5).names).toEqual([]);
+  });
+});
+
+describe('blockedSummary', () => {
+  const blocked = [
+    { kind: 'item', provider_id: 4, provider_name: 'desktop gpu', width: 512, height: 512, count: 279 },
+    { kind: 'skill', provider_id: null, provider_name: null, width: 512, height: null, count: 3 },
+  ];
+
+  it('totals the rows and names each group with its size', () => {
+    const s = blockedSummary(blocked);
+    expect(s.total).toBe(282);
+    expect(s.lines).toEqual([
+      '279 queued item on "desktop gpu" (512×512)',
+      '3 queued skill on provider (batch) (512×?)',
+    ]);
+  });
+
+  // The clear body must carry the NULL through: an unpinned group is matched
+  // with IS NOT DISTINCT FROM, and dropping the key would be a 400.
+  it('builds the clear body from the same list, keeping null provider ids', () => {
+    expect(blockedSummary(blocked).groups).toEqual([
+      { kind: 'item', provider_id: 4 }, { kind: 'skill', provider_id: null },
+    ]);
+  });
+
+  it('is empty for a refusal without groups', () => {
+    expect(blockedSummary(undefined)).toEqual({ total: 0, lines: [], groups: [] });
   });
 });

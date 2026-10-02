@@ -4,6 +4,44 @@ import { authHeaders, apiFetch } from "./src/js/net/auth.js";
 import { API_URL } from "../../config.js";
 const KEY = ["ai-providers"];
 
+// SOMET-590 game audio slice 1: one active provider PER MODALITY (the backend
+// enforces this with a non-deferrable per-modality unique index), so picking
+// "the" active provider is meaningless without saying which modality wants
+// it. A row without `modality` predates the column and counts as 'image' --
+// the only kind that existed before audio providers did.
+//
+// Exported (not just used inline) so it is unit-testable without mounting
+// the query hook, and so the one rule -- an image picker must never receive
+// the audio provider -- has a single place it can be checked.
+export function pickActive(providers, modality) {
+  return (providers || []).find((p) => p.is_active && p.enabled !== false
+    && (p.modality || 'image') === modality) || null;
+}
+
+// SOMET-591 (verification fix): the Audio admin's generation controls (Suggest,
+// Generate, Queue N jobs, Start) need an active audio provider; everything else
+// (upload, library, bind-from-library, remove, volume/weight, retry/clear/stop,
+// the misses list) works without one and must stay usable on a box with no GPU
+// provider configured yet.
+//
+// Pure so it's testable without mounting useAiProviders(), and so AudioAdmin
+// and SubjectSounds (which derives this independently for MapsAdmin/BiomesAdmin,
+// see SubjectSounds.jsx) apply the exact same rule:
+// - a query error is its own banner ("could not load", not "none exists") and
+//   never disables generation -- we don't actually know there isn't one
+// - still loading defaults to enabled, so a slow fetch doesn't flash every
+//   button disabled for a moment before re-enabling them
+// - only a settled fetch with no active audio provider disables generation
+export function audioProviderState({ activeAudioProvider, isLoading, error }) {
+  if (error) {
+    return { canGenerate: true, banner: 'error' };
+  }
+  if (!isLoading && !activeAudioProvider) {
+    return { canGenerate: false, banner: 'none' };
+  }
+  return { canGenerate: true, banner: null };
+}
+
 // SOMET-330. Follows useBiomes.js: one query hook plus a mutation factory.
 //
 // The list is admin-only server-side, so this hook is only mounted from the
@@ -35,7 +73,13 @@ export function useAiProviders() {
     // The one the generation path will use by default. Disabled profiles are
     // excluded here for the same reason the backend excludes them: an
     // active-but-disabled provider is not the effective default.
-    activeProvider: (data || []).find((p) => p.is_active && p.enabled !== false) || null,
+    //
+    // Image-only: every image picker in this codebase (ProviderChoice,
+    // ProviderPinField, TypeProviderPinChoice, the Art console) reads
+    // `activeProvider` and must never be handed an audio profile. Audio
+    // consumers read `activeAudioProvider` instead.
+    activeProvider: pickActive(data, 'image'),
+    activeAudioProvider: pickActive(data, 'audio'),
   };
 }
 

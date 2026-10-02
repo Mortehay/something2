@@ -65,9 +65,11 @@ class WorldGenError extends Error {
 // generate worlds because no IMAGE provider is active would be an unrelated
 // rule enforced in the wrong place.
 async function resolveWorldService(db) {
+  // The audio profile points at the same box with a different key; the world
+  // service is reached through the image profile.
   const r = await db.query(
     `SELECT * FROM ai_providers
-      WHERE enabled AND auth_token IS NOT NULL AND base_url IS NOT NULL
+      WHERE enabled AND modality = 'image' AND auth_token IS NOT NULL AND base_url IS NOT NULL
       ORDER BY is_active DESC, id ASC
       LIMIT 1`,
   );

@@ -267,7 +267,7 @@ function cancelRun() {
 async function drive(run, opts, deps) {
   const { pool } = run;
   const loadProvider = deps.loadProvider
-    || ((id) => aiProviders.loadProviderWithSecret(pool, id));
+    || ((id) => aiProviders.loadImageProviderWithSecret(pool, id));
   const runSubject = deps.regenerateSubject || regenerateSubject;
 
   const providerCache = new Map();

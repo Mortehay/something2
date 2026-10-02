@@ -380,7 +380,10 @@ async function defaultWriteArt(db, job, imageKey, {
     const profile = bytes && alphaProfile(bytes);
     if (profile && profile.transparentPct < MIN_TRANSPARENT_PCT()) {
       throw new Error(`the provider returned an image that is only `
-        + `${profile.transparentPct.toFixed(0)}% transparent (floor `
+        // Floored to one decimal, never rounded: toFixed(0) turned 24.6 into
+        // "25% (floor 25%)", which reads as the guard refusing a value that
+        // met it (SOMET-601). Flooring keeps the shown value below the floor.
+        + `${(Math.floor(profile.transparentPct * 10) / 10).toFixed(1)}% transparent (floor `
         + `${MIN_TRANSPARENT_PCT()}%); the backdrop was not keyed out, so this `
         + 'would render as a coloured square rather than an icon');
     }
@@ -420,19 +423,37 @@ async function objectSizeRefusal(db, provider, subjects = catalogSubjects, loadP
   // pin, so the provider a subject will use is not necessarily the one this
   // batch was started with.
   const { rows } = await db.query(
-    `SELECT DISTINCT subject_kind, provider_id FROM art_jobs WHERE state = 'queued'`);
+    `SELECT subject_kind, provider_id, count(*)::int AS n
+       FROM art_jobs WHERE state = 'queued'
+      GROUP BY subject_kind, provider_id ORDER BY subject_kind, provider_id`);
+  // EVERY blocking group, not the first. The console offers to drop exactly
+  // these rows so the rest of the queue can run, and a refusal that named one
+  // group at a time would have the admin drop, retry and be refused again.
+  const blocked = [];
+  let first = null;
   for (const r of rows) {
     const reg = subjects.registryFor(r.subject_kind);
     if (!reg || reg.generationKind !== 'object') continue;   // tiles are exempt
     const p = await resolveJobProvider(db, r.provider_id, provider, loadProvider);
     const refusal = providerSizeRefusal(p);
-    if (refusal) {
-      const err = new Error(`${refusal} (queued ${r.subject_kind} jobs use it)`);
-      err.code = 'PROVIDER_TOO_SMALL';
-      return err;
-    }
+    if (!refusal) continue;
+    if (!first) first = `${refusal} (queued ${r.subject_kind} jobs use it)`;
+    blocked.push({
+      kind: r.subject_kind,
+      // The row's own value, NULL included: that is what a scoped clear has to
+      // match. An unpinned row resolves to the batch provider, named here.
+      provider_id: r.provider_id,
+      provider_name: p && p.name ? p.name : null,
+      width: templatePx(p, 'width'),
+      height: templatePx(p, 'height'),
+      count: r.n,
+    });
   }
-  return null;
+  if (!first) return null;
+  const err = new Error(first);
+  err.code = 'PROVIDER_TOO_SMALL';
+  err.blocked = blocked;
+  return err;
 }
 
 // The provider a job will actually be sent to: its own pin when it has one,
@@ -445,12 +466,12 @@ const providerCache = new WeakMap();
 async function resolveJobProvider(db, providerId, batchProvider, loadProvider) {
   if (!Number.isInteger(providerId)) return batchProvider;
   if (batchProvider && batchProvider.id === providerId) return batchProvider;
-  const load = loadProvider || aiProviders.loadProviderWithSecret;
+  const load = loadProvider || aiProviders.loadImageProviderWithSecret;
   let cache = providerCache.get(db);
   if (!cache) { cache = new Map(); providerCache.set(db, cache); }
   if (!cache.has(providerId)) cache.set(providerId, await load(db, providerId));
   // A pin whose provider was deleted (ON DELETE SET NULL cannot help once the
-  // row is gone) degrades to the batch's rather than failing the job -- the
+  // row is gone), or that names the audio profile, degrades to the batch's rather than failing the job -- the
   // same choice resolveGenerationTarget makes for a dangling pin.
   return cache.get(providerId) || batchProvider;
 }
@@ -492,18 +513,33 @@ async function dispatch(db, {
   subjects = catalogSubjects,
   loadProvider,
   deps = {},
+  skipBlocked = false,
+  onBlocked = null,
+  shouldStop = null,
 } = {}) {
   // Checked BEFORE claiming, so a misconfigured provider costs nothing and
   // leaves the queue untouched rather than burning an attempt on every row.
   // Skipped when the caller builds its own requests -- it is then not this
   // module's business what gets sent.
+  //
+  // `skipBlocked` (SOMET-594) is the running drain's mode: a 512 group queued
+  // MID-BATCH used to stop the whole drain, taking every good 1024 subject
+  // down with it. The drain now leaves the blocked groups queued and draws the
+  // rest; the refusal still stands for them, reported as `blocked`.
+  let blocked = [];
   if (!buildRequest) {
     const err = await objectSizeRefusal(db, provider, subjects, loadProvider);
-    if (err) throw err;
+    if (err && !skipBlocked) throw err;
+    if (err) blocked = err.blocked;
   }
+  // Reported BEFORE the pass runs: a pass is `limit` generations long, and a
+  // status that only learned of a blocked group at its end would hide the
+  // group -- and the action to remove it -- for minutes.
+  if (onBlocked) onBlocked(blocked);
+  const exclude = blocked.map((b) => ({ kind: b.kind, provider_id: b.provider_id }));
 
-  const claimed = await queue.claim(db, limit);
-  if (claimed.length === 0) return { claimed: 0, done: 0, failed: 0, results: [] };
+  const claimed = await queue.claim(db, limit, { exclude });
+  if (claimed.length === 0) return { claimed: 0, done: 0, failed: 0, results: [], blocked };
 
   const resolveSubject = subjectResolver(db, subjects);
   const results = [];
@@ -514,12 +550,17 @@ async function dispatch(db, {
   // two seconds, and BREAKER_TRIP=3 tripped at ten every time. The guard was
   // real, configured, and disarmed by the granularity of the thing it guarded.
   let aborted = false;
+  // Stop finishes the subject in flight and releases the rest. Without this
+  // the drain read its stop flag only between passes, so Stop still drew every
+  // remaining claimed subject -- up to nine at limit 10 -- one after another.
+  let stopped = false;
   // A fixed pool of workers pulling from a shared cursor, rather than slicing
   // the list into equal chunks: subjects do not take equal time, and chunking
   // would leave one worker finishing long after the others idled.
   const workers = Array.from({ length: Math.max(1, concurrency) }, async () => {
     for (;;) {
-      if (aborted) return;
+      if (aborted || stopped) return;
+      if (shouldStop && shouldStop()) { stopped = true; return; }
       const i = cursor;
       cursor += 1;
       if (i >= claimed.length) return;
@@ -544,7 +585,7 @@ async function dispatch(db, {
   // stamped every one of them, so without this the breaker would strand
   // `limit - processed` jobs in `running` for an hour -- trading the failure
   // this fix prevents for a different one.
-  if (aborted) {
+  if (aborted || stopped) {
     const resolved = new Set(results.map((r) => r.id));
     await queue.release(db, claimed.filter((j) => !resolved.has(j.id)).map((j) => j.id));
   }
@@ -554,6 +595,7 @@ async function dispatch(db, {
     done: results.filter((r) => r.ok).length,
     failed: results.filter((r) => !r.ok).length,
     results,
+    blocked,
   };
 }
 
@@ -596,6 +638,10 @@ function runStatus() {
     // null unless the drain is currently sitting out a retry backoff.
     waiting_until: run.waitingUntil || null,
     error: run.error || null,
+    // SOMET-594. Queued groups this drain is leaving alone because they would
+    // render below the object minimum -- the same shape /dispatch's 400 uses,
+    // so the console offers the same Remove action for them.
+    blocked: run.blocked || [],
   };
 }
 
@@ -616,22 +662,16 @@ function startDrain(db, opts = {}) {
     err.code = 'ALREADY_RUNNING';
     throw err;
   }
-  // The precondition is checked HERE, synchronously, so a misconfigured
-  // provider is a 400 on the request that started it rather than an error
-  // buried in a status poll nobody reads.
-  if (!opts.buildRequest) {
-    const refusal = providerSizeRefusal(opts.provider);
-    if (refusal) {
-      const err = new Error(refusal);
-      err.code = 'PROVIDER_TOO_SMALL';
-      throw err;
-    }
-  }
-
+  // The resolution precondition is NOT checked here against the batch
+  // provider alone: every queued job carries its own provider pin, so a 512
+  // batch provider is correct for a tile batch and irrelevant to a pinned
+  // entity batch. The /dispatch route awaits the queue-aware
+  // objectSizeRefusal before calling this, and dispatch() re-checks each pass
+  // -- skipping, not stopping on, a group that turns up blocked mid-batch.
   run = {
     running: true, stopping: false, startedAt: new Date().toISOString(),
     finishedAt: null, passes: 0, done: 0, failed: 0, error: null,
-    waitingUntil: null,
+    waitingUntil: null, blocked: [],
   };
   // Distinct subjects that have failed on the PROVIDER since the last success.
   // A Set, not a counter: the same subject failing repeatedly says nothing
@@ -647,6 +687,10 @@ function startDrain(db, opts = {}) {
         // provider stops the pass at BREAKER_TRIP instead of after all `limit`
         // claimed jobs have been converted into failures.
         let tripped = false;
+        // What the LAST counted failure was, so the stop message can name it.
+        // SOMET-601: a revoked token tripped this as "looks down", and the
+        // operator went looking for a dead GPU box that was answering fine.
+        let lastCause = null;
         const onResult = (r) => {
           if (r.ok) { brokenSubjects.clear(); return null; }
           // Only PROVIDER-class failures count. A subject whose cutout keyed
@@ -654,22 +698,31 @@ function startDrain(db, opts = {}) {
           // tripping on it would stop a perfectly good batch -- exactly the
           // mistake an external watchdog made here before the distinction
           // existed.
-          if (!failures.classify(r.error).retryable) return null;
+          const cause = failures.classify(r.error);
+          if (!cause.retryable) return null;
+          lastCause = cause;
           brokenSubjects.add(r.subject);
           if (brokenSubjects.size < BREAKER_TRIP()) return null;
           tripped = true;
           return 'stop';
         };
-        const out = await dispatch(db, { ...opts, onResult });
+        const out = await dispatch(db, {
+          ...opts, onResult, skipBlocked: true, onBlocked: (b) => { self.blocked = b; },
+          shouldStop: () => self.stopping,
+        });
         self.passes += 1;
         self.done += out.done;
         self.failed += out.failed;
 
         // THE CIRCUIT BREAKER fired inside the pass; this only reports it.
         if (tripped) {
-          self.error = `stopped after ${brokenSubjects.size} different subjects failed on the `
-            + 'provider in a row -- it looks down rather than the subjects being bad. '
-            + 'Nothing was lost: they are queued and will retry.';
+          self.error = lastCause && lastCause.kind === failures.KINDS.AUTH
+            ? `stopped after ${brokenSubjects.size} different subjects in a row were refused `
+              + 'as unauthorised -- the provider rejected its token. Fix the token under AI '
+              + 'Providers, then start the batch again. Nothing was lost: they are still queued.'
+            : `stopped after ${brokenSubjects.size} different subjects failed on the `
+              + 'provider in a row -- it looks down rather than the subjects being bad. '
+              + 'Nothing was lost: they are queued and will retry.';
           break;
         }
         // SOMET-543. Nothing claimed no longer means the queue is empty: it
@@ -683,7 +736,9 @@ function startDrain(db, opts = {}) {
         // genuinely empty still ends the batch, so enqueueing more remains an
         // explicit act that starts another drain.
         if (out.claimed === 0) {
-          const next = await queue.nextClaimableAt(db);
+          const next = await queue.nextClaimableAt(db, {
+            exclude: self.blocked.map((b) => ({ kind: b.kind, provider_id: b.provider_id })),
+          });
           if (!next) break;
           const waitMs = Math.min(
             Math.max(new Date(next).getTime() - Date.now(), 0),
@@ -709,10 +764,20 @@ function startDrain(db, opts = {}) {
   return runStatus();
 }
 
+// A scoped clear removed these groups: stop reporting them as blocked. Without
+// this a finished drain's status keeps offering to remove rows already gone,
+// and a running one does until its next pass re-checks.
+function forgetBlocked(groups) {
+  if (!run || !Array.isArray(run.blocked) || !Array.isArray(groups)) return;
+  const gone = new Set(groups.map((g) => `${g.kind}|${g.provider_id ?? ''}`));
+  run.blocked = run.blocked.filter((b) => !gone.has(`${b.kind}|${b.provider_id ?? ''}`));
+}
+
 // Tests only: forget the run so one case cannot leave another looking busy.
 function __resetRun() { run = null; }
 
 module.exports.startDrain = startDrain;
 module.exports.stopDrain = stopDrain;
 module.exports.runStatus = runStatus;
+module.exports.forgetBlocked = forgetBlocked;
 module.exports.__resetRun = __resetRun;

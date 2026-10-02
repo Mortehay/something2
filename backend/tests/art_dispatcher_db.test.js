@@ -225,7 +225,7 @@ lockedTest('concurrency runs several at once and every claimed job is resolved',
 
 lockedTest('dispatch on an empty queue is a no-op, not an error', async (t, pool, providerId) => {
   const out = await dispatch(pool, { provider: PROVIDER(providerId), generate: succeed(), buildRequest });
-  assert.deepEqual(out, { claimed: 0, done: 0, failed: 0, results: [] });
+  assert.deepEqual(out, { claimed: 0, done: 0, failed: 0, results: [], blocked: [] });
 });
 
 // --- SOMET-547: the dispatcher must actually RECORD history ----------------
@@ -303,6 +303,82 @@ lockedTest('a drain stops once several DIFFERENT subjects fail on the provider',
       "SELECT count(*)::int AS n FROM art_jobs WHERE state = 'queued' AND subject_key LIKE 'sk_%'",
     );
     assert.ok(rows[0].n > 0, 'stopping must leave work queued, not consume it');
+  });
+
+// SOMET-601. A revoked token trips the breaker too -- every subject fails the
+// same way -- but the message must send the operator to the token, not to a
+// GPU box that is answering fine.
+lockedTest('a run of 401s stops the drain and names the rejected token',
+  async (t, pool, providerId) => {
+    for (let i = 40; i <= 45; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await queue.enqueue(pool, [S(i)], { backend: 'connector', providerId });
+    }
+    dispatcher.startDrain(pool, {
+      provider: PROVIDER(providerId),
+      generate: failWith('provider answered 401: {"detail":"Invalid or revoked token"}'),
+      buildRequest,
+      limit: 6,
+    });
+    for (let i = 0; i < 60 && dispatcher.runStatus().running; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((r) => { setTimeout(r, 100); });
+    }
+    const final = dispatcher.runStatus();
+    assert.equal(final.running, false);
+    assert.match(final.error || '', /token/i, 'the stop must name the token');
+    assert.doesNotMatch(final.error || '', /looks down/i,
+      'a provider that answers 401 is up; saying otherwise sends the operator the wrong way');
+    const { rows } = await pool.query(
+      "SELECT count(*)::int AS n FROM art_jobs WHERE state = 'queued' AND subject_key LIKE 'sk_%'",
+    );
+    assert.ok(rows[0].n > 0, 'the subjects are fine -- they must still be queued');
+  });
+
+// STOP MEANS THE SUBJECT IN FLIGHT, NOT THE REST OF THE PASS. The console
+// starts drains at limit 10, concurrency 1, and the stop flag used to be read
+// only between passes -- so Stop still drew up to nine more claimed subjects,
+// one after another, at minutes each on the remote box. The button read as
+// dead while the banner promised "stopping after the subjects in flight".
+lockedTest('Stop ends the pass after the subject in flight and releases the rest',
+  async (t, pool, providerId) => {
+    for (let i = 50; i <= 54; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await queue.enqueue(pool, [S(i)], { backend: 'connector', providerId });
+    }
+    dispatcher.__resetRun();
+    const draw = succeed();
+    let calls = 0;
+    dispatcher.startDrain(pool, {
+      provider: PROVIDER(providerId),
+      // The admin presses Stop while the first subject is drawing.
+      generate: async (registryId, ...rest) => {
+        calls += 1;
+        if (calls === 1) assert.equal(dispatcher.stopDrain(), true);
+        return draw(registryId, ...rest);
+      },
+      buildRequest,
+      limit: 5,
+      concurrency: 1,
+    });
+    t.after(() => { dispatcher.stopDrain(); dispatcher.__resetRun(); });
+    for (let i = 0; i < 80 && dispatcher.runStatus().running; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((r) => { setTimeout(r, 50); });
+    }
+    const final = dispatcher.runStatus();
+    assert.equal(final.running, false, 'precondition: the drain must have stopped');
+    assert.equal(calls, 1, 'Stop must not start another generation');
+    assert.equal(final.done, 1, 'the subject in flight finishes');
+
+    const { rows } = await pool.query(
+      `SELECT state, count(*)::int n, max(attempts) AS worst FROM art_jobs
+        WHERE subject_key LIKE 'sk_5%' GROUP BY state ORDER BY state`,
+    );
+    const byState = Object.fromEntries(rows.map((r) => [r.state, r]));
+    assert.equal(byState.running, undefined, 'no job may be left claimed by a stopped pass');
+    assert.equal(byState.queued && byState.queued.n, 4, 'the untried four go back to the queue');
+    assert.equal(byState.queued.worst, 0, 'and cost no attempt -- they never ran');
   });
 
 // The distinction that a naive breaker gets wrong, and that an external

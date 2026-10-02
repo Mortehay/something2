@@ -20,15 +20,24 @@ describe("makeChunkFetcher", () => {
     const fetchImpl = fakeFetch({ world_id: "w1", cx: 2, cy: -1, data: grid, decorations });
     const fetchChunk = makeChunkFetcher("w1", "http://api", fetchImpl);
     const out = await fetchChunk(2, -1);
-    expect(out).toEqual({ tiles: grid, decorations }); // NOT { data: grid, ... }
+    expect(out).toEqual({ tiles: grid, decorations, biomes: null }); // NOT { data: grid, ... }
   });
 
-  it("defaults decorations to [] when the envelope omits it", async () => {
+  it("defaults decorations to [] and biomes to null when the envelope omits them", async () => {
     const grid = [["grass"]];
     const fetchImpl = fakeFetch({ world_id: "w1", cx: 0, cy: 0, data: grid });
     const fetchChunk = makeChunkFetcher("w1", "http://api", fetchImpl);
     const out = await fetchChunk(0, 0);
-    expect(out).toEqual({ tiles: grid, decorations: [] });
+    expect(out).toEqual({ tiles: grid, decorations: [], biomes: null });
+  });
+
+  it("passes through the biomes grid when the envelope includes it", async () => {
+    const grid = [["grass"]];
+    const biomes = [["forest", "desert"], ["forest", "desert"]];
+    const fetchImpl = fakeFetch({ world_id: "w1", cx: 0, cy: 0, data: grid, biomes });
+    const fetchChunk = makeChunkFetcher("w1", "http://api", fetchImpl);
+    const out = await fetchChunk(0, 0);
+    expect(out).toEqual({ tiles: grid, decorations: [], biomes });
   });
 
   it("builds the correct URL incl. negative coords", async () => {

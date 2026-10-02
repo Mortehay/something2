@@ -308,12 +308,41 @@ export function useStartArtBatch() {
       // 400 here is usually the resolution precondition, whose message says
       // exactly which provider is misconfigured and how to fix it. Passing it
       // through verbatim is the whole point of writing it that way.
-      if (!res.ok) throw new Error(json.error || 'Failed to start the batch');
+      if (!res.ok) {
+        const err = new Error(json.error || 'Failed to start the batch');
+        // WHICH queued groups block the start. The console renders these with
+        // a button that drops exactly them, so the rest of the queue can run.
+        err.blocked = Array.isArray(json.blocked) ? json.blocked : [];
+        throw err;
+      }
       return json;
     },
     onSuccess: () => {
       toast.success('Batch started');
       qc.invalidateQueries({ queryKey: QUEUE_KEY });
+    },
+    // A refusal with blocked groups is explained by the panel under the
+    // buttons; the toast only points at it rather than repeating the paragraph.
+    onError: (err) => toast.error(err.blocked?.length
+      ? 'Not started: some queued jobs would render below 1024px -- see below'
+      : err.message),
+  });
+}
+
+// Drop ONLY the given (kind, provider_id) groups of queued jobs -- the "unselect"
+// a PROVIDER_TOO_SMALL refusal offers. Claimed, done and failed rows are kept.
+export function useClearArtGroups() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (groups) => {
+      const { res, json } = await post('/api/art-jobs/clear', { groups });
+      if (!res.ok) throw new Error(json.error || 'Failed to remove the blocked jobs');
+      return json;
+    },
+    onSuccess: ({ cleared }) => {
+      toast.success(`Removed ${cleared} blocked job(s) from the queue`);
+      qc.invalidateQueries({ queryKey: QUEUE_KEY });
+      qc.invalidateQueries({ queryKey: SUBJECTS_KEY });
     },
     onError: (err) => toast.error(err.message),
   });

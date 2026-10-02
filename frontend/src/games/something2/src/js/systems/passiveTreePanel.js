@@ -11,6 +11,7 @@
 // screen. Nodes are bucketed into fixed 200-unit world cells once, when the
 // tree arrives, and each frame visits only the cells the viewport overlaps.
 import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
+import { artIcon, drawIconFit } from "./gameArt.js";
 
 export const PANEL_W = 1200;
 export const PANEL_H = 680;
@@ -48,6 +49,17 @@ const STATE_FILL = {
   allocatable: "#1e3a5f",
   locked: "rgba(30,30,45,0.9)",
 };
+// SOMET-599. Below this on-screen radius a label icon is an unreadable speck,
+// and the zoomed-out tree would pay up to 1852 image draws for nothing.
+export const MIN_ICON_R = 5;
+
+// How much of a node's icon shows through per state. The icon covers the
+// state fill, so without this an unallocated node with art would look exactly
+// like an allocated one; the rim colour alone is too thin a cue at r=7.
+// Not lower: 0.45 was tried and, over the dark locked fill, made the icons
+// unreadable in the live tree -- and a fresh character's tree is ~all locked.
+const ICON_ALPHA = { allocated: 1, allocatable: 0.9, locked: 0.7 };
+
 const STATE_STROKE = {
   allocated: "#4ade80",
   allocatable: "#4a9eff",
@@ -410,7 +422,9 @@ export function hitNodeAt(layout, x, y) {
   return null;
 }
 
-export function drawPassiveTree(ctx, layout) {
+// `art` (SOMET-599) is the GameArt lookup; null draws every node as a plain
+// circle, as before.
+export function drawPassiveTree(ctx, layout, art = null) {
   const { panel, title, close, viewport, searchBox, searchClear } = layout;
   const now = typeof performance !== "undefined" ? performance.now() : 0;
 
@@ -515,6 +529,18 @@ export function drawPassiveTree(ctx, layout) {
     ctx.arc(n.sx, n.sy, Math.max(1, n.r), 0, Math.PI * 2);
     ctx.fillStyle = STATE_FILL[n.state];
     ctx.fill();
+
+    // The label icon, clipped to the same circle and drawn between the fill
+    // and the rim, so the rim still reads on top. No extra arc: clip() reuses
+    // the path the fill just used, and the rim below strokes it again.
+    const icon = n.r >= MIN_ICON_R ? artIcon(art, "passive_label", n.label) : null;
+    if (icon) {
+      ctx.save();
+      ctx.clip();
+      ctx.globalAlpha = (isSearchDimmed ? 0.35 : 1) * (ICON_ALPHA[n.state] ?? 1);
+      drawIconFit(ctx, icon, n.sx - n.r, n.sy - n.r, n.r * 2);
+      ctx.restore();
+    }
 
     // Medallion rim stroke styling:
     if (n.kind === "keystone") {

@@ -38,6 +38,9 @@ import {
     mergeLevelInfo, buildCharacterView,
 } from "./progressionExtras.js";
 import { fetchProgression } from "../net/progressionClient.js";
+import { AudioEngine } from "../audio/AudioEngine.js";
+import { fetchWorldAudio } from "../audio/audioClient.js";
+import { loadVolumes } from "../audio/audioSettings.js";
 import {
     getSkillById, getSkillsForClass, getRequiredForm, isTransformationSkill,
     isDruidExclusiveSkill, resolveSkillVfx, checkGemRequirements, getWeaponCategory,
@@ -49,6 +52,8 @@ import {
 } from "./hotbarStorage.js";
 import { createSkillVisual, updateSkillVisuals, pruneSkillVisuals } from "./skillVisuals.js";
 import { API_URL } from "../../../../../config.js";
+import { GameArt } from "../systems/gameArt.js";
+import { fetchGameArt } from "../net/gameArtClient.js";
 
 // How long the "out of ammo" HUD flash stays up after the server's `noammo`
 // frame arrives.
@@ -500,7 +505,39 @@ export class Game {
         this.state = "playing";
         this.chunked = true;
         this.worldId = worldId;
+        // Game audio (spec §3). One engine per Game; a re-entry (new world)
+        // swaps its world rather than building a second AudioContext.
+        if (!this.audio) {
+            this.audio = new AudioEngine();
+            this.audio.setVolumes(loadVolumes());
+            if (import.meta.env && import.meta.env.DEV) window.__s2audio = () => this.audio.snapshot();
+            this._audioMissTimer = setInterval(() => this.audio && this.audio.flushMisses(), 30000);
+        } else {
+            // Re-entry (world transition on the same Game): fetchWorldAudio
+            // below is async, so without this the OLD world's music/rotation
+            // timer keeps playing into the new world until the new bundle
+            // resolves. Flush the old world's misses (spec: "on world leave"
+            // as well as every 30s) and drop to a null world synchronously --
+            // setWorld({world:null}) stops both channels and clears the
+            // pending music-rotation timer without recording a miss.
+            this.audio.flushMisses();
+            this.audio.setWorld({ world: null, bindings: {} });
+        }
+        this.audio.unlock(); // initChunked runs from the Play click: sticky user activation
+        fetchWorldAudio(worldId).then((bundle) => {
+            if (this.audio && this.worldId === worldId) this.audio.setWorld(bundle);
+        });
         this.renderSystem = new RenderSystem(this.canvas, this.imageManager);
+        // SOMET-598: generated icons for skills / passive labels / items. The
+        // index is fetched once per session and never awaited -- a slow or
+        // failed fetch just leaves every surface on its emoji/initials fallback.
+        if (!this.gameArt) {
+            this.gameArt = new GameArt(this.imageManager, API_URL);
+            fetchGameArt()
+                .then((index) => this.gameArt.setIndex(index))
+                .catch((err) => console.warn('game art index unavailable, using fallback icons', err));
+        }
+        this.renderSystem.gameArt = this.gameArt;
         this.chunkedMap = new ChunkedMap(chunkSize, tileTypes);
         this._preloadTileAssets(tileTypes);
         // Names arrive on the wire already resolved; this is the only lookup
@@ -1164,6 +1201,8 @@ export class Game {
         if (this._windowMouseUpHandler) window.removeEventListener('mouseup', this._windowMouseUpHandler);
         if (this._wheelHandler) this.canvas.removeEventListener('wheel', this._wheelHandler);
         if (this.authorityClient) this.authorityClient.disconnect();
+        if (this._audioMissTimer) clearInterval(this._audioMissTimer);
+        if (this.audio) { this.audio.destroy(); this.audio = null; }
 
         cancelAnimationFrame(this.animationFrameId);
     }
@@ -1173,6 +1212,26 @@ export class Game {
         if (this.chunked) {
             const cx = this.player.x + this.player.width / 2;
             const cy = this.player.y + this.player.height / 2;
+            if (this.audio) {
+                this.audio.tick(this.chunkedMap.biomeAt(cx, cy), performance.now());
+                // Task 7 (game audio slice 3): creature/world-point "nearby"
+                // ambience. tickNearby is internally throttled to 250ms, so
+                // this passes a thunk (fix round 1, item 3) rather than
+                // merging the six arrays here on every one of the other ~59
+                // frames per second it does nothing with them -- the spread
+                // only actually runs on a tick that proceeds past the
+                // throttle. AudioEngine itself filters out anything missing
+                // an `art` field, so a plain village (no chests/gem/skill
+                // merchants this run) still works with the rest present.
+                this.audio.tickNearby(this.creatures.creatures, () => [
+                    ...(this.landmarks || []),
+                    ...(this.worldChests || []),
+                    ...(this.merchants || []),
+                    ...(this.gemMerchants || []),
+                    ...(this.skillMerchants || []),
+                    ...(this.banks || []),
+                ], { x: cx, y: cy });
+            }
             this.streamer.update(cx, cy); // fire-and-forget; wanted-guard makes it safe
             const nowMs = performance.now();
             const keys = movementKeys(this);
@@ -1315,6 +1374,20 @@ export class Game {
             // Enforce the live-particle budget the moment the list grows,
             // which is exactly when a crowded fight would blow it.
             this.vfx = capParticles(this.vfx);
+        }
+        // Game audio slice 3. `sfx` rides the same frame and is equally
+        // single-shot (the authority clears its stash after this broadcast),
+        // omitted entirely on a quiet tick. AudioEngine never throws out of
+        // this call -- a bad event is silence plus one warning, same
+        // contract as every other clip lookup in that module.
+        if (this.audio) {
+            this.audio.playSfxEvents(msg.sfx || [], {
+                listener: {
+                    x: this.player.x + (this.player.width || 0) / 2,
+                    y: this.player.y + (this.player.height || 0) / 2,
+                },
+                ownActor: `p:${this.localUserId}`,
+            });
         }
     }
 
@@ -2139,6 +2212,10 @@ export class Game {
         };
 
         this._keydownHandler = (e) => {
+            // A resumed/reconnected session can reach here with an AudioContext
+            // that started suspended because initChunked ran without a fresh
+            // gesture; any key is a valid user-activation to resume it.
+            if (this.audio) this.audio.unlock();
             // First: if passive search is focused, intercept all keys and do NOT register movement or trigger hotkeys
             if (this.passiveTreeOpen && this.passiveSearchFocused) {
                 if (e.key === 'Escape' || e.key === 'Enter') {
@@ -2380,6 +2457,9 @@ export class Game {
             }
         };
         this._mouseDownHandler = (e) => {
+            // See the same call in _keydownHandler: a click is also a valid
+            // user-activation to resume a still-suspended AudioContext.
+            if (this.audio) this.audio.unlock();
             if (e.button !== 0 && e.button !== 1 && e.button !== 2) return;
             if (this.state !== 'playing' || !this.chunked || !this.authorityClient) return;
             // Locate the press by its own event and keep the tracked cursor in

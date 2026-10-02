@@ -367,3 +367,26 @@ lockedTest('a refund floors at zero rather than going negative', async (t, pool)
   assert.equal(twice.attempts, 0, 'attempts must never go negative');
   assert.equal(twice.state, 'queued');
 });
+
+// SOMET-594. A running drain leaves blocked (kind, provider) groups queued and
+// draws the rest. claim() must step over them, and nextClaimableAt must not
+// count them as "ready" -- or it reports the queue as drawable and the drain
+// ends while a drawable job is still serving its backoff.
+lockedTest('claim and nextClaimableAt step over excluded groups', async (t, pool) => {
+  const exclude = [{ kind: 'skill', provider_id: null }];
+  await q.enqueue(pool, [S(1), S(2), { kind: 'item', key: 'it_1' }],
+    { backend: 'connector', providerId: null });
+
+  const claimed = await q.claim(pool, 10, { exclude });
+  assert.deepEqual(claimed.map((j) => j.subject_key), ['it_1'], 'only the non-excluded job');
+
+  // The item fails into a backoff; the two excluded skills are ready.
+  await q.fail(pool, claimed[0].id, 'provider answered 500', { delayMs: 60000 });
+  const next = await q.nextClaimableAt(pool, { exclude });
+  assert.ok(next, 'the drain must wait for the backed-off item, not end on ready-but-excluded rows');
+  assert.equal(await q.nextClaimableAt(pool), null, 'unexcluded, the ready skills say "claim now"');
+
+  const { rows } = await pool.query(
+    "SELECT count(*)::int n FROM art_jobs WHERE subject_kind = 'skill' AND state = 'queued' AND attempts = 0");
+  assert.equal(rows[0].n, 2, 'excluded rows are left untouched');
+});

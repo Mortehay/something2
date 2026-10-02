@@ -185,7 +185,30 @@ const PASSIVE_TREE_LOCK_WAIT_MS = 45000;
 // stop excluding each other.
 const ART_JOBS_LOCK_KEY = 615204773;
 
+// SOMET-591 (game audio slice 2): a fifth shared-state key, for the audio_jobs
+// queue -- the audio equivalent of ART_JOBS_LOCK_KEY above, and distinct from
+// it so an audio-queue test and an art-queue test never block each other for
+// no reason. Same shape of hazard: audio_jobs is one table that later tasks'
+// tests share (enqueue, claim, drain), node --test runs files in parallel,
+// and a claim in one file is not scoped to that file's own jobs. Every test
+// that enqueues, claims or drains audio_jobs takes this key for its whole
+// body, per common.md's QUEUE TEST ISOLATION rule, so later tasks reuse it
+// rather than declaring their own and silently drifting onto a different
+// number.
+const AUDIO_JOBS_LOCK_KEY = 977005353;
+
+// SOMET-591: a sixth key, for audio_clips rows that exist UNBOUND, even
+// briefly. POST /admin/clips/delete-unbound (audio_library_routes_db) deletes
+// EVERY clip with no binding in the whole database, not just its own, so a
+// peer file that inserts a clip and binds it a moment later (the seeder, the
+// library/catalog tests, fixtures that insert rows before their bindings)
+// can have its clip deleted in between -- measured: 9 of 40 victim runs failed
+// against a looping delete-unbound before this key existed. Every test that
+// calls delete-unbound, or that leaves one of its clips unbound while it
+// still relies on it, takes this key for its whole body.
+const AUDIO_CLIPS_LOCK_KEY = 591204817;
+
 module.exports = {
   withAdvisoryLock, readingUnderLock, LOCK_WAIT_MS,
-  PASSIVE_TREE_LOCK_KEY, PASSIVE_TREE_LOCK_WAIT_MS, ART_JOBS_LOCK_KEY,
+  PASSIVE_TREE_LOCK_KEY, PASSIVE_TREE_LOCK_WAIT_MS, ART_JOBS_LOCK_KEY, AUDIO_JOBS_LOCK_KEY, AUDIO_CLIPS_LOCK_KEY,
 };

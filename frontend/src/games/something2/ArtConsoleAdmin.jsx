@@ -18,7 +18,7 @@ import { useSearchParams } from 'react-router-dom';
 import styled from 'styled-components';
 import {
   useArtSubjects, useArtQueue, useEnqueueArt, useStartArtBatch, useStopArtBatch,
-  useRequeueStale, useRequeueFailures, useArtHistory, useClearArtQueue,
+  useRequeueStale, useRequeueFailures, useArtHistory, useClearArtQueue, useClearArtGroups,
   useArtNotes, useAddArtNote, useRemoveArtNote,
   useArtDescription, useWriteDescription, useClearDescription,
 } from './useArtConsole.js';
@@ -31,7 +31,7 @@ import {
   enqueueSummary, coverage, selectionOutsideFilter, PAGE_SIZE, filtersFromParams,
 } from './artSelection.js';
 import {
-  batchProgress, formatDuration, claimedAgo, partitionInFlight, previewNames,
+  batchProgress, formatDuration, claimedAgo, partitionInFlight, previewNames, blockedSummary,
   QUEUE_PREVIEW, WAITING_PREVIEW, IDLE_QUEUED, RUNNING, FINISHED,
 } from './artProgress.js';
 import AdminLoading from './AdminLoading.jsx';
@@ -69,6 +69,10 @@ const Button = styled.button`
 const Secondary = styled(Button)`background: var(--s2-btn-grey);`;
 const Hint = styled.p`color: var(--s2-text-muted); font-size: 0.85rem; margin: 0.25rem 0;`;
 const Err = styled.p`color: var(--s2-danger); font-size: 0.85rem; margin: 0.25rem 0;`;
+const Blocked = styled.section`
+  border: 1px solid var(--s2-danger); border-radius: 6px; padding: 0.5rem 0.75rem; margin: 0.5rem 0;
+  ul { margin: 0.25rem 0 0.5rem 1.25rem; font-size: 0.85rem; }
+`;
 // DELIBERATELY not a scroll container. `overflow-x: auto` here computed
 // overflow-y to `auto` as well, which made this the nearest scrollport -- the
 // sticky header then pinned to THIS box (which never scrolls vertically) and
@@ -437,11 +441,17 @@ function ArtConsoleAdmin() {
     live: Boolean(run?.running),
   });
   const { providers, activeProvider } = useAiProviders();
+  // Art console generation is image-only; an audio provider has no txt2img
+  // endpoint to enqueue a tile/entity job against, and activeProvider above
+  // is already image-only (useAiProviders.pickActive) -- this list must
+  // agree with it.
+  const imageProviders = (providers || []).filter((p) => (p.modality || 'image') === 'image');
   const enqueue = useEnqueueArt();
   const startBatch = useStartArtBatch();
   const stopBatch = useStopArtBatch();
   const requeue = useRequeueStale();
   const clearQueue = useClearArtQueue();
+  const clearGroups = useClearArtGroups();
   const requeueFailures = useRequeueFailures();
 
   // SOMET-571. A deep link from the Skill Tree tab (`?kind=&art=&q=`) seeds
@@ -583,6 +593,30 @@ function ArtConsoleAdmin() {
     </Pager>
   );
 
+  const startBody = () => ({
+    provider_id: providerId ? Number(providerId) : activeProvider?.id,
+    concurrency: 1,
+  });
+  const onStart = () => startBatch.mutate(startBody());
+  // A size refusal names the queued groups that block it. Offered as ONE
+  // action -- drop exactly those, then start -- because the admin's intent is
+  // "run what can run"; the dropped subjects can be re-queued on a 1024
+  // provider later.
+  //
+  // Two sources (SOMET-594): the Start refusal, and a drain that found blocked
+  // groups queued MID-BATCH and is skipping them. The drain's list is the
+  // live one, so it wins; while it runs, removal must not also start.
+  const runBlocked = run?.blocked?.length ? run.blocked : null;
+  const blocked = blockedSummary(runBlocked || startBatch.error?.blocked);
+  const onDropBlocked = () => {
+    if (!window.confirm(
+      `Remove ${blocked.total} queued job(s) that would render below 1024px?\n\n`
+      + `${blocked.lines.join('\n')}\n\n`
+      + 'Other queued jobs are kept. Re-queue these subjects on a 1024 provider to draw them.',
+    )) return;
+    clearGroups.mutate(blocked.groups, { onSuccess: run?.running ? undefined : onStart });
+  };
+
   const onEnqueue = async () => {
     const grouped = byKind(selected);
     if (grouped.size === 0) return;
@@ -659,7 +693,7 @@ function ArtConsoleAdmin() {
             Provider
             <select value={providerId} onChange={(e) => setProviderId(e.target.value)}>
               <option value="">(the active provider)</option>
-              {(providers || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              {imageProviders.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </Field>
         )}
@@ -676,10 +710,7 @@ function ArtConsoleAdmin() {
           <Secondary onClick={() => setSelected(new Set())}>Clear selection</Secondary>
         )}
         <Button
-          onClick={() => startBatch.mutate({
-            provider_id: providerId ? Number(providerId) : activeProvider?.id,
-            concurrency: 1,
-          })}
+          onClick={onStart}
           disabled={run?.running || !(providerId || activeProvider)}
           title={!(providerId || activeProvider)
             ? 'Choose a provider, or set an active one in AI Providers'
@@ -711,6 +742,25 @@ function ArtConsoleAdmin() {
           </Secondary>
         )}
       </Bar>
+
+      {blocked.total > 0 && (runBlocked || !run?.running) && (
+        <Blocked role="alert">
+          <Err>
+            {runBlocked
+              ? `${run.running ? 'Skipping' : 'Skipped'} ${blocked.total} queued job(s) that would render `
+                + 'below 1024px -- the rest of the batch '
+                + `${run.running ? 'is drawing' : 'was drawn'}. Remove them, or re-queue those subjects on a 1024 provider.`
+              : startBatch.error.message}
+          </Err>
+          <ul>{blocked.lines.map((l) => <li key={l}>{l}</li>)}</ul>
+          <Bar>
+            <Button onClick={onDropBlocked} disabled={clearGroups.isPending || startBatch.isPending}>
+              Remove {blocked.total} blocked job(s){run?.running ? '' : ' & start'}
+            </Button>
+            {!runBlocked && <Secondary onClick={() => startBatch.reset()}>Dismiss</Secondary>}
+          </Bar>
+        </Blocked>
+      )}
 
       {/* THE ANSWER TO "is it generating?", in one box (SOMET-558).
           Before this the page offered a counter line and a button label, and

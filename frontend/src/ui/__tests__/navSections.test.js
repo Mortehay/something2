@@ -43,9 +43,9 @@ describe('visibleSections', () => {
     expect(items.every((i) => !i.adminType)).toBe(true);
   });
 
-  it('shows an admin the two player screens plus all thirteen admin screens', () => {
+  it('shows an admin the two player screens plus all fourteen admin screens', () => {
     const items = allItems(visibleSections(true));
-    expect(items).toHaveLength(15);
+    expect(items).toHaveLength(16);
     expect(items.map((i) => i.path)).toEqual([
       '/game', '/game/map', '/game/tiles', '/game/entities', '/game/items',
       '/game/maps', '/game/biomes', '/game/creature-behaviors', '/game/vfx', '/game/world-map',
@@ -64,6 +64,9 @@ describe('visibleSections', () => {
       // you point the game at a machine there, then drive a batch through it
       // here.
       '/game/art',
+      // SOMET-590 game audio slice 1: the Audio tab, directly below Art
+      // Generation for the same reason -- both are "how content gets made".
+      '/game/audio',
       // SOMET-330: AI Providers, last because it is configuration rather than
       // content -- opened once to point the game at a machine, not per session.
       '/game/settings',

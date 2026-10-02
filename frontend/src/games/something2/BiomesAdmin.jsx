@@ -5,6 +5,7 @@ import { useTileTypes, useEntityTypes } from './useMaps.js';
 import { useBiomes, useCreateBiome, useUpdateBiome, useDeleteBiome } from './useBiomes.js';
 import { emptyBiomeForm, biomeToForm, biomeFormToPayload } from './biomeForm.js';
 import AdminLoading from './AdminLoading.jsx';
+import SubjectSounds from './SubjectSounds.jsx';
 
 const AdminContainer = styled.div`
   padding: 2rem; color: var(--s2-text); max-width: 1200px; margin: 0 auto;
@@ -114,6 +115,17 @@ function BiomeCard({ biome, tileNames, floraNames, creatureNames }) {
           Palette, art style and exclusions are composed into image-generation prompts.
         </span>
       </Row>
+      {/* Task 7 (SOMET-591 slice 2): the new-biome card (isNew, biome===null)
+          has no saved name yet to key sounds by, so it gets no Sounds section
+          at all -- not even an empty one -- until it has been created and
+          re-rendered as a real BiomeCard with a biome prop. */}
+      {!isNew && (
+        <Row style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
+          <div style={{ width: '100%' }}>
+            <SubjectSounds kind="biome" subjectKey={biome.name} compact />
+          </div>
+        </Row>
+      )}
     </Card>
   );
 }

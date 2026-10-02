@@ -3,6 +3,7 @@
 // Allows players to purchase PoE-style Skill Gems for gold, inspect Level/Attribute requirements, and weapon requirements.
 
 import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
+import { artIcon, drawIconFit } from "./gameArt.js";
 import { getSkillsForClass, SKILLS, checkGemRequirements, getWeaponRequirementName } from "../core/skillsData.js";
 
 export const GEM_SHOP_W = 780;
@@ -187,7 +188,8 @@ export function layoutGemShopPanel(state) {
   };
 }
 
-export function drawGemShopPanel(ctx, layout, state) {
+// `art` (SOMET-598) is the GameArt lookup; null draws every emoji as before.
+export function drawGemShopPanel(ctx, layout, state, art = null) {
   const {
     panel, title, close, colorTabs, classTabs, rows,
     prevBtn, nextBtn, footerY, currentPage, totalPages, totalCount, playerGold,
@@ -318,10 +320,15 @@ export function drawGemShopPanel(ctx, layout, state) {
     ctx.fill();
     ctx.globalAlpha = 1.0;
 
-    ctx.font = "24px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(s.icon || "💎", iconBoxX + iconBoxS / 2, iconBoxY + iconBoxS / 2 + 1);
+    const sImg = artIcon(art, "skill", s.id);
+    if (sImg) {
+      drawIconFit(ctx, sImg, iconBoxX + 3, iconBoxY + 3, iconBoxS - 6);
+    } else {
+      ctx.font = "24px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(s.icon || "💎", iconBoxX + iconBoxS / 2, iconBoxY + iconBoxS / 2 + 1);
+    }
 
     // Text details
     const textX = iconBoxX + iconBoxS + 12;

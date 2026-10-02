@@ -25,6 +25,7 @@ import {
   ALL_TAB, UNASSIGNED_TAB,
 } from './entityFilters.js';
 import AdminLoading from './AdminLoading.jsx';
+import SubjectSounds from './SubjectSounds.jsx';
 
 const PAGE_SIZE = 6;
 
@@ -1248,6 +1249,11 @@ function EntityTypesAdmin() {
             </SpawnList>
 
             <SpritePanel entity={entity} capability={capability} capabilityDown={capabilityDown} />
+            {/* Game audio slice 3, Task 8: creatures and world points can
+                carry sound (nearby/attack/hurt/death, or nearby for a point).
+                Nothing renders for any other entity type. */}
+            {entity.is_creature && <SubjectSounds kind="creature" subjectKey={entity.name} compact />}
+            {entity.point_kind != null && <SubjectSounds kind="world_point" subjectKey={entity.name} compact />}
           </EntityCard>
         ))}
       </EntityGrid>

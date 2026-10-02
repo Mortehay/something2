@@ -116,6 +116,21 @@ async function objectExists(key) {
   }
 }
 
+// SOMET-591 (game audio slice 2): the clip library's delete needs the write
+// side's mirror -- objectExists's "missing is an answer, not an error" logic,
+// but for removal. A clip row can outlive its object (a prior delete that
+// removed the row but failed on this call, a hand-cleared bucket), so a
+// second delete attempt must still succeed rather than throw on what is
+// already gone.
+async function removeObject(key) {
+  try {
+    await getClient().removeObject(BUCKET(), key);
+  } catch (err) {
+    if (err && (err.code === 'NotFound' || err.code === 'NoSuchKey')) return;
+    throw err;
+  }
+}
+
 // Test seam: inject a fake client ({ getObject(bucket, key) -> Readable,
 // bucketExists, makeBucket, putObject }). Passing null drops the cached client
 // so the next call rebuilds it from the current environment -- which is what
@@ -138,7 +153,7 @@ async function listObjectKeys(prefix = '') {
 }
 
 module.exports = {
-  getObjectStream, putObject, ensureBucket, listObjectKeys, objectExists, __setAssetClient, BUCKET,
+  getObjectStream, putObject, ensureBucket, listObjectKeys, objectExists, removeObject, __setAssetClient, BUCKET,
   // Exported for the configuration tests: the point of this module is the
   // settings it derives, and asserting them through a live connection would
   // need a live store.
