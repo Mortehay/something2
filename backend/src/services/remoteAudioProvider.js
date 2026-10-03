@@ -77,6 +77,48 @@ async function propose(provider, { context, kind }, { fetchImpl = fetch } = {}) 
   return { ok: true, style: style || null, slots: slots || {}, prompt: prompt || '' };
 }
 
+// --- The model gateway (plan 2026-10-03) ----------------------------------
+//
+// The box's GPU worker holds ONE model at a time. The drain switches it once
+// per phase boundary (text model for the prompt phase, then each audio drain
+// group's model) instead of letting each call pull in its own model and
+// evict the other's.
+//
+// Which gateway model each drain group needs. Read 2026-10-03 (plan Task 0)
+// from GET /api/model-gateway, /api/text/models and the "requested <model>"
+// text of failed rows in the box's job log (GET /api/audio?limit=200):
+//   music     audio:ace-step      (11 failed rows named it)
+//   ambience  audio:stable-audio  (one failed row named it)
+// The sfx groups (sfx_realistic, sfx_retro) are UNKNOWN -- no refusal in the
+// log named one -- so they have no entry: the drain skips the up-front switch
+// for them and, when a call is refused, switches to the model the refusal
+// names (requestedModel). The text model is not here: it is
+// `brain:${textProvider.model}`, since /api/text/models lists ids without
+// the prefix.
+const GATEWAY_MODEL_FOR_GROUP = Object.freeze({
+  music: 'audio:ace-step',
+  ambience: 'audio:stable-audio',
+});
+
+// The model a gateway refusal asked for -- "requested audio:ace-step, but
+// brain:... holds the card" -> 'audio:ace-step' -- or null. Trailing
+// punctuation is the sentence's, not the id's.
+function requestedModel(error) {
+  const m = typeof error === 'string' ? /requested (\S+)/.exec(error) : null;
+  const id = m ? m[1].replace(/[,;.]+$/, '') : '';
+  return id || null;
+}
+
+// Makes `model` the box's active (pinned) model. NORMAL mode only: the box
+// answers 409 while any job is queued, running or deferred, and the caller
+// waits that out. `force` is never sent -- it would cut off whatever the box
+// is doing for someone else. callJson's shape: a 409/503 is retryable with
+// its status, which the drain reads as "wait".
+async function switchModel(provider, model, { fetchImpl = fetch } = {}) {
+  if (typeof model !== 'string' || !model) return { ok: false, error: 'switchModel requires a model id' };
+  return callJson(provider, 'POST', '/api/model-gateway/switch', { model }, fetchImpl);
+}
+
 function loopMs(info, key) {
   const v = info && info[key];
   const rate = info && info.sample_rate;
@@ -287,5 +329,5 @@ async function generateSfxPack(provider, req, { fetchImpl = fetch } = {}) {
 }
 
 module.exports = {
-  listStyles, propose, generateTrack, generateSfx, generateSfxPack,
+  listStyles, propose, generateTrack, generateSfx, generateSfxPack, switchModel, requestedModel, GATEWAY_MODEL_FOR_GROUP,
 };

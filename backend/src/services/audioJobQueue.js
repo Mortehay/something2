@@ -9,6 +9,12 @@
 //   * requeueOrphans runs at every drain start: a nodemon restart (ANY backend
 //     edit) kills a running drain mid-job, and art's manual "requeue stale"
 //     button is exactly the step people forget.
+//   * PHASES (plan 2026-10-03): a queued job is either waiting for its
+//     prompt (needs_prompt -- the PROMPT phase, the box's text model) or
+//     ready for audio (the AUDIO phase). The claims and nextClaimableAt take
+//     the phase, so the drain can run every prompt first and only then switch
+//     the box to an audio model, instead of the two models evicting each
+//     other job by job.
 const DRAIN_ORDER = ['music', 'ambience', 'sfx_realistic', 'sfx_retro'];
 // Groups whose jobs are claimed together and sent as ONE box request.
 const PACKED_GROUPS = ['sfx_realistic', 'sfx_retro'];
@@ -46,10 +52,30 @@ function backoffMs(attempts) {
   return Math.round(RETRY_BASE_MS() * 2 ** Math.max(0, attempts - 1) * jitter);
 }
 
+// The WHERE fragment for one phase (constant SQL, never caller text):
+//   'prompt'  jobs whose prompt the prompt phase must write first;
+//   'audio'   jobs ready to generate (a prompt-only job never is);
+//   none      anything either phase could take -- what a phase-less claim
+//             and the drain's idle wait look at.
+function phaseFilter(phase, alias = '') {
+  const a = alias ? `${alias}.` : '';
+  if (phase === 'prompt') return `${a}needs_prompt`;
+  if (phase === 'audio') return `NOT ${a}needs_prompt AND NOT ${a}prompt_only`;
+  if (phase === undefined || phase === null) return `(${a}needs_prompt OR NOT ${a}prompt_only)`;
+  throw new Error(`unknown audio job phase ${phase}`);
+}
+
+// needs_prompt is decided here, once, in the INSERT itself (one LEFT JOIN on
+// the active prompts, not a query per item): force_prompt, or no request
+// prompt of the item's own AND no non-empty active audio_prompts row. A
+// stored '' means "cleared", i.e. no prompt (generateForSlot reads it the
+// same way). A prompt_only item that needs no prompt has nothing to do and
+// is stored 'done' rather than queued: no phase would ever claim it.
 async function enqueue(db, items, { batchId = null, providerId = null } = {}) {
   const batch = batchId || (await db.query('SELECT gen_random_uuid() AS id')).rows[0].id;
   const cols = {
     kind: [], key: [], slot: [], clip: [], group: [], style: [], prompt: [], slots: [], seed: [], engine: [],
+    force: [], promptOnly: [],
   };
   for (const it of items) {
     cols.kind.push(it.subject_kind); cols.key.push(it.subject_key); cols.slot.push(it.slot);
@@ -59,17 +85,24 @@ async function enqueue(db, items, { batchId = null, providerId = null } = {}) {
     cols.style.push(it.style || null); cols.prompt.push(it.prompt || null);
     cols.slots.push(it.slots ? JSON.stringify(it.slots) : null);
     cols.seed.push(Number.isInteger(it.seed) ? it.seed : null);
+    cols.force.push(it.force_prompt === true);
+    cols.promptOnly.push(it.prompt_only === true);
   }
   const r = await db.query(
     `INSERT INTO audio_jobs (batch_id, provider_id, subject_kind, subject_key, slot, clip_kind, drain_group,
-                             style, prompt, slots, seed, engine)
-     SELECT $1, $2, k, key, s, c, g, st, pr, sl::jsonb, sd, en
-       FROM unnest($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[], $10::text[], $11::bigint[],
-                   $12::text[])
-         AS u(k, key, s, c, g, st, pr, sl, sd, en)
+                             style, prompt, slots, seed, engine, needs_prompt, force_prompt, prompt_only, state)
+     SELECT $1, $2, k, key, s, c, g, st, pr, sl::jsonb, sd, en, needs, fp, po,
+            CASE WHEN po AND NOT needs THEN 'done' ELSE 'queued' END
+       FROM (
+         SELECT u.*, (u.fp OR (u.pr IS NULL AND (p.id IS NULL OR p.text = ''))) AS needs
+           FROM unnest($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[], $10::text[],
+                       $11::bigint[], $12::text[], $13::boolean[], $14::boolean[])
+             AS u(k, key, s, c, g, st, pr, sl, sd, en, fp, po)
+           LEFT JOIN audio_prompts p ON p.active AND p.subject_kind = u.k AND p.subject_key = u.key AND p.slot = u.s
+       ) x
      ON CONFLICT DO NOTHING RETURNING *`,
     [batch, providerId, cols.kind, cols.key, cols.slot, cols.clip, cols.group, cols.style, cols.prompt, cols.slots, cols.seed,
-      cols.engine],
+      cols.engine, cols.force, cols.promptOnly],
   );
   const got = new Set(r.rows.map((j) => `${j.subject_kind}/${j.subject_key}/${j.slot}`));
   const already_live = items
@@ -101,28 +134,71 @@ async function claimNext(db) {
 // `first` takes its row FOR UPDATE SKIP LOCKED too, so a concurrent claimer
 // cannot pick the same head row; `pick` re-locks it in this same statement
 // (a transaction never blocks on its own lock).
-async function claimBatch(db, n) {
+//
+// `phase` (see phaseFilter) limits the claim to one phase; the prompt phase
+// is always one job per claim, whatever the group. `group` limits it to one
+// drain group -- the audio phase drains a group at a time, right after
+// switching the box to that group's model.
+async function claimBatch(db, n, { phase, group } = {}) {
   const limit = Number.isInteger(n) && n > 0 ? n : 1;
+  const only = phase === 'prompt' ? 1 : null;
   const r = await db.query(
     `WITH first AS (
        SELECT drain_group, provider_id FROM audio_jobs
         WHERE state = 'queued' AND (not_before IS NULL OR not_before <= now())
+          AND ${phaseFilter(phase)} AND ($4::text IS NULL OR drain_group = $4)
         ORDER BY array_position($1::text[], drain_group), id
         FOR UPDATE SKIP LOCKED LIMIT 1
      ), pick AS (
        SELECT j.id FROM audio_jobs j, first f
         WHERE j.state = 'queued' AND (j.not_before IS NULL OR j.not_before <= now())
+          AND ${phaseFilter(phase, 'j')}
           AND j.drain_group = f.drain_group AND j.provider_id IS NOT DISTINCT FROM f.provider_id
         ORDER BY j.id
-        LIMIT CASE WHEN (SELECT drain_group FROM first) = ANY($3::text[]) THEN $2::int ELSE 1 END
+        LIMIT CASE WHEN $5::int IS NOT NULL THEN $5::int
+                   WHEN (SELECT drain_group FROM first) = ANY($3::text[]) THEN $2::int ELSE 1 END
         FOR UPDATE OF j SKIP LOCKED
      )
      UPDATE audio_jobs SET state = 'running', attempts = attempts + 1, claimed_at = now(), updated_at = now()
       WHERE id IN (SELECT id FROM pick)
       RETURNING *`,
-    [DRAIN_ORDER, limit, PACKED_GROUPS],
+    [DRAIN_ORDER, limit, PACKED_GROUPS, group || null, only],
   );
   return r.rows.sort((a, b) => Number(a.id) - Number(b.id));
+}
+
+// Whether `phase` (and `group`) has a job claimable right now. The drain asks
+// this before switching the box's model, so it never switches for a phase
+// or group that has nothing to run.
+async function hasClaimable(db, { phase, group } = {}) {
+  const r = await db.query(
+    `SELECT EXISTS (
+       SELECT 1 FROM audio_jobs
+        WHERE state = 'queued' AND (not_before IS NULL OR not_before <= now())
+          AND ${phaseFilter(phase)} AND ($1::text IS NULL OR drain_group = $1)) AS any`,
+    [group || null],
+  );
+  return r.rows[0].any;
+}
+
+// A claimed job's prompt was written (or a hand edit won the race -- the
+// slot has a prompt either way). A prompt-only job is done; any other goes
+// back to 'queued' for the audio phase, with the attempt the prompt claim
+// spent refunded (writing the prompt was not an attempt at the audio) and no
+// backoff. Returns the state written, or null when the row was no longer
+// 'running' (nothing changed).
+async function promptWritten(db, id) {
+  const r = await db.query(
+    `UPDATE audio_jobs
+        SET needs_prompt = false, last_error = NULL, not_before = NULL, updated_at = now(),
+            state = CASE WHEN prompt_only THEN 'done' ELSE 'queued' END,
+            attempts = CASE WHEN prompt_only THEN attempts ELSE GREATEST(attempts - 1, 0) END,
+            claimed_at = CASE WHEN prompt_only THEN claimed_at ELSE NULL END
+      WHERE id = $1 AND state = 'running'
+      RETURNING state`,
+    [id],
+  );
+  return r.rows[0] ? r.rows[0].state : null;
 }
 
 // Claimed jobs straight back to 'queued', attempt refunded, NO backoff. For
@@ -174,9 +250,13 @@ async function requeueOrphans(db) {
   return r.rowCount;
 }
 
-async function nextClaimableAt(db) {
+// Same phase/group filter as claimBatch, so "nothing claimable yet" and
+// "nothing left" are told apart over exactly the rows a claim could take.
+async function nextClaimableAt(db, { phase, group } = {}) {
   const r = await db.query(
-    `SELECT min(COALESCE(not_before, now())) AS at FROM audio_jobs WHERE state = 'queued'`,
+    `SELECT min(COALESCE(not_before, now())) AS at FROM audio_jobs
+      WHERE state = 'queued' AND ${phaseFilter(phase)} AND ($1::text IS NULL OR drain_group = $1)`,
+    [group || null],
   );
   return r.rows[0].at;
 }
@@ -328,6 +408,8 @@ module.exports = {
   enqueue,
   claimNext,
   claimBatch,
+  hasClaimable,
+  promptWritten,
   release,
   complete,
   fail,

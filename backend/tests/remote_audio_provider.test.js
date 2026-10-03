@@ -255,3 +255,40 @@ test('propose passes context and kind through', async () => {
   assert.equal(r.style, 'forest');
   assert.deepEqual(calls[0].body, { context: 'pine forest', kind: 'ambience' });
 });
+
+// Plan 2026-10-03, Task 2: the drain switches the box's one GPU model at a
+// phase boundary. Normal mode only -- force would kill whatever the box is
+// running for someone else, so the body must never carry it.
+test('switchModel posts {model} to the gateway with auth and never sends force', async () => {
+  const { fetchImpl, calls } = fakeBox({
+    'POST /api/model-gateway/switch': () => json({ active: { model: 'audio:ace-step', pinned: true } }),
+  });
+  const r = await rap.switchModel(provider, 'audio:ace-step', { fetchImpl });
+  assert.equal(r.ok, true, r.error);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].body, { model: 'audio:ace-step' });
+  assert.equal(calls[0].headers.Authorization, 'Bearer sk_test');
+});
+
+test('switchModel reports a 409 refusal as busy (status 409, retryable)', async () => {
+  const { fetchImpl } = fakeBox({
+    'POST /api/model-gateway/switch': () => json({ detail: 'jobs are queued' }, 409),
+  });
+  const r = await rap.switchModel(provider, 'brain:qwen3.6-35b-a3b', { fetchImpl });
+  assert.deepEqual({ ok: r.ok, status: r.status, retryable: r.retryable }, { ok: false, status: 409, retryable: true });
+  assert.match(r.error, /jobs are queued/);
+});
+
+test('requestedModel reads the model a gateway refusal asked for', () => {
+  assert.equal(
+    rap.requestedModel('audio service answered 409 for POST /api/audio/sfx-pack: requested audio:foley-x, but brain:qwen3.6-35b-a3b holds the card'),
+    'audio:foley-x',
+  );
+  assert.equal(rap.requestedModel('requested audio:ace-step but brain:q holds the card'), 'audio:ace-step');
+  assert.equal(rap.requestedModel('switch pending'), null);
+  assert.equal(rap.requestedModel(undefined), null);
+});
+
+test('GATEWAY_MODEL_FOR_GROUP maps the groups Task 0 found, and only those', () => {
+  assert.deepEqual(rap.GATEWAY_MODEL_FOR_GROUP, { music: 'audio:ace-step', ambience: 'audio:stable-audio' });
+});
