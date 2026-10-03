@@ -320,9 +320,13 @@ test('audio dispatcher', { skip }, async (t) => {
 
       await t.test('stopDrain lets the in-flight job finish but claims nothing further', async () => {
         d.__resetRun();
+        // With a prompt each, so neither job enters the prompt phase (plan
+        // 2026-10-03): seeing stop1 as `current` must mean stop1 is
+        // GENERATING, not having its prompt written -- a stop landing in the
+        // prompt phase rightly generates nothing, which raced this test.
         await q.enqueue(pool, [
-          { subject_kind: 'world', subject_key: `${tag}-stop1`, slot: 'music', clip_kind: 'music' },
-          { subject_kind: 'world', subject_key: `${tag}-stop2`, slot: 'music', clip_kind: 'music' },
+          { subject_kind: 'world', subject_key: `${tag}-stop1`, slot: 'music', clip_kind: 'music', prompt: 'p' },
+          { subject_kind: 'world', subject_key: `${tag}-stop2`, slot: 'music', clip_kind: 'music', prompt: 'p' },
         ], {});
         let release;
         const gate = new Promise((resolve) => { release = resolve; });
