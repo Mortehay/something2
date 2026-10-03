@@ -432,6 +432,11 @@ module.exports = function audioRoutes(pool) {
         // eslint-disable-next-line no-await-in-loop
         const { clipKind, error } = await checkSubject(pool, it.subject_kind, it.subject_key, it.slot);
         if (error) { rejected.push({ item, error }); continue; }
+        // Plan 2026-10-03: "Force regenerate prompt" (force_prompt) and
+        // "Write with model" (prompt_only). Strict booleans: a truthy string
+        // must not force a rewrite over someone's hand-written prompt.
+        const badFlag = ['force_prompt', 'prompt_only'].find((f) => it[f] !== undefined && typeof it[f] !== 'boolean');
+        if (badFlag) { rejected.push({ item, error: `${badFlag} must be a boolean` }); continue; }
         // sfx (slice 3): an upload-only slot has no cue on the box, so a
         // job for it could never generate anything (spec §4) -- refused here
         // rather than queued to fail later. The per-item engine is optional
@@ -455,6 +460,8 @@ module.exports = function audioRoutes(pool) {
           style: it.style || null,
           prompt: it.prompt || null,
           engine: clipKind === 'sfx' ? it.engine : undefined,
+          force_prompt: it.force_prompt === true,
+          prompt_only: it.prompt_only === true,
         });
       }
       const enq = await audioJobQueue.enqueue(pool, valid, { providerId });

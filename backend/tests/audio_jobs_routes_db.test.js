@@ -19,6 +19,7 @@ const { signToken } = require('../src/auth/tokens.js');
 const { withAdvisoryLock, AUDIO_JOBS_LOCK_KEY } = require('./helpers/advisoryLock.js');
 const { restoringForeignJobs } = require('./helpers/foreignAudioJobs.js');
 const audioDispatcher = require('../src/services/audioDispatcher');
+const { promptPhaseStub } = require('./helpers/audioPromptPhaseStub.js');
 
 const url = process.env.TEST_DATABASE_URL;
 const skip = !url ? 'no TEST_DATABASE_URL -- refusing to mutate a real database' : false;
@@ -231,7 +232,7 @@ test('audio job routes', { skip }, async (t) => {
 
       await t.test('start:true drains the queue and the job finishes done', async () => {
         audioDispatcher.__resetRun();
-        audioDispatcher.__setDeps({ generateForSlot: async () => ({ ok: true, clip: { id: null } }) });
+        audioDispatcher.__setDeps({ ...promptPhaseStub, generateForSlot: async () => ({ ok: true, clip: { id: null } }) });
         const res = await request(app).post('/api/audio/admin/jobs').set('Authorization', bearer(admin)).send({
           items: [{ subject_kind: 'world', subject_key: worldName, slot: 'ambience' }],
           provider_id: providerId,
@@ -252,6 +253,7 @@ test('audio job routes', { skip }, async (t) => {
         let release;
         const gate = new Promise((resolve) => { release = resolve; });
         audioDispatcher.__setDeps({
+          ...promptPhaseStub,
           generateForSlot: async (db, provider, spec) => {
             if (spec.subjectKey === worldName2 && spec.slot === 'music') await gate;
             return { ok: true, clip: { id: null } };
@@ -311,6 +313,37 @@ test('audio job routes', { skip }, async (t) => {
         assert.equal(row.attempts, 0);
         assert.deepEqual(await sentinels(), sentinelsBefore, "another file's failed row was not re-queued");
         await pool.query('DELETE FROM audio_jobs WHERE subject_key = $1', [failKey]);
+      });
+      // Plan 2026-10-03: "Force regenerate prompt" and "Write with model"
+      // ride on the item. Both are strict booleans -- a truthy string must
+      // not quietly force a rewrite over someone's hand-written prompt.
+      await t.test('enqueue: force_prompt and prompt_only are stored when boolean and rejected otherwise', async () => {
+        const w3 = `audio-jobs3-${tag}`;
+        made.worlds.push((await pool.query('INSERT INTO worlds (name, seed) VALUES ($1, 3) RETURNING id', [w3])).rows[0].id);
+        const res = await request(app).post('/api/audio/admin/jobs').set('Authorization', bearer(admin)).send({
+          items: [
+            { subject_kind: 'world', subject_key: w3, slot: 'music', force_prompt: true, prompt_only: true },
+            { subject_kind: 'world', subject_key: w3, slot: 'ambience', force_prompt: false },
+            { subject_kind: 'world', subject_key: worldName, slot: 'music', force_prompt: 'yes' },
+            { subject_kind: 'world', subject_key: worldName2, slot: 'music', prompt_only: 1 },
+          ],
+        });
+        try {
+          assert.equal(res.status, 201, JSON.stringify(res.body));
+          const by = Object.fromEntries(res.body.queued.map((j) => [`${j.subject_key}/${j.slot}`,
+            [j.force_prompt, j.prompt_only, j.needs_prompt]]));
+          assert.deepEqual(by, {
+            [`${w3}/music`]: [true, true, true],
+            [`${w3}/ambience`]: [false, false, true],
+          });
+          assert.deepEqual(res.body.rejected.map((r) => [r.item.subject_key, r.error]), [
+            [worldName, 'force_prompt must be a boolean'],
+            [worldName2, 'prompt_only must be a boolean'],
+          ]);
+        } finally {
+          const ids = (res.body.queued || []).map((j) => j.id);
+          if (ids.length) await pool.query('DELETE FROM audio_jobs WHERE id = ANY($1)', [ids]);
+        }
       });
     } finally {
       for (const r of foreign) {
