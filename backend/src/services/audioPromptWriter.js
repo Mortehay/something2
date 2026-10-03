@@ -37,7 +37,10 @@ const SYSTEM_MUSIC = [
   'instruments or sound sources, mood, tempo feel, texture. No lyrics, no vocals,',
   'no artist or song names, no sentences about the game -- only what should be heard.',
   'Ambience is environmental sound (wind, water, birds, crowd), never melodic music.',
-  'Answer only with the JSON object.',
+  // Spelled out because the box does not enforce json_schema (live 2026-10-04:
+  // every music answer was {"prompt": ...} with no style, so all failed validation).
+  'Answer only with a JSON object with exactly two keys:',
+  '{"style": "<one name from the allowed list, copied exactly>", "prompt": "<the prompt>"}.',
 ].join(' ');
 
 const SYSTEM_SFX = [
@@ -45,7 +48,8 @@ const SYSTEM_SFX = [
   'The sound cue (hit, death, slash, spell, waypoint...) is fixed; describe the SOURCE',
   'of the sound in at most 10 words: what it is made of, how big, what voice it has.',
   'Examples: "a heavy iron mace", "a small bat with papery wings", "an old stone shrine humming".',
-  'No verbs about the action, no sentences. Answer only with the JSON object.',
+  'No verbs about the action, no sentences.',
+  'Answer only with a JSON object with exactly one key: {"entity": "<the phrase>"}.',
 ].join(' ');
 
 function schemaFor(clipKind, styles) {
