@@ -45,7 +45,7 @@ async function restoringForeignJobs(pool, ownLike, states, fn) {
   return { result, foreignTouched };
 }
 
-// A claim (claimNext/claimBatch, or a drain) takes ANY claimable queued row,
+// A claim (claimBatch, or a drain) takes ANY claimable queued row,
 // not only the calling file's. This parks every claimable queued row that is
 // NOT this file's own (subject_key NOT LIKE ownLike) an hour out for the
 // duration of fn(), then puts each not_before back to its EXACT previous

@@ -63,7 +63,7 @@ test('audio job queue', { skip }, async (t) => {
     );
     const claimMine = async () => {
       for (let i = 0; i < 50; i++) {
-        const j = await q.claimNext(pool);
+        const [j] = await q.claimBatch(pool, 1);
         if (!j) return null;
         if (j.subject_key.startsWith(tag)) return j;
         await pool.query("UPDATE audio_jobs SET state = 'queued', attempts = attempts - 1, claimed_at = NULL WHERE id = $1", [j.id]);

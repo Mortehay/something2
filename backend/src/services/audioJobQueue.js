@@ -68,8 +68,11 @@ function phaseFilter(phase, alias = '') {
 }
 
 // needs_prompt is decided here, once, in the INSERT itself (one LEFT JOIN on
-// the active prompts, not a query per item): force_prompt, or no request
-// prompt of the item's own AND no non-empty active audio_prompts row. A
+// the active prompts, not a query per item): force_prompt, or no style and
+// no prompt of the item's own AND no non-empty active audio_prompts row.
+// The item's own style counts because generateForSlot uses an explicit style
+// or prompt as it is and never reads the stored prompt then -- a prompt
+// written for such a job would be thrown away. A
 // stored '' means "cleared", i.e. no prompt (generateForSlot reads it the
 // same way). A prompt_only item that needs no prompt has nothing to do and
 // is stored 'done' rather than queued: no phase would ever claim it.
@@ -99,7 +102,7 @@ async function enqueue(db, items, { batchId = null, providerId = null } = {}) {
      SELECT $1, $2, k, key, s, c, g, st, pr, sl::jsonb, sd, en, needs, fp, po,
             CASE WHEN po AND NOT needs THEN 'done' ELSE 'queued' END, va, hi
        FROM (
-         SELECT u.*, (u.fp OR (u.pr IS NULL AND (p.id IS NULL OR p.text = ''))) AS needs
+         SELECT u.*, (u.fp OR (u.st IS NULL AND u.pr IS NULL AND (p.id IS NULL OR p.text = ''))) AS needs
            FROM unnest($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[], $10::text[],
                        $11::bigint[], $12::text[], $13::boolean[], $14::boolean[], $15::int[], $16::text[])
              WITH ORDINALITY AS u(k, key, s, c, g, st, pr, sl, sd, en, fp, po, va, hi, ord)
@@ -117,20 +120,6 @@ async function enqueue(db, items, { batchId = null, providerId = null } = {}) {
     .filter((it) => !got.has(`${it.subject_kind}/${it.subject_key}/${it.slot}`))
     .map(({ subject_kind, subject_key, slot }) => ({ subject_kind, subject_key, slot }));
   return { batch_id: batch, queued: r.rows, already_live };
-}
-
-async function claimNext(db) {
-  const r = await db.query(
-    `UPDATE audio_jobs SET state = 'running', attempts = attempts + 1, claimed_at = now(), updated_at = now()
-      WHERE id = (
-        SELECT id FROM audio_jobs
-         WHERE state = 'queued' AND (not_before IS NULL OR not_before <= now())
-         ORDER BY array_position($1::text[], drain_group), id
-         FOR UPDATE SKIP LOCKED LIMIT 1)
-      RETURNING *`,
-    [DRAIN_ORDER],
-  );
-  return r.rows[0] || null;
 }
 
 // Claims up to `n` jobs of ONE drain group: the group (and provider pin) of
@@ -200,12 +189,16 @@ async function hasClaimable(db, { phase, group } = {}) {
 // slot has a prompt either way). A prompt-only job is done; any other goes
 // back to 'queued' for the audio phase, with the attempt the prompt claim
 // spent refunded (writing the prompt was not an attempt at the audio) and no
-// backoff. Returns the state written, or null when the row was no longer
-// 'running' (nothing changed).
+// backoff. A FORCED job also drops its own style and prompt: whoever ticked
+// Force wants the new stored prompt used, and generateForSlot would let an
+// explicit style or prompt win over it. Returns the state written, or null
+// when the row was no longer 'running' (nothing changed).
 async function promptWritten(db, id) {
   const r = await db.query(
     `UPDATE audio_jobs
         SET needs_prompt = false, last_error = NULL, not_before = NULL, updated_at = now(),
+            style = CASE WHEN force_prompt THEN NULL ELSE style END,
+            prompt = CASE WHEN force_prompt THEN NULL ELSE prompt END,
             state = CASE WHEN prompt_only THEN 'done' ELSE 'queued' END,
             attempts = CASE WHEN prompt_only THEN attempts ELSE GREATEST(attempts - 1, 0) END,
             claimed_at = CASE WHEN prompt_only THEN claimed_at ELSE NULL END
@@ -421,7 +414,6 @@ module.exports = {
   drainGroupFor,
   backoffMs,
   enqueue,
-  claimNext,
   claimBatch,
   hasClaimable,
   promptWritten,
