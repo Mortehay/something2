@@ -289,6 +289,14 @@ test('requestedModel reads the model a gateway refusal asked for', () => {
   assert.equal(rap.requestedModel(undefined), null);
 });
 
-test('GATEWAY_MODEL_FOR_GROUP maps the groups Task 0 found, and only those', () => {
-  assert.deepEqual(rap.GATEWAY_MODEL_FOR_GROUP, { music: 'audio:ace-step', ambience: 'audio:stable-audio' });
+// The box's job log reports a refused model as a FAILED row whose text says
+// so, with no HTTP status (both texts are from real failed rows, 2026-10-03).
+test('isGatewayRefusal recognises the gateway refusal text, whatever carried it', () => {
+  assert.equal(rap.isGatewayRefusal('audio service failed: s2-world-x is not built yet and cannot be built now: '
+    + 'Model gateway: requested audio:ace-step, but brain:qwen3.6-35b-a3b was selected in the UI and holds the card'), true);
+  assert.equal(rap.isGatewayRefusal('audio service failed: Model gateway: requested audio:stable-audio, '
+    + 'but 1 job(s) queued for the active model brain:qwen3.6-35b-a3b'), true);
+  assert.equal(rap.isGatewayRefusal('audio service failed: CUDA out of memory'), false);
+  assert.equal(rap.isGatewayRefusal('switch pending'), false);
+  assert.equal(rap.isGatewayRefusal(undefined), false);
 });

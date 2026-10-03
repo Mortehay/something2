@@ -86,6 +86,9 @@ const SWITCH_WAIT_MS = () => envInt('AUDIO_SWITCH_WAIT_MS', 5000);
 // A prompt job with no active text provider fails with this, rather than
 // waiting: waiting cannot fix configuration.
 const NO_TEXT_PROVIDER = 'no text provider — add one under AI Providers';
+// Same for an active text provider whose model is blank: there is no brain
+// model to switch the box to, and waiting cannot fix that either.
+const NO_TEXT_MODEL = 'the text provider has no model set';
 
 // The default prompt step for one claimed prompt job: the real writer
 // (audioPromptWriter.writeSlotPrompt), box only -- there is no silent CPU
@@ -99,7 +102,6 @@ async function writeJobPrompt(db, job, deps, cache) {
   const key = job.subject_key;
   const { slot } = job;
   const before = await audioPrompts.getActive(db, kind, key, slot);
-  if (!job.force_prompt && before && before.text) return { ok: true, row: before, skipped: true };
   if (!cache.catalog) cache.catalog = await loadPromptCatalog(db);
   if (job.clip_kind !== 'sfx' && !cache.styles) {
     const styles = await deps.loadStyles(db);
@@ -109,7 +111,7 @@ async function writeJobPrompt(db, job, deps, cache) {
     if (styles && (styles.music.length || styles.ambience.length)) cache.styles = styles;
   }
   const cue = job.clip_kind === 'sfx' ? await cueFor(db, kind, key, slot) : null;
-  return writeSlotPrompt(db, {
+  const write = () => writeSlotPrompt(db, {
     kind, key, slot, hint: job.hint,
   }, {
     tp: deps.tp,
@@ -121,6 +123,14 @@ async function writeJobPrompt(db, job, deps, cache) {
     // { conflict }), forced or not.
     expectActiveId: before ? before.id : null,
   });
+  let r = await write();
+  // The catalog snapshot is per phase, so a subject added after it was read
+  // (and queued since) looks unknown: read the catalog again, once.
+  if (!r.ok && r.error === 'unknown subject') {
+    cache.catalog = await loadPromptCatalog(db);
+    r = await write();
+  }
+  return r;
 }
 
 // Real defaults. Every DB access, the generate call and the sleep are
@@ -221,6 +231,15 @@ async function bookkeep(db, deps, self, job, write) {
 // and must not count toward the breaker.
 function isBusy(result) {
   return Boolean(result.retryable) && (result.status === 409 || result.status === 503);
+}
+
+// A REFUSAL is the box's "not now" for this call: busy (above), or the model
+// gateway refusing to load the model the call needs. The box reports the
+// latter as a FAILED job-log row too -- no status, providerFault set, the
+// gateway's text in the error (plan 2026-10-03 review) -- so it is told by
+// its text. A refusal never fails a job and never counts toward the breaker.
+function isRefusal(result) {
+  return isBusy(result) || rap.isGatewayRefusal(result.error);
 }
 
 // Only a PROVIDER FAULT counts toward the breaker (busy is handled before
@@ -353,8 +372,11 @@ function startDrain(db, opts = {}) {
   // --- Model switching ------------------------------------------------------
   //
   // `settledModel` is the model this drain last switched the box to (or
-  // tried to, see below); a switch to it again is skipped until a call is
-  // refused, which clears it. `learned` is the model a refusal named for a
+  // tried to, see below) within the CURRENT phase or drain group; a switch
+  // to it again is skipped until a call is refused, which clears it. Every
+  // phase and group boundary clears it too, so each one switches afresh: the
+  // box (or a person in its UI) may have moved the card since, and a switch
+  // to the model already active is only the box re-pinning it. `learned` is the model a refusal named for a
   // drain group ("requested X, but Y holds the card"), which then overrides
   // GATEWAY_MODEL_FOR_GROUP for that group -- it covers the groups with no
   // map entry (the sfx engines) and a map entry gone stale. `refusalSwitch`
@@ -464,15 +486,30 @@ function startDrain(db, opts = {}) {
       slot: job.slot,
       drain_group: job.drain_group,
     };
-    if (!textProv) {
+    let r;
+    try {
+      // A job that is not forced and whose slot gained a non-empty prompt
+      // since it was queued has nothing left to write -- checked before the
+      // text provider, so a missing one does not fail a job that needs none.
+      const before = job.force_prompt ? null : await audioPrompts.getActive(db, job.subject_kind, job.subject_key, job.slot);
+      if (before && before.text) r = { ok: true, row: before, skipped: true };
+    } catch (err) {
+      r = { ok: false, error: errorText(err) };
+    }
+    if (!r && !textProv) {
       await failJob(job, { error: NO_TEXT_PROVIDER, retryable: false });
       return undefined;
     }
-    let r;
-    try {
-      r = await deps.writePrompt(db, job, deps, cache);
-    } catch (err) {
-      r = { ok: false, error: errorText(err) };
+    if (!r && !textProv.model) {
+      await failJob(job, { error: NO_TEXT_MODEL, retryable: false });
+      return undefined;
+    }
+    if (!r) {
+      try {
+        r = await deps.writePrompt(db, job, deps, cache);
+      } catch (err) {
+        r = { ok: false, error: errorText(err) };
+      }
     }
     if (r.ok || r.conflict) {
       let state;
@@ -560,7 +597,7 @@ function startDrain(db, opts = {}) {
     // Busy: refundAttempt undoes the claim's increment, and it never reaches
     // the breaker -- three subjects in a row failing on a busy box says
     // nothing about whether the box is actually broken.
-    if (isBusy(result)) {
+    if (isRefusal(result)) {
       const switching = await refusedFor([job], result, provider);
       if (switching) return switching;
       await failJob(job, result, { retryable: true, refundAttempt: true });
@@ -630,26 +667,40 @@ function startDrain(db, opts = {}) {
 
     let anyOk = false;
     let anyFault = false;
+    const refused = [];
     for (const { job, result } of out.results) {
       if (result.ok) {
         // eslint-disable-next-line no-await-in-loop
         if (await completeJob(job, result)) anyOk = true;
+      } else if (isRefusal(result)) {
+        // Settled below, together: never failed, never a fault.
+        refused.push({ job, result });
       } else {
         // eslint-disable-next-line no-await-in-loop
         await failJob(job, result);
         if (isProviderFault(result)) anyFault = true;
       }
     }
+    let next;
+    if (refused.length) {
+      next = await refusedFor(refused.map((x) => x.job), refused[0].result, provider);
+      if (!next) {
+        // eslint-disable-next-line no-await-in-loop
+        for (const { job, result } of refused) await failJob(job, result, { retryable: true, refundAttempt: true });
+        next = 'pause';
+      }
+    }
     if (anyOk) {
       consecutiveFailures = 0;
-      return undefined;
+      return next;
     }
-    return anyFault ? recordFault() : undefined;
+    if (anyFault) return recordFault() || next;
+    return next;
   }
 
   // The box refused the pack as a whole; `sent` are the jobs it held.
   async function settlePackFailure(sent, pack, provider) {
-    if (isBusy(pack)) {
+    if (isRefusal(pack)) {
       const switching = await refusedFor(sent.map((x) => x.job), pack, provider);
       if (switching) return switching;
       // eslint-disable-next-line no-await-in-loop
@@ -706,6 +757,7 @@ function startDrain(db, opts = {}) {
     // /api/text/models lists ids without the gateway's prefix (plan Task 0).
     const textModel = textProv && textProv.model ? `brain:${textProv.model}` : null;
     const cache = {};
+    settledModel = null; // a phase boundary always switches (see settledModel)
     for (;;) {
       if (self.stopping) return 'stopped';
       // eslint-disable-next-line no-await-in-loop
@@ -736,6 +788,7 @@ function startDrain(db, opts = {}) {
       // names the model through the job's own provider.
       // eslint-disable-next-line no-await-in-loop
       const switchProv = await deps.resolveAudioProvider(db, null);
+      settledModel = null; // a group boundary always switches (see settledModel)
       for (;;) {
         if (self.stopping) return 'stopped';
         const model = learned[group] || rap.GATEWAY_MODEL_FOR_GROUP[group];
@@ -844,4 +897,5 @@ module.exports = {
   // fallback startDrain itself uses.
   hasResolvableProvider,
   NO_TEXT_PROVIDER,
+  NO_TEXT_MODEL,
 };

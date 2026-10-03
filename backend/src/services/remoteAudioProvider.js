@@ -109,6 +109,16 @@ function requestedModel(error) {
   return id || null;
 }
 
+// Whether a failure is the model gateway refusing to load the model the call
+// needs ("Model gateway: requested audio:ace-step, but brain:... holds the
+// card" / "... but 1 job(s) queued for the active model ..."). The box says
+// this through an HTTP 409 OR as a FAILED row in its job log, which reaches
+// us with no status at all (generateTrack's ledger poll) -- so the text, not
+// the status, is what marks it. A refusal is "not now", never a bad job.
+function isGatewayRefusal(error) {
+  return typeof error === 'string' && /Model gateway: requested \S+/.test(error);
+}
+
 // Makes `model` the box's active (pinned) model. NORMAL mode only: the box
 // answers 409 while any job is queued, running or deferred, and the caller
 // waits that out. `force` is never sent -- it would cut off whatever the box
@@ -329,5 +339,5 @@ async function generateSfxPack(provider, req, { fetchImpl = fetch } = {}) {
 }
 
 module.exports = {
-  listStyles, propose, generateTrack, generateSfx, generateSfxPack, switchModel, requestedModel, GATEWAY_MODEL_FOR_GROUP,
+  listStyles, propose, generateTrack, generateSfx, generateSfxPack, switchModel, requestedModel, isGatewayRefusal, GATEWAY_MODEL_FOR_GROUP,
 };

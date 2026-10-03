@@ -122,8 +122,8 @@ test('audio drain in phases', { skip }, async (t) => {
 
     try {
       await t.test('enqueue decides needs_prompt from the item and the stored prompt', async () => {
-        const [none, stored, cleared, own, forced, only] = await Promise.all(
-          ['nq-none', 'nq-stored', 'nq-cleared', 'nq-own', 'nq-forced', 'nq-only'].map(world),
+        const [none, stored, cleared, own, forced, only, styled] = await Promise.all(
+          ['nq-none', 'nq-stored', 'nq-cleared', 'nq-own', 'nq-forced', 'nq-only', 'nq-styled'].map(world),
         );
         await prompts.save(pool, 'world', stored, 'music', { style: 'village', text: 'kept' });
         await prompts.save(pool, 'world', cleared, 'music', { style: null, text: '' });
@@ -132,6 +132,9 @@ test('audio drain in phases', { skip }, async (t) => {
         const r = await q.enqueue(pool, [
           music(none), music(stored), music(cleared), music(own, { prompt: 'typed' }),
           music(forced, { force_prompt: true }), music(only, { prompt_only: true }),
+          // An explicit style alone is used by generation as it is (it never
+          // reads the stored prompt then), so a written prompt would be wasted.
+          music(styled, { style: 'tavern' }),
         ]);
         const by = Object.fromEntries(r.queued.map((j) => [j.subject_key, [j.needs_prompt, j.force_prompt, j.prompt_only, j.state]]));
         assert.deepEqual(by, {
@@ -141,11 +144,12 @@ test('audio drain in phases', { skip }, async (t) => {
           [own]: [false, false, false, 'queued'],
           [forced]: [true, true, false, 'queued'],
           [only]: [false, false, true, 'done'],
+          [styled]: [false, false, false, 'queued'],
         });
         // The prompt JOIN must not reorder the inserts: the drain claims and
         // packs by id, so ids follow the items' order.
         const byId = [...r.queued].sort((a, b) => Number(a.id) - Number(b.id)).map((j) => j.subject_key);
-        assert.deepEqual(byId, [none, stored, cleared, own, forced, only]);
+        assert.deepEqual(byId, [none, stored, cleared, own, forced, only, styled]);
         await pool.query('DELETE FROM audio_jobs WHERE subject_key LIKE $1', [`${tag}-nq-%`]);
       });
 
@@ -417,6 +421,191 @@ test('audio drain in phases', { skip }, async (t) => {
         assert.equal(s.failed, 0, s.error);
         assert.equal(bodies.length, 1);
         assert.deepEqual(bodies[0].slots, { mood: 'calm and sunny' });
+      });
+      // --- Review fixes (2026-10-04) ---------------------------------------
+      const REFUSED_ACE = 'audio service failed: s2-world-x is not built yet and cannot be built now: Model gateway: '
+        + `requested ${ACE}, but ${BRAIN} was selected in the UI and holds the card`;
+      // AUDIO_BREAKER_TRIP=1: any result counted as a provider fault ends the
+      // drain at once with 'breaker' -- so a drain that ends 'empty' proves
+      // no refusal was counted.
+      const withTrip1 = async (fn) => {
+        const prev = process.env.AUDIO_BREAKER_TRIP;
+        process.env.AUDIO_BREAKER_TRIP = '1';
+        try { return await fn(); } finally {
+          if (prev === undefined) delete process.env.AUDIO_BREAKER_TRIP; else process.env.AUDIO_BREAKER_TRIP = prev;
+        }
+      };
+
+      await t.test('a refusal reported as a failed job-log row (no status) switches and retries; never failed, never a fault', async () => {
+        reset();
+        const k = await world('lr1');
+        await prompts.save(pool, 'world', k, 'music', { style: 'village', text: 'stored lr' });
+        await q.enqueue(pool, [music(k)]);
+        let tries = 0;
+        const refusingRap = {
+          ...rap,
+          generateTrack: async (p, body) => {
+            tries += 1;
+            if (tries === 1) {
+              calls.push('generate:refused');
+              return { ok: false, error: REFUSED_ACE, providerFault: true };
+            }
+            return rap.generateTrack(p, body);
+          },
+        };
+        const s = await withTrip1(async () => {
+          d.startDrain(pool, {
+            deps: depsWith({ generateForSlot: (db, p, spec) => gen.generateForSlot(db, p, spec, { rap: refusingRap, lib: fakeLib }) }),
+          });
+          return waitIdle();
+        });
+        assert.equal(s.stopped_reason, 'empty', `a refusal tripped the breaker or ended the drain: ${s.error}`);
+        assert.deepEqual([s.done, s.failed], [1, 0]);
+        assert.deepEqual(calls, [`switch:${ACE}`, 'generate:refused', `switch:${ACE}`, 'generate:stored lr']);
+        const j = await jobOf(k);
+        assert.deepEqual([j.state, j.attempts], ['done', 1], 'the refused try was refunded');
+      });
+
+      const sfxJob = (key) => ({
+        subject_kind: 'creature', subject_key: `${tag}-${key}`, slot: 'hurt', clip_kind: 'sfx', engine: 'realistic', prompt: 'a beast',
+      });
+      const okItem = (it) => ({
+        ok: true, cue: it.cue, entity: it.entity, clips: [{ buffer: OGG, durationMs: 500 }], prompt: 'p', seed: 1, cached: false,
+      });
+      const packDeps = (generateSfxPack) => depsWith({
+        generateSfxPackForJobs: (db, p, jobs, opts) => gen.generateSfxPackForJobs(db, p, jobs, {
+          ...opts, rap: { generateSfxPack }, lib: fakeLib,
+        }),
+      });
+
+      await t.test('a whole-pack refusal reported without a status switches and re-sends the pack', async () => {
+        reset();
+        await q.enqueue(pool, [sfxJob('wp-a'), sfxJob('wp-b')]);
+        let packs = 0;
+        const s = await withTrip1(async () => {
+          d.startDrain(pool, {
+            deps: packDeps(async (p, body) => {
+              packs += 1;
+              calls.push(`pack:${body.items.length}`);
+              if (packs === 1) {
+                return {
+                  ok: false, providerFault: true,
+                  error: `audio service failed: Model gateway: requested audio:sfx-x, but 1 job(s) queued for the active model ${BRAIN}`,
+                };
+              }
+              return { ok: true, items: body.items.map(okItem) };
+            }),
+          });
+          return waitIdle();
+        });
+        assert.equal(s.stopped_reason, 'empty', s.error);
+        assert.deepEqual([s.done, s.failed], [2, 0]);
+        assert.deepEqual(calls, ['pack:2', 'switch:audio:sfx-x', 'pack:2']);
+      });
+
+      await t.test('a per-item refusal inside a pack switches and re-sends only that item', async () => {
+        reset();
+        await q.enqueue(pool, [sfxJob('pi-a'), sfxJob('pi-b')]);
+        let packs = 0;
+        const refusedEntity = `${tag}-pi-b`.toLowerCase();
+        const s = await withTrip1(async () => {
+          d.startDrain(pool, {
+            deps: packDeps(async (p, body) => {
+              packs += 1;
+              calls.push(`pack:${body.items.length}`);
+              return {
+                ok: true,
+                items: body.items.map((it) => (packs === 1 && it.entity === refusedEntity
+                  ? {
+                    ok: false, cue: it.cue, entity: it.entity, providerFault: true,
+                    error: `Model gateway: requested audio:sfx-y, but ${BRAIN} holds the card`,
+                  }
+                  : okItem(it))),
+              };
+            }),
+          });
+          return waitIdle();
+        });
+        assert.equal(s.stopped_reason, 'empty', s.error);
+        assert.deepEqual([s.done, s.failed], [2, 0]);
+        assert.deepEqual(calls, ['pack:2', 'switch:audio:sfx-y', 'pack:1']);
+        const rows = (await pool.query(
+          'SELECT subject_key, state, attempts FROM audio_jobs WHERE subject_key LIKE $1 ORDER BY id', [`${tag}-pi-%`])).rows;
+        assert.deepEqual(rows.map((r) => [r.state, r.attempts]), [['done', 1], ['done', 1]]);
+      });
+
+      await t.test('every cycle switches at its group boundary, even to the model the last cycle used', async () => {
+        reset();
+        const [b1, b2] = await Promise.all(['bd1', 'bd2'].map(world));
+        await prompts.save(pool, 'world', b1, 'music', { style: 'village', text: 'stored bd1' });
+        await prompts.save(pool, 'world', b2, 'music', { style: 'village', text: 'stored bd2' });
+        await q.enqueue(pool, [music(b1), music(b2)]);
+        // bd2 becomes claimable only after the first cycle has ended.
+        await pool.query("UPDATE audio_jobs SET not_before = now() + interval '400 milliseconds' WHERE subject_key = $1", [b2]);
+        d.startDrain(pool, {
+          deps: depsWith({ sleep: (ms) => new Promise((r) => { setTimeout(r, Math.min(ms, 50)); }) }),
+        });
+        const s = await waitIdle();
+        assert.equal(s.failed, 0, s.error);
+        assert.deepEqual(calls, [`switch:${ACE}`, 'generate:stored bd1', `switch:${ACE}`, 'generate:stored bd2']);
+      });
+
+      await t.test('force_prompt over an explicit prompt: generation uses the newly written prompt', async () => {
+        reset();
+        const k = await world('fp1');
+        await q.enqueue(pool, [music(k, { prompt: 'typed by hand', style: 'tavern', force_prompt: true })]);
+        d.startDrain(pool, { deps: depsWith() });
+        const s = await waitIdle();
+        assert.equal(s.failed, 0, s.error);
+        const active = await prompts.getActive(pool, 'world', k, 'music');
+        assert.deepEqual(calls.filter((c) => c.startsWith('generate:')), [`generate:${active.text}`]);
+        const row = (await pool.query('SELECT style, prompt FROM audio_jobs WHERE subject_key = $1', [k])).rows[0];
+        assert.deepEqual(row, { style: null, prompt: null }, "the job's own style and prompt were cleared");
+      });
+
+      await t.test('a text provider with no model fails its prompt jobs with that reason; nothing waits', async () => {
+        reset();
+        const k = await world('nm1');
+        await q.enqueue(pool, [music(k)]);
+        d.startDrain(pool, { deps: depsWith({ loadTextProvider: async () => ({ ...textProvider, model: '' }) }) });
+        const s = await waitIdle();
+        assert.equal(s.stopped_reason, 'empty', s.error);
+        assert.deepEqual(calls, []);
+        const j = await jobOf(k);
+        assert.deepEqual([j.state, j.last_error], ['failed', 'the text provider has no model set']);
+      });
+
+      await t.test('with no text provider, a slot that gained a prompt since enqueue is not failed', async () => {
+        reset();
+        const k = await world('gp1');
+        await q.enqueue(pool, [music(k)]);
+        await prompts.save(pool, 'world', k, 'music', { style: 'village', text: 'written meanwhile' });
+        d.startDrain(pool, { deps: depsWith({ loadTextProvider: async () => null }) });
+        const s = await waitIdle();
+        assert.deepEqual([s.done, s.failed], [1, 0], s.error);
+        assert.deepEqual(calls, [`switch:${ACE}`, 'generate:written meanwhile']);
+      });
+
+      await t.test('a subject added after the prompt phase read its catalog is found on a reload, not failed', async () => {
+        reset();
+        const first = await world('rl1');
+        const lateName = `${tag}-rl2`;
+        await q.enqueue(pool, [music(first, { prompt_only: true })]);
+        let added = false;
+        const addingTp = {
+          complete: async (db, req, opts) => {
+            if (!added) {
+              added = true;
+              worldIds.push((await pool.query('INSERT INTO worlds (name, seed) VALUES ($1, 1) RETURNING id', [lateName])).rows[0].id);
+              await q.enqueue(pool, [music(lateName, { prompt_only: true })]);
+            }
+            return tp.complete(db, req, opts);
+          },
+        };
+        d.startDrain(pool, { deps: depsWith({ tp: addingTp }) });
+        const s = await waitIdle();
+        assert.deepEqual([s.done, s.failed], [2, 0], s.error);
+        assert.equal((await jobOf(lateName)).state, 'done');
       });
     } finally {
       for (const r of foreign) {
