@@ -31,16 +31,30 @@ const TEMPERATURE = () => {
   return Number.isFinite(raw) ? raw : 0.15;
 };
 
+// The box does not enforce json_schema (live 2026-10-04: every music answer
+// was {"prompt": ...} with no style), so each prompt spells out the keys. Music
+// and ambience are separate prompts because a shared one made "music" answers
+// describe ambience ("icy wind", "dripping water").
+const JSON_KEYS = 'Answer only with a JSON object with exactly two keys: '
+  + '{"style": "<one name from the allowed list, copied exactly>", "prompt": "<the prompt>"}.';
+
 const SYSTEM_MUSIC = [
-  'You write prompts for a music and ambience generator in a medieval fantasy RPG.',
+  'You write prompts for a background-score generator in a medieval fantasy RPG.',
   'Pick ONE style from the allowed list, then write a prompt of at most 40 words:',
-  'instruments or sound sources, mood, tempo feel, texture. No lyrics, no vocals,',
-  'no artist or song names, no sentences about the game -- only what should be heard.',
-  'Ambience is environmental sound (wind, water, birds, crowd), never melodic music.',
-  // Spelled out because the box does not enforce json_schema (live 2026-10-04:
-  // every music answer was {"prompt": ...} with no style, so all failed validation).
-  'Answer only with a JSON object with exactly two keys:',
-  '{"style": "<one name from the allowed list, copied exactly>", "prompt": "<the prompt>"}.',
+  'the instruments, melody and harmony, tempo, mood and texture of the piece.',
+  'Describe only instruments and playing, never weather, water, animals or other',
+  'environmental sounds. No lyrics, no vocals, no artist or song names,',
+  'no sentences about the game -- only what should be heard.',
+  JSON_KEYS,
+].join(' ');
+
+const SYSTEM_AMBIENCE = [
+  'You write prompts for an environmental-sound generator in a medieval fantasy RPG.',
+  'Pick ONE style from the allowed list, then write a prompt of at most 40 words:',
+  'the sound sources of the place (wind, water, birds, insects, fire, crowd, machinery),',
+  'how near or far they are, and how dense. Never instruments, melody or a tune.',
+  'No voices speaking words, no sentences about the game -- only what should be heard.',
+  JSON_KEYS,
 ].join(' ');
 
 const SYSTEM_SFX = [
@@ -104,7 +118,7 @@ async function writeSlotPrompt(db, {
   }
   const cleanHint = typeof hint === 'string' && hint.trim() ? hint.trim().slice(0, 200) : null;
   const request = {
-    system: clipKind === 'sfx' ? SYSTEM_SFX : SYSTEM_MUSIC,
+    system: { sfx: SYSTEM_SFX, ambience: SYSTEM_AMBIENCE }[clipKind] || SYSTEM_MUSIC,
     prompt: [
       `Clip kind: ${clipKind}`,
       clipKind === 'sfx' ? null : `Allowed styles: ${allowed.join(', ')}`,
@@ -147,5 +161,5 @@ async function writeSlotPrompt(db, {
 }
 
 module.exports = {
-  writeSlotPrompt, loadStyles, SYSTEM_MUSIC, SYSTEM_SFX,
+  writeSlotPrompt, loadStyles, SYSTEM_MUSIC, SYSTEM_AMBIENCE, SYSTEM_SFX,
 };

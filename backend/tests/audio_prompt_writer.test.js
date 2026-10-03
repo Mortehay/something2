@@ -51,6 +51,22 @@ test('music: schema enum is the box styles; stored with source_input and via', a
   });
 });
 
+// Live 2026-10-04: with one shared system prompt, "music" answers described
+// ambience ("icy wind", "dripping water"). Each kind now gets its own.
+test('ambience gets its own system prompt, and the music one is about music only', async () => {
+  const tp = fakeTp([{ ok: true, json: { style: 'night', prompt: 'crickets, distant owl' }, model: 'q', via: 'box' }]);
+  const r = await w.writeSlotPrompt({}, { kind: 'world', key: 'Vale', slot: 'ambience' },
+    { tp, store: fakeStore(), catalog: CAT, styles: STYLES });
+  assert.equal(r.ok, true, r.error);
+  const req = tp.calls[0].req;
+  assert.equal(req.system, w.SYSTEM_AMBIENCE);
+  assert.notEqual(w.SYSTEM_AMBIENCE, w.SYSTEM_MUSIC);
+  assert.deepEqual(req.jsonSchema.properties.style.enum, ['forest', 'night']);
+  assert.doesNotMatch(w.SYSTEM_MUSIC, /ambience/i);
+  assert.doesNotMatch(w.SYSTEM_AMBIENCE, /\bmusic\b/i);
+  for (const s of [w.SYSTEM_MUSIC, w.SYSTEM_AMBIENCE]) assert.match(s, /"style".*"prompt"/);
+});
+
 test('sfx: entity contract, no style, cue in the context', async () => {
   const store = fakeStore();
   const tp = fakeTp([{ ok: true, json: { entity: 'a snarling grey wolf' }, model: 'q', via: 'fallback' }]);
