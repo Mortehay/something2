@@ -20,7 +20,7 @@ const WALL_EPS = 0.01; // clamp/inset margin so a clamped face stays inside the 
 // Scale, not a fixed size, so one rule covers every actor and 1.0 reproduces
 // the old full-box behaviour exactly. The anchor is unchanged — the footprint
 // is centred on the same box centre movement already resolved against.
-const FOOTPRINT_SCALE = 1.0;
+const FOOTPRINT_SCALE = 0.5;
 
 function resolveMove(map, actor, dirX, dirY, dt) {
   if (dirX === 0 && dirY === 0) return { x: actor.x, y: actor.y, moved: false };
@@ -69,10 +69,29 @@ function resolveMove(map, actor, dirX, dirY, dt) {
       const boundary = dir > 0
         ? Math.floor(destFace / MAP_TILE_SIZE) * MAP_TILE_SIZE
         : Math.ceil(destFace / MAP_TILE_SIZE) * MAP_TILE_SIZE;
-      const move = (boundary - dir * WALL_EPS) - face;
-      if (move * dir > 0) {
-        x += move;
+      const tileFace = boundary - dir * WALL_EPS;
+      const tileMove = tileFace - face;
+      if (tileMove * dir > 0 && map.isWalkable(tileFace, top) && map.isWalkable(tileFace, bot) &&
+          (!map.isWalkable(boundary + dir * WALL_EPS, top) || !map.isWalkable(boundary + dir * WALL_EPS, bot))) {
+        x += tileMove;
         moved = true;
+      } else {
+        let lo = 0;
+        let hi = stepX;
+        for (let iter = 0; iter < 16; iter++) {
+          const mid = (lo + hi) / 2;
+          const testFace = face + mid;
+          if (map.isWalkable(testFace, top) && map.isWalkable(testFace, bot)) {
+            lo = mid;
+          } else {
+            hi = mid;
+          }
+        }
+        const safeMove = dir > 0 ? Math.max(0, lo - WALL_EPS) : Math.min(0, lo + WALL_EPS);
+        if (Math.abs(safeMove) > 0.0001) {
+          x += safeMove;
+          moved = true;
+        }
       }
     }
   }
@@ -89,10 +108,29 @@ function resolveMove(map, actor, dirX, dirY, dt) {
       const boundary = dir > 0
         ? Math.floor(destFace / MAP_TILE_SIZE) * MAP_TILE_SIZE
         : Math.ceil(destFace / MAP_TILE_SIZE) * MAP_TILE_SIZE;
-      const move = (boundary - dir * WALL_EPS) - face;
-      if (move * dir > 0) {
-        y += move;
+      const tileFace = boundary - dir * WALL_EPS;
+      const tileMove = tileFace - face;
+      if (tileMove * dir > 0 && map.isWalkable(left, tileFace) && map.isWalkable(right, tileFace) &&
+          (!map.isWalkable(left, boundary + dir * WALL_EPS) || !map.isWalkable(right, boundary + dir * WALL_EPS))) {
+        y += tileMove;
         moved = true;
+      } else {
+        let lo = 0;
+        let hi = stepY;
+        for (let iter = 0; iter < 16; iter++) {
+          const mid = (lo + hi) / 2;
+          const testFace = face + mid;
+          if (map.isWalkable(left, testFace) && map.isWalkable(right, testFace)) {
+            lo = mid;
+          } else {
+            hi = mid;
+          }
+        }
+        const safeMove = dir > 0 ? Math.max(0, lo - WALL_EPS) : Math.min(0, lo + WALL_EPS);
+        if (Math.abs(safeMove) > 0.0001) {
+          y += safeMove;
+          moved = true;
+        }
       }
     }
   }
@@ -170,14 +208,20 @@ class ServerMap {
     if (t === null) return false;
     const def = this.tileTypes[t];
     if (def && def.walkable === false) return false;
-    // Decoration overlay: a blocking decoration makes its whole tile non-walkable.
+    // Decoration overlay: blocking decorations occupy their center footprint (~36x36) rather than the whole 100x100 tile
     const gCol = Math.floor(worldX / MAP_TILE_SIZE);
     const gRow = Math.floor(worldY / MAP_TILE_SIZE);
     const cx = Math.floor(gCol / this.chunkSize);
     const cy = Math.floor(gRow / this.chunkSize);
     const lc = gCol - cx * this.chunkSize;
     const lr = gRow - cy * this.chunkSize;
-    if (this.blockedDecorationsFor(cx, cy).has(`${lr},${lc}`)) return false;
+    if (this.blockedDecorationsFor(cx, cy).has(`${lr},${lc}`)) {
+      const lx = worldX - gCol * MAP_TILE_SIZE;
+      const ly = worldY - gRow * MAP_TILE_SIZE;
+      if (Math.abs(lx - 50) <= 10 && Math.abs(ly - 50) <= 10) {
+        return false;
+      }
+    }
     return true;
   }
 

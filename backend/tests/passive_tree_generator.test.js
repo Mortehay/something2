@@ -31,7 +31,7 @@ const RULES = [
   'attackSpeedMult', 'castSpeedMult', 'meleeReachBonus', 'meleeArcBonus',
   'projectileCount', 'projectileSpeedMult', 'pierceBonus',
   'auraLeech', 'auraRadius', 'meleeDamageMult', 'meleeWaveShare',
-  'hpRegen', 'manaRegen',
+  'hpRegen', 'manaRegen', 'staminaRegen',
 ];
 
 const tree = generatePassiveTree(PASSIVE_TREE_SPEC);

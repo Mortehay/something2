@@ -235,6 +235,7 @@ function derivePlayerStats(progression, classPools = null) {
     cooldownFloor: cooldownFloorOf(progression),
     hpRegen: Math.max(0, round4(C.HP_REGEN_BASE + C.HP_REGEN_PER_CON * above('constitution') + (rulesOf(progression).hpRegen || 0))),
     manaRegen: round4(C.MANA_REGEN_BASE + C.MANA_REGEN_PER_WIS * above('wisdom') + C.MANA_REGEN_PER_INT * above('intelligence') + (rulesOf(progression).manaRegen || 0)),
+    staminaRegen: Math.max(0, round4(C.STAMINA_REGEN_BASE + (rulesOf(progression).staminaRegen || 0))),
     // The fraction of an item's value a merchant pays. Capped strictly below
     // 1.0: see SELL_FRACTION_MAX in progressionConstants.js -- this is a
     // safety bound against an infinite-gold loop, not a balance knob.

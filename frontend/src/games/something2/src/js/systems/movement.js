@@ -46,13 +46,8 @@ export function resolveMove(map, actor, dirX, dirY, dt) {
   let y = actor.y;
   let moved = false;
 
-  // Swept clamp per axis. The leading face is the box edge in the travel
-  // direction; a sub-tile step crosses at most one boundary.
-  // Assumes tile-aligned walls (isWalkable is per-tile) and sub-tile steps (dt small); both hold in-game.
-  // If the destination corners are blocked, clamp the face to WALL_EPS shy of the
-  // wall boundary and move only that far (dt-invariant: any timestep lands on
-  // the same face). Perpendicular corners are inset by WALL_EPS so an edge
-  // exactly on a tile line is not read as inside the next tile.
+  // Swept clamp per axis with binary search sub-step resolution.
+  // Supports both tile-aligned walls and sub-tile decoration hitboxes.
   if (stepX !== 0) {
     const dir = stepX > 0 ? 1 : -1;
     const face = cx + dir * fhw;
@@ -66,10 +61,29 @@ export function resolveMove(map, actor, dirX, dirY, dt) {
       const boundary = dir > 0
         ? Math.floor(destFace / MAP_TILE_SIZE) * MAP_TILE_SIZE
         : Math.ceil(destFace / MAP_TILE_SIZE) * MAP_TILE_SIZE;
-      const move = (boundary - dir * WALL_EPS) - face;
-      if (move * dir > 0) {
-        x += move;
+      const tileFace = boundary - dir * WALL_EPS;
+      const tileMove = tileFace - face;
+      if (tileMove * dir > 0 && map.isWalkable(tileFace, top) && map.isWalkable(tileFace, bot) &&
+          (!map.isWalkable(boundary + dir * WALL_EPS, top) || !map.isWalkable(boundary + dir * WALL_EPS, bot))) {
+        x += tileMove;
         moved = true;
+      } else {
+        let lo = 0;
+        let hi = stepX;
+        for (let iter = 0; iter < 16; iter++) {
+          const mid = (lo + hi) / 2;
+          const testFace = face + mid;
+          if (map.isWalkable(testFace, top) && map.isWalkable(testFace, bot)) {
+            lo = mid;
+          } else {
+            hi = mid;
+          }
+        }
+        const safeMove = dir > 0 ? Math.max(0, lo - WALL_EPS) : Math.min(0, lo + WALL_EPS);
+        if (Math.abs(safeMove) > 0.0001) {
+          x += safeMove;
+          moved = true;
+        }
       }
     }
   }
@@ -86,10 +100,29 @@ export function resolveMove(map, actor, dirX, dirY, dt) {
       const boundary = dir > 0
         ? Math.floor(destFace / MAP_TILE_SIZE) * MAP_TILE_SIZE
         : Math.ceil(destFace / MAP_TILE_SIZE) * MAP_TILE_SIZE;
-      const move = (boundary - dir * WALL_EPS) - face;
-      if (move * dir > 0) {
-        y += move;
+      const tileFace = boundary - dir * WALL_EPS;
+      const tileMove = tileFace - face;
+      if (tileMove * dir > 0 && map.isWalkable(left, tileFace) && map.isWalkable(right, tileFace) &&
+          (!map.isWalkable(left, boundary + dir * WALL_EPS) || !map.isWalkable(right, boundary + dir * WALL_EPS))) {
+        y += tileMove;
         moved = true;
+      } else {
+        let lo = 0;
+        let hi = stepY;
+        for (let iter = 0; iter < 16; iter++) {
+          const mid = (lo + hi) / 2;
+          const testFace = face + mid;
+          if (map.isWalkable(left, testFace) && map.isWalkable(right, testFace)) {
+            lo = mid;
+          } else {
+            hi = mid;
+          }
+        }
+        const safeMove = dir > 0 ? Math.max(0, lo - WALL_EPS) : Math.min(0, lo + WALL_EPS);
+        if (Math.abs(safeMove) > 0.0001) {
+          y += safeMove;
+          moved = true;
+        }
       }
     }
   }

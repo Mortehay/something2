@@ -23,7 +23,7 @@ const { generateChunk, generateChunkDecorations } = require('../src/services/map
 // If you are here because this failed: the change is probably fine. Update the
 // value below, then re-derive the three fixtures named in the message.
 test('the footprint geometry three fixtures depend on', () => {
-  assert.equal(FOOTPRINT_SCALE, 1.0);
+  assert.equal(FOOTPRINT_SCALE, 0.5);
   assert.equal(WALL_EPS, 0.01);
 });
 
@@ -56,24 +56,24 @@ function wallTile(col, row) {
 }
 
 test('footprint tests BOTH leading-edge corners (one corner in a wall tile blocks)', () => {
-  // Box 64x64 at (20,68) -> centre (52,100), footprint half-extent 32.
-  // East step 40: leading face 52+32=84 -> destination 124, column 1.
+  // Box 64x64 at (20,68) -> centre (52,100), footprint half-extent 16 (0.5 scale).
+  // East step 40: leading face 52+16=68 -> destination 108, column 1.
   // Bottom sample hits row 1 (wall), clamps to 100 - EPS:
-  // x moves 99.99-84 = 15.99, to 35.99.
+  // x moves 99.99-68 = 31.99, to 51.99.
   const actor = { x: 20, y: 68, width: 64, height: 64, speed: 40 };
   const r = resolveMove(wallTile(1, 1), actor, 1, 0, 1);
-  assert.ok(Math.abs(r.x - 35.99) < 1e-6, `x=${r.x}`);
+  assert.ok(Math.abs(r.x - 51.99) < 1e-6, `x=${r.x}`);
   assert.equal(r.y, 68);
   assert.equal(r.moved, true);
 });
 
 test('a blocked step CLAMPS the footprint up to the wall face (not reject)', () => {
-  // Box at x=20 -> centre 52, east footprint face 52+32=84. Wall column 1 (x>=100).
-  // Step east 40 would put that face at 124, inside wall; clamp to 100-EPS: x = 35.99.
+  // Box at x=20 -> centre 52, east footprint face 52+16=68. Wall column 1 (x>=100).
+  // Step east 40 would put that face at 108, inside wall; clamp to 100-EPS: x = 51.99.
   const actor = { x: 20, y: 0, width: 64, height: 64, speed: 40 };
   const r = resolveMove(wallColumn(1), actor, 1, 0, 1);
-  assert.ok(Math.abs(r.x - 35.99) < 1e-6, `x=${r.x}`);
-  assert.ok(Math.abs((r.x + 64) - 99.99) < 1e-6, `face=${r.x + 64}`);
+  assert.ok(Math.abs(r.x - 51.99) < 1e-6, `x=${r.x}`);
+  assert.ok(Math.abs((r.x + 48) - 99.99) < 1e-6, `face=${r.x + 48}`);
   assert.equal(r.y, 0);
   assert.equal(r.moved, true);
 });
@@ -113,7 +113,7 @@ test('resolveMove normalizes diagonals (not faster than an axis)', () => {
 test('X clamps to the wall face while Y slides free (footprint)', () => {
   const actor = { x: 0, y: 0, width: 64, height: 64, speed: 200 };
   const r = resolveMove(wallColumn(1), actor, 1, 1, 0.5);
-  assert.ok(Math.abs(r.x - 35.99) < 1e-6, `x=${r.x}`);
+  assert.ok(Math.abs(r.x - 51.99) < 1e-6, `x=${r.x}`);
   assert.ok(r.y > 0);
   assert.equal(r.moved, true);
 });
@@ -127,7 +127,7 @@ test('collision is dt-invariant near a wall: one big step == many small steps', 
   const big = run(0.05, 10);
   const small = run(0.05 / 3, 30);
   assert.ok(Math.abs(big - small) < 1e-9, `dt divergence: big=${big} small=${small}`);
-  assert.ok(Math.abs(big - 35.99) < 1e-6, `x=${big}`);
+  assert.ok(Math.abs(big - 51.99) < 1e-6, `x=${big}`);
 });
 
 test('flush against a wall, a parallel move slides at full speed (EPS corner inset)', () => {

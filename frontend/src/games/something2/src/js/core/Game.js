@@ -113,6 +113,22 @@ export const DEFAULT_KEYBINDS = {
     pickup: 'g',
 };
 
+export function getMouseKeyNames(button) {
+    if (button === 0) return ['mouse1', 'lmb', 'left', 'left click'];
+    if (button === 1) return ['mouse3', 'mmb', 'middle', 'middle click'];
+    if (button === 2) return ['mouse2', 'rmb', 'right', 'right click'];
+    if (button === 3) return ['mouse4', 'back'];
+    if (button === 4) return ['mouse5', 'forward'];
+    return [`mouse${button + 1}`];
+}
+
+export function matchesMouseKey(boundKey, button) {
+    if (!boundKey) return false;
+    const b = String(boundKey).toLowerCase().trim();
+    const names = getMouseKeyNames(button);
+    return names.includes(b);
+}
+
 export class Game {
     constructor() {
         console.log("Game constructor");
@@ -598,6 +614,9 @@ export class Game {
         this.mainStat = mainStat;
         this.hotbarSkills = loadHotbarForCharacter(characterId, this.className || className || 'Warrior');
         this.unlockedSkills = loadUnlockedSkillsForCharacter(characterId);
+        this._channeledSlot = null;
+        this._channeledSkillId = null;
+        this._lastChannelTick = 0;
         this.skillVisuals = [];
         this.merchants = [];
         this.skillMerchants = [];
@@ -1117,6 +1136,94 @@ export class Game {
         if (should) this._sendAttackAtCursor();
     }
 
+    _stopChanneledSkill(skillId) {
+        const id = skillId || this._channeledSkillId;
+        if (id) {
+            const nowMs = performance.now();
+            const RELEASE_CD_MS = 1000; // 1 second cooldown after releasing channeled skill
+            const existingCd = this.skillCooldowns.get(id) || 0;
+            if (nowMs >= existingCd) {
+                this.skillCooldowns.set(id, nowMs + RELEASE_CD_MS);
+            }
+        }
+        this._channeledSlot = null;
+        this._channeledSkillId = null;
+    }
+
+    _isSlotHeld(slot) {
+        if (!this.keys) return false;
+        const binds = this.keybinds || DEFAULT_KEYBINDS;
+        const bind = String(binds[`slot${slot}`] || `${slot}`).toLowerCase().trim();
+        if (this.keys[bind] || this.keys[`${slot}`] || this.keys[`digit${slot}`] || this.keys[`numpad${slot}`]) {
+            return true;
+        }
+        if (bind === ' ' || bind === 'space' || bind === 'spacebar') {
+            return !!this.keys[' '] || !!this.keys['space'] || !!this.keys['spacebar'];
+        }
+        if (bind === 'mouse1' || bind === 'lmb' || bind === 'left') {
+            return this._attackHeld || !!this.keys['mouse1'] || !!this.keys['lmb'] || !!this.keys['left'];
+        }
+        if (bind === 'mouse2' || bind === 'rmb' || bind === 'right') {
+            return !!this.keys['mouse2'] || !!this.keys['rmb'] || !!this.keys['right'];
+        }
+        if (bind === 'mouse3' || bind === 'mmb' || bind === 'middle') {
+            return !!this.keys['mouse3'] || !!this.keys['mmb'] || !!this.keys['middle'];
+        }
+        if (bind === 'mouse4' || bind === 'back') {
+            return !!this.keys['mouse4'] || !!this.keys['back'];
+        }
+        if (bind === 'mouse5' || bind === 'forward') {
+            return !!this.keys['mouse5'] || !!this.keys['forward'];
+        }
+        if (this.keys[`key${bind}`]) return true;
+        return false;
+    }
+
+    _tickConstantSkills() {
+        if (!this.constantAttack) return;
+        if (this.state !== 'playing' || !this.chunked || !this.authorityClient) return;
+        if (this._anyPanelOpen()) return;
+
+        const nowMs = performance.now();
+        for (let slot = 1; slot <= 9; slot++) {
+            if (this._isSlotHeld(slot)) {
+                const s = this.hotbarSkills.get(slot);
+                if (!s) continue;
+                if (s.channeled || isTransformationSkill(s)) continue;
+
+                const readyAt = this.skillCooldowns.get(s.id) || 0;
+                if (nowMs >= readyAt) {
+                    this._activateHotbarSkill(slot, true);
+                }
+            }
+        }
+    }
+
+    _tickChanneledSkill() {
+        if (this._channeledSlot == null) return;
+        if (this._anyPanelOpen()) {
+            this._stopChanneledSkill();
+            return;
+        }
+        const s = this.hotbarSkills.get(this._channeledSlot);
+        if (!s || !s.channeled || s.id !== this._channeledSkillId) {
+            this._stopChanneledSkill();
+            return;
+        }
+
+        if (!this._isSlotHeld(this._channeledSlot)) {
+            this._stopChanneledSkill();
+            return;
+        }
+
+        const nowMs = performance.now();
+        const CHANNEL_INTERVAL_MS = 250;
+        if (nowMs - (this._lastChannelTick || 0) >= CHANNEL_INTERVAL_MS) {
+            this._lastChannelTick = nowMs;
+            this._activateHotbarSkill(this._channeledSlot, true);
+        }
+    }
+
     // The server refused an attack. Only a refusal the player cannot wait out
     // ends the hold -- see refusalStopsHold for why a cooldown refusal must
     // not, and why a shock interrupt must not either.
@@ -1129,6 +1236,7 @@ export class Game {
     // player: you have run out, so the character stops.
     _stopConstantAttack() {
         this._attackHeld = false;
+        this._stopChanneledSkill();
     }
 
     // Purely local: no server involvement, so unlike setAutoLoot this always
@@ -1200,6 +1308,10 @@ export class Game {
         if (this._mouseUpHandler) this.canvas.removeEventListener('mouseup', this._mouseUpHandler);
         if (this._windowMouseUpHandler) window.removeEventListener('mouseup', this._windowMouseUpHandler);
         if (this._wheelHandler) this.canvas.removeEventListener('wheel', this._wheelHandler);
+        if (this._auxClickHandler) {
+            window.removeEventListener('auxclick', this._auxClickHandler);
+            if (this.canvas) this.canvas.removeEventListener('auxclick', this._auxClickHandler);
+        }
         if (this.authorityClient) this.authorityClient.disconnect();
         if (this._audioMissTimer) clearInterval(this._audioMissTimer);
         if (this.audio) { this.audio.destroy(); this.audio = null; }
@@ -1241,9 +1353,19 @@ export class Game {
             if (this.authorityClient) {
                 const { dx, dy } = inputVector(keys);
                 const s = this.authorityClient.sendInput(dx, dy, dt);
-                if (s.sent) this._inputBuffer.push({ seq: s.seq, dx: s.dx, dy: s.dy, dt: s.dt });
+                if (s.sent) {
+                    if (Array.isArray(s.inputs)) {
+                        for (const inp of s.inputs) {
+                            this._inputBuffer.push({ seq: inp.seq, dx: inp.dx, dy: inp.dy, dt: inp.dt });
+                        }
+                    } else {
+                        this._inputBuffer.push({ seq: s.seq, dx: s.dx, dy: s.dy, dt: s.dt });
+                    }
+                }
             }
             this._tickConstantAttack();
+            this._tickChanneledSkill();
+            this._tickConstantSkills();
             if (this.skillVisuals && this.skillVisuals.length > 0) {
                 this.skillVisuals = updateSkillVisuals(this.skillVisuals, dt, nowMs, (proj) => {
                     const elem = (proj && proj.element) || 'fire';
@@ -1326,7 +1448,7 @@ export class Game {
             if (errDist > 64) {
                 this.player.x = out.x;
                 this.player.y = out.y;
-            } else if (errDist >= 1.0) {
+            } else if (isMoving ? errDist >= 1.0 : errDist >= 2.0) {
                 this.player.x += errX * 0.25;
                 this.player.y += errY * 0.25;
             }
@@ -1909,7 +2031,7 @@ export class Game {
         return list;
     }
 
-    _activateHotbarSkill(slotNum) {
+    _activateHotbarSkill(slotNum, isContinuous = false) {
         const s = this.hotbarSkills.get(slotNum);
         if (!s) {
             if (!this.className && !this.passiveStartClass) {
@@ -1992,11 +2114,14 @@ export class Game {
             return;
         }
 
-        // 4. Check cooldown
+        // 4. Check cooldown (applies to standard skills and channeled post-release cooldown)
         const readyAt = this.skillCooldowns.get(s.id) || 0;
         if (nowMs < readyAt) {
             const remaining = ((readyAt - nowMs) / 1000).toFixed(1);
-            if (this.showToast) this.showToast(`⏳ ${s.nameEn} on cooldown (${remaining}s)`);
+            if (!isContinuous && this.showToast) this.showToast(`⏳ ${s.nameEn || s.nameUk} on cooldown (${remaining}s)`);
+            if (s.channeled && isContinuous) {
+                this._stopChanneledSkill(s.id);
+            }
             return;
         }
 
@@ -2005,24 +2130,40 @@ export class Game {
         if (s.costType === 'mana' && cost > 0) {
             const currentMana = this.localMana != null ? this.localMana : 100;
             if (currentMana < cost) {
-                if (this.showToast) this.showToast(`⚠️ Not enough Mana! (Need ${cost} MP, have ${Math.round(currentMana)})`);
+                if (!isContinuous && this.showToast) this.showToast(`⚠️ Not enough Mana! (Need ${cost} MP, have ${Math.round(currentMana)})`);
+                if (s.channeled) {
+                    this._stopChanneledSkill(s.id);
+                }
                 return;
             }
             this.localMana = Math.max(0, currentMana - cost);
         } else if (s.costType === 'stamina' && cost > 0) {
             const currentStamina = this.localStamina != null ? this.localStamina : 100;
             if (currentStamina < cost) {
-                if (this.showToast) this.showToast(`⚠️ Not enough Stamina! (Need ${cost} SP, have ${Math.round(currentStamina)})`);
+                if (!isContinuous && this.showToast) this.showToast(`⚠️ Not enough Stamina! (Need ${cost} SP, have ${Math.round(currentStamina)})`);
+                if (s.channeled) {
+                    this._stopChanneledSkill(s.id);
+                }
                 return;
             }
             this.localStamina = Math.max(0, currentStamina - cost);
         } else if (s.costType === 'hp' && cost > 0) {
             const currentHp = (this.player && this.player.hp != null) ? this.player.hp : 100;
             if (currentHp <= cost) {
-                if (this.showToast) this.showToast(`⚠️ Not enough Life!`);
+                if (!isContinuous && this.showToast) this.showToast(`⚠️ Not enough Life!`);
+                if (s.channeled) {
+                    this._stopChanneledSkill(s.id);
+                }
                 return;
             }
             this.player.hp = Math.max(1, currentHp - cost);
+        }
+
+        // All checks passed — activate channeling if this is a channeled skill
+        if (s.channeled && !isContinuous) {
+            this._channeledSlot = slotNum;
+            this._channeledSkillId = s.id;
+            this._lastChannelTick = nowMs;
         }
 
         // 6. Target resolution & Max Range enforcement (prevents casting across the whole screen)
@@ -2075,8 +2216,10 @@ export class Game {
         }
 
         // 6. Set cooldown
-        const cdSec = s.cooldown || 1;
-        this.skillCooldowns.set(s.id, nowMs + cdSec * 1000);
+        if (!s.channeled) {
+            const cdSec = s.cooldown || 1;
+            this.skillCooldowns.set(s.id, nowMs + cdSec * 1000);
+        }
 
         // 7. Trigger distinct skill visual effects through the Attack Effects (vfx_effects) library
         const visual = createSkillVisual(s, px, py, targetX, targetY, aimAngle, nowMs);
@@ -2084,7 +2227,9 @@ export class Game {
         const nx = Math.cos(aimAngle);
         const ny = Math.sin(aimAngle);
         const vfxName = resolveSkillVfx(s);
-        const reach = s.type === 'melee' ? (Number(s.range) || 90) : (Number(s.radius) || 80) * 1.5;
+        const isSpin = s.channeled && (s.id.includes('whirlwind') || s.id.includes('spin') || s.id.includes('crane') || s.id.includes('cyclone'));
+        const reach = isSpin ? 120 : (s.type === 'melee' ? (Number(s.range) || 90) : (Number(s.radius) || 80) * 1.5);
+        const arc = isSpin ? Math.PI * 2 : (s.type === 'melee' ? Math.PI * 0.75 : Math.PI * 2);
 
         if (visual) {
             const list = Array.isArray(visual) ? visual : [visual];
@@ -2105,11 +2250,11 @@ export class Game {
         if (!isFlyingProjectile) {
             addEffects(this.vfx, [{
                 v: vfxName,
-                x: s.type === 'melee' ? px : targetX,
-                y: s.type === 'melee' ? py : targetY,
+                x: s.type === 'melee' ? px : (isSpin ? px : targetX),
+                y: s.type === 'melee' ? py : (isSpin ? py : targetY),
                 nx, ny,
                 reach,
-                arc: s.type === 'melee' ? Math.PI * 0.75 : Math.PI * 2,
+                arc,
                 el: elem,
                 hit: true,
             }], nowMs, this.vfxDefs);
@@ -2117,13 +2262,13 @@ export class Game {
 
             // Blasts for ground impacts
             if (s.type === 'melee') {
-                addBlasts(this.blasts, [{ x: targetX, y: targetY, radius: 70, element: elem }], nowMs);
+                addBlasts(this.blasts, [{ x: isSpin ? px : targetX, y: isSpin ? py : targetY, radius: isSpin ? 110 : 70, element: elem }], nowMs);
             } else if (s.type === 'buff') {
                 addBlasts(this.blasts, [{ x: px, y: py, radius: 75, element: 'holy' }], nowMs);
             } else if (s.type === 'debuff') {
                 addBlasts(this.blasts, [{ x: targetX, y: targetY, radius: 85, element: 'shadow' }], nowMs);
             } else {
-                addBlasts(this.blasts, [{ x: targetX, y: targetY, radius: 95, element: elem }], nowMs);
+                addBlasts(this.blasts, [{ x: isSpin ? px : targetX, y: isSpin ? py : targetY, radius: isSpin ? 110 : 95, element: elem }], nowMs);
             }
         }
 
@@ -2188,8 +2333,11 @@ export class Game {
             this.authorityClient.sendCastSkill(s.id, targetX, targetY, nx, ny);
         }
 
-        // Normal skill cast toast
-        if (this.showToast) this.showToast(`Cast: ${s.nameEn} ${s.icon || '✨'} (-${cost} ${s.costType.toUpperCase()})`);
+        // Skill cast toast
+        if (!isContinuous && this.showToast) {
+            const mode = s.channeled ? 'Channelling' : 'Cast';
+            this.showToast(`${mode}: ${s.nameEn || s.nameUk} ${s.icon || '✨'} (-${cost} ${s.costType.toUpperCase()})`);
+        }
     }
 
     setupInput(){
@@ -2391,6 +2539,15 @@ export class Game {
             this.keys[key] = false;
             if (cyrillicMapped) this.keys[cyrillicMapped] = false;
             if (codeKey) this.keys[codeKey] = false;
+            if (e.code) this.keys[e.code.toLowerCase()] = false;
+
+            if (this._channeledSlot != null) {
+                const binds = this.keybinds || DEFAULT_KEYBINDS;
+                const bind = String(binds[`slot${this._channeledSlot}`] || `${this._channeledSlot}`).toLowerCase().trim();
+                if (key === bind || codeKey === bind || cyrillicMapped === bind || key === `${this._channeledSlot}` || codeKey === `${this._channeledSlot}`) {
+                    this._stopChanneledSkill();
+                }
+            }
         };
 
         // Both of these also drop a held attack (SOMET-494). A right-click or a
@@ -2399,8 +2556,12 @@ export class Game {
         // without reloading -- the same reason both already clear this.keys.
         this._contextMenuHandler = (e) => {
             if (typeof e?.preventDefault === 'function') e.preventDefault();
-            this.keys = {};
+            const mouseNames = ['mouse1', 'mouse2', 'mouse3', 'mouse4', 'mouse5', 'lmb', 'rmb', 'mmb', 'left', 'right', 'middle', 'back', 'forward'];
+            for (const mn of mouseNames) {
+                this.keys[mn] = false;
+            }
             this._attackHeld = false;
+            this._stopChanneledSkill();
             if (this.passiveTreeOpen) {
                 this._handlePassivePress(this._cursorX ?? 0, this._cursorY ?? 0, true);
             }
@@ -2409,6 +2570,7 @@ export class Game {
         this._blurHandler = () => {
             this.keys = {};
             this._attackHeld = false;
+            this._stopChanneledSkill();
         };
 
         // Mouse aim (Slice 3b): track cursor canvas-px position, and on
@@ -2680,21 +2842,90 @@ export class Game {
                 return;
             }
 
+            const mouseNames = getMouseKeyNames(e.button);
             if (e.button !== 0) {
-                const mouseKey = e.button === 2 ? 'mouse2' : (e.button === 1 ? 'mouse3' : 'mouse1');
-                const binds = this.keybinds || DEFAULT_KEYBINDS;
-                for (let slot = 1; slot <= 9; slot++) {
-                    const bind = String(binds[`slot${slot}`] || '').toLowerCase();
-                    if (bind === mouseKey || (e.button === 2 && (bind === 'rmb' || bind === 'right' || bind === 'right click' || bind === 'mouse2')) || (e.button === 1 && (bind === 'mmb' || bind === 'middle' || bind === 'middle click' || bind === 'mouse3'))) {
-                        if (!this.skillsOpen && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen && !this.inventoryOpen && !this.gemShopOpen) {
-                            if (typeof e.preventDefault === 'function') e.preventDefault();
-                            this._activateHotbarSkill(slot);
-                            return;
-                        }
+                if (typeof e.preventDefault === 'function') e.preventDefault();
+                if (typeof e.stopPropagation === 'function') e.stopPropagation();
+            }
+            for (const mn of mouseNames) {
+                this.keys[mn] = true;
+            }
+
+            const binds = this.keybinds || DEFAULT_KEYBINDS;
+            const matchesThisMouse = (actionKey, fallback) => {
+                const bound = (binds && binds[actionKey] !== undefined) ? binds[actionKey] : (DEFAULT_KEYBINDS[actionKey] || fallback);
+                return matchesMouseKey(bound, e.button);
+            };
+
+            // 1. Check hotbar slot mouse bindings (slots 1..9)
+            for (let slot = 1; slot <= 9; slot++) {
+                if (matchesThisMouse(`slot${slot}`, `${slot}`)) {
+                    if (!this.skillsOpen && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen && !this.inventoryOpen && !this.gemShopOpen) {
+                        if (typeof e.preventDefault === 'function') e.preventDefault();
+                        this._activateHotbarSkill(slot);
+                        return;
                     }
+                }
+            }
+
+            // 2. Check UI/Action mouse bindings
+            if (matchesThisMouse('inventory', 'i') && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen) {
+                if (this.inventoryOpen) this.closeInventory();
+                else this.inventoryOpen = true;
+                return;
+            }
+            if (matchesThisMouse('character', 'c') && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen) {
+                if (this.inventoryOpen && this.inventoryTab === 'character') {
+                    this.closeInventory();
+                } else {
+                    this.inventoryOpen = true;
+                    this.inventoryTab = 'character';
+                    this.inventoryPage = 0;
+                    this.characterModPage = 0;
+                    this._refreshProgressionBundle();
                 }
                 return;
             }
+            if (matchesThisMouse('passiveTree', 'p') && !this.inventoryOpen && !this.shopOpen && !this.bankOpen) {
+                if (this.passiveTreeOpen) this.closePassiveTree();
+                else this.openPassiveTree();
+                return;
+            }
+            if (matchesThisMouse('skills', 'k') && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen && !this.inventoryOpen) {
+                this.skillsOpen = !this.skillsOpen;
+                return;
+            }
+            if (matchesThisMouse('interact', 'e') && !this.inventoryOpen && !this.bankOpen) {
+                if (this.gemShopOpen) { this.gemShopOpen = false; return; }
+                if (this.shopOpen) { this.shopOpen = false; return; }
+                if (this.skillsOpen) { this.skillsOpen = false; return; }
+                const pcx = this.player ? this.player.x + (this.player.width || 64) / 2 : 0;
+                const pcy = this.player ? this.player.y + (this.player.height || 64) / 2 : 0;
+                const nearSkillMerchant = (Array.isArray(this.skillMerchants) ? this.skillMerchants : []).some((sm) => Math.hypot(sm.x - pcx, sm.y - pcy) <= 140);
+                const nearGm = Array.isArray(this.gemMerchants) && this.gemMerchants.find(gm => Math.hypot(gm.x - pcx, gm.y - pcy) <= 140);
+                if (nearSkillMerchant || nearGm) {
+                    this.gemShopOpen = true;
+                    this.skillsOpen = false;
+                    return;
+                }
+                if (this.authorityClient) this.authorityClient.sendInteract();
+                return;
+            }
+            if (matchesThisMouse('bank', 'b') && !this.inventoryOpen && !this.shopOpen) {
+                if (this.bankOpen) { this.bankOpen = false; return; }
+                if (this.authorityClient) this.authorityClient.sendOpenBank();
+                return;
+            }
+            if (matchesThisMouse('openChest', 'f') && !this.inventoryOpen && !this.shopOpen && !this.bankOpen) {
+                if (this.authorityClient) this.authorityClient.sendOpenChest();
+                return;
+            }
+            if (matchesThisMouse('pickup', 'g') && !this.inventoryOpen && !this.bankOpen) {
+                if (this.authorityClient) this.authorityClient.sendPickup();
+                return;
+            }
+
+            if (e.button !== 0) return;
 
             // While a panel is open, clicks hit-test it and must NOT also
             // fire an attack. Shop is checked first — the two panels never
@@ -2788,9 +3019,31 @@ export class Game {
         // which owns inventory-drag resolution and must stay canvas-scoped.
         this._windowMouseUpHandler = (e) => {
             if (e.button === 0) this._attackHeld = false;
+            const mouseNames = getMouseKeyNames(e.button);
+            for (const mn of mouseNames) {
+                this.keys[mn] = false;
+            }
+            if (this._channeledSlot != null) {
+                const binds = this.keybinds || DEFAULT_KEYBINDS;
+                const bound = String(binds[`slot${this._channeledSlot}`] || `${this._channeledSlot}`).toLowerCase().trim();
+                if (matchesMouseKey(bound, e.button)) {
+                    this._stopChanneledSkill();
+                }
+            }
         };
 
         this._mouseUpHandler = (e) => {
+            const mouseNames = getMouseKeyNames(e.button);
+            for (const mn of mouseNames) {
+                this.keys[mn] = false;
+            }
+            if (this._channeledSlot != null) {
+                const binds = this.keybinds || DEFAULT_KEYBINDS;
+                const bound = String(binds[`slot${this._channeledSlot}`] || `${this._channeledSlot}`).toLowerCase().trim();
+                if (matchesMouseKey(bound, e.button)) {
+                    this._stopChanneledSkill();
+                }
+            }
             if (e.button !== 0) return;
             if (this.skillDrag) {
                 const sDrag = this.skillDrag;
@@ -2875,17 +3128,26 @@ export class Game {
             );
         };
 
+        this._auxClickHandler = (e) => {
+            if (this.state === 'playing' && this.chunked) {
+                if (typeof e.preventDefault === 'function') e.preventDefault();
+                if (typeof e.stopPropagation === 'function') e.stopPropagation();
+            }
+        };
+
         if (typeof window !== 'undefined') {
             window.addEventListener('keydown', this._keydownHandler);
             window.addEventListener('keyup', this._keyupHandler);
             window.addEventListener('contextmenu', this._contextMenuHandler);
             window.addEventListener('blur', this._blurHandler);
             window.addEventListener('mouseup', this._windowMouseUpHandler);
+            window.addEventListener('auxclick', this._auxClickHandler);
         }
         if (this.canvas && typeof this.canvas.addEventListener === 'function') {
             this.canvas.addEventListener('mousemove', this._mouseMoveHandler);
             this.canvas.addEventListener('mousedown', this._mouseDownHandler);
             this.canvas.addEventListener('mouseup', this._mouseUpHandler);
+            this.canvas.addEventListener('auxclick', this._auxClickHandler);
             this.canvas.addEventListener('wheel', this._wheelHandler, { passive: false });
         }
     }

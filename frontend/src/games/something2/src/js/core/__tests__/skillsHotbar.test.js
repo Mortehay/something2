@@ -743,6 +743,38 @@ describe("Skills Purchasing & Unlocking Mechanics", () => {
 
     expect(castSlot).toBe(1);
   });
+
+  it("does not restart or overwrite cooldown of channeled skills if pressed again during active cooldown", () => {
+    const whirlwind = getSkillById("war_whirlwind");
+    expect(whirlwind.channeled).toBe(true);
+    g.hotbarSkills.set(1, whirlwind);
+    g.localStamina = 100;
+    g.player = { x: 100, y: 100, hp: 100, maxHp: 100, className: "Warrior" };
+    g.progression = { strength: 50, dexterity: 50, constitution: 50, level: 10 };
+    g.inventory = {
+      equipment: { main_hand: "item_sword" },
+      types: { item_sword: { id: "item_sword", name: "crude-sword", kind: "weapon", category: "Melee" } }
+    };
+
+    // 1. Activate channeled skill
+    g._activateHotbarSkill(1);
+    expect(g._channeledSlot).toBe(1);
+    expect(g._channeledSkillId).toBe("war_whirlwind");
+
+    // 2. Stop/release channeled skill -> sets 1s release cooldown
+    g._stopChanneledSkill();
+    expect(g._channeledSlot).toBe(null);
+    const initialCd = g.skillCooldowns.get("war_whirlwind");
+    expect(initialCd).toBeGreaterThan(performance.now());
+
+    // 3. Try to press skill again while on cooldown
+    g._activateHotbarSkill(1);
+    // Should NOT have started channeling because it's on cooldown
+    expect(g._channeledSlot).toBe(null);
+    // Keyup / stop should not alter or extend the cooldown expiration time
+    g._stopChanneledSkill();
+    expect(g.skillCooldowns.get("war_whirlwind")).toBe(initialCd);
+  });
 });
 
 

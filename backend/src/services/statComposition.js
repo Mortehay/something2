@@ -70,6 +70,8 @@ const RULE_COMBINE = {
   hpRegen: 'sum',
   // Passive mana regeneration (mana/s) flat bonus from the tree. `sum`, identity 0.
   manaRegen: 'sum',
+  // Passive stamina regeneration (stamina/s) flat bonus from the tree. `sum`, identity 0.
+  staminaRegen: 'sum',
 };
 const RULE_IDENTITY = { product: 1, sum: 0, min: null };
 

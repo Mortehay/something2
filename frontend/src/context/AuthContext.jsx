@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { API_URL } from "../config";
 import {
@@ -10,6 +11,7 @@ import { deriveAuth, shouldSignOutOnProbe } from "./authState";
 const AuthContext = createContext(null);
 
 function AuthProvider({ children }) {
+  const queryClient = useQueryClient();
   // Source of truth for "who is signed in". Initialised from storage so a page
   // reload keeps the session instead of minting a new anonymous user
   // (SOMET-97); getStoredToken() clears an expired/malformed token itself.
@@ -18,7 +20,12 @@ function AuthProvider({ children }) {
 
   // Login.jsx calls storeToken() itself before invoking onAuthed(), so the
   // default re-reads storage rather than making the caller hand it over twice.
-  const signIn = useCallback((next = getStoredToken()) => setToken(next), []);
+  // We clear the queryClient cache so no cached admin queries or stale character
+  // data leak into the new account session.
+  const signIn = useCallback((next = getStoredToken()) => {
+    queryClient.clear();
+    setToken(next);
+  }, [queryClient]);
 
   const signOut = useCallback(() => {
     clearToken();
@@ -26,8 +33,9 @@ function AuthProvider({ children }) {
     // it behind means the next account to sign in here inherits a stale id and
     // is bounced by the server's ownership check on its first join.
     clearActiveCharacterId();
+    queryClient.clear();
     setToken(null);
-  }, []);
+  }, [queryClient]);
 
   // A token can be REVOKED while still being well-formed and unexpired: any
   // token_version bump (logout-everywhere, `make admin-password`) leaves the
@@ -57,12 +65,14 @@ function AuthProvider({ children }) {
   // storage by noteAuthFailure, so this only has to drop the in-memory state.
   useEffect(() => {
     const onExpired = () => {
+      clearActiveCharacterId();
+      queryClient.clear();
       setToken(null);
       toast.error("Session expired — please sign in again");
     };
     globalThis.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
     return () => globalThis.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);
-  }, []);
+  }, [queryClient]);
 
   const value = useMemo(
     () => ({ authed, isAdmin, username, signIn, signOut }),

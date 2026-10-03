@@ -164,14 +164,41 @@ export class WorldAuthorityClient {
     }
   }
 
-  // Returns {sent, seq?, dx?, dy?, dt?}. dt is the seconds accumulated since the
+  // Returns {sent, seq?, dx?, dy?, dt?, inputs?}. dt is the seconds accumulated since the
   // previous actual send (so replay during reconciliation uses the real dt).
   sendInput(dx, dy, dt) {
-    this._accumDt += dt;
-    if (!this.connected) return { sent: false };
+    if (!this.connected) {
+      this._accumDt += dt;
+      return { sent: false };
+    }
     const now = this.now();
     const dirChanged = (this._lastDx !== undefined && (dx !== this._lastDx || dy !== this._lastDy));
-    if (!dirChanged && (now - this._lastSentAt < this.inputIntervalMs)) return { sent: false };
+    const inputs = [];
+
+    // If direction changed and we accumulated dt while moving in the previous direction,
+    // flush that previous movement first so the authority and client replay do not drop the distance traveled!
+    if (dirChanged && this._accumDt > 0 && (this._lastDx !== 0 || this._lastDy !== 0)) {
+      const flushSeq = ++this._seq;
+      const flushDt = this._accumDt;
+      this._send({ type: 'input', seq: flushSeq, dx: this._lastDx, dy: this._lastDy, dt: flushDt });
+      inputs.push({ seq: flushSeq, dx: this._lastDx, dy: this._lastDy, dt: flushDt });
+      this._accumDt = 0;
+    }
+
+    this._accumDt += dt;
+
+    if (!dirChanged && (now - this._lastSentAt < this.inputIntervalMs)) {
+      if (inputs.length === 0) return { sent: false };
+      return {
+        sent: true,
+        seq: inputs[inputs.length - 1].seq,
+        dx: inputs[inputs.length - 1].dx,
+        dy: inputs[inputs.length - 1].dy,
+        dt: inputs[inputs.length - 1].dt,
+        inputs,
+      };
+    }
+
     const seq = ++this._seq;
     const sentDt = this._accumDt;
     this._send({ type: 'input', seq, dx, dy, dt: sentDt });
@@ -179,7 +206,16 @@ export class WorldAuthorityClient {
     this._lastDx = dx;
     this._lastDy = dy;
     this._accumDt = 0;
-    return { sent: true, seq, dx, dy, dt: sentDt };
+    inputs.push({ seq, dx, dy, dt: sentDt });
+
+    return {
+      sent: true,
+      seq,
+      dx,
+      dy,
+      dt: sentDt,
+      inputs,
+    };
   }
 
   ping() { this._send({ type: 'ping' }); }

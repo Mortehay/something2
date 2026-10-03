@@ -771,8 +771,8 @@ export class RenderSystem {
 
     // 2. Metrics Grid: Damage, Cost, Cooldown, Range, Element
     const dmgInfo = resolveSkillDamage(skill);
-    const costText = `${skill.cost || 0} ${(skill.costType || 'mana').toUpperCase()}`;
-    const cdText = skill.cooldown ? `${skill.cooldown}s` : 'None';
+    const costText = skill.channeled ? `${(skill.cost || 0) * 4}/s ${(skill.costType || 'mana').toUpperCase()}` : `${skill.cost || 0} ${(skill.costType || 'mana').toUpperCase()}`;
+    const cdText = skill.channeled ? 'Channeled' : (skill.cooldown ? `${skill.cooldown}s` : 'None');
     const rangeText = skill.range ? `${skill.range} px` : (skill.type === 'melee' ? 'Melee (80)' : 'Self');
     const elemText = (skill.element || (skill.class === 'Archer' ? 'Physical' : 'Arcane')).toUpperCase();
 

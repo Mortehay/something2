@@ -120,7 +120,7 @@ test('every rule key names the module that consumes it and how duplicates combin
     ['attackSpeedMult', 'auraLeech', 'auraRadius', 'castSpeedMult', 'cooldownFloor',
       'hpRegen', 'lifeCostMultiplier', 'manaRegen', 'meleeArcBonus', 'meleeDamageMult', 'meleeReachBonus',
       'meleeWaveShare', 'pierceBonus', 'projectileCount', 'projectileSpeedMult',
-      'regenLifeShare', 'treeCharmBonus']);
+      'regenLifeShare', 'staminaRegen', 'treeCharmBonus']);
   for (const [key, def] of Object.entries(RULE_KEYS)) {
     assert.ok(['sum', 'product', 'min'].includes(def.combine), `${key}.combine`);
     assert.ok(typeof def.consumer === 'string' && def.consumer.length > 0, `${key}.consumer`);
@@ -130,6 +130,7 @@ test('every rule key names the module that consumes it and how duplicates combin
   assert.strictEqual(RULE_KEYS.cooldownFloor.combine, 'min');
   assert.strictEqual(RULE_KEYS.hpRegen.combine, 'sum');
   assert.strictEqual(RULE_KEYS.manaRegen.combine, 'sum');
+  assert.strictEqual(RULE_KEYS.staminaRegen.combine, 'sum');
   // SOMET-519: `product`, so four +10% satellites compound to x1.46 rather
   // than adding to +40%. That is what keeps a cluster's last satellite worth
   // taking.

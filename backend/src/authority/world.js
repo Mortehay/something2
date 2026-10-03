@@ -606,7 +606,10 @@ class World {
           p.hp = Math.min(p.maxHp, p.hp + hpRegenRate * dt);
         }
       }
-      if (p.stamina < p.maxStamina) p.stamina = Math.min(p.maxStamina, p.stamina + PLAYER_STAMINA_REGEN * dt);
+      if (p.stamina < p.maxStamina) {
+        const stamRegenRate = p.stats.staminaRegen ?? (PLAYER_STAMINA_REGEN + ((p.stats.rules && p.stats.rules.staminaRegen) || 0));
+        p.stamina = Math.min(p.maxStamina, p.stamina + stamRegenRate * dt);
+      }
       // SOMET-522. THE LEECH AURA -- the Cultist's Sanguine Aura cluster.
       //
       // Resolved once a SECOND, not once a frame: the numbers are authored as
@@ -1419,8 +1422,9 @@ class World {
 
     if (skill.type === 'melee') {
       const { nx, ny } = normalizeAim(ax, ay, p.facing);
-      const reach = Math.max(85, (Number(skill.range) || 85) * 1.25);
-      const arc = Math.PI * 0.75;
+      const isSpin = skill.channeled || skill.id.includes('whirlwind') || skill.id.includes('spin') || skill.id.includes('crane');
+      const reach = isSpin ? 120 : Math.max(85, (Number(skill.range) || 85) * 1.25);
+      const arc = isSpin ? (Math.PI * 2) : (Math.PI * 0.75);
       // The same target set applyMeleeArc resolves, read before it can
       // remove a kill.
       for (const id of this.creatures.meleeArcTargets(px, py, nx, ny, reach, arc, pacifiedFrom)) {
@@ -1436,16 +1440,17 @@ class World {
           if (!kills.some(k => k.id === kid)) kills.push({ id: kid, killerUserId: userId });
         }
       }
-      // Life leech for sacrificial / blood siphon skills
-      if (skill.id.includes('sacrificial') || skill.id.includes('siphon') || skill.id.includes('leech')) {
-        const leechAmount = Math.max(3, Math.round(damage * 0.2));
+      // Life leech for sacrificial / blood siphon / soul drain skills
+      if (skill.id.includes('soul_drain') || skill.id.includes('sacrificial') || skill.id.includes('siphon') || skill.id.includes('leech') || skill.id.includes('blood_harvest')) {
+        const leechAmount = Math.max(3, Math.round(damage * 0.35));
         p.hp = Math.min(p.maxHp || 100, p.hp + leechAmount);
       }
     } else if (skill.type === 'magic' || skill.type === 'debuff') {
       const aoeRadius = Math.max(90, (Number(skill.radius) || 80) * 1.5);
       const isBarrage = skill.id === 'arc_barrage';
-      const isDirectionalShotgun = isBarrage || skill.id.includes('multishot') || skill.id.includes('split_shot') || skill.id.includes('aimed_shot') || skill.id.includes('piercing');
-      const isFrostNova = skill.id === 'mag_frost_nova' || skill.id.includes('frost_nova');
+      const isBeam = skill.id.includes('beam') || skill.id.includes('ray');
+      const isDirectionalShotgun = isBarrage || isBeam || skill.id.includes('multishot') || skill.id.includes('split_shot') || skill.id.includes('aimed_shot') || skill.id.includes('piercing');
+      const isCasterCentered = skill.id === 'mag_frost_nova' || skill.id.includes('frost_nova') || skill.id === 'dru_cyclone' || skill.id.includes('cyclone');
       const isSingularity = skill.id.includes('gravity') || skill.id.includes('singularity') || skill.id.includes('black_hole');
 
       // Singularity: Pull nearby creatures towards the center
@@ -1463,7 +1468,7 @@ class World {
       }
 
       if (isDirectionalShotgun) {
-        // Shotgun cone effect: all enemies in the cone or directly in front of the player (point-blank) take shotgun hits from all arrows!
+        // Shotgun cone / beam effect: all enemies in the cone or directly in front of the player take hits
         const { nx, ny } = normalizeAim(ax, ay, p.facing);
         const aimAngle = Math.atan2(ny, nx);
         const maxRange = Math.max(120, Number(skill.range) || 440);
@@ -1480,7 +1485,7 @@ class World {
             let angleDiff = Math.abs(angleToTarget - aimAngle);
             if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
 
-            // In cone (within +/- 40 deg) OR point-blank in front of archer (dist <= 85)
+            // In cone (within +/- 40 deg) OR point-blank in front of caster (dist <= 85)
             if (angleDiff <= 0.70 || dist <= 85) {
               struck.push(strike(c));
               for (let h = 0; h < hitCount; h++) {
@@ -1494,9 +1499,9 @@ class World {
           }
         }
       } else {
-        // Radial spells, Frost Nova (centered on caster px, py), Rain of Arrows, and targeted AoEs
-        const aoeCenterX = isFrostNova ? px : targetX;
-        const aoeCenterY = isFrostNova ? py : targetY;
+        // Radial spells, Frost Nova / Cyclone (centered on caster px, py), Rain of Arrows, and targeted AoEs
+        const aoeCenterX = isCasterCentered ? px : targetX;
+        const aoeCenterY = isCasterCentered ? py : targetY;
         aoeCentre = { x: aoeCenterX, y: aoeCenterY };
 
         for (let h = 0; h < hitCount; h++) {
@@ -1513,6 +1518,12 @@ class World {
             }
           }
         }
+      }
+
+      // Life leech for magic soul drain / siphon
+      if (skill.id.includes('soul_drain') || skill.id.includes('siphon') || skill.id.includes('leech')) {
+        const leechAmount = Math.max(3, Math.round(damage * 0.35));
+        p.hp = Math.min(p.maxHp || 100, p.hp + leechAmount);
       }
     } else if (skill.type === 'buff') {
       // 1. Instant recovery/heal effects

@@ -27,10 +27,11 @@ export function movementKeys(state) {
 
 export function inputVector(keys) {
     let dx = 0, dy = 0;
-    if (keys['w'] || keys['arrowup']) { dx -= 1; dy -= 1; }
-    if (keys['s'] || keys['arrowdown']) { dx += 1; dy += 1; }
-    if (keys['a'] || keys['arrowleft']) { dx -= 1; dy += 1; }
-    if (keys['d'] || keys['arrowright']) { dx += 1; dy -= 1; }
+    if (!keys) return { dx, dy };
+    if (keys['w'] || keys['arrowup'] || keys['keyw'] || keys['ц']) { dx -= 1; dy -= 1; }
+    if (keys['s'] || keys['arrowdown'] || keys['keys'] || keys['і'] || keys['ы']) { dx += 1; dy += 1; }
+    if (keys['a'] || keys['arrowleft'] || keys['keya'] || keys['ф']) { dx -= 1; dy += 1; }
+    if (keys['d'] || keys['arrowright'] || keys['keyd'] || keys['в']) { dx += 1; dy -= 1; }
     return { dx, dy };
 }
 

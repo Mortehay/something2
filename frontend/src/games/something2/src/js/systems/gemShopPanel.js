@@ -373,8 +373,8 @@ export function drawGemShopPanel(ctx, layout, state, art = null) {
     ctx.font = "11px sans-serif";
     ctx.fillStyle = "#94a3b8";
     const maxDescW = r.w - (textX - r.x) - 120;
-    const costText = `${s.cost} ${s.costType.toUpperCase()}`;
-    const cdText = `${s.cooldown}s CD`;
+    const costText = s.channeled ? `${(s.cost || 0) * 4}/s ${s.costType.toUpperCase()}` : `${s.cost} ${s.costType.toUpperCase()}`;
+    const cdText = s.channeled ? 'Channeled' : `${s.cooldown}s CD`;
     ctx.fillText(`${costText} · ${cdText} — ${s.descEn || s.descUk}`, textX, r.y + 45, maxDescW);
 
     // Buy Button

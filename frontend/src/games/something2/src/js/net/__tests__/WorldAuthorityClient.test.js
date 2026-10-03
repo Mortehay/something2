@@ -44,15 +44,33 @@ describe('WorldAuthorityClient', () => {
     expect(r2.sent).toBe(false);
 
     clock = 1060;
-    const r3 = c.sendInput(0, 1, 0.016); // 60ms since last send → send
+    const r3 = c.sendInput(1, 0, 0.016); // 60ms since last send (same dir) → send
     expect(r3.sent).toBe(true);
     expect(r3.seq).toBe(2);
-    // dt accumulated since the previous actual send (r1 already reported/reset its
-    // own dt): the throttled r2 frame (0.016) + the current r3 frame (0.016) = 0.032.
+    // dt accumulated since the previous actual send: the throttled r2 frame (0.016) + the current r3 frame (0.016) = 0.032.
     expect(r3.dt).toBeCloseTo(0.032, 5);
-    // most-recent input vector wins
     const last = FakeWS.last.sent[FakeWS.last.sent.length - 1];
-    expect(last).toMatchObject({ type: 'input', seq: 2, dx: 0, dy: 1 });
+    expect(last).toMatchObject({ type: 'input', seq: 2, dx: 1, dy: 0 });
+  });
+
+  it('flushes accumulated movement from previous direction when direction changes or stops', () => {
+    let clock = 1000;
+    const c = new WorldAuthorityClient({ url: 'ws://x/authority', token: 't', inputIntervalMs: 50, now: () => clock });
+    c.connect('w1', 5);
+    FakeWS.last._l.open();
+    FakeWS.last.sent.length = 0;
+
+    c.sendInput(1, 0, 0.016); // seq 1: dx=1, dy=0, dt=0.016
+    clock = 1020;
+    c.sendInput(1, 0, 0.016); // throttled: accumulated 0.016s in (1, 0)
+    clock = 1030;
+    const rStop = c.sendInput(0, 0, 0.016); // stopped!
+    expect(rStop.sent).toBe(true);
+    expect(rStop.inputs).toHaveLength(2);
+    expect(rStop.inputs[0]).toMatchObject({ seq: 2, dx: 1, dy: 0 });
+    expect(rStop.inputs[0].dt).toBeCloseTo(0.016, 5);
+    expect(rStop.inputs[1]).toMatchObject({ seq: 3, dx: 0, dy: 0 });
+    expect(rStop.inputs[1].dt).toBeCloseTo(0.016, 5);
   });
 
   it('dispatches a joined message to onJoined', () => {

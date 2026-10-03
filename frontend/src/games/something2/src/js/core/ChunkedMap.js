@@ -80,9 +80,18 @@ export class ChunkedMap {
     if (def && def.walkable === false) return false;
     // Blocking-decoration overlay mirrors the server's ServerMap.isWalkable
     // so client-side prediction and server authority agree.
+    // Decorations occupy their center footprint (~36x36) rather than the whole 100x100 tile.
     const { cx, cy, lr, lc } = worldToChunkLocal(worldX, worldY, this.chunkSize);
     const e = this.decorations.get(CHUNK_KEY(cx, cy));
-    if (e && e.blocked.has(`${lr},${lc}`)) return false;
+    if (e && e.blocked.has(`${lr},${lc}`)) {
+      const gCol = cx * this.chunkSize + lc;
+      const gRow = cy * this.chunkSize + lr;
+      const lx = worldX - gCol * this.tileSize;
+      const ly = worldY - gRow * this.tileSize;
+      if (Math.abs(lx - 50) <= 10 && Math.abs(ly - 50) <= 10) {
+        return false;
+      }
+    }
     return true;
   }
 

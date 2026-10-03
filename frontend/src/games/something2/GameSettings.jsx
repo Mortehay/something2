@@ -250,6 +250,9 @@ export function formatKeyDisplay(keyStr) {
   if (k === 'mouse1' || k === 'lmb') return 'LMB';
   if (k === 'mouse2' || k === 'rmb' || k === 'right' || k === 'right click') return 'RMB';
   if (k === 'mouse3' || k === 'mmb' || k === 'middle' || k === 'middle click') return 'MMB';
+  if (k === 'mouse4' || k === 'back') return 'Mouse 4';
+  if (k === 'mouse5' || k === 'forward') return 'Mouse 5';
+  if (k.startsWith('mouse')) return `Mouse ${k.slice(5)}`;
   if (k === ' ' || k === 'space' || k === 'spacebar') return 'SPACE';
   return k.toUpperCase();
 }
@@ -450,7 +453,7 @@ export default function GameSettings({ gameRef }) {
                   <span className="label">
                     Constant attack
                     <span className="hint">
-                      Hold the left mouse button to keep attacking continuously instead of clicking each time.
+                      Hold attack or skill buttons to keep attacking and casting skills continuously.
                     </span>
                   </span>
                 </Row>
@@ -481,7 +484,16 @@ export default function GameSettings({ gameRef }) {
                           if (isListening) {
                             e.preventDefault();
                             e.stopPropagation();
-                            const mouseMap = { 0: 'mouse1', 1: 'mouse3', 2: 'mouse2' };
+                            const mouseMap = { 0: 'mouse1', 1: 'mouse3', 2: 'mouse2', 3: 'mouse4', 4: 'mouse5' };
+                            const boundMouse = mouseMap[e.button] || `mouse${e.button + 1}`;
+                            applyNewKeybind(def.key, boundMouse);
+                          }
+                        }}
+                        onAuxClick={(e) => {
+                          if (isListening) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const mouseMap = { 0: 'mouse1', 1: 'mouse3', 2: 'mouse2', 3: 'mouse4', 4: 'mouse5' };
                             const boundMouse = mouseMap[e.button] || `mouse${e.button + 1}`;
                             applyNewKeybind(def.key, boundMouse);
                           }

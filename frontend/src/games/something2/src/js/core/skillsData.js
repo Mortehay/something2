@@ -15,9 +15,9 @@ export const SKILLS = [
   {
     id: 'war_whirlwind', class: 'Warrior', type: 'melee',
     nameUk: 'Вихор клинка', nameEn: 'Whirlwind',
-    costType: 'stamina', cost: 25, cooldown: 6, range: 120, icon: '🌀', iconColor: '#f43f5e',
-    descUk: 'Кругова атака, яка вражає всіх ворогів навколо у радіусі 3 клітинок.',
-    descEn: 'Spinning attack striking all enemies in a 3-tile radius around the warrior.'
+    costType: 'stamina', cost: 5, cooldown: 0, range: 120, icon: '🌀', iconColor: '#f43f5e', channeled: true,
+    descUk: 'Підтримувана кругова атака (витрачає 20 витривалості/сек), яка безперервно обертає клинки та вражає всіх ворогів навколо у радіусі 3 клітинок.',
+    descEn: 'Channeled spinning attack (drains 20 stamina/sec) continuously striking all enemies in a 3-tile radius around the warrior.'
   },
   {
     id: 'war_hamstring_slash', class: 'Warrior', type: 'melee',
@@ -85,9 +85,9 @@ export const SKILLS = [
   {
     id: 'war_flurry_of_steel', class: 'Warrior', type: 'melee',
     nameUk: 'Безжалісний шквал', nameEn: 'Flurry of Steel',
-    costType: 'stamina', cost: 28, cooldown: 10, range: 90, icon: '⚔️', iconColor: '#e2e8f0',
-    descUk: 'Серія з 4 швидких послідовних ударів по одній цілі.',
-    descEn: 'Unleashes a rapid series of 4 consecutive strikes on a single target.'
+    costType: 'stamina', cost: 4, cooldown: 0, range: 90, icon: '⚔️', iconColor: '#e2e8f0', channeled: true,
+    descUk: 'Підтримуваний неперервний шквал ударів мечем/сокирою (витрачає 16 витривалості/сек).',
+    descEn: 'Channeled rapid flurry of steel strikes (drains 16 stamina/sec) on targets in front.'
   },
   {
     id: 'war_disarming_bash', class: 'Warrior', type: 'melee',
@@ -475,9 +475,9 @@ export const SKILLS = [
   {
     id: 'mag_arcane_beam', class: 'Mage', type: 'magic',
     nameUk: 'Чародійський промінь', nameEn: 'Arcane Beam',
-    costType: 'mana', cost: 15, cooldown: 1, range: 500, icon: '🟣', iconColor: '#9333ea',
-    descUk: 'Випускає потужний сфокусований промінь чародійської енергії, що пронизує ворогів.',
-    descEn: 'Fires a high-power focused beam of arcane energy piercing through enemies.'
+    costType: 'mana', cost: 5, cooldown: 0, range: 500, icon: '🟣', iconColor: '#9333ea', channeled: true,
+    descUk: 'Підтримуваний чародійський промінь (витрачає 20 мани/сек), що безперервно пронизує ворогів сфокусованою енергією.',
+    descEn: 'Channeled high-power focused beam of arcane energy (drains 20 mana/sec) piercing through enemies.'
   },
   {
     id: 'mag_ball_lightning', class: 'Mage', type: 'magic',
@@ -503,9 +503,9 @@ export const SKILLS = [
   {
     id: 'mag_blizzard', class: 'Mage', type: 'magic',
     nameUk: 'Хуртовина', nameEn: 'Blizzard',
-    costType: 'mana', cost: 55, cooldown: 25, range: 440, icon: '🌨️', iconColor: '#7dd3fc',
-    descUk: 'Крижаний шторм у зоні, що постійно завдає шкоди та сповільнює.',
-    descEn: 'Summons a blizzard freezing and damaging foes in a wide area.'
+    costType: 'mana', cost: 6, cooldown: 0, range: 440, icon: '🌨️', iconColor: '#7dd3fc', channeled: true,
+    descUk: 'Підтримувана хуртовина (витрачає 24 мани/сек), що постійно обрушує крижаний шторм у цільовій зоні, сповільнюючи та завдаючи шкоди.',
+    descEn: 'Channeled blizzard (drains 24 mana/sec) continuously raining ice and freezing foes in a wide area.'
   },
   {
     id: 'mag_magic_missiles', class: 'Mage', type: 'magic',
@@ -770,9 +770,9 @@ export const SKILLS = [
   {
     id: 'mnk_hundred_fists', class: 'Monk', type: 'melee',
     nameUk: 'Кулак сотні тіней', nameEn: 'Hundred Fists',
-    costType: 'mana', cost: 30, cooldown: 12, range: 120, icon: '👊', iconColor: '#f59e0b',
-    descUk: 'Монах стоїть на місці та наносить шквал ударів по конусу перед собою.',
-    descEn: 'Channeled frontal cone barrage of a hundred shadow punches.'
+    costType: 'mana', cost: 4, cooldown: 0, range: 120, icon: '👊', iconColor: '#f59e0b', channeled: true,
+    descUk: 'Підтримуваний шквал кулаків (витрачає 16 мани/сек), що неперервно б\'є по конусу перед монахом.',
+    descEn: 'Channeled frontal cone barrage of a hundred shadow punches (drains 16 mana/sec).'
   },
   {
     id: 'mnk_falling_star', class: 'Monk', type: 'melee',
@@ -826,9 +826,9 @@ export const SKILLS = [
   {
     id: 'mnk_spinning_crane_kick', class: 'Monk', type: 'melee',
     nameUk: 'Вихор монаха', nameEn: 'Spinning Crane Kick',
-    costType: 'mana', cost: 25, cooldown: 8, range: 110, icon: '🌪️', iconColor: '#38bdf8',
-    descUk: 'Монах крутиться в повітрі, завдаючи шкоди всім навколо протягом 2 сек.',
-    descEn: 'Spins through the air dealing continuous damage to all nearby enemies.'
+    costType: 'mana', cost: 4, cooldown: 0, range: 110, icon: '🌪️', iconColor: '#38bdf8', channeled: true,
+    descUk: 'Підтримуваний вихор ударів ногами у повітрі (витрачає 16 мани/сек), що завдає шкоди всім навколо.',
+    descEn: 'Channeled spinning crane kick (drains 16 mana/sec) continuously damaging all surrounding enemies.'
   },
   {
     id: 'mnk_zen_strike', class: 'Monk', type: 'melee',
@@ -877,9 +877,9 @@ export const SKILLS = [
   {
     id: 'mnk_jade_serpent_beam', class: 'Monk', type: 'magic',
     nameUk: 'Промінь нефритового змія', nameEn: 'Jade Serpent Beam',
-    costType: 'mana', cost: 20, cooldown: 0, range: 400, icon: '🐉', iconColor: '#059669',
-    descUk: 'Потік зеленої духовної енергії, що наносить постійну магічну шкоду.',
-    descEn: 'Channels a soothing or destructive stream of jade dragon energy.'
+    costType: 'mana', cost: 5, cooldown: 0, range: 400, icon: '🐉', iconColor: '#059669', channeled: true,
+    descUk: 'Підтримуваний промінь нефритового змія (витрачає 20 мани/сек), що наносить постійну духовну шкоду.',
+    descEn: 'Channeled stream of jade dragon energy (drains 20 mana/sec) continuously damaging enemies.'
   },
   {
     id: 'mnk_sphere_of_harmony', class: 'Monk', type: 'magic',
@@ -1209,9 +1209,9 @@ export const SKILLS = [
   {
     id: 'cul_abyssal_beam', class: 'Cultist', type: 'magic',
     nameUk: 'Пекельний потік', nameEn: 'Abyssal Beam',
-    costType: 'hp', cost: 12, cooldown: 0, range: 400, icon: '🟣', iconColor: '#581c87',
-    descUk: 'Безперервний потік темного полум\'я, що спалює здоров\'я ворогів.',
-    descEn: 'Channels continuous dark fire ray consuming health per tick.'
+    costType: 'hp', cost: 3, cooldown: 0, range: 400, icon: '🟣', iconColor: '#581c87', channeled: true,
+    descUk: 'Підтримуваний потік темного полум\'я (витрачає 12 HP/сек), що спалює здоров\'я ворогів.',
+    descEn: 'Channeled continuous dark fire ray (drains 12 HP/sec) consuming health per tick.'
   },
   {
     id: 'cul_summon_blood_golem', class: 'Cultist', type: 'magic',
@@ -1230,9 +1230,9 @@ export const SKILLS = [
   {
     id: 'cul_soul_drain', class: 'Cultist', type: 'magic',
     nameUk: 'Витягування душі', nameEn: 'Soul Drain',
-    costType: 'hp', cost: 10, cooldown: 6, range: 320, icon: '👻', iconColor: '#6b21a8',
-    descUk: 'Магічний канал, що безперервно викачує HP з ворога на відстані.',
-    descEn: 'Channeled soul tether continuously leeching life from target.'
+    costType: 'hp', cost: 3, cooldown: 0, range: 320, icon: '👻', iconColor: '#6b21a8', channeled: true,
+    descUk: 'Підтримуваний магічний канал (витрачає 12 HP/сек), що викачує здоров\'я з ворога та лікує культиста.',
+    descEn: 'Channeled soul tether (drains 12 HP/sec) continuously leeching life from target to heal the caster.'
   },
   {
     id: 'cul_dark_star_fall', class: 'Cultist', type: 'magic',
@@ -1546,9 +1546,9 @@ export const SKILLS = [
   {
     id: 'arc_ambush_flurry', class: 'Archer', type: 'melee',
     nameUk: 'Засадний розтин', nameEn: 'Ambush Flurry',
-    costType: 'stamina', cost: 26, cooldown: 14, range: 80, icon: '🥷', iconColor: '#881337',
-    descUk: '3 блискавичні удари кинджалом, якщо лучник атакував із невидимості.',
-    descEn: '3 critical dagger strikes executed from stealth.'
+    costType: 'stamina', cost: 4, cooldown: 0, range: 80, icon: '🥷', iconColor: '#881337', channeled: true,
+    descUk: 'Підтримуваний шквал кинджальних випадів (витрачає 16 витривалості/сек).',
+    descEn: 'Channeled rapid dagger strikes (drains 16 stamina/sec).'
   },
 
   // Archer Ranged & Magic Arrows
@@ -1562,9 +1562,9 @@ export const SKILLS = [
   {
     id: 'arc_barrage', class: 'Archer', type: 'magic',
     nameUk: 'Шквал стріл', nameEn: 'Barrage',
-    costType: 'stamina', cost: 35, cooldown: 8, range: 440, icon: '🏹', iconColor: '#f97316',
-    descUk: 'Вистрілює конус із 12 стріл перед собою за 1.5 секунди.',
-    descEn: 'Rapidly unloads a 12-arrow barrage in a forward cone.'
+    costType: 'stamina', cost: 4, cooldown: 0, range: 440, icon: '🏹', iconColor: '#f97316', channeled: true,
+    descUk: 'Підтримуваний шквал стріл (витрачає 16 витривалості/сек), що вистрілює неперервний град стріл у конусі перед собою.',
+    descEn: 'Channeled arrow barrage (drains 16 stamina/sec) rapidly unloading a continuous stream of arrows in a forward cone.'
   },
   {
     id: 'arc_lightning_arrow', class: 'Archer', type: 'magic',
@@ -1970,11 +1970,11 @@ export const SKILLS = [
     descEn: 'Calls down waves of falling stars battering all nearby enemies.'
   },
   {
-    id: 'dru_charm_creature', class: 'Druid', type: 'magic',
-    nameUk: 'Приручення істоти (Charm)', nameEn: 'Charm Creature',
-    costType: 'mana', cost: 40, cooldown: 30, range: 280, icon: '💖', iconColor: '#ec4899',
-    descUk: 'Друїд підкорює розум дикої істоти, змушуючи її битися на своєму боці.',
-    descEn: 'Charms a wild creature or beast to fight alongside the druid.'
+    id: 'dru_primal_metamorphosis', class: 'Druid', type: 'buff',
+    nameUk: 'Первісний метаморфоз', nameEn: 'Primal Metamorphosis',
+    costType: 'mana', cost: 30, cooldown: 18, range: 0, icon: '🌿', iconColor: '#10b981',
+    descUk: '[Форми] Друїд пробуджує первісну силу природи: миттєво зцілює 180 HP, дає +30% до фізичної шкоди та +35% швидкості бігу у формах звіра.',
+    descEn: '[Shapeshifting] Awakens primal nature power: instantly restores 180 HP, grants +30% physical damage and +35% movement speed while in beast forms.'
   },
   {
     id: 'dru_summon_wolfpack', class: 'Druid', type: 'magic',
@@ -1993,9 +1993,9 @@ export const SKILLS = [
   {
     id: 'dru_cyclone', class: 'Druid', type: 'magic',
     nameUk: 'Вихор торнадо', nameEn: 'Cyclone',
-    costType: 'mana', cost: 30, cooldown: 18, range: 320, icon: '🌪️', iconColor: '#38bdf8',
-    descUk: 'Підіймає ворога у повітряний смерч на 4 сек (ворог не може діяти).',
-    descEn: 'Tosses enemy into an impenetrable cyclone whirlwind for 4s.'
+    costType: 'mana', cost: 4, cooldown: 0, range: 320, icon: '🌪️', iconColor: '#38bdf8', channeled: true,
+    descUk: 'Підтримуваний смерч навколо друїда (витрачає 16 мани/сек), що вражає та збиває з ніг ворогів.',
+    descEn: 'Channeled cyclone whirlwind (drains 16 mana/sec) swirling around the druid and damaging all nearby enemies.'
   },
   {
     id: 'dru_storm_lightning', class: 'Druid', type: 'magic',
@@ -2014,9 +2014,9 @@ export const SKILLS = [
   {
     id: 'dru_solar_beam', class: 'Druid', type: 'magic',
     nameUk: 'Сонцестояння', nameEn: 'Solar Beam',
-    costType: 'mana', cost: 35, cooldown: 25, range: 360, icon: '☀️', iconColor: '#fbbf24',
-    descUk: 'Сфокусований сонячний промінь, що наносить шкоду та накладає Silence у зоні.',
-    descEn: 'Solar beam scorching and silencing all enemies in target area.'
+    costType: 'mana', cost: 5, cooldown: 0, range: 360, icon: '☀️', iconColor: '#fbbf24', channeled: true,
+    descUk: 'Підтримуваний сфокусований сонячний промінь (витрачає 20 мани/сек), що спалює ворогів у цільовій лінії/зоні.',
+    descEn: 'Channeled solar beam (drains 20 mana/sec) scorching all enemies in target area.'
   },
 
   // Druid 3 Key Transformations & Buffs

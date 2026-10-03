@@ -39,13 +39,13 @@ test('tick advances a player on open ground', () => {
 
 test('tick clamps a player to the wall face instead of entering an unwalkable tile', () => {
   const w = new World(stubMap(100)); // wall at the x=100 tile boundary (tile-aligned)
-  w.addPlayer('u1', { x: 30, y: 0 }); // 64px box -> east face at 94, one step crosses 100
+  w.addPlayer('u1', { x: 45, y: 0 }); // 64px box, 0.5 footprint -> east face at 93, one 10px step crosses 100
   w.setInput('u1', 1, 1, 0); // seq=1, dx=1 (east), dy=0
   w.tick(0.05); // realistic sub-tile step
   const p = w.getPlayer('u1');
   // Deterministic clamp: the player's east face stops flush at WALL_EPS shy of x=100
-  // centre 99.99-32 = 67.99, so x = 67.99-32 = 35.99.
-  assert.ok(Math.abs(p.x - 35.99) < 1e-6, `x=${p.x}`);
+  // centre 99.99-16 = 83.99, so x = 83.99-32 = 51.99.
+  assert.ok(Math.abs(p.x - 51.99) < 1e-6, `x=${p.x}`);
 });
 
 test('ackSeq tracks the latest input seq; snapshot has the right shape', () => {
