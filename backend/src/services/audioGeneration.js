@@ -79,19 +79,21 @@ async function generateForSlot(db, provider, spec, {
   const {
     subjectKind, subjectKey, slot, clipKind,
   } = spec;
-  let { style = null, prompt = null, slots = null } = spec;
+  let { style = null, prompt = null } = spec;
+  const { slots = null } = spec;
   const seed = Number.isInteger(spec.seed) ? spec.seed : randomSeed();
-  // Precedence (spec 2026-09-30 §6): the request's own style/prompt, then the
-  // slot's stored prompt, then the box's propose. A stored '' means "cleared
-  // on purpose" and falls through.
+  // Precedence (plan 2026-10-03, Task 1): the request's own style/prompt,
+  // then the slot's stored prompt, then fail. NEVER the box's propose: it
+  // runs on the box LLM, and the GPU holds one model at a time -- loading
+  // the brain here evicts the audio model this very call needs next, and a
+  // busy retry did it again, so the two kept evicting each other. Prompts
+  // are written in the drain's own prompt phase instead (audioDispatcher).
+  // A stored '' means "cleared on purpose", which is now "no prompt" too.
   if (!style && !prompt) {
     const stored = await prompts.getActive(db, subjectKind, subjectKey, slot);
     if (stored && stored.text) ({ style, prompt } = { style: stored.style, prompt: stored.text });
   }
-  if (!style && !prompt) {
-    const p = await rap.propose(provider, { context: await contextFor(db, subjectKind, subjectKey, slot), kind: clipKind });
-    if (p.ok) ({ style, slots, prompt } = { style: p.style, slots: p.slots, prompt: p.prompt });
-  }
+  if (!style && !prompt) return { ok: false, error: 'no prompt', retryable: false };
   const gen = await rap.generateTrack(provider, {
     kind: clipKind, name: boxTrackName(subjectKind, subjectKey, slot, seed), style, prompt, slots, seed,
   });

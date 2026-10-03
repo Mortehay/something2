@@ -253,6 +253,10 @@ module.exports = function audioRoutes(pool) {
         variants: clipKind === 'sfx' && Number.isInteger(b.variants) ? b.variants : undefined,
         seed: Number.isInteger(b.seed) ? b.seed : undefined,
       });
+      // No request prompt and none stored (plan 2026-10-03): generate never
+      // proposes any more, so this is the caller's to fix -- write a prompt
+      // (or queue the slot, whose prompt phase writes one) -- not a box fault.
+      if (!gen.ok && gen.error === 'no prompt') return res.status(409).json({ error: 'no prompt' });
       if (!gen.ok) return res.status(502).json({ error: gen.error, retryable: Boolean(gen.retryable) });
       // sfx generates N variants at once (`{clips, bindings}`); music/ambience
       // stay a single clip (`{clip, binding}`) -- callers of the existing

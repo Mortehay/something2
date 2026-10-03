@@ -9,6 +9,7 @@ const { withAdvisoryLock, AUDIO_CLIPS_LOCK_KEY } = require('./helpers/advisoryLo
 const assetStore = require('../src/services/assetStore');
 const lib = require('../src/services/audioLibrary');
 const gen = require('../src/services/audioGeneration');
+const prompts = require('../src/services/audioPrompts');
 
 const url = process.env.TEST_DATABASE_URL;
 const skip = !url ? 'no TEST_DATABASE_URL -- refusing to write to a real database' : false;
@@ -26,24 +27,37 @@ test('generateForSlot', { skip }, async (t) => {
       try {
         await pool.query(`DELETE FROM audio_clips WHERE id IN (SELECT clip_id FROM audio_bindings WHERE subject_key = $1)`, [tag]);
         await pool.query('DELETE FROM audio_clips WHERE label LIKE $1', [`${tag}%`]);
+        await pool.query('DELETE FROM audio_prompts WHERE subject_key = $1', [tag]);
         if (worldIds.length) await pool.query('DELETE FROM worlds WHERE id = ANY($1)', [worldIds]);
       } finally { await pool.end(); }
     });
     worldIds.push((await pool.query('INSERT INTO worlds (name, seed) VALUES ($1, 1) RETURNING id', [tag])).rows[0].id);
 
     const calls = [];
+    // The audio step never calls the box LLM (plan 2026-10-03, Task 1): the
+    // brain and the audio model evict each other on the one GPU. A propose
+    // that throws makes any call to it fail this test loudly.
     const rap = {
-      propose: async (p, body) => { calls.push(['propose', body]); return { ok: true, style: 'village', slots: { mood: 'calm and sunny' }, prompt: 'p' }; },
+      propose: async () => { calls.push(['propose']); throw new Error('propose must not be called'); },
       generateTrack: async (p, body) => { calls.push(['generate', body]); return { ok: true, buffer: OGG, durationMs: 2000, sampleRate: 44100, loopStartMs: 0, loopEndMs: 2000, prompt: 'p', seed: body.seed }; },
     };
     const provider = { id: null, base_url: 'http://x', modality: 'audio' };
 
+    // No request prompt, no stored prompt -> 'no prompt', nothing sent.
+    const r0 = await gen.generateForSlot(pool, provider,
+      { subjectKind: 'world', subjectKey: tag, slot: 'music', clipKind: 'music', seed: 76 }, { rap, lib });
+    assert.deepEqual(r0, { ok: false, error: 'no prompt', retryable: false });
+    assert.deepEqual(calls, [], 'no propose and no generate without a prompt');
+
+    // A stored prompt is what gets sent.
+    await prompts.save(pool, 'world', tag, 'music', { style: 'village', text: 'stored village theme' });
     const r = await gen.generateForSlot(pool, provider,
       { subjectKind: 'world', subjectKey: tag, slot: 'music', clipKind: 'music', seed: 77 }, { rap, lib });
     assert.equal(r.ok, true, r.error);
-    assert.deepEqual(calls.map((c) => c[0]), ['propose', 'generate'], 'no style/prompt → propose first');
-    assert.equal(calls[1][1].style, 'village');
-    assert.equal(calls[1][1].seed, 77);
+    assert.deepEqual(calls.map((c) => c[0]), ['generate'], 'the stored prompt is used; propose is never called');
+    assert.equal(calls[0][1].style, 'village');
+    assert.equal(calls[0][1].prompt, 'stored village theme');
+    assert.equal(calls[0][1].seed, 77);
     assert.equal(r.binding.subject_key, tag);
 
     calls.length = 0;

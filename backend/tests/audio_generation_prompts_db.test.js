@@ -1,5 +1,6 @@
 // backend/tests/audio_generation_prompts_db.test.js
-// Precedence: request > stored > propose/entityPhrase. The fake box RECORDS
+// Precedence: request > stored > 'no prompt' (music/ambience) or entityPhrase
+// (sfx). The box's propose is never called (plan 2026-10-03, Task 1). The fake box RECORDS
 // every body it is sent (style, prompt, entity) and each case deepEquals that
 // record, so a precedence bug shows up as a wrong recorded body -- the fake
 // never ignores its input and answers the same regardless.
@@ -52,7 +53,7 @@ test('generation reads the stored prompt', { skip }, async (t) => {
 
     const calls = [];
     const rap = {
-      propose: async () => { calls.push('propose'); return { ok: true, style: 'village', slots: {}, prompt: 'proposed' }; },
+      propose: async () => { calls.push('propose'); throw new Error('propose must not be called'); },
       generateTrack: async (p, body) => { calls.push(['track', body.style, body.prompt]); return { ok: true, buffer: OGG, durationMs: 2000, loopStartMs: 0, loopEndMs: 2000, prompt: body.prompt, seed: body.seed }; },
       generateSfx: async (p, body) => { calls.push(['sfx', body.entity]); return { ok: true, clips: [{ buffer: OGG, durationMs: 500 }], cached: false, prompt: body.entity, seed: body.seed }; },
     };
@@ -70,11 +71,12 @@ test('generation reads the stored prompt', { skip }, async (t) => {
     r = await gen.generateForSlot(pool, provider, spec({ style: 'tavern', prompt: 'typed' }), { rap, lib });
     assert.deepEqual(calls, [['track', 'tavern', 'typed']]);
 
-    // 3. stored '' (cleared) -> falls through to propose
+    // 3. stored '' (cleared) -> 'no prompt'; never proposes, never generates
     calls.length = 0;
     await prompts.save(pool, 'world', tag, 'music', { style: null, text: '' });
     r = await gen.generateForSlot(pool, provider, spec(), { rap, lib });
-    assert.deepEqual(calls, ['propose', ['track', 'village', 'proposed']]);
+    assert.deepEqual(r, { ok: false, error: 'no prompt', retryable: false });
+    assert.deepEqual(calls, []);
 
     // 4. sfx: stored text becomes entity, take suffix preserved
     calls.length = 0;

@@ -284,16 +284,14 @@ test('audio routes', { skip }, async (t) => {
     assert.equal(m.body.accepted, 1);
   });
 
-  await t.test('generate with no style and no prompt proposes first, then generates with the proposed style', async () => {
+  await t.test('generate with no style, no prompt and nothing stored is a 409 "no prompt"; the box is never called', async () => {
     const before = seen.length;
     const res = await request(app).post('/api/audio/admin/generate').set('Authorization', bearer(admin))
       .send({ subject_kind: 'world', subject_key: worldName, slot: 'music', provider_id: prov });
-    assert.equal(res.status, 201, JSON.stringify(res.body));
+    assert.equal(res.status, 409, JSON.stringify(res.body));
+    assert.deepEqual(res.body, { error: 'no prompt' });
     const calls = seen.slice(before).filter((s) => s.method === 'POST' && (s.url === '/api/audio/propose' || s.url === '/api/audio'));
-    assert.deepEqual(calls.map((c) => c.url), ['/api/audio/propose', '/api/audio'], 'propose is called before generate');
-    assert.equal(JSON.parse(calls[1].body).style, 'village', 'the generate call carries the proposed style');
-    assert.equal(res.body.clip.style_or_cue, 'village');
-    assert.match(res.body.clip.label, /\(village\)$/, 'the stored label carries the proposed style');
+    assert.deepEqual(calls, [], 'neither propose nor generate reached the box');
   });
 
   await t.test('a miss for a world that does not exist is dropped (accepted 0, no row)', async () => {
