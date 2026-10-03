@@ -17,6 +17,7 @@
 import styled from 'styled-components';
 import {
   batchProgress, DRAIN_GROUPS_LABEL, queuedToDiscard, runStopWarning, groupRunningText,
+  drainPhaseText, waitingText,
 } from './audioBatch.js';
 import {
   useStartAudioDrain, useStopAudioDrain, useRetryAudioFailures, useClearAudioJobs,
@@ -50,6 +51,10 @@ const GroupPill = styled.div`
 const Current = styled.p`
   margin: 0 0 0.5rem; font-size: 0.85rem; color: var(--s2-text);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+`;
+const Waiting = styled.p`
+  margin: 0 0 0.5rem; font-size: 0.85rem; color: var(--s2-warning, var(--s2-text));
+  span { display: block; font-size: 0.78rem; color: var(--s2-text-muted); word-break: break-word; }
 `;
 const Controls = styled.div`display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;`;
 const Button = styled.button`
@@ -95,6 +100,8 @@ function AudioBatchPanel({
   const running = progress.phase === 'running';
   const discardable = queuedToDiscard({ run, stats });
   const stopWarning = runStopWarning(run);
+  const phaseText = drainPhaseText(run);
+  const waiting = waitingText(run);
 
   return (
     <Panel>
@@ -103,7 +110,11 @@ function AudioBatchPanel({
           {progress.phase === 'running' && (
             <>
               <strong>{progress.done + progress.failed} of {progress.total} · {progress.pct}%</strong>{' '}
-              <span>{run && run.stopping ? 'stopping after the current job' : `drain: ${GROUP_LABEL[progress.group] || progress.group || '—'}`}</span>
+              <span>
+                {run && run.stopping
+                  ? 'stopping after the current job'
+                  : `${phaseText ? `${phaseText} · ` : ''}drain: ${GROUP_LABEL[progress.group] || progress.group || '—'}`}
+              </span>
             </>
           )}
           {progress.phase === 'queued' && <strong>{progress.queued + progress.running} queued — press Start</strong>}
@@ -132,6 +143,15 @@ function AudioBatchPanel({
           );
         })}
       </Groups>
+
+      {/* The drain pauses (never fails a job) while the box refuses a model
+          switch; this is the only place an admin can see why nothing moves. */}
+      {waiting && (
+        <Waiting role="status">
+          {waiting.line}
+          {waiting.reason && <span>{waiting.reason}</span>}
+        </Waiting>
+      )}
 
       {run && run.current && (
         <Current>

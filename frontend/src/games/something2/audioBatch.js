@@ -207,3 +207,27 @@ export function doneRose(prevStats, stats) {
   if (!prevStats || !stats) return false;
   return groupTotals(stats).done > groupTotals(prevStats).done;
 }
+
+// Plan 2026-10-03: the drain runs in phases -- every pending prompt is
+// written on the text model first, then audio is generated group by group.
+// runStatus().phase is 'prompt' | 'audio' while one runs, else null.
+export function drainPhaseText(run) {
+  const phase = run && run.phase;
+  if (phase === 'prompt') return 'writing prompts';
+  if (phase === 'audio') return 'generating audio';
+  return null;
+}
+
+// Plan 2026-10-03: while the box refuses a model switch (busy, or a model
+// pinned in the box UI) the drain pauses and retries -- run.waiting is
+// { model, reason, since } then, else null. `since` is an ISO timestamp,
+// shown as local hh:mm; an unparseable one is left out rather than "NaN:NaN".
+export function waitingText(run) {
+  const w = run && run.waiting;
+  if (!w) return null;
+  const at = w.since ? new Date(w.since) : null;
+  const since = at && !Number.isNaN(at.getTime())
+    ? ` (since ${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')})`
+    : '';
+  return { line: `Waiting for box: ${w.model || 'unknown model'}${since}`, reason: w.reason || null };
+}
