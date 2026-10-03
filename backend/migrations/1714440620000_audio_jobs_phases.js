@@ -13,14 +13,24 @@ exports.shorthands = undefined;
 //                 one; the old row stays in audio_prompts history.
 //   prompt_only   "Write with model": the job is done once its prompt is
 //                 written, and never reaches the audio phase.
+// And two inputs the slot card's synchronous calls sent that a queued job
+// could not carry, so the card's Generate and Write with model can go
+// through the queue:
+//   variants      sfx only: how many variants to ask the box for (1-5).
+//                 NULL = the pack default; a job with any other count is
+//                 claimed and sent on its own, never inside a pack.
+//   hint          the admin's hint for the prompt writer (capped at 200
+//                 characters by the route, as writeSlotPrompt caps it).
 exports.up = (pgm) => {
   pgm.addColumns('audio_jobs', {
     needs_prompt: { type: 'boolean', notNull: true, default: false },
     force_prompt: { type: 'boolean', notNull: true, default: false },
     prompt_only: { type: 'boolean', notNull: true, default: false },
+    variants: { type: 'integer', check: 'variants BETWEEN 1 AND 5' },
+    hint: { type: 'text' },
   });
 };
 
 exports.down = (pgm) => {
-  pgm.dropColumns('audio_jobs', ['needs_prompt', 'force_prompt', 'prompt_only']);
+  pgm.dropColumns('audio_jobs', ['needs_prompt', 'force_prompt', 'prompt_only', 'variants', 'hint']);
 };

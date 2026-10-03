@@ -343,6 +343,77 @@ test('audio drain in phases', { skip }, async (t) => {
           'SELECT state, attempts FROM audio_jobs WHERE subject_key LIKE $1 ORDER BY id', [`${tag}-r%`])).rows;
         assert.deepEqual(rows, [{ state: 'done', attempts: 1 }, { state: 'done', attempts: 1 }], 'the refused try was refunded');
       });
+      // The slot card's own inputs, carried by the queue.
+      await t.test('an sfx job with variants 5 runs alone and asks for 5; variants-null jobs still pack', async () => {
+        reset();
+        const sfx = (key, extra = {}) => ({
+          subject_kind: 'creature', subject_key: `${tag}-${key}`, slot: 'hurt', clip_kind: 'sfx', engine: 'realistic', prompt: 'a beast', ...extra,
+        });
+        await q.enqueue(pool, [sfx('v-solo', { variants: 5 }), sfx('v-a'), sfx('v-b')]);
+        const clipsFor = (n) => Array.from({ length: n }, (_, i) => ({ buffer: Buffer.concat([OGG, Buffer.from([i])]), durationMs: 500 }));
+        const sfxRap = {
+          generateSfx: async (p, body) => {
+            calls.push(`sfx:${body.entity}:${body.variants}`);
+            return { ok: true, clips: clipsFor(body.variants), cached: false, prompt: body.entity, seed: body.seed };
+          },
+          generateSfxPack: async (p, body) => {
+            calls.push(`pack:${body.items.length}:${body.variants}`);
+            return {
+              ok: true,
+              items: body.items.map((it) => ({
+                ok: true, cue: it.cue, entity: it.entity, clips: clipsFor(body.variants), prompt: 'p', seed: 1, cached: false,
+              })),
+            };
+          },
+        };
+        d.startDrain(pool, {
+          deps: depsWith({
+            generateForSlot: (db, p, spec) => gen.generateForSlot(db, p, spec, { rap: sfxRap, lib: fakeLib }),
+            generateSfxPackForJobs: (db, p, jobs, opts) => gen.generateSfxPackForJobs(db, p, jobs, { ...opts, rap: sfxRap, lib: fakeLib }),
+          }),
+        });
+        const s = await waitIdle();
+        assert.equal(s.stopped_reason, 'empty', s.error);
+        assert.equal(s.failed, 0, s.error);
+        assert.equal(s.done, 3);
+        // A tagged creature's entity text is its lower-cased key (entityPhrase).
+        assert.deepEqual(calls, [`sfx:${`${tag}-v-solo`.toLowerCase()}:5`, `pack:2:${gen.DEFAULT_SFX_VARIANTS}`],
+          'the variants-5 job went alone with its own count; the others packed with the default');
+      });
+
+      await t.test("a job's hint reaches the text model's request", async () => {
+        reset();
+        const k = await world('h1');
+        await q.enqueue(pool, [music(k, { hint: 'stormy sea shanty', prompt_only: true })]);
+        const requests = [];
+        d.startDrain(pool, {
+          deps: depsWith({
+            tp: { complete: async (db, req, opts) => { requests.push(req.prompt); return tp.complete(db, req, opts); } },
+          }),
+        });
+        const s = await waitIdle();
+        assert.equal(s.failed, 0, s.error);
+        assert.equal(requests.length, 1);
+        assert.match(requests[0], /^Admin hint: stormy sea shanty$/m);
+        const active = await prompts.getActive(pool, 'world', k, 'music');
+        assert.equal(active.hint, 'stormy sea shanty', 'the stored prompt records the hint');
+      });
+
+      await t.test("a job's slots reach generateTrack", async () => {
+        reset();
+        const k = await world('s1');
+        await prompts.save(pool, 'world', k, 'music', { style: 'village', text: 'stored s' });
+        await q.enqueue(pool, [music(k, { slots: { mood: 'calm and sunny' } })]);
+        const bodies = [];
+        const slotRap = { ...rap, generateTrack: async (p, body) => { bodies.push(body); return rap.generateTrack(p, body); } };
+        d.startDrain(pool, {
+          deps: depsWith({ generateForSlot: (db, p, spec) => gen.generateForSlot(db, p, spec, { rap: slotRap, lib: fakeLib }) }),
+        });
+        const s = await waitIdle();
+        assert.equal(s.failed, 0, s.error);
+        assert.equal(bodies.length, 1);
+        assert.deepEqual(bodies[0].slots, { mood: 'calm and sunny' });
+      });
     } finally {
       for (const r of foreign) {
         // eslint-disable-next-line no-await-in-loop

@@ -20,6 +20,8 @@ const DRAIN_ORDER = ['music', 'ambience', 'sfx_realistic', 'sfx_retro'];
 const PACKED_GROUPS = ['sfx_realistic', 'sfx_retro'];
 const SFX_ENGINES = ['realistic', 'retro'];
 const MAX_ATTEMPTS = Number(process.env.AUDIO_JOB_MAX_ATTEMPTS) || 3;
+// What a pack asks the box for per item (audioGeneration owns the number).
+const { DEFAULT_SFX_VARIANTS } = require('./audioGeneration');
 // Validated like audioDispatcher's envInt (finite and > 0, else the
 // default): a stray negative or zero value here doesn't just miscompute a
 // backoff, it would make backoffMs(1) negative or zero, and the dispatcher's
@@ -75,7 +77,7 @@ async function enqueue(db, items, { batchId = null, providerId = null } = {}) {
   const batch = batchId || (await db.query('SELECT gen_random_uuid() AS id')).rows[0].id;
   const cols = {
     kind: [], key: [], slot: [], clip: [], group: [], style: [], prompt: [], slots: [], seed: [], engine: [],
-    force: [], promptOnly: [],
+    force: [], promptOnly: [], variants: [], hint: [],
   };
   for (const it of items) {
     cols.kind.push(it.subject_kind); cols.key.push(it.subject_key); cols.slot.push(it.slot);
@@ -87,22 +89,25 @@ async function enqueue(db, items, { batchId = null, providerId = null } = {}) {
     cols.seed.push(Number.isInteger(it.seed) ? it.seed : null);
     cols.force.push(it.force_prompt === true);
     cols.promptOnly.push(it.prompt_only === true);
+    cols.variants.push(Number.isInteger(it.variants) ? it.variants : null);
+    cols.hint.push(typeof it.hint === 'string' && it.hint ? it.hint : null);
   }
   const r = await db.query(
     `INSERT INTO audio_jobs (batch_id, provider_id, subject_kind, subject_key, slot, clip_kind, drain_group,
-                             style, prompt, slots, seed, engine, needs_prompt, force_prompt, prompt_only, state)
+                             style, prompt, slots, seed, engine, needs_prompt, force_prompt, prompt_only, state,
+                             variants, hint)
      SELECT $1, $2, k, key, s, c, g, st, pr, sl::jsonb, sd, en, needs, fp, po,
-            CASE WHEN po AND NOT needs THEN 'done' ELSE 'queued' END
+            CASE WHEN po AND NOT needs THEN 'done' ELSE 'queued' END, va, hi
        FROM (
          SELECT u.*, (u.fp OR (u.pr IS NULL AND (p.id IS NULL OR p.text = ''))) AS needs
            FROM unnest($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[], $10::text[],
-                       $11::bigint[], $12::text[], $13::boolean[], $14::boolean[])
-             AS u(k, key, s, c, g, st, pr, sl, sd, en, fp, po)
+                       $11::bigint[], $12::text[], $13::boolean[], $14::boolean[], $15::int[], $16::text[])
+             AS u(k, key, s, c, g, st, pr, sl, sd, en, fp, po, va, hi)
            LEFT JOIN audio_prompts p ON p.active AND p.subject_kind = u.k AND p.subject_key = u.key AND p.slot = u.s
        ) x
      ON CONFLICT DO NOTHING RETURNING *`,
     [batch, providerId, cols.kind, cols.key, cols.slot, cols.clip, cols.group, cols.style, cols.prompt, cols.slots, cols.seed,
-      cols.engine, cols.force, cols.promptOnly],
+      cols.engine, cols.force, cols.promptOnly, cols.variants, cols.hint],
   );
   const got = new Set(r.rows.map((j) => `${j.subject_kind}/${j.subject_key}/${j.slot}`));
   const already_live = items
@@ -139,12 +144,18 @@ async function claimNext(db) {
 // is always one job per claim, whatever the group. `group` limits it to one
 // drain group -- the audio phase drains a group at a time, right after
 // switching the box to that group's model.
+//
+// A SOLO sfx job -- one whose `variants` is set to anything but the pack
+// default (the slot card's own count) -- never joins a pack, since a pack
+// asks for one variant count for all its items: when the head is solo it is
+// claimed alone, and otherwise only non-solo jobs are picked.
 async function claimBatch(db, n, { phase, group } = {}) {
   const limit = Number.isInteger(n) && n > 0 ? n : 1;
   const only = phase === 'prompt' ? 1 : null;
+  const solo = (a) => `(${a}variants IS NOT NULL AND ${a}variants <> $6::int)`;
   const r = await db.query(
     `WITH first AS (
-       SELECT drain_group, provider_id FROM audio_jobs
+       SELECT id, drain_group, provider_id, ${solo('')} AS solo FROM audio_jobs
         WHERE state = 'queued' AND (not_before IS NULL OR not_before <= now())
           AND ${phaseFilter(phase)} AND ($4::text IS NULL OR drain_group = $4)
         ORDER BY array_position($1::text[], drain_group), id
@@ -154,6 +165,7 @@ async function claimBatch(db, n, { phase, group } = {}) {
         WHERE j.state = 'queued' AND (j.not_before IS NULL OR j.not_before <= now())
           AND ${phaseFilter(phase, 'j')}
           AND j.drain_group = f.drain_group AND j.provider_id IS NOT DISTINCT FROM f.provider_id
+          AND (CASE WHEN f.solo THEN j.id = f.id ELSE NOT ${solo('j.')} END)
         ORDER BY j.id
         LIMIT CASE WHEN $5::int IS NOT NULL THEN $5::int
                    WHEN (SELECT drain_group FROM first) = ANY($3::text[]) THEN $2::int ELSE 1 END
@@ -162,7 +174,7 @@ async function claimBatch(db, n, { phase, group } = {}) {
      UPDATE audio_jobs SET state = 'running', attempts = attempts + 1, claimed_at = now(), updated_at = now()
       WHERE id IN (SELECT id FROM pick)
       RETURNING *`,
-    [DRAIN_ORDER, limit, PACKED_GROUPS, group || null, only],
+    [DRAIN_ORDER, limit, PACKED_GROUPS, group || null, only, DEFAULT_SFX_VARIANTS],
   );
   return r.rows.sort((a, b) => Number(a.id) - Number(b.id));
 }

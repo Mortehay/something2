@@ -109,7 +109,9 @@ async function writeJobPrompt(db, job, deps, cache) {
     if (styles && (styles.music.length || styles.ambience.length)) cache.styles = styles;
   }
   const cue = job.clip_kind === 'sfx' ? await cueFor(db, kind, key, slot) : null;
-  return writeSlotPrompt(db, { kind, key, slot }, {
+  return writeSlotPrompt(db, {
+    kind, key, slot, hint: job.hint,
+  }, {
     tp: deps.tp,
     catalog: cache.catalog,
     styles: cache.styles || { music: [], ambience: [] },
@@ -248,6 +250,12 @@ function isProviderFault(result) {
   return Boolean(result.retryable)
     || (Number.isInteger(result.status) && result.status >= 500 && result.status !== 503)
     || Boolean(result.providerFault);
+}
+
+// One claimed sfx job with a variant count other than the pack's.
+function isSoloSfx(jobs) {
+  return jobs.length === 1 && jobs[0].variants != null
+    && Number(jobs[0].variants) !== audioGeneration.DEFAULT_SFX_VARIANTS;
 }
 
 const errorText = (err) => (err && err.message ? err.message : String(err));
@@ -529,6 +537,10 @@ function startDrain(db, opts = {}) {
           style: job.style,
           prompt: job.prompt,
           slots: job.slots,
+          // sfx (a solo job -- see audioJobQueue.claimBatch): the engine it was
+          // queued with and its own variant count; null -> the default.
+          engine: job.engine || undefined,
+          variants: job.variants == null ? undefined : job.variants,
           // audio_jobs.seed is bigint; pg returns it as a string, so a bare
           // job.seed would hand generateForSlot "123" instead of 123.
           // Number() on a present seed, undefined (not null) when absent, so
@@ -733,7 +745,11 @@ function startDrain(db, opts = {}) {
         const jobs = await deps.queue.claimBatch(db, SFX_PACK_SIZE(), { phase: 'audio', group });
         if (!jobs.length) break;
         // eslint-disable-next-line no-await-in-loop
-        const next = audioJobQueue.PACKED_GROUPS.includes(group) ? await runPack(jobs) : await runSingle(jobs[0]);
+        // A solo sfx job (its own variant count, see claimBatch) is claimed
+        // alone and takes generateForSlot's single-call sfx path -- the one
+        // the slot card's synchronous Generate always used.
+        const packed = audioJobQueue.PACKED_GROUPS.includes(group) && !isSoloSfx(jobs);
+        const next = packed ? await runPack(jobs) : await runSingle(jobs[0]);
         self.current = null;
         if (next === 'breaker') return 'breaker';
         // eslint-disable-next-line no-await-in-loop
