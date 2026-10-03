@@ -84,6 +84,26 @@ Never run destructive experiments on `game_db`.
   The text model ID is taken from the `text` provider's model setting, written as `brain:<model>`. Confirm that
   format against the gateway status.
 
+**Task 0 result (2026-10-03).** Read from `GET /api/model-gateway`, `/api/text/models` and the error text of
+failed rows in the box's job log (`GET /api/audio?limit=200`):
+
+| Drain group | Gateway model | Evidence |
+|---|---|---|
+| music | `audio:ace-step` | 11 failed rows: "requested audio:ace-step" |
+| ambience | `audio:stable-audio` | a failed row: "requested audio:stable-audio" |
+| text | `brain:qwen3.6-35b-a3b` | gateway `choices` + `/api/text/models` (`id` without the `brain:` prefix) |
+| sfx_realistic, sfx_retro | **unknown** | no refusal in the log names one |
+
+Two more findings:
+- The gateway status `{active:{model,pinned,idle_for_s,pin_release_in_s}, pending, switching}` showed the brain
+  pinned at the time.
+- Text models are listed WITHOUT the prefix, so the switch target is `brain:${textProvider.model}`.
+
+**Design consequence:** `ensureModel` uses the map above where it has an entry. When an audio call is still refused
+with a gateway message, the drain parses `requested (\S+)` from it, switches to that model and retries. The map
+saves a round trip; the parse covers the unknown SFX engines and any engine added later. A group with no map
+entry skips the up-front switch and relies on the parse.
+
 ### Task 1: The audio step stops calling the LLM
 
 - `generateForSlot` uses one order: the job's explicit prompt or style, then the stored active prompt, then fail.
