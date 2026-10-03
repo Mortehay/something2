@@ -27,7 +27,9 @@ const ART_KIND = { creature: 'entity', world_point: 'entity', item: 'item', skil
 
 async function loadPromptCatalog(db) {
   const [worlds, biomes, entities, items, art] = await Promise.all([
-    db.query('SELECT name, biomes, level_min, level_max FROM worlds'),
+    db.query(`SELECT w.name, w.biomes, w.level_min, w.level_max, w.allows_fast_travel, w.is_entry, w.width,
+                     EXISTS (SELECT 1 FROM villages v WHERE v.world_id = w.id) AS has_village
+                FROM worlds w`),
     db.query('SELECT name, art_style FROM biomes'),
     db.query('SELECT name, prompt FROM entity_types WHERE is_creature OR point_kind IS NOT NULL'),
     db.query("SELECT name, category, req_level FROM item_types WHERE category = 'weapon'"),
@@ -49,6 +51,36 @@ function looks(catalog, kind, key, fallback) {
   return text ? `; looks like: ${text}` : '';
 }
 
+// What kind of place a world is, from what the database knows rather than
+// from its name's mood. Live 2026-10-04: told only name/regions/levels, the
+// model picked "dungeon" for 18 of 20 worlds, overworld frontiers included.
+//   fast travel        -> overworld (dungeons are portal-gated, no fast travel)
+//   a villages row     -> a village; inside a dungeon that is its hub
+//   ": Elite" / ": End" -> the boss rooms of the vale-region dungeon specs
+//   no width           -> the legacy chunked Overworld, not a bounded dungeon
+const BOSS_ROOM = /: (Elite|End)$/;
+
+function worldKind(w, name) {
+  if (!w) return null;
+  const overworld = w.allows_fast_travel || w.is_entry || w.width == null;
+  if (overworld) return w.has_village ? 'overworld village' : 'overworld area';
+  if (w.has_village) return 'dungeon hub with a village';
+  return BOSS_ROOM.test(name) ? 'dungeon boss room' : 'dungeon room';
+}
+
+// The music style is decided here, not by the model: it only writes the text.
+const MUSIC_STYLE_FOR_KIND = {
+  'overworld village': 'village',
+  'overworld area': 'medieval_fantasy',
+  'dungeon hub with a village': 'tavern',
+  'dungeon boss room': 'battle',
+  'dungeon room': 'dungeon',
+};
+
+function worldMusicStyle(w, name) {
+  return MUSIC_STYLE_FOR_KIND[worldKind(w, name)] || null;
+}
+
 function tail(slot, cue) {
   return `; slot: ${slot}${cue ? `; sound cue: ${cue}` : ''}`;
 }
@@ -60,7 +92,7 @@ function buildContext(catalog, kind, key, slot, { cue = null } = {}) {
       if (!w) return null;
       const regions = Array.isArray(w.biomes) && w.biomes.length ? `; regions: ${w.biomes.join(', ')}` : '';
       const levels = w.level_min != null && w.level_max != null ? `; levels ${w.level_min}-${w.level_max}` : '';
-      return `world "${key}"${regions}${levels}${tail(slot, cue)}`;
+      return `world "${key}"; type: ${worldKind(w, key)}${regions}${levels}${tail(slot, cue)}`;
     }
     case 'biome': {
       const b = catalog.biomes.get(key);
@@ -105,5 +137,5 @@ function isStale(row, current) {
 }
 
 module.exports = {
-  loadPromptCatalog, buildContext, contextFor, isStale, stripImageStyling,
+  loadPromptCatalog, buildContext, contextFor, isStale, stripImageStyling, worldKind, worldMusicStyle,
 };

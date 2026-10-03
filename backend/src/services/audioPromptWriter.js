@@ -21,7 +21,7 @@
 // would only double the wait.
 const defaultTp = require('./textProvider');
 const defaultStore = require('./audioPrompts');
-const { buildContext } = require('./audioPromptContext');
+const { buildContext, worldMusicStyle } = require('./audioPromptContext');
 const { slotKind } = require('./audioSubjects');
 const aiProviders = require('./aiProviders');
 const defaultRap = require('./remoteAudioProvider');
@@ -97,10 +97,36 @@ async function loadStyles(db, { rap = defaultRap } = {}) {
   if (!provider) return { music: [], ambience: [] };
   const r = await rap.listStyles(provider);
   if (!r.ok) return { music: [], ambience: [] };
+  // slots[style] = { featured: [...], mood: [...] }: the box's own choices for
+  // each style, used to give each world a lead instrument and mood.
+  const values = (slot) => (slot && Array.isArray(slot.values) ? slot.values : []);
   return {
     music: r.styles.filter((s) => s.kind === 'music').map((s) => s.value),
     ambience: r.styles.filter((s) => s.kind === 'ambience').map((s) => s.value),
+    slots: Object.fromEntries(r.styles.map((s) => [s.value, {
+      featured: values(s.slots && s.slots.featured), mood: values(s.slots && s.slots.mood),
+    }])),
   };
+}
+
+// A stable pick from `list` for `key`: the same world always gets the same
+// lead instrument, and different worlds spread across the list.
+function stablePick(list, key) {
+  if (!list || !list.length) return null;
+  let h = 0;
+  for (const ch of String(key)) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+  return list[h % list.length];
+}
+
+// World music: the style comes from worldMusicStyle, not the model (live
+// 2026-10-04: the model chose "dungeon" for 18 of 20 worlds). Null when the
+// rule's style is not one the box offers -- then the model chooses as before.
+function fixedMusic(catalog, kind, key, clipKind, allowed, styles) {
+  if (clipKind !== 'music' || kind !== 'world') return null;
+  const style = worldMusicStyle(catalog.worlds.get(key), key);
+  if (!style || !allowed.includes(style)) return null;
+  const slots = (styles && styles.slots && styles.slots[style]) || {};
+  return { style, lead: stablePick(slots.featured, key), mood: stablePick(slots.mood, `${key}|mood`) };
 }
 
 async function writeSlotPrompt(db, {
@@ -112,16 +138,21 @@ async function writeSlotPrompt(db, {
   if (!clipKind) return { ok: false, error: 'unknown subject or slot' };
   const context = buildContext(catalog, kind, key, slot, { cue });
   if (!context) return { ok: false, error: 'unknown subject' };
-  const allowed = clipKind === 'sfx' ? [] : (styles && styles[clipKind]) || [];
+  let allowed = clipKind === 'sfx' ? [] : (styles && styles[clipKind]) || [];
   if (clipKind !== 'sfx' && !allowed.length) {
     return { ok: false, error: `no ${clipKind} styles known -- add/refresh the audio provider first` };
   }
   const cleanHint = typeof hint === 'string' && hint.trim() ? hint.trim().slice(0, 200) : null;
+  const fixed = fixedMusic(catalog, kind, key, clipKind, allowed, styles);
+  if (fixed) allowed = [fixed.style];
   const request = {
     system: { sfx: SYSTEM_SFX, ambience: SYSTEM_AMBIENCE }[clipKind] || SYSTEM_MUSIC,
     prompt: [
       `Clip kind: ${clipKind}`,
-      clipKind === 'sfx' ? null : `Allowed styles: ${allowed.join(', ')}`,
+      fixed ? `Style: ${fixed.style} (fixed)` : null,
+      fixed && fixed.lead ? `Lead instrument: ${fixed.lead}` : null,
+      fixed && fixed.mood ? `Mood: ${fixed.mood}` : null,
+      clipKind === 'sfx' || fixed ? null : `Allowed styles: ${allowed.join(', ')}`,
       `Subject: ${context}`,
       cleanHint ? `Admin hint: ${cleanHint}` : null,
     ].filter(Boolean).join('\n'),

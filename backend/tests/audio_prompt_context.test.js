@@ -1,10 +1,14 @@
 // backend/tests/audio_prompt_context.test.js
 const test = require('node:test');
 const assert = require('node:assert');
-const { buildContext, isStale, stripImageStyling } = require('../src/services/audioPromptContext');
+const {
+  buildContext, isStale, stripImageStyling, worldKind, worldMusicStyle,
+} = require('../src/services/audioPromptContext');
 
 const CAT = {
-  worlds: new Map([['Vale', { biomes: ['Meadow', 'Deep Forest'], level_min: 1, level_max: 10 }]]),
+  worlds: new Map([['Vale', {
+    biomes: ['Meadow', 'Deep Forest'], level_min: 1, level_max: 10, allows_fast_travel: true, has_village: false, width: 96,
+  }]]),
   biomes: new Map([['Meadow', { art_style: 'rolling grass, wildflowers' }]]),
   entities: new Map([
     ['Wolf', { prompt: 'pixel art, a grey timber wolf, single object, solid transparent background' }],
@@ -22,7 +26,33 @@ test('stripImageStyling drops styling clauses, keeps the subject', () => {
 
 test('world context names biomes and level band', () => {
   assert.equal(buildContext(CAT, 'world', 'Vale', 'music'),
-    'world "Vale"; regions: Meadow, Deep Forest; levels 1-10; slot: music');
+    'world "Vale"; type: overworld area; regions: Meadow, Deep Forest; levels 1-10; slot: music');
+});
+
+// Live 2026-10-04: told only name/regions/levels, the model picked "dungeon"
+// for 18 of 20 worlds, overworld frontiers included. The kind now comes from
+// what the database knows: fast travel (overworld) and a village row.
+test('worldKind reads fast travel, villages, boss rooms and the legacy chunked world', () => {
+  const room = { allows_fast_travel: false, has_village: false, width: 96 };
+  assert.equal(worldKind(room, 'The Catacombs: Deep'), 'dungeon room');
+  assert.equal(worldKind(room, 'The Catacombs: Elite'), 'dungeon boss room');
+  assert.equal(worldKind(room, 'The Umbral Gate: End'), 'dungeon boss room');
+  assert.equal(worldKind({ ...room, has_village: true }, 'The Abyss: Hub'), 'dungeon hub with a village');
+  assert.equal(worldKind({ allows_fast_travel: true, has_village: false, width: 96 }, 'Glacier\'s End'), 'overworld area');
+  assert.equal(worldKind({ allows_fast_travel: true, has_village: true, width: 96 }, 'Vale Crossing'), 'overworld village');
+  assert.equal(worldKind({ allows_fast_travel: false, has_village: false, width: null }, 'Overworld'), 'overworld area');
+  assert.equal(worldKind({ ...room, is_entry: true }, 'Start'), 'overworld area');
+});
+
+test('worldMusicStyle maps each kind to one box style', () => {
+  const pairs = [
+    [{ allows_fast_travel: false, has_village: false, width: 96 }, 'The Catacombs: Deep', 'dungeon'],
+    [{ allows_fast_travel: false, has_village: false, width: 96 }, 'The Catacombs: Elite', 'battle'],
+    [{ allows_fast_travel: false, has_village: true, width: 96 }, 'The Abyss: Hub', 'tavern'],
+    [{ allows_fast_travel: true, has_village: true, width: 96 }, 'Vale Crossing', 'village'],
+    [{ allows_fast_travel: true, has_village: false, width: 96 }, 'Ashfields Frontier', 'medieval_fantasy'],
+  ];
+  for (const [w, name, style] of pairs) assert.equal(worldMusicStyle(w, name), style, name);
 });
 
 test('biome context carries art_style', () => {

@@ -35,3 +35,22 @@ test('audioPromptContext against real catalog rows', { skip }, async (t) => {
   assert.ok(after.includes(`looks like: ${expected}`), `art description not used: ${after}`);
   if (ids.length) assert.equal(ctx.isStale({ source_input: before }, after), true, 'a new art description makes the prompt stale');
 });
+
+// The world kind must come from real rows: a village world reads as one, and a
+// world with no fast travel and no village reads as a dungeon room.
+test('world kind against real worlds and villages', { skip }, async () => {
+  const pool = new Pool({ connectionString: url });
+  try {
+    const village = (await pool.query(
+      'SELECT w.name FROM worlds w JOIN villages v ON v.world_id = w.id WHERE w.allows_fast_travel ORDER BY w.name LIMIT 1')).rows[0];
+    const room = (await pool.query(
+      `SELECT w.name FROM worlds w WHERE NOT w.allows_fast_travel AND NOT w.is_entry AND w.width IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM villages v WHERE v.world_id = w.id)
+         AND w.name !~ ': (Elite|End)$' ORDER BY w.name LIMIT 1`)).rows[0];
+    assert.ok(village && room, 'scratch DB must have seeded maps (both specs)');
+    const cat = await ctx.loadPromptCatalog(pool);
+    assert.equal(ctx.worldKind(cat.worlds.get(village.name), village.name), 'overworld village');
+    assert.equal(ctx.worldKind(cat.worlds.get(room.name), room.name), 'dungeon room');
+    assert.match(ctx.buildContext(cat, 'world', room.name, 'music'), /; type: dungeon room;/);
+  } finally { await pool.end(); }
+});

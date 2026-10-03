@@ -4,7 +4,10 @@ const assert = require('node:assert');
 const w = require('../src/services/audioPromptWriter');
 
 const CAT = {
-  worlds: new Map([['Vale', { biomes: ['Meadow'], level_min: 1, level_max: 5 }]]),
+  // Vale is an overworld village, so the world-music rule fixes its style to "village".
+  worlds: new Map([['Vale', {
+    biomes: ['Meadow'], level_min: 1, level_max: 5, allows_fast_travel: true, has_village: true, width: 96,
+  }]]),
   biomes: new Map(), entities: new Map([['Wolf', { prompt: 'a grey wolf' }]]),
   items: new Map(), skills: new Map(), artDescriptions: new Map(),
 };
@@ -41,13 +44,13 @@ test('music: schema enum is the box styles; stored with source_input and via', a
     { tp, store, catalog: CAT, styles: STYLES });
   assert.equal(r.ok, true, r.error);
   const req = tp.calls[0].req;
-  assert.deepEqual(req.jsonSchema.properties.style.enum, ['medieval_fantasy', 'village']);
+  assert.deepEqual(req.jsonSchema.properties.style.enum, ['village']);
   assert.equal(req.system, w.SYSTEM_MUSIC);
   assert.match(req.prompt, /world "Vale"/);
   assert.match(req.prompt, /Admin hint: darker/);
   assert.deepEqual(store.saved[0], {
     kind: 'world', key: 'Vale', slot: 'music', style: 'village', text: 'warm lute over soft drums',
-    sourceInput: 'world "Vale"; regions: Meadow; levels 1-5; slot: music', hint: 'darker', model: 'q', via: 'box',
+    sourceInput: 'world "Vale"; type: overworld village; regions: Meadow; levels 1-5; slot: music', hint: 'darker', model: 'q', via: 'box',
   });
 });
 
@@ -65,6 +68,56 @@ test('ambience gets its own system prompt, and the music one is about music only
   assert.doesNotMatch(w.SYSTEM_MUSIC, /ambience/i);
   assert.doesNotMatch(w.SYSTEM_AMBIENCE, /\bmusic\b/i);
   for (const s of [w.SYSTEM_MUSIC, w.SYSTEM_AMBIENCE]) assert.match(s, /"style".*"prompt"/);
+});
+
+// Live 2026-10-04 style check: 18 of 20 worlds came back "dungeon", and ~8
+// texts were near copies ("Low cello drones and dissonant lute chords").
+// World music now has its style fixed by worldMusicStyle, and leads with one
+// of the box's featured instruments for that style, picked per world.
+const ROOMS = Array.from({ length: 12 }, (_, i) => [`Crypt: Room${i}`, { allows_fast_travel: false, has_village: false, width: 96 }]);
+const ROOM_CAT = { ...CAT, worlds: new Map(ROOMS) };
+const DUNGEON = {
+  music: ['medieval_fantasy', 'dungeon'],
+  ambience: ['cave'],
+  slots: { dungeon: { featured: ['distant bells and viola da gamba', 'low bowed strings', 'slow harp over drone'], mood: ['mysterious', 'lonely', 'somber'] } },
+};
+
+async function roomRequest(key, styles = DUNGEON) {
+  // Two answers: in the fallback case "dungeon" is not allowed, so the writer retries once.
+  const answer = { ok: true, json: { style: 'dungeon', prompt: 'x' }, model: 'q', via: 'box' };
+  const tp = fakeTp([answer, answer]);
+  await w.writeSlotPrompt({}, { kind: 'world', key, slot: 'music' }, { tp, store: fakeStore(), catalog: ROOM_CAT, styles });
+  return tp.calls[0].req;
+}
+
+test('world music: the rule fixes the style and the model may only return it', async () => {
+  const req = await roomRequest('Crypt: Room0');
+  assert.deepEqual(req.jsonSchema.properties.style.enum, ['dungeon']);
+  assert.match(req.prompt, /^Style: dungeon \(fixed\)$/m);
+  assert.doesNotMatch(req.prompt, /Allowed styles/);
+});
+
+test('world music: one featured instrument and mood per world, stable, and varied across worlds', async () => {
+  const leads = [];
+  for (const [key] of ROOMS) {
+    // eslint-disable-next-line no-await-in-loop
+    const req = await roomRequest(key);
+    const lead = req.prompt.match(/^Lead instrument: (.+)$/m);
+    const mood = req.prompt.match(/^Mood: (.+)$/m);
+    assert.ok(lead && ['distant bells and viola da gamba', 'low bowed strings', 'slow harp over drone'].includes(lead[1]), req.prompt);
+    assert.ok(mood && ['mysterious', 'lonely', 'somber'].includes(mood[1]), req.prompt);
+    // eslint-disable-next-line no-await-in-loop
+    assert.equal((await roomRequest(key)).prompt, req.prompt, 'the same world must get the same request');
+    leads.push(lead[1]);
+  }
+  assert.ok(new Set(leads).size >= 2, `12 worlds all got ${leads[0]}`);
+});
+
+test('world music: a rule style the box does not offer falls back to the model choosing', async () => {
+  const req = await roomRequest('Crypt: Room0', { music: ['medieval_fantasy', 'village'], ambience: [] });
+  assert.deepEqual(req.jsonSchema.properties.style.enum, ['medieval_fantasy', 'village']);
+  assert.match(req.prompt, /Allowed styles: medieval_fantasy, village/);
+  assert.doesNotMatch(req.prompt, /Lead instrument/);
 });
 
 test('sfx: entity contract, no style, cue in the context', async () => {
