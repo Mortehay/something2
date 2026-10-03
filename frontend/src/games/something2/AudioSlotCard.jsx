@@ -9,6 +9,7 @@ import styled from 'styled-components';
 import {
   useProposeAudio, useUploadAudio, useUpdateBinding, useUnbind,
   generateItem, writeItem, singleEnqueueMessage, slotJobFor, isLiveJob,
+  slotJobsShouldPoll, slotEnqueueBlocked, slotAwaiting,
   useEnqueueSlotJob, useAudioJobs, useAudioSlotJobs, useSubjectRefresh,
   useAudioClips, useBindFromLibrary, loopEditable, useSetClipLoopable, useSavePrompt,
 } from './useAudioAdmin.js';
@@ -346,17 +347,31 @@ function AudioSlotCard({
   // the batch panel's cadence). The job row -- not a mutation's isPending --
   // is what survives a remount and what a batch drain also updates.
   const { run, stats } = useAudioJobs();
-  const { slotJobs } = useAudioSlotJobs({ poll: shouldPoll({ run, stats }) });
+  // Set from a successful enqueue's response; null when nothing awaits.
+  const [awaitingAt, setAwaitingAt] = useState(null);
+  const batchPoll = shouldPoll({ run, stats });
+  const { slotJobs, slotJobsUpdatedAt } = useAudioSlotJobs({
+    poll: batchPoll,
+    pollWhen: (rows, updatedAt) => slotJobsShouldPoll({
+      batchPoll, job: slotJobFor(rows, subject.kind, subject.key, slot), awaitingAt, slotJobsUpdatedAt: updatedAt,
+    }),
+  });
   const job = slotJobFor(slotJobs, subject.kind, subject.key, slot);
   const live = isLiveJob(job);
+  const blockedFor = (mutation) => slotEnqueueBlocked({
+    pending: mutation.isPending, job, awaitingAt, slotJobsUpdatedAt,
+  });
   // When this slot's job leaves the queue (done drops out of /jobs/slots,
   // or it turns failed), refetch the prompt and the bound clips it changed.
+  // "Busy" includes the awaiting window: a job that finished before the
+  // first fresh fetch is never seen live, and still changed the slot.
+  const busy = live || slotAwaiting(awaitingAt, slotJobsUpdatedAt);
   const refresh = useSubjectRefresh(subject.kind, subject.key);
-  const wasLive = useRef(live);
+  const wasBusy = useRef(busy);
   useEffect(() => {
-    if (wasLive.current && !live) refresh();
-    wasLive.current = live;
-  }, [live, refresh]);
+    if (wasBusy.current && !busy) refresh();
+    wasBusy.current = busy;
+  }, [busy, refresh]);
 
   const onSuggest = () => {
     propose.mutate(
@@ -375,10 +390,14 @@ function AudioSlotCard({
 
   const enqueue = (mutation, item, what) => {
     setEnqueueNote(null);
+    setAwaitingAt(null);
     mutation.mutate(item, {
       onSuccess: (json) => {
         const note = singleEnqueueMessage(json, what);
         setEnqueueNote(note);
+        // Queued: stay disabled until a fresh /jobs/slots fetch shows it.
+        // Not queued (rejected/already live): nothing to wait for.
+        if (note.ok) setAwaitingAt(Date.now());
         if (note.ok) toast.success(note.message); else toast.error(note.message);
       },
     });
@@ -488,7 +507,7 @@ function AudioSlotCard({
             />
             <Secondary
               type="button"
-              disabled={write.isPending || live || !canGenerate}
+              disabled={blockedFor(write) || !canGenerate}
               title={!canGenerate ? NO_PROVIDER_TITLE : (live ? LIVE_JOB_TITLE : undefined)}
               onClick={onWrite}
             >
@@ -573,11 +592,11 @@ function AudioSlotCard({
             </InlineLabel>
             <Button
               type="button"
-              disabled={generate.isPending || live || !canGenerate || (isSfx && dirty)}
+              disabled={blockedFor(generate) || !canGenerate || (isSfx && dirty)}
               title={generateTitle({ canGenerate, live, sfxDirty: isSfx && dirty })}
               onClick={onGenerate}
             >
-              {generateLabel(generate.isPending, job)}
+              {generateLabel(blockedFor(generate) && !live, job)}
             </Button>
           </>
         )}

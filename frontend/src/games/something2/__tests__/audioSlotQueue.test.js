@@ -4,6 +4,7 @@ import {
 import { apiFetch } from '../src/js/net/auth.js';
 import {
   enqueueSlotJob, generateItem, writeItem, singleEnqueueMessage, slotJobFor, isLiveJob,
+  slotJobsShouldPoll, slotEnqueueBlocked,
 } from '../useAudioAdmin.js';
 
 // Plan 2026-10-03 Task 3: the slot card's Generate and "Write with model"
@@ -116,5 +117,77 @@ describe("the slot's live job", () => {
     expect(isLiveJob(slotJobFor(rows, 'world', 'Vale', 'ambience'))).toBe(false);
     expect(isLiveJob({ status: 'queued' })).toBe(true);
     expect(isLiveJob(null)).toBe(false);
+  });
+});
+
+// Review fix: a card outside the Audio tab (SubjectSounds in Biomes, Entity
+// Types, Maps) stayed on "Generating…" because /jobs/slots stopped polling
+// with the batch cadence while its last fetch still showed the job running.
+describe('whether a slot card polls /jobs/slots', () => {
+  const running = { id: '5', status: 'running' };
+
+  it('keeps polling while its own job is live, even after the drain ended', () => {
+    // The drain's run is over (batch cadence off) but the last fetch still
+    // shows this slot's job running: only another fetch can clear it.
+    expect(slotJobsShouldPoll({
+      batchPoll: false, job: running, awaitingAt: null, slotJobsUpdatedAt: 1000,
+    })).toBe(true);
+    expect(slotJobsShouldPoll({
+      batchPoll: false, job: { id: '5', status: 'queued' }, awaitingAt: null, slotJobsUpdatedAt: 1000,
+    })).toBe(true);
+  });
+
+  it('stops once the slot has no live job and nothing awaits a fresh fetch', () => {
+    expect(slotJobsShouldPoll({
+      batchPoll: false, job: null, awaitingAt: null, slotJobsUpdatedAt: 1000,
+    })).toBe(false);
+    expect(slotJobsShouldPoll({
+      batchPoll: false, job: { id: '5', status: 'failed' }, awaitingAt: 900, slotJobsUpdatedAt: 1000,
+    })).toBe(false);
+  });
+
+  it('polls while an enqueue awaits a fetch newer than its response', () => {
+    expect(slotJobsShouldPoll({
+      batchPoll: false, job: null, awaitingAt: 2000, slotJobsUpdatedAt: 1000,
+    })).toBe(true);
+  });
+
+  it('follows the batch cadence when that is on', () => {
+    expect(slotJobsShouldPoll({
+      batchPoll: true, job: null, awaitingAt: null, slotJobsUpdatedAt: 1000,
+    })).toBe(true);
+  });
+});
+
+// Review fix: between the enqueue response (isPending false) and the next
+// /jobs/slots fetch, Generate was enabled again -- a double-click window.
+describe('whether Generate / Write with model is blocked', () => {
+  it('is blocked while the request is in flight', () => {
+    expect(slotEnqueueBlocked({
+      pending: true, job: null, awaitingAt: null, slotJobsUpdatedAt: 0,
+    })).toBe(true);
+  });
+
+  it('stays blocked after a queued response until a newer fetch arrives', () => {
+    expect(slotEnqueueBlocked({
+      pending: false, job: null, awaitingAt: 5000, slotJobsUpdatedAt: 4000,
+    })).toBe(true);
+    // The fresh fetch shows the job: still blocked, now because it is live.
+    expect(slotEnqueueBlocked({
+      pending: false, job: { id: '9', status: 'queued' }, awaitingAt: 5000, slotJobsUpdatedAt: 5200,
+    })).toBe(true);
+    // The fresh fetch shows no job (it already finished): unblocked.
+    expect(slotEnqueueBlocked({
+      pending: false, job: null, awaitingAt: 5000, slotJobsUpdatedAt: 5200,
+    })).toBe(false);
+  });
+
+  it('is not blocked when nothing was queued (rejected / already live clears awaiting)', () => {
+    expect(slotEnqueueBlocked({
+      pending: false, job: null, awaitingAt: null, slotJobsUpdatedAt: 0,
+    })).toBe(false);
+    expect(slotEnqueueBlocked({
+      pending: false, job: { id: '1', status: 'failed' }, awaitingAt: null, slotJobsUpdatedAt: 0,
+    })).toBe(false);
   });
 });

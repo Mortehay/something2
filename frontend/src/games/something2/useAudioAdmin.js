@@ -131,6 +131,39 @@ export function isLiveJob(job) {
   return Boolean(job) && (job.status === 'queued' || job.status === 'running');
 }
 
+// A slot card's enqueue is "awaiting" from a successful response (at
+// `awaitingAt`, a Date.now()) until a /jobs/slots fetch has completed after
+// it: only then does the card's job row reflect the new job (or, for a job
+// that already finished, its absence). The enqueue's own invalidation
+// cancels any fetch that was in flight, so a fetch completing at or after
+// `awaitingAt` was issued after the job was committed.
+export function slotAwaiting(awaitingAt, slotJobsUpdatedAt) {
+  return Number.isFinite(awaitingAt) && !(slotJobsUpdatedAt >= awaitingAt);
+}
+
+// Whether a slot card polls /jobs/slots. The batch cadence (shouldPoll) is
+// not enough on its own: it stops the moment the drain's run ends, and the
+// last fetch can predate the job's completion by up to one interval -- the
+// card then shows a stale queued/running row forever. AudioAdmin covers that
+// with its run-ended invalidation, but SubjectSounds (Biomes, Entity Types,
+// Maps) has nothing that does. So a card keeps polling while its OWN slot's
+// job is live, or while its enqueue is still awaiting a fresh fetch.
+export function slotJobsShouldPoll({
+  batchPoll, job, awaitingAt, slotJobsUpdatedAt,
+}) {
+  return Boolean(batchPoll) || isLiveJob(job) || slotAwaiting(awaitingAt, slotJobsUpdatedAt);
+}
+
+// Whether the card's Generate / Write with model is disabled for job
+// reasons: the request is in flight, the slot has a live job, or the enqueue
+// succeeded but no fresh /jobs/slots fetch shows the job yet (the
+// double-click window between isPending going false and that refetch).
+export function slotEnqueueBlocked({
+  pending, job, awaitingAt, slotJobsUpdatedAt,
+}) {
+  return Boolean(pending) || isLiveJob(job) || slotAwaiting(awaitingAt, slotJobsUpdatedAt);
+}
+
 export function useAudioSubjects() {
   const { data, isLoading, error } = useQuery({
     queryKey: SUBJECTS_KEY,
@@ -306,13 +339,23 @@ export function useAudioJobs() {
 // GET /admin/jobs/slots: the latest live-or-failed job per slot. `poll` is
 // the caller's shouldPoll({run, stats}) over useAudioJobs' data, so this
 // refetches on exactly the batch panel's cadence and stops when it stops.
-export function useAudioSlotJobs({ poll = false } = {}) {
-  const { data, isLoading, error } = useQuery({
+//
+// `pollWhen(rows, dataUpdatedAt)` (optional) is asked on every interval with
+// the query's CURRENT data, so a slot card can keep polling on its own job's
+// state without reading that state back during render.
+export function useAudioSlotJobs({ poll = false, pollWhen } = {}) {
+  const {
+    data, dataUpdatedAt, isLoading, error,
+  } = useQuery({
     queryKey: SLOT_JOBS_KEY,
-    refetchInterval: poll ? 2000 : false,
+    refetchInterval: (q) => (
+      (poll || (typeof pollWhen === 'function' && pollWhen(q.state.data || [], q.state.dataUpdatedAt || 0)))
+        ? 2000 : false),
     queryFn: () => getJson(`${API_URL}/api/audio/admin/jobs/slots`, 'the slot jobs'),
   });
-  return { slotJobs: data || [], isLoadingSlotJobs: isLoading, slotJobsError: error || null };
+  return {
+    slotJobs: data || [], slotJobsUpdatedAt: dataUpdatedAt || 0, isLoadingSlotJobs: isLoading, slotJobsError: error || null,
+  };
 }
 
 // Queues a selection of any size (SOMET-596): POST /admin/jobs caps a request
