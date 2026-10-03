@@ -326,13 +326,18 @@ export function useAudioSlotJobs({ poll = false } = {}) {
 // stopping at the first failure (audioSelection.queueInChunks). Resolves to
 // { results, error, unsent } rather than rejecting on a failed chunk: the
 // chunks before it DID queue, and the caller reports both halves.
+//
+// The request body is jobsRequestBody's, so a test can see exactly what one
+// chunk sends (items untouched -- force_prompt/prompt_only ride on them).
+export function jobsRequestBody(items, providerId) {
+  return { items, start: true, provider_id: Number.isInteger(providerId) ? providerId : undefined };
+}
+
 export function useEnqueueAudioJobs() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ items, providerId }) => queueInChunks(items, async (chunk) => {
-      const { res, json } = await post('/api/audio/admin/jobs', {
-        items: chunk, start: true, provider_id: Number.isInteger(providerId) ? providerId : undefined,
-      });
+      const { res, json } = await post('/api/audio/admin/jobs', jobsRequestBody(chunk, providerId));
       if (!res.ok) throw new Error(json.error || 'Failed to queue the batch');
       return json;
     }),

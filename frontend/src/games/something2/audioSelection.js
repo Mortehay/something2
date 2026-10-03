@@ -203,9 +203,13 @@ export function selectionOutsideFilter(selected, matching) {
 // selection may be hidden by the filter and is still queued). `style` goes on
 // music/ambience items when chosen (the route stores it; none means the box
 // suggests one per subject); `engine` goes on every sfx item (the route's
-// drain group; realistic when unset). Upload-only rows and ids that no longer
-// name a row are not sent and are counted in `skipped`.
-export function queueItems(selected, rowsById, { style = '', engine = 'realistic' } = {}) {
+// drain group; realistic when unset). `forcePrompt` (plan 2026-10-03, the
+// "Force regenerate prompt" checkbox) puts `force_prompt: true` on every item,
+// so the prompt phase rewrites even a stored or hand-written prompt; unticked,
+// the field is left off and the server's default (false) applies.
+// Upload-only rows and ids that no longer name a row are not sent and are
+// counted in `skipped`.
+export function queueItems(selected, rowsById, { style = '', engine = 'realistic', forcePrompt = false } = {}) {
   const items = [];
   let skipped = 0;
   for (const id of selected) {
@@ -214,6 +218,7 @@ export function queueItems(selected, rowsById, { style = '', engine = 'realistic
     const it = { subject_kind: r.kind, subject_key: r.key, slot: r.slot };
     if (r.clipKind === 'sfx') it.engine = engine || 'realistic';
     else if (style) it.style = style;
+    if (forcePrompt === true) it.force_prompt = true;
     items.push(it);
   }
   items.sort((a, b) => slotId(a.subject_kind, a.subject_key, a.slot)

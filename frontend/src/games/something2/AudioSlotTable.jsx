@@ -28,6 +28,12 @@ import SubjectSounds from './SubjectSounds.jsx';
 const Bar = styled.div`
   display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: flex-end; margin-bottom: 0.75rem;
 `;
+// A checkbox beside the queue controls: Field's column layout and 140px
+// input width are for selects and text inputs.
+const CheckLabel = styled.label`
+  display: flex; align-items: center; gap: 0.35rem; font-size: 0.8rem;
+  color: var(--s2-text-muted); padding-bottom: 0.45rem;
+`;
 const Field = styled.label`
   display: flex; flex-direction: column; gap: 0.25rem;
   font-size: 0.8rem; color: var(--s2-text-muted);
@@ -155,6 +161,9 @@ function AudioSlotTable({
   const [subject, setSubject] = useState(null);
   const [style, setStyle] = useState('');
   const [engine, setEngine] = useState('realistic');
+  // Plan 2026-10-03: off by default -- a forced prompt replaces even a
+  // hand-written one (the old version stays in the slot's history).
+  const [forcePrompt, setForcePrompt] = useState(false);
   const [notice, setNotice] = useState(null);
   const [failure, setFailure] = useState(null);
 
@@ -199,7 +208,7 @@ function AudioSlotTable({
   );
 
   const onQueue = async () => {
-    const { items, skipped } = queueItems(selected, rowsById, { style, engine });
+    const { items, skipped } = queueItems(selected, rowsById, { style, engine, forcePrompt });
     setFailure(null);
     if (items.length === 0) {
       setNotice(enqueueSummary([], skipped).message);
@@ -281,6 +290,15 @@ function AudioSlotTable({
             {SFX_ENGINES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
         </Field>
+        <CheckLabel title="Write a new prompt for every queued slot, even one that already has a prompt (hand-written included). The old prompt stays in the slot's history.">
+          <input
+            type="checkbox"
+            checked={forcePrompt}
+            aria-label="Force regenerate prompt"
+            onChange={(e) => setForcePrompt(e.target.checked)}
+          />
+          Force regenerate prompt
+        </CheckLabel>
         <Button
           type="button"
           onClick={onQueue}

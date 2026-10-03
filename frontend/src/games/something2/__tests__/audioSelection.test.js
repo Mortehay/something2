@@ -198,6 +198,22 @@ describe('queueItems', () => {
     expect(skipped).toBe(2);
   });
 
+  // Plan 2026-10-03: the queue bar's "Force regenerate prompt" checkbox.
+  it('puts force_prompt: true on every item when Force is ticked, music and sfx alike', () => {
+    const { items } = queueItems(new Set(['world/Ash/music', 'creature/Slime/hurt']), index, { forcePrompt: true });
+    expect(items).toEqual([
+      {
+        subject_kind: 'creature', subject_key: 'Slime', slot: 'hurt', engine: 'realistic', force_prompt: true,
+      },
+      { subject_kind: 'world', subject_key: 'Ash', slot: 'music', force_prompt: true },
+    ]);
+  });
+
+  it('sends no force_prompt field when Force is unticked', () => {
+    const { items } = queueItems(new Set(['world/Ash/music']), index, { forcePrompt: false });
+    expect(items).toEqual([{ subject_kind: 'world', subject_key: 'Ash', slot: 'music' }]);
+  });
+
   it('leaves style off when none is chosen, and defaults engine to realistic', () => {
     const { items } = queueItems(new Set(['world/Ash/music', 'creature/Slime/hurt']), index, {});
     expect(items).toEqual([
