@@ -142,6 +142,10 @@ test('audio drain in phases', { skip }, async (t) => {
           [forced]: [true, true, false, 'queued'],
           [only]: [false, false, true, 'done'],
         });
+        // The prompt JOIN must not reorder the inserts: the drain claims and
+        // packs by id, so ids follow the items' order.
+        const byId = [...r.queued].sort((a, b) => Number(a.id) - Number(b.id)).map((j) => j.subject_key);
+        assert.deepEqual(byId, [none, stored, cleared, own, forced, only]);
         await pool.query('DELETE FROM audio_jobs WHERE subject_key LIKE $1', [`${tag}-nq-%`]);
       });
 

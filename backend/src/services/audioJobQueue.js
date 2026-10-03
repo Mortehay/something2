@@ -102,9 +102,12 @@ async function enqueue(db, items, { batchId = null, providerId = null } = {}) {
          SELECT u.*, (u.fp OR (u.pr IS NULL AND (p.id IS NULL OR p.text = ''))) AS needs
            FROM unnest($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[], $10::text[],
                        $11::bigint[], $12::text[], $13::boolean[], $14::boolean[], $15::int[], $16::text[])
-             AS u(k, key, s, c, g, st, pr, sl, sd, en, fp, po, va, hi)
+             WITH ORDINALITY AS u(k, key, s, c, g, st, pr, sl, sd, en, fp, po, va, hi, ord)
            LEFT JOIN audio_prompts p ON p.active AND p.subject_kind = u.k AND p.subject_key = u.key AND p.slot = u.s
        ) x
+      -- Ids in item order: the join may reorder rows, and the drain claims
+      -- (and packs) by id.
+      ORDER BY ord
      ON CONFLICT DO NOTHING RETURNING *`,
     [batch, providerId, cols.kind, cols.key, cols.slot, cols.clip, cols.group, cols.style, cols.prompt, cols.slots, cols.seed,
       cols.engine, cols.force, cols.promptOnly, cols.variants, cols.hint],
