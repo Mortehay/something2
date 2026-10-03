@@ -513,24 +513,29 @@ function usePromptInvalidation(kind, key) {
   };
 }
 
+// PUT /admin/prompts/:kind/:key/:slot -- one new active version. Save and
+// the history list's Restore both send through here; a 409 (the active row is
+// no longer `expectActiveId`) rejects with the server's own "reload it" text.
+export async function putPrompt(kind, key, {
+  slot, style, text, expectActiveId,
+}) {
+  const res = await apiFetch(
+    `${API_URL}/api/audio/admin/prompts/${encodeURIComponent(kind)}/${encodeURIComponent(key)}/${encodeURIComponent(slot)}`,
+    {
+      method: 'PUT',
+      headers: authHeaders(),
+      body: JSON.stringify({ style, text, expect_active_id: expectActiveId ?? null }),
+    },
+  );
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || 'Failed to save the prompt');
+  return json;
+}
+
 export function useSavePrompt(kind, key) {
   const invalidate = usePromptInvalidation(kind, key);
   return useMutation({
-    mutationFn: async ({
-      slot, style, text, expectActiveId,
-    }) => {
-      const res = await apiFetch(
-        `${API_URL}/api/audio/admin/prompts/${encodeURIComponent(kind)}/${encodeURIComponent(key)}/${encodeURIComponent(slot)}`,
-        {
-          method: 'PUT',
-          headers: authHeaders(),
-          body: JSON.stringify({ style, text, expect_active_id: expectActiveId ?? null }),
-        },
-      );
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.error || 'Failed to save the prompt');
-      return json;
-    },
+    mutationFn: (vars) => putPrompt(kind, key, vars),
     onSuccess: invalidate,
     onError: (err) => toast.error(err.message),
   });

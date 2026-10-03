@@ -12,7 +12,9 @@ import {
   useSavePrompt, useWritePrompt, writePromptMutationKey,
 } from './useAudioAdmin.js';
 import { draftText, isDirty } from './artDescriptionDraft.js';
-import { provenanceText, generatePromptFields } from './audioPromptDraft.js';
+import {
+  provenanceText, generatePromptFields, historyRows, restoreVars,
+} from './audioPromptDraft.js';
 import { assetUrl } from './src/js/net/assets.js';
 import { API_URL } from '../../config.js';
 
@@ -81,6 +83,25 @@ const HintInput = styled.input`
   border: 1px solid var(--s2-border-strong); border-radius: 4px;
   padding: 0.3rem 0.35rem; font-size: 0.8rem; min-width: 10rem; flex: 1;
 `;
+
+// "Prompt history (N)" (plan 2026-10-03 Task 4): collapsed by default, one
+// row per inactive version, newest first, each with Restore.
+const History = styled.details`
+  margin-top: 0.5rem; font-size: 0.8rem; color: var(--s2-text-muted);
+  summary { cursor: pointer; }
+  ul { list-style: none; margin: 0.35rem 0 0; padding: 0; }
+`;
+const HistoryRow = styled.li`
+  display: flex; gap: 0.5rem; align-items: flex-start; flex-wrap: wrap;
+  padding: 0.3rem 0; border-bottom: 1px solid var(--s2-border);
+  &:last-child { border-bottom: none; }
+  p { margin: 0; flex: 1; min-width: 10rem; color: var(--s2-text); word-break: break-word; }
+`;
+
+const formatWhen = (iso) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString();
+};
 
 // The two engines the box offers for sfx (spec §4): realistic is the
 // default, retro is cheaper (no model load) but lower fidelity.
@@ -300,6 +321,10 @@ function AudioSlotCard({
   const [textDraft, setTextDraft] = useState(null);
   const [hint, setHint] = useState('');
   const save = useSavePrompt(subject.kind, subject.key);
+  // Its own mutation instance so a Restore error shows under the history
+  // list, not under Save; both invalidate the prompts query on success.
+  const restore = useSavePrompt(subject.kind, subject.key);
+  const history = historyRows(prompt);
   const write = useWritePrompt(subject.kind, subject.key, slot);
   const writing = useIsMutating({ mutationKey: writePromptMutationKey(subject.kind, subject.key, slot) }) > 0;
   const styleShown = draftText(styleDraft, active ? { text: active.style || '' } : null);
@@ -347,6 +372,12 @@ function AudioSlotCard({
       },
       { onSuccess: () => { setStyleDraft(null); setTextDraft(null); } },
     );
+  };
+
+  const onRestore = (row) => {
+    restore.mutate(restoreVars(slot, row, active), {
+      onSuccess: () => { setStyleDraft(null); setTextDraft(null); },
+    });
   };
 
   const onWrite = () => {
@@ -428,6 +459,30 @@ function AudioSlotCard({
           </Controls>
           {write.isError && <Err>{write.error.message}</Err>}
           {save.isError && <Err>{save.error.message}</Err>}
+          {history.length > 0 && (
+            <History>
+              <summary>Prompt history ({history.length})</summary>
+              <ul>
+                {history.map((h) => (
+                  <HistoryRow key={h.id}>
+                    <Meta title={h.createdAt}>{formatWhen(h.createdAt)}</Meta>
+                    <Meta>{h.author}</Meta>
+                    {!isSfx && <Meta>{h.style || '(no style)'}</Meta>}
+                    <p>{h.text || <i>(cleared)</i>}</p>
+                    <Secondary
+                      type="button"
+                      disabled={restore.isPending}
+                      title="Save this version as the active prompt (the current one moves into history)"
+                      onClick={() => onRestore(h)}
+                    >
+                      Restore
+                    </Secondary>
+                  </HistoryRow>
+                ))}
+              </ul>
+              {restore.isError && <Err>{restore.error.message}</Err>}
+            </History>
+          )}
         </>
       )}
 

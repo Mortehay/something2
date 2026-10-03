@@ -24,3 +24,32 @@ export function generatePromptFields({
   if (!active && !style && !text) return {};
   return { style: style || undefined, prompt: text || undefined };
 }
+
+// The slot card's "Prompt history (N)" list (plan 2026-10-03 Task 4).
+// `history` is GET /admin/prompts' inactive rows, already newest first
+// (audioPrompts.listForSubject orders by created_at DESC); it is re-sorted
+// here anyway so the list never depends on that ORDER BY. The author is the
+// model that wrote the row, or "hand" for a row nobody's model wrote (via
+// null).
+export function historyRows(prompt) {
+  const rows = (prompt && Array.isArray(prompt.history)) ? prompt.history : [];
+  return [...rows]
+    .sort((a, b) => (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0)
+      || Number(b.id) - Number(a.id))
+    .map((r) => ({
+      id: r.id,
+      createdAt: r.created_at,
+      author: r.via == null ? 'hand' : (r.model || r.via),
+      style: r.style || '',
+      text: r.text || '',
+    }));
+}
+
+// What Restore saves: the old row's text and style as a NEW active version,
+// guarded by the CURRENT active id -- if someone saved meanwhile, the PUT
+// answers 409 and nothing is overwritten. History itself is never edited.
+export function restoreVars(slot, row, active) {
+  return {
+    slot, style: row.style || null, text: row.text, expectActiveId: active ? active.id : null,
+  };
+}
