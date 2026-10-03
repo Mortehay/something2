@@ -24,6 +24,7 @@ export const SLOT_JOBS_KEY = [...JOBS_KEY, 'slots'];
 export const CLIPS_KEY_PREFIX = ['audio-clips'];
 const clipsKey = (kind, unbound, page) => [...CLIPS_KEY_PREFIX, kind || null, Boolean(unbound), page || 1];
 const slotsKey = (kind, key) => ['audio-slots', kind, key];
+const promptsKey = (kind, key) => ['audio-prompts', kind, key];
 // Every audio-slots query, regardless of subject -- a clip delete or a
 // bind-from-library cannot know in advance which subjects it touched (a clip
 // can be bound to more than one), so mutations that only learn "N bindings
@@ -54,15 +55,20 @@ function fetchSlots(kind, key) {
   );
 }
 
-// The /admin/generate body for one slot card. Suggest's `slots` are the box's
-// values FOR the style it suggested, so they are only sent while the style
-// field still holds that style -- a hand-edited style sends none.
+// The slot card's Generate, as ONE POST /admin/jobs item (plan 2026-10-03:
+// a single click goes through the queue, so it runs the same prompt ->
+// switch -> audio phases as a batch). Suggest's `slots` are the box's values
+// FOR the style it suggested, so they are only sent while the style field
+// still holds that style -- a hand-edited style sends none.
 //
 // `engine`/`variants` are sfx-only (game audio slice 3): AudioSlotCard omits
 // them entirely for music/ambience slots, so they are undefined there and
 // dropped from the JSON body the same way style/prompt/slots already are.
-export function generateBody({
-  subject, slot, style, prompt, proposal, engine, variants,
+// `seed` is sent only when it is an integer (the card has no seed control
+// today). `forcePrompt` is the card's "Force regenerate prompt" checkbox;
+// unticked, the field is left off and the server's default (false) applies.
+export function generateItem({
+  subject, slot, style, prompt, proposal, engine, variants, seed, forcePrompt,
 }) {
   return {
     subject_kind: subject.kind, subject_key: subject.key, slot,
@@ -71,7 +77,58 @@ export function generateBody({
     slots: (proposal && proposal.slots && proposal.style === style) ? proposal.slots : undefined,
     engine: engine || undefined,
     variants: Number.isInteger(variants) ? variants : undefined,
+    seed: Number.isInteger(seed) ? seed : undefined,
+    force_prompt: forcePrompt === true ? true : undefined,
   };
+}
+
+// The slot card's "Write with model", as ONE POST /admin/jobs item: a
+// prompt-only job that always rewrites (force_prompt), carrying the card's
+// optional hint. The queue's prompt phase writes it on the box's text model.
+export function writeItem({ subject, slot, hint }) {
+  const h = typeof hint === 'string' ? hint.trim() : '';
+  return {
+    subject_kind: subject.kind,
+    subject_key: subject.key,
+    slot,
+    prompt_only: true,
+    force_prompt: true,
+    hint: h || undefined,
+  };
+}
+
+// What one single-item enqueue did, as { ok, message }. The route answers
+// 201 even when it queued nothing: the item can be `rejected` (with the
+// reason) or `already_live` (the slot has a queued or running job already),
+// and neither may be swallowed -- the admin pressed a button and nothing
+// will happen. `started:false, reason:'no_provider'` means it is queued but
+// no drain will run it until a provider exists.
+export function singleEnqueueMessage(json, what = 'Generate') {
+  const j = json || {};
+  const rejected = Array.isArray(j.rejected) ? j.rejected : [];
+  if (rejected.length) {
+    return { ok: false, message: `${what} not queued: ${rejected[0].error || 'rejected'}` };
+  }
+  if (Array.isArray(j.already_live) && j.already_live.length) {
+    return { ok: false, message: `${what} not queued: this slot already has a queued or running job` };
+  }
+  if (!(Array.isArray(j.queued) && j.queued.length)) {
+    return { ok: false, message: `${what} not queued` };
+  }
+  if (j.started === false && j.reason === 'no_provider') {
+    return { ok: true, message: `${what} queued — no audio provider, press Start once one is active` };
+  }
+  return { ok: true, message: `${what} queued` };
+}
+
+// This slot's row from GET /admin/jobs/slots (the latest queued, running or
+// failed job), or null.
+export function slotJobFor(slotJobs, kind, key, slot) {
+  return (slotJobs || []).find((j) => j.subject_kind === kind && j.subject_key === key && j.slot === slot) || null;
+}
+
+export function isLiveJob(job) {
+  return Boolean(job) && (job.status === 'queued' || job.status === 'running');
 }
 
 export function useAudioSubjects() {
@@ -107,69 +164,6 @@ export function useProposeAudio() {
       return json;
     },
     onError: (err) => toast.error(err.message),
-  });
-}
-
-// A per-(subject,slot) mutation key, not a bare hook-local mutation.
-//
-// Two things this buys over a plain useMutation():
-//   1. A toast id scoped to this exact slot (`audio-generate:world/vale/music`)
-//      so generating for two different subjects/slots shows two toasts
-//      instead of one clobbering the other.
-//   2. The mutation is findable in the GLOBAL mutation cache by this key via
-//      useIsMutating(), which survives a component UNMOUNT. Slot cards are
-//      keyed by subject -- switching subjects or navigating away and back
-//      remounts them, and a fresh useMutation() instance always starts
-//      isPending=false. Without this, a still-running generation (minutes,
-//      for music) looked finished the moment its card remounted, and a
-//      second press could fire a duplicate request at the GPU box.
-export function generateMutationKey(subjectKind, subjectKey, slot) {
-  return ['audio-generate', subjectKind, subjectKey, slot];
-}
-
-// The result toast text for one /admin/generate call (SOMET-592 review fix).
-// A music/ambience call (`{clip, binding}`, no `partial` concept) and a full
-// sfx success (every requested variant stored) both stay the original plain
-// message. A PARTIAL sfx store -- some variants bound, one or more failed
-// mid-loop (audioRoutes.js's `gen.partial`/`gen.error`, still a 201 because
-// the successful variants are real and already bound) -- must say so, or the
-// admin has no way to learn a generation came back short. `requestedVariants`
-// falls back to the stored count when it is missing (a music/ambience call,
-// or an sfx call whose body never set `variants`), so the message never
-// claims "N of undefined".
-export function generateResultMessage(json, requestedVariants) {
-  if (!json || !json.partial) return 'Clip generated and bound';
-  const got = Array.isArray(json.clips) ? json.clips.length : 0;
-  const requested = Number.isInteger(requestedVariants) && requestedVariants > 0 ? requestedVariants : got;
-  return `Generated ${got} of ${requested} variant(s) — ${json.error}`;
-}
-
-export function useGenerateAudio(subjectKind, subjectKey, slot) {
-  const qc = useQueryClient();
-  const toastId = `audio-generate:${subjectKind}/${subjectKey}/${slot}`;
-  return useMutation({
-    mutationKey: generateMutationKey(subjectKind, subjectKey, slot),
-    mutationFn: async (body) => {
-      const { res, json } = await post('/api/audio/admin/generate', body);
-      if (!res.ok) throw new Error(json.error || 'Failed to generate');
-      return json;
-    },
-    onMutate: () => {
-      toast.loading('Generating… this can take a few minutes', { id: toastId });
-    },
-    // `variables` is the body useGenerateAudio's caller passed to
-    // generate.mutate() -- generateBody's `variants` field, when the call was
-    // for an sfx slot -- so a partial result can report how many were asked
-    // for, not just how many arrived.
-    onSuccess: (json, variables) => {
-      const message = generateResultMessage(json, variables && variables.variants);
-      if (json.partial) toast.error(message, { id: toastId });
-      else toast.success(message, { id: toastId });
-      qc.invalidateQueries({ queryKey: slotsKey(subjectKind, subjectKey) });
-      qc.invalidateQueries({ queryKey: MISSES_KEY });
-      qc.invalidateQueries({ queryKey: SUBJECTS_KEY });
-    },
-    onError: (err) => toast.error(err.message, { id: toastId }),
   });
 }
 
@@ -333,6 +327,38 @@ export function jobsRequestBody(items, providerId) {
   return { items, start: true, provider_id: Number.isInteger(providerId) ? providerId : undefined };
 }
 
+// One slot card's Generate or Write with model: a single-item enqueue with
+// start:true. Resolves to the route's JSON; the card reads
+// singleEnqueueMessage(json) to report a rejected or already-live item.
+export async function enqueueSlotJob(item) {
+  const { res, json } = await post('/api/audio/admin/jobs', jobsRequestBody([item]));
+  if (!res.ok) throw new Error(json.error || 'Failed to queue the job');
+  return json;
+}
+
+export function useEnqueueSlotJob() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: enqueueSlotJob,
+    onSettled: () => qc.invalidateQueries({ queryKey: JOBS_KEY }),
+    onError: (err) => toast.error(err.message),
+  });
+}
+
+// When a slot card's own job leaves the queue, what it changed must show:
+// a new prompt version (prompt phase) and a new bound clip (audio phase).
+// AudioAdmin's doneRose refresh covers the slot table but not the prompts,
+// and SubjectSounds (the world/biome editors) has no AudioAdmin at all.
+export function useSubjectRefresh(kind, key) {
+  const qc = useQueryClient();
+  return () => {
+    qc.invalidateQueries({ queryKey: promptsKey(kind, key) });
+    qc.invalidateQueries({ queryKey: slotsKey(kind, key) });
+    qc.invalidateQueries({ queryKey: SUBJECTS_KEY });
+    qc.invalidateQueries({ queryKey: MISSES_KEY });
+  };
+}
+
 export function useEnqueueAudioJobs() {
   const qc = useQueryClient();
   return useMutation({
@@ -489,8 +515,6 @@ export function useDeleteUnboundClips() {
 
 // --- Prompts (Task 12, spec 2026-09-30 §9) ---------------------------------
 
-const promptsKey = (kind, key) => ['audio-prompts', kind, key];
-
 export function usePrompts(kind, key) {
   const { data, isLoading } = useQuery({
     queryKey: promptsKey(kind, key),
@@ -503,7 +527,7 @@ export function usePrompts(kind, key) {
   return { prompts: data || {}, isLoadingPrompts: isLoading };
 }
 
-// Both mutations refresh the subject's prompts and the table's prompt column
+// Save and Restore refresh the subject's prompts and the table's prompt column
 // (SUBJECTS_KEY carries promptStates).
 function usePromptInvalidation(kind, key) {
   const qc = useQueryClient();
@@ -536,27 +560,6 @@ export function useSavePrompt(kind, key) {
   const invalidate = usePromptInvalidation(kind, key);
   return useMutation({
     mutationFn: (vars) => putPrompt(kind, key, vars),
-    onSuccess: invalidate,
-    onError: (err) => toast.error(err.message),
-  });
-}
-
-export function writePromptMutationKey(kind, key, slot) {
-  return ['audio-prompt-write', kind, key, slot];
-}
-
-export function useWritePrompt(kind, key, slot) {
-  const invalidate = usePromptInvalidation(kind, key);
-  return useMutation({
-    mutationKey: writePromptMutationKey(kind, key, slot),
-    mutationFn: async ({ hint }) => {
-      const { res, json } = await post(
-        `/api/audio/admin/prompts/${encodeURIComponent(kind)}/${encodeURIComponent(key)}/${encodeURIComponent(slot)}/write`,
-        { hint },
-      );
-      if (!res.ok) throw new Error(`${json.error || 'Failed to write the prompt'}${json.via ? ` (${json.via})` : ''}`);
-      return json;
-    },
     onSuccess: invalidate,
     onError: (err) => toast.error(err.message),
   });

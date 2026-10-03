@@ -4,13 +4,15 @@
 // AudioAdmin.jsx so that file stays a layout shell -- this is where the
 // per-slot state (draft prompt, upload file, elapsed generation time) lives.
 import { useEffect, useRef, useState } from 'react';
-import { useIsMutating } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
 import styled from 'styled-components';
 import {
-  useProposeAudio, useGenerateAudio, useUploadAudio, useUpdateBinding, useUnbind, generateMutationKey,
-  generateBody, useAudioClips, useBindFromLibrary, loopEditable, useSetClipLoopable,
-  useSavePrompt, useWritePrompt, writePromptMutationKey,
+  useProposeAudio, useUploadAudio, useUpdateBinding, useUnbind,
+  generateItem, writeItem, singleEnqueueMessage, slotJobFor, isLiveJob,
+  useEnqueueSlotJob, useAudioJobs, useAudioSlotJobs, useSubjectRefresh,
+  useAudioClips, useBindFromLibrary, loopEditable, useSetClipLoopable, useSavePrompt,
 } from './useAudioAdmin.js';
+import { shouldPoll } from './audioBatch.js';
 import { draftText, isDirty } from './artDescriptionDraft.js';
 import {
   provenanceText, generatePromptFields, historyRows, restoreVars,
@@ -119,6 +121,24 @@ const NO_PROVIDER_TITLE = 'No audio provider — add one under AI Providers';
 // with no visible warning, so Generate is disabled until it's saved.
 const SFX_DIRTY_TITLE = 'Save the prompt first — SFX use the saved prompt';
 
+// A slot with a queued or running job cannot take another (the queue keeps
+// one live job per slot and would answer already_live).
+const LIVE_JOB_TITLE = 'This slot already has a queued or running job';
+
+function generateTitle({ canGenerate, live, sfxDirty }) {
+  if (!canGenerate) return NO_PROVIDER_TITLE;
+  if (live) return LIVE_JOB_TITLE;
+  if (sfxDirty) return SFX_DIRTY_TITLE;
+  return undefined;
+}
+
+function generateLabel(pending, job) {
+  if (pending) return 'Queuing…';
+  if (job && job.status === 'running') return 'Generating…';
+  if (job && job.status === 'queued') return 'Queued…';
+  return 'Generate';
+}
+
 // The "+ From library" picker (SOMET-591): a small inline list, not a modal --
 // it only ever shows clips of THIS slot's clip kind, which keeps it short.
 const Picker = styled.div`
@@ -149,20 +169,6 @@ function formatDuration(ms) {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 const formatKb = (bytes) => (Number.isFinite(bytes) ? `${Math.round(bytes / 1024)} KB` : '—');
-
-// Seconds since mount. A separate component rather than state in the parent
-// so the reset-on-stop is "unmount" instead of a setState call inside an
-// effect body (which react-hooks/set-state-in-effect flags) -- mounted only
-// while a generation is in flight, via `{generating && <Elapsed />}`.
-function Elapsed() {
-  const [seconds, setSeconds] = useState(0);
-  useEffect(() => {
-    const start = Date.now();
-    const id = setInterval(() => setSeconds(Math.round((Date.now() - start) / 1000)), 1000);
-    return () => clearInterval(id);
-  }, []);
-  return seconds;
-}
 
 function ClipRow({
   row, subject, slot, playingId, onPlay, onStop,
@@ -300,7 +306,14 @@ function AudioSlotCard({
   const isSfx = clipKind === 'sfx';
   const uploadOnly = isSfx && cue === null;
   const propose = useProposeAudio();
-  const generate = useGenerateAudio(subject.kind, subject.key, slot);
+  // Generate and Write with model both enqueue ONE job (plan 2026-10-03):
+  // separate mutation instances so each button's pending state is its own.
+  const generate = useEnqueueSlotJob();
+  const write = useEnqueueSlotJob();
+  const [forcePrompt, setForcePrompt] = useState(false);
+  // What the last enqueue said ({ ok, message }): a rejected or already-live
+  // item queues nothing, and the admin must see that.
+  const [enqueueNote, setEnqueueNote] = useState(null);
   const upload = useUploadAudio();
   const [engine, setEngine] = useState('realistic');
   const [variants, setVariants] = useState(1);
@@ -325,20 +338,25 @@ function AudioSlotCard({
   // list, not under Save; both invalidate the prompts query on success.
   const restore = useSavePrompt(subject.kind, subject.key);
   const history = historyRows(prompt);
-  const write = useWritePrompt(subject.kind, subject.key, slot);
-  const writing = useIsMutating({ mutationKey: writePromptMutationKey(subject.kind, subject.key, slot) }) > 0;
   const styleShown = draftText(styleDraft, active ? { text: active.style || '' } : null);
   const textShown = draftText(textDraft, active);
   const dirty = isDirty(styleDraft, active ? { text: active.style || '' } : null) || isDirty(textDraft, active);
 
-  // NOT generate.isPending: that comes from THIS hook instance, which is
-  // fresh (isPending=false) every time this card remounts -- switching
-  // subjects, or navigating away and back while a generation is still
-  // running on the GPU box. useIsMutating reads the GLOBAL mutation cache by
-  // mutationKey instead, so the pending state (and therefore the disabled
-  // button) survives the remount and a second click can't fire a duplicate
-  // request at the box.
-  const generating = useIsMutating({ mutationKey: generateMutationKey(subject.kind, subject.key, slot) }) > 0;
+  // The slot's live job, from the same shared queries AudioAdmin polls (on
+  // the batch panel's cadence). The job row -- not a mutation's isPending --
+  // is what survives a remount and what a batch drain also updates.
+  const { run, stats } = useAudioJobs();
+  const { slotJobs } = useAudioSlotJobs({ poll: shouldPoll({ run, stats }) });
+  const job = slotJobFor(slotJobs, subject.kind, subject.key, slot);
+  const live = isLiveJob(job);
+  // When this slot's job leaves the queue (done drops out of /jobs/slots,
+  // or it turns failed), refetch the prompt and the bound clips it changed.
+  const refresh = useSubjectRefresh(subject.kind, subject.key);
+  const wasLive = useRef(live);
+  useEffect(() => {
+    if (wasLive.current && !live) refresh();
+    wasLive.current = live;
+  }, [live, refresh]);
 
   const onSuggest = () => {
     propose.mutate(
@@ -355,14 +373,27 @@ function AudioSlotCard({
     );
   };
 
+  const enqueue = (mutation, item, what) => {
+    setEnqueueNote(null);
+    mutation.mutate(item, {
+      onSuccess: (json) => {
+        const note = singleEnqueueMessage(json, what);
+        setEnqueueNote(note);
+        if (note.ok) toast.success(note.message); else toast.error(note.message);
+      },
+    });
+  };
+
   const onGenerate = () => {
-    generate.mutate(generateBody(isSfx
-      ? { subject, slot, engine, variants }
+    enqueue(generate, generateItem(isSfx
+      ? {
+        subject, slot, engine, variants, forcePrompt,
+      }
       : {
         subject, slot, ...generatePromptFields({
           isSfx, styleDraft, textDraft, active,
-        }), proposal,
-      }));
+        }), proposal, forcePrompt,
+      }), 'Generate');
   };
 
   const onSave = () => {
@@ -380,8 +411,10 @@ function AudioSlotCard({
     });
   };
 
+  // Queued, not awaited: the prompt phase writes it, and the refresh above
+  // shows the new version once the job leaves the queue.
   const onWrite = () => {
-    write.mutate({ hint }, { onSuccess: () => { setStyleDraft(null); setTextDraft(null); } });
+    enqueue(write, writeItem({ subject, slot, hint }), 'Write with model');
   };
 
   const onUpload = (e) => {
@@ -453,8 +486,13 @@ function AudioSlotCard({
               placeholder="hint (optional)"
               aria-label={`Hint for ${slot}`}
             />
-            <Secondary type="button" disabled={writing} onClick={onWrite}>
-              {writing ? <>Writing… <Elapsed />s</> : 'Write with model'}
+            <Secondary
+              type="button"
+              disabled={write.isPending || live || !canGenerate}
+              title={!canGenerate ? NO_PROVIDER_TITLE : (live ? LIVE_JOB_TITLE : undefined)}
+              onClick={onWrite}
+            >
+              {write.isPending ? 'Queuing…' : 'Write with model'}
             </Secondary>
           </Controls>
           {write.isError && <Err>{write.error.message}</Err>}
@@ -523,14 +561,25 @@ function AudioSlotCard({
           </>
         )}
         {!uploadOnly && (
-          <Button
-            type="button"
-            disabled={generating || !canGenerate || (isSfx && dirty)}
-            title={!canGenerate ? NO_PROVIDER_TITLE : ((isSfx && dirty) ? SFX_DIRTY_TITLE : undefined)}
-            onClick={onGenerate}
-          >
-            {generating ? <>Generating… <Elapsed />s</> : 'Generate'}
-          </Button>
+          <>
+            <InlineLabel title="Write a new prompt before generating, even if this slot already has one (hand-written included). The old prompt stays in the history.">
+              <input
+                type="checkbox"
+                checked={forcePrompt}
+                aria-label={`Force regenerate prompt for ${slot}`}
+                onChange={(e) => setForcePrompt(e.target.checked)}
+              />
+              Force regenerate prompt
+            </InlineLabel>
+            <Button
+              type="button"
+              disabled={generate.isPending || live || !canGenerate || (isSfx && dirty)}
+              title={generateTitle({ canGenerate, live, sfxDirty: isSfx && dirty })}
+              onClick={onGenerate}
+            >
+              {generateLabel(generate.isPending, job)}
+            </Button>
+          </>
         )}
         <Secondary type="button" onClick={() => fileRef.current?.click()} disabled={upload.isPending}>
           {upload.isPending ? 'Uploading…' : 'Upload .ogg'}
@@ -558,6 +607,12 @@ function AudioSlotCard({
           {showPicker ? 'Hide library' : '+ From library'}
         </Secondary>
       </Controls>
+      {job && (
+        <Hint>
+          Job: {job.status}{job.status === 'failed' && job.error ? ` — ${job.error}` : ''}
+        </Hint>
+      )}
+      {enqueueNote && (enqueueNote.ok ? <Hint>{enqueueNote.message}</Hint> : <Err>{enqueueNote.message}</Err>)}
       {generate.isError && <Err>{generate.error.message}</Err>}
       {propose.isError && <Err>{propose.error.message}</Err>}
       {upload.isError && <Err>{upload.error.message}</Err>}
