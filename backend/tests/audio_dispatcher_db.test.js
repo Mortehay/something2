@@ -6,6 +6,8 @@ const q = require('../src/services/audioJobQueue');
 const d = require('../src/services/audioDispatcher');
 const gen = require('../src/services/audioGeneration');
 
+const { promptPhaseStub } = require('./helpers/audioPromptPhaseStub.js');
+
 const url = process.env.TEST_DATABASE_URL;
 const skip = !url ? 'no TEST_DATABASE_URL -- refusing to write to a real database' : false;
 
@@ -74,6 +76,11 @@ test('audio dispatcher', { skip }, async (t) => {
         // check (F2) has its own subtest below that leaves this default out.
         subjectExists: async () => true,
         sleep: async () => {},
+        // The prompt phase and the model switch (plan 2026-10-03) have their
+        // own file, audio_two_phase_drain_db.test.js. Here every prompt job
+        // "writes" at once and no switch reaches a box, so these cases keep
+        // testing what they were written for: the audio phase.
+        ...promptPhaseStub,
         generateForSlot: async (db, p, spec) => {
           seen.push(`${spec.clipKind}:${spec.subjectKey}`);
           seeds[spec.subjectKey] = spec.seed;

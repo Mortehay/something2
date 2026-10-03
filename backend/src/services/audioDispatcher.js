@@ -19,9 +19,25 @@
 //     first claim, is the restart-recovery step -- a crash never loses a job,
 //     only costs it one attempt (audioJobQueue.requeueOrphans refunds that
 //     too).
+//   * PHASES (plan 2026-10-03). The box's GPU holds ONE model at a time, and
+//     the text model (prompts) and the audio models (clips) evicted each
+//     other job by job. A drain therefore runs CYCLES over the whole queue:
+//       1. switch the box to the text model, write every pending prompt;
+//       2. for each drain group with audio-ready jobs, in DRAIN_ORDER,
+//          switch the box to that group's model and drain the group;
+//       3. repeat, until both phases come up empty.
+//     Work enqueued during the audio phase waits for the next cycle. A switch
+//     the box refuses (409: something else is queued or pinned) PAUSES the
+//     drain -- visible as `waiting` -- and is retried; it never fails a job.
 const audioJobQueue = require('./audioJobQueue');
 const audioGeneration = require('./audioGeneration');
-const { subjectExists } = require('./audioSubjects');
+const { subjectExists, cueFor } = require('./audioSubjects');
+const rap = require('./remoteAudioProvider');
+const aiProviders = require('./aiProviders');
+const textProvider = require('./textProvider');
+const audioPrompts = require('./audioPrompts');
+const { writeSlotPrompt, loadStyles } = require('./audioPromptWriter');
+const { loadPromptCatalog } = require('./audioPromptContext');
 
 // How many consecutive job failures end the drain rather than working
 // through the rest of the queue.
@@ -61,6 +77,50 @@ const MAX_WAIT_MS = () => envInt('AUDIO_DRAIN_MAX_WAIT_MS', 60000);
 // database instead of an actual wait.
 const MIN_IDLE_WAIT_MS = 250;
 
+// The first wait after the box refuses a model switch; it doubles per refusal
+// up to MAX_WAIT_MS. There is no limit on how long the drain waits (plan
+// 2026-10-03: a box pinned by hand pauses the run until it is unpinned or
+// the run is stopped) -- it is visible as runStatus().waiting.
+const SWITCH_WAIT_MS = () => envInt('AUDIO_SWITCH_WAIT_MS', 5000);
+
+// A prompt job with no active text provider fails with this, rather than
+// waiting: waiting cannot fix configuration.
+const NO_TEXT_PROVIDER = 'no text provider — add one under AI Providers';
+
+// The default prompt step for one claimed prompt job: the real writer
+// (audioPromptWriter.writeSlotPrompt), box only -- there is no silent CPU
+// fallback in a batch. `cache` lives for one prompt phase, so the catalog
+// snapshot and the style list are read once per phase, not once per job.
+// A job that is not forced and whose slot gained a non-empty prompt since it
+// was queued has nothing left to write: it is reported written without a
+// model call.
+async function writeJobPrompt(db, job, deps, cache) {
+  const kind = job.subject_kind;
+  const key = job.subject_key;
+  const { slot } = job;
+  const before = await audioPrompts.getActive(db, kind, key, slot);
+  if (!job.force_prompt && before && before.text) return { ok: true, row: before, skipped: true };
+  if (!cache.catalog) cache.catalog = await loadPromptCatalog(db);
+  if (job.clip_kind !== 'sfx' && !cache.styles) {
+    const styles = await deps.loadStyles(db);
+    // An empty list (no audio provider, or the box did not answer) is not
+    // cached, so the next job asks again instead of the whole phase failing
+    // on one bad answer; this job gets the writer's "no styles known" error.
+    if (styles && (styles.music.length || styles.ambience.length)) cache.styles = styles;
+  }
+  const cue = job.clip_kind === 'sfx' ? await cueFor(db, kind, key, slot) : null;
+  return writeSlotPrompt(db, { kind, key, slot }, {
+    tp: deps.tp,
+    catalog: cache.catalog,
+    styles: cache.styles || { music: [], ambience: [] },
+    cue,
+    boxOnly: true,
+    // A hand edit saved while the model writes wins (writeSlotPrompt returns
+    // { conflict }), forced or not.
+    expectActiveId: before ? before.id : null,
+  });
+}
+
 // Real defaults. Every DB access, the generate call and the sleep are
 // injected as `deps` so a test can drive the loop without a provider or a
 // real clock -- `startDrain`'s own test enqueues real rows and fakes only
@@ -73,6 +133,14 @@ const REAL_DEPS = {
   subjectExists,
   sleep: (ms) => new Promise((resolve) => { setTimeout(resolve, ms); }),
   now: () => Date.now(),
+  // The phases (plan 2026-10-03). switchModel is the box's model gateway;
+  // the text provider is loaded the way textProvider.complete loads it; tp
+  // and loadStyles are what the default writePrompt hands the real writer.
+  switchModel: rap.switchModel,
+  loadTextProvider: (db) => aiProviders.loadActiveProviderWithSecret(db, 'text'),
+  tp: textProvider,
+  loadStyles: (db) => loadStyles(db),
+  writePrompt: writeJobPrompt,
 };
 
 // The deps startDrain falls back to when called without its own. Task 4's
@@ -205,6 +273,8 @@ function runStatus() {
       stopped_reason: null,
       error: null,
       requeued_orphans: 0,
+      phase: null,
+      waiting: null,
     };
   }
   return {
@@ -219,6 +289,10 @@ function runStatus() {
     stopped_reason: run.stoppedReason || null,
     error: run.error || null,
     requeued_orphans: run.requeuedOrphans,
+    // 'prompt' | 'audio' while a phase runs, else null.
+    phase: run.phase || null,
+    // { model, reason, since } while the box refuses a model switch.
+    waiting: run.waiting ? { ...run.waiting } : null,
   };
 }
 
@@ -259,12 +333,89 @@ function startDrain(db, opts = {}) {
     stoppedReason: null,
     error: null,
     requeuedOrphans: 0,
+    phase: null,
+    waiting: null,
   };
   const self = run;
   // Distinct from `self.failed`/`self.retried`: those are lifetime totals for
   // the whole drain, this is reset on every success (spec: "reset the
   // consecutive-failure count") and is only what the breaker looks at.
   let consecutiveFailures = 0;
+
+  // --- Model switching ------------------------------------------------------
+  //
+  // `settledModel` is the model this drain last switched the box to (or
+  // tried to, see below); a switch to it again is skipped until a call is
+  // refused, which clears it. `learned` is the model a refusal named for a
+  // drain group ("requested X, but Y holds the card"), which then overrides
+  // GATEWAY_MODEL_FOR_GROUP for that group -- it covers the groups with no
+  // map entry (the sfx engines) and a map entry gone stale. `refusalSwitch`
+  // is the model the drain already switched to because of a refusal and has
+  // not seen a success since: a second refusal for it takes the ordinary
+  // busy path (attempt refunded, backoff, pause) instead of switching again,
+  // so a box that keeps refusing cannot spin the drain in a tight loop.
+  let settledModel = null;
+  const learned = {};
+  let refusalSwitch = null;
+  let pendingSwitch = null;
+
+  // Make `model` the box's model. True once it is (or once the box answered
+  // something other than busy -- an old box with no gateway, say: the drain
+  // then goes ahead and the call itself reports what is wrong), false when
+  // the drain was stopped while waiting. A busy refusal (409/503) waits with
+  // a doubling backoff, as long as it takes, with run.waiting set so the UI
+  // shows it. Never force mode (rap.switchModel never sends it).
+  async function ensureModel(model, provider) {
+    if (!model || !provider) return true;
+    if (settledModel === model) return true;
+    let delay = SWITCH_WAIT_MS();
+    for (;;) {
+      if (self.stopping) return false;
+      let r;
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        r = await deps.switchModel(provider, model);
+      } catch (err) {
+        r = { ok: false, error: errorText(err) };
+      }
+      if (r.ok || !isBusy(r)) {
+        if (!r.ok) console.warn(`audio drain: switching the box to ${model} failed, going ahead without it: ${r.error}`);
+        settledModel = model;
+        self.waiting = null;
+        return true;
+      }
+      if (!self.waiting || self.waiting.model !== model) {
+        self.waiting = { model, reason: String(r.error), since: new Date().toISOString() };
+      } else {
+        self.waiting.reason = String(r.error);
+      }
+      // eslint-disable-next-line no-await-in-loop
+      await sleepSliced(delay, self, deps);
+      delay = Math.min(delay * 2, MAX_WAIT_MS());
+    }
+  }
+
+  // A busy answer from an audio call. When it names the model it wanted and
+  // the drain has not already switched to that model for a refusal, the
+  // jobs are released (attempt refunded, no backoff), the model is learned
+  // for their group and switched to before the next claim -- 'switch'.
+  // Otherwise null: the caller takes the ordinary busy path.
+  async function refusedFor(jobs, result, provider) {
+    settledModel = null;
+    const wanted = rap.requestedModel(result.error);
+    if (!wanted || refusalSwitch === wanted || !provider) return null;
+    try {
+      await deps.queue.release(db, jobs.map((j) => j.id));
+    } catch (err) {
+      // Still 'running'; the next drain's requeueOrphans picks them up.
+      console.error('audio drain: could not release jobs refused for another model', err);
+      self.error = errorText(err);
+    }
+    learned[jobs[0].drain_group] = wanted;
+    refusalSwitch = wanted;
+    pendingSwitch = { model: wanted, provider };
+    return 'switch';
+  }
 
   // A provider fault just happened: 'breaker' when it is the one that trips.
   function recordFault() {
@@ -287,13 +438,55 @@ function startDrain(db, opts = {}) {
   async function completeJob(job, result) {
     if (!(await bookkeep(db, deps, self, job, () => deps.queue.complete(db, job.id, result.clip.id)))) return false;
     self.done += 1;
+    refusalSwitch = null;
     return true;
+  }
+
+  // A prompt-phase job: write its slot's prompt with the text model.
+  //   written, or a hand edit won the race (conflict) -> the slot has a
+  //     prompt: needs_prompt cleared, prompt-only done, any other job back
+  //     to the queue for the audio phase (attempt refunded);
+  //   busy -> refunded, backoff and pause, exactly as a busy audio call;
+  //   anything else -> failed with the writer's own error.
+  async function runPrompt(job, textProv, cache) {
+    self.current = {
+      id: job.id,
+      subject_kind: job.subject_kind,
+      subject_key: job.subject_key,
+      slot: job.slot,
+      drain_group: job.drain_group,
+    };
+    if (!textProv) {
+      await failJob(job, { error: NO_TEXT_PROVIDER, retryable: false });
+      return undefined;
+    }
+    let r;
+    try {
+      r = await deps.writePrompt(db, job, deps, cache);
+    } catch (err) {
+      r = { ok: false, error: errorText(err) };
+    }
+    if (r.ok || r.conflict) {
+      let state;
+      if (await bookkeep(db, deps, self, job, async () => { state = await deps.queue.promptWritten(db, job.id); })) {
+        if (state === 'done') self.done += 1;
+      }
+      return undefined;
+    }
+    if (r.busy) {
+      settledModel = null;
+      await failJob(job, { error: r.error, retryable: true }, { refundAttempt: true });
+      return 'pause';
+    }
+    await failJob(job, { error: r.error || 'the prompt could not be written', retryable: false });
+    return undefined;
   }
 
   // Each handler below returns what the loop does next: undefined (claim the
   // next batch), 'pause' (the box was busy: sleep before claiming again, so
-  // the very next claim doesn't immediately hammer the same busy box) or
-  // 'breaker' (stop the drain).
+  // the very next claim doesn't immediately hammer the same busy box),
+  // 'switch' (the box refused for another model: switch to it, then claim --
+  // see refusedFor) or 'breaker' (stop the drain).
 
   // A music/ambience job: one box call.
   async function runSingle(job) {
@@ -312,6 +505,7 @@ function startDrain(db, opts = {}) {
     // down (that is what the top-level catch is for; this one is scoped to a
     // single job).
     let result;
+    let provider = null;
     try {
       // A job can sit queued while its world/biome is deleted or renamed
       // (subjects are keyed by name). Generating for it would burn box time
@@ -321,7 +515,7 @@ function startDrain(db, opts = {}) {
       const exists = await deps.subjectExists(db, job.subject_kind, job.subject_key);
       // job.provider_id resolves that pin; null falls through to the active
       // audio provider (resolveAudioProvider's own contract).
-      const provider = exists ? await deps.resolveAudioProvider(db, job.provider_id ?? null) : null;
+      provider = exists ? await deps.resolveAudioProvider(db, job.provider_id ?? null) : null;
       if (!exists) {
         result = { ok: false, error: 'subject no longer exists', retryable: false };
       } else if (!provider) {
@@ -355,6 +549,8 @@ function startDrain(db, opts = {}) {
     // the breaker -- three subjects in a row failing on a busy box says
     // nothing about whether the box is actually broken.
     if (isBusy(result)) {
+      const switching = await refusedFor([job], result, provider);
+      if (switching) return switching;
       await failJob(job, result, { retryable: true, refundAttempt: true });
       return 'pause';
     }
@@ -395,9 +591,10 @@ function startDrain(db, opts = {}) {
     if (!live.length) return undefined;
 
     let out;
+    let provider = null;
     try {
       // claimBatch never mixes provider pins, so the head's pin is the batch's.
-      const provider = await deps.resolveAudioProvider(db, head.provider_id ?? null);
+      provider = await deps.resolveAudioProvider(db, head.provider_id ?? null);
       if (!provider) {
         // eslint-disable-next-line no-await-in-loop
         for (const job of live) await failJob(job, { error: 'no audio provider', retryable: false });
@@ -417,7 +614,7 @@ function startDrain(db, opts = {}) {
     // Upload-only / cue not offered: never sent, never counted.
     // eslint-disable-next-line no-await-in-loop
     for (const { job, result } of out.refused) await failJob(job, result);
-    if (out.packFailure) return settlePackFailure(out.sent, out.packFailure);
+    if (out.packFailure) return settlePackFailure(out.sent, out.packFailure, provider);
 
     let anyOk = false;
     let anyFault = false;
@@ -439,8 +636,10 @@ function startDrain(db, opts = {}) {
   }
 
   // The box refused the pack as a whole; `sent` are the jobs it held.
-  async function settlePackFailure(sent, pack) {
+  async function settlePackFailure(sent, pack, provider) {
     if (isBusy(pack)) {
+      const switching = await refusedFor(sent.map((x) => x.job), pack, provider);
+      if (switching) return switching;
       // eslint-disable-next-line no-await-in-loop
       for (const { job } of sent) await failJob(job, pack, { retryable: true, refundAttempt: true });
       return 'pause';
@@ -472,6 +671,78 @@ function startDrain(db, opts = {}) {
     return isProviderFault(pack) || pack.unknownCue ? recordFault() : undefined;
   }
 
+  // What a handler asked for after one claim: 'pause' sleeps one backoff
+  // before claiming again (the box was busy), 'switch' makes the model a
+  // refusal named the box's model first. 'stopped' when a stop landed.
+  async function afterClaim(next) {
+    if (next === 'pause') {
+      await sleepSliced(deps.queue.backoffMs(1), self, deps);
+    } else if (next === 'switch' && pendingSwitch) {
+      const { model, provider } = pendingSwitch;
+      pendingSwitch = null;
+      if (!(await ensureModel(model, provider))) return 'stopped';
+    }
+    return self.stopping ? 'stopped' : undefined;
+  }
+
+  // Phase 1: every claimable prompt job, under the text model. 'idle' when
+  // there was nothing to do (no switch was made), 'ran', or 'stopped'.
+  async function promptPhase() {
+    if (!(await deps.queue.hasClaimable(db, { phase: 'prompt' }))) return 'idle';
+    self.phase = 'prompt';
+    const textProv = await deps.loadTextProvider(db);
+    // /api/text/models lists ids without the gateway's prefix (plan Task 0).
+    const textModel = textProv && textProv.model ? `brain:${textProv.model}` : null;
+    const cache = {};
+    for (;;) {
+      if (self.stopping) return 'stopped';
+      // eslint-disable-next-line no-await-in-loop
+      if (textModel && !(await ensureModel(textModel, textProv))) return 'stopped';
+      // eslint-disable-next-line no-await-in-loop
+      const [job] = await deps.queue.claimBatch(db, 1, { phase: 'prompt' });
+      if (!job) return 'ran';
+      // eslint-disable-next-line no-await-in-loop
+      const next = await runPrompt(job, textProv, cache);
+      self.current = null;
+      // eslint-disable-next-line no-await-in-loop
+      if ((await afterClaim(next)) === 'stopped') return 'stopped';
+    }
+  }
+
+  // Phase 2: each drain group with audio-ready jobs, in DRAIN_ORDER, under
+  // that group's model. 'idle', 'ran', 'stopped' or 'breaker'.
+  async function audioPhase() {
+    let ran = false;
+    for (const group of audioJobQueue.DRAIN_ORDER) {
+      if (self.stopping) return 'stopped';
+      // eslint-disable-next-line no-await-in-loop
+      if (!(await deps.queue.hasClaimable(db, { phase: 'audio', group }))) continue;
+      ran = true;
+      self.phase = 'audio';
+      // The active audio provider is the box the switch goes to; with none
+      // (only pinned jobs) there is no up-front switch, and a refusal still
+      // names the model through the job's own provider.
+      // eslint-disable-next-line no-await-in-loop
+      const switchProv = await deps.resolveAudioProvider(db, null);
+      for (;;) {
+        if (self.stopping) return 'stopped';
+        const model = learned[group] || rap.GATEWAY_MODEL_FOR_GROUP[group];
+        // eslint-disable-next-line no-await-in-loop
+        if (!(await ensureModel(model, switchProv))) return 'stopped';
+        // eslint-disable-next-line no-await-in-loop
+        const jobs = await deps.queue.claimBatch(db, SFX_PACK_SIZE(), { phase: 'audio', group });
+        if (!jobs.length) break;
+        // eslint-disable-next-line no-await-in-loop
+        const next = audioJobQueue.PACKED_GROUPS.includes(group) ? await runPack(jobs) : await runSingle(jobs[0]);
+        self.current = null;
+        if (next === 'breaker') return 'breaker';
+        // eslint-disable-next-line no-await-in-loop
+        if ((await afterClaim(next)) === 'stopped') return 'stopped';
+      }
+    }
+    return ran ? 'ran' : 'idle';
+  }
+
   (async () => {
     try {
       // RESTART RECOVERY, BEFORE the NO_PROVIDER precondition. A nodemon
@@ -496,8 +767,15 @@ function startDrain(db, opts = {}) {
         if (self.stopping) { self.stoppedReason = 'stopped'; break; }
 
         // eslint-disable-next-line no-await-in-loop
-        const jobs = await deps.queue.claimBatch(db, SFX_PACK_SIZE());
-        if (!jobs.length) {
+        const prompted = await promptPhase();
+        if (prompted === 'stopped') { self.stoppedReason = 'stopped'; break; }
+        // eslint-disable-next-line no-await-in-loop
+        const audio = await audioPhase();
+        self.phase = null;
+        self.current = null;
+        if (audio === 'stopped') { self.stoppedReason = 'stopped'; break; }
+        if (audio === 'breaker') { self.stoppedReason = 'breaker'; break; }
+        if (prompted === 'idle' && audio === 'idle') {
           // Nothing claimable does not mean the queue is empty -- it also
           // happens when every remaining job is sitting out its retry
           // backoff. Ending the drain on that would silently strand a queue
@@ -509,19 +787,6 @@ function startDrain(db, opts = {}) {
           const waitMs = Math.min(Math.max(rawWaitMs, MIN_IDLE_WAIT_MS), MAX_WAIT_MS());
           // eslint-disable-next-line no-await-in-loop
           await sleepSliced(waitMs, self, deps);
-          if (self.stopping) { self.stoppedReason = 'stopped'; break; }
-          continue;
-        }
-
-        // eslint-disable-next-line no-await-in-loop
-        const next = audioJobQueue.PACKED_GROUPS.includes(jobs[0].drain_group)
-          ? await runPack(jobs)
-          : await runSingle(jobs[0]);
-        self.current = null;
-        if (next === 'breaker') { self.stoppedReason = 'breaker'; break; }
-        if (next === 'pause') {
-          // eslint-disable-next-line no-await-in-loop
-          await sleepSliced(deps.queue.backoffMs(1), self, deps);
           if (self.stopping) { self.stoppedReason = 'stopped'; break; }
         }
       }
@@ -535,6 +800,8 @@ function startDrain(db, opts = {}) {
       else if (!self.stoppedReason) self.stoppedReason = 'error';
     } finally {
       self.current = null;
+      self.phase = null;
+      self.waiting = null;
       self.running = false;
       self.finishedAt = new Date().toISOString();
     }
@@ -560,4 +827,5 @@ module.exports = {
   // `deps` (at least a `resolveAudioProvider`); REAL_DEPS is only the
   // fallback startDrain itself uses.
   hasResolvableProvider,
+  NO_TEXT_PROVIDER,
 };

@@ -26,6 +26,8 @@ const q = require('../src/services/audioJobQueue');
 const d = require('../src/services/audioDispatcher');
 const prompts = require('../src/services/audioPrompts');
 
+const { promptPhaseStub } = require('./helpers/audioPromptPhaseStub.js');
+
 const url = process.env.TEST_DATABASE_URL;
 const skip = !url ? 'no TEST_DATABASE_URL -- refusing to write to a real database' : false;
 const OGG = fs.readFileSync(path.join(__dirname, 'fixtures/audio/tone.ogg'));
@@ -89,6 +91,10 @@ test('sfx drain: cached is not a duplicate; a duplicate is retryable', { skip },
       const depsFor = (answer) => ({
         resolveAudioProvider: async () => provider,
         sleep: async () => {},
+        // No prompt is written and no model switch reaches a box (the phases
+        // are tested in audio_two_phase_drain_db.test.js): the entity text
+        // stays the slot's stored prompt or registry phrase, as phraseOf reads.
+        ...promptPhaseStub,
         generateSfxPackForJobs: (db, p, jobs, opts) => gen.generateSfxPackForJobs(db, p, jobs, {
           ...opts,
           lib,
