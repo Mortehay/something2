@@ -345,6 +345,51 @@ test('audio job routes', { skip }, async (t) => {
           if (ids.length) await pool.query('DELETE FROM audio_jobs WHERE id = ANY($1)', [ids]);
         }
       });
+      // The slot card's Generate and Write with model go through the queue,
+      // so an item carries what their synchronous calls sent: sfx variants,
+      // music/ambience slots, the writer's hint, and a seed. Each is checked
+      // per item; a bad one rejects only that item.
+      await t.test('enqueue: variants, slots, hint and seed are validated per item and stored', async () => {
+        const w4 = `audio-jobs4-${tag}`;
+        made.worlds.push((await pool.query('INSERT INTO worlds (name, seed) VALUES ($1, 4) RETURNING id', [w4])).rows[0].id);
+        const long = 'x'.repeat(300);
+        const res = await request(app).post('/api/audio/admin/jobs').set('Authorization', bearer(admin)).send({
+          items: [
+            { subject_kind: 'attack_type', subject_key: 'magic', slot: 'hit', variants: 5, hint: '  a crackling bolt  ' },
+            { subject_kind: 'attack_type', subject_key: 'melee', slot: 'use', variants: 6 },
+            { subject_kind: 'attack_type', subject_key: 'melee', slot: 'hit', variants: 2.5 },
+            { subject_kind: 'attack_type', subject_key: 'ranged', slot: 'hit', slots: { mood: 'calm' } },
+            { subject_kind: 'world', subject_key: w4, slot: 'music', slots: { mood: 'calm' }, hint: '', seed: 42 },
+            { subject_kind: 'world', subject_key: w4, slot: 'ambience', hint: long },
+            { subject_kind: 'world', subject_key: worldName, slot: 'music', variants: 3 },
+            { subject_kind: 'world', subject_key: worldName2, slot: 'music', slots: ['calm'] },
+            { subject_kind: 'world', subject_key: worldName2, slot: 'ambience', hint: 7 },
+            { subject_kind: 'world', subject_key: worldName, slot: 'ambience', seed: 'x' },
+          ],
+        });
+        try {
+          assert.equal(res.status, 201, JSON.stringify(res.body));
+          const by = Object.fromEntries(res.body.queued.map((j) => [`${j.subject_key}/${j.slot}`,
+            [j.variants, j.slots, j.hint, j.seed == null ? null : Number(j.seed)]]));
+          assert.deepEqual(by, {
+            'magic/hit': [5, null, 'a crackling bolt', null],
+            [`${w4}/music`]: [null, { mood: 'calm' }, null, 42],
+            [`${w4}/ambience`]: [null, null, 'x'.repeat(200), null],
+          });
+          assert.deepEqual(res.body.rejected.map((r) => [r.item.subject_key, r.item.slot, r.error]), [
+            ['melee', 'use', 'variants must be an integer 1-5'],
+            ['melee', 'hit', 'variants must be an integer 1-5'],
+            ['ranged', 'hit', 'slots are for music and ambience only'],
+            [worldName, 'music', 'variants are for sfx only'],
+            [worldName2, 'music', 'slots must be an object'],
+            [worldName2, 'ambience', 'hint must be a string'],
+            [worldName, 'ambience', 'seed must be an integer'],
+          ]);
+        } finally {
+          const ids = (res.body.queued || []).map((j) => j.id);
+          if (ids.length) await pool.query('DELETE FROM audio_jobs WHERE id = ANY($1)', [ids]);
+        }
+      });
     } finally {
       for (const r of foreign) {
         // eslint-disable-next-line no-await-in-loop

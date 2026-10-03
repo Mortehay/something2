@@ -56,6 +56,42 @@ async function checkSubject(pool, kind, key, slot) {
   return { clipKind };
 }
 
+// The rest of a POST /admin/jobs item: what the slot card's synchronous
+// Generate / Write with model sent, so the same click can go through the
+// queue instead. Returns { variants, slots, hint, seed } (each undefined/null
+// when absent) or { error }.
+//   variants  sfx only, an integer 1-5 -- the same rule as /admin/generate.
+//   slots     music/ambience only, a plain object: /admin/generate passes
+//             b.slots to the box as given, so only the shape is checked.
+//   hint      a string, trimmed and capped at 200 as writeSlotPrompt caps it;
+//             '' is no hint.
+//   seed      an integer.
+const MAX_HINT = 200;
+function checkJobExtras(it, clipKind) {
+  const out = {};
+  if (it.variants !== undefined) {
+    if (clipKind !== 'sfx') return { error: 'variants are for sfx only' };
+    if (!(Number.isInteger(it.variants) && it.variants >= 1 && it.variants <= 5)) {
+      return { error: 'variants must be an integer 1-5' };
+    }
+    out.variants = it.variants;
+  }
+  if (it.slots !== undefined && it.slots !== null) {
+    if (clipKind === 'sfx') return { error: 'slots are for music and ambience only' };
+    if (typeof it.slots !== 'object' || Array.isArray(it.slots)) return { error: 'slots must be an object' };
+    out.slots = Object.keys(it.slots).length ? it.slots : null;
+  }
+  if (it.hint !== undefined && it.hint !== null) {
+    if (typeof it.hint !== 'string') return { error: 'hint must be a string' };
+    out.hint = it.hint.trim().slice(0, MAX_HINT) || null;
+  }
+  if (it.seed !== undefined && it.seed !== null) {
+    if (!Number.isSafeInteger(it.seed)) return { error: 'seed must be an integer' };
+    out.seed = it.seed;
+  }
+  return out;
+}
+
 function sendError(res, err) {
   if (err && err.status === 400) return res.status(400).json({ error: err.message });
   console.error(err);
@@ -452,6 +488,8 @@ module.exports = function audioRoutes(pool) {
             continue;
           }
         }
+        const extra = checkJobExtras(it, clipKind);
+        if (extra.error) { rejected.push({ item, error: extra.error }); continue; }
         valid.push({
           subject_kind: it.subject_kind,
           subject_key: it.subject_key,
@@ -462,6 +500,10 @@ module.exports = function audioRoutes(pool) {
           engine: clipKind === 'sfx' ? it.engine : undefined,
           force_prompt: it.force_prompt === true,
           prompt_only: it.prompt_only === true,
+          variants: extra.variants,
+          slots: extra.slots,
+          hint: extra.hint,
+          seed: extra.seed,
         });
       }
       const enq = await audioJobQueue.enqueue(pool, valid, { providerId });
