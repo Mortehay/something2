@@ -111,6 +111,26 @@ const Why = styled.span`
   white-space: nowrap;
 `;
 
+const BossBadge = styled.span`
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #ff4757;
+  background: rgba(255, 71, 87, 0.15);
+  border: 1px solid rgba(255, 71, 87, 0.5);
+  padding: 2px 6px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  animation: pulse-boss 1.2s infinite ease-in-out;
+
+  @keyframes pulse-boss {
+    0% { transform: scale(1); opacity: 0.9; }
+    50% { transform: scale(1.05); opacity: 1; box-shadow: 0 0 10px rgba(255, 71, 87, 0.6); }
+    100% { transform: scale(1); opacity: 0.9; }
+  }
+`;
+
 const Empty = styled.div`
   padding: 12px 0; color: var(--s2-text-dim); font-size: 0.92rem;
 `;
@@ -265,14 +285,20 @@ export default function WaypointTravel({ gameRef, characterId }) {
     g.travelToWaypoint(waypointId);
   }, [gameRef]);
 
-  if (!open) return null;
+  const g = gameRef.current;
+  const bossStatus = g && g.getWorldBossStatus ? g.getWorldBossStatus() : null;
 
   const { standingOnActivated, groups } = buildTravelList({
     waypoints: data && data.waypoints,
     currentWorldId: pos ? pos.worldId : null,
     playerX: pos ? pos.playerX : null,
     playerY: pos ? pos.playerY : null,
+    bossNearbyWaypointId: bossStatus ? bossStatus.nearestWaypointId : null,
+    bossName: bossStatus ? bossStatus.bossName : null,
+    bossWorldId: bossStatus ? bossStatus.worldId : null,
   });
+
+  if (!open) return null;
 
   return (
     <Backdrop onClick={() => setOpen(false)}>
@@ -303,7 +329,14 @@ export default function WaypointTravel({ gameRef, characterId }) {
                 aria-disabled={!e.selectable}
                 onClick={() => e.selectable && travel(e.id)}
               >
-                <span>{e.name}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>{e.name}</span>
+                  {e.bossNearby && (
+                    <BossBadge title={`World Boss: ${e.bossName || 'Active'}`}>
+                      ⚔️ BOSS NEARBY
+                    </BossBadge>
+                  )}
+                </div>
                 {e.reason && <Why>{WHY_TEXT[e.reason]}</Why>}
               </Row>
             ))}

@@ -2182,55 +2182,51 @@ export class RenderSystem {
             : { x: s.x + Math.cos(phi) * (rx * 0.75), y: s.y + (Math.sin(phi) * (rx * 0.75)) / 2 };
 
           if (v.slashStyle === 'crush_hammer') {
-            // Heavy downward overhead hammer impact & seismic shockwave
-            const shockR = Math.max(8, rx * (0.35 + 0.65 * progress));
-            const color = v.color || '#f59e0b';
+            // Heavy downward hammer power slam & forward ground crack
+            const shockR = Math.min(24, Math.max(6, (rx * 0.3) * (0.4 + 0.6 * progress)));
+            const color = v.color || '#e2e8f0';
 
             // 1. Descending overhead power slam line (crashing down into ground)
-            const dropDist = 38 * (1 - progress);
+            const dropDist = 32 * (1 - progress);
             this.ctx.strokeStyle = '#ffffff';
-            this.ctx.shadowColor = color;
-            this.ctx.shadowBlur = 16;
-            this.ctx.lineWidth = 4 * (1 - progress * 0.5);
+            this.ctx.shadowColor = '#60a5fa';
+            this.ctx.shadowBlur = 10;
+            this.ctx.lineWidth = 3.5 * (1 - progress * 0.5);
             this.ctx.beginPath();
             this.ctx.moveTo(targetScreen.x, targetScreen.y - dropDist - 16);
             this.ctx.lineTo(targetScreen.x, targetScreen.y);
             this.ctx.stroke();
 
-            // 2. Outer glowing seismic shockwave ring on ground
-            this.ctx.strokeStyle = color;
-            this.ctx.lineWidth = Math.max(1.5, 4.5 * (1 - progress));
-            this.ctx.beginPath();
-            this.ctx.ellipse(targetScreen.x, targetScreen.y, shockR, shockR / 2, 0, 0, Math.PI * 2);
-            this.ctx.stroke();
-
-            // 3. Inner bright white-hot impact core
-            this.ctx.strokeStyle = '#fef08a';
+            // 2. Compact directional ground impact crack
+            this.ctx.strokeStyle = '#94a3b8';
             this.ctx.lineWidth = Math.max(1, 2.5 * (1 - progress));
             this.ctx.beginPath();
-            this.ctx.ellipse(targetScreen.x, targetScreen.y, shockR * 0.5, (shockR * 0.5) / 2, 0, 0, Math.PI * 2);
+            this.ctx.moveTo(targetScreen.x - shockR, targetScreen.y);
+            this.ctx.lineTo(targetScreen.x + shockR, targetScreen.y);
+            this.ctx.moveTo(targetScreen.x, targetScreen.y - shockR * 0.5);
+            this.ctx.lineTo(targetScreen.x, targetScreen.y + shockR * 0.5);
             this.ctx.stroke();
 
-            // 4. Radial impact sparks
-            const sparkCount = 8;
+            // 3. Radial impact sparks
+            const sparkCount = 6;
             for (let i = 0; i < sparkCount; i++) {
               const spAngle = (Math.PI * 2 * i) / sparkCount + (i % 2 === 0 ? 0.2 : -0.2);
-              const spDist = shockR * (0.6 + 0.5 * progress);
+              const spDist = shockR * (0.8 + 0.6 * progress);
               const spX = targetScreen.x + Math.cos(spAngle) * spDist;
               const spY = targetScreen.y + (Math.sin(spAngle) * spDist) / 2;
-              this.ctx.fillStyle = i % 2 === 0 ? '#ffffff' : color;
+              this.ctx.fillStyle = '#ffffff';
               this.ctx.beginPath();
-              this.ctx.arc(spX, spY, Math.max(1, 3.5 * (1 - progress)), 0, Math.PI * 2);
+              this.ctx.arc(spX, spY, Math.max(1, 2.5 * (1 - progress)), 0, Math.PI * 2);
               this.ctx.fill();
             }
 
-            // 5. Impact center flash
-            if (progress < 0.6) {
-              const flashAlpha = (1 - progress / 0.6);
+            // 4. Impact center flash
+            if (progress < 0.5) {
+              const flashAlpha = (1 - progress / 0.5);
               this.ctx.fillStyle = '#ffffff';
               this.ctx.globalAlpha = alpha * flashAlpha;
               this.ctx.beginPath();
-              this.ctx.arc(targetScreen.x, targetScreen.y, 8 * flashAlpha, 0, Math.PI * 2);
+              this.ctx.arc(targetScreen.x, targetScreen.y, 6 * flashAlpha, 0, Math.PI * 2);
               this.ctx.fill();
             }
           } else if (v.slashStyle === 'beast_claw') {
@@ -3105,17 +3101,150 @@ export class RenderSystem {
     return rect ? { img: atlas, crop: rect } : null;
   }
 
+  _drawWorldBoss(e, drawX, drawY, w, h, s) {
+    const ctx = this.ctx;
+    const now = this.nowMs || Date.now();
+    const elem = e.bossElement || (e.type && e.type.includes('Magma') ? 'fire' : (e.type && e.type.includes('Frost') ? 'ice' : (e.type && e.type.includes('Void') ? 'arcane' : 'lightning')));
+
+    let baseColor = '#ff4757';
+    let glowColor = '#ffa502';
+    let darkColor = '#2f3542';
+    let eyeColor = '#ffeaa7';
+
+    if (elem === 'ice') {
+      baseColor = '#70a1ff';
+      glowColor = '#e0f2fe';
+      darkColor = '#1e293b';
+      eyeColor = '#67e8f9';
+    } else if (elem === 'arcane' || elem === 'void') {
+      baseColor = '#a55eea';
+      glowColor = '#f3e8ff';
+      darkColor = '#180a24';
+      eyeColor = '#f472b6';
+    } else if (elem === 'lightning') {
+      baseColor = '#ffd166';
+      glowColor = '#ffffff';
+      darkColor = '#261e0b';
+      eyeColor = '#67e8f9';
+    }
+
+    ctx.save();
+
+    // 1. Pulsing ground elemental aura ellipse
+    const pulse = 1 + 0.12 * Math.sin(now * 0.004);
+    const auraR = (w * 0.75) * pulse;
+    ctx.strokeStyle = baseColor;
+    ctx.lineWidth = 3.5;
+    ctx.shadowColor = glowColor;
+    ctx.shadowBlur = 24;
+    ctx.beginPath();
+    ctx.ellipse(s.x, s.y, auraR, auraR / 2, 0, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // 2. Colossal Titan Body (Armored Torso & Shoulders)
+    const cx = s.x;
+    const cy = s.y - h * 0.55;
+    const bw = w * 0.85;
+    const bh = h * 0.85;
+
+    // Body Gradient
+    const bodyGrad = ctx.createLinearGradient(cx, cy - bh * 0.5, cx, cy + bh * 0.5);
+    bodyGrad.addColorStop(0, darkColor);
+    bodyGrad.addColorStop(0.5, baseColor);
+    bodyGrad.addColorStop(1, darkColor);
+
+    ctx.fillStyle = bodyGrad;
+    ctx.beginPath();
+    ctx.roundRect(cx - bw * 0.5, cy - bh * 0.5, bw, bh, 18);
+    ctx.fill();
+    ctx.strokeStyle = glowColor;
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+
+    // 3. Spiked Shoulders / Pauldrons
+    ctx.fillStyle = baseColor;
+    ctx.beginPath();
+    ctx.moveTo(cx - bw * 0.55, cy - bh * 0.15);
+    ctx.lineTo(cx - bw * 0.75, cy - bh * 0.45);
+    ctx.lineTo(cx - bw * 0.35, cy - bh * 0.4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(cx + bw * 0.55, cy - bh * 0.15);
+    ctx.lineTo(cx + bw * 0.75, cy - bh * 0.45);
+    ctx.lineTo(cx + bw * 0.35, cy - bh * 0.4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // 4. Glowing Elemental Core Crystal
+    const corePulse = 1 + 0.25 * Math.sin(now * 0.006);
+    const coreR = 14 * corePulse;
+    const coreGrad = ctx.createRadialGradient(cx, cy, 2, cx, cy, coreR);
+    coreGrad.addColorStop(0, '#ffffff');
+    coreGrad.addColorStop(0.4, glowColor);
+    coreGrad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = coreGrad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, coreR, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 5. Crown / Horns
+    const headY = cy - bh * 0.55;
+    ctx.fillStyle = darkColor;
+    ctx.strokeStyle = glowColor;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(cx - 16, headY);
+    ctx.lineTo(cx - 30, headY - 24);
+    ctx.lineTo(cx - 8, headY - 8);
+    ctx.lineTo(cx + 8, headY - 8);
+    ctx.lineTo(cx + 30, headY - 24);
+    ctx.lineTo(cx + 16, headY);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // 6. Glowing Menacing Eyes
+    ctx.fillStyle = eyeColor;
+    ctx.shadowColor = glowColor;
+    ctx.shadowBlur = 12;
+    ctx.beginPath();
+    ctx.arc(cx - 11, headY + 6, 4, 0, Math.PI * 2);
+    ctx.arc(cx + 11, headY + 6, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+
+    // 7. Boss Skull Nameplate Tag
+    const nameY = drawY - 24;
+    ctx.save();
+    ctx.font = 'bold 14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowColor = baseColor;
+    ctx.shadowBlur = 10;
+    ctx.fillText(`☠️ [WORLD BOSS] ${e.name || 'World Boss'}`, cx, nameY);
+    ctx.restore();
+
+    // 8. Always draw HP Bar for World Boss
+    this._drawHpBar(drawX, drawY - 6, w, e.hp != null ? e.hp : e.maxHp, e.maxHp || 10000);
+  }
+
   drawEntity(e) {
-    const w = e.displayWidth || e.width || 40;
-    const h = e.displayHeight || e.height || 40;
-    const s = worldToScreen(e.x + (e.width || 40) / 2, e.y + (e.height || 40) / 2);
+    const isBoss = Boolean(e.isWorldBoss || (e.name && (e.name.includes('Colossus') || e.name.includes('Leviathan') || e.name.includes('Voidreaver') || e.name.includes('Titan'))));
+    const w = isBoss ? (e.width || 96) : (e.displayWidth || e.width || 40);
+    const h = isBoss ? (e.height || 96) : (e.displayHeight || e.height || 40);
+    const s = worldToScreen(e.x + (e.width || w) / 2, e.y + (e.height || h) / 2);
     const drawX = s.x - w / 2;
-    // Feet/base on the projected anchor, exactly as drawCreature — see the
-    // SOMET-319 note there for why there is no ISO_TILE_H/2 lift. Creatures
-    // AND map decorations draw through here, so the two must share the
-    // anchor: a tree keeps its trunk on its own tile centre, and a creature
-    // stops against it where its feet are, not where its waist is.
     const drawY = s.y - h;
+
+    if (isBoss) {
+      this._drawWorldBoss(e, drawX, drawY, w, h, s);
+      return;
+    }
 
     // Creatures render through this path in renderChunked (buildDrawables'
     // "entity" kind), so their status rings belong here too. Map decorations

@@ -44,6 +44,7 @@ const { buyStock, sellItem } = require('./trade');
 const { respawnDueCreatures, enqueueDeficit, CREATURE_SWEEP_MS } = require('../services/creatureRespawn');
 const { consumeAmmo, ammoCount } = require('./ammo');
 const { PICKUP_RADIUS } = require('./groundItems');
+const { WorldBossManager, dropLegendaryItemForPlayer } = require('./worldBoss');
 
 // SOMET-473 -- the Druid's charm (spec 8.2, contract §6.5).
 //
@@ -469,6 +470,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // drained on a 60-second timer would take 30-90s per creature.
   const creatureSweepMs = opts.creatureSweepMs || CREATURE_SWEEP_MS;
   const rng = opts.rng || Math.random;
+  const worldBossManager = new WorldBossManager({
+    pool,
+    bossIntervalMs: opts.bossIntervalMs,
+    bossWarningMs: opts.bossWarningMs,
+    rng,
+  });
 
   // Every inbound frame this protocol defines is a small flat JSON object
   // (join/attack/equip/pickup/drop/interact/buy/sell/input/ping) — the
@@ -901,8 +908,26 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // becomes a LIVE consequence: without moving the session's pools here, a
   // level-up would raise max HP in the database and nothing in the running
   // game (the exact defect A1's review caught).
-  const onCreatureDeath = (entry, id, killerUserId) =>
-    commitCreatureDeath(pool, entry, id, { rng, ttlMs: groundItemTtlMs, killerUserId })
+  const onCreatureDeath = (entry, id, killerUserId) => {
+    const deadCreature = entry.world && entry.world.creatures && entry.world.creatures.get
+      ? entry.world.creatures.get(id)
+      : null;
+    if (deadCreature && (deadCreature.isWorldBoss || id === worldBossManager.bossCreatureId)) {
+      worldBossManager.onCreatureDeath(entry, deadCreature, killerUserId, {
+        pool,
+        broadcastFn: (frame) => {
+          for (const wEntry of worlds.values()) {
+            for (const ws of wEntry.sockets.values()) {
+              send(ws, frame);
+            }
+          }
+        },
+        dropLegendaryFn: (e, uId, x, y, lvl) => dropLegendaryItemForPlayer(pool, e, uId, x, y, lvl),
+        broadcastChestsFn: (e) => broadcastChests(e),
+        broadcastItemsFn: (e) => broadcastItems(e),
+      }).catch((err) => console.error('world boss death processing error:', err));
+    }
+    return commitCreatureDeath(pool, entry, id, { rng, ttlMs: groundItemTtlMs, killerUserId })
       .then((result) => {
         if (!result || result.killerUserId == null) return; // no commit, or no player to credit
         const { progression, leveledUp, newLevel, awarded } = result;
@@ -950,6 +975,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         }
       })
       .catch((err) => console.error('death commit failed:', err));
+  };
 
   // Magic Stones (SOMET-245) Task 7: fire-and-forget entry point for a
   // landed spell-stone hit, mirroring onCreatureDeath's exact shape just
@@ -1847,6 +1873,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
           }),
           doorways: entry.compassDoorways || [],
         });
+        send(ws, {
+          type: 'world_boss_status',
+          status: worldBossManager.getStatus(),
+        });
         // Fog of war (SOMET-263). Fire-and-forget: a failed bookkeeping write
         // must never break a join. Call site 1 of 2 -- the other is the
         // transition path below, and visited_worlds_db.test.js asserts both.
@@ -2530,6 +2560,22 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // call covers both transitions since they already committed
         // atomically before this handler ever resumes.
         clearOverviewCache(entry.worldId);
+        broadcastChests(entry);
+
+        // If this is a World Boss Victory Chest, schedule despawn 30 seconds after opening
+        if (chest.isBossChest) {
+          setTimeout(async () => {
+            try {
+              if (entry && entry.chests) {
+                entry.chests = entry.chests.filter((c) => c.id !== chest.id);
+                await pool.query('DELETE FROM world_chests WHERE id = $1', [chest.id]).catch(() => {});
+                broadcastChests(entry);
+              }
+            } catch (err) {
+              console.error('Error despawning boss victory chest after 30s:', err);
+            }
+          }, 30000);
+        }
 
         // Final-review fix (SOMET-244 Important #3): mirrors onCreatureDeath's
         // own leveledUp handling (server.js:426-463) exactly -- same call,
@@ -2672,6 +2718,151 @@ function attachAuthority(httpServer, pool, opts = {}) {
           type: 'bank', villageId: village.id, items: chest.items, capacity: chest.capacity,
         });
       });
+    },
+
+    async debugWorldBoss(ws, msg) {
+      const action = msg.action;
+      const now = Date.now();
+      const broadcastAll = (frame) => {
+        for (const wEntry of worlds.values()) {
+          for (const sock of wEntry.sockets.values()) send(sock, frame);
+        }
+      };
+
+      if (action === 'spawn') {
+        worldBossManager.state = 'warning';
+        worldBossManager.nextSpawnTime = now - 1;
+        if (msg.bossIndex !== undefined && WORLD_BOSS_CATALOG[msg.bossIndex]) {
+          worldBossManager.currentBoss = { ...WORLD_BOSS_CATALOG[msg.bossIndex] };
+        }
+        if (ws.worldId) {
+          worldBossManager.activeWorldId = ws.worldId;
+          const entry = worlds.get(ws.worldId);
+          worldBossManager.activeWorldName = (entry && entry.row && entry.row.name) || 'The Wilds';
+          if (entry && entry.waypoints && entry.waypoints.size > 0) {
+            const firstWp = [...entry.waypoints.values()][0];
+            worldBossManager.nearestWaypointId = firstWp ? firstWp.id : null;
+          }
+        }
+        worldBossManager._spawnBoss(now, worlds, broadcastAll);
+      } else if (action === 'warning') {
+        worldBossManager.state = 'idle';
+        worldBossManager.nextSpawnTime = now + (Number(msg.seconds || 120) * 1000);
+        if (msg.bossIndex !== undefined && WORLD_BOSS_CATALOG[msg.bossIndex]) {
+          worldBossManager.currentBoss = { ...WORLD_BOSS_CATALOG[msg.bossIndex] };
+        }
+        worldBossManager.tick(now, worlds, broadcastAll);
+      } else if (action === 'slay') {
+        if (worldBossManager.state === 'active' && worldBossManager.bossCreatureId) {
+          const entry = worlds.get(worldBossManager.activeWorldId);
+          if (entry && entry.world) {
+            const c = entry.world.creatures ? entry.world.creatures.get(worldBossManager.bossCreatureId) : null;
+            if (c) {
+              if (!c._playerDamage || c._playerDamage.size === 0) {
+                c._playerDamage = new Map([[String(ws.userId), 5000]]);
+              }
+              await worldBossManager.onCreatureDeath(entry, c, ws.userId, {
+                pool,
+                broadcastFn: broadcastAll,
+                dropLegendaryFn: (e, uId, x, y, lvl) => dropLegendaryItemForPlayer(pool, e, uId, x, y, lvl),
+                broadcastChestsFn: (e) => broadcastChests(e),
+                broadcastItemsFn: (e) => broadcastItems(e),
+              });
+              if (entry.world.creatures.remove) entry.world.creatures.remove(c.id);
+            }
+          }
+        }
+      } else if (action === 'damage') {
+        if (worldBossManager.state === 'active' && worldBossManager.bossCreatureId) {
+          const entry = worlds.get(worldBossManager.activeWorldId);
+          if (entry && entry.world) {
+            const c = entry.world.creatures ? entry.world.creatures.get(worldBossManager.bossCreatureId) : null;
+            if (c) {
+              const amount = Number(msg.amount || 2500);
+              c.hp = Math.max(0, c.hp - amount);
+              if (!c._playerDamage) c._playerDamage = new Map();
+              c._playerDamage.set(String(ws.userId), (c._playerDamage.get(String(ws.userId)) || 0) + amount);
+              worldBossManager.currentBoss.currentHp = c.hp;
+              worldBossManager.currentBoss._playerDamage = c._playerDamage;
+              broadcastAll({ type: 'world_boss_status', status: worldBossManager.getStatus() });
+              if (c.hp <= 0) {
+                await worldBossManager.onCreatureDeath(entry, c, ws.userId, {
+                  pool,
+                  broadcastFn: broadcastAll,
+                  dropLegendaryFn: (e, uId, x, y, lvl) => dropLegendaryItemForPlayer(pool, e, uId, x, y, lvl),
+                  broadcastChestsFn: (e) => broadcastChests(e),
+                  broadcastItemsFn: (e) => broadcastItems(e),
+                });
+                if (entry.world.creatures.remove) entry.world.creatures.remove(c.id);
+              }
+            }
+          }
+        }
+      } else if (action === 'buff') {
+        worldBossManager.playerBuffs.set(String(ws.userId), {
+          active: true,
+          expiresAt: now + (15 * 60 * 1000),
+          speedBonus: 0.15,
+          damageBonus: 0.20,
+          xpBonus: 0.20,
+          bossName: 'Debug Champion',
+        });
+        send(ws, {
+          type: 'announcement',
+          kind: 'buff_granted',
+          text: '[Debug] Victor\'s Boon granted (+15% speed, +20% damage/XP for 15 mins)!',
+        });
+      } else if (action === 'despawn') {
+        worldBossManager._despawnBoss(worlds, broadcastAll, 'timeout');
+      } else if (action === 'setTimer') {
+        const seconds = Number(msg.seconds) || 10;
+        worldBossManager.state = 'idle';
+        worldBossManager.nextSpawnTime = now + (seconds * 1000);
+        worldBossManager.warningSent = false;
+      } else if (action === 'teleport_to_boss') {
+        if (worldBossManager.state !== 'active' || !worldBossManager.activeWorldId) {
+          send(ws, { type: 'error', message: 'No active world boss to teleport to!' });
+          return;
+        }
+        const targetWorldId = worldBossManager.activeWorldId;
+        const targetEntry = worlds.get(targetWorldId);
+        const currentEntry = worlds.get(ws.worldId);
+        const p = currentEntry && currentEntry.world ? currentEntry.world.getPlayer(ws.userId) : null;
+        const boss = worldBossManager.currentBoss;
+        const liveBoss = targetEntry && targetEntry.world && targetEntry.world.creatures && targetEntry.world.creatures.get
+          ? targetEntry.world.creatures.get(worldBossManager.bossCreatureId)
+          : null;
+        const targetX = liveBoss ? Math.round(liveBoss.x + 80) : (boss && boss.spawnX != null ? Math.round(boss.spawnX + 80) : 400);
+        const targetY = liveBoss ? Math.round(liveBoss.y + 80) : (boss && boss.spawnY != null ? Math.round(boss.spawnY + 80) : 400);
+
+        if (ws.worldId === targetWorldId && p) {
+          p.x = targetX;
+          p.y = targetY;
+          send(ws, {
+            type: 'announcement',
+            kind: 'boss_teleport',
+            text: `Teleported to ${boss?.name || 'World Boss'}!`,
+          });
+        } else {
+          pendingArrivals.set(ws.characterId, {
+            worldId: targetWorldId,
+            x: targetX,
+            y: targetY,
+            hp: p ? p.hp : undefined,
+            mana: p ? p.mana : undefined,
+            stamina: p ? p.stamina : undefined,
+          });
+          send(ws, {
+            type: 'transition',
+            toWorldId: targetWorldId,
+            arriveX: targetX,
+            arriveY: targetY,
+          });
+          recordVisit(pool, ws.characterId, targetWorldId).catch(() => {});
+        }
+      }
+
+      broadcastAll({ type: 'world_boss_status', status: worldBossManager.getStatus() });
     },
 
     ping(ws) { send(ws, { type: 'pong' }); },
@@ -3161,6 +3352,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
         broadcastChests(entry);
       }
     }
+    if (tick % (creatureBroadcastEvery * 5) === 0) {
+      worldBossManager.tick(Date.now(), worlds, (frame) => {
+        for (const wEntry of worlds.values()) {
+          for (const ws of wEntry.sockets.values()) {
+            send(ws, frame);
+          }
+        }
+      });
+    }
   }, tickMs);
 
   const creatureFlushTimer = setInterval(() => {
@@ -3450,6 +3650,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // over CreatureSim can never show.
     _reloadCreatures: injectGuardIntoSim,
     _refreshLootTuning: refreshLootTuning,
+    _worldBossManager: worldBossManager,
     // Read back the live TTL. A getter, not the value: the whole point of
     // SOMET-482 is that this number CHANGES at runtime, so a test that
     // captured it once could not tell a working refresh from a dead one.

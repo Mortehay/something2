@@ -59,6 +59,7 @@ export function renderFrame(ctx, dpr, box, cellW, { gameRef, overviewRef, tileCo
     // terrain window. `phase` is read HERE, in the component, because the
     // renderer must stay a pure function of its arguments.
     landmarks: snap.landmarks || [],
+    worldBoss: snap.worldBoss || null,
     phase: performance.now(),
     view: { centerCol: pCol, centerRow: pRow, step: overview ? overview.step : FALLBACK_STEP, cellW, boxW: box, boxH: box },
   });

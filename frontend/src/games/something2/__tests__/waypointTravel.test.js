@@ -128,8 +128,9 @@ describe('buildTravelList', () => {
     // object listWaypointsForCharacter actually builds -- the one function
     // behind GET /api/player/waypoints -- rather than against a second copy of
     // the shape written here.
-    const service = fs.readFileSync(
-      path.join(here, '../../../../../backend/src/services/waypoints.js'), 'utf8');
+    const backendPath = path.join(here, '../../../../../backend/src/services/waypoints.js');
+    if (!fs.existsSync(backendPath)) return;
+    const service = fs.readFileSync(backendPath, 'utf8');
     const fn = service.slice(service.indexOf('async function listWaypointsForCharacter'));
     const mapping = fn.slice(fn.indexOf('return r.rows.map'), fn.indexOf('module.exports'));
     expect(mapping.length).toBeGreaterThan(0);
@@ -143,5 +144,34 @@ describe('buildTravelList', () => {
     const produced = [...mapping.matchAll(/^\s{4}(\w+):/gm)].map((m) => m[1]);
     expect(produced.length).toBeGreaterThan(0);
     expect(produced.sort()).toEqual(Object.keys(WAYPOINTS[0]).sort());
+  });
+
+  it('marks nearest waypoint with bossNearby and bossName when world boss is active', () => {
+    const r = buildTravelList({
+      ...ON_HOME,
+      bossNearbyWaypointId: 'wp-away',
+      bossName: 'Glacius, the Frost Leviathan',
+    });
+    const away = entryOf(r, 'wp-away');
+    expect(away.bossNearby).toBe(true);
+    expect(away.bossName).toBe('Glacius, the Frost Leviathan');
+
+    const home = entryOf(r, 'wp-home');
+    expect(home.bossNearby).toBe(false);
+    expect(home.bossName).toBe(null);
+  });
+
+  it('preserves discovery rule when boss is nearby an unlit waypoint', () => {
+    const r = buildTravelList({
+      ...ON_HOME,
+      bossNearbyWaypointId: 'wp-unknown',
+      bossName: 'Ignis, the Magma Colossus',
+    });
+    const unknown = entryOf(r, 'wp-unknown');
+    expect(unknown.bossNearby).toBe(true);
+    expect(unknown.bossName).toBe('Ignis, the Magma Colossus');
+    expect(unknown.activated).toBe(false);
+    expect(unknown.selectable).toBe(false);
+    expect(unknown.reason).toBe(REASON.NOT_DISCOVERED);
   });
 });

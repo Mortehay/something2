@@ -228,7 +228,15 @@ function readKeybinds() {
   try {
     const raw = localStorage.getItem(LS_KEYBINDS);
     if (raw) {
-      return { ...DEFAULT_KEYBINDS, ...JSON.parse(raw) };
+      const merged = { ...DEFAULT_KEYBINDS, ...JSON.parse(raw) };
+      // Sanitize hotbar slots: LMB is dedicated to standard attack/interaction
+      for (let s = 1; s <= 9; s++) {
+        const b = String(merged[`slot${s}`] || '').toLowerCase().trim();
+        if (b === 'mouse1' || b === 'lmb' || b === 'left' || b === 'left click') {
+          merged[`slot${s}`] = `${s}`;
+        }
+      }
+      return merged;
     }
   } catch {
     // ignore
@@ -335,6 +343,15 @@ export default function GameSettings({ gameRef }) {
   }, [gameRef]);
 
   const applyNewKeybind = useCallback((actionKey, newBoundKey) => {
+    if (actionKey.startsWith('slot')) {
+      const b = String(newBoundKey).toLowerCase().trim();
+      if (b === 'mouse1' || b === 'lmb' || b === 'left' || b === 'left click') {
+        const game = gameRef.current;
+        if (game && game.showToast) game.showToast("Left Mouse Button (LMB) is reserved for Basic Attack / Interact");
+        setListeningAction(null);
+        return;
+      }
+    }
     setKeybinds((prev) => {
       const updated = { ...prev, [actionKey]: newBoundKey };
       writeKeybinds(updated);

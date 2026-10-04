@@ -42,7 +42,14 @@
         "y": 4650,
         "guard_creature_type": "Slime",
         "level": 2
-      }
+      },
+      "waypoints": [
+        {
+          "x": 4650,
+          "y": 4550,
+          "name": "Vale Crossing Waypoint"
+        }
+      ]
     },
     {
       "key": "vale_forest",
@@ -138,7 +145,24 @@
       "allowed_creature_types": [
         "Skeleton"
       ],
-      "is_entry": false
+      "is_entry": false,
+      "village": {
+        "key": "sunscar",
+        "min_row": 44,
+        "min_col": 44,
+        "width": 6,
+        "height": 4,
+        "gate_edge": "E",
+        "spawn_x": 4650,
+        "spawn_y": 4550
+      },
+      "waypoints": [
+        {
+          "x": 4650,
+          "y": 4550,
+          "name": "Sunscar Outpost Waypoint"
+        }
+      ]
     },
     {
       "key": "vale_frozen",
@@ -161,7 +185,24 @@
         "Bat",
         "Skeleton"
       ],
-      "is_entry": false
+      "is_entry": false,
+      "village": {
+        "key": "rimehollow",
+        "min_row": 44,
+        "min_col": 44,
+        "width": 6,
+        "height": 4,
+        "gate_edge": "S",
+        "spawn_x": 4650,
+        "spawn_y": 4550
+      },
+      "waypoints": [
+        {
+          "x": 4650,
+          "y": 4550,
+          "name": "Rimehollow Haven Waypoint"
+        }
+      ]
     },
     {
       "key": "vale_mire",
@@ -184,7 +225,24 @@
         "Slime",
         "Bat"
       ],
-      "is_entry": false
+      "is_entry": false,
+      "village": {
+        "key": "blackfen",
+        "min_row": 24,
+        "min_col": 24,
+        "width": 6,
+        "height": 4,
+        "gate_edge": "N",
+        "spawn_x": 2650,
+        "spawn_y": 2550
+      },
+      "waypoints": [
+        {
+          "x": 2650,
+          "y": 2550,
+          "name": "Blackfen Refuge Waypoint"
+        }
+      ]
     },
     {
       "key": "spine_entry",
@@ -403,6 +461,13 @@
       "level_band": [
         3,
         5
+      ],
+      "waypoints": [
+        {
+          "x": 6450,
+          "y": 6450,
+          "name": "Hollow Cache Waypoint"
+        }
       ]
     },
     {
@@ -488,6 +553,13 @@
       "level_band": [
         6,
         9
+      ],
+      "waypoints": [
+        {
+          "x": 9650,
+          "y": 9650,
+          "name": "Frostbound Shrine Waypoint"
+        }
       ]
     },
     {
@@ -519,6 +591,13 @@
       "level_band": [
         6,
         9
+      ],
+      "waypoints": [
+        {
+          "x": 9650,
+          "y": 9650,
+          "name": "Deep Cut Waypoint"
+        }
       ]
     },
     {
@@ -550,6 +629,13 @@
       "level_band": [
         9,
         12
+      ],
+      "waypoints": [
+        {
+          "x": 11250,
+          "y": 11250,
+          "name": "Glacier's End Sanctum"
+        }
       ]
     },
     {

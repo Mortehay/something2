@@ -134,21 +134,11 @@ function applyDamage(target, raw, element, mit = NO_MITIGATION, now = undefined,
   const candidate = raw2 * (1 - resist);
   const final = Math.max(MIN_DAMAGE, Number.isFinite(candidate) ? candidate : MIN_DAMAGE);
   target.hp -= final;
-  // SOMET-290. Being hit is what turns a skittish creature from prey into a
-  // fighter, and this is the ONE place a hit lands: the melee arc (world.js),
-  // a direct projectile, an AoE detonation (projectiles.js) and the burn tick
-  // all funnel through here. Stamping it at those call sites instead would be
-  // the same rule-on-one-of-several-write-paths failure that shipped SOMET-153.
-  //
-  // Set unconditionally rather than only when `final > 0`: a hit absorbed to
-  // nothing is still an attack, and a creature that shrugs off being struck
-  // reads as broken. Harmless on players and on every other chase style —
-  // nothing but isProvokedBy above reads it.
-  //
-  // WHO and UNTIL WHEN, not a bare boolean. The boolean could not express the
-  // one thing the rule is about — a shot from beyond aggro range, which is how
-  // a deer is normally hit — without also blaming a bystander who happened to
-  // be standing nearby when it landed.
+  if (source && typeof source === 'string' && source.startsWith('p:')) {
+    const pUid = source.slice(2);
+    if (!target._playerDamage) target._playerDamage = new Map();
+    target._playerDamage.set(pUid, (target._playerDamage.get(pUid) || 0) + final);
+  }
   provoke(target, source, now);
   return final;
 }

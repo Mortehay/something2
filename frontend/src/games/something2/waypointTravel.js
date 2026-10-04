@@ -33,7 +33,7 @@ const tileKey = (x, y) => `${Math.floor(y / MAP_TILE_SIZE)},${Math.floor(x / MAP
 // `playerX`/`playerY` are the player's CENTRE, which is what the authority uses
 // too -- a player is a 64px box placed by its top-left corner, so keying on the
 // corner would light the wrong tile near a boundary.
-export function buildTravelList({ waypoints, currentWorldId, playerX, playerY } = {}) {
+export function buildTravelList({ waypoints, currentWorldId, playerX, playerY, bossNearbyWaypointId, bossName, bossWorldId } = {}) {
   const list = Array.isArray(waypoints) ? waypoints : [];
 
   // Where the player is standing, if it is a waypoint at all. Scoped to the
@@ -66,6 +66,9 @@ export function buildTravelList({ waypoints, currentWorldId, playerX, playerY } 
     else if (w.activated !== true) reason = REASON.NOT_DISCOVERED;
     else if (!standingOnActivated) reason = REASON.NOT_ON_A_WAYPOINT;
 
+    const isBossNearby = (bossNearbyWaypointId != null && w.id === bossNearbyWaypointId)
+      || (bossWorldId != null && w.worldId === bossWorldId);
+
     if (!groups.has(w.worldId)) {
       groups.set(w.worldId, { worldId: w.worldId, worldName: w.worldName, entries: [] });
     }
@@ -78,6 +81,8 @@ export function buildTravelList({ waypoints, currentWorldId, playerX, playerY } 
       activated: w.activated === true,
       selectable: reason === null,
       reason,
+      bossNearby: Boolean(isBossNearby),
+      bossName: isBossNearby ? (bossName || 'World Boss') : null,
     });
   }
 

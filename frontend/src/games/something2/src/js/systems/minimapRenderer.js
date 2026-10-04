@@ -38,6 +38,8 @@ export function drawMinimap(ctx, {
   // leaves overviewCache alone. `phase` is the caller's rAF timestamp -- see
   // landmarkRenderer for why a renderer must never read its own clock.
   landmarks, phase,
+  // World Boss marker & edge indicator
+  worldBoss,
 }) {
   // 1) Terrain -- one blit of the cached window bitmap.
   //
@@ -128,6 +130,126 @@ export function drawMinimap(ctx, {
     ctx.beginPath();
     ctx.arc(x, y, 2, 0, Math.PI * 2);
     ctx.fill();
+  }
+
+  // 4.5) World Boss (Pulsing Skull, Elemental Aura & Off-Screen Compass Pointer)
+  if (worldBoss && (worldBoss.state === 'active' || worldBoss.state === 'upcoming')) {
+    const bossX = Number(worldBoss.x) || Number(worldBoss.spawnX) || 0;
+    const bossY = Number(worldBoss.y) || Number(worldBoss.spawnY) || 0;
+    if (bossX > 0 && bossY > 0) {
+      const bCol = bossX / MAP_TILE_SIZE;
+      const bRow = bossY / MAP_TILE_SIZE;
+      const { x, y } = worldTileToView(bCol, bRow, view);
+
+      const pulse = 0.5 + 0.5 * Math.sin((phase || 0) * 0.006);
+      const elem = worldBoss.bossElement || 'fire';
+      const elemColor = elem === 'fire' ? '#f97316'
+        : elem === 'ice' ? '#38bdf8'
+        : elem === 'shadow' ? '#c084fc'
+        : elem === 'lightning' ? '#fbbf24'
+        : elem === 'holy' ? '#fef08a'
+        : '#ef4444';
+
+      const pad = 14;
+      const inBox = x >= pad && x <= view.boxW - pad && y >= pad && y <= view.boxH - pad;
+
+      ctx.save();
+      if (inBox) {
+        // Direct World Boss Beacon on the minimap
+        // 1. Pulsing glowing ground ring
+        ctx.beginPath();
+        ctx.arc(x, y, 9 + 4 * pulse, 0, Math.PI * 2);
+        ctx.fillStyle = elemColor;
+        ctx.globalAlpha = 0.3 * pulse;
+        ctx.fill();
+
+        // 2. Outer sharp pulsing ring
+        ctx.beginPath();
+        ctx.arc(x, y, 7 + 2 * pulse, 0, Math.PI * 2);
+        ctx.strokeStyle = elemColor;
+        ctx.lineWidth = 1.8;
+        ctx.globalAlpha = 0.9;
+        ctx.stroke();
+
+        // 3. Inner dark badge
+        ctx.beginPath();
+        ctx.arc(x, y, 6, 0, Math.PI * 2);
+        ctx.fillStyle = '#0f172a';
+        ctx.globalAlpha = 0.95;
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+
+        // 4. Skull icon
+        ctx.font = 'bold 9px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#ffffff';
+        ctx.globalAlpha = 1;
+        ctx.fillText('☠', x, y);
+
+        // 5. Boss nameplate when expanded
+        if (worldBoss.bossName && view.cellW > 12 && ctx.fillText) {
+          ctx.font = 'bold 9px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillStyle = '#ffffff';
+          ctx.strokeStyle = '#000000';
+          ctx.lineWidth = 3;
+          ctx.strokeText(`☠ ${worldBoss.bossName}`, x, y - 12);
+          ctx.fillStyle = elemColor;
+          ctx.fillText(`☠ ${worldBoss.bossName}`, x, y - 12);
+        }
+      } else {
+        // Off-screen indicator: clamp to edge of box and draw arrow + skull badge
+        const cx = view.boxW / 2;
+        const cy = view.boxH / 2;
+        const dx = x - cx;
+        const dy = y - cy;
+        const angle = Math.atan2(dy, dx);
+
+        const edgeMargin = 12;
+        const maxDistX = view.boxW / 2 - edgeMargin;
+        const maxDistY = view.boxH / 2 - edgeMargin;
+
+        const scale = Math.min(Math.abs(maxDistX / (dx || 0.001)), Math.abs(maxDistY / (dy || 0.001)));
+        const edgeX = cx + dx * scale;
+        const edgeY = cy + dy * scale;
+
+        // Pointer triangle towards boss
+        ctx.translate(edgeX, edgeY);
+        ctx.rotate(angle);
+
+        ctx.beginPath();
+        ctx.moveTo(8, 0);
+        ctx.lineTo(-6, -5);
+        ctx.lineTo(-3, 0);
+        ctx.lineTo(-6, 5);
+        ctx.closePath();
+        ctx.fillStyle = elemColor;
+        ctx.globalAlpha = 0.85 + 0.15 * pulse;
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        // Mini skull beacon on edge
+        ctx.beginPath();
+        ctx.arc(-8, 0, 5, 0, Math.PI * 2);
+        ctx.fillStyle = '#0f172a';
+        ctx.fill();
+        ctx.strokeStyle = elemColor;
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+
+        ctx.font = 'bold 7px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText('☠', -8, 0);
+      }
+      ctx.restore();
+    }
   }
 
   // 5) Player: centered dot + facing triangle

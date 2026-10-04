@@ -692,7 +692,12 @@ export class Game {
                     resolve(msg.spawn);
                 },
                 onState: (msg) => this._onWorldState(msg),
-                onCreatures: (msg) => this.creatures.applySnapshot(msg.creatures),
+                onCreatures: (msg) => {
+                    this.creatures.applySnapshot(msg.creatures);
+                    if (this._onWorldBossStatusChange && this.worldBossStatus && this.worldBossStatus.state === 'active') {
+                        this._onWorldBossStatusChange(this.getWorldBossStatus());
+                    }
+                },
                 onItems: (msg) => this.groundItems.applySnapshot(msg.items || []),
                 onPicked: (msg) => { if (msg.item) addItem(this.inventory, msg.item); },
                 // Gold pickup is out-of-band from the inventory: the server
@@ -795,6 +800,17 @@ export class Game {
                 },
                 onAttackRefused: (msg) => this._onAttackRefused(msg),
                 onAmmo: (msg) => applyAmmoCount(this.inventory, msg.item_type_id, msg.count),
+                onWorldBossStatus: (msg) => {
+                    this.worldBossStatus = msg.status || null;
+                    if (this._onWorldBossStatusChange) {
+                        this._onWorldBossStatusChange(this.worldBossStatus);
+                    }
+                },
+                onAnnouncement: (msg) => {
+                    if (msg && msg.text) {
+                        this._showToast(msg.text);
+                    }
+                },
                 onError: (e) => {
                     console.error('[authority]', e);
                     // A server rejection that arrives BEFORE `joined` is a
@@ -923,6 +939,7 @@ export class Game {
                 dir: this._minimapDir || { dx: 0, dy: 1 },
             },
             creatures: (this.creatures ? this.creatures.all() : []).map((c) => ({ x: c.x, y: c.y, color: c.color })),
+            worldBoss: this.worldBossStatus || null,
         };
     }
 
@@ -1030,7 +1047,16 @@ export class Game {
                 const raw = localStorage.getItem('something2_keybinds');
                 if (raw) {
                     const parsed = JSON.parse(raw);
-                    return { ...DEFAULT_KEYBINDS, ...parsed };
+                    const merged = { ...DEFAULT_KEYBINDS, ...parsed };
+                    // LMB is reserved for standard weapon attack / interaction.
+                    // Sanitize any hotbar slot that was accidentally bound to mouse1/LMB.
+                    for (let s = 1; s <= 9; s++) {
+                        const b = String(merged[`slot${s}`] || '').toLowerCase().trim();
+                        if (b === 'mouse1' || b === 'lmb' || b === 'left' || b === 'left click') {
+                            merged[`slot${s}`] = `${s}`;
+                        }
+                    }
+                    return merged;
                 }
             }
         } catch {
@@ -1040,7 +1066,14 @@ export class Game {
     }
 
     setKeybinds(binds) {
-        this.keybinds = { ...DEFAULT_KEYBINDS, ...(binds || {}) };
+        const merged = { ...DEFAULT_KEYBINDS, ...(binds || {}) };
+        for (let s = 1; s <= 9; s++) {
+            const b = String(merged[`slot${s}`] || '').toLowerCase().trim();
+            if (b === 'mouse1' || b === 'lmb' || b === 'left' || b === 'left click') {
+                merged[`slot${s}`] = `${s}`;
+            }
+        }
+        this.keybinds = merged;
         try {
             if (typeof localStorage !== 'undefined') {
                 localStorage.setItem('something2_keybinds', JSON.stringify(this.keybinds));
@@ -1154,14 +1187,14 @@ export class Game {
         if (!this.keys) return false;
         const binds = this.keybinds || DEFAULT_KEYBINDS;
         const bind = String(binds[`slot${slot}`] || `${slot}`).toLowerCase().trim();
+        if (bind === 'mouse1' || bind === 'lmb' || bind === 'left' || bind === 'left click') {
+            return false;
+        }
         if (this.keys[bind] || this.keys[`${slot}`] || this.keys[`digit${slot}`] || this.keys[`numpad${slot}`]) {
             return true;
         }
         if (bind === ' ' || bind === 'space' || bind === 'spacebar') {
             return !!this.keys[' '] || !!this.keys['space'] || !!this.keys['spacebar'];
-        }
-        if (bind === 'mouse1' || bind === 'lmb' || bind === 'left') {
-            return this._attackHeld || !!this.keys['mouse1'] || !!this.keys['lmb'] || !!this.keys['left'];
         }
         if (bind === 'mouse2' || bind === 'rmb' || bind === 'right') {
             return !!this.keys['mouse2'] || !!this.keys['rmb'] || !!this.keys['right'];
@@ -2858,12 +2891,16 @@ export class Game {
             };
 
             // 1. Check hotbar slot mouse bindings (slots 1..9)
-            for (let slot = 1; slot <= 9; slot++) {
-                if (matchesThisMouse(`slot${slot}`, `${slot}`)) {
-                    if (!this.skillsOpen && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen && !this.inventoryOpen && !this.gemShopOpen) {
-                        if (typeof e.preventDefault === 'function') e.preventDefault();
-                        this._activateHotbarSkill(slot);
-                        return;
+            // LMB (e.button === 0) is dedicated to standard weapon attack / world interaction.
+            // RMB / MMB / Extra mouse buttons (buttons 1..5) trigger assigned hotbar skills.
+            if (e.button !== 0) {
+                for (let slot = 1; slot <= 9; slot++) {
+                    if (matchesThisMouse(`slot${slot}`, `${slot}`)) {
+                        if (!this.skillsOpen && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen && !this.inventoryOpen && !this.gemShopOpen) {
+                            if (typeof e.preventDefault === 'function') e.preventDefault();
+                            this._activateHotbarSkill(slot);
+                            return;
+                        }
                     }
                 }
             }
@@ -3244,5 +3281,39 @@ export class Game {
         this.canvas.style.margin = '0';
         this.canvas.style.width = `${fit.width}px`;
         this.canvas.style.height = `${fit.height}px`;
+    }
+
+    getWorldBossStatus() {
+        if (!this.worldBossStatus) return null;
+        if (this.worldBossStatus.state === 'active' && this.creatures && this.creatures.all) {
+            const all = this.creatures.all();
+            const bossCreature = all.find(
+                (c) => c.isWorldBoss ||
+                       c.id === this.worldBossStatus.bossCreatureId ||
+                       (this.worldBossStatus.bossName && (c.name === this.worldBossStatus.bossName || c.type === this.worldBossStatus.bossName))
+            );
+            if (bossCreature) {
+                return {
+                    ...this.worldBossStatus,
+                    currentHp: bossCreature.hp !== undefined ? bossCreature.hp : this.worldBossStatus.currentHp,
+                    maxHp: bossCreature.maxHp || this.worldBossStatus.maxHp,
+                };
+            }
+        }
+        return this.worldBossStatus;
+    }
+
+    setOnWorldBossStatusChange(cb) {
+        this._onWorldBossStatusChange = cb;
+    }
+
+    debugWorldBoss(action, opts = {}) {
+        if (this.authorityClient && this.authorityClient._send) {
+            this.authorityClient._send({
+                type: 'debugWorldBoss',
+                action,
+                ...opts,
+            });
+        }
     }
 }
