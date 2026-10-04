@@ -204,7 +204,7 @@ export default function WorldBossHud({ gameRef }) {
     return () => clearInterval(interval);
   }, [gameRef]);
 
-  if (!status || status.state === 'idle') {
+  if (!status || status.state === 'idle' || (status.state === 'active' && status.currentHp <= 0)) {
     return null;
   }
 

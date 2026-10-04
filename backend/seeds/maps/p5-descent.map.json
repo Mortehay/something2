@@ -58,7 +58,7 @@
       "is_entry": false,
       "level_band": [
         1,
-        6
+        7
       ],
       "density": "sparse"
     },
@@ -86,7 +86,7 @@
       "is_entry": false,
       "level_band": [
         1,
-        6
+        7
       ],
       "density": "sparse"
     },
@@ -114,7 +114,7 @@
       "is_entry": false,
       "level_band": [
         1,
-        6
+        7
       ],
       "density": "sparse"
     },
@@ -142,7 +142,7 @@
       "is_entry": false,
       "level_band": [
         1,
-        7
+        8
       ],
       "density": "sparse"
     },
@@ -170,7 +170,7 @@
       "is_entry": false,
       "level_band": [
         1,
-        7
+        8
       ],
       "density": "sparse"
     },
@@ -198,7 +198,7 @@
       "is_entry": false,
       "level_band": [
         1,
-        7
+        8
       ],
       "density": "sparse"
     },
@@ -226,7 +226,7 @@
       "is_entry": false,
       "level_band": [
         1,
-        8
+        7
       ],
       "density": "sparse"
     },
@@ -254,7 +254,7 @@
       "is_entry": false,
       "level_band": [
         8,
-        14
+        13
       ],
       "density": "sparse",
       "village": {
@@ -292,7 +292,7 @@
       "is_entry": false,
       "level_band": [
         8,
-        14
+        13
       ],
       "density": "sparse"
     },
@@ -320,7 +320,7 @@
       "is_entry": false,
       "level_band": [
         8,
-        14
+        13
       ],
       "density": "sparse"
     },
@@ -348,7 +348,7 @@
       "is_entry": false,
       "level_band": [
         8,
-        14
+        13
       ],
       "density": "sparse"
     },
@@ -376,7 +376,7 @@
       "is_entry": false,
       "level_band": [
         8,
-        14
+        13
       ],
       "density": "sparse"
     },
@@ -487,8 +487,8 @@
       ],
       "is_entry": false,
       "level_band": [
-        11,
-        21
+        12,
+        22
       ],
       "density": "normal"
     },
@@ -500,8 +500,8 @@
         0
       ],
       "seed": 5203,
-      "width": 128,
-      "height": 128,
+      "width": 160,
+      "height": 160,
       "chunk_size": 32,
       "biomes": [
         "Sunken Cistern",
@@ -515,10 +515,10 @@
       ],
       "is_entry": false,
       "level_band": [
-        12,
-        22
+        14,
+        24
       ],
-      "density": "normal"
+      "density": "dense"
     },
     {
       "key": "d3_heart",
@@ -543,8 +543,8 @@
       ],
       "is_entry": false,
       "level_band": [
-        13,
-        23
+        12,
+        22
       ],
       "density": "normal"
     },
@@ -556,8 +556,8 @@
         1
       ],
       "seed": 5205,
-      "width": 128,
-      "height": 128,
+      "width": 160,
+      "height": 160,
       "chunk_size": 32,
       "biomes": [
         "Sunken Cistern",
@@ -571,10 +571,10 @@
       ],
       "is_entry": false,
       "level_band": [
-        12,
-        22
+        14,
+        24
       ],
-      "density": "normal"
+      "density": "dense"
     },
     {
       "key": "d3_southwing",
@@ -599,8 +599,8 @@
       ],
       "is_entry": false,
       "level_band": [
-        11,
-        21
+        12,
+        22
       ],
       "density": "normal"
     },
@@ -655,8 +655,8 @@
       ],
       "is_entry": false,
       "level_band": [
-        15,
-        25
+        16,
+        26
       ],
       "density": "dense"
     },
@@ -683,8 +683,8 @@
       ],
       "is_entry": false,
       "level_band": [
-        15,
-        25
+        16,
+        26
       ],
       "density": "dense"
     },
@@ -711,8 +711,8 @@
       ],
       "is_entry": false,
       "level_band": [
-        15,
-        25
+        16,
+        26
       ],
       "density": "dense"
     },
@@ -739,8 +739,8 @@
       ],
       "is_entry": false,
       "level_band": [
-        16,
-        26
+        18,
+        28
       ],
       "density": "dense"
     },
@@ -767,8 +767,8 @@
       ],
       "is_entry": false,
       "level_band": [
-        16,
-        26
+        18,
+        28
       ],
       "density": "dense"
     },
@@ -795,8 +795,8 @@
       ],
       "is_entry": false,
       "level_band": [
-        17,
-        27
+        18,
+        28
       ],
       "density": "dense"
     },
@@ -823,8 +823,8 @@
       ],
       "is_entry": false,
       "level_band": [
-        18,
-        28
+        16,
+        26
       ],
       "density": "dense"
     },
@@ -851,8 +851,8 @@
       ],
       "is_entry": false,
       "level_band": [
-        19,
-        29
+        18,
+        28
       ],
       "density": "dense",
       "village": {
@@ -889,8 +889,8 @@
       ],
       "is_entry": false,
       "level_band": [
-        19,
-        29
+        18,
+        28
       ],
       "density": "dense"
     },
@@ -917,8 +917,8 @@
       ],
       "is_entry": false,
       "level_band": [
-        19,
-        29
+        18,
+        28
       ],
       "density": "dense"
     },
@@ -945,8 +945,8 @@
       ],
       "is_entry": false,
       "level_band": [
-        19,
-        29
+        18,
+        28
       ],
       "density": "dense"
     },
@@ -973,8 +973,8 @@
       ],
       "is_entry": false,
       "level_band": [
-        19,
-        29
+        18,
+        28
       ],
       "density": "dense"
     },
@@ -1085,8 +1085,8 @@
       ],
       "is_entry": false,
       "level_band": [
-        28,
-        34
+        29,
+        35
       ],
       "density": "horde"
     },
@@ -1098,8 +1098,8 @@
         0
       ],
       "seed": 5503,
-      "width": 192,
-      "height": 192,
+      "width": 224,
+      "height": 224,
       "chunk_size": 32,
       "biomes": [
         "Sunken Foundry",
@@ -1113,10 +1113,10 @@
       ],
       "is_entry": false,
       "level_band": [
-        29,
-        35
+        30,
+        36
       ],
-      "density": "horde"
+      "density": "swarm"
     },
     {
       "key": "d6_heart",
@@ -1154,8 +1154,8 @@
         1
       ],
       "seed": 5505,
-      "width": 192,
-      "height": 192,
+      "width": 224,
+      "height": 224,
       "chunk_size": 32,
       "biomes": [
         "Sunken Foundry",
@@ -1169,10 +1169,10 @@
       ],
       "is_entry": false,
       "level_band": [
-        29,
-        35
+        30,
+        36
       ],
-      "density": "horde"
+      "density": "swarm"
     },
     {
       "key": "d6_southwing",
@@ -1197,8 +1197,8 @@
       ],
       "is_entry": false,
       "level_band": [
-        28,
-        34
+        29,
+        35
       ],
       "density": "horde"
     },
@@ -1253,7 +1253,7 @@
       ],
       "is_entry": false,
       "level_band": [
-        40,
+        41,
         50
       ],
       "density": "swarm"
@@ -1281,7 +1281,7 @@
       ],
       "is_entry": false,
       "level_band": [
-        40,
+        41,
         50
       ],
       "density": "swarm"
@@ -1309,7 +1309,7 @@
       ],
       "is_entry": false,
       "level_band": [
-        40,
+        41,
         50
       ],
       "density": "swarm"
@@ -1337,7 +1337,7 @@
       ],
       "is_entry": false,
       "level_band": [
-        41,
+        43,
         50
       ],
       "density": "swarm"
@@ -1365,7 +1365,7 @@
       ],
       "is_entry": false,
       "level_band": [
-        41,
+        43,
         50
       ],
       "density": "swarm"
@@ -1393,7 +1393,7 @@
       ],
       "is_entry": false,
       "level_band": [
-        42,
+        43,
         50
       ],
       "density": "swarm"
@@ -1421,7 +1421,7 @@
       ],
       "is_entry": false,
       "level_band": [
-        43,
+        41,
         50
       ],
       "density": "swarm"
@@ -2184,6 +2184,15 @@
     {
       "kind": "portal",
       "from": "d1_end",
+      "from_x": 4550,
+      "from_y": 4550,
+      "to": "d1_entry",
+      "to_x": 4550,
+      "to_y": 4550
+    },
+    {
+      "kind": "portal",
+      "from": "d1_end",
       "from_x": 4850,
       "from_y": 4850,
       "to": "d2_hub",
@@ -2193,6 +2202,15 @@
         "creature_type": "Fungal Line",
         "count": 1
       }
+    },
+    {
+      "kind": "portal",
+      "from": "d2_subBranch",
+      "from_x": 6150,
+      "from_y": 6150,
+      "to": "d2_hub",
+      "to_x": 4450,
+      "to_y": 5250
     },
     {
       "kind": "portal",
@@ -2210,6 +2228,15 @@
     {
       "kind": "portal",
       "from": "d3_heart",
+      "from_x": 6150,
+      "from_y": 6150,
+      "to": "d3_entry",
+      "to_x": 6150,
+      "to_y": 6150
+    },
+    {
+      "kind": "portal",
+      "from": "d3_heart",
       "from_x": 6450,
       "from_y": 6450,
       "to": "d4_entry",
@@ -2219,6 +2246,15 @@
         "creature_type": "Ember Line",
         "count": 1
       }
+    },
+    {
+      "kind": "portal",
+      "from": "d4_end",
+      "from_x": 7750,
+      "from_y": 7750,
+      "to": "d4_entry",
+      "to_x": 7750,
+      "to_y": 7750
     },
     {
       "kind": "portal",
@@ -2236,6 +2272,15 @@
     {
       "kind": "portal",
       "from": "d5_subBranch",
+      "from_x": 9350,
+      "from_y": 9350,
+      "to": "d5_hub",
+      "to_x": 7650,
+      "to_y": 8450
+    },
+    {
+      "kind": "portal",
+      "from": "d5_subBranch",
       "from_x": 9650,
       "from_y": 9650,
       "to": "d6_entry",
@@ -2245,6 +2290,15 @@
         "creature_type": "Crystal Line",
         "count": 1
       }
+    },
+    {
+      "kind": "portal",
+      "from": "d6_heart",
+      "from_x": 9350,
+      "from_y": 9350,
+      "to": "d6_entry",
+      "to_x": 9350,
+      "to_y": 9350
     },
     {
       "kind": "portal",
@@ -2262,6 +2316,15 @@
     {
       "kind": "portal",
       "from": "d7_end",
+      "from_x": 10950,
+      "from_y": 10950,
+      "to": "d7_entry",
+      "to_x": 10950,
+      "to_y": 10950
+    },
+    {
+      "kind": "portal",
+      "from": "d7_end",
       "from_x": 11250,
       "from_y": 11250,
       "to": "d8_hub",
@@ -2271,6 +2334,15 @@
         "creature_type": "Void Line",
         "count": 1
       }
+    },
+    {
+      "kind": "portal",
+      "from": "d8_subBranch",
+      "from_x": 10950,
+      "from_y": 10950,
+      "to": "d8_hub",
+      "to_x": 10850,
+      "to_y": 11650
     }
   ]
 }

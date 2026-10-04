@@ -44,7 +44,7 @@ const { buyStock, sellItem } = require('./trade');
 const { respawnDueCreatures, enqueueDeficit, CREATURE_SWEEP_MS } = require('../services/creatureRespawn');
 const { consumeAmmo, ammoCount } = require('./ammo');
 const { PICKUP_RADIUS } = require('./groundItems');
-const { WorldBossManager, dropLegendaryItemForPlayer } = require('./worldBoss');
+const { WorldBossManager, dropLegendaryItemForPlayer, resolveArena } = require('./worldBoss');
 
 // SOMET-473 -- the Druid's charm (spec 8.2, contract §6.5).
 //
@@ -912,7 +912,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
     const deadCreature = entry.world && entry.world.creatures && entry.world.creatures.get
       ? entry.world.creatures.get(id)
       : null;
-    if (deadCreature && (deadCreature.isWorldBoss || id === worldBossManager.bossCreatureId)) {
+    if (id === worldBossManager.bossCreatureId || (deadCreature && deadCreature.isWorldBoss)) {
       worldBossManager.onCreatureDeath(entry, deadCreature, killerUserId, {
         pool,
         broadcastFn: (frame) => {
@@ -2735,14 +2735,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
         if (msg.bossIndex !== undefined && WORLD_BOSS_CATALOG[msg.bossIndex]) {
           worldBossManager.currentBoss = { ...WORLD_BOSS_CATALOG[msg.bossIndex] };
         }
-        if (ws.worldId) {
-          worldBossManager.activeWorldId = ws.worldId;
-          const entry = worlds.get(ws.worldId);
-          worldBossManager.activeWorldName = (entry && entry.row && entry.row.name) || 'The Wilds';
-          if (entry && entry.waypoints && entry.waypoints.size > 0) {
-            const firstWp = [...entry.waypoints.values()][0];
-            worldBossManager.nearestWaypointId = firstWp ? firstWp.id : null;
-          }
+        const currentEntry = ws.worldId ? worlds.get(ws.worldId) : null;
+        const currentKey = (currentEntry && currentEntry.row && (currentEntry.row.key || currentEntry.row.canonical_id)) || '';
+        const currentName = (currentEntry && currentEntry.row && currentEntry.row.name) || '';
+        if (currentEntry && resolveArena(currentKey, currentName)) {
+          worldBossManager._planNextBoss(worlds, ws.worldId);
+        } else {
+          worldBossManager._planNextBoss(worlds);
         }
         worldBossManager._spawnBoss(now, worlds, broadcastAll);
       } else if (action === 'warning') {
@@ -2821,8 +2820,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
         worldBossManager.warningSent = false;
       } else if (action === 'teleport_to_boss') {
         if (worldBossManager.state !== 'active' || !worldBossManager.activeWorldId) {
-          send(ws, { type: 'error', message: 'No active world boss to teleport to!' });
-          return;
+          worldBossManager._planNextBoss(worlds);
+          worldBossManager._spawnBoss(now, worlds, broadcastAll);
         }
         const targetWorldId = worldBossManager.activeWorldId;
         const targetEntry = worlds.get(targetWorldId);
@@ -2832,18 +2831,48 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const liveBoss = targetEntry && targetEntry.world && targetEntry.world.creatures && targetEntry.world.creatures.get
           ? targetEntry.world.creatures.get(worldBossManager.bossCreatureId)
           : null;
-        const targetX = liveBoss ? Math.round(liveBoss.x + 80) : (boss && boss.spawnX != null ? Math.round(boss.spawnX + 80) : 400);
-        const targetY = liveBoss ? Math.round(liveBoss.y + 80) : (boss && boss.spawnY != null ? Math.round(boss.spawnY + 80) : 400);
+        const targetX = liveBoss ? Math.round(liveBoss.x + 80) : (worldBossManager.targetSpawnX != null ? Math.round(worldBossManager.targetSpawnX + 80) : 400);
+        const targetY = liveBoss ? Math.round(liveBoss.y + 80) : (worldBossManager.targetSpawnY != null ? Math.round(worldBossManager.targetSpawnY + 80) : 400);
 
-        if (ws.worldId === targetWorldId && p) {
-          p.x = targetX;
-          p.y = targetY;
-          send(ws, {
-            type: 'announcement',
-            kind: 'boss_teleport',
-            text: `Teleported to ${boss?.name || 'World Boss'}!`,
-          });
-        } else {
+        pendingArrivals.set(ws.characterId, {
+          worldId: targetWorldId,
+          x: targetX,
+          y: targetY,
+          hp: p ? p.hp : undefined,
+          mana: p ? p.mana : undefined,
+          stamina: p ? p.stamina : undefined,
+        });
+        send(ws, {
+          type: 'transition',
+          toWorldId: targetWorldId,
+          arriveX: targetX,
+          arriveY: targetY,
+        });
+        send(ws, {
+          type: 'announcement',
+          kind: 'boss_teleport',
+          text: `Teleported to ${boss?.name || 'World Boss'} at ${worldBossManager.activeArenaName} (${worldBossManager.activeWorldName})!`,
+        });
+        recordVisit(pool, ws.characterId, targetWorldId).catch(() => {});
+      } else if (action === 'teleport_to_world') {
+        const targetWorldId = msg.worldId;
+        if (targetWorldId) {
+          const targetEntry = worlds.get(targetWorldId);
+          const currentEntry = worlds.get(ws.worldId);
+          const p = currentEntry && currentEntry.world ? currentEntry.world.getPlayer(ws.userId) : null;
+
+          let targetX = Number(msg.x);
+          let targetY = Number(msg.y);
+          if (isNaN(targetX) || isNaN(targetY) || targetX <= 0 || targetY <= 0) {
+            if (targetEntry && targetEntry.row && targetEntry.row.width && targetEntry.row.height) {
+              targetX = Math.round((targetEntry.row.width * 100) / 2);
+              targetY = Math.round((targetEntry.row.height * 100) / 2);
+            } else {
+              targetX = 400;
+              targetY = 400;
+            }
+          }
+
           pendingArrivals.set(ws.characterId, {
             worldId: targetWorldId,
             x: targetX,
@@ -2857,6 +2886,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
             toWorldId: targetWorldId,
             arriveX: targetX,
             arriveY: targetY,
+          });
+          const wName = (targetEntry && targetEntry.row && targetEntry.row.name) || msg.worldName || 'New Location';
+          send(ws, {
+            type: 'announcement',
+            kind: 'location_teleport',
+            text: `Teleported to ${wName}!`,
           });
           recordVisit(pool, ws.characterId, targetWorldId).catch(() => {});
         }

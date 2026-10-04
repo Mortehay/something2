@@ -262,32 +262,38 @@ export function formatItemTooltipLines(item, type) {
   if (!type) return [];
   const lines = [];
 
-  // 1. Name
+  // 1. Name & Quantity
   const name = type.name || "Unknown Item";
+  const qty = item && item.quantity > 1 ? ` (x${item.quantity})` : "";
   lines.push({
-    text: name,
+    text: `${name}${qty}`,
     color: rarityBorderColor(item ? item.rarity : null, "#e5e7eb"),
     font: "bold 13px monospace",
   });
 
-  // 2. Category / Subtype / Slot
+  // 2. Category / Subtype / Slot / Tier / Item Level
   let catText = "";
+  const ilvl = item && item.item_level ? item.item_level : type.item_level;
+  const ilvlStr = ilvl ? ` (iLvl ${ilvl})` : "";
+
   if (type.category === "weapon") {
-    catText = `${type.two_handed ? "Two-Handed " : ""}${type.kind === "projectile" ? "Ranged" : "Melee"} Weapon · Main Hand${type.tier ? " (Tier " + type.tier + ")" : ""}`;
+    catText = `${type.two_handed ? "Two-Handed " : ""}${type.kind === "projectile" ? "Ranged" : "Melee"} Weapon · Main Hand${type.tier ? " (Tier " + type.tier + ")" : ""}${ilvlStr}`;
   } else if (type.category === "armor") {
-    catText = `${(type.slot ? type.slot.replace("_", " ") : "Armor").toUpperCase()}${type.tier ? " (Tier " + type.tier + ")" : ""}`;
+    catText = `${(type.slot ? type.slot.replace("_", " ") : "Armor").toUpperCase()}${type.tier ? " (Tier " + type.tier + ")" : ""}${ilvlStr}`;
   } else if (type.category === "stone") {
-    catText = `Magic Stone${type.stone_mode ? " (" + type.stone_mode + ")" : ""}`;
+    catText = `Magic Stone${type.stone_mode ? " (" + type.stone_mode + ")" : ""}${ilvlStr}`;
   } else if (type.category === "consumable") {
-    catText = "Consumable";
+    catText = `Consumable${ilvlStr}`;
   } else if (type.category === "ammo") {
-    catText = "Ammunition";
+    catText = `Ammunition${ilvlStr}`;
+  } else {
+    catText = `${(type.category || "Item").toUpperCase()}${ilvlStr}`;
   }
   if (catText) {
     lines.push({ text: catText, color: "#9ca3af", font: "11px monospace" });
   }
 
-  // 3. Core Combat / Defense Stats
+  // 3. Core Combat / Defense / Consumable Stats
   if (type.category === "weapon") {
     const dps = (type.damage > 0 && type.cooldown > 0) ? ` (${(type.damage / type.cooldown).toFixed(1)} DPS)` : "";
     lines.push({
@@ -300,6 +306,7 @@ export function formatItemTooltipLines(item, type) {
     }
     if (type.range) lines.push({ text: `Range: ${type.range}`, color: "#9ca3af", font: "11px monospace" });
     if (type.reach) lines.push({ text: `Reach: ${type.reach}`, color: "#9ca3af", font: "11px monospace" });
+    if (type.arc_width) lines.push({ text: `Attack Arc: ${type.arc_width}°`, color: "#9ca3af", font: "11px monospace" });
     if (type.stamina_cost > 0) lines.push({ text: `Stamina Cost: ${type.stamina_cost}`, color: "#fbbf24", font: "11px monospace" });
     if (type.mana_cost > 0) lines.push({ text: `Mana Cost: ${type.mana_cost}`, color: "#60a5fa", font: "11px monospace" });
     if (type.bonus_damage > 0) lines.push({ text: `+${type.bonus_damage} Bonus Damage`, color: "#f87171", font: "11px monospace" });
@@ -319,16 +326,72 @@ export function formatItemTooltipLines(item, type) {
         }
       }
     }
+  } else if (type.category === "consumable") {
+    const healHp = type.heal_hp || type.hp_heal || type.heal_amount || type.restore_hp;
+    if (healHp) lines.push({ text: `❤️ Restores +${healHp} Health`, color: "#f87171", font: "11px monospace" });
+    const healMana = type.heal_mana || type.mana_heal || type.restore_mana;
+    if (healMana) lines.push({ text: `💧 Restores +${healMana} Mana`, color: "#60a5fa", font: "11px monospace" });
+    const healStamina = type.heal_stamina || type.stamina_heal || type.restore_stamina;
+    if (healStamina) lines.push({ text: `⚡ Restores +${healStamina} Stamina`, color: "#fbbf24", font: "11px monospace" });
+    const buff = type.buff_type || type.buff || type.buff_name;
+    if (buff) {
+      const dur = type.buff_duration || type.duration;
+      lines.push({ text: `✨ Grants ${buff}${dur ? ` (${dur}s)` : ""}`, color: "#c084fc", font: "11px monospace" });
+    }
+    if (type.effect) {
+      lines.push({ text: `✨ Effect: ${type.effect}`, color: "#38bdf8", font: "11px monospace" });
+    }
+  } else if (type.category === "stone") {
+    if (type.stone_mode) lines.push({ text: `Active Mode: ${type.stone_mode}`, color: "#a855f7", font: "11px monospace" });
+    if (type.skill_name || type.skill) lines.push({ text: `Grants Skill: ${type.skill_name || type.skill}`, color: "#38bdf8", font: "11px monospace" });
+    if (type.effect) lines.push({ text: `Effect: ${type.effect}`, color: "#4ade80", font: "11px monospace" });
+  } else if (type.category === "ammo") {
+    if (type.damage) lines.push({ text: `+${type.damage} Ammo Damage`, color: "#fbbf24", font: "11px monospace" });
+    if (type.projectile_speed) lines.push({ text: `Speed: ${type.projectile_speed}`, color: "#9ca3af", font: "11px monospace" });
   }
 
-  // 4. Inherent Stat Bonus (e.g. +2 to Charisma)
-  if (type.stat_bonus_stat && type.stat_bonus_amount != null) {
-    const sName = STAT_NAMES[type.stat_bonus_stat] || type.stat_bonus_stat;
+  // 4. Inherent & Direct Stat Bonuses (e.g. +30 to Strength, +2 to Charisma)
+  let statBonusStat = type.stat_bonus_stat || (item && item.stat_bonus_stat);
+  let statBonusAmt = type.stat_bonus_amount != null ? type.stat_bonus_amount : (item && item.stat_bonus_amount != null ? item.stat_bonus_amount : null);
+
+  // If not explicitly authored in DB column, derive inherent primary stat bonus for tiered equipment
+  if (!statBonusStat && type.tier) {
+    for (const s of ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"]) {
+      if (type[`req_${s}`] > 0) {
+        statBonusStat = s;
+        // Scales cleanly with tier: Tier 1: +3, Tier 2: +6 ... Tier 10: +30
+        statBonusAmt = Math.round(type.tier * 3);
+        break;
+      }
+    }
+  }
+
+  if (statBonusStat && statBonusAmt != null && statBonusAmt > 0) {
+    const sName = STAT_NAMES[statBonusStat] || statBonusStat;
     lines.push({
-      text: `+${type.stat_bonus_amount} to ${sName}`,
+      text: `+${statBonusAmt} to ${sName}`,
       color: "#4ade80",
       font: "bold 11px monospace",
     });
+  }
+  for (const s of ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"]) {
+    const bAmt = type[`bonus_${s}`] || (item && item[`bonus_${s}`]);
+    if (bAmt && bAmt > 0 && s !== statBonusStat) {
+      lines.push({
+        text: `+${bAmt} to ${STAT_NAMES[s] || s}`,
+        color: "#4ade80",
+        font: "bold 11px monospace",
+      });
+    }
+  }
+  if (type.bonus_hp && type.bonus_hp > 0) {
+    lines.push({ text: `+${type.bonus_hp} Maximum Life`, color: "#f87171", font: "11px monospace" });
+  }
+  if (type.bonus_mana && type.bonus_mana > 0) {
+    lines.push({ text: `+${type.bonus_mana} Maximum Mana`, color: "#60a5fa", font: "11px monospace" });
+  }
+  if (type.bonus_speed && type.bonus_speed > 0) {
+    lines.push({ text: `+${type.bonus_speed}% Movement Speed`, color: "#38bdf8", font: "11px monospace" });
   }
 
   // 5. Rolled Affixes
@@ -342,7 +405,17 @@ export function formatItemTooltipLines(item, type) {
     }
   }
 
-  // 6. Requirements
+  // 6. Description / Lore / Instructions
+  const desc = type.description || (item && item.description);
+  if (desc && typeof desc === "string" && desc.trim().length > 0) {
+    lines.push({
+      text: desc.length > 50 ? `${desc.slice(0, 48)}...` : desc,
+      color: "#94a3b8",
+      font: "italic 10px monospace",
+    });
+  }
+
+  // 7. Requirements
   const reqs = [];
   if (type.req_level && type.req_level > 1) {
     reqs.push(`Level ${type.req_level}`);
@@ -361,7 +434,12 @@ export function formatItemTooltipLines(item, type) {
     });
   }
 
-  // 7. Soulbound
+  // 8. Value & Soulbound
+  const val = type.value != null ? type.value : (item && item.value != null ? item.value : null);
+  if (val != null && val > 0) {
+    lines.push({ text: `Value: ${val} Gold`, color: "#fde68a", font: "10px monospace" });
+  }
+
   if (item && item.soulbound) {
     lines.push({ text: "Soulbound", color: "#a78bfa", font: "10px monospace" });
   }

@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import styled from 'styled-components';
+import { useWorlds } from './useWorlds.js';
 
 const FloatButton = styled.button`
   position: absolute;
@@ -45,8 +46,8 @@ const ModalCard = styled.div`
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 16px;
   padding: 24px;
-  width: min(520px, 92vw);
-  max-height: 85vh;
+  width: min(560px, 94vw);
+  max-height: 88vh;
   overflow-y: auto;
   color: #e2e8f0;
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.8);
@@ -147,9 +148,78 @@ const ActionBtn = styled.button`
   }
 `;
 
+const TeleportPanel = styled.div`
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+`;
+
+const SelectBox = styled.select`
+  width: 100%;
+  padding: 8px 12px;
+  background: #0f172a;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  color: #f8fafc;
+  font-size: 0.85rem;
+  outline: none;
+
+  &:focus {
+    border-color: #38bdf8;
+  }
+`;
+
+const SearchInput = styled.input`
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  background: #0f172a;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  color: #f8fafc;
+  font-size: 0.84rem;
+  outline: none;
+
+  &:focus {
+    border-color: #38bdf8;
+  }
+`;
+
+const ChipContainer = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+`;
+
+const QuickChip = styled.button`
+  padding: 5px 10px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  color: #cbd5e1;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+
+  &:hover {
+    background: rgba(56, 189, 248, 0.2);
+    border-color: #38bdf8;
+    color: #ffffff;
+  }
+`;
+
 export default function WorldBossTestPanel({ gameRef }) {
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState(null);
+  const [selectedWorldId, setSelectedWorldId] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const { worlds = [] } = useWorlds();
 
   useEffect(() => {
     const g = gameRef.current;
@@ -173,6 +243,32 @@ export default function WorldBossTestPanel({ gameRef }) {
     }
   };
 
+  const filteredWorlds = useMemo(() => {
+    if (!worlds || !Array.isArray(worlds)) return [];
+    if (!searchTerm.trim()) return worlds;
+    const q = searchTerm.toLowerCase();
+    return worlds.filter((w) => {
+      const name = (w.name || '').toLowerCase();
+      const id = String(w.id || '').toLowerCase();
+      const key = (w.key || w.canonical_id || '').toLowerCase();
+      return name.includes(q) || id.includes(q) || key.includes(q);
+    });
+  }, [worlds, searchTerm]);
+
+  useEffect(() => {
+    if (!selectedWorldId && worlds && worlds.length > 0) {
+      setSelectedWorldId(worlds[0].id);
+    }
+  }, [worlds, selectedWorldId]);
+
+  const handleTeleportToWorld = (targetId, targetName) => {
+    if (!targetId) return;
+    sendAction('teleport_to_world', {
+      worldId: targetId,
+      worldName: targetName,
+    });
+  };
+
   return (
     <>
       <FloatButton onClick={() => setOpen(true)} title="Open World Boss Testing Panel">
@@ -184,8 +280,8 @@ export default function WorldBossTestPanel({ gameRef }) {
         <ModalBackdrop onClick={() => setOpen(false)}>
           <ModalCard onClick={(e) => e.stopPropagation()}>
             <CloseButton onClick={() => setOpen(false)}>×</CloseButton>
-            <h2>👹 World Boss Test Panel</h2>
-            <p className="sub">Debug & test world bosses, warnings, damage leaderboards, loot and buffs.</p>
+            <h2>👹 World Boss & Teleport Panel</h2>
+            <p className="sub">Debug world bosses, fast-teleport to any dungeon or world, adjust timers & test loot.</p>
 
             <StatusBox>
               <div className="item">
@@ -219,6 +315,63 @@ export default function WorldBossTestPanel({ gameRef }) {
                 </>
               )}
             </StatusBox>
+
+            <SectionTitle>🌌 Teleport to Any Location / Dungeon</SectionTitle>
+            <TeleportPanel>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <SearchInput
+                  placeholder="🔍 Filter location / dungeon name..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+              </div>
+
+              <SelectBox
+                value={selectedWorldId}
+                onChange={(e) => setSelectedWorldId(e.target.value)}
+              >
+                {filteredWorlds.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name} {w.canonical_id ? `(${w.canonical_id})` : ''}
+                  </option>
+                ))}
+              </SelectBox>
+
+              <ActionBtn
+                $bg="linear-gradient(135deg, #0284c7 0%, #0369a1 100%)"
+                $border="rgba(56, 189, 248, 0.6)"
+                $color="#ffffff"
+                style={{ fontWeight: 800, padding: '10px 16px' }}
+                onClick={() => {
+                  const target = worlds.find((w) => String(w.id) === String(selectedWorldId));
+                  handleTeleportToWorld(selectedWorldId, target?.name);
+                }}
+              >
+                ✨ Teleport to Selected Location
+              </ActionBtn>
+
+              <div style={{ marginTop: 4 }}>
+                <span style={{ fontSize: '0.72rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 700, display: 'block', marginBottom: 6 }}>
+                  ⚡ Quick Destinations:
+                </span>
+                <ChipContainer>
+                  {worlds
+                    .filter((w) => {
+                      const n = (w.name || '').toLowerCase();
+                      return n.includes('vale') || n.includes('wilds') || n.includes('arena') || n.includes('descent') || n.includes('mire') || n.includes('chasm');
+                    })
+                    .slice(0, 10)
+                    .map((w) => (
+                      <QuickChip
+                        key={w.id}
+                        onClick={() => handleTeleportToWorld(w.id, w.name)}
+                      >
+                        📍 {w.name}
+                      </QuickChip>
+                    ))}
+                </ChipContainer>
+              </div>
+            </TeleportPanel>
 
             <SectionTitle>⚡ Instant Boss Spawns</SectionTitle>
             <ButtonGrid>
@@ -326,3 +479,4 @@ export default function WorldBossTestPanel({ gameRef }) {
     </>
   );
 }
+

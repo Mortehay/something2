@@ -11,9 +11,9 @@
 
 const { rollItemInstance } = require('./affixes.js');
 
-const BOSS_INTERVAL_MS = 10 * 60 * 1000;  // 10 minutes between boss spawns
+const BOSS_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes between boss spawns
 const BOSS_WARNING_MS = 2 * 60 * 1000;    // 2 minutes warning before spawn
-const BOSS_LIFETIME_MS = 8 * 60 * 1000;   // 8 minutes max lifetime before despawning
+const BOSS_LIFETIME_MS = 20 * 60 * 1000;  // 20 minutes max lifetime before despawning
 const VICTORS_BOON_DURATION_MS = 15 * 60 * 1000; // 15 minutes buff duration
 
 const WORLD_BOSS_CATALOG = [
@@ -150,14 +150,38 @@ class WorldBossManager {
   }
 
   // Choose a boss, target world, and dedicated boss arena
-  _planNextBoss(worlds) {
+  _planNextBoss(worlds, preferredWorldId = null) {
     const bossIdx = Math.floor(this.rng() * WORLD_BOSS_CATALOG.length);
     this.currentBoss = { ...WORLD_BOSS_CATALOG[bossIdx] };
     
     // Pick from loaded worlds if any exist
     const worldEntries = [...worlds.entries()];
     if (worldEntries.length > 0) {
-      const [wId, entry] = worldEntries[Math.floor(this.rng() * worldEntries.length)];
+      const arenaWorlds = worldEntries.filter(([wId, entry]) => {
+        const wName = (entry.row && entry.row.name) || '';
+        const wKey = (entry.row && (entry.row.key || entry.row.canonical_id)) || '';
+        return resolveArena(wKey, wName) !== null;
+      });
+
+      let chosen = null;
+      if (preferredWorldId && worlds.has(preferredWorldId)) {
+        const prefEntry = worlds.get(preferredWorldId);
+        const prefKey = (prefEntry.row && (prefEntry.row.key || prefEntry.row.canonical_id)) || '';
+        const prefName = (prefEntry.row && prefEntry.row.name) || '';
+        if (resolveArena(prefKey, prefName)) {
+          chosen = [preferredWorldId, prefEntry];
+        }
+      }
+
+      if (!chosen) {
+        if (arenaWorlds.length > 0) {
+          chosen = arenaWorlds[Math.floor(this.rng() * arenaWorlds.length)];
+        } else {
+          chosen = worldEntries[Math.floor(this.rng() * worldEntries.length)];
+        }
+      }
+
+      const [wId, entry] = chosen;
       this.activeWorldId = wId;
       const wName = (entry.row && entry.row.name) || 'The Wilds';
       const wKey = (entry.row && (entry.row.key || entry.row.canonical_id)) || '';
@@ -308,6 +332,10 @@ class WorldBossManager {
                 status: this.getStatus(),
               });
             }
+          } else if (!c && this.currentBoss) {
+            // Boss creature was killed or removed from the world
+            this.onCreatureDeath(entry, null, null, { pool: this.pool, broadcastFn })
+              .catch((err) => console.error('Error in world boss fallback death processing:', err));
           }
         }
       }
@@ -399,8 +427,15 @@ class WorldBossManager {
       }
     }
 
+    const oldBoss = this.currentBoss;
+    this.state = 'idle';
+    this.currentBoss = null;
+    this.bossCreatureId = null;
+    this.nextSpawnTime = Date.now() + this.bossIntervalMs;
+    this.warningSent = false;
+
     if (broadcastFn && reason === 'timeout') {
-      const despawnMsg = `[World Boss] ${this.currentBoss.name} was not defeated in time and retreated into the shadows.`;
+      const despawnMsg = `[World Boss] ${oldBoss?.name || 'World Boss'} was not defeated in time and retreated into the shadows.`;
       broadcastFn({
         type: 'announcement',
         kind: 'world_boss_despawn',
@@ -408,23 +443,29 @@ class WorldBossManager {
       });
     }
 
-    this.state = 'idle';
-    this.currentBoss = null;
-    this.bossCreatureId = null;
-    this.nextSpawnTime = Date.now() + this.bossIntervalMs;
-    this.warningSent = false;
+    if (broadcastFn) {
+      broadcastFn({
+        type: 'world_boss_status',
+        status: this.getStatus(),
+      });
+    }
   }
 
   // Called when any creature dies in the world
   async onCreatureDeath(entry, creature, killerUserId, { pool, broadcastFn, dropLegendaryFn, broadcastChestsFn, broadcastItemsFn } = {}) {
-    if (!creature || (!creature.isWorldBoss && creature.id !== this.bossCreatureId)) {
+    if (this.state !== 'active' && !this.currentBoss) {
+      return null;
+    }
+    if (creature && !creature.isWorldBoss && creature.id !== this.bossCreatureId) {
       return null;
     }
 
     const dbPool = pool || this.pool;
     const now = Date.now();
     const boss = this.currentBoss || creature;
-    const damageMap = creature._playerDamage || (this.currentBoss && this.currentBoss._playerDamage) || new Map();
+    if (!boss) return null;
+
+    const damageMap = (creature && creature._playerDamage) || (this.currentBoss && this.currentBoss._playerDamage) || new Map();
 
     // Sort contributors descending by damage
     const contributors = [];
@@ -454,8 +495,8 @@ class WorldBossManager {
     }
 
     // 2. Grant guaranteed legendary ('foxy') item to Top 3 damagers
-    const cx = Math.round(creature.x || 400);
-    const cy = Math.round(creature.y || 400);
+    const cx = Math.round((creature && creature.x) || (boss && boss.spawnX) || this.targetSpawnX || 400);
+    const cy = Math.round((creature && creature.y) || (boss && boss.spawnY) || this.targetSpawnY || 400);
 
     const recipients = top3.length > 0 ? top3 : [{ userId: String(killerUserId || '1'), damage: 1000 }];
     let itemOffset = -40;
@@ -526,7 +567,14 @@ class WorldBossManager {
     if (broadcastChestsFn) broadcastChestsFn(entry);
     if (broadcastItemsFn) broadcastItemsFn(entry);
 
-    // 5. Broadcast victory announcement in English
+    // Reset cycle to idle before broadcasting final status
+    this.state = 'idle';
+    this.currentBoss = null;
+    this.bossCreatureId = null;
+    this.nextSpawnTime = now + this.bossIntervalMs;
+    this.warningSent = false;
+
+    // 5. Broadcast victory announcement and idle status
     if (broadcastFn) {
       const victoryMsg = `[World Boss Defeated] ${boss.name || 'The World Boss'} has been slain! Top contributors receive legendary loot and the Victor's Boon! A Boss Victory Chest has appeared!`;
       broadcastFn({
@@ -541,14 +589,6 @@ class WorldBossManager {
         status: this.getStatus(),
       });
     }
-
-
-    // Reset cycle
-    this.state = 'idle';
-    this.currentBoss = null;
-    this.bossCreatureId = null;
-    this.nextSpawnTime = now + this.bossIntervalMs;
-    this.warningSent = false;
 
     return {
       slain: true,
@@ -605,6 +645,7 @@ async function dropLegendaryItemForPlayer(pool, entry, userId, x, y, level = 100
 module.exports = {
   WorldBossManager,
   dropLegendaryItemForPlayer,
+  resolveArena,
   WORLD_BOSS_CATALOG,
   BOSS_ARENAS,
   BOSS_INTERVAL_MS,

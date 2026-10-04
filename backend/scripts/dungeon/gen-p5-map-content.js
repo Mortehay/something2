@@ -91,6 +91,18 @@ function portalPlacement(world) {
   return { x: portalCenterPx(world.width), y: portalCenterPx(world.width) };
 }
 
+function returnPortalPlacement(world) {
+  if (world && world.village) {
+    const v = world.village;
+    const midCol = v.min_col + Math.floor(v.width / 2);
+    const row = v.min_row + v.height + 4;
+    const col = midCol - 3;
+    return { x: col * 100 + 50, y: row * 100 + 50 };
+  }
+  const c = Math.floor(world.width / 2);
+  return { x: (c - 3) * 100 + 50, y: (c - 3) * 100 + 50 };
+}
+
 // A "{Line} {Rung}" name, exactly gen-p4-bestiary.js's convention -- every
 // one of the 288 P4 creatures is named this way.
 function creatureName(line, rung) { return `${line} ${rung}`; }
@@ -451,6 +463,13 @@ function generateSpec() {
       entryWorld.is_entry = true;
       d1EntryKey = built.entryKey;
     }
+    // Return portal from end of dungeon back to beginning of dungeon
+    portalLinks.push({
+      kind: 'portal',
+      from: built.exitKey, from_x: null, from_y: null,
+      to: built.entryKey, to_x: null, to_y: null,
+      is_return: true,
+    });
     prevExit = built.exitKey;
   });
 
@@ -539,12 +558,22 @@ function generateSpec() {
   for (const l of portalLinks) {
     const from = sizedByKey.get(l.from);
     const to = sizedByKey.get(l.to);
-    const departure = portalPlacement(from);
-    const arrival = portalPlacement(to);
-    l.from_x = departure.x;
-    l.from_y = departure.y;
-    l.to_x = arrival.x;
-    l.to_y = arrival.y;
+    if (l.is_return) {
+      const departure = returnPortalPlacement(from);
+      const arrival = returnPortalPlacement(to);
+      l.from_x = departure.x;
+      l.from_y = departure.y;
+      l.to_x = arrival.x;
+      l.to_y = arrival.y;
+      delete l.is_return;
+    } else {
+      const departure = portalPlacement(from);
+      const arrival = portalPlacement(to);
+      l.from_x = departure.x;
+      l.from_y = departure.y;
+      l.to_x = arrival.x;
+      l.to_y = arrival.y;
+    }
   }
 
   // Minor #6 (SOMET-251 final review): SEED_OVERRIDES[globalKey] ?? default

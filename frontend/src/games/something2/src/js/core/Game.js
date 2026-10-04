@@ -3293,12 +3293,19 @@ export class Game {
                        (this.worldBossStatus.bossName && (c.name === this.worldBossStatus.bossName || c.type === this.worldBossStatus.bossName))
             );
             if (bossCreature) {
+                const curHp = bossCreature.hp !== undefined ? bossCreature.hp : this.worldBossStatus.currentHp;
+                if (curHp <= 0) {
+                    return null;
+                }
                 return {
                     ...this.worldBossStatus,
-                    currentHp: bossCreature.hp !== undefined ? bossCreature.hp : this.worldBossStatus.currentHp,
+                    currentHp: curHp,
                     maxHp: bossCreature.maxHp || this.worldBossStatus.maxHp,
                 };
             }
+        }
+        if (this.worldBossStatus.state === 'active' && this.worldBossStatus.currentHp <= 0) {
+            return null;
         }
         return this.worldBossStatus;
     }
