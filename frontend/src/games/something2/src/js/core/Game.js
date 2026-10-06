@@ -1948,7 +1948,9 @@ export class Game {
 
             const statusMap = new Map();
             for (const cq of charQuestsList) {
-                statusMap.set(cq.quest_id || cq.questId, cq);
+                const idKey = cq.id || cq.quest_id || cq.questId || cq.key;
+                if (idKey != null) statusMap.set(idKey, cq);
+                if (cq.key) statusMap.set(cq.key, cq);
             }
 
             const rawQuests = Array.isArray(quests)
@@ -1956,10 +1958,10 @@ export class Game {
                 : (quests && Array.isArray(quests.quests) ? quests.quests : []);
 
             this.allQuests = rawQuests.map((q) => {
-                const cq = statusMap.get(q.id);
+                const cq = statusMap.get(q.id) || statusMap.get(q.key);
                 return {
                     ...q,
-                    status: cq ? cq.status : (q.status || 'available'),
+                    status: (cq && cq.status) ? cq.status : (q.status || 'available'),
                     progress: cq ? cq.progress : (q.progress || {}),
                 };
             });
@@ -2913,7 +2915,12 @@ export class Game {
                         return;
                     }
                     if (hit.kind === 'quest_accept') {
-                        startQuest(this.characterId, hit.questId).then(() => {
+                        const targetId = hit.questId || hit.questKey;
+                        startQuest(this.characterId, targetId).then(() => {
+                            if (this.allQuests) {
+                                const q = this.allQuests.find(item => item.id === hit.questId || item.key === hit.questKey);
+                                if (q) q.status = 'active';
+                            }
                             this.openQuestLog();
                             if (this.showToast) this.showToast(`⚔️ Quest started!`);
                         }).catch((err) => {
@@ -2922,7 +2929,12 @@ export class Game {
                         return;
                     }
                     if (hit.kind === 'quest_complete') {
-                        completeQuest(this.characterId, hit.questId).then((res) => {
+                        const targetId = hit.questId || hit.questKey;
+                        completeQuest(this.characterId, targetId).then((res) => {
+                            if (this.allQuests) {
+                                const q = this.allQuests.find(item => item.id === hit.questId || item.key === hit.questKey);
+                                if (q) q.status = 'completed';
+                            }
                             this.openQuestLog();
                             if (res && res.rewards) {
                                 if (res.rewards.gold && this.gold != null) this.gold += res.rewards.gold;
@@ -2936,7 +2948,12 @@ export class Game {
                     }
                     if (hit.kind === 'quest_choice_city' || hit.kind === 'quest_choice_surge') {
                         const choice = hit.kind === 'quest_choice_city' ? 'city_restoration' : 'elemental_surge';
-                        completeQuest(this.characterId, hit.questId, choice).then(() => {
+                        const targetId = hit.questId || hit.questKey;
+                        completeQuest(this.characterId, targetId, choice).then(() => {
+                            if (this.allQuests) {
+                                const q = this.allQuests.find(item => item.id === hit.questId || item.key === hit.questKey);
+                                if (q) q.status = 'completed';
+                            }
                             this.legacyChoice = choice;
                             if (this.progression) this.progression.legacyChoice = choice;
                             this.openQuestLog();
