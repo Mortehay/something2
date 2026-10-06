@@ -31,6 +31,7 @@ test('fetchVillages maps snake_case columns to camelCase', async () => {
     bankX: 1050, bankY: 850,
     gemMerchantX: null, gemMerchantY: null,
     skillMerchantX: 1750, skillMerchantY: 650,
+    questGiverX: 350, questGiverY: 650,
     // SOMET-582: no *_art column in this fixture's row, so all four default
     // to null -- this exhaustive comparison is exactly where a silently
     // added/dropped join column would be caught.
@@ -120,5 +121,27 @@ test('the skill merchant sits inside the skill house and never stacks on bank or
     const sCol = Math.floor(skill.x / 100);
     assert.ok(sRow >= house.minRow + 1 && sRow <= house.minRow + house.height - 2, 'skill inside house row');
     assert.ok(sCol >= house.minCol + 1 && sCol <= house.minCol + house.width - 2, 'skill inside house col');
+  }
+});
+
+test('the quest giver sits inside the quest house and never stacks on bank, merchant, or skill merchant', () => {
+  const { villageBankPost, villageMerchantPost, villageSkillMerchantPost, villageQuestGiverPost, villageQuestHouse } = require('../src/services/mapService');
+
+  for (const gateEdge of ['N', 'S', 'E', 'W']) {
+    const v = { minRow: 10, minCol: 10, width: 6, height: 4, gateEdge };
+    const merchant = villageMerchantPost(v);
+    const bank = villageBankPost(v, merchant);
+    const skill = villageSkillMerchantPost(v);
+    const quest = villageQuestGiverPost(v);
+    const house = villageQuestHouse(v);
+
+    assert.notDeepEqual(quest, merchant, `gate ${gateEdge}: quest stacked on merchant`);
+    assert.notDeepEqual(quest, bank, `gate ${gateEdge}: quest stacked on bank`);
+    assert.notDeepEqual(quest, skill, `gate ${gateEdge}: quest stacked on skill`);
+
+    const qRow = Math.floor(quest.y / 100);
+    const qCol = Math.floor(quest.x / 100);
+    assert.ok(qRow >= house.minRow + 1 && qRow <= house.minRow + house.height - 2, 'quest inside house row');
+    assert.ok(qCol >= house.minCol + 1 && qCol <= house.minCol + house.width - 2, 'quest inside house col');
   }
 });

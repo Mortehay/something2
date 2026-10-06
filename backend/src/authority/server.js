@@ -1861,6 +1861,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
               villageId: v.id, x: v.skillMerchantX, y: v.skillMerchantY,
               art: resolvePointArt('skill_merchant', v.skillMerchantArt, entry.pointArtDefaults),
             })),
+          questGivers: (entry.villages || [])
+            .filter((v) => v.questGiverX != null && v.questGiverY != null)
+            .map((v) => ({
+              villageId: v.id, x: v.questGiverX, y: v.questGiverY,
+              name: 'Elder Eldrin',
+              art: 'quest_giver',
+            })),
           // SOMET-297. Built from the Maps loadWorld already holds, plus one
           // per-join read of this character's activations -- no second loader.
           //

@@ -9,6 +9,7 @@ services:
       - "15173:5173"
     volumes:
       - ./frontend:/app
+      - ./backend:/backend:ro
     environment:
       # SOMET-370. The client calls the backend at this ABSOLUTE url (and derives
       # the authority ws url from it), so a remote player needs it to be the

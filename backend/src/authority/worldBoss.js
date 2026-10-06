@@ -231,6 +231,11 @@ class WorldBossManager {
 
   getStatus() {
     const now = Date.now();
+    const hpRatio = (this.currentBoss && this.currentBoss.maxHp > 0)
+      ? (this.currentBoss.currentHp / this.currentBoss.maxHp)
+      : 1;
+    const phaseInfo = this._calculatePhase(hpRatio);
+
     return {
       state: this.state,
       bossName: this.currentBoss ? this.currentBoss.name : null,
@@ -242,8 +247,100 @@ class WorldBossManager {
       timeToSpawnMs: Math.max(0, this.nextSpawnTime - now),
       currentHp: this.currentBoss ? this.currentBoss.currentHp : 0,
       maxHp: this.currentBoss ? this.currentBoss.maxHp : 0,
+      phase: this.currentBoss ? (this.currentBoss.phase || phaseInfo.phase) : 1,
+      phaseName: phaseInfo.name,
+      phaseBonus: phaseInfo.bonus,
+      hpRatio,
       topDamagers: this.getTopDamagers(3),
     };
+  }
+
+  _calculatePhase(hpRatio) {
+    if (hpRatio <= 0.25) return { phase: 4, name: 'Frenzy Overload', bonus: '+50% Damage & Catastrophic Blasts' };
+    if (hpRatio <= 0.50) return { phase: 3, name: 'Elemental Nova', bonus: '+25% Defense & Minion Summons' };
+    if (hpRatio <= 0.75) return { phase: 2, name: 'Enraged Surge', bonus: '+20% Speed & Shockwave' };
+    return { phase: 1, name: 'Standard', bonus: 'Base Stats' };
+  }
+
+  _checkPhaseTransition(creature, worldEntry, broadcastFn) {
+    if (!this.currentBoss || !creature) return;
+    const hpRatio = Math.max(0, creature.hp) / (creature.maxHp || 1);
+    const phaseInfo = this._calculatePhase(hpRatio);
+    const currentPhase = this.currentBoss.phase || 1;
+
+    if (phaseInfo.phase > currentPhase) {
+      this.currentBoss.phase = phaseInfo.phase;
+      creature.phase = phaseInfo.phase;
+
+      // Apply stat boosts per phase
+      if (phaseInfo.phase === 2) {
+        creature.speed = Math.round((this.currentBoss.speed || 60) * 1.2);
+        creature.damage = Math.round((this.currentBoss.damage || 40) * 1.1);
+      } else if (phaseInfo.phase === 3) {
+        creature.defense = Math.round((this.currentBoss.defense || 25) * 1.25);
+        creature.damage = Math.round((this.currentBoss.damage || 40) * 1.25);
+        this._spawnPhaseMinions(creature, worldEntry);
+      } else if (phaseInfo.phase === 4) {
+        creature.damage = Math.round((this.currentBoss.damage || 40) * 1.5);
+        creature.speed = Math.round((this.currentBoss.speed || 60) * 1.3);
+        this._spawnPhaseMinions(creature, worldEntry);
+      }
+
+      if (broadcastFn) {
+        const phaseMsg = `[World Boss Phase ${phaseInfo.phase}] ${this.currentBoss.name} enters ${phaseInfo.name}! (${phaseInfo.bonus})`;
+        broadcastFn({
+          type: 'announcement',
+          kind: 'world_boss_phase',
+          text: phaseMsg,
+          phase: phaseInfo.phase,
+          phaseName: phaseInfo.name,
+          bossName: this.currentBoss.name,
+        });
+        broadcastFn({
+          type: 'world_boss_status',
+          status: this.getStatus(),
+        });
+      }
+    }
+  }
+
+  _spawnPhaseMinions(creature, worldEntry) {
+    if (!worldEntry || !worldEntry.world || !worldEntry.world.creatures || !worldEntry.world.creatures.addCreatures) return;
+    const minions = [
+      {
+        id: `wb_minion_${Date.now()}_1`,
+        type: `${this.currentBoss.element.toUpperCase()} Elemental Guard`,
+        name: `${this.currentBoss.name}'s Minion`,
+        x: creature.x + 40,
+        y: creature.y + 40,
+        width: 48,
+        height: 48,
+        level: 80,
+        hp: 1500,
+        maxHp: 1500,
+        damage: 25,
+        attackElement: this.currentBoss.element,
+        speed: 70,
+        defense: 15,
+      },
+      {
+        id: `wb_minion_${Date.now()}_2`,
+        type: `${this.currentBoss.element.toUpperCase()} Elemental Guard`,
+        name: `${this.currentBoss.name}'s Minion`,
+        x: creature.x - 40,
+        y: creature.y - 40,
+        width: 48,
+        height: 48,
+        level: 80,
+        hp: 1500,
+        maxHp: 1500,
+        damage: 25,
+        attackElement: this.currentBoss.element,
+        speed: 70,
+        defense: 15,
+      },
+    ];
+    worldEntry.world.creatures.addCreatures(minions);
   }
 
   getTopDamagers(limit = 3) {
@@ -323,6 +420,7 @@ class WorldBossManager {
             if (c._playerDamage) {
               this.currentBoss._playerDamage = c._playerDamage;
             }
+            this._checkPhaseTransition(c, entry, broadcastFn);
             // Auto-broadcast if HP changed or periodically every 1500ms
             if (broadcastFn && (oldHp !== this.currentBoss.currentHp || (now - this._lastBroadcastTime) >= 1500)) {
               this._lastBroadcastHp = this.currentBoss.currentHp;

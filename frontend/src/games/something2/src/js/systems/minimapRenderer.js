@@ -40,6 +40,8 @@ export function drawMinimap(ctx, {
   landmarks, phase,
   // World Boss marker & edge indicator
   worldBoss,
+  // Quest markers (SOMET / Open World)
+  questMarkers = [],
 }) {
   // 1) Terrain -- one blit of the cached window bitmap.
   //
@@ -65,6 +67,21 @@ export function drawMinimap(ctx, {
     const { x, y } = worldTileToView(v.col, v.row, view);
     ctx.fillStyle = '#fbbf24';
     ctx.fillRect(x - 3, y - 3, 6, 6);
+
+    // Quest indicator near village
+    if (Array.isArray(questMarkers) && questMarkers.length > 0) {
+      const q = questMarkers.find(
+        (m) => m.villageKey === v.key || (v.name && m.villageKey && v.name.toLowerCase().includes(m.villageKey.toLowerCase()))
+      );
+      if (q && q.status !== 'completed') {
+        ctx.save();
+        ctx.fillStyle = q.status === 'active' ? '#60a5fa' : '#f59e0b';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(q.status === 'active' ? '?' : '!', x, y - 6);
+        ctx.restore();
+      }
+    }
   }
   for (const d of doorways || []) {
     const { x, y } = worldTileToView(d.col, d.row, view);

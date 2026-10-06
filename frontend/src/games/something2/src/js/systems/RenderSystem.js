@@ -17,6 +17,7 @@ import { layoutInventory, drawInventory } from "./inventoryPanel.js";
 import { layoutPassiveTree, drawPassiveTree } from "./passiveTreePanel.js";
 import { layoutSkillsPanel, drawSkillsPanel } from "./skillsPanel.js";
 import { layoutGemShopPanel, drawGemShopPanel } from "./gemShopPanel.js";
+import { layoutQuestLog, drawQuestLog } from "./questLogPanel.js";
 import { isTransformationSkill, getRequiredForm, resolveSkillDamage, checkGemRequirements, getWeaponRequirementName } from "../core/skillsData.js";
 import {
   blastProgress, blastScreenRadiusX, elementColor, auraRingGeometry,
@@ -293,6 +294,8 @@ export class RenderSystem {
     gemShopPage = 0, gemShopSelectedGemId = null,
     // Skill Trainer / Merchant
     skillMerchants = [],
+    // Dedicated Quest Giver / Elder NPC
+    questGivers = [],
     // SOMET-310. Same join-frame fixed-world-point shape as `merchants`.
     banks = [], bank = null, bankOpen = false, bankView = null,
     // SOMET-372 -- WORLD chests (guarded, lootable), not the account chest
@@ -333,6 +336,8 @@ export class RenderSystem {
     skillHoverSlot = null, playerClass = null, activeForm = null, flashSlot = null,
     skillCooldowns = null, activeBuffs = [], unlockedSkills = null,
     hoveredSkill = null, cursorX = null, cursorY = null, keybinds = null,
+    // Quest Log (hotkey 'J')
+    questLogOpen = false, quests = [], activeQuestKey = null, legacyChoice = null,
   }) {
     // SOMET-584. Set before anything below resolves art, including the
     // landmark body plan a few lines down.
@@ -343,7 +348,7 @@ export class RenderSystem {
     // panel — and, more importantly, must not hit-test the world hidden behind
     // one and let a click pin something the player cannot see.
     const panelOpen = (inventoryOpen && !!inventory) || (shopOpen && !!shop) || (bankOpen && !!bank)
-      || (passiveTreeOpen && !!passiveIndex) || skillsOpen || gemShopOpen;
+      || (passiveTreeOpen && !!passiveIndex) || skillsOpen || gemShopOpen || questLogOpen;
     this.ctx.fillStyle = "#0f3460";
     this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     // Timestamp for this frame; animated tile textures advance off it (unlike
@@ -447,6 +452,9 @@ export class RenderSystem {
     for (const sm of skillMerchants) {
       drawables.push({ kind: "skillMerchant", ref: sm, order: 0, depth: depthKey(sm.x, sm.y) });
     }
+    for (const qg of questGivers) {
+      drawables.push({ kind: "questGiver", ref: qg, order: 0, depth: depthKey(qg.x, qg.y) });
+    }
     // Bank posts are the same kind of fixed world point as merchants, and go
     // through the same depth sort — a chest one tile behind the merchant must
     // draw behind them, which a separate later pass would get wrong.
@@ -477,6 +485,7 @@ export class RenderSystem {
       else if (d.kind === "merchant") this.drawMerchant(d.ref, player);
       else if (d.kind === "gem_merchant") this.drawGemMerchant(d.ref, player);
       else if (d.kind === "skillMerchant") this.drawSkillMerchant(d.ref, player);
+      else if (d.kind === "questGiver") this.drawQuestGiver(d.ref, player);
       else if (d.kind === "bank") this.drawBank(d.ref, player);
       else if (d.kind === "worldchest") this.drawWorldChest(d.ref, player);
       else if (d.kind === "pointart") this.drawPointBody(d.ref.def, d.ref.x, d.ref.y, d.ref.treatment);
@@ -633,6 +642,17 @@ export class RenderSystem {
         hoverX: passiveHoverX, hoverY: passiveHoverY,
         searchText: passiveSearchText, searchFocused: passiveSearchFocused,
       }, this._passiveHitAreas);
+    }
+
+    // Quest Log overlay (hotkey 'J')
+    this._questHitAreas = [];
+    this._questLayout = null;
+    if (questLogOpen) {
+      this._questLayout = this.renderQuestLog(this.ctx, {
+        quests: quests || [],
+        legacyChoice,
+        activeQuestKey,
+      }, this._questHitAreas);
     }
 
     // SOMET-493 — last of all, so the card sits on top of the HUD orbs and the
@@ -2745,6 +2765,84 @@ export class RenderSystem {
     this.ctx.restore();
   }
 
+  // Dedicated Quest Giver / Elder Eldrin NPC in village
+  drawQuestGiver(qg, player = null) {
+    const s = worldToScreen(qg.x, qg.y);
+    const dx = s.x, dy = s.y;
+    const r = 12;
+    this.ctx.save();
+
+    // Radiant amber/gold pulsing aura beneath NPC
+    const pulse = Math.sin(this.nowMs * 0.004) * 0.2 + 0.8;
+    this.ctx.beginPath();
+    this.ctx.ellipse(dx, dy + 2, r * 1.5, r * 0.75, 0, 0, Math.PI * 2);
+    this.ctx.fillStyle = `rgba(234, 179, 8, ${0.25 * pulse})`;
+    this.ctx.fill();
+
+    const drewArt = this._drawPointArtAt(qg.art, qg.x, qg.y, pointStateTreatment("quest_giver", qg));
+    if (!drewArt) {
+      // Golden diamond body
+      this.ctx.fillStyle = "#eab308";
+      this.ctx.strokeStyle = "rgba(0,0,0,0.7)";
+      this.ctx.lineWidth = 2;
+      this.ctx.beginPath();
+      this.ctx.moveTo(dx, dy - r);
+      this.ctx.lineTo(dx + r, dy);
+      this.ctx.lineTo(dx, dy + r);
+      this.ctx.lineTo(dx - r, dy);
+      this.ctx.closePath();
+      this.ctx.fill();
+      this.ctx.stroke();
+
+      // Inner jewel facet
+      this.ctx.fillStyle = "#fef08a";
+      this.ctx.beginPath();
+      this.ctx.moveTo(dx, dy - r * 0.5);
+      this.ctx.lineTo(dx + r * 0.5, dy);
+      this.ctx.lineTo(dx, dy + r * 0.5);
+      this.ctx.lineTo(dx - r * 0.5, dy);
+      this.ctx.closePath();
+      this.ctx.fill();
+    }
+
+    const lift = drewArt ? drewArt : r;
+
+    // Floating animated exclamation mark '!'
+    const bob = Math.sin(this.nowMs * 0.005) * 4;
+    const markY = dy - lift - 16 + bob;
+    this.ctx.font = "bold 16px sans-serif";
+    this.ctx.textAlign = "center";
+    this.ctx.textBaseline = "middle";
+    this.ctx.fillStyle = "#fef08a";
+    this.ctx.strokeStyle = "rgba(0,0,0,0.85)";
+    this.ctx.lineWidth = 3;
+    this.ctx.strokeText("!", dx, markY);
+    this.ctx.fillText("!", dx, markY);
+
+    // Label: "Elder Eldrin" or "Quest Giver"
+    this.ctx.font = "bold 12px sans-serif";
+    this.ctx.textBaseline = "alphabetic";
+    this.ctx.fillStyle = "#fef08a";
+    this.ctx.fillText(qg.name || "Elder Eldrin", dx, dy - lift - 2);
+
+    // Prompt [e] Quests when close
+    if (player) {
+      const pcx = player.x + (player.width || 0) / 2;
+      const pcy = player.y + (player.height || 0) / 2;
+      const d = Math.hypot(qg.x - pcx, qg.y - pcy);
+      if (d <= WORLD_CHEST_PROMPT_R) {
+        this.ctx.font = "bold 11px sans-serif";
+        this.ctx.fillStyle = "#facc15";
+        this.ctx.strokeStyle = "rgba(0,0,0,0.85)";
+        this.ctx.lineWidth = 2;
+        this.ctx.strokeText("[e] Quests", dx, dy + r + 14);
+        this.ctx.fillText("[e] Quests", dx, dy + r + 14);
+      }
+    }
+
+    this.ctx.restore();
+  }
+
   // SOMET-310 — the account chest's world marker, drawn beside the merchant it
   // shares a village with. Same diamond footprint and label placement as
   // drawMerchant above so the two read as a matched pair of village services;
@@ -4049,6 +4147,15 @@ export class RenderSystem {
     const layout = layoutGemShopPanel(state);
     for (const a of layout.hitAreas) hitAreas.push(a);
     drawGemShopPanel(ctx, layout, state, this.gameArt);
+    return layout;
+  }
+
+  renderQuestLog(ctx, state, hitAreas) {
+    const layout = layoutQuestLog(state);
+    if (layout && layout.hitAreas && Array.isArray(hitAreas)) {
+      for (const a of layout.hitAreas) hitAreas.push(a);
+    }
+    drawQuestLog(ctx, layout);
     return layout;
   }
 

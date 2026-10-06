@@ -55,6 +55,7 @@ import { createSkillVisual, updateSkillVisuals, pruneSkillVisuals } from "./skil
 import { API_URL } from "../../../../../config.js";
 import { GameArt } from "../systems/gameArt.js";
 import { fetchGameArt } from "../net/gameArtClient.js";
+import { fetchAllQuests, fetchCharacterQuests, startQuest, completeQuest } from "../net/questsClient.js";
 
 // How long the "out of ammo" HUD flash stays up after the server's `noammo`
 // frame arrives.
@@ -108,6 +109,7 @@ export const DEFAULT_KEYBINDS = {
     character: 'c',
     passiveTree: 'p',
     skills: 'k',
+    questLog: 'j',
     interact: 'e',
     bank: 'b',
     openChest: 'f',
@@ -208,6 +210,12 @@ export class Game {
         this.hotbarFlashUntil = 0;
         this.skillCooldowns = new Map();
 
+        // Quest Log (hotkey 'J') & Open World Storyline
+        this.questLogOpen = false;
+        this.allQuests = [];
+        this.activeQuestKey = null;
+        this.legacyChoice = null;
+
         // Ground items (Slice 3b-2b): render-only store of items on the
         // ground, plus a local mirror of the server-owned auto-loot flag.
         // SOMET-493 moved the toggle itself into the React Settings panel, so
@@ -297,6 +305,7 @@ export class Game {
         this.gemShopPage = 0;
         this.gemShopSelectedGemId = null;
         this.skillMerchants = [];
+        this.questGivers = [];
         // SOMET-297. Empty until a `joined` frame arrives, and reset here on
         // the same line merchants is -- both are per-world join payload.
         this.landmarks = [];
@@ -646,6 +655,7 @@ export class Game {
         this.skillVisuals = [];
         this.merchants = [];
         this.skillMerchants = [];
+        this.questGivers = [];
         // SOMET-297. Empty until a `joined` frame arrives, and reset here on
         // the same line merchants is -- both are per-world join payload.
         this.landmarks = [];
@@ -705,6 +715,7 @@ export class Game {
                     this.merchants = Array.isArray(msg.merchants) ? msg.merchants : [];
                     this.gemMerchants = Array.isArray(msg.gemMerchants) ? msg.gemMerchants : [];
                     this.skillMerchants = Array.isArray(msg.skillMerchants) ? msg.skillMerchants : [];
+                    this.questGivers = Array.isArray(msg.questGivers) ? msg.questGivers : [];
                     this.landmarks = Array.isArray(msg.landmarks) ? msg.landmarks : [];
                     this.doorways = Array.isArray(msg.doorways) ? msg.doorways : [];
                     this.banks = Array.isArray(msg.banks) ? msg.banks : [];
@@ -966,6 +977,20 @@ export class Game {
             },
             creatures: (this.creatures ? this.creatures.all() : []).map((c) => ({ x: c.x, y: c.y, color: c.color })),
             worldBoss: this.worldBossStatus || null,
+            questGivers: (this.questGivers || []).map((qg) => ({
+                x: qg.x,
+                y: qg.y,
+                name: qg.name || 'Elder Eldrin',
+            })),
+            questMarkers: (this.allQuests || []).map((q) => ({
+                id: q.id,
+                key: q.key,
+                title: q.title,
+                act: q.act,
+                status: q.status || 'available',
+                npcKey: q.start_npc_key,
+                villageKey: q.village_key,
+            })),
         };
     }
 
@@ -1400,6 +1425,7 @@ export class Game {
                     ...(this.merchants || []),
                     ...(this.gemMerchants || []),
                     ...(this.skillMerchants || []),
+                    ...(this.questGivers || []),
                     ...(this.banks || []),
                 ], { x: cx, y: cy });
             }
@@ -1738,6 +1764,7 @@ export class Game {
                 equippedWeapon: this._resolveEquippedWeapon(),
                 playerStats: this.characterView() || this.progression || null,
                 skillMerchants: this.skillMerchants,
+                questGivers: this.questGivers,
                 landmarks: this.landmarks,
                 doorways: this.doorways,
                 shop: this.shop,
@@ -1787,6 +1814,11 @@ export class Game {
                 passiveHoverY: this.passiveTreeOpen ? (this._cursorY ?? null) : null,
                 passiveSearchText: this.passiveSearchText,
                 passiveSearchFocused: this.passiveSearchFocused,
+                // Quests & Storyline (SOMET / Open World)
+                questLogOpen: this.questLogOpen,
+                quests: this.allQuests || [],
+                activeQuestKey: this.activeQuestKey,
+                legacyChoice: (this.progression && this.progression.legacyChoice) || this.legacyChoice || null,
                 // SOMET-493. `enabled` false short-circuits the whole pass in
                 // RenderSystem, so a player who never turns it on pays one
                 // property read per frame.
@@ -1891,6 +1923,41 @@ export class Game {
                 this.passiveGold = q.gold;
             })
             .catch(() => { this.passiveRespecCost = null; });
+    }
+
+    openQuestLog() {
+        this.questLogOpen = true;
+        const load = async () => {
+            try {
+                const [quests, charQuests] = await Promise.all([
+                    (this.allQuests && this.allQuests.length > 0) ? Promise.resolve(this.allQuests) : fetchAllQuests(),
+                    this.characterId ? fetchCharacterQuests(this.characterId) : Promise.resolve([]),
+                ]);
+                const statusMap = new Map();
+                for (const cq of (charQuests || [])) {
+                    statusMap.set(cq.quest_id || cq.questId, cq);
+                }
+                this.allQuests = (quests || []).map((q) => {
+                    const cq = statusMap.get(q.id);
+                    return {
+                        ...q,
+                        status: cq ? cq.status : 'available',
+                        progress: cq ? cq.progress : {},
+                    };
+                });
+                if (!this.activeQuestKey && this.allQuests.length > 0) {
+                    const activeQ = this.allQuests.find((q) => q.status === 'active') || this.allQuests[0];
+                    this.activeQuestKey = activeQ.key;
+                }
+            } catch (err) {
+                if (this.showToast) this.showToast(`Quest Log: ${err.message}`);
+            }
+        };
+        load();
+    }
+
+    closeQuestLog() {
+        this.questLogOpen = false;
     }
 
     // A press inside the open tree. Either it lands on a chrome control (the
@@ -2415,7 +2482,7 @@ export class Game {
             KeyW: 'w', KeyA: 'a', KeyS: 's', KeyD: 'd',
             KeyI: 'i', KeyE: 'e', KeyB: 'b', KeyG: 'g',
             KeyF: 'f', KeyM: 'm', KeyT: 't', KeyC: 'c',
-            KeyR: 'r', KeyQ: 'q', KeyP: 'p', KeyK: 'k', Space: ' ',
+            KeyR: 'r', KeyQ: 'q', KeyP: 'p', KeyK: 'k', KeyJ: 'j', Space: ' ',
             ArrowUp: 'arrowup', ArrowDown: 'arrowdown', ArrowLeft: 'arrowleft', ArrowRight: 'arrowright',
             Escape: 'escape',
         };
@@ -2514,11 +2581,18 @@ export class Game {
                 this.skillsOpen = !this.skillsOpen;
             }
 
+            // Quest Log panel ('j')
+            if (matchesBind('questLog', 'j') && this.state === 'playing' && this.chunked && !e.repeat
+                && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen && !this.inventoryOpen) {
+                if (this.questLogOpen) this.closeQuestLog();
+                else this.openQuestLog();
+            }
+
             // Hotbar keys (slot1..slot9)
             if (this.state === 'playing' && this.chunked && !e.repeat) {
                 for (let s = 1; s <= 9; s++) {
                     if (matchesBind(`slot${s}`, `${s}`)) {
-                        if (!this.skillsOpen && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen) {
+                        if (!this.skillsOpen && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen && !this.questLogOpen) {
                             this._activateHotbarSkill(s);
                             if (typeof e.preventDefault === 'function') e.preventDefault();
                             return;
@@ -2532,6 +2606,8 @@ export class Game {
                 console.log("Escape pressed, current state:", this.state);
                 if (this.gemShopOpen) {
                     this.gemShopOpen = false;
+                } else if (this.questLogOpen) {
+                    this.closeQuestLog();
                 } else if (this.skillsOpen) {
                     this.skillsOpen = false;
                 } else if (this.shopOpen) {
@@ -2554,6 +2630,12 @@ export class Game {
                 const pcx = this.player ? this.player.x + (this.player.width || 64) / 2 : 0;
                 const pcy = this.player ? this.player.y + (this.player.height || 64) / 2 : 0;
 
+                const nearQuestGiver = (Array.isArray(this.questGivers) ? this.questGivers : [])
+                    .some((qg) => Math.hypot(qg.x - pcx, qg.y - pcy) <= 140);
+                if (nearQuestGiver) {
+                    this.openQuestLog();
+                    return;
+                }
                 const nearSkillMerchant = (Array.isArray(this.skillMerchants) ? this.skillMerchants : [])
                     .some((sm) => Math.hypot(sm.x - pcx, sm.y - pcy) <= 140);
                 const nearGm = Array.isArray(this.gemMerchants) && this.gemMerchants.find(gm => Math.hypot(gm.x - pcx, gm.y - pcy) <= 140);
@@ -2794,6 +2876,59 @@ export class Game {
                 return;
             }
 
+            // Quest Log Panel ('J')
+            if (this.questLogOpen) {
+                const x = this._cursorX ?? 0, y = this._cursorY ?? 0;
+                const areas = (this.renderSystem && this.renderSystem._questHitAreas) || [];
+                const hit = areas.find((a) => x >= a.x && x <= a.x + a.w && y >= a.y && y <= a.y + a.h);
+                if (hit) {
+                    if (hit.kind === 'questclose') {
+                        this.closeQuestLog();
+                        return;
+                    }
+                    if (hit.kind === 'selectquest') {
+                        this.activeQuestKey = hit.key;
+                        return;
+                    }
+                    if (hit.kind === 'quest_accept') {
+                        startQuest(this.characterId, hit.questId).then(() => {
+                            this.openQuestLog();
+                            if (this.showToast) this.showToast(`⚔️ Quest started!`);
+                        }).catch((err) => {
+                            if (this.showToast) this.showToast(`❌ ${err.message}`);
+                        });
+                        return;
+                    }
+                    if (hit.kind === 'quest_complete') {
+                        completeQuest(this.characterId, hit.questId).then((res) => {
+                            this.openQuestLog();
+                            if (res && res.rewards) {
+                                if (res.rewards.gold && this.gold != null) this.gold += res.rewards.gold;
+                                if (res.rewards.passive_points && this.progression) this.progression.passivePoints = (this.progression.passivePoints || 0) + res.rewards.passive_points;
+                            }
+                            if (this.showToast) this.showToast(`🎉 Quest completed! Rewards collected!`);
+                        }).catch((err) => {
+                            if (this.showToast) this.showToast(`❌ ${err.message}`);
+                        });
+                        return;
+                    }
+                    if (hit.kind === 'quest_choice_city' || hit.kind === 'quest_choice_surge') {
+                        const choice = hit.kind === 'quest_choice_city' ? 'city_restoration' : 'elemental_surge';
+                        completeQuest(this.characterId, hit.questId, choice).then(() => {
+                            this.legacyChoice = choice;
+                            if (this.progression) this.progression.legacyChoice = choice;
+                            this.openQuestLog();
+                            const desc = choice === 'city_restoration' ? '🏛️ City Restoration (-15% prices)' : '⚡ Elemental Surge (+15% MF / +20% Mining)';
+                            if (this.showToast) this.showToast(`👑 Permanent Legacy Chosen: ${desc}!`);
+                        }).catch((err) => {
+                            if (this.showToast) this.showToast(`❌ ${err.message}`);
+                        });
+                        return;
+                    }
+                }
+                return;
+            }
+
             // Skills Panel (Skill Gem Sockets 1-9 & Inventory Gems Board)
             if (this.skillsOpen) {
                 const x = this._cursorX ?? 0, y = this._cursorY ?? 0;
@@ -2966,6 +3101,11 @@ export class Game {
                 this.skillsOpen = !this.skillsOpen;
                 return;
             }
+            if (matchesThisMouse('questLog', 'j') && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen && !this.inventoryOpen) {
+                if (this.questLogOpen) this.closeQuestLog();
+                else this.openQuestLog();
+                return;
+            }
             if (matchesThisMouse('interact', 'e') && !this.inventoryOpen && !this.bankOpen) {
                 if (this.gemShopOpen) { this.gemShopOpen = false; return; }
                 if (this.shopOpen) { this.shopOpen = false; return; }
@@ -3058,6 +3198,9 @@ export class Game {
                 const INTERACT_CLICK_R = 110;
                 const pointedAt = (t) => Math.hypot(t.x - w.x, t.y - w.y) <= MARKER_CLICK_R
                     && Math.hypot(t.x - pcx, t.y - pcy) <= INTERACT_CLICK_R;
+                for (const qg of (Array.isArray(this.questGivers) ? this.questGivers : [])) {
+                    if (pointedAt(qg)) { this.openQuestLog(); return; }
+                }
                 for (const sm of (Array.isArray(this.skillMerchants) ? this.skillMerchants : [])) {
                     if (pointedAt(sm)) { this.gemShopOpen = true; this.skillsOpen = false; return; }
                 }

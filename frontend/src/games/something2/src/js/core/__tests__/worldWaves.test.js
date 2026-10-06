@@ -78,9 +78,16 @@ describe("wavesFromFrame", () => {
 // ---------------------------------------------------------------------------
 describe("server wave frame -> client contract", () => {
   it("the client reads the top-level `waves` key the authority sends", () => {
-    const worldPath = path.resolve(HERE, "../../../../../../../../backend/src/authority/world.js");
-    if (!fs.existsSync(worldPath)) {
-      throw new Error(`cannot find the authority at ${worldPath} -- this guard `
+    const candidates = [
+      "/backend/src/authority/world.js",
+      path.resolve(HERE, "../../../../../../../backend/src/authority/world.js"),
+      path.resolve(HERE, "../../../../../../../../backend/src/authority/world.js"),
+      path.resolve(process.cwd(), "../backend/src/authority/world.js"),
+      path.resolve(process.cwd(), "backend/src/authority/world.js"),
+    ];
+    const worldPath = candidates.find((p) => fs.existsSync(p));
+    if (!worldPath) {
+      throw new Error("cannot find the authority -- this guard "
         + "fails rather than skipping, because a guard that skips is worse than none");
     }
     const world = fs.readFileSync(worldPath, "utf8");

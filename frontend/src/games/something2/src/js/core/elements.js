@@ -80,3 +80,61 @@ export function elementColor(element) {
 export function elementTint(element) {
   return TINTS[element] || null;
 }
+
+// Elemental Combo Reaction Matrix
+export const ELEMENTAL_REACTIONS = {
+  vaporize: { name: "Vaporize", multiplier: 1.8, blastKind: "steam_burst", color: "#8fdcff", description: "Fire meets Ice! High steam explosion!" },
+  combustion: { name: "Combustion", multiplier: 1.5, blastKind: "fire_nova", color: "#ff4757", description: "Fire ignites existing Burn for extra AOE!" },
+  shatter: { name: "Shatter", multiplier: 2.0, blastKind: "ice_shatter", color: "#70a1ff", description: "Ice shatters Shocked target!" },
+  super_shatter: { name: "Super Shatter", multiplier: 2.5, blastKind: "glacial_shatter", color: "#eccc68", description: "Brittle target shattered into icicles!" },
+  conductive_arc: { name: "Conductive Arc", multiplier: 1.75, blastKind: "lightning_chain", color: "#f4d35e", description: "Lightning arcs wildly through Chilled target!" },
+  chain_overload: { name: "Chain Overload", multiplier: 1.4, blastKind: "thunder_shock", color: "#f4d35e", description: "Shock stack exploded!" },
+  astral_rift: { name: "Astral Rift", multiplier: 1.6, blastKind: "void_implosion", color: "#9b5de5", description: "Arcane implodes elemental residue!" },
+};
+
+export function evaluateElementalReaction(activeEffects = [], incomingElement) {
+  if (!incomingElement || !Array.isArray(activeEffects) || activeEffects.length === 0) {
+    return null;
+  }
+  const hasBurn = activeEffects.includes("burn") || activeEffects.includes("fire");
+  const hasChill = activeEffects.includes("chill") || activeEffects.includes("ice");
+  const hasShock = activeEffects.includes("shock") || activeEffects.includes("lightning");
+
+  // 1. Super Shatter: Ice + Chill + Shock
+  if (incomingElement === "ice" && hasChill && hasShock) {
+    return { reactionKey: "super_shatter", ...ELEMENTAL_REACTIONS.super_shatter, consume: ["chill", "shock"] };
+  }
+
+  // 2. Shatter: Ice + Shock
+  if (incomingElement === "ice" && hasShock) {
+    return { reactionKey: "shatter", ...ELEMENTAL_REACTIONS.shatter, consume: ["shock"] };
+  }
+
+  // 3. Vaporize: Fire + Chill
+  if (incomingElement === "fire" && hasChill) {
+    return { reactionKey: "vaporize", ...ELEMENTAL_REACTIONS.vaporize, consume: ["chill"] };
+  }
+
+  // 4. Combustion: Fire + Burn
+  if (incomingElement === "fire" && hasBurn) {
+    return { reactionKey: "combustion", ...ELEMENTAL_REACTIONS.combustion, consume: [] };
+  }
+
+  // 5. Conductive Arc: Lightning + Chill
+  if (incomingElement === "lightning" && hasChill) {
+    return { reactionKey: "conductive_arc", ...ELEMENTAL_REACTIONS.conductive_arc, consume: [] };
+  }
+
+  // 6. Chain Overload: Lightning + Shock
+  if (incomingElement === "lightning" && hasShock) {
+    return { reactionKey: "chain_overload", ...ELEMENTAL_REACTIONS.chain_overload, consume: [] };
+  }
+
+  // 7. Astral Rift: Arcane + any element
+  if (incomingElement === "arcane" && (hasBurn || hasChill || hasShock)) {
+    return { reactionKey: "astral_rift", ...ELEMENTAL_REACTIONS.astral_rift, consume: ["burn", "chill", "shock"] };
+  }
+
+  return null;
+}
+

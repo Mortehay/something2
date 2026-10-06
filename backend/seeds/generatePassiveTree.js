@@ -67,7 +67,7 @@ function ringKinds(total, notableCount, keystoneCount, layout, greaterCount = 0)
 function templatePool(templates, kind, sector, ring) {
   const matching = templates.filter((t) => t.kind === kind
     && (t.sectors === '*' ? sector !== 'core' : t.sectors.includes(sector))
-    && t.rings.includes(ring));
+    && (t.rings.includes(ring) || (ring >= 3 && t.rings.includes(3))));
   const pool = [];
   for (const t of matching) {
     const weight = Number.isFinite(t.weight) && t.weight > 0 ? Math.floor(t.weight) : 1;
@@ -182,12 +182,22 @@ function generatePassiveTree(spec) {
     let keystoneSeq = 0;
     sectorRings[s] = {};
 
-    for (let ring = 1; ring <= 3; ring += 1) {
+    const SECTOR_ASYMMETRY = {
+      wisdom: { angleShift: 0, clusterAlt: 15 },
+      intelligence: { angleShift: 0, clusterAlt: -15 },
+      dexterity: { angleShift: 0, clusterAlt: 20 },
+      strength: { angleShift: 0, clusterAlt: -20 },
+      constitution: { angleShift: 0, clusterAlt: 25 },
+      charisma: { angleShift: 0, clusterAlt: -25 },
+    };
+    const asym = SECTOR_ASYMMETRY[sector] || { angleShift: 0, clusterAlt: 0 };
+
+    for (let ring = 1; ring <= 4; ring += 1) {
       const rg = layout.rings[ring];
       const total = rg.rows * rg.cols;
       const kinds = ringKinds(total, rg.notable, rg.keystone, layout, rg.greater || 0);
 
-      // "Через 1" on the highway: 9, 15, 19 highway nodes
+      // "Через 1" on the highway: 9, 15, 19, 23 highway nodes
       let numHighwayCols = 9;
       let numClusters = 6;
       if (ring === 2) {
@@ -196,10 +206,14 @@ function generatePassiveTree(spec) {
       } else if (ring === 3) {
         numHighwayCols = 19;
         numClusters = 6;
+      } else if (ring === 4) {
+        numHighwayCols = 23;
+        numClusters = 6;
       }
 
       const highwayNodes = [];
       let flatIdx = 0;
+      const baseRadius = rg.baseRadius;
 
       // 1. Generate arterial highway on Row 0 with wide double spacing:
       for (let col = 0; col < numHighwayCols; col += 1) {
@@ -215,8 +229,8 @@ function generatePassiveTree(spec) {
           }
         }
 
-        const hAngle = axis - half + (col * layout.sectorSpanDeg) / (numHighwayCols - 1);
-        const hp = polar(rg.baseRadius, hAngle);
+        const hAngle = axis + asym.angleShift - half + (col * layout.sectorSpanDeg) / (numHighwayCols - 1);
+        const hp = polar(baseRadius, hAngle);
 
         let label;
         let grants;
@@ -254,18 +268,20 @@ function generatePassiveTree(spec) {
         const cEnd = Math.floor(((c + 1) * remainingNodesCount) / numClusters);
         const cSize = cEnd - cStart;
 
-        const frac = 0.15 + (c / (numClusters - 1 || 1)) * 0.70;
+        const frac = 0.12 + (c / (numClusters - 1 || 1)) * 0.76;
         let cRadius;
         if (ring === 1) {
-          cRadius = (c % 2 === 0) ? 320 : 395;
+          cRadius = (c % 2 === 0) ? 450 : 590;
         } else if (ring === 2) {
-          cRadius = (c % 2 === 0) ? 540 : 620;
+          cRadius = (c % 2 === 0) ? 880 : 1040;
+        } else if (ring === 3) {
+          cRadius = (c % 2 === 0) ? 1350 : 1530;
         } else {
-          cRadius = (c % 2 === 0) ? 760 : 785;
+          cRadius = (c % 2 === 0) ? 1880 : 2060;
         }
 
         const hIdx = Math.min(highwayNodes.length - 1, Math.round(frac * (highwayNodes.length - 1)));
-        const cAngle = axis - half + frac * layout.sectorSpanDeg;
+        const cAngle = axis + asym.angleShift - half + frac * layout.sectorSpanDeg;
         const cp = polar(cRadius, cAngle);
 
         // Collect kinds for this cluster:
@@ -275,11 +291,6 @@ function generatePassiveTree(spec) {
         }
         const keystonesInCluster = clusterKinds.filter(k => k === 'keystone');
         const notablesInCluster = clusterKinds.filter(k => k === 'notable');
-        // SOMET-517. Greaters are carried through this distribution explicitly.
-        // These filters are exhaustive by construction -- a kind that matches
-        // none of them is DROPPED silently and the ring quietly loses nodes,
-        // which is exactly what happened when `greater` was first added and the
-        // tree generated zero of them while every existing test stayed green.
         const greatersInCluster = clusterKinds.filter(k => k === 'greater');
         const minors = clusterKinds.filter(k => k === 'minor');
 
@@ -299,13 +310,13 @@ function generatePassiveTree(spec) {
         let innerCount = 0;
         let outerCount = totalPetals;
         let rInner = 0;
-        let rOuter = Math.max(34, Math.ceil(11.0 / Math.sin(Math.PI / outerCount)));
+        let rOuter = Math.max(46, Math.ceil(16.0 / Math.sin(Math.PI / outerCount)));
 
         if (totalPetals >= 12) {
           innerCount = 5;
           outerCount = totalPetals - innerCount;
-          rInner = 20;
-          rOuter = (ring === 3) ? 40 : 42;
+          rInner = 22;
+          rOuter = 52;
         }
 
         const outerKinds = new Array(outerCount).fill('minor');
@@ -512,7 +523,7 @@ function generatePassiveTree(spec) {
           addEdge(highwayNodes[hIdx], outerKeys[0]);
         }
 
-        clusterWheels.push({ hub: hubKey, inner: innerKeys, outer: outerKeys, cp, cAngle, cRadius });
+        clusterWheels.push({ hub: hubKey, inner: innerKeys, outer: outerKeys, cp, cAngle, cRadius, hIdx });
       }
 
       sectorRings[s][ring] = { highway: highwayNodes, clusters: clusterWheels };
@@ -522,24 +533,30 @@ function generatePassiveTree(spec) {
     const midH1 = Math.floor(sectorRings[s][1].highway.length / 2);
     addEdge(startKey, sectorRings[s][1].highway[midH1]);
 
-    // Elevator shortcuts between Ring 1 clusters and Ring 2 highway / Ring 2 clusters and Ring 3 highway:
+    // Elevator shortcuts between Ring 1 -> Ring 2 -> Ring 3 -> Ring 4:
     const r1Clusters = sectorRings[s][1].clusters;
     const r2Clusters = sectorRings[s][2].clusters;
+    const r3Clusters = sectorRings[s][3].clusters;
+    const r4Clusters = sectorRings[s][4].clusters;
     const r2H = sectorRings[s][2].highway;
     const r3H = sectorRings[s][3].highway;
+    const r4H = sectorRings[s][4].highway;
 
     for (let c of [1, 3, 5]) {
-      if (r1Clusters[c]) {
+      if (r1Clusters[c] && r2Clusters[c] && r1Clusters[c].outer.length > 0) {
         const c1Apex = Math.floor(r1Clusters[c].outer.length / 2);
-        const frac = 0.15 + (c / (6 - 1 || 1)) * 0.70;
-        const hIdx2 = Math.min(r2H.length - 1, Math.round(frac * (r2H.length - 1)));
+        const hIdx2 = r2Clusters[c].hIdx;
         addEdge(r1Clusters[c].outer[c1Apex], r2H[hIdx2]);
       }
-      if (r2Clusters[c]) {
+      if (r2Clusters[c] && r3Clusters[c] && r2Clusters[c].outer.length > 0) {
         const c2Apex = Math.floor(r2Clusters[c].outer.length / 2);
-        const frac = 0.15 + (c / (6 - 1 || 1)) * 0.70;
-        const hIdx3 = Math.min(r3H.length - 1, Math.round(frac * (r3H.length - 1)));
+        const hIdx3 = r3Clusters[c].hIdx;
         addEdge(r2Clusters[c].outer[c2Apex], r3H[hIdx3]);
+      }
+      if (r3Clusters[c] && r4Clusters[c] && r3Clusters[c].outer.length > 0) {
+        const c3Apex = Math.floor(r3Clusters[c].outer.length / 2);
+        const hIdx4 = r4Clusters[c].hIdx;
+        addEdge(r3Clusters[c].outer[c3Apex], r4H[hIdx4]);
       }
     }
 
@@ -550,12 +567,15 @@ function generatePassiveTree(spec) {
 
     addEdge(r2H[0], r3H[0]);
     addEdge(r2H[r2H.length - 1], r3H[r3H.length - 1]);
+
+    addEdge(r3H[0], r4H[0]);
+    addEdge(r3H[r3H.length - 1], r4H[r4H.length - 1]);
   }
 
-  // Cross-sector highways connecting adjacent classes on all 3 rings:
+  // Cross-sector highways connecting adjacent classes on all 4 rings:
   for (let s = 0; s < sectors.length; s += 1) {
     const nextS = (s + 1) % sectors.length;
-    for (let ring = 1; ring <= 3; ring += 1) {
+    for (let ring = 1; ring <= 4; ring += 1) {
       const curH = sectorRings[s][ring].highway;
       const nextH = sectorRings[nextS][ring].highway;
       addEdge(curH[curH.length - 1], nextH[0]);
@@ -563,18 +583,6 @@ function generatePassiveTree(spec) {
   }
 
   // ---- epic clusters (SOMET-518) ----------------------------------------
-  //
-  // A hub plus 2 or 4 satellites, placed OUTSIDE ring 3 on the sector's own
-  // axis. Deliberately appended after the grid rather than woven into it: a
-  // cluster's defining property is its edge topology, and threading it through
-  // the ring/row/column bookkeeping would put that topology at the mercy of
-  // the collision walk that shuffles kinds between slots.
-  //
-  // EDGES: hub -> one ring-3 anchor, and hub -> each satellite. NOTHING ELSE.
-  // A satellite has exactly one neighbour, its own hub, so isAllocatable's
-  // walk cannot reach it until the hub is allocated. That is what makes an
-  // increaser unbuyable without the epic it increases -- structurally, not by
-  // a rule anyone has to remember.
   const clustersBySector = new Map();
   for (const c of clusters) {
     if (!clustersBySector.has(c.sector)) clustersBySector.set(c.sector, []);
@@ -585,7 +593,7 @@ function generatePassiveTree(spec) {
     const list = clustersBySector.get(sector) || [];
     const axis = layout.sectorAxisDeg0 + s * 360 / sectors.length;
     const half = layout.sectorSpanDeg / 2;
-    const ring3 = sectorRings[s][3];
+    const ringOuter = sectorRings[s][4];
     list.forEach((c, ci) => {
       // Spread the sector's clusters across its wedge so two do not overlap.
       const frac = list.length === 1 ? 0.5 : (ci + 0.5) / list.length;
@@ -593,16 +601,23 @@ function generatePassiveTree(spec) {
       const hubRadius = layout.clusterRadius;
       const hp = polar(hubRadius, hubAngle);
       const hubKey = push({
-        key: `${c.key}-hub`, sector, ring: 3, x: hp.x, y: hp.y,
+        key: `${c.key}-hub`, sector, ring: 4, x: hp.x, y: hp.y,
         kind: 'greater', label: c.hubLabel,
         grants: c.hubGrants.map((g) => ({ ...g })), start_class: null,
       });
-      // The anchor: the ring-3 highway node nearest this cluster's angle, so
-      // the hub is reachable by a walk that stays in the player's own sector.
-      const highway = ring3.highway;
-      const anchorIdx = Math.min(highway.length - 1,
-        Math.max(0, Math.round(frac * (highway.length - 1))));
-      addEdge(highway[anchorIdx], hubKey);
+      // Connect hubKey to nearest outer apex or highway on ring 4:
+      const nearestClusterIdx = Math.min(ringOuter.clusters.length - 1,
+        Math.max(0, Math.floor(frac * ringOuter.clusters.length)));
+      const targetCluster = ringOuter.clusters[nearestClusterIdx];
+      if (targetCluster && targetCluster.outer.length > 0) {
+        const outerApex = Math.floor(targetCluster.outer.length / 2);
+        addEdge(targetCluster.outer[outerApex], hubKey);
+      } else {
+        const highway = ringOuter.highway;
+        const anchorIdx = Math.min(highway.length - 1,
+          Math.max(0, Math.round(frac * (highway.length - 1))));
+        addEdge(highway[anchorIdx], hubKey);
+      }
       // Satellites ring the hub. Their ONLY edge is back to it.
       c.satellites.forEach((sat, si) => {
         const a = hubAngle * DEG + (si / c.satellites.length) * Math.PI * 2;
@@ -629,3 +644,5 @@ function generatePassiveTree(spec) {
 }
 
 module.exports = { generatePassiveTree };
+
+

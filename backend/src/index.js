@@ -156,6 +156,7 @@ const progressionRoutes = require('./api/progressionRoutes.js');
 const passiveTreeRoutes = require('./api/passiveTreeRoutes.js');
 const passiveNodesRoutes = require('./api/passiveNodesRoutes.js');
 const characterRoutes = require('./api/characterRoutes.js');
+const { createQuestsRouter } = require('./routes/questsRoutes.js');
 const audioRoutes = require('./api/audioRoutes.js');
 const remoteAudioProvider = require('./services/remoteAudioProvider');
 const textProvider = require('./services/textProvider');
@@ -526,6 +527,7 @@ app.use('/api/passive-nodes', passiveNodesRoutes(guardPool));
 // Character slots (SOMET-259): list / create / delete, plus the playable-class
 // catalog the creation form reads. Behind requireAuth, scoped to req.user.id.
 app.use('/api/characters', characterRoutes(guardPool));
+app.use('/api/quests', createQuestsRouter(guardPool));
 
 // Game audio (spec docs/superpowers/specs/2026-09-28-game-audio-design.md).
 // Player routes (world bundle, misses) and admin routes (/admin/*) share one

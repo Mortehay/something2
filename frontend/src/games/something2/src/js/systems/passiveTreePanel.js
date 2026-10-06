@@ -241,6 +241,28 @@ export function grantLine(g) {
   }
 }
 
+export function computeAllocatedStatsSummary(index, allocatedNodeIds) {
+  if (!index || !index.byId || !Array.isArray(allocatedNodeIds) || allocatedNodeIds.length === 0) {
+    return [];
+  }
+  const totals = new Map();
+  for (const id of allocatedNodeIds) {
+    const node = index.byId.get(id);
+    if (node && Array.isArray(node.grants)) {
+      for (const g of node.grants) {
+        const line = grantLine(g);
+        totals.set(line, (totals.get(line) || 0) + 1);
+      }
+    }
+  }
+  const result = [];
+  for (const [line, count] of totals.entries()) {
+    result.push(count > 1 ? `${line} (x${count})` : line);
+  }
+  return result;
+}
+
+
 function knownNumber(v) {
   return v != null && v !== '' && Number.isFinite(Number(v));
 }
@@ -362,9 +384,17 @@ export function layoutPassiveTree(state) {
       if (!fromSet.has(hit.id)) {
         path = findShortestPath(index, fromSet, hit.id);
       }
+      const targetNodes = path.length > 0 ? path.map((id) => index.byId.get(id)).filter(Boolean) : [index.byId.get(hit.id)].filter(Boolean);
+      const deltaGrants = [];
+      for (const tn of targetNodes) {
+        if (Array.isArray(tn.grants)) {
+          for (const g of tn.grants) deltaGrants.push(grantLine(g));
+        }
+      }
       hover = {
         id: hit.id, label: hit.label, kind: hit.kind,
         lines: hit.grants.map(grantLine),
+        deltaLines: deltaGrants,
         sx: hit.sx, sy: hit.sy,
         path,
         pathPointsCost: path.length,
@@ -399,11 +429,13 @@ export function layoutPassiveTree(state) {
     });
   }
 
+  const allocatedStatsSummary = computeAllocatedStatsSummary(index, allocatedNodeIds);
+
   return {
     panel, title, close, viewport, searchBox,
     nodes, edges, hover, respec, hitAreas, stats,
     searchText, searchFocused, hasSearch, searchMatchesCount,
-    hoverPathSet,
+    hoverPathSet, allocatedStatsSummary,
     header: {
       pointsLabel: `Passive points: ${passivePoints}`,
       countLabel: `${allocated.size} allocated`,
@@ -495,7 +527,7 @@ export function drawPassiveTree(ctx, layout, art = null) {
   // 1. Edges:
   for (const e of layout.edges) {
     if (e.pathPreview) {
-      ctx.lineWidth = 3;
+      ctx.lineWidth = 3.5;
       ctx.strokeStyle = "#38bdf8";
       ctx.beginPath();
       ctx.moveTo(e.x1, e.y1);
@@ -518,21 +550,31 @@ export function drawPassiveTree(ctx, layout, art = null) {
     }
   }
 
-  // 2. Nodes: Exactly 1 arc and 1 fill per node
+  // 2. Nodes:
   for (const n of layout.nodes) {
     const isSearchDimmed = layout.hasSearch && !n.searchMatch;
 
     ctx.save();
     if (isSearchDimmed) ctx.globalAlpha = 0.35;
 
+    // Feature 1: Animated search aura pulse for matching nodes
+    if (n.searchMatch) {
+      ctx.save();
+      ctx.shadowColor = "#f59e0b";
+      ctx.shadowBlur = 14 + 6 * Math.sin(now / 150);
+      ctx.beginPath();
+      ctx.arc(n.sx, n.sy, n.r + 4 + Math.sin(now / 200) * 2, 0, Math.PI * 2);
+      ctx.strokeStyle = "#fbbf24";
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+      ctx.restore();
+    }
+
     ctx.beginPath();
     ctx.arc(n.sx, n.sy, Math.max(1, n.r), 0, Math.PI * 2);
     ctx.fillStyle = STATE_FILL[n.state];
     ctx.fill();
 
-    // The label icon, clipped to the same circle and drawn between the fill
-    // and the rim, so the rim still reads on top. No extra arc: clip() reuses
-    // the path the fill just used, and the rim below strokes it again.
     const icon = n.r >= MIN_ICON_R ? artIcon(art, "passive_label", n.label) : null;
     if (icon) {
       ctx.save();
@@ -542,26 +584,39 @@ export function drawPassiveTree(ctx, layout, art = null) {
       ctx.restore();
     }
 
-    // Medallion rim stroke styling:
+    // Feature 3: Rarity visual glow & medallion rim stroke styling:
     if (n.kind === "keystone") {
-      ctx.lineWidth = 3;
+      ctx.save();
+      ctx.shadowColor = n.state === "allocated" ? "#4ade80" : "#fde047";
+      ctx.shadowBlur = n.state === "allocated" ? 18 : 14;
+      ctx.lineWidth = 3.2;
       ctx.strokeStyle = n.state === "allocated" ? "#4ade80" : "#fde047";
       ctx.stroke();
+      ctx.restore();
     } else if (n.kind === "greater") {
-      // SOMET-517. Between a notable and a keystone in weight, and given its
-      // own violet rim so a +30 stat node is not mistaken for a +12 one at a
-      // glance -- the two sit in the same ring.
-      ctx.lineWidth = 2.6;
+      ctx.save();
+      ctx.shadowColor = n.state === "allocated" ? "#4ade80" : "#c084fc";
+      ctx.shadowBlur = 12;
+      ctx.lineWidth = 2.8;
       ctx.strokeStyle = n.state === "allocated" ? "#4ade80" : "#c084fc";
       ctx.stroke();
+      ctx.restore();
     } else if (n.kind === "notable") {
-      ctx.lineWidth = 2.2;
+      ctx.save();
+      ctx.shadowColor = n.state === "allocated" ? "#4ade80" : "#f59e0b";
+      ctx.shadowBlur = 10;
+      ctx.lineWidth = 2.4;
       ctx.strokeStyle = n.state === "allocated" ? "#4ade80" : "#f59e0b";
       ctx.stroke();
+      ctx.restore();
     } else if (n.kind === "start") {
-      ctx.lineWidth = 2.5;
+      ctx.save();
+      ctx.shadowColor = "#60a5fa";
+      ctx.shadowBlur = 14;
+      ctx.lineWidth = 2.8;
       ctx.strokeStyle = "#60a5fa";
       ctx.stroke();
+      ctx.restore();
     } else {
       ctx.lineWidth = 1;
       if (n.state === "allocated") {
@@ -594,16 +649,27 @@ export function drawPassiveTree(ctx, layout, art = null) {
   ctx.fillText("drag to pan · wheel to zoom · click to allocate · right-click to refund 1 pt · Shift+click to auto-path",
     panel.x + 14, panel.y + panel.h - 28);
 
-  // Tooltip with shortest path cost:
+  // Feature 2: Tooltip with Shortest Path & Stat Preview Delta
   const h = layout.hover;
   if (h) {
     ctx.font = "12px monospace";
-    const lines = [h.label, ...h.lines];
+    const headerLines = [h.label, ...h.lines];
+    const previewLines = [];
     if (h.pathPointsCost > 0) {
-      lines.push(`— Path: ${h.pathPointsCost} pt${h.pathPointsCost > 1 ? "s" : ""} (Shift+Click) —`);
+      previewLines.push(`— Path: ${h.pathPointsCost} pt${h.pathPointsCost > 1 ? "s" : ""} (Shift+Click) —`);
+      if (Array.isArray(h.deltaLines) && h.deltaLines.length > 0) {
+        previewLines.push("▶ Stat Preview Delta:");
+        for (const dl of h.deltaLines.slice(0, 5)) {
+          previewLines.push(`  + ${dl}`);
+        }
+        if (h.deltaLines.length > 5) {
+          previewLines.push(`  + (${h.deltaLines.length - 5} more bonuses)`);
+        }
+      }
     }
-    const w = Math.max(...lines.map((t) => ctx.measureText(t).width)) + 16;
-    const boxH = 8 + lines.length * 15;
+    const allLines = [...headerLines, ...previewLines];
+    const w = Math.max(...allLines.map((t) => ctx.measureText(t).width)) + 20;
+    const boxH = 10 + allLines.length * 15;
     const tx = Math.min(h.sx + 14, GAME_WIDTH - w - 4);
     const ty = Math.min(h.sy + 14, GAME_HEIGHT - boxH - 4);
     ctx.fillStyle = "rgba(10,10,18,0.96)";
@@ -613,14 +679,19 @@ export function drawPassiveTree(ctx, layout, art = null) {
         : h.kind === "notable" ? "#f59e0b" : "#4a9eff";
     ctx.lineWidth = 1;
     ctx.strokeRect(tx, ty, w, boxH);
+
     ctx.fillStyle = "#e5e7eb";
-    ctx.fillText(lines[0], tx + 8, ty + 5);
+    ctx.fillText(headerLines[0], tx + 8, ty + 5);
     ctx.fillStyle = "#9ca3af";
-    for (let i = 1; i < lines.length; i += 1) {
-      if (i === lines.length - 1 && h.pathPointsCost > 0) {
-        ctx.fillStyle = "#38bdf8";
-      }
-      ctx.fillText(lines[i], tx + 8, ty + 5 + i * 15);
+    for (let i = 1; i < headerLines.length; i += 1) {
+      ctx.fillText(headerLines[i], tx + 8, ty + 5 + i * 15);
+    }
+
+    let lineOffset = headerLines.length;
+    for (const pl of previewLines) {
+      ctx.fillStyle = pl.startsWith("▶") ? "#34d399" : pl.startsWith("  +") ? "#38bdf8" : "#9ca3af";
+      ctx.fillText(pl, tx + 8, ty + 5 + lineOffset * 15);
+      lineOffset += 1;
     }
   }
 

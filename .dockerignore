@@ -7,8 +7,6 @@ backend/node_modules
 # matters a great deal on the Pi's fallback build path over four A53 cores.
 .git
 docs
-engine
-sprite-gen
 tools
 **/__tests__
 **/*.test.js

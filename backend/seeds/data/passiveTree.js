@@ -179,13 +179,14 @@ const LAYOUT = {
   // SOMET-518. Epic clusters sit OUTSIDE ring 3 (whose outermost row is at
   // 700 + 2*70 = 840), far enough out that a hub and its satellites cannot
   // overlap the grid they hang off.
-  clusterRadius: 960,
-  clusterSatelliteRadius: 62,
+  clusterRadius: 2350,
+  clusterSatelliteRadius: 90,
   rings: [
     null, // index 0 is the core + the start nodes, which are not laid out on a grid
-    { rows: 4, cols: 17, baseRadius: 260, rowStep: 45, minor: 60, notable: 8, keystone: 0 },
-    { rows: 4, cols: 29, baseRadius: 460, rowStep: 55, minor: 100, notable: 14, keystone: 2 },
-    { rows: 3, cols: 37, baseRadius: 700, rowStep: 70, minor: 84, notable: 18, keystone: 3, greater: 6 },
+    { rows: 4, cols: 17, baseRadius: 320, rowStep: 65, minor: 60, notable: 8, keystone: 0 },
+    { rows: 4, cols: 29, baseRadius: 720, rowStep: 85, minor: 100, notable: 14, keystone: 2 },
+    { rows: 3, cols: 37, baseRadius: 1200, rowStep: 105, minor: 84, notable: 18, keystone: 3, greater: 6 },
+    { rows: 3, cols: 25, baseRadius: 1750, rowStep: 105, minor: 56, notable: 14, keystone: 0, greater: 5 },
   ],
 };
 
@@ -268,58 +269,48 @@ const TEMPLATES = [
   { key: 'min_natural_vigour', kind: 'minor', sectors: ['charisma'], rings: [1, 2, 3], weight: 2, label: 'Natural Vigour', grants: [{ type: 'rule', rule: 'hpRegen', value: 1.0 }, { type: 'rule', rule: 'staminaRegen', value: 2.5 }] },
 
   // --- notables ---
-  { key: 'not_great_sinew', kind: 'notable', sectors: '*', rings: [1, 2, 3], weight: 5, label: 'Great Sinew', grants: [{ type: 'stat', stat: '@sector', value: 8 }] },
-  { key: 'not_mastery', kind: 'notable', sectors: '*', rings: [2, 3], weight: 4, label: 'Mastery', grants: [{ type: 'stat', stat: '@sector', value: 12 }] },
-  { key: 'not_apotheosis', kind: 'notable', sectors: '*', rings: [3], weight: 3, label: 'Apotheosis', grants: [{ type: 'stat', stat: '@sector', value: 16 }] },
+  { key: 'not_great_sinew', kind: 'notable', sectors: '*', rings: [1, 2, 3], weight: 5, label: 'Great Sinew', grants: [{ type: 'stat', stat: '@sector', value: 6 }] },
+  { key: 'not_mastery', kind: 'notable', sectors: '*', rings: [2, 3], weight: 4, label: 'Mastery', grants: [{ type: 'stat', stat: '@sector', value: 8 }] },
+  { key: 'not_apotheosis', kind: 'notable', sectors: '*', rings: [3], weight: 3, label: 'Apotheosis', grants: [{ type: 'stat', stat: '@sector', value: 12 }] },
   // SOMET-516: the off-stat notables. An 8/12/16 off-stat notable is what lets
   // a Cultist reach real INT, or a Monk real STR, without leaving home.
-  { key: 'not_broad_study', kind: 'notable', sectors: '*', rings: [1, 2, 3], weight: 2, label: 'Broad Study', grants: [{ type: 'stat', stat: '@other', value: 8 }] },
-  { key: 'not_second_discipline', kind: 'notable', sectors: '*', rings: [2, 3], weight: 2, label: 'Second Discipline', grants: [{ type: 'stat', stat: '@other', value: 12 }] },
-  { key: 'not_renaissance', kind: 'notable', sectors: '*', rings: [3], weight: 1, label: 'Renaissance', grants: [{ type: 'stat', stat: '@other', value: 16 }] },
+  { key: 'not_broad_study', kind: 'notable', sectors: '*', rings: [1, 2, 3], weight: 2, label: 'Broad Study', grants: [{ type: 'stat', stat: '@other', value: 6 }] },
+  { key: 'not_second_discipline', kind: 'notable', sectors: '*', rings: [2, 3], weight: 2, label: 'Second Discipline', grants: [{ type: 'stat', stat: '@other', value: 8 }] },
+  { key: 'not_renaissance', kind: 'notable', sectors: '*', rings: [3], weight: 1, label: 'Renaissance', grants: [{ type: 'stat', stat: '@other', value: 12 }] },
   { key: 'not_deep_reserve', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Deep Reserve', grants: [{ type: 'resource', pool: 'mana', value: 15 }] },
-  { key: 'not_thick_skin', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Thick Skin', grants: [{ type: 'resource', pool: 'hp', value: 40 }] },
-  { key: 'not_endurance', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Endurance', grants: [{ type: 'resource', pool: 'stamina', value: 30 }] },
-  { key: 'not_brutality', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Brutality', grants: [{ type: 'damage', element: 'physical', value: 12 }] },
+  { key: 'not_thick_skin', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Thick Skin', grants: [{ type: 'resource', pool: 'hp', value: 25 }] },
+  { key: 'not_endurance', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Endurance', grants: [{ type: 'resource', pool: 'stamina', value: 20 }] },
+  { key: 'not_brutality', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Brutality', grants: [{ type: 'damage', element: 'physical', value: 8 }] },
   // Sector-themed notables:
-  { key: 'not_sanguine_spring', kind: 'notable', sectors: ['constitution'], rings: [1, 2, 3], label: 'Sanguine Spring', grants: [{ type: 'rule', rule: 'hpRegen', value: 5.0 }, { type: 'resource', pool: 'hp', value: 60 }] },
-  { key: 'not_iron_recovery', kind: 'notable', sectors: ['strength'], rings: [1, 2, 3], label: 'Iron Recovery', grants: [{ type: 'rule', rule: 'hpRegen', value: 3.5 }, { type: 'resource', pool: 'hp', value: 50 }] },
-  { key: 'not_font_of_power', kind: 'notable', sectors: ['intelligence'], rings: [1, 2, 3], label: 'Font of Power', grants: [{ type: 'rule', rule: 'manaRegen', value: 8.0 }, { type: 'resource', pool: 'mana', value: 40 }] },
-  { key: 'not_tranquil_flow', kind: 'notable', sectors: ['wisdom'], rings: [1, 2, 3], label: 'Tranquil Flow', grants: [{ type: 'rule', rule: 'hpRegen', value: 2.5 }, { type: 'rule', rule: 'manaRegen', value: 5.0 }, { type: 'resist', element: 'arcane', value: 8 }] },
-  { key: 'not_fleeting_rest', kind: 'notable', sectors: ['dexterity'], rings: [1, 2, 3], label: 'Fleeting Rest', grants: [{ type: 'rule', rule: 'staminaRegen', value: 10.0 }, { type: 'resource', pool: 'stamina', value: 25 }, { type: 'rule', rule: 'hpRegen', value: 1.5 }] },
-  { key: 'not_rejuvenation', kind: 'notable', sectors: ['charisma'], rings: [1, 2, 3], label: 'Rejuvenation', grants: [{ type: 'rule', rule: 'hpRegen', value: 2.5 }, { type: 'rule', rule: 'manaRegen', value: 3.5 }, { type: 'rule', rule: 'staminaRegen', value: 5.0 }] },
-  { key: 'not_kindling', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Kindling', grants: [{ type: 'damage', element: 'fire', value: 12 }] },
-  { key: 'not_frostbite', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Frostbite', grants: [{ type: 'damage', element: 'ice', value: 12 }] },
-  { key: 'not_charge', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Charge', grants: [{ type: 'damage', element: 'lightning', value: 12 }] },
-  { key: 'not_resonance', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Resonance', grants: [{ type: 'damage', element: 'arcane', value: 12 }] },
-  { key: 'not_plating', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Plating', grants: [{ type: 'resist', element: 'physical', value: 8 }] },
-  { key: 'not_fireproof', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Fireproof', grants: [{ type: 'resist', element: 'fire', value: 8 }] },
-  { key: 'not_warm_blood', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Warm Blood', grants: [{ type: 'resist', element: 'ice', value: 8 }] },
-  { key: 'not_grounding', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Grounding', grants: [{ type: 'resist', element: 'lightning', value: 8 }] },
-  { key: 'not_null_field', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Null Field', grants: [{ type: 'resist', element: 'arcane', value: 8 }] },
-  { key: 'not_ox_blood', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Ox Blood', grants: [{ type: 'stat', stat: '@sector', value: 8 }, { type: 'resource', pool: 'hp', value: 25 }] },
-  { key: 'not_wellspring', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Wellspring', grants: [{ type: 'stat', stat: '@sector', value: 8 }, { type: 'resource', pool: 'mana', value: 20 }] },
-  { key: 'not_honed', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Honed', grants: [{ type: 'stat', stat: '@sector', value: 8 }, { type: 'damage', element: 'physical', value: 5 }] },
-  { key: 'not_quickening', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Quickening', grants: [{ type: 'stat', stat: 'dexterity', value: 6 }] },
-  { key: 'not_ward', kind: 'notable', sectors: '*', rings: [2, 3], label: 'Ward', grants: [{ type: 'resist', element: 'arcane', value: 6 }, { type: 'resist', element: 'fire', value: 6 }] },
+  { key: 'not_sanguine_spring', kind: 'notable', sectors: ['constitution'], rings: [1, 2, 3], label: 'Sanguine Spring', grants: [{ type: 'rule', rule: 'hpRegen', value: 2.5 }, { type: 'resource', pool: 'hp', value: 35 }] },
+  { key: 'not_iron_recovery', kind: 'notable', sectors: ['strength'], rings: [1, 2, 3], label: 'Iron Recovery', grants: [{ type: 'rule', rule: 'hpRegen', value: 2.0 }, { type: 'resource', pool: 'hp', value: 30 }] },
+  { key: 'not_font_of_power', kind: 'notable', sectors: ['intelligence'], rings: [1, 2, 3], label: 'Font of Power', grants: [{ type: 'rule', rule: 'manaRegen', value: 4.0 }, { type: 'resource', pool: 'mana', value: 25 }] },
+  { key: 'not_tranquil_flow', kind: 'notable', sectors: ['wisdom'], rings: [1, 2, 3], label: 'Tranquil Flow', grants: [{ type: 'rule', rule: 'hpRegen', value: 1.5 }, { type: 'rule', rule: 'manaRegen', value: 3.0 }, { type: 'resist', element: 'arcane', value: 5 }] },
+  { key: 'not_fleeting_rest', kind: 'notable', sectors: ['dexterity'], rings: [1, 2, 3], label: 'Fleeting Rest', grants: [{ type: 'rule', rule: 'staminaRegen', value: 5.0 }, { type: 'resource', pool: 'stamina', value: 15 }, { type: 'rule', rule: 'hpRegen', value: 0.8 }] },
+  { key: 'not_rejuvenation', kind: 'notable', sectors: ['charisma'], rings: [1, 2, 3], label: 'Rejuvenation', grants: [{ type: 'rule', rule: 'hpRegen', value: 1.5 }, { type: 'rule', rule: 'manaRegen', value: 2.0 }, { type: 'rule', rule: 'staminaRegen', value: 3.0 }] },
+  { key: 'not_kindling', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Kindling', grants: [{ type: 'damage', element: 'fire', value: 8 }] },
+  { key: 'not_frostbite', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Frostbite', grants: [{ type: 'damage', element: 'ice', value: 8 }] },
+  { key: 'not_charge', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Charge', grants: [{ type: 'damage', element: 'lightning', value: 8 }] },
+  { key: 'not_resonance', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Resonance', grants: [{ type: 'damage', element: 'arcane', value: 8 }] },
+  { key: 'not_plating', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Plating', grants: [{ type: 'resist', element: 'physical', value: 5 }] },
+  { key: 'not_fireproof', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Fireproof', grants: [{ type: 'resist', element: 'fire', value: 5 }] },
+  { key: 'not_warm_blood', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Warm Blood', grants: [{ type: 'resist', element: 'ice', value: 5 }] },
+  { key: 'not_grounding', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Grounding', grants: [{ type: 'resist', element: 'lightning', value: 5 }] },
+  { key: 'not_null_field', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Null Field', grants: [{ type: 'resist', element: 'arcane', value: 5 }] },
+  { key: 'not_ox_blood', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Ox Blood', grants: [{ type: 'stat', stat: '@sector', value: 6 }, { type: 'resource', pool: 'hp', value: 18 }] },
+  { key: 'not_wellspring', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Wellspring', grants: [{ type: 'stat', stat: '@sector', value: 6 }, { type: 'resource', pool: 'mana', value: 14 }] },
+  { key: 'not_honed', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Honed', grants: [{ type: 'stat', stat: '@sector', value: 6 }, { type: 'damage', element: 'physical', value: 4 }] },
+  { key: 'not_quickening', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Quickening', grants: [{ type: 'stat', stat: 'dexterity', value: 4 }] },
+  { key: 'not_ward', kind: 'notable', sectors: '*', rings: [2, 3], label: 'Ward', grants: [{ type: 'resist', element: 'arcane', value: 4 }, { type: 'resist', element: 'fire', value: 4 }] },
   { key: 'not_searing_blows', kind: 'notable', sectors: '*', rings: [3], label: 'Searing Blows', grants: [{ type: 'status', status: 'burn', value: 1 }] },
   { key: 'not_numbing_blows', kind: 'notable', sectors: '*', rings: [3], label: 'Numbing Blows', grants: [{ type: 'status', status: 'chill', value: 1 }] },
   { key: 'not_jarring_blows', kind: 'notable', sectors: '*', rings: [3], label: 'Jarring Blows', grants: [{ type: 'status', status: 'shock', value: 1 }] },
 
   // --- greaters (SOMET-517) -------------------------------------------------
-  //
-  // A fourth tier between a notable and a keystone, RING 3 ONLY. Before this
-  // the biggest stat node in the tree was not_apotheosis at +16, and the next
-  // step up was one of a sector's five keystones -- nothing in between, and no
-  // repeatable reward for going deep.
-  //
-  // A greater grants +25 or +30 of a SINGLE stat, own or off. Ring 3 is where
-  // it belongs: a +30 INT for a Cultist should be a genuine cross-map
-  // commitment, not a freebie two nodes from the start. The off-stat variants
-  // are what make a real cross-class build reachable at all.
-  { key: 'grt_ascendance', kind: 'greater', sectors: '*', rings: [3], weight: 3, label: 'Ascendance', grants: [{ type: 'stat', stat: '@sector', value: 25 }] },
-  { key: 'grt_paragon', kind: 'greater', sectors: '*', rings: [3], weight: 2, label: 'Paragon', grants: [{ type: 'stat', stat: '@sector', value: 30 }] },
-  { key: 'grt_wanderers_gift', kind: 'greater', sectors: '*', rings: [3], weight: 2, label: "Wanderer's Gift", grants: [{ type: 'stat', stat: '@other', value: 25 }] },
-  { key: 'grt_apostasy', kind: 'greater', sectors: '*', rings: [3], weight: 1, label: 'Apostasy', grants: [{ type: 'stat', stat: '@other', value: 30 }] },
+  { key: 'grt_ascendance', kind: 'greater', sectors: '*', rings: [3], weight: 3, label: 'Ascendance', grants: [{ type: 'stat', stat: '@sector', value: 18 }] },
+  { key: 'grt_paragon', kind: 'greater', sectors: '*', rings: [3], weight: 2, label: 'Paragon', grants: [{ type: 'stat', stat: '@sector', value: 20 }] },
+  { key: 'grt_wanderers_gift', kind: 'greater', sectors: '*', rings: [3], weight: 2, label: "Wanderer's Gift", grants: [{ type: 'stat', stat: '@other', value: 18 }] },
+  { key: 'grt_apostasy', kind: 'greater', sectors: '*', rings: [3], weight: 1, label: 'Apostasy', grants: [{ type: 'stat', stat: '@other', value: 20 }] },
 ];
 
 // --- Keystones -------------------------------------------------------------
@@ -331,201 +322,160 @@ const TEMPLATES = [
 // the strongest of the five should be authored last.
 const KEYSTONES = {
   wisdom: [
-    { key: 'ks_wis_inner_flame', label: 'Inner Flame — +30 WIS', grants: [{ type: 'stat', stat: 'wisdom', value: 30 }] },
-    { key: 'ks_wis_meditation', label: 'Meditation — +120 max mana, +4.0 mana regen/s, +10% life share from mana regen', grants: [{ type: 'resource', pool: 'mana', value: 120 }, { type: 'rule', rule: 'manaRegen', value: 4 }, { type: 'rule', rule: 'regenLifeShare', value: 0.1 }] },
-    { key: 'ks_wis_spirit_ward', label: 'Spirit Ward — +20% arcane resistance, +1.5 HP regen/s', grants: [{ type: 'resist', element: 'arcane', value: 20 }, { type: 'rule', rule: 'hpRegen', value: 1.5 }] },
-    { key: 'ks_wis_iron_body', label: 'Iron Body — +20 WIS and +20 CON', grants: [{ type: 'stat', stat: 'wisdom', value: 20 }, { type: 'stat', stat: 'constitution', value: 20 }] },
-    // SOMET-518 moved Clarity to a CLUSTER (hub + 4 satellites). This slot
-    // becomes a plain stat keystone rather than being deleted: the generator
-    // places exactly five keystones per sector from this array, so removing
-    // one would leave a ring-3 keystone slot with nothing to fill it.
-    { key: 'ks_wis_transcendence', label: 'Transcendence — +35 WIS and +25 INT', grants: [{ type: 'stat', stat: 'wisdom', value: 35 }, { type: 'stat', stat: 'intelligence', value: 25 }] },
+    { key: 'ks_wis_inner_flame', label: 'Inner Flame — +20 WIS', grants: [{ type: 'stat', stat: 'wisdom', value: 20 }] },
+    { key: 'ks_wis_meditation', label: 'Meditation — +70 max mana, +2.0 mana regen/s, +5% life share from mana regen', grants: [{ type: 'resource', pool: 'mana', value: 70 }, { type: 'rule', rule: 'manaRegen', value: 2 }, { type: 'rule', rule: 'regenLifeShare', value: 0.05 }] },
+    { key: 'ks_wis_spirit_ward', label: 'Spirit Ward — +12% arcane resistance, +0.8 HP regen/s', grants: [{ type: 'resist', element: 'arcane', value: 12 }, { type: 'rule', rule: 'hpRegen', value: 0.8 }] },
+    { key: 'ks_wis_iron_body', label: 'Iron Body — +15 WIS and +15 CON', grants: [{ type: 'stat', stat: 'wisdom', value: 15 }, { type: 'stat', stat: 'constitution', value: 15 }] },
+    { key: 'ks_wis_transcendence', label: 'Transcendence — +25 WIS and +18 INT', grants: [{ type: 'stat', stat: 'wisdom', value: 25 }, { type: 'stat', stat: 'intelligence', value: 18 }] },
   ],
   intelligence: [
-    { key: 'ks_int_pyromancy', label: 'Pyromancy — +35% fire damage, and your hits burn', grants: [{ type: 'damage', element: 'fire', value: 35 }, { type: 'status', status: 'burn', value: 1 }] },
-    { key: 'ks_int_storm_caller', label: 'Storm Caller — +35% lightning damage, and your hits shock', grants: [{ type: 'damage', element: 'lightning', value: 35 }, { type: 'status', status: 'shock', value: 1 }] },
-    { key: 'ks_int_cryomancy', label: 'Cryomancy — +35% ice damage, and your hits chill', grants: [{ type: 'damage', element: 'ice', value: 35 }, { type: 'status', status: 'chill', value: 1 }] },
-    { key: 'ks_int_deep_well', label: 'Deep Well — +40 INT', grants: [{ type: 'stat', stat: 'intelligence', value: 40 }] },
-    { key: 'ks_int_arcane_conduit', label: 'Arcane Conduit — +20 INT, +60 max mana, +6.0 mana regen/s', grants: [{ type: 'stat', stat: 'intelligence', value: 20 }, { type: 'resource', pool: 'mana', value: 60 }, { type: 'rule', rule: 'manaRegen', value: 6 }] },
+    { key: 'ks_int_pyromancy', label: 'Pyromancy — +20% fire damage, and your hits burn', grants: [{ type: 'damage', element: 'fire', value: 20 }, { type: 'status', status: 'burn', value: 1 }] },
+    { key: 'ks_int_storm_caller', label: 'Storm Caller — +20% lightning damage, and your hits shock', grants: [{ type: 'damage', element: 'lightning', value: 20 }, { type: 'status', status: 'shock', value: 1 }] },
+    { key: 'ks_int_cryomancy', label: 'Cryomancy — +20% ice damage, and your hits chill', grants: [{ type: 'damage', element: 'ice', value: 20 }, { type: 'status', status: 'chill', value: 1 }] },
+    { key: 'ks_int_deep_well', label: 'Deep Well — +25 INT', grants: [{ type: 'stat', stat: 'intelligence', value: 25 }] },
+    { key: 'ks_int_arcane_conduit', label: 'Arcane Conduit — +15 INT, +35 max mana, +3.0 mana regen/s', grants: [{ type: 'stat', stat: 'intelligence', value: 15 }, { type: 'resource', pool: 'mana', value: 35 }, { type: 'rule', rule: 'manaRegen', value: 3 }] },
   ],
   dexterity: [
-    { key: 'ks_dex_deadeye', label: 'Deadeye — +30 DEX and +1 Extra Arrow', grants: [{ type: 'stat', stat: 'dexterity', value: 30 }, { type: 'rule', rule: 'projectileCount', value: 1 }] },
-    { key: 'ks_dex_windrunner', label: 'Windrunner — +20 DEX, +80 max stamina, +10 stamina regen/s', grants: [{ type: 'stat', stat: 'dexterity', value: 20 }, { type: 'resource', pool: 'stamina', value: 80 }, { type: 'rule', rule: 'staminaRegen', value: 10 }] },
-    { key: 'ks_dex_piercing_shot', label: 'Piercing Shot — +30% physical damage and +2 Pierce', grants: [{ type: 'damage', element: 'physical', value: 30 }, { type: 'rule', rule: 'pierceBonus', value: 2 }] },
-    { key: 'ks_dex_evasion', label: 'Evasion — +12% resistance to every element', grants: [{ type: 'resist', element: 'physical', value: 12 }, { type: 'resist', element: 'arcane', value: 12 }, { type: 'resist', element: 'fire', value: 12 }, { type: 'resist', element: 'ice', value: 12 }, { type: 'resist', element: 'lightning', value: 12 }] },
-    { key: 'ks_dex_fleet', label: 'Fleet — your cooldown floor drops from 0.40 to 0.32', grants: [{ type: 'rule', rule: 'cooldownFloor', value: 0.32 }] },
+    { key: 'ks_dex_deadeye', label: 'Deadeye — +20 DEX and +1 Extra Arrow', grants: [{ type: 'stat', stat: 'dexterity', value: 20 }, { type: 'rule', rule: 'projectileCount', value: 1 }] },
+    { key: 'ks_dex_windrunner', label: 'Windrunner — +15 DEX, +40 max stamina, +5 stamina regen/s', grants: [{ type: 'stat', stat: 'dexterity', value: 15 }, { type: 'resource', pool: 'stamina', value: 40 }, { type: 'rule', rule: 'staminaRegen', value: 5 }] },
+    { key: 'ks_dex_piercing_shot', label: 'Piercing Shot — +15% physical damage and +1 Pierce', grants: [{ type: 'damage', element: 'physical', value: 15 }, { type: 'rule', rule: 'pierceBonus', value: 1 }] },
+    { key: 'ks_dex_evasion', label: 'Evasion — +6% resistance to every element', grants: [{ type: 'resist', element: 'physical', value: 6 }, { type: 'resist', element: 'arcane', value: 6 }, { type: 'resist', element: 'fire', value: 6 }, { type: 'resist', element: 'ice', value: 6 }, { type: 'resist', element: 'lightning', value: 6 }] },
+    { key: 'ks_dex_fleet', label: 'Fleet — your cooldown floor drops from 0.40 to 0.35', grants: [{ type: 'rule', rule: 'cooldownFloor', value: 0.35 }] },
   ],
   strength: [
-    { key: 'ks_str_executioner', label: 'Executioner — +25% physical damage and +20 melee reach', grants: [{ type: 'damage', element: 'physical', value: 25 }, { type: 'rule', rule: 'meleeReachBonus', value: 20 }] },
-    { key: 'ks_str_iron_hide', label: 'Iron Hide — +250 maximum life and +2.0 HP regen/s', grants: [{ type: 'resource', pool: 'hp', value: 250 }, { type: 'rule', rule: 'hpRegen', value: 2 }] },
-    { key: 'ks_str_bulwark', label: 'Bulwark — +20 CON and +10% physical resistance', grants: [{ type: 'stat', stat: 'constitution', value: 20 }, { type: 'resist', element: 'physical', value: 10 }] },
-    { key: 'ks_str_reckless_swing', label: 'Reckless Swing — +40% physical damage, -15% ice resistance', grants: [{ type: 'damage', element: 'physical', value: 40 }, { type: 'resist', element: 'ice', value: -15 }] },
-    { key: 'ks_str_unbreakable', label: 'Unbreakable — +30 STR and +150 maximum life', grants: [{ type: 'stat', stat: 'strength', value: 30 }, { type: 'resource', pool: 'hp', value: 150 }] },
+    { key: 'ks_str_executioner', label: 'Executioner — +15% physical damage and +12 melee reach', grants: [{ type: 'damage', element: 'physical', value: 15 }, { type: 'rule', rule: 'meleeReachBonus', value: 12 }] },
+    { key: 'ks_str_iron_hide', label: 'Iron Hide — +140 maximum life and +1.2 HP regen/s', grants: [{ type: 'resource', pool: 'hp', value: 140 }, { type: 'rule', rule: 'hpRegen', value: 1.2 }] },
+    { key: 'ks_str_bulwark', label: 'Bulwark — +15 CON and +6% physical resistance', grants: [{ type: 'stat', stat: 'constitution', value: 15 }, { type: 'resist', element: 'physical', value: 6 }] },
+    { key: 'ks_str_reckless_swing', label: 'Reckless Swing — +25% physical damage, -10% ice resistance', grants: [{ type: 'damage', element: 'physical', value: 25 }, { type: 'resist', element: 'ice', value: -10 }] },
+    { key: 'ks_str_unbreakable', label: 'Unbreakable — +20 STR and +100 maximum life', grants: [{ type: 'stat', stat: 'strength', value: 20 }, { type: 'resource', pool: 'hp', value: 100 }] },
   ],
   constitution: [
-    { key: 'ks_con_pain_ward', label: 'Pain Ward — +15% physical and +15% fire resistance, +2.0 HP regen/s', grants: [{ type: 'resist', element: 'physical', value: 15 }, { type: 'resist', element: 'fire', value: 15 }, { type: 'rule', rule: 'hpRegen', value: 2 }] },
-    { key: 'ks_con_undying', label: 'Undying — +40 CON', grants: [{ type: 'stat', stat: 'constitution', value: 40 }] },
-    { key: 'ks_con_vital_surge', label: 'Vital Surge — +300 maximum life', grants: [{ type: 'resource', pool: 'hp', value: 300 }] },
-    { key: 'ks_con_sanguine_rite', label: 'Sanguine Rite — life costs are reduced a further 20%', grants: [{ type: 'rule', rule: 'lifeCostMultiplier', value: 0.8 }] },
-    { key: 'ks_con_blood_pact', label: 'Blood Pact — life costs are reduced 25%', grants: [{ type: 'rule', rule: 'lifeCostMultiplier', value: 0.75 }] },
+    { key: 'ks_con_pain_ward', label: 'Pain Ward — +10% physical and +10% fire resistance, +1.2 HP regen/s', grants: [{ type: 'resist', element: 'physical', value: 10 }, { type: 'resist', element: 'fire', value: 10 }, { type: 'rule', rule: 'hpRegen', value: 1.2 }] },
+    { key: 'ks_con_undying', label: 'Undying — +25 CON', grants: [{ type: 'stat', stat: 'constitution', value: 25 }] },
+    { key: 'ks_con_vital_surge', label: 'Vital Surge — +180 maximum life', grants: [{ type: 'resource', pool: 'hp', value: 180 }] },
+    { key: 'ks_con_sanguine_rite', label: 'Sanguine Rite — life costs are reduced a further 12%', grants: [{ type: 'rule', rule: 'lifeCostMultiplier', value: 0.88 }] },
+    { key: 'ks_con_blood_pact', label: 'Blood Pact — life costs are reduced 15%', grants: [{ type: 'rule', rule: 'lifeCostMultiplier', value: 0.85 }] },
   ],
   charisma: [
-    { key: 'ks_cha_eternal_bear', label: 'Eternal Bear Form — +35 STR, +250 HP, +3.0 HP regen/s, +10% physical resistance', grants: [{ type: 'stat', stat: 'strength', value: 35 }, { type: 'resource', pool: 'hp', value: 250 }, { type: 'rule', rule: 'hpRegen', value: 3 }, { type: 'resist', element: 'physical', value: 10 }] },
-    { key: 'ks_cha_eternal_hawk', label: 'Eternal Hawk Form — +35 DEX, +80 max stamina, +8 stamina regen/s, +15% attack speed', grants: [{ type: 'stat', stat: 'dexterity', value: 35 }, { type: 'resource', pool: 'stamina', value: 80 }, { type: 'rule', rule: 'staminaRegen', value: 8 }, { type: 'rule', rule: 'attackSpeedMult', value: 1.15 }] },
-    { key: 'ks_cha_eternal_wolf', label: 'Eternal Wolf Form — +25 STR, +25 DEX, +25 CHA, +20% physical damage', grants: [{ type: 'stat', stat: 'strength', value: 25 }, { type: 'stat', stat: 'dexterity', value: 25 }, { type: 'stat', stat: 'charisma', value: 25 }, { type: 'damage', element: 'physical', value: 20 }] },
-    { key: 'ks_cha_primal_mastery', label: 'Primal Form Mastery — +30 STR, +30 DEX, +3.0 HP regen/s, +5.0 stamina regen/s', grants: [{ type: 'stat', stat: 'strength', value: 30 }, { type: 'stat', stat: 'dexterity', value: 30 }, { type: 'rule', rule: 'hpRegen', value: 3 }, { type: 'rule', rule: 'staminaRegen', value: 5 }] },
-    { key: 'ks_cha_menagerie', label: 'Menagerie — Aspect of the Wild (+35 CHA, +25 CON, +50 max mana, +4.0 mana regen/s)', grants: [{ type: 'stat', stat: 'charisma', value: 35 }, { type: 'stat', stat: 'constitution', value: 25 }, { type: 'resource', pool: 'mana', value: 50 }, { type: 'rule', rule: 'manaRegen', value: 4 }] },
+    { key: 'ks_cha_eternal_bear', label: 'Eternal Bear Form — +20 STR, +120 HP, +1.5 HP regen/s, +5% physical resistance', grants: [{ type: 'stat', stat: 'strength', value: 20 }, { type: 'resource', pool: 'hp', value: 120 }, { type: 'rule', rule: 'hpRegen', value: 1.5 }, { type: 'resist', element: 'physical', value: 5 }] },
+    { key: 'ks_cha_eternal_hawk', label: 'Eternal Hawk Form — +20 DEX, +40 max stamina, +4 stamina regen/s, +8% attack speed', grants: [{ type: 'stat', stat: 'dexterity', value: 20 }, { type: 'resource', pool: 'stamina', value: 40 }, { type: 'rule', rule: 'staminaRegen', value: 4 }, { type: 'rule', rule: 'attackSpeedMult', value: 1.08 }] },
+    { key: 'ks_cha_eternal_wolf', label: 'Eternal Wolf Form — +15 STR, +15 DEX, +15 CHA, +12% physical damage', grants: [{ type: 'stat', stat: 'strength', value: 15 }, { type: 'stat', stat: 'dexterity', value: 15 }, { type: 'stat', stat: 'charisma', value: 15 }, { type: 'damage', element: 'physical', value: 12 }] },
+    { key: 'ks_cha_primal_mastery', label: 'Primal Form Mastery — +20 STR, +20 DEX, +1.5 HP regen/s, +3.0 stamina regen/s', grants: [{ type: 'stat', stat: 'strength', value: 20 }, { type: 'stat', stat: 'dexterity', value: 20 }, { type: 'rule', rule: 'hpRegen', value: 1.5 }, { type: 'rule', rule: 'staminaRegen', value: 3 }] },
+    { key: 'ks_cha_menagerie', label: 'Menagerie — Aspect of the Wild (+20 CHA, +15 CON, +30 max mana, +2.0 mana regen/s)', grants: [{ type: 'stat', stat: 'charisma', value: 20 }, { type: 'stat', stat: 'constitution', value: 15 }, { type: 'resource', pool: 'mana', value: 30 }, { type: 'rule', rule: 'manaRegen', value: 2 }] },
   ],
 };
 
-// --- Epic clusters (SOMET-518) ---------------------------------------------
-//
-// A HUB plus 2 or 4 SATELLITES. The generator places the hub beyond ring 3 and
-// wires edges HUB<->SATELLITE ONLY -- no satellite touches the rest of the
-// graph.
-//
-// THAT WIRING IS THE WHOLE MECHANISM. isAllocatable walks the undirected
-// adjacency out from the start node, so a satellite is unreachable until its
-// hub is allocated. The gate is structural rather than a rule someone has to
-// remember to write, which is the difference between a guarantee and a
-// convention.
-//
-// UNITS. Reach and radius are PIXELS -- what w.reach and every world
-// coordinate already use. A tile is 64px, so the brief's "+0.5m" is +32.
-// Arcs are RADIANS. Speed rules are multipliers (1.10 = +10%) and compound.
-//
-// Each cluster names the class it is for. It sits in that class's own sector,
-// so the epic option a class wants is at the far edge of the tree they start
-// in -- a long walk, but their own.
 const CLUSTERS = [
   {
     key: 'clu_str_cleaving', sector: 'strength', hubLabel: 'Cleaving Reach',
-    hubGrants: [{ type: 'rule', rule: 'meleeReachBonus', value: 32 }],
+    hubGrants: [{ type: 'rule', rule: 'meleeReachBonus', value: 20 }],
     satellites: [
-      { label: 'Long Guard', grants: [{ type: 'rule', rule: 'meleeReachBonus', value: 16 }] },
-      { label: 'Extended Guard', grants: [{ type: 'rule', rule: 'meleeReachBonus', value: 16 }] },
+      { label: 'Long Guard', grants: [{ type: 'rule', rule: 'meleeReachBonus', value: 10 }] },
+      { label: 'Extended Guard', grants: [{ type: 'rule', rule: 'meleeReachBonus', value: 10 }] },
     ],
   },
   {
     key: 'clu_str_whirlwind', sector: 'strength', hubLabel: 'Whirlwind',
-    // 6.3 rad on top of a typical 1.8 arc clamps to a full turn at the
-    // authority, so this reads as "your swing becomes circular".
-    //
-    // SOMET-527 ADDED THE PENALTY. Shipped in SOMET-520 as a pure upgrade --
-    // a circle that cost nothing but points, and therefore not a choice. It
-    // now trades 30% of swung damage for hitting everything around you, which
-    // is what makes Spearpoint and Sweep worth considering against it.
     hubGrants: [
-      { type: 'rule', rule: 'meleeArcBonus', value: 6.3 },
-      { type: 'rule', rule: 'meleeDamageMult', value: 0.7 },
+      { type: 'rule', rule: 'meleeArcBonus', value: 3.5 },
+      { type: 'rule', rule: 'meleeDamageMult', value: 0.8 },
     ],
     satellites: [
-      { label: 'Momentum', grants: [{ type: 'rule', rule: 'attackSpeedMult', value: 1.1 }] },
-      { label: 'Follow-Through', grants: [{ type: 'rule', rule: 'attackSpeedMult', value: 1.1 }] },
-      { label: 'Whirling Step', grants: [{ type: 'rule', rule: 'attackSpeedMult', value: 1.1 }] },
-      { label: 'Unending Swing', grants: [{ type: 'rule', rule: 'attackSpeedMult', value: 1.1 }] },
+      { label: 'Momentum', grants: [{ type: 'rule', rule: 'attackSpeedMult', value: 1.05 }] },
+      { label: 'Follow-Through', grants: [{ type: 'rule', rule: 'attackSpeedMult', value: 1.05 }] },
+      { label: 'Whirling Step', grants: [{ type: 'rule', rule: 'attackSpeedMult', value: 1.05 }] },
+      { label: 'Unending Swing', grants: [{ type: 'rule', rule: 'attackSpeedMult', value: 1.05 }] },
     ],
   },
   {
-    // SOMET-527. The opposite trade to Whirlwind: everything in one direction.
-    // The negative arc is why meleeArcBonus was made a `sum` rather than a
-    // product -- narrowing is just an authored minus sign.
     key: 'clu_str_spearpoint', sector: 'strength', hubLabel: 'Spearpoint',
     hubGrants: [
-      { type: 'rule', rule: 'meleeReachBonus', value: 64 },
-      { type: 'rule', rule: 'meleeArcBonus', value: -0.9 },
+      { type: 'rule', rule: 'meleeReachBonus', value: 32 },
+      { type: 'rule', rule: 'meleeArcBonus', value: -0.5 },
     ],
     satellites: [
-      { label: 'Lunge', grants: [{ type: 'rule', rule: 'meleeReachBonus', value: 32 }] },
-      { label: 'Pike Drill', grants: [{ type: 'rule', rule: 'meleeReachBonus', value: 32 }] },
+      { label: 'Lunge', grants: [{ type: 'rule', rule: 'meleeReachBonus', value: 16 }] },
+      { label: 'Pike Drill', grants: [{ type: 'rule', rule: 'meleeReachBonus', value: 16 }] },
     ],
   },
   {
-    // Wide but close: crowd control that gives up the range Spearpoint buys.
-    // SOMET-528. The swing keeps burning the ground it swept for ~2s. Pairs
-    // deliberately with the SHAPE clusters: a lingering Spearpoint line and a
-    // lingering Sweep fan are different tools, which is why shapes shipped
-    // first.
     key: 'clu_str_afterimage', sector: 'strength', hubLabel: 'Afterimage',
-    hubGrants: [{ type: 'rule', rule: 'meleeWaveShare', value: 0.3 }],
+    hubGrants: [{ type: 'rule', rule: 'meleeWaveShare', value: 0.15 }],
     satellites: [
-      { label: 'Lingering Edge', grants: [{ type: 'rule', rule: 'meleeWaveShare', value: 0.1 }] },
-      { label: 'Slow Burn', grants: [{ type: 'rule', rule: 'meleeWaveShare', value: 0.1 }] },
+      { label: 'Lingering Edge', grants: [{ type: 'rule', rule: 'meleeWaveShare', value: 0.05 }] },
+      { label: 'Slow Burn', grants: [{ type: 'rule', rule: 'meleeWaveShare', value: 0.05 }] },
     ],
   },
   {
     key: 'clu_str_sweep', sector: 'strength', hubLabel: 'Sweep',
     hubGrants: [
-      { type: 'rule', rule: 'meleeArcBonus', value: 2 },
-      { type: 'rule', rule: 'meleeReachBonus', value: -24 },
+      { type: 'rule', rule: 'meleeArcBonus', value: 1.2 },
+      { type: 'rule', rule: 'meleeReachBonus', value: -12 },
     ],
     satellites: [
-      { label: 'Wide Stance', grants: [{ type: 'rule', rule: 'meleeArcBonus', value: 0.5 }] },
-      { label: 'Scything Blow', grants: [{ type: 'rule', rule: 'meleeArcBonus', value: 0.5 }] },
+      { label: 'Wide Stance', grants: [{ type: 'rule', rule: 'meleeArcBonus', value: 0.3 }] },
+      { label: 'Scything Blow', grants: [{ type: 'rule', rule: 'meleeArcBonus', value: 0.3 }] },
     ],
   },
   {
     key: 'clu_dex_volley', sector: 'dexterity', hubLabel: 'Volley',
     hubGrants: [{ type: 'rule', rule: 'projectileCount', value: 1 }],
     satellites: [
-      { label: 'Split Arrow', grants: [{ type: 'rule', rule: 'projectileCount', value: 1 }] },
-      { label: 'Scattershot', grants: [{ type: 'rule', rule: 'projectileCount', value: 1 }] },
+      { label: 'Split Arrow', grants: [{ type: 'rule', rule: 'projectileSpeedMult', value: 1.05 }] },
+      { label: 'Scattershot', grants: [{ type: 'rule', rule: 'projectileSpeedMult', value: 1.05 }] },
     ],
   },
   {
     key: 'clu_dex_swiftshot', sector: 'dexterity', hubLabel: 'Swiftshot',
-    hubGrants: [{ type: 'rule', rule: 'projectileSpeedMult', value: 1.25 }],
+    hubGrants: [{ type: 'rule', rule: 'projectileSpeedMult', value: 1.15 }],
     satellites: [
-      { label: 'Taut String', grants: [{ type: 'rule', rule: 'projectileSpeedMult', value: 1.1 }] },
-      { label: 'Fletching', grants: [{ type: 'rule', rule: 'projectileSpeedMult', value: 1.1 }] },
-      { label: 'Draw Weight', grants: [{ type: 'rule', rule: 'projectileSpeedMult', value: 1.1 }] },
-      { label: 'Loosed Wind', grants: [{ type: 'rule', rule: 'projectileSpeedMult', value: 1.1 }] },
+      { label: 'Taut String', grants: [{ type: 'rule', rule: 'projectileSpeedMult', value: 1.05 }] },
+      { label: 'Fletching', grants: [{ type: 'rule', rule: 'projectileSpeedMult', value: 1.05 }] },
+      { label: 'Draw Weight', grants: [{ type: 'rule', rule: 'projectileSpeedMult', value: 1.05 }] },
+      { label: 'Loosed Wind', grants: [{ type: 'rule', rule: 'projectileSpeedMult', value: 1.05 }] },
     ],
   },
   {
     key: 'clu_int_quickcast', sector: 'intelligence', hubLabel: 'Quickcast',
-    hubGrants: [{ type: 'rule', rule: 'castSpeedMult', value: 1.2 }],
+    hubGrants: [{ type: 'rule', rule: 'castSpeedMult', value: 1.12 }],
     satellites: [
-      { label: 'Swift Incant', grants: [{ type: 'rule', rule: 'castSpeedMult', value: 1.08 }] },
-      { label: 'Practised Cadence', grants: [{ type: 'rule', rule: 'castSpeedMult', value: 1.08 }] },
-      { label: 'Sharp Syllables', grants: [{ type: 'rule', rule: 'castSpeedMult', value: 1.08 }] },
-      { label: 'Thoughtform', grants: [{ type: 'rule', rule: 'castSpeedMult', value: 1.08 }] },
+      { label: 'Swift Incant', grants: [{ type: 'rule', rule: 'castSpeedMult', value: 1.04 }] },
+      { label: 'Practised Cadence', grants: [{ type: 'rule', rule: 'castSpeedMult', value: 1.04 }] },
+      { label: 'Sharp Syllables', grants: [{ type: 'rule', rule: 'castSpeedMult', value: 1.04 }] },
+      { label: 'Thoughtform', grants: [{ type: 'rule', rule: 'castSpeedMult', value: 1.04 }] },
     ],
   },
   {
     key: 'clu_int_spellpierce', sector: 'intelligence', hubLabel: 'Spellpierce',
-    hubGrants: [{ type: 'rule', rule: 'pierceBonus', value: 2 }],
+    hubGrants: [{ type: 'rule', rule: 'pierceBonus', value: 1 }],
     satellites: [
-      { label: 'Rending Bolt', grants: [{ type: 'rule', rule: 'pierceBonus', value: 1 }] },
-      { label: 'Unspent Force', grants: [{ type: 'rule', rule: 'pierceBonus', value: 1 }] },
+      { label: 'Rending Bolt', grants: [{ type: 'rule', rule: 'castSpeedMult', value: 1.04 }] },
+      { label: 'Unspent Force', grants: [{ type: 'rule', rule: 'castSpeedMult', value: 1.04 }] },
     ],
   },
   {
     key: 'clu_con_sanguine', sector: 'constitution', hubLabel: 'Sanguine Aura',
-    hubGrants: [{ type: 'rule', rule: 'auraLeech', value: 2 }],
+    hubGrants: [{ type: 'rule', rule: 'auraLeech', value: 1 }],
     satellites: [
-      { label: 'Crimson Thirst', grants: [{ type: 'rule', rule: 'auraLeech', value: 1 }] },
-      { label: 'Deepening Thirst', grants: [{ type: 'rule', rule: 'auraLeech', value: 1 }] },
-      { label: 'Spreading Stain', grants: [{ type: 'rule', rule: 'auraRadius', value: 40 }] },
-      { label: 'Wide Communion', grants: [{ type: 'rule', rule: 'auraRadius', value: 40 }] },
+      { label: 'Crimson Thirst', grants: [{ type: 'rule', rule: 'auraLeech', value: 0.5 }] },
+      { label: 'Deepening Thirst', grants: [{ type: 'rule', rule: 'auraLeech', value: 0.5 }] },
+      { label: 'Spreading Stain', grants: [{ type: 'rule', rule: 'auraRadius', value: 20 }] },
+      { label: 'Wide Communion', grants: [{ type: 'rule', rule: 'auraRadius', value: 20 }] },
     ],
   },
   {
-    // REPLACES ks_wis_clarity, which granted the same rule. Shipping both
-    // would pay the Monk twice for one idea.
     key: 'clu_wis_clarity', sector: 'wisdom', hubLabel: 'Clarity',
-    hubGrants: [{ type: 'rule', rule: 'regenLifeShare', value: 0.2 }],
+    hubGrants: [{ type: 'rule', rule: 'regenLifeShare', value: 0.1 }],
     satellites: [
-      { label: 'Still Water', grants: [{ type: 'rule', rule: 'regenLifeShare', value: 0.05 }] },
-      { label: 'Even Breath', grants: [{ type: 'rule', rule: 'regenLifeShare', value: 0.05 }] },
-      { label: 'Quiet Mind', grants: [{ type: 'rule', rule: 'regenLifeShare', value: 0.05 }] },
-      { label: 'Open Palm', grants: [{ type: 'rule', rule: 'regenLifeShare', value: 0.05 }] },
+      { label: 'Still Water', grants: [{ type: 'rule', rule: 'regenLifeShare', value: 0.02 }] },
+      { label: 'Even Breath', grants: [{ type: 'rule', rule: 'regenLifeShare', value: 0.02 }] },
+      { label: 'Quiet Mind', grants: [{ type: 'rule', rule: 'regenLifeShare', value: 0.02 }] },
+      { label: 'Open Palm', grants: [{ type: 'rule', rule: 'regenLifeShare', value: 0.02 }] },
     ],
   },
   {
-    // REPLACES ks_cha_beast_bond, for the same reason.
     key: 'clu_cha_beast_bond', sector: 'charisma', hubLabel: 'Beast Bond',
-    hubGrants: [{ type: 'rule', rule: 'treeCharmBonus', value: 5 }],
+    hubGrants: [{ type: 'rule', rule: 'treeCharmBonus', value: 3 }],
     satellites: [
       { label: 'Kindred Call', grants: [{ type: 'rule', rule: 'treeCharmBonus', value: 1 }] },
       { label: 'Wider Pack', grants: [{ type: 'rule', rule: 'treeCharmBonus', value: 1 }] },

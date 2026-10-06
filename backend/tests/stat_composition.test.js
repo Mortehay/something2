@@ -91,10 +91,8 @@ test('rules combine by their declared mode: product, sum and min', () => {
     gear: [],
   });
 
-  // 0.75 * 0.8 in binary floating point is 0.6000000000000001; the module
-  // rounds rule products to 4dp for the same reason playerStats.js's round4
-  // exists, so the literal below is 0.6 and not a tolerance argument.
-  assert.strictEqual(r.rules.lifeCostMultiplier, 0.6);
+  // Additive percentage reduction: 1 - (0.25 + 0.20) = 0.55
+  assert.strictEqual(r.rules.lifeCostMultiplier, 0.55);
   assert.strictEqual(r.rules.treeCharmBonus, 8);
   assert.strictEqual(r.rules.cooldownFloor, 0.32);
   assert.strictEqual(r.rules.regenLifeShare, 0);

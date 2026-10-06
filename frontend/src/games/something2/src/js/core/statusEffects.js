@@ -24,45 +24,45 @@ export const EFFECT_ELEMENT = {
   shock: "lightning",
 };
 
-// Drawn/listed in this order regardless of the order the server happened to
-// iterate its Map in, so a player under two effects sees a stable HUD line and
-// a stable ring order rather than something that flickers between frames.
 export const EFFECT_ORDER = ["burn", "chill", "shock"];
 
-// Short HUD labels. Deliberately the player-facing word rather than the wire
-// key: "Slowed" says what chill does, "chill" only says what it is called.
 const EFFECT_LABEL = {
   burn: "Burning",
   chill: "Slowed",
   shock: "Shocked",
 };
 
-// Filter to keys this client understands, in EFFECT_ORDER.
-//
-// An unknown key is DROPPED rather than drawn in the fallback colour. A server
-// that adds a fourth effect before the client ships would otherwise paint it
-// with lightning's yellow and read to the player as a shock — a wrong tint is
-// worse than no tint, because the player acts on it.
-export function normalizeEffects(keys) {
-  if (!Array.isArray(keys) || keys.length === 0) return [];
-  return EFFECT_ORDER.filter((k) => keys.includes(k));
+export const STATUS_EFFECT_CATALOG = {
+  burn: { nameEn: "Burning", nameUk: "Горіння", icon: "🔥", category: "debuff", color: elementColor("fire") },
+  chill: { nameEn: "Slowed", nameUk: "Уповільнення", icon: "❄️", category: "debuff", color: elementColor("ice") },
+  shock: { nameEn: "Shocked", nameUk: "Шок", icon: "⚡", category: "debuff", color: elementColor("lightning") },
+  victors_boon: { nameEn: "Victor's Boon", nameUk: "Благословення Переможця", icon: "👑", category: "buff", color: "#ffd166" },
+  steel_tempering: { nameEn: "Steel Tempering", nameUk: "Загартування Сталі", icon: "🛡️", category: "buff", color: "#4ade80" },
+  arcane_barrier: { nameEn: "Arcane Barrier", nameUk: "Аркановий Бар'єр", icon: "🔮", category: "buff", color: "#a55eea" },
+  frenzy: { nameEn: "Frenzy", nameUk: "Лють", icon: "🩸", category: "buff", color: "#eb3b5a" },
+  poison: { nameEn: "Poisoned", nameUk: "Отруєння", icon: "☠️", category: "debuff", color: "#20bf6b" },
+};
+
+export function getStatusEffectDetails(key) {
+  if (STATUS_EFFECT_CATALOG[key]) return STATUS_EFFECT_CATALOG[key];
+  return null;
 }
 
-// The colour for one effect key, routed through the SAME elementColor table
-// the projectiles and blast rings use — a burn tint and the fire bolt that
-// caused it must not be two different oranges. Returns null for an unknown
-// key so callers skip it rather than drawing a default.
+export function normalizeEffects(keys) {
+  if (!Array.isArray(keys) || keys.length === 0) return [];
+  const known = new Set(EFFECT_ORDER);
+  const present = new Set(keys.filter((k) => known.has(k)));
+  return EFFECT_ORDER.filter((k) => present.has(k));
+}
+
 export function effectColor(key) {
   const element = EFFECT_ELEMENT[key];
   return element ? elementColor(element) : null;
 }
 
-// The HUD line for the local player's own effects, or null to draw nothing.
-// Null (not "") so the caller can omit the line entirely rather than pushing a
-// blank row into the HUD box, which would make the panel jump a row taller
-// whenever anything touched the player.
 export function effectHudLine(keys) {
   const active = normalizeEffects(keys);
   if (active.length === 0) return null;
   return active.map((k) => EFFECT_LABEL[k]).join("  ");
 }
+

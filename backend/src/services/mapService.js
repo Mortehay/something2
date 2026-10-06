@@ -342,21 +342,23 @@ function generateConnectingRoads(cfg, defaultPathTile) {
     }
   }
 
-  // Connect each village's main gate to its Skill House gate with a wide visible road
+  // Connect each village's main gate to its Skill House gate and auxiliary houses with roads
   if (Array.isArray(cfg.villages)) {
     for (const v of cfg.villages) {
       const mainExit = villageGateExit(v);
-      const skHouse = villageSkillHouse(v);
-      const skExit = villageGateExit(skHouse);
       const [r1, c1] = mainExit.exit;
-      const [r2, c2] = skExit.exit;
-      addRoad([[r1, c1], [r2, c1], [r2, c2]]);
-      if (v.gateEdge === 'E' || v.gateEdge === 'W') {
-        const offsetCol = v.gateEdge === 'E' ? -1 : 1;
-        addRoad([[r1, c1 + offsetCol], [r2 - 1, c1 + offsetCol], [r2 - 1, c2]]);
-      } else {
-        const offsetRow = v.gateEdge === 'S' ? -1 : 1;
-        addRoad([[r1 + offsetRow, c1], [r1 + offsetRow, c2], [r2, c2]]);
+
+      for (const house of villageHouses(v)) {
+        const hExit = villageGateExit(house);
+        const [r2, c2] = hExit.exit;
+        addRoad([[r1, c1], [r2, c1], [r2, c2]]);
+        if (v.gateEdge === 'E' || v.gateEdge === 'W') {
+          const offsetCol = v.gateEdge === 'E' ? -1 : 1;
+          addRoad([[r1, c1 + offsetCol], [r2 - 1, c1 + offsetCol], [r2 - 1, c2]]);
+        } else {
+          const offsetRow = v.gateEdge === 'S' ? -1 : 1;
+          addRoad([[r1 + offsetRow, c1], [r1 + offsetRow, c2], [r2, c2]]);
+        }
       }
 
       // Connect village gate and house entrance outward to the main road network & path lattice
@@ -369,10 +371,6 @@ function generateConnectingRoads(cfg, defaultPathTile) {
       const latticeC = Math.round(c1 / cfg.pathCell) * cfg.pathCell;
       addRoad([[r1, c1], [latticeR, c1], [latticeR, latticeC]]);
       addRoad([[r1, c1], [r1, latticeC], [latticeR, latticeC]]);
-
-      // Also connect the skill house / front plaza outward
-      addRoad([[r2, c2], [latticeR, c2], [latticeR, latticeC]]);
-      addRoad([[r2, c2], [r2, latticeC], [latticeR, latticeC]]);
     }
   }
 
@@ -602,7 +600,9 @@ function generateRegion(world, rMin, cMin, rows, cols) {
   if (cfg.villages) {
     for (const v of cfg.villages) {
       stampVillage(grid, rMin, cMin, rows, cols, v);
-      stampVillage(grid, rMin, cMin, rows, cols, villageSkillHouse(v));
+      for (const house of villageHouses(v)) {
+        stampVillage(grid, rMin, cMin, rows, cols, house);
+      }
     }
   }
   return grid;
@@ -757,10 +757,11 @@ function isExcludedBlockerCell(cfg, spawn, portals, gRow, gCol) {
       if (gRow >= v.minRow - VILLAGE_RING && gRow < v.minRow + v.height + VILLAGE_RING &&
           gCol >= v.minCol - VILLAGE_RING && gCol < v.minCol + v.width + VILLAGE_RING) return true;
       if (inGateCorridor(v, gRow, gCol)) return true;
-      const sk = villageSkillHouse(v);
-      if (gRow >= sk.minRow - VILLAGE_RING && gRow < sk.minRow + sk.height + VILLAGE_RING &&
-          gCol >= sk.minCol - VILLAGE_RING && gCol < sk.minCol + sk.width + VILLAGE_RING) return true;
-      if (inGateCorridor(sk, gRow, gCol)) return true;
+      for (const house of villageHouses(v)) {
+        if (gRow >= house.minRow - VILLAGE_RING && gRow < house.minRow + house.height + VILLAGE_RING &&
+            gCol >= house.minCol - VILLAGE_RING && gCol < house.minCol + house.width + VILLAGE_RING) return true;
+        if (inGateCorridor(house, gRow, gCol)) return true;
+      }
     }
   }
   if (inDoorwayApproach(cfg.bounds, gRow, gCol)) return true;
@@ -1027,7 +1028,9 @@ function safeContextFor(cfg) {
   if (Array.isArray(cfg.villages)) {
     for (const v of cfg.villages) {
       allVillages.push(v);
-      allVillages.push(villageSkillHouse(v));
+      for (const house of villageHouses(v)) {
+        allVillages.push(house);
+      }
     }
   }
   const ctx = buildSafeContext({
@@ -1560,6 +1563,103 @@ function villageSkillHouse(v) {
   };
 }
 
+// Dedicated Quest Hall / Elder's Lodge housing the Quest Giver NPC.
+function villageQuestHouse(v) {
+  const w = 4, h = 4;
+  let minRow, minCol, gateEdge;
+  if (v.gateEdge === 'S' || v.gateEdge === 'N') {
+    minRow = v.minRow;
+    minCol = Math.max(2, v.minCol - 6);
+    gateEdge = 'E';
+  } else if (v.gateEdge === 'W') {
+    minRow = Math.max(2, v.minRow - 6);
+    minCol = v.minCol;
+    gateEdge = 'S';
+  } else {
+    minRow = Math.max(2, v.minRow - 6);
+    minCol = v.minCol;
+    gateEdge = 'S';
+  }
+  return {
+    minRow,
+    minCol,
+    width: w,
+    height: h,
+    gateEdge,
+    wallTile: 'wooden_wall',
+    gateTile: 'village_gate',
+  };
+}
+
+// Quest Giver / Elder Eldrin post: stands inside the dedicated Quest Hall.
+function villageQuestGiverPost(v) {
+  const house = villageQuestHouse(v);
+  const row = house.minRow + 1;
+  const col = house.minCol + 1;
+  return { x: col * 100 + 50, y: row * 100 + 50 };
+}
+
+// Residential Cottage for villagers.
+function villageCottage(v) {
+  const w = 4, h = 4;
+  let minRow, minCol, gateEdge;
+  if (v.gateEdge === 'S' || v.gateEdge === 'N') {
+    minRow = Math.max(2, v.minRow - 6);
+    minCol = v.minCol + 1;
+    gateEdge = 'S';
+  } else if (v.gateEdge === 'W') {
+    minRow = v.minRow;
+    minCol = v.minCol + v.width + 2;
+    gateEdge = 'W';
+  } else {
+    minRow = v.minRow;
+    minCol = Math.max(2, v.minCol - 6);
+    gateEdge = 'E';
+  }
+  return {
+    minRow,
+    minCol,
+    width: w,
+    height: h,
+    gateEdge,
+    wallTile: 'wooden_wall',
+    gateTile: 'village_gate',
+  };
+}
+
+// Village Tavern / Common Lodge.
+function villageTavern(v) {
+  const w = 5, h = 4;
+  let minRow, minCol, gateEdge;
+  if (v.gateEdge === 'S' || v.gateEdge === 'N') {
+    minRow = v.minRow + v.height + 2;
+    minCol = v.minCol + 1;
+    gateEdge = 'N';
+  } else if (v.gateEdge === 'W') {
+    minRow = v.minRow + v.height + 2;
+    minCol = Math.max(2, v.minCol - 7);
+    gateEdge = 'E';
+  } else {
+    minRow = v.minRow + v.height + 2;
+    minCol = v.minCol + v.width + 2;
+    gateEdge = 'W';
+  }
+  return {
+    minRow,
+    minCol,
+    width: w,
+    height: h,
+    gateEdge,
+    wallTile: 'wooden_wall',
+    gateTile: 'village_gate',
+  };
+}
+
+// Returns the full collection of houses for village v
+function villageHouses(v) {
+  return [villageSkillHouse(v), villageQuestHouse(v), villageCottage(v), villageTavern(v)];
+}
+
 // Skill Merchant post: stands inside the dedicated Skill House.
 function villageSkillMerchantPost(v) {
   const house = villageSkillHouse(v);
@@ -1903,6 +2003,11 @@ module.exports = {
     villageGemMerchantPost,
     villageSkillMerchantPost,
     villageSkillHouse,
+    villageQuestHouse,
+    villageQuestGiverPost,
+    villageCottage,
+    villageTavern,
+    villageHouses,
     DOORWAY_TILES,
     // SOMET-510: the decoration clearance rule and the geometry it is built
     // from, exported so the rule can be tested cell-by-cell rather than only
