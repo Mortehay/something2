@@ -474,8 +474,8 @@ export class RenderSystem {
     for (const d of drawables) {
       if (d.kind === "wall") {
         drawWall(this.ctx, { s: d.s, def: d.def, visual: d.visual, H: d.H, alpha: 1, halfW, halfH, tileCache: this._tileCache });
-      } else if (d.kind === "player") this.drawCreature(d.ref, "player", 1);
-      else if (d.kind === "remote") this.drawCreature(d.ref, "player", 0.85, d.userId);
+      } else if (d.kind === "player") this.drawCreature(d.ref, d.ref.imageKey || "player", 1);
+      else if (d.kind === "remote") this.drawCreature(d.ref, d.ref.imageKey || "player", 0.85, d.userId);
       else if (d.kind === "grounditem") this.drawGroundItem(d.ref, inventory, player);
       else if (d.kind === "merchant") this.drawMerchant(d.ref, player);
       else if (d.kind === "gem_merchant") this.drawGemMerchant(d.ref, player);
@@ -3051,8 +3051,15 @@ export class RenderSystem {
     // method already computed — see _drawEffectRings on why not s.y.
     this._drawEffectRings(s.x, drawY + h, w, obj.effects);
     const img = this.imageManager.get(imageKey);
+    const resolved = RenderSystem.resolveSprite(
+      obj, this.imageManager, obj.renderMode || 'static', this.nowMs,
+    );
     this.ctx.globalAlpha = alpha;
-    if (img) {
+    if (resolved) {
+      const [sx, sy, sw, sh] = resolved.crop;
+      const r = fitSpriteRect(sw, sh, drawX, drawY, w, h);
+      this.ctx.drawImage(resolved.img, sx, sy, sw, sh, r.dx, r.dy, r.dw, r.dh);
+    } else if (img) {
       // SOMET-569: fit, do not stretch. See fitSpriteRect.
       const r = fitSpriteRect(img.width, img.height, drawX, drawY, w, h);
       this.ctx.drawImage(img, r.dx, r.dy, r.dw, r.dh);
@@ -4209,7 +4216,7 @@ export class RenderSystem {
       // its single-writer progression row and this method stays a pass-through.
       character: v.character || null,
       modPage: v.modPage || 0,
-      playerImage: this.imageManager ? this.imageManager.get("player") : null,
+      playerImage: this.imageManager ? this.imageManager.get(v.playerImageKey || "player") : null,
     };
     const layout = layoutInventory(state);
     for (const a of layout.hitAreas) hitAreas.push(a);

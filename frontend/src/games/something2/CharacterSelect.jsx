@@ -3,6 +3,7 @@ import styled from 'styled-components';
 import { usePlayableClasses, useCreateCharacter, useDeleteCharacter } from './useCharacters.js';
 import { canCreate, slotsUsed } from './characterSession.js';
 import { describeClass } from './classIdentity.js';
+import { assetUrl } from './useTileSprites.js';
 
 // The character list and create form, rendered in place of the game canvas
 // until a character is chosen. Deliberately thin: every rule worth testing
@@ -49,7 +50,7 @@ const List = styled.ul`
 
 const Row = styled.li`
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 4.8rem 1fr auto auto;
   gap: 1.2rem;
   align-items: center;
   padding: 1rem 1.2rem;
@@ -58,6 +59,41 @@ const Row = styled.li`
 
   .name { font-weight: 600; }
   .meta { color: var(--color-grey-500); font-size: 1.3rem; }
+`;
+
+const Portrait = styled.div`
+  width: 4.8rem;
+  height: 4.8rem;
+  border-radius: 6px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: ${(p) => p.$color || 'var(--color-grey-100)'};
+  color: #fff;
+  font-weight: 700;
+
+  img { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
+`;
+
+const AppearanceGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.6rem;
+`;
+
+const AppearanceButton = styled.button`
+  min-height: 6.4rem;
+  border: 2px solid ${(p) => p.$selected ? 'var(--color-brand-600)' : 'var(--color-grey-200)'};
+  border-radius: 6px;
+  background: ${(p) => p.$color || 'var(--color-grey-100)'};
+  color: #fff;
+  cursor: pointer;
+  overflow: hidden;
+  position: relative;
+
+  img { width: 100%; height: 5.6rem; object-fit: contain; image-rendering: pixelated; }
+  span { position: absolute; right: 0.4rem; bottom: 0.2rem; font-size: 1.1rem; text-shadow: 0 1px 2px #000; }
+  &:focus-visible { outline: 2px solid var(--color-brand-600); outline-offset: 2px; }
 `;
 
 const Button = styled.button`
@@ -109,6 +145,7 @@ export default function CharacterSelect({ characters, maxCharacters, onPlay }) {
   const deleteCharacter = useDeleteCharacter();
   const [name, setName] = useState('');
   const [entityTypeId, setEntityTypeId] = useState(null);
+  const [appearanceVariant, setAppearanceVariant] = useState(1);
 
   const list = Array.isArray(characters) ? characters : [];
   const cap = maxCharacters;
@@ -116,11 +153,12 @@ export default function CharacterSelect({ characters, maxCharacters, onPlay }) {
   // is never enabled before we can honour it.
   const roomLeft = cap != null && canCreate(characters, cap);
   const chosenClass = entityTypeId ?? (classes && classes.length ? classes[0].id : null);
+  const chosenClassDef = (classes || []).find((cls) => cls.id === chosenClass) || null;
 
   function submit(e) {
     e.preventDefault();
     if (!roomLeft || chosenClass == null) return;
-    createCharacter.mutate({ name, entityTypeId: chosenClass }, {
+    createCharacter.mutate({ name, entityTypeId: chosenClass, appearanceVariant }, {
       onSuccess: () => setName(''),
     });
   }
@@ -144,6 +182,11 @@ export default function CharacterSelect({ characters, maxCharacters, onPlay }) {
         <List>
           {list.map((c) => (
             <Row key={c.id}>
+              <Portrait $color={(classes || []).find((x) => x.name === c.className)?.color}>
+                {c.appearance?.image
+                  ? <img src={assetUrl(c.appearance.image)} alt="" />
+                  : c.className?.slice(0, 1)}
+              </Portrait>
               <div>
                 <div className="name">{c.name}</div>
                 <div className="meta">
@@ -183,7 +226,7 @@ export default function CharacterSelect({ characters, maxCharacters, onPlay }) {
                   name="character-class"
                   value={cls.id}
                   checked={chosenClass === cls.id}
-                  onChange={() => setEntityTypeId(cls.id)}
+                  onChange={() => { setEntityTypeId(cls.id); setAppearanceVariant(1); }}
                 />
                 {/* SOMET-486: these are the class's real base pools, straight
                     off the same entity_types columns the authority derives a
@@ -200,6 +243,7 @@ export default function CharacterSelect({ characters, maxCharacters, onPlay }) {
                     drops out without this file naming it. */}
                 <span className="pick">
                   <span>
+                    {cls.image && <img src={assetUrl(cls.image)} alt="" width="32" height="32" />}
                     {cls.name}{' '}
                     <span className="why">({cls.hp} hp / {cls.mana} mana)</span>
                   </span>
@@ -208,6 +252,27 @@ export default function CharacterSelect({ characters, maxCharacters, onPlay }) {
               </label>
             ))}
           </fieldset>
+          {chosenClassDef && (
+            <fieldset disabled={!roomLeft}>
+              <legend className="why">Appearance</legend>
+              <AppearanceGrid>
+                {(chosenClassDef.appearances || []).map((appearance) => (
+                  <AppearanceButton
+                    key={appearance.variant}
+                    type="button"
+                    $selected={appearanceVariant === appearance.variant}
+                    $color={chosenClassDef.color}
+                    aria-label={`${chosenClassDef.name} ${appearance.label}`}
+                    aria-pressed={appearanceVariant === appearance.variant}
+                    onClick={() => setAppearanceVariant(appearance.variant)}
+                  >
+                    {appearance.image && <img src={assetUrl(appearance.image)} alt="" />}
+                    <span>{appearance.variant}</span>
+                  </AppearanceButton>
+                ))}
+              </AppearanceGrid>
+            </fieldset>
+          )}
           <PrimaryButton
             type="submit"
             disabled={!roomLeft || !name.trim() || createCharacter.isPending}

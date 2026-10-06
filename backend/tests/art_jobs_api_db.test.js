@@ -92,6 +92,21 @@ lockedTest('GET /api/art-subjects pages the catalogue 100 at a time', async (t) 
   assert.equal(p4.body.subjects.length, 0, 'past the end is empty, not an error');
 });
 
+lockedTest('GET /api/art-subjects exposes every character appearance as missing art',
+  async (t) => {
+    const res = await request(app)
+      .get('/api/art-subjects/character_appearance?missing_only=true&per_page=500')
+      .set(...AUTH);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.total, 30);
+    assert.equal(res.body.subjects.length, 30);
+    assert.ok(res.body.subjects.every((s) => (
+      s.kind === 'character_appearance' && !s.has_art && s.takes_description
+    )));
+    assert.ok(res.body.subjects.some((s) => s.key === 'Warrior:1'));
+    assert.ok(res.body.subjects.some((s) => s.key === 'Druid:5'));
+  });
+
 // The response carries `row` internally -- the whole catalogue row. Shipping it
 // would send the catalog twice on every page.
 lockedTest('a page carries only the named fields, not the whole catalogue row', async (t) => {
@@ -108,7 +123,7 @@ lockedTest('an unknown subject kind is a 400 that names the valid ones', async (
   const res = await request(app).get('/api/art-subjects/nonsense').set(...AUTH);
   assert.equal(res.status, 400);
   assert.deepEqual(res.body.kinds.sort(),
-    ['entity', 'item', 'passive_label', 'skill', 'tile']);
+    ['character_appearance', 'entity', 'item', 'passive_label', 'skill', 'tile']);
 });
 
 // THE RESUME MECHANISM. A batch is resumable because the filter reads the
@@ -831,7 +846,7 @@ lockedTest('a description for a subject that is not in the catalogue is refused'
 lockedTest('the listing says which kinds take a description, and it matches the route',
   async (t) => {
     for (const [kind, expected] of [['skill', true], ['item', true],
-      ['passive_label', true], ['entity', true], ['tile', false]]) {
+      ['passive_label', true], ['entity', true], ['character_appearance', true], ['tile', false]]) {
       // eslint-disable-next-line no-await-in-loop
       const res = await request(app).get(`/api/art-subjects/${kind}?per_page=1`).set(...AUTH);
       assert.equal(res.status, 200);

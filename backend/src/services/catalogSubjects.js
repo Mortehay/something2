@@ -11,7 +11,7 @@ const { resolveGenerationTarget } = require('./generationTarget.js');
 // class skills, and passive-tree labels -- in one place, so adding a fourth is
 // an entry here rather than an edit in four files.
 //
-// SCOPE (widened by SOMET-538): all five kinds now live here. Tiles and
+// SCOPE (widened by SOMET-538): every art kind lives here. Tiles and
 // entities were deliberately left out at first -- their loaders carry biome
 // prompts and per-type provider pins that only the bulk tool used, and moving
 // them to prove a point would have risked ~300 working images for no behaviour
@@ -131,6 +131,54 @@ const SUBJECTS = Object.freeze({
       const { rows } = await db.query(
         `SELECT name, icon AS image, updated_at FROM item_types
           WHERE icon IS NOT NULL AND icon <> ''`,
+      );
+      return indexArt(rows);
+    },
+  },
+
+  // Five independently generated portraits/stills for every playable class.
+  // The entity type's image remains the fallback until a slot gets its own
+  // art; it deliberately does not count as this subject's art, otherwise all
+  // 30 slots would disappear from the console's Missing art filter.
+  character_appearance: {
+    kind: 'character_appearance',
+    generationKind: 'object',
+    async list(db) {
+      const { rows } = await db.query(
+        `SELECT ca.entity_type_id, ca.variant, ca.label, ca.image, ca.sprite,
+                ca.render_mode, ca.updated_at, e.name AS class_name,
+                e.prompt AS class_prompt
+           FROM character_appearances ca
+           JOIN entity_types e ON e.id = ca.entity_type_id
+          WHERE e.is_playable = true
+          ORDER BY e.name, ca.variant`,
+      );
+      return rows.map((row) => ({
+        kind: 'character_appearance',
+        key: `${row.class_name}:${row.variant}`,
+        name: `${row.class_name} appearance ${row.variant}`,
+        basePrompt: `${row.class_prompt || row.class_name}, ${row.label}`,
+        row,
+      }));
+    },
+    async write(db, key, image) {
+      const { rows } = await db.query(
+        `UPDATE character_appearances ca
+            SET image = $1, sprite = NULL, render_mode = 'static', updated_at = now()
+           FROM entity_types e
+          WHERE e.id = ca.entity_type_id AND e.is_playable = true
+            AND e.name || ':' || ca.variant::text = $2
+          RETURNING ca.entity_type_id, ca.variant`,
+        [image, key],
+      );
+      return rows[0] || null;
+    },
+    async artIndex(db) {
+      const { rows } = await db.query(
+        `SELECT e.name || ':' || ca.variant::text AS name, ca.image, ca.updated_at
+           FROM character_appearances ca
+           JOIN entity_types e ON e.id = ca.entity_type_id
+          WHERE e.is_playable = true AND ca.image IS NOT NULL AND ca.image <> ''`,
       );
       return indexArt(rows);
     },

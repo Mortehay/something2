@@ -65,6 +65,10 @@ describe('autoJoinTarget', () => {
     expect(autoJoinTarget({ ...base, mapTiles: undefined })).toBeNull();
   });
 
+  it('waits when the character appearance catalog has not arrived yet', () => {
+    expect(autoJoinTarget({ ...base, appearanceCatalogReady: false })).toBeNull();
+  });
+
   it('does not re-join, hijack an admin, or fire without a Game', () => {
     expect(autoJoinTarget({ ...base, alreadyJoined: true })).toBeNull();
     expect(autoJoinTarget({ ...base, isPlaying: true })).toBeNull();

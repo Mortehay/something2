@@ -1,7 +1,7 @@
 // Data for the mass-generation console (SOMET-538).
 //
 // EVERY SUBJECT IS FETCHED, not a server page at a time. The catalogue is ~1000
-// rows across five kinds and each row is a handful of short fields, so the
+// rows across six kinds and each row is a handful of short fields, so the
 // whole thing is a small payload -- and holding it makes "select all 617
 // matching the filter" an exact set rather than a promise the server has to
 // re-derive from filter parameters. A server-paged table cannot honestly tell

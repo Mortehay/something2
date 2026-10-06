@@ -58,9 +58,17 @@ async function listPlayableClasses(pool) {
   // would silently change which class a player gets by pressing Create without
   // touching the radios.
   const r = await pool.query(
-    `SELECT id, name, color, main_stat, ${CLASS_POOL_COLUMNS},
+    `SELECT e.id, e.name, e.color, e.main_stat, e.image, e.render_mode, e.sprite,
+            e.${CLASS_POOL_COLUMNS.replace(', ', ', e.')},
             strength, dexterity, constitution, intelligence, wisdom, charisma
-       FROM entity_types WHERE is_playable = true ORDER BY id ASC`);
+          , COALESCE((
+              SELECT jsonb_agg(jsonb_build_object(
+                'variant', a.variant, 'label', a.label, 'image', a.image,
+                'render_mode', a.render_mode, 'sprite', a.sprite
+              ) ORDER BY a.variant)
+                FROM character_appearances a WHERE a.entity_type_id = e.id
+            ), '[]'::jsonb) AS appearances
+       FROM entity_types e WHERE e.is_playable = true ORDER BY id ASC`);
   // SOMET-486: `hp` (and the new `mana`) are the class's BASE POOLS, read
   // through classPoolsFromRow -- the same function and the same columns the
   // join path uses. `hp` used to come from entity_types.hp, a DIFFERENT column
@@ -73,6 +81,16 @@ async function listPlayableClasses(pool) {
     // SOMET-471: the passive tree's start position for this class (spec 5.2).
     // The picker shows it as the class's main stat.
     mainStat: x.main_stat,
+    image: x.image,
+    renderMode: x.render_mode,
+    sprite: x.sprite,
+    appearances: (x.appearances || []).map((a) => ({
+      variant: Number(a.variant),
+      label: a.label,
+      image: a.image || x.image || null,
+      renderMode: a.render_mode || x.render_mode || 'static',
+      sprite: a.sprite || x.sprite || null,
+    })),
     hp: classPoolsFromRow(x).maxHp,
     mana: classPoolsFromRow(x).maxMana,
     strength: Number(x.strength),
@@ -90,13 +108,18 @@ async function listCharacters(pool, userId) {
   // would make a brand-new character invisible on the very screen the player
   // just created it from.
   const r = await pool.query(
-    `SELECT c.id, c.slot, c.name, c.entity_type_id,
+    `SELECT c.id, c.slot, c.name, c.entity_type_id, c.appearance_variant,
             e.name AS class_name, e.main_stat,
+            COALESCE(a.image, e.image) AS appearance_image,
+            COALESCE(a.render_mode, e.render_mode, 'static') AS appearance_render_mode,
+            COALESCE(a.sprite, e.sprite) AS appearance_sprite,
             COALESCE(pr.level, 1) AS level,
             w.name AS last_world_name,
             lw.world_id AS last_world_id
        FROM characters c
        JOIN entity_types e ON e.id = c.entity_type_id
+       JOIN character_appearances a ON a.entity_type_id = c.entity_type_id
+                                   AND a.variant = c.appearance_variant
        LEFT JOIN player_progression pr ON pr.character_id = c.id
        LEFT JOIN LATERAL (
          SELECT world_id FROM world_players
@@ -119,6 +142,12 @@ async function listCharacters(pool, userId) {
     // request landed.
     mainStat: x.main_stat,
     entityTypeId: x.entity_type_id,
+    appearanceVariant: Number(x.appearance_variant),
+    appearance: {
+      image: x.appearance_image,
+      renderMode: x.appearance_render_mode,
+      sprite: x.appearance_sprite,
+    },
     level: Number(x.level),
     lastWorldName: x.last_world_name,
     // The id the client auto-joins into on the next login. lastWorldName is
@@ -140,10 +169,15 @@ async function ownedCharacter(pool, userId, characterId) {
   // classPoolsFromRow then yields nulls and derivePlayerStats falls back to
   // HP_BASE/MANA_BASE -- a pool-less join, not a refused one.
   const r = await pool.query(
-    `SELECT c.id, c.entity_type_id, c.inventory_slots,
-            e.name AS class_name, e.main_stat, e.max_hp, e.max_mana
+    `SELECT c.id, c.entity_type_id, c.inventory_slots, c.appearance_variant,
+            e.name AS class_name, e.main_stat, e.max_hp, e.max_mana,
+            COALESCE(a.image, e.image) AS appearance_image,
+            COALESCE(a.render_mode, e.render_mode, 'static') AS appearance_render_mode,
+            COALESCE(a.sprite, e.sprite) AS appearance_sprite
        FROM characters c
        LEFT JOIN entity_types e ON e.id = c.entity_type_id
+       LEFT JOIN character_appearances a ON a.entity_type_id = c.entity_type_id
+                                        AND a.variant = c.appearance_variant
       WHERE c.id = $1 AND c.user_id = $2`,
     [id, userId]);
   if (!r.rows.length) return null;
@@ -168,6 +202,12 @@ async function ownedCharacter(pool, userId, characterId) {
     inventorySlots: Number(r.rows[0].inventory_slots),
     className: r.rows[0].class_name,
     mainStat: r.rows[0].main_stat,
+    appearanceVariant: Number(r.rows[0].appearance_variant) || 1,
+    appearance: {
+      image: r.rows[0].appearance_image || null,
+      renderMode: r.rows[0].appearance_render_mode || 'static',
+      sprite: r.rows[0].appearance_sprite || null,
+    },
     classPools: classPoolsFromRow(r.rows[0]),
   };
 }
@@ -176,28 +216,34 @@ async function ownedCharacter(pool, userId, characterId) {
 // slots, then INSERT into the lowest") leaves a window in which two concurrent
 // creates both pick the same slot; here the loser hits
 // characters_user_slot_unique and is translated to no_free_slot below.
-async function createCharacter(pool, userId, name, entityTypeId) {
+async function createCharacter(pool, userId, name, entityTypeId, appearanceVariant = 1) {
   const trimmed = typeof name === 'string' ? name.trim() : '';
   if (trimmed.length === 0 || trimmed.length > MAX_NAME_LENGTH) {
     throw new CharacterError('bad_name', `name must be 1-${MAX_NAME_LENGTH} characters`);
   }
   const typeId = Number(entityTypeId);
   if (!Number.isInteger(typeId)) throw new CharacterError('not_playable', 'unknown class');
+  const variant = Number(appearanceVariant);
+  if (!Number.isInteger(variant) || variant < 1 || variant > 5) {
+    throw new CharacterError('bad_appearance', 'unknown appearance');
+  }
 
   const cls = await pool.query(
-    'SELECT id FROM entity_types WHERE id = $1 AND is_playable = true', [typeId]);
+    `SELECT e.id FROM entity_types e
+       JOIN character_appearances a ON a.entity_type_id = e.id AND a.variant = $2
+      WHERE e.id = $1 AND e.is_playable = true`, [typeId, variant]);
   if (!cls.rows.length) throw new CharacterError('not_playable', 'unknown class');
 
   try {
     const r = await pool.query(
-      `INSERT INTO characters (user_id, slot, name, entity_type_id)
-       SELECT $1, s.slot, $2, $3
+      `INSERT INTO characters (user_id, slot, name, entity_type_id, appearance_variant)
+       SELECT $1, s.slot, $2, $3, $4
          FROM generate_series(1, ${MAX_CHARACTERS}) AS s(slot)
         WHERE NOT EXISTS (SELECT 1 FROM characters WHERE user_id = $1 AND slot = s.slot)
         ORDER BY s.slot ASC
         LIMIT 1
        RETURNING id, slot, name`,
-      [userId, trimmed, typeId]);
+      [userId, trimmed, typeId, variant]);
     if (!r.rows.length) throw new CharacterError('no_free_slot', 'all character slots are used');
 
     // The class-base stat SNAPSHOT (design doc 3.3, contract 6.1), written
@@ -226,7 +272,7 @@ async function createCharacter(pool, userId, name, entityTypeId) {
       [r.rows[0].id, BASE_STAT],
     );
 
-    return { id: r.rows[0].id, slot: r.rows[0].slot, name: r.rows[0].name };
+    return { id: r.rows[0].id, slot: r.rows[0].slot, name: r.rows[0].name, appearanceVariant: variant };
   } catch (err) {
     if (err instanceof CharacterError) throw err;
     if (err && err.constraint === 'characters_name_unique') {

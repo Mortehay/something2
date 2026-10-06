@@ -85,6 +85,7 @@ test('seededKey keeps the per-kind prefix GET /api/assets already serves from', 
   assert.strictEqual(seededKey('sprites', 'tile', 'grass'), 'sprites/tiles/grass/seeded/static.png');
   assert.strictEqual(seededKey('sprites', 'entity', 'Wolf'), 'sprites/Wolf/seeded/static.png');
   assert.strictEqual(seededKey('sprites', 'skill', 'arc_tumble'), 'sprites/objects/arc_tumble/seeded/static.png');
+  assert.strictEqual(seededKey('sprites', 'character_appearance', 'Warrior:1'), 'sprites/objects/Warrior_1/seeded/static.png');
   assert.strictEqual(seededKey('sprites', 'passive_label', 'Focus'), 'sprites/objects/Focus/seeded/static.png');
   assert.strictEqual(seededKey('sprites', 'item', 'void-blade'), 'sprites/objects/void-blade/seeded/static.png');
 });
@@ -218,7 +219,7 @@ test('catalog-art gates: skip when the subject already has art unless forced', a
 
 test('trim policy: tiles are stored as drawn, everything else is trimmed as an object', () => {
   assert.strictEqual(SEED_POLICY.tile.trim, null);
-  for (const kind of ['entity', 'skill', 'passive_label', 'item']) {
+  for (const kind of ['entity', 'character_appearance', 'skill', 'passive_label', 'item']) {
     assert.strictEqual(SEED_POLICY[kind].trim, 'object', kind);
   }
 });

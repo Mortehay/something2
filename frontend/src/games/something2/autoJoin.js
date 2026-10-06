@@ -32,7 +32,7 @@ export function pickEntryWorld(worlds) {
 // The full auto-join decision. Returns the world id to join, or null.
 export function autoJoinTarget({
   isAdmin, isPlaying, alreadyJoined, hasGame, hasCharacter, lastWorldId, isGameRoute,
-  worlds, mapTiles, mapConfig,
+  worlds, mapTiles, mapConfig, appearanceCatalogReady = true,
 }) {
   if (isAdmin || isPlaying || alreadyJoined) return null;
   // Only on the game route. This used to be enforced by ACCIDENT: the Game
@@ -51,6 +51,7 @@ export function autoJoinTarget({
   // works. Same reasoning as worldAssetsReady below -- wait, don't retry.
   if (!hasCharacter) return null;
   if (!worldAssetsReady(mapTiles, mapConfig)) return null;
+  if (!appearanceCatalogReady) return null;
 
   // Where this character actually logged out wins over the entry world.
   // pickEntryWorld answers "where does a BRAND NEW character start", which is

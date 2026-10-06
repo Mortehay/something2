@@ -62,11 +62,16 @@ test('ackSeq tracks the latest input seq; snapshot has the right shape', () => {
   // F1 fast-follow: autoLoot added so the client mirror can be corrected from
   // every state frame, not just `joined`.
   // Task 4 (stamina): widened again for stamina/maxStamina, mirroring mana.
+  // Character visuals: class + appearance slot are small stable identifiers;
+  // the client resolves them against the catalog loaded at character select.
   assert.deepEqual(
     Object.keys(snap.players[0]).sort(),
-    ['autoLoot', 'equipment', 'facing', 'hp', 'id', 'mana', 'maxHp', 'maxMana', 'maxStamina', 'stamina', 'x', 'y'],
+    ['appearanceVariant', 'autoLoot', 'className', 'equipment', 'facing', 'hp', 'id',
+      'mana', 'maxHp', 'maxMana', 'maxStamina', 'stamina', 'x', 'y'],
   );
   assert.equal(snap.players[0].id, 'u1');
+  assert.equal(snap.players[0].className, null);
+  assert.equal(snap.players[0].appearanceVariant, 1);
 });
 
 test('removePlayer + isEmpty', () => {

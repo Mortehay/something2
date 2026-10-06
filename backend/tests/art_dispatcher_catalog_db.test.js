@@ -120,6 +120,36 @@ lockedTest('a finished job points its subject at the generated image', async (t,
     'which provider drew it is the first question when a batch comes out wrong');
 });
 
+lockedTest('a finished appearance job updates the exact class variant the game reads',
+  async (t, pool, providerId) => {
+    const [subject] = await cs.SUBJECTS.character_appearance.list(pool);
+    const original = subject.row;
+    try {
+      await queue.enqueue(pool, [{ kind: subject.kind, key: subject.key }],
+        { backend: 'connector', providerId });
+      const out = await dispatch(pool, {
+        provider: PROVIDER(providerId),
+        generate: succeed('zzTest/characters/appearance.png'),
+        deps: { store: storeReturning(6) },
+      });
+      assert.equal(out.done, 1, `dispatch reported ${JSON.stringify(out.results)}`);
+
+      const { rows } = await pool.query(
+        `SELECT image, render_mode, sprite FROM character_appearances
+          WHERE entity_type_id = $1 AND variant = $2`,
+        [original.entity_type_id, original.variant]);
+      assert.equal(rows[0].image, 'zzTest/characters/appearance.png');
+      assert.equal(rows[0].render_mode, 'static');
+      assert.equal(rows[0].sprite, null);
+    } finally {
+      await pool.query(
+        `UPDATE character_appearances SET image = $1, render_mode = $2, sprite = $3,
+                updated_at = $4 WHERE entity_type_id = $5 AND variant = $6`,
+        [original.image, original.render_mode, original.sprite, original.updated_at,
+          original.entity_type_id, original.variant]);
+    }
+  });
+
 // Items do NOT write catalog_art -- they have their own icon column. A single
 // write path would have quietly left all 189 merchant goods blank.
 lockedTest('an item writes its own icon column, not catalog_art', async (t, pool, providerId) => {

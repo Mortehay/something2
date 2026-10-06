@@ -94,14 +94,14 @@ test('composed prompts carry NO styling -- the wrapper owns that', () => {
 
 test('the registry names every art subject, and each declares how it is drawn', () => {
   assert.deepEqual(cs.subjectKinds().sort(),
-    ['entity', 'item', 'passive_label', 'skill', 'tile']);
+    ['character_appearance', 'entity', 'item', 'passive_label', 'skill', 'tile']);
   assert.equal(cs.registryFor('nonsense'), null, 'an unknown kind must not silently resolve');
 
   // GENERATION KIND IS NOT SUBJECT KIND, and getting it backwards is expensive
   // both ways: an object drawn as a tile comes back a sprite sheet, and a tile
   // checked as an object is refused for being opaque -- which it correctly is.
   assert.equal(cs.registryFor('tile').generationKind, 'tile');
-  for (const k of ['item', 'skill', 'passive_label', 'entity']) {
+  for (const k of ['item', 'skill', 'passive_label', 'entity', 'character_appearance']) {
     assert.equal(cs.registryFor(k).generationKind, 'object', `${k} is an isolated object`);
   }
   for (const k of cs.subjectKinds()) {
@@ -120,6 +120,40 @@ test('skills list from the static catalog without a database', async () => {
     assert.equal(s.kind, 'skill');
   }
 });
+
+lockedTest('playable classes expose five independently generatable appearance subjects',
+  async (t, pool) => {
+    const subjects = await cs.listWithArtState(pool, 'character_appearance');
+    const playable = (await pool.query(
+      'SELECT count(*)::int n FROM entity_types WHERE is_playable = true')).rows[0].n;
+    assert.equal(subjects.length, playable * 5);
+    assert.equal(new Set(subjects.map((s) => s.key)).size, subjects.length);
+    for (const s of subjects) {
+      assert.equal(s.kind, 'character_appearance');
+      assert.match(s.key, /:\d$/);
+      assert.ok(s.basePrompt.includes(s.name.split(' appearance ')[0]));
+    }
+  });
+
+lockedTest('generated appearance art is written to its character appearance slot',
+  async (t, pool) => {
+    const [subject] = await cs.SUBJECTS.character_appearance.list(pool);
+    const original = subject.row;
+    try {
+      await cs.SUBJECTS.character_appearance.write(pool, subject.key, 'zzTest/appearance.png');
+      const after = (await cs.SUBJECTS.character_appearance.list(pool))
+        .find((s) => s.key === subject.key);
+      assert.equal(after.row.image, 'zzTest/appearance.png');
+      assert.equal(after.row.render_mode, 'static');
+      assert.equal(after.row.sprite, null);
+    } finally {
+      await pool.query(
+        `UPDATE character_appearances SET image = $1, render_mode = $2, sprite = $3,
+                updated_at = $4 WHERE entity_type_id = $5 AND variant = $6`,
+        [original.image, original.render_mode, original.sprite, original.updated_at,
+          original.entity_type_id, original.variant]);
+    }
+  });
 
 lockedTest('items list every catalog row and report which have art', async (t, pool) => {
   const subjects = await cs.listWithArtState(pool, 'item');

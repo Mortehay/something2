@@ -1742,7 +1742,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // spawn.bind (SOMET-294) is the player_binds row as loaded, world id and
         // all -- distinct from spawn.respawn, which is always a point in THIS
         // world. See loadSpawn for why the two are separate facts.
-        entry.world.addPlayer(ws.userId, spawn, inv, spawn.respawn, gold, stats, character.id, spawn.bind, character.classPools, usesLifeCost);
+        entry.world.addPlayer(
+          ws.userId, spawn, inv, spawn.respawn, gold, stats, character.id,
+          spawn.bind, character.classPools, usesLifeCost,
+          character.className, character.appearanceVariant,
+        );
 
         // Latch the tile this join landed on, for EVERY join -- not just a
         // doorway arrival. A resume or a map fast-travel spawns the character

@@ -27,6 +27,7 @@ import {
 import { resolveAmmoHud, applyAmmoCount } from "./ammo.js";
 import { chestsFromFrame, applyChestOpened } from "./worldChests.js";
 import { remotePlayerFromFrame } from './worldPlayers.js';
+import { appearanceImageKey, indexAppearanceVisuals } from './characterAppearance.js';
 import { wavesFromFrame } from './worldWaves.js';
 import { addBlasts, pruneBlasts } from "./blasts.js";
 import { indexEffects, addEffects, pruneEffects, capParticles } from "./vfx.js";
@@ -496,7 +497,7 @@ export class Game {
         }
     }
 
-    async initChunked({ worldId, characterId, chunkSize, tileTypes, vfxEffects = null, entityTypes = null, spawnX = 0, spawnY = 0, className = null, mainStat = null }) {
+    async initChunked({ worldId, characterId, chunkSize, tileTypes, vfxEffects = null, entityTypes = null, spawnX = 0, spawnY = 0, className = null, mainStat = null, appearanceVariant = 1, characterClasses = [] }) {
         if (!this.canvas) {
             console.error("Canvas not found!");
             return;
@@ -610,6 +611,31 @@ export class Game {
         this.characterModPage = 0;
         this.characterId = characterId;
         this.className = className || this.passiveStartClass || null;
+        this.appearanceVariant = Number(appearanceVariant) || 1;
+        this.appearanceVisuals = indexAppearanceVisuals(characterClasses);
+        this.player.className = this.className;
+        this.player.appearanceVariant = this.appearanceVariant;
+        this.player.imageKey = appearanceImageKey(this.className, this.appearanceVariant);
+        const localVisual = this.appearanceVisuals.get(this.player.imageKey);
+        if (localVisual) {
+            this.player.renderMode = localVisual.renderMode;
+            this.player.sprite = localVisual.sprite;
+        }
+        for (const [key, visual] of this.appearanceVisuals) {
+            if (visual.image) this.imageManager.load(key, assetUrl(API_URL, visual.image));
+            if (visual.sprite?.atlas_key) {
+                this.imageManager.load(
+                    visual.sprite.atlas_key,
+                    assetUrl(API_URL, visual.sprite.atlas_key),
+                );
+                if (visual.sprite.manifest_key && !visual.sprite.manifest) {
+                    fetch(assetUrl(API_URL, visual.sprite.manifest_key))
+                        .then((r) => r.ok ? r.json() : null)
+                        .then((manifest) => { if (manifest) visual.sprite.manifest = manifest; })
+                        .catch(() => undefined);
+                }
+            }
+        }
         if (className) this.passiveStartClass = className;
         this.mainStat = mainStat;
         this.hotbarSkills = loadHotbarForCharacter(characterId, this.className || className || 'Warrior');
@@ -1442,7 +1468,14 @@ export class Game {
             // this map is built from named fields, not a spread, so anything
             // the server sends and the list omits is dropped SILENTLY. See
             // that module's header for the bug that taught us.
-            next.set(p.id, remotePlayerFromFrame(p));
+            const remote = remotePlayerFromFrame(p);
+            remote.imageKey = appearanceImageKey(remote.className, remote.appearanceVariant);
+            const visual = this.appearanceVisuals && this.appearanceVisuals.get(remote.imageKey);
+            if (visual) {
+                remote.renderMode = visual.renderMode;
+                remote.sprite = visual.sprite;
+            }
+            next.set(p.id, remote);
         }
         this.remotePlayers = next;
         if (mine) {
@@ -1689,6 +1722,7 @@ export class Game {
                     hoverY: this._cursorY ?? null,
                     // SOMET-483. Built fresh, never cached -- see characterView.
                     character: this.characterView(),
+                    playerImageKey: this.player && this.player.imageKey,
                     modPage: this.characterModPage,
                 },
                 groundItems: this.groundItems.all(),

@@ -39,7 +39,13 @@ describe('remotePlayerFromFrame', () => {
     });
     expect(p).toEqual({
       x: 1, y: 2, facing: 'ne', hp: 5, maxHp: 9, effects: ['burn'], aura: 0,
+      className: null, appearanceVariant: 1,
     });
+  });
+
+  it('carries class and appearance identity for remote player art', () => {
+    expect(remotePlayerFromFrame({ className: 'Archer', appearanceVariant: 4 }))
+      .toMatchObject({ className: 'Archer', appearanceVariant: 4 });
   });
 });
 

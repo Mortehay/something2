@@ -25,5 +25,7 @@ export function remotePlayerFromFrame(p) {
     // Defaulted to 0 rather than null: auraRingGeometry reads it as a number,
     // and the server OMITS the key entirely for a player with no aura.
     aura: p.aura || 0,
+    className: p.className || null,
+    appearanceVariant: Number(p.appearanceVariant) || 1,
   };
 }

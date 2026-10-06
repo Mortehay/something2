@@ -7,7 +7,7 @@ import { useMapTiles, useMapConfig, useVfxEffects } from "./useMaps.js";
 import { useWorlds } from "./useWorlds";
 import { autoJoinTarget } from "./autoJoin.js";
 import CharacterSelect from "./CharacterSelect.jsx";
-import { useCharacters } from "./useCharacters.js";
+import { useCharacters, usePlayableClasses } from "./useCharacters.js";
 import {
   readActiveCharacterId, writeActiveCharacterId, clearActiveCharacterId, resolveActiveCharacter,
 } from "./characterSession.js";
@@ -215,6 +215,7 @@ export default function GameShell() {
   // THIRD state, distinct from "no character": treating it as the latter
   // flashes the picker for a frame before the canvas on every reload.
   const { characters, maxCharacters, isLoadingCharacters } = useCharacters();
+  const { classes: playableClasses } = usePlayableClasses();
   const [activeCharacterId, setActiveCharacterId] = useState(() => readActiveCharacterId());
   const activeCharacter = resolveActiveCharacter(activeCharacterId, characters);
 
@@ -428,6 +429,7 @@ export default function GameShell() {
     // and handleEnterRef below always points at the latest one, so this sees
     // the current character rather than the one active at mount.
     if (!activeCharacter) return false;
+    if (!Array.isArray(playableClasses) || playableClasses.length === 0) return false;
 
     try {
       const world = worlds?.find(w => w.id === worldId);
@@ -444,6 +446,8 @@ export default function GameShell() {
         // falls back to declaration order rather than throwing.
         className: activeCharacter.className || null,
         mainStat: activeCharacter.mainStat || null,
+        appearanceVariant: activeCharacter.appearanceVariant || 1,
+        characterClasses: playableClasses || [],
         chunkSize,
         tileTypes: mapTiles,
         vfxEffects: vfxEffects || null,
@@ -499,6 +503,7 @@ export default function GameShell() {
     // without a character. autoJoin.test.js passed the flag explicitly and
     // stayed green throughout. Caught in the browser.
     hasCharacter: !!activeCharacter,
+    appearanceCatalogReady: Array.isArray(playableClasses) && playableClasses.length > 0,
     // Where this character logged out. Read off activeCharacter, which is
     // also the effect's dependency, so a character switch re-evaluates the
     // target rather than resuming the previous character's world.
@@ -529,7 +534,7 @@ export default function GameShell() {
     // to become ready, and without it here the effect never re-runs after the
     // picker closes -- the player sits on the world list forever.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [worlds, mapTiles, mapConfig, isAdmin, isPlaying, isGameRoute, activeCharacter]);
+  }, [worlds, mapTiles, mapConfig, playableClasses, isAdmin, isPlaying, isGameRoute, activeCharacter]);
 
   return (
     <StyledGameContainer>

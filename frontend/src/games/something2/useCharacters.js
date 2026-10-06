@@ -24,6 +24,7 @@ const CREATE_ERRORS = {
   no_free_slot: "All 8 character slots are in use. Delete one first.",
   bad_name: "Pick a name between 1 and 32 characters.",
   not_playable: "That class cannot be played.",
+  bad_appearance: "That appearance is not available for this class.",
 };
 
 async function readError(res, fallback) {
@@ -68,11 +69,13 @@ export function usePlayableClasses() {
 export function useCreateCharacter() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ name, entityTypeId }) => {
+    mutationFn: async ({ name, entityTypeId, appearanceVariant }) => {
       const res = await apiFetch(`${API_URL}/api/characters`, {
         method: "POST",
         headers: authHeaders(),
-        body: JSON.stringify({ name, entity_type_id: entityTypeId }),
+        body: JSON.stringify({
+          name, entity_type_id: entityTypeId, appearance_variant: appearanceVariant,
+        }),
       });
       if (!res.ok) throw await readError(res, "Failed to create character");
       return res.json();

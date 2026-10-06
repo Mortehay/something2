@@ -357,7 +357,7 @@ class World {
   // player -- behaves exactly as before. HOW MUCH it costs is not here: that
   // is stats.lifeCostMultiplier, which the tree owns and applyDerivedStats
   // refreshes.
-  addPlayer(userId, spawn, inv = { items: [], equipment: {} }, respawn = spawn, gold = 0, stats = BASE_STATS, characterId = null, bind = null, classPools = null, usesLifeCost = false) {
+  addPlayer(userId, spawn, inv = { items: [], equipment: {} }, respawn = spawn, gold = 0, stats = BASE_STATS, characterId = null, bind = null, classPools = null, usesLifeCost = false, className = null, appearanceVariant = 1) {
     this.players.set(userId, {
       userId,
       characterId,
@@ -422,6 +422,8 @@ class World {
       // Strict boolean: a truthy string off the join path must not silently
       // enrol a Warrior in life casting.
       usesLifeCost: usesLifeCost === true,
+      className,
+      appearanceVariant: Number(appearanceVariant) || 1,
     });
   }
 
@@ -1657,6 +1659,8 @@ class World {
           hp: p.hp, maxHp: p.maxHp, mana: p.mana, maxMana: p.maxMana,
           stamina: p.stamina, maxStamina: p.maxStamina, equipment: p.inv ? p.inv.equipment : {},
           autoLoot: p.autoLoot,
+          className: p.className,
+          appearanceVariant: p.appearanceVariant,
         };
         // Effect KEYS only, and omitted entirely when nothing is active — see
         // activeEffectKeys. Read on the client as `p.effects || []`.

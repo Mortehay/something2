@@ -14,7 +14,9 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { listPlayableClasses, ownedCharacter, listCharacters } = require('../src/services/characters.js');
+const {
+  listPlayableClasses, ownedCharacter, listCharacters, createCharacter, CharacterError,
+} = require('../src/services/characters.js');
 
 function fakePool(rows) {
   const seen = [];
@@ -28,6 +30,8 @@ test('listPlayableClasses carries main_stat through as mainStat', async () => {
   const pool = fakePool([
     {
       id: 7, name: 'Druid', color: '#2f7d5b', main_stat: 'charisma',
+      image: 'sprites/Druid/seeded/static.png', render_mode: 'static', sprite: null,
+      appearances: [{ variant: 1, label: 'Appearance 1', image: null, render_mode: null, sprite: null }],
       max_hp: 90, max_mana: 135,
       strength: 10, dexterity: 10, constitution: 10,
       intelligence: 10, wisdom: 10, charisma: 12,
@@ -36,6 +40,8 @@ test('listPlayableClasses carries main_stat through as mainStat', async () => {
   const classes = await listPlayableClasses(pool);
   assert.deepEqual(classes, [{
     id: 7, name: 'Druid', color: '#2f7d5b', mainStat: 'charisma',
+    image: 'sprites/Druid/seeded/static.png', renderMode: 'static', sprite: null,
+    appearances: [{ variant: 1, label: 'Appearance 1', image: 'sprites/Druid/seeded/static.png', renderMode: 'static', sprite: null }],
     hp: 90, mana: 135,
     strength: 10, dexterity: 10, constitution: 10,
     intelligence: 10, wisdom: 10, charisma: 12,
@@ -58,6 +64,8 @@ test('ownedCharacter carries the class name and main stat', async () => {
   const pool = fakePool([
     {
       id: 3, entity_type_id: 9, inventory_slots: 24,
+      appearance_variant: 2, appearance_image: 'cultist.png',
+      appearance_render_mode: 'static', appearance_sprite: null,
       class_name: 'Cultist', main_stat: 'constitution',
       max_hp: 110, max_mana: 90,
     },
@@ -66,6 +74,8 @@ test('ownedCharacter carries the class name and main stat', async () => {
   assert.deepEqual(c, {
     id: 3, entityTypeId: 9, inventorySlots: 24,
     className: 'Cultist', mainStat: 'constitution',
+    appearanceVariant: 2,
+    appearance: { image: 'cultist.png', renderMode: 'static', sprite: null },
     classPools: { maxHp: 110, maxMana: 90 },
   });
   assert.match(pool.seen[0], /main_stat/);
@@ -79,12 +89,16 @@ test('ownedCharacter survives a character whose class row has vanished', async (
   const pool = fakePool([
     {
       id: 3, entity_type_id: 9, inventory_slots: 24,
+      appearance_variant: 1, appearance_image: null,
+      appearance_render_mode: null, appearance_sprite: null,
       class_name: null, main_stat: null, max_hp: null, max_mana: null,
     },
   ]);
   assert.deepEqual(await ownedCharacter(pool, 1, 3), {
     id: 3, entityTypeId: 9, inventorySlots: 24,
     className: null, mainStat: null,
+    appearanceVariant: 1,
+    appearance: { image: null, renderMode: 'static', sprite: null },
     classPools: { maxHp: null, maxMana: null },
   });
 });
@@ -112,5 +126,14 @@ test('listCharacters carries main_stat through as mainStat', async () => {
 test('ownedCharacter still refuses a non-integer id without querying', async () => {
   const pool = fakePool([]);
   assert.equal(await ownedCharacter(pool, 1, 'nope'), null);
+  assert.equal(pool.seen.length, 0);
+});
+
+test('createCharacter rejects an appearance outside the five catalog slots before querying', async () => {
+  const pool = fakePool([]);
+  await assert.rejects(
+    () => createCharacter(pool, 1, 'Nix', 7, 6),
+    (err) => err instanceof CharacterError && err.code === 'bad_appearance',
+  );
   assert.equal(pool.seen.length, 0);
 });
