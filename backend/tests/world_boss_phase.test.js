@@ -27,6 +27,7 @@ test('WorldBossManager triggers phase 2 (Enraged) at 75% HP with announcement', 
   const now = Date.now();
 
   manager.state = 'active';
+  manager.activeWorldId = 'w1';
   manager.spawnedAt = now;
   manager.currentBoss = { ...WORLD_BOSS_CATALOG[0], currentHp: 12000, maxHp: 12000, phase: 1 };
   manager.bossCreatureId = 'wb_boss_1';
@@ -60,6 +61,7 @@ test('WorldBossManager triggers phase 3 (Elemental Nova) at 50% HP and spawns mi
   const now = Date.now();
 
   manager.state = 'active';
+  manager.activeWorldId = 'w1';
   manager.spawnedAt = now;
   manager.currentBoss = { ...WORLD_BOSS_CATALOG[1], currentHp: 14000, maxHp: 14000, phase: 2 };
   manager.bossCreatureId = 'wb_boss_2';
