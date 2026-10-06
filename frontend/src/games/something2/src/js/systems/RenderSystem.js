@@ -69,8 +69,8 @@ const LEVEL_TAG_STYLE = {
   lineWidth: 2,
 };
 
-const XP_BASE = 18;
-const XP_EXPONENT = 1.33;
+const XP_BASE = 35;
+const XP_EXPONENT = 1.45;
 const MAX_LEVEL = 150;
 
 function levelWorth(level) {
