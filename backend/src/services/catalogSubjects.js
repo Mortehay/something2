@@ -104,6 +104,35 @@ function skillPrompt(skill) {
   return bits.join(', ');
 }
 
+// Class identity is explicit because entity_types.prompt is optional and is empty
+// in the seeded playable classes. These are visible concepts already established
+// by each class's starter loadout and role, not image-model styling.
+const CHARACTER_IDENTITIES = Object.freeze({
+  Warrior: 'sturdy melee fighter in practical leather armor carrying one short sword',
+  Mage: 'arcane scholar in layered robes carrying one apprentice staff and a ward focus',
+  Monk: 'disciplined martial artist in simple wrapped robes carrying one quarterstaff',
+  Cultist: 'occult life-magic caster in hooded ritual robes carrying one crooked apprentice staff and a crimson talisman',
+  Archer: 'leather-clad ranged scout carrying one longbow and a visible quiver',
+  Druid: 'nature mystic in leaf-and-bark robes carrying one wooden club and an animal charm',
+});
+
+const APPEARANCE_DIRECTIONS = Object.freeze({
+  1: 'iconic class-defining adventurer with clean practical equipment',
+  2: 'battle-worn veteran with weathered, repaired equipment',
+  3: 'ceremonial noble version with clean ornate equipment',
+  4: 'ominous night-traveller with dark worn materials',
+  5: 'rugged wilderness exile with rough natural materials',
+});
+
+function appearancePrompt(row) {
+  const className = row.class_name || 'adventurer';
+  const identity = row.class_prompt || CHARACTER_IDENTITIES[className]
+    || 'fantasy adventurer with class-specific clothing and equipment';
+  const direction = APPEARANCE_DIRECTIONS[row.variant]
+    || 'distinct class-appropriate clothing and equipment';
+  return `a ${className} hero, ${identity}, ${direction}`;
+}
+
 const SUBJECTS = Object.freeze({
   // The merchant's goods. item_types.icon was empty on all 189 rows when this
   // registry was written; the icons exist now, and SOMET-572 exports and
@@ -153,13 +182,22 @@ const SUBJECTS = Object.freeze({
           WHERE e.is_playable = true
           ORDER BY e.name, ca.variant`,
       );
-      return rows.map((row) => ({
-        kind: 'character_appearance',
-        key: `${row.class_name}:${row.variant}`,
-        name: `${row.class_name} appearance ${row.variant}`,
-        basePrompt: `${row.class_prompt || row.class_name}, ${row.label}`,
-        row,
-      }));
+      return rows.map((row) => {
+        const enriched = {
+          ...row,
+          class_identity: row.class_prompt || CHARACTER_IDENTITIES[row.class_name]
+            || 'fantasy adventurer with class-specific clothing and equipment',
+          variant_direction: APPEARANCE_DIRECTIONS[row.variant]
+            || 'distinct class-appropriate clothing and equipment',
+        };
+        return {
+          kind: 'character_appearance',
+          key: `${row.class_name}:${row.variant}`,
+          name: `${row.class_name} appearance ${row.variant}`,
+          basePrompt: appearancePrompt(row),
+          row: enriched,
+        };
+      });
     },
     async write(db, key, image) {
       const { rows } = await db.query(
@@ -455,6 +493,7 @@ async function latestJobByKey(db, kind) {
 }
 
 module.exports = {
+  CHARACTER_IDENTITIES, APPEARANCE_DIRECTIONS, appearancePrompt,
   SUBJECTS, subjectKinds, registryFor, listWithArtState, takesDescription,
   subjectsForEnqueue, pinnedProviderId,
   deslug, article, labelSubject, itemPrompt, skillPrompt, writeCatalogArt,

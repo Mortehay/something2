@@ -242,7 +242,7 @@ function descriptionMutation(run, successMessage) {
   };
 }
 
-// `text` given writes it verbatim (a human edit); omitted asks the local model
+// `text` given writes it verbatim (a human edit); omitted asks the active text provider
 // for one, which takes 10-100s on CPU -- the caller must show that it is
 // working or the button reads as broken.
 export const useWriteDescription = descriptionMutation(async (subject, body) => {

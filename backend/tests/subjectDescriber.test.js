@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const {
   clean, buildMessages, subjectContext, grantsPhrase, CONTRACTS, TEMPERATURE,
-  describeSubject, TIMEOUT_MS,
+  describeSubject, budgetFor,
 } = require('../src/services/subjectDescriber.js');
 
 // SOMET-550. The contract that turns a catalogue row into a subject phrase.
@@ -56,10 +56,34 @@ test('each kind gets its own contract, not one shared prompt', () => {
   assert.match(sys('skill'), /ability/i);
   assert.match(sys('passive_label'), /bonus/i);
   assert.match(sys('item'), /ITEM/);
+  assert.match(sys('character_appearance'), /full-body fantasy game HERO/i);
+  assert.doesNotMatch(sys('character_appearance'), /Never mention a person/i,
+    'a hero contract must not inherit the icon contract that forbids people');
   assert.notEqual(sys('skill'), sys('item'));
   // An unknown kind falls back rather than throwing -- a new subject kind is a
   // registry entry, and it must not need a change here to be describable.
   assert.equal(sys('brand_new_kind'), sys('item'));
+});
+
+test('a character appearance carries class identity and a distinct variant direction', () => {
+  const ctx = subjectContext({
+    kind: 'character_appearance', key: 'Archer:2', name: 'Archer appearance 2',
+    row: {
+      class_name: 'Archer', variant: 2,
+      class_identity: 'ranged scout with a longbow and quiver',
+      variant_direction: 'battle-worn veteran with repaired equipment',
+    },
+  });
+  assert.match(ctx, /Class: Archer/);
+  assert.match(ctx, /longbow and quiver/);
+  assert.match(ctx, /battle-worn veteran/);
+});
+
+test('hero descriptions have enough room for anatomy, clothing, gear and variant identity', () => {
+  const icon = budgetFor({ kind: 'item' }, 'medium');
+  const hero = budgetFor({ kind: 'character_appearance' }, 'medium');
+  assert.ok(hero.words >= 45, `hero budget is only ${hero.words} words`);
+  assert.ok(hero.tokens > icon.tokens);
 });
 
 test('every skill and passive exemplar is ONE object, never an action', () => {
@@ -187,41 +211,22 @@ test('temperature defaults low, because a description that moves is not a record
   }
 });
 
-// SOMET-553. The timeout has to cover a COLD model, not a warm one.
-//
-// Measured on this host: ~8-15s warm, ~108s to load the model cold, and the
-// load happens before a single token is generated. The old 120s default left
-// ~12s for the work itself, so the first click after an idle period aborted --
-// the one moment a person is most likely to be watching.
-test('the describer timeout leaves room for a cold model load', async () => {
-  const before = process.env.ART_DESCRIBER_TIMEOUT_MS;
-  try {
-    delete process.env.ART_DESCRIBER_TIMEOUT_MS;
-    let seenTimeout = null;
-    const fetchImpl = async (url, opts) => {
-      // AbortSignal.timeout() exposes no deadline, so the request carries it
-      // where a test can see it rather than the assertion guessing.
-      seenTimeout = opts.signal;
-      return {
-        ok: true,
-        json: async () => ({ choices: [{ message: { content: 'iron spear' } }] }),
-      };
-    };
-    const out = await describeSubject({ kind: 'item', key: 'k', name: 'K' }, { fetchImpl });
-    assert.equal(out.text, 'iron spear');
-    assert.ok(seenTimeout, 'the request must carry an abort signal at all');
-
-    // Read from the MODULE, not recomputed from a literal here. Asserting
-    // `parseInt(env || '300000')` would pass no matter what the module's
-    // default became -- the assertion would be derived from the same constant
-    // it claims to check, which is a pattern this repo has been caught by
-    // before.
-    assert.ok(TIMEOUT_MS() >= 180000,
-      `${TIMEOUT_MS()}ms does not cover a ~108s cold load plus the generation`);
-    process.env.ART_DESCRIBER_TIMEOUT_MS = '90000';
-    assert.equal(TIMEOUT_MS(), 90000, 'and stays tunable for a host with a warm model');
-  } finally {
-    if (before === undefined) delete process.env.ART_DESCRIBER_TIMEOUT_MS;
-    else process.env.ART_DESCRIBER_TIMEOUT_MS = before;
-  }
+test('the describer uses the shared text provider, which prefers the GPU box', async () => {
+  const db = { query: async () => { throw new Error('the injected provider owns DB access'); } };
+  let call = null;
+  const textProvider = {
+    complete: async (seenDb, request) => {
+      call = { seenDb, request };
+      return { ok: true, text: 'battle-worn archer with a longbow', model: 'large-gpu-llm', via: 'box' };
+    },
+  };
+  const subject = { kind: 'character_appearance', key: 'Archer:2', name: 'Archer appearance 2' };
+  const out = await describeSubject(db, subject, { length: 'medium', textProvider });
+  assert.strictEqual(call.seenDb, db);
+  assert.match(call.request.system, /full-body fantasy game HERO/i);
+  assert.match(call.request.prompt, /Archer appearance 2/);
+  assert.equal(call.request.maxTokens, budgetFor(subject, 'medium').tokens);
+  assert.deepEqual(out, {
+    text: 'battle-worn archer with a longbow', model: 'large-gpu-llm', length: 'medium', via: 'box',
+  });
 });

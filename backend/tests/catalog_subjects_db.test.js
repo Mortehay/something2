@@ -74,6 +74,23 @@ test('itemPrompt composes a plain subject from a slug plus what the row carries'
   assert.equal(cs.itemPrompt({ name: 'gold', category: 'currency' }), 'a pile of gold');
 });
 
+test('character fallback prompts preserve all six class identities and five variants', () => {
+  const requiredGear = {
+    Warrior: /short sword/, Mage: /apprentice staff/, Monk: /quarterstaff/,
+    Cultist: /ritual robes/, Archer: /longbow/, Druid: /wooden club/,
+  };
+  for (const [className, gear] of Object.entries(requiredGear)) {
+    const prompts = [];
+    for (let variant = 1; variant <= 5; variant += 1) {
+      const prompt = cs.appearancePrompt({ class_name: className, class_prompt: '', variant });
+      assert.match(prompt, gear, `${className} lost its defining gear`);
+      assert.doesNotMatch(prompt, /pixel art|isometric|background|camera/i);
+      prompts.push(prompt);
+    }
+    assert.equal(new Set(prompts).size, 5, `${className} variants must not share one prompt`);
+  }
+});
+
 // THE RULE THIS WHOLE FILE EXISTS UNDER. Both generators wrap basePrompt with
 // their own framing; a base that carries styling fights the wrapper. Measured:
 // a fully styled base for "war hammer" came back a heraldic crest.

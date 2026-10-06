@@ -3518,7 +3518,7 @@ app.get('/api/art-subjects/:kind/:key/description', adminGuard, async (req, res)
 });
 
 // Write one, replacing whatever was active. `text` given writes it verbatim
-// (a human edit); omitted asks the local model for one.
+// (a human edit); omitted asks the active text provider for one.
 app.post('/api/art-subjects/:kind/:key/description', adminGuard, async (req, res) => {
   try {
     const { kind, key } = req.params;
@@ -3541,7 +3541,7 @@ app.post('/api/art-subjects/:kind/:key/description', adminGuard, async (req, res
     let text = req.body.text;
     let model = null;
     if (!text) {
-      const written = await subjectDescriber.describeSubject(subject, { length: req.body.length });
+      const written = await subjectDescriber.describeSubject(pool, subject, { length: req.body.length });
       text = written.text;
       model = written.model;
     }
