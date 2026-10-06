@@ -337,7 +337,7 @@ export class RenderSystem {
     skillCooldowns = null, activeBuffs = [], unlockedSkills = null,
     hoveredSkill = null, cursorX = null, cursorY = null, keybinds = null,
     // Quest Log (hotkey 'J')
-    questLogOpen = false, quests = [], activeQuestKey = null, legacyChoice = null,
+    questLogOpen = false, quests = [], activeQuestKey = null, legacyChoice = null, questScroll = 0,
   }) {
     // SOMET-584. Set before anything below resolves art, including the
     // landmark body plan a few lines down.
@@ -652,6 +652,7 @@ export class RenderSystem {
         quests: quests || [],
         legacyChoice,
         activeQuestKey,
+        questScroll,
       }, this._questHitAreas);
     }
 

@@ -1820,6 +1820,7 @@ export class Game {
                 quests: this.allQuests || [],
                 activeQuestKey: this.activeQuestKey,
                 legacyChoice: (this.progression && this.progression.legacyChoice) || this.legacyChoice || null,
+                questScroll: this.questLogScrollY || 0,
                 // SOMET-493. `enabled` false short-circuits the whole pass in
                 // RenderSystem, so a player who never turns it on pays one
                 // property read per frame.
@@ -3354,13 +3355,21 @@ export class Game {
         // preventDefault -- without it the browser scrolls the page behind the
         // canvas while the player is zooming the tree.
         this._wheelHandler = (e) => {
-            if (!this.passiveTreeOpen) return;
-            if (typeof e.preventDefault === 'function') e.preventDefault();
-            const pt = this._canvasPoint(e);
-            const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-            this.passiveView = zoomAbout(
-                this.passiveView, pt.x, pt.y, clampZoom(this.passiveView.zoom * factor),
-            );
+            if (this.passiveTreeOpen) {
+                if (typeof e.preventDefault === 'function') e.preventDefault();
+                const pt = this._canvasPoint(e);
+                const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+                this.passiveView = zoomAbout(
+                    this.passiveView, pt.x, pt.y, clampZoom(this.passiveView.zoom * factor),
+                );
+                return;
+            }
+            if (this.questLogOpen) {
+                if (typeof e.preventDefault === 'function') e.preventDefault();
+                const delta = e.deltaY < 0 ? -40 : 40;
+                this.questLogScrollY = Math.max(0, (this.questLogScrollY || 0) + delta);
+                return;
+            }
         };
 
         this._auxClickHandler = (e) => {

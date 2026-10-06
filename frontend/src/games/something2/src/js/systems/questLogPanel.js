@@ -8,11 +8,21 @@ export const QUEST_PANEL_W = 760;
 export const QUEST_PANEL_H = 520;
 const TITLE_H = 34;
 
+function truncateText(ctx, text, maxWidth) {
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let s = text;
+  while (s.length > 0 && ctx.measureText(s + "…").width > maxWidth) {
+    s = s.slice(0, -1);
+  }
+  return s + "…";
+}
+
 export function layoutQuestLog(state = {}) {
   const {
     quests = [],
     legacyChoice = null,
     activeQuestKey = null,
+    questScroll = 0,
   } = state;
 
   const px = (GAME_WIDTH - QUEST_PANEL_W) / 2;
@@ -27,13 +37,22 @@ export function layoutQuestLog(state = {}) {
   const listArea = { x: px + 12, y: py + TITLE_H + 12, w: 260, h: QUEST_PANEL_H - TITLE_H - 24 };
   const detailArea = { x: px + 284, y: py + TITLE_H + 12, w: QUEST_PANEL_W - 296, h: QUEST_PANEL_H - TITLE_H - 24 };
 
+  const itemH = 42;
+  const itemGap = 4;
+  const totalH = quests.length * (itemH + itemGap);
+  const maxScroll = Math.max(0, totalH - listArea.h);
+  const scrollY = Math.max(0, Math.min(maxScroll, questScroll));
+
   const questItems = [];
-  let itemY = listArea.y;
-  for (const q of quests) {
-    const itemRect = { x: listArea.x, y: itemY, w: listArea.w, h: 42 };
+  for (let i = 0; i < quests.length; i++) {
+    const q = quests[i];
+    const itemY = listArea.y + i * (itemH + itemGap) - scrollY;
+    const itemRect = { x: listArea.x, y: itemY, w: listArea.w, h: itemH };
     questItems.push({ ...q, ...itemRect });
-    hitAreas.push({ ...itemRect, kind: "selectquest", key: q.key });
-    itemY += 46;
+
+    if (itemY + itemH >= listArea.y && itemY <= listArea.y + listArea.h) {
+      hitAreas.push({ ...itemRect, kind: "selectquest", key: q.key });
+    }
   }
 
   const selectedQuest = quests.find(q => q.key === activeQuestKey) || quests[0] || null;
@@ -115,6 +134,7 @@ export function layoutQuestLog(state = {}) {
   return {
     panel, title, close, hitAreas, listArea, detailArea,
     quests: questItems, selectedQuest, legacyChoice, actionButtons,
+    totalH, maxScroll, scrollY,
     header: {
       titleText: "📜 Quest Log (Hotkey 'J')",
       choiceText: legacyChoice === "city_restoration"
@@ -129,7 +149,7 @@ export function layoutQuestLog(state = {}) {
 export function drawQuestLog(ctx, layout) {
   if (!layout) return;
 
-  const { panel, title, close, listArea, detailArea, quests, selectedQuest, header } = layout;
+  const { panel, title, close, listArea, detailArea, quests, selectedQuest, header, totalH, maxScroll, scrollY } = layout;
 
   ctx.save();
   ctx.textBaseline = "top";
@@ -150,7 +170,8 @@ export function drawQuestLog(ctx, layout) {
 
   ctx.fillStyle = "#a7f3d0";
   ctx.font = "12px monospace";
-  ctx.fillText(header.choiceText, title.x + 360, title.y + 9);
+  const choiceText = truncateText(ctx, header.choiceText, title.w - 380);
+  ctx.fillText(choiceText, title.x + 360, title.y + 9);
 
   // Close Button
   ctx.fillStyle = "rgba(140, 35, 35, 0.9)";
@@ -171,8 +192,15 @@ export function drawQuestLog(ctx, layout) {
   ctx.strokeStyle = "#382e21";
   ctx.strokeRect(detailArea.x, detailArea.y, detailArea.w, detailArea.h);
 
-  // Draw Quest List
+  // Draw Quest List clipped within listArea
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(listArea.x, listArea.y, listArea.w, listArea.h);
+  ctx.clip();
+
   for (const q of quests) {
+    if (q.y + q.h < listArea.y || q.y > listArea.y + listArea.h) continue;
+
     const isSelected = selectedQuest && selectedQuest.key === q.key;
     ctx.fillStyle = isSelected ? "rgba(45, 35, 20, 0.95)" : "rgba(25, 20, 16, 0.6)";
     ctx.fillRect(q.x, q.y, q.w, q.h);
@@ -184,11 +212,28 @@ export function drawQuestLog(ctx, layout) {
 
     ctx.fillStyle = isCompleted ? "#4ade80" : isActive ? "#60a5fa" : "#e2e8f0";
     ctx.font = "bold 12px monospace";
-    ctx.fillText(`Act ${q.act}: ${q.title}`, q.x + 8, q.y + 6);
+    const titleStr = `Act ${q.act}: ${q.title}`;
+    const truncatedTitle = truncateText(ctx, titleStr, q.w - 16);
+    ctx.fillText(truncatedTitle, q.x + 8, q.y + 6);
 
     ctx.fillStyle = isCompleted ? "#86efac" : isActive ? "#93c5fd" : "#94a3b8";
     ctx.font = "11px monospace";
     ctx.fillText(isCompleted ? "✔ Completed" : isActive ? "⚙ Active" : "✦ Available", q.x + 8, q.y + 24);
+  }
+  ctx.restore();
+
+  // Scrollbar indicator for left list area
+  if (maxScroll > 0) {
+    const barW = 4;
+    const barX = listArea.x + listArea.w - barW - 2;
+    const trackH = listArea.h - 4;
+    const thumbH = Math.max(20, Math.floor((listArea.h / totalH) * trackH));
+    const thumbY = listArea.y + 2 + Math.floor((scrollY / maxScroll) * (trackH - thumbH));
+
+    ctx.fillStyle = "rgba(255, 255, 255, 0.1)";
+    ctx.fillRect(barX, listArea.y + 2, barW, trackH);
+    ctx.fillStyle = "#f59e0b";
+    ctx.fillRect(barX, thumbY, barW, thumbH);
   }
 
   // Draw Selected Quest Detail
@@ -197,24 +242,29 @@ export function drawQuestLog(ctx, layout) {
     const dx = detailArea.x + 14;
 
     ctx.fillStyle = "#fde047";
-    ctx.font = "bold 16px monospace";
-    ctx.fillText(`[Act ${selectedQuest.act}] ${selectedQuest.title}`, dx, dy);
+    ctx.font = "bold 15px monospace";
+    const detailTitle = `[Act ${selectedQuest.act}] ${selectedQuest.title}`;
+    const truncatedDetailTitle = truncateText(ctx, detailTitle, detailArea.w - 28);
+    ctx.fillText(truncatedDetailTitle, dx, dy);
     dy += 24;
 
     ctx.fillStyle = "#cbd5e1";
     ctx.font = "12px monospace";
-    const descWords = selectedQuest.description.split(" ");
-    let line = "";
-    for (const w of descWords) {
-      if (ctx.measureText(line + w).width > detailArea.w - 30) {
-        ctx.fillText(line, dx, dy);
+    const maxDescWidth = detailArea.w - 28;
+    const words = selectedQuest.description.split(" ");
+    let currentLine = "";
+    for (const word of words) {
+      const testLine = currentLine ? currentLine + " " + word : word;
+      if (ctx.measureText(testLine).width > maxDescWidth) {
+        if (currentLine) ctx.fillText(currentLine, dx, dy);
         dy += 18;
-        line = "";
+        currentLine = word;
+      } else {
+        currentLine = testLine;
       }
-      line += w + " ";
     }
-    if (line) {
-      ctx.fillText(line, dx, dy);
+    if (currentLine) {
+      ctx.fillText(currentLine, dx, dy);
       dy += 24;
     }
 
