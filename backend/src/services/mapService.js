@@ -1669,7 +1669,7 @@ function villageSkillMerchantPost(v) {
 }
 
 function stampVillage(grid, rMin, cMin, rows, cols, village) {
-  const { minRow, minCol, width, height, wallTile, gateTile } = village;
+  const { minRow, minCol, width, height, wallTile, gateTile, floorTile = 'cobblestone' } = village;
   const rMax = minRow + height - 1;
   const cMax = minCol + width - 1;
   for (let r = 0; r < rows; r++) {
@@ -1677,8 +1677,11 @@ function stampVillage(grid, rMin, cMin, rows, cols, village) {
       const gRow = rMin + r, gCol = cMin + c;
       if (gRow < minRow || gRow > rMax || gCol < minCol || gCol > cMax) continue;
       const onRing = gRow === minRow || gRow === rMax || gCol === minCol || gCol === cMax;
-      if (!onRing) continue;
-      grid[r][c] = villageGateCell(gRow, gCol, village) ? gateTile : wallTile;
+      if (onRing) {
+        grid[r][c] = villageGateCell(gRow, gCol, village) ? gateTile : wallTile;
+      } else if (floorTile) {
+        grid[r][c] = floorTile;
+      }
     }
   }
   return grid;

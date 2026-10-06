@@ -283,7 +283,7 @@ function villageGeometryError(village) {
 async function fetchVillages(pool, worldId) {
   const r = await pool.query(
     `SELECT v.id, v.min_row, v.min_col, v.width, v.height, v.gate_edge, v.spawn_x, v.spawn_y,
-            v.merchant_x, v.merchant_y,
+            v.merchant_x, v.merchant_y, v.spec_key,
             ma.name AS merchant_art, ba.name AS bank_art,
             ga.name AS gem_merchant_art, sa.name AS skill_merchant_art
        FROM villages v
@@ -324,6 +324,7 @@ async function fetchVillages(pool, worldId) {
     );
     return {
       id: v.id,
+      specKey: v.spec_key,
       ...geometry,
       spawnX: v.spawn_x, spawnY: v.spawn_y,
       merchantX,

@@ -25,7 +25,7 @@ test('fetchVillages maps snake_case columns to camelCase', async () => {
   // Gate S offsets the bank one column off the merchant: merchant (950,850) is
   // tile (row 8, col 9), so the bank takes col 10 -> x 1050, same row.
   assert.deepEqual(out, [{
-    id: 'v1', minRow: 5, minCol: 6, width: 8, height: 6,
+    id: 'v1', specKey: null, minRow: 5, minCol: 6, width: 8, height: 6,
     gateEdge: 'S', spawnX: 650, spawnY: 550,
     merchantX: 950, merchantY: 850,
     bankX: 1050, bankY: 850,

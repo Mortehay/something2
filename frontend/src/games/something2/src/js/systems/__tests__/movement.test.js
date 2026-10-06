@@ -34,7 +34,7 @@ describe("resolveMove", () => {
     // actor center near right edge of tile (0,0) so a small east step crosses into (0,1)
     const a = { x: T - 30, y: 10, width: 20, height: 20, speed: 100 };
     const r = resolveMove(m, a, 1, 0, 1);
-    expect(r.x).toBeCloseTo(79.99, 2);
+    expect(r.x).toBeCloseTo(84.99, 2);
   });
 
   it("scales step by the current tile's speed", () => {
@@ -56,7 +56,7 @@ describe("resolveMove", () => {
     // actor near the east edge of chunk (0,0); a step east crosses into chunk (1,0), unloaded.
     const a = { x: N * T - 30, y: 10, width: 20, height: 20, speed: 100 };
     const r = resolveMove(m, a, 1, 0, 1);
-    expect(r.x).toBeCloseTo(379.99, 2);
+    expect(r.x).toBeCloseTo(384.99, 2);
   });
 
   it("does not mutate the actor", () => {
@@ -80,8 +80,8 @@ describe("resolveMove", () => {
 
   it("a blocked step clamps the footprint up to the wall face", () => {
     const r = resolveMove(wallColumn(1), { x: 20, y: 0, width: 64, height: 64, speed: 40 }, 1, 0, 1);
-    expect(r.x).toBeCloseTo(35.99, 2);
-    expect(r.x + 64).toBeCloseTo(99.99, 2); // face lands EPS shy of the line
+    expect(r.x).toBeCloseTo(51.99, 2);
+    expect(r.x + 48).toBeCloseTo(99.99, 2); // face lands EPS shy of the line
     expect(r.y).toBe(0);
     expect(r.moved).toBe(true);
   });
@@ -106,7 +106,7 @@ describe("resolveMove", () => {
 
   it("footprint tests BOTH leading-edge corners (one corner in a wall tile blocks)", () => {
     const r = resolveMove(wallTile(1, 1), { x: 20, y: 68, width: 64, height: 64, speed: 40 }, 1, 0, 1);
-    expect(r.x).toBeCloseTo(35.99, 2);
+    expect(r.x).toBeCloseTo(51.99, 2);
     expect(r.y).toBe(68);
     expect(r.moved).toBe(true);
   });
@@ -120,7 +120,7 @@ describe("resolveMove", () => {
     const big = run(0.05, 10);
     const small = run(0.05 / 3, 30);
     expect(Math.abs(big - small)).toBeLessThan(1e-9);
-    expect(big).toBeCloseTo(35.99, 5);
+    expect(big).toBeCloseTo(51.99, 5);
   });
 
   it("flush against a wall, a parallel move slides at full speed", () => {

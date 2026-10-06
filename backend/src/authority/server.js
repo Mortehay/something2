@@ -1863,11 +1863,19 @@ function attachAuthority(httpServer, pool, opts = {}) {
             })),
           questGivers: (entry.villages || [])
             .filter((v) => v.questGiverX != null && v.questGiverY != null)
-            .map((v) => ({
-              villageId: v.id, x: v.questGiverX, y: v.questGiverY,
-              name: 'Elder Eldrin',
-              art: 'quest_giver',
-            })),
+            .map((v) => {
+              let name = 'Elder Eldrin';
+              if (v.specKey === 'emberfall') name = 'Lord Thorn';
+              else if (v.specKey === 'sylvan_haven') name = 'Arch-Druid Elyona';
+              else if (v.specKey === 'abyssal_tideport') name = 'Captain Valdor';
+              else if (v.specKey === 'ashen_oasis') name = 'Astronomer Zahir';
+              else if (v.specKey === 'blackfen') name = 'Shadow Hunter';
+              return {
+                villageId: v.id, x: v.questGiverX, y: v.questGiverY,
+                name,
+                art: 'quest_giver',
+              };
+            }),
           // SOMET-297. Built from the Maps loadWorld already holds, plus one
           // per-join read of this character's activations -- no second loader.
           //
