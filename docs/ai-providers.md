@@ -601,6 +601,7 @@ tunnel, queue them from the slot table instead: that queues jobs on the
 backend and drains them one at a time, so no single HTTP request has to
 survive the whole run.
 
+<<<<<<< HEAD
 **Queuing.** Tick rows in the slot table. The header checkbox selects **this
 page** only; **Select all N matching** selects every row the current filter
 matches, on every page (the two are deliberately separate buttons).
@@ -626,6 +627,17 @@ upload-only or no-longer-existing slots. While a drain runs, the table's clip
 counts refresh every time a job finishes, so a slot that just got its sound
 leaves the *Missing* filter instead of being queued again.
 
+=======
+**Queuing.** In Batch mode, tick subjects in the left column and choose which
+slots per kind to include (music, ambience, and every sfx slot that has a
+cue -- upload-only slots are listed as skipped and never queued), or tick items in **Missing sounds** and press **Add to batch** --
+Missing sounds is fed by the game client's own `POST /api/audio/misses`, so
+it lists slots a player actually hit with nothing bound, not a guess from the
+registry. **Queue N jobs** enqueues everything selected. A slot that already
+has a queued or running job for it reports back as `already_live` instead of
+being queued twice -- re-queueing it is a no-op, not an error.
+
+>>>>>>> origin/feat/game-audio-slice3
 **The drain.** Jobs are claimed group by group in the order `music` →
 `ambience` → `sfx_realistic` → `sfx_retro`, so the GPU box switches model at
 most once per group instead of once per clip (music runs on

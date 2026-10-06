@@ -241,7 +241,6 @@ function isBusy(result) {
 function isRefusal(result) {
   return isBusy(result) || rap.isGatewayRefusal(result.error);
 }
-
 // Only a PROVIDER FAULT counts toward the breaker (busy is handled before
 // this is ever asked). A provider fault is any of:
 //   * result.retryable -- a transport error, a client-side timeout, or (per
@@ -276,7 +275,6 @@ function isSoloSfx(jobs) {
   return jobs.length === 1 && jobs[0].variants != null
     && Number(jobs[0].variants) !== audioGeneration.DEFAULT_SFX_VARIANTS;
 }
-
 const errorText = (err) => (err && err.message ? err.message : String(err));
 
 // --- The drain --------------------------------------------------------------
@@ -446,7 +444,6 @@ function startDrain(db, opts = {}) {
     pendingSwitch = { model: wanted, provider };
     return 'switch';
   }
-
   // A provider fault just happened: 'breaker' when it is the one that trips.
   function recordFault() {
     consecutiveFailures += 1;
@@ -811,7 +808,6 @@ function startDrain(db, opts = {}) {
     }
     return ran ? 'ran' : 'idle';
   }
-
   (async () => {
     try {
       // RESTART RECOVERY, BEFORE the NO_PROVIDER precondition. A nodemon
@@ -857,6 +853,7 @@ function startDrain(db, opts = {}) {
           // eslint-disable-next-line no-await-in-loop
           await sleepSliced(waitMs, self, deps);
           if (self.stopping) { self.stoppedReason = 'stopped'; break; }
+
         }
       }
     } catch (err) {

@@ -473,6 +473,7 @@ module.exports = function audioRoutes(pool) {
         // must not force a rewrite over someone's hand-written prompt.
         const badFlag = ['force_prompt', 'prompt_only'].find((f) => it[f] !== undefined && typeof it[f] !== 'boolean');
         if (badFlag) { rejected.push({ item, error: `${badFlag} must be a boolean` }); continue; }
+
         // sfx (slice 3): an upload-only slot has no cue on the box, so a
         // job for it could never generate anything (spec §4) -- refused here
         // rather than queued to fail later. The per-item engine is optional
@@ -488,8 +489,10 @@ module.exports = function audioRoutes(pool) {
             continue;
           }
         }
+
         const extra = checkJobExtras(it, clipKind);
         if (extra.error) { rejected.push({ item, error: extra.error }); continue; }
+
         valid.push({
           subject_kind: it.subject_kind,
           subject_key: it.subject_key,

@@ -68,7 +68,6 @@ async function storedClipSha1s(db, hashes) {
   const r = await db.query('SELECT DISTINCT sha1 FROM audio_clips WHERE sha1 = ANY($1)', [hashes]);
   return new Set(r.rows.map((row) => row.sha1));
 }
-
 async function boundClipSha1s(db, { subjectKind, subjectKey, slot }, { store = assetStore } = {}) {
   const r = await db.query(
     `SELECT c.id, c.sha1, c.storage_key FROM audio_bindings b JOIN audio_clips c ON c.id = b.clip_id
