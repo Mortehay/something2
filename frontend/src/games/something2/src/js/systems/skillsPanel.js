@@ -5,12 +5,12 @@
 import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
 import { artIcon, drawIconFit } from "./gameArt.js";
 import {
-  getSkillsForClass, getSkillById, SKILLS, checkGemRequirements, getWeaponRequirementName,
+  SKILLS, checkGemRequirements, getWeaponRequirementName,
 } from "../core/skillsData.js";
 
 export const PANEL_W = 840;
 export const PANEL_H = 550;
-const iconBoxS = 48;
+export const iconBoxS = 48;
 const PAD = 14;
 const TITLE_H = 34;
 const TAB_H = 24;
@@ -31,7 +31,6 @@ export function layoutSkillsPanel(state) {
     tab = "inventory",
     page = 0,
     selectedSkillId = null,
-    drag = null,
     playerStats = null,
     equippedWeapon = null,
     hotbarSkills = new Map(),
@@ -126,7 +125,7 @@ export function layoutSkillsPanel(state) {
   }
 
   // Gem pool resolution
-  let pool = [];
+  let pool;
   if (tab === "inventory") {
     pool = (inventoryGems && inventoryGems.length > 0)
       ? inventoryGems

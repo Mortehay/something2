@@ -195,9 +195,9 @@ const Input = styled.input`
 
 export default function GameView() {
   const {
-    gameRef, isPlaying, isPaused, isFullscreen,
+    gameRef, isPlaying, isFullscreen,
     selectedWorldId, setSelectedWorldId,
-    enterWorld, retryJoin, resume, exitToMenu, changeCharacter, toggleFullscreen, openHelp,
+    enterWorld, retryJoin, changeCharacter, toggleFullscreen, openHelp,
     // The RESOLVED character, not the stored id: a stored id whose character
     // was deleted elsewhere resolves to null, and that is precisely the case
     // where entering a world must not be offered.

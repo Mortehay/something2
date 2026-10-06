@@ -2,7 +2,7 @@
 // Client-side persistence for character skill hotbar assignments (slots 1-9).
 // Stored per-character in localStorage: `something2.hotbar.${characterId}`
 
-import { getSkillById, getSkillsForClass } from './skillsData.js';
+import { getSkillById } from './skillsData.js';
 
 export const HOTBAR_STORAGE_PREFIX = 'something2.hotbar.';
 export const UNLOCKED_SKILLS_PREFIX = 'something2.unlocked_skills.';
@@ -104,7 +104,7 @@ export function isSkillUnlocked(characterId, skillId) {
  * @param {string} [className]
  * @returns {Map<number, object>} Map of slot (1..9) -> Skill object (initially empty)
  */
-export function getDefaultHotbarForClass(className) {
+export function getDefaultHotbarForClass(_className) {
   return new Map();
 }
 

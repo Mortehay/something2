@@ -1056,7 +1056,7 @@ function EntityTypesAdmin() {
   useEffect(() => {
     if (!editingEntity || !liveEditingEntity) return;
     setFormData(prev => syncApprovedAsset(prev, liveEditingEntity));
-  }, [editingEntity, liveEditingEntity?.render_mode, liveEditingEntity?.image]);
+  }, [editingEntity, liveEditingEntity]);
 
   const handleOpenAdd = () => {
     setEditingEntity(null);

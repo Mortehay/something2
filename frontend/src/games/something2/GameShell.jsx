@@ -308,7 +308,6 @@ export default function GameShell() {
   // transient activation is still valid through the quick world join.
   useEffect(() => {
     if (isPlaying) enterGameFullscreen();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPlaying]);
 
   // Leaves the world and returns to the picker. autoJoinedRef is reset so the

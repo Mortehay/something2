@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { it, expect } from 'vitest';
 import { cursorToWorld, aimVector } from '../aim.js';
 import { worldToScreen } from '../iso.js';
 import { GAME_WIDTH, GAME_HEIGHT } from '../constants.js';

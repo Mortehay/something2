@@ -177,7 +177,6 @@ export function resolveProjectileType(skill) {
 export function resolveSlashStyle(skill) {
   if (!skill) return 'greatsword_cleave';
   const id = (skill.id || '').toLowerCase();
-  const nameEn = (skill.nameEn || '').toLowerCase();
 
   // Beast Claws (Druid Bear / Wolf / Hawk)
   if (id.includes('claw') || id.includes('maul') || id.includes('shred') || id.includes('bite') || id.includes('rend') || id.includes('talon') || id.includes('swipe')) {

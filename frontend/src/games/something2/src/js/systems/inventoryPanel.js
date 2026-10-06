@@ -272,7 +272,7 @@ export function formatItemTooltipLines(item, type) {
   });
 
   // 2. Category / Subtype / Slot / Tier / Item Level
-  let catText = "";
+  let catText;
   const ilvl = item && item.item_level ? item.item_level : type.item_level;
   const ilvlStr = ilvl ? ` (iLvl ${ilvl})` : "";
 

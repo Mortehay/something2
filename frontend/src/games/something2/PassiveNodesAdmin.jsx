@@ -216,7 +216,6 @@ function PassiveNodesAdmin() {
           {form.grants.map((g, i) => {
             const def = GRANT_TYPES.find((t) => t.type === g.type);
             return (
-              // eslint-disable-next-line react/no-array-index-key
               <GrantRow key={i}>
                 <Field>
                   Type

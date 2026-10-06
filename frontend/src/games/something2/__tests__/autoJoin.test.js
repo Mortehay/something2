@@ -129,7 +129,7 @@ describe('auto-join only fires on the game route', () => {
     // route" rather than as "unknown, proceed anyway" -- the failure mode this
     // project keeps hitting is a guard whose input is never wired, which
     // arrives undefined and silently permits.
-    const { isGameRoute, ...withoutFlag } = base;
+    const { isGameRoute: _isGameRoute, ...withoutFlag } = base;
     expect(autoJoinTarget(withoutFlag)).toBeNull();
   });
 

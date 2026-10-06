@@ -4,7 +4,6 @@ import {
   loadHotbarForCharacter,
   saveHotbarForCharacter,
   getDefaultHotbarForClass,
-  HOTBAR_STORAGE_PREFIX,
 } from '../hotbarStorage.js';
 import { getSkillById } from '../skillsData.js';
 

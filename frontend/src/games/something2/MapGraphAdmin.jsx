@@ -501,7 +501,7 @@ function MapGraphAdmin() {
       cy.autoungrabify(false);
       setLinkMode(false);
     };
-  }, [cy, savePosition.mutate]);
+  }, [cy, savePosition]);
 
   // `preset` (the layout below) only fits the viewport once, at mount:
   // react-cytoscapejs's patchLayout only re-runs a layout when the `layout`

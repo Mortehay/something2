@@ -400,7 +400,7 @@ export function layoutPassiveTree(state) {
   }
 
   return {
-    panel, title, close, viewport, searchBox, searchClear,
+    panel, title, close, viewport, searchBox,
     nodes, edges, hover, respec, hitAreas, stats,
     searchText, searchFocused, hasSearch, searchMatchesCount,
     hoverPathSet,
@@ -425,7 +425,7 @@ export function hitNodeAt(layout, x, y) {
 // `art` (SOMET-599) is the GameArt lookup; null draws every node as a plain
 // circle, as before.
 export function drawPassiveTree(ctx, layout, art = null) {
-  const { panel, title, close, viewport, searchBox, searchClear } = layout;
+  const { panel, title, close, viewport, searchBox } = layout;
   const now = typeof performance !== "undefined" ? performance.now() : 0;
 
   ctx.save();

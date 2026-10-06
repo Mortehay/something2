@@ -6,7 +6,7 @@ import {
   useActivateProvider, useRefreshModels, useTestProvider,
 } from './useAiProviders.js';
 import {
-  emptyProviderForm, providerToForm, providerFormToPayload, validateProviderForm,
+  providerToForm, providerFormToPayload, validateProviderForm,
   parseTemplate, templateWarning, PLACEHOLDERS,
 } from './providerForm.js';
 import AdminLoading from './AdminLoading.jsx';

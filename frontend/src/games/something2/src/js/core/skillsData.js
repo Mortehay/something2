@@ -2414,7 +2414,7 @@ export function resolveSkillDamage(skill) {
 
   // Parse multiplier from description e.g. "250%" or "180%"
   const pctMatch = desc.match(/(\d+)%/);
-  let baseVal = 14;
+  let baseVal;
   if (pctMatch) {
     const pct = parseInt(pctMatch[1], 10);
     // Halved damage scaling for balanced combat
@@ -2448,7 +2448,7 @@ export function enrichSkillGems(list) {
     
     // Level requirement curve: Level 1 to 50
     // Starter skills (1..3) require Level 1 so players can immediately use them!
-    let reqLvl = 1;
+    let reqLvl;
     if (idx <= 3) reqLvl = 1;
     else if (idx <= 10) reqLvl = 2 + (idx - 4) * 2; // 2, 4, 6, 8, 10, 12, 14
     else if (idx <= 25) reqLvl = 16 + Math.floor((idx - 11) * 1.5); // 16..37

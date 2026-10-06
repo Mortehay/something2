@@ -43,8 +43,8 @@ import { AudioEngine } from "../audio/AudioEngine.js";
 import { fetchWorldAudio } from "../audio/audioClient.js";
 import { loadVolumes } from "../audio/audioSettings.js";
 import {
-    getSkillById, getSkillsForClass, getRequiredForm, isTransformationSkill,
-    isDruidExclusiveSkill, resolveSkillVfx, checkGemRequirements, getWeaponCategory,
+    getSkillById, getRequiredForm, isTransformationSkill,
+    isDruidExclusiveSkill, resolveSkillVfx, checkGemRequirements,
     getSkillPrice, getSkillLevelReq,
 } from "./skillsData.js";
 import {
@@ -497,7 +497,7 @@ export class Game {
         }
     }
 
-    async initChunked({ worldId, characterId, chunkSize, tileTypes, vfxEffects = null, entityTypes = null, spawnX = 0, spawnY = 0, className = null, mainStat = null, appearanceVariant = 1, characterClasses = [] }) {
+    async initChunked({ worldId, characterId, chunkSize, tileTypes, vfxEffects = null, entityTypes = null, className = null, mainStat = null, appearanceVariant = 1, characterClasses = [] }) {
         if (!this.canvas) {
             console.error("Canvas not found!");
             return;
@@ -1897,7 +1897,7 @@ export class Game {
     // [X], the respec button) and is consumed here, or it ARMS a pan -- and
     // whether that was a pan or a click on a node is decided on mouseup by
     // `moved`, exactly as the inventory drag decides between a drag and a click.
-    _handlePassivePress(x, y, isRightClick = false, shiftKey = false) {
+    _handlePassivePress(x, y, isRightClick = false, _shiftKey = false) {
         const layout = this.renderSystem && this.renderSystem._passiveLayout;
         if (layout) {
             if (isRightClick) {
@@ -2267,7 +2267,7 @@ export class Game {
                         aimAngle = Math.atan2(aim.ny, aim.nx);
                     }
                 }
-            } catch (_) {}
+            } catch (_) { /* malformed optional target; retain cursor aim */ }
         }
 
         const maxRange = Number(s.range) || (s.type === 'melee' ? 55 : (s.type === 'buff' ? 0 : 220));

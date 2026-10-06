@@ -353,7 +353,6 @@ export function drawGemShopPanel(ctx, layout, state, art = null) {
     // Class tag
     ctx.fillStyle = "#facc15";
     ctx.fillText(`[${(s.class || "ALL").toUpperCase()}]`, badgeX, r.y + 7);
-    badgeX += ctx.measureText(`[${(s.class || "ALL").toUpperCase()}]`).width + 6;
 
     // Line 2: Requirements (Level, STR, DEX, CON, INT, WIS, CHA, Weapon)
     ctx.font = "11px monospace";

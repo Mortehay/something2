@@ -33,7 +33,7 @@ function b64urlDecode(s) {
   const b64 = s.replace(/-/g, "+").replace(/_/g, "/");
   if (typeof atob === "function") return atob(b64);
   // Node (vitest) fallback.
-  return Buffer.from(b64, "base64").toString("binary");
+  return globalThis.Buffer.from(b64, "base64").toString("binary");
 }
 
 // Decode a JWT's payload without verifying the signature (verification is the

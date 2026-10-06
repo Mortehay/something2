@@ -93,7 +93,7 @@ describe("inventory drag input", () => {
   });
 
   it("dragging an equipped slot into the grid unequips", () => {
-    const { g, layout } = makeGame();
+    const { g } = makeGame();
     g.inventory.equipment = { main_hand: "w" };
     const l = layoutInventory({ inventory: g.inventory });
     g.renderSystem._invHitAreas = l.hitAreas;

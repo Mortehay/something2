@@ -1,6 +1,6 @@
 import { GAME_WIDTH, GAME_HEIGHT, ISO_TILE_H, ISO_TILE_W, MAP_TILE_SIZE } from "../core/constants.js";
 import { worldToScreen, depthKey } from "../core/iso.js";
-import { compareDrawables, wallRevealed, drawWall } from "./wallRenderer.js";
+import { compareDrawables, drawWall } from "./wallRenderer.js";
 import { drawLandmarks } from "./landmarkRenderer.js";
 import { pointArtDef, pointBodyRef, pointStateTreatment, planLandmarkBodies } from "./pointArt.js";
 import { drawPlaceholder } from "./placeholderSprite.js";
@@ -13,7 +13,6 @@ import { createTextLabelCache, drawCachedLabel } from "./textLabelCache.js";
 // odd-looking import would be the worse trade.
 import { domCanvasFactory } from "./minimapTerrainLayer.js";
 import { chunkTileCells } from "../core/chunkTiles.js";
-import { SLOTS, typeOf, canEquipClient } from "../core/inventory.js";
 import { layoutInventory, drawInventory } from "./inventoryPanel.js";
 import { layoutPassiveTree, drawPassiveTree } from "./passiveTreePanel.js";
 import { layoutSkillsPanel, drawSkillsPanel } from "./skillsPanel.js";
@@ -22,10 +21,10 @@ import { isTransformationSkill, getRequiredForm, resolveSkillDamage, checkGemReq
 import {
   blastProgress, blastScreenRadiusX, elementColor, auraRingGeometry,
 } from "../core/blasts.js";
-import { effectProgress, effectAlpha, isoArcAngle, particlesAt, effectSeed, hash01 } from "../core/vfx.js";
+import { effectProgress, effectAlpha, isoArcAngle, effectSeed, hash01 } from "../core/vfx.js";
 import { anchorY } from "../core/attackAnchor.js";
 import { elementTint } from "../core/elements.js";
-import { normalizeEffects, effectColor, effectHudLine } from "../core/statusEffects.js";
+import { normalizeEffects, effectColor } from "../core/statusEffects.js";
 import {
   canvasToCameraPoint, pickDrawable, targetKey, describeTarget, layoutCard,
   drawableScreenRect, CARD,
@@ -57,7 +56,6 @@ const WORLD_CHEST_PROMPT_R = 110;
 
 // Radius (world px) around an actor within which an occluding wall fades to
 // let the player see themselves/nearby creatures behind it.
-const WALL_REVEAL_R = 150;
 
 // SOMET-445. The level tag's full visual identity, in one place: it is both
 // what gets drawn and what the label cache keys on, so the two cannot drift.
@@ -470,7 +468,6 @@ export class RenderSystem {
     for (const d of RenderSystem.collectDecorations(chunkedMap, camera, decoTypes)) drawables.push(d);
     drawables.sort(compareDrawables);
 
-    const actors = RenderSystem.collectActors(player, remotePlayers, creatures);
     for (const d of drawables) {
       if (d.kind === "wall") {
         drawWall(this.ctx, { s: d.s, def: d.def, visual: d.visual, H: d.H, alpha: 1, halfW, halfH, tileCache: this._tileCache });
@@ -530,7 +527,7 @@ export class RenderSystem {
     camera.reset(this.ctx);
     this._skillSlotHitAreas = [];
     this.renderHud({
-      player, remotePlayers, localUserId, mana, maxMana, showMana, stamina, maxStamina,
+      player, mana, maxMana, showMana, stamina, maxStamina,
       weaponName, ammo, noAmmoFlash, effects, gold, progression,
       skills: hotbarSkills, hitAreas: this._skillSlotHitAreas, hoverSlot: skillHoverSlot, drag: skillDrag,
       activeForm, flashSlot, skillCooldowns, activeBuffs,
@@ -2184,7 +2181,6 @@ export class RenderSystem {
           if (v.slashStyle === 'crush_hammer') {
             // Heavy downward hammer power slam & forward ground crack
             const shockR = Math.min(24, Math.max(6, (rx * 0.3) * (0.4 + 0.6 * progress)));
-            const color = v.color || '#e2e8f0';
 
             // 1. Descending overhead power slam line (crashing down into ground)
             const dropDist = 32 * (1 - progress);
@@ -2881,7 +2877,7 @@ export class RenderSystem {
   }
 
   // Draw doorway map transitions with destination names so players see where edges lead
-  drawDoorways(doorways, chunkedMap, player) {
+  drawDoorways(doorways, chunkedMap, _player) {
     if (!Array.isArray(doorways) || doorways.length === 0 || !chunkedMap) return;
     const W = chunkedMap.width, H = chunkedMap.height;
     if (!W || !H) return;
@@ -4144,9 +4140,8 @@ export class RenderSystem {
   }
 
   renderHud({
-    player, remotePlayers, localUserId, mana = null, maxMana = null, showMana = true,
-    stamina = null, maxStamina = null, weaponName = null, ammo = null, noAmmoFlash = false,
-    effects = null, gold = null, progression = null, skills = null, hitAreas = null,
+    player, mana = null, maxMana = null, showMana = true,
+    stamina = null, maxStamina = null, progression = null, skills = null, hitAreas = null,
     hoverSlot = null, drag = null, activeForm = null, flashSlot = null, skillCooldowns = null,
     activeBuffs = [], playerStats = null, equippedWeapon = null, keybinds = null
   }) {
