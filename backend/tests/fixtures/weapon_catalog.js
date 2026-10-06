@@ -22,8 +22,8 @@
 // 1714440020000_rebalance_stamina.js, plus the ammo/aoe columns and the 3
 // ammo rows from 1714440021000_aoe_ammo.js. 22 weapons + 3 ammo = 25 rows,
 // plus the Monk's `quarterstaff` from 1714440516000 (SOMET-504), `unarmed`
-// from 1714440517000 (SOMET-509) and the gear ladder's 30 weapons from
-// 1714440506000 -- 54 weapons + 3 ammo = 57 rows.
+// from 1714440517000 (SOMET-509) and the gear ladder's 120 weapons from
+// 1714440506000 and 1714440520000 -- 144 weapons + 3 ammo = 147 rows.
 // Keep in sync with the migrations: 'the live item_types catalog matches
 // SEED_ROWS' reports ANY weapon or ammo row in the database that is missing
 // here, so a migration that adds a weapon must add it to this list too.
@@ -184,11 +184,12 @@ const SEED_ROWS = [
     pierce: null, mana_cost: 0, stamina_cost: 0, element: null,
     stackable: true, ammo_type_id: null, aoe_radius: null },
 
-  // --- the base gear ladder's 30 weapons, from 1714440506000_base_gear_ladder
-  // (SOMET-479, progression epic T11) ---
+  // --- the base gear ladder's 120 weapons, introduced by
+  // 1714440506000_base_gear_ladder and expanded by
+  // 1714440520000_skill_gem_weapons_catalog ---
   //
   // The ladder's other 120 rows are armor, which this fixture deliberately
-  // does not mirror ("SEED_ROWS is weapon+ammo only"). These 30 are here
+  // does not mirror ("SEED_ROWS is weapon+ammo only"). These 120 are here
   // because they ARE weapons and the live-catalog comparison above reports any
   // weapon row it cannot find.
   //
@@ -197,33 +198,55 @@ const SEED_ROWS = [
   // this fixture and the migration the same source and the comparison above
   // would stop being able to notice a difference between them.
   //
-  //   blade  = 6 x tier power, melee, reach 80,  arc 1.2, cooldown 0.55
-  //   spear  = 8 x tier power, melee, reach 150, arc 0.7, cooldown 0.80
-  //   wand   = 5 x tier power, projectile, range 420, speed 520, radius 6, cooldown 0.70
-  //   powers = 1.0 1.6 2.4 3.4 4.6 6.0 7.8 9.8 12.0 14.5
-  //
   // The ids are local to this fixture (the mock pool in
   // 'the seeded catalog has no structurally broken weapon' keys a Map on
   // them); the live comparison excludes id on purpose.
-  ...[
-    ['crude', 6, 8, 5], ['iron', 9.6, 12.8, 8], ['steel', 14.4, 19.2, 12],
-    ['tempered', 20.4, 27.2, 17], ['runed', 27.6, 36.8, 23], ['obsidian', 36, 48, 30],
-    ['astral', 46.8, 62.4, 39], ['void', 58.8, 78.4, 49], ['dragon', 72, 96, 60],
-    ['mythic', 87, 116, 72.5],
-  ].flatMap(([prefix, blade, spear, wand], i) => [
-    { id: 501 + i * 3, name: `${prefix}-blade`, category: 'weapon', kind: 'melee', damage: blade, cooldown: 0.55,
-      reach: 80, arc_width: 1.2, range: null, projectile_speed: null, projectile_radius: null,
-      pierce: null, mana_cost: 0, stamina_cost: 0, element: null,
-      stackable: false, ammo_type_id: null, aoe_radius: null },
-    { id: 502 + i * 3, name: `${prefix}-spear`, category: 'weapon', kind: 'melee', damage: spear, cooldown: 0.80,
-      reach: 150, arc_width: 0.7, range: null, projectile_speed: null, projectile_radius: null,
-      pierce: null, mana_cost: 0, stamina_cost: 0, element: null,
-      stackable: false, ammo_type_id: null, aoe_radius: null },
-    { id: 503 + i * 3, name: `${prefix}-wand`, category: 'weapon', kind: 'projectile', damage: wand, cooldown: 0.70,
-      reach: null, arc_width: null, range: 420, projectile_speed: 520, projectile_radius: 6,
-      pierce: null, mana_cost: 0, stamina_cost: 0, element: null,
-      stackable: false, ammo_type_id: null, aoe_radius: null },
-  ]),
+  ...(() => {
+    const tiers = [
+      ['crude', 1.0], ['iron', 1.6], ['steel', 2.4], ['tempered', 3.4],
+      ['runed', 4.6], ['obsidian', 6.0], ['astral', 7.8], ['void', 9.8],
+      ['dragon', 12.0], ['mythic', 14.5],
+    ];
+    const families = [
+      { key: 'blade', kind: 'melee', damage: 6, cooldown: 0.55, reach: 80, arc_width: 1.2 },
+      { key: 'sword', kind: 'melee', damage: 7, cooldown: 0.6, reach: 85, arc_width: 1.3 },
+      { key: 'axe', kind: 'melee', damage: 8, cooldown: 0.7, reach: 75, arc_width: 1.4 },
+      { key: 'mace', kind: 'melee', damage: 8, cooldown: 0.7, reach: 70, arc_width: 1.2 },
+      { key: 'spear', kind: 'melee', damage: 8, cooldown: 0.8, reach: 150, arc_width: 0.7 },
+      { key: 'dagger', kind: 'melee', damage: 5, cooldown: 0.45, reach: 65, arc_width: 1.0 },
+      { key: 'quarterstaff', kind: 'melee', damage: 7, cooldown: 0.6, reach: 95, arc_width: 1.1 },
+      { key: 'bow', kind: 'projectile', damage: 7, cooldown: 0.75,
+        range: 450, projectile_speed: 550, projectile_radius: 5 },
+      { key: 'crossbow', kind: 'projectile', damage: 9, cooldown: 0.95,
+        range: 480, projectile_speed: 600, projectile_radius: 6 },
+      { key: 'wand', kind: 'projectile', damage: 5, cooldown: 0.7,
+        range: 420, projectile_speed: 520, projectile_radius: 6 },
+      { key: 'staff', kind: 'projectile', damage: 8, cooldown: 0.85,
+        range: 400, projectile_speed: 480, projectile_radius: 8 },
+      { key: 'scepter', kind: 'projectile', damage: 6, cooldown: 0.65,
+        range: 380, projectile_speed: 500, projectile_radius: 7 },
+    ];
+    return tiers.flatMap(([prefix, power], tierIndex) => families.map((family, familyIndex) => ({
+      id: 501 + tierIndex * families.length + familyIndex,
+      name: `${prefix}-${family.key}`,
+      category: 'weapon',
+      kind: family.kind,
+      damage: Math.round(family.damage * power * 10) / 10,
+      cooldown: family.cooldown,
+      reach: family.reach ?? null,
+      arc_width: family.arc_width ?? null,
+      range: family.range ?? null,
+      projectile_speed: family.projectile_speed ?? null,
+      projectile_radius: family.projectile_radius ?? null,
+      pierce: null,
+      mana_cost: 0,
+      stamina_cost: 0,
+      element: null,
+      stackable: false,
+      ammo_type_id: null,
+      aoe_radius: null,
+    })));
+  })(),
 ];
 
 // The fastest (lowest) cooldown, in MILLISECONDS, of any weapon carrying

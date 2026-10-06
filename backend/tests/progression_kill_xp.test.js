@@ -424,10 +424,11 @@ function fakeLevelUpPool() {
   });
 }
 
-test('a level-up moves the LIVE player pools (maxHp up, hp by the delta, never healed to full) and pushes a progression message', async () => {
+test('a level-up moves the LIVE player pools (maxHp up, hp by the delta, never healed to full) and pushes a progression message', async (t) => {
   const pool = fakeLevelUpPool();
   const { url, handle, server } = await bootWith(pool);
   const ws = connect(url, 1);
+  t.after(() => { ws.close(); handle.close(); server.close(); });
   await new Promise((r) => ws.on('open', r));
   ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
@@ -481,9 +482,9 @@ test('a level-up moves the LIVE player pools (maxHp up, hp by the delta, never h
   }
   assert.ok(raised, 'live maxHp must move to 200 (base 100 + 10*10 from constitution 15)');
   const me = state.players.find((p) => p.id === '1');
-  assert.strictEqual(me.hp, 160, 'hp must move by the +100 delta (60+100), not snap to the new max (200)');
+  assert.ok(me.hp >= 160 && me.hp < 161,
+    'hp must move by the +100 delta (60+100), plus at most one observed regen fraction; got ' + me.hp);
 
-  ws.close(); handle.close(); server.close();
 });
 
 // Finding 1: the p.hp > 0 guard (server.js, onCreatureDeath) had NO test --
@@ -506,10 +507,11 @@ test('a level-up moves the LIVE player pools (maxHp up, hp by the delta, never h
 // broadcastCreatures() (which normally load and announce it) never run --
 // and none of that is needed anyway, since world.attack() reads the live
 // creature sim directly.
-test('a player mid-death (hp <= 0, awaiting resolveDeaths) is not revived by their own kill leveling them up', async () => {
+test('a player mid-death (hp <= 0, awaiting resolveDeaths) is not revived by their own kill leveling them up', async (t) => {
   const pool = fakeLevelUpPool();
   const { url, handle, server } = await bootWith(pool, { tickMs: 3600000 });
   const ws = connect(url, 1);
+  t.after(() => { ws.close(); handle.close(); server.close(); });
   await new Promise((r) => ws.on('open', r));
   ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
@@ -569,7 +571,6 @@ test('a player mid-death (hp <= 0, awaiting resolveDeaths) is not revived by the
   assert.strictEqual(killClients.length, 1, 'exactly one transaction performed the kill');
   assert.strictEqual(killClients[0].released, 1, 'the kill client must still be released');
 
-  ws.close(); handle.close(); server.close();
 });
 
 // ---------------------------------------------------------------------------

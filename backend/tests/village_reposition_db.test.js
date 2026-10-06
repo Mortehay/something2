@@ -144,7 +144,7 @@ test('a village whose spec box moves is repositioned, with everything derived fr
 
       // A player bound to this village, exactly as the authority writes it:
       // the bind IS the village spawn point.
-      const et = (await pool.query('SELECT id FROM entity_types LIMIT 1')).rows[0];
+      const et = (await pool.query('SELECT id FROM entity_types WHERE is_playable = true ORDER BY id LIMIT 1')).rows[0];
       const ch = (await pool.query(
         `INSERT INTO characters (user_id, slot, name, entity_type_id)
          VALUES ($1, 1, 'zzMoveVillageChar', $2) RETURNING id`, [user.id, et.id])).rows[0];

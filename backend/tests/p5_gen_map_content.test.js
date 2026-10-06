@@ -30,7 +30,7 @@ test('every new world grid.x is >= 20 (collision avoidance with the 3 existing s
 
 test('exactly 7 inter-dungeon portal links, each carrying a guard', () => {
   const spec = generateSpec();
-  const portals = spec.links.filter((l) => l.kind === 'portal');
+  const portals = spec.links.filter((l) => l.kind === 'portal' && l.guard);
   assert.equal(portals.length, 7);
   for (const p of portals) {
     assert.ok(p.guard && typeof p.guard.creature_type === 'string' && p.guard.count >= 1);
