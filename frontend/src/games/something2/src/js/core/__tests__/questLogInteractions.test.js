@@ -165,4 +165,21 @@ describe("Quest Log Panel & Storyline Interactions", () => {
     g._keydownHandler({ key: "e", code: "KeyE", repeat: false });
     expect(g.questLogOpen).toBe(true);
   });
+
+  it("handles object response from fetchCharacterQuests correctly", async () => {
+    const { fetchCharacterQuests } = await import("../../net/questsClient.js");
+    fetchCharacterQuests.mockResolvedValueOnce({
+      ok: true,
+      quests: [{ quest_id: 1, status: "active", progress: {} }],
+      legacyChoice: "city_restoration",
+    });
+
+    await g.openQuestLog();
+
+    expect(g.allQuests.length).toBeGreaterThan(0);
+    const act1 = g.allQuests.find(q => q.id === 1);
+    expect(act1).toBeDefined();
+    expect(act1.status).toBe("active");
+    expect(g.legacyChoice).toBe("city_restoration");
+  });
 });

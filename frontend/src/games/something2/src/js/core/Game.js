@@ -619,6 +619,7 @@ export class Game {
         this._statsFromSocket = false;
         this.characterModPage = 0;
         this.characterId = characterId;
+        this.loadQuests();
         this.className = className || this.passiveStartClass || null;
         this.appearanceVariant = Number(appearanceVariant) || 1;
         this.appearanceVisuals = indexAppearanceVisuals(characterClasses);
@@ -1925,35 +1926,55 @@ export class Game {
             .catch(() => { this.passiveRespecCost = null; });
     }
 
+    async loadQuests() {
+        try {
+            const [quests, charQuests] = await Promise.all([
+                (this.allQuests && this.allQuests.length > 0) ? Promise.resolve(this.allQuests) : fetchAllQuests(),
+                this.characterId ? fetchCharacterQuests(this.characterId) : Promise.resolve({ quests: [], legacyChoice: null }),
+            ]);
+
+            const charQuestsList = Array.isArray(charQuests)
+                ? charQuests
+                : (charQuests && Array.isArray(charQuests.quests) ? charQuests.quests : []);
+
+            const legacyChoice = (charQuests && !Array.isArray(charQuests) && charQuests.legacyChoice)
+                ? charQuests.legacyChoice
+                : null;
+            if (legacyChoice) {
+                this.legacyChoice = legacyChoice;
+                if (this.progression) this.progression.legacyChoice = legacyChoice;
+            }
+
+            const statusMap = new Map();
+            for (const cq of charQuestsList) {
+                statusMap.set(cq.quest_id || cq.questId, cq);
+            }
+
+            const rawQuests = Array.isArray(quests)
+                ? quests
+                : (quests && Array.isArray(quests.quests) ? quests.quests : []);
+
+            this.allQuests = rawQuests.map((q) => {
+                const cq = statusMap.get(q.id);
+                return {
+                    ...q,
+                    status: cq ? cq.status : (q.status || 'available'),
+                    progress: cq ? cq.progress : (q.progress || {}),
+                };
+            });
+
+            if (!this.activeQuestKey && this.allQuests.length > 0) {
+                const activeQ = this.allQuests.find((q) => q.status === 'active') || this.allQuests[0];
+                this.activeQuestKey = activeQ.key;
+            }
+        } catch (err) {
+            if (this.showToast) this.showToast(`Quest Log: ${err.message}`);
+        }
+    }
+
     openQuestLog() {
         this.questLogOpen = true;
-        const load = async () => {
-            try {
-                const [quests, charQuests] = await Promise.all([
-                    (this.allQuests && this.allQuests.length > 0) ? Promise.resolve(this.allQuests) : fetchAllQuests(),
-                    this.characterId ? fetchCharacterQuests(this.characterId) : Promise.resolve([]),
-                ]);
-                const statusMap = new Map();
-                for (const cq of (charQuests || [])) {
-                    statusMap.set(cq.quest_id || cq.questId, cq);
-                }
-                this.allQuests = (quests || []).map((q) => {
-                    const cq = statusMap.get(q.id);
-                    return {
-                        ...q,
-                        status: cq ? cq.status : 'available',
-                        progress: cq ? cq.progress : {},
-                    };
-                });
-                if (!this.activeQuestKey && this.allQuests.length > 0) {
-                    const activeQ = this.allQuests.find((q) => q.status === 'active') || this.allQuests[0];
-                    this.activeQuestKey = activeQ.key;
-                }
-            } catch (err) {
-                if (this.showToast) this.showToast(`Quest Log: ${err.message}`);
-            }
-        };
-        load();
+        return this.loadQuests();
     }
 
     closeQuestLog() {
