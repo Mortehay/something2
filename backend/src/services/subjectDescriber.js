@@ -173,7 +173,7 @@ function clean(text, length, subject = null) {
 }
 
 async function describeSubject(db, subject, {
-  length = 'medium', fetchImpl = fetch, textProvider = defaultTextProvider,
+  length = 'medium', fetchImpl = fetch, textProvider = defaultTextProvider, boxOnly = false,
 } = {}) {
   const budget = budgetFor(subject, length);
   const messages = buildMessages(subject, length);
@@ -182,8 +182,13 @@ async function describeSubject(db, subject, {
     prompt: messages[1].content,
     maxTokens: budget.tokens,
     temperature: TEMPERATURE(),
-  }, { fetchImpl });
-  if (!result.ok) throw new Error(result.error || 'text provider failed');
+  }, { fetchImpl, boxOnly });
+  if (!result.ok) {
+    const err = new Error(result.error || 'text provider failed');
+    err.busy = Boolean(result.busy);
+    err.via = result.via;
+    throw err;
+  }
   const text = clean(result.text, length, subject);
   if (!text) throw new Error('describer returned nothing usable');
   return { text, model: result.model, length, via: result.via };

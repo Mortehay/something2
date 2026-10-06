@@ -390,3 +390,21 @@ lockedTest('claim and nextClaimableAt step over excluded groups', async (t, pool
     "SELECT count(*)::int n FROM art_jobs WHERE subject_kind = 'skill' AND state = 'queued' AND attempts = 0");
   assert.equal(rows[0].n, 2, 'excluded rows are left untouched');
 });
+
+lockedTest('forced prompts gate image claims until the prompt is written', async (t, pool) => {
+  const [queued] = await q.enqueue(pool, [S('forced')],
+    { backend: 'connector', forcePrompt: true });
+  assert.equal(queued.needs_prompt, true);
+  assert.equal(queued.force_prompt, true);
+  assert.deepEqual(await q.claim(pool, 1), [], 'image claim must skip prompt-pending work');
+
+  const prompt = await q.claimPrompt(pool);
+  assert.equal(prompt.id, queued.id);
+  const ready = await q.promptWritten(pool, prompt.id);
+  assert.equal(ready.needs_prompt, false);
+  assert.equal(ready.force_prompt, false);
+  assert.equal(ready.attempts, 0, 'prompt work must not spend an image attempt');
+
+  const [image] = await q.claim(pool, 1);
+  assert.equal(image.id, queued.id, 'the same job becomes image-claimable afterwards');
+});

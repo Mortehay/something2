@@ -130,6 +130,20 @@ export function byKind(selected) {
 }
 
 
+// Forced prompt generation is unavailable for subjects that compose their own
+// prompts (currently tiles). Count them so the queue action can be disabled
+// before a per-kind request produces a partial enqueue.
+export function promptIneligibleCount(selected, subjects) {
+  const byId = new Map(subjects.map((subject) => [subjectId(subject), subject]));
+  let count = 0;
+  for (const id of selected) {
+    const subject = byId.get(id);
+    if (!subject || subject.takes_description !== true) count += 1;
+  }
+  return count;
+}
+
+
 // How much of the selection the current filter is NOT showing.
 //
 // Selection deliberately SURVIVES a filter change -- filtering to items,

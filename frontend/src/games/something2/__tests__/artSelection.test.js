@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   subjectId, sortSubjects, freezeOrder, clampPage, pageCount, toggle, selectPage, deselectPage,
   isPageFullySelected, selectAllMatching, selectAllLabel, byKind, applyFilters,
-  enqueueSummary, coverage, selectionOutsideFilter, PAGE_SIZE, filtersFromParams,
+  enqueueSummary, coverage, selectionOutsideFilter, promptIneligibleCount, PAGE_SIZE, filtersFromParams,
 } from '../artSelection.js';
 
 const S = (kind, key, extra = {}) => ({ kind, key, name: key, has_art: false, ...extra });
@@ -132,6 +132,17 @@ describe('selection across a filter change', () => {
   it('is zero when everything selected is visible', () => {
     const rows = [S('item', 'a'), S('item', 'b')];
     expect(selectionOutsideFilter(selectAllMatching(rows), rows)).toBe(0);
+  });
+});
+
+describe('forced prompt selection', () => {
+  it('accepts description-backed subjects and rejects composed-prompt subjects', () => {
+    const subjects = [
+      S('character_appearance', 'Archer:1', { takes_description: true }),
+      S('tile', 'grass', { takes_description: false }),
+    ];
+    expect(promptIneligibleCount(new Set(['character_appearance/Archer:1']), subjects)).toBe(0);
+    expect(promptIneligibleCount(new Set(['character_appearance/Archer:1', 'tile/grass']), subjects)).toBe(1);
   });
 });
 

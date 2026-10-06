@@ -28,7 +28,7 @@ import { draftText, draftLength, isDirty } from './artDescriptionDraft.js';
 import {
   sortSubjects, freezeOrder, applyFilters, clampPage, pageCount, toggle, selectPage, deselectPage,
   isPageFullySelected, selectAllMatching, selectAllLabel, byKind, subjectId,
-  enqueueSummary, coverage, selectionOutsideFilter, PAGE_SIZE, filtersFromParams,
+  enqueueSummary, coverage, selectionOutsideFilter, promptIneligibleCount, PAGE_SIZE, filtersFromParams,
 } from './artSelection.js';
 import {
   batchProgress, formatDuration, claimedAgo, partitionInFlight, previewNames, blockedSummary,
@@ -67,6 +67,12 @@ const Button = styled.button`
   &:disabled { opacity: 0.5; cursor: default; }
 `;
 const Secondary = styled(Button)`background: var(--s2-btn-grey);`;
+const BatchOption = styled.label`
+  display: flex; align-items: center; gap: 0.45rem; min-height: 2rem;
+  color: var(--s2-text-muted); font-size: 0.85rem; cursor: pointer;
+  input { accent-color: var(--s2-accent); }
+  &:has(input:disabled) { opacity: 0.5; cursor: default; }
+`;
 const Hint = styled.p`color: var(--s2-text-muted); font-size: 0.85rem; margin: 0.25rem 0;`;
 const Err = styled.p`color: var(--s2-danger); font-size: 0.85rem; margin: 0.25rem 0;`;
 const Blocked = styled.section`
@@ -467,6 +473,7 @@ function ArtConsoleAdmin() {
   const [selected, setSelected] = useState(new Set());
   const [backend, setBackend] = useState('connector');
   const [providerId, setProviderId] = useState('');
+  const [forcePrompt, setForcePrompt] = useState(false);
   const [notice, setNotice] = useState(null);
   const [failure, setFailure] = useState(null);
   const [sort, setSort] = useState({ by: 'subject', dir: 'asc' });
@@ -578,6 +585,7 @@ function ArtConsoleAdmin() {
   const cover = coverage(subjects);
   const allLabel = selectAllLabel(matching.length, pageRows.length);
   const hiddenSelected = selectionOutsideFilter(selected, matching);
+  const promptIneligible = promptIneligibleCount(selected, subjects);
 
   // Rendered BOTH above and below the table. At PAGE_SIZE 100 the bottom copy
   // sits ~4000px down, so paging with only that one means scrolling the whole
@@ -630,6 +638,7 @@ function ArtConsoleAdmin() {
         byKind: grouped,
         backend,
         providerId: backend === 'connector' && providerId ? Number(providerId) : null,
+        forcePrompt,
       });
       // Reported rather than assumed: enqueue is idempotent, so "100 selected,
       // 3 queued" is a normal outcome and needs its breakdown to make sense.
@@ -700,7 +709,19 @@ function ArtConsoleAdmin() {
       </Bar>
 
       <Bar>
-        <Button onClick={onEnqueue} disabled={selected.size === 0 || enqueue.isPending}>
+        <BatchOption title="Generate a fresh subject description on the GPU box before drawing">
+          <input
+            type="checkbox"
+            checked={forcePrompt}
+            disabled={enqueue.isPending}
+            onChange={(e) => setForcePrompt(e.target.checked)}
+          />
+          Regenerate prompts with GPU box
+        </BatchOption>
+        <Button
+          onClick={onEnqueue}
+          disabled={selected.size === 0 || enqueue.isPending || (forcePrompt && promptIneligible > 0)}
+        >
           Queue {selected.size} selected
         </Button>
         {allLabel && (
@@ -742,6 +763,9 @@ function ArtConsoleAdmin() {
           </Secondary>
         )}
       </Bar>
+      {forcePrompt && promptIneligible > 0 && (
+        <Err>{promptIneligible} selected subject(s) build their own prompts and cannot use GPU prompt regeneration.</Err>
+      )}
 
       {blocked.total > 0 && (runBlocked || !run?.running) && (
         <Blocked role="alert">
@@ -838,7 +862,8 @@ function ArtConsoleAdmin() {
             waiting their turn, and are summarised rather than listed. */}
         {claimed.drawing.map((j) => (
           <Drawing key={j.id}>
-            drawing {j.subject_kind}/{j.subject_key}
+            {j.needs_prompt || run?.phase === 'prompt' ? 'writing prompt for ' : 'drawing '}
+            {j.subject_kind}/{j.subject_key}
             {/* "claimed Xs ago", never "drawing for Xs". claimed_at is when
                 the row was TAKEN; every job after the first in a claimed batch
                 was taken long before the provider reached it, so "drawing for"

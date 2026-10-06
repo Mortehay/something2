@@ -3629,6 +3629,12 @@ app.post('/api/art-jobs', adminGuard, async (req, res) => {
     const keys = Array.isArray(req.body.keys) ? req.body.keys.filter((k) => typeof k === 'string') : [];
     if (keys.length === 0) return res.status(400).json({ error: 'keys must be a non-empty array' });
     const backend = req.body.backend === 'local' ? 'local' : 'connector';
+    const forcePrompt = req.body.force_prompt === true;
+    if (forcePrompt && !catalogSubjects.takesDescription(kind)) {
+      return res.status(409).json({
+        error: `${kind} builds its own prompt and cannot regenerate one with the text provider`,
+      });
+    }
 
     // Per-subject provider pins resolved HERE, at enqueue, so a pinned tile or
     // entity keeps its own provider instead of silently taking the batch's.
@@ -3674,10 +3680,13 @@ app.post('/api/art-jobs', adminGuard, async (req, res) => {
       }
     }
 
-    const rows = await artJobQueue.enqueue(pool, subjects, { backend, providerId });
+    const rows = await artJobQueue.enqueue(pool, subjects, {
+      backend, providerId, forcePrompt,
+    });
     res.status(201).json({
       requested: keys.length,
       queued: rows.length,
+      force_prompt: forcePrompt,
       // Each named rather than implied: "I asked for 100 and 3 were queued" is
       // confusing until you know the other 97 were already in flight, and a key
       // that has left the catalogue is a different thing again.

@@ -8,6 +8,7 @@ const aiProviders = require('./aiProviders.js');
 const history = require('./artGenerations.js');
 const promptNotes = require('./artPromptNotes.js');
 const descriptions = require('./artPromptDescriptions.js');
+const subjectDescriber = require('./subjectDescriber.js');
 const failures = require('./artFailures.js');
 const {
   buildObjectPrompt, BACKDROP, CUTOUT_BACKDROP, OBJECT_NEGATIVES,
@@ -345,6 +346,35 @@ async function runOne(db, job, {
   };
 }
 
+// Write a fresh model-authored subject phrase before image generation. Forced
+// batches insist on the GPU box: falling back to a small/local model would
+// make the checkbox promise false.
+async function writePromptForJob(db, job, {
+  subjects = catalogSubjects,
+  describer = subjectDescriber,
+  descriptionStore = descriptions,
+  resolveSubject = null,
+} = {}) {
+  const reg = subjects.registryFor(job.subject_kind);
+  if (!reg) throw new Error(`unknown subject kind: ${job.subject_kind}`);
+  if (!subjects.takesDescription(job.subject_kind)) {
+    throw new Error(`${job.subject_kind} builds its own prompt and cannot regenerate one`);
+  }
+  const getSubject = resolveSubject || subjectResolver(db, subjects);
+  const subject = await getSubject(job.subject_kind, job.subject_key);
+  if (!subject) {
+    throw new Error(`subject ${job.subject_kind}/${job.subject_key} is no longer in the catalogue`);
+  }
+  const written = await describer.describeSubject(db, subject, {
+    length: 'medium', boxOnly: true,
+  });
+  await descriptionStore.replace(db, job.subject_kind, job.subject_key, {
+    text: written.text, length: 'medium', model: written.model,
+    sourcePrompt: subject.basePrompt,
+  });
+  return written;
+}
+
 // Point the subject at its new image, through SOMET-535's registry -- items
 // write item_types.icon, skills and passive labels write catalog_art.
 //
@@ -610,6 +640,7 @@ module.exports = {
   subjectResolver,
   backdropFor,
   resolveJobProvider,
+  writePromptForJob,
 };
 
 // --- The drain ------------------------------------------------------------
@@ -634,6 +665,8 @@ function runStatus() {
     passes: run.passes,
     done: run.done,
     failed: run.failed,
+    phase: run.phase || null,
+    prompts_written: run.promptsWritten || 0,
     stopping: run.stopping,
     // null unless the drain is currently sitting out a retry backoff.
     waiting_until: run.waitingUntil || null,
@@ -671,18 +704,53 @@ function startDrain(db, opts = {}) {
   run = {
     running: true, stopping: false, startedAt: new Date().toISOString(),
     finishedAt: null, passes: 0, done: 0, failed: 0, error: null,
-    waitingUntil: null, blocked: [],
+    waitingUntil: null, blocked: [], phase: null, promptsWritten: 0,
   };
   // Distinct subjects that have failed on the PROVIDER since the last success.
   // A Set, not a counter: the same subject failing repeatedly says nothing
   // about the provider, and the attempt cap already ends that.
   const brokenSubjects = new Set();
   const self = run;
+  const promptSubjects = (opts.promptDeps && opts.promptDeps.subjects) || catalogSubjects;
+  const promptResolveSubject = subjectResolver(db, promptSubjects);
 
   (async () => {
     try {
       for (;;) {
         if (self.stopping) break;
+        // Prompt phase first across the whole queue, avoiding a text/image
+        // model swap for every individual subject.
+        self.phase = 'prompt';
+        for (;;) {
+          if (self.stopping) break;
+          const promptJob = await queue.claimPrompt(db);
+          if (promptJob) {
+            try {
+              await (opts.writePromptForJob || writePromptForJob)(db, promptJob, {
+                ...opts.promptDeps, resolveSubject: promptResolveSubject,
+              });
+              await queue.promptWritten(db, promptJob.id);
+              self.promptsWritten += 1;
+            } catch (err) {
+              await queue.fail(db, promptJob.id, err, { refundAttempt: err && err.busy === true });
+              self.failed += 1;
+            }
+            continue;
+          }
+          const promptState = await queue.promptQueueState(db);
+          if (promptState.queued === 0) break;
+          if (promptState.ready > 0) continue;
+          if (!promptState.next) break;
+          const waitMs = Math.min(
+            Math.max(new Date(promptState.next).getTime() - Date.now(), 0),
+            MAX_IDLE_WAIT_MS(),
+          );
+          self.waitingUntil = new Date(promptState.next).toISOString();
+          await sleepUnlessStopping(waitMs, self);
+          self.waitingUntil = null;
+        }
+        if (self.stopping) break;
+        self.phase = 'image';
         // The breaker now runs as each result lands (SOMET-558), so a wedged
         // provider stops the pass at BREAKER_TRIP instead of after all `limit`
         // claimed jobs have been converted into failures.
@@ -756,6 +824,7 @@ function startDrain(db, opts = {}) {
     } catch (err) {
       self.error = err && err.message ? err.message : String(err);
     } finally {
+      self.phase = null;
       self.running = false;
       self.finishedAt = new Date().toISOString();
     }

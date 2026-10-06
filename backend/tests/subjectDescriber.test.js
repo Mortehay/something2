@@ -215,14 +215,15 @@ test('the describer uses the shared text provider, which prefers the GPU box', a
   const db = { query: async () => { throw new Error('the injected provider owns DB access'); } };
   let call = null;
   const textProvider = {
-    complete: async (seenDb, request) => {
-      call = { seenDb, request };
+    complete: async (seenDb, request, opts) => {
+      call = { seenDb, request, opts };
       return { ok: true, text: 'battle-worn archer with a longbow', model: 'large-gpu-llm', via: 'box' };
     },
   };
   const subject = { kind: 'character_appearance', key: 'Archer:2', name: 'Archer appearance 2' };
-  const out = await describeSubject(db, subject, { length: 'medium', textProvider });
+  const out = await describeSubject(db, subject, { length: 'medium', textProvider, boxOnly: true });
   assert.strictEqual(call.seenDb, db);
+  assert.equal(call.opts.boxOnly, true);
   assert.match(call.request.system, /full-body fantasy game HERO/i);
   assert.match(call.request.prompt, /Archer appearance 2/);
   assert.equal(call.request.maxTokens, budgetFor(subject, 'medium').tokens);

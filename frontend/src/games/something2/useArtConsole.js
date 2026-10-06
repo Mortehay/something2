@@ -279,11 +279,11 @@ async function post(path, body) {
 export function useEnqueueArt() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ byKind, backend, providerId }) => {
+    mutationFn: async ({ byKind, backend, providerId, forcePrompt }) => {
       const results = [];
       for (const [kind, keys] of byKind) {
         const { res, json } = await post('/api/art-jobs', {
-          kind, keys, backend, provider_id: providerId,
+          kind, keys, backend, provider_id: providerId, force_prompt: forcePrompt === true,
         });
         if (!res.ok) throw new Error(json.error || `Failed to queue ${kind}`);
         results.push(json);

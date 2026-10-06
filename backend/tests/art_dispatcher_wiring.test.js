@@ -347,3 +347,31 @@ test('a tile request does NOT carry the object framing exclusions', async () => 
       `a tile must not be steered away from "${term}"`);
   }
 });
+
+test('forced prompt writing uses the GPU box and stores the replacement phrase', async () => {
+  const calls = [];
+  const subjects = {
+    registryFor: () => ({ list: async () => [{
+      kind: 'character_appearance', key: 'Archer:2', name: 'Archer appearance 2',
+      basePrompt: 'an archer hero',
+    }] }),
+    takesDescription: () => true,
+  };
+  const describer = {
+    describeSubject: async (db, subject, opts) => {
+      calls.push(['describe', subject.key, opts]);
+      return { text: 'battle-worn archer with a longbow', model: 'gpu-llm' };
+    },
+  };
+  const descriptionStore = {
+    replace: async (db, kind, key, value) => calls.push(['store', kind, key, value]),
+  };
+  await d.writePromptForJob({},
+    { subject_kind: 'character_appearance', subject_key: 'Archer:2' },
+    { subjects, describer, descriptionStore });
+  assert.equal(calls[0][2].boxOnly, true);
+  assert.deepEqual(calls[1], ['store', 'character_appearance', 'Archer:2', {
+    text: 'battle-worn archer with a longbow', length: 'medium', model: 'gpu-llm',
+    sourcePrompt: 'an archer hero',
+  }]);
+});
