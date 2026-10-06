@@ -19,3 +19,21 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+Generated Content Notice
+
+All shipped creative content in this project, including images, audio, and
+in-game descriptive text, is generated locally on a privately operated GPU
+box. No hosted generative-AI service is used to create that content.
+
+The models recorded by the project's local generation pipeline are:
+
+- Text and prompt writing: qwen3.6-35b-a3b and qwen2.5-coder:7b.
+- Images: gguf:qwen-image-2512-Q2_K+lightning8,
+  gguf:Qwen-Image-2512-Q3_K_M, and
+  stabilityai/stable-diffusion-xl-base-1.0 with the nerijs/pixel-art-xl or
+  Muapi/soft-pixel-art-xl adapters.
+- Audio: audio:ace-step and audio:stable-audio.
+
+This notice is informational and does not modify the permissions, conditions,
+or disclaimer of the MIT License above.

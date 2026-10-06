@@ -4,6 +4,22 @@ Real-time 2D MMORPG. Node + Express backend with the authoritative game server
 (WebSockets, 60Hz tick, collisions, mob AI) running in-process, Vite + React
 client, Postgres + Redis + MinIO.
 
+## AI-generated content
+
+All shipped creative content in the game&mdash;images, audio, and in-game
+descriptive text&mdash;is generated locally on a privately operated GPU box. No
+hosted generative-AI service is used to create that content.
+
+The local models recorded by the project's generation pipeline are:
+
+- **Text and prompt writing:** `qwen3.6-35b-a3b` and
+  `qwen2.5-coder:7b`.
+- **Images:** `gguf:qwen-image-2512-Q2_K+lightning8`,
+  `gguf:Qwen-Image-2512-Q3_K_M`, and
+  `stabilityai/stable-diffusion-xl-base-1.0` with the
+  `nerijs/pixel-art-xl` or `Muapi/soft-pixel-art-xl` adapters.
+- **Audio:** `audio:ace-step` and `audio:stable-audio`.
+
 Everything runs in Docker. You do **not** need Node, Postgres or anything else
 installed on the host — only Docker, `make` and `git`.
 

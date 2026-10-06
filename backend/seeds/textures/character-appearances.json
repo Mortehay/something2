@@ -27,7 +27,7 @@
     "key": "Archer:5",
     "name": "Archer appearance 5",
     "file": "Archer_5.png",
-    "bytes": 521721
+    "bytes": 425436
   },
   {
     "key": "Cultist:1",
@@ -105,13 +105,13 @@
     "key": "Mage:3",
     "name": "Mage appearance 3",
     "file": "Mage_3.png",
-    "bytes": 341080
+    "bytes": 196604
   },
   {
     "key": "Mage:4",
     "name": "Mage appearance 4",
     "file": "Mage_4.png",
-    "bytes": 256662
+    "bytes": 225303
   },
   {
     "key": "Mage:5",
@@ -165,7 +165,7 @@
     "key": "Warrior:3",
     "name": "Warrior appearance 3",
     "file": "Warrior_3.png",
-    "bytes": 367182
+    "bytes": 403647
   },
   {
     "key": "Warrior:4",
