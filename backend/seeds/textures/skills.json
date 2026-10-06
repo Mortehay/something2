@@ -1080,16 +1080,6 @@
     }
   },
   {
-    "key": "dru_charm_creature",
-    "name": "Charm Creature",
-    "file": "dru_charm_creature.png",
-    "bytes": 75959,
-    "source": {
-      "width": 210,
-      "height": 256
-    }
-  },
-  {
     "key": "dru_constricting_vines",
     "name": "Constricting Vines",
     "file": "dru_constricting_vines.png",
@@ -1307,6 +1297,16 @@
     "source": {
       "width": 238,
       "height": 256
+    }
+  },
+  {
+    "key": "dru_primal_metamorphosis",
+    "name": "Primal Metamorphosis",
+    "file": "dru_primal_metamorphosis.png",
+    "bytes": 63070,
+    "source": {
+      "width": 372,
+      "height": 461
     }
   },
   {

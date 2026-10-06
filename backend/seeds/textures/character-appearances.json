@@ -1,0 +1,182 @@
+[
+  {
+    "key": "Archer:1",
+    "name": "Archer appearance 1",
+    "file": "Archer_1.png",
+    "bytes": 452869
+  },
+  {
+    "key": "Archer:2",
+    "name": "Archer appearance 2",
+    "file": "Archer_2.png",
+    "bytes": 349110
+  },
+  {
+    "key": "Archer:3",
+    "name": "Archer appearance 3",
+    "file": "Archer_3.png",
+    "bytes": 546084
+  },
+  {
+    "key": "Archer:4",
+    "name": "Archer appearance 4",
+    "file": "Archer_4.png",
+    "bytes": 676012
+  },
+  {
+    "key": "Archer:5",
+    "name": "Archer appearance 5",
+    "file": "Archer_5.png",
+    "bytes": 521721
+  },
+  {
+    "key": "Cultist:1",
+    "name": "Cultist appearance 1",
+    "file": "Cultist_1.png",
+    "bytes": 524241
+  },
+  {
+    "key": "Cultist:2",
+    "name": "Cultist appearance 2",
+    "file": "Cultist_2.png",
+    "bytes": 190850
+  },
+  {
+    "key": "Cultist:3",
+    "name": "Cultist appearance 3",
+    "file": "Cultist_3.png",
+    "bytes": 254814
+  },
+  {
+    "key": "Cultist:4",
+    "name": "Cultist appearance 4",
+    "file": "Cultist_4.png",
+    "bytes": 134609
+  },
+  {
+    "key": "Cultist:5",
+    "name": "Cultist appearance 5",
+    "file": "Cultist_5.png",
+    "bytes": 448542
+  },
+  {
+    "key": "Druid:1",
+    "name": "Druid appearance 1",
+    "file": "Druid_1.png",
+    "bytes": 484373
+  },
+  {
+    "key": "Druid:2",
+    "name": "Druid appearance 2",
+    "file": "Druid_2.png",
+    "bytes": 446711
+  },
+  {
+    "key": "Druid:3",
+    "name": "Druid appearance 3",
+    "file": "Druid_3.png",
+    "bytes": 636286
+  },
+  {
+    "key": "Druid:4",
+    "name": "Druid appearance 4",
+    "file": "Druid_4.png",
+    "bytes": 304386
+  },
+  {
+    "key": "Druid:5",
+    "name": "Druid appearance 5",
+    "file": "Druid_5.png",
+    "bytes": 742925
+  },
+  {
+    "key": "Mage:1",
+    "name": "Mage appearance 1",
+    "file": "Mage_1.png",
+    "bytes": 232089
+  },
+  {
+    "key": "Mage:2",
+    "name": "Mage appearance 2",
+    "file": "Mage_2.png",
+    "bytes": 293598
+  },
+  {
+    "key": "Mage:3",
+    "name": "Mage appearance 3",
+    "file": "Mage_3.png",
+    "bytes": 341080
+  },
+  {
+    "key": "Mage:4",
+    "name": "Mage appearance 4",
+    "file": "Mage_4.png",
+    "bytes": 256662
+  },
+  {
+    "key": "Mage:5",
+    "name": "Mage appearance 5",
+    "file": "Mage_5.png",
+    "bytes": 158154
+  },
+  {
+    "key": "Monk:1",
+    "name": "Monk appearance 1",
+    "file": "Monk_1.png",
+    "bytes": 210764
+  },
+  {
+    "key": "Monk:2",
+    "name": "Monk appearance 2",
+    "file": "Monk_2.png",
+    "bytes": 370815
+  },
+  {
+    "key": "Monk:3",
+    "name": "Monk appearance 3",
+    "file": "Monk_3.png",
+    "bytes": 390502
+  },
+  {
+    "key": "Monk:4",
+    "name": "Monk appearance 4",
+    "file": "Monk_4.png",
+    "bytes": 314280
+  },
+  {
+    "key": "Monk:5",
+    "name": "Monk appearance 5",
+    "file": "Monk_5.png",
+    "bytes": 430173
+  },
+  {
+    "key": "Warrior:1",
+    "name": "Warrior appearance 1",
+    "file": "Warrior_1.png",
+    "bytes": 563720
+  },
+  {
+    "key": "Warrior:2",
+    "name": "Warrior appearance 2",
+    "file": "Warrior_2.png",
+    "bytes": 657273
+  },
+  {
+    "key": "Warrior:3",
+    "name": "Warrior appearance 3",
+    "file": "Warrior_3.png",
+    "bytes": 367182
+  },
+  {
+    "key": "Warrior:4",
+    "name": "Warrior appearance 4",
+    "file": "Warrior_4.png",
+    "bytes": 529942
+  },
+  {
+    "key": "Warrior:5",
+    "name": "Warrior appearance 5",
+    "file": "Warrior_5.png",
+    "bytes": 421352
+  }
+]
