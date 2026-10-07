@@ -2917,12 +2917,8 @@ export class Game {
                     if (hit.kind === 'quest_accept') {
                         const targetId = hit.questId || hit.questKey;
                         startQuest(this.characterId, targetId).then(() => {
-                            if (this.allQuests) {
-                                const q = this.allQuests.find(item => item.id === hit.questId || item.key === hit.questKey);
-                                if (q) q.status = 'active';
-                            }
                             this.openQuestLog();
-                            if (this.showToast) this.showToast(`⚔️ Quest started!`);
+                            if (this.showToast) this.showToast(`⚔️ Quest accepted! Objective updated.`);
                         }).catch((err) => {
                             if (this.showToast) this.showToast(`❌ ${err.message}`);
                         });
@@ -2931,16 +2927,23 @@ export class Game {
                     if (hit.kind === 'quest_complete') {
                         const targetId = hit.questId || hit.questKey;
                         completeQuest(this.characterId, targetId).then((res) => {
-                            if (this.allQuests) {
-                                const q = this.allQuests.find(item => item.id === hit.questId || item.key === hit.questKey);
-                                if (q) q.status = 'completed';
+                            if (res && res.rewards) {
+                                const r = res.rewards;
+                                if (r.gold != null && this.gold != null) this.gold += r.gold;
+                                if (this.progression) {
+                                    if (r.exp != null) this.progression.experience = (this.progression.experience || 0) + r.exp;
+                                    if (r.passive_points != null) this.progression.passivePoints = (this.progression.passivePoints || 0) + r.passive_points;
+                                    if (r.newLevel != null) this.progression.level = r.newLevel;
+                                }
+                                let rewardMsg = `🎉 Quest completed!`;
+                                if (r.gold) rewardMsg += ` +${r.gold}g`;
+                                if (r.exp) rewardMsg += ` +${r.exp} EXP`;
+                                if (r.passive_points) rewardMsg += ` +${r.passive_points} Pt`;
+                                if (this.showToast) this.showToast(rewardMsg);
+                            } else {
+                                if (this.showToast) this.showToast(`🎉 Quest completed! Rewards collected!`);
                             }
                             this.openQuestLog();
-                            if (res && res.rewards) {
-                                if (res.rewards.gold && this.gold != null) this.gold += res.rewards.gold;
-                                if (res.rewards.passive_points && this.progression) this.progression.passivePoints = (this.progression.passivePoints || 0) + res.rewards.passive_points;
-                            }
-                            if (this.showToast) this.showToast(`🎉 Quest completed! Rewards collected!`);
                         }).catch((err) => {
                             if (this.showToast) this.showToast(`❌ ${err.message}`);
                         });
@@ -2949,10 +2952,15 @@ export class Game {
                     if (hit.kind === 'quest_choice_city' || hit.kind === 'quest_choice_surge') {
                         const choice = hit.kind === 'quest_choice_city' ? 'city_restoration' : 'elemental_surge';
                         const targetId = hit.questId || hit.questKey;
-                        completeQuest(this.characterId, targetId, choice).then(() => {
-                            if (this.allQuests) {
-                                const q = this.allQuests.find(item => item.id === hit.questId || item.key === hit.questKey);
-                                if (q) q.status = 'completed';
+                        completeQuest(this.characterId, targetId, choice).then((res) => {
+                            if (res && res.rewards) {
+                                const r = res.rewards;
+                                if (r.gold != null && this.gold != null) this.gold += r.gold;
+                                if (this.progression) {
+                                    if (r.exp != null) this.progression.experience = (this.progression.experience || 0) + r.exp;
+                                    if (r.passive_points != null) this.progression.passivePoints = (this.progression.passivePoints || 0) + r.passive_points;
+                                    if (r.newLevel != null) this.progression.level = r.newLevel;
+                                }
                             }
                             this.legacyChoice = choice;
                             if (this.progression) this.progression.legacyChoice = choice;

@@ -14,6 +14,8 @@ const QUESTS = [
     passive_points_reward: 1,
     title_reward: "Шукач Джерел",
     status: "active",
+    progress_count: 1,
+    target_count: 1,
   },
   {
     key: "act2_elemental_seals",
@@ -25,6 +27,8 @@ const QUESTS = [
     gold_reward: 5000,
     passive_points_reward: 3,
     status: "active",
+    progress_count: 0,
+    target_count: 4,
   },
 ];
 
@@ -42,8 +46,35 @@ describe("layoutQuestLog", () => {
     expect(layout.selectedQuest.key).toBe("act1_core_whisper");
     expect(layout.legacyChoice).toBe("city_restoration");
     expect(layout.header.choiceText).toContain("City Restoration");
-    expect(layout.actionButtons.length).toBe(1);
-    expect(layout.actionButtons[0].kind).toBe("quest_complete");
+    expect(layout.actionButtons.length).toBe(2);
+    expect(layout.actionButtons[0].kind).toBe("quest_toggle_track");
+    expect(layout.actionButtons[1].kind).toBe("quest_complete");
+  });
+
+  it("adds quest_toggle_track button for active quests and supports trackedQuestKey", () => {
+    const layout = layoutQuestLog({
+      quests: QUESTS,
+      legacyChoice: null,
+      activeQuestKey: "act2_elemental_seals",
+      trackedQuestKey: "act2_elemental_seals",
+    });
+
+    const trackBtn = layout.actionButtons.find(b => b.kind === "quest_toggle_track");
+    expect(trackBtn).toBeDefined();
+    expect(trackBtn.isTracked).toBe(true);
+    expect(trackBtn.text).toContain("Tracking");
+  });
+
+  it("shows in-progress banner when objective progress is incomplete", () => {
+    const layout = layoutQuestLog({
+      quests: QUESTS,
+      legacyChoice: null,
+      activeQuestKey: "act2_elemental_seals",
+    });
+
+    const banner = layout.actionButtons.find(b => b.type === "banner_in_progress");
+    expect(banner).toBeDefined();
+    expect(banner.text).toContain("Objective In Progress (0/4)");
   });
 
   it("offers legacy choices A and B for Act IV when active and unchosen", () => {
@@ -55,6 +86,8 @@ describe("layoutQuestLog", () => {
       description: "Вирішіть долю стародавнього Ядра.",
       required_level: 40,
       status: "active",
+      progress_count: 1,
+      target_count: 1,
     };
     const layout = layoutQuestLog({
       quests: [act4Quest],
@@ -62,9 +95,32 @@ describe("layoutQuestLog", () => {
       activeQuestKey: "act4_primordial_core",
     });
 
-    expect(layout.actionButtons.length).toBe(2);
-    expect(layout.actionButtons[0].kind).toBe("quest_choice_city");
-    expect(layout.actionButtons[1].kind).toBe("quest_choice_surge");
+    const cityBtn = layout.actionButtons.find(b => b.kind === "quest_choice_city");
+    const surgeBtn = layout.actionButtons.find(b => b.kind === "quest_choice_surge");
+    expect(cityBtn).toBeDefined();
+    expect(surgeBtn).toBeDefined();
+  });
+
+  it("handles locked quest status and displays locked banner", () => {
+    const lockedQuest = {
+      id: 5,
+      key: "act2_molten_anvil",
+      act: 2,
+      title: "Серце Розплавленого Ковадла",
+      description: "Поверніть молот Тітана.",
+      objective: "Поверніть молот Тітана з вулкана",
+      required_level: 16,
+      status: "locked",
+    };
+    const layout = layoutQuestLog({
+      quests: [lockedQuest],
+      legacyChoice: null,
+      activeQuestKey: "act2_molten_anvil",
+    });
+
+    expect(layout.selectedQuest.status).toBe("locked");
+    expect(layout.actionButtons.length).toBe(1);
+    expect(layout.actionButtons[0].type).toBe("banner_locked");
   });
 });
 

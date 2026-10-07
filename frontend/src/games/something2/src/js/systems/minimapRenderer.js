@@ -42,6 +42,7 @@ export function drawMinimap(ctx, {
   worldBoss,
   // Quest markers (SOMET / Open World)
   questMarkers = [],
+  trackedQuest,
 }) {
   // 1) Terrain -- one blit of the cached window bitmap.
   //
@@ -267,6 +268,67 @@ export function drawMinimap(ctx, {
       }
       ctx.restore();
     }
+  }
+
+  // 4.6) Tracked Quest Marker (Golden Pin & Edge Compass Pointer)
+  if (trackedQuest) {
+    const VILLAGE_COORDS = {
+      sunspire: { col: 32, row: 32 },
+      emberfall: { col: 120, row: 40 },
+      sylvan_haven: { col: 40, row: 120 },
+      abyssal_tideport: { col: 140, row: 140 },
+      ashen_oasis: { col: 180, row: 60 },
+      blackfen: { col: 200, row: 200 },
+    };
+    const loc = VILLAGE_COORDS[trackedQuest.village_key] || { col: 32, row: 32 };
+    const { x, y } = worldTileToView(loc.col, loc.row, view);
+    const pad = 12;
+    const inBox = x >= pad && x <= view.boxW - pad && y >= pad && y <= view.boxH - pad;
+
+    ctx.save();
+    if (inBox) {
+      ctx.beginPath();
+      ctx.arc(x, y, 7, 0, Math.PI * 2);
+      ctx.fillStyle = '#f59e0b';
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 9px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('📌', x, y);
+    } else {
+      const cx = view.boxW / 2;
+      const cy = view.boxH / 2;
+      const dx = x - cx;
+      const dy = y - cy;
+      const angle = Math.atan2(dy, dx);
+
+      const maxDistX = view.boxW / 2 - 10;
+      const maxDistY = view.boxH / 2 - 10;
+      const scale = Math.min(Math.abs(maxDistX / (dx || 0.001)), Math.abs(maxDistY / (dy || 0.001)));
+      const edgeX = cx + dx * scale;
+      const edgeY = cy + dy * scale;
+
+      ctx.translate(edgeX, edgeY);
+      ctx.rotate(angle);
+
+      ctx.beginPath();
+      ctx.moveTo(8, 0);
+      ctx.lineTo(-5, -4);
+      ctx.lineTo(-2, 0);
+      ctx.lineTo(-5, 4);
+      ctx.closePath();
+      ctx.fillStyle = '#f59e0b';
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   // 5) Player: centered dot + facing triangle

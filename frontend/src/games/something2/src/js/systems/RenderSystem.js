@@ -337,7 +337,7 @@ export class RenderSystem {
     skillCooldowns = null, activeBuffs = [], unlockedSkills = null,
     hoveredSkill = null, cursorX = null, cursorY = null, keybinds = null,
     // Quest Log (hotkey 'J')
-    questLogOpen = false, quests = [], activeQuestKey = null, legacyChoice = null, questScroll = 0,
+    questLogOpen = false, quests = [], activeQuestKey = null, legacyChoice = null, questScroll = 0, trackedQuestKey = null,
   }) {
     // SOMET-584. Set before anything below resolves art, including the
     // landmark body plan a few lines down.
@@ -653,7 +653,14 @@ export class RenderSystem {
         legacyChoice,
         activeQuestKey,
         questScroll,
+        trackedQuestKey,
       }, this._questHitAreas);
+    }
+
+    // Quest Tracker HUD Widget & Waypoint Pointer
+    const trackedQuest = (quests || []).find(q => q.key === trackedQuestKey) || (quests || []).find(q => q.status === "active");
+    if (trackedQuest && !panelOpen) {
+      this._drawQuestTrackerHUD(this.ctx, trackedQuest, player, camera);
     }
 
     // SOMET-493 — last of all, so the card sits on top of the HUD orbs and the
@@ -4158,6 +4165,127 @@ export class RenderSystem {
     }
     drawQuestLog(ctx, layout);
     return layout;
+  }
+
+  _drawQuestTrackerHUD(ctx, trackedQuest, player, camera) {
+    if (!ctx || !trackedQuest) return;
+
+    const VILLAGE_COORDS = {
+      sunspire: { col: 32, row: 32, x: 1024, y: 1024, name: "Sunspire Valley" },
+      emberfall: { col: 120, row: 40, x: 3840, y: 1280, name: "Emberfall Volcanic Ridge" },
+      sylvan_haven: { col: 40, row: 120, x: 1280, y: 3840, name: "Sylvan Haven Redwood" },
+      abyssal_tideport: { col: 140, row: 140, x: 4480, y: 4480, name: "Abyssal Tideport" },
+      ashen_oasis: { col: 180, row: 60, x: 5760, y: 1920, name: "Ashen Oasis Ruins" },
+      blackfen: { col: 200, row: 200, x: 6400, y: 6400, name: "Blackfen Abyssal Marsh" },
+    };
+
+    const px = player ? (player.x || (player.col || 32) * 32) : 1024;
+    const py = player ? (player.y || (player.row || 32) * 32) : 1024;
+
+    const loc = VILLAGE_COORDS[trackedQuest.village_key] || VILLAGE_COORDS.sunspire;
+    const distM = Math.max(1, Math.floor(Math.hypot(loc.x - px, loc.y - py) / 32));
+
+    const w = 230;
+    const h = 76;
+    const x = GAME_WIDTH - w - 16;
+    const y = 60;
+
+    ctx.save();
+    // Glassmorphic dark card
+    ctx.fillStyle = "rgba(12, 10, 8, 0.88)";
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = "#38bdf8";
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(x, y, w, h);
+
+    // Left accent bar
+    ctx.fillStyle = "#38bdf8";
+    ctx.fillRect(x, y, 4, h);
+
+    // Title
+    ctx.fillStyle = "#fde047";
+    ctx.font = "bold 11px monospace";
+    ctx.fillText(`📌 TRACKED: Act ${trackedQuest.act}`, x + 12, y + 8);
+
+    // Quest Title
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 12px monospace";
+    const titleText = (ctx.measureText(trackedQuest.title).width > w - 24)
+      ? trackedQuest.title.slice(0, 20) + "…"
+      : trackedQuest.title;
+    ctx.fillText(titleText, x + 12, y + 24);
+
+    // Objective progress
+    const targetCnt = trackedQuest.target_count || 1;
+    const progCnt = trackedQuest.progress_count || 0;
+    ctx.fillStyle = "#60a5fa";
+    ctx.font = "11px monospace";
+    const objRaw = `🎯 ${trackedQuest.objective || trackedQuest.description} (${progCnt}/${targetCnt})`;
+    const objStr = (ctx.measureText(objRaw).width > w - 24)
+      ? objRaw.slice(0, 26) + "…"
+      : objRaw;
+    ctx.fillText(objStr, x + 12, y + 42);
+
+    // Distance and Location
+    ctx.fillStyle = "#a7f3d0";
+    ctx.font = "11px monospace";
+    ctx.fillText(`↗ ${distM}m • ${loc.name}`, x + 12, y + 58);
+
+    // Draw Screen Edge Compass Arrow pointing toward target
+    if (camera && player) {
+      const targetScreen = worldToScreen(loc.x, loc.y);
+      const camScreenX = targetScreen.x - camera.x;
+      const camScreenY = targetScreen.y - camera.y;
+
+      const isOffScreen = camScreenX < 40 || camScreenX > GAME_WIDTH - 40 || camScreenY < 40 || camScreenY > GAME_HEIGHT - 40;
+
+      if (isOffScreen) {
+        const cx = GAME_WIDTH / 2;
+        const cy = GAME_HEIGHT / 2;
+        const angle = Math.atan2(camScreenY - cy, camScreenX - cx);
+
+        const edgeX = cx + Math.cos(angle) * (GAME_WIDTH / 2 - 40);
+        const edgeY = cy + Math.sin(angle) * (GAME_HEIGHT / 2 - 40);
+
+        ctx.translate(edgeX, edgeY);
+        ctx.rotate(angle);
+
+        ctx.beginPath();
+        ctx.moveTo(14, 0);
+        ctx.lineTo(-10, -9);
+        ctx.lineTo(-4, 0);
+        ctx.lineTo(-10, 9);
+        ctx.closePath();
+        ctx.fillStyle = "#f59e0b";
+        ctx.fill();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        ctx.rotate(-angle);
+        ctx.fillStyle = "#fde047";
+        ctx.font = "bold 11px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText(`📌 ${distM}m`, 0, 18);
+      } else {
+        // Floating 3D Waypoint Pin on-screen
+        const pulse = 0.5 + 0.5 * Math.sin(Date.now() * 0.005);
+        ctx.beginPath();
+        ctx.arc(camScreenX, camScreenY - 30 - pulse * 6, 8, 0, Math.PI * 2);
+        ctx.fillStyle = "#f59e0b";
+        ctx.fill();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 10px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText("📌", camScreenX, camScreenY - 30 - pulse * 6);
+      }
+    }
+
+    ctx.restore();
   }
 
   _drawActiveBuffs(activeBuffs) {

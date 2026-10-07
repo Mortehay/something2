@@ -5,6 +5,7 @@ const {
   getCharacterQuests,
   startQuest,
   completeQuest,
+  incrementQuestProgress,
 } = require('../services/questsService.js');
 
 function createQuestsRouter(pool) {
@@ -48,6 +49,17 @@ function createQuestsRouter(pool) {
       const { characterId, questKey, questId, legacyChoice } = req.body;
       const result = await completeQuest(pool, characterId, questKey || questId, legacyChoice);
       res.json({ ok: true, ...result });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
+  // POST /api/quests/progress - Increment quest objective progress count
+  router.post('/progress', async (req, res) => {
+    try {
+      const { characterId, questKey, questId, amount } = req.body;
+      const updated = await incrementQuestProgress(pool, characterId, questKey || questId, amount || 1);
+      res.json({ ok: true, progressState: updated });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
     }

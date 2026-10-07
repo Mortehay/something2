@@ -55,10 +55,29 @@ export function layoutQuestLog(state = {}) {
     }
   }
 
+  const trackedQuestKey = state.trackedQuestKey || (quests.find(q => q.status === "active")?.key || activeQuestKey);
   const selectedQuest = quests.find(q => q.key === activeQuestKey) || quests[0] || null;
 
   let actionButtons = [];
   if (selectedQuest) {
+    // Add Track Quest Toggle Button top-right of detail area
+    if (selectedQuest.status !== "completed" && selectedQuest.status !== "locked") {
+      const isTracked = trackedQuestKey === selectedQuest.key;
+      const trackBtn = {
+        kind: "quest_toggle_track",
+        questKey: selectedQuest.key,
+        isTracked,
+        x: detailArea.x + detailArea.w - 138,
+        y: detailArea.y + 10,
+        w: 124,
+        h: 26,
+        text: isTracked ? "📌 Tracking" : "📌 Track Quest",
+        color: isTracked ? "#38bdf8" : "#94a3b8",
+      };
+      actionButtons.push(trackBtn);
+      hitAreas.push(trackBtn);
+    }
+
     const btnY = detailArea.y + detailArea.h - 52;
     if (selectedQuest.status === "completed") {
       actionButtons.push({
@@ -70,7 +89,21 @@ export function layoutQuestLog(state = {}) {
         text: "✔ Quest completed! All rewards claimed.",
         color: "#4ade80",
       });
+    } else if (selectedQuest.status === "locked") {
+      actionButtons.push({
+        type: "banner_locked",
+        x: detailArea.x + 14,
+        y: btnY,
+        w: detailArea.w - 28,
+        h: 42,
+        text: "🔒 Locked: Complete previous quest first.",
+        color: "#64748b",
+      });
     } else if (selectedQuest.status === "active") {
+      const progCnt = selectedQuest.progress_count || 0;
+      const targetCnt = selectedQuest.target_count || 1;
+      const isObjectiveComplete = progCnt >= targetCnt;
+
       if (selectedQuest.act === 4 && (!legacyChoice || selectedQuest.key === "act4_new_dawn" || selectedQuest.key === "act4_primordial_core")) {
         const halfW = Math.floor((detailArea.w - 36) / 2);
         const cityBtn = {
@@ -99,6 +132,16 @@ export function layoutQuestLog(state = {}) {
         };
         actionButtons.push(cityBtn, surgeBtn);
         hitAreas.push(cityBtn, surgeBtn);
+      } else if (!isObjectiveComplete) {
+        actionButtons.push({
+          type: "banner_in_progress",
+          x: detailArea.x + 14,
+          y: btnY,
+          w: detailArea.w - 28,
+          h: 42,
+          text: `⚙ Objective In Progress (${progCnt}/${targetCnt})`,
+          color: "#38bdf8",
+        });
       } else {
         const completeBtn = {
           kind: "quest_complete",
@@ -202,23 +245,35 @@ export function drawQuestLog(ctx, layout) {
     if (q.y + q.h < listArea.y || q.y > listArea.y + listArea.h) continue;
 
     const isSelected = selectedQuest && selectedQuest.key === q.key;
-    ctx.fillStyle = isSelected ? "rgba(45, 35, 20, 0.95)" : "rgba(25, 20, 16, 0.6)";
+    const isLocked = q.status === "locked";
+    ctx.fillStyle = isSelected
+      ? "rgba(45, 35, 20, 0.95)"
+      : isLocked
+        ? "rgba(15, 13, 11, 0.4)"
+        : "rgba(25, 20, 16, 0.6)";
     ctx.fillRect(q.x, q.y, q.w, q.h);
     ctx.strokeStyle = isSelected ? "#f59e0b" : "#2d2419";
     ctx.strokeRect(q.x, q.y, q.w, q.h);
 
     const isCompleted = q.status === "completed";
     const isActive = q.status === "active";
+    const isTracked = layout.trackedQuestKey === q.key;
 
-    ctx.fillStyle = isCompleted ? "#4ade80" : isActive ? "#60a5fa" : "#e2e8f0";
+    ctx.fillStyle = isCompleted ? "#4ade80" : isActive ? "#60a5fa" : isLocked ? "#64748b" : "#e2e8f0";
     ctx.font = "bold 12px monospace";
     const titleStr = `Act ${q.act}: ${q.title}`;
-    const truncatedTitle = truncateText(ctx, titleStr, q.w - 16);
+    const truncatedTitle = truncateText(ctx, titleStr, q.w - (isTracked ? 34 : 16));
     ctx.fillText(truncatedTitle, q.x + 8, q.y + 6);
 
-    ctx.fillStyle = isCompleted ? "#86efac" : isActive ? "#93c5fd" : "#94a3b8";
+    if (isTracked) {
+      ctx.fillStyle = "#38bdf8";
+      ctx.font = "bold 12px monospace";
+      ctx.fillText("📌", q.x + q.w - 22, q.y + 6);
+    }
+
+    ctx.fillStyle = isCompleted ? "#86efac" : isActive ? "#93c5fd" : isLocked ? "#475569" : "#94a3b8";
     ctx.font = "11px monospace";
-    ctx.fillText(isCompleted ? "✔ Completed" : isActive ? "⚙ Active" : "✦ Available", q.x + 8, q.y + 24);
+    ctx.fillText(isCompleted ? "✔ Completed" : isActive ? "⚙ Active" : isLocked ? "🔒 Locked" : "✦ Available", q.x + 8, q.y + 24);
   }
   ctx.restore();
 
@@ -269,14 +324,67 @@ export function drawQuestLog(ctx, layout) {
     }
 
     // Quest Meta
-    dy += 10;
+    dy += 4;
     ctx.fillStyle = "#94a3b8";
     ctx.font = "12px monospace";
     ctx.fillText(`Required Level: ${selectedQuest.required_level}`, dx, dy);
     dy += 18;
 
+    // Quest Objective Section
+    dy += 6;
+    ctx.fillStyle = "#38bdf8";
+    ctx.font = "bold 13px monospace";
+    ctx.fillText("🎯 Quest Objective:", dx, dy);
+    dy += 20;
+
+    const objText = selectedQuest.objective || selectedQuest.description;
+    const targetCnt = selectedQuest.target_count || 1;
+    const progCnt = selectedQuest.progress_count || 0;
+
+    let statusPrefix = "[✦] ";
+    let statusColor = "#fde047";
+    let statusProgressStr = `(0/${targetCnt})`;
+
+    if (selectedQuest.status === "completed") {
+      statusPrefix = "[✔] ";
+      statusColor = "#4ade80";
+      statusProgressStr = `(${targetCnt}/${targetCnt})`;
+    } else if (selectedQuest.status === "active") {
+      statusPrefix = "[⚙] ";
+      statusColor = "#60a5fa";
+      statusProgressStr = `(${progCnt}/${targetCnt})`;
+    } else if (selectedQuest.status === "locked") {
+      statusPrefix = "[🔒] ";
+      statusColor = "#64748b";
+      statusProgressStr = `(Locked)`;
+    }
+
+    ctx.fillStyle = statusColor;
+    ctx.font = "12px monospace";
+    const fullObjText = selectedQuest.status === "locked"
+      ? "[🔒] Complete previous quest first to unlock"
+      : `${statusPrefix}${objText} ${statusProgressStr}`;
+
+    const objWords = fullObjText.split(" ");
+    let objLine = "";
+    const objMaxW = maxDescWidth - 8;
+    for (const w of objWords) {
+      const test = objLine ? objLine + " " + w : w;
+      if (ctx.measureText(test).width > objMaxW) {
+        if (objLine) ctx.fillText(objLine, dx + 8, dy);
+        dy += 18;
+        objLine = w;
+      } else {
+        objLine = test;
+      }
+    }
+    if (objLine) {
+      ctx.fillText(objLine, dx + 8, dy);
+      dy += 20;
+    }
+
     // Rewards Header
-    dy += 10;
+    dy += 6;
     ctx.fillStyle = "#f59e0b";
     ctx.font = "bold 13px monospace";
     ctx.fillText("🎁 Quest Rewards:", dx, dy);
@@ -307,15 +415,28 @@ export function drawQuestLog(ctx, layout) {
     // Action buttons & legacy choices
     if (layout.actionButtons && layout.actionButtons.length > 0) {
       for (const btn of layout.actionButtons) {
-        if (btn.type === "banner") {
-          ctx.fillStyle = "rgba(34, 197, 94, 0.15)";
+        if (btn.type === "banner" || btn.type === "banner_locked" || btn.type === "banner_in_progress") {
+          ctx.fillStyle = btn.type === "banner"
+            ? "rgba(34, 197, 94, 0.15)"
+            : btn.type === "banner_in_progress"
+              ? "rgba(56, 189, 248, 0.15)"
+              : "rgba(71, 85, 105, 0.25)";
           ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
-          ctx.strokeStyle = "#22c55e";
+          ctx.strokeStyle = btn.color;
           ctx.lineWidth = 1.5;
           ctx.strokeRect(btn.x, btn.y, btn.w, btn.h);
-          ctx.fillStyle = "#4ade80";
+          ctx.fillStyle = btn.color;
           ctx.font = "bold 13px monospace";
           ctx.fillText(btn.text, btn.x + 14, btn.y + 14);
+        } else if (btn.kind === "quest_toggle_track") {
+          ctx.fillStyle = btn.isTracked ? "rgba(56, 189, 248, 0.2)" : "rgba(30, 41, 59, 0.6)";
+          ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
+          ctx.strokeStyle = btn.color;
+          ctx.lineWidth = 1.5;
+          ctx.strokeRect(btn.x, btn.y, btn.w, btn.h);
+          ctx.fillStyle = btn.color;
+          ctx.font = "bold 11px monospace";
+          ctx.fillText(btn.text, btn.x + 10, btn.y + 7);
         } else if (btn.kind === "quest_choice_city" || btn.kind === "quest_choice_surge") {
           ctx.fillStyle = btn.kind === "quest_choice_city" ? "rgba(56, 189, 248, 0.2)" : "rgba(245, 158, 11, 0.2)";
           ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
@@ -336,7 +457,7 @@ export function drawQuestLog(ctx, layout) {
           ctx.strokeRect(btn.x, btn.y, btn.w, btn.h);
           ctx.fillStyle = "#ffffff";
           ctx.font = "bold 13px monospace";
-          ctx.fillText(btn.text, btn.x + 16, btn.y + 14);
+          ctx.fillText(btn.text, btn.text ? btn.x + 16 : btn.x, btn.y + 14);
         }
       }
     }
