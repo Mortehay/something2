@@ -750,9 +750,7 @@ export class Game {
                 // open (panel currently closed) — otherwise buying row 3 of
                 // buyback page 2 would bounce the player back to catalog p1.
                 onShop: (msg) => {
-                    this.shop = { villageId: msg.villageId, catalog: msg.catalog || [], buyback: msg.buyback || [] };
-                    if (!this.shopOpen) this.shopView = { tab: 'catalog', page: 0 };
-                    this.shopOpen = true;
+                    this.openShop(msg);
                 },
                 // SOMET-310. The server sends the WHOLE chest on open and again
                 // after every deposit/withdraw, so this mirrors the frame and
@@ -765,13 +763,7 @@ export class Game {
                 // the carry tab must not bounce the player back to chest page 1
                 // on the refresh frame that follows it.
                 onBank: (msg) => {
-                    this.bank = {
-                        villageId: msg.villageId,
-                        items: Array.isArray(msg.items) ? msg.items : [],
-                        capacity: Number(msg.capacity) || 0,
-                    };
-                    if (!this.bankOpen) this.bankView = { tab: 'chest', page: 0 };
-                    this.bankOpen = true;
+                    this.openBank(msg);
                 },
                 // The chest half of a move arrives as the `bank` frame above;
                 // these two carry the INVENTORY half. Deliberately not folded
@@ -1873,16 +1865,35 @@ export class Game {
         };
     }
 
+    closeAllPanels(except = null) {
+        if (except !== 'inventory') this.closeInventory();
+        if (except !== 'passiveTree') this.closePassiveTree();
+        if (except !== 'questLog') this.closeQuestLog();
+        if (except !== 'skills') this.skillsOpen = false;
+        if (except !== 'gemShop') this.gemShopOpen = false;
+        if (except !== 'shop') this.shopOpen = false;
+        if (except !== 'bank') this.bankOpen = false;
+    }
+
+    openInventory(tab = 'inventory') {
+        this.closeAllPanels('inventory');
+        this.inventoryOpen = true;
+        this.inventoryTab = tab;
+        if (tab === 'character') {
+            this.inventoryPage = 0;
+            this.characterModPage = 0;
+            this._refreshProgressionBundle();
+        }
+    }
+
     closeInventory() {
         this.inventoryOpen = false;
         this.inventorySelectedItemId = null;
         this.inventoryDrag = null;
     }
 
-    // The ONE way the passive tree opens, for the same reason closeInventory
-    // is the one way the inventory closes: the P toggle is the only caller
-    // today, but the fetch/centre pair must not be duplicated at a second one.
     openPassiveTree() {
+        this.closeAllPanels('passiveTree');
         this.passiveTreeOpen = true;
         // Recentred on every open: a player who panned into a far sector last
         // time should not reopen to an empty screen with no idea which way
@@ -1976,12 +1987,48 @@ export class Game {
     }
 
     openQuestLog() {
+        this.closeAllPanels('questLog');
         this.questLogOpen = true;
         return this.loadQuests();
     }
 
     closeQuestLog() {
         this.questLogOpen = false;
+    }
+
+    openSkills() {
+        this.closeAllPanels('skills');
+        this.skillsOpen = true;
+        if (!this.className && !this.passiveStartClass) {
+            fetchStartClass().then((name) => { if (name) { this.className = name; this.passiveStartClass = name; } }).catch(() => {});
+        }
+    }
+
+    openGemShop() {
+        this.closeAllPanels('gemShop');
+        this.gemShopOpen = true;
+    }
+
+    openShop(msg = null) {
+        this.closeAllPanels('shop');
+        if (msg) {
+            this.shop = { villageId: msg.villageId, catalog: msg.catalog || [], buyback: msg.buyback || [] };
+        }
+        if (!this.shopOpen) this.shopView = { tab: 'catalog', page: 0 };
+        this.shopOpen = true;
+    }
+
+    openBank(msg = null) {
+        this.closeAllPanels('bank');
+        if (msg) {
+            this.bank = {
+                villageId: msg.villageId,
+                items: Array.isArray(msg.items) ? msg.items : [],
+                capacity: Number(msg.capacity) || 0,
+            };
+        }
+        if (!this.bankOpen) this.bankView = { tab: 'chest', page: 0 };
+        this.bankOpen = true;
     }
 
     // A press inside the open tree. Either it lands on a chrome control (the
@@ -2568,46 +2615,38 @@ export class Game {
             // Hotkey registry audit claims: isKey('i') isKey('c') isKey('p') isKey('k') isKey('e') isKey('b') isKey('f') isKey('g')
 
             // Inventory / paper-doll toggle
-            if (matchesBind('inventory', 'i') && this.state === 'playing' && this.chunked && !e.repeat && !this.shopOpen && !this.bankOpen
-                && !this.passiveTreeOpen) {
-                if (this.inventoryOpen) this.closeInventory();
-                else this.inventoryOpen = true;
+            if (matchesBind('inventory', 'i') && this.state === 'playing' && this.chunked && !e.repeat && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen) {
+                if (this.inventoryOpen) {
+                    this.closeInventory();
+                } else {
+                    this.openInventory('inventory');
+                }
             }
 
             // Character sheet (SOMET-483): C opens the inventory panel on its Character tab.
-            if (matchesBind('character', 'c') && this.state === 'playing' && this.chunked && !e.repeat
-                && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen) {
+            if (matchesBind('character', 'c') && this.state === 'playing' && this.chunked && !e.repeat && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen) {
                 if (this.inventoryOpen && this.inventoryTab === 'character') {
                     this.closeInventory();
                 } else {
-                    this.inventoryOpen = true;
-                    this.inventoryTab = 'character';
-                    this.inventoryPage = 0;
-                    this.characterModPage = 0;
-                    this._refreshProgressionBundle();
+                    this.openInventory('character');
                 }
             }
 
             // Passive tree (SOMET-476)
-            if (matchesBind('passiveTree', 'p') && this.state === 'playing' && this.chunked && !e.repeat
-                && !this.inventoryOpen && !this.shopOpen && !this.bankOpen) {
+            if (matchesBind('passiveTree', 'p') && this.state === 'playing' && this.chunked && !e.repeat && !this.inventoryOpen && !this.shopOpen && !this.bankOpen) {
                 if (this.passiveTreeOpen) { this.closePassiveTree(); return; }
                 this.openPassiveTree();
                 return;
             }
 
             // Skills panel ('k')
-            if (matchesBind('skills', 'k') && this.state === 'playing' && this.chunked && !e.repeat
-                && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen && !this.inventoryOpen) {
-                if (!this.className && !this.passiveStartClass) {
-                    fetchStartClass().then((name) => { if (name) { this.className = name; this.passiveStartClass = name; } }).catch(() => {});
-                }
-                this.skillsOpen = !this.skillsOpen;
+            if (matchesBind('skills', 'k') && this.state === 'playing' && this.chunked && !e.repeat && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen) {
+                if (this.skillsOpen) { this.skillsOpen = false; }
+                else { this.openSkills(); }
             }
 
             // Quest Log panel ('j')
-            if (matchesBind('questLog', 'j') && this.state === 'playing' && this.chunked && !e.repeat
-                && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen && !this.inventoryOpen) {
+            if (matchesBind('questLog', 'j') && this.state === 'playing' && this.chunked && !e.repeat && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen) {
                 if (this.questLogOpen) this.closeQuestLog();
                 else this.openQuestLog();
             }
@@ -2646,7 +2685,7 @@ export class Game {
             }
 
             // Merchant shop / Gem Merchant / Skill Trainer ('e')
-            if (matchesBind('interact', 'e') && this.state === 'playing' && this.chunked && !e.repeat && !this.inventoryOpen && !this.bankOpen) {
+            if (matchesBind('interact', 'e') && this.state === 'playing' && this.chunked && !e.repeat) {
                 if (this.gemShopOpen) { this.gemShopOpen = false; return; }
                 if (this.shopOpen) { this.shopOpen = false; return; }
                 if (this.skillsOpen) { this.skillsOpen = false; return; }
@@ -2664,8 +2703,7 @@ export class Game {
                     .some((sm) => Math.hypot(sm.x - pcx, sm.y - pcy) <= 140);
                 const nearGm = Array.isArray(this.gemMerchants) && this.gemMerchants.find(gm => Math.hypot(gm.x - pcx, gm.y - pcy) <= 140);
                 if (nearSkillMerchant || nearGm) {
-                    this.gemShopOpen = true;
-                    this.skillsOpen = false;
+                    this.openGemShop();
                     return;
                 }
                 if (this.authorityClient) this.authorityClient.sendInteract();
@@ -2673,8 +2711,9 @@ export class Game {
             }
 
             // Account chest (SOMET-310) ('b')
-            if (matchesBind('bank', 'b') && this.state === 'playing' && this.chunked && !e.repeat && !this.inventoryOpen && !this.shopOpen) {
+            if (matchesBind('bank', 'b') && this.state === 'playing' && this.chunked && !e.repeat) {
                 if (this.bankOpen) { this.bankOpen = false; return; }
+                this.closeAllPanels('bank');
                 if (this.authorityClient) this.authorityClient.sendOpenBank();
                 return;
             }
@@ -3122,38 +3161,35 @@ export class Game {
             }
 
             // 2. Check UI/Action mouse bindings
-            if (matchesThisMouse('inventory', 'i') && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen) {
-                if (this.inventoryOpen) this.closeInventory();
-                else this.inventoryOpen = true;
+            if (matchesThisMouse('inventory', 'i')) {
+                if (this.inventoryOpen && this.inventoryTab === 'inventory') this.closeInventory();
+                else this.openInventory('inventory');
                 return;
             }
-            if (matchesThisMouse('character', 'c') && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen) {
+            if (matchesThisMouse('character', 'c')) {
                 if (this.inventoryOpen && this.inventoryTab === 'character') {
                     this.closeInventory();
                 } else {
-                    this.inventoryOpen = true;
-                    this.inventoryTab = 'character';
-                    this.inventoryPage = 0;
-                    this.characterModPage = 0;
-                    this._refreshProgressionBundle();
+                    this.openInventory('character');
                 }
                 return;
             }
-            if (matchesThisMouse('passiveTree', 'p') && !this.inventoryOpen && !this.shopOpen && !this.bankOpen) {
+            if (matchesThisMouse('passiveTree', 'p')) {
                 if (this.passiveTreeOpen) this.closePassiveTree();
                 else this.openPassiveTree();
                 return;
             }
-            if (matchesThisMouse('skills', 'k') && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen && !this.inventoryOpen) {
-                this.skillsOpen = !this.skillsOpen;
+            if (matchesThisMouse('skills', 'k')) {
+                if (this.skillsOpen) this.skillsOpen = false;
+                else this.openSkills();
                 return;
             }
-            if (matchesThisMouse('questLog', 'j') && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen && !this.inventoryOpen) {
+            if (matchesThisMouse('questLog', 'j')) {
                 if (this.questLogOpen) this.closeQuestLog();
                 else this.openQuestLog();
                 return;
             }
-            if (matchesThisMouse('interact', 'e') && !this.inventoryOpen && !this.bankOpen) {
+            if (matchesThisMouse('interact', 'e')) {
                 if (this.gemShopOpen) { this.gemShopOpen = false; return; }
                 if (this.shopOpen) { this.shopOpen = false; return; }
                 if (this.skillsOpen) { this.skillsOpen = false; return; }
@@ -3162,15 +3198,15 @@ export class Game {
                 const nearSkillMerchant = (Array.isArray(this.skillMerchants) ? this.skillMerchants : []).some((sm) => Math.hypot(sm.x - pcx, sm.y - pcy) <= 140);
                 const nearGm = Array.isArray(this.gemMerchants) && this.gemMerchants.find(gm => Math.hypot(gm.x - pcx, gm.y - pcy) <= 140);
                 if (nearSkillMerchant || nearGm) {
-                    this.gemShopOpen = true;
-                    this.skillsOpen = false;
+                    this.openGemShop();
                     return;
                 }
                 if (this.authorityClient) this.authorityClient.sendInteract();
                 return;
             }
-            if (matchesThisMouse('bank', 'b') && !this.inventoryOpen && !this.shopOpen) {
+            if (matchesThisMouse('bank', 'b')) {
                 if (this.bankOpen) { this.bankOpen = false; return; }
+                this.closeAllPanels('bank');
                 if (this.authorityClient) this.authorityClient.sendOpenBank();
                 return;
             }

@@ -1,6 +1,8 @@
 // frontend/src/games/something2/src/js/systems/__tests__/questLogPanel.test.js
 import { describe, it, expect } from "vitest";
 import { layoutQuestLog, QUEST_PANEL_W, QUEST_PANEL_H } from "../questLogPanel.js";
+import { RenderSystem } from "../RenderSystem.js";
+import { GAME_WIDTH } from "../../core/constants.js";
 
 const QUESTS = [
   {
@@ -121,6 +123,35 @@ describe("layoutQuestLog", () => {
     expect(layout.selectedQuest.status).toBe("locked");
     expect(layout.actionButtons.length).toBe(1);
     expect(layout.actionButtons[0].type).toBe("banner_locked");
+  });
+
+  it("positions quest tracker HUD in the top-left corner with panel styling", () => {
+    let filledCard = null;
+    const dummyCtx = {
+      save: () => {},
+      restore: () => {},
+      beginPath: () => {},
+      roundRect: (x, y, w, h, r) => {
+        if (!filledCard) filledCard = { x, y, w, h, r };
+      },
+      moveTo: () => {},
+      arcTo: () => {},
+      closePath: () => {},
+      fill: () => {},
+      stroke: () => {},
+      fillText: () => {},
+      translate: () => {},
+      rotate: () => {},
+      measureText: () => ({ width: 50 }),
+    };
+
+    const rs = Object.create(RenderSystem.prototype);
+    rs._drawQuestTrackerHUD(dummyCtx, QUESTS[0], null, null);
+
+    expect(filledCard).not.toBeNull();
+    expect(filledCard.x).toBe(16);
+    expect(filledCard.y).toBe(16);
+    expect(filledCard.w).toBe(230);
   });
 });
 

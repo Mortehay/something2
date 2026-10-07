@@ -4186,26 +4186,47 @@ export class RenderSystem {
     const distM = Math.max(1, Math.floor(Math.hypot(loc.x - px, loc.y - py) / 32));
 
     const w = 230;
-    const h = 76;
-    const x = GAME_WIDTH - w - 16;
-    const y = 60;
+    const h = 78;
+    // Positioned in top-left corner with 16px margins, matching game UI button styling
+    const x = 16;
+    const y = 16;
+    const r = 10;
 
     ctx.save();
-    // Glassmorphic dark card
-    ctx.fillStyle = "rgba(12, 10, 8, 0.88)";
-    ctx.fillRect(x, y, w, h);
-    ctx.strokeStyle = "#38bdf8";
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(x, y, w, h);
+    // Dark glassmorphic card matching game UI panels (e.g. Minimap, HowToButton)
+    ctx.beginPath();
+    if (typeof ctx.roundRect === "function") {
+      ctx.roundRect(x, y, w, h, r);
+    } else {
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    }
+    ctx.fillStyle = "rgba(15, 15, 26, 0.85)";
+    ctx.fill();
+    ctx.strokeStyle = "#2e2e3e";
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
 
-    // Left accent bar
+    // Left accent indicator bar
+    ctx.beginPath();
+    if (typeof ctx.roundRect === "function") {
+      ctx.roundRect(x, y, 4, h, [r, 0, 0, r]);
+    } else {
+      ctx.rect(x, y, 4, h);
+    }
     ctx.fillStyle = "#38bdf8";
-    ctx.fillRect(x, y, 4, h);
+    ctx.fill();
 
-    // Title
+    ctx.textBaseline = "top";
+
+    // Title label
     ctx.fillStyle = "#fde047";
     ctx.font = "bold 11px monospace";
-    ctx.fillText(`📌 TRACKED: Act ${trackedQuest.act}`, x + 12, y + 8);
+    ctx.fillText(`📌 TRACKED: Act ${trackedQuest.act}`, x + 12, y + 10);
 
     // Quest Title
     ctx.fillStyle = "#ffffff";
@@ -4213,7 +4234,7 @@ export class RenderSystem {
     const titleText = (ctx.measureText(trackedQuest.title).width > w - 24)
       ? trackedQuest.title.slice(0, 20) + "…"
       : trackedQuest.title;
-    ctx.fillText(titleText, x + 12, y + 24);
+    ctx.fillText(titleText, x + 12, y + 26);
 
     // Objective progress
     const targetCnt = trackedQuest.target_count || 1;
@@ -4224,12 +4245,12 @@ export class RenderSystem {
     const objStr = (ctx.measureText(objRaw).width > w - 24)
       ? objRaw.slice(0, 26) + "…"
       : objRaw;
-    ctx.fillText(objStr, x + 12, y + 42);
+    ctx.fillText(objStr, x + 12, y + 43);
 
     // Distance and Location
     ctx.fillStyle = "#a7f3d0";
     ctx.font = "11px monospace";
-    ctx.fillText(`↗ ${distM}m • ${loc.name}`, x + 12, y + 58);
+    ctx.fillText(`↗ ${distM}m • ${loc.name}`, x + 12, y + 59);
 
     // Draw Screen Edge Compass Arrow pointing toward target
     if (camera && player) {

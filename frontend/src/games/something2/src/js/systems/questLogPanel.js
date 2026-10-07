@@ -6,7 +6,7 @@ import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
 
 export const QUEST_PANEL_W = 760;
 export const QUEST_PANEL_H = 520;
-const TITLE_H = 34;
+const TITLE_H = 40;
 
 function truncateText(ctx, text, maxWidth) {
   if (ctx.measureText(text).width <= maxWidth) return text;
@@ -15,6 +15,22 @@ function truncateText(ctx, text, maxWidth) {
     s = s.slice(0, -1);
   }
   return s + "…";
+}
+
+function drawRoundedRect(ctx, x, y, w, h, r = 0) {
+  ctx.beginPath();
+  if (typeof ctx.roundRect === "function") {
+    ctx.roundRect(x, y, w, h, r);
+  } else {
+    const radii = Array.isArray(r) ? r : [r, r, r, r];
+    const [tl, tr, br, bl] = radii;
+    ctx.moveTo(x + tl, y);
+    ctx.arcTo(x + w, y, x + w, y + h, tr);
+    ctx.arcTo(x + w, y + h, x, y + h, br);
+    ctx.arcTo(x, y + h, x, y, bl);
+    ctx.arcTo(x, y, x + w, y, tl);
+    ctx.closePath();
+  }
 }
 
 export function layoutQuestLog(state = {}) {
@@ -30,15 +46,15 @@ export function layoutQuestLog(state = {}) {
 
   const panel = { x: px, y: py, w: QUEST_PANEL_W, h: QUEST_PANEL_H };
   const title = { x: px, y: py, w: QUEST_PANEL_W, h: TITLE_H };
-  const close = { x: px + QUEST_PANEL_W - 28, y: py + 6, w: 22, h: 22 };
+  const close = { x: px + QUEST_PANEL_W - 32, y: py + 8, w: 24, h: 24 };
 
   const hitAreas = [{ ...close, kind: "questclose", id: null }];
 
-  const listArea = { x: px + 12, y: py + TITLE_H + 12, w: 260, h: QUEST_PANEL_H - TITLE_H - 24 };
-  const detailArea = { x: px + 284, y: py + TITLE_H + 12, w: QUEST_PANEL_W - 296, h: QUEST_PANEL_H - TITLE_H - 24 };
+  const listArea = { x: px + 14, y: py + TITLE_H + 12, w: 260, h: QUEST_PANEL_H - TITLE_H - 26 };
+  const detailArea = { x: px + 288, y: py + TITLE_H + 12, w: QUEST_PANEL_W - 302, h: QUEST_PANEL_H - TITLE_H - 26 };
 
-  const itemH = 42;
-  const itemGap = 4;
+  const itemH = 44;
+  const itemGap = 6;
   const totalH = quests.length * (itemH + itemGap);
   const maxScroll = Math.max(0, totalH - listArea.h);
   const scrollY = Math.max(0, Math.min(maxScroll, questScroll));
@@ -197,115 +213,184 @@ export function drawQuestLog(ctx, layout) {
   ctx.save();
   ctx.textBaseline = "top";
 
-  // Main Background
-  ctx.fillStyle = "rgba(12, 10, 8, 0.96)";
-  ctx.fillRect(panel.x, panel.y, panel.w, panel.h);
-  ctx.strokeStyle = "#4a3c2c";
-  ctx.lineWidth = 2;
-  ctx.strokeRect(panel.x, panel.y, panel.w, panel.h);
+  // 1. Main Background Panel (Dark Glassmorphic UI)
+  drawRoundedRect(ctx, panel.x, panel.y, panel.w, panel.h, 14);
+  ctx.fillStyle = "rgba(15, 15, 26, 0.95)";
+  ctx.fill();
+  ctx.strokeStyle = "#2e2e3e";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
 
-  // Title Bar
-  ctx.fillStyle = "rgba(24, 18, 14, 0.98)";
-  ctx.fillRect(title.x, title.y, title.w, title.h);
-  ctx.fillStyle = "#fde68a";
+  // Subtle inner accent glow
+  drawRoundedRect(ctx, panel.x + 1, panel.y + 1, panel.w - 2, panel.h - 2, 13);
+  ctx.strokeStyle = "rgba(56, 189, 248, 0.1)";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // 2. Title Bar Header
+  drawRoundedRect(ctx, title.x, title.y, title.w, title.h, [14, 14, 0, 0]);
+  ctx.fillStyle = "rgba(22, 22, 38, 0.98)";
+  ctx.fill();
+
+  // Header bottom border
+  ctx.beginPath();
+  ctx.moveTo(title.x, title.y + title.h);
+  ctx.lineTo(title.x + title.w, title.y + title.h);
+  ctx.strokeStyle = "#2e2e3e";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Title icon & text
+  ctx.fillStyle = "#fde047";
   ctx.font = "bold 14px monospace";
-  ctx.fillText(header.titleText, title.x + 12, title.y + 8);
+  ctx.fillText(header.titleText, title.x + 16, title.y + 11);
 
-  ctx.fillStyle = "#a7f3d0";
-  ctx.font = "12px monospace";
-  const choiceText = truncateText(ctx, header.choiceText, title.w - 380);
-  ctx.fillText(choiceText, title.x + 360, title.y + 9);
+  // Legacy status badge/pill
+  if (header.choiceText) {
+    ctx.font = "11px monospace";
+    const choiceStr = truncateText(ctx, header.choiceText, title.w - 380);
+    const textW = ctx.measureText(choiceStr).width;
+    const badgeX = title.x + 360;
+    const badgeY = title.y + 9;
 
-  // Close Button
-  ctx.fillStyle = "rgba(140, 35, 35, 0.9)";
-  ctx.fillRect(close.x, close.y, close.w, close.h);
-  ctx.fillStyle = "#f8fafc";
+    drawRoundedRect(ctx, badgeX, badgeY, textW + 16, 22, 11);
+    ctx.fillStyle = "rgba(52, 211, 153, 0.1)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(52, 211, 153, 0.3)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.fillStyle = "#34d399";
+    ctx.fillText(choiceStr, badgeX + 8, badgeY + 4);
+  }
+
+  // Close Button (Sleek red glass button)
+  drawRoundedRect(ctx, close.x, close.y, close.w, close.h, 6);
+  ctx.fillStyle = "rgba(239, 68, 68, 0.15)";
+  ctx.fill();
+  ctx.strokeStyle = "rgba(239, 68, 68, 0.4)";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  ctx.fillStyle = "#fca5a5";
   ctx.font = "bold 13px monospace";
-  ctx.fillText("✕", close.x + 6, close.y + 4);
+  ctx.fillText("✕", close.x + 7, close.y + 4);
 
-  // Left List Area Box
-  ctx.fillStyle = "rgba(18, 15, 12, 0.9)";
-  ctx.fillRect(listArea.x, listArea.y, listArea.w, listArea.h);
-  ctx.strokeStyle = "#382e21";
-  ctx.strokeRect(listArea.x, listArea.y, listArea.w, listArea.h);
+  // 3. Left List Area Box
+  drawRoundedRect(ctx, listArea.x, listArea.y, listArea.w, listArea.h, 10);
+  ctx.fillStyle = "rgba(18, 18, 30, 0.7)";
+  ctx.fill();
+  ctx.strokeStyle = "#252538";
+  ctx.lineWidth = 1;
+  ctx.stroke();
 
-  // Right Detail Box
-  ctx.fillStyle = "rgba(18, 15, 12, 0.9)";
-  ctx.fillRect(detailArea.x, detailArea.y, detailArea.w, detailArea.h);
-  ctx.strokeStyle = "#382e21";
-  ctx.strokeRect(detailArea.x, detailArea.y, detailArea.w, detailArea.h);
+  // 4. Right Detail Box
+  drawRoundedRect(ctx, detailArea.x, detailArea.y, detailArea.w, detailArea.h, 10);
+  ctx.fillStyle = "rgba(18, 18, 30, 0.7)";
+  ctx.fill();
+  ctx.strokeStyle = "#252538";
+  ctx.lineWidth = 1;
+  ctx.stroke();
 
-  // Draw Quest List clipped within listArea
+  // Draw Quest List (clipped to listArea)
   ctx.save();
   ctx.beginPath();
-  ctx.rect(listArea.x, listArea.y, listArea.w, listArea.h);
+  drawRoundedRect(ctx, listArea.x, listArea.y, listArea.w, listArea.h, 10);
   ctx.clip();
 
   for (const q of quests) {
     if (q.y + q.h < listArea.y || q.y > listArea.y + listArea.h) continue;
 
     const isSelected = selectedQuest && selectedQuest.key === q.key;
-    const isLocked = q.status === "locked";
-    ctx.fillStyle = isSelected
-      ? "rgba(45, 35, 20, 0.95)"
-      : isLocked
-        ? "rgba(15, 13, 11, 0.4)"
-        : "rgba(25, 20, 16, 0.6)";
-    ctx.fillRect(q.x, q.y, q.w, q.h);
-    ctx.strokeStyle = isSelected ? "#f59e0b" : "#2d2419";
-    ctx.strokeRect(q.x, q.y, q.w, q.h);
-
     const isCompleted = q.status === "completed";
     const isActive = q.status === "active";
+    const isLocked = q.status === "locked";
     const isTracked = layout.trackedQuestKey === q.key;
 
-    ctx.fillStyle = isCompleted ? "#4ade80" : isActive ? "#60a5fa" : isLocked ? "#64748b" : "#e2e8f0";
+    // Item Background
+    drawRoundedRect(ctx, q.x, q.y, q.w, q.h, 8);
+    ctx.fillStyle = isSelected
+      ? "rgba(56, 189, 248, 0.14)"
+      : isCompleted
+        ? "rgba(34, 197, 94, 0.06)"
+        : isLocked
+          ? "rgba(15, 15, 24, 0.4)"
+          : "rgba(26, 26, 42, 0.5)";
+    ctx.fill();
+
+    ctx.strokeStyle = isSelected
+      ? "#38bdf8"
+      : isCompleted
+        ? "rgba(34, 197, 94, 0.2)"
+        : isLocked
+          ? "rgba(47, 53, 74, 0.4)"
+          : "rgba(40, 40, 60, 0.5)";
+    ctx.lineWidth = isSelected ? 1.5 : 1;
+    ctx.stroke();
+
+    // Left Accent Strip for selected or active quest
+    if (isSelected || isActive) {
+      drawRoundedRect(ctx, q.x, q.y, 4, q.h, [8, 0, 0, 8]);
+      ctx.fillStyle = isSelected ? "#38bdf8" : "#f59e0b";
+      ctx.fill();
+    }
+
+    // Quest Title
+    ctx.fillStyle = isSelected ? "#ffffff" : isCompleted ? "#86efac" : isActive ? "#93c5fd" : isLocked ? "#64748b" : "#e2e8f0";
     ctx.font = "bold 12px monospace";
     const titleStr = `Act ${q.act}: ${q.title}`;
     const truncatedTitle = truncateText(ctx, titleStr, q.w - (isTracked ? 34 : 16));
-    ctx.fillText(truncatedTitle, q.x + 8, q.y + 6);
+    ctx.fillText(truncatedTitle, q.x + 10, q.y + 7);
 
+    // Tracked Pin Icon
     if (isTracked) {
       ctx.fillStyle = "#38bdf8";
       ctx.font = "bold 12px monospace";
-      ctx.fillText("📌", q.x + q.w - 22, q.y + 6);
+      ctx.fillText("📌", q.x + q.w - 22, q.y + 7);
     }
 
-    ctx.fillStyle = isCompleted ? "#86efac" : isActive ? "#93c5fd" : isLocked ? "#475569" : "#94a3b8";
+    // Status Badge Text
+    ctx.fillStyle = isCompleted ? "#4ade80" : isActive ? "#38bdf8" : isLocked ? "#64748b" : "#fde047";
     ctx.font = "11px monospace";
-    ctx.fillText(isCompleted ? "✔ Completed" : isActive ? "⚙ Active" : isLocked ? "🔒 Locked" : "✦ Available", q.x + 8, q.y + 24);
+    ctx.fillText(isCompleted ? "✔ Completed" : isActive ? "⚙ Active" : isLocked ? "🔒 Locked" : "✦ Available", q.x + 10, q.y + 25);
   }
   ctx.restore();
 
-  // Scrollbar indicator for left list area
+  // Scrollbar indicator
   if (maxScroll > 0) {
     const barW = 4;
-    const barX = listArea.x + listArea.w - barW - 2;
-    const trackH = listArea.h - 4;
+    const barX = listArea.x + listArea.w - barW - 3;
+    const trackH = listArea.h - 8;
     const thumbH = Math.max(20, Math.floor((listArea.h / totalH) * trackH));
-    const thumbY = listArea.y + 2 + Math.floor((scrollY / maxScroll) * (trackH - thumbH));
+    const thumbY = listArea.y + 4 + Math.floor((scrollY / maxScroll) * (trackH - thumbH));
 
-    ctx.fillStyle = "rgba(255, 255, 255, 0.1)";
-    ctx.fillRect(barX, listArea.y + 2, barW, trackH);
-    ctx.fillStyle = "#f59e0b";
-    ctx.fillRect(barX, thumbY, barW, thumbH);
+    drawRoundedRect(ctx, barX, listArea.y + 4, barW, trackH, 2);
+    ctx.fillStyle = "rgba(255, 255, 255, 0.05)";
+    ctx.fill();
+
+    drawRoundedRect(ctx, barX, thumbY, barW, thumbH, 2);
+    ctx.fillStyle = "#38bdf8";
+    ctx.fill();
   }
 
-  // Draw Selected Quest Detail
+  // Draw Selected Quest Details
   if (selectedQuest) {
-    let dy = detailArea.y + 12;
-    const dx = detailArea.x + 14;
+    let dy = detailArea.y + 14;
+    const dx = detailArea.x + 16;
+    const detailW = detailArea.w - 32;
 
+    // Detail Header Title
     ctx.fillStyle = "#fde047";
     ctx.font = "bold 15px monospace";
     const detailTitle = `[Act ${selectedQuest.act}] ${selectedQuest.title}`;
-    const truncatedDetailTitle = truncateText(ctx, detailTitle, detailArea.w - 28);
+    const truncatedDetailTitle = truncateText(ctx, detailTitle, detailArea.w - 160);
     ctx.fillText(truncatedDetailTitle, dx, dy);
     dy += 24;
 
+    // Quest Description
     ctx.fillStyle = "#cbd5e1";
     ctx.font = "12px monospace";
-    const maxDescWidth = detailArea.w - 28;
+    const maxDescWidth = detailW;
     const words = selectedQuest.description.split(" ");
     let currentLine = "";
     for (const word of words) {
@@ -320,20 +405,18 @@ export function drawQuestLog(ctx, layout) {
     }
     if (currentLine) {
       ctx.fillText(currentLine, dx, dy);
-      dy += 24;
+      dy += 22;
     }
 
-    // Quest Meta
-    dy += 4;
+    // Required Level Subtitle
     ctx.fillStyle = "#94a3b8";
-    ctx.font = "12px monospace";
+    ctx.font = "11px monospace";
     ctx.fillText(`Required Level: ${selectedQuest.required_level}`, dx, dy);
-    dy += 18;
+    dy += 22;
 
-    // Quest Objective Section
-    dy += 6;
+    // --- Quest Objective Card Section ---
     ctx.fillStyle = "#38bdf8";
-    ctx.font = "bold 13px monospace";
+    ctx.font = "bold 12px monospace";
     ctx.fillText("🎯 Quest Objective:", dx, dy);
     dy += 20;
 
@@ -359,105 +442,147 @@ export function drawQuestLog(ctx, layout) {
       statusProgressStr = `(Locked)`;
     }
 
-    ctx.fillStyle = statusColor;
-    ctx.font = "12px monospace";
     const fullObjText = selectedQuest.status === "locked"
       ? "[🔒] Complete previous quest first to unlock"
       : `${statusPrefix}${objText} ${statusProgressStr}`;
 
+    // Objective Card Wrapper Box
+    const objBoxY = dy;
     const objWords = fullObjText.split(" ");
+    const objLines = [];
     let objLine = "";
-    const objMaxW = maxDescWidth - 8;
+    const objMaxW = detailW - 24;
     for (const w of objWords) {
       const test = objLine ? objLine + " " + w : w;
       if (ctx.measureText(test).width > objMaxW) {
-        if (objLine) ctx.fillText(objLine, dx + 8, dy);
-        dy += 18;
+        if (objLine) objLines.push(objLine);
         objLine = w;
       } else {
         objLine = test;
       }
     }
-    if (objLine) {
-      ctx.fillText(objLine, dx + 8, dy);
-      dy += 20;
-    }
+    if (objLine) objLines.push(objLine);
 
-    // Rewards Header
-    dy += 6;
+    const objBoxH = Math.max(36, objLines.length * 18 + 14);
+
+    drawRoundedRect(ctx, dx, objBoxY, detailW, objBoxH, 8);
+    ctx.fillStyle = "rgba(56, 189, 248, 0.06)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(56, 189, 248, 0.25)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Left accent bar on objective box
+    drawRoundedRect(ctx, dx, objBoxY, 4, objBoxH, [8, 0, 0, 8]);
+    ctx.fillStyle = statusColor;
+    ctx.fill();
+
+    ctx.fillStyle = statusColor;
+    ctx.font = "12px monospace";
+    let lineY = objBoxY + 8;
+    for (const line of objLines) {
+      ctx.fillText(line, dx + 12, lineY);
+      lineY += 18;
+    }
+    dy += objBoxH + 16;
+
+    // --- Quest Rewards Card Section ---
     ctx.fillStyle = "#f59e0b";
-    ctx.font = "bold 13px monospace";
+    ctx.font = "bold 12px monospace";
     ctx.fillText("🎁 Quest Rewards:", dx, dy);
     dy += 20;
 
-    ctx.fillStyle = "#38bdf8";
-    ctx.font = "12px monospace";
+    const rewardItems = [];
     if (selectedQuest.exp_reward > 0) {
-      ctx.fillText(`• Experience: +${selectedQuest.exp_reward} EXP`, dx + 8, dy);
-      dy += 18;
+      rewardItems.push({ text: `⚡ +${selectedQuest.exp_reward} EXP`, color: "#38bdf8" });
     }
     if (selectedQuest.gold_reward > 0) {
-      ctx.fillStyle = "#fde047";
-      ctx.fillText(`• Gold: +${selectedQuest.gold_reward}g`, dx + 8, dy);
-      dy += 18;
+      rewardItems.push({ text: `🪙 +${selectedQuest.gold_reward}g Gold`, color: "#fde047" });
     }
     if (selectedQuest.passive_points_reward > 0) {
-      ctx.fillStyle = "#a7f3d0";
-      ctx.fillText(`• Passive Points: +${selectedQuest.passive_points_reward} pt`, dx + 8, dy);
-      dy += 18;
+      rewardItems.push({ text: `✨ +${selectedQuest.passive_points_reward} Passive Points`, color: "#a7f3d0" });
     }
     if (selectedQuest.title_reward) {
-      ctx.fillStyle = "#c084fc";
-      ctx.fillText(`• Title: "${selectedQuest.title_reward}"`, dx + 8, dy);
-      dy += 18;
+      rewardItems.push({ text: `👑 Title: "${selectedQuest.title_reward}"`, color: "#c084fc" });
     }
 
-    // Action buttons & legacy choices
+    const rewardBoxY = dy;
+    const rewardBoxH = Math.max(36, rewardItems.length * 20 + 12);
+
+    drawRoundedRect(ctx, dx, rewardBoxY, detailW, rewardBoxH, 8);
+    ctx.fillStyle = "rgba(245, 158, 11, 0.06)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(245, 158, 11, 0.25)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Left accent bar on rewards box
+    drawRoundedRect(ctx, dx, rewardBoxY, 4, rewardBoxH, [8, 0, 0, 8]);
+    ctx.fillStyle = "#f59e0b";
+    ctx.fill();
+
+    ctx.font = "12px monospace";
+    let rY = rewardBoxY + 8;
+    for (const rItem of rewardItems) {
+      ctx.fillStyle = rItem.color;
+      ctx.fillText(rItem.text, dx + 12, rY);
+      rY += 20;
+    }
+
+    // --- Action Buttons & Banners ---
     if (layout.actionButtons && layout.actionButtons.length > 0) {
       for (const btn of layout.actionButtons) {
         if (btn.type === "banner" || btn.type === "banner_locked" || btn.type === "banner_in_progress") {
+          drawRoundedRect(ctx, btn.x, btn.y, btn.w, btn.h, 8);
           ctx.fillStyle = btn.type === "banner"
             ? "rgba(34, 197, 94, 0.15)"
             : btn.type === "banner_in_progress"
               ? "rgba(56, 189, 248, 0.15)"
               : "rgba(71, 85, 105, 0.25)";
-          ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
+          ctx.fill();
           ctx.strokeStyle = btn.color;
-          ctx.lineWidth = 1.5;
-          ctx.strokeRect(btn.x, btn.y, btn.w, btn.h);
+          ctx.lineWidth = 1.2;
+          ctx.stroke();
+
           ctx.fillStyle = btn.color;
           ctx.font = "bold 13px monospace";
-          ctx.fillText(btn.text, btn.x + 14, btn.y + 14);
+          ctx.fillText(btn.text, btn.x + 16, btn.y + 13);
         } else if (btn.kind === "quest_toggle_track") {
+          drawRoundedRect(ctx, btn.x, btn.y, btn.w, btn.h, 8);
           ctx.fillStyle = btn.isTracked ? "rgba(56, 189, 248, 0.2)" : "rgba(30, 41, 59, 0.6)";
-          ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
+          ctx.fill();
           ctx.strokeStyle = btn.color;
-          ctx.lineWidth = 1.5;
-          ctx.strokeRect(btn.x, btn.y, btn.w, btn.h);
+          ctx.lineWidth = 1.2;
+          ctx.stroke();
+
           ctx.fillStyle = btn.color;
           ctx.font = "bold 11px monospace";
-          ctx.fillText(btn.text, btn.x + 10, btn.y + 7);
+          ctx.fillText(btn.text, btn.x + 12, btn.y + 7);
         } else if (btn.kind === "quest_choice_city" || btn.kind === "quest_choice_surge") {
-          ctx.fillStyle = btn.kind === "quest_choice_city" ? "rgba(56, 189, 248, 0.2)" : "rgba(245, 158, 11, 0.2)";
-          ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
+          drawRoundedRect(ctx, btn.x, btn.y, btn.w, btn.h, 8);
+          ctx.fillStyle = btn.kind === "quest_choice_city" ? "rgba(56, 189, 248, 0.18)" : "rgba(245, 158, 11, 0.18)";
+          ctx.fill();
           ctx.strokeStyle = btn.color;
-          ctx.lineWidth = 1.5;
-          ctx.strokeRect(btn.x, btn.y, btn.w, btn.h);
+          ctx.lineWidth = 1.2;
+          ctx.stroke();
+
           ctx.fillStyle = btn.color;
           ctx.font = "bold 13px monospace";
-          ctx.fillText(btn.title, btn.x + 10, btn.y + 10);
+          ctx.fillText(btn.title, btn.x + 12, btn.y + 10);
           ctx.fillStyle = "#cbd5e1";
           ctx.font = "11px monospace";
-          ctx.fillText(btn.sub, btn.x + 10, btn.y + 32);
+          ctx.fillText(btn.sub, btn.x + 12, btn.y + 32);
         } else {
+          drawRoundedRect(ctx, btn.x, btn.y, btn.w, btn.h, 8);
           ctx.fillStyle = btn.kind === "quest_complete" ? "rgba(34, 197, 94, 0.25)" : "rgba(234, 179, 8, 0.25)";
-          ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
+          ctx.fill();
           ctx.strokeStyle = btn.color;
-          ctx.lineWidth = 1.5;
-          ctx.strokeRect(btn.x, btn.y, btn.w, btn.h);
+          ctx.lineWidth = 1.2;
+          ctx.stroke();
+
           ctx.fillStyle = "#ffffff";
           ctx.font = "bold 13px monospace";
-          ctx.fillText(btn.text, btn.text ? btn.x + 16 : btn.x, btn.y + 14);
+          ctx.fillText(btn.text, btn.x + 16, btn.y + 13);
         }
       }
     }
