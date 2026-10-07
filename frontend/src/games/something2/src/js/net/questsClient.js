@@ -35,3 +35,13 @@ export async function completeQuest(characterId, questKey, legacyChoice = null) 
   if (!res.ok) throw new Error(`Failed to complete quest: ${res.status}`);
   return await res.json();
 }
+
+export async function incrementQuestProgress(characterId, questKey, amount = 1) {
+  const res = await fetch('/api/quests/progress', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ characterId, questKey, amount }),
+  });
+  if (!res.ok) throw new Error(`Failed to update quest progress: ${res.status}`);
+  return await res.json();
+}
