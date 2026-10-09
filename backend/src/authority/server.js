@@ -2740,6 +2740,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
     },
 
     async debugWorldBoss(ws, msg) {
+      // SOMET-614: dev tool (spawn/slay a boss, guaranteed legendary loot).
+      // Admin only, decided from the role read off the users row at connect,
+      // never from anything in the message. Silent ignore, like the other
+      // benign rejections; no per-message logging.
+      if (ws.role !== 'admin') return;
       const action = msg.action;
       const now = Date.now();
       const broadcastAll = (frame) => {
