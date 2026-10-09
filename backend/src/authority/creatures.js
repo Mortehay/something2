@@ -24,6 +24,17 @@ const DIRS = [
 ];
 const DIR_FACING = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE'];
 const CREATURE_SIZE = 48;
+
+// SOMET-603: the largest server hitbox a catalog row may ask for. Same ceiling
+// as MAX_ENTITY_DISPLAY_PX in index.js (4 tiles at MAP_TILE_SIZE 100) and as
+// the entity_types_hitbox_size_check constraint.
+const MAX_HITBOX_SIZE = 400;
+
+// A usable hitbox or null. Strict on purpose: a string '96' or a 12.5 is a
+// fixture/admin bug, and null makes the caller fall back to CREATURE_SIZE.
+function hitboxOrNull(v) {
+  return Number.isInteger(v) && v > 0 && v <= MAX_HITBOX_SIZE ? v : null;
+}
 const CREATURE_SPEED = 40;    // world px/s
 const REDIRECT_CHANCE = 0.02;
 
@@ -1189,9 +1200,21 @@ class CreatureSim {
       // pack back to the guards, with the charm columns still perfectly
       // populated.
       const charmOwner = c.charmOwnerUserId ?? null;
+      const hitbox = hitboxOrNull(c.hitboxSize);
       this.creatures.set(c.id, {
         id: c.id, type: c.type, x: c.x, y: c.y,
-        width: CREATURE_SIZE, height: CREATURE_SIZE, speed: CREATURE_SPEED,
+        // SOMET-603: the catalog's hitbox, not a constant. This is what makes a
+        // boss's server collision/hit radius (world.js:1120, projectiles.js:507,
+        // creatures.js:2243 all read width/2) match its catalog size.
+        width: hitbox ?? CREATURE_SIZE, height: hitbox ?? CREATURE_SIZE, speed: CREATURE_SPEED,
+        // SOMET-603: the ONE boss flag (render, audio, HUD, spawn) and its
+        // element; name for the nameplate. Null for every ordinary creature.
+        name: c.name ?? c.type,
+        bossTier: c.bossTier ?? null,
+        element: c.element ?? null,
+        hitboxSize: hitbox,
+        // Aura names (entity_types.auras). Carried, not interpreted, until S3.
+        auras: Array.isArray(c.auras) ? c.auras : null,
         facing: c.facing || 'S', hp: c.hp, maxHp: c.hp, color: c.color,
         mit: creatureMitigation(c),
         // Slice D: effect bindings from entity_types.vfx, normalized to null
