@@ -17,6 +17,7 @@ const {
 } = require('../seeds/data/entityTypes.js');
 const { BESTIARY_P4_CREATURES, BESTIARY_P4_DROPS } = require('../seeds/data/bestiaryP4.js');
 const { CREATURE_BEHAVIORS } = require('../seeds/data/creatureBehaviors.js');
+const { AURA_EFFECTS, BEHAVIOR_DEFAULT_AURAS } = require('../seeds/data/auraEffects.js');
 const { CREATURE_ABILITIES } = require('../seeds/data/creatureAbilities.js');
 const { BEHAVIOR_DROPS } = require('../seeds/data/behaviorDrops.js');
 const { CHEST_LOOT } = require('../seeds/data/chestLoot.js');
@@ -437,6 +438,36 @@ async function seedOneClassLoadout(pool, l) {
   return r.rows.length && r.rows[0].inserted ? 1 : 0;
 }
 
+// DO NOTHING: an admin retuning pack_leader in the Aura Effects tab must not be
+// reset by a reseed (same posture as seedOneCreatureType).
+async function seedOneAura(db, a) {
+  const r = await db.query(
+    `INSERT INTO aura_effects (name, target_side, radius, damage_mult, defense_mult, speed_mult, shape, color, pulse_ms)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (name) DO NOTHING`,
+    [a.name, a.target_side, a.radius, a.damage_mult ?? 1, a.defense_mult ?? 1, a.speed_mult ?? 1,
+     a.shape ?? 'ring', a.color ?? '#d4a017', a.pulse_ms ?? 1200],
+  );
+  return r.rowCount;
+}
+
+// Runs AFTER the creature types exist: migration 1714440680000 binds Champions
+// on an existing DB, but on a fresh one (staging) it runs before any Champion
+// entity is created and binds nothing. `auras IS NULL` only -- [] is an
+// admin's deliberate removal and must survive every reseed.
+async function bindDefaultAuras(db) {
+  let n = 0;
+  for (const [behaviorName, auras] of Object.entries(BEHAVIOR_DEFAULT_AURAS)) {
+    const r = await db.query(
+      `UPDATE entity_types e SET auras = $2::jsonb
+         FROM creature_behaviors b
+        WHERE b.id = e.behavior_id AND b.name = $1 AND e.auras IS NULL`,
+      [behaviorName, JSON.stringify(auras)],
+    );
+    n += r.rowCount;
+  }
+  return n;
+}
+
 async function seedCatalogs(pool) {
   let tiles = 0;
   for (const t of DEFAULT_TILE_TYPES) {
@@ -530,6 +561,9 @@ async function seedCatalogs(pool) {
   }
   console.log(`Seeded ${pointTypes} world point types across ${POINT_KINDS.length} kinds`);
 
+  // The aura library first: entities reference auras by name.
+  for (const a of AURA_EFFECTS) await seedOneAura(pool, a);
+
   // Creatures, then their drop rules. HOSTILE_CREATURES (4 legacy) and
   // BESTIARY_P4_CREATURES (288 generated, SOMET-250 Task 6) go through the
   // same seedOneCreatureType path -- see its comment above for the upsert
@@ -538,6 +572,8 @@ async function seedCatalogs(pool) {
   for (const c of [...HOSTILE_CREATURES, ...BESTIARY_P4_CREATURES]) {
     creatures += await seedOneCreatureType(pool, c);
   }
+  const aurasBound = await bindDefaultAuras(pool);
+  console.log(`Bound default auras on ${aurasBound} entity types`);
 
   // CREATURE_DROPS (Wolf's one hand-authored rule) and BESTIARY_P4_DROPS (288
   // generated rules, SOMET-250 Task 6) go through the same
@@ -581,7 +617,7 @@ async function seedCatalogs(pool) {
 
 module.exports = {
   seedCatalogs, seedOneTile, seedOneBiome, seedOneBehavior, seedOneAbility, seedOneBehaviorDrop,
-  seedOneChestLoot,
+  seedOneChestLoot, seedOneAura, bindDefaultAuras,
   seedOneCreatureType, seedOneCreatureDrop, seedOnePlayableClass, seedOneClassLoadout,
 };
 
