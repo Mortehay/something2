@@ -6,7 +6,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
-const { bindDefaultAuras, seedOneAura } = require('../scripts/seed-catalogs.js');
+const { bindDefaultAuras, seedOneAura, seedCatalogs } = require('../scripts/seed-catalogs.js');
 const { AURA_EFFECTS, BEHAVIOR_DEFAULT_AURAS } = require('../seeds/data/auraEffects.js');
 
 const url = process.env.TEST_DATABASE_URL;
@@ -60,6 +60,25 @@ test('seeded auras', { skip }, async (t) => {
     await bindDefaultAuras(pool);
     assert.deepStrictEqual(await auras('zz_aura_champ_null'), ['pack_leader']);
     assert.deepStrictEqual(await auras('zz_aura_champ_empty'), []);
+  });
+
+  // Guards the ORDERING: a Champion that seedCatalogs itself (re)creates must be
+  // bound in the same run, i.e. bindDefaultAuras must run after the creature
+  // loop. Runs in a rolled-back transaction so the shared catalog is untouched.
+  await t.test('seedCatalogs binds a Champion it recreates, and keeps an explicit []', async () => {
+    const c = await pool.connect();
+    try {
+      await c.query('BEGIN');
+      const d = await c.query("DELETE FROM entity_types WHERE name = 'Beast Champion'");
+      assert.strictEqual(d.rowCount, 1, 'Beast Champion must exist to be recreated');
+      await c.query("UPDATE entity_types SET auras = NULL WHERE name = 'zz_aura_champ_null'");
+      await c.query("UPDATE entity_types SET auras = '[]'::jsonb WHERE name = 'zz_aura_champ_empty'");
+      await seedCatalogs(c);
+      const q = async (n) => (await c.query('SELECT auras FROM entity_types WHERE name = $1', [n])).rows[0]?.auras;
+      assert.deepStrictEqual(await q('Beast Champion'), ['pack_leader'], 'recreated Champion bound in the same seed');
+      assert.deepStrictEqual(await q('zz_aura_champ_null'), ['pack_leader']);
+      assert.deepStrictEqual(await q('zz_aura_champ_empty'), []);
+    } finally { await c.query('ROLLBACK'); c.release(); }
   });
 
   await t.test('the library row is restored on a DB that lost it', async () => {
