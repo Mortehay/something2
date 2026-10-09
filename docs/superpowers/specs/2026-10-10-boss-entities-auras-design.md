@@ -67,7 +67,8 @@ bosses in the dungeon End and Elite rooms.
 | Column | Type | Notes |
 |---|---|---|
 | `boss_tier` | `text NULL` | CHECK `IN ('world','dungeon_end','dungeon_elite')`; NULL = ordinary. The ONE boss flag for render, audio, HUD and spawn. |
-| `element` | `text NULL` | same vocabulary as `item_types.element` |
+| `element` | `text NULL` | the 5-value `elements` table vocabulary (physical, fire, ice, lightning, arcane); `entity_types_attack_element_check` is widened to include `arcane` (Abyssor) |
+| `base_damage` | `real NULL` | boss contact damage; bosses are never persisted, so `world_creatures.damage` cannot carry it (added during S1 planning) |
 | `auras` | `jsonb NULL` | array of `aura_effects.name`; no FK (same trade-off as `vfx`): unknown name → no-op + one log line |
 | `hitbox_size` | `integer NULL` | server collision size; NULL → `CREATURE_SIZE` |
 | `xp_reward` | `integer NULL` | world-boss kill XP |
@@ -88,12 +89,24 @@ Boss display size uses existing `display_width/display_height`; gold uses
 | `color`, `pulse_ms` | visual |
 | `particle_count, particle_spread, particle_speed, particle_gravity, particle_lifetime_ms, particle_size` | copied from `vfx_effects` |
 
-Stacking: the same aura from several sources → strongest value per stat
-(today's `Math.max` rule). Different auras → multiply. Enemy-side results are
-floored: `speed_mult ≥ 0.5`, `damage_mult ≥ 0.5`, `defense_mult ≥ 0.5`.
+Stacking: the same aura from several sources → the strongest effect per stat.
+For an ally buff that is the largest multiplier (today's `Math.max`); for an
+enemy debuff it is the SMALLEST multiplier — S4 must not reuse `Math.max`.
+Different auras → multiply. Enemy-side results are floored:
+`speed_mult ≥ 0.5`, `damage_mult ≥ 0.5`, `defense_mult ≥ 0.5`.
+A DoT is allowed only on an `enemies` aura (CHECK); `dot_element` is NOT NULL,
+default `physical`. `radius ≤ 2000`.
 
 Migration seeds `pack_leader` from Champion's current values and binds it to
 every entity whose behaviour is Champion; then drops `creature_behaviors.aura_*`.
+The seeder (`seed-catalogs`) ALSO restores `pack_leader` and binds it where
+`auras IS NULL`: on a fresh DB/staging the migration runs before the Champion
+entities exist, so a migration-only bind would ship no aura while every test
+on the dev DB stays green.
+
+Aura definitions are resolved when a creature is loaded, so an edit reaches
+creatures already in memory only on their next chunk load (unlike Attack
+Effects, which are live). The Aura Effects tab says so.
 
 ### 3.3 `creature_skills` (new)
 
@@ -208,6 +221,15 @@ Levels follow each dungeon's `level_band` upper bound (End) and midpoint+
   `addCreatures` skips known ids); respawn after `respawn_s` via the existing
   respawn sweep (SOMET-309).
 - Boss instances are not persisted.
+- Boss-tier rows never wild-spawn: `worldPopulation` excludes them even if
+  listed in `allowed_creature_types`.
+- `CreatureSim` gains `remove(id)` so timed-out / slain world bosses actually
+  leave the world (today the call is guarded and never happens).
+- Known pre-epic facts carried by later slices: boss speed is forced to 40 by
+  `addCreatures` (catalog speeds were never live — kept in S1, tuning in 613);
+  a boss kill awards nothing because `commitCreatureDeath` finds no
+  `world_creatures` row (S10 must award boss XP/loot without that row);
+  non-uuid boss/minion ids never flush positions (harmless, not persisted).
 
 ### 4.2 Aura tick
 
@@ -216,7 +238,10 @@ Levels follow each dungeon's `level_band` upper bound (End) and midpoint+
 - enemies side: players in radius get the stat multipliers for the tick and a
   DoT charged every `tick_ms` **through the normal damage path** (resistances,
   death);
-- existing aura cap (`creatures.js:2195`) kept; distance compared squared.
+- distance compared squared. Correction: `creatures.js:2195` is the PLAYER
+  leech-aura cap, not a creature-aura cap — creature auras have none today
+  (cost scales with leader count, ~25.8 ms/tick at 200 leaders per
+  `densityTiers.js`). S4 decides whether enemy auras need a cap.
 
 Snapshot additions: creature's active aura names; player's active debuffs.
 
@@ -284,6 +309,14 @@ trigger), `enrage` at < 10% HP or near the lifetime limit.
 | S10 | Boss loot: loot columns + tier defaults, biased rarity roll, dungeon boss drops + chest, world-boss participant rolls, Entities tab fields | S1, S9 |
 
 Order: S1 ∥ S3 → S2, S4, S5, S6, S9 → S7, S10 → S8.
+
+S1 ∥ S3 merge contract: both touch `addCreatures`, the `UPDATE entity_types`
+parameter list (id stays last) and the creature SELECT. Whichever merges
+second keeps exactly one `auras: resolveInstanceAuras(c)` line, carries
+S3's `AURAS_LATERAL` into S1's `hydrateCreatureRow`, and removes any leftover
+`b.aura_*` from `CREATURE_JOINED_SELECT` / `loadCreatureTypes`.
+
+Separate prerequisite: SOMET-614 (debugWorldBoss not admin-gated) ships first.
 
 Migration timestamp ranges (the untracked `1714440660000` is taken):
 S1 `1714440670000+`, S3 `1714440680000+`, S6 `1714440690000+`,
