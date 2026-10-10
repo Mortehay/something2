@@ -304,6 +304,9 @@ module.exports = function audioRoutes(pool) {
       // proposes any more, so this is the caller's to fix -- write a prompt
       // (or queue the slot, whose prompt phase writes one) -- not a box fault.
       if (!gen.ok && gen.error === 'no prompt') return res.status(409).json({ error: 'no prompt' });
+      // An upload-only sfx slot (no cue, or one the provider has not reported)
+      // is the same kind of caller error: nothing the box did (SOMET-592).
+      if (!gen.ok && gen.uploadOnly) return res.status(409).json({ error: gen.error, retryable: false });
       if (!gen.ok) return res.status(502).json({ error: gen.error, retryable: Boolean(gen.retryable) });
       // sfx generates N variants at once (`{clips, bindings}`); music/ambience
       // stay a single clip (`{clip, binding}`) -- callers of the existing
