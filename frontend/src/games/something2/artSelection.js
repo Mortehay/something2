@@ -175,23 +175,30 @@ export const ART_FILTERS = Object.freeze(['all', 'missing', 'has', 'failed']);
 //
 // `kind` is not validated here: the kinds come from the server, and the
 // console's <select> simply shows no such option for an unknown one.
+//
+// `key=` names ONE subject and is matched exactly (`exact: true`); `q=` is
+// the search box's substring match. The Skill Tree tab links with key=,
+// because q=Mage also matches Afterimage, Pyromancy and five more labels.
 export function filtersFromParams(params) {
   const art = params.get('art');
+  const key = params.get('key');
   return {
     kind: params.get('kind') || 'all',
     art: ART_FILTERS.includes(art) ? art : 'missing',
-    search: params.get('q') || '',
+    search: key || params.get('q') || '',
+    exact: Boolean(key),
   };
 }
 
 // The inverse, omitting the console defaults so the plain tab URL stays plain.
 // SOMET-535: the console writes its filters back through this, so browser
 // back/forward and a reload land on the same table.
-export function paramsFromFilters({ kind, art, search }) {
+// An exact search goes back out as key= so it stays exact across back/reload.
+export function paramsFromFilters({ kind, art, search, exact = false }) {
   const p = new URLSearchParams();
   if (kind && kind !== 'all') p.set('kind', kind);
   if (art && art !== 'missing') p.set('art', art);
-  if (search) p.set('q', search);
+  if (search) p.set(exact ? 'key' : 'q', search);
   return p;
 }
 
@@ -262,14 +269,17 @@ export function startErrorMessage(error) {
   return error.message || 'Failed to start the batch';
 }
 
-export function applyFilters(subjects, { kind = 'all', art = 'all', search = '' } = {}) {
+// `exact`: `search` is a subject key, compared as-is (no case folding, name
+// not searched). Otherwise a case-insensitive substring of key and name.
+export function applyFilters(subjects, { kind = 'all', art = 'all', search = '', exact = false } = {}) {
   const q = search.trim().toLowerCase();
   return subjects.filter((s) => {
     if (kind !== 'all' && s.kind !== kind) return false;
     if (art === 'missing' && s.has_art) return false;
     if (art === 'has' && !s.has_art) return false;
     if (art === 'failed' && s.job_state !== 'failed') return false;
-    if (q && !`${s.key} ${s.name || ''}`.toLowerCase().includes(q)) return false;
+    if (exact && search && s.key !== search) return false;
+    if (!exact && q && !`${s.key} ${s.name || ''}`.toLowerCase().includes(q)) return false;
     return true;
   });
 }

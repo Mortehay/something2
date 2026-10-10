@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
+import { applyFilters, filtersFromParams } from '../artSelection.js';
+import { SKILLS_BY_CLASS } from '../src/js/core/skillsData.js';
 import {
   indexArt, artFor, artCoverage, distinctLabels, treeBounds, zoomViewBox, panViewBox,
-  artConsoleLink, onlyMissing, dragStart, dragMove, dragEnd, dragClick,
+  artConsoleLink, clientToWorld, onlyMissing, dragStart, dragMove, dragEnd, dragClick,
 } from '../skillTreeView.js';
 
 // SOMET-571. The Skill Tree tab's rules, testable without an SVG.
@@ -115,6 +117,35 @@ describe('zoomViewBox', () => {
   });
 });
 
+describe('clientToWorld', () => {
+  // A 1000x500 element showing a square box: "meet" fits the height, so the
+  // box is centred horizontally with slack on both sides.
+  const rect = { left: 100, top: 50, width: 1000, height: 500 };
+  const box = { x: 0, y: 0, w: 200, h: 200 };
+
+  it('maps the element centre to the box centre and scales by the fitted axis', () => {
+    expect(clientToWorld(box, rect, 600, 300)).toEqual({ x: 100, y: 100 });
+    expect(clientToWorld(box, rect, 600 + 250, 300 + 250)).toEqual({ x: 200, y: 200 });
+  });
+
+  // SOMET-571 rework: the wheel handler took the focus from the last-RENDERED
+  // box, so wheel events landing between renders zoomed about a stale point
+  // and the spot under the cursor drifted. Zooming repeatedly about the point
+  // computed from the box being zoomed keeps it fixed exactly.
+  it('keeps the point under the cursor fixed across many chained zooms', () => {
+    const cx = 333; const cy = 177;
+    let b = box;
+    const start = clientToWorld(b, rect, cx, cy);
+    for (let i = 0; i < 12; i += 1) {
+      const f = clientToWorld(b, rect, cx, cy);
+      b = zoomViewBox(b, 1.2, f.x, f.y);
+    }
+    const end = clientToWorld(b, rect, cx, cy);
+    expect(end.x).toBeCloseTo(start.x, 9);
+    expect(end.y).toBeCloseTo(start.y, 9);
+  });
+});
+
 describe('panViewBox', () => {
   it('moves the box opposite to the drag, in world units', () => {
     // Dragging right by 50 screen px at 2 world-units-per-px moves the box
@@ -153,6 +184,44 @@ describe('drag gate', () => {
     expect([r.dx, r.dy]).toEqual([2, 0]);
   });
 
+  // SOMET-571 rework. The svg used to setPointerCapture on EVERY press. Chrome
+  // then retargets pointerup and click to the svg, so a node's onClick never
+  // fired and a plain click on the tree navigated nowhere (logged live:
+  // pointerdown:image, gotpointercapture:svg, pointerup:svg, click:svg). The
+  // gate now says WHEN to capture: on the one move where the press becomes a
+  // drag, never on the press itself, so a click without a drag keeps its target.
+  it('asks for pointer capture only on the move that turns a press into a drag', () => {
+    let s = dragStart(10, 10);
+    let r = dragMove(s, 11, 10); // sub-threshold: still a click candidate
+    expect(r.capture).toBe(false);
+    r = dragMove(r.state, 30, 10); // crosses the threshold
+    expect(r.capture).toBe(true);
+    r = dragMove(r.state, 50, 10); // already dragging: capture once, not per move
+    expect(r.capture).toBe(false);
+  });
+
+  it('a plain press-release never asks for capture', () => {
+    const s = dragStart(10, 10);
+    expect(s.capture).toBeUndefined();
+    const r = dragMove(s, 10, 10);
+    expect(r.capture).toBe(false);
+    expect(dragClick(dragEnd(r.state)).allow).toBe(true);
+  });
+
+  it('measures the threshold from the press, so a slow drag still counts as a drag', () => {
+    // Per-move deltas of 1 px never reach a 3 px threshold on their own; a
+    // slow pan must still swallow its trailing click and still capture.
+    let s = dragStart(0, 0);
+    const captures = [];
+    for (let x = 1; x <= 10; x += 1) {
+      const r = dragMove(s, x, 0);
+      captures.push(r.capture);
+      s = r.state;
+    }
+    expect(captures.filter(Boolean).length).toBe(1);
+    expect(dragClick(dragEnd(s)).allow).toBe(false);
+  });
+
   it('ignores moves when no press is in progress', () => {
     const r = dragMove(null, 5, 5);
     expect(r.state).toBeNull();
@@ -163,13 +232,47 @@ describe('drag gate', () => {
 describe('artConsoleLink', () => {
   it('lands on the console filtered to exactly that subject, art filter widened', () => {
     // The console defaults to art=missing. A link to a subject that HAS art
-    // must override that, or the click lands on an empty table.
+    // must override that, or the click lands on an empty table. The subject
+    // goes in `key=` (exact), not `q=` (substring): q=Mage matched 8 labels.
     expect(artConsoleLink('skill', 'war_whirlwind'))
-      .toBe('/game/art?kind=skill&art=all&q=war_whirlwind');
+      .toBe('/game/art?kind=skill&art=all&key=war_whirlwind');
   });
 
   it('encodes a label with spaces and punctuation', () => {
     expect(artConsoleLink('passive_label', 'Arcane Conduit & more'))
-      .toBe('/game/art?kind=passive_label&art=all&q=Arcane+Conduit+%26+more');
+      .toBe('/game/art?kind=passive_label&art=all&key=Arcane+Conduit+%26+more');
+  });
+});
+
+// SOMET-571 rework. The round trip the click actually takes: link -> URL ->
+// the console's filtersFromParams -> applyFilters. Validation found q=Mage
+// landing on 8 rows (Afterimage, Pyromancy, ...): 8 of 128 labels opened on
+// the wrong set. Every link must select exactly its own subject.
+describe('artConsoleLink lands on exactly one subject', () => {
+  const land = (subjects, link) => {
+    const params = new URL(link, 'http://x').searchParams;
+    return applyFilters(subjects, filtersFromParams(params));
+  };
+
+  it('holds for labels that are substrings of other labels', () => {
+    // Real collisions reported by validation, plus case-only and key/name overlap.
+    const keys = ['Mage', 'Afterimage', 'Pyromancy', 'Storm Caller', 'Wind', 'Windwalker',
+      'Second Wind', 'Ward', 'Warden', 'Edge', 'Hedge', 'Stamina', 'Stamina Reserve', 'Reserve'];
+    const subjects = keys.map((key) => ({ kind: 'passive_label', key, name: key, has_art: true }));
+    for (const key of keys) {
+      const rows = land(subjects, artConsoleLink('passive_label', key));
+      expect(rows.map((s) => s.key), key).toEqual([key]);
+    }
+  });
+
+  it('holds for every class skill the Skill Tree tab can link to', () => {
+    // A skill's display name may contain another skill's key, so the name is
+    // part of the haystack; all 300 must still land on one row.
+    const all = Object.values(SKILLS_BY_CLASS).flat();
+    const subjects = all.map((s) => ({ kind: 'skill', key: s.id, name: s.nameEn, has_art: true }));
+    for (const s of all) {
+      const rows = land(subjects, artConsoleLink('skill', s.id));
+      expect(rows.map((r) => r.key), s.id).toEqual([s.id]);
+    }
   });
 });

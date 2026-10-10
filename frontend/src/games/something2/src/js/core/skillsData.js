@@ -1221,7 +1221,7 @@ export const SKILLS = [
     descEn: 'Constructs a hulking golem from cultist blood to fight alongside.'
   },
   {
-    id: 'plague_globule', class: 'Cultist', type: 'magic',
+    id: 'cul_plague_globule', class: 'Cultist', type: 'magic',
     nameUk: 'Згусток чуми', nameEn: 'Plague Globule',
     costType: 'hp', cost: 25, cooldown: 4, range: 360, icon: '☣️', iconColor: '#15803d',
     descUk: 'Снаряд отрути та нежиті, що заражає ворогів інфекцією.',
