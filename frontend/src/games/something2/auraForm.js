@@ -1,10 +1,14 @@
 // Form <-> payload for the Aura Effects admin (SOMET-604). Pure, so it is
 // testable under vitest's node env. Vocabulary and limits are asserted equal
 // to backend/src/services/auraEffects.js by auraForm.test.js.
+import { ELEMENTS } from './abilityForm.js';
+
 export const AURA_SIDES = ['allies', 'enemies'];
 export const AURA_SHAPES = ['ring', 'disc', 'particles'];
 export const AURA_LIMITS = { maxRadius: 2000, minTickMs: 100, maxTickMs: 5000, maxPulseMs: 10000, maxParticles: 64, maxNameLen: 200 };
-export const AURA_ELEMENTS = ['physical', 'fire', 'ice', 'lightning', 'arcane'];
+// The one frontend element list (SOMET-603), pinned to the backend by
+// __tests__/elementLists.test.js. Not a copy: a third list could drift.
+export const AURA_ELEMENTS = ELEMENTS;
 
 const FIELDS = {
   target_side: 'allies', radius: '200', damage_mult: '1', defense_mult: '1', speed_mult: '1',

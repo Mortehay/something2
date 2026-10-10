@@ -96,7 +96,7 @@ function __resetAuraWarnings() { warnedUnknown.clear(); }
 // The single place an instance's auras are decided (addCreatures calls it),
 // mirroring resolveInstanceBehavior's priority:
 //  1. a loader row (aura_defs present) -- the live path, CREATURE_JOINED_SELECT;
-//  2. an already-resolved camelCase `auras` array (test fixtures; S1's hydration);
+//  2. an already-resolved camelCase `auras` array (test fixtures);
 //  3. nothing -> [].
 function resolveInstanceAuras(c, warn = console.warn) {
   if (Array.isArray(c.aura_defs)) {
@@ -119,8 +119,9 @@ function resolveInstanceAuras(c, warn = console.warn) {
   return [];
 }
 
-// Appended to CREATURE_JOINED_SELECT after ABILITIES_LATERAL. `et` is the
-// entity_types alias there. jsonb `?` = "array contains this string", so a
+// Appended after ABILITIES_LATERAL in BOTH creature SELECTs: CREATURE_JOINED_SELECT
+// (chunk instances) and ENTITY_CATALOG_SELECT (world bosses and minions, via
+// hydrateCreatureRow). `et` is the entity_types alias in both. jsonb `?` = "array contains this string", so a
 // NULL or [] auras column matches nothing and yields '[]'. The dot_* fields
 // ride along now so S4 adds no second loader.
 const AURAS_LATERAL = `

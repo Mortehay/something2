@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { ELEMENTS } from "../abilityForm.js";
 import { ENTITY_ELEMENTS, MAX_HITBOX_PX } from "../bossFields.js";
+import { AURA_ELEMENTS } from "../auraForm.js";
 
 // SOMET-603: the frontend element list is a copy of the backend's. Pin it, so
 // a new element cannot be accepted by one side and rejected by the other.
@@ -18,6 +19,10 @@ describe("element lists stay in step with the backend", () => {
 
   it("the entity editor uses that same single list", () => {
     expect(ENTITY_ELEMENTS).toBe(ELEMENTS);
+  });
+
+  it("the aura editor (SOMET-604) uses that same single list", () => {
+    expect(AURA_ELEMENTS).toBe(ELEMENTS);
   });
 
   it("hitbox ceiling equals MAX_ENTITY_DISPLAY_PX in index.js", () => {

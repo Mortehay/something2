@@ -17,7 +17,7 @@ const {
   applyElementEffect, applyHitStatuses, activeEffectKeys, canAct, charmerOf,
 } = require('./effects');
 const { resolveBehavior, DEFAULT_BEHAVIOR, DEFAULT_ABILITY } = require('../services/creatureBehaviors');
-const { resolveInstanceAuras } = require('../services/auraEffects.js');
+const { resolveInstanceAuras, AURAS_LATERAL } = require('../services/auraEffects.js');
 const { shoveAwayFrom } = require('./knockback');
 
 const DIRS = [
@@ -238,19 +238,25 @@ const ABILITIES_LATERAL = `
 // resolveBehavior read, for callers that spawn an instance with no
 // world_creatures row (WorldBossManager now; S9 dungeon bosses next). Callers
 // append their own WHERE/ORDER BY, against the entity_types alias `et` (the
-// alias S3's AURAS_LATERAL expects). b.aura_* are deliberately NOT selected:
-// S3 drops those columns, and no boss uses a behaviour with an aura. Neither
-// is et.auras: S3 owns aura resolution end to end.
+// alias AURAS_LATERAL expects). b.aura_* no longer exist (SOMET-604 dropped
+// them).
+//
+// SOMET-604: `et.auras AS aura_names, au.aura_defs` + AURAS_LATERAL, the same
+// pair CREATURE_JOINED_SELECT carries, so a boss or minion bound to an aura
+// gets it through hydrateCreatureRow -> addCreatures -> resolveInstanceAuras.
+// Without them every boss aura is inert with the chunk-loader tests green;
+// boss_aura_hydration_db.test.js guards this.
 const ENTITY_CATALOG_SELECT = `SELECT et.id, et.name, et.color, et.hp, et.max_hp, et.defense, et.resistances,
          et.faction, et.gold_min, et.gold_max, et.attack_element, et.vfx, et.prompt,
          et.boss_tier, et.element, et.hitbox_size, et.xp_reward, et.base_damage,
          et.display_width, et.display_height,
+         et.auras AS aura_names, au.aura_defs,
          b.name AS behavior_name, b.aggro_radius, b.leash_radius, b.chase_style, b.preferred_range,
          b.move_speed_mult, b.damage_override,
          b.gold_min AS behavior_gold_min, b.gold_max AS behavior_gold_max,
          ab.abilities
     FROM entity_types et
-    LEFT JOIN creature_behaviors b ON b.id = et.behavior_id${ABILITIES_LATERAL}`;
+    LEFT JOIN creature_behaviors b ON b.id = et.behavior_id${ABILITIES_LATERAL}${AURAS_LATERAL}`;
 
 // Load the creature entity types. Named + exported (rather than inlined in
 // server.js) so a guard test can assert the SELECT names every column the
