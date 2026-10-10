@@ -233,13 +233,13 @@
         "width": 6,
         "height": 4,
         "gate_edge": "N",
-        "spawn_x": 2650,
-        "spawn_y": 2550
+        "spawn_x": 2550,
+        "spawn_y": 2650
       },
       "waypoints": [
         {
-          "x": 2650,
-          "y": 2550,
+          "x": 2550,
+          "y": 2650,
           "name": "Blackfen Refuge Waypoint"
         }
       ]
