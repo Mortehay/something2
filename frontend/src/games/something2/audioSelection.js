@@ -460,12 +460,23 @@ export function createSearchSync(commit, delay = SEARCH_DEBOUNCE_MS) {
 
 // The Variants box's text -> a variants count, or null when it is not an
 // integer 1..MAX_SFX_VARIANTS. The box keeps its raw text (so Backspace then
-// a digit works); this is checked on blur and on queue.
+// a digit works); variantsStatus reads it on every render and on queue.
 export function parseVariants(text) {
   const t = String(text ?? '').trim();
   if (!/^\d+$/.test(t)) return null;
   const n = Number(t);
   return n >= 1 && n <= MAX_SFX_VARIANTS ? n : null;
+}
+
+// The Variants box's text -> { value, error }: the count, or null plus the
+// message the bar shows beside the box (and Queue stays disabled) while the
+// text is not 1..MAX_SFX_VARIANTS. Nothing replaces an invalid text -- a blur
+// that restored the last valid count ran before Queue's click (rework 3).
+export function variantsStatus(text) {
+  const value = parseVariants(text);
+  return value === null
+    ? { value: null, error: `Variants must be a whole number from 1 to ${MAX_SFX_VARIANTS}.` }
+    : { value, error: null };
 }
 
 // `fn` (which returns a promise) wrapped so a call made while an earlier one

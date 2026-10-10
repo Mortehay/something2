@@ -9,6 +9,7 @@ import {
   selectAllMatching, selectionOutsideFilter, queueItems, enqueueSummary, normalizeCause, failedByCause,
   soundText, MAX_JOB_ITEMS, chunkItems, queueInChunks, jobsForKnownSubjects, uploadOnlyCount, slotEntriesFor,
   DEFAULT_SFX_VARIANTS, SEARCH_DEBOUNCE_MS, createSearchSync, singleFlight, MAX_SFX_VARIANTS, parseVariants,
+  variantsStatus,
 } from '../audioSelection.js';
 
 // AudioSlotTable.jsx with comments removed, for the wiring gates below: a
@@ -620,8 +621,7 @@ describe('table wiring (rework 2 gates)', () => {
     const src = tableCode();
     const call = /queueItems\(\s*selected,\s*rowsById,\s*\{([\s\S]*?)\}\s*\)/.exec(src);
     expect(call).not.toBeNull();
-    expect(call[1]).toMatch(/\bvariants\s*:\s*variantsNow\b/);
-    expect(src).toMatch(/const variantsNow = parseVariants\(variantsText\)/);
+    expect(call[1]).toMatch(/\bvariants\s*:\s*variantsNow\.value\b/);
   });
 
   it('every filtersFromParams call passes the registry kinds', () => {
@@ -643,13 +643,85 @@ describe('table wiring (rework 2 gates)', () => {
     for (const args of calls) expect(args).toMatch(/,\s*kindKeys\s*$/);
   });
 
-  it('the Variants input shows its raw text and only restores it on blur', () => {
+  it('the Variants input shows its raw text', () => {
     const src = tableCode();
     const input = /Variants \(sfx\)\s*<input([\s\S]*?)\/>/.exec(src);
     expect(input).not.toBeNull();
     expect(input[1]).toMatch(/value=\{variantsText\}/);
     expect(input[1]).toMatch(/setVariantsText\(e\.target\.value\)/);
-    expect(input[1]).toMatch(/onBlur=\{\(\) => setVariantsText\(String\(variants\)\)\}/);
+  });
+});
+
+describe('Variants: an invalid value is never replaced, and blocks Queue (rework 3)', () => {
+  // Validator, re-validation of 47550eef: a real mouse click on Queue blurs
+  // the Variants box first, and onBlur restored the last valid value before
+  // onClick ran -- so '0' was queued as 4 with no error. The box now keeps
+  // what was typed, says why it is invalid, and Queue is disabled meanwhile.
+  const variantsInput = () => /Variants \(sfx\)\s*<input([\s\S]*?)\/>/.exec(tableCode())[1];
+  const queueButton = () => {
+    const m = /<Button\s*type="button"\s*onClick=\{onQueue\}([\s\S]*?)>/.exec(tableCode());
+    expect(m).not.toBeNull();
+    return m[1];
+  };
+
+  it('variantsStatus: the count and no error for 1..MAX, the error for anything else', () => {
+    expect(variantsStatus('4')).toEqual({ value: 4, error: null });
+    for (const bad of ['0', '', '6', 'x']) {
+      expect(variantsStatus(bad)).toEqual({
+        value: null, error: `Variants must be a whole number from 1 to ${MAX_SFX_VARIANTS}.`,
+      });
+    }
+  });
+
+  it('blur leaves the typed text alone: no onBlur rewrites it', () => {
+    expect(variantsInput()).not.toMatch(/onBlur/);
+    // No second "last valid" count exists for anything to fall back to.
+    expect(tableCode()).not.toMatch(/\bsetVariants\(/);
+  });
+
+  it('the count queued is read from the box text at click time', () => {
+    expect(tableCode()).toMatch(/const variantsNow = variantsStatus\(variantsText\)/);
+  });
+
+  it('onQueue sends nothing while the Variants text is invalid, even if reached', () => {
+    const body = /const onQueue = async \(\) => \{([\s\S]*?)\n {2}\};/.exec(tableCode());
+    expect(body).not.toBeNull();
+    expect(body[1]).toMatch(/^\s*if \(variantsNow\.value === null\) return;/);
+  });
+
+  it('Queue is disabled while the Variants text is invalid', () => {
+    expect(queueButton()).toMatch(/disabled=\{[^}]*\bvariantsNow\.value === null\b[^}]*\}/);
+  });
+
+  it('the box shows why it is invalid, next to the box, while it is invalid', () => {
+    const src = tableCode();
+    expect(src).toMatch(/\{variantsNow\.error && <FieldErr role="alert">\{variantsNow\.error\}<\/FieldErr>\}/);
+    expect(variantsInput()).toMatch(/aria-invalid=\{variantsNow\.value === null\}/);
+  });
+});
+
+describe('Variants box: no native spinner, readable width (rework 3)', () => {
+  // A type="number" box gets Chrome's spin arrows over its centre at 40px
+  // (4rem under the app's 62.5% root), so a click to focus it changed the
+  // count. A text box with a numeric keypad has no arrows.
+  it('is a text box with a numeric keypad, not type="number"', () => {
+    const input = /Variants \(sfx\)\s*<input([\s\S]*?)\/>/.exec(tableCode())[1];
+    expect(input).not.toMatch(/type="number"/);
+    expect(input).toMatch(/inputMode="numeric"/);
+  });
+
+  it('is at least 56px wide under the 10px root', () => {
+    const m = /const VariantsField = styled\(Field\)`[^`]*\bwidth:\s*([\d.]+)rem/.exec(tableCode());
+    expect(m).not.toBeNull();
+    expect(Number(m[1]) * 10).toBeGreaterThanOrEqual(56);
+  });
+});
+
+describe('Search: unmount cancels a pending commit (rework 3)', () => {
+  // A pending 250 ms commit firing after the table unmounts would rewrite
+  // the next route's URL. Removing this effect used to leave every test green.
+  it('the table cancels the search sync in an unmount cleanup', () => {
+    expect(tableCode()).toMatch(/useEffect\(\(\) => \(\) => searchSync\.cancel\(\), \[searchSync\]\);/);
   });
 });
 

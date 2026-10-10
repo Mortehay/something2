@@ -22,7 +22,7 @@ import {
   PAGE_SIZE, pageCount, clampPage, toggle, selectPage, deselectPage, isPageFullySelected,
   selectAllMatching, selectionOutsideFilter, queueItems, enqueueSummary, failedByCause, soundText,
   jobsForKnownSubjects, uploadOnlyCount, slotId,
-  DEFAULT_SFX_VARIANTS, MAX_SFX_VARIANTS, createSearchSync, singleFlight, parseVariants,
+  DEFAULT_SFX_VARIANTS, createSearchSync, singleFlight, variantsStatus,
 } from './audioSelection.js';
 import SubjectSounds from './SubjectSounds.jsx';
 
@@ -51,9 +51,12 @@ const Button = styled.button`
 `;
 const Secondary = styled(Button)`background: var(--s2-btn-grey);`;
 // Field's 140px min-width is for selects and text; a 1-5 number needs less.
-const VariantsField = styled(Field)`input { min-width: 0; width: 4rem; }`;
+// The root font-size is 62.5%, so 6rem is 60px (4rem rendered 40px).
+const VariantsField = styled(Field)`input { min-width: 0; width: 6rem; }`;
 const Hint = styled.p`color: var(--s2-text-muted); font-size: 0.85rem; margin: 0.25rem 0;`;
 const Err = styled.p`color: var(--s2-danger); font-size: 0.85rem; margin: 0.25rem 0;`;
+// An error inside a <label>, which may hold phrasing content only.
+const FieldErr = styled.span`color: var(--s2-danger); font-size: 0.8rem; max-width: 12rem;`;
 const LinkButton = styled.button`
   background: none; border: none; color: var(--s2-accent); cursor: pointer; padding: 0;
   font: inherit; text-decoration: underline;
@@ -179,10 +182,11 @@ function AudioSlotTable({
   const [subject, setSubject] = useState(null);
   const [style, setStyle] = useState('');
   const [engine, setEngine] = useState('realistic');
-  // The Variants box keeps its raw text so it can be cleared and retyped;
-  // `variants` is the last valid count, which a blur restores the box to.
+  // The Variants box keeps exactly what was typed. An invalid text is never
+  // swapped for a valid one (a blur that did so ran before Queue's click and
+  // queued 0 as 4, rework 3): it shows an error and disables Queue instead.
   const [variantsText, setVariantsText] = useState(String(DEFAULT_SFX_VARIANTS));
-  const [variants, setVariants] = useState(DEFAULT_SFX_VARIANTS);
+  const variantsNow = variantsStatus(variantsText);
   // Plan 2026-10-03: off by default -- a forced prompt replaces even a
   // hand-written one (the old version stays in the slot's history).
   const [forcePrompt, setForcePrompt] = useState(false);
@@ -236,14 +240,9 @@ function AudioSlotTable({
   );
 
   const onQueue = async () => {
-    const variantsNow = parseVariants(variantsText);
-    if (variantsNow === null) {
-      setNotice(null);
-      setFailure(`Variants must be a whole number from 1 to ${MAX_SFX_VARIANTS}.`);
-      return;
-    }
+    if (variantsNow.value === null) return;
     const { items, skipped } = queueItems(selected, rowsById, {
-      style, engine, forcePrompt, variants: variantsNow,
+      style, engine, forcePrompt, variants: variantsNow.value,
     });
     setFailure(null);
     if (items.length === 0) {
@@ -329,17 +328,12 @@ function AudioSlotTable({
         <VariantsField title="How many takes each queued sfx slot generates">
           Variants (sfx)
           <input
-            type="number"
-            min={1}
-            max={MAX_SFX_VARIANTS}
+            inputMode="numeric"
             value={variantsText}
-            onChange={(e) => {
-              setVariantsText(e.target.value);
-              const n = parseVariants(e.target.value);
-              if (n !== null) setVariants(n);
-            }}
-            onBlur={() => setVariantsText(String(variants))}
+            aria-invalid={variantsNow.value === null}
+            onChange={(e) => setVariantsText(e.target.value)}
           />
+          {variantsNow.error && <FieldErr role="alert">{variantsNow.error}</FieldErr>}
         </VariantsField>
         <CheckLabel title="Write a new prompt for every queued slot, even one that already has a prompt (hand-written included). The old prompt stays in the slot's history.">
           <input
@@ -353,7 +347,7 @@ function AudioSlotTable({
         <Button
           type="button"
           onClick={onQueue}
-          disabled={selected.size === 0 || enqueue.isPending || !canGenerate}
+          disabled={selected.size === 0 || enqueue.isPending || !canGenerate || variantsNow.value === null}
           title={canGenerate ? undefined : NO_PROVIDER_TITLE}
         >
           {enqueue.isPending ? 'Queuing…' : `Queue ${selected.size} selected`}
