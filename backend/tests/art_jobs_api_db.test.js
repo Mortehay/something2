@@ -100,18 +100,35 @@ lockedTest('GET /api/art-subjects pages the catalogue 100 at a time', async (t) 
 });
 
 lockedTest('GET /api/art-subjects exposes every character appearance as missing art',
-  async (t) => {
-    const res = await request(app)
-      .get('/api/art-subjects/character_appearance?missing_only=true&per_page=500')
-      .set(...AUTH);
-    assert.equal(res.status, 200);
-    assert.equal(res.body.total, 30);
-    assert.equal(res.body.subjects.length, 30);
-    assert.ok(res.body.subjects.every((s) => (
-      s.kind === 'character_appearance' && !s.has_art && s.takes_description
-    )));
-    assert.ok(res.body.subjects.some((s) => s.key === 'Warrior:1'));
-    assert.ok(res.body.subjects.some((s) => s.key === 'Druid:5'));
+  async (t, pool) => {
+    // The precondition is CREATED, not assumed: on a database where the slots
+    // already have art (any real one) "missing" is empty and this read 0 vs 30.
+    // Cleared and restored INSIDE the lock -- the peers that write appearance
+    // art (catalog_subjects_db, art_dispatcher_catalog_db) hold the same one.
+    const { rows: original } = await pool.query(
+      `SELECT entity_type_id, variant, image, updated_at FROM character_appearances`);
+    await pool.query('UPDATE character_appearances SET image = NULL');
+    try {
+      const res = await request(app)
+        .get('/api/art-subjects/character_appearance?missing_only=true&per_page=500')
+        .set(...AUTH);
+      assert.equal(res.status, 200);
+      assert.equal(res.body.total, 30);
+      assert.equal(res.body.subjects.length, 30);
+      assert.ok(res.body.subjects.every((s) => (
+        s.kind === 'character_appearance' && !s.has_art && s.takes_description
+      )));
+      assert.ok(res.body.subjects.some((s) => s.key === 'Warrior:1'));
+      assert.ok(res.body.subjects.some((s) => s.key === 'Druid:5'));
+    } finally {
+      for (const r of original) {
+        await pool.query(
+          `UPDATE character_appearances SET image = $1, updated_at = $2
+            WHERE entity_type_id = $3 AND variant = $4`,
+          [r.image, r.updated_at, r.entity_type_id, r.variant],
+        ).catch(() => {});
+      }
+    }
   });
 
 // The response carries `row` internally -- the whole catalogue row. Shipping it
@@ -193,13 +210,25 @@ lockedTest('queueing rejects an empty selection and an unknown kind', async (t, 
     .send({ kind: 'nonsense', keys: ['x'], provider_id: providerId });
   assert.equal(bad.status, 400);
 
-  const noProvider = await request(app).post('/api/art-jobs').set(...AUTH)
-    .send({ kind: 'skill', keys: ['x'] });
-  assert.equal(noProvider.status, 400,
-    'the connector backend with no provider AND no active one would queue work nothing can run');
-  assert.match(noProvider.body.error, /no active provider/,
-    'the message must say WHICH thing is missing -- "provider_id is required" sends '
-    + 'the admin looking for a field they deliberately left on its default');
+  // "No active provider" is CREATED here, not assumed: a real database has
+  // one, the route then (correctly) falls back to it, and this read 201.
+  // Image modality only, restored in a finally -- see the next test for why
+  // not in a t.after.
+  const prev = await pool.query("SELECT id FROM ai_providers WHERE is_active AND modality = 'image'");
+  await pool.query("UPDATE ai_providers SET is_active = false WHERE is_active AND modality = 'image'");
+  try {
+    const noProvider = await request(app).post('/api/art-jobs').set(...AUTH)
+      .send({ kind: 'skill', keys: ['x'] });
+    assert.equal(noProvider.status, 400,
+      'the connector backend with no provider AND no active one would queue work nothing can run');
+    assert.match(noProvider.body.error, /no active provider/,
+      'the message must say WHICH thing is missing -- "provider_id is required" sends '
+      + 'the admin looking for a field they deliberately left on its default');
+  } finally {
+    for (const { id } of prev.rows) {
+      await pool.query('UPDATE ai_providers SET is_active = true WHERE id = $1', [id]).catch(() => {});
+    }
+  }
 });
 
 // Omitting provider_id means "the active provider", which is what the console's
