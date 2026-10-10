@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import styled from 'styled-components';
 import { useWorlds } from './useWorlds.js';
+import { BOSS_STAGE_ACTIONS } from './worldBossDebugActions.js';
 
 const FloatButton = styled.button`
   position: absolute;
@@ -581,6 +582,17 @@ export default function WorldBossTestPanel({ gameRef }) {
                   >
                     💥 Deal 3,000 Damage
                   </ActionBtn>
+                  {BOSS_STAGE_ACTIONS.map((a) => (
+                    <ActionBtn
+                      key={a.action}
+                      $bg="rgba(255, 99, 72, 0.15)"
+                      $border="rgba(255, 99, 72, 0.45)"
+                      $color="#ff6348"
+                      onClick={() => sendAction(a.action)}
+                    >
+                      {a.label}
+                    </ActionBtn>
+                  ))}
                   <ActionBtn
                     $bg="rgba(235, 77, 75, 0.2)"
                     $border="rgba(235, 77, 75, 0.5)"
