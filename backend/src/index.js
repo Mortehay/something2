@@ -796,6 +796,13 @@ function entityTypeFieldError(body) {
           || (Array.isArray(body.spawn_tiles) && body.spawn_tiles.length > 0))) {
     return 'a point-kind type cannot be a creature or have spawn tiles';
   }
+  // SOMET-604: entity_types.auras is a list of aura_effects NAMES (no FK).
+  // undefined = not sent (PUT leaves it alone), null = never authored, [] = none.
+  if (body.auras !== undefined && body.auras !== null) {
+    if (!Array.isArray(body.auras)) return 'auras must be an array of aura names or null';
+    if (body.auras.some((n) => typeof n !== 'string' || n.trim() === '')) return 'each aura must be a non-empty name';
+    if (new Set(body.auras).size !== body.auras.length) return 'auras must not repeat a name';
+  }
   return null;
 }
 
@@ -809,6 +816,16 @@ app.get('/api/entity-types', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch entity types' });
   }
 });
+
+// The dropdown is the first defence; this is the second, for scripts and stale
+// tabs. Runs on the caller's db handle so PUT checks inside its transaction.
+async function unknownAuraError(db, auras) {
+  if (!Array.isArray(auras) || auras.length === 0) return null;
+  const r = await db.query('SELECT name FROM aura_effects WHERE name = ANY($1::text[])', [auras]);
+  const known = new Set(r.rows.map((x) => x.name));
+  const missing = auras.find((n) => !known.has(n));
+  return missing ? `unknown aura "${missing}"` : null;
+}
 
 app.post('/api/entity-types', adminGuard, async (req, res) => {
   try {
@@ -846,6 +863,8 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
     // providerPinError above.
     const pinModalityErr = await providerPinModalityError(pool, pin);
     if (pinModalityErr) return res.status(400).json({ error: pinModalityErr });
+    const auraErr = await unknownAuraError(pool, req.body.auras);
+    if (auraErr) return res.status(400).json({ error: auraErr });
 
     const result = await pool.query(
       `INSERT INTO entity_types (
@@ -854,15 +873,16 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
         hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
         display_width, display_height, render_mode, is_creature, prompt, place_order,
         behavior_id, attack_element, ai_provider_mode, ai_provider_id, point_kind,
-        boss_tier, element, hitbox_size, xp_reward, base_damage
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34) RETURNING *`,
+        boss_tier, element, hitbox_size, xp_reward, base_damage, auras
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35::jsonb) RETURNING *`,
       [
         name, color, walkable ?? false, JSON.stringify(spawn_tiles || []), chance ?? 0.1,
         strength ?? 0, dexterity ?? 0, constitution ?? 0, intelligence ?? 0, wisdom ?? 0, charisma ?? 0,
         hp ?? 0, max_hp ?? 0, hp_regen_rate ?? 0, mana ?? 0, max_mana ?? 0, mana_regen_rate ?? 0, image,
         display_width, display_height, render_mode ?? 'rect', is_creature ?? false, prompt ?? '', Number(place_order) || 0,
         behavior_id ?? null, attack_element || 'physical', pin.mode, pin.id, point_kind ?? null,
-        boss_tier ?? null, element ?? null, hitbox_size ?? null, xp_reward ?? null, base_damage ?? null
+        boss_tier ?? null, element ?? null, hitbox_size ?? null, xp_reward ?? null, base_damage ?? null,
+        req.body.auras == null ? null : JSON.stringify(req.body.auras)
       ]
     );
     res.status(201).json(result.rows[0]);
@@ -920,6 +940,9 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
   // legitimately sends point_kind: null, which a bare `?? null` COALESCE
   // would silently fail to apply.
   const pointKindProvided = 'point_kind' in req.body;
+  // SOMET-604: same present-in-body rule -- omitted leaves auras alone, null
+  // clears to NULL (never authored), [] stores an explicit none.
+  const aurasProvided = 'auras' in req.body;
 
   // SOMET-228: worlds.allowed_creature_types, world_creatures.type and
   // biomes.flora_types/creature_types reference entity_types by NAME (no
@@ -946,6 +969,11 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
     if (pinModalityErr) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: pinModalityErr });
+    }
+    const auraErr = await unknownAuraError(client, req.body.auras);
+    if (auraErr) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: auraErr });
     }
 
     let renamedReferences = null;
@@ -1055,8 +1083,9 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
         hitbox_size = CASE WHEN $37::boolean THEN $38::integer ELSE entity_types.hitbox_size END,
         xp_reward = CASE WHEN $39::boolean THEN $40::integer ELSE entity_types.xp_reward END,
         base_damage = CASE WHEN $41::boolean THEN $42::real ELSE entity_types.base_damage END,
+        auras = CASE WHEN $43::boolean THEN $44::jsonb ELSE entity_types.auras END,
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $43 RETURNING *`,
+      WHERE id = $45 RETURNING *`,
       [
         name, color, walkable, JSON.stringify(spawn_tiles), chance,
         strength, dexterity, constitution, intelligence, wisdom, charisma,
@@ -1093,6 +1122,8 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
         'hitbox_size' in req.body, hitbox_size ?? null,
         'xp_reward' in req.body, xp_reward ?? null,
         'base_damage' in req.body, base_damage ?? null,
+        // SOMET-604: auras last before id, same present-in-body rule.
+        aurasProvided, req.body.auras == null ? null : JSON.stringify(req.body.auras),
         id
       ]
     );

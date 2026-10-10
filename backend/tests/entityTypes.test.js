@@ -743,3 +743,15 @@ test('PUT /api/entity-types/:id writes sent boss fields and leaves absent ones a
   }
   assert.equal(params[params.length - 1], '5', 'id stays the last param');
 });
+
+test('PUT /api/entity-types/:id writes auras when sent, keeping id last', async () => {
+  let captured;
+  __setPool(putMock('Wolf', (s, p) => {
+    if (/FROM aura_effects/.test(s)) return { rows: [{ name: 'pack_leader' }] };
+    captured = { s, p }; return { rows: [{ id: 7 }] };
+  }));
+  const r = await request(app).put('/api/entity-types/7').set(...AUTH).send({ name: 'Wolf', color: '#000000', auras: ['pack_leader'] });
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(paramFor(captured.s, captured.p, 'auras'), '["pack_leader"]');
+  assert.strictEqual(captured.p[captured.p.length - 1], '7');
+});
