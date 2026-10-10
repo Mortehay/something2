@@ -26,6 +26,7 @@ import { SECTOR_HUES, nodeRadius, grantLine } from './src/js/systems/passiveTree
 import {
   indexArt, artFor, artCoverage, distinctLabels, onlyMissing,
   treeBounds, panViewBox, wheelZoom, artConsoleLink, dragStart, dragMove, dragEnd, dragClick,
+  endPressOnRelease,
 } from './skillTreeView.js';
 import AdminLoading from './AdminLoading.jsx';
 
@@ -201,20 +202,10 @@ function TreeGraph({ nodes, edges, art, dimLabels, onHover, onPick }) {
   };
   const onPointerUp = () => { drag.current = dragEnd(drag.current); };
 
-  // A press released OUTSIDE the svg before it became a drag (so before the
-  // capture) never reaches onPointerUp above. The window still hears it, and
-  // the press ends there; dragEnd is idempotent, so a release on the svg that
-  // arrives both ways is harmless. dragMove's buttons===0 check covers a
+  // A press released OUTSIDE the svg never reaches onPointerUp above; the
+  // window ends it (endPressOnRelease). dragMove's buttons===0 check covers a
   // release the window missed too (e.g. outside the browser window).
-  useEffect(() => {
-    const end = () => { drag.current = dragEnd(drag.current); };
-    window.addEventListener('pointerup', end);
-    window.addEventListener('pointercancel', end);
-    return () => {
-      window.removeEventListener('pointerup', end);
-      window.removeEventListener('pointercancel', end);
-    };
-  }, []);
+  useEffect(() => endPressOnRelease(window, drag), []);
 
   const pick = (node) => {
     const { state, allow } = dragClick(drag.current);

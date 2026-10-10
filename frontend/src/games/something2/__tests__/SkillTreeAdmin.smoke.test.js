@@ -109,8 +109,12 @@ describe('SkillTreeAdmin', () => {
   it('ends a press whose pointerup happened outside the svg', () => {
     const move = admin.match(/const onPointerMove = \(e\) => \{([\s\S]*?)\n {2}\};/)[1];
     expect(move).toMatch(/dragMove\(drag\.current,\s*e\.clientX,\s*e\.clientY,\s*e\.buttons\)/);
-    expect(admin).toMatch(/window\.addEventListener\('pointerup',/);
-    expect(admin).toMatch(/window\.removeEventListener\('pointerup',/);
+    // The listening itself (pointerup AND pointercancel, ending the press,
+    // removed on unmount) is endPressOnRelease's, unit-tested against an
+    // EventTarget. Here: the tree hands it the window and its own drag ref,
+    // and returns its cleanup from the effect.
+    expect(admin).toMatch(/useEffect\(\(\) => endPressOnRelease\(window, drag\), \[\]\);/);
+    expect(admin).not.toMatch(/window\.addEventListener\('pointer/);
   });
 
   it('zooms inside the setBox updater, from the box being zoomed', () => {
