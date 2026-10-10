@@ -383,6 +383,11 @@ describe('per-subject slots (SOMET-605)', () => {
     expect(rows.map((r) => r.slot)).toEqual(['music', 'ambience']);
   });
 
+  it('audioSlotRows: a key absent from subjectSlots yields zero rows', () => {
+    const g = { ...creatureGroup, subjects: ['Ignis', 'Ghost'] };
+    expect(audioSlotRows([g]).filter((r) => r.key === 'Ghost')).toEqual([]);
+  });
+
   it('slotEntriesFor: a subject absent from subjectSlots gets nothing', () => {
     expect(slotEntriesFor(creatureGroup, 'Ghost')).toEqual([]);
   });

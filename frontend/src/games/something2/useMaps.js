@@ -143,6 +143,8 @@ export function useCreateEntityType() {
       queryClient.invalidateQueries({ queryKey: ['mapConfig'] });
       // Aura Used-by lists are computed from entity bindings (SOMET-604).
       queryClient.invalidateQueries({ queryKey: ['auraEffects'] });
+      // SOMET-605: the audio subject list follows the entity catalog.
+      queryClient.invalidateQueries({ queryKey: ['audio-subjects'] });
       toast.success('Entity type created!');
     },
     onError: (err) => toast.error(`Creation failed: ${err.message}`)
@@ -194,6 +196,8 @@ export function useDeleteEntityType() {
       queryClient.invalidateQueries({ queryKey: ['mapConfig'] });
       // Aura Used-by lists are computed from entity bindings (SOMET-604).
       queryClient.invalidateQueries({ queryKey: ['auraEffects'] });
+      // SOMET-605: the audio subject list follows the entity catalog.
+      queryClient.invalidateQueries({ queryKey: ['audio-subjects'] });
       toast.success('Entity type deleted!');
     },
     onError: (err) => toast.error(`Deletion failed: ${err.message}`)
