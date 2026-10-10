@@ -206,3 +206,19 @@ export function artConsoleLink(kind, key) {
   const qs = new URLSearchParams({ kind, art: 'all', key });
   return `/game/art?${qs.toString()}`;
 }
+
+// A fast double-click fires two click handlers before react-router's location
+// has updated between them (SOMET-571 rework 4), so navigating straight off
+// each click pushed two history entries for the SAME destination -- one Back
+// press then landed back on the page it just left.
+//
+// Gated on TIME, not on "have we ever gone to this link": a real second visit
+// -- go back, then click the same node again on purpose -- is a deliberate
+// act well outside a double click's span, and must still navigate. `last` is
+// `{ link, at }` for the most recent navigation, or null before the first.
+export const DOUBLE_CLICK_GUARD_MS = 500;
+
+export function shouldNavigate(last, link, now) {
+  if (!last || last.link !== link) return true;
+  return now - last.at >= DOUBLE_CLICK_GUARD_MS;
+}

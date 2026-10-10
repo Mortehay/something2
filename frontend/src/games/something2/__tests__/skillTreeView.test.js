@@ -4,7 +4,7 @@ import { SKILLS_BY_CLASS } from '../src/js/core/skillsData.js';
 import {
   indexArt, artFor, artCoverage, distinctLabels, treeBounds, zoomViewBox, panViewBox,
   artConsoleLink, clientToWorld, wheelZoom, onlyMissing, dragStart, dragMove, dragEnd, dragClick,
-  endPressOnRelease,
+  endPressOnRelease, shouldNavigate,
 } from '../skillTreeView.js';
 
 // SOMET-571. The Skill Tree tab's rules, testable without an SVG.
@@ -391,5 +391,34 @@ describe('artConsoleLink lands on exactly one subject', () => {
       const rows = land(subjects, artConsoleLink('skill', s.id));
       expect(rows.map((r) => r.key), s.id).toEqual([s.id]);
     }
+  });
+});
+
+// SOMET-571 rework 4. A fast double-click fires two click handlers before
+// react-router's location has updated between them, so openLabel/openSkill
+// each called navigate() and pushed two history entries for the SAME
+// destination -- one Back press then landed back on the page it just left.
+// Gated on TIME rather than "have we ever gone here": a deliberate second
+// visit (go back, click the same node again) happens well outside a double
+// click's span and must still navigate.
+describe('shouldNavigate', () => {
+  it('blocks an immediate repeat of the same link', () => {
+    const last = { link: '/game/art?key=Mage', at: 1000 };
+    expect(shouldNavigate(last, '/game/art?key=Mage', 1000)).toBe(false);
+    expect(shouldNavigate(last, '/game/art?key=Mage', 1300)).toBe(false);
+  });
+
+  it('allows a different link immediately', () => {
+    const last = { link: '/game/art?key=Mage', at: 1000 };
+    expect(shouldNavigate(last, '/game/art?key=Focus', 1000)).toBe(true);
+  });
+
+  it('allows the same link again once the double-click window has passed', () => {
+    const last = { link: '/game/art?key=Mage', at: 1000 };
+    expect(shouldNavigate(last, '/game/art?key=Mage', 1501)).toBe(true);
+  });
+
+  it('allows the first navigation ever (no last click recorded)', () => {
+    expect(shouldNavigate(null, '/game/art?key=Mage', 1000)).toBe(true);
   });
 });

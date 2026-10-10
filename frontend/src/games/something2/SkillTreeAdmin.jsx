@@ -26,7 +26,7 @@ import { SECTOR_HUES, nodeRadius, grantLine } from './src/js/systems/passiveTree
 import {
   indexArt, artFor, artCoverage, distinctLabels, onlyMissing,
   treeBounds, panViewBox, wheelZoom, artConsoleLink, dragStart, dragMove, dragEnd, dragClick,
-  endPressOnRelease,
+  endPressOnRelease, shouldNavigate,
 } from './skillTreeView.js';
 import AdminLoading from './AdminLoading.jsx';
 
@@ -373,8 +373,18 @@ export default function SkillTreeAdmin() {
     ? onlyMissing(art, 'skill', classSkills, (s) => s.id)
     : classSkills;
 
-  const openLabel = (node) => { if (node.label) navigate(artConsoleLink('passive_label', node.label)); };
-  const openSkill = (skill) => navigate(artConsoleLink('skill', skill.id));
+  // SOMET-571 rework 4: a fast double-click fires two click handlers before
+  // the route has changed between them, so each would push the router again
+  // and leave a second history entry for the page already being opened.
+  const lastNav = useRef(null);
+  const goToArtConsole = (link) => {
+    const now = Date.now();
+    if (!shouldNavigate(lastNav.current, link, now)) return;
+    lastNav.current = { link, at: now };
+    navigate(link);
+  };
+  const openLabel = (node) => { if (node.label) goToArtConsole(artConsoleLink('passive_label', node.label)); };
+  const openSkill = (skill) => goToArtConsole(artConsoleLink('skill', skill.id));
 
   return (
     <AdminContainer>

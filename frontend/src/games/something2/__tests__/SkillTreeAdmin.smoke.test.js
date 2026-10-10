@@ -158,6 +158,19 @@ describe('SkillTreeAdmin', () => {
     expect(admin).not.toMatch(/window\.addEventListener\('pointer/);
   });
 
+  // SOMET-571 rework 4: a fast double-click fired two click handlers before
+  // the route changed between them, so openLabel/openSkill each called
+  // navigate() and pushed a second history entry for the page already being
+  // opened -- one Back press then landed back on the page it just left.
+  it('gates every navigation to the Art console through shouldNavigate, not navigate() directly', () => {
+    expect(admin).toMatch(/if\s*\(!shouldNavigate\(lastNav\.current, link, now\)\)\s*return;/);
+    expect(admin).toMatch(/lastNav\.current = \{ link, at: now \};/);
+    expect(admin).toMatch(/const openLabel = \(node\) => \{ if \(node\.label\) goToArtConsole\(/);
+    expect(admin).toMatch(/const openSkill = \(skill\) => goToArtConsole\(/);
+    // navigate() itself is called from exactly one place: inside the guard.
+    expect(admin.match(/\bnavigate\(/g)).toHaveLength(2); // the guarded call, plus the unrelated "missing" button
+  });
+
   it('zooms inside the setBox updater, from the box being zoomed', () => {
     // A focus computed from the last-rendered box drifted under a wheel burst
     // (SOMET-571 validation); the updater must chain off its own argument.
