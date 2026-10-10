@@ -3,7 +3,7 @@ import { applyFilters, filtersFromParams } from '../artSelection.js';
 import { SKILLS_BY_CLASS } from '../src/js/core/skillsData.js';
 import {
   indexArt, artFor, artCoverage, distinctLabels, treeBounds, zoomViewBox, panViewBox,
-  artConsoleLink, clientToWorld, onlyMissing, dragStart, dragMove, dragEnd, dragClick,
+  artConsoleLink, clientToWorld, wheelZoom, onlyMissing, dragStart, dragMove, dragEnd, dragClick,
 } from '../skillTreeView.js';
 
 // SOMET-571. The Skill Tree tab's rules, testable without an SVG.
@@ -146,6 +146,28 @@ describe('clientToWorld', () => {
   });
 });
 
+describe('wheelZoom', () => {
+  const rect = { left: 100, top: 50, width: 1000, height: 500 };
+  const bounds = { x: 0, y: 0, w: 200, h: 200 };
+
+  it('starts from the tree bounds when the user has not zoomed yet', () => {
+    expect(wheelZoom(null, bounds, rect, 600, 300, 2)).toEqual(zoomViewBox(bounds, 2, 100, 100));
+  });
+
+  // Each step chained off the previous RESULT, exactly as setBox's updater
+  // feeds it. A focus taken from a stale box (the bounds, or the box from
+  // before the burst) drifts.
+  it('keeps the point under the cursor fixed over a burst of chained steps', () => {
+    const cx = 333; const cy = 177;
+    const start = clientToWorld(bounds, rect, cx, cy);
+    let b = null;
+    for (let i = 0; i < 12; i += 1) b = wheelZoom(b, bounds, rect, cx, cy, 1.2);
+    const end = clientToWorld(b, rect, cx, cy);
+    expect(end.x).toBeCloseTo(start.x, 9);
+    expect(end.y).toBeCloseTo(start.y, 9);
+  });
+});
+
 describe('panViewBox', () => {
   it('moves the box opposite to the drag, in world units', () => {
     // Dragging right by 50 screen px at 2 world-units-per-px moves the box
@@ -220,6 +242,45 @@ describe('drag gate', () => {
     }
     expect(captures.filter(Boolean).length).toBe(1);
     expect(dragClick(dragEnd(s)).allow).toBe(false);
+  });
+
+  // SOMET-571 re-validation. Capture is taken only once a press becomes a drag,
+  // so a press that leaves the svg before the threshold (or jumps straight out
+  // of it) is released outside, the svg never sees pointerup, and the press
+  // stayed `pressed`. Hovering back over the tree with NO button held then
+  // panned it (viewBox x -925 -> -459). A move whose `buttons` is 0 is proof
+  // the button is up: it ends the press and pans nothing.
+  it('a move with no button held ends a press whose release was missed', () => {
+    let s = dragStart(100, 100);
+    let r = dragMove(s, 101, 100, 1); // still held, sub-threshold
+    expect(r.state.pressed).toBe(true);
+    r = dragMove(r.state, 40, 60, 0); // released outside, hovering back
+    expect([r.dx, r.dy]).toEqual([0, 0]);
+    expect(r.capture).toBe(false);
+    expect(r.state.pressed).toBe(false);
+    // ...and stays ended: later button-less moves pan nothing either.
+    r = dragMove(r.state, 10, 10, 0);
+    expect([r.dx, r.dy]).toEqual([0, 0]);
+    r = dragMove(r.state, 300, 10, 0);
+    expect([r.dx, r.dy]).toEqual([0, 0]);
+  });
+
+  it('a missed release after a real drag ends it too, and pans nothing more', () => {
+    // The press had become a drag before it left; its release was missed. The
+    // button-less move ends it without capturing, and the next press starts fresh.
+    let r = dragMove(dragStart(0, 0), 20, 0, 1);
+    expect(r.capture).toBe(true);
+    r = dragMove(r.state, 25, 0, 0);
+    expect(r.state.pressed).toBe(false);
+    expect([r.dx, r.dy]).toEqual([0, 0]);
+    const fresh = dragStart(5, 5);
+    expect(dragClick(dragEnd(fresh)).allow).toBe(true);
+  });
+
+  it('a held button keeps panning (buttons !== 0)', () => {
+    const r = dragMove(dragStart(0, 0), 20, 5, 1);
+    expect([r.dx, r.dy]).toEqual([20, 5]);
+    expect(r.state.pressed).toBe(true);
   });
 
   it('ignores moves when no press is in progress', () => {

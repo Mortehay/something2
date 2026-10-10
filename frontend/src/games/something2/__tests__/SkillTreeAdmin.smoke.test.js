@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import SkillTreeAdmin from '../SkillTreeAdmin.jsx';
+import { SECTOR_HUES } from '../src/js/systems/passiveTreePanel.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const read = (rel) => fs.readFileSync(path.join(here, rel), 'utf8');
@@ -35,7 +36,7 @@ describe('SkillTreeAdmin', () => {
   });
 
   it('decides art lookup, coverage and links in skillTreeView.js, not inline', () => {
-    for (const fn of ['indexArt', 'artFor', 'artCoverage', 'distinctLabels', 'treeBounds', 'zoomViewBox', 'panViewBox', 'artConsoleLink', 'onlyMissing', 'dragStart', 'dragMove', 'dragEnd', 'dragClick']) {
+    for (const fn of ['indexArt', 'artFor', 'artCoverage', 'distinctLabels', 'treeBounds', 'wheelZoom', 'panViewBox', 'artConsoleLink', 'onlyMissing', 'dragStart', 'dragMove', 'dragEnd', 'dragClick']) {
       expect(admin, `${fn} must be imported from skillTreeView.js`)
         .toMatch(new RegExp(`import\\s*\\{[^}]*\\b${fn}\\b[^}]*\\}\\s*from\\s*'\\./skillTreeView\\.js'`));
       expect(admin, `${fn} must actually be called`).toMatch(new RegExp(`\\b${fn}\\(`));
@@ -65,6 +66,15 @@ describe('SkillTreeAdmin', () => {
     expect(console_).toMatch(/filtersFromParams\(/);
   });
 
+  it('typing in the console search box drops the deep link\'s exact match', () => {
+    // A key= link seeds the box with the key and matches it exactly; once the
+    // admin edits the box it is a substring search again ('Mag' -> 8 rows).
+    const input = console_.match(/<input value=\{search\} onChange=\{\(e\) => \{([^}]*)\}/);
+    expect(input, 'search input').not.toBeNull();
+    expect(input[1]).toMatch(/setSearch\(e\.target\.value\)/);
+    expect(input[1]).toMatch(/setExact\(false\)/);
+  });
+
   it('passes the deep link\'s exact-key flag to every applyFilters call', () => {
     // filtersFromParams returns `exact` for a key= link; a call site that
     // drops it falls back to the substring search (q=Mage -> 8 rows).
@@ -92,9 +102,44 @@ describe('SkillTreeAdmin', () => {
     expect(admin.match(/setPointerCapture\(/g)).toHaveLength(1);
   });
 
+  // SOMET-571 re-validation: a press released outside the svg (before the
+  // drag threshold, so before capture) never reached onPointerUp and stayed
+  // pressed; hovering back with no button held panned the tree. The move
+  // handler must hand dragMove the button state, and a release ANYWHERE must
+  // end the press.
+  it('ends a press whose pointerup happened outside the svg', () => {
+    const move = admin.match(/const onPointerMove = \(e\) => \{([\s\S]*?)\n {2}\};/)[1];
+    expect(move).toMatch(/dragMove\(drag\.current,\s*e\.clientX,\s*e\.clientY,\s*e\.buttons\)/);
+    expect(admin).toMatch(/window\.addEventListener\('pointerup',/);
+    expect(admin).toMatch(/window\.removeEventListener\('pointerup',/);
+  });
+
+  it('zooms inside the setBox updater, from the box being zoomed', () => {
+    // A focus computed from the last-rendered box drifted under a wheel burst
+    // (SOMET-571 validation); the updater must chain off its own argument.
+    expect(admin).toMatch(/setBox\(\(b\) => wheelZoom\(b, bounds, rect, clientX, clientY, factor\)\)/);
+  });
+
   it('says so when missing-only has nothing to show, instead of dimming every node', () => {
     // Validation: with nothing missing, missing-only dimmed all 1852 nodes to
     // 0.15 with no message, which reads as a broken tree.
-    expect(admin).toMatch(/treeMissingOnly\s*&&\s*labelCoverage\.missing\s*===\s*0/);
+    expect(admin).toMatch(/const treeNothingMissing = treeMissingOnly\s*&&\s*labelCoverage\.missing\s*===\s*0;/);
+    // The message is actually rendered under that condition...
+    expect(admin).toMatch(/\{treeNothingMissing\s*&&[^}]*<Hint>Every passive label has art/);
+    // ...and the tree is NOT dimmed then.
+    expect(admin).toMatch(/dimLabels=\{treeMissingOnly\s*&&\s*!treeNothingMissing\s*\?\s*missingLabels\s*:\s*null\}/);
+  });
+
+  // Validation: at whole-tree zoom a world-unit stroke is sub-pixel, so the
+  // missing-art marker is drawn in screen pixels. And it must not share a
+  // colour with a sector: amber was charisma's hue, so in the Druid sector a
+  // missing ring was told apart only by thickness.
+  it('marks missing art with a screen-pixel ring in a colour no sector uses', () => {
+    const m = admin.match(/<circle\s+r=\{r\} fill="none" stroke=\{GAME_MISSING\}([^>]*)\/>/);
+    expect(m, 'missing-art ring').not.toBeNull();
+    expect(m[1]).toMatch(/vectorEffect="non-scaling-stroke"/);
+    const colour = admin.match(/const GAME_MISSING = '([^']+)';/)[1].toLowerCase();
+    const hues = Object.values(SECTOR_HUES).map((h) => h.toLowerCase());
+    expect(hues).not.toContain(colour);
   });
 });

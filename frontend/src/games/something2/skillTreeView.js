@@ -103,6 +103,17 @@ export function clientToWorld(box, rect, clientX, clientY) {
   };
 }
 
+// One wheel step: zoom `box` (null = the tree's own bounds, i.e. never zoomed)
+// about the client point under the cursor. The focus is taken from the box
+// BEING zoomed. The component calls this inside its setBox updater, so wheel
+// events that land before a render chain correctly; a focus taken from the
+// last-rendered box zoomed about a stale point and drifted ~7 px over 12 steps.
+export function wheelZoom(box, bounds, rect, clientX, clientY, factor) {
+  const from = box || bounds;
+  const focus = clientToWorld(from, rect, clientX, clientY);
+  return zoomViewBox(from, factor, focus.x, focus.y);
+}
+
 // Drag by (dx, dy) screen pixels; `unitsPerPx` converts to world units. The
 // box moves opposite to the drag so the content follows the cursor.
 export function panViewBox(box, dx, dy, unitsPerPx) {
@@ -138,8 +149,15 @@ export function dragStart(x, y) {
 // capture taken on the press makes Chrome retarget pointerup and click to the
 // svg, so a node's onClick never fires and a plain click on the tree
 // navigated nowhere (SOMET-571 validation, 2026-10-10).
-export function dragMove(state, x, y) {
+//
+// `buttons` is the event's PointerEvent.buttons. 0 means no button is held, so
+// the press's release happened somewhere the svg never heard about (a press
+// that left the svg before it became a drag is not captured yet). That move
+// ends the press and pans nothing; without it, hovering back over the tree
+// with the button up panned it (SOMET-571 re-validation). Omitted = held.
+export function dragMove(state, x, y, buttons) {
   if (!state || !state.pressed) return { state, dx: 0, dy: 0, capture: false };
+  if (buttons === 0) return { state: dragEnd(state), dx: 0, dy: 0, capture: false };
   const dx = x - state.x;
   const dy = y - state.y;
   const far = Math.abs(x - state.ox) + Math.abs(y - state.oy) >= DRAG_THRESHOLD_PX;
