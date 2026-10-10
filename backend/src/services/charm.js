@@ -59,4 +59,10 @@ function canSummon(activeSummonLevels, candidateLevel, budget) {
 const PLAYER_CHARM_MS = 4000;
 const PLAYER_CHARM_IMMUNITY_MS = 8000;
 
-module.exports = { charmBudget, canSummon, PLAYER_CHARM_MS, PLAYER_CHARM_IMMUNITY_MS };
+// SOMET-609: bosses are never charmable -- not persisted (no row for the charm
+// UPDATE), and a boss pet would walk a dungeon's End out of its room.
+function canBeCharmed(creature) {
+  return !!creature && !creature.bossTier;
+}
+
+module.exports = { charmBudget, canSummon, canBeCharmed, PLAYER_CHARM_MS, PLAYER_CHARM_IMMUNITY_MS };

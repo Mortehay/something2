@@ -11,7 +11,7 @@ const { loadProgression, applyDeath } = require('../services/progressionStore.js
 const { withStoneBonuses, socketedBuffStones } = require('../services/stoneBonuses.js');
 const { withGearAffixes, equippedAffixGrants } = require('../services/gearAffixes.js');
 const { ownedCharacter } = require('../services/characters.js');
-const { charmBudget, canSummon, PLAYER_CHARM_MS } = require('../services/charm.js');
+const { charmBudget, canSummon, canBeCharmed, PLAYER_CHARM_MS } = require('../services/charm.js');
 // SOMET-473: the PLAYER pacify. applyCharm owns the non-refreshing immunity
 // window (effects.js), so this handler never decides whether a charm lands.
 const { applyCharm } = require('./effects');
@@ -2309,7 +2309,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // guess between two things a tile apart. A caller may name exactly one.
     //
     // Refusals, in order: not a Druid, no target named, nothing in range,
-    // already someone's pet, or over budget. Only "not a Druid" and the budget
+    // already someone's pet, a boss (before ANY charm state changes), or over
+    // budget. Only "not a Druid", the boss refusal and the budget
     // say anything -- a miss is silent, exactly like `pickup` with nothing in
     // range, and so is a pacify that bounces off the immunity window (the
     // target's protection is not the caster's business).
@@ -2366,6 +2367,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const cc = { x: c.x + c.width / 2, y: c.y + c.height / 2 };
         if (Math.hypot(cc.x - pc.x, cc.y - pc.y) > CHARM_RANGE) return;
         if (c.charmOwnerUserId != null) return; // already someone's pet
+        if (!canBeCharmed(c)) return send(ws, { type: 'error', message: 'Charm refused: bosses cannot be charmed' });
 
         // COMPOSED, not raw, and both halves come off the SAME object.
         // loadProgression already folds the tree in (it ends in
