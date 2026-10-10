@@ -410,7 +410,14 @@ async function subjectsForEnqueue(db, kind, keys, { active = null, fallbackProvi
   for (const key of keys) {
     const s = byKey.get(key);
     if (!s) { unknown.push(key); continue; }
-    subjects.push({ kind, key, providerId: pinnedProviderId(s, active, fallbackProviderId) });
+    const row = s.row || {};
+    subjects.push({
+      kind, key,
+      providerId: pinnedProviderId(s, active, fallbackProviderId),
+      // The type's own provider pin decided this, not the console's pick --
+      // which is what a refusal has to tell the admin to change (SOMET-594).
+      pinned: row.ai_provider_mode === 'provider' && Number.isInteger(row.ai_provider_id),
+    });
   }
   return { subjects, unknown };
 }

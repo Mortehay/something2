@@ -31,7 +31,7 @@ import {
   enqueueSummary, coverage, selectionOutsideFilter, promptIneligibleCount, PAGE_SIZE, filtersFromParams,
 } from './artSelection.js';
 import {
-  batchProgress, formatDuration, claimedAgo, partitionInFlight, previewNames, blockedSummary, singleFlight,
+  batchProgress, formatDuration, claimedAgo, partitionInFlight, previewNames, blockedPanel, singleFlight,
   QUEUE_PREVIEW, WAITING_PREVIEW, IDLE_QUEUED, RUNNING, FINISHED,
 } from './artProgress.js';
 import AdminLoading from './AdminLoading.jsx';
@@ -615,10 +615,9 @@ function ArtConsoleAdmin() {
   // provider later.
   //
   // Two sources (SOMET-594): the Start refusal, and a drain that found blocked
-  // groups queued MID-BATCH and is skipping them. The drain's list is the
-  // live one, so it wins; while it runs, removal must not also start.
-  const runBlocked = run?.blocked?.length ? run.blocked : null;
-  const blocked = blockedSummary(runBlocked || startBatch.error?.blocked);
+  // groups queued MID-BATCH and is skipping them. Only the refusal starts after
+  // removing -- blockedPanel says which, and why.
+  const blocked = blockedPanel({ run, startError: startBatch.error });
   const onDropBlocked = () => {
     if (!dropFlight.tryBegin()) return;
     if (!window.confirm(
@@ -627,7 +626,7 @@ function ArtConsoleAdmin() {
       + 'Other queued jobs are kept. Re-queue these subjects on a 1024 provider to draw them.',
     )) { dropFlight.end(); return; }
     clearGroups.mutate(blocked.groups, {
-      onSuccess: run?.running ? undefined : onStart,
+      onSuccess: blocked.startAfter ? onStart : undefined,
       onSettled: () => dropFlight.end(),
     });
   };
@@ -774,10 +773,10 @@ function ArtConsoleAdmin() {
         <Err>{promptIneligible} selected subject(s) build their own prompts and cannot use GPU prompt regeneration.</Err>
       )}
 
-      {blocked.total > 0 && (runBlocked || !run?.running) && (
+      {blocked.show && (
         <Blocked role="alert">
           <Err>
-            {runBlocked
+            {blocked.fromRun
               ? `${run.running ? 'Skipping' : 'Skipped'} ${blocked.total} queued job(s) that would render `
                 + 'below 1024px -- the rest of the batch '
                 + `${run.running ? 'is drawing' : 'was drawn'}. Remove them, or re-queue those subjects on a 1024 provider.`
@@ -786,9 +785,9 @@ function ArtConsoleAdmin() {
           <ul>{blocked.lines.map((l) => <li key={l}>{l}</li>)}</ul>
           <Bar>
             <Button onClick={onDropBlocked} disabled={clearGroups.isPending || startBatch.isPending}>
-              Remove {blocked.total} blocked job(s){run?.running ? '' : ' & start'}
+              {blocked.label}
             </Button>
-            {!runBlocked && <Secondary onClick={() => startBatch.reset()}>Dismiss</Secondary>}
+            {blocked.dismissable && <Secondary onClick={() => startBatch.reset()}>Dismiss</Secondary>}
           </Bar>
         </Blocked>
       )}

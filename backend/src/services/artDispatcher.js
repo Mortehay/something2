@@ -850,6 +850,20 @@ function forgetBlocked(groups) {
   run.blocked = run.blocked.filter((b) => !gone.has(`${b.kind}|${b.provider_id ?? ''}`));
 }
 
+// run.blocked is a snapshot from the drain's last pass, and the console builds
+// its "Remove N blocked job(s)" offer from it. Rows can leave the queue without
+// a scoped clear -- the unscoped "Clear N pending", or by hand -- and a finished
+// drain never re-checks, so the offer outlived its rows and its button cleared
+// 0 of them. `queued` is the CURRENT queue as [{ kind, provider_id, count }]:
+// keep only the blocked groups still in it, at their current counts.
+function retainBlocked(queued) {
+  if (!run || !Array.isArray(run.blocked) || !Array.isArray(queued)) return;
+  const now = new Map(queued.map((g) => [`${g.kind}|${g.provider_id ?? ''}`, Number(g.count)]));
+  run.blocked = run.blocked
+    .filter((b) => now.get(`${b.kind}|${b.provider_id ?? ''}`) > 0)
+    .map((b) => ({ ...b, count: now.get(`${b.kind}|${b.provider_id ?? ''}`) }));
+}
+
 // Tests only: forget the run so one case cannot leave another looking busy.
 function __resetRun() { run = null; }
 
@@ -857,4 +871,5 @@ module.exports.startDrain = startDrain;
 module.exports.stopDrain = stopDrain;
 module.exports.runStatus = runStatus;
 module.exports.forgetBlocked = forgetBlocked;
+module.exports.retainBlocked = retainBlocked;
 module.exports.__resetRun = __resetRun;

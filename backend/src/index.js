@@ -3724,11 +3724,31 @@ app.post('/api/art-jobs', adminGuard, async (req, res) => {
       const tooSmall = provs.filter((p) => ids.includes(p.id) && artDispatcher.providerSizeRefusal(p));
       if (tooSmall.length) {
         const ok = provs.filter((p) => !artDispatcher.providerSizeRefusal(p)).map((p) => `"${p.name}"`);
+        const okList = ok.length ? ok.join(' or ') : null;
+        const small = new Set(tooSmall.map((p) => p.id));
+        const nameOf = (id) => `"${provs.find((p) => p.id === id).name}"`;
+        // A subject whose type is PINNED elsewhere ignores the console's pick,
+        // so "pick X in the Provider list" would point at a control that is
+        // not the cause. Name the pinned subjects and the pin instead.
+        const pinned = subjects.filter((s) => s.pinned && small.has(s.providerId));
+        const fixes = [];
+        if (pinned.length) {
+          const byProv = new Map();
+          for (const s of pinned) byProv.set(s.providerId, [...(byProv.get(s.providerId) || []), s.key]);
+          for (const [id, keys] of byProv) {
+            fixes.push(`${keys.map((k) => `"${k}"`).join(', ')} ${keys.length === 1 ? 'is' : 'are'} `
+              + `pinned to ${nameOf(id)} by its ${kind} type -- change that type's AI provider`
+              + `${okList ? ` to ${okList}` : ''}.`);
+          }
+        }
+        if (subjects.some((s) => !s.pinned && small.has(s.providerId))) {
+          fixes.push(okList ? `Pick ${okList} in the Provider list.`
+            : 'Set a provider\'s request_template width/height to 1024.');
+        }
         return res.status(400).json({
           error: `${kind} is drawn as an isolated object and needs a 1024px provider; `
             + `${tooSmall.map((p) => `"${p.name}"`).join(', ')} renders smaller. `
-            + (ok.length ? `Pick ${ok.join(' or ')} in the Provider list.`
-              : 'Set a provider\'s request_template width/height to 1024.'),
+            + fixes.join(' '),
           code: 'PROVIDER_TOO_SMALL',
         });
       }
@@ -3782,6 +3802,13 @@ app.get('/api/art-jobs', adminGuard, async (req, res) => {
         WHERE f.state = 'failed' AND ${ART_FAILURE_UNRESOLVED}
         ORDER BY f.updated_at DESC`,
     );
+    // SOMET-594. Re-check the drain's blocked snapshot against the queue as it
+    // is NOW, so the console never offers to remove rows that are gone.
+    const { rows: queuedGroups } = await pool.query(
+      `SELECT subject_kind AS kind, provider_id, count(*)::int AS count
+         FROM art_jobs WHERE state = 'queued' GROUP BY subject_kind, provider_id`,
+    );
+    artDispatcher.retainBlocked(queuedGroups);
     res.json({
       stats: await artJobQueue.stats(pool),
       run: artDispatcher.runStatus(),
@@ -4080,6 +4107,8 @@ app.post('/api/art-jobs/clear', adminGuard, async (req, res) => {
       ({ rows } = await pool.query(
         "DELETE FROM art_jobs WHERE state IN ('queued', 'running') RETURNING state",
       ));
+      // Nothing is queued any more, so nothing is blocked (SOMET-594).
+      artDispatcher.retainBlocked([]);
     }
     res.json({
       cleared: rows.length,

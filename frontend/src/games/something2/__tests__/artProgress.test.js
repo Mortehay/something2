@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   batchProgress, formatDuration, formatElapsed, elapsedSince, shouldPollQueue,
-  partitionInFlight, claimedAgo, previewNames, blockedSummary, singleFlight,
+  partitionInFlight, claimedAgo, previewNames, blockedSummary, singleFlight, blockedPanel,
   IDLE, IDLE_QUEUED, RUNNING, FINISHED,
 } from '../artProgress.js';
 
@@ -335,5 +335,55 @@ describe('singleFlight', () => {
     expect(handler).toMatch(/onSettled: \(\) => dropFlight\.end\(\)/);
     // A cancelled confirm must release the gate, or the button is dead.
     expect(handler).toMatch(/\{\s*dropFlight\.end\(\);\s*return;\s*\}/);
+  });
+});
+
+// SOMET-594 rework. The Remove panel has two sources and they must not share an
+// action: a /dispatch REFUSAL means "drop these, then start what I asked for";
+// a drain's run.blocked means "drop these" and nothing else -- the admin may
+// have just pressed Stop, and the old label read "& start" whenever the run was
+// not running, restarting the batch they stopped.
+describe('blockedPanel', () => {
+  const group = { kind: 'item', provider_id: 4, provider_name: 'desktop gpu', count: 2 };
+
+  it('never starts a batch for a stopped drain\'s run.blocked', () => {
+    const p = blockedPanel({ run: { running: false, blocked: [group] }, startError: null });
+    expect(p.show).toBe(true);
+    expect(p.fromRun).toBe(true);
+    expect(p.startAfter).toBe(false);
+    expect(p.label).toBe('Remove 2 blocked job(s)');
+    expect(p.dismissable).toBe(false);
+  });
+
+  it('does not start for run.blocked while running either', () => {
+    const p = blockedPanel({ run: { running: true, blocked: [group] }, startError: null });
+    expect(p.startAfter).toBe(false);
+    expect(p.label).toBe('Remove 2 blocked job(s)');
+  });
+
+  it('keeps "& start" for a Start refusal -- starting is what was asked for', () => {
+    const p = blockedPanel({ run: { running: false, blocked: [] }, startError: { blocked: [group] } });
+    expect(p.show).toBe(true);
+    expect(p.fromRun).toBe(false);
+    expect(p.startAfter).toBe(true);
+    expect(p.label).toBe('Remove 2 blocked job(s) & start');
+    expect(p.dismissable).toBe(true);
+  });
+
+  it('prefers the live run.blocked over a stale Start refusal', () => {
+    const p = blockedPanel({
+      run: { running: false, blocked: [{ ...group, count: 1 }] },
+      startError: { blocked: [group] },
+    });
+    expect(p.fromRun).toBe(true);
+    expect(p.startAfter).toBe(false);
+    expect(p.total).toBe(1);
+  });
+
+  it('hides a Start refusal once a batch is running, and hides when nothing is blocked', () => {
+    expect(blockedPanel({ run: { running: true, blocked: [] }, startError: { blocked: [group] } }).show)
+      .toBe(false);
+    expect(blockedPanel({ run: { running: false, blocked: [] }, startError: null }).show).toBe(false);
+    expect(blockedPanel({ run: null, startError: null }).show).toBe(false);
   });
 });

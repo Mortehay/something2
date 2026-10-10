@@ -253,3 +253,26 @@ export function singleFlight() {
     end() { busy = false; },
   };
 }
+
+// The Remove panel's whole decision (SOMET-594). Two sources:
+//  - the /dispatch REFUSAL (startError.blocked): the admin pressed Start, so
+//    removing the blocked groups and then starting is the action they asked
+//    for -- hence "& start", and it can be dismissed;
+//  - the drain's run.blocked: groups it is skipping (or skipped). Removing
+//    them NEVER starts anything. Gating "& start" on !run.running restarted a
+//    batch the admin had just stopped.
+// The run's list is the live one, so it wins when both exist. A refusal is
+// hidden once a batch is running: it described a Start that has since happened.
+export function blockedPanel({ run, startError }) {
+  const fromRun = Boolean(run?.blocked?.length);
+  const s = blockedSummary(fromRun ? run.blocked : startError?.blocked);
+  const startAfter = !fromRun && !run?.running;
+  return {
+    ...s,
+    show: s.total > 0 && (fromRun || !run?.running),
+    fromRun,
+    startAfter,
+    dismissable: !fromRun,
+    label: `Remove ${s.total} blocked job(s)${startAfter ? ' & start' : ''}`,
+  };
+}

@@ -632,6 +632,79 @@ lockedTest('a scoped clear is allowed while a batch runs, and un-reports the gro
     assert.equal(dispatcher.runStatus().running, true, 'the batch keeps running');
   });
 
+// SOMET-594 rework. run.blocked is a snapshot from the drain's last pass, and
+// the console offers "Remove N blocked job(s)" from it. Once those rows are
+// gone -- by an UNSCOPED clear or out of band -- the offer must go too, or the
+// button clears 0 rows (and used to start a batch).
+lockedTest('run.blocked forgets groups that no longer have queued rows',
+  async (t, pool, providerId) => {
+    const small = await smallProvider(t, pool);
+    const [good, bad] = (await cs.SUBJECTS.skill.list()).slice(0, 2);
+    const [item] = await cs.SUBJECTS.item.list(pool);
+    await queue.enqueue(pool, [{ kind: 'skill', key: good.key }], { backend: 'connector', providerId });
+    await queue.enqueue(pool, [{ kind: 'skill', key: bad.key }], { backend: 'connector', providerId: small });
+    await queue.enqueue(pool, [{ kind: 'item', key: item.key }], { backend: 'connector', providerId: small });
+
+    dispatcher.__resetRun();
+    dispatcher.startDrain(pool, {
+      provider: { id: providerId, name: 'big', request_template: { width: 1024, height: 1024 } },
+      generate: async (registryId) => {
+        remote.setJob(registryId, { status: 'done', result: { image_key: 'zzTest/x.png', frames: 1 } });
+      },
+      writeArt: async () => {},
+    });
+    t.after(() => { dispatcher.stopDrain(); dispatcher.__resetRun(); });
+    await drainOut();
+    await pool.query("DELETE FROM art_generations WHERE image_key = 'zzTest/x.png'").catch(() => {});
+    assert.equal(dispatcher.runStatus().running, false);
+    assert.deepEqual(dispatcher.runStatus().blocked.map((b) => b.kind).sort(), ['item', 'skill'],
+      'precondition: both groups were reported blocked');
+
+    // Out of band: the item row is deleted by hand. The listing must stop
+    // offering it, while the skill group (still queued) stays offered.
+    await pool.query("DELETE FROM art_jobs WHERE subject_kind = 'item'");
+    const list = await request(app).get('/api/art-jobs').set(...AUTH);
+    assert.equal(list.status, 200);
+    assert.deepEqual(list.body.run.blocked.map((b) => [b.kind, b.provider_id]), [['skill', small]]);
+
+    // The unscoped "Clear N pending" removes every queued row, so nothing
+    // blocked is left to offer -- in the run itself, not only in the listing.
+    const res = await request(app).post('/api/art-jobs/clear').set(...AUTH).send({});
+    assert.equal(res.status, 200);
+    assert.equal(res.body.cleared, 1);
+    assert.deepEqual(dispatcher.runStatus().blocked, [], 'an unscoped clear forgets run.blocked');
+    const after = await request(app).get('/api/art-jobs').set(...AUTH);
+    assert.deepEqual(after.body.run.blocked, []);
+  });
+
+// The size refusal must name the fix that applies. A type PINNED to a 512
+// provider ignores the console's pick, so "Pick X in the Provider list" sends
+// the admin to a control that is already set correctly.
+lockedTest('a refusal caused by a type pin says to change the pin, not the pick',
+  async (t, pool, providerId) => {
+    const small = await smallProvider(t, pool);
+    const [entity] = await cs.SUBJECTS.entity.list(pool);
+    const { rows: [prev] } = await pool.query(
+      'SELECT ai_provider_mode, ai_provider_id FROM entity_types WHERE name = $1', [entity.key]);
+    await pool.query(
+      "UPDATE entity_types SET ai_provider_mode = 'provider', ai_provider_id = $2 WHERE name = $1",
+      [entity.key, small]);
+    try {
+      const res = await request(app).post('/api/art-jobs').set(...AUTH)
+        .send({ kind: 'entity', keys: [entity.key], provider_id: providerId });
+      assert.equal(res.status, 400);
+      assert.equal(res.body.code, 'PROVIDER_TOO_SMALL');
+      assert.match(res.body.error, /pinned/);
+      assert.ok(res.body.error.includes(entity.key), 'the pinned subject is named');
+      assert.doesNotMatch(res.body.error, /in the Provider list/,
+        'the picked provider is already a 1024 one');
+    } finally {
+      await pool.query(
+        'UPDATE entity_types SET ai_provider_mode = $2, ai_provider_id = $3 WHERE name = $1',
+        [entity.key, prev.ai_provider_mode, prev.ai_provider_id]);
+    }
+  });
+
 // Deleting a row a worker is mid-generation on would have the drain resolve a
 // job that no longer exists.
 lockedTest('clear is REFUSED while a batch is running', async (t, pool, providerId) => {
