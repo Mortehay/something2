@@ -2947,5 +2947,5 @@ module.exports = {
   applyAuras,
   // SOMET-606 (S4): the enemies-side pass and the shared defense read, exported
   // so world.js/projectiles.js use the SAME effectiveMit and tests pin the pass.
-  applyEnemyAuras, ENEMY_AURA_FLOOR, effectiveMit, NO_BUFF, __enemyAuraScratchGrowths,
+  applyEnemyAuras, ENEMY_AURA_FLOOR, effectiveMit, NO_BUFF, __enemyAuraScratchGrowths, chargeAuraDots,
 };
