@@ -36,10 +36,10 @@ describe("debuffHudEntries (SOMET-606)", () => {
 
 describe("resetSelfAura (SOMET-606 fix)", () => {
   it("clears a slowed state back to speed 1 and no rows", () => {
-    const g = { selfSpeedMult: 0.6, player: { auraSpeedMult: 0.6 }, auraDebuffRows: [{ id: "aura:x" }] };
+    const g = { selfSpeedMult: 0.6, player: { debuffSpeedMult: 0.6 }, auraDebuffRows: [{ id: "aura:x" }] };
     resetSelfAura(g);
     expect(g.selfSpeedMult).toBe(1);
-    expect(g.player.auraSpeedMult).toBe(1);
+    expect(g.player.debuffSpeedMult).toBe(1);
     expect(g.auraDebuffRows).toEqual([]);
   });
   it("debuffHudEntries skips null entries", () => {

@@ -11,7 +11,7 @@ describe("Game.js aura wiring (SOMET-606)", () => {
     expect(src).toMatch(/speed:\s*PLAYER_SPEED_EFFECTIVE\s*\*\s*this\.selfSpeedMult/);
   });
   it("the local player predicts with it too, assigned every frame", () => {
-    expect(src).toMatch(/this\.player\.auraSpeedMult\s*=\s*this\.selfSpeedMult/);
+    expect(src).toMatch(/this\.player\.debuffSpeedMult\s*=\s*this\.selfSpeedMult/);
     expect(src).toMatch(/this\.selfSpeedMult\s*=\s*selfSpeedMult\(msg\)/);
   });
   it("HUD rows are rebuilt every frame and passed to the renderer", () => {
