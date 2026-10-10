@@ -1187,6 +1187,162 @@ function applyAuras(creatures) {
   return buffs;
 }
 
+// SOMET-606 (S4). ENEMY-side auras: hostile creatures debuff PLAYERS in radius.
+//
+// A SEPARATE pass from applyAuras, deliberately (SOMET-617 review): player and
+// creature ids do not share a namespace, the candidates are the world's few
+// players rather than its thousands of creatures, and applyAuras is pinned
+// bit-for-bit by aura_apply_equivalence -- touching it would re-open that.
+//
+// STACKING (spec §3.2), the mirror image of the allies pass:
+//   - same aura name from several sources -> the STRONGEST debuff, i.e. the
+//     SMALLEST multiplier (Math.min). Math.max here would let a weak, stale
+//     source win; that is the defect enemy_auras.test.js pins.
+//   - different names -> multiply, in first-reach order;
+//   - each TOTAL floored at ENEMY_AURA_FLOOR (0.5).
+//   - DoT: per name, the LARGEST dps, attributed to the first source holding it.
+// Only an uncharmed live HOSTILE is a source (a Druid's pet never debuffs its
+// owner; a guard's enemies are creatures, not players). Each per-aura value is
+// clamped to <= 1: an enemies aura only ever hinders.
+//
+// Cost: O(enemy sources x players). No cap -- players per world are tens, not
+// thousands; creature_tick_cost's enemy row is the measurement (Task 6).
+// The inner loop allocates nothing; one result object (+ one entry per aura
+// name) per DEBUFFED player.
+const ENEMY_AURA_FLOOR = 0.5;
+let enemyAcc = new Float64Array(0);   // [slot*G + g]*4 + {0 dmg, 1 def, 2 spd, 3 dps}
+let enemySeen = new Uint8Array(0);    // [slot*G + g] -> 1 once that name reached that player
+let enemyOrder = new Int32Array(0);   // [slot*G + k] -> k-th name group to reach that player
+let enemyDotSrc = new Int32Array(0);  // [slot*G + g] -> source index holding the max dps
+let enemyCount = new Int32Array(0);   // [slot] -> number of groups in enemyOrder
+let enemyPx = new Float64Array(0);    // [slot] -> player centre x
+let enemyPy = new Float64Array(0);
+let enemyScratchGrowths = 0;          // test hook: must stay flat across ticks of one size
+function enemyScratch(cells, slots) {
+  if (enemySeen.length < cells) {
+    const size = Math.max(cells, enemySeen.length * 2);
+    enemyAcc = new Float64Array(size * 4);
+    enemySeen = new Uint8Array(size);
+    enemyOrder = new Int32Array(size);
+    enemyDotSrc = new Int32Array(size);
+    enemyScratchGrowths++;
+  }
+  if (enemyCount.length < slots) {
+    const size = Math.max(slots, enemyCount.length * 2);
+    enemyCount = new Int32Array(size);
+    enemyPx = new Float64Array(size);
+    enemyPy = new Float64Array(size);
+    enemyScratchGrowths++;
+  }
+}
+// `v < 1 ? v : 1`: NaN compares false, so a NaN multiplier is neutral (1).
+function hinder(v) { return v < 1 ? v : 1; }
+
+function applyEnemyAuras(creatures, players) {
+  const out = new Map();
+  const plist = Array.isArray(players) ? players : [...players];
+  const P = plist.length;
+  if (P === 0) return out;
+  const list = Array.isArray(creatures) ? creatures : [...creatures];
+
+  const srcIdx = [];
+  const srcAura = [];
+  for (let i = 0; i < list.length; i++) {
+    const c = list[i];
+    const auras = c.auras;
+    if (!Array.isArray(auras) || auras.length === 0) continue; // most creatures
+    if (!(c.hp > 0) || c.faction !== 'hostile' || c.charmOwnerUserId != null) continue;
+    for (let k = 0; k < auras.length; k++) {
+      const a = auras[k];
+      if (a.targetSide === 'enemies' && a.radius > 0) { srcIdx.push(i); srcAura.push(a); }
+    }
+  }
+  const S = srcIdx.length;
+  if (S === 0) return out;
+
+  const groupOf = new Map();
+  const srcGroup = new Int32Array(S);
+  for (let s = 0; s < S; s++) {
+    const name = srcAura[s].name;
+    let g = groupOf.get(name);
+    if (g === undefined) { g = groupOf.size; groupOf.set(name, g); }
+    srcGroup[s] = g;
+  }
+  const G = groupOf.size;
+
+  // Slots ARE player indices: players are distinct objects keyed by userId in
+  // World.players, so no id-merge step is needed (unlike the creature pass).
+  enemyScratch(P * G, P);
+  enemySeen.fill(0, 0, P * G);
+  for (let j = 0; j < P; j++) {
+    const p = plist[j];
+    enemyCount[j] = 0;
+    enemyPx[j] = p.x + p.width / 2;
+    enemyPy[j] = p.y + p.height / 2;
+  }
+
+  for (let s = 0; s < S; s++) {
+    const src = list[srcIdx[s]];
+    const a = srcAura[s];
+    const g = srcGroup[s];
+    const dm = hinder(a.damageMult); const fm = hinder(a.defenseMult); const sm = hinder(a.speedMult);
+    const dps = a.dotDps > 0 ? a.dotDps : 0;
+    const r2 = a.radius * a.radius;
+    const sx = src.x + src.width / 2;
+    const sy = src.y + src.height / 2;
+    for (let j = 0; j < P; j++) {
+      if (!(plist[j].hp > 0)) continue;
+      const dx = sx - enemyPx[j]; const dy = sy - enemyPy[j];
+      if (!(dx * dx + dy * dy <= r2)) continue; // NaN position -> excluded
+      const cell = j * G + g;
+      const p4 = cell * 4;
+      if (enemySeen[cell] === 0) {
+        enemySeen[cell] = 1;
+        enemyOrder[j * G + enemyCount[j]++] = g;
+        enemyAcc[p4] = dm; enemyAcc[p4 + 1] = fm; enemyAcc[p4 + 2] = sm; enemyAcc[p4 + 3] = dps;
+        enemyDotSrc[cell] = s;
+      } else {
+        // Math.MIN within one aura name -- this line IS the enemies-side rule.
+        if (dm < enemyAcc[p4]) enemyAcc[p4] = dm;
+        if (fm < enemyAcc[p4 + 1]) enemyAcc[p4 + 1] = fm;
+        if (sm < enemyAcc[p4 + 2]) enemyAcc[p4 + 2] = sm;
+        if (dps > enemyAcc[p4 + 3]) { enemyAcc[p4 + 3] = dps; enemyDotSrc[cell] = s; }
+      }
+    }
+  }
+
+  for (let j = 0; j < P; j++) {
+    const k = enemyCount[j];
+    if (k === 0) continue;
+    let d = 1; let f = 1; let sp = 1;
+    const auras = new Array(k);
+    for (let q = 0; q < k; q++) {
+      const g = enemyOrder[j * G + q];
+      const cell = j * G + g;
+      const p4 = cell * 4;
+      d *= enemyAcc[p4]; f *= enemyAcc[p4 + 1]; sp *= enemyAcc[p4 + 2];
+      const ds = enemyDotSrc[cell];
+      const a = srcAura[ds];
+      auras[q] = {
+        name: a.name,
+        damageMult: enemyAcc[p4], defenseMult: enemyAcc[p4 + 1], speedMult: enemyAcc[p4 + 2],
+        dotDps: enemyAcc[p4 + 3],
+        dotElement: typeof a.dotElement === 'string' ? a.dotElement : 'physical',
+        tickMs: a.tickMs,
+        sourceId: list[srcIdx[ds]].id,
+      };
+    }
+    out.set(plist[j].userId, {
+      damageMult: d > ENEMY_AURA_FLOOR ? d : ENEMY_AURA_FLOOR,
+      defenseMult: f > ENEMY_AURA_FLOOR ? f : ENEMY_AURA_FLOOR,
+      speedMult: sp > ENEMY_AURA_FLOOR ? sp : ENEMY_AURA_FLOOR,
+      auras,
+    });
+  }
+  return out;
+}
+function __enemyAuraScratchGrowths() { return enemyScratchGrowths; }
+
 // The neutral buff every creature gets when no leader's aura reaches it.
 // Frozen and shared (never cloned per-creature) since it is only ever read,
 // never written -- `c._buff = buffs.get(c.id) || NO_BUFF` in tick() below.
@@ -2735,4 +2891,7 @@ module.exports = {
   // can pin the non-mutation/stacking rules directly against the buff map,
   // without needing a full tick() to observe them.
   applyAuras,
+  // SOMET-606 (S4): the enemies-side pass and the shared defense read, exported
+  // so world.js/projectiles.js use the SAME effectiveMit and tests pin the pass.
+  applyEnemyAuras, ENEMY_AURA_FLOOR, effectiveMit, NO_BUFF, __enemyAuraScratchGrowths,
 };
