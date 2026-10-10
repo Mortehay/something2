@@ -12,6 +12,7 @@ import GameShell from "./games/something2/GameShell";
 import GameView from "./games/something2/GameView";
 import TileTypesAdmin from "./games/something2/TileTypesAdmin";
 import ArtConsoleAdmin from "./games/something2/ArtConsoleAdmin";
+import SpriteConsoleAdmin from "./games/something2/SpriteConsoleAdmin";
 import AudioAdmin from "./games/something2/AudioAdmin";
 import EntityTypesAdmin from "./games/something2/EntityTypesAdmin";
 import ItemTypesAdmin from "./games/something2/ItemTypesAdmin";
@@ -75,6 +76,7 @@ function App() {
                       <Route path="admin/progression" element={<ProgressionAdmin />} />
                       <Route path="admin/skill-tree" element={<SkillTreeAdmin />} />
                       <Route path="art" element={<ArtConsoleAdmin />} />
+                      <Route path="sprites" element={<SpriteConsoleAdmin />} />
                       <Route path="audio" element={<AudioAdmin />} />
                       <Route path="settings" element={<SettingsAdmin />} />
                     </Route>

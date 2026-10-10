@@ -62,6 +62,7 @@ export const NAV_SECTIONS = [
       // machine there, then drive a batch through it here -- and because both
       // are about how art gets made rather than about one catalogue.
       { id: 'art', label: 'Art Generation', path: '/game/art', Icon: HiOutlinePhoto },
+      { id: 'sprites', label: 'Sprite Generation', path: '/game/sprites', Icon: HiOutlineSparkles },
       // SOMET-590 game audio slice 1: the Audio tab -- worlds/biomes today,
       // more subject kinds in later slices. Directly below Art Generation for
       // the same reason that one sits where it does: both are about how

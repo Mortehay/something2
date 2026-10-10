@@ -159,6 +159,8 @@ const auraEffectsRoutes = require('./api/auraEffectsRoutes.js');
 const characterRoutes = require('./api/characterRoutes.js');
 const { createQuestsRouter } = require('./routes/questsRoutes.js');
 const audioRoutes = require('./api/audioRoutes.js');
+const spriteBatchRoutes = require('./api/spriteBatchRoutes.js');
+const { createDispatcher: createSpriteDispatcher } = require('./services/spriteDispatcher.js');
 const remoteAudioProvider = require('./services/remoteAudioProvider');
 const textProvider = require('./services/textProvider');
 const { DEFAULTS: GAME_SETTING_DEFAULTS, getSettings, setSetting } = require('./services/gameSettings.js');
@@ -349,6 +351,13 @@ async function fetchJobDocument(jobId) {
   return spriteGen.getJob(jobId);
 }
 let spriteGen = require('./services/spriteGen');
+const spriteDispatcher = createSpriteDispatcher({
+  db: guardPool,
+  spriteGen: {
+    postGenerate: (...args) => spriteGen.postGenerate(...args),
+    getJob: (...args) => spriteGen.getJob(...args),
+  },
+});
 const __setSpriteGen = (impl) => { spriteGen = impl; };
 const assetStore = require('./services/assetStore');
 
@@ -535,6 +544,7 @@ app.use('/api/quests', createQuestsRouter(guardPool));
 // Player routes (world bundle, misses) and admin routes (/admin/*) share one
 // mount; each route carries its own guard.
 app.use('/api/audio', audioRoutes(guardPool));
+app.use('/api/sprite-admin', spriteBatchRoutes(guardPool, adminGuard, spriteDispatcher));
 
 // The player's fog-of-war world map (SOMET-263). Read-only, and deliberately
 // NOT the payload the admin World Map tab reads from /api/world-graph: that one
@@ -3263,9 +3273,11 @@ async function startGenerationJob(req, res, { subject, kind, defaultFrames, fail
       // history is one list rather than two. `backend` carries the provider
       // name, which is what an admin looking at an old row wants to know.
       const row = await pool.query(
-        `INSERT INTO sprite_sets (creature, backend, seed, frames, job_id, status)
-         VALUES ($1, $2, $3, $4, $5, 'queued') RETURNING *`,
-        [subject, `remote:${provider.name}`, seed, frames || defaultFrames, gen.job_id],
+        `INSERT INTO sprite_sets
+           (creature, backend, seed, frames, job_id, generation_kind, base_prompt, provider_id, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'queued') RETURNING *`,
+        [subject, `remote:${provider.name}`, seed, frames || defaultFrames, gen.job_id,
+          kind || 'creature', prompt, provider.id],
       );
       return res.status(201).json({ ...row.rows[0], job_id: gen.job_id, provider: provider.name });
     }
@@ -3282,9 +3294,10 @@ async function startGenerationJob(req, res, { subject, kind, defaultFrames, fail
     const chosenBackend = backend || (gen.recipe && gen.recipe.backend) || 'stub';
     const chosenFrames = frames || (gen.recipe && gen.recipe.frames) || defaultFrames;
     const row = await pool.query(
-      `INSERT INTO sprite_sets (creature, backend, seed, frames, job_id, status)
-       VALUES ($1, $2, $3, $4, $5, 'queued') RETURNING *`,
-      [subject, chosenBackend, seed, chosenFrames, gen.job_id]
+      `INSERT INTO sprite_sets
+         (creature, backend, seed, frames, job_id, generation_kind, base_prompt, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued') RETURNING *`,
+      [subject, chosenBackend, seed, chosenFrames, gen.job_id, kind || 'creature', prompt]
     );
     res.status(201).json({ ...row.rows[0], job_id: gen.job_id, recipe: gen.recipe });
   } catch (err) {
