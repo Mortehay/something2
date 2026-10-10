@@ -107,9 +107,14 @@ async function commitCreatureDeath(pool, entry, creatureId, {
     // have their own lifecycles -- a vault guard is respawned by the chest
     // sweep -- and queueing them here would duplicate them.
     if (dead.home_x === null && dead.blocks_portal_id === null) {
+      // SOMET-609: never for a boss-tier type. Dungeon and world bosses have
+      // their own respawn owners and no world_creatures row; this guard covers
+      // the admin who tiers a type while instances of it are alive.
       await client.query(
         `INSERT INTO creature_respawns (world_id, type, x, y, level, respawn_at)
-         VALUES ($1,$2,$3,$4,$5, now() + ($6::int * interval '1 millisecond'))`,
+         SELECT $1::uuid, $2::text, $3::real, $4::real, $5::int,
+                now() + ($6::int * interval '1 millisecond')
+          WHERE NOT EXISTS (SELECT 1 FROM entity_types WHERE name = $2::text AND boss_tier IS NOT NULL)`,
         [entry.worldId, dead.type, dead.x, dead.y, dead.level, RESPAWN_DELAY_MS],
       );
     }

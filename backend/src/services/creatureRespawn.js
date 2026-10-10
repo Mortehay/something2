@@ -130,9 +130,13 @@ async function respawnDueCreatures(pool, {
         // Full row: placeMapCreatures reads .hp/.defense/.resistances off each
         // allowed type, and scaleCreature needs hp/defense too. A name-only row
         // would silently respawn every creature at the 10hp/0-defense fallback.
+        // SOMET-609: boss-tier types are never respawned here (dungeon bosses
+        // have DungeonBossManager, world bosses WorldBossManager). Such a row
+        // takes the "catalog no longer has this creature" branch below and is
+        // dropped instead of becoming a plain persisted wild creature.
         const et = await pool.query(
           `SELECT id, name, hp, defense, resistances FROM entity_types
-            WHERE name = $1 AND is_creature = true`,
+            WHERE name = $1 AND is_creature = true AND boss_tier IS NULL`,
           [row.type],
         );
         if (et.rowCount === 0) {
