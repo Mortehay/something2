@@ -18,9 +18,10 @@ const ACTIONS = [
   { action: 'spawn' }, { action: 'warning' }, { action: 'slay' }, { action: 'damage' },
   { action: 'buff' }, { action: 'despawn' }, { action: 'setTimer' },
   { action: 'teleport_to_boss' }, { action: 'teleport_to_world', worldId: 'w1' },
+  { action: 'phase' }, { action: 'enrage' },
 ];
 // Frames only the debug handler produces in response to these messages.
-const DEBUG_FRAMES = new Set(['announcement', 'transition', 'world_boss_status', 'world_boss_spawn']);
+const DEBUG_FRAMES = new Set(['announcement', 'transition', 'world_boss_status', 'world_boss_spawn', 'error']);
 
 function token(u) { return jwt.sign({ user_id: u, tv: 1 }, SECRET, { algorithm: 'HS256' }); }
 
@@ -105,5 +106,16 @@ test('an admin socket still reaches debugWorldBoss', async () => {
   h.ws.send(JSON.stringify({ type: 'debugWorldBoss', action: 'buff' }));
   await waitFor(() => h.frames.slice(framesBefore).some((f) => f.type === 'announcement' && f.kind === 'buff_granted'));
   await waitFor(() => h.frames.slice(framesBefore).some((f) => f.type === 'world_boss_status'));
+  } finally { close(h); }
+});
+
+test('an admin reaches the phase/enrage triggers (an error frame proves the branch ran)', async () => {
+  const h = await boot('admin');
+  try {
+    await new Promise((r) => setTimeout(r, 100));
+    const framesBefore = h.frames.length;
+    h.ws.send(JSON.stringify({ type: 'debugWorldBoss', action: 'phase' }));
+    h.ws.send(JSON.stringify({ type: 'debugWorldBoss', action: 'enrage' }));
+    await waitFor(() => h.frames.slice(framesBefore).filter((f) => f.type === 'error' && /no active world boss/.test(f.message)).length === 2);
   } finally { close(h); }
 });

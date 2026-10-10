@@ -2834,6 +2834,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
             }
           }
         }
+      } else if (action === 'phase') {
+        // SOMET-605: test panel trigger; same transition code as the fight.
+        if (!worldBossManager.forcePhase(worlds, broadcastAll)) {
+          send(ws, { type: 'error', message: 'no active world boss, or it is already in its last phase' });
+        }
+      } else if (action === 'enrage') {
+        if (!worldBossManager.forceEnrage(worlds, broadcastAll)) {
+          send(ws, { type: 'error', message: 'no active world boss, or it is already enraged' });
+        }
       } else if (action === 'buff') {
         worldBossManager.playerBuffs.set(String(ws.userId), {
           active: true,

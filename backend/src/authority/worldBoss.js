@@ -14,10 +14,16 @@ const { rollItemInstance } = require('./affixes.js');
 const {
   hydrateCreatureRow, ENTITY_CATALOG_SELECT, CREATURE_SPEED, CREATURE_DAMAGE,
 } = require('./creatures.js');
+const { pushSfxEvent, bossSfx } = require('./sfxEvents.js');
 
 const BOSS_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes between boss spawns
 const BOSS_WARNING_MS = 2 * 60 * 1000;    // 2 minutes warning before spawn
 const BOSS_LIFETIME_MS = 20 * 60 * 1000;  // 20 minutes max lifetime before despawning
+// SOMET-605 (spec §4.3): enrage at < 10% HP or in the last minute of the
+// boss's lifetime. "Near the lifetime limit" is not quantified by the spec;
+// 60 s is this slice's reading (plan decision D2).
+const ENRAGE_HP_RATIO = 0.10;
+const ENRAGE_LEAD_MS = 60 * 1000;
 const VICTORS_BOON_DURATION_MS = 15 * 60 * 1000; // 15 minutes buff duration
 
 // SOMET-603 (S1): bosses are entity_types rows now (boss_tier = 'world');
@@ -348,6 +354,7 @@ class WorldBossManager {
       phaseName: phaseInfo.name,
       phaseBonus: phaseInfo.bonus,
       hpRatio,
+      enraged: Boolean(this.currentBoss && this.currentBoss.enraged),
       topDamagers: this.getTopDamagers(3),
     };
   }
@@ -383,6 +390,8 @@ class WorldBossManager {
         this._spawnPhaseMinions(creature, worldEntry);
       }
 
+      this._emitBossSfx(worldEntry, creature, 'phase'); // SOMET-605
+
       if (broadcastFn) {
         const phaseMsg = `[World Boss Phase ${phaseInfo.phase}] ${this.currentBoss.name} enters ${phaseInfo.name}! (${phaseInfo.bonus})`;
         broadcastFn({
@@ -399,6 +408,71 @@ class WorldBossManager {
         });
       }
     }
+  }
+
+  // SOMET-605: put a boss event on the boss's own sim sfx buffer, at its box
+  // centre; World#drainSfx carries it into the next frame.
+  _emitBossSfx(worldEntry, creature, e) {
+    const sim = worldEntry && worldEntry.world && worldEntry.world.creatures;
+    if (!sim || !Array.isArray(sim.sfx) || !creature) return false;
+    return pushSfxEvent(sim.sfx, bossSfx(e, creature,
+      creature.x + (creature.width || 0) / 2, creature.y + (creature.height || 0) / 2));
+  }
+
+  _checkEnrage(creature, worldEntry, now, broadcastFn) {
+    if (!this.currentBoss || !creature || this.currentBoss.enraged) return false;
+    const hpRatio = Math.max(0, creature.hp) / (creature.maxHp || 1);
+    const nearTimeout = now - this.spawnedAt >= this.bossLifetimeMs - ENRAGE_LEAD_MS;
+    if (hpRatio >= ENRAGE_HP_RATIO && !nearTimeout) return false;
+    return this._enrage(creature, worldEntry, broadcastFn);
+  }
+
+  _enrage(creature, worldEntry, broadcastFn) {
+    this.currentBoss.enraged = true;
+    creature.enraged = true;
+    this._emitBossSfx(worldEntry, creature, 'enrage');
+    if (broadcastFn) {
+      broadcastFn({
+        type: 'announcement', kind: 'world_boss_enrage',
+        text: `[World Boss] ${this.currentBoss.name} is enraged!`, bossName: this.currentBoss.name,
+      });
+      broadcastFn({ type: 'world_boss_status', status: this.getStatus() });
+    }
+    return true;
+  }
+
+  // The live boss creature and its world entry, or {} when there is none.
+  _liveBoss(worlds) {
+    if (this.state !== 'active' || !this.currentBoss || !this.activeWorldId || !worlds) return {};
+    const entry = worlds.get(this.activeWorldId);
+    const sim = entry && entry.world && entry.world.creatures;
+    const creature = sim && sim.get ? sim.get(this.bossCreatureId) : null;
+    return creature ? { entry, creature } : {};
+  }
+
+  // Test panel (spec §5): advance exactly one phase. HP is lowered to the
+  // first whole percent _calculatePhase puts in the next phase -- the real
+  // thresholds, read rather than copied -- and the normal transition runs.
+  forcePhase(worlds, broadcastFn = null) {
+    const { entry, creature } = this._liveBoss(worlds);
+    if (!creature) return false;
+    const before = this.currentBoss.phase || 1;
+    const maxHp = creature.maxHp || 1;
+    for (let pct = Math.floor((Math.max(0, creature.hp) / maxHp) * 100); pct >= 1; pct -= 1) {
+      if (this._calculatePhase(pct / 100).phase > before) {
+        creature.hp = Math.floor((maxHp * pct) / 100);
+        break;
+      }
+    }
+    this.currentBoss.currentHp = Math.max(0, creature.hp);
+    this._checkPhaseTransition(creature, entry, broadcastFn);
+    return (this.currentBoss.phase || 1) > before;
+  }
+
+  forceEnrage(worlds, broadcastFn = null) {
+    const { entry, creature } = this._liveBoss(worlds);
+    if (!creature || this.currentBoss.enraged) return false;
+    return this._enrage(creature, entry, broadcastFn);
   }
 
   _spawnPhaseMinions(creature, worldEntry) {
@@ -501,6 +575,7 @@ class WorldBossManager {
               this.currentBoss._playerDamage = c._playerDamage;
             }
             this._checkPhaseTransition(c, entry, broadcastFn);
+            this._checkEnrage(c, entry, now, broadcastFn); // SOMET-605
             // Auto-broadcast if HP changed or periodically every 1500ms
             if (broadcastFn && (oldHp !== this.currentBoss.currentHp || (now - this._lastBroadcastTime) >= 1500)) {
               this._lastBroadcastHp = this.currentBoss.currentHp;
