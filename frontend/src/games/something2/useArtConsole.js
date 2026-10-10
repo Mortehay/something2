@@ -15,7 +15,7 @@ import { useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { authHeaders, apiFetch } from './src/js/net/auth.js';
-import { shouldPollQueue, batchJustSettled } from './artProgress.js';
+import { batchJustSettled, queuePollInterval } from './artProgress.js';
 import { API_URL } from '../../config.js';
 
 const SUBJECTS_KEY = ['art-subjects'];
@@ -101,9 +101,7 @@ export function useArtSubjects({ live = false } = {}) {
 export function useArtQueue() {
   const { data } = useQuery({
     queryKey: QUEUE_KEY,
-    refetchInterval: (q) => (
-      shouldPollQueue(q.state.data?.run, q.state.data?.stats) ? 2000 : false
-    ),
+    refetchInterval: (q) => queuePollInterval(q.state.data?.run, q.state.data?.stats),
     queryFn: () => getJson(`${API_URL}/api/art-jobs`, 'the art queue'),
   });
   // `failures` arrives already GROUPED AND CLASSIFIED by the server. The rule

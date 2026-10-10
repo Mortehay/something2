@@ -36,6 +36,7 @@ import {
   QUEUE_PREVIEW, WAITING_PREVIEW, IDLE_QUEUED, RUNNING, FINISHED,
 } from './artProgress.js';
 import AdminLoading from './AdminLoading.jsx';
+import ArtStartError from './ArtStartError.jsx';
 
 // The house admin-root style, shared verbatim with the eight other admin
 // panels. Load-bearing rather than cosmetic: GameShell's ContentArea is
@@ -820,6 +821,10 @@ function ArtConsoleAdmin() {
           </Bar>
         </Blocked>
       )}
+      {/* Every OTHER refused start (SOMET-535 rework 3): a Local start against
+          connector jobs, an empty queue, a provider precondition. The panel
+          above opens only for a size refusal, so these used to render nowhere. */}
+      <ArtStartError error={startBatch.error} onDismiss={() => startBatch.reset()} />
 
       {/* THE ANSWER TO "is it generating?", in one box (SOMET-558).
           Before this the page offered a counter line and a button label, and

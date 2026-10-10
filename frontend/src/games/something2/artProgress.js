@@ -162,6 +162,16 @@ export function batchJustSettled(wasRunning, isRunning) {
   return Boolean(wasRunning) && !isRunning;
 }
 
+// The refetch interval for the queue (SOMET-535 rework 3). Outstanding work
+// polls fast; an idle queue polls SLOWLY rather than never, because returning
+// `false` there meant a job queued from outside this page (the API, another
+// admin, the Skill Tree tab) stayed invisible until a reload.
+export const QUEUE_POLL_BUSY_MS = 2000;
+export const QUEUE_POLL_IDLE_MS = 15000;
+export function queuePollInterval(run, stats) {
+  return shouldPollQueue(run, stats) ? QUEUE_POLL_BUSY_MS : QUEUE_POLL_IDLE_MS;
+}
+
 // Which of the claimed jobs is actually ON the provider (SOMET-558).
 //
 // THE TRAP THIS EXISTS FOR. dispatch() claims `limit` jobs in ONE update --

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  batchProgress, formatDuration, formatElapsed, elapsedSince, shouldPollQueue, batchJustSettled,
+  batchProgress, formatDuration, formatElapsed, elapsedSince, shouldPollQueue, batchJustSettled, queuePollInterval,
+  QUEUE_POLL_BUSY_MS, QUEUE_POLL_IDLE_MS,
   partitionInFlight, claimedAgo, previewNames, blockedSummary, singleFlight, blockedPanel,
   IDLE, IDLE_QUEUED, RUNNING, FINISHED,
 } from '../artProgress.js';
@@ -432,5 +433,25 @@ describe('batchJustSettled', () => {
     expect(batchJustSettled(true, true)).toBe(false);
     expect(batchJustSettled(false, false)).toBe(false);
     expect(batchJustSettled(false, true)).toBe(false);
+  });
+});
+
+// SOMET-535 rework 3. With nothing outstanding the queue stopped polling
+// altogether, so a job queued from somewhere else (the API, another admin, the
+// Skill Tree tab) never appeared until a reload. Idle now polls SLOWLY instead
+// of never.
+describe('queuePollInterval', () => {
+  it('polls fast while anything is outstanding', () => {
+    expect(queuePollInterval({ running: true }, null)).toBe(QUEUE_POLL_BUSY_MS);
+    expect(queuePollInterval(null, { queued: 1, running: 0 })).toBe(QUEUE_POLL_BUSY_MS);
+  });
+  it('keeps polling, slowly, when the queue is idle', () => {
+    expect(queuePollInterval({ running: false, done: 97 }, { queued: 0, running: 0 })).toBe(QUEUE_POLL_IDLE_MS);
+    expect(queuePollInterval(null, null)).toBe(QUEUE_POLL_IDLE_MS);
+  });
+  it('idle is a real, slower interval -- not false, not the busy rate', () => {
+    expect(Number.isFinite(QUEUE_POLL_IDLE_MS)).toBe(true);
+    expect(QUEUE_POLL_IDLE_MS).toBeGreaterThan(QUEUE_POLL_BUSY_MS);
+    expect(QUEUE_POLL_IDLE_MS).toBeLessThanOrEqual(30000);
   });
 });

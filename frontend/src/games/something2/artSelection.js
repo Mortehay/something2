@@ -233,6 +233,18 @@ export function startBatchBody({ backend, providerId, activeProvider }) {
   return { provider_id: providerId ? Number(providerId) : activeProvider?.id, concurrency: 1 };
 }
 
+// The text of a refused Start that the Blocked panel does NOT explain, or
+// null (SOMET-535 rework 3). A refusal carrying blocked groups is the size
+// refusal, rendered with its own drop button; every other refusal -- a Local
+// start against connector jobs, an empty queue, a misconfigured provider, a
+// double start -- used to render nowhere, because the only place the message
+// was printed was inside that panel.
+export function startErrorMessage(error) {
+  if (!error) return null;
+  if (Array.isArray(error.blocked) && error.blocked.length) return null;
+  return error.message || 'Failed to start the batch';
+}
+
 export function applyFilters(subjects, { kind = 'all', art = 'all', search = '' } = {}) {
   const q = search.trim().toLowerCase();
   return subjects.filter((s) => {
