@@ -46,6 +46,7 @@ const { respawnDueCreatures, enqueueDeficit, CREATURE_SWEEP_MS } = require('../s
 const { consumeAmmo, ammoCount } = require('./ammo');
 const { PICKUP_RADIUS } = require('./groundItems');
 const { WorldBossManager, dropLegendaryItemForPlayer } = require('./worldBoss');
+const { DungeonBossManager } = require('./dungeonBosses');
 
 // SOMET-473 -- the Druid's charm (spec 8.2, contract §6.5).
 //
@@ -499,6 +500,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // SOMET-603: the rotation's bosses are catalog rows. Fire-and-forget:
   // refreshCatalog never rejects, and an empty catalog just idles the event.
   worldBossManager.refreshCatalog();
+  // SOMET-609 (S9): dungeon End/Elite bosses. The single owner of their life:
+  // placed in loadWorld, killed via onCreatureDeath (before commitCreatureDeath
+  // and WorldBossManager), re-placed by creatureRespawnSweep. S10 passes
+  // onDungeonBossKilled to roll boss loot; S9 awards nothing.
+  const dungeonBosses = new DungeonBossManager({
+    pool,
+    clock: opts.dungeonBossClock || (() => Date.now()),
+    onKilled: opts.onDungeonBossKilled || null,
+  });
 
   // Every inbound frame this protocol defines is a small flat JSON object
   // (join/attack/equip/pickup/drop/interact/buy/sell/input/ping) — the
@@ -645,7 +655,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // buildWorldGenConfig, but enqueueDeficit's `row` further down IS this
         // same `row` -- omitting them here would make the load-time backstop
         // silently enqueue 0 for every real world, forever, with no error.
-        const wr = await pool.query('SELECT id, seed, chunk_size, width, height, is_entry, entry_spawn, biomes, biome_cell, level_min, level_max, safe_road_radius, safe_rects, authored_roads, density, allowed_creature_types FROM worlds WHERE id = $1', [worldId]);
+        // dungeon_boss (SOMET-609): read by DungeonBossManager.place below;
+        // omitting it would silently place no boss anywhere.
+        const wr = await pool.query('SELECT id, seed, chunk_size, width, height, is_entry, entry_spawn, biomes, biome_cell, level_min, level_max, safe_road_radius, safe_rects, authored_roads, density, allowed_creature_types, dungeon_boss FROM worlds WHERE id = $1', [worldId]);
         if (wr.rows.length === 0) return null;
         const row = wr.rows[0];
         // Postgres uuid input is case-insensitive and also accepts braced /
@@ -790,6 +802,16 @@ function attachAuthority(httpServer, pool, opts = {}) {
           console.error('world load top-up failed:', canonicalId, err);
         }
 
+        // SOMET-609: this world's dungeon boss, if its spec authored one. Never
+        // fatal -- a bossless room is playable, a failed join is not. quiet:
+        // a room that loads with its boss already in it plays no spawn sound
+        // (ruling N-1/P6; becomes S2's quietSpawn on rebase, see dungeonBosses.js).
+        try {
+          await dungeonBosses.place(entry, { quiet: true });
+        } catch (err) {
+          console.error('dungeon boss placement failed:', canonicalId, err);
+        }
+
         return entry;
       })();
       loading.set(worldId, pending);
@@ -932,6 +954,14 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // level-up would raise max HP in the database and nothing in the running
   // game (the exact defect A1's review caught).
   const onCreatureDeath = (entry, id, killerUserId) => {
+    // SOMET-609: a dungeon boss has ONE respawn owner. It has no
+    // world_creatures row (commitCreatureDeath's uuid DELETE would throw on a
+    // `boss:` id) and is not a world boss, so it never reaches either path.
+    // Routed by id (ruling G10): the creature is already out of the sim here.
+    if (dungeonBosses.isBoss(entry.worldId, id)) {
+      dungeonBosses.onDeath(entry, id, killerUserId);
+      return Promise.resolve(null);
+    }
     const deadCreature = entry.world && entry.world.creatures && entry.world.creatures.get
       ? entry.world.creatures.get(id)
       : null;
@@ -1470,6 +1500,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
     if (dirty.length) {
       const ok = [];
       for (const c of dirty) {
+        // SOMET-609: a dungeon boss has no world_creatures row; its `boss:` id
+        // would fail the uuid cast here every flush, forever (it never clears).
+        if (dungeonBosses.isBoss(entry.worldId, c.id)) { ok.push(c.id); continue; }
         try {
           await pool.query(
             `UPDATE world_creatures SET x=$1, y=$2, facing=$3, updated_at=now() WHERE id=$4`,
@@ -3583,6 +3616,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
     } catch (err) {
       console.error('creature respawn sweep failed:', err);
     }
+    // SOMET-609: dungeon bosses ride the same 10 s timer but not its queue.
+    try {
+      await dungeonBosses.sweep(worlds, (worldId) => {
+        const entry = worlds.get(worldId);
+        return entry ? [...entry.world.players.values()].map((p) => ({ x: p.x, y: p.y })) : [];
+      });
+    } catch (err) {
+      console.error('dungeon boss sweep failed:', err);
+    }
   }
 
   // SOMET-481: the two inputs a rarity roll needs -- the admin-editable weight
@@ -3735,6 +3777,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
     _reloadCreatures: injectGuardIntoSim,
     _refreshLootTuning: refreshLootTuning,
     _worldBossManager: worldBossManager,
+    // SOMET-609 test seams: the manager, the kill entry point every kill site
+    // uses, and loadWorld (a world can be loaded without a socket).
+    _dungeonBosses: dungeonBosses,
+    _onCreatureDeath: onCreatureDeath,
+    _loadWorld: loadWorld,
+    _flushAndPrune: flushAndPrune,
     // Read back the live TTL. A getter, not the value: the whole point of
     // SOMET-482 is that this number CHANGES at runtime, so a test that
     // captured it once could not tell a working refresh from a dead one.
