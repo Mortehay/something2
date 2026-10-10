@@ -23,6 +23,7 @@ import SettingsAdmin from "./games/something2/SettingsAdmin";
 import PlayerWorldMap from "./games/something2/PlayerWorldMap";
 import CreatureBehaviorsAdmin from "./games/something2/CreatureBehaviorsAdmin";
 import VfxEffectsAdmin from './games/something2/VfxEffectsAdmin.jsx';
+import AuraEffectsAdmin from './games/something2/AuraEffectsAdmin.jsx';
 import ProgressionAdmin from './games/something2/ProgressionAdmin.jsx';
 import SkillTreeAdmin from './games/something2/SkillTreeAdmin.jsx';
 
@@ -68,6 +69,7 @@ function App() {
                       <Route path="biomes" element={<BiomesAdmin />} />
                       <Route path="creature-behaviors" element={<CreatureBehaviorsAdmin />} />
                       <Route path="vfx" element={<VfxEffectsAdmin />} />
+                      <Route path="auras" element={<AuraEffectsAdmin />} />
                       <Route path="world-map" element={<MapGraphAdmin />} />
                       <Route path="generated-worlds" element={<WorldGenAdmin />} />
                       <Route path="admin/progression" element={<ProgressionAdmin />} />
