@@ -100,14 +100,19 @@ const DEFAULT_FILTERS = Object.freeze({
 
 // The filters live in the URL (`?kind=&sound=&q=`) so a reload or a shared
 // link lands on the same table. An unknown sound value is dropped rather than
-// trapping the table in a state no control on screen can leave. `kind` is not
-// validated: the kinds come from the server, and an unknown one just matches
-// nothing (the <select> shows no such option).
-export function filtersFromParams(params) {
+// trapping the table in a state no control on screen can leave, and so is an
+// unknown kind once `knownKinds` (the registry's kinds, from the server) is
+// non-empty: `?kind=nope` used to show "All kinds" in the <select> over an
+// empty table, and choosing "All kinds" then fired no change event. Before
+// the kinds load there is nothing to check against, so a deep link is kept.
+export function filtersFromParams(params, knownKinds) {
   const sound = params.get('sound');
   const prompt = params.get('prompt');
+  const kind = params.get('kind') || DEFAULT_FILTERS.kind;
+  const kindKnown = kind === DEFAULT_FILTERS.kind || !knownKinds || knownKinds.length === 0
+    || knownKinds.includes(kind);
   return {
-    kind: params.get('kind') || DEFAULT_FILTERS.kind,
+    kind: kindKnown ? kind : DEFAULT_FILTERS.kind,
     sound: SOUND_FILTERS.includes(sound) ? sound : DEFAULT_FILTERS.sound,
     search: params.get('q') || DEFAULT_FILTERS.search,
     prompt: PROMPT_FILTERS.includes(prompt) ? prompt : DEFAULT_FILTERS.prompt,
@@ -209,6 +214,13 @@ export function selectionOutsideFilter(selected, matching) {
 
 // --- Queueing ---------------------------------------------------------------
 
+// How many sfx variants a queued job asks for. The default MUST equal the
+// backend's DEFAULT_SFX_VARIANTS (audioGeneration.js) -- the pack size a job
+// with no `variants` gets -- and audioSelection.test.js pins the two. The
+// route accepts 1..MAX_SFX_VARIANTS.
+export const DEFAULT_SFX_VARIANTS = 3;
+export const MAX_SFX_VARIANTS = 5;
+
 // POST /api/audio/admin/jobs items for exactly the selected slots. `rowsById`
 // is a Map(slotId -> row) over ALL rows (not just the filtered ones -- the
 // selection may be hidden by the filter and is still queued). `style` goes on
@@ -218,17 +230,25 @@ export function selectionOutsideFilter(selected, matching) {
 // "Force regenerate prompt" checkbox) puts `force_prompt: true` on every item,
 // so the prompt phase rewrites even a stored or hand-written prompt; unticked,
 // the field is left off and the server's default (false) applies.
+// `variants` (SOMET-596 rework, the bar's Variants control) goes on every
+// sfx item when it is an integer 1-5 -- the route's rule; it rejects the
+// field on a music/ambience item, so it never goes there.
 // Upload-only rows and ids that no longer name a row are not sent and are
 // counted in `skipped`.
-export function queueItems(selected, rowsById, { style = '', engine = 'realistic', forcePrompt = false } = {}) {
+export function queueItems(selected, rowsById, {
+  style = '', engine = 'realistic', forcePrompt = false, variants,
+} = {}) {
   const items = [];
   let skipped = 0;
+  const sendVariants = Number.isInteger(variants) && variants >= 1 && variants <= MAX_SFX_VARIANTS;
   for (const id of selected) {
     const r = rowsById.get(id);
     if (!r || r.uploadOnly) { skipped += 1; continue; }
     const it = { subject_kind: r.kind, subject_key: r.key, slot: r.slot };
-    if (r.clipKind === 'sfx') it.engine = engine || 'realistic';
-    else if (style) it.style = style;
+    if (r.clipKind === 'sfx') {
+      it.engine = engine || 'realistic';
+      if (sendVariants) it.variants = variants;
+    } else if (style) it.style = style;
     if (forcePrompt === true) it.force_prompt = true;
     items.push(it);
   }
@@ -389,4 +409,60 @@ export function failedByCause(jobRows) {
       more: Math.max(0, g.slots.length - SAMPLES),
     }))
     .sort((a, b) => b.count - a.count || a.cause.localeCompare(b.cause));
+}
+
+// --- Search box -------------------------------------------------------------
+
+export const SEARCH_DEBOUNCE_MS = 250;
+
+// The Search box's link to `?q=` (SOMET-596 rework). Binding the input to the
+// URL param lost keystrokes: a commit re-filters every row and takes 30-300
+// ms, and until it lands the input still shows the old value, so the next key
+// is applied to that. The input shows its own text instead; `type` schedules
+// one `commit` per pause, and `fromUrl` says what the box should show when
+// `?q=` changes -- the URL's value when nothing is pending (back/forward, a
+// shared link), null (keep the typed text) while a commit is still due.
+export function createSearchSync(commit, delay = SEARCH_DEBOUNCE_MS) {
+  let timer = null;
+  let pending = null;
+  return {
+    type(value) {
+      pending = value;
+      if (timer !== null) clearTimeout(timer);
+      timer = setTimeout(() => {
+        const v = pending;
+        timer = null;
+        pending = null;
+        commit(v);
+      }, delay);
+    },
+    fromUrl(urlValue) {
+      return pending === null ? urlValue : null;
+    },
+    cancel() {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+      pending = null;
+    },
+  };
+}
+
+// `fn` (which returns a promise) wrapped so a call made while an earlier one
+// is still in flight is dropped (returns undefined). "Retry these N" used
+// disabled={isPending}, which takes effect a render later -- a fast
+// double-click sent two POSTs 2 ms apart.
+export function singleFlight(fn) {
+  let busy = false;
+  return (...args) => {
+    if (busy) return undefined;
+    busy = true;
+    let p;
+    try {
+      p = Promise.resolve(fn(...args));
+    } catch (err) {
+      busy = false;
+      throw err;
+    }
+    return p.finally(() => { busy = false; });
+  };
 }

@@ -22,6 +22,7 @@ import {
   PAGE_SIZE, pageCount, clampPage, toggle, selectPage, deselectPage, isPageFullySelected,
   selectAllMatching, selectionOutsideFilter, queueItems, enqueueSummary, failedByCause, soundText,
   jobsForKnownSubjects, uploadOnlyCount, slotId,
+  DEFAULT_SFX_VARIANTS, MAX_SFX_VARIANTS, createSearchSync, singleFlight,
 } from './audioSelection.js';
 import SubjectSounds from './SubjectSounds.jsx';
 
@@ -49,6 +50,8 @@ const Button = styled.button`
   &:disabled { opacity: 0.5; cursor: default; }
 `;
 const Secondary = styled(Button)`background: var(--s2-btn-grey);`;
+// Field's 140px min-width is for selects and text; a 1-5 number needs less.
+const VariantsField = styled(Field)`input { min-width: 0; width: 4rem; }`;
 const Hint = styled.p`color: var(--s2-text-muted); font-size: 0.85rem; margin: 0.25rem 0;`;
 const Err = styled.p`color: var(--s2-danger); font-size: 0.85rem; margin: 0.25rem 0;`;
 const LinkButton = styled.button`
@@ -137,11 +140,12 @@ function AudioSlotTable({
 
   // The filters ARE the URL (`?kind=&sound=&q=`): read from it every render
   // and written back on change, so a reload or a shared link lands on the
-  // same table.
+  // same table. A kind the registry does not list is read as "all".
   const [searchParams, setSearchParams] = useSearchParams();
+  const kindKeys = useMemo(() => (subjects || []).map((g) => g.kind), [subjects]);
   const {
     kind, sound, search, prompt,
-  } = filtersFromParams(searchParams);
+  } = filtersFromParams(searchParams, kindKeys);
   const [page, setPage] = useState(1);
   // The params a filter change builds on. react-router's functional
   // setSearchParams form still hands the updater THIS render's params, so two
@@ -151,16 +155,31 @@ function AudioSlotTable({
   const pendingParams = useRef(searchParams);
   useEffect(() => { pendingParams.current = searchParams; }, [searchParams]);
   const setFilter = (patch) => {
-    const next = paramsFromFilters({ ...filtersFromParams(pendingParams.current), ...patch });
+    const next = paramsFromFilters({ ...filtersFromParams(pendingParams.current, kindKeys), ...patch });
     pendingParams.current = next;
     setSearchParams(next, { replace: true });
     setPage(1);
   };
 
+  // The Search box shows its OWN text and reaches `?q=` after a pause
+  // (createSearchSync): bound straight to the URL it lost keystrokes, since
+  // each commit re-filters every row. setFilter is re-created every render,
+  // so the debounced commit calls the latest one through a ref.
+  const [searchText, setSearchText] = useState(search);
+  const setFilterRef = useRef(setFilter);
+  setFilterRef.current = setFilter;
+  const [searchSync] = useState(() => createSearchSync((v) => setFilterRef.current({ search: v })));
+  useEffect(() => {
+    const v = searchSync.fromUrl(search);
+    if (v !== null) setSearchText(v);
+  }, [search, searchSync]);
+  useEffect(() => () => searchSync.cancel(), [searchSync]);
+
   const [selected, setSelected] = useState(() => new Set());
   const [subject, setSubject] = useState(null);
   const [style, setStyle] = useState('');
   const [engine, setEngine] = useState('realistic');
+  const [variants, setVariants] = useState(DEFAULT_SFX_VARIANTS);
   // Plan 2026-10-03: off by default -- a forced prompt replaces even a
   // hand-written one (the old version stays in the slot's history).
   const [forcePrompt, setForcePrompt] = useState(false);
@@ -182,6 +201,12 @@ function AudioSlotTable({
     [rows, kind, sound, search, prompt],
   );
   const causes = useMemo(() => failedByCause(knownJobs), [knownJobs]);
+  // One retry at a time: disabled={retry.isPending} lands a render late, and
+  // a fast double-click sent two POSTs.
+  // The mutation's own onError toasts a failure, so the rejection is dropped.
+  const retryRef = useRef(retry);
+  retryRef.current = retry;
+  const [retryOnce] = useState(() => singleFlight((ids) => retryRef.current.mutateAsync(ids).catch(() => {})));
 
   const shownPage = clampPage(page, matching.length);
   const pages = pageCount(matching.length);
@@ -208,7 +233,9 @@ function AudioSlotTable({
   );
 
   const onQueue = async () => {
-    const { items, skipped } = queueItems(selected, rowsById, { style, engine, forcePrompt });
+    const { items, skipped } = queueItems(selected, rowsById, {
+      style, engine, forcePrompt, variants,
+    });
     setFailure(null);
     if (items.length === 0) {
       setNotice(enqueueSummary([], skipped).message);
@@ -260,8 +287,8 @@ function AudioSlotTable({
         <Field>
           Search
           <input
-            value={search}
-            onChange={(e) => setFilter({ search: e.target.value })}
+            value={searchText}
+            onChange={(e) => { setSearchText(e.target.value); searchSync.type(e.target.value); }}
             placeholder="subject or slot"
           />
         </Field>
@@ -290,6 +317,19 @@ function AudioSlotTable({
             {SFX_ENGINES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
         </Field>
+        <VariantsField title="How many takes each queued sfx slot generates">
+          Variants (sfx)
+          <input
+            type="number"
+            min={1}
+            max={MAX_SFX_VARIANTS}
+            value={variants}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              if (Number.isInteger(n) && n >= 1 && n <= MAX_SFX_VARIANTS) setVariants(n);
+            }}
+          />
+        </VariantsField>
         <CheckLabel title="Write a new prompt for every queued slot, even one that already has a prompt (hand-written included). The old prompt stays in the slot's history.">
           <input
             type="checkbox"
@@ -338,7 +378,7 @@ function AudioSlotTable({
                 {g.samples.join(', ')}
                 {g.more > 0 && ` … and ${g.more} more`}
               </Samples>
-              <Secondary type="button" disabled={retry.isPending} onClick={() => retry.mutate(g.ids)}>
+              <Secondary type="button" disabled={retry.isPending} onClick={() => retryOnce(g.ids)}>
                 Retry these {g.count}
               </Secondary>
             </FailGroup>

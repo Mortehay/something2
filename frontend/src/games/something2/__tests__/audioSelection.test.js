@@ -1,4 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import {
+  describe, it, expect, vi, afterEach,
+} from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
@@ -6,6 +8,7 @@ import {
   PAGE_SIZE, pageCount, clampPage, toggle, selectPage, deselectPage, isPageFullySelected,
   selectAllMatching, selectionOutsideFilter, queueItems, enqueueSummary, normalizeCause, failedByCause,
   soundText, MAX_JOB_ITEMS, chunkItems, queueInChunks, jobsForKnownSubjects, uploadOnlyCount, slotEntriesFor,
+  DEFAULT_SFX_VARIANTS, SEARCH_DEBOUNCE_MS, createSearchSync, singleFlight,
 } from '../audioSelection.js';
 
 // A registry response shaped like GET /api/audio/admin/subjects.
@@ -123,6 +126,22 @@ describe('filters', () => {
     });
   });
 
+  // SOMET-596 rework: `?kind=nope` showed "All kinds" in the select over a
+  // table of 0 rows, and choosing "All kinds" fired no change event, so no
+  // control on screen could leave that state.
+  it('drops a kind the registry does not list, once the kinds are known', () => {
+    const known = ['world', 'creature'];
+    expect(filtersFromParams(new URLSearchParams('kind=nope&sound=all'), known))
+      .toEqual({
+        kind: 'all', sound: 'all', search: '', prompt: 'all',
+      });
+    expect(filtersFromParams(new URLSearchParams('kind=creature'), known).kind).toBe('creature');
+    // Before the subjects load there is nothing to check against, so the
+    // deep link is kept rather than thrown away on the first render.
+    expect(filtersFromParams(new URLSearchParams('kind=creature'), []).kind).toBe('creature');
+    expect(filtersFromParams(new URLSearchParams('kind=creature')).kind).toBe('creature');
+  });
+
   it('writes filters back to the URL, omitting defaults, and round-trips', () => {
     expect(paramsFromFilters({
       kind: 'all', sound: 'missing', search: '', prompt: 'all',
@@ -222,6 +241,33 @@ describe('queueItems', () => {
       },
       { subject_kind: 'world', subject_key: 'Ash', slot: 'music' },
     ]);
+  });
+
+  // SOMET-596 rework: the queue bar's Variants control. The route accepts
+  // `variants` (an integer 1-5) on sfx items only and rejects it on a
+  // music/ambience item, so it must never be put on one.
+  it('puts the chosen variants on sfx items only', () => {
+    const { items } = queueItems(new Set(['world/Ash/music', 'creature/Slime/hurt']), index, { variants: 5 });
+    expect(items).toEqual([
+      {
+        subject_kind: 'creature', subject_key: 'Slime', slot: 'hurt', engine: 'realistic', variants: 5,
+      },
+      { subject_kind: 'world', subject_key: 'Ash', slot: 'music' },
+    ]);
+  });
+
+  it('sends no variants for a value the route would reject', () => {
+    for (const bad of [0, 6, 2.5, NaN, '3', null]) {
+      const { items } = queueItems(new Set(['creature/Slime/hurt']), index, { variants: bad });
+      expect(items[0]).not.toHaveProperty('variants');
+    }
+  });
+
+  it('defaults the bar to the server\'s own pack size', () => {
+    const gen = readFileSync(fileURLToPath(new URL('../../../../../backend/src/services/audioGeneration.js', import.meta.url)), 'utf8');
+    const m = /const DEFAULT_SFX_VARIANTS = (\d+);/.exec(gen);
+    expect(m).not.toBeNull();
+    expect(DEFAULT_SFX_VARIANTS).toBe(Number(m[1]));
   });
 
   it('summarises the enqueue responses of every chunk', () => {
@@ -337,6 +383,123 @@ describe('failed by cause', () => {
       cause: 'audio service answered 404 for POST /api/audio/sfx (job N)', count: 1, more: 0, ids: ['900'], samples: ['world/Vale/music'],
     });
     expect(failedByCause([])).toEqual([]);
+  });
+});
+
+describe('failed by cause: ordering', () => {
+  const job = (id, error) => ({
+    id: String(id), subject_kind: 'creature', subject_key: `c${id}`, slot: 'hurt', status: 'failed', error,
+  });
+
+  // SOMET-596 rework: the fixture above lists its biggest group first, so
+  // the sort was untested -- removing it left the suite green.
+  it('puts the biggest group first even when it appears last', () => {
+    const groups = failedByCause([
+      job(1, 'small cause'),
+      job(2, 'big cause'), job(3, 'big cause'), job(4, 'big cause'),
+      job(5, 'middle cause'), job(6, 'middle cause'),
+    ]);
+    expect(groups.map((g) => [g.cause, g.count])).toEqual([
+      ['big cause', 3], ['middle cause', 2], ['small cause', 1],
+    ]);
+  });
+
+  it('breaks a tie by cause text, so the order is stable across polls', () => {
+    const groups = failedByCause([job(1, 'zeta'), job(2, 'alpha'), job(3, 'mu')]);
+    expect(groups.map((g) => g.cause)).toEqual(['alpha', 'mu', 'zeta']);
+  });
+});
+
+describe('search box: debounced URL sync', () => {
+  // SOMET-596 rework: the Search input was bound straight to `?q=`, and a
+  // URL commit takes 30-300 ms (every row is re-filtered), so the next key
+  // was applied to the OLD value and typed characters were lost ("Titan" ->
+  // "n"). The input now shows local text; the URL follows after a pause.
+  afterEach(() => { vi.useRealTimers(); });
+  const harness = () => {
+    vi.useFakeTimers();
+    const commits = [];
+    const sync = createSearchSync((v) => commits.push(v));
+    return { sync, commits };
+  };
+
+  it('commits the whole word once, after the pause, when typed faster than the URL commits', () => {
+    const { sync, commits } = harness();
+    let shown = '';
+    for (const ch of 'Titan') {
+      shown += ch;
+      sync.type(shown);
+      // The URL has not caught up, as in the browser: it still says ''.
+      expect(sync.fromUrl('')).toBeNull();
+      vi.advanceTimersByTime(60);
+    }
+    expect(commits).toEqual([]);
+    vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS);
+    expect(commits).toEqual(['Titan']);
+  });
+
+  it('keeps the typed text while a commit is still landing, then follows the URL again', () => {
+    const { sync, commits } = harness();
+    sync.type('Tit');
+    vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS);
+    expect(commits).toEqual(['Tit']);
+    sync.type('Titan');
+    // The 'Tit' commit lands while 'Titan' is pending: the box keeps 'Titan'.
+    expect(sync.fromUrl('Tit')).toBeNull();
+    vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS);
+    expect(commits).toEqual(['Tit', 'Titan']);
+    // Nothing pending: a URL change (back/forward, a shared link) wins.
+    expect(sync.fromUrl('Vale')).toBe('Vale');
+  });
+
+  it('cancel drops a pending commit (unmount)', () => {
+    const { sync, commits } = harness();
+    sync.type('Ti');
+    sync.cancel();
+    vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS * 2);
+    expect(commits).toEqual([]);
+    expect(sync.fromUrl('x')).toBe('x');
+  });
+
+  it('the table binds its Search input to the local text, not to the URL param', () => {
+    const src = readFileSync(fileURLToPath(new URL('../AudioSlotTable.jsx', import.meta.url)), 'utf8');
+    const input = /Search\s*<input([\s\S]*?)\/>/.exec(src);
+    expect(input).not.toBeNull();
+    expect(input[1]).not.toMatch(/value=\{search\}/);
+    expect(input[1]).not.toMatch(/setFilter\(/);
+    expect(input[1]).toMatch(/value=\{searchText\}/);
+  });
+});
+
+describe('singleFlight (Retry these N)', () => {
+  // SOMET-596 rework: a fast double-click sent two POSTs 2 ms apart, because
+  // disabled={retry.isPending} lands a render too late.
+  it('ignores a second call while the first is in flight, and allows one after it settles', async () => {
+    let release;
+    const fn = vi.fn(() => new Promise((r) => { release = r; }));
+    const once = singleFlight(fn);
+    const first = once('a');
+    expect(once('b')).toBeUndefined();
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(fn).toHaveBeenCalledWith('a');
+    release('done');
+    await expect(first).resolves.toBe('done');
+    once('c');
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it('releases after a failure too', async () => {
+    const fn = vi.fn().mockRejectedValueOnce(new Error('boom')).mockResolvedValue('ok');
+    const once = singleFlight(fn);
+    await expect(once()).rejects.toThrow('boom');
+    await expect(once()).resolves.toBe('ok');
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it('the table routes Retry these N through it', () => {
+    const src = readFileSync(fileURLToPath(new URL('../AudioSlotTable.jsx', import.meta.url)), 'utf8');
+    expect(src).not.toMatch(/onClick=\{\(\) => retry\.mutate\(/);
+    expect(src).toMatch(/singleFlight\(/);
   });
 });
 
