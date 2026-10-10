@@ -8,7 +8,7 @@ const { bodyLift } = require('./attackOrigin.js');
 const {
   applyDamageWithEffects, NO_MITIGATION, playerKey, creatureKey,
 } = require('./damage');
-const { hasLineOfSight } = require('./weapons');
+const { hasLineOfSight, hitRadius } = require('./weapons');
 const { applyElementEffect, applyHitStatuses } = require('./effects');
 const { shoveAwayFrom } = require('./knockback');
 // SOMET-283: the leash-aware creature shove. The clamp is a creature-domain
@@ -504,9 +504,8 @@ class ProjectileSim {
             // the cue fires exactly when the arrow would have connected --
             // and never for a guard the shot merely passed near.
             if (projectileBlockedBy(p, c)) {
-              const bhalf = (c.hitboxRadius || (c.width ? c.width / 2 : 24) || 24);
-              const brr = p.radius + bhalf;
-              const bcx = c.x + (c.width ? c.width / 2 : bhalf), bcy = c.y + (c.height ? c.height / 2 : bhalf);
+              const brr = p.radius + hitRadius(c);
+              const bcx = c.x + (c.width ? c.width / 2 : 24), bcy = c.y + (c.height ? c.height / 2 : 24);
               if (dist2(p.x, p.y, bcx, bcy) <= brr * brr) {
                 recordBlock(p, c, bcx, bcy, -ux, -uy, blocks);
               }
@@ -515,9 +514,9 @@ class ProjectileSim {
           }
           const key = `c:${c.id}`;
           if (p.hitIds.has(key)) continue;
-          const half = (c.hitboxRadius || (c.width ? c.width / 2 : 24) || 24);
-          const cx = c.x + (c.width ? c.width / 2 : half), cy = c.y + (c.height ? c.height / 2 : half);
-          const rr = p.radius + half;
+          // SOMET-575: padded capture radius (hitRadius), same as melee.
+          const cx = c.x + (c.width ? c.width / 2 : 24), cy = c.y + (c.height ? c.height / 2 : 24);
+          const rr = p.radius + hitRadius(c);
           if (dist2(p.x, p.y, cx, cy) <= rr * rr) {
             // SOMET-343: only a CONTACT detonator goes off on touching
             // something. A 'max_range' shot flies through, taking the ordinary
@@ -577,9 +576,8 @@ class ProjectileSim {
           if (!projectileHitsPlayer(p, pl)) continue;
           const key = `p:${pl.userId}`;
           if (p.hitIds.has(key)) continue;
-          const half = pl.width / 2;
-          const px = pl.x + half, py = pl.y + pl.height / 2;
-          const rr = p.radius + half;
+          const px = pl.x + pl.width / 2, py = pl.y + pl.height / 2;
+          const rr = p.radius + hitRadius(pl); // SOMET-575: padded, same as creatures
           if (dist2(p.x, p.y, px, py) <= rr * rr) {
             // SOMET-343: only a CONTACT detonator goes off on touching
             // something. A 'max_range' shot flies through, taking the ordinary

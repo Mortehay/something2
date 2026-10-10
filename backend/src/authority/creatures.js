@@ -4,7 +4,7 @@
 // creature's CURRENT chunk (chunkOf), never its spawn chunk.
 const { resolveMove, MAP_TILE_SIZE } = require('./collision');
 const { chunkOf, CHUNK_KEY } = require('./coords');
-const { inArc, hasLineOfSight } = require('./weapons');
+const { inArc, hasLineOfSight, hitRadius } = require('./weapons');
 const {
   applyDamageWithEffects, NO_MITIGATION, isProvokedBy, provoke, playerKey, creatureKey,
 } = require('./damage');
@@ -2449,8 +2449,7 @@ class CreatureSim {
     const hit = [], blocked = [];
     for (const [id, c] of this.creatures) {
       const cc = center(c);
-      const targetRadius = c.hitboxRadius || (c.width ? c.width / 2 : 24) || 24;
-      if (!inArc(ox, oy, nx, ny, cc.x, cc.y, reach, arcWidth, targetRadius)) continue;
+      if (!inArc(ox, oy, nx, ny, cc.x, cc.y, reach, arcWidth, hitRadius(c))) continue;
       // Terrain blocks the swing, exactly as it blocks a projectile.
       if (!hasLineOfSight(this.map, ox, oy, cc.x, cc.y)) continue;
       // SOMET-473: a pacified swing at the charmer's pet is reported as

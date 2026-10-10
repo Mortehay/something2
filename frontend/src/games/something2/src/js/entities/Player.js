@@ -46,7 +46,6 @@ export class Player extends Entity {
     constructor(){
         super(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, 64, 64);
         this.speed = 100;
-        this.hitboxRadius = 32;
         this.facing = "s";
         this.damageMultiplier = 1;
         this.fireRateMultiplier = 1;

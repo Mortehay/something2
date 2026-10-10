@@ -650,3 +650,37 @@ test('a creature-owned AoE kill credits killerUserId: null, not the shooter crea
   const out = sim.step(1, { creatures, players: [], map: WALK_ALL });
   assert.deepEqual(out.kills, [{ id: 'guardY', killerUserId: null }]);
 });
+
+// --- SOMET-575: padded capture radius ---------------------------------------
+// A 6px dart flying along y=0 past a body offset perpendicular to the flight.
+const DART = { ...BOW, damage: 100, projectile_radius: 6 };
+
+function dartAtCreature(offset) {
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: DART });
+  // 48px creature, centre (54, offset).
+  const creatures = creaturesStub([{ id: 'c1', x: 30, y: offset - 24, width: 48, height: 48, hp: 10 }]);
+  return sim.step(0.1, { creatures, players: [], map: WALK_ALL }).kills.length === 1;
+}
+
+function dartAtPlayer(offset) {
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: { ...DART, damage: 20 } });
+  // 64px player, centre (94, offset).
+  const target = { userId: 'u2', x: 62, y: offset - 32, width: 64, height: 64, hp: 100 };
+  sim.step(0.12, { creatures: creaturesStub([]), players: [target], map: WALK_ALL });
+  return target.hp < 100;
+}
+
+test('SOMET-575 a dart 33-37px off a 48px creature centre hits (old capture radius was 6+24=30)', () => {
+  assert.equal(dartAtCreature(20), true, 'sanity: a near-centre shot hits');
+  assert.equal(dartAtCreature(33), true);
+  assert.equal(dartAtCreature(37), true);
+  assert.equal(dartAtCreature(45), false, 'padding is bounded');
+});
+
+test('SOMET-575 a dart 40px off a 64px player centre hits (old capture radius was 6+32=38)', () => {
+  assert.equal(dartAtPlayer(20), true, 'sanity: a near-centre shot hits');
+  assert.equal(dartAtPlayer(40), true);
+  assert.equal(dartAtPlayer(55), false, 'padding is bounded');
+});

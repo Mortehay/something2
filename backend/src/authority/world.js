@@ -1,7 +1,7 @@
 const { resolveMove } = require('./collision');
 const { CreatureSim, CREATURE_SIZE, shoveCreature } = require('./creatures');
 const { shoveAwayFrom } = require('./knockback');
-const { normalizeAim, inArc, hasLineOfSight, weaponStaminaCost } = require('./weapons');
+const { normalizeAim, inArc, hasLineOfSight, weaponStaminaCost, hitRadius } = require('./weapons');
 const { resolveEffectName, momentForAttack, blockedImpact } = require('./vfx.js');
 const { attackLift, bodyLift } = require('./attackOrigin.js');
 const { ProjectileSim } = require('./projectiles');
@@ -1117,8 +1117,7 @@ class World {
         // sparks off a target it did no damage to reads as a bug.
         if (pacifiedFrom != null && other.userId === pacifiedFrom) continue;
         const ocx = other.x + other.width / 2, ocy = other.y + other.height / 2;
-        const targetRadius = other.hitboxRadius || (other.width ? other.width / 2 : 32) || 32;
-        if (inArc(cx, cy, nx, ny, ocx, ocy, reach, arc, targetRadius)
+        if (inArc(cx, cy, nx, ny, ocx, ocy, reach, arc, hitRadius(other))
             && hasLineOfSight(this.map, cx, cy, ocx, ocy)) {
           applyDamageWithEffects(other, weaponDamage(p, w), w.element, other.mit || NO_MITIGATION,
             this.now, playerKey(userId));
@@ -1425,7 +1424,7 @@ class World {
     if (skill.type === 'melee') {
       const { nx, ny } = normalizeAim(ax, ay, p.facing);
       const isSpin = skill.channeled || skill.id.includes('whirlwind') || skill.id.includes('spin') || skill.id.includes('crane');
-      const reach = isSpin ? 120 : Math.max(85, (Number(skill.range) || 85) * 1.25);
+      const reach = isSpin ? 120 : Math.max(90, (Number(skill.range) || 90) * 1.3);
       const arc = isSpin ? (Math.PI * 2) : (Math.PI * 0.75);
       // The same target set applyMeleeArc resolves, read before it can
       // remove a kill.
