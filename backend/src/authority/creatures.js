@@ -2381,10 +2381,11 @@ class CreatureSim {
           // loop, so the inner `?? CREATURE_DAMAGE` fallback here was dead.
           const dmg = (bh.damageOverride ?? c.damage) * ability.damageMult * c._buff.damageMult;
           if (ability.attackKind === 'melee') {
-            // tp is a PLAYER, not a creature: no aura ever buffs a player's
-            // defence, so tp.mit is read as-is here, unlike the three
-            // creature-target sites below which read effectiveMit(target).
-            applyDamageWithEffects(tp, dmg, 'physical', tp.mit || NO_MITIGATION, now, creatureKey(c.id));
+            // SOMET-606: tp is a PLAYER, and an enemy aura CAN lower a player's
+            // defence now -- effectiveMit reads tp._buff exactly as it does a
+            // creature's, so this is the same one defence read as the
+            // creature-target sites.
+            applyDamageWithEffects(tp, dmg, 'physical', effectiveMit(tp), now, creatureKey(c.id));
             // SOMET-290 — a landed blow re-arms the creature's OWN memory, so
             // provocation lasts "for that engagement" (spec §3) rather than for
             // a fixed number of seconds from the first hit. Without it a

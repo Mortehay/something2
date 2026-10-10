@@ -1,5 +1,5 @@
 const { resolveMove } = require('./collision');
-const { CreatureSim, CREATURE_SIZE, shoveCreature, NO_BUFF } = require('./creatures');
+const { CreatureSim, CREATURE_SIZE, shoveCreature, effectiveMit, NO_BUFF } = require('./creatures');
 const { shoveAwayFrom } = require('./knockback');
 const { normalizeAim, inArc, hasLineOfSight, weaponStaminaCost } = require('./weapons');
 const { resolveEffectName, momentForAttack, blockedImpact } = require('./vfx.js');
@@ -8,7 +8,7 @@ const { ProjectileSim } = require('./projectiles');
 const {
   weaponUse, weaponHit, creatureUse, creatureHurt, skillUse, skillAttackKind, attackKindOf, pushSfxEvent,
 } = require('./sfxEvents.js');
-const { applyDamageWithEffects, drainMana, NO_MITIGATION, playerKey } = require('./damage');
+const { applyDamageWithEffects, drainMana, playerKey } = require('./damage');
 const {
   tickEffects, effectMagnitude, applyElementEffect, applyHitStatuses,
   canAct, clearInterrupt, activeEffectKeys,
@@ -534,7 +534,7 @@ class World {
         // applier's userId for kill attribution already, so naming it here
         // costs nothing and keeps every damage site attributed rather than
         // leaving one that stamps "hit by nobody".
-        applyDamageWithEffects(t, m, BURN_ELEMENT, t.mit || NO_MITIGATION, this.now, playerKey(sourceId));
+        applyDamageWithEffects(t, m, BURN_ELEMENT, effectiveMit(t), this.now, playerKey(sourceId));
         return false;
       });
     }
@@ -1120,7 +1120,7 @@ class World {
         const targetRadius = other.hitboxRadius || (other.width ? other.width / 2 : 32) || 32;
         if (inArc(cx, cy, nx, ny, ocx, ocy, reach, arc, targetRadius)
             && hasLineOfSight(this.map, cx, cy, ocx, ocy)) {
-          applyDamageWithEffects(other, weaponDamage(p, w), w.element, other.mit || NO_MITIGATION,
+          applyDamageWithEffects(other, weaponDamage(p, w), w.element, effectiveMit(other),
             this.now, playerKey(userId));
           applyElementEffect(other, w.element, this.now, userId);
           // SOMET-495: the tree's riders, applied ONCE per target per swing --
@@ -1136,7 +1136,7 @@ class World {
           // creatures would be a PvP balance bug nothing else would catch.
           if (augment && augment.bonusDamage > 0) {
             applyDamageWithEffects(other, augment.bonusDamage, augment.element,
-              other.mit || NO_MITIGATION, this.now, playerKey(userId));
+              effectiveMit(other), this.now, playerKey(userId));
             applyElementEffect(other, augment.element, this.now, userId);
           }
           playerHits++;

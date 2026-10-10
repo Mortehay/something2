@@ -6,7 +6,7 @@
 const { resolveEffectName, blockedImpact } = require('./vfx.js');
 const { bodyLift } = require('./attackOrigin.js');
 const {
-  applyDamageWithEffects, NO_MITIGATION, playerKey, creatureKey,
+  applyDamageWithEffects, playerKey, creatureKey,
 } = require('./damage');
 const { hasLineOfSight } = require('./weapons');
 const { applyElementEffect, applyHitStatuses } = require('./effects');
@@ -19,7 +19,7 @@ const { shoveAwayFrom } = require('./knockback');
 // resolved behaviour's chaseStyle), imported rather than re-expressed here as
 // a faction test -- a second definition would drift from the tick's own
 // routing and would wrongly sweep in the hostile portal guards.
-const { shoveCreature, immuneToPlayerDamage } = require('./creatures');
+const { shoveCreature, immuneToPlayerDamage, effectiveMit } = require('./creatures');
 
 // Sub-step resolution for terrain sampling, shared with the melee
 // line-of-sight walk in weapons.js. Defined in subStep.js (see the note there
@@ -140,7 +140,7 @@ function applyCreatureAugment(p, creatures, c, scale, now) {
 function applyPlayerAugment(p, pl, scale, now) {
   if (!p.augment || !(p.augment.bonusDamage > 0)) return;
   applyDamageWithEffects(pl, p.augment.bonusDamage * scale, p.augment.element,
-    pl.mit || NO_MITIGATION, now, provokerKeyFor(p));
+    effectiveMit(pl), now, provokerKeyFor(p));
   applyElementEffect(pl, p.augment.element, now, p.ownerId);
 }
 
@@ -423,7 +423,7 @@ class ProjectileSim {
       // resistances on top. It floors at 1, so an edge hit still registers.
       // SOMET-343: same falloff as the weapon packet (see the creature branch).
       applyPlayerAugment(p, pl, 1 - d / r, now);
-      applyDamageWithEffects(pl, p.damage * (1 - d / r), p.element, pl.mit || NO_MITIGATION,
+      applyDamageWithEffects(pl, p.damage * (1 - d / r), p.element, effectiveMit(pl),
         now, provokerKeyFor(p));
       applyElementEffect(pl, p.element, now, p.ownerId);
       // SOMET-495: the shooter's tree riders. A player and a creature must take
@@ -595,7 +595,7 @@ class ProjectileSim {
             this._pushHitSfx(p, px, py); // game audio slice 3
             // SOMET-343: full-strength bonus on a direct hit, no falloff.
             applyPlayerAugment(p, pl, 1, now);
-            applyDamageWithEffects(pl, p.damage, p.element, pl.mit || NO_MITIGATION,
+            applyDamageWithEffects(pl, p.damage, p.element, effectiveMit(pl),
               now, provokerKeyFor(p));
             applyElementEffect(pl, p.element, now, p.ownerId);
             // SOMET-495: the shooter's tree riders on a direct PvP hit, the
