@@ -1719,3 +1719,42 @@ test('SOMET-365: players in adjacent chunks still see each other', async () => {
   a.close(); b.close();
   handle.close(); server.close();
 });
+
+// SOMET-574: a creature's swing and the spark it lands are produced by
+// World.tickCreatures (stamped `c:<id>` in creatures.js) and must reach the
+// client on the state frame. The tick loop used to destructure only `kills`
+// from tickCreatures and read attacks/impacts from world.tick() instead, which
+// never returns them -- so every creature swing was dropped server-side while
+// each piece was green in isolation. The descriptors here are injected at the
+// tickCreatures boundary so the test pins the server.js wiring, not the sim.
+test('creature attacks and impacts returned by tickCreatures reach the state frame', async (t) => {
+  const { World } = require('../src/authority/world.js');
+  const orig = World.prototype.tickCreatures;
+  const ATK = { a: 'c:574', v: 'sweep_arc', x: 10, y: 20, nx: 1, ny: 0, reach: 40, arc: 0.6, hit: true };
+  const IMP = { a: 'c:574', t: 'p:1', x: 12, y: 22, v: 'hit_spark' };
+  let injected = 0;
+  World.prototype.tickCreatures = function patched(...args) {
+    const r = orig.apply(this, args);
+    // Every tick, not once: the first ticks can run before this socket is
+    // registered for broadcast, and a one-shot injection would race that.
+    injected++;
+    return { ...r, attacks: [...(r.attacks || []), ATK], impacts: [...(r.impacts || []), IMP] };
+  };
+  t.after(() => { World.prototype.tickCreatures = orig; });
+
+  const { url, handle, server } = await boot();
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+  let atk = null; let imp = null;
+  for (let i = 0; i < 30 && !(atk && imp); i++) {
+    const s = await nextMsg(ws, 'state');
+    if (Array.isArray(s.attacks)) atk = atk || s.attacks.find((a) => a.a === 'c:574');
+    if (Array.isArray(s.impacts)) imp = imp || s.impacts.find((a) => a.a === 'c:574');
+  }
+  assert.ok(injected >= 1, 'precondition: the tick loop called tickCreatures');
+  assert.deepEqual(atk, ATK, 'the creature swing must ride the state frame');
+  assert.deepEqual(imp, IMP, 'the creature impact must ride the state frame');
+  ws.close(); handle.close(); server.close();
+});

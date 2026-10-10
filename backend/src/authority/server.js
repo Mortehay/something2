@@ -3065,15 +3065,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // tick is reported here and goes through the SAME death commit as a
       // melee or projectile kill — burn must not become a fourth way to die
       // that skips loot or deletes twice.
-      const {
-        kills: killedByEffects, attacks: creatureAttacks, impacts: creatureImpacts,
-      } = entry.world.tick(dt);
-      // Slice D: a wolf bite goes onto the same stash a halberd swing does,
-      // and is bounded by the same cap -- creatures are the numerous actors,
-      // so leaving them unbounded would be the one thing able to blow the
-      // frame in a pack fight.
-      pushAttacks(entry, creatureAttacks);
-      pushImpacts(entry, creatureImpacts);
+      const { kills: killedByEffects } = entry.world.tick(dt);
       for (const k of dedupeKillsById(killedByEffects)) onCreatureDeath(entry, k.id, k.killerUserId);
       if (entry.links && entry.links.size > 0) {
         const now = Date.now();
@@ -3265,7 +3257,16 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // aggro/chase/contact damage + respawns (before state). Guard kills route
       // through onCreatureDeath like every other kill site, so the DELETE +
       // drop roll stay authoritative.
-      const { kills: killedByGuards } = entry.world.tickCreatures(dt, entry.activeChunks);
+      const {
+        kills: killedByGuards, attacks: creatureAttacks, impacts: creatureImpacts,
+      } = entry.world.tickCreatures(dt, entry.activeChunks);
+      // Slice D: a wolf bite goes onto the same stash a halberd swing does,
+      // and is bounded by the same cap -- creatures are the numerous actors,
+      // so leaving them unbounded would be the one thing able to blow the
+      // frame in a pack fight. SOMET-574: read from tickCreatures, which is
+      // what produces them; world.tick() returns only kills.
+      pushAttacks(entry, creatureAttacks);
+      pushImpacts(entry, creatureImpacts);
       for (const k of dedupeKillsById(killedByGuards)) onCreatureDeath(entry, k.id, k.killerUserId);
       const {
         kills: killedByProjectiles, detonations, stoneHits, blocks,
