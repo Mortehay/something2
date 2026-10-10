@@ -2451,6 +2451,10 @@ class CreatureSim {
       const { cx, cy } = chunkOf(c.x, c.y, this.chunkSize);
       if (active.has(CHUNK_KEY(cx, cy))) continue;
       if (c.dirty) continue;
+      // SOMET-603: boss instances are never persisted, so there is nothing to
+      // reload them from -- their owner (the boss manager / debug paths)
+      // removes them. Phase minions carry no bossTier and stay prunable.
+      if (c.bossTier) continue;
       this.creatures.delete(id);
       dropped++;
     }

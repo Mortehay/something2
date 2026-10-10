@@ -175,6 +175,76 @@ test('onCreatureDeath gives guaranteed Legendary to Top 3 and Victor Boon to par
   assert.ok(frames.find((f) => f.kind === 'world_boss_slain').text.includes('zzMagma Boss has been slain!'));
 });
 
+const flush = () => new Promise((r) => setImmediate(r));
+
+// D2: pruning or world eviction used to make the tick read "boss missing" as a
+// kill -- slain announcement, legendary drops (to user '1' as the fallback),
+// gold pile and chest, with nobody having fought it.
+test('a boss missing from its loaded world is re-placed, never announced slain (SOMET-603)', async (t) => {
+  t.mock.method(console, 'warn', () => {});
+  const m = await managerWith(catalogOf([bossRow()]));
+  let queries = 0;
+  m.pool = { query: async () => { queries++; return { rows: [] }; } };
+  const entry = worldEntry();
+  const worlds = new Map([['w1', entry]]);
+  const now = Date.now();
+  m.forceSpawn(now, worlds, {}, () => {});
+  const id = m.bossCreatureId;
+  entry.world.creatures.remove(id); // pruned / world reloaded without it
+  m.currentBoss.currentHp = 7000;
+  m.currentBoss._playerDamage = new Map([['user_1', 5000]]);
+
+  const frames = [];
+  m.tick(now + 1000, worlds, (f) => frames.push(f));
+  await flush();
+
+  assert.equal(frames.filter((f) => f.kind === 'world_boss_slain').length, 0, 'no slain announcement');
+  assert.equal(queries, 0, 'no drops, gold or chest written');
+  assert.equal(m.hasBuff('user_1'), false, 'no Victor\'s Boon');
+  assert.equal(m.state, 'active');
+  assert.equal(m.bossCreatureId, id);
+  const c = entry.world.creatures.get(id);
+  assert.ok(c, 'the boss is back in the sim under the same id');
+  assert.equal(c.hp, 7000, 'at its current hp, not healed');
+  assert.equal(c.maxHp, 12000, 'its max hp is the boss max, not the current hp');
+  assert.equal(c.bossTier, 'world');
+  assert.equal(c._playerDamage.get('user_1'), 5000, 'contribution survives the re-place');
+});
+
+// I3: the death used to be claimed only after the reward awaits, so a tick
+// landing mid-reward saw "boss missing" and paid out a second time.
+test('a real kill announces slain exactly once even if the tick runs mid-reward (SOMET-603)', async (t) => {
+  t.mock.method(console, 'warn', () => {});
+  const m = await managerWith(catalogOf([bossRow()]));
+  const entry = worldEntry();
+  const worlds = new Map([['w1', entry]]);
+  const now = Date.now();
+  m.forceSpawn(now, worlds, {}, () => {});
+  const id = m.bossCreatureId;
+  const c = entry.world.creatures.get(id);
+  c._playerDamage = new Map([['user_1', 9000]]);
+  entry.world.creatures.remove(id); // the real kill paths remove before dispatch
+
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const drops = [];
+  const frames = [];
+  const death = m.onCreatureDeath(entry, c, 'user_1', {
+    broadcastFn: (f) => frames.push(f),
+    dropLegendaryFn: async (e, uid) => { drops.push(uid); await gate; },
+  });
+  m.tick(now + 1000, worlds, (f) => frames.push(f)); // lands mid-reward
+  await flush();
+  release();
+  await death;
+  await flush();
+
+  assert.equal(frames.filter((f) => f.kind === 'world_boss_slain').length, 1, 'slain exactly once');
+  assert.deepEqual(drops, ['user_1'], 'one set of drops');
+  assert.equal(entry.world.creatures.has(id), false, 'a killed boss is not re-placed');
+  assert.equal(m.state, 'idle');
+});
+
 // The deleted constant used to be referenced by server.js without being
 // imported -- every "Spawn <boss>" test-panel click threw ReferenceError.
 test('nothing references the deleted WORLD_BOSS_CATALOG constant', () => {

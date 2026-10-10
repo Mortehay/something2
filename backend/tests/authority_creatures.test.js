@@ -56,6 +56,21 @@ test('pruneInactive drops non-dirty out-of-active creatures, keeps dirty', () =>
   assert.ok(s.has('dirty'));     // dirty → kept
 });
 
+// Boss instances are never persisted (wb_* ids), so a prune has nothing to
+// reload them from; the manager's tick then read "missing" as a kill.
+test('pruneInactive never unloads a boss-tier creature (SOMET-603)', () => {
+  const s = new CreatureSim(stubMap(), noRedirect);
+  s.addCreatures([
+    { id: 'wolf', type: 'Wolf', x: 100, y: 100, hp: 10 },
+    { id: 'wb_boss', type: 'zzBoss', x: 120, y: 120, hp: 9000, bossTier: 'world' },
+  ]);
+  // Both freshly added, so both non-dirty; chunk(0,0) is not active.
+  const dropped = s.pruneInactive(new Set());
+  assert.equal(dropped, 1);
+  assert.ok(!s.has('wolf'), 'an ordinary creature is still pruned');
+  assert.ok(s.has('wb_boss'), 'the boss must survive an unattended prune');
+});
+
 // --- Task 6: tick() reads the resolved behaviour, not the module constants ---
 
 test('tick returns { killed, shots }', () => {

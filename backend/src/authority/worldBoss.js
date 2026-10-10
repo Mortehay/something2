@@ -511,9 +511,13 @@ class WorldBossManager {
               });
             }
           } else if (!c && this.currentBoss) {
-            // Boss creature was killed or removed from the world
-            this.onCreatureDeath(entry, null, null, { pool: this.pool, broadcastFn })
-              .catch((err) => console.error('Error in world boss fallback death processing:', err));
+            // SOMET-603: missing is NOT a kill. Every real kill reaches
+            // onCreatureDeath synchronously, which idles the manager before
+            // this tick can run, so a boss still tracked here was lost (world
+            // evicted and reloaded, or removed out of band). Put it back at
+            // its current hp; never announce it slain or pay out.
+            console.warn(`[World Boss] ${this.currentBoss.name} (${this.bossCreatureId}) missing from its world; re-placing at ${this.currentBoss.currentHp} hp`);
+            this._placeBossCreature(entry, this.currentBoss.currentHp);
           }
         }
       }
@@ -556,22 +560,7 @@ class WorldBossManager {
       }
       this.currentBoss.spawnX = spawnX;
       this.currentBoss.spawnY = spawnY;
-
-      // SOMET-603: hydrated from the catalog row like every other creature, so
-      // boss_tier/element/hitbox_size/behaviour/vfx (and S3's auras) arrive the
-      // one shared way. No `damage` here: an explicit instance damage would
-      // beat the row's base_damage (ruling P1).
-      const bossCreature = hydrateCreatureRow(this.currentBoss.row, {
-        id: cid,
-        x: spawnX,
-        y: spawnY,
-        level: WORLD_BOSS_LEVEL,
-        hp: this.currentBoss.maxHp,
-      });
-
-      if (worldEntry.world.creatures && worldEntry.world.creatures.addCreatures) {
-        worldEntry.world.creatures.addCreatures([bossCreature]);
-      }
+      this._placeBossCreature(worldEntry, this.currentBoss.maxHp);
     }
 
     if (broadcastFn) {
@@ -590,6 +579,32 @@ class WorldBossManager {
         status: this.getStatus(),
       });
     }
+  }
+
+  // The ONE place a boss creature is built and put into a world sim: the
+  // spawn (at max hp) and the lost-boss re-place in tick (at current hp).
+  // SOMET-603: hydrated from the catalog row like every other creature, so
+  // boss_tier/element/hitbox_size/behaviour/vfx (and S3's auras) arrive the
+  // one shared way. No `damage` here: an explicit instance damage would beat
+  // the row's base_damage (ruling P1).
+  _placeBossCreature(worldEntry, hp) {
+    const sim = worldEntry && worldEntry.world && worldEntry.world.creatures;
+    if (!sim || !sim.addCreatures || !this.currentBoss) return null;
+    const bossCreature = hydrateCreatureRow(this.currentBoss.row, {
+      id: this.bossCreatureId,
+      x: this.currentBoss.spawnX ?? this.targetSpawnX ?? 400,
+      y: this.currentBoss.spawnY ?? this.targetSpawnY ?? 400,
+      level: WORLD_BOSS_LEVEL,
+      hp,
+    });
+    sim.addCreatures([bossCreature]);
+    const placed = sim.get ? sim.get(this.bossCreatureId) : null;
+    if (placed) {
+      // addCreatures takes maxHp from hp; a re-placed boss keeps its real max.
+      placed.maxHp = this.currentBoss.maxHp;
+      if (this.currentBoss._playerDamage) placed._playerDamage = this.currentBoss._playerDamage;
+    }
+    return placed;
   }
 
   _despawnBoss(worlds, broadcastFn, reason = 'timeout') {
@@ -654,6 +669,22 @@ class WorldBossManager {
     }
 
     const top3 = contributors.slice(0, 3);
+
+    // 2. Grant guaranteed legendary ('foxy') item to Top 3 damagers
+    const cx = Math.round((creature && creature.x) || (boss && boss.spawnX) || this.targetSpawnX || 400);
+    const cy = Math.round((creature && creature.y) || (boss && boss.spawnY) || this.targetSpawnY || 400);
+
+    // SOMET-603: claim the death BEFORE the first await. Everything below
+    // reads the locals captured above, so a tick that runs during the reward
+    // awaits sees an idle manager and cannot pay this kill out twice (or
+    // re-place a boss that was just slain).
+    this.state = 'idle';
+    this.currentBoss = null;
+    this.bossCreatureId = null;
+    this.nextSpawnTime = now + this.bossIntervalMs;
+    this.warningSent = false;
+    this._refreshInBackground();
+
     const dropFn = dropLegendaryFn || ((e, uId, x, y, lvl) => dropLegendaryItemForPlayer(dbPool, e, uId, x, y, lvl));
 
     // 1. Grant Victor's Boon buff to ALL players who dealt damage
@@ -667,10 +698,6 @@ class WorldBossManager {
         bossName: boss.name || 'World Boss',
       });
     }
-
-    // 2. Grant guaranteed legendary ('foxy') item to Top 3 damagers
-    const cx = Math.round((creature && creature.x) || (boss && boss.spawnX) || this.targetSpawnX || 400);
-    const cy = Math.round((creature && creature.y) || (boss && boss.spawnY) || this.targetSpawnY || 400);
 
     const recipients = top3.length > 0 ? top3 : [{ userId: String(killerUserId || '1'), damage: 1000 }];
     let itemOffset = -40;
@@ -740,14 +767,6 @@ class WorldBossManager {
     // 4. Broadcast chest and item updates immediately to zone
     if (broadcastChestsFn) broadcastChestsFn(entry);
     if (broadcastItemsFn) broadcastItemsFn(entry);
-
-    // Reset cycle to idle before broadcasting final status
-    this.state = 'idle';
-    this.currentBoss = null;
-    this.bossCreatureId = null;
-    this.nextSpawnTime = now + this.bossIntervalMs;
-    this.warningSent = false;
-    this._refreshInBackground();
 
     // 5. Broadcast victory announcement and idle status
     if (broadcastFn) {
