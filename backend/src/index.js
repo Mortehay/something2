@@ -155,6 +155,7 @@ const authRouter = require('./auth/routes.js');
 const progressionRoutes = require('./api/progressionRoutes.js');
 const passiveTreeRoutes = require('./api/passiveTreeRoutes.js');
 const passiveNodesRoutes = require('./api/passiveNodesRoutes.js');
+const auraEffectsRoutes = require('./api/auraEffectsRoutes.js');
 const characterRoutes = require('./api/characterRoutes.js');
 const { createQuestsRouter } = require('./routes/questsRoutes.js');
 const audioRoutes = require('./api/audioRoutes.js');
@@ -523,6 +524,7 @@ app.use('/api/passive-tree', passiveTreeRoutes(guardPool));
 // under here is adminGuard'd, reads included, while /api/passive-tree is the
 // player's read-only view of the same table.
 app.use('/api/passive-nodes', passiveNodesRoutes(guardPool));
+app.use('/api/aura-effects', auraEffectsRoutes(guardPool));
 
 // Character slots (SOMET-259): list / create / delete, plus the playable-class
 // catalog the creation form reads. Behind requireAuth, scoped to req.user.id.
