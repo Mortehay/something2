@@ -152,7 +152,19 @@ function requiredTilesFor(w, spec, row, doorwayEdges) {
   return out;
 }
 
-async function applyMapSpec(pool, spec) {
+// `moveEntry: false` applies everything EXCEPT the is_entry hand-over (SOMET-534).
+//
+// The default -- the spec's declared entry world becomes THE entry world -- is
+// what `make seed-map` means and is unchanged. The option exists for a caller
+// that applies a spec for its own sake and would only put is_entry back
+// afterwards: seed_map_db.test.js's "every shipped spec applies cleanly".
+// The apply is one transaction, so peers see it all at COMMIT or not at all.
+// What they CAN see is the window between that COMMIT moving is_entry and the
+// caller moving it back -- and guarding that window is what made the test hold
+// the shared entry-world advisory key around the whole apply (60s idle,
+// 122-189s under suite load), starving every other holder. Not moving is_entry
+// in the first place leaves no window to guard.
+async function applyMapSpec(pool, spec, { moveEntry = true } = {}) {
   // One biome read, two catalog entries: biomeNames answers "does this biome
   // exist", biomeCreatureTypes answers "which creatures can actually spawn in
   // it" (SOMET-315). Deriving the name set from the same rows keeps them from
@@ -801,7 +813,7 @@ async function applyMapSpec(pool, spec) {
     // LAST: setting is_entry clears it on every other world (index.js:1542),
     // so doing this mid-apply would fight itself as later worlds are written.
     const entry = spec.worlds.find((w) => w.is_entry);
-    if (entry) {
+    if (entry && moveEntry) {
       // One atomic statement via the shared writer (services/entryWorld.js).
       // This site was already safe -- it runs inside the apply transaction, so
       // its old clear-then-set pair could not be observed half-done -- but it
