@@ -380,6 +380,39 @@ describe('blockedPanel', () => {
     expect(p.total).toBe(1);
   });
 
+  // The browser pass caught "the rest of the batch was drawn" after a manual
+  // Stop with 0 done and 12 skills still queued. The sentence now reads the
+  // live queue; blocked rows are queued rows, so they are subtracted.
+  it('a stopped drain with other jobs queued says so, not "was drawn"', () => {
+    const p = blockedPanel({
+      run: { running: false, done: 0, blocked: [group] },
+      startError: null,
+      stats: { queued: 14, running: 0 },
+    });
+    expect(p.message).toBe('Skipped 2 queued job(s) that would render below 1024px -- '
+      + 'the batch stopped; 12 other job(s) are still queued. '
+      + 'Remove them, or re-queue those subjects on a 1024 provider.');
+    expect(p.message).not.toMatch(/was drawn/);
+  });
+
+  it('a stopped drain with only the blocked jobs left says nothing else is queued', () => {
+    const p = blockedPanel({
+      run: { running: false, done: 12, blocked: [group] },
+      startError: null,
+      stats: { queued: 2, running: 0 },
+    });
+    expect(p.message).toMatch(/-- nothing else is queued\. /);
+  });
+
+  it('a running drain says the rest is drawing; a refusal carries no message', () => {
+    const p = blockedPanel({
+      run: { running: true, blocked: [group] }, startError: null, stats: { queued: 10, running: 1 },
+    });
+    expect(p.message).toMatch(/^Skipping 2 .* -- the rest of the batch is drawing\. /);
+    expect(blockedPanel({ run: { running: false, blocked: [] }, startError: { blocked: [group] } }).message)
+      .toBe(null);
+  });
+
   it('hides a Start refusal once a batch is running, and hides when nothing is blocked', () => {
     expect(blockedPanel({ run: { running: true, blocked: [] }, startError: { blocked: [group] } }).show)
       .toBe(false);

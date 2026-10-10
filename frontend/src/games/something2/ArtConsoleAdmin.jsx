@@ -617,7 +617,7 @@ function ArtConsoleAdmin() {
   // Two sources (SOMET-594): the Start refusal, and a drain that found blocked
   // groups queued MID-BATCH and is skipping them. Only the refusal starts after
   // removing -- blockedPanel says which, and why.
-  const blocked = blockedPanel({ run, startError: startBatch.error });
+  const blocked = blockedPanel({ run, startError: startBatch.error, stats });
   const onDropBlocked = () => {
     if (!dropFlight.tryBegin()) return;
     if (!window.confirm(
@@ -776,11 +776,7 @@ function ArtConsoleAdmin() {
       {blocked.show && (
         <Blocked role="alert">
           <Err>
-            {blocked.fromRun
-              ? `${run.running ? 'Skipping' : 'Skipped'} ${blocked.total} queued job(s) that would render `
-                + 'below 1024px -- the rest of the batch '
-                + `${run.running ? 'is drawing' : 'was drawn'}. Remove them, or re-queue those subjects on a 1024 provider.`
-              : startBatch.error.message}
+            {blocked.fromRun ? blocked.message : startBatch.error.message}
           </Err>
           <ul>{blocked.lines.map((l) => <li key={l}>{l}</li>)}</ul>
           <Bar>

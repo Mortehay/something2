@@ -263,16 +263,34 @@ export function singleFlight() {
 //    batch the admin had just stopped.
 // The run's list is the live one, so it wins when both exist. A refusal is
 // hidden once a batch is running: it described a Start that has since happened.
-export function blockedPanel({ run, startError }) {
+//
+// `message` is only set for run.blocked (a refusal shows the server's own
+// text). Its second half reads the LIVE queue, not how the run ended: the old
+// "the rest of the batch was drawn" was printed after a manual Stop with 0
+// jobs done and 12 still queued. Blocked rows are queued rows, so the others
+// are queued + in flight minus the blocked total.
+export function blockedPanel({ run, startError, stats }) {
   const fromRun = Boolean(run?.blocked?.length);
   const s = blockedSummary(fromRun ? run.blocked : startError?.blocked);
   const startAfter = !fromRun && !run?.running;
+  let message = null;
+  if (fromRun) {
+    const others = Math.max(0,
+      Number(stats?.queued || 0) + Number(stats?.running || 0) - s.total);
+    let rest;
+    if (run.running) rest = 'the rest of the batch is drawing.';
+    else if (others > 0) rest = `the batch stopped; ${others} other job(s) are still queued.`;
+    else rest = 'nothing else is queued.';
+    message = `${run.running ? 'Skipping' : 'Skipped'} ${s.total} queued job(s) that would render `
+      + `below 1024px -- ${rest} Remove them, or re-queue those subjects on a 1024 provider.`;
+  }
   return {
     ...s,
     show: s.total > 0 && (fromRun || !run?.running),
     fromRun,
     startAfter,
     dismissable: !fromRun,
+    message,
     label: `Remove ${s.total} blocked job(s)${startAfter ? ' & start' : ''}`,
   };
 }
