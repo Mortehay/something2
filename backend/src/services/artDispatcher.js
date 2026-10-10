@@ -275,10 +275,14 @@ async function runOne(db, job, {
     const elapsed = Date.now() - startedAt;
     const refundAttempt = elapsed < queue.FAST_FAULT_MS()
       && failures.classify(message).retryable;
-    await queue.fail(db, job.id, new Error(message), { refundAttempt });
+    const row = await queue.fail(db, job.id, new Error(message), { refundAttempt });
     return {
       id: job.id, ok: false, error: message,
       subject: `${job.subject_kind}/${job.subject_key}`,
+      // SOMET-538. Whether this failure ENDED the job. A retryable one puts it
+      // back in `queued`, where the console still counts it as owed; counting
+      // it as failed too made the progress card double count it.
+      terminal: Boolean(row && row.state === 'failed'),
     };
   };
   // Only an OBJECT gets the cutout guards. A tile is legitimately opaque, and
@@ -740,8 +744,10 @@ function startDrain(db, opts = {}) {
               await queue.promptWritten(db, promptJob.id);
               self.promptsWritten += 1;
             } catch (err) {
-              await queue.fail(db, promptJob.id, err, { refundAttempt: err && err.busy === true });
-              self.failed += 1;
+              const row = await queue.fail(db, promptJob.id, err, { refundAttempt: err && err.busy === true });
+              // Only a job this failure ENDED is failed; one back in `queued`
+              // is still owed and the console counts it there (SOMET-538).
+              if (row && row.state === 'failed') self.failed += 1;
             }
             continue;
           }
@@ -773,7 +779,11 @@ function startDrain(db, opts = {}) {
           // tally sat at 0 while ten subjects landed in the catalogue and the
           // console's progress card read "0 of 41" beside a header showing 9
           // new images (SOMET-538 re-validation, observed live).
-          if (r.ok) self.done += 1; else self.failed += 1;
+          // And failed counts only TERMINAL failures. A retryable one returns
+          // the job to `queued`, which batchProgress already counts as
+          // remaining -- counting it here as well read "2 of 4 · 50%" with
+          // nothing drawn and ended "2 drawn, 2 failed" when nothing failed.
+          if (r.ok) self.done += 1; else if (r.terminal) self.failed += 1;
           if (r.ok) { brokenSubjects.clear(); return null; }
           // Only PROVIDER-class failures count. A subject whose cutout keyed
           // away its own image says nothing about the provider's health, and

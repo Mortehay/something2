@@ -212,6 +212,18 @@ function invalidId(id) {
   return !/^[0-9]+$/.test(String(id));
 }
 
+// A provider_id from a JSON body (SOMET-538). Absent or null means "not
+// chosen"; anything else must be an id the int4 column can hold. Without the
+// range check 99999999999 passed Number.isInteger and answered 500 from the
+// query; without the type check a string or 1.5 was silently dropped and the
+// work went to the active provider instead of being refused.
+const MAX_INT4 = 2147483647;
+function bodyProviderId(value) {
+  if (value === undefined || value === null) return { id: null };
+  if (Number.isInteger(value) && value >= 1 && value <= MAX_INT4) return { id: value };
+  return { error: `provider_id must be a positive integer up to ${MAX_INT4}, or omitted` };
+}
+
 // Upper bound for PUT /api/worlds/:id creature_count (SOMET-188 / F-008).
 // ONE number, defined in densityTiers.js: that is where it now does the real
 // work, clamping the count resolveDensity hands to both population callers.
@@ -3712,9 +3724,9 @@ app.post('/api/art-jobs', adminGuard, async (req, res) => {
     // EITHER is this a bad request -- and then the message says so, because
     // "provider_id is required" sends the admin looking for a field they
     // deliberately left on its default.
-    const providerId = Number.isInteger(req.body.provider_id)
-      ? req.body.provider_id
-      : (active ? active.id : null);
+    const chosen = bodyProviderId(req.body.provider_id);
+    if (chosen.error) return res.status(400).json({ error: chosen.error });
+    const providerId = chosen.id || (active ? active.id : null);
     if (backend === 'connector' && !providerId) {
       return res.status(400).json({
         error: 'no provider chosen and no active provider is set -- pick one in the '
@@ -3724,11 +3736,11 @@ app.post('/api/art-jobs', adminGuard, async (req, res) => {
     // A named provider must exist. Without this the enqueue hit the
     // art_jobs.provider_id foreign key and answered a bare 500 (SOMET-538
     // re-validation); /dispatch already answers the same mistake with a 404.
-    if (Number.isInteger(req.body.provider_id)) {
+    if (chosen.id) {
       const { rows: found } = await pool.query(
-        'SELECT 1 FROM ai_providers WHERE id = $1', [req.body.provider_id]);
+        'SELECT 1 FROM ai_providers WHERE id = $1', [chosen.id]);
       if (found.length === 0) {
-        return res.status(404).json({ error: `provider ${req.body.provider_id} not found` });
+        return res.status(404).json({ error: `provider ${chosen.id} not found` });
       }
     }
     const { subjects, unknown } = await catalogSubjects.subjectsForEnqueue(
@@ -3856,7 +3868,9 @@ app.get('/api/art-jobs', adminGuard, async (req, res) => {
 // Start draining. Returns immediately; poll GET /api/art-jobs.
 app.post('/api/art-jobs/dispatch', adminGuard, async (req, res) => {
   try {
-    const providerId = Number.isInteger(req.body.provider_id) ? req.body.provider_id : null;
+    const chosen = bodyProviderId(req.body.provider_id);
+    if (chosen.error) return res.status(400).json({ error: chosen.error });
+    const providerId = chosen.id;
     if (!providerId) return res.status(400).json({ error: 'provider_id is required' });
     const provider = await aiProviders.loadImageProviderWithSecret(pool, providerId);
     if (!provider) return res.status(404).json({ error: 'provider not found' });

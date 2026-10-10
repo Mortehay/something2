@@ -419,9 +419,11 @@ lockedTest('the breaker stops the PASS at its threshold, not at the claim limit'
       await queue.enqueue(pool, [S(i)], { backend: 'connector', providerId });
     }
     dispatcher.__resetRun();
+    const dead = failWith('provider answered 500: !handles_.at(i) INTERNAL ASSERT FAILED');
+    let attempted = 0;
     dispatcher.startDrain(pool, {
       provider: PROVIDER(providerId),
-      generate: failWith('provider answered 500: !handles_.at(i) INTERNAL ASSERT FAILED'),
+      generate: async (...a) => { attempted += 1; return dead(...a); },
       buildRequest,
       limit: 12,          // deliberately far above the breaker's threshold
       concurrency: 1,
@@ -435,8 +437,13 @@ lockedTest('the breaker stops the PASS at its threshold, not at the claim limit'
     const final = dispatcher.runStatus();
     assert.equal(final.running, false, 'precondition: the drain must have stopped');
     const TRIP = 3;                          // BREAKER_TRIP's default
-    assert.equal(final.failed, TRIP,
+    assert.equal(attempted, TRIP,
       `a dead provider must cost ${TRIP} subjects, not the whole claimed batch of 12`);
+    // SOMET-538 rework 3. This used to read the cost off run.failed, which
+    // counted every failed ATTEMPT -- but all three are back in `queued` below,
+    // so none of them failed, and counting them made the console's progress
+    // card double count. The cost is now measured where it is spent.
+    assert.equal(final.failed, 0, 'no subject was ended by a dead provider: all are still owed');
 
     // AND THE REMAINDER MUST NOT BE STRANDED. claim() stamps every job in the
     // batch up front, so an aborted pass that simply walked away would leave
@@ -554,4 +561,142 @@ lockedTest('a drain forgotten by __resetRun stops instead of claiming later work
         ORDER BY subject_key`);
     assert.deepEqual(rows.map((r) => r.state), ['queued', 'queued'],
       'work queued after the reset is left for the next drain');
+  });
+
+// SOMET-538 rework 3. run.failed must count only TERMINAL failures. A retryable
+// failure sends the job back to `queued`, so the console's batchProgress counts
+// it a second time in `remaining` -- live, two subjects on a provider answering
+// 500 read "2 of 4 · 50%" with nothing drawn, and the batch ended "2 drawn,
+// 2 failed" when nothing had failed. These drive the real drain with a short
+// backoff so the retry happens inside the test.
+function withEnv(t, vars) {
+  const saved = {};
+  for (const [k, v] of Object.entries(vars)) {
+    saved[k] = process.env[k];
+    process.env[k] = v;
+  }
+  t.after(() => {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+  });
+}
+
+async function waitForDrainEnd() {
+  for (let i = 0; i < 120 && dispatcher.runStatus().running; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((r) => { setTimeout(r, 50); });
+  }
+  return dispatcher.runStatus();
+}
+
+lockedTest('a retryable image failure that later succeeds is not counted as failed',
+  async (t, pool, providerId) => {
+    withEnv(t, { ART_JOB_RETRY_BASE_MS: '50' });
+    await queue.enqueue(pool, [S(80)], { backend: 'connector', providerId });
+    dispatcher.__resetRun();
+    const ok = succeed();
+    const bad = failWith('provider answered 500: out of memory');
+    let calls = 0;
+    let seenOnRetry = null;
+    dispatcher.startDrain(pool, {
+      provider: PROVIDER(providerId),
+      generate: async (registryId, ...rest) => {
+        calls += 1;
+        if (calls === 1) return bad(registryId, ...rest);
+        seenOnRetry = dispatcher.runStatus();
+        return ok(registryId, ...rest);
+      },
+      buildRequest,
+      limit: 1,
+      concurrency: 1,
+    });
+    t.after(() => { dispatcher.stopDrain(); dispatcher.__resetRun(); });
+    const final = await waitForDrainEnd();
+    assert.equal(final.running, false, 'precondition: the drain must have finished');
+    assert.equal(calls, 2, 'precondition: one failed attempt, then one success');
+    assert.ok(seenOnRetry, 'precondition: the status was read during the retry');
+    assert.equal(seenOnRetry.failed, 0,
+      'a job back in the queue is still owed, not failed -- counting it double counts the card');
+    assert.equal(final.done, 1);
+    assert.equal(final.failed, 0, 'nothing failed: the subject was drawn');
+  });
+
+lockedTest('an image failure that exhausts the job IS counted as failed',
+  async (t, pool, providerId) => {
+    withEnv(t, { ART_JOB_MAX_ATTEMPTS: '1', ART_MAX_FAULT_REFUNDS: '0' });
+    await queue.enqueue(pool, [S(81)], { backend: 'connector', providerId });
+    dispatcher.__resetRun();
+    dispatcher.startDrain(pool, {
+      provider: PROVIDER(providerId),
+      generate: failWith('cutout removed the whole subject'),
+      buildRequest,
+      limit: 1,
+      concurrency: 1,
+    });
+    t.after(() => { dispatcher.stopDrain(); dispatcher.__resetRun(); });
+    const final = await waitForDrainEnd();
+    assert.equal(final.running, false, 'precondition: the drain must have finished');
+    const { rows } = await pool.query("SELECT state FROM art_jobs WHERE subject_key = 'sk_81'");
+    assert.equal(rows[0].state, 'failed', 'precondition: the job reached its terminal state');
+    assert.equal(final.failed, 1, 'a terminally failed subject is resolved and must count');
+    assert.equal(final.done, 0);
+  });
+
+lockedTest('a refunded prompt failure that later succeeds is not counted as failed',
+  async (t, pool, providerId) => {
+    withEnv(t, { ART_JOB_RETRY_BASE_MS: '50' });
+    await queue.enqueue(pool, [S(82)], { backend: 'connector', providerId });
+    await pool.query("UPDATE art_jobs SET needs_prompt = true WHERE subject_key = 'sk_82'");
+    dispatcher.__resetRun();
+    let promptCalls = 0;
+    let seenOnRetry = null;
+    dispatcher.startDrain(pool, {
+      provider: PROVIDER(providerId),
+      generate: succeed(),
+      buildRequest,
+      writePromptForJob: async () => {
+        promptCalls += 1;
+        if (promptCalls === 1) {
+          const err = new Error('text model busy');
+          err.busy = true;
+          throw err;
+        }
+        seenOnRetry = dispatcher.runStatus();
+      },
+      limit: 1,
+      concurrency: 1,
+    });
+    t.after(() => { dispatcher.stopDrain(); dispatcher.__resetRun(); });
+    const final = await waitForDrainEnd();
+    assert.equal(final.running, false, 'precondition: the drain must have finished');
+    assert.equal(promptCalls, 2, 'precondition: one busy refusal, then one written prompt');
+    assert.ok(seenOnRetry, 'precondition: the status was read during the prompt retry');
+    assert.equal(seenOnRetry.failed, 0, 'a refunded prompt failure is still owed, not failed');
+    assert.equal(final.done, 1);
+    assert.equal(final.failed, 0);
+  });
+
+lockedTest('a prompt failure that exhausts the job IS counted as failed',
+  async (t, pool, providerId) => {
+    withEnv(t, { ART_JOB_MAX_ATTEMPTS: '1' });
+    await queue.enqueue(pool, [S(83)], { backend: 'connector', providerId });
+    await pool.query("UPDATE art_jobs SET needs_prompt = true WHERE subject_key = 'sk_83'");
+    dispatcher.__resetRun();
+    let generated = 0;
+    dispatcher.startDrain(pool, {
+      provider: PROVIDER(providerId),
+      generate: async (...a) => { generated += 1; return succeed()(...a); },
+      buildRequest,
+      writePromptForJob: async () => { throw new Error('model returned no text'); },
+      limit: 1,
+      concurrency: 1,
+    });
+    t.after(() => { dispatcher.stopDrain(); dispatcher.__resetRun(); });
+    const final = await waitForDrainEnd();
+    assert.equal(final.running, false, 'precondition: the drain must have finished');
+    const { rows } = await pool.query("SELECT state FROM art_jobs WHERE subject_key = 'sk_83'");
+    assert.equal(rows[0].state, 'failed', 'precondition: the job reached its terminal state');
+    assert.equal(generated, 0);
+    assert.equal(final.failed, 1);
   });

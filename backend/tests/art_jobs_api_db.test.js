@@ -216,6 +216,63 @@ lockedTest('queueing on a provider that does not exist is a 404 and queues nothi
     assert.equal(rows[0].n, 0, 'nothing may be queued');
   });
 
+// SOMET-538 rework 3. A provider_id the client SENT is either a usable id or a
+// 400 -- never a 500 and never silently replaced by the active provider.
+// Observed: 99999999999 passed Number.isInteger, overflowed int4 in the
+// existence SELECT and answered 500; 0 was read as "none given" and refused
+// with a false "no active provider is set"; '999999' and 1.5 were ignored and
+// the jobs went to the active provider. Asserted WITH an active provider, so a
+// value that falls through to it answers 201 and the test sees it.
+lockedTest('a malformed provider_id is a 400 naming the field, and queues nothing',
+  async (t, pool, providerId) => {
+    const prev = await pool.query("SELECT id FROM ai_providers WHERE is_active AND modality = 'image'");
+    await pool.query("UPDATE ai_providers SET is_active = false WHERE is_active AND modality = 'image'");
+    await pool.query('UPDATE ai_providers SET is_active = true WHERE id = $1', [providerId]);
+    try {
+      const [skill] = await cs.SUBJECTS.skill.list();
+      for (const bad of [99999999999, 2147483648, 0, -3, 1.5, '999999', String(providerId), true, {}]) {
+        // eslint-disable-next-line no-await-in-loop
+        const res = await request(app).post('/api/art-jobs').set(...AUTH)
+          .send({ kind: 'skill', keys: [skill.key], provider_id: bad });
+        assert.equal(res.status, 400, `provider_id ${JSON.stringify(bad)}: ${JSON.stringify(res.body)}`);
+        assert.match(res.body.error, /provider_id must be a positive integer/,
+          `provider_id ${JSON.stringify(bad)} must be refused as malformed, not as a missing provider`);
+      }
+      const { rows } = await pool.query('SELECT count(*)::int n FROM art_jobs');
+      assert.equal(rows[0].n, 0, 'nothing may be queued on a malformed provider_id');
+
+      // The boundary is the column's: the largest int4 is well-formed, so it
+      // gets the honest 404 rather than the 400.
+      const top = await request(app).post('/api/art-jobs').set(...AUTH)
+        .send({ kind: 'skill', keys: [skill.key], provider_id: 2147483647 });
+      assert.equal(top.status, 404, JSON.stringify(top.body));
+      // And null still means "the active provider", which is what the console
+      // sends for its default option.
+      const dflt = await request(app).post('/api/art-jobs').set(...AUTH)
+        .send({ kind: 'skill', keys: [skill.key], provider_id: null });
+      assert.equal(dflt.status, 201, JSON.stringify(dflt.body));
+    } finally {
+      await pool.query('UPDATE ai_providers SET is_active = false WHERE id = $1', [providerId])
+        .catch(() => {});
+      for (const r of prev.rows) {
+        // eslint-disable-next-line no-await-in-loop
+        await pool.query('UPDATE ai_providers SET is_active = true WHERE id = $1', [r.id])
+          .catch(() => {});
+      }
+    }
+  });
+
+// The same overflow on /dispatch: 99999999999 reached the provider SELECT and
+// answered 500.
+lockedTest('dispatch refuses a malformed provider_id with a 400, not a 500', async () => {
+  for (const bad of [99999999999, 0, 1.5, '7']) {
+    // eslint-disable-next-line no-await-in-loop
+    const res = await request(app).post('/api/art-jobs/dispatch').set(...AUTH)
+      .send({ provider_id: bad });
+    assert.equal(res.status, 400, `provider_id ${JSON.stringify(bad)}: ${JSON.stringify(res.body)}`);
+  }
+});
+
 lockedTest('queueing rejects an empty selection and an unknown kind', async (t, pool, providerId) => {
   const empty = await request(app).post('/api/art-jobs').set(...AUTH)
     .send({ kind: 'skill', keys: [], provider_id: providerId });
