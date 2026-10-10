@@ -47,3 +47,54 @@ test('seedOneDungeonBoss inserts a complete boss once and never overwrites it', 
     await pool.end();
   }
 });
+
+const { DUNGEON_BOSSES } = require('../seeds/data/dungeonBosses.js');
+
+const bossRows = (c) => c.query(
+  `SELECT e.name, e.boss_tier, e.behavior_id,
+          (SELECT count(*)::int FROM creature_drops cd WHERE cd.entity_type_id = e.id) AS drops
+     FROM entity_types e WHERE e.name = ANY($1) ORDER BY e.name`, [DUNGEON_BOSSES.map((b) => b.name)]);
+
+test('every real dungeon boss restores tiered, with a resolved behaviour and exactly one drop', { skip }, async () => {
+  const pool = new Pool({ connectionString: url, max: 1 });
+  const c = await pool.connect();
+  try {
+    await c.query('BEGIN');
+    const names = DUNGEON_BOSSES.map((b) => b.name);
+    await c.query('DELETE FROM creature_drops WHERE entity_type_id IN (SELECT id FROM entity_types WHERE name = ANY($1))', [names]);
+    await c.query('DELETE FROM entity_types WHERE name = ANY($1)', [names]);
+    let inserted = 0;
+    for (const b of DUNGEON_BOSSES) inserted += await seedOneDungeonBoss(c, b);
+    assert.equal(inserted, DUNGEON_BOSSES.length);
+    const rows = (await bossRows(c)).rows;
+    assert.equal(rows.length, DUNGEON_BOSSES.length);
+    for (const r of rows) {
+      const want = DUNGEON_BOSSES.find((b) => b.name === r.name);
+      assert.equal(r.boss_tier, want.boss_tier, `${r.name} tier`);
+      assert.notEqual(r.behavior_id, null, `${r.name} behavior_id resolved`);
+      assert.equal(r.drops, 1, `${r.name} drop rule (${want.drop_item}) resolved`);
+    }
+  } finally {
+    await c.query('ROLLBACK').catch(() => {});
+    c.release();
+    await pool.end();
+  }
+});
+
+test('P7: an existing boss keeps its admin-edited drops across a reseed', { skip }, async () => {
+  const pool = new Pool({ connectionString: url, max: 1 });
+  const c = await pool.connect();
+  try {
+    await c.query('BEGIN');
+    const b = DUNGEON_BOSSES[0];
+    await seedOneDungeonBoss(c, b); // present (real row or restored)
+    await c.query('DELETE FROM creature_drops WHERE entity_type_id = (SELECT id FROM entity_types WHERE name = $1)', [b.name]);
+    assert.equal(await seedOneDungeonBoss(c, b), 0);
+    const r = await c.query('SELECT count(*)::int AS n FROM creature_drops WHERE entity_type_id = (SELECT id FROM entity_types WHERE name = $1)', [b.name]);
+    assert.equal(r.rows[0].n, 0, 'admin-deleted drop rule must not be re-added');
+  } finally {
+    await c.query('ROLLBACK').catch(() => {});
+    c.release();
+    await pool.end();
+  }
+});

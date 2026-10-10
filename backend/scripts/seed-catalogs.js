@@ -333,8 +333,8 @@ async function seedOneCreatureType(pool, c) {
 // SOMET-609 (S9). A dungeon boss, with the boss columns seedOneCreatureType
 // does not write. Insert-only (ON CONFLICT DO NOTHING): the Entities tab owns
 // the row after the first insert. Behaviour resolves by name; the drop rule is
-// NOT EXISTS-guarded because creature_drops has no unique constraint. Returns
-// 1 when the row was inserted.
+// written only when the boss row was newly inserted (and NOT EXISTS-guarded as
+// creature_drops has no unique constraint). Returns 1 when inserted.
 async function seedOneDungeonBoss(db, b) {
   const r = await db.query(
     `INSERT INTO entity_types
@@ -349,6 +349,9 @@ async function seedOneDungeonBoss(db, b) {
      b.prompt, b.element, b.behavior_name, b.boss_tier, b.size, b.xp_reward, b.base_damage,
      JSON.stringify(b.auras)],
   );
+  // Drop rule only with a NEW boss row (P7): an admin's deleted or changed
+  // drop on an existing boss must survive every reseed.
+  if (r.rowCount !== 1) return 0;
   await db.query(
     `INSERT INTO creature_drops (entity_type_id, item_type_id, chance, min_qty, max_qty)
      SELECT et.id, it.id, 0.2, 1, 1 FROM entity_types et, item_types it
