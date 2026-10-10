@@ -3,6 +3,7 @@ import {
   subjectId, sortSubjects, freezeOrder, clampPage, pageCount, toggle, selectPage, deselectPage,
   isPageFullySelected, selectAllMatching, selectAllLabel, byKind, applyFilters,
   enqueueSummary, coverage, selectionOutsideFilter, promptIneligibleCount, PAGE_SIZE, filtersFromParams,
+  joinInFlight,
 } from '../artSelection.js';
 
 const S = (kind, key, extra = {}) => ({ kind, key, name: key, has_art: false, ...extra });
@@ -28,12 +29,20 @@ describe('ordering', () => {
   // has-art would move subjects between pages mid-batch, so the row an admin
   // ticked is no longer the row they thought.
   it('is stable as art lands, because it sorts on immutable columns', () => {
-    const before = [S('skill', 'b'), S('skill', 'a'), S('item', 'c')];
+    const before = [S('skill', 'b'), S('skill', 'a'), S('item', 'c'), S('item', 'd')];
     const order = sortSubjects(before).map(subjectId);
+    expect(order).toEqual(['item/c', 'item/d', 'skill/a', 'skill/b']);
 
-    // The same subjects, now with art and fresh timestamps.
-    const after = before.map((s) => ({ ...s, has_art: true, updated_at: '2026-09-04' }));
-    expect(sortSubjects(after).map(subjectId)).toEqual(order);
+    // Mid-batch, art lands on SOME subjects, not all. Flipping every row at
+    // once would leave a has-art (or updated_at) sort giving the same order and
+    // this test green; flipping one row in the middle moves it under any such
+    // sort, in either direction.
+    for (const landed of ['item/d', 'skill/a']) {
+      const after = before.map((s) => (subjectId(s) === landed
+        ? { ...s, has_art: true, updated_at: '2026-09-04' }
+        : s));
+      expect(sortSubjects(after).map(subjectId), `art landed on ${landed}`).toEqual(order);
+    }
   });
 
   it('groups by kind then key', () => {
@@ -309,5 +318,28 @@ describe('filtersFromParams', () => {
     // A hand-edited or stale link must not put the table into a state no
     // control can get it out of.
     expect(filtersFromParams(new URLSearchParams('art=bogus')).art).toBe('missing');
+  });
+});
+
+describe('joinInFlight', () => {
+  // SOMET-538 rework: two clicks in one tick sent two POSTs; isPending had not
+  // flipped yet. The second response ("0 of 2 -- 2 already in flight")
+  // overwrote the first. A second call while one is pending must JOIN it.
+  it('runs once for two same-tick calls, and both get the same result', async () => {
+    const slot = { current: null };
+    let runs = 0;
+    const start = async () => { runs += 1; return `run ${runs}`; };
+    const a = joinInFlight(slot, start);
+    const b = joinInFlight(slot, start);
+    expect(await Promise.all([a, b])).toEqual(['run 1', 'run 1']);
+    expect(runs).toBe(1);
+  });
+
+  it('starts again once the previous call settled, including after a failure', async () => {
+    const slot = { current: null };
+    await expect(joinInFlight(slot, async () => { throw new Error('boom'); })).rejects.toThrow('boom');
+    expect(slot.current).toBe(null);
+    expect(await joinInFlight(slot, async () => 'again')).toBe('again');
+    expect(slot.current).toBe(null);
   });
 });

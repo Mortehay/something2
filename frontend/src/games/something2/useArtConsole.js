@@ -26,6 +26,32 @@ async function getJson(url, what) {
   return res.json();
 }
 
+// The server caps per_page at 500, so a kind with more rows than that is
+// paged through until `total` is reached. One request per kind used to be
+// enough (entities are ~316 today), but it silently dropped every row past the
+// 500th and "Select all N matching" then undercounted (SOMET-538 rework).
+// An empty page stops the loop even if `total` says more: the catalogue can
+// shrink between two requests, and a stale total must not spin forever.
+const PER_PAGE = 500;
+
+async function loadKind(getJsonFn, kind) {
+  const rows = [];
+  for (let page = 1; ; page += 1) {
+    const { subjects = [], total = 0 } = await getJsonFn(
+      `${API_URL}/api/art-subjects/${encodeURIComponent(kind)}?per_page=${PER_PAGE}&page=${page}`,
+      kind,
+    );
+    rows.push(...subjects);
+    if (subjects.length === 0 || rows.length >= total) return rows;
+  }
+}
+
+export async function loadAllSubjects(getJsonFn) {
+  const { kinds } = await getJsonFn(`${API_URL}/api/art-subjects`, 'the subject kinds');
+  const perKind = await Promise.all(kinds.map(({ kind }) => loadKind(getJsonFn, kind)));
+  return { kinds: kinds.map((k) => k.kind), subjects: perKind.flat() };
+}
+
 // `live` polls the catalogue while a batch is draining (SOMET-558).
 //
 // Without it the table is FROZEN for the whole run: this query had no
@@ -42,17 +68,7 @@ export function useArtSubjects({ live = false } = {}) {
   const { data, isLoading, error } = useQuery({
     queryKey: SUBJECTS_KEY,
     refetchInterval: live ? 15000 : false,
-    queryFn: async () => {
-      const { kinds } = await getJson(`${API_URL}/api/art-subjects`, 'the subject kinds');
-      // per_page is above every kind's row count, so one request each.
-      const pages = await Promise.all(kinds.map(({ kind }) => (
-        getJson(`${API_URL}/api/art-subjects/${encodeURIComponent(kind)}?per_page=500`, kind)
-      )));
-      return {
-        kinds: kinds.map((k) => k.kind),
-        subjects: pages.flatMap((p) => p.subjects),
-      };
-    },
+    queryFn: () => loadAllSubjects(getJson),
   });
   return {
     kinds: data?.kinds || [],

@@ -215,6 +215,20 @@ export function enqueueSummary(results) {
   return { ...t, message: parts.join(' — ') };
 }
 
+// One submission at a time, decided SYNCHRONOUSLY. A mutation's isPending
+// only disables the button after the next render, so two clicks in the same
+// tick both got through: two POSTs, and the second response ("Queued 0 of 2
+// -- 2 already in flight") overwrote the first. A call made while one is
+// pending joins it and gets the same result. `slot` is a React ref.
+export function joinInFlight(slot, start) {
+  if (slot.current) return slot.current;
+  const pending = Promise.resolve()
+    .then(start)
+    .finally(() => { slot.current = null; });
+  slot.current = pending;
+  return pending;
+}
+
 // Progress from the CATALOG, not from a counter. A counter drifts; "how many of
 // these subjects have art" is answerable at any moment and cannot.
 export function coverage(subjects) {
