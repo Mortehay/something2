@@ -133,6 +133,12 @@ function requiredTilesFor(w, spec, row, doorwayEdges) {
   if (w.chest && Number.isFinite(w.chest.x) && Number.isFinite(w.chest.y)) {
     out.push({ row: Math.floor(w.chest.y / 100), col: Math.floor(w.chest.x / 100), what: 'vault chest' });
   }
+  // SOMET-609: a dungeon boss post is generated terrain too. A boss standing in
+  // a sealed pocket (or in a wall) is a boss nobody can fight; listing the post
+  // makes assertNavigable prove it is walkable AND reachable from the doorways.
+  if (w.boss && Number.isFinite(w.boss.x) && Number.isFinite(w.boss.y)) {
+    out.push({ row: Math.floor(w.boss.y / 100), col: Math.floor(w.boss.x / 100), what: 'dungeon boss' });
+  }
   for (const l of (spec.links || [])) {
     if (l.kind !== 'portal') continue;
     if (l.from === w.key) {
@@ -237,9 +243,9 @@ async function applyMapSpec(pool, spec, { moveEntry = true } = {}) {
                              allowed_creature_types, entry_spawn, biomes, biome_cell,
                              graph_x, graph_y, level_min, level_max, density,
                              allows_fast_travel, safe_road_radius, safe_rects,
-                             authored_roads, pens)
+                             authored_roads, pens, dungeon_boss)
          VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,
-                 $18::jsonb,$19::jsonb)
+                 $18::jsonb,$19::jsonb,$20::jsonb)
          ON CONFLICT (name) DO UPDATE
            SET seed = EXCLUDED.seed, chunk_size = EXCLUDED.chunk_size,
                width = EXCLUDED.width, height = EXCLUDED.height,
@@ -268,7 +274,10 @@ async function applyMapSpec(pool, spec, { moveEntry = true } = {}) {
                -- Editing a pen's box in a spec therefore moves the authored
                -- rectangle without moving the creatures already standing in it.
                authored_roads = EXCLUDED.authored_roads,
-               pens = EXCLUDED.pens
+               pens = EXCLUDED.pens,
+               -- SOMET-609: re-asserted like every authored column; removing
+               -- the key from a spec removes the boss.
+               dungeon_boss = EXCLUDED.dungeon_boss
          RETURNING id`,
         [w.name, w.seed, w.chunk_size ?? 64, w.width, w.height,
          JSON.stringify(w.allowed_creature_types ?? []),
@@ -282,7 +291,8 @@ async function applyMapSpec(pool, spec, { moveEntry = true } = {}) {
          w.safe_road_radius ?? 0,
          JSON.stringify(w.safe_rects ?? []),
          JSON.stringify(w.roads ?? []),
-         JSON.stringify(w.pens ?? [])],
+         JSON.stringify(w.pens ?? []),
+         w.boss ? JSON.stringify(w.boss) : null],
       );
       idByKey.set(w.key, r.rows[0].id);
       worldsWritten += 1;
