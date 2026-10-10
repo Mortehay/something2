@@ -152,6 +152,16 @@ export function shouldPollQueue(run, stats) {
   return Number(stats?.queued || 0) + Number(stats?.running || 0) > 0;
 }
 
+// Whether a run has just ended, so the catalogue must be read once more.
+//
+// The catalogue polls only while a run is going (15s). Art that landed after
+// its last poll was never fetched, so a finished 50-tile run showed "49 have
+// art" and kept 2 done tiles in the missing list until a manual reload
+// (SOMET-538 rework, found live).
+export function batchJustSettled(wasRunning, isRunning) {
+  return Boolean(wasRunning) && !isRunning;
+}
+
 // Which of the claimed jobs is actually ON the provider (SOMET-558).
 //
 // THE TRAP THIS EXISTS FOR. dispatch() claims `limit` jobs in ONE update --

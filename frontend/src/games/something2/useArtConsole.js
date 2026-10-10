@@ -11,10 +11,11 @@
 // authHeaders() is NOT optional: every /api/art-* route is adminGuard'd, and a
 // 401 here would sign the admin out mid-batch. Same trap documented in
 // useAiProviders.js.
+import { useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { authHeaders, apiFetch } from './src/js/net/auth.js';
-import { shouldPollQueue } from './artProgress.js';
+import { shouldPollQueue, batchJustSettled } from './artProgress.js';
 import { API_URL } from '../../config.js';
 
 const SUBJECTS_KEY = ['art-subjects'];
@@ -65,11 +66,19 @@ export async function loadAllSubjects(getJsonFn) {
 // can have changed; polling it at the counters' rate would spend the API
 // budget re-fetching an unchanged catalogue. Off entirely when idle.
 export function useArtSubjects({ live = false } = {}) {
+  const qc = useQueryClient();
   const { data, isLoading, error } = useQuery({
     queryKey: SUBJECTS_KEY,
     refetchInterval: live ? 15000 : false,
     queryFn: () => loadAllSubjects(getJson),
   });
+  // One last read when the run ends. Polling stops on that same render, so
+  // without it whatever landed since the last 15s poll stays invisible.
+  const wasLive = useRef(live);
+  useEffect(() => {
+    if (batchJustSettled(wasLive.current, live)) qc.invalidateQueries({ queryKey: SUBJECTS_KEY });
+    wasLive.current = live;
+  }, [live, qc]);
   return {
     kinds: data?.kinds || [],
     subjects: data?.subjects || [],

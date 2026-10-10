@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  batchProgress, formatDuration, formatElapsed, elapsedSince, shouldPollQueue,
+  batchProgress, formatDuration, formatElapsed, elapsedSince, shouldPollQueue, batchJustSettled,
   partitionInFlight, claimedAgo, previewNames, blockedSummary, singleFlight, blockedPanel,
   IDLE, IDLE_QUEUED, RUNNING, FINISHED,
 } from '../artProgress.js';
@@ -418,5 +418,19 @@ describe('blockedPanel', () => {
       .toBe(false);
     expect(blockedPanel({ run: { running: false, blocked: [] }, startError: null }).show).toBe(false);
     expect(blockedPanel({ run: null, startError: null }).show).toBe(false);
+  });
+});
+
+describe('batchJustSettled', () => {
+  // SOMET-538 rework, found live: the catalogue polls every 15s only WHILE a
+  // run is going, so subjects that landed after its last poll never appeared
+  // -- the page ended a 50-tile run at "49 have art" with 2 tiles still
+  // listed as missing while the API said 0. The run ending is the moment the
+  // catalogue must be read once more.
+  it('fires on the running -> idle edge only', () => {
+    expect(batchJustSettled(true, false)).toBe(true);
+    expect(batchJustSettled(true, true)).toBe(false);
+    expect(batchJustSettled(false, false)).toBe(false);
+    expect(batchJustSettled(false, true)).toBe(false);
   });
 });
