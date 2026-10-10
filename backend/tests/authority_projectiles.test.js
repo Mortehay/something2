@@ -684,3 +684,24 @@ test('SOMET-575 a dart 40px off a 64px player centre hits (old capture radius wa
   assert.equal(dartAtPlayer(40), true);
   assert.equal(dartAtPlayer(55), false, 'padding is bounded');
 });
+
+// The guard block cue must use the SAME padded capture radius as a real hit,
+// or a shot that would have connected with a hostile shows no cue on a guard.
+function dartAtGuardBlocks(offset) {
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: DART });
+  // 48px guard, centre (54, offset): immune to player damage, so a shot that
+  // reaches it records a block cue instead of a hit.
+  const guard = { id: 'g1', x: 30, y: offset - 24, width: 48, height: 48, hp: 10,
+    behavior: { chaseStyle: 'guard' } };
+  const out = sim.step(0.1, { creatures: creaturesStub([guard]), players: [], map: WALK_ALL });
+  assert.equal(guard.hp, 10, 'a guard is never damaged by a player shot');
+  return out.blocks.length === 1;
+}
+
+test('SOMET-575 a dart 33-37px off a 48px guard centre records a block cue (old radius 6+24=30)', () => {
+  assert.equal(dartAtGuardBlocks(20), true, 'sanity: a near-centre shot is blocked');
+  assert.equal(dartAtGuardBlocks(33), true);
+  assert.equal(dartAtGuardBlocks(37), true);
+  assert.equal(dartAtGuardBlocks(45), false, 'padding is bounded: a clear miss shows no cue');
+});

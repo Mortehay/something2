@@ -474,9 +474,11 @@ test('a zero or missing speed multiplier is a no-op, never a division by zero', 
 // ---------------------------------------------------------------------------
 // SOMET-520: meleeReachBonus / meleeArcBonus.
 //
-// blade (id 1) has reach 190 and arc_width 1.8 rad. A creature at distance d
-// on the aim vector is hit iff d <= reach; one BEHIND the attacker is hit only
-// once the arc opens past PI.
+// blade (id 1) has reach 190 and arc_width 1.8 rad. Since SOMET-575 reach is
+// measured to the creature's padded body EDGE: a 48px creature has hit radius
+// 32 (24 + 8 padding), so a creature whose centre is d away on the aim vector
+// is hit iff d - 32 <= reach. One BEHIND the attacker is hit only once the arc
+// opens past PI.
 // ---------------------------------------------------------------------------
 
 function swing(rules, creatures) {
@@ -502,9 +504,10 @@ function eastOf(world, dx) {
 }
 
 test('a creature beyond the catalog reach is missed, and reached with the bonus', () => {
-  // 220px east, centre to centre: outside blade's 190 reach, inside 190 + 64.
+  // 260px east, centre to centre = edge at 228: outside blade's 190 reach
+  // (centre limit 222), inside 190 + 64 (centre limit 286).
   const far = (world) => [{
-    id: 'c1', type: 'wolf', ...eastOf(world, 220), hp: 50, facing: 'S', color: '#f00',
+    id: 'c1', type: 'wolf', ...eastOf(world, 260), hp: 50, facing: 'S', color: '#f00',
   }];
   {
     const w = armWorld();
@@ -512,7 +515,7 @@ test('a creature beyond the catalog reach is missed, and reached with the bonus'
     w.creatures.addCreatures(far(w));
     w.attack('u1', 1, 0);
     assert.equal(w.creatures.all().find((c) => c.id === 'c1').hp, 50,
-      'without the bonus a target at 220px is out of a 190px reach');
+      'without the bonus a target whose edge is 228px away is out of a 190px reach');
   }
   {
     const w = armWorld();
@@ -857,9 +860,10 @@ function swingAt(rules, dist, angle) {
 // which is the exact bug this ticket exists to fix.
 test('Spearpoint trades arc for reach, and BOTH halves of the trade are real', () => {
   const spear = { meleeReachBonus: 64, meleeArcBonus: -0.9 };
-  // Further out than the base 190 reach: base misses, Spearpoint connects.
-  assert.equal(swingAt(null, 220, 0).hit, false, 'base reach must miss at 220px');
-  assert.equal(swingAt(spear, 220, 0).hit, true, 'Spearpoint must reach 220px');
+  // Centre 260 = edge 228 (hit radius 32): further out than the base 190
+  // reach (centre limit 222), inside Spearpoint's 254 (centre limit 286).
+  assert.equal(swingAt(null, 260, 0).hit, false, 'base reach must miss at 260px');
+  assert.equal(swingAt(spear, 260, 0).hit, true, 'Spearpoint must reach 260px');
   // Off-axis at 0.7 rad: inside the base 1.8 arc (half-angle 0.9), outside
   // Spearpoint's 0.9 arc (half-angle 0.45).
   assert.equal(swingAt(null, 150, 0.7).hit, true, 'the base arc covers 0.7 rad off-axis');
@@ -873,9 +877,10 @@ test('Sweep trades reach for arc, and BOTH halves of the trade are real', () => 
   // 1.3 rad off-axis: outside the base 1.8 arc, inside Sweep's 3.8.
   assert.equal(swingAt(null, 120, 1.3).hit, false, 'the base arc misses 1.3 rad off-axis');
   assert.equal(swingAt(sweep, 120, 1.3).hit, true, 'Sweep must cover 1.3 rad off-axis');
-  // At 180px the base reach (190) connects and Sweep's (166) does not.
-  assert.equal(swingAt(null, 180, 0).hit, true, 'base reach covers 180px');
-  assert.equal(swingAt(sweep, 180, 0).hit, false,
+  // Centre 210 = edge 178 (hit radius 32): the base reach (190, centre limit
+  // 222) connects and Sweep's (166, centre limit 198) does not.
+  assert.equal(swingAt(null, 210, 0).hit, true, 'base reach covers 210px');
+  assert.equal(swingAt(sweep, 210, 0).hit, false,
     'Sweep must GIVE UP the distant target');
 });
 
