@@ -191,6 +191,7 @@ export class RenderSystem {
     if (element === "ice") return { baseColor: "#70a1ff", glowColor: "#e0f2fe", darkColor: "#1e293b", eyeColor: "#67e8f9" };
     if (element === "arcane" || element === "void") return { baseColor: "#a55eea", glowColor: "#f3e8ff", darkColor: "#180a24", eyeColor: "#f472b6" };
     if (element === "lightning") return { baseColor: "#ffd166", glowColor: "#ffffff", darkColor: "#261e0b", eyeColor: "#67e8f9" };
+    if (element === "physical") return { baseColor: "#d8d2c0", glowColor: "#f5f0e1", darkColor: "#2b2620", eyeColor: "#7dd3fc" };
     return { baseColor: "#ff4757", glowColor: "#ffa502", darkColor: "#2f3542", eyeColor: "#ffeaa7" };
   }
 

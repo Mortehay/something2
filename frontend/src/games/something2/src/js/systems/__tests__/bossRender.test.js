@@ -80,4 +80,11 @@ describe("boss rendering (SOMET-603)", () => {
     expect(RenderSystem.bossPalette(undefined).baseColor).toBe("#ff4757");
     expect(RenderSystem.bossPalette("void").baseColor).toBe(RenderSystem.bossPalette("arcane").baseColor);
   });
+
+  it("bossPalette gives physical bosses a bone palette, not the fire fallback (SOMET-609)", () => {
+    const physical = RenderSystem.bossPalette("physical");
+    expect(physical.baseColor).toBe("#d8d2c0");
+    expect(physical.baseColor).not.toBe(RenderSystem.bossPalette(undefined).baseColor);
+    expect(RenderSystem.bossPalette("fire").baseColor).toBe("#ff4757");
+  });
 });
