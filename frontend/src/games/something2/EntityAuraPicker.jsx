@@ -2,8 +2,8 @@ import { toggleAura, danglingAuras } from './entityAuras.js';
 
 // SOMET-604: checkbox picker over the aura library. Self-contained so the
 // Entities form only wires value/onChange.
-export default function EntityAuraPicker({ value, library, isLoading, onChange }) {
-  const dangling = danglingAuras(value, library, isLoading);
+export default function EntityAuraPicker({ value, library, isLoading, isError = false, onChange }) {
+  const dangling = danglingAuras(value, library, isLoading, isError);
   return (
     <div>
       <label>
@@ -13,6 +13,11 @@ export default function EntityAuraPicker({ value, library, isLoading, onChange }
         </small>
       </label>
       {isLoading && <small style={{ display: 'block' }}>Loading auras…</small>}
+      {isError && !isLoading && (
+        <small role="status" style={{ display: 'block' }}>
+          Could not load the aura library — bindings are kept unchanged.
+        </small>
+      )}
       {library.map((a) => (
         <label key={a.id} style={{ display: 'inline-flex', gap: 4, marginRight: 12 }}>
           <input

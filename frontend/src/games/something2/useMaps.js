@@ -141,6 +141,8 @@ export function useCreateEntityType() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['entityTypes'] });
       queryClient.invalidateQueries({ queryKey: ['mapConfig'] });
+      // Aura Used-by lists are computed from entity bindings (SOMET-604).
+      queryClient.invalidateQueries({ queryKey: ['auraEffects'] });
       toast.success('Entity type created!');
     },
     onError: (err) => toast.error(`Creation failed: ${err.message}`)
@@ -163,6 +165,8 @@ export function useUpdateEntityType() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['entityTypes'] });
       queryClient.invalidateQueries({ queryKey: ['mapConfig'] });
+      // Aura Used-by lists are computed from entity bindings (SOMET-604).
+      queryClient.invalidateQueries({ queryKey: ['auraEffects'] });
       toast.success('Entity type updated!');
     },
     onError: (err) => toast.error(`Update failed: ${err.message}`)
@@ -183,6 +187,8 @@ export function useDeleteEntityType() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['entityTypes'] });
       queryClient.invalidateQueries({ queryKey: ['mapConfig'] });
+      // Aura Used-by lists are computed from entity bindings (SOMET-604).
+      queryClient.invalidateQueries({ queryKey: ['auraEffects'] });
       toast.success('Entity type deleted!');
     },
     onError: (err) => toast.error(`Deletion failed: ${err.message}`)

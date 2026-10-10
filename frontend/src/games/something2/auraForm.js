@@ -25,6 +25,9 @@ const n = (v) => (typeof v === 'string' && v.trim() === '' ? NaN : Number(v));
 export function auraFormToPayload(f) {
   const p = { name: String(f.name || '').trim() };
   for (const k of Object.keys(FIELDS)) p[k] = TEXT.has(k) ? f[k] : n(f[k]);
+  // The DoT field is disabled for allies; a leftover value from an earlier
+  // 'enemies' edit must neither be sent nor block the save.
+  if (p.target_side === 'allies') p.dot_dps = 0;
   return p;
 }
 export function validateAuraForm(f) {

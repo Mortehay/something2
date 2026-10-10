@@ -20,9 +20,17 @@ describe('aura form', () => {
   it.each([
     [{ radius: '0' }, /Radius/], [{ radius: '-5' }, /Radius/], [{ radius: '' }, /Radius/],
     [{ radius: '26000' }, /Radius/], [{ damage_mult: '0' }, /Damage/], [{ tick_ms: '50' }, /Tick/],
-    [{ dot_dps: '3' }, /enemies/], [{ particle_count: '65' }, /Particles/], [{ color: 'gold' }, /Colour/],
+    [{ target_side: 'enemies', dot_dps: '-1' }, /DoT/], [{ particle_count: '65' }, /Particles/], [{ color: 'gold' }, /Colour/],
   ])('rejects %j before a round trip', (over, re) => {
     expect(validateAuraForm({ ...emptyAuraForm(), name: 'x', radius: '200', ...over })).toMatch(re);
+  });
+  it('switching enemies -> allies drops a leftover DoT: valid, and the payload sends dot_dps 0', () => {
+    const f = { ...emptyAuraForm(), name: 'x', target_side: 'enemies', dot_dps: '5' };
+    expect(validateAuraForm(f)).toBeNull();
+    expect(auraFormToPayload(f).dot_dps).toBe(5);
+    const allies = { ...f, target_side: 'allies' };
+    expect(validateAuraForm(allies)).toBeNull();
+    expect(auraFormToPayload(allies).dot_dps).toBe(0);
   });
   it('round-trips a stored row, including a genuine 0 dps and pulse 0', () => {
     const row = { id: 1, name: 'pack_leader', target_side: 'allies', radius: 260, damage_mult: 1.25, defense_mult: 1.2,

@@ -9,11 +9,11 @@ export function missingAuras(list, library) {
   const known = new Set((library || []).map((a) => a.name));
   return list.filter((n) => !known.has(n));
 }
-// Same as missingAuras, but empty while the library is still loading: an
-// unloaded library would otherwise flag every binding and invite a Remove that
-// wipes it.
-export function danglingAuras(list, library, isLoading) {
-  return isLoading ? [] : missingAuras(list, library);
+// Same as missingAuras, but empty while the library is still loading OR failed
+// to load: an unavailable library would otherwise flag every binding and invite
+// a Remove that wipes it on the next Save.
+export function danglingAuras(list, library, isLoading, isError = false) {
+  return isLoading || isError ? [] : missingAuras(list, library);
 }
 // The binding travels from the form state, never from the picker's library, so
 // editing any other field (or a picker that never loaded) re-sends it as-is.

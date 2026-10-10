@@ -199,7 +199,7 @@ function AuraCard({ aura, onDone }) {
 }
 
 export default function AuraEffectsAdmin() {
-  const { auras, isLoadingAuras } = useAuraEffectsAdmin();
+  const { auras, isLoadingAuras, isAuraError } = useAuraEffectsAdmin();
   const [adding, setAdding] = useState(false);
   const [search, setSearch] = useState('');
   const [sideFilter, setSideFilter] = useState('all');
@@ -244,7 +244,10 @@ export default function AuraEffectsAdmin() {
       {adding && <AuraCard aura={null} onDone={() => setAdding(false)} />}
       {isLoadingAuras && <AdminLoading label="Loading auras…" inline size={16} />}
       {filtered.map(a => <AuraCard key={a.id} aura={a} />)}
-      {!isLoadingAuras && filtered.length === 0 && !adding && (
+      {isAuraError && !isLoadingAuras && (
+        <p style={{ color: 'var(--s2-danger)' }}>Could not load the aura library.</p>
+      )}
+      {!isLoadingAuras && !isAuraError && filtered.length === 0 && !adding && (
         <p style={{ color: 'var(--s2-text-muted)' }}>
           {auras.length > 0 ? 'No auras match your filter.' : 'No auras yet.'}
         </p>

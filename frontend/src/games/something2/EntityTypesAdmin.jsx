@@ -941,7 +941,7 @@ function EntityTypesAdmin() {
   // re-read the row by id for anything that must reflect the approval.
   const liveEditingEntity = (editingEntity && entityTypes?.find(e => e.id === editingEntity.id)) || editingEntity;
   
-  const { auras: auraLibrary, isLoadingAuras } = useAuraEffectsAdmin();
+  const { auras: auraLibrary, isLoadingAuras, isAuraError } = useAuraEffectsAdmin();
 
   const [formData, setFormData] = useState({
     name: '',
@@ -1461,6 +1461,7 @@ function EntityTypesAdmin() {
                     value={formData.auras}
                     library={auraLibrary}
                     isLoading={isLoadingAuras}
+                    isError={isAuraError}
                     onChange={(name) => setFormData(prev => ({ ...prev, auras: toggleAura(prev.auras, name) }))}
                   />
                 </FormGroup>

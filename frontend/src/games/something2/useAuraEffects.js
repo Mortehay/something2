@@ -9,7 +9,7 @@ export const AURA_QUERY_KEY = ["auraEffects"];
 
 // The list carries used_by (entity types binding each aura) for the Used by line.
 export function useAuraEffectsAdmin() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: AURA_QUERY_KEY,
     queryFn: async () => {
       const res = await apiFetch(`${API_URL}/api/aura-effects`);
@@ -17,7 +17,7 @@ export function useAuraEffectsAdmin() {
       return res.json();
     },
   });
-  return { auras: data || [], isLoadingAuras: isLoading };
+  return { auras: data || [], isLoadingAuras: isLoading, isAuraError: isError };
 }
 
 // A 409 is the ORPHAN guard (entity bindings are by name, no FK): surface the
@@ -40,7 +40,9 @@ function auraMutation({ method, url, successMessage, failMessage }) {
         });
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
-          throw new Error(res.status === 409 ? orphanMessage(body, failMessage) : (body.error || failMessage));
+          const err = new Error(res.status === 409 ? orphanMessage(body, failMessage) : (body.error || failMessage));
+          err.status = res.status;
+          throw err;
         }
         return res.status === 204 ? true : res.json();
       },
@@ -58,7 +60,11 @@ function auraMutation({ method, url, successMessage, failMessage }) {
         toast.success(successMessage);
       },
       // Longer than the default: an orphan message lists names to act on.
-      onError: (e) => toast.error(e.message, { duration: 8000 }),
+      onError: (e) => {
+        toast.error(e.message, { duration: 8000 });
+        // A refused delete (409) means our Used-by list was stale: refetch so the card corrects itself.
+        if (e.status === 409) qc.invalidateQueries({ queryKey: AURA_QUERY_KEY });
+      },
     });
   };
 }

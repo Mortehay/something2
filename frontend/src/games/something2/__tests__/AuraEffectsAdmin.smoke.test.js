@@ -16,9 +16,9 @@ describe('Aura Effects screen', () => {
   it('uses all four hooks', () => {
     for (const h of ['useAuraEffectsAdmin()', 'useCreateAuraEffect', 'useUpdateAuraEffect', 'useDeleteAuraEffect']) expect(admin).toContain(h);
   });
-  it('the data hook returns { auras, isLoadingAuras } (Task 9 destructures auras)', () => {
-    expect(hooks).toMatch(/return \{ auras: data \|\| \[\], isLoadingAuras: isLoading \}/);
-    expect(admin).toMatch(/const \{ auras, isLoadingAuras \} = useAuraEffectsAdmin\(\)/);
+  it('the data hook returns { auras, isLoadingAuras, isAuraError } (Task 9 destructures auras)', () => {
+    expect(hooks).toMatch(/return \{ auras: data \|\| \[\], isLoadingAuras: isLoading, isAuraError: isError \}/);
+    expect(admin).toMatch(/const \{ auras, isLoadingAuras, isAuraError \} = useAuraEffectsAdmin\(\)/);
   });
   it('has the four spec sections', () => {
     for (const s of ['Target', 'Modifiers', 'Damage over time', 'Visual']) expect(admin).toContain(`>${s}<`);

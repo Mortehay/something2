@@ -31,6 +31,10 @@ describe('entity aura picker helpers', () => {
     expect(danglingAuras(['pack_leader'], [], true)).toEqual([]);
     expect(danglingAuras(['pack_leader'], [], false)).toEqual(['pack_leader']);
   });
+  it('flags no dangling names when the library fetch ERRORED (an empty library is not "all missing")', () => {
+    expect(danglingAuras(['pack_leader', 'x'], [], false, true)).toEqual([]);
+    expect(danglingAuras(['pack_leader'], [], false, false)).toEqual(['pack_leader']);
+  });
 });
 
 describe('EntityTypesAdmin wiring', () => {
@@ -48,6 +52,21 @@ describe('EntityTypesAdmin wiring', () => {
   });
   it('submits auras', () => {
     expect(src).toMatch(/auras: aurasForPayload\(formData\)/);
+  });
+  it('the error state flows hook -> Entities form -> picker, with a kept-unchanged note', () => {
+    const hook = fs.readFileSync(path.join(dir, '../useAuraEffects.js'), 'utf8');
+    expect(hook).toMatch(/isAuraError: isError/);
+    expect(src).toMatch(/isLoadingAuras, isAuraError \} = useAuraEffectsAdmin/);
+    expect(src).toMatch(/isError=\{isAuraError\}/);
+    expect(picker).toMatch(/danglingAuras\(value, library, isLoading, isError\)/);
+    expect(picker).toMatch(/Could not load the aura library/);
+  });
+  it('entity save/delete and a refused aura delete invalidate the aura query (stale Used by)', () => {
+    const maps = fs.readFileSync(path.join(dir, '../useMaps.js'), 'utf8');
+    const n = (maps.match(/queryKey: \['auraEffects'\]/g) || []).length;
+    expect(n).toBe(3);
+    const hook = fs.readFileSync(path.join(dir, '../useAuraEffects.js'), 'utf8');
+    expect(hook).toMatch(/e\.status === 409\) qc\.invalidateQueries\(\{ queryKey: AURA_QUERY_KEY \}\)/);
   });
   it('the picker hides dangling warnings while loading and offers Remove', () => {
     expect(picker).toMatch(/danglingAuras\(/);
