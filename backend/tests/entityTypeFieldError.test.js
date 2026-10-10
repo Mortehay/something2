@@ -122,3 +122,21 @@ test('accepts integer and null ai_provider_id', () => {
   assert.equal(entityTypeFieldError({ ...VALID, ai_provider_id: 1 }), null);
   assert.equal(entityTypeFieldError({ ...VALID, ai_provider_id: null }), null);
 });
+
+// SOMET-603: the boss fields.
+test('boss fields: null and valid values pass, arcane attack passes', () => {
+  assert.equal(entityTypeFieldError({ ...VALID, boss_tier: null, element: null, hitbox_size: null, xp_reward: null, base_damage: null }), null);
+  assert.equal(entityTypeFieldError({ ...VALID, boss_tier: 'world', element: 'arcane', hitbox_size: 96, xp_reward: 0, base_damage: 42.5 }), null);
+  assert.equal(entityTypeFieldError({ ...VALID, boss_tier: 'dungeon_elite' }), null);
+  assert.equal(entityTypeFieldError({ ...VALID, attack_element: 'arcane' }), null);
+});
+
+for (const [field, bad] of [
+  ['boss_tier', 'raid'], ['element', 'plasma'],
+  ['hitbox_size', 0], ['hitbox_size', 401], ['hitbox_size', 12.5], ['hitbox_size', '96'],
+  ['xp_reward', -1], ['xp_reward', 1.5], ['base_damage', -1], ['base_damage', 'x'],
+]) {
+  test(`rejects ${field} = ${JSON.stringify(bad)}`, () => {
+    assert.match(entityTypeFieldError({ ...VALID, [field]: bad }) || '', new RegExp(field));
+  });
+}

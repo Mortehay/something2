@@ -14,8 +14,10 @@
 const ATTACK_KINDS = ['melee', 'ranged', 'cast'];
 const CHASE_STYLES = ['charge', 'kite', 'skirmish', 'hold', 'ambush', 'guard', 'skittish'];
 // Mirrors creature_abilities' element CHECK constraint (migration
-// 1714440083000), which additionally allows NULL -- see resolveAbility.
-const ELEMENTS = ['physical', 'fire', 'ice', 'lightning'];
+// 1714440083000, widened by 1714440672000 for 'arcane'), which additionally
+// allows NULL -- see resolveAbility. Also the entity_types.attack_element
+// list (1714440670000) and the list authority/damage.js uses.
+const ELEMENTS = ['physical', 'arcane', 'fire', 'ice', 'lightning'];
 
 // Today's hostile attack, and the fallback for a behaviour with no ability
 // rows. Must equal CONTACT_RANGE (60) and CREATURE_ATTACK_COOLDOWN (1.0) in

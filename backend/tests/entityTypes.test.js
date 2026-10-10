@@ -703,3 +703,43 @@ test('PUT /api/entity-types/:id does not touch world_point_kinds when point_kind
   assert.strictEqual(res.status, 200);
   assert.ok(!queries.some((q) => /UPDATE world_point_kinds/i.test(q.sql)), 'must not issue the cleanup query');
 });
+
+// SOMET-603: the boss columns travel on POST and PUT; an absent key on PUT
+// must leave the stored value alone (same rule as point_kind / behavior_id).
+function flagFor(sql, params, column) {
+  const m = new RegExp(`\\b${column}\\s*=\\s*CASE WHEN \\$(\\d+)::boolean`, 'i').exec(sql);
+  assert.ok(m, `UPDATE does not guard '${column}' with a was-it-sent flag`);
+  return params[Number(m[1]) - 1];
+}
+
+test('POST /api/entity-types binds the boss columns', async () => {
+  let params = null, sql = null;
+  __setPool({ query: withAuth(async (s, p) => { sql = s; params = p; return { rows: [{ id: 1 }] }; }) });
+  const res = await request(app).post('/api/entity-types').set(...AUTH).send({
+    name: 'zzBossPost', color: '#f00', is_creature: true,
+    boss_tier: 'world', element: 'fire', hitbox_size: 96, xp_reward: 3500, base_damage: 42,
+  });
+  assert.equal(res.status, 201);
+  assert.equal(paramFor(sql, params, 'boss_tier'), 'world');
+  assert.equal(paramFor(sql, params, 'element'), 'fire');
+  assert.equal(paramFor(sql, params, 'hitbox_size'), 96);
+  assert.equal(paramFor(sql, params, 'xp_reward'), 3500);
+  assert.equal(paramFor(sql, params, 'base_damage'), 42);
+});
+
+test('PUT /api/entity-types/:id writes sent boss fields and leaves absent ones alone', async () => {
+  let sql = null, params = null;
+  __setPool(putMock('zzBossPut', async (s, p) => { sql = s; params = p; return { rows: [{ id: 5 }] }; }));
+  const res = await request(app).put('/api/entity-types/5').set(...AUTH).send({
+    name: 'zzBossPut', color: '#f00', boss_tier: 'world', hitbox_size: null,
+  });
+  assert.equal(res.status, 200);
+  assert.equal(flagFor(sql, params, 'boss_tier'), true);
+  assert.equal(paramFor(sql, params, 'boss_tier'), 'world');
+  assert.equal(flagFor(sql, params, 'hitbox_size'), true, 'an explicit null is a clear, not an omission');
+  assert.equal(paramFor(sql, params, 'hitbox_size'), null);
+  for (const col of ['element', 'xp_reward', 'base_damage']) {
+    assert.equal(flagFor(sql, params, col), false, `${col} was not sent and must be left alone`);
+  }
+  assert.equal(params[params.length - 1], '5', 'id stays the last param');
+});

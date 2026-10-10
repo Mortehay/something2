@@ -30,7 +30,7 @@ const { composeBiomePrompt } = require('./services/biomePrompt');
 const { buildWorldGenConfig } = require('./services/worldGenConfig');
 const { loadTileTypes } = require('./services/tileTypes');
 const { ATTACK_KINDS, CHASE_STYLES, ELEMENTS } = require('./services/creatureBehaviors');
-const { ABILITIES_LATERAL } = require('./authority/creatures');
+const { ABILITIES_LATERAL, BOSS_TIERS } = require('./authority/creatures');
 require('dotenv').config();
 
 const app = express();
@@ -710,7 +710,7 @@ app.get('/api/map/tiles', async (req, res) => {
 });
 
 // Mirrors the entity_types_attack_element_check CHECK constraint (migration
-// 1714440081000) so a bad value is a readable 400 rather than a raw 500 from
+// 1714440081000, widened to include 'arcane' by 1714440670000) so a bad value is a readable 400 rather than a raw 500 from
 // the constraint -- render_mode on these same two routes has no such check
 // (SOMET-254 leaves that pre-existing gap as-is; it is a free-form column
 // with no CHECK constraint to mirror). behavior_id is a real integer FK into
@@ -747,6 +747,25 @@ function entityTypeFieldError(body) {
   if (pinErr) return pinErr;
   if (body.attack_element != null && !ELEMENTS.includes(body.attack_element)) {
     return `attack_element must be one of ${ELEMENTS.join(', ')}`;
+  }
+  // SOMET-603: the boss fields. Each mirrors its DB constraint so a bad value
+  // is a readable 400 naming the field, never a raw 500.
+  if (body.boss_tier != null && !BOSS_TIERS.includes(body.boss_tier)) {
+    return `boss_tier must be one of ${BOSS_TIERS.join(', ')} or null`;
+  }
+  if (body.element != null && !ITEM_ELEMENTS.includes(body.element)) {
+    return `element must be one of ${ITEM_ELEMENTS.join(', ')} or null`;
+  }
+  if (body.hitbox_size != null && (!Number.isInteger(body.hitbox_size)
+      || body.hitbox_size < 1 || body.hitbox_size > MAX_ENTITY_DISPLAY_PX)) {
+    return `hitbox_size must be an integer between 1 and ${MAX_ENTITY_DISPLAY_PX}`;
+  }
+  if (body.xp_reward != null && (!Number.isInteger(body.xp_reward) || body.xp_reward < 0)) {
+    return 'xp_reward must be a non-negative integer';
+  }
+  if (body.base_damage != null && (typeof body.base_damage !== 'number'
+      || !Number.isFinite(body.base_damage) || body.base_damage < 0)) {
+    return 'base_damage must be a non-negative number';
   }
   if (body.behavior_id != null
       && (typeof body.behavior_id !== 'number' || !Number.isInteger(body.behavior_id))) {
@@ -796,7 +815,8 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
       strength, dexterity, constitution, intelligence, wisdom, charisma,
       hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
       display_width, display_height, render_mode, is_creature, prompt, place_order,
-      behavior_id, attack_element, point_kind
+      behavior_id, attack_element, point_kind,
+      boss_tier, element, hitbox_size, xp_reward, base_damage
     } = req.body;
     if (!name || !color) return res.status(400).json({ error: 'Name and color are required' });
     if (catalogNameTooLong(name)) {
@@ -831,14 +851,16 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
         strength, dexterity, constitution, intelligence, wisdom, charisma,
         hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
         display_width, display_height, render_mode, is_creature, prompt, place_order,
-        behavior_id, attack_element, ai_provider_mode, ai_provider_id, point_kind
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29) RETURNING *`,
+        behavior_id, attack_element, ai_provider_mode, ai_provider_id, point_kind,
+        boss_tier, element, hitbox_size, xp_reward, base_damage
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34) RETURNING *`,
       [
         name, color, walkable ?? false, JSON.stringify(spawn_tiles || []), chance ?? 0.1,
         strength ?? 0, dexterity ?? 0, constitution ?? 0, intelligence ?? 0, wisdom ?? 0, charisma ?? 0,
         hp ?? 0, max_hp ?? 0, hp_regen_rate ?? 0, mana ?? 0, max_mana ?? 0, mana_regen_rate ?? 0, image,
         display_width, display_height, render_mode ?? 'rect', is_creature ?? false, prompt ?? '', Number(place_order) || 0,
-        behavior_id ?? null, attack_element || 'physical', pin.mode, pin.id, point_kind ?? null
+        behavior_id ?? null, attack_element || 'physical', pin.mode, pin.id, point_kind ?? null,
+        boss_tier ?? null, element ?? null, hitbox_size ?? null, xp_reward ?? null, base_damage ?? null
       ]
     );
     res.status(201).json(result.rows[0]);
@@ -858,7 +880,8 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
     strength, dexterity, constitution, intelligence, wisdom, charisma,
     hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
     display_width, display_height, render_mode, is_creature, prompt, place_order,
-    behavior_id, attack_element, point_kind
+    behavior_id, attack_element, point_kind,
+    boss_tier, element, hitbox_size, xp_reward, base_damage
   } = req.body;
   if (catalogNameTooLong(name)) {
     return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
@@ -1025,8 +1048,13 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
         ai_provider_mode = CASE WHEN $28::boolean THEN $29 ELSE entity_types.ai_provider_mode END,
         ai_provider_id = CASE WHEN $28::boolean THEN $30 ELSE entity_types.ai_provider_id END,
         point_kind = CASE WHEN $31::boolean THEN $32 ELSE entity_types.point_kind END,
+        boss_tier = CASE WHEN $33::boolean THEN $34::text ELSE entity_types.boss_tier END,
+        element = CASE WHEN $35::boolean THEN $36::text ELSE entity_types.element END,
+        hitbox_size = CASE WHEN $37::boolean THEN $38::integer ELSE entity_types.hitbox_size END,
+        xp_reward = CASE WHEN $39::boolean THEN $40::integer ELSE entity_types.xp_reward END,
+        base_damage = CASE WHEN $41::boolean THEN $42::real ELSE entity_types.base_damage END,
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $33 RETURNING *`,
+      WHERE id = $43 RETURNING *`,
       [
         name, color, walkable, JSON.stringify(spawn_tiles), chance,
         strength, dexterity, constitution, intelligence, wisdom, charisma,
@@ -1055,7 +1083,15 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
         // pointKindProvided/point_kind sit here for the same reason
         // behaviorIdProvided/pinSent do: id must stay `params[params.length - 1]`
         // -- entityTypes.test.js asserts it on this exact route.
-        behaviorIdProvided, pinSent, pin.mode, pin.id, pointKindProvided, point_kind ?? null, id
+        behaviorIdProvided, pinSent, pin.mode, pin.id, pointKindProvided, point_kind ?? null,
+        // SOMET-603: present-in-body flags, same reason as pointKindProvided:
+        // the form clears a field by sending null, which a COALESCE would eat.
+        'boss_tier' in req.body, boss_tier ?? null,
+        'element' in req.body, element ?? null,
+        'hitbox_size' in req.body, hitbox_size ?? null,
+        'xp_reward' in req.body, xp_reward ?? null,
+        'base_damage' in req.body, base_damage ?? null,
+        id
       ]
     );
     if (result.rows.length === 0) {
