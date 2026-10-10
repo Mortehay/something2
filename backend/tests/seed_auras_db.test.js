@@ -23,6 +23,9 @@ test('seeded auras', { skip }, async (t) => {
   await cleanup();
   t.after(async () => { await cleanup(); await pool.end(); });
 
+  // is_creature=false: bindDefaultAuras keys on behavior_id only, and a hostile
+  // creature clone (no drop rule) would fail creature_drops_db / creature_behaviors_seed_db
+  // for a parallel reader while it lives through the ~10 s seedCatalogs below.
   // Column-order-independent clone of the template row (behavior NULL for the plain one).
   await cloneRow('zz_aura_champ_null', null, tpl.rows[0].behavior_id);
   await cloneRow('zz_aura_champ_empty', '[]', tpl.rows[0].behavior_id);
@@ -34,7 +37,8 @@ test('seeded auras', { skip }, async (t) => {
        SELECT (json_populate_record(NULL::entity_types,
          (row_to_json(e)::jsonb || jsonb_build_object(
             'id', nextval(pg_get_serial_sequence('entity_types','id')),
-            'name', $1::text, 'auras', $2::jsonb, 'behavior_id', $3::int))::json)).*
+            'name', $1::text, 'auras', $2::jsonb, 'behavior_id', $3::int,
+            'is_creature', false))::json)).*
          FROM entity_types e WHERE e.id = $4`,
       [name, auras, behaviorId, tpl.rows[0].id]);
   }

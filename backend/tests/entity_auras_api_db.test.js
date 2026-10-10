@@ -17,7 +17,9 @@ test('entity_types.auras binding', { skip }, async (t) => {
     [`auraadm-${E}`])).rows[0];
   const auth = ['Authorization', `Bearer ${signToken({ userId: u.id, username: 'x', role: 'admin', tokenVersion: u.token_version })}`];
   t.after(async () => {
-    await pool.query('DELETE FROM entity_types WHERE name = $1', [E]).catch(() => {});
+    // Prefix, not equality: the 'POST with an unknown name' case uses `${E}b`, which a
+    // regression (a 201 instead of a 400) would otherwise leak.
+    await pool.query("DELETE FROM entity_types WHERE name LIKE $1 || '%'", [E]).catch(() => {});
     await pool.query('DELETE FROM users WHERE id = $1', [u.id]).catch(() => {});
     await pool.end();
   });
@@ -25,7 +27,10 @@ test('entity_types.auras binding', { skip }, async (t) => {
   const base = {
     name: E, color: '#112233', walkable: false, spawn_tiles: [], chance: 0.1,
     strength: 0, dexterity: 0, constitution: 0, intelligence: 0, wisdom: 0, charisma: 0,
-    is_creature: true, hp: 10, max_hp: 10, hp_regen_rate: 0, mana: 0, max_mana: 0, mana_regen_rate: 0,
+    // false: a hostile is_creature row with no drop rule/behaviour fails the
+    // creature_drops_db / creature_behaviors_seed_db invariants for any parallel
+    // reader. The binding API does not look at is_creature.
+    is_creature: false, hp: 10, max_hp: 10, hp_regen_rate: 0, mana: 0, max_mana: 0, mana_regen_rate: 0,
     render_mode: 'rect',
   };
   let id;

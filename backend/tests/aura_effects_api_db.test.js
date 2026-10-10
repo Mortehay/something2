@@ -32,7 +32,8 @@ test('aura effects admin API', { skip }, async (t) => {
   const player = await makeUser(pool, 'player');
   t.after(async () => {
     await pool.query('DELETE FROM entity_types WHERE name = $1', [E]).catch(() => {});
-    await pool.query('DELETE FROM aura_effects WHERE name = ANY($1)', [[A, B]]).catch(() => {});
+    // Prefix, not [A, B]: the dot_element case uses `${A}x`, which a regression would leak.
+    await pool.query("DELETE FROM aura_effects WHERE name LIKE $1 || '%' OR name LIKE $2 || '%'", [A, B]).catch(() => {});
     await pool.query('DELETE FROM users WHERE id = ANY($1::int[])', [[admin.id, player.id]]).catch(() => {});
     await pool.end();
   });
@@ -73,7 +74,7 @@ test('aura effects admin API', { skip }, async (t) => {
     assert.match(r.body.error, /dot_element/);
   });
   await t.test('delete while bound is 409 with the entity list', async () => {
-    await pool.query(`INSERT INTO entity_types (name, color, is_creature, auras) VALUES ($1, '#123456', true, $2::jsonb)`,
+    await pool.query(`INSERT INTO entity_types (name, color, is_creature, auras) VALUES ($1, '#123456', false, $2::jsonb)`,
       [E, JSON.stringify([A])]);
     const r = await request(app).delete(`/api/aura-effects/${id}`).set(...as(admin));
     assert.strictEqual(r.status, 409);
