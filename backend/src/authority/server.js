@@ -20,7 +20,7 @@ const { mayJoin, joinPolicyFacts, waypointTravelFacts } = require('../services/j
 const { derivePlayerStats } = require('../services/playerStats.js');
 const { chunkOf, parseKey, neighborhoodKeys, CHUNK_KEY } = require('./coords');
 const { bucketPlayersByChunk, playersNear } = require('./playerAoi');
-const { loadCreatureTypes, ABILITIES_LATERAL } = require('./creatures');
+const { loadCreatureTypes, ABILITIES_LATERAL, hydrateCreatureRow } = require('./creatures');
 const { chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint, villageContaining } = require('../services/mapService');
 const { fetchLinks } = require('../services/mapLinks');
 const { fetchVillages } = require('../services/villages');
@@ -376,6 +376,7 @@ const CREATURE_JOINED_SELECT = `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.fac
                 -- trap -- the binding would exist in the database, and every
                 -- creature would silently draw the kind default forever.
                 et.vfx,
+                et.boss_tier, et.element, et.hitbox_size, et.auras,
                 b.name AS behavior_name, b.aggro_radius, b.leash_radius,
                 b.chase_style, b.preferred_range, b.move_speed_mult, b.damage_override,
                 b.aura_radius, b.aura_damage_mult, b.aura_defense_mult, b.aura_speed_mult,
@@ -419,6 +420,13 @@ function hydrateCharm(row, world) {
     charmedByCharacterId: row.charmed_by_character_id,
     charmExpiresAt: world.now + (expiresMs - Date.now()),
   };
+}
+
+// SOMET-603: the one per-row conversion both live loaders apply. Hydration
+// first (boss fields, hitbox -- shared with WorldBossManager), then the charm
+// restore, which spreads the row and so keeps every hydrated field.
+function toSimCreature(row, world) {
+  return hydrateCharm(hydrateCreatureRow(row), world);
 }
 
 // Attach the authoritative WebSocket simulation to an existing http server.
@@ -1280,7 +1288,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
          WHERE wc.world_id = $1 AND wc.x >= $2 AND wc.x < $3 AND wc.y >= $4 AND wc.y < $5`,
         [entry.worldId, cx * span, cx * span + span, cy * span, cy * span + span],
       );
-      entry.world.creatures.addCreatures(rows.rows.map((r) => hydrateCharm(r, entry.world)));
+      entry.world.creatures.addCreatures(rows.rows.map((r) => toSimCreature(r, entry.world)));
       const itemRows = await pool.query(
         // `rarity` is NOT optional in this list (SOMET-490). This SELECT is
         // the ONLY way an item re-enters the sim after flushAndPrune's
@@ -1329,7 +1337,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
          WHERE wc.id = ANY($1::uuid[])`,
         [ids],
       );
-      entry.world.creatures.addCreatures(rows.rows.map((r) => hydrateCharm(r, entry.world)));
+      entry.world.creatures.addCreatures(rows.rows.map((r) => toSimCreature(r, entry.world)));
     } catch (err) {
       // Best-effort, same posture as activateChunk's own catch: log so a
       // persistently failing injection is visible to an operator instead of

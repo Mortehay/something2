@@ -161,6 +161,50 @@ function creatureMitigation(row) {
   };
 }
 
+// SOMET-603: the three boss tiers (entity_types_boss_tier_check). NULL = an
+// ordinary creature.
+const BOSS_TIERS = Object.freeze(['world', 'dungeon_end', 'dungeon_elite']);
+
+// SOMET-603 (spec §4.1): the ONE row -> addCreatures-input mapping. Every
+// path that puts a creature into a CreatureSim from the database goes through
+// here: server.js's activateChunk and injectGuardIntoSim (instance rows from
+// CREATURE_JOINED_SELECT) and WorldBossManager (type rows from
+// ENTITY_CATALOG_SELECT plus instance overrides). Two mappings is how
+// SOMET-249 nearly shipped a catalog inert; this is the third column set
+// (boss fields) that would otherwise have needed adding in three places.
+//
+// `instance` wins over `row`, which is how a type row becomes an instance:
+// the manager supplies id/x/y/hp/level. A type row has `name` and no `type`;
+// an instance row has `type` (wc.type) and no `name`.
+//
+// damage: base_damage -> damage lives HERE and nowhere else (controller
+// ruling P1). An explicit instance damage wins; otherwise a non-null
+// entity_types.base_damage; otherwise the row's own damage (wc.damage, the
+// per-instance level-scaled value). Left undefined when none is set so
+// addCreatures keeps its CREATURE_DAMAGE fallback. Consumers read the
+// hydrated `.damage` and must not re-derive it.
+//
+// One returned key per normalised field: a later column set (S3's
+// aura_names/aura_defs) adds its own line here, not a second mapping.
+function hydrateCreatureRow(row, instance = {}) {
+  const merged = { ...row, ...instance };
+  const type = merged.type ?? row.name;
+  let damage = merged.damage;
+  if (instance.damage == null && row.base_damage != null) damage = Number(row.base_damage);
+  return {
+    ...merged,
+    type,
+    name: instance.name ?? row.name ?? type,
+    damage,
+    bossTier: BOSS_TIERS.includes(merged.boss_tier) ? merged.boss_tier : null,
+    element: typeof merged.element === 'string' && merged.element !== '' ? merged.element : null,
+    hitboxSize: merged.hitbox_size == null ? null : hitboxOrNull(Number(merged.hitbox_size)),
+    auras: Array.isArray(merged.auras)
+      ? merged.auras.filter((a) => typeof a === 'string' && a !== '')
+      : null,
+  };
+}
+
 // Abilities as one JSON array per creature, rather than a second round-trip
 // or a row-multiplying join. ORDER BY a.slot inside the aggregate is
 // load-bearing: slot order IS priority order, and json_agg over an unordered
@@ -191,6 +235,22 @@ const ABILITIES_LATERAL = `
            ), '[]'::json) AS abilities
     FROM creature_abilities a WHERE a.behavior_id = b.id
   ) ab ON true`;
+
+// SOMET-603: entity TYPE rows with everything hydrateCreatureRow and
+// resolveBehavior read, for callers that spawn an instance with no
+// world_creatures row (WorldBossManager now; S9 dungeon bosses next). Callers
+// append their own WHERE/ORDER BY. b.aura_* are deliberately NOT selected:
+// S3 drops those columns, and no boss uses a behaviour with an aura.
+const ENTITY_CATALOG_SELECT = `SELECT e.id, e.name, e.color, e.hp, e.max_hp, e.defense, e.resistances,
+         e.faction, e.gold_min, e.gold_max, e.attack_element, e.vfx, e.prompt,
+         e.boss_tier, e.element, e.hitbox_size, e.auras, e.xp_reward, e.base_damage,
+         e.display_width, e.display_height,
+         b.name AS behavior_name, b.aggro_radius, b.leash_radius, b.chase_style, b.preferred_range,
+         b.move_speed_mult, b.damage_override,
+         b.gold_min AS behavior_gold_min, b.gold_max AS behavior_gold_max,
+         ab.abilities
+    FROM entity_types e
+    LEFT JOIN creature_behaviors b ON b.id = e.behavior_id${ABILITIES_LATERAL}`;
 
 // Load the creature entity types. Named + exported (rather than inlined in
 // server.js) so a guard test can assert the SELECT names every column the
@@ -2493,6 +2553,8 @@ class CreatureSim {
 
 module.exports = {
   CreatureSim, loadCreatureTypes, creatureMitigation,
+  // SOMET-603: the shared row -> creature hydration and its catalog SELECT.
+  hydrateCreatureRow, ENTITY_CATALOG_SELECT, BOSS_TIERS,
   CREATURE_SIZE, CREATURE_SPEED, REDIRECT_CHANCE,
   AGGRO_RADIUS, LEASH_RADIUS, CONTACT_RANGE, CREATURE_DAMAGE, CREATURE_ATTACK_COOLDOWN,
   GUARD_AGGRO_RADIUS, GUARD_LEASH_RADIUS, GUARD_DAMAGE, GUARD_HOME_EPSILON,
