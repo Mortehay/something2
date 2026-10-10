@@ -38,6 +38,9 @@ const BOSSES = [
     prompt: 'An electrified colossus crackling with tempest storms.' },
 ];
 
+// Exported so the world-boss aura migration's parity test reads the names instead of retyping them.
+exports.BOSSES = BOSSES;
+
 const MINIONS = [
   { name: 'Fire Elemental Guard', color: '#ff4757', element: 'fire',
     prompt: 'A hulking guardian of living flame summoned to defend a world boss.' },

@@ -6,7 +6,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
-const { bindDefaultAuras, seedOneAura, seedCatalogs } = require('../scripts/seed-catalogs.js');
+const { bindDefaultAuras, bindWorldBossAuras, seedOneAura, seedCatalogs } = require('../scripts/seed-catalogs.js');
 const { AURA_EFFECTS, BEHAVIOR_DEFAULT_AURAS } = require('../seeds/data/auraEffects.js');
 
 const url = process.env.TEST_DATABASE_URL;
@@ -94,6 +94,65 @@ test('seeded auras', { skip }, async (t) => {
       const r = await c.query("SELECT radius, damage_mult FROM aura_effects WHERE name = 'pack_leader'");
       assert.strictEqual(r.rows[0].radius, 260);
       assert.strictEqual(r.rows[0].damage_mult, 1.25);
+    } finally { await c.query('ROLLBACK'); c.release(); }
+  });
+
+  // SOMET-606 Task 6B. Everything below runs in a rolled-back transaction so the
+  // real boss rows and the library are never left changed.
+  const IGNIS = 'Ignis, the Magma Colossus';
+  await t.test('bindWorldBossAuras: NULL is bound, [] survives, a clone with another name is untouched', async () => {
+    const c = await pool.connect();
+    try {
+      await c.query('BEGIN');
+      await c.query('UPDATE entity_types SET auras = NULL WHERE name = $1', [IGNIS]);
+      const clone = await c.query(`SELECT id FROM entity_types WHERE name = 'zz_aura_plain_null'`);
+      await c.query(`UPDATE entity_types SET boss_tier = 'world' WHERE id = $1`, [clone.rows[0].id]);
+      const q = async (n) => (await c.query('SELECT auras FROM entity_types WHERE name = $1', [n])).rows[0].auras;
+      const n = await bindWorldBossAuras(c);
+      assert.ok(n >= 1);
+      assert.deepStrictEqual(await q(IGNIS), ['ignis_inferno']);
+      assert.strictEqual(await q('zz_aura_plain_null'), null, 'a world-tier clone not in the map is never bound');
+      await c.query("UPDATE entity_types SET auras = '[]'::jsonb WHERE name = $1", [IGNIS]);
+      await bindWorldBossAuras(c);
+      assert.deepStrictEqual(await q(IGNIS), [], 'an admin [] must survive a rebind');
+      await c.query("UPDATE entity_types SET auras = '[\"pack_leader\"]'::jsonb WHERE name = $1", [IGNIS]);
+      await bindWorldBossAuras(c);
+      assert.deepStrictEqual(await q(IGNIS), ['pack_leader'], 'an authored binding is not appended to');
+    } finally { await c.query('ROLLBACK'); c.release(); }
+  });
+
+  await t.test('bindWorldBossAuras does not bind a non-world entity that shares a boss name', async () => {
+    const c = await pool.connect();
+    try {
+      await c.query('BEGIN');
+      await c.query(`UPDATE entity_types SET auras = NULL, boss_tier = NULL WHERE name = $1`, [IGNIS]);
+      await bindWorldBossAuras(c);
+      const r = await c.query('SELECT auras FROM entity_types WHERE name = $1', [IGNIS]);
+      assert.strictEqual(r.rows[0].auras, null);
+    } finally { await c.query('ROLLBACK'); c.release(); }
+  });
+
+  await t.test('seedOneAura restores a DoT aura with its dot_dps, dot_element and tick_ms', async () => {
+    const c = await pool.connect();
+    try {
+      await c.query('BEGIN');
+      await c.query("DELETE FROM aura_effects WHERE name = 'ignis_inferno'");
+      const seeded = AURA_EFFECTS.find((a) => a.name === 'ignis_inferno');
+      assert.ok(seeded, 'ignis_inferno must be in AURA_EFFECTS');
+      await seedOneAura(c, seeded);
+      const r = await c.query("SELECT target_side, radius, dot_dps, dot_element, tick_ms FROM aura_effects WHERE name = 'ignis_inferno'");
+      assert.deepStrictEqual(r.rows[0], { target_side: 'enemies', radius: 360, dot_dps: 6, dot_element: 'fire', tick_ms: 1000 });
+    } finally { await c.query('ROLLBACK'); c.release(); }
+  });
+
+  await t.test('seedCatalogs binds a world boss it finds with NULL auras', async () => {
+    const c = await pool.connect();
+    try {
+      await c.query('BEGIN');
+      await c.query('UPDATE entity_types SET auras = NULL WHERE name = $1', [IGNIS]);
+      await seedCatalogs(c);
+      const r = await c.query('SELECT auras FROM entity_types WHERE name = $1', [IGNIS]);
+      assert.deepStrictEqual(r.rows[0].auras, ['ignis_inferno']);
     } finally { await c.query('ROLLBACK'); c.release(); }
   });
 });

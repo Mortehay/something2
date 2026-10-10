@@ -17,7 +17,7 @@ const {
 } = require('../seeds/data/entityTypes.js');
 const { BESTIARY_P4_CREATURES, BESTIARY_P4_DROPS } = require('../seeds/data/bestiaryP4.js');
 const { CREATURE_BEHAVIORS } = require('../seeds/data/creatureBehaviors.js');
-const { AURA_EFFECTS, BEHAVIOR_DEFAULT_AURAS } = require('../seeds/data/auraEffects.js');
+const { AURA_EFFECTS, BEHAVIOR_DEFAULT_AURAS, WORLD_BOSS_DEFAULT_AURAS } = require('../seeds/data/auraEffects.js');
 const { CREATURE_ABILITIES } = require('../seeds/data/creatureAbilities.js');
 const { BEHAVIOR_DROPS } = require('../seeds/data/behaviorDrops.js');
 const { CHEST_LOOT } = require('../seeds/data/chestLoot.js');
@@ -434,10 +434,12 @@ async function seedOneClassLoadout(pool, l) {
 // reset by a reseed (same posture as seedOneCreatureType).
 async function seedOneAura(db, a) {
   const r = await db.query(
-    `INSERT INTO aura_effects (name, target_side, radius, damage_mult, defense_mult, speed_mult, shape, color, pulse_ms)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (name) DO NOTHING`,
+    `INSERT INTO aura_effects (name, target_side, radius, damage_mult, defense_mult, speed_mult, shape, color, pulse_ms,
+                               dot_dps, dot_element, tick_ms)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (name) DO NOTHING`,
     [a.name, a.target_side, a.radius, a.damage_mult ?? 1, a.defense_mult ?? 1, a.speed_mult ?? 1,
-     a.shape ?? 'ring', a.color ?? '#d4a017', a.pulse_ms ?? 1200],
+     a.shape ?? 'ring', a.color ?? '#d4a017', a.pulse_ms ?? 1200,
+     a.dot_dps ?? 0, a.dot_element ?? 'physical', a.tick_ms ?? 1000],
   );
   return r.rowCount;
 }
@@ -454,6 +456,22 @@ async function bindDefaultAuras(db) {
          FROM creature_behaviors b
         WHERE b.id = e.behavior_id AND b.name = $1 AND e.auras IS NULL`,
       [behaviorName, JSON.stringify(auras)],
+    );
+    n += r.rowCount;
+  }
+  return n;
+}
+
+// SOMET-606 (S4). World bosses are bound by entity NAME + boss_tier, not by
+// behaviour (they are all `Line`). NULL only: an admin's [] or authored list
+// is never overwritten. Returns the number of rows bound.
+async function bindWorldBossAuras(db) {
+  let n = 0;
+  for (const [entityName, auras] of Object.entries(WORLD_BOSS_DEFAULT_AURAS)) {
+    const r = await db.query(
+      `UPDATE entity_types SET auras = $2::jsonb
+        WHERE name = $1 AND boss_tier = 'world' AND auras IS NULL`,
+      [entityName, JSON.stringify(auras)],
     );
     n += r.rowCount;
   }
@@ -565,7 +583,8 @@ async function seedCatalogs(pool) {
     creatures += await seedOneCreatureType(pool, c);
   }
   const aurasBound = await bindDefaultAuras(pool);
-  console.log(`Bound default auras on ${aurasBound} entity types`);
+  const bossAurasBound = await bindWorldBossAuras(pool);
+  console.log(`Bound default auras on ${aurasBound + bossAurasBound} entity types`);
 
   // CREATURE_DROPS (Wolf's one hand-authored rule) and BESTIARY_P4_DROPS (288
   // generated rules, SOMET-250 Task 6) go through the same
@@ -609,7 +628,7 @@ async function seedCatalogs(pool) {
 
 module.exports = {
   seedCatalogs, seedOneTile, seedOneBiome, seedOneBehavior, seedOneAbility, seedOneBehaviorDrop,
-  seedOneChestLoot, seedOneAura, bindDefaultAuras,
+  seedOneChestLoot, seedOneAura, bindDefaultAuras, bindWorldBossAuras,
   seedOneCreatureType, seedOneCreatureDrop, seedOnePlayableClass, seedOneClassLoadout,
 };
 
