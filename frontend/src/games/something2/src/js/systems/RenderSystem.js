@@ -185,6 +185,15 @@ export class RenderSystem {
     return override || entity.renderMode || entity.render_mode || "rect";
   }
 
+  // SOMET-603: the procedural boss colours, keyed on the catalog element --
+  // never guessed from the name. Unknown/absent element = the fire palette.
+  static bossPalette(element) {
+    if (element === "ice") return { baseColor: "#70a1ff", glowColor: "#e0f2fe", darkColor: "#1e293b", eyeColor: "#67e8f9" };
+    if (element === "arcane" || element === "void") return { baseColor: "#a55eea", glowColor: "#f3e8ff", darkColor: "#180a24", eyeColor: "#f472b6" };
+    if (element === "lightning") return { baseColor: "#ffd166", glowColor: "#ffffff", darkColor: "#261e0b", eyeColor: "#67e8f9" };
+    return { baseColor: "#ff4757", glowColor: "#ffa502", darkColor: "#2f3542", eyeColor: "#ffeaa7" };
+  }
+
   // Dev cycle: none -> force rect -> force static -> force animated -> none.
   cycleRenderModeOverride() {
     const order = [null, "rect", "static", "animated"];
@@ -3213,29 +3222,7 @@ export class RenderSystem {
   _drawWorldBoss(e, drawX, drawY, w, h, s) {
     const ctx = this.ctx;
     const now = this.nowMs || Date.now();
-    const elem = e.bossElement || (e.type && e.type.includes('Magma') ? 'fire' : (e.type && e.type.includes('Frost') ? 'ice' : (e.type && e.type.includes('Void') ? 'arcane' : 'lightning')));
-
-    let baseColor = '#ff4757';
-    let glowColor = '#ffa502';
-    let darkColor = '#2f3542';
-    let eyeColor = '#ffeaa7';
-
-    if (elem === 'ice') {
-      baseColor = '#70a1ff';
-      glowColor = '#e0f2fe';
-      darkColor = '#1e293b';
-      eyeColor = '#67e8f9';
-    } else if (elem === 'arcane' || elem === 'void') {
-      baseColor = '#a55eea';
-      glowColor = '#f3e8ff';
-      darkColor = '#180a24';
-      eyeColor = '#f472b6';
-    } else if (elem === 'lightning') {
-      baseColor = '#ffd166';
-      glowColor = '#ffffff';
-      darkColor = '#261e0b';
-      eyeColor = '#67e8f9';
-    }
+    const { baseColor, glowColor, darkColor, eyeColor } = RenderSystem.bossPalette(e.element);
 
     ctx.save();
 
@@ -3326,67 +3313,78 @@ export class RenderSystem {
     ctx.fill();
 
     ctx.restore();
+  }
 
-    // 7. Boss Skull Nameplate Tag
-    const nameY = drawY - 24;
+  // SOMET-603: nameplate + always-on HP bar, drawn for EVERY boss whether its
+  // body came from approved art or from the procedural fallback.
+  _drawBossPlate(e, drawX, drawY, w, s) {
+    const ctx = this.ctx;
+    const { baseColor } = RenderSystem.bossPalette(e.element);
+    const tag = e.bossTier === "world" ? "[WORLD BOSS]" : "[BOSS]";
     ctx.save();
-    ctx.font = 'bold 14px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillStyle = '#ffffff';
+    ctx.font = "bold 14px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#ffffff";
     ctx.shadowColor = baseColor;
     ctx.shadowBlur = 10;
-    ctx.fillText(`☠️ [WORLD BOSS] ${e.name || 'World Boss'}`, cx, nameY);
+    ctx.fillText(`☠️ ${tag} ${e.name || e.type || "Boss"}`, s.x, drawY - 24);
     ctx.restore();
+    const maxHp = e.maxHp || 1;
+    this._drawHpBar(drawX, drawY - 6, w, e.hp != null ? e.hp : maxHp, maxHp);
+  }
 
-    // 8. Always draw HP Bar for World Boss
-    this._drawHpBar(drawX, drawY - 6, w, e.hp != null ? e.hp : e.maxHp, e.maxHp || 10000);
+  // The sprite-or-image half of drawEntity, shared by bosses and everything
+  // else. Returns true when it drew, false when the caller must supply its own
+  // fallback (a rectangle, or a boss's procedural body).
+  _drawEntityArt(e, drawX, drawY, w, h) {
+    const mode = RenderSystem.resolveRenderMode(e, this.renderModeOverride);
+    const sprite = RenderSystem.resolveSprite(e, this.imageManager, mode, this.nowMs);
+    if (sprite) {
+      const [sx, sy, sw, sh] = sprite.crop;
+      // SOMET-569: the FRAME's dimensions decide the fit, not the atlas's.
+      const r = fitSpriteRect(sw, sh, drawX, drawY, w, h);
+      this.ctx.drawImage(sprite.img, sx, sy, sw, sh, r.dx, r.dy, r.dw, r.dh);
+      return true;
+    }
+    const img = mode !== "rect" && e.image && this.imageManager
+      ? this.imageManager.get(e.image)
+      : null;
+    if (!img) return false;
+    // SOMET-569: fit, do not stretch.
+    const r = fitSpriteRect(img.width, img.height, drawX, drawY, w, h);
+    this.ctx.drawImage(img, r.dx, r.dy, r.dw, r.dh);
+    return true;
   }
 
   drawEntity(e) {
-    const isBoss = Boolean(e.isWorldBoss || (e.name && (e.name.includes('Colossus') || e.name.includes('Leviathan') || e.name.includes('Voidreaver') || e.name.includes('Titan'))));
-    const w = isBoss ? (e.width || 96) : (e.displayWidth || e.width || 40);
-    const h = isBoss ? (e.height || 96) : (e.displayHeight || e.height || 40);
+    // SOMET-603: `bossTier` is the ONE boss flag; no name matching.
+    const isBoss = Boolean(e.bossTier);
+    const fallback = isBoss ? 96 : 40;
+    const dim = (...vals) => {
+      for (const v of vals) if (Number.isFinite(v) && v > 0) return v;
+      return fallback;
+    };
+    // Display size first (approved art), then the server box, then default.
+    const w = dim(e.displayWidth, e.width);
+    const h = dim(e.displayHeight, e.height);
     const s = worldToScreen(e.x + (e.width || w) / 2, e.y + (e.height || h) / 2);
     const drawX = s.x - w / 2;
     const drawY = s.y - h;
 
+    // Status rings (creatures render through this path in renderChunked).
+    this._drawEffectRings(s.x, drawY + h, w, e.effects);
+
     if (isBoss) {
-      this._drawWorldBoss(e, drawX, drawY, w, h, s);
+      if (!this._drawEntityArt(e, drawX, drawY, w, h)) this._drawWorldBoss(e, drawX, drawY, w, h, s);
+      this._drawBossPlate(e, drawX, drawY, w, s);
+      this._drawEffectPips(drawX, drawY, e.effects);
       return;
     }
 
-    // Creatures render through this path in renderChunked (buildDrawables'
-    // "entity" kind), so their status rings belong here too. Map decorations
-    // never carry `effects`, so this is a no-op for them.
-    this._drawEffectRings(s.x, drawY + h, w, e.effects);
-
-    const mode = RenderSystem.resolveRenderMode(e, this.renderModeOverride);
-    // Preferred sprite path: crop a frame out of the generated atlas.
-    const sprite = RenderSystem.resolveSprite(e, this.imageManager, mode, this.nowMs);
-    if (sprite) {
-      const [sx, sy, sw, sh] = sprite.crop;
-      // SOMET-569: the FRAME's dimensions decide the fit, not the atlas's. A
-      // sheet is a grid of cells and each cell is as aspect-sensitive as a
-      // standalone image; using the atlas size here would fit against the whole
-      // sheet and squash every frame in it.
-      const r = fitSpriteRect(sw, sh, drawX, drawY, w, h);
-      this.ctx.drawImage(sprite.img, sx, sy, sw, sh, r.dx, r.dy, r.dw, r.dh);
-    } else {
-      // Legacy single-image fallback (whole image) still honored in sprite modes;
-      // then degrade to a rectangle so a missing asset never leaves a hole.
-      const img = mode !== "rect" && e.image && this.imageManager
-        ? this.imageManager.get(e.image)
-        : null;
-      if (img) {
-        // SOMET-569: fit, do not stretch. This is the path the four
-        // non-square decorations take (pine_tree, dead_tree, Tree, rose_bush),
-        // which is why they had been rendering squashed to 0.61-0.67x.
-        const r = fitSpriteRect(img.width, img.height, drawX, drawY, w, h);
-        this.ctx.drawImage(img, r.dx, r.dy, r.dw, r.dh);
-      } else {
-        this.ctx.fillStyle = e.color || "#c0392b";
-        this.ctx.fillRect(drawX, drawY, w, h);
-      }
+    if (!this._drawEntityArt(e, drawX, drawY, w, h)) {
+      // Degrade to a rectangle so a missing asset never leaves a hole.
+      this.ctx.fillStyle = e.color || "#c0392b";
+      this.ctx.fillRect(drawX, drawY, w, h);
     }
 
     // HP bar for damaged actors. Map decorations never carry hp/maxHp, so

@@ -56,6 +56,7 @@ import { API_URL } from "../../../../../config.js";
 import { GameArt } from "../systems/gameArt.js";
 import { fetchGameArt } from "../net/gameArtClient.js";
 import { fetchAllQuests, fetchCharacterQuests, startQuest, completeQuest } from "../net/questsClient.js";
+import { findWorldBossCreature } from "./worldBossMatch.js";
 
 // How long the "out of ammo" HUD flash stays up after the server's `noammo`
 // frame arrives.
@@ -3554,12 +3555,7 @@ export class Game {
     getWorldBossStatus() {
         if (!this.worldBossStatus) return null;
         if (this.worldBossStatus.state === 'active' && this.creatures && this.creatures.all) {
-            const all = this.creatures.all();
-            const bossCreature = all.find(
-                (c) => c.isWorldBoss ||
-                       c.id === this.worldBossStatus.bossCreatureId ||
-                       (this.worldBossStatus.bossName && (c.name === this.worldBossStatus.bossName || c.type === this.worldBossStatus.bossName))
-            );
+            const bossCreature = findWorldBossCreature(this.creatures.all(), this.worldBossStatus);
             if (bossCreature) {
                 const curHp = bossCreature.hp !== undefined ? bossCreature.hp : this.worldBossStatus.currentHp;
                 if (curHp <= 0) {
