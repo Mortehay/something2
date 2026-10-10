@@ -25,7 +25,7 @@ import { SKILLS_BY_CLASS } from './src/js/core/skillsData.js';
 import { SECTOR_HUES, nodeRadius, grantLine } from './src/js/systems/passiveTreePanel.js';
 import {
   indexArt, artFor, artCoverage, distinctLabels, onlyMissing,
-  treeBounds, zoomViewBox, panViewBox, clientToWorld, artConsoleLink, dragStart, dragMove, dragEnd, dragClick,
+  treeBounds, panViewBox, wheelZoom, artConsoleLink, dragStart, dragMove, dragEnd, dragClick,
 } from './skillTreeView.js';
 import AdminLoading from './AdminLoading.jsx';
 
@@ -117,7 +117,10 @@ const GAME_TREE_BG = 'rgba(10, 8, 6, 0.98)';
 const GAME_EDGE = '#3a3a4e';
 const GAME_NODE_FILL = 'rgba(30, 30, 45, 0.9)';
 const GAME_EMOJI = '#e5e7eb';
-const GAME_MISSING = '#f59e0b';
+// Not a sector hue: amber was charisma's, so a missing node in the Druid
+// sector read as an ordinary node. Near-white stands apart from all seven
+// hues on the dark tree background.
+const GAME_MISSING = '#f8fafc';
 const IconBox = styled.div`
   flex: 0 0 auto; width: ${SKILL_ICON_PX}px; height: ${SKILL_ICON_PX}px;
   background: ${GAME_ICON_BG}; border: 1.5px solid var(--icon-border, #a855f7);
@@ -172,11 +175,7 @@ function TreeGraph({ nodes, edges, art, dimLabels, onHover, onPick }) {
       const rect = svgRef.current.getBoundingClientRect();
       const factor = e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
       const { clientX, clientY } = e;
-      setBox((b) => {
-        const from = b || bounds;
-        const focus = clientToWorld(from, rect, clientX, clientY);
-        return zoomViewBox(from, factor, focus.x, focus.y);
-      });
+      setBox((b) => wheelZoom(b, bounds, rect, clientX, clientY, factor));
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
@@ -193,7 +192,7 @@ function TreeGraph({ nodes, edges, art, dimLabels, onHover, onPick }) {
     drag.current = dragStart(e.clientX, e.clientY);
   };
   const onPointerMove = (e) => {
-    const { state, dx, dy, capture } = dragMove(drag.current, e.clientX, e.clientY);
+    const { state, dx, dy, capture } = dragMove(drag.current, e.clientX, e.clientY, e.buttons);
     drag.current = state;
     if (!state || !state.pressed) return;
     if (capture) e.currentTarget.setPointerCapture(e.pointerId);
@@ -201,6 +200,21 @@ function TreeGraph({ nodes, edges, art, dimLabels, onHover, onPick }) {
     setBox((b) => panViewBox(b || bounds, dx, dy, upp));
   };
   const onPointerUp = () => { drag.current = dragEnd(drag.current); };
+
+  // A press released OUTSIDE the svg before it became a drag (so before the
+  // capture) never reaches onPointerUp above. The window still hears it, and
+  // the press ends there; dragEnd is idempotent, so a release on the svg that
+  // arrives both ways is harmless. dragMove's buttons===0 check covers a
+  // release the window missed too (e.g. outside the browser window).
+  useEffect(() => {
+    const end = () => { drag.current = dragEnd(drag.current); };
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
+    return () => {
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', end);
+    };
+  }, []);
 
   const pick = (node) => {
     const { state, allow } = dragClick(drag.current);
@@ -397,7 +411,7 @@ export default function SkillTreeAdmin() {
             {Object.entries(SECTOR_HUES).map(([sector, hue]) => (
               <span key={sector}><Swatch style={{ background: hue }} />{sector}</span>
             ))}
-            <span><Swatch style={{ border: `2px solid ${GAME_MISSING}` }} />no art</span>
+            <span><Swatch style={{ background: GAME_TREE_BG, border: `2px solid ${GAME_MISSING}` }} />no art</span>
           </Legend>
         </SectionHead>
         {treeError && <Err role="alert">{treeError.message}</Err>}
