@@ -4326,9 +4326,10 @@ export class RenderSystem {
       const by = startY + i * (slotH + gapY);
 
       const dur = Number(b.durationMs) || 20000;
-      const remainingMs = Math.max(0, (b.expiresAt || (b.startedAt + dur)) - nowMs);
+      const persistent = b.persistent === true;
+      const remainingMs = persistent ? dur : Math.max(0, (b.expiresAt || (b.startedAt + dur)) - nowMs);
       const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
-      const frac = Math.max(0, Math.min(1, remainingMs / dur));
+      const frac = persistent ? 1 : Math.max(0, Math.min(1, remainingMs / dur));
 
       // 1. Sleek glassmorphic container
       ctx.beginPath();
@@ -4358,7 +4359,7 @@ export class RenderSystem {
       ctx.fill();
 
       // Buff Emoji Icon
-      const buffImg = artIcon(this.gameArt, "skill", b.id);
+      const buffImg = persistent ? null : artIcon(this.gameArt, "skill", b.id);
       if (buffImg) {
         drawIconFit(ctx, buffImg, iconBoxX + 2, iconBoxY + 2, iconBoxS - 4);
       } else {
@@ -4376,10 +4377,16 @@ export class RenderSystem {
       ctx.fillStyle = "#ffffff";
       ctx.fillText(title.length > 13 ? title.slice(0, 12) + "…" : title, bx + 36, by + 5);
 
-      // Timer readout
+      // Timer readout -- or, for an aura debuff (SOMET-606), what it does.
       ctx.font = "10px monospace";
-      ctx.fillStyle = remainingSec <= 3 ? "#f87171" : "#fde047";
-      ctx.fillText(`${remainingSec}s`, bx + 36, by + 18);
+      if (persistent) {
+        ctx.fillStyle = "#fca5a5";
+        const d = b.detail || "";
+        ctx.fillText(d.length > 17 ? d.slice(0, 16) + "…" : d, bx + 36, by + 18);
+      } else {
+        ctx.fillStyle = remainingSec <= 3 ? "#f87171" : "#fde047";
+        ctx.fillText(`${remainingSec}s`, bx + 36, by + 18);
+      }
 
       // 4. Mini progress duration bar at bottom of the slot
       const barX = bx + 36;

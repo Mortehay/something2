@@ -15,6 +15,7 @@ import { getStoredToken, parseJwt } from "../net/auth.js";
 import { reconcile } from "../net/reconcile.js";
 import { inputVector, movementKeys, facingFromVector } from "../entities/Player.js";
 import { PLAYER_SPEED_EFFECTIVE } from "./constants.js";
+import { selfSpeedMult, debuffHudEntries } from "./auraDebuffs.js";
 import { aimVector, cursorToWorld } from "./aim.js";
 import { createInventory, applyJoined, applyEquipment, canEquipClient, typeOf, addItem, removeItem } from "./inventory.js";
 import { resolveDrop } from '../systems/inventoryPanel.js';
@@ -142,6 +143,9 @@ export class Game {
 
         this.player = new Player();
         this.camera = new Camera();
+        // SOMET-606: server aura multiplier / HUD debuff rows (own state frame).
+        this.selfSpeedMult = 1;
+        this.auraDebuffRows = [];
 
         this.chunked = false;
         this.chunkedMap = null;
@@ -1505,6 +1509,11 @@ export class Game {
             // server omits the field — otherwise a `if (mine.effects)` guard
             // would leave the HUD reading "Burning" long after the burn ended.
             this.player.effects = mine.effects || null;
+            // SOMET-606. Both assigned EVERY frame (the server omits them when
+            // clear -- same reason as `effects` above).
+            this.selfSpeedMult = selfSpeedMult(msg);
+            this.player.auraSpeedMult = this.selfSpeedMult;
+            this.auraDebuffRows = debuffHudEntries(msg.debuffs);
             // SOMET-523. Assigned on EVERY frame for the same reason `effects`
             // is one line up: the server OMITS the field entirely when the
             // player has no aura, so a guarded assignment would leave a ring
@@ -1525,7 +1534,7 @@ export class Game {
                 msg.ackSeq || 0,
                 this._inputBuffer,
                 this.chunkedMap,
-                { width: this.player.width, height: this.player.height, speed: PLAYER_SPEED_EFFECTIVE },
+                { width: this.player.width, height: this.player.height, speed: PLAYER_SPEED_EFFECTIVE * this.selfSpeedMult },
                 { dx, dy, dt: pendingDt }
             );
             const errX = out.x - this.player.x;
@@ -1725,7 +1734,7 @@ export class Game {
                 keybinds: this.keybinds,
                 inventoryGems: this.getInventoryGems(),
                 activeForm: this.activeForm,
-                activeBuffs: this.activeBuffs ? Array.from(this.activeBuffs.values()) : [],
+                activeBuffs: [...(this.activeBuffs ? Array.from(this.activeBuffs.values()) : []), ...this.auraDebuffRows],
                 flashSlot: (nowMs < this.hotbarFlashUntil) ? this.hotbarFlashSlot : null,
                 skillCooldowns: this.skillCooldowns,
                 unlockedSkills: this.unlockedSkills || loadUnlockedSkillsForCharacter(this.characterId),
