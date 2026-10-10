@@ -41,7 +41,13 @@ export function validateAuraForm(f) {
   if (!(p.damage_mult > 0)) return 'Damage multiplier must be greater than 0';
   if (!(p.defense_mult > 0)) return 'Defense multiplier must be greater than 0';
   if (!(p.speed_mult > 0)) return 'Speed multiplier must be greater than 0';
-  if (!(p.dot_dps >= 0)) return 'DoT per second must be 0 or greater';
+  // Enemies auras debuff players: a multiplier above 1 would be an enemy buff (G4, SOMET-606).
+  if (p.target_side === 'enemies') {
+    if (p.damage_mult > 1) return 'Damage multiplier must be 1 or less on an enemies aura';
+    if (p.defense_mult > 1) return 'Defense multiplier must be 1 or less on an enemies aura';
+    if (p.speed_mult > 1) return 'Speed multiplier must be 1 or less on an enemies aura';
+  }
+  if (!(p.dot_dps >= 0 && Number.isFinite(p.dot_dps))) return 'DoT per second must be 0 or greater';
   if (p.target_side === 'allies' && p.dot_dps > 0) return 'Only an enemies aura can deal damage over time';
   if (!Number.isInteger(p.tick_ms) || p.tick_ms < AURA_LIMITS.minTickMs || p.tick_ms > AURA_LIMITS.maxTickMs) {
     return `Tick must be a whole number of ms between ${AURA_LIMITS.minTickMs} and ${AURA_LIMITS.maxTickMs}`;

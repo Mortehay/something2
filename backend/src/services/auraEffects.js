@@ -17,7 +17,7 @@ const HEX = /^#[0-9a-fA-F]{6}$/;
 // are 0 and Number('260px') is NaN, and a blank field must not become a radius 0.
 function asNum(v) {
   if (typeof v === 'number') return Number.isFinite(v) ? v : NaN;
-  if (typeof v === 'string' && v.trim() !== '') return Number(v);
+  if (typeof v === 'string' && v.trim() !== '') { const n = Number(v); return Number.isFinite(n) ? n : NaN; }
   return NaN;
 }
 const isInt = (n) => Number.isInteger(n);
@@ -32,6 +32,10 @@ function auraEffectError(b) {
   if (!(r > 0 && r <= AURA_LIMITS.maxRadius)) return `radius must be greater than 0 and at most ${AURA_LIMITS.maxRadius}`;
   for (const f of ['damage_mult', 'defense_mult', 'speed_mult']) {
     if (b[f] != null && !(asNum(b[f]) > 0)) return `${f} must be greater than 0`;
+    // G4 (SOMET-606): an enemies aura debuffs players, so above 1 would be a buff.
+    if (b.target_side === 'enemies' && b[f] != null && asNum(b[f]) > 1) {
+      return `${f} must be 1 or less on an enemies aura (it debuffs the players it reaches)`;
+    }
   }
   if (b.dot_dps != null && !(asNum(b.dot_dps) >= 0)) return 'dot_dps must be 0 or greater';
   if (b.target_side === 'allies' && asNum(b.dot_dps ?? 0) > 0) {

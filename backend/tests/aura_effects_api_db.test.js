@@ -54,7 +54,8 @@ test('aura effects admin API', { skip }, async (t) => {
   });
   await t.test('validation runs before the DB (400 with a readable message)', async () => {
     for (const [over, re] of [[{ radius: 0 }, /radius/], [{ radius: -3 }, /radius/], [{ radius: 26000 }, /radius/],
-      [{ damage_mult: 0 }, /damage_mult/], [{ tick_ms: 50 }, /tick_ms/], [{ dot_dps: 5 }, /enemies/]]) {
+      [{ damage_mult: 0 }, /damage_mult/], [{ tick_ms: 50 }, /tick_ms/], [{ dot_dps: 5 }, /enemies/],
+      [{ target_side: 'enemies', damage_mult: 1.3 }, /damage_mult/]]) {
       const r = await request(app).post('/api/aura-effects').set(...as(admin)).send(body(over));
       assert.strictEqual(r.status, 400, JSON.stringify(over));
       assert.match(r.body.error, re);
@@ -69,7 +70,7 @@ test('aura effects admin API', { skip }, async (t) => {
   });
   await t.test('an unknown dot_element is a 400, not a raw FK 500', async () => {
     const r = await request(app).post('/api/aura-effects').set(...as(admin))
-      .send(body({ name: `${A}x`, target_side: 'enemies', dot_dps: 2, dot_element: 'plasma' }));
+      .send(body({ name: `${A}x`, target_side: 'enemies', damage_mult: 1, dot_dps: 2, dot_element: 'plasma' }));
     assert.strictEqual(r.status, 400);
     assert.match(r.body.error, /dot_element/);
   });
