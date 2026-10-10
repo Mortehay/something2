@@ -29,7 +29,7 @@ import {
   sortSubjects, freezeOrder, applyFilters, clampPage, pageCount, toggle, selectPage, deselectPage,
   isPageFullySelected, selectAllMatching, selectAllLabel, byKind, subjectId,
   enqueueSummary, coverage, selectionOutsideFilter, promptIneligibleCount, PAGE_SIZE, filtersFromParams,
-  joinInFlight, paramsFromFilters, startBatchBlocker,
+  joinInFlight, paramsFromFilters, startBatchBlocker, createUrlEcho, startBatchBody,
 } from './artSelection.js';
 import {
   batchProgress, formatDuration, claimedAgo, partitionInFlight, previewNames, blockedPanel, singleFlight,
@@ -477,12 +477,24 @@ function ArtConsoleAdmin() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [page, setPage] = useState(1);
   const filters = useMemo(() => filtersFromParams(searchParams), [searchParams]);
-  const { kind, art, search } = filters;
+  const { kind, art } = filters;
+  // The search box is local state, written to the URL but never read back
+  // from it while typing: the URL commits late and a controlled input bound
+  // to it dropped keystrokes. Only outside navigation (back, deep link)
+  // replaces it -- see createUrlEcho.
+  const [search, setSearch] = useState(filters.search);
   const pendingParams = useRef(searchParams);
-  useEffect(() => { pendingParams.current = searchParams; }, [searchParams]);
+  const urlEcho = useRef(createUrlEcho());
+  useEffect(() => {
+    if (!urlEcho.current.adopt(searchParams)) return;
+    pendingParams.current = searchParams;
+    setSearch(filtersFromParams(searchParams).search);
+  }, [searchParams]);
   const setFilter = (patch) => {
+    if ('search' in patch) setSearch(patch.search);
     const next = paramsFromFilters({ ...filtersFromParams(pendingParams.current), ...patch });
     pendingParams.current = next;
+    urlEcho.current.wrote(next);
     setSearchParams(next, { replace: true });
     setPage(1);
   };
@@ -617,10 +629,11 @@ function ArtConsoleAdmin() {
     </Pager>
   );
 
-  const startBody = () => ({
-    provider_id: providerId ? Number(providerId) : activeProvider?.id,
-    concurrency: 1,
-  });
+  // Under Local the Provider select is hidden, so its value must not ride
+  // along: a provider chosen under Connector and then hidden by switching to
+  // Local used to start a remote batch while the page said no provider is
+  // used (SOMET-535). See startBatchBody.
+  const startBody = () => startBatchBody({ backend, providerId, activeProvider });
   const onStart = () => startBatch.mutate(startBody());
   const startBlocker = startBatchBlocker({ backend, providerId, activeProvider });
   // A size refusal names the queued groups that block it. Offered as ONE

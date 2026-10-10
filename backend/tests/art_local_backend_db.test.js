@@ -78,6 +78,22 @@ async function withActive(pool, providerId, body) {
   }
 }
 
+// NO active image provider for the duration of the body. An unpinned tile
+// resolves to the ACTIVE provider before the batch's, so a test that asserts
+// the batch provider went red on any DB that had one (the dev DB has
+// provider 5). Restored in a finally, inside the lock.
+async function withNoActive(pool, body) {
+  const prev = await pool.query("SELECT id FROM ai_providers WHERE is_active AND modality = 'image'");
+  await pool.query("UPDATE ai_providers SET is_active = false WHERE is_active AND modality = 'image'");
+  try {
+    return await body();
+  } finally {
+    for (const r of prev.rows) {
+      await pool.query('UPDATE ai_providers SET is_active = true WHERE id = $1', [r.id]);
+    }
+  }
+}
+
 function lockedTest(name, body) {
   test(name, async (t) => {
     if (!requireTestDb(t, 'writes art_jobs')) return;
@@ -134,8 +150,8 @@ lockedTest('a tile pinned to local is queued as a local job inside a connector b
       "UPDATE tile_types SET ai_provider_mode = 'local', ai_provider_id = NULL WHERE name = $1",
       [a.key]);
     try {
-      const res = await request(app).post('/api/art-jobs').set(...AUTH)
-        .send({ kind: 'tile', keys: [a.key, b.key], backend: 'connector', provider_id: providerId });
+      const res = await withNoActive(pool, () => request(app).post('/api/art-jobs').set(...AUTH)
+        .send({ kind: 'tile', keys: [a.key, b.key], backend: 'connector', provider_id: providerId }));
       assert.equal(res.status, 201, JSON.stringify(res.body));
       const { rows } = await pool.query(
         'SELECT subject_key, backend, provider_id FROM art_jobs ORDER BY subject_key');
@@ -239,6 +255,56 @@ lockedTest('connector jobs still need a provider to start', async (t, pool, prov
   const res = await request(app).post('/api/art-jobs/dispatch').set(...AUTH).send({});
   assert.equal(res.status, 400);
   assert.match(res.body.error, /provider_id is required/);
+});
+
+// The validator's mutation: dropping the connector check let a MIXED queue
+// start provider-less, and nothing went red. A mixed queue must be refused,
+// and refused for the right reason.
+lockedTest('a mixed local + connector queue cannot start without a provider',
+  async (t, pool, providerId) => {
+    const [s1, s2] = await cs.SUBJECTS.skill.list();
+    await queue.enqueue(pool, [{ kind: 'skill', key: s1.key }], { backend: 'local', providerId: null });
+    await queue.enqueue(pool, [{ kind: 'skill', key: s2.key }], { backend: 'connector', providerId });
+    const res = await request(app).post('/api/art-jobs/dispatch').set(...AUTH).send({});
+    assert.equal(res.status, 400, JSON.stringify(res.body));
+    assert.match(res.body.error, /holds 1 connector job/);
+    assert.equal(dispatcher.runStatus().running, false, 'no drain may start');
+  });
+
+// An empty queue is refused with the TRUE reason, not "the queue holds
+// connector jobs" (Start is enabled under Local, so this is reachable).
+lockedTest('a provider-less start on an empty queue says nothing is queued', async () => {
+  const res = await request(app).post('/api/art-jobs/dispatch').set(...AUTH).send({});
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /nothing is queued/);
+  assert.doesNotMatch(res.body.error, /connector/);
+});
+
+// A double-click on Start under Local: the running drain has already claimed
+// the only local job, so the queue looks empty. The answer is the 409 the
+// provider path gives, not a provider-less 400.
+lockedTest('a provider-less start while a batch runs is a 409', async (t, pool) => {
+  const [skill] = await cs.SUBJECTS.skill.list();
+  await queue.enqueue(pool, [{ kind: 'skill', key: skill.key }], { backend: 'local', providerId: null });
+  dispatcher.startDrain(pool, {
+    provider: null,
+    localGenerate: async () => new Promise((r) => { setTimeout(r, 400); }),
+    writePromptForJob: async () => new Promise((r) => { setTimeout(r, 400); }),
+    concurrency: 1,
+  });
+  t.after(() => { dispatcher.stopDrain(); dispatcher.__resetRun(); });
+  // Wait until the drain has claimed the job, the state the second click saw.
+  for (let i = 0; i < 100; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    const { rows } = await pool.query("SELECT count(*)::int AS n FROM art_jobs WHERE state = 'queued'");
+    if (rows[0].n === 0) break;
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((r) => { setTimeout(r, 20); });
+  }
+  const res = await request(app).post('/api/art-jobs/dispatch').set(...AUTH).send({});
+  assert.equal(res.status, 409, JSON.stringify(res.body));
+  assert.match(res.body.error, /already running/);
+  assert.equal(res.body.run.running, true);
 });
 
 // --- Unknown kinds ---------------------------------------------------------

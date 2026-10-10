@@ -3,7 +3,7 @@ import {
   subjectId, sortSubjects, freezeOrder, clampPage, pageCount, toggle, selectPage, deselectPage,
   isPageFullySelected, selectAllMatching, selectAllLabel, byKind, applyFilters,
   enqueueSummary, coverage, selectionOutsideFilter, promptIneligibleCount, PAGE_SIZE, filtersFromParams,
-  joinInFlight, paramsFromFilters, startBatchBlocker,
+  joinInFlight, paramsFromFilters, startBatchBlocker, startBatchBody, createUrlEcho,
 } from '../artSelection.js';
 
 const S = (kind, key, extra = {}) => ({ kind, key, name: key, has_art: false, ...extra });
@@ -380,5 +380,36 @@ describe('startBatchBlocker', () => {
 
   it('does not need a provider for a local batch', () => {
     expect(startBatchBlocker({ backend: 'local', providerId: '', activeProvider: null })).toBeNull();
+  });
+});
+
+describe('startBatchBody', () => {
+  it('sends no provider under Local, even one left in the hidden select', () => {
+    expect(startBatchBody({ backend: 'local', providerId: '5', activeProvider: { id: 9 } }))
+      .toEqual({ concurrency: 1 });
+  });
+  it('sends the chosen provider under Connector, else the active one', () => {
+    expect(startBatchBody({ backend: 'connector', providerId: '5', activeProvider: { id: 9 } }))
+      .toEqual({ provider_id: 5, concurrency: 1 });
+    expect(startBatchBody({ backend: 'connector', providerId: '', activeProvider: { id: 9 } }))
+      .toEqual({ provider_id: 9, concurrency: 1 });
+  });
+});
+
+describe('createUrlEcho', () => {
+  const q = (s) => new URLSearchParams(s);
+  it('ignores a late commit of a value the console wrote itself, even a stale one', () => {
+    const echo = createUrlEcho();
+    for (const v of ['q=w', 'q=wa', 'q=war']) echo.wrote(q(v));
+    // the router commits 'wa' after the user has typed 'war': adopting it
+    // would snap the input back and lose the 'r'
+    expect(echo.adopt(q('q=wa'))).toBe(false);
+    expect(echo.adopt(q('q=war'))).toBe(false);
+  });
+  it('adopts navigation from outside (back, a deep link), then forgets old writes', () => {
+    const echo = createUrlEcho();
+    echo.wrote(q('q=w'));
+    expect(echo.adopt(q('kind=skill&q=war_whirlwind'))).toBe(true);
+    expect(echo.adopt(q('q=w'))).toBe(true);
   });
 });

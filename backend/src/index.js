@@ -3876,8 +3876,17 @@ app.post('/api/art-jobs/dispatch', adminGuard, async (req, res) => {
     if (chosen.error) return res.status(400).json({ error: chosen.error });
     const providerId = chosen.id;
     // SOMET-535. A queue holding only LOCAL jobs needs no provider: sprite-gen
-    // draws them. Anything a connector would draw still needs one, and an
-    // empty queue keeps the old answer rather than starting a no-op drain.
+    // draws them. Anything a connector would draw still needs one.
+    //
+    // A running batch is answered first: it has already CLAIMED its job, so
+    // the queue below can look empty and the provider-less checks would give
+    // a false reason (a double-click on Start under Local got "the queue
+    // holds connector jobs").
+    if (artDispatcher.runStatus().running) {
+      return res.status(409).json({
+        error: 'an art batch is already running', run: artDispatcher.runStatus(),
+      });
+    }
     let provider = null;
     if (providerId) {
       provider = await aiProviders.loadImageProviderWithSecret(pool, providerId);
@@ -3887,11 +3896,15 @@ app.post('/api/art-jobs/dispatch', adminGuard, async (req, res) => {
         `SELECT count(*) FILTER (WHERE backend = 'local')::int AS local,
                 count(*) FILTER (WHERE backend <> 'local')::int AS connector
            FROM art_jobs WHERE state = 'queued'`);
-      if (!mix || mix.connector > 0 || mix.local === 0) {
+      if (mix.connector > 0) {
         return res.status(400).json({
-          error: 'provider_id is required -- the queue holds connector jobs; '
-            + 'only a queue of local jobs can start without one',
+          error: `provider_id is required -- the queue holds ${mix.connector} connector `
+            + 'job(s); only a queue of local jobs can start without one',
         });
+      }
+      // Kept a refusal rather than a no-op drain, with the true reason.
+      if (mix.local === 0) {
+        return res.status(400).json({ error: 'nothing is queued -- queue subjects first' });
       }
     }
 

@@ -195,6 +195,26 @@ export function paramsFromFilters({ kind, art, search }) {
   return p;
 }
 
+// SOMET-535. Tells the console's own URL writes apart from navigation that
+// came from outside (browser back, a Skill Tree deep link). React Router
+// applies setSearchParams as a deferred update, so while someone is typing
+// the URL can commit a value they have already typed past ('wa' after 'war').
+// An input bound to the URL snapped back to it and lost keys. The console
+// therefore keeps the typed text in its own state and adopts a URL value only
+// when it is not one of its own writes.
+export function createUrlEcho() {
+  const written = new Set();
+  return {
+    wrote(params) { written.add(params.toString()); },
+    // true when `params` came from outside and the console should adopt it
+    adopt(params) {
+      if (written.has(params.toString())) return false;
+      written.clear();
+      return true;
+    },
+  };
+}
+
 // Why Start batch cannot run, or null when it can. A LOCAL batch is drawn by
 // the sprite-gen service and needs no remote provider (SOMET-535); a connector
 // batch needs a chosen one or an active one.
@@ -202,6 +222,15 @@ export function startBatchBlocker({ backend, providerId, activeProvider }) {
   if (backend === 'local') return null;
   if (providerId || activeProvider) return null;
   return 'Choose a provider, or set an active one in AI Providers';
+}
+
+// The POST /api/art-jobs/dispatch body. Under Local it carries NO
+// provider_id: the server starts a provider-less batch only when every queued
+// job is local, and a provider left in the hidden select must not turn a
+// Local start into a remote batch (SOMET-535).
+export function startBatchBody({ backend, providerId, activeProvider }) {
+  if (backend === 'local') return { concurrency: 1 };
+  return { provider_id: providerId ? Number(providerId) : activeProvider?.id, concurrency: 1 };
 }
 
 export function applyFilters(subjects, { kind = 'all', art = 'all', search = '' } = {}) {
