@@ -104,6 +104,9 @@ function makePool({ bounded = true, userItems = [], safeRoadRadius = 0, safeRect
           // types here means the backstop no-ops for this fixture's world,
           // same as any world seeded without creature content.
           density: 'normal', allowed_creature_types: [],
+          // SOMET-609: loadWorld also selects dungeon_boss. NULL (no boss) is
+          // what every non-dungeon world carries, and places nothing.
+          dungeon_boss: null,
         })] };
       }
       if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
