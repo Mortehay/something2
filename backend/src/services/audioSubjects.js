@@ -46,6 +46,15 @@ const ATTACK_TYPE_PHRASE = {
   magic: { use: 'a magic spell', hit: 'a magic blast' },
 };
 
+// SOMET-605 (spec §3.6): every creature carries the base slots; a row with a
+// boss_tier also carries BOSS_SLOTS. The kind's `slots` map below is the
+// VOCABULARY (every slot ANY creature can carry, so slotKind stays
+// subject-free); whether ONE creature carries a slot is answered by
+// exists(db, keys, slot) or subjectSlotNames -- never by `slots` alone.
+const CREATURE_BASE_SLOTS = Object.freeze(['nearby', 'attack', 'hurt', 'death']);
+const BOSS_SLOTS = Object.freeze(['spawn', 'presence', 'phase', 'enrage']);
+const BOSS_SLOT_SET = new Set(BOSS_SLOTS);
+
 const SUBJECT_KINDS = {
   world: {
     label: 'Worlds',
@@ -65,23 +74,44 @@ const SUBJECT_KINDS = {
     label: 'Creatures',
     slots: {
       nearby: 'sfx', attack: 'sfx', hurt: 'sfx', death: 'sfx',
+      spawn: 'sfx', presence: 'sfx', phase: 'sfx', enrage: 'sfx',
     },
     // Fixed: the same cue applies to every creature (spec §4 table). `nearby`
-    // and `attack` have no cue on the box today -- upload only. Still used by
-    // cueFor directly; subjectCues below fans it out per listed creature.
+    // and `attack` have no cue on the box today -- upload only. The four boss
+    // slots have none either (the box offers slash/hit/pickup/spell/footstep/
+    // ui_click/miss/chest_open/death/waypoint), so they are upload only too.
     cues: {
       nearby: null, attack: null, hurt: 'hit', death: 'death',
+      spawn: null, presence: null, phase: null, enrage: null,
     },
     list: async (db) => (await db.query(
       'SELECT name FROM entity_types WHERE is_creature ORDER BY name')).rows.map((r) => r.name),
-    exists: async (db, keys) => new Set((await db.query(
-      'SELECT name FROM entity_types WHERE is_creature AND name = ANY($1::text[])', [keys])).rows.map((r) => r.name)),
-    // subjectCues(db) -> { [name]: { [slot]: cue|null } }, one entry per
-    // listed creature -- see the module-level comment above SUBJECT_KINDS.
+    // `slot` (optional): a boss slot exists only on a boss_tier row. Omitted,
+    // this answers "is it a creature at all", exactly as before.
+    exists: async (db, keys, slot) => new Set((await db.query(
+      `SELECT name FROM entity_types
+        WHERE is_creature AND name = ANY($1::text[])
+          AND ($2::boolean IS FALSE OR boss_tier IS NOT NULL)`,
+      [keys, BOSS_SLOT_SET.has(slot)])).rows.map((r) => r.name)),
+    // { [name]: [slot, ...] } for the named creatures (all when keys is null),
+    // in vocabulary order. Unknown names are absent.
+    subjectSlotNames: async (db, keys = null) => {
+      const r = await db.query(
+        `SELECT name, boss_tier IS NOT NULL AS boss FROM entity_types
+          WHERE is_creature AND ($1::text[] IS NULL OR name = ANY($1::text[]))
+          ORDER BY name`, [keys]);
+      return Object.fromEntries(r.rows.map((row) => [
+        row.name, row.boss ? [...CREATURE_BASE_SLOTS, ...BOSS_SLOTS] : [...CREATURE_BASE_SLOTS],
+      ]));
+    },
+    // subjectCues(db) -> { [name]: { [slot]: cue|null } }, covering exactly
+    // the slots THAT creature carries (a boss row gets the boss slots too).
     subjectCues: async (db) => {
-      const names = await SUBJECT_KINDS.creature.list(db);
+      const bySubject = await SUBJECT_KINDS.creature.subjectSlotNames(db);
       const out = {};
-      for (const n of names) out[n] = { ...SUBJECT_KINDS.creature.cues };
+      for (const [n, slots] of Object.entries(bySubject)) {
+        out[n] = Object.fromEntries(slots.map((sl) => [sl, SUBJECT_KINDS.creature.cues[sl]]));
+      }
       return out;
     },
   },
@@ -158,15 +188,37 @@ function isKnownSlot(subjectKind, slot) {
 const MAX_SUBJECT_KEY = 200;
 
 // Does this subject exist in its catalogue (spec §3: unknown keys are
-// dropped)? One query for the whole list; returns the Set of keys that exist.
-async function existingSubjects(db, subjectKind, keys) {
+// dropped) -- and, when `slot` is given, does it CARRY that slot (spec §3.6:
+// boss slots only on boss rows)? Kinds whose slots do not vary per subject
+// ignore `slot`. One query for the whole list.
+async function existingSubjects(db, subjectKind, keys, slot) {
   if (!isKnownKind(subjectKind) || !keys.length) return new Set();
-  return SUBJECT_KINDS[subjectKind].exists(db, keys);
+  return SUBJECT_KINDS[subjectKind].exists(db, keys, slot);
 }
 
-async function subjectExists(db, subjectKind, key) {
+async function subjectExists(db, subjectKind, key, slot) {
   if (typeof key !== 'string' || !key || key.length > MAX_SUBJECT_KEY) return false;
-  return (await existingSubjects(db, subjectKind, [key])).has(key);
+  return (await existingSubjects(db, subjectKind, [key], slot)).has(key);
+}
+
+// The slots ONE subject carries, in vocabulary order. Kinds without
+// per-subject slots return the whole vocabulary, without checking that the
+// key exists -- the same answer GET /admin/prompts and /admin/slots always
+// gave, so their behaviour for those kinds is unchanged.
+async function slotNamesFor(db, subjectKind, key) {
+  if (!isKnownKind(subjectKind)) return [];
+  const def = SUBJECT_KINDS[subjectKind];
+  if (!def.subjectSlotNames) return Object.keys(def.slots);
+  return (await def.subjectSlotNames(db, [key]))[key] || [];
+}
+
+// { [key]: [slot, ...] } for every listed subject of a kind.
+async function slotsBySubject(db, subjectKind) {
+  if (!isKnownKind(subjectKind)) return {};
+  const def = SUBJECT_KINDS[subjectKind];
+  if (def.subjectSlotNames) return def.subjectSlotNames(db);
+  const all = Object.keys(def.slots);
+  return Object.fromEntries((await def.list(db)).map((k) => [k, [...all]]));
 }
 
 // An item's own attack kind (melee/ranged/magic), via the ONE definition
@@ -274,6 +326,9 @@ module.exports = {
   isKnownSlot,
   existingSubjects,
   subjectExists,
+  slotNamesFor,
+  slotsBySubject,
+  BOSS_SLOTS,
   cueFor,
   entityPhrase,
   itemCues,

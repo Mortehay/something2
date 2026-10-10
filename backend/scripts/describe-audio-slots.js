@@ -40,7 +40,7 @@
 const path = require('path');
 const dotenv = require('dotenv');
 const { Pool } = require('pg');
-const { SUBJECT_KINDS, slotKind, cueFor } = require('../src/services/audioSubjects');
+const { SUBJECT_KINDS, slotKind, cueFor, slotsBySubject } = require('../src/services/audioSubjects');
 const audioPrompts = require('../src/services/audioPrompts');
 const { loadPromptCatalog, buildContext, isStale } = require('../src/services/audioPromptContext');
 const writer = require('../src/services/audioPromptWriter');
@@ -96,11 +96,11 @@ function summarize(results) {
 
 async function allSlots(db) {
   const out = [];
-  for (const [kind, def] of Object.entries(SUBJECT_KINDS)) {
+  for (const kind of Object.keys(SUBJECT_KINDS)) {
     // eslint-disable-next-line no-await-in-loop
-    const keys = await def.list(db);
-    for (const key of keys) {
-      for (const slot of Object.keys(def.slots)) out.push({ kind, key, slot, id: `${kind}/${key}/${slot}` });
+    const bySubject = await slotsBySubject(db, kind);
+    for (const [key, slots] of Object.entries(bySubject)) {
+      for (const slot of slots) out.push({ kind, key, slot, id: `${kind}/${key}/${slot}` });
     }
   }
   return out;
