@@ -177,6 +177,10 @@ async function applyMapSpec(pool, spec, { moveEntry = true } = {}) {
     creatureTypeNames: new Set(
       (await pool.query('SELECT name FROM entity_types WHERE is_creature = true')).rows.map((r) => r.name)),
     pointArtTypes: await loadPointTypeNames(pool),
+    // SOMET-609: boss tiers for the `boss` block's catalog check.
+    bossTiers: new Map((await pool.query(
+      'SELECT name, boss_tier FROM entity_types WHERE is_creature = true AND boss_tier IS NOT NULL',
+    )).rows.map((r) => [r.name, r.boss_tier])),
   };
   const errors = validateMapSpec(spec, catalogs);
   if (errors.length) {
