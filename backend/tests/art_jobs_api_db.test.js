@@ -33,6 +33,11 @@ function requireTestDb(t, why) {
   return true;
 }
 
+// Scratch providers a test creates beyond freshPool's own. freshPool's t.after
+// deletes them BEFORE it ends the pool: a t.after registered later by the test
+// itself runs after the pool is gone, fails silently and leaks the row.
+const extraProviders = new Set();
+
 async function freshPool(t) {
   const pool = new Pool({ connectionString: DB_URL, max: 6, connectionTimeoutMillis: 3000 });
   const { rows } = await pool.query(
@@ -52,7 +57,9 @@ async function freshPool(t) {
     // Not a blanket DELETE FROM art_jobs: t.after runs outside the advisory
     // lock, so it would wipe a peer file's in-flight jobs.
     dispatcher.__resetRun();
-    await pool.query('DELETE FROM ai_providers WHERE id = $1', [providerId]).catch(() => {});
+    const ids = [providerId, ...extraProviders];
+    extraProviders.clear();
+    await pool.query('DELETE FROM ai_providers WHERE id = ANY($1::int[])', [ids]).catch(() => {});
     await pool.end().catch(() => {});
   });
   return { pool, providerId };
@@ -260,9 +267,11 @@ lockedTest('dispatch refuses a below-native provider with an actionable 400',
     );
     const skills = (await cs.SUBJECTS.skill.list()).slice(0, 2);
     const [tile] = await cs.SUBJECTS.tile.list(pool);
+    const [item] = await cs.SUBJECTS.item.list(pool);
     await queue.enqueue(pool, [
       ...skills.map((s) => ({ kind: 'skill', key: s.key })),
       { kind: 'tile', key: tile.key },
+      { kind: 'item', key: item.key },
     ], { backend: 'connector', providerId });
 
     const res = await request(app).post('/api/art-jobs/dispatch').set(...AUTH)
@@ -270,11 +279,17 @@ lockedTest('dispatch refuses a below-native provider with an actionable 400',
     assert.equal(res.status, 400);
     assert.match(res.body.error, /1024px minimum/);
     assert.match(res.body.error, /request_template/, 'the message must say how to fix it');
+    // EVERY blocked kind is named, not just the first one the GROUP BY returns
+    // (SOMET-593 D5: the copy said "queued item jobs" while skill was blocked too).
+    assert.match(res.body.error, /queued item and skill jobs use it/);
     // WHICH rows block it, so the console can offer to drop exactly those.
     // The tile is exempt and must not be listed -- dropping it would lose
     // correct work.
     assert.deepEqual(res.body.blocked.map(({ kind, provider_id: pid, width, count }) =>
-      ({ kind, pid, width, count })), [{ kind: 'skill', pid: providerId, width: 512, count: 2 }]);
+      ({ kind, pid, width, count })), [
+      { kind: 'item', pid: providerId, width: 512, count: 1 },
+      { kind: 'skill', pid: providerId, width: 512, count: 2 },
+    ]);
     assert.equal(dispatcher.runStatus().running, false, 'nothing may have started');
   });
 
@@ -496,9 +511,16 @@ lockedTest('clear rejects malformed groups rather than clearing everything',
     const [skill] = await cs.SUBJECTS.skill.list();
     await queue.enqueue(pool, [{ kind: 'skill', key: skill.key }],
       { backend: 'connector', providerId });
-    for (const groups of [[], [{ kind: 'skill' }], [{ kind: 3, provider_id: 1 }]]) {
+    // A PRESENT but non-array `groups` used to read as "no scope" and take the
+    // clear-everything branch (SOMET-593 D1), and a provider_id beyond int4 got
+    // past Number.isInteger into the query and came back a 500 (D2).
+    for (const groups of [[], [{ kind: 'skill' }], [{ kind: 3, provider_id: 1 }],
+      'skill', { kind: 'skill', provider_id: providerId }, null, 7,
+      [{ kind: 'skill', provider_id: 99999999999 }],
+      [{ kind: 'skill', provider_id: -2147483649 }]]) {
       const res = await request(app).post('/api/art-jobs/clear').set(...AUTH).send({ groups });
       assert.equal(res.status, 400, JSON.stringify(groups));
+      assert.match(res.body.error, /groups must be/, JSON.stringify(groups));
     }
     const { rows } = await pool.query("SELECT count(*)::int n FROM art_jobs WHERE state='queued'");
     assert.equal(rows[0].n, 1, 'a bad request must delete nothing');
@@ -510,7 +532,7 @@ async function smallProvider(t, pool) {
     `INSERT INTO ai_providers (name, base_url, request_template, model)
      VALUES ($1, 'http://stub.invalid/sdapi/v1/txt2img', '{"width":512,"height":512}'::jsonb, 'stub')
      RETURNING id`, [`zzTestSmall ${process.pid} ${Date.now()}`]);
-  t.after(() => pool.query('DELETE FROM ai_providers WHERE id = $1', [rows[0].id]).catch(() => {}));
+  extraProviders.add(rows[0].id);        // deleted by freshPool's t.after
   return rows[0].id;
 }
 
@@ -908,3 +930,19 @@ lockedTest('a failure its subject has since recovered from is neither listed nor
       { subject_key: 'rq_still_failed', state: 'queued' },
     ], 'the recovered subject must not be queued to draw over its art');
   });
+
+// SOMET-593 D3. LAST in the file on purpose: every earlier test's t.after hooks
+// have run by now. smallProvider's own t.after DELETE used to run after
+// freshPool's had ended the pool, failed silently, and leaked a 'zzTestSmall'
+// ai_providers row per use on every run.
+test('no scratch provider this file created outlives it', async (t) => {
+  if (!requireTestDb(t, 'reads ai_providers')) return;
+  const pool = new Pool({ connectionString: DB_URL, max: 1 });
+  try {
+    const { rows } = await pool.query(
+      "SELECT name FROM ai_providers WHERE name LIKE 'zzTest% ' || $1 || ' %'", [String(process.pid)]);
+    assert.deepEqual(rows.map((r) => r.name), []);
+  } finally {
+    await pool.end();
+  }
+});

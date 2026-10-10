@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   batchProgress, formatDuration, formatElapsed, elapsedSince, shouldPollQueue,
-  partitionInFlight, claimedAgo, previewNames, blockedSummary,
+  partitionInFlight, claimedAgo, previewNames, blockedSummary, singleFlight,
   IDLE, IDLE_QUEUED, RUNNING, FINISHED,
 } from '../artProgress.js';
 
@@ -309,5 +309,31 @@ describe('blockedSummary', () => {
 
   it('is empty for a refusal without groups', () => {
     expect(blockedSummary(undefined)).toEqual({ total: 0, lines: [], groups: [] });
+  });
+});
+
+// SOMET-593 D4. A rapid double-click on "Remove N blocked job(s) & start" sent
+// two /clear requests 3ms apart: the mutation's isPending is not true yet when
+// the second click lands, so the button's disabled prop cannot stop it.
+describe('singleFlight', () => {
+  it('admits one caller until the first one ends', () => {
+    const flight = singleFlight();
+    expect(flight.tryBegin()).toBe(true);
+    expect(flight.tryBegin()).toBe(false);
+    flight.end();
+    expect(flight.tryBegin()).toBe(true);
+  });
+
+  it('is what the Remove-blocked handler gates on, released when the request settles', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const src = fs.readFileSync(path.join(here, '../ArtConsoleAdmin.jsx'), 'utf8');
+    const handler = src.slice(src.indexOf('const onDropBlocked'), src.indexOf('const onEnqueue'));
+    expect(handler).toMatch(/if \(!dropFlight\.tryBegin\(\)\) return;/);
+    expect(handler).toMatch(/onSettled: \(\) => dropFlight\.end\(\)/);
+    // A cancelled confirm must release the gate, or the button is dead.
+    expect(handler).toMatch(/\{\s*dropFlight\.end\(\);\s*return;\s*\}/);
   });
 });

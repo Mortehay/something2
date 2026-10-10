@@ -31,7 +31,7 @@ import {
   enqueueSummary, coverage, selectionOutsideFilter, promptIneligibleCount, PAGE_SIZE, filtersFromParams,
 } from './artSelection.js';
 import {
-  batchProgress, formatDuration, claimedAgo, partitionInFlight, previewNames, blockedSummary,
+  batchProgress, formatDuration, claimedAgo, partitionInFlight, previewNames, blockedSummary, singleFlight,
   QUEUE_PREVIEW, WAITING_PREVIEW, IDLE_QUEUED, RUNNING, FINISHED,
 } from './artProgress.js';
 import AdminLoading from './AdminLoading.jsx';
@@ -458,6 +458,9 @@ function ArtConsoleAdmin() {
   const requeue = useRequeueStale();
   const clearQueue = useClearArtQueue();
   const clearGroups = useClearArtGroups();
+  // One /clear per action. isPending is not true yet when a double-click's
+  // second click lands, so the disabled prop alone let two through (SOMET-593).
+  const [dropFlight] = useState(singleFlight);
   const requeueFailures = useRequeueFailures();
 
   // SOMET-571. A deep link from the Skill Tree tab (`?kind=&art=&q=`) seeds
@@ -617,12 +620,16 @@ function ArtConsoleAdmin() {
   const runBlocked = run?.blocked?.length ? run.blocked : null;
   const blocked = blockedSummary(runBlocked || startBatch.error?.blocked);
   const onDropBlocked = () => {
+    if (!dropFlight.tryBegin()) return;
     if (!window.confirm(
       `Remove ${blocked.total} queued job(s) that would render below 1024px?\n\n`
       + `${blocked.lines.join('\n')}\n\n`
       + 'Other queued jobs are kept. Re-queue these subjects on a 1024 provider to draw them.',
-    )) return;
-    clearGroups.mutate(blocked.groups, { onSuccess: run?.running ? undefined : onStart });
+    )) { dropFlight.end(); return; }
+    clearGroups.mutate(blocked.groups, {
+      onSuccess: run?.running ? undefined : onStart,
+      onSettled: () => dropFlight.end(),
+    });
   };
 
   const onEnqueue = async () => {

@@ -237,3 +237,19 @@ export function blockedSummary(blocked) {
     groups: list.map((b) => ({ kind: b.kind, provider_id: b.provider_id ?? null })),
   };
 }
+
+// A synchronous one-at-a-time gate for a click handler. A mutation's isPending
+// only flips on the next render, so a double-click's second click still sees
+// it false; this flag flips in the same tick the first click begins
+// (SOMET-593: two /clear requests 3ms apart).
+export function singleFlight() {
+  let busy = false;
+  return {
+    tryBegin() {
+      if (busy) return false;
+      busy = true;
+      return true;
+    },
+    end() { busy = false; },
+  };
+}

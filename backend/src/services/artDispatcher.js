@@ -460,14 +460,19 @@ async function objectSizeRefusal(db, provider, subjects = catalogSubjects, loadP
   // these rows so the rest of the queue can run, and a refusal that named one
   // group at a time would have the admin drop, retry and be refused again.
   const blocked = [];
-  let first = null;
+  // refusal text -> the kinds it blocks, so the message names EVERY blocked
+  // kind (SOMET-593: it named only the first row's kind, though skill was
+  // blocked alongside item).
+  const kindsByRefusal = new Map();
   for (const r of rows) {
     const reg = subjects.registryFor(r.subject_kind);
     if (!reg || reg.generationKind !== 'object') continue;   // tiles are exempt
     const p = await resolveJobProvider(db, r.provider_id, provider, loadProvider);
     const refusal = providerSizeRefusal(p);
     if (!refusal) continue;
-    if (!first) first = `${refusal} (queued ${r.subject_kind} jobs use it)`;
+    const kinds = kindsByRefusal.get(refusal) || [];
+    if (!kinds.includes(r.subject_kind)) kinds.push(r.subject_kind);
+    kindsByRefusal.set(refusal, kinds);
     blocked.push({
       kind: r.subject_kind,
       // The row's own value, NULL included: that is what a scoped clear has to
@@ -479,8 +484,11 @@ async function objectSizeRefusal(db, provider, subjects = catalogSubjects, loadP
       count: r.n,
     });
   }
-  if (!first) return null;
-  const err = new Error(first);
+  if (kindsByRefusal.size === 0) return null;
+  const message = [...kindsByRefusal]
+    .map(([refusal, kinds]) => `${refusal} (queued ${kinds.join(' and ')} jobs use it)`)
+    .join(' ');
+  const err = new Error(message);
   err.code = 'PROVIDER_TOO_SMALL';
   err.blocked = blocked;
   return err;

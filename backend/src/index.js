@@ -4039,11 +4039,22 @@ app.post('/api/art-jobs/clear', adminGuard, async (req, res) => {
     // scoped: the admin is dropping work that has not started, and a claimed
     // row is a separate recovery (Rescue stranded jobs). provider_id null
     // matches unpinned rows, hence IS NOT DISTINCT FROM.
-    const groups = Array.isArray(req.body.groups) ? req.body.groups : null;
+    //
+    // FAILS CLOSED: a `groups` that is present but not an array is a malformed
+    // scope, and must be refused -- reading it as "no scope" would take the
+    // clear-everything branch below and wipe the queue (SOMET-593).
+    const body = req.body || {};
+    if ('groups' in body && !Array.isArray(body.groups)) {
+      return res.status(400).json({ error: 'groups must be [{ kind, provider_id }]' });
+    }
+    const groups = 'groups' in body ? body.groups : null;
     let rows;
     if (groups) {
+      // Bounded to int4: Number.isInteger alone let 99999999999 through to the
+      // $2::int[] cast, which threw and came back a 500 rather than a 400.
       const valid = groups.filter((g) => g && typeof g.kind === 'string'
-        && (g.provider_id === null || Number.isInteger(g.provider_id)));
+        && (g.provider_id === null || (Number.isInteger(g.provider_id)
+          && g.provider_id >= -2147483648 && g.provider_id <= 2147483647)));
       if (valid.length === 0 || valid.length !== groups.length) {
         return res.status(400).json({ error: 'groups must be [{ kind, provider_id }]' });
       }
