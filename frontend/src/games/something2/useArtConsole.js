@@ -16,6 +16,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { authHeaders, apiFetch } from './src/js/net/auth.js';
 import { batchJustSettled, queuePollInterval } from './artProgress.js';
+import { dispatchError } from './artSelection.js';
 import { API_URL } from '../../config.js';
 
 const SUBJECTS_KEY = ['art-subjects'];
@@ -326,18 +327,7 @@ export function useStartArtBatch() {
   return useMutation({
     mutationFn: async (body) => {
       const { res, json } = await post('/api/art-jobs/dispatch', body);
-      // 409 is an admin clicking twice, or two admins at once -- not a fault.
-      if (res.status === 409) throw new Error('A batch is already running');
-      // 400 here is usually the resolution precondition, whose message says
-      // exactly which provider is misconfigured and how to fix it. Passing it
-      // through verbatim is the whole point of writing it that way.
-      if (!res.ok) {
-        const err = new Error(json.error || 'Failed to start the batch');
-        // WHICH queued groups block the start. The console renders these with
-        // a button that drops exactly them, so the rest of the queue can run.
-        err.blocked = Array.isArray(json.blocked) ? json.blocked : [];
-        throw err;
-      }
+      if (!res.ok) throw dispatchError(res.status, json);
       return json;
     },
     onSuccess: () => {

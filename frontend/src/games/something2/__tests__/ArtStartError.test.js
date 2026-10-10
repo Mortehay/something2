@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import ArtStartError from '../ArtStartError.jsx';
-import { startErrorMessage } from '../artSelection.js';
+import { dispatchError, startErrorMessage } from '../artSelection.js';
 
 // SOMET-535 rework 3. A Start the server REFUSES without a blocked list -- a
 // Local start against a queue holding connector jobs, or an empty queue --
@@ -43,8 +43,22 @@ describe('ArtStartError renders a refused start that has no blocked list', () =>
 describe('startErrorMessage', () => {
   it('passes a plain refusal through verbatim', () => {
     expect(startErrorMessage(startError(EMPTY))).toBe(EMPTY);
-    // an Error with no `blocked` field at all (e.g. the 409 path) is plain too
-    expect(startErrorMessage(new Error('A batch is already running'))).toBe('A batch is already running');
+    // an Error with no `blocked` field at all is plain too
+    expect(startErrorMessage(new Error('provider 4 has no model'))).toBe('provider 4 has no model');
+  });
+  // SOMET-535 rework 4 (D1). A double-clicked Start sends two POSTs: 202, then
+  // 409. The batch IS running, so "Not started" next to "Running..." was false,
+  // and it outlived the batch until dismissed. Built through dispatchError --
+  // the same function the hook throws -- so a hook that stops tagging the 409
+  // turns this red instead of leaving it green on a hand-made Error.
+  it('says nothing for a start refused because a batch is already running', () => {
+    expect(startErrorMessage(dispatchError(409, {}))).toBe(null);
+  });
+  it('still reports a 400 refusal built by the same path', () => {
+    expect(startErrorMessage(dispatchError(400, { error: EMPTY }))).toBe(EMPTY);
+    expect(startErrorMessage(dispatchError(400, { error: 'x', blocked: [{ kind: 'item', count: 1 }] }))).toBe(null);
+    expect(dispatchError(400, { error: 'x', blocked: [{ kind: 'item', count: 1 }] }).blocked).toHaveLength(1);
+    expect(startErrorMessage(dispatchError(500, {}))).toBe('Failed to start the batch');
   });
   it('is null for no error and for a refusal with blocked groups', () => {
     expect(startErrorMessage(null)).toBe(null);

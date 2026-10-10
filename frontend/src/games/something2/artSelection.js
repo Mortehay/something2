@@ -233,6 +233,22 @@ export function startBatchBody({ backend, providerId, activeProvider }) {
   return { provider_id: providerId ? Number(providerId) : activeProvider?.id, concurrency: 1 };
 }
 
+// The Error useStartArtBatch throws for a refused POST /dispatch. A 409 is an
+// admin clicking twice, or two admins at once: the batch IS running, so it is
+// tagged rather than reported (SOMET-535 rework 4). 400 is usually the
+// resolution precondition, whose message names the misconfigured provider, so
+// it passes through verbatim along with WHICH queued groups block the start.
+export function dispatchError(status, json = {}) {
+  if (status === 409) {
+    const err = new Error('A batch is already running');
+    err.alreadyRunning = true;
+    return err;
+  }
+  const err = new Error(json.error || 'Failed to start the batch');
+  err.blocked = Array.isArray(json.blocked) ? json.blocked : [];
+  return err;
+}
+
 // The text of a refused Start that the Blocked panel does NOT explain, or
 // null (SOMET-535 rework 3). A refusal carrying blocked groups is the size
 // refusal, rendered with its own drop button; every other refusal -- a Local
@@ -241,6 +257,7 @@ export function startBatchBody({ backend, providerId, activeProvider }) {
 // was printed was inside that panel.
 export function startErrorMessage(error) {
   if (!error) return null;
+  if (error.alreadyRunning) return null;
   if (Array.isArray(error.blocked) && error.blocked.length) return null;
   return error.message || 'Failed to start the batch';
 }
