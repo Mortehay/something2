@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { selfSpeedMult, debuffHudEntries, prettyAuraName } from "../auraDebuffs.js";
+import { selfSpeedMult, debuffHudEntries, prettyAuraName, resetSelfAura } from "../auraDebuffs.js";
 
 describe("selfSpeedMult (SOMET-606)", () => {
   it("reads a finite positive speedMult, else 1", () => {
@@ -31,5 +31,18 @@ describe("debuffHudEntries (SOMET-606)", () => {
   });
   it("prettyAuraName title-cases snake case", () => {
     expect(prettyAuraName("pack_leader")).toBe("Pack Leader");
+  });
+});
+
+describe("resetSelfAura (SOMET-606 fix)", () => {
+  it("clears a slowed state back to speed 1 and no rows", () => {
+    const g = { selfSpeedMult: 0.6, player: { auraSpeedMult: 0.6 }, auraDebuffRows: [{ id: "aura:x" }] };
+    resetSelfAura(g);
+    expect(g.selfSpeedMult).toBe(1);
+    expect(g.player.auraSpeedMult).toBe(1);
+    expect(g.auraDebuffRows).toEqual([]);
+  });
+  it("debuffHudEntries skips null entries", () => {
+    expect(debuffHudEntries([null, { n: "dread", d: 1, f: 0.7, s: 1 }]).map((r) => r.id)).toEqual(["aura:dread"]);
   });
 });
