@@ -25,6 +25,12 @@ const { Pool } = require('pg');
 const { scaleCreature } = require('../src/services/creatureLevel.js');
 const { MIN_DAMAGE } = require('../src/authority/damage.js');
 const { GUARD_LEVEL } = require('../src/services/villages.js');
+const { MINION_TYPE_BY_ELEMENT } = require('../src/authority/worldBoss.js');
+
+// World-boss content (SOMET-603): boss-tier rows and the phase-minion types the
+// boss manager summons. Neither ever wild-spawns, so neither is a threat a
+// guard faces. Same constant the manager resolves minions by -- not a copy.
+const BOSS_MINION_NAMES = Object.values(MINION_TYPE_BY_ELEMENT);
 
 const DB_URL = process.env.TEST_DATABASE_URL
   || process.env.DATABASE_URL
@@ -76,16 +82,40 @@ test('every live village guard is level 150 and out-damages the toughest hostile
 
     // The toughest hostile rung actually present in the catalog, so the
     // comparison is against real content rather than an assumed number.
+    // Boss tiers and world-boss minions are excluded (SOMET-603): they never
+    // wild-spawn, and the assertion below proves the exclusion drops nothing
+    // a world can actually spawn.
     const worst = await pool.query(
       `SELECT MAX(defense) AS defense, MAX(hp) AS hp
          FROM entity_types
-        WHERE is_creature = true AND name <> 'Village Guard'`,
+        WHERE is_creature = true AND name <> 'Village Guard'
+          AND boss_tier IS NULL
+          AND name <> ALL($1::text[])`,
+      [BOSS_MINION_NAMES],
     );
     const hostileBase = {
       hp: Number(worst.rows[0].hp),
       damage: 5,
       defense: Number(worst.rows[0].defense),
     };
+    // An empty result would NaN-pass every comparison below.
+    assert.ok(hostileBase.hp > 0 && hostileBase.defense >= 0,
+      `toughest hostile base is not a real row: hp=${hostileBase.hp} defense=${hostileBase.defense}`);
+
+    // Every non-boss type any world can spawn is covered by that base, so the
+    // guard really is measured against the toughest wild threat.
+    const spawnable = await pool.query(
+      `SELECT DISTINCT et.name, et.hp, et.defense
+         FROM worlds w
+         CROSS JOIN LATERAL jsonb_array_elements_text(w.allowed_creature_types) AS a(name)
+         JOIN entity_types et ON et.name = a.name
+        WHERE et.boss_tier IS NULL AND et.name <> 'Village Guard'`,
+    );
+    for (const r of spawnable.rows) {
+      assert.ok(Number(r.hp) <= hostileBase.hp && Number(r.defense) <= hostileBase.defense,
+        `${r.name} (hp ${r.hp}, defense ${r.defense}) is spawnable by a world but tougher than `
+        + `the base the guard is measured against (hp ${hostileBase.hp}, defense ${hostileBase.defense})`);
+    }
 
     // SOMET-285: the comparison is no longer against the guard's OWN band. The
     // level is fixed at 150 everywhere, so the hostile every guard is measured

@@ -158,6 +158,12 @@ test('the backstop enqueues the gap between target and live population', { skip:
 test('the backstop never queues a boss-tier type (SOMET-603)', { skip: !url }, async () => {
   const pool = new Pool({ connectionString: url });
   try {
+    // Precondition: without a world-tier Ignis row the zero-count assertion
+    // below would pass for the wrong reason (missing or non-boss row).
+    const ignis = await pool.query(
+      'SELECT boss_tier FROM entity_types WHERE name = $1', ['Ignis, the Magma Colossus']);
+    assert.equal(ignis.rows[0]?.boss_tier, 'world',
+      'precondition: "Ignis, the Magma Colossus" must exist with boss_tier = \'world\'');
     await withWorld(pool, async (worldId) => {
       await pool.query(
         `UPDATE worlds SET allowed_creature_types = '["Ignis, the Magma Colossus","Wolf"]'::jsonb WHERE id = $1`,
