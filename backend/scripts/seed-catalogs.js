@@ -21,6 +21,7 @@ const { AURA_EFFECTS, BEHAVIOR_DEFAULT_AURAS } = require('../seeds/data/auraEffe
 const { CREATURE_ABILITIES } = require('../seeds/data/creatureAbilities.js');
 const { BEHAVIOR_DROPS } = require('../seeds/data/behaviorDrops.js');
 const { CHEST_LOOT } = require('../seeds/data/chestLoot.js');
+const { DUNGEON_BOSSES } = require('../seeds/data/dungeonBosses.js');
 
 // COALESCE, not plain EXCLUDED, for the four columns below.
 //
@@ -329,6 +330,35 @@ async function seedOneCreatureType(pool, c) {
   return r.rowCount;
 }
 
+// SOMET-609 (S9). A dungeon boss, with the boss columns seedOneCreatureType
+// does not write. Insert-only (ON CONFLICT DO NOTHING): the Entities tab owns
+// the row after the first insert. Behaviour resolves by name; the drop rule is
+// NOT EXISTS-guarded because creature_drops has no unique constraint. Returns
+// 1 when the row was inserted.
+async function seedOneDungeonBoss(db, b) {
+  const r = await db.query(
+    `INSERT INTO entity_types
+       (name, color, walkable, spawn_tiles, chance, is_creature, hp, max_hp, defense,
+        resistances, faction, gold_min, gold_max, prompt, attack_element, behavior_id,
+        boss_tier, element, hitbox_size, xp_reward, base_damage, display_width, display_height, auras)
+     VALUES ($1,$2,true,'[]'::jsonb,0,true,$3,$3,$4,$5::jsonb,'hostile',$6,$7,$8,$9,
+             (SELECT id FROM creature_behaviors WHERE name = $10),
+             $11,$9,$12,$13,$14,$12,$12,$15::jsonb)
+     ON CONFLICT (name) DO NOTHING`,
+    [b.name, b.color, b.hp, b.defense, JSON.stringify(b.resistances), b.gold_min, b.gold_max,
+     b.prompt, b.element, b.behavior_name, b.boss_tier, b.size, b.xp_reward, b.base_damage,
+     JSON.stringify(b.auras)],
+  );
+  await db.query(
+    `INSERT INTO creature_drops (entity_type_id, item_type_id, chance, min_qty, max_qty)
+     SELECT et.id, it.id, 0.2, 1, 1 FROM entity_types et, item_types it
+      WHERE et.name = $1 AND it.name = $2
+        AND NOT EXISTS (SELECT 1 FROM creature_drops cd WHERE cd.entity_type_id = et.id AND cd.item_type_id = it.id)`,
+    [b.name, b.drop_item],
+  );
+  return r.rowCount;
+}
+
 // Guarded by NOT EXISTS, not ON CONFLICT: creature_drops has no unique
 // constraint on (entity_type_id, item_type_id) -- see
 // 1714440018000_create_loot.js -- so a bare INSERT would stack a duplicate
@@ -566,6 +596,9 @@ async function seedCatalogs(pool) {
   }
   const aurasBound = await bindDefaultAuras(pool);
   console.log(`Bound default auras on ${aurasBound} entity types`);
+  let dungeonBosses = 0;
+  for (const b of DUNGEON_BOSSES) dungeonBosses += await seedOneDungeonBoss(pool, b);
+  console.log(`Restored ${dungeonBosses} missing dungeon bosses`);
 
   // CREATURE_DROPS (Wolf's one hand-authored rule) and BESTIARY_P4_DROPS (288
   // generated rules, SOMET-250 Task 6) go through the same
@@ -610,7 +643,7 @@ async function seedCatalogs(pool) {
 module.exports = {
   seedCatalogs, seedOneTile, seedOneBiome, seedOneBehavior, seedOneAbility, seedOneBehaviorDrop,
   seedOneChestLoot, seedOneAura, bindDefaultAuras,
-  seedOneCreatureType, seedOneCreatureDrop, seedOnePlayableClass, seedOneClassLoadout,
+  seedOneCreatureType, seedOneDungeonBoss, seedOneCreatureDrop, seedOnePlayableClass, seedOneClassLoadout,
 };
 
 if (require.main === module) {
