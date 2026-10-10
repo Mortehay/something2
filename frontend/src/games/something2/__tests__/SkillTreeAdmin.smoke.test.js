@@ -10,6 +10,47 @@ const read = (rel) => fs.readFileSync(path.join(here, rel), 'utf8');
 const admin = read('../SkillTreeAdmin.jsx');
 const hook = read('../usePassiveTree.js');
 const console_ = read('../ArtConsoleAdmin.jsx');
+const globalStyles = read('../../../styles/GlobalStyles.js');
+
+// --- colour helpers for the legend gate ---------------------------------------
+const rgbOf = (c) => {
+  const s = c.trim().toLowerCase();
+  let m = s.match(/^#([0-9a-f]{3})$/);
+  if (m) return [...m[1]].map((h) => parseInt(h + h, 16));
+  m = s.match(/^#([0-9a-f]{6})$/);
+  if (m) return [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16));
+  m = s.match(/^rgba?\(([^)]+)\)$/);
+  if (m) return m[1].split(',').slice(0, 3).map((v) => Number(v.trim()));
+  throw new Error(`cannot parse colour ${c}`);
+};
+const luminance = (c) => {
+  const [r, g, b] = rgbOf(c).map((v) => {
+    const x = v / 255;
+    return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+const contrast = (a, b) => {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+};
+// GlobalStyles.js: the light tokens come first, the dark ones under &.dark-mode.
+const tokenIn = (mode, name) => {
+  const split = globalStyles.indexOf('&.dark-mode');
+  const block = mode === 'dark' ? globalStyles.slice(split) : globalStyles.slice(0, split);
+  const m = block.match(new RegExp(`${name}:\\s*([^;]+);`));
+  if (!m) throw new Error(`${name} not defined in ${mode} mode`);
+  return m[1].trim();
+};
+// A colour as written in SkillTreeAdmin.jsx: a GAME_* constant, a var(--s2-*)
+// token, or a literal.
+const resolve = (expr, mode) => {
+  const e = expr.trim();
+  const v = e.match(/^var\((--s2-[\w-]+)\)$/);
+  if (v) return tokenIn(mode, v[1]);
+  if (/^[A-Z_]+$/.test(e)) return admin.match(new RegExp(`const ${e} = '([^']+)';`))[1];
+  return e;
+};
 
 // SOMET-571. Source-text gates, like PassiveNodesAdmin.smoke.test.js and for
 // the same reason: vitest runs in a plain node environment, so this is the
@@ -144,5 +185,52 @@ describe('SkillTreeAdmin', () => {
     const colour = admin.match(/const GAME_MISSING = '([^']+)';/)[1].toLowerCase();
     const hues = Object.values(SECTOR_HUES).map((h) => h.toLowerCase());
     expect(hues).not.toContain(colour);
+  });
+
+  // Validation (light theme): the legend's "no art" key was a dark dot with a
+  // #f8fafc border on the white page, 1.04:1, so the ring vanished. The ring
+  // must stand apart from what is inside it AND from what is outside it --
+  // its own outer edge if it draws one, else the page surface -- in BOTH
+  // themes.
+  it('draws the legend\'s "no art" key as a ring that reads in both themes', () => {
+    const m = admin.match(/<Swatch style=\{\{(.*?)\}\} \/>no art</);
+    expect(m, '"no art" swatch').not.toBeNull();
+    const style = m[1];
+    const fill = style.match(/background:\s*([^,]+?)\s*(,|$)/)[1];
+    const ring = style.match(/border:\s*`2px solid \$\{([^}]+)\}`/)[1];
+    const edge = style.match(/boxShadow:\s*'0 0 0 1px ([^']+)'/);
+    for (const mode of ['light', 'dark']) {
+      const ringC = resolve(ring, mode);
+      const outside = edge ? resolve(edge[1], mode) : tokenIn(mode, '--s2-surface');
+      expect(contrast(ringC, resolve(fill, mode)), `${mode}: ring vs fill`).toBeGreaterThanOrEqual(3);
+      expect(contrast(ringC, outside), `${mode}: ring vs outside`).toBeGreaterThanOrEqual(3);
+    }
+    // And it is the same ring the tree draws, so the key means what it shows.
+    expect(ring).toBe('GAME_MISSING');
+  });
+
+  // Validation: at phone width 390 the tree svg rendered 0 px wide. The row
+  // was a grid of `1fr 260px`, so once the content area was narrower than the
+  // side card the tree's 1fr column collapsed to nothing. The row must wrap
+  // the side card below the tree instead, and the tree must be allowed to
+  // shrink to the width it has.
+  it('wraps the side card below the tree instead of squeezing the tree to 0 px', () => {
+    const css = (name) => admin.match(new RegExp(`const ${name} = styled\\.div\`([^\`]*)\``))[1];
+    const row = css('TreeRow');
+    expect(row).not.toMatch(/grid-template-columns/);
+    expect(row).toMatch(/display:\s*flex;/);
+    expect(row).toMatch(/flex-wrap:\s*wrap;/);
+    const frame = css('TreeFrame');
+    expect(frame).toMatch(/flex:\s*1 1 \d+px;/);
+    expect(frame).toMatch(/min-width:\s*0;/);
+    const side = css('Side');
+    expect(side).toMatch(/flex:\s*0 1 260px;/);
+  });
+
+  it('lets a skill card column shrink below 260 px on a narrow row', () => {
+    // minmax(260px, 1fr) demands 260 px per column even when the row is
+    // narrower, so the card grid overflowed the page at phone width.
+    const grid = admin.match(/const Grid = styled\.div`([^`]*)`/)[1];
+    expect(grid).toMatch(/minmax\(min\(260px, 100%\), 1fr\)/);
   });
 });
