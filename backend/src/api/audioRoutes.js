@@ -13,7 +13,7 @@ const {
   resolveAudioProvider, contextFor, boxTrackName, generateForSlot,
 } = require('../services/audioGeneration');
 const {
-  SUBJECT_KINDS, MAX_SUBJECT_KEY, slotKind, subjectExists, cueFor,
+  SUBJECT_KINDS, MAX_SUBJECT_KEY, slotKind, subjectExists, slotNamesFor, cueFor,
 } = require('../services/audioSubjects');
 const { checkClipBuffer } = require('../services/oggInfo');
 const audioJobQueue = require('../services/audioJobQueue');
@@ -52,7 +52,13 @@ async function checkSubject(pool, kind, key, slot) {
   }
   const clipKind = slotKind(kind, slot);
   if (!clipKind) return { error: 'unknown subject or slot' };
-  if (!(await subjectExists(pool, kind, key))) return { error: 'unknown subject' };
+  // SOMET-605: the slot is part of the question -- a boss slot exists only
+  // on a boss_tier creature. The second query runs only on failure, to tell
+  // "no such subject" from "this subject has no such slot".
+  if (!(await subjectExists(pool, kind, key, slot))) {
+    if (await subjectExists(pool, kind, key)) return { error: `'${key}' has no '${slot}' slot (boss slots need a boss tier)` };
+    return { error: 'unknown subject' };
+  }
   return { clipKind };
 }
 
@@ -162,6 +168,11 @@ module.exports = function audioRoutes(pool) {
         };
         // eslint-disable-next-line no-await-in-loop
         if (def.subjectCues) entry.cues = await def.subjectCues(pool);
+        // SOMET-605: which slots each subject carries, for kinds where that
+        // varies (creature: boss slots only on boss rows). Absent = every
+        // subject carries every slot in `slots`.
+        // eslint-disable-next-line no-await-in-loop
+        if (def.subjectSlotNames) entry.subjectSlots = await def.subjectSlotNames(pool);
         const states = {};
         for (const p of activePrompts) {
           if (p.subject_kind !== kind) continue;
@@ -205,7 +216,7 @@ module.exports = function audioRoutes(pool) {
       if (!def || !Object.hasOwn(SUBJECT_KINDS, kind)) return res.status(400).json({ error: 'unknown subject kind' });
       const [bySlot, catalog] = await Promise.all([audioPrompts.listForSubject(pool, kind, key), loadPromptCatalog(pool)]);
       const out = {};
-      for (const slot of Object.keys(def.slots)) {
+      for (const slot of await slotNamesFor(pool, kind, key)) {
         // eslint-disable-next-line no-await-in-loop
         const cue = slotKind(kind, slot) === 'sfx' ? await cueFor(pool, kind, key, slot) : null;
         const currentInput = buildContext(catalog, kind, key, slot, { cue });

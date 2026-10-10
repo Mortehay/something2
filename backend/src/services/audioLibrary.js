@@ -6,7 +6,7 @@ const crypto = require('node:crypto');
 const assetStore = require('./assetStore');
 const { readObject } = require('./artSeed.js');
 const {
-  SUBJECT_KINDS, GLOBAL_SUBJECT_KINDS, MAX_SUBJECT_KEY, isKnownKind, slotKind, isKnownSlot, existingSubjects, subjectExists,
+  SUBJECT_KINDS, GLOBAL_SUBJECT_KINDS, MAX_SUBJECT_KEY, isKnownKind, slotKind, isKnownSlot, existingSubjects, subjectExists, slotNamesFor,
 } = require('./audioSubjects');
 
 class AudioInputError extends Error {
@@ -132,7 +132,12 @@ async function bindClip(db, { subjectKind, subjectKey, slot, clipId, volume = 1,
   if (!expected) throw new AudioInputError(`'${subjectKind}' has no slot '${slot}'`);
   // Subjects are keyed by NAME: a deleted or renamed world/biome must not
   // gain a binding from any path (route, generate, a stale queued job).
-  if (!(await subjectExists(db, subjectKind, subjectKey))) throw new AudioInputError('unknown subject');
+  if (!(await subjectExists(db, subjectKind, subjectKey, slot))) {
+    if (await subjectExists(db, subjectKind, subjectKey)) {
+      throw new AudioInputError(`'${subjectKey}' has no '${slot}' slot (boss slots need a boss tier)`);
+    }
+    throw new AudioInputError('unknown subject');
+  }
   const clip = (await db.query('SELECT kind FROM audio_clips WHERE id = $1', [clipId])).rows[0];
   if (!clip) throw new AudioInputError('clip not found');
   if (clip.kind !== expected) {
@@ -305,11 +310,10 @@ const BINDING_COLUMNS = `b.id AS binding_id, b.subject_kind, b.subject_key, b.sl
 
 async function subjectSlots(db, subjectKind, subjectKey) {
   if (!isKnownKind(subjectKind)) throw new AudioInputError(`unknown subject kind '${subjectKind}'`);
-  const k = SUBJECT_KINDS[subjectKind];
   const r = await db.query(
     `SELECT ${BINDING_COLUMNS} FROM audio_bindings b JOIN audio_clips c ON c.id = b.clip_id
       WHERE b.subject_kind = $1 AND b.subject_key = $2 ORDER BY b.sort, b.id`, [subjectKind, subjectKey]);
-  const out = Object.fromEntries(Object.keys(k.slots).map((s) => [s, []]));
+  const out = Object.fromEntries((await slotNamesFor(db, subjectKind, subjectKey)).map((s) => [s, []]));
   for (const row of r.rows) if (out[row.slot]) out[row.slot].push(row);
   return out;
 }
@@ -349,13 +353,18 @@ async function recordMisses(db, misses) {
   const shaped = misses.slice(0, MAX_MISSES_PER_POST).filter((m) => m
     && typeof m.subject_key === 'string' && m.subject_key && m.subject_key.length <= MAX_SUBJECT_KEY
     && isKnownSlot(m.subject_kind, m.slot));
-  const existing = {};
-  for (const kind of new Set(shaped.map((m) => m.subject_kind))) {
+  // SOMET-605: grouped by (kind, slot), because a boss slot exists only on
+  // boss-tier rows -- a miss for a slot the subject does not carry is junk.
+  const existing = new Map(); // `${kind}\u0000${slot}` -> Set of keys that carry that slot
+  for (const m of shaped) {
+    const id = `${m.subject_kind}\u0000${m.slot}`;
+    if (existing.has(id)) continue;
     // eslint-disable-next-line no-await-in-loop
-    existing[kind] = await existingSubjects(db, kind,
-      [...new Set(shaped.filter((m) => m.subject_kind === kind).map((m) => m.subject_key))]);
+    existing.set(id, await existingSubjects(db, m.subject_kind,
+      [...new Set(shaped.filter((x) => x.subject_kind === m.subject_kind && x.slot === m.slot).map((x) => x.subject_key))],
+      m.slot));
   }
-  const ok = shaped.filter((m) => existing[m.subject_kind].has(m.subject_key));
+  const ok = shaped.filter((m) => existing.get(`${m.subject_kind}\u0000${m.slot}`).has(m.subject_key));
   if (!ok.length) return 0;
   const rows = new Map();
   for (const m of ok) {

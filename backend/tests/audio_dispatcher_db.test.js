@@ -280,6 +280,26 @@ test('audio dispatcher', { skip }, async (t) => {
         assert.ok(rows.every((r) => r.state === 'failed' && /subject no longer exists/.test(r.last_error)), JSON.stringify(rows));
       });
 
+      // SOMET-605: the slot is part of "does this subject exist" (a boss slot
+      // needs a boss tier). Record what the dispatcher asks, so a dropped
+      // 4th argument cannot hide behind a fake that ignores it.
+      await t.test('the single-job path asks subjectExists with the job\'s slot', async () => {
+        d.__resetRun();
+        const { queued: [job] } = await q.enqueue(pool, [
+          { subject_kind: 'world', subject_key: `${tag}-slotarg`, slot: 'music', clip_kind: 'music' },
+        ], {});
+        const asked = [];
+        d.startDrain(pool, {
+          deps: {
+            ...baseDeps,
+            subjectExists: async (db, kind, key, slot) => { asked.push([kind, key, slot]); return true; },
+          },
+        });
+        await waitIdle();
+        assert.ok(job.id);
+        assert.deepEqual(asked, [['world', `${tag}-slotarg`, 'music']]);
+      });
+
       // F5: a bookkeeping write failing (e.g. complete() hitting FK 23503
       // because the clip was deleted in between) must cost ONE job, not the
       // whole drain, and must not leave that job stuck in 'running'.

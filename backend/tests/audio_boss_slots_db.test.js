@@ -60,3 +60,116 @@ test('registry: boss slots only on boss-tier creatures', { skip }, async (t) => 
     assert.equal(await subjects.cueFor(pool, 'creature', BOSS, 'presence'), null);
   });
 });
+
+const fs = require('node:fs');
+const path = require('node:path');
+const request = require('supertest');
+const { withAdvisoryLock, AUDIO_CLIPS_LOCK_KEY } = require('./helpers/advisoryLock.js');
+const { app, __setPool } = require('../src/index.js');
+const { signToken } = require('../src/auth/tokens.js');
+const assetStore = require('../src/services/assetStore');
+const lib = require('../src/services/audioLibrary');
+const { existingBindingSubjects } = require('../src/services/audioSeed');
+const { allSlots } = require('../scripts/describe-audio-slots');
+
+const OGG = fs.readFileSync(path.join(__dirname, 'fixtures/audio/tone.ogg'));
+
+test('every door refuses a boss slot on an ordinary creature; demotion hides boss slots', { skip }, async () => {
+  const pool = new Pool({ connectionString: url });
+  __setPool(pool);
+  assetStore.__setAssetClient({ bucketExists: async () => true, putObject: async () => {}, removeObject: async () => {} });
+  const tag = `${process.pid}-${Date.now()}`;
+  const TEMP_BOSS = `zz-s2-boss-${tag}`; // our own row, so we may demote it
+  const clipIds = [];
+  let userId = null;
+  try {
+    await withAdvisoryLock(pool, AUDIO_CLIPS_LOCK_KEY, async () => {
+      try {
+        await pool.query(
+          `INSERT INTO entity_types (name, is_creature, color, hp, boss_tier, element)
+           VALUES ($1, true, '#123456', 100, 'world', 'fire')`, [TEMP_BOSS]);
+        const u = (await pool.query(
+          "INSERT INTO users (username, password_hash, role) VALUES ($1, 'x', 'admin') RETURNING id, username, role, token_version",
+          [`s2-admin-${tag}`])).rows[0];
+        userId = u.id;
+        const auth = `Bearer ${signToken({ userId: u.id, username: u.username, role: u.role, tokenVersion: u.token_version })}`;
+        const clip = await lib.storeClip(pool, { buffer: OGG, kind: 'sfx', label: `s2 boss ${tag}`, source: 'uploaded', durationMs: 500 });
+        clipIds.push(clip.id);
+
+        // Door 1: POST /admin/bindings (bind-from-library) -> 400 for Slime/presence.
+        const bad = await request(app).post('/api/audio/admin/bindings').set('Authorization', auth)
+          .send({ subject_kind: 'creature', subject_key: PLAIN, slot: 'presence', clip_id: clip.id });
+        assert.equal(bad.status, 400);
+        assert.match(bad.body.error, /has no 'presence' slot/);
+        const ok = await request(app).post('/api/audio/admin/bindings').set('Authorization', auth)
+          .send({ subject_kind: 'creature', subject_key: TEMP_BOSS, slot: 'presence', clip_id: clip.id });
+        assert.equal(ok.status, 201);
+
+        // Door 2: bindClip directly (generate/upload/queued-job paths all land here).
+        await assert.rejects(
+          lib.bindClip(pool, { subjectKind: 'creature', subjectKey: PLAIN, slot: 'enrage', clipId: clip.id }),
+          (err) => err.status === 400 && /has no 'enrage' slot/.test(err.message));
+
+        // Door 3: a game client's miss report, through the player-reachable route.
+        const missBefore = (await pool.query(
+          "SELECT count(*)::int AS n FROM audio_misses WHERE subject_key = $1 AND slot = 'presence'", [PLAIN])).rows[0].n;
+        const dropped = await request(app).post('/api/audio/misses').set('Authorization', auth)
+          .send({ misses: [{ subject_kind: 'creature', subject_key: PLAIN, slot: 'presence', world: null }] });
+        assert.equal(dropped.status, 200);
+        assert.equal(dropped.body.accepted, 0);
+        const kept = await request(app).post('/api/audio/misses').set('Authorization', auth)
+          .send({ misses: [
+            { subject_kind: 'creature', subject_key: PLAIN, slot: 'presence', world: null },
+            { subject_kind: 'creature', subject_key: TEMP_BOSS, slot: 'presence', world: null },
+            { subject_kind: 'creature', subject_key: PLAIN, slot: 'hurt', world: null },
+          ] });
+        assert.equal(kept.body.accepted, 2, 'boss slot kept for the boss, base slot kept for the ordinary creature');
+        const missAfter = (await pool.query(
+          "SELECT count(*)::int AS n FROM audio_misses WHERE subject_key = $1 AND slot = 'presence'", [PLAIN])).rows[0].n;
+        assert.equal(missAfter, missBefore, 'no junk miss row for an ordinary creature boss slot');
+
+        // Door 4: a seed manifest.
+        const seen = await existingBindingSubjects(pool, [
+          { subject_kind: 'creature', subject_key: PLAIN, slot: 'spawn' },
+          { subject_kind: 'creature', subject_key: PLAIN, slot: 'hurt' },
+          { subject_kind: 'creature', subject_key: TEMP_BOSS, slot: 'spawn' },
+        ]);
+        assert.deepEqual([...seen].sort(), [`creature/${PLAIN}/hurt`, `creature/${TEMP_BOSS}/spawn`].sort());
+
+        // The tab: /admin/subjects sends per-subject slots for creatures only.
+        const subj = await request(app).get('/api/audio/admin/subjects').set('Authorization', auth);
+        assert.equal(subj.status, 200);
+        const creature = subj.body.find((g) => g.kind === 'creature');
+        assert.deepEqual(creature.subjectSlots[PLAIN], ['nearby', 'attack', 'hurt', 'death']);
+        assert.equal(creature.subjectSlots[TEMP_BOSS].includes('presence'), true);
+        assert.equal(subj.body.find((g) => g.kind === 'world').subjectSlots, undefined);
+        assert.equal(Object.hasOwn(creature.cues[PLAIN], 'presence'), false);
+
+        // The prompt writer's slot list.
+        const every = await allSlots(pool);
+        assert.equal(every.some((s) => s.id === `creature/${PLAIN}/presence`), false);
+        assert.equal(every.some((s) => s.id === `creature/${TEMP_BOSS}/presence`), true);
+
+        // Demotion: boss slots vanish from /admin/slots and /admin/prompts, binds are refused,
+        // the existing binding row stays (re-promotion brings it back), nothing throws.
+        await pool.query('UPDATE entity_types SET boss_tier = NULL WHERE name = $1', [TEMP_BOSS]);
+        const slots = await request(app).get(`/api/audio/admin/slots/creature/${encodeURIComponent(TEMP_BOSS)}`).set('Authorization', auth);
+        assert.equal(slots.status, 200);
+        assert.deepEqual(Object.keys(slots.body), ['nearby', 'attack', 'hurt', 'death']);
+        const prompts = await request(app).get(`/api/audio/admin/prompts/creature/${encodeURIComponent(TEMP_BOSS)}`).set('Authorization', auth);
+        assert.deepEqual(Object.keys(prompts.body), ['nearby', 'attack', 'hurt', 'death']);
+        const again = await request(app).post('/api/audio/admin/bindings').set('Authorization', auth)
+          .send({ subject_kind: 'creature', subject_key: TEMP_BOSS, slot: 'spawn', clip_id: clip.id });
+        assert.equal(again.status, 400);
+        const rows = await pool.query("SELECT 1 FROM audio_bindings WHERE subject_key = $1 AND slot = 'presence'", [TEMP_BOSS]);
+        assert.equal(rows.rowCount, 1, 'demotion does not delete bindings');
+      } finally {
+        await pool.query('DELETE FROM audio_misses WHERE subject_key = $1', [TEMP_BOSS]).catch(() => {});
+        await pool.query('DELETE FROM audio_bindings WHERE subject_key = $1', [TEMP_BOSS]);
+        if (clipIds.length) await pool.query('DELETE FROM audio_clips WHERE id = ANY($1)', [clipIds]);
+        await pool.query('DELETE FROM entity_types WHERE name = $1', [TEMP_BOSS]);
+        if (userId) await pool.query('DELETE FROM users WHERE id = $1', [userId]);
+      }
+    });
+  } finally { await pool.end(); }
+});

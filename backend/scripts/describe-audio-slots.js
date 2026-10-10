@@ -197,5 +197,5 @@ if (require.main === module) {
 }
 
 module.exports = {
-  selectSlots, summarize, run, parseArgs, BOX_ONLY_BUSY_WAIT_LIMIT,
+  selectSlots, summarize, run, parseArgs, allSlots, BOX_ONLY_BUSY_WAIT_LIMIT,
 };

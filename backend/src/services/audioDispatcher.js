@@ -554,7 +554,7 @@ function startDrain(db, opts = {}) {
       // on a clip that can never be bound, so it fails up front --
       // retryable:false with no status/providerFault, so it does not count
       // toward the breaker either.
-      const exists = await deps.subjectExists(db, job.subject_kind, job.subject_key);
+      const exists = await deps.subjectExists(db, job.subject_kind, job.subject_key, job.slot);
       // job.provider_id resolves that pin; null falls through to the active
       // audio provider (resolveAudioProvider's own contract).
       provider = exists ? await deps.resolveAudioProvider(db, job.provider_id ?? null) : null;
@@ -624,7 +624,7 @@ function startDrain(db, opts = {}) {
       let exists;
       try {
         // eslint-disable-next-line no-await-in-loop
-        exists = await deps.subjectExists(db, job.subject_kind, job.subject_key);
+        exists = await deps.subjectExists(db, job.subject_kind, job.subject_key, job.slot);
       } catch (err) {
         // eslint-disable-next-line no-await-in-loop
         await failJob(job, { error: errorText(err), retryable: false });

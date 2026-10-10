@@ -142,6 +142,27 @@ test('sfx drain: cached is not a duplicate; a duplicate is retryable', { skip },
         assert.equal(bound[0].clip_id, row.clip_id);
       });
 
+      // SOMET-605: the pack path checks each job's subject WITH its slot.
+      await t.test('the pack path asks subjectExists with each job\'s slot', async () => {
+        d.__resetRun();
+        const { queued: [job] } = await q.enqueue(pool, [{
+          subject_kind: 'skill', subject_key: SKILL, slot: 'hit', clip_kind: 'sfx', engine: 'realistic',
+        }], {});
+        jobIds.push(job.id);
+        const asked = [];
+        d.startDrain(pool, {
+          deps: {
+            ...depsFor(() => variant(60)),
+            subjectExists: async (db, kind, key, slot) => { asked.push([kind, key, slot]); return true; },
+          },
+        });
+        const st = await waitIdle();
+        // Register cleanup before asserting, so a failure cannot leave a bound clip behind.
+        for (const b of await boundTo('hit')) { bindingIds.push(b.binding_id); clipIds.push(b.clip_id); }
+        assert.equal(st.done, 1, st.error);
+        assert.deepEqual(asked, [['skill', SKILL, 'hit']]);
+      });
+
       await t.test('a true duplicate is retried with a later take and never trips the breaker', async () => {
         d.__resetRun();
         const own = await lib.storeClip(pool, {

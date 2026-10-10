@@ -301,24 +301,11 @@ async function seedAudio({
   let wantedBindings = bindingsManifest.filter((b) => present.has(b.clip_id));
   if (only) wantedBindings = wantedBindings.filter((b) => only.includes(b.subject_key));
 
-  // Batched per subject_kind rather than one existence check per binding
-  // (audioSubjects.existingSubjects), because a manifest can carry dozens of
-  // bindings for the same handful of worlds/biomes.
-  const bySubjectKind = new Map();
-  for (const b of wantedBindings) {
-    if (!bySubjectKind.has(b.subject_kind)) bySubjectKind.set(b.subject_kind, new Set());
-    bySubjectKind.get(b.subject_kind).add(b.subject_key);
-  }
-  const existingByKind = new Map();
-  for (const [kind, keys] of bySubjectKind) {
-    // eslint-disable-next-line no-await-in-loop
-    existingByKind.set(kind, await existingSubjects(db, kind, [...keys]));
-  }
+  const known = await existingBindingSubjects(db, wantedBindings);
 
   const bindingStats = { bound: 0, skipped: 0, missingSubject: [] };
   for (const b of wantedBindings) {
-    const known = existingByKind.get(b.subject_kind);
-    if (!known || !known.has(b.subject_key)) {
+    if (!known.has(`${b.subject_kind}/${b.subject_key}/${b.slot}`)) {
       const label = `${b.subject_kind}/${b.subject_key}/${b.slot}`;
       log(`  ${label}: SKIP (subject does not exist)`);
       bindingStats.missingSubject.push(label);
@@ -373,6 +360,24 @@ function parseArgs(argv) {
   return out;
 }
 
+// SOMET-605: which manifest bindings point at a subject that exists AND
+// carries that slot (a boss slot needs a boss_tier row). One query per
+// (kind, slot) pair rather than per binding.
+async function existingBindingSubjects(db, bindings) {
+  const groups = new Map();
+  for (const b of bindings) {
+    const id = `${b.subject_kind}\u0000${b.slot}`;
+    if (!groups.has(id)) groups.set(id, { kind: b.subject_kind, slot: b.slot, keys: new Set() });
+    groups.get(id).keys.add(b.subject_key);
+  }
+  const out = new Set();
+  for (const g of groups.values()) {
+    // eslint-disable-next-line no-await-in-loop
+    for (const key of await existingSubjects(db, g.kind, [...g.keys], g.slot)) out.add(`${g.kind}/${key}/${g.slot}`);
+  }
+  return out;
+}
+
 module.exports = {
-  AUDIO_SEEDS_ROOT, AUDIO_KINDS, exportAudio, seedAudio, parseArgs,
+  AUDIO_SEEDS_ROOT, AUDIO_KINDS, exportAudio, seedAudio, parseArgs, existingBindingSubjects,
 };
