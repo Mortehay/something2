@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sfxChains } from '../sfxResolve.js';
+import { sfxChains, sfxPriority } from '../sfxResolve.js';
 
 describe('sfxChains', () => {
   it('a skill cast resolves skill -> attack_type, most-specific miss key first', () => {
@@ -49,5 +49,23 @@ describe('sfxChains', () => {
     expect(sfxChains({ e: 'nearby', c: 'slime', x: 0, y: 0 })).toEqual([]);
     expect(sfxChains({ e: 'use', x: 0, y: 0 })).toEqual([]); // no s, no c
     expect(sfxChains({ e: 'hurt', x: 0, y: 0 })).toEqual([]); // no c
+  });
+});
+
+describe('SOMET-605 boss events', () => {
+  it('boss events resolve to creature/<type>/<e>', () => {
+    for (const e of ['spawn', 'phase', 'enrage']) {
+      expect(sfxChains({ e, c: 'Ignis', a: 'c:wb_1', x: 0, y: 0 }))
+        .toEqual([{ keys: [`creature/Ignis/${e}`], missKey: `creature/Ignis/${e}` }]);
+    }
+    expect(sfxChains({ e: 'phase', x: 0, y: 0 })).toEqual([]);
+  });
+
+  it('sfxPriority -- own beats everything, boss events are boss, the rest nearest', () => {
+    expect(sfxPriority({ e: 'use', a: 'p:1' }, 'p:1')).toBe('own');
+    expect(sfxPriority({ e: 'phase', c: 'Ignis', a: 'c:wb_1' }, 'p:1')).toBe('boss');
+    expect(sfxPriority({ e: 'enrage', c: 'Ignis' }, undefined)).toBe('boss');
+    expect(sfxPriority({ e: 'hurt', c: 'Slime' }, 'p:1')).toBe('nearest');
+    expect(sfxPriority({ e: 'death', c: 'Ignis' }, 'p:1')).toBe('nearest');
   });
 });

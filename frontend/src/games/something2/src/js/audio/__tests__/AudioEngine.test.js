@@ -121,6 +121,28 @@ describe('AudioEngine', () => {
     expect(posted.some((m) => m.slot === 'ambience')).toBe(false);
   });
 
+  it('SOMET-605: a boss phase one-shot holds its voice against creature chatter, and an own swing still lands', async () => {
+    const { engine, sources } = engineWith({
+      'creature/Ignis/phase': [{ key: 'ignis-phase.ogg', volume: 1, weight: 1 }],
+      'creature/slime/hurt': [{ key: 'slime-hurt.ogg', volume: 1, weight: 1 }],
+      'item/Iron Sword/use': [{ key: 'sword.ogg', volume: 1, weight: 1 }],
+    });
+    engine.unlock();
+    engine.sfxLimiter.maxVoices = 1;
+    const opts = { listener: { x: 0, y: 0 }, ownActor: 'p:1' };
+    engine.playSfxEvents([{ e: 'phase', c: 'Ignis', a: 'c:wb_1', x: 900, y: 0 }], opts);
+    await flush(); await flush();
+    expect(sources.map((s) => s.buffer.tag)).toEqual(['u:ignis-phase.ogg']);
+    engine.playSfxEvents([{ e: 'hurt', c: 'slime', x: 0, y: 0 }], opts);
+    await flush(); await flush();
+    expect(sources.length).toBe(1);
+    expect(sources[0].stopped).toBe(false);
+    engine.playSfxEvents([{ e: 'use', k: 'melee', s: 'Iron Sword', a: 'p:1', x: 0, y: 0 }], opts);
+    await flush(); await flush();
+    expect(sources[0].stopped).toBe(true);
+    expect(sources[1].buffer.tag).toBe('u:sword.ogg');
+  });
+
   it('mute and volumes drive the master and bus gains', () => {
     const { engine } = engineWith({});
     engine.setVolumes({ master: 0.5, music: 0.2, ambience: 1, sfx: 1, muted: true });

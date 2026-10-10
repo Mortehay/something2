@@ -42,7 +42,19 @@ export function sfxChains(ev) {
       return c ? chain([`creature/${c}/hurt`]) : [];
     case 'death':
       return c ? chain([`creature/${c}/death`]) : [];
+    // SOMET-605: a boss's own moments (backend sfxEvents.bossSfx).
+    case 'spawn':
+    case 'phase':
+    case 'enrage':
+      return c ? chain([`creature/${c}/${e}`]) : [];
     default:
       return [];
   }
+}
+
+// SOMET-605 (spec 4.4): which SfxLimiter tier a wire event plays at.
+const BOSS_EVENTS = new Set(['spawn', 'phase', 'enrage']);
+export function sfxPriority(ev, ownActor) {
+  if (ownActor && ev && ev.a === ownActor) return 'own';
+  return ev && BOSS_EVENTS.has(ev.e) ? 'boss' : 'nearest';
 }

@@ -6,7 +6,7 @@ import { assetUrl } from '../net/assets.js';
 import {
   resolveChain, pickWeighted, ambienceChain, musicChain, nearbyPointPath,
 } from './audioLookup.js';
-import { sfxChains } from './sfxResolve.js';
+import { sfxChains, sfxPriority } from './sfxResolve.js';
 import { SfxLimiter } from './sfxLimits.js';
 import { NearbyScheduler } from './nearbyScheduler.js';
 import { BiomeTracker } from './biomeTracker.js';
@@ -223,7 +223,7 @@ export class AudioEngine {
     // gain 0 anyway, so cull it before it can take a voice slot or a
     // same-clip throttle slot, and before it fetches anything.
     if (distance >= SFX_FALLOFF_PX) return;
-    const priority = ownActor && ev.a === ownActor ? 'own' : 'nearest';
+    const priority = sfxPriority(ev, ownActor);
     const { ok, evict, voiceId } = this.sfxLimiter.admit({ clipKey: clip.key, priority, distance });
     if (!ok) { this.sfxStats.droppedTotal += 1; return; }
     // The evicted voice may be a one-shot OR a still-looping nearby world
