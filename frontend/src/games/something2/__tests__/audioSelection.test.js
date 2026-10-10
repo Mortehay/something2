@@ -451,56 +451,55 @@ describe('search box: debounced URL sync', () => {
     expect(commits).toEqual(['Tit']);
     sync.type('Titan');
     // The 'Tit' commit lands while 'Titan' is pending: the box keeps 'Titan'.
-    expect(sync.fromUrl('Tit')).toBeNull();
+    expect(sync.fromUrl('Tit', 'Tit')).toBeNull();
     vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS);
     expect(commits).toEqual(['Tit', 'Titan']);
-    // The URL reaches the last commit, then a later URL change
-    // (back/forward, a shared link) wins.
-    expect(sync.fromUrl('Titan')).toBe('Titan');
-    expect(sync.fromUrl('Vale')).toBe('Vale');
+    expect(sync.fromUrl('Titan', 'Titan')).toBe('Titan');
+    // Nothing pending: a URL change (back/forward, a shared link) wins --
+    // the address bar and the render agree on it.
+    expect(sync.fromUrl('Vale', 'Vale')).toBe('Vale');
   });
 
-  it('ignores a stale URL value that lands after a later commit fired (rework 2)', () => {
+  it('ignores a stale render that lands after a later commit fired (rework 2)', () => {
     const { sync, commits } = harness();
     sync.type('Titan Br');
     vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS);
-    expect(sync.fromUrl('Titan Br')).toBe('Titan Br');
     sync.type('Titan Bru');
     vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS);
     expect(commits).toEqual(['Titan Br', 'Titan Bru']);
-    // Nothing is pending, but the URL has not reached 'Titan Bru' yet: a
-    // late render of the earlier value (or the pre-typing '') must not
-    // revert the box.
-    expect(sync.fromUrl('Titan Br')).toBeNull();
-    expect(sync.fromUrl('')).toBeNull();
-    expect(sync.fromUrl('Titan Bru')).toBe('Titan Bru');
-    // The URL caught up: a later change (back/forward) wins again.
-    expect(sync.fromUrl('Titan Br')).toBe('Titan Br');
+    // Nothing is pending and the address bar already says 'Titan Bru', but
+    // the starved transition render still carries the earlier value.
+    expect(sync.fromUrl('Titan Br', 'Titan Bru')).toBeNull();
+    expect(sync.fromUrl('', 'Titan Bru')).toBeNull();
+    expect(sync.fromUrl('Titan Bru', 'Titan Bru')).toBe('Titan Bru');
   });
 
-  it('keeps typed text when the awaited URL lands while a newer commit is due', () => {
+  it('ignores a stale render even when the rendered value before it equalled the new commit', () => {
+    // Measured live against the first rework-2 attempt: the previous search
+    // 'Titan Brute' was still rendered, the user cleared and retyped it, and
+    // the starved render of the intermediate 'Tita' landed after the final
+    // commit -- an "is the commit already in the URL?" shortcut read the stale
+    // render as current and let 'Tita' through.
     const { sync } = harness();
-    sync.type('Ti');
-    vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS);
-    sync.type('Tit');
-    expect(sync.fromUrl('Ti')).toBeNull();
+    expect(sync.fromUrl('Titan Brute', 'Titan Brute')).toBe('Titan Brute');
+    for (const v of ['', 'Tita', 'Titan Brute']) {
+      sync.type(v);
+      vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS);
+    }
+    expect(sync.fromUrl('Tita', 'Titan Brute')).toBeNull();
   });
 
-  it('a commit of the value the URL already holds does not block a later URL change', () => {
-    vi.useFakeTimers();
-    const sync = createSearchSync(() => {}, SEARCH_DEBOUNCE_MS, 'Vale');
-    sync.type('Val');
-    sync.type('Vale');
-    vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS);
-    // setSearchParams with the same q changes nothing, so no URL value
-    // 'Vale' arrives; back/forward to 'Ash' must still reach the box.
-    expect(sync.fromUrl('Ash')).toBe('Ash');
-  });
-
-  it('the table copies ?q= into the box through fromUrl, and seeds it with the URL value', () => {
+  it('the table feeds fromUrl the rendered q AND the live address-bar q', () => {
     const src = tableCode();
-    expect(src).toMatch(/useEffect\(\(\) => \{\s*const v = searchSync\.fromUrl\(search\);\s*if \(v !== null\) setSearchText\(v\);\s*\}, \[search, searchSync\]\)/);
-    expect(src).toMatch(/useState\(\(\) => createSearchSync\([\s\S]*?,\s*search,?\s*\)\)/);
+    expect(src).toMatch(/useEffect\(\(\) => \{\s*const live = filtersFromParams\(new URLSearchParams\(window\.location\.search\), kindKeys\)\.search;\s*const v = searchSync\.fromUrl\(search, live\);\s*if \(v !== null\) setSearchText\(v\);\s*\}, \[search, searchSync, kindKeys\]\)/);
+  });
+
+  it('a filter change builds on the live URL, not on the possibly stale rendered params', () => {
+    const src = tableCode();
+    const body = /const setFilter = \(patch\) => \{([\s\S]*?)\n {2}\};/.exec(src);
+    expect(body).not.toBeNull();
+    expect(body[1]).toMatch(/paramsFromFilters\(\{ \.\.\.liveUrlFilters\(\), \.\.\.patch \}\)/);
+    expect(src).toMatch(/const liveUrlFilters = \(\) => filtersFromParams\(new URLSearchParams\(window\.location\.search\), kindKeys\)/);
   });
 
   it('cancel drops a pending commit (unmount)', () => {
@@ -627,8 +626,20 @@ describe('table wiring (rework 2 gates)', () => {
 
   it('every filtersFromParams call passes the registry kinds', () => {
     const src = tableCode();
-    const calls = [...src.matchAll(/filtersFromParams\(([^()]*)\)/g)].map((m) => m[1]);
-    expect(calls.length).toBeGreaterThanOrEqual(2);
+    // The argument text of each call, parentheses balanced.
+    const calls = [...src.matchAll(/filtersFromParams\(/g)].map((m) => {
+      let depth = 1;
+      let i = m.index + m[0].length;
+      const start = i;
+      for (; depth > 0; i += 1) {
+        if (src[i] === '(') depth += 1;
+        else if (src[i] === ')') depth -= 1;
+      }
+      return src.slice(start, i - 1);
+    }).filter((args) => args.trim() !== '');
+    // The rendered params, the live URL (setFilter's base) and the Search
+    // box's live check.
+    expect(calls.length).toBeGreaterThanOrEqual(3);
     for (const args of calls) expect(args).toMatch(/,\s*kindKeys\s*$/);
   });
 

@@ -147,16 +147,15 @@ function AudioSlotTable({
     kind, sound, search, prompt,
   } = filtersFromParams(searchParams, kindKeys);
   const [page, setPage] = useState(1);
-  // The params a filter change builds on. react-router's functional
-  // setSearchParams form still hands the updater THIS render's params, so two
-  // changes in one tick would clobber each other (seen in the browser); this
-  // ref carries the pending value between them. Re-synced from the URL on
-  // every render (and so on back/forward).
-  const pendingParams = useRef(searchParams);
-  useEffect(() => { pendingParams.current = searchParams; }, [searchParams]);
+  // The filters as the address bar holds them NOW. react-router writes the
+  // address bar synchronously but renders the new location in a transition,
+  // so `searchParams` can trail it by several changes while keys arrive
+  // (SOMET-596 rework 2). A filter change builds on the live URL -- building
+  // on the rendered params let two quick changes clobber each other -- and
+  // the Search box uses it to tell a stale render from a current one.
+  const liveUrlFilters = () => filtersFromParams(new URLSearchParams(window.location.search), kindKeys);
   const setFilter = (patch) => {
-    const next = paramsFromFilters({ ...filtersFromParams(pendingParams.current, kindKeys), ...patch });
-    pendingParams.current = next;
+    const next = paramsFromFilters({ ...liveUrlFilters(), ...patch });
     setSearchParams(next, { replace: true });
     setPage(1);
   };
@@ -168,13 +167,12 @@ function AudioSlotTable({
   const [searchText, setSearchText] = useState(search);
   const setFilterRef = useRef(setFilter);
   setFilterRef.current = setFilter;
-  const [searchSync] = useState(() => createSearchSync(
-    (v) => setFilterRef.current({ search: v }), undefined, search,
-  ));
+  const [searchSync] = useState(() => createSearchSync((v) => setFilterRef.current({ search: v })));
   useEffect(() => {
-    const v = searchSync.fromUrl(search);
+    const live = filtersFromParams(new URLSearchParams(window.location.search), kindKeys).search;
+    const v = searchSync.fromUrl(search, live);
     if (v !== null) setSearchText(v);
-  }, [search, searchSync]);
+  }, [search, searchSync, kindKeys]);
   useEffect(() => () => searchSync.cancel(), [searchSync]);
 
   const [selected, setSelected] = useState(() => new Set());

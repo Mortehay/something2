@@ -419,24 +419,22 @@ export const SEARCH_DEBOUNCE_MS = 250;
 // URL param lost keystrokes: a commit re-filters every row and takes 30-300
 // ms, and until it lands the input still shows the old value, so the next key
 // is applied to that. The input shows its own text instead; `type` schedules
-// one `commit` per pause, and `fromUrl` says what the box should show when
-// `?q=` changes: the URL's value, or null (keep the typed text).
+// one `commit` per pause, and `fromUrl(rendered, live)` says what the box
+// should show when the rendered `?q=` changes: that value, or null (keep the
+// typed text).
 //
-// Null is returned in two cases:
-// - a commit is still due (the user is mid-word);
-// - a commit has FIRED but the URL has not reached it yet. react-router
-//   applies a navigation inside startTransition, so the render carrying an
-//   EARLIER committed `?q=` can land after a later commit fired (rework 2:
-//   "Titan Bru" was typed, the stale `?q=Titan Br` render landed and reverted
-//   the box). Every URL value is ignored until the URL equals the last value
-//   committed; after that the URL wins again (back/forward, a shared link).
-// A commit of the value the URL already holds produces no URL change to wait
-// for, so it does not arm the wait (`initialUrl` seeds that comparison).
-export function createSearchSync(commit, delay = SEARCH_DEBOUNCE_MS, initialUrl = '') {
+// `live` is the q in the address bar NOW (window.location). react-router
+// writes the address bar synchronously but renders the new location inside
+// startTransition, and while keys keep arriving that render is starved: the
+// rendered q can trail the real one by several commits and land after a
+// later commit fired (rework 2, measured live: "Titan Bru" typed, a late
+// `?q=Titan Br` render reverted the box). A rendered value that differs
+// from the live one is such a stale render, and is ignored; one that equals
+// it is current, so back/forward and a shared link still reach the box.
+// Null is also returned while a commit is still due (the user is mid-word).
+export function createSearchSync(commit, delay = SEARCH_DEBOUNCE_MS) {
   let timer = null;
   let pending = null;
-  let awaiting = null;
-  let lastUrl = initialUrl;
   return {
     type(value) {
       pending = value;
@@ -445,23 +443,17 @@ export function createSearchSync(commit, delay = SEARCH_DEBOUNCE_MS, initialUrl 
         const v = pending;
         timer = null;
         pending = null;
-        awaiting = v === lastUrl ? null : v;
         commit(v);
       }, delay);
     },
-    fromUrl(urlValue) {
-      lastUrl = urlValue;
-      if (awaiting !== null) {
-        if (urlValue !== awaiting) return null;
-        awaiting = null;
-      }
-      return pending === null ? urlValue : null;
+    fromUrl(rendered, live = rendered) {
+      if (pending !== null || rendered !== live) return null;
+      return rendered;
     },
     cancel() {
       if (timer !== null) clearTimeout(timer);
       timer = null;
       pending = null;
-      awaiting = null;
     },
   };
 }
