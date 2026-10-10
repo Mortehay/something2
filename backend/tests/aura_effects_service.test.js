@@ -43,7 +43,33 @@ for (const [field, value, re] of [
 
 test('an allies aura may not carry a DoT', () => {
   assert.match(auraEffectError({ ...VALID, dot_dps: 3 }), /only an enemies aura can deal damage over time/);
-  assert.strictEqual(auraEffectError({ ...VALID, target_side: 'enemies', dot_dps: 3 }), null);
+  assert.strictEqual(auraEffectError({ ...VALID, target_side: 'enemies', dot_dps: 3, damage_mult: 1, defense_mult: 1, speed_mult: 1 }), null);
+});
+
+// G4 (SOMET-606): an enemies aura debuffs the players it reaches, so a mult
+// above 1 would be an enemy BUFF. Rejected at the API; the runtime clamps too.
+const ENEMIES = { ...VALID, target_side: 'enemies', damage_mult: 1, defense_mult: 1, speed_mult: 1 };
+for (const field of ['damage_mult', 'defense_mult', 'speed_mult']) {
+  test(`an enemies aura rejects ${field} above 1, naming the field`, () => {
+    assert.match(auraEffectError({ ...ENEMIES, [field]: 1.1 }) || '', new RegExp(`${field} .*1`));
+    assert.match(auraEffectError({ ...ENEMIES, [field]: '1.1' }) || '', new RegExp(field));
+  });
+  test(`an enemies aura accepts ${field} of exactly 1 and of 0.5`, () => {
+    assert.strictEqual(auraEffectError({ ...ENEMIES, [field]: 1 }), null);
+    assert.strictEqual(auraEffectError({ ...ENEMIES, [field]: 0.5 }), null);
+  });
+  test(`an enemies aura rejects ${field} of 0 or below`, () => {
+    assert.match(auraEffectError({ ...ENEMIES, [field]: 0 }) || '', new RegExp(field));
+    assert.match(auraEffectError({ ...ENEMIES, [field]: -0.2 }) || '', new RegExp(field));
+  });
+}
+test('an allies aura may still exceed 1 (buffs are the point)', () => {
+  assert.strictEqual(auraEffectError({ ...VALID, speed_mult: 1.5 }), null);
+});
+test('a non-finite dot_dps is rejected, as a number or a string', () => {
+  for (const v of [Infinity, NaN, 'Infinity', '1e999']) {
+    assert.match(auraEffectError({ ...ENEMIES, dot_dps: v }) || '', /dot_dps/, String(v));
+  }
 });
 
 test('resolveAuraDef maps a json_build_object row to camelCase', () => {
