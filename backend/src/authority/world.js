@@ -77,6 +77,27 @@ const BASE_STATS = derivePlayerStats(DEFAULT_PROGRESSION);
 function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 function sign(v) { return v > 0.3 ? 1 : v < -0.3 ? -1 : 0; }
 
+// SOMET-606 (S4). The enemy-aura debuff a player is living with this tick,
+// stamped by CreatureSim.tick (p._buff, the same field and the same NO_BUFF
+// default creatures use). Two readers, ONE definition each:
+//  - playerSpeedMult: chill x aura. tick() moves with it and selfAuraFields
+//    sends it to the owning client, which predicts with it -- two copies is
+//    how prediction and authority drift into a rubber-band.
+//  - auraDamageMult: every outgoing player damage number (weaponDamage, skills,
+//    and an augment stone's bonus packet).
+//
+// The 0.5 floor (ENEMY_AURA_FLOOR) is applied to the AURA product only, inside
+// applyEnemyAuras. Chill multiplies on top of the already-floored aura factor,
+// so chill x aura CAN go below 0.5 (e.g. a 0.5 aura with a 0.7 chill = 0.35).
+// That is accepted (controller ruling Q8); tuning is SOMET-613.
+function playerSpeedMult(p, now) {
+  const chill = effectMagnitude(p, CHILL, now);
+  return (chill || 1) * (p._buff || NO_BUFF).speedMult;
+}
+function auraDamageMult(p) {
+  return (p._buff || NO_BUFF).damageMult;
+}
+
 // STR scales physical weapons, INT scales every other element. The split is
 // the weapon catalog's existing `element` column -- no new field, and it
 // gives the element system weight it currently lacks.
@@ -98,7 +119,7 @@ function weaponDamage(p, w) {
   //
   // Identity is 1, so every weapon with no shape node allocated is unmoved.
   const shape = w.kind === 'melee' ? (p.stats.rules.meleeDamageMult || 1) : 1;
-  return w.damage * mult * elementDamageMult(p.stats, w.element) * shape;
+  return w.damage * mult * elementDamageMult(p.stats, w.element) * shape * auraDamageMult(p);
 }
 
 // SOMET-495. The passive tree's `damage` grants, as a PER-ELEMENT multiplier.
@@ -537,6 +558,12 @@ class World {
         applyDamageWithEffects(t, m, BURN_ELEMENT, effectiveMit(t), this.now, playerKey(sourceId));
         return false;
       });
+      // SOMET-606: stepEffects set speed = base x chill; fold in the enemy-aura
+      // slow from the SAME function the client is told about. Recomputed from
+      // baseSpeed every tick, so it can never compound. p._buff was stamped by
+      // the PREVIOUS CreatureSim.tick (it runs after World.tick), so a new
+      // debuff slows movement from the next 50 ms tick (ruling G11, accepted).
+      p.speed = p.baseSpeed * playerSpeedMult(p, this.now);
     }
     // Snapshot: damageCreatureById deletes from the live map on a kill.
     for (const c of this.creatures.all()) {
@@ -971,7 +998,11 @@ class World {
     const augment = w.augment
       ? {
         ...w.augment,
-        bonusDamage: w.augment.bonusDamage * elementDamageMult(p.stats, w.augment.element),
+        // SOMET-606 (ruling Q3): the enemy-aura damage debuff lowers TOTAL
+        // outgoing damage, so the bonus packet is scaled here too -- once, for
+        // the same three consumers (creature arc, PvP branch, projectile).
+        bonusDamage: w.augment.bonusDamage * elementDamageMult(p.stats, w.augment.element)
+          * auraDamageMult(p),
       }
       : null;
 
@@ -1400,7 +1431,7 @@ class World {
       baseDamage = Math.max(4, Math.min(28, baseDamage));
     }
 
-    const damage = Math.max(2, Math.round(baseDamage * baseMult * elemMult));
+    const damage = Math.max(2, Math.round(baseDamage * baseMult * elemMult * auraDamageMult(p)));
     const element = skill.element || (skill.class === 'Mage' ? 'fire' : (skill.class === 'Druid' ? 'lightning' : (skill.class === 'Cultist' ? 'shadow' : 'physical')));
 
     const kills = [];
@@ -1726,4 +1757,5 @@ module.exports = {
   PLAYER_MAX_STAMINA, PLAYER_STAMINA_REGEN,
   weaponDamage, applyAttackCooldown, BASE_STATS,
   MAX_CREATURE_PROJECTILES,
+  playerSpeedMult, auraDamageMult,
 };
