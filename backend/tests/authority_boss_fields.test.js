@@ -9,11 +9,11 @@ const { CreatureSim } = require('../src/authority/creatures.js');
 const stubMap = () => ({ isWalkable: () => true, speedAt: () => 1, chunkSize: 8 });
 const rng = () => 0.05;
 
-test('addCreatures keeps a boss instance\'s tier, element, name, auras and hitbox', () => {
+test('addCreatures keeps a boss instance\'s tier, element, name and hitbox', () => {
   const s = new CreatureSim(stubMap(), rng);
   s.addCreatures([{
     id: 'b1', type: 'zzBoss', name: 'zzBoss Display', x: 100, y: 100, hp: 5000,
-    bossTier: 'world', element: 'ice', hitboxSize: 96, auras: ['zzAura'],
+    bossTier: 'world', element: 'ice', hitboxSize: 96,
   }]);
   const c = s.get('b1');
   assert.equal(c.bossTier, 'world');
@@ -22,7 +22,6 @@ test('addCreatures keeps a boss instance\'s tier, element, name, auras and hitbo
   assert.equal(c.hitboxSize, 96);
   assert.equal(c.width, 96);
   assert.equal(c.height, 96);
-  assert.deepEqual(c.auras, ['zzAura']);
 });
 
 test('an ordinary creature keeps the 48px box and null boss fields', () => {
@@ -34,7 +33,6 @@ test('an ordinary creature keeps the 48px box and null boss fields', () => {
   assert.equal(c.bossTier, null);
   assert.equal(c.element, null);
   assert.equal(c.hitboxSize, null);
-  assert.equal(c.auras, null);
   assert.equal(c.name, 'Wolf', 'name falls back to the type');
 });
 

@@ -381,7 +381,7 @@ const CREATURE_JOINED_SELECT = `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.fac
                 -- trap -- the binding would exist in the database, and every
                 -- creature would silently draw the kind default forever.
                 et.vfx,
-                et.boss_tier, et.element, et.hitbox_size, et.auras,
+                et.boss_tier, et.element, et.hitbox_size,
                 b.name AS behavior_name, b.aggro_radius, b.leash_radius,
                 b.chase_style, b.preferred_range, b.move_speed_mult, b.damage_override,
                 b.aura_radius, b.aura_damage_mult, b.aura_defense_mult, b.aura_speed_mult,

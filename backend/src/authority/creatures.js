@@ -199,9 +199,6 @@ function hydrateCreatureRow(row, instance = {}) {
     bossTier: BOSS_TIERS.includes(merged.boss_tier) ? merged.boss_tier : null,
     element: typeof merged.element === 'string' && merged.element !== '' ? merged.element : null,
     hitboxSize: merged.hitbox_size == null ? null : hitboxOrNull(Number(merged.hitbox_size)),
-    auras: Array.isArray(merged.auras)
-      ? merged.auras.filter((a) => typeof a === 'string' && a !== '')
-      : null,
   };
 }
 
@@ -239,18 +236,20 @@ const ABILITIES_LATERAL = `
 // SOMET-603: entity TYPE rows with everything hydrateCreatureRow and
 // resolveBehavior read, for callers that spawn an instance with no
 // world_creatures row (WorldBossManager now; S9 dungeon bosses next). Callers
-// append their own WHERE/ORDER BY. b.aura_* are deliberately NOT selected:
-// S3 drops those columns, and no boss uses a behaviour with an aura.
-const ENTITY_CATALOG_SELECT = `SELECT e.id, e.name, e.color, e.hp, e.max_hp, e.defense, e.resistances,
-         e.faction, e.gold_min, e.gold_max, e.attack_element, e.vfx, e.prompt,
-         e.boss_tier, e.element, e.hitbox_size, e.auras, e.xp_reward, e.base_damage,
-         e.display_width, e.display_height,
+// append their own WHERE/ORDER BY, against the entity_types alias `et` (the
+// alias S3's AURAS_LATERAL expects). b.aura_* are deliberately NOT selected:
+// S3 drops those columns, and no boss uses a behaviour with an aura. Neither
+// is et.auras: S3 owns aura resolution end to end.
+const ENTITY_CATALOG_SELECT = `SELECT et.id, et.name, et.color, et.hp, et.max_hp, et.defense, et.resistances,
+         et.faction, et.gold_min, et.gold_max, et.attack_element, et.vfx, et.prompt,
+         et.boss_tier, et.element, et.hitbox_size, et.xp_reward, et.base_damage,
+         et.display_width, et.display_height,
          b.name AS behavior_name, b.aggro_radius, b.leash_radius, b.chase_style, b.preferred_range,
          b.move_speed_mult, b.damage_override,
          b.gold_min AS behavior_gold_min, b.gold_max AS behavior_gold_max,
          ab.abilities
-    FROM entity_types e
-    LEFT JOIN creature_behaviors b ON b.id = e.behavior_id${ABILITIES_LATERAL}`;
+    FROM entity_types et
+    LEFT JOIN creature_behaviors b ON b.id = et.behavior_id${ABILITIES_LATERAL}`;
 
 // Load the creature entity types. Named + exported (rather than inlined in
 // server.js) so a guard test can assert the SELECT names every column the
@@ -1273,8 +1272,6 @@ class CreatureSim {
         bossTier: c.bossTier ?? null,
         element: c.element ?? null,
         hitboxSize: hitbox,
-        // Aura names (entity_types.auras). Carried, not interpreted, until S3.
-        auras: Array.isArray(c.auras) ? c.auras : null,
         facing: c.facing || 'S', hp: c.hp, maxHp: c.hp, color: c.color,
         mit: creatureMitigation(c),
         // Slice D: effect bindings from entity_types.vfx, normalized to null

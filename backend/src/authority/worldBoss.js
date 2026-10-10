@@ -39,8 +39,8 @@ const MINION_TYPE_BY_ELEMENT = Object.freeze({
 async function loadWorldBossCatalog(pool) {
   const r = await pool.query(
     `${ENTITY_CATALOG_SELECT}
-      WHERE e.is_creature = true AND (e.boss_tier = 'world' OR e.name = ANY($1::text[]))
-      ORDER BY e.id ASC`,
+      WHERE et.is_creature = true AND (et.boss_tier = 'world' OR et.name = ANY($1::text[]))
+      ORDER BY et.id ASC`,
     [Object.values(MINION_TYPE_BY_ELEMENT)],
   );
   const bosses = r.rows.filter((row) => row.boss_tier === 'world');
@@ -409,7 +409,7 @@ class WorldBossManager {
       return;
     }
     const stamp = Date.now();
-    // SOMET-603: hydrated like every other creature (auras, behaviour, element
+    // SOMET-603: hydrated like every other creature (behaviour, element
     // and damage all arrive the one shared way). No `damage` here: an explicit
     // instance damage would beat the row's base_damage (ruling P1).
     const minions = MINION_OFFSETS.map(([dx, dy], i) => hydrateCreatureRow(row, {
