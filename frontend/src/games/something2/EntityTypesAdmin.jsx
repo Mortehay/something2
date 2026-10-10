@@ -27,6 +27,9 @@ import {
 } from './entityFilters.js';
 import AdminLoading from './AdminLoading.jsx';
 import SubjectSounds from './SubjectSounds.jsx';
+import { useAuraEffectsAdmin } from './useAuraEffects.js';
+import { toggleAura, aurasForPayload } from './entityAuras.js';
+import EntityAuraPicker from './EntityAuraPicker.jsx';
 
 const PAGE_SIZE = 6;
 
@@ -938,6 +941,8 @@ function EntityTypesAdmin() {
   // re-read the row by id for anything that must reflect the approval.
   const liveEditingEntity = (editingEntity && entityTypes?.find(e => e.id === editingEntity.id)) || editingEntity;
   
+  const { auras: auraLibrary, isLoadingAuras } = useAuraEffectsAdmin();
+
   const [formData, setFormData] = useState({
     name: '',
     color: '#ffffff', // s2-theme-exempt(#ffffff): entity data default, not chrome
@@ -967,6 +972,7 @@ function EntityTypesAdmin() {
     place_order: 0,
     behavior_id: null,
     attack_element: 'physical',
+    auras: null,
     point_kind: null,
     ...BOSS_FORM_DEFAULTS
   });
@@ -1010,6 +1016,7 @@ function EntityTypesAdmin() {
         // not fall back to a truthy default -- same rule as damage_override.
         behavior_id: editingEntity.behavior_id ?? null,
         attack_element: editingEntity.attack_element || 'physical',
+        auras: editingEntity.auras ?? null,
         point_kind: editingEntity.point_kind ?? null,
         ...bossFieldsFromEntity(editingEntity),
         // SOMET-342: the stored pin, flattened to the single string a <select>
@@ -1044,6 +1051,7 @@ function EntityTypesAdmin() {
         place_order: 0,
         behavior_id: null,
         attack_element: 'physical',
+        auras: null,
         point_kind: null,
         ...BOSS_FORM_DEFAULTS,
         provider_pin: ''
@@ -1094,6 +1102,7 @@ function EntityTypesAdmin() {
       ...rest,
       ...selectValueToPin(provider_pin),
       ...pointKindPayload(formData),
+      auras: aurasForPayload(formData),
       display_width: optionalPx(rest.display_width),
       display_height: optionalPx(rest.display_height),
       ...bossFieldsPayload(formData),
@@ -1443,6 +1452,18 @@ function EntityTypesAdmin() {
                       onChange={e => setFormData({ ...formData, base_damage: e.target.value === '' ? '' : parseFloat(e.target.value) })} />
                   </FormGroup>
                 </div>
+              )}
+
+              {/* SOMET-604: aura picker, beside the boss fields (spec §5). */}
+              {formData.is_creature && (
+                <FormGroup>
+                  <EntityAuraPicker
+                    value={formData.auras}
+                    library={auraLibrary}
+                    isLoading={isLoadingAuras}
+                    onChange={(name) => setFormData(prev => ({ ...prev, auras: toggleAura(prev.auras, name) }))}
+                  />
+                </FormGroup>
               )}
 
               <FormGroup>
