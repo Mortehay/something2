@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const {
-  clean, buildMessages, subjectContext, grantsPhrase, CONTRACTS, TEMPERATURE,
+  clean, buildMessages, subjectContext, grantsPhrase, RULE_PHRASES, CONTRACTS, TEMPERATURE,
   describeSubject, budgetFor,
 } = require('../src/services/subjectDescriber.js');
 
@@ -163,9 +163,14 @@ test('every grant type renders, because an unhandled one is a silent blank', () 
     { type: 'rule', rule: 'cooldownFloor', value: 0.32 },
   ]);
   // These six are every type in passive_nodes, checked against the live table.
-  for (const word of ['strength', 'fire damage', 'ice resistance', 'mana', 'chill', 'cooldownFloor']) {
+  // SOMET-568: the rule entry used to expect the literal identifier
+  // 'cooldownFloor'. That assertion described the defect -- it passed precisely
+  // BECAUSE the identifier reached the prompt raw -- so it is now the English
+  // the rule renders as, and the identifier is asserted ABSENT.
+  for (const word of ['strength', 'fire damage', 'ice resistance', 'mana', 'chill', 'recharge faster']) {
     assert.ok(all.includes(word), `"${word}" is missing from "${all}"`);
   }
+  assert.ok(!all.includes('cooldownFloor'), `the rule identifier reached the prompt raw: "${all}"`);
   assert.equal(grantsPhrase([]), '', 'and no grants is no Effect line, not an empty one');
   assert.equal(grantsPhrase(undefined), '');
   assert.equal(grantsPhrase([{ type: 'something_new' }]), '',
@@ -230,4 +235,89 @@ test('the describer uses the shared text provider, which prefers the GPU box', a
   assert.deepEqual(out, {
     text: 'battle-worn archer with a longbow', model: 'large-gpu-llm', length: 'medium', via: 'box',
   });
+});
+
+// SOMET-568. A rule grant names a FORMULA, and its identifier is that formula's
+// name in the code. Rendering it raw put `meleeWaveShare 0.3` / `auraRadius 40`
+// into the prompt, and for the labels whose ONLY grant is a rule that identifier
+// was the entire mechanical context.
+test('a rule grant reaches the prompt as English, never as its identifier', () => {
+  const phrase = grantsPhrase([{ type: 'rule', rule: 'meleeWaveShare', value: 0.3 }]);
+  assert.match(phrase, /shockwave/, `"${phrase}" should describe the effect`);
+  assert.doesNotMatch(phrase, /meleeWaveShare/, 'the identifier must not survive into a prompt');
+  // No digits: these values are multipliers, floors and shares whose direction
+  // is not readable from the number, and a model given them may draw them.
+  assert.doesNotMatch(phrase, /[0-9]/, `"${phrase}" carries a number the model cannot interpret`);
+  const ctx = subjectContext({
+    kind: 'passive_label', name: 'Spreading Stain',
+    grants: [{ type: 'rule', rule: 'auraRadius', value: 40 }],
+  });
+  assert.match(ctx, /Effect: a wider aura/);
+  assert.doesNotMatch(ctx, /auraRadius|40/);
+});
+
+// The tree uses rules in BOTH directions: Whirlwind is meleeArcBonus 3.5 WITH
+// meleeDamageMult 0.8 -- a wide swing paid for in damage -- and Spearpoint /
+// Sweep carry a NEGATIVE meleeArcBonus / meleeReachBonus. One phrase per rule
+// ("heavier melee blows") would put the opposite fact into those prompts.
+test('a rule that can cut both ways says which way this grant cuts', () => {
+  const weaker = grantsPhrase([{ type: 'rule', rule: 'meleeDamageMult', value: 0.8 }]);
+  assert.match(weaker, /lighter|weaker/, `0.8x melee damage is a penalty, got "${weaker}"`);
+  assert.doesNotMatch(weaker, /heav/, 'a damage penalty must not read as heavier blows');
+  assert.match(grantsPhrase([{ type: 'rule', rule: 'meleeDamageMult', value: 1.2 }]), /heavier/);
+  assert.match(grantsPhrase([{ type: 'rule', rule: 'meleeArcBonus', value: -0.5 }]), /narrower/);
+  assert.match(grantsPhrase([{ type: 'rule', rule: 'meleeArcBonus', value: 3.5 }]), /wider/);
+  assert.match(grantsPhrase([{ type: 'rule', rule: 'meleeReachBonus', value: -12 }]), /shorter/);
+  assert.match(grantsPhrase([{ type: 'rule', rule: 'lifeCostMultiplier', value: 0.85 }]), /less life/);
+  assert.equal(grantsPhrase([{ type: 'rule', rule: 'attackSpeedMult', value: 1 }]), '',
+    'a neutral value changes nothing, so it says nothing');
+});
+
+test('an unmapped rule is dropped, not passed through as camelCase', () => {
+  assert.equal(grantsPhrase([{ type: 'rule', rule: 'aRuleAddedTomorrow', value: 5 }]), '',
+    'consistent with an unknown grant TYPE being dropped rather than rendered as undefined');
+  // and it must not take a legitimate sibling down with it
+  assert.equal(
+    grantsPhrase([{ type: 'stat', stat: 'wisdom', value: 2 },
+      { type: 'rule', rule: 'aRuleAddedTomorrow', value: 5 }]),
+    '+2 wisdom');
+});
+
+// THE STALENESS GUARD, at both ends. RULE_KEYS is the AUTHORED vocabulary, so a
+// rule fails here the moment it becomes authorable, before any node uses it.
+// generatePassiveTree(PASSIVE_TREE_SPEC) is exactly what the seeder writes into
+// passive_nodes, so every rule grant that table will hold is rendered for real
+// here -- without touching a database.
+test('every rule the tree can author, and every rule grant it seeds, has words', () => {
+  const { RULE_KEYS, PASSIVE_TREE_SPEC } = require('../seeds/data/passiveTree.js');
+  const { generatePassiveTree } = require('../seeds/generatePassiveTree.js');
+  const missing = Object.keys(RULE_KEYS).filter((k) => !RULE_PHRASES[k]);
+  assert.deepEqual(missing, [],
+    `these rules would be dropped from every prompt: ${missing.join(', ')}`);
+  // The converse: a phrase for a rule that no longer exists is dead weight that
+  // makes the table look more complete than it is.
+  const orphans = Object.keys(RULE_PHRASES).filter((k) => !RULE_KEYS[k]);
+  assert.deepEqual(orphans, [], `no such rule in the tree: ${orphans.join(', ')}`);
+
+  const ruleGrants = generatePassiveTree(PASSIVE_TREE_SPEC).nodes
+    .flatMap((n) => n.grants || []).filter((g) => g.type === 'rule');
+  assert.ok(ruleGrants.length > 50, `anti-vacuity: expected the seeded tree's rule grants, got ${ruleGrants.length}`);
+  for (const g of ruleGrants) {
+    const phrase = grantsPhrase([g]);
+    assert.ok(phrase, `${g.rule} ${g.value} renders as nothing`);
+    assert.doesNotMatch(phrase, /[a-z][A-Z]|[0-9]/, `${g.rule} ${g.value} rendered as "${phrase}"`);
+  }
+});
+
+// Two phrases were read off their CONSUMER because the identifier misleads.
+// Pinned so a later "tidy-up" cannot quietly reintroduce the wrong fact.
+test('the two rules whose names mislead say what the code actually does', () => {
+  // world.js on auraLeech: "It HEALS and never drains."
+  const leech = grantsPhrase([{ type: 'rule', rule: 'auraLeech', value: 0.5 }]);
+  assert.match(leech, /heal/i);
+  assert.doesNotMatch(leech, /drain|steal|enem/i,
+    'auraLeech heals its owner; describing it as draining enemies is a wrong fact');
+  // world.js on regenLifeShare: the share rides MANA regeneration --
+  // "no regeneration, no life" -- so it is not a second health regen.
+  assert.match(grantsPhrase([{ type: 'rule', rule: 'regenLifeShare', value: 0.1 }]), /mana/i);
 });
