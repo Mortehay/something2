@@ -1514,7 +1514,7 @@ export class Game {
             // SOMET-606. Both assigned EVERY frame (the server omits them when
             // clear -- same reason as `effects` above).
             this.selfSpeedMult = selfSpeedMult(msg);
-            this.player.auraSpeedMult = this.selfSpeedMult;
+            this.player.debuffSpeedMult = this.selfSpeedMult;
             this.auraDebuffRows = debuffHudEntries(msg.debuffs);
             // SOMET-523. Assigned on EVERY frame for the same reason `effects`
             // is one line up: the server OMITS the field entirely when the

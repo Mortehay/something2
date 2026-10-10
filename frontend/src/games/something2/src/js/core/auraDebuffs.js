@@ -42,6 +42,6 @@ export function debuffHudEntries(debuffs) {
 // slowing us and no debuff is showing until the server says so again.
 export function resetSelfAura(game) {
   game.selfSpeedMult = 1;
-  if (game.player) game.player.auraSpeedMult = 1;
+  if (game.player) game.player.debuffSpeedMult = 1;
   game.auraDebuffRows = [];
 }

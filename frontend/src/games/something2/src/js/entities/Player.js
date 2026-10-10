@@ -83,7 +83,7 @@ export class Player extends Entity {
         // SOMET-606: the server's enemy-aura (x chill) multiplier, from the own
         // state frame -- predicting at full speed while the server slows us is
         // a snap-back every frame.
-        const speed = this.speed * (this.speedMultiplier || 1) * (this.auraSpeedMult || 1);
+        const speed = this.speed * (this.speedMultiplier || 1) * (this.debuffSpeedMult || 1);
         const r = resolveMove(map, { x: this.x, y: this.y, width: this.width, height: this.height, speed }, dx, dy, dt);
         this.x = r.x;
         this.y = r.y;
