@@ -420,11 +420,23 @@ export const SEARCH_DEBOUNCE_MS = 250;
 // ms, and until it lands the input still shows the old value, so the next key
 // is applied to that. The input shows its own text instead; `type` schedules
 // one `commit` per pause, and `fromUrl` says what the box should show when
-// `?q=` changes -- the URL's value when nothing is pending (back/forward, a
-// shared link), null (keep the typed text) while a commit is still due.
-export function createSearchSync(commit, delay = SEARCH_DEBOUNCE_MS) {
+// `?q=` changes: the URL's value, or null (keep the typed text).
+//
+// Null is returned in two cases:
+// - a commit is still due (the user is mid-word);
+// - a commit has FIRED but the URL has not reached it yet. react-router
+//   applies a navigation inside startTransition, so the render carrying an
+//   EARLIER committed `?q=` can land after a later commit fired (rework 2:
+//   "Titan Bru" was typed, the stale `?q=Titan Br` render landed and reverted
+//   the box). Every URL value is ignored until the URL equals the last value
+//   committed; after that the URL wins again (back/forward, a shared link).
+// A commit of the value the URL already holds produces no URL change to wait
+// for, so it does not arm the wait (`initialUrl` seeds that comparison).
+export function createSearchSync(commit, delay = SEARCH_DEBOUNCE_MS, initialUrl = '') {
   let timer = null;
   let pending = null;
+  let awaiting = null;
+  let lastUrl = initialUrl;
   return {
     type(value) {
       pending = value;
@@ -433,18 +445,35 @@ export function createSearchSync(commit, delay = SEARCH_DEBOUNCE_MS) {
         const v = pending;
         timer = null;
         pending = null;
+        awaiting = v === lastUrl ? null : v;
         commit(v);
       }, delay);
     },
     fromUrl(urlValue) {
+      lastUrl = urlValue;
+      if (awaiting !== null) {
+        if (urlValue !== awaiting) return null;
+        awaiting = null;
+      }
       return pending === null ? urlValue : null;
     },
     cancel() {
       if (timer !== null) clearTimeout(timer);
       timer = null;
       pending = null;
+      awaiting = null;
     },
   };
+}
+
+// The Variants box's text -> a variants count, or null when it is not an
+// integer 1..MAX_SFX_VARIANTS. The box keeps its raw text (so Backspace then
+// a digit works); this is checked on blur and on queue.
+export function parseVariants(text) {
+  const t = String(text ?? '').trim();
+  if (!/^\d+$/.test(t)) return null;
+  const n = Number(t);
+  return n >= 1 && n <= MAX_SFX_VARIANTS ? n : null;
 }
 
 // `fn` (which returns a promise) wrapped so a call made while an earlier one

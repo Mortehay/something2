@@ -8,8 +8,14 @@ import {
   PAGE_SIZE, pageCount, clampPage, toggle, selectPage, deselectPage, isPageFullySelected,
   selectAllMatching, selectionOutsideFilter, queueItems, enqueueSummary, normalizeCause, failedByCause,
   soundText, MAX_JOB_ITEMS, chunkItems, queueInChunks, jobsForKnownSubjects, uploadOnlyCount, slotEntriesFor,
-  DEFAULT_SFX_VARIANTS, SEARCH_DEBOUNCE_MS, createSearchSync, singleFlight,
+  DEFAULT_SFX_VARIANTS, SEARCH_DEBOUNCE_MS, createSearchSync, singleFlight, MAX_SFX_VARIANTS, parseVariants,
 } from '../audioSelection.js';
+
+// AudioSlotTable.jsx with comments removed, for the wiring gates below: a
+// gate that a comment can satisfy proves nothing (rework 2 found one).
+const tableCode = () => readFileSync(fileURLToPath(new URL('../AudioSlotTable.jsx', import.meta.url)), 'utf8')
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/(^|[^:])\/\/.*$/gm, '$1');
 
 // A registry response shaped like GET /api/audio/admin/subjects.
 const subjects = [
@@ -448,8 +454,53 @@ describe('search box: debounced URL sync', () => {
     expect(sync.fromUrl('Tit')).toBeNull();
     vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS);
     expect(commits).toEqual(['Tit', 'Titan']);
-    // Nothing pending: a URL change (back/forward, a shared link) wins.
+    // The URL reaches the last commit, then a later URL change
+    // (back/forward, a shared link) wins.
+    expect(sync.fromUrl('Titan')).toBe('Titan');
     expect(sync.fromUrl('Vale')).toBe('Vale');
+  });
+
+  it('ignores a stale URL value that lands after a later commit fired (rework 2)', () => {
+    const { sync, commits } = harness();
+    sync.type('Titan Br');
+    vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS);
+    expect(sync.fromUrl('Titan Br')).toBe('Titan Br');
+    sync.type('Titan Bru');
+    vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS);
+    expect(commits).toEqual(['Titan Br', 'Titan Bru']);
+    // Nothing is pending, but the URL has not reached 'Titan Bru' yet: a
+    // late render of the earlier value (or the pre-typing '') must not
+    // revert the box.
+    expect(sync.fromUrl('Titan Br')).toBeNull();
+    expect(sync.fromUrl('')).toBeNull();
+    expect(sync.fromUrl('Titan Bru')).toBe('Titan Bru');
+    // The URL caught up: a later change (back/forward) wins again.
+    expect(sync.fromUrl('Titan Br')).toBe('Titan Br');
+  });
+
+  it('keeps typed text when the awaited URL lands while a newer commit is due', () => {
+    const { sync } = harness();
+    sync.type('Ti');
+    vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS);
+    sync.type('Tit');
+    expect(sync.fromUrl('Ti')).toBeNull();
+  });
+
+  it('a commit of the value the URL already holds does not block a later URL change', () => {
+    vi.useFakeTimers();
+    const sync = createSearchSync(() => {}, SEARCH_DEBOUNCE_MS, 'Vale');
+    sync.type('Val');
+    sync.type('Vale');
+    vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS);
+    // setSearchParams with the same q changes nothing, so no URL value
+    // 'Vale' arrives; back/forward to 'Ash' must still reach the box.
+    expect(sync.fromUrl('Ash')).toBe('Ash');
+  });
+
+  it('the table copies ?q= into the box through fromUrl, and seeds it with the URL value', () => {
+    const src = tableCode();
+    expect(src).toMatch(/useEffect\(\(\) => \{\s*const v = searchSync\.fromUrl\(search\);\s*if \(v !== null\) setSearchText\(v\);\s*\}, \[search, searchSync\]\)/);
+    expect(src).toMatch(/useState\(\(\) => createSearchSync\([\s\S]*?,\s*search,?\s*\)\)/);
   });
 
   it('cancel drops a pending commit (unmount)', () => {
@@ -462,7 +513,7 @@ describe('search box: debounced URL sync', () => {
   });
 
   it('the table binds its Search input to the local text, not to the URL param', () => {
-    const src = readFileSync(fileURLToPath(new URL('../AudioSlotTable.jsx', import.meta.url)), 'utf8');
+    const src = tableCode();
     const input = /Search\s*<input([\s\S]*?)\/>/.exec(src);
     expect(input).not.toBeNull();
     expect(input[1]).not.toMatch(/value=\{search\}/);
@@ -497,9 +548,10 @@ describe('singleFlight (Retry these N)', () => {
   });
 
   it('the table routes Retry these N through it', () => {
-    const src = readFileSync(fileURLToPath(new URL('../AudioSlotTable.jsx', import.meta.url)), 'utf8');
-    expect(src).not.toMatch(/onClick=\{\(\) => retry\.mutate\(/);
-    expect(src).toMatch(/singleFlight\(/);
+    const src = tableCode();
+    expect(src).not.toMatch(/retry\.mutate\(/);
+    expect(src).toMatch(/const \[retryOnce\] = useState\(\(\) => singleFlight\(/);
+    expect(src).toMatch(/onClick=\{\(\) => retryOnce\(g\.ids\)\}/);
   });
 });
 
@@ -561,5 +613,42 @@ describe('per-subject slots (SOMET-605)', () => {
       { id: 2, subject_kind: 'creature', subject_key: 'Ignis', slot: 'presence', status: 'failed' },
     ];
     expect(jobsForKnownSubjects(jobs, [creatureGroup]).map((j) => j.id)).toEqual([2]);
+  });
+});
+
+describe('table wiring (rework 2 gates)', () => {
+  it('Queue passes the Variants value into queueItems', () => {
+    const src = tableCode();
+    const call = /queueItems\(\s*selected,\s*rowsById,\s*\{([\s\S]*?)\}\s*\)/.exec(src);
+    expect(call).not.toBeNull();
+    expect(call[1]).toMatch(/\bvariants\s*:\s*variantsNow\b/);
+    expect(src).toMatch(/const variantsNow = parseVariants\(variantsText\)/);
+  });
+
+  it('every filtersFromParams call passes the registry kinds', () => {
+    const src = tableCode();
+    const calls = [...src.matchAll(/filtersFromParams\(([^()]*)\)/g)].map((m) => m[1]);
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+    for (const args of calls) expect(args).toMatch(/,\s*kindKeys\s*$/);
+  });
+
+  it('the Variants input shows its raw text and only restores it on blur', () => {
+    const src = tableCode();
+    const input = /Variants \(sfx\)\s*<input([\s\S]*?)\/>/.exec(src);
+    expect(input).not.toBeNull();
+    expect(input[1]).toMatch(/value=\{variantsText\}/);
+    expect(input[1]).toMatch(/setVariantsText\(e\.target\.value\)/);
+    expect(input[1]).toMatch(/onBlur=\{\(\) => setVariantsText\(String\(variants\)\)\}/);
+  });
+});
+
+describe('parseVariants', () => {
+  it('accepts 1..MAX and rejects the rest, including the empty text mid-edit', () => {
+    expect(parseVariants('1')).toBe(1);
+    expect(parseVariants(' 4 ')).toBe(4);
+    expect(parseVariants(String(MAX_SFX_VARIANTS))).toBe(MAX_SFX_VARIANTS);
+    for (const bad of ['', '0', '6', '35', '2.5', '-1', 'x', '1e0', null, undefined]) {
+      expect(parseVariants(bad)).toBeNull();
+    }
   });
 });

@@ -22,7 +22,7 @@ import {
   PAGE_SIZE, pageCount, clampPage, toggle, selectPage, deselectPage, isPageFullySelected,
   selectAllMatching, selectionOutsideFilter, queueItems, enqueueSummary, failedByCause, soundText,
   jobsForKnownSubjects, uploadOnlyCount, slotId,
-  DEFAULT_SFX_VARIANTS, MAX_SFX_VARIANTS, createSearchSync, singleFlight,
+  DEFAULT_SFX_VARIANTS, MAX_SFX_VARIANTS, createSearchSync, singleFlight, parseVariants,
 } from './audioSelection.js';
 import SubjectSounds from './SubjectSounds.jsx';
 
@@ -168,7 +168,9 @@ function AudioSlotTable({
   const [searchText, setSearchText] = useState(search);
   const setFilterRef = useRef(setFilter);
   setFilterRef.current = setFilter;
-  const [searchSync] = useState(() => createSearchSync((v) => setFilterRef.current({ search: v })));
+  const [searchSync] = useState(() => createSearchSync(
+    (v) => setFilterRef.current({ search: v }), undefined, search,
+  ));
   useEffect(() => {
     const v = searchSync.fromUrl(search);
     if (v !== null) setSearchText(v);
@@ -179,6 +181,9 @@ function AudioSlotTable({
   const [subject, setSubject] = useState(null);
   const [style, setStyle] = useState('');
   const [engine, setEngine] = useState('realistic');
+  // The Variants box keeps its raw text so it can be cleared and retyped;
+  // `variants` is the last valid count, which a blur restores the box to.
+  const [variantsText, setVariantsText] = useState(String(DEFAULT_SFX_VARIANTS));
   const [variants, setVariants] = useState(DEFAULT_SFX_VARIANTS);
   // Plan 2026-10-03: off by default -- a forced prompt replaces even a
   // hand-written one (the old version stays in the slot's history).
@@ -233,8 +238,14 @@ function AudioSlotTable({
   );
 
   const onQueue = async () => {
+    const variantsNow = parseVariants(variantsText);
+    if (variantsNow === null) {
+      setNotice(null);
+      setFailure(`Variants must be a whole number from 1 to ${MAX_SFX_VARIANTS}.`);
+      return;
+    }
     const { items, skipped } = queueItems(selected, rowsById, {
-      style, engine, forcePrompt, variants,
+      style, engine, forcePrompt, variants: variantsNow,
     });
     setFailure(null);
     if (items.length === 0) {
@@ -323,11 +334,13 @@ function AudioSlotTable({
             type="number"
             min={1}
             max={MAX_SFX_VARIANTS}
-            value={variants}
+            value={variantsText}
             onChange={(e) => {
-              const n = Number(e.target.value);
-              if (Number.isInteger(n) && n >= 1 && n <= MAX_SFX_VARIANTS) setVariants(n);
+              setVariantsText(e.target.value);
+              const n = parseVariants(e.target.value);
+              if (n !== null) setVariants(n);
             }}
+            onBlur={() => setVariantsText(String(variants))}
           />
         </VariantsField>
         <CheckLabel title="Write a new prompt for every queued slot, even one that already has a prompt (hand-written included). The old prompt stays in the slot's history.">
