@@ -160,7 +160,10 @@ class WorldBossManager {
     // Injectable so unit tests need no database.
     this.loadCatalog = loadCatalog || (pool ? () => loadWorldBossCatalog(pool) : null);
     this.catalog = { bosses: [], minionsByElement: new Map() };
-    this._warnedEmptyCatalog = false;
+    // Why the last skipped rotation was skipped, so each cause is logged once
+    // and a failed load is never reported as an empty catalog.
+    this._catalogLoadError = null;
+    this._skipLoggedCause = null;
   }
 
   // Never throws: a failed load keeps the previous catalog (the tick loop must
@@ -171,9 +174,11 @@ class WorldBossManager {
       const next = await this.loadCatalog();
       if (next && Array.isArray(next.bosses)) {
         this.catalog = { bosses: next.bosses, minionsByElement: next.minionsByElement || new Map() };
-        if (next.bosses.length > 0) this._warnedEmptyCatalog = false;
+        this._catalogLoadError = null;
+        if (next.bosses.length > 0) this._skipLoggedCause = null;
       }
     } catch (err) {
+      this._catalogLoadError = (err && err.message) || String(err);
       console.error('[world boss] catalog load failed; keeping the previous catalog:', err);
     }
     return this.catalog;
@@ -183,20 +188,34 @@ class WorldBossManager {
     if (this.loadCatalog) this.refreshCatalog();
   }
 
-  // No world-tier rows: stay idle, try again next interval, say so once.
+  // No boss to spawn: stay idle, try again next interval, say why once per
+  // cause. A failed load and a genuinely empty catalog are different faults
+  // with different fixes, so they are logged as such.
   _skipRotation(now) {
     this.state = 'idle';
     this.currentBoss = null;
     this.nextSpawnTime = now + this.bossIntervalMs;
-    if (!this._warnedEmptyCatalog) {
-      console.warn("[world boss] no entity_types rows with boss_tier = 'world'; rotation skipped");
-      this._warnedEmptyCatalog = true;
+    const cause = this._catalogLoadError
+      ? `[world boss] the boss catalog failed to load (${this._catalogLoadError}); rotation skipped`
+      : "[world boss] no entity_types rows with boss_tier = 'world'; rotation skipped";
+    if (this._skipLoggedCause !== cause) {
+      console.warn(cause);
+      this._skipLoggedCause = cause;
     }
     this._refreshInBackground();
   }
 
-  // Debug/test-panel spawn. Returns false (and stays idle) when the catalog is empty.
+  // A debug caller's boss name must be one the catalog holds; null means
+  // "any boss" and is always acceptable.
+  _knowsBoss(bossName) {
+    return bossName == null || this.catalog.bosses.some((b) => b.name === bossName);
+  }
+
+  // Debug/test-panel spawn. Returns false (and changes nothing) for a boss
+  // name the catalog does not hold; returns false (and stays idle) when the
+  // catalog is empty.
   forceSpawn(now, worlds, { bossName = null, preferredWorldId = null } = {}, broadcastFn = null) {
+    if (!this._knowsBoss(bossName)) return false;
     if (this.state === 'active') this._despawnBoss(worlds, null, 'replaced');
     this.currentBoss = null;
     if (!this._planNextBoss(worlds, preferredWorldId, bossName)) {
@@ -210,6 +229,7 @@ class WorldBossManager {
   }
 
   forceWarning(now, worlds, { bossName = null, seconds = 120 } = {}, broadcastFn = null) {
+    if (!this._knowsBoss(bossName)) return false;
     if (this.state === 'active') this._despawnBoss(worlds, null, 'replaced');
     this.state = 'idle';
     this.currentBoss = null;

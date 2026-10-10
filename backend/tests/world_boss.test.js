@@ -181,3 +181,39 @@ test('nothing references the deleted WORLD_BOSS_CATALOG constant', () => {
   const src = fs.readFileSync(path.join(__dirname, '../src/authority/server.js'), 'utf8');
   assert.doesNotMatch(src, /WORLD_BOSS_CATALOG/);
 });
+
+// Minor (b): the debug panel names a boss; a name the catalog does not hold
+// must fail loudly (server.js sends 'no world boss in the catalog'), not
+// spawn a random boss in its place.
+test('forceSpawn / forceWarning refuse an unknown boss name instead of picking a random one', async () => {
+  const m = await managerWith(catalogOf([bossRow()]));
+  const entry = worldEntry();
+  const worlds = new Map([['w1', entry]]);
+  const frames = [];
+  assert.equal(m.forceSpawn(Date.now(), worlds, { bossName: 'zzNo Such Boss' }, (f) => frames.push(f)), false);
+  assert.equal(m.state, 'idle');
+  assert.equal(m.currentBoss, null);
+  assert.equal(entry.world.creatures.count(), 0, 'nothing spawned');
+  assert.equal(m.forceWarning(Date.now(), worlds, { bossName: 'zzNo Such Boss' }, (f) => frames.push(f)), false);
+  assert.equal(m.state, 'idle');
+  assert.equal(m.currentBoss, null);
+  assert.deepEqual(frames, []);
+  // The known name still works.
+  assert.equal(m.forceSpawn(Date.now(), worlds, { bossName: 'zzMagma Boss' }, () => {}), true);
+});
+
+// Minor (c): a failed load is not an empty catalog; the skip log names the
+// real cause.
+test('a rotation skipped because the catalog failed to load says so, not "no boss rows"', async (t) => {
+  const warns = t.mock.method(console, 'warn', () => {});
+  t.mock.method(console, 'error', () => {});
+  const m = await managerWith(async () => { throw new Error('db down'); });
+  const worlds = new Map([['w1', worldEntry()]]);
+  const now = Date.now();
+  m.nextSpawnTime = now + 1000;
+  m.tick(now, worlds, () => {});
+  assert.equal(m.state, 'idle');
+  const lines = warns.mock.calls.map((c) => String(c.arguments[0]));
+  assert.equal(lines.filter((l) => /catalog failed to load/.test(l) && /db down/.test(l)).length, 1, lines.join('\n'));
+  assert.equal(lines.filter((l) => /boss_tier = 'world'/.test(l)).length, 0, 'not misreported as an empty catalog');
+});
