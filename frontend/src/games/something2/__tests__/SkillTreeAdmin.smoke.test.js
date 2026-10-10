@@ -64,4 +64,37 @@ describe('SkillTreeAdmin', () => {
     expect(console_).toMatch(/useSearchParams/);
     expect(console_).toMatch(/filtersFromParams\(/);
   });
+
+  it('passes the deep link\'s exact-key flag to every applyFilters call', () => {
+    // filtersFromParams returns `exact` for a key= link; a call site that
+    // drops it falls back to the substring search (q=Mage -> 8 rows).
+    const calls = console_.match(/applyFilters\(subjects,\s*\{[^}]*\}/g) || [];
+    expect(calls.length).toBeGreaterThan(0);
+    for (const c of calls) expect(c).toMatch(/\bexact\b/);
+  });
+
+  // SOMET-571 rework. Capturing the pointer on pointerdown made Chrome
+  // retarget pointerup AND click to the <svg>, so no node's onClick ever ran:
+  // a plain click on the tree navigated nowhere. Vitest has no DOM here, so
+  // the wiring is pinned in source; the decision itself (capture on the move
+  // that starts a drag, once) is unit-tested as dragMove's `capture`.
+  it('never captures the pointer on press, only once dragMove says a drag began', () => {
+    const body = (name) => {
+      const m = admin.match(new RegExp(`const ${name} = \\(e\\) => \\{([\\s\\S]*?)\\n  \\};`));
+      expect(m, `${name} handler`).not.toBeNull();
+      return m[1];
+    };
+    expect(body('onPointerDown')).not.toMatch(/setPointerCapture/);
+    const move = body('onPointerMove');
+    expect(move).toMatch(/\bcapture\b[^;]*=\s*dragMove\(|\{[^}]*\bcapture\b[^}]*\}\s*=\s*dragMove\(/);
+    expect(move).toMatch(/if\s*\(capture\)[^;]*setPointerCapture\(e\.pointerId\)/);
+    // And nowhere else.
+    expect(admin.match(/setPointerCapture\(/g)).toHaveLength(1);
+  });
+
+  it('says so when missing-only has nothing to show, instead of dimming every node', () => {
+    // Validation: with nothing missing, missing-only dimmed all 1852 nodes to
+    // 0.15 with no message, which reads as a broken tree.
+    expect(admin).toMatch(/treeMissingOnly\s*&&\s*labelCoverage\.missing\s*===\s*0/);
+  });
 });

@@ -25,7 +25,7 @@ import { SKILLS_BY_CLASS } from './src/js/core/skillsData.js';
 import { SECTOR_HUES, nodeRadius, grantLine } from './src/js/systems/passiveTreePanel.js';
 import {
   indexArt, artFor, artCoverage, distinctLabels, onlyMissing,
-  treeBounds, zoomViewBox, panViewBox, artConsoleLink, dragStart, dragMove, dragEnd, dragClick,
+  treeBounds, zoomViewBox, panViewBox, clientToWorld, artConsoleLink, dragStart, dragMove, dragEnd, dragClick,
 } from './skillTreeView.js';
 import AdminLoading from './AdminLoading.jsx';
 
@@ -117,6 +117,7 @@ const GAME_TREE_BG = 'rgba(10, 8, 6, 0.98)';
 const GAME_EDGE = '#3a3a4e';
 const GAME_NODE_FILL = 'rgba(30, 30, 45, 0.9)';
 const GAME_EMOJI = '#e5e7eb';
+const GAME_MISSING = '#f59e0b';
 const IconBox = styled.div`
   flex: 0 0 auto; width: ${SKILL_ICON_PX}px; height: ${SKILL_ICON_PX}px;
   background: ${GAME_ICON_BG}; border: 1.5px solid var(--icon-border, #a855f7);
@@ -154,48 +155,48 @@ function TreeGraph({ nodes, edges, art, dimLabels, onHover, onPick }) {
     const rect = el.getBoundingClientRect();
     return Math.max(view.w / rect.width, view.h / rect.height);
   };
-  const toWorld = (clientX, clientY) => {
-    const el = svgRef.current;
-    const rect = el.getBoundingClientRect();
-    const upp = unitsPerPx();
-    // With "meet", the box is centred in the element on the slack axis.
-    const cx = view.x + view.w / 2;
-    const cy = view.y + view.h / 2;
-    return {
-      x: cx + (clientX - (rect.left + rect.width / 2)) * upp,
-      y: cy + (clientY - (rect.top + rect.height / 2)) * upp,
-    };
-  };
 
   // React registers `wheel` passively, so preventDefault there is ignored and
   // the page scrolls under the cursor. A native non-passive listener is the
   // only way to zoom instead.
+  //
+  // The focus point is computed INSIDE the updater, from the box being zoomed.
+  // Computed from the last-rendered box instead, several wheel events landing
+  // before a render each used a stale box, and the point under the cursor
+  // drifted (~7 px over 12 steps, SOMET-571 validation).
   useEffect(() => {
     const el = frameRef.current;
     if (!el) return undefined;
     const onWheel = (e) => {
       e.preventDefault();
-      const focus = toWorld(e.clientX, e.clientY);
+      const rect = svgRef.current.getBoundingClientRect();
       const factor = e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
-      setBox((b) => zoomViewBox(b || bounds, factor, focus.x, focus.y));
+      const { clientX, clientY } = e;
+      setBox((b) => {
+        const from = b || bounds;
+        const focus = clientToWorld(from, rect, clientX, clientY);
+        return zoomViewBox(from, factor, focus.x, focus.y);
+      });
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-    // No dependency list on purpose: toWorld reads `view` through its closure,
-    // and re-binding on every render is what keeps the focus point correct.
-  });
+  }, [bounds]);
 
   // The press/move/release/click sequence is the drag gate in skillTreeView.js;
   // this only feeds it events. In particular pointerup does NOT forget the
   // press -- the click that follows a pan needs to know it was a pan.
+  //
+  // The pointer is captured only once the press has become a drag (so a pan
+  // that leaves the svg keeps panning). Capturing on pointerdown made Chrome
+  // retarget pointerup and click to the svg, and no node's onClick ever ran.
   const onPointerDown = (e) => {
     drag.current = dragStart(e.clientX, e.clientY);
-    e.currentTarget.setPointerCapture(e.pointerId);
   };
   const onPointerMove = (e) => {
-    const { state, dx, dy } = dragMove(drag.current, e.clientX, e.clientY);
+    const { state, dx, dy, capture } = dragMove(drag.current, e.clientX, e.clientY);
     drag.current = state;
     if (!state || !state.pressed) return;
+    if (capture) e.currentTarget.setPointerCapture(e.pointerId);
     const upp = unitsPerPx();
     setBox((b) => panViewBox(b || bounds, dx, dy, upp));
   };
@@ -269,6 +270,15 @@ function TreeGraph({ nodes, edges, art, dimLabels, onHover, onPick }) {
                 r={r} fill="none" stroke={hue} strokeWidth={a ? 2 : 1.5}
                 strokeDasharray={a ? undefined : `${Math.max(2, r / 2)} ${Math.max(2, r / 2)}`}
               />
+              {/* Missing art also gets a ring in SCREEN pixels: at whole-tree
+                  zoom a world-unit dashed stroke is sub-pixel and the gaps
+                  stopped reading at a glance. */}
+              {!a && (
+                <circle
+                  r={r} fill="none" stroke={GAME_MISSING} strokeWidth={2}
+                  vectorEffect="non-scaling-stroke"
+                />
+              )}
             </g>
           );
         })}
@@ -344,6 +354,9 @@ export default function SkillTreeAdmin() {
     () => new Set(onlyMissing(art, 'passive_label', labels, (l) => l)),
     [art, labels],
   );
+  // Missing-only with nothing missing would dim every node and say nothing,
+  // which reads as a broken tree. Say so, and leave the tree as it is.
+  const treeNothingMissing = treeMissingOnly && labelCoverage.missing === 0;
 
   const classSkills = SKILLS_BY_CLASS[cls] || [];
   const skillCoverage = artCoverage(art, 'skill', classSkills.map((s) => s.id));
@@ -384,9 +397,13 @@ export default function SkillTreeAdmin() {
             {Object.entries(SECTOR_HUES).map(([sector, hue]) => (
               <span key={sector}><Swatch style={{ background: hue }} />{sector}</span>
             ))}
+            <span><Swatch style={{ border: `2px solid ${GAME_MISSING}` }} />no art</span>
           </Legend>
         </SectionHead>
         {treeError && <Err role="alert">{treeError.message}</Err>}
+        {treeNothingMissing && !isLoadingTree && !isLoadingSubjects && (
+          <Hint>Every passive label has art — nothing is missing.</Hint>
+        )}
         {isLoadingTree ? (
           <AdminLoading label="Loading passive tree…" inline size={16} />
         ) : (
@@ -395,7 +412,7 @@ export default function SkillTreeAdmin() {
               nodes={nodes}
               edges={edges}
               art={art}
-              dimLabels={treeMissingOnly ? missingLabels : null}
+              dimLabels={treeMissingOnly && !treeNothingMissing ? missingLabels : null}
               onHover={setHover}
               onPick={openLabel}
             />

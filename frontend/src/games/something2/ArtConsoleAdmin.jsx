@@ -460,7 +460,7 @@ function ArtConsoleAdmin() {
   const clearGroups = useClearArtGroups();
   const requeueFailures = useRequeueFailures();
 
-  // SOMET-571. A deep link from the Skill Tree tab (`?kind=&art=&q=`) seeds
+  // SOMET-571. A deep link from the Skill Tree tab (`?kind=&art=&key=`) seeds
   // the filters; with no params these are the console's own defaults, art =
   // missing being the resume filter. Read once at mount: the URL is a way IN,
   // and the controls below own the state from then on.
@@ -469,6 +469,9 @@ function ArtConsoleAdmin() {
   const [kind, setKind] = useState(initial.kind);
   const [art, setArt] = useState(initial.art);
   const [search, setSearch] = useState(initial.search);
+  // A `key=` deep link matches that one subject exactly; typing in the search
+  // box returns to the ordinary substring search.
+  const [exact, setExact] = useState(initial.exact);
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState(new Set());
   const [backend, setBackend] = useState('connector');
@@ -555,7 +558,7 @@ function ArtConsoleAdmin() {
 
   const frozenOrder = useMemo(
     () => (running && sort.by === 'updated'
-      ? sortSubjects(applyFilters(subjects, { kind, art, search }), sort).map(subjectId)
+      ? sortSubjects(applyFilters(subjects, { kind, art, search, exact }), sort).map(subjectId)
       : null),
     // `subjects` is deliberately absent: re-capturing whenever a generation
     // lands would defeat the freeze this exists to provide. The closure reads
@@ -565,12 +568,12 @@ function ArtConsoleAdmin() {
   );
 
   const matching = useMemo(() => {
-    const filtered = applyFilters(subjects, { kind, art, search });
+    const filtered = applyFilters(subjects, { kind, art, search, exact });
     if (sort.by !== 'updated') return sortSubjects(filtered, sort);
     // Hold the captured order while a batch runs; sort live otherwise.
     if (running && frozenOrder) return freezeOrder(filtered, frozenOrder);
     return sortSubjects(filtered, sort);
-  }, [subjects, kind, art, search, sort, running, frozenOrder]);
+  }, [subjects, kind, art, search, exact, sort, running, frozenOrder]);
 
   // Clicking the active column flips direction; a new column starts newest-first
   // for dates and A-Z for names, which is what each is usually wanted for.
@@ -687,7 +690,7 @@ function ArtConsoleAdmin() {
         </Field>
         <Field>
           Search
-          <input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+          <input value={search} onChange={(e) => { setSearch(e.target.value); setExact(false); setPage(1); }}
             placeholder="name or key" />
         </Field>
         <Field>

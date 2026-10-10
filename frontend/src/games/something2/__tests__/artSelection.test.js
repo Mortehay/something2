@@ -173,6 +173,10 @@ describe('filters', () => {
   it('kind and search narrow further, and combine with the art filter', () => {
     expect(applyFilters(all, { kind: 'item' }).length).toBe(2);
     expect(applyFilters(all, { search: 'SWO' }).map((s) => s.key)).toEqual(['sword']);
+    // exact: the key itself, case-sensitive, and the name is not searched.
+    expect(applyFilters([...all, { kind: 'item', key: 'swordfish', has_art: true }], { search: 'sword', exact: true })
+      .map((s) => s.key)).toEqual(['sword']);
+    expect(applyFilters(all, { search: 'SWORD', exact: true })).toEqual([]);
     expect(applyFilters(all, { kind: 'item', art: 'missing' }).map((s) => s.key))
       .toEqual(['shield']);
   });
@@ -297,12 +301,18 @@ describe('filtersFromParams', () => {
   // ALREADY filtered to it, art filter widened past the resume default.
   it('seeds kind, art and search from the URL', () => {
     expect(filtersFromParams(new URLSearchParams('kind=skill&art=all&q=war_whirlwind')))
-      .toEqual({ kind: 'skill', art: 'all', search: 'war_whirlwind' });
+      .toEqual({ kind: 'skill', art: 'all', search: 'war_whirlwind', exact: false });
+  });
+
+  it('seeds an EXACT key match from key=, which wins over q=', () => {
+    // SOMET-571 rework: q is a substring search, so q=Mage opened 8 rows.
+    expect(filtersFromParams(new URLSearchParams('kind=passive_label&art=all&key=Mage&q=x')))
+      .toEqual({ kind: 'passive_label', art: 'all', search: 'Mage', exact: true });
   });
 
   it('keeps the console defaults when the URL says nothing', () => {
     expect(filtersFromParams(new URLSearchParams('')))
-      .toEqual({ kind: 'all', art: 'missing', search: '' });
+      .toEqual({ kind: 'all', art: 'missing', search: '', exact: false });
   });
 
   it('ignores an art value the console has no filter for', () => {

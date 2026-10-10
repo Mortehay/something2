@@ -175,23 +175,32 @@ export const ART_FILTERS = Object.freeze(['all', 'missing', 'has', 'failed']);
 //
 // `kind` is not validated here: the kinds come from the server, and the
 // console's <select> simply shows no such option for an unknown one.
+//
+// `key=` names ONE subject and is matched exactly (`exact: true`); `q=` is
+// the search box's substring match. The Skill Tree tab links with key=,
+// because q=Mage also matches Afterimage, Pyromancy and five more labels.
 export function filtersFromParams(params) {
   const art = params.get('art');
+  const key = params.get('key');
   return {
     kind: params.get('kind') || 'all',
     art: ART_FILTERS.includes(art) ? art : 'missing',
-    search: params.get('q') || '',
+    search: key || params.get('q') || '',
+    exact: Boolean(key),
   };
 }
 
-export function applyFilters(subjects, { kind = 'all', art = 'all', search = '' } = {}) {
+// `exact`: `search` is a subject key, compared as-is (no case folding, name
+// not searched). Otherwise a case-insensitive substring of key and name.
+export function applyFilters(subjects, { kind = 'all', art = 'all', search = '', exact = false } = {}) {
   const q = search.trim().toLowerCase();
   return subjects.filter((s) => {
     if (kind !== 'all' && s.kind !== kind) return false;
     if (art === 'missing' && s.has_art) return false;
     if (art === 'has' && !s.has_art) return false;
     if (art === 'failed' && s.job_state !== 'failed') return false;
-    if (q && !`${s.key} ${s.name || ''}`.toLowerCase().includes(q)) return false;
+    if (exact && search && s.key !== search) return false;
+    if (!exact && q && !`${s.key} ${s.name || ''}`.toLowerCase().includes(q)) return false;
     return true;
   });
 }
