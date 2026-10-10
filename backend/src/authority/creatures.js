@@ -2545,6 +2545,11 @@ class CreatureSim {
       if (!known.has(c.id)) {
         row.type = c.type; row.color = c.color;
         row.maxHp = c.maxHp; row.level = c.level;
+        // SOMET-603: immutable too, and sent only when they say something, so
+        // an ordinary creature's intro is byte-identical to before.
+        if (c.bossTier) { row.bossTier = c.bossTier; row.name = c.name; }
+        if (c.element) row.element = c.element;
+        if (c.width !== CREATURE_SIZE) { row.width = c.width; row.height = c.height; }
       }
       out.push(row);
     }

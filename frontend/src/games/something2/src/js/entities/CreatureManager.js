@@ -82,11 +82,22 @@ export class CreatureManager {
         if (c.maxHp !== undefined) ex.maxHp = c.maxHp;
         if (c.level !== undefined) ex.level = c.level;
         if (c.color) ex.color = c.color;
+        // SOMET-603: boss fields are immutable intro fields too.
+        if (c.bossTier !== undefined) ex.bossTier = c.bossTier;
+        if (c.element !== undefined) ex.element = c.element;
+        if (c.name !== undefined) ex.name = c.name;
+        if (c.width !== undefined) { ex.width = c.width; ex.height = c.height; }
       } else {
         this.creatures.set(c.id, this._applyTypeVisuals({
           id: c.id, type: c.type,
           x: c.x, y: c.y, tx: c.x, ty: c.y,
-          width: CREATURE_SIZE, height: CREATURE_SIZE,
+          // SOMET-603: the server box when it differs from the default (a
+          // boss); drawEntity centres on x + width/2, so a wrong width puts
+          // the sprite off its hitbox.
+          width: c.width ?? CREATURE_SIZE, height: c.height ?? CREATURE_SIZE,
+          name: c.name ?? c.type,
+          bossTier: c.bossTier ?? null,
+          element: c.element ?? null,
           // A first sighting in the FAR zone carries position and the
           // immutable fields, but no facing/hp/mode -- it has never been close
           // enough to have any. The defaults keep it a well-formed creature
