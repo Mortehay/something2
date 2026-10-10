@@ -298,6 +298,11 @@ test('the chunk creature load SELECTs the columns CreatureSim maps into `mit`/le
     assert.ok(new RegExp(`\\b${col}\\b`).test(sel),
       `the world_creatures load must SELECT ${col} — without it Task 5's aura consumer sees no leaders`);
   }
+  // SOMET-604: the aura library. Missing any of these and every entity-bound
+  // aura is inert in the running game while every unit test stays green.
+  assert.match(sel, /et\.auras\s+AS\s+aura_names/i, 'the world_creatures load must SELECT et.auras AS aura_names');
+  assert.match(sel, /\bau\.aura_defs\b/, 'the world_creatures load must SELECT au.aura_defs');
+  assert.match(sel, /FROM aura_effects ae/, 'the aura lateral join must be part of THIS query');
   // gold_min/gold_max are checked as the exact aliased form: resolveBehavior
   // (shared with loadCreatureTypes, where e.gold_min/e.gold_max ALSO exist)
   // reads behavior_gold_min/behavior_gold_max unconditionally, so this query

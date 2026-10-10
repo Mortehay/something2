@@ -21,6 +21,7 @@ const { derivePlayerStats } = require('../services/playerStats.js');
 const { chunkOf, parseKey, neighborhoodKeys, CHUNK_KEY } = require('./coords');
 const { bucketPlayersByChunk, playersNear } = require('./playerAoi');
 const { loadCreatureTypes, ABILITIES_LATERAL, hydrateCreatureRow } = require('./creatures');
+const { AURAS_LATERAL } = require('../services/auraEffects.js');
 const { chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint, villageContaining } = require('../services/mapService');
 const { fetchLinks } = require('../services/mapLinks');
 const { fetchVillages } = require('../services/villages');
@@ -369,6 +370,12 @@ function drainAttacks(entry) {
 // lets a non-null base_damage beat the row's damage, so selecting it here
 // would replace the level-scaled wc.damage of every persisted instance with
 // the catalog value. boss_joined_select_db.test.js guards this.
+//
+// SOMET-604 (S3): `et.auras AS aura_names, au.aura_defs` + AURAS_LATERAL carry
+// the entity-bound aura library (aura_effects) to addCreatures ->
+// resolveInstanceAuras -> applyAuras. Missing them, every entity-bound aura is
+// inert in the live game while unit tests stay green. b.aura_* stay readable
+// here until Task 5 drops them; nothing in the tick reads them any more.
 const CREATURE_JOINED_SELECT = `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.facing, wc.home_x, wc.home_y,
                 wc.level, wc.damage, wc.blocks_portal_id,
                 wc.charmed_by_character_id, wc.charm_expires_at, ch.user_id AS charm_owner_user_id,
@@ -382,6 +389,7 @@ const CREATURE_JOINED_SELECT = `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.fac
                 -- creature would silently draw the kind default forever.
                 et.vfx,
                 et.boss_tier, et.element, et.hitbox_size,
+                et.auras AS aura_names, au.aura_defs,
                 b.name AS behavior_name, b.aggro_radius, b.leash_radius,
                 b.chase_style, b.preferred_range, b.move_speed_mult, b.damage_override,
                 b.aura_radius, b.aura_damage_mult, b.aura_defense_mult, b.aura_speed_mult,
@@ -390,7 +398,7 @@ const CREATURE_JOINED_SELECT = `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.fac
          FROM world_creatures wc
          LEFT JOIN entity_types et ON et.name = wc.type
          LEFT JOIN characters ch ON ch.id = wc.charmed_by_character_id
-         LEFT JOIN creature_behaviors b ON b.id = et.behavior_id${ABILITIES_LATERAL}`;
+         LEFT JOIN creature_behaviors b ON b.id = et.behavior_id${ABILITIES_LATERAL}${AURAS_LATERAL}`;
 
 // SOMET-473 -- persisted charm -> the in-memory shape addCreatures reads.
 //

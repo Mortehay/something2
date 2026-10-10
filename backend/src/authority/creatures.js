@@ -17,6 +17,7 @@ const {
   applyElementEffect, applyHitStatuses, activeEffectKeys, canAct, charmerOf,
 } = require('./effects');
 const { resolveBehavior, DEFAULT_BEHAVIOR, DEFAULT_ABILITY } = require('../services/creatureBehaviors');
+const { resolveInstanceAuras } = require('../services/auraEffects.js');
 const { shoveAwayFrom } = require('./knockback');
 
 const DIRS = [
@@ -1019,49 +1020,51 @@ function movedWith(map, c, vx, vy, dt, mult) {
   return resolveMove(map, { ...c, speed: c.speed * mult }, vx, vy, dt);
 }
 
-// Pack-leader auras (SOMET-253 Task 5). Recomputed from scratch every tick and
-// never persisted: a leader's death removes its buff on the next tick with no
-// cleanup path, so the failure mode where a buff outlives its source cannot
-// occur.
+// Ally-side auras (SOMET-253 Task 5, moved to the aura library by SOMET-604).
+// Recomputed from scratch every tick and never persisted: a source's death
+// removes its buff on the next tick with no cleanup path.
 //
-// NON-STACKING: the strongest single value wins per stat. Two overlapping
-// Champions must not compound into a 1.5625x damage pack -- that is the
-// difference between a hard fight and an unwinnable one.
+// STACKING (spec §3.2):
+//   - the SAME aura from several sources -> strongest value per stat (Math.max).
+//     Two overlapping Champions stay x1.25, never x1.5625.
+//   - DIFFERENT auras -> multiply.
+// A source never buffs itself. Enemy-side auras are S4 and are ignored here.
 //
-// A leader does not buff itself.
-//
-// O(leaders x creatures). Leaders are rare and MAX_WORLD_CREATURES bounds the
-// inner term, so this stays cheap without an index.
-function computeAuras(creatures) {
+// O(sources x creatures); radius is CHECK-bounded to 2000 (1714440680000).
+function applyAuras(creatures) {
   const buffs = new Map();
-  const leaders = [];
+  const sources = [];
   for (const c of creatures) {
-    const bh = c.behavior || DEFAULT_BEHAVIOR;
-    if (bh.auraRadius > 0 && c.hp > 0) leaders.push({ c, bh });
+    if (!(c.hp > 0) || !Array.isArray(c.auras)) continue;
+    for (const a of c.auras) if (a.targetSide === 'allies' && a.radius > 0) sources.push({ c, a });
   }
-  if (leaders.length === 0) return buffs;
-  for (const { c: leader, bh } of leaders) {
-    const lc = center(leader);
-    const r2 = bh.auraRadius * bh.auraRadius;
+  if (sources.length === 0) return buffs;
+  const perTarget = new Map(); // id -> Map(auraName -> {damageMult, defenseMult, speedMult})
+  for (const { c: src, a } of sources) {
+    const sc = center(src);
+    const r2 = a.radius * a.radius;
     for (const other of creatures) {
-      if (other === leader || other.hp <= 0) continue;
-      if (other.faction !== leader.faction) continue;
+      if (other === src || other.hp <= 0) continue;
+      if (other.faction !== src.faction) continue;
       const oc = center(other);
-      if (dist2(lc.x, lc.y, oc.x, oc.y) > r2) continue;
-      const cur = buffs.get(other.id);
+      if (dist2(sc.x, sc.y, oc.x, oc.y) > r2) continue;
+      let byName = perTarget.get(other.id);
+      if (!byName) { byName = new Map(); perTarget.set(other.id, byName); }
+      const cur = byName.get(a.name);
       if (!cur) {
-        buffs.set(other.id, {
-          damageMult: bh.auraDamageMult,
-          defenseMult: bh.auraDefenseMult,
-          speedMult: bh.auraSpeedMult,
-        });
+        byName.set(a.name, { damageMult: a.damageMult, defenseMult: a.defenseMult, speedMult: a.speedMult });
       } else {
-        // Math.max, never multiplication -- this line IS the non-stacking rule.
-        cur.damageMult = Math.max(cur.damageMult, bh.auraDamageMult);
-        cur.defenseMult = Math.max(cur.defenseMult, bh.auraDefenseMult);
-        cur.speedMult = Math.max(cur.speedMult, bh.auraSpeedMult);
+        // Math.max within one aura name -- this line IS the non-stacking rule.
+        cur.damageMult = Math.max(cur.damageMult, a.damageMult);
+        cur.defenseMult = Math.max(cur.defenseMult, a.defenseMult);
+        cur.speedMult = Math.max(cur.speedMult, a.speedMult);
       }
     }
+  }
+  for (const [id, byName] of perTarget) {
+    let d = 1; let f = 1; let s = 1;
+    for (const v of byName.values()) { d *= v.damageMult; f *= v.defenseMult; s *= v.speedMult; }
+    buffs.set(id, { damageMult: d, defenseMult: f, speedMult: s });
   }
   return buffs;
 }
@@ -1312,6 +1315,9 @@ class CreatureSim {
         // instance the same way `mit`, `level` and `damage` are: attached
         // once, never recomputed inside the tick. See resolveInstanceBehavior.
         behavior: resolveInstanceBehavior(c),
+        // SOMET-604: entity-bound auras (aura_effects via AURAS_LATERAL), resolved
+        // once like `behavior`. applyAuras reads ONLY this, never behavior.aura*.
+        auras: resolveInstanceAuras(c),
         // c.attackElement covers an already-shaped instance; c.attack_element
         // is the raw column name server.js's SELECT aliases it as (et.attack_element).
         attackElement: c.attackElement || c.attack_element || 'physical',
@@ -1424,7 +1430,7 @@ class CreatureSim {
     // a property of the field, and recomputing it inside the loop would let a
     // creature that moved earlier this tick buff differently than one that
     // has not moved yet.
-    const buffs = computeAuras(all);
+    const buffs = applyAuras(all);
     // Every creature gets a fresh `_buff` here, including one whose chunk is
     // outside the active set and will be skipped by the loop below --
     // otherwise it would keep a stale buff from whenever it was last active.
@@ -1443,7 +1449,7 @@ class CreatureSim {
       // every entry in `this.creatures` was populated by addCreatures, which
       // always stamps `behavior: resolveInstanceBehavior(c)`, and every
       // branch of resolveInstanceBehavior returns a real object, never a
-      // falsy value. Unlike computeAuras above (an exported function some
+      // falsy value. Unlike applyAuras above (an exported function some
       // tests call directly with hand-built fixtures that omit `.behavior`),
       // this loop only ever sees addCreatures-shaped entries, so the
       // fallback here could never fire.
@@ -2607,8 +2613,8 @@ module.exports = {
   // join text as loadCreatureTypes above, rather than a second copy that can
   // drift.
   ABILITIES_LATERAL,
-  // SOMET-253 Task 5: exported so authority_creature_auras.test.js can pin
-  // the non-mutation/non-stacking rules directly against the buff map,
+  // SOMET-253 Task 5 / SOMET-604: exported so authority_creature_auras.test.js
+  // can pin the non-mutation/stacking rules directly against the buff map,
   // without needing a full tick() to observe them.
-  computeAuras,
+  applyAuras,
 };

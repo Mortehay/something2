@@ -22,25 +22,26 @@ function activeKeys() {
   return keys;
 }
 
-// `leaders` of the population get the Champion behaviour (aura_radius 260),
-// the ONLY aura-carrying behaviour in the catalog and exactly what Slice B
-// promotes pack masters into.
+// `leaders` of the population are Beast Champions carrying the pack_leader
+// aura (radius 260), the ONLY aura bound in the catalog and exactly what
+// Slice B promotes pack masters into.
+//
+// SOMET-604 (S3): auras live on the ENTITY now. applyAuras reads only
+// `c.auras`, which addCreatures stamps via resolveInstanceAuras from the
+// loader row's `aura_names`/`aura_defs` (et.auras + AURAS_LATERAL in
+// server.js's CREATURE_JOINED_SELECT). The leader rows below carry exactly
+// that shape, with pack_leader's seeded values (1714440680000: radius 260,
+// damage 1.25, defense 1.2, speed 1.1). The behaviour half of the row (below)
+// is unchanged and still drives chase/attack cost.
 //
 // resolveInstanceBehavior(c) (src/authority/creatures.js) has three branches:
 // a pre-resolved `c.behavior` object, a `c.behavior_name`-bearing row (routed
 // through resolveBehavior in services/creatureBehaviors.js), or a
 // faction-based fallback. `behavior_name` alone only supplies the `name`
-// field -- resolveBehavior reads aura_radius/aura_damage_mult/
-// aura_defense_mult/aura_speed_mult as SEPARATE row columns (num(row.aura_radius,
-// DEFAULT_BEHAVIOR.auraRadius), etc.), not a lookup keyed off the name
-// string. So `behavior_name: 'Champion'` with no aura_* columns resolves
-// aura_radius to the DEFAULT_BEHAVIOR fallback of 0 -- a non-leader. The
-// leader rows below therefore also carry the real Champion aura_* values
-// (migration 1714440085000_behavior_auras.js: aura_radius 260, aura_damage_mult
-// 1.25, aura_defense_mult 1.2, aura_speed_mult 1.1) alongside the rest of the
-// real Champion catalog row (migration 1714440080000_creature_behaviors.js),
-// so this fixture exercises resolveBehavior the same way the real per-chunk
-// spawn loader's LEFT JOIN result does.
+// field, so the leader rows also carry the rest of the real Champion catalog
+// row (migration 1714440080000_creature_behaviors.js), exercising
+// resolveBehavior the same way the real per-chunk spawn loader's LEFT JOIN
+// result does.
 // CreatureSim's map interface (collision.js's resolveMove) needs isWalkable
 // and speedAt, not just chunkSize -- an all-open stub matches every other
 // CreatureSim fixture in this suite (e.g. authority_creature_auras.test.js's
@@ -67,20 +68,25 @@ function buildSim(n, leaders) {
         attack_kind: 'melee', attack_range: 65, attack_cooldown: 1.1,
         aggro_radius: 480, leash_radius: 900, chase_style: 'charge',
         preferred_range: 0, move_speed_mult: 1.05,
-        aura_radius: 260, aura_damage_mult: 1.25, aura_defense_mult: 1.2, aura_speed_mult: 1.1,
+        aura_names: ['pack_leader'],
+        aura_defs: [{ name: 'pack_leader', target_side: 'allies', radius: 260, damage_mult: 1.25,
+          defense_mult: 1.2, speed_mult: 1.1, dot_dps: 0, dot_element: 'physical', tick_ms: 1000 }],
       } : {}),
     });
   }
   sim.addCreatures(list);
 
   // ASSERT THE FIXTURE, do not trust it. addCreatures stamps
-  // `behavior: resolveInstanceBehavior(c)`, and if that function does not read
-  // the fields this fixture sets, every creature silently gets a non-aura
-  // behaviour -- the benchmark then measures the cheap, chunk-scoped half of
-  // the tick and reports a false all-clear, which is precisely the failure this
-  // task exists to prevent.
+  // `auras: resolveInstanceAuras(c)`, and if that does not read the fields
+  // this fixture sets, every creature silently carries no aura -- the
+  // benchmark then measures the cheap, chunk-scoped half of the tick and
+  // reports a false all-clear, which is precisely the failure this task exists
+  // to prevent. The check reads the SAME field applyAuras reads (`c.auras`,
+  // allies side, radius > 0); checking anything else (e.g. the pre-S3
+  // behavior.auraRadius) would stay green while applyAuras sees nothing.
   const actual = [...sim.creatures.values()]
-    .filter((c) => c.behavior && c.behavior.auraRadius > 0).length;
+    .filter((c) => Array.isArray(c.auras)
+      && c.auras.some((a) => a.targetSide === 'allies' && a.radius > 0)).length;
   if (actual !== leaders) {
     throw new Error(
       `fixture built ${actual} aura-carrying creatures, expected ${leaders} -- `
@@ -117,13 +123,13 @@ RUN('tick cost across population and leader count', () => {
   // count scales with world size), not to gate this one, and they are
   // deliberately left unasserted:
   //
-  //   - computeAuras is O(leaders x all) and unscoped by the chunk gate, so
+  //   - applyAuras is O(sources x all) and unscoped by the chunk gate, so
   //     its cost is dominated by leader count, not headcount -- 4500/50
   //     already spends most of the 8ms half-budget (~7-12ms observed,
   //     depending on machine load) and 4500/200 blows well past the WHOLE
   //     16ms frame budget (~26-41ms observed). Both numbers are real and
   //     load-bearing for Slice B: it must bound leader count or index
-  //     computeAuras spatially before every pack gets an aura-carrying
+  //     applyAuras spatially before every pack gets an aura-carrying
   //     master, or the tick blows its budget long before MAX_WORLD_CREATURES
   //     is reached.
   //   - Asserting on them here would make this benchmark flake on machine

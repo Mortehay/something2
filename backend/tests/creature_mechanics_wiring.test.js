@@ -1,6 +1,6 @@
 // SOMET-253 Task 10: the live-wiring sweep. Every mechanic landed by Tasks
 // 1-9 already has unit coverage for its own resolver (resolveBehavior,
-// resolveAbility) and its own tick-time consumer (computeAuras, selectAbility,
+// resolveAbility) and its own tick-time consumer (applyAuras, selectAbility,
 // applyKnockback) -- but nearly every one of those tests either hand-builds
 // `c.behavior` directly (case 1 of resolveInstanceBehavior in creatures.js,
 // which bypasses the resolver entirely) or feeds resolveBehavior/resolveAbility
@@ -52,29 +52,32 @@ function loaderCreatureRow(over = {}) {
     move_speed_mult: over.moveSpeedMult ?? 1, damage_override: over.damageOverride ?? null,
     aura_radius: over.auraRadius ?? 0, aura_damage_mult: over.auraDamageMult ?? 1,
     aura_defense_mult: over.auraDefenseMult ?? 1, aura_speed_mult: over.auraSpeedMult ?? 1,
+    // SOMET-604: entity-bound auras, exactly as `et.auras AS aura_names` and
+    // AURAS_LATERAL's json_agg (`au.aura_defs`, snake_case) return them.
+    aura_names: over.auraNames ?? null,
+    aura_defs: over.auraDefs ?? [],
     behavior_gold_min: over.behaviorGoldMin ?? 0, behavior_gold_max: over.behaviorGoldMax ?? 0,
     abilities,
   };
 }
 
 // =============================================================================
-// Mechanic 1: aura (creature_behaviors.aura_radius/aura_*_mult)
+// Mechanic 1: aura (entity_types.auras -> aura_effects, SOMET-604)
 // =============================================================================
 //
-// creature_aura_resolve.test.js already proves resolveBehavior maps the aura
-// columns; authority_creature_auras.test.js already proves computeAuras'
-// non-stacking/non-self/non-mutation rules from a hand-built `c.behavior`.
-// Neither proves a REAL loader row's aura_damage_mult ever reaches a live
-// creature's dealt damage. This does, end to end: row -> addCreatures ->
-// resolveInstanceBehavior -> resolveBehavior -> computeAuras -> tick's dmg
-// calc -> the player's hp.
-test('aura: a loader-shaped leader row buffs a same-faction follower\'s damage, by the ROW\'s own aura_damage_mult', () => {
+// authority_creature_auras.test.js proves applyAuras' stacking/non-self/
+// non-mutation rules from hand-built `auras` arrays. Neither proves a REAL
+// loader row's aura_defs ever reaches a live creature's dealt damage. This
+// does, end to end: row -> addCreatures -> resolveInstanceAuras ->
+// applyAuras -> tick's dmg calc -> the player's hp.
+test('aura: a loader-shaped leader row buffs a same-faction follower\'s damage, by the ROW\'s own aura_defs damage_mult', () => {
   const s = new CreatureSim(openMap(), noRedirect);
   s.addCreatures([
     loaderCreatureRow({
       id: 'leader', x: 100, y: 100, behaviorName: 'zzChampion', // centre (124,124)
       chaseStyle: 'hold', aggroRadius: 0, // never targets the player itself
-      auraRadius: 300, auraDamageMult: 1.4, auraDefenseMult: 1, auraSpeedMult: 1,
+      auraNames: ['zzPack'],
+      auraDefs: [{ name: 'zzPack', target_side: 'allies', radius: 300, damage_mult: 1.4, defense_mult: 1, speed_mult: 1 }],
     }),
     // 100px from the leader (inside the 300px aura, but NOT co-located with
     // it -- co-located would put the player at distance 0 from the LEADER
@@ -87,11 +90,11 @@ test('aura: a loader-shaped leader row buffs a same-faction follower\'s damage, 
   const player = { userId: 'u1', x: 192, y: 92, width: 64, height: 64, hp: 1000, maxHp: 1000 };
   s.tick(0.05, active, [player], 0);
   // 10 (follower's own row.damage) * 1 (ability.damage_mult) * 1.4 (the
-  // LEADER row's own aura_damage_mult) -- a literal from the fixture, not
+  // LEADER row's aura_defs damage_mult) -- a literal from the fixture, not
   // read back off any resolved object.
   assert.equal(player.hp, 1000 - 10 * 1.4,
-    'the follower\'s hit must be scaled by the leader ROW\'s aura_damage_mult (1.4), proving the column '
-    + 'survived resolveBehavior and reached computeAuras/tick from real loader-shaped input');
+    'the follower\'s hit must be scaled by the LEADER row\'s aura_defs damage_mult (1.4), proving it '
+    + 'survived resolveInstanceAuras and reached applyAuras/tick from real loader-shaped input');
 });
 
 // =============================================================================

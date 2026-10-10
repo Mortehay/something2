@@ -90,6 +90,18 @@ test('an already-resolved fixture array is copied, not shared', () => {
   assert.strictEqual(out[0].damageMult, 2);
 });
 
+// A parallel branch (S1) may store bare aura NAMES in an instance's `auras`
+// (entity_types.auras is a jsonb array of strings). Without a loader row
+// (aura_defs) there is nothing to resolve them against, so they must be inert:
+// skipped, never spread into a half-built def with radius undefined.
+test('string entries in an already-resolved auras array are ignored, not half-resolved', () => {
+  assert.deepStrictEqual(resolveInstanceAuras({ auras: ['pack_leader', 'war_drum'] }), []);
+  const mixed = resolveInstanceAuras({ auras: ['pack_leader',
+    { name: 'a', targetSide: 'allies', radius: 10, damageMult: 2, defenseMult: 1, speedMult: 1 }] });
+  assert.strictEqual(mixed.length, 1);
+  assert.strictEqual(mixed[0].name, 'a');
+});
+
 test('AURAS_LATERAL resolves names through the jsonb ? operator and orders by name', () => {
   assert.match(AURAS_LATERAL, /LEFT JOIN LATERAL/);
   assert.match(AURAS_LATERAL, /FROM aura_effects ae/);

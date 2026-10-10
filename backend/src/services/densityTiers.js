@@ -97,7 +97,7 @@ const DEFAULT_DENSITY = 'normal';
 //
 // SOMET-350 Task 5: raised 4000 -> 5000 on a measurement, not a guess.
 // CreatureSim.tick (authority/creatures.js) has a cheap, chunk-scoped
-// behaviour loop and an EXPENSIVE unscoped pass -- computeAuras, O(leaders x
+// behaviour loop and an EXPENSIVE unscoped pass -- applyAuras, O(sources x
 // all), running over the whole population every tick regardless of the
 // active chunk set. Leader count, not headcount, is what bends the curve, so
 // the population/leader sweep below deliberately varies leaders, using the
@@ -110,7 +110,7 @@ const DEFAULT_DENSITY = 'normal';
 //   4500 creatures /   6 leaders: 1.897 ms/tick
 //   4500 creatures /  50 leaders: 6.839 ms/tick
 //   4500 creatures / 200 leaders: 25.787 ms/tick
-// computeAuras is O(leaders x all) and runs over the WHOLE population every
+// applyAuras is O(sources x all) and runs over the WHOLE population every
 // tick, outside the chunk gate -- so the leader count, not the headcount, is
 // what bends this curve. Slice B (pack masters use the Champion behaviour,
 // the only one with aura_radius > 0) must budget against the last two rows:
