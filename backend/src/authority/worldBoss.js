@@ -517,7 +517,7 @@ class WorldBossManager {
             // evicted and reloaded, or removed out of band). Put it back at
             // its current hp; never announce it slain or pay out.
             console.warn(`[World Boss] ${this.currentBoss.name} (${this.bossCreatureId}) missing from its world; re-placing at ${this.currentBoss.currentHp} hp`);
-            this._placeBossCreature(entry, this.currentBoss.currentHp);
+            this._placeBossCreature(entry, this.currentBoss.currentHp, true);
           }
         }
       }
@@ -587,7 +587,7 @@ class WorldBossManager {
   // boss_tier/element/hitbox_size/behaviour/vfx (and S3's auras) arrive the
   // one shared way. No `damage` here: an explicit instance damage would beat
   // the row's base_damage (ruling P1).
-  _placeBossCreature(worldEntry, hp) {
+  _placeBossCreature(worldEntry, hp, quiet = false) {
     const sim = worldEntry && worldEntry.world && worldEntry.world.creatures;
     if (!sim || !sim.addCreatures || !this.currentBoss) return null;
     const bossCreature = hydrateCreatureRow(this.currentBoss.row, {
@@ -597,6 +597,8 @@ class WorldBossManager {
       level: WORLD_BOSS_LEVEL,
       hp,
     });
+    // SOMET-605: a lost-boss re-place must not replay the spawn sound.
+    if (quiet) bossCreature.quietSpawn = true;
     sim.addCreatures([bossCreature]);
     const placed = sim.get ? sim.get(this.bossCreatureId) : null;
     if (placed) {

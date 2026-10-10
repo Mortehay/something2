@@ -211,6 +211,27 @@ test('a boss missing from its loaded world is re-placed, never announced slain (
   assert.equal(c._playerDamage.get('user_1'), 5000, 'contribution survives the re-place');
 });
 
+// SOMET-605: the first spawn announces itself once; the lost-boss re-place stays quiet.
+test('first boss spawn emits one spawn sfx; a lost-boss re-place emits none (SOMET-605)', async (t) => {
+  t.mock.method(console, 'warn', () => {});
+  const m = await managerWith(catalogOf([bossRow()]));
+  m.pool = { query: async () => ({ rows: [] }) };
+  const entry = worldEntry();
+  const worlds = new Map([['w1', entry]]);
+  const now = Date.now();
+  m.forceSpawn(now, worlds, {}, () => {});
+  const sim = entry.world.creatures;
+  const spawns = () => sim.sfx.filter((e) => e.e === 'spawn');
+  assert.equal(spawns().length, 1, 'first spawn announces once');
+  assert.equal(spawns()[0].a, `c:${m.bossCreatureId}`);
+  sim.sfx = [];
+  sim.remove(m.bossCreatureId);
+  m.tick(now + 1000, worlds, () => {});
+  assert.ok(sim.get(m.bossCreatureId), 're-placed');
+  assert.equal(spawns().length, 0, 're-place is quiet');
+  assert.equal('quietSpawn' in sim.get(m.bossCreatureId), false);
+});
+
 // I3: the death used to be claimed only after the reward awaits, so a tick
 // landing mid-reward saw "boss missing" and paid out a second time.
 test('a real kill announces slain exactly once even if the tick runs mid-reward (SOMET-603)', async (t) => {

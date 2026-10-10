@@ -11,7 +11,7 @@ const {
 const { resolveEffectName } = require('./vfx.js');
 const { bodyLift } = require('./attackOrigin.js');
 const {
-  creatureUse, creatureHit, creatureHurt, creatureDeath, pushSfxEvent,
+  creatureUse, creatureHit, creatureHurt, creatureDeath, bossSfx, pushSfxEvent,
 } = require('./sfxEvents.js');
 const {
   applyElementEffect, applyHitStatuses, activeEffectKeys, canAct, charmerOf,
@@ -1465,6 +1465,12 @@ class CreatureSim {
         // has never attacked can attack on its first tick.
         _abilityCd: new Map(),
       });
+      // SOMET-605: a boss announces itself on arrival. quietSpawn is an input
+      // flag only (never stored), set by a re-place of a boss already in the fight.
+      const added = this.creatures.get(c.id);
+      if (added.bossTier && !c.quietSpawn) {
+        pushSfxEvent(this.sfx, bossSfx('spawn', added, added.x + added.width / 2, added.y + added.height / 2));
+      }
     }
   }
 
