@@ -2881,6 +2881,10 @@ class CreatureSim {
         if (c.bossTier) { row.bossTier = c.bossTier; row.name = c.name; }
         if (c.element) row.element = c.element;
         if (c.width !== CREATURE_SIZE) { row.width = c.width; row.height = c.height; }
+        // SOMET-606: aura NAMES, immutable for this instance (resolved at load).
+        // Sent once like bossTier; absent on a creature with none, so an
+        // ordinary intro stays byte-identical.
+        if (Array.isArray(c.auras) && c.auras.length > 0) row.auras = c.auras.map((a) => a.name);
       }
       out.push(row);
     }

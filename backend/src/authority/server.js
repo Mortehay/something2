@@ -3,7 +3,7 @@ const jwt = require('jsonwebtoken');
 const { WebSocketServer } = require('ws');
 const { currentUserForToken } = require('../auth/tokens.js');
 const { ServerMap } = require('./collision');
-const { World } = require('./world');
+const { World, selfAuraFields } = require('./world');
 const { loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, loadInventory, grantStartingLoadout, socketStone, unsocketStone, freeSlots } = require('./items');
 const { loadCatalogs, elementsForWire } = require('./catalogs');
 const { configureAttackOrigins } = require('./attackOrigin.js');
@@ -3396,6 +3396,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
           ? playersNear(playerBuckets, p.x, p.y, entry.row.chunk_size, playerRowById.get(p.userId) || null)
           : snap.players;
         const frame = { type: 'state', tick, ackSeq: p ? p.ackSeq : 0, players, projectiles: snap.projectiles };
+        // SOMET-606: the owner's debuffs + effective speed. Per socket, never on
+        // the shared rows; {} for a clear player, so nothing is added.
+        if (p) Object.assign(frame, selfAuraFields(p, entry.world.now));
         // SOMET-528. `waves` is copied ACROSS EXPLICITLY, and this line is the
         // third place a new snapshot field can be lost.
         //

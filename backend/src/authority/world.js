@@ -98,6 +98,23 @@ function auraDamageMult(p) {
   return (p._buff || NO_BUFF).damageMult;
 }
 
+// SOMET-606. The OWNER's aura state for its own `state` frame (server.js adds
+// it per socket). Never on the shared players[] rows: those go to every nearby
+// recipient by reference, and nobody but the owner has a use for them.
+// {} when clear, so a quiet frame costs no bytes and the client clears.
+function selfAuraFields(p, now) {
+  const out = {};
+  const b = p._buff;
+  if (b && Array.isArray(b.auras) && b.auras.length > 0) {
+    out.debuffs = b.auras.map((a) => (a.dotDps > 0
+      ? { n: a.name, d: a.damageMult, f: a.defenseMult, s: a.speedMult, dps: a.dotDps, el: a.dotElement }
+      : { n: a.name, d: a.damageMult, f: a.defenseMult, s: a.speedMult }));
+  }
+  const sm = playerSpeedMult(p, now);
+  if (sm !== 1) out.speedMult = sm;
+  return out;
+}
+
 // STR scales physical weapons, INT scales every other element. The split is
 // the weapon catalog's existing `element` column -- no new field, and it
 // gives the element system weight it currently lacks.
@@ -1757,5 +1774,5 @@ module.exports = {
   PLAYER_MAX_STAMINA, PLAYER_STAMINA_REGEN,
   weaponDamage, applyAttackCooldown, BASE_STATS,
   MAX_CREATURE_PROJECTILES,
-  playerSpeedMult, auraDamageMult,
+  playerSpeedMult, auraDamageMult, selfAuraFields,
 };
