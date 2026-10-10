@@ -224,54 +224,6 @@ async function release(db, ids) {
   )).rowCount;
 }
 
-// Claims up to `n` jobs of ONE drain group: the group (and provider pin) of
-// the first claimable job in DRAIN_ORDER. Only a PACKED group (sfx) takes
-// more than one -- music/ambience are one box call per job, so they stay one
-// job per claim whatever `n` is. Same provider_id only, because a batch is
-// one request to one box. Returned in id order.
-//
-// `first` takes its row FOR UPDATE SKIP LOCKED too, so a concurrent claimer
-// cannot pick the same head row; `pick` re-locks it in this same statement
-// (a transaction never blocks on its own lock).
-async function claimBatch(db, n) {
-  const limit = Number.isInteger(n) && n > 0 ? n : 1;
-  const r = await db.query(
-    `WITH first AS (
-       SELECT drain_group, provider_id FROM audio_jobs
-        WHERE state = 'queued' AND (not_before IS NULL OR not_before <= now())
-        ORDER BY array_position($1::text[], drain_group), id
-        FOR UPDATE SKIP LOCKED LIMIT 1
-     ), pick AS (
-       SELECT j.id FROM audio_jobs j, first f
-        WHERE j.state = 'queued' AND (j.not_before IS NULL OR j.not_before <= now())
-          AND j.drain_group = f.drain_group AND j.provider_id IS NOT DISTINCT FROM f.provider_id
-        ORDER BY j.id
-        LIMIT CASE WHEN (SELECT drain_group FROM first) = ANY($3::text[]) THEN $2::int ELSE 1 END
-        FOR UPDATE OF j SKIP LOCKED
-     )
-     UPDATE audio_jobs SET state = 'running', attempts = attempts + 1, claimed_at = now(), updated_at = now()
-      WHERE id IN (SELECT id FROM pick)
-      RETURNING *`,
-    [DRAIN_ORDER, limit, PACKED_GROUPS],
-  );
-  return r.rows.sort((a, b) => Number(a.id) - Number(b.id));
-}
-
-// Claimed jobs straight back to 'queued', attempt refunded, NO backoff. For
-// jobs that were never actually tried -- e.g. the rest of an sfx pack that
-// one unknown cue made the box refuse as a whole. fail(..., {refundAttempt})
-// is the busy-box variant: that one DOES back off, because the box said
-// "not now".
-async function release(db, ids) {
-  if (!ids.length) return 0;
-  return (await db.query(
-    `UPDATE audio_jobs SET state = 'queued', attempts = GREATEST(attempts - 1, 0), claimed_at = NULL,
-            not_before = NULL, updated_at = now()
-      WHERE id = ANY($1::bigint[]) AND state = 'running'`,
-    [ids],
-  )).rowCount;
-}
-
 async function complete(db, id, clipId) {
   await db.query(
     `UPDATE audio_jobs SET state = 'done', clip_id = $2, last_error = NULL, updated_at = now() WHERE id = $1`,
