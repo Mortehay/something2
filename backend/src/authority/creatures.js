@@ -1343,6 +1343,47 @@ function applyEnemyAuras(creatures, players) {
 }
 function __enemyAuraScratchGrowths() { return enemyScratchGrowths; }
 
+// A DoT cadence the aura_effects CHECK would accept, else 1000 -- a NaN or 0
+// tick_ms must not charge every tick (or never). Same bounds as AURA_LIMITS.
+function dotTickMs(t) {
+  return t >= 100 && t <= 5000 ? t : 1000;
+}
+
+// SOMET-606. Charges each enemy-aura DoT on its own per-name clock. Called
+// from tick() right after applyEnemyAuras stamped p._buff.
+//
+// THROUGH THE DAMAGE PATH (spec §4.2): applyDamageWithEffects with
+// effectiveMit(p), so defense (and the aura's own defense debuff, already on
+// p._buff), resistances, shock vulnerability, the min-1 floor and the
+// provocation stamp all apply exactly as for a bite. A kill is left at
+// hp <= 0 for World.resolveDeaths(), the ONE player-death path -- this
+// function never respawns or reports anyone.
+//
+// Different names ADD (each its own clock, element and cadence -- the entry
+// carries the values of the source that holds that name's max dps).
+//
+// NO BANKING: `_auraDotAt` stores the next DUE time per name. A name is due
+// when now >= nextAt, so the first charge lands on entry, time spent outside
+// accumulates nothing, and stepping out and back inside tick_ms re-charges
+// nothing.
+function chargeAuraDots(players, now) {
+  for (const p of players) {
+    const b = p._buff;
+    if (b === NO_BUFF || !b || !Array.isArray(b.auras) || !(p.hp > 0)) continue;
+    for (let k = 0; k < b.auras.length; k++) {
+      const a = b.auras[k];
+      if (!(a.dotDps > 0)) continue;
+      const at = p._auraDotAt;
+      const due = at ? at.get(a.name) : undefined;
+      if (due !== undefined && now < due) continue;
+      const tickMs = dotTickMs(a.tickMs);
+      (at || (p._auraDotAt = new Map())).set(a.name, now + tickMs);
+      applyDamageWithEffects(p, a.dotDps * tickMs / 1000, a.dotElement, effectiveMit(p), now, creatureKey(a.sourceId));
+      if (!(p.hp > 0)) break;
+    }
+  }
+}
+
 // The neutral buff every creature gets when no leader's aura reaches it.
 // Frozen and shared (never cloned per-creature) since it is only ever read,
 // never written -- `c._buff = buffs.get(c.id) || NO_BUFF` in tick() below.
@@ -1712,6 +1753,14 @@ class CreatureSim {
     // read from OUTSIDE this loop too: another creature's attack and a
     // projectile collision both need a target's defence buff.
     for (const c of all) c._buff = buffs.get(c.id) || NO_BUFF;
+    // SOMET-606 (S4): enemy-side auras over PLAYERS, same once-per-tick rule.
+    // EVERY player gets a fresh _buff (NO_BUFF when nothing reaches them) so a
+    // debuff can never outlive its source or the player's exit. p._buff is
+    // read by effectiveMit (every damage-taken site), world.js's speed and
+    // outgoing-damage reads, and the self frame.
+    const debuffs = applyEnemyAuras(all, players);
+    for (const p of players) p._buff = debuffs.get(p.userId) || NO_BUFF;
+    if (debuffs.size > 0) chargeAuraDots(players, now);
     // SOMET-314. Resolved once per tick rather than per creature: it is a
     // property of the world, it never changes for the life of this manager, and
     // the roam clamp below is on the hot path.

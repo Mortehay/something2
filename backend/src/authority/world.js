@@ -1,5 +1,5 @@
 const { resolveMove } = require('./collision');
-const { CreatureSim, CREATURE_SIZE, shoveCreature } = require('./creatures');
+const { CreatureSim, CREATURE_SIZE, shoveCreature, NO_BUFF } = require('./creatures');
 const { shoveAwayFrom } = require('./knockback');
 const { normalizeAim, inArc, hasLineOfSight, weaponStaminaCost } = require('./weapons');
 const { resolveEffectName, momentForAttack, blockedImpact } = require('./vfx.js');
@@ -1630,6 +1630,13 @@ class World {
         // effects.js — so dying cannot be used to shed it.
         clearInterrupt(p);
         p.effects.clear();
+        // SOMET-606 (Q5): the killer's aura debuff and its DoT clocks die with
+        // the player. The next creature tick re-stamps _buff anyway, but until
+        // then a respawned player must not move or defend at the debuffed
+        // value, and a stale clock must not suppress the entry charge if they
+        // walk straight back in.
+        p._buff = NO_BUFF;
+        p._auraDotAt = undefined;
       }
     }
     return died;
