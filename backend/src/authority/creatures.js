@@ -1031,44 +1031,158 @@ function movedWith(map, c, vx, vy, dt, mult) {
 // STACKING (spec §3.2):
 //   - the SAME aura from several sources -> strongest value per stat (Math.max).
 //     Two overlapping Champions stay x1.25, never x1.5625.
-//   - DIFFERENT auras -> multiply.
+//   - DIFFERENT auras -> multiply, in the order each aura FIRST reached that
+//     target (float multiplication is not associative past two factors, so the
+//     order is part of the result, not a detail).
 // A source never buffs itself. Enemy-side auras are S4 and are ignored here.
 //
-// O(sources x creatures); radius is CHECK-bounded to 2000 (1714440680000).
+// O(sources x same-faction candidates); radius is CHECK-bounded to 2000
+// (1714440680000).
+//
+// SOMET-617: a hot path (once per tick, over EVERY creature, unscoped by the
+// chunk gate). Centres are computed once per tick into typed arrays, targets
+// are pre-bucketed by faction, and the per-(target, aura) accumulators live in
+// module-level scratch buffers reused across ticks -- the inner loop allocates
+// nothing and only one result object is built per buffed target. Semantics are
+// pinned to the pre-617 algorithm by tests/aura_apply_equivalence.test.js,
+// which keeps that algorithm as its reference; change both or neither.
+let auraAcc = new Float64Array(0); // [slot*G + g]*3 + {0 dmg, 1 def, 2 spd}
+let auraSeen = new Uint8Array(0); // [slot*G + g] -> 1 once that aura reached that slot
+let auraOrder = new Int32Array(0); // [slot*G + k] -> k-th aura group to reach that slot
+let auraCount = new Int32Array(0); // [slot] -> number of groups in auraOrder
+// Grows only, never shrinks; contents are NOT preserved (callers size first).
+function auraScratch(cells, slots) {
+  if (auraSeen.length < cells) {
+    const size = Math.max(cells, auraSeen.length * 2);
+    auraAcc = new Float64Array(size * 3);
+    auraSeen = new Uint8Array(size);
+    auraOrder = new Int32Array(size);
+  }
+  if (auraCount.length < slots) auraCount = new Int32Array(Math.max(slots, auraCount.length * 2));
+}
+
 function applyAuras(creatures) {
   const buffs = new Map();
-  const sources = [];
-  for (const c of creatures) {
-    if (!(c.hp > 0) || !Array.isArray(c.auras)) continue;
-    for (const a of c.auras) if (a.targetSide === 'allies' && a.radius > 0) sources.push({ c, a });
+  const list = Array.isArray(creatures) ? creatures : [...creatures];
+  const n = list.length;
+
+  // Sources, in creature order then aura order (the order the old pass met them).
+  const srcIdx = [];
+  const srcAura = [];
+  for (let i = 0; i < n; i++) {
+    const c = list[i];
+    if (!(c.hp > 0)) continue;
+    const auras = c.auras;
+    if (!Array.isArray(auras) || auras.length === 0) continue; // most creatures
+    for (let k = 0; k < auras.length; k++) {
+      const a = auras[k];
+      if (a.targetSide === 'allies' && a.radius > 0) { srcIdx.push(i); srcAura.push(a); }
+    }
   }
-  if (sources.length === 0) return buffs;
-  const perTarget = new Map(); // id -> Map(auraName -> {damageMult, defenseMult, speedMult})
-  for (const { c: src, a } of sources) {
-    const sc = center(src);
+  const S = srcIdx.length;
+  if (S === 0) return buffs;
+
+  // Aura name -> group index (same-name sources max together; groups multiply).
+  const groupOf = new Map();
+  const srcGroup = new Int32Array(S);
+  for (let s = 0; s < S; s++) {
+    const name = srcAura[s].name;
+    let g = groupOf.get(name);
+    if (g === undefined) { g = groupOf.size; groupOf.set(name, g); }
+    srcGroup[s] = g;
+  }
+  const G = groupOf.size;
+
+  // Candidate targets bucketed by faction, in creature order, for factions that
+  // actually have a source. `!==` never matches NaN, so a NaN faction neither
+  // buffs nor is buffed (a Map key would have matched it to itself).
+  const buckets = new Map();
+  for (let s = 0; s < S; s++) {
+    const f = list[srcIdx[s]].faction;
+    if (f !== f) continue;
+    if (!buckets.has(f)) buckets.set(f, []);
+  }
+  if (buckets.size === 0) return buffs;
+  const cx = new Float64Array(n);
+  const cy = new Float64Array(n);
+  let lastF; let lastB = null;
+  for (let j = 0; j < n; j++) {
+    const o = list[j];
+    if (o.hp <= 0) continue;
+    const f = o.faction;
+    let b;
+    if (lastB !== null && f === lastF) b = lastB;
+    else { b = f === f ? buckets.get(f) : undefined; lastF = f; lastB = b === undefined ? null : b; }
+    if (b === undefined || b === null) continue;
+    b.push(j);
+    // Same expression as center(): x + width / 2.
+    cx[j] = o.x + o.width / 2;
+    cy[j] = o.y + o.height / 2;
+  }
+
+  // Slots: one per distinct target id, numbered in first-hit order (the old
+  // perTarget Map's insertion order, so `buffs` iterates identically). Keyed by
+  // id, not index, so two entries sharing an id merge exactly as they did.
+  const slotOfIdx = new Int32Array(n).fill(-1);
+  const slotOfId = new Map();
+  const slotIds = [];
+  // Sized once, up front: there are at most n slots, and growing mid-pass
+  // would drop the accumulators already written.
+  auraScratch(n * G, n);
+
+  for (let s = 0; s < S; s++) {
+    const si = srcIdx[s];
+    const src = list[si];
+    const f = src.faction;
+    if (f !== f) continue;
+    const bucket = buckets.get(f);
+    const a = srcAura[s];
+    const g = srcGroup[s];
+    const dm = a.damageMult; const fm = a.defenseMult; const sm = a.speedMult;
     const r2 = a.radius * a.radius;
-    for (const other of creatures) {
-      if (other === src || other.hp <= 0) continue;
-      if (other.faction !== src.faction) continue;
-      const oc = center(other);
-      if (dist2(sc.x, sc.y, oc.x, oc.y) > r2) continue;
-      let byName = perTarget.get(other.id);
-      if (!byName) { byName = new Map(); perTarget.set(other.id, byName); }
-      const cur = byName.get(a.name);
-      if (!cur) {
-        byName.set(a.name, { damageMult: a.damageMult, defenseMult: a.defenseMult, speedMult: a.speedMult });
+    const sx = src.x + src.width / 2;
+    const sy = src.y + src.height / 2;
+    for (let b = 0; b < bucket.length; b++) {
+      const j = bucket[b];
+      const dx = sx - cx[j]; const dy = sy - cy[j];
+      if (dx * dx + dy * dy > r2) continue;
+      if (list[j] === src) continue; // a source never buffs itself
+      let slot = slotOfIdx[j];
+      if (slot < 0) {
+        const id = list[j].id;
+        slot = slotOfId.get(id);
+        if (slot === undefined) {
+          slot = slotIds.length;
+          slotOfId.set(id, slot);
+          slotIds.push(id);
+          auraCount[slot] = 0;
+          auraSeen.fill(0, slot * G, (slot + 1) * G);
+        }
+        slotOfIdx[j] = slot;
+      }
+      const cell = slot * G + g;
+      const p = cell * 3;
+      if (auraSeen[cell] === 0) {
+        auraSeen[cell] = 1;
+        auraOrder[slot * G + auraCount[slot]++] = g;
+        auraAcc[p] = dm; auraAcc[p + 1] = fm; auraAcc[p + 2] = sm;
       } else {
         // Math.max within one aura name -- this line IS the non-stacking rule.
-        cur.damageMult = Math.max(cur.damageMult, a.damageMult);
-        cur.defenseMult = Math.max(cur.defenseMult, a.defenseMult);
-        cur.speedMult = Math.max(cur.speedMult, a.speedMult);
+        auraAcc[p] = Math.max(auraAcc[p], dm);
+        auraAcc[p + 1] = Math.max(auraAcc[p + 1], fm);
+        auraAcc[p + 2] = Math.max(auraAcc[p + 2], sm);
       }
     }
   }
-  for (const [id, byName] of perTarget) {
+
+  for (let slot = 0; slot < slotIds.length; slot++) {
     let d = 1; let f = 1; let s = 1;
-    for (const v of byName.values()) { d *= v.damageMult; f *= v.defenseMult; s *= v.speedMult; }
-    buffs.set(id, { damageMult: d, defenseMult: f, speedMult: s });
+    const base = slot * G;
+    for (let k = 0; k < auraCount[slot]; k++) {
+      const p = (base + auraOrder[base + k]) * 3;
+      d *= auraAcc[p]; f *= auraAcc[p + 1]; s *= auraAcc[p + 2];
+    }
+    buffs.set(slotIds[slot], { damageMult: d, defenseMult: f, speedMult: s });
   }
   return buffs;
 }
