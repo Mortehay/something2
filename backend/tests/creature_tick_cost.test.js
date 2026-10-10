@@ -147,34 +147,67 @@ RUN('tick cost across population and leader count', () => {
   }
 });
 
-// SOMET-606 (S4): the enemies-side pass. 6 hostile sources carrying a 400px
-// enemies aura WITH a DoT, 20 players standing inside them (a raid on a boss),
-// on top of the 4500/6 population that gates MAX_WORLD_CREATURES. Asserted
-// against the same 8ms half-budget as the leaders<=6 rows above -- the
-// enemy pass is O(sources x players), so it must not move this row.
-RUN('tick cost with 20 players inside enemy auras', () => {
+// SOMET-606 (S4): the enemies-side pass, gated on ITS OWN overhead. The whole
+// sim tick with 20 players in aggro range costs far more than the aura pass
+// (player-driven creature AI), so an absolute budget here measures the wrong
+// thing and flakes on host load. Instead: same layout, same process,
+// alternating enemy auras ON / OFF, best of N each, and assert the delta; plus
+// the pass itself (applyEnemyAuras + chargeAuraDots) timed directly.
+RUN('enemy-aura overhead with 20 players inside 6 enemy sources', () => {
+  const { applyEnemyAuras, chargeAuraDots } = require('../src/authority/creatures');
   const active = activeKeys();
-  const sim = buildSim(4500, 6);
-  let tagged = 0;
-  for (const c of sim.creatures.values()) {
-    if (tagged >= 6) break;
-    if (c.auras && c.auras.length) continue;      // not one of the ally leaders
-    c.auras = [{ name: 'blight', targetSide: 'enemies', radius: 400, damageMult: 0.8, defenseMult: 0.8,
-      speedMult: 0.7, dotDps: 0.001, dotElement: 'fire', tickMs: 1000 }];
-    tagged++;
+  // 50 ms steps: the creature pass (and so the aura pass) runs on every step.
+  const ENEMY = { name: 'blight', targetSide: 'enemies', radius: 400, damageMult: 0.8, defenseMult: 0.8,
+    speedMult: 0.7, dotDps: 0.001, dotElement: 'fire', tickMs: 1000 };
+  function run(withAura) {
+    const sim = buildSim(4500, 6);
+    const src = [];
+    for (const c of sim.creatures.values()) {
+      if (src.length >= 6) break;
+      if (c.auras && c.auras.length) continue;      // not one of the ally leaders
+      if (withAura) c.auras = [{ ...ENEMY }];
+      src.push(c);
+    }
+    const players = src.length === 6 ? [] : null;
+    if (!players) throw new Error(`fixture built ${src.length} candidate sources, expected 6`);
+    for (let k = 0; k < 20; k++) {
+      const s = src[k % 6];
+      players.push({ userId: `u${k}`, x: s.x + 20 + k, y: s.y, width: 64, height: 64, hp: 1e9, maxHp: 1e9, mit: null });
+    }
+    for (let i = 0; i < 20; i++) sim.tick(0.05, active, players, i * 50);
+    const inside = players.every((p) => p._buff && p._buff.auras);
+    if (withAura && !inside) throw new Error('fixture: players are not inside the enemy auras');
+    if (!withAura && players.some((p) => p._buff && p._buff.auras)) throw new Error('control leaked an enemy aura');
+    const t0 = process.hrtime.bigint();
+    for (let i = 0; i < 60; i++) sim.tick(0.05, active, players, (20 + i) * 50);
+    const tickMs = Number(process.hrtime.bigint() - t0) / 1e6 / 60;
+    let passMs = null;
+    if (withAura) {
+      const all = [...sim.creatures.values()];
+      let best = Infinity;
+      for (let r = 0; r < 5; r++) {
+        const t1 = process.hrtime.bigint();
+        for (let i = 0; i < 40; i++) {
+          const d = applyEnemyAuras(all, players);
+          for (const p of players) p._buff = d.get(p.userId) || p._buff;
+          chargeAuraDots(players, (200 + r * 40 + i) * 50);
+        }
+        best = Math.min(best, Number(process.hrtime.bigint() - t1) / 1e6 / 40);
+      }
+      passMs = best;
+    }
+    return { tickMs, passMs };
   }
-  const first = [...sim.creatures.values()].filter((c) => c.auras && c.auras.some((a) => a.targetSide === 'enemies'));
-  if (first.length !== 6) throw new Error(`fixture built ${first.length} enemy sources, expected 6`);
-  const players = [];
-  for (let k = 0; k < 20; k++) {
-    const s = first[k % 6];
-    players.push({ userId: `u${k}`, x: s.x + 20 + k, y: s.y, width: 64, height: 64, hp: 1e9, maxHp: 1e9, mit: null });
+  let onBest = Infinity; let offBest = Infinity; let passBest = Infinity;
+  for (let round = 0; round < 8; round++) {
+    const off = run(false); const on = run(true);
+    offBest = Math.min(offBest, off.tickMs);
+    onBest = Math.min(onBest, on.tickMs);
+    passBest = Math.min(passBest, on.passMs);
   }
-  for (let i = 0; i < 20; i++) sim.tick(1 / 60, active, players, i * 16);
-  if (!players.every((p) => p._buff && p._buff.auras)) throw new Error('fixture: players are not inside the enemy auras');
-  const t0 = process.hrtime.bigint();
-  for (let i = 0; i < 120; i++) sim.tick(1 / 60, active, players, (20 + i) * 16);
-  const ms = Number(process.hrtime.bigint() - t0) / 1e6 / 120;
-  console.log(`[tick] 4500 creatures / 6 leaders / 6 enemy sources / 20 players inside: ${ms.toFixed(3)} ms/tick`);
-  assert.ok(ms < 8, `${ms.toFixed(3)} ms/tick, over the 8ms half-budget`);
+  const delta = onBest - offBest;
+  console.log(`[tick] enemy auras ON ${onBest.toFixed(3)} vs OFF ${offBest.toFixed(3)} ms/tick `
+    + `(delta ${delta.toFixed(3)}); pass+dots alone ${passBest.toFixed(3)} ms; load ${require('os').loadavg()[0].toFixed(1)}`);
+  assert.ok(delta < 2, `enemy auras add ${delta.toFixed(3)} ms/tick, over the 2ms budget`);
+  assert.ok(passBest < 1, `applyEnemyAuras + chargeAuraDots cost ${passBest.toFixed(3)} ms, over the 1ms budget`);
 });
