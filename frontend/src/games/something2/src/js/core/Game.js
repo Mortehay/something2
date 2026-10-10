@@ -42,6 +42,7 @@ import { fetchProgression } from "../net/progressionClient.js";
 import { AudioEngine } from "../audio/AudioEngine.js";
 import { fetchWorldAudio } from "../audio/audioClient.js";
 import { loadVolumes } from "../audio/audioSettings.js";
+import { screenRadiusWorld } from "../audio/screenRadius.js";
 import {
     getSkillById, getRequiredForm, isTransformationSkill,
     isDruidExclusiveSkill, resolveSkillVfx, checkGemRequirements,
@@ -1404,6 +1405,12 @@ export class Game {
             const cy = this.player.y + this.player.height / 2;
             if (this.audio) {
                 this.audio.tick(this.chunkedMap.biomeAt(cx, cy), performance.now());
+                // SOMET-605: half the viewport diagonal in world units, per
+                // tick (spec §4.4); the boss presence loop's in/out edge.
+                this.audio.setScreenRadius(screenRadiusWorld(
+                    (this.canvas && this.canvas.width) || GAME_WIDTH,
+                    (this.canvas && this.canvas.height) || GAME_HEIGHT,
+                ));
                 // Task 7 (game audio slice 3): creature/world-point "nearby"
                 // ambience. tickNearby is internally throttled to 250ms, so
                 // this passes a thunk (fix round 1, item 3) rather than

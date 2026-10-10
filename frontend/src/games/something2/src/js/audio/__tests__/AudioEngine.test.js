@@ -893,5 +893,128 @@ describe('AudioEngine', () => {
         expect(engine.nearbyLoopStarting.size).toBe(0);
       });
     });
+
+    describe('boss presence (SOMET-605)', () => {
+      const bindings = { 'creature/Ignis/presence': [{ key: 'ignis-bed.ogg', volume: 0.8, weight: 1, loopable: false }] };
+      // Controller ruling N-2: y: -48 puts the 96px box centre on y = 0, so
+      // ignis(452) is exactly 500 world px from the listener.
+      const ignis = (x) => creatureMap([{ id: 'wb_1', type: 'Ignis', x, y: -48, width: 96, height: 96, bossTier: 'world' }]);
+
+      it('loops presence while the boss is within screen radius, then fades it out on exit', async () => {
+        const { engine, sources } = engineWith(bindings);
+        engine.unlock();
+        engine.setScreenRadius(1000);
+        engine.tickNearby(ignis(452), [], { x: 0, y: 0 }, 0); // centre 500 <= 1000
+        await flush(); await flush();
+        const bed = sources.find((s) => s.buffer && s.buffer.tag === 'u:ignis-bed.ogg');
+        expect(bed).toBeTruthy();
+        expect(bed.loop).toBe(true); // loops although the clip is not marked loopable
+        expect(engine.snapshot().loops).toEqual([{ id: 'boss:wb_1', key: 'ignis-bed.ogg', priority: 'boss', distance: 500 }]);
+        engine.tickNearby(ignis(552), [], { x: 0, y: 0 }, 300); // still in: no second source
+        await flush(); await flush();
+        expect(sources.filter((s) => s.buffer && s.buffer.tag === 'u:ignis-bed.ogg').length).toBe(1);
+        engine.tickNearby(ignis(1052), [], { x: 0, y: 0 }, 600); // centre 1100 > 1000
+        await flush(); await flush();
+        expect(bed.stopped).toBe(true);
+        expect(engine.snapshot().loops).toEqual([]);
+      });
+
+      it('plays at clip volume (no distance falloff), pans with the boss, fades out over FADE_S and fades back in on re-entry', async () => {
+        const { engine, sources } = engineWith(bindings);
+        engine.unlock();
+        engine.setScreenRadius(1000);
+        engine.tickNearby(ignis(552), [], { x: 0, y: 0 }, 0); // centre x = 600: pan +1
+        await flush(); await flush();
+        const first = sources[0];
+        const panner = first.out;
+        const gain = panner.out;
+        expect(gain.gain.value).toBe(0.8); // a point loop at 600px would be 0.8 * (1 - 600/1600)
+        expect(panner.pan.value).toBe(1);
+        engine.tickNearby(ignis(-348), [], { x: 0, y: 0 }, 300); // centre x = -300: pan -0.5
+        expect(panner.pan.value).toBe(-0.5);
+        expect(engine.snapshot().loops[0].distance).toBe(300);
+        engine.tickNearby(ignis(1052), [], { x: 0, y: 0 }, 600); // out
+        expect(first.stopped).toBe(true);
+        expect(first.stopAt).toBe(2); // FADE_S from currentTime 0, not an instant stop
+        expect(gain.gain.value).toBe(0);
+        engine.tickNearby(ignis(452), [], { x: 0, y: 0 }, 900); // back in
+        await flush(); await flush();
+        expect(sources.length).toBe(2);
+        const second = sources[1];
+        expect(second.loop).toBe(true);
+        expect(second.started).toBe(true);
+        expect(second.out.out.gain.value).toBe(0.8);
+        expect(engine.snapshot().loops).toEqual([{ id: 'boss:wb_1', key: 'ignis-bed.ogg', priority: 'boss', distance: 500 }]);
+      });
+
+      it('an ordinary creature never gets a presence loop', async () => {
+        const { engine, sources } = engineWith({ 'creature/Slime/presence': [{ key: 'x.ogg', volume: 1, weight: 1 }] });
+        engine.unlock();
+        engine.setScreenRadius(1000);
+        engine.tickNearby(creatureMap([{ id: 1, type: 'Slime', x: 0, y: 0 }]), [], { x: 0, y: 0 }, 0);
+        await flush(); await flush();
+        expect(sources.length).toBe(0);
+      });
+
+      it('the boss leaving the creature map (death/despawn) fades the loop; setWorld stops it outright', async () => {
+        const { engine, sources } = engineWith(bindings);
+        engine.unlock();
+        engine.setScreenRadius(1000);
+        engine.tickNearby(ignis(0), [], { x: 0, y: 0 }, 0);
+        await flush(); await flush();
+        engine.tickNearby(new Map(), [], { x: 0, y: 0 }, 300);
+        await flush(); await flush();
+        expect(sources[0].stopped).toBe(true);
+        expect(engine.snapshot().loops).toEqual([]);
+        engine.tickNearby(ignis(0), [], { x: 0, y: 0 }, 600);
+        await flush(); await flush();
+        engine.setWorld({ world: 'other', bindings });
+        expect(sources[sources.length - 1].stopped).toBe(true);
+        expect(engine.snapshot().loops).toEqual([]);
+      });
+
+      it('no screen radius yet means no presence', async () => {
+        const { engine, sources } = engineWith(bindings);
+        engine.unlock();
+        engine.tickNearby(ignis(0), [], { x: 0, y: 0 }, 0);
+        await flush(); await flush();
+        expect(sources.length).toBe(0);
+      });
+
+      it('creature nearby chatter cannot evict the presence loop', async () => {
+        const { engine, sources } = engineWith({ ...bindings, 'creature/slime/nearby': [{ key: 'slime.ogg', volume: 1, weight: 1 }] });
+        engine.unlock();
+        engine.setScreenRadius(1000);
+        engine.sfxLimiter.maxVoices = 1;
+        const both = creatureMap([
+          { id: 'wb_1', type: 'Ignis', x: 0, y: 0, width: 96, height: 96, bossTier: 'world' },
+          { id: 2, type: 'slime', x: 5, y: 0 },
+        ]);
+        engine.tickNearby(both, [], { x: 0, y: 0 }, 0);
+        await flush(); await flush();
+        engine.tickNearby(both, [], { x: 0, y: 0 }, 11000); // past the cadence gap
+        await flush(); await flush();
+        const bed = sources.find((s) => s.buffer.tag === 'u:ignis-bed.ogg');
+        expect(bed.stopped).toBe(false);
+        expect(sources.some((s) => s.buffer.tag === 'u:slime.ogg' && s.started)).toBe(false);
+      });
+
+      it('a slow buffer spanning several ticks starts exactly one presence source', async () => {
+        let release;
+        const gate = new Promise((r) => { release = r; });
+        const { ctx, sources } = fakeCtx();
+        const engine = new AudioEngine({
+          ctxFactory: () => ctx, urlFor: (k) => `u:${k}`, rand: () => 0, postMisses: async () => {},
+          fetchBytes: async (url) => { await gate; return new TextEncoder().encode(url).buffer; },
+        });
+        engine.setWorld({ world: 'vale', bindings });
+        engine.unlock();
+        engine.setScreenRadius(1000);
+        for (let t = 0; t <= 1000; t += 250) engine.tickNearby(ignis(0), [], { x: 0, y: 0 }, t);
+        release();
+        await flush(); await flush(); await flush();
+        expect(sources.filter((s) => s.buffer && s.buffer.tag === 'u:ignis-bed.ogg').length).toBe(1);
+      });
+    });
   });
 });
