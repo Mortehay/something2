@@ -364,6 +364,11 @@ function drainAttacks(entry) {
 // activateChunk's own inline comment for the column-by-column rationale
 // (dropping any of them silently makes some creature mechanic inert rather
 // than throwing). Both call sites append their own WHERE clause.
+//
+// SOMET-603: et.base_damage is deliberately NOT selected. hydrateCreatureRow
+// lets a non-null base_damage beat the row's damage, so selecting it here
+// would replace the level-scaled wc.damage of every persisted instance with
+// the catalog value. boss_joined_select_db.test.js guards this.
 const CREATURE_JOINED_SELECT = `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.facing, wc.home_x, wc.home_y,
                 wc.level, wc.damage, wc.blocks_portal_id,
                 wc.charmed_by_character_id, wc.charm_expires_at, ch.user_id AS charm_owner_user_id,

@@ -59,6 +59,16 @@ test('a type row\'s base_damage becomes the creature damage; without it the row 
   assert.equal(s.get('bd1').damage, 42, 'addCreatures keeps the hydrated damage');
 });
 
+test('an explicit instance.damage beats a type row\'s base_damage', () => {
+  const c = hydrateCreatureRow({ ...catalogRow, base_damage: 42 }, { id: 'bd2', x: 0, y: 0, damage: 17 });
+  assert.equal(c.damage, 17);
+});
+
+test('a row carrying both damage and base_damage hydrates to base_damage (documented precedence)', () => {
+  const c = hydrateCreatureRow({ id: 'bd3', type: 'zzBoth', x: 0, y: 0, hp: 1, damage: 17, base_damage: 42 });
+  assert.equal(c.damage, 42, 'instance.damage > row.base_damage > row.damage');
+});
+
 test('hydrated rows go through addCreatures with the catalog hitbox', () => {
   const s = new CreatureSim(stubMap(), () => 0.05);
   s.addCreatures([hydrateCreatureRow(catalogRow, { id: 'b1', x: 0, y: 0 })]);

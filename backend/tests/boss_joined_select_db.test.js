@@ -21,10 +21,16 @@ test('a boss-typed world_creatures row loads with its catalog hitbox, tier and e
       `INSERT INTO worlds (name, seed) VALUES ('zzBossJoinedSelect', 1) RETURNING id`);
     const ins = await client.query(
       `INSERT INTO world_creatures (world_id, type, x, y, hp, facing, level, damage, defense)
-       VALUES ($1, 'Ignis, the Magma Colossus', 500, 500, 12000, 'S', 100, 42, 25) RETURNING id`,
+       VALUES ($1, 'Ignis, the Magma Colossus', 500, 500, 12000, 'S', 100, 17, 25) RETURNING id`,
       [w.rows[0].id]);
     const q = await client.query(`${CREATURE_JOINED_SELECT} WHERE wc.id = $1`, [ins.rows[0].id]);
     assert.equal(q.rowCount, 1, 'precondition: the joined SELECT found the fixture row');
+    // wc.damage (17) deliberately differs from Ignis's base_damage (42): the
+    // persisted, level-scaled instance damage must survive hydration. If the
+    // joined SELECT ever carried et.base_damage, hydrateCreatureRow would
+    // replace 17 with 42 for every persisted boss instance.
+    assert.equal('base_damage' in q.rows[0], false,
+      'CREATURE_JOINED_SELECT must not select et.base_damage');
 
     const sim = new CreatureSim({ isWalkable: () => true, speedAt: () => 1, chunkSize: 8 }, () => 0.05);
     sim.addCreatures(q.rows.map((r) => hydrateCreatureRow(r)));
@@ -33,6 +39,7 @@ test('a boss-typed world_creatures row loads with its catalog hitbox, tier and e
     assert.equal(c.element, 'fire');
     assert.equal(c.width, 96);
     assert.equal(c.height, 96);
+    assert.equal(c.damage, 17, 'the persisted wc.damage survives, not the catalog base_damage');
   } finally {
     await client.query('ROLLBACK');
     client.release();
