@@ -7,8 +7,13 @@ export const BOSS_TIER_LABELS = {
   dungeon_end: "Dungeon boss (End)",
   dungeon_elite: "Dungeon mini-boss (Elite)",
 };
-// The seeded `elements` table. The server validates against the live table.
-export const ENTITY_ELEMENTS = ["physical", "arcane", "fire", "ice", "lightning"];
+import { ELEMENTS } from "./abilityForm.js";
+
+// ONE frontend element list (abilityForm.js), pinned to the backend's
+// creatureBehaviors.ELEMENTS by __tests__/elementLists.test.js.
+export const ENTITY_ELEMENTS = ELEMENTS;
+// Mirrors MAX_ENTITY_DISPLAY_PX in backend/src/index.js (pinned by the same test).
+export const MAX_HITBOX_PX = 400;
 export const BOSS_FORM_DEFAULTS = Object.freeze({
   boss_tier: "", element: "", hitbox_size: "", xp_reward: "", base_damage: "",
 });
@@ -39,7 +44,7 @@ export function bossFieldsPayload(f) {
 
 export function bossFieldError(f) {
   const hb = blankToNull(f.hitbox_size);
-  if (hb != null && (!Number.isInteger(hb) || hb < 1 || hb > 400)) return "Hitbox Size must be an integer between 1 and 400";
+  if (hb != null && (!Number.isInteger(hb) || hb < 1 || hb > MAX_HITBOX_PX)) return `Hitbox Size must be an integer between 1 and ${MAX_HITBOX_PX}`;
   const xp = blankToNull(f.xp_reward);
   if (xp != null && (!Number.isInteger(xp) || xp < 0)) return "XP Reward must be a non-negative integer";
   const dmg = blankToNull(f.base_damage);
