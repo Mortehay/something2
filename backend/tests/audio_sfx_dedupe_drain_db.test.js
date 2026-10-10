@@ -156,9 +156,13 @@ test('sfx drain: cached is not a duplicate; a duplicate is retryable', { skip },
             subjectExists: async (db, kind, key, slot) => { asked.push([kind, key, slot]); return true; },
           },
         });
-        const st = await waitIdle();
-        // Register cleanup before asserting, so a failure cannot leave a bound clip behind.
-        for (const b of await boundTo('hit')) { bindingIds.push(b.binding_id); clipIds.push(b.clip_id); }
+        let st;
+        try {
+          st = await waitIdle();
+        } finally {
+          // Register cleanup before asserting (and even if waitIdle throws).
+          for (const b of await boundTo('hit')) { bindingIds.push(b.binding_id); clipIds.push(b.clip_id); }
+        }
         assert.equal(st.done, 1, st.error);
         assert.deepEqual(asked, [['skill', SKILL, 'hit']]);
       });

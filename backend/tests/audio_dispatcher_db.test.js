@@ -285,7 +285,7 @@ test('audio dispatcher', { skip }, async (t) => {
       // 4th argument cannot hide behind a fake that ignores it.
       await t.test('the single-job path asks subjectExists with the job\'s slot', async () => {
         d.__resetRun();
-        const { queued: [job] } = await q.enqueue(pool, [
+        await q.enqueue(pool, [
           { subject_kind: 'world', subject_key: `${tag}-slotarg`, slot: 'music', clip_kind: 'music' },
         ], {});
         const asked = [];
@@ -295,8 +295,8 @@ test('audio dispatcher', { skip }, async (t) => {
             subjectExists: async (db, kind, key, slot) => { asked.push([kind, key, slot]); return true; },
           },
         });
-        await waitIdle();
-        assert.ok(job.id);
+        const st = await waitIdle();
+        assert.equal(st.done, 1, st.error);
         assert.deepEqual(asked, [['world', `${tag}-slotarg`, 'music']]);
       });
 

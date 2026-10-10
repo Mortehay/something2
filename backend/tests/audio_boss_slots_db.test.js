@@ -80,6 +80,7 @@ test('every door refuses a boss slot on an ordinary creature; demotion hides bos
   assetStore.__setAssetClient({ bucketExists: async () => true, putObject: async () => {}, removeObject: async () => {} });
   const tag = `${process.pid}-${Date.now()}`;
   const TEMP_BOSS = `zz-s2-boss-${tag}`; // our own row, so we may demote it
+  const TEMP_PLAIN = `zz-s2-plain-${tag}`; // our own ordinary creature: its misses are ours to write and delete
   const clipIds = [];
   let userId = null;
   try {
@@ -88,6 +89,8 @@ test('every door refuses a boss slot on an ordinary creature; demotion hides bos
         await pool.query(
           `INSERT INTO entity_types (name, is_creature, color, hp, boss_tier, element)
            VALUES ($1, true, '#123456', 100, 'world', 'fire')`, [TEMP_BOSS]);
+        await pool.query(
+          `INSERT INTO entity_types (name, is_creature, color, hp) VALUES ($1, true, '#654321', 100)`, [TEMP_PLAIN]);
         const u = (await pool.query(
           "INSERT INTO users (username, password_hash, role) VALUES ($1, 'x', 'admin') RETURNING id, username, role, token_version",
           [`s2-admin-${tag}`])).rows[0];
@@ -121,7 +124,7 @@ test('every door refuses a boss slot on an ordinary creature; demotion hides bos
           .send({ misses: [
             { subject_kind: 'creature', subject_key: PLAIN, slot: 'presence', world: null },
             { subject_kind: 'creature', subject_key: TEMP_BOSS, slot: 'presence', world: null },
-            { subject_kind: 'creature', subject_key: PLAIN, slot: 'hurt', world: null },
+            { subject_kind: 'creature', subject_key: TEMP_PLAIN, slot: 'hurt', world: null },
           ] });
         assert.equal(kept.body.accepted, 2, 'boss slot kept for the boss, base slot kept for the ordinary creature');
         const missAfter = (await pool.query(
@@ -164,11 +167,19 @@ test('every door refuses a boss slot on an ordinary creature; demotion hides bos
         const rows = await pool.query("SELECT 1 FROM audio_bindings WHERE subject_key = $1 AND slot = 'presence'", [TEMP_BOSS]);
         assert.equal(rows.rowCount, 1, 'demotion does not delete bindings');
       } finally {
-        await pool.query('DELETE FROM audio_misses WHERE subject_key = $1', [TEMP_BOSS]).catch(() => {});
-        await pool.query('DELETE FROM audio_bindings WHERE subject_key = $1', [TEMP_BOSS]);
-        if (clipIds.length) await pool.query('DELETE FROM audio_clips WHERE id = ANY($1)', [clipIds]);
-        await pool.query('DELETE FROM entity_types WHERE name = $1', [TEMP_BOSS]);
-        if (userId) await pool.query('DELETE FROM users WHERE id = $1', [userId]);
+        const names = [TEMP_BOSS, TEMP_PLAIN];
+        const steps = [
+          () => pool.query('DELETE FROM audio_misses WHERE subject_key = ANY($1)', [names]),
+          () => pool.query('DELETE FROM audio_bindings WHERE subject_key = ANY($1)', [names]),
+          () => (clipIds.length ? pool.query('DELETE FROM audio_clips WHERE id = ANY($1)', [clipIds]) : null),
+          () => pool.query('DELETE FROM entity_types WHERE name = ANY($1)', [names]),
+          () => (userId ? pool.query('DELETE FROM users WHERE id = $1', [userId]) : null),
+        ];
+        // Each step guarded on its own, so one failure cannot strand the rest.
+        for (const step of steps) {
+          // eslint-disable-next-line no-await-in-loop
+          try { await step(); } catch (e) { console.error('cleanup step failed', e.message); }
+        }
       }
     });
   } finally { await pool.end(); }
