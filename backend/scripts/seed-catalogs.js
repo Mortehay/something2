@@ -117,18 +117,17 @@ async function seedOneBiome(db, b) {
 // non-optional two (name, chase_style) are the profile's identity and are
 // always written.
 //
-// The eleven COALESCE-guarded columns split into two groups against the
+// The seven COALESCE-guarded columns split into two groups against the
 // twelve rows in seeds/data/creatureBehaviors.js as they stand today:
 //   - aggro_radius, leash_radius, preferred_range, move_speed_mult are
 //     supplied by all twelve rows. The COALESCE here is nominal insurance
 //     for a future row that omits one -- against the current data it never
 //     falls back, so it has not yet had occasion to protect a hand-tuned
 //     admin value for these four.
-//   - damage_override, aura_radius, aura_damage_mult, aura_defense_mult,
-//     aura_speed_mult, gold_min, gold_max are genuinely exercised: NO row
+//   - damage_override, gold_min, gold_max are genuinely exercised: NO row
 //     sets damage_override any more (all twelve fall back to whatever value
-//     is already in the column on reseed), only Champion sets the four
-//     aura_* fields, and only Guard omits gold_min/gold_max.
+//     is already in the column on reseed), and only Guard omits
+//     gold_min/gold_max.
 //   Read "COALESCE-guarded" as "will protect an admin edit if this seed
 //   row is ever missing the field", not as "is currently protecting one" --
 //   only the second group's fallback is presently reached by a real row.
@@ -162,25 +161,23 @@ async function seedOneBiome(db, b) {
 // seeding the real CREATURE_BEHAVIORS data (not the seed test's integer-only
 // fixtures) was the first place a fractional value hit these params.
 //
-// SOMET-253 Task 4: aura_radius/aura_damage_mult/aura_defense_mult/
-// aura_speed_mult/gold_min/gold_max ($8-$13) follow the exact same COALESCE
-// rule as aggro_radius/leash_radius/move_speed_mult above, and for the same
-// reason those need the ::real cast -- these columns are NOT NULL with a
-// non-null column default (0/1/1/1/0/0), so a bare NULL parameter (an
-// omitted seed field) would violate the constraint outright rather than
-// merely mis-inferring a type. The literal fallbacks inside each COALESCE
-// mirror migration 1714440085000_behavior_auras.js's column defaults.
+// SOMET-253 Task 4: gold_min/gold_max ($8-$9) follow the exact same
+// COALESCE rule as aggro_radius/leash_radius/move_speed_mult above -- these
+// columns are NOT NULL with a non-null column default (0/0), so a bare NULL
+// parameter (an omitted seed field) would violate the constraint outright.
+// The literal fallbacks inside each COALESCE mirror migration
+// 1714440085000_behavior_auras.js's column defaults. (The pack-leader aura
+// columns that migration also added were dropped by 1714440681000; the aura
+// is seeded from seeds/data/auraEffects.js, SOMET-604.)
 async function seedOneBehavior(db, b) {
   await db.query(
     `INSERT INTO creature_behaviors
        (name, aggro_radius, leash_radius, chase_style,
         preferred_range, move_speed_mult, damage_override,
-        aura_radius, aura_damage_mult, aura_defense_mult, aura_speed_mult,
         gold_min, gold_max)
      VALUES ($1, COALESCE($2::real,400), COALESCE($3::real,800),
              $4, COALESCE($5::real,0), COALESCE($6::real,1), $7::real,
-             COALESCE($8::real,0), COALESCE($9::real,1), COALESCE($10::real,1), COALESCE($11::real,1),
-             COALESCE($12::int,0), COALESCE($13::int,0))
+             COALESCE($8::int,0), COALESCE($9::int,0))
      ON CONFLICT (name) DO UPDATE
        SET chase_style = EXCLUDED.chase_style,
            aggro_radius = COALESCE($2::real, creature_behaviors.aggro_radius),
@@ -188,17 +185,12 @@ async function seedOneBehavior(db, b) {
            preferred_range = COALESCE($5::real, creature_behaviors.preferred_range),
            move_speed_mult = COALESCE($6::real, creature_behaviors.move_speed_mult),
            damage_override = COALESCE($7::real, creature_behaviors.damage_override),
-           aura_radius = COALESCE($8::real, creature_behaviors.aura_radius),
-           aura_damage_mult = COALESCE($9::real, creature_behaviors.aura_damage_mult),
-           aura_defense_mult = COALESCE($10::real, creature_behaviors.aura_defense_mult),
-           aura_speed_mult = COALESCE($11::real, creature_behaviors.aura_speed_mult),
-           gold_min = COALESCE($12::int, creature_behaviors.gold_min),
-           gold_max = COALESCE($13::int, creature_behaviors.gold_max),
+           gold_min = COALESCE($8::int, creature_behaviors.gold_min),
+           gold_max = COALESCE($9::int, creature_behaviors.gold_max),
            updated_at = now()`,
     [b.name, b.aggro_radius ?? null, b.leash_radius ?? null, b.chase_style,
      b.preferred_range ?? null, b.move_speed_mult ?? null,
      b.damage_override ?? null,
-     b.aura_radius ?? null, b.aura_damage_mult ?? null, b.aura_defense_mult ?? null, b.aura_speed_mult ?? null,
      b.gold_min ?? null, b.gold_max ?? null],
   );
 }

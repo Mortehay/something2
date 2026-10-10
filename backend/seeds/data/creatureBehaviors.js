@@ -33,14 +33,13 @@
 // values are today's hostile constants exactly: CONTACT_RANGE 60,
 // CREATURE_ATTACK_COOLDOWN 1.0, AGGRO_RADIUS 400, LEASH_RADIUS 800,
 // CREATURE_SPEED x 1. Changing them changes the whole game.
-// aura_radius/aura_damage_mult/aura_defense_mult/aura_speed_mult and
 // gold_min/gold_max are SOMET-253 Task 4 additions, omitted here (falling
-// back to the seeder's own INSERT-time defaults of 0/1/1/1/0/0) unless a
-// row needs a non-default value -- same convention damage_override already
-// uses. Values mirror migration 1714440085000_behavior_auras.js's two UPDATE
-// statements exactly: Champion is the only profile with a real aura (the
-// umbrella's pack leader), and every rung except Guard carries a gold range
-// (a village guard is not a purse).
+// back to the seeder's own INSERT-time defaults of 0/0) unless a row needs a
+// non-default value -- same convention damage_override already uses. Values
+// mirror migration 1714440085000_behavior_auras.js's gold UPDATE exactly:
+// every rung except Guard carries a gold range (a village guard is not a
+// purse). Champion's pack-leader aura moved to seeds/data/auraEffects.js
+// (SOMET-604).
 const CREATURE_BEHAVIORS = [
   { name: 'Swarm',      attack_kind: 'melee',  attack_range: 60,  attack_cooldown: 0.7, projectile_speed: 0,   projectile_radius: 0,  aggro_radius: 400, leash_radius: 800,  chase_style: 'charge',   preferred_range: 0,   move_speed_mult: 1.2, gold_min: 0,  gold_max: 3 },
   { name: 'Skirmisher', attack_kind: 'melee',  attack_range: 60,  attack_cooldown: 0.9, projectile_speed: 0,   projectile_radius: 0,  aggro_radius: 450, leash_radius: 800,  chase_style: 'skirmish', preferred_range: 150, move_speed_mult: 1.5, gold_min: 1,  gold_max: 6 },
@@ -50,7 +49,7 @@ const CREATURE_BEHAVIORS = [
   { name: 'Brute',      attack_kind: 'melee',  attack_range: 70,  attack_cooldown: 1.8, projectile_speed: 0,   projectile_radius: 0,  aggro_radius: 380, leash_radius: 800,  chase_style: 'charge',   preferred_range: 0,   move_speed_mult: 0.7, gold_min: 4,  gold_max: 14 },
   { name: 'Heavy',      attack_kind: 'melee',  attack_range: 65,  attack_cooldown: 1.5, projectile_speed: 0,   projectile_radius: 0,  aggro_radius: 300, leash_radius: 500,  chase_style: 'charge',   preferred_range: 0,   move_speed_mult: 0.6, gold_min: 5,  gold_max: 18 },
   { name: 'Champion',   attack_kind: 'melee',  attack_range: 65,  attack_cooldown: 1.1, projectile_speed: 0,   projectile_radius: 0,  aggro_radius: 480, leash_radius: 900,  chase_style: 'charge',   preferred_range: 0,   move_speed_mult: 1.05,
-    aura_radius: 260, aura_damage_mult: 1.25, aura_defense_mult: 1.2, aura_speed_mult: 1.1, gold_min: 10, gold_max: 30 },
+    gold_min: 10, gold_max: 30 },
   { name: 'Apex',       attack_kind: 'cast',   attack_range: 260, attack_cooldown: 2.0, projectile_speed: 460, projectile_radius: 10, aggro_radius: 600, leash_radius: 1200, chase_style: 'charge',   preferred_range: 0,   move_speed_mult: 0.95, gold_min: 25, gold_max: 80 },
   // No damage_override -- deliberately. See the Guard note in the header.
   // leash_radius 600, not the 300 migration 1714440080000 inserted: SOMET-291

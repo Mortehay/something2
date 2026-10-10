@@ -505,51 +505,7 @@ function CreatureBehaviorsAdmin() {
                 />
               </FormGroup>
 
-              {/* SOMET-253 Task 8: pack-leader aura. aura_radius 0 means
-                  "not a leader" -- the correct value for eleven of the twelve
-                  seeded profiles, not an unset field. The three multipliers
-                  default to 1 (neutral) for a brand-new profile; see
-                  behaviorForm.js's NEW_ROW_DEFAULTS. */}
-              <FormRow>
-                <FormGroup>
-                  <label>
-                    Aura Radius
-                    <Hint> — 0 = not a pack leader</Hint>
-                  </label>
-                  <input
-                    type="number" step="1" min="0"
-                    value={formData.aura_radius}
-                    onChange={e => setFormData({ ...formData, aura_radius: e.target.value })}
-                  />
-                </FormGroup>
-                <FormGroup>
-                  <label>Aura Damage Mult</label>
-                  <input
-                    type="number" step="0.05" min="0.01"
-                    value={formData.aura_damage_mult}
-                    onChange={e => setFormData({ ...formData, aura_damage_mult: e.target.value })}
-                  />
-                </FormGroup>
-              </FormRow>
-
-              <FormRow>
-                <FormGroup>
-                  <label>Aura Defense Mult</label>
-                  <input
-                    type="number" step="0.05" min="0.01"
-                    value={formData.aura_defense_mult}
-                    onChange={e => setFormData({ ...formData, aura_defense_mult: e.target.value })}
-                  />
-                </FormGroup>
-                <FormGroup>
-                  <label>Aura Speed Mult</label>
-                  <input
-                    type="number" step="0.05" min="0.01"
-                    value={formData.aura_speed_mult}
-                    onChange={e => setFormData({ ...formData, aura_speed_mult: e.target.value })}
-                  />
-                </FormGroup>
-              </FormRow>
+              <Hint>Pack-leader auras moved to Entities → Auras (library: Aura Effects tab).</Hint>
 
               {/* Per-rung gold -- a fallback loot.js uses only when the
                   creature type's own gold range is absent/zero. */}

@@ -50,8 +50,6 @@ function loaderCreatureRow(over = {}) {
     aggro_radius: over.aggroRadius ?? 400, leash_radius: over.leashRadius ?? 800,
     chase_style: over.chaseStyle || 'charge', preferred_range: over.preferredRange ?? 0,
     move_speed_mult: over.moveSpeedMult ?? 1, damage_override: over.damageOverride ?? null,
-    aura_radius: over.auraRadius ?? 0, aura_damage_mult: over.auraDamageMult ?? 1,
-    aura_defense_mult: over.auraDefenseMult ?? 1, aura_speed_mult: over.auraSpeedMult ?? 1,
     // SOMET-604: entity-bound auras, exactly as `et.auras AS aura_names` and
     // AURAS_LATERAL's json_agg (`au.aura_defs`, snake_case) return them.
     aura_names: over.auraNames ?? null,
@@ -229,7 +227,6 @@ function loaderTypeRow(over = {}) {
     attack_element: 'physical', behavior_id: over.behaviorId,
     behavior_name: over.behaviorName || 'zzRungProfile', aggro_radius: 400, leash_radius: 800,
     chase_style: 'charge', preferred_range: 0, move_speed_mult: 1, damage_override: null,
-    aura_radius: 0, aura_damage_mult: 1, aura_defense_mult: 1, aura_speed_mult: 1,
     behavior_gold_min: over.behaviorGoldMin ?? 0, behavior_gold_max: over.behaviorGoldMax ?? 0,
     abilities: [],
   };

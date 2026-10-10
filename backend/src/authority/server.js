@@ -374,8 +374,8 @@ function drainAttacks(entry) {
 // SOMET-604 (S3): `et.auras AS aura_names, au.aura_defs` + AURAS_LATERAL carry
 // the entity-bound aura library (aura_effects) to addCreatures ->
 // resolveInstanceAuras -> applyAuras. Missing them, every entity-bound aura is
-// inert in the live game while unit tests stay green. b.aura_* stay readable
-// here until Task 5 drops them; nothing in the tick reads them any more.
+// inert in the live game while unit tests stay green. The old behaviour-row
+// aura columns were dropped by 1714440681000; this is the only aura source.
 const CREATURE_JOINED_SELECT = `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.facing, wc.home_x, wc.home_y,
                 wc.level, wc.damage, wc.blocks_portal_id,
                 wc.charmed_by_character_id, wc.charm_expires_at, ch.user_id AS charm_owner_user_id,
@@ -392,7 +392,6 @@ const CREATURE_JOINED_SELECT = `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.fac
                 et.auras AS aura_names, au.aura_defs,
                 b.name AS behavior_name, b.aggro_radius, b.leash_radius,
                 b.chase_style, b.preferred_range, b.move_speed_mult, b.damage_override,
-                b.aura_radius, b.aura_damage_mult, b.aura_defense_mult, b.aura_speed_mult,
                 b.gold_min AS behavior_gold_min, b.gold_max AS behavior_gold_max,
                 ab.abilities
          FROM world_creatures wc
@@ -1291,8 +1290,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // carries no competing et.gold_min/et.gold_max to collide with --
       // resolveBehavior (shared with loadCreatureTypes, where the collision
       // IS real) reads that one alias unconditionally, so both SELECTs must
-      // agree on it. b.aura_* columns have no collision anywhere and stay
-      // unaliased, same as aggro_radius/leash_radius/etc.
+      // agree on it.
       //
       // The SELECT/FROM/JOIN text lives in CREATURE_JOINED_SELECT (module
       // scope, above attachAuthority) rather than inline here, so

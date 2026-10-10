@@ -275,15 +275,13 @@ async function loadCreatureTypes(pool) {
   // creatureGold below) -- an unaliased pair would collide into a single
   // "gold_min" key with the later column silently winning, corrupting
   // creatureGold with the per-rung fallback instead of the per-creature
-  // value. b.aura_* columns have no such collision and stay unaliased, same
-  // as aggro_radius/leash_radius/etc above.
+  // value.
   const r = await pool.query(
     `SELECT e.id, e.name, e.color, e.hp, e.defense, e.resistances, e.faction,
             e.gold_min, e.gold_max, e.attack_element, e.behavior_id,
             b.name AS behavior_name,
             b.aggro_radius, b.leash_radius, b.chase_style, b.preferred_range,
             b.move_speed_mult, b.damage_override,
-            b.aura_radius, b.aura_damage_mult, b.aura_defense_mult, b.aura_speed_mult,
             b.gold_min AS behavior_gold_min, b.gold_max AS behavior_gold_max,
             ab.abilities
      FROM entity_types e

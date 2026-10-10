@@ -100,9 +100,9 @@ const DEFAULT_DENSITY = 'normal';
 // behaviour loop and an EXPENSIVE unscoped pass -- applyAuras, O(sources x
 // all), running over the whole population every tick regardless of the
 // active chunk set. Leader count, not headcount, is what bends the curve, so
-// the population/leader sweep below deliberately varies leaders, using the
-// Champion behaviour (aura_radius 260, the only aura-carrying entry in the
-// catalog and what a later slice promotes pack masters into).
+// the population/leader sweep below deliberately varies leaders, using
+// Champion entities (pack_leader, radius 260, the only aura bound by default
+// and what a later slice promotes pack masters into).
 //
 // Measured 2026-08-16 on an AMD Ryzen 5 7530U (12 logical cores), backend/tests/
 // creature_tick_cost.test.js, CreatureSim.tick with a 3x3 active chunk block:
@@ -113,7 +113,7 @@ const DEFAULT_DENSITY = 'normal';
 // applyAuras is O(sources x all) and runs over the WHOLE population every
 // tick, outside the chunk gate -- so the leader count, not the headcount, is
 // what bends this curve. Slice B (pack masters use the Champion behaviour,
-// the only one with aura_radius > 0) must budget against the last two rows:
+// the only entities bound to an aura) must budget against the last two rows:
 // a single active area with 50 leaders already spends most of the 8ms
 // half-budget, and 200 leaders blows well past the whole 16ms frame budget.
 // The 5000-creature/6-leader decision row itself has headroom to spare.
