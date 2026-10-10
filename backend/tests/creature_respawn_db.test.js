@@ -155,6 +155,32 @@ test('the backstop enqueues the gap between target and live population', { skip:
   }
 });
 
+test('the backstop never queues a boss-tier type (SOMET-603)', { skip: !url }, async () => {
+  const pool = new Pool({ connectionString: url });
+  try {
+    await withWorld(pool, async (worldId) => {
+      await pool.query(
+        `UPDATE worlds SET allowed_creature_types = '["Ignis, the Magma Colossus","Wolf"]'::jsonb WHERE id = $1`,
+        [worldId],
+      );
+      const row = (await pool.query('SELECT * FROM worlds WHERE id = $1', [worldId])).rows[0];
+
+      const enqueued = await enqueueDeficit(pool, { worldRow: row, world: fakeWorldConfig() });
+      assert.ok(enqueued > 0, 'nothing queued -- the negative assertion below would be vacuous');
+
+      const wolves = await pool.query(
+        `SELECT count(*)::int AS n FROM creature_respawns WHERE world_id = $1 AND type = 'Wolf'`, [worldId]);
+      assert.ok(wolves.rows[0].n > 0, 'the ordinary allowed type must actually be queued');
+      const bosses = await pool.query(
+        `SELECT count(*)::int AS n FROM creature_respawns WHERE world_id = $1 AND type = 'Ignis, the Magma Colossus'`,
+        [worldId]);
+      assert.equal(bosses.rows[0].n, 0, 'a boss-tier type must never be queued by the deficit refill');
+    });
+  } finally {
+    await pool.end();
+  }
+});
+
 test('the backstop enqueues nothing for a world already at target', { skip: !url }, async () => {
   const pool = new Pool({ connectionString: url });
   try {
