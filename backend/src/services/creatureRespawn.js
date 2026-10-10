@@ -272,9 +272,12 @@ async function enqueueDeficit(pool, { worldRow, world }) {
     ? worldRow.allowed_creature_types : [];
   if (allowedNames.length === 0) return 0;
 
+  // SOMET-603: boss-tier rows are placed by their own owners (WorldBossManager,
+  // S9's map-spec `boss` block), never scattered -- same structural exclusion
+  // as the guard filter below, done in SQL because boss_tier is not selected.
   const et = await pool.query(
     `SELECT name, hp, defense, resistances, faction FROM entity_types
-      WHERE is_creature = true AND name = ANY($1::text[])`,
+      WHERE is_creature = true AND boss_tier IS NULL AND name = ANY($1::text[])`,
     [allowedNames],
   );
   // Same exclusion populateWorld applies: a guard-faction type rolled into the
