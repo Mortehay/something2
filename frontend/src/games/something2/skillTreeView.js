@@ -170,6 +170,23 @@ export function dragEnd(state) {
   return { ...state, pressed: false };
 }
 
+// A press released OUTSIDE the svg before it became a drag (so before the
+// capture) never reaches the svg's onPointerUp. The window still hears it, so
+// the tree listens there too, on pointerup and pointercancel, and ends the
+// press in `dragRef` (a React ref). dragEnd is idempotent, so a release that
+// arrives both ways is harmless, and it keeps `moved`, so click gating is
+// unchanged. `target` is the window in the component and any EventTarget in a
+// test. Returns the cleanup, to hand straight back from a useEffect.
+export function endPressOnRelease(target, dragRef) {
+  const end = () => { dragRef.current = dragEnd(dragRef.current); };
+  target.addEventListener('pointerup', end);
+  target.addEventListener('pointercancel', end);
+  return () => {
+    target.removeEventListener('pointerup', end);
+    target.removeEventListener('pointercancel', end);
+  };
+}
+
 // Whether the click may act. A click after a moved press is the tail of the
 // drag and is swallowed -- once: the record is cleared with it.
 export function dragClick(state) {

@@ -4,6 +4,7 @@ import { SKILLS_BY_CLASS } from '../src/js/core/skillsData.js';
 import {
   indexArt, artFor, artCoverage, distinctLabels, treeBounds, zoomViewBox, panViewBox,
   artConsoleLink, clientToWorld, wheelZoom, onlyMissing, dragStart, dragMove, dragEnd, dragClick,
+  endPressOnRelease,
 } from '../skillTreeView.js';
 
 // SOMET-571. The Skill Tree tab's rules, testable without an SVG.
@@ -165,6 +166,61 @@ describe('wheelZoom', () => {
     const end = clientToWorld(b, rect, cx, cy);
     expect(end.x).toBeCloseTo(start.x, 9);
     expect(end.y).toBeCloseTo(start.y, 9);
+  });
+
+  // A step that zoomed the bounds every time keeps the focus fixed too, but
+  // never gets past one step's 1.2x. (A tree big enough that 12 steps stay
+  // clear of the MIN_W clamp.)
+  it('accumulates the zoom over a burst of chained steps', () => {
+    const big = { x: 0, y: 0, w: 2000, h: 2000 };
+    let b = null;
+    for (let i = 0; i < 12; i += 1) b = wheelZoom(b, big, rect, 333, 177, 1.2);
+    expect(b.w).toBeCloseTo(big.w / 1.2 ** 12, 9);
+  });
+
+  it('zooms the box it is given once the user has zoomed, not the bounds', () => {
+    const box = { x: 50, y: 20, w: 80, h: 40 };
+    const focus = clientToWorld(box, rect, 600, 300);
+    expect(wheelZoom(box, bounds, rect, 600, 300, 2)).toEqual(zoomViewBox(box, 2, focus.x, focus.y));
+  });
+});
+
+// SOMET-571 re-validation: a press released outside the svg before it became
+// a drag never reaches the svg's onPointerUp; the window must end it, on
+// pointerup AND pointercancel, and stop listening on unmount.
+describe('endPressOnRelease', () => {
+  const pressed = () => dragStart(10, 10);
+
+  for (const type of ['pointerup', 'pointercancel']) {
+    it(`a window ${type} ends the press`, () => {
+      const win = new EventTarget();
+      const ref = { current: pressed() };
+      endPressOnRelease(win, ref);
+      win.dispatchEvent(new Event(type));
+      expect(ref.current.pressed).toBe(false);
+      // A later move pans nothing, even one that reports a button held.
+      const { dx, dy } = dragMove(ref.current, 200, 200, 1);
+      expect([dx, dy]).toEqual([0, 0]);
+    });
+  }
+
+  it('keeps the moved record, so the click after a pan is still swallowed', () => {
+    const win = new EventTarget();
+    let s = pressed();
+    ({ state: s } = dragMove(s, 60, 10, 1));
+    const ref = { current: s };
+    endPressOnRelease(win, ref);
+    win.dispatchEvent(new Event('pointerup'));
+    expect(dragClick(ref.current).allow).toBe(false);
+  });
+
+  it('stops listening once the returned cleanup runs', () => {
+    const win = new EventTarget();
+    const ref = { current: pressed() };
+    endPressOnRelease(win, ref)();
+    win.dispatchEvent(new Event('pointerup'));
+    win.dispatchEvent(new Event('pointercancel'));
+    expect(ref.current.pressed).toBe(true);
   });
 });
 

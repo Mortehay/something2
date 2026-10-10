@@ -26,6 +26,7 @@ import { SECTOR_HUES, nodeRadius, grantLine } from './src/js/systems/passiveTree
 import {
   indexArt, artFor, artCoverage, distinctLabels, onlyMissing,
   treeBounds, panViewBox, wheelZoom, artConsoleLink, dragStart, dragMove, dragEnd, dragClick,
+  endPressOnRelease,
 } from './skillTreeView.js';
 import AdminLoading from './AdminLoading.jsx';
 
@@ -73,14 +74,18 @@ const Swatch = styled.span`
   display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 0.3rem;
   vertical-align: middle;
 `;
-const TreeRow = styled.div`display: grid; grid-template-columns: 1fr 260px; gap: 1rem; align-items: start;`;
+// The side card wraps BELOW the tree when the row is too narrow for both. A
+// fixed "1fr 260px" grid squeezed the tree's column to 0 px at phone width.
+const TreeRow = styled.div`display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-start;`;
 const TreeFrame = styled.div`
+  flex: 1 1 480px; min-width: 0;
   border: 1px solid var(--s2-border); border-radius: 8px; overflow: hidden;
   height: 640px; touch-action: none; user-select: none;
   svg { display: block; width: 100%; height: 100%; cursor: grab; }
   svg:active { cursor: grabbing; }
 `;
 const Side = styled.div`
+  flex: 0 1 260px; max-width: 100%;
   background: var(--s2-surface-raised); border: 1px solid var(--s2-border); border-radius: 8px;
   padding: 0.75rem; font-size: 0.85rem; min-height: 120px;
   h3 { margin: 0 0 0.4rem 0; font-size: 0.95rem; color: var(--s2-text-strong); }
@@ -92,7 +97,7 @@ const SideThumb = styled.div`
   margin: 0.5rem 0;
 `;
 const Grid = styled.div`
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 0.5rem;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); gap: 0.5rem;
 `;
 const Card = styled.button`
   display: flex; gap: 0.6rem; align-items: center; text-align: left;
@@ -201,20 +206,10 @@ function TreeGraph({ nodes, edges, art, dimLabels, onHover, onPick }) {
   };
   const onPointerUp = () => { drag.current = dragEnd(drag.current); };
 
-  // A press released OUTSIDE the svg before it became a drag (so before the
-  // capture) never reaches onPointerUp above. The window still hears it, and
-  // the press ends there; dragEnd is idempotent, so a release on the svg that
-  // arrives both ways is harmless. dragMove's buttons===0 check covers a
+  // A press released OUTSIDE the svg never reaches onPointerUp above; the
+  // window ends it (endPressOnRelease). dragMove's buttons===0 check covers a
   // release the window missed too (e.g. outside the browser window).
-  useEffect(() => {
-    const end = () => { drag.current = dragEnd(drag.current); };
-    window.addEventListener('pointerup', end);
-    window.addEventListener('pointercancel', end);
-    return () => {
-      window.removeEventListener('pointerup', end);
-      window.removeEventListener('pointercancel', end);
-    };
-  }, []);
+  useEffect(() => endPressOnRelease(window, drag), []);
 
   const pick = (node) => {
     const { state, allow } = dragClick(drag.current);
@@ -411,7 +406,7 @@ export default function SkillTreeAdmin() {
             {Object.entries(SECTOR_HUES).map(([sector, hue]) => (
               <span key={sector}><Swatch style={{ background: hue }} />{sector}</span>
             ))}
-            <span><Swatch style={{ background: GAME_TREE_BG, border: `2px solid ${GAME_MISSING}` }} />no art</span>
+            <span><Swatch style={{ background: GAME_TREE_BG, border: `2px solid ${GAME_MISSING}`, boxShadow: '0 0 0 1px var(--s2-swatch-border)' }} />no art</span>
           </Legend>
         </SectionHead>
         {treeError && <Err role="alert">{treeError.message}</Err>}
