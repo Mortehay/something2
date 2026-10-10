@@ -29,7 +29,7 @@ import {
   sortSubjects, freezeOrder, applyFilters, clampPage, pageCount, toggle, selectPage, deselectPage,
   isPageFullySelected, selectAllMatching, selectAllLabel, byKind, subjectId,
   enqueueSummary, coverage, selectionOutsideFilter, promptIneligibleCount, PAGE_SIZE, filtersFromParams,
-  joinInFlight,
+  joinInFlight, paramsFromFilters, startBatchBlocker,
 } from './artSelection.js';
 import {
   batchProgress, formatDuration, claimedAgo, partitionInFlight, previewNames, blockedPanel, singleFlight,
@@ -466,14 +466,26 @@ function ArtConsoleAdmin() {
 
   // SOMET-571. A deep link from the Skill Tree tab (`?kind=&art=&q=`) seeds
   // the filters; with no params these are the console's own defaults, art =
-  // missing being the resume filter. Read once at mount: the URL is a way IN,
-  // and the controls below own the state from then on.
-  const [searchParams] = useSearchParams();
-  const [initial] = useState(() => filtersFromParams(searchParams));
-  const [kind, setKind] = useState(initial.kind);
-  const [art, setArt] = useState(initial.art);
-  const [search, setSearch] = useState(initial.search);
+  // missing being the resume filter.
+  //
+  // SOMET-535: the filters ARE the URL, read every render and written back on
+  // change (replace, so typing a search is not one history entry per key).
+  // Read only at mount, browser back reset them to All kinds / Missing art.
+  // Same shape as AudioSlotTable: setSearchParams' functional form still
+  // hands the updater THIS render's params, so two changes in one tick would
+  // clobber each other; the ref carries the pending value between them.
+  const [searchParams, setSearchParams] = useSearchParams();
   const [page, setPage] = useState(1);
+  const filters = useMemo(() => filtersFromParams(searchParams), [searchParams]);
+  const { kind, art, search } = filters;
+  const pendingParams = useRef(searchParams);
+  useEffect(() => { pendingParams.current = searchParams; }, [searchParams]);
+  const setFilter = (patch) => {
+    const next = paramsFromFilters({ ...filtersFromParams(pendingParams.current), ...patch });
+    pendingParams.current = next;
+    setSearchParams(next, { replace: true });
+    setPage(1);
+  };
   const [selected, setSelected] = useState(new Set());
   const [backend, setBackend] = useState('connector');
   const [providerId, setProviderId] = useState('');
@@ -610,6 +622,7 @@ function ArtConsoleAdmin() {
     concurrency: 1,
   });
   const onStart = () => startBatch.mutate(startBody());
+  const startBlocker = startBatchBlocker({ backend, providerId, activeProvider });
   // A size refusal names the queued groups that block it. Offered as ONE
   // action -- drop exactly those, then start -- because the admin's intent is
   // "run what can run"; the dropped subjects can be re-queued on a 1024
@@ -683,14 +696,14 @@ function ArtConsoleAdmin() {
       <Bar>
         <Field>
           Kind
-          <select value={kind} onChange={(e) => { setKind(e.target.value); setPage(1); }}>
+          <select value={kind} onChange={(e) => setFilter({ kind: e.target.value })}>
             <option value="all">All kinds</option>
             {kinds.map((k) => <option key={k} value={k}>{k}</option>)}
           </select>
         </Field>
         <Field>
           Art
-          <select value={art} onChange={(e) => { setArt(e.target.value); setPage(1); }}>
+          <select value={art} onChange={(e) => setFilter({ art: e.target.value })}>
             <option value="missing">Missing art</option>
             <option value="has">Has art</option>
             <option value="failed">Last job failed</option>
@@ -699,7 +712,7 @@ function ArtConsoleAdmin() {
         </Field>
         <Field>
           Search
-          <input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+          <input value={search} onChange={(e) => setFilter({ search: e.target.value })}
             placeholder="name or key" />
         </Field>
         <Field>
@@ -709,6 +722,9 @@ function ArtConsoleAdmin() {
             <option value="local">Local sprite-gen</option>
           </select>
         </Field>
+        {backend === 'local' && (
+          <Hint>Drawn by the local sprite-gen service — no AI provider is used.</Hint>
+        )}
         {backend === 'connector' && (
           <Field>
             Provider
@@ -744,10 +760,8 @@ function ArtConsoleAdmin() {
         )}
         <Button
           onClick={onStart}
-          disabled={run?.running || !(providerId || activeProvider)}
-          title={!(providerId || activeProvider)
-            ? 'Choose a provider, or set an active one in AI Providers'
-            : undefined}
+          disabled={run?.running || Boolean(startBlocker)}
+          title={startBlocker || undefined}
         >
           {run?.running ? 'Running…' : 'Start batch'}
         </Button>

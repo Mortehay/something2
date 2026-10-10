@@ -400,7 +400,14 @@ function indexArt(rows) {
 //
 // A key that is no longer in the catalogue is reported back rather than
 // dropped: "I selected 100 and 97 were queued" needs an explanation.
-async function subjectsForEnqueue(db, kind, keys, { active = null, fallbackProviderId = null } = {}) {
+//
+// SOMET-535: each subject also carries its BACKEND. A Local run makes every
+// subject a local job with no provider; in a connector run, a type pinned to
+// 'local' becomes a local job too, rather than a connector job with no
+// provider that the dispatcher would then hand to the batch's remote.
+async function subjectsForEnqueue(db, kind, keys, {
+  active = null, fallbackProviderId = null, backend = 'connector',
+} = {}) {
   const reg = registryFor(kind);
   if (!reg) throw new Error(`unknown subject kind: ${kind}`);
   const byKey = new Map((await reg.list(db)).map((s) => [s.key, s]));
@@ -410,10 +417,16 @@ async function subjectsForEnqueue(db, kind, keys, { active = null, fallbackProvi
   for (const key of keys) {
     const s = byKey.get(key);
     if (!s) { unknown.push(key); continue; }
+    if (backend === 'local') {
+      subjects.push({ kind, key, providerId: null, backend: 'local', pinned: false });
+      continue;
+    }
     const row = s.row || {};
+    const providerId = pinnedProviderId(s, active, fallbackProviderId);
+    const pinnedLocal = providerId === null && row.ai_provider_mode === 'local';
     subjects.push({
-      kind, key,
-      providerId: pinnedProviderId(s, active, fallbackProviderId),
+      kind, key, providerId,
+      backend: pinnedLocal ? 'local' : 'connector',
       // The type's own provider pin decided this, not the console's pick --
       // which is what a refusal has to tell the admin to change (SOMET-594).
       pinned: row.ai_provider_mode === 'provider' && Number.isInteger(row.ai_provider_id),
@@ -457,8 +470,14 @@ function subjectKinds() {
   return Object.keys(SUBJECTS);
 }
 
+// Own properties only: SUBJECTS is a plain object, so `constructor`,
+// `__proto__` or `toString` would otherwise resolve to an inherited function
+// and reach the routes as a "registry" (a 500 instead of a 400).
 function registryFor(kind) {
-  return SUBJECTS[kind] || null;
+  if (typeof kind !== 'string' || !Object.prototype.hasOwnProperty.call(SUBJECTS, kind)) {
+    return null;
+  }
+  return SUBJECTS[kind];
 }
 
 // Every subject of a kind, annotated with whether it already has art -- which

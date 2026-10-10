@@ -3724,9 +3724,12 @@ app.post('/api/art-jobs', adminGuard, async (req, res) => {
     // EITHER is this a bad request -- and then the message says so, because
     // "provider_id is required" sends the admin looking for a field they
     // deliberately left on its default.
+    //
+    // SOMET-535: never for a LOCAL run. Local jobs are drawn by sprite-gen, and
+    // recording the active provider on them is how "Local" was drawn remotely.
     const chosen = bodyProviderId(req.body.provider_id);
     if (chosen.error) return res.status(400).json({ error: chosen.error });
-    const providerId = chosen.id || (active ? active.id : null);
+    const providerId = backend === 'connector' ? (chosen.id || (active ? active.id : null)) : null;
     if (backend === 'connector' && !providerId) {
       return res.status(400).json({
         error: 'no provider chosen and no active provider is set -- pick one in the '
@@ -3736,7 +3739,7 @@ app.post('/api/art-jobs', adminGuard, async (req, res) => {
     // A named provider must exist. Without this the enqueue hit the
     // art_jobs.provider_id foreign key and answered a bare 500 (SOMET-538
     // re-validation); /dispatch already answers the same mistake with a 404.
-    if (chosen.id) {
+    if (backend === 'connector' && chosen.id) {
       const { rows: found } = await pool.query(
         'SELECT 1 FROM ai_providers WHERE id = $1', [chosen.id]);
       if (found.length === 0) {
@@ -3744,7 +3747,7 @@ app.post('/api/art-jobs', adminGuard, async (req, res) => {
       }
     }
     const { subjects, unknown } = await catalogSubjects.subjectsForEnqueue(
-      pool, kind, keys, { active, fallbackProviderId: providerId },
+      pool, kind, keys, { active, fallbackProviderId: providerId, backend },
     );
 
     // SOMET-594. Refuse at the SOURCE. An object queued on a provider that
@@ -3753,7 +3756,8 @@ app.post('/api/art-jobs', adminGuard, async (req, res) => {
     // stranded. Checked per subject's RESOLVED provider, since a pinned type
     // goes to its pin rather than to the one picked in the console.
     if (backend === 'connector' && catalogSubjects.registryFor(kind).generationKind === 'object') {
-      const ids = [...new Set(subjects.map((s) => s.providerId).filter(Number.isInteger))];
+      const ids = [...new Set(subjects.filter((s) => s.backend !== 'local')
+        .map((s) => s.providerId).filter(Number.isInteger))];
       const { rows: provs } = await pool.query(
         "SELECT id, name, request_template FROM ai_providers WHERE modality = 'image'");
       const tooSmall = provs.filter((p) => ids.includes(p.id) && artDispatcher.providerSizeRefusal(p));
@@ -3871,21 +3875,40 @@ app.post('/api/art-jobs/dispatch', adminGuard, async (req, res) => {
     const chosen = bodyProviderId(req.body.provider_id);
     if (chosen.error) return res.status(400).json({ error: chosen.error });
     const providerId = chosen.id;
-    if (!providerId) return res.status(400).json({ error: 'provider_id is required' });
-    const provider = await aiProviders.loadImageProviderWithSecret(pool, providerId);
-    if (!provider) return res.status(404).json({ error: 'provider not found' });
+    // SOMET-535. A queue holding only LOCAL jobs needs no provider: sprite-gen
+    // draws them. Anything a connector would draw still needs one, and an
+    // empty queue keeps the old answer rather than starting a no-op drain.
+    let provider = null;
+    if (providerId) {
+      provider = await aiProviders.loadImageProviderWithSecret(pool, providerId);
+      if (!provider) return res.status(404).json({ error: 'provider not found' });
+    } else {
+      const { rows: [mix] } = await pool.query(
+        `SELECT count(*) FILTER (WHERE backend = 'local')::int AS local,
+                count(*) FILTER (WHERE backend <> 'local')::int AS connector
+           FROM art_jobs WHERE state = 'queued'`);
+      if (!mix || mix.connector > 0 || mix.local === 0) {
+        return res.status(400).json({
+          error: 'provider_id is required -- the queue holds connector jobs; '
+            + 'only a queue of local jobs can start without one',
+        });
+      }
+    }
 
     // The resolution precondition, against WHAT IS QUEUED rather than the
     // batch provider alone: each job carries its own provider pin. `blocked`
     // lists every queued (kind, provider) group that would be drawn below the
     // object minimum, so the console can offer to drop exactly those rows.
-    if (!artDispatcher.runStatus().running) {
+    if (!artDispatcher.runStatus().running && provider) {
       const refusal = await artDispatcher.objectSizeRefusal(pool, provider);
       if (refusal) throw refusal;
     }
 
     const status = artDispatcher.startDrain(pool, {
       provider,
+      // The same sprite-gen client the interactive local path uses (and the
+      // one __setSpriteGen swaps in tests), for backend='local' jobs.
+      deps: { spriteGen },
       limit: Math.min(Math.max(parseInt(req.body.limit, 10) || 10, 1), 100),
       // Defaults to ONE. The remote card's effective headroom is under one
       // SDXL pipeline, so two concurrent generations ask the driver for memory

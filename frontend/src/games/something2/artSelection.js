@@ -184,6 +184,26 @@ export function filtersFromParams(params) {
   };
 }
 
+// The inverse, omitting the console defaults so the plain tab URL stays plain.
+// SOMET-535: the console writes its filters back through this, so browser
+// back/forward and a reload land on the same table.
+export function paramsFromFilters({ kind, art, search }) {
+  const p = new URLSearchParams();
+  if (kind && kind !== 'all') p.set('kind', kind);
+  if (art && art !== 'missing') p.set('art', art);
+  if (search) p.set('q', search);
+  return p;
+}
+
+// Why Start batch cannot run, or null when it can. A LOCAL batch is drawn by
+// the sprite-gen service and needs no remote provider (SOMET-535); a connector
+// batch needs a chosen one or an active one.
+export function startBatchBlocker({ backend, providerId, activeProvider }) {
+  if (backend === 'local') return null;
+  if (providerId || activeProvider) return null;
+  return 'Choose a provider, or set an active one in AI Providers';
+}
+
 export function applyFilters(subjects, { kind = 'all', art = 'all', search = '' } = {}) {
   const q = search.trim().toLowerCase();
   return subjects.filter((s) => {

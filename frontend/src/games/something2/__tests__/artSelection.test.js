@@ -3,7 +3,7 @@ import {
   subjectId, sortSubjects, freezeOrder, clampPage, pageCount, toggle, selectPage, deselectPage,
   isPageFullySelected, selectAllMatching, selectAllLabel, byKind, applyFilters,
   enqueueSummary, coverage, selectionOutsideFilter, promptIneligibleCount, PAGE_SIZE, filtersFromParams,
-  joinInFlight,
+  joinInFlight, paramsFromFilters, startBatchBlocker,
 } from '../artSelection.js';
 
 const S = (kind, key, extra = {}) => ({ kind, key, name: key, has_art: false, ...extra });
@@ -341,5 +341,44 @@ describe('joinInFlight', () => {
     expect(slot.current).toBe(null);
     expect(await joinInFlight(slot, async () => 'again')).toBe('again');
     expect(slot.current).toBe(null);
+  });
+});
+
+// SOMET-535 validation, minor UX: the filters were read from the URL at mount
+// and never written back, so browser back reset them. The console now writes
+// them back; this is the inverse it uses.
+describe('paramsFromFilters', () => {
+  it('round-trips through filtersFromParams', () => {
+    const f = { kind: 'skill', art: 'failed', search: 'whirl' };
+    expect(filtersFromParams(paramsFromFilters(f))).toEqual(f);
+  });
+
+  it('omits the defaults so the plain tab URL stays plain', () => {
+    expect(paramsFromFilters({ kind: 'all', art: 'missing', search: '' }).toString()).toBe('');
+  });
+
+  it('writes the same names the Skill Tree deep link uses', () => {
+    expect(paramsFromFilters({ kind: 'skill', art: 'all', search: 'war_whirlwind' }).toString())
+      .toBe('kind=skill&art=all&q=war_whirlwind');
+  });
+});
+
+// SOMET-535 rework: under Local the batch is drawn by sprite-gen, so a missing
+// remote provider must not disable Start.
+describe('startBatchBlocker', () => {
+  it('needs a provider for a connector batch', () => {
+    expect(startBatchBlocker({ backend: 'connector', providerId: '', activeProvider: null }))
+      .toMatch(/provider/i);
+  });
+
+  it('is satisfied by the active provider or a chosen one', () => {
+    expect(startBatchBlocker({ backend: 'connector', providerId: '', activeProvider: { id: 1 } }))
+      .toBeNull();
+    expect(startBatchBlocker({ backend: 'connector', providerId: '3', activeProvider: null }))
+      .toBeNull();
+  });
+
+  it('does not need a provider for a local batch', () => {
+    expect(startBatchBlocker({ backend: 'local', providerId: '', activeProvider: null })).toBeNull();
   });
 });

@@ -10,6 +10,7 @@ const promptNotes = require('./artPromptNotes.js');
 const descriptions = require('./artPromptDescriptions.js');
 const subjectDescriber = require('./subjectDescriber.js');
 const failures = require('./artFailures.js');
+const localArt = require('./localArtGenerator.js');
 const {
   buildObjectPrompt, BACKDROP, CUTOUT_BACKDROP, OBJECT_NEGATIVES,
 } = require('./objectPrompt.js');
@@ -171,11 +172,16 @@ async function requestForSubject(db, job, subject, reg, provider) {
       db, job.subject_kind, job.subject_key, subject.basePrompt,
     );
 
-  const prompt = reg.composePrompt
-    ? await reg.composePrompt(db, subject)
-    : buildObjectPrompt(phrase, {
-      backdrop: backdropFor(provider), corrections,
-    });
+  // SOMET-535. The LOCAL backend gets the plain subject phrase: sprite-gen's
+  // build_object_prompt adds its own isolated-object framing and keys a WHITE
+  // backdrop, so the remote wrapper (magenta backdrop, "only X and nothing
+  // else") would double-frame it and name the wrong backdrop colour. A tile's
+  // composed biome prompt is what the interactive local path sends too.
+  const isLocal = Boolean(provider && provider.local);
+  let prompt;
+  if (reg.composePrompt) prompt = await reg.composePrompt(db, subject);
+  else if (isLocal) prompt = phrase;
+  else prompt = buildObjectPrompt(phrase, { backdrop: backdropFor(provider), corrections });
 
   const req = {
     subject: subject.name || subject.key,
@@ -198,7 +204,7 @@ async function requestForSubject(db, job, subject, reg, provider) {
   // isolated subject and does not tile-repeat the way an off-native object
   // does; forcing 1024 on the terrain provider would change working art for
   // no reason. Honoured only by a {{width}} template either way.
-  if (generationKind === 'object') {
+  if (generationKind === 'object' && !isLocal) {
     req.width = MIN_OBJECT_PX();
     req.height = MIN_OBJECT_PX();
   }
@@ -304,6 +310,13 @@ async function runOne(db, job, {
     if (!reg) return fail(`unknown subject kind: ${job.subject_kind}`);
     req = await requestForSubject(db, job, subject, reg, provider);
     generationKind = reg.generationKind;
+  }
+
+  // A connector job with no provider to send it to (a local-only drain that
+  // met a connector row) fails with the reason instead of crashing inside the
+  // provider call.
+  if (!provider && !buildRequest) {
+    return fail(`no AI provider for this connector job -- start the batch with a provider`);
   }
 
   registryId = remote.createJob();
@@ -457,8 +470,11 @@ async function objectSizeRefusal(db, provider, subjects = catalogSubjects, loadP
   // pin, so the provider a subject will use is not necessarily the one this
   // batch was started with.
   const { rows } = await db.query(
+    // Local rows are exempt: the 1024 rule is about SDXL on a remote provider,
+    // and sprite-gen picks its own size. Counting them would refuse -- or
+    // offer to delete -- local work against a provider it never touches.
     `SELECT subject_kind, provider_id, count(*)::int AS n
-       FROM art_jobs WHERE state = 'queued'
+       FROM art_jobs WHERE state = 'queued' AND backend <> 'local'
       GROUP BY subject_kind, provider_id ORDER BY subject_kind, provider_id`);
   // EVERY blocking group, not the first. The console offers to drop exactly
   // these rows so the rest of the queue can run, and a refusal that named one
@@ -550,6 +566,8 @@ async function dispatch(db, {
   concurrency = DEFAULT_CONCURRENCY(),
   onResult = null,
   generate,
+  // SOMET-535. What draws a backend='local' job; injected by tests.
+  localGenerate = localArt.runGeneration,
   buildRequest,
   writeArt,
   subjects = catalogSubjects,
@@ -607,13 +625,24 @@ async function dispatch(db, {
       cursor += 1;
       if (i >= claimed.length) return;
       const job = claimed[i];
+      // SOMET-535. art_jobs.backend decides WHO draws it. A 'local' job goes
+      // to sprite-gen and is never resolved to the batch's remote provider --
+      // that fallback is how "Local" jobs used to be drawn remotely.
+      const isLocal = job.backend === 'local';
       // The job's own provider, not the batch's, when its type is pinned.
-      const jobProvider = buildRequest
-        ? provider
-        : await resolveJobProvider(db, job.provider_id, provider, loadProvider);
+      let jobProvider = provider;
+      if (isLocal) jobProvider = localArt.LOCAL_PROVIDER;
+      else if (!buildRequest) {
+        jobProvider = await resolveJobProvider(db, job.provider_id, provider, loadProvider);
+      }
       const result = await runOne(db, job, {
-        provider: jobProvider, generate, buildRequest, writeArt, resolveSubject,
-        subjects, deps,
+        provider: jobProvider,
+        generate: isLocal ? localGenerate : generate,
+        buildRequest,
+        writeArt,
+        resolveSubject,
+        subjects,
+        deps,
       });
       results.push(result);
       // Checked the instant a result lands, so the pass stops on the third
