@@ -541,7 +541,7 @@ export default function WorldBossTestPanel({ gameRef }) {
                     $bg="rgba(255, 71, 87, 0.15)"
                     $border="rgba(255, 71, 87, 0.4)"
                     $color="#ff6b81"
-                    onClick={() => sendAction('spawn', { bossIndex: 0 })}
+                    onClick={() => sendAction('spawn', { bossName: 'Ignis, the Magma Colossus' })}
                   >
                     🔥 Spawn Ignis (Fire)
                   </ActionBtn>
@@ -549,7 +549,7 @@ export default function WorldBossTestPanel({ gameRef }) {
                     $bg="rgba(112, 161, 255, 0.15)"
                     $border="rgba(112, 161, 255, 0.4)"
                     $color="#70a1ff"
-                    onClick={() => sendAction('spawn', { bossIndex: 1 })}
+                    onClick={() => sendAction('spawn', { bossName: 'Glacius, the Frost Leviathan' })}
                   >
                     ❄️ Spawn Glacius (Ice)
                   </ActionBtn>
@@ -557,7 +557,7 @@ export default function WorldBossTestPanel({ gameRef }) {
                     $bg="rgba(165, 94, 234, 0.15)"
                     $border="rgba(165, 94, 234, 0.4)"
                     $color="#a55eea"
-                    onClick={() => sendAction('spawn', { bossIndex: 2 })}
+                    onClick={() => sendAction('spawn', { bossName: 'Abyssor, the Voidreaver' })}
                   >
                     🔮 Spawn Abyssor (Void)
                   </ActionBtn>
@@ -565,7 +565,7 @@ export default function WorldBossTestPanel({ gameRef }) {
                     $bg="rgba(236, 204, 104, 0.15)"
                     $border="rgba(236, 204, 104, 0.4)"
                     $color="#eccc68"
-                    onClick={() => sendAction('spawn', { bossIndex: 3 })}
+                    onClick={() => sendAction('spawn', { bossName: 'Gorgon, the Thunder Titan' })}
                   >
                     ⚡ Spawn Gorgon (Thunder)
                   </ActionBtn>

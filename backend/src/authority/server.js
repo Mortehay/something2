@@ -44,7 +44,7 @@ const { buyStock, sellItem } = require('./trade');
 const { respawnDueCreatures, enqueueDeficit, CREATURE_SWEEP_MS } = require('../services/creatureRespawn');
 const { consumeAmmo, ammoCount } = require('./ammo');
 const { PICKUP_RADIUS } = require('./groundItems');
-const { WorldBossManager, dropLegendaryItemForPlayer, resolveArena } = require('./worldBoss');
+const { WorldBossManager, dropLegendaryItemForPlayer } = require('./worldBoss');
 
 // SOMET-473 -- the Druid's charm (spec 8.2, contract §6.5).
 //
@@ -489,6 +489,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
     bossWarningMs: opts.bossWarningMs,
     rng,
   });
+  // SOMET-603: the rotation's bosses are catalog rows. Fire-and-forget:
+  // refreshCatalog never rejects, and an empty catalog just idles the event.
+  worldBossManager.refreshCatalog();
 
   // Every inbound frame this protocol defines is a small flat JSON object
   // (join/attack/equip/pickup/drop/interact/buy/sell/input/ping) — the
@@ -925,7 +928,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
     const deadCreature = entry.world && entry.world.creatures && entry.world.creatures.get
       ? entry.world.creatures.get(id)
       : null;
-    if (id === worldBossManager.bossCreatureId || (deadCreature && deadCreature.isWorldBoss)) {
+    if (id === worldBossManager.bossCreatureId || (deadCreature && deadCreature.bossTier === 'world')) {
       worldBossManager.onCreatureDeath(entry, deadCreature, killerUserId, {
         pool,
         broadcastFn: (frame) => {
@@ -2766,28 +2769,19 @@ function attachAuthority(httpServer, pool, opts = {}) {
         }
       };
 
+      // SOMET-603: the boss is picked BY NAME from the catalog (bossIndex
+      // referenced a JS constant server.js never imported -- every spawn
+      // button threw ReferenceError -- and _planNextBoss overwrote the
+      // choice anyway).
+      const bossName = typeof msg.bossName === 'string' && msg.bossName !== '' ? msg.bossName : null;
       if (action === 'spawn') {
-        worldBossManager.state = 'warning';
-        worldBossManager.nextSpawnTime = now - 1;
-        if (msg.bossIndex !== undefined && WORLD_BOSS_CATALOG[msg.bossIndex]) {
-          worldBossManager.currentBoss = { ...WORLD_BOSS_CATALOG[msg.bossIndex] };
+        if (!worldBossManager.forceSpawn(now, worlds, { bossName, preferredWorldId: ws.worldId }, broadcastAll)) {
+          send(ws, { type: 'error', message: 'no world boss in the catalog' });
         }
-        const currentEntry = ws.worldId ? worlds.get(ws.worldId) : null;
-        const currentKey = (currentEntry && currentEntry.row && (currentEntry.row.key || currentEntry.row.canonical_id)) || '';
-        const currentName = (currentEntry && currentEntry.row && currentEntry.row.name) || '';
-        if (currentEntry && resolveArena(currentKey, currentName)) {
-          worldBossManager._planNextBoss(worlds, ws.worldId);
-        } else {
-          worldBossManager._planNextBoss(worlds);
-        }
-        worldBossManager._spawnBoss(now, worlds, broadcastAll);
       } else if (action === 'warning') {
-        worldBossManager.state = 'idle';
-        worldBossManager.nextSpawnTime = now + (Number(msg.seconds || 120) * 1000);
-        if (msg.bossIndex !== undefined && WORLD_BOSS_CATALOG[msg.bossIndex]) {
-          worldBossManager.currentBoss = { ...WORLD_BOSS_CATALOG[msg.bossIndex] };
+        if (!worldBossManager.forceWarning(now, worlds, { bossName, seconds: Number(msg.seconds || 120) }, broadcastAll)) {
+          send(ws, { type: 'error', message: 'no world boss in the catalog' });
         }
-        worldBossManager.tick(now, worlds, broadcastAll);
       } else if (action === 'slay') {
         if (worldBossManager.state === 'active' && worldBossManager.bossCreatureId) {
           const entry = worlds.get(worldBossManager.activeWorldId);
@@ -2857,8 +2851,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
         worldBossManager.warningSent = false;
       } else if (action === 'teleport_to_boss') {
         if (worldBossManager.state !== 'active' || !worldBossManager.activeWorldId) {
-          worldBossManager._planNextBoss(worlds);
-          worldBossManager._spawnBoss(now, worlds, broadcastAll);
+          if (!worldBossManager.forceSpawn(now, worlds, {}, broadcastAll)) {
+            send(ws, { type: 'error', message: 'no world boss in the catalog' });
+            return;
+          }
         }
         const targetWorldId = worldBossManager.activeWorldId;
         const targetEntry = worlds.get(targetWorldId);

@@ -1355,6 +1355,11 @@ class CreatureSim {
   // `all()` would work but forces a full-map copy per swing, and `has()`
   // alone can't hand back the object. Named `get` to match the Map it wraps.
   get(id) { return this.creatures.get(id); }
+  // SOMET-603: SILENT removal (no death sfx, no kill accounting) for an
+  // instance its owner retires -- a world boss that timed out or was
+  // force-despawned. worldBoss.js and server.js's debug `slay` always called
+  // creatures.remove(); it never existed, so those bosses stayed in the world.
+  remove(id) { return this.creatures.delete(id); }
 
   // SOMET-473 -- take control of a creature. Returns false for an id this sim
   // does not hold, so the caller can tell "charmed" from "that creature is
