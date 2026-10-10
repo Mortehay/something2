@@ -465,3 +465,93 @@ lockedTest('the breaker stops the PASS at its threshold, not at the claim limit'
       assert.equal(r.worst, 0, 'neither group may be left holding a spent attempt');
     }
   });
+
+// SOMET-538 re-validation. The console's progress card divides run.done by
+// run.done + what is still owed. run.done used to be added once per PASS, from
+// dispatch()'s return value, so for the whole of a 10-job pass it sat at 0
+// while subjects landed in the catalogue -- live, the card read "0 of 41 · 0%"
+// beside a header showing 9 new images, then jumped at the pass boundary.
+// Observed from INSIDE the pass: the third generation reads the status while
+// the first two are already written.
+lockedTest('run.done counts each finished subject as it lands, not once per pass',
+  async (t, pool, providerId) => {
+    for (let i = 60; i <= 62; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await queue.enqueue(pool, [S(i)], { backend: 'connector', providerId });
+    }
+    dispatcher.__resetRun();
+    const draw = succeed();
+    let calls = 0;
+    let seenMidPass = null;
+    dispatcher.startDrain(pool, {
+      provider: PROVIDER(providerId),
+      generate: async (registryId, ...rest) => {
+        calls += 1;
+        if (calls === 3) seenMidPass = dispatcher.runStatus();
+        return draw(registryId, ...rest);
+      },
+      buildRequest,
+      // One pass holds all three, so a per-pass tally cannot move mid-run.
+      limit: 3,
+      concurrency: 1,
+    });
+    t.after(() => { dispatcher.stopDrain(); dispatcher.__resetRun(); });
+    for (let i = 0; i < 80 && dispatcher.runStatus().running; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((r) => { setTimeout(r, 50); });
+    }
+    const final = dispatcher.runStatus();
+    assert.equal(final.running, false, 'precondition: the drain must have finished');
+    assert.equal(calls, 3, 'precondition: all three subjects were drawn');
+    assert.equal(final.passes >= 1, true);
+    assert.ok(seenMidPass, 'precondition: the status was read during the third draw');
+    assert.equal(seenMidPass.done, 2,
+      'two subjects already written must already count while the third is drawing');
+    assert.equal(final.done, 3, 'and no subject is counted twice at the pass boundary');
+    assert.equal(final.failed, 0);
+  });
+
+// SOMET-538 re-validation. __resetRun used to null `run` and nothing else, so a
+// drain forgotten mid-pass kept looping with no handle left to stop it, and
+// claimed rows a LATER test queued -- art_jobs_api_db's 'clear also takes
+// claimed rows' intermittently counted 3 claimed where it made 2. Forgetting a
+// run must also stop it.
+lockedTest('a drain forgotten by __resetRun stops instead of claiming later work',
+  async (t, pool, providerId) => {
+    await queue.enqueue(pool, [S(70)], { backend: 'connector', providerId });
+    dispatcher.__resetRun();
+    const draw = succeed();
+    let calls = 0;
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    dispatcher.startDrain(pool, {
+      provider: PROVIDER(providerId),
+      generate: async (registryId, ...rest) => {
+        calls += 1;
+        if (calls === 1) await gate;
+        return draw(registryId, ...rest);
+      },
+      buildRequest,
+      limit: 1,
+      concurrency: 1,
+    });
+    t.after(() => { dispatcher.stopDrain(); dispatcher.__resetRun(); release(); });
+    for (let i = 0; i < 80 && calls === 0; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((r) => { setTimeout(r, 25); });
+    }
+    assert.equal(calls, 1, 'precondition: the drain is drawing its first subject');
+
+    dispatcher.__resetRun();
+    // What the next test would queue, while the forgotten drain is mid-pass.
+    await queue.enqueue(pool, [S(71), S(72)], { backend: 'connector', providerId });
+    release();
+    await new Promise((r) => { setTimeout(r, 1500); });
+
+    assert.equal(calls, 1, 'a forgotten drain must not start another generation');
+    const { rows } = await pool.query(
+      `SELECT subject_key, state FROM art_jobs WHERE subject_key IN ('sk_71','sk_72')
+        ORDER BY subject_key`);
+    assert.deepEqual(rows.map((r) => r.state), ['queued', 'queued'],
+      'work queued after the reset is left for the next drain');
+  });

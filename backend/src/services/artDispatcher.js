@@ -768,6 +768,12 @@ function startDrain(db, opts = {}) {
         // operator went looking for a dead GPU box that was answering fine.
         let lastCause = null;
         const onResult = (r) => {
+          // Counted HERE, per job, not from dispatch()'s return value. The
+          // pass returns only after all `limit` claimed jobs, so a per-pass
+          // tally sat at 0 while ten subjects landed in the catalogue and the
+          // console's progress card read "0 of 41" beside a header showing 9
+          // new images (SOMET-538 re-validation, observed live).
+          if (r.ok) self.done += 1; else self.failed += 1;
           if (r.ok) { brokenSubjects.clear(); return null; }
           // Only PROVIDER-class failures count. A subject whose cutout keyed
           // away its own image says nothing about the provider's health, and
@@ -787,8 +793,6 @@ function startDrain(db, opts = {}) {
           shouldStop: () => self.stopping,
         });
         self.passes += 1;
-        self.done += out.done;
-        self.failed += out.failed;
 
         // THE CIRCUIT BREAKER fired inside the pass; this only reports it.
         if (tripped) {
@@ -865,7 +869,17 @@ function retainBlocked(queued) {
 }
 
 // Tests only: forget the run so one case cannot leave another looking busy.
-function __resetRun() { run = null; }
+//
+// It STOPS the run it forgets. Nulling `run` alone left the drain's loop going
+// untracked: stopDrain() reads `run`, so once it was null nothing could stop
+// that loop, and it kept claiming whatever the NEXT test queued (SOMET-538:
+// art_jobs_api_db's freshPool after-hook resets before the test's own
+// stopDrain runs -- t.after is FIFO -- and 'clear also takes claimed rows'
+// then saw a third row claimed by a previous case's orphaned drain).
+function __resetRun() {
+  if (run) run.stopping = true;
+  run = null;
+}
 
 module.exports.startDrain = startDrain;
 module.exports.stopDrain = stopDrain;
