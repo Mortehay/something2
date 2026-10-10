@@ -44,6 +44,28 @@ make down      # stop everything
 
 Full command list: [.ai/commands.md](.ai/commands.md).
 
+## Worktrees
+
+Several agent sessions share this checkout at once, so **never** `checkout`,
+`stash`, `rebase` or `reset` in it — that rewrites files under another
+session's feet (the dev stack also hot-reloads from here). Branch work goes in
+a git worktree. Worktrees used to be created per task and never removed: 22
+piled up, VS Code listed every one, and a stale view of one showed 7255 staged
+"deletions" that were not real. So:
+
+- **One worktree per task, reused.** Run `git worktree list` first; if one
+  already holds your branch, work there instead of adding another.
+- **Remove it when the task ends** — merged, abandoned or handed off:
+  `git worktree remove <path>` then `git branch -d <branch>` (use `-D` only
+  after `git cherry origin/main <branch>` shows no `+` lines). Never `rm -rf` a
+  worktree. Run `git worktree prune` afterwards; scratchpad worktrees under
+  `/tmp` vanish on reboot and leave dead entries behind.
+- **Never remove a worktree you did not create.** Another session may be
+  mid-task in it. Uncommitted files, unmerged commits, or an index modified in
+  the last hour all mean it is live.
+- Link `backend/node_modules` and `frontend/node_modules` back to the main
+  checkout instead of reinstalling; `.gitignore` covers the symlinks.
+
 ## Plane workflow
 
 Work is tracked in Plane. The `plane-workflow` skill needs these values; they are
