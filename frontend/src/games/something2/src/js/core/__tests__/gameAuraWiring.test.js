@@ -18,4 +18,10 @@ describe("Game.js aura wiring (SOMET-606)", () => {
     expect(src).toMatch(/this\.auraDebuffRows\s*=\s*debuffHudEntries\(msg\.debuffs\)/);
     expect(src).toMatch(/activeBuffs:[^\n]*\.\.\.this\.auraDebuffRows/);
   });
+  it("world switch and frames without self reset the slow and rows", () => {
+    const init = src.slice(src.indexOf("async initChunked("));
+    expect(init.slice(0, 1500)).toMatch(/resetSelfAura\(this\)/);
+    const ws = src.slice(src.indexOf("this.selfSpeedMult = selfSpeedMult(msg)"));
+    expect(ws.slice(0, 6000)).toMatch(/else\s*\{\s*(\/\/[^\n]*\n\s*)*resetSelfAura\(this\)/);
+  });
 });

@@ -21,7 +21,7 @@ const pct = (m) => Math.round((1 - m) * 100);
 
 export function debuffHudEntries(debuffs) {
   if (!Array.isArray(debuffs) || debuffs.length === 0) return [];
-  return debuffs.map((d) => {
+  return debuffs.filter(Boolean).map((d) => {
     const parts = [];
     if (d.s < 1) parts.push(`-${pct(d.s)}% spd`);
     if (d.d < 1) parts.push(`-${pct(d.d)}% dmg`);
@@ -36,4 +36,12 @@ export function debuffHudEntries(debuffs) {
       detail: parts.join(" "),
     };
   });
+}
+
+// World entry / switch, or a state frame with no own entry: nothing is
+// slowing us and no debuff is showing until the server says so again.
+export function resetSelfAura(game) {
+  game.selfSpeedMult = 1;
+  if (game.player) game.player.auraSpeedMult = 1;
+  game.auraDebuffRows = [];
 }

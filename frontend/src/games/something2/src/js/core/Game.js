@@ -15,7 +15,7 @@ import { getStoredToken, parseJwt } from "../net/auth.js";
 import { reconcile } from "../net/reconcile.js";
 import { inputVector, movementKeys, facingFromVector } from "../entities/Player.js";
 import { PLAYER_SPEED_EFFECTIVE } from "./constants.js";
-import { selfSpeedMult, debuffHudEntries } from "./auraDebuffs.js";
+import { selfSpeedMult, debuffHudEntries, resetSelfAura } from "./auraDebuffs.js";
 import { aimVector, cursorToWorld } from "./aim.js";
 import { createInventory, applyJoined, applyEquipment, canEquipClient, typeOf, addItem, removeItem } from "./inventory.js";
 import { resolveDrop } from '../systems/inventoryPanel.js';
@@ -516,6 +516,8 @@ export class Game {
             console.error("Canvas not found!");
             return;
         }
+        // SOMET-606: a world switch must not carry the old world's slow / rows.
+        resetSelfAura(this);
         // Re-entry guard: if initChunked runs twice on the same Game instance
         // (double-click, retry after join timeout, StrictMode double-invoke),
         // tear down the previous run's leakable resources before starting a
@@ -1548,6 +1550,9 @@ export class Game {
                 this.player.y += errY * 0.25;
             }
             this._inputBuffer = out.buffer.length > 50 ? out.buffer.slice(-30) : out.buffer;
+        } else {
+            // SOMET-606: no own entry this frame -> no stale slow / debuff rows.
+            resetSelfAura(this);
         }
         if (mine) {
             this.localMana = mine.mana;
