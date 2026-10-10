@@ -31,6 +31,18 @@ export function missesSetFrom(missRows) {
   return new Set((missRows || []).map((m) => slotId(m.subject_kind, m.subject_key, m.slot)));
 }
 
+// SOMET-605 (spec 3.6): the slots ONE subject carries. A group whose kind
+// varies slots per subject (creature: boss slots only on boss rows) sends
+// `subjectSlots`; without it every subject carries every slot. A subject
+// missing from that map carries none. A demoted boss's boss-slot bindings are
+// therefore hidden here, never offered for deletion (ruling D-demote).
+export function slotEntriesFor(group, key) {
+  const entries = Object.entries((group && group.slots) || {});
+  if (!group || !group.subjectSlots) return entries;
+  const names = group.subjectSlots[key];
+  return names ? entries.filter(([s]) => names.includes(s)) : [];
+}
+
 // One row per (kind, key, slot), in registry order: kinds as the server lists
 // them, subjects as listed within a kind, slots in the kind's slot order. That
 // order never changes while a batch runs (clip counts and job states do), so
@@ -44,11 +56,10 @@ export function audioSlotRows(subjectsResponse, jobsBySlot, missesSet, uploadOnl
   const uploadOnly = uploadOnlyIds || new Set();
   const out = [];
   for (const group of subjectsResponse || []) {
-    const slots = Object.entries(group.slots || {});
     const filled = group.filledSlots || {};
     const prompts = group.promptStates || {};
     for (const key of group.subjects || []) {
-      for (const [slot, clipKind] of slots) {
+      for (const [slot, clipKind] of slotEntriesFor(group, key)) {
         const id = slotId(group.kind, key, slot);
         out.push({
           id,
@@ -335,11 +346,12 @@ export function normalizeCause(error) {
 export function jobsForKnownSubjects(jobRows, subjectsResponse) {
   const known = new Map();
   for (const g of subjectsResponse || []) {
-    known.set(g.kind, { keys: new Set(g.subjects || []), slots: g.slots || {} });
+    known.set(g.kind, { group: g, keys: new Set(g.subjects || []) });
   }
   return (jobRows || []).filter((j) => {
     const k = known.get(j.subject_kind);
-    return Boolean(k) && k.keys.has(j.subject_key) && Object.prototype.hasOwnProperty.call(k.slots, j.slot);
+    return Boolean(k) && k.keys.has(j.subject_key)
+      && slotEntriesFor(k.group, j.subject_key).some(([s]) => s === j.slot);
   });
 }
 

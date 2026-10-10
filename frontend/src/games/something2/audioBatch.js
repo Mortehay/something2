@@ -3,6 +3,8 @@
 // so the arithmetic here is testable without mounting a query hook or a
 // running drain.
 
+import { slotEntriesFor } from './audioSelection.js';
+
 // Claims order, mirrored from backend/src/services/audioJobQueue.js's
 // DRAIN_ORDER: music, then ambience, then the two SFX packs (realistic
 // before retro), so the box switches model as rarely as possible. Kept here
@@ -143,10 +145,14 @@ export function hasBatchActivity({ run, stats } = {}) {
 // registry still loading/empty) rather than throwing -- SubjectSounds must
 // keep rendering (its slot cards) even while useAudioSubjects() is loading or
 // errored.
-export function subjectSlotsFor(subjectsResponse, kind) {
+//
+// SOMET-605: with a `key`, only that subject's slots (boss slots show on boss
+// rows only); without one, the kind's whole slot list as before.
+export function subjectSlotsFor(subjectsResponse, kind, key) {
   const group = (subjectsResponse || []).find((g) => g.kind === kind);
   if (!group) return [];
-  return Object.entries(group.slots || {}).map(([slot, clipKind]) => ({ slot, clipKind }));
+  const entries = key === undefined ? Object.entries(group.slots || {}) : slotEntriesFor(group, key);
+  return entries.map(([slot, clipKind]) => ({ slot, clipKind }));
 }
 
 // Whether the jobs query is worth polling. Wider than "a drain is running"

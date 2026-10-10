@@ -5,7 +5,7 @@ import {
   slotId, audioSlotRows, jobsBySlotFrom, missesSetFrom, applyFilters, filtersFromParams, paramsFromFilters,
   PAGE_SIZE, pageCount, clampPage, toggle, selectPage, deselectPage, isPageFullySelected,
   selectAllMatching, selectionOutsideFilter, queueItems, enqueueSummary, normalizeCause, failedByCause,
-  soundText, MAX_JOB_ITEMS, chunkItems, queueInChunks, jobsForKnownSubjects, uploadOnlyCount,
+  soundText, MAX_JOB_ITEMS, chunkItems, queueInChunks, jobsForKnownSubjects, uploadOnlyCount, slotEntriesFor,
 } from '../audioSelection.js';
 
 // A registry response shaped like GET /api/audio/admin/subjects.
@@ -358,5 +358,40 @@ describe('uploadOnlyCount', () => {
   it('counts the upload-only rows a filter matched', () => {
     expect(uploadOnlyCount(applyFilters(rows, { sound: 'missing' }))).toBe(1);
     expect(uploadOnlyCount(applyFilters(rows, { kind: 'world' }))).toBe(0);
+  });
+});
+
+describe('per-subject slots (SOMET-605)', () => {
+  const creatureGroup = {
+    kind: 'creature', label: 'Creatures',
+    slots: { nearby: 'sfx', attack: 'sfx', hurt: 'sfx', death: 'sfx', spawn: 'sfx', presence: 'sfx', phase: 'sfx', enrage: 'sfx' },
+    subjects: ['Ignis', 'Slime'],
+    subjectSlots: {
+      Ignis: ['nearby', 'attack', 'hurt', 'death', 'spawn', 'presence', 'phase', 'enrage'],
+      Slime: ['nearby', 'attack', 'hurt', 'death'],
+    },
+  };
+
+  it('a boss row lists 8 slot rows, an ordinary creature 4', () => {
+    const rows = audioSlotRows([creatureGroup]);
+    expect(rows.filter((r) => r.key === 'Ignis').map((r) => r.slot)).toEqual(['nearby', 'attack', 'hurt', 'death', 'spawn', 'presence', 'phase', 'enrage']);
+    expect(rows.filter((r) => r.key === 'Slime').map((r) => r.slot)).toEqual(['nearby', 'attack', 'hurt', 'death']);
+  });
+
+  it('a group without subjectSlots still lists every slot for every subject', () => {
+    const rows = audioSlotRows([{ kind: 'world', slots: { music: 'music', ambience: 'ambience' }, subjects: ['Vale'] }]);
+    expect(rows.map((r) => r.slot)).toEqual(['music', 'ambience']);
+  });
+
+  it('slotEntriesFor: a subject absent from subjectSlots gets nothing', () => {
+    expect(slotEntriesFor(creatureGroup, 'Ghost')).toEqual([]);
+  });
+
+  it('a job for an ordinary creature boss slot is not a known subject (no retry offered)', () => {
+    const jobs = [
+      { id: 1, subject_kind: 'creature', subject_key: 'Slime', slot: 'presence', status: 'failed' },
+      { id: 2, subject_kind: 'creature', subject_key: 'Ignis', slot: 'presence', status: 'failed' },
+    ];
+    expect(jobsForKnownSubjects(jobs, [creatureGroup]).map((j) => j.id)).toEqual([2]);
   });
 });

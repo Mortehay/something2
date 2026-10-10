@@ -167,6 +167,11 @@ export function useUpdateEntityType() {
       queryClient.invalidateQueries({ queryKey: ['mapConfig'] });
       // Aura Used-by lists are computed from entity bindings (SOMET-604).
       queryClient.invalidateQueries({ queryKey: ['auraEffects'] });
+      // SOMET-605: Boss tier decides which audio slots a creature carries;
+      // the Audio tab and the entity's Sounds section read them from here.
+      // Literal = useAudioAdmin.js SUBJECTS_KEY (not imported, to keep the
+      // audio hooks out of this module).
+      queryClient.invalidateQueries({ queryKey: ['audio-subjects'] });
       toast.success('Entity type updated!');
     },
     onError: (err) => toast.error(`Update failed: ${err.message}`)

@@ -67,7 +67,7 @@ function SubjectSounds({
 
   if (subjectsError) return <Err>{String(subjectsError.message)}</Err>;
 
-  const slots = subjectSlotsFor(subjects, kind);
+  const slots = subjectSlotsFor(subjects, kind, subjectKey);
   const subject = { kind, key: subjectKey };
   // The registry's per-subject cue map (game audio slice 3): undefined for a
   // kind with no `cues` at all (world, biome), which AudioSlotCard reads the
