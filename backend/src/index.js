@@ -3721,6 +3721,16 @@ app.post('/api/art-jobs', adminGuard, async (req, res) => {
           + 'Provider list, or mark a provider active under AI Providers',
       });
     }
+    // A named provider must exist. Without this the enqueue hit the
+    // art_jobs.provider_id foreign key and answered a bare 500 (SOMET-538
+    // re-validation); /dispatch already answers the same mistake with a 404.
+    if (Number.isInteger(req.body.provider_id)) {
+      const { rows: found } = await pool.query(
+        'SELECT 1 FROM ai_providers WHERE id = $1', [req.body.provider_id]);
+      if (found.length === 0) {
+        return res.status(404).json({ error: `provider ${req.body.provider_id} not found` });
+      }
+    }
     const { subjects, unknown } = await catalogSubjects.subjectsForEnqueue(
       pool, kind, keys, { active, fallbackProviderId: providerId },
     );

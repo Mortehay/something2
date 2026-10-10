@@ -201,6 +201,21 @@ lockedTest('POST /api/art-jobs queues a selection and reports what was already l
     assert.equal(rows[0].n, 5, 'a duplicate enqueue must not double the batch');
   });
 
+// SOMET-538 re-validation: a provider_id that names no provider was a 500 from
+// the art_jobs foreign key. The key is REAL, so the 404 can only come from the
+// provider check -- an unknown key would have answered 201 with queued 0.
+lockedTest('queueing on a provider that does not exist is a 404 and queues nothing',
+  async (t, pool) => {
+    const [skill] = await cs.SUBJECTS.skill.list();
+    const { rows: [{ max }] } = await pool.query('SELECT COALESCE(max(id), 0)::int AS max FROM ai_providers');
+    const res = await request(app).post('/api/art-jobs').set(...AUTH)
+      .send({ kind: 'skill', keys: [skill.key], provider_id: max + 1000 });
+    assert.equal(res.status, 404);
+    assert.match(res.body.error, /provider \d+ not found/);
+    const { rows } = await pool.query('SELECT count(*)::int n FROM art_jobs');
+    assert.equal(rows[0].n, 0, 'nothing may be queued');
+  });
+
 lockedTest('queueing rejects an empty selection and an unknown kind', async (t, pool, providerId) => {
   const empty = await request(app).post('/api/art-jobs').set(...AUTH)
     .send({ kind: 'skill', keys: [], provider_id: providerId });
