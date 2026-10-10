@@ -31,7 +31,7 @@ async function loadPromptCatalog(db) {
                      EXISTS (SELECT 1 FROM villages v WHERE v.world_id = w.id) AS has_village
                 FROM worlds w`),
     db.query('SELECT name, art_style FROM biomes'),
-    db.query('SELECT name, prompt FROM entity_types WHERE is_creature OR point_kind IS NOT NULL'),
+    db.query('SELECT name, prompt, boss_tier, element FROM entity_types WHERE is_creature OR point_kind IS NOT NULL'),
     db.query("SELECT name, category, req_level FROM item_types WHERE category = 'weapon'"),
     db.query("SELECT subject_kind, subject_key, text FROM art_prompt_descriptions WHERE active AND subject_kind IN ('entity', 'item', 'skill')"),
   ]);
@@ -81,8 +81,19 @@ function worldMusicStyle(w, name) {
   return MUSIC_STYLE_FOR_KIND[worldKind(w, name)] || null;
 }
 
+// SOMET-605: the boss slots are new words to the writer model; say what each
+// one is for. Only these four slots get a meaning, so every existing slot's
+// tail -- and therefore every stored prompt's source_input -- is unchanged.
+const BOSS_SLOT_MEANING = {
+  spawn: 'the boss appears',
+  presence: 'a loop that plays while the boss is on screen',
+  phase: 'the boss enters a new fight phase',
+  enrage: 'the boss becomes enraged',
+};
+
 function tail(slot, cue) {
-  return `; slot: ${slot}${cue ? `; sound cue: ${cue}` : ''}`;
+  const meaning = Object.hasOwn(BOSS_SLOT_MEANING, slot) ? ` (${BOSS_SLOT_MEANING[slot]})` : '';
+  return `; slot: ${slot}${meaning}${cue ? `; sound cue: ${cue}` : ''}`;
 }
 
 function buildContext(catalog, kind, key, slot, { cue = null } = {}) {
@@ -104,7 +115,11 @@ function buildContext(catalog, kind, key, slot, { cue = null } = {}) {
       const e = catalog.entities.get(key);
       if (!e) return null;
       const label = kind === 'creature' ? 'creature' : 'world point';
-      return `${label} "${key}"${looks(catalog, kind, key, stripImageStyling(e.prompt))}${tail(slot, cue)}`;
+      // SOMET-605: boss rows only, so an ordinary creature's string -- and its
+      // stored prompt's staleness -- does not move.
+      const boss = kind === 'creature' && e.boss_tier
+        ? `; boss tier: ${e.boss_tier}${e.element ? `; element: ${e.element}` : ''}` : '';
+      return `${label} "${key}"${boss}${looks(catalog, kind, key, stripImageStyling(e.prompt))}${tail(slot, cue)}`;
     }
     case 'item': {
       const it = catalog.items.get(key);

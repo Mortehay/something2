@@ -54,3 +54,28 @@ test('world kind against real worlds and villages', { skip }, async () => {
     assert.match(ctx.buildContext(cat, 'world', room.name, 'music'), /; type: dungeon room;/);
   } finally { await pool.end(); }
 });
+
+// SOMET-605: literals captured from the scratch DB BEFORE the change.
+test('SOMET-605: real ordinary creatures keep their exact prompt context', { skip }, async () => {
+  const pool = new Pool({ connectionString: url });
+  try {
+    const catalog = await ctx.loadPromptCatalog(pool);
+    assert.equal(ctx.buildContext(catalog, 'creature', 'Slime', 'hurt', { cue: 'hit' }),
+      'creature "Slime"; looks like: a translucent green slime blob; slot: hurt; sound cue: hit');
+    assert.equal(ctx.buildContext(catalog, 'creature', 'Wolf', 'hurt', { cue: 'hit' }),
+      'creature "Wolf"; looks like: a grey meadow wolf; slot: hurt; sound cue: hit');
+    assert.equal(ctx.buildContext(catalog, 'creature', 'Titan Brute', 'hurt', { cue: 'hit' }),
+      'creature "Titan Brute"; looks like: a hulking physical-touched titan creature; slot: hurt; sound cue: hit');
+  } finally { await pool.end(); }
+});
+
+test('SOMET-605: the real Ignis row reaches the boss branch', { skip }, async () => {
+  const pool = new Pool({ connectionString: url });
+  try {
+    const catalog = await ctx.loadPromptCatalog(pool);
+    const s = ctx.buildContext(catalog, 'creature', 'Ignis, the Magma Colossus', 'spawn');
+    assert.match(s, /; boss tier: world; element: fire;/);
+    assert.match(s, /slot: spawn \(/);
+    assert.doesNotMatch(ctx.buildContext(catalog, 'creature', 'Slime', 'hurt', { cue: 'hit' }), /boss tier/);
+  } finally { await pool.end(); }
+});
