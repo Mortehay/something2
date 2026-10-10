@@ -216,3 +216,26 @@ test('parseDungeonBoss keeps the four fields and rejects junk', () => {
     assert.equal(parseDungeonBoss(bad), null, JSON.stringify(bad));
   }
 });
+
+// Ruling N-1/P6 (S2 quietSpawn): a room that simply loads with its boss in it
+// is silent; a boss coming BACK after its timer announces itself once.
+const spawnSfx = (entry) => entry.world.creatures.sfx.filter((ev) => ev.e === 'spawn');
+
+test('world-load placement is quiet, a due sweep respawn plays exactly one spawn sfx', async () => {
+  const h = harness();
+  const e = h.newEntry();
+  const placed = await h.mgr.place(e, { quiet: true });
+  assert.ok(placed, 'the boss is placed');
+  assert.equal(spawnSfx(e).length, 0, 'world-load placement emits no spawn sfx');
+  assert.equal('quietSpawn' in placed, false, 'quietSpawn is an input flag, never stored');
+
+  kill(e, 'boss:w-1');
+  h.mgr.onDeath(e, 'boss:w-1', null);
+  e.world.creatures.sfx.length = 0;
+  h.advance(600_000);
+  assert.equal(await h.mgr.sweep(new Map([['w-1', e]])), 1);
+  const spawns = spawnSfx(e);
+  assert.equal(spawns.length, 1, 'a sweep respawn emits exactly one spawn sfx');
+  assert.equal(spawns[0].a, 'c:boss:w-1');
+  assert.equal('quietSpawn' in e.world.creatures.get('boss:w-1'), false, 'never stored on a respawn either');
+});

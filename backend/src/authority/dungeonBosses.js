@@ -130,11 +130,10 @@ class DungeonBossManager {
     const size = hydrated.hitboxSize ?? CREATURE_SIZE;
     hydrated.x = spec.x - size / 2;
     hydrated.y = spec.y - size / 2;
-    // >>> S2 REBASE (N-1/P6): S2 adds a `quietSpawn` addCreatures input flag
-    // that suppresses the boss spawn sound. After rebasing onto S2, set
-    // `hydrated.quietSpawn = quiet;` here. Until then there is no spawn sound
-    // to suppress and `quiet` is carried but unused. <<<
-    void quiet;
+    // N-1/P6: `quietSpawn` is an addCreatures INPUT flag (S2, SOMET-605) that
+    // suppresses the boss spawn sound; addCreatures never copies it onto the
+    // sim creature.
+    if (quiet) hydrated.quietSpawn = true;
     sim.addCreatures([hydrated]);
     const creature = sim.get(id) || null;
     this.records.set(worldId, { creatureId: id, deadUntil: null, creature, row, spec });
