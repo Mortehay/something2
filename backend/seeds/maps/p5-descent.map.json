@@ -116,7 +116,13 @@
         1,
         7
       ],
-      "density": "sparse"
+      "density": "sparse",
+      "boss": {
+        "entity": "Ossuary Warden",
+        "x": 4950,
+        "y": 4850,
+        "respawn_s": 600
+      }
     },
     {
       "key": "d1_gorge",
@@ -228,7 +234,13 @@
         1,
         7
       ],
-      "density": "sparse"
+      "density": "sparse",
+      "boss": {
+        "entity": "The Bone Regent",
+        "x": 4950,
+        "y": 5450,
+        "respawn_s": 900
+      }
     },
     {
       "key": "d2_hub",
@@ -714,7 +726,13 @@
         16,
         26
       ],
-      "density": "dense"
+      "density": "dense",
+      "boss": {
+        "entity": "Cinder Matriarch",
+        "x": 8150,
+        "y": 8050,
+        "respawn_s": 600
+      }
     },
     {
       "key": "d4_gorge",
@@ -826,7 +844,13 @@
         16,
         26
       ],
-      "density": "dense"
+      "density": "dense",
+      "boss": {
+        "entity": "The Ember Queen",
+        "x": 8150,
+        "y": 8650,
+        "respawn_s": 900
+      }
     },
     {
       "key": "d5_hub",
@@ -1312,7 +1336,13 @@
         41,
         50
       ],
-      "density": "swarm"
+      "density": "swarm",
+      "boss": {
+        "entity": "Shade Herald",
+        "x": 11350,
+        "y": 11250,
+        "respawn_s": 600
+      }
     },
     {
       "key": "d7_gorge",
@@ -1424,7 +1454,13 @@
         41,
         50
       ],
-      "density": "swarm"
+      "density": "swarm",
+      "boss": {
+        "entity": "The Umbral Gatekeeper",
+        "x": 11350,
+        "y": 11850,
+        "respawn_s": 900
+      }
     },
     {
       "key": "d8_hub",

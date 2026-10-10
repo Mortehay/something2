@@ -103,6 +103,21 @@ function returnPortalPlacement(world) {
   return { x: (c - 3) * 100 + 50, y: (c - 3) * 100 + 50 };
 }
 
+// SOMET-609 (S9). Where a dungeon boss stands, one tile EAST of the room's
+// centre column. End: 6 tiles SOUTH of the centre-tile exit portal, so the walk
+// from the W doorway to that portal passes through its aggro radius without
+// stacking it on the portal guard. Elite: the centre row (Elite rooms have no
+// portal). The east shift is not cosmetic: the dead-centre tile (c, c) and
+// (c+6, c) sit under a blocking decoration in d1_end / d1_elite, which
+// seed-map's decoration-aware assertNavigable refuses (a probe of +-6 tiles
+// showed c+1 is clear in all six rooms). requiredTilesFor lists the post, so a
+// re-roll that blocks it fails loudly at seed time.
+function bossPlacement(world, room) {
+  const c = world.width / 2;
+  const row = room === 'end' ? c + 6 : c;
+  return { x: (c + 1) * 100 + 50, y: row * 100 + 50 };
+}
+
 // A "{Line} {Rung}" name, exactly gen-p4-bestiary.js's convention -- every
 // one of the 288 P4 creatures is named this way.
 function creatureName(line, rung) { return `${line} ${rung}`; }
@@ -544,6 +559,17 @@ function generateSpec() {
     w.village = entryVillageBox(w.width, villageKeyFor(w.name));
   }
 
+  // SOMET-609: dungeon bosses, from content.js. Stamped after sizing because
+  // the post depends on the room's final size. A typo'd room key throws rather
+  // than silently producing a dungeon with no boss.
+  for (const { dungeon } of dungeonBuilds) {
+    for (const [room, b] of Object.entries(dungeon.bosses || {})) {
+      const w = sizedByKey.get(`${dungeon.key}_${room}`);
+      if (!w) throw new Error(`${dungeon.key}.bosses.${room}: no world ${dungeon.key}_${room}`);
+      w.boss = { entity: b.entity, ...bossPlacement(w, room), respawn_s: b.respawn_s };
+    }
+  }
+
   // The sole is_entry world spawns new characters at its centre.
   const d1Entry = sizedByKey.get(d1EntryKey);
   d1Entry.entry_spawn = {
@@ -672,5 +698,5 @@ function writeOutput() {
   console.log(`Wrote ${spec.worlds.length} worlds, ${spec.links.length} links to ${outPath}`);
 }
 
-module.exports = { generateSpec, portalCenterPx, entryVillageBox, villageKeyFor };
+module.exports = { generateSpec, portalCenterPx, entryVillageBox, villageKeyFor, bossPlacement };
 if (require.main === module) writeOutput();
