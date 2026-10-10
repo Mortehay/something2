@@ -192,6 +192,26 @@ export function runStopWarning(run) {
   return `Batch stopped (${reason}): ${detail} — fix the cause, then press Start to resume.`;
 }
 
+// A slot card's job line (SOMET-592). A job left 'queued' when the drain
+// ended -- a breaker trip, no provider, a fault, Stop, or a drain that never
+// started -- will not move until someone presses Start, so "queued" alone
+// reads as "about to run" when it is not. The line says the drain stopped,
+// and why when the run recorded a reason.
+export function slotJobText(job, run) {
+  if (!job) return null;
+  if (job.status === 'failed') return job.error ? `Job: failed — ${job.error}` : 'Job: failed';
+  if (job.status !== 'queued' || (run && run.running)) return `Job: ${job.status}`;
+  const reason = run && run.stopped_reason;
+  const detail = (run && run.error) || 'no detail';
+  if (reason === 'breaker') {
+    return `Job: queued — the drain stopped after repeated provider failures (${detail}); press Start on the Audio page once the provider is fixed.`;
+  }
+  if (reason === 'no_provider' || reason === 'error') {
+    return `Job: queued — the drain stopped (${reason}): ${detail}; press Start on the Audio page once that is fixed.`;
+  }
+  return 'Job: queued — no drain is running; press Start on the Audio page to run it.';
+}
+
 // A group pill's running count. With no drain running those rows are
 // interrupted (see shouldPoll), and "running" would claim work is happening
 // that is not -- Start is what picks them back up.
