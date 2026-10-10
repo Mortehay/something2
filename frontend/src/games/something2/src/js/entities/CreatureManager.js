@@ -86,6 +86,7 @@ export class CreatureManager {
         if (c.bossTier !== undefined) ex.bossTier = c.bossTier;
         if (c.element !== undefined) ex.element = c.element;
         if (c.name !== undefined) ex.name = c.name;
+        if (c.auras !== undefined) ex.auras = c.auras;
         if (c.width !== undefined) { ex.width = c.width; ex.height = c.height; }
       } else {
         this.creatures.set(c.id, this._applyTypeVisuals({
@@ -98,6 +99,7 @@ export class CreatureManager {
           name: c.name ?? c.type,
           bossTier: c.bossTier ?? null,
           element: c.element ?? null,
+          auras: c.auras ?? null,
           // A first sighting in the FAR zone carries position and the
           // immutable fields, but no facing/hp/mode -- it has never been close
           // enough to have any. The defaults keep it a well-formed creature
