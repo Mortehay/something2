@@ -287,6 +287,7 @@ test('renaming an entity type cascades into a biome that still lists it, instead
   const pool = mockPool([
     [/SELECT name FROM entity_types WHERE id/i, () => ({ rows: [{ name: 'bush' }] })],
     [/FROM worlds WHERE allowed_creature_types/i, () => ({ rows: [] })],
+    [/FROM worlds WHERE dungeon_boss->>'entity'/i, () => ({ rows: [] })],
     [/FROM world_creatures WHERE type/i, () => ({ rows: [] })],
     [/SELECT id, name FROM biomes WHERE flora_types/i, () => ({ rows: [{ id: 1, name: 'Meadow' }] })],
     [/UPDATE biomes\b/i, () => ({ rowCount: 1, rows: [] })],

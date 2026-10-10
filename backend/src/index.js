@@ -1021,7 +1021,13 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
           'SELECT id, name FROM biomes WHERE flora_types @> $1::jsonb OR creature_types @> $1::jsonb',
           [JSON.stringify([oldName])],
         );
-        if (worldsRef.rows.length > 0 || creaturesRef.rows.length > 0 || biomesRef.rows.length > 0) {
+        // SOMET-609: worlds.dungeon_boss names its boss entity by name, no FK.
+        const bossRef = await client.query(
+          "SELECT id, name FROM worlds WHERE dungeon_boss->>'entity' = $1",
+          [oldName],
+        );
+        if (worldsRef.rows.length > 0 || creaturesRef.rows.length > 0 || biomesRef.rows.length > 0
+          || bossRef.rows.length > 0) {
           // Rewrite the ONE matching element inside each jsonb array, not the
           // whole array -- WITH ORDINALITY + `ORDER BY` keeps element order
           // stable, and jsonb_agg's per-element CASE leaves every other
@@ -1076,10 +1082,24 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
             );
             biomesCount = biomesResult.rowCount || 0;
           }
+          // SOMET-609: rewrite only the `entity` key; x/y/respawn_s stay. The
+          // checked-in p5 spec (scripts/dungeon/content.js) still names the
+          // old entity, so a later seed-map re-inserts it unless the spec is
+          // updated to follow.
+          let bossCount = 0;
+          if (bossRef.rows.length > 0) {
+            const bossResult = await client.query(
+              `UPDATE worlds SET dungeon_boss = jsonb_set(dungeon_boss, '{entity}', to_jsonb($2::text))
+               WHERE dungeon_boss->>'entity' = $1`,
+              [oldName, name],
+            );
+            bossCount = bossResult.rowCount || 0;
+          }
           renamedReferences = {
             worlds: worldsCount,
             biomes: biomesCount,
             hadPlacedCreatures: creaturesRef.rows.length > 0,
+            dungeonBosses: bossCount,
           };
         }
       }
@@ -1198,20 +1218,27 @@ app.delete('/api/entity-types/:id', adminGuard, async (req, res) => {
     const cur = await pool.query('SELECT name FROM entity_types WHERE id = $1', [id]);
     if (cur.rows.length === 0) return res.status(404).json({ error: 'Entity type not found' });
     const name = cur.rows[0].name;
-    const [worldsRef, creaturesRef, biomesRef] = await Promise.all([
+    const [worldsRef, creaturesRef, biomesRef, bossRef] = await Promise.all([
       pool.query('SELECT id, name FROM worlds WHERE allowed_creature_types @> $1::jsonb', [JSON.stringify([name])]),
       pool.query('SELECT 1 FROM world_creatures WHERE type = $1 LIMIT 1', [name]),
       pool.query(
         'SELECT id, name FROM biomes WHERE flora_types @> $1::jsonb OR creature_types @> $1::jsonb',
         [JSON.stringify([name])],
       ),
+      // SOMET-609: a dungeon whose boss this is would go bossless silently.
+      pool.query("SELECT id, name FROM worlds WHERE dungeon_boss->>'entity' = $1 ORDER BY name", [name]),
     ]);
-    if (worldsRef.rows.length > 0 || creaturesRef.rows.length > 0 || biomesRef.rows.length > 0) {
+    if (worldsRef.rows.length > 0 || creaturesRef.rows.length > 0 || biomesRef.rows.length > 0
+      || bossRef.rows.length > 0) {
+      const bossNote = bossRef.rows.length > 0
+        ? ` (dungeon boss of: ${bossRef.rows.map((w) => w.name).join(', ')})`
+        : '';
       return res.status(409).json({
-        error: `Cannot delete '${name}': still referenced by allowed_creature_types, placed creatures, or a biome`,
+        error: `Cannot delete '${name}': still referenced by allowed_creature_types, placed creatures, a biome, or a dungeon boss${bossNote}`,
         referencing_worlds: worldsRef.rows.map((w) => ({ id: w.id, name: w.name })),
         referencing_biomes: biomesRef.rows.map((b) => ({ id: b.id, name: b.name })),
         has_placed_creatures: creaturesRef.rows.length > 0,
+        dungeon_boss_worlds: bossRef.rows.map((w) => ({ id: w.id, name: w.name })),
       });
     }
     const result = await pool.query('DELETE FROM entity_types WHERE id = $1 RETURNING id', [id]);
