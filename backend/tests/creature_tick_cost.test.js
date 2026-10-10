@@ -146,3 +146,35 @@ RUN('tick cost across population and leader count', () => {
       `${r.n} creatures / ${r.leaders} leaders cost ${r.ms.toFixed(3)} ms/tick, over the 8ms half-budget`);
   }
 });
+
+// SOMET-606 (S4): the enemies-side pass. 6 hostile sources carrying a 400px
+// enemies aura WITH a DoT, 20 players standing inside them (a raid on a boss),
+// on top of the 4500/6 population that gates MAX_WORLD_CREATURES. Asserted
+// against the same 8ms half-budget as the leaders<=6 rows above -- the
+// enemy pass is O(sources x players), so it must not move this row.
+RUN('tick cost with 20 players inside enemy auras', () => {
+  const active = activeKeys();
+  const sim = buildSim(4500, 6);
+  let tagged = 0;
+  for (const c of sim.creatures.values()) {
+    if (tagged >= 6) break;
+    if (c.auras && c.auras.length) continue;      // not one of the ally leaders
+    c.auras = [{ name: 'blight', targetSide: 'enemies', radius: 400, damageMult: 0.8, defenseMult: 0.8,
+      speedMult: 0.7, dotDps: 0.001, dotElement: 'fire', tickMs: 1000 }];
+    tagged++;
+  }
+  const first = [...sim.creatures.values()].filter((c) => c.auras && c.auras.some((a) => a.targetSide === 'enemies'));
+  if (first.length !== 6) throw new Error(`fixture built ${first.length} enemy sources, expected 6`);
+  const players = [];
+  for (let k = 0; k < 20; k++) {
+    const s = first[k % 6];
+    players.push({ userId: `u${k}`, x: s.x + 20 + k, y: s.y, width: 64, height: 64, hp: 1e9, maxHp: 1e9, mit: null });
+  }
+  for (let i = 0; i < 20; i++) sim.tick(1 / 60, active, players, i * 16);
+  if (!players.every((p) => p._buff && p._buff.auras)) throw new Error('fixture: players are not inside the enemy auras');
+  const t0 = process.hrtime.bigint();
+  for (let i = 0; i < 120; i++) sim.tick(1 / 60, active, players, (20 + i) * 16);
+  const ms = Number(process.hrtime.bigint() - t0) / 1e6 / 120;
+  console.log(`[tick] 4500 creatures / 6 leaders / 6 enemy sources / 20 players inside: ${ms.toFixed(3)} ms/tick`);
+  assert.ok(ms < 8, `${ms.toFixed(3)} ms/tick, over the 8ms half-budget`);
+});
