@@ -1758,3 +1758,76 @@ test('creature attacks and impacts returned by tickCreatures reach the state fra
   assert.deepEqual(imp, IMP, 'the creature impact must ride the state frame');
   ws.close(); handle.close(); server.close();
 });
+
+// The JOIN WINDOW. The join handler registers the socket in entry.sockets
+// synchronously (so a kicked session's close cannot tear the world down under
+// it), but world.addPlayer only runs after several DB awaits. For every tick
+// in between, the socket is a recipient with NO player row, so it has no
+// position to scope by. It used to fall back to the whole snap.players, which
+// let a client read every player's position just by reconnecting in a loop
+// (validation of 2026-10-10: 9 of 10 probe joins leaked).
+//
+// The window is held open deterministically: user 2's gold lookup (between
+// the socket registration and addPlayer) sleeps for many ticks. Player 1 is
+// in the world and FAR from anywhere 2 could spawn, so any pre-'joined'
+// frame that lists player 1 is a leak.
+test('SOMET-365: a joining socket gets no player positions before it is placed', async () => {
+  const JOIN_HOLD_MS = 300; // 15 ticks at tickMs 20
+  let heldGoldLookup = false;
+  const pool = withConnect({
+    query: async (sql, params) => {
+      if (/SELECT gold FROM users WHERE id/i.test(sql) && String(params[0]) === '2') {
+        heldGoldLookup = true;
+        await new Promise((r) => setTimeout(r, JOIN_HOLD_MS));
+      }
+      return fakePool().query(sql, params);
+    },
+  });
+  const { url, handle, server } = await bootWith(pool);
+
+  const a = connect(url, 1);
+  await new Promise((r) => a.on('open', r));
+  a.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
+  await nextMsg(a, 'joined');
+  handle.worlds.get('w1').world.getPlayer('1').x += 800 * 5;
+
+  const b = connect(url, 2);
+  const beforeJoined = [];
+  let bJoined = false;
+  b.on('message', (data) => {
+    const m = JSON.parse(data);
+    if (m.type === 'joined') bJoined = true;
+    else if (!bJoined) beforeJoined.push(m);
+  });
+  await new Promise((r) => b.on('open', r));
+  // Count the ticks a receives while b's join is held: proves the window was
+  // real and the tick loop ran inside it, so a pass is not just "no tick
+  // happened to land" (the vacuous shape).
+  let aFramesDuringHold = 0;
+  const countA = (data) => { if (!bJoined && JSON.parse(data).type === 'state') aFramesDuringHold++; };
+  a.on('message', countA);
+  b.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
+  await new Promise((resolve, reject) => {
+    const to = setTimeout(() => reject(new Error('timeout waiting for b joined')), 4000);
+    const iv = setInterval(() => { if (bJoined) { clearInterval(iv); clearTimeout(to); resolve(); } }, 5);
+  });
+  a.off('message', countA);
+
+  assert.ok(heldGoldLookup, 'precondition: the join must have passed through the held lookup');
+  assert.ok(aFramesDuringHold >= 5, `precondition: the tick loop must run during the held join (a saw ${aFramesDuringHold} frames)`);
+  const leaked = beforeJoined
+    .filter((m) => m.type === 'state')
+    .filter((m) => (m.players || []).some((pl) => pl.id === '1'));
+  assert.equal(leaked.length, 0, `no pre-'joined' state frame may list another player (got ${leaked.length})`);
+
+  // And once placed, b is scoped like anyone else: 1 is five chunks away.
+  for (let i = 0; i < 6; i++) {
+    const s = await nextMsg(b, 'state');
+    const ids = s.players.map((pl) => pl.id);
+    assert.ok(!ids.includes('1'), 'after joining, the distant player stays out of the frame');
+    assert.ok(ids.includes('2'), 'after joining, the recipient gets its own row');
+  }
+
+  a.close(); b.close();
+  handle.close(); server.close();
+});

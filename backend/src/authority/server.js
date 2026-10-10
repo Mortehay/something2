@@ -19,7 +19,7 @@ const { recordVisit } = require('../services/visitedWorlds.js');
 const { mayJoin, joinPolicyFacts, waypointTravelFacts } = require('../services/joinPolicy.js');
 const { derivePlayerStats } = require('../services/playerStats.js');
 const { chunkOf, parseKey, neighborhoodKeys, CHUNK_KEY } = require('./coords');
-const { bucketPlayersByChunk, playersNear } = require('./playerAoi');
+const { bucketPlayersByChunk, playersForRecipient } = require('./playerAoi');
 const { loadCreatureTypes, ABILITIES_LATERAL, hydrateCreatureRow } = require('./creatures');
 const { AURAS_LATERAL } = require('../services/auraEffects.js');
 const { chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint, villageContaining } = require('../services/mapService');
@@ -3389,13 +3389,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // the client reconciles its predicted state -- ackSeq, hp, mana,
         // stamina, equipment -- out of this frame, so a recipient missing from
         // its own frame breaks prediction rather than merely failing to draw.
-        // A socket whose player has gone (p == null) has no position to scope
-        // by, so it keeps the whole array: that is the pre-existing behaviour
-        // for a frame that is about to stop being sent anyway.
-        const players = p
-          ? playersNear(playerBuckets, p.x, p.y, entry.row.chunk_size, playerRowById.get(p.userId) || null)
-          : snap.players;
-        const frame = { type: 'state', tick, ackSeq: p ? p.ackSeq : 0, players, projectiles: snap.projectiles };
+        // A socket with no placed player yet (the join window: registered in
+        // entry.sockets before addPlayer) gets NO state frame -- it has no
+        // position to scope by, and the old whole-array fallback leaked every
+        // player's position to a joining client.
+        const players = playersForRecipient(playerBuckets, playerRowById, p, entry.row.chunk_size);
+        if (!players) continue;
+        const frame = { type: 'state', tick, ackSeq: p.ackSeq, players, projectiles: snap.projectiles };
         // SOMET-528. `waves` is copied ACROSS EXPLICITLY, and this line is the
         // third place a new snapshot field can be lost.
         //

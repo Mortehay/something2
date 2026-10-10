@@ -72,4 +72,20 @@ function playersNear(buckets, x, y, chunkSize, ownRow = null, radius = 1) {
   return out;
 }
 
-module.exports = { bucketPlayersByChunk, playersNear };
+// The per-socket call the tick loop makes. `player` is the recipient's world
+// player (entry.world.getPlayer), `rowById` maps a snapshot row id (= userId)
+// to that row, built once per tick alongside the buckets.
+//
+// Returns null when the socket has no placed player, and the tick loop sends
+// that socket NO state frame. That is the join window: the join handler
+// registers the socket in entry.sockets before its DB awaits and only calls
+// world.addPlayer after them, so for several ticks the socket is a recipient
+// with no position to scope by. Falling back to every row there leaked the
+// whole world's positions to any client that reconnected in a loop. The
+// creature/item/chest broadcasts already skip such a socket; this matches them.
+function playersForRecipient(buckets, rowById, player, chunkSize) {
+  if (!player) return null;
+  return playersNear(buckets, player.x, player.y, chunkSize, rowById.get(player.userId) || null);
+}
+
+module.exports = { bucketPlayersByChunk, playersNear, playersForRecipient };
