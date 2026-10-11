@@ -23,7 +23,7 @@ import { ProviderPinField, pinToSelectValue, selectValueToPin } from './Provider
 import { HiOutlineMagnifyingGlass } from "react-icons/hi2";
 import {
   buildBiomeIndex, biomesWithEntities, filterByBiomeTab, filterBySearch, paginate,
-  ALL_TAB, UNASSIGNED_TAB,
+  ALL_TAB, UNASSIGNED_TAB, BOSS_TAB,
 } from './entityFilters.js';
 import AdminLoading from './AdminLoading.jsx';
 import SubjectSounds from './SubjectSounds.jsx';
@@ -916,6 +916,10 @@ function EntityTypesAdmin() {
     () => (entityTypes || []).filter(e => !biomeIndex.has(e.name)).length,
     [entityTypes, biomeIndex],
   );
+  const bossCount = useMemo(
+    () => (entityTypes || []).filter(e => !!e.boss_tier).length,
+    [entityTypes],
+  );
 
   const filteredEntities = useMemo(() => {
     const byTab = filterByBiomeTab(entityTypes || [], activeTab, biomeIndex);
@@ -1172,6 +1176,11 @@ function EntityTypesAdmin() {
         <TabButton $active={activeTab === ALL_TAB} onClick={() => handleTabChange(ALL_TAB)}>
           All
         </TabButton>
+        {bossCount > 0 && (
+          <TabButton $active={activeTab === BOSS_TAB} onClick={() => handleTabChange(BOSS_TAB)}>
+            Bosses ({bossCount})
+          </TabButton>
+        )}
         {biomeTabs.map(name => (
           <TabButton key={name} $active={activeTab === name} onClick={() => handleTabChange(name)}>
             {name}

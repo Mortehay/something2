@@ -36,10 +36,15 @@ export function biomesWithEntities(biomes, biomeIndex) {
 
 export const ALL_TAB = 'all';
 export const UNASSIGNED_TAB = 'unassigned';
+// Cross-cutting, not a biome tab: bosses (world or dungeon) get placed by id
+// ASC ordering, so on a freshly-seeded catalog they sit on the LAST page --
+// invisible in practice behind 300+ earlier entities (SOMET-609 follow-up).
+export const BOSS_TAB = 'bosses';
 
-// activeTab is ALL_TAB, UNASSIGNED_TAB, or a biome name.
+// activeTab is ALL_TAB, UNASSIGNED_TAB, BOSS_TAB, or a biome name.
 export function filterByBiomeTab(entityTypes, activeTab, biomeIndex) {
   if (activeTab === ALL_TAB) return entityTypes;
+  if (activeTab === BOSS_TAB) return entityTypes.filter((e) => !!e.boss_tier);
   if (activeTab === UNASSIGNED_TAB) {
     return entityTypes.filter((e) => !biomeIndex.has(e.name));
   }
