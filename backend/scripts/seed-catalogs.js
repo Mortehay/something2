@@ -22,6 +22,7 @@ const { CREATURE_ABILITIES } = require('../seeds/data/creatureAbilities.js');
 const { BEHAVIOR_DROPS } = require('../seeds/data/behaviorDrops.js');
 const { CHEST_LOOT } = require('../seeds/data/chestLoot.js');
 const { DUNGEON_BOSSES } = require('../seeds/data/dungeonBosses.js');
+const { buildMinibosses, minibossSpawnsByBiome } = require('../seeds/data/minibosses.js');
 
 // COALESCE, not plain EXCLUDED, for the four columns below.
 //
@@ -362,6 +363,37 @@ async function seedOneDungeonBoss(db, b) {
   return r.rowCount;
 }
 
+// SOMET-624 (S11). A generated miniboss row -- same shape and the same
+// insert-only/ON CONFLICT DO NOTHING ownership-transfer rule as
+// seedOneDungeonBoss above. Also writes a creature_drops row (floor only --
+// S12/SOMET-625 owns the real tiered loot table), written only with a NEW
+// row for the same reason seedOneDungeonBoss's is: an admin's edited or
+// deleted drop must survive every reseed. Returns 1 when inserted.
+async function seedOneMiniboss(db, b) {
+  const r = await db.query(
+    `INSERT INTO entity_types
+       (name, color, walkable, spawn_tiles, chance, is_creature, hp, max_hp, defense,
+        resistances, faction, gold_min, gold_max, prompt, attack_element, behavior_id,
+        boss_tier, element, hitbox_size, xp_reward, base_damage, display_width, display_height, auras)
+     VALUES ($1,$2,true,'[]'::jsonb,0,true,$3,$3,$4,$5::jsonb,'hostile',$6,$7,$8,$9,
+             (SELECT id FROM creature_behaviors WHERE name = $10),
+             $11,$16,$12,$13,$14,$12,$12,$15::jsonb)
+     ON CONFLICT (name) DO NOTHING`,
+    [b.name, b.color, b.hp, b.defense, JSON.stringify(b.resistances), b.gold_min, b.gold_max,
+     b.prompt, b.attack_element, b.behavior_name, b.boss_tier, b.size, b.xp_reward, b.base_damage,
+     JSON.stringify(b.auras), b.element],
+  );
+  if (r.rowCount !== 1) return 0;
+  await db.query(
+    `INSERT INTO creature_drops (entity_type_id, item_type_id, chance, min_qty, max_qty)
+     SELECT et.id, it.id, $3, $4, $5 FROM entity_types et, item_types it
+      WHERE et.name = $1 AND it.name = $2
+        AND NOT EXISTS (SELECT 1 FROM creature_drops cd WHERE cd.entity_type_id = et.id AND cd.item_type_id = it.id)`,
+    [b.name, b.drop_item, b.drop_chance, b.drop_min_qty, b.drop_max_qty],
+  );
+  return r.rowCount;
+}
+
 // Guarded by NOT EXISTS, not ON CONFLICT: creature_drops has no unique
 // constraint on (entity_type_id, item_type_id) -- see
 // 1714440018000_create_loot.js -- so a bare INSERT would stack a duplicate
@@ -518,8 +550,19 @@ async function seedCatalogs(pool) {
     tiles += 1;
   }
 
+  // SOMET-624 (S11). Each biome's generated miniboss name(s) are merged into
+  // its creature_types before the upsert below -- seedOneBiome REPLACES
+  // creature_types wholesale on an existing row (see its own comment), so
+  // this must happen before the insert, not as a later patch.
+  const minibossRows = buildMinibosses(STARTER_BIOMES);
+  const minibossSpawns = minibossSpawnsByBiome(minibossRows);
+  const biomesWithMinibosses = STARTER_BIOMES.map((b) => ({
+    ...b,
+    creature_types: [...(b.creature_types || []), ...(minibossSpawns.get(b.name) || [])],
+  }));
+
   let biomes = 0;
-  for (const b of STARTER_BIOMES) {
+  for (const b of biomesWithMinibosses) {
     await seedOneBiome(pool, b);
     biomes += 1;
   }
@@ -621,6 +664,9 @@ async function seedCatalogs(pool) {
   let dungeonBosses = 0;
   for (const b of DUNGEON_BOSSES) dungeonBosses += await seedOneDungeonBoss(pool, b);
   console.log(`Restored ${dungeonBosses} missing dungeon bosses`);
+  let minibosses = 0;
+  for (const b of minibossRows) minibosses += await seedOneMiniboss(pool, b);
+  console.log(`Restored ${minibosses} missing minibosses`);
 
   // CREATURE_DROPS (Wolf's one hand-authored rule) and BESTIARY_P4_DROPS (288
   // generated rules, SOMET-250 Task 6) go through the same
@@ -665,7 +711,7 @@ async function seedCatalogs(pool) {
 module.exports = {
   seedCatalogs, seedOneTile, seedOneBiome, seedOneBehavior, seedOneAbility, seedOneBehaviorDrop,
   seedOneChestLoot, seedOneAura, bindDefaultAuras, bindWorldBossAuras,
-  seedOneCreatureType, seedOneDungeonBoss, seedOneCreatureDrop, seedOnePlayableClass, seedOneClassLoadout,
+  seedOneCreatureType, seedOneDungeonBoss, seedOneMiniboss, seedOneCreatureDrop, seedOnePlayableClass, seedOneClassLoadout,
 };
 
 if (require.main === module) {

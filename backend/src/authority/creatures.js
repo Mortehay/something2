@@ -162,9 +162,11 @@ function creatureMitigation(row) {
   };
 }
 
-// SOMET-603: the three boss tiers (entity_types_boss_tier_check). NULL = an
-// ordinary creature.
-const BOSS_TIERS = Object.freeze(['world', 'dungeon_end', 'dungeon_elite']);
+// SOMET-603/624: the four boss tiers (entity_types_boss_tier_check). NULL =
+// an ordinary creature. 'miniboss' (SOMET-624) spawns via the regular biome
+// creature_types path, not a singular-encounter manager -- it is still a
+// boss_tier for render/UI/loot purposes.
+const BOSS_TIERS = Object.freeze(['world', 'dungeon_end', 'dungeon_elite', 'miniboss']);
 
 // SOMET-603 (spec §4.1): the ONE row -> addCreatures-input mapping. Every
 // path that puts a creature into a CreatureSim from the database goes through

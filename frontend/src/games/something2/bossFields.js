@@ -1,11 +1,12 @@
 // SOMET-603: pure rules behind the entity editor's boss fields, kept out of
 // EntityTypesAdmin.jsx so a test can reach them (that suite has no DOM).
 // The server re-validates every one of these (index.js entityTypeFieldError).
-export const BOSS_TIERS = ["world", "dungeon_end", "dungeon_elite"];
+export const BOSS_TIERS = ["world", "dungeon_end", "dungeon_elite", "miniboss"];
 export const BOSS_TIER_LABELS = {
   world: "World boss",
   dungeon_end: "Dungeon boss (End)",
   dungeon_elite: "Dungeon mini-boss (Elite)",
+  miniboss: "Miniboss",
 };
 import { ELEMENTS } from "./abilityForm.js";
 
