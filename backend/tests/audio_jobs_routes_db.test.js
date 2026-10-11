@@ -248,6 +248,116 @@ test('audio job routes', { skip }, async (t) => {
         assert.equal(row.state, 'done');
       });
 
+      // SOMET-592 defect 2: the slot card's own Generate/Write click sends
+      // `scoped: true`, and the drain it starts must never claim a
+      // DIFFERENT, already-queued job that sits in the same packed sfx
+      // group (sfx_realistic claims up to AUDIO_SFX_PACK_SIZE rows in one
+      // call) -- the exact reported harm. `melee`/`use` is queued first,
+      // unstarted, standing in for "someone else's already-queued job";
+      // the scoped request is for `magic`/`hit`, a different subject in
+      // the very same drain_group.
+      await t.test('a scoped Generate (scoped:true) never sweeps a different, already-queued job in the same sfx pack group', async () => {
+        audioDispatcher.__resetRun();
+        const other = await request(app).post('/api/audio/admin/jobs').set('Authorization', bearer(admin)).send({
+          items: [{ subject_kind: 'attack_type', subject_key: 'melee', slot: 'use' }],
+        });
+        assert.equal(other.status, 201, JSON.stringify(other.body));
+        assert.equal(other.body.queued.length, 1, JSON.stringify(other.body));
+
+        audioDispatcher.__setDeps({
+          ...promptPhaseStub,
+          generateForSlot: async () => ({ ok: true, clip: { id: null } }),
+          // The real sfxRequestFor/box path is exercised elsewhere
+          // (audio_dispatcher_db.test.js); this is purely about WHICH rows
+          // a scoped claim picks, so every item sent is reported done.
+          generateSfxPackForJobs: async (db, p, jobs) => ({
+            refused: [], results: jobs.map((job) => ({ job, result: { ok: true, clip: { id: null } } })),
+          }),
+        });
+        const mine = await request(app).post('/api/audio/admin/jobs').set('Authorization', bearer(admin)).send({
+          items: [{ subject_kind: 'attack_type', subject_key: 'magic', slot: 'hit' }],
+          provider_id: providerId,
+          start: true,
+          scoped: true,
+        });
+        assert.equal(mine.status, 201, JSON.stringify(mine.body));
+        assert.equal(mine.body.started, true, JSON.stringify(mine.body));
+
+        await waitIdle(admin);
+        const rows = (await pool.query(
+          "SELECT subject_key, state FROM audio_jobs WHERE subject_kind = 'attack_type' AND subject_key IN ('melee', 'magic')",
+        )).rows;
+        const byKey = Object.fromEntries(rows.map((r) => [r.subject_key, r.state]));
+        assert.equal(byKey.magic, 'done', 'the scoped click\'s own job ran');
+        assert.equal(byKey.melee, 'queued', 'the unrelated already-queued job was never swept in');
+        await pool.query("DELETE FROM audio_jobs WHERE subject_kind = 'attack_type' AND subject_key IN ('melee', 'magic')");
+      });
+
+      // The concurrency edge case called out in the design intent: a second
+      // scoped Generate arriving while a DIFFERENT scoped drain is still
+      // running must not claim started:true for a job it can never reach.
+      // It reports drain_busy instead, and the job is recovered -- not lost
+      // -- once the busy drain is out of the way (here, via the ordinary
+      // unscoped Start/dispatch an admin would press next).
+      await t.test('a second scoped Generate while a scoped drain is already running reports drain_busy instead of stranding the job', async () => {
+        audioDispatcher.__resetRun();
+        let release;
+        const gate = new Promise((resolve) => { release = resolve; });
+        audioDispatcher.__setDeps({
+          ...promptPhaseStub,
+          generateForSlot: async () => ({ ok: true, clip: { id: null } }),
+          generateSfxPackForJobs: async (db, p, jobs) => {
+            await gate;
+            return { refused: [], results: jobs.map((job) => ({ job, result: { ok: true, clip: { id: null } } })) };
+          },
+        });
+        const first = await request(app).post('/api/audio/admin/jobs').set('Authorization', bearer(admin)).send({
+          items: [{ subject_kind: 'attack_type', subject_key: 'magic', slot: 'use' }],
+          provider_id: providerId,
+          start: true,
+          scoped: true,
+        });
+        assert.equal(first.status, 201, JSON.stringify(first.body));
+        assert.equal(first.body.started, true, JSON.stringify(first.body));
+        await waitForCurrent(admin, 'magic');
+
+        const second = await request(app).post('/api/audio/admin/jobs').set('Authorization', bearer(admin)).send({
+          items: [{ subject_kind: 'attack_type', subject_key: 'melee', slot: 'hit' }],
+          provider_id: providerId,
+          start: true,
+          scoped: true,
+        });
+        assert.equal(second.status, 201, JSON.stringify(second.body));
+        assert.equal(second.body.queued.length, 1, JSON.stringify(second.body));
+        assert.equal(second.body.started, false, JSON.stringify(second.body));
+        assert.equal(second.body.reason, 'drain_busy', JSON.stringify(second.body));
+
+        release();
+        await waitIdle(admin);
+        const stillQueued = (await pool.query(
+          "SELECT state FROM audio_jobs WHERE subject_kind = 'attack_type' AND subject_key = 'melee' AND slot = 'hit'",
+        )).rows[0];
+        assert.equal(stillQueued.state, 'queued', 'drain_busy must not silently claim or drop the job');
+
+        // Recovery: an ordinary unscoped Start (what the dispatch button
+        // sends) reaches EVERY queued job, the stranded one included.
+        audioDispatcher.__setDeps({
+          ...promptPhaseStub,
+          generateForSlot: async () => ({ ok: true, clip: { id: null } }),
+          generateSfxPackForJobs: async (db, p, jobs) => ({
+            refused: [], results: jobs.map((job) => ({ job, result: { ok: true, clip: { id: null } } })),
+          }),
+        });
+        const dispatch = await request(app).post('/api/audio/admin/jobs/dispatch').set('Authorization', bearer(admin)).send({});
+        assert.equal(dispatch.status, 202, JSON.stringify(dispatch.body));
+        await waitIdle(admin);
+        const recovered = (await pool.query(
+          "SELECT state FROM audio_jobs WHERE subject_kind = 'attack_type' AND subject_key = 'melee' AND slot = 'hit'",
+        )).rows[0];
+        assert.equal(recovered.state, 'done', 'the previously-stranded job completes once a drain can actually reach it');
+        await pool.query("DELETE FROM audio_jobs WHERE subject_kind = 'attack_type' AND subject_key IN ('magic', 'melee')");
+      });
+
       await t.test('clear refuses 409 while a drain is running, then clears once it finishes', async () => {
         audioDispatcher.__resetRun();
         let release;

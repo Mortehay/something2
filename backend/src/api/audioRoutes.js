@@ -471,6 +471,17 @@ module.exports = function audioRoutes(pool) {
       if (!Array.isArray(b.items) || b.items.length < 1 || b.items.length > MAX_JOB_ITEMS) {
         return res.status(400).json({ error: `items must be an array of 1-${MAX_JOB_ITEMS} entries` });
       }
+      // SOMET-592 defect 2: `scoped` is the explicit signal that this
+      // request's own drain must never claim anything beyond what it just
+      // enqueued -- the slot card's single Generate/Write click sets it.
+      // Deliberately a request-level flag, not inferred from items.length:
+      // a multi-item request can legitimately want scoping too, and
+      // inferring from the count would silently stop scoping the moment a
+      // card ever batches more than one item.
+      if (b.scoped !== undefined && typeof b.scoped !== 'boolean') {
+        return res.status(400).json({ error: 'scoped must be a boolean' });
+      }
+      const scoped = b.scoped === true;
       const providerId = Number.isInteger(b.provider_id) ? b.provider_id : null;
       if (providerId !== null && !(await resolveAudioProvider(pool, providerId))) {
         return res.status(400).json({ error: 'provider_id does not resolve to an active audio provider' });
@@ -535,14 +546,27 @@ module.exports = function audioRoutes(pool) {
           reason = 'no_provider';
         } else {
           try {
-            audioDispatcher.startDrain(pool);
+            audioDispatcher.startDrain(pool, scoped ? { batchId: enq.batch_id } : {});
             started = true;
           } catch (err) {
-            // A drain already running will pick these jobs up regardless --
-            // that is a success from the caller's point of view, not a
-            // reason to fail an enqueue that already committed.
-            if (err.code === 'ALREADY_RUNNING') started = true;
-            else throw err;
+            if (err.code === 'ALREADY_RUNNING') {
+              // SOMET-592 defect 2: a drain already running picks these jobs
+              // up regardless ONLY when it is unscoped (or already watches
+              // this exact batch, which never happens for a freshly minted
+              // one) -- runCovers is the honest answer, because a drain
+              // scoped to a DIFFERENT batch never widens to claim this one
+              // (see startDrain's and runCovers' own comments). Reporting
+              // started:true here would silently strand the job this
+              // request just queued: it stays queued, visibly not started,
+              // until the admin retries (another Generate click, or Start
+              // once the busy drain finishes).
+              if (audioDispatcher.runCovers(scoped ? enq.batch_id : null)) {
+                started = true;
+              } else {
+                started = false;
+                reason = 'drain_busy';
+              }
+            } else throw err;
           }
         }
       }
