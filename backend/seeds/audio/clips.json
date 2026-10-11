@@ -7215,6 +7215,21 @@
     "seed": "1179234839"
   },
   {
+    "id": "1a6e5e9e-2bcb-4b34-a745-d4cbdb8bb7d1",
+    "kind": "ambience",
+    "label": "pack_leader loop (forest)",
+    "file": "ambience/pack_leader_loop__forest_-1a6e5e9e.ogg",
+    "bytes": 317889,
+    "duration_ms": 30000,
+    "loopable": true,
+    "loop_start_ms": 0,
+    "loop_end_ms": 30000,
+    "prompt": "Dense, low-frequency hum of magical energy vibrating through ancient bark. Distant owl hoots echo faintly. Close, sharp twigs snap underfoot. Thick canopy filters wind into a soft, rhythmic rustling of leaves.",
+    "style_or_cue": "forest",
+    "engine": null,
+    "seed": "1867853555"
+  },
+  {
     "id": "1a73a806-aa18-49e1-8466-bdd5f633f1b0",
     "kind": "sfx",
     "label": "Demonic Apex hurt (hit)",
@@ -13890,6 +13905,21 @@
     "seed": "1396764564"
   },
   {
+    "id": "3008a26c-59fa-43d8-9b11-5659fae5a9e6",
+    "kind": "ambience",
+    "label": "ignis_inferno loop (night)",
+    "file": "ambience/ignis_inferno_loop__night_-3008a26c.ogg",
+    "bytes": 378217,
+    "duration_ms": 30000,
+    "loopable": true,
+    "loop_start_ms": 0,
+    "loop_end_ms": 30000,
+    "prompt": "Roaring inferno crackles intensely nearby, surrounded by distant, eerie hoots of night birds and the faint rustle of dry leaves in the cold wind.",
+    "style_or_cue": "night",
+    "engine": null,
+    "seed": "1006603303"
+  },
+  {
     "id": "3017f21b-c8d5-486d-ad99-49787e828ee2",
     "kind": "sfx",
     "label": "Drowned Brute death (death)",
@@ -19080,6 +19110,21 @@
     "seed": "689299518"
   },
   {
+    "id": "4287a3db-3e66-45ad-90ac-1e28f7af3e57",
+    "kind": "ambience",
+    "label": "shade_veil pulse (forest)",
+    "file": "ambience/shade_veil_pulse__forest_-4287a3db.ogg",
+    "bytes": 479378,
+    "duration_ms": 30000,
+    "loopable": true,
+    "loop_start_ms": 0,
+    "loop_end_ms": 30000,
+    "prompt": "Dense, low-frequency hum of magical energy. Distant rustling leaves, faint insect chirps, and soft wind filtering through ancient trees. No voices or melodies.",
+    "style_or_cue": "forest",
+    "engine": null,
+    "seed": "37129857"
+  },
+  {
     "id": "429cc6c5-da36-479e-9880-be4a3816d7f5",
     "kind": "sfx",
     "label": "Drowned Caster death (death)",
@@ -19438,6 +19483,21 @@
     "style_or_cue": "hit",
     "engine": "realistic",
     "seed": "1464492790"
+  },
+  {
+    "id": "444c58d4-9e98-4dc8-bf4f-73c10f48fe8e",
+    "kind": "ambience",
+    "label": "shade_veil loop (forest)",
+    "file": "ambience/shade_veil_loop__forest_-444c58d4.ogg",
+    "bytes": 315399,
+    "duration_ms": 30000,
+    "loopable": true,
+    "loop_start_ms": 0,
+    "loop_end_ms": 30000,
+    "prompt": "Dense, low-frequency hum of magical energy. Distant rustling leaves, faint insect chirps, and soft wind through branches. No voices or instruments.",
+    "style_or_cue": "forest",
+    "engine": null,
+    "seed": "979936851"
   },
   {
     "id": "445d1c6f-dc89-4961-b4c5-db68ec45814e",
@@ -26535,6 +26595,21 @@
     "seed": "285052984"
   },
   {
+    "id": "596e059e-032e-4e9a-9646-67c227488473",
+    "kind": "ambience",
+    "label": "gorgon_static_field pulse (cave)",
+    "file": "ambience/gorgon_static_field_pulse__cave_-596e059e.ogg",
+    "bytes": 314026,
+    "duration_ms": 30000,
+    "loopable": true,
+    "loop_start_ms": 0,
+    "loop_end_ms": 30000,
+    "prompt": "Low, dense electrical hum vibrating through stone. Distant, sharp crackles of static discharge. Sparse, echoing drips of water. Heavy, oppressive silence between pulses. No voices.",
+    "style_or_cue": "cave",
+    "engine": null,
+    "seed": "1156188150"
+  },
+  {
     "id": "598983fd-d093-479f-b05d-b96ebb169347",
     "kind": "sfx",
     "label": "dragon-spear hit (hit)",
@@ -31560,6 +31635,21 @@
     "seed": "485927349"
   },
   {
+    "id": "6b62e07d-a68a-47ca-b3f0-4b7fc445126b",
+    "kind": "ambience",
+    "label": "ossuary_dread loop (cave)",
+    "file": "ambience/ossuary_dread_loop__cave_-6b62e07d.ogg",
+    "bytes": 510996,
+    "duration_ms": 30000,
+    "loopable": true,
+    "loop_start_ms": 0,
+    "loop_end_ms": 30000,
+    "prompt": "Distant, hollow drips of water echo against stone. A low, oppressive hum vibrates through the air. Sparse, skittering claws scrape on rough rock. Cold wind whistles through narrow fissures, creating a dense, unsettling atmosphere.",
+    "style_or_cue": "cave",
+    "engine": null,
+    "seed": "1685079822"
+  },
+  {
     "id": "6b6564a7-1a07-4c96-9758-4d1b8bf662ca",
     "kind": "sfx",
     "label": "war_sunder_armor use (spell)",
@@ -32353,6 +32443,21 @@
     "style_or_cue": "hit",
     "engine": "realistic",
     "seed": "1775664698"
+  },
+  {
+    "id": "6dc06ab2-e08e-4908-80dd-92b2d23f7b7a",
+    "kind": "ambience",
+    "label": "abyssor_void_rend loop (cave)",
+    "file": "ambience/abyssor_void_rend_loop__cave_-6dc06ab2.ogg",
+    "bytes": 321207,
+    "duration_ms": 30000,
+    "loopable": true,
+    "loop_start_ms": 0,
+    "loop_end_ms": 30000,
+    "prompt": "Deep, hollow wind howls through narrow stone passages. Distant, rhythmic dripping echoes off wet walls. Occasional sharp cracks of shifting rock reverberate with low density, creating a vast, oppressive emptiness.",
+    "style_or_cue": "cave",
+    "engine": null,
+    "seed": "184228466"
   },
   {
     "id": "6dc1cfa2-13c0-49c4-9b16-d4c2ae6c8afd",
@@ -38683,6 +38788,21 @@
     "style_or_cue": "hit",
     "engine": "realistic",
     "seed": "1546353216"
+  },
+  {
+    "id": "84168fb0-4dd7-48f9-9573-2dd484678a86",
+    "kind": "ambience",
+    "label": "glacius_permafrost pulse (cave)",
+    "file": "ambience/glacius_permafrost_pulse__cave_-84168fb0.ogg",
+    "bytes": 631334,
+    "duration_ms": 30000,
+    "loopable": true,
+    "loop_start_ms": 0,
+    "loop_end_ms": 30000,
+    "prompt": "Distant, hollow wind whistles through jagged ice formations. Sharp, rhythmic cracking of freezing stone echoes nearby. Sparse, brittle chimes of frost crystals shatter in the dense, cold air.",
+    "style_or_cue": "cave",
+    "engine": null,
+    "seed": "1527014656"
   },
   {
     "id": "8428d8ee-19c8-4722-93a5-99dbab1f19e3",
@@ -47595,6 +47715,21 @@
     "seed": "1487301873"
   },
   {
+    "id": "a30a07dc-134f-4ee3-8823-ac299e4c1fe9",
+    "kind": "ambience",
+    "label": "glacius_permafrost loop (cave)",
+    "file": "ambience/glacius_permafrost_loop__cave_-a30a07dc.ogg",
+    "bytes": 437315,
+    "duration_ms": 30000,
+    "loopable": true,
+    "loop_start_ms": 0,
+    "loop_end_ms": 30000,
+    "prompt": "Distant, hollow wind whistling through jagged ice formations. Sharp, rhythmic cracking of freezing stone. Sparse, brittle chimes of frost crystals shifting. Low, resonant hum of permafrost. Sparse, echoing drips of melting water.",
+    "style_or_cue": "cave",
+    "engine": null,
+    "seed": "560634964"
+  },
+  {
     "id": "a32c3d3f-836f-4168-8966-11ae1394f5ed",
     "kind": "sfx",
     "label": "Drowned Apex death (death)",
@@ -51868,6 +52003,21 @@
     "style_or_cue": "hit",
     "engine": "realistic",
     "seed": "1019142149"
+  },
+  {
+    "id": "b346eeba-fccf-4277-bed3-3f4ae4bea83d",
+    "kind": "ambience",
+    "label": "fire_sparks pulse (night)",
+    "file": "ambience/fire_sparks_pulse__night_-b346eeba.ogg",
+    "bytes": 334917,
+    "duration_ms": 30000,
+    "loopable": true,
+    "loop_start_ms": 0,
+    "loop_end_ms": 30000,
+    "prompt": "Dense, crackling fire sparks pulse rhythmically nearby. Distant, eerie owl hoots echo through the cold air. Sparse, dry leaves rustle in the wind.",
+    "style_or_cue": "night",
+    "engine": null,
+    "seed": "1678481913"
   },
   {
     "id": "b35f2416-bb69-406b-aba8-a6f38617672c",
@@ -57150,6 +57300,21 @@
     "seed": "887033381"
   },
   {
+    "id": "c72c63af-c082-46bf-bf68-985e525cd6b7",
+    "kind": "ambience",
+    "label": "ignis_inferno pulse (night)",
+    "file": "ambience/ignis_inferno_pulse__night_-c72c63af.ogg",
+    "bytes": 461902,
+    "duration_ms": 30000,
+    "loopable": true,
+    "loop_start_ms": 0,
+    "loop_end_ms": 30000,
+    "prompt": "Dense, roaring fire crackles nearby, accompanied by distant, eerie insect chirps and a low, pulsing wind howling through the darkness.",
+    "style_or_cue": "night",
+    "engine": null,
+    "seed": "1541213380"
+  },
+  {
     "id": "c7443ab0-106d-4ac1-ace7-1e7cfda62275",
     "kind": "sfx",
     "label": "Eldritch Caster death (death)",
@@ -60705,6 +60870,21 @@
     "seed": "1998423673"
   },
   {
+    "id": "d3b405b0-e7b1-40fa-8c97-2dbaba595869",
+    "kind": "ambience",
+    "label": "ossuary_dread pulse (cave)",
+    "file": "ambience/ossuary_dread_pulse__cave_-d3b405b0.ogg",
+    "bytes": 312893,
+    "duration_ms": 30000,
+    "loopable": true,
+    "loop_start_ms": 0,
+    "loop_end_ms": 30000,
+    "prompt": "Distant, hollow echoes of dripping water. Low, dense rumbling of shifting bones. Sparse, sharp clinking of stone against stone. Thin, whistling wind through narrow cracks. Heavy, oppressive silence between sounds.",
+    "style_or_cue": "cave",
+    "engine": null,
+    "seed": "1921032817"
+  },
+  {
     "id": "d3b9a236-7c91-434a-9d66-7f7b8cbad11d",
     "kind": "sfx",
     "label": "magic use (spell)",
@@ -61380,6 +61560,21 @@
     "seed": "679907027"
   },
   {
+    "id": "d63bf8bf-c569-46d0-8d25-2527b33a84ee",
+    "kind": "ambience",
+    "label": "gorgon_static_field loop (cave)",
+    "file": "ambience/gorgon_static_field_loop__cave_-d63bf8bf.ogg",
+    "bytes": 422337,
+    "duration_ms": 30000,
+    "loopable": true,
+    "loop_start_ms": 0,
+    "loop_end_ms": 30000,
+    "prompt": "Low, dense electrical hum fills the air. Sharp, sporadic static crackles echo from nearby stone walls. Distant, hollow drips of water punctuate the heavy, oppressive silence of the enclosed space.",
+    "style_or_cue": "cave",
+    "engine": null,
+    "seed": "197650641"
+  },
+  {
     "id": "d63f5070-6b76-44ac-ac95-8f0bdb583fe6",
     "kind": "sfx",
     "label": "arc_barrage hit (hit)",
@@ -61483,6 +61678,21 @@
     "style_or_cue": "spell",
     "engine": "realistic",
     "seed": "887033386"
+  },
+  {
+    "id": "d69fec37-9ac3-4f7e-8cac-1055b0290ca3",
+    "kind": "ambience",
+    "label": "cinder_brood loop (forest)",
+    "file": "ambience/cinder_brood_loop__forest_-d69fec37.ogg",
+    "bytes": 491836,
+    "duration_ms": 30000,
+    "loopable": true,
+    "loop_start_ms": 0,
+    "loop_end_ms": 30000,
+    "prompt": "Distant rustling leaves, faint crackling embers, low insect hum. Sparse, airy density. Soft wind through branches, occasional popping sparks, subtle ambient forest life.",
+    "style_or_cue": "forest",
+    "engine": null,
+    "seed": "39191133"
   },
   {
     "id": "d6bb81d3-c532-48ba-b1f7-9dc5105450c0",
@@ -63268,6 +63478,21 @@
     "style_or_cue": "death",
     "engine": "realistic",
     "seed": "808497683"
+  },
+  {
+    "id": "dcc5ae28-6ea2-4c44-b125-10d3cf6c94fe",
+    "kind": "ambience",
+    "label": "cinder_brood pulse (night)",
+    "file": "ambience/cinder_brood_pulse__night_-dcc5ae28.ogg",
+    "bytes": 312924,
+    "duration_ms": 30000,
+    "loopable": true,
+    "loop_start_ms": 0,
+    "loop_end_ms": 30000,
+    "prompt": "Distant, low-frequency hum of crackling embers. Sparse, sharp pops of burning wood. Cold wind whistling through hollow branches. Occasional, lonely owl hoots echoing from the deep forest shadows.",
+    "style_or_cue": "night",
+    "engine": null,
+    "seed": "670632706"
   },
   {
     "id": "dcca7c26-81a1-40e2-a281-ea2ac0afde45",
@@ -67800,6 +68025,21 @@
     "seed": "319710528"
   },
   {
+    "id": "ea2f7bc4-bf4b-46af-b676-71bc707f8ee1",
+    "kind": "ambience",
+    "label": "abyssor_void_rend pulse (cave)",
+    "file": "ambience/abyssor_void_rend_pulse__cave_-ea2f7bc4.ogg",
+    "bytes": 307162,
+    "duration_ms": 30000,
+    "loopable": true,
+    "loop_start_ms": 0,
+    "loop_end_ms": 30000,
+    "prompt": "Deep, hollow wind howls through narrow stone passages. Distant, rhythmic dripping echoes off wet walls. Low, subterranean rumbling vibrates the ground. Sparse, metallic scraping sounds drift from the shadows.",
+    "style_or_cue": "cave",
+    "engine": null,
+    "seed": "1527486806"
+  },
+  {
     "id": "ea623378-e619-4dc6-97eb-89cb577c21a5",
     "kind": "sfx",
     "label": "arc_hunters_trip hit (hit)",
@@ -70003,6 +70243,21 @@
     "style_or_cue": "hit",
     "engine": "realistic",
     "seed": "2142352897"
+  },
+  {
+    "id": "f2370401-f0c1-47eb-b72a-e9d8336f8973",
+    "kind": "ambience",
+    "label": "fire_sparks loop (night)",
+    "file": "ambience/fire_sparks_loop__night_-f2370401.ogg",
+    "bytes": 309659,
+    "duration_ms": 30000,
+    "loopable": true,
+    "loop_start_ms": 0,
+    "loop_end_ms": 30000,
+    "prompt": "Dense, close-range crackling fire sparks and hissing embers. Distant, sparse owl hoots. Low, heavy wind rushing through dark trees. No voices or music.",
+    "style_or_cue": "night",
+    "engine": null,
+    "seed": "764728063"
   },
   {
     "id": "f23bb79d-db8b-4c88-85a6-35a8f550d19c",
@@ -73873,6 +74128,21 @@
     "style_or_cue": "hit",
     "engine": "realistic",
     "seed": "484845299"
+  },
+  {
+    "id": "fff33453-7767-4e8a-b58c-0487bc3ced31",
+    "kind": "ambience",
+    "label": "pack_leader pulse (forest)",
+    "file": "ambience/pack_leader_pulse__forest_-fff33453.ogg",
+    "bytes": 260135,
+    "duration_ms": 30000,
+    "loopable": true,
+    "loop_start_ms": 0,
+    "loop_end_ms": 30000,
+    "prompt": "Dense, low-frequency thrumming pulses from nearby, overlaid with distant wind rustling leaves and faint insect chirps. The air feels heavy with a rhythmic, physical vibration that dominates the ambient soundscape.",
+    "style_or_cue": "forest",
+    "engine": null,
+    "seed": "481357236"
   },
   {
     "id": "fff8ead6-cb3b-48a6-a8a8-d67bb29f93de",

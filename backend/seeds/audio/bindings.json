@@ -135,6 +135,168 @@
     "sort": 0
   },
   {
+    "subject_kind": "aura",
+    "subject_key": "abyssor_void_rend",
+    "slot": "loop",
+    "clip_id": "6dc06ab2-e08e-4908-80dd-92b2d23f7b7a",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "abyssor_void_rend",
+    "slot": "pulse",
+    "clip_id": "ea2f7bc4-bf4b-46af-b676-71bc707f8ee1",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "cinder_brood",
+    "slot": "loop",
+    "clip_id": "d69fec37-9ac3-4f7e-8cac-1055b0290ca3",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "cinder_brood",
+    "slot": "pulse",
+    "clip_id": "dcc5ae28-6ea2-4c44-b125-10d3cf6c94fe",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "fire_sparks",
+    "slot": "loop",
+    "clip_id": "f2370401-f0c1-47eb-b72a-e9d8336f8973",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "fire_sparks",
+    "slot": "pulse",
+    "clip_id": "b346eeba-fccf-4277-bed3-3f4ae4bea83d",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "glacius_permafrost",
+    "slot": "loop",
+    "clip_id": "a30a07dc-134f-4ee3-8823-ac299e4c1fe9",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "glacius_permafrost",
+    "slot": "pulse",
+    "clip_id": "84168fb0-4dd7-48f9-9573-2dd484678a86",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "gorgon_static_field",
+    "slot": "loop",
+    "clip_id": "d63bf8bf-c569-46d0-8d25-2527b33a84ee",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "gorgon_static_field",
+    "slot": "pulse",
+    "clip_id": "596e059e-032e-4e9a-9646-67c227488473",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "ignis_inferno",
+    "slot": "loop",
+    "clip_id": "3008a26c-59fa-43d8-9b11-5659fae5a9e6",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "ignis_inferno",
+    "slot": "pulse",
+    "clip_id": "c72c63af-c082-46bf-bf68-985e525cd6b7",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "ossuary_dread",
+    "slot": "loop",
+    "clip_id": "6b62e07d-a68a-47ca-b3f0-4b7fc445126b",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "ossuary_dread",
+    "slot": "pulse",
+    "clip_id": "d3b405b0-e7b1-40fa-8c97-2dbaba595869",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "pack_leader",
+    "slot": "loop",
+    "clip_id": "1a6e5e9e-2bcb-4b34-a745-d4cbdb8bb7d1",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "pack_leader",
+    "slot": "pulse",
+    "clip_id": "fff33453-7767-4e8a-b58c-0487bc3ced31",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "shade_veil",
+    "slot": "loop",
+    "clip_id": "444c58d4-9e98-4dc8-bf4f-73c10f48fe8e",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "shade_veil",
+    "slot": "pulse",
+    "clip_id": "4287a3db-3e66-45ad-90ac-1e28f7af3e57",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
     "subject_kind": "biome",
     "subject_key": "Abyssal Rift",
     "slot": "ambience",
