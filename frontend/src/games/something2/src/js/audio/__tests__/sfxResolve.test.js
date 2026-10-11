@@ -69,3 +69,19 @@ describe('SOMET-605 boss events', () => {
     expect(sfxPriority({ e: 'death', c: 'Ignis' }, 'p:1')).toBe('nearest');
   });
 });
+
+// SOMET-607 (S5, spec §4.4): the local player entering an enemy aura.
+describe('aura apply', () => {
+  it("resolves to aura/<name>/apply, c carrying the aura's name", () => {
+    expect(sfxChains({ e: 'apply', c: 'pack_leader', a: 'p:1', x: 0, y: 0 }))
+      .toEqual([{ keys: ['aura/pack_leader/apply'], missKey: 'aura/pack_leader/apply' }]);
+  });
+
+  it('no aura name resolves to no chains', () => {
+    expect(sfxChains({ e: 'apply', x: 0, y: 0 })).toEqual([]);
+  });
+
+  it('plays at own when the event carries the local player as actor, same generic rule as everything else', () => {
+    expect(sfxPriority({ e: 'apply', c: 'pack_leader', a: 'p:1' }, 'p:1')).toBe('own');
+  });
+});

@@ -429,6 +429,7 @@ export class AudioEngine {
 
     const cadenceEmitters = [];
     const presence = [];
+    const auraEmitters = [];
     if (creatures) {
       for (const c of creatures.values()) {
         if (!c || !c.type || c.id == null) continue;
@@ -436,6 +437,13 @@ export class AudioEngine {
         const cy = c.y + (c.height || 0) / 2;
         cadenceEmitters.push({ id: `c:${c.id}`, key: `creature/${c.type}/nearby`, x: cx, y: cy, kind: 'creature' });
         if (c.bossTier) presence.push({ id: `boss:${c.id}`, type: c.type, x: cx, y: cy });
+        // SOMET-607 (S5, spec §4.4): one looping sound per (creature, aura)
+        // pair while the aura is active and the creature is in range.
+        if (Array.isArray(c.auras)) {
+          for (const auraName of c.auras) {
+            auraEmitters.push({ id: `aura:${c.id}:${auraName}`, aura: auraName, x: cx, y: cy, boss: !!c.bossTier });
+          }
+        }
       }
     }
 
@@ -493,6 +501,29 @@ export class AudioEngine {
       }
     }
 
+    // SOMET-607 (S5, spec §4.4): same presence machinery, radius-gated like
+    // the carrying creature itself would be -- the boss screen radius for a
+    // boss, the ordinary nearby radius otherwise.
+    const auraPresenceById = new Map();
+    for (const a of auraEmitters) {
+      const auraRadius = a.boss ? this.screenRadiusPx : this.nearbyScheduler.radiusPx;
+      if (!auraRadius) continue;
+      const dx = a.x - listener.x;
+      const distance = Math.hypot(dx, a.y - listener.y);
+      if (distance > auraRadius) continue;
+      auraPresenceById.set(a.id, a);
+      const live = this.nearbyLoops.get(a.id);
+      if (live) {
+        live.distance = distance;
+        if (live.panner) live.panner.pan.value = Math.max(-1, Math.min(1, dx / SFX_PAN_PX));
+        continue;
+      }
+      if (this.nearbyLoopStarting.has(a.id)) continue;
+      const { clips, key } = this._resolve([`aura/${a.aura}/loop`]); // records the miss itself
+      const clip = key ? pickWeighted(clips, this.rand) : null;
+      if (clip) this._startNearbyLoop(a.id, clip, dx, distance, { priority: a.boss ? 'boss' : 'nearby', presence: true });
+    }
+
     for (const d of this.nearbyScheduler.tick(cadenceEmitters, listener)) {
       try {
         this._triggerNearby(d, listener);
@@ -501,7 +532,7 @@ export class AudioEngine {
         this.nearbyScheduler.ended(d.id);
       }
     }
-    this._sweepNearbyLoops(pointsById, listener, presenceById);
+    this._sweepNearbyLoops(pointsById, listener, presenceById, auraPresenceById);
   }
 
   // Cadence path only (creatures and non-loopable points) -- a loopable
@@ -608,11 +639,16 @@ export class AudioEngine {
   // every currently-looping point (and every still-loading one, fix round 2)
   // against the latest positions: gone from `points` entirely, or still
   // present but now beyond the scheduler's radius, both end it the same way.
-  _sweepNearbyLoops(pointsById, listener, presenceById = new Map()) {
+  _sweepNearbyLoops(pointsById, listener, presenceById = new Map(), auraPresenceById = new Map()) {
     const stillNear = (p) => p && Math.hypot((p.x || 0) - listener.x, (p.y || 0) - listener.y) <= this.nearbyScheduler.radiusPx;
     // SOMET-605: a `boss:` emitter stays only while tickNearby found it
     // within screen radius this tick; a point keeps its own radius rule.
-    const keep = (id) => (id.startsWith('boss:') ? presenceById.has(id) : stillNear(pointsById.get(id)));
+    // SOMET-607: an `aura:` emitter follows the same "found this tick" rule.
+    const keep = (id) => {
+      if (id.startsWith('boss:')) return presenceById.has(id);
+      if (id.startsWith('aura:')) return auraPresenceById.has(id);
+      return stillNear(pointsById.get(id));
+    };
     for (const emitterId of [...this.nearbyLoops.keys()]) {
       if (!keep(emitterId)) this._fadeOutNearbyLoop(emitterId);
     }

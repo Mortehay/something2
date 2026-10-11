@@ -64,7 +64,10 @@ describe('EntityTypesAdmin wiring', () => {
   it('entity save/delete and a refused aura delete invalidate the aura query (stale Used by)', () => {
     const maps = fs.readFileSync(path.join(dir, '../useMaps.js'), 'utf8');
     const n = (maps.match(/queryKey: \['auraEffects'\]/g) || []).length;
-    expect(n).toBe(3);
+    // 3 invalidations (entity save/delete, refused aura delete) + SOMET-607's
+    // own game-facing useAuraEffects() read, same key on purpose: the live
+    // game's aura library shares the admin's cache and goes stale the same way.
+    expect(n).toBe(4);
     const hook = fs.readFileSync(path.join(dir, '../useAuraEffects.js'), 'utf8');
     expect(hook).toMatch(/e\.status === 409\) qc\.invalidateQueries\(\{ queryKey: AURA_QUERY_KEY \}\)/);
   });

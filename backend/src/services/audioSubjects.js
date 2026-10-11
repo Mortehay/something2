@@ -162,6 +162,28 @@ const SUBJECT_KINDS = {
     // hoisted).
     subjectCues: async () => skillCues(),
   },
+  // SOMET-607 (S5, spec §3.6). loop/pulse/apply all 'sfx' -- 'loop' is a
+  // continuous clip played presence-style (AudioEngine.tickNearby), same
+  // mechanism as a loopable world point or a boss's own `presence`, not a
+  // distinct clip kind. No cue on the box today for any of the three (same
+  // "upload only" posture as most boss slots above) -- this registers the
+  // vocabulary so the Audio tab, batch and prompt writer pick it up with no
+  // route change, per this ticket's own acceptance criterion; generation
+  // itself can follow once a cue exists.
+  aura: {
+    label: 'Auras',
+    slots: { loop: 'sfx', pulse: 'sfx', apply: 'sfx' },
+    cues: { loop: null, pulse: null, apply: null },
+    list: async (db) => (await db.query('SELECT name FROM aura_effects ORDER BY name')).rows.map((r) => r.name),
+    exists: async (db, keys) => new Set((await db.query(
+      'SELECT name FROM aura_effects WHERE name = ANY($1::text[])', [keys])).rows.map((r) => r.name)),
+    subjectCues: async (db) => {
+      const names = await SUBJECT_KINDS.aura.list(db);
+      const out = {};
+      for (const n of names) out[n] = { ...SUBJECT_KINDS.aura.cues };
+      return out;
+    },
+  },
 };
 
 // Every kind whose bindings are global rather than scoped to one world/biome

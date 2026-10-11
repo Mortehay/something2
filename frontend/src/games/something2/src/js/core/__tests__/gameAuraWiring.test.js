@@ -25,3 +25,19 @@ describe("Game.js aura wiring (SOMET-606)", () => {
     expect(ws.slice(0, 6000)).toMatch(/else\s*\{\s*(\/\/[^\n]*\n\s*)*resetSelfAura\(this\)/);
   });
 });
+
+// SOMET-607 (S5, spec §4.4): "apply" has no wire event of its own -- it is
+// synthesized by diffing this frame's debuff names against last frame's
+// (newlyAppliedAuraNames), the same source gate / reasoning as SOMET-606
+// above.
+describe("Game.js aura apply sfx wiring (SOMET-607)", () => {
+  it("diffs every frame against selfAuraNames, then updates it from the same frame", () => {
+    expect(src).toMatch(/newlyAppliedAuraNames\(this\.selfAuraNames,\s*msg\.debuffs\)/);
+    expect(src).toMatch(/this\.selfAuraNames\s*=\s*new Set\(/);
+  });
+  it("plays one 'apply' sfx event per newly-applied aura, at the local player's own actor key", () => {
+    expect(src).toMatch(/e:\s*'apply',\s*c:\s*n,\s*a:\s*`p:\$\{this\.localUserId\}`/);
+    const apply = src.slice(src.indexOf("const justApplied = newlyAppliedAuraNames"));
+    expect(apply.slice(0, 800)).toMatch(/this\.audio\.playSfxEvents/);
+  });
+});

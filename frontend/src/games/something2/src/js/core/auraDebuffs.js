@@ -44,4 +44,18 @@ export function resetSelfAura(game) {
   game.selfSpeedMult = 1;
   if (game.player) game.player.debuffSpeedMult = 1;
   game.auraDebuffRows = [];
+  game.selfAuraNames = new Set();
+}
+
+// SOMET-607 (S5, spec §4.4): the server pushes the local player's CURRENT
+// debuff set every frame (same "omitted when clear" contract as the rest of
+// this file) -- there is no one-shot "you were just hit by an aura" wire
+// event. The 'apply' sfx is synthesized client-side by diffing this frame's
+// names against last frame's: a name that was not there a moment ago just
+// started, which is the moment the sound should play. Pure so Game.js's
+// per-frame call is testable without a fake server.
+export function newlyAppliedAuraNames(prevNames, debuffs) {
+  const prev = prevNames instanceof Set ? prevNames : new Set(prevNames || []);
+  const now = (Array.isArray(debuffs) ? debuffs : []).filter(Boolean).map((d) => d.n);
+  return now.filter((n) => n && !prev.has(n));
 }

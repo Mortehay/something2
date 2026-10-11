@@ -26,7 +26,7 @@ function stripImageStyling(prompt) {
 const ART_KIND = { creature: 'entity', world_point: 'entity', item: 'item', skill: 'skill' };
 
 async function loadPromptCatalog(db) {
-  const [worlds, biomes, entities, items, art] = await Promise.all([
+  const [worlds, biomes, entities, items, art, auras] = await Promise.all([
     db.query(`SELECT w.name, w.biomes, w.level_min, w.level_max, w.allows_fast_travel, w.is_entry, w.width,
                      EXISTS (SELECT 1 FROM villages v WHERE v.world_id = w.id) AS has_village
                 FROM worlds w`),
@@ -34,6 +34,7 @@ async function loadPromptCatalog(db) {
     db.query('SELECT name, prompt, boss_tier, element FROM entity_types WHERE is_creature OR point_kind IS NOT NULL'),
     db.query("SELECT name, category, req_level FROM item_types WHERE category = 'weapon'"),
     db.query("SELECT subject_kind, subject_key, text FROM art_prompt_descriptions WHERE active AND subject_kind IN ('entity', 'item', 'skill')"),
+    db.query('SELECT name, target_side, dot_element FROM aura_effects'),
   ]);
   return {
     worlds: new Map(worlds.rows.map((r) => [r.name, r])),
@@ -42,6 +43,7 @@ async function loadPromptCatalog(db) {
     items: new Map(items.rows.map((r) => [r.name, r])),
     skills: new Map(SKILLS.map((s) => [s.id, s])),
     artDescriptions: new Map(art.rows.filter((r) => r.text).map((r) => [`${r.subject_kind}/${r.subject_key}`, r.text])),
+    auras: new Map(auras.rows.map((r) => [r.name, r])),
   };
 }
 
@@ -137,6 +139,14 @@ function buildContext(catalog, kind, key, slot, { cue = null } = {}) {
       if (!phrases) return null;
       const phrase = Object.hasOwn(phrases, slot) ? phrases[slot] : phrases.use;
       return `${key} attack: ${phrase}${tail(slot, cue)}`;
+    }
+    // SOMET-607 (S5): "prompt context (element, side)" per the ticket --
+    // dot_element is the closest catalog field to "element" an aura carries
+    // (not every aura is elemental; physical is the column's own default).
+    case 'aura': {
+      const a = catalog.auras.get(key);
+      if (!a) return null;
+      return `magical aura "${key}"; side: ${a.target_side}; element: ${a.dot_element}${tail(slot, cue)}`;
     }
     default: return null;
   }

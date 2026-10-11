@@ -47,6 +47,14 @@ export function sfxChains(ev) {
     case 'phase':
     case 'enrage':
       return c ? chain([`creature/${c}/${e}`]) : [];
+    // SOMET-607 (S5, spec §4.4): "apply" plays when the LOCAL player enters
+    // an enemy aura, at 'own' -- a client-synthesized event (Game.js diffs
+    // its own debuffs frame to frame), not something the server pushes. `c`
+    // carries the aura NAME, same field the other cases reuse for a subject
+    // key. sfxPriority's existing ownActor check resolves this to 'own' as
+    // long as the caller sets `ev.a` to the local player's own id.
+    case 'apply':
+      return c ? chain([`aura/${c}/apply`]) : [];
     default:
       return [];
   }

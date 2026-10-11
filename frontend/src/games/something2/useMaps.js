@@ -290,3 +290,18 @@ export function useVfxEffects() {
   });
   return { vfxEffects };
 }
+
+// SOMET-607 (S5): the aura effect library -- same shape/caching contract as
+// useVfxEffects, indexed by Game.initChunked into auraDefs for rendering.
+export function useAuraEffects() {
+  const { data: auraEffects } = useQuery({
+    queryKey: ['auraEffects'],
+    staleTime: 60_000,
+    queryFn: async () => {
+      const res = await fetch(`${API_URL}/api/aura-effects`);
+      if (!res.ok) throw new Error('Failed to fetch aura effects');
+      return res.json();
+    }
+  });
+  return { auraEffects };
+}

@@ -15,7 +15,7 @@ import { getStoredToken, parseJwt } from "../net/auth.js";
 import { reconcile } from "../net/reconcile.js";
 import { inputVector, movementKeys, facingFromVector } from "../entities/Player.js";
 import { PLAYER_SPEED_EFFECTIVE } from "./constants.js";
-import { selfSpeedMult, debuffHudEntries, resetSelfAura } from "./auraDebuffs.js";
+import { selfSpeedMult, debuffHudEntries, resetSelfAura, newlyAppliedAuraNames } from "./auraDebuffs.js";
 import { aimVector, cursorToWorld } from "./aim.js";
 import { createInventory, applyJoined, applyEquipment, canEquipClient, typeOf, addItem, removeItem } from "./inventory.js";
 import { resolveDrop } from '../systems/inventoryPanel.js';
@@ -147,6 +147,9 @@ export class Game {
         // SOMET-606: server aura multiplier / HUD debuff rows (own state frame).
         this.selfSpeedMult = 1;
         this.auraDebuffRows = [];
+        // SOMET-607 (S5): last frame's active debuff names, diffed every
+        // frame to synthesize the one-shot 'apply' sfx -- see auraDebuffs.js.
+        this.selfAuraNames = new Set();
 
         this.chunked = false;
         this.chunkedMap = null;
@@ -188,6 +191,9 @@ export class Game {
         // Live attack effects, and the library their names resolve against.
         this.vfx = [];
         this.vfxDefs = {};
+        // SOMET-607 (S5): the aura visual library (ring/disc/particles),
+        // indexed by name the same way vfxDefs is.
+        this.auraDefs = {};
 
         // Inventory / paper-doll (Slice 3b-2a). `inventory` mirrors the
         // account-wide item catalog + owned items + equipment; the server is
@@ -512,7 +518,7 @@ export class Game {
         }
     }
 
-    async initChunked({ worldId, characterId, chunkSize, tileTypes, vfxEffects = null, entityTypes = null, className = null, mainStat = null, appearanceVariant = 1, characterClasses = [] }) {
+    async initChunked({ worldId, characterId, chunkSize, tileTypes, vfxEffects = null, auraEffects = null, entityTypes = null, className = null, mainStat = null, appearanceVariant = 1, characterClasses = [] }) {
         if (!this.canvas) {
             console.error("Canvas not found!");
             return;
@@ -578,6 +584,9 @@ export class Game {
         // the client does. Empty until the fetch lands — effects then simply
         // do not draw, rather than throwing.
         this.vfxDefs = indexEffects(vfxEffects);
+        // SOMET-607 (S5): same contract, for the active-aura visuals (ring/
+        // disc/particles) RenderSystem draws beneath an entity.
+        this.auraDefs = indexEffects(auraEffects);
         // Approved entity images/atlases, so authority-driven creatures render
         // with their generated sprite rather than a colored box. Fire-and-forget
         // like the tile preload: until it resolves, rendering degrades to color.
@@ -1523,6 +1532,23 @@ export class Game {
             this.selfSpeedMult = selfSpeedMult(msg);
             this.player.debuffSpeedMult = this.selfSpeedMult;
             this.auraDebuffRows = debuffHudEntries(msg.debuffs);
+            // SOMET-607 (S5, spec §4.4): "apply" plays when the LOCAL player
+            // enters an enemy aura. The server pushes the current debuff set
+            // every frame, not a one-shot "you just entered" event, so it is
+            // synthesized here by diffing against last frame's names.
+            const justApplied = newlyAppliedAuraNames(this.selfAuraNames, msg.debuffs);
+            this.selfAuraNames = new Set((msg.debuffs || []).filter(Boolean).map((d) => d.n).filter(Boolean));
+            if (justApplied.length && this.audio) {
+                this.audio.playSfxEvents(justApplied.map((n) => ({
+                    e: 'apply', c: n, a: `p:${this.localUserId}`, x: this.player.x, y: this.player.y,
+                })), {
+                    listener: {
+                        x: this.player.x + (this.player.width || 0) / 2,
+                        y: this.player.y + (this.player.height || 0) / 2,
+                    },
+                    ownActor: `p:${this.localUserId}`,
+                });
+            }
             // SOMET-523. Assigned on EVERY frame for the same reason `effects`
             // is one line up: the server OMITS the field entirely when the
             // player has no aura, so a guarded assignment would leave a ring
@@ -1798,6 +1824,7 @@ export class Game {
                 // SOMET-528. Empty until a wave-granting node is allocated.
                 waves: this.waves || [],
                 vfx: this.vfx, vfxDefs: this.vfxDefs,
+                auraDefs: this.auraDefs,
                 skillVisuals: this.skillVisuals,
                 // null whenever the equipped weapon needs no ammo — the HUD
                 // then draws no ammo line at all.

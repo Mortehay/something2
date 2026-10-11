@@ -3,7 +3,7 @@ import { Outlet, useMatch } from 'react-router-dom';
 import styled from 'styled-components';
 import toast from 'react-hot-toast';
 import { Game } from "./src/js/main.js";
-import { useMapTiles, useMapConfig, useVfxEffects } from "./useMaps.js";
+import { useMapTiles, useMapConfig, useVfxEffects, useAuraEffects } from "./useMaps.js";
 import { useWorlds } from "./useWorlds";
 import { autoJoinTarget } from "./autoJoin.js";
 import CharacterSelect from "./CharacterSelect.jsx";
@@ -206,6 +206,7 @@ export default function GameShell() {
 
   const { mapTiles } = useMapTiles();
   const { vfxEffects } = useVfxEffects();
+  const { auraEffects } = useAuraEffects();
   // Entity types keyed by name (same shape the legacy map path uses) — the
   // chunked renderer needs them to draw creatures with their approved sprite.
   const { mapConfig } = useMapConfig();
@@ -450,6 +451,7 @@ export default function GameShell() {
         chunkSize,
         tileTypes: mapTiles,
         vfxEffects: vfxEffects || null,
+        auraEffects: auraEffects || null,
         entityTypes: mapConfig?.entityTypes || null,
         spawnX: spawn,
         spawnY: spawn,
@@ -472,7 +474,7 @@ export default function GameShell() {
     }
   };
   // Keep the transition callback pointed at the current closure (fresh
-  // mapTiles/worlds/vfxEffects/mapConfig) — see handleEnterRef declaration above.
+  // mapTiles/worlds/vfxEffects/auraEffects/mapConfig) — see handleEnterRef declaration above.
   handleEnterRef.current = enterWorld;
 
   // MISMATCH fix: a logged-in player should spawn straight into the canonical

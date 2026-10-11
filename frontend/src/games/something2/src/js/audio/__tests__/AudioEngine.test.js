@@ -1016,5 +1016,68 @@ describe('AudioEngine', () => {
         expect(sources.filter((s) => s.buffer && s.buffer.tag === 'u:ignis-bed.ogg').length).toBe(1);
       });
     });
+
+    describe('aura presence (SOMET-607)', () => {
+      const bindings = { 'aura/pack_leader/loop': [{ key: 'pack-leader-loop.ogg', volume: 1, weight: 1, loopable: false }] };
+      const withAura = (x, extra = {}) => creatureMap([
+        { id: 1, type: 'wolf', x, y: 0, width: 0, height: 0, auras: ['pack_leader'], ...extra },
+      ]);
+
+      it('loops aura/<name>/loop while an ordinary creature carrying the aura is within the nearby radius', async () => {
+        const { engine, sources } = engineWith(bindings);
+        engine.unlock();
+        engine.tickNearby(withAura(100), [], { x: 0, y: 0 }, 0);
+        await flush(); await flush();
+        const loop = sources.find((s) => s.buffer && s.buffer.tag === 'u:pack-leader-loop.ogg');
+        expect(loop).toBeTruthy();
+        expect(loop.loop).toBe(true);
+        expect(engine.snapshot().loops).toEqual([{ id: 'aura:1:pack_leader', key: 'pack-leader-loop.ogg', priority: 'nearby', distance: 100 }]);
+      });
+
+      it('an aura-less creature of the same type gets no loop', async () => {
+        const { engine, sources } = engineWith(bindings);
+        engine.unlock();
+        engine.tickNearby(creatureMap([{ id: 1, type: 'wolf', x: 100, y: 0 }]), [], { x: 0, y: 0 }, 0);
+        await flush(); await flush();
+        expect(sources.length).toBe(0);
+      });
+
+      it('fades out once the creature leaves the nearby radius', async () => {
+        const { engine, sources } = engineWith(bindings);
+        engine.unlock();
+        engine.tickNearby(withAura(100), [], { x: 0, y: 0 }, 0);
+        await flush(); await flush();
+        const loop = sources[0];
+        engine.tickNearby(withAura(5000), [], { x: 0, y: 0 }, 300);
+        expect(loop.stopped).toBe(true);
+        expect(engine.snapshot().loops).toEqual([]);
+      });
+
+      it('a boss carrying the aura is gated by screen radius, not the ordinary nearby radius', async () => {
+        const { engine, sources } = engineWith(bindings);
+        engine.unlock();
+        // No setScreenRadius yet -- a boss-carried aura must not use the
+        // ordinary nearby radius as a fallback.
+        engine.tickNearby(withAura(100, { bossTier: 'world' }), [], { x: 0, y: 0 }, 0);
+        await flush(); await flush();
+        expect(sources.length).toBe(0);
+        engine.setScreenRadius(1000);
+        engine.tickNearby(withAura(100, { bossTier: 'world' }), [], { x: 0, y: 0 }, 300);
+        await flush(); await flush();
+        expect(engine.snapshot().loops).toEqual([{ id: 'aura:1:pack_leader', key: 'pack-leader-loop.ogg', priority: 'boss', distance: 100 }]);
+      });
+
+      it('two different auras on the same creature each loop independently', async () => {
+        const { engine, sources } = engineWith({
+          ...bindings,
+          'aura/burning/loop': [{ key: 'burning-loop.ogg', volume: 1, weight: 1 }],
+        });
+        engine.unlock();
+        engine.tickNearby(creatureMap([{ id: 1, type: 'wolf', x: 100, y: 0, auras: ['pack_leader', 'burning'] }]), [], { x: 0, y: 0 }, 0);
+        await flush(); await flush();
+        expect(sources.map((s) => s.buffer.tag).sort()).toEqual(['u:burning-loop.ogg', 'u:pack-leader-loop.ogg']);
+        expect(engine.snapshot().loops.map((l) => l.id).sort()).toEqual(['aura:1:burning', 'aura:1:pack_leader']);
+      });
+    });
   });
 });

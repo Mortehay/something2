@@ -325,6 +325,10 @@ export class RenderSystem {
     // Passed per frame rather than stashed at construction because the library
     // arrives asynchronously, after the renderer exists.
     vfxDefs = null,
+    // SOMET-607 (S5): the aura visual library, same "arrives async, passed
+    // per frame" contract as vfxDefs -- auraDefs[name] gives a creature's
+    // active aura its shape/color/radius/pulse.
+    auraDefs = null,
     progression = null,
     equippedWeapon = null, playerStats = null,
     // SOMET-493 — the inspect card. Shaped
@@ -353,6 +357,7 @@ export class RenderSystem {
     // landmark body plan a few lines down.
     this.entityDefs = entityDefs;
     if (vfxDefs) this.vfxDefs = vfxDefs;
+    if (auraDefs) this.auraDefs = auraDefs;
     // While any full-screen panel is up the cursor is being used to click ITS
     // rows, so the inspect card must not follow it around over the top of the
     // panel — and, more importantly, must not hit-test the world hidden behind
@@ -3102,6 +3107,45 @@ export class RenderSystem {
     this.ctx.restore();
   }
 
+  // SOMET-607 (S5). A creature's active auras (names in e.auras, resolved
+  // against the catalog auraDefs[name] carries) drawn on the ground plane,
+  // same 2:1 ellipse convention as every other ground ring here -- and
+  // BENEATH the actor, same ordering _drawEffectRings already uses, so the
+  // creature stands on top of its own aura rather than being hidden by it.
+  //
+  // shape='particles' falls back to the same ring stroke as 'ring': a true
+  // particle field is a later pass; the ring already tells the player
+  // "something is emanating from here", which is the acceptance bar for S5.
+  _drawAuraEffects(cx, feetY, auras) {
+    if (!this.auraDefs || !Array.isArray(auras) || auras.length === 0) return;
+    const now = this.nowMs || Date.now();
+    this.ctx.save();
+    for (const name of auras) {
+      const def = this.auraDefs[name];
+      if (!def) continue;
+      const rx = blastScreenRadiusX(def.radius);
+      if (!(rx > 0)) continue;
+      const pulseMs = Number(def.pulse_ms) || 0;
+      const pulse = pulseMs > 0 ? 1 + 0.08 * Math.sin((now * 2 * Math.PI) / pulseMs) : 1;
+      const r = rx * pulse;
+      this.ctx.strokeStyle = def.color || '#d4a017';
+      this.ctx.fillStyle = def.color || '#d4a017';
+      this.ctx.lineWidth = 2;
+      this.ctx.beginPath();
+      this.ctx.ellipse(cx, feetY, r, r / 2, 0, 0, Math.PI * 2);
+      if (def.shape === 'disc') {
+        this.ctx.globalAlpha = 0.25;
+        this.ctx.fill();
+        this.ctx.globalAlpha = 0.9;
+        this.ctx.stroke();
+      } else {
+        this.ctx.globalAlpha = 0.85;
+        this.ctx.stroke();
+      }
+    }
+    this.ctx.restore();
+  }
+
   // Colour pips above an affected actor, alongside the HP bar. The feet rings
   // can be occluded by a sprite standing in front; the pips sit above the head
   // where the HP bar already reads clearly, so an effect is never completely
@@ -3162,6 +3206,7 @@ export class RenderSystem {
     // rather than being obscured by it. `drawY + h` is the feet line this same
     // method already computed — see _drawEffectRings on why not s.y.
     this._drawEffectRings(s.x, drawY + h, w, obj.effects);
+    this._drawAuraEffects(s.x, drawY + h, obj.auras);
     const img = this.imageManager.get(imageKey);
     const resolved = RenderSystem.resolveSprite(
       obj, this.imageManager, obj.renderMode || 'static', this.nowMs,
@@ -3378,6 +3423,7 @@ export class RenderSystem {
 
     // Status rings (creatures render through this path in renderChunked).
     this._drawEffectRings(s.x, drawY + h, w, e.effects);
+    this._drawAuraEffects(s.x, drawY + h, e.auras);
 
     if (isBoss) {
       if (!this._drawEntityArt(e, drawX, drawY, w, h)) this._drawWorldBoss(e, drawX, drawY, w, h, s);

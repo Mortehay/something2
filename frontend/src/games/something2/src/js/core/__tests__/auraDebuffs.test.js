@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { selfSpeedMult, debuffHudEntries, prettyAuraName, resetSelfAura } from "../auraDebuffs.js";
+import { selfSpeedMult, debuffHudEntries, prettyAuraName, resetSelfAura, newlyAppliedAuraNames } from "../auraDebuffs.js";
 
 describe("selfSpeedMult (SOMET-606)", () => {
   it("reads a finite positive speedMult, else 1", () => {
@@ -42,7 +42,37 @@ describe("resetSelfAura (SOMET-606 fix)", () => {
     expect(g.player.debuffSpeedMult).toBe(1);
     expect(g.auraDebuffRows).toEqual([]);
   });
+  it("also clears selfAuraNames (SOMET-607), so a world switch does not replay old auras as newly-applied", () => {
+    const g = { selfAuraNames: new Set(["dread"]) };
+    resetSelfAura(g);
+    expect(g.selfAuraNames).toEqual(new Set());
+  });
   it("debuffHudEntries skips null entries", () => {
     expect(debuffHudEntries([null, { n: "dread", d: 1, f: 0.7, s: 1 }]).map((r) => r.id)).toEqual(["aura:dread"]);
+  });
+});
+
+// SOMET-607 (S5, spec §4.4): there is no one-shot wire event for "you just
+// entered an aura" -- Game.js diffs this frame's debuff names against last
+// frame's to synthesize one.
+describe("newlyAppliedAuraNames (SOMET-607)", () => {
+  it("a name absent last frame and present now is newly applied", () => {
+    expect(newlyAppliedAuraNames(new Set(), [{ n: "dread" }])).toEqual(["dread"]);
+  });
+  it("a name already active last frame is not re-reported", () => {
+    expect(newlyAppliedAuraNames(new Set(["dread"]), [{ n: "dread" }])).toEqual([]);
+  });
+  it("one held, one new: only the new one is reported", () => {
+    expect(newlyAppliedAuraNames(new Set(["dread"]), [{ n: "dread" }, { n: "blight_field" }])).toEqual(["blight_field"]);
+  });
+  it("a name that drops off and is never reported again until it reapplies", () => {
+    expect(newlyAppliedAuraNames(new Set(["dread"]), [])).toEqual([]);
+  });
+  it("accepts a plain array or iterable in place of a Set for prevNames", () => {
+    expect(newlyAppliedAuraNames(["dread"], [{ n: "dread" }, { n: "blight_field" }])).toEqual(["blight_field"]);
+  });
+  it("empty / missing debuffs, null entries and a null/undefined n are all handled, never a throw", () => {
+    expect(newlyAppliedAuraNames(new Set(), undefined)).toEqual([]);
+    expect(newlyAppliedAuraNames(new Set(), [null, { n: "dread" }, { n: null }])).toEqual(["dread"]);
   });
 });
