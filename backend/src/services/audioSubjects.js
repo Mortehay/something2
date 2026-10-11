@@ -162,18 +162,27 @@ const SUBJECT_KINDS = {
     // hoisted).
     subjectCues: async () => skillCues(),
   },
-  // SOMET-607 (S5, spec §3.6). loop/pulse/apply all 'sfx' -- 'loop' is a
-  // continuous clip played presence-style (AudioEngine.tickNearby), same
-  // mechanism as a loopable world point or a boss's own `presence`, not a
-  // distinct clip kind. No cue on the box today for any of the three (same
-  // "upload only" posture as most boss slots above) -- this registers the
-  // vocabulary so the Audio tab, batch and prompt writer pick it up with no
-  // route change, per this ticket's own acceptance criterion; generation
-  // itself can follow once a cue exists.
+  // SOMET-607 (S5, spec §3.6). `loop` is a continuous clip played
+  // presence-style (AudioEngine.tickNearby), same mechanism as a loopable
+  // world point or a boss's own `presence`. `pulse` is a periodic ambient
+  // bed too (no client trigger wired yet -- reserved for a future per-tick
+  // cue). Both are 'ambience' clipKind, NOT 'sfx': the box's sfx path is
+  // strictly cue-based (spec §4's fixed vocabulary -- slash/hit/death/...),
+  // and there is no such cue for "a generic magical aura", so registering
+  // them as 'sfx' made every generation attempt refuse with "upload only"
+  // before ever reaching the box (found live 2026-10-11, generating audio
+  // for S8's aura follow-up). 'ambience', like world/biome's own ambience
+  // slots, is free-text: it sends the slot's STORED PROMPT straight to the
+  // box with no cue at all -- exactly the path buildContext's 'aura' case
+  // (side/element phrasing) already feeds correctly.
+  // `apply` is a genuine one-shot sfx tied to a specific moment (the local
+  // player entering the aura) -- cue-shaped, same as creature nearby/attack
+  // or any boss slot. The box has no cue for it either, so it stays
+  // deliberately upload-only, same posture as those.
   aura: {
     label: 'Auras',
-    slots: { loop: 'sfx', pulse: 'sfx', apply: 'sfx' },
-    cues: { loop: null, pulse: null, apply: null },
+    slots: { loop: 'ambience', pulse: 'ambience', apply: 'sfx' },
+    cues: { apply: null },
     list: async (db) => (await db.query('SELECT name FROM aura_effects ORDER BY name')).rows.map((r) => r.name),
     exists: async (db, keys) => new Set((await db.query(
       'SELECT name FROM aura_effects WHERE name = ANY($1::text[])', [keys])).rows.map((r) => r.name)),
