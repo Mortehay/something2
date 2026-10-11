@@ -61,6 +61,16 @@ describe("boss rendering (SOMET-603)", () => {
     expect(calls.some((c) => c.op === "fillText" && c.text.includes("[BOSS] zzEnd Boss"))).toBe(true);
   });
 
+  it("a miniboss gets its own tag, not the generic [BOSS] plate (SOMET-625)", () => {
+    const { rs, calls, procedural } = setup();
+    rs.drawEntity(boss({ bossTier: "miniboss", name: "zzBeast Miniboss" }));
+    expect(calls.some((c) => c.op === "fillText" && c.text.includes("[MINIBOSS] zzBeast Miniboss"))).toBe(true);
+    // Same procedural-body/nameplate path as every other bossTier -- the
+    // thing that already makes it visually distinct from its own flat-rect
+    // base creature, independent of this tag.
+    expect(procedural).toEqual(["fire"]);
+  });
+
   it("an untiered creature whose name sounds like a boss is NOT drawn as one", () => {
     const { rs, procedural } = setup();
     rs.drawEntity({ id: "t", type: "Gorgon, the Thunder Titan", name: "Gorgon, the Thunder Titan",

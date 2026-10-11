@@ -3321,7 +3321,11 @@ export class RenderSystem {
   _drawBossPlate(e, drawX, drawY, w, s) {
     const ctx = this.ctx;
     const { baseColor } = RenderSystem.bossPalette(e.element);
-    const tag = e.bossTier === "world" ? "[WORLD BOSS]" : "[BOSS]";
+    // SOMET-625 (S12): a miniboss gets its own tag -- it is drawn through the
+    // same procedural-body/nameplate/HP-bar path every bossTier uses (that
+    // part already made it visually distinct from its own base creature),
+    // but a generic "[BOSS]" made it indistinguishable from a dungeon boss.
+    const tag = e.bossTier === "world" ? "[WORLD BOSS]" : e.bossTier === "miniboss" ? "[MINIBOSS]" : "[BOSS]";
     ctx.save();
     ctx.font = "bold 14px sans-serif";
     ctx.textAlign = "center";

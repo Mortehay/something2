@@ -77,3 +77,37 @@ test('every LINES biome exists in STARTER_BIOMES (no orphan spawn target)', () =
   const biomeNames = new Set(STARTER_BIOMES.map((b) => b.name));
   for (const line of LINES) assert.ok(biomeNames.has(line.biome), line.biome);
 });
+
+// SOMET-625 (S12).
+test('every miniboss has exactly two drops: a floor item and a distinct, rarer upgrade', () => {
+  const rows = buildMinibosses(STARTER_BIOMES);
+  for (const r of rows) {
+    assert.equal(r.drops.length, 2, r.name);
+    const [floor, upgrade] = r.drops;
+    assert.equal(floor.chance, 1, `${r.name}: the S11 floor item must stay guaranteed`);
+    assert.ok(upgrade.chance > 0 && upgrade.chance < 1, `${r.name}: the upgrade must be rarer than guaranteed`);
+    assert.notEqual(floor.item, upgrade.item, r.name);
+  }
+});
+
+test('the upgrade item matches the line\'s element; a physical/elementless line gets a two-handed sword', () => {
+  const rows = buildMinibosses(STARTER_BIOMES);
+  const expected = { fire: 'flame staff', ice: 'frost staff', lightning: 'storm staff', arcane: 'archmage staff' };
+  for (const line of LINES) {
+    const row = rows.find((r) => r.name === `${line.name} Miniboss`);
+    const want = expected[line.element] || 'two-handed sword';
+    assert.equal(row.drops[1].item, want, line.name);
+  }
+});
+
+test('an elite variant\'s upgrade chance is higher than its line\'s base variant', () => {
+  const rows = buildMinibosses(STARTER_BIOMES);
+  for (const line of LINES) {
+    if (!line.tier.includes('IV')) continue;
+    const base = rows.find((r) => r.name === `${line.name} Miniboss`);
+    const elite = rows.find((r) => r.name === `${line.name} Elite Miniboss`);
+    assert.ok(elite.drops[1].chance > base.drops[1].chance, line.name);
+    // Same item on both -- only the odds improve, not the reward itself.
+    assert.equal(elite.drops[1].item, base.drops[1].item, line.name);
+  }
+});

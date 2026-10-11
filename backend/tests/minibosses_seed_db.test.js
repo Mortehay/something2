@@ -62,6 +62,36 @@ test('every miniboss has a creature_drops row (tests/creature_drops_db.test.js\'
   }
 });
 
+// SOMET-625 (S12).
+test('every miniboss has exactly its two generated drop rows, matching item + chance', { skip }, async () => {
+  const pool = new Pool({ connectionString: url });
+  try {
+    const rows = buildMinibosses(STARTER_BIOMES);
+    const r = await pool.query(
+      `SELECT et.name AS creature, it.name AS item, cd.chance, cd.min_qty, cd.max_qty
+         FROM creature_drops cd
+         JOIN entity_types et ON et.id = cd.entity_type_id
+         JOIN item_types it ON it.id = cd.item_type_id
+        WHERE et.boss_tier = 'miniboss'`);
+    const byCreature = new Map();
+    for (const row of r.rows) {
+      if (!byCreature.has(row.creature)) byCreature.set(row.creature, []);
+      byCreature.get(row.creature).push(row);
+    }
+    for (const gen of rows) {
+      const live = byCreature.get(gen.name) || [];
+      assert.equal(live.length, 2, gen.name);
+      for (const d of gen.drops) {
+        const match = live.find((l) => l.item === d.item);
+        assert.ok(match, `${gen.name}: expected a drop row for ${d.item}`);
+        assert.equal(Number(match.chance), d.chance, `${gen.name}/${d.item}`);
+      }
+    }
+  } finally {
+    await pool.end();
+  }
+});
+
 test('seeding a biome wires its generated miniboss name(s) into creature_types', { skip }, async () => {
   const pool = new Pool({ connectionString: url });
   try {

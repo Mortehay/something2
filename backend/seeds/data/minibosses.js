@@ -17,12 +17,16 @@
 // don't carry). Real balance is SOMET-613's tuning follow-up, not this
 // ticket's job -- these numbers only need to exist and be sane-shaped.
 //
-// drop_item: tests/creature_drops_db.test.js enforces a real invariant --
-// every hostile creature needs an explicit creature_drops row, or it kills
-// silently yielding nothing. Reusing BEHAVIOR_DROPS' own Heavy/Champion item
-// (morning star / long sword) is the same floor those rungs already have
-// everywhere else, not new curation; S12 (SOMET-625) is where this gets a
-// real tiered loot table.
+// drops: tests/creature_drops_db.test.js enforces a real invariant -- every
+// hostile creature needs an explicit creature_drops row, or it kills
+// silently yielding nothing (SOMET-624/S11 found this the hard way). Every
+// miniboss gets TWO rows (SOMET-625/S12):
+//  1. the floor: its rung's own BEHAVIOR_DROPS item (morning star / long
+//     sword), same as any other Heavy/Champion creature -- not new curation.
+//  2. the upgrade: a rarer, element-matched weapon from the SAME catalog
+//     dungeon bosses already draw from (flame/frost/storm/archmage staff,
+//     or two-handed sword for a physical/elementless line) -- this is the
+//     actual reason to hunt one down, not just a tougher reskin of its line.
 const { LINES, RUNGS } = require('../../scripts/bestiary/template.js');
 const { BEHAVIOR_DROPS } = require('./behaviorDrops.js');
 
@@ -31,13 +35,22 @@ const dropItemFor = (behaviorName) => BEHAVIOR_DROPS.find((d) => d.behavior === 
 
 const TIER_IV = 'IV';
 
+// Same element -> weapon mapping backend/seeds/data/dungeonBosses.js already
+// uses for fire/arcane (flame staff / archmage staff); extended to the two
+// elements no dungeon boss happens to carry (ice, lightning), both already
+// real rows in migration 1714440019000_weapon_catalog.js.
+const UPGRADE_ITEM_BY_ELEMENT = {
+  fire: 'flame staff', ice: 'frost staff', lightning: 'storm staff', arcane: 'archmage staff',
+};
+const upgradeItemFor = (element) => UPGRADE_ITEM_BY_ELEMENT[element] || 'two-handed sword';
+
 const BASE = {
   hpMult: 10, defMult: 4, baseDamage: 18, size: 56, xpReward: 80, goldMin: 6, goldMax: 18,
-  behaviorName: 'Heavy', dropChance: 1, dropMinQty: 1, dropMaxQty: 1,
+  behaviorName: 'Heavy', upgradeChance: 0.25,
 };
 const ELITE = {
   hpMult: 18, defMult: 7, baseDamage: 40, size: 72, xpReward: 200, goldMin: 14, goldMax: 42,
-  behaviorName: 'Champion', dropChance: 1, dropMinQty: 1, dropMaxQty: 2,
+  behaviorName: 'Champion', upgradeChance: 0.5,
 };
 
 function colorFor(biomeName, biomes) {
@@ -71,10 +84,10 @@ function buildOne(line, variant, biomes) {
     resistances: {},
     prompt: `pixel art boss creature, a ${variant === 'elite' ? 'fearsome elite' : 'powerful'} ${line.name.toLowerCase()}-themed miniboss, single object, solid transparent background`,
     biome: line.biome,
-    drop_item: dropItemFor(stats.behaviorName),
-    drop_chance: stats.dropChance,
-    drop_min_qty: stats.dropMinQty,
-    drop_max_qty: stats.dropMaxQty,
+    drops: [
+      { item: dropItemFor(stats.behaviorName), chance: 1, min_qty: 1, max_qty: 1 },
+      { item: upgradeItemFor(line.element), chance: stats.upgradeChance, min_qty: 1, max_qty: 1 },
+    ],
   };
 }
 

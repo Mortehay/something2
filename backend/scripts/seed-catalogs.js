@@ -363,12 +363,12 @@ async function seedOneDungeonBoss(db, b) {
   return r.rowCount;
 }
 
-// SOMET-624 (S11). A generated miniboss row -- same shape and the same
-// insert-only/ON CONFLICT DO NOTHING ownership-transfer rule as
-// seedOneDungeonBoss above. Also writes a creature_drops row (floor only --
-// S12/SOMET-625 owns the real tiered loot table), written only with a NEW
-// row for the same reason seedOneDungeonBoss's is: an admin's edited or
-// deleted drop must survive every reseed. Returns 1 when inserted.
+// SOMET-624 (S11) / SOMET-625 (S12). A generated miniboss row -- same shape
+// and the same insert-only/ON CONFLICT DO NOTHING ownership-transfer rule as
+// seedOneDungeonBoss above. Writes every row in b.drops (floor item + the S12
+// element-matched upgrade), each only with a NEW entity_types row for the
+// same reason seedOneDungeonBoss's is: an admin's edited or deleted drop must
+// survive every reseed. Returns 1 when inserted.
 async function seedOneMiniboss(db, b) {
   const r = await db.query(
     `INSERT INTO entity_types
@@ -384,13 +384,16 @@ async function seedOneMiniboss(db, b) {
      JSON.stringify(b.auras), b.element],
   );
   if (r.rowCount !== 1) return 0;
-  await db.query(
-    `INSERT INTO creature_drops (entity_type_id, item_type_id, chance, min_qty, max_qty)
-     SELECT et.id, it.id, $3, $4, $5 FROM entity_types et, item_types it
-      WHERE et.name = $1 AND it.name = $2
-        AND NOT EXISTS (SELECT 1 FROM creature_drops cd WHERE cd.entity_type_id = et.id AND cd.item_type_id = it.id)`,
-    [b.name, b.drop_item, b.drop_chance, b.drop_min_qty, b.drop_max_qty],
-  );
+  for (const d of b.drops) {
+    // eslint-disable-next-line no-await-in-loop
+    await db.query(
+      `INSERT INTO creature_drops (entity_type_id, item_type_id, chance, min_qty, max_qty)
+       SELECT et.id, it.id, $3, $4, $5 FROM entity_types et, item_types it
+        WHERE et.name = $1 AND it.name = $2
+          AND NOT EXISTS (SELECT 1 FROM creature_drops cd WHERE cd.entity_type_id = et.id AND cd.item_type_id = it.id)`,
+      [b.name, d.item, d.chance, d.min_qty, d.max_qty],
+    );
+  }
   return r.rowCount;
 }
 
