@@ -962,6 +962,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
       dungeonBosses.onDeath(entry, id, killerUserId);
       return Promise.resolve(null);
     }
+    // SOMET-626 (S13): same reasoning as the boss above -- a dungeon-boss
+    // escort minion has no world_creatures row either.
+    if (dungeonBosses.isMinion(entry.worldId, id)) {
+      dungeonBosses.onMinionDeath(entry, id);
+      return Promise.resolve(null);
+    }
     const deadCreature = entry.world && entry.world.creatures && entry.world.creatures.get
       ? entry.world.creatures.get(id)
       : null;

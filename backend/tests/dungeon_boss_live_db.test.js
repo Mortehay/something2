@@ -173,3 +173,62 @@ test('a placed dungeon boss: one instance, one respawn path, one respawn', { ski
     await pool.end();
   }
 });
+
+// SOMET-626 (S13). Same live-authority, real-catalog posture as the test
+// above, for the escort minions.
+test('a dungeon boss\'s escort minion: real catalog resolution, no world_creatures write, independent fast respawn', { skip }, async () => {
+  const pool = new Pool({ connectionString: url, max: 4 });
+  const server = http.createServer();
+  let now = Date.now();
+  const srv = attachAuthority(server, pool, {
+    jwtSecret: 'test-secret', creatureSweepMs: 1e9, itemSweepMs: 1e9, heartbeatMs: 1e9,
+    flushMs: 1e9, dungeonBossClock: () => now,
+  });
+  const errors = [];
+  const origError = console.error;
+  console.error = (...a) => { errors.push(a.map(String).join(' ')); origError(...a); };
+  try {
+    await withFixtureWorld(pool, async (worldId) => {
+      // Shade Herald: dungeon_elite, element arcane -> 1 minion, resolved
+      // against the REAL catalog (not a stub) to "Arcane Elemental Guard",
+      // the same row S1/SOMET-602 seeded for world-boss phase minions.
+      await pool.query(
+        `UPDATE worlds SET biomes = '["Deep Forest"]'::jsonb, level_min = 41, level_max = 50,
+                dungeon_boss = $2::jsonb WHERE id = $1`,
+        [worldId, JSON.stringify({ entity: 'Shade Herald', x: 4850, y: 4850, respawn_s: 600 })]);
+      const minionId = `dminion:${worldId}:0`;
+      const minionsIn = (e) => e.world.creatures.all().filter((c) => c.id && c.id.startsWith(`dminion:${worldId}:`));
+
+      let entry = await srv._loadWorld(worldId);
+      assert.equal(minionsIn(entry).length, 1, 'Elite places its one escort minion');
+      const m = entry.world.creatures.get(minionId);
+      assert.ok(m, 'the minion sits under its fixed id');
+      assert.equal(m.type, 'Arcane Elemental Guard');
+      assert.equal(m.bossTier, null, 'a minion is not itself boss-tier');
+
+      const spy = spyPool(pool);
+      try {
+        entry.world.creatures._removeKilled(m);
+        await srv._onCreatureDeath(entry, minionId, null);
+      } finally {
+        spy.restore();
+      }
+      assert.ok(!spy.queries.some((q) => /world_creatures|creature_respawns/.test(q)), spy.queries.join('\n'));
+      assert.ok(!errors.some((e) => /death commit failed/.test(e)), errors.join('\n'));
+      assert.equal(minionsIn(entry).length, 0, 'dead');
+
+      // Due at 20s -- independent of, and far faster than, the boss's own 600s.
+      now += 19_000;
+      await srv._creatureRespawnSweep();
+      assert.equal(minionsIn(entry).length, 0, 'not due yet');
+      now += 1_000;
+      await srv._creatureRespawnSweep();
+      assert.equal(minionsIn(entry).length, 1, 'respawned at 20s');
+      srv.evictWorld(worldId);
+    }, { prefix: 'zzS13live' });
+  } finally {
+    console.error = origError;
+    srv.close();
+    await pool.end();
+  }
+});

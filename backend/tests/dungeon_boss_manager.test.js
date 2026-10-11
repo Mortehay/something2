@@ -15,14 +15,25 @@ const ROW = {
   aura_names: null, aura_defs: null,
 };
 const SPEC = { entity: 'zzElite', x: 1150, y: 1250, respawn_s: 600 };
+// SOMET-626 (S13). A stand-in for the real "Arcane Elemental Guard" catalog
+// row -- ROW's element is 'arcane', so this is what minionTypeNameFor(ROW.element)
+// resolves to by default.
+const MINION_ROW = {
+  id: 88, name: 'Arcane Elemental Guard', hp: 60, max_hp: 60, defense: 4, faction: 'hostile',
+  boss_tier: null, element: 'arcane', hitbox_size: 40, base_damage: 10, aura_names: null, aura_defs: null,
+};
 
-function harness({ row = ROW, spec = SPEC, levelMin = 41, levelMax = 50 } = {}) {
+// minionRow: null exercises the "catalog row missing" warning path; a real
+// row (the default) is what every pre-existing, non-minion-focused test in
+// this file implicitly relies on staying silent.
+function harness({ row = ROW, spec = SPEC, levelMin = 41, levelMax = 50, minionRow = MINION_ROW } = {}) {
   let now = 1_000_000;
   const warnings = [];
   const kills = [];
   const loads = [];
   const mgr = new DungeonBossManager({
     loadRow: async (name) => { loads.push(name); return name === row?.name ? row : null; },
+    loadMinionRow: async (name) => (minionRow && name === minionRow.name ? minionRow : null),
     clock: () => now,
     onKilled: (k) => kills.push(k),
     log: { warn: (m) => warnings.push(m), error: (m) => warnings.push(m) },
@@ -35,6 +46,7 @@ function harness({ row = ROW, spec = SPEC, levelMin = 41, levelMax = 50 } = {}) 
   return { mgr, newEntry, warnings, kills, loads, advance: (ms) => { now += ms; } };
 }
 const bosses = (entry) => entry.world.creatures.all().filter((c) => c.bossTier);
+const minions = (entry) => entry.world.creatures.all().filter((c) => c.id && c.id.startsWith('dminion:'));
 const kill = (entry, id) => entry.world.creatures._removeKilled(entry.world.creatures.get(id));
 
 test('place adds one boss with fixed id, tier, level, full hp and a leash post', async () => {
@@ -186,6 +198,91 @@ test('isBoss is an id test: only boss:<thisWorld>', () => {
   assert.equal(mgr.isBoss('w-2', 'boss:w-1'), false);
   assert.equal(mgr.isBoss('w-1', 'wb_123_4'), false);
   assert.equal(mgr.isBoss('w-1', '6f1c...uuid'), false);
+});
+
+// SOMET-626 (S13): dungeon boss escort minions.
+test('isMinion is an id test: only dminion:<thisWorld>:<n>', () => {
+  const { mgr } = harness();
+  assert.equal(mgr.isMinion('w-1', 'dminion:w-1:0'), true);
+  assert.equal(mgr.isMinion('w-1', 'dminion:w-1:1'), true);
+  assert.equal(mgr.isMinion('w-2', 'dminion:w-1:0'), false);
+  assert.equal(mgr.isMinion('w-1', 'boss:w-1'), false);
+});
+
+test('placing an Elite boss also places its one escort minion, element-matched', async () => {
+  const h = harness(); // ROW.boss_tier = dungeon_elite, element = arcane
+  const e = h.newEntry();
+  await h.mgr.place(e);
+  const live = minions(e);
+  assert.equal(live.length, 1, 'Elite gets 1 minion');
+  assert.equal(live[0].id, 'dminion:w-1:0');
+  assert.equal(live[0].type, 'Arcane Elemental Guard');
+  assert.equal(live[0].bossTier, null, 'a minion is not itself boss-tier');
+});
+
+test('an End boss gets 2 escort minions, offset from its post like the world-boss pattern', async () => {
+  const h = harness({ row: { ...ROW, boss_tier: 'dungeon_end' } });
+  const e = h.newEntry();
+  await h.mgr.place(e);
+  const live = minions(e).sort((a, b) => a.id.localeCompare(b.id));
+  assert.equal(live.length, 2);
+  assert.deepEqual(live.map((c) => c.id), ['dminion:w-1:0', 'dminion:w-1:1']);
+});
+
+test('a double place leaves exactly the right minion count, not double (race-safe like the boss itself)', async () => {
+  const h = harness();
+  const e = h.newEntry();
+  await Promise.all([h.mgr.place(e), h.mgr.place(e)]);
+  await h.mgr.place(e);
+  assert.equal(minions(e).length, 1);
+});
+
+test('a missing minion catalog row places no minion, warns once, and still places the boss', async () => {
+  const h = harness({ minionRow: null });
+  const e = h.newEntry();
+  const c = await h.mgr.place(e);
+  assert.ok(c, 'the boss itself still places');
+  assert.equal(minions(e).length, 0);
+  await h.mgr.place(e); // re-entry: no duplicate warning
+  assert.equal(h.warnings.filter((w) => /minion type/.test(w)).length, 1);
+});
+
+test('a killed minion respawns independently, much faster than the boss, and does not disturb the other minion', async () => {
+  const h = harness({ row: { ...ROW, boss_tier: 'dungeon_end' } }); // 2 minions
+  const e = h.newEntry();
+  const worlds = new Map([['w-1', e]]);
+  await h.mgr.place(e);
+  kill(e, 'dminion:w-1:0');
+  assert.equal(h.mgr.onMinionDeath(e, 'dminion:w-1:0'), true);
+  assert.equal(minions(e).length, 1, 'only the killed one is gone');
+
+  h.advance(19_999);
+  assert.equal(await h.mgr.sweep(worlds), 0, 'not due yet');
+  h.advance(1);
+  assert.equal(await h.mgr.sweep(worlds), 1, 'due at 20s, independent of the boss\'s 600s+');
+  assert.equal(minions(e).length, 2, 'both minions present again');
+});
+
+test('a due minion respawn is gated by the same 1000px clear-of-players rule', async () => {
+  const h = harness();
+  const e = h.newEntry();
+  const worlds = new Map([['w-1', e]]);
+  await h.mgr.place(e);
+  kill(e, 'dminion:w-1:0');
+  h.mgr.onMinionDeath(e, 'dminion:w-1:0');
+  h.advance(20_000);
+  assert.equal(await h.mgr.sweep(worlds, () => [{ x: 1150 + 40 + 999, y: 1250 + 40 }]), 0);
+  assert.equal(await h.mgr.sweep(worlds, () => [{ x: 1150 + 40 + 1000, y: 1250 + 40 }]), 1);
+});
+
+test('a minion kill is reported via onMinionDeath exactly once; a duplicate/unknown id returns false', async () => {
+  const h = harness();
+  const e = h.newEntry();
+  await h.mgr.place(e);
+  kill(e, 'dminion:w-1:0');
+  assert.equal(h.mgr.onMinionDeath(e, 'dminion:w-1:0'), true);
+  assert.equal(h.mgr.onMinionDeath(e, 'dminion:w-1:0'), false, 'already dead, not re-armed');
+  assert.equal(h.mgr.onMinionDeath(e, 'dminion:w-1:9'), false, 'unknown minion id');
 });
 
 test('an onKilled that throws or rejects is logged, never propagated', async () => {
