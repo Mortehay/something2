@@ -18,6 +18,7 @@ const {
 } = require('./effects');
 const { resolveBehavior, DEFAULT_BEHAVIOR, DEFAULT_ABILITY } = require('../services/creatureBehaviors');
 const { resolveInstanceAuras, AURAS_LATERAL } = require('../services/auraEffects.js');
+const { DEFAULT_SKILL } = require('../services/creatureSkills');
 const { shoveAwayFrom } = require('./knockback');
 
 const DIRS = [
@@ -38,6 +39,15 @@ function hitboxOrNull(v) {
 }
 const CREATURE_SPEED = 40;    // world px/s
 const REDIRECT_CHANCE = 0.02;
+
+// SOMET-608 (S6). creature_skills has no projectile_speed column of its own
+// (spec §3.3's table does not give the `projectile` kind one, unlike
+// creature_abilities) -- `radius` serves the AoE role for slam/nova and the
+// projectile_radius (hit-size) role for `projectile`, and speed is this one
+// fixed default rather than a second configurable number the spec never
+// asked for. 400 sits in the middle of the existing ability speeds (Ranged
+// 520, Caster 420, Apex 460).
+const SKILL_PROJECTILE_SPEED = 400;
 
 // SOMET-254: AGGRO_RADIUS/LEASH_RADIUS/CONTACT_RANGE/CREATURE_ATTACK_COOLDOWN
 // are no longer read by any tick/behaviour-resolution code in this file --
@@ -236,6 +246,28 @@ const ABILITIES_LATERAL = `
     FROM creature_abilities a WHERE a.behavior_id = b.id
   ) ab ON true`;
 
+// SOMET-608 (S6): a behaviour's SKILL repertoire, the same one-JSON-array-
+// per-creature shape ABILITIES_LATERAL uses and for the same reasons --
+// `cbs.slot` inside the aggregate is load-bearing (slot order IS priority
+// order), and this is written once and shared by every query that loads a
+// behaviour, so a column added to creature_skills and forgotten here is
+// inert everywhere at once rather than merely untested in one place.
+const SKILLS_LATERAL = `
+  LEFT JOIN LATERAL (
+    SELECT COALESCE(json_agg(
+             json_build_object(
+               'slot', cbs.slot, 'skill_id', cs.id, 'name', cs.name, 'kind', cs.kind,
+               'telegraph_ms', cs.telegraph_ms, 'cooldown_ms', cs.cooldown_ms,
+               'radius', cs.radius, 'range', cs.range, 'damage_mult', cs.damage_mult,
+               'element', cs.element, 'summon_entity', cs.summon_entity,
+               'summon_count', cs.summon_count, 'vfx', cs.vfx, 'power_scale', cbs.power_scale
+             ) ORDER BY cbs.slot
+           ), '[]'::json) AS skills
+    FROM creature_behavior_skills cbs
+    JOIN creature_skills cs ON cs.id = cbs.skill_id
+    WHERE cbs.behavior_id = b.id
+  ) sk ON true`;
+
 // SOMET-603: entity TYPE rows with everything hydrateCreatureRow and
 // resolveBehavior read, for callers that spawn an instance with no
 // world_creatures row (WorldBossManager now; S9 dungeon bosses next). Callers
@@ -256,9 +288,9 @@ const ENTITY_CATALOG_SELECT = `SELECT et.id, et.name, et.color, et.hp, et.max_hp
          b.name AS behavior_name, b.aggro_radius, b.leash_radius, b.chase_style, b.preferred_range,
          b.move_speed_mult, b.damage_override,
          b.gold_min AS behavior_gold_min, b.gold_max AS behavior_gold_max,
-         ab.abilities
+         ab.abilities, sk.skills
     FROM entity_types et
-    LEFT JOIN creature_behaviors b ON b.id = et.behavior_id${ABILITIES_LATERAL}${AURAS_LATERAL}`;
+    LEFT JOIN creature_behaviors b ON b.id = et.behavior_id${ABILITIES_LATERAL}${AURAS_LATERAL}${SKILLS_LATERAL}`;
 
 // Load the creature entity types. Named + exported (rather than inlined in
 // server.js) so a guard test can assert the SELECT names every column the
@@ -291,9 +323,9 @@ async function loadCreatureTypes(pool) {
             b.aggro_radius, b.leash_radius, b.chase_style, b.preferred_range,
             b.move_speed_mult, b.damage_override,
             b.gold_min AS behavior_gold_min, b.gold_max AS behavior_gold_max,
-            ab.abilities
+            ab.abilities, sk.skills
      FROM entity_types e
-     LEFT JOIN creature_behaviors b ON b.id = e.behavior_id${ABILITIES_LATERAL}
+     LEFT JOIN creature_behaviors b ON b.id = e.behavior_id${ABILITIES_LATERAL}${SKILLS_LATERAL}
      WHERE e.is_creature = true ORDER BY e.id ASC`,
   );
   const creatureTypes = r.rows.map((row) => ({
@@ -339,13 +371,26 @@ async function loadCreatureTypes(pool) {
   // entirely for it -- same "unknown/absent -> no drops" posture as an
   // entity_type name missing from creatureTypeIds.
   const behaviorDrops = new Map(r.rows.map((row) => [row.name, row.behavior_id]));
+  // SOMET-608 (S6): a `summon`-kind skill names an entity_types row by NAME
+  // (creature_skills.summon_entity) and needs the FULL raw row --
+  // hydrateCreatureRow-shaped, with boss_tier/hitbox_size/vfx/auras/display
+  // size, none of which the narrower SELECT above carries -- to build a real
+  // instance at resolve time. CreatureSim.tick() is synchronous and runs
+  // every tick, so this cannot be a live per-summon query; it has to be a
+  // map already in hand. ENTITY_CATALOG_SELECT already names every column
+  // hydrateCreatureRow reads (it is the same query WorldBossManager and
+  // dungeonBosses.js use for their own one-off catalog fetches), so this
+  // reuses it verbatim rather than hand-merging a second column list into
+  // the query above and risking the two drifting apart.
+  const catalogRows = await pool.query(`${ENTITY_CATALOG_SELECT} WHERE et.is_creature = true`);
+  const rowsByName = new Map(catalogRows.rows.map((row) => [row.name, row]));
   // creatureTypes/creatureTypeIds stay COMPLETE (guards included): drops and
   // name→id lookups still need to see guards. The wild-spawn exclusion of
   // guard-faction types lives at the one place that still rolls a wild-spawn
   // pool -- worldPopulation.js's own `hostileTypes` filter -- not here; this
   // function no longer has a wild-spawn caller of its own (SOMET-246).
   return {
-    creatureTypes, creatureTypeIds, creatureGold, behaviorGold, behaviorDrops,
+    creatureTypes, creatureTypeIds, creatureGold, behaviorGold, behaviorDrops, rowsByName,
   };
 }
 
@@ -404,6 +449,18 @@ function stampCreatureAttack(attacks, impacts, c, target, from, to, sfx = null) 
   }
 }
 function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; }
+
+// SOMET-608 (S6). Scatters a summon-kind skill's brood evenly around its
+// origin point, for any count -- unlike dungeonBosses.js's fixed two-entry
+// MINION_OFFSETS (that mechanic only ever summons 1 or 2), a creature skill's
+// summon_count is admin-authored and scaled further by power_scale, so this
+// has to handle an arbitrary count rather than a short hand list.
+const SUMMON_RING_RADIUS = 50;
+function summonOffset(i, total) {
+  if (total <= 1) return [0, 0];
+  const angle = (i / total) * Math.PI * 2;
+  return [Math.cos(angle) * SUMMON_RING_RADIUS, Math.sin(angle) * SUMMON_RING_RADIUS];
+}
 
 // SOMET-314 — the player spawn sanctuary.
 //
@@ -1451,12 +1508,22 @@ function completeAbilities(list) {
   return list.map((a) => ({ ...DEFAULT_ABILITY, ...a })).sort((x, y) => x.slot - y.slot);
 }
 
+// SOMET-608 (S6): same treatment, for a hand-built behaviour's `skills`
+// array -- except the empty case returns [] (DEFAULT_BEHAVIOR.skills),
+// never a fallback skill: unlike an attack ability, "no skill bound" really
+// does mean no skill, not "use the default one instead".
+function completeSkills(list) {
+  if (!Array.isArray(list) || list.length === 0) return DEFAULT_BEHAVIOR.skills;
+  return list.map((s) => ({ ...DEFAULT_SKILL, ...s })).sort((x, y) => x.slot - y.slot);
+}
+
 function resolveInstanceBehavior(c) {
   if (c.behavior) {
     return {
       ...DEFAULT_BEHAVIOR,
       ...c.behavior,
       abilities: completeAbilities(c.behavior.abilities),
+      skills: completeSkills(c.behavior.skills),
     };
   }
   if (c.behavior_name != null) return resolveBehavior(c);
@@ -1494,6 +1561,23 @@ function selectAbility(c, bh, dist) {
     if ((c._abilityCd.get(a.slot) || 0) > 0) continue;
     if (dist > a.attackRange) continue;
     return a;
+  }
+  return null;
+}
+
+// SOMET-608 (S6). The skill twin of selectAbility above -- same rule
+// (deterministic, lowest-slot-first among off-cooldown + in-range), same
+// cooldown-lives-on-the-instance reasoning, just over `bh.skills` /
+// `c._skillCd` instead of `bh.abilities` / `c._abilityCd`. `range` gates
+// every kind uniformly, nova included: "how close a target needs to be for
+// the creature to bother casting this at all" is a property the catalog
+// author sets (typically close to the skill's own radius for a
+// self-centred burst), not something this function special-cases by kind.
+function selectSkill(c, bh, dist) {
+  for (const s of bh.skills) {
+    if ((c._skillCd.get(s.slot) || 0) > 0) continue;
+    if (dist > s.range) continue;
+    return s;
   }
   return null;
 }
@@ -1663,6 +1747,13 @@ class CreatureSim {
         // same thing the old scalar `_attackCd: 0` meant), so a creature that
         // has never attacked can attack on its first tick.
         _abilityCd: new Map(),
+        // SOMET-608 (S6): same per-instance-per-slot cooldown convention, for
+        // the creature's SKILL repertoire (a separate list from its ordinary
+        // attack abilities above). `_pendingSkill` is at most one in-flight
+        // telegraph -- a creature commits to one skill at a time, exactly
+        // like selectAbility's single-pick rule for ordinary attacks.
+        _skillCd: new Map(),
+        _pendingSkill: null,
       });
       // SOMET-605: a boss announces itself on arrival. quietSpawn is an input
       // flag only (never stored), set by a re-place of a boss already in the fight.
@@ -1732,7 +1823,11 @@ class CreatureSim {
   // `now` is the world clock, threaded in for the same reason the attack
   // resolvers take it: damage reads the target's live status effects (shock's
   // vulnerability) and this module must never read a clock of its own.
-  tick(dt, activeChunkKeys, players = [], now = 0) {
+  // `catalogRows` (SOMET-608, S6, optional): name -> full entity_types row,
+  // consulted ONLY by a `summon`-kind skill's resolve. See world.js's
+  // tickCreatures for where it comes from.
+  tick(dt, activeChunkKeys, players = [], now = 0, catalogRows = null) {
+    this._skillCatalogRows = catalogRows;
     const active = activeChunkKeys instanceof Set ? activeChunkKeys : new Set(activeChunkKeys);
     const byId = new Map(players.map((p) => [p.userId, p]));
     const killed = [];
@@ -1748,6 +1843,18 @@ class CreatureSim {
     // World.tick and pushed onto the same frame keys player swings use.
     const attacks = [];
     const impacts = [];
+    // SOMET-608 (S6): new telegraphs STARTED this tick, for World to append
+    // to its own persistent, decaying `activeTelegraphs` list (purely a
+    // client-rendering aid -- see world.js's tickCreatures).
+    const telegraphs = [];
+    // A summon-kind skill's resolve fills this instead of calling
+    // addCreatures() directly: `this.creatures` is a Map, and Map iteration
+    // sees entries added WHILE it is running -- a creature added mid-loop
+    // would be visited later in this SAME tick despite never having gone
+    // through the `all`/`_buff` setup above, crashing the first thing that
+    // reads `c._buff.speedMult`. Collected here and added once, after the
+    // main loop below has finished.
+    const pendingSummons = [];
     const all = [...this.creatures.values()];
     // Computed once per tick over the whole set, not per creature: an aura is
     // a property of the field, and recomputing it inside the loop would let a
@@ -1789,6 +1896,22 @@ class CreatureSim {
       // `_attackCd` decrement -- only the number of timers changed.
       for (const [slot, cd] of c._abilityCd) {
         if (cd > 0) c._abilityCd.set(slot, Math.max(0, cd - dt));
+      }
+      // SOMET-608 (S6). Same per-slot decrement for the SKILL repertoire, a
+      // separate timer set from the ordinary attack above. Resolved BEFORE
+      // any movement/attack decision below: a creature mid-telegraph is
+      // STOPPED for its whole duration (spec §4.3's "target in range and off
+      // cooldown -> stop, emit skill_telegraph, wait, resolve"), so once
+      // `_pendingSkill` is set this is the ONLY thing that runs for it until
+      // the telegraph resolves -- nothing today cancels one early.
+      for (const [id, cd] of c._skillCd) {
+        if (cd > 0) c._skillCd.set(id, Math.max(0, cd - dt));
+      }
+      if (c._pendingSkill) {
+        if (now >= c._pendingSkill.resolveAt) {
+          this._resolveSkill(c, players, attacks, impacts, shots, pendingSummons, now);
+        }
+        continue;
       }
 
       const cc = center(c);
@@ -2382,6 +2505,42 @@ class CreatureSim {
         // refused: no ability, therefore no cooldown stamped for the bite it
         // never took, so a creature provoked mid-flee bites immediately
         // instead of first serving 1.2s for a swing that never happened.
+        // SOMET-608 (S6). Skills take priority over the ordinary attack: a
+        // creature that commits to a telegraph is STOPPED for its whole
+        // duration (spec §4.3's "stop, emit skill_telegraph, wait, resolve"),
+        // so if one is available this tick, nothing else below runs for it
+        // this tick. `bh.skills.length > 0` costs exactly one check on the
+        // hot path for the overwhelming majority of creatures, which have
+        // none bound at all.
+        const skill = (!fleeing && bh.skills.length > 0 && canAct(c, now)) ? selectSkill(c, bh, dist) : null;
+        if (skill) {
+          // `_skillCd` is decremented by `dt` every tick, exactly like
+          // `_abilityCd` -- and `dt` is SECONDS (World.tick's own dtMs
+          // conversion is what makes `now` milliseconds instead). The
+          // catalog column is `cooldown_ms`, so this is the one place that
+          // unit conversion has to happen; `resolveAt` below stays in `now`'s
+          // own ms unit, no conversion needed there.
+          c._skillCd.set(skill.slot, skill.cooldownMs / 1000);
+          // Locked NOW, not re-measured at resolve time: the caster does not
+          // move while a skill is pending (see the per-tick top-of-loop
+          // check above). Only `slam` is target-centred (a ground target
+          // that should not silently follow a player who sidesteps during
+          // the wind-up -- the whole point of a telegraph is that the spot
+          // is already committed); `nova` and `projectile` both originate
+          // from the CASTER -- a nova bursts around itself, and a
+          // projectile is fired FROM it (toward the target, re-aimed at
+          // resolve time off the target's live position -- see
+          // _resolveSkill's projectile branch).
+          const origin = skill.kind === 'slam' ? { x: tc.x, y: tc.y } : { x: cc.x, y: cc.y };
+          c._pendingSkill = {
+            skill, targetUserId: tp.userId, x: origin.x, y: origin.y, resolveAt: now + skill.telegraphMs,
+          };
+          telegraphs.push({
+            creatureId: c.id, skill: skill.name, x: origin.x, y: origin.y,
+            radius: skill.radius, telegraphMs: skill.telegraphMs,
+          });
+          continue;
+        }
         const ability = fleeing ? null : selectAbility(c, bh, dist);
         if (ability && canAct(c, now)) {
           // SOMET-254: see the guard block above -- `c.damage` is always
@@ -2560,7 +2719,109 @@ class CreatureSim {
         c._dir = (c._dir + 1) % DIRS.length; // blocked → turn
       }
     }
-    return { killed, killCredits, shots, attacks, impacts };
+    // SOMET-608: summons land now, once, after every creature's own move/
+    // attack/skill decision for this tick has already been made -- see
+    // `pendingSummons`'s own comment above for why this cannot happen
+    // inline during the loop.
+    if (pendingSummons.length > 0) this.addCreatures(pendingSummons);
+    return { killed, killCredits, shots, attacks, impacts, telegraphs };
+  }
+
+  // SOMET-608 (S6). Resolve one creature's committed skill once its
+  // telegraph has elapsed. Called from tick()'s per-creature loop, which
+  // leaves `_pendingSkill` set until this runs -- clearing it here (rather
+  // than at telegraph-start) is what lets a second cast attempt never start
+  // while one is already in flight, since selectSkill is never even reached
+  // for a creature whose `_pendingSkill` is non-null (see the top-of-loop
+  // `continue`).
+  //
+  // Scoped to PLAYERS only for slam/nova, matching every other hostile
+  // creature damage path in this file -- hostiles never damage each other
+  // today, and an AoE skill is not the seam to introduce that.
+  _resolveSkill(c, players, attacks, impacts, shots, pendingSummons, now) {
+    const pending = c._pendingSkill;
+    c._pendingSkill = null;
+    const {
+      skill, targetUserId, x: originX, y: originY,
+    } = pending;
+    const bh = c.behavior;
+    const dmg = (bh.damageOverride ?? c.damage) * skill.damageMult * c._buff.damageMult;
+    const element = skill.element || c.attackElement;
+
+    if (skill.kind === 'slam' || skill.kind === 'nova') {
+      const r2 = skill.radius * skill.radius;
+      for (const p of players) {
+        const pc = center(p);
+        if (dist2(pc.x, pc.y, originX, originY) > r2) continue;
+        applyDamageWithEffects(p, dmg, element, effectiveMit(p), now, creatureKey(c.id));
+        impacts.push({
+          t: `p:${p.userId}`, x: pc.x, y: pc.y,
+          v: resolveEffectName({ kind: 'creature', vfx: { impact: skill.vfx && skill.vfx.impact } }, 'impact'),
+          el: element, o: bodyLift(p.height, 'middle'),
+        });
+      }
+      // One attack descriptor for the cast itself, a full circle centred on
+      // the locked origin -- `reach`/`arc` describe the AoE's own footprint,
+      // not a directional swing, so `nx`/`ny` carry no meaning here.
+      attacks.push({
+        a: `c:${c.id}`,
+        v: resolveEffectName({ kind: 'creature', vfx: { attack: skill.vfx && skill.vfx.cast } }, 'attack'),
+        x: originX, y: originY, nx: 0, ny: 1,
+        o: bodyLift(c.height, 'middle'), reach: skill.radius, arc: Math.PI * 2, hit: true,
+      });
+      if (this.sfx) {
+        pushSfxEvent(this.sfx, creatureUse(c, originX, originY));
+        pushSfxEvent(this.sfx, creatureHit(c.type, originX, originY));
+      }
+      return;
+    }
+
+    if (skill.kind === 'projectile') {
+      // Aim at the target's LIVE position if they are still around -- a
+      // charged shot that still tracks someone who merely moved during the
+      // wind-up -- else along the locked origin's facing (straight "south",
+      // the same default a swing with no real aim uses elsewhere); never
+      // thrown at a target who is simply gone.
+      const target = targetUserId != null ? players.find((p) => p.userId === targetUserId) : null;
+      const aim = target ? center(target) : { x: originX, y: originY + 1 };
+      const dx = aim.x - originX;
+      const dy = aim.y - originY;
+      const d = Math.hypot(dx, dy) || 1;
+      shots.push({
+        ownerId: c.id, ownerType: c.type, ownerFaction: c.faction || 'hostile',
+        x: originX, y: originY, nx: dx / d, ny: dy / d,
+        damage: dmg, originLift: bodyLift(c.height, 'middle'), element,
+        speed: SKILL_PROJECTILE_SPEED, radius: skill.radius, range: skill.range || LEASH_RADIUS,
+        knockback: 0,
+      });
+      // No sfx push here: World.tickCreatures' existing shots-drain loop
+      // already pushes `creatureUse` for every entry in `shots`, regardless
+      // of source -- pushing a second one here would double it up.
+      return;
+    }
+
+    if (skill.kind === 'summon') {
+      if (!skill.summonEntity || !this._skillCatalogRows) return;
+      const row = this._skillCatalogRows.get(skill.summonEntity);
+      if (!row) return; // unknown name: same no-op posture as an unknown vfx/aura binding
+      if (!c._skillSummonIds) c._skillSummonIds = new Set();
+      // Free any slot whose earlier summon has since died or been removed,
+      // so a later cast can refill it. This IS the cap/no-duplicates
+      // guarantee: each of the summonCount deterministic ids can hold at
+      // most one ALIVE creature at a time, and addCreatures is independently
+      // idempotent against the same id besides.
+      for (const sid of [...c._skillSummonIds]) {
+        if (!this.creatures.has(sid)) c._skillSummonIds.delete(sid);
+      }
+      for (let i = 0; i < skill.summonCount; i++) {
+        const sid = `skillsummon:${c.id}:${skill.id}:${i}`;
+        if (c._skillSummonIds.has(sid)) continue;
+        c._skillSummonIds.add(sid);
+        const [dx, dy] = summonOffset(i, skill.summonCount);
+        pendingSummons.push(hydrateCreatureRow(row, { id: sid, x: originX + dx, y: originY + dy }));
+      }
+      if (this.sfx) pushSfxEvent(this.sfx, creatureUse(c, originX, originY));
+    }
   }
 
   // Player melee: damage creatures within `range` of (px,py); remove + return dead ids.
@@ -2948,6 +3209,9 @@ module.exports = {
   // join text as loadCreatureTypes above, rather than a second copy that can
   // drift.
   ABILITIES_LATERAL,
+  // SOMET-608 (S6): same reason, for server.js's CREATURE_JOINED_SELECT to
+  // carry a creature's skill repertoire.
+  SKILLS_LATERAL,
   // SOMET-253 Task 5 / SOMET-604: exported so authority_creature_auras.test.js
   // can pin the non-mutation/stacking rules directly against the buff map,
   // without needing a full tick() to observe them.

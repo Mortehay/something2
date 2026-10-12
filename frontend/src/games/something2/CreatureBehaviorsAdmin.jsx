@@ -8,8 +8,12 @@ import {
 import {
   useCreatureBehaviors, useCreateCreatureBehavior, useUpdateCreatureBehavior, useDeleteCreatureBehavior,
 } from './useCreatureBehaviors.js';
+import {
+  useCreatureSkills, useCreateCreatureSkill, useUpdateCreatureSkill, useDeleteCreatureSkill,
+} from './useCreatureSkills.js';
 import { behaviorToForm, behaviorFormToPayload, ATTACK_KINDS, CHASE_STYLES } from './behaviorForm.js';
 import { abilityToForm, abilityFormToPayload, ELEMENTS } from './abilityForm.js';
+import { creatureSkillToForm, creatureSkillFormToPayload, KINDS as SKILL_KINDS } from './creatureSkillForm.js';
 import AdminLoading from './AdminLoading.jsx';
 
 const AdminContainer = styled.div`
@@ -280,21 +284,59 @@ function abilitiesToForm(behavior) {
   return rows.map((row) => abilityToForm(row));
 }
 
+// SOMET-608 (S6). The kit editor's bindings -- unlike abilities, [] is a
+// perfectly normal starting point (most creatures have no skill at all), so
+// this has no "at least one" fallback the way abilitiesToForm does.
+// `skill_id`/`power_scale` are the only fields a BINDING carries; everything
+// else (kind, radius, cooldown...) lives on the catalog row the dropdown
+// picks, not here.
+function skillBindingsToForm(behavior) {
+  const rows = behavior?.skills;
+  if (!Array.isArray(rows) || rows.length === 0) return [];
+  return rows.map((row) => ({ skill_id: row.skill_id, power_scale: row.power_scale ?? 1 }));
+}
+
 function CreatureBehaviorsAdmin() {
   const { behaviors, isLoadingBehaviors } = useCreatureBehaviors();
   const createMutation = useCreateCreatureBehavior();
   const updateMutation = useUpdateCreatureBehavior();
   const deleteMutation = useDeleteCreatureBehavior();
 
+  // SOMET-608 (S6). The skill CATALOG -- read by both the kit editor's
+  // dropdown below and the standalone Creature Skills table/modal further
+  // down this component.
+  const { creatureSkills } = useCreatureSkills();
+  const createSkillMutation = useCreateCreatureSkill();
+  const updateSkillMutation = useUpdateCreatureSkill();
+  const deleteSkillMutation = useDeleteCreatureSkill();
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingBehavior, setEditingBehavior] = useState(null);
   const [formData, setFormData] = useState(behaviorToForm());
   const [abilities, setAbilities] = useState(abilitiesToForm(null));
+  // SOMET-608 (S6): the kit -- which catalog skills this behaviour binds,
+  // and at what power_scale. A sibling array to `abilities`, edited the
+  // same way (local state, one PUT/POST on submit), but never defaulted to
+  // a non-empty list -- see skillBindingsToForm's own comment.
+  const [skillBindings, setSkillBindings] = useState(skillBindingsToForm(null));
+
+  // SOMET-608 (S6). The skill CATALOG's own Add/Edit modal -- a second,
+  // independent CRUD surface on this same page (spec §5: "Creature
+  // Behaviors tab: new Skills sub-list with CRUD; per-behaviour skill kit
+  // editor"), not nested inside the behaviour modal above.
+  const [isSkillModalOpen, setIsSkillModalOpen] = useState(false);
+  const [editingSkill, setEditingSkill] = useState(null);
+  const [skillFormData, setSkillFormData] = useState(creatureSkillToForm());
 
   useEffect(() => {
     setFormData(behaviorToForm(editingBehavior || {}));
     setAbilities(abilitiesToForm(editingBehavior));
+    setSkillBindings(skillBindingsToForm(editingBehavior));
   }, [editingBehavior, isModalOpen]);
+
+  useEffect(() => {
+    setSkillFormData(creatureSkillToForm(editingSkill || {}));
+  }, [editingSkill, isSkillModalOpen]);
 
   const handleOpenAdd = () => {
     setEditingBehavior(null);
@@ -331,6 +373,42 @@ function CreatureBehaviorsAdmin() {
     });
   };
 
+  // SOMET-608 (S6). Same shape as addAbility/removeAbility/moveAbility
+  // above, over skillBindings instead -- except a brand-new binding needs a
+  // concrete skill_id to point at, not just a blank form, so Add is refused
+  // (toast, no-op) when the catalog is empty or already fully bound. Picks
+  // the first catalog skill NOT already bound, so Add never silently
+  // creates a second binding to the same skill (slot would then be
+  // ambiguous about which one 's a creature actually uses -- selectSkill
+  // reads array order, and two rows for one skill_id serve no purpose).
+  const addSkillBinding = () => {
+    const boundIds = new Set(skillBindings.map((b) => b.skill_id));
+    const next = (creatureSkills || []).find((s) => !boundIds.has(s.id));
+    if (!next) {
+      toast.error(creatureSkills?.length ? 'Every creature skill is already bound' : 'No creature skills exist yet — add one below first');
+      return;
+    }
+    setSkillBindings((prev) => [...prev, { skill_id: next.id, power_scale: 1 }]);
+  };
+
+  const updateSkillBinding = (index, patch) => {
+    setSkillBindings((prev) => prev.map((b, i) => (i === index ? { ...b, ...patch } : b)));
+  };
+
+  const removeSkillBinding = (index) => {
+    setSkillBindings((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const moveSkillBinding = (index, dir) => {
+    setSkillBindings((prev) => {
+      const target = index + dir;
+      if (target < 0 || target >= prev.length) return prev;
+      const next = [...prev];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  };
+
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!formData.name.trim()) {
@@ -340,6 +418,7 @@ function CreatureBehaviorsAdmin() {
     const payload = {
       ...behaviorFormToPayload(formData),
       abilities: abilities.map((a, i) => abilityFormToPayload(a, i)),
+      skills: skillBindings.map((b) => ({ skill_id: b.skill_id, power_scale: Number(b.power_scale) || 1 })),
     };
 
     if (editingBehavior) {
@@ -359,6 +438,39 @@ function CreatureBehaviorsAdmin() {
       // name the profile in its error toast -- the response body only names
       // what's blocking the delete, not what was being deleted.
       deleteMutation.mutate({ id: behavior.id, name: behavior.name });
+    }
+  };
+
+  // SOMET-608 (S6). The skill catalog's own modal -- a sibling to
+  // handleOpenAdd/handleOpenEdit/handleSubmit/handleDelete above, over
+  // creature_skills instead of creature_behaviors.
+  const handleOpenAddSkill = () => {
+    setEditingSkill(null);
+    setIsSkillModalOpen(true);
+  };
+
+  const handleOpenEditSkill = (skill) => {
+    setEditingSkill(skill);
+    setIsSkillModalOpen(true);
+  };
+
+  const handleSkillSubmit = (e) => {
+    e.preventDefault();
+    if (!skillFormData.name.trim()) {
+      toast.error('Name is required');
+      return;
+    }
+    const payload = creatureSkillFormToPayload(skillFormData);
+    if (editingSkill) {
+      updateSkillMutation.mutate({ id: editingSkill.id, ...payload }, { onSuccess: () => setIsSkillModalOpen(false) });
+    } else {
+      createSkillMutation.mutate(payload, { onSuccess: () => setIsSkillModalOpen(false) });
+    }
+  };
+
+  const handleDeleteSkill = (skill) => {
+    if (window.confirm(`Are you sure you want to delete "${skill.name}"?`)) {
+      deleteSkillMutation.mutate({ id: skill.id, name: skill.name });
     }
   };
 
@@ -383,6 +495,7 @@ function CreatureBehaviorsAdmin() {
             <tr>
               <th>Name</th>
               <th>Abilities</th>
+              <th>Skills</th>
               <th>Aggro Radius</th>
               <th>Leash Radius</th>
               <th>Chase Style</th>
@@ -399,6 +512,11 @@ function CreatureBehaviorsAdmin() {
                 <td>
                   {(behavior.abilities || [])
                     .map((a) => `${a.name} (${a.attack_kind})`)
+                    .join(', ')}
+                </td>
+                <td>
+                  {(behavior.skills || []).length === 0 ? '—' : behavior.skills
+                    .map((s) => `${s.name} (×${s.power_scale})`)
                     .join(', ')}
                 </td>
                 <td>{behavior.aggro_radius}</td>
@@ -423,6 +541,212 @@ function CreatureBehaviorsAdmin() {
           </tbody>
         </Table>
       </TableWrap>
+
+      {/* SOMET-608 (S6). The skill CATALOG itself -- a second, independent
+          table/modal pair on this same page (spec §5), separate from the
+          per-behaviour kit editor nested in the Behavior modal above. */}
+      <Header style={{ marginTop: '2.5rem' }}>
+        <h2>Creature Skills Catalog</h2>
+        <MainButton onClick={handleOpenAddSkill}>
+          <HiOutlinePlus style={{ marginRight: '8px' }} />
+          Add New Skill
+        </MainButton>
+      </Header>
+
+      <TableWrap>
+        <Table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Kind</th>
+              <th>Telegraph (ms)</th>
+              <th>Cooldown (ms)</th>
+              <th>Radius</th>
+              <th>Range</th>
+              <th>Damage Mult</th>
+              <th>Element</th>
+              <th>Summon</th>
+              <th>Used By</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {creatureSkills?.map((skill) => (
+              <tr key={skill.id}>
+                <td>{skill.name}</td>
+                <td>{skill.kind}</td>
+                <td>{skill.telegraph_ms}</td>
+                <td>{skill.cooldown_ms}</td>
+                <td>{skill.radius}</td>
+                <td>{skill.range}</td>
+                <td>{skill.damage_mult}</td>
+                <td>{skill.element ?? "inherit"}</td>
+                <td>{skill.kind === 'summon' ? `${skill.summon_entity ?? '—'} ×${skill.summon_count}` : '—'}</td>
+                <td>{(skill.used_by || []).length === 0 ? '—' : skill.used_by.map((b) => b.name).join(', ')}</td>
+                <td>
+                  <ActionButtons>
+                    <IconButton onClick={() => handleOpenEditSkill(skill)} title="Edit">
+                      <HiOutlinePencil />
+                    </IconButton>
+                    <IconButton $delete onClick={() => handleDeleteSkill(skill)} title="Delete">
+                      <HiOutlineTrash />
+                    </IconButton>
+                  </ActionButtons>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      </TableWrap>
+
+      {isSkillModalOpen && (
+        <Overlay>
+          <Modal>
+            <Header style={{ marginBottom: '1.5rem' }}>
+              <h2>{editingSkill ? 'Edit Creature Skill' : 'Create New Creature Skill'}</h2>
+              <IconButton onClick={() => setIsSkillModalOpen(false)}>
+                <HiOutlineXMark />
+              </IconButton>
+            </Header>
+
+            <Form onSubmit={handleSkillSubmit}>
+              <FormGroup>
+                <label>Name</label>
+                <input
+                  value={skillFormData.name}
+                  onChange={(e) => setSkillFormData({ ...skillFormData, name: e.target.value })}
+                  placeholder="e.g. Ground Slam"
+                />
+              </FormGroup>
+
+              <FormGroup>
+                <label>Kind</label>
+                <select
+                  value={skillFormData.kind}
+                  onChange={(e) => setSkillFormData({ ...skillFormData, kind: e.target.value })}
+                >
+                  {SKILL_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
+                </select>
+              </FormGroup>
+
+              <FormRow>
+                <FormGroup>
+                  <label>Telegraph (ms) <Hint>— 0 to 3000</Hint></label>
+                  <input
+                    type="number" step="50" min="0" max="3000"
+                    value={skillFormData.telegraph_ms}
+                    onChange={(e) => setSkillFormData({ ...skillFormData, telegraph_ms: e.target.value })}
+                  />
+                </FormGroup>
+                <FormGroup>
+                  <label>Cooldown (ms)</label>
+                  <input
+                    type="number" step="100" min="1"
+                    value={skillFormData.cooldown_ms}
+                    onChange={(e) => setSkillFormData({ ...skillFormData, cooldown_ms: e.target.value })}
+                  />
+                </FormGroup>
+              </FormRow>
+
+              <FormRow>
+                <FormGroup>
+                  <label>
+                    Radius
+                    <Hint> — AoE size (slam/nova) or hit-size (projectile)</Hint>
+                  </label>
+                  <input
+                    type="number" step="1" min="0"
+                    value={skillFormData.radius}
+                    onChange={(e) => setSkillFormData({ ...skillFormData, radius: e.target.value })}
+                  />
+                </FormGroup>
+                <FormGroup>
+                  <label>Range <Hint>— cast range</Hint></label>
+                  <input
+                    type="number" step="1" min="0"
+                    value={skillFormData.range}
+                    onChange={(e) => setSkillFormData({ ...skillFormData, range: e.target.value })}
+                  />
+                </FormGroup>
+              </FormRow>
+
+              <FormRow>
+                <FormGroup>
+                  <label>Damage Mult</label>
+                  <input
+                    type="number" step="0.05" min="0"
+                    value={skillFormData.damage_mult}
+                    onChange={(e) => setSkillFormData({ ...skillFormData, damage_mult: e.target.value })}
+                  />
+                </FormGroup>
+                <FormGroup>
+                  <label>Element</label>
+                  <select
+                    value={skillFormData.element}
+                    onChange={(e) => setSkillFormData({ ...skillFormData, element: e.target.value })}
+                  >
+                    <option value="">inherit caster's element</option>
+                    {ELEMENTS.map((el) => <option key={el} value={el}>{el}</option>)}
+                  </select>
+                </FormGroup>
+              </FormRow>
+
+              {skillFormData.kind === 'summon' && (
+                <FormRow>
+                  <FormGroup>
+                    <label>Summon Entity <Hint>— entity_types.name</Hint></label>
+                    <input
+                      value={skillFormData.summon_entity}
+                      onChange={(e) => setSkillFormData({ ...skillFormData, summon_entity: e.target.value })}
+                      placeholder="e.g. Fire Elemental Guard"
+                    />
+                  </FormGroup>
+                  <FormGroup>
+                    <label>Summon Count</label>
+                    <input
+                      type="number" step="1" min="1"
+                      value={skillFormData.summon_count}
+                      onChange={(e) => setSkillFormData({ ...skillFormData, summon_count: e.target.value })}
+                    />
+                  </FormGroup>
+                </FormRow>
+              )}
+
+              <Hint>VFX bindings (optional — a name from the Attack Effects library):</Hint>
+              <FormRow>
+                <FormGroup>
+                  <label>Telegraph VFX</label>
+                  <input
+                    value={skillFormData.vfx_telegraph}
+                    onChange={(e) => setSkillFormData({ ...skillFormData, vfx_telegraph: e.target.value })}
+                  />
+                </FormGroup>
+                <FormGroup>
+                  <label>Cast VFX</label>
+                  <input
+                    value={skillFormData.vfx_cast}
+                    onChange={(e) => setSkillFormData({ ...skillFormData, vfx_cast: e.target.value })}
+                  />
+                </FormGroup>
+              </FormRow>
+              <FormGroup>
+                <label>Impact VFX</label>
+                <input
+                  value={skillFormData.vfx_impact}
+                  onChange={(e) => setSkillFormData({ ...skillFormData, vfx_impact: e.target.value })}
+                />
+              </FormGroup>
+
+              <FormActions>
+                <SecondaryButton type="button" onClick={() => setIsSkillModalOpen(false)}>Cancel</SecondaryButton>
+                <MainButton type="submit" disabled={createSkillMutation.isPending || updateSkillMutation.isPending}>
+                  {editingSkill ? 'Save Changes' : 'Create Skill'}
+                </MainButton>
+              </FormActions>
+            </Form>
+          </Modal>
+        </Overlay>
+      )}
 
       {isModalOpen && (
         <Overlay>
@@ -657,6 +981,88 @@ function CreatureBehaviorsAdmin() {
                           />
                         </FormGroup>
                       </FormRow>
+                    </AbilityCard>
+                  );
+                })}
+              </AbilitySection>
+
+              {/* SOMET-608 (S6). The kit editor: which catalog skills this
+                  behaviour binds, and at what power_scale. Reuses the
+                  Ability*-styled components verbatim -- a skill binding is
+                  the same "slot-ordered card with move/remove" shape an
+                  ability is, just over a dropdown + a scale slider instead
+                  of nine inline attack fields. */}
+              <AbilitySection>
+                <AbilitySectionHeader>
+                  <label>Skills</label>
+                  <AddAbilityButton type="button" onClick={addSkillBinding}>
+                    <HiOutlinePlus /> Add Skill
+                  </AddAbilityButton>
+                </AbilitySectionHeader>
+
+                {skillBindings.length === 0 && (
+                  <Hint>No skills bound — this creature uses only its ordinary attack above.</Hint>
+                )}
+
+                {skillBindings.map((binding, index) => {
+                  const catalogSkill = (creatureSkills || []).find((s) => s.id === binding.skill_id);
+                  const scale = Number(binding.power_scale) || 1;
+                  return (
+                    <AbilityCard key={index}>
+                      <AbilityCardHeader>
+                        <span>Slot {index + 1}</span>
+                        <AbilityCardActions>
+                          <IconButton
+                            type="button" title="Move up"
+                            disabled={index === 0}
+                            onClick={() => moveSkillBinding(index, -1)}
+                          >
+                            <HiOutlineChevronUp />
+                          </IconButton>
+                          <IconButton
+                            type="button" title="Move down"
+                            disabled={index === skillBindings.length - 1}
+                            onClick={() => moveSkillBinding(index, 1)}
+                          >
+                            <HiOutlineChevronDown />
+                          </IconButton>
+                          <IconButton
+                            type="button" $delete title="Remove skill"
+                            onClick={() => removeSkillBinding(index)}
+                          >
+                            <HiOutlineTrash />
+                          </IconButton>
+                        </AbilityCardActions>
+                      </AbilityCardHeader>
+
+                      <FormGroup>
+                        <label>Skill</label>
+                        <select
+                          value={binding.skill_id ?? ''}
+                          onChange={(e) => updateSkillBinding(index, { skill_id: Number(e.target.value) })}
+                        >
+                          {(creatureSkills || []).map((s) => (
+                            <option key={s.id} value={s.id}>{s.name} ({s.kind})</option>
+                          ))}
+                        </select>
+                      </FormGroup>
+
+                      <FormGroup>
+                        <label>Power Scale: {scale.toFixed(2)}×</label>
+                        <input
+                          type="range" min="0.1" max="1.5" step="0.05"
+                          value={binding.power_scale}
+                          onChange={(e) => updateSkillBinding(index, { power_scale: e.target.value })}
+                        />
+                        {catalogSkill && (
+                          <Hint>
+                            Scaled: radius {(catalogSkill.radius * scale).toFixed(0)},
+                            {' '}damage_mult {(catalogSkill.damage_mult * scale).toFixed(2)}
+                            {catalogSkill.kind === 'summon'
+                              && `, summons ${Math.max(1, Math.round(catalogSkill.summon_count * scale))}`}
+                          </Hint>
+                        )}
+                      </FormGroup>
                     </AbilityCard>
                   );
                 })}

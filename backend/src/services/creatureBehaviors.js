@@ -11,6 +11,12 @@
 // a value rejected only in JS is a value that reaches the database, and a
 // value rejected only in SQL is a value that reaches the sim from a row
 // written before the constraint existed.
+// SOMET-608 (S6): a behaviour's SKILL repertoire, a sibling list to
+// `abilities` below -- normalised by its own module (creatureSkills.js) for
+// the same reason resolveAbility isn't duplicated here: one place owns one
+// normalisation.
+const { resolveSkills } = require('./creatureSkills');
+
 const ATTACK_KINDS = ['melee', 'ranged', 'cast'];
 const CHASE_STYLES = ['charge', 'kite', 'skirmish', 'hold', 'ambush', 'guard', 'skittish'];
 // Mirrors creature_abilities' element CHECK constraint (migration
@@ -51,6 +57,12 @@ const DEFAULT_ABILITY = Object.freeze({
 const DEFAULT_BEHAVIOR = Object.freeze({
   name: 'Line',
   abilities: Object.freeze([DEFAULT_ABILITY]),
+  // SOMET-608 (S6): empty, not a default skill -- unlike an attack ability, a
+  // profile with no bound skill simply has none; there is no sensible
+  // fallback skill to hand out instead. Frozen for the same reason
+  // `abilities`' array is: this exact array reference is shared by every
+  // fallback creature in the process.
+  skills: Object.freeze([]),
   aggroRadius: 400,
   leashRadius: 800,
   chaseStyle: 'charge',
@@ -124,6 +136,10 @@ function resolveBehavior(row) {
     // behaviour whose join returned no ability rows gets the single default
     // ability, which is exactly today's melee 60 / 1.0s contact attack.
     abilities: resolveAbilities(row.abilities),
+    // SOMET-608 (S6): a behaviour whose join returned no skill rows (the
+    // overwhelming majority, at least until S7's boss/scaled kits bind some)
+    // gets no skill at all -- never the default ATTACK ability repurposed.
+    skills: resolveSkills(row.skills),
     aggroRadius: num(row.aggro_radius, DEFAULT_BEHAVIOR.aggroRadius),
     leashRadius: num(row.leash_radius, DEFAULT_BEHAVIOR.leashRadius),
     chaseStyle: oneOf(row.chase_style, CHASE_STYLES, DEFAULT_BEHAVIOR.chaseStyle),

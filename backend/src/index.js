@@ -30,7 +30,7 @@ const { composeBiomePrompt } = require('./services/biomePrompt');
 const { buildWorldGenConfig } = require('./services/worldGenConfig');
 const { loadTileTypes } = require('./services/tileTypes');
 const { ATTACK_KINDS, CHASE_STYLES, ELEMENTS } = require('./services/creatureBehaviors');
-const { ABILITIES_LATERAL, BOSS_TIERS } = require('./authority/creatures');
+const { ABILITIES_LATERAL, SKILLS_LATERAL, BOSS_TIERS } = require('./authority/creatures');
 require('dotenv').config();
 
 const app = express();
@@ -156,6 +156,7 @@ const progressionRoutes = require('./api/progressionRoutes.js');
 const passiveTreeRoutes = require('./api/passiveTreeRoutes.js');
 const passiveNodesRoutes = require('./api/passiveNodesRoutes.js');
 const auraEffectsRoutes = require('./api/auraEffectsRoutes.js');
+const creatureSkillsRoutes = require('./api/creatureSkillsRoutes.js');
 const characterRoutes = require('./api/characterRoutes.js');
 const { createQuestsRouter } = require('./routes/questsRoutes.js');
 const audioRoutes = require('./api/audioRoutes.js');
@@ -546,6 +547,7 @@ app.use('/api/passive-tree', passiveTreeRoutes(guardPool));
 // player's read-only view of the same table.
 app.use('/api/passive-nodes', passiveNodesRoutes(guardPool));
 app.use('/api/aura-effects', auraEffectsRoutes(guardPool));
+app.use('/api/creature-skills', creatureSkillsRoutes(guardPool));
 
 // Character slots (SOMET-259): list / create / delete, plus the playable-class
 // catalog the creation form reads. Behind requireAuth, scoped to req.user.id.
@@ -2336,6 +2338,52 @@ function behaviorAbilitiesError(body) {
   return null;
 }
 
+// SOMET-608 (S6). The skill twin of behaviorAbilitiesError -- except this one
+// cannot be a pure synchronous function the way that one is: an ability is
+// fully inline (nothing to look up), but a skill BINDING only carries
+// `skill_id` + `power_scale`, and whether that id names a real
+// creature_skills row can only be answered by the database. Checked inside
+// the SAME transaction POST/PUT already opens, so a skill deleted by another
+// admin between page-load and submit is caught here rather than surfacing as
+// a raw FK-violation 500 from replaceSkills below.
+async function behaviorSkillsError(client, body) {
+  const list = body.skills;
+  if (list == null) return null; // omitted entirely = "no skills", same as []
+  if (!Array.isArray(list)) return 'skills must be an array';
+  for (const s of list) {
+    if (!s || typeof s !== 'object') return 'each skill binding must be an object';
+    if (!Number.isInteger(s.skill_id)) return 'each skill binding needs an integer skill_id';
+    const scale = Number(s.power_scale ?? 1);
+    if (!(Number.isFinite(scale) && scale >= 0.1 && scale <= 1.5)) {
+      return 'power_scale must be between 0.1 and 1.5';
+    }
+  }
+  if (list.length === 0) return null;
+  const ids = list.map((s) => s.skill_id);
+  const found = await client.query('SELECT id FROM creature_skills WHERE id = ANY($1::int[])', [ids]);
+  const foundIds = new Set(found.rows.map((r) => r.id));
+  const missing = ids.filter((id) => !foundIds.has(id));
+  if (missing.length > 0) return `unknown skill_id: ${[...new Set(missing)].join(', ')}`;
+  return null;
+}
+
+// Replaces a behaviour's whole SKILL binding set, the same "DELETE then
+// reinsert, slot by array POSITION" shape replaceAbilities uses below --
+// kept as a sibling function rather than folded into it, since the columns
+// (skill_id + power_scale vs. 9 inline attack fields) do not overlap at all.
+async function replaceSkills(client, behaviorId, skills) {
+  await client.query('DELETE FROM creature_behavior_skills WHERE behavior_id = $1', [behaviorId]);
+  const list = Array.isArray(skills) ? skills : [];
+  for (let i = 0; i < list.length; i += 1) {
+    const s = list[i];
+    await client.query(
+      `INSERT INTO creature_behavior_skills (behavior_id, skill_id, slot, power_scale)
+       VALUES ($1,$2,$3,$4)`,
+      [behaviorId, s.skill_id, i + 1, s.power_scale ?? 1],
+    );
+  }
+}
+
 // Replaces a behaviour's whole ability set inside an open transaction: DELETE
 // every existing row, then reinsert `abilities` with slot renumbered 1..n BY
 // POSITION. Slot is never read from the client -- the admin editor implies it
@@ -2362,7 +2410,7 @@ async function replaceAbilities(client, behaviorId, abilities) {
 // transaction before COMMIT.
 async function loadBehaviorWithAbilities(db, id) {
   const r = await db.query(
-    `SELECT b.*, ab.abilities FROM creature_behaviors b${ABILITIES_LATERAL} WHERE b.id = $1`,
+    `SELECT b.*, ab.abilities, sk.skills FROM creature_behaviors b${ABILITIES_LATERAL}${SKILLS_LATERAL} WHERE b.id = $1`,
     [id],
   );
   return r.rows[0];
@@ -2371,7 +2419,7 @@ async function loadBehaviorWithAbilities(db, id) {
 app.get('/api/creature-behaviors', async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT b.*, ab.abilities FROM creature_behaviors b${ABILITIES_LATERAL} ORDER BY b.id ASC`,
+      `SELECT b.*, ab.abilities, sk.skills FROM creature_behaviors b${ABILITIES_LATERAL}${SKILLS_LATERAL} ORDER BY b.id ASC`,
     );
     res.json(result.rows);
   } catch (err) {
@@ -2444,6 +2492,11 @@ app.post('/api/creature-behaviors', adminGuard, async (req, res) => {
   try {
     client = await pool.connect();
     await client.query('BEGIN');
+    // SOMET-608 (S6): checked inside the transaction, not alongside the
+    // synchronous checks above -- validating a skill_id against the
+    // database is the one check in this route that cannot be synchronous.
+    const skillsBad = await behaviorSkillsError(client, b);
+    if (skillsBad) { await client.query('ROLLBACK'); return res.status(400).json({ error: skillsBad }); }
     const result = await client.query(
       `INSERT INTO creature_behaviors
         (name, aggro_radius, leash_radius, chase_style,
@@ -2462,6 +2515,7 @@ app.post('/api/creature-behaviors', adminGuard, async (req, res) => {
     );
     const id = result.rows[0].id;
     await replaceAbilities(client, id, b.abilities);
+    await replaceSkills(client, id, b.skills);
     const row = await loadBehaviorWithAbilities(client, id);
     await client.query('COMMIT');
     res.status(201).json(row);
@@ -2491,6 +2545,8 @@ app.put('/api/creature-behaviors/:id', adminGuard, async (req, res) => {
   try {
     client = await pool.connect();
     await client.query('BEGIN');
+    const skillsBad = await behaviorSkillsError(client, b);
+    if (skillsBad) { await client.query('ROLLBACK'); return res.status(400).json({ error: skillsBad }); }
     const result = await client.query(
       `UPDATE creature_behaviors SET
          name = $1, aggro_radius = $2, leash_radius = $3, chase_style = $4,
@@ -2511,8 +2567,10 @@ app.put('/api/creature-behaviors/:id', adminGuard, async (req, res) => {
     // replaceAbilities) is scoped to this one behaviour's children and is the
     // intended way to replace its ability set -- it is not the destructive
     // catalog write the project's DB-safety rules forbid in a test or script,
-    // which is about wiping real catalog rows outright.
+    // which is about wiping real catalog rows outright. replaceSkills (S6)
+    // is scoped the same way, over creature_behavior_skills.
     await replaceAbilities(client, id, b.abilities);
+    await replaceSkills(client, id, b.skills);
     const row = await loadBehaviorWithAbilities(client, id);
     await client.query('COMMIT');
     res.json(row);
@@ -5343,6 +5401,6 @@ if (require.main === module) {
 
 module.exports = {
   app, __setSpriteGen, __setPool, __setAuthorityHandle, validateItemType, boundedCacheSet,
-  apiRateLimiter, behaviorFieldError, abilityFieldError, behaviorAbilitiesError,
+  apiRateLimiter, behaviorFieldError, abilityFieldError, behaviorAbilitiesError, behaviorSkillsError,
   entityTypeFieldError, shouldMigrateOnBoot, runMigrations, __setMigrationRunner,
 };

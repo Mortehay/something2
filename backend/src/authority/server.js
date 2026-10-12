@@ -20,7 +20,7 @@ const { mayJoin, joinPolicyFacts, waypointTravelFacts } = require('../services/j
 const { derivePlayerStats } = require('../services/playerStats.js');
 const { chunkOf, parseKey, neighborhoodKeys, CHUNK_KEY } = require('./coords');
 const { bucketPlayersByChunk, playersForRecipient } = require('./playerAoi');
-const { loadCreatureTypes, ABILITIES_LATERAL, hydrateCreatureRow } = require('./creatures');
+const { loadCreatureTypes, ABILITIES_LATERAL, SKILLS_LATERAL, hydrateCreatureRow } = require('./creatures');
 const { AURAS_LATERAL } = require('../services/auraEffects.js');
 const { chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint, villageContaining } = require('../services/mapService');
 const { fetchLinks } = require('../services/mapLinks');
@@ -394,11 +394,11 @@ const CREATURE_JOINED_SELECT = `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.fac
                 b.name AS behavior_name, b.aggro_radius, b.leash_radius,
                 b.chase_style, b.preferred_range, b.move_speed_mult, b.damage_override,
                 b.gold_min AS behavior_gold_min, b.gold_max AS behavior_gold_max,
-                ab.abilities
+                ab.abilities, sk.skills
          FROM world_creatures wc
          LEFT JOIN entity_types et ON et.name = wc.type
          LEFT JOIN characters ch ON ch.id = wc.charmed_by_character_id
-         LEFT JOIN creature_behaviors b ON b.id = et.behavior_id${ABILITIES_LATERAL}${AURAS_LATERAL}`;
+         LEFT JOIN creature_behaviors b ON b.id = et.behavior_id${ABILITIES_LATERAL}${AURAS_LATERAL}${SKILLS_LATERAL}`;
 
 // SOMET-473 -- persisted charm -> the in-memory shape addCreatures reads.
 //
@@ -681,7 +681,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const tileTypes = {};
         for (const t of tr.rows) tileTypes[t.name] = { walkable: t.walkable, speed: t.speed };
         const {
-          creatureTypes, creatureTypeIds, creatureGold, behaviorGold, behaviorDrops,
+          creatureTypes, creatureTypeIds, creatureGold, behaviorGold, behaviorDrops, rowsByName,
         } = await loadCreatureTypes(pool);
         // SOMET-329: the option catalogs, loaded BEFORE the item types that
         // resolve against them. `configureAttackOrigins` makes an admin's
@@ -759,6 +759,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
           // palette without a second query per player.
           catalogs,
           tileTypes, creatureTypes, creatureTypeIds, creatureGold, behaviorGold, behaviorDrops,
+          // SOMET-608 (S6): name -> full raw entity_types row, for a
+          // `summon`-kind creature skill to hydrate from at resolve time
+          // (see loadCreatureTypes's own comment on rowsByName).
+          creatureCatalogRows: rowsByName,
           goldItemTypeId, links, portalLinks, compassDoorways, villages, waypoints, chests, mapGenConfig,
           pointArtDefaults,
           activeChunks: new Set(),   // chunk keys currently in the union of player neighborhoods
@@ -3309,7 +3313,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // drop roll stay authoritative.
       const {
         kills: killedByGuards, attacks: creatureAttacks, impacts: creatureImpacts,
-      } = entry.world.tickCreatures(dt, entry.activeChunks);
+      } = entry.world.tickCreatures(dt, entry.activeChunks, entry.creatureCatalogRows);
       // Slice D: a wolf bite goes onto the same stash a halberd swing does,
       // and is bounded by the same cap -- creatures are the numerous actors,
       // so leaving them unbounded would be the one thing able to blow the
@@ -3464,6 +3468,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // Omitted when empty, like detonations/attacks/impacts below: a quiet
         // tick must cost no bytes.
         if (snap.waves) frame.waves = snap.waves;
+        // SOMET-608 (S6): same silent-loss risk this hop already has a named
+        // comment for -- added here explicitly rather than trusting a spread.
+        if (snap.telegraphs) frame.telegraphs = snap.telegraphs;
         if (hasDets) frame.detonations = dets;
         if (hasAtks) frame.attacks = atks;
         // Omitted entirely when nothing was hit, exactly as detonations and

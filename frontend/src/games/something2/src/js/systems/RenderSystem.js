@@ -293,6 +293,9 @@ export class RenderSystem {
     // SOMET-528. Lingering melee waves; defaults to empty so every existing
     // caller and test renders exactly as before.
     waves = [],
+    // SOMET-608 (S6): active skill telegraphs -- resolved geometry +
+    // remaining/total ms, same contract waves already carries.
+    telegraphs = [],
     skillVisuals = [],
     merchants = [], shop = null, shopOpen = false, shopView = null, decoTypes = null,
     // SOMET-584 — name-keyed entity-type catalog, needed to resolve a world
@@ -434,6 +437,10 @@ export class RenderSystem {
     // same reason: they mark AREA, so they belong under every actor including
     // the creatures standing in them.
     this._drawWaves(waves);
+    // SOMET-608 (S6). A skill telegraph marks the ground that is ABOUT to
+    // hurt, same layer and same reason as waves -- the caster itself (still
+    // standing there, mid wind-up) must not occlude the warning.
+    this._drawTelegraphs(telegraphs);
 
     // Players + creatures + ground items + walls, all depth-sorted together
     // (Pass B) — ground items must join the same sort rather than being
@@ -1141,6 +1148,41 @@ export class RenderSystem {
       this.ctx.ellipse(s.x, s.y, rx, rx / 2, 0, mid - half, mid + half);
       this.ctx.closePath();
       this.ctx.fill();
+    }
+    this.ctx.restore();
+  }
+
+  // SOMET-608 (S6). A creature skill's wind-up, filling in over
+  // `telegraphMs` before it lands -- "Browser: telegraph visible before a
+  // slam lands" is this ticket's own acceptance line. Combines two
+  // precedents already in this file rather than inventing a third
+  // projection: the "ring" VFX shape's grow-WITHOUT-fade progress math (it
+  // reads as a shockwave building up, not a detonation dying out -- exactly
+  // the feeling a warning should give) with `_drawWaves`'s FILLED geometry
+  // (a stroked outline alone reads as a boundary marker, not "this ground
+  // is about to hurt"). `ms`/`telegraphMs` travel resolved from the server,
+  // so no synchronised clock is needed to compute progress client-side.
+  _drawTelegraphs(telegraphs) {
+    if (!telegraphs || telegraphs.length === 0) return;
+    this.ctx.save();
+    for (const t of telegraphs) {
+      const s = worldToScreen(t.x, t.y);
+      if (!Number.isFinite(s.x) || !Number.isFinite(s.y)) continue;
+      const rx = blastScreenRadiusX(t.radius);
+      if (!(rx > 0)) continue; // also rejects NaN
+      const progress = Math.max(0, Math.min(1, 1 - t.ms / t.telegraphMs));
+      // Starts at 30% of full size (visible the instant it appears, not a
+      // zero-radius dot) and grows to 100% exactly as the cast lands.
+      const fillRx = rx * (0.3 + 0.7 * progress);
+      this.ctx.beginPath();
+      this.ctx.ellipse(s.x, s.y, fillRx, fillRx / 2, 0, 0, Math.PI * 2);
+      this.ctx.fillStyle = "#ff4757";
+      this.ctx.globalAlpha = 0.18 + 0.32 * progress;
+      this.ctx.fill();
+      this.ctx.strokeStyle = "#ff4757";
+      this.ctx.lineWidth = 2;
+      this.ctx.globalAlpha = 0.5 + 0.4 * progress;
+      this.ctx.stroke();
     }
     this.ctx.restore();
   }
