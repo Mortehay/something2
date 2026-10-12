@@ -52,10 +52,13 @@ test('registry: boss slots only on boss-tier creatures', { skip }, async (t) => 
   });
 
   await t.test('subjectCues: boss slots are upload-only (null) on a boss, absent on an ordinary creature', async () => {
+    // SOMET-627: nearby/attack now carry idle/attack cues (spec §4's own
+    // suggested names); the boss-only slots (spawn/presence/phase/enrage)
+    // still have none.
     const cues = await subjects.SUBJECT_KINDS.creature.subjectCues(pool);
-    assert.deepEqual(cues[PLAIN], { nearby: null, attack: null, hurt: 'hit', death: 'death' });
+    assert.deepEqual(cues[PLAIN], { nearby: 'idle', attack: 'attack', hurt: 'hit', death: 'death' });
     assert.deepEqual(cues[BOSS], {
-      nearby: null, attack: null, hurt: 'hit', death: 'death', spawn: null, presence: null, phase: null, enrage: null,
+      nearby: 'idle', attack: 'attack', hurt: 'hit', death: 'death', spawn: null, presence: null, phase: null, enrage: null,
     });
     assert.equal(await subjects.cueFor(pool, 'creature', BOSS, 'presence'), null);
   });

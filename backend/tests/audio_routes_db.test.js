@@ -257,15 +257,17 @@ test('audio routes', { skip }, async (t) => {
     assert.equal(byKind.biome.cues, undefined, 'biome has no sfx slots -- no cues field at all');
 
     assert.ok(byKind.creature.cues, 'creature group is missing cues');
+    // SOMET-627: nearby/attack now carry idle/attack (spec §4's own
+    // suggested cue names), not upload-only null.
     assert.deepEqual(byKind.creature.cues.Slime, {
-      nearby: null, attack: null, hurt: 'hit', death: 'death',
+      nearby: 'idle', attack: 'attack', hurt: 'hit', death: 'death',
     });
 
     assert.ok(byKind.attack_type.cues, 'attack_type group is missing cues');
-    assert.deepEqual(byKind.attack_type.cues.ranged, { use: null, hit: 'hit' });
+    assert.deepEqual(byKind.attack_type.cues.ranged, { use: 'shoot', hit: 'hit' });
 
     assert.ok(byKind.item.cues, 'item group is missing cues');
-    assert.deepEqual(byKind.item.cues['crude-bow'], { use: null, hit: 'hit' },
+    assert.deepEqual(byKind.item.cues['crude-bow'], { use: 'shoot', hit: 'hit' },
       'a gear-ladder bow (no ammo_type_id on the row) still resolves ranged via the name fallback');
 
     assert.ok(byKind.skill.cues, 'skill group is missing cues');
@@ -300,9 +302,12 @@ test('audio routes', { skip }, async (t) => {
   // happen before any box call.
   await t.test('generate for an upload-only sfx slot is a 409, not a 502; the box is never called', async () => {
     const before = seen.length;
-    // attack_type/ranged/use has no cue at all.
+    // creature/*/presence (a boss-only slot) has no cue at all -- unlike
+    // attack_type/ranged/use and creature nearby/attack, which gained one in
+    // SOMET-627. 'Ignis, the Magma Colossus' is a real seeded boss_tier row
+    // (shared with audio_boss_slots_db.test.js), read-only here.
     const noCue = await request(app).post('/api/audio/admin/generate').set('Authorization', bearer(admin))
-      .send({ subject_kind: 'attack_type', subject_key: 'ranged', slot: 'use', provider_id: prov });
+      .send({ subject_kind: 'creature', subject_key: 'Ignis, the Magma Colossus', slot: 'presence', provider_id: prov });
     assert.equal(noCue.status, 409, JSON.stringify(noCue.body));
     assert.match(noCue.body.error, /upload only/);
     assert.equal(noCue.body.retryable, false);

@@ -27,19 +27,27 @@ const ATTACK_KINDS = ['melee', 'ranged', 'magic'];
 // spec §4's slot -> cue table for attack_type, keyed by attack kind because
 // the cue genuinely differs per subject (melee `use` is not ranged `use`) --
 // unlike creature/world_point below, where the same map applies to every
-// subject of that kind. `hit` is `null` for whichever kind has no cue on the
-// box today (spec §4: "Three slots have no cue... a bow/throw release").
+// subject of that kind. SOMET-627: ranged `use` (a bow/throw release) was the
+// one slot here with no cue on the box; spec §4 flagged it as a gap and
+// suggested `shoot` as the cue name for when the box adds it, so that is what
+// is wired here. sfxRequestFor (audioGeneration.js) still cross-checks the
+// active provider's own discovered `models_cache` before ever calling the
+// box, so a registry entry for a cue the box has not actually reported yet
+// fails the same safe way ("upload only") instead of sending a request the
+// box would reject -- this entry is therefore correct to ship ahead of the
+// box itself gaining the cue.
 const ATTACK_TYPE_CUES = {
   melee: { use: 'slash', hit: 'hit' },
-  ranged: { use: null, hit: 'hit' },
+  ranged: { use: 'shoot', hit: 'hit' },
   magic: { use: 'spell', hit: 'hit' },
 };
 
 // entityPhrase's text for the attack_type kind, per (kind, slot) -- the spec
 // §4 table gives each slot its own phrase ("a steel sword" is a swing, "a
 // blade on a creature" is a hit; a `hit` cue sent "a steel sword" tends
-// toward a clang). ranged/use has no cue (upload only), so its phrase is
-// never sent; it reuses the ranged/hit phrase rather than inventing one.
+// toward a clang). ranged/use now has a cue (SOMET-627) and reuses the
+// ranged/hit phrase ("an arrow") rather than inventing a new one -- the two
+// slots already shared this phrase even while `use` was upload-only.
 const ATTACK_TYPE_PHRASE = {
   melee: { use: 'a steel sword', hit: 'a blade on a creature' },
   ranged: { use: 'an arrow', hit: 'an arrow' },
@@ -77,11 +85,17 @@ const SUBJECT_KINDS = {
       spawn: 'sfx', presence: 'sfx', phase: 'sfx', enrage: 'sfx',
     },
     // Fixed: the same cue applies to every creature (spec §4 table). `nearby`
-    // and `attack` have no cue on the box today -- upload only. The four boss
-    // slots have none either (the box offers slash/hit/pickup/spell/footstep/
-    // ui_click/miss/chest_open/death/waypoint), so they are upload only too.
+    // and `attack` (SOMET-627) now carry `idle`/`attack` -- the exact cue
+    // names spec §4 suggested for when the box gained them, so this is data
+    // only, not a new mechanism. As with ranged `use` above, sfxRequestFor
+    // still refuses as upload-only if the active provider's models_cache has
+    // not reported `cue:idle`/`cue:attack`, so shipping this ahead of the box
+    // cannot send it a cue it does not know. The four boss slots still have
+    // no cue (the box's documented vocabulary is slash/hit/pickup/spell/
+    // footstep/ui_click/miss/chest_open/death/waypoint, plus idle/attack/
+    // shoot once reported), so they stay upload only.
     cues: {
-      nearby: null, attack: null, hurt: 'hit', death: 'death',
+      nearby: 'idle', attack: 'attack', hurt: 'hit', death: 'death',
       spawn: null, presence: null, phase: null, enrage: null,
     },
     list: async (db) => (await db.query(
