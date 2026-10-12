@@ -4,8 +4,8 @@
 // paints exactly what this returns and decides nothing itself.
 import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
 import { SLOTS, typeOf, canEquipClient } from "../core/inventory.js";
-import { rarityBorderColor, affixModifier, clipToWidth } from "./itemDisplay.js";
-import { artIcon, drawIconFit } from "./gameArt.js";
+import { rarityBorderColor, affixModifier, clipToWidth, itemIcon } from "./itemDisplay.js";
+import { drawIconFit } from "./gameArt.js";
 import { layoutCharacterTab, drawCharacterTab, formatModifier, STAT_ABBR } from "./characterTab.js";
 
 export const STAT_NAMES = {
@@ -449,11 +449,6 @@ export function formatItemTooltipLines(item, type) {
 
 function inside(rect, x, y) {
   return x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h;
-}
-
-// The item type's generated icon (SOMET-600), or null -> the initials.
-function itemIcon(art, type) {
-  return type && type.id != null ? artIcon(art, "item", type.id) : null;
 }
 
 // `art` (SOMET-600) is the GameArt lookup; null draws initials as before.

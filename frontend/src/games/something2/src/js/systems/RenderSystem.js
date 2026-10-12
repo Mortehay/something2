@@ -33,7 +33,7 @@ import {
 import { rarityGlowColor, withAlpha } from "../core/rarityColors.js";
 import { artIcon, drawIconFit } from "./gameArt.js";
 import {
-  rarityBorderColor, affixLine, clipToWidth, rowTextOffsets, AFFIX_FONT_PX,
+  rarityBorderColor, affixLine, clipToWidth, rowTextOffsets, AFFIX_FONT_PX, itemIcon,
 } from "./itemDisplay.js";
 
 // Read once from the layout module rather than restated, so the painter and
@@ -4679,18 +4679,31 @@ export class RenderSystem {
       ctx.fillRect(leftX, y, colW, rowH);
       ctx.strokeStyle = rarityBorderColor(row.rarity, isBuyback ? "#caa24a" : "#3a3a4e");
       ctx.strokeRect(leftX, y, colW, rowH);
+
+      // SOMET-628: the same itemIcon lookup inventoryPanel.js uses for the
+      // carry grid. A type with no generated art draws nothing and the row
+      // keeps exactly the all-text layout it had before this existed.
+      const rowType = itemTypes && itemTypes.get ? itemTypes.get(row.itemTypeId) : null;
+      const rowIcon = itemIcon(this.gameArt, rowType);
+      const rowIconS = rowH - 8;
+      const rowTextShift = rowIcon ? rowIconS + 8 : 0;
+      const rowTextX = leftX + 8 + rowTextShift;
+      if (rowIcon) {
+        drawIconFit(ctx, rowIcon, leftX + 4, y + 4, rowIconS);
+      }
+
       ctx.fillStyle = "#e5e7eb";
       ctx.font = "12px monospace";
-      ctx.fillText(resolveName(row.itemTypeId), leftX + 8, y + at.name);
+      ctx.fillText(resolveName(row.itemTypeId), rowTextX, y + at.name);
       ctx.fillStyle = isBuyback ? "#caa24a" : "#9ca3af";
-      ctx.fillText(`${row.price} g`, leftX + 8, y + at.sub);
+      ctx.fillText(`${row.price} g`, rowTextX, y + at.sub);
       if (at.affix != null) {
         // Clipped to the gap left of the Buy button rather than measured: see
         // clipToWidth. Tinted with the grade so the caption and the border
         // agree at a glance, falling back to the ordinary subline grey.
         ctx.font = `${AFFIX_FONT_PX}px monospace`;
         ctx.fillStyle = rarityBorderColor(row.rarity, "#9ca3af");
-        ctx.fillText(clipToWidth(affixes, colW - 16 - buyW, AFFIX_FONT_PX), leftX + 8, y + at.affix);
+        ctx.fillText(clipToWidth(affixes, colW - 16 - buyW - rowTextShift, AFFIX_FONT_PX), rowTextX, y + at.affix);
         ctx.font = "12px monospace";
       }
 
@@ -4756,9 +4769,19 @@ export class RenderSystem {
       // player needs more than a restatement of the grade.
       ctx.strokeStyle = rarityBorderColor(item.rarity, "#3a3a4e");
       ctx.strokeRect(rightX, ry, rightW, rowH);
+
+      // SOMET-628: same icon lookup as the shelf opposite and the carry grid.
+      const sellIcon = itemIcon(this.gameArt, type);
+      const sellIconS = rowH - 8;
+      const sellTextShift = sellIcon ? sellIconS + 8 : 0;
+      const sellTextX = rightX + 8 + sellTextShift;
+      if (sellIcon) {
+        drawIconFit(ctx, sellIcon, rightX + 4, ry + 4, sellIconS);
+      }
+
       ctx.fillStyle = "#e5e7eb";
       ctx.font = "12px monospace";
-      ctx.fillText(type.name, rightX + 8, ry + 6);
+      ctx.fillText(type.name, sellTextX, ry + 6);
 
       // SOMET-317: bound instances refuse to sell (trade.js sellItem, the
       // SOMET-277 anti-faucet rule), and until now the only way to find that
@@ -4776,7 +4799,7 @@ export class RenderSystem {
       // (authority).
       if (item.soulbound === true) {
         ctx.fillStyle = "#caa24a";
-        ctx.fillText("bound", rightX + 8, ry + 22);
+        ctx.fillText("bound", sellTextX, ry + 22);
       }
 
       const sellX = rightX + rightW - 8 - sellW;
