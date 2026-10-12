@@ -166,4 +166,16 @@ describe('doneRose', () => {
     expect(doneRose(undefined, stats(1, 2))).toBe(false);
     expect(doneRose(stats(1, 2), undefined)).toBe(false);
   });
+
+  it('SOMET-605: with a key, a creature with subjectSlots gets only its own slots', () => {
+    const reg = [{
+      kind: 'creature', slots: { hurt: 'sfx', presence: 'sfx' }, subjects: ['Ignis', 'Slime'],
+      subjectSlots: { Ignis: ['hurt', 'presence'], Slime: ['hurt'] },
+    }];
+    expect(subjectSlotsFor(reg, 'creature', 'Slime')).toEqual([{ slot: 'hurt', clipKind: 'sfx' }]);
+    expect(subjectSlotsFor(reg, 'creature', 'Ignis').map((s) => s.slot)).toEqual(['hurt', 'presence']);
+    expect(subjectSlotsFor(subjects, 'world', 'Vale')).toEqual([
+      { slot: 'music', clipKind: 'music' }, { slot: 'ambience', clipKind: 'ambience' },
+    ]);
+  });
 });

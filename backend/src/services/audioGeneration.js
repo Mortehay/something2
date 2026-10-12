@@ -228,19 +228,20 @@ async function freshVariants(db, lib, target, variants, cached) {
 // (generateSfxPackForJobs) so both refuse the same slots the same way. The
 // cue is never taken from the caller -- it is the registry's own answer for
 // this (subjectKind, subjectKey, slot), and a slot with no cue on the box
-// today (spec §4) is upload-only, refused before any box call.
+// today (spec §4) is upload-only, refused before any box call. `uploadOnly`
+// marks that refusal so a route can answer it as the caller's error (409).
 async function sfxRequestFor(db, provider, {
   subjectKind, subjectKey, slot, engine,
 }, { prompts = defaultPrompts } = {}) {
   const cue = await subjects.cueFor(db, subjectKind, subjectKey, slot);
-  if (!cue) return { ok: false, error: 'upload only: the provider has no cue for this slot', retryable: false };
+  if (!cue) return { ok: false, error: 'upload only: the provider has no cue for this slot', retryable: false, uploadOnly: true };
   // The provider's own discovered allow-list (spec §2 "Cues": a provider's
   // Refresh writes 'cue:<name>' entries into models_cache) -- never send a
   // cue the box hasn't reported it knows about, even if the registry thinks
   // it exists (a stale registry entry vs. a provider that hasn't been
   // refreshed yet must fail the same way: upload only).
   const known = Array.isArray(provider.models_cache) && provider.models_cache.includes(`cue:${cue}`);
-  if (!known) return { ok: false, error: `upload only: the provider has no cue '${cue}' registered`, retryable: false };
+  if (!known) return { ok: false, error: `upload only: the provider has no cue '${cue}' registered`, retryable: false, uploadOnly: true };
   // The slot's stored prompt, when there is one, IS the entity text (spec
   // 2026-09-30 §6). Editing it therefore also gets past the box's global
   // (engine, cue, entity) cache. '' = cleared -> the registry phrase.

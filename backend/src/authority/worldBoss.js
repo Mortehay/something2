@@ -3,73 +3,86 @@
 // Spawns a rotating world boss every 10 minutes with a 2-minute global warning.
 // Features:
 // - English announcements broadcast to all connected sessions.
-// - 4 distinct World Bosses with elemental affinities and boss-tier stats.
+// - World bosses are entity_types rows (boss_tier = 'world', SOMET-603), hydrated
+//   like every other creature; an empty catalog idles the event.
 // - Tracks per-player damage contribution.
 // - Top 3 damage contributors receive guaranteed Legendary ('foxy') gear.
 // - All damaging participants receive the "Victor's Boon" buff (+15% speed, +20% damage/xp).
 // - Identifies the nearest waypoint to the boss so travel UI can display a pulsing boss indicator.
 
 const { rollItemInstance } = require('./affixes.js');
+const {
+  hydrateCreatureRow, ENTITY_CATALOG_SELECT, CREATURE_SPEED, CREATURE_DAMAGE,
+} = require('./creatures.js');
+const { pushSfxEvent, bossSfx } = require('./sfxEvents.js');
 
 const BOSS_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes between boss spawns
 const BOSS_WARNING_MS = 2 * 60 * 1000;    // 2 minutes warning before spawn
 const BOSS_LIFETIME_MS = 20 * 60 * 1000;  // 20 minutes max lifetime before despawning
+// SOMET-605 (spec §4.3): enrage at < 10% HP or in the last minute of the
+// boss's lifetime. "Near the lifetime limit" is not quantified by the spec;
+// 60 s is this slice's reading (plan decision D2).
+const ENRAGE_HP_RATIO = 0.10;
+const ENRAGE_LEAD_MS = 60 * 1000;
 const VICTORS_BOON_DURATION_MS = 15 * 60 * 1000; // 15 minutes buff duration
 
-const WORLD_BOSS_CATALOG = [
-  {
-    type: 'Ignis, the Magma Colossus',
-    name: 'Ignis, the Magma Colossus',
-    element: 'fire',
-    maxHp: 12000,
-    damage: 42,
-    defense: 25,
-    speed: 60,
-    size: 96,
-    xpReward: 3500,
-    goldReward: 500,
-    description: 'A titan forged from molten core and obsidian armor.',
-  },
-  {
-    type: 'Glacius, the Frost Leviathan',
-    name: 'Glacius, the Frost Leviathan',
-    element: 'ice',
-    maxHp: 14000,
-    damage: 35,
-    defense: 32,
-    speed: 50,
-    size: 96,
-    xpReward: 3800,
-    goldReward: 550,
-    description: 'An ancient dread beast encased in eternal permafrost.',
-  },
-  {
-    type: 'Abyssor, the Voidreaver',
-    name: 'Abyssor, the Voidreaver',
-    element: 'arcane',
-    maxHp: 10000,
-    damage: 55,
-    defense: 18,
-    speed: 85,
-    size: 80,
-    xpReward: 4000,
-    goldReward: 600,
-    description: 'A harbinger of the astral void who tears reality asunder.',
-  },
-  {
-    type: 'Gorgon, the Thunder Titan',
-    name: 'Gorgon, the Thunder Titan',
-    element: 'lightning',
-    maxHp: 13000,
-    damage: 45,
-    defense: 24,
-    speed: 65,
-    size: 96,
-    xpReward: 3600,
-    goldReward: 520,
-    description: 'An electrified colossus crackling with tempest storms.',
-  },
-];
+// SOMET-603 (S1): bosses are entity_types rows now (boss_tier = 'world');
+// the JS catalog that used to live here is gone. Level and minion layout are
+// event rules, not catalog data, so they stay here.
+const WORLD_BOSS_LEVEL = 100;
+const MINION_LEVEL = 80;
+const MINION_OFFSETS = [[40, 40], [-40, -40]];
+// Phase minions per boss element. Resolved BY NAME (the spec names these four
+// rows); a renamed or deleted row means no minions for that element plus one
+// log line per phase, never a crash.
+const MINION_TYPE_BY_ELEMENT = Object.freeze({
+  fire: 'Fire Elemental Guard',
+  ice: 'Ice Elemental Guard',
+  arcane: 'Arcane Elemental Guard',
+  lightning: 'Lightning Elemental Guard',
+});
+
+async function loadWorldBossCatalog(pool) {
+  const r = await pool.query(
+    `${ENTITY_CATALOG_SELECT}
+      WHERE et.is_creature = true AND (et.boss_tier = 'world' OR et.name = ANY($1::text[]))
+      ORDER BY et.id ASC`,
+    [Object.values(MINION_TYPE_BY_ELEMENT)],
+  );
+  const bosses = r.rows.filter((row) => row.boss_tier === 'world');
+  const minionsByElement = new Map();
+  for (const [element, name] of Object.entries(MINION_TYPE_BY_ELEMENT)) {
+    const row = r.rows.find((x) => x.name === name && x.boss_tier !== 'world');
+    if (row) minionsByElement.set(element, row);
+  }
+  return { bosses, minionsByElement };
+}
+
+// The event's view of one catalog row. `speed` is the sim's base speed: that is
+// what the boss actually moves at (addCreatures has always forced
+// CREATURE_SPEED), and the phase multipliers scale it.
+//
+// `damage` is the HYDRATED damage (ruling P1: base_damage -> damage lives only
+// in hydrateCreatureRow), falling back to addCreatures' own CREATURE_DAMAGE
+// default when the row sets none -- the same number the spawned creature gets.
+// It is read here only as the base the phase multipliers scale; the spawned
+// instance gets its damage from the hydration itself, never from this field.
+function bossFromRow(row) {
+  const hydrated = hydrateCreatureRow(row);
+  return {
+    row,
+    type: hydrated.type,
+    name: hydrated.name,
+    element: hydrated.element,
+    maxHp: Number(row.max_hp) || Number(row.hp) || 1,
+    damage: Number.isFinite(hydrated.damage) ? hydrated.damage : CREATURE_DAMAGE,
+    defense: Number(row.defense) || 0,
+    speed: CREATURE_SPEED,
+    xpReward: Number(row.xp_reward) || 0,
+    goldReward: Number(row.gold_max) || 0,
+    description: row.prompt || '',
+  };
+}
 
 // Dedicated Boss Arenas across key regions so bosses don't spawn at map center
 const BOSS_ARENAS = [
@@ -123,6 +136,7 @@ class WorldBossManager {
     bossWarningMs = BOSS_WARNING_MS,
     bossLifetimeMs = BOSS_LIFETIME_MS,
     rng = Math.random,
+    loadCatalog = null,
   } = {}) {
     this.pool = pool;
     this.bossIntervalMs = bossIntervalMs;
@@ -147,12 +161,99 @@ class WorldBossManager {
 
     // Track active buffs: userId -> { expiresAt, damageBonus, speedBonus, xpBonus }
     this.playerBuffs = new Map();
+
+    // SOMET-603: catalog rows, refreshed at startup and after every rotation.
+    // Injectable so unit tests need no database.
+    this.loadCatalog = loadCatalog || (pool ? () => loadWorldBossCatalog(pool) : null);
+    this.catalog = { bosses: [], minionsByElement: new Map() };
+    // Why the last skipped rotation was skipped, so each cause is logged once
+    // and a failed load is never reported as an empty catalog.
+    this._catalogLoadError = null;
+    this._skipLoggedCause = null;
+  }
+
+  // Never throws: a failed load keeps the previous catalog (the tick loop must
+  // not lose a working rotation to one DB hiccup).
+  async refreshCatalog() {
+    if (!this.loadCatalog) return this.catalog;
+    try {
+      const next = await this.loadCatalog();
+      if (next && Array.isArray(next.bosses)) {
+        this.catalog = { bosses: next.bosses, minionsByElement: next.minionsByElement || new Map() };
+        this._catalogLoadError = null;
+        if (next.bosses.length > 0) this._skipLoggedCause = null;
+      }
+    } catch (err) {
+      this._catalogLoadError = (err && err.message) || String(err);
+      console.error('[world boss] catalog load failed; keeping the previous catalog:', err);
+    }
+    return this.catalog;
+  }
+
+  _refreshInBackground() {
+    if (this.loadCatalog) this.refreshCatalog();
+  }
+
+  // No boss to spawn: stay idle, try again next interval, say why once per
+  // cause. A failed load and a genuinely empty catalog are different faults
+  // with different fixes, so they are logged as such.
+  _skipRotation(now) {
+    this.state = 'idle';
+    this.currentBoss = null;
+    this.nextSpawnTime = now + this.bossIntervalMs;
+    const cause = this._catalogLoadError
+      ? `[world boss] the boss catalog failed to load (${this._catalogLoadError}); rotation skipped`
+      : "[world boss] no entity_types rows with boss_tier = 'world'; rotation skipped";
+    if (this._skipLoggedCause !== cause) {
+      console.warn(cause);
+      this._skipLoggedCause = cause;
+    }
+    this._refreshInBackground();
+  }
+
+  // A debug caller's boss name must be one the catalog holds; null means
+  // "any boss" and is always acceptable.
+  _knowsBoss(bossName) {
+    return bossName == null || this.catalog.bosses.some((b) => b.name === bossName);
+  }
+
+  // Debug/test-panel spawn. Returns false (and changes nothing) for a boss
+  // name the catalog does not hold; returns false (and stays idle) when the
+  // catalog is empty.
+  forceSpawn(now, worlds, { bossName = null, preferredWorldId = null } = {}, broadcastFn = null) {
+    if (!this._knowsBoss(bossName)) return false;
+    if (this.state === 'active') this._despawnBoss(worlds, null, 'replaced');
+    this.currentBoss = null;
+    if (!this._planNextBoss(worlds, preferredWorldId, bossName)) {
+      this.state = 'idle';
+      return false;
+    }
+    this.state = 'warning';
+    this.nextSpawnTime = now - 1;
+    this._spawnBoss(now, worlds, broadcastFn);
+    return true;
+  }
+
+  forceWarning(now, worlds, { bossName = null, seconds = 120 } = {}, broadcastFn = null) {
+    if (!this._knowsBoss(bossName)) return false;
+    if (this.state === 'active') this._despawnBoss(worlds, null, 'replaced');
+    this.state = 'idle';
+    this.currentBoss = null;
+    this.nextSpawnTime = now + Math.max(0, Number(seconds) || 0) * 1000;
+    if (!this._planNextBoss(worlds, null, bossName)) return false;
+    this.tick(now, worlds, broadcastFn);
+    return true;
   }
 
   // Choose a boss, target world, and dedicated boss arena
-  _planNextBoss(worlds, preferredWorldId = null) {
-    const bossIdx = Math.floor(this.rng() * WORLD_BOSS_CATALOG.length);
-    this.currentBoss = { ...WORLD_BOSS_CATALOG[bossIdx] };
+  _planNextBoss(worlds, preferredWorldId = null, bossName = null) {
+    const bosses = this.catalog.bosses;
+    if (bosses.length === 0) {
+      this.currentBoss = null;
+      return false;
+    }
+    const named = bossName ? bosses.find((b) => b.name === bossName) : null;
+    this.currentBoss = bossFromRow(named || bosses[Math.floor(this.rng() * bosses.length)]);
     
     // Pick from loaded worlds if any exist
     const worldEntries = [...worlds.entries()];
@@ -227,6 +328,7 @@ class WorldBossManager {
       this.targetSpawnY = 400;
       this.nearestWaypointId = null;
     }
+    return true;
   }
 
   getStatus() {
@@ -239,6 +341,7 @@ class WorldBossManager {
     return {
       state: this.state,
       bossName: this.currentBoss ? this.currentBoss.name : null,
+      bossCreatureId: this.bossCreatureId,
       bossElement: this.currentBoss ? this.currentBoss.element : null,
       worldId: this.activeWorldId,
       worldName: this.activeWorldName,
@@ -251,6 +354,7 @@ class WorldBossManager {
       phaseName: phaseInfo.name,
       phaseBonus: phaseInfo.bonus,
       hpRatio,
+      enraged: Boolean(this.currentBoss && this.currentBoss.enraged),
       topDamagers: this.getTopDamagers(3),
     };
   }
@@ -286,6 +390,8 @@ class WorldBossManager {
         this._spawnPhaseMinions(creature, worldEntry);
       }
 
+      this._emitBossSfx(worldEntry, creature, 'phase'); // SOMET-605
+
       if (broadcastFn) {
         const phaseMsg = `[World Boss Phase ${phaseInfo.phase}] ${this.currentBoss.name} enters ${phaseInfo.name}! (${phaseInfo.bonus})`;
         broadcastFn({
@@ -304,42 +410,89 @@ class WorldBossManager {
     }
   }
 
+  // SOMET-605: put a boss event on the boss's own sim sfx buffer, at its box
+  // centre; World#drainSfx carries it into the next frame.
+  _emitBossSfx(worldEntry, creature, e) {
+    const sim = worldEntry && worldEntry.world && worldEntry.world.creatures;
+    if (!sim || !Array.isArray(sim.sfx) || !creature) return false;
+    return pushSfxEvent(sim.sfx, bossSfx(e, creature,
+      creature.x + (creature.width || 0) / 2, creature.y + (creature.height || 0) / 2));
+  }
+
+  _checkEnrage(creature, worldEntry, now, broadcastFn) {
+    if (!this.currentBoss || !creature || this.currentBoss.enraged) return false;
+    const hpRatio = Math.max(0, creature.hp) / (creature.maxHp || 1);
+    const nearTimeout = now - this.spawnedAt >= this.bossLifetimeMs - ENRAGE_LEAD_MS;
+    if (hpRatio >= ENRAGE_HP_RATIO && !nearTimeout) return false;
+    return this._enrage(creature, worldEntry, broadcastFn);
+  }
+
+  _enrage(creature, worldEntry, broadcastFn) {
+    this.currentBoss.enraged = true;
+    creature.enraged = true;
+    this._emitBossSfx(worldEntry, creature, 'enrage');
+    if (broadcastFn) {
+      broadcastFn({
+        type: 'announcement', kind: 'world_boss_enrage',
+        text: `[World Boss] ${this.currentBoss.name} is enraged!`, bossName: this.currentBoss.name,
+      });
+      broadcastFn({ type: 'world_boss_status', status: this.getStatus() });
+    }
+    return true;
+  }
+
+  // The live boss creature and its world entry, or {} when there is none.
+  _liveBoss(worlds) {
+    if (this.state !== 'active' || !this.currentBoss || !this.activeWorldId || !worlds) return {};
+    const entry = worlds.get(this.activeWorldId);
+    const sim = entry && entry.world && entry.world.creatures;
+    const creature = sim && sim.get ? sim.get(this.bossCreatureId) : null;
+    return creature ? { entry, creature } : {};
+  }
+
+  // Test panel (spec §5): advance exactly one phase. HP is lowered to the
+  // first whole percent _calculatePhase puts in the next phase -- the real
+  // thresholds, read rather than copied -- and the normal transition runs.
+  forcePhase(worlds, broadcastFn = null) {
+    const { entry, creature } = this._liveBoss(worlds);
+    if (!creature) return false;
+    const before = this.currentBoss.phase || 1;
+    const maxHp = creature.maxHp || 1;
+    for (let pct = Math.floor((Math.max(0, creature.hp) / maxHp) * 100); pct >= 1; pct -= 1) {
+      if (this._calculatePhase(pct / 100).phase > before) {
+        creature.hp = Math.floor((maxHp * pct) / 100);
+        break;
+      }
+    }
+    this.currentBoss.currentHp = Math.max(0, creature.hp);
+    this._checkPhaseTransition(creature, entry, broadcastFn);
+    return (this.currentBoss.phase || 1) > before;
+  }
+
+  forceEnrage(worlds, broadcastFn = null) {
+    const { entry, creature } = this._liveBoss(worlds);
+    if (!creature || this.currentBoss.enraged) return false;
+    return this._enrage(creature, entry, broadcastFn);
+  }
+
   _spawnPhaseMinions(creature, worldEntry) {
     if (!worldEntry || !worldEntry.world || !worldEntry.world.creatures || !worldEntry.world.creatures.addCreatures) return;
-    const minions = [
-      {
-        id: `wb_minion_${Date.now()}_1`,
-        type: `${this.currentBoss.element.toUpperCase()} Elemental Guard`,
-        name: `${this.currentBoss.name}'s Minion`,
-        x: creature.x + 40,
-        y: creature.y + 40,
-        width: 48,
-        height: 48,
-        level: 80,
-        hp: 1500,
-        maxHp: 1500,
-        damage: 25,
-        attackElement: this.currentBoss.element,
-        speed: 70,
-        defense: 15,
-      },
-      {
-        id: `wb_minion_${Date.now()}_2`,
-        type: `${this.currentBoss.element.toUpperCase()} Elemental Guard`,
-        name: `${this.currentBoss.name}'s Minion`,
-        x: creature.x - 40,
-        y: creature.y - 40,
-        width: 48,
-        height: 48,
-        level: 80,
-        hp: 1500,
-        maxHp: 1500,
-        damage: 25,
-        attackElement: this.currentBoss.element,
-        speed: 70,
-        defense: 15,
-      },
-    ];
+    const row = this.catalog.minionsByElement.get(this.currentBoss.element);
+    if (!row) {
+      console.warn(`[world boss] no minion row for element ${this.currentBoss.element}; phase minions skipped`);
+      return;
+    }
+    const stamp = Date.now();
+    // SOMET-603: hydrated like every other creature (behaviour, element
+    // and damage all arrive the one shared way). No `damage` here: an explicit
+    // instance damage would beat the row's base_damage (ruling P1).
+    const minions = MINION_OFFSETS.map(([dx, dy], i) => hydrateCreatureRow(row, {
+      id: `wb_minion_${stamp}_${i + 1}`,
+      x: creature.x + dx,
+      y: creature.y + dy,
+      level: MINION_LEVEL,
+      hp: Number(row.max_hp) || Number(row.hp) || 1,
+    }));
     worldEntry.world.creatures.addCreatures(minions);
   }
 
@@ -377,9 +530,10 @@ class WorldBossManager {
     // 1. Idle state -> check if warning should be sent
     if (this.state === 'idle') {
       const timeRemaining = this.nextSpawnTime - now;
-      if (timeRemaining <= this.bossWarningMs) {
+      if (timeRemaining <= this.bossWarningMs && !this.currentBoss && !this._planNextBoss(worlds)) {
+        this._skipRotation(now);
+      } else if (timeRemaining <= this.bossWarningMs) {
         this.state = 'warning';
-        if (!this.currentBoss) this._planNextBoss(worlds);
 
         if (broadcastFn) {
           const alertMsg = `[World Boss Alert] A massive tremor shakes the realm! ${this.currentBoss.name} will emerge in 2 minutes at ${this.activeArenaName} (${this.activeWorldName})! Prepare for battle!`;
@@ -421,6 +575,7 @@ class WorldBossManager {
               this.currentBoss._playerDamage = c._playerDamage;
             }
             this._checkPhaseTransition(c, entry, broadcastFn);
+            this._checkEnrage(c, entry, now, broadcastFn); // SOMET-605
             // Auto-broadcast if HP changed or periodically every 1500ms
             if (broadcastFn && (oldHp !== this.currentBoss.currentHp || (now - this._lastBroadcastTime) >= 1500)) {
               this._lastBroadcastHp = this.currentBoss.currentHp;
@@ -431,9 +586,13 @@ class WorldBossManager {
               });
             }
           } else if (!c && this.currentBoss) {
-            // Boss creature was killed or removed from the world
-            this.onCreatureDeath(entry, null, null, { pool: this.pool, broadcastFn })
-              .catch((err) => console.error('Error in world boss fallback death processing:', err));
+            // SOMET-603: missing is NOT a kill. Every real kill reaches
+            // onCreatureDeath synchronously, which idles the manager before
+            // this tick can run, so a boss still tracked here was lost (world
+            // evicted and reloaded, or removed out of band). Put it back at
+            // its current hp; never announce it slain or pay out.
+            console.warn(`[World Boss] ${this.currentBoss.name} (${this.bossCreatureId}) missing from its world; re-placing at ${this.currentBoss.currentHp} hp`);
+            this._placeBossCreature(entry, this.currentBoss.currentHp, true);
           }
         }
       }
@@ -441,7 +600,10 @@ class WorldBossManager {
   }
 
   _spawnBoss(now, worlds, broadcastFn) {
-    if (!this.currentBoss) this._planNextBoss(worlds);
+    if (!this.currentBoss && !this._planNextBoss(worlds)) {
+      this._skipRotation(now);
+      return;
+    }
     this.state = 'active';
     this.spawnedAt = now;
     this.currentBoss.currentHp = this.currentBoss.maxHp;
@@ -473,30 +635,7 @@ class WorldBossManager {
       }
       this.currentBoss.spawnX = spawnX;
       this.currentBoss.spawnY = spawnY;
-
-      const bossCreature = {
-        id: cid,
-        type: this.currentBoss.type,
-        name: this.currentBoss.name,
-        x: spawnX,
-        y: spawnY,
-        width: this.currentBoss.size || 96,
-        height: this.currentBoss.size || 96,
-        level: 100,
-        hp: this.currentBoss.maxHp,
-        maxHp: this.currentBoss.maxHp,
-        damage: this.currentBoss.damage,
-        attackElement: this.currentBoss.element,
-        bossElement: this.currentBoss.element,
-        speed: this.currentBoss.speed,
-        defense: this.currentBoss.defense,
-        isWorldBoss: true,
-        _playerDamage: this.currentBoss._playerDamage,
-      };
-
-      if (worldEntry.world.creatures && worldEntry.world.creatures.addCreatures) {
-        worldEntry.world.creatures.addCreatures([bossCreature]);
-      }
+      this._placeBossCreature(worldEntry, this.currentBoss.maxHp);
     }
 
     if (broadcastFn) {
@@ -517,6 +656,34 @@ class WorldBossManager {
     }
   }
 
+  // The ONE place a boss creature is built and put into a world sim: the
+  // spawn (at max hp) and the lost-boss re-place in tick (at current hp).
+  // SOMET-603: hydrated from the catalog row like every other creature, so
+  // boss_tier/element/hitbox_size/behaviour/vfx (and S3's auras) arrive the
+  // one shared way. No `damage` here: an explicit instance damage would beat
+  // the row's base_damage (ruling P1).
+  _placeBossCreature(worldEntry, hp, quiet = false) {
+    const sim = worldEntry && worldEntry.world && worldEntry.world.creatures;
+    if (!sim || !sim.addCreatures || !this.currentBoss) return null;
+    const bossCreature = hydrateCreatureRow(this.currentBoss.row, {
+      id: this.bossCreatureId,
+      x: this.currentBoss.spawnX ?? this.targetSpawnX ?? 400,
+      y: this.currentBoss.spawnY ?? this.targetSpawnY ?? 400,
+      level: WORLD_BOSS_LEVEL,
+      hp,
+    });
+    // SOMET-605: a lost-boss re-place must not replay the spawn sound.
+    if (quiet) bossCreature.quietSpawn = true;
+    sim.addCreatures([bossCreature]);
+    const placed = sim.get ? sim.get(this.bossCreatureId) : null;
+    if (placed) {
+      // addCreatures takes maxHp from hp; a re-placed boss keeps its real max.
+      placed.maxHp = this.currentBoss.maxHp;
+      if (this.currentBoss._playerDamage) placed._playerDamage = this.currentBoss._playerDamage;
+    }
+    return placed;
+  }
+
   _despawnBoss(worlds, broadcastFn, reason = 'timeout') {
     if (this.activeWorldId && worlds.has(this.activeWorldId)) {
       const entry = worlds.get(this.activeWorldId);
@@ -531,6 +698,7 @@ class WorldBossManager {
     this.bossCreatureId = null;
     this.nextSpawnTime = Date.now() + this.bossIntervalMs;
     this.warningSent = false;
+    this._refreshInBackground();
 
     if (broadcastFn && reason === 'timeout') {
       const despawnMsg = `[World Boss] ${oldBoss?.name || 'World Boss'} was not defeated in time and retreated into the shadows.`;
@@ -554,7 +722,7 @@ class WorldBossManager {
     if (this.state !== 'active' && !this.currentBoss) {
       return null;
     }
-    if (creature && !creature.isWorldBoss && creature.id !== this.bossCreatureId) {
+    if (creature && creature.bossTier !== 'world' && creature.id !== this.bossCreatureId) {
       return null;
     }
 
@@ -578,6 +746,22 @@ class WorldBossManager {
     }
 
     const top3 = contributors.slice(0, 3);
+
+    // 2. Grant guaranteed legendary ('foxy') item to Top 3 damagers
+    const cx = Math.round((creature && creature.x) || (boss && boss.spawnX) || this.targetSpawnX || 400);
+    const cy = Math.round((creature && creature.y) || (boss && boss.spawnY) || this.targetSpawnY || 400);
+
+    // SOMET-603: claim the death BEFORE the first await. Everything below
+    // reads the locals captured above, so a tick that runs during the reward
+    // awaits sees an idle manager and cannot pay this kill out twice (or
+    // re-place a boss that was just slain).
+    this.state = 'idle';
+    this.currentBoss = null;
+    this.bossCreatureId = null;
+    this.nextSpawnTime = now + this.bossIntervalMs;
+    this.warningSent = false;
+    this._refreshInBackground();
+
     const dropFn = dropLegendaryFn || ((e, uId, x, y, lvl) => dropLegendaryItemForPlayer(dbPool, e, uId, x, y, lvl));
 
     // 1. Grant Victor's Boon buff to ALL players who dealt damage
@@ -591,10 +775,6 @@ class WorldBossManager {
         bossName: boss.name || 'World Boss',
       });
     }
-
-    // 2. Grant guaranteed legendary ('foxy') item to Top 3 damagers
-    const cx = Math.round((creature && creature.x) || (boss && boss.spawnX) || this.targetSpawnX || 400);
-    const cy = Math.round((creature && creature.y) || (boss && boss.spawnY) || this.targetSpawnY || 400);
 
     const recipients = top3.length > 0 ? top3 : [{ userId: String(killerUserId || '1'), damage: 1000 }];
     let itemOffset = -40;
@@ -664,13 +844,6 @@ class WorldBossManager {
     // 4. Broadcast chest and item updates immediately to zone
     if (broadcastChestsFn) broadcastChestsFn(entry);
     if (broadcastItemsFn) broadcastItemsFn(entry);
-
-    // Reset cycle to idle before broadcasting final status
-    this.state = 'idle';
-    this.currentBoss = null;
-    this.bossCreatureId = null;
-    this.nextSpawnTime = now + this.bossIntervalMs;
-    this.warningSent = false;
 
     // 5. Broadcast victory announcement and idle status
     if (broadcastFn) {
@@ -744,7 +917,11 @@ module.exports = {
   WorldBossManager,
   dropLegendaryItemForPlayer,
   resolveArena,
-  WORLD_BOSS_CATALOG,
+  loadWorldBossCatalog,
+  bossFromRow,
+  MINION_TYPE_BY_ELEMENT,
+  WORLD_BOSS_LEVEL,
+  MINION_LEVEL,
   BOSS_ARENAS,
   BOSS_INTERVAL_MS,
   BOSS_WARNING_MS,

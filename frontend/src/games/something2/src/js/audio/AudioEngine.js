@@ -6,7 +6,7 @@ import { assetUrl } from '../net/assets.js';
 import {
   resolveChain, pickWeighted, ambienceChain, musicChain, nearbyPointPath,
 } from './audioLookup.js';
-import { sfxChains } from './sfxResolve.js';
+import { sfxChains, sfxPriority } from './sfxResolve.js';
 import { SfxLimiter } from './sfxLimits.js';
 import { NearbyScheduler } from './nearbyScheduler.js';
 import { BiomeTracker } from './biomeTracker.js';
@@ -98,7 +98,12 @@ export class AudioEngine {
     this.nearbyPointLoopable = new Map();
     this.sfxVoiceEnded = new Map(); // voiceId -> extra "voice ended" hook (nearby cadence path only; see _fireVoiceEnded)
     this._lastNearbyTick = -Infinity;
+    this.screenRadiusPx = null; // SOMET-605: world px; null = no boss presence
   }
+
+  // SOMET-605: Game.update passes screenRadiusWorld(...) every frame; the
+  // presence loop uses it. null (never set, or invalid) = no presence.
+  setScreenRadius(px) { this.screenRadiusPx = Number.isFinite(px) && px > 0 ? px : null; }
 
   _ensureCtx() {
     if (this.ctx) return this.ctx;
@@ -223,7 +228,7 @@ export class AudioEngine {
     // gain 0 anyway, so cull it before it can take a voice slot or a
     // same-clip throttle slot, and before it fetches anything.
     if (distance >= SFX_FALLOFF_PX) return;
-    const priority = ownActor && ev.a === ownActor ? 'own' : 'nearest';
+    const priority = sfxPriority(ev, ownActor);
     const { ok, evict, voiceId } = this.sfxLimiter.admit({ clipKey: clip.key, priority, distance });
     if (!ok) { this.sfxStats.droppedTotal += 1; return; }
     // The evicted voice may be a one-shot OR a still-looping nearby world
@@ -423,12 +428,22 @@ export class AudioEngine {
     const points = typeof pointsOrThunk === 'function' ? pointsOrThunk() : pointsOrThunk;
 
     const cadenceEmitters = [];
+    const presence = [];
+    const auraEmitters = [];
     if (creatures) {
       for (const c of creatures.values()) {
         if (!c || !c.type || c.id == null) continue;
         const cx = c.x + (c.width || 0) / 2;
         const cy = c.y + (c.height || 0) / 2;
         cadenceEmitters.push({ id: `c:${c.id}`, key: `creature/${c.type}/nearby`, x: cx, y: cy, kind: 'creature' });
+        if (c.bossTier) presence.push({ id: `boss:${c.id}`, type: c.type, x: cx, y: cy });
+        // SOMET-607 (S5, spec §4.4): one looping sound per (creature, aura)
+        // pair while the aura is active and the creature is in range.
+        if (Array.isArray(c.auras)) {
+          for (const auraName of c.auras) {
+            auraEmitters.push({ id: `aura:${c.id}:${auraName}`, aura: auraName, x: cx, y: cy, boss: !!c.bossTier });
+          }
+        }
       }
     }
 
@@ -461,6 +476,54 @@ export class AudioEngine {
       } else cadenceEmitters.push({ id, key, x: p.x, y: p.y, kind: 'point' });
     }
 
+    // SOMET-605 (spec §4.4): a boss within screen radius keeps one looping
+    // `presence` source at the boss tier. Same loop machinery as a loopable
+    // world point (nearbyLoops / nearbyLoopStarting), so the start-race and
+    // leak guards those three fix rounds added apply here unchanged.
+    const presenceById = new Map();
+    const radius = this.screenRadiusPx;
+    if (radius) {
+      for (const b of presence) {
+        const dx = b.x - listener.x;
+        const distance = Math.hypot(dx, b.y - listener.y);
+        if (distance > radius) continue;
+        presenceById.set(b.id, b);
+        const live = this.nearbyLoops.get(b.id);
+        if (live) {
+          live.distance = distance;
+          if (live.panner) live.panner.pan.value = Math.max(-1, Math.min(1, dx / SFX_PAN_PX));
+          continue;
+        }
+        if (this.nearbyLoopStarting.has(b.id)) continue;
+        const { clips, key } = this._resolve([`creature/${b.type}/presence`]); // records the miss itself
+        const clip = key ? pickWeighted(clips, this.rand) : null;
+        if (clip) this._startNearbyLoop(b.id, clip, dx, distance, { priority: 'boss', presence: true });
+      }
+    }
+
+    // SOMET-607 (S5, spec §4.4): same presence machinery, radius-gated like
+    // the carrying creature itself would be -- the boss screen radius for a
+    // boss, the ordinary nearby radius otherwise.
+    const auraPresenceById = new Map();
+    for (const a of auraEmitters) {
+      const auraRadius = a.boss ? this.screenRadiusPx : this.nearbyScheduler.radiusPx;
+      if (!auraRadius) continue;
+      const dx = a.x - listener.x;
+      const distance = Math.hypot(dx, a.y - listener.y);
+      if (distance > auraRadius) continue;
+      auraPresenceById.set(a.id, a);
+      const live = this.nearbyLoops.get(a.id);
+      if (live) {
+        live.distance = distance;
+        if (live.panner) live.panner.pan.value = Math.max(-1, Math.min(1, dx / SFX_PAN_PX));
+        continue;
+      }
+      if (this.nearbyLoopStarting.has(a.id)) continue;
+      const { clips, key } = this._resolve([`aura/${a.aura}/loop`]); // records the miss itself
+      const clip = key ? pickWeighted(clips, this.rand) : null;
+      if (clip) this._startNearbyLoop(a.id, clip, dx, distance, { priority: a.boss ? 'boss' : 'nearby', presence: true });
+    }
+
     for (const d of this.nearbyScheduler.tick(cadenceEmitters, listener)) {
       try {
         this._triggerNearby(d, listener);
@@ -469,7 +532,7 @@ export class AudioEngine {
         this.nearbyScheduler.ended(d.id);
       }
     }
-    this._sweepNearbyLoops(pointsById, listener);
+    this._sweepNearbyLoops(pointsById, listener, presenceById, auraPresenceById);
   }
 
   // Cadence path only (creatures and non-loopable points) -- a loopable
@@ -495,13 +558,13 @@ export class AudioEngine {
   // which is before tickNearby can be invoked again (250ms later at the
   // earliest). That closes the window where a slow buffer load let repeated
   // ticks each start their own competing source for the same point.
-  _startNearbyLoop(emitterId, clip, dx, distance) {
+  _startNearbyLoop(emitterId, clip, dx, distance, { priority = 'nearby', presence = false } = {}) {
     this.nearbyLoopStarting.set(emitterId, undefined); // claim it now; voiceId filled in below
-    const { ok, evict, voiceId } = this.sfxLimiter.admit({ clipKey: clip.key, priority: 'nearby', distance });
+    const { ok, evict, voiceId } = this.sfxLimiter.admit({ clipKey: clip.key, priority, distance });
     if (!ok) { this.nearbyLoopStarting.delete(emitterId); this.sfxStats.droppedTotal += 1; return; } // retried next tick
     this.nearbyLoopStarting.set(emitterId, voiceId);
     if (evict != null) this._stopSfxOrLoopVoice(evict);
-    this._startNearbyLoopVoice(emitterId, voiceId, clip, dx, distance);
+    this._startNearbyLoopVoice(emitterId, voiceId, clip, dx, distance, { priority, presence });
   }
 
   // Mirrors _startSfxVoice's pending-cancellation guard exactly (same reason:
@@ -524,7 +587,7 @@ export class AudioEngine {
   // it exactly like round 2's bug. The success path also now refuses to
   // overwrite an existing nearbyLoops entry, as a second, independent guard
   // against two attempts for the same point both reaching success.
-  async _startNearbyLoopVoice(emitterId, voiceId, clip, dx, distance) {
+  async _startNearbyLoopVoice(emitterId, voiceId, clip, dx, distance, { priority = 'nearby', presence = false } = {}) {
     const stillOurs = () => this.nearbyLoopStarting.get(emitterId) === voiceId;
     this.sfxPending.add(voiceId);
     const buffer = await this._buffer(this.urlFor(clip.key));
@@ -539,7 +602,9 @@ export class AudioEngine {
     const panner = this.ctx.createStereoPanner();
     const vol = typeof clip.volume === 'number' ? clip.volume : 1;
     const falloff = Math.max(0, 1 - distance / SFX_FALLOFF_PX);
-    const target = vol * falloff;
+    // SOMET-605 (D4 / ruling G8): a boss presence loop is gated only by the
+    // screen radius, so it plays at clip volume; a point loop keeps falloff.
+    const target = presence ? vol : vol * falloff;
     // Fix round 1, item 4: fade IN rather than popping to full gain the
     // instant the point comes into range -- same pattern _play() already
     // uses for music/ambience.
@@ -549,7 +614,7 @@ export class AudioEngine {
     src.connect(panner);
     panner.connect(gain);
     gain.connect(this.bus.sfx);
-    this.nearbyLoops.set(emitterId, { src, gain, voiceId, key: clip.key });
+    this.nearbyLoops.set(emitterId, { src, gain, panner, voiceId, key: clip.key, priority, distance });
     if (stillOurs()) this.nearbyLoopStarting.delete(emitterId); // success -- ownership moves to nearbyLoops
     this.sfxStats.playedTotal += 1;
     src.start();
@@ -574,13 +639,21 @@ export class AudioEngine {
   // every currently-looping point (and every still-loading one, fix round 2)
   // against the latest positions: gone from `points` entirely, or still
   // present but now beyond the scheduler's radius, both end it the same way.
-  _sweepNearbyLoops(pointsById, listener) {
+  _sweepNearbyLoops(pointsById, listener, presenceById = new Map(), auraPresenceById = new Map()) {
     const stillNear = (p) => p && Math.hypot((p.x || 0) - listener.x, (p.y || 0) - listener.y) <= this.nearbyScheduler.radiusPx;
+    // SOMET-605: a `boss:` emitter stays only while tickNearby found it
+    // within screen radius this tick; a point keeps its own radius rule.
+    // SOMET-607: an `aura:` emitter follows the same "found this tick" rule.
+    const keep = (id) => {
+      if (id.startsWith('boss:')) return presenceById.has(id);
+      if (id.startsWith('aura:')) return auraPresenceById.has(id);
+      return stillNear(pointsById.get(id));
+    };
     for (const emitterId of [...this.nearbyLoops.keys()]) {
-      if (!stillNear(pointsById.get(emitterId))) this._fadeOutNearbyLoop(emitterId);
+      if (!keep(emitterId)) this._fadeOutNearbyLoop(emitterId);
     }
     for (const emitterId of [...this.nearbyLoopStarting.keys()]) {
-      if (!stillNear(pointsById.get(emitterId))) this._cancelNearbyLoopStart(emitterId);
+      if (!keep(emitterId)) this._cancelNearbyLoopStart(emitterId);
     }
   }
 
@@ -683,6 +756,8 @@ export class AudioEngine {
       ambience: ch('ambience'),
       sfx: { voices: this.sfxVoices.size, playedTotal: this.sfxStats.playedTotal, droppedTotal: this.sfxStats.droppedTotal },
       gains: this.bus ? { master: this.bus.master.gain.value, music: this.bus.music.gain.value, ambience: this.bus.ambience.gain.value, sfx: this.bus.sfx.gain.value } : null,
+      loops: [...this.nearbyLoops].map(([id, l]) => ({ id, key: l.key, priority: l.priority || 'nearby', distance: Math.round(l.distance || 0) })),
+      screenRadiusPx: this.screenRadiusPx,
     };
   }
 

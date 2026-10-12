@@ -272,11 +272,10 @@ test('loadCreatureTypes SELECTs every behaviour column its mapping reads', async
   }
   assert.ok(/LEFT JOIN\s+creature_behaviors/i.test(sql), 'must LEFT JOIN, not INNER JOIN');
 
-  // SOMET-253 Task 4: the four aura multiplier/radius columns. No collision
-  // risk with entity_types (it has no aura_* columns of its own), so a bare
-  // substring check is enough -- unlike gold_min/gold_max just below.
+  // SOMET-604: the behaviour-row aura columns were dropped by 1714440681000;
+  // selecting one would make loadCreatureTypes throw.
   for (const col of ['aura_radius', 'aura_damage_mult', 'aura_defense_mult', 'aura_speed_mult']) {
-    assert.ok(sql.includes(col), `SELECT is missing ${col} — Task 5's aura consumer would silently see no leaders`);
+    assert.ok(!new RegExp(`\\bb\\.${col}\\b`).test(sql), `b.${col} was dropped by 1714440681000 and must not be selected`);
   }
   // Checked as the exact aliased form, not a bare `sql.includes('gold_min')`:
   // this SELECT already carries e.gold_min/e.gold_max (the entity type's own
@@ -364,7 +363,6 @@ test('loadCreatureTypes maps defense/resistances and defaults them', async () =>
       }],
       aggroRadius: 400, leashRadius: 800,
       chaseStyle: 'charge', preferredRange: 0, moveSpeedMult: 1, damageOverride: null,
-      auraRadius: 0, auraDamageMult: 1, auraDefenseMult: 1, auraSpeedMult: 1,
       goldMin: 0, goldMax: 0,
     },
     defense: 1, resistances: { fire: 0.6 },
@@ -380,7 +378,6 @@ test('loadCreatureTypes maps defense/resistances and defaults them', async () =>
       }],
       aggroRadius: 400, leashRadius: 800,
       chaseStyle: 'charge', preferredRange: 0, moveSpeedMult: 1, damageOverride: null,
-      auraRadius: 0, auraDamageMult: 1, auraDefenseMult: 1, auraSpeedMult: 1,
       goldMin: 0, goldMax: 0,
     },
     defense: 0, resistances: {},

@@ -141,6 +141,10 @@ export function useCreateEntityType() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['entityTypes'] });
       queryClient.invalidateQueries({ queryKey: ['mapConfig'] });
+      // Aura Used-by lists are computed from entity bindings (SOMET-604).
+      queryClient.invalidateQueries({ queryKey: ['auraEffects'] });
+      // SOMET-605: the audio subject list follows the entity catalog.
+      queryClient.invalidateQueries({ queryKey: ['audio-subjects'] });
       toast.success('Entity type created!');
     },
     onError: (err) => toast.error(`Creation failed: ${err.message}`)
@@ -163,6 +167,13 @@ export function useUpdateEntityType() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['entityTypes'] });
       queryClient.invalidateQueries({ queryKey: ['mapConfig'] });
+      // Aura Used-by lists are computed from entity bindings (SOMET-604).
+      queryClient.invalidateQueries({ queryKey: ['auraEffects'] });
+      // SOMET-605: Boss tier decides which audio slots a creature carries;
+      // the Audio tab and the entity's Sounds section read them from here.
+      // Literal = useAudioAdmin.js SUBJECTS_KEY (not imported, to keep the
+      // audio hooks out of this module).
+      queryClient.invalidateQueries({ queryKey: ['audio-subjects'] });
       toast.success('Entity type updated!');
     },
     onError: (err) => toast.error(`Update failed: ${err.message}`)
@@ -183,6 +194,10 @@ export function useDeleteEntityType() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['entityTypes'] });
       queryClient.invalidateQueries({ queryKey: ['mapConfig'] });
+      // Aura Used-by lists are computed from entity bindings (SOMET-604).
+      queryClient.invalidateQueries({ queryKey: ['auraEffects'] });
+      // SOMET-605: the audio subject list follows the entity catalog.
+      queryClient.invalidateQueries({ queryKey: ['audio-subjects'] });
       toast.success('Entity type deleted!');
     },
     onError: (err) => toast.error(`Deletion failed: ${err.message}`)
@@ -274,4 +289,19 @@ export function useVfxEffects() {
     }
   });
   return { vfxEffects };
+}
+
+// SOMET-607 (S5): the aura effect library -- same shape/caching contract as
+// useVfxEffects, indexed by Game.initChunked into auraDefs for rendering.
+export function useAuraEffects() {
+  const { data: auraEffects } = useQuery({
+    queryKey: ['auraEffects'],
+    staleTime: 60_000,
+    queryFn: async () => {
+      const res = await fetch(`${API_URL}/api/aura-effects`);
+      if (!res.ok) throw new Error('Failed to fetch aura effects');
+      return res.json();
+    }
+  });
+  return { auraEffects };
 }

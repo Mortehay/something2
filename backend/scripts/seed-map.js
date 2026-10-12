@@ -133,6 +133,12 @@ function requiredTilesFor(w, spec, row, doorwayEdges) {
   if (w.chest && Number.isFinite(w.chest.x) && Number.isFinite(w.chest.y)) {
     out.push({ row: Math.floor(w.chest.y / 100), col: Math.floor(w.chest.x / 100), what: 'vault chest' });
   }
+  // SOMET-609: a dungeon boss post is generated terrain too. A boss standing in
+  // a sealed pocket (or in a wall) is a boss nobody can fight; listing the post
+  // makes assertNavigable prove it is walkable AND reachable from the doorways.
+  if (w.boss && Number.isFinite(w.boss.x) && Number.isFinite(w.boss.y)) {
+    out.push({ row: Math.floor(w.boss.y / 100), col: Math.floor(w.boss.x / 100), what: 'dungeon boss' });
+  }
   for (const l of (spec.links || [])) {
     if (l.kind !== 'portal') continue;
     if (l.from === w.key) {
@@ -152,7 +158,19 @@ function requiredTilesFor(w, spec, row, doorwayEdges) {
   return out;
 }
 
-async function applyMapSpec(pool, spec) {
+// `moveEntry: false` applies everything EXCEPT the is_entry hand-over (SOMET-534).
+//
+// The default -- the spec's declared entry world becomes THE entry world -- is
+// what `make seed-map` means and is unchanged. The option exists for a caller
+// that applies a spec for its own sake and would only put is_entry back
+// afterwards: seed_map_db.test.js's "every shipped spec applies cleanly".
+// The apply is one transaction, so peers see it all at COMMIT or not at all.
+// What they CAN see is the window between that COMMIT moving is_entry and the
+// caller moving it back -- and guarding that window is what made the test hold
+// the shared entry-world advisory key around the whole apply (60s idle,
+// 122-189s under suite load), starving every other holder. Not moving is_entry
+// in the first place leaves no window to guard.
+async function applyMapSpec(pool, spec, { moveEntry = true } = {}) {
   // One biome read, two catalog entries: biomeNames answers "does this biome
   // exist", biomeCreatureTypes answers "which creatures can actually spawn in
   // it" (SOMET-315). Deriving the name set from the same rows keeps them from
@@ -165,6 +183,10 @@ async function applyMapSpec(pool, spec) {
     creatureTypeNames: new Set(
       (await pool.query('SELECT name FROM entity_types WHERE is_creature = true')).rows.map((r) => r.name)),
     pointArtTypes: await loadPointTypeNames(pool),
+    // SOMET-609: boss tiers for the `boss` block's catalog check.
+    bossTiers: new Map((await pool.query(
+      'SELECT name, boss_tier FROM entity_types WHERE is_creature = true AND boss_tier IS NOT NULL',
+    )).rows.map((r) => [r.name, r.boss_tier])),
   };
   const errors = validateMapSpec(spec, catalogs);
   if (errors.length) {
@@ -221,9 +243,9 @@ async function applyMapSpec(pool, spec) {
                              allowed_creature_types, entry_spawn, biomes, biome_cell,
                              graph_x, graph_y, level_min, level_max, density,
                              allows_fast_travel, safe_road_radius, safe_rects,
-                             authored_roads, pens)
+                             authored_roads, pens, dungeon_boss)
          VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,
-                 $18::jsonb,$19::jsonb)
+                 $18::jsonb,$19::jsonb,$20::jsonb)
          ON CONFLICT (name) DO UPDATE
            SET seed = EXCLUDED.seed, chunk_size = EXCLUDED.chunk_size,
                width = EXCLUDED.width, height = EXCLUDED.height,
@@ -252,7 +274,10 @@ async function applyMapSpec(pool, spec) {
                -- Editing a pen's box in a spec therefore moves the authored
                -- rectangle without moving the creatures already standing in it.
                authored_roads = EXCLUDED.authored_roads,
-               pens = EXCLUDED.pens
+               pens = EXCLUDED.pens,
+               -- SOMET-609: re-asserted like every authored column; removing
+               -- the key from a spec removes the boss.
+               dungeon_boss = EXCLUDED.dungeon_boss
          RETURNING id`,
         [w.name, w.seed, w.chunk_size ?? 64, w.width, w.height,
          JSON.stringify(w.allowed_creature_types ?? []),
@@ -266,7 +291,8 @@ async function applyMapSpec(pool, spec) {
          w.safe_road_radius ?? 0,
          JSON.stringify(w.safe_rects ?? []),
          JSON.stringify(w.roads ?? []),
-         JSON.stringify(w.pens ?? [])],
+         JSON.stringify(w.pens ?? []),
+         w.boss ? JSON.stringify(w.boss) : null],
       );
       idByKey.set(w.key, r.rows[0].id);
       worldsWritten += 1;
@@ -801,7 +827,7 @@ async function applyMapSpec(pool, spec) {
     // LAST: setting is_entry clears it on every other world (index.js:1542),
     // so doing this mid-apply would fight itself as later worlds are written.
     const entry = spec.worlds.find((w) => w.is_entry);
-    if (entry) {
+    if (entry && moveEntry) {
       // One atomic statement via the shared writer (services/entryWorld.js).
       // This site was already safe -- it runs inside the apply transaction, so
       // its old clear-then-set pair could not be observed half-done -- but it

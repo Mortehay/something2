@@ -11,10 +11,12 @@
 // authHeaders() is NOT optional: every /api/art-* route is adminGuard'd, and a
 // 401 here would sign the admin out mid-batch. Same trap documented in
 // useAiProviders.js.
+import { useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { authHeaders, apiFetch } from './src/js/net/auth.js';
-import { shouldPollQueue } from './artProgress.js';
+import { batchJustSettled, queuePollInterval } from './artProgress.js';
+import { dispatchError } from './artSelection.js';
 import { API_URL } from '../../config.js';
 
 const SUBJECTS_KEY = ['art-subjects'];
@@ -24,6 +26,32 @@ async function getJson(url, what) {
   const res = await apiFetch(url, { headers: authHeaders() });
   if (!res.ok) throw new Error(`Failed to load ${what}`);
   return res.json();
+}
+
+// The server caps per_page at 500, so a kind with more rows than that is
+// paged through until `total` is reached. One request per kind used to be
+// enough (entities are ~316 today), but it silently dropped every row past the
+// 500th and "Select all N matching" then undercounted (SOMET-538 rework).
+// An empty page stops the loop even if `total` says more: the catalogue can
+// shrink between two requests, and a stale total must not spin forever.
+const PER_PAGE = 500;
+
+async function loadKind(getJsonFn, kind) {
+  const rows = [];
+  for (let page = 1; ; page += 1) {
+    const { subjects = [], total = 0 } = await getJsonFn(
+      `${API_URL}/api/art-subjects/${encodeURIComponent(kind)}?per_page=${PER_PAGE}&page=${page}`,
+      kind,
+    );
+    rows.push(...subjects);
+    if (subjects.length === 0 || rows.length >= total) return rows;
+  }
+}
+
+export async function loadAllSubjects(getJsonFn) {
+  const { kinds } = await getJsonFn(`${API_URL}/api/art-subjects`, 'the subject kinds');
+  const perKind = await Promise.all(kinds.map(({ kind }) => loadKind(getJsonFn, kind)));
+  return { kinds: kinds.map((k) => k.kind), subjects: perKind.flat() };
 }
 
 // `live` polls the catalogue while a batch is draining (SOMET-558).
@@ -39,21 +67,19 @@ async function getJson(url, what) {
 // can have changed; polling it at the counters' rate would spend the API
 // budget re-fetching an unchanged catalogue. Off entirely when idle.
 export function useArtSubjects({ live = false } = {}) {
+  const qc = useQueryClient();
   const { data, isLoading, error } = useQuery({
     queryKey: SUBJECTS_KEY,
     refetchInterval: live ? 15000 : false,
-    queryFn: async () => {
-      const { kinds } = await getJson(`${API_URL}/api/art-subjects`, 'the subject kinds');
-      // per_page is above every kind's row count, so one request each.
-      const pages = await Promise.all(kinds.map(({ kind }) => (
-        getJson(`${API_URL}/api/art-subjects/${encodeURIComponent(kind)}?per_page=500`, kind)
-      )));
-      return {
-        kinds: kinds.map((k) => k.kind),
-        subjects: pages.flatMap((p) => p.subjects),
-      };
-    },
+    queryFn: () => loadAllSubjects(getJson),
   });
+  // One last read when the run ends. Polling stops on that same render, so
+  // without it whatever landed since the last 15s poll stays invisible.
+  const wasLive = useRef(live);
+  useEffect(() => {
+    if (batchJustSettled(wasLive.current, live)) qc.invalidateQueries({ queryKey: SUBJECTS_KEY });
+    wasLive.current = live;
+  }, [live, qc]);
   return {
     kinds: data?.kinds || [],
     subjects: data?.subjects || [],
@@ -76,9 +102,7 @@ export function useArtSubjects({ live = false } = {}) {
 export function useArtQueue() {
   const { data } = useQuery({
     queryKey: QUEUE_KEY,
-    refetchInterval: (q) => (
-      shouldPollQueue(q.state.data?.run, q.state.data?.stats) ? 2000 : false
-    ),
+    refetchInterval: (q) => queuePollInterval(q.state.data?.run, q.state.data?.stats),
     queryFn: () => getJson(`${API_URL}/api/art-jobs`, 'the art queue'),
   });
   // `failures` arrives already GROUPED AND CLASSIFIED by the server. The rule
@@ -303,18 +327,7 @@ export function useStartArtBatch() {
   return useMutation({
     mutationFn: async (body) => {
       const { res, json } = await post('/api/art-jobs/dispatch', body);
-      // 409 is an admin clicking twice, or two admins at once -- not a fault.
-      if (res.status === 409) throw new Error('A batch is already running');
-      // 400 here is usually the resolution precondition, whose message says
-      // exactly which provider is misconfigured and how to fix it. Passing it
-      // through verbatim is the whole point of writing it that way.
-      if (!res.ok) {
-        const err = new Error(json.error || 'Failed to start the batch');
-        // WHICH queued groups block the start. The console renders these with
-        // a button that drops exactly them, so the rest of the queue can run.
-        err.blocked = Array.isArray(json.blocked) ? json.blocked : [];
-        throw err;
-      }
+      if (!res.ok) throw dispatchError(res.status, json);
       return json;
     },
     onSuccess: () => {

@@ -4,21 +4,12 @@
 // AudioContext.
 //
 // Priority is an ORDERED level, lowest first:
-//   nearby (creature/world-point ambience, Task 7) < nearest (a non-own sfx
-//   event) < own (the player's own actions always win a contested slot).
+//   nearby (creature/world-point ambience) < nearest (a non-own sfx event)
+//   < boss (SOMET-605: boss one-shots) < own (the player's own actions).
 //
 // Eviction at capacity is NOT a flat priority comparison -- see admit()'s
-// comment for the exact rule per tier, but in one line: 'own' always wins,
-// bumping a held 'nearby' voice first and a held 'nearest' voice only if no
-// 'nearby' voice is held; 'nearest' does the same (bumps 'nearby' first,
-// unconditionally, else competes with other 'nearest' voices purely on
-// distance); 'nearby' may only ever bump a farther held 'nearby' voice, never
-// 'nearest' or 'own', however near it is.
-export const SFX_PRIORITY_ORDER = ['nearby', 'nearest', 'own'];
-const TOP_PRIORITY = SFX_PRIORITY_ORDER[SFX_PRIORITY_ORDER.length - 1];
-const BOTTOM_PRIORITY = SFX_PRIORITY_ORDER[0];
-const isTop = (priority) => priority === TOP_PRIORITY;
-const isBottom = (priority) => priority === BOTTOM_PRIORITY;
+// comment for the exact rule per tier.
+export const SFX_PRIORITY_ORDER = ['nearby', 'nearest', 'boss', 'own'];
 
 const MAX_VOICES = 12;
 const SAME_CLIP_WINDOW_MS = 100;
@@ -40,25 +31,16 @@ export class SfxLimiter {
   // room -- admit() has already forgotten it, so the caller only needs to
   // stop its actual playback.
   //
-  // Controller ruling ("nearest win"), fix round 1, extended for the
-  // 'nearby' tier (Task 7): eviction at capacity is NOT a strict
-  // priority-level comparison across the board.
-  //   - 'own' (top) always wins a slot: it bumps the farthest held 'nearby'
-  //     voice if any is held, regardless of its own distance (an own action
-  //     is always worth hearing); only when NO 'nearby' voice is held does it
-  //     fall back to bumping the farthest held 'nearest' voice, equally
-  //     unconditionally. A held 'own' voice is never evicted.
-  //   - 'nearest' does the same in miniature: it bumps the farthest held
-  //     'nearby' voice unconditionally if one is held (a nearby ambience is
-  //     never worth keeping over a real sfx event); only with none held does
-  //     it compete with the OTHER held 'nearest' voices purely on distance --
-  //     it may evict only the farthest held 'nearest' voice, and only when it
-  //     is itself nearer. Equal distance does not win -- ties are refused.
-  //     A held 'own' voice is never evicted by 'nearest'.
-  //   - 'nearby' may only ever evict a FARTHER held 'nearby' voice, on the
-  //     same nearer-wins/no-ties rule -- never a 'nearest' or 'own' voice,
-  //     however near it is. With no 'nearby' voice held (or none farther),
-  //     it is refused, full stop.
+  // Eviction at capacity, per tier (a held 'own' voice is never evicted):
+  //   - 'own' always wins: it bumps the farthest held 'nearby', else the
+  //     farthest 'nearest', else (last resort, ruling G5) the farthest 'boss',
+  //     all unconditionally.
+  //   - 'boss' bumps the farthest held 'nearby', else 'nearest',
+  //     unconditionally; otherwise only a FARTHER held 'boss' (nearer wins,
+  //     ties refused). Never 'own'.
+  //   - 'nearest' bumps a held 'nearby' unconditionally, else a farther
+  //     'nearest'. Never 'boss' or 'own'.
+  //   - 'nearby' may only bump a farther held 'nearby'.
   admit({ clipKey, priority, distance }) {
     const nowMs = this.now();
     const recent = (this.recentPlays.get(clipKey) || []).filter((t) => nowMs - t < this.sameClipWindowMs);
@@ -97,19 +79,28 @@ export class SfxLimiter {
   // per the tier rules documented on admit() above. Returns null when the
   // newcomer must be refused.
   _evictionTarget(priority, distance) {
-    if (isTop(priority)) {
-      return this._farthestOf(BOTTOM_PRIORITY) || this._farthestOf('nearest');
+    switch (priority) {
+      case 'own':
+        return this._farthestOf('nearby') || this._farthestOf('nearest') || this._farthestOf('boss');
+      case 'boss': {
+        const low = this._farthestOf('nearby') || this._farthestOf('nearest');
+        if (low) return low;
+        const other = this._farthestOf('boss');
+        return other && distance < other.distance ? other : null;
+      }
+      case 'nearest': {
+        const nearby = this._farthestOf('nearby');
+        if (nearby) return nearby;
+        const nearest = this._farthestOf('nearest');
+        return nearest && distance < nearest.distance ? nearest : null;
+      }
+      case 'nearby': {
+        const nearby = this._farthestOf('nearby');
+        return nearby && distance < nearby.distance ? nearby : null;
+      }
+      default:
+        return null;
     }
-    if (isBottom(priority)) {
-      const nearby = this._farthestOf(BOTTOM_PRIORITY);
-      return nearby && distance < nearby.distance ? nearby : null;
-    }
-    // 'nearest': prefer bumping a held 'nearby' voice unconditionally; with
-    // none held, compete with the other held 'nearest' voices on distance.
-    const nearby = this._farthestOf(BOTTOM_PRIORITY);
-    if (nearby) return nearby;
-    const nearest = this._farthestOf('nearest');
-    return nearest && distance < nearest.distance ? nearest : null;
   }
 
   release(voiceId) {

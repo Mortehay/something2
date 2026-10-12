@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
-  batchProgress, formatDuration, formatElapsed, elapsedSince, shouldPollQueue,
-  partitionInFlight, claimedAgo, previewNames, blockedSummary,
+  batchProgress, formatDuration, formatElapsed, elapsedSince, shouldPollQueue, batchJustSettled, queuePollInterval,
+  QUEUE_POLL_BUSY_MS, QUEUE_POLL_IDLE_MS,
+  partitionInFlight, claimedAgo, previewNames, blockedSummary, singleFlight, blockedPanel,
   IDLE, IDLE_QUEUED, RUNNING, FINISHED,
 } from '../artProgress.js';
 
@@ -309,5 +310,148 @@ describe('blockedSummary', () => {
 
   it('is empty for a refusal without groups', () => {
     expect(blockedSummary(undefined)).toEqual({ total: 0, lines: [], groups: [] });
+  });
+});
+
+// SOMET-593 D4. A rapid double-click on "Remove N blocked job(s) & start" sent
+// two /clear requests 3ms apart: the mutation's isPending is not true yet when
+// the second click lands, so the button's disabled prop cannot stop it.
+describe('singleFlight', () => {
+  it('admits one caller until the first one ends', () => {
+    const flight = singleFlight();
+    expect(flight.tryBegin()).toBe(true);
+    expect(flight.tryBegin()).toBe(false);
+    flight.end();
+    expect(flight.tryBegin()).toBe(true);
+  });
+
+  it('is what the Remove-blocked handler gates on, released when the request settles', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const src = fs.readFileSync(path.join(here, '../ArtConsoleAdmin.jsx'), 'utf8');
+    const handler = src.slice(src.indexOf('const onDropBlocked'), src.indexOf('const onEnqueue'));
+    expect(handler).toMatch(/if \(!dropFlight\.tryBegin\(\)\) return;/);
+    expect(handler).toMatch(/onSettled: \(\) => dropFlight\.end\(\)/);
+    // A cancelled confirm must release the gate, or the button is dead.
+    expect(handler).toMatch(/\{\s*dropFlight\.end\(\);\s*return;\s*\}/);
+  });
+});
+
+// SOMET-594 rework. The Remove panel has two sources and they must not share an
+// action: a /dispatch REFUSAL means "drop these, then start what I asked for";
+// a drain's run.blocked means "drop these" and nothing else -- the admin may
+// have just pressed Stop, and the old label read "& start" whenever the run was
+// not running, restarting the batch they stopped.
+describe('blockedPanel', () => {
+  const group = { kind: 'item', provider_id: 4, provider_name: 'desktop gpu', count: 2 };
+
+  it('never starts a batch for a stopped drain\'s run.blocked', () => {
+    const p = blockedPanel({ run: { running: false, blocked: [group] }, startError: null });
+    expect(p.show).toBe(true);
+    expect(p.fromRun).toBe(true);
+    expect(p.startAfter).toBe(false);
+    expect(p.label).toBe('Remove 2 blocked job(s)');
+    expect(p.dismissable).toBe(false);
+  });
+
+  it('does not start for run.blocked while running either', () => {
+    const p = blockedPanel({ run: { running: true, blocked: [group] }, startError: null });
+    expect(p.startAfter).toBe(false);
+    expect(p.label).toBe('Remove 2 blocked job(s)');
+  });
+
+  it('keeps "& start" for a Start refusal -- starting is what was asked for', () => {
+    const p = blockedPanel({ run: { running: false, blocked: [] }, startError: { blocked: [group] } });
+    expect(p.show).toBe(true);
+    expect(p.fromRun).toBe(false);
+    expect(p.startAfter).toBe(true);
+    expect(p.label).toBe('Remove 2 blocked job(s) & start');
+    expect(p.dismissable).toBe(true);
+  });
+
+  it('prefers the live run.blocked over a stale Start refusal', () => {
+    const p = blockedPanel({
+      run: { running: false, blocked: [{ ...group, count: 1 }] },
+      startError: { blocked: [group] },
+    });
+    expect(p.fromRun).toBe(true);
+    expect(p.startAfter).toBe(false);
+    expect(p.total).toBe(1);
+  });
+
+  // The browser pass caught "the rest of the batch was drawn" after a manual
+  // Stop with 0 done and 12 skills still queued. The sentence now reads the
+  // live queue; blocked rows are queued rows, so they are subtracted.
+  it('a stopped drain with other jobs queued says so, not "was drawn"', () => {
+    const p = blockedPanel({
+      run: { running: false, done: 0, blocked: [group] },
+      startError: null,
+      stats: { queued: 14, running: 0 },
+    });
+    expect(p.message).toBe('Skipped 2 queued job(s) that would render below 1024px -- '
+      + 'the batch stopped; 12 other job(s) are still queued. '
+      + 'Remove them, or re-queue those subjects on a 1024 provider.');
+    expect(p.message).not.toMatch(/was drawn/);
+  });
+
+  it('a stopped drain with only the blocked jobs left says nothing else is queued', () => {
+    const p = blockedPanel({
+      run: { running: false, done: 12, blocked: [group] },
+      startError: null,
+      stats: { queued: 2, running: 0 },
+    });
+    expect(p.message).toMatch(/-- nothing else is queued\. /);
+  });
+
+  it('a running drain says the rest is drawing; a refusal carries no message', () => {
+    const p = blockedPanel({
+      run: { running: true, blocked: [group] }, startError: null, stats: { queued: 10, running: 1 },
+    });
+    expect(p.message).toMatch(/^Skipping 2 .* -- the rest of the batch is drawing\. /);
+    expect(blockedPanel({ run: { running: false, blocked: [] }, startError: { blocked: [group] } }).message)
+      .toBe(null);
+  });
+
+  it('hides a Start refusal once a batch is running, and hides when nothing is blocked', () => {
+    expect(blockedPanel({ run: { running: true, blocked: [] }, startError: { blocked: [group] } }).show)
+      .toBe(false);
+    expect(blockedPanel({ run: { running: false, blocked: [] }, startError: null }).show).toBe(false);
+    expect(blockedPanel({ run: null, startError: null }).show).toBe(false);
+  });
+});
+
+describe('batchJustSettled', () => {
+  // SOMET-538 rework, found live: the catalogue polls every 15s only WHILE a
+  // run is going, so subjects that landed after its last poll never appeared
+  // -- the page ended a 50-tile run at "49 have art" with 2 tiles still
+  // listed as missing while the API said 0. The run ending is the moment the
+  // catalogue must be read once more.
+  it('fires on the running -> idle edge only', () => {
+    expect(batchJustSettled(true, false)).toBe(true);
+    expect(batchJustSettled(true, true)).toBe(false);
+    expect(batchJustSettled(false, false)).toBe(false);
+    expect(batchJustSettled(false, true)).toBe(false);
+  });
+});
+
+// SOMET-535 rework 3. With nothing outstanding the queue stopped polling
+// altogether, so a job queued from somewhere else (the API, another admin, the
+// Skill Tree tab) never appeared until a reload. Idle now polls SLOWLY instead
+// of never.
+describe('queuePollInterval', () => {
+  it('polls fast while anything is outstanding', () => {
+    expect(queuePollInterval({ running: true }, null)).toBe(QUEUE_POLL_BUSY_MS);
+    expect(queuePollInterval(null, { queued: 1, running: 0 })).toBe(QUEUE_POLL_BUSY_MS);
+  });
+  it('keeps polling, slowly, when the queue is idle', () => {
+    expect(queuePollInterval({ running: false, done: 97 }, { queued: 0, running: 0 })).toBe(QUEUE_POLL_IDLE_MS);
+    expect(queuePollInterval(null, null)).toBe(QUEUE_POLL_IDLE_MS);
+  });
+  it('idle is a real, slower interval -- not false, not the busy rate', () => {
+    expect(Number.isFinite(QUEUE_POLL_IDLE_MS)).toBe(true);
+    expect(QUEUE_POLL_IDLE_MS).toBeGreaterThan(QUEUE_POLL_BUSY_MS);
+    expect(QUEUE_POLL_IDLE_MS).toBeLessThanOrEqual(30000);
   });
 });

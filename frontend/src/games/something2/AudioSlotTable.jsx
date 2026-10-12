@@ -22,6 +22,7 @@ import {
   PAGE_SIZE, pageCount, clampPage, toggle, selectPage, deselectPage, isPageFullySelected,
   selectAllMatching, selectionOutsideFilter, queueItems, enqueueSummary, failedByCause, soundText,
   jobsForKnownSubjects, uploadOnlyCount, slotId,
+  DEFAULT_SFX_VARIANTS, createSearchSync, singleFlight, variantsStatus,
 } from './audioSelection.js';
 import SubjectSounds from './SubjectSounds.jsx';
 
@@ -49,8 +50,13 @@ const Button = styled.button`
   &:disabled { opacity: 0.5; cursor: default; }
 `;
 const Secondary = styled(Button)`background: var(--s2-btn-grey);`;
+// Field's 140px min-width is for selects and text; a 1-5 number needs less.
+// The root font-size is 62.5%, so 6rem is 60px (4rem rendered 40px).
+const VariantsField = styled(Field)`input { min-width: 0; width: 6rem; }`;
 const Hint = styled.p`color: var(--s2-text-muted); font-size: 0.85rem; margin: 0.25rem 0;`;
 const Err = styled.p`color: var(--s2-danger); font-size: 0.85rem; margin: 0.25rem 0;`;
+// An error inside a <label>, which may hold phrasing content only.
+const FieldErr = styled.span`color: var(--s2-danger); font-size: 0.8rem; max-width: 12rem;`;
 const LinkButton = styled.button`
   background: none; border: none; color: var(--s2-accent); cursor: pointer; padding: 0;
   font: inherit; text-decoration: underline;
@@ -137,30 +143,50 @@ function AudioSlotTable({
 
   // The filters ARE the URL (`?kind=&sound=&q=`): read from it every render
   // and written back on change, so a reload or a shared link lands on the
-  // same table.
+  // same table. A kind the registry does not list is read as "all".
   const [searchParams, setSearchParams] = useSearchParams();
+  const kindKeys = useMemo(() => (subjects || []).map((g) => g.kind), [subjects]);
   const {
     kind, sound, search, prompt,
-  } = filtersFromParams(searchParams);
+  } = filtersFromParams(searchParams, kindKeys);
   const [page, setPage] = useState(1);
-  // The params a filter change builds on. react-router's functional
-  // setSearchParams form still hands the updater THIS render's params, so two
-  // changes in one tick would clobber each other (seen in the browser); this
-  // ref carries the pending value between them. Re-synced from the URL on
-  // every render (and so on back/forward).
-  const pendingParams = useRef(searchParams);
-  useEffect(() => { pendingParams.current = searchParams; }, [searchParams]);
+  // The filters as the address bar holds them NOW. react-router writes the
+  // address bar synchronously but renders the new location in a transition,
+  // so `searchParams` can trail it by several changes while keys arrive
+  // (SOMET-596 rework 2). A filter change builds on the live URL -- building
+  // on the rendered params let two quick changes clobber each other -- and
+  // the Search box uses it to tell a stale render from a current one.
+  const liveUrlFilters = () => filtersFromParams(new URLSearchParams(window.location.search), kindKeys);
   const setFilter = (patch) => {
-    const next = paramsFromFilters({ ...filtersFromParams(pendingParams.current), ...patch });
-    pendingParams.current = next;
+    const next = paramsFromFilters({ ...liveUrlFilters(), ...patch });
     setSearchParams(next, { replace: true });
     setPage(1);
   };
+
+  // The Search box shows its OWN text and reaches `?q=` after a pause
+  // (createSearchSync): bound straight to the URL it lost keystrokes, since
+  // each commit re-filters every row. setFilter is re-created every render,
+  // so the debounced commit calls the latest one through a ref.
+  const [searchText, setSearchText] = useState(search);
+  const setFilterRef = useRef(setFilter);
+  setFilterRef.current = setFilter;
+  const [searchSync] = useState(() => createSearchSync((v) => setFilterRef.current({ search: v })));
+  useEffect(() => {
+    const live = filtersFromParams(new URLSearchParams(window.location.search), kindKeys).search;
+    const v = searchSync.fromUrl(search, live);
+    if (v !== null) setSearchText(v);
+  }, [search, searchSync, kindKeys]);
+  useEffect(() => () => searchSync.cancel(), [searchSync]);
 
   const [selected, setSelected] = useState(() => new Set());
   const [subject, setSubject] = useState(null);
   const [style, setStyle] = useState('');
   const [engine, setEngine] = useState('realistic');
+  // The Variants box keeps exactly what was typed. An invalid text is never
+  // swapped for a valid one (a blur that did so ran before Queue's click and
+  // queued 0 as 4, rework 3): it shows an error and disables Queue instead.
+  const [variantsText, setVariantsText] = useState(String(DEFAULT_SFX_VARIANTS));
+  const variantsNow = variantsStatus(variantsText);
   // Plan 2026-10-03: off by default -- a forced prompt replaces even a
   // hand-written one (the old version stays in the slot's history).
   const [forcePrompt, setForcePrompt] = useState(false);
@@ -182,6 +208,12 @@ function AudioSlotTable({
     [rows, kind, sound, search, prompt],
   );
   const causes = useMemo(() => failedByCause(knownJobs), [knownJobs]);
+  // One retry at a time: disabled={retry.isPending} lands a render late, and
+  // a fast double-click sent two POSTs.
+  // The mutation's own onError toasts a failure, so the rejection is dropped.
+  const retryRef = useRef(retry);
+  retryRef.current = retry;
+  const [retryOnce] = useState(() => singleFlight((ids) => retryRef.current.mutateAsync(ids).catch(() => {})));
 
   const shownPage = clampPage(page, matching.length);
   const pages = pageCount(matching.length);
@@ -208,7 +240,10 @@ function AudioSlotTable({
   );
 
   const onQueue = async () => {
-    const { items, skipped } = queueItems(selected, rowsById, { style, engine, forcePrompt });
+    if (variantsNow.value === null) return;
+    const { items, skipped } = queueItems(selected, rowsById, {
+      style, engine, forcePrompt, variants: variantsNow.value,
+    });
     setFailure(null);
     if (items.length === 0) {
       setNotice(enqueueSummary([], skipped).message);
@@ -260,8 +295,8 @@ function AudioSlotTable({
         <Field>
           Search
           <input
-            value={search}
-            onChange={(e) => setFilter({ search: e.target.value })}
+            value={searchText}
+            onChange={(e) => { setSearchText(e.target.value); searchSync.type(e.target.value); }}
             placeholder="subject or slot"
           />
         </Field>
@@ -290,6 +325,16 @@ function AudioSlotTable({
             {SFX_ENGINES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
         </Field>
+        <VariantsField title="How many takes each queued sfx slot generates">
+          Variants (sfx)
+          <input
+            inputMode="numeric"
+            value={variantsText}
+            aria-invalid={variantsNow.value === null}
+            onChange={(e) => setVariantsText(e.target.value)}
+          />
+          {variantsNow.error && <FieldErr role="alert">{variantsNow.error}</FieldErr>}
+        </VariantsField>
         <CheckLabel title="Write a new prompt for every queued slot, even one that already has a prompt (hand-written included). The old prompt stays in the slot's history.">
           <input
             type="checkbox"
@@ -302,7 +347,7 @@ function AudioSlotTable({
         <Button
           type="button"
           onClick={onQueue}
-          disabled={selected.size === 0 || enqueue.isPending || !canGenerate}
+          disabled={selected.size === 0 || enqueue.isPending || !canGenerate || variantsNow.value === null}
           title={canGenerate ? undefined : NO_PROVIDER_TITLE}
         >
           {enqueue.isPending ? 'Queuing…' : `Queue ${selected.size} selected`}
@@ -338,7 +383,7 @@ function AudioSlotTable({
                 {g.samples.join(', ')}
                 {g.more > 0 && ` … and ${g.more} more`}
               </Samples>
-              <Secondary type="button" disabled={retry.isPending} onClick={() => retry.mutate(g.ids)}>
+              <Secondary type="button" disabled={retry.isPending} onClick={() => retryOnce(g.ids)}>
                 Retry these {g.count}
               </Secondary>
             </FailGroup>

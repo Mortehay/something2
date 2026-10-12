@@ -15,6 +15,7 @@ import { getStoredToken, parseJwt } from "../net/auth.js";
 import { reconcile } from "../net/reconcile.js";
 import { inputVector, movementKeys, facingFromVector } from "../entities/Player.js";
 import { PLAYER_SPEED_EFFECTIVE } from "./constants.js";
+import { selfSpeedMult, debuffHudEntries, resetSelfAura, newlyAppliedAuraNames } from "./auraDebuffs.js";
 import { aimVector, cursorToWorld } from "./aim.js";
 import { createInventory, applyJoined, applyEquipment, canEquipClient, typeOf, addItem, removeItem } from "./inventory.js";
 import { resolveDrop } from '../systems/inventoryPanel.js';
@@ -42,6 +43,7 @@ import { fetchProgression } from "../net/progressionClient.js";
 import { AudioEngine } from "../audio/AudioEngine.js";
 import { fetchWorldAudio } from "../audio/audioClient.js";
 import { loadVolumes } from "../audio/audioSettings.js";
+import { screenRadiusWorld } from "../audio/screenRadius.js";
 import {
     getSkillById, getRequiredForm, isTransformationSkill,
     isDruidExclusiveSkill, resolveSkillVfx, checkGemRequirements,
@@ -56,6 +58,7 @@ import { API_URL } from "../../../../../config.js";
 import { GameArt } from "../systems/gameArt.js";
 import { fetchGameArt } from "../net/gameArtClient.js";
 import { fetchAllQuests, fetchCharacterQuests, startQuest, completeQuest } from "../net/questsClient.js";
+import { findWorldBossCreature } from "./worldBossMatch.js";
 
 // How long the "out of ammo" HUD flash stays up after the server's `noammo`
 // frame arrives.
@@ -141,6 +144,12 @@ export class Game {
 
         this.player = new Player();
         this.camera = new Camera();
+        // SOMET-606: server aura multiplier / HUD debuff rows (own state frame).
+        this.selfSpeedMult = 1;
+        this.auraDebuffRows = [];
+        // SOMET-607 (S5): last frame's active debuff names, diffed every
+        // frame to synthesize the one-shot 'apply' sfx -- see auraDebuffs.js.
+        this.selfAuraNames = new Set();
 
         this.chunked = false;
         this.chunkedMap = null;
@@ -182,6 +191,9 @@ export class Game {
         // Live attack effects, and the library their names resolve against.
         this.vfx = [];
         this.vfxDefs = {};
+        // SOMET-607 (S5): the aura visual library (ring/disc/particles),
+        // indexed by name the same way vfxDefs is.
+        this.auraDefs = {};
 
         // Inventory / paper-doll (Slice 3b-2a). `inventory` mirrors the
         // account-wide item catalog + owned items + equipment; the server is
@@ -506,11 +518,13 @@ export class Game {
         }
     }
 
-    async initChunked({ worldId, characterId, chunkSize, tileTypes, vfxEffects = null, entityTypes = null, className = null, mainStat = null, appearanceVariant = 1, characterClasses = [] }) {
+    async initChunked({ worldId, characterId, chunkSize, tileTypes, vfxEffects = null, auraEffects = null, entityTypes = null, className = null, mainStat = null, appearanceVariant = 1, characterClasses = [] }) {
         if (!this.canvas) {
             console.error("Canvas not found!");
             return;
         }
+        // SOMET-606: a world switch must not carry the old world's slow / rows.
+        resetSelfAura(this);
         // Re-entry guard: if initChunked runs twice on the same Game instance
         // (double-click, retry after join timeout, StrictMode double-invoke),
         // tear down the previous run's leakable resources before starting a
@@ -570,6 +584,9 @@ export class Game {
         // the client does. Empty until the fetch lands — effects then simply
         // do not draw, rather than throwing.
         this.vfxDefs = indexEffects(vfxEffects);
+        // SOMET-607 (S5): same contract, for the active-aura visuals (ring/
+        // disc/particles) RenderSystem draws beneath an entity.
+        this.auraDefs = indexEffects(auraEffects);
         // Approved entity images/atlases, so authority-driven creatures render
         // with their generated sprite rather than a colored box. Fire-and-forget
         // like the tile preload: until it resolves, rendering degrades to color.
@@ -1403,6 +1420,12 @@ export class Game {
             const cy = this.player.y + this.player.height / 2;
             if (this.audio) {
                 this.audio.tick(this.chunkedMap.biomeAt(cx, cy), performance.now());
+                // SOMET-605: half the viewport diagonal in world units, per
+                // tick (spec §4.4); the boss presence loop's in/out edge.
+                this.audio.setScreenRadius(screenRadiusWorld(
+                    (this.canvas && this.canvas.width) || GAME_WIDTH,
+                    (this.canvas && this.canvas.height) || GAME_HEIGHT,
+                ));
                 // Task 7 (game audio slice 3): creature/world-point "nearby"
                 // ambience. tickNearby is internally throttled to 250ms, so
                 // this passes a thunk (fix round 1, item 3) rather than
@@ -1504,6 +1527,28 @@ export class Game {
             // server omits the field — otherwise a `if (mine.effects)` guard
             // would leave the HUD reading "Burning" long after the burn ended.
             this.player.effects = mine.effects || null;
+            // SOMET-606. Both assigned EVERY frame (the server omits them when
+            // clear -- same reason as `effects` above).
+            this.selfSpeedMult = selfSpeedMult(msg);
+            this.player.debuffSpeedMult = this.selfSpeedMult;
+            this.auraDebuffRows = debuffHudEntries(msg.debuffs);
+            // SOMET-607 (S5, spec §4.4): "apply" plays when the LOCAL player
+            // enters an enemy aura. The server pushes the current debuff set
+            // every frame, not a one-shot "you just entered" event, so it is
+            // synthesized here by diffing against last frame's names.
+            const justApplied = newlyAppliedAuraNames(this.selfAuraNames, msg.debuffs);
+            this.selfAuraNames = new Set((msg.debuffs || []).filter(Boolean).map((d) => d.n).filter(Boolean));
+            if (justApplied.length && this.audio) {
+                this.audio.playSfxEvents(justApplied.map((n) => ({
+                    e: 'apply', c: n, a: `p:${this.localUserId}`, x: this.player.x, y: this.player.y,
+                })), {
+                    listener: {
+                        x: this.player.x + (this.player.width || 0) / 2,
+                        y: this.player.y + (this.player.height || 0) / 2,
+                    },
+                    ownActor: `p:${this.localUserId}`,
+                });
+            }
             // SOMET-523. Assigned on EVERY frame for the same reason `effects`
             // is one line up: the server OMITS the field entirely when the
             // player has no aura, so a guarded assignment would leave a ring
@@ -1524,7 +1569,7 @@ export class Game {
                 msg.ackSeq || 0,
                 this._inputBuffer,
                 this.chunkedMap,
-                { width: this.player.width, height: this.player.height, speed: PLAYER_SPEED_EFFECTIVE },
+                { width: this.player.width, height: this.player.height, speed: PLAYER_SPEED_EFFECTIVE * this.selfSpeedMult },
                 { dx, dy, dt: pendingDt }
             );
             const errX = out.x - this.player.x;
@@ -1538,6 +1583,9 @@ export class Game {
                 this.player.y += errY * 0.25;
             }
             this._inputBuffer = out.buffer.length > 50 ? out.buffer.slice(-30) : out.buffer;
+        } else {
+            // SOMET-606: no own entry this frame -> no stale slow / debuff rows.
+            resetSelfAura(this);
         }
         if (mine) {
             this.localMana = mine.mana;
@@ -1724,7 +1772,7 @@ export class Game {
                 keybinds: this.keybinds,
                 inventoryGems: this.getInventoryGems(),
                 activeForm: this.activeForm,
-                activeBuffs: this.activeBuffs ? Array.from(this.activeBuffs.values()) : [],
+                activeBuffs: [...(this.activeBuffs ? Array.from(this.activeBuffs.values()) : []), ...this.auraDebuffRows],
                 flashSlot: (nowMs < this.hotbarFlashUntil) ? this.hotbarFlashSlot : null,
                 skillCooldowns: this.skillCooldowns,
                 unlockedSkills: this.unlockedSkills || loadUnlockedSkillsForCharacter(this.characterId),
@@ -1776,6 +1824,7 @@ export class Game {
                 // SOMET-528. Empty until a wave-granting node is allocated.
                 waves: this.waves || [],
                 vfx: this.vfx, vfxDefs: this.vfxDefs,
+                auraDefs: this.auraDefs,
                 skillVisuals: this.skillVisuals,
                 // null whenever the equipped weapon needs no ammo — the HUD
                 // then draws no ammo line at all.
@@ -3554,12 +3603,7 @@ export class Game {
     getWorldBossStatus() {
         if (!this.worldBossStatus) return null;
         if (this.worldBossStatus.state === 'active' && this.creatures && this.creatures.all) {
-            const all = this.creatures.all();
-            const bossCreature = all.find(
-                (c) => c.isWorldBoss ||
-                       c.id === this.worldBossStatus.bossCreatureId ||
-                       (this.worldBossStatus.bossName && (c.name === this.worldBossStatus.bossName || c.type === this.worldBossStatus.bossName))
-            );
+            const bossCreature = findWorldBossCreature(this.creatures.all(), this.worldBossStatus);
             if (bossCreature) {
                 const curHp = bossCreature.hp !== undefined ? bossCreature.hp : this.worldBossStatus.currentHp;
                 if (curHp <= 0) {

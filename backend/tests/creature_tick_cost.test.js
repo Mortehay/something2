@@ -22,25 +22,26 @@ function activeKeys() {
   return keys;
 }
 
-// `leaders` of the population get the Champion behaviour (aura_radius 260),
-// the ONLY aura-carrying behaviour in the catalog and exactly what Slice B
-// promotes pack masters into.
+// `leaders` of the population are Beast Champions carrying the pack_leader
+// aura (radius 260), the ONLY aura bound in the catalog and exactly what
+// Slice B promotes pack masters into.
+//
+// SOMET-604 (S3): auras live on the ENTITY now. applyAuras reads only
+// `c.auras`, which addCreatures stamps via resolveInstanceAuras from the
+// loader row's `aura_names`/`aura_defs` (et.auras + AURAS_LATERAL in
+// server.js's CREATURE_JOINED_SELECT). The leader rows below carry exactly
+// that shape, with pack_leader's seeded values (1714440680000: radius 260,
+// damage 1.25, defense 1.2, speed 1.1). The behaviour half of the row (below)
+// is unchanged and still drives chase/attack cost.
 //
 // resolveInstanceBehavior(c) (src/authority/creatures.js) has three branches:
 // a pre-resolved `c.behavior` object, a `c.behavior_name`-bearing row (routed
 // through resolveBehavior in services/creatureBehaviors.js), or a
 // faction-based fallback. `behavior_name` alone only supplies the `name`
-// field -- resolveBehavior reads aura_radius/aura_damage_mult/
-// aura_defense_mult/aura_speed_mult as SEPARATE row columns (num(row.aura_radius,
-// DEFAULT_BEHAVIOR.auraRadius), etc.), not a lookup keyed off the name
-// string. So `behavior_name: 'Champion'` with no aura_* columns resolves
-// aura_radius to the DEFAULT_BEHAVIOR fallback of 0 -- a non-leader. The
-// leader rows below therefore also carry the real Champion aura_* values
-// (migration 1714440085000_behavior_auras.js: aura_radius 260, aura_damage_mult
-// 1.25, aura_defense_mult 1.2, aura_speed_mult 1.1) alongside the rest of the
-// real Champion catalog row (migration 1714440080000_creature_behaviors.js),
-// so this fixture exercises resolveBehavior the same way the real per-chunk
-// spawn loader's LEFT JOIN result does.
+// field, so the leader rows also carry the rest of the real Champion catalog
+// row (migration 1714440080000_creature_behaviors.js), exercising
+// resolveBehavior the same way the real per-chunk spawn loader's LEFT JOIN
+// result does.
 // CreatureSim's map interface (collision.js's resolveMove) needs isWalkable
 // and speedAt, not just chunkSize -- an all-open stub matches every other
 // CreatureSim fixture in this suite (e.g. authority_creature_auras.test.js's
@@ -67,20 +68,25 @@ function buildSim(n, leaders) {
         attack_kind: 'melee', attack_range: 65, attack_cooldown: 1.1,
         aggro_radius: 480, leash_radius: 900, chase_style: 'charge',
         preferred_range: 0, move_speed_mult: 1.05,
-        aura_radius: 260, aura_damage_mult: 1.25, aura_defense_mult: 1.2, aura_speed_mult: 1.1,
+        aura_names: ['pack_leader'],
+        aura_defs: [{ name: 'pack_leader', target_side: 'allies', radius: 260, damage_mult: 1.25,
+          defense_mult: 1.2, speed_mult: 1.1, dot_dps: 0, dot_element: 'physical', tick_ms: 1000 }],
       } : {}),
     });
   }
   sim.addCreatures(list);
 
   // ASSERT THE FIXTURE, do not trust it. addCreatures stamps
-  // `behavior: resolveInstanceBehavior(c)`, and if that function does not read
-  // the fields this fixture sets, every creature silently gets a non-aura
-  // behaviour -- the benchmark then measures the cheap, chunk-scoped half of
-  // the tick and reports a false all-clear, which is precisely the failure this
-  // task exists to prevent.
+  // `auras: resolveInstanceAuras(c)`, and if that does not read the fields
+  // this fixture sets, every creature silently carries no aura -- the
+  // benchmark then measures the cheap, chunk-scoped half of the tick and
+  // reports a false all-clear, which is precisely the failure this task exists
+  // to prevent. The check reads the SAME field applyAuras reads (`c.auras`,
+  // allies side, radius > 0); checking anything else (e.g. the pre-S3
+  // behavior.auraRadius) would stay green while applyAuras sees nothing.
   const actual = [...sim.creatures.values()]
-    .filter((c) => c.behavior && c.behavior.auraRadius > 0).length;
+    .filter((c) => Array.isArray(c.auras)
+      && c.auras.some((a) => a.targetSide === 'allies' && a.radius > 0)).length;
   if (actual !== leaders) {
     throw new Error(
       `fixture built ${actual} aura-carrying creatures, expected ${leaders} -- `
@@ -117,13 +123,13 @@ RUN('tick cost across population and leader count', () => {
   // count scales with world size), not to gate this one, and they are
   // deliberately left unasserted:
   //
-  //   - computeAuras is O(leaders x all) and unscoped by the chunk gate, so
+  //   - applyAuras is O(sources x all) and unscoped by the chunk gate, so
   //     its cost is dominated by leader count, not headcount -- 4500/50
   //     already spends most of the 8ms half-budget (~7-12ms observed,
   //     depending on machine load) and 4500/200 blows well past the WHOLE
   //     16ms frame budget (~26-41ms observed). Both numbers are real and
   //     load-bearing for Slice B: it must bound leader count or index
-  //     computeAuras spatially before every pack gets an aura-carrying
+  //     applyAuras spatially before every pack gets an aura-carrying
   //     master, or the tick blows its budget long before MAX_WORLD_CREATURES
   //     is reached.
   //   - Asserting on them here would make this benchmark flake on machine
@@ -139,4 +145,69 @@ RUN('tick cost across population and leader count', () => {
     assert.ok(r.ms < 8,
       `${r.n} creatures / ${r.leaders} leaders cost ${r.ms.toFixed(3)} ms/tick, over the 8ms half-budget`);
   }
+});
+
+// SOMET-606 (S4): the enemies-side pass, gated on ITS OWN overhead. The whole
+// sim tick with 20 players in aggro range costs far more than the aura pass
+// (player-driven creature AI), so an absolute budget here measures the wrong
+// thing and flakes on host load. Instead: same layout, same process,
+// alternating enemy auras ON / OFF, best of N each, and assert the delta; plus
+// the pass itself (applyEnemyAuras + chargeAuraDots) timed directly.
+RUN('enemy-aura overhead with 20 players inside 6 enemy sources', () => {
+  const { applyEnemyAuras, chargeAuraDots } = require('../src/authority/creatures');
+  const active = activeKeys();
+  // 50 ms steps: the creature pass (and so the aura pass) runs on every step.
+  const ENEMY = { name: 'blight', targetSide: 'enemies', radius: 400, damageMult: 0.8, defenseMult: 0.8,
+    speedMult: 0.7, dotDps: 0.001, dotElement: 'fire', tickMs: 1000 };
+  function run(withAura) {
+    const sim = buildSim(4500, 6);
+    const src = [];
+    for (const c of sim.creatures.values()) {
+      if (src.length >= 6) break;
+      if (c.auras && c.auras.length) continue;      // not one of the ally leaders
+      if (withAura) c.auras = [{ ...ENEMY }];
+      src.push(c);
+    }
+    const players = src.length === 6 ? [] : null;
+    if (!players) throw new Error(`fixture built ${src.length} candidate sources, expected 6`);
+    for (let k = 0; k < 20; k++) {
+      const s = src[k % 6];
+      players.push({ userId: `u${k}`, x: s.x + 20 + k, y: s.y, width: 64, height: 64, hp: 1e9, maxHp: 1e9, mit: null });
+    }
+    for (let i = 0; i < 20; i++) sim.tick(0.05, active, players, i * 50);
+    const inside = players.every((p) => p._buff && p._buff.auras);
+    if (withAura && !inside) throw new Error('fixture: players are not inside the enemy auras');
+    if (!withAura && players.some((p) => p._buff && p._buff.auras)) throw new Error('control leaked an enemy aura');
+    const t0 = process.hrtime.bigint();
+    for (let i = 0; i < 60; i++) sim.tick(0.05, active, players, (20 + i) * 50);
+    const tickMs = Number(process.hrtime.bigint() - t0) / 1e6 / 60;
+    let passMs = null;
+    if (withAura) {
+      const all = [...sim.creatures.values()];
+      let best = Infinity;
+      for (let r = 0; r < 5; r++) {
+        const t1 = process.hrtime.bigint();
+        for (let i = 0; i < 40; i++) {
+          const d = applyEnemyAuras(all, players);
+          for (const p of players) p._buff = d.get(p.userId) || p._buff;
+          chargeAuraDots(players, (200 + r * 40 + i) * 50);
+        }
+        best = Math.min(best, Number(process.hrtime.bigint() - t1) / 1e6 / 40);
+      }
+      passMs = best;
+    }
+    return { tickMs, passMs };
+  }
+  let onBest = Infinity; let offBest = Infinity; let passBest = Infinity;
+  for (let round = 0; round < 8; round++) {
+    const off = run(false); const on = run(true);
+    offBest = Math.min(offBest, off.tickMs);
+    onBest = Math.min(onBest, on.tickMs);
+    passBest = Math.min(passBest, on.passMs);
+  }
+  const delta = onBest - offBest;
+  console.log(`[tick] enemy auras ON ${onBest.toFixed(3)} vs OFF ${offBest.toFixed(3)} ms/tick `
+    + `(delta ${delta.toFixed(3)}); pass+dots alone ${passBest.toFixed(3)} ms; load ${require('os').loadavg()[0].toFixed(1)}`);
+  assert.ok(delta < 2, `enemy auras add ${delta.toFixed(3)} ms/tick, over the 2ms budget`);
+  assert.ok(passBest < 1, `applyEnemyAuras + chargeAuraDots cost ${passBest.toFixed(3)} ms, over the 1ms budget`);
 });

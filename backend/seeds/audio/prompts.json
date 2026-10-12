@@ -55,6 +55,204 @@
     "via": "box"
   },
   {
+    "subject_kind": "aura",
+    "subject_key": "abyssor_void_rend",
+    "slot": "loop",
+    "style": "cave",
+    "text": "Deep, hollow wind howls through narrow stone passages. Distant, rhythmic dripping echoes off wet walls. Occasional sharp cracks of shifting rock reverberate with low density, creating a vast, oppressive emptiness.",
+    "source_input": "magical aura \"abyssor_void_rend\"; side: enemies; element: physical; slot: loop",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "abyssor_void_rend",
+    "slot": "pulse",
+    "style": "cave",
+    "text": "Deep, hollow wind howls through narrow stone passages. Distant, rhythmic dripping echoes off wet walls. Low, subterranean rumbling vibrates the ground. Sparse, metallic scraping sounds drift from the shadows.",
+    "source_input": "magical aura \"abyssor_void_rend\"; side: enemies; element: physical; slot: pulse",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "cinder_brood",
+    "slot": "loop",
+    "style": "forest",
+    "text": "Distant rustling leaves, faint crackling embers, low insect hum. Sparse, airy density. Soft wind through branches, occasional popping sparks, subtle ambient forest life.",
+    "source_input": "magical aura \"cinder_brood\"; side: allies; element: physical; slot: loop",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "cinder_brood",
+    "slot": "pulse",
+    "style": "night",
+    "text": "Distant, low-frequency hum of crackling embers. Sparse, sharp pops of burning wood. Cold wind whistling through hollow branches. Occasional, lonely owl hoots echoing from the deep forest shadows.",
+    "source_input": "magical aura \"cinder_brood\"; side: allies; element: physical; slot: pulse",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "fire_sparks",
+    "slot": "loop",
+    "style": "night",
+    "text": "Dense, close-range crackling fire sparks and hissing embers. Distant, sparse owl hoots. Low, heavy wind rushing through dark trees. No voices or music.",
+    "source_input": "magical aura \"fire_sparks\"; side: enemies; element: fire; slot: loop",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "fire_sparks",
+    "slot": "pulse",
+    "style": "night",
+    "text": "Dense, crackling fire sparks pulse rhythmically nearby. Distant, eerie owl hoots echo through the cold air. Sparse, dry leaves rustle in the wind.",
+    "source_input": "magical aura \"fire_sparks\"; side: enemies; element: fire; slot: pulse",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "glacius_permafrost",
+    "slot": "loop",
+    "style": "cave",
+    "text": "Distant, hollow wind whistling through jagged ice formations. Sharp, rhythmic cracking of freezing stone. Sparse, brittle chimes of frost crystals shifting. Low, resonant hum of permafrost. Sparse, echoing drips of melting water.",
+    "source_input": "magical aura \"glacius_permafrost\"; side: enemies; element: physical; slot: loop",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "glacius_permafrost",
+    "slot": "pulse",
+    "style": "cave",
+    "text": "Distant, hollow wind whistles through jagged ice formations. Sharp, rhythmic cracking of freezing stone echoes nearby. Sparse, brittle chimes of frost crystals shatter in the dense, cold air.",
+    "source_input": "magical aura \"glacius_permafrost\"; side: enemies; element: physical; slot: pulse",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "gorgon_static_field",
+    "slot": "loop",
+    "style": "cave",
+    "text": "Low, dense electrical hum fills the air. Sharp, sporadic static crackles echo from nearby stone walls. Distant, hollow drips of water punctuate the heavy, oppressive silence of the enclosed space.",
+    "source_input": "magical aura \"gorgon_static_field\"; side: enemies; element: physical; slot: loop",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "gorgon_static_field",
+    "slot": "pulse",
+    "style": "cave",
+    "text": "Low, dense electrical hum vibrating through stone. Distant, sharp crackles of static discharge. Sparse, echoing drips of water. Heavy, oppressive silence between pulses. No voices.",
+    "source_input": "magical aura \"gorgon_static_field\"; side: enemies; element: physical; slot: pulse",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "ignis_inferno",
+    "slot": "loop",
+    "style": "night",
+    "text": "Roaring inferno crackles intensely nearby, surrounded by distant, eerie hoots of night birds and the faint rustle of dry leaves in the cold wind.",
+    "source_input": "magical aura \"ignis_inferno\"; side: enemies; element: fire; slot: loop",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "ignis_inferno",
+    "slot": "pulse",
+    "style": "night",
+    "text": "Dense, roaring fire crackles nearby, accompanied by distant, eerie insect chirps and a low, pulsing wind howling through the darkness.",
+    "source_input": "magical aura \"ignis_inferno\"; side: enemies; element: fire; slot: pulse",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "ossuary_dread",
+    "slot": "loop",
+    "style": "cave",
+    "text": "Distant, hollow drips of water echo against stone. A low, oppressive hum vibrates through the air. Sparse, skittering claws scrape on rough rock. Cold wind whistles through narrow fissures, creating a dense, unsettling atmosphere.",
+    "source_input": "magical aura \"ossuary_dread\"; side: allies; element: physical; slot: loop",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "ossuary_dread",
+    "slot": "pulse",
+    "style": "cave",
+    "text": "Distant, hollow echoes of dripping water. Low, dense rumbling of shifting bones. Sparse, sharp clinking of stone against stone. Thin, whistling wind through narrow cracks. Heavy, oppressive silence between sounds.",
+    "source_input": "magical aura \"ossuary_dread\"; side: allies; element: physical; slot: pulse",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "pack_leader",
+    "slot": "loop",
+    "style": "forest",
+    "text": "Dense, low-frequency hum of magical energy vibrating through ancient bark. Distant owl hoots echo faintly. Close, sharp twigs snap underfoot. Thick canopy filters wind into a soft, rhythmic rustling of leaves.",
+    "source_input": "magical aura \"pack_leader\"; side: allies; element: physical; slot: loop",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "pack_leader",
+    "slot": "pulse",
+    "style": "forest",
+    "text": "Dense, low-frequency thrumming pulses from nearby, overlaid with distant wind rustling leaves and faint insect chirps. The air feels heavy with a rhythmic, physical vibration that dominates the ambient soundscape.",
+    "source_input": "magical aura \"pack_leader\"; side: allies; element: physical; slot: pulse",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "shade_veil",
+    "slot": "loop",
+    "style": "forest",
+    "text": "Dense, low-frequency hum of magical energy. Distant rustling leaves, faint insect chirps, and soft wind through branches. No voices or instruments.",
+    "source_input": "magical aura \"shade_veil\"; side: allies; element: physical; slot: loop",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "shade_veil",
+    "slot": "pulse",
+    "style": "forest",
+    "text": "Dense, low-frequency hum of magical energy. Distant rustling leaves, faint insect chirps, and soft wind filtering through ancient trees. No voices or melodies.",
+    "source_input": "magical aura \"shade_veil\"; side: allies; element: physical; slot: pulse",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
     "subject_kind": "biome",
     "subject_key": "Abyssal Rift",
     "slot": "ambience",
@@ -408,6 +606,50 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Abyssor, the Voidreaver",
+    "slot": "death",
+    "style": null,
+    "text": "a collapsing star imploding into silence",
+    "source_input": "creature \"Abyssor, the Voidreaver\"; boss tier: world; element: arcane; looks like: A harbinger of the astral void who tears reality asunder.; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Abyssor, the Voidreaver",
+    "slot": "hurt",
+    "style": null,
+    "text": "a jagged shard of void energy",
+    "source_input": "creature \"Abyssor, the Voidreaver\"; boss tier: world; element: arcane; looks like: A harbinger of the astral void who tears reality asunder.; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Arcane Elemental Guard",
+    "slot": "death",
+    "style": null,
+    "text": "a massive construct of swirling arcane energy",
+    "source_input": "creature \"Arcane Elemental Guard\"; looks like: A hulking guardian of swirling arcane force summoned to defend a world boss.; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Arcane Elemental Guard",
+    "slot": "hurt",
+    "style": null,
+    "text": "a hulking construct of swirling arcane force",
+    "source_input": "creature \"Arcane Elemental Guard\"; looks like: A hulking guardian of swirling arcane force summoned to defend a world boss.; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Bat",
     "slot": "death",
     "style": null,
@@ -556,6 +798,28 @@
     "style": null,
     "text": "a lean beast with coarse fur",
     "source_input": "creature \"Beast Line\"; looks like: a lean beast creature; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Beast Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a massive scaled beast with a deep, guttural roar",
+    "source_input": "creature \"Beast Miniboss\"; boss tier: miniboss; looks like: pixel art boss creature, a powerful beast-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Beast Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a massive scaled beast with thick hide",
+    "source_input": "creature \"Beast Miniboss\"; boss tier: miniboss; looks like: pixel art boss creature, a powerful beast-themed miniboss; slot: hurt; sound cue: hit",
     "hint": null,
     "model": "qwen3.6-35b-a3b",
     "via": "box"
@@ -760,6 +1024,28 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Blight Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a rotting, pixelated beast",
+    "source_input": "creature \"Blight Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a powerful blight-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Blight Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a rotting, pixelated beast with slimy flesh",
+    "source_input": "creature \"Blight Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a powerful blight-themed miniboss; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Blight Ranged",
     "slot": "death",
     "style": null,
@@ -952,6 +1238,28 @@
     "style": null,
     "text": "a lean, ice-touched bonelord creature",
     "source_input": "creature \"Bonelord Line\"; looks like: a lean ice-touched bonelord creature; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Bonelord Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a towering skeleton wreathed in frost",
+    "source_input": "creature \"Bonelord Miniboss\"; boss tier: miniboss; element: ice; looks like: pixel art boss creature, a powerful bonelord-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Bonelord Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a massive, frost-encrusted skeleton warrior",
+    "source_input": "creature \"Bonelord Miniboss\"; boss tier: miniboss; element: ice; looks like: pixel art boss creature, a powerful bonelord-themed miniboss; slot: hurt; sound cue: hit",
     "hint": null,
     "model": "qwen3.6-35b-a3b",
     "via": "box"
@@ -1156,6 +1464,28 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Cave Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a massive, rocky golem crumbling into dust",
+    "source_input": "creature \"Cave Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a powerful cave-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Cave Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a massive boulder with jagged stone edges",
+    "source_input": "creature \"Cave Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a powerful cave-themed miniboss; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Cave Ranged",
     "slot": "death",
     "style": null,
@@ -1310,6 +1640,28 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Chaos Elite Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a jagged storm elemental of crackling lightning",
+    "source_input": "creature \"Chaos Elite Miniboss\"; boss tier: miniboss; element: lightning; looks like: pixel art boss creature, a fearsome elite chaos-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Chaos Elite Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a jagged shard of crackling violet lightning",
+    "source_input": "creature \"Chaos Elite Miniboss\"; boss tier: miniboss; element: lightning; looks like: pixel art boss creature, a fearsome elite chaos-themed miniboss; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Chaos Heavy",
     "slot": "death",
     "style": null,
@@ -1348,6 +1700,28 @@
     "style": null,
     "text": "a crackling, jagged shard of raw chaos",
     "source_input": "creature \"Chaos Line\"; looks like: a lean lightning-touched chaos creature; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Chaos Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a crackling void entity of jagged lightning",
+    "source_input": "creature \"Chaos Miniboss\"; boss tier: miniboss; element: lightning; looks like: pixel art boss creature, a powerful chaos-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Chaos Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a jagged, crackling storm elemental",
+    "source_input": "creature \"Chaos Miniboss\"; boss tier: miniboss; element: lightning; looks like: pixel art boss creature, a powerful chaos-themed miniboss; slot: hurt; sound cue: hit",
     "hint": null,
     "model": "qwen3.6-35b-a3b",
     "via": "box"
@@ -1414,6 +1788,28 @@
     "style": null,
     "text": "a tiny lightning-touched chaos creature",
     "source_input": "creature \"Chaos Swarm\"; looks like: a tiny lightning-touched chaos creature; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Cinder Matriarch",
+    "slot": "death",
+    "style": null,
+    "text": "a scorched brood mother insect trailing cinders",
+    "source_input": "creature \"Cinder Matriarch\"; boss tier: dungeon_elite; element: fire; looks like: A scorched brood mother insect trailing cinders, tending the burning hive cells.; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Cinder Matriarch",
+    "slot": "hurt",
+    "style": null,
+    "text": "a scorched brood mother insect trailing cinders",
+    "source_input": "creature \"Cinder Matriarch\"; boss tier: dungeon_elite; element: fire; looks like: A scorched brood mother insect trailing cinders, tending the burning hive cells.; slot: hurt; sound cue: hit",
     "hint": null,
     "model": "qwen3.6-35b-a3b",
     "via": "box"
@@ -1546,6 +1942,28 @@
     "style": null,
     "text": "a lean stone construct with metallic joints",
     "source_input": "creature \"Construct Line\"; looks like: a lean physical-touched construct creature; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Construct Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a massive stone golem crumbling into rubble",
+    "source_input": "creature \"Construct Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a powerful construct-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Construct Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a massive stone golem with grinding gears",
+    "source_input": "creature \"Construct Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a powerful construct-themed miniboss; slot: hurt; sound cue: hit",
     "hint": null,
     "model": "qwen3.6-35b-a3b",
     "via": "box"
@@ -1750,6 +2168,28 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Crystal Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a massive jagged crystal shard",
+    "source_input": "creature \"Crystal Miniboss\"; boss tier: miniboss; element: lightning; looks like: pixel art boss creature, a powerful crystal-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Crystal Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a jagged shard of crackling blue crystal",
+    "source_input": "creature \"Crystal Miniboss\"; boss tier: miniboss; element: lightning; looks like: pixel art boss creature, a powerful crystal-themed miniboss; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Crystal Ranged",
     "slot": "death",
     "style": null,
@@ -1904,6 +2344,28 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Demonic Elite Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a massive obsidian demon wreathed in crackling flames",
+    "source_input": "creature \"Demonic Elite Miniboss\"; boss tier: miniboss; element: fire; looks like: pixel art boss creature, a fearsome elite demonic-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Demonic Elite Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a massive obsidian demon wreathed in crackling flames",
+    "source_input": "creature \"Demonic Elite Miniboss\"; boss tier: miniboss; element: fire; looks like: pixel art boss creature, a fearsome elite demonic-themed miniboss; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Demonic Heavy",
     "slot": "death",
     "style": null,
@@ -1942,6 +2404,28 @@
     "style": null,
     "text": "a lean, fire-touched demon with scorched skin",
     "source_input": "creature \"Demonic Line\"; looks like: a lean fire-touched demonic creature; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Demonic Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a massive obsidian demon wreathed in roaring flames",
+    "source_input": "creature \"Demonic Miniboss\"; boss tier: miniboss; element: fire; looks like: pixel art boss creature, a powerful demonic-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Demonic Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a massive obsidian demon with burning eyes",
+    "source_input": "creature \"Demonic Miniboss\"; boss tier: miniboss; element: fire; looks like: pixel art boss creature, a powerful demonic-themed miniboss; slot: hurt; sound cue: hit",
     "hint": null,
     "model": "qwen3.6-35b-a3b",
     "via": "box"
@@ -2146,6 +2630,28 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Desert Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a massive obsidian golem crumbling into ash",
+    "source_input": "creature \"Desert Miniboss\"; boss tier: miniboss; element: fire; looks like: pixel art boss creature, a powerful desert-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Desert Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a scorching sand golem with cracked obsidian skin",
+    "source_input": "creature \"Desert Miniboss\"; boss tier: miniboss; element: fire; looks like: pixel art boss creature, a powerful desert-themed miniboss; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Desert Ranged",
     "slot": "death",
     "style": null,
@@ -2344,6 +2850,28 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Drowned Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a massive, ice-encrusted corpse of a drowned warrior",
+    "source_input": "creature \"Drowned Miniboss\"; boss tier: miniboss; element: ice; looks like: pixel art boss creature, a powerful drowned-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Drowned Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a bloated, ice-encrusted corpse",
+    "source_input": "creature \"Drowned Miniboss\"; boss tier: miniboss; element: ice; looks like: pixel art boss creature, a powerful drowned-themed miniboss; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Drowned Ranged",
     "slot": "death",
     "style": null,
@@ -2498,6 +3026,28 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Eldritch Elite Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a towering eldritch horror with jagged obsidian armor",
+    "source_input": "creature \"Eldritch Elite Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a fearsome elite eldritch-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Eldritch Elite Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a pulsating eldritch horror with jagged obsidian spikes",
+    "source_input": "creature \"Eldritch Elite Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a fearsome elite eldritch-themed miniboss; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Eldritch Heavy",
     "slot": "death",
     "style": null,
@@ -2536,6 +3086,28 @@
     "style": null,
     "text": "a lean eldritch creature with shimmering, unstable flesh",
     "source_input": "creature \"Eldritch Line\"; looks like: a lean physical-touched eldritch creature; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Eldritch Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a colossal eldritch horror dissolving into void",
+    "source_input": "creature \"Eldritch Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a powerful eldritch-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Eldritch Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a pulsating eldritch mass of dark flesh",
+    "source_input": "creature \"Eldritch Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a powerful eldritch-themed miniboss; slot: hurt; sound cue: hit",
     "hint": null,
     "model": "qwen3.6-35b-a3b",
     "via": "box"
@@ -2740,6 +3312,28 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Ember Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a massive, crumbling ember golem",
+    "source_input": "creature \"Ember Miniboss\"; boss tier: miniboss; element: fire; looks like: pixel art boss creature, a powerful ember-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ember Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a charred stone golem with glowing cracks",
+    "source_input": "creature \"Ember Miniboss\"; boss tier: miniboss; element: fire; looks like: pixel art boss creature, a powerful ember-themed miniboss; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Ember Ranged",
     "slot": "death",
     "style": null,
@@ -2894,6 +3488,28 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Fallen Elite Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a shattered ice golem crumbling into frost",
+    "source_input": "creature \"Fallen Elite Miniboss\"; boss tier: miniboss; element: ice; looks like: pixel art boss creature, a fearsome elite fallen-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Fallen Elite Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a jagged shard of dark ice",
+    "source_input": "creature \"Fallen Elite Miniboss\"; boss tier: miniboss; element: ice; looks like: pixel art boss creature, a fearsome elite fallen-themed miniboss; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Fallen Heavy",
     "slot": "death",
     "style": null,
@@ -2932,6 +3548,28 @@
     "style": null,
     "text": "a lean, ice-touched fallen creature",
     "source_input": "creature \"Fallen Line\"; looks like: a lean ice-touched fallen creature; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Fallen Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a crumbling ice statue shattering into shards",
+    "source_input": "creature \"Fallen Miniboss\"; boss tier: miniboss; element: ice; looks like: pixel art boss creature, a powerful fallen-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Fallen Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a jagged shard of dark ice",
+    "source_input": "creature \"Fallen Miniboss\"; boss tier: miniboss; element: ice; looks like: pixel art boss creature, a powerful fallen-themed miniboss; slot: hurt; sound cue: hit",
     "hint": null,
     "model": "qwen3.6-35b-a3b",
     "via": "box"
@@ -2998,6 +3636,28 @@
     "style": null,
     "text": "a tiny ice-touched fallen creature",
     "source_input": "creature \"Fallen Swarm\"; looks like: a tiny ice-touched fallen creature; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Fire Elemental Guard",
+    "slot": "death",
+    "style": null,
+    "text": "a hulking mass of roaring, collapsing fire",
+    "source_input": "creature \"Fire Elemental Guard\"; looks like: A hulking guardian of living flame summoned to defend a world boss.; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Fire Elemental Guard",
+    "slot": "hurt",
+    "style": null,
+    "text": "a hulking mass of roaring living flame",
+    "source_input": "creature \"Fire Elemental Guard\"; looks like: A hulking guardian of living flame summoned to defend a world boss.; slot: hurt; sound cue: hit",
     "hint": null,
     "model": "qwen3.6-35b-a3b",
     "via": "box"
@@ -3136,6 +3796,28 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Fungal Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a massive, crackling fungal titan",
+    "source_input": "creature \"Fungal Miniboss\"; boss tier: miniboss; element: lightning; looks like: pixel art boss creature, a powerful fungal-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Fungal Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a massive, crackling fungal titan",
+    "source_input": "creature \"Fungal Miniboss\"; boss tier: miniboss; element: lightning; looks like: pixel art boss creature, a powerful fungal-themed miniboss; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Fungal Ranged",
     "slot": "death",
     "style": null,
@@ -3196,6 +3878,28 @@
     "style": null,
     "text": "a tiny lightning-touched fungal creature",
     "source_input": "creature \"Fungal Swarm\"; looks like: a tiny lightning-touched fungal creature; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Glacius, the Frost Leviathan",
+    "slot": "death",
+    "style": null,
+    "text": "a colossal leviathan encased in eternal permafrost",
+    "source_input": "creature \"Glacius, the Frost Leviathan\"; boss tier: world; element: ice; looks like: An ancient dread beast encased in eternal permafrost.; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Glacius, the Frost Leviathan",
+    "slot": "hurt",
+    "style": null,
+    "text": "a colossal glacier of ancient, cracking ice",
+    "source_input": "creature \"Glacius, the Frost Leviathan\"; boss tier: world; element: ice; looks like: An ancient dread beast encased in eternal permafrost.; slot: hurt; sound cue: hit",
     "hint": null,
     "model": "qwen3.6-35b-a3b",
     "via": "box"
@@ -3334,6 +4038,28 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Gloom Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a massive shadowy beast encased in jagged ice",
+    "source_input": "creature \"Gloom Miniboss\"; boss tier: miniboss; element: ice; looks like: pixel art boss creature, a powerful gloom-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Gloom Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a jagged shard of dark ice",
+    "source_input": "creature \"Gloom Miniboss\"; boss tier: miniboss; element: ice; looks like: pixel art boss creature, a powerful gloom-themed miniboss; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Gloom Ranged",
     "slot": "death",
     "style": null,
@@ -3394,6 +4120,28 @@
     "style": null,
     "text": "a tiny ice-touched gloom creature",
     "source_input": "creature \"Gloom Swarm\"; looks like: a tiny ice-touched gloom creature; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Gorgon, the Thunder Titan",
+    "slot": "death",
+    "style": null,
+    "text": "a colossal electrified titan crackling with tempest storms",
+    "source_input": "creature \"Gorgon, the Thunder Titan\"; boss tier: world; element: lightning; looks like: An electrified colossus crackling with tempest storms.; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Gorgon, the Thunder Titan",
+    "slot": "hurt",
+    "style": null,
+    "text": "a colossal electrified titan crackling with tempest storms",
+    "source_input": "creature \"Gorgon, the Thunder Titan\"; boss tier: world; element: lightning; looks like: An electrified colossus crackling with tempest storms.; slot: hurt; sound cue: hit",
     "hint": null,
     "model": "qwen3.6-35b-a3b",
     "via": "box"
@@ -3526,6 +4274,28 @@
     "style": null,
     "text": "a lean, muscular highland beast",
     "source_input": "creature \"Highland Line\"; looks like: a lean physical-touched highland creature; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Highland Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a massive, moss-covered stone golem crumbling to dust",
+    "source_input": "creature \"Highland Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a powerful highland-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Highland Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a thick leather cuirass reinforced with iron plates",
+    "source_input": "creature \"Highland Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a powerful highland-themed miniboss; slot: hurt; sound cue: hit",
     "hint": null,
     "model": "qwen3.6-35b-a3b",
     "via": "box"
@@ -3730,6 +4500,28 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Hive Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a massive armored hive queen with chitinous plates",
+    "source_input": "creature \"Hive Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a powerful hive-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Hive Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a chitinous insectoid carapace",
+    "source_input": "creature \"Hive Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a powerful hive-themed miniboss; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Hive Ranged",
     "slot": "death",
     "style": null,
@@ -3790,6 +4582,50 @@
     "style": null,
     "text": "a cluster of chitinous insect shells",
     "source_input": "creature \"Hive Swarm\"; looks like: a tiny physical-touched hive creature; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ice Elemental Guard",
+    "slot": "death",
+    "style": null,
+    "text": "a massive jagged ice golem shattering into shards",
+    "source_input": "creature \"Ice Elemental Guard\"; looks like: A hulking guardian of jagged ice summoned to defend a world boss.; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ice Elemental Guard",
+    "slot": "hurt",
+    "style": null,
+    "text": "a massive jagged ice golem",
+    "source_input": "creature \"Ice Elemental Guard\"; looks like: A hulking guardian of jagged ice summoned to defend a world boss.; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ignis, the Magma Colossus",
+    "slot": "death",
+    "style": null,
+    "text": "a colossal titan of molten rock and obsidian",
+    "source_input": "creature \"Ignis, the Magma Colossus\"; boss tier: world; element: fire; looks like: A titan forged from molten core and obsidian armor.; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ignis, the Magma Colossus",
+    "slot": "hurt",
+    "style": null,
+    "text": "a colossal obsidian titan striking with molten fists",
+    "source_input": "creature \"Ignis, the Magma Colossus\"; boss tier: world; element: fire; looks like: A titan forged from molten core and obsidian armor.; slot: hurt; sound cue: hit",
     "hint": null,
     "model": "qwen3.6-35b-a3b",
     "via": "box"
@@ -3928,6 +4764,28 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Jungle Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a massive jaguar wreathed in crackling lightning",
+    "source_input": "creature \"Jungle Miniboss\"; boss tier: miniboss; element: lightning; looks like: pixel art boss creature, a powerful jungle-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Jungle Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a massive vine-covered stone golem",
+    "source_input": "creature \"Jungle Miniboss\"; boss tier: miniboss; element: lightning; looks like: pixel art boss creature, a powerful jungle-themed miniboss; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Jungle Ranged",
     "slot": "death",
     "style": null,
@@ -3988,6 +4846,28 @@
     "style": null,
     "text": "a swarm of tiny lightning-touched jungle insects",
     "source_input": "creature \"Jungle Swarm\"; looks like: a tiny lightning-touched jungle creature; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Lightning Elemental Guard",
+    "slot": "death",
+    "style": null,
+    "text": "a hulking mass of crackling lightning",
+    "source_input": "creature \"Lightning Elemental Guard\"; looks like: A hulking guardian of crackling lightning summoned to defend a world boss.; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Lightning Elemental Guard",
+    "slot": "hurt",
+    "style": null,
+    "text": "a hulking mass of crackling blue lightning",
+    "source_input": "creature \"Lightning Elemental Guard\"; looks like: A hulking guardian of crackling lightning summoned to defend a world boss.; slot: hurt; sound cue: hit",
     "hint": null,
     "model": "qwen3.6-35b-a3b",
     "via": "box"
@@ -4082,6 +4962,28 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Nightmare Elite Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a towering shadow beast with tattered spectral wings",
+    "source_input": "creature \"Nightmare Elite Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a fearsome elite nightmare-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Nightmare Elite Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a massive armored nightmare beast",
+    "source_input": "creature \"Nightmare Elite Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a fearsome elite nightmare-themed miniboss; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Nightmare Heavy",
     "slot": "death",
     "style": null,
@@ -4120,6 +5022,28 @@
     "style": null,
     "text": "a lean, shadowy nightmare creature",
     "source_input": "creature \"Nightmare Line\"; looks like: a lean physical-touched nightmare creature; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Nightmare Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a massive shadowy beast with tattered wings",
+    "source_input": "creature \"Nightmare Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a powerful nightmare-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Nightmare Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a hulking shadow beast with jagged obsidian armor",
+    "source_input": "creature \"Nightmare Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a powerful nightmare-themed miniboss; slot: hurt; sound cue: hit",
     "hint": null,
     "model": "qwen3.6-35b-a3b",
     "via": "box"
@@ -4186,6 +5110,28 @@
     "style": null,
     "text": "a swarm of tiny, shadowy nightmare sprites",
     "source_input": "creature \"Nightmare Swarm\"; looks like: a tiny physical-touched nightmare creature; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ossuary Warden",
+    "slot": "death",
+    "style": null,
+    "text": "a towering armored skeleton wrapped in heavy burial chains",
+    "source_input": "creature \"Ossuary Warden\"; boss tier: dungeon_elite; element: physical; looks like: A towering armoured skeleton keeper wrapped in burial chains, guarding the ossuary.; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ossuary Warden",
+    "slot": "hurt",
+    "style": null,
+    "text": "a towering armored skeleton wrapped in heavy burial chains",
+    "source_input": "creature \"Ossuary Warden\"; boss tier: dungeon_elite; element: physical; looks like: A towering armoured skeleton keeper wrapped in burial chains, guarding the ossuary.; slot: hurt; sound cue: hit",
     "hint": null,
     "model": "qwen3.6-35b-a3b",
     "via": "box"
@@ -4280,6 +5226,28 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Plague Elite Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a rotting, pixelated plague beast",
+    "source_input": "creature \"Plague Elite Miniboss\"; boss tier: miniboss; element: fire; looks like: pixel art boss creature, a fearsome elite plague-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Plague Elite Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a bloated, charred plague beast",
+    "source_input": "creature \"Plague Elite Miniboss\"; boss tier: miniboss; element: fire; looks like: pixel art boss creature, a fearsome elite plague-themed miniboss; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Plague Heavy",
     "slot": "death",
     "style": null,
@@ -4318,6 +5286,28 @@
     "style": null,
     "text": "a lean, fire-touched plague creature",
     "source_input": "creature \"Plague Line\"; looks like: a lean fire-touched plague creature; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Plague Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a bloated, charred plague beast",
+    "source_input": "creature \"Plague Miniboss\"; boss tier: miniboss; element: fire; looks like: pixel art boss creature, a powerful plague-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Plague Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a bloated, charred toad with weeping sores",
+    "source_input": "creature \"Plague Miniboss\"; boss tier: miniboss; element: fire; looks like: pixel art boss creature, a powerful plague-themed miniboss; slot: hurt; sound cue: hit",
     "hint": null,
     "model": "qwen3.6-35b-a3b",
     "via": "box"
@@ -4522,6 +5512,28 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Rime Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a massive glacier of jagged blue ice",
+    "source_input": "creature \"Rime Miniboss\"; boss tier: miniboss; element: ice; looks like: pixel art boss creature, a powerful rime-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Rime Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a jagged shard of enchanted blue ice",
+    "source_input": "creature \"Rime Miniboss\"; boss tier: miniboss; element: ice; looks like: pixel art boss creature, a powerful rime-themed miniboss; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Rime Ranged",
     "slot": "death",
     "style": null,
@@ -4720,6 +5732,28 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Ruin Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a crumbling stone golem shattering into ice shards",
+    "source_input": "creature \"Ruin Miniboss\"; boss tier: miniboss; element: ice; looks like: pixel art boss creature, a powerful ruin-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ruin Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a massive, frost-encrusted stone golem",
+    "source_input": "creature \"Ruin Miniboss\"; boss tier: miniboss; element: ice; looks like: pixel art boss creature, a powerful ruin-themed miniboss; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Ruin Ranged",
     "slot": "death",
     "style": null,
@@ -4780,6 +5814,28 @@
     "style": null,
     "text": "a cluster of jagged, frost-covered stone shards",
     "source_input": "creature \"Ruin Swarm\"; looks like: a tiny ice-touched ruin creature; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Shade Herald",
+    "slot": "death",
+    "style": null,
+    "text": "a tattered banner of shadow",
+    "source_input": "creature \"Shade Herald\"; boss tier: dungeon_elite; element: arcane; looks like: A hooded wraith herald with a tattered banner of shadow, announcing the Gatekeeper.; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Shade Herald",
+    "slot": "hurt",
+    "style": null,
+    "text": "a tattered banner of shadow",
+    "source_input": "creature \"Shade Herald\"; boss tier: dungeon_elite; element: arcane; looks like: A hooded wraith herald with a tattered banner of shadow, announcing the Gatekeeper.; slot: hurt; sound cue: hit",
     "hint": null,
     "model": "qwen3.6-35b-a3b",
     "via": "box"
@@ -4956,6 +6012,28 @@
     "style": null,
     "text": "a lean, fire-touched stone creature",
     "source_input": "creature \"Stoneborn Line\"; looks like: a lean fire-touched stoneborn creature; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Stoneborn Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a massive boulder crumbling into ash",
+    "source_input": "creature \"Stoneborn Miniboss\"; boss tier: miniboss; element: fire; looks like: pixel art boss creature, a powerful stoneborn-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Stoneborn Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a massive boulder of cracked obsidian",
+    "source_input": "creature \"Stoneborn Miniboss\"; boss tier: miniboss; element: fire; looks like: pixel art boss creature, a powerful stoneborn-themed miniboss; slot: hurt; sound cue: hit",
     "hint": null,
     "model": "qwen3.6-35b-a3b",
     "via": "box"
@@ -5160,6 +6238,28 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Storm Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a massive storm cloud crackling with thunder",
+    "source_input": "creature \"Storm Miniboss\"; boss tier: miniboss; element: lightning; looks like: pixel art boss creature, a powerful storm-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Storm Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a crackling storm elemental of jagged lightning",
+    "source_input": "creature \"Storm Miniboss\"; boss tier: miniboss; element: lightning; looks like: pixel art boss creature, a powerful storm-themed miniboss; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Storm Ranged",
     "slot": "death",
     "style": null,
@@ -5358,6 +6458,28 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Swamp Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a bloated swamp beast with rotting flesh",
+    "source_input": "creature \"Swamp Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a powerful swamp-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Swamp Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a bloated, slimy swamp beast",
+    "source_input": "creature \"Swamp Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a powerful swamp-themed miniboss; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Swamp Ranged",
     "slot": "death",
     "style": null,
@@ -5418,6 +6540,72 @@
     "style": null,
     "text": "a squelching mass of wet mud and decaying roots",
     "source_input": "creature \"Swamp Swarm\"; looks like: a tiny physical-touched swamp creature; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "The Bone Regent",
+    "slot": "death",
+    "style": null,
+    "text": "a massive skeletal monarch crumbling into dust",
+    "source_input": "creature \"The Bone Regent\"; boss tier: dungeon_end; element: physical; looks like: A crowned skeletal monarch on a throne of fused bones, ruling the deepest crypt of the Catacombs.; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "The Bone Regent",
+    "slot": "hurt",
+    "style": null,
+    "text": "a heavy iron mace striking a brittle skull",
+    "source_input": "creature \"The Bone Regent\"; boss tier: dungeon_end; element: physical; looks like: A crowned skeletal monarch on a throne of fused bones, ruling the deepest crypt of the Catacombs.; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "The Ember Queen",
+    "slot": "death",
+    "style": null,
+    "text": "a colossal molten hive queen with smouldering ash wings",
+    "source_input": "creature \"The Ember Queen\"; boss tier: dungeon_end; element: fire; looks like: A vast molten hive queen with a glowing ember abdomen and wings of smouldering ash.; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "The Ember Queen",
+    "slot": "hurt",
+    "style": null,
+    "text": "a vast molten hive queen with smouldering ash wings",
+    "source_input": "creature \"The Ember Queen\"; boss tier: dungeon_end; element: fire; looks like: A vast molten hive queen with a glowing ember abdomen and wings of smouldering ash.; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "The Umbral Gatekeeper",
+    "slot": "death",
+    "style": null,
+    "text": "a colossal void sentinel of living shadow",
+    "source_input": "creature \"The Umbral Gatekeeper\"; boss tier: dungeon_end; element: arcane; looks like: A colossal void sentinel of living shadow, its body a doorway into starless dark.; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "The Umbral Gatekeeper",
+    "slot": "hurt",
+    "style": null,
+    "text": "a colossal void sentinel of living shadow",
+    "source_input": "creature \"The Umbral Gatekeeper\"; boss tier: dungeon_end; element: arcane; looks like: A colossal void sentinel of living shadow, its body a doorway into starless dark.; slot: hurt; sound cue: hit",
     "hint": null,
     "model": "qwen3.6-35b-a3b",
     "via": "box"
@@ -5512,6 +6700,28 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Titan Elite Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a colossal stone titan crumbling into dust",
+    "source_input": "creature \"Titan Elite Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a fearsome elite titan-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Titan Elite Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a colossal stone golem with cracked granite skin",
+    "source_input": "creature \"Titan Elite Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a fearsome elite titan-themed miniboss; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Titan Heavy",
     "slot": "death",
     "style": null,
@@ -5550,6 +6760,28 @@
     "style": null,
     "text": "a lean titan with stone-like skin",
     "source_input": "creature \"Titan Line\"; looks like: a lean physical-touched titan creature; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Titan Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a colossal stone golem crumbling into dust",
+    "source_input": "creature \"Titan Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a powerful titan-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Titan Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a massive stone golem with cracked granite skin",
+    "source_input": "creature \"Titan Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a powerful titan-themed miniboss; slot: hurt; sound cue: hit",
     "hint": null,
     "model": "qwen3.6-35b-a3b",
     "via": "box"
@@ -5754,6 +6986,28 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Tundra Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a massive glacial golem shattering into ice shards",
+    "source_input": "creature \"Tundra Miniboss\"; boss tier: miniboss; element: ice; looks like: pixel art boss creature, a powerful tundra-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Tundra Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a massive block of jagged, cracking ice",
+    "source_input": "creature \"Tundra Miniboss\"; boss tier: miniboss; element: ice; looks like: pixel art boss creature, a powerful tundra-themed miniboss; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Tundra Ranged",
     "slot": "death",
     "style": null,
@@ -5908,6 +7162,28 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Umbral Elite Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a towering shadowy figure dissolving into dark mist",
+    "source_input": "creature \"Umbral Elite Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a fearsome elite umbral-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Umbral Elite Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a jagged obsidian blade striking dark armor",
+    "source_input": "creature \"Umbral Elite Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a fearsome elite umbral-themed miniboss; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Umbral Heavy",
     "slot": "death",
     "style": null,
@@ -5946,6 +7222,28 @@
     "style": null,
     "text": "a lean shadowy figure with a hollow, whispering voice",
     "source_input": "creature \"Umbral Line\"; looks like: a lean physical-touched umbral creature; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Umbral Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a massive shadowy beast dissolving into smoke",
+    "source_input": "creature \"Umbral Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a powerful umbral-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Umbral Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a massive shadowy beast with jagged obsidian armor",
+    "source_input": "creature \"Umbral Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a powerful umbral-themed miniboss; slot: hurt; sound cue: hit",
     "hint": null,
     "model": "qwen3.6-35b-a3b",
     "via": "box"
@@ -6150,6 +7448,28 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Undead Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a crumbling ice skeleton shattering into frost",
+    "source_input": "creature \"Undead Miniboss\"; boss tier: miniboss; element: ice; looks like: pixel art boss creature, a powerful undead-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Undead Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a frost-encrusted skeletal warrior",
+    "source_input": "creature \"Undead Miniboss\"; boss tier: miniboss; element: ice; looks like: pixel art boss creature, a powerful undead-themed miniboss; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Undead Ranged",
     "slot": "death",
     "style": null,
@@ -6326,6 +7646,28 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Void Elite Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a towering void entity dissolving into shadow",
+    "source_input": "creature \"Void Elite Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a fearsome elite void-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Void Elite Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a jagged obsidian shard",
+    "source_input": "creature \"Void Elite Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a fearsome elite void-themed miniboss; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Void Heavy",
     "slot": "death",
     "style": null,
@@ -6364,6 +7706,28 @@
     "style": null,
     "text": "a lean void creature with a hollow, echoing voice",
     "source_input": "creature \"Void Line\"; looks like: a lean physical-touched void creature; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Void Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a collapsing void rift",
+    "source_input": "creature \"Void Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a powerful void-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Void Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a shadowy void entity with jagged edges",
+    "source_input": "creature \"Void Miniboss\"; boss tier: miniboss; element: physical; looks like: pixel art boss creature, a powerful void-themed miniboss; slot: hurt; sound cue: hit",
     "hint": null,
     "model": "qwen3.6-35b-a3b",
     "via": "box"
@@ -6562,6 +7926,28 @@
     "style": null,
     "text": "a lean creature of molten rock and ash",
     "source_input": "creature \"Volcanic Line\"; looks like: a lean fire-touched volcanic creature; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Volcanic Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a massive obsidian golem shattering into molten lava",
+    "source_input": "creature \"Volcanic Miniboss\"; boss tier: miniboss; element: fire; looks like: pixel art boss creature, a powerful volcanic-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Volcanic Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a molten rock golem with a deep rumbling voice",
+    "source_input": "creature \"Volcanic Miniboss\"; boss tier: miniboss; element: fire; looks like: pixel art boss creature, a powerful volcanic-themed miniboss; slot: hurt; sound cue: hit",
     "hint": null,
     "model": "qwen3.6-35b-a3b",
     "via": "box"
@@ -6782,6 +8168,28 @@
     "style": null,
     "text": "a lean woodland creature with rough bark skin",
     "source_input": "creature \"Woodland Line\"; looks like: a lean woodland creature; slot: hurt; sound cue: hit",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Woodland Miniboss",
+    "slot": "death",
+    "style": null,
+    "text": "a massive ancient oak tree crumbling to dust",
+    "source_input": "creature \"Woodland Miniboss\"; boss tier: miniboss; looks like: pixel art boss creature, a powerful woodland-themed miniboss; slot: death; sound cue: death",
+    "hint": null,
+    "model": "qwen3.6-35b-a3b",
+    "via": "box"
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Woodland Miniboss",
+    "slot": "hurt",
+    "style": null,
+    "text": "a massive oak golem with bark armor",
+    "source_input": "creature \"Woodland Miniboss\"; boss tier: miniboss; looks like: pixel art boss creature, a powerful woodland-themed miniboss; slot: hurt; sound cue: hit",
     "hint": null,
     "model": "qwen3.6-35b-a3b",
     "via": "box"

@@ -135,6 +135,168 @@
     "sort": 0
   },
   {
+    "subject_kind": "aura",
+    "subject_key": "abyssor_void_rend",
+    "slot": "loop",
+    "clip_id": "6dc06ab2-e08e-4908-80dd-92b2d23f7b7a",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "abyssor_void_rend",
+    "slot": "pulse",
+    "clip_id": "ea2f7bc4-bf4b-46af-b676-71bc707f8ee1",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "cinder_brood",
+    "slot": "loop",
+    "clip_id": "d69fec37-9ac3-4f7e-8cac-1055b0290ca3",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "cinder_brood",
+    "slot": "pulse",
+    "clip_id": "dcc5ae28-6ea2-4c44-b125-10d3cf6c94fe",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "fire_sparks",
+    "slot": "loop",
+    "clip_id": "f2370401-f0c1-47eb-b72a-e9d8336f8973",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "fire_sparks",
+    "slot": "pulse",
+    "clip_id": "b346eeba-fccf-4277-bed3-3f4ae4bea83d",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "glacius_permafrost",
+    "slot": "loop",
+    "clip_id": "a30a07dc-134f-4ee3-8823-ac299e4c1fe9",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "glacius_permafrost",
+    "slot": "pulse",
+    "clip_id": "84168fb0-4dd7-48f9-9573-2dd484678a86",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "gorgon_static_field",
+    "slot": "loop",
+    "clip_id": "d63bf8bf-c569-46d0-8d25-2527b33a84ee",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "gorgon_static_field",
+    "slot": "pulse",
+    "clip_id": "596e059e-032e-4e9a-9646-67c227488473",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "ignis_inferno",
+    "slot": "loop",
+    "clip_id": "3008a26c-59fa-43d8-9b11-5659fae5a9e6",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "ignis_inferno",
+    "slot": "pulse",
+    "clip_id": "c72c63af-c082-46bf-bf68-985e525cd6b7",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "ossuary_dread",
+    "slot": "loop",
+    "clip_id": "6b62e07d-a68a-47ca-b3f0-4b7fc445126b",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "ossuary_dread",
+    "slot": "pulse",
+    "clip_id": "d3b405b0-e7b1-40fa-8c97-2dbaba595869",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "pack_leader",
+    "slot": "loop",
+    "clip_id": "1a6e5e9e-2bcb-4b34-a745-d4cbdb8bb7d1",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "pack_leader",
+    "slot": "pulse",
+    "clip_id": "fff33453-7767-4e8a-b58c-0487bc3ced31",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "shade_veil",
+    "slot": "loop",
+    "clip_id": "444c58d4-9e98-4dc8-bf4f-73c10f48fe8e",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "aura",
+    "subject_key": "shade_veil",
+    "slot": "pulse",
+    "clip_id": "4287a3db-3e66-45ad-90ac-1e28f7af3e57",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
     "subject_kind": "biome",
     "subject_key": "Abyssal Rift",
     "slot": "ambience",
@@ -418,6 +580,114 @@
     "subject_key": "Verdant Jungle",
     "slot": "ambience",
     "clip_id": "afa92637-9b65-4c77-a4ce-413ab670cc92",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Abyssor, the Voidreaver",
+    "slot": "death",
+    "clip_id": "5ec7dd49-a3c1-45cd-af32-f6e9cbd7927b",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Abyssor, the Voidreaver",
+    "slot": "death",
+    "clip_id": "a1a12a0f-be47-41d1-9348-1b266cf00f2b",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Abyssor, the Voidreaver",
+    "slot": "death",
+    "clip_id": "cc19f151-11c7-4ffa-a861-5d8dbce9af6e",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Abyssor, the Voidreaver",
+    "slot": "hurt",
+    "clip_id": "58592e59-ba8a-466b-be38-006bc0da1501",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Abyssor, the Voidreaver",
+    "slot": "hurt",
+    "clip_id": "b33d2df8-ddab-4edc-ad8d-3da69b5bf49a",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Abyssor, the Voidreaver",
+    "slot": "hurt",
+    "clip_id": "e4b3d451-9b5e-4531-a633-6e4bb92252f5",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Arcane Elemental Guard",
+    "slot": "death",
+    "clip_id": "1681b243-ffbb-44c1-99ed-2545ce01b50c",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Arcane Elemental Guard",
+    "slot": "death",
+    "clip_id": "3412268d-749f-4fb9-8d97-62ec7136608a",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Arcane Elemental Guard",
+    "slot": "death",
+    "clip_id": "e48419a8-9bf2-4d4a-a5de-2ae0415b2b37",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Arcane Elemental Guard",
+    "slot": "hurt",
+    "clip_id": "c105700a-1542-4cb2-8c48-4196352afec1",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Arcane Elemental Guard",
+    "slot": "hurt",
+    "clip_id": "c946475a-fc72-4434-a978-c3f5cd707558",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Arcane Elemental Guard",
+    "slot": "hurt",
+    "clip_id": "d133bbb1-5240-4c1a-9bb7-cf6345c30189",
     "volume": 1,
     "weight": 1,
     "sort": 0
@@ -796,6 +1066,60 @@
     "subject_key": "Beast Line",
     "slot": "hurt",
     "clip_id": "786fcf19-d9fd-4a76-8de1-8896a4e15557",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Beast Miniboss",
+    "slot": "death",
+    "clip_id": "0bc605d4-fa31-4084-85cd-cb901c48eaea",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Beast Miniboss",
+    "slot": "death",
+    "clip_id": "ab5492e6-60c7-4b62-82c7-ecf565afd756",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Beast Miniboss",
+    "slot": "death",
+    "clip_id": "c63e3942-4c4c-42bc-a34d-73a040d82214",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Beast Miniboss",
+    "slot": "hurt",
+    "clip_id": "1d8754a0-e71d-48e1-8794-5654d06d0c27",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Beast Miniboss",
+    "slot": "hurt",
+    "clip_id": "3b5526d2-a6f3-4691-a9a8-f44618d77712",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Beast Miniboss",
+    "slot": "hurt",
+    "clip_id": "3c779bf4-7b5c-4edf-aed9-793e42778797",
     "volume": 1,
     "weight": 1,
     "sort": 0
@@ -1288,6 +1612,60 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Blight Miniboss",
+    "slot": "death",
+    "clip_id": "69d8e7da-5514-47cc-8275-992acc7e4f00",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Blight Miniboss",
+    "slot": "death",
+    "clip_id": "d4a88fba-e16f-44fc-86da-f674219e800c",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Blight Miniboss",
+    "slot": "death",
+    "clip_id": "edd30f36-8e36-4c7e-a2f4-139359aee767",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Blight Miniboss",
+    "slot": "hurt",
+    "clip_id": "23308da5-3ff2-42f5-a6bc-af61cba710e8",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Blight Miniboss",
+    "slot": "hurt",
+    "clip_id": "445d1c6f-dc89-4961-b4c5-db68ec45814e",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Blight Miniboss",
+    "slot": "hurt",
+    "clip_id": "967edb9d-7a6e-40e1-bd09-e548918517d7",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Blight Ranged",
     "slot": "death",
     "clip_id": "5bbd2c3a-82c9-44a0-9b35-646537b473e9",
@@ -1768,6 +2146,60 @@
     "subject_key": "Bonelord Line",
     "slot": "hurt",
     "clip_id": "a5ef5bdf-9b1d-4af8-b6e4-3ee454fbc814",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Bonelord Miniboss",
+    "slot": "death",
+    "clip_id": "25750fb0-cdb4-4542-8de5-5666977712d8",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Bonelord Miniboss",
+    "slot": "death",
+    "clip_id": "961e2ab0-2da0-44dc-a20f-4a298b164372",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Bonelord Miniboss",
+    "slot": "death",
+    "clip_id": "967f993f-70f0-430d-87eb-936083f8d99f",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Bonelord Miniboss",
+    "slot": "hurt",
+    "clip_id": "46297bbd-133c-4485-baba-bf3beddb67f5",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Bonelord Miniboss",
+    "slot": "hurt",
+    "clip_id": "992451e6-9e45-4c50-86e8-130a687a3201",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Bonelord Miniboss",
+    "slot": "hurt",
+    "clip_id": "e8642bd8-0cbe-4d29-8898-0f6e0dbad3ff",
     "volume": 1,
     "weight": 1,
     "sort": 0
@@ -2260,6 +2692,60 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Cave Miniboss",
+    "slot": "death",
+    "clip_id": "7318ee8b-b950-4fdc-a871-99c3b52dcb4a",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Cave Miniboss",
+    "slot": "death",
+    "clip_id": "7c9d9a49-e00b-4673-9f75-3744cb41ad58",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Cave Miniboss",
+    "slot": "death",
+    "clip_id": "ecfd1d88-2816-40d4-9477-702292499c4c",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Cave Miniboss",
+    "slot": "hurt",
+    "clip_id": "1552f67c-790c-4f65-8195-95490e71b7ba",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Cave Miniboss",
+    "slot": "hurt",
+    "clip_id": "73fa122f-9e46-41e3-837f-ccd367189054",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Cave Miniboss",
+    "slot": "hurt",
+    "clip_id": "f632d515-8c6b-41fe-b40c-d51186409c87",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Cave Ranged",
     "slot": "death",
     "clip_id": "54b3eee0-8760-45b2-b7f0-9d5da70c4d8c",
@@ -2638,6 +3124,60 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Chaos Elite Miniboss",
+    "slot": "death",
+    "clip_id": "0b4d95c2-9239-4dfb-849f-b7615384e2b0",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Chaos Elite Miniboss",
+    "slot": "death",
+    "clip_id": "11e25dd4-b696-40b0-a587-a76426ee88ad",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Chaos Elite Miniboss",
+    "slot": "death",
+    "clip_id": "be0d0914-4619-49cc-ae5f-902564f2a612",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Chaos Elite Miniboss",
+    "slot": "hurt",
+    "clip_id": "18c1ec52-3c3b-4417-b318-6f179bf4cf73",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Chaos Elite Miniboss",
+    "slot": "hurt",
+    "clip_id": "c5cf56a4-2b0f-4045-a0d5-678433a59892",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Chaos Elite Miniboss",
+    "slot": "hurt",
+    "clip_id": "ebd9fab5-a036-4793-8aed-c333afa7f381",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Chaos Heavy",
     "slot": "death",
     "clip_id": "3b575a7a-90a1-4faa-9329-7fc34217b93c",
@@ -2740,6 +3280,60 @@
     "subject_key": "Chaos Line",
     "slot": "hurt",
     "clip_id": "dcf127ed-0a5c-4daa-b0e7-db7a3b40fa2f",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Chaos Miniboss",
+    "slot": "death",
+    "clip_id": "30816da4-6d70-4a24-82ca-98804d4c82d7",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Chaos Miniboss",
+    "slot": "death",
+    "clip_id": "ce15717c-9043-402e-b1d6-4e2b3afec2bb",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Chaos Miniboss",
+    "slot": "death",
+    "clip_id": "e8c35b88-8620-48e9-b230-7f5763d0abbf",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Chaos Miniboss",
+    "slot": "hurt",
+    "clip_id": "36e64d30-58f2-4376-b18c-624e351f3566",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Chaos Miniboss",
+    "slot": "hurt",
+    "clip_id": "ad41049c-e378-4707-a3df-8b9a88f86bab",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Chaos Miniboss",
+    "slot": "hurt",
+    "clip_id": "c826fb10-b7d8-4ea9-8d6d-1c796b201dc5",
     "volume": 1,
     "weight": 1,
     "sort": 0
@@ -2902,6 +3496,60 @@
     "subject_key": "Chaos Swarm",
     "slot": "hurt",
     "clip_id": "7a344a53-875e-441e-b9c6-b54cfbe5a8ca",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Cinder Matriarch",
+    "slot": "death",
+    "clip_id": "4430d3dd-b8e5-4cbf-9207-fa9766c88be0",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Cinder Matriarch",
+    "slot": "death",
+    "clip_id": "66a8edae-1028-4500-b968-d78c17605954",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Cinder Matriarch",
+    "slot": "death",
+    "clip_id": "68154350-a7d1-4687-a78b-ff10279380bd",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Cinder Matriarch",
+    "slot": "hurt",
+    "clip_id": "4474019c-803c-400c-87de-655499951c72",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Cinder Matriarch",
+    "slot": "hurt",
+    "clip_id": "a96a4d8c-b433-4cf4-8bd4-95f799d07de9",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Cinder Matriarch",
+    "slot": "hurt",
+    "clip_id": "c1f45fec-5dec-49ea-8b6d-b94d3dc9eed7",
     "volume": 1,
     "weight": 1,
     "sort": 0
@@ -3226,6 +3874,60 @@
     "subject_key": "Construct Line",
     "slot": "hurt",
     "clip_id": "a856eb6f-8b49-4dc7-b568-d8cbd26f16a1",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Construct Miniboss",
+    "slot": "death",
+    "clip_id": "011d2b8e-1dc0-4ff3-9bb6-11053498c590",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Construct Miniboss",
+    "slot": "death",
+    "clip_id": "2cb47146-d218-4963-8179-c33bf9e8b02e",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Construct Miniboss",
+    "slot": "death",
+    "clip_id": "e921993f-3e37-45f4-9bf5-52156addec8c",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Construct Miniboss",
+    "slot": "hurt",
+    "clip_id": "9247fa67-5569-46d4-9c38-7667cee8bd2f",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Construct Miniboss",
+    "slot": "hurt",
+    "clip_id": "a5d786c8-8c7b-4706-ba9b-4054ec7a7c79",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Construct Miniboss",
+    "slot": "hurt",
+    "clip_id": "c7dcb7ff-79a5-42c7-82b1-27c7313908f4",
     "volume": 1,
     "weight": 1,
     "sort": 0
@@ -3718,6 +4420,60 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Crystal Miniboss",
+    "slot": "death",
+    "clip_id": "25ea61e7-1a22-4ac6-bfde-2cf676905535",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Crystal Miniboss",
+    "slot": "death",
+    "clip_id": "9a1c5e7d-d66d-4dbb-926d-a1de3ef4f0a4",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Crystal Miniboss",
+    "slot": "death",
+    "clip_id": "dd24a35b-6721-4f52-a318-e113981a11a2",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Crystal Miniboss",
+    "slot": "hurt",
+    "clip_id": "1c9e2136-b028-43fc-b6ec-6d1869d2b2e1",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Crystal Miniboss",
+    "slot": "hurt",
+    "clip_id": "36ef216d-f3f8-423a-a96e-6d4657eca0a6",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Crystal Miniboss",
+    "slot": "hurt",
+    "clip_id": "94468ea8-12cd-4b03-9f7a-5d218869aaef",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Crystal Ranged",
     "slot": "death",
     "clip_id": "3f0f2112-d249-489f-9748-fe1e2729de41",
@@ -4096,6 +4852,60 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Demonic Elite Miniboss",
+    "slot": "death",
+    "clip_id": "01beaee9-42a1-421c-ae19-f9e2a9742102",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Demonic Elite Miniboss",
+    "slot": "death",
+    "clip_id": "68f3f7d2-5100-4551-8eda-6c7f9b702be7",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Demonic Elite Miniboss",
+    "slot": "death",
+    "clip_id": "8ed240fa-88f3-4ee5-86bd-c79485705d6a",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Demonic Elite Miniboss",
+    "slot": "hurt",
+    "clip_id": "0927adca-8368-426c-a0aa-57d34026bb8f",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Demonic Elite Miniboss",
+    "slot": "hurt",
+    "clip_id": "550bdda8-8186-40bf-bbe7-fffe68f85504",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Demonic Elite Miniboss",
+    "slot": "hurt",
+    "clip_id": "96a74166-467a-4b0d-b887-5106bf6d9ebe",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Demonic Heavy",
     "slot": "death",
     "clip_id": "73cbe186-7047-4931-9a81-7d37ad274b5c",
@@ -4198,6 +5008,60 @@
     "subject_key": "Demonic Line",
     "slot": "hurt",
     "clip_id": "6b710dbb-58d0-41bc-9589-b95296819a9e",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Demonic Miniboss",
+    "slot": "death",
+    "clip_id": "2817214e-4409-4e36-b942-f106dd5a114a",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Demonic Miniboss",
+    "slot": "death",
+    "clip_id": "3e0ddff7-8074-45e5-9ca1-5e6a2519b84f",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Demonic Miniboss",
+    "slot": "death",
+    "clip_id": "a13d57fc-5b7e-4249-b10c-1e184424c2a7",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Demonic Miniboss",
+    "slot": "hurt",
+    "clip_id": "149579df-3a2a-4ad8-a51f-3c003a849f03",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Demonic Miniboss",
+    "slot": "hurt",
+    "clip_id": "163ec905-59c2-4371-ae89-8ec1ad35e57c",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Demonic Miniboss",
+    "slot": "hurt",
+    "clip_id": "c70ca271-c704-4225-aa29-d2955e27a442",
     "volume": 1,
     "weight": 1,
     "sort": 0
@@ -4690,6 +5554,60 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Desert Miniboss",
+    "slot": "death",
+    "clip_id": "275e5ce3-0b21-4ca2-9168-20f88963d8a1",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Desert Miniboss",
+    "slot": "death",
+    "clip_id": "29043a58-4c53-47fa-8a32-5adf39b68733",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Desert Miniboss",
+    "slot": "death",
+    "clip_id": "93476012-2002-4f25-9526-49dcdd523973",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Desert Miniboss",
+    "slot": "hurt",
+    "clip_id": "24933dbf-029f-46b3-b110-e1b1ec6d3209",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Desert Miniboss",
+    "slot": "hurt",
+    "clip_id": "a280f3a8-023b-412e-b157-9204253d1b0c",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Desert Miniboss",
+    "slot": "hurt",
+    "clip_id": "ae3e154a-93fe-437b-bdb0-cfb953a87fea",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Desert Ranged",
     "slot": "death",
     "clip_id": "04df9e0e-9fc4-4cab-a20f-12ad0b206179",
@@ -5176,6 +6094,60 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Drowned Miniboss",
+    "slot": "death",
+    "clip_id": "1af92840-ece6-4196-95f9-a15f9de1d8a9",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Drowned Miniboss",
+    "slot": "death",
+    "clip_id": "2643699e-69b4-49d2-916a-5cec223cd797",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Drowned Miniboss",
+    "slot": "death",
+    "clip_id": "f88fe6e4-b61a-459c-88ea-69566ad90e2b",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Drowned Miniboss",
+    "slot": "hurt",
+    "clip_id": "bf1d2cf8-d734-4046-955c-47f9d55e9faa",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Drowned Miniboss",
+    "slot": "hurt",
+    "clip_id": "d29d7c4f-aff0-4125-8594-6b0af5fbf5c6",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Drowned Miniboss",
+    "slot": "hurt",
+    "clip_id": "f4e775a7-7795-4fd0-ad72-58d13fb87051",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Drowned Ranged",
     "slot": "death",
     "clip_id": "2ab533f0-b6c8-4628-a2cb-99a97deeee72",
@@ -5554,6 +6526,60 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Eldritch Elite Miniboss",
+    "slot": "death",
+    "clip_id": "10475e1b-4e2f-4e13-9fc7-398efe00cf35",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Eldritch Elite Miniboss",
+    "slot": "death",
+    "clip_id": "88b93e63-5f0d-4ec1-8962-cc80ef365460",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Eldritch Elite Miniboss",
+    "slot": "death",
+    "clip_id": "fc45f3e6-cf2e-4eb9-af4c-241a860e9099",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Eldritch Elite Miniboss",
+    "slot": "hurt",
+    "clip_id": "89f6ac37-bc7b-42bf-a966-cdacc4990a68",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Eldritch Elite Miniboss",
+    "slot": "hurt",
+    "clip_id": "9cdd7b91-6295-441a-879f-7f4e6d408fc6",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Eldritch Elite Miniboss",
+    "slot": "hurt",
+    "clip_id": "ba7ad8a5-3159-4504-bf29-3ace863b5d43",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Eldritch Heavy",
     "slot": "death",
     "clip_id": "5342ed6c-f431-477a-a373-b259924de8ea",
@@ -5656,6 +6682,60 @@
     "subject_key": "Eldritch Line",
     "slot": "hurt",
     "clip_id": "fa76bea2-0656-4127-97d8-a2ee3742f242",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Eldritch Miniboss",
+    "slot": "death",
+    "clip_id": "1f9512ff-e5e8-48a8-9565-bb870fbe99f8",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Eldritch Miniboss",
+    "slot": "death",
+    "clip_id": "446eb0a1-a4f6-4c76-89c4-6c4071bab815",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Eldritch Miniboss",
+    "slot": "death",
+    "clip_id": "52c6d02f-f021-4b08-9a7d-29eeff44777b",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Eldritch Miniboss",
+    "slot": "hurt",
+    "clip_id": "0f7fb213-8062-4c37-a58a-a3832ca34d7e",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Eldritch Miniboss",
+    "slot": "hurt",
+    "clip_id": "91d0a3a6-54e6-494f-99f3-a1bf643af30c",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Eldritch Miniboss",
+    "slot": "hurt",
+    "clip_id": "c1d4f6a6-5ef7-423b-bb26-f75b75da27fe",
     "volume": 1,
     "weight": 1,
     "sort": 0
@@ -6148,6 +7228,60 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Ember Miniboss",
+    "slot": "death",
+    "clip_id": "0e0bc60f-2aa5-4a8f-81e7-71e18dfa29a8",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ember Miniboss",
+    "slot": "death",
+    "clip_id": "a935500a-5885-4855-bc7a-be8f782eae19",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ember Miniboss",
+    "slot": "death",
+    "clip_id": "c3099254-2a4c-4a2e-b42b-fc1bdd007088",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ember Miniboss",
+    "slot": "hurt",
+    "clip_id": "5d7761e7-04c7-473d-ae1a-5004b6ac9034",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ember Miniboss",
+    "slot": "hurt",
+    "clip_id": "6109fadc-9ff9-47c7-a900-c5bb0e391eb0",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ember Miniboss",
+    "slot": "hurt",
+    "clip_id": "d13364ef-a466-4971-b7af-f59949b99404",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Ember Ranged",
     "slot": "death",
     "clip_id": "1687a102-d2fd-46b9-a138-e51ef3a4702f",
@@ -6526,6 +7660,60 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Fallen Elite Miniboss",
+    "slot": "death",
+    "clip_id": "10b1ac61-fae6-4492-a573-a1350ba7cd99",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Fallen Elite Miniboss",
+    "slot": "death",
+    "clip_id": "988b027b-d3a9-466f-91a4-7592a0f24c60",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Fallen Elite Miniboss",
+    "slot": "death",
+    "clip_id": "b5a5040d-cd2b-4c39-9285-2884d5b13a00",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Fallen Elite Miniboss",
+    "slot": "hurt",
+    "clip_id": "2a497cd4-ac87-4792-bb89-a9aed2f0a69e",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Fallen Elite Miniboss",
+    "slot": "hurt",
+    "clip_id": "eaeaa6d1-7313-4990-8c59-aec5fa2a4af0",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Fallen Elite Miniboss",
+    "slot": "hurt",
+    "clip_id": "fc4461d3-48f2-407f-8af6-9eb90442bf0e",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Fallen Heavy",
     "slot": "death",
     "clip_id": "3e7e8487-d15b-49fd-8d03-05ea036ca902",
@@ -6628,6 +7816,60 @@
     "subject_key": "Fallen Line",
     "slot": "hurt",
     "clip_id": "cc30b8b0-05e6-48a4-9f36-8f2ea3c88459",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Fallen Miniboss",
+    "slot": "death",
+    "clip_id": "87269984-1621-40c4-919f-19e60f0587ba",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Fallen Miniboss",
+    "slot": "death",
+    "clip_id": "890ff21d-268c-4b1d-ba6f-7cd6c68a14cf",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Fallen Miniboss",
+    "slot": "death",
+    "clip_id": "ab16db30-23f1-4c82-9eb9-dec200fadc87",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Fallen Miniboss",
+    "slot": "hurt",
+    "clip_id": "2f27bcad-88c9-4df9-ac73-02309fb106f5",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Fallen Miniboss",
+    "slot": "hurt",
+    "clip_id": "4e95ba98-f6e7-40a9-b482-fb3adbd8a871",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Fallen Miniboss",
+    "slot": "hurt",
+    "clip_id": "9a2ac410-54b6-47d3-9586-f4981c416ccc",
     "volume": 1,
     "weight": 1,
     "sort": 0
@@ -6790,6 +8032,60 @@
     "subject_key": "Fallen Swarm",
     "slot": "hurt",
     "clip_id": "c0fa6d31-d4aa-46c3-8566-cfada9904f69",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Fire Elemental Guard",
+    "slot": "death",
+    "clip_id": "54341cdb-83c6-4f31-ad61-7e3bd45e4cef",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Fire Elemental Guard",
+    "slot": "death",
+    "clip_id": "61233b21-0e68-42ef-8845-ac89564cc649",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Fire Elemental Guard",
+    "slot": "death",
+    "clip_id": "910c0bef-0590-4fb1-a3c8-28e23c969529",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Fire Elemental Guard",
+    "slot": "hurt",
+    "clip_id": "0969d4d3-c6fd-4324-9dc7-3b892b0cc904",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Fire Elemental Guard",
+    "slot": "hurt",
+    "clip_id": "64183bcc-6d4a-4d47-932c-1ab6a44d1682",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Fire Elemental Guard",
+    "slot": "hurt",
+    "clip_id": "b4c533a6-8524-4a07-a35b-da290ac80287",
     "volume": 1,
     "weight": 1,
     "sort": 0
@@ -7120,6 +8416,60 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Fungal Miniboss",
+    "slot": "death",
+    "clip_id": "16869dc1-115c-4989-b916-1f295c3abc8a",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Fungal Miniboss",
+    "slot": "death",
+    "clip_id": "99566382-1642-4f78-8e9b-cfae7bca3705",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Fungal Miniboss",
+    "slot": "death",
+    "clip_id": "d4d69529-4361-442d-b509-9e89a041046d",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Fungal Miniboss",
+    "slot": "hurt",
+    "clip_id": "023960b7-f1c8-4599-8a02-771842121a2e",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Fungal Miniboss",
+    "slot": "hurt",
+    "clip_id": "57defca3-c73a-4507-bbe1-c9a6cf709208",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Fungal Miniboss",
+    "slot": "hurt",
+    "clip_id": "b96c5f93-bf01-49ed-bbe6-17634e8c0b7b",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Fungal Ranged",
     "slot": "death",
     "clip_id": "7ada7a58-c9e2-4f49-9da2-ac5d95a83b61",
@@ -7276,6 +8626,60 @@
     "subject_key": "Fungal Swarm",
     "slot": "hurt",
     "clip_id": "3459661e-8d68-4295-a553-eeb8108db1f0",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Glacius, the Frost Leviathan",
+    "slot": "death",
+    "clip_id": "2b5d9382-2290-4883-ab1c-920e470d6da8",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Glacius, the Frost Leviathan",
+    "slot": "death",
+    "clip_id": "6f9317c8-35cd-4660-a6bb-8468b18980f9",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Glacius, the Frost Leviathan",
+    "slot": "death",
+    "clip_id": "82c0d43d-557f-470e-80fa-22719a8a2dcf",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Glacius, the Frost Leviathan",
+    "slot": "hurt",
+    "clip_id": "766ba1e1-8c15-4be0-b5c5-4ef4d48b4be8",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Glacius, the Frost Leviathan",
+    "slot": "hurt",
+    "clip_id": "8edef8b8-89a7-422d-ae7c-b835c96a1b9d",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Glacius, the Frost Leviathan",
+    "slot": "hurt",
+    "clip_id": "d7e5887b-8fb7-47b1-a8e1-69dc73e4d968",
     "volume": 1,
     "weight": 1,
     "sort": 0
@@ -7606,6 +9010,60 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Gloom Miniboss",
+    "slot": "death",
+    "clip_id": "01b03582-7a18-4b48-b574-0ce5ed8d48ae",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Gloom Miniboss",
+    "slot": "death",
+    "clip_id": "35934386-e8ba-4e7b-bbd4-7e0f5802b6bd",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Gloom Miniboss",
+    "slot": "death",
+    "clip_id": "5d66a55e-90bc-4bf1-948a-a8935c977f60",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Gloom Miniboss",
+    "slot": "hurt",
+    "clip_id": "70b47e05-4b44-452c-96de-42311419f60e",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Gloom Miniboss",
+    "slot": "hurt",
+    "clip_id": "a67345c4-7c55-40e3-9a9a-d80da1e41788",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Gloom Miniboss",
+    "slot": "hurt",
+    "clip_id": "ca55587f-71a8-4d61-bacd-ef1b4d5aa6e0",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Gloom Ranged",
     "slot": "death",
     "clip_id": "4a1a32fd-9b32-4bf1-8c09-a78c5ff265f8",
@@ -7762,6 +9220,60 @@
     "subject_key": "Gloom Swarm",
     "slot": "hurt",
     "clip_id": "ff58ddce-ec34-48fa-991b-6496243b8c9b",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Gorgon, the Thunder Titan",
+    "slot": "death",
+    "clip_id": "5a6fabd2-65aa-4c17-9917-02a475860016",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Gorgon, the Thunder Titan",
+    "slot": "death",
+    "clip_id": "69bc9a86-2b6b-49a7-8081-46bcb98c6ba1",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Gorgon, the Thunder Titan",
+    "slot": "death",
+    "clip_id": "7ef15f51-7b94-40cb-889d-4284535fbcf1",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Gorgon, the Thunder Titan",
+    "slot": "hurt",
+    "clip_id": "2ec3936e-c5c3-4e4e-91f7-43544d337d7d",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Gorgon, the Thunder Titan",
+    "slot": "hurt",
+    "clip_id": "c67efdff-5fcf-4869-9f01-0acc61bcb42b",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Gorgon, the Thunder Titan",
+    "slot": "hurt",
+    "clip_id": "ef31502a-85c2-45f6-8998-58a5c4592373",
     "volume": 1,
     "weight": 1,
     "sort": 0
@@ -8086,6 +9598,60 @@
     "subject_key": "Highland Line",
     "slot": "hurt",
     "clip_id": "fcf39ba3-626b-4272-bf45-1f507b9f0bc1",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Highland Miniboss",
+    "slot": "death",
+    "clip_id": "02436670-d69e-42bd-afd1-7152684d4410",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Highland Miniboss",
+    "slot": "death",
+    "clip_id": "3cefd0b1-6022-4d9b-af87-6d3b0d7e7d3a",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Highland Miniboss",
+    "slot": "death",
+    "clip_id": "bb052f02-57da-4a6f-af54-3129e721e11d",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Highland Miniboss",
+    "slot": "hurt",
+    "clip_id": "e28b2fec-c69d-43e5-bb4d-5515a113976e",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Highland Miniboss",
+    "slot": "hurt",
+    "clip_id": "ee576bf6-bb19-4fba-8215-4dbaa4aa40bd",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Highland Miniboss",
+    "slot": "hurt",
+    "clip_id": "fe35ebd2-6a46-4a81-b750-695323f719e5",
     "volume": 1,
     "weight": 1,
     "sort": 0
@@ -8578,6 +10144,60 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Hive Miniboss",
+    "slot": "death",
+    "clip_id": "1bd3dfbd-e50b-46f8-aa81-71e38d0b6c99",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Hive Miniboss",
+    "slot": "death",
+    "clip_id": "d28d433b-f4e6-4cd4-92fa-14f43735f9ac",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Hive Miniboss",
+    "slot": "death",
+    "clip_id": "f4d5be6b-6404-4c37-9d46-94293ab5bbec",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Hive Miniboss",
+    "slot": "hurt",
+    "clip_id": "1fa63a69-57cc-4b36-8e4c-4299d7d58571",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Hive Miniboss",
+    "slot": "hurt",
+    "clip_id": "45a20039-bf56-4be7-a239-4c03e7987e3b",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Hive Miniboss",
+    "slot": "hurt",
+    "clip_id": "73923be7-a8a8-4ecf-bff4-c70c090bfed4",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Hive Ranged",
     "slot": "death",
     "clip_id": "5291277e-0dae-43f2-9908-19069e5846e9",
@@ -8734,6 +10354,114 @@
     "subject_key": "Hive Swarm",
     "slot": "hurt",
     "clip_id": "b2340bd8-aa28-47db-8877-21f4a28ca697",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ice Elemental Guard",
+    "slot": "death",
+    "clip_id": "a2f92046-0d25-4230-bf2b-aa97d660e60c",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ice Elemental Guard",
+    "slot": "death",
+    "clip_id": "f83aa341-0354-4dd8-aae5-42b4bce36952",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ice Elemental Guard",
+    "slot": "death",
+    "clip_id": "f9399664-c3ec-4a41-958f-63bab08e01d0",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ice Elemental Guard",
+    "slot": "hurt",
+    "clip_id": "1ce5eff7-730f-4c4b-aef7-27a499785848",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ice Elemental Guard",
+    "slot": "hurt",
+    "clip_id": "8e5d7af6-965c-4cb9-a420-d72809900393",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ice Elemental Guard",
+    "slot": "hurt",
+    "clip_id": "c833533c-6f16-404c-ac97-1e876f43ac10",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ignis, the Magma Colossus",
+    "slot": "death",
+    "clip_id": "23346bf6-08ce-496c-83bd-81f0defe1f0a",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ignis, the Magma Colossus",
+    "slot": "death",
+    "clip_id": "47e9359e-cc36-4d10-938c-76717d28a264",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ignis, the Magma Colossus",
+    "slot": "death",
+    "clip_id": "72db3678-367e-4688-93b7-a66d94178d20",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ignis, the Magma Colossus",
+    "slot": "hurt",
+    "clip_id": "542fe55a-e458-435a-8d2a-82ad55782092",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ignis, the Magma Colossus",
+    "slot": "hurt",
+    "clip_id": "7ce8d372-821b-4e1e-bde1-087ca6fcb411",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ignis, the Magma Colossus",
+    "slot": "hurt",
+    "clip_id": "e8f34b21-3de5-41c3-8b5c-f522a3a2ad00",
     "volume": 1,
     "weight": 1,
     "sort": 0
@@ -9064,6 +10792,60 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Jungle Miniboss",
+    "slot": "death",
+    "clip_id": "2df3eb59-cded-4d6c-bc55-2b4a62b2b5ce",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Jungle Miniboss",
+    "slot": "death",
+    "clip_id": "5066573b-8ea3-42cd-9d0a-2ccdd4312ad9",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Jungle Miniboss",
+    "slot": "death",
+    "clip_id": "b2543110-b6f6-4e7d-9952-cf5cefd5b8d7",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Jungle Miniboss",
+    "slot": "hurt",
+    "clip_id": "0e5b1fb9-cff3-4bb2-a317-71ec7e97ba65",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Jungle Miniboss",
+    "slot": "hurt",
+    "clip_id": "51345c5c-0b44-461f-8964-b86b608218d6",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Jungle Miniboss",
+    "slot": "hurt",
+    "clip_id": "6cfb54a4-8824-4fca-87b5-c563b605e2f4",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Jungle Ranged",
     "slot": "death",
     "clip_id": "3b825abb-3351-485a-9b39-5a246b64e394",
@@ -9220,6 +11002,60 @@
     "subject_key": "Jungle Swarm",
     "slot": "hurt",
     "clip_id": "f10a8f54-84dd-4e7c-b4cc-98d2b1d8feec",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Lightning Elemental Guard",
+    "slot": "death",
+    "clip_id": "133035e7-66ef-45f0-9f7b-bd19f0f1ee6b",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Lightning Elemental Guard",
+    "slot": "death",
+    "clip_id": "201fc260-bb58-460d-8a0e-fbee1627e6d2",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Lightning Elemental Guard",
+    "slot": "death",
+    "clip_id": "3d778111-0374-46b5-8d2a-9d69bca4eea0",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Lightning Elemental Guard",
+    "slot": "hurt",
+    "clip_id": "2a8520b1-f546-4861-9cb8-0c12c3782fcf",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Lightning Elemental Guard",
+    "slot": "hurt",
+    "clip_id": "44e6c425-d3d9-480f-966b-7d23670a6930",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Lightning Elemental Guard",
+    "slot": "hurt",
+    "clip_id": "645dfb92-e9d0-4caf-9e0e-a750e6adfd25",
     "volume": 1,
     "weight": 1,
     "sort": 0
@@ -9442,6 +11278,60 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Nightmare Elite Miniboss",
+    "slot": "death",
+    "clip_id": "0eaa28ba-e350-4e7a-b236-0a405c523054",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Nightmare Elite Miniboss",
+    "slot": "death",
+    "clip_id": "22cc6b87-2079-43a9-9ece-9dd25e768a0a",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Nightmare Elite Miniboss",
+    "slot": "death",
+    "clip_id": "cd07f1cf-8731-4484-b4d4-e5f8be104e78",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Nightmare Elite Miniboss",
+    "slot": "hurt",
+    "clip_id": "06fecd4a-68c2-4062-9cde-2d9828f1a498",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Nightmare Elite Miniboss",
+    "slot": "hurt",
+    "clip_id": "e74088c2-7fcf-4732-8fce-31f058edbbdc",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Nightmare Elite Miniboss",
+    "slot": "hurt",
+    "clip_id": "f9febade-b840-4d7d-8209-73644a24cb32",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Nightmare Heavy",
     "slot": "death",
     "clip_id": "32e37505-c00f-4bf6-9464-4bd477a6ab8d",
@@ -9544,6 +11434,60 @@
     "subject_key": "Nightmare Line",
     "slot": "hurt",
     "clip_id": "d0985f66-0df4-4475-b11f-1f74bd1d9d2a",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Nightmare Miniboss",
+    "slot": "death",
+    "clip_id": "0054c45e-6d70-499a-8510-dc54d6f4c43b",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Nightmare Miniboss",
+    "slot": "death",
+    "clip_id": "8e3ad4c5-922a-4f09-92c7-847659aa6a2d",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Nightmare Miniboss",
+    "slot": "death",
+    "clip_id": "94f1607b-992e-409a-b4cc-5a4aa35949c7",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Nightmare Miniboss",
+    "slot": "hurt",
+    "clip_id": "33927cdb-97db-4148-816f-bf4af0216584",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Nightmare Miniboss",
+    "slot": "hurt",
+    "clip_id": "53171cee-22d8-4857-8a8a-6b73bd1d5abd",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Nightmare Miniboss",
+    "slot": "hurt",
+    "clip_id": "5e6a73db-3fc5-4396-bcb7-c9aeb5793dcf",
     "volume": 1,
     "weight": 1,
     "sort": 0
@@ -9706,6 +11650,60 @@
     "subject_key": "Nightmare Swarm",
     "slot": "hurt",
     "clip_id": "f9f4412c-d817-4be8-a510-a159a00ce2a0",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ossuary Warden",
+    "slot": "death",
+    "clip_id": "476f1a88-7382-4fbd-a7f4-b1564425b3f9",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ossuary Warden",
+    "slot": "death",
+    "clip_id": "86d27a06-891b-4060-aab9-3c6b1f36d6ed",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ossuary Warden",
+    "slot": "death",
+    "clip_id": "dce170df-ca65-47d0-86c5-80b56d30e7df",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ossuary Warden",
+    "slot": "hurt",
+    "clip_id": "96741368-1db5-4e24-afd2-4c355c1ca917",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ossuary Warden",
+    "slot": "hurt",
+    "clip_id": "ad056b74-b9db-4a85-be21-90136fdba3c7",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ossuary Warden",
+    "slot": "hurt",
+    "clip_id": "d33e2c3b-24a9-4c76-ad36-3e36a90eccc3",
     "volume": 1,
     "weight": 1,
     "sort": 0
@@ -9928,6 +11926,60 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Plague Elite Miniboss",
+    "slot": "death",
+    "clip_id": "3f5ba4fd-0b12-4e17-96a0-49a234221586",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Plague Elite Miniboss",
+    "slot": "death",
+    "clip_id": "d6d60144-920d-4fa8-8806-97d17b358031",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Plague Elite Miniboss",
+    "slot": "death",
+    "clip_id": "f28fa081-75bd-40d0-b7ee-9ccafff0f32d",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Plague Elite Miniboss",
+    "slot": "hurt",
+    "clip_id": "0eb2f15e-f6c8-4c94-bb8e-ae2d6a0c5e0e",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Plague Elite Miniboss",
+    "slot": "hurt",
+    "clip_id": "1c7ca7b3-3dc9-4f64-b51a-8da257a60dcd",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Plague Elite Miniboss",
+    "slot": "hurt",
+    "clip_id": "dbcbc076-37bc-42fb-8866-ace02bef2360",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Plague Heavy",
     "slot": "death",
     "clip_id": "196dc5c9-b490-4548-b2f7-2221743ac643",
@@ -10030,6 +12082,60 @@
     "subject_key": "Plague Line",
     "slot": "hurt",
     "clip_id": "5384dc88-1951-4f62-b0de-468917ddf858",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Plague Miniboss",
+    "slot": "death",
+    "clip_id": "228cb3fc-7c62-486e-8c3f-ffb9cd07a61e",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Plague Miniboss",
+    "slot": "death",
+    "clip_id": "7e4c65fe-b80b-4347-8bea-0067ae420703",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Plague Miniboss",
+    "slot": "death",
+    "clip_id": "ca236817-5028-4145-b2fd-a4483712944b",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Plague Miniboss",
+    "slot": "hurt",
+    "clip_id": "09316284-4550-4414-9333-681ad474a6fb",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Plague Miniboss",
+    "slot": "hurt",
+    "clip_id": "45bfcb30-1c54-41f9-b60b-23f56450b8a7",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Plague Miniboss",
+    "slot": "hurt",
+    "clip_id": "6d2e8d6a-fff0-45c8-b4d4-3675f9760f04",
     "volume": 1,
     "weight": 1,
     "sort": 0
@@ -10522,6 +12628,60 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Rime Miniboss",
+    "slot": "death",
+    "clip_id": "2dd07949-afdf-4e4d-b6a0-9522b64797d0",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Rime Miniboss",
+    "slot": "death",
+    "clip_id": "cd95286f-363c-4968-8740-d77d49827c13",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Rime Miniboss",
+    "slot": "death",
+    "clip_id": "ce85dece-c3c9-4cdc-99b6-3fcd136b18e3",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Rime Miniboss",
+    "slot": "hurt",
+    "clip_id": "28c14c63-a370-4105-87a5-08e09009f333",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Rime Miniboss",
+    "slot": "hurt",
+    "clip_id": "9b4ac358-853d-4650-9719-09c9537ca342",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Rime Miniboss",
+    "slot": "hurt",
+    "clip_id": "e25d1cb9-0630-45e6-88d6-60b73b750199",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Rime Ranged",
     "slot": "death",
     "clip_id": "4a16f4ed-d19e-4a54-a5ec-2b378bfe703f",
@@ -11008,6 +13168,60 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Ruin Miniboss",
+    "slot": "death",
+    "clip_id": "49f41204-7e33-4cb3-af3b-ae72e1246876",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ruin Miniboss",
+    "slot": "death",
+    "clip_id": "589dbb80-36ad-41f1-828b-a9de8ce383c2",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ruin Miniboss",
+    "slot": "death",
+    "clip_id": "d5626379-b098-4b59-9c9b-bde47a4760bb",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ruin Miniboss",
+    "slot": "hurt",
+    "clip_id": "2c565fc8-b16b-4a0b-a0cb-74fa7ebe2d0d",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ruin Miniboss",
+    "slot": "hurt",
+    "clip_id": "a81e5eee-d0b5-4412-b9aa-3a5561822c63",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Ruin Miniboss",
+    "slot": "hurt",
+    "clip_id": "ebf784ab-2702-45c4-9a5e-8576b988ec5e",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Ruin Ranged",
     "slot": "death",
     "clip_id": "7e0eff28-40ce-49b5-b091-ba94e9f9aaae",
@@ -11164,6 +13378,60 @@
     "subject_key": "Ruin Swarm",
     "slot": "hurt",
     "clip_id": "e7f07f61-c192-47f2-b13e-6e94c68e7936",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Shade Herald",
+    "slot": "death",
+    "clip_id": "8090bdff-2191-4a08-9f1c-57a312d8e69b",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Shade Herald",
+    "slot": "death",
+    "clip_id": "df1e50b6-08c4-4abe-a2bb-6e4e954996c3",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Shade Herald",
+    "slot": "death",
+    "clip_id": "e78f20f5-d6da-49fc-bac2-ae168f365636",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Shade Herald",
+    "slot": "hurt",
+    "clip_id": "756a035a-a09f-44e3-841d-bc936de481ac",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Shade Herald",
+    "slot": "hurt",
+    "clip_id": "789d20e7-275a-4433-8c5f-7c16f852435d",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Shade Herald",
+    "slot": "hurt",
+    "clip_id": "8cea82a7-223a-4d39-95ba-9296cd7112c9",
     "volume": 1,
     "weight": 1,
     "sort": 0
@@ -11596,6 +13864,60 @@
     "subject_key": "Stoneborn Line",
     "slot": "hurt",
     "clip_id": "3b20cf3a-dd88-45fd-a93b-2fec7bef72c5",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Stoneborn Miniboss",
+    "slot": "death",
+    "clip_id": "aa4c0275-4a10-4235-bc50-1d4fa5e2c4be",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Stoneborn Miniboss",
+    "slot": "death",
+    "clip_id": "c1035843-df0e-4399-9b24-c38241e5a79a",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Stoneborn Miniboss",
+    "slot": "death",
+    "clip_id": "f0dd21ae-ceea-43d3-b6ad-e0fb56791d00",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Stoneborn Miniboss",
+    "slot": "hurt",
+    "clip_id": "114d10ba-ab63-4d5f-9fb0-77dde18415fd",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Stoneborn Miniboss",
+    "slot": "hurt",
+    "clip_id": "461f89d6-f16c-4669-821b-6564781cacc7",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Stoneborn Miniboss",
+    "slot": "hurt",
+    "clip_id": "9f0ac3cf-62c0-4175-a18b-fec682f4a685",
     "volume": 1,
     "weight": 1,
     "sort": 0
@@ -12088,6 +14410,60 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Storm Miniboss",
+    "slot": "death",
+    "clip_id": "09205c50-2a3b-47c3-9bb3-084343ffabf4",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Storm Miniboss",
+    "slot": "death",
+    "clip_id": "194ceb5b-8715-486a-a0d5-64c53846d33c",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Storm Miniboss",
+    "slot": "death",
+    "clip_id": "c1188e8f-2dcf-44e8-b5ec-312135d665f6",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Storm Miniboss",
+    "slot": "hurt",
+    "clip_id": "7c7ea206-148c-4fbf-8207-be007cf28460",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Storm Miniboss",
+    "slot": "hurt",
+    "clip_id": "9e3eac78-921b-402b-aa2f-87afe78ced0f",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Storm Miniboss",
+    "slot": "hurt",
+    "clip_id": "a8f5e35a-65fe-474c-8cec-fee7cdf00f6f",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Storm Ranged",
     "slot": "death",
     "clip_id": "2255b217-552f-4336-9797-f6c45f1fe3eb",
@@ -12574,6 +14950,60 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Swamp Miniboss",
+    "slot": "death",
+    "clip_id": "061e4e17-76db-4eac-a93a-d7785785ad29",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Swamp Miniboss",
+    "slot": "death",
+    "clip_id": "10e2032d-9094-468b-a72d-079dc1856cb6",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Swamp Miniboss",
+    "slot": "death",
+    "clip_id": "19c0af19-25c9-44c6-acc2-e4d9259a908d",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Swamp Miniboss",
+    "slot": "hurt",
+    "clip_id": "27e8b30c-7889-40af-8097-adefe2548035",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Swamp Miniboss",
+    "slot": "hurt",
+    "clip_id": "a7222577-1cdf-46b9-96a5-dc94e62a92f0",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Swamp Miniboss",
+    "slot": "hurt",
+    "clip_id": "ce31dfea-c565-4700-bb70-523cafb51144",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Swamp Ranged",
     "slot": "death",
     "clip_id": "0e32a909-14de-43c9-83ae-57b476e686af",
@@ -12730,6 +15160,168 @@
     "subject_key": "Swamp Swarm",
     "slot": "hurt",
     "clip_id": "eb625b2c-4298-47dc-9e63-859ea8113588",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "The Bone Regent",
+    "slot": "death",
+    "clip_id": "3e352fc9-838a-4560-ab49-2fefdaea4d59",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "The Bone Regent",
+    "slot": "death",
+    "clip_id": "899f3562-a40f-46a0-9d49-1d5e6930dfe4",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "The Bone Regent",
+    "slot": "death",
+    "clip_id": "ab401eab-0a51-4beb-8133-920ac3662e43",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "The Bone Regent",
+    "slot": "hurt",
+    "clip_id": "3833edd4-f533-4d7f-b4d3-87ea0f92f63c",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "The Bone Regent",
+    "slot": "hurt",
+    "clip_id": "8d0920c6-6a68-4943-9fdb-72291ef704ef",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "The Bone Regent",
+    "slot": "hurt",
+    "clip_id": "c9e3d383-fce3-4a30-a0e7-91de7e65e021",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "The Ember Queen",
+    "slot": "death",
+    "clip_id": "076644be-e0d6-4672-9b5f-14a438fc8d56",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "The Ember Queen",
+    "slot": "death",
+    "clip_id": "138ae951-447b-4737-b5ac-e599ed4f4c88",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "The Ember Queen",
+    "slot": "death",
+    "clip_id": "769ebf84-7daf-48dc-88d4-dbadc8f931f6",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "The Ember Queen",
+    "slot": "hurt",
+    "clip_id": "468b3008-fdc1-47c0-9429-e9c11dfb7c67",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "The Ember Queen",
+    "slot": "hurt",
+    "clip_id": "71578b9b-4363-40ed-a7ab-73823564dd4c",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "The Ember Queen",
+    "slot": "hurt",
+    "clip_id": "f28d6b53-20cd-434a-a238-fc514af16cf5",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "The Umbral Gatekeeper",
+    "slot": "death",
+    "clip_id": "1d713ebd-81a4-4965-b25d-da270be90b26",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "The Umbral Gatekeeper",
+    "slot": "death",
+    "clip_id": "98e15a63-37c7-4a47-ac26-44cbb1b72c2e",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "The Umbral Gatekeeper",
+    "slot": "death",
+    "clip_id": "b4ef3ab1-f04a-4931-8301-a5dad24b44ac",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "The Umbral Gatekeeper",
+    "slot": "hurt",
+    "clip_id": "1750e0bc-3ccc-4b0e-bd68-fe39ff55b69a",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "The Umbral Gatekeeper",
+    "slot": "hurt",
+    "clip_id": "3abed8f3-9bd0-4f1b-bc1a-c1a5130bd137",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "The Umbral Gatekeeper",
+    "slot": "hurt",
+    "clip_id": "3ff6a775-8450-4e63-a041-832bb6e4dbf0",
     "volume": 1,
     "weight": 1,
     "sort": 0
@@ -12898,6 +15490,33 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Titan Elite Miniboss",
+    "slot": "hurt",
+    "clip_id": "2974a866-4ab2-46c6-adb5-04bc2e9c538f",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Titan Elite Miniboss",
+    "slot": "hurt",
+    "clip_id": "4082c35f-2d3d-4816-a0a2-cde0a91e18d6",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Titan Elite Miniboss",
+    "slot": "hurt",
+    "clip_id": "882f0230-d679-4b9c-af32-b8b4dfd66578",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Titan Heavy",
     "slot": "death",
     "clip_id": "4495a464-4be8-459a-b644-9d806729d8f8",
@@ -13000,6 +15619,60 @@
     "subject_key": "Titan Line",
     "slot": "hurt",
     "clip_id": "7c599f39-96ac-41c8-ae60-750c9f7663c2",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Titan Miniboss",
+    "slot": "death",
+    "clip_id": "1c848186-c8e9-4624-8cb4-63d590068590",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Titan Miniboss",
+    "slot": "death",
+    "clip_id": "519fe112-1335-40a1-aee5-0dcafbdd48c2",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Titan Miniboss",
+    "slot": "death",
+    "clip_id": "9c94a867-857b-4c38-9b8c-df88efe6854e",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Titan Miniboss",
+    "slot": "hurt",
+    "clip_id": "4c6d9110-2254-42d1-b53b-9e39f747e480",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Titan Miniboss",
+    "slot": "hurt",
+    "clip_id": "c3bd52df-727d-4b33-a58e-db30943f780f",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Titan Miniboss",
+    "slot": "hurt",
+    "clip_id": "f22664f0-4769-4e84-ae32-3b771275e9a1",
     "volume": 1,
     "weight": 1,
     "sort": 0
@@ -13492,6 +16165,60 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Tundra Miniboss",
+    "slot": "death",
+    "clip_id": "198d3f32-ac6e-49da-a39b-970adbfa3867",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Tundra Miniboss",
+    "slot": "death",
+    "clip_id": "35afa3ee-41c6-43c9-8875-c5f2b4e877bc",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Tundra Miniboss",
+    "slot": "death",
+    "clip_id": "7cdc19fb-1f8b-41b5-ac91-26d3008d283e",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Tundra Miniboss",
+    "slot": "hurt",
+    "clip_id": "2431b5e5-65f6-4424-b39d-4bce00f3c6f7",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Tundra Miniboss",
+    "slot": "hurt",
+    "clip_id": "b596f803-f15f-4121-b564-0271db014aa8",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Tundra Miniboss",
+    "slot": "hurt",
+    "clip_id": "efa684c7-d842-4840-8394-0b4c08c1fdd0",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Tundra Ranged",
     "slot": "death",
     "clip_id": "08a1f3f3-0f78-4834-ba7f-fdfee2f0ed2d",
@@ -13870,6 +16597,60 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Umbral Elite Miniboss",
+    "slot": "death",
+    "clip_id": "491fafde-0f44-4712-86ec-0fd5e582a12e",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Umbral Elite Miniboss",
+    "slot": "death",
+    "clip_id": "4b33cf13-e83d-4dec-9bb2-e1d14b85e48d",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Umbral Elite Miniboss",
+    "slot": "death",
+    "clip_id": "c1997936-226c-4881-a777-ad99394cc50b",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Umbral Elite Miniboss",
+    "slot": "hurt",
+    "clip_id": "1767d5fc-2927-48ba-a78a-a9deffe3075e",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Umbral Elite Miniboss",
+    "slot": "hurt",
+    "clip_id": "3822c98b-11c5-481c-9c8d-c25e0c03218b",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Umbral Elite Miniboss",
+    "slot": "hurt",
+    "clip_id": "6a8cc197-3f01-46de-9d7c-ed11a9fe9a18",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Umbral Heavy",
     "slot": "death",
     "clip_id": "174b41fc-d5c0-47ce-ab94-0f4efd3f7943",
@@ -13972,6 +16753,60 @@
     "subject_key": "Umbral Line",
     "slot": "hurt",
     "clip_id": "c54db62d-992d-4bb2-ba38-fb777b7b0844",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Umbral Miniboss",
+    "slot": "death",
+    "clip_id": "4251af57-80ae-4f84-9736-b8cd7acda0b5",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Umbral Miniboss",
+    "slot": "death",
+    "clip_id": "db939c2b-5984-466b-806e-6425da548f88",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Umbral Miniboss",
+    "slot": "death",
+    "clip_id": "e05afda9-6be8-4e6f-84e5-f48512e87c1f",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Umbral Miniboss",
+    "slot": "hurt",
+    "clip_id": "36b9a459-b30f-4d1e-bbe2-b75a057e744d",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Umbral Miniboss",
+    "slot": "hurt",
+    "clip_id": "b9ae30e8-a551-4bb2-9ec4-d27bec8be745",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Umbral Miniboss",
+    "slot": "hurt",
+    "clip_id": "cfc959b3-9d45-4a85-b995-1fd17fce0fa4",
     "volume": 1,
     "weight": 1,
     "sort": 0
@@ -14464,6 +17299,60 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Undead Miniboss",
+    "slot": "death",
+    "clip_id": "66f0c4ae-5fec-45fb-a562-9c8682bf8d21",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Undead Miniboss",
+    "slot": "death",
+    "clip_id": "89ddeb6b-2ba5-408d-891e-9a4e8be3ad38",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Undead Miniboss",
+    "slot": "death",
+    "clip_id": "e6e3c79d-2a48-4207-8821-6c54b28b3930",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Undead Miniboss",
+    "slot": "hurt",
+    "clip_id": "2767af5e-c7e0-4c1d-b17f-c70976e960e8",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Undead Miniboss",
+    "slot": "hurt",
+    "clip_id": "cf161e63-03c0-48a5-9e85-78eb0f3b836c",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Undead Miniboss",
+    "slot": "hurt",
+    "clip_id": "e36f2afe-3efe-42b7-84f7-fdeb0c074e8c",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Undead Ranged",
     "slot": "death",
     "clip_id": "64f1e3fd-19f4-44ef-a858-5783918a7e56",
@@ -14896,6 +17785,60 @@
   },
   {
     "subject_kind": "creature",
+    "subject_key": "Void Elite Miniboss",
+    "slot": "death",
+    "clip_id": "20508aad-45e4-4677-9364-59d5dc904442",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Void Elite Miniboss",
+    "slot": "death",
+    "clip_id": "cc7b1fb4-1065-4ea7-abee-f923df191e4a",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Void Elite Miniboss",
+    "slot": "death",
+    "clip_id": "f84bc547-1423-4ba6-a1e8-1197206cf29a",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Void Elite Miniboss",
+    "slot": "hurt",
+    "clip_id": "3d70e103-9c56-458a-86ec-bfec19859c80",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Void Elite Miniboss",
+    "slot": "hurt",
+    "clip_id": "8a468e36-52e9-4989-bb95-d69face9b681",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Void Elite Miniboss",
+    "slot": "hurt",
+    "clip_id": "fa0dd4ba-ceb5-4e6b-8901-7fff2314c9d3",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
     "subject_key": "Void Heavy",
     "slot": "death",
     "clip_id": "43319ff2-7afe-44eb-b213-4c13b37aafc2",
@@ -14998,6 +17941,60 @@
     "subject_key": "Void Line",
     "slot": "hurt",
     "clip_id": "f5d732ae-6781-425c-81ce-e0f643dc6049",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Void Miniboss",
+    "slot": "death",
+    "clip_id": "72b3e348-a1ae-43d7-b237-35450dc13b0a",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Void Miniboss",
+    "slot": "death",
+    "clip_id": "8cff7166-8480-4f45-a242-4f5da865d95a",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Void Miniboss",
+    "slot": "death",
+    "clip_id": "fcef051f-e391-4666-9c37-84ce88683c02",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Void Miniboss",
+    "slot": "hurt",
+    "clip_id": "9472eead-0a63-49ac-84b6-152014787a85",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Void Miniboss",
+    "slot": "hurt",
+    "clip_id": "e7090257-d1f7-4949-81de-0ee27dc40ecb",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Void Miniboss",
+    "slot": "hurt",
+    "clip_id": "f20842d4-d61e-4934-87ca-2ec6de149208",
     "volume": 1,
     "weight": 1,
     "sort": 0
@@ -15484,6 +18481,60 @@
     "subject_key": "Volcanic Line",
     "slot": "hurt",
     "clip_id": "72fe4d4f-7bed-4ce3-9a10-ab28df8dadf0",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Volcanic Miniboss",
+    "slot": "death",
+    "clip_id": "1cf407f1-cb35-4a94-afd1-a024996ac3a1",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Volcanic Miniboss",
+    "slot": "death",
+    "clip_id": "2817822b-2168-4e79-9e41-d8094649dca7",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Volcanic Miniboss",
+    "slot": "death",
+    "clip_id": "82c1215c-37af-4498-b069-42233487b0c9",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Volcanic Miniboss",
+    "slot": "hurt",
+    "clip_id": "3a04b325-7ad0-40a1-872f-b8a05aefcb45",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Volcanic Miniboss",
+    "slot": "hurt",
+    "clip_id": "8b89fb9a-6195-43a3-ae49-0f04e598c62e",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Volcanic Miniboss",
+    "slot": "hurt",
+    "clip_id": "c68c4de5-9798-4053-ad3c-bbe2bd0e1059",
     "volume": 1,
     "weight": 1,
     "sort": 0
@@ -16024,6 +19075,60 @@
     "subject_key": "Woodland Line",
     "slot": "hurt",
     "clip_id": "79271340-cafa-42a7-85e6-2f34aecc14a5",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Woodland Miniboss",
+    "slot": "death",
+    "clip_id": "38b12c6e-8baf-4778-bc9f-e91a9b54d398",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Woodland Miniboss",
+    "slot": "death",
+    "clip_id": "6503ba0b-b943-4b37-a85e-55ec3b19ce00",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Woodland Miniboss",
+    "slot": "death",
+    "clip_id": "c53abb6b-c5bf-4e92-8728-673c140066f0",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Woodland Miniboss",
+    "slot": "hurt",
+    "clip_id": "29477195-9225-4cc9-99a3-cbab9dd6b55e",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Woodland Miniboss",
+    "slot": "hurt",
+    "clip_id": "3877fb20-f2ed-484a-abe8-9deda76384c8",
+    "volume": 1,
+    "weight": 1,
+    "sort": 0
+  },
+  {
+    "subject_kind": "creature",
+    "subject_key": "Woodland Miniboss",
+    "slot": "hurt",
+    "clip_id": "bd7b1491-47f4-40da-ad1e-32e8e8a803a9",
     "volume": 1,
     "weight": 1,
     "sort": 0

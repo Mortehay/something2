@@ -30,7 +30,7 @@ const { composeBiomePrompt } = require('./services/biomePrompt');
 const { buildWorldGenConfig } = require('./services/worldGenConfig');
 const { loadTileTypes } = require('./services/tileTypes');
 const { ATTACK_KINDS, CHASE_STYLES, ELEMENTS } = require('./services/creatureBehaviors');
-const { ABILITIES_LATERAL } = require('./authority/creatures');
+const { ABILITIES_LATERAL, BOSS_TIERS } = require('./authority/creatures');
 require('dotenv').config();
 
 const app = express();
@@ -155,9 +155,12 @@ const authRouter = require('./auth/routes.js');
 const progressionRoutes = require('./api/progressionRoutes.js');
 const passiveTreeRoutes = require('./api/passiveTreeRoutes.js');
 const passiveNodesRoutes = require('./api/passiveNodesRoutes.js');
+const auraEffectsRoutes = require('./api/auraEffectsRoutes.js');
 const characterRoutes = require('./api/characterRoutes.js');
 const { createQuestsRouter } = require('./routes/questsRoutes.js');
 const audioRoutes = require('./api/audioRoutes.js');
+const spriteBatchRoutes = require('./api/spriteBatchRoutes.js');
+const { createDispatcher: createSpriteDispatcher } = require('./services/spriteDispatcher.js');
 const remoteAudioProvider = require('./services/remoteAudioProvider');
 const textProvider = require('./services/textProvider');
 const { DEFAULTS: GAME_SETTING_DEFAULTS, getSettings, setSetting } = require('./services/gameSettings.js');
@@ -207,6 +210,18 @@ function isUniqueViolation(err) {
 // problem (SOMET-254, first fixed for /api/creature-behaviors).
 function invalidId(id) {
   return !/^[0-9]+$/.test(String(id));
+}
+
+// A provider_id from a JSON body (SOMET-538). Absent or null means "not
+// chosen"; anything else must be an id the int4 column can hold. Without the
+// range check 99999999999 passed Number.isInteger and answered 500 from the
+// query; without the type check a string or 1.5 was silently dropped and the
+// work went to the active provider instead of being refused.
+const MAX_INT4 = 2147483647;
+function bodyProviderId(value) {
+  if (value === undefined || value === null) return { id: null };
+  if (Number.isInteger(value) && value >= 1 && value <= MAX_INT4) return { id: value };
+  return { error: `provider_id must be a positive integer up to ${MAX_INT4}, or omitted` };
 }
 
 // Upper bound for PUT /api/worlds/:id creature_count (SOMET-188 / F-008).
@@ -348,6 +363,13 @@ async function fetchJobDocument(jobId) {
   return spriteGen.getJob(jobId);
 }
 let spriteGen = require('./services/spriteGen');
+const spriteDispatcher = createSpriteDispatcher({
+  db: guardPool,
+  spriteGen: {
+    postGenerate: (...args) => spriteGen.postGenerate(...args),
+    getJob: (...args) => spriteGen.getJob(...args),
+  },
+});
 const __setSpriteGen = (impl) => { spriteGen = impl; };
 const assetStore = require('./services/assetStore');
 
@@ -523,6 +545,7 @@ app.use('/api/passive-tree', passiveTreeRoutes(guardPool));
 // under here is adminGuard'd, reads included, while /api/passive-tree is the
 // player's read-only view of the same table.
 app.use('/api/passive-nodes', passiveNodesRoutes(guardPool));
+app.use('/api/aura-effects', auraEffectsRoutes(guardPool));
 
 // Character slots (SOMET-259): list / create / delete, plus the playable-class
 // catalog the creation form reads. Behind requireAuth, scoped to req.user.id.
@@ -533,6 +556,7 @@ app.use('/api/quests', createQuestsRouter(guardPool));
 // Player routes (world bundle, misses) and admin routes (/admin/*) share one
 // mount; each route carries its own guard.
 app.use('/api/audio', audioRoutes(guardPool));
+app.use('/api/sprite-admin', spriteBatchRoutes(guardPool, adminGuard, spriteDispatcher));
 
 // The player's fog-of-war world map (SOMET-263). Read-only, and deliberately
 // NOT the payload the admin World Map tab reads from /api/world-graph: that one
@@ -710,7 +734,7 @@ app.get('/api/map/tiles', async (req, res) => {
 });
 
 // Mirrors the entity_types_attack_element_check CHECK constraint (migration
-// 1714440081000) so a bad value is a readable 400 rather than a raw 500 from
+// 1714440081000, widened to include 'arcane' by 1714440670000) so a bad value is a readable 400 rather than a raw 500 from
 // the constraint -- render_mode on these same two routes has no such check
 // (SOMET-254 leaves that pre-existing gap as-is; it is a free-form column
 // with no CHECK constraint to mirror). behavior_id is a real integer FK into
@@ -748,6 +772,25 @@ function entityTypeFieldError(body) {
   if (body.attack_element != null && !ELEMENTS.includes(body.attack_element)) {
     return `attack_element must be one of ${ELEMENTS.join(', ')}`;
   }
+  // SOMET-603: the boss fields. Each mirrors its DB constraint so a bad value
+  // is a readable 400 naming the field, never a raw 500.
+  if (body.boss_tier != null && !BOSS_TIERS.includes(body.boss_tier)) {
+    return `boss_tier must be one of ${BOSS_TIERS.join(', ')} or null`;
+  }
+  if (body.element != null && !ITEM_ELEMENTS.includes(body.element)) {
+    return `element must be one of ${ITEM_ELEMENTS.join(', ')} or null`;
+  }
+  if (body.hitbox_size != null && (!Number.isInteger(body.hitbox_size)
+      || body.hitbox_size < 1 || body.hitbox_size > MAX_ENTITY_DISPLAY_PX)) {
+    return `hitbox_size must be an integer between 1 and ${MAX_ENTITY_DISPLAY_PX}`;
+  }
+  if (body.xp_reward != null && (!Number.isInteger(body.xp_reward) || body.xp_reward < 0)) {
+    return 'xp_reward must be a non-negative integer';
+  }
+  if (body.base_damage != null && (typeof body.base_damage !== 'number'
+      || !Number.isFinite(body.base_damage) || body.base_damage < 0)) {
+    return 'base_damage must be a non-negative number';
+  }
   if (body.behavior_id != null
       && (typeof body.behavior_id !== 'number' || !Number.isInteger(body.behavior_id))) {
     return 'behavior_id must be an integer';
@@ -775,6 +818,13 @@ function entityTypeFieldError(body) {
           || (Array.isArray(body.spawn_tiles) && body.spawn_tiles.length > 0))) {
     return 'a point-kind type cannot be a creature or have spawn tiles';
   }
+  // SOMET-604: entity_types.auras is a list of aura_effects NAMES (no FK).
+  // undefined = not sent (PUT leaves it alone), null = never authored, [] = none.
+  if (body.auras !== undefined && body.auras !== null) {
+    if (!Array.isArray(body.auras)) return 'auras must be an array of aura names or null';
+    if (body.auras.some((n) => typeof n !== 'string' || n.trim() === '')) return 'each aura must be a non-empty name';
+    if (new Set(body.auras).size !== body.auras.length) return 'auras must not repeat a name';
+  }
   return null;
 }
 
@@ -789,6 +839,16 @@ app.get('/api/entity-types', async (req, res) => {
   }
 });
 
+// The dropdown is the first defence; this is the second, for scripts and stale
+// tabs. Runs on the caller's db handle so PUT checks inside its transaction.
+async function unknownAuraError(db, auras) {
+  if (!Array.isArray(auras) || auras.length === 0) return null;
+  const r = await db.query('SELECT name FROM aura_effects WHERE name = ANY($1::text[])', [auras]);
+  const known = new Set(r.rows.map((x) => x.name));
+  const missing = auras.find((n) => !known.has(n));
+  return missing ? `unknown aura "${missing}"` : null;
+}
+
 app.post('/api/entity-types', adminGuard, async (req, res) => {
   try {
     const {
@@ -796,7 +856,8 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
       strength, dexterity, constitution, intelligence, wisdom, charisma,
       hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
       display_width, display_height, render_mode, is_creature, prompt, place_order,
-      behavior_id, attack_element, point_kind
+      behavior_id, attack_element, point_kind,
+      boss_tier, element, hitbox_size, xp_reward, base_damage
     } = req.body;
     if (!name || !color) return res.status(400).json({ error: 'Name and color are required' });
     if (catalogNameTooLong(name)) {
@@ -824,6 +885,8 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
     // providerPinError above.
     const pinModalityErr = await providerPinModalityError(pool, pin);
     if (pinModalityErr) return res.status(400).json({ error: pinModalityErr });
+    const auraErr = await unknownAuraError(pool, req.body.auras);
+    if (auraErr) return res.status(400).json({ error: auraErr });
 
     const result = await pool.query(
       `INSERT INTO entity_types (
@@ -831,14 +894,17 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
         strength, dexterity, constitution, intelligence, wisdom, charisma,
         hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
         display_width, display_height, render_mode, is_creature, prompt, place_order,
-        behavior_id, attack_element, ai_provider_mode, ai_provider_id, point_kind
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29) RETURNING *`,
+        behavior_id, attack_element, ai_provider_mode, ai_provider_id, point_kind,
+        boss_tier, element, hitbox_size, xp_reward, base_damage, auras
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35::jsonb) RETURNING *`,
       [
         name, color, walkable ?? false, JSON.stringify(spawn_tiles || []), chance ?? 0.1,
         strength ?? 0, dexterity ?? 0, constitution ?? 0, intelligence ?? 0, wisdom ?? 0, charisma ?? 0,
         hp ?? 0, max_hp ?? 0, hp_regen_rate ?? 0, mana ?? 0, max_mana ?? 0, mana_regen_rate ?? 0, image,
         display_width, display_height, render_mode ?? 'rect', is_creature ?? false, prompt ?? '', Number(place_order) || 0,
-        behavior_id ?? null, attack_element || 'physical', pin.mode, pin.id, point_kind ?? null
+        behavior_id ?? null, attack_element || 'physical', pin.mode, pin.id, point_kind ?? null,
+        boss_tier ?? null, element ?? null, hitbox_size ?? null, xp_reward ?? null, base_damage ?? null,
+        req.body.auras == null ? null : JSON.stringify(req.body.auras)
       ]
     );
     res.status(201).json(result.rows[0]);
@@ -858,7 +924,8 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
     strength, dexterity, constitution, intelligence, wisdom, charisma,
     hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
     display_width, display_height, render_mode, is_creature, prompt, place_order,
-    behavior_id, attack_element, point_kind
+    behavior_id, attack_element, point_kind,
+    boss_tier, element, hitbox_size, xp_reward, base_damage
   } = req.body;
   if (catalogNameTooLong(name)) {
     return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
@@ -895,6 +962,9 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
   // legitimately sends point_kind: null, which a bare `?? null` COALESCE
   // would silently fail to apply.
   const pointKindProvided = 'point_kind' in req.body;
+  // SOMET-604: same present-in-body rule -- omitted leaves auras alone, null
+  // clears to NULL (never authored), [] stores an explicit none.
+  const aurasProvided = 'auras' in req.body;
 
   // SOMET-228: worlds.allowed_creature_types, world_creatures.type and
   // biomes.flora_types/creature_types reference entity_types by NAME (no
@@ -922,6 +992,11 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: pinModalityErr });
     }
+    const auraErr = await unknownAuraError(client, req.body.auras);
+    if (auraErr) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: auraErr });
+    }
 
     let renamedReferences = null;
     if (name != null) {
@@ -946,7 +1021,13 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
           'SELECT id, name FROM biomes WHERE flora_types @> $1::jsonb OR creature_types @> $1::jsonb',
           [JSON.stringify([oldName])],
         );
-        if (worldsRef.rows.length > 0 || creaturesRef.rows.length > 0 || biomesRef.rows.length > 0) {
+        // SOMET-609: worlds.dungeon_boss names its boss entity by name, no FK.
+        const bossRef = await client.query(
+          "SELECT id, name FROM worlds WHERE dungeon_boss->>'entity' = $1",
+          [oldName],
+        );
+        if (worldsRef.rows.length > 0 || creaturesRef.rows.length > 0 || biomesRef.rows.length > 0
+          || bossRef.rows.length > 0) {
           // Rewrite the ONE matching element inside each jsonb array, not the
           // whole array -- WITH ORDINALITY + `ORDER BY` keeps element order
           // stable, and jsonb_agg's per-element CASE leaves every other
@@ -1001,10 +1082,24 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
             );
             biomesCount = biomesResult.rowCount || 0;
           }
+          // SOMET-609: rewrite only the `entity` key; x/y/respawn_s stay. The
+          // checked-in p5 spec (scripts/dungeon/content.js) still names the
+          // old entity, so a later seed-map re-inserts it unless the spec is
+          // updated to follow.
+          let bossCount = 0;
+          if (bossRef.rows.length > 0) {
+            const bossResult = await client.query(
+              `UPDATE worlds SET dungeon_boss = jsonb_set(dungeon_boss, '{entity}', to_jsonb($2::text))
+               WHERE dungeon_boss->>'entity' = $1`,
+              [oldName, name],
+            );
+            bossCount = bossResult.rowCount || 0;
+          }
           renamedReferences = {
             worlds: worldsCount,
             biomes: biomesCount,
             hadPlacedCreatures: creaturesRef.rows.length > 0,
+            dungeonBosses: bossCount,
           };
         }
       }
@@ -1025,8 +1120,14 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
         ai_provider_mode = CASE WHEN $28::boolean THEN $29 ELSE entity_types.ai_provider_mode END,
         ai_provider_id = CASE WHEN $28::boolean THEN $30 ELSE entity_types.ai_provider_id END,
         point_kind = CASE WHEN $31::boolean THEN $32 ELSE entity_types.point_kind END,
+        boss_tier = CASE WHEN $33::boolean THEN $34::text ELSE entity_types.boss_tier END,
+        element = CASE WHEN $35::boolean THEN $36::text ELSE entity_types.element END,
+        hitbox_size = CASE WHEN $37::boolean THEN $38::integer ELSE entity_types.hitbox_size END,
+        xp_reward = CASE WHEN $39::boolean THEN $40::integer ELSE entity_types.xp_reward END,
+        base_damage = CASE WHEN $41::boolean THEN $42::real ELSE entity_types.base_damage END,
+        auras = CASE WHEN $43::boolean THEN $44::jsonb ELSE entity_types.auras END,
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $33 RETURNING *`,
+      WHERE id = $45 RETURNING *`,
       [
         name, color, walkable, JSON.stringify(spawn_tiles), chance,
         strength, dexterity, constitution, intelligence, wisdom, charisma,
@@ -1055,7 +1156,17 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
         // pointKindProvided/point_kind sit here for the same reason
         // behaviorIdProvided/pinSent do: id must stay `params[params.length - 1]`
         // -- entityTypes.test.js asserts it on this exact route.
-        behaviorIdProvided, pinSent, pin.mode, pin.id, pointKindProvided, point_kind ?? null, id
+        behaviorIdProvided, pinSent, pin.mode, pin.id, pointKindProvided, point_kind ?? null,
+        // SOMET-603: present-in-body flags, same reason as pointKindProvided:
+        // the form clears a field by sending null, which a COALESCE would eat.
+        'boss_tier' in req.body, boss_tier ?? null,
+        'element' in req.body, element ?? null,
+        'hitbox_size' in req.body, hitbox_size ?? null,
+        'xp_reward' in req.body, xp_reward ?? null,
+        'base_damage' in req.body, base_damage ?? null,
+        // SOMET-604: auras last before id, same present-in-body rule.
+        aurasProvided, req.body.auras == null ? null : JSON.stringify(req.body.auras),
+        id
       ]
     );
     if (result.rows.length === 0) {
@@ -1107,20 +1218,27 @@ app.delete('/api/entity-types/:id', adminGuard, async (req, res) => {
     const cur = await pool.query('SELECT name FROM entity_types WHERE id = $1', [id]);
     if (cur.rows.length === 0) return res.status(404).json({ error: 'Entity type not found' });
     const name = cur.rows[0].name;
-    const [worldsRef, creaturesRef, biomesRef] = await Promise.all([
+    const [worldsRef, creaturesRef, biomesRef, bossRef] = await Promise.all([
       pool.query('SELECT id, name FROM worlds WHERE allowed_creature_types @> $1::jsonb', [JSON.stringify([name])]),
       pool.query('SELECT 1 FROM world_creatures WHERE type = $1 LIMIT 1', [name]),
       pool.query(
         'SELECT id, name FROM biomes WHERE flora_types @> $1::jsonb OR creature_types @> $1::jsonb',
         [JSON.stringify([name])],
       ),
+      // SOMET-609: a dungeon whose boss this is would go bossless silently.
+      pool.query("SELECT id, name FROM worlds WHERE dungeon_boss->>'entity' = $1 ORDER BY name", [name]),
     ]);
-    if (worldsRef.rows.length > 0 || creaturesRef.rows.length > 0 || biomesRef.rows.length > 0) {
+    if (worldsRef.rows.length > 0 || creaturesRef.rows.length > 0 || biomesRef.rows.length > 0
+      || bossRef.rows.length > 0) {
+      const bossNote = bossRef.rows.length > 0
+        ? ` (dungeon boss of: ${bossRef.rows.map((w) => w.name).join(', ')})`
+        : '';
       return res.status(409).json({
-        error: `Cannot delete '${name}': still referenced by allowed_creature_types, placed creatures, or a biome`,
+        error: `Cannot delete '${name}': still referenced by allowed_creature_types, placed creatures, a biome, or a dungeon boss${bossNote}`,
         referencing_worlds: worldsRef.rows.map((w) => ({ id: w.id, name: w.name })),
         referencing_biomes: biomesRef.rows.map((b) => ({ id: b.id, name: b.name })),
         has_placed_creatures: creaturesRef.rows.length > 0,
+        dungeon_boss_worlds: bossRef.rows.map((w) => ({ id: w.id, name: w.name })),
       });
     }
     const result = await pool.query('DELETE FROM entity_types WHERE id = $1 RETURNING id', [id]);
@@ -2143,7 +2261,7 @@ function behaviorFieldError(body) {
     return 'preferred_range must be 0 or greater';
   }
   // SOMET-254: damage_override has no DB CHECK constraint (it is nullable
-  // with no bound, unlike preferred_range/the aura fields below), so nothing
+  // with no bound, unlike preferred_range above), so nothing
   // else in this function was rejecting a non-numeric value here -- it used
   // to reach Postgres as a real-column cast error (raw 500) instead of a
   // 400. Any finite number is valid, including negative (a creature that
@@ -2152,25 +2270,12 @@ function behaviorFieldError(body) {
   if (body.damage_override != null && !Number.isFinite(Number(body.damage_override))) {
     return 'damage_override must be a number';
   }
-  // SOMET-253 Task 8: pack-leader aura + per-rung gold. Mirrors migration
-  // 1714440085000's two CHECK constraints exactly. All six fields are
-  // optional in the body -- most seeded profiles carry no aura fields at all
-  // and fall back to the column defaults (0/1/1/1/0/0), same convention
+  // SOMET-253 Task 8: per-rung gold. Mirrors migration 1714440085000's
+  // creature_behaviors_gold_check exactly. Both fields are optional in the
+  // body and fall back to the column defaults (0/0), same convention
   // preferred_range/damage_override already use -- so each rule only fires
-  // when the field is actually present.
-  //
-  // aura_radius 0 means "not a leader" and is the correct value for eleven of
-  // the twelve seeded profiles, so it is >= 0 like preferred_range. The three
-  // multipliers are a different kind of 0: an aura_damage_mult/
-  // aura_defense_mult/aura_speed_mult of 0 would make every creature the aura
-  // touches deal, take, or move at NOTHING the instant a leader stands near
-  // them -- silently. Strictly > 0, same class of rule as move_speed_mult.
-  if (body.aura_radius != null && !(Number(body.aura_radius) >= 0)) {
-    return 'aura_radius must be 0 or greater';
-  }
-  for (const field of ['aura_damage_mult', 'aura_defense_mult', 'aura_speed_mult']) {
-    if (body[field] != null && !(Number(body[field]) > 0)) return `${field} must be greater than 0`;
-  }
+  // when the field is actually present. (The pack-leader aura that shared
+  // this block moved to aura_effects in SOMET-604.)
   if (body.gold_min != null && !(Number(body.gold_min) >= 0)) {
     return 'gold_min must be 0 or greater';
   }
@@ -2343,19 +2448,17 @@ app.post('/api/creature-behaviors', adminGuard, async (req, res) => {
       `INSERT INTO creature_behaviors
         (name, aggro_radius, leash_radius, chase_style,
          preferred_range, move_speed_mult, damage_override,
-         aura_radius, aura_damage_mult, aura_defense_mult, aura_speed_mult,
          gold_min, gold_max)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
       [b.name, b.aggro_radius, b.leash_radius, b.chase_style,
        b.preferred_range ?? 0, b.move_speed_mult ?? 1,
        // damage_override is nullable and 0 is a real value ("hits for
        // nothing"), so this must be ?? not || -- 0 must survive.
        b.damage_override ?? null,
-       // SOMET-253 Task 8: same ?? convention as above -- aura_radius 0 and
-       // gold_min 0 are real values ("not a leader" / "no loot"), not absent
-       // ones, so a genuine 0 must survive rather than being coerced by ||.
-       b.aura_radius ?? 0, b.aura_damage_mult ?? 1, b.aura_defense_mult ?? 1,
-       b.aura_speed_mult ?? 1, b.gold_min ?? 0, b.gold_max ?? 0],
+       // SOMET-253 Task 8: same ?? convention as above -- gold_min 0 is a
+       // real value ("no loot"), not an absent one, so a genuine 0 must
+       // survive rather than being coerced by ||.
+       b.gold_min ?? 0, b.gold_max ?? 0],
     );
     const id = result.rows[0].id;
     await replaceAbilities(client, id, b.abilities);
@@ -2392,15 +2495,13 @@ app.put('/api/creature-behaviors/:id', adminGuard, async (req, res) => {
       `UPDATE creature_behaviors SET
          name = $1, aggro_radius = $2, leash_radius = $3, chase_style = $4,
          preferred_range = $5, move_speed_mult = $6, damage_override = $7,
-         aura_radius = $8, aura_damage_mult = $9, aura_defense_mult = $10,
-         aura_speed_mult = $11, gold_min = $12, gold_max = $13,
+         gold_min = $8, gold_max = $9,
          updated_at = CURRENT_TIMESTAMP
-       WHERE id = $14 RETURNING id`,
+       WHERE id = $10 RETURNING id`,
       [b.name, b.aggro_radius, b.leash_radius, b.chase_style,
        b.preferred_range ?? 0, b.move_speed_mult ?? 1,
        b.damage_override ?? null,
-       b.aura_radius ?? 0, b.aura_damage_mult ?? 1, b.aura_defense_mult ?? 1,
-       b.aura_speed_mult ?? 1, b.gold_min ?? 0, b.gold_max ?? 0, id],
+       b.gold_min ?? 0, b.gold_max ?? 0, id],
     );
     if (result.rows.length === 0) {
       await client.query('ROLLBACK');
@@ -3211,9 +3312,11 @@ async function startGenerationJob(req, res, { subject, kind, defaultFrames, fail
       // history is one list rather than two. `backend` carries the provider
       // name, which is what an admin looking at an old row wants to know.
       const row = await pool.query(
-        `INSERT INTO sprite_sets (creature, backend, seed, frames, job_id, status)
-         VALUES ($1, $2, $3, $4, $5, 'queued') RETURNING *`,
-        [subject, `remote:${provider.name}`, seed, frames || defaultFrames, gen.job_id],
+        `INSERT INTO sprite_sets
+           (creature, backend, seed, frames, job_id, generation_kind, base_prompt, provider_id, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'queued') RETURNING *`,
+        [subject, `remote:${provider.name}`, seed, frames || defaultFrames, gen.job_id,
+          kind || 'creature', prompt, provider.id],
       );
       return res.status(201).json({ ...row.rows[0], job_id: gen.job_id, provider: provider.name });
     }
@@ -3230,9 +3333,10 @@ async function startGenerationJob(req, res, { subject, kind, defaultFrames, fail
     const chosenBackend = backend || (gen.recipe && gen.recipe.backend) || 'stub';
     const chosenFrames = frames || (gen.recipe && gen.recipe.frames) || defaultFrames;
     const row = await pool.query(
-      `INSERT INTO sprite_sets (creature, backend, seed, frames, job_id, status)
-       VALUES ($1, $2, $3, $4, $5, 'queued') RETURNING *`,
-      [subject, chosenBackend, seed, chosenFrames, gen.job_id]
+      `INSERT INTO sprite_sets
+         (creature, backend, seed, frames, job_id, generation_kind, base_prompt, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued') RETURNING *`,
+      [subject, chosenBackend, seed, chosenFrames, gen.job_id, kind || 'creature', prompt]
     );
     res.status(201).json({ ...row.rows[0], job_id: gen.job_id, recipe: gen.recipe });
   } catch (err) {
@@ -3647,17 +3751,30 @@ app.post('/api/art-jobs', adminGuard, async (req, res) => {
     // EITHER is this a bad request -- and then the message says so, because
     // "provider_id is required" sends the admin looking for a field they
     // deliberately left on its default.
-    const providerId = Number.isInteger(req.body.provider_id)
-      ? req.body.provider_id
-      : (active ? active.id : null);
+    //
+    // SOMET-535: never for a LOCAL run. Local jobs are drawn by sprite-gen, and
+    // recording the active provider on them is how "Local" was drawn remotely.
+    const chosen = bodyProviderId(req.body.provider_id);
+    if (chosen.error) return res.status(400).json({ error: chosen.error });
+    const providerId = backend === 'connector' ? (chosen.id || (active ? active.id : null)) : null;
     if (backend === 'connector' && !providerId) {
       return res.status(400).json({
         error: 'no provider chosen and no active provider is set -- pick one in the '
           + 'Provider list, or mark a provider active under AI Providers',
       });
     }
+    // A named provider must exist. Without this the enqueue hit the
+    // art_jobs.provider_id foreign key and answered a bare 500 (SOMET-538
+    // re-validation); /dispatch already answers the same mistake with a 404.
+    if (backend === 'connector' && chosen.id) {
+      const { rows: found } = await pool.query(
+        'SELECT 1 FROM ai_providers WHERE id = $1', [chosen.id]);
+      if (found.length === 0) {
+        return res.status(404).json({ error: `provider ${chosen.id} not found` });
+      }
+    }
     const { subjects, unknown } = await catalogSubjects.subjectsForEnqueue(
-      pool, kind, keys, { active, fallbackProviderId: providerId },
+      pool, kind, keys, { active, fallbackProviderId: providerId, backend },
     );
 
     // SOMET-594. Refuse at the SOURCE. An object queued on a provider that
@@ -3666,17 +3783,38 @@ app.post('/api/art-jobs', adminGuard, async (req, res) => {
     // stranded. Checked per subject's RESOLVED provider, since a pinned type
     // goes to its pin rather than to the one picked in the console.
     if (backend === 'connector' && catalogSubjects.registryFor(kind).generationKind === 'object') {
-      const ids = [...new Set(subjects.map((s) => s.providerId).filter(Number.isInteger))];
+      const ids = [...new Set(subjects.filter((s) => s.backend !== 'local')
+        .map((s) => s.providerId).filter(Number.isInteger))];
       const { rows: provs } = await pool.query(
         "SELECT id, name, request_template FROM ai_providers WHERE modality = 'image'");
       const tooSmall = provs.filter((p) => ids.includes(p.id) && artDispatcher.providerSizeRefusal(p));
       if (tooSmall.length) {
         const ok = provs.filter((p) => !artDispatcher.providerSizeRefusal(p)).map((p) => `"${p.name}"`);
+        const okList = ok.length ? ok.join(' or ') : null;
+        const small = new Set(tooSmall.map((p) => p.id));
+        const nameOf = (id) => `"${provs.find((p) => p.id === id).name}"`;
+        // A subject whose type is PINNED elsewhere ignores the console's pick,
+        // so "pick X in the Provider list" would point at a control that is
+        // not the cause. Name the pinned subjects and the pin instead.
+        const pinned = subjects.filter((s) => s.pinned && small.has(s.providerId));
+        const fixes = [];
+        if (pinned.length) {
+          const byProv = new Map();
+          for (const s of pinned) byProv.set(s.providerId, [...(byProv.get(s.providerId) || []), s.key]);
+          for (const [id, keys] of byProv) {
+            fixes.push(`${keys.map((k) => `"${k}"`).join(', ')} ${keys.length === 1 ? 'is' : 'are'} `
+              + `pinned to ${nameOf(id)} by its ${kind} type -- change that type's AI provider`
+              + `${okList ? ` to ${okList}` : ''}.`);
+          }
+        }
+        if (subjects.some((s) => !s.pinned && small.has(s.providerId))) {
+          fixes.push(okList ? `Pick ${okList} in the Provider list.`
+            : 'Set a provider\'s request_template width/height to 1024.');
+        }
         return res.status(400).json({
           error: `${kind} is drawn as an isolated object and needs a 1024px provider; `
             + `${tooSmall.map((p) => `"${p.name}"`).join(', ')} renders smaller. `
-            + (ok.length ? `Pick ${ok.join(' or ')} in the Provider list.`
-              : 'Set a provider\'s request_template width/height to 1024.'),
+            + fixes.join(' '),
           code: 'PROVIDER_TOO_SMALL',
         });
       }
@@ -3730,6 +3868,13 @@ app.get('/api/art-jobs', adminGuard, async (req, res) => {
         WHERE f.state = 'failed' AND ${ART_FAILURE_UNRESOLVED}
         ORDER BY f.updated_at DESC`,
     );
+    // SOMET-594. Re-check the drain's blocked snapshot against the queue as it
+    // is NOW, so the console never offers to remove rows that are gone.
+    const { rows: queuedGroups } = await pool.query(
+      `SELECT subject_kind AS kind, provider_id, count(*)::int AS count
+         FROM art_jobs WHERE state = 'queued' GROUP BY subject_kind, provider_id`,
+    );
+    artDispatcher.retainBlocked(queuedGroups);
     res.json({
       stats: await artJobQueue.stats(pool),
       run: artDispatcher.runStatus(),
@@ -3754,22 +3899,56 @@ app.get('/api/art-jobs', adminGuard, async (req, res) => {
 // Start draining. Returns immediately; poll GET /api/art-jobs.
 app.post('/api/art-jobs/dispatch', adminGuard, async (req, res) => {
   try {
-    const providerId = Number.isInteger(req.body.provider_id) ? req.body.provider_id : null;
-    if (!providerId) return res.status(400).json({ error: 'provider_id is required' });
-    const provider = await aiProviders.loadImageProviderWithSecret(pool, providerId);
-    if (!provider) return res.status(404).json({ error: 'provider not found' });
+    const chosen = bodyProviderId(req.body.provider_id);
+    if (chosen.error) return res.status(400).json({ error: chosen.error });
+    const providerId = chosen.id;
+    // SOMET-535. A queue holding only LOCAL jobs needs no provider: sprite-gen
+    // draws them. Anything a connector would draw still needs one.
+    //
+    // A running batch is answered first: it has already CLAIMED its job, so
+    // the queue below can look empty and the provider-less checks would give
+    // a false reason (a double-click on Start under Local got "the queue
+    // holds connector jobs").
+    if (artDispatcher.runStatus().running) {
+      return res.status(409).json({
+        error: 'an art batch is already running', run: artDispatcher.runStatus(),
+      });
+    }
+    let provider = null;
+    if (providerId) {
+      provider = await aiProviders.loadImageProviderWithSecret(pool, providerId);
+      if (!provider) return res.status(404).json({ error: 'provider not found' });
+    } else {
+      const { rows: [mix] } = await pool.query(
+        `SELECT count(*) FILTER (WHERE backend = 'local')::int AS local,
+                count(*) FILTER (WHERE backend <> 'local')::int AS connector
+           FROM art_jobs WHERE state = 'queued'`);
+      if (mix.connector > 0) {
+        return res.status(400).json({
+          error: `provider_id is required -- the queue holds ${mix.connector} connector `
+            + 'job(s); only a queue of local jobs can start without one',
+        });
+      }
+      // Kept a refusal rather than a no-op drain, with the true reason.
+      if (mix.local === 0) {
+        return res.status(400).json({ error: 'nothing is queued -- queue subjects first' });
+      }
+    }
 
     // The resolution precondition, against WHAT IS QUEUED rather than the
     // batch provider alone: each job carries its own provider pin. `blocked`
     // lists every queued (kind, provider) group that would be drawn below the
     // object minimum, so the console can offer to drop exactly those rows.
-    if (!artDispatcher.runStatus().running) {
+    if (!artDispatcher.runStatus().running && provider) {
       const refusal = await artDispatcher.objectSizeRefusal(pool, provider);
       if (refusal) throw refusal;
     }
 
     const status = artDispatcher.startDrain(pool, {
       provider,
+      // The same sprite-gen client the interactive local path uses (and the
+      // one __setSpriteGen swaps in tests), for backend='local' jobs.
+      deps: { spriteGen },
       limit: Math.min(Math.max(parseInt(req.body.limit, 10) || 10, 1), 100),
       // Defaults to ONE. The remote card's effective headroom is under one
       // SDXL pipeline, so two concurrent generations ask the driver for memory
@@ -3987,11 +4166,22 @@ app.post('/api/art-jobs/clear', adminGuard, async (req, res) => {
     // scoped: the admin is dropping work that has not started, and a claimed
     // row is a separate recovery (Rescue stranded jobs). provider_id null
     // matches unpinned rows, hence IS NOT DISTINCT FROM.
-    const groups = Array.isArray(req.body.groups) ? req.body.groups : null;
+    //
+    // FAILS CLOSED: a `groups` that is present but not an array is a malformed
+    // scope, and must be refused -- reading it as "no scope" would take the
+    // clear-everything branch below and wipe the queue (SOMET-593).
+    const body = req.body || {};
+    if ('groups' in body && !Array.isArray(body.groups)) {
+      return res.status(400).json({ error: 'groups must be [{ kind, provider_id }]' });
+    }
+    const groups = 'groups' in body ? body.groups : null;
     let rows;
     if (groups) {
+      // Bounded to int4: Number.isInteger alone let 99999999999 through to the
+      // $2::int[] cast, which threw and came back a 500 rather than a 400.
       const valid = groups.filter((g) => g && typeof g.kind === 'string'
-        && (g.provider_id === null || Number.isInteger(g.provider_id)));
+        && (g.provider_id === null || (Number.isInteger(g.provider_id)
+          && g.provider_id >= -2147483648 && g.provider_id <= 2147483647)));
       if (valid.length === 0 || valid.length !== groups.length) {
         return res.status(400).json({ error: 'groups must be [{ kind, provider_id }]' });
       }
@@ -4017,6 +4207,8 @@ app.post('/api/art-jobs/clear', adminGuard, async (req, res) => {
       ({ rows } = await pool.query(
         "DELETE FROM art_jobs WHERE state IN ('queued', 'running') RETURNING state",
       ));
+      // Nothing is queued any more, so nothing is blocked (SOMET-594).
+      artDispatcher.retainBlocked([]);
     }
     res.json({
       cleared: rows.length,

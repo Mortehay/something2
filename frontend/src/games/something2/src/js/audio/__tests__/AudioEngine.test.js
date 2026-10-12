@@ -121,6 +121,28 @@ describe('AudioEngine', () => {
     expect(posted.some((m) => m.slot === 'ambience')).toBe(false);
   });
 
+  it('SOMET-605: a boss phase one-shot holds its voice against creature chatter, and an own swing still lands', async () => {
+    const { engine, sources } = engineWith({
+      'creature/Ignis/phase': [{ key: 'ignis-phase.ogg', volume: 1, weight: 1 }],
+      'creature/slime/hurt': [{ key: 'slime-hurt.ogg', volume: 1, weight: 1 }],
+      'item/Iron Sword/use': [{ key: 'sword.ogg', volume: 1, weight: 1 }],
+    });
+    engine.unlock();
+    engine.sfxLimiter.maxVoices = 1;
+    const opts = { listener: { x: 0, y: 0 }, ownActor: 'p:1' };
+    engine.playSfxEvents([{ e: 'phase', c: 'Ignis', a: 'c:wb_1', x: 900, y: 0 }], opts);
+    await flush(); await flush();
+    expect(sources.map((s) => s.buffer.tag)).toEqual(['u:ignis-phase.ogg']);
+    engine.playSfxEvents([{ e: 'hurt', c: 'slime', x: 0, y: 0 }], opts);
+    await flush(); await flush();
+    expect(sources.length).toBe(1);
+    expect(sources[0].stopped).toBe(false);
+    engine.playSfxEvents([{ e: 'use', k: 'melee', s: 'Iron Sword', a: 'p:1', x: 0, y: 0 }], opts);
+    await flush(); await flush();
+    expect(sources[0].stopped).toBe(true);
+    expect(sources[1].buffer.tag).toBe('u:sword.ogg');
+  });
+
   it('mute and volumes drive the master and bus gains', () => {
     const { engine } = engineWith({});
     engine.setVolumes({ master: 0.5, music: 0.2, ambience: 1, sfx: 1, muted: true });
@@ -869,6 +891,192 @@ describe('AudioEngine', () => {
         expect(sources[0].buffer.tag).toBe('u:clipB.ogg');
         expect(engine.nearbyLoops.has('pt:w1')).toBe(true); // tracked, not orphaned
         expect(engine.nearbyLoopStarting.size).toBe(0);
+      });
+    });
+
+    describe('boss presence (SOMET-605)', () => {
+      const bindings = { 'creature/Ignis/presence': [{ key: 'ignis-bed.ogg', volume: 0.8, weight: 1, loopable: false }] };
+      // Controller ruling N-2: y: -48 puts the 96px box centre on y = 0, so
+      // ignis(452) is exactly 500 world px from the listener.
+      const ignis = (x) => creatureMap([{ id: 'wb_1', type: 'Ignis', x, y: -48, width: 96, height: 96, bossTier: 'world' }]);
+
+      it('loops presence while the boss is within screen radius, then fades it out on exit', async () => {
+        const { engine, sources } = engineWith(bindings);
+        engine.unlock();
+        engine.setScreenRadius(1000);
+        engine.tickNearby(ignis(452), [], { x: 0, y: 0 }, 0); // centre 500 <= 1000
+        await flush(); await flush();
+        const bed = sources.find((s) => s.buffer && s.buffer.tag === 'u:ignis-bed.ogg');
+        expect(bed).toBeTruthy();
+        expect(bed.loop).toBe(true); // loops although the clip is not marked loopable
+        expect(engine.snapshot().loops).toEqual([{ id: 'boss:wb_1', key: 'ignis-bed.ogg', priority: 'boss', distance: 500 }]);
+        engine.tickNearby(ignis(552), [], { x: 0, y: 0 }, 300); // still in: no second source
+        await flush(); await flush();
+        expect(sources.filter((s) => s.buffer && s.buffer.tag === 'u:ignis-bed.ogg').length).toBe(1);
+        engine.tickNearby(ignis(1052), [], { x: 0, y: 0 }, 600); // centre 1100 > 1000
+        await flush(); await flush();
+        expect(bed.stopped).toBe(true);
+        expect(engine.snapshot().loops).toEqual([]);
+      });
+
+      it('plays at clip volume (no distance falloff), pans with the boss, fades out over FADE_S and fades back in on re-entry', async () => {
+        const { engine, sources } = engineWith(bindings);
+        engine.unlock();
+        engine.setScreenRadius(1000);
+        engine.tickNearby(ignis(552), [], { x: 0, y: 0 }, 0); // centre x = 600: pan +1
+        await flush(); await flush();
+        const first = sources[0];
+        const panner = first.out;
+        const gain = panner.out;
+        expect(gain.gain.value).toBe(0.8); // a point loop at 600px would be 0.8 * (1 - 600/1600)
+        expect(panner.pan.value).toBe(1);
+        engine.tickNearby(ignis(-348), [], { x: 0, y: 0 }, 300); // centre x = -300: pan -0.5
+        expect(panner.pan.value).toBe(-0.5);
+        expect(engine.snapshot().loops[0].distance).toBe(300);
+        engine.tickNearby(ignis(1052), [], { x: 0, y: 0 }, 600); // out
+        expect(first.stopped).toBe(true);
+        expect(first.stopAt).toBe(2); // FADE_S from currentTime 0, not an instant stop
+        expect(gain.gain.value).toBe(0);
+        engine.tickNearby(ignis(452), [], { x: 0, y: 0 }, 900); // back in
+        await flush(); await flush();
+        expect(sources.length).toBe(2);
+        const second = sources[1];
+        expect(second.loop).toBe(true);
+        expect(second.started).toBe(true);
+        expect(second.out.out.gain.value).toBe(0.8);
+        expect(engine.snapshot().loops).toEqual([{ id: 'boss:wb_1', key: 'ignis-bed.ogg', priority: 'boss', distance: 500 }]);
+      });
+
+      it('an ordinary creature never gets a presence loop', async () => {
+        const { engine, sources } = engineWith({ 'creature/Slime/presence': [{ key: 'x.ogg', volume: 1, weight: 1 }] });
+        engine.unlock();
+        engine.setScreenRadius(1000);
+        engine.tickNearby(creatureMap([{ id: 1, type: 'Slime', x: 0, y: 0 }]), [], { x: 0, y: 0 }, 0);
+        await flush(); await flush();
+        expect(sources.length).toBe(0);
+      });
+
+      it('the boss leaving the creature map (death/despawn) fades the loop; setWorld stops it outright', async () => {
+        const { engine, sources } = engineWith(bindings);
+        engine.unlock();
+        engine.setScreenRadius(1000);
+        engine.tickNearby(ignis(0), [], { x: 0, y: 0 }, 0);
+        await flush(); await flush();
+        engine.tickNearby(new Map(), [], { x: 0, y: 0 }, 300);
+        await flush(); await flush();
+        expect(sources[0].stopped).toBe(true);
+        expect(engine.snapshot().loops).toEqual([]);
+        engine.tickNearby(ignis(0), [], { x: 0, y: 0 }, 600);
+        await flush(); await flush();
+        engine.setWorld({ world: 'other', bindings });
+        expect(sources[sources.length - 1].stopped).toBe(true);
+        expect(engine.snapshot().loops).toEqual([]);
+      });
+
+      it('no screen radius yet means no presence', async () => {
+        const { engine, sources } = engineWith(bindings);
+        engine.unlock();
+        engine.tickNearby(ignis(0), [], { x: 0, y: 0 }, 0);
+        await flush(); await flush();
+        expect(sources.length).toBe(0);
+      });
+
+      it('creature nearby chatter cannot evict the presence loop', async () => {
+        const { engine, sources } = engineWith({ ...bindings, 'creature/slime/nearby': [{ key: 'slime.ogg', volume: 1, weight: 1 }] });
+        engine.unlock();
+        engine.setScreenRadius(1000);
+        engine.sfxLimiter.maxVoices = 1;
+        const both = creatureMap([
+          { id: 'wb_1', type: 'Ignis', x: 0, y: 0, width: 96, height: 96, bossTier: 'world' },
+          { id: 2, type: 'slime', x: 5, y: 0 },
+        ]);
+        engine.tickNearby(both, [], { x: 0, y: 0 }, 0);
+        await flush(); await flush();
+        engine.tickNearby(both, [], { x: 0, y: 0 }, 11000); // past the cadence gap
+        await flush(); await flush();
+        const bed = sources.find((s) => s.buffer.tag === 'u:ignis-bed.ogg');
+        expect(bed.stopped).toBe(false);
+        expect(sources.some((s) => s.buffer.tag === 'u:slime.ogg' && s.started)).toBe(false);
+      });
+
+      it('a slow buffer spanning several ticks starts exactly one presence source', async () => {
+        let release;
+        const gate = new Promise((r) => { release = r; });
+        const { ctx, sources } = fakeCtx();
+        const engine = new AudioEngine({
+          ctxFactory: () => ctx, urlFor: (k) => `u:${k}`, rand: () => 0, postMisses: async () => {},
+          fetchBytes: async (url) => { await gate; return new TextEncoder().encode(url).buffer; },
+        });
+        engine.setWorld({ world: 'vale', bindings });
+        engine.unlock();
+        engine.setScreenRadius(1000);
+        for (let t = 0; t <= 1000; t += 250) engine.tickNearby(ignis(0), [], { x: 0, y: 0 }, t);
+        release();
+        await flush(); await flush(); await flush();
+        expect(sources.filter((s) => s.buffer && s.buffer.tag === 'u:ignis-bed.ogg').length).toBe(1);
+      });
+    });
+
+    describe('aura presence (SOMET-607)', () => {
+      const bindings = { 'aura/pack_leader/loop': [{ key: 'pack-leader-loop.ogg', volume: 1, weight: 1, loopable: false }] };
+      const withAura = (x, extra = {}) => creatureMap([
+        { id: 1, type: 'wolf', x, y: 0, width: 0, height: 0, auras: ['pack_leader'], ...extra },
+      ]);
+
+      it('loops aura/<name>/loop while an ordinary creature carrying the aura is within the nearby radius', async () => {
+        const { engine, sources } = engineWith(bindings);
+        engine.unlock();
+        engine.tickNearby(withAura(100), [], { x: 0, y: 0 }, 0);
+        await flush(); await flush();
+        const loop = sources.find((s) => s.buffer && s.buffer.tag === 'u:pack-leader-loop.ogg');
+        expect(loop).toBeTruthy();
+        expect(loop.loop).toBe(true);
+        expect(engine.snapshot().loops).toEqual([{ id: 'aura:1:pack_leader', key: 'pack-leader-loop.ogg', priority: 'nearby', distance: 100 }]);
+      });
+
+      it('an aura-less creature of the same type gets no loop', async () => {
+        const { engine, sources } = engineWith(bindings);
+        engine.unlock();
+        engine.tickNearby(creatureMap([{ id: 1, type: 'wolf', x: 100, y: 0 }]), [], { x: 0, y: 0 }, 0);
+        await flush(); await flush();
+        expect(sources.length).toBe(0);
+      });
+
+      it('fades out once the creature leaves the nearby radius', async () => {
+        const { engine, sources } = engineWith(bindings);
+        engine.unlock();
+        engine.tickNearby(withAura(100), [], { x: 0, y: 0 }, 0);
+        await flush(); await flush();
+        const loop = sources[0];
+        engine.tickNearby(withAura(5000), [], { x: 0, y: 0 }, 300);
+        expect(loop.stopped).toBe(true);
+        expect(engine.snapshot().loops).toEqual([]);
+      });
+
+      it('a boss carrying the aura is gated by screen radius, not the ordinary nearby radius', async () => {
+        const { engine, sources } = engineWith(bindings);
+        engine.unlock();
+        // No setScreenRadius yet -- a boss-carried aura must not use the
+        // ordinary nearby radius as a fallback.
+        engine.tickNearby(withAura(100, { bossTier: 'world' }), [], { x: 0, y: 0 }, 0);
+        await flush(); await flush();
+        expect(sources.length).toBe(0);
+        engine.setScreenRadius(1000);
+        engine.tickNearby(withAura(100, { bossTier: 'world' }), [], { x: 0, y: 0 }, 300);
+        await flush(); await flush();
+        expect(engine.snapshot().loops).toEqual([{ id: 'aura:1:pack_leader', key: 'pack-leader-loop.ogg', priority: 'boss', distance: 100 }]);
+      });
+
+      it('two different auras on the same creature each loop independently', async () => {
+        const { engine, sources } = engineWith({
+          ...bindings,
+          'aura/burning/loop': [{ key: 'burning-loop.ogg', volume: 1, weight: 1 }],
+        });
+        engine.unlock();
+        engine.tickNearby(creatureMap([{ id: 1, type: 'wolf', x: 100, y: 0, auras: ['pack_leader', 'burning'] }]), [], { x: 0, y: 0 }, 0);
+        await flush(); await flush();
+        expect(sources.map((s) => s.buffer.tag).sort()).toEqual(['u:burning-loop.ogg', 'u:pack-leader-loop.ogg']);
+        expect(engine.snapshot().loops.map((l) => l.id).sort()).toEqual(['aura:1:burning', 'aura:1:pack_leader']);
       });
     });
   });

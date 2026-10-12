@@ -175,23 +175,111 @@ export const ART_FILTERS = Object.freeze(['all', 'missing', 'has', 'failed']);
 //
 // `kind` is not validated here: the kinds come from the server, and the
 // console's <select> simply shows no such option for an unknown one.
+//
+// `key=` names ONE subject and is matched exactly (`exact: true`); `q=` is
+// the search box's substring match. The Skill Tree tab links with key=,
+// because q=Mage also matches Afterimage, Pyromancy and five more labels.
 export function filtersFromParams(params) {
   const art = params.get('art');
+  const key = params.get('key');
   return {
     kind: params.get('kind') || 'all',
     art: ART_FILTERS.includes(art) ? art : 'missing',
-    search: params.get('q') || '',
+    search: key || params.get('q') || '',
+    exact: Boolean(key),
   };
 }
 
-export function applyFilters(subjects, { kind = 'all', art = 'all', search = '' } = {}) {
+// The inverse, omitting the console defaults so the plain tab URL stays plain.
+// SOMET-535: the console writes its filters back through this, so browser
+// back/forward and a reload land on the same table.
+// An exact search goes back out as key= so it stays exact across back/reload.
+export function paramsFromFilters({ kind, art, search, exact = false }) {
+  const p = new URLSearchParams();
+  if (kind && kind !== 'all') p.set('kind', kind);
+  if (art && art !== 'missing') p.set('art', art);
+  if (search) p.set(exact ? 'key' : 'q', search);
+  return p;
+}
+
+// SOMET-535. Tells the console's own URL writes apart from navigation that
+// came from outside (browser back, a Skill Tree deep link). React Router
+// applies setSearchParams as a deferred update, so while someone is typing
+// the URL can commit a value they have already typed past ('wa' after 'war').
+// An input bound to the URL snapped back to it and lost keys. The console
+// therefore keeps the typed text in its own state and adopts a URL value only
+// when it is not one of its own writes.
+export function createUrlEcho() {
+  const written = new Set();
+  return {
+    wrote(params) { written.add(params.toString()); },
+    // true when `params` came from outside and the console should adopt it
+    adopt(params) {
+      if (written.has(params.toString())) return false;
+      written.clear();
+      return true;
+    },
+  };
+}
+
+// Why Start batch cannot run, or null when it can. A LOCAL batch is drawn by
+// the sprite-gen service and needs no remote provider (SOMET-535); a connector
+// batch needs a chosen one or an active one.
+export function startBatchBlocker({ backend, providerId, activeProvider }) {
+  if (backend === 'local') return null;
+  if (providerId || activeProvider) return null;
+  return 'Choose a provider, or set an active one in AI Providers';
+}
+
+// The POST /api/art-jobs/dispatch body. Under Local it carries NO
+// provider_id: the server starts a provider-less batch only when every queued
+// job is local, and a provider left in the hidden select must not turn a
+// Local start into a remote batch (SOMET-535).
+export function startBatchBody({ backend, providerId, activeProvider }) {
+  if (backend === 'local') return { concurrency: 1 };
+  return { provider_id: providerId ? Number(providerId) : activeProvider?.id, concurrency: 1 };
+}
+
+// The Error useStartArtBatch throws for a refused POST /dispatch. A 409 is an
+// admin clicking twice, or two admins at once: the batch IS running, so it is
+// tagged rather than reported (SOMET-535 rework 4). 400 is usually the
+// resolution precondition, whose message names the misconfigured provider, so
+// it passes through verbatim along with WHICH queued groups block the start.
+export function dispatchError(status, json = {}) {
+  if (status === 409) {
+    const err = new Error('A batch is already running');
+    err.alreadyRunning = true;
+    return err;
+  }
+  const err = new Error(json.error || 'Failed to start the batch');
+  err.blocked = Array.isArray(json.blocked) ? json.blocked : [];
+  return err;
+}
+
+// The text of a refused Start that the Blocked panel does NOT explain, or
+// null (SOMET-535 rework 3). A refusal carrying blocked groups is the size
+// refusal, rendered with its own drop button; every other refusal -- a Local
+// start against connector jobs, an empty queue, a misconfigured provider, a
+// double start -- used to render nowhere, because the only place the message
+// was printed was inside that panel.
+export function startErrorMessage(error) {
+  if (!error) return null;
+  if (error.alreadyRunning) return null;
+  if (Array.isArray(error.blocked) && error.blocked.length) return null;
+  return error.message || 'Failed to start the batch';
+}
+
+// `exact`: `search` is a subject key, compared as-is (no case folding, name
+// not searched). Otherwise a case-insensitive substring of key and name.
+export function applyFilters(subjects, { kind = 'all', art = 'all', search = '', exact = false } = {}) {
   const q = search.trim().toLowerCase();
   return subjects.filter((s) => {
     if (kind !== 'all' && s.kind !== kind) return false;
     if (art === 'missing' && s.has_art) return false;
     if (art === 'has' && !s.has_art) return false;
     if (art === 'failed' && s.job_state !== 'failed') return false;
-    if (q && !`${s.key} ${s.name || ''}`.toLowerCase().includes(q)) return false;
+    if (exact && search && s.key !== search) return false;
+    if (!exact && q && !`${s.key} ${s.name || ''}`.toLowerCase().includes(q)) return false;
     return true;
   });
 }
@@ -213,6 +301,20 @@ export function enqueueSummary(results) {
   if (t.alreadyLive) parts.push(`${t.alreadyLive} already in flight`);
   if (t.unknown) parts.push(`${t.unknown} no longer in the catalogue`);
   return { ...t, message: parts.join(' — ') };
+}
+
+// One submission at a time, decided SYNCHRONOUSLY. A mutation's isPending
+// only disables the button after the next render, so two clicks in the same
+// tick both got through: two POSTs, and the second response ("Queued 0 of 2
+// -- 2 already in flight") overwrote the first. A call made while one is
+// pending joins it and gets the same result. `slot` is a React ref.
+export function joinInFlight(slot, start) {
+  if (slot.current) return slot.current;
+  const pending = Promise.resolve()
+    .then(start)
+    .finally(() => { slot.current = null; });
+  slot.current = pending;
+  return pending;
 }
 
 // Progress from the CATALOG, not from a counter. A counter drifts; "how many of

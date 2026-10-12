@@ -294,6 +294,31 @@ test('audio routes', { skip }, async (t) => {
     assert.deepEqual(calls, [], 'neither propose nor generate reached the box');
   });
 
+  // SOMET-592 validation, defect 4: an upload-only sfx slot is the caller's
+  // mistake (or a provider that has not discovered the cue yet), not a box
+  // fault, so it is a 409 like "no prompt" -- never a 502. Both refusals
+  // happen before any box call.
+  await t.test('generate for an upload-only sfx slot is a 409, not a 502; the box is never called', async () => {
+    const before = seen.length;
+    // attack_type/ranged/use has no cue at all.
+    const noCue = await request(app).post('/api/audio/admin/generate').set('Authorization', bearer(admin))
+      .send({ subject_kind: 'attack_type', subject_key: 'ranged', slot: 'use', provider_id: prov });
+    assert.equal(noCue.status, 409, JSON.stringify(noCue.body));
+    assert.match(noCue.body.error, /upload only/);
+    assert.equal(noCue.body.retryable, false);
+    // attack_type/melee/use has the cue 'slash', but a provider whose
+    // models_cache has never reported it (`prov` has, since the test above).
+    const fresh = (await pool.query(
+      `INSERT INTO ai_providers (name, base_url, request_template, modality, auth_token)
+       VALUES ($1, $2, '{}'::jsonb, 'audio', 'sk_route_fresh') RETURNING id`, [`audio-route-fresh-${tag}`, boxUrl])).rows[0].id;
+    made.providers.push(fresh);
+    const unknown = await request(app).post('/api/audio/admin/generate').set('Authorization', bearer(admin))
+      .send({ subject_kind: 'attack_type', subject_key: 'melee', slot: 'use', provider_id: fresh });
+    assert.equal(unknown.status, 409, JSON.stringify(unknown.body));
+    assert.match(unknown.body.error, /upload only: the provider has no cue 'slash'/);
+    assert.equal(seen.slice(before).filter((s) => s.url === '/api/audio/sfx').length, 0, 'no sfx call reached the box');
+  });
+
   await t.test('a miss for a world that does not exist is dropped (accepted 0, no row)', async () => {
     const m = await request(app).post('/api/audio/misses').set('Authorization', bearer(player))
       .send({ misses: [{ subject_kind: 'world', subject_key: ghostWorld, slot: 'music', world: ghostWorld }] });

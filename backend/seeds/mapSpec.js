@@ -131,14 +131,64 @@ const WORLD_KEYS = new Set([
   'roads',
   'pens',
   'waypoints',
+  'boss',
   'creature_count',
 ]);
 
 function validateMapSpec(spec, {
   biomeNames = null, creatureTypeNames = null, biomeCreatureTypes = null,
-  pointArtTypes = null,
+  pointArtTypes = null, bossTiers = null,
 } = {}) {
   const errors = [];
+
+  // SOMET-609 (S9, spec §3.5). A dungeon boss placed at a fixed post. Walkability
+  // is NOT checked here (this module is pure and has no terrain): requiredTilesFor
+  // in seed-map.js lists the post, so assertNavigable proves it at seed time and
+  // tests/p5_navigability.test.js proves it offline. The End/Elite rule keys on
+  // the p5 generator's room naming ("<Dungeon>: End"); any other world may hold
+  // either dungeon tier.
+  const BOSS_KEYS = ['entity', 'x', 'y', 'respawn_s'];
+  const DUNGEON_BOSS_TIERS = ['dungeon_end', 'dungeon_elite'];
+  function checkBoss(w) {
+    const label = `world "${w.key}" boss`;
+    const b = w.boss;
+    if (!b || typeof b !== 'object' || Array.isArray(b)) {
+      errors.push(`${label} must be an object (got ${JSON.stringify(b)})`);
+      return;
+    }
+    for (const k of Object.keys(b)) {
+      if (!BOSS_KEYS.includes(k)) errors.push(`${label} has unknown key "${k}"`);
+    }
+    if (typeof b.entity !== 'string' || b.entity === '') {
+      errors.push(`${label} entity must be an entity type name (got ${JSON.stringify(b.entity)})`);
+    } else if (bossTiers) {
+      const tier = bossTiers.get(b.entity) ?? null;
+      const want = /: End$/.test(w.name ?? '') ? 'dungeon_end'
+        : /: Elite$/.test(w.name ?? '') ? 'dungeon_elite' : null;
+      if (!DUNGEON_BOSS_TIERS.includes(tier)) {
+        errors.push(`${label} entity "${b.entity}" is not a dungeon boss `
+          + `(boss_tier ${tier ?? 'NULL'}; needs dungeon_end or dungeon_elite)`);
+      } else if (want && tier !== want) {
+        errors.push(`${label} entity "${b.entity}" is ${tier}, but "${w.name}" needs ${want}`);
+      }
+    }
+    for (const f of ['x', 'y']) {
+      if (!Number.isInteger(b[f])) {
+        errors.push(`${label} ${f} must be an integer in world pixels (got ${JSON.stringify(b[f])})`);
+      }
+    }
+    const maxX = (w.width ?? 0) * SPEC_TILE_SIZE;
+    const maxY = (w.height ?? 0) * SPEC_TILE_SIZE;
+    if (Number.isInteger(b.x) && (b.x < 0 || b.x >= maxX)) {
+      errors.push(`${label} x ${b.x} is outside the world (0..${maxX - 1} px)`);
+    }
+    if (Number.isInteger(b.y) && (b.y < 0 || b.y >= maxY)) {
+      errors.push(`${label} y ${b.y} is outside the world (0..${maxY - 1} px)`);
+    }
+    if (!Number.isInteger(b.respawn_s) || b.respawn_s <= 0) {
+      errors.push(`${label} respawn_s must be a positive integer (got ${JSON.stringify(b.respawn_s)})`);
+    }
+  }
 
   // Art bindings (SOMET-580). `pointArtTypes` is Map<entity type name, point_kind>
   // from the live catalog (seed-map) or the checked-in POINT_TYPES (fixtures);
@@ -672,6 +722,8 @@ function validateMapSpec(spec, {
         checkArt(c.art, 'chest_vault', `world "${w.key}" chest art`);
       }
     }
+
+    if (w.boss !== undefined) checkBoss(w);
 
     if (biomeNames) {
       for (const b of w.biomes ?? []) {

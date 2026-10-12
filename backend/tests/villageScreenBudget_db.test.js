@@ -88,9 +88,10 @@ const { ENTRY_LOCK_KEY, ENTRY_LOCK_WAIT_MS } = require('./helpers/entryWorld.js'
 // of a guard is how one of them gets forgotten. The reasoning above is left
 // intact because it is the evidence for why the shared helper skips rather
 // than fails.
-// The 45s wait, not the 6s default (SOMET-534). Every holder of this key
-// applies a whole map spec, so a reader on the default never got in and all
-// four invariants below skipped on EVERY full run -- measured, 4 skips per run.
+// ENTRY_LOCK_WAIT_MS, not the 6s default (SOMET-534). Writers queue on this key
+// with no ordering, so a reader on the default could lose to a run of them and
+// skip all four invariants below -- measured, 4 skips per run, back when one
+// writer held the key for minutes. See entryWorld.js for the current numbers.
 const readingLiveWorld = (pool, t, fn) => readingUnderLock(
   pool, ENTRY_LOCK_KEY, t, fn, { waitMs: ENTRY_LOCK_WAIT_MS });
 

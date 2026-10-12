@@ -272,3 +272,27 @@ test('castSkill validates weapon requirements for skill gems and rejects mismatc
   assert.equal(meleeRes.reason, 'weapon_mismatch');
 });
 
+
+// SOMET-575 (D4): melee skill reach is max(90, range*1.3), measured to the
+// target's body edge. war_crushing_blow has range 80 -> reach 104.
+function crushingBlowHitsAt(d) {
+  const world = makeTestWorld({ id: 'item_sword', name: 'sword', category: 'weapon', kind: 'melee' });
+  const player = addTestPlayer(world, 'u_reach', { x: 100, y: 100 });
+  player.stamina = 100;
+  const pcx = player.x + player.width / 2, pcy = player.y + player.height / 2;
+  world.creatures.creatures.set('c_far', {
+    id: 'c_far', name: 'Goblin', x: pcx + d - 24, y: pcy - 24, width: 48, height: 48,
+    hp: 180, maxHp: 180, effects: new Map(), mit: { defense: 0, resists: {} },
+  });
+  const res = world.castSkill('u_reach', 'war_crushing_blow', pcx + d, pcy, 1, 0);
+  assert.equal(res.ok, true);
+  const c = world.creatures.get('c_far');
+  return !c || c.hp < 180;
+}
+
+test('SOMET-575 melee skill reach restored to max(90, range*1.3), edge-measured', () => {
+  // Centre 134 -> padded edge 134-32 = 102: inside 104, outside the 100 of the regression.
+  assert.equal(crushingBlowHitsAt(134), true);
+  // Centre 140 -> edge 108: beyond 104.
+  assert.equal(crushingBlowHitsAt(140), false);
+});

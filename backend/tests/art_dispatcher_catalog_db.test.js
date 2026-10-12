@@ -156,25 +156,33 @@ lockedTest('an item writes its own icon column, not catalog_art', async (t, pool
   const { rows: before } = await pool.query(
     "SELECT name, icon FROM item_types ORDER BY name LIMIT 1");
   const item = before[0];
-  t.after(async () => {
-    await pool.query('UPDATE item_types SET icon = $1 WHERE name = $2', [item.icon, item.name])
-      .catch(() => {});
-  });
+  // A key no earlier run can have left behind: with a fixed key, a leaked
+  // icon from a previous run satisfied the assertion even with the item write
+  // made a no-op (SOMET-535 validation, defect 2).
+  const imageKey = `zzTest/items/${process.pid}-${Date.now()}/static.png`;
+  assert.notEqual(item.icon, imageKey, 'setup: the icon must not already be the new key');
 
-  await queue.enqueue(pool, [{ kind: 'item', key: item.name }],
-    { backend: 'connector', providerId });
-  const out = await dispatch(pool, {
-    provider: PROVIDER(providerId),
-    generate: succeed('zzTest/items/1/static.png'),
-    deps: { store: storeReturning(6) },
-  });
-  assert.equal(out.done, 1, `dispatch reported ${JSON.stringify(out.results)}`);
+  // Restored in a finally, NOT a t.after: freshPool's t.after was registered
+  // first, runs first and ends the pool, so a restore hook registered here
+  // failed silently and leaked the test icon into every database it ran on.
+  try {
+    await queue.enqueue(pool, [{ kind: 'item', key: item.name }],
+      { backend: 'connector', providerId });
+    const out = await dispatch(pool, {
+      provider: PROVIDER(providerId),
+      generate: succeed(imageKey),
+      deps: { store: storeReturning(6) },
+    });
+    assert.equal(out.done, 1, `dispatch reported ${JSON.stringify(out.results)}`);
 
-  const { rows } = await pool.query('SELECT icon FROM item_types WHERE name = $1', [item.name]);
-  assert.equal(rows[0].icon, 'zzTest/items/1/static.png');
-  const { rows: art } = await pool.query(
-    "SELECT 1 FROM catalog_art WHERE subject_kind = 'item'");
-  assert.equal(art.length, 0, 'an item must not also land in catalog_art -- two homes drift');
+    const { rows } = await pool.query('SELECT icon FROM item_types WHERE name = $1', [item.name]);
+    assert.equal(rows[0].icon, imageKey);
+    const { rows: art } = await pool.query(
+      "SELECT 1 FROM catalog_art WHERE subject_kind = 'item'");
+    assert.equal(art.length, 0, 'an item must not also land in catalog_art -- two homes drift');
+  } finally {
+    await pool.query('UPDATE item_types SET icon = $1 WHERE name = $2', [item.icon, item.name]);
+  }
 });
 
 // Stable Diffusion has no alpha channel. An opaque square renders as a grey

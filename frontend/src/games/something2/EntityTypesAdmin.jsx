@@ -14,6 +14,7 @@ import { pointKindHidesWorldFields, pointKindPayload, defaultButtonState } from 
 import { HiOutlineTrash, HiOutlinePencil, HiOutlinePlus, HiOutlineXMark, HiOutlineChevronDown, HiOutlineChevronUp } from "react-icons/hi2";
 import toast from 'react-hot-toast';
 import { validateEntityType } from './catalogValidation.js';
+import { BOSS_TIERS, BOSS_TIER_LABELS, ENTITY_ELEMENTS, BOSS_FORM_DEFAULTS, bossFieldsFromEntity, bossFieldsPayload, bossFieldError, bossBadgeLabel } from './bossFields.js';
 import { syncApprovedAsset } from './entityAssetSync.js';
 import { orphanedSpawnTiles } from './catalogReferences.js';
 import { withOptionalBiome, withOptionalProvider } from './generationJobPayload.js';
@@ -22,10 +23,13 @@ import { ProviderPinField, pinToSelectValue, selectValueToPin } from './Provider
 import { HiOutlineMagnifyingGlass } from "react-icons/hi2";
 import {
   buildBiomeIndex, biomesWithEntities, filterByBiomeTab, filterBySearch, paginate,
-  ALL_TAB, UNASSIGNED_TAB,
+  ALL_TAB, UNASSIGNED_TAB, BOSS_TAB,
 } from './entityFilters.js';
 import AdminLoading from './AdminLoading.jsx';
 import SubjectSounds from './SubjectSounds.jsx';
+import { useAuraEffectsAdmin } from './useAuraEffects.js';
+import { toggleAura, aurasForPayload } from './entityAuras.js';
+import EntityAuraPicker from './EntityAuraPicker.jsx';
 
 const PAGE_SIZE = 6;
 
@@ -882,8 +886,8 @@ function EntityTexturePanel({ entity, prompt }) {
   );
 }
 
-// entity_types.attack_element CHECK constraint, migration 1714440081000.
-const ATTACK_ELEMENTS = ['physical', 'fire', 'ice', 'lightning'];
+// entity_types.attack_element CHECK constraint, migration 1714440670000 (added arcane).
+const ATTACK_ELEMENTS = ENTITY_ELEMENTS;
 
 function EntityTypesAdmin() {
   const { entityTypes, isLoadingEntityTypes } = useEntityTypes();
@@ -912,6 +916,10 @@ function EntityTypesAdmin() {
     () => (entityTypes || []).filter(e => !biomeIndex.has(e.name)).length,
     [entityTypes, biomeIndex],
   );
+  const bossCount = useMemo(
+    () => (entityTypes || []).filter(e => !!e.boss_tier).length,
+    [entityTypes],
+  );
 
   const filteredEntities = useMemo(() => {
     const byTab = filterByBiomeTab(entityTypes || [], activeTab, biomeIndex);
@@ -937,6 +945,8 @@ function EntityTypesAdmin() {
   // re-read the row by id for anything that must reflect the approval.
   const liveEditingEntity = (editingEntity && entityTypes?.find(e => e.id === editingEntity.id)) || editingEntity;
   
+  const { auras: auraLibrary, isLoadingAuras, isAuraError } = useAuraEffectsAdmin();
+
   const [formData, setFormData] = useState({
     name: '',
     color: '#ffffff', // s2-theme-exempt(#ffffff): entity data default, not chrome
@@ -966,7 +976,9 @@ function EntityTypesAdmin() {
     place_order: 0,
     behavior_id: null,
     attack_element: 'physical',
-    point_kind: null
+    auras: null,
+    point_kind: null,
+    ...BOSS_FORM_DEFAULTS
   });
 
   useEffect(() => {
@@ -1008,7 +1020,9 @@ function EntityTypesAdmin() {
         // not fall back to a truthy default -- same rule as damage_override.
         behavior_id: editingEntity.behavior_id ?? null,
         attack_element: editingEntity.attack_element || 'physical',
+        auras: editingEntity.auras ?? null,
         point_kind: editingEntity.point_kind ?? null,
+        ...bossFieldsFromEntity(editingEntity),
         // SOMET-342: the stored pin, flattened to the single string a <select>
         // can hold. Split back into the two columns on submit.
         provider_pin: pinToSelectValue(editingEntity.ai_provider_mode, editingEntity.ai_provider_id)
@@ -1041,7 +1055,9 @@ function EntityTypesAdmin() {
         place_order: 0,
         behavior_id: null,
         attack_element: 'physical',
+        auras: null,
         point_kind: null,
+        ...BOSS_FORM_DEFAULTS,
         provider_pin: ''
       });
     }
@@ -1072,7 +1088,7 @@ function EntityTypesAdmin() {
     e.preventDefault();
     // F-025/SOMET-205: this used to only check that name was non-empty, so a
     // negative Max HP (or any other out-of-range stat) saved silently.
-    const problem = validateEntityType(formData);
+    const problem = validateEntityType(formData) || bossFieldError(formData);
     if (problem) {
       toast.error(problem);
       return;
@@ -1090,8 +1106,10 @@ function EntityTypesAdmin() {
       ...rest,
       ...selectValueToPin(provider_pin),
       ...pointKindPayload(formData),
+      auras: aurasForPayload(formData),
       display_width: optionalPx(rest.display_width),
       display_height: optionalPx(rest.display_height),
+      ...bossFieldsPayload(formData),
     };
 
     if (editingEntity) {
@@ -1158,6 +1176,11 @@ function EntityTypesAdmin() {
         <TabButton $active={activeTab === ALL_TAB} onClick={() => handleTabChange(ALL_TAB)}>
           All
         </TabButton>
+        {bossCount > 0 && (
+          <TabButton $active={activeTab === BOSS_TAB} onClick={() => handleTabChange(BOSS_TAB)}>
+            Bosses ({bossCount})
+          </TabButton>
+        )}
         {biomeTabs.map(name => (
           <TabButton key={name} $active={activeTab === name} onClick={() => handleTabChange(name)}>
             {name}
@@ -1197,6 +1220,9 @@ function EntityTypesAdmin() {
                 <EntityName>{entity.name}</EntityName>
                 {entity.point_kind ? (
                   <span style={{ fontSize: '1.1rem', opacity: 0.6 }}>{` · point: ${entity.point_kind}`}</span>
+                ) : null}
+                {bossBadgeLabel(entity) ? (
+                  <span style={{ fontSize: '1.1rem', opacity: 0.8 }}>{` · ${bossBadgeLabel(entity)}`}</span>
                 ) : null}
               </EntityInfo>
               <ActionButtons>
@@ -1400,6 +1426,54 @@ function EntityTypesAdmin() {
                     </select>
                   </FormGroup>
                 </div>
+              )}
+
+              {/* SOMET-603: boss fields. Own block so the S3 aura field merges cleanly. */}
+              {formData.is_creature && (
+                <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap' }}>
+                  <FormGroup style={{ flex: 1 }}>
+                    <label>Boss Tier</label>
+                    <select value={formData.boss_tier} onChange={e => setFormData({ ...formData, boss_tier: e.target.value })}>
+                      <option value="">— not a boss —</option>
+                      {BOSS_TIERS.map(t => <option key={t} value={t}>{BOSS_TIER_LABELS[t]}</option>)}
+                    </select>
+                  </FormGroup>
+                  <FormGroup style={{ flex: 1 }}>
+                    <label>Element</label>
+                    <select value={formData.element} onChange={e => setFormData({ ...formData, element: e.target.value })}>
+                      <option value="">— none —</option>
+                      {ENTITY_ELEMENTS.map(el => <option key={el} value={el}>{el}</option>)}
+                    </select>
+                  </FormGroup>
+                  <FormGroup>
+                    <label>Hitbox Size</label>
+                    <input type="number" placeholder="48 (default)" value={formData.hitbox_size}
+                      onChange={e => setFormData({ ...formData, hitbox_size: e.target.value === '' ? '' : parseInt(e.target.value, 10) })} />
+                  </FormGroup>
+                  <FormGroup>
+                    <label>XP Reward</label>
+                    <input type="number" placeholder="none" value={formData.xp_reward}
+                      onChange={e => setFormData({ ...formData, xp_reward: e.target.value === '' ? '' : parseInt(e.target.value, 10) })} />
+                  </FormGroup>
+                  <FormGroup>
+                    <label>Base Damage</label>
+                    <input type="number" step="0.5" placeholder="default" value={formData.base_damage}
+                      onChange={e => setFormData({ ...formData, base_damage: e.target.value === '' ? '' : parseFloat(e.target.value) })} />
+                  </FormGroup>
+                </div>
+              )}
+
+              {/* SOMET-604: aura picker, beside the boss fields (spec §5). */}
+              {formData.is_creature && (
+                <FormGroup>
+                  <EntityAuraPicker
+                    value={formData.auras}
+                    library={auraLibrary}
+                    isLoading={isLoadingAuras}
+                    isError={isAuraError}
+                    onChange={(name) => setFormData(prev => ({ ...prev, auras: toggleAura(prev.auras, name) }))}
+                  />
+                </FormGroup>
               )}
 
               <FormGroup>

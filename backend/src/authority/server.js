@@ -3,7 +3,7 @@ const jwt = require('jsonwebtoken');
 const { WebSocketServer } = require('ws');
 const { currentUserForToken } = require('../auth/tokens.js');
 const { ServerMap } = require('./collision');
-const { World } = require('./world');
+const { World, selfAuraFields } = require('./world');
 const { loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, loadInventory, grantStartingLoadout, socketStone, unsocketStone, freeSlots } = require('./items');
 const { loadCatalogs, elementsForWire } = require('./catalogs');
 const { configureAttackOrigins } = require('./attackOrigin.js');
@@ -11,7 +11,7 @@ const { loadProgression, applyDeath } = require('../services/progressionStore.js
 const { withStoneBonuses, socketedBuffStones } = require('../services/stoneBonuses.js');
 const { withGearAffixes, equippedAffixGrants } = require('../services/gearAffixes.js');
 const { ownedCharacter } = require('../services/characters.js');
-const { charmBudget, canSummon, PLAYER_CHARM_MS } = require('../services/charm.js');
+const { charmBudget, canSummon, canBeCharmed, PLAYER_CHARM_MS } = require('../services/charm.js');
 // SOMET-473: the PLAYER pacify. applyCharm owns the non-refreshing immunity
 // window (effects.js), so this handler never decides whether a charm lands.
 const { applyCharm } = require('./effects');
@@ -19,8 +19,9 @@ const { recordVisit } = require('../services/visitedWorlds.js');
 const { mayJoin, joinPolicyFacts, waypointTravelFacts } = require('../services/joinPolicy.js');
 const { derivePlayerStats } = require('../services/playerStats.js');
 const { chunkOf, parseKey, neighborhoodKeys, CHUNK_KEY } = require('./coords');
-const { bucketPlayersByChunk, playersNear } = require('./playerAoi');
-const { loadCreatureTypes, ABILITIES_LATERAL } = require('./creatures');
+const { bucketPlayersByChunk, playersForRecipient } = require('./playerAoi');
+const { loadCreatureTypes, ABILITIES_LATERAL, hydrateCreatureRow } = require('./creatures');
+const { AURAS_LATERAL } = require('../services/auraEffects.js');
 const { chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint, villageContaining } = require('../services/mapService');
 const { fetchLinks } = require('../services/mapLinks');
 const { fetchVillages } = require('../services/villages');
@@ -44,7 +45,8 @@ const { buyStock, sellItem } = require('./trade');
 const { respawnDueCreatures, enqueueDeficit, CREATURE_SWEEP_MS } = require('../services/creatureRespawn');
 const { consumeAmmo, ammoCount } = require('./ammo');
 const { PICKUP_RADIUS } = require('./groundItems');
-const { WorldBossManager, dropLegendaryItemForPlayer, resolveArena } = require('./worldBoss');
+const { WorldBossManager, dropLegendaryItemForPlayer } = require('./worldBoss');
+const { DungeonBossManager } = require('./dungeonBosses');
 
 // SOMET-473 -- the Druid's charm (spec 8.2, contract §6.5).
 //
@@ -364,6 +366,17 @@ function drainAttacks(entry) {
 // activateChunk's own inline comment for the column-by-column rationale
 // (dropping any of them silently makes some creature mechanic inert rather
 // than throwing). Both call sites append their own WHERE clause.
+//
+// SOMET-603: et.base_damage is deliberately NOT selected. hydrateCreatureRow
+// lets a non-null base_damage beat the row's damage, so selecting it here
+// would replace the level-scaled wc.damage of every persisted instance with
+// the catalog value. boss_joined_select_db.test.js guards this.
+//
+// SOMET-604 (S3): `et.auras AS aura_names, au.aura_defs` + AURAS_LATERAL carry
+// the entity-bound aura library (aura_effects) to addCreatures ->
+// resolveInstanceAuras -> applyAuras. Missing them, every entity-bound aura is
+// inert in the live game while unit tests stay green. The old behaviour-row
+// aura columns were dropped by 1714440681000; this is the only aura source.
 const CREATURE_JOINED_SELECT = `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.facing, wc.home_x, wc.home_y,
                 wc.level, wc.damage, wc.blocks_portal_id,
                 wc.charmed_by_character_id, wc.charm_expires_at, ch.user_id AS charm_owner_user_id,
@@ -376,15 +389,16 @@ const CREATURE_JOINED_SELECT = `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.fac
                 -- trap -- the binding would exist in the database, and every
                 -- creature would silently draw the kind default forever.
                 et.vfx,
+                et.boss_tier, et.element, et.hitbox_size,
+                et.auras AS aura_names, au.aura_defs,
                 b.name AS behavior_name, b.aggro_radius, b.leash_radius,
                 b.chase_style, b.preferred_range, b.move_speed_mult, b.damage_override,
-                b.aura_radius, b.aura_damage_mult, b.aura_defense_mult, b.aura_speed_mult,
                 b.gold_min AS behavior_gold_min, b.gold_max AS behavior_gold_max,
                 ab.abilities
          FROM world_creatures wc
          LEFT JOIN entity_types et ON et.name = wc.type
          LEFT JOIN characters ch ON ch.id = wc.charmed_by_character_id
-         LEFT JOIN creature_behaviors b ON b.id = et.behavior_id${ABILITIES_LATERAL}`;
+         LEFT JOIN creature_behaviors b ON b.id = et.behavior_id${ABILITIES_LATERAL}${AURAS_LATERAL}`;
 
 // SOMET-473 -- persisted charm -> the in-memory shape addCreatures reads.
 //
@@ -419,6 +433,13 @@ function hydrateCharm(row, world) {
     charmedByCharacterId: row.charmed_by_character_id,
     charmExpiresAt: world.now + (expiresMs - Date.now()),
   };
+}
+
+// SOMET-603: the one per-row conversion both live loaders apply. Hydration
+// first (boss fields, hitbox -- shared with WorldBossManager), then the charm
+// restore, which spreads the row and so keeps every hydrated field.
+function toSimCreature(row, world) {
+  return hydrateCharm(hydrateCreatureRow(row), world);
 }
 
 // Attach the authoritative WebSocket simulation to an existing http server.
@@ -475,6 +496,18 @@ function attachAuthority(httpServer, pool, opts = {}) {
     bossIntervalMs: opts.bossIntervalMs,
     bossWarningMs: opts.bossWarningMs,
     rng,
+  });
+  // SOMET-603: the rotation's bosses are catalog rows. Fire-and-forget:
+  // refreshCatalog never rejects, and an empty catalog just idles the event.
+  worldBossManager.refreshCatalog();
+  // SOMET-609 (S9): dungeon End/Elite bosses. The single owner of their life:
+  // placed in loadWorld, killed via onCreatureDeath (before commitCreatureDeath
+  // and WorldBossManager), re-placed by creatureRespawnSweep. S10 passes
+  // onDungeonBossKilled to roll boss loot; S9 awards nothing.
+  const dungeonBosses = new DungeonBossManager({
+    pool,
+    clock: opts.dungeonBossClock || (() => Date.now()),
+    onKilled: opts.onDungeonBossKilled || null,
   });
 
   // Every inbound frame this protocol defines is a small flat JSON object
@@ -622,7 +655,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // buildWorldGenConfig, but enqueueDeficit's `row` further down IS this
         // same `row` -- omitting them here would make the load-time backstop
         // silently enqueue 0 for every real world, forever, with no error.
-        const wr = await pool.query('SELECT id, seed, chunk_size, width, height, is_entry, entry_spawn, biomes, biome_cell, level_min, level_max, safe_road_radius, safe_rects, authored_roads, density, allowed_creature_types FROM worlds WHERE id = $1', [worldId]);
+        // dungeon_boss (SOMET-609): read by DungeonBossManager.place below;
+        // omitting it would silently place no boss anywhere.
+        const wr = await pool.query('SELECT id, seed, chunk_size, width, height, is_entry, entry_spawn, biomes, biome_cell, level_min, level_max, safe_road_radius, safe_rects, authored_roads, density, allowed_creature_types, dungeon_boss FROM worlds WHERE id = $1', [worldId]);
         if (wr.rows.length === 0) return null;
         const row = wr.rows[0];
         // Postgres uuid input is case-insensitive and also accepts braced /
@@ -767,6 +802,16 @@ function attachAuthority(httpServer, pool, opts = {}) {
           console.error('world load top-up failed:', canonicalId, err);
         }
 
+        // SOMET-609: this world's dungeon boss, if its spec authored one. Never
+        // fatal -- a bossless room is playable, a failed join is not. quiet:
+        // a room that loads with its boss already in it plays no spawn sound
+        // (ruling N-1/P6; becomes S2's quietSpawn on rebase, see dungeonBosses.js).
+        try {
+          await dungeonBosses.place(entry, { quiet: true });
+        } catch (err) {
+          console.error('dungeon boss placement failed:', canonicalId, err);
+        }
+
         return entry;
       })();
       loading.set(worldId, pending);
@@ -909,10 +954,24 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // level-up would raise max HP in the database and nothing in the running
   // game (the exact defect A1's review caught).
   const onCreatureDeath = (entry, id, killerUserId) => {
+    // SOMET-609: a dungeon boss has ONE respawn owner. It has no
+    // world_creatures row (commitCreatureDeath's uuid DELETE would throw on a
+    // `boss:` id) and is not a world boss, so it never reaches either path.
+    // Routed by id (ruling G10): the creature is already out of the sim here.
+    if (dungeonBosses.isBoss(entry.worldId, id)) {
+      dungeonBosses.onDeath(entry, id, killerUserId);
+      return Promise.resolve(null);
+    }
+    // SOMET-626 (S13): same reasoning as the boss above -- a dungeon-boss
+    // escort minion has no world_creatures row either.
+    if (dungeonBosses.isMinion(entry.worldId, id)) {
+      dungeonBosses.onMinionDeath(entry, id);
+      return Promise.resolve(null);
+    }
     const deadCreature = entry.world && entry.world.creatures && entry.world.creatures.get
       ? entry.world.creatures.get(id)
       : null;
-    if (id === worldBossManager.bossCreatureId || (deadCreature && deadCreature.isWorldBoss)) {
+    if (id === worldBossManager.bossCreatureId || (deadCreature && deadCreature.bossTier === 'world')) {
       worldBossManager.onCreatureDeath(entry, deadCreature, killerUserId, {
         pool,
         broadcastFn: (frame) => {
@@ -1267,8 +1326,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // carries no competing et.gold_min/et.gold_max to collide with --
       // resolveBehavior (shared with loadCreatureTypes, where the collision
       // IS real) reads that one alias unconditionally, so both SELECTs must
-      // agree on it. b.aura_* columns have no collision anywhere and stay
-      // unaliased, same as aggro_radius/leash_radius/etc.
+      // agree on it.
       //
       // The SELECT/FROM/JOIN text lives in CREATURE_JOINED_SELECT (module
       // scope, above attachAuthority) rather than inline here, so
@@ -1280,7 +1338,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
          WHERE wc.world_id = $1 AND wc.x >= $2 AND wc.x < $3 AND wc.y >= $4 AND wc.y < $5`,
         [entry.worldId, cx * span, cx * span + span, cy * span, cy * span + span],
       );
-      entry.world.creatures.addCreatures(rows.rows.map((r) => hydrateCharm(r, entry.world)));
+      entry.world.creatures.addCreatures(rows.rows.map((r) => toSimCreature(r, entry.world)));
       const itemRows = await pool.query(
         // `rarity` is NOT optional in this list (SOMET-490). This SELECT is
         // the ONLY way an item re-enters the sim after flushAndPrune's
@@ -1329,7 +1387,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
          WHERE wc.id = ANY($1::uuid[])`,
         [ids],
       );
-      entry.world.creatures.addCreatures(rows.rows.map((r) => hydrateCharm(r, entry.world)));
+      entry.world.creatures.addCreatures(rows.rows.map((r) => toSimCreature(r, entry.world)));
     } catch (err) {
       // Best-effort, same posture as activateChunk's own catch: log so a
       // persistently failing injection is visible to an operator instead of
@@ -1448,6 +1506,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
     if (dirty.length) {
       const ok = [];
       for (const c of dirty) {
+        // SOMET-609: a dungeon boss has no world_creatures row; its `boss:` id
+        // would fail the uuid cast here every flush, forever (it never clears).
+        if (dungeonBosses.isBoss(entry.worldId, c.id)) { ok.push(c.id); continue; }
         try {
           await pool.query(
             `UPDATE world_creatures SET x=$1, y=$2, facing=$3, updated_at=now() WHERE id=$4`,
@@ -2254,7 +2315,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // guess between two things a tile apart. A caller may name exactly one.
     //
     // Refusals, in order: not a Druid, no target named, nothing in range,
-    // already someone's pet, or over budget. Only "not a Druid" and the budget
+    // already someone's pet, a boss (before ANY charm state changes), or over
+    // budget. Only "not a Druid", the boss refusal and the budget
     // say anything -- a miss is silent, exactly like `pickup` with nothing in
     // range, and so is a pacify that bounces off the immunity window (the
     // target's protection is not the caster's business).
@@ -2311,6 +2373,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const cc = { x: c.x + c.width / 2, y: c.y + c.height / 2 };
         if (Math.hypot(cc.x - pc.x, cc.y - pc.y) > CHARM_RANGE) return;
         if (c.charmOwnerUserId != null) return; // already someone's pet
+        if (!canBeCharmed(c)) return send(ws, { type: 'error', message: 'Charm refused: bosses cannot be charmed' });
 
         // COMPOSED, not raw, and both halves come off the SAME object.
         // loadProgression already folds the tree in (it ends in
@@ -2740,6 +2803,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
     },
 
     async debugWorldBoss(ws, msg) {
+      // SOMET-614: dev tool (spawn/slay a boss, guaranteed legendary loot).
+      // Admin only, decided from the role read off the users row at connect,
+      // never from anything in the message. Silent ignore, like the other
+      // benign rejections; no per-message logging.
+      if (ws.role !== 'admin') return;
       const action = msg.action;
       const now = Date.now();
       const broadcastAll = (frame) => {
@@ -2748,28 +2816,19 @@ function attachAuthority(httpServer, pool, opts = {}) {
         }
       };
 
+      // SOMET-603: the boss is picked BY NAME from the catalog (bossIndex
+      // referenced a JS constant server.js never imported -- every spawn
+      // button threw ReferenceError -- and _planNextBoss overwrote the
+      // choice anyway).
+      const bossName = typeof msg.bossName === 'string' && msg.bossName !== '' ? msg.bossName : null;
       if (action === 'spawn') {
-        worldBossManager.state = 'warning';
-        worldBossManager.nextSpawnTime = now - 1;
-        if (msg.bossIndex !== undefined && WORLD_BOSS_CATALOG[msg.bossIndex]) {
-          worldBossManager.currentBoss = { ...WORLD_BOSS_CATALOG[msg.bossIndex] };
+        if (!worldBossManager.forceSpawn(now, worlds, { bossName, preferredWorldId: ws.worldId }, broadcastAll)) {
+          send(ws, { type: 'error', message: 'no world boss in the catalog' });
         }
-        const currentEntry = ws.worldId ? worlds.get(ws.worldId) : null;
-        const currentKey = (currentEntry && currentEntry.row && (currentEntry.row.key || currentEntry.row.canonical_id)) || '';
-        const currentName = (currentEntry && currentEntry.row && currentEntry.row.name) || '';
-        if (currentEntry && resolveArena(currentKey, currentName)) {
-          worldBossManager._planNextBoss(worlds, ws.worldId);
-        } else {
-          worldBossManager._planNextBoss(worlds);
-        }
-        worldBossManager._spawnBoss(now, worlds, broadcastAll);
       } else if (action === 'warning') {
-        worldBossManager.state = 'idle';
-        worldBossManager.nextSpawnTime = now + (Number(msg.seconds || 120) * 1000);
-        if (msg.bossIndex !== undefined && WORLD_BOSS_CATALOG[msg.bossIndex]) {
-          worldBossManager.currentBoss = { ...WORLD_BOSS_CATALOG[msg.bossIndex] };
+        if (!worldBossManager.forceWarning(now, worlds, { bossName, seconds: Number(msg.seconds || 120) }, broadcastAll)) {
+          send(ws, { type: 'error', message: 'no world boss in the catalog' });
         }
-        worldBossManager.tick(now, worlds, broadcastAll);
       } else if (action === 'slay') {
         if (worldBossManager.state === 'active' && worldBossManager.bossCreatureId) {
           const entry = worlds.get(worldBossManager.activeWorldId);
@@ -2816,6 +2875,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
             }
           }
         }
+      } else if (action === 'phase') {
+        // SOMET-605: test panel trigger; same transition code as the fight.
+        if (!worldBossManager.forcePhase(worlds, broadcastAll)) {
+          send(ws, { type: 'error', message: 'no active world boss, or it is already in its last phase' });
+        }
+      } else if (action === 'enrage') {
+        if (!worldBossManager.forceEnrage(worlds, broadcastAll)) {
+          send(ws, { type: 'error', message: 'no active world boss, or it is already enraged' });
+        }
       } else if (action === 'buff') {
         worldBossManager.playerBuffs.set(String(ws.userId), {
           active: true,
@@ -2839,8 +2907,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
         worldBossManager.warningSent = false;
       } else if (action === 'teleport_to_boss') {
         if (worldBossManager.state !== 'active' || !worldBossManager.activeWorldId) {
-          worldBossManager._planNextBoss(worlds);
-          worldBossManager._spawnBoss(now, worlds, broadcastAll);
+          if (!worldBossManager.forceSpawn(now, worlds, {}, broadcastAll)) {
+            send(ws, { type: 'error', message: 'no world boss in the catalog' });
+            return;
+          }
         }
         const targetWorldId = worldBossManager.activeWorldId;
         const targetEntry = worlds.get(targetWorldId);
@@ -3045,15 +3115,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // tick is reported here and goes through the SAME death commit as a
       // melee or projectile kill — burn must not become a fourth way to die
       // that skips loot or deletes twice.
-      const {
-        kills: killedByEffects, attacks: creatureAttacks, impacts: creatureImpacts,
-      } = entry.world.tick(dt);
-      // Slice D: a wolf bite goes onto the same stash a halberd swing does,
-      // and is bounded by the same cap -- creatures are the numerous actors,
-      // so leaving them unbounded would be the one thing able to blow the
-      // frame in a pack fight.
-      pushAttacks(entry, creatureAttacks);
-      pushImpacts(entry, creatureImpacts);
+      const { kills: killedByEffects } = entry.world.tick(dt);
       for (const k of dedupeKillsById(killedByEffects)) onCreatureDeath(entry, k.id, k.killerUserId);
       if (entry.links && entry.links.size > 0) {
         const now = Date.now();
@@ -3245,7 +3307,16 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // aggro/chase/contact damage + respawns (before state). Guard kills route
       // through onCreatureDeath like every other kill site, so the DELETE +
       // drop roll stay authoritative.
-      const { kills: killedByGuards } = entry.world.tickCreatures(dt, entry.activeChunks);
+      const {
+        kills: killedByGuards, attacks: creatureAttacks, impacts: creatureImpacts,
+      } = entry.world.tickCreatures(dt, entry.activeChunks);
+      // Slice D: a wolf bite goes onto the same stash a halberd swing does,
+      // and is bounded by the same cap -- creatures are the numerous actors,
+      // so leaving them unbounded would be the one thing able to blow the
+      // frame in a pack fight. SOMET-574: read from tickCreatures, which is
+      // what produces them; world.tick() returns only kills.
+      pushAttacks(entry, creatureAttacks);
+      pushImpacts(entry, creatureImpacts);
       for (const k of dedupeKillsById(killedByGuards)) onCreatureDeath(entry, k.id, k.killerUserId);
       const {
         kills: killedByProjectiles, detonations, stoneHits, blocks,
@@ -3368,13 +3439,16 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // the client reconciles its predicted state -- ackSeq, hp, mana,
         // stamina, equipment -- out of this frame, so a recipient missing from
         // its own frame breaks prediction rather than merely failing to draw.
-        // A socket whose player has gone (p == null) has no position to scope
-        // by, so it keeps the whole array: that is the pre-existing behaviour
-        // for a frame that is about to stop being sent anyway.
-        const players = p
-          ? playersNear(playerBuckets, p.x, p.y, entry.row.chunk_size, playerRowById.get(p.userId) || null)
-          : snap.players;
-        const frame = { type: 'state', tick, ackSeq: p ? p.ackSeq : 0, players, projectiles: snap.projectiles };
+        // A socket with no placed player yet (the join window: registered in
+        // entry.sockets before addPlayer) gets NO state frame -- it has no
+        // position to scope by, and the old whole-array fallback leaked every
+        // player's position to a joining client.
+        const players = playersForRecipient(playerBuckets, playerRowById, p, entry.row.chunk_size);
+        if (!players) continue;
+        const frame = { type: 'state', tick, ackSeq: p.ackSeq, players, projectiles: snap.projectiles };
+        // SOMET-606: the owner's debuffs + effective speed. Per socket, never on
+        // the shared rows; {} for a clear player, so nothing is added.
+        Object.assign(frame, selfAuraFields(p, entry.world.now));
         // SOMET-528. `waves` is copied ACROSS EXPLICITLY, and this line is the
         // third place a new snapshot field can be lost.
         //
@@ -3553,6 +3627,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
     } catch (err) {
       console.error('creature respawn sweep failed:', err);
     }
+    // SOMET-609: dungeon bosses ride the same 10 s timer but not its queue.
+    try {
+      await dungeonBosses.sweep(worlds, (worldId) => {
+        const entry = worlds.get(worldId);
+        return entry ? [...entry.world.players.values()].map((p) => ({ x: p.x, y: p.y })) : [];
+      });
+    } catch (err) {
+      console.error('dungeon boss sweep failed:', err);
+    }
   }
 
   // SOMET-481: the two inputs a rarity roll needs -- the admin-editable weight
@@ -3705,6 +3788,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
     _reloadCreatures: injectGuardIntoSim,
     _refreshLootTuning: refreshLootTuning,
     _worldBossManager: worldBossManager,
+    // SOMET-609 test seams: the manager, the kill entry point every kill site
+    // uses, and loadWorld (a world can be loaded without a socket).
+    _dungeonBosses: dungeonBosses,
+    _onCreatureDeath: onCreatureDeath,
+    _loadWorld: loadWorld,
+    _flushAndPrune: flushAndPrune,
     // Read back the live TTL. A getter, not the value: the whole point of
     // SOMET-482 is that this number CHANGES at runtime, so a test that
     // captured it once could not tell a working refresh from a dead one.

@@ -254,6 +254,7 @@ test('PUT /api/entity-types/:id cascades the rename into worlds.allowed_creature
   const pool = mockPool([
     [/SELECT name FROM entity_types WHERE id/i, () => ({ rows: [{ name: 'AuditFixtureBeast' }] })],
     [/SELECT id, name FROM worlds WHERE allowed_creature_types/i, () => ({ rows: [{ id: 'w1', name: 'Test World' }] })],
+    [/FROM worlds WHERE dungeon_boss->>'entity'/i, () => ({ rows: [] })],
     [/SELECT 1 FROM world_creatures WHERE type/i, () => ({ rows: [] })],
     [/SELECT id, name FROM biomes WHERE flora_types/i, () => ({ rows: [] })],
     [/UPDATE worlds\b[\s\S]*allowed_creature_types/i, () => ({ rowCount: 1, rows: [] })],
@@ -279,6 +280,7 @@ test('PUT /api/entity-types/:id cascades the rename into world_creatures.type in
   const pool = mockPool([
     [/SELECT name FROM entity_types WHERE id/i, () => ({ rows: [{ name: 'Village Guard' }] })],
     [/SELECT id, name FROM worlds WHERE allowed_creature_types/i, () => ({ rows: [] })],
+    [/FROM worlds WHERE dungeon_boss->>'entity'/i, () => ({ rows: [] })],
     [/SELECT 1 FROM world_creatures WHERE type/i, () => ({ rows: [{ '?column?': 1 }] })],
     [/SELECT id, name FROM biomes WHERE flora_types/i, () => ({ rows: [] })],
     [/UPDATE world_creatures SET type/i, () => ({ rowCount: 3, rows: [] })],
@@ -302,6 +304,7 @@ test('PUT /api/entity-types/:id cascades the rename into biomes.flora_types/crea
   const pool = mockPool([
     [/SELECT name FROM entity_types WHERE id/i, () => ({ rows: [{ name: 'bush' }] })],
     [/SELECT id, name FROM worlds WHERE allowed_creature_types/i, () => ({ rows: [] })],
+    [/FROM worlds WHERE dungeon_boss->>'entity'/i, () => ({ rows: [] })],
     [/SELECT 1 FROM world_creatures WHERE type/i, () => ({ rows: [] })],
     [/SELECT id, name FROM biomes WHERE flora_types/i, () => ({ rows: [{ id: 1, name: 'Meadow' }] })],
     [/UPDATE biomes\b/i, () => ({ rowCount: 1, rows: [] })],
@@ -331,6 +334,7 @@ test('PUT /api/entity-types/:id cascades a rename referenced in worlds, world_cr
   const pool = mockPool([
     [/SELECT name FROM entity_types WHERE id/i, () => ({ rows: [{ name: 'AuditFixtureBeast' }] })],
     [/SELECT id, name FROM worlds WHERE allowed_creature_types/i, () => ({ rows: [{ id: 'w1', name: 'Test World' }] })],
+    [/FROM worlds WHERE dungeon_boss->>'entity'/i, () => ({ rows: [] })],
     [/SELECT 1 FROM world_creatures WHERE type/i, () => ({ rows: [{ '?column?': 1 }] })],
     [/SELECT id, name FROM biomes WHERE flora_types/i, () => ({ rows: [{ id: 1, name: 'Meadow' }] })],
     [/UPDATE worlds\b[\s\S]*allowed_creature_types/i, () => ({ rowCount: 1, rows: [] })],
@@ -345,7 +349,7 @@ test('PUT /api/entity-types/:id cascades a rename referenced in worlds, world_cr
     .send({ name: 'AuditFixtureBeastRenamed', color: '#0f0' });
 
   assert.equal(res.status, 200, JSON.stringify(res.body));
-  assert.deepEqual(res.body.renamedReferences, { worlds: 1, biomes: 1, hadPlacedCreatures: true });
+  assert.deepEqual(res.body.renamedReferences, { worlds: 1, biomes: 1, hadPlacedCreatures: true, dungeonBosses: 0 });
   assert.ok(pool.calls.some((c) => /UPDATE worlds\b/i.test(c.sql)));
   assert.ok(pool.calls.some((c) => /UPDATE world_creatures SET type/i.test(c.sql)));
   assert.ok(pool.calls.some((c) => /UPDATE biomes\b/i.test(c.sql)));
@@ -355,6 +359,7 @@ test('PUT /api/entity-types/:id allows a rename when nothing references the old 
   const pool = mockPool([
     [/SELECT name FROM entity_types WHERE id/i, () => ({ rows: [{ name: 'OldName' }] })],
     [/SELECT id, name FROM worlds WHERE allowed_creature_types/i, () => ({ rows: [] })],
+    [/FROM worlds WHERE dungeon_boss->>'entity'/i, () => ({ rows: [] })],
     [/SELECT 1 FROM world_creatures WHERE type/i, () => ({ rows: [] })],
     [/SELECT id, name FROM biomes WHERE flora_types/i, () => ({ rows: [] })],
     [/UPDATE entity_types SET/i, () => ({ rows: [{ id: 5, name: 'NewName' }] })],
@@ -410,6 +415,7 @@ test('PUT /api/entity-types/:id rolls back the whole cascade when a mid-transact
   const pool = mockPool([
     [/SELECT name FROM entity_types WHERE id/i, () => ({ rows: [{ name: 'AuditFixtureBeast' }] })],
     [/SELECT id, name FROM worlds WHERE allowed_creature_types/i, () => ({ rows: [{ id: 'w1', name: 'Test World' }] })],
+    [/FROM worlds WHERE dungeon_boss->>'entity'/i, () => ({ rows: [] })],
     [/SELECT 1 FROM world_creatures WHERE type/i, () => ({ rows: [{ '?column?': 1 }] })],
     [/SELECT id, name FROM biomes WHERE flora_types/i, () => ({ rows: [{ id: 1, name: 'Meadow' }] })],
     [/UPDATE worlds\b[\s\S]*allowed_creature_types/i, () => ({ rowCount: 1, rows: [] })],
@@ -438,6 +444,7 @@ test('DELETE /api/entity-types/:id 409s when still an allowed creature type on a
   __setPool(mockPool([
     [/SELECT name FROM entity_types WHERE id/i, () => ({ rows: [{ name: 'AuditFixtureBeast' }] })],
     [/SELECT id, name FROM worlds WHERE allowed_creature_types/i, () => ({ rows: [{ id: 'w1', name: 'Test World' }] })],
+    [/FROM worlds WHERE dungeon_boss->>'entity'/i, () => ({ rows: [] })],
     [/SELECT 1 FROM world_creatures WHERE type/i, () => ({ rows: [] })],
     [/FROM biomes WHERE/i, () => ({ rows: [] })],
   ]));
@@ -451,6 +458,7 @@ test('DELETE /api/entity-types/:id 409s when it still has placed creatures', asy
   __setPool(mockPool([
     [/SELECT name FROM entity_types WHERE id/i, () => ({ rows: [{ name: 'Village Guard' }] })],
     [/SELECT id, name FROM worlds WHERE allowed_creature_types/i, () => ({ rows: [] })],
+    [/FROM worlds WHERE dungeon_boss->>'entity'/i, () => ({ rows: [] })],
     [/SELECT 1 FROM world_creatures WHERE type/i, () => ({ rows: [{ '?column?': 1 }] })],
     [/FROM biomes WHERE/i, () => ({ rows: [] })],
   ]));
@@ -464,6 +472,7 @@ test('DELETE /api/entity-types/:id 409s when still referenced by a biome', async
   __setPool(mockPool([
     [/SELECT name FROM entity_types WHERE id/i, () => ({ rows: [{ name: 'Bush' }] })],
     [/SELECT id, name FROM worlds WHERE allowed_creature_types/i, () => ({ rows: [] })],
+    [/FROM worlds WHERE dungeon_boss->>'entity'/i, () => ({ rows: [] })],
     [/SELECT 1 FROM world_creatures WHERE type/i, () => ({ rows: [] })],
     [/FROM biomes WHERE/i, () => ({ rows: [{ id: 'b1', name: 'Meadow' }] })],
   ]));
@@ -477,6 +486,7 @@ test('DELETE /api/entity-types/:id succeeds when nothing references it (no regre
   const pool = mockPool([
     [/SELECT name FROM entity_types WHERE id/i, () => ({ rows: [{ name: 'Unused' }] })],
     [/SELECT id, name FROM worlds WHERE allowed_creature_types/i, () => ({ rows: [] })],
+    [/FROM worlds WHERE dungeon_boss->>'entity'/i, () => ({ rows: [] })],
     [/SELECT 1 FROM world_creatures WHERE type/i, () => ({ rows: [] })],
     [/FROM biomes WHERE/i, () => ({ rows: [] })],
     [/DELETE FROM entity_types WHERE id/i, () => ({ rows: [{ id: 5 }] })],
@@ -702,4 +712,56 @@ test('PUT /api/entity-types/:id does not touch world_point_kinds when point_kind
   const res = await request(app).put('/api/entity-types/1').set(...AUTH).send(base);
   assert.strictEqual(res.status, 200);
   assert.ok(!queries.some((q) => /UPDATE world_point_kinds/i.test(q.sql)), 'must not issue the cleanup query');
+});
+
+// SOMET-603: the boss columns travel on POST and PUT; an absent key on PUT
+// must leave the stored value alone (same rule as point_kind / behavior_id).
+function flagFor(sql, params, column) {
+  const m = new RegExp(`\\b${column}\\s*=\\s*CASE WHEN \\$(\\d+)::boolean`, 'i').exec(sql);
+  assert.ok(m, `UPDATE does not guard '${column}' with a was-it-sent flag`);
+  return params[Number(m[1]) - 1];
+}
+
+test('POST /api/entity-types binds the boss columns', async () => {
+  let params = null, sql = null;
+  __setPool({ query: withAuth(async (s, p) => { sql = s; params = p; return { rows: [{ id: 1 }] }; }) });
+  const res = await request(app).post('/api/entity-types').set(...AUTH).send({
+    name: 'zzBossPost', color: '#f00', is_creature: true,
+    boss_tier: 'world', element: 'fire', hitbox_size: 96, xp_reward: 3500, base_damage: 42,
+  });
+  assert.equal(res.status, 201);
+  assert.equal(paramFor(sql, params, 'boss_tier'), 'world');
+  assert.equal(paramFor(sql, params, 'element'), 'fire');
+  assert.equal(paramFor(sql, params, 'hitbox_size'), 96);
+  assert.equal(paramFor(sql, params, 'xp_reward'), 3500);
+  assert.equal(paramFor(sql, params, 'base_damage'), 42);
+});
+
+test('PUT /api/entity-types/:id writes sent boss fields and leaves absent ones alone', async () => {
+  let sql = null, params = null;
+  __setPool(putMock('zzBossPut', async (s, p) => { sql = s; params = p; return { rows: [{ id: 5 }] }; }));
+  const res = await request(app).put('/api/entity-types/5').set(...AUTH).send({
+    name: 'zzBossPut', color: '#f00', boss_tier: 'world', hitbox_size: null,
+  });
+  assert.equal(res.status, 200);
+  assert.equal(flagFor(sql, params, 'boss_tier'), true);
+  assert.equal(paramFor(sql, params, 'boss_tier'), 'world');
+  assert.equal(flagFor(sql, params, 'hitbox_size'), true, 'an explicit null is a clear, not an omission');
+  assert.equal(paramFor(sql, params, 'hitbox_size'), null);
+  for (const col of ['element', 'xp_reward', 'base_damage']) {
+    assert.equal(flagFor(sql, params, col), false, `${col} was not sent and must be left alone`);
+  }
+  assert.equal(params[params.length - 1], '5', 'id stays the last param');
+});
+
+test('PUT /api/entity-types/:id writes auras when sent, keeping id last', async () => {
+  let captured;
+  __setPool(putMock('Wolf', (s, p) => {
+    if (/FROM aura_effects/.test(s)) return { rows: [{ name: 'pack_leader' }] };
+    captured = { s, p }; return { rows: [{ id: 7 }] };
+  }));
+  const r = await request(app).put('/api/entity-types/7').set(...AUTH).send({ name: 'Wolf', color: '#000000', auras: ['pack_leader'] });
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(paramFor(captured.s, captured.p, 'auras'), '["pack_leader"]');
+  assert.strictEqual(captured.p[captured.p.length - 1], '7');
 });

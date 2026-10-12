@@ -1,12 +1,22 @@
-import { describe, it, expect } from 'vitest';
+import {
+  describe, it, expect, vi, afterEach,
+} from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
   slotId, audioSlotRows, jobsBySlotFrom, missesSetFrom, applyFilters, filtersFromParams, paramsFromFilters,
   PAGE_SIZE, pageCount, clampPage, toggle, selectPage, deselectPage, isPageFullySelected,
   selectAllMatching, selectionOutsideFilter, queueItems, enqueueSummary, normalizeCause, failedByCause,
-  soundText, MAX_JOB_ITEMS, chunkItems, queueInChunks, jobsForKnownSubjects, uploadOnlyCount,
+  soundText, MAX_JOB_ITEMS, chunkItems, queueInChunks, jobsForKnownSubjects, uploadOnlyCount, slotEntriesFor,
+  DEFAULT_SFX_VARIANTS, SEARCH_DEBOUNCE_MS, createSearchSync, singleFlight, MAX_SFX_VARIANTS, parseVariants,
+  variantsStatus,
 } from '../audioSelection.js';
+
+// AudioSlotTable.jsx with comments removed, for the wiring gates below: a
+// gate that a comment can satisfy proves nothing (rework 2 found one).
+const tableCode = () => readFileSync(fileURLToPath(new URL('../AudioSlotTable.jsx', import.meta.url)), 'utf8')
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/(^|[^:])\/\/.*$/gm, '$1');
 
 // A registry response shaped like GET /api/audio/admin/subjects.
 const subjects = [
@@ -123,6 +133,22 @@ describe('filters', () => {
     });
   });
 
+  // SOMET-596 rework: `?kind=nope` showed "All kinds" in the select over a
+  // table of 0 rows, and choosing "All kinds" fired no change event, so no
+  // control on screen could leave that state.
+  it('drops a kind the registry does not list, once the kinds are known', () => {
+    const known = ['world', 'creature'];
+    expect(filtersFromParams(new URLSearchParams('kind=nope&sound=all'), known))
+      .toEqual({
+        kind: 'all', sound: 'all', search: '', prompt: 'all',
+      });
+    expect(filtersFromParams(new URLSearchParams('kind=creature'), known).kind).toBe('creature');
+    // Before the subjects load there is nothing to check against, so the
+    // deep link is kept rather than thrown away on the first render.
+    expect(filtersFromParams(new URLSearchParams('kind=creature'), []).kind).toBe('creature');
+    expect(filtersFromParams(new URLSearchParams('kind=creature')).kind).toBe('creature');
+  });
+
   it('writes filters back to the URL, omitting defaults, and round-trips', () => {
     expect(paramsFromFilters({
       kind: 'all', sound: 'missing', search: '', prompt: 'all',
@@ -222,6 +248,33 @@ describe('queueItems', () => {
       },
       { subject_kind: 'world', subject_key: 'Ash', slot: 'music' },
     ]);
+  });
+
+  // SOMET-596 rework: the queue bar's Variants control. The route accepts
+  // `variants` (an integer 1-5) on sfx items only and rejects it on a
+  // music/ambience item, so it must never be put on one.
+  it('puts the chosen variants on sfx items only', () => {
+    const { items } = queueItems(new Set(['world/Ash/music', 'creature/Slime/hurt']), index, { variants: 5 });
+    expect(items).toEqual([
+      {
+        subject_kind: 'creature', subject_key: 'Slime', slot: 'hurt', engine: 'realistic', variants: 5,
+      },
+      { subject_kind: 'world', subject_key: 'Ash', slot: 'music' },
+    ]);
+  });
+
+  it('sends no variants for a value the route would reject', () => {
+    for (const bad of [0, 6, 2.5, NaN, '3', null]) {
+      const { items } = queueItems(new Set(['creature/Slime/hurt']), index, { variants: bad });
+      expect(items[0]).not.toHaveProperty('variants');
+    }
+  });
+
+  it('defaults the bar to the server\'s own pack size', () => {
+    const gen = readFileSync(fileURLToPath(new URL('../../../../../backend/src/services/audioGeneration.js', import.meta.url)), 'utf8');
+    const m = /const DEFAULT_SFX_VARIANTS = (\d+);/.exec(gen);
+    expect(m).not.toBeNull();
+    expect(DEFAULT_SFX_VARIANTS).toBe(Number(m[1]));
   });
 
   it('summarises the enqueue responses of every chunk', () => {
@@ -340,6 +393,168 @@ describe('failed by cause', () => {
   });
 });
 
+describe('failed by cause: ordering', () => {
+  const job = (id, error) => ({
+    id: String(id), subject_kind: 'creature', subject_key: `c${id}`, slot: 'hurt', status: 'failed', error,
+  });
+
+  // SOMET-596 rework: the fixture above lists its biggest group first, so
+  // the sort was untested -- removing it left the suite green.
+  it('puts the biggest group first even when it appears last', () => {
+    const groups = failedByCause([
+      job(1, 'small cause'),
+      job(2, 'big cause'), job(3, 'big cause'), job(4, 'big cause'),
+      job(5, 'middle cause'), job(6, 'middle cause'),
+    ]);
+    expect(groups.map((g) => [g.cause, g.count])).toEqual([
+      ['big cause', 3], ['middle cause', 2], ['small cause', 1],
+    ]);
+  });
+
+  it('breaks a tie by cause text, so the order is stable across polls', () => {
+    const groups = failedByCause([job(1, 'zeta'), job(2, 'alpha'), job(3, 'mu')]);
+    expect(groups.map((g) => g.cause)).toEqual(['alpha', 'mu', 'zeta']);
+  });
+});
+
+describe('search box: debounced URL sync', () => {
+  // SOMET-596 rework: the Search input was bound straight to `?q=`, and a
+  // URL commit takes 30-300 ms (every row is re-filtered), so the next key
+  // was applied to the OLD value and typed characters were lost ("Titan" ->
+  // "n"). The input now shows local text; the URL follows after a pause.
+  afterEach(() => { vi.useRealTimers(); });
+  const harness = () => {
+    vi.useFakeTimers();
+    const commits = [];
+    const sync = createSearchSync((v) => commits.push(v));
+    return { sync, commits };
+  };
+
+  it('commits the whole word once, after the pause, when typed faster than the URL commits', () => {
+    const { sync, commits } = harness();
+    let shown = '';
+    for (const ch of 'Titan') {
+      shown += ch;
+      sync.type(shown);
+      // The URL has not caught up, as in the browser: it still says ''.
+      expect(sync.fromUrl('')).toBeNull();
+      vi.advanceTimersByTime(60);
+    }
+    expect(commits).toEqual([]);
+    vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS);
+    expect(commits).toEqual(['Titan']);
+  });
+
+  it('keeps the typed text while a commit is still landing, then follows the URL again', () => {
+    const { sync, commits } = harness();
+    sync.type('Tit');
+    vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS);
+    expect(commits).toEqual(['Tit']);
+    sync.type('Titan');
+    // The 'Tit' commit lands while 'Titan' is pending: the box keeps 'Titan'.
+    expect(sync.fromUrl('Tit', 'Tit')).toBeNull();
+    vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS);
+    expect(commits).toEqual(['Tit', 'Titan']);
+    expect(sync.fromUrl('Titan', 'Titan')).toBe('Titan');
+    // Nothing pending: a URL change (back/forward, a shared link) wins --
+    // the address bar and the render agree on it.
+    expect(sync.fromUrl('Vale', 'Vale')).toBe('Vale');
+  });
+
+  it('ignores a stale render that lands after a later commit fired (rework 2)', () => {
+    const { sync, commits } = harness();
+    sync.type('Titan Br');
+    vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS);
+    sync.type('Titan Bru');
+    vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS);
+    expect(commits).toEqual(['Titan Br', 'Titan Bru']);
+    // Nothing is pending and the address bar already says 'Titan Bru', but
+    // the starved transition render still carries the earlier value.
+    expect(sync.fromUrl('Titan Br', 'Titan Bru')).toBeNull();
+    expect(sync.fromUrl('', 'Titan Bru')).toBeNull();
+    expect(sync.fromUrl('Titan Bru', 'Titan Bru')).toBe('Titan Bru');
+  });
+
+  it('ignores a stale render even when the rendered value before it equalled the new commit', () => {
+    // Measured live against the first rework-2 attempt: the previous search
+    // 'Titan Brute' was still rendered, the user cleared and retyped it, and
+    // the starved render of the intermediate 'Tita' landed after the final
+    // commit -- an "is the commit already in the URL?" shortcut read the stale
+    // render as current and let 'Tita' through.
+    const { sync } = harness();
+    expect(sync.fromUrl('Titan Brute', 'Titan Brute')).toBe('Titan Brute');
+    for (const v of ['', 'Tita', 'Titan Brute']) {
+      sync.type(v);
+      vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS);
+    }
+    expect(sync.fromUrl('Tita', 'Titan Brute')).toBeNull();
+  });
+
+  it('the table feeds fromUrl the rendered q AND the live address-bar q', () => {
+    const src = tableCode();
+    expect(src).toMatch(/useEffect\(\(\) => \{\s*const live = filtersFromParams\(new URLSearchParams\(window\.location\.search\), kindKeys\)\.search;\s*const v = searchSync\.fromUrl\(search, live\);\s*if \(v !== null\) setSearchText\(v\);\s*\}, \[search, searchSync, kindKeys\]\)/);
+  });
+
+  it('a filter change builds on the live URL, not on the possibly stale rendered params', () => {
+    const src = tableCode();
+    const body = /const setFilter = \(patch\) => \{([\s\S]*?)\n {2}\};/.exec(src);
+    expect(body).not.toBeNull();
+    expect(body[1]).toMatch(/paramsFromFilters\(\{ \.\.\.liveUrlFilters\(\), \.\.\.patch \}\)/);
+    expect(src).toMatch(/const liveUrlFilters = \(\) => filtersFromParams\(new URLSearchParams\(window\.location\.search\), kindKeys\)/);
+  });
+
+  it('cancel drops a pending commit (unmount)', () => {
+    const { sync, commits } = harness();
+    sync.type('Ti');
+    sync.cancel();
+    vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS * 2);
+    expect(commits).toEqual([]);
+    expect(sync.fromUrl('x')).toBe('x');
+  });
+
+  it('the table binds its Search input to the local text, not to the URL param', () => {
+    const src = tableCode();
+    const input = /Search\s*<input([\s\S]*?)\/>/.exec(src);
+    expect(input).not.toBeNull();
+    expect(input[1]).not.toMatch(/value=\{search\}/);
+    expect(input[1]).not.toMatch(/setFilter\(/);
+    expect(input[1]).toMatch(/value=\{searchText\}/);
+  });
+});
+
+describe('singleFlight (Retry these N)', () => {
+  // SOMET-596 rework: a fast double-click sent two POSTs 2 ms apart, because
+  // disabled={retry.isPending} lands a render too late.
+  it('ignores a second call while the first is in flight, and allows one after it settles', async () => {
+    let release;
+    const fn = vi.fn(() => new Promise((r) => { release = r; }));
+    const once = singleFlight(fn);
+    const first = once('a');
+    expect(once('b')).toBeUndefined();
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(fn).toHaveBeenCalledWith('a');
+    release('done');
+    await expect(first).resolves.toBe('done');
+    once('c');
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it('releases after a failure too', async () => {
+    const fn = vi.fn().mockRejectedValueOnce(new Error('boom')).mockResolvedValue('ok');
+    const once = singleFlight(fn);
+    await expect(once()).rejects.toThrow('boom');
+    await expect(once()).resolves.toBe('ok');
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it('the table routes Retry these N through it', () => {
+    const src = tableCode();
+    expect(src).not.toMatch(/retry\.mutate\(/);
+    expect(src).toMatch(/const \[retryOnce\] = useState\(\(\) => singleFlight\(/);
+    expect(src).toMatch(/onClick=\{\(\) => retryOnce\(g\.ids\)\}/);
+  });
+});
+
 describe('jobs for subjects that still exist', () => {
   it('drops job rows whose kind, key or slot is not in the registry', () => {
     const jobRows = [
@@ -358,5 +573,165 @@ describe('uploadOnlyCount', () => {
   it('counts the upload-only rows a filter matched', () => {
     expect(uploadOnlyCount(applyFilters(rows, { sound: 'missing' }))).toBe(1);
     expect(uploadOnlyCount(applyFilters(rows, { kind: 'world' }))).toBe(0);
+  });
+});
+
+describe('per-subject slots (SOMET-605)', () => {
+  const creatureGroup = {
+    kind: 'creature', label: 'Creatures',
+    slots: { nearby: 'sfx', attack: 'sfx', hurt: 'sfx', death: 'sfx', spawn: 'sfx', presence: 'sfx', phase: 'sfx', enrage: 'sfx' },
+    subjects: ['Ignis', 'Slime'],
+    subjectSlots: {
+      Ignis: ['nearby', 'attack', 'hurt', 'death', 'spawn', 'presence', 'phase', 'enrage'],
+      Slime: ['nearby', 'attack', 'hurt', 'death'],
+    },
+  };
+
+  it('a boss row lists 8 slot rows, an ordinary creature 4', () => {
+    const rows = audioSlotRows([creatureGroup]);
+    expect(rows.filter((r) => r.key === 'Ignis').map((r) => r.slot)).toEqual(['nearby', 'attack', 'hurt', 'death', 'spawn', 'presence', 'phase', 'enrage']);
+    expect(rows.filter((r) => r.key === 'Slime').map((r) => r.slot)).toEqual(['nearby', 'attack', 'hurt', 'death']);
+  });
+
+  it('a group without subjectSlots still lists every slot for every subject', () => {
+    const rows = audioSlotRows([{ kind: 'world', slots: { music: 'music', ambience: 'ambience' }, subjects: ['Vale'] }]);
+    expect(rows.map((r) => r.slot)).toEqual(['music', 'ambience']);
+  });
+
+  it('audioSlotRows: a key absent from subjectSlots yields zero rows', () => {
+    const g = { ...creatureGroup, subjects: ['Ignis', 'Ghost'] };
+    expect(audioSlotRows([g]).filter((r) => r.key === 'Ghost')).toEqual([]);
+  });
+
+  it('slotEntriesFor: a subject absent from subjectSlots gets nothing', () => {
+    expect(slotEntriesFor(creatureGroup, 'Ghost')).toEqual([]);
+  });
+
+  it('a job for an ordinary creature boss slot is not a known subject (no retry offered)', () => {
+    const jobs = [
+      { id: 1, subject_kind: 'creature', subject_key: 'Slime', slot: 'presence', status: 'failed' },
+      { id: 2, subject_kind: 'creature', subject_key: 'Ignis', slot: 'presence', status: 'failed' },
+    ];
+    expect(jobsForKnownSubjects(jobs, [creatureGroup]).map((j) => j.id)).toEqual([2]);
+  });
+});
+
+describe('table wiring (rework 2 gates)', () => {
+  it('Queue passes the Variants value into queueItems', () => {
+    const src = tableCode();
+    const call = /queueItems\(\s*selected,\s*rowsById,\s*\{([\s\S]*?)\}\s*\)/.exec(src);
+    expect(call).not.toBeNull();
+    expect(call[1]).toMatch(/\bvariants\s*:\s*variantsNow\.value\b/);
+  });
+
+  it('every filtersFromParams call passes the registry kinds', () => {
+    const src = tableCode();
+    // The argument text of each call, parentheses balanced.
+    const calls = [...src.matchAll(/filtersFromParams\(/g)].map((m) => {
+      let depth = 1;
+      let i = m.index + m[0].length;
+      const start = i;
+      for (; depth > 0; i += 1) {
+        if (src[i] === '(') depth += 1;
+        else if (src[i] === ')') depth -= 1;
+      }
+      return src.slice(start, i - 1);
+    }).filter((args) => args.trim() !== '');
+    // The rendered params, the live URL (setFilter's base) and the Search
+    // box's live check.
+    expect(calls.length).toBeGreaterThanOrEqual(3);
+    for (const args of calls) expect(args).toMatch(/,\s*kindKeys\s*$/);
+  });
+
+  it('the Variants input shows its raw text', () => {
+    const src = tableCode();
+    const input = /Variants \(sfx\)\s*<input([\s\S]*?)\/>/.exec(src);
+    expect(input).not.toBeNull();
+    expect(input[1]).toMatch(/value=\{variantsText\}/);
+    expect(input[1]).toMatch(/setVariantsText\(e\.target\.value\)/);
+  });
+});
+
+describe('Variants: an invalid value is never replaced, and blocks Queue (rework 3)', () => {
+  // Validator, re-validation of 47550eef: a real mouse click on Queue blurs
+  // the Variants box first, and onBlur restored the last valid value before
+  // onClick ran -- so '0' was queued as 4 with no error. The box now keeps
+  // what was typed, says why it is invalid, and Queue is disabled meanwhile.
+  const variantsInput = () => /Variants \(sfx\)\s*<input([\s\S]*?)\/>/.exec(tableCode())[1];
+  const queueButton = () => {
+    const m = /<Button\s*type="button"\s*onClick=\{onQueue\}([\s\S]*?)>/.exec(tableCode());
+    expect(m).not.toBeNull();
+    return m[1];
+  };
+
+  it('variantsStatus: the count and no error for 1..MAX, the error for anything else', () => {
+    expect(variantsStatus('4')).toEqual({ value: 4, error: null });
+    for (const bad of ['0', '', '6', 'x']) {
+      expect(variantsStatus(bad)).toEqual({
+        value: null, error: `Variants must be a whole number from 1 to ${MAX_SFX_VARIANTS}.`,
+      });
+    }
+  });
+
+  it('blur leaves the typed text alone: no onBlur rewrites it', () => {
+    expect(variantsInput()).not.toMatch(/onBlur/);
+    // No second "last valid" count exists for anything to fall back to.
+    expect(tableCode()).not.toMatch(/\bsetVariants\(/);
+  });
+
+  it('the count queued is read from the box text at click time', () => {
+    expect(tableCode()).toMatch(/const variantsNow = variantsStatus\(variantsText\)/);
+  });
+
+  it('onQueue sends nothing while the Variants text is invalid, even if reached', () => {
+    const body = /const onQueue = async \(\) => \{([\s\S]*?)\n {2}\};/.exec(tableCode());
+    expect(body).not.toBeNull();
+    expect(body[1]).toMatch(/^\s*if \(variantsNow\.value === null\) return;/);
+  });
+
+  it('Queue is disabled while the Variants text is invalid', () => {
+    expect(queueButton()).toMatch(/disabled=\{[^}]*\bvariantsNow\.value === null\b[^}]*\}/);
+  });
+
+  it('the box shows why it is invalid, next to the box, while it is invalid', () => {
+    const src = tableCode();
+    expect(src).toMatch(/\{variantsNow\.error && <FieldErr role="alert">\{variantsNow\.error\}<\/FieldErr>\}/);
+    expect(variantsInput()).toMatch(/aria-invalid=\{variantsNow\.value === null\}/);
+  });
+});
+
+describe('Variants box: no native spinner, readable width (rework 3)', () => {
+  // A type="number" box gets Chrome's spin arrows over its centre at 40px
+  // (4rem under the app's 62.5% root), so a click to focus it changed the
+  // count. A text box with a numeric keypad has no arrows.
+  it('is a text box with a numeric keypad, not type="number"', () => {
+    const input = /Variants \(sfx\)\s*<input([\s\S]*?)\/>/.exec(tableCode())[1];
+    expect(input).not.toMatch(/type="number"/);
+    expect(input).toMatch(/inputMode="numeric"/);
+  });
+
+  it('is at least 56px wide under the 10px root', () => {
+    const m = /const VariantsField = styled\(Field\)`[^`]*\bwidth:\s*([\d.]+)rem/.exec(tableCode());
+    expect(m).not.toBeNull();
+    expect(Number(m[1]) * 10).toBeGreaterThanOrEqual(56);
+  });
+});
+
+describe('Search: unmount cancels a pending commit (rework 3)', () => {
+  // A pending 250 ms commit firing after the table unmounts would rewrite
+  // the next route's URL. Removing this effect used to leave every test green.
+  it('the table cancels the search sync in an unmount cleanup', () => {
+    expect(tableCode()).toMatch(/useEffect\(\(\) => \(\) => searchSync\.cancel\(\), \[searchSync\]\);/);
+  });
+});
+
+describe('parseVariants', () => {
+  it('accepts 1..MAX and rejects the rest, including the empty text mid-edit', () => {
+    expect(parseVariants('1')).toBe(1);
+    expect(parseVariants(' 4 ')).toBe(4);
+    expect(parseVariants(String(MAX_SFX_VARIANTS))).toBe(MAX_SFX_VARIANTS);
+    for (const bad of ['', '0', '6', '35', '2.5', '-1', 'x', '1e0', null, undefined]) {
+      expect(parseVariants(bad)).toBeNull();
+    }
   });
 });

@@ -124,7 +124,7 @@ test('a rename referenced in worlds, world_creatures AND biomes cascades correct
 
     assert.equal(res.status, 200, JSON.stringify(res.body));
     assert.equal(res.body.name, NEW);
-    assert.deepEqual(res.body.renamedReferences, { worlds: 1, biomes: 1, hadPlacedCreatures: true });
+    assert.deepEqual(res.body.renamedReferences, { worlds: 1, biomes: 1, hadPlacedCreatures: true, dungeonBosses: 0 });
 
     const worldRow = (await dbPool.query('SELECT allowed_creature_types FROM worlds WHERE id = $1', [worldId])).rows[0];
     assert.deepEqual(worldRow.allowed_creature_types, [NEW, UNRELATED], 'the matching element renamed, the unrelated one untouched, order preserved');

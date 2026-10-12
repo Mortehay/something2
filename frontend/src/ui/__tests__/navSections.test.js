@@ -43,12 +43,12 @@ describe('visibleSections', () => {
     expect(items.every((i) => !i.adminType)).toBe(true);
   });
 
-  it('shows an admin the two player screens plus all fourteen admin screens', () => {
+  it('shows an admin the two player screens plus all sixteen admin screens', () => {
     const items = allItems(visibleSections(true));
-    expect(items).toHaveLength(16);
+    expect(items).toHaveLength(18);
     expect(items.map((i) => i.path)).toEqual([
       '/game', '/game/map', '/game/tiles', '/game/entities', '/game/items',
-      '/game/maps', '/game/biomes', '/game/creature-behaviors', '/game/vfx', '/game/world-map',
+      '/game/maps', '/game/biomes', '/game/creature-behaviors', '/game/vfx', '/game/auras', '/game/world-map',
       // Regions from the remote world-spec generator, beside the map editors
       // because an admin opens it to look at content, not to configure a host.
       '/game/generated-worlds',
@@ -64,6 +64,7 @@ describe('visibleSections', () => {
       // you point the game at a machine there, then drive a batch through it
       // here.
       '/game/art',
+      '/game/sprites',
       // SOMET-590 game audio slice 1: the Audio tab, directly below Art
       // Generation for the same reason -- both are "how content gets made".
       '/game/audio',

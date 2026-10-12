@@ -502,3 +502,45 @@ test('world.snapshot broadcasts several concurrent effects as keys, not entries'
   assert.equal(wire.includes('"until"'), false, 'effect expiry timestamps reached the wire');
   assert.equal(wire.includes('"elapsed"'), false, 'effect tick accumulators reached the wire');
 });
+
+// SOMET-574 AC2 (server leg): while a swing's cooldown runs, movement input
+// must not turn the player away from the attack -- otherwise remote viewers
+// see the attacker face the walk direction mid-swing. Once the cooldown
+// lapses, movement steers facing again. Both movement branches are pinned:
+// the queued-input path (a fresh input frame this tick) and the held-input
+// path (no new frame, the last input keeps moving the player).
+test('movement does not change facing while the attack cooldown runs (queued input)', () => {
+  const w = new World(stubMap());
+  w.addPlayer('u1', { x: 0, y: 0 });
+  const p = w.getPlayer('u1');
+  p.facing = 'e';
+  p._attackCd = 0.5;
+  w.setInput('u1', 1, -1, 0, 0.05); // walking west, attack aimed east
+  w.tick(0.05);
+  assert.ok(p.x < 0, 'precondition: the player actually moved west');
+  assert.equal(p.facing, 'e', 'facing is held toward the attack during cooldown');
+  p._attackCd = 0;
+  w.setInput('u1', 2, -1, 0, 0.05);
+  w.tick(0.05);
+  assert.equal(p.facing, 'w', 'after the cooldown, movement steers facing again');
+});
+
+test('movement does not change facing while the attack cooldown runs (held input)', () => {
+  const w = new World(stubMap());
+  w.addPlayer('u1', { x: 0, y: 0 });
+  const p = w.getPlayer('u1');
+  w.setInput('u1', 1, 0, 1); // no dt: legacy path; first tick drains the queue
+  w.tick(0.05);
+  assert.equal(p.facing, 's');
+  p.facing = 'e';
+  p._attackCd = 0.5;
+  w.setInput('u1', 2, -1, 0);
+  w.tick(0.05); // drains the queued frame
+  const x0 = p.x;
+  w.tick(0.05); // no new frame: the held-input branch moves the player
+  assert.ok(p.x < x0, 'precondition: the held-input branch moved the player west');
+  assert.equal(p.facing, 'e', 'facing is held toward the attack during cooldown');
+  p._attackCd = 0;
+  w.tick(0.05);
+  assert.equal(p.facing, 'w', 'after the cooldown, held movement steers facing again');
+});

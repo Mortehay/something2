@@ -1,14 +1,14 @@
 const { resolveMove } = require('./collision');
-const { CreatureSim, CREATURE_SIZE, shoveCreature } = require('./creatures');
+const { CreatureSim, CREATURE_SIZE, shoveCreature, effectiveMit, NO_BUFF } = require('./creatures');
 const { shoveAwayFrom } = require('./knockback');
-const { normalizeAim, inArc, hasLineOfSight, weaponStaminaCost } = require('./weapons');
+const { normalizeAim, inArc, hasLineOfSight, weaponStaminaCost, hitRadius } = require('./weapons');
 const { resolveEffectName, momentForAttack, blockedImpact } = require('./vfx.js');
 const { attackLift, bodyLift } = require('./attackOrigin.js');
 const { ProjectileSim } = require('./projectiles');
 const {
   weaponUse, weaponHit, creatureUse, creatureHurt, skillUse, skillAttackKind, attackKindOf, pushSfxEvent,
 } = require('./sfxEvents.js');
-const { applyDamageWithEffects, drainMana, NO_MITIGATION, playerKey } = require('./damage');
+const { applyDamageWithEffects, drainMana, playerKey } = require('./damage');
 const {
   tickEffects, effectMagnitude, applyElementEffect, applyHitStatuses,
   canAct, clearInterrupt, activeEffectKeys,
@@ -77,6 +77,44 @@ const BASE_STATS = derivePlayerStats(DEFAULT_PROGRESSION);
 function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 function sign(v) { return v > 0.3 ? 1 : v < -0.3 ? -1 : 0; }
 
+// SOMET-606 (S4). The enemy-aura debuff a player is living with this tick,
+// stamped by CreatureSim.tick (p._buff, the same field and the same NO_BUFF
+// default creatures use). Two readers, ONE definition each:
+//  - playerSpeedMult: chill x aura. tick() moves with it and selfAuraFields
+//    sends it to the owning client, which predicts with it -- two copies is
+//    how prediction and authority drift into a rubber-band.
+//  - debuffDamageMult: every outgoing player damage number (weaponDamage, skills,
+//    and an augment stone's bonus packet).
+//
+// The 0.5 floor (ENEMY_AURA_FLOOR) is applied to the AURA product only, inside
+// applyEnemyAuras. Chill multiplies on top of the already-floored aura factor,
+// so chill x aura CAN go below 0.5 (e.g. a 0.5 aura with a 0.7 chill = 0.35).
+// That is accepted (controller ruling Q8); tuning is SOMET-613.
+function playerSpeedMult(p, now) {
+  const chill = effectMagnitude(p, CHILL, now);
+  return (chill || 1) * (p._buff || NO_BUFF).speedMult;
+}
+function debuffDamageMult(p) {
+  return (p._buff || NO_BUFF).damageMult;
+}
+
+// SOMET-606. The OWNER's aura state for its own `state` frame (server.js adds
+// it per socket). Never on the shared players[] rows: those go to every nearby
+// recipient by reference, and nobody but the owner has a use for them.
+// {} when clear, so a quiet frame costs no bytes and the client clears.
+function selfAuraFields(p, now) {
+  const out = {};
+  const b = p._buff;
+  if (b && Array.isArray(b.auras) && b.auras.length > 0) {
+    out.debuffs = b.auras.map((a) => (a.dotDps > 0
+      ? { n: a.name, d: a.damageMult, f: a.defenseMult, s: a.speedMult, dps: a.dotDps, el: a.dotElement }
+      : { n: a.name, d: a.damageMult, f: a.defenseMult, s: a.speedMult }));
+  }
+  const sm = playerSpeedMult(p, now);
+  if (sm !== 1) out.speedMult = sm;
+  return out;
+}
+
 // STR scales physical weapons, INT scales every other element. The split is
 // the weapon catalog's existing `element` column -- no new field, and it
 // gives the element system weight it currently lacks.
@@ -98,7 +136,7 @@ function weaponDamage(p, w) {
   //
   // Identity is 1, so every weapon with no shape node allocated is unmoved.
   const shape = w.kind === 'melee' ? (p.stats.rules.meleeDamageMult || 1) : 1;
-  return w.damage * mult * elementDamageMult(p.stats, w.element) * shape;
+  return w.damage * mult * elementDamageMult(p.stats, w.element) * shape * debuffDamageMult(p);
 }
 
 // SOMET-495. The passive tree's `damage` grants, as a PER-ELEMENT multiplier.
@@ -534,9 +572,15 @@ class World {
         // applier's userId for kill attribution already, so naming it here
         // costs nothing and keeps every damage site attributed rather than
         // leaving one that stamps "hit by nobody".
-        applyDamageWithEffects(t, m, BURN_ELEMENT, t.mit || NO_MITIGATION, this.now, playerKey(sourceId));
+        applyDamageWithEffects(t, m, BURN_ELEMENT, effectiveMit(t), this.now, playerKey(sourceId));
         return false;
       });
+      // SOMET-606: stepEffects set speed = base x chill; fold in the enemy-aura
+      // slow from the SAME function the client is told about. Recomputed from
+      // baseSpeed every tick, so it can never compound. p._buff was stamped by
+      // the PREVIOUS CreatureSim.tick (it runs after World.tick), so a new
+      // debuff slows movement from the next 50 ms tick (ruling G11, accepted).
+      p.speed = p.baseSpeed * playerSpeedMult(p, this.now);
     }
     // Snapshot: damageCreatureById deletes from the live map on a kill.
     for (const c of this.creatures.all()) {
@@ -971,7 +1015,11 @@ class World {
     const augment = w.augment
       ? {
         ...w.augment,
-        bonusDamage: w.augment.bonusDamage * elementDamageMult(p.stats, w.augment.element),
+        // SOMET-606 (ruling Q3): the enemy-aura damage debuff lowers TOTAL
+        // outgoing damage, so the bonus packet is scaled here too -- once, for
+        // the same three consumers (creature arc, PvP branch, projectile).
+        bonusDamage: w.augment.bonusDamage * elementDamageMult(p.stats, w.augment.element)
+          * debuffDamageMult(p),
       }
       : null;
 
@@ -1117,10 +1165,9 @@ class World {
         // sparks off a target it did no damage to reads as a bug.
         if (pacifiedFrom != null && other.userId === pacifiedFrom) continue;
         const ocx = other.x + other.width / 2, ocy = other.y + other.height / 2;
-        const targetRadius = other.hitboxRadius || (other.width ? other.width / 2 : 32) || 32;
-        if (inArc(cx, cy, nx, ny, ocx, ocy, reach, arc, targetRadius)
+        if (inArc(cx, cy, nx, ny, ocx, ocy, reach, arc, hitRadius(other))
             && hasLineOfSight(this.map, cx, cy, ocx, ocy)) {
-          applyDamageWithEffects(other, weaponDamage(p, w), w.element, other.mit || NO_MITIGATION,
+          applyDamageWithEffects(other, weaponDamage(p, w), w.element, effectiveMit(other),
             this.now, playerKey(userId));
           applyElementEffect(other, w.element, this.now, userId);
           // SOMET-495: the tree's riders, applied ONCE per target per swing --
@@ -1136,7 +1183,7 @@ class World {
           // creatures would be a PvP balance bug nothing else would catch.
           if (augment && augment.bonusDamage > 0) {
             applyDamageWithEffects(other, augment.bonusDamage, augment.element,
-              other.mit || NO_MITIGATION, this.now, playerKey(userId));
+              effectiveMit(other), this.now, playerKey(userId));
             applyElementEffect(other, augment.element, this.now, userId);
           }
           playerHits++;
@@ -1400,7 +1447,7 @@ class World {
       baseDamage = Math.max(4, Math.min(28, baseDamage));
     }
 
-    const damage = Math.max(2, Math.round(baseDamage * baseMult * elemMult));
+    const damage = Math.max(2, Math.round(baseDamage * baseMult * elemMult * debuffDamageMult(p)));
     const element = skill.element || (skill.class === 'Mage' ? 'fire' : (skill.class === 'Druid' ? 'lightning' : (skill.class === 'Cultist' ? 'shadow' : 'physical')));
 
     const kills = [];
@@ -1425,7 +1472,7 @@ class World {
     if (skill.type === 'melee') {
       const { nx, ny } = normalizeAim(ax, ay, p.facing);
       const isSpin = skill.channeled || skill.id.includes('whirlwind') || skill.id.includes('spin') || skill.id.includes('crane');
-      const reach = isSpin ? 120 : Math.max(85, (Number(skill.range) || 85) * 1.25);
+      const reach = isSpin ? 120 : Math.max(90, (Number(skill.range) || 90) * 1.3);
       const arc = isSpin ? (Math.PI * 2) : (Math.PI * 0.75);
       // The same target set applyMeleeArc resolves, read before it can
       // remove a kill.
@@ -1630,6 +1677,13 @@ class World {
         // effects.js — so dying cannot be used to shed it.
         clearInterrupt(p);
         p.effects.clear();
+        // SOMET-606 (Q5): the killer's aura debuff and its DoT clocks die with
+        // the player. The next creature tick re-stamps _buff anyway, but until
+        // then a respawned player must not move or defend at the debuffed
+        // value, and a stale clock must not suppress the entry charge if they
+        // walk straight back in.
+        p._buff = NO_BUFF;
+        p._auraDotAt = undefined;
       }
     }
     return died;
@@ -1719,4 +1773,5 @@ module.exports = {
   PLAYER_MAX_STAMINA, PLAYER_STAMINA_REGEN,
   weaponDamage, applyAttackCooldown, BASE_STATS,
   MAX_CREATURE_PROJECTILES,
+  playerSpeedMult, debuffDamageMult, selfAuraFields,
 };

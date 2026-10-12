@@ -42,7 +42,27 @@ export function sfxChains(ev) {
       return c ? chain([`creature/${c}/hurt`]) : [];
     case 'death':
       return c ? chain([`creature/${c}/death`]) : [];
+    // SOMET-605: a boss's own moments (backend sfxEvents.bossSfx).
+    case 'spawn':
+    case 'phase':
+    case 'enrage':
+      return c ? chain([`creature/${c}/${e}`]) : [];
+    // SOMET-607 (S5, spec §4.4): "apply" plays when the LOCAL player enters
+    // an enemy aura, at 'own' -- a client-synthesized event (Game.js diffs
+    // its own debuffs frame to frame), not something the server pushes. `c`
+    // carries the aura NAME, same field the other cases reuse for a subject
+    // key. sfxPriority's existing ownActor check resolves this to 'own' as
+    // long as the caller sets `ev.a` to the local player's own id.
+    case 'apply':
+      return c ? chain([`aura/${c}/apply`]) : [];
     default:
       return [];
   }
+}
+
+// SOMET-605 (spec 4.4): which SfxLimiter tier a wire event plays at.
+const BOSS_EVENTS = new Set(['spawn', 'phase', 'enrage']);
+export function sfxPriority(ev, ownActor) {
+  if (ownActor && ev && ev.a === ownActor) return 'own';
+  return ev && BOSS_EVENTS.has(ev.e) ? 'boss' : 'nearest';
 }

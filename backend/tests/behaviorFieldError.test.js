@@ -86,45 +86,17 @@ test('accepts a negative damage_override (a healing profile)', () => {
   assert.equal(behaviorFieldError({ ...VALID, damage_override: -5 }), null);
 });
 
-// SOMET-253 Task 8: pack-leader aura + per-rung gold. VALID carries none of
-// these six fields at all (like most seeded profiles), so a fully-formed
-// profile with them entirely absent must still pass -- they are optional,
-// falling back to the column defaults (0/1/1/1/0/0) exactly like
+// SOMET-253 Task 8: per-rung gold. VALID carries neither field at all, so a
+// fully-formed profile with them entirely absent must still pass -- they are
+// optional, falling back to the column defaults (0/0) exactly like
 // preferred_range/damage_override already do.
-test('a profile with no aura/gold fields at all still passes (falls back to column defaults)', () => {
+test('a profile with no gold fields at all still passes (falls back to column defaults)', () => {
   assert.equal(behaviorFieldError(VALID), null);
 });
 
-// aura_radius 0 means "not a leader" -- the correct value for eleven of the
-// twelve seeded profiles, not an unset field. Only negative is rejected.
-test('accepts aura_radius of 0', () => {
-  assert.equal(behaviorFieldError({ ...VALID, aura_radius: 0 }), null);
+test('aura fields are no longer behaviour fields (SOMET-604): they are ignored, not validated', () => {
+  assert.equal(behaviorFieldError({ ...VALID, aura_radius: -1 }), null);
 });
-
-test('rejects a negative aura_radius', () => {
-  assert.match(behaviorFieldError({ ...VALID, aura_radius: -1 }), /aura_radius/);
-});
-
-// The three aura multipliers are a different kind of 0 than aura_radius: an
-// aura_damage_mult/aura_defense_mult/aura_speed_mult of 0 makes every
-// creature the aura touches deal, take, or move at NOTHING the instant a
-// leader stands near them -- silently, the same class of bug SOMET-249's
-// fix-wave I4 closed for move_speed_mult. Strictly > 0.
-for (const field of ['aura_damage_mult', 'aura_defense_mult', 'aura_speed_mult']) {
-  test(`rejects ${field} of exactly 0 when present`, () => {
-    const err = behaviorFieldError({ ...VALID, [field]: 0 });
-    assert.match(err, new RegExp(field), `error should name ${field}, got: ${err}`);
-  });
-
-  test(`rejects a negative ${field}`, () => {
-    const err = behaviorFieldError({ ...VALID, [field]: -1 });
-    assert.match(err, new RegExp(field));
-  });
-
-  test(`accepts a small positive ${field}`, () => {
-    assert.equal(behaviorFieldError({ ...VALID, [field]: 0.5 }), null);
-  });
-}
 
 test('accepts gold_min of 0', () => {
   assert.equal(behaviorFieldError({ ...VALID, gold_min: 0, gold_max: 5 }), null);

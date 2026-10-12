@@ -17,9 +17,12 @@ const {
 } = require('../seeds/data/entityTypes.js');
 const { BESTIARY_P4_CREATURES, BESTIARY_P4_DROPS } = require('../seeds/data/bestiaryP4.js');
 const { CREATURE_BEHAVIORS } = require('../seeds/data/creatureBehaviors.js');
+const { AURA_EFFECTS, BEHAVIOR_DEFAULT_AURAS, WORLD_BOSS_DEFAULT_AURAS } = require('../seeds/data/auraEffects.js');
 const { CREATURE_ABILITIES } = require('../seeds/data/creatureAbilities.js');
 const { BEHAVIOR_DROPS } = require('../seeds/data/behaviorDrops.js');
 const { CHEST_LOOT } = require('../seeds/data/chestLoot.js');
+const { DUNGEON_BOSSES } = require('../seeds/data/dungeonBosses.js');
+const { buildMinibosses, minibossSpawnsByBiome } = require('../seeds/data/minibosses.js');
 
 // COALESCE, not plain EXCLUDED, for the four columns below.
 //
@@ -116,18 +119,17 @@ async function seedOneBiome(db, b) {
 // non-optional two (name, chase_style) are the profile's identity and are
 // always written.
 //
-// The eleven COALESCE-guarded columns split into two groups against the
+// The seven COALESCE-guarded columns split into two groups against the
 // twelve rows in seeds/data/creatureBehaviors.js as they stand today:
 //   - aggro_radius, leash_radius, preferred_range, move_speed_mult are
 //     supplied by all twelve rows. The COALESCE here is nominal insurance
 //     for a future row that omits one -- against the current data it never
 //     falls back, so it has not yet had occasion to protect a hand-tuned
 //     admin value for these four.
-//   - damage_override, aura_radius, aura_damage_mult, aura_defense_mult,
-//     aura_speed_mult, gold_min, gold_max are genuinely exercised: NO row
+//   - damage_override, gold_min, gold_max are genuinely exercised: NO row
 //     sets damage_override any more (all twelve fall back to whatever value
-//     is already in the column on reseed), only Champion sets the four
-//     aura_* fields, and only Guard omits gold_min/gold_max.
+//     is already in the column on reseed), and only Guard omits
+//     gold_min/gold_max.
 //   Read "COALESCE-guarded" as "will protect an admin edit if this seed
 //   row is ever missing the field", not as "is currently protecting one" --
 //   only the second group's fallback is presently reached by a real row.
@@ -161,25 +163,23 @@ async function seedOneBiome(db, b) {
 // seeding the real CREATURE_BEHAVIORS data (not the seed test's integer-only
 // fixtures) was the first place a fractional value hit these params.
 //
-// SOMET-253 Task 4: aura_radius/aura_damage_mult/aura_defense_mult/
-// aura_speed_mult/gold_min/gold_max ($8-$13) follow the exact same COALESCE
-// rule as aggro_radius/leash_radius/move_speed_mult above, and for the same
-// reason those need the ::real cast -- these columns are NOT NULL with a
-// non-null column default (0/1/1/1/0/0), so a bare NULL parameter (an
-// omitted seed field) would violate the constraint outright rather than
-// merely mis-inferring a type. The literal fallbacks inside each COALESCE
-// mirror migration 1714440085000_behavior_auras.js's column defaults.
+// SOMET-253 Task 4: gold_min/gold_max ($8-$9) follow the exact same
+// COALESCE rule as aggro_radius/leash_radius/move_speed_mult above -- these
+// columns are NOT NULL with a non-null column default (0/0), so a bare NULL
+// parameter (an omitted seed field) would violate the constraint outright.
+// The literal fallbacks inside each COALESCE mirror migration
+// 1714440085000_behavior_auras.js's column defaults. (The pack-leader aura
+// columns that migration also added were dropped by 1714440681000; the aura
+// is seeded from seeds/data/auraEffects.js, SOMET-604.)
 async function seedOneBehavior(db, b) {
   await db.query(
     `INSERT INTO creature_behaviors
        (name, aggro_radius, leash_radius, chase_style,
         preferred_range, move_speed_mult, damage_override,
-        aura_radius, aura_damage_mult, aura_defense_mult, aura_speed_mult,
         gold_min, gold_max)
      VALUES ($1, COALESCE($2::real,400), COALESCE($3::real,800),
              $4, COALESCE($5::real,0), COALESCE($6::real,1), $7::real,
-             COALESCE($8::real,0), COALESCE($9::real,1), COALESCE($10::real,1), COALESCE($11::real,1),
-             COALESCE($12::int,0), COALESCE($13::int,0))
+             COALESCE($8::int,0), COALESCE($9::int,0))
      ON CONFLICT (name) DO UPDATE
        SET chase_style = EXCLUDED.chase_style,
            aggro_radius = COALESCE($2::real, creature_behaviors.aggro_radius),
@@ -187,17 +187,12 @@ async function seedOneBehavior(db, b) {
            preferred_range = COALESCE($5::real, creature_behaviors.preferred_range),
            move_speed_mult = COALESCE($6::real, creature_behaviors.move_speed_mult),
            damage_override = COALESCE($7::real, creature_behaviors.damage_override),
-           aura_radius = COALESCE($8::real, creature_behaviors.aura_radius),
-           aura_damage_mult = COALESCE($9::real, creature_behaviors.aura_damage_mult),
-           aura_defense_mult = COALESCE($10::real, creature_behaviors.aura_defense_mult),
-           aura_speed_mult = COALESCE($11::real, creature_behaviors.aura_speed_mult),
-           gold_min = COALESCE($12::int, creature_behaviors.gold_min),
-           gold_max = COALESCE($13::int, creature_behaviors.gold_max),
+           gold_min = COALESCE($8::int, creature_behaviors.gold_min),
+           gold_max = COALESCE($9::int, creature_behaviors.gold_max),
            updated_at = now()`,
     [b.name, b.aggro_radius ?? null, b.leash_radius ?? null, b.chase_style,
      b.preferred_range ?? null, b.move_speed_mult ?? null,
      b.damage_override ?? null,
-     b.aura_radius ?? null, b.aura_damage_mult ?? null, b.aura_defense_mult ?? null, b.aura_speed_mult ?? null,
      b.gold_min ?? null, b.gold_max ?? null],
   );
 }
@@ -336,6 +331,72 @@ async function seedOneCreatureType(pool, c) {
   return r.rowCount;
 }
 
+// SOMET-609 (S9). A dungeon boss, with the boss columns seedOneCreatureType
+// does not write. Insert-only (ON CONFLICT DO NOTHING): the Entities tab owns
+// the row after the first insert. Behaviour resolves by name; the drop rule is
+// written only when the boss row was newly inserted (and NOT EXISTS-guarded as
+// creature_drops has no unique constraint). Returns 1 when inserted.
+async function seedOneDungeonBoss(db, b) {
+  const r = await db.query(
+    `INSERT INTO entity_types
+       (name, color, walkable, spawn_tiles, chance, is_creature, hp, max_hp, defense,
+        resistances, faction, gold_min, gold_max, prompt, attack_element, behavior_id,
+        boss_tier, element, hitbox_size, xp_reward, base_damage, display_width, display_height, auras)
+     VALUES ($1,$2,true,'[]'::jsonb,0,true,$3,$3,$4,$5::jsonb,'hostile',$6,$7,$8,$9,
+             (SELECT id FROM creature_behaviors WHERE name = $10),
+             $11,$9,$12,$13,$14,$12,$12,$15::jsonb)
+     ON CONFLICT (name) DO NOTHING`,
+    [b.name, b.color, b.hp, b.defense, JSON.stringify(b.resistances), b.gold_min, b.gold_max,
+     b.prompt, b.element, b.behavior_name, b.boss_tier, b.size, b.xp_reward, b.base_damage,
+     JSON.stringify(b.auras)],
+  );
+  // Drop rule only with a NEW boss row (P7): an admin's deleted or changed
+  // drop on an existing boss must survive every reseed.
+  if (r.rowCount !== 1) return 0;
+  await db.query(
+    `INSERT INTO creature_drops (entity_type_id, item_type_id, chance, min_qty, max_qty)
+     SELECT et.id, it.id, 0.2, 1, 1 FROM entity_types et, item_types it
+      WHERE et.name = $1 AND it.name = $2
+        AND NOT EXISTS (SELECT 1 FROM creature_drops cd WHERE cd.entity_type_id = et.id AND cd.item_type_id = it.id)`,
+    [b.name, b.drop_item],
+  );
+  return r.rowCount;
+}
+
+// SOMET-624 (S11) / SOMET-625 (S12). A generated miniboss row -- same shape
+// and the same insert-only/ON CONFLICT DO NOTHING ownership-transfer rule as
+// seedOneDungeonBoss above. Writes every row in b.drops (floor item + the S12
+// element-matched upgrade), each only with a NEW entity_types row for the
+// same reason seedOneDungeonBoss's is: an admin's edited or deleted drop must
+// survive every reseed. Returns 1 when inserted.
+async function seedOneMiniboss(db, b) {
+  const r = await db.query(
+    `INSERT INTO entity_types
+       (name, color, walkable, spawn_tiles, chance, is_creature, hp, max_hp, defense,
+        resistances, faction, gold_min, gold_max, prompt, attack_element, behavior_id,
+        boss_tier, element, hitbox_size, xp_reward, base_damage, display_width, display_height, auras)
+     VALUES ($1,$2,true,'[]'::jsonb,0,true,$3,$3,$4,$5::jsonb,'hostile',$6,$7,$8,$9,
+             (SELECT id FROM creature_behaviors WHERE name = $10),
+             $11,$16,$12,$13,$14,$12,$12,$15::jsonb)
+     ON CONFLICT (name) DO NOTHING`,
+    [b.name, b.color, b.hp, b.defense, JSON.stringify(b.resistances), b.gold_min, b.gold_max,
+     b.prompt, b.attack_element, b.behavior_name, b.boss_tier, b.size, b.xp_reward, b.base_damage,
+     JSON.stringify(b.auras), b.element],
+  );
+  if (r.rowCount !== 1) return 0;
+  for (const d of b.drops) {
+    // eslint-disable-next-line no-await-in-loop
+    await db.query(
+      `INSERT INTO creature_drops (entity_type_id, item_type_id, chance, min_qty, max_qty)
+       SELECT et.id, it.id, $3, $4, $5 FROM entity_types et, item_types it
+        WHERE et.name = $1 AND it.name = $2
+          AND NOT EXISTS (SELECT 1 FROM creature_drops cd WHERE cd.entity_type_id = et.id AND cd.item_type_id = it.id)`,
+      [b.name, d.item, d.chance, d.min_qty, d.max_qty],
+    );
+  }
+  return r.rowCount;
+}
+
 // Guarded by NOT EXISTS, not ON CONFLICT: creature_drops has no unique
 // constraint on (entity_type_id, item_type_id) -- see
 // 1714440018000_create_loot.js -- so a bare INSERT would stack a duplicate
@@ -437,6 +498,54 @@ async function seedOneClassLoadout(pool, l) {
   return r.rows.length && r.rows[0].inserted ? 1 : 0;
 }
 
+// DO NOTHING: an admin retuning pack_leader in the Aura Effects tab must not be
+// reset by a reseed (same posture as seedOneCreatureType).
+async function seedOneAura(db, a) {
+  const r = await db.query(
+    `INSERT INTO aura_effects (name, target_side, radius, damage_mult, defense_mult, speed_mult, shape, color, pulse_ms,
+                               dot_dps, dot_element, tick_ms)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (name) DO NOTHING`,
+    [a.name, a.target_side, a.radius, a.damage_mult ?? 1, a.defense_mult ?? 1, a.speed_mult ?? 1,
+     a.shape ?? 'ring', a.color ?? '#d4a017', a.pulse_ms ?? 1200,
+     a.dot_dps ?? 0, a.dot_element ?? 'physical', a.tick_ms ?? 1000],
+  );
+  return r.rowCount;
+}
+
+// Runs AFTER the creature types exist: migration 1714440680000 binds Champions
+// on an existing DB, but on a fresh one (staging) it runs before any Champion
+// entity is created and binds nothing. `auras IS NULL` only -- [] is an
+// admin's deliberate removal and must survive every reseed.
+async function bindDefaultAuras(db) {
+  let n = 0;
+  for (const [behaviorName, auras] of Object.entries(BEHAVIOR_DEFAULT_AURAS)) {
+    const r = await db.query(
+      `UPDATE entity_types e SET auras = $2::jsonb
+         FROM creature_behaviors b
+        WHERE b.id = e.behavior_id AND b.name = $1 AND e.auras IS NULL`,
+      [behaviorName, JSON.stringify(auras)],
+    );
+    n += r.rowCount;
+  }
+  return n;
+}
+
+// SOMET-606 (S4). World bosses are bound by entity NAME + boss_tier, not by
+// behaviour (they are all `Line`). NULL only: an admin's [] or authored list
+// is never overwritten. Returns the number of rows bound.
+async function bindWorldBossAuras(db) {
+  let n = 0;
+  for (const [entityName, auras] of Object.entries(WORLD_BOSS_DEFAULT_AURAS)) {
+    const r = await db.query(
+      `UPDATE entity_types SET auras = $2::jsonb
+        WHERE name = $1 AND boss_tier = 'world' AND auras IS NULL`,
+      [entityName, JSON.stringify(auras)],
+    );
+    n += r.rowCount;
+  }
+  return n;
+}
+
 async function seedCatalogs(pool) {
   let tiles = 0;
   for (const t of DEFAULT_TILE_TYPES) {
@@ -444,8 +553,19 @@ async function seedCatalogs(pool) {
     tiles += 1;
   }
 
+  // SOMET-624 (S11). Each biome's generated miniboss name(s) are merged into
+  // its creature_types before the upsert below -- seedOneBiome REPLACES
+  // creature_types wholesale on an existing row (see its own comment), so
+  // this must happen before the insert, not as a later patch.
+  const minibossRows = buildMinibosses(STARTER_BIOMES);
+  const minibossSpawns = minibossSpawnsByBiome(minibossRows);
+  const biomesWithMinibosses = STARTER_BIOMES.map((b) => ({
+    ...b,
+    creature_types: [...(b.creature_types || []), ...(minibossSpawns.get(b.name) || [])],
+  }));
+
   let biomes = 0;
-  for (const b of STARTER_BIOMES) {
+  for (const b of biomesWithMinibosses) {
     await seedOneBiome(pool, b);
     biomes += 1;
   }
@@ -530,6 +650,9 @@ async function seedCatalogs(pool) {
   }
   console.log(`Seeded ${pointTypes} world point types across ${POINT_KINDS.length} kinds`);
 
+  // The aura library first: entities reference auras by name.
+  for (const a of AURA_EFFECTS) await seedOneAura(pool, a);
+
   // Creatures, then their drop rules. HOSTILE_CREATURES (4 legacy) and
   // BESTIARY_P4_CREATURES (288 generated, SOMET-250 Task 6) go through the
   // same seedOneCreatureType path -- see its comment above for the upsert
@@ -538,6 +661,15 @@ async function seedCatalogs(pool) {
   for (const c of [...HOSTILE_CREATURES, ...BESTIARY_P4_CREATURES]) {
     creatures += await seedOneCreatureType(pool, c);
   }
+  const aurasBound = await bindDefaultAuras(pool);
+  const bossAurasBound = await bindWorldBossAuras(pool);
+  console.log(`Bound default auras on ${aurasBound + bossAurasBound} entity types`);
+  let dungeonBosses = 0;
+  for (const b of DUNGEON_BOSSES) dungeonBosses += await seedOneDungeonBoss(pool, b);
+  console.log(`Restored ${dungeonBosses} missing dungeon bosses`);
+  let minibosses = 0;
+  for (const b of minibossRows) minibosses += await seedOneMiniboss(pool, b);
+  console.log(`Restored ${minibosses} missing minibosses`);
 
   // CREATURE_DROPS (Wolf's one hand-authored rule) and BESTIARY_P4_DROPS (288
   // generated rules, SOMET-250 Task 6) go through the same
@@ -581,8 +713,8 @@ async function seedCatalogs(pool) {
 
 module.exports = {
   seedCatalogs, seedOneTile, seedOneBiome, seedOneBehavior, seedOneAbility, seedOneBehaviorDrop,
-  seedOneChestLoot,
-  seedOneCreatureType, seedOneCreatureDrop, seedOnePlayableClass, seedOneClassLoadout,
+  seedOneChestLoot, seedOneAura, bindDefaultAuras, bindWorldBossAuras,
+  seedOneCreatureType, seedOneDungeonBoss, seedOneMiniboss, seedOneCreatureDrop, seedOnePlayableClass, seedOneClassLoadout,
 };
 
 if (require.main === module) {

@@ -164,3 +164,32 @@ test('a stamped entry village stays inside its world and carries no marker field
     assert.equal(w._needsVillage, undefined, `"${w.key}" leaked its marker field`);
   }
 });
+
+const { DUNGEON_BOSSES } = require('../seeds/data/dungeonBosses.js');
+
+// SOMET-609 (S9): each spine dungeon's End and Elite rooms hold exactly one
+// boss of the right tier, at the documented post, inside the world.
+test('the six End/Elite rooms each declare one dungeon boss of the right tier', () => {
+  const spec = generateSpec();
+  const tierOf = new Map(DUNGEON_BOSSES.map((b) => [b.name, b.boss_tier]));
+  const bossed = spec.worlds.filter((w) => w.boss);
+  assert.deepEqual(bossed.map((w) => w.key).sort(),
+    ['d1_elite', 'd1_end', 'd4_elite', 'd4_end', 'd7_elite', 'd7_end']);
+  for (const w of bossed) {
+    const want = w.key.endsWith('_end') ? 'dungeon_end' : 'dungeon_elite';
+    assert.equal(tierOf.get(w.boss.entity), want, `${w.key} boss ${w.boss.entity}`);
+    assert.ok(w.boss.x >= 0 && w.boss.x < w.width * 100 && w.boss.y >= 0 && w.boss.y < w.height * 100, w.key);
+  }
+  const posts = Object.fromEntries(bossed.map((w) => [w.key, [w.boss.entity, w.boss.x, w.boss.y, w.boss.respawn_s]]));
+  assert.deepEqual(posts, {
+    d1_end: ['The Bone Regent', 4950, 5450, 900], d1_elite: ['Ossuary Warden', 4950, 4850, 600],
+    d4_end: ['The Ember Queen', 8150, 8650, 900], d4_elite: ['Cinder Matriarch', 8150, 8050, 600],
+    d7_end: ['The Umbral Gatekeeper', 11350, 11850, 900], d7_elite: ['Shade Herald', 11350, 11250, 600],
+  });
+});
+
+test('no non-End/Elite world declares a boss', () => {
+  for (const w of generateSpec().worlds) {
+    if (!/: (End|Elite)$/.test(w.name)) assert.equal(w.boss, undefined, w.key);
+  }
+});

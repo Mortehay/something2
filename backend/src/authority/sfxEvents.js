@@ -117,6 +117,17 @@ function skillUse(skill, userId, x, y) {
   return sfxEvent('use', { k: skillAttackKind(skill), s: `skill:${skill.id}`, a: `p:${userId}` }, x, y);
 }
 
+// SOMET-605 (S2, spec §4.3/§4.4): a boss's own announcements, on the same
+// creature channel as use/hurt/death. One builder for all three so the boss
+// wire vocabulary is written once; the client plays creature/<type>/<e> at
+// its `boss` limiter tier. Unknown `e` -> null, which pushSfxEvent drops.
+const BOSS_SFX_EVENTS = Object.freeze(['spawn', 'phase', 'enrage']);
+
+function bossSfx(e, c, x, y) {
+  if (!c || !BOSS_SFX_EVENTS.includes(e)) return null;
+  return sfxEvent(e, { c: c.type, a: `c:${c.id}` }, x, y);
+}
+
 // Bounded append: every buffer events pass through (each sim's, the world's,
 // the server's per-world stash) is capped, so a world whose frames stop
 // draining can never grow one without limit. An event without a finite
@@ -140,5 +151,7 @@ module.exports = {
   creatureHurt,
   creatureDeath,
   skillUse,
+  BOSS_SFX_EVENTS,
+  bossSfx,
   pushSfxEvent,
 };

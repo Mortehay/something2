@@ -76,3 +76,6 @@ compose/orangepi/secrets/
 # Python bytecode from the tools/ scripts
 __pycache__/
 *.pyc
+.lh
+.history
+.vscode-upload.json

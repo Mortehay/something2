@@ -139,9 +139,12 @@ async function populateWorld(client, worldRow, { rngSeed }) {
     return { scattered: 0, packed: 0, total: 0 };
   }
 
+  // SOMET-603: boss-tier rows are placed by their own owners (WorldBossManager,
+  // S9's map-spec `boss` block), never scattered -- same structural exclusion
+  // as the guard filter below, done in SQL because boss_tier is not selected.
   const et = await client.query(
     `SELECT name, hp, defense, resistances, faction FROM entity_types
-      WHERE is_creature = true AND name = ANY($1::text[])`,
+      WHERE is_creature = true AND boss_tier IS NULL AND name = ANY($1::text[])`,
     [allowedNames],
   );
   // Guards are structural, never wild spawns -- the same filter the re-roll

@@ -300,6 +300,7 @@ function runStatus() {
       requeued_orphans: 0,
       phase: null,
       waiting: null,
+      scope: null,
     };
   }
   return {
@@ -318,6 +319,13 @@ function runStatus() {
     phase: run.phase || null,
     // { model, reason, since } while the box refuses a model switch.
     waiting: run.waiting ? { ...run.waiting } : null,
+    // SOMET-592 defect 2: null means an UNSCOPED drain (today's whole-queue
+    // behaviour -- a page-level "Generate All"/dispatch call, or any batch
+    // POST /admin/jobs with no scope requested), which claims across every
+    // batch exactly as before. An array is the one or more batch_ids a
+    // SCOPED drain (a single slot card's own Generate/Write click) will ever
+    // claim from -- see claimBatch's batchIds and runCovers below.
+    scope: run.batchIds ? [...run.batchIds] : null,
   };
 }
 
@@ -330,6 +338,39 @@ function stopDrain() {
   return runStatus();
 }
 
+// SOMET-592 defect 2, the concurrency edge case: whether the CURRENTLY
+// RUNNING drain will, on its own, ever claim `batchId` (or, with no
+// argument, whether it covers an UNSCOPED request -- a page-level "Generate
+// All"/dispatch call, or a batch POST /admin/jobs with no scope of its own).
+//
+// Called from audioRoutes.js's ALREADY_RUNNING handling: today, a second
+// startDrain call hitting ALREADY_RUNNING was always treated as success --
+// "the running drain will pick these jobs up regardless" -- which was true
+// of every drain before this fix, because every drain was unscoped. That
+// stops being true once a drain can be scoped to one batch: a second
+// Generate click enqueues a NEW batch while a drain scoped to a DIFFERENT
+// batch is still running, and that running drain will never widen to claim
+// it (see startDrain's comment for why it does not try to). Reporting
+// started:true in that case would silently strand the new job -- queued
+// forever, with the UI none the wiser. This function is the honest answer
+// the route needs instead:
+//   * no run, or not running -> false (nothing is running to cover anything,
+//     though callers only ask this from inside an ALREADY_RUNNING catch, so
+//     a live run is implied).
+//   * the running drain is UNSCOPED (batchIds === null) -> true, always --
+//     it claims across every batch exactly as every drain did before this
+//     fix, whatever the new request asked for.
+//   * the running drain is SCOPED -> true only if `batchId` is exactly one
+//     of the batches it already watches (never true for a brand-new batch,
+//     since nothing widens a scoped drain's list after it starts); an
+//     unscoped request (no `batchId`) is never covered by a scoped drain,
+//     because "everything" is precisely what it was scoped to exclude.
+function runCovers(batchId) {
+  if (!run || !run.running) return false;
+  if (run.batchIds === null) return true;
+  return batchId != null && run.batchIds.includes(batchId);
+}
+
 // Starts a background drain. Returns immediately; poll runStatus().
 //
 // A PLAIN SYNCHRONOUS FUNCTION: `run` is set, and the loop is kicked off as a
@@ -337,6 +378,20 @@ function stopDrain() {
 // second call in the same tick see `run.running === true` and throw
 // ALREADY_RUNNING -- if `run` were set inside the async body, two calls
 // issued back to back (no await between them) would both pass the check.
+//
+// `opts.batchId` (SOMET-592 defect 2): confines this drain to ONE enqueue's
+// batch_id. Set ONCE here, at creation, and never mutated afterwards --
+// every claim/hasClaimable/nextClaimableAt call below reads the live
+// `self.batchIds` array (never a value captured earlier), but nothing in
+// this file ever widens or extends it after the drain starts. That is a
+// deliberate simplicity choice over the alternative (letting a second
+// caller's request join an in-flight scoped drain's watch list): mutating
+// shared state concurrently with the drain's own async idle/stop decisions
+// opens a race (a widen landing between "nothing left under the old scope"
+// and the drain actually stopping would be silently lost). Instead a scoped
+// drain is immutable for its whole life, and runCovers (below) tells a
+// second caller the honest truth about whether this run will ever reach
+// their batch -- see audioRoutes.js's ALREADY_RUNNING handling.
 function startDrain(db, opts = {}) {
   if (run && run.running) {
     const err = new Error('an audio batch is already running');
@@ -360,6 +415,7 @@ function startDrain(db, opts = {}) {
     requeuedOrphans: 0,
     phase: null,
     waiting: null,
+    batchIds: opts.batchId ? [opts.batchId] : null,
   };
   const self = run;
   // Distinct from `self.failed`/`self.retried`: those are lifetime totals for
@@ -554,7 +610,7 @@ function startDrain(db, opts = {}) {
       // on a clip that can never be bound, so it fails up front --
       // retryable:false with no status/providerFault, so it does not count
       // toward the breaker either.
-      const exists = await deps.subjectExists(db, job.subject_kind, job.subject_key);
+      const exists = await deps.subjectExists(db, job.subject_kind, job.subject_key, job.slot);
       // job.provider_id resolves that pin; null falls through to the active
       // audio provider (resolveAudioProvider's own contract).
       provider = exists ? await deps.resolveAudioProvider(db, job.provider_id ?? null) : null;
@@ -624,7 +680,7 @@ function startDrain(db, opts = {}) {
       let exists;
       try {
         // eslint-disable-next-line no-await-in-loop
-        exists = await deps.subjectExists(db, job.subject_kind, job.subject_key);
+        exists = await deps.subjectExists(db, job.subject_kind, job.subject_key, job.slot);
       } catch (err) {
         // eslint-disable-next-line no-await-in-loop
         await failJob(job, { error: errorText(err), retryable: false });
@@ -748,7 +804,7 @@ function startDrain(db, opts = {}) {
   // Phase 1: every claimable prompt job, under the text model. 'idle' when
   // there was nothing to do (no switch was made), 'ran', or 'stopped'.
   async function promptPhase() {
-    if (!(await deps.queue.hasClaimable(db, { phase: 'prompt' }))) return 'idle';
+    if (!(await deps.queue.hasClaimable(db, { phase: 'prompt', batchIds: self.batchIds }))) return 'idle';
     self.phase = 'prompt';
     const textProv = await deps.loadTextProvider(db);
     // /api/text/models lists ids without the gateway's prefix (plan Task 0).
@@ -760,7 +816,7 @@ function startDrain(db, opts = {}) {
       // eslint-disable-next-line no-await-in-loop
       if (textModel && !(await ensureModel(textModel, textProv))) return 'stopped';
       // eslint-disable-next-line no-await-in-loop
-      const [job] = await deps.queue.claimBatch(db, 1, { phase: 'prompt' });
+      const [job] = await deps.queue.claimBatch(db, 1, { phase: 'prompt', batchIds: self.batchIds });
       if (!job) return 'ran';
       // eslint-disable-next-line no-await-in-loop
       const next = await runPrompt(job, textProv, cache);
@@ -777,7 +833,7 @@ function startDrain(db, opts = {}) {
     for (const group of audioJobQueue.DRAIN_ORDER) {
       if (self.stopping) return 'stopped';
       // eslint-disable-next-line no-await-in-loop
-      if (!(await deps.queue.hasClaimable(db, { phase: 'audio', group }))) continue;
+      if (!(await deps.queue.hasClaimable(db, { phase: 'audio', group, batchIds: self.batchIds }))) continue;
       ran = true;
       self.phase = 'audio';
       // The active audio provider is the box the switch goes to; with none
@@ -792,7 +848,7 @@ function startDrain(db, opts = {}) {
         // eslint-disable-next-line no-await-in-loop
         if (!(await ensureModel(model, switchProv))) return 'stopped';
         // eslint-disable-next-line no-await-in-loop
-        const jobs = await deps.queue.claimBatch(db, SFX_PACK_SIZE(), { phase: 'audio', group });
+        const jobs = await deps.queue.claimBatch(db, SFX_PACK_SIZE(), { phase: 'audio', group, batchIds: self.batchIds });
         if (!jobs.length) break;
         // eslint-disable-next-line no-await-in-loop
         // A solo sfx job (its own variant count, see claimBatch) is claimed
@@ -846,7 +902,7 @@ function startDrain(db, opts = {}) {
           // backoff. Ending the drain on that would silently strand a queue
           // full of retryable jobs; nextClaimableAt tells the two apart.
           // eslint-disable-next-line no-await-in-loop
-          const next = await deps.queue.nextClaimableAt(db);
+          const next = await deps.queue.nextClaimableAt(db, { batchIds: self.batchIds });
           if (!next) { self.stoppedReason = 'empty'; break; }
           const rawWaitMs = new Date(next).getTime() - deps.now();
           const waitMs = Math.min(Math.max(rawWaitMs, MIN_IDLE_WAIT_MS), MAX_WAIT_MS());
@@ -883,6 +939,7 @@ module.exports = {
   startDrain,
   stopDrain,
   runStatus,
+  runCovers,
   __resetRun,
   __setDeps,
   // Exported so audioRoutes.js's dispatch/enqueue-with-start preflight (the

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildBiomeIndex, biomesWithEntities, filterByBiomeTab, filterBySearch, paginate,
-  ALL_TAB, UNASSIGNED_TAB,
+  ALL_TAB, UNASSIGNED_TAB, BOSS_TAB,
 } from "../entityFilters.js";
 
 const BIOMES = [
@@ -56,6 +56,17 @@ describe("filterByBiomeTab", () => {
     // placement yet -- this is the load-bearing case, not an edge case.
     const result = filterByBiomeTab(entities, UNASSIGNED_TAB, idx).map((e) => e.name);
     expect(result).toEqual(["Tundra Apex"]);
+  });
+
+  it("BOSS_TAB returns only entities with a truthy boss_tier, regardless of biome membership", () => {
+    const withBosses = [
+      { name: "Wolf" },
+      { name: "Shade Herald", boss_tier: "dungeon_elite" },
+      { name: "The Umbral Gatekeeper", boss_tier: "dungeon_end" },
+      { name: "Not A Boss", boss_tier: null },
+    ];
+    const result = filterByBiomeTab(withBosses, BOSS_TAB, idx).map((e) => e.name);
+    expect(result).toEqual(["Shade Herald", "The Umbral Gatekeeper"]);
   });
 });
 

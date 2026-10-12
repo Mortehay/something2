@@ -13,7 +13,7 @@ const {
   resolveAudioProvider, contextFor, boxTrackName, generateForSlot,
 } = require('../services/audioGeneration');
 const {
-  SUBJECT_KINDS, MAX_SUBJECT_KEY, slotKind, subjectExists, cueFor,
+  SUBJECT_KINDS, MAX_SUBJECT_KEY, slotKind, subjectExists, slotNamesFor, cueFor,
 } = require('../services/audioSubjects');
 const { checkClipBuffer } = require('../services/oggInfo');
 const audioJobQueue = require('../services/audioJobQueue');
@@ -52,7 +52,13 @@ async function checkSubject(pool, kind, key, slot) {
   }
   const clipKind = slotKind(kind, slot);
   if (!clipKind) return { error: 'unknown subject or slot' };
-  if (!(await subjectExists(pool, kind, key))) return { error: 'unknown subject' };
+  // SOMET-605: the slot is part of the question -- a boss slot exists only
+  // on a boss_tier creature. The second query runs only on failure, to tell
+  // "no such subject" from "this subject has no such slot".
+  if (!(await subjectExists(pool, kind, key, slot))) {
+    if (await subjectExists(pool, kind, key)) return { error: `'${key}' has no '${slot}' slot (boss slots need a boss tier)` };
+    return { error: 'unknown subject' };
+  }
   return { clipKind };
 }
 
@@ -162,6 +168,11 @@ module.exports = function audioRoutes(pool) {
         };
         // eslint-disable-next-line no-await-in-loop
         if (def.subjectCues) entry.cues = await def.subjectCues(pool);
+        // SOMET-605: which slots each subject carries, for kinds where that
+        // varies (creature: boss slots only on boss rows). Absent = every
+        // subject carries every slot in `slots`.
+        // eslint-disable-next-line no-await-in-loop
+        if (def.subjectSlotNames) entry.subjectSlots = await def.subjectSlotNames(pool);
         const states = {};
         for (const p of activePrompts) {
           if (p.subject_kind !== kind) continue;
@@ -205,7 +216,7 @@ module.exports = function audioRoutes(pool) {
       if (!def || !Object.hasOwn(SUBJECT_KINDS, kind)) return res.status(400).json({ error: 'unknown subject kind' });
       const [bySlot, catalog] = await Promise.all([audioPrompts.listForSubject(pool, kind, key), loadPromptCatalog(pool)]);
       const out = {};
-      for (const slot of Object.keys(def.slots)) {
+      for (const slot of await slotNamesFor(pool, kind, key)) {
         // eslint-disable-next-line no-await-in-loop
         const cue = slotKind(kind, slot) === 'sfx' ? await cueFor(pool, kind, key, slot) : null;
         const currentInput = buildContext(catalog, kind, key, slot, { cue });
@@ -293,6 +304,9 @@ module.exports = function audioRoutes(pool) {
       // proposes any more, so this is the caller's to fix -- write a prompt
       // (or queue the slot, whose prompt phase writes one) -- not a box fault.
       if (!gen.ok && gen.error === 'no prompt') return res.status(409).json({ error: 'no prompt' });
+      // An upload-only sfx slot (no cue, or one the provider has not reported)
+      // is the same kind of caller error: nothing the box did (SOMET-592).
+      if (!gen.ok && gen.uploadOnly) return res.status(409).json({ error: gen.error, retryable: false });
       if (!gen.ok) return res.status(502).json({ error: gen.error, retryable: Boolean(gen.retryable) });
       // sfx generates N variants at once (`{clips, bindings}`); music/ambience
       // stay a single clip (`{clip, binding}`) -- callers of the existing
@@ -457,6 +471,17 @@ module.exports = function audioRoutes(pool) {
       if (!Array.isArray(b.items) || b.items.length < 1 || b.items.length > MAX_JOB_ITEMS) {
         return res.status(400).json({ error: `items must be an array of 1-${MAX_JOB_ITEMS} entries` });
       }
+      // SOMET-592 defect 2: `scoped` is the explicit signal that this
+      // request's own drain must never claim anything beyond what it just
+      // enqueued -- the slot card's single Generate/Write click sets it.
+      // Deliberately a request-level flag, not inferred from items.length:
+      // a multi-item request can legitimately want scoping too, and
+      // inferring from the count would silently stop scoping the moment a
+      // card ever batches more than one item.
+      if (b.scoped !== undefined && typeof b.scoped !== 'boolean') {
+        return res.status(400).json({ error: 'scoped must be a boolean' });
+      }
+      const scoped = b.scoped === true;
       const providerId = Number.isInteger(b.provider_id) ? b.provider_id : null;
       if (providerId !== null && !(await resolveAudioProvider(pool, providerId))) {
         return res.status(400).json({ error: 'provider_id does not resolve to an active audio provider' });
@@ -521,14 +546,27 @@ module.exports = function audioRoutes(pool) {
           reason = 'no_provider';
         } else {
           try {
-            audioDispatcher.startDrain(pool);
+            audioDispatcher.startDrain(pool, scoped ? { batchId: enq.batch_id } : {});
             started = true;
           } catch (err) {
-            // A drain already running will pick these jobs up regardless --
-            // that is a success from the caller's point of view, not a
-            // reason to fail an enqueue that already committed.
-            if (err.code === 'ALREADY_RUNNING') started = true;
-            else throw err;
+            if (err.code === 'ALREADY_RUNNING') {
+              // SOMET-592 defect 2: a drain already running picks these jobs
+              // up regardless ONLY when it is unscoped (or already watches
+              // this exact batch, which never happens for a freshly minted
+              // one) -- runCovers is the honest answer, because a drain
+              // scoped to a DIFFERENT batch never widens to claim this one
+              // (see startDrain's and runCovers' own comments). Reporting
+              // started:true here would silently strand the job this
+              // request just queued: it stays queued, visibly not started,
+              // until the admin retries (another Generate click, or Start
+              // once the busy drain finishes).
+              if (audioDispatcher.runCovers(scoped ? enq.batch_id : null)) {
+                started = true;
+              } else {
+                started = false;
+                reason = 'drain_busy';
+              }
+            } else throw err;
           }
         }
       }

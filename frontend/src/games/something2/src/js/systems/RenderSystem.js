@@ -185,6 +185,16 @@ export class RenderSystem {
     return override || entity.renderMode || entity.render_mode || "rect";
   }
 
+  // SOMET-603: the procedural boss colours, keyed on the catalog element --
+  // never guessed from the name. Unknown/absent element = the fire palette.
+  static bossPalette(element) {
+    if (element === "ice") return { baseColor: "#70a1ff", glowColor: "#e0f2fe", darkColor: "#1e293b", eyeColor: "#67e8f9" };
+    if (element === "arcane" || element === "void") return { baseColor: "#a55eea", glowColor: "#f3e8ff", darkColor: "#180a24", eyeColor: "#f472b6" };
+    if (element === "lightning") return { baseColor: "#ffd166", glowColor: "#ffffff", darkColor: "#261e0b", eyeColor: "#67e8f9" };
+    if (element === "physical") return { baseColor: "#d8d2c0", glowColor: "#f5f0e1", darkColor: "#2b2620", eyeColor: "#7dd3fc" };
+    return { baseColor: "#ff4757", glowColor: "#ffa502", darkColor: "#2f3542", eyeColor: "#ffeaa7" };
+  }
+
   // Dev cycle: none -> force rect -> force static -> force animated -> none.
   cycleRenderModeOverride() {
     const order = [null, "rect", "static", "animated"];
@@ -315,6 +325,10 @@ export class RenderSystem {
     // Passed per frame rather than stashed at construction because the library
     // arrives asynchronously, after the renderer exists.
     vfxDefs = null,
+    // SOMET-607 (S5): the aura visual library, same "arrives async, passed
+    // per frame" contract as vfxDefs -- auraDefs[name] gives a creature's
+    // active aura its shape/color/radius/pulse.
+    auraDefs = null,
     progression = null,
     equippedWeapon = null, playerStats = null,
     // SOMET-493 — the inspect card. Shaped
@@ -343,6 +357,7 @@ export class RenderSystem {
     // landmark body plan a few lines down.
     this.entityDefs = entityDefs;
     if (vfxDefs) this.vfxDefs = vfxDefs;
+    if (auraDefs) this.auraDefs = auraDefs;
     // While any full-screen panel is up the cursor is being used to click ITS
     // rows, so the inspect card must not follow it around over the top of the
     // panel — and, more importantly, must not hit-test the world hidden behind
@@ -3092,6 +3107,45 @@ export class RenderSystem {
     this.ctx.restore();
   }
 
+  // SOMET-607 (S5). A creature's active auras (names in e.auras, resolved
+  // against the catalog auraDefs[name] carries) drawn on the ground plane,
+  // same 2:1 ellipse convention as every other ground ring here -- and
+  // BENEATH the actor, same ordering _drawEffectRings already uses, so the
+  // creature stands on top of its own aura rather than being hidden by it.
+  //
+  // shape='particles' falls back to the same ring stroke as 'ring': a true
+  // particle field is a later pass; the ring already tells the player
+  // "something is emanating from here", which is the acceptance bar for S5.
+  _drawAuraEffects(cx, feetY, auras) {
+    if (!this.auraDefs || !Array.isArray(auras) || auras.length === 0) return;
+    const now = this.nowMs || Date.now();
+    this.ctx.save();
+    for (const name of auras) {
+      const def = this.auraDefs[name];
+      if (!def) continue;
+      const rx = blastScreenRadiusX(def.radius);
+      if (!(rx > 0)) continue;
+      const pulseMs = Number(def.pulse_ms) || 0;
+      const pulse = pulseMs > 0 ? 1 + 0.08 * Math.sin((now * 2 * Math.PI) / pulseMs) : 1;
+      const r = rx * pulse;
+      this.ctx.strokeStyle = def.color || '#d4a017';
+      this.ctx.fillStyle = def.color || '#d4a017';
+      this.ctx.lineWidth = 2;
+      this.ctx.beginPath();
+      this.ctx.ellipse(cx, feetY, r, r / 2, 0, 0, Math.PI * 2);
+      if (def.shape === 'disc') {
+        this.ctx.globalAlpha = 0.25;
+        this.ctx.fill();
+        this.ctx.globalAlpha = 0.9;
+        this.ctx.stroke();
+      } else {
+        this.ctx.globalAlpha = 0.85;
+        this.ctx.stroke();
+      }
+    }
+    this.ctx.restore();
+  }
+
   // Colour pips above an affected actor, alongside the HP bar. The feet rings
   // can be occluded by a sprite standing in front; the pips sit above the head
   // where the HP bar already reads clearly, so an effect is never completely
@@ -3152,6 +3206,7 @@ export class RenderSystem {
     // rather than being obscured by it. `drawY + h` is the feet line this same
     // method already computed — see _drawEffectRings on why not s.y.
     this._drawEffectRings(s.x, drawY + h, w, obj.effects);
+    this._drawAuraEffects(s.x, drawY + h, obj.auras);
     const img = this.imageManager.get(imageKey);
     const resolved = RenderSystem.resolveSprite(
       obj, this.imageManager, obj.renderMode || 'static', this.nowMs,
@@ -3213,29 +3268,7 @@ export class RenderSystem {
   _drawWorldBoss(e, drawX, drawY, w, h, s) {
     const ctx = this.ctx;
     const now = this.nowMs || Date.now();
-    const elem = e.bossElement || (e.type && e.type.includes('Magma') ? 'fire' : (e.type && e.type.includes('Frost') ? 'ice' : (e.type && e.type.includes('Void') ? 'arcane' : 'lightning')));
-
-    let baseColor = '#ff4757';
-    let glowColor = '#ffa502';
-    let darkColor = '#2f3542';
-    let eyeColor = '#ffeaa7';
-
-    if (elem === 'ice') {
-      baseColor = '#70a1ff';
-      glowColor = '#e0f2fe';
-      darkColor = '#1e293b';
-      eyeColor = '#67e8f9';
-    } else if (elem === 'arcane' || elem === 'void') {
-      baseColor = '#a55eea';
-      glowColor = '#f3e8ff';
-      darkColor = '#180a24';
-      eyeColor = '#f472b6';
-    } else if (elem === 'lightning') {
-      baseColor = '#ffd166';
-      glowColor = '#ffffff';
-      darkColor = '#261e0b';
-      eyeColor = '#67e8f9';
-    }
+    const { baseColor, glowColor, darkColor, eyeColor } = RenderSystem.bossPalette(e.element);
 
     ctx.save();
 
@@ -3326,67 +3359,83 @@ export class RenderSystem {
     ctx.fill();
 
     ctx.restore();
+  }
 
-    // 7. Boss Skull Nameplate Tag
-    const nameY = drawY - 24;
+  // SOMET-603: nameplate + always-on HP bar, drawn for EVERY boss whether its
+  // body came from approved art or from the procedural fallback.
+  _drawBossPlate(e, drawX, drawY, w, s) {
+    const ctx = this.ctx;
+    const { baseColor } = RenderSystem.bossPalette(e.element);
+    // SOMET-625 (S12): a miniboss gets its own tag -- it is drawn through the
+    // same procedural-body/nameplate/HP-bar path every bossTier uses (that
+    // part already made it visually distinct from its own base creature),
+    // but a generic "[BOSS]" made it indistinguishable from a dungeon boss.
+    const tag = e.bossTier === "world" ? "[WORLD BOSS]" : e.bossTier === "miniboss" ? "[MINIBOSS]" : "[BOSS]";
     ctx.save();
-    ctx.font = 'bold 14px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillStyle = '#ffffff';
+    ctx.font = "bold 14px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#ffffff";
     ctx.shadowColor = baseColor;
     ctx.shadowBlur = 10;
-    ctx.fillText(`☠️ [WORLD BOSS] ${e.name || 'World Boss'}`, cx, nameY);
+    ctx.fillText(`☠️ ${tag} ${e.name || e.type || "Boss"}`, s.x, drawY - 24);
     ctx.restore();
+    const maxHp = e.maxHp || 1;
+    this._drawHpBar(drawX, drawY - 6, w, e.hp != null ? e.hp : maxHp, maxHp);
+  }
 
-    // 8. Always draw HP Bar for World Boss
-    this._drawHpBar(drawX, drawY - 6, w, e.hp != null ? e.hp : e.maxHp, e.maxHp || 10000);
+  // The sprite-or-image half of drawEntity, shared by bosses and everything
+  // else. Returns true when it drew, false when the caller must supply its own
+  // fallback (a rectangle, or a boss's procedural body).
+  _drawEntityArt(e, drawX, drawY, w, h) {
+    const mode = RenderSystem.resolveRenderMode(e, this.renderModeOverride);
+    const sprite = RenderSystem.resolveSprite(e, this.imageManager, mode, this.nowMs);
+    if (sprite) {
+      const [sx, sy, sw, sh] = sprite.crop;
+      // SOMET-569: the FRAME's dimensions decide the fit, not the atlas's.
+      const r = fitSpriteRect(sw, sh, drawX, drawY, w, h);
+      this.ctx.drawImage(sprite.img, sx, sy, sw, sh, r.dx, r.dy, r.dw, r.dh);
+      return true;
+    }
+    const img = mode !== "rect" && e.image && this.imageManager
+      ? this.imageManager.get(e.image)
+      : null;
+    if (!img) return false;
+    // SOMET-569: fit, do not stretch.
+    const r = fitSpriteRect(img.width, img.height, drawX, drawY, w, h);
+    this.ctx.drawImage(img, r.dx, r.dy, r.dw, r.dh);
+    return true;
   }
 
   drawEntity(e) {
-    const isBoss = Boolean(e.isWorldBoss || (e.name && (e.name.includes('Colossus') || e.name.includes('Leviathan') || e.name.includes('Voidreaver') || e.name.includes('Titan'))));
-    const w = isBoss ? (e.width || 96) : (e.displayWidth || e.width || 40);
-    const h = isBoss ? (e.height || 96) : (e.displayHeight || e.height || 40);
+    // SOMET-603: `bossTier` is the ONE boss flag; no name matching.
+    const isBoss = Boolean(e.bossTier);
+    const fallback = isBoss ? 96 : 40;
+    const dim = (...vals) => {
+      for (const v of vals) if (Number.isFinite(v) && v > 0) return v;
+      return fallback;
+    };
+    // Display size first (approved art), then the server box, then default.
+    const w = dim(e.displayWidth, e.width);
+    const h = dim(e.displayHeight, e.height);
     const s = worldToScreen(e.x + (e.width || w) / 2, e.y + (e.height || h) / 2);
     const drawX = s.x - w / 2;
     const drawY = s.y - h;
 
+    // Status rings (creatures render through this path in renderChunked).
+    this._drawEffectRings(s.x, drawY + h, w, e.effects);
+    this._drawAuraEffects(s.x, drawY + h, e.auras);
+
     if (isBoss) {
-      this._drawWorldBoss(e, drawX, drawY, w, h, s);
+      if (!this._drawEntityArt(e, drawX, drawY, w, h)) this._drawWorldBoss(e, drawX, drawY, w, h, s);
+      this._drawBossPlate(e, drawX, drawY, w, s);
+      this._drawEffectPips(drawX, drawY, e.effects);
       return;
     }
 
-    // Creatures render through this path in renderChunked (buildDrawables'
-    // "entity" kind), so their status rings belong here too. Map decorations
-    // never carry `effects`, so this is a no-op for them.
-    this._drawEffectRings(s.x, drawY + h, w, e.effects);
-
-    const mode = RenderSystem.resolveRenderMode(e, this.renderModeOverride);
-    // Preferred sprite path: crop a frame out of the generated atlas.
-    const sprite = RenderSystem.resolveSprite(e, this.imageManager, mode, this.nowMs);
-    if (sprite) {
-      const [sx, sy, sw, sh] = sprite.crop;
-      // SOMET-569: the FRAME's dimensions decide the fit, not the atlas's. A
-      // sheet is a grid of cells and each cell is as aspect-sensitive as a
-      // standalone image; using the atlas size here would fit against the whole
-      // sheet and squash every frame in it.
-      const r = fitSpriteRect(sw, sh, drawX, drawY, w, h);
-      this.ctx.drawImage(sprite.img, sx, sy, sw, sh, r.dx, r.dy, r.dw, r.dh);
-    } else {
-      // Legacy single-image fallback (whole image) still honored in sprite modes;
-      // then degrade to a rectangle so a missing asset never leaves a hole.
-      const img = mode !== "rect" && e.image && this.imageManager
-        ? this.imageManager.get(e.image)
-        : null;
-      if (img) {
-        // SOMET-569: fit, do not stretch. This is the path the four
-        // non-square decorations take (pine_tree, dead_tree, Tree, rose_bush),
-        // which is why they had been rendering squashed to 0.61-0.67x.
-        const r = fitSpriteRect(img.width, img.height, drawX, drawY, w, h);
-        this.ctx.drawImage(img, r.dx, r.dy, r.dw, r.dh);
-      } else {
-        this.ctx.fillStyle = e.color || "#c0392b";
-        this.ctx.fillRect(drawX, drawY, w, h);
-      }
+    if (!this._drawEntityArt(e, drawX, drawY, w, h)) {
+      // Degrade to a rectangle so a missing asset never leaves a hole.
+      this.ctx.fillStyle = e.color || "#c0392b";
+      this.ctx.fillRect(drawX, drawY, w, h);
     }
 
     // HP bar for damaged actors. Map decorations never carry hp/maxHp, so
@@ -4328,9 +4377,10 @@ export class RenderSystem {
       const by = startY + i * (slotH + gapY);
 
       const dur = Number(b.durationMs) || 20000;
-      const remainingMs = Math.max(0, (b.expiresAt || (b.startedAt + dur)) - nowMs);
+      const persistent = b.persistent === true;
+      const remainingMs = persistent ? dur : Math.max(0, (b.expiresAt || (b.startedAt + dur)) - nowMs);
       const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
-      const frac = Math.max(0, Math.min(1, remainingMs / dur));
+      const frac = persistent ? 1 : Math.max(0, Math.min(1, remainingMs / dur));
 
       // 1. Sleek glassmorphic container
       ctx.beginPath();
@@ -4360,7 +4410,7 @@ export class RenderSystem {
       ctx.fill();
 
       // Buff Emoji Icon
-      const buffImg = artIcon(this.gameArt, "skill", b.id);
+      const buffImg = persistent ? null : artIcon(this.gameArt, "skill", b.id);
       if (buffImg) {
         drawIconFit(ctx, buffImg, iconBoxX + 2, iconBoxY + 2, iconBoxS - 4);
       } else {
@@ -4378,10 +4428,16 @@ export class RenderSystem {
       ctx.fillStyle = "#ffffff";
       ctx.fillText(title.length > 13 ? title.slice(0, 12) + "…" : title, bx + 36, by + 5);
 
-      // Timer readout
+      // Timer readout -- or, for an aura debuff (SOMET-606), what it does.
       ctx.font = "10px monospace";
-      ctx.fillStyle = remainingSec <= 3 ? "#f87171" : "#fde047";
-      ctx.fillText(`${remainingSec}s`, bx + 36, by + 18);
+      if (persistent) {
+        ctx.fillStyle = "#fca5a5";
+        const d = b.detail || "";
+        ctx.fillText(d.length > 17 ? d.slice(0, 16) + "…" : d, bx + 36, by + 18);
+      } else {
+        ctx.fillStyle = remainingSec <= 3 ? "#f87171" : "#fde047";
+        ctx.fillText(`${remainingSec}s`, bx + 36, by + 18);
+      }
 
       // 4. Mini progress duration bar at bottom of the slot
       const barX = bx + 36;

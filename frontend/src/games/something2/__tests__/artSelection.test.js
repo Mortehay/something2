@@ -3,6 +3,7 @@ import {
   subjectId, sortSubjects, freezeOrder, clampPage, pageCount, toggle, selectPage, deselectPage,
   isPageFullySelected, selectAllMatching, selectAllLabel, byKind, applyFilters,
   enqueueSummary, coverage, selectionOutsideFilter, promptIneligibleCount, PAGE_SIZE, filtersFromParams,
+  joinInFlight, paramsFromFilters, startBatchBlocker, startBatchBody, createUrlEcho,
 } from '../artSelection.js';
 
 const S = (kind, key, extra = {}) => ({ kind, key, name: key, has_art: false, ...extra });
@@ -28,12 +29,20 @@ describe('ordering', () => {
   // has-art would move subjects between pages mid-batch, so the row an admin
   // ticked is no longer the row they thought.
   it('is stable as art lands, because it sorts on immutable columns', () => {
-    const before = [S('skill', 'b'), S('skill', 'a'), S('item', 'c')];
+    const before = [S('skill', 'b'), S('skill', 'a'), S('item', 'c'), S('item', 'd')];
     const order = sortSubjects(before).map(subjectId);
+    expect(order).toEqual(['item/c', 'item/d', 'skill/a', 'skill/b']);
 
-    // The same subjects, now with art and fresh timestamps.
-    const after = before.map((s) => ({ ...s, has_art: true, updated_at: '2026-09-04' }));
-    expect(sortSubjects(after).map(subjectId)).toEqual(order);
+    // Mid-batch, art lands on SOME subjects, not all. Flipping every row at
+    // once would leave a has-art (or updated_at) sort giving the same order and
+    // this test green; flipping one row in the middle moves it under any such
+    // sort, in either direction.
+    for (const landed of ['item/d', 'skill/a']) {
+      const after = before.map((s) => (subjectId(s) === landed
+        ? { ...s, has_art: true, updated_at: '2026-09-04' }
+        : s));
+      expect(sortSubjects(after).map(subjectId), `art landed on ${landed}`).toEqual(order);
+    }
   });
 
   it('groups by kind then key', () => {
@@ -173,6 +182,10 @@ describe('filters', () => {
   it('kind and search narrow further, and combine with the art filter', () => {
     expect(applyFilters(all, { kind: 'item' }).length).toBe(2);
     expect(applyFilters(all, { search: 'SWO' }).map((s) => s.key)).toEqual(['sword']);
+    // exact: the key itself, case-sensitive, and the name is not searched.
+    expect(applyFilters([...all, { kind: 'item', key: 'swordfish', has_art: true }], { search: 'sword', exact: true })
+      .map((s) => s.key)).toEqual(['sword']);
+    expect(applyFilters(all, { search: 'SWORD', exact: true })).toEqual([]);
     expect(applyFilters(all, { kind: 'item', art: 'missing' }).map((s) => s.key))
       .toEqual(['shield']);
   });
@@ -297,17 +310,127 @@ describe('filtersFromParams', () => {
   // ALREADY filtered to it, art filter widened past the resume default.
   it('seeds kind, art and search from the URL', () => {
     expect(filtersFromParams(new URLSearchParams('kind=skill&art=all&q=war_whirlwind')))
-      .toEqual({ kind: 'skill', art: 'all', search: 'war_whirlwind' });
+      .toEqual({ kind: 'skill', art: 'all', search: 'war_whirlwind', exact: false });
+  });
+
+  it('seeds an EXACT key match from key=, which wins over q=', () => {
+    // SOMET-571 rework: q is a substring search, so q=Mage opened 8 rows.
+    expect(filtersFromParams(new URLSearchParams('kind=passive_label&art=all&key=Mage&q=x')))
+      .toEqual({ kind: 'passive_label', art: 'all', search: 'Mage', exact: true });
   });
 
   it('keeps the console defaults when the URL says nothing', () => {
     expect(filtersFromParams(new URLSearchParams('')))
-      .toEqual({ kind: 'all', art: 'missing', search: '' });
+      .toEqual({ kind: 'all', art: 'missing', search: '', exact: false });
   });
 
   it('ignores an art value the console has no filter for', () => {
     // A hand-edited or stale link must not put the table into a state no
     // control can get it out of.
     expect(filtersFromParams(new URLSearchParams('art=bogus')).art).toBe('missing');
+  });
+});
+
+describe('joinInFlight', () => {
+  // SOMET-538 rework: two clicks in one tick sent two POSTs; isPending had not
+  // flipped yet. The second response ("0 of 2 -- 2 already in flight")
+  // overwrote the first. A second call while one is pending must JOIN it.
+  it('runs once for two same-tick calls, and both get the same result', async () => {
+    const slot = { current: null };
+    let runs = 0;
+    const start = async () => { runs += 1; return `run ${runs}`; };
+    const a = joinInFlight(slot, start);
+    const b = joinInFlight(slot, start);
+    expect(await Promise.all([a, b])).toEqual(['run 1', 'run 1']);
+    expect(runs).toBe(1);
+  });
+
+  it('starts again once the previous call settled, including after a failure', async () => {
+    const slot = { current: null };
+    await expect(joinInFlight(slot, async () => { throw new Error('boom'); })).rejects.toThrow('boom');
+    expect(slot.current).toBe(null);
+    expect(await joinInFlight(slot, async () => 'again')).toBe('again');
+    expect(slot.current).toBe(null);
+  });
+});
+
+// SOMET-535 validation, minor UX: the filters were read from the URL at mount
+// and never written back, so browser back reset them. The console now writes
+// them back; this is the inverse it uses.
+describe('paramsFromFilters', () => {
+  it('round-trips through filtersFromParams', () => {
+    const f = { kind: 'skill', art: 'failed', search: 'whirl', exact: false };
+    expect(filtersFromParams(paramsFromFilters(f))).toEqual(f);
+  });
+
+  // SOMET-571 x SOMET-535: the console writes its filters back to the URL on
+  // every change, so a key= deep link must come back out as key= -- written
+  // as q=, the first unrelated change (kind, art) silently turned the exact
+  // match into a substring one (key=Mage -> q=Mage, eight labels).
+  it('keeps an exact key search exact across the write-back', () => {
+    const f = { kind: 'passive_label', art: 'all', search: 'Mage', exact: true };
+    expect(paramsFromFilters(f).toString()).toBe('kind=passive_label&art=all&key=Mage');
+    expect(filtersFromParams(paramsFromFilters(f))).toEqual(f);
+    expect(filtersFromParams(paramsFromFilters({ ...f, art: 'has' }))).toMatchObject({ exact: true });
+  });
+
+  it('omits the defaults so the plain tab URL stays plain', () => {
+    expect(paramsFromFilters({ kind: 'all', art: 'missing', search: '' }).toString()).toBe('');
+  });
+
+  it('writes the same names the Skill Tree deep link uses', () => {
+    expect(paramsFromFilters({ kind: 'skill', art: 'all', search: 'war_whirlwind' }).toString())
+      .toBe('kind=skill&art=all&q=war_whirlwind');
+  });
+});
+
+// SOMET-535 rework: under Local the batch is drawn by sprite-gen, so a missing
+// remote provider must not disable Start.
+describe('startBatchBlocker', () => {
+  it('needs a provider for a connector batch', () => {
+    expect(startBatchBlocker({ backend: 'connector', providerId: '', activeProvider: null }))
+      .toMatch(/provider/i);
+  });
+
+  it('is satisfied by the active provider or a chosen one', () => {
+    expect(startBatchBlocker({ backend: 'connector', providerId: '', activeProvider: { id: 1 } }))
+      .toBeNull();
+    expect(startBatchBlocker({ backend: 'connector', providerId: '3', activeProvider: null }))
+      .toBeNull();
+  });
+
+  it('does not need a provider for a local batch', () => {
+    expect(startBatchBlocker({ backend: 'local', providerId: '', activeProvider: null })).toBeNull();
+  });
+});
+
+describe('startBatchBody', () => {
+  it('sends no provider under Local, even one left in the hidden select', () => {
+    expect(startBatchBody({ backend: 'local', providerId: '5', activeProvider: { id: 9 } }))
+      .toEqual({ concurrency: 1 });
+  });
+  it('sends the chosen provider under Connector, else the active one', () => {
+    expect(startBatchBody({ backend: 'connector', providerId: '5', activeProvider: { id: 9 } }))
+      .toEqual({ provider_id: 5, concurrency: 1 });
+    expect(startBatchBody({ backend: 'connector', providerId: '', activeProvider: { id: 9 } }))
+      .toEqual({ provider_id: 9, concurrency: 1 });
+  });
+});
+
+describe('createUrlEcho', () => {
+  const q = (s) => new URLSearchParams(s);
+  it('ignores a late commit of a value the console wrote itself, even a stale one', () => {
+    const echo = createUrlEcho();
+    for (const v of ['q=w', 'q=wa', 'q=war']) echo.wrote(q(v));
+    // the router commits 'wa' after the user has typed 'war': adopting it
+    // would snap the input back and lose the 'r'
+    expect(echo.adopt(q('q=wa'))).toBe(false);
+    expect(echo.adopt(q('q=war'))).toBe(false);
+  });
+  it('adopts navigation from outside (back, a deep link), then forgets old writes', () => {
+    const echo = createUrlEcho();
+    echo.wrote(q('q=w'));
+    expect(echo.adopt(q('kind=skill&q=war_whirlwind'))).toBe(true);
+    expect(echo.adopt(q('q=w'))).toBe(true);
   });
 });

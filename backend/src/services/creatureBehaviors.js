@@ -14,8 +14,10 @@
 const ATTACK_KINDS = ['melee', 'ranged', 'cast'];
 const CHASE_STYLES = ['charge', 'kite', 'skirmish', 'hold', 'ambush', 'guard', 'skittish'];
 // Mirrors creature_abilities' element CHECK constraint (migration
-// 1714440083000), which additionally allows NULL -- see resolveAbility.
-const ELEMENTS = ['physical', 'fire', 'ice', 'lightning'];
+// 1714440083000, widened by 1714440672000 for 'arcane'), which additionally
+// allows NULL -- see resolveAbility. Also the entity_types.attack_element
+// list (1714440670000) and the list authority/damage.js uses.
+const ELEMENTS = ['physical', 'arcane', 'fire', 'ice', 'lightning'];
 
 // Today's hostile attack, and the fallback for a behaviour with no ability
 // rows. Must equal CONTACT_RANGE (60) and CREATURE_ATTACK_COOLDOWN (1.0) in
@@ -55,16 +57,6 @@ const DEFAULT_BEHAVIOR = Object.freeze({
   preferredRange: 0,
   moveSpeedMult: 1,
   damageOverride: null,
-  // SOMET-253 Task 4: aura_radius 0 means "not a pack leader" -- Task 5's
-  // consumer never applies a buff/debuff within a zero-radius aura, so this
-  // is a true no-op until then. The three multipliers default to 1
-  // (neutral), never 0: a NULL aura_damage_mult resolving to Number(null)=0
-  // would make every buffed creature deal NOTHING, the same trap as the
-  // ability cooldown in Task 2.
-  auraRadius: 0,
-  auraDamageMult: 1,
-  auraDefenseMult: 1,
-  auraSpeedMult: 1,
   // Per-rung gold fallback (see loot.js, wired up in Task 5). 0 means "no
   // fallback range", matching the migration's column default.
   goldMin: 0,
@@ -142,10 +134,6 @@ function resolveBehavior(row) {
     // falsy test.
     damageOverride: row.damage_override == null
       ? null : num(row.damage_override, null),
-    auraRadius: num(row.aura_radius, DEFAULT_BEHAVIOR.auraRadius),
-    auraDamageMult: num(row.aura_damage_mult, DEFAULT_BEHAVIOR.auraDamageMult),
-    auraDefenseMult: num(row.aura_defense_mult, DEFAULT_BEHAVIOR.auraDefenseMult),
-    auraSpeedMult: num(row.aura_speed_mult, DEFAULT_BEHAVIOR.auraSpeedMult),
     // Aliased `behavior_gold_min`/`behavior_gold_max`, not the bare
     // `gold_min`/`gold_max` entity_types already owns: loadCreatureTypes'
     // SELECT carries both e.gold_min (the entity type's own range, used by

@@ -3,6 +3,8 @@
 // so the arithmetic here is testable without mounting a query hook or a
 // running drain.
 
+import { slotEntriesFor } from './audioSelection.js';
+
 // Claims order, mirrored from backend/src/services/audioJobQueue.js's
 // DRAIN_ORDER: music, then ambience, then the two SFX packs (realistic
 // before retro), so the box switches model as rarely as possible. Kept here
@@ -143,10 +145,14 @@ export function hasBatchActivity({ run, stats } = {}) {
 // registry still loading/empty) rather than throwing -- SubjectSounds must
 // keep rendering (its slot cards) even while useAudioSubjects() is loading or
 // errored.
-export function subjectSlotsFor(subjectsResponse, kind) {
+//
+// SOMET-605: with a `key`, only that subject's slots (boss slots show on boss
+// rows only); without one, the kind's whole slot list as before.
+export function subjectSlotsFor(subjectsResponse, kind, key) {
   const group = (subjectsResponse || []).find((g) => g.kind === kind);
   if (!group) return [];
-  return Object.entries(group.slots || {}).map(([slot, clipKind]) => ({ slot, clipKind }));
+  const entries = key === undefined ? Object.entries(group.slots || {}) : slotEntriesFor(group, key);
+  return entries.map(([slot, clipKind]) => ({ slot, clipKind }));
 }
 
 // Whether the jobs query is worth polling. Wider than "a drain is running"
@@ -184,6 +190,26 @@ export function runStopWarning(run) {
     return `Stopped after repeated provider failures (${detail}) — fix the provider, then press Start to resume.`;
   }
   return `Batch stopped (${reason}): ${detail} — fix the cause, then press Start to resume.`;
+}
+
+// A slot card's job line (SOMET-592). A job left 'queued' when the drain
+// ended -- a breaker trip, no provider, a fault, Stop, or a drain that never
+// started -- will not move until someone presses Start, so "queued" alone
+// reads as "about to run" when it is not. The line says the drain stopped,
+// and why when the run recorded a reason.
+export function slotJobText(job, run) {
+  if (!job) return null;
+  if (job.status === 'failed') return job.error ? `Job: failed — ${job.error}` : 'Job: failed';
+  if (job.status !== 'queued' || (run && run.running)) return `Job: ${job.status}`;
+  const reason = run && run.stopped_reason;
+  const detail = (run && run.error) || 'no detail';
+  if (reason === 'breaker') {
+    return `Job: queued — the drain stopped after repeated provider failures (${detail}); press Start on the Audio page once the provider is fixed.`;
+  }
+  if (reason === 'no_provider' || reason === 'error') {
+    return `Job: queued — the drain stopped (${reason}): ${detail}; press Start on the Audio page once that is fixed.`;
+  }
+  return 'Job: queued — no drain is running; press Start on the Audio page to run it.';
 }
 
 // A group pill's running count. With no drain running those rows are

@@ -12,6 +12,7 @@ import GameShell from "./games/something2/GameShell";
 import GameView from "./games/something2/GameView";
 import TileTypesAdmin from "./games/something2/TileTypesAdmin";
 import ArtConsoleAdmin from "./games/something2/ArtConsoleAdmin";
+import SpriteConsoleAdmin from "./games/something2/SpriteConsoleAdmin";
 import AudioAdmin from "./games/something2/AudioAdmin";
 import EntityTypesAdmin from "./games/something2/EntityTypesAdmin";
 import ItemTypesAdmin from "./games/something2/ItemTypesAdmin";
@@ -23,6 +24,7 @@ import SettingsAdmin from "./games/something2/SettingsAdmin";
 import PlayerWorldMap from "./games/something2/PlayerWorldMap";
 import CreatureBehaviorsAdmin from "./games/something2/CreatureBehaviorsAdmin";
 import VfxEffectsAdmin from './games/something2/VfxEffectsAdmin.jsx';
+import AuraEffectsAdmin from './games/something2/AuraEffectsAdmin.jsx';
 import ProgressionAdmin from './games/something2/ProgressionAdmin.jsx';
 import SkillTreeAdmin from './games/something2/SkillTreeAdmin.jsx';
 
@@ -68,11 +70,13 @@ function App() {
                       <Route path="biomes" element={<BiomesAdmin />} />
                       <Route path="creature-behaviors" element={<CreatureBehaviorsAdmin />} />
                       <Route path="vfx" element={<VfxEffectsAdmin />} />
+                      <Route path="auras" element={<AuraEffectsAdmin />} />
                       <Route path="world-map" element={<MapGraphAdmin />} />
                       <Route path="generated-worlds" element={<WorldGenAdmin />} />
                       <Route path="admin/progression" element={<ProgressionAdmin />} />
                       <Route path="admin/skill-tree" element={<SkillTreeAdmin />} />
                       <Route path="art" element={<ArtConsoleAdmin />} />
+                      <Route path="sprites" element={<SpriteConsoleAdmin />} />
                       <Route path="audio" element={<AudioAdmin />} />
                       <Route path="settings" element={<SettingsAdmin />} />
                     </Route>

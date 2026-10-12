@@ -3,12 +3,54 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import SkillTreeAdmin from '../SkillTreeAdmin.jsx';
+import { SECTOR_HUES } from '../src/js/systems/passiveTreePanel.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const read = (rel) => fs.readFileSync(path.join(here, rel), 'utf8');
 const admin = read('../SkillTreeAdmin.jsx');
 const hook = read('../usePassiveTree.js');
 const console_ = read('../ArtConsoleAdmin.jsx');
+const globalStyles = read('../../../styles/GlobalStyles.js');
+
+// --- colour helpers for the legend gate ---------------------------------------
+const rgbOf = (c) => {
+  const s = c.trim().toLowerCase();
+  let m = s.match(/^#([0-9a-f]{3})$/);
+  if (m) return [...m[1]].map((h) => parseInt(h + h, 16));
+  m = s.match(/^#([0-9a-f]{6})$/);
+  if (m) return [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16));
+  m = s.match(/^rgba?\(([^)]+)\)$/);
+  if (m) return m[1].split(',').slice(0, 3).map((v) => Number(v.trim()));
+  throw new Error(`cannot parse colour ${c}`);
+};
+const luminance = (c) => {
+  const [r, g, b] = rgbOf(c).map((v) => {
+    const x = v / 255;
+    return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+const contrast = (a, b) => {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+};
+// GlobalStyles.js: the light tokens come first, the dark ones under &.dark-mode.
+const tokenIn = (mode, name) => {
+  const split = globalStyles.indexOf('&.dark-mode');
+  const block = mode === 'dark' ? globalStyles.slice(split) : globalStyles.slice(0, split);
+  const m = block.match(new RegExp(`${name}:\\s*([^;]+);`));
+  if (!m) throw new Error(`${name} not defined in ${mode} mode`);
+  return m[1].trim();
+};
+// A colour as written in SkillTreeAdmin.jsx: a GAME_* constant, a var(--s2-*)
+// token, or a literal.
+const resolve = (expr, mode) => {
+  const e = expr.trim();
+  const v = e.match(/^var\((--s2-[\w-]+)\)$/);
+  if (v) return tokenIn(mode, v[1]);
+  if (/^[A-Z_]+$/.test(e)) return admin.match(new RegExp(`const ${e} = '([^']+)';`))[1];
+  return e;
+};
 
 // SOMET-571. Source-text gates, like PassiveNodesAdmin.smoke.test.js and for
 // the same reason: vitest runs in a plain node environment, so this is the
@@ -35,7 +77,7 @@ describe('SkillTreeAdmin', () => {
   });
 
   it('decides art lookup, coverage and links in skillTreeView.js, not inline', () => {
-    for (const fn of ['indexArt', 'artFor', 'artCoverage', 'distinctLabels', 'treeBounds', 'zoomViewBox', 'panViewBox', 'artConsoleLink', 'onlyMissing', 'dragStart', 'dragMove', 'dragEnd', 'dragClick']) {
+    for (const fn of ['indexArt', 'artFor', 'artCoverage', 'distinctLabels', 'treeBounds', 'wheelZoom', 'panViewBox', 'artConsoleLink', 'onlyMissing', 'dragStart', 'dragMove', 'dragEnd', 'dragClick']) {
       expect(admin, `${fn} must be imported from skillTreeView.js`)
         .toMatch(new RegExp(`import\\s*\\{[^}]*\\b${fn}\\b[^}]*\\}\\s*from\\s*'\\./skillTreeView\\.js'`));
       expect(admin, `${fn} must actually be called`).toMatch(new RegExp(`\\b${fn}\\(`));
@@ -63,5 +105,145 @@ describe('SkillTreeAdmin', () => {
     expect(console_).toMatch(/import\s*\{[^}]*\bfiltersFromParams\b[^}]*\}\s*from\s*'\.\/artSelection\.js'/);
     expect(console_).toMatch(/useSearchParams/);
     expect(console_).toMatch(/filtersFromParams\(/);
+  });
+
+  it('passes the deep link\'s exact-key flag to every applyFilters call', () => {
+    // filtersFromParams returns `exact` for a key= link; a call site that
+    // drops it falls back to the substring search (q=Mage -> 8 rows).
+    const calls = console_.match(/applyFilters\(subjects,\s*\{[^}]*\}/g) || [];
+    expect(calls.length).toBeGreaterThan(0);
+    for (const c of calls) expect(c).toMatch(/\bexact\b/);
+    // ...read from the URL-backed filters (SOMET-535 made the URL the state).
+    expect(console_).toMatch(/const \{[^}]*\bexact\b[^}]*\} = filters;/);
+  });
+
+  it('typing in the search box leaves the exact-key match', () => {
+    // setFilter merges the patch over the CURRENT params, so a patch without
+    // exact: false would keep key= and match the typed text exactly.
+    expect(console_).toMatch(/onChange=\{\(e\) => setFilter\(\{ search: e\.target\.value, exact: false \}\)\}/);
+  });
+
+  // SOMET-571 rework. Capturing the pointer on pointerdown made Chrome
+  // retarget pointerup AND click to the <svg>, so no node's onClick ever ran:
+  // a plain click on the tree navigated nowhere. Vitest has no DOM here, so
+  // the wiring is pinned in source; the decision itself (capture on the move
+  // that starts a drag, once) is unit-tested as dragMove's `capture`.
+  it('never captures the pointer on press, only once dragMove says a drag began', () => {
+    const body = (name) => {
+      const m = admin.match(new RegExp(`const ${name} = \\(e\\) => \\{([\\s\\S]*?)\\n  \\};`));
+      expect(m, `${name} handler`).not.toBeNull();
+      return m[1];
+    };
+    expect(body('onPointerDown')).not.toMatch(/setPointerCapture/);
+    const move = body('onPointerMove');
+    expect(move).toMatch(/\bcapture\b[^;]*=\s*dragMove\(|\{[^}]*\bcapture\b[^}]*\}\s*=\s*dragMove\(/);
+    expect(move).toMatch(/if\s*\(capture\)[^;]*setPointerCapture\(e\.pointerId\)/);
+    // And nowhere else.
+    expect(admin.match(/setPointerCapture\(/g)).toHaveLength(1);
+  });
+
+  // SOMET-571 re-validation: a press released outside the svg (before the
+  // drag threshold, so before capture) never reached onPointerUp and stayed
+  // pressed; hovering back with no button held panned the tree. The move
+  // handler must hand dragMove the button state, and a release ANYWHERE must
+  // end the press.
+  it('ends a press whose pointerup happened outside the svg', () => {
+    const move = admin.match(/const onPointerMove = \(e\) => \{([\s\S]*?)\n {2}\};/)[1];
+    expect(move).toMatch(/dragMove\(drag\.current,\s*e\.clientX,\s*e\.clientY,\s*e\.buttons\)/);
+    // The listening itself (pointerup AND pointercancel, ending the press,
+    // removed on unmount) is endPressOnRelease's, unit-tested against an
+    // EventTarget. Here: the tree hands it the window and its own drag ref,
+    // and returns its cleanup from the effect.
+    expect(admin).toMatch(/useEffect\(\(\) => endPressOnRelease\(window, drag\), \[\]\);/);
+    expect(admin).not.toMatch(/window\.addEventListener\('pointer/);
+  });
+
+  // SOMET-571 rework 4: a fast double-click fired two click handlers before
+  // the route changed between them, so openLabel/openSkill each called
+  // navigate() and pushed a second history entry for the page already being
+  // opened -- one Back press then landed back on the page it just left.
+  it('gates every navigation to the Art console through shouldNavigate, not navigate() directly', () => {
+    expect(admin).toMatch(/if\s*\(!shouldNavigate\(lastNav\.current, link, now\)\)\s*return;/);
+    expect(admin).toMatch(/lastNav\.current = \{ link, at: now \};/);
+    expect(admin).toMatch(/const openLabel = \(node\) => \{ if \(node\.label\) goToArtConsole\(/);
+    expect(admin).toMatch(/const openSkill = \(skill\) => goToArtConsole\(/);
+    // navigate() itself is called from exactly one place: inside the guard.
+    expect(admin.match(/\bnavigate\(/g)).toHaveLength(2); // the guarded call, plus the unrelated "missing" button
+  });
+
+  it('zooms inside the setBox updater, from the box being zoomed', () => {
+    // A focus computed from the last-rendered box drifted under a wheel burst
+    // (SOMET-571 validation); the updater must chain off its own argument.
+    expect(admin).toMatch(/setBox\(\(b\) => wheelZoom\(b, bounds, rect, clientX, clientY, factor\)\)/);
+  });
+
+  it('says so when missing-only has nothing to show, instead of dimming every node', () => {
+    // Validation: with nothing missing, missing-only dimmed all 1852 nodes to
+    // 0.15 with no message, which reads as a broken tree.
+    expect(admin).toMatch(/const treeNothingMissing = treeMissingOnly\s*&&\s*labelCoverage\.missing\s*===\s*0;/);
+    // The message is actually rendered under that condition...
+    expect(admin).toMatch(/\{treeNothingMissing\s*&&[^}]*<Hint>Every passive label has art/);
+    // ...and the tree is NOT dimmed then.
+    expect(admin).toMatch(/dimLabels=\{treeMissingOnly\s*&&\s*!treeNothingMissing\s*\?\s*missingLabels\s*:\s*null\}/);
+  });
+
+  // Validation: at whole-tree zoom a world-unit stroke is sub-pixel, so the
+  // missing-art marker is drawn in screen pixels. And it must not share a
+  // colour with a sector: amber was charisma's hue, so in the Druid sector a
+  // missing ring was told apart only by thickness.
+  it('marks missing art with a screen-pixel ring in a colour no sector uses', () => {
+    const m = admin.match(/<circle\s+r=\{r\} fill="none" stroke=\{GAME_MISSING\}([^>]*)\/>/);
+    expect(m, 'missing-art ring').not.toBeNull();
+    expect(m[1]).toMatch(/vectorEffect="non-scaling-stroke"/);
+    const colour = admin.match(/const GAME_MISSING = '([^']+)';/)[1].toLowerCase();
+    const hues = Object.values(SECTOR_HUES).map((h) => h.toLowerCase());
+    expect(hues).not.toContain(colour);
+  });
+
+  // Validation (light theme): the legend's "no art" key was a dark dot with a
+  // #f8fafc border on the white page, 1.04:1, so the ring vanished. The ring
+  // must stand apart from what is inside it AND from what is outside it --
+  // its own outer edge if it draws one, else the page surface -- in BOTH
+  // themes.
+  it('draws the legend\'s "no art" key as a ring that reads in both themes', () => {
+    const m = admin.match(/<Swatch style=\{\{(.*?)\}\} \/>no art</);
+    expect(m, '"no art" swatch').not.toBeNull();
+    const style = m[1];
+    const fill = style.match(/background:\s*([^,]+?)\s*(,|$)/)[1];
+    const ring = style.match(/border:\s*`2px solid \$\{([^}]+)\}`/)[1];
+    const edge = style.match(/boxShadow:\s*'0 0 0 1px ([^']+)'/);
+    for (const mode of ['light', 'dark']) {
+      const ringC = resolve(ring, mode);
+      const outside = edge ? resolve(edge[1], mode) : tokenIn(mode, '--s2-surface');
+      expect(contrast(ringC, resolve(fill, mode)), `${mode}: ring vs fill`).toBeGreaterThanOrEqual(3);
+      expect(contrast(ringC, outside), `${mode}: ring vs outside`).toBeGreaterThanOrEqual(3);
+    }
+    // And it is the same ring the tree draws, so the key means what it shows.
+    expect(ring).toBe('GAME_MISSING');
+  });
+
+  // Validation: at phone width 390 the tree svg rendered 0 px wide. The row
+  // was a grid of `1fr 260px`, so once the content area was narrower than the
+  // side card the tree's 1fr column collapsed to nothing. The row must wrap
+  // the side card below the tree instead, and the tree must be allowed to
+  // shrink to the width it has.
+  it('wraps the side card below the tree instead of squeezing the tree to 0 px', () => {
+    const css = (name) => admin.match(new RegExp(`const ${name} = styled\\.div\`([^\`]*)\``))[1];
+    const row = css('TreeRow');
+    expect(row).not.toMatch(/grid-template-columns/);
+    expect(row).toMatch(/display:\s*flex;/);
+    expect(row).toMatch(/flex-wrap:\s*wrap;/);
+    const frame = css('TreeFrame');
+    expect(frame).toMatch(/flex:\s*1 1 \d+px;/);
+    expect(frame).toMatch(/min-width:\s*0;/);
+    const side = css('Side');
+    expect(side).toMatch(/flex:\s*0 1 260px;/);
+  });
+
+  it('lets a skill card column shrink below 260 px on a narrow row', () => {
+    // minmax(260px, 1fr) demands 260 px per column even when the row is
+    // narrower, so the card grid overflowed the page at phone width.
+    const grid = admin.match(/const Grid = styled\.div`([^`]*)`/)[1];
+    expect(grid).toMatch(/minmax\(min\(260px, 100%\), 1fr\)/);
   });
 });

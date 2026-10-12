@@ -112,6 +112,60 @@ const CONTRACTS = {
   },
 };
 
+// SOMET-568. A `rule` grant names a FORMULA, and its identifier is the name of
+// that formula in the code -- `meleeWaveShare`, `cooldownFloor`. Rendered raw,
+// the labels whose ONLY grant is a rule were described from one camelCase token.
+//
+// EACH PHRASE WAS READ OFF ITS CONSUMER (RULE_KEYS[rule].consumer in
+// seeds/data/passiveTree.js), not guessed from the name. Two mislead:
+//   auraLeech      "leech" reads as draining an enemy; world.js says "It HEALS
+//                  and never drains" -- a healing aura.
+//   regenLifeShare not a second health regen: the share rides the mana
+//                  ACTUALLY regenerated.
+//
+// DIRECTION. The tree uses several rules both ways -- Whirlwind pairs a wide arc
+// with meleeDamageMult 0.8, Spearpoint carries meleeArcBonus -0.5 -- so a rule
+// that can cut both ways is { pivot, more, less }: `more` above the pivot (1 for
+// a multiplier, 0 for a bonus), `less` below it, nothing AT it. A plain string
+// is for a rule the tree only uses one way (cooldownFloor is min-combined, so
+// only a lower floor ever changes anything).
+//
+// NO NUMBERS: these are multipliers, floors and shares whose meaning is not
+// readable from the digits (cooldownFloor 0.32 is BETTER than 0.40), and a model
+// handed the digits may draw them.
+const RULE_PHRASES = {
+  lifeCostMultiplier: { pivot: 1, more: 'abilities cost more life', less: 'abilities cost less life' },
+  treeCharmBonus: { pivot: 0, more: 'charms more creatures to fight alongside you', less: 'charms fewer creatures to fight alongside you' },
+  cooldownFloor: 'abilities recharge faster',
+  regenLifeShare: 'regenerating mana also restores life',
+  attackSpeedMult: { pivot: 1, more: 'attacks faster', less: 'attacks slower' },
+  castSpeedMult: { pivot: 1, more: 'casts spells faster', less: 'casts spells slower' },
+  meleeReachBonus: { pivot: 0, more: 'strikes from further away', less: 'strikes at shorter reach' },
+  meleeArcBonus: { pivot: 0, more: 'strikes through a wider arc', less: 'strikes through a narrower arc' },
+  projectileCount: { pivot: 0, more: 'fires extra projectiles', less: 'fires fewer projectiles' },
+  projectileSpeedMult: { pivot: 1, more: 'projectiles fly faster', less: 'projectiles fly slower' },
+  pierceBonus: { pivot: 0, more: 'projectiles pierce through enemies', less: 'projectiles pierce fewer enemies' },
+  auraLeech: 'a healing aura',
+  auraRadius: { pivot: 0, more: 'a wider aura', less: 'a smaller aura' },
+  meleeDamageMult: { pivot: 1, more: 'heavier melee blows', less: 'lighter melee blows' },
+  meleeWaveShare: 'melee blows send out a shockwave',
+  hpRegen: { pivot: 0, more: 'regenerates health faster', less: 'regenerates health slower' },
+  manaRegen: { pivot: 0, more: 'regenerates mana faster', less: 'regenerates mana slower' },
+  staminaRegen: { pivot: 0, more: 'regenerates stamina faster', less: 'regenerates stamina slower' },
+};
+
+// An UNMAPPED rule is DROPPED rather than passed through as camelCase -- the
+// same rule as grantsPhrase's `default`. The staleness test against RULE_KEYS
+// and the generated tree is what stops that being a silent hole.
+function rulePhrase(g) {
+  const p = Object.prototype.hasOwnProperty.call(RULE_PHRASES, g.rule) ? RULE_PHRASES[g.rule] : null;
+  if (!p) return '';
+  if (typeof p === 'string') return p;
+  const v = Number(g.value);
+  if (!Number.isFinite(v) || v === p.pivot) return '';
+  return v > p.pivot ? p.more : p.less;
+}
+
 function grantsPhrase(grants) {
   if (!Array.isArray(grants) || !grants.length) return '';
   return grants.map((g) => {
@@ -122,7 +176,7 @@ function grantsPhrase(grants) {
       case 'resist': return `+${g.value} ${g.element} resistance`;
       case 'resource': return `+${g.value} ${g.pool}`;
       case 'status': return `inflicts ${g.status}`;
-      case 'rule': return `${g.rule} ${g.value}`;
+      case 'rule': return rulePhrase(g);
       default: return '';
     }
   }).filter(Boolean).join(', ');
@@ -195,6 +249,6 @@ async function describeSubject(db, subject, {
 }
 
 module.exports = {
-  describeSubject, buildMessages, clean, subjectContext, grantsPhrase, budgetFor,
+  describeSubject, buildMessages, clean, subjectContext, grantsPhrase, RULE_PHRASES, budgetFor,
   LENGTHS, HERO_LENGTHS, CONTRACTS, TEMPERATURE,
 };
