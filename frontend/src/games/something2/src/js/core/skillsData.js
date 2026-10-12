@@ -2175,7 +2175,27 @@ export const SKILLS_BY_CLASS = {
 
 export const SKILLS_BY_ID = new Map(SKILLS.map(s => [s.id, s]));
 
+// SOMET-618. Every skill id on both sides is class-prefixed (war_, mag_,
+// mnk_, cul_, arc_, dru_); `plague_globule` was the one bare exception, drawn
+// from before the Cultist prefix convention was applied everywhere else, and
+// it drifted from the backend's `cul_plague_globule` (which keys catalog_art,
+// textures and the authority's skill lookups). The id itself was already
+// renamed to the convention-correct `cul_plague_globule` (SOMET-571); this
+// map exists only so a hotbar slot or an "unlocked skill" flag saved to a
+// player's localStorage under the OLD bare id before that rename still
+// resolves, instead of silently losing the assignment/ownership. Keyed by
+// the retired id, valued by the current one -- never the reverse.
+export const LEGACY_SKILL_ID_ALIASES = Object.freeze({
+  plague_globule: 'cul_plague_globule',
+});
 
+// Resolves a possibly-stale skill id (one a player's browser may still be
+// holding from before a rename) to the id the current catalog actually uses.
+// An id that is neither a known alias nor a current id is returned as-is --
+// callers that look it up in SKILLS_BY_ID will correctly find nothing.
+export function canonicalizeSkillId(id) {
+  return LEGACY_SKILL_ID_ALIASES[id] || id;
+}
 
 export function getSkillsForClass(className) {
   if (!className || className === 'all' || className === 'All') return SKILLS;
@@ -2183,7 +2203,7 @@ export function getSkillsForClass(className) {
 }
 
 export function getSkillById(id) {
-  return SKILLS_BY_ID.get(id) || null;
+  return SKILLS_BY_ID.get(canonicalizeSkillId(id)) || null;
 }
 
 export function getSkillIndexInClass(skill) {

@@ -4,6 +4,11 @@ import {
   loadHotbarForCharacter,
   saveHotbarForCharacter,
   getDefaultHotbarForClass,
+  loadUnlockedSkillsForCharacter,
+  unlockSkillForCharacter,
+  isSkillUnlocked,
+  HOTBAR_STORAGE_PREFIX,
+  UNLOCKED_SKILLS_PREFIX,
 } from '../hotbarStorage.js';
 import { getSkillById } from '../skillsData.js';
 
@@ -58,5 +63,33 @@ describe('Hotbar Storage and Persistence', () => {
 
     expect(load1.get(1).id).toBe('mag_fireball');
     expect(load2.get(1).id).toBe('arc_fan_of_knives');
+  });
+
+  // SOMET-618: a hotbar saved before the plague_globule -> cul_plague_globule
+  // rename (SOMET-571) still has the OLD bare id sitting in a real player's
+  // localStorage. Writing it directly (bypassing saveHotbarForCharacter,
+  // which would already persist the current id) reproduces that stale state.
+  it('resolves a hotbar slot saved under the old plague_globule id to the renamed cul_plague_globule skill', () => {
+    const key = `${HOTBAR_STORAGE_PREFIX}char-legacy`;
+    globalThis.localStorage.setItem(key, JSON.stringify({ 7: 'plague_globule' }));
+
+    const loaded = loadHotbarForCharacter('char-legacy', 'Cultist');
+    expect(loaded.get(7)).toBeDefined();
+    expect(loaded.get(7).id).toBe('cul_plague_globule');
+  });
+
+  it('resolves an "owned gem" unlocked under the old plague_globule id to the renamed skill', () => {
+    const key = `${UNLOCKED_SKILLS_PREFIX}char-legacy-gem`;
+    globalThis.localStorage.setItem(key, JSON.stringify(['plague_globule']));
+
+    const unlocked = loadUnlockedSkillsForCharacter('char-legacy-gem');
+    expect(unlocked.has('cul_plague_globule')).toBe(true);
+    expect(unlocked.has('plague_globule')).toBe(false);
+    expect(isSkillUnlocked('char-legacy-gem', 'cul_plague_globule')).toBe(true);
+  });
+
+  it('keeps the legacy id resolvable after a fresh unlock under the current id', () => {
+    unlockSkillForCharacter('char-fresh-gem', 'cul_plague_globule');
+    expect(isSkillUnlocked('char-fresh-gem', 'cul_plague_globule')).toBe(true);
   });
 });
