@@ -641,7 +641,7 @@ function CreatureBehaviorsAdmin() {
                 <FormGroup>
                   <label>Cooldown (ms)</label>
                   <input
-                    type="number" step="100" min="1"
+                    type="number" step="1" min="1"
                     value={skillFormData.cooldown_ms}
                     onChange={(e) => setSkillFormData({ ...skillFormData, cooldown_ms: e.target.value })}
                   />
