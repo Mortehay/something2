@@ -1,9 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   subjectId, sortSubjects, freezeOrder, clampPage, pageCount, toggle, selectPage, deselectPage,
   isPageFullySelected, selectAllMatching, selectAllLabel, byKind, applyFilters,
-  enqueueSummary, coverage, selectionOutsideFilter, promptIneligibleCount, PAGE_SIZE, filtersFromParams,
-  joinInFlight, paramsFromFilters, startBatchBlocker, startBatchBody, createUrlEcho,
+  enqueueSummary, enqueueByKind, coverage, selectionOutsideFilter, promptIneligibleCount, PAGE_SIZE,
+  filtersFromParams, joinInFlight, paramsFromFilters, startBatchBlocker, startBatchBody, createUrlEcho,
 } from '../artSelection.js';
 
 const S = (kind, key, extra = {}) => ({ kind, key, name: key, has_art: false, ...extra });
@@ -214,6 +214,50 @@ describe('reporting', () => {
       .toBe('Queued 5 of 5');
   });
 
+  // SOMET-541: a kind refused after some other kind already queued must still
+  // report what went through, not just the failure.
+  it('states what queued before an error, when one is given', () => {
+    const s = enqueueSummary(
+      [{ requested: 3, queued: 3, already_live: 0, unknown: [] }],
+      new Error('item needs a 1024px provider'),
+    );
+    expect(s.message).toBe(
+      'Stopped after an error: item needs a 1024px provider. Queued 3 of 3 before it; the rest stay selected.',
+    );
+  });
+});
+
+describe('enqueueByKind', () => {
+  // A mixed object+tile selection sends one request per kind (byKind). An
+  // object kind refused at the enqueue-time size check (SOMET-541) must not
+  // also swallow a tile kind that queued successfully before it.
+  it('stops at the first failing kind but keeps the results before it', async () => {
+    const send = vi.fn()
+      .mockResolvedValueOnce({ kind: 'tile', requested: 1, queued: 1, already_live: 0, unknown: [] })
+      .mockRejectedValueOnce(new Error('item needs a 1024px provider'));
+    const grouped = byKind(new Set(['tile/grass', 'item/sword']));
+
+    const out = await enqueueByKind(grouped, send);
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(out.results).toEqual([{ kind: 'tile', requested: 1, queued: 1, already_live: 0, unknown: [] }]);
+    expect(out.error.message).toBe('item needs a 1024px provider');
+    expect(out.unsent).toEqual([['item', ['sword']]]);
+  });
+
+  it('resolves with no error and nothing unsent when every kind succeeds', async () => {
+    const send = vi.fn().mockResolvedValue({ requested: 1, queued: 1, already_live: 0, unknown: [] });
+    const grouped = byKind(new Set(['tile/grass']));
+
+    const out = await enqueueByKind(grouped, send);
+
+    expect(out.error).toBe(null);
+    expect(out.unsent).toEqual([]);
+    expect(out.results).toHaveLength(1);
+  });
+});
+
+describe('reporting (coverage)', () => {
   // Progress comes from the catalog, never a counter that can drift.
   it('coverage counts art and failures from the rows themselves', () => {
     const c = coverage([

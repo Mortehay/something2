@@ -102,15 +102,50 @@ describe('ArtConsoleAdmin: Queue N selected is single-flight', () => {
     expect(mutateAsync).toHaveBeenCalledTimes(1);
     expect(mutateAsync.mock.calls[0][0].byKind.get('skill')).toEqual(['a', 'b']);
 
-    finish([{ kind: 'skill', requested: 2, queued: 2, already_live: 0, unknown: [] }]);
+    finish({
+      results: [{ kind: 'skill', requested: 2, queued: 2, already_live: 0, unknown: [] }],
+      error: null,
+      unsent: [],
+    });
     await Promise.all([first, second]);
   });
 
   it('a click in a LATER tick, after the first settles, is sent', async () => {
-    mutateAsync.mockResolvedValue([{ kind: 'skill', requested: 1, queued: 1, already_live: 0, unknown: [] }]);
+    mutateAsync.mockResolvedValue({
+      results: [{ kind: 'skill', requested: 1, queued: 1, already_live: 0, unknown: [] }],
+      error: null,
+      unsent: [],
+    });
     const button = queueButton(renderWithSelection(['skill/a']));
     await button.props.onClick();
     await button.props.onClick();
     expect(mutateAsync).toHaveBeenCalledTimes(2);
+  });
+});
+
+// SOMET-541: a mixed-kind selection sends one request per kind, and an object
+// kind refused by the enqueue-time size check must not read as if the tile
+// kind that queued before it was lost too.
+describe('ArtConsoleAdmin: a refused kind keeps what queued before it', () => {
+  beforeEach(() => {
+    rt.slots = [];
+    mutateAsync.mockReset();
+  });
+
+  it('reports the stopping error, drops the kind that queued, keeps the refused kind selected', async () => {
+    mutateAsync.mockResolvedValue({
+      results: [{ kind: 'tile', requested: 1, queued: 1, already_live: 0, unknown: [] }],
+      error: new Error('item needs a 1024px provider'),
+      unsent: [['item', ['sword']]],
+    });
+    const button = queueButton(renderWithSelection(['tile/grass', 'item/sword']));
+    await button.props.onClick();
+
+    const text = textOf(render());
+    expect(text).toContain('Stopped after an error: item needs a 1024px provider');
+    expect(text).toContain('Queued 1 of 1 before it; the rest stay selected');
+
+    const idx = rt.slots.findIndex((v) => v instanceof Set);
+    expect([...rt.slots[idx]]).toEqual(['item/sword']);
   });
 });
