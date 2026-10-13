@@ -255,6 +255,11 @@ class DungeonBossManager {
     const kill = {
       entry, worldId, creatureId, killerUserId: killerUserId ?? null,
       entityName: rec.row.name, entityTypeId: rec.row.id ?? null, bossTier: rec.row.boss_tier,
+      // SOMET-611 (S10): the full catalog row, so onKilled can resolve the
+      // entity's loot profile (bossLoot.js's resolveLootProfile) without a
+      // second query -- this.loadRow already fetched it via
+      // ENTITY_CATALOG_SELECT, which now carries the four loot_* columns.
+      row: rec.row,
       level: c.level ?? 1,
       // The CENTRE of the boss's last position (a drop lands where it stood,
       // as loot.js's dropX = dead.x + size/2 does for a wild creature).

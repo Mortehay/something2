@@ -31,6 +31,7 @@ const { buildWorldGenConfig } = require('./services/worldGenConfig');
 const { loadTileTypes } = require('./services/tileTypes');
 const { ATTACK_KINDS, CHASE_STYLES, ELEMENTS } = require('./services/creatureBehaviors');
 const { ABILITIES_LATERAL, SKILLS_LATERAL, BOSS_TIERS } = require('./authority/creatures');
+const { RARITIES } = require('./authority/rarity');
 // SOMET-587: needed above (for the `specDir` test seam, declared alongside
 // __setPool) ahead of where the rest of this feature's imports sit.
 const { DEFAULT_SPEC_DIR } = require('./services/specFileLocator.js');
@@ -826,6 +827,23 @@ function entityTypeFieldError(body) {
       && (typeof body.behavior_id !== 'number' || !Number.isInteger(body.behavior_id))) {
     return 'behavior_id must be an integer';
   }
+  // SOMET-611 (S10): the four boss loot overrides. Each mirrors its DB
+  // constraint, same posture as boss_tier/hitbox_size/xp_reward/base_damage
+  // just above -- a bad value is a readable 400, never a raw 500 from the
+  // CHECK constraint the migration added.
+  if (body.loot_rolls != null && (!Number.isInteger(body.loot_rolls) || body.loot_rolls < 0)) {
+    return 'loot_rolls must be a non-negative integer';
+  }
+  if (body.loot_min_rarity != null && !RARITIES.includes(body.loot_min_rarity)) {
+    return `loot_min_rarity must be one of ${RARITIES.join(', ')} or null`;
+  }
+  if (body.loot_rarity_bias != null && (typeof body.loot_rarity_bias !== 'number'
+      || !Number.isFinite(body.loot_rarity_bias) || body.loot_rarity_bias < 0 || body.loot_rarity_bias > 0.9)) {
+    return 'loot_rarity_bias must be a number between 0 and 0.9';
+  }
+  if (body.loot_chest != null && typeof body.loot_chest !== 'boolean') {
+    return 'loot_chest must be a boolean or null';
+  }
   for (const field of ['display_width', 'display_height']) {
     const v = body[field];
     if (v == null) continue; // omitted or explicitly null -> renderer default
@@ -888,7 +906,8 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
       hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
       display_width, display_height, render_mode, is_creature, prompt, place_order,
       behavior_id, attack_element, point_kind,
-      boss_tier, element, hitbox_size, xp_reward, base_damage
+      boss_tier, element, hitbox_size, xp_reward, base_damage,
+      loot_rolls, loot_min_rarity, loot_rarity_bias, loot_chest
     } = req.body;
     if (!name || !color) return res.status(400).json({ error: 'Name and color are required' });
     if (catalogNameTooLong(name)) {
@@ -926,8 +945,9 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
         hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
         display_width, display_height, render_mode, is_creature, prompt, place_order,
         behavior_id, attack_element, ai_provider_mode, ai_provider_id, point_kind,
-        boss_tier, element, hitbox_size, xp_reward, base_damage, auras
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35::jsonb) RETURNING *`,
+        boss_tier, element, hitbox_size, xp_reward, base_damage, auras,
+        loot_rolls, loot_min_rarity, loot_rarity_bias, loot_chest
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35::jsonb, $36, $37, $38, $39) RETURNING *`,
       [
         name, color, walkable ?? false, JSON.stringify(spawn_tiles || []), chance ?? 0.1,
         strength ?? 0, dexterity ?? 0, constitution ?? 0, intelligence ?? 0, wisdom ?? 0, charisma ?? 0,
@@ -935,7 +955,8 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
         display_width, display_height, render_mode ?? 'rect', is_creature ?? false, prompt ?? '', Number(place_order) || 0,
         behavior_id ?? null, attack_element || 'physical', pin.mode, pin.id, point_kind ?? null,
         boss_tier ?? null, element ?? null, hitbox_size ?? null, xp_reward ?? null, base_damage ?? null,
-        req.body.auras == null ? null : JSON.stringify(req.body.auras)
+        req.body.auras == null ? null : JSON.stringify(req.body.auras),
+        loot_rolls ?? null, loot_min_rarity ?? null, loot_rarity_bias ?? null, loot_chest ?? null
       ]
     );
     res.status(201).json(result.rows[0]);
@@ -955,7 +976,8 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
     hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
     display_width, display_height, render_mode, is_creature, prompt, place_order,
     behavior_id, attack_element, point_kind,
-    boss_tier, element, hitbox_size, xp_reward, base_damage
+    boss_tier, element, hitbox_size, xp_reward, base_damage,
+    loot_rolls, loot_min_rarity, loot_rarity_bias, loot_chest
   } = req.body;
   if (catalogNameTooLong(name)) {
     return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
@@ -1156,8 +1178,15 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
         xp_reward = CASE WHEN $39::boolean THEN $40::integer ELSE entity_types.xp_reward END,
         base_damage = CASE WHEN $41::boolean THEN $42::real ELSE entity_types.base_damage END,
         auras = CASE WHEN $43::boolean THEN $44::jsonb ELSE entity_types.auras END,
+        -- SOMET-611 (S10): same present-in-body rule as boss_tier/element/
+        -- etc. above -- the admin form clears a loot override back to "use
+        -- tier default" by sending null, which a bare COALESCE would eat.
+        loot_rolls = CASE WHEN $45::boolean THEN $46::integer ELSE entity_types.loot_rolls END,
+        loot_min_rarity = CASE WHEN $47::boolean THEN $48::text ELSE entity_types.loot_min_rarity END,
+        loot_rarity_bias = CASE WHEN $49::boolean THEN $50::numeric ELSE entity_types.loot_rarity_bias END,
+        loot_chest = CASE WHEN $51::boolean THEN $52::boolean ELSE entity_types.loot_chest END,
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $45 RETURNING *`,
+      WHERE id = $53 RETURNING *`,
       [
         name, color, walkable, JSON.stringify(spawn_tiles), chance,
         strength, dexterity, constitution, intelligence, wisdom, charisma,
@@ -1194,8 +1223,16 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
         'hitbox_size' in req.body, hitbox_size ?? null,
         'xp_reward' in req.body, xp_reward ?? null,
         'base_damage' in req.body, base_damage ?? null,
-        // SOMET-604: auras last before id, same present-in-body rule.
+        // SOMET-604: auras, same present-in-body rule.
         aurasProvided, req.body.auras == null ? null : JSON.stringify(req.body.auras),
+        // SOMET-611 (S10): the four loot overrides, same present-in-body
+        // rule, last before id for the same reason every other provided-flag
+        // pair above sits before it -- entityTypes.test.js asserts `id` is
+        // `params[params.length - 1]` on this exact route.
+        'loot_rolls' in req.body, loot_rolls ?? null,
+        'loot_min_rarity' in req.body, loot_min_rarity ?? null,
+        'loot_rarity_bias' in req.body, loot_rarity_bias ?? null,
+        'loot_chest' in req.body, loot_chest ?? null,
         id
       ]
     );

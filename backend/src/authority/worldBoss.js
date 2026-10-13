@@ -15,6 +15,7 @@ const {
   hydrateCreatureRow, ENTITY_CATALOG_SELECT, CREATURE_SPEED, CREATURE_DAMAGE,
 } = require('./creatures.js');
 const { pushSfxEvent, bossSfx } = require('./sfxEvents.js');
+const { resolveLootProfile, spawnBossLootItems, spawnBossChest } = require('./bossLoot.js');
 
 const BOSS_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes between boss spawns
 const BOSS_WARNING_MS = 2 * 60 * 1000;    // 2 minutes warning before spawn
@@ -783,6 +784,33 @@ class WorldBossManager {
       itemOffset += 40;
     }
 
+    // SOMET-611 (S10, spec §3.7): "3 per damaging participant" -- EVERY
+    // contributor, not just the top3 who already received a guaranteed
+    // legendary above. `resolveLootProfile` reads the boss's own loot_*
+    // overrides off its catalog row (ENTITY_CATALOG_SELECT); a row with none
+    // set falls back to the 'world' tier default (3 rolls / yellow floor /
+    // 0.5 bias). `boss.row` is absent only in the defensive `boss = creature`
+    // fallback a few lines up (no live `this.currentBoss`) -- a bare
+    // `{boss_tier:'world'}` stand-in still resolves to the same tier default.
+    const lootRecipients = contributors.length > 0 ? contributors : recipients;
+    const lootProfile = resolveLootProfile(boss.row || { boss_tier: 'world' });
+    if (dbPool && lootProfile.rolls > 0) {
+      for (const rec of lootRecipients) {
+        try {
+          await spawnBossLootItems(dbPool, entry, {
+            entityTypeId: (boss.row && boss.row.id) ?? null,
+            behaviorId: (boss.row && boss.row.behavior_id) ?? null,
+            profile: lootProfile,
+            itemLevel: WORLD_BOSS_LEVEL,
+            x: cx,
+            y: cy,
+          });
+        } catch (err) {
+          console.error('Failed to roll world boss participant loot:', err);
+        }
+      }
+    }
+
     // Drop large gold pile at boss location
     if (dbPool && entry.goldItemTypeId) {
       try {
@@ -801,41 +829,42 @@ class WorldBossManager {
       }
     }
 
-    // 3. Spawn a Boss Victory Chest at the boss death location
-    if (dbPool) {
+    // 3. Spawn a Boss Victory Chest at the boss death location. SOMET-611
+    // (S10): this INSERT used to omit guard_entity_type_id, a NOT NULL FK
+    // with no default -- it has been failing silently (caught by the
+    // try/catch below, logged, nothing else) since the column was added.
+    // spawnBossChest fixes it by naming the defeated boss's OWN entity type
+    // as the guard (there is no live guard to point at instead), and its
+    // return is already in the camelCase shape broadcastChests/mapChestRow
+    // expect -- replacing the hand-built `bossChest` object below, which
+    // was missing `art` and used `guardCreatureIds` where fetchChests'
+    // reload of the same row would have produced `guardCreatureIds: []`
+    // from the jsonb column either way (cosmetically identical, now simply
+    // the one shared shape). loot_chest respects a per-boss override
+    // (lootProfile.chest) the same way the item rolls above do, rather than
+    // always spawning one regardless of the entity's own setting.
+    if (dbPool && lootProfile.chest) {
       try {
-        const chestRes = await dbPool.query(
-          `INSERT INTO world_chests (world_id, x, y, kind, guard_level, guard_creature_ids, state)
-           VALUES ($1, $2, $3, 'vault', 100, '[]'::jsonb, 'unlocked')
-           RETURNING id, x, y, kind, guard_level, guard_creature_ids, state, opened_at, respawn_at`,
-          [entry.worldId, cx, cy],
-        );
-        if (chestRes.rows && chestRes.rows.length) {
-          const row = chestRes.rows[0];
-          const bossChest = {
-            id: row.id,
-            x: Number(row.x),
-            y: Number(row.y),
-            kind: 'vault',
-            guardLevel: 100,
-            guardCreatureIds: [],
-            state: 'unlocked',
-            isBossChest: true,
-          };
-          if (!entry.chests) entry.chests = [];
-          entry.chests.push(bossChest);
-
-          // Fallback cleanup if chest is abandoned for 10 minutes
-          setTimeout(async () => {
-            try {
-              if (entry && entry.chests) {
-                entry.chests = entry.chests.filter((c) => c.id !== bossChest.id);
-                await dbPool.query('DELETE FROM world_chests WHERE id = $1', [bossChest.id]).catch(() => {});
-                if (broadcastChestsFn) broadcastChestsFn(entry);
-              }
-            } catch (_) {}
-          }, 10 * 60 * 1000);
-        }
+        const bossChest = await spawnBossChest(dbPool, entry, {
+          x: cx, y: cy, guardEntityTypeId: boss.row && boss.row.id, guardLevel: WORLD_BOSS_LEVEL,
+        });
+        // Fallback cleanup if chest is abandoned for 10 minutes. SOMET-611
+        // (S10): .unref() -- this timer has no business keeping the process
+        // alive on its own (a world boss kill is routine, not a shutdown-
+        // blocking operation), and without it a real-DB test that exercises
+        // this path (boss_loot_award_db.test.js) hangs the whole file for
+        // the full 10 minutes even though every assertion already passed --
+        // node --test's own `# fail` count does not surface a hang like
+        // this as a failure (AGENTS.md's "Reading a test run" / SOMET-530).
+        setTimeout(async () => {
+          try {
+            if (entry && entry.chests) {
+              entry.chests = entry.chests.filter((c) => c.id !== bossChest.id);
+              await dbPool.query('DELETE FROM world_chests WHERE id = $1', [bossChest.id]).catch(() => {});
+              if (broadcastChestsFn) broadcastChestsFn(entry);
+            }
+          } catch (_) {}
+        }, 10 * 60 * 1000).unref();
       } catch (err) {
         console.error('Failed to create Boss Victory Chest:', err);
       }
