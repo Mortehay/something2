@@ -1179,12 +1179,19 @@ export class RenderSystem {
       // Starts at 30% of full size (visible the instant it appears, not a
       // zero-radius dot) and grows to 100% exactly as the cast lands.
       const fillRx = rx * (0.3 + 0.7 * progress);
+      // SOMET-610 (S7): the skill's own vfx.telegraph binding tints the
+      // fill -- this geometry (a filled area that GROWS over telegraph_ms)
+      // has no equivalent among the 5 ordinary vfx_effects shapes
+      // (arc/line/ring/burst/bolt are all momentary swing effects), so the
+      // binding customises COLOR only; the fallback red keeps every
+      // existing/un-bound skill looking exactly as it did before this slice.
+      const color = (t.v && this.vfxDefs && this.vfxDefs[t.v] && this.vfxDefs[t.v].color) || "#ff4757";
       this.ctx.beginPath();
       this.ctx.ellipse(s.x, s.y, fillRx, fillRx / 2, 0, 0, Math.PI * 2);
-      this.ctx.fillStyle = "#ff4757";
+      this.ctx.fillStyle = color;
       this.ctx.globalAlpha = 0.18 + 0.32 * progress;
       this.ctx.fill();
-      this.ctx.strokeStyle = "#ff4757";
+      this.ctx.strokeStyle = color;
       this.ctx.lineWidth = 2;
       this.ctx.globalAlpha = 0.5 + 0.4 * progress;
       this.ctx.stroke();

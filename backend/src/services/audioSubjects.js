@@ -207,6 +207,30 @@ const SUBJECT_KINDS = {
       return out;
     },
   },
+  // SOMET-610 (S7, spec §3.6). A creature SKILL's own telegraph/cast/hit
+  // moments -- keyed by skill NAME (creature_skills.name, unique, same
+  // shape `aura` keys on), never the caster's creature type: the same
+  // skill (e.g. Magma Slam) is bound to several different creatures at
+  // different power_scale, and its sound is a property of the SKILL, not
+  // of whoever is currently casting it. All three slots are genuine
+  // one-shot sfx (not a loop/ambience, unlike aura's `loop`/`pulse` --
+  // see the S5-era fix note on that), so this does NOT repeat that
+  // mistake; they stay upload-only (no box cue) by default, same posture
+  // as creature's own boss slots (spawn/presence/phase/enrage).
+  creature_skill: {
+    label: 'Creature Skills',
+    slots: { telegraph: 'sfx', use: 'sfx', hit: 'sfx' },
+    cues: { telegraph: null, use: null, hit: null },
+    list: async (db) => (await db.query('SELECT name FROM creature_skills ORDER BY name')).rows.map((r) => r.name),
+    exists: async (db, keys) => new Set((await db.query(
+      'SELECT name FROM creature_skills WHERE name = ANY($1::text[])', [keys])).rows.map((r) => r.name)),
+    subjectCues: async (db) => {
+      const names = await SUBJECT_KINDS.creature_skill.list(db);
+      const out = {};
+      for (const n of names) out[n] = { ...SUBJECT_KINDS.creature_skill.cues };
+      return out;
+    },
+  },
 };
 
 // Every kind whose bindings are global rather than scoped to one world/biome

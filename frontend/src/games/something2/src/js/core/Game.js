@@ -1641,12 +1641,29 @@ export class Game {
         // this call -- a bad event is silence plus one warning, same
         // contract as every other clip lookup in that module.
         if (this.audio) {
-            this.audio.playSfxEvents(msg.sfx || [], {
+            const sfx = msg.sfx || [];
+            // SOMET-610 (S7): the live cross-reference sfxPriority needs to
+            // tell a boss's skill_telegraph/_cast/_hit from an ordinary
+            // creature's (those three event names are not boss-exclusive
+            // the way spawn/phase/enrage are -- see sfxResolve.js's own
+            // comment). Built only when there is something to resolve: a
+            // quiet tick (the overwhelming majority) never pays for it,
+            // unlike tickNearby's own `if (c.bossTier)` scan a few lines up,
+            // which already runs on its own 250ms cadence regardless.
+            let bossActorIds;
+            if (sfx.length > 0) {
+                bossActorIds = new Set();
+                for (const c of this.creatures.creatures.values()) {
+                    if (c.bossTier) bossActorIds.add(`c:${c.id}`);
+                }
+            }
+            this.audio.playSfxEvents(sfx, {
                 listener: {
                     x: this.player.x + (this.player.width || 0) / 2,
                     y: this.player.y + (this.player.height || 0) / 2,
                 },
                 ownActor: `p:${this.localUserId}`,
+                bossActorIds,
             });
         }
     }

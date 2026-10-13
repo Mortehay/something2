@@ -72,4 +72,28 @@ describe("skill telegraph rendering (SOMET-608)", () => {
     rs._drawTelegraphs([telegraph(), telegraph({ x: 100 }), telegraph({ x: 200 })]);
     expect(calls.filter((c) => c.op === "ellipse").length).toBe(3);
   });
+
+  // SOMET-610 (S7): the skill's own vfx.telegraph binding tints the fill --
+  // the hardcoded red stays the fallback for every un-bound skill, not the
+  // only color there ever was.
+  it("tints fill AND stroke with the bound vfx's color when `v` resolves in vfxDefs", () => {
+    const { rs, calls } = setup();
+    rs.vfxDefs = { fireball_blast: { color: "#ff6b35" } };
+    rs._drawTelegraphs([telegraph({ v: "fireball_blast" })]);
+    expect(calls.find((c) => c.op === "fill").color).toBe("#ff6b35");
+    expect(calls.find((c) => c.op === "stroke").color).toBe("#ff6b35");
+  });
+
+  it("falls back to the hardcoded red when `v` is null, unresolved, or vfxDefs isn't loaded", () => {
+    for (const { v, vfxDefs } of [
+      { v: null, vfxDefs: { fireball_blast: { color: "#ff6b35" } } },
+      { v: "nonexistent_effect", vfxDefs: { fireball_blast: { color: "#ff6b35" } } },
+      { v: "fireball_blast", vfxDefs: undefined },
+    ]) {
+      const { rs, calls } = setup();
+      if (vfxDefs) rs.vfxDefs = vfxDefs;
+      rs._drawTelegraphs([telegraph({ v })]);
+      expect(calls.find((c) => c.op === "fill").color).toBe("#ff4757");
+    }
+  });
 });

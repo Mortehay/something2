@@ -30,6 +30,11 @@ export function telegraphsFromFrame(msg) {
     out.push({
       creatureId: t.creatureId != null ? String(t.creatureId) : null,
       skill: typeof t.skill === 'string' ? t.skill : null,
+      // SOMET-610 (S7): the vfx binding's resolved NAME (server-resolved,
+      // same reason every other vfx name arrives resolved rather than as a
+      // raw binding -- the client holds no creature_skills catalog). null
+      // when the skill set none; the renderer keeps its own default then.
+      v: typeof t.v === 'string' ? t.v : null,
       x, y, radius,
       // Remaining lifetime, for the fill progress. Clamped rather than
       // trusted -- a negative or NaN would invert or delete the draw, the

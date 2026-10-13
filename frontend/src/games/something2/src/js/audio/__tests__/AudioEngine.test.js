@@ -143,6 +143,55 @@ describe('AudioEngine', () => {
     expect(sources[1].buffer.tag).toBe('u:sword.ogg');
   });
 
+  // SOMET-610 (S7): a creature skill's telegraph/cast/hit is NOT a
+  // boss-exclusive event name (an ordinary creature casts a scaled-down kit
+  // too), so its priority depends on a live cross-reference against
+  // `bossActorIds`, not the event tuple alone -- mirrors the SOMET-605 boss
+  // phase test above, but for a name the caller must look up rather than
+  // read straight off the event.
+  it('SOMET-610: a boss skill cast holds its voice against creature chatter only when its actor is in bossActorIds', async () => {
+    const { engine, sources } = engineWith({
+      'creature_skill/Magma Slam/use': [{ key: 'magma-slam.ogg', volume: 1, weight: 1 }],
+      'creature/slime/hurt': [{ key: 'slime-hurt.ogg', volume: 1, weight: 1 }],
+    });
+    engine.unlock();
+    engine.sfxLimiter.maxVoices = 1;
+    const opts = { listener: { x: 0, y: 0 }, ownActor: 'p:1', bossActorIds: new Set(['c:wb_1']) };
+    engine.playSfxEvents([{ e: 'skill_cast', s: 'Magma Slam', a: 'c:wb_1', x: 900, y: 0 }], opts);
+    await flush(); await flush();
+    expect(sources.map((s) => s.buffer.tag)).toEqual(['u:magma-slam.ogg']);
+
+    // Creature chatter must not evict it -- same rule as a real boss event.
+    engine.playSfxEvents([{ e: 'hurt', c: 'slime', x: 0, y: 0 }], opts);
+    await flush(); await flush();
+    expect(sources.length).toBe(1);
+    expect(sources[0].stopped).toBe(false);
+  });
+
+  it("SOMET-610: the same skill cast from a non-boss actor (or with no bossActorIds) is ordinary 'nearest' priority, and loses contention to creature chatter", async () => {
+    const { engine, sources } = engineWith({
+      'creature_skill/Magma Slam/use': [{ key: 'magma-slam.ogg', volume: 1, weight: 1 }],
+      'creature/slime/hurt': [{ key: 'slime-hurt.ogg', volume: 1, weight: 1 }],
+    });
+    engine.unlock();
+    engine.sfxLimiter.maxVoices = 1;
+    const bossActorIds = new Set(['c:wb_1']); // present, but this actor isn't in it
+    engine.playSfxEvents(
+      [{ e: 'skill_cast', s: 'Magma Slam', a: 'c:fire_guard_1', x: 900, y: 0 }], // held 'nearest', far
+      { listener: { x: 0, y: 0 }, ownActor: 'p:1', bossActorIds },
+    );
+    await flush(); await flush();
+    expect(sources.length).toBe(1);
+
+    engine.playSfxEvents(
+      [{ e: 'hurt', c: 'slime', x: 0, y: 0 }], // newcomer 'nearest', strictly closer -- bumps it
+      { listener: { x: 0, y: 0 }, ownActor: 'p:1', bossActorIds },
+    );
+    await flush(); await flush();
+    expect(sources[0].stopped).toBe(true); // bumped, since it was only 'nearest'
+    expect(sources[1].buffer.tag).toBe('u:slime-hurt.ogg');
+  });
+
   it('mute and volumes drive the master and bus gains', () => {
     const { engine } = engineWith({});
     engine.setVolumes({ master: 0.5, music: 0.2, ambience: 1, sfx: 1, muted: true });
