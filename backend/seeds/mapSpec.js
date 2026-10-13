@@ -882,8 +882,12 @@ function validateMapSpec(spec, {
       }
       // Art bindings (SOMET-580): a portal's own art applies to both rows of
       // the pair (one entity type, two doorway rows), while waypoint_art is
-      // only meaningful once the staircase IS a waypoint.
+      // only meaningful once the staircase IS a waypoint. SOMET-586: to_art is
+      // the optional per-side override for the arrival/mirror row only -- same
+      // checkArt rule (entity-type-exists + point_kind-match) as art, since
+      // both name a portal-kind entity type.
       checkArt(l.art, 'portal', `portal link ${l.from}->${l.to} art`);
+      checkArt(l.to_art, 'portal', `portal link ${l.from}->${l.to} to_art`);
       if (l.waypoint_art !== undefined && l.is_waypoint !== true) {
         errors.push(`portal link ${l.from}->${l.to} waypoint_art requires is_waypoint: true`);
       } else {

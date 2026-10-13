@@ -76,10 +76,15 @@ async function applyPointArt(client, spec, idByKey) {
   for (const l of links) {
     if (l.kind !== 'portal') continue;
     const typeId = idFor(l.art, 'portal', `portal link ${l.from}->${l.to} art`);
+    // SOMET-586: to_art overrides the arrival/mirror row only (a dungeon
+    // mouth and its inside can want different art); `to_art ?? art` keeps
+    // both rows on the same type, the pre-586 behaviour, whenever a spec
+    // leaves to_art unset.
+    const toTypeId = idFor(l.to_art ?? l.art, 'portal', `portal link ${l.from}->${l.to} to_art`);
     const sql = `UPDATE map_links SET entity_type_id = $4
                   WHERE from_world_id = $1 AND edge = 'PORTAL' AND from_x = $2 AND from_y = $3`;
     await client.query(sql, [idByKey.get(l.from), l.from_x, l.from_y, typeId]);
-    await client.query(sql, [idByKey.get(l.to), l.to_x, l.to_y, typeId]);
+    await client.query(sql, [idByKey.get(l.to), l.to_x, l.to_y, toTypeId]);
     n.portals += 1;
     if (l.is_waypoint === true) {
       const wpId = idFor(l.waypoint_art, 'waypoint', `portal link ${l.from}->${l.to} waypoint_art`);

@@ -71,6 +71,41 @@ test('waypoint_art without is_waypoint is rejected; with it, kind waypoint is re
   assert.match(artErrors(s)[0], /waypoint_art "stone_gate" is not an entity type of point kind "waypoint"/);
 });
 
+// SOMET-586: to_art overrides the arrival row only, but is validated the
+// same way as art (same checkArt rule: entity-type-exists + point_kind-match).
+test('a portal to_art of the right kind passes alongside art', () => {
+  const s = base();
+  s.links[0].art = 'portal';
+  s.links[0].to_art = 'stone_gate';
+  assert.deepStrictEqual(artErrors(s), []);
+});
+
+test('a to_art of another kind is rejected naming the link and the kind', () => {
+  const s = base();
+  s.links[0].to_art = 'pine_tree';
+  const errs = artErrors(s);
+  assert.strictEqual(errs.length, 1);
+  assert.match(errs[0], /portal link a->b to_art "pine_tree" is not an entity type of point kind "portal"/);
+});
+
+test('an unknown to_art name is rejected', () => {
+  const s = base();
+  s.links[0].to_art = 'no_such_type';
+  assert.match(artErrors(s)[0], /portal link a->b to_art "no_such_type" is not an entity type of point kind "portal"/);
+});
+
+test('a non-string to_art is a shape error even with no catalog', () => {
+  const s = base();
+  s.links[0].to_art = 7;
+  assert.match(artErrors(s, null)[0], /portal link a->b to_art must be an entity type name/);
+});
+
+test('to_art alone (no art) is accepted -- art stays unbound, to_art binds the arrival row', () => {
+  const s = base();
+  s.links[0].to_art = 'stone_gate';
+  assert.deepStrictEqual(artErrors(s), []);
+});
+
 test('a non-string art is a shape error even with no catalog', () => {
   const s = base();
   s.links[0].art = 7;

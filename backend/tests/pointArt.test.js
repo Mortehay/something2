@@ -55,6 +55,10 @@ const TYPE_ROWS = [
   { id: 2, name: 'waypoint_stone', point_kind: 'waypoint' },
   { id: 3, name: 'merchant_post', point_kind: 'merchant' },
   { id: 4, name: 'chest_vault', point_kind: 'chest_vault' },
+  // Second portal-kind type (SOMET-586): to_art needs a distinct art name of
+  // the SAME kind as art to prove the two rows end up different, not just
+  // that a kind mismatch was rejected.
+  { id: 5, name: 'cave_mouth', point_kind: 'portal' },
 ];
 const idByKey = new Map([['a', 'wid-a'], ['b', 'wid-b']]);
 
@@ -74,6 +78,43 @@ test('applyPointArt writes both rows of a portal pair and NULLs an unbound porta
     ['wid-a', 950, 950, null], ['wid-b', 1550, 1550, null],
   ]);
   for (const w of portalWrites) assert.match(w.sql, /edge = 'PORTAL'/);
+});
+
+// SOMET-586: to_art overrides the arrival/mirror row only.
+test('applyPointArt resolves to_art onto the arrival row only, keeping the departure row on art', async () => {
+  const client = capturingClient(TYPE_ROWS);
+  const spec = { worlds: [{ key: 'a' }, { key: 'b' }], links: [
+    { kind: 'portal', from: 'a', to: 'b', from_x: 550, from_y: 1550, to_x: 550, to_y: 550,
+      art: 'stone_gate', to_art: 'cave_mouth' },
+  ] };
+  await applyPointArt(client, spec, idByKey);
+  const portalWrites = client.writes.filter((w) => /UPDATE map_links/.test(w.sql));
+  assert.deepStrictEqual(portalWrites.map((w) => w.params), [
+    ['wid-a', 550, 1550, 1], // departure keeps `art` (stone_gate, id 1)
+    ['wid-b', 550, 550, 5],  // arrival gets `to_art` (cave_mouth, id 5)
+  ]);
+});
+
+test('applyPointArt falls both rows back to art when to_art is absent', async () => {
+  const client = capturingClient(TYPE_ROWS);
+  const spec = { worlds: [{ key: 'a' }, { key: 'b' }], links: [
+    { kind: 'portal', from: 'a', to: 'b', from_x: 550, from_y: 1550, to_x: 550, to_y: 550, art: 'stone_gate' },
+  ] };
+  await applyPointArt(client, spec, idByKey);
+  const portalWrites = client.writes.filter((w) => /UPDATE map_links/.test(w.sql));
+  assert.deepStrictEqual(portalWrites.map((w) => w.params), [
+    ['wid-a', 550, 1550, 1],
+    ['wid-b', 550, 550, 1],
+  ]);
+});
+
+test('applyPointArt throws on a to_art of the wrong kind rather than binding it', async () => {
+  const client = capturingClient(TYPE_ROWS);
+  const spec = { worlds: [{ key: 'a' }, { key: 'b' }],
+    links: [{ kind: 'portal', from: 'a', to: 'b', from_x: 1, from_y: 1, to_x: 2, to_y: 2,
+      art: 'stone_gate', to_art: 'merchant_post' }] };
+  await assert.rejects(() => applyPointArt(client, spec, idByKey), /"merchant_post" is not a portal type/);
+  assert.strictEqual(client.writes.length, 0);
 });
 
 test('applyPointArt binds waypoints by name (both authoring routes)', async () => {
