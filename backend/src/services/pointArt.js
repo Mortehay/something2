@@ -44,11 +44,16 @@ async function loadPointKindDefaults(db) {
   return new Map(r.rows.filter((row) => row.name).map((row) => [row.kind, row.name]));
 }
 
-async function loadPointTypeNames(db) {
+async function loadPointTypeRows(db) {
   const r = await db.query(
-    'SELECT name, point_kind FROM entity_types WHERE point_kind IS NOT NULL ORDER BY id ASC',
+    'SELECT id, name, point_kind FROM entity_types WHERE point_kind IS NOT NULL ORDER BY id ASC',
   );
-  return new Map(r.rows.map((row) => [row.name, row.point_kind]));
+  return r.rows;
+}
+
+async function loadPointTypeNames(db) {
+  const rows = await loadPointTypeRows(db);
+  return new Map(rows.map((row) => [row.name, row.point_kind]));
 }
 
 // Seed convergence. `idByKey` is seed-map's Map<world key, world id>. Runs
@@ -57,8 +62,7 @@ async function loadPointTypeNames(db) {
 // row itself and only returns the forward id.
 async function applyPointArt(client, spec, idByKey) {
   const types = new Map(
-    (await client.query('SELECT id, name, point_kind FROM entity_types WHERE point_kind IS NOT NULL')).rows
-      .map((r) => [r.name, { id: r.id, kind: r.point_kind }]),
+    (await loadPointTypeRows(client)).map((r) => [r.name, { id: r.id, kind: r.point_kind }]),
   );
   // Validated up front so a bad spec writes nothing (the caller's transaction
   // would roll back anyway; this keeps the error at the first bad name).
@@ -106,11 +110,14 @@ async function applyPointArt(client, spec, idByKey) {
     }
     if (w.chest) {
       const chestId = idFor(w.chest.art, 'chest_vault', `world "${w.key}" chest art`);
-      await client.query(
+      // n.chests counts rows actually written, not specs that named a chest --
+      // a world with no vault chest row (or one already removed) would
+      // otherwise inflate the count with an UPDATE that touched nothing.
+      const result = await client.query(
         `UPDATE world_chests SET entity_type_id = $2 WHERE world_id = $1 AND kind = 'vault'`,
         [idByKey.get(w.key), chestId],
       );
-      n.chests += 1;
+      n.chests += result.rowCount || 0;
     }
   }
   return n;

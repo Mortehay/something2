@@ -42,4 +42,12 @@ describe('defaultButtonState', () => {
     const s = defaultButtonState({ pointKind: 'waypoint', entityId: 9, kinds });
     expect(s.label).toBe('Make default for waypoint (currently: none)');
   });
+  it('disables (but still shows) the button when the form kind has not been saved yet', () => {
+    const s = defaultButtonState({ pointKind: 'portal', savedPointKind: 'waypoint', entityId: 9, kinds });
+    expect(s).toEqual({ visible: true, disabled: true, label: 'Make default for portal (currently: portal)' });
+  });
+  it('is not disabled by savedPointKind once it matches the live form value', () => {
+    const s = defaultButtonState({ pointKind: 'portal', savedPointKind: 'portal', entityId: 9, kinds });
+    expect(s.disabled).toBe(false);
+  });
 });

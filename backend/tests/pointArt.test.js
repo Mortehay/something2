@@ -101,6 +101,25 @@ test('applyPointArt writes all four village columns keyed by spec_key, and the v
   assert.deepStrictEqual(ch.map((w) => w.params), [['wid-a', 4], ['wid-b', null]]);
 });
 
+test('applyPointArt does not count a chest UPDATE that matched no row', async () => {
+  // SOMET-588: n.chests used to increment unconditionally per spec'd chest,
+  // even when the world has no vault chest row (or it already left the
+  // database) and the UPDATE touched nothing.
+  const writes = [];
+  const client = {
+    query: async (sql, params) => {
+      if (/SELECT id, name, point_kind FROM entity_types/.test(sql)) return { rows: TYPE_ROWS };
+      writes.push({ sql: sql.replace(/\s+/g, ' ').trim(), params });
+      if (/UPDATE world_chests/.test(sql)) return { rowCount: 0, rows: [] };
+      return { rowCount: 1, rows: [] };
+    },
+  };
+  const spec = { worlds: [{ key: 'a', chest: { x: 1, y: 1, art: 'chest_vault' } }], links: [] };
+  const n = await applyPointArt(client, spec, idByKey);
+  assert.strictEqual(n.chests, 0);
+  assert.strictEqual(writes.filter((w) => /UPDATE world_chests/.test(w.sql)).length, 1);
+});
+
 test('applyPointArt throws on a name of the wrong kind rather than binding it', async () => {
   const client = capturingClient(TYPE_ROWS);
   const spec = { worlds: [{ key: 'a' }, { key: 'b' }],

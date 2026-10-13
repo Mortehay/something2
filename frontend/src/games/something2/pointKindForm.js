@@ -17,7 +17,13 @@ export function pointKindPayload(formData) {
   return { point_kind: typeof k === 'string' && k !== '' ? k : null };
 }
 
-export function defaultButtonState({ pointKind, entityId, kinds }) {
+// savedPointKind is the entity's point_kind as last persisted (editingEntity),
+// separate from pointKind (the form's live value). When they differ, the
+// server does not yet know this entity as a member of pointKind -- clicking
+// the button would ask for a default pointing at a type the kind's own FK
+// check does not (yet) recognize as one. Omitted entirely (not passed), the
+// check is skipped -- callers that don't track an unsaved edit still work.
+export function defaultButtonState({ pointKind, savedPointKind, entityId, kinds }) {
   if (!pointKindHidesWorldFields(pointKind) || entityId == null) {
     return { visible: false, disabled: true, label: '' };
   }
@@ -27,5 +33,9 @@ export function defaultButtonState({ pointKind, entityId, kinds }) {
     return { visible: true, disabled: true, label: `Default for ${pointKind}` };
   }
   const current = row && row.default_name ? row.default_name : 'none';
-  return { visible: true, disabled: false, label: `Make default for ${pointKind} (currently: ${current})` };
+  const label = `Make default for ${pointKind} (currently: ${current})`;
+  if (savedPointKind !== undefined && savedPointKind !== pointKind) {
+    return { visible: true, disabled: true, label };
+  }
+  return { visible: true, disabled: false, label };
 }

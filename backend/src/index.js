@@ -204,6 +204,16 @@ function isUniqueViolation(err) {
   return !!err && err.code === '23505';
 }
 
+// entity_types.point_kind FK violation (world_point_kinds), surfaced as a 400
+// naming the bad kind instead of the generic 500 catch-all. Shared by the
+// POST and PUT entity-types routes' catch blocks.
+function pointKindForeignKeyError(err, pointKind) {
+  if (err && err.code === '23503' && /point_kind/.test(err.constraint || '')) {
+    return `unknown point_kind "${pointKind}"`;
+  }
+  return null;
+}
+
 // A route param destined for an `id` (integer, serial-PK) column. Express
 // hands every :id through as a string with no type coercion, so a
 // non-numeric value (or a float like "1.5") used to reach Postgres as-is and
@@ -911,9 +921,8 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    if (err.code === '23503' && /point_kind/.test(err.constraint || '')) {
-      return res.status(400).json({ error: `unknown point_kind "${req.body.point_kind}"` });
-    }
+    const pkErr = pointKindForeignKeyError(err, req.body.point_kind);
+    if (pkErr) return res.status(400).json({ error: pkErr });
     console.error(err);
     res.status(500).json({ error: 'Failed to create entity type' });
   }
@@ -1195,9 +1204,8 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
     res.json(body);
   } catch (err) {
     await client?.query('ROLLBACK').catch(() => {});
-    if (err.code === '23503' && /point_kind/.test(err.constraint || '')) {
-      return res.status(400).json({ error: `unknown point_kind "${req.body.point_kind}"` });
-    }
+    const pkErr = pointKindForeignKeyError(err, req.body.point_kind);
+    if (pkErr) return res.status(400).json({ error: pkErr });
     console.error(err);
     res.status(500).json({ error: 'Failed to update entity type' });
   } finally {
@@ -2447,6 +2455,12 @@ app.get('/api/world-point-kinds', async (req, res) => {
 
 app.put('/api/world-point-kinds/:kind', adminGuard, async (req, res) => {
   const { kind } = req.params;
+  // A body that omits the key entirely used to fall through `typeId != null`
+  // (undefined == null) and clear the default silently. The field is
+  // mandatory on this route -- use an explicit null to clear it.
+  if (!('default_entity_type_id' in req.body)) {
+    return res.status(400).json({ error: 'default_entity_type_id is required (use null to clear)' });
+  }
   const { default_entity_type_id: typeId } = req.body;
   if (typeId != null && !Number.isInteger(typeId)) {
     return res.status(400).json({ error: 'default_entity_type_id must be an integer or null' });
