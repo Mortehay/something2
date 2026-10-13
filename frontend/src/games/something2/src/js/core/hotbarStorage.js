@@ -2,7 +2,7 @@
 // Client-side persistence for character skill hotbar assignments (slots 1-9).
 // Stored per-character in localStorage: `something2.hotbar.${characterId}`
 
-import { getSkillById } from './skillsData.js';
+import { getSkillById, canonicalizeSkillId } from './skillsData.js';
 
 export const HOTBAR_STORAGE_PREFIX = 'something2.hotbar.';
 export const UNLOCKED_SKILLS_PREFIX = 'something2.unlocked_skills.';
@@ -46,7 +46,10 @@ export function loadUnlockedSkillsForCharacter(characterId) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
         for (const id of parsed) {
-          if (typeof id === 'string') result.add(id);
+          // SOMET-618: a gem unlocked before the plague_globule ->
+          // cul_plague_globule rename is still stored under the old id --
+          // normalize on read so ownership isn't silently lost.
+          if (typeof id === 'string') result.add(canonicalizeSkillId(id));
         }
         return result;
       }
