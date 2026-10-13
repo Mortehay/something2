@@ -721,17 +721,25 @@ or biome -- every world plays them):
 
 | Kind | Key | Slots → box cue |
 |---|---|---|
-| `creature` | entity type name (`Slime`) | `nearby` → —, `attack` → —, `hurt` → `hit`, `death` → `death` |
+| `creature` | entity type name (`Slime`) | `nearby` → `idle`, `attack` → `attack`, `hurt` → `hit`, `death` → `death`; a boss row's own `spawn`/`presence`/`phase`/`enrage` → — |
 | `world_point` | entity type name (`portal`, `merchant_post`, ...) | `nearby` → `waypoint` |
-| `attack_type` | `melee` / `ranged` / `magic` | melee `use` → `slash`, ranged `use` → —, magic `use` → `spell`; `hit` → `hit` for all three |
+| `attack_type` | `melee` / `ranged` / `magic` | melee `use` → `slash`, ranged `use` → `shoot`, magic `use` → `spell`; `hit` → `hit` for all three |
 | `item` | weapon name | as its weapon's attack type |
 | `skill` | skill id | `use` → `slash` for a melee skill, `spell` otherwise; `hit` → `hit` |
 
-A slot marked — has no cue on the box today (there is no idle, creature-attack
-or bow-release cue), so it is **upload-only**: the slot card says so, the
-Generate button is hidden, and its checkbox in the slot table is disabled
-(it counts as *Missing* but can never be selected or queued). Upload an OGG for it
-by hand or bind one from the library. A weapon's attack type is decided from
+SOMET-627 gave creature `nearby`/`attack` and `attack_type` ranged `use` the
+cue names spec §4 originally suggested for them (`idle`/`attack`/`shoot`) --
+the registry's slot → cue map is data, so this was a one-line change there,
+same as any other cue. The box itself may not have reported one of these cues
+yet: the active provider's own discovered cue list (`models_cache`, from
+Refresh) is still checked before any of these slots is actually sent, so a
+provider that has not reported e.g. `cue:idle` still shows the slot as
+upload-only, correctly. A slot marked — above has no cue in the registry at
+all (today, only a boss row's own spawn/presence/phase/enrage slots), so it is
+**always upload-only**: the slot card says so, the Generate button is hidden,
+and its checkbox in the slot table is disabled (it counts as *Missing* but
+can never be selected or queued). Upload an OGG for it by hand or bind one
+from the library. A weapon's attack type is decided from
 the catalog row: a socketed stone or augment → magic, `kind = 'melee'` →
 melee, an `ammo_type_id` or a bow-category name → ranged, anything else →
 magic.

@@ -184,7 +184,11 @@ test('audio job routes', { skip }, async (t) => {
       // (no cue on the box) is rejected, and the optional per-item engine
       // picks the drain group. attack_type is a fixed catalog (melee/ranged/
       // magic) needing no row of its own; the jobs made here are deleted by
-      // id straight after.
+      // id straight after. attack_type/ranged/use now HAS a cue ('shoot',
+      // SOMET-627) and queues like any other sfx slot; 'Ignis, the Magma
+      // Colossus' presence (a boss-only slot with no cue at all, a real
+      // seeded row shared with audio_boss_slots_db.test.js) stands in as the
+      // still-upload-only example instead.
       await t.test('enqueue: sfx slots queue by engine; an upload-only slot and a bad engine are rejected', async () => {
         const res = await request(app).post('/api/audio/admin/jobs').set('Authorization', bearer(admin)).send({
           items: [
@@ -192,6 +196,7 @@ test('audio job routes', { skip }, async (t) => {
             { subject_kind: 'attack_type', subject_key: 'magic', slot: 'hit' },
             { subject_kind: 'attack_type', subject_key: 'ranged', slot: 'use' },
             { subject_kind: 'attack_type', subject_key: 'ranged', slot: 'hit', engine: 'lofi' },
+            { subject_kind: 'creature', subject_key: 'Ignis, the Magma Colossus', slot: 'presence' },
           ],
         });
         try {
@@ -199,7 +204,7 @@ test('audio job routes', { skip }, async (t) => {
           const byKey = Object.fromEntries(res.body.queued.map((j) => [`${j.subject_key}/${j.slot}`, j]));
           // Strict: no other test file enqueues attack_type jobs, and this
           // body holds AUDIO_JOBS_LOCK_KEY.
-          assert.deepEqual(Object.keys(byKey).sort(), ['magic/hit', 'melee/use'], JSON.stringify(res.body));
+          assert.deepEqual(Object.keys(byKey).sort(), ['magic/hit', 'melee/use', 'ranged/use'], JSON.stringify(res.body));
           assert.deepEqual(
             [byKey['melee/use'].clip_kind, byKey['melee/use'].drain_group, byKey['melee/use'].engine],
             ['sfx', 'sfx_retro', 'retro'],
@@ -208,9 +213,13 @@ test('audio job routes', { skip }, async (t) => {
             [byKey['magic/hit'].drain_group, byKey['magic/hit'].engine],
             ['sfx_realistic', 'realistic'], 'no engine -> realistic',
           );
+          assert.deepEqual(
+            [byKey['ranged/use'].clip_kind, byKey['ranged/use'].drain_group, byKey['ranged/use'].engine],
+            ['sfx', 'sfx_realistic', 'realistic'], 'SOMET-627: ranged/use now queues like any other sfx slot',
+          );
           assert.deepEqual(res.body.rejected.map((r) => [r.item.subject_key, r.item.slot, r.error]), [
-            ['ranged', 'use', 'upload only: no cue on the provider'],
             ['ranged', 'hit', "engine must be 'realistic' or 'retro'"],
+            ['Ignis, the Magma Colossus', 'presence', 'upload only: no cue on the provider'],
           ]);
         } finally {
           const ids = (res.body.queued || []).map((j) => j.id);
