@@ -73,7 +73,7 @@ function catalogHandlers() {
     // UNRELATED error, which is not what any of them are testing.
     [/SELECT name FROM entity_types WHERE is_creature = true/i, () => ({ rows: [{ name: 'Wolf' }] })],
     [/SELECT name, boss_tier FROM entity_types WHERE is_creature = true AND boss_tier IS NOT NULL/i, () => ({ rows: [] })],
-    [/SELECT name, point_kind FROM entity_types WHERE point_kind IS NOT NULL/i, () => ({ rows: [
+    [/SELECT id, name, point_kind FROM entity_types WHERE point_kind IS NOT NULL/i, () => ({ rows: [
       { name: 'stone_gate', point_kind: 'portal' },
       { name: 'waypoint_stone', point_kind: 'waypoint' },
       { name: 'merchant_post', point_kind: 'merchant' },
@@ -161,7 +161,7 @@ test('PUT /api/map-links/:id/art: setting the ARRIVAL side to a name distinct fr
     [/SELECT name, creature_types FROM biomes/i, () => ({ rows: [{ name: 'meadow', creature_types: [] }] })],
     [/SELECT name FROM entity_types WHERE is_creature = true/i, () => ({ rows: [{ name: 'Wolf' }] })],
     [/SELECT name, boss_tier FROM entity_types WHERE is_creature = true AND boss_tier IS NOT NULL/i, () => ({ rows: [] })],
-    [/SELECT name, point_kind FROM entity_types WHERE point_kind IS NOT NULL/i, () => ({ rows: [
+    [/SELECT id, name, point_kind FROM entity_types WHERE point_kind IS NOT NULL/i, () => ({ rows: [
       { name: 'stone_gate', point_kind: 'portal' },
       { name: 'dungeon_door', point_kind: 'portal' },
     ] })],
@@ -196,7 +196,7 @@ test('PUT /api/map-links/:id/art: setting the ARRIVAL side back to the SAME name
     [/SELECT name, creature_types FROM biomes/i, () => ({ rows: [{ name: 'meadow', creature_types: [] }] })],
     [/SELECT name FROM entity_types WHERE is_creature = true/i, () => ({ rows: [{ name: 'Wolf' }] })],
     [/SELECT name, boss_tier FROM entity_types WHERE is_creature = true AND boss_tier IS NOT NULL/i, () => ({ rows: [] })],
-    [/SELECT name, point_kind FROM entity_types WHERE point_kind IS NOT NULL/i, () => ({ rows: [
+    [/SELECT id, name, point_kind FROM entity_types WHERE point_kind IS NOT NULL/i, () => ({ rows: [
       { name: 'stone_gate', point_kind: 'portal' },
       { name: 'dungeon_door', point_kind: 'portal' },
     ] })],
@@ -295,7 +295,7 @@ test('PUT /api/map-links/:id/art: aborts with 400 and touches neither the file n
     [/SELECT name, creature_types FROM biomes/i, () => ({ rows: [{ name: 'meadow', creature_types: [] }] })],
     [/SELECT name FROM entity_types WHERE is_creature = true/i, () => ({ rows: [] })],
     [/SELECT name, boss_tier FROM entity_types WHERE is_creature = true AND boss_tier IS NOT NULL/i, () => ({ rows: [] })],
-    [/SELECT name, point_kind FROM entity_types WHERE point_kind IS NOT NULL/i, () => ({ rows: [] })], // "ghost_gate" absent
+    [/SELECT id, name, point_kind FROM entity_types WHERE point_kind IS NOT NULL/i, () => ({ rows: [] })], // "ghost_gate" absent
     [/UPDATE map_links SET entity_type_id/i, () => ({ rows: [], rowCount: 1 })],
   ]);
   __setPool(pool);
