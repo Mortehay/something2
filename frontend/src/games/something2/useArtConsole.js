@@ -16,7 +16,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { authHeaders, apiFetch } from './src/js/net/auth.js';
 import { batchJustSettled, queuePollInterval } from './artProgress.js';
-import { dispatchError } from './artSelection.js';
+import { dispatchError, enqueueByKind } from './artSelection.js';
 import { API_URL } from '../../config.js';
 
 const SUBJECTS_KEY = ['art-subjects'];
@@ -300,21 +300,26 @@ async function post(path, body) {
 // SEQUENTIALLY rather than in parallel: each call ends by reading the queue
 // stats, and firing five at once would have them race to report a total that
 // is already stale.
+//
+// Resolves to { results, error, unsent } rather than rejecting on a failed
+// kind (SOMET-541): an object kind refused by the enqueue-time size check
+// must not also lose the tile kinds that queued before it. onSettled (not
+// onSuccess) invalidates the caches, since kinds before the failure DID write
+// rows even when the mutation's own result carries an error.
 export function useEnqueueArt() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ byKind, backend, providerId, forcePrompt }) => {
-      const results = [];
-      for (const [kind, keys] of byKind) {
+    mutationFn: async ({ byKind, backend, providerId, forcePrompt }) => enqueueByKind(
+      byKind,
+      async (kind, keys) => {
         const { res, json } = await post('/api/art-jobs', {
           kind, keys, backend, provider_id: providerId, force_prompt: forcePrompt === true,
         });
         if (!res.ok) throw new Error(json.error || `Failed to queue ${kind}`);
-        results.push(json);
-      }
-      return results;
-    },
-    onSuccess: () => {
+        return json;
+      },
+    ),
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: QUEUE_KEY });
       qc.invalidateQueries({ queryKey: SUBJECTS_KEY });
     },

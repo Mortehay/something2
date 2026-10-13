@@ -675,7 +675,10 @@ function ArtConsoleAdmin() {
     // at all when the request 400'd -- the button simply did not work. Found
     // in the browser.
     try {
-      const results = await enqueue.mutateAsync({
+      // Resolves rather than rejects on a refused kind (SOMET-541): a mixed
+      // object+tile selection that hits the object-size refusal still queued
+      // the tile kinds before it, and those must not be reported as lost.
+      const { results, error, unsent } = await enqueue.mutateAsync({
         byKind: grouped,
         backend,
         providerId: backend === 'connector' && providerId ? Number(providerId) : null,
@@ -683,8 +686,22 @@ function ArtConsoleAdmin() {
       });
       // Reported rather than assumed: enqueue is idempotent, so "100 selected,
       // 3 queued" is a normal outcome and needs its breakdown to make sense.
-      setNotice(enqueueSummary(results).message);
-      setSelected(new Set());
+      const summary = enqueueSummary(results, error);
+      if (error) {
+        // Keep exactly the refused-and-never-attempted kinds selected, so
+        // Queue can be pressed again (e.g. after picking a 1024 provider)
+        // without reselecting the whole batch.
+        const stillSelected = new Set();
+        for (const [kind, keys] of unsent) {
+          for (const key of keys) stillSelected.add(subjectId({ kind, key }));
+        }
+        setNotice(null);
+        setFailure(summary.message);
+        setSelected(stillSelected);
+      } else {
+        setNotice(summary.message);
+        setSelected(new Set());
+      }
     } catch (err) {
       // The hook has already toasted; keep it on screen too, because a batch
       // that silently did not start is the worst outcome here.
