@@ -31,6 +31,9 @@ const { buildWorldGenConfig } = require('./services/worldGenConfig');
 const { loadTileTypes } = require('./services/tileTypes');
 const { ATTACK_KINDS, CHASE_STYLES, ELEMENTS } = require('./services/creatureBehaviors');
 const { ABILITIES_LATERAL, SKILLS_LATERAL, BOSS_TIERS } = require('./authority/creatures');
+// SOMET-587: needed above (for the `specDir` test seam, declared alongside
+// __setPool) ahead of where the rest of this feature's imports sit.
+const { DEFAULT_SPEC_DIR } = require('./services/specFileLocator.js');
 require('dotenv').config();
 
 const app = express();
@@ -137,6 +140,13 @@ let pool = new Pool({
 // Test seam: lets tests swap in a mock pool so routes don't need a live DB.
 const __setPool = (impl) => { pool = impl; };
 
+// Test seam, same shape as __setPool: lets tests point the SOMET-587 spec
+// locator at a throwaway fixture directory instead of the real, checked-in
+// backend/seeds/maps/ -- a test must never write to those files (see
+// specFileLocator.js's own header on why there is no caching to work around).
+let specDir = DEFAULT_SPEC_DIR;
+const __setSpecDir = (impl) => { specDir = impl; };
+
 // Guards and auth routes must see the CURRENT pool (tests swap it via
 // __setPool), so hand them a proxy that forwards to the live `pool` binding
 // rather than whatever value existed at module-load time. `connect` is
@@ -167,8 +177,17 @@ const textProvider = require('./services/textProvider');
 const { DEFAULTS: GAME_SETTING_DEFAULTS, getSettings, setSetting } = require('./services/gameSettings.js');
 const { ownedCharacter } = require('./services/characters.js');
 const { listVisited } = require('./services/visitedWorlds.js');
-const { listWaypointsForCharacter } = require('./services/waypoints.js');
+const { listWaypointsForCharacter, fetchWaypoints } = require('./services/waypoints.js');
 const { setEntryWorld } = require('./services/entryWorld.js');
+const { loadPointTypeNames } = require('./services/pointArt.js');
+const { VILLAGE_POST_KINDS, villageArtColumn } = require('../seeds/data/pointTypes.js');
+// SOMET-587: the reverse spec-locator for the World Map tab's per-instance
+// art picker. Pure/DB-free (see its own header comment) -- this file supplies
+// the live catalog it validates against.
+const {
+  findLinkInSpecs, findWaypointInSpecs, findChestInSpecs, findVillageInSpecs,
+  writeSpecFieldChange,
+} = require('./services/specFileLocator.js');
 // Single admin guard applied to every mutating admin route below.
 const adminGuard = requireAdmin(guardPool);
 // Authenticated-but-not-admin guard, for the player-facing routes declared
@@ -3078,6 +3097,49 @@ async function mapSpecCatalogs(db) {
   };
 }
 
+// SOMET-587: mapSpecCatalogs() above feeds the world-gen download/seed
+// routes and deliberately omits pointArtTypes/bossTiers (neither route edits
+// art or bosses, so there is no reason to widen what they validate against).
+// The per-instance art picker's write-back DOES need checkArt to actually
+// check something, so this adds the two catalogs scripts/seed-map.js's own
+// applyMapSpec loads, without changing mapSpecCatalogs() itself and
+// therefore without changing those two existing routes' behaviour.
+async function mapSpecCatalogsWithArt(db) {
+  const base = await mapSpecCatalogs(db);
+  return {
+    ...base,
+    pointArtTypes: await loadPointTypeNames(db),
+    bossTiers: new Map((await db.query(
+      'SELECT name, boss_tier FROM entity_types WHERE is_creature = true AND boss_tier IS NOT NULL',
+    )).rows.map((r) => [r.name, r.boss_tier])),
+  };
+}
+
+// Shared by all four art-picker PUT routes below. `body.art_name` must be
+// present (a non-empty string to set, or an explicit `null` to clear) --
+// an absent key is rejected rather than silently treated as either, since a
+// caller that forgot the field and one that means to clear look identical
+// otherwise. Resolves against the LIVE entity_types catalog and requires the
+// matched row's point_kind to equal `kind` exactly, the same rule
+// pointArt.js's applyPointArt enforces at seed time (idFor) -- so a name that
+// exists but is the wrong kind of point is a 400, not a silent wrong-looking
+// bind.
+async function resolvePointArtId(pool, body, kind) {
+  if (!body || !('art_name' in body)) {
+    return { ok: false, error: 'art_name is required (a non-empty string, or null to clear)' };
+  }
+  const name = body.art_name;
+  if (name === null) return { ok: true, id: null, name: null };
+  if (typeof name !== 'string' || name.trim() === '') {
+    return { ok: false, error: 'art_name must be a non-empty string, or null to clear' };
+  }
+  const r = await pool.query('SELECT id, point_kind FROM entity_types WHERE name = $1', [name]);
+  if (!r.rows[0] || r.rows[0].point_kind !== kind) {
+    return { ok: false, error: `"${name}" is not an entity type of point kind "${kind}"` };
+  }
+  return { ok: true, id: r.rows[0].id, name };
+}
+
 // One place that turns a WorldGenError into a response, so every route reports
 // an auth failure and an unreachable host as a MESSAGE with a status, never as
 // an empty body. The generator's own author shipped the opposite -- both
@@ -4823,7 +4885,11 @@ app.get('/api/world-graph', adminGuard, async (req, res) => {
         `SELECT id, name, width, height, is_entry, biomes, graph_x, graph_y
            FROM worlds ORDER BY created_at DESC`),
       pool.query(
-        `SELECT from_world_id, edge, to_world_id, from_x, from_y, to_x, to_y
+        // SOMET-587: `id` and `entity_type_id` added so the World Map tab's
+        // per-instance art picker (PUT /api/map-links/:id/art) can address a
+        // selected portal row and show what it currently carries. Additive
+        // only -- every column this route already returned is unchanged.
+        `SELECT id, from_world_id, edge, to_world_id, from_x, from_y, to_x, to_y, entity_type_id
            FROM map_links ORDER BY from_world_id, edge, from_x, from_y`),
     ]);
     res.json({ worlds: worldsRes.rows, links: linksRes.rows });
@@ -5044,7 +5110,15 @@ function validateVillageBody(body, worldRow, existing) {
 app.get('/api/worlds/:id/villages', adminGuard, async (req, res) => {
   try {
     const r = await pool.query(
-      `SELECT id, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y, merchant_x, merchant_y
+      // SOMET-587: spec_key and the four post entity_type_id columns added so
+      // the World Map tab's per-instance art picker can show each post's
+      // current binding and PUT /api/villages/:id/art can locate the right
+      // spec entry (via spec_key -- see specFileLocator.js's
+      // findVillageInSpecs). Additive only -- every column this route
+      // already returned is unchanged.
+      `SELECT id, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y, merchant_x, merchant_y,
+              spec_key, merchant_entity_type_id, bank_entity_type_id,
+              gem_merchant_entity_type_id, skill_merchant_entity_type_id
          FROM villages WHERE world_id = $1 ORDER BY created_at ASC`,
       [req.params.id],
     );
@@ -5134,6 +5208,225 @@ app.delete('/api/worlds/:id/villages/:villageId', adminGuard, async (req, res) =
     res.status(500).json({ error: 'Failed to delete village' });
   } finally {
     client?.release();
+  }
+});
+
+// SOMET-587. Read-side support for the World Map tab's per-instance art
+// picker: a world carries at most one waypoint (waypoints_world_unique,
+// 1714440270000) and at most one vault chest (seed-map's applyPointArt keys
+// its UPDATE on `WHERE world_id = $1 AND kind = 'vault'` with no further
+// disambiguator), so each of these answers with a single object (or null),
+// not a list. Reuses fetchWaypoints/fetchChests (the SAME readers the live
+// authority uses) rather than a second ad hoc query, so the art name this
+// admin view shows can never disagree with what a joining player actually
+// sees.
+app.get('/api/worlds/:id/waypoint', adminGuard, async (req, res) => {
+  try {
+    const rows = await fetchWaypoints(pool, req.params.id);
+    res.json(rows[0] || null);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load waypoint' });
+  }
+});
+
+app.get('/api/worlds/:id/chest', adminGuard, async (req, res) => {
+  try {
+    const rows = await fetchChests(pool, req.params.id);
+    // Only a vault chest is spec-authored (seed-map.js's applyPointArt only
+    // ever binds `WHERE kind = 'vault'`) -- a field chest is a runtime loot
+    // spawn with no spec entry, so there is nothing for this picker to edit.
+    res.json(rows.find((c) => c.kind === 'vault') || null);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load chest' });
+  }
+});
+
+// SOMET-587. Write-side of the per-instance art picker, four endpoints with
+// one shared shape: resolve the requested art name against the live
+// entity_types catalog (kind-checked), locate the ONE checked-in spec entry
+// this live row came from, write the spec file FIRST (validated, atomic,
+// no-op on failure), and only once that succeeds update the database row —
+// so a failed file write can never leave the database claiming a durability
+// the spec file does not actually have. A lookup that cannot find a unique
+// spec match refuses with 422 rather than writing only to the database (see
+// specFileLocator.js's header comment on why that would be unsafe).
+app.put('/api/map-links/:id/art', adminGuard, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const row = (await pool.query(
+      `SELECT ml.id, ml.from_world_id, ml.to_world_id, ml.edge, ml.from_x, ml.from_y, ml.to_x, ml.to_y,
+              w.name AS from_world_name
+         FROM map_links ml JOIN worlds w ON w.id = ml.from_world_id
+        WHERE ml.id = $1`,
+      [id],
+    )).rows[0];
+    if (!row) return res.status(404).json({ error: 'map link not found' });
+    if (row.edge !== 'PORTAL') {
+      return res.status(400).json({ error: 'only a portal link carries art — a compass doorway has none' });
+    }
+
+    const resolved = await resolvePointArtId(pool, req.body, 'portal');
+    if (!resolved.ok) return res.status(400).json({ error: resolved.error });
+
+    // The clicked row (`:id`) may be either the spec's declared departure
+    // side or the implicit mirror arrival side -- findLinkInSpecs matches
+    // whichever one this physical row is (by its OWN from_world_name/
+    // from_x/from_y, never the mirror's) and reports back which side matched
+    // as `located.side`, with `located.fieldPath` already resolved to `art`
+    // (departure) or `to_art` (arrival -- SOMET-586). There is no explicit
+    // "which side" request field: the row id already disambiguates it.
+    const located = findLinkInSpecs(row.from_world_name, { from_x: row.from_x, from_y: row.from_y }, specDir);
+    if (!located) {
+      return res.status(422).json({
+        error: 'No unique spec-file match for this portal — it is not safely editable from here. '
+          + 'Edit the map spec file directly instead; writing only to the database would be silently '
+          + 'wiped by the next `make seed-map`.',
+      });
+    }
+
+    const catalogs = await mapSpecCatalogsWithArt(pool);
+    // `siblingFallbackKey: 'art'` only on the arrival side -- setting to_art
+    // to the SAME name the departure `art` field already carries collapses
+    // back to no explicit to_art key (see writeSpecFieldChange's own
+    // comment), which is also what an explicit clear (art_name: null) always
+    // did. The departure side has no such sibling to collapse against.
+    const siblingFallbackKey = located.side === 'arrival' ? 'art' : null;
+    const write = writeSpecFieldChange(located, resolved.name, catalogs, [], siblingFallbackKey);
+    if (!write.ok) return res.status(write.status).json({ error: write.error });
+
+    // SOMET-586/587: the two doorway rows no longer necessarily share one
+    // entity type (to_art can override the arrival row), so this writes ONLY
+    // the single physical row `:id` addresses -- never its mirror. Setting
+    // the other side's art is a second PUT against that row's own id.
+    await pool.query('UPDATE map_links SET entity_type_id = $2 WHERE id = $1', [id, resolved.id]);
+
+    res.json({ art: resolved.name, entity_type_id: resolved.id, side: located.side });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update portal art' });
+  }
+});
+
+app.put('/api/waypoints/:id/art', adminGuard, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const row = (await pool.query(
+      `SELECT wp.id, wp.world_id, w.name AS world_name
+         FROM waypoints wp JOIN worlds w ON w.id = wp.world_id
+        WHERE wp.id = $1`,
+      [id],
+    )).rows[0];
+    if (!row) return res.status(404).json({ error: 'waypoint not found' });
+
+    const resolved = await resolvePointArtId(pool, req.body, 'waypoint');
+    if (!resolved.ok) return res.status(400).json({ error: resolved.error });
+
+    const located = findWaypointInSpecs(row.world_name, specDir);
+    if (!located) {
+      return res.status(422).json({
+        error: 'No unique spec-file match for this waypoint — it is not safely editable from here. '
+          + 'Edit the map spec file directly instead; writing only to the database would be silently '
+          + 'wiped by the next `make seed-map`.',
+      });
+    }
+
+    const catalogs = await mapSpecCatalogsWithArt(pool);
+    const write = writeSpecFieldChange(located, resolved.name, catalogs);
+    if (!write.ok) return res.status(write.status).json({ error: write.error });
+
+    await pool.query('UPDATE waypoints SET entity_type_id = $2 WHERE id = $1', [id, resolved.id]);
+    res.json({ art: resolved.name, entity_type_id: resolved.id });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update waypoint art' });
+  }
+});
+
+// Addressed by the chest's OWN id (world_chests.id), mirroring /api/map-links
+// and /api/waypoints -- GET /api/worlds/:id/chest above is what hands the
+// frontend this id in the first place, so there is no need to route this one
+// through the world id as well.
+app.put('/api/world-chests/:id/art', adminGuard, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const row = (await pool.query(
+      `SELECT c.id, c.world_id, c.kind, w.name AS world_name
+         FROM world_chests c JOIN worlds w ON w.id = c.world_id
+        WHERE c.id = $1`,
+      [id],
+    )).rows[0];
+    if (!row) return res.status(404).json({ error: 'chest not found' });
+    if (row.kind !== 'vault') {
+      return res.status(400).json({ error: 'only a vault chest is spec-authored — a field chest has no spec entry to edit' });
+    }
+
+    const resolved = await resolvePointArtId(pool, req.body, 'chest_vault');
+    if (!resolved.ok) return res.status(400).json({ error: resolved.error });
+
+    const located = findChestInSpecs(row.world_name, specDir);
+    if (!located) {
+      return res.status(422).json({
+        error: 'No unique spec-file match for this chest — it is not safely editable from here. '
+          + 'Edit the map spec file directly instead; writing only to the database would be silently '
+          + 'wiped by the next `make seed-map`.',
+      });
+    }
+
+    const catalogs = await mapSpecCatalogsWithArt(pool);
+    const write = writeSpecFieldChange(located, resolved.name, catalogs);
+    if (!write.ok) return res.status(write.status).json({ error: write.error });
+
+    await pool.query('UPDATE world_chests SET entity_type_id = $2 WHERE id = $1', [id, resolved.id]);
+    res.json({ art: resolved.name, entity_type_id: resolved.id });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update chest art' });
+  }
+});
+
+app.put('/api/villages/:id/art', adminGuard, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { slot } = req.body || {};
+    if (!VILLAGE_POST_KINDS.includes(slot)) {
+      return res.status(400).json({ error: `slot must be one of ${VILLAGE_POST_KINDS.join(', ')}` });
+    }
+
+    const row = (await pool.query(
+      `SELECT v.id, v.world_id, v.spec_key, w.name AS world_name
+         FROM villages v JOIN worlds w ON w.id = v.world_id
+        WHERE v.id = $1`,
+      [id],
+    )).rows[0];
+    if (!row) return res.status(404).json({ error: 'village not found' });
+
+    const resolved = await resolvePointArtId(pool, req.body, slot);
+    if (!resolved.ok) return res.status(400).json({ error: resolved.error });
+
+    // villages.spec_key is the identity a village row already carries for
+    // this exact "which spec entry" problem (SOMET-312/SOMET-591) -- a NULL
+    // here (a village created before specs existed, or since) correctly
+    // refuses rather than guessing which entry to touch.
+    const located = findVillageInSpecs(row.world_name, row.spec_key, specDir);
+    if (!located) {
+      return res.status(422).json({
+        error: 'No unique spec-file match for this village — it is not safely editable from here. '
+          + 'Edit the map spec file directly instead; writing only to the database would be silently '
+          + 'wiped by the next `make seed-map`.',
+      });
+    }
+
+    const catalogs = await mapSpecCatalogsWithArt(pool);
+    const write = writeSpecFieldChange(located, resolved.name, catalogs, [slot]);
+    if (!write.ok) return res.status(write.status).json({ error: write.error });
+
+    await pool.query(`UPDATE villages SET ${villageArtColumn(slot)} = $2 WHERE id = $1`, [id, resolved.id]);
+    res.json({ slot, art: resolved.name, entity_type_id: resolved.id });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update village post art' });
   }
 });
 
@@ -5402,5 +5695,5 @@ if (require.main === module) {
 module.exports = {
   app, __setSpriteGen, __setPool, __setAuthorityHandle, validateItemType, boundedCacheSet,
   apiRateLimiter, behaviorFieldError, abilityFieldError, behaviorAbilitiesError, behaviorSkillsError,
-  entityTypeFieldError, shouldMigrateOnBoot, runMigrations, __setMigrationRunner,
+  entityTypeFieldError, shouldMigrateOnBoot, runMigrations, __setMigrationRunner, __setSpecDir,
 };

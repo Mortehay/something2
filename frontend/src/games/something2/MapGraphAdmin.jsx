@@ -5,9 +5,10 @@ import cytoscape from 'cytoscape';
 import edgehandles from 'cytoscape-edgehandles';
 import { useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { useWorldGraph, useSaveGraphPosition } from './useMapGraph.js';
+import { useWorldGraph, useSaveGraphPosition, useSetPortalArt } from './useMapGraph.js';
 import { useBiomes } from './useBiomes.js';
 import { useSetLink, useClearLink } from './useMapsAdmin.js';
+import { useEntityTypes } from './useMaps.js';
 import { seedPositions, compassFromDelta, OPPOSITE } from './mapGraphLayout.js';
 import {
   collapseLinks, lintGraph, linksReplacedBy, edgeElementId,
@@ -48,10 +49,20 @@ const bounded = (w) => !!(w.width && w.height);
 function MapGraphAdmin() {
   const { worlds, links, isLoadingGraph, graphError } = useWorldGraph();
   const { biomes } = useBiomes();
+  const { entityTypes } = useEntityTypes();
   const savePosition = useSaveGraphPosition();
   const setLink = useSetLink();
   const clearLink = useClearLink();
+  const setPortalArt = useSetPortalArt();
   const qc = useQueryClient();
+  // SOMET-587: options for the selected portal's art picker. Reuses the same
+  // entity-type list the catalog editor already loads (useEntityTypes),
+  // filtered client-side by point_kind -- no second fetcher for a list this
+  // page already has.
+  const portalArtTypes = useMemo(
+    () => (entityTypes || []).filter((t) => t.point_kind === 'portal'),
+    [entityTypes],
+  );
   // Held in state, not a ref: the drag-end listener effect below needs a real
   // dependency to re-run once the instance exists. `cyRef.current` would
   // never trigger a re-run of an effect on its own, and since that effect's
@@ -474,8 +485,17 @@ function MapGraphAdmin() {
         return;
       }
       if (!id.includes('|')) return;
-      const [fromId, edge] = id.split('|');
-      setSelectedEdge({ fromId, edge });
+      // edgeElementId (mapGraphLint.js) ids a PORTAL as `${fromId}|PORTAL|${toId}`
+      // (a world may hold MANY portal rows, so `toId` is what disambiguates
+      // which one was actually clicked) and a compass edge as `${fromId}|${edge}`
+      // (unique per world by DB constraint, so no third segment is needed).
+      // SOMET-587: `toId` used to be dropped here, so `selectedRow` below
+      // could only ever resolve to a world's FIRST portal link regardless of
+      // which one was clicked -- harmless while this panel was
+      // delete-only (deleting a PORTAL edge is already rejected server-side),
+      // but wrong for the art picker, which edits one specific link.
+      const [fromId, edge, toId] = id.split('|');
+      setSelectedEdge({ fromId, edge, toId: edge === 'PORTAL' ? toId : undefined });
     };
     const onUnselect = (evt) => {
       if (evt.target.isNode()) {
@@ -577,7 +597,25 @@ function MapGraphAdmin() {
   // admin's own commit), `selectedRow` goes undefined and the panel below
   // stops rendering itself -- it cannot outlive the row it points at.
   const selectedRow = selectedEdge
-    && links.find((l) => l.from_world_id === selectedEdge.fromId && l.edge === selectedEdge.edge);
+    && links.find((l) => l.from_world_id === selectedEdge.fromId && l.edge === selectedEdge.edge
+      // SOMET-587: disambiguate a world's multiple portal rows by target —
+      // see the onSelect handler's comment above for why `toId` is captured.
+      && (selectedEdge.edge !== 'PORTAL' || l.to_world_id === selectedEdge.toId));
+
+  // SOMET-586/587: the OTHER physical row of the same portal pair —
+  // `selectedRow`'s own mirror, matched by exact coordinates (not just world
+  // ids: a world can hold many portal rows to the same neighbour). This is
+  // what lets the picker show both sides (departure art / arrival to_art)
+  // at once without the backend needing an explicit "which side" request
+  // field — each side is just a PUT against its own row's id (see
+  // useMapGraph.js's useSetPortalArt comment). `undefined` (not matched) is
+  // a real possibility for a one-way portal with no mirror row at all; the
+  // "Arrival" picker below simply does not render in that case.
+  const mirrorRow = selectedRow && selectedRow.edge === 'PORTAL'
+    ? links.find((l) => l.from_world_id === selectedRow.to_world_id && l.to_world_id === selectedRow.from_world_id
+        && l.from_x === selectedRow.to_x && l.from_y === selectedRow.to_y
+        && l.to_x === selectedRow.from_x && l.to_y === selectedRow.from_y)
+    : undefined;
 
   // Runs the plan in order and reports a partial failure honestly: a create
   // that fails after the clears already landed leaves those worlds
@@ -699,6 +737,66 @@ function MapGraphAdmin() {
               <Row>
                 {nameOf(selectedRow.from_world_id)} {selectedRow.edge} → {nameOf(selectedRow.to_world_id)}
               </Row>
+              {selectedRow.edge === 'PORTAL' && (
+                // SOMET-587/586: only a portal carries art — a compass
+                // doorway is a gap in a stamped wall ring, not a drawn point
+                // (see mapSpec.js's own rejection of `is_waypoint` on a
+                // compass link for the same reason). `entity_type_id` comes
+                // straight off GET /api/world-graph's map_links row.
+                //
+                // Two independent pickers, one per physical row of the
+                // pair: "Departure" is the row this edge was selected as
+                // (selectedRow.from_world_id, i.e. the world named first in
+                // the header line above), "Arrival" is its mirror — the
+                // tile the traveller lands on in the OTHER world. Each PUTs
+                // to its own row's /api/map-links/:id/art independently; the
+                // backend resolves which spec field (`art` vs `to_art`)
+                // each one lands on purely from which row id was sent (see
+                // useSetPortalArt's comment), so there is no shared field
+                // here to keep in sync.
+                <>
+                  <Row>
+                    <label style={{ color: 'var(--s2-text-muted)' }}>
+                      Art — Departure ({nameOf(selectedRow.from_world_id)}):
+                    </label>
+                    <select
+                      value={selectedRow.entity_type_id ?? ''}
+                      disabled={setPortalArt.isPending}
+                      onChange={(e) => {
+                        const chosen = portalArtTypes.find((t) => String(t.id) === e.target.value);
+                        setPortalArt.mutate({ id: selectedRow.id, art_name: chosen ? chosen.name : null });
+                      }}
+                    >
+                      <option value="">— kind default —</option>
+                      {portalArtTypes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                  </Row>
+                  {mirrorRow && (
+                    <Row>
+                      <label style={{ color: 'var(--s2-text-muted)' }}>
+                        Art — Arrival ({nameOf(mirrorRow.from_world_id)}):
+                      </label>
+                      <select
+                        value={mirrorRow.entity_type_id ?? ''}
+                        disabled={setPortalArt.isPending}
+                        onChange={(e) => {
+                          const chosen = portalArtTypes.find((t) => String(t.id) === e.target.value);
+                          setPortalArt.mutate({ id: mirrorRow.id, art_name: chosen ? chosen.name : null });
+                        }}
+                      >
+                        <option value="">— kind default —</option>
+                        {portalArtTypes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      </select>
+                    </Row>
+                  )}
+                  <Dim style={{ fontSize: '0.8em' }}>
+                    On the next <code>make seed-map</code>, a blank Arrival falls back to whatever Departure
+                    is set to (SOMET-586's <code>to_art ?? art</code>) rather than the plain kind default —
+                    the two can be set independently, but an unset Arrival always follows Departure, never
+                    the other way round.
+                  </Dim>
+                </>
+              )}
               <Warn>Removing this clears BOTH directions, and rebuilds terrain for both worlds.</Warn>
               <Row>
                 <Button
