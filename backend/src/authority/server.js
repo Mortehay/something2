@@ -40,7 +40,7 @@ const { loadDecorationDefs } = require('../services/decorationDefs');
 const { loadBiomes } = require('../services/biomes');
 const { buildWorldGenConfig } = require('../services/worldGenConfig');
 const { commitCreatureDeath, claimItem, claimGold, dropItem, dropGraceActive, spawnGroundItemTypes } = require('./loot');
-const { knockbackPosition } = require('./knockback');
+const { knockbackPosition, knockbackWithFallback } = require('./knockback');
 const { buyStock, sellItem } = require('./trade');
 const { respawnDueCreatures, enqueueDeficit, CREATURE_SWEEP_MS } = require('../services/creatureRespawn');
 const { consumeAmmo, ammoCount } = require('./ammo');
@@ -2928,29 +2928,63 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const liveBoss = targetEntry && targetEntry.world && targetEntry.world.creatures && targetEntry.world.creatures.get
           ? targetEntry.world.creatures.get(worldBossManager.bossCreatureId)
           : null;
-        const targetX = liveBoss ? Math.round(liveBoss.x + 80) : (worldBossManager.targetSpawnX != null ? Math.round(worldBossManager.targetSpawnX + 80) : 400);
-        const targetY = liveBoss ? Math.round(liveBoss.y + 80) : (worldBossManager.targetSpawnY != null ? Math.round(worldBossManager.targetSpawnY + 80) : 400);
+        const baseX = liveBoss ? liveBoss.x : (worldBossManager.targetSpawnX != null ? worldBossManager.targetSpawnX : 400);
+        const baseY = liveBoss ? liveBoss.y : (worldBossManager.targetSpawnY != null ? worldBossManager.targetSpawnY : 400);
 
-        pendingArrivals.set(ws.characterId, {
-          worldId: targetWorldId,
-          x: targetX,
-          y: targetY,
-          hp: p ? p.hp : undefined,
-          mana: p ? p.mana : undefined,
-          stamina: p ? p.stamina : undefined,
-        });
-        send(ws, {
-          type: 'transition',
-          toWorldId: targetWorldId,
-          arriveX: targetX,
-          arriveY: targetY,
-        });
-        send(ws, {
-          type: 'announcement',
-          kind: 'boss_teleport',
-          text: `Teleported to ${boss?.name || 'World Boss'} at ${worldBossManager.activeArenaName} (${worldBossManager.activeWorldName})!`,
-        });
-        recordVisit(pool, ws.characterId, targetWorldId).catch(() => {});
+        if (ws.worldId === targetWorldId && p) {
+          // SOMET-623: the admin is already in the boss's world, so the
+          // cross-world `transition` frame below is a no-op -- the client is
+          // told to "transition" into the world it is already standing in,
+          // and nothing moves. Reposition the player directly instead,
+          // mirroring death-respawn's own same-world branch above (search
+          // "Same world is the common case"): a plain position assignment
+          // plus persist, no transition frame needed -- the client stays in
+          // this world and the next `state` broadcast carries the new spot.
+          //
+          // Walkable-tile search reuses knockbackWithFallback (knockback.js)
+          // rather than inventing a new one: same full/half/quarter retry the
+          // portal-blocked bounce and combat knockback already rely on, aimed
+          // along the same diagonal the cross-world branch already offset
+          // along (+x, +y), so the admin lands beside the boss, not on it.
+          const dest = (targetEntry && targetEntry.world && targetEntry.world.map)
+            ? knockbackWithFallback({
+                px: baseX, py: baseY, fromX: baseX - 1, fromY: baseY - 1,
+                distance: 80, map: targetEntry.world.map,
+              })
+            : { x: baseX + 80, y: baseY + 80 };
+          p.x = Math.round(dest.x);
+          p.y = Math.round(dest.y);
+          persist(targetWorldId, ws.characterId, p).catch((e) => console.error('persist (teleport_to_boss, same world)', e));
+          send(ws, {
+            type: 'announcement',
+            kind: 'boss_teleport',
+            text: `Teleported to ${boss?.name || 'World Boss'} at ${worldBossManager.activeArenaName} (${worldBossManager.activeWorldName})!`,
+          });
+        } else {
+          const targetX = Math.round(baseX + 80);
+          const targetY = Math.round(baseY + 80);
+
+          pendingArrivals.set(ws.characterId, {
+            worldId: targetWorldId,
+            x: targetX,
+            y: targetY,
+            hp: p ? p.hp : undefined,
+            mana: p ? p.mana : undefined,
+            stamina: p ? p.stamina : undefined,
+          });
+          send(ws, {
+            type: 'transition',
+            toWorldId: targetWorldId,
+            arriveX: targetX,
+            arriveY: targetY,
+          });
+          send(ws, {
+            type: 'announcement',
+            kind: 'boss_teleport',
+            text: `Teleported to ${boss?.name || 'World Boss'} at ${worldBossManager.activeArenaName} (${worldBossManager.activeWorldName})!`,
+          });
+          recordVisit(pool, ws.characterId, targetWorldId).catch(() => {});
+        }
       } else if (action === 'teleport_to_world') {
         const targetWorldId = msg.worldId;
         if (targetWorldId) {
