@@ -1,3 +1,12 @@
+import os
+
+# SOMET-539: must be set before `app.main` is imported below -- it builds the
+# JobManager's Redis client at import time, and the unit suite must never
+# need a real Redis reachable from the host (same reasoning as the MinIO-
+# blocking fixture further down: tests exercise behavior against fakes, not
+# live external services).
+os.environ.setdefault("SPRITE_GEN_REDIS_BACKEND", "fake")
+
 import pytest
 from unittest.mock import patch
 from app.backends.stub import StubBackend

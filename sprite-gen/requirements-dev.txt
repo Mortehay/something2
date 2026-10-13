@@ -5,3 +5,7 @@ numpy==1.26.*
 minio==7.*
 pytest==8.*
 httpx==0.27.*
+# SOMET-539: fakeredis backs the durable job store in tests so the suite
+# never needs a real Redis reachable from the host (same reasoning as the
+# MinIO-blocking fixture in conftest.py).
+fakeredis==2.*
