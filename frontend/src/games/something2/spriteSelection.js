@@ -27,3 +27,13 @@ export function selectAllSpriteSubjects(subjects) {
   return new Set(subjects.map((subject) => subject.id));
 }
 
+// Selected rows -> POST /jobs body. An appearance-variant row's own `id` is
+// the synthetic "entityId:variant" string used for selection, not the real id
+// the backend wants -- `entity_id` carries that instead (see spriteBatchRoutes.js).
+export function targetsForSprites(selectedRows) {
+  return selectedRows.map((subject) => ({
+    entity_id: subject.variant == null ? subject.id : subject.entity_id,
+    variant: subject.variant,
+  }));
+}
+

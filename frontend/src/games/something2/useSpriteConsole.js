@@ -59,7 +59,7 @@ function mutation(path, success, body = (value) => value) {
 
 export const useQueueSprites = mutation('/jobs',
   (data) => `${data.queued} sprite job${data.queued === 1 ? '' : 's'} queued`,
-  (entityIds) => ({ entity_ids: entityIds }));
+  (targets) => ({ targets }));
 export const useStartSpriteBatch = mutation('/jobs/dispatch', 'Sprite batch started', () => ({}));
 export const useStopSpriteBatch = mutation('/jobs/stop', 'Sprite batch stopping', () => ({}));
 export const useRescueSpriteJobs = mutation('/jobs/requeue-stale',

@@ -26,14 +26,51 @@ test('POST /api/sprite-admin/jobs derives queue options from entity rows', async
   });
 
   const res = await request(app).post('/api/sprite-admin/jobs').set(...AUTH)
-    .send({ entity_ids: [4] });
+    .send({ targets: [{ entity_id: 4 }] });
 
   assert.equal(res.status, 201);
   assert.equal(res.body.queued, 1);
   const insert = calls.find((call) => /INSERT INTO sprite_sets/i.test(call.sql));
-  assert.deepEqual(insert.params[1], ['Wolf']);
-  assert.deepEqual(insert.params[2], ['creature']);
-  assert.deepEqual(insert.params[3], ['grey wolf']);
-  assert.deepEqual(insert.params[5], [4]);
+  assert.deepEqual(insert.params[1], [null]);
+  assert.deepEqual(insert.params[2], ['Wolf']);
+  assert.deepEqual(insert.params[3], ['creature']);
+  assert.deepEqual(insert.params[4], ['grey wolf']);
+  assert.deepEqual(insert.params[6], [4]);
+});
+
+test('POST /api/sprite-admin/jobs targets an appearance variant instead of the class itself', async () => {
+  const calls = [];
+  __setPool({
+    query: async (sql, params = []) => {
+      if (isUserLookup(sql)) return ADMIN_USER_ROW;
+      calls.push({ sql, params });
+      if (/FROM character_appearances ca JOIN entity_types/i.test(sql)) {
+        return { rows: [{
+          entity_type_id: 3, variant: 2, class_name: 'Mage', class_prompt: 'a spell-flinging mage',
+        }] };
+      }
+      if (/count\(\*\).*FROM sprite_sets/is.test(sql)) return { rows: [] };
+      if (/INSERT INTO sprite_sets/i.test(sql)) return { rows: [{ id: 'job-row', status: 'queued' }] };
+      if (/SELECT status, count/i.test(sql)) return { rows: [{ status: 'queued', n: 1 }] };
+      throw new Error(`unexpected query: ${sql}`);
+    },
+  });
+
+  const res = await request(app).post('/api/sprite-admin/jobs').set(...AUTH)
+    .send({ targets: [{ entity_id: 3, variant: 2 }] });
+
+  assert.equal(res.status, 201);
+  assert.equal(res.body.queued, 1);
+  const insert = calls.find((call) => /INSERT INTO sprite_sets/i.test(call.sql));
+  assert.deepEqual(insert.params[0], [3]);
+  assert.deepEqual(insert.params[1], [2]);
+  assert.deepEqual(insert.params[2], ['Mage:2']);
+});
+
+test('POST /api/sprite-admin/jobs rejects an out-of-range variant', async () => {
+  __setPool({ query: async (sql) => { if (isUserLookup(sql)) return ADMIN_USER_ROW; throw new Error(`unexpected query: ${sql}`); } });
+  const res = await request(app).post('/api/sprite-admin/jobs').set(...AUTH)
+    .send({ targets: [{ entity_id: 3, variant: 6 }] });
+  assert.equal(res.status, 400);
 });
 
