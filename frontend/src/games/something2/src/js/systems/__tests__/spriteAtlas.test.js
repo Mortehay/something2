@@ -82,6 +82,23 @@ describe("RenderSystem.resolveSprite", () => {
     expect(RenderSystem.resolveSprite({ sprite: { atlas_key: "atlas.png" } }, im, "static")).toBeNull();
     expect(RenderSystem.resolveSprite({}, im, "static")).toBeNull();
   });
+
+  // SOMET-588: moved from pointArt.test.js (wrong home -- resolveSprite's own
+  // stateKey seam, not a pointArt.js concern; that file only ever imported
+  // RenderSystem for these two).
+  describe("stateKey seam", () => {
+    const stateManifest = { frames: { "S/0": [0, 0, 8, 8], opened: [8, 0, 8, 8] } };
+    const stateImg = { width: 16, height: 8 };
+    const stateIm = { get: (k) => (k === "atlas" ? stateImg : null) };
+    const stateEntity = { sprite: { atlas_key: "atlas", manifest: stateManifest } };
+    it("uses the state frame when present", () => {
+      expect(RenderSystem.resolveSprite({ ...stateEntity, stateKey: "opened" }, stateIm, "static", 0).crop).toEqual([8, 0, 8, 8]);
+    });
+    it("falls back to the static frame when the state frame is absent", () => {
+      expect(RenderSystem.resolveSprite({ ...stateEntity, stateKey: "locked" }, stateIm, "static", 0).crop).toEqual([0, 0, 8, 8]);
+      expect(RenderSystem.resolveSprite(stateEntity, stateIm, "static", 0).crop).toEqual([0, 0, 8, 8]);
+    });
+  });
 });
 
 describe("stateFrameKey", () => {

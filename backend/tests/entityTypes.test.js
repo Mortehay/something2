@@ -630,6 +630,39 @@ test('POST /api/entity-types rejects a non-string point_kind', async () => {
   assert.match(res.body.error, /point_kind/);
 });
 
+// SOMET-588: POST and PUT share pointKindForeignKeyError (extracted from two
+// verbatim copies of this same mapping) -- cover both call sites so a future
+// edit to one can't silently stop matching the other's constraint name.
+test('POST /api/entity-types maps a point_kind FK violation to 400, not 500', async () => {
+  __setPool({ query: withAuth(async () => {
+    const err = new Error('insert or update on table "entity_types" violates foreign key constraint');
+    err.code = '23503';
+    err.constraint = 'entity_types_point_kind_fkey';
+    throw err;
+  }) });
+  const res = await request(app).post('/api/entity-types').set(...AUTH)
+    .send({ name: 'stone_gate', color: '#fff', point_kind: 'not_a_real_kind' });
+  assert.strictEqual(res.status, 400);
+  assert.match(res.body.error, /unknown point_kind "not_a_real_kind"/);
+});
+
+test('PUT /api/entity-types/:id maps a point_kind FK violation to 400, not 500', async () => {
+  __setPool(putMock('portal', async (sql) => {
+    if (/UPDATE entity_types/i.test(sql)) {
+      const err = new Error('insert or update on table "entity_types" violates foreign key constraint');
+      err.code = '23503';
+      err.constraint = 'entity_types_point_kind_fkey';
+      throw err;
+    }
+    return { rows: [] };
+  }));
+  const base = { name: 'portal', color: '#fff', walkable: true, spawn_tiles: [], chance: 0 };
+  const res = await request(app).put('/api/entity-types/1').set(...AUTH)
+    .send({ ...base, point_kind: 'not_a_real_kind' });
+  assert.strictEqual(res.status, 400);
+  assert.match(res.body.error, /unknown point_kind "not_a_real_kind"/);
+});
+
 test('PUT /api/entity-types/:id leaves point_kind alone when omitted and clears it when null', async () => {
   const seen = [];
   __setPool(putMock('portal', async (sql, params) => {

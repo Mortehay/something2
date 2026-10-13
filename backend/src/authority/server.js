@@ -1498,7 +1498,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
         .map((c) => ({
           id: c.id, x: c.x, y: c.y, kind: c.kind, state: c.state,
           // SOMET-582: chestPointKind maps 'vault'/'field' onto the point-kind
-          // catalog's names ('chest_vault'/'chest_field').
+          // catalog's names ('chest_vault'/'chest_field'). It throws on any
+          // other kind, but c.kind can never be one: world_chests has a
+          // `world_chests_kind_check` CHECK constraint restricting the column
+          // to exactly these two values, so every row this loop sees already
+          // satisfies chestPointKind's precondition.
           art: resolvePointArt(chestPointKind(c.kind), c.art, entry.pointArtDefaults),
         }));
       send(ws, { type: 'chests', chests });

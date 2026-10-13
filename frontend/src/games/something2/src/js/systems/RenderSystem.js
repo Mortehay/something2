@@ -1,7 +1,7 @@
 import { GAME_WIDTH, GAME_HEIGHT, ISO_TILE_H, ISO_TILE_W, MAP_TILE_SIZE } from "../core/constants.js";
 import { worldToScreen, depthKey } from "../core/iso.js";
 import { compareDrawables, drawWall } from "./wallRenderer.js";
-import { drawLandmarks } from "./landmarkRenderer.js";
+import { drawLandmarks, landmarkColor } from "./landmarkRenderer.js";
 import { pointArtDef, pointBodyRef, pointStateTreatment, planLandmarkBodies } from "./pointArt.js";
 import { drawPlaceholder } from "./placeholderSprite.js";
 import { frameRect, staticFrameKey, animatedFrameKey, facingToDir, tileFrameKey, resolveTileVisual, stateFrameKey } from "./spriteAtlas.js";
@@ -424,7 +424,9 @@ export class RenderSystem {
     // legible. The pulse phase is this frame's timestamp, set above -- the
     // renderer never reads a clock itself.
     const landmarkPlan = this._readyLandmarkPlan(landmarks);
-    drawLandmarks(this.ctx, { landmarks, phase: this.nowMs, halfW, halfH, skipBody: landmarkPlan.skipBody });
+    drawLandmarks(this.ctx, {
+      landmarks, phase: this.nowMs, halfW, halfH, skipBody: landmarkPlan.skipBody, beamOverlay: landmarkPlan.beamOverlay,
+    });
     this.drawDoorways(doorways, chunkedMap, player);
 
     // SOMET-523. The leech aura's ground ring, drawn BEFORE the depth-sorted
@@ -522,7 +524,10 @@ export class RenderSystem {
     // tall body (a portal arch) permanently hides its own destination pill
     // behind itself. Same `phase: this.nowMs` as the first call -- the pulse
     // must read as one marker, not two out of sync.
-    drawLandmarks(this.ctx, { landmarks, phase: this.nowMs, halfW, halfH, skipBody: landmarkPlan.skipBody, overlayOnly: true });
+    drawLandmarks(this.ctx, {
+      landmarks, phase: this.nowMs, halfW, halfH, skipBody: landmarkPlan.skipBody,
+      beamOverlay: landmarkPlan.beamOverlay, overlayOnly: true,
+    });
 
     // SOMET-493. Resolved against the SAME `drawables` list that was just
     // painted, in the same frame, so the card can never name something that is
@@ -936,7 +941,7 @@ export class RenderSystem {
     if (!Number.isFinite(cx) || !Number.isFinite(cy) || !inspect.camera) return;
 
     const point = canvasToCameraPoint(cx, cy, inspect.camera);
-    const hover = pickDrawable(drawables, point);
+    const hover = pickDrawable(drawables, point, inspect.entityDefs);
     this._inspectHoverKey = targetKey(hover);
 
     // Hover wins over a pin: pointing at something new is an unambiguous
@@ -964,7 +969,7 @@ export class RenderSystem {
     // pointer across the screen attached to nothing.
     let ax = cx, ay = cy;
     if (!hover) {
-      const r = drawableScreenRect(target);
+      const r = drawableScreenRect(target, inspect.entityDefs);
       if (r) {
         const off = canvasToCameraPoint(0, 0, inspect.camera);
         ax = r.x + r.w / 2 - off.x;
@@ -2603,7 +2608,10 @@ export class RenderSystem {
     this.ctx.save();
     if (treatment.ring) {
       this.ctx.globalAlpha = 0.9;
-      this.ctx.strokeStyle = "#7dd3fc";
+      // SOMET-588: was its own copy of the waypoint diamond's colour --
+      // shares landmarkColor so an unlit waypoint's ring and its diamond
+      // can never drift apart when the palette changes.
+      this.ctx.strokeStyle = landmarkColor("waypoint");
       this.ctx.lineWidth = 2;
       this.ctx.beginPath();
       this.ctx.ellipse(s.x, s.y, 28, 14, 0, 0, Math.PI * 2);
@@ -2611,16 +2619,15 @@ export class RenderSystem {
     }
     this.ctx.globalAlpha = treatment.alpha;
     const ref = pointBodyRef(def, x, y, { stateKey: treatment.stateKey });
-    this.drawEntity(ref);
+    // SOMET-584 review round 2 (T9 finding B) wanted the drawn body's on-screen
+    // height so a caption lifts above it rather than landing inside it.
+    // SOMET-588: drawEntity now returns the REAL fit-scaled height (not the
+    // catalog box) -- a width-constrained body (e.g. a wide arch capped by
+    // boxW) fits shorter than its box and used to over-lift the caption into
+    // the empty space above the art.
+    const drawnHeight = this.drawEntity(ref);
     this.ctx.restore();
-    // SOMET-584 review round 2 (T9 finding B): callers need the drawn body's
-    // on-screen height to lift a caption above it, or the caption lands
-    // inside the body (a "Merchant" label in the middle of a 100px arch).
-    // drawEntity fits the sprite INSIDE this box preserving aspect ratio, so
-    // the box height is a safe upper bound on the actual drawn pixel height
-    // -- never less than what was drawn -- without reaching into drawEntity's
-    // private fitSpriteRect math.
-    return ref.displayHeight || ref.height || 40;
+    return drawnHeight;
   }
 
   // A resolvable def (pointArtDef already checked render_mode/image/sprite
@@ -3426,8 +3433,10 @@ export class RenderSystem {
   }
 
   // The sprite-or-image half of drawEntity, shared by bosses and everything
-  // else. Returns true when it drew, false when the caller must supply its own
-  // fallback (a rectangle, or a boss's procedural body).
+  // else. Returns the actual fit-scaled on-screen height when it drew (SOMET-588:
+  // the box passed in is an upper bound, not what a width-constrained sprite
+  // actually fills -- see fitSpriteRect), or `false` when the caller must supply
+  // its own fallback (a rectangle, or a boss's procedural body).
   _drawEntityArt(e, drawX, drawY, w, h) {
     const mode = RenderSystem.resolveRenderMode(e, this.renderModeOverride);
     const sprite = RenderSystem.resolveSprite(e, this.imageManager, mode, this.nowMs);
@@ -3436,7 +3445,7 @@ export class RenderSystem {
       // SOMET-569: the FRAME's dimensions decide the fit, not the atlas's.
       const r = fitSpriteRect(sw, sh, drawX, drawY, w, h);
       this.ctx.drawImage(sprite.img, sx, sy, sw, sh, r.dx, r.dy, r.dw, r.dh);
-      return true;
+      return r.dh;
     }
     const img = mode !== "rect" && e.image && this.imageManager
       ? this.imageManager.get(e.image)
@@ -3445,7 +3454,7 @@ export class RenderSystem {
     // SOMET-569: fit, do not stretch.
     const r = fitSpriteRect(img.width, img.height, drawX, drawY, w, h);
     this.ctx.drawImage(img, r.dx, r.dy, r.dw, r.dh);
-    return true;
+    return r.dh;
   }
 
   drawEntity(e) {
@@ -3468,13 +3477,18 @@ export class RenderSystem {
     this._drawAuraEffects(s.x, drawY + h, e.auras);
 
     if (isBoss) {
-      if (!this._drawEntityArt(e, drawX, drawY, w, h)) this._drawWorldBoss(e, drawX, drawY, w, h, s);
+      const artH = this._drawEntityArt(e, drawX, drawY, w, h);
+      if (!artH) this._drawWorldBoss(e, drawX, drawY, w, h, s);
       this._drawBossPlate(e, drawX, drawY, w, s);
       this._drawEffectPips(drawX, drawY, e.effects);
-      return;
+      return artH || h;
     }
 
-    if (!this._drawEntityArt(e, drawX, drawY, w, h)) {
+    // SOMET-588: the caller (drawPointBody, for a caption's lift) needs the
+    // REAL drawn height, not this box -- a width-constrained sprite fits
+    // shorter than `h` and leaves empty space above it inside the box.
+    const artH = this._drawEntityArt(e, drawX, drawY, w, h);
+    if (!artH) {
       // Degrade to a rectangle so a missing asset never leaves a hole.
       this.ctx.fillStyle = e.color || "#c0392b";
       this.ctx.fillRect(drawX, drawY, w, h);
@@ -3511,6 +3525,7 @@ export class RenderSystem {
       }
     }
     this._drawEffectPips(drawX, drawY, e.effects);
+    return artH || h;
   }
 
   _drawPoEOrb(cx, cy, radius, current, max, label, colorType) {

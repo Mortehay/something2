@@ -1342,7 +1342,8 @@ function EntityTypesAdmin() {
                 </select>
                 {(() => {
                   const s = defaultButtonState({
-                    pointKind: formData.point_kind, entityId: editingEntity?.id ?? null, kinds: pointKinds,
+                    pointKind: formData.point_kind, savedPointKind: editingEntity?.point_kind ?? null,
+                    entityId: editingEntity?.id ?? null, kinds: pointKinds,
                   });
                   if (!s.visible) return null;
                   return (
