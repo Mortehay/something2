@@ -14,8 +14,17 @@ describe("telegraphsFromFrame", () => {
   it("carries the resolved geometry through to the renderer", () => {
     const [t] = telegraphsFromFrame({ telegraphs: [telegraph()] });
     expect(t).toEqual({
-      creatureId: "c:1", skill: "Ground Slam", x: 100, y: 200, radius: 80, ms: 300, telegraphMs: 500,
+      creatureId: "c:1", skill: "Ground Slam", v: null, x: 100, y: 200, radius: 80, ms: 300, telegraphMs: 500,
     });
+  });
+
+  // SOMET-610 (S7): the vfx binding's resolved name, server-resolved same
+  // as every other effect name (the client holds no creature_skills
+  // catalog to look a raw binding up in).
+  it("carries the resolved vfx name through; a non-string is dropped to null", () => {
+    expect(telegraphsFromFrame({ telegraphs: [telegraph({ v: "fireball_blast" })] })[0].v).toBe("fireball_blast");
+    expect(telegraphsFromFrame({ telegraphs: [telegraph({ v: 123 })] })[0].v).toBe(null);
+    expect(telegraphsFromFrame({ telegraphs: [telegraph({ v: undefined })] })[0].v).toBe(null);
   });
 
   // The server OMITS the key entirely when nothing is telegraphing, which is
@@ -70,9 +79,9 @@ describe("telegraphsFromFrame", () => {
 
   it("every numeric field returned is finite", () => {
     for (const t of telegraphsFromFrame({ telegraphs: [telegraph(), telegraph({ skill: null, creatureId: null })] })) {
-      for (const [k, v] of Object.entries(t)) {
-        if (k === "skill" || k === "creatureId") continue;
-        expect(Number.isFinite(v)).toBe(true);
+      for (const [k, val] of Object.entries(t)) {
+        if (k === "skill" || k === "creatureId" || k === "v") continue;
+        expect(Number.isFinite(val)).toBe(true);
       }
     }
   });

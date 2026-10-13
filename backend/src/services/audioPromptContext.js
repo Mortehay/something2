@@ -26,7 +26,7 @@ function stripImageStyling(prompt) {
 const ART_KIND = { creature: 'entity', world_point: 'entity', item: 'item', skill: 'skill' };
 
 async function loadPromptCatalog(db) {
-  const [worlds, biomes, entities, items, art, auras] = await Promise.all([
+  const [worlds, biomes, entities, items, art, auras, creatureSkills] = await Promise.all([
     db.query(`SELECT w.name, w.biomes, w.level_min, w.level_max, w.allows_fast_travel, w.is_entry, w.width,
                      EXISTS (SELECT 1 FROM villages v WHERE v.world_id = w.id) AS has_village
                 FROM worlds w`),
@@ -35,6 +35,7 @@ async function loadPromptCatalog(db) {
     db.query("SELECT name, category, req_level FROM item_types WHERE category = 'weapon'"),
     db.query("SELECT subject_kind, subject_key, text FROM art_prompt_descriptions WHERE active AND subject_kind IN ('entity', 'item', 'skill')"),
     db.query('SELECT name, target_side, dot_element FROM aura_effects'),
+    db.query('SELECT name, kind, element FROM creature_skills'),
   ]);
   return {
     worlds: new Map(worlds.rows.map((r) => [r.name, r])),
@@ -44,6 +45,7 @@ async function loadPromptCatalog(db) {
     skills: new Map(SKILLS.map((s) => [s.id, s])),
     artDescriptions: new Map(art.rows.filter((r) => r.text).map((r) => [`${r.subject_kind}/${r.subject_key}`, r.text])),
     auras: new Map(auras.rows.map((r) => [r.name, r])),
+    creatureSkills: new Map(creatureSkills.rows.map((r) => [r.name, r])),
   };
 }
 
@@ -147,6 +149,18 @@ function buildContext(catalog, kind, key, slot, { cue = null } = {}) {
       const a = catalog.auras.get(key);
       if (!a) return null;
       return `magical aura "${key}"; side: ${a.target_side}; element: ${a.dot_element}${tail(slot, cue)}`;
+    }
+    // SOMET-610 (S7). `kind` (slam/nova/summon/projectile) is the closest
+    // catalog field to "what does this sound like" a creature skill
+    // carries; element is null for a physical skill (Bone Crush), same
+    // "omit rather than force a value" rule aura's own element already
+    // follows via dot_element's non-null default -- the difference here is
+    // creature_skills.element really can be NULL (inherit the caster's).
+    case 'creature_skill': {
+      const s = catalog.creatureSkills.get(key);
+      if (!s) return null;
+      const el = s.element ? `; element: ${s.element}` : '';
+      return `creature skill "${key}"; kind: ${s.kind}${el}${tail(slot, cue)}`;
     }
     default: return null;
   }

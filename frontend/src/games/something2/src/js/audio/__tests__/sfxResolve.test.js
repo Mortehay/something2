@@ -85,3 +85,32 @@ describe('aura apply', () => {
     expect(sfxPriority({ e: 'apply', c: 'pack_leader', a: 'p:1' }, 'p:1')).toBe('own');
   });
 });
+
+// SOMET-610 (S7, spec §3.6/§4.4): a creature skill's own telegraph/cast/hit.
+describe('creature skill events', () => {
+  it('resolve to creature_skill/<name>/<slot>, keyed by the skill NAME on `s`', () => {
+    expect(sfxChains({ e: 'skill_telegraph', s: 'Magma Slam', a: 'c:1', x: 0, y: 0 }))
+      .toEqual([{ keys: ['creature_skill/Magma Slam/telegraph'], missKey: 'creature_skill/Magma Slam/telegraph' }]);
+    expect(sfxChains({ e: 'skill_cast', s: 'Magma Slam', a: 'c:1', x: 0, y: 0 }))
+      .toEqual([{ keys: ['creature_skill/Magma Slam/use'], missKey: 'creature_skill/Magma Slam/use' }]);
+    expect(sfxChains({ e: 'skill_hit', s: 'Magma Slam', a: 'c:1', x: 0, y: 0 }))
+      .toEqual([{ keys: ['creature_skill/Magma Slam/hit'], missKey: 'creature_skill/Magma Slam/hit' }]);
+  });
+
+  it('no skill name resolves to no chains', () => {
+    for (const e of ['skill_telegraph', 'skill_cast', 'skill_hit']) {
+      expect(sfxChains({ e, a: 'c:1', x: 0, y: 0 })).toEqual([]);
+    }
+  });
+
+  // Not boss-exclusive event NAMES (an ordinary creature casts a scaled-down
+  // kit too, e.g. Fire Elemental Guard @0.4) -- priority depends on a live
+  // cross-reference (bossActorIds), not the event tuple alone.
+  it('sfxPriority: own beats everything; boss only with a matching bossActorIds entry; nearest otherwise', () => {
+    const bossActorIds = new Set(['c:wb_1']);
+    expect(sfxPriority({ e: 'skill_cast', s: 'Magma Slam', a: 'c:wb_1' }, 'p:1', bossActorIds)).toBe('boss');
+    expect(sfxPriority({ e: 'skill_telegraph', s: 'Magma Slam', a: 'c:2' }, 'p:1', bossActorIds)).toBe('nearest');
+    expect(sfxPriority({ e: 'skill_hit', s: 'Magma Slam', a: 'c:wb_1' }, 'p:1')).toBe('nearest'); // no bossActorIds at all
+    expect(sfxPriority({ e: 'skill_cast', s: 'Magma Slam', a: 'p:1' }, 'p:1', bossActorIds)).toBe('own'); // own still wins
+  });
+});

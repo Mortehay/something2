@@ -32,10 +32,22 @@ test('the manager spawns world bosses from entity_types rows', { skip }, async (
     assert.equal(c.attackElement, 'ice');
     assert.equal(c.width, 96);
     assert.equal(c.maxHp, 14000);
-    // Ruling P2: chaseStyle === 'charge' (or behavior.name === 'Line') cannot
-    // fail -- Line IS DEFAULT_BEHAVIOR -- so assert on the joined row column,
-    // which is null when the behaviour join misses.
-    assert.ok(catalog.bosses.every((b) => b.behavior_name === 'Line'), 'every boss row carries its joined Line behaviour');
+    // Ruling P2: chaseStyle === 'charge' cannot fail on its own -- Line (the
+    // old shared row) IS DEFAULT_BEHAVIOR -- so assert on the joined row
+    // column instead, which is null when the behaviour join misses.
+    // SOMET-610 (S7): each boss now has its own dedicated behavior row
+    // (migration 1714440730000_boss_dedicated_behaviors.js), named after the
+    // boss itself rather than the shared 'Line' row.
+    assert.deepEqual(
+      catalog.bosses.map((b) => ({ name: b.name, behavior_name: b.behavior_name })).sort((a, b) => a.name.localeCompare(b.name)),
+      [
+        { name: 'Abyssor, the Voidreaver', behavior_name: 'Abyssor, the Voidreaver' },
+        { name: 'Glacius, the Frost Leviathan', behavior_name: 'Glacius, the Frost Leviathan' },
+        { name: 'Gorgon, the Thunder Titan', behavior_name: 'Gorgon, the Thunder Titan' },
+        { name: 'Ignis, the Magma Colossus', behavior_name: 'Ignis, the Magma Colossus' },
+      ],
+      'every boss row carries its own dedicated behaviour',
+    );
   } finally {
     await pool.end();
   }

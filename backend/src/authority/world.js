@@ -6,7 +6,7 @@ const { resolveEffectName, momentForAttack, blockedImpact } = require('./vfx.js'
 const { attackLift, bodyLift } = require('./attackOrigin.js');
 const { ProjectileSim } = require('./projectiles');
 const {
-  weaponUse, weaponHit, creatureUse, creatureHurt, skillUse, skillAttackKind, attackKindOf, pushSfxEvent,
+  weaponUse, weaponHit, creatureUse, creatureHurt, creatureSkillSfx, skillUse, skillAttackKind, attackKindOf, pushSfxEvent,
 } = require('./sfxEvents.js');
 const { applyDamageWithEffects, drainMana, playerKey } = require('./damage');
 const {
@@ -784,8 +784,13 @@ class World {
     for (const s of shots) {
       if (this.projectiles.countByOwnerKind('creature') >= MAX_CREATURE_PROJECTILES) break;
       // Game audio slice 3: the shot is heard only if it actually spawns --
-      // past the cap above, nothing leaves the creature.
-      pushSfxEvent(this.sfx, creatureUse({ id: s.ownerId, type: s.ownerType }, s.x, s.y));
+      // past the cap above, nothing leaves the creature. SOMET-610 (S7):
+      // a skill-sourced shot (CreatureSim._resolveSkill's projectile
+      // branch stamps `s.skillName`) plays that SKILL's own cast cue
+      // instead of the creature's generic attack sound.
+      pushSfxEvent(this.sfx, s.skillName
+        ? creatureSkillSfx('skill_cast', s.skillName, { id: s.ownerId }, s.x, s.y)
+        : creatureUse({ id: s.ownerId, type: s.ownerType }, s.x, s.y));
       this.projectiles.spawn({
         ownerId: s.ownerId,
         ownerKind: 'creature',
@@ -1791,6 +1796,10 @@ class World {
       ...(this.activeTelegraphs.length > 0 ? {
         telegraphs: this.activeTelegraphs.map((t) => ({
           creatureId: t.creatureId, skill: t.skill, x: t.x, y: t.y, radius: t.radius,
+          // SOMET-610 (S7): the vfx binding's resolved name -- see
+          // worldTelegraphs.js's own comment for why this is server-
+          // resolved rather than a raw binding.
+          v: t.v,
           ms: Math.max(0, Math.round(t.expiresAt - this.now)),
           // The ORIGINAL duration, not just what's left -- the client needs
           // both to compute fill progress (elapsed/total), and has no clock

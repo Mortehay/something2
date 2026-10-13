@@ -11,7 +11,7 @@ const {
 const { resolveEffectName } = require('./vfx.js');
 const { bodyLift } = require('./attackOrigin.js');
 const {
-  creatureUse, creatureHit, creatureHurt, creatureDeath, bossSfx, pushSfxEvent,
+  creatureUse, creatureHit, creatureHurt, creatureDeath, bossSfx, creatureSkillSfx, pushSfxEvent,
 } = require('./sfxEvents.js');
 const {
   applyElementEffect, applyHitStatuses, activeEffectKeys, canAct, charmerOf,
@@ -2538,7 +2538,16 @@ class CreatureSim {
           telegraphs.push({
             creatureId: c.id, skill: skill.name, x: origin.x, y: origin.y,
             radius: skill.radius, telegraphMs: skill.telegraphMs,
+            // SOMET-610 (S7): resolved now, server-side, same reason every
+            // other vfx binding resolves on this side of the wire -- the
+            // client holds no creature_skills catalog to look `skill.vfx`
+            // up in. `resolveEffectName` is a generic `vfx[moment]` lookup
+            // with no fixed moment vocabulary (vfx.js), so 'telegraph'
+            // needs no change there; null when unset, and the renderer
+            // keeps its own default for that case.
+            v: resolveEffectName({ kind: 'creature', vfx: { telegraph: skill.vfx && skill.vfx.telegraph } }, 'telegraph'),
           });
+          if (this.sfx) pushSfxEvent(this.sfx, creatureSkillSfx('skill_telegraph', skill.name, c, origin.x, origin.y));
           continue;
         }
         const ability = fleeing ? null : selectAbility(c, bh, dist);
@@ -2769,9 +2778,15 @@ class CreatureSim {
         x: originX, y: originY, nx: 0, ny: 1,
         o: bodyLift(c.height, 'middle'), reach: skill.radius, arc: Math.PI * 2, hit: true,
       });
+      // SOMET-610 (S7): the SKILL's own cast/hit cues (creature_skill/
+      // <name>/use, .../hit), not the creature's generic attack sound --
+      // this is what lets Magma Slam sound different from an ordinary
+      // Line bite, and what sfxPriority's boss-tier check (bossActorIds,
+      // AudioEngine.js) keys off instead of the always-'nearest' ordinary
+      // creature events.
       if (this.sfx) {
-        pushSfxEvent(this.sfx, creatureUse(c, originX, originY));
-        pushSfxEvent(this.sfx, creatureHit(c.type, originX, originY));
+        pushSfxEvent(this.sfx, creatureSkillSfx('skill_cast', skill.name, c, originX, originY));
+        pushSfxEvent(this.sfx, creatureSkillSfx('skill_hit', skill.name, c, originX, originY));
       }
       return;
     }
@@ -2793,10 +2808,14 @@ class CreatureSim {
         damage: dmg, originLift: bodyLift(c.height, 'middle'), element,
         speed: SKILL_PROJECTILE_SPEED, radius: skill.radius, range: skill.range || LEASH_RADIUS,
         knockback: 0,
+        // SOMET-610 (S7): tells World.tickCreatures' shots-drain loop to
+        // push the SKILL's own cast cue instead of the generic creature
+        // one for this shot -- see that loop's own comment.
+        skillName: skill.name,
       });
       // No sfx push here: World.tickCreatures' existing shots-drain loop
-      // already pushes `creatureUse` for every entry in `shots`, regardless
-      // of source -- pushing a second one here would double it up.
+      // pushes the cast sfx for every entry in `shots`, regardless of
+      // source -- pushing a second one here would double it up.
       return;
     }
 
@@ -2820,7 +2839,7 @@ class CreatureSim {
         const [dx, dy] = summonOffset(i, skill.summonCount);
         pendingSummons.push(hydrateCreatureRow(row, { id: sid, x: originX + dx, y: originY + dy }));
       }
-      if (this.sfx) pushSfxEvent(this.sfx, creatureUse(c, originX, originY));
+      if (this.sfx) pushSfxEvent(this.sfx, creatureSkillSfx('skill_cast', skill.name, c, originX, originY));
     }
   }
 
