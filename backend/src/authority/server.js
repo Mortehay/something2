@@ -47,6 +47,7 @@ const { consumeAmmo, ammoCount } = require('./ammo');
 const { PICKUP_RADIUS } = require('./groundItems');
 const { WorldBossManager, dropLegendaryItemForPlayer } = require('./worldBoss');
 const { DungeonBossManager } = require('./dungeonBosses');
+const { awardDungeonBossLoot } = require('./bossLoot');
 
 // SOMET-473 -- the Druid's charm (spec 8.2, contract §6.5).
 //
@@ -1503,6 +1504,23 @@ function attachAuthority(httpServer, pool, opts = {}) {
         }));
       send(ws, { type: 'chests', chests });
     }
+  }
+
+  // SOMET-611 (S10): the real dungeon-boss loot award, wired in here (not at
+  // DungeonBossManager construction time, up near `opts.onDungeonBossKilled
+  // || null`) because it needs broadcastItems/broadcastChests, both defined
+  // above this line. `dungeonBosses.onKilled` is read fresh on every death
+  // (onDeath), not captured at construction, so assigning it post-hoc here
+  // is equivalent to passing it through opts -- opts.onDungeonBossKilled
+  // still wins when a test supplies one, exactly as it already did.
+  if (!opts.onDungeonBossKilled) {
+    dungeonBosses.onKilled = (kill) => awardDungeonBossLoot(kill, {
+      pool,
+      rng,
+      ttlMs: groundItemTtlMs,
+      broadcastItemsFn: (e) => broadcastItems(e),
+      broadcastChestsFn: (e) => broadcastChests(e),
+    });
   }
 
   async function flushAndPrune(entry) {

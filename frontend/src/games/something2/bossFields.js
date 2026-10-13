@@ -15,8 +15,19 @@ import { ELEMENTS } from "./abilityForm.js";
 export const ENTITY_ELEMENTS = ELEMENTS;
 // Mirrors MAX_ENTITY_DISPLAY_PX in backend/src/index.js (pinned by the same test).
 export const MAX_HITBOX_PX = 400;
+// SOMET-611 (S10, spec §3.7): the four nullable loot override columns.
+// RARITIES mirrors backend/src/authority/rarity.js's own constant (ascending
+// white < blue < yellow < foxy) -- not imported, since the frontend has no
+// access to backend source; __tests__/lootFields.test.js pins the two lists
+// against each other the same way elementLists.test.js pins ENTITY_ELEMENTS.
+export const LOOT_RARITIES = ["white", "blue", "yellow", "foxy"];
+// loot_chest is tri-state (NULL = tier default, true, false) -- a plain
+// checkbox has no way to represent "unset", so the form field is a string
+// ("", "true", "false") converted at the payload/hydration boundary, same
+// shape blankToNull already gives every other nullable field here.
 export const BOSS_FORM_DEFAULTS = Object.freeze({
   boss_tier: "", element: "", hitbox_size: "", xp_reward: "", base_damage: "",
+  loot_rolls: "", loot_min_rarity: "", loot_rarity_bias: "", loot_chest: "",
 });
 
 const blankToNull = (v) => (v === "" || v == null || Number.isNaN(v) ? null : v);
@@ -28,6 +39,10 @@ export function bossFieldsFromEntity(entity) {
     hitbox_size: entity?.hitbox_size ?? "",
     xp_reward: entity?.xp_reward ?? "",
     base_damage: entity?.base_damage ?? "",
+    loot_rolls: entity?.loot_rolls ?? "",
+    loot_min_rarity: entity?.loot_min_rarity ?? "",
+    loot_rarity_bias: entity?.loot_rarity_bias ?? "",
+    loot_chest: entity?.loot_chest == null ? "" : String(entity.loot_chest),
   };
 }
 
@@ -40,6 +55,10 @@ export function bossFieldsPayload(f) {
     hitbox_size: blankToNull(f.hitbox_size),
     xp_reward: blankToNull(f.xp_reward),
     base_damage: blankToNull(f.base_damage),
+    loot_rolls: blankToNull(f.loot_rolls),
+    loot_min_rarity: blankToNull(f.loot_min_rarity),
+    loot_rarity_bias: blankToNull(f.loot_rarity_bias),
+    loot_chest: f.loot_chest === "" ? null : f.loot_chest === "true",
   };
 }
 
@@ -50,6 +69,12 @@ export function bossFieldError(f) {
   if (xp != null && (!Number.isInteger(xp) || xp < 0)) return "XP Reward must be a non-negative integer";
   const dmg = blankToNull(f.base_damage);
   if (dmg != null && (!Number.isFinite(dmg) || dmg < 0)) return "Base Damage must be a non-negative number";
+  const rolls = blankToNull(f.loot_rolls);
+  if (rolls != null && (!Number.isInteger(rolls) || rolls < 0)) return "Loot Rolls must be a non-negative integer";
+  const minRarity = blankToNull(f.loot_min_rarity);
+  if (minRarity != null && !LOOT_RARITIES.includes(minRarity)) return "Loot Min Rarity must be one of white/blue/yellow/foxy";
+  const bias = blankToNull(f.loot_rarity_bias);
+  if (bias != null && (!Number.isFinite(bias) || bias < 0 || bias > 0.9)) return "Loot Rarity Bias must be a number between 0 and 0.9";
   return null;
 }
 

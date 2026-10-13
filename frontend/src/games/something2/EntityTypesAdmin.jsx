@@ -14,7 +14,7 @@ import { pointKindHidesWorldFields, pointKindPayload, defaultButtonState } from 
 import { HiOutlineTrash, HiOutlinePencil, HiOutlinePlus, HiOutlineXMark, HiOutlineChevronDown, HiOutlineChevronUp } from "react-icons/hi2";
 import toast from 'react-hot-toast';
 import { validateEntityType } from './catalogValidation.js';
-import { BOSS_TIERS, BOSS_TIER_LABELS, ENTITY_ELEMENTS, BOSS_FORM_DEFAULTS, bossFieldsFromEntity, bossFieldsPayload, bossFieldError, bossBadgeLabel } from './bossFields.js';
+import { BOSS_TIERS, BOSS_TIER_LABELS, ENTITY_ELEMENTS, LOOT_RARITIES, BOSS_FORM_DEFAULTS, bossFieldsFromEntity, bossFieldsPayload, bossFieldError, bossBadgeLabel } from './bossFields.js';
 import { syncApprovedAsset } from './entityAssetSync.js';
 import { orphanedSpawnTiles } from './catalogReferences.js';
 import { withOptionalBiome, withOptionalProvider } from './generationJobPayload.js';
@@ -1459,6 +1459,40 @@ function EntityTypesAdmin() {
                     <label>Base Damage</label>
                     <input type="number" step="0.5" placeholder="default" value={formData.base_damage}
                       onChange={e => setFormData({ ...formData, base_damage: e.target.value === '' ? '' : parseFloat(e.target.value) })} />
+                  </FormGroup>
+                </div>
+              )}
+
+              {/* SOMET-611 (S10, spec §3.7): loot overrides, only meaningful
+                  once this row IS a boss -- blank on every field means "use
+                  the tier default" (dungeon_elite 2/blue/0.2/no chest,
+                  dungeon_end 4/yellow/0.4/chest, world 3/yellow/0.5/chest). */}
+              {formData.is_creature && formData.boss_tier && (
+                <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap' }}>
+                  <FormGroup>
+                    <label>Loot Rolls</label>
+                    <input type="number" placeholder="tier default" value={formData.loot_rolls}
+                      onChange={e => setFormData({ ...formData, loot_rolls: e.target.value === '' ? '' : parseInt(e.target.value, 10) })} />
+                  </FormGroup>
+                  <FormGroup>
+                    <label>Loot Min Rarity</label>
+                    <select value={formData.loot_min_rarity} onChange={e => setFormData({ ...formData, loot_min_rarity: e.target.value })}>
+                      <option value="">— tier default —</option>
+                      {LOOT_RARITIES.map(r => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                  </FormGroup>
+                  <FormGroup>
+                    <label>Loot Rarity Bias</label>
+                    <input type="number" step="0.05" min="0" max="0.9" placeholder="tier default" value={formData.loot_rarity_bias}
+                      onChange={e => setFormData({ ...formData, loot_rarity_bias: e.target.value === '' ? '' : parseFloat(e.target.value) })} />
+                  </FormGroup>
+                  <FormGroup>
+                    <label>Loot Chest</label>
+                    <select value={formData.loot_chest} onChange={e => setFormData({ ...formData, loot_chest: e.target.value })}>
+                      <option value="">— tier default —</option>
+                      <option value="true">yes</option>
+                      <option value="false">no</option>
+                    </select>
                   </FormGroup>
                 </div>
               )}

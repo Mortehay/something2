@@ -86,11 +86,14 @@ test('a kill is noted once, fires onKilled once, and the boss stays dead until d
   const k = h.mgr.onDeath(e, 'boss:w-1', 'u9');
   // x/y are the boss's last CENTRE (a drop lands where it stood, like
   // loot.js's dropX = dead.x + size/2): top-left 1300/1210 + 40.
+  // SOMET-611 (S10): `row` carries the full catalog row (here, ROW itself)
+  // so onKilled can resolve a loot profile without a second query.
   assert.deepEqual(
-    { ...k, entry: undefined },
+    { ...k, entry: undefined, row: undefined },
     { entry: undefined, worldId: 'w-1', creatureId: 'boss:w-1', killerUserId: 'u9', entityName: 'zzElite',
-      entityTypeId: 77, bossTier: 'dungeon_elite', level: 47, x: 1340, y: 1250 });
+      entityTypeId: 77, bossTier: 'dungeon_elite', level: 47, x: 1340, y: 1250, row: undefined });
   assert.equal(k.entry, e);
+  assert.equal(k.row, ROW);
   assert.equal(h.mgr.onDeath(e, 'boss:w-1', 'u9'), null, 'a duplicate death report is ignored');
   assert.equal(h.kills.length, 1);
 
