@@ -28,3 +28,29 @@ def test_generate_with_stub_completes():
 def test_unknown_backend_is_400():
     r = client.post("/generate", json={"creature": "x", "base_prompt": "y", "backend": "nope"})
     assert r.status_code == 400
+
+
+def test_generate_submits_a_dedup_key_scoped_to_kind_and_subject(monkeypatch):
+    # SOMET-539: /generate must hand job_manager a dedup_key so resubmitting
+    # the same subject while one is in flight collapses -- asserted here
+    # against the real route's wiring (JobManager's own collapsing behavior
+    # is covered directly in test_jobs.py).
+    captured = {}
+
+    def fake_submit(job_type, params, job_id=None, dedup_key=None):
+        captured["job_type"] = job_type
+        captured["params"] = params
+        captured["job_id"] = job_id
+        captured["dedup_key"] = dedup_key
+        return job_id
+
+    monkeypatch.setattr(job_manager, "submit", fake_submit)
+    r = client.post("/generate", json={
+        "creature": "goblin", "base_prompt": "a goblin", "kind": "object",
+        "backend": "stub", "seed": 3,
+    })
+    assert r.status_code == 202
+    assert captured["job_type"] == "object"
+    assert captured["dedup_key"] == "object:goblin"
+    assert captured["params"]["creature"] == "goblin"
+    assert captured["params"]["job_id"] == r.json()["job_id"]

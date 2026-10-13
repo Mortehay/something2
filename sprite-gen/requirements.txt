@@ -1,4 +1,7 @@
 -r requirements-dev.txt
+# SOMET-539: durable job store backing Redis, already in the stack as
+# redis:7-alpine.
+redis==5.*
 torch==2.3.*
 # Pinned to match torch 2.3.x; installed from the CPU index in the Dockerfile.
 # Present here so controlnet-aux/rembg see it as already-satisfied and don't
