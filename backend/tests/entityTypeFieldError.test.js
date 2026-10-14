@@ -140,3 +140,24 @@ for (const [field, bad] of [
     assert.match(entityTypeFieldError({ ...VALID, [field]: bad }) || '', new RegExp(field));
   });
 }
+
+// SOMET-611: loot overrides. loot_rolls is capped (MAX_LOOT_ROLLS) because
+// every roll is a synchronous item roll + row insert on the authority loop;
+// a value past int4 used to slip through validation and 500 at the INSERT.
+test('loot_rolls accepts 0..MAX_LOOT_ROLLS and null, rejects above, negative, fractional', () => {
+  const { MAX_LOOT_ROLLS } = require('../src/authority/bossLoot.js');
+  assert.equal(MAX_LOOT_ROLLS, 20);
+  for (const ok of [null, 0, 4, 20]) {
+    assert.equal(entityTypeFieldError({ ...VALID, loot_rolls: ok }), null, `loot_rolls ${ok}`);
+  }
+  for (const bad of [21, 1e6, 2 ** 31, -1, 2.5]) {
+    assert.match(String(entityTypeFieldError({ ...VALID, loot_rolls: bad })), /loot_rolls/, `loot_rolls ${bad}`);
+  }
+});
+
+test('loot_rarity_bias must be a number in [0, 0.9]; a numeric STRING is a 400, not a silent coerce', () => {
+  assert.equal(entityTypeFieldError({ ...VALID, loot_rarity_bias: 0.9 }), null);
+  for (const bad of [0.95, -0.1, '0.5']) {
+    assert.match(String(entityTypeFieldError({ ...VALID, loot_rarity_bias: bad })), /loot_rarity_bias/);
+  }
+});

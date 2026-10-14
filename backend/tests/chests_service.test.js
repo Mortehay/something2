@@ -122,7 +122,7 @@ test('spawnFieldChest places a guard, inserts a locked field chest referencing i
   // shapes, since a field chest pushed straight from this call sits next to
   // vault chests loaded through fetchChests.
   assert.deepEqual(Object.keys(result.row).sort(), [
-    'art', 'guardCreatureIds', 'guardEntityTypeId', 'guardLevel', 'id', 'kind', 'openedAt', 'respawnAt', 'state', 'x', 'y',
+    'art', 'expiresAt', 'guardCreatureIds', 'guardEntityTypeId', 'guardLevel', 'id', 'kind', 'openedAt', 'respawnAt', 'state', 'x', 'y',
   ].sort());
   // SOMET-582: a field chest's RETURNING * row has no joined `art` column
   // (art is never a physical column, only a join alias) -- mapChestRow must

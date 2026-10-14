@@ -14,7 +14,7 @@ import { pointKindHidesWorldFields, pointKindPayload, defaultButtonState } from 
 import { HiOutlineTrash, HiOutlinePencil, HiOutlinePlus, HiOutlineXMark, HiOutlineChevronDown, HiOutlineChevronUp } from "react-icons/hi2";
 import toast from 'react-hot-toast';
 import { validateEntityType } from './catalogValidation.js';
-import { BOSS_TIERS, BOSS_TIER_LABELS, ENTITY_ELEMENTS, LOOT_RARITIES, BOSS_FORM_DEFAULTS, bossFieldsFromEntity, bossFieldsPayload, bossFieldError, bossBadgeLabel } from './bossFields.js';
+import { BOSS_TIERS, BOSS_TIER_LABELS, ENTITY_ELEMENTS, LOOT_RARITIES, LOOT_TIERS, MAX_LOOT_ROLLS, BOSS_FORM_DEFAULTS, bossFieldsFromEntity, bossFieldsPayload, bossFieldError, bossBadgeLabel } from './bossFields.js';
 import { syncApprovedAsset } from './entityAssetSync.js';
 import { orphanedSpawnTiles } from './catalogReferences.js';
 import { withOptionalBiome, withOptionalProvider } from './generationJobPayload.js';
@@ -1468,11 +1468,11 @@ function EntityTypesAdmin() {
                   once this row IS a boss -- blank on every field means "use
                   the tier default" (dungeon_elite 2/blue/0.2/no chest,
                   dungeon_end 4/yellow/0.4/chest, world 3/yellow/0.5/chest). */}
-              {formData.is_creature && formData.boss_tier && (
+              {formData.is_creature && LOOT_TIERS.includes(formData.boss_tier) && (
                 <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap' }}>
                   <FormGroup>
                     <label>Loot Rolls</label>
-                    <input type="number" placeholder="tier default" value={formData.loot_rolls}
+                    <input type="number" min="0" max={MAX_LOOT_ROLLS} placeholder="tier default" value={formData.loot_rolls}
                       onChange={e => setFormData({ ...formData, loot_rolls: e.target.value === '' ? '' : parseInt(e.target.value, 10) })} />
                   </FormGroup>
                   <FormGroup>

@@ -32,6 +32,7 @@ const { loadTileTypes } = require('./services/tileTypes');
 const { ATTACK_KINDS, CHASE_STYLES, ELEMENTS } = require('./services/creatureBehaviors');
 const { ABILITIES_LATERAL, SKILLS_LATERAL, BOSS_TIERS } = require('./authority/creatures');
 const { RARITIES } = require('./authority/rarity');
+const { MAX_LOOT_ROLLS } = require('./authority/bossLoot');
 // SOMET-587: needed above (for the `specDir` test seam, declared alongside
 // __setPool) ahead of where the rest of this feature's imports sit.
 const { DEFAULT_SPEC_DIR } = require('./services/specFileLocator.js');
@@ -831,8 +832,9 @@ function entityTypeFieldError(body) {
   // constraint, same posture as boss_tier/hitbox_size/xp_reward/base_damage
   // just above -- a bad value is a readable 400, never a raw 500 from the
   // CHECK constraint the migration added.
-  if (body.loot_rolls != null && (!Number.isInteger(body.loot_rolls) || body.loot_rolls < 0)) {
-    return 'loot_rolls must be a non-negative integer';
+  if (body.loot_rolls != null && (!Number.isInteger(body.loot_rolls)
+      || body.loot_rolls < 0 || body.loot_rolls > MAX_LOOT_ROLLS)) {
+    return `loot_rolls must be an integer between 0 and ${MAX_LOOT_ROLLS}`;
   }
   if (body.loot_min_rarity != null && !RARITIES.includes(body.loot_min_rarity)) {
     return `loot_min_rarity must be one of ${RARITIES.join(', ')} or null`;

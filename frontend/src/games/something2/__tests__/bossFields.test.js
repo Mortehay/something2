@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
+import { createRequire } from "node:module";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import {
   bossFieldsFromEntity, bossFieldsPayload, bossFieldError, bossBadgeLabel, LOOT_RARITIES,
+  LOOT_TIERS, MAX_LOOT_ROLLS,
 } from "../bossFields.js";
 
 describe("boss fields form rules (SOMET-603)", () => {
@@ -73,5 +77,53 @@ describe("boss loot fields form rules (SOMET-611)", () => {
     for (const r of LOOT_RARITIES) expect(bossFieldError({ loot_min_rarity: r })).toBe(null);
     expect(bossFieldError({ loot_rarity_bias: 0 })).toBe(null);
     expect(bossFieldError({ loot_rarity_bias: 0.9 })).toBe(null);
+  });
+});
+
+// SOMET-611 rework. loot_rarity_bias is a NUMERIC column, and pg hands it to
+// GET /api/entity-types as a STRING. The admin found a boss with a saved
+// bias could never be re-saved: hydration kept "0.5", and bossFieldError's
+// Number.isFinite rejected it. These pin the real wire shape, not an
+// idealised number.
+describe("boss loot fields survive a real round-trip (SOMET-611)", () => {
+  it("hydrates a NUMERIC string bias as a number", () => {
+    const f = bossFieldsFromEntity({ boss_tier: "dungeon_end", loot_rarity_bias: "0.50" });
+    expect(f.loot_rarity_bias).toBe(0.5);
+  });
+
+  it("a row with a saved string bias passes validation and re-sends a number", () => {
+    const f = bossFieldsFromEntity({
+      boss_tier: "dungeon_end", loot_rolls: 6, loot_min_rarity: "foxy", loot_rarity_bias: "0.6", loot_chest: true,
+    });
+    expect(bossFieldError(f)).toBeNull();
+    expect(bossFieldsPayload(f).loot_rarity_bias).toBe(0.6);
+  });
+
+  it("caps loot_rolls at MAX_LOOT_ROLLS", () => {
+    expect(bossFieldError({ ...bossFieldsFromEntity({}), loot_rolls: MAX_LOOT_ROLLS })).toBeNull();
+    expect(bossFieldError({ ...bossFieldsFromEntity({}), loot_rolls: MAX_LOOT_ROLLS + 1 }))
+      .toMatch(/Loot Rolls/);
+  });
+
+  it("offers loot overrides only for tiers bossLoot.js resolves (not miniboss)", () => {
+    expect(LOOT_TIERS).not.toContain("miniboss");
+  });
+});
+
+const requireCjs = createRequire(import.meta.url);
+const backendSrc = path.resolve(__dirname, "../../../../../backend/src");
+
+describe("loot constants stay in step with the backend (SOMET-611)", () => {
+  it("LOOT_RARITIES equals rarity.js RARITIES", () => {
+    const { RARITIES } = requireCjs(path.join(backendSrc, "authority/rarity.js"));
+    expect([...LOOT_RARITIES]).toEqual([...RARITIES]);
+  });
+
+  it("MAX_LOOT_ROLLS and LOOT_TIERS match bossLoot.js", () => {
+    const src = readFileSync(path.join(backendSrc, "authority/bossLoot.js"), "utf8");
+    expect(Number(src.match(/const MAX_LOOT_ROLLS\s*=\s*(\d+)/)[1])).toBe(MAX_LOOT_ROLLS);
+    const block = src.slice(src.indexOf("const TIER_LOOT_DEFAULTS"), src.indexOf("});", src.indexOf("const TIER_LOOT_DEFAULTS")));
+    const tiers = [...block.matchAll(/^\s{2}(\w+): Object\.freeze/gm)].map((m) => m[1]);
+    expect([...tiers].sort()).toEqual([...LOOT_TIERS].sort());
   });
 });

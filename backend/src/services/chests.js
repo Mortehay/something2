@@ -68,6 +68,11 @@ function mapChestRow(c) {
     // row with no joined `art` column -- spawnFieldChest's `RETURNING *` is
     // exactly that case: entity_type_id exists but nothing joins its name.
     art: c.art ?? null,
+    // SOMET-611: a transient boss-death chest's purge deadline (NULL =
+    // permanent, every authored vault/field chest). purgeExpiredChests acts
+    // on the DB column; this copy is what the openchest handler reads to
+    // know it must shorten the deadline once the chest is opened.
+    expiresAt: c.expires_at ?? null,
   };
 }
 
@@ -78,7 +83,7 @@ function mapChestRow(c) {
 async function fetchChests(pool, worldId) {
   const r = await pool.query(
     `SELECT c.id, c.x, c.y, c.kind, c.guard_entity_type_id, c.guard_level, c.guard_creature_ids,
-            c.state, c.opened_at, c.respawn_at, pa.name AS art
+            c.state, c.opened_at, c.respawn_at, pa.name AS art, c.expires_at
        FROM world_chests c
        LEFT JOIN entity_types pa ON pa.id = c.entity_type_id
       WHERE c.world_id = $1 ORDER BY c.created_at ASC`,
@@ -283,6 +288,20 @@ async function respawnDueFieldChests(client, { getWorld, onReset = () => {} }) {
   return reset;
 }
 
+// SOMET-611: deletes every transient (boss-death) chest whose expires_at has
+// passed and returns the deleted {id, world_id} rows, so the caller can drop
+// them from each loaded world's entry.chests. Rows with a NULL expires_at --
+// every authored vault and field chest -- are never touched. Runs off the
+// DB column rather than an in-memory timer so a chest outlives neither a
+// server restart nor a world reload.
+async function purgeExpiredChests(client) {
+  const r = await client.query(
+    'DELETE FROM world_chests WHERE expires_at IS NOT NULL AND expires_at <= now() RETURNING id, world_id',
+  );
+  return r.rows;
+}
+
 module.exports = {
   insertVaultChest, fetchChests, mapChestRow, spawnFieldChest, nearestChest, respawnDueFieldChests,
+  purgeExpiredChests,
 };

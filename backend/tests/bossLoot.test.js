@@ -10,6 +10,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   TIER_LOOT_DEFAULTS, resolveLootProfile, biasedRng, floorRarity, rollBossRarity,
+  MAX_LOOT_ROLLS, bossGoldRange, DEFAULT_BOSS_GOLD_RANGE, spawnBossLootItems,
+  awardDungeonBossLoot, shortenBossChestExpiry,
 } = require('../src/authority/bossLoot.js');
 const { RARITIES } = require('../src/authority/rarity.js');
 
@@ -86,10 +88,15 @@ test('floorRarity raises a roll below the floor and leaves one at or above it al
   assert.equal(floorRarity('white', 'not-a-real-grade'), 'white'); // unknown floor ignored, not thrown
 });
 
-test('rollBossRarity with no anchors is always white and consumes no rng', () => {
+// SOMET-611 rework: no anchors (no weight table, or a failed tuning refresh)
+// still rolls nothing -- but the floor is the boss profile's promise and
+// must hold regardless. It used to return a bare 'white' BEFORE flooring.
+test('rollBossRarity with no anchors consumes no rng but still honours the floor', () => {
   let called = false;
   const rng = () => { called = true; return 0.9; };
-  assert.equal(rollBossRarity(150, null, { bias: 0.5, minRarity: 'foxy' }, rng), 'white');
+  assert.equal(rollBossRarity(150, null, { bias: 0.5, minRarity: 'foxy' }, rng), 'foxy');
+  assert.equal(rollBossRarity(150, null, { bias: 0.5, minRarity: 'blue' }, rng), 'blue');
+  assert.equal(rollBossRarity(150, null, { bias: 0.5, minRarity: null }, rng), 'white');
   assert.equal(called, false, 'no anchors must roll NOTHING, mirroring spawnDrops/openChest');
 });
 
@@ -150,4 +157,103 @@ test('a higher item level never produces a worse rarity than a lower one, same p
       prev = cur;
     }
   }
+});
+
+// ---- SOMET-611 rework -------------------------------------------------------
+
+test('resolveLootProfile caps an over-large loot_rolls at MAX_LOOT_ROLLS (20)', () => {
+  assert.equal(MAX_LOOT_ROLLS, 20);
+  assert.equal(resolveLootProfile({ boss_tier: 'world', loot_rolls: 1e6 }).rolls, 20);
+  assert.equal(resolveLootProfile({ boss_tier: 'world', loot_rolls: 20 }).rolls, 20);
+});
+
+// The spec's "End >= Elite at equal rng/level", with the REAL tier profiles
+// (floors included) rather than floor-stripped ones: dungeon_end's floor
+// (yellow) and bias (0.4) both dominate dungeon_elite's (blue, 0.2).
+test('the real dungeon_end profile never rolls worse than the real dungeon_elite profile', () => {
+  const end = resolveLootProfile({ boss_tier: 'dungeon_end' });
+  const elite = resolveLootProfile({ boss_tier: 'dungeon_elite' });
+  for (const level of [1, 25, 50, 100, 150]) {
+    for (let i = 0; i < 1000; i += 1) {
+      const r = i / 1000;
+      const e = RARITIES.indexOf(rollBossRarity(level, ANCHORS, end, () => r));
+      const l = RARITIES.indexOf(rollBossRarity(level, ANCHORS, elite, () => r));
+      assert.ok(e >= l, `level ${level}, rng ${r}: end ${RARITIES[e]} < elite ${RARITIES[l]}`);
+    }
+  }
+});
+
+test('bossGoldRange reads the row\'s own gold_min/gold_max (spec §3.1), defaulting only when none is authored', () => {
+  assert.deepEqual(bossGoldRange({ gold_min: 20, gold_max: 40 }), { min: 20, max: 40 });
+  assert.deepEqual(bossGoldRange({ gold_min: '8', gold_max: '15' }), { min: 8, max: 15 });
+  assert.deepEqual(bossGoldRange({ gold_min: 50, gold_max: 10 }), { min: 10, max: 10 }, 'min clamped to max');
+  assert.equal(bossGoldRange({ gold_min: null, gold_max: null }), DEFAULT_BOSS_GOLD_RANGE);
+  assert.equal(bossGoldRange({ gold_min: 0, gold_max: 0 }), DEFAULT_BOSS_GOLD_RANGE);
+  assert.equal(bossGoldRange(null), DEFAULT_BOSS_GOLD_RANGE);
+});
+
+function recordingPool(handlers = {}) {
+  const calls = [];
+  return {
+    calls,
+    async query(sql, params) {
+      calls.push({ sql, params });
+      for (const [re, fn] of Object.entries(handlers)) {
+        if (new RegExp(re).test(sql)) return fn(sql, params);
+      }
+      return { rows: [] };
+    },
+  };
+}
+
+test('spawnBossLootItems with includeOwnDrops:false never reads the entity\'s own drop rows', async () => {
+  const pool = recordingPool();
+  const entry = { worldId: 'w', world: { groundItems: { add() {} } } };
+  await spawnBossLootItems(pool, entry, {
+    entityTypeId: 7, behaviorId: 3, profile: { rolls: 0, minRarity: null, bias: 0 },
+    itemLevel: 10, x: 0, y: 0, includeOwnDrops: false,
+  });
+  assert.equal(pool.calls.filter((c) => /creature_drops|behavior_drops/.test(c.sql)).length, 0);
+
+  const pool2 = recordingPool();
+  await spawnBossLootItems(pool2, entry, {
+    entityTypeId: 7, behaviorId: 3, profile: { rolls: 0, minRarity: null, bias: 0 },
+    itemLevel: 10, x: 0, y: 0,
+  });
+  assert.equal(pool2.calls.filter((c) => /creature_drops|behavior_drops/.test(c.sql)).length, 2,
+    'the default still reads both (the kill\'s own drops)');
+});
+
+// A failed gold insert used to abort the award before the chest was spawned
+// and before anything was broadcast.
+test('awardDungeonBossLoot still spawns the chest and broadcasts when the gold insert fails', async () => {
+  const pool = recordingPool({
+    'INSERT INTO world_items \\(world_id, item_type_id, x, y, expires_at, quantity\\)': () => { throw new Error('gold boom'); },
+    'INSERT INTO world_chests': () => ({
+      rows: [{ id: 'ch1', x: 5, y: 6, kind: 'vault', guard_entity_type_id: 21, guard_level: 50,
+        guard_creature_ids: [], state: 'unlocked', expires_at: new Date() }],
+    }),
+  });
+  const entry = { worldId: 'w', goldItemTypeId: 99, chests: [], world: { groundItems: { add() {} } } };
+  const broadcasts = [];
+  await assert.rejects(awardDungeonBossLoot({
+    entry, entityTypeId: 21, level: 50, x: 5, y: 6,
+    row: { boss_tier: 'dungeon_end', gold_min: 20, gold_max: 40 },
+  }, {
+    pool, rng: () => 0.5,
+    broadcastItemsFn: () => broadcasts.push('items'),
+    broadcastChestsFn: () => broadcasts.push('chests'),
+  }), /gold boom/);
+  assert.equal(entry.chests.length, 1, 'the chest still spawned');
+  assert.deepEqual(broadcasts, ['items', 'chests']);
+  const goldCall = pool.calls.find((c) => /quantity\)\s*VALUES/.test(c.sql));
+  assert.ok(goldCall, 'gold insert attempted');
+  assert.ok(goldCall.params[5] >= 20 && goldCall.params[5] <= 40, `gold uses the row's own range, got ${goldCall.params[5]}`);
+});
+
+test('shortenBossChestExpiry leaves a permanent (no-deadline) chest alone without a query', async () => {
+  const pool = recordingPool();
+  const chest = { id: 'c', expiresAt: null };
+  await shortenBossChestExpiry(pool, chest);
+  assert.equal(pool.calls.length, 0);
 });

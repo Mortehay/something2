@@ -18,9 +18,16 @@ export const MAX_HITBOX_PX = 400;
 // SOMET-611 (S10, spec §3.7): the four nullable loot override columns.
 // RARITIES mirrors backend/src/authority/rarity.js's own constant (ascending
 // white < blue < yellow < foxy) -- not imported, since the frontend has no
-// access to backend source; __tests__/lootFields.test.js pins the two lists
-// against each other the same way elementLists.test.js pins ENTITY_ELEMENTS.
+// access to backend source; __tests__/bossFields.test.js pins the two lists
+// (and MAX_LOOT_ROLLS) against the backend source.
 export const LOOT_RARITIES = ["white", "blue", "yellow", "foxy"];
+// Mirrors MAX_LOOT_ROLLS in backend/src/authority/bossLoot.js.
+export const MAX_LOOT_ROLLS = 20;
+// The boss tiers whose loot the four loot_* columns actually drive
+// (bossLoot.js's TIER_LOOT_DEFAULTS). A miniboss has its own drop path
+// (S12), so the form hides the fields there rather than offering overrides
+// that would silently do nothing.
+export const LOOT_TIERS = ["world", "dungeon_end", "dungeon_elite"];
 // loot_chest is tri-state (NULL = tier default, true, false) -- a plain
 // checkbox has no way to represent "unset", so the form field is a string
 // ("", "true", "false") converted at the payload/hydration boundary, same
@@ -41,7 +48,10 @@ export function bossFieldsFromEntity(entity) {
     base_damage: entity?.base_damage ?? "",
     loot_rolls: entity?.loot_rolls ?? "",
     loot_min_rarity: entity?.loot_min_rarity ?? "",
-    loot_rarity_bias: entity?.loot_rarity_bias ?? "",
+    // NUMERIC column: pg returns it as a string ("0.5"); coerce here or
+    // bossFieldError's Number.isFinite (and the server's typeof check)
+    // rejects every later save of a row that has a bias set.
+    loot_rarity_bias: entity?.loot_rarity_bias == null ? "" : Number(entity.loot_rarity_bias),
     loot_chest: entity?.loot_chest == null ? "" : String(entity.loot_chest),
   };
 }
@@ -70,7 +80,9 @@ export function bossFieldError(f) {
   const dmg = blankToNull(f.base_damage);
   if (dmg != null && (!Number.isFinite(dmg) || dmg < 0)) return "Base Damage must be a non-negative number";
   const rolls = blankToNull(f.loot_rolls);
-  if (rolls != null && (!Number.isInteger(rolls) || rolls < 0)) return "Loot Rolls must be a non-negative integer";
+  if (rolls != null && (!Number.isInteger(rolls) || rolls < 0 || rolls > MAX_LOOT_ROLLS)) {
+    return `Loot Rolls must be an integer between 0 and ${MAX_LOOT_ROLLS}`;
+  }
   const minRarity = blankToNull(f.loot_min_rarity);
   if (minRarity != null && !LOOT_RARITIES.includes(minRarity)) return "Loot Min Rarity must be one of white/blue/yellow/foxy";
   const bias = blankToNull(f.loot_rarity_bias);

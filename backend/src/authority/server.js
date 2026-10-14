@@ -29,7 +29,7 @@ const { fetchWaypoints, activateWaypoint, waypointTileKey } = require('../servic
 const { buildLandmarks } = require('../services/landmarks');
 const { loadPointKindDefaults, resolvePointArt, chestPointKind } = require('../services/pointArt');
 const {
-  fetchChests, spawnFieldChest, nearestChest, respawnDueFieldChests,
+  fetchChests, spawnFieldChest, nearestChest, respawnDueFieldChests, purgeExpiredChests,
 } = require('../services/chests.js');
 const { openChest } = require('./chestLoot.js');
 const { getSetting } = require('../services/gameSettings.js');
@@ -47,7 +47,7 @@ const { consumeAmmo, ammoCount } = require('./ammo');
 const { PICKUP_RADIUS } = require('./groundItems');
 const { WorldBossManager, dropLegendaryItemForPlayer } = require('./worldBoss');
 const { DungeonBossManager } = require('./dungeonBosses');
-const { awardDungeonBossLoot } = require('./bossLoot');
+const { awardDungeonBossLoot, shortenBossChestExpiry } = require('./bossLoot');
 
 // SOMET-473 -- the Druid's charm (spec 8.2, contract §6.5).
 //
@@ -2670,19 +2670,16 @@ function attachAuthority(httpServer, pool, opts = {}) {
         clearOverviewCache(entry.worldId);
         broadcastChests(entry);
 
-        // If this is a World Boss Victory Chest, schedule despawn 30 seconds after opening
-        if (chest.isBossChest) {
-          setTimeout(async () => {
-            try {
-              if (entry && entry.chests) {
-                entry.chests = entry.chests.filter((c) => c.id !== chest.id);
-                await pool.query('DELETE FROM world_chests WHERE id = $1', [chest.id]).catch(() => {});
-                broadcastChests(entry);
-              }
-            } catch (err) {
-              console.error('Error despawning boss victory chest after 30s:', err);
-            }
-          }, 30000);
+        // SOMET-611: a transient boss-death chest (world or dungeon boss)
+        // carries an expires_at deadline; once opened it only needs to
+        // linger long enough to read as "looted", so pull the deadline in to
+        // BOSS_CHEST_OPENED_TTL_MS. LEAST, never later than it already was.
+        // The item sweep's purgeExpiredChests does the actual delete -- a DB
+        // deadline, so it survives a restart, unlike the old in-memory
+        // isBossChest + setTimeout it replaces (which nothing set any more).
+        if (chest.expiresAt != null) {
+          await shortenBossChestExpiry(pool, chest)
+            .catch((err) => console.error('boss chest expiry update failed:', err));
         }
 
         // Final-review fix (SOMET-244 Important #3): mirrors onCreatureDeath's
@@ -3802,6 +3799,33 @@ function attachAuthority(httpServer, pool, opts = {}) {
     }
 
     chestRespawnSweep();
+    purgeExpiredChestsSweep();
+  }
+
+  // SOMET-611: transient boss-death chests past their expires_at. Deletes in
+  // the DB first, then drops the same ids from every LOADED world's
+  // entry.chests (an unloaded world simply won't load them -- they are gone
+  // from the table) and rebroadcasts only the worlds that actually changed.
+  async function purgeExpiredChestsSweep() {
+    try {
+      const gone = await purgeExpiredChests(pool);
+      if (gone.length === 0) return;
+      const byWorld = new Map();
+      for (const { id, world_id: worldId } of gone) {
+        if (!byWorld.has(worldId)) byWorld.set(worldId, new Set());
+        byWorld.get(worldId).add(id);
+      }
+      for (const [worldId, ids] of byWorld) {
+        clearOverviewCache(worldId);
+        const entry = worlds.get(worldId);
+        if (!entry || !entry.chests) continue;
+        const before = entry.chests.length;
+        entry.chests = entry.chests.filter((c) => !ids.has(c.id));
+        if (entry.chests.length !== before) broadcastChests(entry);
+      }
+    } catch (err) {
+      console.error('expired chest purge failed:', err);
+    }
   }
 
   const itemSweepTimer = setInterval(() => {
@@ -3835,6 +3859,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // real itemSweepTimer's fire-and-forget call) instead of waiting for or
     // racing wall-clock itemSweepMs.
     _chestRespawnSweep: chestRespawnSweep,
+    // SOMET-611 test seam, same reasoning: one deterministic purge pass.
+    _purgeExpiredChests: purgeExpiredChestsSweep,
     // Test seam, same reasoning as _chestRespawnSweep: run one creature
     // respawn pass synchronously (and await it, unlike the timer's
     // fire-and-forget call) instead of racing wall-clock creatureSweepMs.

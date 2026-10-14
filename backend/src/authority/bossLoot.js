@@ -19,6 +19,20 @@ const { mapChestRow } = require('../services/chests.js');
 // participant" -- a PER-RECIPIENT count, not a per-death total -- so the
 // caller (worldBoss.js) multiplies this by its own contributor loop rather
 // than this module knowing anything about participants.
+// Hard ceiling on extra rolls per recipient -- matches the migration's CHECK
+// and the admin validators. Each roll is a synchronous rollItemInstance on
+// the authority loop plus a world_items row (per participant, for a world
+// boss), so this is a stall guard, not a balance knob.
+const MAX_LOOT_ROLLS = 20;
+
+// A boss-death chest is transient: purged by the item sweep
+// (purgeExpiredChests) BOSS_CHEST_TTL_MS after it spawns if nobody opens it,
+// or BOSS_CHEST_OPENED_TTL_MS after it is opened -- the same 10 min / 30 s
+// the world-boss victory chest always intended, now a DB deadline instead of
+// an in-memory timer so it survives a restart or world reload.
+const BOSS_CHEST_TTL_MS = 10 * 60 * 1000;
+const BOSS_CHEST_OPENED_TTL_MS = 30 * 1000;
+
 const TIER_LOOT_DEFAULTS = Object.freeze({
   dungeon_elite: Object.freeze({
     rolls: 2, minRarity: 'blue', bias: 0.2, chest: false,
@@ -49,7 +63,9 @@ function resolveLootProfile(entityTypeRow) {
   const chest = entityTypeRow.loot_chest;
   return {
     tier,
-    rolls: rolls == null ? defaults.rolls : Math.max(0, Math.round(Number(rolls)) || 0),
+    rolls: rolls == null
+      ? defaults.rolls
+      : Math.min(MAX_LOOT_ROLLS, Math.max(0, Math.round(Number(rolls)) || 0)),
     minRarity: minRarity == null ? defaults.minRarity : minRarity,
     // `numeric` rides over the wire as a string; Number() it before the
     // clamp below runs, or a bias of "0.5" would compare as a string and
@@ -87,12 +103,12 @@ function floorRarity(rarity, minRarity) {
 // The single rarity roll every boss-death item (both the entity's own
 // creature_drops/behavior_drops rows and the extra loot_rolls items) goes
 // through -- biased, then floored. `anchors` null (no rarity_weights
-// configured) falls back to 'white' with NO rng consumed, mirroring
-// spawnDrops/openChest's own "no anchors -> white, no roll" contract so a
-// world with no weight table configured behaves identically whether or not
-// this function is in the call path.
+// configured, or the tuning refresh failed) consumes NO rng, mirroring
+// spawnDrops/openChest's own "no anchors -> white, no roll" contract -- but
+// the floor still applies: "never below loot_min_rarity" is the boss
+// profile's promise, and it must hold regardless of the weight table.
 function rollBossRarity(itemLevel, anchors, profile, rng) {
-  if (!anchors) return 'white';
+  if (!anchors) return floorRarity('white', profile.minRarity);
   const rolled = rollRarity(itemLevel, anchors, biasedRng(rng, profile.bias));
   return floorRarity(rolled, profile.minRarity);
 }
@@ -141,18 +157,22 @@ async function rollBossGearItemTypeIds(pool, count, itemLevel, rng) {
 // `entityTypeId` is a separate param from `profile` (not read off it) --
 // resolveLootProfile's return carries no entity identity, and the drop-row
 // queries need the id regardless of which tier/override produced the
-// profile.
+// profile. `includeOwnDrops: false` skips the entity's own drop rows: a
+// world boss calls this once per participant, and its own rows belong to the
+// KILL (rolled once), not to every recipient.
 async function spawnBossLootItems(pool, entry, {
-  entityTypeId, behaviorId = null, profile, itemLevel, x, y,
+  entityTypeId, behaviorId = null, profile, itemLevel, x, y, includeOwnDrops = true,
   rarityAnchors = (entry && entry.rarityAnchors) || null,
   affixPool = (entry && entry.affixPool) || [],
   rng = Math.random, ttlMs = 180000,
 }) {
-  const dr = await pool.query(
-    'SELECT item_type_id, chance, min_qty, max_qty FROM creature_drops WHERE entity_type_id = $1',
-    [entityTypeId],
-  );
-  const br = behaviorId != null
+  const dr = includeOwnDrops && entityTypeId != null
+    ? await pool.query(
+      'SELECT item_type_id, chance, min_qty, max_qty FROM creature_drops WHERE entity_type_id = $1',
+      [entityTypeId],
+    )
+    : { rows: [] };
+  const br = includeOwnDrops && behaviorId != null
     ? await pool.query(
       'SELECT item_type_id, chance, min_qty, max_qty FROM behavior_drops WHERE behavior_id = $1',
       [behaviorId],
@@ -195,12 +215,20 @@ async function spawnBossLootItems(pool, entry, {
 
 // A boss's gold drop, separate from the item roll above because gold rides
 // its own `world_items` row with no rarity/affixes (same split spawnDrops
-// keeps). `goldRange` is the entity's own {min,max} (entry.creatureGold),
-// falling back to a boss-generic range when the entity carries none -- most
-// boss rows have never had a creature_drops-style gold range authored, and a
-// defeated boss dropping literally 0 gold would be a silent regression next
-// to the ordinary-creature path this mirrors.
+// keeps). `goldRange` is the entity's own {min,max} (bossGoldRange, read off
+// the catalog row's gold_min/gold_max, spec §3.1), falling back to a
+// boss-generic range only when the row authors none -- a defeated boss
+// dropping literally 0 gold would be a silent regression next to the
+// ordinary-creature path this mirrors.
 const DEFAULT_BOSS_GOLD_RANGE = Object.freeze({ min: 100, max: 600 });
+
+function bossGoldRange(row) {
+  const min = Number(row && row.gold_min);
+  const max = Number(row && row.gold_max);
+  if (!Number.isFinite(max) || max <= 0) return DEFAULT_BOSS_GOLD_RANGE;
+  const lo = Number.isFinite(min) && min >= 0 ? Math.min(min, max) : 0;
+  return { min: lo, max };
+}
 
 async function spawnBossGold(pool, entry, {
   x, y, goldRange = DEFAULT_BOSS_GOLD_RANGE, rng = Math.random, ttlMs = 180000,
@@ -230,18 +258,41 @@ async function spawnBossGold(pool, entry, {
 // the same camelCase shape fetchChests/spawnFieldChest already produce
 // (mapChestRow), so entry.chests stays one consistent shape regardless of
 // which path pushed a row onto it.
+//
+// The chest is transient: expires_at = now() + ttlMs, purged by the item
+// sweep (purgeExpiredChests); the openchest handler shortens it to
+// BOSS_CHEST_OPENED_TTL_MS once opened. Without this, every boss respawn
+// cycle stacked one more permanent row at the same spot.
 async function spawnBossChest(pool, entry, {
-  x, y, guardEntityTypeId, guardLevel,
+  x, y, guardEntityTypeId, guardLevel, ttlMs = BOSS_CHEST_TTL_MS,
 }) {
   const ins = await pool.query(
-    `INSERT INTO world_chests (world_id, x, y, kind, guard_entity_type_id, guard_level, guard_creature_ids, state)
-     VALUES ($1, $2, $3, 'vault', $4, $5, '[]'::jsonb, 'unlocked')
-     RETURNING id, x, y, kind, guard_entity_type_id, guard_level, guard_creature_ids, state, opened_at, respawn_at`,
-    [entry.worldId, Math.round(x), Math.round(y), guardEntityTypeId, Math.max(1, Math.round(Number(guardLevel)) || 1)],
+    `INSERT INTO world_chests (world_id, x, y, kind, guard_entity_type_id, guard_level, guard_creature_ids, state, expires_at)
+     VALUES ($1, $2, $3, 'vault', $4, $5, '[]'::jsonb, 'unlocked', now() + ($6::int * interval '1 millisecond'))
+     RETURNING id, x, y, kind, guard_entity_type_id, guard_level, guard_creature_ids, state, opened_at, respawn_at, expires_at`,
+    [entry.worldId, Math.round(x), Math.round(y), guardEntityTypeId,
+      Math.max(1, Math.round(Number(guardLevel)) || 1), Math.round(ttlMs)],
   );
   const chest = mapChestRow(ins.rows[0]);
   if (!entry.chests) entry.chests = [];
   entry.chests.push(chest);
+  return chest;
+}
+
+// Called by the openchest handler once a transient boss chest is opened:
+// pulls its purge deadline in to `ttlMs` from now (LEAST -- never later than
+// it already was) and mirrors the new value onto the in-memory chest. A
+// chest with no deadline (authored vault/field chest) is left untouched.
+async function shortenBossChestExpiry(pool, chest, ttlMs = BOSS_CHEST_OPENED_TTL_MS) {
+  if (!chest || chest.expiresAt == null) return chest;
+  const r = await pool.query(
+    `UPDATE world_chests
+        SET expires_at = LEAST(expires_at, now() + ($2::int * interval '1 millisecond'))
+      WHERE id = $1 AND expires_at IS NOT NULL
+      RETURNING expires_at`,
+    [chest.id, Math.round(ttlMs)],
+  );
+  if (r.rows[0]) chest.expiresAt = r.rows[0].expires_at;
   return chest;
 }
 
@@ -270,32 +321,51 @@ async function awardDungeonBossLoot(kill, {
   if (!profile) return null; // not a tier this table knows (defensive; dungeonBosses.js only routes real boss rows here)
   const { entry } = kill;
 
-  const items = await spawnBossLootItems(pool, entry, {
-    entityTypeId: kill.entityTypeId,
-    behaviorId: kill.row.behavior_id ?? null,
-    profile,
-    itemLevel: kill.level,
-    x: kill.x,
-    y: kill.y,
-    rng,
-    ttlMs,
-  });
-  await spawnBossGold(pool, entry, { x: kill.x, y: kill.y, rng, ttlMs });
-
+  // Each step is independent: a failed gold insert must not cost the kill
+  // its chest, and whatever DID land must still be broadcast (the items are
+  // already in groundItems either way). Failures are collected and rethrown
+  // after the broadcast so dungeonBosses.js's onKilled catch still logs them.
+  const errors = [];
+  let items = [];
   let chest = null;
-  if (profile.chest) {
-    chest = await spawnBossChest(pool, entry, {
-      x: kill.x, y: kill.y, guardEntityTypeId: kill.entityTypeId, guardLevel: kill.level,
+  try {
+    items = await spawnBossLootItems(pool, entry, {
+      entityTypeId: kill.entityTypeId,
+      behaviorId: kill.row.behavior_id ?? null,
+      profile,
+      itemLevel: kill.level,
+      x: kill.x,
+      y: kill.y,
+      rng,
+      ttlMs,
     });
+  } catch (err) { errors.push(err); }
+  try {
+    await spawnBossGold(pool, entry, {
+      x: kill.x, y: kill.y, goldRange: bossGoldRange(kill.row), rng, ttlMs,
+    });
+  } catch (err) { errors.push(err); }
+  if (profile.chest && kill.entityTypeId != null) {
+    try {
+      chest = await spawnBossChest(pool, entry, {
+        x: kill.x, y: kill.y, guardEntityTypeId: kill.entityTypeId, guardLevel: kill.level,
+      });
+    } catch (err) { errors.push(err); }
   }
 
   if (broadcastItemsFn) broadcastItemsFn(entry);
   if (chest && broadcastChestsFn) broadcastChestsFn(entry);
 
+  if (errors.length) throw errors[0];
   return { items, chest };
 }
 
 module.exports = {
+  MAX_LOOT_ROLLS,
+  BOSS_CHEST_TTL_MS,
+  BOSS_CHEST_OPENED_TTL_MS,
+  DEFAULT_BOSS_GOLD_RANGE,
+  bossGoldRange,
   TIER_LOOT_DEFAULTS,
   resolveLootProfile,
   biasedRng,
@@ -305,5 +375,6 @@ module.exports = {
   spawnBossLootItems,
   spawnBossGold,
   spawnBossChest,
+  shortenBossChestExpiry,
   awardDungeonBossLoot,
 };

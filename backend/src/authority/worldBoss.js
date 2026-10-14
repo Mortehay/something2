@@ -794,8 +794,12 @@ class WorldBossManager {
     // `{boss_tier:'world'}` stand-in still resolves to the same tier default.
     const lootRecipients = contributors.length > 0 ? contributors : recipients;
     const lootProfile = resolveLootProfile(boss.row || { boss_tier: 'world' });
-    if (dbPool && lootProfile.rolls > 0) {
-      for (const rec of lootRecipients) {
+    // The boss's OWN creature_drops/behavior_drops rows belong to the kill,
+    // not to each recipient (spec: loot_rolls are extras "on top of" the
+    // normal drop rows) -- rolled with the first recipient only.
+    if (dbPool) {
+      for (let i = 0; i < lootRecipients.length; i += 1) {
+        if (i > 0 && lootProfile.rolls <= 0) break;
         try {
           await spawnBossLootItems(dbPool, entry, {
             entityTypeId: (boss.row && boss.row.id) ?? null,
@@ -804,6 +808,8 @@ class WorldBossManager {
             itemLevel: WORLD_BOSS_LEVEL,
             x: cx,
             y: cy,
+            includeOwnDrops: i === 0,
+            rng: this.rng,
           });
         } catch (err) {
           console.error('Failed to roll world boss participant loot:', err);
@@ -843,28 +849,21 @@ class WorldBossManager {
     // the one shared shape). loot_chest respects a per-boss override
     // (lootProfile.chest) the same way the item rolls above do, rather than
     // always spawning one regardless of the entity's own setting.
-    if (dbPool && lootProfile.chest) {
+    // SOMET-611 rework: the chest's lifetime is now a DB deadline
+    // (world_chests.expires_at, 10 min; shortened to 30 s on open by the
+    // openchest handler, purged by the item sweep) instead of an in-memory
+    // setTimeout + isBossChest flag that a restart or world reload silently
+    // dropped. Skipped -- not attempted and failed -- when the defensive
+    // `boss = creature` fallback above carries no catalog row: the chest's
+    // guard_entity_type_id is NOT NULL and there is nothing honest to put
+    // there.
+    let bossChest = null;
+    const guardEntityTypeId = (boss.row && boss.row.id) ?? null;
+    if (dbPool && lootProfile.chest && guardEntityTypeId != null) {
       try {
-        const bossChest = await spawnBossChest(dbPool, entry, {
-          x: cx, y: cy, guardEntityTypeId: boss.row && boss.row.id, guardLevel: WORLD_BOSS_LEVEL,
+        bossChest = await spawnBossChest(dbPool, entry, {
+          x: cx, y: cy, guardEntityTypeId, guardLevel: WORLD_BOSS_LEVEL,
         });
-        // Fallback cleanup if chest is abandoned for 10 minutes. SOMET-611
-        // (S10): .unref() -- this timer has no business keeping the process
-        // alive on its own (a world boss kill is routine, not a shutdown-
-        // blocking operation), and without it a real-DB test that exercises
-        // this path (boss_loot_award_db.test.js) hangs the whole file for
-        // the full 10 minutes even though every assertion already passed --
-        // node --test's own `# fail` count does not surface a hang like
-        // this as a failure (AGENTS.md's "Reading a test run" / SOMET-530).
-        setTimeout(async () => {
-          try {
-            if (entry && entry.chests) {
-              entry.chests = entry.chests.filter((c) => c.id !== bossChest.id);
-              await dbPool.query('DELETE FROM world_chests WHERE id = $1', [bossChest.id]).catch(() => {});
-              if (broadcastChestsFn) broadcastChestsFn(entry);
-            }
-          } catch (_) {}
-        }, 10 * 60 * 1000).unref();
       } catch (err) {
         console.error('Failed to create Boss Victory Chest:', err);
       }
@@ -876,7 +875,8 @@ class WorldBossManager {
 
     // 5. Broadcast victory announcement and idle status
     if (broadcastFn) {
-      const victoryMsg = `[World Boss Defeated] ${boss.name || 'The World Boss'} has been slain! Top contributors receive legendary loot and the Victor's Boon! A Boss Victory Chest has appeared!`;
+      const chestLine = bossChest ? ' A Boss Victory Chest has appeared!' : '';
+      const victoryMsg = `[World Boss Defeated] ${boss.name || 'The World Boss'} has been slain! Top contributors receive legendary loot and the Victor's Boon!${chestLine}`;
       broadcastFn({
         type: 'announcement',
         kind: 'world_boss_slain',
