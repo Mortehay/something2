@@ -1,19 +1,57 @@
-const { optionsForEntity } = require('./spriteBatchOptions.js');
+const { optionsForEntity, optionsForAppearance } = require('./spriteBatchOptions.js');
 const { seedFor } = require('./artJobQueue.js');
 
-async function enqueue(db, entityIds) {
-  if (!Array.isArray(entityIds) || entityIds.length === 0) return { rows: [], unknown: [] };
-  const ids = [...new Set(entityIds.filter(Number.isInteger))];
-  const { rows: entities } = await db.query(
-    `SELECT id, name, prompt, render_mode, is_creature, is_playable
-       FROM entity_types WHERE id = ANY($1::int[]) ORDER BY id`,
-    [ids],
-  );
-  const found = new Set(entities.map((e) => e.id));
-  const unknown = ids.filter((id) => !found.has(id));
-  if (entities.length === 0) return { rows: [], unknown };
+// `targets` is a list of { entityId, variant } -- variant null/undefined
+// means "the entity's own sprite", 1-5 means one of its character_appearances
+// rows. One query loads plain entities, a second loads the requested
+// (entity, variant) appearance rows; either can come back short, which is
+// how `unknown` is built (an id or an id:variant pair nothing matched).
+async function enqueue(db, targets) {
+  if (!Array.isArray(targets) || targets.length === 0) return { rows: [], unknown: [] };
+  const normalized = targets
+    .map((t) => ({ entityId: Number(t.entityId), variant: t.variant == null ? null : Number(t.variant) }))
+    .filter((t) => Number.isInteger(t.entityId) && (t.variant === null || (t.variant >= 1 && t.variant <= 5)));
+  const key = (t) => `${t.entityId}:${t.variant ?? ''}`;
+  const unique = [...new Map(normalized.map((t) => [key(t), t])).values()];
 
-  const opts = entities.map((e) => optionsForEntity(e));
+  const entityIds = [...new Set(unique.filter((t) => t.variant === null).map((t) => t.entityId))];
+  const appearanceIds = [...new Set(unique.filter((t) => t.variant !== null).map((t) => t.entityId))];
+
+  const [{ rows: entities }, { rows: appearances }] = await Promise.all([
+    entityIds.length
+      ? db.query(
+        `SELECT id, name, prompt, render_mode, is_creature, is_playable
+           FROM entity_types WHERE id = ANY($1::int[]) ORDER BY id`,
+        [entityIds],
+      )
+      : { rows: [] },
+    appearanceIds.length
+      ? db.query(
+        `SELECT ca.entity_type_id, ca.variant, e.name AS class_name, e.prompt AS class_prompt
+           FROM character_appearances ca JOIN entity_types e ON e.id = ca.entity_type_id
+          WHERE ca.entity_type_id = ANY($1::int[]) ORDER BY ca.entity_type_id, ca.variant`,
+        [appearanceIds],
+      )
+      : { rows: [] },
+  ]);
+
+  const requestedAppearances = new Set(
+    unique.filter((t) => t.variant !== null).map((t) => `${t.entityId}:${t.variant}`),
+  );
+  // The query above loads every variant of each requested class (one round
+  // trip instead of N); narrow back to only the (entity, variant) pairs the
+  // caller actually asked for.
+  const matchedAppearances = appearances.filter((a) => requestedAppearances.has(`${a.entity_type_id}:${a.variant}`));
+
+  const foundEntities = new Set(entities.map((e) => e.id));
+  const foundAppearances = new Set(matchedAppearances.map((a) => `${a.entity_type_id}:${a.variant}`));
+  const unknown = unique
+    .filter((t) => (t.variant === null ? !foundEntities.has(t.entityId) : !foundAppearances.has(`${t.entityId}:${t.variant}`)))
+    .map((t) => (t.variant === null ? t.entityId : `${t.entityId}:${t.variant}`));
+
+  const opts = [...entities.map((e) => optionsForEntity(e)), ...matchedAppearances.map((a) => optionsForAppearance(a))];
+  if (opts.length === 0) return { rows: [], unknown };
+
   const { rows: prior } = await db.query(
     `SELECT creature, count(*)::int AS n FROM sprite_sets
       WHERE creature = ANY($1::text[]) GROUP BY creature`,
@@ -22,15 +60,15 @@ async function enqueue(db, entityIds) {
   const counts = new Map(prior.map((r) => [r.creature, r.n]));
   const { rows } = await db.query(
     `INSERT INTO sprite_sets
-       (entity_type_id, creature, generation_kind, base_prompt, backend, seed, frames, status)
-     SELECT entity_id, subject, kind, prompt, 'auto', seed, frames, 'queued'
-       FROM unnest($1::int[], $2::text[], $3::text[], $4::text[], $5::int[], $6::int[])
-         AS t(entity_id, subject, kind, prompt, seed, frames)
+       (entity_type_id, appearance_variant, creature, generation_kind, base_prompt, backend, seed, frames, status)
+     SELECT entity_id, variant, subject, kind, prompt, 'auto', seed, frames, 'queued'
+       FROM unnest($1::int[], $2::smallint[], $3::text[], $4::text[], $5::text[], $6::int[], $7::int[])
+         AS t(entity_id, variant, subject, kind, prompt, seed, frames)
      ON CONFLICT DO NOTHING
      RETURNING *`,
     [
-      opts.map((o) => o.entityTypeId), opts.map((o) => o.subject), opts.map((o) => o.kind),
-      opts.map((o) => o.prompt),
+      opts.map((o) => o.entityTypeId), opts.map((o) => o.appearanceVariant),
+      opts.map((o) => o.subject), opts.map((o) => o.kind), opts.map((o) => o.prompt),
       opts.map((o) => seedFor('sprite', o.subject, counts.get(o.subject) || 0)),
       opts.map((o) => o.frames),
     ],
@@ -106,7 +144,7 @@ async function queueView(db) {
   const [counts, active] = await Promise.all([
     stats(db),
     db.query(
-      `SELECT s.id, s.entity_type_id, s.creature, s.generation_kind, s.frames,
+      `SELECT s.id, s.entity_type_id, s.appearance_variant, s.creature, s.generation_kind, s.frames,
               s.backend, s.status, s.attempts, s.last_error, s.claimed_at,
               s.created_at, s.updated_at, s.job_id, s.image_key, s.atlas_key,
               s.manifest_key

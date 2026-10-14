@@ -52,3 +52,35 @@ test('claim skips orphaned single-entity rows and takes the batch row', { skip }
     await pool.end();
   }
 });
+
+// sprite_sets_one_live_per_entity_variant (migration 1714440750000) replaced
+// the old one-job-per-entity unique index with one keyed on
+// (entity_type_id, COALESCE(appearance_variant, 0)) specifically so a
+// class's 5 appearance variants can all be queued at once -- this proves
+// that, not just that enqueueing one variant works.
+test('enqueue targets distinct appearance variants of the same class independently', { skip }, async () => {
+  const pool = new Pool({ connectionString: url });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [cls] } = await client.query(
+      `SELECT ca.entity_type_id FROM character_appearances ca
+        GROUP BY ca.entity_type_id HAVING count(*) >= 2 LIMIT 1`,
+    );
+    assert.ok(cls, 'precondition: a class with at least two appearance variants');
+
+    const { rows, unknown } = await queue.enqueue(client, [
+      { entityId: cls.entity_type_id, variant: 1 },
+      { entityId: cls.entity_type_id, variant: 2 },
+    ]);
+
+    assert.deepEqual(unknown, []);
+    assert.equal(rows.length, 2);
+    assert.deepEqual(rows.map((r) => r.appearance_variant).sort(), [1, 2]);
+    assert.ok(rows.every((r) => r.entity_type_id === cls.entity_type_id));
+  } finally {
+    await client.query('ROLLBACK');
+    client.release();
+    await pool.end();
+  }
+});

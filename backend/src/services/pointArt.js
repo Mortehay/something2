@@ -44,11 +44,16 @@ async function loadPointKindDefaults(db) {
   return new Map(r.rows.filter((row) => row.name).map((row) => [row.kind, row.name]));
 }
 
-async function loadPointTypeNames(db) {
+async function loadPointTypeRows(db) {
   const r = await db.query(
-    'SELECT name, point_kind FROM entity_types WHERE point_kind IS NOT NULL ORDER BY id ASC',
+    'SELECT id, name, point_kind FROM entity_types WHERE point_kind IS NOT NULL ORDER BY id ASC',
   );
-  return new Map(r.rows.map((row) => [row.name, row.point_kind]));
+  return r.rows;
+}
+
+async function loadPointTypeNames(db) {
+  const rows = await loadPointTypeRows(db);
+  return new Map(rows.map((row) => [row.name, row.point_kind]));
 }
 
 // Seed convergence. `idByKey` is seed-map's Map<world key, world id>. Runs
@@ -57,8 +62,7 @@ async function loadPointTypeNames(db) {
 // row itself and only returns the forward id.
 async function applyPointArt(client, spec, idByKey) {
   const types = new Map(
-    (await client.query('SELECT id, name, point_kind FROM entity_types WHERE point_kind IS NOT NULL')).rows
-      .map((r) => [r.name, { id: r.id, kind: r.point_kind }]),
+    (await loadPointTypeRows(client)).map((r) => [r.name, { id: r.id, kind: r.point_kind }]),
   );
   // Validated up front so a bad spec writes nothing (the caller's transaction
   // would roll back anyway; this keeps the error at the first bad name).
@@ -76,10 +80,15 @@ async function applyPointArt(client, spec, idByKey) {
   for (const l of links) {
     if (l.kind !== 'portal') continue;
     const typeId = idFor(l.art, 'portal', `portal link ${l.from}->${l.to} art`);
+    // SOMET-586: to_art overrides the arrival/mirror row only (a dungeon
+    // mouth and its inside can want different art); `to_art ?? art` keeps
+    // both rows on the same type, the pre-586 behaviour, whenever a spec
+    // leaves to_art unset.
+    const toTypeId = idFor(l.to_art ?? l.art, 'portal', `portal link ${l.from}->${l.to} to_art`);
     const sql = `UPDATE map_links SET entity_type_id = $4
                   WHERE from_world_id = $1 AND edge = 'PORTAL' AND from_x = $2 AND from_y = $3`;
     await client.query(sql, [idByKey.get(l.from), l.from_x, l.from_y, typeId]);
-    await client.query(sql, [idByKey.get(l.to), l.to_x, l.to_y, typeId]);
+    await client.query(sql, [idByKey.get(l.to), l.to_x, l.to_y, toTypeId]);
     n.portals += 1;
     if (l.is_waypoint === true) {
       const wpId = idFor(l.waypoint_art, 'waypoint', `portal link ${l.from}->${l.to} waypoint_art`);
@@ -106,11 +115,14 @@ async function applyPointArt(client, spec, idByKey) {
     }
     if (w.chest) {
       const chestId = idFor(w.chest.art, 'chest_vault', `world "${w.key}" chest art`);
-      await client.query(
+      // n.chests counts rows actually written, not specs that named a chest --
+      // a world with no vault chest row (or one already removed) would
+      // otherwise inflate the count with an UPDATE that touched nothing.
+      const result = await client.query(
         `UPDATE world_chests SET entity_type_id = $2 WHERE world_id = $1 AND kind = 'vault'`,
         [idByKey.get(w.key), chestId],
       );
-      n.chests += 1;
+      n.chests += result.rowCount || 0;
     }
   }
   return n;

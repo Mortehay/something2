@@ -139,12 +139,24 @@ async function populateWorld(client, worldRow, { rngSeed }) {
     return { scattered: 0, packed: 0, total: 0 };
   }
 
-  // SOMET-603: boss-tier rows are placed by their own owners (WorldBossManager,
-  // S9's map-spec `boss` block), never scattered -- same structural exclusion
-  // as the guard filter below, done in SQL because boss_tier is not selected.
+  // SOMET-603: world/dungeon boss-tier rows are placed by their own owners
+  // (WorldBossManager, DungeonBossManager, S9's map-spec `boss` block), never
+  // scattered -- same structural exclusion as the guard filter below, done in
+  // SQL because boss_tier is not selected.
+  //
+  // SOMET-624 (S11): 'miniboss' is the one boss_tier that is DESIGNED to come
+  // through this exact path -- its own ticket text is "spawns as a rare
+  // regular mob via the existing population/density-tier machinery", not a
+  // manager. Excluding it here silently stranded all 41 generated minibosses:
+  // the catalog rows and biome wiring were both correct, but this filter kept
+  // them out of the candidate pool regardless, so none of them could ever be
+  // placed in any world (live-reproduced 2026-10-12: 0/879 in a controlled
+  // test world that explicitly allowed one). 'world'/'dungeon_elite'/
+  // 'dungeon_end' stay excluded -- those three are still manager-owned.
   const et = await client.query(
     `SELECT name, hp, defense, resistances, faction FROM entity_types
-      WHERE is_creature = true AND boss_tier IS NULL AND name = ANY($1::text[])`,
+      WHERE is_creature = true AND (boss_tier IS NULL OR boss_tier = 'miniboss')
+        AND name = ANY($1::text[])`,
     [allowedNames],
   );
   // Guards are structural, never wild spawns -- the same filter the re-roll

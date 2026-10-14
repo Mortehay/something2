@@ -4,7 +4,7 @@ import toast from 'react-hot-toast';
 import { HiOutlinePlus, HiOutlineTrash, HiOutlineArrowPath, HiOutlineSparkles, HiOutlineStar, HiOutlineChevronRight, HiOutlineChevronDown } from 'react-icons/hi2';
 import { useWorlds, useCreateWorld, useDeleteWorld } from './useWorlds.js';
 import { useEntityTypes } from './useMaps.js';
-import { useUpdateWorld, useRegenerateWorld, useRerollCreatures, useWorldLinks, useSetLink, useClearLink, useWorldVillages, useAddVillage, useDeleteVillage, useWorldsSummary } from './useMapsAdmin.js';
+import { useUpdateWorld, useRegenerateWorld, useRerollCreatures, useWorldLinks, useSetLink, useClearLink, useWorldVillages, useAddVillage, useDeleteVillage, useSetVillageArt, useWorldsSummary, useWorldWaypoint, useWorldChest, useSetWaypointArt, useSetChestArt } from './useMapsAdmin.js';
 import { useBiomes } from './useBiomes.js';
 import { orderBiomeNames } from './biomeForm.js';
 import { groupWorldsByRegion, filterWorlds, defaultOpenGroups } from './mapListView.js';
@@ -105,6 +105,108 @@ const PickerOption = styled.button`
 const VILLAGE_DEFAULT_W = 5;
 const VILLAGE_DEFAULT_H = 5;
 
+// SOMET-587. The four posts one villages row carries (merchant_entity_type_id
+// etc. on the DB side -- see backend/seeds/data/pointTypes.js's
+// VILLAGE_POST_KINDS, which this list mirrors; not imported directly since
+// that module lives on the backend side of the repo split and nothing else
+// here crosses it). Each slot name doubles as its own point_kind.
+const VILLAGE_POST_SLOTS = ['merchant', 'bank', 'gem_merchant', 'skill_merchant'];
+const VILLAGE_POST_LABELS = {
+  merchant: 'Merchant', bank: 'Bank', gem_merchant: 'Gem merchant', skill_merchant: 'Skill merchant',
+};
+// villages row field name for a slot's current binding, matching the GET
+// /api/worlds/:id/villages column names added for this ticket.
+const villageSlotColumn = (slot) => `${slot}_entity_type_id`;
+
+// SOMET-587. One post's art picker: a plain `<select>`, options filtered to
+// this slot's own point_kind from the full entity-type catalog already
+// loaded for the catalog editor (no second fetcher). A 422 ("no unique spec
+// match") is surfaced by useSetVillageArt's own toast -- this component does
+// not swallow or special-case it.
+function VillagePostArtPicker({ village, worldId, slot, entityTypes }) {
+  const setArt = useSetVillageArt();
+  const options = useMemo(
+    () => (entityTypes || []).filter((t) => t.point_kind === slot),
+    [entityTypes, slot],
+  );
+  const current = village[villageSlotColumn(slot)] ?? '';
+  return (
+    <label style={{ color: 'var(--s2-text-secondary)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      {VILLAGE_POST_LABELS[slot]}
+      <select
+        value={current}
+        disabled={setArt.isPending}
+        onChange={(e) => {
+          const chosen = options.find((t) => String(t.id) === e.target.value);
+          setArt.mutate({ id: village.id, worldId, slot, art_name: chosen ? chosen.name : null });
+        }}
+      >
+        <option value="">— kind default —</option>
+        {options.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+      </select>
+    </label>
+  );
+}
+
+// SOMET-587. A world's waypoint/chest art pickers. Added here (the Maps
+// tab's per-world card) rather than to the World Map tab's Cytoscape graph:
+// a waypoint and a vault chest are not drawn as their own graph nodes or
+// edges there today (only worlds and links are), and that graph's own
+// comments elsewhere in this ticket's own diff already flag exactly this
+// kind of extension as the more fragile path (new node/edge kinds bring the
+// same selection-id risk this ticket already found and fixed for multi-
+// portal worlds). A world has at most one of each (waypoints_world_unique;
+// seed-map's applyPointArt keys its chest UPDATE on
+// `WHERE world_id = $1 AND kind = 'vault'` with no further disambiguator),
+// so one picker per world, not a list, is the right shape — see
+// useWorldWaypoint/useWorldChest's own comment for the cardinality check.
+// `current` reads `art` as a NAME directly (fetchWaypoints/fetchChests
+// already resolve `entity_type_id` to a name via their own LEFT JOIN), not
+// an id the way the portal/village pickers do.
+function WaypointArtPicker({ waypoint, worldId, entityTypes }) {
+  const setArt = useSetWaypointArt();
+  const options = useMemo(
+    () => (entityTypes || []).filter((t) => t.point_kind === 'waypoint'),
+    [entityTypes],
+  );
+  const current = waypoint.art ?? '';
+  return (
+    <label style={{ color: 'var(--s2-text-secondary)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      Waypoint art
+      <select
+        value={current}
+        disabled={setArt.isPending}
+        onChange={(e) => setArt.mutate({ id: waypoint.id, worldId, art_name: e.target.value || null })}
+      >
+        <option value="">— kind default —</option>
+        {options.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
+      </select>
+    </label>
+  );
+}
+
+function ChestArtPicker({ chest, worldId, entityTypes }) {
+  const setArt = useSetChestArt();
+  const options = useMemo(
+    () => (entityTypes || []).filter((t) => t.point_kind === 'chest_vault'),
+    [entityTypes],
+  );
+  const current = chest.art ?? '';
+  return (
+    <label style={{ color: 'var(--s2-text-secondary)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      Vault chest art
+      <select
+        value={current}
+        disabled={setArt.isPending}
+        onChange={(e) => setArt.mutate({ id: chest.id, worldId, art_name: e.target.value || null })}
+      >
+        <option value="">— kind default —</option>
+        {options.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
+      </select>
+    </label>
+  );
+}
+
 function bounded(w) { return !!(w.width && w.height); }
 
 // SOMET-554. Replaces a grid of one checkbox per creature type. On the dev
@@ -197,7 +299,7 @@ function MapRow({ world, summary, biomeColors = {}, open, onToggle, onDelete }) 
   );
 }
 
-function MapCard({ world, creatureTypes, allMaps, biomes, biomesLoading }) {
+function MapCard({ world, creatureTypes, allMaps, biomes, biomesLoading, entityTypes }) {
   const update = useUpdateWorld();
   const regen = useRegenerateWorld();
   const reroll = useRerollCreatures();
@@ -207,6 +309,8 @@ function MapCard({ world, creatureTypes, allMaps, biomes, biomesLoading }) {
   const villages = useWorldVillages(world.id);
   const addVillage = useAddVillage();
   const delVillage = useDeleteVillage();
+  const waypoint = useWorldWaypoint(world.id);
+  const chest = useWorldChest(world.id);
   const [vMinRow, setVMinRow] = useState(1);
   const [vMinCol, setVMinCol] = useState(1);
   const [vW, setVW] = useState(VILLAGE_DEFAULT_W);
@@ -366,12 +470,40 @@ function MapCard({ world, creatureTypes, allMaps, biomes, biomesLoading }) {
           </label>
         ))}
       </Row>
+      {/* SOMET-587: a world holds at most one waypoint and one vault chest
+          (see useWorldWaypoint/useWorldChest's own comment on cardinality),
+          so this is one picker each, not a list -- rendered only once the
+          query resolves AND actually found one, exactly like the village
+          picker's own spec_key guard just below. */}
+      {(waypoint || chest) && (
+        <Row>
+          <span style={{ color: 'var(--s2-text-muted)' }}>World points:</span>
+          {waypoint && <WaypointArtPicker waypoint={waypoint} worldId={world.id} entityTypes={entityTypes} />}
+          {chest && <ChestArtPicker chest={chest} worldId={world.id} entityTypes={entityTypes} />}
+        </Row>
+      )}
       <Row style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
         <span style={{ color: 'var(--s2-text-muted)' }}>Villages:</span>
         {villages.map((v) => (
-          <div key={v.id} style={{ color: 'var(--s2-text-secondary)', display: 'flex', gap: 8, alignItems: 'center' }}>
-            <span>({v.min_row},{v.min_col}) {v.width}×{v.height} gate {v.gate_edge}</span>
-            <button onClick={() => delVillage.mutate({ id: world.id, villageId: v.id })}>Delete</button>
+          <div key={v.id} style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%' }}>
+            <div style={{ color: 'var(--s2-text-secondary)', display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span>({v.min_row},{v.min_col}) {v.width}×{v.height} gate {v.gate_edge}</span>
+              <button onClick={() => delVillage.mutate({ id: world.id, villageId: v.id })}>Delete</button>
+            </div>
+            {/* SOMET-587: per-post art pickers. Hidden when spec_key is
+                absent (a village created before specs existed, or since) --
+                the write-back would 422 on every change since there is no
+                spec entry to locate, so showing a picker that can never
+                actually save is worse than not showing one. */}
+            {v.spec_key != null && (
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginLeft: '1rem', fontSize: '0.9em' }}>
+                {VILLAGE_POST_SLOTS.map((slot) => (
+                  <VillagePostArtPicker
+                    key={slot} village={v} worldId={world.id} slot={slot} entityTypes={entityTypes}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         ))}
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -503,7 +635,7 @@ function MapsAdmin() {
                 />
                 {openId === w.id && (
                   <MapCard world={w} creatureTypes={creatureTypes} allMaps={boundedMaps}
-                    biomes={biomes} biomesLoading={isLoadingBiomes} />
+                    biomes={biomes} biomesLoading={isLoadingBiomes} entityTypes={entityTypes} />
                 )}
               </div>
             ))}

@@ -288,8 +288,10 @@ export function applyFilters(subjects, { kind = 'all', art = 'all', search = '',
 
 // Enqueue is idempotent server-side, so "I selected 100 and 3 were queued" is
 // the normal case rather than an error -- but it is baffling without the
-// breakdown. Each number is named.
-export function enqueueSummary(results) {
+// breakdown. Each number is named. `error`, when a kind was refused (e.g. an
+// object-size refusal, SOMET-541), is stated together with how much queued
+// before it -- the kinds enqueued before the refusal are not lost.
+export function enqueueSummary(results, error = null) {
   const t = results.reduce((acc, r) => ({
     requested: acc.requested + (r.requested || 0),
     queued: acc.queued + (r.queued || 0),
@@ -300,7 +302,30 @@ export function enqueueSummary(results) {
   const parts = [`Queued ${t.queued} of ${t.requested}`];
   if (t.alreadyLive) parts.push(`${t.alreadyLive} already in flight`);
   if (t.unknown) parts.push(`${t.unknown} no longer in the catalogue`);
-  return { ...t, message: parts.join(' — ') };
+  let message = parts.join(' — ');
+  if (error) message = `Stopped after an error: ${error.message || error}. ${message} before it; the rest stay selected.`;
+  return { ...t, message };
+}
+
+// Queues one kind at a time, because the route takes a single kind per
+// request. A mixed object+tile selection sends several requests -- an object
+// kind refused at the source (SOMET-541's enqueue-time size check) must not
+// also swallow tile kinds that already queued, so a failing kind STOPS the
+// rest rather than losing them: the kinds before it keep their result, and
+// `unsent` (the failing kind onward) lets the caller re-select exactly what
+// still needs to go. Mirrors audioSelection.queueInChunks.
+export async function enqueueByKind(byKind, send) {
+  const entries = [...byKind];
+  const results = [];
+  for (let i = 0; i < entries.length; i += 1) {
+    const [kind, keys] = entries[i];
+    try {
+      results.push(await send(kind, keys));
+    } catch (error) {
+      return { results, error, unsent: entries.slice(i) };
+    }
+  }
+  return { results, error: null, unsent: [] };
 }
 
 // One submission at a time, decided SYNCHRONOUSLY. A mutation's isPending

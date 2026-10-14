@@ -394,9 +394,13 @@ test('audio dispatcher', { skip }, async (t) => {
       //
       // Creature subjects with tagged, made-up keys (subjectExists is faked):
       // creature cues are fixed per slot (hurt->hit, death->death, nearby ->
-      // none, upload only). The fake box is the ADAPTER-level
-      // generateSfxPack; everything between it and the job rows -- cue
-      // checks, entity text, mapping rows back, bookkeeping -- is real.
+      // idle since SOMET-627). `sfxProvider`'s models_cache below deliberately
+      // omits 'cue:idle' (along with 'cue:slash'/'cue:spell'/etc.), so a
+      // `nearby` job is still refused upload-only here -- now via the
+      // provider-has-not-discovered-it path rather than the registry having
+      // no cue at all. The fake box is the ADAPTER-level generateSfxPack;
+      // everything between it and the job rows -- cue checks, entity text,
+      // mapping rows back, bookkeeping -- is real.
       const sfxProvider = { id: null, modality: 'audio', models_cache: ['cue:hit', 'cue:death'] };
       const fakeLib = { bindClip: async () => ({}), storeAndBindClip: async () => ({ clip: { id: null }, binding: { id: null } }) };
       const okRow = (it) => ({

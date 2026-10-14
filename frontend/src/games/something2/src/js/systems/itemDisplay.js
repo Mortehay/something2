@@ -23,6 +23,7 @@
 // helper with a baked-in fallback would repaint every legacy row instead.
 import { rarityGlowColor } from "../core/rarityColors.js";
 import { formatModifier } from "./characterTab.js";
+import { artIcon } from "./gameArt.js";
 
 // The border colour for a cell or a row showing one instance.
 //
@@ -34,6 +35,15 @@ import { formatModifier } from "./characterTab.js";
 // chest row -- pixel-identical to how it rendered before this module existed.
 export function rarityBorderColor(rarity, neutral) {
   return rarityGlowColor(rarity) || neutral;
+}
+
+// The generated icon for an item TYPE (SOMET-600), or null when there is
+// none -- every caller falls back to its own pre-existing text/initials, the
+// same contract gameArt.js documents for skills and passive labels. Shared
+// so the inventory grid, the shop shelf and the sell column all key the same
+// icon off the same type.id rather than three readings of artIcon.
+export function itemIcon(art, type) {
+  return type && type.id != null ? artIcon(art, "item", type.id) : null;
 }
 
 // Which normalised field a grant kind reads its `detail` from. The client-side

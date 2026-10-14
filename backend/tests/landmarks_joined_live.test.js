@@ -103,7 +103,13 @@ function fakeLandmarkPool({ activatedRows = [], portalRows = null, waypointRows 
           from_x: PORTAL_X, from_y: PORTAL_Y, to_x: 500, to_y: 500 },
       ] };
     }
-    if (/FROM villages WHERE/i.test(sql)) return { rows: [] };
+    // villagesOf's query joins worlds (same shape as map_links above, matched
+    // on line ~98) -- it is never a standalone "FROM villages WHERE". The old
+    // pattern here never matched the real SQL and only "worked" because the
+    // generic fall-through at the bottom returns the same empty rows: a
+    // regex-routed fixture silently going dead, the exact drift the
+    // map_links route above is already keyed on world id to catch.
+    if (/FROM villages v JOIN worlds/i.test(sql)) return { rows: [] };
     // loadPointKindDefaults (SOMET-582). A default for 'portal' only -- no
     // default is seeded for 'waypoint' here, so the waypoint landmark below
     // must resolve to null, not fall through to some other kind's name.

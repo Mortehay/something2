@@ -110,10 +110,17 @@ services:
       - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD must be set in .env}
       - MINIO_BUCKET=sprites
       - SPRITE_GEN_SHARED_SECRET=${SPRITE_GEN_SHARED_SECRET:?SPRITE_GEN_SHARED_SECRET must be set in .env}
+      # SOMET-539. DB 1, not 0 -- the game-engine's live state is on DB 0 and
+      # the job store must never share keyspace with it. A GPU-box
+      # deployment runs its own `redis` container and overrides this;
+      # nothing here crosses machines except HTTP.
+      - REDIS_URL=redis://redis:6379/1
+      - SPRITE_GEN_WORKERS=${SPRITE_GEN_WORKERS:-1}
     volumes:
       - sprite-models:/root/.cache/huggingface
     depends_on:
       - minio
+      - redis
 
   # SOMET-368 -- public tunnel so someone outside this machine can play.
   # It points at the *frontend*, not the backend: vite proxies /api and the

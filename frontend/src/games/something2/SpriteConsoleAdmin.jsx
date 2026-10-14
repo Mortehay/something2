@@ -7,7 +7,7 @@ import {
   useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
 } from './useSpriteConsole.js';
 import {
-  filterSpriteSubjects, selectAllSpriteSubjects, spriteShape, toggleSpriteSubject,
+  filterSpriteSubjects, selectAllSpriteSubjects, spriteShape, targetsForSprites, toggleSpriteSubject,
 } from './spriteSelection.js';
 
 const Wrap = styled.div`
@@ -81,7 +81,10 @@ function SpriteConsoleAdmin() {
   const selectedRows = subjects.filter((subject) => selected.has(subject.id));
   const approvable = selectedRows.filter((subject) => subject.job_state === 'done' && subject.job_id);
 
-  const enqueue = () => queue.mutate([...selected], { onSuccess: () => setSelected(new Set()) });
+  const enqueue = () => queue.mutate(
+    targetsForSprites(selectedRows),
+    { onSuccess: () => setSelected(new Set()) },
+  );
   const approveSelected = () => approve.mutate(
     approvable.map((subject) => subject.job_id),
     { onSuccess: () => setSelected(new Set()) },

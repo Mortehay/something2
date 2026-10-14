@@ -1,7 +1,7 @@
 import { GAME_WIDTH, GAME_HEIGHT, ISO_TILE_H, ISO_TILE_W, MAP_TILE_SIZE } from "../core/constants.js";
 import { worldToScreen, depthKey } from "../core/iso.js";
 import { compareDrawables, drawWall } from "./wallRenderer.js";
-import { drawLandmarks } from "./landmarkRenderer.js";
+import { drawLandmarks, landmarkColor } from "./landmarkRenderer.js";
 import { pointArtDef, pointBodyRef, pointStateTreatment, planLandmarkBodies } from "./pointArt.js";
 import { drawPlaceholder } from "./placeholderSprite.js";
 import { frameRect, staticFrameKey, animatedFrameKey, facingToDir, tileFrameKey, resolveTileVisual, stateFrameKey } from "./spriteAtlas.js";
@@ -33,7 +33,7 @@ import {
 import { rarityGlowColor, withAlpha } from "../core/rarityColors.js";
 import { artIcon, drawIconFit } from "./gameArt.js";
 import {
-  rarityBorderColor, affixLine, clipToWidth, rowTextOffsets, AFFIX_FONT_PX,
+  rarityBorderColor, affixLine, clipToWidth, rowTextOffsets, AFFIX_FONT_PX, itemIcon,
 } from "./itemDisplay.js";
 
 // Read once from the layout module rather than restated, so the painter and
@@ -293,6 +293,9 @@ export class RenderSystem {
     // SOMET-528. Lingering melee waves; defaults to empty so every existing
     // caller and test renders exactly as before.
     waves = [],
+    // SOMET-608 (S6): active skill telegraphs -- resolved geometry +
+    // remaining/total ms, same contract waves already carries.
+    telegraphs = [],
     skillVisuals = [],
     merchants = [], shop = null, shopOpen = false, shopView = null, decoTypes = null,
     // SOMET-584 — name-keyed entity-type catalog, needed to resolve a world
@@ -421,7 +424,9 @@ export class RenderSystem {
     // legible. The pulse phase is this frame's timestamp, set above -- the
     // renderer never reads a clock itself.
     const landmarkPlan = this._readyLandmarkPlan(landmarks);
-    drawLandmarks(this.ctx, { landmarks, phase: this.nowMs, halfW, halfH, skipBody: landmarkPlan.skipBody });
+    drawLandmarks(this.ctx, {
+      landmarks, phase: this.nowMs, halfW, halfH, skipBody: landmarkPlan.skipBody, beamOverlay: landmarkPlan.beamOverlay,
+    });
     this.drawDoorways(doorways, chunkedMap, player);
 
     // SOMET-523. The leech aura's ground ring, drawn BEFORE the depth-sorted
@@ -434,6 +439,10 @@ export class RenderSystem {
     // same reason: they mark AREA, so they belong under every actor including
     // the creatures standing in them.
     this._drawWaves(waves);
+    // SOMET-608 (S6). A skill telegraph marks the ground that is ABOUT to
+    // hurt, same layer and same reason as waves -- the caster itself (still
+    // standing there, mid wind-up) must not occlude the warning.
+    this._drawTelegraphs(telegraphs);
 
     // Players + creatures + ground items + walls, all depth-sorted together
     // (Pass B) — ground items must join the same sort rather than being
@@ -515,7 +524,10 @@ export class RenderSystem {
     // tall body (a portal arch) permanently hides its own destination pill
     // behind itself. Same `phase: this.nowMs` as the first call -- the pulse
     // must read as one marker, not two out of sync.
-    drawLandmarks(this.ctx, { landmarks, phase: this.nowMs, halfW, halfH, skipBody: landmarkPlan.skipBody, overlayOnly: true });
+    drawLandmarks(this.ctx, {
+      landmarks, phase: this.nowMs, halfW, halfH, skipBody: landmarkPlan.skipBody,
+      beamOverlay: landmarkPlan.beamOverlay, overlayOnly: true,
+    });
 
     // SOMET-493. Resolved against the SAME `drawables` list that was just
     // painted, in the same frame, so the card can never name something that is
@@ -929,7 +941,7 @@ export class RenderSystem {
     if (!Number.isFinite(cx) || !Number.isFinite(cy) || !inspect.camera) return;
 
     const point = canvasToCameraPoint(cx, cy, inspect.camera);
-    const hover = pickDrawable(drawables, point);
+    const hover = pickDrawable(drawables, point, inspect.entityDefs);
     this._inspectHoverKey = targetKey(hover);
 
     // Hover wins over a pin: pointing at something new is an unambiguous
@@ -957,7 +969,7 @@ export class RenderSystem {
     // pointer across the screen attached to nothing.
     let ax = cx, ay = cy;
     if (!hover) {
-      const r = drawableScreenRect(target);
+      const r = drawableScreenRect(target, inspect.entityDefs);
       if (r) {
         const off = canvasToCameraPoint(0, 0, inspect.camera);
         ax = r.x + r.w / 2 - off.x;
@@ -1141,6 +1153,48 @@ export class RenderSystem {
       this.ctx.ellipse(s.x, s.y, rx, rx / 2, 0, mid - half, mid + half);
       this.ctx.closePath();
       this.ctx.fill();
+    }
+    this.ctx.restore();
+  }
+
+  // SOMET-608 (S6). A creature skill's wind-up, filling in over
+  // `telegraphMs` before it lands -- "Browser: telegraph visible before a
+  // slam lands" is this ticket's own acceptance line. Combines two
+  // precedents already in this file rather than inventing a third
+  // projection: the "ring" VFX shape's grow-WITHOUT-fade progress math (it
+  // reads as a shockwave building up, not a detonation dying out -- exactly
+  // the feeling a warning should give) with `_drawWaves`'s FILLED geometry
+  // (a stroked outline alone reads as a boundary marker, not "this ground
+  // is about to hurt"). `ms`/`telegraphMs` travel resolved from the server,
+  // so no synchronised clock is needed to compute progress client-side.
+  _drawTelegraphs(telegraphs) {
+    if (!telegraphs || telegraphs.length === 0) return;
+    this.ctx.save();
+    for (const t of telegraphs) {
+      const s = worldToScreen(t.x, t.y);
+      if (!Number.isFinite(s.x) || !Number.isFinite(s.y)) continue;
+      const rx = blastScreenRadiusX(t.radius);
+      if (!(rx > 0)) continue; // also rejects NaN
+      const progress = Math.max(0, Math.min(1, 1 - t.ms / t.telegraphMs));
+      // Starts at 30% of full size (visible the instant it appears, not a
+      // zero-radius dot) and grows to 100% exactly as the cast lands.
+      const fillRx = rx * (0.3 + 0.7 * progress);
+      // SOMET-610 (S7): the skill's own vfx.telegraph binding tints the
+      // fill -- this geometry (a filled area that GROWS over telegraph_ms)
+      // has no equivalent among the 5 ordinary vfx_effects shapes
+      // (arc/line/ring/burst/bolt are all momentary swing effects), so the
+      // binding customises COLOR only; the fallback red keeps every
+      // existing/un-bound skill looking exactly as it did before this slice.
+      const color = (t.v && this.vfxDefs && this.vfxDefs[t.v] && this.vfxDefs[t.v].color) || "#ff4757";
+      this.ctx.beginPath();
+      this.ctx.ellipse(s.x, s.y, fillRx, fillRx / 2, 0, 0, Math.PI * 2);
+      this.ctx.fillStyle = color;
+      this.ctx.globalAlpha = 0.18 + 0.32 * progress;
+      this.ctx.fill();
+      this.ctx.strokeStyle = color;
+      this.ctx.lineWidth = 2;
+      this.ctx.globalAlpha = 0.5 + 0.4 * progress;
+      this.ctx.stroke();
     }
     this.ctx.restore();
   }
@@ -2561,7 +2615,10 @@ export class RenderSystem {
     this.ctx.save();
     if (treatment.ring) {
       this.ctx.globalAlpha = 0.9;
-      this.ctx.strokeStyle = "#7dd3fc";
+      // SOMET-588: was its own copy of the waypoint diamond's colour --
+      // shares landmarkColor so an unlit waypoint's ring and its diamond
+      // can never drift apart when the palette changes.
+      this.ctx.strokeStyle = landmarkColor("waypoint");
       this.ctx.lineWidth = 2;
       this.ctx.beginPath();
       this.ctx.ellipse(s.x, s.y, 28, 14, 0, 0, Math.PI * 2);
@@ -2569,16 +2626,15 @@ export class RenderSystem {
     }
     this.ctx.globalAlpha = treatment.alpha;
     const ref = pointBodyRef(def, x, y, { stateKey: treatment.stateKey });
-    this.drawEntity(ref);
+    // SOMET-584 review round 2 (T9 finding B) wanted the drawn body's on-screen
+    // height so a caption lifts above it rather than landing inside it.
+    // SOMET-588: drawEntity now returns the REAL fit-scaled height (not the
+    // catalog box) -- a width-constrained body (e.g. a wide arch capped by
+    // boxW) fits shorter than its box and used to over-lift the caption into
+    // the empty space above the art.
+    const drawnHeight = this.drawEntity(ref);
     this.ctx.restore();
-    // SOMET-584 review round 2 (T9 finding B): callers need the drawn body's
-    // on-screen height to lift a caption above it, or the caption lands
-    // inside the body (a "Merchant" label in the middle of a 100px arch).
-    // drawEntity fits the sprite INSIDE this box preserving aspect ratio, so
-    // the box height is a safe upper bound on the actual drawn pixel height
-    // -- never less than what was drawn -- without reaching into drawEntity's
-    // private fitSpriteRect math.
-    return ref.displayHeight || ref.height || 40;
+    return drawnHeight;
   }
 
   // A resolvable def (pointArtDef already checked render_mode/image/sprite
@@ -3384,8 +3440,10 @@ export class RenderSystem {
   }
 
   // The sprite-or-image half of drawEntity, shared by bosses and everything
-  // else. Returns true when it drew, false when the caller must supply its own
-  // fallback (a rectangle, or a boss's procedural body).
+  // else. Returns the actual fit-scaled on-screen height when it drew (SOMET-588:
+  // the box passed in is an upper bound, not what a width-constrained sprite
+  // actually fills -- see fitSpriteRect), or `false` when the caller must supply
+  // its own fallback (a rectangle, or a boss's procedural body).
   _drawEntityArt(e, drawX, drawY, w, h) {
     const mode = RenderSystem.resolveRenderMode(e, this.renderModeOverride);
     const sprite = RenderSystem.resolveSprite(e, this.imageManager, mode, this.nowMs);
@@ -3394,7 +3452,7 @@ export class RenderSystem {
       // SOMET-569: the FRAME's dimensions decide the fit, not the atlas's.
       const r = fitSpriteRect(sw, sh, drawX, drawY, w, h);
       this.ctx.drawImage(sprite.img, sx, sy, sw, sh, r.dx, r.dy, r.dw, r.dh);
-      return true;
+      return r.dh;
     }
     const img = mode !== "rect" && e.image && this.imageManager
       ? this.imageManager.get(e.image)
@@ -3403,7 +3461,7 @@ export class RenderSystem {
     // SOMET-569: fit, do not stretch.
     const r = fitSpriteRect(img.width, img.height, drawX, drawY, w, h);
     this.ctx.drawImage(img, r.dx, r.dy, r.dw, r.dh);
-    return true;
+    return r.dh;
   }
 
   drawEntity(e) {
@@ -3426,13 +3484,18 @@ export class RenderSystem {
     this._drawAuraEffects(s.x, drawY + h, e.auras);
 
     if (isBoss) {
-      if (!this._drawEntityArt(e, drawX, drawY, w, h)) this._drawWorldBoss(e, drawX, drawY, w, h, s);
+      const artH = this._drawEntityArt(e, drawX, drawY, w, h);
+      if (!artH) this._drawWorldBoss(e, drawX, drawY, w, h, s);
       this._drawBossPlate(e, drawX, drawY, w, s);
       this._drawEffectPips(drawX, drawY, e.effects);
-      return;
+      return artH || h;
     }
 
-    if (!this._drawEntityArt(e, drawX, drawY, w, h)) {
+    // SOMET-588: the caller (drawPointBody, for a caption's lift) needs the
+    // REAL drawn height, not this box -- a width-constrained sprite fits
+    // shorter than `h` and leaves empty space above it inside the box.
+    const artH = this._drawEntityArt(e, drawX, drawY, w, h);
+    if (!artH) {
       // Degrade to a rectangle so a missing asset never leaves a hole.
       this.ctx.fillStyle = e.color || "#c0392b";
       this.ctx.fillRect(drawX, drawY, w, h);
@@ -3469,6 +3532,7 @@ export class RenderSystem {
       }
     }
     this._drawEffectPips(drawX, drawY, e.effects);
+    return artH || h;
   }
 
   _drawPoEOrb(cx, cy, radius, current, max, label, colorType) {
@@ -4679,18 +4743,31 @@ export class RenderSystem {
       ctx.fillRect(leftX, y, colW, rowH);
       ctx.strokeStyle = rarityBorderColor(row.rarity, isBuyback ? "#caa24a" : "#3a3a4e");
       ctx.strokeRect(leftX, y, colW, rowH);
+
+      // SOMET-628: the same itemIcon lookup inventoryPanel.js uses for the
+      // carry grid. A type with no generated art draws nothing and the row
+      // keeps exactly the all-text layout it had before this existed.
+      const rowType = itemTypes && itemTypes.get ? itemTypes.get(row.itemTypeId) : null;
+      const rowIcon = itemIcon(this.gameArt, rowType);
+      const rowIconS = rowH - 8;
+      const rowTextShift = rowIcon ? rowIconS + 8 : 0;
+      const rowTextX = leftX + 8 + rowTextShift;
+      if (rowIcon) {
+        drawIconFit(ctx, rowIcon, leftX + 4, y + 4, rowIconS);
+      }
+
       ctx.fillStyle = "#e5e7eb";
       ctx.font = "12px monospace";
-      ctx.fillText(resolveName(row.itemTypeId), leftX + 8, y + at.name);
+      ctx.fillText(resolveName(row.itemTypeId), rowTextX, y + at.name);
       ctx.fillStyle = isBuyback ? "#caa24a" : "#9ca3af";
-      ctx.fillText(`${row.price} g`, leftX + 8, y + at.sub);
+      ctx.fillText(`${row.price} g`, rowTextX, y + at.sub);
       if (at.affix != null) {
         // Clipped to the gap left of the Buy button rather than measured: see
         // clipToWidth. Tinted with the grade so the caption and the border
         // agree at a glance, falling back to the ordinary subline grey.
         ctx.font = `${AFFIX_FONT_PX}px monospace`;
         ctx.fillStyle = rarityBorderColor(row.rarity, "#9ca3af");
-        ctx.fillText(clipToWidth(affixes, colW - 16 - buyW, AFFIX_FONT_PX), leftX + 8, y + at.affix);
+        ctx.fillText(clipToWidth(affixes, colW - 16 - buyW - rowTextShift, AFFIX_FONT_PX), rowTextX, y + at.affix);
         ctx.font = "12px monospace";
       }
 
@@ -4756,9 +4833,19 @@ export class RenderSystem {
       // player needs more than a restatement of the grade.
       ctx.strokeStyle = rarityBorderColor(item.rarity, "#3a3a4e");
       ctx.strokeRect(rightX, ry, rightW, rowH);
+
+      // SOMET-628: same icon lookup as the shelf opposite and the carry grid.
+      const sellIcon = itemIcon(this.gameArt, type);
+      const sellIconS = rowH - 8;
+      const sellTextShift = sellIcon ? sellIconS + 8 : 0;
+      const sellTextX = rightX + 8 + sellTextShift;
+      if (sellIcon) {
+        drawIconFit(ctx, sellIcon, rightX + 4, ry + 4, sellIconS);
+      }
+
       ctx.fillStyle = "#e5e7eb";
       ctx.font = "12px monospace";
-      ctx.fillText(type.name, rightX + 8, ry + 6);
+      ctx.fillText(type.name, sellTextX, ry + 6);
 
       // SOMET-317: bound instances refuse to sell (trade.js sellItem, the
       // SOMET-277 anti-faucet rule), and until now the only way to find that
@@ -4776,7 +4863,7 @@ export class RenderSystem {
       // (authority).
       if (item.soulbound === true) {
         ctx.fillStyle = "#caa24a";
-        ctx.fillText("bound", rightX + 8, ry + 22);
+        ctx.fillText("bound", sellTextX, ry + 22);
       }
 
       const sellX = rightX + rightW - 8 - sellW;

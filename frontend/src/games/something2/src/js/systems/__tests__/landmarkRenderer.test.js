@@ -166,16 +166,46 @@ describe('drawLandmarks', () => {
   // two above already cover the non-overlay half.
   it('overlayOnly draws the beam and label for a skipBody landmark, but never its diamond', () => {
     const ctx = stubCtx();
-    ctx.fillText = ctx.calls.push.bind(ctx.calls); ctx.measureText = () => ({ width: 40 });
+    // SOMET-588: the old `ctx.calls.push.bind(ctx.calls)` spread fillText's
+    // own (text, x, y) args across three bare array entries with no `.name`,
+    // so the label was only ever proven present by `calls.length` growing --
+    // never that the actual destination text got drawn.
+    ctx.fillText = (...args) => ctx.calls.push({ name: 'fillText', args });
+    ctx.measureText = () => ({ width: 40 });
     drawLandmarks(ctx, {
       landmarks: [PORTAL], phase: 0, halfW: 50, halfH: 25, skipBody: new Set([PORTAL]), overlayOnly: true,
     });
     expect(ctx.calls.filter((c) => c.name === 'fill').length).toBe(0);   // no diamond fill
     expect(ctx.calls.filter((c) => c.name === 'fillRect').length).toBeGreaterThanOrEqual(1); // beam
+    const label = ctx.calls.find((c) => c.name === 'fillText');
+    expect(label).toBeTruthy();
+    expect(label.args[0]).toContain(PORTAL.name);
   });
   it('overlayOnly draws nothing for a landmark NOT in skipBody -- the other call already drew it', () => {
     const ctx = stubCtx();
     drawLandmarks(ctx, { landmarks: [PORTAL], phase: 0, halfW: 50, halfH: 25, overlayOnly: true });
     expect(ctx.calls.length).toBe(0);
+  });
+
+  // SOMET-588: a `beamOverlay` landmark (a waypoint sharing a flagged
+  // staircase's tile) keeps its diamond in the flat pass but defers just its
+  // beam/label to the overlay pass, unlike `skipBody` which defers all three.
+  it('beamOverlay draws the diamond but not the beam/label in the normal pass', () => {
+    const ctx = stubCtx();
+    ctx.fillText = ctx.calls.push.bind(ctx.calls); ctx.measureText = () => ({ width: 40 });
+    drawLandmarks(ctx, {
+      landmarks: [WAYPOINT], phase: 0, halfW: 50, halfH: 25, beamOverlay: new Set([WAYPOINT]),
+    });
+    expect(ctx.calls.filter((c) => c.name === 'fill').length).toBe(1); // diamond fill
+    expect(ctx.calls.filter((c) => c.name === 'fillRect').length).toBe(0); // beam deferred
+  });
+  it('beamOverlay draws the beam/label but not the diamond in the overlay pass', () => {
+    const ctx = stubCtx();
+    ctx.fillText = ctx.calls.push.bind(ctx.calls); ctx.measureText = () => ({ width: 40 });
+    drawLandmarks(ctx, {
+      landmarks: [WAYPOINT], phase: 0, halfW: 50, halfH: 25, beamOverlay: new Set([WAYPOINT]), overlayOnly: true,
+    });
+    expect(ctx.calls.filter((c) => c.name === 'fill').length).toBe(0); // no diamond
+    expect(ctx.calls.filter((c) => c.name === 'fillRect').length).toBeGreaterThanOrEqual(1); // beam
   });
 });

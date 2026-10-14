@@ -11,7 +11,8 @@
 //   2. describeTarget  — that drawable -> a display descriptor
 //   3. layoutCard      — that descriptor -> rects and text, clamped on screen
 import { worldToScreen } from "../core/iso.js";
-import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
+import { GAME_WIDTH, GAME_HEIGHT, MAP_TILE_SIZE } from "../core/constants.js";
+import { pointArtDef } from "./pointArt.js";
 
 // ---------------------------------------------------------------------------
 // 1. Hit-testing
@@ -63,15 +64,34 @@ export function markerScreenRect(p, radius) {
 
 const MARKER_RADII = { grounditem: 9, merchant: 11, gem_merchant: 11, skillMerchant: 11, bank: 11, worldchest: 12 };
 
+// A merchant/bank/worldchest marker whose `art` resolves to a catalog def
+// (SOMET-583/584) draws a full art body -- drawPointBody's box, anchored
+// exactly like markerScreenRect's point but sized MAP_TILE_SIZE (or the
+// def's own displayWidth/Height) instead of the small placeholder radius.
+// Without this, a 100px body was only clickable within its centre 11px
+// square -- the rest of a tall arch or wide stall read as empty terrain.
+function pointArtScreenRect(p, entityDefs) {
+  const def = pointArtDef(p && p.art, entityDefs);
+  if (!def) return null;
+  const w = def.displayWidth || MAP_TILE_SIZE;
+  const h = def.displayHeight || MAP_TILE_SIZE;
+  const s = worldToScreen(p.x, p.y);
+  return { x: s.x - w / 2, y: s.y - h, w, h };
+}
+
 // The screen rect for any drawable renderChunked built, or null for kinds the
 // card does not describe (walls and floor tiles: hovering terrain should not
 // pop a card over the thing you are actually trying to look at).
-export function drawableScreenRect(d) {
+//
+// `entityDefs` is optional (Game.entityDefs) -- omitting it just falls back to
+// the placeholder radius, same as before this was threaded through.
+export function drawableScreenRect(d, entityDefs = null) {
   if (!d || !d.ref) return null;
   if (d.kind === "entity" || d.kind === "decoration") return entityScreenRect(d.ref);
   if (d.kind === "player" || d.kind === "remote") return actorScreenRect(d.ref);
   const r = MARKER_RADII[d.kind];
-  return r ? markerScreenRect(d.ref, r) : null;
+  if (!r) return null;
+  return pointArtScreenRect(d.ref, entityDefs) || markerScreenRect(d.ref, r);
 }
 
 // Topmost drawable under `point`, or null.
@@ -80,11 +100,11 @@ export function drawableScreenRect(d) {
 // drawn — not a re-derived copy — so the card can never name something the
 // player cannot see. Iterated in reverse because the last thing drawn is the
 // thing on top, which is the one the cursor is pointing at.
-export function pickDrawable(drawables, point) {
+export function pickDrawable(drawables, point, entityDefs = null) {
   if (!Array.isArray(drawables) || !point) return null;
   for (let i = drawables.length - 1; i >= 0; i--) {
     const d = drawables[i];
-    const r = drawableScreenRect(d);
+    const r = drawableScreenRect(d, entityDefs);
     if (!r) continue;
     if (point.x >= r.x && point.x <= r.x + r.w && point.y >= r.y && point.y <= r.y + r.h) return d;
   }

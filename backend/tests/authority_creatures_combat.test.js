@@ -361,6 +361,9 @@ test('loadCreatureTypes maps defense/resistances and defaults them', async () =>
         slot: 1, name: 'Attack', attackKind: 'melee', attackRange: 60, attackCooldown: 1,
         projectileSpeed: 0, projectileRadius: 0, element: null, damageMult: 1, knockback: 0,
       }],
+      // SOMET-608 (S6): a behaviour with no skill rows (this fixture's join
+      // carries none) resolves to [], never a fallback skill.
+      skills: [],
       aggroRadius: 400, leashRadius: 800,
       chaseStyle: 'charge', preferredRange: 0, moveSpeedMult: 1, damageOverride: null,
       goldMin: 0, goldMax: 0,
@@ -376,6 +379,7 @@ test('loadCreatureTypes maps defense/resistances and defaults them', async () =>
         slot: 1, name: 'Attack', attackKind: 'melee', attackRange: 60, attackCooldown: 1,
         projectileSpeed: 0, projectileRadius: 0, element: null, damageMult: 1, knockback: 0,
       }],
+      skills: [],
       aggroRadius: 400, leashRadius: 800,
       chaseStyle: 'charge', preferredRange: 0, moveSpeedMult: 1, damageOverride: null,
       goldMin: 0, goldMax: 0,

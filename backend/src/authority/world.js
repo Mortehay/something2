@@ -6,7 +6,7 @@ const { resolveEffectName, momentForAttack, blockedImpact } = require('./vfx.js'
 const { attackLift, bodyLift } = require('./attackOrigin.js');
 const { ProjectileSim } = require('./projectiles');
 const {
-  weaponUse, weaponHit, creatureUse, creatureHurt, skillUse, skillAttackKind, attackKindOf, pushSfxEvent,
+  weaponUse, weaponHit, creatureUse, creatureHurt, creatureSkillSfx, skillUse, skillAttackKind, attackKindOf, pushSfxEvent,
 } = require('./sfxEvents.js');
 const { applyDamageWithEffects, drainMana, playerKey } = require('./damage');
 const {
@@ -346,6 +346,13 @@ class World {
     // not worth the surface. Ordered by spawn time, which is what lets the
     // per-owner cap drop the STALEST wave rather than an arbitrary one.
     this.waves = [];
+    // SOMET-608 (S6). Active skill telegraphs, world-wide, same "plain array,
+    // no per-chunk identity" reasoning as waves above -- purely a client
+    // rendering aid (the actual damage resolves independently, inside
+    // CreatureSim, off the caster's own `_pendingSkill`). New ones are
+    // appended from CreatureSim.tick()'s own `telegraphs` output each tick;
+    // see snapshot() for the expiry-by-remaining-ms convention.
+    this.activeTelegraphs = [];
     this.groundItems = new GroundItemSim(chunkSize);
     // Game audio slice 3: the world's own `sfx` events (player swings, shots,
     // melee hits, skill casts). CreatureSim and ProjectileSim keep their own
@@ -746,7 +753,12 @@ class World {
   // Tick creatures with the live players (aggro/chase/contact damage). Death
   // resolution (respawn) now happens once for all damage sources in
   // resolveDeaths(), not here.
-  tickCreatures(dt, activeKeys) {
+  // `catalogRows` (SOMET-608, S6): name -> full entity_types row, so a
+  // `summon`-kind skill can hydrate its summon at resolve time -- see
+  // loadCreatureTypes's own comment on rowsByName. Optional; a tick with no
+  // catalog in hand simply cannot resolve a summon (same "unknown name is a
+  // no-op" trade-off entity_types.vfx/auras already carry).
+  tickCreatures(dt, activeKeys, catalogRows = null) {
     // `this.now` is threaded through so contact damage reads the same clock
     // every other damage site does — a shocked player must take +25% from a
     // creature's bite too, not only from weapons.
@@ -756,14 +768,29 @@ class World {
     // killed: [], shots: [] }` fallback here could never fire. Removed.
     const {
       killed: killedIds, killCredits, shots,
-      attacks: creatureAttacks, impacts: creatureImpacts,
-    } = this.creatures.tick(dt, activeKeys, [...this.players.values()], this.now);
+      attacks: creatureAttacks, impacts: creatureImpacts, telegraphs,
+    } = this.creatures.tick(dt, activeKeys, [...this.players.values()], this.now, catalogRows);
+    // SOMET-608: new telegraphs this tick are appended; expired ones are
+    // dropped here (nothing periodic needs to happen while one is active,
+    // unlike waves' per-second damage tick, so there is no separate
+    // _tickTelegraphs -- just prune-then-append, every tick).
+    this.activeTelegraphs = this.activeTelegraphs.filter((t) => this.now < t.expiresAt);
+    if (telegraphs && telegraphs.length > 0) {
+      for (const t of telegraphs) {
+        this.activeTelegraphs.push({ ...t, expiresAt: this.now + t.telegraphMs });
+      }
+    }
 
     for (const s of shots) {
       if (this.projectiles.countByOwnerKind('creature') >= MAX_CREATURE_PROJECTILES) break;
       // Game audio slice 3: the shot is heard only if it actually spawns --
-      // past the cap above, nothing leaves the creature.
-      pushSfxEvent(this.sfx, creatureUse({ id: s.ownerId, type: s.ownerType }, s.x, s.y));
+      // past the cap above, nothing leaves the creature. SOMET-610 (S7):
+      // a skill-sourced shot (CreatureSim._resolveSkill's projectile
+      // branch stamps `s.skillName`) plays that SKILL's own cast cue
+      // instead of the creature's generic attack sound.
+      pushSfxEvent(this.sfx, s.skillName
+        ? creatureSkillSfx('skill_cast', s.skillName, { id: s.ownerId }, s.x, s.y)
+        : creatureUse({ id: s.ownerId, type: s.ownerType }, s.x, s.y));
       this.projectiles.spawn({
         ownerId: s.ownerId,
         ownerKind: 'creature',
@@ -1760,6 +1787,24 @@ class World {
           // Milliseconds left, so the client can fade it out without needing a
           // synchronised clock.
           ms: Math.max(0, Math.round(v.expiresAt - this.now)),
+        })),
+      } : {}),
+      // SOMET-608 (S6). Same "resolved geometry, remaining ms, omitted when
+      // empty" convention as waves above -- the client has no creature_skills
+      // catalog, so radius/telegraphMs travel resolved rather than as a name
+      // to look up.
+      ...(this.activeTelegraphs.length > 0 ? {
+        telegraphs: this.activeTelegraphs.map((t) => ({
+          creatureId: t.creatureId, skill: t.skill, x: t.x, y: t.y, radius: t.radius,
+          // SOMET-610 (S7): the vfx binding's resolved name -- see
+          // worldTelegraphs.js's own comment for why this is server-
+          // resolved rather than a raw binding.
+          v: t.v,
+          ms: Math.max(0, Math.round(t.expiresAt - this.now)),
+          // The ORIGINAL duration, not just what's left -- the client needs
+          // both to compute fill progress (elapsed/total), and has no clock
+          // synced to the moment the telegraph actually started.
+          telegraphMs: t.telegraphMs,
         })),
       } : {}),
     };

@@ -52,6 +52,20 @@ describe('useMapGraph', () => {
     expect(typeof adminHooks.useSetLink).toBe('function');
     expect(typeof adminHooks.useClearLink).toBe('function');
   });
+
+  // SOMET-587: the World Map tab's portal art picker and the Maps tab's
+  // village post / waypoint / chest art pickers.
+  it('exports the per-instance art mutations', () => {
+    expect(typeof graphHooks.useSetPortalArt).toBe('function');
+    expect(typeof adminHooks.useSetVillageArt).toBe('function');
+    expect(typeof adminHooks.useSetWaypointArt).toBe('function');
+    expect(typeof adminHooks.useSetChestArt).toBe('function');
+  });
+
+  it('exports the single-waypoint and single-chest reader hooks', () => {
+    expect(typeof adminHooks.useWorldWaypoint).toBe('function');
+    expect(typeof adminHooks.useWorldChest).toBe('function');
+  });
 });
 
 describe('cross-tab invalidation', () => {
@@ -112,5 +126,51 @@ describe('cross-tab invalidation', () => {
     const handler = onSuccessOf(exportedBlock(src('useMapsAdmin.js'), 'useSetLink'));
     expect(handler).not.toContain('onError');
     expect(handler).toContain('invalidateQueries');
+  });
+
+  // SOMET-587: the World Map tab's selected-link panel reads links through
+  // ["worldGraph"] -- without this, setting a portal's art would leave the
+  // diagram showing the old binding until something else happens to refetch.
+  it('useSetPortalArt targets the map-links endpoint and invalidates worldGraph on success', () => {
+    const block = exportedBlock(src('useMapGraph.js'), 'useSetPortalArt');
+    expect(block).toContain('/api/map-links/');
+    expect(block).toContain('/art');
+    expect(onSuccessOf(block)).toContain('queryKey: ["worldGraph"]');
+  });
+
+  // The Maps tab's village card reads its posts through ["worldVillages", id]
+  // -- without this, setting a post's art would leave the card showing the
+  // old binding until the card is closed and reopened.
+  it('useSetVillageArt targets the villages endpoint and invalidates worldVillages on success', () => {
+    const block = exportedBlock(src('useMapsAdmin.js'), 'useSetVillageArt');
+    expect(block).toContain('/api/villages/');
+    expect(block).toContain('/art');
+    expect(onSuccessOf(block)).toContain('queryKey: ["worldVillages"');
+  });
+
+  // SOMET-587: the Maps tab's waypoint/chest pickers read through
+  // ["worldWaypoint", id] / ["worldChest", id] -- without these, setting
+  // either art would leave the card showing the old binding until it is
+  // closed and reopened.
+  it('useSetWaypointArt targets the waypoints endpoint and invalidates worldWaypoint on success', () => {
+    const block = exportedBlock(src('useMapsAdmin.js'), 'useSetWaypointArt');
+    expect(block).toContain('/api/waypoints/');
+    expect(block).toContain('/art');
+    expect(onSuccessOf(block)).toContain('queryKey: ["worldWaypoint"');
+  });
+
+  it('useSetChestArt targets the world-chests endpoint and invalidates worldChest on success', () => {
+    const block = exportedBlock(src('useMapsAdmin.js'), 'useSetChestArt');
+    expect(block).toContain('/api/world-chests/');
+    expect(block).toContain('/art');
+    expect(onSuccessOf(block)).toContain('queryKey: ["worldChest"');
+  });
+
+  it('useWorldWaypoint targets the per-world waypoint endpoint', () => {
+    expect(exportedBlock(src('useMapsAdmin.js'), 'useWorldWaypoint')).toContain('/waypoint');
+  });
+
+  it('useWorldChest targets the per-world chest endpoint', () => {
+    expect(exportedBlock(src('useMapsAdmin.js'), 'useWorldChest')).toContain('/chest');
   });
 });

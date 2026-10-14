@@ -184,6 +184,97 @@ export function useDeleteVillage() {
   });
 }
 
+// SOMET-587: a village post's art, set directly from the Maps tab. `id` is
+// the villages row id; `slot` is one of merchant/bank/gem_merchant/
+// skill_merchant. A 422 (no unique spec-file match -- e.g. a village with no
+// `spec_key`, adopted from before specs existed) is surfaced verbatim via
+// toast rather than a generic failure string, the same posture
+// useSetPortalArt (useMapGraph.js) takes for the identical refusal.
+export function useSetVillageArt() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, worldId, slot, art_name }) => {
+      const res = await apiFetch(`${API_URL}/api/villages/${id}/art`, {
+        method: "PUT", headers: authHeaders(), body: JSON.stringify({ slot, art_name }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to save village post art");
+      return res.json();
+    },
+    onSuccess: (data, v) => { qc.invalidateQueries({ queryKey: ["worldVillages", v.worldId] }); },
+    onError: (err) => toast.error(err.message),
+  });
+}
+
+// SOMET-587. A world carries at most one waypoint (waypoints_world_unique)
+// and at most one vault chest (seed-map's applyPointArt keys its UPDATE on
+// `WHERE world_id = $1 AND kind = 'vault'` with no further disambiguator —
+// see specFileLocator.js's findChestInSpecs for the same cardinality note),
+// so these mirror useWorldVillages' shape but return a single object (or
+// null) rather than a list. Both GET routes already reuse
+// fetchWaypoints/fetchChests (the SAME readers the live authority uses), so
+// the art name shown here can never disagree with what a joining player
+// sees.
+export function useWorldWaypoint(worldId) {
+  const { data } = useQuery({
+    queryKey: ["worldWaypoint", worldId],
+    enabled: !!worldId,
+    queryFn: async () => {
+      const res = await apiFetch(`${API_URL}/api/worlds/${worldId}/waypoint`, { headers: authHeaders() });
+      if (!res.ok) throw new Error("Failed to load waypoint");
+      return res.json();
+    },
+  });
+  return data ?? null;
+}
+
+export function useWorldChest(worldId) {
+  const { data } = useQuery({
+    queryKey: ["worldChest", worldId],
+    enabled: !!worldId,
+    queryFn: async () => {
+      const res = await apiFetch(`${API_URL}/api/worlds/${worldId}/chest`, { headers: authHeaders() });
+      if (!res.ok) throw new Error("Failed to load chest");
+      return res.json();
+    },
+  });
+  return data ?? null;
+}
+
+// `id` is the waypoints row id; `worldId` is passed through (not read off
+// the fetched row — GET /api/worlds/:id/waypoint already hands it back as
+// `worldId`, but the mutation is invoked straight from the picker component,
+// which already has the enclosing world's id to hand) purely so onSuccess
+// can invalidate the one query key this picker's own data came from.
+export function useSetWaypointArt() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, worldId, art_name }) => {
+      const res = await apiFetch(`${API_URL}/api/waypoints/${id}/art`, {
+        method: "PUT", headers: authHeaders(), body: JSON.stringify({ art_name }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to save waypoint art");
+      return res.json();
+    },
+    onSuccess: (data, v) => { qc.invalidateQueries({ queryKey: ["worldWaypoint", v.worldId] }); },
+    onError: (err) => toast.error(err.message),
+  });
+}
+
+export function useSetChestArt() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, worldId, art_name }) => {
+      const res = await apiFetch(`${API_URL}/api/world-chests/${id}/art`, {
+        method: "PUT", headers: authHeaders(), body: JSON.stringify({ art_name }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to save chest art");
+      return res.json();
+    },
+    onSuccess: (data, v) => { qc.invalidateQueries({ queryKey: ["worldChest", v.worldId] }); },
+    onError: (err) => toast.error(err.message),
+  });
+}
+
 // SOMET-554. One request for what used to be 200: the Maps tab renders a
 // collapsed row per world, and each row wants that world's portal and village
 // counts. Fetching them per row meant two XHRs per card on mount.

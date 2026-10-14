@@ -78,7 +78,13 @@ function diamondPath(ctx, x, y, halfW, halfH) {
 // label for exactly those `skipBody` landmarks, now safely on top of the
 // body that was just painted. Every other landmark (no body, not in
 // `skipBody`) is drawn in full by the first call only.
-export function drawLandmarks(ctx, { landmarks, phase, halfW, halfH, skipBody = null, overlayOnly = false } = {}) {
+function inSet(set, l) {
+  return !!(set && typeof set.has === "function" && set.has(l));
+}
+
+export function drawLandmarks(ctx, {
+  landmarks, phase, halfW, halfH, skipBody = null, beamOverlay = null, overlayOnly = false,
+} = {}) {
   if (!Array.isArray(landmarks) || landmarks.length === 0) return;
 
   const alpha = landmarkPulse(phase);
@@ -89,10 +95,17 @@ export function drawLandmarks(ctx, { landmarks, phase, halfW, halfH, skipBody = 
     // "it renders" and "it renders invisibly" become indistinguishable.
     if (!l || !Number.isFinite(l.x) || !Number.isFinite(l.y)) continue;
 
-    // Partition: this call owns EITHER the skipBody landmarks (overlayOnly)
-    // OR everyone else (the normal pass), never both -- see the note above.
-    const bodyElsewhere = skipBody && typeof skipBody.has === "function" && skipBody.has(l);
-    if (overlayOnly ? !bodyElsewhere : bodyElsewhere) continue;
+    // A landmark with a body defers BOTH its diamond and its beam/label to
+    // the overlay pass. One in `beamOverlay` keeps its diamond in THIS (flat)
+    // pass -- its only on-screen activation signal -- but defers just the
+    // beam/label, which would otherwise land underneath a neighbouring body
+    // drawn later in the depth sort.
+    const bodyElsewhere = inSet(skipBody, l);
+    const beamElsewhere = bodyElsewhere || inSet(beamOverlay, l);
+
+    // The normal pass draws nothing for a landmark whose body is elsewhere;
+    // the overlay pass draws nothing for one whose beam/label are not.
+    if (overlayOnly ? !beamElsewhere : bodyElsewhere) continue;
 
     const s = worldToScreen(l.x, l.y);
     const color = landmarkColor(l.kind);
@@ -106,10 +119,10 @@ export function drawLandmarks(ctx, { landmarks, phase, halfW, halfH, skipBody = 
     // which waypoints a player has lit.
     //
     // An art body (SOMET-584) replaces the diamond entirely for a `skipBody`
-    // landmark -- it never reaches this branch at all now (see the
-    // `overlayOnly` partition above), so there is nothing to gate here beyond
-    // `overlayOnly` itself: this call only ever draws a diamond for a
-    // non-skipBody landmark, in its one and only pass.
+    // landmark, and that landmark never reaches this branch in the normal
+    // pass at all (the gate above already `continue`d it) -- so a diamond is
+    // only ever drawn here for a landmark that keeps one, in its one and only
+    // pass, regardless of whether its beam/label are deferred.
     if (!overlayOnly) {
       const filled = l.kind !== "waypoint" || l.activated === true;
       diamondPath(ctx, s.x, s.y, halfW, halfH);
@@ -123,47 +136,52 @@ export function drawLandmarks(ctx, { landmarks, phase, halfW, halfH, skipBody = 
       }
     }
 
-    // A short beam above the tile, so the marker is findable when the tile
-    // itself is behind a wall or below the camera's attention. Drawn at a
-    // fraction of the marker alpha -- it is a hint, not a second marker.
-    ctx.globalAlpha = alpha * 0.35;
-    ctx.fillStyle = color;
-    ctx.fillRect(s.x - 2, s.y - halfH - 46, 4, 46);
+    // The beam/label draw in whichever pass owns them: the overlay pass for
+    // a landmark in `beamElsewhere` (skipBody or beamOverlay), the normal
+    // pass for everyone else.
+    if (overlayOnly ? beamElsewhere : !beamElsewhere) {
+      // A short beam above the tile, so the marker is findable when the tile
+      // itself is behind a wall or below the camera's attention. Drawn at a
+      // fraction of the marker alpha -- it is a hint, not a second marker.
+      ctx.globalAlpha = alpha * 0.35;
+      ctx.fillStyle = color;
+      ctx.fillRect(s.x - 2, s.y - halfH - 46, 4, 46);
 
-    // Draw destination label for portal / landmark so players see where it leads
-    if (l.name && ctx.fillText) {
-      const text = l.kind === 'portal' ? `🌀 ${l.name}` : l.name;
-      ctx.save();
-      ctx.globalAlpha = Math.max(0.75, alpha);
-      ctx.font = 'bold 11px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      const labelY = s.y - halfH - 58;
+      // Draw destination label for portal / landmark so players see where it leads
+      if (l.name && ctx.fillText) {
+        const text = l.kind === 'portal' ? `🌀 ${l.name}` : l.name;
+        ctx.save();
+        ctx.globalAlpha = Math.max(0.75, alpha);
+        ctx.font = 'bold 11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const labelY = s.y - halfH - 58;
 
-      const metrics = ctx.measureText ? ctx.measureText(text) : { width: text.length * 7 };
-      const padX = 8;
-      const boxW = (metrics.width || 60) + padX * 2;
-      const boxH = 18;
+        const metrics = ctx.measureText ? ctx.measureText(text) : { width: text.length * 7 };
+        const padX = 8;
+        const boxW = (metrics.width || 60) + padX * 2;
+        const boxH = 18;
 
-      // Background pill
-      ctx.fillStyle = 'rgba(18, 18, 31, 0.85)';
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 1.5;
-      if (ctx.roundRect) {
-        ctx.beginPath();
-        ctx.roundRect(s.x - boxW / 2, labelY - boxH / 2, boxW, boxH, 4);
-        ctx.fill();
-        ctx.stroke();
-      } else if (ctx.strokeRect) {
-        ctx.fillRect(s.x - boxW / 2, labelY - boxH / 2, boxW, boxH);
-        ctx.strokeRect(s.x - boxW / 2, labelY - boxH / 2, boxW, boxH);
-      } else {
-        ctx.fillRect(s.x - boxW / 2, labelY - boxH / 2, boxW, boxH);
+        // Background pill
+        ctx.fillStyle = 'rgba(18, 18, 31, 0.85)';
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        if (ctx.roundRect) {
+          ctx.beginPath();
+          ctx.roundRect(s.x - boxW / 2, labelY - boxH / 2, boxW, boxH, 4);
+          ctx.fill();
+          ctx.stroke();
+        } else if (ctx.strokeRect) {
+          ctx.fillRect(s.x - boxW / 2, labelY - boxH / 2, boxW, boxH);
+          ctx.strokeRect(s.x - boxW / 2, labelY - boxH / 2, boxW, boxH);
+        } else {
+          ctx.fillRect(s.x - boxW / 2, labelY - boxH / 2, boxW, boxH);
+        }
+
+        ctx.fillStyle = '#fdfdfd';
+        ctx.fillText(text, s.x, labelY);
+        ctx.restore();
       }
-
-      ctx.fillStyle = '#fdfdfd';
-      ctx.fillText(text, s.x, labelY);
-      ctx.restore();
     }
 
     ctx.restore();

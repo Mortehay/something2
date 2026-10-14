@@ -20,9 +20,11 @@
 // is a 409 from the store, counted as "changed during run" and left alone --
 // a skip, not a failure, so it never feeds the 5-in-a-row stop.
 //
-// UPLOAD-ONLY SLOTS ARE SKIPPED. An sfx slot with no cue on the box (creature
-// nearby/attack, ranged use) can never be generated, so a prompt for it is
-// CPU time for a row nobody sees; they are counted, not written.
+// UPLOAD-ONLY SLOTS ARE SKIPPED. An sfx slot with no cue on the box (e.g. a
+// boss's own spawn/presence/phase/enrage slots -- creature nearby/attack and
+// attack_type ranged/use gained cues in SOMET-627) can never be generated, so
+// a prompt for it is CPU time for a row nobody sees; they are counted, not
+// written.
 //
 // DUPLICATES ARE REPORTED, NOT FIXED. The art epic measured 12 of 20 skills
 // collapsing to one generic weapon; the per-kind duplicate count is how that

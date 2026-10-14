@@ -6,12 +6,62 @@ from pydantic import BaseModel, Field, field_validator
 from typing import Literal, Optional, List
 from .config import settings
 from . import backends
-from .jobs import JobManager
+from .jobs import JobManager, build_redis_client
 from .orchestrator import generate_creature, generate_tile, generate_object
 from .recipe import recipe_for
 
 app = FastAPI(title="something2 sprite-gen")
-job_manager = JobManager()
+
+
+# SOMET-539: handlers are plain functions of (params, progress) -> result,
+# never closures over a request -- a durable job record stores `type` +
+# `params` (JSON), not code, so a restart can replay it by looking the
+# handler up again. Storage is opt-in via env so unit tests (no MinIO)
+# don't try to upload; read lazily (module-level, patched by conftest.py)
+# rather than captured at job-submission time.
+def _store_result(put, name, job_id, out):
+    if _STORE_ENABLED:
+        from .storage import default_store
+        return put(default_store(), name, job_id, out)
+    return {"frames": len(out["frames"]), "manifest": out["manifest"]}
+
+
+def _handle_creature(params: dict, progress) -> dict:
+    out = generate_creature(
+        creature=params["creature"], base_prompt=params["base_prompt"],
+        backend_name=params["backend_name"], seed=params["seed"],
+        n_frames=params["frames"], size=tuple(params["size"]), steps=params["steps"],
+        progress=progress,
+    )
+    return _store_result(lambda store, name, job_id, out: store.put_creature(name, job_id, out),
+                         params["creature"], params["job_id"], out)
+
+
+def _handle_tile(params: dict, progress) -> dict:
+    out = generate_tile(
+        tile=params["creature"], base_prompt=params["base_prompt"],
+        backend_name=params["backend_name"], seed=params["seed"],
+        n_frames=params["frames"], size=tuple(params["size"]), steps=params["steps"],
+        progress=progress,
+    )
+    return _store_result(lambda store, name, job_id, out: store.put_tile(name, job_id, out),
+                         params["creature"], params["job_id"], out)
+
+
+def _handle_object(params: dict, progress) -> dict:
+    out = generate_object(
+        obj=params["creature"], base_prompt=params["base_prompt"],
+        backend_name=params["backend_name"], seed=params["seed"],
+        n_frames=params["frames"], size=tuple(params["size"]), steps=params["steps"],
+        progress=progress,
+    )
+    return _store_result(lambda store, name, job_id, out: store.put_object(name, job_id, out),
+                         params["creature"], params["job_id"], out)
+
+
+_HANDLERS = {"creature": _handle_creature, "tile": _handle_tile, "object": _handle_object}
+
+job_manager = JobManager(build_redis_client(), _HANDLERS)
 
 # Bounds for POST /generate (F-033/SOMET-213). Sized from the real call
 # sites, not guesses:
@@ -123,46 +173,25 @@ def generate(req: GenerateRequest):
     caps = backends.capabilities_for(backend_name)
     reported_steps = steps if caps["max_steps"] is None else min(steps, caps["max_steps"])
 
-    # SOMET-235: mint the job_id here, before `work` closes over it, so the id
-    # returned to the caller, the id keying job_manager._jobs, and the id
-    # baked into the storage path are all the same value. Without this the
-    # storage layer would key generated assets by name alone, and a second
-    # generation for the same tile/object/creature would silently overwrite
-    # a previous (possibly already-approved, live) one before anyone reviews it.
+    # SOMET-235: mint the job_id here so the id returned to the caller, the
+    # id keying the job record, and the id baked into the storage path are
+    # all the same value. Without this the storage layer would key generated
+    # assets by name alone, and a second generation for the same
+    # tile/object/creature would silently overwrite a previous (possibly
+    # already-approved, live) one before anyone reviews it.
     job_id = uuid.uuid4().hex
-
-    def work(progress):
-        if req.kind == "tile":
-            out = generate_tile(
-                tile=req.creature, base_prompt=req.base_prompt, backend_name=backend_name,
-                seed=req.seed, n_frames=frames, size=size, steps=steps, progress=progress,
-            )
-            if _STORE_ENABLED:
-                from .storage import default_store
-                return default_store().put_tile(req.creature, job_id, out)
-            return {"frames": len(out["frames"]), "manifest": out["manifest"]}
-        if req.kind == "object":
-            out = generate_object(
-                obj=req.creature, base_prompt=req.base_prompt, backend_name=backend_name,
-                seed=req.seed, n_frames=frames, size=size, steps=steps, progress=progress,
-            )
-            if _STORE_ENABLED:
-                from .storage import default_store
-                return default_store().put_object(req.creature, job_id, out)
-            return {"frames": len(out["frames"]), "manifest": out["manifest"]}
-        out = generate_creature(
-            creature=req.creature, base_prompt=req.base_prompt, backend_name=backend_name,
-            seed=req.seed, n_frames=frames, size=size, steps=steps, progress=progress,
-        )
-        # Persist to MinIO only when a real store is reachable; failures surface
-        # in the job error. In tests the store call is skipped (STORE disabled).
-        if _STORE_ENABLED:
-            from .storage import default_store
-            return default_store().put_creature(req.creature, job_id, out)
-        return {"frames": len(out["frames"]), "manifest": out["manifest"]}
+    params = {
+        "job_id": job_id, "creature": req.creature, "base_prompt": req.base_prompt,
+        "backend_name": backend_name, "seed": req.seed, "frames": frames,
+        "size": list(size), "steps": steps,
+    }
+    # SOMET-539: dedup by (kind, subject) -- resubmitting the same subject
+    # while one is already queued/running hands back the existing job_id
+    # instead of starting a second generation.
+    dedup_key = f"{req.kind}:{req.creature}"
 
     return {
-        "job_id": job_manager.submit(work, job_id=job_id),
+        "job_id": job_manager.submit(req.kind, params, job_id=job_id, dedup_key=dedup_key),
         "recipe": {
             "tier": recipe.tier,
             "backend": backend_name,

@@ -128,6 +128,23 @@ function bossSfx(e, c, x, y) {
   return sfxEvent(e, { c: c.type, a: `c:${c.id}` }, x, y);
 }
 
+// SOMET-610 (S7, spec §3.6/§4.4): a creature SKILL's own moments -- distinct
+// wire names from the ordinary attack's use/hit (and from bossSfx's own
+// spawn/phase/enrage) so they resolve against the `creature_skill` audio
+// kind (keyed by skill NAME, not creature type) rather than `creature`'s
+// own `<type>/attack` slot. `s` carries the skill's name -- the registry key
+// -- the same role it plays for a player's own `s: 'skill:<id>'` cast,
+// minus that prefix (the event NAME here already scopes it to creature
+// skills, so no prefix is needed to disambiguate). One builder for all
+// three, mirroring bossSfx immediately above for the identical reason: one
+// place writes the wire vocabulary instead of three near-identical ones.
+const CREATURE_SKILL_SFX_EVENTS = Object.freeze(['skill_telegraph', 'skill_cast', 'skill_hit']);
+
+function creatureSkillSfx(e, skillName, c, x, y) {
+  if (!c || !skillName || !CREATURE_SKILL_SFX_EVENTS.includes(e)) return null;
+  return sfxEvent(e, { s: skillName, a: `c:${c.id}` }, x, y);
+}
+
 // Bounded append: every buffer events pass through (each sim's, the world's,
 // the server's per-world stash) is capped, so a world whose frames stop
 // draining can never grow one without limit. An event without a finite
@@ -153,5 +170,7 @@ module.exports = {
   skillUse,
   BOSS_SFX_EVENTS,
   bossSfx,
+  CREATURE_SKILL_SFX_EVENTS,
+  creatureSkillSfx,
   pushSfxEvent,
 };

@@ -30,6 +30,7 @@ import { chestsFromFrame, applyChestOpened } from "./worldChests.js";
 import { remotePlayerFromFrame } from './worldPlayers.js';
 import { appearanceImageKey, indexAppearanceVisuals } from './characterAppearance.js';
 import { wavesFromFrame } from './worldWaves.js';
+import { telegraphsFromFrame } from './worldTelegraphs.js';
 import { addBlasts, pruneBlasts } from "./blasts.js";
 import { indexEffects, addEffects, pruneEffects, capParticles } from "./vfx.js";
 import { assetUrl } from "../net/assets.js";
@@ -169,6 +170,7 @@ export class Game {
         this.localUserId = null;
         this.remotePlayers = new NativeMap(); // user_id -> {x, y, hp}
         this.waves = [];              // SOMET-528, replaced by each world frame
+        this.telegraphs = [];         // SOMET-608, same replace-every-frame rule
         this.lastServerTick = 0;
 
         // Combat (Slice 3b): local mana state from `state`, and the
@@ -1607,6 +1609,9 @@ export class Game {
         // The field list lives in worldWaves.js so a test can hold it -- see
         // that module's header for the bug that taught us to do this.
         this.waves = wavesFromFrame(msg);
+        // SOMET-608 (S6). Same "frame replaces the list every tick" rule
+        // waves uses -- the server re-sends every still-active telegraph.
+        this.telegraphs = telegraphsFromFrame(msg);
         // Detonations are present only on the tick they happened (the server
         // clears its stash after this broadcast), so they must be taken off
         // THIS frame — there is no snapshot to re-read them from later.
@@ -1636,12 +1641,29 @@ export class Game {
         // this call -- a bad event is silence plus one warning, same
         // contract as every other clip lookup in that module.
         if (this.audio) {
-            this.audio.playSfxEvents(msg.sfx || [], {
+            const sfx = msg.sfx || [];
+            // SOMET-610 (S7): the live cross-reference sfxPriority needs to
+            // tell a boss's skill_telegraph/_cast/_hit from an ordinary
+            // creature's (those three event names are not boss-exclusive
+            // the way spawn/phase/enrage are -- see sfxResolve.js's own
+            // comment). Built only when there is something to resolve: a
+            // quiet tick (the overwhelming majority) never pays for it,
+            // unlike tickNearby's own `if (c.bossTier)` scan a few lines up,
+            // which already runs on its own 250ms cadence regardless.
+            let bossActorIds;
+            if (sfx.length > 0) {
+                bossActorIds = new Set();
+                for (const c of this.creatures.creatures.values()) {
+                    if (c.bossTier) bossActorIds.add(`c:${c.id}`);
+                }
+            }
+            this.audio.playSfxEvents(sfx, {
                 listener: {
                     x: this.player.x + (this.player.width || 0) / 2,
                     y: this.player.y + (this.player.height || 0) / 2,
                 },
                 ownActor: `p:${this.localUserId}`,
+                bossActorIds,
             });
         }
     }
@@ -1823,6 +1845,7 @@ export class Game {
                 blasts: this.blasts,
                 // SOMET-528. Empty until a wave-granting node is allocated.
                 waves: this.waves || [],
+                telegraphs: this.telegraphs || [],
                 vfx: this.vfx, vfxDefs: this.vfxDefs,
                 auraDefs: this.auraDefs,
                 skillVisuals: this.skillVisuals,

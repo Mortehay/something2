@@ -197,30 +197,36 @@ export class AudioEngine {
   // advances and never fires onended, so admitting it would occupy a voice
   // slot (and a same-clip throttle slot) forever; skipping here means no
   // admit and no fetch happen at all until the context actually resumes.
-  playSfxEvents(events, { listener, ownActor } = {}) {
+  // SOMET-610 (S7): `bossActorIds` (optional) is a Set of `c:<id>` actor
+  // keys the caller built from its own live creature list -- the live
+  // cross-reference sfxPriority needs to tell a boss's skill_telegraph/
+  // _cast/_hit from an ordinary creature's (see that function's own
+  // comment: those three event NAMES are not boss-exclusive the way
+  // spawn/phase/enrage are).
+  playSfxEvents(events, { listener, ownActor, bossActorIds } = {}) {
     if (!Array.isArray(events) || events.length === 0) return;
     const ctx = this._ensureCtx();
     if (!ctx || ctx.state !== 'running') return;
     for (const ev of events) {
       try {
-        this._playSfxEvent(ev, listener || { x: 0, y: 0 }, ownActor);
+        this._playSfxEvent(ev, listener || { x: 0, y: 0 }, ownActor, bossActorIds);
       } catch (err) {
         this._warn('sfx-event', `[audio] sfx event failed: ${err.message}`);
       }
     }
   }
 
-  _playSfxEvent(ev, listener, ownActor) {
+  _playSfxEvent(ev, listener, ownActor, bossActorIds) {
     for (const { keys } of sfxChains(ev)) {
       const { clips, key } = this._resolve(keys);
       if (!key) continue; // miss already recorded by _resolve
       const clip = pickWeighted(clips, this.rand);
       if (!clip) continue;
-      this._triggerSfx(clip, ev, listener, ownActor);
+      this._triggerSfx(clip, ev, listener, ownActor, bossActorIds);
     }
   }
 
-  _triggerSfx(clip, ev, listener, ownActor) {
+  _triggerSfx(clip, ev, listener, ownActor, bossActorIds) {
     const dx = (ev.x || 0) - listener.x;
     const dy = (ev.y || 0) - listener.y;
     const distance = Math.hypot(dx, dy);
@@ -228,7 +234,7 @@ export class AudioEngine {
     // gain 0 anyway, so cull it before it can take a voice slot or a
     // same-clip throttle slot, and before it fetches anything.
     if (distance >= SFX_FALLOFF_PX) return;
-    const priority = sfxPriority(ev, ownActor);
+    const priority = sfxPriority(ev, ownActor, bossActorIds);
     const { ok, evict, voiceId } = this.sfxLimiter.admit({ clipKey: clip.key, priority, distance });
     if (!ok) { this.sfxStats.droppedTotal += 1; return; }
     // The evicted voice may be a one-shot OR a still-looping nearby world

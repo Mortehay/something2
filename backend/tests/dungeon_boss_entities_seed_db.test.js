@@ -2,6 +2,11 @@
 // SOMET-609 (S9, spec §3.8). The six dungeon bosses on a real migrated DB.
 // Values are restated as literals -- never read back from the migration or
 // seeds/data -- so a typo in BOTH sources still fails here.
+//
+// SOMET-610 (S7): all six were repointed off the shared 'Apex'/'Champion'
+// rows onto their own dedicated behavior rows (migration
+// 1714440730000_boss_dedicated_behaviors.js) so a boss's skill kit binds to
+// it alone rather than leaking onto every other Apex/Champion creature.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { Pool } = require('pg');
@@ -24,12 +29,12 @@ test('the six dungeon bosses are tiered catalog rows with their stats', { skip }
       gold_min: gmin, gold_max: gmax, faction: 'hostile', auras, behavior,
     });
     assert.deepEqual(r.rows, [
-      row('Cinder Matriarch', 'dungeon_elite', 'fire', 2200, 23, 31, 72, 500, 30, 60, 'Champion', ['cinder_brood']),
-      row('Ossuary Warden', 'dungeon_elite', 'physical', 850, 15, 14, 72, 120, 8, 15, 'Champion', ['ossuary_dread']),
-      row('Shade Herald', 'dungeon_elite', 'arcane', 4100, 36, 56, 80, 1100, 75, 150, 'Champion', ['shade_veil']),
-      row('The Bone Regent', 'dungeon_end', 'physical', 2000, 16, 24, 96, 300, 20, 40, 'Apex', []),
-      row('The Ember Queen', 'dungeon_end', 'fire', 5000, 25, 52, 96, 1200, 75, 150, 'Apex', []),
-      row('The Umbral Gatekeeper', 'dungeon_end', 'arcane', 8700, 37, 88, 112, 2500, 175, 350, 'Apex', []),
+      row('Cinder Matriarch', 'dungeon_elite', 'fire', 2200, 23, 31, 72, 500, 30, 60, 'Cinder Matriarch', ['cinder_brood']),
+      row('Ossuary Warden', 'dungeon_elite', 'physical', 850, 15, 14, 72, 120, 8, 15, 'Ossuary Warden', ['ossuary_dread']),
+      row('Shade Herald', 'dungeon_elite', 'arcane', 4100, 36, 56, 80, 1100, 75, 150, 'Shade Herald', ['shade_veil']),
+      row('The Bone Regent', 'dungeon_end', 'physical', 2000, 16, 24, 96, 300, 20, 40, 'The Bone Regent', []),
+      row('The Ember Queen', 'dungeon_end', 'fire', 5000, 25, 52, 96, 1200, 75, 150, 'The Ember Queen', []),
+      row('The Umbral Gatekeeper', 'dungeon_end', 'arcane', 8700, 37, 88, 112, 2500, 175, 350, 'The Umbral Gatekeeper', []),
     ]);
   } finally {
     await pool.end();
