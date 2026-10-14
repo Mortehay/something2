@@ -2601,7 +2601,20 @@ export class Game {
 
             const isManaRestore = s.id.includes('mana') || s.id.includes('evocation') || desc.includes('мана') || desc.includes('ману');
             if (isManaRestore) {
-                this.localMana = Math.min(this.localMaxMana, this.localMana + 35);
+                let manaPct = 0.40;
+                const pctMatch = desc.match(/(\d+)%/);
+                if (pctMatch) {
+                    manaPct = parseInt(pctMatch[1], 10) / 100;
+                }
+                const flatMatch = desc.match(/(\d+)\s*(?:MP|mana|мани)/i);
+                const maxMana = this.localMaxMana || (this.player && this.player.maxMana) || 100;
+                let manaAmt = Math.max(35, Math.round(maxMana * manaPct));
+                if (flatMatch && !pctMatch) {
+                    manaAmt = parseInt(flatMatch[1], 10);
+                }
+                const curMana = this.localMana != null ? this.localMana : 0;
+                this.localMana = Math.min(maxMana, curMana + manaAmt);
+                if (this.player) this.player.mana = this.localMana;
             }
 
             const isStaminaRestore = s.id.includes('stamina') || s.id.includes('adrenaline') || desc.includes('витривал');

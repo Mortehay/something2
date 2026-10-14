@@ -1663,7 +1663,18 @@ class World {
 
       const isManaRestore = skill.id.includes('mana') || skill.id.includes('evocation') || desc.includes('мана') || desc.includes('ману');
       if (isManaRestore) {
-        p.mana = Math.min(p.maxMana, p.mana + 35);
+        let manaPct = 0.40;
+        const pctMatch = desc.match(/(\d+)%/);
+        if (pctMatch) {
+          manaPct = parseInt(pctMatch[1], 10) / 100;
+        }
+        const flatMatch = desc.match(/(\d+)\s*(?:MP|mana|мани)/i);
+        const maxMana = p.maxMana || 100;
+        let manaAmt = Math.max(35, Math.round(maxMana * manaPct));
+        if (flatMatch && !pctMatch) {
+          manaAmt = parseInt(flatMatch[1], 10);
+        }
+        p.mana = Math.min(maxMana, p.mana + manaAmt);
       }
 
       const isStaminaRestore = skill.id.includes('stamina') || skill.id.includes('adrenaline') || desc.includes('витривал');

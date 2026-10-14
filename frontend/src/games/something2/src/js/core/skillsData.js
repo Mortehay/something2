@@ -2392,7 +2392,9 @@ export function resolveSkillDamage(skill) {
       return { base: 0, hits: 0, text: 'Heal +25% HP' };
     }
     if (desc.includes('mana') || desc.includes('мана')) {
-      return { base: 0, hits: 0, text: 'Restores +35 MP' };
+      const pctMatch = desc.match(/(\d+)%/);
+      const pctStr = pctMatch ? `${pctMatch[1]}%` : '40%';
+      return { base: 0, hits: 0, text: `Restores +${pctStr} MP` };
     }
     if (desc.includes('stamina') || desc.includes('витривал')) {
       return { base: 0, hits: 0, text: 'Restores +30 SP' };

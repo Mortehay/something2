@@ -353,6 +353,28 @@ describe("Skills Panel & Hotbar Interactions", () => {
     expect(sent[0].skillId).toBe("war_steel_tempering");
   });
 
+  it("activates Mana Surge, restores 40% of maximum mana locally, and dispatches to server", () => {
+    g.localMaxMana = 3277;
+    g.localMana = 327; // ~10%
+    g.player = { x: 100, y: 100, hp: 100, maxHp: 100, maxMana: 3277, mana: 327, className: "Mage" };
+
+    const sent = [];
+    g.authorityClient = { sendCastSkill: (skillId, tx, ty, nx, ny) => sent.push({ skillId, tx, ty, nx, ny }) };
+
+    const manaSurge = getSkillById("mag_mana_surge");
+    expect(manaSurge).toBeDefined();
+    g.hotbarSkills.set(2, manaSurge);
+    g.activeBuffs = new Map();
+
+    g._activateHotbarSkill(2);
+
+    // 40% of 3277 is 1311, so localMana becomes 327 + 1311 = 1638
+    expect(g.localMana).toBe(1638);
+    expect(g.player.mana).toBe(1638);
+    expect(g.activeBuffs.has("mag_mana_surge")).toBe(true);
+    expect(sent[0].skillId).toBe("mag_mana_surge");
+  });
+
   it("spawns directional arrow projectiles for Archer / Ranger skills", () => {
     g.localStamina = 100;
     g.player = { x: 100, y: 100, hp: 100, maxHp: 100, className: "Archer" };

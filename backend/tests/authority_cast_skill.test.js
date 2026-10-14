@@ -124,6 +124,20 @@ test('castSkill executes buff skills, restores resources, and applies player buf
   assert.equal(playerSnap.buffs[0].id, 'war_steel_tempering');
 });
 
+test('castSkill executes Mana Surge and restores 40% of maximum mana', () => {
+  const world = makeTestWorld({ id: 'item_staff', name: 'staff', category: 'weapon', kind: 'magic' });
+  const userId = 'u_mage';
+  const player = addTestPlayer(world, userId, { x: 100, y: 100 });
+  player.maxMana = 3277;
+  player.mana = 327; // ~10% mana
+
+  const res = world.castSkill(userId, 'mag_mana_surge', 100, 100, 0, 1);
+  assert.equal(res.ok, true);
+  // 40% of 3277 is 1311, so mana becomes 327 + 1311 = 1638
+  assert.equal(player.mana, 1638, 'Mana Surge restored 40% of max mana');
+  assert.equal(player.buffs.has('mag_mana_surge'), true, 'Buff registered in active buffs');
+});
+
 test('castSkill executes Barrage with individual arrow damage hits in shotgun cone', () => {
   const world = makeTestWorld({ id: 'item_bow', name: 'bow', category: 'weapon', kind: 'projectile' });
   const userId = 'u_archer';
