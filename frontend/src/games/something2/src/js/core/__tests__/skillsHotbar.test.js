@@ -783,10 +783,10 @@ describe("Skills Purchasing & Unlocking Mechanics", () => {
     g.localMana = 3277;
     g.localMaxMana = 3277;
     g.player = { x: 100, y: 100, hp: 100, maxHp: 100, className: "Mage" };
-    g.progression = { intelligence: 100, wisdom: 100, level: 75 };
+    g.progression = { strength: 50, dexterity: 50, constitution: 50, intelligence: 100, wisdom: 100, charisma: 50, level: 75 };
     g.inventory = {
       equipment: { main_hand: "item_staff" },
-      types: { item_staff: { id: "item_staff", name: "staff", kind: "weapon", category: "Melee" } }
+      types: { item_staff: { id: "item_staff", name: "staff", kind: "weapon", category: "weapon" } }
     };
 
     // 1. Initial activation: Tick 0 (Stack 0)
