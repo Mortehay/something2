@@ -775,6 +775,49 @@ describe("Skills Purchasing & Unlocking Mechanics", () => {
     g._stopChanneledSkill();
     expect(g.skillCooldowns.get("war_whirlwind")).toBe(initialCd);
   });
+
+  it("ramps intensity stacks and scales resource cost for channeled skills", () => {
+    const blizzard = getSkillById("mag_blizzard");
+    expect(blizzard.channeled).toBe(true);
+    g.hotbarSkills.set(1, blizzard);
+    g.localMana = 3277;
+    g.localMaxMana = 3277;
+    g.player = { x: 100, y: 100, hp: 100, maxHp: 100, className: "Mage" };
+    g.progression = { intelligence: 100, wisdom: 100, level: 75 };
+    g.inventory = {
+      equipment: { main_hand: "item_staff" },
+      types: { item_staff: { id: "item_staff", name: "staff", kind: "weapon", category: "Melee" } }
+    };
+
+    // 1. Initial activation: Tick 0 (Stack 0)
+    g._activateHotbarSkill(1);
+    expect(g._channeledSlot).toBe(1);
+    expect(g._channelTicks).toBe(0);
+    // Base cost is 6, so localMana drops from 3277 to 3271
+    expect(g.localMana).toBe(3271);
+
+    // 2. Advance 16 ticks (reach stack 8)
+    for (let t = 1; t <= 16; t++) {
+      g._channelTicks = t;
+      g._activateHotbarSkill(1, true);
+    }
+    expect(g._channelTicks).toBe(16);
+    expect(g.activeBuffs.has('channel_focus')).toBe(true);
+    const focusBuff = g.activeBuffs.get('channel_focus');
+    expect(focusBuff.nameEn).toContain("8/8");
+    expect(focusBuff.nameEn).toContain("+120%");
+
+    // Next tick at stack 8 should cost 105 mana
+    const manaBefore = g.localMana;
+    g._channelTicks = 17; // still stack 8 (max)
+    g._activateHotbarSkill(1, true);
+    expect(manaBefore - g.localMana).toBe(105);
+
+    // 3. Stop channeling: resets channel ticks and removes focus buff
+    g._stopChanneledSkill();
+    expect(g._channelTicks).toBe(0);
+    expect(g.activeBuffs.has('channel_focus')).toBe(false);
+  });
 });
 
 

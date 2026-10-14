@@ -1411,17 +1411,63 @@ class World {
     }
     const req = checkGemRequirements(skill, p.stats, equippedWeapon);
     if (!req.weaponOk) {
+      p._channelSkillId = null;
+      p._channelTicks = 0;
       return { ok: false, kills: [], reason: 'weapon_mismatch', error: req.errors[0] };
     }
     if (!req.ok) {
+      p._channelSkillId = null;
+      p._channelTicks = 0;
       return { ok: false, kills: [], reason: 'requirements_unmet', error: req.errors[0] };
     }
 
+    // Channeled skills: track continuous ticks and calculate ramping intensity
+    let channelStack = 0;
+    if (skill.channeled) {
+      const now = this.now;
+      if (p._channelSkillId === skill.id && (now - (p._lastChannelAt || 0)) <= 600) {
+        p._channelTicks = (p._channelTicks || 0) + 1;
+      } else {
+        p._channelSkillId = skill.id;
+        p._channelTicks = 0;
+      }
+      p._lastChannelAt = now;
+      channelStack = Math.min(8, Math.floor(p._channelTicks / 2));
+    } else {
+      p._channelSkillId = null;
+      p._channelTicks = 0;
+    }
+
+    // Calculate resource cost (ramping for channeled skills)
+    const baseCost = Number(skill.cost) || 0;
+    let cost = baseCost;
+    if (skill.channeled && channelStack > 0) {
+      let maxPool = 100;
+      if (skill.costType === 'mana') maxPool = p.maxMana || 100;
+      else if (skill.costType === 'stamina') maxPool = p.maxStamina || 100;
+      else if (skill.costType === 'hp') maxPool = p.maxHp || 100;
+
+      const costMult = 1 + channelStack * 0.35;
+      const poolDrain = (maxPool * (channelStack * 0.0125)) / 4;
+      cost = Math.max(1, Math.round(baseCost * costMult + poolDrain));
+    }
+
     // Check resources on player
-    const cost = Number(skill.cost) || 0;
-    if (skill.costType === 'mana' && p.mana < cost) return { ok: false, kills: [], reason: 'mana' };
-    if (skill.costType === 'stamina' && p.stamina < cost) return { ok: false, kills: [], reason: 'stamina' };
-    if (skill.costType === 'hp' && p.hp <= cost) return { ok: false, kills: [], reason: 'hp' };
+    if (skill.costType === 'mana' && p.mana < cost) {
+      p._channelSkillId = null;
+      p._channelTicks = 0;
+      return { ok: false, kills: [], reason: 'mana' };
+    }
+    if (skill.costType === 'stamina' && p.stamina < cost) {
+      p._channelSkillId = null;
+      p._channelTicks = 0;
+      return { ok: false, kills: [], reason: 'stamina' };
+    }
+    if (skill.costType === 'hp' && p.hp <= cost) {
+      p._channelSkillId = null;
+      p._channelTicks = 0;
+      return { ok: false, kills: [], reason: 'hp' };
+    }
 
     // Deduct resource
     if (skill.costType === 'mana') p.mana = Math.max(0, p.mana - cost);
@@ -1474,7 +1520,8 @@ class World {
       baseDamage = Math.max(4, Math.min(28, baseDamage));
     }
 
-    const damage = Math.max(2, Math.round(baseDamage * baseMult * elemMult * debuffDamageMult(p)));
+    const intensityMult = skill.channeled ? (1 + channelStack * 0.15) : 1;
+    const damage = Math.max(2, Math.round(baseDamage * baseMult * elemMult * debuffDamageMult(p) * intensityMult));
     const element = skill.element || (skill.class === 'Mage' ? 'fire' : (skill.class === 'Druid' ? 'lightning' : (skill.class === 'Cultist' ? 'shadow' : 'physical')));
 
     const kills = [];
@@ -1499,7 +1546,8 @@ class World {
     if (skill.type === 'melee') {
       const { nx, ny } = normalizeAim(ax, ay, p.facing);
       const isSpin = skill.channeled || skill.id.includes('whirlwind') || skill.id.includes('spin') || skill.id.includes('crane');
-      const reach = isSpin ? 120 : Math.max(90, (Number(skill.range) || 90) * 1.3);
+      const reachScale = (skill.channeled && channelStack > 0) ? (1 + channelStack * 0.04) : 1;
+      const reach = (isSpin ? 120 : Math.max(90, (Number(skill.range) || 90) * 1.3)) * reachScale;
       const arc = isSpin ? (Math.PI * 2) : (Math.PI * 0.75);
       // The same target set applyMeleeArc resolves, read before it can
       // remove a kill.
@@ -1522,7 +1570,8 @@ class World {
         p.hp = Math.min(p.maxHp || 100, p.hp + leechAmount);
       }
     } else if (skill.type === 'magic' || skill.type === 'debuff') {
-      const aoeRadius = Math.max(90, (Number(skill.radius) || 80) * 1.5);
+      const aoeScale = (skill.channeled && channelStack > 0) ? (1 + channelStack * 0.04) : 1;
+      const aoeRadius = Math.max(90, (Number(skill.radius) || 80) * 1.5) * aoeScale;
       const isBarrage = skill.id === 'arc_barrage';
       const isBeam = skill.id.includes('beam') || skill.id.includes('ray');
       const isDirectionalShotgun = isBarrage || isBeam || skill.id.includes('multishot') || skill.id.includes('split_shot') || skill.id.includes('aimed_shot') || skill.id.includes('piercing');

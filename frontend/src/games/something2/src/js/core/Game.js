@@ -1244,6 +1244,8 @@ export class Game {
         }
         this._channeledSlot = null;
         this._channeledSkillId = null;
+        this._channelTicks = 0;
+        if (this.activeBuffs) this.activeBuffs.delete('channel_focus');
     }
 
     _isSlotHeld(slot) {
@@ -1316,6 +1318,7 @@ export class Game {
         const CHANNEL_INTERVAL_MS = 250;
         if (nowMs - (this._lastChannelTick || 0) >= CHANNEL_INTERVAL_MS) {
             this._lastChannelTick = nowMs;
+            this._channelTicks = (this._channelTicks || 0) + 1;
             this._activateHotbarSkill(this._channeledSlot, true);
         }
     }
@@ -2403,7 +2406,21 @@ export class Game {
         }
 
         // 5. Check and deduct resource cost
-        const cost = s.cost || 0;
+        const baseCost = s.cost || 0;
+        const channelStack = s.channeled ? Math.min(8, Math.floor((this._channelTicks || 0) / 2)) : 0;
+
+        let maxPool = 100;
+        if (s.costType === 'mana') maxPool = this.localMaxMana != null ? this.localMaxMana : 100;
+        else if (s.costType === 'stamina') maxPool = this.localStamina != null ? this.localStamina : 100;
+        else if (s.costType === 'hp') maxPool = (this.player && this.player.maxHp != null) ? this.player.maxHp : 100;
+
+        let cost = baseCost;
+        if (s.channeled && channelStack > 0) {
+            const costMult = 1 + channelStack * 0.35;
+            const poolDrain = (maxPool * (channelStack * 0.0125)) / 4;
+            cost = Math.max(1, Math.round(baseCost * costMult + poolDrain));
+        }
+
         if (s.costType === 'mana' && cost > 0) {
             const currentMana = this.localMana != null ? this.localMana : 100;
             if (currentMana < cost) {
@@ -2441,6 +2458,7 @@ export class Game {
             this._channeledSlot = slotNum;
             this._channeledSkillId = s.id;
             this._lastChannelTick = nowMs;
+            this._channelTicks = 0;
         }
 
         // 6. Target resolution & Max Range enforcement (prevents casting across the whole screen)
@@ -2505,7 +2523,8 @@ export class Game {
         const ny = Math.sin(aimAngle);
         const vfxName = resolveSkillVfx(s);
         const isSpin = s.channeled && (s.id.includes('whirlwind') || s.id.includes('spin') || s.id.includes('crane') || s.id.includes('cyclone'));
-        const reach = isSpin ? 120 : (s.type === 'melee' ? (Number(s.range) || 90) : (Number(s.radius) || 80) * 1.5);
+        const reachScale = (s.channeled && channelStack > 0) ? (1 + channelStack * 0.04) : 1;
+        const reach = (isSpin ? 120 : (s.type === 'melee' ? (Number(s.range) || 90) : (Number(s.radius) || 80) * 1.5)) * reachScale;
         const arc = isSpin ? Math.PI * 2 : (s.type === 'melee' ? Math.PI * 0.75 : Math.PI * 2);
 
         if (visual) {
@@ -2602,6 +2621,21 @@ export class Game {
                 startedAt: nowMs,
                 durationMs: durMs,
                 expiresAt: nowMs + durMs,
+            });
+        }
+
+        if (s.channeled && channelStack > 0) {
+            if (!this.activeBuffs) this.activeBuffs = new Map();
+            const dmgBonusPct = Math.round(channelStack * 15);
+            this.activeBuffs.set('channel_focus', {
+                id: 'channel_focus',
+                nameUk: `Фокус (${channelStack}/8): +${dmgBonusPct}% шкоди`,
+                nameEn: `Focus (${channelStack}/8): +${dmgBonusPct}% Damage`,
+                icon: '⚡',
+                iconColor: '#38bdf8',
+                startedAt: nowMs,
+                durationMs: 1200,
+                expiresAt: nowMs + 1200,
             });
         }
 

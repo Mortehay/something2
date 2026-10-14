@@ -766,7 +766,7 @@ export class RenderSystem {
     if (!isFormOk) unmetWarnings.push(`Requires ${reqForm.toUpperCase()} Form`);
 
     const reqBlockH = 34 + (unmetWarnings.length > 0 ? 18 : 0);
-    const cardH = 135 + reqBlockH + descH + (hasReqForm ? 20 : 0);
+    const cardH = 135 + reqBlockH + descH + (hasReqForm ? 20 : 0) + (skill.channeled ? 18 : 0);
 
     // Calculate positioning with screen bounds clamping
     let cardX = cursorX + 16;
@@ -823,8 +823,8 @@ export class RenderSystem {
 
     // 2. Metrics Grid: Damage, Cost, Cooldown, Range, Element
     const dmgInfo = resolveSkillDamage(skill);
-    const costText = skill.channeled ? `${(skill.cost || 0) * 4}/s ${(skill.costType || 'mana').toUpperCase()}` : `${skill.cost || 0} ${(skill.costType || 'mana').toUpperCase()}`;
-    const cdText = skill.channeled ? 'Channeled' : (skill.cooldown ? `${skill.cooldown}s` : 'None');
+    const costText = skill.channeled ? `${(skill.cost || 0) * 4}/s ${(skill.costType || 'mana').toUpperCase()} (Ramping)` : `${skill.cost || 0} ${(skill.costType || 'mana').toUpperCase()}`;
+    const cdText = skill.channeled ? 'Channeled (Focus x1–x8)' : (skill.cooldown ? `${skill.cooldown}s` : 'None');
     const rangeText = skill.range ? `${skill.range} px` : (skill.type === 'melee' ? 'Melee (80)' : 'Self');
     const elemText = (skill.element || (skill.class === 'Archer' ? 'Physical' : 'Arcane')).toUpperCase();
 
@@ -914,11 +914,18 @@ export class RenderSystem {
     }
 
     // 5. Form Requirement (if Druid form required)
+    let extraY = div3Y + 7 + descLines.length * 15 + 4;
     if (hasReqForm) {
-      const formY = div3Y + 7 + descLines.length * 15 + 4;
       ctx.font = 'bold 10px monospace';
       ctx.fillStyle = isFormOk ? '#34d399' : '#facc15';
-      ctx.fillText(`🔒 Requires: ${reqForm.toUpperCase()} FORM`, cardX + pad, formY);
+      ctx.fillText(`🔒 Requires: ${reqForm.toUpperCase()} FORM`, cardX + pad, extraY);
+      extraY += 16;
+    }
+
+    if (skill.channeled) {
+      ctx.font = 'italic 10px sans-serif';
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillText('⚡ Focus: +15% Dmg/stack (up to +120%), cost ramps over time', cardX + pad, extraY);
     }
 
     ctx.restore();
