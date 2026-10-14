@@ -2384,17 +2384,22 @@ export function resolveSkillVfx(skill) {
   return 'generic_slash';
 }
 
-export function resolveSkillDamage(skill) {
+export function resolveSkillDamage(skill, playerPools = null) {
   if (!skill) return { base: 12, hits: 1, text: '12 Damage' };
   if (skill.type === 'buff') {
     const desc = (skill.descEn || '') + ' ' + (skill.descUk || '');
     if (desc.includes('HP') || desc.includes('heal') || desc.includes('зцілює')) {
-      return { base: 0, hits: 0, text: 'Heal +25% HP' };
+      const maxHp = (playerPools && (playerPools.maxHp != null ? playerPools.maxHp : playerPools.hp)) || null;
+      const extra = maxHp ? ` (+${Math.max(15, Math.round(maxHp * 0.25))} HP)` : '';
+      return { base: 0, hits: 0, text: `Heal +25% HP${extra}` };
     }
     if (desc.includes('mana') || desc.includes('мана')) {
       const pctMatch = desc.match(/(\d+)%/);
+      const pct = pctMatch ? parseInt(pctMatch[1], 10) : 40;
       const pctStr = pctMatch ? `${pctMatch[1]}%` : '40%';
-      return { base: 0, hits: 0, text: `Restores +${pctStr} MP` };
+      const maxMana = (playerPools && (playerPools.maxMana != null ? playerPools.maxMana : playerPools.mana)) || null;
+      const extra = maxMana ? ` (+${Math.max(35, Math.round(maxMana * (pct / 100)))} MP)` : '';
+      return { base: 0, hits: 0, text: `Restores +${pctStr} MP${extra}` };
     }
     if (desc.includes('stamina') || desc.includes('витривал')) {
       return { base: 0, hits: 0, text: 'Restores +30 SP' };

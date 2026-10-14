@@ -69,6 +69,12 @@ export class CreatureManager {
       if (ex) {
         ex.tx = c.x; ex.ty = c.y;
         if (!c.f) {
+          if (ex.hp !== undefined && c.hp !== undefined && c.hp < ex.hp) {
+            const dmg = Math.round(ex.hp - c.hp);
+            if (dmg > 0 && typeof this.onCreatureDamage === 'function') {
+              this.onCreatureDamage(ex, dmg);
+            }
+          }
           ex.facing = c.facing; ex.hp = c.hp; ex.mode = c.mode;
           // Assigned UNCONDITIONALLY within the near zone (unlike color
           // below): the server omits the field entirely once nothing is

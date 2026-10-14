@@ -306,6 +306,21 @@ export function createSkillVisual(skill, fromX, fromY, toX, toY, aimAngle, nowMs
     };
   }
 
+  // 4b. Mana Surge (Expanding arcane tidal shockwave + radiant rising mana motes)
+  if (id === 'mag_mana_surge' || id.includes('mana_surge') || id.includes('evocation') || id.includes('arcane_surge')) {
+    return {
+      kind: 'mana_surge',
+      id: `${id}_${Math.random()}`,
+      x: fromX,
+      y: fromY,
+      radius: 110,
+      element: 'arcane',
+      color: '#38bdf8',
+      startedAt: nowMs,
+      durationMs: 750,
+    };
+  }
+
   // 5. Meteor Shower / Deep Comet (4 massive meteors falling sequentially from sky)
   if (id.includes('meteor_shower') || id.includes('deep_comet')) {
     const meteorCount = 4;

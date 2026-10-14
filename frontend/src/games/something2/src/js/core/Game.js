@@ -219,6 +219,8 @@ export class Game {
         this.hotbarSkills = new Map();
         this.unlockedSkills = new Set();
         this.skillVisuals = [];
+        this.floatingTexts = [];
+        this._inputBuffer = [];
         this.activeForm = null;
         this.hotbarFlashSlot = null;
         this.hotbarFlashUntil = 0;
@@ -386,6 +388,20 @@ export class Game {
     // queueing; a newer toast simply replaces whatever was showing.
     _showToast(message, durationMs = 3000) {
         this.toast = { message, expiresAt: performance.now() + durationMs };
+    }
+
+    // Spawn floating combat / resource text (Damage numbers, Mana restore, Heals, Stamina)
+    spawnFloatingText(x, y, text, color = '#ffffff', options = {}) {
+        if (!this.floatingTexts) this.floatingTexts = [];
+        this.floatingTexts.push({
+            x,
+            y,
+            text,
+            color,
+            size: options.size || 15,
+            duration: options.duration || 1.1,
+            createdAt: performance.now(),
+        });
     }
 
     setEngineClient(engine, localUserId) {
@@ -596,6 +612,13 @@ export class Game {
         this.streamer = new ChunkStreamer(this.chunkedMap, makeChunkFetcher(worldId, API_URL), 1);
 
         this.creatures = new CreatureManager(entityTypes);
+        this.creatures.onCreatureDamage = (creature, dmg) => {
+            const cx = creature.tx != null ? creature.tx : creature.x;
+            const cy = creature.ty != null ? creature.ty : creature.y;
+            const jitterX = (Math.random() - 0.5) * 16;
+            const jitterY = (Math.random() - 0.5) * 8;
+            this.spawnFloatingText(cx + jitterX, cy - 25 + jitterY, `-${dmg}`, '#ef4444', { size: 15, bold: true });
+        };
         this.projectiles = new ProjectileManager();
         // Non-creature entity types (map decorations: rocks, bushes, ...),
         // keyed by name for RenderSystem.collectDecorations. Built once here
@@ -673,6 +696,7 @@ export class Game {
         this._channeledSkillId = null;
         this._lastChannelTick = 0;
         this.skillVisuals = [];
+        this.floatingTexts = [];
         this.merchants = [];
         this.skillMerchants = [];
         this.questGivers = [];
@@ -1495,6 +1519,10 @@ export class Game {
                 });
                 this.skillVisuals = pruneSkillVisuals(this.skillVisuals, nowMs);
             }
+            if (this.floatingTexts && this.floatingTexts.length > 0) {
+                const nowMs = performance.now();
+                this.floatingTexts = this.floatingTexts.filter(ft => (nowMs - ft.createdAt) < (ft.duration * 1000));
+            }
             this.creatures.interpolate(dt);
             if (this.projectiles) this.projectiles.interpolate(dt);
             this.camera.update(this.player);
@@ -1511,6 +1539,13 @@ export class Game {
         let mine = null;
         for (const p of (msg.players || [])) {
             if (p.id === this.localUserId) { mine = p; continue; }
+            const prevRemote = this.remotePlayers && this.remotePlayers.get(p.id);
+            if (prevRemote && prevRemote.hp !== undefined && p.hp !== undefined && p.hp < prevRemote.hp) {
+                const dmg = Math.round(prevRemote.hp - p.hp);
+                if (dmg > 0) {
+                    this.spawnFloatingText(p.x, p.y - 25, `-${dmg}`, '#ef4444', { size: 14, bold: true });
+                }
+            }
             // The field list lives in worldPlayers.js so a test can hold it:
             // this map is built from named fields, not a spread, so anything
             // the server sends and the list omits is dropped SILENTLY. See
@@ -1526,6 +1561,19 @@ export class Game {
         }
         this.remotePlayers = next;
         if (mine) {
+            if (this.player && this.player.hp !== undefined && mine.hp !== undefined && mine.hp < this.player.hp) {
+                const dmg = Math.round(this.player.hp - mine.hp);
+                if (dmg > 0) {
+                    const jitterX = (Math.random() - 0.5) * 12;
+                    this.spawnFloatingText(this.player.x + jitterX, this.player.y - 25, `-${dmg}`, '#ef4444', { size: 16, bold: true });
+                }
+            } else if (this.player && this.player.hp !== undefined && mine.hp !== undefined && mine.hp > this.player.hp) {
+                const heal = Math.round(mine.hp - this.player.hp);
+                if (heal > 0) {
+                    const jitterX = (Math.random() - 0.5) * 12;
+                    this.spawnFloatingText(this.player.x + jitterX, this.player.y - 25, `+${heal} HP`, '#4ade80', { size: 16, bold: true });
+                }
+            }
             this.player.hp = mine.hp;
             this.player.maxHp = mine.maxHp;
             // Assigned on EVERY frame, including the (common) one where the
@@ -1743,6 +1791,9 @@ export class Game {
             if (this.skillVisuals && this.skillVisuals.length > 0) {
                 this.skillVisuals = pruneSkillVisuals(this.skillVisuals, nowMs);
             }
+            if (this.floatingTexts && this.floatingTexts.length > 0) {
+                this.floatingTexts = this.floatingTexts.filter(ft => (nowMs - ft.createdAt) < (ft.duration * 1000));
+            }
             if (this.activeBuffs && this.activeBuffs.size > 0) {
                 for (const [id, b] of this.activeBuffs) {
                     if (nowMs >= b.expiresAt) this.activeBuffs.delete(id);
@@ -1852,6 +1903,7 @@ export class Game {
                 vfx: this.vfx, vfxDefs: this.vfxDefs,
                 auraDefs: this.auraDefs,
                 skillVisuals: this.skillVisuals,
+                floatingTexts: this.floatingTexts,
                 // null whenever the equipped weapon needs no ammo — the HUD
                 // then draws no ammo line at all.
                 ammo: resolveAmmoHud(this.inventory),
@@ -2596,7 +2648,11 @@ export class Game {
                            s.id.includes('flash_of_light') || s.id.includes('holy_light') || s.id.includes('unstoppable');
             if (isHeal && this.player) {
                 const maxHp = this.player.maxHp || 100;
-                this.player.hp = Math.min(maxHp, (this.player.hp || maxHp) + Math.max(15, Math.round(maxHp * 0.25)));
+                const healAmt = Math.max(15, Math.round(maxHp * 0.25));
+                const oldHp = this.player.hp || maxHp;
+                this.player.hp = Math.min(maxHp, oldHp + healAmt);
+                const actualHealed = this.player.hp - oldHp;
+                this.spawnFloatingText(px, py - 25, `+${actualHealed > 0 ? actualHealed : healAmt} HP`, '#4ade80', { size: 16, bold: true });
             }
 
             const isManaRestore = s.id.includes('mana') || s.id.includes('evocation') || desc.includes('мана') || desc.includes('ману');
@@ -2615,11 +2671,13 @@ export class Game {
                 const curMana = this.localMana != null ? this.localMana : 0;
                 this.localMana = Math.min(maxMana, curMana + manaAmt);
                 if (this.player) this.player.mana = this.localMana;
+                this.spawnFloatingText(px, py - 25, `+${manaAmt} MP`, '#38bdf8', { size: 16, bold: true });
             }
 
-            const isStaminaRestore = s.id.includes('stamina') || s.id.includes('adrenaline') || desc.includes('витривал');
+            const isStaminaRestore = s.id.includes('stamina') || s.id.includes('adrenaline') || desc.toLowerCase().includes('stamina') || desc.includes('витривал');
             if (isStaminaRestore) {
                 this.localStamina = Math.min(this.localMaxStamina, this.localStamina + 30);
+                this.spawnFloatingText(px, py - 25, `+30 SP`, '#fbbf24', { size: 15, bold: true });
             }
 
             if (!this.activeBuffs) this.activeBuffs = new Map();

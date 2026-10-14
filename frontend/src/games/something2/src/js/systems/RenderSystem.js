@@ -353,6 +353,8 @@ export class RenderSystem {
     skillHoverSlot = null, playerClass = null, activeForm = null, flashSlot = null,
     skillCooldowns = null, activeBuffs = [], unlockedSkills = null,
     hoveredSkill = null, cursorX = null, cursorY = null, keybinds = null,
+    // Floating Combat & Resource text (Damage numbers, heals, mana/stamina surge)
+    floatingTexts = [],
     // Quest Log (hotkey 'J')
     questLogOpen = false, quests = [], activeQuestKey = null, legacyChoice = null, questScroll = 0, trackedQuestKey = null,
   }) {
@@ -559,6 +561,9 @@ export class RenderSystem {
     this.drawBlasts(blasts);
     this.drawVfx(vfx, { player, remotePlayers, creatures, localUserId });
     this.drawSkillVisuals(skillVisuals);
+    if (floatingTexts && floatingTexts.length > 0) {
+      this.drawFloatingTexts(floatingTexts);
+    }
 
     camera.reset(this.ctx);
     this._skillSlotHitAreas = [];
@@ -699,11 +704,13 @@ export class RenderSystem {
 
     // Skill rich tooltip on hover (over hotbar slots or skills panel)
     if (hoveredSkill && cursorX != null && cursorY != null) {
-      this._drawSkillTooltip(hoveredSkill, cursorX, cursorY, playerStats || progression, equippedWeapon, activeForm);
+      this._drawSkillTooltip(hoveredSkill, cursorX, cursorY, playerStats || progression, equippedWeapon, activeForm, {
+        mana, maxMana, maxHp: player && player.maxHp, hp: player && player.hp, stamina, maxStamina
+      });
     }
   }
 
-  _drawSkillTooltip(skill, cursorX, cursorY, playerStats = null, equippedWeapon = null, activeForm = null) {
+  _drawSkillTooltip(skill, cursorX, cursorY, playerStats = null, equippedWeapon = null, activeForm = null, playerPools = null) {
     if (!skill) return;
     const ctx = this.ctx;
     ctx.save();
@@ -824,7 +831,7 @@ export class RenderSystem {
     ctx.stroke();
 
     // 2. Metrics Grid: Damage, Cost, Cooldown, Range, Element
-    const dmgInfo = resolveSkillDamage(skill);
+    const dmgInfo = resolveSkillDamage(skill, playerPools);
     const costText = skill.channeled ? `${(skill.cost || 0) * 4}/s ${(skill.costType || 'mana').toUpperCase()} (Ramping)` : `${skill.cost || 0} ${(skill.costType || 'mana').toUpperCase()}`;
     const cdText = skill.channeled ? 'Channeled (Focus x1–x8)' : (skill.cooldown ? `${skill.cooldown}s` : 'None');
     const rangeText = skill.range ? `${skill.range} px` : (skill.type === 'melee' ? 'Melee (80)' : 'Self');
@@ -2220,6 +2227,61 @@ export class RenderSystem {
             }
           }
           this.ctx.restore();
+        } else if (v.kind === 'mana_surge') {
+          // Arcane tidal shockwave & ascending radiant mana motes
+          this.ctx.save();
+          this.ctx.globalAlpha = alpha;
+          const s = worldToScreen(v.x, v.y);
+          const maxR = blastScreenRadiusX(v.radius || 110);
+          const rx = maxR * Math.sqrt(progress);
+          const ry = rx / 2;
+
+          if (rx > 0) {
+            // Ground arcane aura glow
+            const groundGrad = this.ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, rx);
+            groundGrad.addColorStop(0, 'rgba(56, 189, 248, 0.35)');
+            groundGrad.addColorStop(0.6, 'rgba(14, 165, 233, 0.15)');
+            groundGrad.addColorStop(1, 'rgba(2, 132, 199, 0)');
+            this.ctx.fillStyle = groundGrad;
+            this.ctx.beginPath();
+            this.ctx.ellipse(s.x, s.y, rx, ry, 0, 0, Math.PI * 2);
+            this.ctx.fill();
+
+            // Outer sharp expanding mana crest ring
+            this.ctx.strokeStyle = '#38bdf8';
+            this.ctx.lineWidth = 3.5 * (1 - progress * 0.5);
+            this.ctx.beginPath();
+            this.ctx.ellipse(s.x, s.y, rx, ry, 0, 0, Math.PI * 2);
+            this.ctx.stroke();
+
+            // Inner harmonic ring
+            if (progress > 0.12) {
+              const innerRx = rx * 0.62;
+              this.ctx.strokeStyle = '#bae6fd';
+              this.ctx.lineWidth = 2 * (1 - progress);
+              this.ctx.beginPath();
+              this.ctx.ellipse(s.x, s.y, innerRx, innerRx / 2, 0, 0, Math.PI * 2);
+              this.ctx.stroke();
+            }
+
+            // Ascending mana motes floating upwards around the player
+            const sparkCount = 10;
+            for (let i = 0; i < sparkCount; i++) {
+              const angle = (Math.PI * 2 * i) / sparkCount + (i * 1.3);
+              const dist = rx * (0.3 + (i % 4) * 0.18);
+              const sparkX = s.x + Math.cos(angle) * dist;
+              const sparkGroundY = s.y + Math.sin(angle) * (dist / 2);
+              const rise = progress * (45 + (i % 3) * 20);
+              const sparkY = sparkGroundY - rise;
+              const sparkSize = Math.max(1.5, 3.5 * (1 - progress));
+
+              this.ctx.fillStyle = i % 2 === 0 ? '#38bdf8' : '#ffffff';
+              this.ctx.beginPath();
+              this.ctx.arc(sparkX, sparkY, sparkSize, 0, Math.PI * 2);
+              this.ctx.fill();
+            }
+          }
+          this.ctx.restore();
         } else if (v.kind === 'holy_pillar') {
           // Ascending vertical pillar of golden light
           this.ctx.save();
@@ -2495,6 +2557,68 @@ export class RenderSystem {
     } finally {
       this.ctx.restore();
     }
+  }
+
+  // Floating Combat & Resource Text (Damage numbers, Mana restore, Heals, Stamina)
+  // Drawn inside the camera transform right above world entities.
+  drawFloatingTexts(floatingTexts) {
+    if (!floatingTexts || floatingTexts.length === 0) return;
+    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
+    this.ctx.save();
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+
+    for (const ft of floatingTexts) {
+      if (!ft) continue;
+      const createdAt = ft.createdAt || now;
+      const elapsed = (now - createdAt) / 1000;
+      const duration = ft.duration || 1.1;
+      if (elapsed < 0 || elapsed > duration) continue;
+
+      const progress = Math.min(1, Math.max(0, elapsed / duration));
+      // Fade in quickly during first 15%, fade out smoothly during last 35%
+      let alpha = 1;
+      if (progress < 0.15) {
+        alpha = progress / 0.15;
+      } else if (progress > 0.65) {
+        alpha = Math.max(0, 1 - (progress - 0.65) / 0.35);
+      }
+
+      // Smooth rise upward: starts quick, rises upwards by ~38px
+      const riseY = Math.pow(progress, 0.75) * 38;
+
+      // Project world coordinate to screen under camera
+      const s = worldToScreen(ft.x, ft.y);
+      const drawX = s.x;
+      const drawY = s.y - riseY;
+
+      // Slight scale pop at spawn (scale 0.8 -> 1.12 -> 1.0)
+      const scale = progress < 0.15
+        ? (0.8 + (progress / 0.15) * 0.32)
+        : (1.12 - ((progress - 0.15) / 0.85) * 0.12);
+
+      this.ctx.save();
+      this.ctx.translate(drawX, drawY);
+      this.ctx.scale(scale, scale);
+      this.ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+
+      const fontSize = ft.size || 14;
+      this.ctx.font = `bold ${fontSize}px sans-serif`;
+
+      // Thick dark outline for high contrast against any terrain/spells
+      this.ctx.strokeStyle = 'rgba(0, 0, 0, 0.9)';
+      this.ctx.lineWidth = 3.5;
+      this.ctx.lineJoin = 'round';
+      this.ctx.strokeText(ft.text, 0, 0);
+
+      // Main vibrant fill text
+      this.ctx.fillStyle = ft.color || '#ffffff';
+      this.ctx.fillText(ft.text, 0, 0);
+
+      this.ctx.restore();
+    }
+
+    this.ctx.restore();
   }
 
 
