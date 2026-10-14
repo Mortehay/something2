@@ -626,7 +626,9 @@ async function applyMapSpec(pool, spec, { moveEntry = true } = {}) {
     for (const w of spec.worlds) {
       if (!w.chest) continue;
       const worldId = idByKey.get(w.key);
-      const existing = await client.query('SELECT id FROM world_chests WHERE world_id = $1', [worldId]);
+      // expires_at IS NULL: a transient boss-death chest (SOMET-611) is not
+      // the authored chest and must not make this reseed skip writing it.
+      const existing = await client.query('SELECT id FROM world_chests WHERE world_id = $1 AND expires_at IS NULL', [worldId]);
       if (existing.rowCount === 0) {   // idempotent: one authored chest per seeded world
         await insertVaultChest(client, worldId, {
           x: w.chest.x, y: w.chest.y,

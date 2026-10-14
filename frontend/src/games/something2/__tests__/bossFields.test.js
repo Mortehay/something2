@@ -127,3 +127,12 @@ describe("loot constants stay in step with the backend (SOMET-611)", () => {
     expect([...tiers].sort()).toEqual([...LOOT_TIERS].sort());
   });
 });
+
+// Review gap: LOOT_TIERS excluding miniboss proves nothing unless the form
+// actually gates on it. Source gate on the JSX (the suite has no DOM).
+describe("the entity editor gates loot fields on LOOT_TIERS (SOMET-611)", () => {
+  it("renders the loot block only for LOOT_TIERS tiers", () => {
+    const src = readFileSync(path.resolve(__dirname, "../EntityTypesAdmin.jsx"), "utf8");
+    expect(src).toMatch(/formData\.is_creature && LOOT_TIERS\.includes\(formData\.boss_tier\) && \(/);
+  });
+});

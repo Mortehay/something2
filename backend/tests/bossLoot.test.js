@@ -257,3 +257,48 @@ test('shortenBossChestExpiry leaves a permanent (no-deadline) chest alone withou
   await shortenBossChestExpiry(pool, chest);
   assert.equal(pool.calls.length, 0);
 });
+
+// Review gap: the world-boss loop's "own drops once per kill" was only
+// guarded by a DB-gated test (skipped without TEST_DATABASE_URL). This runs
+// the REAL WorldBossManager.onCreatureDeath against a recording pool: four
+// participants must produce exactly ONE creature_drops read, and the extra
+// gear pool must be drawn once per participant.
+test('world boss kill: own drop rows read once per kill, extra rolls once per participant', async () => {
+  const { WorldBossManager } = require('../src/authority/worldBoss.js');
+  const pool = recordingPool({
+    'FROM item_types': () => ({ rows: [{ id: 1 }, { id: 2 }] }),
+    'INSERT INTO world_items': () => ({ rows: [] }),
+    'INSERT INTO world_chests': () => ({
+      rows: [{ id: 'ch', x: 1, y: 1, kind: 'vault', guard_entity_type_id: 7, guard_level: 100,
+        guard_creature_ids: [], state: 'unlocked', expires_at: new Date() }],
+    }),
+  });
+  const wbm = new WorldBossManager({ pool, rng: () => 0.1 });
+  const dmg = new Map([['u1', 400], ['u2', 300], ['u3', 200], ['u4', 100]]);
+  wbm.state = 'active';
+  wbm.bossCreatureId = 'wb_1';
+  wbm.currentBoss = {
+    row: { id: 7, behavior_id: 3, boss_tier: 'world' }, name: 'Testboss', maxHp: 1000, _playerDamage: dmg,
+  };
+  const entry = { worldId: 'w', chests: [], world: { groundItems: { add() {} } } };
+  const legendaries = [];
+  await wbm.onCreatureDeath(entry, { id: 'wb_1', bossTier: 'world', x: 10, y: 10, _playerDamage: dmg }, 'u1', {
+    pool, dropLegendaryFn: async (e, uId) => { legendaries.push(uId); },
+  });
+  assert.equal(pool.calls.filter((c) => /FROM creature_drops/.test(c.sql)).length, 1, 'own creature_drops once per kill');
+  assert.equal(pool.calls.filter((c) => /FROM behavior_drops/.test(c.sql)).length, 1, 'own behavior_drops once per kill');
+  assert.equal(pool.calls.filter((c) => /FROM item_types/.test(c.sql)).length, 4, 'extra gear rolled for every participant');
+  assert.equal(legendaries.length, 3, 'top-3 legendaries unchanged');
+  assert.equal(entry.chests.length, 1, 'victory chest spawned');
+});
+
+// Review gap: the openchest handler is the only caller that shortens an
+// opened boss chest's deadline. A source gate proves the call is WRITTEN in
+// the handler, guarded on expiresAt; boss_loot_award_db.test.js proves the
+// function's SQL, and the browser pass proved the wired path end to end.
+test('the openchest handler shortens a transient chest\'s deadline once opened', () => {
+  const src = require('node:fs').readFileSync(require.resolve('../src/authority/server.js'), 'utf8');
+  const handler = src.slice(src.indexOf("chainOp(ws, 'openchest'"));
+  const body = handler.slice(0, handler.indexOf('chainOp(ws, ', 10));
+  assert.match(body, /if \(chest\.expiresAt != null\) \{\s*await shortenBossChestExpiry\(pool, chest\)/);
+});

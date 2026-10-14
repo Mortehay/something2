@@ -119,7 +119,8 @@ async function applyPointArt(client, spec, idByKey) {
       // a world with no vault chest row (or one already removed) would
       // otherwise inflate the count with an UPDATE that touched nothing.
       const result = await client.query(
-        `UPDATE world_chests SET entity_type_id = $2 WHERE world_id = $1 AND kind = 'vault'`,
+        // expires_at IS NULL skips transient boss-death vault chests (SOMET-611).
+        `UPDATE world_chests SET entity_type_id = $2 WHERE world_id = $1 AND kind = 'vault' AND expires_at IS NULL`,
         [idByKey.get(w.key), chestId],
       );
       n.chests += result.rowCount || 0;

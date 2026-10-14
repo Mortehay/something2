@@ -14,6 +14,7 @@ const { rollDrops, rollGold } = require('./loot.js');
 const { rollRarity, RARITIES } = require('./rarity.js');
 const { rollItemInstance } = require('./affixes.js');
 const { mapChestRow } = require('../services/chests.js');
+const { clearOverviewCache } = require('../services/overviewCache.js');
 
 // Spec §3.7's table, verbatim. `rolls` for 'world' is "3 per damaging
 // participant" -- a PER-RECIPIENT count, not a per-death total -- so the
@@ -276,6 +277,9 @@ async function spawnBossChest(pool, entry, {
   const chest = mapChestRow(ins.rows[0]);
   if (!entry.chests) entry.chests = [];
   entry.chests.push(chest);
+  // A cached /overview would otherwise omit this chest until something else
+  // invalidated it -- same call every other chest write makes.
+  clearOverviewCache(entry.worldId);
   return chest;
 }
 

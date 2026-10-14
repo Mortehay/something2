@@ -5289,7 +5289,8 @@ app.get('/api/worlds/:id/chest', adminGuard, async (req, res) => {
     // Only a vault chest is spec-authored (seed-map.js's applyPointArt only
     // ever binds `WHERE kind = 'vault'`) -- a field chest is a runtime loot
     // spawn with no spec entry, so there is nothing for this picker to edit.
-    res.json(rows.find((c) => c.kind === 'vault') || null);
+    // Same for a transient boss-death vault chest (SOMET-611, expiresAt set).
+    res.json(rows.find((c) => c.kind === 'vault' && c.expiresAt == null) || null);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to load chest' });
