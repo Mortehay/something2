@@ -562,12 +562,15 @@ export class RenderSystem {
 
     camera.reset(this.ctx);
     this._skillSlotHitAreas = [];
+    const trackedQuest = (quests || []).find(q => q.key === trackedQuestKey) || (quests || []).find(q => q.status === "active");
+    const hasTrackedQuest = !!(trackedQuest && !panelOpen);
     this.renderHud({
       player, mana, maxMana, showMana, stamina, maxStamina,
       weaponName, ammo, noAmmoFlash, effects, gold, progression,
       skills: hotbarSkills, hitAreas: this._skillSlotHitAreas, hoverSlot: skillHoverSlot, drag: skillDrag,
       activeForm, flashSlot, skillCooldowns, activeBuffs,
       playerStats: playerStats || progression, equippedWeapon, keybinds,
+      hasTrackedQuest,
     });
     if (toast) this.renderToast(toast);
 
@@ -685,8 +688,7 @@ export class RenderSystem {
     }
 
     // Quest Tracker HUD Widget & Waypoint Pointer
-    const trackedQuest = (quests || []).find(q => q.key === trackedQuestKey) || (quests || []).find(q => q.status === "active");
-    if (trackedQuest && !panelOpen) {
+    if (hasTrackedQuest) {
       this._drawQuestTrackerHUD(this.ctx, trackedQuest, player, camera);
     }
 
@@ -4429,12 +4431,11 @@ export class RenderSystem {
     ctx.restore();
   }
 
-  _drawActiveBuffs(activeBuffs) {
+  _drawActiveBuffs(activeBuffs, startY = 18) {
     const ctx = this.ctx;
     if (!ctx || !Array.isArray(activeBuffs) || activeBuffs.length === 0) return;
 
     const startX = 18;
-    const startY = 18;
     const slotW = 145;
     const slotH = 34;
     const gapY = 6;
@@ -4527,7 +4528,8 @@ export class RenderSystem {
     player, mana = null, maxMana = null, showMana = true,
     stamina = null, maxStamina = null, progression = null, skills = null, hitAreas = null,
     hoverSlot = null, drag = null, activeForm = null, flashSlot = null, skillCooldowns = null,
-    activeBuffs = [], playerStats = null, equippedWeapon = null, keybinds = null
+    activeBuffs = [], playerStats = null, equippedWeapon = null, keybinds = null,
+    hasTrackedQuest = false,
   }) {
     if (!player) return;
 
@@ -4557,8 +4559,9 @@ export class RenderSystem {
     // Skills panel (slots 1-9) right above the level bar
     this._drawSkillBar(skills, hitAreas, hoverSlot, drag, activeForm, flashSlot, skillCooldowns, playerStats, equippedWeapon, keybinds);
 
-    // Active buffs list panel in top-left
-    this._drawActiveBuffs(activeBuffs);
+    // Active buffs list panel in top-left (offset below quest tracker if visible)
+    const buffsStartY = hasTrackedQuest ? 104 : 18;
+    this._drawActiveBuffs(activeBuffs, buffsStartY);
 
     // Bottom XP bar connecting HP and MP orbs, with central level emblem
     this._drawXpBar(progression);
