@@ -11,12 +11,13 @@ def _redis():
 
 
 def _wait(manager, job_id, timeout=2, statuses=("done", "error")):
+    job = None
     for _ in range(int(timeout * 100)):
         job = manager.get(job_id)
         if job and job["status"] in statuses:
             return job
         time.sleep(0.01)
-    raise AssertionError(f"job did not reach {statuses}")
+    raise AssertionError(f"job did not reach {statuses}; last seen {job}")
 
 
 def test_submit_generates_a_job_id_when_none_given():
@@ -247,17 +248,19 @@ def test_late_returning_attempt_does_not_hide_its_retry_from_the_watchdog():
             calls["n"] += 1
             n = calls["n"]
         if n == 1:
-            time.sleep(0.75)  # past the deadline, but it DOES come back
+            # Past attempt 1's deadline (1.0s) but before attempt 2's (~2.0s),
+            # with 0.5s margin each side so a loaded box can't reorder them.
+            time.sleep(1.5)  # past the deadline, but it DOES come back
             return "late"
         never_returns.wait()  # attempt 2 wedges for real
         return "unreachable"
 
     manager = JobManager(
         r, {"slow": handler}, worker_count=2,
-        deadline_seconds=0.5, max_retries=1, watchdog_interval=0.05,
+        deadline_seconds=1.0, max_retries=1, watchdog_interval=0.05,
     )
     job_id = manager.submit("slow", {})
-    job = _wait(manager, job_id, timeout=3, statuses=("error",))
+    job = _wait(manager, job_id, timeout=6, statuses=("error",))
     assert job["error"] == "deadline exceeded after 2 attempts"
     assert job["retries"] == 2
     manager.stop()
@@ -326,3 +329,111 @@ def test_restart_recovery_counts_as_an_attempt():
     assert job["status"] == "error"
     assert "interrupted by restart" in job["error"]
     assert r.llen("sprite_gen:queue") == 0
+
+
+def test_wedged_job_reaches_a_terminal_state_at_the_default_one_worker_two_retries():
+    # SOMET-539 rework, Defect 3. A fenced attempt's thread is still stuck
+    # inside the handler (Python can't kill it), so it permanently holds its
+    # worker. With W <= R -- including the shipped defaults W=1, R=2 -- the
+    # requeued retry used to sit in "queued" forever: no live worker popped
+    # it, and the watchdog only looks at running jobs. It also held the
+    # dedup pointer, so every resubmission returned the stuck id.
+    r = _redis()
+    never_returns = threading.Event()
+
+    def wedged(params, progress):
+        never_returns.wait()
+        return "unreachable"
+
+    manager = JobManager(
+        r, {"wedge": wedged}, worker_count=1,
+        deadline_seconds=0.1, max_retries=2, watchdog_interval=0.02,
+    )
+    try:
+        job_id = manager.submit("wedge", {}, dedup_key="k")
+        job = _wait(manager, job_id, timeout=4, statuses=("error",))
+        assert job["error"] == "deadline exceeded after 3 attempts"
+        assert job["retries"] == 3
+        # The dedup pointer is released: a resubmission is a fresh job.
+        assert manager.submit("wedge", {}, dedup_key="k") != job_id
+    finally:
+        manager.stop()
+        never_returns.set()
+
+
+def test_retry_after_a_wedge_succeeds_on_one_worker_and_clears_the_stale_error():
+    # Same capacity trap, success path: attempt 1 hangs, attempt 2 works.
+    # A successful retry must also not keep reporting the "retrying" error
+    # next to status=done.
+    r = _redis()
+    never_returns = threading.Event()
+    calls = {"n": 0}
+    lock = threading.Lock()
+
+    def handler(params, progress):
+        with lock:
+            calls["n"] += 1
+            first = calls["n"] == 1
+        if first:
+            never_returns.wait()
+        return "succeeded-on-retry"
+
+    manager = JobManager(
+        r, {"wedge": handler}, worker_count=1,
+        deadline_seconds=0.1, max_retries=1, watchdog_interval=0.02,
+    )
+    try:
+        job_id = manager.submit("wedge", {})
+        job = _wait(manager, job_id, timeout=3)
+        assert job["status"] == "done"
+        assert job["result"] == "succeeded-on-retry"
+        assert job["retries"] == 1
+        assert job["error"] is None
+    finally:
+        manager.stop()
+        never_returns.set()
+
+
+def test_fenced_worker_that_returns_late_retires_so_capacity_stays_at_n():
+    # The watchdog replaces a fenced worker. If the fenced thread later comes
+    # back, it must retire -- otherwise every slow-but-not-dead call grows
+    # the pool past SPRITE_GEN_WORKERS. Proven by behaviour: with W=1, two
+    # jobs that each need the other running at the same time must NOT both
+    # get a worker.
+    r = _redis()
+    release = threading.Event()
+    calls = {"n": 0}
+    lock = threading.Lock()
+    # Shorter than the deadline, so the watchdog never fences a pair job
+    # (which would legitimately spawn a replacement and let the partner run).
+    pair = threading.Barrier(2, timeout=0.15)
+
+    def slow(params, progress):
+        with lock:
+            calls["n"] += 1
+            first = calls["n"] == 1
+        if first:
+            release.wait()  # overruns the deadline, then comes back
+            return "late"
+        return "retry-ok"
+
+    def needs_a_partner(params, progress):
+        pair.wait()  # BrokenBarrierError unless two workers run at once
+        return "concurrent"
+
+    manager = JobManager(
+        r, {"slow": slow, "pair": needs_a_partner}, worker_count=1,
+        deadline_seconds=0.4, max_retries=1, watchdog_interval=0.02,
+    )
+    try:
+        job_id = manager.submit("slow", {})
+        assert _wait(manager, job_id, timeout=3)["status"] == "done"
+        release.set()  # the fenced attempt 1 returns now
+        time.sleep(0.2)
+        a = manager.submit("pair", {})
+        b = manager.submit("pair", {})
+        results = {_wait(manager, j, timeout=3)["status"] for j in (a, b)}
+        assert results == {"error"}, "more than W workers ran at once"
+    finally:
+        manager.stop()
+        release.set()

@@ -79,9 +79,7 @@ class JobManager:
         if start:
             self._requeue_orphaned_jobs()
             for _ in range(max(1, self.worker_count)):
-                t = threading.Thread(target=self._worker_loop, daemon=True)
-                t.start()
-                self._threads.append(t)
+                self._spawn_worker()
             watchdog = threading.Thread(target=self._watchdog_loop, daemon=True)
             watchdog.start()
             self._threads.append(watchdog)
@@ -197,13 +195,21 @@ class JobManager:
 
     # -- workers ----------------------------------------------------------
 
+    def _spawn_worker(self):
+        t = threading.Thread(target=self._worker_loop, daemon=True)
+        t.start()
+        self._threads.append(t)
+
     def _worker_loop(self):
         while not self._stop.is_set():
             popped = self.redis.blpop(QUEUE_KEY, timeout=1)
             if not popped:
                 continue
             _, job_id = popped
-            self._run_one(job_id)
+            if self._run_one(job_id) == "fenced":
+                # The watchdog fenced this attempt and spawned a replacement
+                # worker in its place; carrying on would grow the pool past N.
+                return
 
     def _cas(self, job_id: str, check, write) -> bool:
         """Apply `write(pipe)` to the job atomically iff `check(raw)` holds.
@@ -248,11 +254,13 @@ class JobManager:
         return None
 
     def _run_one(self, job_id: str):
+        """Run one attempt. Returns "fenced" if the watchdog took the job away
+        from this attempt while it ran (its result was dropped)."""
         attempt = self._mark_running(job_id)
         if attempt is None:
             # Already handled (e.g. a dedup resubmission, or the watchdog
             # already fenced and requeued it under a later attempt).
-            return
+            return None
         raw = self.redis.hgetall(_job_key(job_id))
         job_type = raw["type"]
         params = json.loads(raw["params"])
@@ -261,13 +269,14 @@ class JobManager:
             if handler is None:
                 raise RuntimeError(f"no handler registered for job type '{job_type}'")
             result = handler(params, self._progress_cb(job_id, attempt))
-            self._finish(job_id, attempt, status="done", result=result)
+            landed = self._finish(job_id, attempt, status="done", result=result)
         except Exception as e:  # noqa: BLE001 - report any failure to the client
-            self._finish(job_id, attempt, status="error", error=str(e))
+            landed = self._finish(job_id, attempt, status="error", error=str(e))
         finally:
             # Only ever this attempt's own member -- a retry running under a
             # newer attempt keeps its entry, so the watchdog still sees it.
             self.redis.srem(RUNNING_SET_KEY, _running_member(job_id, attempt))
+        return None if landed else "fenced"
 
     def _progress_cb(self, job_id: str, attempt: str):
         def cb(done, total):
@@ -277,10 +286,13 @@ class JobManager:
             self.redis.hset(key, "progress", json.dumps({"done": done, "total": total}))
         return cb
 
-    def _finish(self, job_id: str, attempt: str, status: str, result=None, error: str = None):
+    def _finish(self, job_id: str, attempt: str, status: str, result=None, error: str = None) -> bool:
         updates = {"status": status}
         if status == "done":
             updates["result"] = json.dumps(result)
+            # A retry that succeeded must not keep reporting the "retrying"
+            # reason left by the watchdog or restart recovery.
+            updates["error"] = ""
         else:
             updates["error"] = error or ""
 
@@ -296,6 +308,8 @@ class JobManager:
         # attempt wrote -- the check-and-set drops it.
         if self._cas(job_id, lambda raw: raw.get("attempt") == attempt, write):
             self._release_dedup(job_id)
+            return True
+        return False
 
     def _fail(self, job_id: str, key: str, retries: int, error: str):
         self.redis.hset(key, mapping={
@@ -334,9 +348,14 @@ class JobManager:
         for, is make GET /jobs/{id} report a reason instead of hanging: the
         attempt token above fences the eventually-returning (or
         never-returning) stuck worker out, so its result can't stomp a
-        retried attempt, and a deployment sizes SPRITE_GEN_WORKERS with the
-        knowledge that a truly wedged backend call keeps one worker busy
-        forever.
+        retried attempt.
+
+        The fenced thread still occupies its worker, so every fence spawns a
+        replacement -- otherwise, with SPRITE_GEN_WORKERS <= JOB_MAX_RETRIES
+        (the defaults), the requeued retry is never popped and the job sits
+        in "queued" forever. Live capacity stays at N; a fenced thread that
+        does come back retires (see _worker_loop). Threads stuck for good
+        are leaked, bounded by wedged jobs x (max_retries + 1).
         """
         now = _now()
         for member in list(self.redis.smembers(RUNNING_SET_KEY)):
@@ -380,5 +399,7 @@ class JobManager:
                 lambda r, attempt=attempt: r.get("status") == "running" and r.get("attempt") == attempt,
                 write,
             )
-            if landed and give_up:
-                self._release_dedup(job_id)
+            if landed:
+                self._spawn_worker()
+                if give_up:
+                    self._release_dedup(job_id)
