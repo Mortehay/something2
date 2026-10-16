@@ -90,10 +90,21 @@ function player(i) {
 
 // Overridable via env for stress variants, e.g.
 //   MINIONS=20 PLAYERS=40 node scripts/profile-boss-tick.js
-const MINIONS = Number(process.env.MINIONS) || 8;
-const PLAYERS = Number(process.env.PLAYERS) || 10;
-const WARMUP = Number(process.env.WARMUP) || 50;
-const TICKS = Number(process.env.TICKS) || 2000;
+// Unset/empty -> default; an explicit 0 is honoured (a bare `|| default`
+// would silently turn MINIONS=0 back into 8). Garbage fails loudly.
+function envInt(name, def, min = 0) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return def;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < min) {
+    throw new Error(`${name} must be an integer >= ${min}, got ${JSON.stringify(raw)}`);
+  }
+  return n;
+}
+const MINIONS = envInt('MINIONS', 8);
+const PLAYERS = envInt('PLAYERS', 10);
+const WARMUP = envInt('WARMUP', 50);
+const TICKS = envInt('TICKS', 2000, 1); // measured-tick count divides the means
 const DT = 0.05; // seconds -- matches server.js's production default tickMs (50ms)
 
 function buildSimRows(stripSkills) {
