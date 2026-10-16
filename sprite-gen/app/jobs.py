@@ -6,12 +6,25 @@ store is that a restart does not lose work. `JobManager` is handed a
 `handlers` map (job type -> `(params, progress) -> result`) and looks the
 handler up by the job's stored type whether it is running the job for the
 first time or replaying it after a restart.
+
+Every state transition is a check-and-set (WATCH/MULTI on the job hash)
+against the attempt token, so a worker and the watchdog racing over the same
+record can never both win. The running set holds `job_id|attempt` members,
+not bare ids, so a late-returning attempt can only ever remove its OWN entry
+and never hides a live retry from the watchdog.
+
+One sprite-gen process per Redis DB. Startup replay treats every "running"
+record as orphaned by a dead process, so a second instance (or
+`uvicorn --workers 2`) sharing the same DB would reset the other's live jobs.
+Give each instance its own Redis DB (REDIS_URL .../<n>).
 """
 
 import json
 import threading
 import time
 import uuid
+
+from redis.exceptions import WatchError
 
 from .config import settings
 
@@ -27,6 +40,10 @@ def _job_key(job_id: str) -> str:
 
 def _dedup_key(dedup_key: str) -> str:
     return f"{DEDUP_KEY_PREFIX}{dedup_key}"
+
+
+def _running_member(job_id: str, attempt: str) -> str:
+    return f"{job_id}|{attempt}"
 
 
 def _now() -> float:
@@ -156,10 +173,22 @@ class JobManager:
                 if not raw:
                     continue
                 status = raw.get("status")
-                if status in ("queued", "running"):
+                if status == "running":
+                    # The process died mid-job -- possibly BECAUSE of this job
+                    # (OOM inside the model). Count it as an attempt, or a
+                    # process-killing job replays on every restart forever.
+                    retries = int(raw.get("retries") or 0)
+                    if retries >= self.max_retries:
+                        self._fail(raw["id"], key, retries + 1,
+                                   f"interrupted by restart after {retries + 1} attempts")
+                        continue
+                    self.redis.hset(key, mapping={
+                        "status": "queued", "attempt": "", "retries": str(retries + 1),
+                        "error": f"interrupted by restart, retrying (attempt {retries + 1})",
+                    })
+                    status = "queued"
+                if status == "queued":
                     pending.append((float(raw.get("created_at") or 0), raw["id"]))
-                    if status == "running":
-                        self.redis.hset(key, mapping={"status": "queued", "attempt": ""})
             if cursor == 0:
                 break
         self.redis.delete(QUEUE_KEY)
@@ -176,22 +205,55 @@ class JobManager:
             _, job_id = popped
             self._run_one(job_id)
 
-    def _run_one(self, job_id: str):
+    def _cas(self, job_id: str, check, write) -> bool:
+        """Apply `write(pipe)` to the job atomically iff `check(raw)` holds.
+
+        WATCHes the job hash, so if anyone else writes it between the read
+        and the EXEC the transaction aborts and is re-evaluated against the
+        fresh record. Returns whether the write landed.
+        """
         key = _job_key(job_id)
-        raw = self.redis.hgetall(key)
-        if not raw or raw.get("status") != "queued":
+        with self.redis.pipeline() as pipe:
+            while True:
+                try:
+                    pipe.watch(key)
+                    raw = pipe.hgetall(key)
+                    if not raw or not check(raw):
+                        pipe.unwatch()
+                        return False
+                    pipe.multi()
+                    write(pipe)
+                    pipe.execute()
+                    return True
+                except WatchError:
+                    continue
+
+    def _mark_running(self, job_id: str):
+        """Claim a queued job for this worker; returns the attempt token, or
+        None if it is not queued (a duplicate queue entry, or already taken)."""
+        attempt = uuid.uuid4().hex
+        now = _now()
+
+        def write(pipe):
+            pipe.hset(_job_key(job_id), mapping={
+                "status": "running",
+                "started_at": repr(now),
+                "deadline_at": repr(now + self.deadline_seconds),
+                "attempt": attempt,
+            })
+            pipe.sadd(RUNNING_SET_KEY, _running_member(job_id, attempt))
+
+        if self._cas(job_id, lambda raw: raw.get("status") == "queued", write):
+            return attempt
+        return None
+
+    def _run_one(self, job_id: str):
+        attempt = self._mark_running(job_id)
+        if attempt is None:
             # Already handled (e.g. a dedup resubmission, or the watchdog
             # already fenced and requeued it under a later attempt).
             return
-        attempt = uuid.uuid4().hex
-        deadline_at = _now() + self.deadline_seconds
-        self.redis.hset(key, mapping={
-            "status": "running",
-            "started_at": repr(_now()),
-            "deadline_at": repr(deadline_at),
-            "attempt": attempt,
-        })
-        self.redis.sadd(RUNNING_SET_KEY, job_id)
+        raw = self.redis.hgetall(_job_key(job_id))
         job_type = raw["type"]
         params = json.loads(raw["params"])
         try:
@@ -203,7 +265,9 @@ class JobManager:
         except Exception as e:  # noqa: BLE001 - report any failure to the client
             self._finish(job_id, attempt, status="error", error=str(e))
         finally:
-            self.redis.srem(RUNNING_SET_KEY, job_id)
+            # Only ever this attempt's own member -- a retry running under a
+            # newer attempt keeps its entry, so the watchdog still sees it.
+            self.redis.srem(RUNNING_SET_KEY, _running_member(job_id, attempt))
 
     def _progress_cb(self, job_id: str, attempt: str):
         def cb(done, total):
@@ -214,20 +278,29 @@ class JobManager:
         return cb
 
     def _finish(self, job_id: str, attempt: str, status: str, result=None, error: str = None):
-        key = _job_key(job_id)
-        if self.redis.hget(key, "attempt") != attempt:
-            # The watchdog already fenced this attempt out (deadline
-            # exceeded -> requeued or failed under a new attempt token) and
-            # may already be running again elsewhere. A late result from a
-            # worker thread that can't be forcibly cancelled must never
-            # stomp whatever the newer attempt wrote -- drop it silently.
-            return
         updates = {"status": status}
         if status == "done":
             updates["result"] = json.dumps(result)
         else:
             updates["error"] = error or ""
-        self.redis.hset(key, mapping=updates)
+
+        def write(pipe):
+            pipe.hset(_job_key(job_id), mapping=updates)
+            if self.ttl_seconds:
+                pipe.expire(_job_key(job_id), self.ttl_seconds)
+
+        # The watchdog may already have fenced this attempt out (deadline
+        # exceeded -> requeued or failed under a new attempt token) and it may
+        # be running again elsewhere. A late result from a worker thread that
+        # can't be forcibly cancelled must never stomp whatever the newer
+        # attempt wrote -- the check-and-set drops it.
+        if self._cas(job_id, lambda raw: raw.get("attempt") == attempt, write):
+            self._release_dedup(job_id)
+
+    def _fail(self, job_id: str, key: str, retries: int, error: str):
+        self.redis.hset(key, mapping={
+            "status": "error", "attempt": "", "retries": str(retries), "error": error,
+        })
         self._release_dedup(job_id)
         if self.ttl_seconds:
             self.redis.expire(key, self.ttl_seconds)
@@ -266,32 +339,46 @@ class JobManager:
         forever.
         """
         now = _now()
-        for job_id in list(self.redis.smembers(RUNNING_SET_KEY)):
+        for member in list(self.redis.smembers(RUNNING_SET_KEY)):
+            job_id, _, attempt = member.partition("|")
             key = _job_key(job_id)
             raw = self.redis.hgetall(key)
-            if not raw or raw.get("status") != "running":
-                self.redis.srem(RUNNING_SET_KEY, job_id)
+            if not raw or raw.get("status") != "running" or raw.get("attempt") != attempt:
+                self.redis.srem(RUNNING_SET_KEY, member)  # stale entry
                 continue
-            deadline_at = float(raw.get("deadline_at") or 0)
-            if now < deadline_at:
+            if now < float(raw.get("deadline_at") or 0):
                 continue
-            self.redis.srem(RUNNING_SET_KEY, job_id)
             retries = int(raw.get("retries") or 0)
-            if retries < self.max_retries:
-                self.redis.hset(key, mapping={
-                    "status": "queued",
-                    "retries": str(retries + 1),
-                    "attempt": "",
-                    "error": f"deadline exceeded, retrying (attempt {retries + 1})",
-                })
-                self.redis.rpush(QUEUE_KEY, job_id)
-            else:
-                self.redis.hset(key, mapping={
-                    "status": "error",
-                    "attempt": "",
-                    "retries": str(retries + 1),
-                    "error": f"deadline exceeded after {retries + 1} attempts",
-                })
+            give_up = retries >= self.max_retries
+
+            def write(pipe, retries=retries, give_up=give_up, member=member):
+                pipe.srem(RUNNING_SET_KEY, member)
+                if give_up:
+                    pipe.hset(key, mapping={
+                        "status": "error",
+                        "attempt": "",
+                        "retries": str(retries + 1),
+                        "error": f"deadline exceeded after {retries + 1} attempts",
+                    })
+                    if self.ttl_seconds:
+                        pipe.expire(key, self.ttl_seconds)
+                else:
+                    pipe.hset(key, mapping={
+                        "status": "queued",
+                        "retries": str(retries + 1),
+                        "attempt": "",
+                        "error": f"deadline exceeded, retrying (attempt {retries + 1})",
+                    })
+                    pipe.rpush(QUEUE_KEY, job_id)
+
+            # Fence only the attempt we judged: if the worker finished (or
+            # anything else rewrote the record) since the read above, the
+            # check fails and the job is left alone -- a "done" job is never
+            # flipped back to "queued" and re-run.
+            landed = self._cas(
+                job_id,
+                lambda r, attempt=attempt: r.get("status") == "running" and r.get("attempt") == attempt,
+                write,
+            )
+            if landed and give_up:
                 self._release_dedup(job_id)
-                if self.ttl_seconds:
-                    self.redis.expire(key, self.ttl_seconds)

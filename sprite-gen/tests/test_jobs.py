@@ -228,3 +228,101 @@ def test_dedup_is_scoped_to_the_key_not_global():
     goblin_id = manager.submit("echo", {}, dedup_key="creature:goblin")
     orc_id = manager.submit("echo", {}, dedup_key="creature:orc")
     assert goblin_id != orc_id
+
+
+def test_late_returning_attempt_does_not_hide_its_retry_from_the_watchdog():
+    # SOMET-539 rework, Defect 1. Attempt 1 overruns its deadline, the
+    # watchdog fences it and requeues, worker 2 starts attempt 2 -- and THEN
+    # attempt 1's handler returns late. Its result is correctly dropped, but
+    # its cleanup used to remove the job id from the running set, which is
+    # the only place the watchdog looks; attempt 2 then hung as "running"
+    # forever. The slow-but-not-dead backend, the likeliest real case.
+    r = _redis()
+    never_returns = threading.Event()
+    calls = {"n": 0}
+    lock = threading.Lock()
+
+    def handler(params, progress):
+        with lock:
+            calls["n"] += 1
+            n = calls["n"]
+        if n == 1:
+            time.sleep(0.75)  # past the deadline, but it DOES come back
+            return "late"
+        never_returns.wait()  # attempt 2 wedges for real
+        return "unreachable"
+
+    manager = JobManager(
+        r, {"slow": handler}, worker_count=2,
+        deadline_seconds=0.5, max_retries=1, watchdog_interval=0.05,
+    )
+    job_id = manager.submit("slow", {})
+    job = _wait(manager, job_id, timeout=3, statuses=("error",))
+    assert job["error"] == "deadline exceeded after 2 attempts"
+    assert job["retries"] == 2
+    manager.stop()
+
+
+def test_watchdog_never_requeues_a_job_that_finished_in_the_meantime():
+    # The watchdog reads a record, decides it is past its deadline, then
+    # writes. If the worker finishes in between, the fence must lose:
+    # a "done" job must never be flipped back to "queued" and re-run.
+    r = _redis()
+    calls = {"n": 0}
+
+    def handler(params, progress):
+        calls["n"] += 1
+        return "ok"
+
+    manager = JobManager(r, {"h": handler}, worker_count=1, deadline_seconds=0,
+                         max_retries=3, start=False)
+    job_id = manager.submit("h", {})
+    real_hgetall = manager.redis.hgetall
+    finished = {"done": False}
+
+    def hgetall_then_finish(key):
+        raw = real_hgetall(key)
+        # Simulate the worker's _finish landing right after the watchdog's read.
+        if not finished["done"] and raw.get("status") == "running":
+            finished["done"] = True
+            manager._finish(job_id, raw["attempt"], status="done", result="ok")
+        return raw
+
+    # Put the job into "running" by hand, exactly as _run_one would.
+    manager.redis.lpop("sprite_gen:queue")
+    attempt = manager._mark_running(job_id)
+    assert attempt
+    manager.redis.hgetall = hgetall_then_finish
+    manager._sweep_wedged()
+    manager.redis.hgetall = real_hgetall
+
+    job = manager.get(job_id)
+    assert job["status"] == "done"
+    assert job["result"] == "ok"
+    assert manager.redis.llen("sprite_gen:queue") == 0
+
+
+def test_restart_recovery_counts_as_an_attempt():
+    # A job that kills the whole process (OOM inside the model) is left
+    # "running" with no live worker. Recovering it at startup must count as
+    # an attempt; otherwise it replays on every restart forever.
+    r = _redis()
+    seed = JobManager(r, {"h": lambda p, cb: "x"}, max_retries=1, start=False)
+    job_id = seed.submit("h", {})
+    r.lpop("sprite_gen:queue")
+    seed._mark_running(job_id)
+
+    # Restart 1: within budget -> requeued, retries=1.
+    JobManager(r, {}, max_retries=1, start=False)._requeue_orphaned_jobs()
+    raw = r.hgetall(f"sprite_gen:job:{job_id}")
+    assert raw["status"] == "queued"
+    assert raw["retries"] == "1"
+
+    # It dies again mid-run; restart 2 exhausts the budget -> error, not queued.
+    r.lpop("sprite_gen:queue")
+    seed._mark_running(job_id)
+    JobManager(r, {}, max_retries=1, start=False)._requeue_orphaned_jobs()
+    job = seed.get(job_id)
+    assert job["status"] == "error"
+    assert "interrupted by restart" in job["error"]
+    assert r.llen("sprite_gen:queue") == 0

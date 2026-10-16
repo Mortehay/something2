@@ -1,4 +1,6 @@
+import hashlib
 import hmac
+import json
 import uuid
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -185,10 +187,14 @@ def generate(req: GenerateRequest):
         "backend_name": backend_name, "seed": req.seed, "frames": frames,
         "size": list(size), "steps": steps,
     }
-    # SOMET-539: dedup by (kind, subject) -- resubmitting the same subject
-    # while one is already queued/running hands back the existing job_id
-    # instead of starting a second generation.
-    dedup_key = f"{req.kind}:{req.creature}"
+    # SOMET-539: resubmitting the same subject with the same generation
+    # params while one is already queued/running hands back the existing
+    # job_id instead of starting a second generation. The params hash is part
+    # of the key so "try another seed" is a new job, not the old one's image
+    # under a new label. job_id is excluded: it is minted per request.
+    resolved = {k: v for k, v in params.items() if k != "job_id"}
+    params_hash = hashlib.sha256(json.dumps(resolved, sort_keys=True).encode()).hexdigest()[:16]
+    dedup_key = f"{req.kind}:{req.creature}:{params_hash}"
 
     return {
         "job_id": job_manager.submit(req.kind, params, job_id=job_id, dedup_key=dedup_key),
