@@ -53,4 +53,20 @@ test('GET /api/sprite-admin/subjects lists each playable class plus one row per 
     assert.equal(v.is_playable, true);
     assert.ok(v.name.includes(cls.name));
   }
+
+  // Grouped under their class: the console renders /subjects in order, so the
+  // variants must sit directly after the class's own row, in variant order.
+  const at = res.body.subjects.findIndex((s) => s.id === cls.id);
+  assert.deepEqual(
+    res.body.subjects.slice(at + 1, at + 1 + cls.n).map((s) => s.id),
+    Array.from({ length: cls.n }, (_, i) => `${cls.id}:${i + 1}`),
+  );
+
+  // The Prompt column shows what will actually be generated for the variant,
+  // not the class's own prompt.
+  const { appearancePrompt } = require('../src/services/catalogSubjects.js');
+  const { rows: [classRow] } = await pool.query('SELECT name, prompt FROM entity_types WHERE id = $1', [cls.id]);
+  for (const v of variants) {
+    assert.equal(v.prompt, appearancePrompt({ class_name: classRow.name, class_prompt: classRow.prompt, variant: v.variant }));
+  }
 });

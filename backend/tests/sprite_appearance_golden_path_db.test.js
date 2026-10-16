@@ -34,6 +34,8 @@ test('an appearance variant: queue -> complete -> approve writes its own directi
       WHERE sprite IS NULL ORDER BY entity_type_id, variant LIMIT 1`,
   );
   assert.ok(target, 'precondition: at least one appearance variant with no sprite of its own yet');
+  const baseSql = 'SELECT sprite, render_mode, image FROM entity_types WHERE id = $1';
+  const { rows: [baseBefore] } = await pool.query(baseSql, [target.entity_type_id]);
 
   t.after(async () => {
     await pool.query(
@@ -90,6 +92,8 @@ test('an appearance variant: queue -> complete -> approve writes its own directi
   assert.equal(variantRow.sprite.atlas_key, 'sprites/golden-path-test/atlas.png');
   assert.equal(variantRow.sprite.static_frame, 'S/0');
   assert.equal(variantRow.render_mode, 'static');
+  const { rows: [baseAfter] } = await pool.query(baseSql, [target.entity_type_id]);
+  assert.deepEqual(baseAfter, baseBefore, "approving a variant must not touch the class's own row");
 
   // 6. A fresh /subjects read no longer counts it as missing.
   const after = await request(app).get('/api/sprite-admin/subjects').set(...AUTH);
