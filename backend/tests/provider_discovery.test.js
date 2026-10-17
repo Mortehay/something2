@@ -273,6 +273,30 @@ test('testConnection does not add a steps key the template never had', async () 
   assert.strictEqual(sent.size, '64x64');
 });
 
+test('testConnection shrinks a template whose size is LITERAL, not a placeholder', async () => {
+  // The shape of the real "desktop gpu (objects)" row: width/height are
+  // numbers, not {{width}}/{{height}}, so substitution alone left the probe at
+  // a full 1024x1024 SDXL draw -- the VRAM allocation that faults this box.
+  const provider = {
+    ...imageProvider(),
+    request_template: {
+      seed: '{{seed}}', steps: 24, width: 1024, cutout: true, height: 1024, prompt: '{{prompt}}',
+      cfg_scale: 7, negative_prompt: 'border', override_settings: { sd_model_checkpoint: '{{model}}' },
+    },
+  };
+  const fetchImpl = generationStub({ generate: () => jsonBody({ images: [PNG_1X1] }) });
+  const out = await testConnection(provider, { fetchImpl });
+  assert.strictEqual(out.ok, true);
+  const sent = JSON.parse(fetchImpl.calls[1].init.body);
+  assert.strictEqual(sent.width, 64);
+  assert.strictEqual(sent.height, 64);
+  assert.strictEqual(sent.steps, 1);
+  // Everything else is the provider's own request, cutout included.
+  assert.strictEqual(sent.cutout, true);
+  assert.strictEqual(sent.cfg_scale, 7);
+  assert.deepStrictEqual(sent.override_settings, { sd_model_checkpoint: 'sd15' });
+});
+
 test('testConnection rejects a 200 that carries no image', async () => {
   const fetchImpl = generationStub({ generate: () => jsonBody({ images: [] }) });
   const out = await testConnection(imageProvider(), { fetchImpl });

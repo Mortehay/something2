@@ -555,9 +555,13 @@ function looksLikeImage(buffer) {
 // A status or models endpoint is answered by the web server, which stays up
 // through a faulted CUDA context; only a draw touches the GPU. Always resolves.
 //
-// steps is forced to 1 only where the template already has a steps key:
-// adding one to a template that never had it could be rejected by a strict
-// endpoint and fail the probe for a reason real jobs never hit.
+// steps, width and height are forced only where the template already has the
+// key: adding one to a template that never had it could be rejected by a
+// strict endpoint and fail the probe for a reason real jobs never hit. The
+// size override is not redundant with the {{width}}/{{height}} variables --
+// real templates carry literal sizes (1024x1024), and a full-size draw is the
+// VRAM allocation that faults the box. Every other key, cutout included, is
+// sent as-is so the probe exercises the same pipeline a job does.
 async function probeGeneration(provider, { fetchImpl = fetch, now = Date.now } = {}) {
   if (!provider.request_template || typeof provider.request_template !== 'object') {
     return { ok: false, error: 'provider has no request_template, so a generation cannot be tested' };
@@ -570,7 +574,10 @@ async function probeGeneration(provider, { fetchImpl = fetch, now = Date.now } =
     height: PROBE_SIZE,
     frames: 1,
   });
-  if (Object.prototype.hasOwnProperty.call(body, 'steps')) body.steps = 1;
+  const overrides = { steps: 1, width: PROBE_SIZE, height: PROBE_SIZE };
+  for (const [key, value] of Object.entries(overrides)) {
+    if (Object.prototype.hasOwnProperty.call(body, key)) body[key] = value;
+  }
 
   const started = now();
   let res;
