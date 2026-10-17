@@ -1,16 +1,20 @@
 const express = require('express');
 const queue = require('../services/spriteJobQueue.js');
+const { appearancePrompt } = require('../services/catalogSubjects.js');
 
 // targets: [{entity_id, variant}], variant omitted/null for the entity's own
 // sprite, 1-5 to target one of its character_appearances rows instead.
 function targetsFrom(body) {
   const values = body && body.targets;
   if (!Array.isArray(values) || values.length === 0 || values.length > 1000) return null;
+  // A null/primitive/array element or a blank/zero id is malformed, not an
+  // unknown entity: Number(null) and Number('') are both 0.
+  if (!values.every((t) => t && typeof t === 'object' && !Array.isArray(t))) return null;
   const targets = values.map((t) => ({
-    entityId: Number(t && t.entity_id),
-    variant: t && t.variant != null ? Number(t.variant) : null,
+    entityId: Number(t.entity_id),
+    variant: t.variant != null ? Number(t.variant) : null,
   }));
-  const valid = targets.every((t) => Number.isInteger(t.entityId)
+  const valid = targets.every((t) => Number.isInteger(t.entityId) && t.entityId > 0
     && (t.variant === null || (Number.isInteger(t.variant) && t.variant >= 1 && t.variant <= 5)));
   return valid ? targets : null;
 }
@@ -64,14 +68,17 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher) {
             ORDER BY e.name, ca.variant`,
         ),
       ]);
-      const subjects = [
-        ...entities.map((e) => ({ ...e, variant: null })),
-        ...appearances.map((a) => ({
+      const variantsByClass = new Map();
+      for (const a of appearances) {
+        if (!variantsByClass.has(a.entity_type_id)) variantsByClass.set(a.entity_type_id, []);
+        variantsByClass.get(a.entity_type_id).push({
           id: `${a.entity_type_id}:${a.variant}`,
           entity_id: a.entity_type_id,
           variant: a.variant,
           name: `${a.class_name} — Appearance ${a.variant}`,
-          prompt: a.class_prompt,
+          // What the job will actually be generated from (optionsForAppearance),
+          // not the class's own prompt.
+          prompt: appearancePrompt(a),
           render_mode: a.render_mode,
           is_creature: false,
           is_playable: true,
@@ -88,8 +95,14 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher) {
           atlas_key: a.atlas_key,
           manifest_key: a.manifest_key,
           job_updated_at: a.job_updated_at,
-        })),
-      ];
+        });
+      }
+      // The console renders this list in order, so each class's variants go
+      // directly under the class's own row (both queries are name-ordered).
+      const subjects = entities.flatMap((e) => [
+        { ...e, variant: null },
+        ...(variantsByClass.get(e.id) || []),
+      ]);
       res.json({ subjects });
     } catch (err) {
       console.error(err);

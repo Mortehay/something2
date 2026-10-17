@@ -74,3 +74,14 @@ test('POST /api/sprite-admin/jobs rejects an out-of-range variant', async () => 
   assert.equal(res.status, 400);
 });
 
+
+// A null/primitive element used to coerce to entity_id 0 and pass validation
+// (201 with unknown:[0]) instead of being rejected as malformed.
+for (const bad of [null, 7, 'x', [], { entity_id: 0 }, { entity_id: '' }, { entity_id: -1 }]) {
+  test(`POST /api/sprite-admin/jobs rejects a malformed target ${JSON.stringify(bad)}`, async () => {
+    __setPool({ query: async (sql) => { if (isUserLookup(sql)) return ADMIN_USER_ROW; throw new Error(`unexpected query: ${sql}`); } });
+    const res = await request(app).post('/api/sprite-admin/jobs').set(...AUTH)
+      .send({ targets: [bad] });
+    assert.equal(res.status, 400);
+  });
+}
