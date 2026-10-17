@@ -162,7 +162,10 @@ export function useTestProvider() {
       return res.json();
     },
     onSuccess: (data) => {
-      if (data.ok) toast.success(`Reachable (${data.latency_ms}ms)`);
+      // An image provider's Test is a real generation (SOMET-542); say so, so a
+      // green toast is not read as the weaker "the server answered".
+      if (data.ok && data.probe === "generation") toast.success(`Generated a test image (${data.latency_ms}ms)`);
+      else if (data.ok) toast.success(`Reachable (${data.latency_ms}ms)`);
       else toast.error(data.error || "Not reachable");
     },
     onError: (err) => toast.error(err.message),

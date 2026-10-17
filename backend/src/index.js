@@ -3111,9 +3111,11 @@ app.post('/api/ai-providers/:id/test', adminGuard, async (req, res) => {
     }
     // Spread explicitly rather than returning the provider: nothing from the
     // row (least of all auth_token) belongs in this response.
-    const { ok, status = null, latency_ms = null, error = null } =
+    // For an image provider this is a real 1-step generation (SOMET-542), so
+    // ok means the box drew a picture, not merely that it answered HTTP.
+    const { ok, status = null, latency_ms = null, error = null, probe = null } =
       await providerDiscovery.testConnection(provider);
-    res.json({ ok, status, latency_ms, error });
+    res.json({ ok, status, latency_ms, error, probe });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to test AI provider' });

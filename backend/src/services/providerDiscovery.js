@@ -132,9 +132,14 @@ async function fetchModels(provider, { fetchImpl = fetch } = {}) {
   return { ok: true, status: res.status, models: extracted.models };
 }
 
-// Reachability only. Hits models_path when one is configured (that is the
-// endpoint discovery will actually use, so it is the more useful signal) and
-// otherwise base_url itself.
+// The image provider's Test button. ok means "a real generation produced an
+// image", not "the box answers HTTP" -- see SOMET-542: a faulted CUDA context
+// kept the models endpoint 200 while every txt2img call 500'd, and the old
+// reachability-only check reported that box healthy while a batch burned.
+//
+// The models GET stays as a cheap pre-check (it is the endpoint discovery
+// uses, and an unreachable box should not wait out a generation timeout).
+// latency_ms is the generation's, since that is the number worth knowing.
 async function testConnection(provider, { fetchImpl = fetch, now = Date.now } = {}) {
   let url;
   try {
@@ -148,15 +153,19 @@ async function testConnection(provider, { fetchImpl = fetch, now = Date.now } = 
       headers: authHeaders(provider),
       signal: AbortSignal.timeout(TIMEOUT_MS()),
     }, { fetchImpl });
-    return {
-      ok: res.ok,
-      status: res.status,
-      latency_ms: now() - started,
-      error: res.ok ? null : `service answered ${res.status}`,
-    };
+    if (!res.ok) {
+      return {
+        ok: false, status: res.status, latency_ms: now() - started, error: `service answered ${res.status}`,
+      };
+    }
   } catch (err) {
     return { ok: false, latency_ms: now() - started, error: err.message };
   }
+  // Required here rather than at the top: remoteImageProvider imports
+  // authHeaders from this module, so a top-level require would be circular.
+  const { probeGeneration } = require('./remoteImageProvider');
+  const probed = await probeGeneration(provider, { fetchImpl, now });
+  return { ...probed, probe: 'generation' };
 }
 
 module.exports = {

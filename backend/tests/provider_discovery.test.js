@@ -197,15 +197,137 @@ test('no failure path echoes the auth token', async () => {
 
 // --- testConnection ------------------------------------------------------
 
-test('testConnection reports ok with a latency', async () => {
+// SOMET-542. A models GET answering 200 proves the web server is up, not that
+// the box can draw: a faulted CUDA context kept /sdapi/v1/sd-models green while
+// every txt2img call 500'd, and the Test button certified it. ok now means "a
+// real generation produced an image", with the models GET kept as a pre-check.
+
+// A real 1x1 RGBA PNG, so the probe's signature check sees genuine bytes.
+const PNG_1X1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+const imageProvider = () => ({
+  base_url: 'http://box:7860/sdapi/v1/txt2img',
+  models_path: '/sdapi/v1/sd-models',
+  models_pointer: '$[*].model_name',
+  model: 'sd15',
+  request_template: {
+    prompt: '{{prompt}}', steps: 20, width: '{{width}}', height: '{{height}}', seed: '{{seed}}',
+  },
+  response_image_pointer: 'images[0]',
+});
+
+// Real Response objects for the generation leg: the probe reads through the
+// same capped readers a job does, and a hand-rolled stub would let those
+// readers take a test-only branch.
+function generationStub({ models = () => jsonResponse([{ model_name: 'sd15' }]), generate }) {
+  return stubFetch(async (url, init) => ((init && init.method === 'POST') ? generate(url, init) : models(url, init)));
+}
+const jsonBody = (body, status = 200) => new Response(JSON.stringify(body), {
+  status, headers: { 'content-type': 'application/json' },
+});
+
+test('testConnection is NOT ok when models answers 200 but generation fails', async () => {
+  // The exact 2026-09-04 failure. Before the fix this returned ok:true.
+  const fetchImpl = generationStub({
+    generate: () => jsonBody({ error: 'RuntimeError', errors: 'CUDA error: unspecified launch failure' }, 500),
+  });
+  const out = await testConnection(imageProvider(), { fetchImpl });
+  assert.strictEqual(out.ok, false);
+  assert.strictEqual(out.status, 500);
+  assert.match(out.error, /500/);
+  assert.match(out.error, /CUDA error/);
+  assert.strictEqual(fetchImpl.calls.length, 2);
+});
+
+test('testConnection is ok only after a generation returns a decodable image', async () => {
   let t = 1000;
-  const fetchImpl = stubFetch(async () => { t += 42; return jsonResponse({}, 200); });
-  const out = await testConnection({ base_url: 'http://box:7860' },
-    { fetchImpl, now: () => t });
+  const fetchImpl = generationStub({
+    generate: async () => { t += 42; return jsonBody({ images: [PNG_1X1] }); },
+  });
+  const out = await testConnection(imageProvider(), { fetchImpl, now: () => t });
   assert.strictEqual(out.ok, true);
   assert.strictEqual(out.status, 200);
   assert.strictEqual(out.latency_ms, 42);
   assert.strictEqual(out.error, null);
+  assert.strictEqual(out.probe, 'generation');
+
+  const [pre, gen] = fetchImpl.calls;
+  assert.strictEqual(pre.url, 'http://box:7860/sdapi/v1/sd-models');
+  assert.strictEqual(gen.url, 'http://box:7860/sdapi/v1/txt2img');
+  const sent = JSON.parse(gen.init.body);
+  // The provider's OWN template, cut down to the cheapest real generation.
+  assert.strictEqual(sent.steps, 1);
+  assert.strictEqual(sent.width, 64);
+  assert.strictEqual(sent.height, 64);
+  assert.strictEqual(typeof sent.prompt, 'string');
+  assert.ok(sent.prompt.length > 0);
+});
+
+test('testConnection does not add a steps key the template never had', async () => {
+  const provider = { ...imageProvider(), request_template: { prompt: '{{prompt}}', size: '{{width}}x{{height}}' } };
+  const fetchImpl = generationStub({ generate: () => jsonBody({ images: [PNG_1X1] }) });
+  const out = await testConnection(provider, { fetchImpl });
+  assert.strictEqual(out.ok, true);
+  const sent = JSON.parse(fetchImpl.calls[1].init.body);
+  assert.deepStrictEqual(Object.keys(sent).sort(), ['prompt', 'size']);
+  assert.strictEqual(sent.size, '64x64');
+});
+
+test('testConnection rejects a 200 that carries no image', async () => {
+  const fetchImpl = generationStub({ generate: () => jsonBody({ images: [] }) });
+  const out = await testConnection(imageProvider(), { fetchImpl });
+  assert.strictEqual(out.ok, false);
+  assert.match(out.error, /no image found/);
+});
+
+test('testConnection rejects a 200 whose "image" is not an image', async () => {
+  // Buffer.from(…, 'base64') accepts nearly anything; decoding to bytes is
+  // not the same as producing a picture.
+  const fetchImpl = generationStub({
+    generate: () => jsonBody({ images: [Buffer.from('internal server error').toString('base64')] }),
+  });
+  const out = await testConnection(imageProvider(), { fetchImpl });
+  assert.strictEqual(out.ok, false);
+  assert.match(out.error, /not a recognisable image/);
+});
+
+test('testConnection accepts a raw image/* body', async () => {
+  const fetchImpl = generationStub({
+    generate: () => new Response(Buffer.from(PNG_1X1, 'base64'), {
+      status: 200, headers: { 'content-type': 'image/png' },
+    }),
+  });
+  const out = await testConnection(imageProvider(), { fetchImpl });
+  assert.strictEqual(out.ok, true);
+});
+
+test('testConnection skips the generation when the models pre-check already failed', async () => {
+  const fetchImpl = generationStub({
+    models: () => jsonResponse({}, 503),
+    generate: () => { throw new Error('generation must not be attempted'); },
+  });
+  const out = await testConnection(imageProvider(), { fetchImpl });
+  assert.strictEqual(out.ok, false);
+  assert.strictEqual(out.status, 503);
+  assert.strictEqual(fetchImpl.calls.length, 1);
+});
+
+test('testConnection names the probe deadline when generation never answers', async () => {
+  const fetchImpl = generationStub({
+    generate: () => { const e = new Error('aborted'); e.name = 'TimeoutError'; throw e; },
+  });
+  const out = await testConnection(imageProvider(), { fetchImpl });
+  assert.strictEqual(out.ok, false);
+  assert.match(out.error, /did not produce an image within \d+s/);
+});
+
+test('testConnection without a request_template cannot certify generation', async () => {
+  const { request_template, ...provider } = imageProvider(); // eslint-disable-line no-unused-vars
+  const fetchImpl = generationStub({ generate: () => jsonBody({ images: [PNG_1X1] }) });
+  const out = await testConnection(provider, { fetchImpl });
+  assert.strictEqual(out.ok, false);
+  assert.match(out.error, /request_template/);
+  assert.strictEqual(fetchImpl.calls.length, 1);
 });
 
 test('testConnection on a dead host resolves ok:false with a reason', async () => {
