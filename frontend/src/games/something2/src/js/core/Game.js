@@ -136,6 +136,22 @@ export function matchesMouseKey(boundKey, button) {
     return names.includes(b);
 }
 
+// SOMET-622: the keydown listener sits on window, so it also hears keys typed
+// into admin form fields rendered alongside the game. Those belong to the field.
+// Non-text inputs (the in-game Settings checkboxes and volume sliders) keep
+// focus after a click but take no typing, so they must not block game keys.
+const NON_TEXT_INPUT_TYPES = new Set([
+    'checkbox', 'radio', 'range', 'button', 'submit', 'reset', 'color', 'image', 'file',
+]);
+
+function isEditableTarget(target) {
+    if (!target) return false;
+    if (target.isContentEditable) return true;
+    const tag = target.tagName;
+    if (tag === 'INPUT') return !NON_TEXT_INPUT_TYPES.has(String(target.type || 'text').toLowerCase());
+    return tag === 'TEXTAREA' || tag === 'SELECT';
+}
+
 export class Game {
     constructor() {
         console.log("Game constructor");
@@ -2746,6 +2762,7 @@ export class Game {
             // that started suspended because initChunked ran without a fresh
             // gesture; any key is a valid user-activation to resume it.
             if (this.audio) this.audio.unlock();
+            if (isEditableTarget(e.target)) return;
             // First: if passive search is focused, intercept all keys and do NOT register movement or trigger hotkeys
             if (this.passiveTreeOpen && this.passiveSearchFocused) {
                 if (e.key === 'Escape' || e.key === 'Enter') {
