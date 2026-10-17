@@ -308,3 +308,62 @@ test('a rotation skipped because the catalog failed to load says so, not "no bos
   assert.equal(lines.filter((l) => /catalog failed to load/.test(l) && /db down/.test(l)).length, 1, lines.join('\n'));
   assert.equal(lines.filter((l) => /boss_tier = 'world'/.test(l)).length, 0, 'not misreported as an empty catalog');
 });
+
+// SOMET-616: the chest INSERT used to omit the NOT NULL guard_entity_type_id
+// and fail silently while the slain announcement still claimed "A Boss
+// Victory Chest has appeared!". The announcement must follow the insert's
+// actual outcome. Every other query (loot rolls, gold) answers empty rows so
+// only the chest path differs between the two cases.
+function chestPool({ chestFails }) {
+  const chestInserts = [];
+  return {
+    chestInserts,
+    query: async (sql, params) => {
+      if (/INSERT INTO world_chests/.test(sql)) {
+        chestInserts.push(params);
+        if (chestFails) throw new Error('null value in column "guard_entity_type_id"');
+        return { rows: [{
+          id: 77, x: params[1], y: params[2], kind: 'vault', guard_entity_type_id: params[3],
+          guard_level: params[4], guard_creature_ids: [], state: 'unlocked',
+          opened_at: null, respawn_at: null, expires_at: new Date(Date.now() + 600000),
+        }] };
+      }
+      return { rows: [] };
+    },
+  };
+}
+
+async function killWithPool(t, pool) {
+  t.mock.method(console, 'error', () => {});
+  t.mock.method(console, 'warn', () => {});
+  const m = await managerWith(catalogOf([bossRow()]));
+  const entry = worldEntry('w1', 'Molten Core');
+  m.forceSpawn(Date.now(), new Map([['w1', entry]]), {}, () => {});
+  const c = entry.world.creatures.get(m.bossCreatureId);
+  c._playerDamage = new Map([['user_1', 9000]]);
+  entry.world.creatures.remove(c.id);
+  const frames = [];
+  await m.onCreatureDeath(entry, c, 'user_1', {
+    pool, broadcastFn: (f) => frames.push(f), dropLegendaryFn: async () => {},
+  });
+  return { entry, slain: frames.filter((f) => f.kind === 'world_boss_slain') };
+}
+
+test('a boss kill inserts exactly one chest, guarded by the boss type, and announces it (SOMET-616)', async (t) => {
+  const pool = chestPool({ chestFails: false });
+  const { entry, slain } = await killWithPool(t, pool);
+  assert.equal(pool.chestInserts.length, 1, 'exactly one chest INSERT');
+  assert.equal(pool.chestInserts[0][3], 901, 'guard_entity_type_id is the defeated boss\'s own catalog id');
+  assert.equal(entry.chests.length, 1, 'the chest is live in the world');
+  assert.equal(slain.length, 1);
+  assert.ok(slain[0].text.includes('A Boss Victory Chest has appeared!'));
+});
+
+test('a failed chest insert is never announced (SOMET-616)', async (t) => {
+  const pool = chestPool({ chestFails: true });
+  const { entry, slain } = await killWithPool(t, pool);
+  assert.equal(pool.chestInserts.length, 1, 'the insert was attempted');
+  assert.equal((entry.chests || []).length, 0, 'no phantom chest in the world');
+  assert.equal(slain.length, 1, 'the kill is still announced once');
+  assert.equal(slain[0].text.includes('Victory Chest'), false, 'but no chest is claimed');
+});
