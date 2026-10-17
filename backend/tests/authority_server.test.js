@@ -1488,11 +1488,16 @@ test('refreshPlayerStats moves a live player\'s pools and pushes a progression m
 
   const progressionMsgP = nextMsg(ws, 'progression');
   const ok = handle.refreshPlayerStats('7', progression, stats);
+  // Read the pools NOW, before awaiting anything. refreshPlayerStats is
+  // synchronous, but the await below yields to the 20ms world tick, and with
+  // hp (160) under maxHp (200) every tick regenerates a little -- under load
+  // the assertion saw 160.04 (SOMET-619). Nothing can interleave here.
+  const { hp, maxHp } = player;
   const msg = await progressionMsgP;
 
   assert.equal(ok, true);
-  assert.equal(player.maxHp, 200, 'maxHp must move to base(100) + 10*10 from constitution 15');
-  assert.equal(player.hp, 160, 'hp must move by the +100 delta (60+100), not snap to the new max (200)');
+  assert.equal(maxHp, 200, 'maxHp must move to base(100) + 10*10 from constitution 15');
+  assert.equal(hp, 160, 'hp must move by the +100 delta (60+100), not snap to the new max (200)');
   assert.deepEqual(msg.progression, progression);
   assert.deepEqual(msg.stats, stats);
 
