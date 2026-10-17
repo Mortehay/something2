@@ -74,3 +74,37 @@ describe("game keydown ignores editable targets (SOMET-622)", () => {
     expect(activated).toEqual([4]);
   });
 });
+
+// Review of 830de7f1: the in-game Settings overlay has checkboxes and range
+// sliders, and the game keeps running behind it. A click leaves focus on the
+// control, so a guard matching every INPUT froze WASD/hotbar until the player
+// clicked elsewhere. Only text-entry inputs own the keyboard.
+describe("non-text inputs do not block game keys (SOMET-622 review)", () => {
+  let g;
+  let activated;
+
+  beforeEach(() => {
+    g = makeTestGame();
+    activated = [];
+    g._activateHotbarSkill = (slot) => { activated.push(slot); };
+  });
+
+  for (const type of ["checkbox", "range", "radio", "button", "submit", "reset", "color", "image", "file"]) {
+    it(`W and 4 still reach the game while a ${type} input has focus`, () => {
+      const target = { tagName: "INPUT", type };
+      g._keydownHandler(keyEvent("w", "KeyW", target));
+      g._keydownHandler(keyEvent("4", "Digit4", target));
+      expect(g.keys.w).toBe(true);
+      expect(activated).toEqual([4]);
+    });
+  }
+
+  for (const type of ["text", "number", "search", "email", "password", "url", "tel", "TEXT"]) {
+    it(`a ${type} input still owns the digit`, () => {
+      const ev = keyEvent("4", "Digit4", { tagName: "INPUT", type });
+      g._keydownHandler(ev);
+      expect(activated).toEqual([]);
+      expect(ev.defaultPrevented).toBe(false);
+    });
+  }
+});

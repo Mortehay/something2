@@ -138,11 +138,18 @@ export function matchesMouseKey(boundKey, button) {
 
 // SOMET-622: the keydown listener sits on window, so it also hears keys typed
 // into admin form fields rendered alongside the game. Those belong to the field.
+// Non-text inputs (the in-game Settings checkboxes and volume sliders) keep
+// focus after a click but take no typing, so they must not block game keys.
+const NON_TEXT_INPUT_TYPES = new Set([
+    'checkbox', 'radio', 'range', 'button', 'submit', 'reset', 'color', 'image', 'file',
+]);
+
 function isEditableTarget(target) {
     if (!target) return false;
     if (target.isContentEditable) return true;
     const tag = target.tagName;
-    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+    if (tag === 'INPUT') return !NON_TEXT_INPUT_TYPES.has(String(target.type || 'text').toLowerCase());
+    return tag === 'TEXTAREA' || tag === 'SELECT';
 }
 
 export class Game {
