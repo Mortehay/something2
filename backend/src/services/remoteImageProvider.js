@@ -359,12 +359,16 @@ function startGeneration(provider, req, deps = {}) {
   return { job_id: jobId, provider_id: provider.id, provider_name: provider.name };
 }
 
-async function runGeneration(jobId, provider, req, deps = {}) {
-  const { fetchImpl = fetch, store = assetStore } = deps;
-  const { subject, kind = 'object', prompt, seed = 0, frames = 1, negative = [] } = req;
-
-  setJob(jobId, { status: 'running' });
-
+// The request body exactly as it goes to the provider: the template with the
+// request's values substituted, plus the operator's negative terms.
+//
+// Pure, and separate from runGeneration, because SOMET-544 needs to rebuild it
+// WITHOUT sending it: "has anything changed since this subject failed?" is
+// answered by comparing the body that would be sent now with the one that was
+// recorded, and a second copy of this merge would be free to disagree with
+// the one actually used.
+function buildBody(provider, req) {
+  const { kind = 'object', prompt, seed = 0, frames = 1, negative = [] } = req;
   const size = defaultSize(kind);
   const frameCount = Math.max(1, Number(frames) || 1);
   // {{frames}} lets the template tell the REMOTE how many frames to draw. The
@@ -401,6 +405,17 @@ async function runGeneration(jobId, provider, req, deps = {}) {
     const existing = String(body.negative_prompt || '').trim();
     body.negative_prompt = [existing, ...extraNegative].filter(Boolean).join(', ');
   }
+  return body;
+}
+
+async function runGeneration(jobId, provider, req, deps = {}) {
+  const { fetchImpl = fetch, store = assetStore } = deps;
+  const { subject, kind = 'object', frames = 1 } = req;
+
+  setJob(jobId, { status: 'running' });
+
+  const frameCount = Math.max(1, Number(frames) || 1);
+  const body = buildBody(provider, req);
 
   // SOMET-547. Publish the FINAL payload on the registry entry so the history
   // can record what was actually sent. Until this existed the dispatcher only
@@ -630,6 +645,7 @@ module.exports = {
   REMOTE_JOB_PREFIX,
   isRemoteJobId,
   substituteTemplate,
+  buildBody,
   decodeImage,
   stripDataUri,
   storageKey,

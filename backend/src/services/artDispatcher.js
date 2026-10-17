@@ -124,10 +124,14 @@ function subjectResolver(db, subjects = catalogSubjects) {
     if (!byKind.has(kind)) {
       const reg = subjects.registryFor(kind);
       if (!reg) throw new Error(`unknown subject kind: ${kind}`);
-      const list = await reg.list(db);
-      byKind.set(kind, new Map(list.map((s) => [s.key, s])));
+      // The PROMISE is cached, not the result: concurrent callers (the requeue
+      // check runs one per failed subject at once) would otherwise all miss
+      // and each run the full-catalogue query.
+      const loading = reg.list(db).then((list) => new Map(list.map((s) => [s.key, s])));
+      byKind.set(kind, loading);
+      loading.catch(() => byKind.delete(kind));
     }
-    return byKind.get(kind).get(key) || null;
+    return (await byKind.get(kind)).get(key) || null;
   };
 }
 
@@ -534,6 +538,63 @@ async function resolveJobProvider(db, providerId, batchProvider, loadProvider) {
   return cache.get(providerId) || batchProvider;
 }
 
+// SOMET-544. Would a plain retry of this failed job send anything different?
+//
+// A content failure is refused a plain requeue because the seed is derived
+// from the subject, so the same request comes back as the same image. That
+// holds only while the REQUEST is unchanged -- and most of what goes into it is
+// code and provider config, not per-subject rows: the backdrop moved white ->
+// grey in SOMET-545 without touching a single subject, and every cutout that
+// failed on white was still refused a retry that would now succeed.
+//
+// So the question is answered by rebuilding the body this subject would be
+// sent now and comparing it with the one recorded when it failed
+// (art_generations, SOMET-547). Built through requestForSubject and
+// remote.buildBody -- the same two steps a real run takes -- so the comparison
+// cannot drift from what would actually be sent.
+//
+// Compared against the provider that drew the failure: whichever provider a
+// later drain picks is unknown here, and "the same provider would now get a
+// different request" is the claim that justifies spending a generation.
+//
+// Every "cannot tell" answers false -- no recorded attempt, a deleted provider,
+// a subject gone from the catalogue -- which keeps the 409 the caller already
+// had. The cost of a wrong true is a wasted generation; of a wrong false, only
+// that the operator uses reseed, as before.
+function stableJson(obj) {
+  return JSON.stringify(Object.keys(obj).sort().map((k) => [k, obj[k]]));
+}
+
+async function requestChangedSinceFailure(db, job, {
+  subjects = catalogSubjects,
+  loadProvider = aiProviders.loadImageProviderWithSecret,
+  resolveSubject = null,
+} = {}) {
+  const { rows } = await db.query(
+    `SELECT composed_prompt, provider_id, params FROM art_generations
+      WHERE art_job_id = $1 AND outcome = 'failed'
+      ORDER BY created_at DESC, id DESC LIMIT 1`,
+    [job.id],
+  );
+  const last = rows[0];
+  if (!last || last.composed_prompt == null || !Number.isInteger(last.provider_id)) return false;
+  const reg = subjects.registryFor(job.subject_kind);
+  if (!reg) return false;
+  const getSubject = resolveSubject || subjectResolver(db, subjects);
+  const subject = await getSubject(job.subject_kind, job.subject_key);
+  if (!subject) return false;
+  const provider = await loadProvider(db, last.provider_id);
+  // A local provider has no template and its failures record no sent body.
+  if (!provider || provider.local) return false;
+
+  const body = remote.buildBody(provider, await requestForSubject(db, job, subject, reg, provider));
+  // Both sides through paramsFrom's whitelist, and the prompt normalised the
+  // way record() stores it, so only a real difference can register.
+  const now = { prompt: body.prompt || null, ...history.paramsFrom(body) };
+  const then = { prompt: last.composed_prompt, ...history.paramsFrom(last.params || {}) };
+  return stableJson(now) !== stableJson(then);
+}
+
 // The longest a drain will sit waiting for a backoff to expire before looking
 // again. Not a cap on the backoff itself -- the loop re-checks and waits again
 // -- only on how long it goes without noticing a stop request or new work.
@@ -682,6 +743,7 @@ module.exports = {
   backdropFor,
   resolveJobProvider,
   writePromptForJob,
+  requestChangedSinceFailure,
 };
 
 // --- The drain ------------------------------------------------------------

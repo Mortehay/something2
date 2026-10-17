@@ -143,9 +143,12 @@ export function useRequeueFailures() {
       return json;
     },
     onSuccess: (json) => {
+      const left = json.unchanged
+        ? `; ${json.unchanged} unchanged since they failed, left as they are`
+        : '';
       toast.success(json.reseeded
         ? `${json.requeued} queued again with a new seed`
-        : `${json.requeued} returned to the queue`);
+        : `${json.requeued} returned to the queue${left}`);
       qc.invalidateQueries({ queryKey: QUEUE_KEY });
       qc.invalidateQueries({ queryKey: SUBJECTS_KEY });
     },
