@@ -520,6 +520,21 @@ function ArtConsoleAdmin() {
   const [mark, setMark] = useState(null);
   const [dragFrom, setDragFrom] = useState(null);
 
+  // Escape closes the preview from the WINDOW, not the backdrop. The preview is
+  // opened with the mouse and focus stays on the row's button, outside the
+  // dialog, so a keydown handler on the (unfocusable) backdrop never fired
+  // (SOMET-546 rework). Capture phase plus stopImmediatePropagation, as the
+  // Minimap and WaypointTravel modals do, so the Game's own window handler --
+  // GameShell keeps it alive under the admin routes -- does not also act.
+  useEffect(() => {
+    if (!preview) return undefined;
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.stopImmediatePropagation(); e.preventDefault(); setPreview(null); }
+    };
+    window.addEventListener('keydown', onKey, true); // capture
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [preview]);
+
   const boxFrom = (a, b) => ({
     x: Math.min(a.x, b.x), y: Math.min(a.y, b.y),
     w: Math.abs(a.x - b.x), h: Math.abs(a.y - b.y),
@@ -1091,7 +1106,6 @@ function ArtConsoleAdmin() {
       {preview && (
         <Backdrop
           onClick={() => setPreview(null)}
-          onKeyDown={(e) => { if (e.key === 'Escape') setPreview(null); }}
           role="presentation"
         >
           <Preview onClick={(e) => e.stopPropagation()}>

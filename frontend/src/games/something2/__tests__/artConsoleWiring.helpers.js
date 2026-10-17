@@ -9,8 +9,9 @@
 // so a test drives the code that ships rather than a copy of its predicate.
 //
 // Deliberately small: state, refs, memos and effects with dependency
-// comparison. It is not React -- children are not rendered, only the element
-// tree the function returns -- and it does not need to be.
+// comparison, plus effect cleanup. It is not React -- children are not
+// rendered, only the element tree the function returns -- and it does not
+// need to be.
 export function createRuntime() {
   const rt = { slots: [], i: 0, effects: [] };
 
@@ -32,21 +33,33 @@ export function createRuntime() {
     useRef(initial) {
       return rt.slots[slot(() => ({ current: initial }))];
     },
-    useMemo(fn) {
-      slot(() => null);
-      return fn();
+    // Dependencies are honoured, as React does: a memo with a deliberately
+    // narrow list (the frozen sort order, SOMET-546) is only testable if a
+    // render that leaves its deps alone returns the value captured earlier.
+    useMemo(fn, deps) {
+      const idx = slot(() => ({ deps: undefined, value: undefined }));
+      const prev = rt.slots[idx].deps;
+      const changed = !deps || !prev || deps.some((d, k) => !Object.is(d, prev[k]));
+      if (changed) rt.slots[idx] = { deps, value: fn() };
+      return rt.slots[idx].value;
     },
     useCallback(fn) {
       slot(() => null);
       return fn;
     },
     useEffect(fn, deps) {
-      const idx = slot(() => ({ deps: undefined }));
+      const idx = slot(() => ({ deps: undefined, cleanup: undefined }));
       const prev = rt.slots[idx].deps;
       const changed = !deps || !prev || deps.some((d, k) => !Object.is(d, prev[k]));
       if (changed) {
         rt.slots[idx].deps = deps;
-        rt.effects.push(fn);
+        // The previous run's cleanup goes first, so a listener an effect
+        // added is removed before the next one is (SOMET-546).
+        rt.effects.push(() => {
+          const s = rt.slots[idx];
+          if (typeof s.cleanup === 'function') s.cleanup();
+          s.cleanup = fn();
+        });
       }
     },
   };
