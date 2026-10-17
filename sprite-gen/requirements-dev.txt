@@ -9,3 +9,6 @@ httpx==0.27.*
 # never needs a real Redis reachable from the host (same reasoning as the
 # MinIO-blocking fixture in conftest.py).
 fakeredis==2.*
+# Pinned to the prod redis-py (requirements.txt); unpinned, fakeredis pulls in
+# redis-py 8.x and the suite runs against a client prod never uses.
+redis==5.*

@@ -1,7 +1,9 @@
+import hashlib
 import hmac
+import json
 import uuid
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from pydantic import BaseModel, Field, field_validator
 from typing import Literal, Optional, List
 from .config import settings
@@ -132,9 +134,18 @@ def require_shared_secret(x_sprite_gen_secret: Optional[str] = Header(default=No
         raise HTTPException(status_code=401, detail="missing or invalid shared secret")
 
 @app.get("/health")
-def health():
+def health(response: Response):
+    # SOMET-539: jobs live in Redis, so an unreachable Redis means no job can
+    # be queued or progress -- report it instead of a green 200.
+    try:
+        job_manager.redis.ping()
+        job_store = "ok"
+    except Exception:  # noqa: BLE001 - any failure means the store is unusable
+        job_store = "unreachable"
+        response.status_code = 503
     return {
-        "status": "ok",
+        "status": "ok" if job_store == "ok" else "degraded",
+        "job_store": job_store,
         "device": settings.device,
         "default_backend": settings.default_backend,
         "capability": settings.capability(),
@@ -185,10 +196,14 @@ def generate(req: GenerateRequest):
         "backend_name": backend_name, "seed": req.seed, "frames": frames,
         "size": list(size), "steps": steps,
     }
-    # SOMET-539: dedup by (kind, subject) -- resubmitting the same subject
-    # while one is already queued/running hands back the existing job_id
-    # instead of starting a second generation.
-    dedup_key = f"{req.kind}:{req.creature}"
+    # SOMET-539: resubmitting the same subject with the same generation
+    # params while one is already queued/running hands back the existing
+    # job_id instead of starting a second generation. The params hash is part
+    # of the key so "try another seed" is a new job, not the old one's image
+    # under a new label. job_id is excluded: it is minted per request.
+    resolved = {k: v for k, v in params.items() if k != "job_id"}
+    params_hash = hashlib.sha256(json.dumps(resolved, sort_keys=True).encode()).hexdigest()[:16]
+    dedup_key = f"{req.kind}:{req.creature}:{params_hash}"
 
     return {
         "job_id": job_manager.submit(req.kind, params, job_id=job_id, dedup_key=dedup_key),
