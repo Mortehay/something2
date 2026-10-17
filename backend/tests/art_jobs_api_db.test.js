@@ -917,6 +917,151 @@ lockedTest('a provider failure requeues plainly, keeping its seed', async (t, po
     'a provider failure keeps its seed -- the image was never the problem');
 });
 
+// SOMET-544's known limitation, the part SOMET-551 left open. "A retry cannot
+// fix this" holds only while the REQUEST is unchanged, and most of the request
+// is code and provider config: the backdrop moved white -> grey (SOMET-545)
+// without touching any per-subject row, and every cutout that failed on white
+// was still refused a retry that would now work.
+//
+// The failure is produced through the REAL runOne path, with only the network
+// call stubbed, so the recorded history is exactly what a real failure writes.
+// The provider template wraps the prompt and adds steps and a negative prompt
+// on purpose: comparing our own req.prompt with the recorded SENT body would
+// call every templated provider "changed", and only a wrapping template shows
+// that.
+// ITEMS, from the END of the catalogue. describe_subjects_db.test.js writes
+// descriptions onto REAL skill subjects while this file runs, and a
+// description written after a subject failed is -- correctly -- a change, so a
+// skill here read "changed" in a full-suite run and passed alone.
+async function quietItems(pool, n) {
+  return (await cs.SUBJECTS.item.list(pool)).slice(-n);
+}
+
+const CUTOUT_ERR = 'provider answered 422: {"detail":"cutout removed 97.9% of the image"}';
+
+async function failThroughRunOne(pool, providerId, subjectKey) {
+  const [job] = await queue.enqueue(pool, [{ kind: 'item', key: subjectKey }],
+    { backend: 'connector', providerId });
+  const provider = (await pool.query('SELECT * FROM ai_providers WHERE id=$1', [providerId])).rows[0];
+  const out = await dispatcher.runOne(pool, job, {
+    provider,
+    resolveSubject: dispatcher.subjectResolver(pool),
+    generate: async (id, p, req) => {
+      remote.setJob(id, { sentBody: remote.buildBody(p, req), status: 'error', error: CUTOUT_ERR });
+    },
+  });
+  assert.equal(out.ok, false, 'setup: the stubbed generation must fail');
+  // Attempts are not the point here; the row just has to be terminally failed.
+  await pool.query("UPDATE art_jobs SET state='failed', attempts=3 WHERE id=$1", [job.id]);
+  return job;
+}
+
+async function withWrappingTemplate(pool, providerId, body) {
+  await pool.query(
+    `UPDATE ai_providers SET request_template = $2::jsonb WHERE id = $1`,
+    [providerId, JSON.stringify({
+      prompt: 'house style, {{prompt}}', seed: '{{seed}}', width: '{{width}}', height: '{{height}}',
+      steps: 30, negative_prompt: 'blurry',
+    })],
+  );
+  const jobIds = [];
+  try {
+    await body(jobIds);
+  } finally {
+    await pool.query('DELETE FROM art_generations WHERE art_job_id = ANY($1::bigint[])', [jobIds])
+      .catch(() => {});
+  }
+}
+
+lockedTest('an UNCHANGED request is still refused a plain requeue after a content failure',
+  async (t, pool, providerId) => {
+    const [item] = await quietItems(pool, 1);
+    await withWrappingTemplate(pool, providerId, async (jobIds) => {
+      const job = await failThroughRunOne(pool, providerId, item.key);
+      jobIds.push(job.id);
+      const gen = await pool.query('SELECT composed_prompt FROM art_generations WHERE art_job_id=$1', [job.id]);
+      assert.match(gen.rows[0].composed_prompt, /^house style, /,
+        'setup: the history must hold the SENT body, or this test proves nothing');
+
+      const res = await request(app).post('/api/art-jobs/requeue')
+        .set(...AUTH).send({ kind: 'content_cutout' });
+      assert.equal(res.status, 409,
+        `nothing changed, so the same image comes back -- must still refuse: ${JSON.stringify(res.body)}`);
+      const still = await pool.query('SELECT state FROM art_jobs WHERE id=$1', [job.id]);
+      assert.equal(still.rows[0].state, 'failed');
+    });
+  });
+
+lockedTest('after a backdrop change, a content failure requeues plainly and keeps its seed',
+  async (t, pool, providerId) => {
+    const [a, b] = await quietItems(pool, 2);
+    await withWrappingTemplate(pool, providerId, async (jobIds) => {
+      const changedJob = await failThroughRunOne(pool, providerId, a.key);
+      const sameJob = await failThroughRunOne(pool, providerId, b.key);
+      jobIds.push(changedJob.id, sameJob.id);
+
+      // The SOMET-545 shape: what the failure was sent is no longer what this
+      // code sends. Stated on the history row because the backdrop is a code
+      // constant; the row is the old code's record of what IT sent.
+      await pool.query(
+        `UPDATE art_generations SET composed_prompt = replace(composed_prompt, $2, 'flat solid white background')
+          WHERE art_job_id = $1`,
+        [changedJob.id, dispatcher.backdropFor({ request_template: {} })],
+      );
+      const rewritten = await pool.query('SELECT composed_prompt FROM art_generations WHERE art_job_id=$1',
+        [changedJob.id]);
+      assert.match(rewritten.rows[0].composed_prompt, /white background/, 'setup: the backdrop must differ');
+
+      const before = await pool.query('SELECT seed FROM art_jobs WHERE id=$1', [changedJob.id]);
+      const res = await request(app).post('/api/art-jobs/requeue')
+        .set(...AUTH).send({ kind: 'content_cutout' });
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      assert.equal(res.body.requeued, 1, 'only the subject whose request changed');
+      assert.equal(res.body.reseeded, false);
+      assert.equal(res.body.unchanged, 1, 'and SAY the other one was left, or "1 of 2" reads as a bug');
+
+      const { rows } = await pool.query('SELECT id, state, seed FROM art_jobs WHERE id = ANY($1::bigint[])',
+        [[changedJob.id, sameJob.id]]);
+      const byId = new Map(rows.map((r) => [String(r.id), r]));
+      assert.equal(byId.get(String(changedJob.id)).state, 'queued');
+      assert.equal(String(byId.get(String(changedJob.id)).seed), String(before.rows[0].seed),
+        'a plain requeue keeps the reproducible seed -- the request is what changed');
+      assert.equal(byId.get(String(sameJob.id)).state, 'failed',
+        'the unchanged subject would reproduce its failure and must stay put');
+    });
+  });
+
+lockedTest('a provider template edit counts as a change too', async (t, pool, providerId) => {
+  const [item] = await quietItems(pool, 1);
+  await withWrappingTemplate(pool, providerId, async (jobIds) => {
+    const job = await failThroughRunOne(pool, providerId, item.key);
+    jobIds.push(job.id);
+    await pool.query(
+      `UPDATE ai_providers SET request_template = request_template || '{"steps": 40}'::jsonb WHERE id=$1`,
+      [providerId],
+    );
+    const res = await request(app).post('/api/art-jobs/requeue')
+      .set(...AUTH).send({ kind: 'content_cutout' });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(res.body.requeued, 1, 'different steps draw a different image from the same seed');
+  });
+});
+
+lockedTest('a failure the request cannot be rebuilt for keeps the refusal', async (t, pool, providerId) => {
+  const [item] = await quietItems(pool, 1);
+  await withWrappingTemplate(pool, providerId, async (jobIds) => {
+    const job = await failThroughRunOne(pool, providerId, item.key);
+    jobIds.push(job.id);
+    await pool.query("UPDATE art_generations SET composed_prompt = 'anything else' WHERE art_job_id=$1",
+      [job.id]);
+    // The provider that drew it is gone: no way to say what it would be sent now.
+    await pool.query('UPDATE art_generations SET provider_id = -1 WHERE art_job_id=$1', [job.id]);
+    const res = await request(app).post('/api/art-jobs/requeue')
+      .set(...AUTH).send({ kind: 'content_cutout' });
+    assert.equal(res.status, 409, '"cannot tell" must not read as "changed"');
+  });
+});
+
 // SOMET-595. Every failed retry leaves its own row, so one subject can hold
 // several failed rows. Requeueing them all tripped art_jobs_one_live_per_subject
 // on the second: a 500 halfway through, the earlier rows already requeued.

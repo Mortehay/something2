@@ -4177,7 +4177,7 @@ app.post('/api/art-jobs/requeue', adminGuard, async (req, res) => {
     // crash where the honest answer is "nothing to do, they are already
     // queued", and the operator cannot tell those apart from a real fault.
     const { rows: failed } = await pool.query(
-      `SELECT f.id, f.subject_kind, f.subject_key, f.last_error, f.updated_at,
+      `SELECT f.id, f.subject_kind, f.subject_key, f.seed, f.last_error, f.updated_at,
               EXISTS (SELECT 1 FROM art_jobs l
                        WHERE l.subject_kind = f.subject_kind
                          AND l.subject_key = f.subject_key
@@ -4215,6 +4215,7 @@ app.post('/api/art-jobs/requeue', adminGuard, async (req, res) => {
     }
 
     const { retryable, action } = artFailures.classify(mine[0].last_error);
+    let unchanged = 0;
     if (!retryable && !reseed) {
       // SOMET-551 lifts SOMET-544's known limitation. "A retry cannot fix this"
       // rests on the prompt being unchanged -- true when the only input was the
@@ -4223,22 +4224,46 @@ app.post('/api/art-jobs/requeue', adminGuard, async (req, res) => {
       // produce a different image from the same seed, so refusing that retry
       // would push the operator to reseed and throw away a reproducible seed
       // for no reason.
-      const changed = await Promise.all(mine.map(
-        (r) => artDescriptions.recipeChangedSince(pool, r.subject_kind, r.subject_key, r.updated_at),
-      ));
+      //
+      // SOMET-544 finishes the job: a description is only ONE input. The
+      // backdrop, the framing and the provider's template are code and config,
+      // and moving the backdrop off white (SOMET-545) changed every cutout
+      // subject's request without touching a row the check above reads. So a
+      // subject also qualifies when the request it would be sent NOW differs
+      // from the one recorded when it failed.
+      const changeCheck = artDispatcher.subjectResolver(pool);
+      const changed = await Promise.all(mine.map(async (r) => {
+        if (await artDescriptions.recipeChangedSince(pool, r.subject_kind, r.subject_key, r.updated_at)) {
+          return true;
+        }
+        // Content failures only. They always come back from a provider, so the
+        // recorded body is what was SENT; a config refusal can be raised before
+        // the call, records our own unmerged request, and would compare as
+        // "changed" with nothing fixed.
+        if (action !== 'reseed') return false;
+        try {
+          return await artDispatcher.requestChangedSinceFailure(pool, r, { resolveSubject: changeCheck });
+        } catch (err) {
+          // Cannot tell is not "changed": the refusal stands, as it did before.
+          console.error('art requeue: could not compare the request', err && err.message);
+          return false;
+        }
+      }));
       const eligible = mine.filter((_, i) => changed[i]);
       if (eligible.length === 0) {
         return res.status(409).json({
           error: action === 'reseed'
             ? 'these failed for a reason a retry cannot fix -- the seed is derived from the '
-              + 'subject, so the same image comes back. Rewrite the description, or pass '
-              + 'reseed:true for a different take.'
+              + 'subject and nothing in their request (description, prompt, backdrop, provider '
+              + 'settings) has changed since, so the same image comes back. Rewrite the '
+              + 'description, or retry with a new seed (reseed:true) for a different take.'
             : 'these failed for a reason a retry cannot fix -- change the configuration first.',
           action,
         });
       }
       // Only the subjects whose recipe actually changed. Requeueing the rest
       // would burn a generation to reproduce an image we already have.
+      unchanged = mine.length - eligible.length;
       mine = eligible;
     }
     if (!retryable && reseed && action !== 'reseed') {
@@ -4269,6 +4294,8 @@ app.post('/api/art-jobs/requeue', adminGuard, async (req, res) => {
       // requeued" reads as a bug until you know the other 5 were already on
       // their way.
       already_queued: alreadyQueued,
+      // SOMET-544. Left failed because a plain retry would reproduce them.
+      unchanged,
       stats: await artJobQueue.stats(pool),
     });
   } catch (err) {

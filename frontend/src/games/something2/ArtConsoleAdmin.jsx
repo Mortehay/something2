@@ -1002,6 +1002,16 @@ function ArtConsoleAdmin() {
                   onClick={() => requeueFailures.mutate({ kind: g.kind })}
                 >Requeue all {g.count}</Secondary>
               )}
+              {/* SOMET-544. The 409 rests on the request being unchanged, so a
+                  subject whose prompt, backdrop or provider settings changed
+                  since it failed IS worth a plain retry -- and keeps its
+                  reproducible seed. The server decides which ones qualify. */}
+              {g.action === 'reseed' && (
+                <Secondary
+                  disabled={requeueFailures.isPending}
+                  onClick={() => requeueFailures.mutate({ kind: g.kind })}
+                >Requeue those whose prompt changed</Secondary>
+              )}
               {g.action === 'reseed' && (
                 <Secondary
                   disabled={requeueFailures.isPending}
