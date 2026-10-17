@@ -101,6 +101,17 @@ class GenerateRequest(BaseModel):
     steps: Optional[int] = Field(default=None, ge=1, le=MAX_STEPS)
     tier: Optional[str] = None  # override the detected hardware tier
 
+    @field_validator("creature", "base_prompt")
+    @classmethod
+    def _not_blank(cls, v, info):
+        # SOMET-631: a blank creature queued a job stored under an empty name,
+        # and prompts.py never adds the creature name, so a blank base_prompt
+        # draws styling with no subject. Rejected, not stripped: the creature
+        # string is the storage key and must reach it unchanged.
+        if not v.strip():
+            raise ValueError(f"{info.field_name} must not be blank")
+        return v
+
     @field_validator("size")
     @classmethod
     def _size_within_bounds(cls, v):
