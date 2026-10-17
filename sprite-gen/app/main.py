@@ -3,7 +3,7 @@ import hmac
 import json
 import uuid
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from pydantic import BaseModel, Field, field_validator
 from typing import Literal, Optional, List
 from .config import settings
@@ -134,9 +134,18 @@ def require_shared_secret(x_sprite_gen_secret: Optional[str] = Header(default=No
         raise HTTPException(status_code=401, detail="missing or invalid shared secret")
 
 @app.get("/health")
-def health():
+def health(response: Response):
+    # SOMET-539: jobs live in Redis, so an unreachable Redis means no job can
+    # be queued or progress -- report it instead of a green 200.
+    try:
+        job_manager.redis.ping()
+        job_store = "ok"
+    except Exception:  # noqa: BLE001 - any failure means the store is unusable
+        job_store = "unreachable"
+        response.status_code = 503
     return {
-        "status": "ok",
+        "status": "ok" if job_store == "ok" else "degraded",
+        "job_store": job_store,
         "device": settings.device,
         "default_backend": settings.default_backend,
         "capability": settings.capability(),

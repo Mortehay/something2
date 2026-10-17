@@ -2,6 +2,7 @@ import threading
 import time
 
 import fakeredis
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 from app.jobs import JobManager
 
@@ -434,6 +435,134 @@ def test_fenced_worker_that_returns_late_retires_so_capacity_stays_at_n():
         b = manager.submit("pair", {})
         results = {_wait(manager, j, timeout=3)["status"] for j in (a, b)}
         assert results == {"error"}, "more than W workers ran at once"
+    finally:
+        manager.stop()
+        release.set()
+
+
+
+class _DropsConnection:
+    """A Redis client that raises ConnectionError on chosen calls of chosen
+    methods -- what a `docker restart` of Redis does to a thread blocked in
+    BLPOP or mid-SMEMBERS. fakeredis never drops a connection, so without this
+    the suite cannot see a loop thread die.
+
+    `drop` maps a method name to the 1-based call numbers that fail."""
+
+    def __init__(self, inner, drop):
+        self._inner = inner
+        self._drop = {name: set(calls) for name, calls in drop.items()}
+        self._seen = {name: 0 for name in drop}
+        self._lock = threading.Lock()
+
+    def __getattr__(self, name):
+        attr = getattr(self._inner, name)
+        if name not in self._drop:
+            return attr
+
+        def call(*args, **kwargs):
+            with self._lock:
+                self._seen[name] += 1
+                fail = self._seen[name] in self._drop[name]
+            if fail:
+                raise RedisConnectionError("Connection closed by server.")
+            return attr(*args, **kwargs)
+        return call
+
+
+def test_idle_worker_survives_a_redis_connection_drop():
+    # Defect 4: an idle worker's BLPOP raised ConnectionError on a Redis
+    # restart, the thread died, and every later job sat "queued" forever.
+    r = _DropsConnection(_redis(), drop={"blpop": {1, 2}})
+    manager = JobManager(r, {"echo": lambda params, progress: "ok"}, worker_count=1,
+                         watchdog_interval=0.05)
+    try:
+        job = _wait(manager, manager.submit("echo", {}), timeout=5)
+        assert job["status"] == "done"
+        assert job["result"] == "ok"
+    finally:
+        manager.stop()
+
+
+def test_watchdog_survives_a_redis_connection_drop():
+    # Defect 4: the watchdog's SMEMBERS raised on a Redis restart and the
+    # thread died, so a wedged job was never fenced -- "running" forever.
+    never_returns = threading.Event()
+    r = _DropsConnection(_redis(), drop={"smembers": {1, 2}})
+    manager = JobManager(
+        r, {"wedge": lambda params, progress: never_returns.wait()}, worker_count=1,
+        deadline_seconds=0.1, max_retries=0, watchdog_interval=0.02,
+    )
+    try:
+        job = _wait(manager, manager.submit("wedge", {}), timeout=5)
+        assert job["status"] == "error"
+        assert job["error"] == "deadline exceeded after 1 attempts"
+    finally:
+        manager.stop()
+        never_returns.set()
+
+
+def test_worker_that_loses_redis_while_claiming_still_runs_the_popped_job():
+    # BLPOP already removed the id from the queue; if the claim then fails the
+    # worker must retry THAT id, or the job is "queued" but in no queue.
+    r = _DropsConnection(_redis(), drop={"pipeline": {1}})
+    manager = JobManager(r, {"echo": lambda params, progress: "ok"}, worker_count=1,
+                         watchdog_interval=0.05)
+    try:
+        job = _wait(manager, manager.submit("echo", {}), timeout=5)
+        assert job["status"] == "done"
+    finally:
+        manager.stop()
+
+
+def test_worker_that_loses_redis_while_finishing_hands_the_job_to_the_watchdog():
+    # A drop while writing the result must neither kill the worker nor strand
+    # the job: the attempt stays in the running set, the watchdog fences it
+    # past its deadline, and the retry runs. pipeline() call 1 is the claim,
+    # call 2 is _finish's check-and-set.
+    calls = {"n": 0}
+
+    def handler(params, progress):
+        calls["n"] += 1
+        return f"attempt-{calls['n']}"
+
+    r = _DropsConnection(_redis(), drop={"pipeline": {2}})
+    manager = JobManager(r, {"echo": handler}, worker_count=1,
+                         deadline_seconds=0.2, max_retries=1, watchdog_interval=0.02)
+    try:
+        job = _wait(manager, manager.submit("echo", {}), timeout=5)
+        assert job["status"] == "done"
+        assert job["result"] == "attempt-2"
+        assert job["retries"] == 1
+        # The worker that lost its write retired and the watchdog replaced it,
+        # so later jobs still run.
+        assert _wait(manager, manager.submit("echo", {}), timeout=5)["status"] == "done"
+    finally:
+        manager.stop()
+
+
+def test_worker_keeps_running_when_its_job_record_vanishes_mid_run():
+    # A job hash deleted mid-run (FLUSHDB, eviction) makes _finish's CAS fail.
+    # That is NOT a watchdog fence -- no replacement was spawned -- so the
+    # worker must carry on, or W=1 drops to zero live workers.
+    r = _redis()
+    started = threading.Event()
+    release = threading.Event()
+
+    def handler(params, progress):
+        if params.get("vanish"):
+            started.set()
+            release.wait(timeout=2)
+        return "ok"
+
+    manager = JobManager(r, {"echo": handler}, worker_count=1,
+                         deadline_seconds=30, watchdog_interval=0.05)
+    try:
+        doomed = manager.submit("echo", {"vanish": True})
+        assert started.wait(timeout=2)
+        r.delete(f"sprite_gen:job:{doomed}")
+        release.set()
+        assert _wait(manager, manager.submit("echo", {}), timeout=3)["status"] == "done"
     finally:
         manager.stop()
         release.set()

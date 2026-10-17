@@ -20,6 +20,7 @@ Give each instance its own Redis DB (REDIS_URL .../<n>).
 """
 
 import json
+import logging
 import threading
 import time
 import uuid
@@ -32,6 +33,12 @@ QUEUE_KEY = "sprite_gen:queue"
 RUNNING_SET_KEY = "sprite_gen:running"
 JOB_KEY_PREFIX = "sprite_gen:job:"
 DEDUP_KEY_PREFIX = "sprite_gen:inflight:"
+
+# How long a worker waits before touching Redis again after an error (e.g.
+# ConnectionError while Redis restarts), so an outage is not a hot loop.
+ERROR_BACKOFF_SECONDS = 1.0
+
+logger = logging.getLogger(__name__)
 
 
 def _job_key(job_id: str) -> str:
@@ -201,15 +208,27 @@ class JobManager:
         self._threads.append(t)
 
     def _worker_loop(self):
+        """Never dies on a Redis error: a `docker restart` of Redis raises
+        ConnectionError out of an idle worker's BLPOP, and a dead thread is
+        lost capacity nothing reports. Back off and carry on instead."""
+        job_id = None
         while not self._stop.is_set():
-            popped = self.redis.blpop(QUEUE_KEY, timeout=1)
-            if not popped:
-                continue
-            _, job_id = popped
-            if self._run_one(job_id) == "fenced":
-                # The watchdog fenced this attempt and spawned a replacement
-                # worker in its place; carrying on would grow the pool past N.
-                return
+            try:
+                if job_id is None:
+                    popped = self.redis.blpop(QUEUE_KEY, timeout=1)
+                    if not popped:
+                        continue
+                    _, job_id = popped
+                # BLPOP already took the id off the queue, so on an error
+                # below keep it and retry the claim -- dropping it would leave
+                # the job "queued" but in no queue.
+                outcome = self._run_one(job_id)
+                job_id = None
+                if outcome == "retire":
+                    return
+            except Exception:  # noqa: BLE001 - this thread must outlive any error
+                logger.warning("sprite-gen worker: Redis error, retrying", exc_info=True)
+                self._stop.wait(ERROR_BACKOFF_SECONDS)
 
     def _cas(self, job_id: str, check, write) -> bool:
         """Apply `write(pipe)` to the job atomically iff `check(raw)` holds.
@@ -254,29 +273,47 @@ class JobManager:
         return None
 
     def _run_one(self, job_id: str):
-        """Run one attempt. Returns "fenced" if the watchdog took the job away
-        from this attempt while it ran (its result was dropped)."""
+        """Run one attempt. Returns "retire" when this worker must stop
+        because the watchdog owns the attempt and has spawned (or will spawn)
+        a replacement -- carrying on would grow the pool past N.
+
+        Raises only before the job is claimed, so the caller can safely retry
+        the same id."""
         attempt = self._mark_running(job_id)
         if attempt is None:
             # Already handled (e.g. a dedup resubmission, or the watchdog
             # already fenced and requeued it under a later attempt).
             return None
-        raw = self.redis.hgetall(_job_key(job_id))
-        job_type = raw["type"]
-        params = json.loads(raw["params"])
+        key = _job_key(job_id)
         try:
-            handler = self.handlers.get(job_type)
-            if handler is None:
-                raise RuntimeError(f"no handler registered for job type '{job_type}'")
-            result = handler(params, self._progress_cb(job_id, attempt))
-            landed = self._finish(job_id, attempt, status="done", result=result)
-        except Exception as e:  # noqa: BLE001 - report any failure to the client
-            landed = self._finish(job_id, attempt, status="error", error=str(e))
-        finally:
+            raw = self.redis.hgetall(key)
+            try:
+                handler = self.handlers.get(raw["type"])
+                if handler is None:
+                    raise RuntimeError(f"no handler registered for job type '{raw['type']}'")
+                outcome = {"status": "done",
+                           "result": handler(json.loads(raw["params"]), self._progress_cb(job_id, attempt))}
+            except Exception as e:  # noqa: BLE001 - report any failure to the client
+                outcome = {"status": "error", "error": str(e)}
+            if self._finish(job_id, attempt, **outcome):
+                landed = True
+            elif self.redis.exists(key):
+                landed = False  # fenced: a newer attempt (or a give-up) owns the record
+            else:
+                # The record vanished (FLUSHDB, eviction). No watchdog fence
+                # happened, so nobody spawned a replacement -- keep working.
+                landed = True
             # Only ever this attempt's own member -- a retry running under a
             # newer attempt keeps its entry, so the watchdog still sees it.
             self.redis.srem(RUNNING_SET_KEY, _running_member(job_id, attempt))
-        return None if landed else "fenced"
+        except Exception:  # noqa: BLE001 - Redis failed after the claim
+            # The attempt is still "running" with its running-set member in
+            # place, so the watchdog fences it at its deadline -- retry or
+            # give-up, plus a replacement worker. Retire to stay at N.
+            logger.warning("sprite-gen worker: Redis error mid-job %s, handing it to the watchdog",
+                           job_id, exc_info=True)
+            return "retire"
+        return None if landed else "retire"
 
     def _progress_cb(self, job_id: str, attempt: str):
         def cb(done, total):
@@ -335,7 +372,11 @@ class JobManager:
             self._stop.wait(self.watchdog_interval)
             if self._stop.is_set():
                 return
-            self._sweep_wedged()
+            try:
+                self._sweep_wedged()
+            except Exception:  # noqa: BLE001 - a dead watchdog fences nothing, silently
+                logger.warning("sprite-gen watchdog: sweep failed, retrying", exc_info=True)
+                self._stop.wait(ERROR_BACKOFF_SECONDS)
 
     def _sweep_wedged(self):
         """Flip a job's reported status for anything past its deadline.
@@ -354,7 +395,7 @@ class JobManager:
         replacement -- otherwise, with SPRITE_GEN_WORKERS <= JOB_MAX_RETRIES
         (the defaults), the requeued retry is never popped and the job sits
         in "queued" forever. Live capacity stays at N; a fenced thread that
-        does come back retires (see _worker_loop). Threads stuck for good
+        does come back retires (see _run_one). Threads stuck for good
         are leaked, bounded by wedged jobs x (max_retries + 1).
         """
         now = _now()
