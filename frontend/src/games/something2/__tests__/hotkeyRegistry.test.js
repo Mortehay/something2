@@ -82,6 +82,14 @@ const GAME_ISKEY_PLAIN = /isKey\('([a-z])'\)(?!\s*&&\s*e\.shiftKey)/g;
 // exclusive of the first. Empty today; adding to it is a review decision.
 const KNOWN_EXCLUSIVE = new Set();
 
+// Files whose window keydown listener claims Escape and NOTHING else, so the
+// letter parser rightly finds no claim in them. Named one by one rather than
+// excusing every file that mentions Escape: Minimap and WaypointTravel bind
+// Escape too, and a broken letter parse there must still fail below. Each
+// entry is checked to bind Escape and to claim no letter.
+//   ArtConsoleAdmin -- closes the image preview (SOMET-546 rework).
+const ESCAPE_ONLY = new Set(['games/something2/ArtConsoleAdmin.jsx']);
+
 function claimsIn(source) {
   const plain = new Set();
   const modified = new Set();
@@ -134,10 +142,19 @@ describe('window keydown hotkeys', () => {
     // through the collision check below. Fail on it here instead, so the next
     // hotkey written in a new shape teaches this test rather than escaping it.
     const silent = listeners
-      .filter((l) => l.plain.size === 0 && l.modified.size === 0)
+      .filter((l) => l.plain.size === 0 && l.modified.size === 0 && !ESCAPE_ONLY.has(l.file))
       .map((l) => l.file);
     expect(silent, 'these files bind keydown but no hotkey shape was recognised '
       + '-- teach the regexes above, do not delete this assertion').toEqual([]);
+  });
+
+  it('an Escape-only listener really binds Escape and claims no letter', () => {
+    for (const file of ESCAPE_ONLY) {
+      const entry = listeners.find((l) => l.file === file);
+      expect(entry, `${file} no longer binds keydown -- drop it from ESCAPE_ONLY`).toBeTruthy();
+      expect(entry.plain.size + entry.modified.size, `${file} now claims a letter`).toBe(0);
+      expect(fs.readFileSync(path.join(SRC, file), 'utf8')).toMatch(/e\.key === 'Escape'/);
+    }
   });
 
   it('leaves plain T to the travel popup and the dev texture toggle on Shift+T', () => {
