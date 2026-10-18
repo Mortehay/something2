@@ -3,15 +3,15 @@
 import { Link } from 'react-router-dom';
 import styled from 'styled-components';
 import { useSeedPreview } from './useSeedExport.js';
-import { statusBadge, kindLabel } from './seedExportModel.js';
-import { Btn, Badge, Muted, Backdrop, Dialog, fmtTime } from './seedUi.jsx';
+import { statusBadge, kindLabel, exportBlocked as isExportBlocked } from './seedExportModel.js';
+import { Btn, Badge, Muted, Modal, fmtTime } from './seedUi.jsx';
 
 const Table = styled.table`
-  width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 0.5rem;
+  width: 100%; border-collapse: collapse; font-size: 1.4rem; margin-top: 0.5rem;
   th, td { text-align: left; padding: 4px; border-bottom: 1px solid var(--s2-border); }
-  th { color: var(--s2-text-muted); font-weight: 500; font-size: 0.75rem; }
+  th { color: var(--s2-text-muted); font-weight: 500; font-size: 1.2rem; }
 `;
-const Err = styled.p`color: var(--s2-danger); font-size: 0.85rem;`;
+const Err = styled.p`color: var(--s2-danger); font-size: 1.4rem;`;
 const Acts = styled.div`display: flex; gap: 6px; justify-content: flex-end; margin-top: 0.8rem;`;
 const MAX_ROWS = 8;
 
@@ -28,11 +28,11 @@ export default function SeedStatusPopup({ group, onClose, onExport, onSeed, expo
   const wantsRows = group.status === 'local_edits' || group.status === 'git_newer';
   const preview = useSeedPreview(group.id, wantsRows);
   const rows = preview.data?.rows || [];
-  const exportBlocked = group.status === 'git_newer';
+  const exportBlocked = isExportBlocked(group);
 
   return (
-    <Backdrop onClick={onClose}>
-      <Dialog onClick={(e) => e.stopPropagation()}>
+    <Modal onClose={onClose} label={`${group.label}: ${badge.label}`}>
+      <>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3 style={{ margin: 0 }}>{group.label} <Badge $tone={badge.tone}>{badge.label}</Badge></h3>
           <Btn onClick={onClose} aria-label="close">✕</Btn>
@@ -44,7 +44,7 @@ export default function SeedStatusPopup({ group, onClose, onExport, onSeed, expo
             <Muted>{group.file}</Muted>
           </>
         ) : (
-          <p style={{ fontSize: '0.85rem' }}>{(WHY[group.status] || WHY.in_sync)(group)}</p>
+          <p style={{ fontSize: '1.4rem' }}>{(WHY[group.status] || WHY.in_sync)(group)}</p>
         )}
 
         {wantsRows && preview.isLoading && <Muted>Loading rows…</Muted>}
@@ -82,7 +82,7 @@ export default function SeedStatusPopup({ group, onClose, onExport, onSeed, expo
             </Btn>
           )}
         </Acts>
-      </Dialog>
-    </Backdrop>
+      </>
+    </Modal>
   );
 }

@@ -5,13 +5,13 @@ import { useMemo, useState } from 'react';
 import styled from 'styled-components';
 import { useSeedPreview, useApplySeed } from './useSeedExport.js';
 import {
-  KINDS, kindLabel, allowedDecisions, initialDecisions, bulkSet, applyGate,
+  KINDS, kindLabel, allowedDecisions, initialDecisions, bulkSet, applyGate, previewSignature,
 } from './seedExportModel.js';
-import { Btn, Muted, Backdrop, Dialog } from './seedUi.jsx';
+import { Btn, Muted, Modal } from './seedUi.jsx';
 
 const Chips = styled.div`display: flex; gap: 6px; flex-wrap: wrap; margin: 0.6rem 0; align-items: center;`;
 const Chip = styled.button`
-  padding: 2px 10px; border-radius: 999px; font-size: 0.8rem; cursor: pointer;
+  padding: 2px 10px; border-radius: 999px; font-size: 1.2rem; cursor: pointer;
   background: ${p => (p.$on ? 'var(--s2-accent)' : 'var(--s2-surface-raised)')};
   color: ${p => (p.$on ? 'var(--s2-on-accent)' : 'var(--s2-text)')};
   border: 1px solid var(--s2-border-strong);
@@ -30,15 +30,15 @@ const RowBox = styled.div`
   ${p => (p.$red ? 'box-shadow: inset 3px 0 0 var(--s2-danger); padding-left: 6px;' : '')}
 `;
 const Kind = styled.span`
-  display: inline-block; margin-left: 6px; padding: 0 7px; border-radius: 8px; font-size: 0.7rem; font-weight: 700;
+  display: inline-block; margin-left: 6px; padding: 0 7px; border-radius: 8px; font-size: 1.1rem; font-weight: 700;
   border: 1px solid var(--s2-border-strong); color: var(--s2-text-muted);
 `;
-const Mono = styled.div`font-family: ui-monospace, monospace; font-size: 0.78rem; word-break: break-all;`;
+const Mono = styled.div`font-family: ui-monospace, monospace; font-size: 1.2rem; word-break: break-all;`;
 const Old = styled.span`color: var(--s2-danger);`;
 const New = styled.span`color: var(--s2-success);`;
 const Seg = styled.div`display: flex; border: 1px solid var(--s2-border-strong); border-radius: 5px; overflow: hidden;`;
 const SegBtn = styled.button`
-  flex: 1; padding: 3px 6px; font-size: 0.75rem; cursor: pointer; border: 0;
+  flex: 1; padding: 3px 6px; font-size: 1.2rem; cursor: pointer; border: 0;
   background: ${p => (p.$on ? 'var(--s2-btn-primary)' : 'var(--s2-surface-raised)')};
   color: ${p => (p.$on ? 'var(--s2-on-accent)' : 'var(--s2-text)')};
   &:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -47,8 +47,8 @@ const Foot = styled.div`
   display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;
   margin-top: 0.8rem; padding-top: 0.7rem; border-top: 1px solid var(--s2-border);
 `;
-const Err = styled.p`color: var(--s2-danger); font-size: 0.85rem;`;
-const Warn = styled.p`color: var(--s2-warning); font-size: 0.85rem; margin: 0.4rem 0;`;
+const Err = styled.p`color: var(--s2-danger); font-size: 1.4rem;`;
+const Warn = styled.p`color: var(--s2-warning); font-size: 1.4rem; margin: 0.4rem 0;`;
 
 const WARNINGS = {
   schema_older: 'This export is from an older database schema; fields added since then will be cleared on rows you take from git.',
@@ -65,23 +65,25 @@ export default function SeedPreviewModal({ group, onClose }) {
   if (preview.error) {
     return <Shell group={group} onClose={onClose}><Err>{preview.error.message}</Err>{preview.error.file && <Muted>{preview.error.file}</Muted>}</Shell>;
   }
-  // Keyed on the fetched snapshot so a refetch resets the decisions with it.
-  return <PreviewBody key={preview.dataUpdatedAt} group={group} data={preview.data} onClose={onClose} />;
+  // Keyed on the diff's content, not the fetch time: a same-content refetch
+  // keeps the decisions, a changed diff (after stale_preview) resets them.
+  return (
+    <PreviewBody key={previewSignature(group.id, preview.data)} group={group} data={preview.data}
+      onClose={onClose} reload={() => preview.refetch()} />
+  );
 }
 
 function Shell({ group, onClose, children }) {
   return (
-    <Backdrop onClick={onClose}>
-      <Dialog $w="860px" onClick={(e) => e.stopPropagation()}>
-        <h3 style={{ margin: 0 }}>Seed preview: {group.label}</h3>
-        {children}
-        <Foot><span /><Btn onClick={onClose}>Close</Btn></Foot>
-      </Dialog>
-    </Backdrop>
+    <Modal $w="860px" onClose={onClose} label={`Seed preview: ${group.label}`}>
+      <h3 style={{ margin: 0 }}>Seed preview: {group.label}</h3>
+      {children}
+      <Foot><span /><Btn onClick={onClose}>Close</Btn></Foot>
+    </Modal>
   );
 }
 
-function PreviewBody({ group, data, onClose }) {
+function PreviewBody({ group, data, onClose, reload }) {
   const rows = data.rows || [];
   const apply = useApplySeed();
   const [decisions, setDecisions] = useState(() => initialDecisions(rows));
@@ -101,16 +103,22 @@ function PreviewBody({ group, data, onClose }) {
   const toggleKind = (k) => setKinds((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
   const togglePick = (u) => setPicked((s) => { const n = new Set(s); if (n.has(u)) n.delete(u); else n.add(u); return n; });
   const allPicked = visible.length > 0 && visible.every((r) => picked.has(r.syncUuid));
-  const bulk = (d) => setDecisions((cur) => bulkSet(cur, [...picked], d, rows));
+  // Only selected rows that are visible under the active filter.
+  const pickedVisible = visible.filter((r) => picked.has(r.syncUuid)).map((r) => r.syncUuid);
+  const bulk = (d) => setDecisions((cur) => bulkSet(cur, pickedVisible, d, rows));
 
   const submit = () => apply.mutate(
     { groupId: group.id, decisions },
-    { onSuccess: onClose },
+    {
+      onSuccess: onClose,
+      // The diff moved under the preview: show the fresh one.
+      onError: (err) => { if (err.code === 'stale_preview') reload(); },
+    },
   );
 
   return (
-    <Backdrop onClick={onClose}>
-      <Dialog $w="900px" onClick={(e) => e.stopPropagation()}>
+    <Modal $w="900px" onClose={onClose} label={`Seed preview: ${group.label}`}>
+      <>
         <h3 style={{ margin: 0 }}>Seed preview: {group.label}</h3>
         <Muted>
           git export{data.header ? ` from ${data.header.exported_by}, ${new Date(data.header.exported_at).toLocaleString()}` : ''} → this PC.
@@ -130,11 +138,11 @@ function PreviewBody({ group, data, onClose }) {
             <Bulk>
               <input type="checkbox" checked={allPicked} aria-label="select all listed rows"
                 onChange={() => setPicked(allPicked ? new Set() : new Set(visible.map((r) => r.syncUuid)))} />
-              <b>{picked.size} selected</b>
+              <b>{pickedVisible.length} selected</b>
               <Muted>→ set to</Muted>
-              <Btn $primary disabled={!picked.size} onClick={() => bulk('git')}>Take git</Btn>
-              <Btn disabled={!picked.size} onClick={() => bulk('local')}>Keep local</Btn>
-              <Btn disabled={!picked.size} onClick={() => bulk('delete')}>Delete local</Btn>
+              <Btn $primary disabled={!pickedVisible.length} onClick={() => bulk('git')}>Take git</Btn>
+              <Btn disabled={!pickedVisible.length} onClick={() => bulk('local')}>Keep local</Btn>
+              <Btn disabled={!pickedVisible.length} onClick={() => bulk('delete')}>Delete local</Btn>
               <Muted style={{ marginLeft: 'auto' }}>Red rows have no default: you must choose.</Muted>
             </Bulk>
             {visible.map((r) => (
@@ -152,7 +160,7 @@ function PreviewBody({ group, data, onClose }) {
                   {['git', 'delete', 'local'].filter((d) => allowedDecisions({ ...r, blockedReason: null }).includes(d)).map((d) => (
                     <SegBtn key={d} $on={decisions[r.syncUuid] === d}
                       disabled={!allowedDecisions(r).includes(d)}
-                      title={d === 'delete' && r.blockedReason ? r.blockedReason : undefined}
+                      title={r.blockedReason && !allowedDecisions(r).includes(d) ? r.blockedReason : undefined}
                       onClick={() => setDecisions((cur) => bulkSet(cur, [r.syncUuid], d, rows))}>
                       {labelFor(r, d)}
                     </SegBtn>
@@ -164,7 +172,7 @@ function PreviewBody({ group, data, onClose }) {
         )}
         <Foot>
           <Muted>
-            Will write: {gate.summary.updated} updates, {gate.summary.created} creates, {gate.summary.deleted} deletes, {gate.summary.kept} kept
+            Will write: {gate.summary.updated} updates, {gate.summary.created} creates, {gate.summary.deleted} deletes, {gate.summary.kept} kept, {gate.summary.adopted} adopted
             {gate.undecided > 0 && ` · ${gate.undecided} rows still need a choice`}
           </Muted>
           <span style={{ display: 'flex', gap: 6 }}>
@@ -174,7 +182,7 @@ function PreviewBody({ group, data, onClose }) {
             </Btn>
           </span>
         </Foot>
-      </Dialog>
-    </Backdrop>
+      </>
+    </Modal>
   );
 }

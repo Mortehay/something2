@@ -21,7 +21,10 @@ async function call(path, { method = "GET", body } = {}) {
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
     const text = json.error || `Request failed (${res.status})`;
-    const err = new Error(json.code ? `${text} (${json.code})` : text);
+    const d = json.details || {};
+    const n = Array.isArray(d.uuids) ? d.uuids.length : null;
+    const extra = [json.code, n ? `${n} row${n === 1 ? '' : 's'}` : null].filter(Boolean).join(': ');
+    const err = new Error(extra ? `${text} (${extra})` : text);
     err.code = json.code;
     err.file = json.file;
     err.status = res.status;
@@ -43,6 +46,10 @@ export const useSeedPreview = (groupId, enabled) => useQuery({
   enabled: Boolean(groupId) && enabled,
   gcTime: 0,
   staleTime: 0,
+  // A refetch under the open modal would be compared against the admin's
+  // decisions; only an explicit refetch (stale_preview) reloads it.
+  refetchOnWindowFocus: false,
+  refetchOnReconnect: false,
 });
 
 export const useSeedRuns = (group) => useQuery({
@@ -82,7 +89,7 @@ export const useApplySeed = () => useInvalidating(
   ({ groupId, decisions }) => call(`/groups/${encodeURIComponent(groupId)}/seed`, { method: "POST", body: { decisions } }),
   (r) => {
     const s = r.summary || {};
-    toast.success(`Seeded: ${s.updated || 0} updated, ${s.created || 0} created, ${s.deleted || 0} deleted, ${s.kept || 0} kept`);
+    toast.success(`Seeded: ${s.updated || 0} updated, ${s.created || 0} created, ${s.deleted || 0} deleted, ${s.kept || 0} kept, ${s.adopted || 0} adopted`);
   },
 );
 

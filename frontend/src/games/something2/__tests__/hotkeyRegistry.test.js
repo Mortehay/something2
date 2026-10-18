@@ -88,7 +88,8 @@ const KNOWN_EXCLUSIVE = new Set();
 // Escape too, and a broken letter parse there must still fail below. Each
 // entry is checked to bind Escape and to claim no letter.
 //   ArtConsoleAdmin -- closes the image preview (SOMET-546 rework).
-const ESCAPE_ONLY = new Set(['games/something2/ArtConsoleAdmin.jsx']);
+//   seedUi (Modal) -- closes the Seed / Export popup, preview and confirm (SOMET-638).
+const ESCAPE_ONLY = new Set(['games/something2/ArtConsoleAdmin.jsx', 'games/something2/seedUi.jsx']);
 
 function claimsIn(source) {
   const plain = new Set();

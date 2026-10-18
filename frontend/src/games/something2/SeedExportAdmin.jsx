@@ -5,8 +5,8 @@
 import { useState } from 'react';
 import styled from 'styled-components';
 import { useSeedGroups, useSeedRuns, useRestartStatus, useExportGroup, useRestartBackend } from './useSeedExport.js';
-import { statusBadge } from './seedExportModel.js';
-import { Btn, Badge, Muted, Backdrop, Dialog, fmtTime } from './seedUi.jsx';
+import { statusBadge, exportBlocked as isExportBlocked } from './seedExportModel.js';
+import { Btn, Badge, Muted, Modal, fmtTime } from './seedUi.jsx';
 import AdminLoading from './AdminLoading.jsx';
 import SeedStatusPopup from './SeedStatusPopup.jsx';
 import SeedPreviewModal from './SeedPreviewModal.jsx';
@@ -21,9 +21,9 @@ const Banner = styled.div`
   background: var(--s2-surface-raised); color: var(--s2-text);
 `;
 const Table = styled.table`
-  width: 100%; border-collapse: collapse; margin-top: 0.8rem; font-size: 0.9rem;
+  width: 100%; border-collapse: collapse; margin-top: 0.8rem; font-size: 1.4rem;
   th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--s2-border); vertical-align: middle; }
-  th { color: var(--s2-text-muted); font-weight: 500; font-size: 0.8rem; }
+  th { color: var(--s2-text-muted); font-weight: 500; font-size: 1.2rem; }
 `;
 const Acts = styled.div`display: flex; gap: 6px; justify-content: flex-end;`;
 const Err = styled.p`color: var(--s2-danger);`;
@@ -68,7 +68,7 @@ export default function SeedExportAdmin() {
         <tbody>
           {list.map((g) => {
             const badge = statusBadge(g);
-            const exportBlocked = g.status === 'git_newer';
+            const exportBlocked = isExportBlocked(g);
             return (
               <tr key={g.id}>
                 <td><b>{g.label}</b></td>
@@ -80,7 +80,7 @@ export default function SeedExportAdmin() {
                   <Btn disabled={exportBlocked || exportGroup.isPending || g.status === 'bad_file'}
                     title={exportBlocked ? 'seed (preview) first' : undefined}
                     onClick={() => doExport(g)}>Export</Btn>
-                  <Btn disabled={!g.inGit} title={g.inGit ? undefined : 'nothing in git yet'}
+                  <Btn disabled={!g.inGit} title={g.inGit ? undefined : g.status === 'bad_file' ? 'fix or delete the export file first' : 'nothing in git yet'}
                     onClick={() => setPreviewId(g.id)}>Seed…</Btn>
                 </Acts></td>
               </tr>
@@ -117,15 +117,15 @@ export default function SeedExportAdmin() {
       )}
       {preview && <SeedPreviewModal group={preview} onClose={() => setPreviewId(null)} />}
       {confirmRestart && (
-        <Backdrop onClick={() => setConfirmRestart(false)}>
-          <Dialog $w="420px" onClick={(e) => e.stopPropagation()}>
+        <Modal $w="420px" onClose={() => setConfirmRestart(false)} label="Restart backend">
+          <>
             <p>Restarting the backend interrupts any running art, sprite or audio batch. Restart now?</p>
             <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
               <Btn onClick={() => setConfirmRestart(false)}>Cancel</Btn>
               <Btn $primary onClick={() => { restartBackend.mutate(); setConfirmRestart(false); }}>Restart</Btn>
             </div>
-          </Dialog>
-        </Backdrop>
+          </>
+        </Modal>
       )}
     </Page>
   );
