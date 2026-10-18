@@ -3,7 +3,7 @@ import {
   statusBadge, initialDecisions, bulkSet, applyGate, allowedDecisions, kindLabel, exportBlocked, previewSignature,
   exportBlockReason, seedBlockReason, decisionLabel, seedRequestBody,
   seedButtonLabel, exportAllPlan, seedAllGroups, historyPageCount, exportAllMessage, seedAllGate, pluralize,
-  tableLabel, warningText, warningIsError, refusalText, groupRowsByTable, isRename,
+  tableLabel, warningText, warningIsError, refusalText, groupRowsByTable, isRename, renameNote,
 } from '../../games/something2/seedExportModel.js';
 
 const row = (syncUuid, kind, defaultDecision, blockedReason = null) => (
@@ -300,6 +300,11 @@ describe('multi-table helpers (SOMET-639)', () => {
       .toBe("Can't seed Progression: setting xp_rate is invalid (must be > 0)");
     expect(refusalText('X', { code: 'stale_preview', details: {} })).toBeNull();
     expect(refusalText('X', { code: 'missing_ref' })).toBeNull();
+    // A null / non-object first ref never throws: the count alone.
+    expect(refusalText('C', { code: 'missing_ref', details: { refs: [null] } }))
+      .toBe("Can't seed C: 1 row points to missing rows");
+    expect(refusalText('C', { code: 'missing_ref', details: { refs: [undefined, { table: 'x' }] } }))
+      .toBe("Can't seed C: 2 rows point to missing rows");
   });
   it('groupRowsByTable follows the diff table order and drops empty tables', () => {
     const tables = [{ table: 'entity_types' }, { table: 'creature_drops' }, { table: 'creature_behaviors' }];
@@ -321,5 +326,13 @@ describe('isRename', () => {
     expect(isRename({ table: 'aura_effects', fields: [{ name: 'name' }] })).toBe(true);
     expect(isRename({ table: 'entity_types', fields: [{ name: 'hp' }] })).toBe(false);
     expect(isRename({ table: 'quests', fields: [{ name: 'name' }] })).toBe(false);
+  });
+  it('renameNote names where each table\'s references live', () => {
+    expect(renameNote({ table: 'entity_types', fields: [{ name: 'name' }] }))
+      .toBe('rename — references in worlds/biomes will follow');
+    expect(renameNote({ table: 'aura_effects', fields: [{ name: 'name' }] }))
+      .toBe("rename — entities' aura lists will follow");
+    expect(renameNote({ table: 'entity_types', fields: [{ name: 'hp' }] })).toBeNull();
+    expect(renameNote(null)).toBeNull();
   });
 });

@@ -220,8 +220,10 @@ export function refusalText(groupLabel, err) {
   if (err && err.code === 'missing_ref' && Array.isArray(d.refs) && d.refs.length) {
     const n = d.refs.length;
     const r = d.refs[0];
+    const rows = `${n} ${n === 1 ? 'row points' : 'rows point'} to missing rows`;
+    if (!r || typeof r !== 'object') return `Can't seed ${groupLabel}: ${rows}`;
     const val = r.value != null && r.value !== '' ? String(r.value) : String(r.syncUuid || r.uuid || '?').slice(0, 8);
-    return `Can't seed ${groupLabel}: ${n} ${n === 1 ? 'row points' : 'rows point'} to missing rows — e.g. ${tableLabel(r.table)} "${r.key}": ${r.column || '?'} → ${r.target ? tableLabel(r.target) : '?'} (${val})`;
+    return `Can't seed ${groupLabel}: ${rows} — e.g. ${tableLabel(r.table)} "${r.key}": ${r.column || '?'} → ${r.target ? tableLabel(r.target) : '?'} (${val})`;
   }
   if (err && err.code === 'invalid_value' && d.key !== undefined) {
     return `Can't seed ${groupLabel}: setting ${d.key} is invalid (${d.error})`;
@@ -243,7 +245,13 @@ export function groupRowsByTable(rows, tables) {
   return seq.map((table) => ({ table, label: tableLabel(table), rows: by.get(table) }));
 }
 
-// A name change on these tables cascades to worlds/biomes server-side.
-const RENAME_TABLES = new Set(['entity_types', 'aura_effects']);
-export const isRename = (row) => Boolean(row) && RENAME_TABLES.has(row.table)
-  && Array.isArray(row.fields) && row.fields.some((f) => f.name === 'name');
+// A name change on these tables cascades server-side (applySeed's
+// RENAME_CASCADES): the note says where the references live.
+const RENAME_NOTES = {
+  entity_types: 'rename — references in worlds/biomes will follow',
+  aura_effects: "rename — entities' aura lists will follow",
+};
+export const isRename = (row) => Boolean(row) && Object.prototype.hasOwnProperty.call(RENAME_NOTES, row.table)
+  && Array.isArray(row.fields) && row.fields.some((f) => f && f.name === 'name');
+// The per-table rename note for a row, or null when it is not a rename.
+export const renameNote = (row) => (isRename(row) ? RENAME_NOTES[row.table] : null);

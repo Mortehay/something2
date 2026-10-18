@@ -49,3 +49,19 @@ describe('SeedPreviewSection multi-table group (SOMET-639)', () => {
     expect(html).not.toContain('<h4');
   });
 });
+
+describe('SeedPreviewSection rename notes (SOMET-639)', () => {
+  const row = (syncUuid, table, key) => ({
+    syncUuid, table, key, kind: 'changed', defaultDecision: 'git', blockedReason: null,
+    fields: [{ name: 'name', local: `${key} old`, git: key }],
+  });
+  it('names where each renamed table\'s references live', () => {
+    const data = { tables: [{ table: 'aura_effects' }], rows: [row('a', 'aura_effects', 'Frost Ring')], warnings: [] };
+    const html = renderToString(h(PreviewSection, { data, decisions: {}, setDecisions: () => {} }));
+    expect(html).toContain('rename — entities&#x27; aura lists will follow');
+    expect(html).not.toContain('worlds/biomes');
+    const ent = { tables: [{ table: 'entity_types' }], rows: [row('b', 'entity_types', 'Goblin')], warnings: [] };
+    expect(renderToString(h(PreviewSection, { data: ent, decisions: {}, setDecisions: () => {} })))
+      .toContain('rename — references in worlds/biomes will follow');
+  });
+});

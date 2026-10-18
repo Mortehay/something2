@@ -5,7 +5,7 @@ import { useMemo, useState } from 'react';
 import styled from 'styled-components';
 import {
   KINDS, kindLabel, allowedDecisions, bulkSet, decisionLabel,
-  warningText, warningIsError, groupRowsByTable, isRename,
+  warningText, warningIsError, groupRowsByTable, renameNote,
 } from './seedExportModel.js';
 import { Btn, Muted } from './seedUi.jsx';
 
@@ -111,7 +111,7 @@ export default function PreviewSection({ data, decisions, setDecisions }) {
                     {r.fields.map((f) => (
                       <Mono key={f.name}>{f.name}: <Old>{show(f.local)}</Old> → <New>{show(f.git)}</New></Mono>
                     ))}
-                    {isRename(r) && <Muted>rename — references in worlds/biomes will follow</Muted>}
+                    {renameNote(r) && <Muted>{renameNote(r)}</Muted>}
                     {r.blockedReason && <Muted>{r.blockedReason}</Muted>}
                   </div>
                   <Seg>
