@@ -20,6 +20,7 @@ import MapsAdmin from "./games/something2/MapsAdmin";
 import BiomesAdmin from "./games/something2/BiomesAdmin";
 import MapGraphAdmin from "./games/something2/MapGraphAdmin";
 import WorldGenAdmin from "./games/something2/WorldGenAdmin";
+import SeedExportAdmin from "./games/something2/SeedExportAdmin";
 import SettingsAdmin from "./games/something2/SettingsAdmin";
 import PlayerWorldMap from "./games/something2/PlayerWorldMap";
 import CreatureBehaviorsAdmin from "./games/something2/CreatureBehaviorsAdmin";
@@ -78,6 +79,7 @@ function App() {
                       <Route path="art" element={<ArtConsoleAdmin />} />
                       <Route path="sprites" element={<SpriteConsoleAdmin />} />
                       <Route path="audio" element={<AudioAdmin />} />
+                      <Route path="seed-export" element={<SeedExportAdmin />} />
                       <Route path="settings" element={<SettingsAdmin />} />
                     </Route>
                   </Route>
