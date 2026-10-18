@@ -421,12 +421,13 @@ dbTest('git row whose natural key a kept local row holds is blocked: conflict', 
   assert.strictEqual(d2.rows.find((r) => r.syncUuid === b.sync_uuid).kind, 'only_here');
   const row2 = d2.rows.find((r) => r.syncUuid === clash.sync_uuid);
   assert.strictEqual(row2.blockedReason, 'key already used by a local row');
-  assert.strictEqual(row2.defaultDecision, 'local');
+  assert.strictEqual(row2.defaultDecision, null, 'a key clash is red: explicit decision required');
 
   const uuids = [a.sync_uuid, b.sync_uuid, clash.sync_uuid];
   const beforeQ = await questState(pool);
   const beforeB = await baselineState(pool, uuids);
   const runs = await seedRunCount(pool);
+  await assert.rejects(applySeed(pool, 'quests', {}), refused('undecided', [clash.sync_uuid]));
   await assert.rejects(applySeed(pool, 'quests', { [clash.sync_uuid]: 'git' }), refused('conflict', [clash.sync_uuid]));
   await assert.rejects(applySeed(pool, 'quests', { [clash.sync_uuid]: 'git', [b.sync_uuid]: 'local' }),
     refused('conflict', [clash.sync_uuid]));
@@ -434,9 +435,19 @@ dbTest('git row whose natural key a kept local row holds is blocked: conflict', 
   assert.deepStrictEqual(await baselineState(pool, uuids), beforeB);
   assert.strictEqual(await seedRunCount(pool), runs, 'a refusal records no run');
 
-  // Deleting the holder in the same seed frees the key.
+  // Explicit 'local' acknowledges git's row: B = hG, next diff deleted_here
+  // (still a clash while the holder stays, so still red).
+  const kept = await apply(pool, 'quests', { [clash.sync_uuid]: 'local' });
+  assert.deepStrictEqual(kept.summary, { updated: 1, created: 0, deleted: 0, kept: 2, adopted: 0 });
+  assert.strictEqual(await baselineOf(pool, 'quests', clash.sync_uuid), rowHash(clash));
+  const d3 = await onlySxListed(pool, 'quests');
+  const row3 = d3.rows.find((r) => r.syncUuid === clash.sync_uuid);
+  assert.deepStrictEqual([row3.kind, row3.blockedReason, row3.defaultDecision],
+    ['deleted_here', 'key already used by a local row', null]);
+
+  // Deleting the holder in the same seed frees the key: explicit git inserts.
   const res = await apply(pool, 'quests', { [b.sync_uuid]: 'delete', [clash.sync_uuid]: 'git' });
-  assert.deepStrictEqual(res.summary, { updated: 1, created: 1, deleted: 1, kept: 0, adopted: 0 });
+  assert.deepStrictEqual(res.summary, { updated: 0, created: 1, deleted: 1, kept: 0, adopted: 0 });
   assert.deepStrictEqual((await questState(pool)).map((r) => [r.key, r.title, r.sync_uuid]),
     [['sx_a', 'sx git a', a.sync_uuid], ['sx_b', 'sx clash', clash.sync_uuid]]);
 });
@@ -749,7 +760,7 @@ dbTest('lock wait past lock_timeout refuses busy (apply and export)', async (t, 
   const release = await heldSeedLock(pool);
   const runs = (await pool.query('SELECT count(*)::int AS n FROM seed_export_runs')).rows[0].n;
   try {
-    await assert.rejects(applySeed(pool, 'quests', {}), refused('busy'));
+    await assert.rejects(applySeed(pool, 'quests', {}), (e) => refused('busy')(e) && /open edit of this table is in progress/.test(e.message));
     await assert.rejects(exportGroup(pool, 'quests'), refused('busy'));
   } finally {
     await release();

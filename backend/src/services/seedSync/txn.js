@@ -20,7 +20,7 @@ async function beginLocked(client) {
 // lock_timeout expired (55P03) -> a refusal the route can show, not a 500.
 function mapLockError(e) {
   if (e && e.code === '55P03') {
-    return new SyncRefused('busy', 'another seed/export is running', { pgCode: e.code });
+    return new SyncRefused('busy', 'another seed/export or an open edit of this table is in progress — try again', { pgCode: e.code });
   }
   return e;
 }

@@ -86,7 +86,9 @@ const deletableUuids = (diff) => diff.rows.filter((r) => DELETABLE.has(r.kind)).
 //  - A referenced deletable row is blocked; a blocked deleted_in_git defaults
 //    to 'local' (keep) instead of 'delete'.
 //  - A new/deleted_here git row whose natural key is held by a local row that
-//    this seed does NOT delete is blocked and defaults to 'local'. (Adopt
+//    this seed does NOT delete is blocked and red (defaultDecision null): an
+//    explicit decision is required -- 'local' sets B = hG, so the next export
+//    drops the other PC's row, which must be a deliberate choice. (Adopt
 //    consumes the same-key local row, so a new/deleted_here row's key holder
 //    is never adopted in the same seed.)
 function annotate(cd, refReasons, decisions) {
@@ -104,7 +106,7 @@ function annotate(cd, refReasons, decisions) {
     const holder = cd.localByKey.get(cd.git.get(r.syncUuid).row[group.naturalKey]);
     if (holder && !deleting.has(holder.row.sync_uuid)) {
       r.blockedReason = KEY_CLASH_REASON;
-      r.defaultDecision = 'local';
+      r.defaultDecision = null;
     }
   }
   return diff.rows.map((row) => ({ row, decision: decisionOf(row) }));
