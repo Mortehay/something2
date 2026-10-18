@@ -73,6 +73,9 @@ export function exportAllPlan(groups) {
 // order.
 export const seedAllGroups = (groups) => groups.filter((g) => g.inGit && !seedBlockReason(g));
 
+// 1 row / 2 rows. `plural` overrides the default +s.
+export const pluralize = (n, word, plural) => `${n} ${n === 1 ? word : (plural || `${word}s`)}`;
+
 export const HISTORY_PER_PAGE = 15;
 export const historyPageCount = (total, perPage = HISTORY_PER_PAGE) => (
   Math.max(1, Math.ceil((Number(total) || 0) / perPage)));

@@ -5,7 +5,7 @@ import { useState } from 'react';
 import styled from 'styled-components';
 import { useSeedPreview, useApplySeed } from './useSeedExport.js';
 import {
-  initialDecisions, applyGate, previewSignature, seedRequestBody, seedAllGate,
+  initialDecisions, applyGate, pluralize, previewSignature, seedRequestBody, seedAllGate,
 } from './seedExportModel.js';
 import { Btn, Muted, Modal } from './seedUi.jsx';
 import PreviewSection from './SeedPreviewSection.jsx';
@@ -71,12 +71,12 @@ function PreviewBody({ group, data, onClose, reload }) {
         <Foot>
           <Muted>
             Will write: {gate.summary.updated} updates, {gate.summary.created} creates, {gate.summary.deleted} deletes, {gate.summary.kept} kept, {gate.summary.adopted} adopted
-            {gate.undecided > 0 && ` · ${gate.undecided} rows still need a choice`}
+            {gate.undecided > 0 && ` · ${gate.undecided === 1 ? '1 row still needs' : `${gate.undecided} rows still need`} a choice`}
           </Muted>
           <span style={{ display: 'flex', gap: 6 }}>
             <Btn onClick={onClose}>Cancel</Btn>
             <Btn $primary disabled={!canApply || apply.isPending} onClick={submit}>
-              {gate.canApply ? 'Apply' : `Apply (choose ${gate.undecided} red rows first)`}
+              {gate.canApply ? 'Apply' : `Apply (choose ${pluralize(gate.undecided, 'red row')} first)`}
             </Btn>
           </span>
         </Foot>

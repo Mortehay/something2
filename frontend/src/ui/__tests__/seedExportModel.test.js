@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   statusBadge, initialDecisions, bulkSet, applyGate, allowedDecisions, kindLabel, exportBlocked, previewSignature,
   exportBlockReason, seedBlockReason, decisionLabel, seedRequestBody,
-  seedButtonLabel, exportAllPlan, seedAllGroups, historyPageCount, exportAllMessage, seedAllGate,
+  seedButtonLabel, exportAllPlan, seedAllGroups, historyPageCount, exportAllMessage, seedAllGate, pluralize,
 } from '../../games/something2/seedExportModel.js';
 
 const row = (syncUuid, kind, defaultDecision, blockedReason = null) => (
@@ -250,5 +250,14 @@ describe('historyPageCount', () => {
     expect(historyPageCount(15, 15)).toBe(1);
     expect(historyPageCount(16, 15)).toBe(2);
     expect(historyPageCount(undefined, 15)).toBe(1);
+  });
+});
+
+describe('pluralize', () => {
+  it('uses singular only for 1', () => {
+    expect(pluralize(1, 'red row')).toBe('1 red row');
+    expect(pluralize(0, 'group')).toBe('0 groups');
+    expect(pluralize(3, 'group')).toBe('3 groups');
+    expect(pluralize(2, 'entry', 'entries')).toBe('2 entries');
   });
 });

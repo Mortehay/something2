@@ -22,6 +22,7 @@ export default function SeedHistoryTab({ groups }) {
   const runs = useSeedRuns({ group, page, perPage: HISTORY_PER_PAGE });
   const total = runs.data?.total ?? 0;
   const pages = historyPageCount(total, HISTORY_PER_PAGE);
+  const labelOf = new Map(groups.map((g) => [g.id, g.label]));
   const list = runs.data?.runs || [];
 
   return (
@@ -43,7 +44,7 @@ export default function SeedHistoryTab({ groups }) {
           <tbody>
             {list.map((r) => (
               <tr key={r.id}>
-                <td>{fmtTime(r.started_at)}</td><td>{r.group_id}</td><td>{r.action}</td>
+                <td>{fmtTime(r.started_at)}</td><td>{labelOf.get(r.group_id) || r.group_id}</td><td>{r.action}</td>
                 <td>{r.status}</td><td>{r.pc_label}</td>
                 <td>{r.error ? <span style={{ color: 'var(--s2-danger)' }}>{r.error}</span>
                   : Object.entries(r.summary || {}).map(([k, v]) => `${k} ${v}`).join(', ')}</td>

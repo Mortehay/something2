@@ -6,7 +6,7 @@ import { useState } from 'react';
 import styled from 'styled-components';
 import { useSeedPreviews, useApplyAll } from './useSeedExport.js';
 import {
-  initialDecisions, previewSignature, seedRequestBody, seedAllGate, applyGate,
+  initialDecisions, previewSignature, seedRequestBody, seedAllGate, applyGate, pluralize,
 } from './seedExportModel.js';
 import { Btn, Muted, Modal } from './seedUi.jsx';
 import PreviewSection from './SeedPreviewSection.jsx';
@@ -93,6 +93,11 @@ export default function SeedAllModal({ groups, onClose }) {
     });
   };
 
+  // Back from the result panel: reload every group not yet seeded.
+  const reviewAgain = () => {
+    setResults(null);
+    groups.forEach((g, i) => { if (!done.has(g.id)) queries[i].refetch(); });
+  };
   const okRes = (results || []).filter((r) => r.ok);
   const badRes = (results || []).filter((r) => !r.ok);
   return (
@@ -113,25 +118,35 @@ export default function SeedAllModal({ groups, onClose }) {
             ))}
           </Res>
         )}
-        {groups.map((g, i) => (
+        {!results && groups.map((g, i) => (
           <Section key={g.id} group={g} query={queries[i]} done={done.has(g.id)}
             state={states[g.id]} setState={setState}
             open={!closed.has(g.id)}
             toggle={() => setClosed((c) => { const n = new Set(c); if (n.has(g.id)) n.delete(g.id); else n.add(g.id); return n; })} />
         ))}
-        <Foot>
-          <Muted>
-            {gate.rows === 0 && !loading ? 'Nothing to change — this PC already matches git.' : `${gate.rows} rows across ${sections.filter((s) => s.rows.length).length} groups`}
-            {gate.undecided > 0 && ` · ${gate.undecided} rows still need a choice`}
-            {failed.length > 0 && ` · Not applied: ${failed.map((g) => g.label).join(', ')} — preview failed to load`}
-          </Muted>
-          <span style={{ display: 'flex', gap: 6 }}>
-            <Btn onClick={onClose}>{results ? 'Close' : 'Cancel'}</Btn>
-            <Btn $primary disabled={!gate.canApply || loading || apply.isPending} onClick={submit}>
-              {gate.undecided > 0 ? `Apply (choose ${gate.undecided} red rows first)` : 'Apply all'}
-            </Btn>
-          </span>
-        </Foot>
+        {results ? (
+          <Foot>
+            <span />
+            <span style={{ display: 'flex', gap: 6 }}>
+              {badRes.length > 0 && <Btn onClick={reviewAgain}>Review again</Btn>}
+              <Btn $primary onClick={onClose}>Close</Btn>
+            </span>
+          </Foot>
+        ) : (
+          <Foot>
+            <Muted>
+              {gate.rows === 0 && !loading ? 'Nothing to change — this PC already matches git.' : `${pluralize(gate.rows, 'row')} across ${pluralize(sections.filter((s) => s.rows.length).length, 'group')}`}
+              {gate.undecided > 0 && ` · ${gate.undecided === 1 ? '1 row still needs' : `${gate.undecided} rows still need`} a choice`}
+              {failed.length > 0 && ` · Not applied: ${failed.map((g) => g.label).join(', ')} — preview failed to load`}
+            </Muted>
+            <span style={{ display: 'flex', gap: 6 }}>
+              <Btn onClick={onClose}>Cancel</Btn>
+              <Btn $primary disabled={!gate.canApply || loading || apply.isPending} onClick={submit}>
+                {gate.undecided > 0 ? `Apply (choose ${pluralize(gate.undecided, 'red row')} first)` : 'Apply all'}
+              </Btn>
+            </span>
+          </Foot>
+        )}
       </>
     </Modal>
   );

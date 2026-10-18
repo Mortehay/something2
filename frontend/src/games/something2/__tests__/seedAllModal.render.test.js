@@ -23,7 +23,7 @@ describe('SeedAllModal render', () => {
     expect(html).toContain('Quests');
     expect(html).toContain('nothing to change');
     expect(html).toContain('Nothing to change — this PC already matches git.');
-    expect(html).toContain('choose 1 red rows first');
+    expect(html).toContain('choose 1 red row first');
   });
   it('lists a group whose preview failed to load as not applied', () => {
     queries = [q({ rows: [], signature: 's1' }), q(undefined, { error: new Error('x') })];
