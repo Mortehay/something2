@@ -49,7 +49,7 @@ function PreviewBody({ group, data, onClose, reload }) {
   const canApply = seedAllGate([{ rows, decisions }]).canApply;
 
   const submit = () => apply.mutate(
-    { groupId: group.id, body: seedRequestBody(decisions, data) },
+    { groupId: group.id, label: group.label, body: seedRequestBody(decisions, data) },
     {
       onSuccess: onClose,
       // The diff moved under the preview: show the fresh one.

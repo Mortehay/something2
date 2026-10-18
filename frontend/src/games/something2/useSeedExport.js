@@ -5,6 +5,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import toast from "react-hot-toast";
 import { authHeaders, apiFetch } from "./src/js/net/auth.js";
 import { API_URL } from "../../config.js";
+import { refusalText } from "./seedExportModel.js";
 
 const BASE = `${API_URL}/api/seed-export`;
 export const GROUPS_KEY = ["seed-groups"];
@@ -12,7 +13,7 @@ export const RUNS_KEY = ["seed-runs"];
 export const RESTART_KEY = ["seed-restart"];
 
 // The API's `error` text plus its `code`, so a refusal says which rule fired.
-async function call(path, { method = "GET", body } = {}) {
+async function call(path, { method = "GET", body, label } = {}) {
   const res = await apiFetch(`${BASE}${path}`, {
     method,
     headers: authHeaders(),
@@ -24,7 +25,8 @@ async function call(path, { method = "GET", body } = {}) {
     const d = json.details || {};
     const n = Array.isArray(d.uuids) ? d.uuids.length : null;
     const extra = [json.code, n ? `${n} row${n === 1 ? '' : 's'}` : null].filter(Boolean).join(': ');
-    const err = new Error(extra ? `${text} (${extra})` : text);
+    const err = new Error(refusalText(label || 'this group', { code: json.code, details: d }) || (extra ? `${text} (${extra})` : text));
+    err.details = d;
     err.code = json.code;
     err.file = json.file;
     err.status = res.status;
@@ -107,7 +109,7 @@ export const useSeedMeta = () => useQuery({
 
 // `body` is seedRequestBody(decisions, preview): decisions + preview signature.
 export const useApplySeed = () => useInvalidating(
-  ({ groupId, body }) => call(`/groups/${encodeURIComponent(groupId)}/seed`, { method: "POST", body }),
+  ({ groupId, body, label }) => call(`/groups/${encodeURIComponent(groupId)}/seed`, { method: "POST", body, label }),
   (r) => {
     const s = r.summary || {};
     toast.success(`Seeded: ${s.updated || 0} updated, ${s.created || 0} created, ${s.deleted || 0} deleted, ${s.kept || 0} kept, ${s.adopted || 0} adopted`);
@@ -156,7 +158,7 @@ export function useApplyAll() {
       const out = [];
       for (const it of items) {
         try {
-          const r = await call(`/groups/${encodeURIComponent(it.id)}/seed`, { method: "POST", body: it.body });
+          const r = await call(`/groups/${encodeURIComponent(it.id)}/seed`, { method: "POST", body: it.body, label: it.label });
           out.push({ id: it.id, label: it.label, ok: true, summary: r.summary || {} });
         } catch (err) {
           out.push({ id: it.id, label: it.label, ok: false, code: err.code, error: err.message });

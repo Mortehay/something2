@@ -185,3 +185,58 @@ export function applyGate(rows, decisions) {
 // preview the admin decided on; the server refuses (stale_preview) if the
 // diff moved since.
 export const seedRequestBody = (decisions, preview) => ({ decisions, signature: preview.signature });
+
+// SOMET-639. Multi-table groups: sub-headings, warning copy, refusal toasts.
+const TABLE_LABELS = {
+  item_types: 'Items', affix_types: 'Affixes', vfx_effects: 'VFX effects', creature_skills: 'Creature skills',
+  aura_effects: 'Auras', creature_behaviors: 'Behaviors', creature_abilities: 'Abilities',
+  creature_behavior_skills: 'Behavior skills', behavior_drops: 'Behavior drops', chest_loot: 'Chest loot',
+  entity_types: 'Entities', creature_drops: 'Drops', class_loadouts: 'Class loadouts', biomes: 'Biomes',
+  passive_nodes: 'Nodes', passive_edges: 'Edges', game_settings: 'Settings', tile_types: 'Tile types',
+  quests: 'Quests', ai_providers: 'AI providers',
+};
+export const tableLabel = (table) => TABLE_LABELS[table] || String(table);
+
+const SCHEMA_OLDER = 'This export is from an older database schema; fields added since then will be cleared on rows you take from git.';
+// Preview warnings are { code, ... } objects (backend seedSync applySeed).
+export function warningText(w) {
+  const code = w && typeof w === 'object' ? w.code : w;
+  switch (code) {
+    case 'schema_older': return SCHEMA_OLDER;
+    case 'dangling_name': return `${w.key}: ${w.column} '${w.name}' does not exist here`;
+    case 'missing_ref': return `${w.key}: ${w.column} points to a ${tableLabel(w.target)} row that doesn't exist here — it will be refused`;
+    case 'invalid_value': return `Setting ${w.key}: ${w.error} — it will be refused`;
+    default: return String(code);
+  }
+}
+// Warnings that predict a refusal at Apply are shown as errors.
+export const warningIsError = (w) => Boolean(w) && (w.code === 'missing_ref' || w.code === 'invalid_value');
+
+// Toast text for a 409 refusal, or null when the code has no special copy.
+// err: { code, details }.
+export function refusalText(groupLabel, err) {
+  const d = (err && err.details) || {};
+  if (err && err.code === 'missing_ref' && Array.isArray(d.refs) && d.refs.length) {
+    const n = d.refs.length;
+    const r = d.refs[0];
+    return `Can't seed ${groupLabel}: ${pluralize(n, 'reference')} to missing rows (e.g. ${r.table}/${r.key} → ${r.target})`;
+  }
+  if (err && err.code === 'invalid_value' && d.key !== undefined) {
+    return `Can't seed ${groupLabel}: setting ${d.key} is invalid (${d.error})`;
+  }
+  return null;
+}
+
+// Rows -> [{ table, label, rows }] in the group's table order (the diff's
+// `tables`); tables with no rows are dropped, unknown tables sort last in
+// first-seen order.
+export function groupRowsByTable(rows, tables) {
+  const order = (tables || []).map((t) => t.table);
+  const by = new Map();
+  for (const r of rows) {
+    if (!by.has(r.table)) by.set(r.table, []);
+    by.get(r.table).push(r);
+  }
+  const seq = [...order.filter((t) => by.has(t)), ...[...by.keys()].filter((t) => !order.includes(t))];
+  return seq.map((table) => ({ table, label: tableLabel(table), rows: by.get(table) }));
+}

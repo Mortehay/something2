@@ -3,7 +3,7 @@
 import { Link } from 'react-router-dom';
 import styled from 'styled-components';
 import { useSeedPreview } from './useSeedExport.js';
-import { statusBadge, kindLabel, exportBlockReason, seedBlockReason } from './seedExportModel.js';
+import { statusBadge, kindLabel, tableLabel, exportBlockReason, seedBlockReason } from './seedExportModel.js';
 import { Btn, Badge, Muted, Modal, fmtTime } from './seedUi.jsx';
 
 const Table = styled.table`
@@ -30,6 +30,8 @@ export default function SeedStatusPopup({ group, onClose, onExport, onSeed, expo
   const wantsRows = group.status === 'local_edits' || group.status === 'git_newer';
   const preview = useSeedPreview(group.id, wantsRows);
   const rows = preview.data?.rows || [];
+  const tables = preview.data?.tables || [];
+  const multi = tables.length > 1;
   const exportWhy = exportBlockReason(group);
   const seedWhy = seedBlockReason(group);
 
@@ -54,18 +56,28 @@ export default function SeedStatusPopup({ group, onClose, onExport, onSeed, expo
         {wantsRows && preview.error && <Err>{preview.error.message}</Err>}
         {wantsRows && !preview.isLoading && !preview.error && rows.length > 0 && (
           <Table>
-            <thead><tr><th>Row</th><th>What</th><th>Fields</th></tr></thead>
+            <thead><tr>{multi && <th>Table</th>}<th>Row</th><th>What</th><th>Fields</th></tr></thead>
             <tbody>
               {rows.slice(0, MAX_ROWS).map((r) => (
                 <tr key={r.syncUuid}>
+                  {multi && <td>{tableLabel(r.table)}</td>}
                   <td>{String(r.key)}</td>
                   <td>{kindLabel(r.kind)}</td>
                   <td>{r.fields.map((f) => f.name).join(', ')}</td>
                 </tr>
               ))}
-              {rows.length > MAX_ROWS && <tr><td colSpan={3}><Muted>+ {rows.length - MAX_ROWS} more…</Muted></td></tr>}
+              {rows.length > MAX_ROWS && <tr><td colSpan={multi ? 4 : 3}><Muted>+ {rows.length - MAX_ROWS} more…</Muted></td></tr>}
             </tbody>
           </Table>
+        )}
+
+        {wantsRows && multi && !preview.isLoading && (
+          <Muted>
+            {tables.map((t) => {
+              const n = Object.values(t.counts || {}).reduce((a, b) => a + b, 0) - (t.counts?.in_sync || 0);
+              return `${tableLabel(t.table)}: ${n}`;
+            }).join(' · ')}
+          </Muted>
         )}
 
         {group.status === 'git_newer' && group.inGit && (

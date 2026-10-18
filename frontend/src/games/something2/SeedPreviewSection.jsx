@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react';
 import styled from 'styled-components';
 import {
   KINDS, kindLabel, allowedDecisions, bulkSet, decisionLabel,
+  warningText, warningIsError, groupRowsByTable,
 } from './seedExportModel.js';
 import { Btn, Muted } from './seedUi.jsx';
 
@@ -42,20 +43,12 @@ const SegBtn = styled.button`
   color: ${p => (p.$on ? 'var(--s2-on-accent)' : 'var(--s2-text)')};
   &:disabled { opacity: 0.4; cursor: not-allowed; }
 `;
-export const Warn = styled.p`color: var(--s2-warning); font-size: 1.4rem; margin: 0.4rem 0;`;
+export const Warn = styled.p`color: ${p => (p.$err ? 'var(--s2-danger)' : 'var(--s2-warning)')}; font-size: 1.4rem; margin: 0.4rem 0;`;
+const TableHead = styled.h4`margin: 0.9rem 0 0.2rem; font-size: 1.3rem; color: var(--s2-text-muted); text-transform: uppercase; letter-spacing: 0.04em;`;
 
-const WARNINGS = {
-  schema_older: 'This export is from an older database schema; fields added since then will be cleared on rows you take from git.',
-};
-// Preview warnings are { code, ... } objects (backend seedSync applySeed).
-// Unknown codes show the code itself; Task 9 refines the dangling_name text.
-export function warningText(w) {
-  if (w && w.code === 'dangling_name') return `${w.key}: ${w.column} '${w.name}' does not exist here`;
-  const code = w && typeof w === 'object' ? w.code : w;
-  return WARNINGS[code] || String(code);
-}
+export { warningText };
 const warningKey = (w) => (w && typeof w === 'object'
-  ? `${w.code}:${w.table || ''}:${w.syncUuid || ''}:${w.column || ''}:${w.name || ''}` : String(w));
+  ? `${w.code}:${w.table || ''}:${w.syncUuid || ''}:${w.key || ''}:${w.column || ''}:${w.name || ''}:${w.target || ''}` : String(w));
 export const NOTHING_TO_CHANGE = 'Nothing to change — this PC already matches git.';
 
 const show = (v) => (v === undefined ? '—' : typeof v === 'string' ? v : JSON.stringify(v));
@@ -79,11 +72,13 @@ export default function PreviewSection({ data, decisions, setDecisions }) {
   const allPicked = visible.length > 0 && visible.every((r) => picked.has(r.syncUuid));
   // Only selected rows that are visible under the active filter.
   const pickedVisible = visible.filter((r) => picked.has(r.syncUuid)).map((r) => r.syncUuid);
+  const sections = useMemo(() => groupRowsByTable(visible, data.tables), [visible, data.tables]);
+  const multi = (data.tables || []).length > 1 || sections.length > 1;
   const bulk = (d) => setDecisions((cur) => bulkSet(cur, pickedVisible, d, rows));
 
   return (
     <>
-      {(data.warnings || []).map((w) => <Warn key={warningKey(w)}>{warningText(w)}</Warn>)}
+      {(data.warnings || []).map((w) => <Warn key={warningKey(w)} $err={warningIsError(w)}>{warningText(w)}</Warn>)}
       {rows.length === 0 && <p>{NOTHING_TO_CHANGE}</p>}
       {rows.length > 0 && (
         <>
@@ -104,7 +99,10 @@ export default function PreviewSection({ data, decisions, setDecisions }) {
             <Btn disabled={!pickedVisible.length} onClick={() => bulk('delete')}>Delete local</Btn>
             <Muted style={{ marginLeft: 'auto' }}>Red rows have no default: you must choose.</Muted>
           </Bulk>
-          {visible.map((r) => (
+          {sections.map((sec) => (
+            <section key={sec.table}>
+              {multi && <TableHead>{sec.label}</TableHead>}
+              {sec.rows.map((r) => (
             <RowBox key={r.syncUuid} $red={r.defaultDecision == null && !decisions[r.syncUuid]}>
               <input type="checkbox" checked={picked.has(r.syncUuid)} onChange={() => togglePick(r.syncUuid)}
                 aria-label={`select ${r.key}`} />
@@ -126,6 +124,8 @@ export default function PreviewSection({ data, decisions, setDecisions }) {
                 ))}
               </Seg>
             </RowBox>
+              ))}
+            </section>
           ))}
         </>
       )}

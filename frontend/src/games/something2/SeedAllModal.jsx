@@ -112,7 +112,7 @@ export default function SeedAllModal({ groups, onClose }) {
             {failed.map((g) => <div key={g.id} style={{ color: 'var(--s2-danger)' }}>Not applied: {g.label} — preview failed to load</div>)}
             {badRes.map((r) => (
               <div key={r.id} style={{ color: 'var(--s2-danger)' }}>
-                Refused: {r.label} — {r.code ? `${r.code}: ` : ''}{r.error}
+                Refused: {r.label} — {r.code && r.code !== 'missing_ref' && r.code !== 'invalid_value' ? `${r.code}: ` : ''}{r.error}
                 {r.code === 'stale_preview' && ' (preview reloaded, review and apply again)'}
               </div>
             ))}
