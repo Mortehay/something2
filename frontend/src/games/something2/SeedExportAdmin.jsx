@@ -4,9 +4,11 @@
 // backend; this file fetches and renders.
 import { useState } from 'react';
 import styled from 'styled-components';
-import { useSeedGroups, useSeedRuns, useRestartStatus, useExportGroup, useRestartBackend } from './useSeedExport.js';
-import { statusBadge, exportBlocked as isExportBlocked } from './seedExportModel.js';
-import { Btn, Badge, Muted, Modal, fmtTime } from './seedUi.jsx';
+import {
+  useSeedGroups, useSeedRuns, useRestartStatus, useExportGroup, useRestartBackend, useSeedMeta,
+} from './useSeedExport.js';
+import { statusBadge, exportBlockReason, seedBlockReason } from './seedExportModel.js';
+import { Btn, Badge, Muted, Modal, fmtTime, StatusHead, PcLabelHint } from './seedUi.jsx';
 import AdminLoading from './AdminLoading.jsx';
 import SeedStatusPopup from './SeedStatusPopup.jsx';
 import SeedPreviewModal from './SeedPreviewModal.jsx';
@@ -34,6 +36,7 @@ export default function SeedExportAdmin() {
   const groups = useSeedGroups();
   const runs = useSeedRuns();
   const restart = useRestartStatus();
+  const meta = useSeedMeta();
   const exportGroup = useExportGroup();
   const restartBackend = useRestartBackend();
   const [popupId, setPopupId] = useState(null);
@@ -53,6 +56,7 @@ export default function SeedExportAdmin() {
     <Page>
       <h2 style={{ marginTop: 0 }}>Seed / Export</h2>
       <Muted>Export writes this PC's data to the seed files in git. Seed reads them back after a pull, with a preview.</Muted>
+      <PcLabelHint meta={meta.data} />
 
       {restart.data?.required && (
         <Banner>
@@ -63,12 +67,13 @@ export default function SeedExportAdmin() {
 
       <Table>
         <thead>
-          <tr><th>Group</th><th>Last export (this PC)</th><th>In git (time · PC)</th><th>Last seed (this PC)</th><th>Status</th><th /></tr>
+          <tr><th>Group</th><th>Last export (this PC)</th><th>In git (time · PC)</th><th>Last seed (this PC)</th><th><StatusHead restartRequired={Boolean(restart.data?.required)} /></th><th /></tr>
         </thead>
         <tbody>
           {list.map((g) => {
             const badge = statusBadge(g);
-            const exportBlocked = isExportBlocked(g);
+            const exportWhy = exportBlockReason(g);
+            const seedWhy = seedBlockReason(g);
             return (
               <tr key={g.id}>
                 <td><b>{g.label}</b></td>
@@ -77,10 +82,10 @@ export default function SeedExportAdmin() {
                 <td>{runLine(g.lastSeed)}</td>
                 <td><Badge as="button" $tone={badge.tone} onClick={() => setPopupId(g.id)}>{badge.label}</Badge></td>
                 <td><Acts>
-                  <Btn disabled={exportBlocked || exportGroup.isPending || g.status === 'bad_file'}
-                    title={exportBlocked ? 'seed (preview) first' : undefined}
+                  <Btn disabled={Boolean(exportWhy) || exportGroup.isPending}
+                    title={exportWhy || undefined}
                     onClick={() => doExport(g)}>Export</Btn>
-                  <Btn disabled={!g.inGit} title={g.inGit ? undefined : g.status === 'bad_file' ? 'fix or delete the export file first' : 'nothing in git yet'}
+                  <Btn disabled={Boolean(seedWhy)} title={seedWhy || undefined}
                     onClick={() => setPreviewId(g.id)}>Seed…</Btn>
                 </Acts></td>
               </tr>

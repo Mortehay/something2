@@ -3,6 +3,10 @@
 // every decision (applySeed.js); this only keeps the UI from offering or
 // sending choices it would refuse.
 
+// The git file was exported from a newer database schema: both export and
+// seed are refused until this PC runs its migrations.
+const SCHEMA_NEWER = 'run migrations first';
+
 export function statusBadge(group) {
   switch (group.status) {
     case 'in_sync': return { label: 'in sync', tone: 'ok' };
@@ -18,13 +22,39 @@ export function statusBadge(group) {
       return { label: `${n} token${n === 1 ? '' : 's'} missing`, tone: 'warn' };
     }
     case 'bad_file': return { label: 'bad export file', tone: 'bad' };
+    case 'schema_newer': return { label: SCHEMA_NEWER, tone: 'bad' };
     default: return { label: String(group.status), tone: 'info' };
   }
 }
 
-// Export is refused server-side whenever git holds changes, even when the
-// badge says local edits (both can be true at once).
-export const exportBlocked = (group) => group.status === 'git_newer' || group.gitChanges > 0;
+// Why Export is disabled (its tooltip), or null. The server refuses export
+// whenever git holds changes, even when the badge says local edits (both can
+// be true at once), and over a newer-schema or unreadable file.
+export function exportBlockReason(group) {
+  if (group.status === 'schema_newer') return SCHEMA_NEWER;
+  if (group.status === 'bad_file') return 'fix or delete the export file first';
+  if (group.status === 'git_newer' || group.gitChanges > 0) return 'seed (preview) first';
+  return null;
+}
+export const exportBlocked = (group) => exportBlockReason(group) !== null;
+
+// Why Seed is disabled (its tooltip), or null.
+export function seedBlockReason(group) {
+  if (group.status === 'schema_newer') return SCHEMA_NEWER;
+  if (group.status === 'bad_file') return 'fix or delete the export file first';
+  if (!group.inGit) return 'nothing in git yet';
+  return null;
+}
+
+const DECISION_LABEL = { git: 'Take git', local: 'Keep local', delete: 'Delete local' };
+// Button copy per row kind: git-only rows are created, not taken; and keeping
+// "local" for a new row means skipping it, which the next export turns into
+// removing it from git.
+export function decisionLabel(row, d) {
+  if (row.kind === 'new' && d === 'local') return 'Skip (drops it from git on next export)';
+  if (d === 'git' && (row.kind === 'new' || row.kind === 'deleted_here')) return 'Create';
+  return DECISION_LABEL[d] || d;
+}
 
 const KIND_LABELS = {
   changed: 'changed',
@@ -53,6 +83,8 @@ export function allowedDecisions(row) {
 // Identity of a fetched preview. A refetch with the same content must not
 // reset the admin's decisions; a different diff must.
 export function previewSignature(groupId, data) {
+  // The server's signature covers kinds, defaults and blocked reasons.
+  if (data && typeof data.signature === 'string') return `${groupId}|${data.signature}`;
   const rows = (data && data.rows) || [];
   const head = data && data.header ? data.header.exported_at : '';
   return `${groupId}|${head}|${rows.map((r) => `${r.syncUuid}:${r.kind}:${r.blockedReason ? 1 : 0}`).join(',')}`;
@@ -90,3 +122,8 @@ export function applyGate(rows, decisions) {
   }
   return { canApply: undecided === 0, undecided, summary };
 }
+
+// POST body of an apply: the full decision map plus the signature of the
+// preview the admin decided on; the server refuses (stale_preview) if the
+// diff moved since.
+export const seedRequestBody = (decisions, preview) => ({ decisions, signature: preview.signature });

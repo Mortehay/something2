@@ -3,7 +3,7 @@
 import { Link } from 'react-router-dom';
 import styled from 'styled-components';
 import { useSeedPreview } from './useSeedExport.js';
-import { statusBadge, kindLabel, exportBlocked as isExportBlocked } from './seedExportModel.js';
+import { statusBadge, kindLabel, exportBlockReason, seedBlockReason } from './seedExportModel.js';
 import { Btn, Badge, Muted, Modal, fmtTime } from './seedUi.jsx';
 
 const Table = styled.table`
@@ -21,6 +21,7 @@ const WHY = {
   never_exported: () => 'Nothing in git yet. Export to start.',
   tokens_missing: () => 'Some rows need a token that never travels through git. Set them on this PC.',
   in_sync: () => 'This PC and git agree.',
+  schema_newer: (g) => `The file in git was exported from a newer database schema${g.inGit ? ` (${g.inGit.schema_version})` : ''}. Run migrations on this PC before seeding or exporting ${g.label}.`,
 };
 
 export default function SeedStatusPopup({ group, onClose, onExport, onSeed, exporting }) {
@@ -28,7 +29,8 @@ export default function SeedStatusPopup({ group, onClose, onExport, onSeed, expo
   const wantsRows = group.status === 'local_edits' || group.status === 'git_newer';
   const preview = useSeedPreview(group.id, wantsRows);
   const rows = preview.data?.rows || [];
-  const exportBlocked = isExportBlocked(group);
+  const exportWhy = exportBlockReason(group);
+  const seedWhy = seedBlockReason(group);
 
   return (
     <Modal onClose={onClose} label={`${group.label}: ${badge.label}`}>
@@ -74,10 +76,13 @@ export default function SeedStatusPopup({ group, onClose, onExport, onSeed, expo
 
         <Acts>
           {group.status === 'tokens_missing' && <Link to="/game/settings"><Btn as="span">Set token (AI Providers)</Btn></Link>}
-          {group.inGit && wantsRows && <Btn $primary={group.status === 'git_newer'} onClick={onSeed}>Seed {group.label} (preview)…</Btn>}
+          {group.inGit && wantsRows && (
+            <Btn $primary={group.status === 'git_newer'} disabled={Boolean(seedWhy)} title={seedWhy || undefined}
+              onClick={onSeed}>Seed {group.label} (preview)…</Btn>
+          )}
           {group.status !== 'bad_file' && (
-            <Btn $primary={!exportBlocked} disabled={exportBlocked || exporting}
-              title={exportBlocked ? 'seed (preview) first' : undefined} onClick={onExport}>
+            <Btn $primary={!exportWhy} disabled={Boolean(exportWhy) || exporting}
+              title={exportWhy || undefined} onClick={onExport}>
               Export {group.label}
             </Btn>
           )}

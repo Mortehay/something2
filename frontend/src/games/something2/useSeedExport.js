@@ -85,8 +85,15 @@ export const useExportGroup = () => useInvalidating(
   (r) => toast.success(`Exported ${r.rowCount} row${r.rowCount === 1 ? "" : "s"}`),
 );
 
+export const useSeedMeta = () => useQuery({
+  queryKey: ["seed-meta"],
+  queryFn: () => call("/meta"),
+  staleTime: Infinity,
+});
+
+// `body` is seedRequestBody(decisions, preview): decisions + preview signature.
 export const useApplySeed = () => useInvalidating(
-  ({ groupId, decisions }) => call(`/groups/${encodeURIComponent(groupId)}/seed`, { method: "POST", body: { decisions } }),
+  ({ groupId, body }) => call(`/groups/${encodeURIComponent(groupId)}/seed`, { method: "POST", body }),
   (r) => {
     const s = r.summary || {};
     toast.success(`Seeded: ${s.updated || 0} updated, ${s.created || 0} created, ${s.deleted || 0} deleted, ${s.kept || 0} kept, ${s.adopted || 0} adopted`);

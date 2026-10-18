@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   statusBadge, initialDecisions, bulkSet, applyGate, allowedDecisions, kindLabel, exportBlocked, previewSignature,
+  exportBlockReason, seedBlockReason, decisionLabel, seedRequestBody,
 } from '../../games/something2/seedExportModel.js';
 
 const row = (syncUuid, kind, defaultDecision, blockedReason = null) => (
@@ -125,5 +126,51 @@ describe('allowedDecisions / kindLabel', () => {
     expect(kindLabel('new')).toBe('new from git');
     expect(kindLabel('deleted_in_git')).toBe('deleted in git');
     expect(kindLabel('only_here')).toBe('only on this PC');
+  });
+});
+
+describe('schema_newer', () => {
+  const g = { status: 'schema_newer', gitChanges: 0, localEdits: 0, inGit: { schema_version: 'v9' } };
+  it('badge says run migrations first, tone bad', () => {
+    expect(statusBadge(g)).toEqual({ label: 'run migrations first', tone: 'bad' });
+  });
+  it('disables Export and Seed with that tooltip', () => {
+    expect(exportBlockReason(g)).toBe('run migrations first');
+    expect(exportBlocked(g)).toBe(true);
+    expect(seedBlockReason(g)).toBe('run migrations first');
+  });
+  it('other block reasons', () => {
+    expect(exportBlockReason({ status: 'git_newer', gitChanges: 1 })).toBe('seed (preview) first');
+    expect(exportBlockReason({ status: 'bad_file', gitChanges: 0 })).toBe('fix or delete the export file first');
+    expect(exportBlockReason({ status: 'local_edits', gitChanges: 0 })).toBe(null);
+    expect(seedBlockReason({ status: 'never_exported', inGit: null })).toBe('nothing in git yet');
+    expect(seedBlockReason({ status: 'bad_file', inGit: null })).toBe('fix or delete the export file first');
+    expect(seedBlockReason({ status: 'git_newer', inGit: {} })).toBe(null);
+  });
+});
+
+describe('decisionLabel', () => {
+  it('says what keeping local means for a new row', () => {
+    expect(decisionLabel(row('x', 'new', 'git'), 'local')).toBe('Skip (drops it from git on next export)');
+    expect(decisionLabel(row('x', 'new', 'git'), 'git')).toBe('Create');
+  });
+  it('other kinds are unchanged', () => {
+    expect(decisionLabel(row('x', 'deleted_here', 'local'), 'local')).toBe('Keep local');
+    expect(decisionLabel(row('x', 'deleted_here', 'local'), 'git')).toBe('Create');
+    expect(decisionLabel(row('x', 'changed', 'git'), 'git')).toBe('Take git');
+    expect(decisionLabel(row('x', 'changed', 'git'), 'local')).toBe('Keep local');
+    expect(decisionLabel(row('x', 'only_here', 'local'), 'delete')).toBe('Delete local');
+  });
+});
+
+describe('stale-preview signature', () => {
+  it('the apply body carries the preview signature', () => {
+    expect(seedRequestBody({ a: 'git' }, { signature: 'abc', rows: [] })).toEqual({ decisions: { a: 'git' }, signature: 'abc' });
+  });
+  it('a new server signature remounts the preview (decisions reset after stale_preview)', () => {
+    const rows = [row('a', 'changed', 'git')];
+    const one = previewSignature('g', { header: { exported_at: 't' }, rows, signature: 's1' });
+    expect(previewSignature('g', { header: { exported_at: 't' }, rows, signature: 's1' })).toBe(one);
+    expect(previewSignature('g', { header: { exported_at: 't' }, rows, signature: 's2' })).not.toBe(one);
   });
 });

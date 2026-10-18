@@ -6,6 +6,7 @@ import styled from 'styled-components';
 import { useSeedPreview, useApplySeed } from './useSeedExport.js';
 import {
   KINDS, kindLabel, allowedDecisions, initialDecisions, bulkSet, applyGate, previewSignature,
+  decisionLabel, seedRequestBody,
 } from './seedExportModel.js';
 import { Btn, Muted, Modal } from './seedUi.jsx';
 
@@ -53,9 +54,6 @@ const Warn = styled.p`color: var(--s2-warning); font-size: 1.4rem; margin: 0.4re
 const WARNINGS = {
   schema_older: 'This export is from an older database schema; fields added since then will be cleared on rows you take from git.',
 };
-const DECISION_LABEL = { git: 'Take git', local: 'Keep local', delete: 'Delete local' };
-// "new" rows are created, not taken; say so.
-const labelFor = (row, d) => (d === 'git' && (row.kind === 'new' || row.kind === 'deleted_here') ? 'Create' : DECISION_LABEL[d]);
 
 const show = (v) => (v === undefined ? '—' : typeof v === 'string' ? v : JSON.stringify(v));
 
@@ -75,7 +73,7 @@ export default function SeedPreviewModal({ group, onClose }) {
 
 function Shell({ group, onClose, children }) {
   return (
-    <Modal $w="860px" onClose={onClose} label={`Seed preview: ${group.label}`}>
+    <Modal $w="860px" onClose={onClose} closeOnBackdrop={false} label={`Seed preview: ${group.label}`}>
       <h3 style={{ margin: 0 }}>Seed preview: {group.label}</h3>
       {children}
       <Foot><span /><Btn onClick={onClose}>Close</Btn></Foot>
@@ -108,7 +106,7 @@ function PreviewBody({ group, data, onClose, reload }) {
   const bulk = (d) => setDecisions((cur) => bulkSet(cur, pickedVisible, d, rows));
 
   const submit = () => apply.mutate(
-    { groupId: group.id, decisions },
+    { groupId: group.id, body: seedRequestBody(decisions, data) },
     {
       onSuccess: onClose,
       // The diff moved under the preview: show the fresh one.
@@ -117,7 +115,9 @@ function PreviewBody({ group, data, onClose, reload }) {
   );
 
   return (
-    <Modal $w="900px" onClose={onClose} label={`Seed preview: ${group.label}`}>
+    // A stray backdrop click must not throw away the admin's decisions:
+    // only Escape and Cancel close it.
+    <Modal $w="900px" onClose={onClose} closeOnBackdrop={false} label={`Seed preview: ${group.label}`}>
       <>
         <h3 style={{ margin: 0 }}>Seed preview: {group.label}</h3>
         <Muted>
@@ -162,7 +162,7 @@ function PreviewBody({ group, data, onClose, reload }) {
                       disabled={!allowedDecisions(r).includes(d)}
                       title={r.blockedReason && !allowedDecisions(r).includes(d) ? r.blockedReason : undefined}
                       onClick={() => setDecisions((cur) => bulkSet(cur, [r.syncUuid], d, rows))}>
-                      {labelFor(r, d)}
+                      {decisionLabel(r, d)}
                     </SegBtn>
                   ))}
                 </Seg>

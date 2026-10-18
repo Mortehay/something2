@@ -35,18 +35,40 @@ export const Dialog = styled.div`
 
 export const fmtTime = (iso) => (iso ? new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '—');
 
-// Backdrop + dialog: Escape and a backdrop click close it.
-export function Modal({ onClose, $w, label, children }) {
+// The backdrop's click handler: none when a stray click would throw away work
+// (the seed preview holds the admin's decisions).
+export const backdropClick = (onClose, closeOnBackdrop = true) => (closeOnBackdrop ? onClose : undefined);
+
+// Backdrop + dialog: Escape closes it; a backdrop click too unless
+// closeOnBackdrop is false.
+export function Modal({ onClose, $w, label, children, closeOnBackdrop = true }) {
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
   return (
-    <Backdrop onClick={onClose}>
+    <Backdrop onClick={backdropClick(onClose, closeOnBackdrop)}>
       <Dialog role="dialog" aria-modal="true" aria-label={label} $w={$w} onClick={(e) => e.stopPropagation()}>
         {children}
       </Dialog>
     </Backdrop>
   );
+}
+
+export const RESTART_NOTE = 'running game still uses old data';
+export const PC_LABEL_HINT = 'Set SEED_PC_LABEL in .env so exports say which PC they came from';
+
+// Status column header; while a seed waits for a backend restart it says the
+// running game has not picked the seeded data up yet.
+export function StatusHead({ restartRequired }) {
+  return (
+    <>Status{restartRequired && <> <Muted>· {RESTART_NOTE}</Muted></>}</>
+  );
+}
+
+// Shown while this PC has no SEED_PC_LABEL (exports then say 'unnamed-pc').
+export function PcLabelHint({ meta }) {
+  if (!meta || meta.pcLabelSet !== false) return null;
+  return <p><Muted>{PC_LABEL_HINT}</Muted></p>;
 }
