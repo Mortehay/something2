@@ -820,7 +820,7 @@ dbTest('preview warns schema_older for an older file; apply still allowed', asyn
   await writeGitWith(pool, 'quests', [{ ...a, title: 'sx git' }], { schemaVersion: current });
   assert.deepStrictEqual((await previewSeed(pool, 'quests')).warnings, []);
   await writeGitWith(pool, 'quests', [{ ...a, title: 'sx git' }], { schemaVersion: '0000000000000_ancient' });
-  assert.deepStrictEqual((await previewSeed(pool, 'quests')).warnings, ['schema_older']);
+  assert.deepStrictEqual((await previewSeed(pool, 'quests')).warnings, [{ code: 'schema_older' }]);
   await apply(pool, 'quests', {});
   assert.strictEqual((await questState(pool))[0].title, 'sx git');
 });

@@ -114,7 +114,7 @@ function annotate(cd, refReasons, decisions) {
 }
 
 function warningsFor(fileVersion, dbVersion) {
-  return fileVersion < dbVersion ? ['schema_older'] : [];
+  return fileVersion < dbVersion ? [{ code: 'schema_older' }] : [];
 }
 
 const versionOf = (header) => (header && header.schema_version != null ? String(header.schema_version) : '');
@@ -148,7 +148,7 @@ function previewSignatureOf(cd, refReasons) {
 }
 
 // diffGroup plus blockedReason (FK references, natural-key clashes), the
-// blocking-aware defaults, and `warnings` (['schema_older'] when the file
+// blocking-aware defaults, and `warnings` ({ code: 'schema_older' } when the file
 // predates this DB's migrations). One read-only snapshot.
 async function previewSeed(pool, groupId) {
   const spec = soleSpec(getGroup(groupId));
@@ -160,7 +160,7 @@ async function previewSeed(pool, groupId) {
     const refReasons = await referenceReasons(client, spec, deletableUuids(cd.diff));
     const signature = previewSignatureOf(cd, refReasons);
     annotate(cd, refReasons, {});
-    // schema_older (a string) first, then the diff's dangling_name objects.
+    // schema_older first, then the diff's dangling_name entries (all { code, ... }).
     const schemaWarnings = cd.diff.header ? warningsFor(versionOf(cd.diff.header), await schemaVersion(client)) : [];
     const warnings = [...schemaWarnings, ...cd.diff.warnings];
     await client.query('COMMIT');
@@ -371,4 +371,4 @@ async function applySeed(pool, groupId, decisions, { signature } = {}) {
   return result;
 }
 
-module.exports = { previewSeed, applySeed, ALLOWED, KEY_CLASH_REASON };
+module.exports = { previewSeed, applySeed, ALLOWED, KEY_CLASH_REASON, annotate };

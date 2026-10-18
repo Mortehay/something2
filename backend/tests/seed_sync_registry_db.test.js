@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
-const { GROUPS, getGroup, tableSpecs, soleSpec, liveColumns, fkProblems, _withTestGroups } = require('../src/services/seedSync/registry.js');
+const { GROUPS, getGroup, tableSpecs, soleSpec, liveColumns, fkProblems, nameRefProblems, _withTestGroups } = require('../src/services/seedSync/registry.js');
 const { deterministicUuid } = require('../src/services/seedSync/canonical.js');
 const { withSeedSyncLock, cleanupSx } = require('./helpers/seedSyncTest.js');
 
@@ -85,8 +85,27 @@ dbTest('every FK column is a declared ref or omitted, and a declared ref matches
   for (const g of GROUPS) {
     for (const s of tableSpecs(g)) {
       assert.deepStrictEqual(await fkProblems(pool, s), [], `${s.table}: FK coverage`);
+      assert.deepStrictEqual(await nameRefProblems(pool, s), [], `${s.table}: nameRefs`);
     }
   }
+});
+
+dbTest('nameRefProblems flags a bad shape, a missing column/target and an omitted column', async (t, pool) => {
+  const spec = (nameRefs, omit = {}) => ({ table: 'entity_types', naturalKey: ['name'], omit, secretColumns: [], refs: {}, nameRefs });
+  const aura = { table: 'aura_effects', keyCol: 'name' };
+  assert.deepStrictEqual(await nameRefProblems(pool, spec({
+    auras: { ...aura, shape: 'array' }, vfx: { ...aura, shape: 'object-values' }, name: { ...aura, shape: 'text' },
+  })), []);
+  assert.deepStrictEqual(await nameRefProblems(pool, spec({ auras: { ...aura, shape: 'list' } })),
+    [{ column: 'auras', target: 'aura_effects.name', problem: 'bad_shape', shape: 'list' }]);
+  assert.deepStrictEqual(await nameRefProblems(pool, spec({ sx_nope: { ...aura, shape: 'text' } })),
+    [{ column: 'sx_nope', target: 'aura_effects.name', problem: 'not_a_column' }]);
+  assert.deepStrictEqual(await nameRefProblems(pool, spec({ auras: { table: 'aura_effects', keyCol: 'sx_nope', shape: 'array' } })),
+    [{ column: 'auras', target: 'aura_effects.sx_nope', problem: 'missing_target' }]);
+  assert.deepStrictEqual(await nameRefProblems(pool, spec({ auras: { table: 'sx_no_table', keyCol: 'name', shape: 'array' } })),
+    [{ column: 'auras', target: 'sx_no_table.name', problem: 'missing_target' }]);
+  assert.deepStrictEqual(await nameRefProblems(pool, spec({ auras: { ...aura, shape: 'array' } }, { auras: 'test' })),
+    [{ column: 'auras', target: 'aura_effects.name', problem: 'not_exported' }]);
 });
 
 // The guard must be able to fail: tile_types.ai_provider_id is a real FK.

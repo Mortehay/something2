@@ -566,7 +566,8 @@ dbTest('exportGroup propagates SyncFileError over a corrupt file', async (t, poo
 // ---- Plan 2: multi-table groups, translated refs, display keys, names ----
 
 const { _withTestGroups } = require('../src/services/seedSync/registry.js');
-const { computeDiff } = require('../src/services/seedSync/diffGroup.js');
+const { computeDiff, localByKeyOf } = require('../src/services/seedSync/diffGroup.js');
+const { annotate, KEY_CLASH_REASON } = require('../src/services/seedSync/applySeed.js');
 
 // TEST-ONLY groups over real tables (Task 6 registers the real ones).
 const LOCAL_COLS = { id: 'local', created_at: 'local', updated_at: 'local', sync_uuid: 'identity' };
@@ -807,8 +808,11 @@ dbTest('Plan-1 group: output unchanged apart from table, keyParts, tables and wa
   assert.deepStrictEqual(none.tables, [{ table: 'tile_types', counts: none.counts }]);
 });
 
-dbTest('pool diff of a multi-table group takes the export SHARE locks: an open writer -> busy', async (t, pool) => {
+dbTest('pool diff reads one consistent snapshot and is not blocked by an open writer', async (t, pool) => {
   await withGroups(async () => {
+    const gob = await addEnt(pool, 'sx_gob');
+    const sword = await addItem(pool, 'sx_sword');
+    await addDrop(pool, gob.id, sword.id);
     await exportGroup(pool, 'sx_ent');
     const { Client } = require('pg');
     const writer = new Client({ connectionString: DB_URL });
@@ -816,16 +820,98 @@ dbTest('pool diff of a multi-table group takes the export SHARE locks: an open w
     const prev = process.env.SEED_SYNC_LOCK_TIMEOUT_MS;
     try {
       await writer.query('BEGIN');
-      await writer.query("INSERT INTO item_types (name, category, damage, cooldown, stackable) VALUES ('sx_w', 'ammo', 0, 0, true)");
-      process.env.SEED_SYNC_LOCK_TIMEOUT_MS = '300';
-      // item_types is a by-uuid ref target of creature_drops: locked too.
-      await assert.rejects(diffGroup(pool, 'sx_ent'), (e) => e instanceof SyncRefused && e.code === 'busy');
+      const w = (await writer.query(
+        "INSERT INTO entity_types (name, color) VALUES ('sx_w', '#010203') RETURNING id")).rows[0];
+      await writer.query('INSERT INTO creature_drops (entity_type_id, item_type_id, chance) VALUES ($1, $2, 0.5)', [w.id, sword.id]);
+      await writer.query("UPDATE entity_types SET color = '#0a0b0c' WHERE name = 'sx_gob'");
+      process.env.SEED_SYNC_LOCK_TIMEOUT_MS = '300'; // a lock wait would fail fast
+      const d = await diffGroup(pool, 'sx_ent');
+      assert.strictEqual(d.status, 'in_sync', 'uncommitted writes are invisible');
+      assert.deepStrictEqual(sxRows(d), []);
     } finally {
       if (prev === undefined) delete process.env.SEED_SYNC_LOCK_TIMEOUT_MS; else process.env.SEED_SYNC_LOCK_TIMEOUT_MS = prev;
       await writer.query('ROLLBACK').catch(() => {});
       await writer.end().catch(() => {});
     }
-    assert.strictEqual((await diffGroup(pool, 'sx_ent')).status, 'in_sync', 'reads fine once the writer is gone');
+  });
+});
+
+// Both PCs created Goblin and its drop after the migration: same names,
+// different random uuids for the parent AND the child.
+async function adoptedParentFixture(pool, { keepChildBaseline = false } = {}) {
+  const gob = await addEnt(pool, 'sx_gob');
+  const sword = await addItem(pool, 'sx_sword');
+  const drop = await addDrop(pool, gob.id, sword.id, 0.5);
+  await exportGroup(pool, 'sx_ent');
+  const forget = keepChildBaseline ? [gob.sync_uuid] : [gob.sync_uuid, drop.sync_uuid];
+  await pool.query('DELETE FROM seed_row_hashes WHERE group_id = $1 AND sync_uuid = ANY($2::uuid[])', ['sx_ent', forget]);
+  const doc = readDoc('sx_ent');
+  const gitGob = crypto.randomUUID();
+  const gitDrop = crypto.randomUUID();
+  doc.tables.entity_types.find((r) => r.name === 'sx_gob').sync_uuid = gitGob;
+  const dr = doc.tables.creature_drops.find((r) => r.sync_uuid === drop.sync_uuid);
+  Object.assign(dr, { sync_uuid: gitDrop, entity_type_id: gitGob });
+  writeDoc('sx_ent', doc);
+  return { gob, drop, gitGob, gitDrop, doc, dr };
+}
+
+dbTest('a child of an adopted parent is adopt_identity too (deep natural key), red when values differ', async (t, pool) => {
+  await withGroups(async () => {
+    const f = await adoptedParentFixture(pool);
+    let d = await diffGroup(pool, 'sx_ent');
+    assert.deepStrictEqual(sxRows(d).map((r) => [r.table, r.syncUuid, r.key, r.kind, r.defaultDecision, r.fields]), [
+      ['entity_types', f.gitGob, 'sx_gob', 'adopt_identity', 'git', []],
+      ['creature_drops', f.gitDrop, 'sx_gob → sx_sword', 'adopt_identity', 'git', []],
+    ], 'no new + only_here pair; the parent uuid alone is not a value difference');
+    f.dr.chance = 0.9;
+    writeDoc('sx_ent', f.doc);
+    d = await diffGroup(pool, 'sx_ent');
+    const child = sxRows(d).find((r) => r.table === 'creature_drops');
+    assert.strictEqual(child.kind, 'adopt_identity');
+    assert.strictEqual(child.defaultDecision, null);
+    assert.deepStrictEqual(child.fields, [{ name: 'chance', local: 0.5, git: 0.9 }]);
+    const cd = await computeDiff(pool, 'sx_ent');
+    assert.strictEqual(localByKeyOf(cd, child).row.sync_uuid, f.drop.sync_uuid, 'the local child it adopts');
+  });
+});
+
+dbTest('key-clash annotation finds a clashing child through the deep natural key', async (t, pool) => {
+  await withGroups(async () => {
+    // The local child keeps its baseline: not adoptable, so git's child is new
+    // and the local one deleted_in_git -- both hold "sx_gob → sx_sword".
+    const f = await adoptedParentFixture(pool, { keepChildBaseline: true });
+    const cd = await computeDiff(pool, 'sx_ent');
+    const kinds = Object.fromEntries(cd.diff.rows.filter((r) => r.table === 'creature_drops' && String(r.key).startsWith('sx_'))
+      .map((r) => [r.syncUuid, r.kind]));
+    assert.deepStrictEqual(kinds, { [f.gitDrop]: 'new', [f.drop.sync_uuid]: 'deleted_in_git' });
+    const row = () => cd.diff.rows.find((r) => r.syncUuid === f.gitDrop);
+    annotate(cd, new Map(), { [f.drop.sync_uuid]: 'local' }); // keep the local child
+    assert.strictEqual(row().blockedReason, KEY_CLASH_REASON);
+    assert.strictEqual(row().defaultDecision, null);
+    const fresh = await computeDiff(pool, 'sx_ent');
+    annotate(fresh, new Map(), {}); // default: the local child is deleted -> no clash
+    assert.strictEqual(fresh.diff.rows.find((r) => r.syncUuid === f.gitDrop).blockedReason, null);
+  });
+});
+
+dbTest("dangling_name for the 'text' shape", async (t, pool) => {
+  const skillsSpec = {
+    table: 'creature_skills', naturalKey: ['name'], omit: LOCAL_COLS, secretColumns: [], refs: {},
+    nameRefs: { summon_entity: { table: 'entity_types', keyCol: 'name', shape: 'text' } },
+  };
+  await _withTestGroups([{ id: 'sx_skills', label: 'SX skills', tables: [skillsSpec] }], async () => {
+    await addEnt(pool, 'sx_gob');
+    const ins = (name, summon) => q1(pool,
+      "INSERT INTO creature_skills (name, kind, cooldown_ms, summon_entity) VALUES ($1, 'summon', 1000, $2) RETURNING sync_uuid",
+      [name, summon]);
+    const bad = await ins('sx_sk_bad', 'sx_nope');
+    await ins('sx_sk_ok', 'sx_gob');
+    await ins('sx_sk_none', null);
+    const d = await diffGroup(pool, 'sx_skills');
+    assert.deepStrictEqual(sxWarnings(d), [{
+      code: 'dangling_name', table: 'creature_skills', key: 'sx_sk_bad', column: 'summon_entity', name: 'sx_nope',
+      target: 'entity_types', syncUuid: bad.sync_uuid,
+    }]);
   });
 });
 

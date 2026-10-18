@@ -165,4 +165,35 @@ async function fkProblems(db, spec) {
   return out.sort((a, b) => (a.column < b.column ? -1 : a.column > b.column ? 1 : 0));
 }
 
-module.exports = { GROUPS, getGroup, tableSpecs, soleSpec, liveColumns, fkProblems, _withTestGroups };
+const NAME_REF_SHAPES = ['text', 'array', 'object-values'];
+
+// nameRefs of one TableSpec against the live schema, sorted by column:
+//  - bad_shape:      shape is not one of NAME_REF_SHAPES
+//  - not_a_column:   the by-name column does not exist in spec.table
+//  - not_exported:   the column is omitted or secret (nothing to check)
+//  - missing_target: target table/keyCol does not exist
+async function nameRefProblems(db, spec) {
+  const entries = Object.entries(spec.nameRefs || {});
+  if (!entries.length) return [];
+  const tables = [...new Set([spec.table, ...entries.map(([, nr]) => nr.table)])];
+  const { rows } = await db.query(
+    `SELECT table_name, column_name FROM information_schema.columns
+      WHERE table_schema = current_schema() AND table_name = ANY($1::text[])`,
+    [tables],
+  );
+  const has = new Set(rows.map((r) => `${r.table_name}\u0000${r.column_name}`));
+  const hidden = new Set([...Object.keys(spec.omit || {}), ...(spec.secretColumns || [])]);
+  const out = [];
+  for (const [col, nr] of entries) {
+    const base = { column: col, target: nr && nr.table ? `${nr.table}.${nr.keyCol}` : null };
+    if (!nr || !NAME_REF_SHAPES.includes(nr.shape)) out.push({ ...base, problem: 'bad_shape', shape: nr ? nr.shape : null });
+    if (!has.has(`${spec.table}\u0000${col}`)) out.push({ ...base, problem: 'not_a_column' });
+    else if (hidden.has(col)) out.push({ ...base, problem: 'not_exported' });
+    if (!nr || !has.has(`${nr.table}\u0000${nr.keyCol}`)) out.push({ ...base, problem: 'missing_target' });
+  }
+  return out.sort((a, b) => (a.column < b.column ? -1 : a.column > b.column ? 1 : 0));
+}
+
+module.exports = {
+  GROUPS, getGroup, tableSpecs, soleSpec, liveColumns, fkProblems, nameRefProblems, NAME_REF_SHAPES, _withTestGroups,
+};
