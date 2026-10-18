@@ -4,6 +4,8 @@ const { getGroup, liveColumns } = require('./registry.js');
 const { canonicalRow, rowHash, stableStringify } = require('./canonical.js');
 const { pcLabel, schemaVersion, startRun, finishRun } = require('./runs.js');
 
+let tmpCounter = 0;
+
 class SyncFileError extends Error {
   constructor(message, file) {
     super(message);
@@ -45,6 +47,7 @@ async function readExport(groupId) {
 async function exportGroup(pool, groupId) {
   const group = getGroup(groupId);
   const runId = await startRun(pool, groupId, 'export');
+  let tmp = null;
   try {
     const columns = await liveColumns(pool, group);
     const { rows: dbRows } = await pool.query(`SELECT * FROM ${group.table}`);
@@ -64,9 +67,12 @@ async function exportGroup(pool, groupId) {
     };
     const file = fileFor(groupId);
     await fs.promises.mkdir(path.dirname(file), { recursive: true });
-    const tmp = `${file}.tmp`;
+    tmp = `${file}.${process.pid}.${tmpCounter++}.tmp`;
     await fs.promises.writeFile(tmp, `${stableStringify(doc)}\n`);
+    // File first, baselines second: if the baseline txn then fails, the result is
+    // "git changed" (safe), never baselines claiming a sync that was not exported.
     await fs.promises.rename(tmp, file);
+    tmp = null;
 
     const client = await pool.connect();
     try {
@@ -88,6 +94,7 @@ async function exportGroup(pool, groupId) {
     await finishRun(pool, runId, { status: 'ok', summary: { rowCount: rows.length } });
     return { runId, rowCount: rows.length };
   } catch (e) {
+    if (tmp) await fs.promises.unlink(tmp).catch(() => {});
     await finishRun(pool, runId, { status: 'failed', error: e.message }).catch(() => {});
     throw e;
   }

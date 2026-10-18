@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
+const path = require('node:path');
 const { Pool } = require('pg');
 const { withSeedSyncLock, cleanupSx, makeTempSyncDir } = require('./helpers/seedSyncTest.js');
 
@@ -34,7 +35,7 @@ function dbTest(name, body) {
 
 const { exportGroup, readExport, fileFor, syncDir } = require('../src/services/seedSync/exportGroup.js');
 const { rowHash } = require('../src/services/seedSync/canonical.js');
-const { lastRuns, recentRuns, startRun, finishRun } = require('../src/services/seedSync/runs.js');
+const { lastRuns, recentRuns } = require('../src/services/seedSync/runs.js');
 
 const addQuest = (pool, key) => pool.query(
   "INSERT INTO quests (key, title, act, description) VALUES ($1, 'sx t', 1, 'sx d')", [key]);
@@ -64,17 +65,29 @@ dbTest('export writes header and sorted canonical rows', async (t, pool, dir) =>
   assert.strictEqual(await readExport('tile_types'), null);
 });
 
+const rawNoStamp = (groupId) => fs.readFileSync(fileFor(groupId), 'utf8')
+  .split('\n').filter((l) => !/^\s*"exported_at":/.test(l)).join('\n');
+
 dbTest('second export is byte-identical', async (t, pool) => {
   await addQuest(pool, 'sx_a');
   await exportGroup(pool, 'quests');
-  const strip = () => {
-    const d = JSON.parse(fs.readFileSync(fileFor('quests'), 'utf8'));
-    delete d.header.exported_at;
-    return JSON.stringify(d);
-  };
-  const first = strip();
+  const first = rawNoStamp('quests');
   await exportGroup(pool, 'quests');
-  assert.strictEqual(strip(), first);
+  assert.strictEqual(rawNoStamp('quests'), first);
+});
+
+dbTest('tile_types round trip: float, jsonb key order, stable hash', async (t, pool) => {
+  await pool.query(
+    `INSERT INTO tile_types (name, color, speed, valid_neighbors)
+     VALUES ('sx_tile', '#123456', 0.75, '[{"z":1,"a":{"y":2,"b":3}},"grass"]')`);
+  await exportGroup(pool, 'tile_types');
+  const first = rawNoStamp('tile_types');
+  await exportGroup(pool, 'tile_types');
+  assert.strictEqual(rawNoStamp('tile_types'), first);
+  const row = JSON.parse(fs.readFileSync(fileFor('tile_types'), 'utf8')).rows.find((r) => r.name === 'sx_tile');
+  assert.strictEqual(row.speed, 0.75);
+  const h = (await pool.query('SELECT hash FROM seed_row_hashes WHERE group_id=$1 AND sync_uuid=$2', ['tile_types', row.sync_uuid])).rows[0];
+  assert.strictEqual(h.hash, rowHash(row));
 });
 
 dbTest('ai_providers export never contains auth_token', async (t, pool) => {
@@ -122,12 +135,19 @@ dbTest('export records a run and baselines', async (t, pool) => {
   assert.strictEqual(recent[0].id, runId);
 });
 
-dbTest('a failed export finishes the run as failed', async (t, pool) => {
-  await assert.rejects(exportGroup(pool, 'nope'), /unknown group/);
-  const id = await startRun(pool, 'quests', 'export');
-  await finishRun(pool, id, { status: 'failed', error: 'boom' });
+dbTest('a failing export finishes its run as failed', async (t, pool, dir) => {
+  const blocker = path.join(dir, 'blocker');
+  fs.writeFileSync(blocker, 'x');
+  process.env.SEED_SYNC_DIR = path.join(blocker, 'sub');
+  try {
+    await assert.rejects(exportGroup(pool, 'quests'));
+  } finally {
+    process.env.SEED_SYNC_DIR = dir;
+  }
   const run = (await recentRuns(pool, { groupId: 'quests', limit: 1 }))[0];
+  assert.strictEqual(run.action, 'export');
   assert.strictEqual(run.status, 'failed');
-  assert.strictEqual(run.error, 'boom');
-  await pool.query('DELETE FROM seed_export_runs WHERE id=$1', [id]);
+  assert.ok(run.error);
+  assert.ok(run.finished_at);
+  await pool.query('DELETE FROM seed_export_runs WHERE id=$1', [run.id]);
 });
