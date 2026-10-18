@@ -53,7 +53,8 @@ const KEYED = {
     WHERE e.name NOT LIKE 'sx\\_%' ORDER BY t.id LIMIT 1`,
   biomes: "SELECT sync_uuid, name AS k FROM biomes WHERE name NOT LIKE 'sx\\_%' ORDER BY id LIMIT 1",
   passive_nodes: "SELECT sync_uuid, key AS k FROM passive_nodes WHERE key NOT LIKE 'sx\\_%' ORDER BY id LIMIT 1",
-  passive_edges: `SELECT t.sync_uuid, a.key || '|' || b.key AS k FROM passive_edges t
+  passive_edges: `SELECT t.sync_uuid, LEAST(a.key COLLATE "C", b.key COLLATE "C") || '|'
+      || GREATEST(a.key COLLATE "C", b.key COLLATE "C") AS k FROM passive_edges t
     JOIN passive_nodes a ON a.id = t.a_id JOIN passive_nodes b ON b.id = t.b_id
     WHERE a.key NOT LIKE 'sx\\_%' ORDER BY t.a_id, t.b_id LIMIT 1`,
   game_settings: "SELECT sync_uuid, key AS k FROM game_settings WHERE key NOT LIKE 'sx\\_%' ORDER BY key LIMIT 1",
@@ -116,5 +117,35 @@ dbTest('duplicate composite keys are rejected (23505), rolled back', async (t, p
       await c.query('ROLLBACK').catch(() => {});
       c.release();
     }
+  }
+});
+
+// Final review (3): computed deterministic uuids that collide block the
+// UNIQUE step; the migration lists them and deletes nothing.
+const plan2Migration = require('../migrations/1714440790000_seed_sync_plan2.js');
+
+dbTest('uuid collision pre-check: none on this DB; an injected key collision is listed (rolled back)', async (t, pool) => {
+  assert.deepStrictEqual(await plan2Migration._uuidCollisions(pool), []);
+  const c = await pool.connect();
+  try {
+    await c.query('BEGIN');
+    // behavior 'sx_col_b|sx_col_i' + item 'sx_col_j' and behavior 'sx_col_b'
+    // + item 'sx_col_i|sx_col_j' both join to 'sx_col_b|sx_col_i|sx_col_j'.
+    const beh = async (name) => (await c.query(`INSERT INTO creature_behaviors (name, aggro_radius, leash_radius, chase_style)
+      VALUES ($1, 100, 200, 'charge') RETURNING id`, [name])).rows[0].id;
+    const item = async (name) => (await c.query(`INSERT INTO item_types (name, category, damage, cooldown)
+      VALUES ($1, 'currency', 0, 0) RETURNING id`, [name])).rows[0].id;
+    const b1 = await beh('sx_col_b|sx_col_i');
+    const b2 = await beh('sx_col_b');
+    const i1 = await item('sx_col_j');
+    const i2 = await item('sx_col_i|sx_col_j');
+    await c.query('INSERT INTO behavior_drops (behavior_id, item_type_id, chance) VALUES ($1, $2, 0.5), ($3, $4, 0.5)',
+      [b1, i1, b2, i2]);
+    const out = await plan2Migration._uuidCollisions(c);
+    assert.deepStrictEqual(out,
+      ['behavior_drops keys ["sx_col_b|sx_col_i|sx_col_j","sx_col_b|sx_col_i|sx_col_j"] -> one sync_uuid x2']);
+  } finally {
+    await c.query('ROLLBACK').catch(() => {});
+    c.release();
   }
 });

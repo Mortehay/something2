@@ -106,7 +106,9 @@ dbTest('status prints one line per group in registry order, exit 0', async () =>
   assert.strictEqual(r.code, 0, r.err);
   assert.deepStrictEqual(r.lines.map((l) => l.split(' ')[0]), ALL_IDS);
   assert.ok(r.lines.every((l) => l.split(' ').length === 4), r.out);
-  assert.match(r.line('aura_effects'), /^aura_effects never_exported 0 0$/);
+  // Empty temp dir: never_exported, or file_missing on a DB that has an ok
+  // export run of the group from elsewhere (e.g. a browser verification).
+  assert.match(r.line('aura_effects'), /^aura_effects (never_exported|file_missing) 0 0$/);
   const one = cli(['status', '--group=aura_effects']);
   assert.strictEqual(one.lines.length, 1);
 });

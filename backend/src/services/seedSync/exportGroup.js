@@ -1,6 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const { getGroup, tableSpecs, liveColumns } = require('./registry.js');
+const { getGroup, tableSpecs, liveColumns, pairKeyCol, orderPair } = require('./registry.js');
 const { canonicalRow, rowHash, stableStringify, compareNaturalKey } = require('./canonical.js');
 const { buildRefMaps, exportRow, exportColumns } = require('./refs.js');
 const { pcLabel, schemaVersion, startRun, finishRun } = require('./runs.js');
@@ -51,8 +51,17 @@ async function exportTable(client, spec) {
   const canonCols = exportColumns(await liveColumns(client, spec), spec);
   const maps = await buildRefMaps(client, spec);
   const { rows: dbRows } = await client.query(`SELECT * FROM ${spec.table}`);
+  // An unordered pair travels ordered by its targets' natural keys, never by
+  // local id order (diffGroup normalises the same way).
+  let keyOf = null;
+  if (spec.unorderedPair) {
+    const { table, keyCol } = pairKeyCol(spec);
+    const { rows } = await client.query(`SELECT sync_uuid, "${keyCol}" AS k FROM ${table}`);
+    const keys = new Map(rows.map((r) => [r.sync_uuid, r.k]));
+    keyOf = (u) => (keys.has(u) ? keys.get(u) : null);
+  }
   return dbRows
-    .map((r) => canonicalRow(exportRow(r, spec, maps), canonCols))
+    .map((r) => canonicalRow(orderPair(spec, exportRow(r, spec, maps), keyOf), canonCols))
     .sort((a, b) => compareNaturalKey(a, b, spec.naturalKey));
 }
 

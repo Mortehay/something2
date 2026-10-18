@@ -1,4 +1,6 @@
-const { GROUPS, getGroup, tableSpecs, liveColumns } = require('./registry.js');
+const {
+  GROUPS, getGroup, tableSpecs, liveColumns, pairKeyCol, orderPair,
+} = require('./registry.js');
 const { canonicalRow, rowHash, stableStringify } = require('./canonical.js');
 const { buildRefMaps, exportRow, exportColumns } = require('./refs.js');
 const { readExport } = require('./exportGroup.js');
@@ -322,6 +324,22 @@ function keyResolver(group, keyIndex, gitIndex) {
   };
 }
 
+// keyOf for orderPair: the pair target's natural key, looked up in `indexes`
+// (Map(table -> Map(uuid -> row))) in order; null when unknown.
+function pairKeyOf(spec, indexes) {
+  const { table, keyCol } = pairKeyCol(spec);
+  return (uuid) => {
+    for (const idx of indexes) {
+      const m = idx.get(table);
+      if (m && m.has(uuid)) {
+        const v = m.get(uuid)[keyCol];
+        return typeof v === 'string' ? v : null;
+      }
+    }
+    return null;
+  };
+}
+
 const joinKey = (parts) => (parts.length === 1 ? parts[0] : parts.map((p) => String(p)).join(' → '));
 
 // ---- diff ------------------------------------------------------------------
@@ -357,7 +375,10 @@ function diffTable(t, gitRaw, baseline, keys) {
     const l = localByUuid.get(uuid);
     if (l) {
       if (l.hash === g.hash) {
-        inSync.push({ table: spec.table, syncUuid: uuid, hash: l.hash, hasBaseline: baseline.has(uuid) });
+        // hasBaseline: B is present AND current. A missing or stale B (e.g.
+        // written before an upgrade changed the export form) is refreshed by
+        // the next seed: local == git, so B = hL is always right.
+        inSync.push({ table: spec.table, syncUuid: uuid, hash: l.hash, hasBaseline: baseline.get(uuid) === l.hash });
         continue;
       }
       const b = baseline.get(uuid);
@@ -446,6 +467,14 @@ async function computeDiff(db, groupId) {
   const doc = await readExport(groupId); // SyncFileError propagates
   if (doc) validateDoc(doc, group);
   const L = await loadLocal(db, group, specs, groupId);
+  // Unordered pairs (registry unorderedPair): local rows ordered by the
+  // targets' local natural keys -- exactly what export writes, so hL == B.
+  for (const t of L.tables) {
+    if (!t.spec.unorderedPair) continue;
+    const keyOf = pairKeyOf(t.spec, [L.keyIndex]);
+    t.rows = t.rows.map((r) => orderPair(t.spec, r, keyOf));
+    L.keyIndex.set(t.spec.table, new Map(t.rows.map((r) => [r.sync_uuid, r])));
+  }
   const tokensMissing = L.tables.reduce((n, t) => n + t.tokensMissing, 0);
 
   // Git-side rows (file form) and names, for targets inside this group's file.
@@ -508,7 +537,15 @@ async function computeDiff(db, groupId) {
   const counts = zeroCounts();
   const perTable = [];
   for (const t of L.tables) {
-    const d = diffTable(t, docRows(doc, t.spec.table), baseline, keys);
+    // Git rows of an unordered pair: ordered by the targets' keys in the file
+    // first, then here (a hand-edited or differently ordered file still
+    // hashes as the exporter would have written it).
+    let gitRows = docRows(doc, t.spec.table);
+    if (t.spec.unorderedPair) {
+      const keyOf = pairKeyOf(t.spec, [gitIndex, L.keyIndex]);
+      gitRows = gitRows.map((r) => (isPlainObject(r) ? orderPair(t.spec, r, keyOf) : r));
+    }
+    const d = diffTable(t, gitRows, baseline, keys);
     tables.set(t.spec.table, d.detail);
     inSync.push(...d.inSync);
     rows.push(...d.rows); // group (seed) order, then key order within a table

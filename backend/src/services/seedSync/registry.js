@@ -3,13 +3,19 @@
 //   { table, naturalKey: string[], omit: {col: reason}, secretColumns: string[],
 //     refs: { [col]: { table, by: 'uuid' } | { table, by: 'key', keyCol } },
 //     nameRefs?: { [col]: { table, keyCol, shape: 'text'|'array'|'object-values' } },
-//     validate?: 'game_settings', secretNeededIf?: col }
+//     validate?: 'game_settings', secretNeededIf?: col, unorderedPair?: [colA, colB] }
 // `omit` columns are deliberately not exported (reason documented);
 // `secretColumns` are never exported; `refs` columns are exported translated
 // (target sync_uuid or natural key), never as local ids. Every FK column must
 // be in `refs` or `omit` (see fkProblems). `nameRefs` columns hold names of
 // rows in another table (no FK); they travel as-is and the diff warns
 // (dangling_name) about a name that resolves neither locally nor in the file.
+// `unorderedPair` names two by-uuid refs to ONE table that together are an
+// unordered pair (passive_edges): export and diff put the pair in the order of
+// the targets' natural keys (plain code-unit compare, = COLLATE "C"), so the
+// file, hashes and deep keys never depend on local id order; apply writes the
+// two resolved local ids LEAST/GREATEST. The target's natural key must be one
+// non-ref column (pairKeyCol).
 //
 // Order rules (pinned by seed_sync_registry_db.test.js): inside a group a
 // table comes after every table of the group it references (deletes run
@@ -258,6 +264,9 @@ const GROUPS = [
       {
         table: 'passive_edges',
         naturalKey: ['a_id', 'b_id'],
+        // CHECK (a_id < b_id) is on local ids, which follow insertion order:
+        // the same edge is (X,Y) here and (Y,X) on another PC.
+        unorderedPair: ['a_id', 'b_id'],
         omit: { sync_uuid: 'identity' },
         secretColumns: [],
         refs: {
@@ -300,6 +309,45 @@ function getGroup(id) {
 
 function tableSpecs(group) {
   return group.tables;
+}
+
+// The registered TableSpec of `table` (first group that has it), or null.
+function specOfTable(table) {
+  for (const g of GROUPS) {
+    const s = g.tables.find((x) => x.table === table);
+    if (s) return s;
+  }
+  return null;
+}
+
+// The target table and its single natural-key column of an unorderedPair
+// spec; throws on a misconfigured pair (different targets, not by uuid, or a
+// target whose natural key is not one plain column).
+function pairKeyCol(spec) {
+  const [a, b] = spec.unorderedPair;
+  const ra = (spec.refs || {})[a];
+  const rb = (spec.refs || {})[b];
+  if (!ra || !rb || ra.by !== 'uuid' || rb.by !== 'uuid' || ra.table !== rb.table) {
+    throw new Error(`seed-sync: ${spec.table}.unorderedPair must name two by-uuid refs to one table`);
+  }
+  const ts = specOfTable(ra.table);
+  if (!ts || ts.naturalKey.length !== 1 || Object.prototype.hasOwnProperty.call(ts.refs || {}, ts.naturalKey[0])) {
+    throw new Error(`seed-sync: ${spec.table}.unorderedPair target ${ra.table} needs a single plain natural key`);
+  }
+  return { table: ra.table, keyCol: ts.naturalKey[0] };
+}
+
+// `row` with its unorderedPair columns ordered by keyOf(value) (code-unit
+// compare). keyOf returns the target's natural key text or null (unknown:
+// the row is left as is). Any other spec: `row` unchanged.
+function orderPair(spec, row, keyOf) {
+  if (!spec.unorderedPair) return row;
+  const [a, b] = spec.unorderedPair;
+  if (row[a] == null || row[b] == null) return row;
+  const ka = keyOf(row[a]);
+  const kb = keyOf(row[b]);
+  if (typeof ka !== 'string' || typeof kb !== 'string' || !(ka > kb)) return row;
+  return { ...row, [a]: row[b], [b]: row[a] };
 }
 
 // The one TableSpec of a single-table, single-key-column group without refs;
@@ -420,5 +468,6 @@ async function nameRefProblems(db, spec) {
 }
 
 module.exports = {
-  GROUPS, getGroup, tableSpecs, soleSpec, liveColumns, fkProblems, nameRefProblems, NAME_REF_SHAPES, _withTestGroups,
+  GROUPS, getGroup, tableSpecs, specOfTable, pairKeyCol, orderPair, soleSpec, liveColumns, fkProblems, nameRefProblems,
+  NAME_REF_SHAPES, _withTestGroups,
 };

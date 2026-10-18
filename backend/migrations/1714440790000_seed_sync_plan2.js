@@ -34,7 +34,12 @@ const TABLES = [
     'JOIN entity_types e ON e.id = t.entity_type_id JOIN item_types i ON i.id = t.item_type_id'],
   ['biomes', 't.name', ''],
   ['passive_nodes', 't.key', ''],
-  ['passive_edges', "a.key || '|' || b.key",
+  // An unordered pair: the CHECK (a_id < b_id) is on LOCAL ids, which follow
+  // insertion order, so the same edge is (X,Y) on one PC and (Y,X) on
+  // another. The key orders the two node keys by code unit (COLLATE "C"),
+  // exactly as the seed-sync registry's unorderedPair normalisation does.
+  ['passive_edges',
+    `LEAST(a.key COLLATE "C", b.key COLLATE "C") || '|' || GREATEST(a.key COLLATE "C", b.key COLLATE "C")`,
     'JOIN passive_nodes a ON a.id = t.a_id JOIN passive_nodes b ON b.id = t.b_id'],
   ['game_settings', 't.key', ''],
 ];
@@ -45,6 +50,25 @@ const UNIQUES = [
   ['behavior_drops', 'behavior_drops_behavior_item_key', ['behavior_id', 'item_type_id']],
   ['chest_loot', 'chest_loot_level_item_key', ['level_min', 'level_max', 'item_type_id']],
 ];
+
+// Rows whose computed deterministic sync_uuid would collide with another row's
+// in the same table (e.g. behavior 'a|b' + item 'c' vs behavior 'a' + item
+// 'b|c', or a NULL key): the UNIQUE step would fail half-way. Read-only;
+// returns one line per colliding uuid. Exported for the migration test.
+async function uuidCollisions(db) {
+  const out = [];
+  for (const [table, keyExpr, joins] of TABLES) {
+    const { rows } = await db.query(
+      `SELECT md5('s2sync:' || '${table}' || ':' || k)::text AS u, count(*)::int AS n,
+              array_agg(coalesce(k, '<null>') ORDER BY k) AS keys
+         FROM (SELECT ${keyExpr} AS k FROM ${table} t ${joins}) sub
+        GROUP BY 1 HAVING count(*) > 1 ORDER BY 1`);
+    for (const r of rows) out.push(`${table} keys ${JSON.stringify(r.keys)} -> one sync_uuid x${r.n}`);
+  }
+  return out;
+}
+exports._uuidCollisions = uuidCollisions;
+exports._TABLES = TABLES;
 
 exports.up = async (pgm) => {
   // Fail before touching anything if a unique key cannot be added.
@@ -60,6 +84,11 @@ exports.up = async (pgm) => {
   if (problems.length > 0) {
     throw new Error(
       `seed_sync_plan2: duplicate rows block the new unique keys -- dedupe them deliberately, then re-run:\n  ${problems.join('\n  ')}`);
+  }
+  const collisions = await uuidCollisions(pgm.db);
+  if (collisions.length > 0) {
+    throw new Error(
+      `seed_sync_plan2: rows whose natural keys give the same sync_uuid block the unique sync_uuid -- rename them deliberately, then re-run:\n  ${collisions.join('\n  ')}`);
   }
 
   for (const [table, keyExpr, joins] of TABLES) {

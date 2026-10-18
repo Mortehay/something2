@@ -405,3 +405,134 @@ dbTest('preview warns invalid_value for a game setting git would write; apply st
     (e) => e instanceof SyncRefused && e.code === 'invalid_value');
   assert.deepStrictEqual((await q1(pool, "SELECT value FROM game_settings WHERE key = 'respec_base_gold'")).value, real.value);
 });
+
+// ---- Final review (1): passive_edges is an unordered pair -------------------
+// CHECK (a_id < b_id) is on LOCAL ids, which follow insertion order: the same
+// edge is (X,Y) on one PC and (Y,X) on another. Identity, file and hashes must
+// follow the node KEYS (code-unit order), never local id order.
+
+const { deterministicUuid } = require('../src/services/seedSync/canonical.js');
+const { pairKeyCol, specOfTable } = require('../src/services/seedSync/registry.js');
+const plan2Migration = require('../migrations/1714440790000_seed_sync_plan2.js');
+
+const PE_NODE = {
+  sx_pe_a: ['core', 4, 9101, 9101, 'minor', 'sx pe a'],
+  sx_pe_b: ['core', 4, 9102, 9102, 'minor', 'sx pe b'],
+};
+
+// Inserts the sx_pe_ nodes in `order` (ids follow it), with `uuids` when
+// given, then the edge between them as LEAST/GREATEST local ids.
+async function sxPairEdge(pool, order, { uuids = {}, edgeUuid = null } = {}) {
+  for (const key of order) {
+    const [sector, ring, x, y, kind, label] = PE_NODE[key];
+    await pool.query(`INSERT INTO passive_nodes (key, sector, ring, x, y, kind, label, grants, sync_uuid)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, '[]'::jsonb, coalesce($8::uuid, gen_random_uuid()))`,
+    [key, sector, ring, x, y, kind, label, uuids[key] || null]);
+  }
+  const a = await idOf(pool, 'passive_nodes', 'key', 'sx_pe_a');
+  const b = await idOf(pool, 'passive_nodes', 'key', 'sx_pe_b');
+  await pool.query(`INSERT INTO passive_edges (a_id, b_id, sync_uuid)
+    VALUES ($1, $2, coalesce($3::uuid, gen_random_uuid()))`, [Math.min(a, b), Math.max(a, b), edgeUuid]);
+  return { a, b };
+}
+
+const peEdge = async (pool) => q1(pool, `SELECT e.a_id, e.b_id, e.sync_uuid FROM passive_edges e
+  JOIN passive_nodes n ON n.id = e.a_id WHERE n.key LIKE 'sx\\_pe\\_%'`);
+const sxRows = (d) => d.rows.filter((r) => String(r.key).includes('sx_pe_'));
+
+dbTest('skill_tree: passive_edges unorderedPair targets passive_nodes.key', async () => {
+  assert.deepStrictEqual(pairKeyCol(specOfTable('passive_edges')), { table: 'passive_nodes', keyCol: 'key' });
+});
+
+dbTest('skill_tree: an edge stored against key order -> LEAST/GREATEST backfill uuid, key-ordered file, take-git writes LEAST/GREATEST ids', async (t, pool) => {
+  // b first: id(b) < id(a), so the stored pair is (b, a) -- the reverse of key order.
+  const { a, b } = await sxPairEdge(pool, ['sx_pe_b', 'sx_pe_a']);
+  assert.ok(b < a, 'local id order is the reverse of key order');
+  assert.deepStrictEqual(await peEdge(pool).then((e) => [e.a_id, e.b_id]), [b, a]);
+
+  // The migration's own backfill expression gives the key-ordered uuid.
+  const [, keyExpr, joins] = plan2Migration._TABLES.find(([table]) => table === 'passive_edges');
+  const sqlUuid = (await q1(pool, `SELECT md5('s2sync:passive_edges:' || ${keyExpr})::uuid::text AS u
+    FROM passive_edges t ${joins} WHERE t.a_id = $1 AND t.b_id = $2`, [b, a])).u;
+  assert.strictEqual(sqlUuid, deterministicUuid('passive_edges', 'sx_pe_a|sx_pe_b'));
+
+  await exportGroup(pool, 'skill_tree');
+  const edgeUuid = (await peEdge(pool)).sync_uuid;
+  const doc = JSON.parse(fs.readFileSync(fileFor('skill_tree'), 'utf8'));
+  const fileEdge = doc.tables.passive_edges.find((r) => r.sync_uuid === edgeUuid);
+  assert.strictEqual(fileEdge.a_id, await uuidOf(pool, 'passive_nodes', 'key', 'sx_pe_a'), 'file pair is key-ordered');
+  assert.strictEqual(fileEdge.b_id, await uuidOf(pool, 'passive_nodes', 'key', 'sx_pe_b'));
+  assert.strictEqual((await diffGroup(pool, 'skill_tree')).status, 'in_sync', 'export then diff is in sync');
+
+  // Round trip: the edge deleted here, seeded back from git (take git).
+  await pool.query('DELETE FROM passive_edges WHERE sync_uuid = $1', [edgeUuid]);
+  const p = await previewSeed(pool, 'skill_tree');
+  assert.deepStrictEqual(p.rows.map((r) => [r.table, r.syncUuid, r.key, r.kind]),
+    [['passive_edges', edgeUuid, 'sx_pe_a → sx_pe_b', 'deleted_here']]);
+  await applySeed(pool, 'skill_tree', { [edgeUuid]: 'git' }, { signature: p.signature }); // no 23514
+  assert.deepStrictEqual(await peEdge(pool), { a_id: b, b_id: a, sync_uuid: edgeUuid }, 'written LEAST/GREATEST');
+  const after = await diffGroup(pool, 'skill_tree');
+  assert.strictEqual(after.status, 'in_sync');
+  assert.deepStrictEqual(after.rows, []);
+});
+
+dbTest('skill_tree: a second PC with the edge stored in swapped local id order diffs in sync / adopt, never new + only_here', async (t, pool) => {
+  // PC 1: ids against key order; export.
+  await sxPairEdge(pool, ['sx_pe_b', 'sx_pe_a']);
+  await exportGroup(pool, 'skill_tree');
+  const uuids = {
+    sx_pe_a: await uuidOf(pool, 'passive_nodes', 'key', 'sx_pe_a'),
+    sx_pe_b: await uuidOf(pool, 'passive_nodes', 'key', 'sx_pe_b'),
+  };
+  const edgeUuid = (await peEdge(pool)).sync_uuid;
+
+  // PC 2: same nodes (same uuids), inserted in key order, so the stored pair
+  // is (a, b): swapped relative to PC 1. Same edge uuid (the deterministic
+  // backfill gives it on both PCs).
+  await pool.query("DELETE FROM passive_nodes WHERE key LIKE 'sx\\_pe\\_%'"); // edge cascades
+  const { a, b } = await sxPairEdge(pool, ['sx_pe_a', 'sx_pe_b'], { uuids, edgeUuid });
+  assert.ok(a < b, 'PC 2 local id order follows key order');
+  const same = await diffGroup(pool, 'skill_tree');
+  assert.deepStrictEqual(sxRows(same), [], 'same edge, swapped local ids: in sync');
+  assert.strictEqual(same.status, 'in_sync');
+
+  // PC 2 created the edge itself after the migration: a random uuid. It is
+  // the same edge by its (key-ordered) deep key: adopt, nothing to decide.
+  await pool.query('DELETE FROM passive_edges WHERE sync_uuid = $1', [edgeUuid]);
+  await pool.query('INSERT INTO passive_edges (a_id, b_id) VALUES ($1, $2)', [a, b]);
+  const fresh = await diffGroup(pool, 'skill_tree');
+  assert.deepStrictEqual(sxRows(fresh).map((r) => [r.table, r.syncUuid, r.key, r.kind, r.fields, r.defaultDecision]),
+    [['passive_edges', edgeUuid, 'sx_pe_a → sx_pe_b', 'adopt_identity', [], 'git']]);
+});
+
+// ---- Final review (2): a stale baseline of an in-sync row is refreshed -------
+
+dbTest('aura_effects: an in-sync row with a stale baseline gets B = hL on the next seed; a later git-only change is `changed`', async (t, pool) => {
+  await pool.query("INSERT INTO aura_effects (name, radius, dot_element) VALUES ('sx_bl_aura', 50, 'fire')");
+  await exportGroup(pool, 'aura_effects');
+  const uuid = await uuidOf(pool, 'aura_effects', 'name', 'sx_bl_aura');
+  const baseOf = async () => (await q1(pool,
+    "SELECT hash FROM seed_row_hashes WHERE group_id = 'aura_effects' AND sync_uuid = $1", [uuid])).hash;
+  const hL = await baseOf();
+  await pool.query("UPDATE seed_row_hashes SET hash = 'stale' WHERE group_id = 'aura_effects' AND sync_uuid = $1", [uuid]);
+
+  const p = await previewSeed(pool, 'aura_effects');
+  assert.deepStrictEqual(p.rows, [], 'local == git: nothing listed');
+  await applySeed(pool, 'aura_effects', {}, { signature: p.signature });
+  assert.strictEqual(await baseOf(), hL, 'baseline refreshed to the local hash');
+
+  const file = fileFor('aura_effects');
+  const doc = JSON.parse(fs.readFileSync(file, 'utf8'));
+  doc.tables.aura_effects.find((r) => r.name === 'sx_bl_aura').radius = 70;
+  fs.writeFileSync(file, `${stableStringify(doc)}\n`);
+  const d = await diffGroup(pool, 'aura_effects');
+  assert.deepStrictEqual(d.rows.map((r) => [r.key, r.kind]), [['sx_bl_aura', 'changed']]);
+});
+
+test('mapWriteError: a check violation (23514) is a conflict refusal naming the constraint, never a 500', () => {
+  const { _mapWriteError } = require('../src/services/seedSync/applySeed.js');
+  const e = _mapWriteError(Object.assign(new Error('violates check'), { code: '23514', constraint: 'passive_edges_ordered' }));
+  assert.ok(e instanceof SyncRefused);
+  assert.strictEqual(e.code, 'conflict');
+  assert.deepStrictEqual(e.details, { constraint: 'passive_edges_ordered' });
+});

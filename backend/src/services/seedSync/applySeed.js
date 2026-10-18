@@ -320,6 +320,15 @@ async function dropBaselines(db, groupId, uuids) {
 // a kept local row holds) is a refusal, not a 500. Constraint name only: the
 // pg detail carries the clashing values.
 function mapWriteError(e) {
+  // 23514 (check violation, e.g. passive_edges a_id < b_id) is a backstop:
+  // apply orders unordered pairs, so it should never fire -- but a refusal
+  // with the constraint name beats a 500.
+  if (e && e.code === '23514') {
+    const constraint = e.constraint || null;
+    return new SyncRefused('conflict',
+      `a git row would break a check constraint${constraint ? ` (${constraint})` : ''}; keep it local or fix the row`,
+      { constraint });
+  }
   if (e && e.code === '23505') {
     const constraint = e.constraint || null;
     return new SyncRefused('conflict',
@@ -480,14 +489,24 @@ function pendingFor(spec, maps, written) {
 // self-reference such as item_types.ammo_type_id) is written NULL now and
 // queued in `deferred` for the second pass. checkWrites already proved every
 // ref resolvable, so anything else unresolved is a bug.
+// An unorderedPair spec (passive_edges) is written with the two resolved
+// local ids LEAST/GREATEST: its CHECK (a_id < b_id) is on local ids, whose
+// order differs between PCs.
 async function resolveForWrite(spec, gitRow, maps, written, order, deferred) {
   const { row, missing } = await resolveRow(gitRow, spec, maps, pendingFor(spec, maps, written));
   for (const m of missing) {
     if (!(order.has(m.target) && order.get(m.target) >= order.get(spec.table))) {
       throw new Error(`seed-sync: ${spec.table}.${m.column} = ${m.value} did not resolve`);
     }
+    if (spec.unorderedPair && spec.unorderedPair.includes(m.column)) {
+      throw new Error(`seed-sync: ${spec.table}.${m.column} is half of an unordered pair; it cannot be deferred`);
+    }
     row[m.column] = null;
     deferred.push({ spec, uuid: gitRow.sync_uuid, column: m.column, value: m.value });
+  }
+  if (spec.unorderedPair) {
+    const [a, b] = spec.unorderedPair;
+    if (row[a] != null && row[b] != null && Number(row[a]) > Number(row[b])) [row[a], row[b]] = [row[b], row[a]];
   }
   return row;
 }
@@ -605,8 +624,11 @@ async function applySeed(pool, groupId, decisions, { signature } = {}) {
       const one = { ...d.spec, refs: { [d.column]: d.spec.refs[d.column] } };
       const { row, missing } = await resolveRow({ [d.column]: d.value }, one, m, pendingFor(one, m, written));
       if (missing.length) throw new Error(`seed-sync: ${d.spec.table}.${d.column} = ${d.value} did not resolve`);
-      await client.query(
+      const res = await client.query(
         `UPDATE ${quoteIdent(d.spec.table)} SET ${quoteIdent(d.column)} = $1 WHERE sync_uuid = $2`, [row[d.column], d.uuid]);
+      if (res.rowCount !== 1) {
+        throw new Error(`seed-sync: second pass ${d.spec.table}.${d.column} of ${d.uuid}: expected 1 row, got ${res.rowCount}`);
+      }
     }
     // 4. Renames: the admin PUT's name cascades, in this transaction.
     for (const r of orderRenames(renames)) await cascades[r.table](client, r.from, r.to);
@@ -617,7 +639,8 @@ async function applySeed(pool, groupId, decisions, { signature } = {}) {
     // changed/edited_here/adopt_identity/new -> B = hG (next diff:
     // not_exported / deleted_here); deleted_in_git -> drop B (next: only_here);
     // deleted_here/not_exported/only_here -> untouched. Rows already identical
-    // with no B -> B = hL (first sync).
+    // with a missing or stale B -> B = hL (first sync, or a B written by an
+    // older export form).
     const ACK = new Set(['changed', 'edited_here', 'adopt_identity', 'new']);
     for (const { row } of [...by('git'), ...by('local', (r) => ACK.has(r.kind))]) {
       await setBaseline(client, groupId, row.syncUuid, gitOf(cd, row).hash);
@@ -641,4 +664,6 @@ async function applySeed(pool, groupId, decisions, { signature } = {}) {
   return result;
 }
 
-module.exports = { previewSeed, applySeed, ALLOWED, KEY_CLASH_REASON, annotate, renameCascadesFor };
+module.exports = {
+  previewSeed, applySeed, ALLOWED, KEY_CLASH_REASON, annotate, renameCascadesFor, _mapWriteError: mapWriteError,
+};
