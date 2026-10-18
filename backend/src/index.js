@@ -39,6 +39,8 @@ const { DEFAULT_SPEC_DIR } = require('./services/specFileLocator.js');
 require('dotenv').config();
 
 const app = express();
+// SOMET-637: /api/seed-export/restart compares seed runs against this.
+const PROCESS_STARTED_AT = new Date();
 const port = process.env.PORT || 3101;
 
 // Who a request came from, when something else terminated the connection
@@ -168,6 +170,7 @@ const progressionRoutes = require('./api/progressionRoutes.js');
 const passiveTreeRoutes = require('./api/passiveTreeRoutes.js');
 const passiveNodesRoutes = require('./api/passiveNodesRoutes.js');
 const auraEffectsRoutes = require('./api/auraEffectsRoutes.js');
+const seedExportRoutes = require('./api/seedExportRoutes.js');
 const creatureSkillsRoutes = require('./api/creatureSkillsRoutes.js');
 const characterRoutes = require('./api/characterRoutes.js');
 const { createQuestsRouter } = require('./routes/questsRoutes.js');
@@ -578,6 +581,7 @@ app.use('/api/passive-tree', passiveTreeRoutes(guardPool));
 // player's read-only view of the same table.
 app.use('/api/passive-nodes', passiveNodesRoutes(guardPool));
 app.use('/api/aura-effects', auraEffectsRoutes(guardPool));
+app.use('/api/seed-export', seedExportRoutes(guardPool, { processStartedAt: PROCESS_STARTED_AT }));
 app.use('/api/creature-skills', creatureSkillsRoutes(guardPool));
 
 // Character slots (SOMET-259): list / create / delete, plus the playable-class

@@ -79,3 +79,4 @@ __pycache__/
 .lh
 .history
 .vscode-upload.json
+backend/src/restart-trigger.json
