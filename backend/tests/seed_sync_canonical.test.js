@@ -34,3 +34,11 @@ test('canonicalRow keeps only listed columns plus sync_uuid, sorted', () => {
   assert.deepStrictEqual(Object.keys(r), ['alpha', 'sync_uuid', 'zeta']);
   assert.strictEqual(r.alpha, 1);
 });
+
+test('date and timestamp-without-tz Dates use LOCAL parts (TZ independent); timestamptz is absolute', () => {
+  assert.strictEqual(canonicalValue(new Date(2026, 9, 18, 0, 0, 0), 'date'), '2026-10-18');
+  assert.strictEqual(canonicalValue(new Date(2026, 9, 18, 0, 0, 0), 'timestamp without time zone'), '2026-10-18T00:00:00.000');
+  assert.strictEqual(canonicalValue(new Date(2026, 0, 5, 23, 59, 58, 7), 'timestamp without time zone'), '2026-01-05T23:59:58.007');
+  assert.strictEqual(canonicalValue(new Date('2026-10-18T12:34:56.789Z'), 'timestamp with time zone'), '2026-10-18T12:34:56.789Z');
+  assert.strictEqual(canonicalValue('2026-10-18 01:02:03', 'timestamp without time zone'), '2026-10-18 01:02:03');
+});

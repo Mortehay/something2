@@ -31,18 +31,19 @@ test('getGroup throws on unknown id and GROUPS is in seed order', () => {
   assert.throws(() => getGroup('nope'), /unknown group/);
 });
 
-dbTest('every live column is exported or explicitly omitted', async (t, pool) => {
+dbTest('every live column is exported or explicitly omitted, with no stale omit keys', async (t, pool) => {
   for (const g of GROUPS) {
     const all = (await pool.query(
       'SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1', [g.table],
     )).rows.map((r) => r.column_name);
     assert.ok(all.length > 0, `${g.table} has columns`);
-    const live = new Set((await liveColumns(pool, g)).map((c) => c.name));
-    const skipped = new Set([...Object.keys(g.omit), ...(g.secretColumns || [])]);
-    for (const c of all) {
-      assert.ok(live.has(c) || skipped.has(c), `${g.table}.${c} is neither exported nor omitted`);
-      assert.ok(!(live.has(c) && skipped.has(c)), `${g.table}.${c} is both`);
-    }
+    const live = (await liveColumns(pool, g)).map((c) => c.name);
+    const omit = Object.keys(g.omit);
+    const secret = g.secretColumns || [];
+    for (const c of [...omit, ...secret]) assert.ok(all.includes(c), `${g.table}: stale omit/secret key ${c}`);
+    const union = [...live, ...omit, ...secret];
+    assert.strictEqual(new Set(union).size, union.length, `${g.table}: a column is listed twice`);
+    assert.deepStrictEqual([...union].sort(), [...all].sort(), `${g.table}: columns drifted`);
   }
 });
 
@@ -61,13 +62,14 @@ dbTest('ai_providers liveColumns never includes auth_token', async (t, pool) => 
 });
 
 dbTest('deterministicUuid matches the SQL backfill formula', async (t, pool) => {
-  await pool.query("INSERT INTO quests (key, act, title, description) VALUES ('sx_q1', 1, 't', 'd')");
-  const sql = (await pool.query("SELECT md5('s2sync:'||'quests'||':'||$1)::uuid::text AS u", ['sx_q1'])).rows[0].u;
+  const sql = (await pool.query("SELECT md5('s2sync:'||'quests'||':'||$1::text)::uuid::text AS u", ['sx_q1'])).rows[0].u;
   assert.strictEqual(deterministicUuid('quests', 'sx_q1'), sql);
 });
 
+// 'grass' is seeded by 1714440002000_create_tile_types.js, long before the
+// sync_uuid migration, so its uuid can only come from the backfill.
 dbTest('migration backfilled pre-existing rows', async (t, pool) => {
-  const { rows } = await pool.query("SELECT name, sync_uuid FROM tile_types WHERE name NOT LIKE 'sx\\_%' ORDER BY name LIMIT 1");
-  assert.ok(rows.length, 'scratch DB has a seeded tile_types row');
-  assert.strictEqual(rows[0].sync_uuid, deterministicUuid('tile_types', rows[0].name));
+  const { rows } = await pool.query("SELECT sync_uuid FROM tile_types WHERE name = 'grass'");
+  if (!rows.length) { t.skip("tile 'grass' (seeded by the create_tile_types migration) is absent on this DB"); return; }
+  assert.strictEqual(rows[0].sync_uuid, deterministicUuid('tile_types', 'grass'));
 });

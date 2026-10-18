@@ -24,8 +24,14 @@ function canonicalValue(value, dataType) {
   if (value === null || value === undefined) return null;
   if (NUMERIC_TYPES.has(dataType)) return Number(value);
   if (TIME_TYPES.has(dataType)) {
-    if (value instanceof Date) return value.toISOString();
-    return value;
+    if (!(value instanceof Date)) return value;
+    // node-pg builds `date` and `timestamp without time zone` as LOCAL-time
+    // Dates, so toISOString() would shift by the machine's TZ. Read local parts.
+    if (dataType === 'timestamp with time zone') return value.toISOString();
+    const p2 = (n) => String(n).padStart(2, '0');
+    const day = `${String(value.getFullYear()).padStart(4, '0')}-${p2(value.getMonth() + 1)}-${p2(value.getDate())}`;
+    if (dataType === 'date') return day;
+    return `${day}T${p2(value.getHours())}:${p2(value.getMinutes())}:${p2(value.getSeconds())}.${String(value.getMilliseconds()).padStart(3, '0')}`;
   }
   if (dataType === 'json' || dataType === 'jsonb') return sortDeep(value);
   return value;
