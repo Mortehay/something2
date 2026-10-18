@@ -39,7 +39,7 @@ describe('SeedPreviewSection multi-table group (SOMET-639)', () => {
     expect(html.indexOf('Entities')).toBeGreaterThan(-1);
     expect(html.indexOf('Entities')).toBeLessThan(html.indexOf('Drops'));
     expect(html).toContain('Goblin → Rusty Sword');
-    expect(html).toContain('points to a Items row');
+    expect(html).toContain('points to a missing Items row');
     expect(html).toContain('Setting xp_rate: must be &gt; 0');
     expect(html).toContain('older database schema');
   });

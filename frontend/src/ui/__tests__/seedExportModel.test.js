@@ -3,7 +3,7 @@ import {
   statusBadge, initialDecisions, bulkSet, applyGate, allowedDecisions, kindLabel, exportBlocked, previewSignature,
   exportBlockReason, seedBlockReason, decisionLabel, seedRequestBody,
   seedButtonLabel, exportAllPlan, seedAllGroups, historyPageCount, exportAllMessage, seedAllGate, pluralize,
-  tableLabel, warningText, warningIsError, refusalText, groupRowsByTable,
+  tableLabel, warningText, warningIsError, refusalText, groupRowsByTable, isRename,
 } from '../../games/something2/seedExportModel.js';
 
 const row = (syncUuid, kind, defaultDecision, blockedReason = null) => (
@@ -276,7 +276,9 @@ describe('multi-table helpers (SOMET-639)', () => {
     expect(warningText({ code: 'dangling_name', key: 'Goblin', column: 'aura', name: 'Frost Ring' }))
       .toBe("Goblin: aura 'Frost Ring' does not exist here");
     expect(warningText({ code: 'missing_ref', key: 'Goblin → Sword', column: 'item', target: 'item_types' }))
-      .toBe("Goblin → Sword: item points to a Items row that doesn't exist here — it will be refused");
+      .toBe('Goblin → Sword: item points to a missing Items row — it will be refused');
+    expect(warningText({ code: 'dangling_name' })).toBe("?: ? '?' does not exist here");
+    expect(warningText({ code: 'missing_ref' })).not.toContain('undefined');
     expect(warningText({ code: 'invalid_value', key: 'xp_rate', error: 'must be > 0' }))
       .toBe('Setting xp_rate: must be > 0 — it will be refused');
     expect(warningText({ code: 'zzz' })).toBe('zzz');
@@ -290,8 +292,10 @@ describe('multi-table helpers (SOMET-639)', () => {
   it('refusalText builds readable toasts', () => {
     const refs = [{ table: 'creature_drops', key: 'Goblin → Sword', column: 'item', target: 'item_types', value: 'Sword' }, { table: 'x', key: 'y', target: 'z' }];
     expect(refusalText('Creatures', { code: 'missing_ref', details: { refs } }))
-      .toBe("Can't seed Creatures: 2 references to missing rows (e.g. creature_drops/Goblin → Sword → item_types)");
-    expect(refusalText('Creatures', { code: 'missing_ref', details: { refs: [refs[0]] } })).toContain('1 reference to');
+      .toBe('Can\'t seed Creatures: 2 rows point to missing rows — e.g. Drops "Goblin → Sword": item → Items (Sword)');
+    expect(refusalText('C', { code: 'missing_ref', details: { refs: [{ table: 'quests', key: 'k', column: 'c', target: 'item_types', syncUuid: 'abcdef1234567' }] } }))
+      .toBe('Can\'t seed C: 1 row points to missing rows — e.g. Quests "k": c → Items (abcdef12)');
+    expect(refusalText('Creatures', { code: 'missing_ref', details: { refs: [refs[0]] } })).toContain('1 row points');
     expect(refusalText('Progression', { code: 'invalid_value', details: { key: 'xp_rate', error: 'must be > 0' } }))
       .toBe("Can't seed Progression: setting xp_rate is invalid (must be > 0)");
     expect(refusalText('X', { code: 'stale_preview', details: {} })).toBeNull();
@@ -308,5 +312,14 @@ describe('multi-table helpers (SOMET-639)', () => {
     expect(g.map((s) => s.label)).toEqual(['Entities', 'Behaviors', 'other']);
     expect(g[0].rows.map((r) => r.syncUuid)).toEqual(['2', '3']);
     expect(groupRowsByTable(rows, undefined)[0].table).toBe('creature_behaviors');
+  });
+});
+
+describe('isRename', () => {
+  it('flags name changes on entities and auras only', () => {
+    expect(isRename({ table: 'entity_types', fields: [{ name: 'name' }] })).toBe(true);
+    expect(isRename({ table: 'aura_effects', fields: [{ name: 'name' }] })).toBe(true);
+    expect(isRename({ table: 'entity_types', fields: [{ name: 'hp' }] })).toBe(false);
+    expect(isRename({ table: 'quests', fields: [{ name: 'name' }] })).toBe(false);
   });
 });

@@ -5,7 +5,7 @@ import { useMemo, useState } from 'react';
 import styled from 'styled-components';
 import {
   KINDS, kindLabel, allowedDecisions, bulkSet, decisionLabel,
-  warningText, warningIsError, groupRowsByTable,
+  warningText, warningIsError, groupRowsByTable, isRename,
 } from './seedExportModel.js';
 import { Btn, Muted } from './seedUi.jsx';
 
@@ -103,27 +103,28 @@ export default function PreviewSection({ data, decisions, setDecisions }) {
             <section key={sec.table}>
               {multi && <TableHead>{sec.label}</TableHead>}
               {sec.rows.map((r) => (
-            <RowBox key={r.syncUuid} $red={r.defaultDecision == null && !decisions[r.syncUuid]}>
-              <input type="checkbox" checked={picked.has(r.syncUuid)} onChange={() => togglePick(r.syncUuid)}
-                aria-label={`select ${r.key}`} />
-              <div>
-                <b>{String(r.key)}</b><Kind>{kindLabel(r.kind)}</Kind>
-                {r.fields.map((f) => (
-                  <Mono key={f.name}>{f.name}: <Old>{show(f.local)}</Old> → <New>{show(f.git)}</New></Mono>
-                ))}
-                {r.blockedReason && <Muted>{r.blockedReason}</Muted>}
-              </div>
-              <Seg>
-                {['git', 'delete', 'local'].filter((d) => allowedDecisions({ ...r, blockedReason: null }).includes(d)).map((d) => (
-                  <SegBtn key={d} $on={decisions[r.syncUuid] === d}
-                    disabled={!allowedDecisions(r).includes(d)}
-                    title={r.blockedReason && !allowedDecisions(r).includes(d) ? r.blockedReason : undefined}
-                    onClick={() => setDecisions((cur) => bulkSet(cur, [r.syncUuid], d, rows))}>
-                    {decisionLabel(r, d)}
-                  </SegBtn>
-                ))}
-              </Seg>
-            </RowBox>
+                <RowBox key={r.syncUuid} $red={r.defaultDecision == null && !decisions[r.syncUuid]}>
+                  <input type="checkbox" checked={picked.has(r.syncUuid)} onChange={() => togglePick(r.syncUuid)}
+                    aria-label={`select ${r.key}`} />
+                  <div>
+                    <b>{String(r.key)}</b><Kind>{kindLabel(r.kind)}</Kind>
+                    {r.fields.map((f) => (
+                      <Mono key={f.name}>{f.name}: <Old>{show(f.local)}</Old> → <New>{show(f.git)}</New></Mono>
+                    ))}
+                    {isRename(r) && <Muted>rename — references in worlds/biomes will follow</Muted>}
+                    {r.blockedReason && <Muted>{r.blockedReason}</Muted>}
+                  </div>
+                  <Seg>
+                    {['git', 'delete', 'local'].filter((d) => allowedDecisions({ ...r, blockedReason: null }).includes(d)).map((d) => (
+                      <SegBtn key={d} $on={decisions[r.syncUuid] === d}
+                        disabled={!allowedDecisions(r).includes(d)}
+                        title={r.blockedReason && !allowedDecisions(r).includes(d) ? r.blockedReason : undefined}
+                        onClick={() => setDecisions((cur) => bulkSet(cur, [r.syncUuid], d, rows))}>
+                        {decisionLabel(r, d)}
+                      </SegBtn>
+                    ))}
+                  </Seg>
+                </RowBox>
               ))}
             </section>
           ))}

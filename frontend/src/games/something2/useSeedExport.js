@@ -25,7 +25,9 @@ async function call(path, { method = "GET", body, label } = {}) {
     const d = json.details || {};
     const n = Array.isArray(d.uuids) ? d.uuids.length : null;
     const extra = [json.code, n ? `${n} row${n === 1 ? '' : 's'}` : null].filter(Boolean).join(': ');
-    const err = new Error(refusalText(label || 'this group', { code: json.code, details: d }) || (extra ? `${text} (${extra})` : text));
+    const refusal = refusalText(label || 'this group', { code: json.code, details: d });
+    const err = new Error(refusal || (extra ? `${text} (${extra})` : text));
+    err.refusal = Boolean(refusal);
     err.details = d;
     err.code = json.code;
     err.file = json.file;
@@ -161,7 +163,7 @@ export function useApplyAll() {
           const r = await call(`/groups/${encodeURIComponent(it.id)}/seed`, { method: "POST", body: it.body, label: it.label });
           out.push({ id: it.id, label: it.label, ok: true, summary: r.summary || {} });
         } catch (err) {
-          out.push({ id: it.id, label: it.label, ok: false, code: err.code, error: err.message });
+          out.push({ id: it.id, label: it.label, ok: false, code: err.code, error: err.message, refusal: err.refusal });
         }
       }
       return out;

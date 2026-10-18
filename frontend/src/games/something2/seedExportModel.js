@@ -201,11 +201,12 @@ const SCHEMA_OLDER = 'This export is from an older database schema; fields added
 // Preview warnings are { code, ... } objects (backend seedSync applySeed).
 export function warningText(w) {
   const code = w && typeof w === 'object' ? w.code : w;
+  const f = (v) => (v === undefined || v === null || v === '' ? '?' : v);
   switch (code) {
     case 'schema_older': return SCHEMA_OLDER;
-    case 'dangling_name': return `${w.key}: ${w.column} '${w.name}' does not exist here`;
-    case 'missing_ref': return `${w.key}: ${w.column} points to a ${tableLabel(w.target)} row that doesn't exist here — it will be refused`;
-    case 'invalid_value': return `Setting ${w.key}: ${w.error} — it will be refused`;
+    case 'dangling_name': return `${f(w.key)}: ${f(w.column)} '${f(w.name)}' does not exist here`;
+    case 'missing_ref': return `${f(w.key)}: ${f(w.column)} points to a missing ${w.target ? tableLabel(w.target) : '?'} row — it will be refused`;
+    case 'invalid_value': return `Setting ${f(w.key)}: ${f(w.error)} — it will be refused`;
     default: return String(code);
   }
 }
@@ -219,7 +220,8 @@ export function refusalText(groupLabel, err) {
   if (err && err.code === 'missing_ref' && Array.isArray(d.refs) && d.refs.length) {
     const n = d.refs.length;
     const r = d.refs[0];
-    return `Can't seed ${groupLabel}: ${pluralize(n, 'reference')} to missing rows (e.g. ${r.table}/${r.key} → ${r.target})`;
+    const val = r.value != null && r.value !== '' ? String(r.value) : String(r.syncUuid || r.uuid || '?').slice(0, 8);
+    return `Can't seed ${groupLabel}: ${n} ${n === 1 ? 'row points' : 'rows point'} to missing rows — e.g. ${tableLabel(r.table)} "${r.key}": ${r.column || '?'} → ${r.target ? tableLabel(r.target) : '?'} (${val})`;
   }
   if (err && err.code === 'invalid_value' && d.key !== undefined) {
     return `Can't seed ${groupLabel}: setting ${d.key} is invalid (${d.error})`;
@@ -240,3 +242,8 @@ export function groupRowsByTable(rows, tables) {
   const seq = [...order.filter((t) => by.has(t)), ...[...by.keys()].filter((t) => !order.includes(t))];
   return seq.map((table) => ({ table, label: tableLabel(table), rows: by.get(table) }));
 }
+
+// A name change on these tables cascades to worlds/biomes server-side.
+const RENAME_TABLES = new Set(['entity_types', 'aura_effects']);
+export const isRename = (row) => Boolean(row) && RENAME_TABLES.has(row.table)
+  && Array.isArray(row.fields) && row.fields.some((f) => f.name === 'name');

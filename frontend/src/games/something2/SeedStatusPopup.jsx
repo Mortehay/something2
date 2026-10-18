@@ -74,7 +74,7 @@ export default function SeedStatusPopup({ group, onClose, onExport, onSeed, expo
         {wantsRows && multi && !preview.isLoading && (
           <Muted>
             {tables.map((t) => {
-              const n = Object.values(t.counts || {}).reduce((a, b) => a + b, 0) - (t.counts?.in_sync || 0);
+              const n = Object.values(t.counts || {}).reduce((a, b) => a + b, 0);
               return `${tableLabel(t.table)}: ${n}`;
             }).join(' · ')}
           </Muted>
