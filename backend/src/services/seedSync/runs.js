@@ -1,8 +1,12 @@
-const os = require('node:os');
+// Never the hostname: in compose that is a random container id, which says
+// nothing about which PC an export came from.
+const UNNAMED_PC = 'unnamed-pc';
 
 function pcLabel() {
-  return process.env.SEED_PC_LABEL || os.hostname();
+  return process.env.SEED_PC_LABEL || UNNAMED_PC;
 }
+
+const pcLabelSet = () => Boolean(process.env.SEED_PC_LABEL);
 
 async function schemaVersion(db) {
   const { rows } = await db.query('SELECT max(name) AS v FROM pgmigrations');
@@ -49,4 +53,4 @@ async function recentRuns(db, { limit = 50, groupId } = {}) {
   return rows;
 }
 
-module.exports = { pcLabel, schemaVersion, startRun, finishRun, lastRuns, recentRuns };
+module.exports = { UNNAMED_PC, pcLabel, pcLabelSet, schemaVersion, startRun, finishRun, lastRuns, recentRuns };

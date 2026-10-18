@@ -328,11 +328,14 @@ function spyPool(pool) {
 dbTest('ai_providers diff never exposes auth_token', async (t, pool) => {
   const before = await diffGroup(pool, 'ai_providers');
   await pool.query(
-    `INSERT INTO ai_providers (name, base_url, request_template, auth_token) VALUES
-       ('sx_p', 'http://x', '{}', 'sx-secret'),
-       ('sx_q', 'http://q', '{}', 'sx-secret'),
-       ('sx_r', 'http://r', '{}', NULL),
-       ('sx_s', 'http://s', '{}', '')`);
+    `INSERT INTO ai_providers (name, base_url, request_template, auth_token, auth_header_name) VALUES
+       ('sx_p', 'http://x', '{}', 'sx-secret', 'Authorization'),
+       ('sx_q', 'http://q', '{}', 'sx-secret', 'Authorization'),
+       ('sx_r', 'http://r', '{}', NULL, 'Authorization'),
+       ('sx_s', 'http://s', '{}', '', 'X-Key'),
+       ('sx_t', 'http://t', '{}', NULL, NULL),
+       ('sx_u', 'http://u', '{}', '', ''),
+       ('sx_v', 'http://v', '{}', NULL, '  ')`);
   const p = await snap(pool, 'ai_providers', 'sx_p');
   const q = await snap(pool, 'ai_providers', 'sx_q');
   assert.ok(!('auth_token' in p));
@@ -351,7 +354,8 @@ dbTest('ai_providers diff never exposes auth_token', async (t, pool) => {
   const json = JSON.stringify(d);
   assert.ok(!json.includes('sx-secret'));
   assert.ok(!json.includes('auth_token'));
-  assert.strictEqual(d.tokensMissing - before.tokensMissing, 2, 'NULL and empty tokens counted');
+  assert.strictEqual(d.tokensMissing - before.tokensMissing, 2,
+    'NULL and empty tokens counted only where an auth header is configured');
   const quests = await diffGroup(pool, 'quests');
   assert.strictEqual(quests.tokensMissing, 0, 'only groups with secret columns count tokens');
 });
@@ -394,7 +398,8 @@ dbTest('status precedence', async (t, pool) => {
   assert.strictEqual(both.gitChanges, 1);
 
   // tokens_missing: below git_newer, above in_sync
-  await pool.query("INSERT INTO ai_providers (name, base_url, request_template) VALUES ('sx_p', 'http://x', '{}')");
+  await pool.query(
+    "INSERT INTO ai_providers (name, base_url, request_template, auth_header_name) VALUES ('sx_p', 'http://x', '{}', 'Authorization')");
   await exportGroup(pool, 'ai_providers');
   const tm = await diffGroup(pool, 'ai_providers');
   assert.ok(tm.tokensMissing >= 1);
@@ -405,6 +410,47 @@ dbTest('status precedence', async (t, pool) => {
   assert.strictEqual((await diffGroup(pool, 'ai_providers')).status, 'git_newer');
   await pool.query("UPDATE ai_providers SET model = 'sx-m' WHERE name = 'sx_p'");
   assert.strictEqual((await diffGroup(pool, 'ai_providers')).status, 'local_edits');
+});
+
+dbTest('schema_newer: status right after never_exported; export refuses', async (t, pool) => {
+  await addQuest(pool, 'sx_a');
+  await exportGroup(pool, 'quests');
+  const doc = JSON.parse(fs.readFileSync(fileFor('quests'), 'utf8'));
+  // Also a git change and a local edit: schema_newer still wins.
+  doc.rows.find((r) => r.key === 'sx_a').title = 'sx git';
+  doc.header.schema_version = '9999999999999_from_the_future';
+  const text = `${stableStringify(doc)}\n`;
+  fs.writeFileSync(fileFor('quests'), text);
+  await addQuest(pool, 'sx_b');
+  const d = await diffGroup(pool, 'quests');
+  assert.strictEqual(d.status, 'schema_newer');
+  assert.strictEqual(d.counts.changed, 1, 'counts still computed');
+  const runsBefore = (await pool.query("SELECT count(*)::int AS n FROM seed_export_runs WHERE group_id='quests'")).rows[0].n;
+  await assert.rejects(exportGroup(pool, 'quests'),
+    (e) => e instanceof SyncRefused && e.code === 'schema_newer' && e.message === 'run migrations first');
+  assert.strictEqual(fs.readFileSync(fileFor('quests'), 'utf8'), text, 'file untouched');
+  const runsAfter = (await pool.query("SELECT count(*)::int AS n FROM seed_export_runs WHERE group_id='quests'")).rows[0].n;
+  assert.strictEqual(runsAfter, runsBefore);
+  // An older or equal version is not schema_newer.
+  const current = (await pool.query('SELECT max(name) AS v FROM pgmigrations')).rows[0].v;
+  fs.writeFileSync(fileFor('quests'), `${stableStringify({ ...doc, header: { ...doc.header, schema_version: current } })}\n`);
+  assert.strictEqual((await diffGroup(pool, 'quests')).status, 'local_edits');
+});
+
+dbTest('row_count mismatch and non-uuid sync_uuid are bad files', async (t, pool) => {
+  const u = crypto.randomUUID();
+  const write = (header, rows) => fs.writeFileSync(fileFor('quests'), JSON.stringify({ header: { group: 'quests', ...header }, rows }));
+  write({ row_count: 2 }, [{ key: 'sx_a', sync_uuid: u }]);
+  await assert.rejects(diffGroup(pool, 'quests'), (e) => e instanceof SyncFileError && /row_count/.test(e.message));
+  write({}, [{ key: 'sx_a', sync_uuid: u }]);
+  await assert.rejects(diffGroup(pool, 'quests'), (e) => e instanceof SyncFileError && /row_count/.test(e.message));
+  for (const bad of [u.toUpperCase(), 'not-a-uuid', `{${u}}`, u.replace(/-/g, '')]) {
+    write({ row_count: 1 }, [{ key: 'sx_a', sync_uuid: bad }]);
+    await assert.rejects(diffGroup(pool, 'quests'),
+      (e) => e instanceof SyncFileError && e.file === 'quests.json' && /not a lowercase uuid/.test(e.message), bad);
+  }
+  write({ row_count: 0 }, []);
+  assert.strictEqual((await diffGroup(pool, 'quests')).header.row_count, 0);
 });
 
 dbTest('invalid JSON file raises SyncFileError with file name', async (t, pool) => {

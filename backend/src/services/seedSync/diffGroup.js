@@ -2,6 +2,7 @@ const { getGroup, liveColumns } = require('./registry.js');
 const { canonicalRow, rowHash, stableStringify } = require('./canonical.js');
 const { readExport } = require('./exportGroup.js');
 const { SyncFileError } = require('./errors.js');
+const { schemaVersion } = require('./runs.js');
 
 // Three-way diff of one group: git file (G) vs local DB (L) vs the baseline
 // hash written at the last export/seed (B). Decides what a seed may overwrite.
@@ -26,6 +27,9 @@ const HEADER_FIELDS = ['group', 'exported_at', 'exported_by', 'schema_version', 
 
 const quoteIdent = (name) => `"${String(name).replace(/"/g, '""')}"`;
 const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+// Lowercase canonical uuid text, exactly as Postgres prints a uuid: a file
+// value in any other form would never match the local row's sync_uuid.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 function zeroCounts() {
   const out = {};
@@ -33,11 +37,14 @@ function zeroCounts() {
   return out;
 }
 
-// Token presence only: the secret values are never read into JS.
+// Token presence only: the secret values are never read into JS. A row only
+// needs its token when `secretNeededIf` (e.g. auth_header_name) is non-blank:
+// a provider with no auth header never sends one.
 async function countTokensMissing(db, group) {
   const secrets = group.secretColumns || [];
   if (!secrets.length) return 0;
-  const cond = secrets.map((c) => `${quoteIdent(c)} IS NULL OR ${quoteIdent(c)} = ''`).join(' OR ');
+  let cond = secrets.map((c) => `${quoteIdent(c)} IS NULL OR ${quoteIdent(c)} = ''`).join(' OR ');
+  if (group.secretNeededIf) cond = `btrim(coalesce(${quoteIdent(group.secretNeededIf)}, '')) <> '' AND (${cond})`;
   const { rows } = await db.query(`SELECT count(*)::int AS n FROM ${quoteIdent(group.table)} WHERE ${cond}`);
   return rows[0].n;
 }
@@ -52,6 +59,9 @@ function validateDoc(doc, group, groupId) {
   doc.rows.forEach((r, i) => {
     if (!r || typeof r !== 'object' || Array.isArray(r)) throw new SyncFileError(`${file}: row ${i} is not an object`, file);
     if (typeof r.sync_uuid !== 'string' || !r.sync_uuid) throw new SyncFileError(`${file}: row ${i} has no sync_uuid`, file);
+    if (!UUID_RE.test(r.sync_uuid)) {
+      throw new SyncFileError(`${file}: row ${i} sync_uuid is not a lowercase uuid`, file);
+    }
     if (seen.has(r.sync_uuid)) throw new SyncFileError(`${file}: duplicate sync_uuid ${r.sync_uuid}`, file);
     seen.add(r.sync_uuid);
     if (r[group.naturalKey] === undefined || r[group.naturalKey] === null) {
@@ -61,6 +71,12 @@ function validateDoc(doc, group, groupId) {
     if (seenKeys.has(nk)) throw new SyncFileError(`${file}: duplicate ${group.naturalKey} ${nk}`, file);
     seenKeys.add(nk);
   });
+  // A truncated or hand-merged file: rows went missing (or were added) after
+  // the header was written. Checked last so a bad row is named first.
+  if (doc.header.row_count !== doc.rows.length) {
+    throw new SyncFileError(
+      `${file}: header row_count ${JSON.stringify(doc.header.row_count)} but ${doc.rows.length} rows`, file);
+  }
 }
 
 // Only the known header fields: the file is hand-editable, never echo extras.
@@ -88,7 +104,8 @@ async function readLocal(db, group, groupId) {
   const { rows: base } = await db.query(
     'SELECT sync_uuid, hash FROM seed_row_hashes WHERE group_id = $1', [groupId]);
   const tokensMissing = await countTokensMissing(db, group);
-  return { columns, rows, base, tokensMissing };
+  const dbVersion = await schemaVersion(db);
+  return { columns, rows, base, tokensMissing, dbVersion };
 }
 
 // A checked-out client (it has release()) is used as-is: the caller owns the
@@ -119,7 +136,7 @@ async function computeDiff(db, groupId) {
   const group = getGroup(groupId);
   const doc = await readExport(groupId); // SyncFileError propagates
   if (doc) validateDoc(doc, group, groupId);
-  const { columns, rows: localRaw, base, tokensMissing } = await loadLocal(db, group, groupId);
+  const { columns, rows: localRaw, base, tokensMissing, dbVersion } = await loadLocal(db, group, groupId);
   const counts = zeroCounts();
 
   if (!doc) {
@@ -194,8 +211,13 @@ async function computeDiff(db, groupId) {
   const divergentAdopts = out.filter((r) => r.kind === 'adopt_identity' && r.fields.length).length;
   const localEdits = LOCAL_EDIT_KINDS.reduce((n, k) => n + counts[k], 0) + divergentAdopts;
   const gitChanges = GIT_CHANGE_KINDS.reduce((n, k) => n + counts[k], 0);
+  // A file from a newer schema (header.schema_version > this DB's latest
+  // migration): its columns may not exist here yet. Ranks right after
+  // never_exported; export and seed both refuse it.
+  const fileVersion = doc.header.schema_version != null ? String(doc.header.schema_version) : '';
   let status = 'in_sync';
-  if (localEdits > 0) status = 'local_edits';
+  if (fileVersion > dbVersion) status = 'schema_newer';
+  else if (localEdits > 0) status = 'local_edits';
   else if (gitChanges > 0) status = 'git_newer';
   else if (tokensMissing > 0) status = 'tokens_missing';
 
@@ -206,6 +228,7 @@ async function computeDiff(db, groupId) {
     local: localByUuid,
     localByKey,
     inSync,
+    dbVersion,
     diff: {
       groupId, header: pickHeader(doc.header), status, counts, localEdits, gitChanges, tokensMissing, rows: out,
     },

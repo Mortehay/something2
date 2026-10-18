@@ -75,6 +75,19 @@ dbTest('ai_providers liveColumns never includes auth_token', async (t, pool) => 
   assert.ok(names.includes('base_url'));
 });
 
+// Per-PC choices and art travel separately (final review rulings).
+dbTest('per-PC and art columns are omitted, with their reason', async (t, pool) => {
+  const ai = getGroup('ai_providers');
+  assert.ok(!(await liveColumns(pool, ai)).some((c) => c.name === 'is_active'));
+  assert.strictEqual(ai.omit.is_active, 'per-PC choice: which box this PC can reach');
+  const tt = getGroup('tile_types');
+  const ttNames = (await liveColumns(pool, tt)).map((c) => c.name);
+  for (const c of ['render_mode', 'sprite']) {
+    assert.ok(!ttNames.includes(c), c);
+    assert.strictEqual(tt.omit[c], 'art group (plan 3)');
+  }
+});
+
 dbTest('deterministicUuid matches the SQL backfill formula', async (t, pool) => {
   const sql = (await pool.query("SELECT md5('s2sync:'||'quests'||':'||$1::text)::uuid::text AS u", ['sx_q1'])).rows[0].u;
   assert.strictEqual(deterministicUuid('quests', 'sx_q1'), sql);

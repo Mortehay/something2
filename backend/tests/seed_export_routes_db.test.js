@@ -75,8 +75,18 @@ function appFor(pool, startedAt = new Date(0)) {
 
 const ROUTES = [
   ['get', '/groups'], ['get', '/groups/quests/preview'], ['post', '/groups/quests/export'],
-  ['post', '/groups/quests/seed'], ['get', '/runs'], ['get', '/restart'], ['post', '/restart'],
+  ['post', '/groups/quests/seed'], ['get', '/runs'], ['get', '/restart'], ['post', '/restart'], ['get', '/meta'],
 ];
+
+// Preview, then post the given decisions with the preview's signature (the
+// UI's contract).
+async function previewThenSeed(app, h, groupId, decisions) {
+  const prev = await request(app).get(`/api/seed-export/groups/${groupId}/preview`).set(h);
+  assert.strictEqual(prev.status, 200, prev.text);
+  assert.match(prev.body.signature, /^[0-9a-f]{64}$/);
+  return request(app).post(`/api/seed-export/groups/${groupId}/seed`).set(h)
+    .send({ decisions, signature: prev.body.signature });
+}
 
 dbTest('routes require admin', async ({ pool, player, trigger }) => {
   const app = appFor(pool);
@@ -132,9 +142,15 @@ dbTest('unknown group is 404; bad bodies and limits', async ({ pool, admin }) =>
   assert.strictEqual((await request(app).post('/api/seed-export/groups/nope/seed').set(h).send({ decisions: {} })).status, 404);
   assert.strictEqual((await request(app).get('/api/seed-export/runs?group=nope').set(h)).status, 404);
   for (const bad of [undefined, null, [], 'x', { 'not-a-uuid': 'git' }, { '00000000-0000-0000-0000-000000000000': 5 }]) {
-    const r = await request(app).post('/api/seed-export/groups/quests/seed').set(h).send({ decisions: bad });
+    const r = await request(app).post('/api/seed-export/groups/quests/seed').set(h).send({ decisions: bad, signature: 's' });
     assert.strictEqual(r.status, 400, JSON.stringify(bad));
     assert.ok(r.body.error);
+  }
+  // The preview's signature is required.
+  for (const sig of [undefined, null, 5, '', {}]) {
+    const r = await request(app).post('/api/seed-export/groups/quests/seed').set(h).send({ decisions: {}, signature: sig });
+    assert.strictEqual(r.status, 400, JSON.stringify(sig));
+    assert.match(r.body.error, /signature/);
   }
   await exportGroup(pool, 'tile_types');
   await exportGroup(pool, 'tile_types');
@@ -158,8 +174,7 @@ dbTest('POST seed with undecided rows -> 409 undecided', async ({ pool, admin })
   fs.writeFileSync(file, JSON.stringify(doc, null, 2));
   await pool.query('DELETE FROM seed_row_hashes WHERE sync_uuid = $1', [row.sync_uuid]);
   const app = appFor(pool);
-  const res = await request(app).post('/api/seed-export/groups/quests/seed')
-    .set('Authorization', admin.auth).send({ decisions: {} });
+  const res = await previewThenSeed(app, { Authorization: admin.auth }, 'quests', {});
   assert.strictEqual(res.status, 409);
   assert.strictEqual(res.body.code, 'undecided');
   assert.ok(res.body.error);
@@ -197,7 +212,7 @@ dbTest('restart required after seed; POST /restart writes the trigger', async ({
   await exportGroup(pool, 'tile_types');
   assert.deepStrictEqual((await request(app).get('/api/seed-export/restart').set(h)).body, { required: false },
     'an export does not require a restart');
-  const seed = await request(app).post('/api/seed-export/groups/tile_types/seed').set(h).send({ decisions: {} });
+  const seed = await previewThenSeed(app, h, 'tile_types', {});
   assert.strictEqual(seed.status, 200, seed.text);
   assert.ok(seed.body.runId);
   assert.deepStrictEqual((await request(app).get('/api/seed-export/restart').set(h)).body, { required: true });
@@ -208,4 +223,48 @@ dbTest('restart required after seed; POST /restart writes the trigger', async ({
   const r = await request(app).post('/api/seed-export/restart').set(h);
   assert.deepStrictEqual(r.body, { ok: true });
   assert.ok(!Number.isNaN(Date.parse(JSON.parse(fs.readFileSync(trigger, 'utf8')).at)));
+});
+
+dbTest('POST seed with a stale signature -> 409 stale_preview, nothing written', async ({ pool, admin }) => {
+  await pool.query("INSERT INTO quests (key, title, act, description) VALUES ('sx_a', 'sx t', 1, 'sx d')");
+  await exportGroup(pool, 'quests');
+  const file = fileFor('quests');
+  const doc = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const row = doc.rows.find((r) => r.key === 'sx_a');
+  row.title = 'sx git';
+  fs.writeFileSync(file, JSON.stringify(doc, null, 2));
+  const app = appFor(pool);
+  const h = { Authorization: admin.auth };
+  const prev = await request(app).get('/api/seed-export/groups/quests/preview').set(h);
+  const r = prev.body.rows.find((x) => x.key === 'sx_a');
+  assert.deepStrictEqual([r.kind, r.defaultDecision], ['changed', 'git']);
+  await pool.query("UPDATE quests SET title = 'sx local edit' WHERE key = 'sx_a'");
+  const res = await request(app).post('/api/seed-export/groups/quests/seed').set(h)
+    .send({ decisions: { [row.sync_uuid]: 'git' }, signature: prev.body.signature });
+  assert.strictEqual(res.status, 409, res.text);
+  assert.strictEqual(res.body.code, 'stale_preview');
+  const q = await pool.query("SELECT title FROM quests WHERE key = 'sx_a'");
+  assert.strictEqual(q.rows[0].title, 'sx local edit');
+});
+
+dbTest('GET /meta reports the PC label and whether it is set (never the hostname)', async ({ pool, admin }) => {
+  const app = appFor(pool);
+  const h = { Authorization: admin.auth };
+  const prev = process.env.SEED_PC_LABEL;
+  try {
+    delete process.env.SEED_PC_LABEL;
+    assert.deepStrictEqual((await request(app).get('/api/seed-export/meta').set(h)).body,
+      { pcLabel: 'unnamed-pc', pcLabelSet: false });
+    process.env.SEED_PC_LABEL = '';
+    assert.deepStrictEqual((await request(app).get('/api/seed-export/meta').set(h)).body,
+      { pcLabel: 'unnamed-pc', pcLabelSet: false });
+    process.env.SEED_PC_LABEL = 'sx-desk';
+    assert.deepStrictEqual((await request(app).get('/api/seed-export/meta').set(h)).body,
+      { pcLabel: 'sx-desk', pcLabelSet: true });
+    delete process.env.SEED_PC_LABEL;
+    await exportGroup(pool, 'quests');
+    assert.strictEqual(JSON.parse(fs.readFileSync(fileFor('quests'), 'utf8')).header.exported_by, 'unnamed-pc');
+  } finally {
+    if (prev === undefined) delete process.env.SEED_PC_LABEL; else process.env.SEED_PC_LABEL = prev;
+  }
 });

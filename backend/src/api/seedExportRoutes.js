@@ -9,7 +9,7 @@ const { GROUPS, getGroup } = require('../services/seedSync/registry.js');
 const { diffGroup } = require('../services/seedSync/diffGroup.js');
 const { previewSeed, applySeed } = require('../services/seedSync/applySeed.js');
 const { exportGroup } = require('../services/seedSync/exportGroup.js');
-const { lastRuns, recentRuns } = require('../services/seedSync/runs.js');
+const { lastRuns, recentRuns, pcLabel, pcLabelSet } = require('../services/seedSync/runs.js');
 const { SyncRefused, SyncFileError } = require('../services/seedSync/errors.js');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -84,6 +84,11 @@ module.exports = function seedExportRoutes(pool, { processStartedAt } = {}) {
     res.json(out);
   }));
 
+  // Which PC exports say they came from; the tab hints when it is unset.
+  router.get('/meta', handler(async (req, res) => {
+    res.json({ pcLabel: pcLabel(), pcLabelSet: pcLabelSet() });
+  }));
+
   router.get('/groups/:id/preview', withGroup(async (req, res) => {
     res.json(await previewSeed(pool, req.params.id));
   }));
@@ -97,7 +102,12 @@ module.exports = function seedExportRoutes(pool, { processStartedAt } = {}) {
     if (!validDecisions(decisions)) {
       return res.status(400).json({ error: 'decisions must be an object of row uuid -> decision string' });
     }
-    res.json(await applySeed(pool, req.params.id, decisions));
+    // The preview's signature: apply refuses (stale_preview) if the diff moved.
+    const signature = req.body.signature;
+    if (typeof signature !== 'string' || !signature) {
+      return res.status(400).json({ error: 'signature (from the preview) is required' });
+    }
+    res.json(await applySeed(pool, req.params.id, decisions, { signature }));
   }));
 
   router.get('/runs', handler(async (req, res) => {

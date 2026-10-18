@@ -12,6 +12,8 @@ const GROUPS = [
       created_at: 'local',
       updated_at: 'local',
       image: 'art group (plan 3)',
+      render_mode: 'art group (plan 3)',
+      sprite: 'art group (plan 3)',
       sync_uuid: 'identity',
       ai_provider_id: 'local FK — plan 2 exports FKs as sync_uuid',
     },
@@ -37,8 +39,11 @@ const GROUPS = [
       sync_uuid: 'identity',
       models_cache: 'machine cache',
       models_fetched_at: 'machine cache',
+      is_active: 'per-PC choice: which box this PC can reach',
     },
     secretColumns: ['auth_token'],
+    // auth_token is only needed when the provider sends an auth header.
+    secretNeededIf: 'auth_header_name',
   },
 ];
 

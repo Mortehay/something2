@@ -52,6 +52,13 @@ async function exportGroup(pool, groupId) {
     // corrupt file (SyncFileError) propagates too; the user must fix or delete
     // it first. Checked under the lock, so no seed can slip in before the write.
     const diff = await diffGroup(client, groupId);
+    // A newer-schema file was written by a DB with columns this one lacks:
+    // overwriting it would drop them from git.
+    if (diff.status === 'schema_newer') {
+      throw new SyncRefused('schema_newer', 'run migrations first', {
+        fileVersion: diff.header.schema_version, dbVersion: await schemaVersion(client),
+      });
+    }
     if (diff.gitChanges > 0) {
       throw new SyncRefused('git_newer', 'seed (preview) first', { gitChanges: diff.gitChanges });
     }

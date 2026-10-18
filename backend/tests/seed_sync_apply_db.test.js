@@ -130,8 +130,18 @@ async function onlySxListed(pool, groupId) {
   return d;
 }
 
-async function apply(pool, groupId, decisions) {
-  const res = await applySeed(pool, groupId, decisions);
+// The real client contract: preview, then post the decisions with the
+// preview's signature. Without an explicit signature, a fresh preview's.
+const sigOf = async (pool, groupId) => (await previewSeed(pool, groupId)).signature;
+async function applyNow(pool, groupId, decisions, signature) {
+  return applySeed(pool, groupId, decisions, { signature: signature ?? await sigOf(pool, groupId) });
+}
+// The FULL decision map the UI posts: every row with a default.
+const defaultsOf = (preview) => Object.fromEntries(
+  preview.rows.filter((r) => r.defaultDecision != null).map((r) => [r.syncUuid, r.defaultDecision]));
+
+async function apply(pool, groupId, decisions, signature) {
+  const res = await applyNow(pool, groupId, decisions, signature);
   createdRuns.push(res.runId);
   return res;
 }
@@ -207,7 +217,7 @@ dbTest('undecided red row refuses', async (t, pool) => {
   await writeGitWith(pool, 'quests', [{ ...a, title: 'sx git' }]); // no baseline: edited_here
   assert.strictEqual(byKey(await onlySxListed(pool, 'quests'), 'sx_a').kind, 'edited_here');
   const runs = await seedRunCount(pool);
-  await assert.rejects(applySeed(pool, 'quests', {}), refused('undecided', [a.sync_uuid]));
+  await assert.rejects(applyNow(pool, 'quests', {}), refused('undecided', [a.sync_uuid]));
   assert.strictEqual((await questState(pool))[0].title, 'sx t');
   assert.strictEqual(await baselineOf(pool, 'quests', a.sync_uuid), null);
   assert.strictEqual(await seedRunCount(pool), runs, 'a refusal records no run');
@@ -221,7 +231,7 @@ dbTest('undecided divergent adopt_identity refuses', async (t, pool) => {
   const r = byKey(await onlySxListed(pool, 'quests'), 'sx_a');
   assert.strictEqual(r.kind, 'adopt_identity');
   assert.strictEqual(r.defaultDecision, null);
-  await assert.rejects(applySeed(pool, 'quests', {}), refused('undecided', [gitUuid]));
+  await assert.rejects(applyNow(pool, 'quests', {}), refused('undecided', [gitUuid]));
   assert.deepStrictEqual((await questState(pool)).map((x) => [x.title, x.sync_uuid]), [['sx t', a.sync_uuid]]);
 });
 
@@ -245,7 +255,7 @@ dbTest('delete blocked by character_quests', async (t, pool) => {
   // A blocked deleted_in_git defaults to keep.
   assert.strictEqual(r.defaultDecision, 'local');
 
-  await assert.rejects(applySeed(pool, 'quests', { [q.sync_uuid]: 'delete' }), refused('blocked', [q.sync_uuid]));
+  await assert.rejects(applyNow(pool, 'quests', { [q.sync_uuid]: 'delete' }), refused('blocked', [q.sync_uuid]));
   assert.strictEqual((await questState(pool)).length, 1, 'quest still exists');
   const cq = await pool.query('SELECT 1 FROM character_quests WHERE character_id = $1', [charId]);
   assert.strictEqual(cq.rowCount, 1, 'player data untouched');
@@ -316,13 +326,13 @@ dbTest('schema_newer refuses', async (t, pool) => {
   await setBaseline(pool, 'quests', a);
   await writeGitWith(pool, 'quests', [{ ...a, title: 'sx git' }], { schemaVersion: '9999999999999_from_the_future' });
   const runs = await seedRunCount(pool);
-  await assert.rejects(applySeed(pool, 'quests', {}), refused('schema_newer'));
+  await assert.rejects(applyNow(pool, 'quests', {}), refused('schema_newer'));
   assert.strictEqual((await questState(pool))[0].title, 'sx t');
   assert.strictEqual(await seedRunCount(pool), runs);
 });
 
 dbTest('no export file refuses with no_export', async (t, pool) => {
-  await assert.rejects(applySeed(pool, 'quests', {}), refused('no_export'));
+  await assert.rejects(applyNow(pool, 'quests', {}), refused('no_export'));
 });
 
 dbTest('adopt_identity rewrites sync_uuid', async (t, pool) => {
@@ -427,9 +437,9 @@ dbTest('git row whose natural key a kept local row holds is blocked: conflict', 
   const beforeQ = await questState(pool);
   const beforeB = await baselineState(pool, uuids);
   const runs = await seedRunCount(pool);
-  await assert.rejects(applySeed(pool, 'quests', {}), refused('undecided', [clash.sync_uuid]));
-  await assert.rejects(applySeed(pool, 'quests', { [clash.sync_uuid]: 'git' }), refused('conflict', [clash.sync_uuid]));
-  await assert.rejects(applySeed(pool, 'quests', { [clash.sync_uuid]: 'git', [b.sync_uuid]: 'local' }),
+  await assert.rejects(applyNow(pool, 'quests', {}), refused('undecided', [clash.sync_uuid]));
+  await assert.rejects(applyNow(pool, 'quests', { [clash.sync_uuid]: 'git' }), refused('conflict', [clash.sync_uuid]));
+  await assert.rejects(applyNow(pool, 'quests', { [clash.sync_uuid]: 'git', [b.sync_uuid]: 'local' }),
     refused('conflict', [clash.sync_uuid]));
   assert.deepStrictEqual(await questState(pool), beforeQ);
   assert.deepStrictEqual(await baselineState(pool, uuids), beforeB);
@@ -495,9 +505,10 @@ dbTest('failure mid-apply rolls back everything', async (t, pool) => {
   const beforeB = await baselineState(pool, uuids);
 
   // The row writes succeed; the first baseline write fails after them.
+  const signature = await sigOf(pool, 'quests');
   const released = instrumentConnect(t, pool, { failOn: /INSERT INTO seed_row_hashes/ });
   try {
-    await assert.rejects(applySeed(pool, 'quests', {}), (e) => e.message === 'sx injected failure');
+    await assert.rejects(applySeed(pool, 'quests', {}, { signature }), (e) => e.message === 'sx injected failure');
   } finally {
     t.mock.restoreAll();
   }
@@ -516,9 +527,10 @@ dbTest('a failed ROLLBACK destroys the client (apply and export)', async (t, poo
   const a = await snap(pool, 'quests', 'sx_a');
   await setBaseline(pool, 'quests', a);
   await writeGitWith(pool, 'quests', [{ ...a, title: 'sx git a' }]);
+  const signature = await sigOf(pool, 'quests');
   let released = instrumentConnect(t, pool, { failOn: /INSERT INTO seed_row_hashes/, failRollback: true });
   try {
-    await assert.rejects(applySeed(pool, 'quests', {}), (e) => e.message === 'sx injected failure');
+    await assert.rejects(applySeed(pool, 'quests', {}, { signature }), (e) => e.message === 'sx injected failure');
   } finally {
     t.mock.restoreAll();
   }
@@ -560,9 +572,9 @@ dbTest('invalid decision for the row kind refuses', async (t, pool) => {
   const o = await snap(pool, 'quests', 'sx_o');
   await setBaseline(pool, 'quests', a);
   await writeGitWith(pool, 'quests', [{ ...a, title: 'sx git' }]);
-  await assert.rejects(applySeed(pool, 'quests', { [a.sync_uuid]: 'delete' }), refused('invalid_decision', [a.sync_uuid]));
-  await assert.rejects(applySeed(pool, 'quests', { [o.sync_uuid]: 'git' }), refused('invalid_decision', [o.sync_uuid]));
-  await assert.rejects(applySeed(pool, 'quests', { [a.sync_uuid]: 'bogus' }), refused('invalid_decision', [a.sync_uuid]));
+  await assert.rejects(applyNow(pool, 'quests', { [a.sync_uuid]: 'delete' }), refused('invalid_decision', [a.sync_uuid]));
+  await assert.rejects(applyNow(pool, 'quests', { [o.sync_uuid]: 'git' }), refused('invalid_decision', [o.sync_uuid]));
+  await assert.rejects(applyNow(pool, 'quests', { [a.sync_uuid]: 'bogus' }), refused('invalid_decision', [a.sync_uuid]));
   assert.deepStrictEqual((await questState(pool)).map((r) => r.title), ['sx t', 'sx t']);
 });
 
@@ -572,23 +584,87 @@ dbTest('decision for a uuid not in the diff refuses stale_preview', async (t, po
   await setBaseline(pool, 'quests', a);
   await writeGitWith(pool, 'quests', [{ ...a, title: 'sx git' }]);
   const ghost = crypto.randomUUID();
-  await assert.rejects(applySeed(pool, 'quests', { [ghost]: 'git' }), refused('stale_preview', [ghost]));
+  await assert.rejects(applyNow(pool, 'quests', { [ghost]: 'git' }), refused('stale_preview', [ghost]));
   assert.strictEqual((await questState(pool))[0].title, 'sx t');
 });
 
-dbTest('apply recomputes the diff: a row edited after the preview must be re-decided', async (t, pool) => {
+dbTest('apply recomputes the diff: a row edited after the preview refuses stale_preview', async (t, pool) => {
   await addQuest(pool, 'sx_a');
   const a = await snap(pool, 'quests', 'sx_a');
   await setBaseline(pool, 'quests', a);
   await writeGitWith(pool, 'quests', [{ ...a, title: 'sx git' }]);
   const preview = await onlySxListed(pool, 'quests');
   assert.strictEqual(byKey(preview, 'sx_a').kind, 'changed');
+  const decisions = defaultsOf(preview);
+  assert.strictEqual(decisions[a.sync_uuid], 'git', 'the UI posts the full default map');
   // Someone edits the row between preview and apply: it is now edited_here.
   await pool.query("UPDATE quests SET title = 'sx late edit' WHERE key = 'sx_a'");
-  // The preview's 'git' default must not carry over: apply re-diffs under its
-  // lock, sees a red row and demands a decision.
-  await assert.rejects(applySeed(pool, 'quests', {}), refused('undecided', [a.sync_uuid]));
+  // The preview's 'git' (sent explicitly, as the UI does) is allowed for
+  // edited_here too, so only the signature stops it overwriting the edit.
+  const runs = await seedRunCount(pool);
+  await assert.rejects(applySeed(pool, 'quests', decisions, { signature: preview.signature }), refused('stale_preview'));
   assert.strictEqual((await questState(pool))[0].title, 'sx late edit');
+  assert.strictEqual(await baselineOf(pool, 'quests', a.sync_uuid), rowHash(a), 'baseline untouched');
+  assert.strictEqual(await seedRunCount(pool), runs, 'a refusal records no run');
+});
+
+dbTest('a git file changed after the preview (row removed) refuses stale_preview', async (t, pool) => {
+  await addQuest(pool, 'sx_a');
+  await addQuest(pool, 'sx_b');
+  const a = await snap(pool, 'quests', 'sx_a');
+  const b = await snap(pool, 'quests', 'sx_b');
+  await setBaseline(pool, 'quests', a);
+  await setBaseline(pool, 'quests', b);
+  await writeGitWith(pool, 'quests', [{ ...a, title: 'sx git' }, b]);
+  const preview = await onlySxListed(pool, 'quests');
+  assert.deepStrictEqual(sxRows(preview).map((r) => [r.key, r.kind]), [['sx_a', 'changed']]);
+  // A pull lands between preview and apply: sx_b is gone in git (same
+  // exported_at, so only the rows differ). Its default would be 'delete'.
+  await writeGitWith(pool, 'quests', [{ ...a, title: 'sx git' }]);
+  assert.strictEqual(byKey(await previewSeed(pool, 'quests'), 'sx_b').kind, 'deleted_in_git');
+  await assert.rejects(applySeed(pool, 'quests', defaultsOf(preview), { signature: preview.signature }),
+    refused('stale_preview'));
+  assert.deepStrictEqual((await questState(pool)).map((r) => [r.key, r.title]), [['sx_a', 'sx t'], ['sx_b', 'sx t']]);
+});
+
+dbTest('apply without a signature refuses stale_preview', async (t, pool) => {
+  await addQuest(pool, 'sx_a');
+  const a = await snap(pool, 'quests', 'sx_a');
+  await setBaseline(pool, 'quests', a);
+  await writeGitWith(pool, 'quests', [{ ...a, title: 'sx git' }]);
+  const preview = await onlySxListed(pool, 'quests');
+  assert.match(preview.signature, /^[0-9a-f]{64}$/);
+  assert.strictEqual(preview.signature, await sigOf(pool, 'quests'), 'stable across previews');
+  await assert.rejects(applySeed(pool, 'quests', defaultsOf(preview)), refused('stale_preview'));
+  await assert.rejects(applySeed(pool, 'quests', defaultsOf(preview), { signature: 'x' }), refused('stale_preview'));
+  assert.strictEqual((await questState(pool))[0].title, 'sx t');
+});
+
+dbTest('a unique clash while writing is a conflict refusal, rolled back, run failed', async (t, pool) => {
+  await addQuest(pool, 'sx_a');
+  await addQuest(pool, 'sx_b');
+  const a = await snap(pool, 'quests', 'sx_a');
+  await setBaseline(pool, 'quests', a);
+  // Git renames sx_a onto sx_b's key; the local sx_b (no baseline, not in git)
+  // is only_here and kept by default. The by-uuid update hits quests_key_key.
+  await writeGitWith(pool, 'quests', [{ ...a, key: 'sx_b', title: 'sx renamed' }]);
+  const preview = await onlySxListed(pool, 'quests');
+  assert.deepStrictEqual(sxRows(preview).map((r) => [r.key, r.kind, r.defaultDecision]),
+    [['sx_a', 'changed', 'git'], ['sx_b', 'only_here', 'local']]);
+  const beforeQ = await questState(pool);
+  const beforeB = await baselineState(pool, [a.sync_uuid]);
+  await assert.rejects(applySeed(pool, 'quests', defaultsOf(preview), { signature: preview.signature }), (e) => {
+    refused('conflict')(e);
+    assert.deepStrictEqual(e.details, { constraint: 'quests_key_key' });
+    assert.match(e.message, /quests_key_key/);
+    assert.ok(!/sx_b/.test(e.message), 'no row values in the message');
+    return true;
+  });
+  assert.deepStrictEqual(await questState(pool), beforeQ);
+  assert.deepStrictEqual(await baselineState(pool, [a.sync_uuid]), beforeB);
+  const run = (await recentRuns(pool, { groupId: 'quests', limit: 1 }))[0];
+  assert.deepStrictEqual([run.action, run.status], ['seed', 'failed']);
+  assert.match(run.error, /quests_key_key/);
 });
 
 // Holds the seed_sync xact lock on its own client. release() is idempotent and
@@ -725,7 +801,8 @@ dbTest('apply waits for an open edit of the table and then sees it (no silent ov
   const a = await snap(pool, 'quests', 'sx_a');
   await setBaseline(pool, 'quests', a);
   await writeGitWith(pool, 'quests', [{ ...a, title: 'sx git' }]);
-  assert.strictEqual(byKey(await onlySxListed(pool, 'quests'), 'sx_a').kind, 'changed');
+  const preview = await onlySxListed(pool, 'quests');
+  assert.strictEqual(byKey(preview, 'sx_a').kind, 'changed');
 
   const editor = await pool.connect();
   let p;
@@ -734,7 +811,7 @@ dbTest('apply waits for an open edit of the table and then sees it (no silent ov
     await editor.query('BEGIN');
     await editor.query("UPDATE quests SET title = 'sx concurrent' WHERE key = 'sx_a'");
     const editorPid = (await editor.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
-    p = applySeed(pool, 'quests', {});
+    p = applySeed(pool, 'quests', defaultsOf(preview), { signature: preview.signature });
     p.catch(() => {});
     await pollUntil(async () => (await pool.query(
       'SELECT count(*)::int AS n FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))', [editorPid],
@@ -745,8 +822,9 @@ dbTest('apply waits for an open edit of the table and then sees it (no silent ov
     if (open) await editor.query('ROLLBACK').catch(() => {});
     editor.release();
   }
-  // Apply re-diffed after the edit committed: the row is red now.
-  await assert.rejects(p, refused('undecided', [a.sync_uuid]));
+  // Apply re-diffed after the edit committed: the row is edited_here now, so
+  // the preview it was given is stale.
+  await assert.rejects(p, refused('stale_preview'));
   assert.strictEqual((await questState(pool))[0].title, 'sx concurrent');
 });
 
@@ -760,7 +838,7 @@ dbTest('lock wait past lock_timeout refuses busy (apply and export)', async (t, 
   const release = await heldSeedLock(pool);
   const runs = (await pool.query('SELECT count(*)::int AS n FROM seed_export_runs')).rows[0].n;
   try {
-    await assert.rejects(applySeed(pool, 'quests', {}), (e) => refused('busy')(e) && /open edit of this table is in progress/.test(e.message));
+    await assert.rejects(applyNow(pool, 'quests', {}), (e) => refused('busy')(e) && /open edit of this table is in progress/.test(e.message));
     await assert.rejects(exportGroup(pool, 'quests'), refused('busy'));
   } finally {
     await release();
@@ -789,9 +867,10 @@ dbTest('a committed seed or export is never reported failed', async (t, pool) =>
   const a = await snap(pool, 'quests', 'sx_a');
   await setBaseline(pool, 'quests', a);
   await writeGitWith(pool, 'quests', [{ ...a, title: 'sx git' }]);
+  const signature = await sigOf(pool, 'quests');
   failFirstRunOk(t, pool);
   let res;
-  try { res = await applySeed(pool, 'quests', {}); } finally { t.mock.restoreAll(); }
+  try { res = await applySeed(pool, 'quests', {}, { signature }); } finally { t.mock.restoreAll(); }
   const run = (await pool.query('SELECT status FROM seed_export_runs WHERE id = $1', [res.runId])).rows[0];
   assert.notStrictEqual(run.status, 'failed');
   assert.strictEqual((await questState(pool))[0].title, 'sx git');

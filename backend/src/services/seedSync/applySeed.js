@@ -1,3 +1,4 @@
+const crypto = require('node:crypto');
 const { getGroup } = require('./registry.js');
 const { computeDiff } = require('./diffGroup.js');
 const { beginLocked, mapLockError, rollback } = require('./txn.js');
@@ -118,6 +119,22 @@ function warningsFor(fileVersion, dbVersion) {
 
 const versionOf = (header) => (header && header.schema_version != null ? String(header.schema_version) : '');
 
+// Identity of what a preview showed: the file's exported_at plus every row's
+// uuid, kind, blocking-aware default and blocked reason (annotated with NO
+// decisions). applySeed recomputes it under the lock and refuses a mismatch,
+// so a decision map is never applied to a diff the admin did not see (a row
+// edited here since, a git pull that added/removed rows, a new reference).
+function previewSignatureOf(cd, refReasons) {
+  // annotate() mutates rows; sign a copy so the caller's rows stay untouched.
+  const copy = { ...cd, diff: { ...cd.diff, rows: cd.diff.rows.map((r) => ({ ...r })) } };
+  annotate(copy, refReasons, {});
+  const parts = copy.diff.rows
+    .map((r) => `${r.syncUuid}:${r.kind}:${r.defaultDecision}:${r.blockedReason}`)
+    .sort();
+  const head = cd.diff.header ? String(cd.diff.header.exported_at) : '';
+  return crypto.createHash('sha256').update(`${head}\n${parts.join('\n')}`).digest('hex');
+}
+
 // diffGroup plus blockedReason (FK references, natural-key clashes), the
 // blocking-aware defaults, and `warnings` (['schema_older'] when the file
 // predates this DB's migrations). One read-only snapshot.
@@ -128,10 +145,12 @@ async function previewSeed(pool, groupId) {
   try {
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     const cd = await computeDiff(client, groupId);
-    annotate(cd, await referenceReasons(client, group, deletableUuids(cd.diff)), {});
+    const refReasons = await referenceReasons(client, group, deletableUuids(cd.diff));
+    const signature = previewSignatureOf(cd, refReasons);
+    annotate(cd, refReasons, {});
     const warnings = cd.diff.header ? warningsFor(versionOf(cd.diff.header), await schemaVersion(client)) : [];
     await client.query('COMMIT');
-    return { ...cd.diff, warnings };
+    return { ...cd.diff, warnings, signature };
   } catch (e) {
     releaseErr = await rollback(client);
     throw e;
@@ -221,13 +240,28 @@ async function dropBaselines(db, groupId, uuids) {
   await db.query('DELETE FROM seed_row_hashes WHERE group_id = $1 AND sync_uuid = ANY($2::uuid[])', [groupId, uuids]);
 }
 
+// A unique violation while writing (e.g. a git row renamed onto a natural key
+// a kept local row holds) is a refusal, not a 500. Constraint name only: the
+// pg detail carries the clashing values.
+function mapWriteError(e) {
+  if (e && e.code === '23505') {
+    const constraint = e.constraint || null;
+    return new SyncRefused('conflict',
+      `a git row would duplicate a unique value${constraint ? ` (${constraint})` : ''}; keep it local or fix the clash`,
+      { constraint });
+  }
+  return e;
+}
+
 // decisions: { [syncUuid]: 'git' | 'local' | 'delete' }; rows left out use
-// their (blocking-aware) defaultDecision. Refusals (busy, no_export,
-// schema_newer, stale_preview, invalid_decision, undecided, blocked, conflict)
-// happen before a run is started, so they record no run -- like export's
-// git_newer. A failure after that rolls everything back and finishes the run
-// as failed; a committed seed always finishes ok.
-async function applySeed(pool, groupId, decisions) {
+// their (blocking-aware) defaultDecision. `signature` is the one previewSeed
+// returned; required -- a missing or different one refuses stale_preview.
+// Refusals (busy, no_export, schema_newer, stale_preview, invalid_decision,
+// undecided, blocked, conflict) happen before a run is started, so they record
+// no run -- like export's git_newer. A failure after that (including a write
+// conflict, 23505 -> SyncRefused('conflict')) rolls everything back and
+// finishes the run as failed; a committed seed always finishes ok.
+async function applySeed(pool, groupId, decisions, { signature } = {}) {
   const group = getGroup(groupId);
   const client = await pool.connect();
   let runId = null;
@@ -256,7 +290,11 @@ async function applySeed(pool, groupId, decisions) {
       await client.query(
         `SELECT 1 FROM ${quoteIdent(group.table)} WHERE sync_uuid = ANY($1::uuid[]) FOR UPDATE`, [deletable]);
     }
-    const steps = plan(cd, await referenceReasons(client, group, deletable), decisions);
+    const refReasons = await referenceReasons(client, group, deletable);
+    if (typeof signature !== 'string' || signature !== previewSignatureOf(cd, refReasons)) {
+      throw new SyncRefused('stale_preview', 'the diff changed since the preview; preview again', { uuids: [] });
+    }
+    const steps = plan(cd, refReasons, decisions);
 
     runId = await startRun(pool, groupId, 'seed');
     const summary = { updated: 0, created: 0, deleted: 0, kept: 0, adopted: 0 };
@@ -305,7 +343,7 @@ async function applySeed(pool, groupId, decisions) {
     await client.query('COMMIT');
     result = { runId, summary };
   } catch (err) {
-    const e = mapLockError(err);
+    const e = mapWriteError(mapLockError(err));
     releaseErr = await rollback(client);
     if (runId !== null) await finishRun(pool, runId, { status: 'failed', error: e.message }).catch(() => {});
     throw e;
