@@ -47,6 +47,15 @@ export const Warn = styled.p`color: var(--s2-warning); font-size: 1.4rem; margin
 const WARNINGS = {
   schema_older: 'This export is from an older database schema; fields added since then will be cleared on rows you take from git.',
 };
+// Preview warnings are { code, ... } objects (backend seedSync applySeed).
+// Unknown codes show the code itself; Task 9 refines the dangling_name text.
+export function warningText(w) {
+  if (w && w.code === 'dangling_name') return `${w.key}: ${w.column} '${w.name}' does not exist here`;
+  const code = w && typeof w === 'object' ? w.code : w;
+  return WARNINGS[code] || String(code);
+}
+const warningKey = (w) => (w && typeof w === 'object'
+  ? `${w.code}:${w.table || ''}:${w.syncUuid || ''}:${w.column || ''}:${w.name || ''}` : String(w));
 export const NOTHING_TO_CHANGE = 'Nothing to change — this PC already matches git.';
 
 const show = (v) => (v === undefined ? '—' : typeof v === 'string' ? v : JSON.stringify(v));
@@ -74,7 +83,7 @@ export default function PreviewSection({ data, decisions, setDecisions }) {
 
   return (
     <>
-      {(data.warnings || []).map((w) => <Warn key={w}>{WARNINGS[w] || w}</Warn>)}
+      {(data.warnings || []).map((w) => <Warn key={warningKey(w)}>{warningText(w)}</Warn>)}
       {rows.length === 0 && <p>{NOTHING_TO_CHANGE}</p>}
       {rows.length > 0 && (
         <>

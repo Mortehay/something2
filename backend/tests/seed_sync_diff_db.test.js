@@ -875,6 +875,34 @@ dbTest('a child of an adopted parent is adopt_identity too (deep natural key), r
   });
 });
 
+dbTest('a parent renamed in git while a new one took its name: the child ref really changed (red)', async (t, pool) => {
+  await withGroups(async () => {
+    const x = await addEnt(pool, 'sx_arrow');
+    const sword = await addItem(pool, 'sx_sword');
+    const child = await addDrop(pool, x.id, sword.id, 0.5);
+    await exportGroup(pool, 'sx_ent');
+    // The local child was never synced: adoptable by its deep key.
+    await pool.query('DELETE FROM seed_row_hashes WHERE group_id = $1 AND sync_uuid = $2', ['sx_ent', child.sync_uuid]);
+    const doc = readDoc('sx_ent');
+    const xRow = doc.tables.entity_types.find((r) => r.sync_uuid === x.sync_uuid);
+    const yUuid = crypto.randomUUID();
+    doc.tables.entity_types.push({ ...xRow, sync_uuid: yUuid }); // new Y takes the name ...
+    xRow.name = 'sx_arrow_old'; // ... X is renamed
+    const gitChild = crypto.randomUUID();
+    const dr = doc.tables.creature_drops.find((r) => r.sync_uuid === child.sync_uuid);
+    Object.assign(dr, { sync_uuid: gitChild, entity_type_id: yUuid });
+    writeDoc('sx_ent', doc);
+    const d = await diffGroup(pool, 'sx_ent');
+    const r = sxRows(d).find((x2) => x2.table === 'creature_drops');
+    assert.strictEqual(r.kind, 'adopt_identity');
+    assert.strictEqual(r.syncUuid, gitChild);
+    assert.strictEqual(r.defaultDecision, null, 'red, not default git');
+    assert.deepStrictEqual(r.fields, [{ name: 'entity_type_id', local: x.sync_uuid, git: yUuid }]);
+    assert.deepStrictEqual(sxRows(d).filter((x2) => x2.table === 'entity_types').map((x2) => [x2.syncUuid, x2.kind]).sort(),
+      [[x.sync_uuid, 'changed'], [yUuid, 'new']].sort());
+  });
+});
+
 dbTest('key-clash annotation finds a clashing child through the deep natural key', async (t, pool) => {
   await withGroups(async () => {
     // The local child keeps its baseline: not adoptable, so git's child is new

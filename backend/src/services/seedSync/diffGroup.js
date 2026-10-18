@@ -305,10 +305,19 @@ function keyResolver(group, keyIndex, gitIndex) {
   };
   return {
     match: (spec, row, side) => stableStringify(matchValue(partsOf(spec, row, side, new Set()))),
-    // Same deep identity for a by-uuid ref value on each side?
-    sameRef: (table, localUuid, gitUuid) => localUuid === gitUuid
-      || (typeof localUuid === 'string' && typeof gitUuid === 'string'
-        && refText(table, localUuid, 'local') === refText(table, gitUuid, 'git')),
+    // Do a local and a git ref uuid name one row? Equal uuids, or the two
+    // sides of one adopt pair: equal deep keys AND the git uuid is no live
+    // local row AND the local uuid no live git row. (A parent renamed in git
+    // while a new one took its name is two rows: the ref really changed.)
+    sameRef: (table, localUuid, gitUuid) => {
+      if (localUuid === gitUuid) return true;
+      if (typeof localUuid !== 'string' || typeof gitUuid !== 'string') return false;
+      const localRows = keyIndex.get(table);
+      const gitRows = gitIndex.get(table);
+      if (localRows && localRows.has(gitUuid)) return false;
+      if (gitRows && gitRows.has(localUuid)) return false;
+      return refText(table, localUuid, 'local') === refText(table, gitUuid, 'git');
+    },
     display: (spec, row, side) => partsOf(spec, row, side, new Set()).map(displayPart),
   };
 }
