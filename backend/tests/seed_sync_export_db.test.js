@@ -136,13 +136,19 @@ dbTest('export records a run and baselines', async (t, pool) => {
 });
 
 dbTest('a failing export finishes its run as failed', async (t, pool, dir) => {
-  const blocker = path.join(dir, 'blocker');
-  fs.writeFileSync(blocker, 'x');
-  process.env.SEED_SYNC_DIR = path.join(blocker, 'sub');
+  // The write must fail AFTER the git_newer pre-check (which reads the file),
+  // so use an existing but read-only directory: no file -> diff passes, the
+  // tmp write then fails with EACCES inside the run.
+  if (process.getuid && process.getuid() === 0) { t.skip('root ignores directory permissions'); return; }
+  const ro = path.join(dir, 'ro');
+  fs.mkdirSync(ro);
+  fs.chmodSync(ro, 0o555);
+  process.env.SEED_SYNC_DIR = ro;
   try {
-    await assert.rejects(exportGroup(pool, 'quests'));
+    await assert.rejects(exportGroup(pool, 'quests'), (e) => e.code === 'EACCES');
   } finally {
     process.env.SEED_SYNC_DIR = dir;
+    fs.chmodSync(ro, 0o755);
   }
   const run = (await recentRuns(pool, { groupId: 'quests', limit: 1 }))[0];
   assert.strictEqual(run.action, 'export');

@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const crypto = require('node:crypto');
 const { Pool } = require('pg');
+const { withSeedSyncLock } = require('./helpers/seedSyncTest.js');
 
 // SOMET-632. seed_sync migration: history + baseline tables and a travelling
 // sync_uuid on the three tables whose natural key is not the id.
@@ -51,12 +52,16 @@ function dbTest(name, body) {
     if (!requireTestDb(t, 'writes quests/tile_types/ai_providers')) return;
     const pool = new Pool({ connectionString: DB_URL, max: 2, connectionTimeoutMillis: 3000 });
     t.after(async () => { await pool.end().catch(() => {}); });
-    await cleanup(pool);
-    try {
-      await body(t, pool);
-    } finally {
-      await cleanup(pool).catch(() => {});
-    }
+    // Shared lock: other seed_sync files clean up sx_ rows too (cleanupSx), so
+    // running unlocked lets them delete this file's rows mid-test.
+    await withSeedSyncLock(pool, async () => {
+      await cleanup(pool);
+      try {
+        await body(t, pool);
+      } finally {
+        await cleanup(pool).catch(() => {});
+      }
+    });
   });
 }
 

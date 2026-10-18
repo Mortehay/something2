@@ -3,17 +3,9 @@ const path = require('node:path');
 const { getGroup, liveColumns } = require('./registry.js');
 const { canonicalRow, rowHash, stableStringify } = require('./canonical.js');
 const { pcLabel, schemaVersion, startRun, finishRun } = require('./runs.js');
+const { SyncFileError, SyncRefused } = require('./errors.js');
 
 let tmpCounter = 0;
-
-class SyncFileError extends Error {
-  constructor(message, file) {
-    super(message);
-    this.name = 'SyncFileError';
-    this.code = 'bad_file';
-    this.file = file;
-  }
-}
 
 function syncDir() {
   return process.env.SEED_SYNC_DIR || path.join(__dirname, '../../../seeds/sync');
@@ -46,6 +38,14 @@ async function readExport(groupId) {
 
 async function exportGroup(pool, groupId) {
   const group = getGroup(groupId);
+  // Never export over changes that came from git: they would be lost. A corrupt
+  // file (SyncFileError) propagates too; the user must fix or delete it first.
+  // Lazy require: diffGroup.js needs readExport from this module.
+  const { diffGroup } = require('./diffGroup.js');
+  const diff = await diffGroup(pool, groupId);
+  if (diff.gitChanges > 0) {
+    throw new SyncRefused('git_newer', 'seed (preview) first', { gitChanges: diff.gitChanges });
+  }
   const runId = await startRun(pool, groupId, 'export');
   let tmp = null;
   try {
