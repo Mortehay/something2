@@ -62,8 +62,10 @@ function decide(rows, resolve) {
   for (const r of rows) {
     if (r.defaultDecision != null) { decisions[r.syncUuid] = r.defaultDecision; continue; }
     if (!resolve) { undecided += 1; continue; }
-    const want = resolve === 'local' ? 'local' : (DELETE_KINDS.has(r.kind) ? 'delete' : 'git');
-    if (allowedDecisions(r).includes(want)) decisions[r.syncUuid] = want;
+    // Red rows are edited_here/adopt-style rows or key clashes; delete kinds
+    // always have a default, so 'git' here is never a delete. A 'git' the
+    // rules forbid (key clash) degrades to 'local' and is reported.
+    if (allowedDecisions(r).includes(resolve)) decisions[r.syncUuid] = resolve;
     else {
       decisions[r.syncUuid] = 'local';
       notes.push(`${r.table || ''}:${r.key || r.syncUuid} kept local (${r.blockedReason || 'not allowed'})`);
@@ -134,4 +136,6 @@ async function main() {
   process.exitCode = failed ? 1 : (refused && opts.cmd !== 'status' ? 2 : 0);
 }
 
-main().catch((err) => { console.error(oneLine(err && err.message)); process.exit(1); });
+module.exports = { decide, allowedDecisions };
+
+if (require.main === module) main().catch((err) => { console.error(oneLine(err && err.message)); process.exit(1); });

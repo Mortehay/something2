@@ -261,23 +261,39 @@ art-seed:
 
 # --- Seed/Export (SOMET-639) -----------------------------------------------
 #
-# Headless twin of the admin Seed/Export tab. GROUP omitted = every group, in
-# seed order. Exit 0 ok, 2 a group was refused, 1 error.
+# Headless twin of the admin Seed/Export tab. GROUP=all = every group, in seed
+# order; export/seed refuse to run without an explicit GROUP. Exit 0 ok, 2 a group was refused, 1 error.
 #
 #   make seed-sync-status [GROUP=items]
-#   make seed-sync-export [GROUP=items]
-#   make seed-sync-seed   [GROUP=items] [RESOLVE=git|local]
+#   make seed-sync-export GROUP=items|all
+#   make seed-sync-seed   GROUP=items|all [RESOLVE=git|local]
 #
 # seed refuses (undecided) a group with rows edited here unless RESOLVE is set;
 # RESOLVE never overrides a blocked delete or a key clash (those stay local).
+# Validation is make-native (no shell sees GROUP/RESOLVE before it is checked).
+SEED_SYNC_GROUP_OK = $(and $(GROUP),$(if $(subst _,,$(subst a,,$(subst b,,$(subst c,,$(subst d,,$(subst e,,$(subst f,,$(subst g,,$(subst h,,$(subst i,,$(subst j,,$(subst k,,$(subst l,,$(subst m,,$(subst n,,$(subst o,,$(subst p,,$(subst q,,$(subst r,,$(subst s,,$(subst t,,$(subst u,,$(subst v,,$(subst w,,$(subst x,,$(subst y,,$(subst z,,$(GROUP)))))))))))))))))))))))))))),,ok))
+define SEED_SYNC_CHECK_GROUP_REQ
+$(if $(SEED_SYNC_GROUP_OK),:,echo 'GROUP=<group id>|all is required (lowercase letters and _ only)' >&2; exit 1)
+endef
+define SEED_SYNC_CHECK_GROUP_OPT
+$(if $(GROUP),$(if $(SEED_SYNC_GROUP_OK),:,echo 'GROUP must be lowercase letters and _ only' >&2; exit 1),:)
+endef
+define SEED_SYNC_CHECK_RESOLVE
+$(if $(RESOLVE),$(if $(filter git local,$(RESOLVE)),:,echo 'RESOLVE must be git or local' >&2; exit 1),:)
+endef
+
 seed-sync-status:
-	$(COMPOSE) exec -T backend node scripts/seed-sync.js status $(if $(GROUP),--group="$(GROUP)")
+	@$(call SEED_SYNC_CHECK_GROUP_OPT)
+	$(COMPOSE) exec -T backend node scripts/seed-sync.js status $(if $(GROUP),--group='$(GROUP)')
 
 seed-sync-export:
-	$(COMPOSE) exec -T backend node scripts/seed-sync.js export $(if $(GROUP),--group="$(GROUP)",--all)
+	@$(call SEED_SYNC_CHECK_GROUP_REQ)
+	$(COMPOSE) exec -T backend node scripts/seed-sync.js export $(if $(filter all,$(GROUP)),--all,--group='$(GROUP)')
 
 seed-sync-seed:
-	$(COMPOSE) exec -T backend node scripts/seed-sync.js seed $(if $(GROUP),--group="$(GROUP)",--all) $(if $(RESOLVE),--resolve="$(RESOLVE)")
+	@$(call SEED_SYNC_CHECK_GROUP_REQ)
+	@$(call SEED_SYNC_CHECK_RESOLVE)
+	$(COMPOSE) exec -T backend node scripts/seed-sync.js seed $(if $(filter all,$(GROUP)),--all,--group='$(GROUP)') $(if $(RESOLVE),--resolve='$(RESOLVE)')
 
 # --- Audio clips -----------------------------------------------------------
 #

@@ -12,6 +12,7 @@ const DB_URL = process.env.TEST_DATABASE_URL
   || process.env.DATABASE_URL
   || 'postgres://user:password@localhost:15432/game_db';
 const SCRIPT = path.join(__dirname, '..', 'scripts', 'seed-sync.js');
+const { decide } = require('../scripts/seed-sync.js');
 const ALL_IDS = GROUPS.map((g) => g.id);
 
 // The CLI writes through the real engine: exports rewrite baselines of every
@@ -164,9 +165,11 @@ dbTest('export --all continues past a refused group; exit 2', async (t, pool) =>
   const r = cli(['export', '--all']);
   assert.strictEqual(r.code, 2, r.out + r.err);
   assert.deepStrictEqual(r.lines.map((l) => l.split(' ')[0]), ALL_IDS, 'every group reported, in order');
-  assert.match(r.line('aura_effects'), /^aura_effects refused:\w+ /);
-  const ok = r.lines.filter((l) => / ok /.test(l));
-  assert.ok(ok.length >= ALL_IDS.length - 1, r.out);
+    const refusedLines = r.lines.filter((l) => /^\S+ refused:/.test(l));
+  assert.ok(refusedLines.some((l) => l.startsWith('aura_effects ')), r.out);
+  const ok = r.lines.filter((l) => /^\S+ ok /.test(l));
+  assert.strictEqual(ok.length, ALL_IDS.length - refusedLines.length, 'every non-refused group exported');
+  assert.ok(ok.length >= 1, r.out);
 });
 
 test('missing DATABASE_URL -> exit 1 with a clear message, no fallback', () => {
@@ -176,4 +179,21 @@ test('missing DATABASE_URL -> exit 1 with a clear message, no fallback', () => {
   assert.strictEqual(r.status, 1);
   assert.match(r.stderr, /DATABASE_URL is not set/);
   assert.strictEqual(r.stdout, '');
+});
+
+test('decide: defaults kept, red rows take --resolve, forbidden git degrades to local with a note', () => {
+  const rows = [
+    { syncUuid: 'a', kind: 'changed', defaultDecision: 'git' },
+    { syncUuid: 'b', kind: 'edited_here', defaultDecision: null },
+    { syncUuid: 'c', kind: 'new', defaultDecision: null, blockedReason: 'key already used by a local row', table: 't', key: 'k' },
+  ];
+  const git = decide(rows, 'git');
+  assert.deepStrictEqual(git.decisions, { a: 'git', b: 'git', c: 'local' });
+  assert.strictEqual(git.notes.length, 1);
+  assert.match(git.notes[0], /key already used/);
+  assert.strictEqual(git.undecided, 0);
+  assert.deepStrictEqual(decide(rows, 'local').decisions, { a: 'git', b: 'local', c: 'local' });
+  const none = decide(rows, null);
+  assert.strictEqual(none.undecided, 2);
+  assert.deepStrictEqual(none.decisions, { a: 'git' });
 });
