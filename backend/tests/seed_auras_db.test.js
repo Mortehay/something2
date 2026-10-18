@@ -38,7 +38,9 @@ test('seeded auras', { skip }, async (t) => {
          (row_to_json(e)::jsonb || jsonb_build_object(
             'id', nextval(pg_get_serial_sequence('entity_types','id')),
             'name', $1::text, 'auras', $2::jsonb, 'behavior_id', $3::int,
-            'is_creature', false))::json)).*
+            'is_creature', false,
+            -- sync_uuid is UNIQUE (seed-sync): a clone needs its own.
+            'sync_uuid', gen_random_uuid()))::json)).*
          FROM entity_types e WHERE e.id = $4`,
       [name, auras, behaviorId, tpl.rows[0].id]);
   }
