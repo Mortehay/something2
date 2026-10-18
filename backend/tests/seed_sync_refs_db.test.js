@@ -57,7 +57,7 @@ function dbTest(name, body) {
     const dir = makeTempSyncDir();
     const prev = process.env.SEED_SYNC_DIR;
     process.env.SEED_SYNC_DIR = dir;
-    const pool = new Pool({ connectionString: DB_URL, max: 3, connectionTimeoutMillis: 3000 });
+    const pool = new Pool({ connectionString: DB_URL, max: 6, connectionTimeoutMillis: 3000 });
     t.after(async () => {
       if (prev === undefined) delete process.env.SEED_SYNC_DIR; else process.env.SEED_SYNC_DIR = prev;
       fs.rmSync(dir, { recursive: true, force: true });
@@ -83,6 +83,24 @@ const docOf = (groupId) => JSON.parse(fs.readFileSync(fileFor(groupId), 'utf8'))
 const rawNoStamp = (groupId) => fs.readFileSync(fileFor(groupId), 'utf8')
   .split('\n').filter((l) => !/^\s*"exported_at":/.test(l)).join('\n');
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+// Every ref column of every row of every table: null, a uuid (by uuid) or a
+// string key (by key) -- never a local numeric id.
+function assertNoLocalIds(doc, group) {
+  let checked = 0;
+  for (const spec of group.tables) {
+    for (const r of doc.tables[spec.table]) {
+      for (const [col, ref] of Object.entries(spec.refs)) {
+        const v = r[col];
+        if (v === null) continue;
+        assert.strictEqual(typeof v, 'string', `${spec.table} ${r.sync_uuid}.${col} = ${JSON.stringify(v)}`);
+        if (ref.by === 'uuid') assert.match(v, UUID_RE, `${spec.table}.${col}`);
+        checked += 1;
+      }
+    }
+  }
+  return checked;
+}
 
 dbTest('test groups cover every FK column (fixture sanity)', async (t, pool) => {
   for (const s of [behaviorsSpec, entitiesSpec, itemsSpec]) {
@@ -110,6 +128,7 @@ dbTest('export writes uuid refs and key refs; no local id of a ref column reache
     assert.ok(r.behavior_id === null || (UUID_RE.test(r.behavior_id) && behUuids.has(r.behavior_id)), `${r.name}: ${r.behavior_id}`);
     assert.ok(!('id' in r) && !('ai_provider_id' in r));
   }
+  assert.ok(assertNoLocalIds(doc, SX_TEST) >= 2);
   assert.ok(!/"behavior_id": \d/.test(fs.readFileSync(fileFor('sx_test'), 'utf8')));
   assert.ok(!JSON.stringify(doc).includes(`"behavior_id":${beh.id}`));
   const n = async (tbl) => Number((await one(pool, `SELECT count(*) AS n FROM ${tbl}`)).n);
@@ -145,11 +164,7 @@ dbTest('key refs translate lookup ids to names; a self-ref travels as uuid', asy
   assert.strictEqual(bow.impact_behavior_id, 'pierce');
   assert.strictEqual(bow.element, 'fire');
   assert.strictEqual(bow.attack_origin, 'head');
-  for (const r of docOf('sx_items').tables.item_types) {
-    for (const c of ['ammo_type_id', 'projectile_shape_id', 'impact_behavior_id']) {
-      assert.ok(r[c] === null || typeof r[c] === 'string', `${r.name}.${c} = ${r[c]}`);
-    }
-  }
+  assert.ok(assertNoLocalIds(docOf('sx_items'), SX_ITEMS) >= 5);
 });
 
 // TODO(Task 4): once diff is multi-table, export over an existing file is
@@ -206,6 +221,10 @@ dbTest('buildRefMaps / exportRow / resolveRow round trip, missing and pending re
   assert.strictEqual(local.behavior_id, beh.id, 'input not mutated');
   assert.deepStrictEqual(exportRow({ behavior_id: null, element: null }, entitiesSpec, maps), { behavior_id: null, element: null });
   assert.throws(() => exportRow({ behavior_id: -1, element: null }, entitiesSpec, maps), /behavior_id.*-1/);
+  // A target whose uuid/key is null fails closed too (never a silent null ref).
+  const holey = { toRef: { behavior_id: new Map([[7, null]]), element: new Map([['fire', undefined]]) }, fromRef: {} };
+  assert.throws(() => exportRow({ behavior_id: 7, element: null }, entitiesSpec, holey), /behavior_id = 7.*no sync_uuid/);
+  assert.throws(() => exportRow({ behavior_id: null, element: 'fire' }, entitiesSpec, holey), /element = "fire".*no name/);
 
   const back = await resolveRow(out, entitiesSpec, maps);
   assert.deepStrictEqual(back, { row: local, missing: [] });
@@ -247,4 +266,66 @@ dbTest('validateDoc: unknown table, v1 for a multi-table group, missing table, r
     tables: { creature_behaviors: [{ name: 'sx_a', sync_uuid: 'NOT-A-UUID' }], entity_types: [] } },
   /creature_behaviors.*lowercase uuid/);
   bad({ header, tables: { creature_behaviors: {}, entity_types: [] } }, /creature_behaviors.*not an array/);
+});
+
+dbTest('buildRefMaps refuses a ref whose FK targets another table', async (t, pool) => {
+  const wrong = { ...entitiesSpec, refs: { behavior_id: { table: 'quests', by: 'uuid' } } };
+  await assert.rejects(buildRefMaps(pool, wrong), /entity_types\.behavior_id references creature_behaviors, but the ref declares quests/);
+  const notFk = { ...entitiesSpec, refs: { name: { table: 'quests', by: 'uuid' } } };
+  await assert.rejects(buildRefMaps(pool, notFk), /entity_types\.name .*not a single-column FK/);
+});
+
+test('buildRefMaps refuses a column with two single-column FKs', async () => {
+  // No such column exists in the schema; a stub catalog reply stands in.
+  const db = { query: async () => ({ rows: [
+    { col: 'behavior_id', ref_col: 'id', target: 'creature_behaviors' },
+    { col: 'behavior_id', ref_col: 'id', target: 'creature_behaviors' },
+  ] }) };
+  const spec = { table: 'entity_types', refs: { behavior_id: { table: 'creature_behaviors', by: 'uuid' } } };
+  await assert.rejects(buildRefMaps(db, spec), /behavior_id has 2 single-column FKs/);
+});
+
+// Without a table lock, export reads behaviors and entities in separate READ
+// COMMITTED statements: a writer committing in between would produce an
+// entity whose behavior uuid is not in the file.
+dbTest('export waits for an open writer and exports a self-consistent file', async (t, pool) => {
+  const writer = await pool.connect();
+  let open = true;
+  try {
+    await writer.query('BEGIN');
+    const wpid = (await writer.query('SELECT pg_backend_pid() AS p')).rows[0].p;
+    const beh = (await writer.query(
+      `INSERT INTO creature_behaviors (name, aggro_radius, leash_radius, chase_style)
+       VALUES ('sx_cw_beh', 5, 10, 'charge') RETURNING id, sync_uuid`)).rows[0];
+    await writer.query(
+      "INSERT INTO entity_types (name, color, behavior_id) VALUES ('sx_cw_ent', '#010203', $1)", [beh.id]);
+
+    let done = false;
+    const p = exportGroup(pool, 'sx_test').then((r) => { done = true; return r; });
+    p.catch(() => {});
+    // Deterministic: wait until some backend is blocked by the writer.
+    let blocked = false;
+    for (let i = 0; i < 100 && !blocked && !done; i += 1) {
+      const { rows } = await pool.query(
+        'SELECT count(*)::int AS n FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))', [wpid]);
+      blocked = rows[0].n > 0;
+      if (!blocked) await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.ok(blocked, 'export blocks on the open writer');
+    assert.strictEqual(done, false, 'export has not finished while the writer is open');
+    await writer.query('COMMIT');
+    open = false;
+    await p;
+    const doc = docOf('sx_test');
+    const b = doc.tables.creature_behaviors.find((r) => r.name === 'sx_cw_beh');
+    const e = doc.tables.entity_types.find((r) => r.name === 'sx_cw_ent');
+    assert.ok(b && e, 'both rows exported');
+    assert.strictEqual(b.sync_uuid, beh.sync_uuid);
+    assert.strictEqual(e.behavior_id, b.sync_uuid, "the entity's ref resolves inside the file");
+    const inFile = new Set(doc.tables.creature_behaviors.map((r) => r.sync_uuid));
+    for (const r of doc.tables.entity_types) assert.ok(r.behavior_id === null || inFile.has(r.behavior_id), r.name);
+  } finally {
+    if (open) await writer.query('ROLLBACK').catch(() => {});
+    writer.release();
+  }
 });

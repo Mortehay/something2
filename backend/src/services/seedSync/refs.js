@@ -5,17 +5,23 @@
 
 const quoteIdent = (name) => `"${String(name).replace(/"/g, '""')}"`;
 
-// The referenced column of each single-column FK of `table`: { col: refCol }.
+// Single-column FKs of `table`: Map(col -> [{ refCol, target }]).
 async function fkReferencedColumns(db, table) {
   const { rows } = await db.query(
-    `SELECT a.attname::text AS col, fa.attname::text AS ref_col
+    `SELECT a.attname::text AS col, fa.attname::text AS ref_col, t.relname::text AS target
        FROM pg_constraint c
        JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1]
        JOIN pg_attribute fa ON fa.attrelid = c.confrelid AND fa.attnum = c.confkey[1]
+       JOIN pg_class t ON t.oid = c.confrelid
       WHERE c.contype = 'f' AND c.conrelid = $1::text::regclass AND array_length(c.conkey, 1) = 1`,
     [quoteIdent(table)],
   );
-  return new Map(rows.map((r) => [r.col, r.ref_col]));
+  const out = new Map();
+  for (const r of rows) {
+    if (!out.has(r.col)) out.set(r.col, []);
+    out.get(r.col).push({ refCol: r.ref_col, target: r.target });
+  }
+  return out;
 }
 
 // Per ref column: toRef (local FK value -> ref value) and fromRef (ref value ->
@@ -27,8 +33,13 @@ async function buildRefMaps(db, spec) {
   if (!refs.length) return { toRef, fromRef };
   const fkCols = await fkReferencedColumns(db, spec.table);
   for (const [col, ref] of refs) {
-    const refCol = fkCols.get(col);
-    if (!refCol) throw new Error(`seed-sync: ${spec.table}.${col} is declared a ref but is not a single-column FK`);
+    const fks = fkCols.get(col) || [];
+    if (!fks.length) throw new Error(`seed-sync: ${spec.table}.${col} is declared a ref but is not a single-column FK`);
+    if (fks.length > 1) throw new Error(`seed-sync: ${spec.table}.${col} has ${fks.length} single-column FKs; a ref needs exactly one`);
+    const { refCol, target } = fks[0];
+    if (target !== ref.table) {
+      throw new Error(`seed-sync: ${spec.table}.${col} references ${target}, but the ref declares ${ref.table}`);
+    }
     const valueCol = ref.by === 'uuid' ? 'sync_uuid' : ref.keyCol;
     if (!valueCol) throw new Error(`seed-sync: ${spec.table}.${col} ref by key needs keyCol`);
     const { rows } = await db.query(
@@ -40,8 +51,9 @@ async function buildRefMaps(db, spec) {
 }
 
 // Copy of `row` with each ref column's local value replaced by its ref value.
-// Null stays null. A value with no target is a bug (FKs guarantee one): throw
-// rather than let a raw local id reach a file.
+// Null stays null. A value with no target, or a target whose uuid/key is
+// null, is a bug (FKs guarantee one): throw rather than let a raw local id or a
+// silently nulled ref reach a file.
 function exportRow(row, spec, maps) {
   const out = { ...row };
   for (const col of Object.keys(spec.refs || {})) {
@@ -51,7 +63,11 @@ function exportRow(row, spec, maps) {
     if (!map || !map.has(v)) {
       throw new Error(`seed-sync: ${spec.table}.${col} = ${JSON.stringify(v)} has no ${spec.refs[col].table} target`);
     }
-    out[col] = map.get(v);
+    const refValue = map.get(v);
+    if (refValue === null || refValue === undefined) {
+      throw new Error(`seed-sync: ${spec.table}.${col} = ${JSON.stringify(v)}: its ${spec.refs[col].table} target has no ${spec.refs[col].by === 'uuid' ? 'sync_uuid' : spec.refs[col].keyCol}`);
+    }
+    out[col] = refValue;
   }
   return out;
 }

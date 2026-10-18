@@ -60,6 +60,20 @@ async function exportTable(client, spec) {
     .sort((a, b) => compareNaturalKey(a, b, spec.naturalKey));
 }
 
+const quoteIdent = (name) => `"${String(name).replace(/"/g, '""')}"`;
+
+// Tables an export must hold still: the group's own tables and every target of
+// a by-uuid ref (by-key targets are migration-seeded lookups with no admin
+// write route). Sorted, so concurrent lockers take them in one order.
+function exportLockTables(specs) {
+  const out = new Set();
+  for (const s of specs) {
+    out.add(s.table);
+    for (const ref of Object.values(s.refs || {})) if (ref.by === 'uuid') out.add(ref.table);
+  }
+  return [...out].sort();
+}
+
 // A group the diff cannot handle yet (several tables, or ref columns).
 const needsV2Diff = (specs) => specs.length > 1 || specs.some((s) => Object.keys(s.refs || {}).length > 0);
 
@@ -75,6 +89,14 @@ async function exportGroup(pool, groupId) {
   let result;
   try {
     await beginLocked(client);
+    // The tables and ref maps are read in separate READ COMMITTED statements:
+    // an admin edit committing between them could leave a ref dangling inside
+    // the file (or make exportRow throw). SHARE blocks writers until COMMIT and
+    // waits for open ones; readers go on. Bounded by lock_timeout -> 'busy'.
+    // (Not REPEATABLE READ: its snapshot is taken by the first statement, the
+    // advisory-lock wait, so a seed committing while we waited would be
+    // invisible -- the same trap applySeed avoids with LOCK TABLE.)
+    await client.query(`LOCK TABLE ${exportLockTables(specs).map(quoteIdent).join(', ')} IN SHARE MODE`);
     if (needsV2Diff(specs)) {
       // TODO(Task 4): diffGroup is single-table until Task 4, so the git_newer /
       // schema_newer pre-check cannot run for this group. Never overwrite a
