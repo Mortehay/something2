@@ -1,4 +1,4 @@
-.PHONY: up down build logs restart rebuild clean nuke shell-backend shell-frontend db-shell \
+.PHONY: seed-sync-status seed-sync-export seed-sync-seed up down build logs restart rebuild clean nuke shell-backend shell-frontend db-shell \
         engine-build engine-test engine-up engine-down engine-logs engine-shell engine-rebuild \
         redis-shell admin-password admin-password-rotate seed-catalogs seed-map seed-passive-tree \
         art-export art-seed audio-export audio-seed tiles-generate tiles-export tiles-seamless tiles-seed \
@@ -258,6 +258,26 @@ art-export:
 art-seed:
 	$(COMPOSE) exec -T backend node scripts/seed-art.js \
 		$(if $(KIND),--kind="$(KIND)") $(if $(ONLY),--only="$(ONLY)") $(if $(FORCE),--force)
+
+# --- Seed/Export (SOMET-639) -----------------------------------------------
+#
+# Headless twin of the admin Seed/Export tab. GROUP omitted = every group, in
+# seed order. Exit 0 ok, 2 a group was refused, 1 error.
+#
+#   make seed-sync-status [GROUP=items]
+#   make seed-sync-export [GROUP=items]
+#   make seed-sync-seed   [GROUP=items] [RESOLVE=git|local]
+#
+# seed refuses (undecided) a group with rows edited here unless RESOLVE is set;
+# RESOLVE never overrides a blocked delete or a key clash (those stay local).
+seed-sync-status:
+	$(COMPOSE) exec -T backend node scripts/seed-sync.js status $(if $(GROUP),--group="$(GROUP)")
+
+seed-sync-export:
+	$(COMPOSE) exec -T backend node scripts/seed-sync.js export $(if $(GROUP),--group="$(GROUP)",--all)
+
+seed-sync-seed:
+	$(COMPOSE) exec -T backend node scripts/seed-sync.js seed $(if $(GROUP),--group="$(GROUP)",--all) $(if $(RESOLVE),--resolve="$(RESOLVE)")
 
 # --- Audio clips -----------------------------------------------------------
 #
