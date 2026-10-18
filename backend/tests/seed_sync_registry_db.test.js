@@ -47,6 +47,20 @@ dbTest('every live column is exported or explicitly omitted, with no stale omit 
   }
 });
 
+// A FK column holds a local numeric id that means nothing on another PC (or
+// worse, points at a different row). Plan 1 omits them; plan 2 maps them.
+dbTest('no live column of any group carries a FK constraint', async (t, pool) => {
+  for (const g of GROUPS) {
+    const fkCols = (await pool.query(
+      `SELECT a.attname::text AS name FROM pg_constraint c
+         JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
+        WHERE c.contype = 'f' AND c.conrelid = $1::text::regclass`, [g.table],
+    )).rows.map((r) => r.name);
+    const live = (await liveColumns(pool, g)).map((c) => c.name);
+    assert.deepStrictEqual(live.filter((c) => fkCols.includes(c)), [], `${g.table}: FK column exported`);
+  }
+});
+
 dbTest('liveColumns is sorted and carries information_schema data_type', async (t, pool) => {
   const cols = await liveColumns(pool, getGroup('tile_types'));
   const names = cols.map((c) => c.name);

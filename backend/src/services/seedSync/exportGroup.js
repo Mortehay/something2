@@ -4,6 +4,7 @@ const { getGroup, liveColumns } = require('./registry.js');
 const { canonicalRow, rowHash, stableStringify } = require('./canonical.js');
 const { pcLabel, schemaVersion, startRun, finishRun } = require('./runs.js');
 const { SyncFileError, SyncRefused } = require('./errors.js');
+const { SEED_SYNC_LOCK_SQL, beginLocked, mapLockError, rollback } = require('./txn.js');
 
 let tmpCounter = 0;
 
@@ -36,10 +37,6 @@ async function readExport(groupId) {
   return data;
 }
 
-// Serializes export and seed (any group): both hold it for their whole
-// check-then-write, so neither acts on a diff the other has invalidated.
-const SEED_SYNC_LOCK_SQL = "SELECT pg_advisory_xact_lock(hashtext('seed_sync'))";
-
 async function exportGroup(pool, groupId) {
   const group = getGroup(groupId);
   // Lazy require: diffGroup.js needs readExport from this module.
@@ -47,9 +44,10 @@ async function exportGroup(pool, groupId) {
   const client = await pool.connect();
   let runId = null;
   let tmp = null;
+  let releaseErr;
+  let result;
   try {
-    await client.query('BEGIN');
-    await client.query(SEED_SYNC_LOCK_SQL);
+    await beginLocked(client);
     // Never export over changes that came from git: they would be lost. A
     // corrupt file (SyncFileError) propagates too; the user must fix or delete
     // it first. Checked under the lock, so no seed can slip in before the write.
@@ -94,16 +92,20 @@ async function exportGroup(pool, groupId) {
       );
     }
     await client.query('COMMIT');
-    await finishRun(pool, runId, { status: 'ok', summary: { rowCount: rows.length } });
-    return { runId, rowCount: rows.length };
-  } catch (e) {
-    await client.query('ROLLBACK').catch(() => {});
+    result = { runId, rowCount: rows.length };
+  } catch (err) {
+    const e = mapLockError(err);
+    releaseErr = await rollback(client);
     if (tmp) await fs.promises.unlink(tmp).catch(() => {});
     if (runId !== null) await finishRun(pool, runId, { status: 'failed', error: e.message }).catch(() => {});
     throw e;
   } finally {
-    client.release();
+    client.release(releaseErr);
   }
+  // Committed: the run is ok whatever happens now; never report it failed.
+  await finishRun(pool, runId, { status: 'ok', summary: { rowCount: result.rowCount } })
+    .catch((e) => console.error(`seed-sync: export run ${runId} committed but not marked ok:`, e.message));
+  return result;
 }
 
 module.exports = { SyncFileError, SEED_SYNC_LOCK_SQL, syncDir, fileFor, readExport, exportGroup };

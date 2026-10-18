@@ -6,6 +6,10 @@ const { withAdvisoryLock } = require('./advisoryLock.js');
 // Shared by every seed_sync DB test file. node --test runs files in parallel and
 // export rewrites a whole group's baselines, so all of them take this one key.
 const SEED_SYNC_TEST_LOCK = 632633001;
+// seed_sync_apply_db.test.js deletes every seed run above a per-test id
+// watermark. That is only safe because EVERY test that writes seed runs holds
+// SEED_SYNC_TEST_LOCK while doing so -- route tests (Task 6) that seed must
+// take it too, or their runs can be deleted mid-test.
 
 function withSeedSyncLock(pool, fn, opts) {
   return withAdvisoryLock(pool, SEED_SYNC_TEST_LOCK, fn, { waitMs: 30000, ...opts });

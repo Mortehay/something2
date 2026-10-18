@@ -7,7 +7,14 @@ const GROUPS = [
     label: 'Tile Types',
     table: 'tile_types',
     naturalKey: 'name',
-    omit: { id: 'local', created_at: 'local', updated_at: 'local', image: 'art group (plan 3)', sync_uuid: 'identity' },
+    omit: {
+      id: 'local',
+      created_at: 'local',
+      updated_at: 'local',
+      image: 'art group (plan 3)',
+      sync_uuid: 'identity',
+      ai_provider_id: 'local FK — plan 2 exports FKs as sync_uuid',
+    },
     secretColumns: [],
   },
   {

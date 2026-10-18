@@ -1,14 +1,15 @@
 const { getGroup } = require('./registry.js');
 const { computeDiff } = require('./diffGroup.js');
-const { SEED_SYNC_LOCK_SQL } = require('./exportGroup.js');
+const { beginLocked, mapLockError, rollback } = require('./txn.js');
 const { schemaVersion, startRun, finishRun } = require('./runs.js');
 const { SyncRefused } = require('./errors.js');
 
 // Seeding writes game data from the git export into this DB. Rules that keep it
 // safe: every red row needs an explicit decision, the diff is recomputed under
 // the seed_sync lock (never trusted from an earlier preview), deletes of rows
-// that other tables reference are refused (never cascaded), secret columns are
-// never written, and everything happens in one transaction.
+// that other tables reference are refused (never cascaded), a git row never
+// takes a natural key a kept local row holds, secret columns are never
+// written, and everything happens in one transaction.
 
 // Allowed decisions per kind; anything else is refused.
 const ALLOWED = {
@@ -23,10 +24,13 @@ const ALLOWED = {
 };
 // Kinds whose local row can be deleted, so FK references can block them.
 const DELETABLE = new Set(['deleted_in_git', 'only_here']);
+// Git-only rows that 'git' inserts, so a kept local row can hold their key.
+const INSERTABLE = new Set(['new', 'deleted_here']);
 const UPDATE_KINDS = new Set(['changed', 'edited_here', 'not_exported']);
-const CREATE_KINDS = new Set(['new', 'deleted_here']);
+const KEY_CLASH_REASON = 'key already used by a local row';
 
 const quoteIdent = (name) => `"${String(name).replace(/"/g, '""')}"`;
+const own = (obj, k) => Object.prototype.hasOwnProperty.call(obj, k);
 
 // Every FK pointing at the group's table, with its column pairs in key order.
 async function referencingFks(db, group) {
@@ -48,7 +52,7 @@ async function referencingFks(db, group) {
 
 // syncUuid -> "<n> rows in <table> reference this" (several tables joined by
 // "; "), for the given local rows that are referenced at all.
-async function blockedReasons(db, group, uuids) {
+async function referenceReasons(db, group, uuids) {
   const out = new Map();
   if (!uuids.length) return out;
   const perUuid = new Map(); // uuid -> Map(table -> n)
@@ -74,36 +78,73 @@ async function blockedReasons(db, group, uuids) {
   return out;
 }
 
-// diffGroup plus blockedReason on every row that could be deleted. One
-// read-only snapshot for the diff and the reference counts.
+const deletableUuids = (diff) => diff.rows.filter((r) => DELETABLE.has(r.kind)).map((r) => r.syncUuid);
+
+// Sets blockedReason and the blocking-aware defaultDecision on every diff row,
+// and returns each row's effective decision under `decisions` (rows left out
+// take their default). Pure: validation happens in the caller.
+//  - A referenced deletable row is blocked; a blocked deleted_in_git defaults
+//    to 'local' (keep) instead of 'delete'.
+//  - A new/deleted_here git row whose natural key is held by a local row that
+//    this seed does NOT delete is blocked and defaults to 'local'. (Adopt
+//    consumes the same-key local row, so a new/deleted_here row's key holder
+//    is never adopted in the same seed.)
+function annotate(cd, refReasons, decisions) {
+  const { diff, group } = cd;
+  const decisionOf = (r) => (own(decisions, r.syncUuid) ? decisions[r.syncUuid] : r.defaultDecision);
+  for (const r of diff.rows) {
+    if (!DELETABLE.has(r.kind) || !refReasons.has(r.syncUuid)) continue;
+    r.blockedReason = refReasons.get(r.syncUuid);
+    if (r.kind === 'deleted_in_git') r.defaultDecision = 'local';
+  }
+  const deleting = new Set(diff.rows
+    .filter((r) => DELETABLE.has(r.kind) && decisionOf(r) === 'delete').map((r) => r.syncUuid));
+  for (const r of diff.rows) {
+    if (!INSERTABLE.has(r.kind)) continue;
+    const holder = cd.localByKey.get(cd.git.get(r.syncUuid).row[group.naturalKey]);
+    if (holder && !deleting.has(holder.row.sync_uuid)) {
+      r.blockedReason = KEY_CLASH_REASON;
+      r.defaultDecision = 'local';
+    }
+  }
+  return diff.rows.map((row) => ({ row, decision: decisionOf(row) }));
+}
+
+function warningsFor(fileVersion, dbVersion) {
+  return fileVersion < dbVersion ? ['schema_older'] : [];
+}
+
+const versionOf = (header) => (header && header.schema_version != null ? String(header.schema_version) : '');
+
+// diffGroup plus blockedReason (FK references, natural-key clashes), the
+// blocking-aware defaults, and `warnings` (['schema_older'] when the file
+// predates this DB's migrations). One read-only snapshot.
 async function previewSeed(pool, groupId) {
   const group = getGroup(groupId);
   const client = await pool.connect();
+  let releaseErr;
   try {
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
-    const { diff } = await computeDiff(client, groupId);
-    const reasons = await blockedReasons(client, group,
-      diff.rows.filter((r) => DELETABLE.has(r.kind)).map((r) => r.syncUuid));
-    for (const r of diff.rows) if (reasons.has(r.syncUuid)) r.blockedReason = reasons.get(r.syncUuid);
+    const cd = await computeDiff(client, groupId);
+    annotate(cd, await referenceReasons(client, group, deletableUuids(cd.diff)), {});
+    const warnings = cd.diff.header ? warningsFor(versionOf(cd.diff.header), await schemaVersion(client)) : [];
     await client.query('COMMIT');
-    return diff;
+    return { ...cd.diff, warnings };
   } catch (e) {
-    await client.query('ROLLBACK').catch(() => {});
+    releaseErr = await rollback(client);
     throw e;
   } finally {
-    client.release();
+    client.release(releaseErr);
   }
 }
 
-// Validate the caller's decisions against the freshly computed diff and return
-// [{ row, decision }] for every listed row.
-function resolveDecisions(diff, decisions) {
+// Refusals before any write; returns [{ row, decision }] for every listed row.
+function plan(cd, refReasons, decisions) {
   if (decisions === null || decisions === undefined) decisions = {};
   if (typeof decisions !== 'object' || Array.isArray(decisions)) {
     throw new SyncRefused('invalid_decision', 'decisions must be an object keyed by sync_uuid', { uuids: [] });
   }
-  const own = (k) => Object.prototype.hasOwnProperty.call(decisions, k);
-  const byUuid = new Map(diff.rows.map((r) => [r.syncUuid, r]));
+  const byUuid = new Map(cd.diff.rows.map((r) => [r.syncUuid, r]));
   const stale = Object.keys(decisions).filter((u) => !byUuid.has(u));
   if (stale.length) {
     throw new SyncRefused('stale_preview', 'the diff changed since the preview; preview again', { uuids: stale });
@@ -112,11 +153,25 @@ function resolveDecisions(diff, decisions) {
   if (invalid.length) {
     throw new SyncRefused('invalid_decision', 'decision not allowed for this row', { uuids: invalid });
   }
-  const undecided = diff.rows.filter((r) => r.defaultDecision === null && !own(r.syncUuid)).map((r) => r.syncUuid);
+  const steps = annotate(cd, refReasons, decisions);
+  const undecided = steps.filter((s) => s.decision === null).map((s) => s.row.syncUuid);
   if (undecided.length) {
     throw new SyncRefused('undecided', 'rows edited on this PC need a decision', { uuids: undecided });
   }
-  return diff.rows.map((row) => ({ row, decision: own(row.syncUuid) ? decisions[row.syncUuid] : row.defaultDecision }));
+  const blocked = steps.filter((s) => s.decision === 'delete' && s.row.blockedReason);
+  if (blocked.length) {
+    throw new SyncRefused('blocked', 'rows referenced elsewhere cannot be deleted', {
+      uuids: blocked.map((s) => s.row.syncUuid),
+      reasons: Object.fromEntries(blocked.map((s) => [s.row.syncUuid, s.row.blockedReason])),
+    });
+  }
+  const conflicts = steps.filter((s) => s.decision === 'git' && s.row.blockedReason === KEY_CLASH_REASON);
+  if (conflicts.length) {
+    throw new SyncRefused('conflict', `${KEY_CLASH_REASON}; keep it local or delete the local row`, {
+      uuids: conflicts.map((s) => s.row.syncUuid),
+    });
+  }
+  return steps;
 }
 
 // Live-column values of a canonical git row as query params.
@@ -140,11 +195,12 @@ async function upsertFromGit(db, group, columns, gitRow) {
   );
 }
 
-async function adoptFromGit(db, group, columns, gitRow, localUuid) {
-  const vals = paramsFor(columns, gitRow);
-  const set = columns.map((c, i) => `${quoteIdent(c.name)} = $${i + 3}`).join(', ');
+// Take git's identity for the local row; with `columns`, git's values too.
+async function adopt(db, group, columns, gitRow, localUuid) {
+  const vals = columns ? paramsFor(columns, gitRow) : [];
+  const set = columns ? columns.map((c, i) => `, ${quoteIdent(c.name)} = $${i + 3}`).join('') : '';
   const res = await db.query(
-    `UPDATE ${quoteIdent(group.table)} SET sync_uuid = $1, ${set} WHERE sync_uuid = $2`,
+    `UPDATE ${quoteIdent(group.table)} SET sync_uuid = $1${set} WHERE sync_uuid = $2`,
     [gitRow.sync_uuid, localUuid, ...vals],
   );
   if (res.rowCount !== 1) throw new Error(`adopt_identity: local row ${localUuid} not found`);
@@ -158,90 +214,106 @@ async function setBaseline(db, groupId, uuid, hash) {
   );
 }
 
+async function dropBaselines(db, groupId, uuids) {
+  if (!uuids.length) return;
+  await db.query('DELETE FROM seed_row_hashes WHERE group_id = $1 AND sync_uuid = ANY($2::uuid[])', [groupId, uuids]);
+}
+
 // decisions: { [syncUuid]: 'git' | 'local' | 'delete' }; rows left out use
-// their defaultDecision. Refusals (no_export, schema_newer, stale_preview,
-// invalid_decision, undecided, blocked) happen before a run is started, so
-// they record no run -- like export's git_newer. Failures after that roll the
-// whole transaction back and finish the run as failed.
+// their (blocking-aware) defaultDecision. Refusals (busy, no_export,
+// schema_newer, stale_preview, invalid_decision, undecided, blocked, conflict)
+// happen before a run is started, so they record no run -- like export's
+// git_newer. A failure after that rolls everything back and finishes the run
+// as failed; a committed seed always finishes ok.
 async function applySeed(pool, groupId, decisions) {
   const group = getGroup(groupId);
   const client = await pool.connect();
   let runId = null;
+  let releaseErr;
+  let result;
   try {
-    await client.query('BEGIN');
-    await client.query(SEED_SYNC_LOCK_SQL);
+    await beginLocked(client);
     // No concurrent INSERT/UPDATE/DELETE on the group's table until COMMIT
     // (reads go on): the diff below stays true while we write, so an edit made
-    // meanwhile on this PC can never be silently overwritten.
+    // meanwhile on this PC can never be silently overwritten. (Not REPEATABLE
+    // READ: its snapshot would be taken before the lock wait.)
     await client.query(`LOCK TABLE ${quoteIdent(group.table)} IN SHARE ROW EXCLUSIVE MODE`);
     const cd = await computeDiff(client, groupId);
     const { diff, columns } = cd;
     if (!diff.header) throw new SyncRefused('no_export', `no export file for ${groupId}`);
-    const fileVersion = diff.header.schema_version == null ? '' : String(diff.header.schema_version);
+    const fileVersion = versionOf(diff.header);
     const dbVersion = await schemaVersion(client);
     if (fileVersion > dbVersion) {
       throw new SyncRefused('schema_newer', 'run migrations first', { fileVersion, dbVersion });
     }
-    const plan = resolveDecisions(diff, decisions);
-
-    const deletes = plan.filter((p) => p.decision === 'delete').map((p) => p.row.syncUuid);
-    if (deletes.length) {
-      // Row locks first: a new referencing row (FK KEY SHARE) now waits for
-      // us, and the count below sees everything committed before it.
+    // Lock every deletable row before counting its references: a new
+    // referencing row (FK KEY SHARE) now waits for us, and the count sees
+    // everything committed before it.
+    const deletable = deletableUuids(diff);
+    if (deletable.length) {
       await client.query(
-        `SELECT 1 FROM ${quoteIdent(group.table)} WHERE sync_uuid = ANY($1::uuid[]) FOR UPDATE`, [deletes]);
-      const reasons = await blockedReasons(client, group, deletes);
-      if (reasons.size) {
-        throw new SyncRefused('blocked', 'rows referenced elsewhere cannot be deleted', {
-          uuids: deletes.filter((u) => reasons.has(u)),
-          reasons: Object.fromEntries(reasons),
-        });
-      }
+        `SELECT 1 FROM ${quoteIdent(group.table)} WHERE sync_uuid = ANY($1::uuid[]) FOR UPDATE`, [deletable]);
     }
+    const steps = plan(cd, await referenceReasons(client, group, deletable), decisions);
 
     runId = await startRun(pool, groupId, 'seed');
     const summary = { updated: 0, created: 0, deleted: 0, kept: 0, adopted: 0 };
+    const gitOf = (row) => cd.git.get(row.syncUuid);
+    const by = (decision, pred = () => true) => steps.filter((s) => s.decision === decision && pred(s.row));
 
     // Deletes, then adopts, then upserts: a git row may take the natural key
     // of a local row deleted in the same seed.
+    const deletes = by('delete').map((s) => s.row.syncUuid);
     if (deletes.length) {
       const res = await client.query(
         `DELETE FROM ${quoteIdent(group.table)} WHERE sync_uuid = ANY($1::uuid[])`, [deletes]);
       if (res.rowCount !== deletes.length) throw new Error(`delete: expected ${deletes.length} rows, got ${res.rowCount}`);
-      await client.query(
-        'DELETE FROM seed_row_hashes WHERE group_id = $1 AND sync_uuid = ANY($2::uuid[])', [groupId, deletes]);
+      await dropBaselines(client, groupId, deletes);
       summary.deleted = deletes.length;
     }
-    const fromGit = plan.filter((p) => p.decision === 'git');
-    for (const { row } of fromGit.filter((p) => p.row.kind === 'adopt_identity')) {
-      const g = cd.git.get(row.syncUuid);
-      const local = cd.localByKey.get(g.row[group.naturalKey]);
-      await adoptFromGit(client, group, columns, g.row, local.row.sync_uuid);
+    const localOf = (row) => cd.localByKey.get(gitOf(row).row[group.naturalKey]).row.sync_uuid;
+    for (const { row } of by('git', (r) => r.kind === 'adopt_identity')) {
+      await adopt(client, group, columns, gitOf(row).row, localOf(row));
       summary.adopted += 1;
     }
-    for (const { row } of fromGit.filter((p) => p.row.kind !== 'adopt_identity')) {
-      await upsertFromGit(client, group, columns, cd.git.get(row.syncUuid).row);
+    for (const { row } of by('local', (r) => r.kind === 'adopt_identity')) {
+      await adopt(client, group, null, gitOf(row).row, localOf(row)); // identity only, values stay
+    }
+    for (const { row } of by('git', (r) => r.kind !== 'adopt_identity')) {
+      await upsertFromGit(client, group, columns, gitOf(row).row);
       if (UPDATE_KINDS.has(row.kind)) summary.updated += 1;
-      else if (CREATE_KINDS.has(row.kind)) summary.created += 1;
+      else if (INSERTABLE.has(row.kind)) summary.created += 1;
       else throw new Error(`no git write for kind ${row.kind}`);
     }
-    summary.kept = plan.filter((p) => p.decision === 'local').length;
+    summary.kept = by('local').length;
 
-    // Baselines: written rows -> B = hG; local rows keep theirs; rows already
-    // identical with no B yet -> B = hL (first sync).
-    for (const { row } of fromGit) await setBaseline(client, groupId, row.syncUuid, cd.git.get(row.syncUuid).hash);
+    // Baselines. Written from git -> B = hG. A 'local' decision acknowledges
+    // git's version so export is not stuck behind git_newer:
+    // changed/edited_here/adopt_identity/new -> B = hG (next diff:
+    // not_exported / deleted_here); deleted_in_git -> drop B (next: only_here);
+    // deleted_here/not_exported/only_here -> untouched. Rows already identical
+    // with no B -> B = hL (first sync).
+    const ACK = new Set(['changed', 'edited_here', 'adopt_identity', 'new']);
+    for (const { row } of [...by('git'), ...by('local', (r) => ACK.has(r.kind))]) {
+      await setBaseline(client, groupId, row.syncUuid, gitOf(row).hash);
+    }
+    await dropBaselines(client, groupId, by('local', (r) => r.kind === 'deleted_in_git').map((s) => s.row.syncUuid));
     for (const s of cd.inSync) if (!s.hasBaseline) await setBaseline(client, groupId, s.syncUuid, s.hash);
 
     await client.query('COMMIT');
-    await finishRun(pool, runId, { status: 'ok', summary });
-    return { runId, summary };
-  } catch (e) {
-    await client.query('ROLLBACK').catch(() => {});
+    result = { runId, summary };
+  } catch (err) {
+    const e = mapLockError(err);
+    releaseErr = await rollback(client);
     if (runId !== null) await finishRun(pool, runId, { status: 'failed', error: e.message }).catch(() => {});
     throw e;
   } finally {
-    client.release();
+    client.release(releaseErr);
   }
+  // Committed: the run is ok whatever happens now; never report it failed.
+  await finishRun(pool, runId, { status: 'ok', summary: result.summary })
+    .catch((e) => console.error(`seed-sync: seed run ${runId} committed but not marked ok:`, e.message));
+  return result;
 }
 
-module.exports = { previewSeed, applySeed, ALLOWED };
+module.exports = { previewSeed, applySeed, ALLOWED, KEY_CLASH_REASON };

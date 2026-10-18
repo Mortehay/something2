@@ -128,8 +128,12 @@ dbTest('export records a run and baselines', async (t, pool) => {
   assert.strictEqual(left.rowCount, 0);
   const last = await lastRuns(pool);
   assert.strictEqual(last.quests.export.id, runId);
-  assert.strictEqual(last.quests.seed, null);
-  assert.strictEqual(last.tile_types.seed, null);
+  // History-independent: a DB may hold real seed runs. Only check that the
+  // export run is not reported as a seed and seeds stay seeds.
+  for (const g of ['quests', 'tile_types']) {
+    const seed = last[g].seed;
+    assert.ok(seed === null || (seed.action === 'seed' && seed.id !== runId), `${g}: seed slot holds a seed run`);
+  }
   const recent = await recentRuns(pool, { limit: 5, groupId: 'quests' });
   assert.strictEqual(recent[0].id, runId);
 });
