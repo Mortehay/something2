@@ -515,7 +515,7 @@ dbTest('failure mid-apply rolls back everything', async (t, pool) => {
   assert.deepStrictEqual(released, [undefined], 'a clean ROLLBACK returns the client to the pool');
   assert.deepStrictEqual(await questState(pool), beforeQ);
   assert.deepStrictEqual(await baselineState(pool, uuids), beforeB);
-  const run = (await recentRuns(pool, { groupId: 'quests', limit: 1 }))[0];
+  const run = (await recentRuns(pool, { groupId: 'quests', limit: 1 })).runs[0];
   assert.strictEqual(run.action, 'seed');
   assert.strictEqual(run.status, 'failed');
   assert.strictEqual(run.error, 'sx injected failure');
@@ -545,7 +545,7 @@ dbTest('a failed ROLLBACK destroys the client (apply and export)', async (t, poo
     t.mock.restoreAll();
   }
   assert.ok(released[0] instanceof Error && released[0].message === 'sx rollback failed', 'export release(err)');
-  createdRuns.push((await recentRuns(pool, { groupId: 'quests', limit: 1 }))[0].id);
+  createdRuns.push((await recentRuns(pool, { groupId: 'quests', limit: 1 })).runs[0].id);
   assert.strictEqual((await questState(pool))[0].title, 'sx t');
 });
 
@@ -608,6 +608,43 @@ dbTest('apply recomputes the diff: a row edited after the preview refuses stale_
   assert.strictEqual(await seedRunCount(pool), runs, 'a refusal records no run');
 });
 
+// The signature covers each row's current local and git VALUES, not just its
+// kind: a second edit keeps the row edited_here with the same default and
+// reason, and 'git' would silently overwrite a value the admin never saw.
+dbTest('a row edited again after the preview (same kind) refuses stale_preview', async (t, pool) => {
+  await addQuest(pool, 'sx_a');
+  const a = await snap(pool, 'quests', 'sx_a');
+  await setBaseline(pool, 'quests', a);
+  await writeGitWith(pool, 'quests', [{ ...a, title: 'sx git' }]);
+  await pool.query("UPDATE quests SET title = 'sx local 1' WHERE key = 'sx_a'");
+  const preview = await onlySxListed(pool, 'quests');
+  assert.strictEqual(byKey(preview, 'sx_a').kind, 'edited_here');
+  await pool.query("UPDATE quests SET title = 'sx local 2' WHERE key = 'sx_a'");
+  const again = byKey(await previewSeed(pool, 'quests'), 'sx_a');
+  assert.deepStrictEqual([again.kind, again.defaultDecision, again.blockedReason], ['edited_here', null, null]);
+  const runs = await seedRunCount(pool);
+  await assert.rejects(applySeed(pool, 'quests', { [a.sync_uuid]: 'git' }, { signature: preview.signature }),
+    refused('stale_preview'));
+  assert.strictEqual((await questState(pool))[0].title, 'sx local 2', 'newest local value kept');
+  assert.strictEqual(await baselineOf(pool, 'quests', a.sync_uuid), rowHash(a), 'baseline untouched');
+  assert.strictEqual(await seedRunCount(pool), runs, 'a refusal records no run');
+});
+
+dbTest('a git value changed after the preview (same kind, same exported_at) refuses stale_preview', async (t, pool) => {
+  await addQuest(pool, 'sx_a');
+  const a = await snap(pool, 'quests', 'sx_a');
+  await setBaseline(pool, 'quests', a);
+  await writeGitWith(pool, 'quests', [{ ...a, title: 'sx git 1' }]);
+  const preview = await onlySxListed(pool, 'quests');
+  assert.strictEqual(byKey(preview, 'sx_a').kind, 'changed');
+  await writeGitWith(pool, 'quests', [{ ...a, title: 'sx git 2' }]);
+  const runs = await seedRunCount(pool);
+  await assert.rejects(applySeed(pool, 'quests', defaultsOf(preview), { signature: preview.signature }),
+    refused('stale_preview'));
+  assert.strictEqual((await questState(pool))[0].title, 'sx t');
+  assert.strictEqual(await seedRunCount(pool), runs, 'a refusal records no run');
+});
+
 dbTest('a git file changed after the preview (row removed) refuses stale_preview', async (t, pool) => {
   await addQuest(pool, 'sx_a');
   await addQuest(pool, 'sx_b');
@@ -662,7 +699,7 @@ dbTest('a unique clash while writing is a conflict refusal, rolled back, run fai
   });
   assert.deepStrictEqual(await questState(pool), beforeQ);
   assert.deepStrictEqual(await baselineState(pool, [a.sync_uuid]), beforeB);
-  const run = (await recentRuns(pool, { groupId: 'quests', limit: 1 }))[0];
+  const run = (await recentRuns(pool, { groupId: 'quests', limit: 1 })).runs[0];
   assert.deepStrictEqual([run.action, run.status], ['seed', 'failed']);
   assert.match(run.error, /quests_key_key/);
 });

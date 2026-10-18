@@ -104,7 +104,12 @@ dbTest('GET /groups lists three groups in order with statuses', async ({ pool, a
   assert.strictEqual(res.status, 200);
   assert.deepStrictEqual(res.body.map((g) => g.id), ['tile_types', 'quests', 'ai_providers']);
   for (const g of res.body) {
-    assert.strictEqual(g.status, 'never_exported');
+    // No file in the temp dir: never_exported, or file_missing when this DB
+    // holds an ok export run of the group (real history may exist).
+    const { rows } = await pool.query(
+      "SELECT EXISTS (SELECT 1 FROM seed_export_runs WHERE group_id = $1 AND action = 'export' AND status = 'ok') AS x",
+      [g.id]);
+    assert.strictEqual(g.status, rows[0].x ? 'file_missing' : 'never_exported', g.id);
     assert.strictEqual(g.inGit, null);
     assert.ok('lastExport' in g && 'lastSeed' in g); // runs of other PCs/tests may exist
     for (const k of ['label', 'counts', 'localEdits', 'gitChanges', 'tokensMissing']) assert.ok(k in g, k);
@@ -115,7 +120,11 @@ dbTest('GET /groups lists three groups in order with statuses', async ({ pool, a
   assert.ok(tt.inGit && tt.inGit.group === 'tile_types');
   assert.ok(tt.lastExport.id > watermark);
   assert.ok(tt.lastExport && tt.lastExport.finished_at && tt.lastExport.pc_label);
-  assert.notStrictEqual(tt.status, 'never_exported');
+  assert.ok(!['never_exported', 'file_missing'].includes(tt.status), tt.status);
+  // The file goes away (e.g. not committed / pulled away): file_missing.
+  fs.rmSync(fileFor('tile_types'));
+  const gone = await request(appFor(pool)).get('/api/seed-export/groups').set('Authorization', admin.auth);
+  assert.strictEqual(gone.body.find((g) => g.id === 'tile_types').status, 'file_missing');
 });
 
 dbTest('bad file yields status bad_file, not 500', async ({ pool, admin }) => {
@@ -155,11 +164,52 @@ dbTest('unknown group is 404; bad bodies and limits', async ({ pool, admin }) =>
   await exportGroup(pool, 'tile_types');
   await exportGroup(pool, 'tile_types');
   const one = await request(app).get('/api/seed-export/runs?group=tile_types&limit=1').set(h);
-  assert.strictEqual(one.body.length, 1);
+  assert.strictEqual(one.body.runs.length, 1);
   const zero = await request(app).get('/api/seed-export/runs?limit=0').set(h);
-  assert.strictEqual(zero.body.length, 1, 'limit clamps up to 1');
+  assert.strictEqual(zero.body.runs.length, 1, 'limit clamps up to 1');
   const all = await request(app).get('/api/seed-export/runs?group=tile_types').set(h);
-  assert.ok(all.body.every((r) => r.group_id === 'tile_types'));
+  assert.ok(all.body.runs.every((r) => r.group_id === 'tile_types'));
+});
+
+dbTest('GET /runs pages newest first with a total', async ({ pool, admin }) => {
+  const app = appFor(pool);
+  const h = { Authorization: admin.auth };
+  const get = (q) => request(app).get(`/api/seed-export/runs${q}`).set(h);
+  const ids = [];
+  for (let i = 0; i < 3; i += 1) ids.push((await exportGroup(pool, 'tile_types')).runId);
+  const count = async (group) => (await pool.query(
+    'SELECT count(*)::int AS n FROM seed_export_runs WHERE ($1::text IS NULL OR group_id = $1)', [group])).rows[0].n;
+  const total = await count('tile_types');
+  assert.ok(total >= 3);
+
+  const first = await get('?group=tile_types&limit=2');
+  assert.strictEqual(first.status, 200);
+  assert.deepStrictEqual(first.body.runs.map((r) => r.id), [ids[2], ids[1]], 'newest first');
+  assert.strictEqual(first.body.total, total);
+  const second = await get('?group=tile_types&limit=2&offset=1');
+  assert.deepStrictEqual(second.body.runs.map((r) => r.id), [ids[1], ids[0]]);
+  assert.strictEqual(second.body.total, total);
+
+  // Default limit 15, clamp to 200; total counts every group without a filter.
+  const dflt = await get('');
+  assert.strictEqual(dflt.body.total, await count(null));
+  assert.strictEqual(dflt.body.runs.length, Math.min(15, dflt.body.total));
+  const big = await get('?limit=100000');
+  assert.strictEqual(big.body.runs.length, Math.min(200, big.body.total));
+
+  // Paging boundaries.
+  const last = await get(`?group=tile_types&limit=1&offset=${total - 1}`);
+  assert.strictEqual(last.body.runs.length, 1);
+  for (const off of [total, total + 50]) {
+    const past = await get(`?group=tile_types&offset=${off}`);
+    assert.strictEqual(past.status, 200);
+    assert.deepStrictEqual(past.body, { runs: [], total });
+  }
+  for (const bad of ['-1', 'x', '1.5', '']) {
+    const r = await get(`?group=tile_types&offset=${encodeURIComponent(bad)}`);
+    assert.strictEqual(r.status, 400, `offset ${JSON.stringify(bad)}`);
+    assert.match(r.body.error, /offset/);
+  }
 });
 
 dbTest('POST seed with undecided rows -> 409 undecided', async ({ pool, admin }) => {

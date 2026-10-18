@@ -140,11 +140,17 @@ async function computeDiff(db, groupId) {
   const counts = zeroCounts();
 
   if (!doc) {
+    // No file, but this PC has exported the group: the file was deleted or
+    // never committed/pulled -- not a group that was never exported.
+    const { rows: ex } = await db.query(
+      `SELECT EXISTS (SELECT 1 FROM seed_export_runs
+                       WHERE group_id = $1 AND action = 'export' AND status = 'ok') AS x`,
+      [groupId]);
     return {
       group,
       columns,
       diff: {
-        groupId, header: null, status: 'never_exported', counts,
+        groupId, header: null, status: ex[0].x ? 'file_missing' : 'never_exported', counts,
         localEdits: 0, gitChanges: 0, tokensMissing, rows: [],
       },
     };
@@ -213,7 +219,7 @@ async function computeDiff(db, groupId) {
   const gitChanges = GIT_CHANGE_KINDS.reduce((n, k) => n + counts[k], 0);
   // A file from a newer schema (header.schema_version > this DB's latest
   // migration): its columns may not exist here yet. Ranks right after
-  // never_exported; export and seed both refuse it.
+  // never_exported / file_missing; export and seed both refuse it.
   const fileVersion = doc.header.schema_version != null ? String(doc.header.schema_version) : '';
   let status = 'in_sync';
   if (fileVersion > dbVersion) status = 'schema_newer';

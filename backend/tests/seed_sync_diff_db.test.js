@@ -360,10 +360,51 @@ dbTest('ai_providers diff never exposes auth_token', async (t, pool) => {
   assert.strictEqual(quests.tokensMissing, 0, 'only groups with secret columns count tokens');
 });
 
+// With no export file, the status depends on whether this PC ever exported
+// the group (an ok export run); the DB may hold real history.
+async function noFileStatus(db, groupId) {
+  const { rows } = await db.query(
+    "SELECT EXISTS (SELECT 1 FROM seed_export_runs WHERE group_id = $1 AND action = 'export' AND status = 'ok') AS x",
+    [groupId]);
+  return rows[0].x ? 'file_missing' : 'never_exported';
+}
+
+function assertEmptyNoFile(d) {
+  assert.strictEqual(d.header, null);
+  assert.deepStrictEqual(d.rows, []);
+  assert.deepStrictEqual(Object.keys(d.counts).sort(), KINDS);
+  assert.ok(Object.values(d.counts).every((n) => n === 0));
+  assert.strictEqual(d.localEdits, 0);
+  assert.strictEqual(d.gitChanges, 0);
+}
+
+dbTest('no file: never_exported without an ok export run here, file_missing with one', async (t, pool) => {
+  // Run history is real state: change it only inside a rolled-back transaction.
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query("DELETE FROM seed_export_runs WHERE group_id = 'quests' AND action = 'export'");
+    // Neither a failed/running export, an ok seed, nor another group's export counts.
+    await client.query(`INSERT INTO seed_export_runs (group_id, action, status, pc_label) VALUES
+      ('quests', 'export', 'failed', 'sx'), ('quests', 'export', 'running', 'sx'),
+      ('quests', 'seed', 'ok', 'sx'), ('tile_types', 'export', 'ok', 'sx')`);
+    const none = await diffGroup(client, 'quests');
+    assert.strictEqual(none.status, 'never_exported');
+    assertEmptyNoFile(none);
+    await client.query("INSERT INTO seed_export_runs (group_id, action, status, pc_label) VALUES ('quests', 'export', 'ok', 'sx')");
+    const missing = await diffGroup(client, 'quests');
+    assert.strictEqual(missing.status, 'file_missing');
+    assertEmptyNoFile(missing);
+  } finally {
+    await client.query('ROLLBACK').catch(() => {});
+    client.release();
+  }
+});
+
 dbTest('status precedence', async (t, pool) => {
-  // never_exported: no file
+  // no file: never_exported / file_missing
   const none = await diffGroup(pool, 'quests');
-  assert.strictEqual(none.status, 'never_exported');
+  assert.strictEqual(none.status, await noFileStatus(pool, 'quests'));
   assert.strictEqual(none.header, null);
   assert.deepStrictEqual(none.rows, []);
   assert.deepStrictEqual(Object.keys(none.counts).sort(), KINDS);

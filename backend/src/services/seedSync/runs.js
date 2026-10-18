@@ -44,13 +44,19 @@ async function lastRuns(db) {
   return out;
 }
 
-async function recentRuns(db, { limit = 50, groupId } = {}) {
+// One page of the run history, newest first, plus the count of runs matching
+// the group filter (for paging).
+async function recentRuns(db, { limit = 15, offset = 0, groupId } = {}) {
   const { rows } = await db.query(
     `SELECT * FROM seed_export_runs WHERE ($2::text IS NULL OR group_id = $2)
-      ORDER BY started_at DESC, id DESC LIMIT $1`,
-    [limit, groupId || null],
+      ORDER BY started_at DESC, id DESC LIMIT $1 OFFSET $3`,
+    [limit, groupId || null, offset],
   );
-  return rows;
+  const { rows: c } = await db.query(
+    'SELECT count(*)::int AS n FROM seed_export_runs WHERE ($1::text IS NULL OR group_id = $1)',
+    [groupId || null],
+  );
+  return { runs: rows, total: c[0].n };
 }
 
 module.exports = { UNNAMED_PC, pcLabel, pcLabelSet, schemaVersion, startRun, finishRun, lastRuns, recentRuns };

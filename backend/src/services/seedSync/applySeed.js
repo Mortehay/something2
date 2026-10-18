@@ -119,17 +119,31 @@ function warningsFor(fileVersion, dbVersion) {
 
 const versionOf = (header) => (header && header.schema_version != null ? String(header.schema_version) : '');
 
+// The local row a diff row is about: by uuid, or for adopt_identity the
+// same-key local row it would take git's identity onto.
+function localHashOf(cd, r) {
+  const l = r.kind === 'adopt_identity'
+    ? cd.localByKey.get(cd.git.get(r.syncUuid).row[cd.group.naturalKey])
+    : cd.local.get(r.syncUuid);
+  return l ? l.hash : '';
+}
+
 // Identity of what a preview showed: the file's exported_at plus every row's
-// uuid, kind, blocking-aware default and blocked reason (annotated with NO
-// decisions). applySeed recomputes it under the lock and refuses a mismatch,
-// so a decision map is never applied to a diff the admin did not see (a row
-// edited here since, a git pull that added/removed rows, a new reference).
+// uuid, kind, blocking-aware default, blocked reason (annotated with NO
+// decisions) and its current local and git hashes. applySeed recomputes it
+// under the lock and refuses a mismatch, so a decision map is never applied to
+// a diff the admin did not see (a row edited here since -- even again, with
+// the same kind --, a git pull that added/removed/changed rows, a new
+// reference).
 function previewSignatureOf(cd, refReasons) {
   // annotate() mutates rows; sign a copy so the caller's rows stay untouched.
   const copy = { ...cd, diff: { ...cd.diff, rows: cd.diff.rows.map((r) => ({ ...r })) } };
   annotate(copy, refReasons, {});
   const parts = copy.diff.rows
-    .map((r) => `${r.syncUuid}:${r.kind}:${r.defaultDecision}:${r.blockedReason}`)
+    .map((r) => {
+      const g = cd.git.get(r.syncUuid);
+      return `${r.syncUuid}:${r.kind}:${r.defaultDecision}:${r.blockedReason}:${localHashOf(cd, r)}:${g ? g.hash : ''}`;
+    })
     .sort();
   const head = cd.diff.header ? String(cd.diff.header.exported_at) : '';
   return crypto.createHash('sha256').update(`${head}\n${parts.join('\n')}`).digest('hex');

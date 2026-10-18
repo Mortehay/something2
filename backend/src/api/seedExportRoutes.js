@@ -114,8 +114,17 @@ module.exports = function seedExportRoutes(pool, { processStartedAt } = {}) {
     const groupId = req.query.group ? String(req.query.group) : undefined;
     if (groupId) getGroup(groupId);
     const n = Number.parseInt(req.query.limit, 10);
-    const limit = Number.isFinite(n) ? Math.min(200, Math.max(1, n)) : 50;
-    res.json(await recentRuns(pool, { limit, groupId }));
+    const limit = Number.isFinite(n) ? Math.min(200, Math.max(1, n)) : 15;
+    let offset = 0;
+    if (req.query.offset !== undefined) {
+      const raw = req.query.offset;
+      offset = typeof raw === 'string' && /^\d+$/.test(raw) ? Number(raw) : NaN;
+      if (!Number.isSafeInteger(offset)) {
+        return res.status(400).json({ error: 'offset must be a non-negative integer' });
+      }
+    }
+    // { runs: [...newest first], total } -- total counts runs matching `group`.
+    res.json(await recentRuns(pool, { limit, offset, groupId }));
   }));
 
   router.get('/restart', handler(async (req, res) => {

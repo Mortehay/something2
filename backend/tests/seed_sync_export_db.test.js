@@ -135,7 +135,7 @@ dbTest('export records a run and baselines', async (t, pool) => {
     assert.ok(seed === null || (seed.action === 'seed' && seed.id !== runId), `${g}: seed slot holds a seed run`);
   }
   const recent = await recentRuns(pool, { limit: 5, groupId: 'quests' });
-  assert.strictEqual(recent[0].id, runId);
+  assert.strictEqual(recent.runs[0].id, runId);
 });
 
 dbTest('a failing export finishes its run as failed', async (t, pool, dir) => {
@@ -152,7 +152,7 @@ dbTest('a failing export finishes its run as failed', async (t, pool, dir) => {
     t.mock.restoreAll();
   }
   assert.deepStrictEqual(fs.readdirSync(dir), [], 'tmp file removed, nothing published');
-  const run = (await recentRuns(pool, { groupId: 'quests', limit: 1 }))[0];
+  const run = (await recentRuns(pool, { groupId: 'quests', limit: 1 })).runs[0];
   assert.strictEqual(run.action, 'export');
   assert.strictEqual(run.status, 'failed');
   assert.strictEqual(run.error, 'sx injected rename failure');
