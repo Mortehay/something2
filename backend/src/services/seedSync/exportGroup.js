@@ -36,21 +36,32 @@ async function readExport(groupId) {
   return data;
 }
 
+// Serializes export and seed (any group): both hold it for their whole
+// check-then-write, so neither acts on a diff the other has invalidated.
+const SEED_SYNC_LOCK_SQL = "SELECT pg_advisory_xact_lock(hashtext('seed_sync'))";
+
 async function exportGroup(pool, groupId) {
   const group = getGroup(groupId);
-  // Never export over changes that came from git: they would be lost. A corrupt
-  // file (SyncFileError) propagates too; the user must fix or delete it first.
   // Lazy require: diffGroup.js needs readExport from this module.
   const { diffGroup } = require('./diffGroup.js');
-  const diff = await diffGroup(pool, groupId);
-  if (diff.gitChanges > 0) {
-    throw new SyncRefused('git_newer', 'seed (preview) first', { gitChanges: diff.gitChanges });
-  }
-  const runId = await startRun(pool, groupId, 'export');
+  const client = await pool.connect();
+  let runId = null;
   let tmp = null;
   try {
-    const columns = await liveColumns(pool, group);
-    const { rows: dbRows } = await pool.query(`SELECT * FROM ${group.table}`);
+    await client.query('BEGIN');
+    await client.query(SEED_SYNC_LOCK_SQL);
+    // Never export over changes that came from git: they would be lost. A
+    // corrupt file (SyncFileError) propagates too; the user must fix or delete
+    // it first. Checked under the lock, so no seed can slip in before the write.
+    const diff = await diffGroup(client, groupId);
+    if (diff.gitChanges > 0) {
+      throw new SyncRefused('git_newer', 'seed (preview) first', { gitChanges: diff.gitChanges });
+    }
+    // Run rows live on the pool, outside the transaction, so a failed run is
+    // still recorded after the rollback.
+    runId = await startRun(pool, groupId, 'export');
+    const columns = await liveColumns(client, group);
+    const { rows: dbRows } = await client.query(`SELECT * FROM ${group.table}`);
     const key = group.naturalKey;
     const rows = dbRows
       .map((r) => canonicalRow(r, columns))
@@ -60,7 +71,7 @@ async function exportGroup(pool, groupId) {
         group: groupId,
         exported_at: new Date().toISOString(),
         exported_by: pcLabel(),
-        schema_version: await schemaVersion(pool),
+        schema_version: await schemaVersion(client),
         row_count: rows.length,
       },
       rows,
@@ -69,35 +80,30 @@ async function exportGroup(pool, groupId) {
     await fs.promises.mkdir(path.dirname(file), { recursive: true });
     tmp = `${file}.${process.pid}.${tmpCounter++}.tmp`;
     await fs.promises.writeFile(tmp, `${stableStringify(doc)}\n`);
-    // File first, baselines second: if the baseline txn then fails, the result is
-    // "git changed" (safe), never baselines claiming a sync that was not exported.
+    // File first, baselines second: if the baseline write or COMMIT then fails,
+    // the result is "git changed" (safe), never baselines claiming a sync that
+    // was not exported.
     await fs.promises.rename(tmp, file);
     tmp = null;
 
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      await client.query('DELETE FROM seed_row_hashes WHERE group_id = $1', [groupId]);
-      for (const r of rows) {
-        await client.query(
-          'INSERT INTO seed_row_hashes (group_id, sync_uuid, hash) VALUES ($1, $2, $3)',
-          [groupId, r.sync_uuid, rowHash(r)],
-        );
-      }
-      await client.query('COMMIT');
-    } catch (e) {
-      await client.query('ROLLBACK').catch(() => {});
-      throw e;
-    } finally {
-      client.release();
+    await client.query('DELETE FROM seed_row_hashes WHERE group_id = $1', [groupId]);
+    for (const r of rows) {
+      await client.query(
+        'INSERT INTO seed_row_hashes (group_id, sync_uuid, hash) VALUES ($1, $2, $3)',
+        [groupId, r.sync_uuid, rowHash(r)],
+      );
     }
+    await client.query('COMMIT');
     await finishRun(pool, runId, { status: 'ok', summary: { rowCount: rows.length } });
     return { runId, rowCount: rows.length };
   } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
     if (tmp) await fs.promises.unlink(tmp).catch(() => {});
-    await finishRun(pool, runId, { status: 'failed', error: e.message }).catch(() => {});
+    if (runId !== null) await finishRun(pool, runId, { status: 'failed', error: e.message }).catch(() => {});
     throw e;
+  } finally {
+    client.release();
   }
 }
 
-module.exports = { SyncFileError, syncDir, fileFor, readExport, exportGroup };
+module.exports = { SyncFileError, SEED_SYNC_LOCK_SQL, syncDir, fileFor, readExport, exportGroup };

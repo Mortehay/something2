@@ -81,19 +81,30 @@ function diffFields(local, git, columns) {
   return out;
 }
 
-async function loadLocal(pool, group, groupId) {
-  const client = await pool.connect();
+async function readLocal(db, group, groupId) {
+  const columns = await liveColumns(db, group);
+  const select = [...columns.map((c) => quoteIdent(c.name)), 'sync_uuid'].join(', ');
+  const { rows } = await db.query(`SELECT ${select} FROM ${quoteIdent(group.table)}`);
+  const { rows: base } = await db.query(
+    'SELECT sync_uuid, hash FROM seed_row_hashes WHERE group_id = $1', [groupId]);
+  const tokensMissing = await countTokensMissing(db, group);
+  return { columns, rows, base, tokensMissing };
+}
+
+// A checked-out client (it has release()) is used as-is: the caller owns the
+// transaction (applySeed / exportGroup under the seed_sync lock). A Pool gets
+// its own one-snapshot read-only transaction.
+const isClient = (db) => typeof db.release === 'function';
+
+async function loadLocal(db, group, groupId) {
+  if (isClient(db)) return readLocal(db, group, groupId);
+  const client = await db.connect();
   try {
     // One consistent snapshot for columns, rows, baselines and token count.
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
-    const columns = await liveColumns(client, group);
-    const select = [...columns.map((c) => quoteIdent(c.name)), 'sync_uuid'].join(', ');
-    const { rows } = await client.query(`SELECT ${select} FROM ${quoteIdent(group.table)}`);
-    const { rows: base } = await client.query(
-      'SELECT sync_uuid, hash FROM seed_row_hashes WHERE group_id = $1', [groupId]);
-    const tokensMissing = await countTokensMissing(client, group);
+    const out = await readLocal(client, group, groupId);
     await client.query('COMMIT');
-    return { columns, rows, base, tokensMissing };
+    return out;
   } catch (e) {
     await client.query('ROLLBACK').catch(() => {});
     throw e;
@@ -102,17 +113,23 @@ async function loadLocal(pool, group, groupId) {
   }
 }
 
-async function diffGroup(pool, groupId) {
+// Full diff plus the canonical rows behind it (applySeed writes from them).
+// Internal: callers outside seedSync use diffGroup.
+async function computeDiff(db, groupId) {
   const group = getGroup(groupId);
   const doc = await readExport(groupId); // SyncFileError propagates
   if (doc) validateDoc(doc, group, groupId);
-  const { columns, rows: localRaw, base, tokensMissing } = await loadLocal(pool, group, groupId);
+  const { columns, rows: localRaw, base, tokensMissing } = await loadLocal(db, group, groupId);
   const counts = zeroCounts();
 
   if (!doc) {
     return {
-      groupId, header: null, status: 'never_exported', counts,
-      localEdits: 0, gitChanges: 0, tokensMissing, rows: [],
+      group,
+      columns,
+      diff: {
+        groupId, header: null, status: 'never_exported', counts,
+        localEdits: 0, gitChanges: 0, tokensMissing, rows: [],
+      },
     };
   }
 
@@ -132,6 +149,7 @@ async function diffGroup(pool, groupId) {
   });
   const gitUuids = new Set(git.map((g) => g.row.sync_uuid));
   const consumed = new Set();
+  const inSync = []; // identical on both sides: { syncUuid, hash, hasBaseline }
   const out = [];
   const add = (kind, syncUuid, key, fields, defaultDecision = DEFAULTS[kind]) => {
     out.push({ syncUuid, key, kind, defaultDecision, fields, blockedReason: null });
@@ -141,7 +159,10 @@ async function diffGroup(pool, groupId) {
     const uuid = g.row.sync_uuid;
     const l = localByUuid.get(uuid);
     if (l) {
-      if (l.hash === g.hash) continue;
+      if (l.hash === g.hash) {
+        inSync.push({ syncUuid: uuid, hash: l.hash, hasBaseline: baseline.has(uuid) });
+        continue;
+      }
       const b = baseline.get(uuid);
       let kind;
       if (b !== undefined && l.hash === b) kind = 'changed';
@@ -179,8 +200,22 @@ async function diffGroup(pool, groupId) {
   else if (tokensMissing > 0) status = 'tokens_missing';
 
   return {
-    groupId, header: pickHeader(doc.header), status, counts, localEdits, gitChanges, tokensMissing, rows: out,
+    group,
+    columns,
+    git: new Map(git.map((g) => [g.row.sync_uuid, g])),
+    local: localByUuid,
+    localByKey,
+    inSync,
+    diff: {
+      groupId, header: pickHeader(doc.header), status, counts, localEdits, gitChanges, tokensMissing, rows: out,
+    },
   };
 }
 
-module.exports = { diffGroup, KINDS, DEFAULTS };
+// `db` is a Pool (own read-only snapshot) or a checked-out client inside the
+// caller's transaction.
+async function diffGroup(db, groupId) {
+  return (await computeDiff(db, groupId)).diff;
+}
+
+module.exports = { diffGroup, computeDiff, KINDS, DEFAULTS };
