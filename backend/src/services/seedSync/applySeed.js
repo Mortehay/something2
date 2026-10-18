@@ -1,6 +1,6 @@
 const crypto = require('node:crypto');
 const { getGroup, soleSpec } = require('./registry.js');
-const { computeDiff } = require('./diffGroup.js');
+const { computeDiff, tableOf, gitOf, localByKeyOf } = require('./diffGroup.js');
 const { beginLocked, mapLockError, rollback } = require('./txn.js');
 const { schemaVersion, startRun, finishRun } = require('./runs.js');
 const { SyncRefused } = require('./errors.js');
@@ -93,7 +93,7 @@ const deletableUuids = (diff) => diff.rows.filter((r) => DELETABLE.has(r.kind)).
 //    consumes the same-key local row, so a new/deleted_here row's key holder
 //    is never adopted in the same seed.)
 function annotate(cd, refReasons, decisions) {
-  const { diff, spec } = cd;
+  const { diff } = cd;
   const decisionOf = (r) => (own(decisions, r.syncUuid) ? decisions[r.syncUuid] : r.defaultDecision);
   for (const r of diff.rows) {
     if (!DELETABLE.has(r.kind) || !refReasons.has(r.syncUuid)) continue;
@@ -104,7 +104,7 @@ function annotate(cd, refReasons, decisions) {
     .filter((r) => DELETABLE.has(r.kind) && decisionOf(r) === 'delete').map((r) => r.syncUuid));
   for (const r of diff.rows) {
     if (!INSERTABLE.has(r.kind)) continue;
-    const holder = cd.localByKey.get(cd.git.get(r.syncUuid).row[spec.naturalKey[0]]);
+    const holder = localByKeyOf(cd, r);
     if (holder && !deleting.has(holder.row.sync_uuid)) {
       r.blockedReason = KEY_CLASH_REASON;
       r.defaultDecision = null;
@@ -122,14 +122,12 @@ const versionOf = (header) => (header && header.schema_version != null ? String(
 // The local row a diff row is about: by uuid, or for adopt_identity the
 // same-key local row it would take git's identity onto.
 function localHashOf(cd, r) {
-  const l = r.kind === 'adopt_identity'
-    ? cd.localByKey.get(cd.git.get(r.syncUuid).row[cd.spec.naturalKey[0]])
-    : cd.local.get(r.syncUuid);
+  const l = r.kind === 'adopt_identity' ? localByKeyOf(cd, r) : tableOf(cd, r).local.get(r.syncUuid);
   return l ? l.hash : '';
 }
 
 // Identity of what a preview showed: the file's exported_at plus every row's
-// uuid, kind, blocking-aware default, blocked reason (annotated with NO
+// table, uuid, kind, blocking-aware default, blocked reason (annotated with NO
 // decisions) and its current local and git hashes. applySeed recomputes it
 // under the lock and refuses a mismatch, so a decision map is never applied to
 // a diff the admin did not see (a row edited here since -- even again, with
@@ -141,8 +139,8 @@ function previewSignatureOf(cd, refReasons) {
   annotate(copy, refReasons, {});
   const parts = copy.diff.rows
     .map((r) => {
-      const g = cd.git.get(r.syncUuid);
-      return `${r.syncUuid}:${r.kind}:${r.defaultDecision}:${r.blockedReason}:${localHashOf(cd, r)}:${g ? g.hash : ''}`;
+      const g = gitOf(cd, r);
+      return `${r.table}:${r.syncUuid}:${r.kind}:${r.defaultDecision}:${r.blockedReason}:${localHashOf(cd, r)}:${g ? g.hash : ''}`;
     })
     .sort();
   const head = cd.diff.header ? String(cd.diff.header.exported_at) : '';
@@ -162,7 +160,9 @@ async function previewSeed(pool, groupId) {
     const refReasons = await referenceReasons(client, spec, deletableUuids(cd.diff));
     const signature = previewSignatureOf(cd, refReasons);
     annotate(cd, refReasons, {});
-    const warnings = cd.diff.header ? warningsFor(versionOf(cd.diff.header), await schemaVersion(client)) : [];
+    // schema_older (a string) first, then the diff's dangling_name objects.
+    const schemaWarnings = cd.diff.header ? warningsFor(versionOf(cd.diff.header), await schemaVersion(client)) : [];
+    const warnings = [...schemaWarnings, ...cd.diff.warnings];
     await client.query('COMMIT');
     return { ...cd.diff, warnings, signature };
   } catch (e) {
@@ -290,7 +290,8 @@ async function applySeed(pool, groupId, decisions, { signature } = {}) {
     // READ: its snapshot would be taken before the lock wait.)
     await client.query(`LOCK TABLE ${quoteIdent(spec.table)} IN SHARE ROW EXCLUSIVE MODE`);
     const cd = await computeDiff(client, groupId);
-    const { diff, columns } = cd;
+    const { diff } = cd;
+    const { columns } = cd.tables.get(spec.table);
     if (!diff.header) throw new SyncRefused('no_export', `no export file for ${groupId}`);
     const fileVersion = versionOf(diff.header);
     const dbVersion = await schemaVersion(client);
@@ -313,7 +314,6 @@ async function applySeed(pool, groupId, decisions, { signature } = {}) {
 
     runId = await startRun(pool, groupId, 'seed');
     const summary = { updated: 0, created: 0, deleted: 0, kept: 0, adopted: 0 };
-    const gitOf = (row) => cd.git.get(row.syncUuid);
     const by = (decision, pred = () => true) => steps.filter((s) => s.decision === decision && pred(s.row));
 
     // Deletes, then adopts, then upserts: a git row may take the natural key
@@ -326,16 +326,16 @@ async function applySeed(pool, groupId, decisions, { signature } = {}) {
       await dropBaselines(client, groupId, deletes);
       summary.deleted = deletes.length;
     }
-    const localOf = (row) => cd.localByKey.get(gitOf(row).row[spec.naturalKey[0]]).row.sync_uuid;
+    const localOf = (row) => localByKeyOf(cd, row).row.sync_uuid;
     for (const { row } of by('git', (r) => r.kind === 'adopt_identity')) {
-      await adopt(client, spec, columns, gitOf(row).row, localOf(row));
+      await adopt(client, spec, columns, gitOf(cd, row).row, localOf(row));
       summary.adopted += 1;
     }
     for (const { row } of by('local', (r) => r.kind === 'adopt_identity')) {
-      await adopt(client, spec, null, gitOf(row).row, localOf(row)); // identity only, values stay
+      await adopt(client, spec, null, gitOf(cd, row).row, localOf(row)); // identity only, values stay
     }
     for (const { row } of by('git', (r) => r.kind !== 'adopt_identity')) {
-      await upsertFromGit(client, spec, columns, gitOf(row).row);
+      await upsertFromGit(client, spec, columns, gitOf(cd, row).row);
       if (UPDATE_KINDS.has(row.kind)) summary.updated += 1;
       else if (INSERTABLE.has(row.kind)) summary.created += 1;
       else throw new Error(`no git write for kind ${row.kind}`);
@@ -350,7 +350,7 @@ async function applySeed(pool, groupId, decisions, { signature } = {}) {
     // with no B -> B = hL (first sync).
     const ACK = new Set(['changed', 'edited_here', 'adopt_identity', 'new']);
     for (const { row } of [...by('git'), ...by('local', (r) => ACK.has(r.kind))]) {
-      await setBaseline(client, groupId, row.syncUuid, gitOf(row).hash);
+      await setBaseline(client, groupId, row.syncUuid, gitOf(cd, row).hash);
     }
     await dropBaselines(client, groupId, by('local', (r) => r.kind === 'deleted_in_git').map((s) => s.row.syncUuid));
     for (const s of cd.inSync) if (!s.hasBaseline) await setBaseline(client, groupId, s.syncUuid, s.hash);

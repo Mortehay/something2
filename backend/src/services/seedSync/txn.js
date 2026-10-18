@@ -17,6 +17,27 @@ async function beginLocked(client) {
   await client.query(SEED_SYNC_LOCK_SQL);
 }
 
+const quoteIdent = (name) => `"${String(name).replace(/"/g, '""')}"`;
+
+// Tables an export (or a diff that must be self-consistent) holds still: the
+// group's own tables and every target of a by-uuid ref (by-key targets are
+// migration-seeded lookups with no admin write route). Sorted, so concurrent
+// lockers take them in one order.
+function exportLockTables(specs) {
+  const out = new Set();
+  for (const s of specs) {
+    out.add(s.table);
+    for (const ref of Object.values(s.refs || {})) if (ref.by === 'uuid') out.add(ref.table);
+  }
+  return [...out].sort();
+}
+
+// LOCK TABLE <exportLockTables> IN SHARE MODE: blocks writers until COMMIT and
+// waits for open ones; readers go on. Bounded by the transaction's lock_timeout.
+async function lockShare(client, specs) {
+  await client.query(`LOCK TABLE ${exportLockTables(specs).map(quoteIdent).join(', ')} IN SHARE MODE`);
+}
+
 // lock_timeout expired (55P03) -> a refusal the route can show, not a 500.
 function mapLockError(e) {
   if (e && e.code === '55P03') {
@@ -36,4 +57,4 @@ async function rollback(client) {
   }
 }
 
-module.exports = { SEED_SYNC_LOCK_SQL, lockTimeoutMs, beginLocked, mapLockError, rollback };
+module.exports = { SEED_SYNC_LOCK_SQL, lockTimeoutMs, beginLocked, mapLockError, rollback, exportLockTables, lockShare };

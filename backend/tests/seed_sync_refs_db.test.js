@@ -167,8 +167,6 @@ dbTest('key refs translate lookup ids to names; a self-ref travels as uuid', asy
   assert.ok(assertNoLocalIds(docOf('sx_items'), SX_ITEMS) >= 5);
 });
 
-// TODO(Task 4): once diff is multi-table, export over an existing file is
-// allowed again; until then the file is removed between the two exports.
 dbTest('multi-table export: rows sorted per table, second export byte-identical', async (t, pool) => {
   const b = await addBehavior(pool, 'sx_b2');
   await addBehavior(pool, 'sx_b1');
@@ -181,29 +179,41 @@ dbTest('multi-table export: rows sorted per table, second export byte-identical'
     const sorted = [...rows].sort((x, y) => compareNaturalKey(x, y, ['name']));
     assert.deepStrictEqual(rows.map((r) => r.name), sorted.map((r) => r.name), tbl);
   }
-  fs.unlinkSync(fileFor('sx_test'));
-  await exportGroup(pool, 'sx_test');
+  await exportGroup(pool, 'sx_test'); // over the existing file: in sync, allowed
   assert.strictEqual(rawNoStamp('sx_test'), first);
 });
 
-dbTest('export over an existing file of a multi-table or ref group is refused until Task 4', async (t, pool, dir) => {
+dbTest('re-export of a multi-table or ref group: in sync is allowed, git_newer refused, bad file propagates', async (t, pool) => {
+  const beh = await addBehavior(pool, 'sx_rx_beh');
+  await addEntity(pool, 'sx_rx_ent', beh.id, 'fire');
   await exportGroup(pool, 'sx_test');
-  const text = fs.readFileSync(fileFor('sx_test'), 'utf8');
-  await assert.rejects(exportGroup(pool, 'sx_test'), (e) => e.name === 'SyncRefused' && e.code === 'not_supported_yet');
-  assert.strictEqual(fs.readFileSync(fileFor('sx_test'), 'utf8'), text, 'file untouched');
-  // Single-table group with refs: same rule.
+  await exportGroup(pool, 'sx_test');
+  assert.strictEqual((await diffGroup(pool, 'sx_test')).status, 'in_sync');
+  // A child row changed in git (its ref now points at no behavior): refused.
+  const doc = docOf('sx_test');
+  doc.tables.entity_types.find((r) => r.name === 'sx_rx_ent').behavior_id = null;
+  const { stableStringify } = require('../src/services/seedSync/canonical.js');
+  const edited = `${stableStringify(doc)}\n`;
+  fs.writeFileSync(fileFor('sx_test'), edited);
+  await assert.rejects(exportGroup(pool, 'sx_test'),
+    (e) => e.name === 'SyncRefused' && e.code === 'git_newer' && e.details.gitChanges === 1);
+  assert.strictEqual(fs.readFileSync(fileFor('sx_test'), 'utf8'), edited, 'file untouched');
+  // Single-table group with refs: same rules.
   await exportGroup(pool, 'sx_items');
-  await assert.rejects(exportGroup(pool, 'sx_items'), (e) => e.code === 'not_supported_yet');
-  // Even a corrupt file is never overwritten.
+  await exportGroup(pool, 'sx_items');
+  // A corrupt file is never overwritten.
   fs.writeFileSync(fileFor('sx_items'), '{ nope');
-  await assert.rejects(exportGroup(pool, 'sx_items'), (e) => e.code === 'not_supported_yet');
+  await assert.rejects(exportGroup(pool, 'sx_items'), (e) => e instanceof SyncFileError);
   assert.strictEqual(fs.readFileSync(fileFor('sx_items'), 'utf8'), '{ nope');
 });
 
-dbTest('single-table diff/preview/apply refuse a multi-table group and a ref group', async (t, pool) => {
+dbTest('diff handles multi-table and ref groups; preview/apply still refuse them (Task 5)', async (t, pool) => {
   for (const id of ['sx_test', 'sx_items']) {
+    await exportGroup(pool, id);
+    const d = await diffGroup(pool, id);
+    assert.strictEqual(d.status, 'in_sync', id);
+    assert.deepStrictEqual(d.tables.map((x) => x.table), getGroup(id).tables.map((s) => s.table));
     const re = id === 'sx_test' ? /sx_test.*2 tables/ : /sx_items.*item_types.*refs/;
-    await assert.rejects(diffGroup(pool, id), re, `diffGroup ${id}`);
     await assert.rejects(previewSeed(pool, id), re, `previewSeed ${id}`);
     await assert.rejects(applySeed(pool, id, {}), re, `applySeed ${id}`);
   }

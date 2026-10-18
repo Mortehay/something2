@@ -2,10 +2,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { getGroup, tableSpecs, liveColumns } = require('./registry.js');
 const { canonicalRow, rowHash, stableStringify, compareNaturalKey } = require('./canonical.js');
-const { buildRefMaps, exportRow } = require('./refs.js');
+const { buildRefMaps, exportRow, exportColumns } = require('./refs.js');
 const { pcLabel, schemaVersion, startRun, finishRun } = require('./runs.js');
 const { SyncFileError, SyncRefused } = require('./errors.js');
-const { SEED_SYNC_LOCK_SQL, beginLocked, mapLockError, rollback } = require('./txn.js');
+const { SEED_SYNC_LOCK_SQL, beginLocked, mapLockError, rollback, lockShare } = require('./txn.js');
 
 let tmpCounter = 0;
 
@@ -48,34 +48,13 @@ async function readExport(groupId) {
 
 // Exported (canonical, refs translated) rows of one table, in file order.
 async function exportTable(client, spec) {
-  const columns = await liveColumns(client, spec);
+  const canonCols = exportColumns(await liveColumns(client, spec), spec);
   const maps = await buildRefMaps(client, spec);
-  // Ref columns already hold their exported value (uuid or key text) after
-  // exportRow: canonicalize them as-is, never as the FK column's numeric type.
-  const refCols = new Set(Object.keys(spec.refs || {}));
-  const canonCols = columns.map((c) => (refCols.has(c.name) ? { name: c.name, dataType: 'ref' } : c));
   const { rows: dbRows } = await client.query(`SELECT * FROM ${spec.table}`);
   return dbRows
     .map((r) => canonicalRow(exportRow(r, spec, maps), canonCols))
     .sort((a, b) => compareNaturalKey(a, b, spec.naturalKey));
 }
-
-const quoteIdent = (name) => `"${String(name).replace(/"/g, '""')}"`;
-
-// Tables an export must hold still: the group's own tables and every target of
-// a by-uuid ref (by-key targets are migration-seeded lookups with no admin
-// write route). Sorted, so concurrent lockers take them in one order.
-function exportLockTables(specs) {
-  const out = new Set();
-  for (const s of specs) {
-    out.add(s.table);
-    for (const ref of Object.values(s.refs || {})) if (ref.by === 'uuid') out.add(ref.table);
-  }
-  return [...out].sort();
-}
-
-// A group the diff cannot handle yet (several tables, or ref columns).
-const needsV2Diff = (specs) => specs.length > 1 || specs.some((s) => Object.keys(s.refs || {}).length > 0);
 
 async function exportGroup(pool, groupId) {
   const group = getGroup(groupId);
@@ -96,31 +75,20 @@ async function exportGroup(pool, groupId) {
     // (Not REPEATABLE READ: its snapshot is taken by the first statement, the
     // advisory-lock wait, so a seed committing while we waited would be
     // invisible -- the same trap applySeed avoids with LOCK TABLE.)
-    await client.query(`LOCK TABLE ${exportLockTables(specs).map(quoteIdent).join(', ')} IN SHARE MODE`);
-    if (needsV2Diff(specs)) {
-      // TODO(Task 4): diffGroup is single-table until Task 4, so the git_newer /
-      // schema_newer pre-check cannot run for this group. Never overwrite a
-      // file unchecked: only a first export (no file at all) is allowed.
-      const exists = await fs.promises.access(fileFor(groupId)).then(() => true, (e) => e.code !== 'ENOENT');
-      if (exists) {
-        throw new SyncRefused('not_supported_yet',
-          `re-export of ${groupId} over an existing file needs the multi-table diff (not supported yet)`);
-      }
-    } else {
-      // Never export over changes that came from git: they would be lost. A
-      // corrupt file (SyncFileError) propagates too; the user must fix or delete
-      // it first. Checked under the lock, so no seed can slip in before the write.
-      const diff = await diffGroup(client, groupId);
-      // A newer-schema file was written by a DB with columns this one lacks:
-      // overwriting it would drop them from git.
-      if (diff.status === 'schema_newer') {
-        throw new SyncRefused('schema_newer', 'run migrations first', {
-          fileVersion: diff.header.schema_version, dbVersion: await schemaVersion(client),
-        });
-      }
-      if (diff.gitChanges > 0) {
-        throw new SyncRefused('git_newer', 'seed (preview) first', { gitChanges: diff.gitChanges });
-      }
+    await lockShare(client, specs);
+    // Never export over changes that came from git: they would be lost. A
+    // corrupt file (SyncFileError) propagates too; the user must fix or delete
+    // it first. Checked under the lock, so no seed can slip in before the write.
+    const diff = await diffGroup(client, groupId);
+    // A newer-schema file was written by a DB with columns this one lacks:
+    // overwriting it would drop them from git.
+    if (diff.status === 'schema_newer') {
+      throw new SyncRefused('schema_newer', 'run migrations first', {
+        fileVersion: diff.header.schema_version, dbVersion: await schemaVersion(client),
+      });
+    }
+    if (diff.gitChanges > 0) {
+      throw new SyncRefused('git_newer', 'seed (preview) first', { gitChanges: diff.gitChanges });
     }
     // Run rows live on the pool, outside the transaction, so a failed run is
     // still recorded after the rollback.

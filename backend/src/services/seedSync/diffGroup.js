@@ -1,8 +1,10 @@
-const { getGroup, tableSpecs, soleSpec, liveColumns } = require('./registry.js');
+const { GROUPS, getGroup, tableSpecs, liveColumns } = require('./registry.js');
 const { canonicalRow, rowHash, stableStringify } = require('./canonical.js');
+const { buildRefMaps, exportRow, exportColumns } = require('./refs.js');
 const { readExport } = require('./exportGroup.js');
 const { SyncFileError } = require('./errors.js');
 const { schemaVersion } = require('./runs.js');
+const { lockTimeoutMs, lockShare, mapLockError, rollback } = require('./txn.js');
 
 // Three-way diff of one group: git file (G) vs local DB (L) vs the baseline
 // hash written at the last export/seed (B). Decides what a seed may overwrite.
@@ -151,49 +153,272 @@ function diffFields(local, git, columns) {
   return out;
 }
 
-async function readLocal(db, spec, groupId) {
-  const columns = await liveColumns(db, spec);
-  const select = [...columns.map((c) => quoteIdent(c.name)), 'sync_uuid'].join(', ');
-  const { rows } = await db.query(`SELECT ${select} FROM ${quoteIdent(spec.table)}`);
+// ---- local side ------------------------------------------------------------
+
+// Natural-key identity of a canonical (exported-form) row: ref parts are the
+// translated values, so a local and a git row with the same composite key
+// compare equal. Internal only (Map keys).
+function keyTextOf(spec, row) {
+  return stableStringify(spec.naturalKey.map((k) => (row[k] === undefined ? null : row[k])));
+}
+
+// The TableSpec that describes `table`: the group's own first, else any
+// registered group's. null when no group exports that table.
+function specFor(group, table) {
+  const own = tableSpecs(group).find((s) => s.table === table);
+  if (own) return own;
+  for (const g of GROUPS) {
+    const s = tableSpecs(g).find((x) => x.table === table);
+    if (s) return s;
+  }
+  return null;
+}
+
+// A display key can only be built from a target whose natural key has no ref
+// parts (a ref part would need another level of lookup).
+const plainKeyed = (spec) => !!spec && spec.naturalKey.every((k) => !Object.prototype.hasOwnProperty.call(spec.refs || {}, k));
+const joinKey = (parts) => (parts.length === 1 ? parts[0] : parts.map((p) => String(p)).join(' → '));
+
+// Names a by-name column holds, per its declared shape. Non-string entries
+// are not names and are ignored.
+function namesIn(value, shape) {
+  if (value === null || value === undefined) return [];
+  if (shape === 'text') return typeof value === 'string' && value !== '' ? [value] : [];
+  if (shape === 'array') return Array.isArray(value) ? value.filter((v) => typeof v === 'string') : [];
+  if (shape === 'object-values') {
+    return isPlainObject(value) ? Object.values(value).filter((v) => typeof v === 'string') : [];
+  }
+  throw new Error(`seed-sync: unknown nameRefs shape ${JSON.stringify(shape)}`);
+}
+
+async function readLocal(db, group, specs, groupId) {
+  const tables = [];
+  for (const spec of specs) {
+    const columns = exportColumns(await liveColumns(db, spec), spec);
+    const maps = await buildRefMaps(db, spec);
+    const select = [...columns.map((c) => quoteIdent(c.name)), 'sync_uuid'].join(', ');
+    const { rows } = await db.query(`SELECT ${select} FROM ${quoteIdent(spec.table)}`);
+    // Exactly what export would write (refs translated), so hL == B for an
+    // unchanged row.
+    const canon = rows.map((r) => canonicalRow(exportRow(r, spec, maps), columns));
+    tables.push({ spec, columns, rows: canon, tokensMissing: await countTokensMissing(db, spec) });
+  }
+  // Display keys of by-uuid ref targets: sync_uuid -> natural key parts.
+  const targetKeys = new Map();
+  for (const spec of specs) {
+    for (const ref of Object.values(spec.refs || {})) {
+      if (ref.by !== 'uuid' || targetKeys.has(ref.table)) continue;
+      const ts = specFor(group, ref.table);
+      if (!plainKeyed(ts)) { targetKeys.set(ref.table, new Map()); continue; }
+      const { rows } = await db.query(
+        `SELECT sync_uuid, ${ts.naturalKey.map(quoteIdent).join(', ')} FROM ${quoteIdent(ref.table)}`);
+      targetKeys.set(ref.table, new Map(rows.map((r) => [r.sync_uuid, ts.naturalKey.map((k) => r[k])])));
+    }
+  }
+  // Names that exist locally, per by-name target (table, keyCol).
+  const names = new Map();
+  for (const spec of specs) {
+    for (const nr of Object.values(spec.nameRefs || {})) {
+      const id = `${nr.table}\u0000${nr.keyCol}`;
+      if (names.has(id)) continue;
+      const { rows } = await db.query(`SELECT ${quoteIdent(nr.keyCol)} AS n FROM ${quoteIdent(nr.table)}`);
+      names.set(id, new Set(rows.map((r) => r.n)));
+    }
+  }
   const { rows: base } = await db.query(
     'SELECT sync_uuid, hash FROM seed_row_hashes WHERE group_id = $1', [groupId]);
-  const tokensMissing = await countTokensMissing(db, spec);
   const dbVersion = await schemaVersion(db);
-  return { columns, rows, base, tokensMissing, dbVersion };
+  return { tables, targetKeys, names, base, dbVersion };
 }
 
 // A checked-out client (it has release()) is used as-is: the caller owns the
-// transaction (applySeed / exportGroup under the seed_sync lock). A Pool gets
-// its own one-snapshot read-only transaction.
+// transaction and its locks (applySeed / exportGroup under the seed_sync
+// lock). A Pool gets its own transaction holding the group's tables and
+// by-uuid ref targets in SHARE mode (the same set export locks), so every
+// table, ref map and baseline is read from one consistent state. (Not
+// REPEATABLE READ: see the export lock note in exportGroup.js.)
 const isClient = (db) => typeof db.release === 'function';
 
-async function loadLocal(db, spec, groupId) {
-  if (isClient(db)) return readLocal(db, spec, groupId);
+async function loadLocal(db, group, specs, groupId) {
+  if (isClient(db)) return readLocal(db, group, specs, groupId);
   const client = await db.connect();
+  let releaseErr;
   try {
-    // One consistent snapshot for columns, rows, baselines and token count.
-    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
-    const out = await readLocal(client, spec, groupId);
+    await client.query('BEGIN');
+    await client.query(`SET LOCAL lock_timeout = '${lockTimeoutMs()}ms'`);
+    await lockShare(client, specs);
+    const out = await readLocal(client, group, specs, groupId);
     await client.query('COMMIT');
     return out;
   } catch (e) {
-    await client.query('ROLLBACK').catch(() => {});
-    throw e;
+    releaseErr = await rollback(client);
+    throw mapLockError(e);
   } finally {
-    client.release();
+    client.release(releaseErr);
   }
 }
 
+// ---- diff ------------------------------------------------------------------
+
+// Display key of a canonical row: natural key parts, a by-uuid ref part shown
+// as the target's natural key (local row, else the same group's git file,
+// else the uuid's first 8 chars).
+function keyPartsOf(spec, row, lookup) {
+  return spec.naturalKey.map((k) => {
+    const v = row[k] === undefined ? null : row[k];
+    const ref = (spec.refs || {})[k];
+    if (!ref || ref.by !== 'uuid' || typeof v !== 'string') return v;
+    const parts = lookup(ref.table, v);
+    return parts ? joinKey(parts) : v.slice(0, 8);
+  });
+}
+
+// One table's three-way classification (Plan-1 rules, unchanged).
+function diffTable(t, gitRaw, baseline, keyOf) {
+  const { spec, columns } = t;
+  const local = t.rows.map((row) => ({ row, hash: rowHash(row) }));
+  const localByUuid = new Map(local.map((l) => [l.row.sync_uuid, l]));
+  const localByKey = new Map(local.map((l) => [keyTextOf(spec, l.row), l]));
+  // Re-canonicalize git rows so a hand-edited file (other key order, extra or
+  // missing columns) hashes exactly as the exporter would have written it.
+  const git = gitRaw.map((r) => {
+    const row = canonicalRow(r, columns);
+    return { row, hash: rowHash(row) };
+  });
+  const gitUuids = new Set(git.map((g) => g.row.sync_uuid));
+  const consumed = new Set();
+  const inSync = []; // identical on both sides
+  const out = [];
+  const add = (kind, syncUuid, row, fields, defaultDecision = DEFAULTS[kind]) => {
+    const keyParts = keyOf(row);
+    out.push({
+      table: spec.table, syncUuid, key: joinKey(keyParts), keyParts, kind, defaultDecision, fields, blockedReason: null,
+    });
+  };
+
+  for (const g of git) {
+    const uuid = g.row.sync_uuid;
+    const l = localByUuid.get(uuid);
+    if (l) {
+      if (l.hash === g.hash) {
+        inSync.push({ table: spec.table, syncUuid: uuid, hash: l.hash, hasBaseline: baseline.has(uuid) });
+        continue;
+      }
+      const b = baseline.get(uuid);
+      let kind;
+      if (b !== undefined && l.hash === b) kind = 'changed';
+      else if (b !== undefined && g.hash === b) kind = 'not_exported';
+      else kind = 'edited_here';
+      add(kind, uuid, l.row, diffFields(l.row, g.row, columns));
+      continue;
+    }
+    const cand = localByKey.get(keyTextOf(spec, g.row));
+    if (cand && !consumed.has(cand.row.sync_uuid)
+        && !gitUuids.has(cand.row.sync_uuid) && !baseline.has(cand.row.sync_uuid)) {
+      consumed.add(cand.row.sync_uuid);
+      const fields = diffFields(cand.row, g.row, columns);
+      add('adopt_identity', uuid, g.row, fields, fields.length ? null : DEFAULTS.adopt_identity);
+      continue;
+    }
+    add(baseline.has(uuid) ? 'deleted_here' : 'new', uuid, g.row, []);
+  }
+
+  for (const l of local) {
+    const uuid = l.row.sync_uuid;
+    if (gitUuids.has(uuid) || consumed.has(uuid)) continue;
+    const b = baseline.get(uuid);
+    add(b !== undefined && l.hash === b ? 'deleted_in_git' : 'only_here', uuid, l.row, []);
+  }
+
+  out.sort((a, b) => cmp(String(a.key), String(b.key)) || cmp(a.syncUuid, b.syncUuid));
+  const counts = zeroCounts();
+  for (const r of out) counts[r.kind] += 1;
+  return {
+    detail: {
+      spec,
+      columns,
+      git: new Map(git.map((g) => [g.row.sync_uuid, g])),
+      local: localByUuid,
+      localByKey,
+    },
+    inSync,
+    rows: out,
+    counts,
+  };
+}
+
+// dangling_name warnings: a by-name column (spec.nameRefs) naming a row that
+// exists neither locally nor in this group's git file. Local and git rows are
+// both checked (one warning per table/row/column/name). Never blocks anything.
+function danglingNames(perTable, names, gitNames, keyOf) {
+  const out = new Map();
+  for (const { spec, rows } of perTable) {
+    for (const [column, nr] of Object.entries(spec.nameRefs || {}).sort(([a], [b]) => cmp(a, b))) {
+      const id = `${nr.table}\u0000${nr.keyCol}`;
+      const here = names.get(id) || new Set();
+      const inGit = gitNames.get(id) || new Set();
+      for (const row of rows) {
+        for (const name of namesIn(row[column], nr.shape)) {
+          if (here.has(name) || inGit.has(name)) continue;
+          const w = {
+            code: 'dangling_name', table: spec.table, key: joinKey(keyOf(spec, row)), column, name, target: nr.table,
+            syncUuid: row.sync_uuid,
+          };
+          out.set(stableStringify([w.table, w.syncUuid, w.column, w.name]), w);
+        }
+      }
+    }
+  }
+  return [...out.values()].sort((a, b) => cmp(a.table, b.table) || cmp(String(a.key), String(b.key))
+    || cmp(a.column, b.column) || cmp(a.name, b.name) || cmp(a.syncUuid, b.syncUuid));
+}
+
 // Full diff plus the canonical rows behind it (applySeed writes from them).
-// Internal: callers outside seedSync use diffGroup. `spec` is the group's one
-// TableSpec (single-table groups only until plan 2 Task 4; soleSpec throws).
+// Internal: callers outside seedSync use diffGroup. Rows are per table
+// (`row.table`); `tables` maps each table to its spec, columns and the git /
+// local rows by sync_uuid and by natural key (see keyTextOf).
 async function computeDiff(db, groupId) {
   const group = getGroup(groupId);
-  const spec = soleSpec(group);
+  const specs = tableSpecs(group);
   const doc = await readExport(groupId); // SyncFileError propagates
   if (doc) validateDoc(doc, group);
-  const { columns, rows: localRaw, base, tokensMissing, dbVersion } = await loadLocal(db, spec, groupId);
-  const counts = zeroCounts();
+  const L = await loadLocal(db, group, specs, groupId);
+  const tokensMissing = L.tables.reduce((n, t) => n + t.tokensMissing, 0);
+
+  // Git-side display keys and names, for targets inside this group's file.
+  const gitKeys = new Map();
+  const gitNames = new Map();
+  if (doc) {
+    for (const spec of specs) {
+      if (plainKeyed(spec)) {
+        gitKeys.set(spec.table, new Map(docRows(doc, spec.table).map((r) => [r.sync_uuid, spec.naturalKey.map((k) => r[k])])));
+      }
+    }
+    for (const spec of specs) {
+      for (const nr of Object.values(spec.nameRefs || {})) {
+        if (!specs.some((s) => s.table === nr.table)) continue;
+        const id = `${nr.table}\u0000${nr.keyCol}`;
+        const set = gitNames.get(id) || new Set();
+        for (const r of docRows(doc, nr.table)) if (r[nr.keyCol] != null) set.add(r[nr.keyCol]);
+        gitNames.set(id, set);
+      }
+    }
+  }
+  const lookup = (table, uuid) => {
+    const l = L.targetKeys.get(table);
+    if (l && l.has(uuid)) return l.get(uuid);
+    const g = gitKeys.get(table);
+    return g && g.has(uuid) ? g.get(uuid) : null;
+  };
+  const keyOf = (spec, row) => keyPartsOf(spec, row, lookup);
+
+  const gitCanon = new Map(); // table -> canonical git rows (for name checks)
+  if (doc) {
+    for (const t of L.tables) gitCanon.set(t.spec.table, docRows(doc, t.spec.table).map((r) => canonicalRow(r, t.columns)));
+  }
+  const warnings = danglingNames(
+    [...L.tables, ...L.tables.map((t) => ({ spec: t.spec, rows: gitCanon.get(t.spec.table) || [] }))],
+    L.names, gitNames, keyOf);
 
   if (!doc) {
     // No file, but this PC has exported the group: the file was deleted or
@@ -203,74 +428,40 @@ async function computeDiff(db, groupId) {
                        WHERE group_id = $1 AND action = 'export' AND status = 'ok') AS x`,
       [groupId]);
     return {
-      spec,
-      columns,
+      specs,
+      tables: new Map(L.tables.map((t) => [t.spec.table, { spec: t.spec, columns: t.columns }])),
+      inSync: [],
+      dbVersion: L.dbVersion,
       diff: {
-        groupId, header: null, status: ex[0].x ? 'file_missing' : 'never_exported', counts,
-        localEdits: 0, gitChanges: 0, tokensMissing, rows: [],
+        groupId,
+        header: null,
+        status: ex[0].x ? 'file_missing' : 'never_exported',
+        counts: zeroCounts(),
+        localEdits: 0,
+        gitChanges: 0,
+        tokensMissing,
+        tables: specs.map((s) => ({ table: s.table, counts: zeroCounts() })),
+        warnings,
+        rows: [],
       },
     };
   }
 
-  const keyCol = spec.naturalKey[0];
-  const baseline = new Map(base.map((b) => [b.sync_uuid, b.hash]));
-  const local = localRaw.map((r) => {
-    const row = canonicalRow(r, columns);
-    return { row, hash: rowHash(row) };
-  });
-  const localByUuid = new Map(local.map((l) => [l.row.sync_uuid, l]));
-  const localByKey = new Map(local.map((l) => [l.row[keyCol], l]));
-  // Re-canonicalize git rows so a hand-edited file (other key order, extra or
-  // missing columns) hashes exactly as the exporter would have written it.
-  const git = docRows(doc, spec.table).map((r) => {
-    const row = canonicalRow(r, columns);
-    return { row, hash: rowHash(row) };
-  });
-  const gitUuids = new Set(git.map((g) => g.row.sync_uuid));
-  const consumed = new Set();
-  const inSync = []; // identical on both sides: { syncUuid, hash, hasBaseline }
-  const out = [];
-  const add = (kind, syncUuid, key, fields, defaultDecision = DEFAULTS[kind]) => {
-    out.push({ syncUuid, key, kind, defaultDecision, fields, blockedReason: null });
-  };
-
-  for (const g of git) {
-    const uuid = g.row.sync_uuid;
-    const l = localByUuid.get(uuid);
-    if (l) {
-      if (l.hash === g.hash) {
-        inSync.push({ syncUuid: uuid, hash: l.hash, hasBaseline: baseline.has(uuid) });
-        continue;
-      }
-      const b = baseline.get(uuid);
-      let kind;
-      if (b !== undefined && l.hash === b) kind = 'changed';
-      else if (b !== undefined && g.hash === b) kind = 'not_exported';
-      else kind = 'edited_here';
-      add(kind, uuid, l.row[keyCol], diffFields(l.row, g.row, columns));
-      continue;
-    }
-    const cand = localByKey.get(g.row[keyCol]);
-    if (cand && !consumed.has(cand.row.sync_uuid)
-        && !gitUuids.has(cand.row.sync_uuid) && !baseline.has(cand.row.sync_uuid)) {
-      consumed.add(cand.row.sync_uuid);
-      const fields = diffFields(cand.row, g.row, columns);
-      add('adopt_identity', uuid, g.row[keyCol], fields, fields.length ? null : DEFAULTS.adopt_identity);
-      continue;
-    }
-    add(baseline.has(uuid) ? 'deleted_here' : 'new', uuid, g.row[keyCol], []);
+  const baseline = new Map(L.base.map((b) => [b.sync_uuid, b.hash]));
+  const tables = new Map();
+  const inSync = [];
+  const rows = [];
+  const counts = zeroCounts();
+  const perTable = [];
+  for (const t of L.tables) {
+    const d = diffTable(t, docRows(doc, t.spec.table), baseline, (row) => keyOf(t.spec, row));
+    tables.set(t.spec.table, d.detail);
+    inSync.push(...d.inSync);
+    rows.push(...d.rows); // group (seed) order, then key order within a table
+    for (const k of KINDS) counts[k] += d.counts[k];
+    perTable.push({ table: t.spec.table, counts: d.counts });
   }
-
-  for (const l of local) {
-    const uuid = l.row.sync_uuid;
-    if (gitUuids.has(uuid) || consumed.has(uuid)) continue;
-    const b = baseline.get(uuid);
-    add(b !== undefined && l.hash === b ? 'deleted_in_git' : 'only_here', uuid, l.row[keyCol], []);
-  }
-
-  out.sort((a, b) => cmp(String(a.key), String(b.key)) || cmp(a.syncUuid, b.syncUuid));
-  for (const r of out) counts[r.kind] += 1;
-  const divergentAdopts = out.filter((r) => r.kind === 'adopt_identity' && r.fields.length).length;
+  const divergentAdopts = rows.filter((r) => r.kind === 'adopt_identity' && r.fields.length).length;
   const localEdits = LOCAL_EDIT_KINDS.reduce((n, k) => n + counts[k], 0) + divergentAdopts;
   const gitChanges = GIT_CHANGE_KINDS.reduce((n, k) => n + counts[k], 0);
   // A file from a newer schema (header.schema_version > this DB's latest
@@ -278,29 +469,46 @@ async function computeDiff(db, groupId) {
   // never_exported / file_missing; export and seed both refuse it.
   const fileVersion = doc.header.schema_version != null ? String(doc.header.schema_version) : '';
   let status = 'in_sync';
-  if (fileVersion > dbVersion) status = 'schema_newer';
+  if (fileVersion > L.dbVersion) status = 'schema_newer';
   else if (localEdits > 0) status = 'local_edits';
   else if (gitChanges > 0) status = 'git_newer';
   else if (tokensMissing > 0) status = 'tokens_missing';
 
   return {
-    spec,
-    columns,
-    git: new Map(git.map((g) => [g.row.sync_uuid, g])),
-    local: localByUuid,
-    localByKey,
+    specs,
+    tables,
     inSync,
-    dbVersion,
+    dbVersion: L.dbVersion,
     diff: {
-      groupId, header: pickHeader(doc.header, doc), status, counts, localEdits, gitChanges, tokensMissing, rows: out,
+      groupId,
+      header: pickHeader(doc.header, doc),
+      status,
+      counts,
+      localEdits,
+      gitChanges,
+      tokensMissing,
+      tables: perTable,
+      warnings,
+      rows,
     },
   };
 }
 
-// `db` is a Pool (own read-only snapshot) or a checked-out client inside the
-// caller's transaction.
+// The per-table detail a diff row belongs to, its git row and (for
+// adopt_identity / key clashes) the local row holding its natural key.
+const tableOf = (cd, r) => cd.tables.get(r.table);
+const gitOf = (cd, r) => tableOf(cd, r).git.get(r.syncUuid);
+function localByKeyOf(cd, r) {
+  const t = tableOf(cd, r);
+  return t.localByKey.get(keyTextOf(t.spec, gitOf(cd, r).row));
+}
+
+// `db` is a Pool (own consistent read, see loadLocal) or a checked-out client
+// inside the caller's transaction.
 async function diffGroup(db, groupId) {
   return (await computeDiff(db, groupId)).diff;
 }
 
-module.exports = { diffGroup, computeDiff, validateDoc, KINDS, DEFAULTS };
+module.exports = {
+  diffGroup, computeDiff, validateDoc, keyTextOf, tableOf, gitOf, localByKeyOf, KINDS, DEFAULTS,
+};

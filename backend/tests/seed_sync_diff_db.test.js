@@ -562,3 +562,286 @@ dbTest('exportGroup propagates SyncFileError over a corrupt file', async (t, poo
   await assert.rejects(exportGroup(pool, 'quests'), (e) => e instanceof SyncFileError);
   assert.strictEqual(fs.readFileSync(fileFor('quests'), 'utf8'), '{ nope');
 });
+
+// ---- Plan 2: multi-table groups, translated refs, display keys, names ----
+
+const { _withTestGroups } = require('../src/services/seedSync/registry.js');
+const { computeDiff } = require('../src/services/seedSync/diffGroup.js');
+
+// TEST-ONLY groups over real tables (Task 6 registers the real ones).
+const LOCAL_COLS = { id: 'local', created_at: 'local', updated_at: 'local', sync_uuid: 'identity' };
+const ELEMENT_REF = { table: 'elements', by: 'key', keyCol: 'name' };
+const aurasSpec = {
+  table: 'aura_effects', naturalKey: ['name'], omit: LOCAL_COLS, secretColumns: [], refs: { dot_element: ELEMENT_REF },
+};
+const entSpec = {
+  table: 'entity_types',
+  naturalKey: ['name'],
+  omit: { ...LOCAL_COLS, ai_provider_id: 'test group', point_kind: 'test group', behavior_id: 'test group' },
+  secretColumns: [],
+  refs: { element: ELEMENT_REF },
+  nameRefs: {
+    auras: { table: 'aura_effects', keyCol: 'name', shape: 'array' },
+    // Test-only: exercises the object-values shape against a table in the group.
+    vfx: { table: 'aura_effects', keyCol: 'name', shape: 'object-values' },
+  },
+};
+const dropsSpec = {
+  table: 'creature_drops',
+  naturalKey: ['entity_type_id', 'item_type_id'],
+  omit: { id: 'local', created_at: 'local', sync_uuid: 'identity' },
+  secretColumns: [],
+  refs: {
+    entity_type_id: { table: 'entity_types', by: 'uuid' },
+    item_type_id: { table: 'item_types', by: 'uuid' },
+  },
+};
+const itemsSpecD = {
+  table: 'item_types',
+  naturalKey: ['name'],
+  omit: LOCAL_COLS,
+  secretColumns: [],
+  refs: {
+    ammo_type_id: { table: 'item_types', by: 'uuid' },
+    element: ELEMENT_REF,
+    attack_origin: { table: 'attack_origins', by: 'key', keyCol: 'name' },
+    projectile_shape_id: { table: 'projectile_shapes', by: 'key', keyCol: 'name' },
+    impact_behavior_id: { table: 'impact_behaviors', by: 'key', keyCol: 'name' },
+  },
+};
+const SX_ENT = { id: 'sx_ent', label: 'SX entities', tables: [aurasSpec, entSpec, dropsSpec] };
+const SX_ITEMS_D = { id: 'sx_items_d', label: 'SX items', tables: [itemsSpecD] };
+const withGroups = (fn) => _withTestGroups([SX_ENT, SX_ITEMS_D], fn);
+
+const q1 = async (pool, sql, params) => (await pool.query(sql, params)).rows[0];
+const addItem = (pool, name) => q1(pool,
+  "INSERT INTO item_types (name, category, damage, cooldown, stackable) VALUES ($1, 'ammo', 0, 0, true) RETURNING id, sync_uuid",
+  [name]);
+const addEnt = (pool, name, extra = {}) => q1(pool,
+  `INSERT INTO entity_types (name, color, auras, vfx) VALUES ($1, '#010203', $2::jsonb, $3::jsonb)
+   RETURNING id, sync_uuid`,
+  [name, JSON.stringify(extra.auras || []), extra.vfx ? JSON.stringify(extra.vfx) : null]);
+const addDrop = (pool, entId, itemId, chance = 0.5) => q1(pool,
+  'INSERT INTO creature_drops (entity_type_id, item_type_id, chance) VALUES ($1, $2, $3) RETURNING sync_uuid',
+  [entId, itemId, chance]);
+const addAura = (pool, name) => q1(pool,
+  'INSERT INTO aura_effects (name, radius) VALUES ($1, 10) RETURNING sync_uuid', [name]);
+
+const readDoc = (groupId) => JSON.parse(fs.readFileSync(fileFor(groupId), 'utf8'));
+function writeDoc(groupId, doc) {
+  for (const [tbl, rows] of Object.entries(doc.tables)) doc.header.row_counts[tbl] = rows.length;
+  fs.writeFileSync(fileFor(groupId), `${stableStringify(doc)}\n`);
+}
+const sxWarnings = (d) => d.warnings.filter((w) => String(w.key).startsWith('sx_'));
+const pick = (r) => ({ table: r.table, key: r.key, kind: r.kind });
+
+dbTest('multi-table: counts summed over tables, per-table counts, child edited on both sides is red', async (t, pool) => {
+  await withGroups(async () => {
+    const gob = await addEnt(pool, 'sx_gob');
+    await addEnt(pool, 'sx_orc');
+    const sword = await addItem(pool, 'sx_sword');
+    const drop = await addDrop(pool, gob.id, sword.id, 0.5);
+    await exportGroup(pool, 'sx_ent');
+    const synced = await diffGroup(pool, 'sx_ent');
+    assert.strictEqual(synced.status, 'in_sync');
+    assert.deepStrictEqual(synced.rows, []);
+
+    const doc = readDoc('sx_ent');
+    doc.tables.entity_types.find((r) => r.name === 'sx_orc').color = '#0a0b0c'; // git only -> changed
+    doc.tables.creature_drops.find((r) => r.sync_uuid === drop.sync_uuid).chance = 0.25; // git ...
+    writeDoc('sx_ent', doc);
+    await pool.query('UPDATE creature_drops SET chance = 0.75 WHERE sync_uuid = $1', [drop.sync_uuid]); // ... and local
+
+    const d = await diffGroup(pool, 'sx_ent');
+    assert.deepStrictEqual(sxRows(d).map(pick), [
+      { table: 'entity_types', key: 'sx_orc', kind: 'changed' },
+      { table: 'creature_drops', key: 'sx_gob → sx_sword', kind: 'edited_here' },
+    ], 'rows in group table order');
+    const red = sxRows(d)[1];
+    assert.strictEqual(red.syncUuid, drop.sync_uuid);
+    assert.strictEqual(red.defaultDecision, null);
+    assert.deepStrictEqual(red.keyParts, ['sx_gob', 'sx_sword']);
+    assert.deepStrictEqual(red.fields, [{ name: 'chance', local: 0.75, git: 0.25 }]);
+    assert.deepStrictEqual(d.tables.map((x) => x.table), ['aura_effects', 'entity_types', 'creature_drops']);
+    const byTable = Object.fromEntries(d.tables.map((x) => [x.table, x.counts]));
+    assert.strictEqual(byTable.entity_types.changed, 1);
+    assert.strictEqual(byTable.creature_drops.edited_here, 1);
+    for (const k of KINDS) {
+      assert.strictEqual(d.counts[k], d.tables.reduce((n, x) => n + x.counts[k], 0), `counts.${k} is the sum`);
+    }
+    assert.strictEqual(d.counts.changed, 1);
+    assert.strictEqual(d.counts.edited_here, 1);
+    assert.strictEqual(d.localEdits, 1);
+    assert.strictEqual(d.gitChanges, 2);
+    assert.strictEqual(d.status, 'local_edits');
+  });
+});
+
+dbTest('the diff hashes the exported form: export baseline == hL of an unchanged row with refs', async (t, pool) => {
+  await withGroups(async () => {
+    const gob = await addEnt(pool, 'sx_gob');
+    const sword = await addItem(pool, 'sx_sword');
+    const drop = await addDrop(pool, gob.id, sword.id);
+    await exportGroup(pool, 'sx_ent');
+    const cd = await computeDiff(pool, 'sx_ent');
+    const local = cd.tables.get('creature_drops').local.get(drop.sync_uuid);
+    assert.strictEqual(local.row.entity_type_id, gob.sync_uuid, 'local row compared in translated form');
+    assert.strictEqual(local.row.item_type_id, sword.sync_uuid);
+    const b = await q1(pool, 'SELECT hash FROM seed_row_hashes WHERE group_id = $1 AND sync_uuid = $2', ['sx_ent', drop.sync_uuid]);
+    assert.strictEqual(local.hash, b.hash);
+    const fileRow = readDoc('sx_ent').tables.creature_drops.find((r) => r.sync_uuid === drop.sync_uuid);
+    assert.strictEqual(rowHash(fileRow), b.hash);
+    assert.ok(cd.inSync.some((s) => s.table === 'creature_drops' && s.syncUuid === drop.sync_uuid && s.hasBaseline));
+  });
+});
+
+dbTest('adopt_identity matches on the translated composite natural key', async (t, pool) => {
+  await withGroups(async () => {
+    const gob = await addEnt(pool, 'sx_gob');
+    const sword = await addItem(pool, 'sx_sword');
+    await exportGroup(pool, 'sx_ent');
+    const local = await addDrop(pool, gob.id, sword.id, 0.5); // created here after the export: no baseline
+    const gitUuid = crypto.randomUUID();
+    const doc = readDoc('sx_ent');
+    const gitRow = {
+      sync_uuid: gitUuid, entity_type_id: gob.sync_uuid, item_type_id: sword.sync_uuid, chance: 0.5, min_qty: 1, max_qty: 1,
+    };
+    doc.tables.creature_drops.push(gitRow);
+    writeDoc('sx_ent', doc);
+    let r = only(await diffGroup(pool, 'sx_ent')); // the local row is consumed, never also only_here
+    assert.deepStrictEqual(r, {
+      table: 'creature_drops', syncUuid: gitUuid, key: 'sx_gob → sx_sword', keyParts: ['sx_gob', 'sx_sword'],
+      kind: 'adopt_identity', defaultDecision: 'git', fields: [], blockedReason: null,
+    });
+    assert.notStrictEqual(local.sync_uuid, gitUuid);
+    gitRow.chance = 0.9;
+    writeDoc('sx_ent', doc);
+    r = only(await diffGroup(pool, 'sx_ent'));
+    assert.strictEqual(r.kind, 'adopt_identity');
+    assert.strictEqual(r.defaultDecision, null, 'differing values are red');
+    assert.deepStrictEqual(r.fields, [{ name: 'chance', local: 0.5, git: 0.9 }]);
+  });
+});
+
+dbTest('display key: a git-only parent shows its git key, an unknown target its uuid prefix', async (t, pool) => {
+  await withGroups(async () => {
+    const gob = await addEnt(pool, 'sx_gob');
+    const sword = await addItem(pool, 'sx_sword');
+    await exportGroup(pool, 'sx_ent');
+    const doc = readDoc('sx_ent');
+    const ghostUuid = crypto.randomUUID();
+    const gobRow = doc.tables.entity_types.find((r) => r.name === 'sx_gob');
+    doc.tables.entity_types.push({ ...gobRow, name: 'sx_ghost', sync_uuid: ghostUuid });
+    const nowhere = crypto.randomUUID();
+    const drop = (e, i) => ({ sync_uuid: crypto.randomUUID(), entity_type_id: e, item_type_id: i, chance: 0.5, min_qty: 1, max_qty: 1 });
+    doc.tables.creature_drops.push(drop(ghostUuid, sword.sync_uuid), drop(gob.sync_uuid, nowhere));
+    writeDoc('sx_ent', doc);
+    const d = await diffGroup(pool, 'sx_ent');
+    const drops = sxRows(d).filter((r) => r.table === 'creature_drops');
+    assert.deepStrictEqual(drops.map((r) => [r.key, r.keyParts, r.kind]), [
+      ['sx_ghost → sx_sword', ['sx_ghost', 'sx_sword'], 'new'],
+      [`sx_gob → ${nowhere.slice(0, 8)}`, ['sx_gob', nowhere.slice(0, 8)], 'new'],
+    ]);
+  });
+});
+
+dbTest('dangling_name warnings: names neither local nor in the group file, sorted, never blocking', async (t, pool) => {
+  await withGroups(async () => {
+    await addAura(pool, 'sx_aura_here');
+    await exportGroup(pool, 'sx_ent');
+    const doc = readDoc('sx_ent');
+    const hereRow = doc.tables.aura_effects.find((r) => r.name === 'sx_aura_here');
+    doc.tables.aura_effects.push({ ...hereRow, name: 'sx_aura_git', sync_uuid: crypto.randomUUID() }); // created by the file
+    const gob = await addEnt(pool, 'sx_gob', {
+      auras: ['sx_aura_here', 'sx_aura_git', 'sx_aura_nope'],
+      vfx: { hit: 'sx_vfx_nope', cast: 'sx_aura_here', n: 3 },
+    });
+    const ghostUuid = crypto.randomUUID();
+    const tmpl = doc.tables.entity_types[0];
+    doc.tables.entity_types.push({ ...tmpl, name: 'sx_ghost', sync_uuid: ghostUuid, auras: ['sx_aura_ghost', 'sx_aura_git'], vfx: null });
+    writeDoc('sx_ent', doc);
+    const d = await diffGroup(pool, 'sx_ent');
+    const w = (key, syncUuid, column, name) => ({ code: 'dangling_name', table: 'entity_types', key, column, name, target: 'aura_effects', syncUuid });
+    assert.deepStrictEqual(sxWarnings(d), [
+      w('sx_ghost', ghostUuid, 'auras', 'sx_aura_ghost'),
+      w('sx_gob', gob.sync_uuid, 'auras', 'sx_aura_nope'),
+      w('sx_gob', gob.sync_uuid, 'vfx', 'sx_vfx_nope'),
+    ]);
+    assert.deepStrictEqual((await diffGroup(pool, 'sx_ent')).warnings, d.warnings, 'deterministic');
+    assert.ok(d.rows.some((r) => r.key === 'sx_ghost' && r.kind === 'new'), 'diff unaffected');
+    // A name also present locally after all: the warning goes away.
+    await addAura(pool, 'sx_aura_nope');
+    assert.deepStrictEqual(sxWarnings(await diffGroup(pool, 'sx_ent')).map((x) => x.name), ['sx_aura_ghost', 'sx_vfx_nope']);
+  });
+});
+
+dbTest('Plan-1 group: output unchanged apart from table, keyParts, tables and warnings', async (t, pool) => {
+  await addQuest(pool, 'sx_a');
+  await addQuest(pool, 'sx_b');
+  await exportGroup(pool, 'quests');
+  const doc = readDoc('quests');
+  doc.tables.quests.find((r) => r.key === 'sx_a').title = 'sx git';
+  writeDoc('quests', doc);
+  await pool.query("UPDATE quests SET title = 'sx local' WHERE key = 'sx_b'");
+  await addQuest(pool, 'sx_c');
+  const a = await snap(pool, 'quests', 'sx_a');
+  const b = await snap(pool, 'quests', 'sx_b');
+  const c = await snap(pool, 'quests', 'sx_c');
+  const d = await diffGroup(pool, 'quests');
+  assert.deepStrictEqual(Object.keys(d).sort(),
+    ['counts', 'gitChanges', 'groupId', 'header', 'localEdits', 'rows', 'status', 'tables', 'tokensMissing', 'warnings']);
+  const row = (s, kind, defaultDecision, fields) => ({
+    table: 'quests', syncUuid: s.sync_uuid, key: s.key, keyParts: [s.key], kind, defaultDecision, fields, blockedReason: null,
+  });
+  assert.deepStrictEqual(sxRows(d), [
+    row(a, 'changed', 'git', [{ name: 'title', local: 'sx t', git: 'sx git' }]),
+    row(b, 'not_exported', 'local', [{ name: 'title', local: 'sx local', git: 'sx t' }]),
+    row(c, 'only_here', 'local', []),
+  ]);
+  assert.deepStrictEqual(d.tables, [{ table: 'quests', counts: d.counts }]);
+  assert.deepStrictEqual(d.warnings, []);
+  assert.deepStrictEqual(Object.keys(d.counts).sort(), KINDS);
+  assert.strictEqual(d.status, 'local_edits');
+  const none = await diffGroup(pool, 'tile_types'); // no file in this temp dir
+  assert.strictEqual(none.header, null);
+  assert.deepStrictEqual(none.tables, [{ table: 'tile_types', counts: none.counts }]);
+});
+
+dbTest('pool diff of a multi-table group takes the export SHARE locks: an open writer -> busy', async (t, pool) => {
+  await withGroups(async () => {
+    await exportGroup(pool, 'sx_ent');
+    const { Client } = require('pg');
+    const writer = new Client({ connectionString: DB_URL });
+    await writer.connect();
+    const prev = process.env.SEED_SYNC_LOCK_TIMEOUT_MS;
+    try {
+      await writer.query('BEGIN');
+      await writer.query("INSERT INTO item_types (name, category, damage, cooldown, stackable) VALUES ('sx_w', 'ammo', 0, 0, true)");
+      process.env.SEED_SYNC_LOCK_TIMEOUT_MS = '300';
+      // item_types is a by-uuid ref target of creature_drops: locked too.
+      await assert.rejects(diffGroup(pool, 'sx_ent'), (e) => e instanceof SyncRefused && e.code === 'busy');
+    } finally {
+      if (prev === undefined) delete process.env.SEED_SYNC_LOCK_TIMEOUT_MS; else process.env.SEED_SYNC_LOCK_TIMEOUT_MS = prev;
+      await writer.query('ROLLBACK').catch(() => {});
+      await writer.end().catch(() => {});
+    }
+    assert.strictEqual((await diffGroup(pool, 'sx_ent')).status, 'in_sync', 'reads fine once the writer is gone');
+  });
+});
+
+dbTest('re-export over an existing multi-table file: allowed in sync, refused git_newer', async (t, pool) => {
+  await withGroups(async () => {
+    const gob = await addEnt(pool, 'sx_gob');
+    const sword = await addItem(pool, 'sx_sword');
+    const drop = await addDrop(pool, gob.id, sword.id);
+    await exportGroup(pool, 'sx_ent');
+    await exportGroup(pool, 'sx_ent');
+    const doc = readDoc('sx_ent');
+    doc.tables.creature_drops.find((r) => r.sync_uuid === drop.sync_uuid).max_qty = 3;
+    writeDoc('sx_ent', doc);
+    const text = fs.readFileSync(fileFor('sx_ent'), 'utf8');
+    await assert.rejects(exportGroup(pool, 'sx_ent'),
+      (e) => e instanceof SyncRefused && e.code === 'git_newer' && e.details.gitChanges === 1);
+    assert.strictEqual(fs.readFileSync(fileFor('sx_ent'), 'utf8'), text, 'file untouched');
+  });
+});

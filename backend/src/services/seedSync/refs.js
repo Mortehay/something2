@@ -72,6 +72,15 @@ function exportRow(row, spec, maps) {
   return out;
 }
 
+// Canonicalization columns of an exported row: a ref column already holds its
+// exported value (uuid or key text) after exportRow, so it is canonicalized
+// as-is ('ref'), never as the FK column's numeric type. Export and diff both
+// use this, so a baseline written by export equals the diff's local hash.
+function exportColumns(columns, spec) {
+  const refCols = new Set(Object.keys(spec.refs || {}));
+  return columns.map((c) => (refCols.has(c.name) ? { name: c.name, dataType: 'ref' } : c));
+}
+
 const pendingFor = (pending, table) => {
   if (!pending) return null;
   return pending instanceof Map ? pending.get(table) : pending[table];
@@ -95,4 +104,4 @@ async function resolveRow(gitRow, spec, maps, pending) {
   return { row, missing };
 }
 
-module.exports = { buildRefMaps, exportRow, resolveRow };
+module.exports = { buildRefMaps, exportRow, exportColumns, resolveRow };

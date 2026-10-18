@@ -2,11 +2,14 @@
 // ordered list of TableSpecs (the order the group writes its tables in):
 //   { table, naturalKey: string[], omit: {col: reason}, secretColumns: string[],
 //     refs: { [col]: { table, by: 'uuid' } | { table, by: 'key', keyCol } },
+//     nameRefs?: { [col]: { table, keyCol, shape: 'text'|'array'|'object-values' } },
 //     validate?: 'game_settings', secretNeededIf?: col }
 // `omit` columns are deliberately not exported (reason documented);
 // `secretColumns` are never exported; `refs` columns are exported translated
 // (target sync_uuid or natural key), never as local ids. Every FK column must
-// be in `refs` or `omit` (see fkProblems).
+// be in `refs` or `omit` (see fkProblems). `nameRefs` columns hold names of
+// rows in another table (no FK); they travel as-is and the diff warns
+// (dangling_name) about a name that resolves neither locally nor in the file.
 const GROUPS = [
   {
     id: 'tile_types',
@@ -75,9 +78,9 @@ function tableSpecs(group) {
 }
 
 // The one TableSpec of a single-table, single-key-column group without refs.
-// Diff and apply only handle that shape until multi-table support lands (plan
-// 2, Tasks 4-5); anything else fails loudly here instead of half-working. A
-// spec with refs is refused because those paths would compare raw local ids.
+// Preview/apply only handle that shape until multi-table support lands (plan
+// 2, Task 5); anything else fails loudly here instead of half-working. A
+// spec with refs is refused because those paths would write raw ref values.
 function soleSpec(group) {
   const specs = tableSpecs(group);
   if (specs.length !== 1) {
