@@ -207,15 +207,16 @@ dbTest('re-export of a multi-table or ref group: in sync is allowed, git_newer r
   assert.strictEqual(fs.readFileSync(fileFor('sx_items'), 'utf8'), '{ nope');
 });
 
-dbTest('diff handles multi-table and ref groups; preview/apply still refuse them (Task 5)', async (t, pool) => {
+dbTest('diff, preview and apply handle multi-table and ref groups (no single-table guard left)', async (t, pool) => {
   for (const id of ['sx_test', 'sx_items']) {
     await exportGroup(pool, id);
     const d = await diffGroup(pool, id);
     assert.strictEqual(d.status, 'in_sync', id);
     assert.deepStrictEqual(d.tables.map((x) => x.table), getGroup(id).tables.map((s) => s.table));
-    const re = id === 'sx_test' ? /sx_test.*2 tables/ : /sx_items.*item_types.*refs/;
-    await assert.rejects(previewSeed(pool, id), re, `previewSeed ${id}`);
-    await assert.rejects(applySeed(pool, id, {}), re, `applySeed ${id}`);
+    const p = await previewSeed(pool, id);
+    assert.deepStrictEqual(p.rows, [], `previewSeed ${id}`);
+    const res = await applySeed(pool, id, {}, { signature: p.signature });
+    assert.deepStrictEqual(res.summary, { updated: 0, created: 0, deleted: 0, kept: 0, adopted: 0 }, `applySeed ${id}`);
   }
 });
 

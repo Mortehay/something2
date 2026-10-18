@@ -919,3 +919,506 @@ dbTest('a committed seed or export is never reported failed', async (t, pool) =>
   const exRun = (await pool.query('SELECT status FROM seed_export_runs WHERE id = $1', [ex.runId])).rows[0];
   assert.notStrictEqual(exRun.status, 'failed');
 });
+
+// ------------------------------------------------- Plan 2: multi-table apply
+
+const { _withTestGroups, fkProblems } = require('../src/services/seedSync/registry.js');
+const { applyLockPlan, exportLockTables, mapLockError } = require('../src/services/seedSync/txn.js');
+
+// TEST-ONLY groups over the real tables (Task 6 registers the real ones).
+const LOCAL = { id: 'local', created_at: 'local', updated_at: 'local', sync_uuid: 'identity' };
+const ELEMENT_REF = { table: 'elements', by: 'key', keyCol: 'name' };
+const BEH_REF = { table: 'creature_behaviors', by: 'uuid' };
+const behSpec = { table: 'creature_behaviors', naturalKey: ['name'], omit: LOCAL, secretColumns: [], refs: {} };
+const abilSpec = {
+  table: 'creature_abilities', naturalKey: ['behavior_id', 'slot'], omit: LOCAL, secretColumns: [], refs: { behavior_id: BEH_REF },
+};
+const bskSpec = {
+  table: 'creature_behavior_skills', naturalKey: ['behavior_id', 'slot'], omit: LOCAL, secretColumns: [],
+  refs: { behavior_id: BEH_REF, skill_id: { table: 'creature_skills', by: 'uuid' } },
+};
+const bdropSpec = {
+  table: 'behavior_drops', naturalKey: ['behavior_id', 'item_type_id'], omit: LOCAL, secretColumns: [],
+  refs: { behavior_id: BEH_REF, item_type_id: { table: 'item_types', by: 'uuid' } },
+};
+const entBSpec = {
+  table: 'entity_types', naturalKey: ['name'],
+  omit: { ...LOCAL, ai_provider_id: 'test group', point_kind: 'test group' },
+  secretColumns: [], refs: { behavior_id: BEH_REF, element: ELEMENT_REF },
+};
+const entPSpec = {
+  table: 'entity_types', naturalKey: ['name'],
+  omit: { ...LOCAL, ai_provider_id: 'test group', point_kind: 'test group', behavior_id: 'test group' },
+  secretColumns: [], refs: { element: ELEMENT_REF },
+};
+const dropsSpec = {
+  table: 'creature_drops', naturalKey: ['entity_type_id', 'item_type_id'], omit: LOCAL, secretColumns: [],
+  refs: { entity_type_id: { table: 'entity_types', by: 'uuid' }, item_type_id: { table: 'item_types', by: 'uuid' } },
+};
+const itemsSpec = {
+  table: 'item_types', naturalKey: ['name'], omit: LOCAL, secretColumns: [],
+  refs: {
+    ammo_type_id: { table: 'item_types', by: 'uuid' },
+    element: ELEMENT_REF,
+    attack_origin: { table: 'attack_origins', by: 'key', keyCol: 'name' },
+    projectile_shape_id: { table: 'projectile_shapes', by: 'key', keyCol: 'name' },
+    impact_behavior_id: { table: 'impact_behaviors', by: 'key', keyCol: 'name' },
+  },
+};
+const settingsSpec = {
+  table: 'game_settings', naturalKey: ['key'], omit: { updated_at: 'local', sync_uuid: 'identity' }, secretColumns: [],
+  refs: {}, validate: 'game_settings',
+};
+const P2_GROUPS = [
+  { id: 'sx_beh', label: 'SX behaviors', tables: [behSpec, abilSpec, bskSpec, bdropSpec] },
+  { id: 'sx_entb', label: 'SX behaviors+entities', tables: [behSpec, entBSpec] },
+  { id: 'sx_ento', label: 'SX entities (behavior outside)', tables: [entBSpec] },
+  { id: 'sx_edrop', label: 'SX entities+drops', tables: [entPSpec, dropsSpec] },
+  { id: 'sx_items', label: 'SX items', tables: [itemsSpec] },
+  { id: 'sx_set', label: 'SX settings', tables: [settingsSpec] },
+];
+
+function p2Test(name, body) {
+  dbTest(name, (t, pool, dir) => _withTestGroups(P2_GROUPS, () => body(t, pool, dir)));
+}
+
+const q1 = async (pool, sql, params) => (await pool.query(sql, params)).rows[0];
+const addBehavior = (pool, name) => q1(pool,
+  `INSERT INTO creature_behaviors (name, aggro_radius, leash_radius, chase_style)
+   VALUES ($1, 5, 10, 'charge') RETURNING id, sync_uuid`, [name]);
+const addAbility = (pool, behId, slot) => q1(pool,
+  `INSERT INTO creature_abilities (behavior_id, slot, name, attack_kind, attack_range, attack_cooldown)
+   VALUES ($1, $2, 'sx hit', 'melee', 1, 1) RETURNING id, sync_uuid`, [behId, slot]);
+const addSkill = (pool, name) => q1(pool,
+  "INSERT INTO creature_skills (name, kind, cooldown_ms) VALUES ($1, 'slam', 1000) RETURNING id, sync_uuid", [name]);
+const addBehSkill = (pool, behId, skillId, slot) => q1(pool,
+  'INSERT INTO creature_behavior_skills (behavior_id, skill_id, slot) VALUES ($1, $2, $3) RETURNING id, sync_uuid',
+  [behId, skillId, slot]);
+const addItem = (pool, name) => q1(pool,
+  "INSERT INTO item_types (name, category, damage, cooldown, stackable) VALUES ($1, 'ammo', 0, 0, true) RETURNING id, sync_uuid",
+  [name]);
+const addBehDrop = (pool, behId, itemId) => q1(pool,
+  'INSERT INTO behavior_drops (behavior_id, item_type_id, chance) VALUES ($1, $2, 0.5) RETURNING id, sync_uuid',
+  [behId, itemId]);
+const addEnt = (pool, name, behaviorId = null, auras = []) => q1(pool,
+  `INSERT INTO entity_types (name, color, behavior_id, auras) VALUES ($1, '#010203', $2, $3::jsonb)
+   RETURNING id, sync_uuid`, [name, behaviorId, JSON.stringify(auras)]);
+const addDrop = (pool, entId, itemId, chance = 0.5) => q1(pool,
+  'INSERT INTO creature_drops (entity_type_id, item_type_id, chance) VALUES ($1, $2, $3) RETURNING id, sync_uuid',
+  [entId, itemId, chance]);
+
+const readDoc = (groupId) => JSON.parse(fs.readFileSync(fileFor(groupId), 'utf8'));
+function writeDoc(groupId, doc) {
+  for (const [tbl, rows] of Object.entries(doc.tables)) doc.header.row_counts[tbl] = rows.length;
+  fs.writeFileSync(fileFor(groupId), `${stableStringify(doc)}\n`);
+}
+async function exportNow(pool, groupId) {
+  const ex = await exportGroup(pool, groupId);
+  createdRuns.push(ex.runId);
+  return ex;
+}
+// Guard: the fixture only lists sx_ rows (never apply over the shared tables).
+async function sxListed(pool, groupId) {
+  const d = await previewSeed(pool, groupId);
+  assert.deepStrictEqual(d.rows.filter((r) => !String(r.key).startsWith('sx_')), [], 'fixture must only list sx_ rows');
+  return d;
+}
+const listed = async (pool, groupId) => (await previewSeed(pool, groupId)).rows;
+const exists = async (pool, table, uuid) => (await pool.query(
+  `SELECT 1 FROM ${table} WHERE sync_uuid = $1`, [uuid])).rowCount === 1;
+
+p2Test('Plan-2 test groups cover every FK column (fixture sanity)', async (t, pool) => {
+  for (const s of [behSpec, abilSpec, bskSpec, bdropSpec, entBSpec, entPSpec, dropsSpec, itemsSpec, settingsSpec]) {
+    assert.deepStrictEqual(await fkProblems(pool, s), [], s.table);
+  }
+});
+
+dbTest('apply locks: group tables SHARE ROW EXCLUSIVE, outside ref targets SHARE, in the export lock order', async () => {
+  const specs = P2_GROUPS[0].tables;
+  const plan = applyLockPlan(specs);
+  assert.deepStrictEqual(plan.map(([tbl]) => tbl), exportLockTables(specs));
+  assert.deepStrictEqual(plan, [
+    ['behavior_drops', 'SHARE ROW EXCLUSIVE'],
+    ['creature_abilities', 'SHARE ROW EXCLUSIVE'],
+    ['creature_behavior_skills', 'SHARE ROW EXCLUSIVE'],
+    ['creature_behaviors', 'SHARE ROW EXCLUSIVE'],
+    ['creature_skills', 'SHARE'],
+    ['item_types', 'SHARE'],
+  ]);
+  // Losing a deadlock against an open admin edit is 'busy', like a lock timeout.
+  assert.strictEqual(mapLockError(Object.assign(new Error('deadlock'), { code: '40P01' })).code, 'busy');
+});
+
+// Review Focus 2 (a)
+p2Test('deleting a behavior in git deletes its abilities, behavior skills and drops in the same transaction', async (t, pool) => {
+  const b = await addBehavior(pool, 'sx_b1');
+  const keep = await addBehavior(pool, 'sx_b2');
+  const ab = await addAbility(pool, b.id, 1);
+  const sk = await addSkill(pool, 'sx_sk');
+  const bs = await addBehSkill(pool, b.id, sk.id, 1);
+  const it = await addItem(pool, 'sx_it');
+  const bd = await addBehDrop(pool, b.id, it.id);
+  const ab2 = await addAbility(pool, keep.id, 1);
+  await exportNow(pool, 'sx_beh');
+  const doc = readDoc('sx_beh');
+  doc.tables.creature_behaviors = doc.tables.creature_behaviors.filter((r) => r.sync_uuid !== b.sync_uuid);
+  for (const tbl of ['creature_abilities', 'creature_behavior_skills', 'behavior_drops']) {
+    doc.tables[tbl] = doc.tables[tbl].filter((r) => r.behavior_id !== b.sync_uuid);
+  }
+  writeDoc('sx_beh', doc);
+  const d = await sxListed(pool, 'sx_beh');
+  assert.deepStrictEqual(d.rows.map((r) => [r.table, r.syncUuid, r.kind, r.defaultDecision, r.blockedReason]), [
+    ['creature_behaviors', b.sync_uuid, 'deleted_in_git', 'delete', null],
+    ['creature_abilities', ab.sync_uuid, 'deleted_in_git', 'delete', null],
+    ['creature_behavior_skills', bs.sync_uuid, 'deleted_in_git', 'delete', null],
+    ['behavior_drops', bd.sync_uuid, 'deleted_in_git', 'delete', null],
+  ], 'in-group children deleted in the same seed do not block their parent');
+  const res = await apply(pool, 'sx_beh', defaultsOf(d));
+  assert.deepStrictEqual(res.summary, { updated: 0, created: 0, deleted: 4, kept: 0, adopted: 0 });
+  for (const [tbl, u] of [['creature_behaviors', b.sync_uuid], ['creature_abilities', ab.sync_uuid],
+    ['creature_behavior_skills', bs.sync_uuid], ['behavior_drops', bd.sync_uuid]]) {
+    assert.strictEqual(await exists(pool, tbl, u), false, tbl);
+    assert.strictEqual(await baselineOf(pool, 'sx_beh', u), null, `${tbl} baseline dropped`);
+  }
+  assert.ok(await exists(pool, 'creature_behaviors', keep.sync_uuid));
+  assert.ok(await exists(pool, 'creature_abilities', ab2.sync_uuid));
+  assert.ok(await exists(pool, 'creature_skills', sk.sync_uuid), 'out-of-group targets untouched');
+  assert.ok(await exists(pool, 'item_types', it.sync_uuid));
+  assert.deepStrictEqual(await listed(pool, 'sx_beh'), []);
+});
+
+// Review Focus 2 (b)
+p2Test('a behavior still referenced by entity_types (another group) cannot be deleted; nothing written', async (t, pool) => {
+  const b = await addBehavior(pool, 'sx_b1');
+  const ab = await addAbility(pool, b.id, 1);
+  await addEnt(pool, 'sx_e', b.id);
+  await exportNow(pool, 'sx_beh');
+  const doc = readDoc('sx_beh');
+  doc.tables.creature_behaviors = doc.tables.creature_behaviors.filter((r) => r.sync_uuid !== b.sync_uuid);
+  doc.tables.creature_abilities = doc.tables.creature_abilities.filter((r) => r.behavior_id !== b.sync_uuid);
+  writeDoc('sx_beh', doc);
+  const d = await sxListed(pool, 'sx_beh');
+  const beh = d.rows.find((r) => r.syncUuid === b.sync_uuid);
+  assert.strictEqual(beh.blockedReason, '1 rows in entity_types reference this');
+  assert.strictEqual(beh.defaultDecision, 'local', 'a blocked deleted_in_git defaults to keep');
+  const runs = await seedRunCount(pool);
+  await assert.rejects(applyNow(pool, 'sx_beh', { [b.sync_uuid]: 'delete', [ab.sync_uuid]: 'delete' }),
+    refused('blocked', [b.sync_uuid]));
+  assert.ok(await exists(pool, 'creature_behaviors', b.sync_uuid));
+  assert.ok(await exists(pool, 'creature_abilities', ab.sync_uuid), 'no partial write: the child is still there');
+  assert.strictEqual(await seedRunCount(pool), runs);
+});
+
+p2Test('an in-group child kept on this PC blocks deleting its parent until it is deleted too', async (t, pool) => {
+  const b = await addBehavior(pool, 'sx_b1');
+  await exportNow(pool, 'sx_beh');
+  const ab = await addAbility(pool, b.id, 1); // created here after the export: only_here, default keep
+  const doc = readDoc('sx_beh');
+  doc.tables.creature_behaviors = doc.tables.creature_behaviors.filter((r) => r.sync_uuid !== b.sync_uuid);
+  writeDoc('sx_beh', doc);
+  const d = await sxListed(pool, 'sx_beh');
+  const beh = d.rows.find((r) => r.syncUuid === b.sync_uuid);
+  assert.strictEqual(beh.blockedReason, '1 rows in creature_abilities reference this',
+    'ON DELETE CASCADE would silently delete the kept local child');
+  assert.strictEqual(beh.defaultDecision, 'local');
+  const child = d.rows.find((r) => r.syncUuid === ab.sync_uuid);
+  assert.deepStrictEqual([child.kind, child.defaultDecision], ['only_here', 'local']);
+  await assert.rejects(applyNow(pool, 'sx_beh', { [b.sync_uuid]: 'delete' }), refused('blocked', [b.sync_uuid]));
+  assert.ok(await exists(pool, 'creature_abilities', ab.sync_uuid));
+
+  const res = await apply(pool, 'sx_beh', { [b.sync_uuid]: 'delete', [ab.sync_uuid]: 'delete' });
+  assert.strictEqual(res.summary.deleted, 2);
+  assert.strictEqual(await exists(pool, 'creature_behaviors', b.sync_uuid), false);
+  assert.strictEqual(await exists(pool, 'creature_abilities', ab.sync_uuid), false);
+  assert.deepStrictEqual(await listed(pool, 'sx_beh'), []);
+});
+
+p2Test('deleting an item that player data references (player_items) is blocked, never cascaded', async (t, pool) => {
+  const it = await addItem(pool, 'sx_it');
+  await exportNow(pool, 'sx_items');
+  const charId = await createCharacter(pool);
+  await pool.query('INSERT INTO player_items (item_type_id, character_id) VALUES ($1, $2)', [it.id, charId]);
+  const doc = readDoc('sx_items');
+  doc.tables.item_types = doc.tables.item_types.filter((r) => r.sync_uuid !== it.sync_uuid);
+  writeDoc('sx_items', doc);
+  const d = await sxListed(pool, 'sx_items');
+  const r = d.rows.find((x) => x.syncUuid === it.sync_uuid);
+  assert.strictEqual(r.blockedReason, '1 rows in player_items reference this');
+  assert.strictEqual(r.defaultDecision, 'local');
+  await assert.rejects(applyNow(pool, 'sx_items', { [it.sync_uuid]: 'delete' }), refused('blocked', [it.sync_uuid]));
+  assert.ok(await exists(pool, 'item_types', it.sync_uuid));
+  const pi = await pool.query('SELECT 1 FROM player_items WHERE character_id = $1', [charId]);
+  assert.strictEqual(pi.rowCount, 1, 'player data untouched');
+});
+
+// Review Focus 3
+p2Test('self-reference to an item new in the same seed: both inserted, the ref set in a second pass', async (t, pool) => {
+  await addItem(pool, 'sx_m_sling');
+  await exportNow(pool, 'sx_items');
+  const doc = readDoc('sx_items');
+  const i = doc.tables.item_types.findIndex((r) => r.name === 'sx_m_sling');
+  const sling = doc.tables.item_types[i];
+  // A launcher template: ammo_type_id needs kind 'projectile' (item_types_ammo_ref_check).
+  const launcher = doc.tables.item_types.find((r) => r.ammo_type_id !== null && r.kind === 'projectile');
+  assert.ok(launcher, 'scratch DB has a projectile launcher to copy');
+  const bowUuid = crypto.randomUUID();
+  const arrowUuid = crypto.randomUUID();
+  // The referencing rows sort (and are written) before their target.
+  doc.tables.item_types.push(
+    { ...launcher, sync_uuid: bowUuid, name: 'sx_a_bow', ammo_type_id: arrowUuid },
+    { ...sling, sync_uuid: arrowUuid, name: 'sx_z_arrow', ammo_type_id: null },
+  );
+  // An existing row re-pointed at the new one.
+  doc.tables.item_types[i] = { ...launcher, sync_uuid: sling.sync_uuid, name: 'sx_m_sling', ammo_type_id: arrowUuid };
+  writeDoc('sx_items', doc);
+  const d = await sxListed(pool, 'sx_items');
+  assert.deepStrictEqual(d.rows.map((r) => [r.key, r.kind]), [['sx_a_bow', 'new'], ['sx_m_sling', 'changed'], ['sx_z_arrow', 'new']]);
+  const res = await apply(pool, 'sx_items', defaultsOf(d));
+  assert.deepStrictEqual(res.summary, { updated: 1, created: 2, deleted: 0, kept: 0, adopted: 0 });
+  const { rows } = await pool.query(
+    "SELECT name, id, ammo_type_id, sync_uuid FROM item_types WHERE name LIKE 'sx\\_%' ORDER BY name");
+  const by = Object.fromEntries(rows.map((r) => [r.name, r]));
+  assert.strictEqual(by.sx_a_bow.sync_uuid, bowUuid);
+  assert.strictEqual(by.sx_a_bow.ammo_type_id, by.sx_z_arrow.id);
+  assert.strictEqual(by.sx_m_sling.ammo_type_id, by.sx_z_arrow.id);
+  assert.strictEqual(by.sx_z_arrow.ammo_type_id, null);
+  assert.deepStrictEqual(await listed(pool, 'sx_items'), [], 'applied rows are in sync (B == hL == hG)');
+});
+
+// Review Focus 4
+p2Test('missing_ref: an entity naming a behavior absent here and in git is refused before any write', async (t, pool) => {
+  const e1 = await addEnt(pool, 'sx_e1');
+  await exportNow(pool, 'sx_ento');
+  const doc = readDoc('sx_ento');
+  const e1Row = doc.tables.entity_types.find((r) => r.sync_uuid === e1.sync_uuid);
+  e1Row.color = '#0a0b0c';
+  const ghost = crypto.randomUUID();
+  const e2Uuid = crypto.randomUUID();
+  doc.tables.entity_types.push({ ...e1Row, sync_uuid: e2Uuid, name: 'sx_e2', behavior_id: ghost });
+  writeDoc('sx_ento', doc);
+  await sxListed(pool, 'sx_ento');
+  const runs = await seedRunCount(pool);
+  await assert.rejects(applyNow(pool, 'sx_ento', {}), (e) => {
+    refused('missing_ref')(e);
+    assert.deepStrictEqual(e.details.refs, [
+      { table: 'entity_types', key: 'sx_e2', column: 'behavior_id', target: 'creature_behaviors', value: ghost },
+    ]);
+    return true;
+  });
+  const { rows } = await pool.query("SELECT name, color FROM entity_types WHERE name LIKE 'sx\\_%' ORDER BY name");
+  assert.deepStrictEqual(rows, [{ name: 'sx_e1', color: '#010203' }], 'nothing written');
+  assert.strictEqual(await seedRunCount(pool), runs, 'refused before a run starts');
+});
+
+p2Test('refs to rows created in the same seed resolve; a ref to a git row kept out or deleted here is missing_ref', async (t, pool) => {
+  const old = await addBehavior(pool, 'sx_old');
+  await exportNow(pool, 'sx_entb');
+  const doc = readDoc('sx_entb');
+  const tmpl = doc.tables.creature_behaviors.find((r) => r.name === 'sx_old');
+  const nb = crypto.randomUUID();
+  const ne = crypto.randomUUID();
+  doc.tables.creature_behaviors = doc.tables.creature_behaviors.filter((r) => r.sync_uuid !== old.sync_uuid);
+  doc.tables.creature_behaviors.push({ ...tmpl, sync_uuid: nb, name: 'sx_nb' });
+  const anyEnt = doc.tables.entity_types[0];
+  doc.tables.entity_types.push({ ...anyEnt, sync_uuid: ne, name: 'sx_ne', behavior_id: nb });
+  writeDoc('sx_entb', doc);
+  const d = await sxListed(pool, 'sx_entb');
+  assert.deepStrictEqual(d.rows.map((r) => [r.key, r.kind]), [['sx_nb', 'new'], ['sx_old', 'deleted_in_git'], ['sx_ne', 'new']]);
+  await assert.rejects(applyNow(pool, 'sx_entb', { [nb]: 'local' }), (e) => refused('missing_ref')(e)
+    && assert.deepStrictEqual(e.details.refs, [
+      { table: 'entity_types', key: 'sx_ne', column: 'behavior_id', target: 'creature_behaviors', value: nb }]) === undefined);
+
+  // The entity now names the behavior git deletes (and this seed deletes too).
+  doc.tables.entity_types.find((r) => r.sync_uuid === ne).behavior_id = old.sync_uuid;
+  writeDoc('sx_entb', doc);
+  await assert.rejects(applyNow(pool, 'sx_entb', {}), (e) => refused('missing_ref')(e)
+    && e.details.refs.length === 1 && e.details.refs[0].value === old.sync_uuid);
+  assert.ok(await exists(pool, 'creature_behaviors', old.sync_uuid), 'nothing written');
+
+  doc.tables.entity_types.find((r) => r.sync_uuid === ne).behavior_id = nb;
+  writeDoc('sx_entb', doc);
+  const res = await apply(pool, 'sx_entb', {});
+  assert.deepStrictEqual(res.summary, { updated: 0, created: 2, deleted: 1, kept: 0, adopted: 0 });
+  const ent = await q1(pool, 'SELECT behavior_id FROM entity_types WHERE sync_uuid = $1', [ne]);
+  const beh = await q1(pool, 'SELECT id FROM creature_behaviors WHERE sync_uuid = $1', [nb]);
+  assert.strictEqual(ent.behavior_id, beh.id, 'resolved through pending (created earlier in this seed)');
+  assert.deepStrictEqual(await listed(pool, 'sx_entb'), []);
+});
+
+// Both PCs created sx_gob and its drop: same names, different random uuids.
+async function adoptPairFixture(pool) {
+  const gob = await addEnt(pool, 'sx_gob');
+  const sword = await addItem(pool, 'sx_sword');
+  const drop = await addDrop(pool, gob.id, sword.id, 0.5);
+  await exportNow(pool, 'sx_edrop');
+  await pool.query('DELETE FROM seed_row_hashes WHERE group_id = $1 AND sync_uuid = ANY($2::uuid[])',
+    ['sx_edrop', [gob.sync_uuid, drop.sync_uuid]]);
+  const doc = readDoc('sx_edrop');
+  const gitGob = crypto.randomUUID();
+  const gitDrop = crypto.randomUUID();
+  doc.tables.entity_types.find((r) => r.name === 'sx_gob').sync_uuid = gitGob;
+  const dr = doc.tables.creature_drops.find((r) => r.sync_uuid === drop.sync_uuid);
+  Object.assign(dr, { sync_uuid: gitDrop, entity_type_id: gitGob });
+  writeDoc('sx_edrop', doc);
+  extraBaselines.push(gitGob, gitDrop);
+  return { gob, sword, drop, gitGob, gitDrop, doc, dr };
+}
+
+p2Test('parent and child adopted together: the child takes the git uuid and resolves to the local parent', async (t, pool) => {
+  const f = await adoptPairFixture(pool);
+  const d = await sxListed(pool, 'sx_edrop');
+  assert.deepStrictEqual(d.rows.map((r) => [r.table, r.syncUuid, r.kind, r.defaultDecision]), [
+    ['entity_types', f.gitGob, 'adopt_identity', 'git'],
+    ['creature_drops', f.gitDrop, 'adopt_identity', 'git'],
+  ]);
+  const res = await apply(pool, 'sx_edrop', defaultsOf(d));
+  assert.deepStrictEqual(res.summary, { updated: 0, created: 0, deleted: 0, kept: 0, adopted: 2 });
+  const ent = await q1(pool, "SELECT id, sync_uuid FROM entity_types WHERE name = 'sx_gob'");
+  assert.deepStrictEqual(ent, { id: f.gob.id, sync_uuid: f.gitGob }, 'same local row, git identity');
+  const drop = await q1(pool, 'SELECT id, sync_uuid, entity_type_id, item_type_id FROM creature_drops WHERE id = $1', [f.drop.id]);
+  assert.deepStrictEqual(drop, { id: f.drop.id, sync_uuid: f.gitDrop, entity_type_id: f.gob.id, item_type_id: f.sword.id });
+  assert.ok(await baselineOf(pool, 'sx_edrop', f.gitGob));
+  assert.ok(await baselineOf(pool, 'sx_edrop', f.gitDrop));
+  assert.deepStrictEqual(await listed(pool, 'sx_edrop'), []);
+});
+
+p2Test('adopt decided git writes git values (refs resolved to local ids); decided local takes git identity only', async (t, pool) => {
+  const f = await adoptPairFixture(pool);
+  f.dr.chance = 0.9;
+  writeDoc('sx_edrop', f.doc);
+  const d = await sxListed(pool, 'sx_edrop');
+  assert.strictEqual(d.rows.find((r) => r.syncUuid === f.gitDrop).defaultDecision, null, 'red: values differ');
+  await apply(pool, 'sx_edrop', { [f.gitGob]: 'local', [f.gitDrop]: 'git' });
+  const drop = await q1(pool, 'SELECT sync_uuid, entity_type_id, chance FROM creature_drops WHERE id = $1', [f.drop.id]);
+  assert.deepStrictEqual(drop, { sync_uuid: f.gitDrop, entity_type_id: f.gob.id, chance: '0.9' });
+  assert.strictEqual((await q1(pool, 'SELECT sync_uuid FROM entity_types WHERE id = $1', [f.gob.id])).sync_uuid, f.gitGob);
+  assert.deepStrictEqual(await listed(pool, 'sx_edrop'), []);
+});
+
+p2Test('adopt of a child decided local keeps its values and its ref to the (adopted) local parent', async (t, pool) => {
+  const f = await adoptPairFixture(pool);
+  f.dr.chance = 0.9;
+  writeDoc('sx_edrop', f.doc);
+  await apply(pool, 'sx_edrop', { [f.gitDrop]: 'local' });
+  const drop = await q1(pool, 'SELECT sync_uuid, entity_type_id, chance FROM creature_drops WHERE id = $1', [f.drop.id]);
+  assert.deepStrictEqual(drop, { sync_uuid: f.gitDrop, entity_type_id: f.gob.id, chance: '0.5' });
+  const after = await listed(pool, 'sx_edrop');
+  assert.deepStrictEqual(after.map((r) => [r.syncUuid, r.kind]), [[f.gitDrop, 'not_exported']],
+    'the kept local value is exportable, git acknowledged');
+});
+
+p2Test('game_settings: a value failing assertValid is refused (invalid_value) before any write; a valid one applies', async (t, pool) => {
+  const orig = await q1(pool, "SELECT value, sync_uuid FROM game_settings WHERE key = 'respec_base_gold'");
+  assert.ok(orig, 'scratch DB has respec_base_gold');
+  try {
+    await exportNow(pool, 'sx_set');
+    const doc = readDoc('sx_set');
+    const row = doc.tables.game_settings.find((r) => r.key === 'respec_base_gold');
+    row.value = -5;
+    writeDoc('sx_set', doc);
+    const runs = await seedRunCount(pool);
+    await assert.rejects(applyNow(pool, 'sx_set', {}), (e) => {
+      refused('invalid_value')(e);
+      assert.strictEqual(e.details.key, 'respec_base_gold');
+      assert.match(e.details.error, /respec_base_gold must be an integer >= 0/);
+      return true;
+    });
+    assert.deepStrictEqual((await q1(pool, "SELECT value FROM game_settings WHERE key = 'respec_base_gold'")).value, orig.value);
+    assert.strictEqual(await seedRunCount(pool), runs);
+
+    row.value = orig.value;
+    doc.tables.game_settings.push({ key: 'sx_unknown_setting', value: 1, sync_uuid: crypto.randomUUID() });
+    writeDoc('sx_set', doc);
+    await assert.rejects(applyNow(pool, 'sx_set', {}),
+      (e) => refused('invalid_value')(e) && e.details.key === 'sx_unknown_setting');
+    assert.strictEqual((await pool.query("SELECT 1 FROM game_settings WHERE key = 'sx_unknown_setting'")).rowCount, 0);
+
+    doc.tables.game_settings.pop();
+    row.value = orig.value + 1;
+    writeDoc('sx_set', doc);
+    await apply(pool, 'sx_set', {});
+    assert.strictEqual((await q1(pool, "SELECT value FROM game_settings WHERE key = 'respec_base_gold'")).value, orig.value + 1);
+  } finally {
+    await pool.query("UPDATE game_settings SET value = $1::jsonb WHERE key = 'respec_base_gold'", [JSON.stringify(orig.value)]);
+    await pool.query("DELETE FROM game_settings WHERE key = 'sx_unknown_setting'");
+  }
+});
+
+p2Test('apply waits for an open admin write to a group table; the committed edit is never overwritten', async (t, pool) => {
+  const b = await addBehavior(pool, 'sx_b1');
+  const ab = await addAbility(pool, b.id, 1);
+  await exportNow(pool, 'sx_beh');
+  const doc = readDoc('sx_beh');
+  doc.tables.creature_behaviors.find((r) => r.sync_uuid === b.sync_uuid).aggro_radius = 9;
+  doc.tables.creature_abilities.find((r) => r.sync_uuid === ab.sync_uuid).attack_range = 3;
+  writeDoc('sx_beh', doc);
+  const preview = await sxListed(pool, 'sx_beh');
+  assert.strictEqual(preview.rows.length, 2);
+
+  const editor = await pool.connect();
+  let p;
+  let open = true;
+  try {
+    await editor.query('BEGIN');
+    await editor.query('UPDATE creature_abilities SET attack_range = 7 WHERE id = $1', [ab.id]);
+    const editorPid = (await editor.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+    p = applySeed(pool, 'sx_beh', defaultsOf(preview), { signature: preview.signature });
+    p.catch(() => {});
+    await pollUntil(async () => (await pool.query(
+      'SELECT count(*)::int AS n FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))', [editorPid],
+    )).rows[0].n > 0, 'apply to block on the open edit of a child table');
+    await editor.query('COMMIT');
+    open = false;
+  } finally {
+    if (open) await editor.query('ROLLBACK').catch(() => {});
+    editor.release();
+  }
+  await assert.rejects(p, refused('stale_preview'));
+  assert.strictEqual((await q1(pool, 'SELECT attack_range FROM creature_abilities WHERE id = $1', [ab.id])).attack_range, 7);
+  assert.strictEqual((await q1(pool, 'SELECT aggro_radius FROM creature_behaviors WHERE id = $1', [b.id])).aggro_radius, 5);
+});
+
+p2Test('apply also waits for an open write to a by-uuid ref target outside the group', async (t, pool) => {
+  const b = await addBehavior(pool, 'sx_b1');
+  const sk = await addSkill(pool, 'sx_sk');
+  await addBehSkill(pool, b.id, sk.id, 1);
+  await exportNow(pool, 'sx_beh');
+  const doc = readDoc('sx_beh');
+  doc.tables.creature_behaviors.find((r) => r.sync_uuid === b.sync_uuid).aggro_radius = 9;
+  writeDoc('sx_beh', doc);
+  const preview = await sxListed(pool, 'sx_beh');
+  const editor = await pool.connect();
+  let p;
+  let open = true;
+  try {
+    await editor.query('BEGIN');
+    await editor.query('UPDATE creature_skills SET cooldown_ms = 2000 WHERE id = $1', [sk.id]);
+    const editorPid = (await editor.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+    p = applySeed(pool, 'sx_beh', defaultsOf(preview), { signature: preview.signature });
+    p.catch(() => {});
+    await pollUntil(async () => (await pool.query(
+      'SELECT count(*)::int AS n FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))', [editorPid],
+    )).rows[0].n > 0, 'apply to block on the open edit of creature_skills');
+    await editor.query('COMMIT');
+    open = false;
+  } finally {
+    if (open) await editor.query('ROLLBACK').catch(() => {});
+    editor.release();
+  }
+  const res = await p;
+  createdRuns.push(res.runId);
+  assert.strictEqual(res.summary.updated, 1);
+  assert.strictEqual((await q1(pool, 'SELECT cooldown_ms FROM creature_skills WHERE id = $1', [sk.id])).cooldown_ms, 2000);
+  assert.strictEqual((await q1(pool, 'SELECT aggro_radius FROM creature_behaviors WHERE id = $1', [b.id])).aggro_radius, 9);
+});
+
+dbTest('auth_token is never written from a file, even when a changed row carries one', async (t, pool) => {
+  await pool.query(
+    "INSERT INTO ai_providers (name, base_url, request_template, auth_token) VALUES ('sx_p1', 'http://x', '{\"a\":1}', 'sx-secret')");
+  const p1 = await snap(pool, 'ai_providers', 'sx_p1');
+  await setBaseline(pool, 'ai_providers', p1);
+  await writeGitWith(pool, 'ai_providers', [{ ...p1, model: 'sx-m', auth_token: 'sx-injected' }]);
+  await apply(pool, 'ai_providers', {});
+  const r = await q1(pool, "SELECT model, auth_token FROM ai_providers WHERE name = 'sx_p1'");
+  assert.deepStrictEqual(r, { model: 'sx-m', auth_token: 'sx-secret' });
+});

@@ -77,10 +77,10 @@ function tableSpecs(group) {
   return group.tables;
 }
 
-// The one TableSpec of a single-table, single-key-column group without refs.
-// Preview/apply only handle that shape until multi-table support lands (plan
-// 2, Task 5); anything else fails loudly here instead of half-working. A
-// spec with refs is refused because those paths would write raw ref values.
+// The one TableSpec of a single-table, single-key-column group without refs;
+// anything else throws. No engine path needs it any more (export, diff,
+// preview and apply all handle multi-table groups with refs since plan 2
+// Task 5); kept for tests that address a Plan-1 group's only table.
 function soleSpec(group) {
   const specs = tableSpecs(group);
   if (specs.length !== 1) {

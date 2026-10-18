@@ -38,9 +38,29 @@ async function lockShare(client, specs) {
   await client.query(`LOCK TABLE ${exportLockTables(specs).map(quoteIdent).join(', ')} IN SHARE MODE`);
 }
 
-// lock_timeout expired (55P03) -> a refusal the route can show, not a 500.
+// Apply's table locks: the export lock set (same sorted order, so concurrent
+// lockers never take them in opposite orders), the group's own tables IN SHARE
+// ROW EXCLUSIVE MODE (no concurrent writer until COMMIT, and no second
+// seed/export SRE/SHARE holder could slip a write in either), every by-uuid ref
+// target outside the group IN SHARE MODE (its rows -- and so the ref maps --
+// stay put while we resolve and write). [[table, mode]].
+function applyLockPlan(specs) {
+  const mine = new Set(specs.map((s) => s.table));
+  return exportLockTables(specs).map((t) => [t, mine.has(t) ? 'SHARE ROW EXCLUSIVE' : 'SHARE']);
+}
+
+// One LOCK TABLE per table, in applyLockPlan order (one statement takes one
+// mode, and a mixed order would break the shared sort).
+async function lockForApply(client, specs) {
+  for (const [table, mode] of applyLockPlan(specs)) {
+    await client.query(`LOCK TABLE ${quoteIdent(table)} IN ${mode} MODE`);
+  }
+}
+
+// lock_timeout expired (55P03), or this transaction lost a deadlock against an
+// open admin edit (40P01) -> a refusal the route can show, not a 500.
 function mapLockError(e) {
-  if (e && e.code === '55P03') {
+  if (e && (e.code === '55P03' || e.code === '40P01')) {
     return new SyncRefused('busy', 'another seed/export or an open edit of this table is in progress — try again', { pgCode: e.code });
   }
   return e;
@@ -57,4 +77,6 @@ async function rollback(client) {
   }
 }
 
-module.exports = { SEED_SYNC_LOCK_SQL, lockTimeoutMs, beginLocked, mapLockError, rollback, exportLockTables, lockShare };
+module.exports = {
+  SEED_SYNC_LOCK_SQL, lockTimeoutMs, beginLocked, mapLockError, rollback, exportLockTables, lockShare, applyLockPlan, lockForApply,
+};

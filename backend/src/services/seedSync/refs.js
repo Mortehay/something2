@@ -24,13 +24,14 @@ async function fkReferencedColumns(db, table) {
   return out;
 }
 
-// Per ref column: toRef (local FK value -> ref value) and fromRef (ref value ->
-// local FK value). Loads only the target's referenced column and its uuid/key.
+// Per ref column: toRef (local FK value -> ref value), fromRef (ref value ->
+// local FK value) and refCols (the target column the FK references). Loads only the target's referenced column and its uuid/key.
 async function buildRefMaps(db, spec) {
   const refs = Object.entries(spec.refs || {});
   const toRef = {};
   const fromRef = {};
-  if (!refs.length) return { toRef, fromRef };
+  const refCols = {}; // col -> the target column the FK points at (usually id)
+  if (!refs.length) return { toRef, fromRef, refCols };
   const fkCols = await fkReferencedColumns(db, spec.table);
   for (const [col, ref] of refs) {
     const fks = fkCols.get(col) || [];
@@ -46,8 +47,9 @@ async function buildRefMaps(db, spec) {
       `SELECT ${quoteIdent(refCol)} AS local, ${quoteIdent(valueCol)} AS ref FROM ${quoteIdent(ref.table)}`);
     toRef[col] = new Map(rows.map((r) => [r.local, r.ref]));
     fromRef[col] = new Map(rows.map((r) => [r.ref, r.local]));
+    refCols[col] = refCol;
   }
-  return { toRef, fromRef };
+  return { toRef, fromRef, refCols };
 }
 
 // Copy of `row` with each ref column's local value replaced by its ref value.
