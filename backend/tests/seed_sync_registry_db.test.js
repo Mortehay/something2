@@ -29,8 +29,8 @@ function dbTest(name, body) {
 
 test('getGroup throws on unknown id and GROUPS is in seed order', () => {
   assert.deepStrictEqual(GROUPS.map((g) => g.id), [
-    'tile_types', 'items', 'attack_effects', 'aura_effects', 'creature_behaviors', 'entities',
-    'biomes', 'skill_tree', 'progression', 'quests', 'ai_providers',
+    'ai_providers', 'tile_types', 'items', 'attack_effects', 'aura_effects', 'creature_behaviors', 'entities',
+    'biomes', 'skill_tree', 'progression', 'quests',
   ]);
   assert.throws(() => getGroup('nope'), /unknown group/);
 });
@@ -98,6 +98,8 @@ test('plan-2 fixed decisions (brief) are registered as decided', () => {
   });
   // passive_nodes: every column travels (only the local id and identity are not data).
   assert.deepStrictEqual(Object.keys(specOf('passive_nodes').omit).sort(), ['id', 'sync_uuid']);
+  assert.deepStrictEqual(specOf('passive_nodes').nameRefs,
+    { start_class: { table: 'entity_types', keyCol: 'name', shape: 'text' } });
   const pe = specOf('passive_edges');
   assert.deepStrictEqual(pe.naturalKey, ['a_id', 'b_id']);
   assert.deepStrictEqual(pe.refs, { a_id: { table: 'passive_nodes', by: 'uuid' }, b_id: { table: 'passive_nodes', by: 'uuid' } });
@@ -131,11 +133,6 @@ test('renameCascadesFor accepts every registered group', () => {
   for (const [id, c] of Object.entries(ran)) if (!['entities', 'aura_effects'].includes(id)) assert.deepStrictEqual(c, [], id);
 });
 
-// FKs that point at a group seeding LATER: allowed only here. ai_providers is
-// fixed last in the global order; the column is nullable (ON DELETE SET NULL)
-// and an unresolved provider is a missing_ref refusal, never a 23503.
-const LATER_GROUP_FK_ALLOWED = new Set(['tile_types.ai_provider_id', 'entity_types.ai_provider_id']);
-
 // Deletes run children first (reverse table order) and a ref to a row not yet
 // written is deferred as NULL: both rely on every in-group FK pointing at an
 // EARLIER table (or the same one). Across groups, seeding in GROUPS order must
@@ -153,7 +150,7 @@ function fkOrderProblems(fks, groups) {
     const name = `${r.tbl}.${r.col}`;
     if (from.gi === to.gi) {
       if (to.ti > from.ti) problems.push(`${name} -> ${r.target}: points forward inside ${from.id}`);
-    } else if (to.gi > from.gi && !LATER_GROUP_FK_ALLOWED.has(name)) {
+    } else if (to.gi > from.gi) {
       problems.push(`${name} -> ${r.target}: group ${to.id} seeds after ${from.id}`);
     }
   }
@@ -175,10 +172,6 @@ dbTest('FK order: in-group FKs point backward, cross-group FKs at earlier groups
   const { problems, checked } = fkOrderProblems(fks, GROUPS);
   assert.ok(checked > 10, `checked ${checked} FKs`);
   assert.deepStrictEqual(problems, []);
-  for (const name of LATER_GROUP_FK_ALLOWED) {
-    const [tbl, col] = name.split('.');
-    assert.ok(fks.some((r) => r.tbl === tbl && r.col === col), `${name} is still a real FK`);
-  }
 });
 
 // The guard can fail: a child listed before its parent, and groups swapped.
@@ -192,6 +185,13 @@ dbTest('FK order guard flags a forward in-group FK and a later-group FK', async 
   const swapped = [...GROUPS.filter((g) => g !== items), items];
   assert.ok(fkOrderProblems(fks, swapped).problems
     .includes('creature_drops.item_type_id -> item_types: group items seeds after entities'));
+  // ai_providers last (the old order) is caught too: two groups pin a provider.
+  const ai = getGroup('ai_providers');
+  const aiLast = fkOrderProblems(fks, [...GROUPS.filter((g) => g !== ai), ai]).problems;
+  for (const p of ['tile_types.ai_provider_id -> ai_providers: group ai_providers seeds after tile_types',
+    'entity_types.ai_provider_id -> ai_providers: group ai_providers seeds after entities']) {
+    assert.ok(aiLast.includes(p), p);
+  }
 });
 
 test('every group is an ordered list of TableSpecs', () => {

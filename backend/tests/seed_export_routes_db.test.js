@@ -14,8 +14,8 @@ const seedExportRoutes = require('../src/api/seedExportRoutes.js');
 
 // Registry (seed) order, global constraints.
 const ALL_GROUPS = [
-  'tile_types', 'items', 'attack_effects', 'aura_effects', 'creature_behaviors', 'entities',
-  'biomes', 'skill_tree', 'progression', 'quests', 'ai_providers',
+  'ai_providers', 'tile_types', 'items', 'attack_effects', 'aura_effects', 'creature_behaviors', 'entities',
+  'biomes', 'skill_tree', 'progression', 'quests',
 ];
 
 const DB_URL = process.env.TEST_DATABASE_URL;

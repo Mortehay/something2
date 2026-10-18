@@ -8,11 +8,34 @@ const DB_URL = process.env.TEST_DATABASE_URL
   || process.env.DATABASE_URL
   || 'postgres://user:password@localhost:15432/game_db';
 
-// The real plan-2 groups this file exports/seeds (their baselines are dropped
-// afterwards: they describe this test's temp files, not a real export).
+// The real plan-2 groups this file exports/seeds. Exports rewrite their
+// baselines and add runs: both are snapshotted before each test and restored
+// exactly afterwards (baselines) / deleted by watermark (runs).
 const PLAN2 = ['items', 'attack_effects', 'aura_effects', 'creature_behaviors', 'entities', 'biomes', 'skill_tree', 'progression'];
 
-let runWatermark = null;
+const baselinesOf = async (pool) => (await pool.query(
+  `SELECT group_id, sync_uuid::text AS sync_uuid, hash FROM seed_row_hashes
+    WHERE group_id = ANY($1::text[]) ORDER BY group_id, sync_uuid`, [PLAN2])).rows;
+
+async function restoreBaselines(pool, snapshot) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM seed_row_hashes WHERE group_id = ANY($1::text[])', [PLAN2]);
+    if (snapshot.length) {
+      await client.query(
+        `INSERT INTO seed_row_hashes (group_id, sync_uuid, hash)
+         SELECT * FROM unnest($1::text[], $2::uuid[], $3::text[])`,
+        [snapshot.map((r) => r.group_id), snapshot.map((r) => r.sync_uuid), snapshot.map((r) => r.hash)]);
+    }
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}
 
 function dbTest(name, body) {
   test(name, async (t) => {
@@ -31,19 +54,19 @@ function dbTest(name, body) {
       fs.rmSync(dir, { recursive: true, force: true });
       await pool.end().catch(() => {});
     });
-    const dropState = async () => {
-      await pool.query('DELETE FROM seed_row_hashes WHERE group_id = ANY($1::text[])', [PLAN2]);
-      if (runWatermark !== null) {
-        await pool.query('DELETE FROM seed_export_runs WHERE id > $1 AND group_id = ANY($2::text[])', [runWatermark, PLAN2]);
-      }
-    };
     await withSeedSyncLock(pool, async () => {
       await cleanupSx(pool);
-      runWatermark = (await pool.query('SELECT coalesce(max(id), 0)::int AS m FROM seed_export_runs')).rows[0].m;
-      try { await body(t, pool, dir); } finally {
-        await dropState().catch(() => {});
+      const snapshot = await baselinesOf(pool);
+      const watermark = (await pool.query('SELECT coalesce(max(id), 0)::int AS m FROM seed_export_runs')).rows[0].m;
+      let failure = null;
+      try { await body(t, pool, dir); } catch (e) { failure = e; } finally {
         await cleanupSx(pool).catch(() => {});
+        await pool.query('DELETE FROM seed_export_runs WHERE id > $1 AND group_id = ANY($2::text[])', [watermark, PLAN2])
+          .catch(() => {});
+        await restoreBaselines(pool, snapshot);
       }
+      if (failure) throw failure;
+      assert.deepStrictEqual(await baselinesOf(pool), snapshot, 'real baselines restored exactly');
     });
   });
 }
@@ -53,6 +76,7 @@ const { diffGroup } = require('../src/services/seedSync/diffGroup.js');
 const { exportGroup, fileFor } = require('../src/services/seedSync/exportGroup.js');
 const { SyncRefused } = require('../src/services/seedSync/errors.js');
 const { stableStringify } = require('../src/services/seedSync/canonical.js');
+const { getGroup, tableSpecs } = require('../src/services/seedSync/registry.js');
 
 const q1 = async (pool, sql, params) => (await pool.query(sql, params)).rows[0];
 const idOf = async (pool, table, col, val) => (await q1(pool, `SELECT id FROM ${table} WHERE ${col} = $1`, [val])).id;
@@ -178,6 +202,35 @@ const FIXTURES = {
   },
 };
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+// Every row of every table: no `id`; each ref column (registry refs) null, a
+// uuid of an existing target row (by uuid) or an existing target key (by key).
+async function assertRefsTranslated(pool, groupId, doc) {
+  let refValues = 0;
+  for (const spec of tableSpecs(getGroup(groupId))) {
+    const targets = {};
+    for (const [col, ref] of Object.entries(spec.refs)) {
+      const valueCol = ref.by === 'uuid' ? 'sync_uuid' : ref.keyCol;
+      targets[col] = new Set((await pool.query(`SELECT ${valueCol}::text AS v FROM ${ref.table}`)).rows.map((r) => r.v));
+    }
+    for (const row of doc.tables[spec.table]) {
+      assert.ok(!('id' in row), `${spec.table}: id exported`);
+      for (const [col, ref] of Object.entries(spec.refs)) {
+        const v = row[col];
+        if (v === null) continue;
+        refValues += 1;
+        assert.strictEqual(typeof v, 'string', `${spec.table}.${col} = ${JSON.stringify(v)} is not translated`);
+        if (ref.by === 'uuid') assert.match(v, UUID_RE, `${spec.table}.${col}`);
+        assert.ok(targets[col].has(v), `${spec.table}.${col} = ${v} names no ${ref.table} row`);
+      }
+    }
+  }
+  if (groupId !== 'progression' && groupId !== 'biomes' && groupId !== 'attack_effects') {
+    assert.ok(refValues > 0, `${groupId}: some ref values were checked`);
+  }
+}
+
 // Exactly the rows a test may list in a diff: its own sx_ rows (or the one
 // real setting it touches).
 async function onlyModifiedListed(pool, groupId, uuid) {
@@ -202,9 +255,9 @@ for (const groupId of PLAN2) {
       // Every table of the group carries a row the test made (or, for
       // progression, the real settings).
       for (const [table, rows] of Object.entries(doc.tables)) assert.ok(rows.length > 0, `${groupId}.${table} exported rows`);
-      // No numeric local id ever reaches a file: every FK travels as a uuid/key.
-      assert.ok(!/"(id|a_id|b_id|behavior_id|item_type_id|entity_type_id|skill_id|ammo_type_id|socket_into_item_type_id)": \d/.test(first),
-        'no raw local id in the file');
+      // No numeric local id ever reaches a file: every ref column (from the
+      // registry) holds a uuid or its target's natural key.
+      await assertRefsTranslated(pool, groupId, doc);
 
       const { table, col, key } = fx.modified;
       const uuid = await uuidOf(pool, table, col, key);
@@ -226,6 +279,22 @@ for (const groupId of PLAN2) {
       realSetting.value, 'real setting restored');
   });
 }
+
+dbTest('items: lookup refs travel as names, the ammo ref as a uuid', async (t, pool) => {
+  await sxItems(pool);
+  await exportGroup(pool, 'items');
+  const doc = JSON.parse(fs.readFileSync(fileFor('items'), 'utf8'));
+  const bow = doc.tables.item_types.find((r) => r.name === 'sx_rt_bow');
+  const local = await q1(pool, `SELECT i.attack_origin, ib.name AS impact, ps.name AS shape
+      FROM item_types i JOIN impact_behaviors ib ON ib.id = i.impact_behavior_id
+      JOIN projectile_shapes ps ON ps.id = i.projectile_shape_id WHERE i.name = 'sx_rt_bow'`);
+  assert.strictEqual(bow.impact_behavior_id, local.impact);
+  assert.strictEqual(bow.projectile_shape_id, local.shape);
+  assert.strictEqual(bow.attack_origin, local.attack_origin);
+  assert.strictEqual(bow.element, 'fire');
+  assert.strictEqual(bow.ammo_type_id, await uuidOf(pool, 'item_types', 'name', 'sx_rt_ammo'));
+  assert.ok(!('icon' in bow) && !('id' in bow));
+});
 
 // The ref columns travel as the target's uuid / natural key, and resolve back.
 dbTest('entities: refs travel as uuid/key and composite keys show the parents\' names', async (t, pool) => {

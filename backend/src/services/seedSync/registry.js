@@ -14,12 +14,33 @@
 // Order rules (pinned by seed_sync_registry_db.test.js): inside a group a
 // table comes after every table of the group it references (deletes run
 // children first, deferred refs only for self/forward refs); across groups an
-// FK only points at a group that seeds earlier -- except ai_provider_id
-// (tile_types, entity_types), since ai_providers is fixed last.
+// FK only points at a group that seeds earlier (ai_providers is first: tile
+// and entity types pin a provider by uuid).
 const LOCAL = { id: 'local', created_at: 'local', updated_at: 'local', sync_uuid: 'identity' };
 const ART = 'art group (plan 3)';
 
 const GROUPS = [
+  {
+    id: 'ai_providers',
+    label: 'AI Providers',
+    tables: [{
+      table: 'ai_providers',
+      naturalKey: ['name'],
+      omit: {
+        id: 'local',
+        created_at: 'local',
+        updated_at: 'local',
+        sync_uuid: 'identity',
+        models_cache: 'machine cache',
+        models_fetched_at: 'machine cache',
+        is_active: 'per-PC choice: which box this PC can reach',
+      },
+      secretColumns: ['auth_token'],
+      // auth_token is only needed when the provider sends an auth header.
+      secretNeededIf: 'auth_header_name',
+      refs: {},
+    }],
+  },
   {
     id: 'tile_types',
     label: 'Tile Types',
@@ -36,8 +57,6 @@ const GROUPS = [
         sync_uuid: 'identity',
       },
       secretColumns: [],
-      // ai_providers seeds LAST (global order), so a fresh PC seeds it before
-      // a tile that pins a provider resolves (missing_ref until then).
       refs: { ai_provider_id: { table: 'ai_providers', by: 'uuid' } },
     }],
   },
@@ -168,7 +187,6 @@ const GROUPS = [
           ai_provider_mode: 'per-PC',
         },
         secretColumns: [],
-        // ai_provider_id: ai_providers seeds LAST (see tile_types).
         refs: {
           behavior_id: { table: 'creature_behaviors', by: 'uuid' },
           ai_provider_id: { table: 'ai_providers', by: 'uuid' },
@@ -233,6 +251,9 @@ const GROUPS = [
         omit: { id: 'local', sync_uuid: 'identity' },
         secretColumns: [],
         refs: {},
+        // A start node names its playable class (passiveTreeStore joins
+        // start_class = entity_types.name); no FK.
+        nameRefs: { start_class: { table: 'entity_types', keyCol: 'name', shape: 'text' } },
       },
       {
         table: 'passive_edges',
@@ -266,27 +287,6 @@ const GROUPS = [
       naturalKey: ['key'],
       omit: { id: 'local', created_at: 'local', sync_uuid: 'identity' },
       secretColumns: [],
-      refs: {},
-    }],
-  },
-  {
-    id: 'ai_providers',
-    label: 'AI Providers',
-    tables: [{
-      table: 'ai_providers',
-      naturalKey: ['name'],
-      omit: {
-        id: 'local',
-        created_at: 'local',
-        updated_at: 'local',
-        sync_uuid: 'identity',
-        models_cache: 'machine cache',
-        models_fetched_at: 'machine cache',
-        is_active: 'per-PC choice: which box this PC can reach',
-      },
-      secretColumns: ['auth_token'],
-      // auth_token is only needed when the provider sends an auth header.
-      secretNeededIf: 'auth_header_name',
       refs: {},
     }],
   },
