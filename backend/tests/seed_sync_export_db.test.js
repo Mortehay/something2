@@ -1,7 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
-const path = require('node:path');
 const { Pool } = require('pg');
 const { withSeedSyncLock, cleanupSx, makeTempSyncDir } = require('./helpers/seedSyncTest.js');
 
@@ -136,24 +135,23 @@ dbTest('export records a run and baselines', async (t, pool) => {
 });
 
 dbTest('a failing export finishes its run as failed', async (t, pool, dir) => {
-  // The write must fail AFTER the git_newer pre-check (which reads the file),
-  // so use an existing but read-only directory: no file -> diff passes, the
-  // tmp write then fails with EACCES inside the run.
-  if (process.getuid && process.getuid() === 0) { t.skip('root ignores directory permissions'); return; }
-  const ro = path.join(dir, 'ro');
-  fs.mkdirSync(ro);
-  fs.chmodSync(ro, 0o555);
-  process.env.SEED_SYNC_DIR = ro;
+  // Fail the publish step (after startRun and the tmp write), uid-independent.
+  // exportGroup calls fs.promises.rename at call time, so the mock takes effect.
+  t.mock.method(fs.promises, 'rename', async () => {
+    const e = new Error('sx injected rename failure');
+    e.code = 'EIO';
+    throw e;
+  });
   try {
-    await assert.rejects(exportGroup(pool, 'quests'), (e) => e.code === 'EACCES');
+    await assert.rejects(exportGroup(pool, 'quests'), (e) => e.message === 'sx injected rename failure');
   } finally {
-    process.env.SEED_SYNC_DIR = dir;
-    fs.chmodSync(ro, 0o755);
+    t.mock.restoreAll();
   }
+  assert.deepStrictEqual(fs.readdirSync(dir), [], 'tmp file removed, nothing published');
   const run = (await recentRuns(pool, { groupId: 'quests', limit: 1 }))[0];
   assert.strictEqual(run.action, 'export');
   assert.strictEqual(run.status, 'failed');
-  assert.ok(run.error);
+  assert.strictEqual(run.error, 'sx injected rename failure');
   assert.ok(run.finished_at);
   await pool.query('DELETE FROM seed_export_runs WHERE id=$1', [run.id]);
 });

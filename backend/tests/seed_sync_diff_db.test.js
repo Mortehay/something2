@@ -143,21 +143,74 @@ dbTest('edited_here when no baseline (two PCs never synced)', async (t, pool) =>
   assert.strictEqual(r.kind, 'edited_here');
   assert.strictEqual(r.defaultDecision, null);
   assert.deepStrictEqual(r.fields, [{ name: 'exp_reward', local: 0, git: 50 }]);
-  assert.ok(d.localEdits >= 1 && d.gitChanges >= 1, 'edited_here counts on both sides');
+  // Counts are over the whole table; measure the sx_ row's contribution.
+  writeGit('quests', [s]);
+  const same = await diffGroup(pool, 'quests');
+  assert.strictEqual(d.counts.edited_here - same.counts.edited_here, 1);
+  assert.strictEqual(d.localEdits - same.localEdits, 1, 'edited_here counts as a local edit');
+  assert.strictEqual(d.gitChanges - same.gitChanges, 1, 'edited_here counts as a git change');
 });
 
-dbTest('adopt_identity on natural-key match', async (t, pool) => {
+// Count deltas of the sx_ fixture against the same table with git == local.
+async function deltas(pool, gitRows, sameRows) {
+  const d = await diffGroup(pool, 'quests');
+  writeGit('quests', sameRows);
+  const base = await diffGroup(pool, 'quests');
+  writeGit('quests', gitRows);
+  return {
+    d,
+    localEdits: d.localEdits - base.localEdits,
+    gitChanges: d.gitChanges - base.gitChanges,
+    adopt: d.counts.adopt_identity - base.counts.adopt_identity,
+  };
+}
+
+dbTest('adopt_identity on natural-key match with identical values defaults to git', async (t, pool) => {
   await addQuest(pool, 'sx_a');
   const s = await snap(pool, 'quests', 'sx_a');
   const gitUuid = crypto.randomUUID();
-  writeGit('quests', [{ ...s, sync_uuid: gitUuid, title: 'sx git' }]);
-  const d = await diffGroup(pool, 'quests');
-  const r = only(d); // the local row is consumed, never also only_here
+  const gitRows = [{ ...s, sync_uuid: gitUuid }];
+  writeGit('quests', gitRows);
+  const x = await deltas(pool, gitRows, [s]);
+  const r = only(x.d); // the local row is consumed, never also only_here
   assert.strictEqual(r.kind, 'adopt_identity');
   assert.strictEqual(r.defaultDecision, 'git');
   assert.strictEqual(r.syncUuid, gitUuid);
   assert.strictEqual(r.key, 'sx_a');
+  assert.deepStrictEqual(r.fields, []);
+  assert.deepStrictEqual([x.adopt, x.gitChanges, x.localEdits], [1, 1, 0]);
+});
+
+dbTest('adopt_identity with differing values is red and counts on both sides', async (t, pool) => {
+  await addQuest(pool, 'sx_a');
+  const s = await snap(pool, 'quests', 'sx_a');
+  const gitUuid = crypto.randomUUID();
+  const gitRows = [{ ...s, sync_uuid: gitUuid, title: 'sx git' }];
+  writeGit('quests', gitRows);
+  const x = await deltas(pool, gitRows, [s]);
+  const r = only(x.d);
+  assert.strictEqual(r.kind, 'adopt_identity');
+  assert.strictEqual(r.defaultDecision, null);
+  assert.strictEqual(r.syncUuid, gitUuid);
   assert.deepStrictEqual(r.fields, [{ name: 'title', local: 'sx t', git: 'sx git' }]);
+  assert.deepStrictEqual([x.adopt, x.gitChanges, x.localEdits], [1, 1, 1]);
+});
+
+dbTest('adopt_identity when deleted and recreated locally (git uuid has a baseline) is red', async (t, pool) => {
+  await addQuest(pool, 'sx_a');
+  const old = await snap(pool, 'quests', 'sx_a');
+  await setBaseline(pool, 'quests', old);
+  await pool.query("DELETE FROM quests WHERE key = 'sx_a'");
+  await pool.query("INSERT INTO quests (key, title, act, description) VALUES ('sx_a', 'sx recreated', 1, 'sx d')");
+  const now = await snap(pool, 'quests', 'sx_a');
+  assert.notStrictEqual(now.sync_uuid, old.sync_uuid);
+  writeGit('quests', [old]);
+  const d = await diffGroup(pool, 'quests');
+  const r = only(d); // not deleted_here + only_here
+  assert.strictEqual(r.kind, 'adopt_identity');
+  assert.strictEqual(r.syncUuid, old.sync_uuid);
+  assert.strictEqual(r.defaultDecision, null);
+  assert.deepStrictEqual(r.fields, [{ name: 'title', local: 'sx recreated', git: 'sx t' }]);
 });
 
 dbTest('adopt_identity not offered when the natural-key local row has a baseline', async (t, pool) => {
@@ -366,11 +419,32 @@ dbTest('invalid JSON file raises SyncFileError with file name', async (t, pool) 
   // a row without sync_uuid
   fs.writeFileSync(fileFor('quests'), JSON.stringify({ header: { group: 'quests' }, rows: [{ key: 'sx_a' }] }));
   await assert.rejects(diffGroup(pool, 'quests'), (e) => e instanceof SyncFileError && e.file === 'quests.json');
+  // a row that is not an object
+  fs.writeFileSync(fileFor('quests'), JSON.stringify({ header: { group: 'quests' }, rows: ['sx_a'] }));
+  await assert.rejects(diffGroup(pool, 'quests'), (e) => e instanceof SyncFileError && /row 0 is not an object/.test(e.message));
+  // a row without its natural key
+  fs.writeFileSync(fileFor('quests'), JSON.stringify({ header: { group: 'quests' }, rows: [{ sync_uuid: crypto.randomUUID() }] }));
+  await assert.rejects(diffGroup(pool, 'quests'), (e) => e instanceof SyncFileError && /has no key/.test(e.message));
+  // duplicate natural key
+  fs.writeFileSync(fileFor('quests'), JSON.stringify({ header: { group: 'quests' },
+    rows: [{ key: 'sx_a', sync_uuid: crypto.randomUUID() }, { key: 'sx_a', sync_uuid: crypto.randomUUID() }] }));
+  await assert.rejects(diffGroup(pool, 'quests'), (e) => e instanceof SyncFileError && /duplicate key/.test(e.message));
   // duplicate sync_uuid
   const u = crypto.randomUUID();
   fs.writeFileSync(fileFor('quests'), JSON.stringify({ header: { group: 'quests' },
     rows: [{ key: 'sx_a', sync_uuid: u }, { key: 'sx_b', sync_uuid: u }] }));
-  await assert.rejects(diffGroup(pool, 'quests'), (e) => e instanceof SyncFileError && e.file === 'quests.json');
+  await assert.rejects(diffGroup(pool, 'quests'), (e) => e instanceof SyncFileError && /duplicate sync_uuid/.test(e.message));
+});
+
+dbTest('header returns only the known fields', async (t, pool) => {
+  fs.writeFileSync(fileFor('quests'), JSON.stringify({
+    header: { group: 'quests', exported_at: 'x', exported_by: 'sx-pc', schema_version: 'v', row_count: 0, auth_token: 'sx-secret' },
+    rows: [],
+  }));
+  const d = await diffGroup(pool, 'quests');
+  assert.deepStrictEqual(d.header,
+    { group: 'quests', exported_at: 'x', exported_by: 'sx-pc', schema_version: 'v', row_count: 0 });
+  assert.ok(!JSON.stringify(d).includes('sx-secret'));
 });
 
 dbTest('exportGroup refuses with git_newer when gitChanges > 0', async (t, pool) => {

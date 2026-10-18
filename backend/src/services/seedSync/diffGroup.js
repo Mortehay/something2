@@ -5,6 +5,10 @@ const { SyncFileError } = require('./errors.js');
 
 // Three-way diff of one group: git file (G) vs local DB (L) vs the baseline
 // hash written at the last export/seed (B). Decides what a seed may overwrite.
+// DEFAULTS is the brief's table. One controller override: an adopt_identity
+// whose values differ (non-empty fields) defaults to null (red, must be
+// decided) and counts as a local edit too -- rows created on both PCs after
+// the migration get random uuids, and 'git' would silently overwrite local.
 const DEFAULTS = {
   changed: 'git',
   not_exported: 'local',
@@ -18,6 +22,7 @@ const DEFAULTS = {
 const KINDS = Object.keys(DEFAULTS);
 const LOCAL_EDIT_KINDS = ['not_exported', 'edited_here', 'only_here', 'deleted_here'];
 const GIT_CHANGE_KINDS = ['changed', 'new', 'deleted_in_git', 'edited_here', 'adopt_identity'];
+const HEADER_FIELDS = ['group', 'exported_at', 'exported_by', 'schema_version', 'row_count'];
 
 const quoteIdent = (name) => `"${String(name).replace(/"/g, '""')}"`;
 const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
@@ -43,6 +48,7 @@ function validateDoc(doc, group, groupId) {
     throw new SyncFileError(`${file}: header names group ${JSON.stringify(doc.header.group)}, expected ${groupId}`, file);
   }
   const seen = new Set();
+  const seenKeys = new Set();
   doc.rows.forEach((r, i) => {
     if (!r || typeof r !== 'object' || Array.isArray(r)) throw new SyncFileError(`${file}: row ${i} is not an object`, file);
     if (typeof r.sync_uuid !== 'string' || !r.sync_uuid) throw new SyncFileError(`${file}: row ${i} has no sync_uuid`, file);
@@ -51,7 +57,17 @@ function validateDoc(doc, group, groupId) {
     if (r[group.naturalKey] === undefined || r[group.naturalKey] === null) {
       throw new SyncFileError(`${file}: row ${i} has no ${group.naturalKey}`, file);
     }
+    const nk = stableStringify(r[group.naturalKey]);
+    if (seenKeys.has(nk)) throw new SyncFileError(`${file}: duplicate ${group.naturalKey} ${nk}`, file);
+    seenKeys.add(nk);
   });
+}
+
+// Only the known header fields: the file is hand-editable, never echo extras.
+function pickHeader(h) {
+  const out = {};
+  for (const k of HEADER_FIELDS) out[k] = h[k] === undefined ? null : h[k];
+  return out;
 }
 
 // Differing live columns between two canonical rows (sync_uuid excluded).
@@ -117,8 +133,8 @@ async function diffGroup(pool, groupId) {
   const gitUuids = new Set(git.map((g) => g.row.sync_uuid));
   const consumed = new Set();
   const out = [];
-  const add = (kind, syncUuid, key, fields) => {
-    out.push({ syncUuid, key, kind, defaultDecision: DEFAULTS[kind], fields, blockedReason: null });
+  const add = (kind, syncUuid, key, fields, defaultDecision = DEFAULTS[kind]) => {
+    out.push({ syncUuid, key, kind, defaultDecision, fields, blockedReason: null });
   };
 
   for (const g of git) {
@@ -138,7 +154,8 @@ async function diffGroup(pool, groupId) {
     if (cand && !consumed.has(cand.row.sync_uuid)
         && !gitUuids.has(cand.row.sync_uuid) && !baseline.has(cand.row.sync_uuid)) {
       consumed.add(cand.row.sync_uuid);
-      add('adopt_identity', uuid, g.row[keyCol], diffFields(cand.row, g.row, columns));
+      const fields = diffFields(cand.row, g.row, columns);
+      add('adopt_identity', uuid, g.row[keyCol], fields, fields.length ? null : DEFAULTS.adopt_identity);
       continue;
     }
     add(baseline.has(uuid) ? 'deleted_here' : 'new', uuid, g.row[keyCol], []);
@@ -153,7 +170,8 @@ async function diffGroup(pool, groupId) {
 
   out.sort((a, b) => cmp(String(a.key), String(b.key)) || cmp(a.syncUuid, b.syncUuid));
   for (const r of out) counts[r.kind] += 1;
-  const localEdits = LOCAL_EDIT_KINDS.reduce((n, k) => n + counts[k], 0);
+  const divergentAdopts = out.filter((r) => r.kind === 'adopt_identity' && r.fields.length).length;
+  const localEdits = LOCAL_EDIT_KINDS.reduce((n, k) => n + counts[k], 0) + divergentAdopts;
   const gitChanges = GIT_CHANGE_KINDS.reduce((n, k) => n + counts[k], 0);
   let status = 'in_sync';
   if (localEdits > 0) status = 'local_edits';
@@ -161,7 +179,7 @@ async function diffGroup(pool, groupId) {
   else if (tokensMissing > 0) status = 'tokens_missing';
 
   return {
-    groupId, header: doc.header, status, counts, localEdits, gitChanges, tokensMissing, rows: out,
+    groupId, header: pickHeader(doc.header), status, counts, localEdits, gitChanges, tokensMissing, rows: out,
   };
 }
 
