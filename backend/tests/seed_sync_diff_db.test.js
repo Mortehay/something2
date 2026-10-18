@@ -422,7 +422,7 @@ dbTest('status precedence', async (t, pool) => {
 
   // git moved sx_a -> git_newer
   const doc = JSON.parse(fs.readFileSync(fileFor('quests'), 'utf8'));
-  doc.rows.find((r) => r.key === 'sx_a').title = 'sx git';
+  doc.tables.quests.find((r) => r.key === 'sx_a').title = 'sx git';
   fs.writeFileSync(fileFor('quests'), `${stableStringify(doc)}\n`);
   const gitNewer = await diffGroup(pool, 'quests');
   assert.strictEqual(gitNewer.status, 'git_newer');
@@ -446,7 +446,7 @@ dbTest('status precedence', async (t, pool) => {
   assert.ok(tm.tokensMissing >= 1);
   assert.strictEqual(tm.status, 'tokens_missing');
   const pdoc = JSON.parse(fs.readFileSync(fileFor('ai_providers'), 'utf8'));
-  pdoc.rows.find((r) => r.name === 'sx_p').base_url = 'http://git';
+  pdoc.tables.ai_providers.find((r) => r.name === 'sx_p').base_url = 'http://git';
   fs.writeFileSync(fileFor('ai_providers'), `${stableStringify(pdoc)}\n`);
   assert.strictEqual((await diffGroup(pool, 'ai_providers')).status, 'git_newer');
   await pool.query("UPDATE ai_providers SET model = 'sx-m' WHERE name = 'sx_p'");
@@ -458,7 +458,7 @@ dbTest('schema_newer: status right after never_exported; export refuses', async 
   await exportGroup(pool, 'quests');
   const doc = JSON.parse(fs.readFileSync(fileFor('quests'), 'utf8'));
   // Also a git change and a local edit: schema_newer still wins.
-  doc.rows.find((r) => r.key === 'sx_a').title = 'sx git';
+  doc.tables.quests.find((r) => r.key === 'sx_a').title = 'sx git';
   doc.header.schema_version = '9999999999999_from_the_future';
   const text = `${stableStringify(doc)}\n`;
   fs.writeFileSync(fileFor('quests'), text);
@@ -538,7 +538,7 @@ dbTest('exportGroup refuses with git_newer when gitChanges > 0', async (t, pool)
   await addQuest(pool, 'sx_a');
   await exportGroup(pool, 'quests');
   const doc = JSON.parse(fs.readFileSync(fileFor('quests'), 'utf8'));
-  doc.rows.find((r) => r.key === 'sx_a').title = 'sx git';
+  doc.tables.quests.find((r) => r.key === 'sx_a').title = 'sx git';
   const edited = `${stableStringify(doc)}\n`;
   fs.writeFileSync(fileFor('quests'), edited);
   const runsBefore = (await pool.query("SELECT count(*)::int AS n FROM seed_export_runs WHERE group_id='quests'")).rows[0].n;
@@ -550,7 +550,7 @@ dbTest('exportGroup refuses with git_newer when gitChanges > 0', async (t, pool)
   assert.strictEqual(runsAfter, runsBefore, 'refused before a run is started');
 
   // local-only edits never block an export
-  fs.writeFileSync(fileFor('quests'), `${stableStringify({ ...doc, rows: doc.rows.map((r) => (r.key === 'sx_a' ? { ...r, title: 'sx t' } : r)) })}\n`);
+  fs.writeFileSync(fileFor('quests'), `${stableStringify({ ...doc, tables: { quests: doc.tables.quests.map((r) => (r.key === 'sx_a' ? { ...r, title: 'sx t' } : r)) } })}\n`);
   await pool.query("UPDATE quests SET title = 'sx local' WHERE key = 'sx_a'");
   assert.strictEqual((await diffGroup(pool, 'quests')).status, 'local_edits');
   await exportGroup(pool, 'quests');

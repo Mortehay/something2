@@ -74,9 +74,10 @@ function tableSpecs(group) {
   return group.tables;
 }
 
-// The one TableSpec of a single-table, single-key-column group. Export, diff
-// and apply only handle that shape until multi-table support lands (plan 2,
-// Tasks 3-5); a multi-table group fails loudly here instead of half-working.
+// The one TableSpec of a single-table, single-key-column group without refs.
+// Diff and apply only handle that shape until multi-table support lands (plan
+// 2, Tasks 4-5); anything else fails loudly here instead of half-working. A
+// spec with refs is refused because those paths would compare raw local ids.
 function soleSpec(group) {
   const specs = tableSpecs(group);
   if (specs.length !== 1) {
@@ -86,7 +87,28 @@ function soleSpec(group) {
   if (spec.naturalKey.length !== 1) {
     throw new Error(`seed-sync: ${spec.table} has a composite natural key; only single-column keys are supported yet`);
   }
+  if (Object.keys(spec.refs || {}).length) {
+    throw new Error(`seed-sync: group ${group.id}: ${spec.table} has refs; diff/seed of ref columns is not supported yet`);
+  }
   return spec;
+}
+
+// TEST ONLY: registers `groups` (ids must be new) for the duration of fn, then
+// removes them, even when fn throws. Production code never calls this; it lets
+// tests exercise multi-table/ref export before the real groups exist (Task 6).
+async function _withTestGroups(groups, fn) {
+  for (const g of groups) {
+    if (GROUPS.some((x) => x.id === g.id)) throw new Error(`seed-sync: test group ${g.id} already registered`);
+  }
+  GROUPS.push(...groups);
+  try {
+    return await fn();
+  } finally {
+    for (const g of groups) {
+      const i = GROUPS.indexOf(g);
+      if (i >= 0) GROUPS.splice(i, 1);
+    }
+  }
 }
 
 // Exported columns of one table: everything but omit and secret columns (ref
@@ -140,4 +162,4 @@ async function fkProblems(db, spec) {
   return out.sort((a, b) => (a.column < b.column ? -1 : a.column > b.column ? 1 : 0));
 }
 
-module.exports = { GROUPS, getGroup, tableSpecs, soleSpec, liveColumns, fkProblems };
+module.exports = { GROUPS, getGroup, tableSpecs, soleSpec, liveColumns, fkProblems, _withTestGroups };

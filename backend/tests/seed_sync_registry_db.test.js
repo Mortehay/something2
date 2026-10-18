@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
-const { GROUPS, getGroup, tableSpecs, soleSpec, liveColumns, fkProblems } = require('../src/services/seedSync/registry.js');
+const { GROUPS, getGroup, tableSpecs, soleSpec, liveColumns, fkProblems, _withTestGroups } = require('../src/services/seedSync/registry.js');
 const { deterministicUuid } = require('../src/services/seedSync/canonical.js');
 const { withSeedSyncLock, cleanupSx } = require('./helpers/seedSyncTest.js');
 
@@ -103,6 +103,42 @@ dbTest('fkProblems flags an uncovered FK column, a wrong ref target and a ref on
   assert.deepStrictEqual(
     await fkProblems(pool, { ...tt, refs: { name: { table: 'ai_providers', by: 'uuid' } } }),
     [{ column: 'name', problem: 'not_a_fk', target: null, declared: 'ai_providers' }]);
+});
+
+// Composite / multi-target: passive_edges has two FK columns (a_id, b_id) into
+// the same table, and a composite primary key over both.
+dbTest('fkProblems covers each column of a two-column FK pair separately', async (t, pool) => {
+  const edges = { table: 'passive_edges', naturalKey: ['a_id', 'b_id'], omit: { sync_uuid: 'identity' }, secretColumns: [], refs: {} };
+  assert.deepStrictEqual(await fkProblems(pool, edges), [
+    { column: 'a_id', problem: 'uncovered', target: 'passive_nodes' },
+    { column: 'b_id', problem: 'uncovered', target: 'passive_nodes' },
+  ]);
+  const a = { a_id: { table: 'passive_nodes', by: 'uuid' } };
+  assert.deepStrictEqual(await fkProblems(pool, { ...edges, refs: a }),
+    [{ column: 'b_id', problem: 'uncovered', target: 'passive_nodes' }], 'covering a_id does not cover b_id');
+  assert.deepStrictEqual(
+    await fkProblems(pool, { ...edges, refs: { ...a, b_id: { table: 'passive_edges', by: 'uuid' } } }),
+    [{ column: 'b_id', problem: 'wrong_target', target: 'passive_nodes', declared: 'passive_edges' }]);
+  assert.deepStrictEqual(
+    await fkProblems(pool, { ...edges, refs: { ...a, b_id: { table: 'passive_nodes', by: 'uuid' } } }), []);
+});
+
+test('soleSpec refuses a spec with refs: single-table paths never compare raw local ids', () => {
+  const q = getGroup('quests').tables[0];
+  const withRef = { id: 'sx_ref', tables: [{ ...q, refs: { x: { table: 'quests', by: 'uuid' } } }] };
+  assert.throws(() => soleSpec(withRef), /sx_ref.*quests.*refs/);
+});
+
+test('_withTestGroups registers groups for the callback only', async () => {
+  const before = GROUPS.map((g) => g.id);
+  const g = { id: 'sx_tmp', label: 'Tmp', tables: [getGroup('quests').tables[0]] };
+  const seen = await _withTestGroups([g], async () => getGroup('sx_tmp'));
+  assert.strictEqual(seen, g);
+  assert.deepStrictEqual(GROUPS.map((x) => x.id), before);
+  assert.throws(() => getGroup('sx_tmp'), /unknown group/);
+  await assert.rejects(_withTestGroups([g], async () => { throw new Error('sx boom'); }), /sx boom/);
+  assert.deepStrictEqual(GROUPS.map((x) => x.id), before, 'removed after a throw too');
+  await assert.rejects(_withTestGroups([{ ...g, id: 'quests' }], async () => {}), /already/);
 });
 
 // Frozen Plan-1 omit/secret lists: the refactor must export exactly what

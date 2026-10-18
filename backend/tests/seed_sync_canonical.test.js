@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { canonicalValue, canonicalRow, rowHash, stableStringify, deterministicUuid } = require('../src/services/seedSync/canonical.js');
+const { canonicalValue, canonicalRow, rowHash, stableStringify, deterministicUuid, compareNaturalKey } = require('../src/services/seedSync/canonical.js');
 
 test('canonical normalizes numeric strings, dates and jsonb key order', () => {
   assert.strictEqual(canonicalValue('0.50', 'numeric'), 0.5);
@@ -41,4 +41,25 @@ test('date and timestamp-without-tz Dates use LOCAL parts (TZ independent); time
   assert.strictEqual(canonicalValue(new Date(2026, 0, 5, 23, 59, 58, 7), 'timestamp without time zone'), '2026-01-05T23:59:58.007');
   assert.strictEqual(canonicalValue(new Date('2026-10-18T12:34:56.789Z'), 'timestamp with time zone'), '2026-10-18T12:34:56.789Z');
   assert.strictEqual(canonicalValue('2026-10-18 01:02:03', 'timestamp without time zone'), '2026-10-18 01:02:03');
+});
+
+test('compareNaturalKey: part by part, plain code-unit compare of the exported value', () => {
+  const rows = [
+    { a: 'b', b: 'a', sync_uuid: '3' },
+    { a: 'a', b: 'z', sync_uuid: '2' },
+    { a: 'a', b: 'B', sync_uuid: '1' },
+    { a: 'B', b: 'z', sync_uuid: '4' },
+  ];
+  const sorted = [...rows].sort((x, y) => compareNaturalKey(x, y, ['a', 'b'])).map((r) => r.sync_uuid);
+  // 'B' (0x42) < 'a' (0x61): code units, not locale order.
+  assert.deepStrictEqual(sorted, ['4', '1', '2', '3']);
+  // Non-strings compare by their JSON text, nulls first; equal keys fall back to sync_uuid.
+  const nums = [{ n: 9, sync_uuid: 'a' }, { n: 10, sync_uuid: 'b' }, { n: null, sync_uuid: 'c' }];
+  assert.deepStrictEqual([...nums].sort((x, y) => compareNaturalKey(x, y, ['n'])).map((r) => r.n), [null, 10, 9]);
+  assert.ok(compareNaturalKey({ k: 'x', sync_uuid: 'a' }, { k: 'x', sync_uuid: 'b' }, ['k']) < 0);
+  // Single-key: identical to Plan 1's `a[key] < b[key]` string order.
+  const keys = ['sx_b', 'Sx', 'sx_a', 'é', 'z'];
+  const p1 = [...keys].sort((x, y) => (x < y ? -1 : x > y ? 1 : 0));
+  const p2 = keys.map((k) => ({ key: k, sync_uuid: k })).sort((x, y) => compareNaturalKey(x, y, ['key'])).map((r) => r.key);
+  assert.deepStrictEqual(p2, p1);
 });

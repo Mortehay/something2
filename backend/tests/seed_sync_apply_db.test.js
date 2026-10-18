@@ -782,7 +782,7 @@ dbTest('edited_here resolved local becomes exportable and export carries the loc
   assert.deepStrictEqual(sxRows(d).map((r) => [r.key, r.kind]), [['sx_a', 'not_exported']]);
   const { runId } = await exportGroup(pool, 'quests');
   createdRuns.push(runId);
-  const row = JSON.parse(fs.readFileSync(fileFor('quests'), 'utf8')).rows.find((r) => r.key === 'sx_a');
+  const row = JSON.parse(fs.readFileSync(fileFor('quests'), 'utf8')).tables.quests.find((r) => r.key === 'sx_a');
   assert.strictEqual(row.title, 'sx mine');
   assert.deepStrictEqual(sxRows(await previewSeed(pool, 'quests')), []);
 });

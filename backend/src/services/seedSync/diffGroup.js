@@ -1,4 +1,4 @@
-const { getGroup, soleSpec, liveColumns } = require('./registry.js');
+const { getGroup, tableSpecs, soleSpec, liveColumns } = require('./registry.js');
 const { canonicalRow, rowHash, stableStringify } = require('./canonical.js');
 const { readExport } = require('./exportGroup.js');
 const { SyncFileError } = require('./errors.js');
@@ -23,7 +23,9 @@ const DEFAULTS = {
 const KINDS = Object.keys(DEFAULTS);
 const LOCAL_EDIT_KINDS = ['not_exported', 'edited_here', 'only_here', 'deleted_here'];
 const GIT_CHANGE_KINDS = ['changed', 'new', 'deleted_in_git', 'edited_here', 'adopt_identity'];
-const HEADER_FIELDS = ['group', 'exported_at', 'exported_by', 'schema_version', 'row_count'];
+// v1 (Plan 1): { header{..., row_count}, rows }; v2: { header{..., row_counts}, tables }.
+const HEADER_FIELDS_V1 = ['group', 'exported_at', 'exported_by', 'schema_version', 'row_count'];
+const HEADER_FIELDS_V2 = ['group', 'exported_at', 'exported_by', 'schema_version', 'row_counts'];
 
 const quoteIdent = (name) => `"${String(name).replace(/"/g, '""')}"`;
 const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
@@ -49,41 +51,92 @@ async function countTokensMissing(db, spec) {
   return rows[0].n;
 }
 
-function validateDoc(doc, spec, groupId) {
+const isV1 = (doc) => Array.isArray(doc.rows);
+const isPlainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+
+// One table's rows: object rows, lowercase unique sync_uuid, a complete and
+// unique natural key. `where` prefixes messages ('' for v1, 'table ' for v2).
+function validateRows(rows, spec, file, where) {
+  const keyCols = spec.naturalKey;
+  const keyName = keyCols.join('+');
+  const seen = new Set();
+  const seenKeys = new Set();
+  rows.forEach((r, i) => {
+    if (!isPlainObject(r)) throw new SyncFileError(`${file}: ${where}row ${i} is not an object`, file);
+    if (typeof r.sync_uuid !== 'string' || !r.sync_uuid) throw new SyncFileError(`${file}: ${where}row ${i} has no sync_uuid`, file);
+    if (!UUID_RE.test(r.sync_uuid)) {
+      throw new SyncFileError(`${file}: ${where}row ${i} sync_uuid is not a lowercase uuid`, file);
+    }
+    if (seen.has(r.sync_uuid)) throw new SyncFileError(`${file}: ${where}duplicate sync_uuid ${r.sync_uuid}`, file);
+    seen.add(r.sync_uuid);
+    for (const k of keyCols) {
+      if (r[k] === undefined || r[k] === null) throw new SyncFileError(`${file}: ${where}row ${i} has no ${k}`, file);
+    }
+    const nk = stableStringify(keyCols.length === 1 ? r[keyCols[0]] : keyCols.map((k) => r[k]));
+    if (seenKeys.has(nk)) throw new SyncFileError(`${file}: ${where}duplicate ${keyName} ${nk}`, file);
+    seenKeys.add(nk);
+  });
+}
+
+// Checks a parsed file (readExport) against its group, per table. v1 is only
+// valid for a single-table group. Every group table must be present (a missing
+// one would read as "all rows deleted in git"); an unknown table is refused.
+function validateDoc(doc, group) {
+  const groupId = group.id;
   const file = `${groupId}.json`;
-  const keyCol = spec.naturalKey[0];
+  const specs = tableSpecs(group);
   if (doc.header.group !== groupId) {
     throw new SyncFileError(`${file}: header names group ${JSON.stringify(doc.header.group)}, expected ${groupId}`, file);
   }
-  const seen = new Set();
-  const seenKeys = new Set();
-  doc.rows.forEach((r, i) => {
-    if (!r || typeof r !== 'object' || Array.isArray(r)) throw new SyncFileError(`${file}: row ${i} is not an object`, file);
-    if (typeof r.sync_uuid !== 'string' || !r.sync_uuid) throw new SyncFileError(`${file}: row ${i} has no sync_uuid`, file);
-    if (!UUID_RE.test(r.sync_uuid)) {
-      throw new SyncFileError(`${file}: row ${i} sync_uuid is not a lowercase uuid`, file);
+  if (isV1(doc)) {
+    if (specs.length !== 1) {
+      throw new SyncFileError(`${file}: a v1 file (rows) is only valid for a single-table group; ${groupId} has ${specs.length} tables`, file);
     }
-    if (seen.has(r.sync_uuid)) throw new SyncFileError(`${file}: duplicate sync_uuid ${r.sync_uuid}`, file);
-    seen.add(r.sync_uuid);
-    if (r[keyCol] === undefined || r[keyCol] === null) {
-      throw new SyncFileError(`${file}: row ${i} has no ${keyCol}`, file);
+    validateRows(doc.rows, specs[0], file, '');
+    // A truncated or hand-merged file: rows went missing (or were added) after
+    // the header was written. Checked last so a bad row is named first.
+    if (doc.header.row_count !== doc.rows.length) {
+      throw new SyncFileError(
+        `${file}: header row_count ${JSON.stringify(doc.header.row_count)} but ${doc.rows.length} rows`, file);
     }
-    const nk = stableStringify(r[keyCol]);
-    if (seenKeys.has(nk)) throw new SyncFileError(`${file}: duplicate ${keyCol} ${nk}`, file);
-    seenKeys.add(nk);
-  });
-  // A truncated or hand-merged file: rows went missing (or were added) after
-  // the header was written. Checked last so a bad row is named first.
-  if (doc.header.row_count !== doc.rows.length) {
-    throw new SyncFileError(
-      `${file}: header row_count ${JSON.stringify(doc.header.row_count)} but ${doc.rows.length} rows`, file);
+    return;
+  }
+  const known = new Set(specs.map((s) => s.table));
+  for (const t of Object.keys(doc.tables).sort()) {
+    if (!known.has(t)) throw new SyncFileError(`${file}: unknown table ${t} (not in group ${groupId})`, file);
+  }
+  for (const spec of specs) {
+    const rows = doc.tables[spec.table];
+    if (rows === undefined) throw new SyncFileError(`${file}: missing table ${spec.table}`, file);
+    if (!Array.isArray(rows)) throw new SyncFileError(`${file}: ${spec.table} is not an array`, file);
+    validateRows(rows, spec, file, `${spec.table} `);
+  }
+  const counts = doc.header.row_counts;
+  if (!isPlainObject(counts)) {
+    throw new SyncFileError(`${file}: header row_counts missing`, file);
+  }
+  for (const t of Object.keys(counts).sort()) {
+    if (!known.has(t)) throw new SyncFileError(`${file}: header row_counts names unknown table ${t}`, file);
+  }
+  for (const spec of specs) {
+    const n = doc.tables[spec.table].length;
+    if (counts[spec.table] !== n) {
+      throw new SyncFileError(
+        `${file}: header row_counts.${spec.table} ${JSON.stringify(counts[spec.table])} but ${n} rows`, file);
+    }
   }
 }
 
-// Only the known header fields: the file is hand-editable, never echo extras.
-function pickHeader(h) {
+// The rows of one table of a validated doc (v1: the group's only table).
+function docRows(doc, table) {
+  return isV1(doc) ? doc.rows : doc.tables[table];
+}
+
+// Only the known header fields of the file's format: the file is
+// hand-editable, never echo extras.
+function pickHeader(h, doc) {
   const out = {};
-  for (const k of HEADER_FIELDS) out[k] = h[k] === undefined ? null : h[k];
+  for (const k of isV1(doc) ? HEADER_FIELDS_V1 : HEADER_FIELDS_V2) out[k] = h[k] === undefined ? null : h[k];
   return out;
 }
 
@@ -135,9 +188,10 @@ async function loadLocal(db, spec, groupId) {
 // Internal: callers outside seedSync use diffGroup. `spec` is the group's one
 // TableSpec (single-table groups only until plan 2 Task 4; soleSpec throws).
 async function computeDiff(db, groupId) {
-  const spec = soleSpec(getGroup(groupId));
+  const group = getGroup(groupId);
+  const spec = soleSpec(group);
   const doc = await readExport(groupId); // SyncFileError propagates
-  if (doc) validateDoc(doc, spec, groupId);
+  if (doc) validateDoc(doc, group);
   const { columns, rows: localRaw, base, tokensMissing, dbVersion } = await loadLocal(db, spec, groupId);
   const counts = zeroCounts();
 
@@ -168,7 +222,7 @@ async function computeDiff(db, groupId) {
   const localByKey = new Map(local.map((l) => [l.row[keyCol], l]));
   // Re-canonicalize git rows so a hand-edited file (other key order, extra or
   // missing columns) hashes exactly as the exporter would have written it.
-  const git = doc.rows.map((r) => {
+  const git = docRows(doc, spec.table).map((r) => {
     const row = canonicalRow(r, columns);
     return { row, hash: rowHash(row) };
   });
@@ -238,7 +292,7 @@ async function computeDiff(db, groupId) {
     inSync,
     dbVersion,
     diff: {
-      groupId, header: pickHeader(doc.header), status, counts, localEdits, gitChanges, tokensMissing, rows: out,
+      groupId, header: pickHeader(doc.header, doc), status, counts, localEdits, gitChanges, tokensMissing, rows: out,
     },
   };
 }
@@ -249,4 +303,4 @@ async function diffGroup(db, groupId) {
   return (await computeDiff(db, groupId)).diff;
 }
 
-module.exports = { diffGroup, computeDiff, KINDS, DEFAULTS };
+module.exports = { diffGroup, computeDiff, validateDoc, KINDS, DEFAULTS };

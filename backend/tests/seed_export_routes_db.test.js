@@ -219,7 +219,7 @@ dbTest('POST seed with undecided rows -> 409 undecided', async ({ pool, admin })
   // baseline and change git's copy so the row is red edited_here.
   const file = fileFor('quests');
   const doc = JSON.parse(fs.readFileSync(file, 'utf8'));
-  const row = doc.rows.find((r) => r.key === 'sx_a');
+  const row = doc.tables.quests.find((r) => r.key === 'sx_a');
   row.title = 'sx git';
   fs.writeFileSync(file, JSON.stringify(doc, null, 2));
   await pool.query('DELETE FROM seed_row_hashes WHERE sync_uuid = $1', [row.sync_uuid]);
@@ -280,7 +280,7 @@ dbTest('POST seed with a stale signature -> 409 stale_preview, nothing written',
   await exportGroup(pool, 'quests');
   const file = fileFor('quests');
   const doc = JSON.parse(fs.readFileSync(file, 'utf8'));
-  const row = doc.rows.find((r) => r.key === 'sx_a');
+  const row = doc.tables.quests.find((r) => r.key === 'sx_a');
   row.title = 'sx git';
   fs.writeFileSync(file, JSON.stringify(doc, null, 2));
   const app = appFor(pool);

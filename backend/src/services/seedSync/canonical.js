@@ -52,4 +52,27 @@ function rowHash(canonical) {
   return crypto.createHash('sha256').update(stableStringify(canonical)).digest('hex');
 }
 
-module.exports = { deterministicUuid, canonicalValue, canonicalRow, rowHash, stableStringify };
+// Row order in an export file: by the natural key parts in order, each compared
+// by plain code-unit compare of its exported value (strings as-is, anything
+// else by its JSON text, null first), then by sync_uuid. For one string key
+// this is exactly Plan 1's `a[key] < b[key]` order.
+function keyPartText(v) {
+  return typeof v === 'string' ? v : JSON.stringify(sortDeep(v));
+}
+const cmpText = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+
+function compareNaturalKey(a, b, keyCols) {
+  for (const k of keyCols) {
+    const x = a[k] === undefined ? null : a[k];
+    const y = b[k] === undefined ? null : b[k];
+    if (x === null || y === null) {
+      if (x !== y) return x === null ? -1 : 1;
+      continue;
+    }
+    const c = cmpText(keyPartText(x), keyPartText(y));
+    if (c) return c;
+  }
+  return cmpText(String(a.sync_uuid), String(b.sync_uuid));
+}
+
+module.exports = { deterministicUuid, canonicalValue, canonicalRow, rowHash, stableStringify, compareNaturalKey };
