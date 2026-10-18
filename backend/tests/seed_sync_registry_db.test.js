@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
-const { GROUPS, getGroup, liveColumns } = require('../src/services/seedSync/registry.js');
+const { GROUPS, getGroup, tableSpecs, soleSpec, liveColumns, fkProblems } = require('../src/services/seedSync/registry.js');
 const { deterministicUuid } = require('../src/services/seedSync/canonical.js');
 const { withSeedSyncLock, cleanupSx } = require('./helpers/seedSyncTest.js');
 
@@ -31,38 +31,110 @@ test('getGroup throws on unknown id and GROUPS is in seed order', () => {
   assert.throws(() => getGroup('nope'), /unknown group/);
 });
 
+test('every group is an ordered list of TableSpecs', () => {
+  for (const g of GROUPS) {
+    assert.ok(Array.isArray(g.tables) && g.tables.length > 0, `${g.id}: tables`);
+    assert.strictEqual(tableSpecs(g), g.tables);
+    for (const s of tableSpecs(g)) {
+      assert.strictEqual(typeof s.table, 'string');
+      assert.ok(Array.isArray(s.naturalKey) && s.naturalKey.length > 0, `${s.table}: naturalKey is a non-empty array`);
+      assert.ok(s.omit && typeof s.omit === 'object', `${s.table}: omit`);
+      for (const [c, why] of Object.entries(s.omit)) assert.ok(typeof why === 'string' && why, `${s.table}.${c}: omit reason`);
+      assert.ok(Array.isArray(s.secretColumns), `${s.table}: secretColumns`);
+      assert.ok(s.refs && typeof s.refs === 'object', `${s.table}: refs`);
+      for (const [c, r] of Object.entries(s.refs)) {
+        assert.ok(r.by === 'uuid' || (r.by === 'key' && typeof r.keyCol === 'string'), `${s.table}.${c}: ref shape`);
+      }
+    }
+  }
+  // Plan-1 groups stay single-table until Task 6 adds the multi-table ones.
+  for (const id of ['tile_types', 'quests', 'ai_providers']) {
+    assert.deepStrictEqual(tableSpecs(getGroup(id)).map((s) => s.table), [id]);
+  }
+});
+
+test('soleSpec refuses a multi-table group with a clear error', () => {
+  assert.strictEqual(soleSpec(getGroup('quests')), getGroup('quests').tables[0]);
+  const two = { id: 'sx_two', tables: [getGroup('quests').tables[0], getGroup('tile_types').tables[0]] };
+  assert.throws(() => soleSpec(two), /sx_two.*2 tables.*single-table/);
+});
+
 dbTest('every live column is exported or explicitly omitted, with no stale omit keys', async (t, pool) => {
   for (const g of GROUPS) {
-    const all = (await pool.query(
-      'SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1', [g.table],
-    )).rows.map((r) => r.column_name);
-    assert.ok(all.length > 0, `${g.table} has columns`);
-    const live = (await liveColumns(pool, g)).map((c) => c.name);
-    const omit = Object.keys(g.omit);
-    const secret = g.secretColumns || [];
-    for (const c of [...omit, ...secret]) assert.ok(all.includes(c), `${g.table}: stale omit/secret key ${c}`);
-    const union = [...live, ...omit, ...secret];
-    assert.strictEqual(new Set(union).size, union.length, `${g.table}: a column is listed twice`);
-    assert.deepStrictEqual([...union].sort(), [...all].sort(), `${g.table}: columns drifted`);
+    for (const s of tableSpecs(g)) {
+      const all = (await pool.query(
+        'SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1', [s.table],
+      )).rows.map((r) => r.column_name);
+      assert.ok(all.length > 0, `${s.table} has columns`);
+      const live = (await liveColumns(pool, s)).map((c) => c.name);
+      const omit = Object.keys(s.omit);
+      const secret = s.secretColumns;
+      for (const c of [...omit, ...secret]) assert.ok(all.includes(c), `${s.table}: stale omit/secret key ${c}`);
+      for (const c of Object.keys(s.refs)) assert.ok(live.includes(c), `${s.table}: ref ${c} is not a live column`);
+      const union = [...live, ...omit, ...secret];
+      assert.strictEqual(new Set(union).size, union.length, `${s.table}: a column is listed twice`);
+      assert.deepStrictEqual([...union].sort(), [...all].sort(), `${s.table}: columns drifted`);
+    }
   }
 });
 
 // A FK column holds a local numeric id that means nothing on another PC (or
-// worse, points at a different row). Plan 1 omits them; plan 2 maps them.
-dbTest('no live column of any group carries a FK constraint', async (t, pool) => {
+// worse, points at a different row). It must either be declared a ref (export
+// translates it) or omitted with a reason -- never exported raw.
+dbTest('every FK column is a declared ref or omitted, and a declared ref matches the real FK target', async (t, pool) => {
   for (const g of GROUPS) {
-    const fkCols = (await pool.query(
-      `SELECT a.attname::text AS name FROM pg_constraint c
-         JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
-        WHERE c.contype = 'f' AND c.conrelid = $1::text::regclass`, [g.table],
-    )).rows.map((r) => r.name);
-    const live = (await liveColumns(pool, g)).map((c) => c.name);
-    assert.deepStrictEqual(live.filter((c) => fkCols.includes(c)), [], `${g.table}: FK column exported`);
+    for (const s of tableSpecs(g)) {
+      assert.deepStrictEqual(await fkProblems(pool, s), [], `${s.table}: FK coverage`);
+    }
   }
 });
 
+// The guard must be able to fail: tile_types.ai_provider_id is a real FK.
+dbTest('fkProblems flags an uncovered FK column, a wrong ref target and a ref on a non-FK column', async (t, pool) => {
+  const tt = getGroup('tile_types').tables[0];
+  const { ai_provider_id: _dropped, ...omitRest } = tt.omit;
+  assert.deepStrictEqual(await fkProblems(pool, { ...tt, omit: omitRest }),
+    [{ column: 'ai_provider_id', problem: 'uncovered', target: 'ai_providers' }]);
+  assert.deepStrictEqual(
+    await fkProblems(pool, { ...tt, omit: omitRest, refs: { ai_provider_id: { table: 'quests', by: 'uuid' } } }),
+    [{ column: 'ai_provider_id', problem: 'wrong_target', target: 'ai_providers', declared: 'quests' }]);
+  assert.deepStrictEqual(
+    await fkProblems(pool, { ...tt, omit: omitRest, refs: { ai_provider_id: { table: 'ai_providers', by: 'uuid' } } }), []);
+  assert.deepStrictEqual(
+    await fkProblems(pool, { ...tt, refs: { name: { table: 'ai_providers', by: 'uuid' } } }),
+    [{ column: 'name', problem: 'not_a_fk', target: null, declared: 'ai_providers' }]);
+});
+
+// Frozen Plan-1 omit/secret lists: the refactor must export exactly what
+// Plan 1 exported (R1: tile_types.ai_provider_id stays omitted until Task 6).
+const PLAN1 = {
+  tile_types: { omit: ['id', 'created_at', 'updated_at', 'image', 'render_mode', 'sprite', 'sync_uuid', 'ai_provider_id'], secret: [] },
+  quests: { omit: ['id', 'created_at', 'sync_uuid'], secret: [] },
+  ai_providers: {
+    omit: ['id', 'created_at', 'updated_at', 'sync_uuid', 'models_cache', 'models_fetched_at', 'is_active'],
+    secret: ['auth_token'],
+  },
+};
+dbTest('plan-1 groups unchanged: liveColumns identical to Plan 1', async (t, pool) => {
+  for (const [id, p] of Object.entries(PLAN1)) {
+    const { rows } = await pool.query(
+      `SELECT column_name, data_type FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = $1`, [id]);
+    const skip = new Set([...p.omit, ...p.secret]);
+    const expected = rows.filter((r) => !skip.has(r.column_name))
+      .map((r) => ({ name: r.column_name, dataType: r.data_type }))
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    assert.ok(expected.length > 0, id);
+    assert.deepStrictEqual(await liveColumns(pool, soleSpec(getGroup(id))), expected, id);
+  }
+  assert.strictEqual(soleSpec(getGroup('ai_providers')).secretNeededIf, 'auth_header_name');
+  assert.deepStrictEqual(soleSpec(getGroup('tile_types')).naturalKey, ['name']);
+  assert.deepStrictEqual(soleSpec(getGroup('quests')).naturalKey, ['key']);
+  assert.deepStrictEqual(soleSpec(getGroup('ai_providers')).naturalKey, ['name']);
+});
+
 dbTest('liveColumns is sorted and carries information_schema data_type', async (t, pool) => {
-  const cols = await liveColumns(pool, getGroup('tile_types'));
+  const cols = await liveColumns(pool, soleSpec(getGroup('tile_types')));
   const names = cols.map((c) => c.name);
   assert.deepStrictEqual(names, [...names].sort());
   assert.strictEqual(cols.find((c) => c.name === 'valid_neighbors').dataType, 'jsonb');
@@ -70,17 +142,17 @@ dbTest('liveColumns is sorted and carries information_schema data_type', async (
 });
 
 dbTest('ai_providers liveColumns never includes auth_token', async (t, pool) => {
-  const names = (await liveColumns(pool, getGroup('ai_providers'))).map((c) => c.name);
+  const names = (await liveColumns(pool, soleSpec(getGroup('ai_providers')))).map((c) => c.name);
   assert.ok(!names.includes('auth_token'));
   assert.ok(names.includes('base_url'));
 });
 
 // Per-PC choices and art travel separately (final review rulings).
 dbTest('per-PC and art columns are omitted, with their reason', async (t, pool) => {
-  const ai = getGroup('ai_providers');
+  const ai = soleSpec(getGroup('ai_providers'));
   assert.ok(!(await liveColumns(pool, ai)).some((c) => c.name === 'is_active'));
   assert.strictEqual(ai.omit.is_active, 'per-PC choice: which box this PC can reach');
-  const tt = getGroup('tile_types');
+  const tt = soleSpec(getGroup('tile_types'));
   const ttNames = (await liveColumns(pool, tt)).map((c) => c.name);
   for (const c of ['render_mode', 'sprite']) {
     assert.ok(!ttNames.includes(c), c);

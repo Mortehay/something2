@@ -1,6 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const { getGroup, liveColumns } = require('./registry.js');
+const { getGroup, soleSpec, liveColumns } = require('./registry.js');
 const { canonicalRow, rowHash, stableStringify } = require('./canonical.js');
 const { pcLabel, schemaVersion, startRun, finishRun } = require('./runs.js');
 const { SyncFileError, SyncRefused } = require('./errors.js');
@@ -38,7 +38,8 @@ async function readExport(groupId) {
 }
 
 async function exportGroup(pool, groupId) {
-  const group = getGroup(groupId);
+  // Single-table groups only until plan 2 Task 3 (soleSpec throws otherwise).
+  const spec = soleSpec(getGroup(groupId));
   // Lazy require: diffGroup.js needs readExport from this module.
   const { diffGroup } = require('./diffGroup.js');
   const client = await pool.connect();
@@ -65,9 +66,9 @@ async function exportGroup(pool, groupId) {
     // Run rows live on the pool, outside the transaction, so a failed run is
     // still recorded after the rollback.
     runId = await startRun(pool, groupId, 'export');
-    const columns = await liveColumns(client, group);
-    const { rows: dbRows } = await client.query(`SELECT * FROM ${group.table}`);
-    const key = group.naturalKey;
+    const columns = await liveColumns(client, spec);
+    const { rows: dbRows } = await client.query(`SELECT * FROM ${spec.table}`);
+    const key = spec.naturalKey[0];
     const rows = dbRows
       .map((r) => canonicalRow(r, columns))
       .sort((a, b) => (a[key] < b[key] ? -1 : a[key] > b[key] ? 1 : 0));

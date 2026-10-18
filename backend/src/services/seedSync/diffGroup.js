@@ -1,4 +1,4 @@
-const { getGroup, liveColumns } = require('./registry.js');
+const { getGroup, soleSpec, liveColumns } = require('./registry.js');
 const { canonicalRow, rowHash, stableStringify } = require('./canonical.js');
 const { readExport } = require('./exportGroup.js');
 const { SyncFileError } = require('./errors.js');
@@ -40,17 +40,18 @@ function zeroCounts() {
 // Token presence only: the secret values are never read into JS. A row only
 // needs its token when `secretNeededIf` (e.g. auth_header_name) is non-blank:
 // a provider with no auth header never sends one.
-async function countTokensMissing(db, group) {
-  const secrets = group.secretColumns || [];
+async function countTokensMissing(db, spec) {
+  const secrets = spec.secretColumns || [];
   if (!secrets.length) return 0;
   let cond = secrets.map((c) => `${quoteIdent(c)} IS NULL OR ${quoteIdent(c)} = ''`).join(' OR ');
-  if (group.secretNeededIf) cond = `btrim(coalesce(${quoteIdent(group.secretNeededIf)}, '')) <> '' AND (${cond})`;
-  const { rows } = await db.query(`SELECT count(*)::int AS n FROM ${quoteIdent(group.table)} WHERE ${cond}`);
+  if (spec.secretNeededIf) cond = `btrim(coalesce(${quoteIdent(spec.secretNeededIf)}, '')) <> '' AND (${cond})`;
+  const { rows } = await db.query(`SELECT count(*)::int AS n FROM ${quoteIdent(spec.table)} WHERE ${cond}`);
   return rows[0].n;
 }
 
-function validateDoc(doc, group, groupId) {
+function validateDoc(doc, spec, groupId) {
   const file = `${groupId}.json`;
+  const keyCol = spec.naturalKey[0];
   if (doc.header.group !== groupId) {
     throw new SyncFileError(`${file}: header names group ${JSON.stringify(doc.header.group)}, expected ${groupId}`, file);
   }
@@ -64,11 +65,11 @@ function validateDoc(doc, group, groupId) {
     }
     if (seen.has(r.sync_uuid)) throw new SyncFileError(`${file}: duplicate sync_uuid ${r.sync_uuid}`, file);
     seen.add(r.sync_uuid);
-    if (r[group.naturalKey] === undefined || r[group.naturalKey] === null) {
-      throw new SyncFileError(`${file}: row ${i} has no ${group.naturalKey}`, file);
+    if (r[keyCol] === undefined || r[keyCol] === null) {
+      throw new SyncFileError(`${file}: row ${i} has no ${keyCol}`, file);
     }
-    const nk = stableStringify(r[group.naturalKey]);
-    if (seenKeys.has(nk)) throw new SyncFileError(`${file}: duplicate ${group.naturalKey} ${nk}`, file);
+    const nk = stableStringify(r[keyCol]);
+    if (seenKeys.has(nk)) throw new SyncFileError(`${file}: duplicate ${keyCol} ${nk}`, file);
     seenKeys.add(nk);
   });
   // A truncated or hand-merged file: rows went missing (or were added) after
@@ -97,13 +98,13 @@ function diffFields(local, git, columns) {
   return out;
 }
 
-async function readLocal(db, group, groupId) {
-  const columns = await liveColumns(db, group);
+async function readLocal(db, spec, groupId) {
+  const columns = await liveColumns(db, spec);
   const select = [...columns.map((c) => quoteIdent(c.name)), 'sync_uuid'].join(', ');
-  const { rows } = await db.query(`SELECT ${select} FROM ${quoteIdent(group.table)}`);
+  const { rows } = await db.query(`SELECT ${select} FROM ${quoteIdent(spec.table)}`);
   const { rows: base } = await db.query(
     'SELECT sync_uuid, hash FROM seed_row_hashes WHERE group_id = $1', [groupId]);
-  const tokensMissing = await countTokensMissing(db, group);
+  const tokensMissing = await countTokensMissing(db, spec);
   const dbVersion = await schemaVersion(db);
   return { columns, rows, base, tokensMissing, dbVersion };
 }
@@ -113,13 +114,13 @@ async function readLocal(db, group, groupId) {
 // its own one-snapshot read-only transaction.
 const isClient = (db) => typeof db.release === 'function';
 
-async function loadLocal(db, group, groupId) {
-  if (isClient(db)) return readLocal(db, group, groupId);
+async function loadLocal(db, spec, groupId) {
+  if (isClient(db)) return readLocal(db, spec, groupId);
   const client = await db.connect();
   try {
     // One consistent snapshot for columns, rows, baselines and token count.
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
-    const out = await readLocal(client, group, groupId);
+    const out = await readLocal(client, spec, groupId);
     await client.query('COMMIT');
     return out;
   } catch (e) {
@@ -131,12 +132,13 @@ async function loadLocal(db, group, groupId) {
 }
 
 // Full diff plus the canonical rows behind it (applySeed writes from them).
-// Internal: callers outside seedSync use diffGroup.
+// Internal: callers outside seedSync use diffGroup. `spec` is the group's one
+// TableSpec (single-table groups only until plan 2 Task 4; soleSpec throws).
 async function computeDiff(db, groupId) {
-  const group = getGroup(groupId);
+  const spec = soleSpec(getGroup(groupId));
   const doc = await readExport(groupId); // SyncFileError propagates
-  if (doc) validateDoc(doc, group, groupId);
-  const { columns, rows: localRaw, base, tokensMissing, dbVersion } = await loadLocal(db, group, groupId);
+  if (doc) validateDoc(doc, spec, groupId);
+  const { columns, rows: localRaw, base, tokensMissing, dbVersion } = await loadLocal(db, spec, groupId);
   const counts = zeroCounts();
 
   if (!doc) {
@@ -147,7 +149,7 @@ async function computeDiff(db, groupId) {
                        WHERE group_id = $1 AND action = 'export' AND status = 'ok') AS x`,
       [groupId]);
     return {
-      group,
+      spec,
       columns,
       diff: {
         groupId, header: null, status: ex[0].x ? 'file_missing' : 'never_exported', counts,
@@ -156,7 +158,7 @@ async function computeDiff(db, groupId) {
     };
   }
 
-  const keyCol = group.naturalKey;
+  const keyCol = spec.naturalKey[0];
   const baseline = new Map(base.map((b) => [b.sync_uuid, b.hash]));
   const local = localRaw.map((r) => {
     const row = canonicalRow(r, columns);
@@ -228,7 +230,7 @@ async function computeDiff(db, groupId) {
   else if (tokensMissing > 0) status = 'tokens_missing';
 
   return {
-    group,
+    spec,
     columns,
     git: new Map(git.map((g) => [g.row.sync_uuid, g])),
     local: localByUuid,

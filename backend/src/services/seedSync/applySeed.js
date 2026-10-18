@@ -1,5 +1,5 @@
 const crypto = require('node:crypto');
-const { getGroup } = require('./registry.js');
+const { getGroup, soleSpec } = require('./registry.js');
 const { computeDiff } = require('./diffGroup.js');
 const { beginLocked, mapLockError, rollback } = require('./txn.js');
 const { schemaVersion, startRun, finishRun } = require('./runs.js');
@@ -34,7 +34,7 @@ const quoteIdent = (name) => `"${String(name).replace(/"/g, '""')}"`;
 const own = (obj, k) => Object.prototype.hasOwnProperty.call(obj, k);
 
 // Every FK pointing at the group's table, with its column pairs in key order.
-async function referencingFks(db, group) {
+async function referencingFks(db, spec) {
   const { rows } = await db.query(
     `SELECT c.oid, c.conrelid::regclass::text AS ref_table,
             array_agg(a.attname::text ORDER BY k.ord) AS ref_cols,
@@ -46,23 +46,23 @@ async function referencingFks(db, group) {
       WHERE c.contype = 'f' AND c.confrelid = $1::text::regclass
       GROUP BY c.oid, c.conrelid
       ORDER BY 2, c.oid`,
-    [quoteIdent(group.table)],
+    [quoteIdent(spec.table)],
   );
   return rows;
 }
 
 // syncUuid -> "<n> rows in <table> reference this" (several tables joined by
 // "; "), for the given local rows that are referenced at all.
-async function referenceReasons(db, group, uuids) {
+async function referenceReasons(db, spec, uuids) {
   const out = new Map();
   if (!uuids.length) return out;
   const perUuid = new Map(); // uuid -> Map(table -> n)
-  for (const fk of await referencingFks(db, group)) {
+  for (const fk of await referencingFks(db, spec)) {
     const on = fk.ref_cols.map((c, i) => `r.${quoteIdent(c)} = t.${quoteIdent(fk.target_cols[i])}`).join(' AND ');
     // ref_table is regclass output: already quoted/qualified as needed.
     const { rows } = await db.query(
       `SELECT t.sync_uuid::text AS uuid, count(*)::int AS n
-         FROM ${quoteIdent(group.table)} t JOIN ${fk.ref_table} r ON ${on}
+         FROM ${quoteIdent(spec.table)} t JOIN ${fk.ref_table} r ON ${on}
         WHERE t.sync_uuid = ANY($1::uuid[])
         GROUP BY t.sync_uuid`,
       [uuids],
@@ -93,7 +93,7 @@ const deletableUuids = (diff) => diff.rows.filter((r) => DELETABLE.has(r.kind)).
 //    consumes the same-key local row, so a new/deleted_here row's key holder
 //    is never adopted in the same seed.)
 function annotate(cd, refReasons, decisions) {
-  const { diff, group } = cd;
+  const { diff, spec } = cd;
   const decisionOf = (r) => (own(decisions, r.syncUuid) ? decisions[r.syncUuid] : r.defaultDecision);
   for (const r of diff.rows) {
     if (!DELETABLE.has(r.kind) || !refReasons.has(r.syncUuid)) continue;
@@ -104,7 +104,7 @@ function annotate(cd, refReasons, decisions) {
     .filter((r) => DELETABLE.has(r.kind) && decisionOf(r) === 'delete').map((r) => r.syncUuid));
   for (const r of diff.rows) {
     if (!INSERTABLE.has(r.kind)) continue;
-    const holder = cd.localByKey.get(cd.git.get(r.syncUuid).row[group.naturalKey]);
+    const holder = cd.localByKey.get(cd.git.get(r.syncUuid).row[spec.naturalKey[0]]);
     if (holder && !deleting.has(holder.row.sync_uuid)) {
       r.blockedReason = KEY_CLASH_REASON;
       r.defaultDecision = null;
@@ -123,7 +123,7 @@ const versionOf = (header) => (header && header.schema_version != null ? String(
 // same-key local row it would take git's identity onto.
 function localHashOf(cd, r) {
   const l = r.kind === 'adopt_identity'
-    ? cd.localByKey.get(cd.git.get(r.syncUuid).row[cd.group.naturalKey])
+    ? cd.localByKey.get(cd.git.get(r.syncUuid).row[cd.spec.naturalKey[0]])
     : cd.local.get(r.syncUuid);
   return l ? l.hash : '';
 }
@@ -153,13 +153,13 @@ function previewSignatureOf(cd, refReasons) {
 // blocking-aware defaults, and `warnings` (['schema_older'] when the file
 // predates this DB's migrations). One read-only snapshot.
 async function previewSeed(pool, groupId) {
-  const group = getGroup(groupId);
+  const spec = soleSpec(getGroup(groupId));
   const client = await pool.connect();
   let releaseErr;
   try {
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     const cd = await computeDiff(client, groupId);
-    const refReasons = await referenceReasons(client, group, deletableUuids(cd.diff));
+    const refReasons = await referenceReasons(client, spec, deletableUuids(cd.diff));
     const signature = previewSignatureOf(cd, refReasons);
     annotate(cd, refReasons, {});
     const warnings = cd.diff.header ? warningsFor(versionOf(cd.diff.header), await schemaVersion(client)) : [];
@@ -218,24 +218,24 @@ function paramsFor(columns, gitRow) {
   });
 }
 
-async function upsertFromGit(db, group, columns, gitRow) {
+async function upsertFromGit(db, spec, columns, gitRow) {
   const names = columns.map((c) => quoteIdent(c.name));
   const vals = paramsFor(columns, gitRow);
   const ph = vals.map((_, i) => `$${i + 2}`).join(', ');
   const set = names.map((n) => `${n} = EXCLUDED.${n}`).join(', ');
   await db.query(
-    `INSERT INTO ${quoteIdent(group.table)} (sync_uuid, ${names.join(', ')}) VALUES ($1, ${ph})
+    `INSERT INTO ${quoteIdent(spec.table)} (sync_uuid, ${names.join(', ')}) VALUES ($1, ${ph})
      ON CONFLICT (sync_uuid) DO UPDATE SET ${set}`,
     [gitRow.sync_uuid, ...vals],
   );
 }
 
 // Take git's identity for the local row; with `columns`, git's values too.
-async function adopt(db, group, columns, gitRow, localUuid) {
+async function adopt(db, spec, columns, gitRow, localUuid) {
   const vals = columns ? paramsFor(columns, gitRow) : [];
   const set = columns ? columns.map((c, i) => `, ${quoteIdent(c.name)} = $${i + 3}`).join('') : '';
   const res = await db.query(
-    `UPDATE ${quoteIdent(group.table)} SET sync_uuid = $1${set} WHERE sync_uuid = $2`,
+    `UPDATE ${quoteIdent(spec.table)} SET sync_uuid = $1${set} WHERE sync_uuid = $2`,
     [gitRow.sync_uuid, localUuid, ...vals],
   );
   if (res.rowCount !== 1) throw new Error(`adopt_identity: local row ${localUuid} not found`);
@@ -276,7 +276,8 @@ function mapWriteError(e) {
 // conflict, 23505 -> SyncRefused('conflict')) rolls everything back and
 // finishes the run as failed; a committed seed always finishes ok.
 async function applySeed(pool, groupId, decisions, { signature } = {}) {
-  const group = getGroup(groupId);
+  // Single-table groups only until plan 2 Task 5 (soleSpec throws otherwise).
+  const spec = soleSpec(getGroup(groupId));
   const client = await pool.connect();
   let runId = null;
   let releaseErr;
@@ -287,7 +288,7 @@ async function applySeed(pool, groupId, decisions, { signature } = {}) {
     // (reads go on): the diff below stays true while we write, so an edit made
     // meanwhile on this PC can never be silently overwritten. (Not REPEATABLE
     // READ: its snapshot would be taken before the lock wait.)
-    await client.query(`LOCK TABLE ${quoteIdent(group.table)} IN SHARE ROW EXCLUSIVE MODE`);
+    await client.query(`LOCK TABLE ${quoteIdent(spec.table)} IN SHARE ROW EXCLUSIVE MODE`);
     const cd = await computeDiff(client, groupId);
     const { diff, columns } = cd;
     if (!diff.header) throw new SyncRefused('no_export', `no export file for ${groupId}`);
@@ -302,9 +303,9 @@ async function applySeed(pool, groupId, decisions, { signature } = {}) {
     const deletable = deletableUuids(diff);
     if (deletable.length) {
       await client.query(
-        `SELECT 1 FROM ${quoteIdent(group.table)} WHERE sync_uuid = ANY($1::uuid[]) FOR UPDATE`, [deletable]);
+        `SELECT 1 FROM ${quoteIdent(spec.table)} WHERE sync_uuid = ANY($1::uuid[]) FOR UPDATE`, [deletable]);
     }
-    const refReasons = await referenceReasons(client, group, deletable);
+    const refReasons = await referenceReasons(client, spec, deletable);
     if (typeof signature !== 'string' || signature !== previewSignatureOf(cd, refReasons)) {
       throw new SyncRefused('stale_preview', 'the diff changed since the preview; preview again', { uuids: [] });
     }
@@ -320,21 +321,21 @@ async function applySeed(pool, groupId, decisions, { signature } = {}) {
     const deletes = by('delete').map((s) => s.row.syncUuid);
     if (deletes.length) {
       const res = await client.query(
-        `DELETE FROM ${quoteIdent(group.table)} WHERE sync_uuid = ANY($1::uuid[])`, [deletes]);
+        `DELETE FROM ${quoteIdent(spec.table)} WHERE sync_uuid = ANY($1::uuid[])`, [deletes]);
       if (res.rowCount !== deletes.length) throw new Error(`delete: expected ${deletes.length} rows, got ${res.rowCount}`);
       await dropBaselines(client, groupId, deletes);
       summary.deleted = deletes.length;
     }
-    const localOf = (row) => cd.localByKey.get(gitOf(row).row[group.naturalKey]).row.sync_uuid;
+    const localOf = (row) => cd.localByKey.get(gitOf(row).row[spec.naturalKey[0]]).row.sync_uuid;
     for (const { row } of by('git', (r) => r.kind === 'adopt_identity')) {
-      await adopt(client, group, columns, gitOf(row).row, localOf(row));
+      await adopt(client, spec, columns, gitOf(row).row, localOf(row));
       summary.adopted += 1;
     }
     for (const { row } of by('local', (r) => r.kind === 'adopt_identity')) {
-      await adopt(client, group, null, gitOf(row).row, localOf(row)); // identity only, values stay
+      await adopt(client, spec, null, gitOf(row).row, localOf(row)); // identity only, values stay
     }
     for (const { row } of by('git', (r) => r.kind !== 'adopt_identity')) {
-      await upsertFromGit(client, group, columns, gitOf(row).row);
+      await upsertFromGit(client, spec, columns, gitOf(row).row);
       if (UPDATE_KINDS.has(row.kind)) summary.updated += 1;
       else if (INSERTABLE.has(row.kind)) summary.created += 1;
       else throw new Error(`no git write for kind ${row.kind}`);

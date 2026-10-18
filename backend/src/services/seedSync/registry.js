@@ -1,49 +1,66 @@
-// Ordered (seed order) registry of exportable data groups.
+// Ordered (seed order) registry of exportable data groups. A group is an
+// ordered list of TableSpecs (the order the group writes its tables in):
+//   { table, naturalKey: string[], omit: {col: reason}, secretColumns: string[],
+//     refs: { [col]: { table, by: 'uuid' } | { table, by: 'key', keyCol } },
+//     validate?: 'game_settings', secretNeededIf?: col }
 // `omit` columns are deliberately not exported (reason documented);
-// `secretColumns` are never exported.
+// `secretColumns` are never exported; `refs` columns are exported translated
+// (target sync_uuid or natural key), never as local ids. Every FK column must
+// be in `refs` or `omit` (see fkProblems).
 const GROUPS = [
   {
     id: 'tile_types',
     label: 'Tile Types',
-    table: 'tile_types',
-    naturalKey: 'name',
-    omit: {
-      id: 'local',
-      created_at: 'local',
-      updated_at: 'local',
-      image: 'art group (plan 3)',
-      render_mode: 'art group (plan 3)',
-      sprite: 'art group (plan 3)',
-      sync_uuid: 'identity',
-      ai_provider_id: 'local FK — plan 2 exports FKs as sync_uuid',
-    },
-    secretColumns: [],
+    tables: [{
+      table: 'tile_types',
+      naturalKey: ['name'],
+      omit: {
+        id: 'local',
+        created_at: 'local',
+        updated_at: 'local',
+        image: 'art group (plan 3)',
+        render_mode: 'art group (plan 3)',
+        sprite: 'art group (plan 3)',
+        sync_uuid: 'identity',
+        // Becomes refs: { ai_provider_id: { table: 'ai_providers', by: 'uuid' } }
+        // once export/apply translate refs (plan 2, Task 6).
+        ai_provider_id: 'local FK — plan 2 exports FKs as sync_uuid',
+      },
+      secretColumns: [],
+      refs: {},
+    }],
   },
   {
     id: 'quests',
     label: 'Quests',
-    table: 'quests',
-    naturalKey: 'key',
-    omit: { id: 'local', created_at: 'local', sync_uuid: 'identity' },
-    secretColumns: [],
+    tables: [{
+      table: 'quests',
+      naturalKey: ['key'],
+      omit: { id: 'local', created_at: 'local', sync_uuid: 'identity' },
+      secretColumns: [],
+      refs: {},
+    }],
   },
   {
     id: 'ai_providers',
     label: 'AI Providers',
-    table: 'ai_providers',
-    naturalKey: 'name',
-    omit: {
-      id: 'local',
-      created_at: 'local',
-      updated_at: 'local',
-      sync_uuid: 'identity',
-      models_cache: 'machine cache',
-      models_fetched_at: 'machine cache',
-      is_active: 'per-PC choice: which box this PC can reach',
-    },
-    secretColumns: ['auth_token'],
-    // auth_token is only needed when the provider sends an auth header.
-    secretNeededIf: 'auth_header_name',
+    tables: [{
+      table: 'ai_providers',
+      naturalKey: ['name'],
+      omit: {
+        id: 'local',
+        created_at: 'local',
+        updated_at: 'local',
+        sync_uuid: 'identity',
+        models_cache: 'machine cache',
+        models_fetched_at: 'machine cache',
+        is_active: 'per-PC choice: which box this PC can reach',
+      },
+      secretColumns: ['auth_token'],
+      // auth_token is only needed when the provider sends an auth header.
+      secretNeededIf: 'auth_header_name',
+      refs: {},
+    }],
   },
 ];
 
@@ -53,17 +70,74 @@ function getGroup(id) {
   return g;
 }
 
-async function liveColumns(db, group) {
+function tableSpecs(group) {
+  return group.tables;
+}
+
+// The one TableSpec of a single-table, single-key-column group. Export, diff
+// and apply only handle that shape until multi-table support lands (plan 2,
+// Tasks 3-5); a multi-table group fails loudly here instead of half-working.
+function soleSpec(group) {
+  const specs = tableSpecs(group);
+  if (specs.length !== 1) {
+    throw new Error(`seed-sync: group ${group.id} has ${specs.length} tables; only single-table groups are supported yet`);
+  }
+  const spec = specs[0];
+  if (spec.naturalKey.length !== 1) {
+    throw new Error(`seed-sync: ${spec.table} has a composite natural key; only single-column keys are supported yet`);
+  }
+  return spec;
+}
+
+// Exported columns of one table: everything but omit and secret columns (ref
+// columns included), sorted by name.
+async function liveColumns(db, spec) {
   const { rows } = await db.query(
     `SELECT column_name, data_type FROM information_schema.columns
       WHERE table_schema = current_schema() AND table_name = $1`,
-    [group.table],
+    [spec.table],
   );
-  const skip = new Set([...Object.keys(group.omit), ...(group.secretColumns || [])]);
+  const skip = new Set([...Object.keys(spec.omit), ...(spec.secretColumns || [])]);
   return rows
     .filter((r) => !skip.has(r.column_name))
     .map((r) => ({ name: r.column_name, dataType: r.data_type }))
     .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 
-module.exports = { GROUPS, getGroup, liveColumns };
+// FK coverage of one TableSpec against the live schema, sorted by column:
+//  - uncovered:    an FK column in neither `refs` nor `omit` (would export a local id)
+//  - wrong_target: a declared ref whose table is not the FK's referenced table
+//  - not_a_fk:     a declared ref on a column with no FK constraint
+async function fkProblems(db, spec) {
+  const { rows } = await db.query(
+    `SELECT a.attname::text AS col, t.relname::text AS target
+       FROM pg_constraint c
+       JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
+       JOIN pg_class t ON t.oid = c.confrelid
+      WHERE c.contype = 'f' AND c.conrelid = $1::text::regclass`,
+    [`"${spec.table.replace(/"/g, '""')}"`],
+  );
+  const fkTargets = new Map(); // col -> Set(target table)
+  for (const r of rows) {
+    if (!fkTargets.has(r.col)) fkTargets.set(r.col, new Set());
+    fkTargets.get(r.col).add(r.target);
+  }
+  const refs = spec.refs || {};
+  const out = [];
+  for (const [col, targets] of fkTargets) {
+    const target = [...targets].sort().join(',');
+    if (Object.prototype.hasOwnProperty.call(refs, col)) {
+      if (targets.size !== 1 || !targets.has(refs[col].table)) {
+        out.push({ column: col, problem: 'wrong_target', target, declared: refs[col].table });
+      }
+    } else if (!Object.prototype.hasOwnProperty.call(spec.omit, col)) {
+      out.push({ column: col, problem: 'uncovered', target });
+    }
+  }
+  for (const [col, ref] of Object.entries(refs)) {
+    if (!fkTargets.has(col)) out.push({ column: col, problem: 'not_a_fk', target: null, declared: ref.table });
+  }
+  return out.sort((a, b) => (a.column < b.column ? -1 : a.column > b.column ? 1 : 0));
+}
+
+module.exports = { GROUPS, getGroup, tableSpecs, soleSpec, liveColumns, fkProblems };

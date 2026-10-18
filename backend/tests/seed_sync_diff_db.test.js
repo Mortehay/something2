@@ -50,7 +50,7 @@ const { diffGroup } = require('../src/services/seedSync/diffGroup.js');
 const { exportGroup, fileFor } = require('../src/services/seedSync/exportGroup.js');
 const { SyncFileError, SyncRefused } = require('../src/services/seedSync/errors.js');
 const { canonicalRow, rowHash, stableStringify } = require('../src/services/seedSync/canonical.js');
-const { getGroup, liveColumns } = require('../src/services/seedSync/registry.js');
+const { getGroup, soleSpec, liveColumns } = require('../src/services/seedSync/registry.js');
 
 const KINDS = ['adopt_identity', 'changed', 'deleted_here', 'deleted_in_git', 'edited_here', 'new', 'not_exported', 'only_here'];
 
@@ -59,9 +59,9 @@ const addQuest = (pool, key) => pool.query(
 
 // Canonical form of a local row, exactly as export would write it.
 async function snap(pool, groupId, key) {
-  const g = getGroup(groupId);
+  const g = soleSpec(getGroup(groupId));
   const cols = await liveColumns(pool, g);
-  const { rows } = await pool.query(`SELECT * FROM ${g.table} WHERE ${g.naturalKey} = $1`, [key]);
+  const { rows } = await pool.query(`SELECT * FROM ${g.table} WHERE ${g.naturalKey[0]} = $1`, [key]);
   return canonicalRow(rows[0], cols);
 }
 

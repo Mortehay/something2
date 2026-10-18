@@ -69,7 +69,7 @@ const { diffGroup } = require('../src/services/seedSync/diffGroup.js');
 const { exportGroup, fileFor } = require('../src/services/seedSync/exportGroup.js');
 const { SyncRefused } = require('../src/services/seedSync/errors.js');
 const { canonicalRow, rowHash, stableStringify } = require('../src/services/seedSync/canonical.js');
-const { getGroup, liveColumns } = require('../src/services/seedSync/registry.js');
+const { getGroup, soleSpec, liveColumns } = require('../src/services/seedSync/registry.js');
 const { recentRuns } = require('../src/services/seedSync/runs.js');
 
 const addQuest = (pool, key, title = 'sx t') => pool.query(
@@ -77,15 +77,15 @@ const addQuest = (pool, key, title = 'sx t') => pool.query(
 
 // Canonical form of every local row of a group, exactly as export writes it.
 async function snapAll(pool, groupId) {
-  const g = getGroup(groupId);
+  const g = soleSpec(getGroup(groupId));
   const cols = await liveColumns(pool, g);
   const { rows } = await pool.query(`SELECT * FROM ${g.table}`);
   return rows.map((r) => canonicalRow(r, cols));
 }
 
 async function snap(pool, groupId, key) {
-  const g = getGroup(groupId);
-  return (await snapAll(pool, groupId)).find((r) => r[g.naturalKey] === key);
+  const g = soleSpec(getGroup(groupId));
+  return (await snapAll(pool, groupId)).find((r) => r[g.naturalKey[0]] === key);
 }
 
 async function setBaseline(pool, groupId, row) {
@@ -113,8 +113,8 @@ function writeGit(groupId, rows, { schemaVersion = '' } = {}) {
 // The git file = the whole local table (so non-sx rows are in sync) with the
 // sx_ rows replaced by `sxRows` (local sx_ rows not listed are absent in git).
 async function writeGitWith(pool, groupId, sxRows, opts) {
-  const g = getGroup(groupId);
-  const others = (await snapAll(pool, groupId)).filter((r) => !String(r[g.naturalKey]).startsWith('sx_'));
+  const g = soleSpec(getGroup(groupId));
+  const others = (await snapAll(pool, groupId)).filter((r) => !String(r[g.naturalKey[0]]).startsWith('sx_'));
   writeGit(groupId, [...others, ...sxRows], opts);
   extraBaselines.push(...sxRows.map((r) => r.sync_uuid));
 }
