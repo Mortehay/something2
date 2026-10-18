@@ -201,7 +201,8 @@ function previewSignatureOf(cd, refInfo) {
 
 // diffGroup plus blockedReason (FK references, natural-key clashes), the
 // blocking-aware defaults, and `warnings` ({ code: 'schema_older' } when the file
-// predates this DB's migrations). One REPEATABLE READ READ ONLY snapshot (what
+// predates this DB's migrations; dangling_name; missing_ref / invalid_value
+// that applying every row's default decision would refuse). One REPEATABLE READ READ ONLY snapshot (what
 // computeDiff's Pool path takes), opened here so the reference counts and the
 // schema version come from the same snapshot as the diff; no table locks, so
 // an open admin edit never blocks a preview.
@@ -214,10 +215,12 @@ async function previewSeed(pool, groupId) {
     const cd = await computeDiff(client, groupId);
     const refInfo = await referenceInfo(client, cd);
     const signature = previewSignatureOf(cd, refInfo);
-    annotate(cd, refInfo, {});
-    // schema_older first, then the diff's dangling_name entries (all { code, ... }).
+    const steps = annotate(cd, refInfo, {});
+    // schema_older first, then the diff's dangling_name entries, then what
+    // applying the defaults would refuse (all { code, ... }).
     const schemaWarnings = cd.diff.header ? warningsFor(versionOf(cd.diff.header), await schemaVersion(client)) : [];
-    const warnings = [...schemaWarnings, ...cd.diff.warnings];
+    const refusalWarnings = cd.diff.header ? await writeWarnings(client, cd, steps) : [];
+    const warnings = [...schemaWarnings, ...cd.diff.warnings, ...refusalWarnings];
     await client.query('COMMIT');
     return { ...cd.diff, warnings, signature };
   } catch (e) {
@@ -384,8 +387,9 @@ function orderRenames(renames) {
 //    to a git row this seed inserts or adopts. Never a 23503/500.
 //  - invalid_value: a game_settings row fails assertValid, or names a key this
 //    code does not know (setSetting refuses those too).
-// Returns the ref maps per table, read under the apply locks.
-async function checkWrites(db, cd, steps) {
+// Read-only: returns { maps, missing: [{ table, key, column, target, value }],
+// invalid: [{ key, error }] } (maps = the ref maps per table).
+async function writeProblems(db, cd, steps) {
   const inGroup = new Set(cd.specs.map((s) => s.table));
   const maps = new Map();
   for (const spec of cd.specs) maps.set(spec.table, await buildRefMaps(db, spec));
@@ -414,11 +418,7 @@ async function checkWrites(db, cd, steps) {
       if (!ok) missing.push({ table: spec.table, key: row.key, column, target: ref.table, value: v });
     }
   }
-  if (missing.length) {
-    throw new SyncRefused('missing_ref',
-      'rows from git reference rows that exist neither here nor in this seed; seed their group first or keep the rows local',
-      { refs: missing });
-  }
+  const invalid = [];
   for (const { row } of writes) {
     if (tableOf(cd, row).spec.validate !== 'game_settings') continue;
     const g = gitOf(cd, row).row;
@@ -427,9 +427,36 @@ async function checkWrites(db, cd, steps) {
     else {
       try { assertValid(g.key, g.value); } catch (e) { error = e.message; }
     }
-    if (error) throw new SyncRefused('invalid_value', `${g.key}: ${error}`, { key: g.key, error });
+    if (error) invalid.push({ key: g.key, error });
+  }
+  return { maps, missing, invalid };
+}
+
+// writeProblems as refusals (missing_ref first, then the first invalid_value);
+// returns the ref maps per table, read under the apply locks.
+async function checkWrites(db, cd, steps) {
+  const { maps, missing, invalid } = await writeProblems(db, cd, steps);
+  if (missing.length) {
+    throw new SyncRefused('missing_ref',
+      'rows from git reference rows that exist neither here nor in this seed; seed their group first or keep the rows local',
+      { refs: missing });
+  }
+  if (invalid.length) {
+    const { key, error } = invalid[0];
+    throw new SyncRefused('invalid_value', `${key}: ${error}`, { key, error });
   }
   return maps;
+}
+
+// The refusals applySeed would raise with every row on its default decision,
+// as preview warnings: { code: 'missing_ref', table, key, column, target } and
+// { code: 'invalid_value', key, error }. Read-only.
+async function writeWarnings(db, cd, steps) {
+  const { missing, invalid } = await writeProblems(db, cd, steps);
+  return [
+    ...missing.map(({ table, key, column, target }) => ({ code: 'missing_ref', table, key, column, target })),
+    ...invalid.map(({ key, error }) => ({ code: 'invalid_value', key, error })),
+  ];
 }
 
 // resolveRow's `pending` for `spec`: git uuid -> the written row's referenced

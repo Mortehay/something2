@@ -12,6 +12,12 @@ const { withSeedSyncLock, cleanupSx, makeTempSyncDir } = require('./helpers/seed
 const { exportGroup, fileFor } = require('../src/services/seedSync/exportGroup.js');
 const seedExportRoutes = require('../src/api/seedExportRoutes.js');
 
+// Registry (seed) order, global constraints.
+const ALL_GROUPS = [
+  'tile_types', 'items', 'attack_effects', 'aura_effects', 'creature_behaviors', 'entities',
+  'biomes', 'skill_tree', 'progression', 'quests', 'ai_providers',
+];
+
 const DB_URL = process.env.TEST_DATABASE_URL;
 
 async function makeUser(pool, role) {
@@ -99,10 +105,10 @@ dbTest('routes require admin', async ({ pool, player, trigger }) => {
   assert.ok(!fs.existsSync(trigger), 'denied POST /restart writes nothing');
 });
 
-dbTest('GET /groups lists three groups in order with statuses', async ({ pool, admin, watermark }) => {
+dbTest('GET /groups lists every group in seed order with statuses', async ({ pool, admin, watermark }) => {
   const res = await request(appFor(pool)).get('/api/seed-export/groups').set('Authorization', admin.auth);
   assert.strictEqual(res.status, 200);
-  assert.deepStrictEqual(res.body.map((g) => g.id), ['tile_types', 'quests', 'ai_providers']);
+  assert.deepStrictEqual(res.body.map((g) => g.id), ALL_GROUPS);
   for (const g of res.body) {
     // No file in the temp dir: never_exported, or file_missing when this DB
     // holds an ok export run of the group (real history may exist).
@@ -136,7 +142,7 @@ dbTest('bad file yields status bad_file, not 500', async ({ pool, admin }) => {
   assert.strictEqual(q.status, 'bad_file');
   assert.ok(q.error);
   assert.ok(q.file);
-  assert.deepStrictEqual(list.body.map((g) => g.id), ['tile_types', 'quests', 'ai_providers']);
+  assert.deepStrictEqual(list.body.map((g) => g.id), ALL_GROUPS);
   const prev = await request(app).get('/api/seed-export/groups/quests/preview').set('Authorization', admin.auth);
   assert.strictEqual(prev.status, 422);
   assert.strictEqual(prev.body.code, 'bad_file');

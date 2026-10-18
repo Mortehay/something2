@@ -3,6 +3,7 @@ const assert = require('node:assert');
 const { Pool } = require('pg');
 const { GROUPS, getGroup, tableSpecs, soleSpec, liveColumns, fkProblems, nameRefProblems, _withTestGroups } = require('../src/services/seedSync/registry.js');
 const { deterministicUuid } = require('../src/services/seedSync/canonical.js');
+const { renameCascadesFor } = require('../src/services/seedSync/applySeed.js');
 const { withSeedSyncLock, cleanupSx } = require('./helpers/seedSyncTest.js');
 
 const DB_URL = process.env.TEST_DATABASE_URL
@@ -27,8 +28,170 @@ function dbTest(name, body) {
 }
 
 test('getGroup throws on unknown id and GROUPS is in seed order', () => {
-  assert.deepStrictEqual(GROUPS.map((g) => g.id), ['tile_types', 'quests', 'ai_providers']);
+  assert.deepStrictEqual(GROUPS.map((g) => g.id), [
+    'tile_types', 'items', 'attack_effects', 'aura_effects', 'creature_behaviors', 'entities',
+    'biomes', 'skill_tree', 'progression', 'quests', 'ai_providers',
+  ]);
   assert.throws(() => getGroup('nope'), /unknown group/);
+});
+
+// Global constraints: each group's tables, in the order the group writes them.
+test('plan-2 groups write exactly their tables, in order', () => {
+  const expected = {
+    items: ['item_types', 'affix_types'],
+    attack_effects: ['vfx_effects', 'creature_skills'],
+    aura_effects: ['aura_effects'],
+    creature_behaviors: ['creature_behaviors', 'creature_abilities', 'creature_behavior_skills', 'behavior_drops', 'chest_loot'],
+    entities: ['entity_types', 'creature_drops', 'class_loadouts'],
+    biomes: ['biomes'],
+    skill_tree: ['passive_nodes', 'passive_edges'],
+    progression: ['game_settings'],
+  };
+  for (const [id, tables] of Object.entries(expected)) {
+    assert.deepStrictEqual(tableSpecs(getGroup(id)).map((s) => s.table), tables, id);
+  }
+  const all = GROUPS.flatMap((g) => tableSpecs(g).map((s) => s.table));
+  assert.strictEqual(new Set(all).size, all.length, 'a table belongs to one group only');
+  for (const lookup of ['elements', 'attack_origins', 'impact_behaviors', 'projectile_shapes', 'world_point_kinds', 'merchant_stock']) {
+    assert.ok(!all.includes(lookup), `${lookup} is never exported`);
+  }
+});
+
+const specOf = (table) => GROUPS.flatMap((g) => tableSpecs(g)).find((s) => s.table === table);
+
+test('plan-2 fixed decisions (brief) are registered as decided', () => {
+  const et = specOf('entity_types');
+  for (const c of ['image', 'sprite', 'render_mode', 'display_width', 'display_height', 'prompt']) {
+    assert.strictEqual(et.omit[c], 'art group (plan 3)', `entity_types.${c}`);
+  }
+  assert.strictEqual(et.omit.ai_provider_mode, 'per-PC');
+  assert.deepStrictEqual(et.refs, {
+    behavior_id: { table: 'creature_behaviors', by: 'uuid' },
+    ai_provider_id: { table: 'ai_providers', by: 'uuid' },
+    element: { table: 'elements', by: 'key', keyCol: 'name' },
+    point_kind: { table: 'world_point_kinds', by: 'key', keyCol: 'kind' },
+  });
+  assert.deepStrictEqual(et.nameRefs, {
+    auras: { table: 'aura_effects', keyCol: 'name', shape: 'array' },
+    vfx: { table: 'vfx_effects', keyCol: 'name', shape: 'object-values' },
+    spawn_tiles: { table: 'tile_types', keyCol: 'name', shape: 'array' },
+  });
+  const it = specOf('item_types');
+  assert.strictEqual(it.omit.icon, 'art group (plan 3)');
+  assert.deepStrictEqual(it.refs, {
+    ammo_type_id: { table: 'item_types', by: 'uuid' },
+    attack_origin: { table: 'attack_origins', by: 'key', keyCol: 'name' },
+    element: { table: 'elements', by: 'key', keyCol: 'name' },
+    impact_behavior_id: { table: 'impact_behaviors', by: 'key', keyCol: 'name' },
+    projectile_shape_id: { table: 'projectile_shapes', by: 'key', keyCol: 'name' },
+  });
+  assert.deepStrictEqual(it.nameRefs, { vfx: { table: 'vfx_effects', keyCol: 'name', shape: 'object-values' } });
+  assert.deepStrictEqual(specOf('biomes').nameRefs, {
+    terrain_tiles: { table: 'tile_types', keyCol: 'name', shape: 'array' },
+    path_tile: { table: 'tile_types', keyCol: 'name', shape: 'text' },
+    creature_types: { table: 'entity_types', keyCol: 'name', shape: 'array' },
+    flora_types: { table: 'entity_types', keyCol: 'name', shape: 'array' },
+  });
+  assert.deepStrictEqual(specOf('creature_skills').nameRefs, {
+    summon_entity: { table: 'entity_types', keyCol: 'name', shape: 'text' },
+    vfx: { table: 'vfx_effects', keyCol: 'name', shape: 'object-values' },
+  });
+  // passive_nodes: every column travels (only the local id and identity are not data).
+  assert.deepStrictEqual(Object.keys(specOf('passive_nodes').omit).sort(), ['id', 'sync_uuid']);
+  const pe = specOf('passive_edges');
+  assert.deepStrictEqual(pe.naturalKey, ['a_id', 'b_id']);
+  assert.deepStrictEqual(pe.refs, { a_id: { table: 'passive_nodes', by: 'uuid' }, b_id: { table: 'passive_nodes', by: 'uuid' } });
+  const gs = specOf('game_settings');
+  assert.deepStrictEqual(gs.naturalKey, ['key']);
+  assert.deepStrictEqual(Object.keys(gs.omit).sort(), ['sync_uuid', 'updated_at']);
+  assert.strictEqual(gs.validate, 'game_settings');
+  assert.deepStrictEqual(specOf('tile_types').refs, { ai_provider_id: { table: 'ai_providers', by: 'uuid' } });
+});
+
+// Natural keys must equal the plan-2 migration's deterministic backfill keys,
+// so two PCs that never synced agree on identity (composite: '|'-joined).
+test('natural keys match the sync_uuid backfill keys of the plan-2 migration', () => {
+  const keys = {
+    item_types: ['name'], affix_types: ['key'], vfx_effects: ['name'], creature_skills: ['name'], aura_effects: ['name'],
+    creature_behaviors: ['name'], creature_abilities: ['behavior_id', 'slot'], creature_behavior_skills: ['behavior_id', 'slot'],
+    behavior_drops: ['behavior_id', 'item_type_id'], chest_loot: ['level_min', 'level_max', 'item_type_id'],
+    entity_types: ['name'], creature_drops: ['entity_type_id', 'item_type_id'], class_loadouts: ['entity_type_id', 'item_type_id'],
+    biomes: ['name'], passive_nodes: ['key'], passive_edges: ['a_id', 'b_id'], game_settings: ['key'],
+  };
+  for (const [table, k] of Object.entries(keys)) assert.deepStrictEqual(specOf(table).naturalKey, k, table);
+});
+
+// Every real group's rename cascades are a supported configuration (a
+// partial overlap of a cascade's target tables with the group throws).
+test('renameCascadesFor accepts every registered group', () => {
+  const ran = {};
+  for (const g of GROUPS) ran[g.id] = Object.keys(renameCascadesFor(tableSpecs(g))).sort();
+  assert.deepStrictEqual(ran.entities, ['entity_types']);
+  assert.deepStrictEqual(ran.aura_effects, ['aura_effects']);
+  for (const [id, c] of Object.entries(ran)) if (!['entities', 'aura_effects'].includes(id)) assert.deepStrictEqual(c, [], id);
+});
+
+// FKs that point at a group seeding LATER: allowed only here. ai_providers is
+// fixed last in the global order; the column is nullable (ON DELETE SET NULL)
+// and an unresolved provider is a missing_ref refusal, never a 23503.
+const LATER_GROUP_FK_ALLOWED = new Set(['tile_types.ai_provider_id', 'entity_types.ai_provider_id']);
+
+// Deletes run children first (reverse table order) and a ref to a row not yet
+// written is deferred as NULL: both rely on every in-group FK pointing at an
+// EARLIER table (or the same one). Across groups, seeding in GROUPS order must
+// find every FK target already seeded. fks: [{ tbl, col, target }].
+function fkOrderProblems(fks, groups) {
+  const groupOf = new Map();
+  groups.forEach((g, gi) => tableSpecs(g).forEach((s, ti) => groupOf.set(s.table, { gi, ti, id: g.id })));
+  const problems = [];
+  let checked = 0;
+  for (const r of fks) {
+    const from = groupOf.get(r.tbl);
+    const to = groupOf.get(r.target);
+    if (!from || !to || r.tbl === r.target) continue;
+    checked += 1;
+    const name = `${r.tbl}.${r.col}`;
+    if (from.gi === to.gi) {
+      if (to.ti > from.ti) problems.push(`${name} -> ${r.target}: points forward inside ${from.id}`);
+    } else if (to.gi > from.gi && !LATER_GROUP_FK_ALLOWED.has(name)) {
+      problems.push(`${name} -> ${r.target}: group ${to.id} seeds after ${from.id}`);
+    }
+  }
+  return { problems, checked };
+}
+
+async function allFks(pool) {
+  const { rows } = await pool.query(
+    `SELECT c.conrelid::regclass::text AS tbl, a.attname::text AS col, t.relname::text AS target
+       FROM pg_constraint c
+       JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
+       JOIN pg_class t ON t.oid = c.confrelid
+      WHERE c.contype = 'f'`);
+  return rows;
+}
+
+dbTest('FK order: in-group FKs point backward, cross-group FKs at earlier groups', async (t, pool) => {
+  const fks = await allFks(pool);
+  const { problems, checked } = fkOrderProblems(fks, GROUPS);
+  assert.ok(checked > 10, `checked ${checked} FKs`);
+  assert.deepStrictEqual(problems, []);
+  for (const name of LATER_GROUP_FK_ALLOWED) {
+    const [tbl, col] = name.split('.');
+    assert.ok(fks.some((r) => r.tbl === tbl && r.col === col), `${name} is still a real FK`);
+  }
+});
+
+// The guard can fail: a child listed before its parent, and groups swapped.
+dbTest('FK order guard flags a forward in-group FK and a later-group FK', async (t, pool) => {
+  const fks = await allFks(pool);
+  const cb = getGroup('creature_behaviors');
+  const reordered = GROUPS.map((g) => (g === cb ? { ...g, tables: [...g.tables].reverse() } : g));
+  assert.ok(fkOrderProblems(fks, reordered).problems
+    .includes('creature_abilities.behavior_id -> creature_behaviors: points forward inside creature_behaviors'));
+  const items = getGroup('items');
+  const swapped = [...GROUPS.filter((g) => g !== items), items];
+  assert.ok(fkOrderProblems(fks, swapped).problems
+    .includes('creature_drops.item_type_id -> item_types: group items seeds after entities'));
 });
 
 test('every group is an ordered list of TableSpecs', () => {
@@ -47,7 +210,7 @@ test('every group is an ordered list of TableSpecs', () => {
       }
     }
   }
-  // Plan-1 groups stay single-table until Task 6 adds the multi-table ones.
+  // Plan-1 groups stay single-table.
   for (const id of ['tile_types', 'quests', 'ai_providers']) {
     assert.deepStrictEqual(tableSpecs(getGroup(id)).map((s) => s.table), [id]);
   }
@@ -111,8 +274,9 @@ dbTest('nameRefProblems flags a bad shape, a missing column/target and an omitte
 // The guard must be able to fail: tile_types.ai_provider_id is a real FK.
 dbTest('fkProblems flags an uncovered FK column, a wrong ref target and a ref on a non-FK column', async (t, pool) => {
   const tt = getGroup('tile_types').tables[0];
-  const { ai_provider_id: _dropped, ...omitRest } = tt.omit;
-  assert.deepStrictEqual(await fkProblems(pool, { ...tt, omit: omitRest }),
+  const omitRest = tt.omit;
+  assert.ok(!('ai_provider_id' in omitRest), 'ai_provider_id is a ref since plan 2, not omitted');
+  assert.deepStrictEqual(await fkProblems(pool, { ...tt, refs: {} }),
     [{ column: 'ai_provider_id', problem: 'uncovered', target: 'ai_providers' }]);
   assert.deepStrictEqual(
     await fkProblems(pool, { ...tt, omit: omitRest, refs: { ai_provider_id: { table: 'quests', by: 'uuid' } } }),
@@ -120,7 +284,7 @@ dbTest('fkProblems flags an uncovered FK column, a wrong ref target and a ref on
   assert.deepStrictEqual(
     await fkProblems(pool, { ...tt, omit: omitRest, refs: { ai_provider_id: { table: 'ai_providers', by: 'uuid' } } }), []);
   assert.deepStrictEqual(
-    await fkProblems(pool, { ...tt, refs: { name: { table: 'ai_providers', by: 'uuid' } } }),
+    await fkProblems(pool, { ...tt, refs: { ...tt.refs, name: { table: 'ai_providers', by: 'uuid' } } }),
     [{ column: 'name', problem: 'not_a_fk', target: null, declared: 'ai_providers' }]);
 });
 
@@ -161,9 +325,10 @@ test('_withTestGroups registers groups for the callback only', async () => {
 });
 
 // Frozen Plan-1 omit/secret lists: the refactor must export exactly what
-// Plan 1 exported (R1: tile_types.ai_provider_id stays omitted until Task 6).
+// Plan 1 exported, except tile_types.ai_provider_id, which plan 2 (Task 6,
+// ruling R1) exports as a ref (the provider's sync_uuid).
 const PLAN1 = {
-  tile_types: { omit: ['id', 'created_at', 'updated_at', 'image', 'render_mode', 'sprite', 'sync_uuid', 'ai_provider_id'], secret: [] },
+  tile_types: { omit: ['id', 'created_at', 'updated_at', 'image', 'render_mode', 'sprite', 'sync_uuid'], secret: [] },
   quests: { omit: ['id', 'created_at', 'sync_uuid'], secret: [] },
   ai_providers: {
     omit: ['id', 'created_at', 'updated_at', 'sync_uuid', 'models_cache', 'models_fetched_at', 'is_active'],
@@ -180,16 +345,17 @@ dbTest('plan-1 groups unchanged: liveColumns identical to Plan 1', async (t, poo
       .map((r) => ({ name: r.column_name, dataType: r.data_type }))
       .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     assert.ok(expected.length > 0, id);
-    assert.deepStrictEqual(await liveColumns(pool, soleSpec(getGroup(id))), expected, id);
+    assert.deepStrictEqual(await liveColumns(pool, tableSpecs(getGroup(id))[0]), expected, id);
   }
   assert.strictEqual(soleSpec(getGroup('ai_providers')).secretNeededIf, 'auth_header_name');
-  assert.deepStrictEqual(soleSpec(getGroup('tile_types')).naturalKey, ['name']);
+  assert.deepStrictEqual(tableSpecs(getGroup('tile_types'))[0].naturalKey, ['name']);
+  assert.ok((await liveColumns(pool, tableSpecs(getGroup('tile_types'))[0])).some((c) => c.name === 'ai_provider_id'));
   assert.deepStrictEqual(soleSpec(getGroup('quests')).naturalKey, ['key']);
   assert.deepStrictEqual(soleSpec(getGroup('ai_providers')).naturalKey, ['name']);
 });
 
 dbTest('liveColumns is sorted and carries information_schema data_type', async (t, pool) => {
-  const cols = await liveColumns(pool, soleSpec(getGroup('tile_types')));
+  const cols = await liveColumns(pool, tableSpecs(getGroup('tile_types'))[0]);
   const names = cols.map((c) => c.name);
   assert.deepStrictEqual(names, [...names].sort());
   assert.strictEqual(cols.find((c) => c.name === 'valid_neighbors').dataType, 'jsonb');
@@ -207,7 +373,7 @@ dbTest('per-PC and art columns are omitted, with their reason', async (t, pool) 
   const ai = soleSpec(getGroup('ai_providers'));
   assert.ok(!(await liveColumns(pool, ai)).some((c) => c.name === 'is_active'));
   assert.strictEqual(ai.omit.is_active, 'per-PC choice: which box this PC can reach');
-  const tt = soleSpec(getGroup('tile_types'));
+  const tt = tableSpecs(getGroup('tile_types'))[0];
   const ttNames = (await liveColumns(pool, tt)).map((c) => c.name);
   for (const c of ['render_mode', 'sprite']) {
     assert.ok(!ttNames.includes(c), c);

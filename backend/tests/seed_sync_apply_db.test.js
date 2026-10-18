@@ -69,22 +69,33 @@ const { diffGroup } = require('../src/services/seedSync/diffGroup.js');
 const { exportGroup, fileFor } = require('../src/services/seedSync/exportGroup.js');
 const { SyncRefused } = require('../src/services/seedSync/errors.js');
 const { canonicalRow, rowHash, stableStringify } = require('../src/services/seedSync/canonical.js');
-const { getGroup, soleSpec, liveColumns } = require('../src/services/seedSync/registry.js');
+const { getGroup, tableSpecs, liveColumns } = require('../src/services/seedSync/registry.js');
+const { buildRefMaps, exportRow, exportColumns } = require('../src/services/seedSync/refs.js');
 const { recentRuns } = require('../src/services/seedSync/runs.js');
 
 const addQuest = (pool, key, title = 'sx t') => pool.query(
   "INSERT INTO quests (key, title, act, description) VALUES ($1, $2, 1, 'sx d')", [key, title]);
 
-// Canonical form of every local row of a group, exactly as export writes it.
+// The one table of a Plan-1 group (tile_types has a ref since plan 2, so not
+// soleSpec).
+const onlySpec = (groupId) => {
+  const specs = tableSpecs(getGroup(groupId));
+  assert.strictEqual(specs.length, 1, groupId);
+  return specs[0];
+};
+
+// Canonical form of every local row of a group, exactly as export writes it
+// (refs translated).
 async function snapAll(pool, groupId) {
-  const g = soleSpec(getGroup(groupId));
-  const cols = await liveColumns(pool, g);
+  const g = onlySpec(groupId);
+  const cols = exportColumns(await liveColumns(pool, g), g);
+  const maps = await buildRefMaps(pool, g);
   const { rows } = await pool.query(`SELECT * FROM ${g.table}`);
-  return rows.map((r) => canonicalRow(r, cols));
+  return rows.map((r) => canonicalRow(exportRow(r, g, maps), cols));
 }
 
 async function snap(pool, groupId, key) {
-  const g = soleSpec(getGroup(groupId));
+  const g = onlySpec(groupId);
   return (await snapAll(pool, groupId)).find((r) => r[g.naturalKey[0]] === key);
 }
 
@@ -113,7 +124,7 @@ function writeGit(groupId, rows, { schemaVersion = '' } = {}) {
 // The git file = the whole local table (so non-sx rows are in sync) with the
 // sx_ rows replaced by `sxRows` (local sx_ rows not listed are absent in git).
 async function writeGitWith(pool, groupId, sxRows, opts) {
-  const g = soleSpec(getGroup(groupId));
+  const g = onlySpec(groupId);
   const others = (await snapAll(pool, groupId)).filter((r) => !String(r[g.naturalKey[0]]).startsWith('sx_'));
   writeGit(groupId, [...others, ...sxRows], opts);
   extraBaselines.push(...sxRows.map((r) => r.sync_uuid));

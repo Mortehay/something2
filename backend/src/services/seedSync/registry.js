@@ -10,6 +10,15 @@
 // be in `refs` or `omit` (see fkProblems). `nameRefs` columns hold names of
 // rows in another table (no FK); they travel as-is and the diff warns
 // (dangling_name) about a name that resolves neither locally nor in the file.
+//
+// Order rules (pinned by seed_sync_registry_db.test.js): inside a group a
+// table comes after every table of the group it references (deletes run
+// children first, deferred refs only for self/forward refs); across groups an
+// FK only points at a group that seeds earlier -- except ai_provider_id
+// (tile_types, entity_types), since ai_providers is fixed last.
+const LOCAL = { id: 'local', created_at: 'local', updated_at: 'local', sync_uuid: 'identity' };
+const ART = 'art group (plan 3)';
+
 const GROUPS = [
   {
     id: 'tile_types',
@@ -25,12 +34,228 @@ const GROUPS = [
         render_mode: 'art group (plan 3)',
         sprite: 'art group (plan 3)',
         sync_uuid: 'identity',
-        // Becomes refs: { ai_provider_id: { table: 'ai_providers', by: 'uuid' } }
-        // once export/apply translate refs (plan 2, Task 6).
-        ai_provider_id: 'local FK — plan 2 exports FKs as sync_uuid',
       },
       secretColumns: [],
+      // ai_providers seeds LAST (global order), so a fresh PC seeds it before
+      // a tile that pins a provider resolves (missing_ref until then).
+      refs: { ai_provider_id: { table: 'ai_providers', by: 'uuid' } },
+    }],
+  },
+  {
+    id: 'items',
+    label: 'Items',
+    tables: [
+      {
+        table: 'item_types',
+        naturalKey: ['name'],
+        omit: { ...LOCAL, icon: ART },
+        secretColumns: [],
+        refs: {
+          ammo_type_id: { table: 'item_types', by: 'uuid' },
+          attack_origin: { table: 'attack_origins', by: 'key', keyCol: 'name' },
+          element: { table: 'elements', by: 'key', keyCol: 'name' },
+          impact_behavior_id: { table: 'impact_behaviors', by: 'key', keyCol: 'name' },
+          projectile_shape_id: { table: 'projectile_shapes', by: 'key', keyCol: 'name' },
+        },
+        nameRefs: { vfx: { table: 'vfx_effects', keyCol: 'name', shape: 'object-values' } },
+      },
+      {
+        table: 'affix_types',
+        naturalKey: ['key'],
+        omit: { id: 'local', created_at: 'local', sync_uuid: 'identity' },
+        secretColumns: [],
+        refs: {},
+      },
+    ],
+  },
+  {
+    id: 'attack_effects',
+    label: 'Attack Effects',
+    tables: [
+      {
+        table: 'vfx_effects',
+        naturalKey: ['name'],
+        omit: { id: 'local', created_at: 'local', sync_uuid: 'identity' },
+        secretColumns: [],
+        refs: {},
+      },
+      {
+        table: 'creature_skills',
+        naturalKey: ['name'],
+        omit: { ...LOCAL },
+        secretColumns: [],
+        refs: {},
+        nameRefs: {
+          summon_entity: { table: 'entity_types', keyCol: 'name', shape: 'text' },
+          vfx: { table: 'vfx_effects', keyCol: 'name', shape: 'object-values' },
+        },
+      },
+    ],
+  },
+  {
+    id: 'aura_effects',
+    label: 'Aura Effects',
+    tables: [{
+      table: 'aura_effects',
+      naturalKey: ['name'],
+      omit: { ...LOCAL },
+      secretColumns: [],
+      refs: { dot_element: { table: 'elements', by: 'key', keyCol: 'name' } },
+    }],
+  },
+  {
+    id: 'creature_behaviors',
+    label: 'Creature Behaviors',
+    tables: [
+      {
+        table: 'creature_behaviors',
+        naturalKey: ['name'],
+        omit: { ...LOCAL },
+        secretColumns: [],
+        refs: {},
+      },
+      {
+        table: 'creature_abilities',
+        naturalKey: ['behavior_id', 'slot'],
+        omit: { ...LOCAL },
+        secretColumns: [],
+        refs: { behavior_id: { table: 'creature_behaviors', by: 'uuid' } },
+      },
+      {
+        table: 'creature_behavior_skills',
+        naturalKey: ['behavior_id', 'slot'],
+        omit: { ...LOCAL },
+        secretColumns: [],
+        refs: {
+          behavior_id: { table: 'creature_behaviors', by: 'uuid' },
+          skill_id: { table: 'creature_skills', by: 'uuid' },
+        },
+      },
+      {
+        table: 'behavior_drops',
+        naturalKey: ['behavior_id', 'item_type_id'],
+        omit: { id: 'local', created_at: 'local', sync_uuid: 'identity' },
+        secretColumns: [],
+        refs: {
+          behavior_id: { table: 'creature_behaviors', by: 'uuid' },
+          item_type_id: { table: 'item_types', by: 'uuid' },
+        },
+      },
+      {
+        table: 'chest_loot',
+        naturalKey: ['level_min', 'level_max', 'item_type_id'],
+        omit: { id: 'local', sync_uuid: 'identity' },
+        secretColumns: [],
+        refs: { item_type_id: { table: 'item_types', by: 'uuid' } },
+      },
+    ],
+  },
+  {
+    id: 'entities',
+    label: 'Entities',
+    tables: [
+      {
+        table: 'entity_types',
+        naturalKey: ['name'],
+        omit: {
+          ...LOCAL,
+          image: ART,
+          sprite: ART,
+          render_mode: ART,
+          display_width: ART,
+          display_height: ART,
+          prompt: ART,
+          ai_provider_mode: 'per-PC',
+        },
+        secretColumns: [],
+        // ai_provider_id: ai_providers seeds LAST (see tile_types).
+        refs: {
+          behavior_id: { table: 'creature_behaviors', by: 'uuid' },
+          ai_provider_id: { table: 'ai_providers', by: 'uuid' },
+          element: { table: 'elements', by: 'key', keyCol: 'name' },
+          point_kind: { table: 'world_point_kinds', by: 'key', keyCol: 'kind' },
+        },
+        nameRefs: {
+          auras: { table: 'aura_effects', keyCol: 'name', shape: 'array' },
+          vfx: { table: 'vfx_effects', keyCol: 'name', shape: 'object-values' },
+          spawn_tiles: { table: 'tile_types', keyCol: 'name', shape: 'array' },
+        },
+      },
+      {
+        table: 'creature_drops',
+        naturalKey: ['entity_type_id', 'item_type_id'],
+        omit: { id: 'local', created_at: 'local', sync_uuid: 'identity' },
+        secretColumns: [],
+        refs: {
+          entity_type_id: { table: 'entity_types', by: 'uuid' },
+          item_type_id: { table: 'item_types', by: 'uuid' },
+        },
+      },
+      {
+        table: 'class_loadouts',
+        naturalKey: ['entity_type_id', 'item_type_id'],
+        omit: { id: 'local', sync_uuid: 'identity' },
+        secretColumns: [],
+        refs: {
+          entity_type_id: { table: 'entity_types', by: 'uuid' },
+          item_type_id: { table: 'item_types', by: 'uuid' },
+          socket_into_item_type_id: { table: 'item_types', by: 'uuid' },
+        },
+      },
+    ],
+  },
+  {
+    id: 'biomes',
+    label: 'Biomes',
+    tables: [{
+      table: 'biomes',
+      naturalKey: ['name'],
+      omit: { ...LOCAL },
+      secretColumns: [],
       refs: {},
+      nameRefs: {
+        terrain_tiles: { table: 'tile_types', keyCol: 'name', shape: 'array' },
+        path_tile: { table: 'tile_types', keyCol: 'name', shape: 'text' },
+        creature_types: { table: 'entity_types', keyCol: 'name', shape: 'array' },
+        flora_types: { table: 'entity_types', keyCol: 'name', shape: 'array' },
+      },
+    }],
+  },
+  {
+    id: 'skill_tree',
+    label: 'Skill Tree',
+    tables: [
+      {
+        // Every column travels: the admin edits label/kind/grants, the
+        // seeder writes the structural ones (full fidelity).
+        table: 'passive_nodes',
+        naturalKey: ['key'],
+        omit: { id: 'local', sync_uuid: 'identity' },
+        secretColumns: [],
+        refs: {},
+      },
+      {
+        table: 'passive_edges',
+        naturalKey: ['a_id', 'b_id'],
+        omit: { sync_uuid: 'identity' },
+        secretColumns: [],
+        refs: {
+          a_id: { table: 'passive_nodes', by: 'uuid' },
+          b_id: { table: 'passive_nodes', by: 'uuid' },
+        },
+      },
+    ],
+  },
+  {
+    id: 'progression',
+    label: 'Progression',
+    tables: [{
+      table: 'game_settings',
+      naturalKey: ['key'],
+      omit: { updated_at: 'local', sync_uuid: 'identity' },
+      secretColumns: [],
+      refs: {},
+      validate: 'game_settings',
     }],
   },
   {
