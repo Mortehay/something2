@@ -7,6 +7,7 @@
 const express = require('express');
 const { requireAdmin } = require('../auth/middleware.js');
 const { auraEffectError } = require('../services/auraEffects.js');
+const { cascadeAuraRename } = require('../services/seedSync/renameCascade.js');
 
 const COLS = ['name', 'target_side', 'radius', 'damage_mult', 'defense_mult', 'speed_mult', 'dot_dps',
   'dot_element', 'tick_ms', 'shape', 'color', 'pulse_ms', 'particle_count', 'particle_spread',
@@ -71,13 +72,8 @@ module.exports = function auraEffectsRoutes(pool) {
           WHERE id = $${COLS.length + 1} RETURNING *`, [...v, req.params.id]);
       let renamedBindings = 0;
       if (oldName !== newName) {
-        // Rewrite the ONE matching element, keep order (index.js:982 pattern).
-        const u = await client.query(
-          `UPDATE entity_types SET auras = (
-             SELECT jsonb_agg(CASE WHEN elem.value = $1 THEN $2 ELSE elem.value END ORDER BY elem.ord)
-               FROM jsonb_array_elements_text(auras) WITH ORDINALITY AS elem(value, ord))
-            WHERE auras ? $1`, [oldName, newName]);
-        renamedBindings = u.rowCount;
+        // Rewrite the ONE matching element, keep order (shared with seed-sync apply).
+        renamedBindings = await cascadeAuraRename(client, oldName, newName);
       }
       await client.query('COMMIT');
       res.json({ ...r.rows[0], renamedBindings });

@@ -171,6 +171,7 @@ const passiveTreeRoutes = require('./api/passiveTreeRoutes.js');
 const passiveNodesRoutes = require('./api/passiveNodesRoutes.js');
 const auraEffectsRoutes = require('./api/auraEffectsRoutes.js');
 const seedExportRoutes = require('./api/seedExportRoutes.js');
+const { cascadeEntityRename } = require('./services/seedSync/renameCascade.js');
 const creatureSkillsRoutes = require('./api/creatureSkillsRoutes.js');
 const characterRoutes = require('./api/characterRoutes.js');
 const { createQuestsRouter } = require('./routes/questsRoutes.js');
@@ -1065,101 +1066,11 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
       }
       const oldName = cur.rows[0].name;
       if (oldName !== name) {
-        // Sequential, not Promise.all: these three now run on the same
-        // transactional `client` (a single pg connection), not on `pool`
-        // (which hands each parallel query its own connection). A single pg
-        // Client can only run one query at a time -- concurrent client.query()
-        // calls are silently queued today but that queuing is deprecated as
-        // of pg 8.x and will be removed in pg 9, so this must be sequential.
-        const worldsRef = await client.query('SELECT id, name FROM worlds WHERE allowed_creature_types @> $1::jsonb', [JSON.stringify([oldName])]);
-        const creaturesRef = await client.query('SELECT 1 FROM world_creatures WHERE type = $1 LIMIT 1', [oldName]);
-        // biomes.flora_types / creature_types reference entity_types by name
-        // with no FK, exactly like allowed_creature_types above.
-        const biomesRef = await client.query(
-          'SELECT id, name FROM biomes WHERE flora_types @> $1::jsonb OR creature_types @> $1::jsonb',
-          [JSON.stringify([oldName])],
-        );
-        // SOMET-609: worlds.dungeon_boss names its boss entity by name, no FK.
-        const bossRef = await client.query(
-          "SELECT id, name FROM worlds WHERE dungeon_boss->>'entity' = $1",
-          [oldName],
-        );
-        if (worldsRef.rows.length > 0 || creaturesRef.rows.length > 0 || biomesRef.rows.length > 0
-          || bossRef.rows.length > 0) {
-          // Rewrite the ONE matching element inside each jsonb array, not the
-          // whole array -- WITH ORDINALITY + `ORDER BY` keeps element order
-          // stable, and jsonb_agg's per-element CASE leaves every other
-          // element (including duplicates of a name that isn't oldName)
-          // untouched. WHERE ... @> guarantees the source array actually
-          // contains oldName, so jsonb_agg is never aggregating over zero
-          // rows here (which would collapse to NULL and wipe the column).
-          // Each cascade UPDATE only runs when its own reference check found
-          // a match -- the three reference sites are independent, and a
-          // rename referenced in only one of them shouldn't touch the other
-          // two tables at all.
-          let worldsCount = 0;
-          let biomesCount = 0;
-          if (worldsRef.rows.length > 0) {
-            const worldsResult = await client.query(
-              `UPDATE worlds
-               SET allowed_creature_types = (
-                 SELECT jsonb_agg(CASE WHEN elem.value = $1 THEN $2 ELSE elem.value END ORDER BY elem.ordinality)
-                 FROM jsonb_array_elements_text(allowed_creature_types) WITH ORDINALITY AS elem(value, ordinality)
-               )
-               WHERE allowed_creature_types @> $3::jsonb`,
-              [oldName, name, JSON.stringify([oldName])],
-            );
-            worldsCount = worldsResult.rowCount || 0;
-          }
-          if (creaturesRef.rows.length > 0) {
-            await client.query(
-              'UPDATE world_creatures SET type = $2 WHERE type = $1',
-              [oldName, name],
-            );
-          }
-          if (biomesRef.rows.length > 0) {
-            // biomes has TWO reference arrays on the same row. Guard each
-            // column's rewrite with its own containment check so a biome
-            // that matches via flora_types but has an empty/absent
-            // creature_types (or vice versa) doesn't have the untouched
-            // column dragged through jsonb_agg over zero rows and collapsed
-            // to NULL.
-            const biomesResult = await client.query(
-              `UPDATE biomes
-               SET
-                 flora_types = CASE WHEN flora_types @> $3::jsonb THEN (
-                   SELECT jsonb_agg(CASE WHEN elem.value = $1 THEN $2 ELSE elem.value END ORDER BY elem.ordinality)
-                   FROM jsonb_array_elements_text(flora_types) WITH ORDINALITY AS elem(value, ordinality)
-                 ) ELSE flora_types END,
-                 creature_types = CASE WHEN creature_types @> $3::jsonb THEN (
-                   SELECT jsonb_agg(CASE WHEN elem.value = $1 THEN $2 ELSE elem.value END ORDER BY elem.ordinality)
-                   FROM jsonb_array_elements_text(creature_types) WITH ORDINALITY AS elem(value, ordinality)
-                 ) ELSE creature_types END
-               WHERE flora_types @> $3::jsonb OR creature_types @> $3::jsonb`,
-              [oldName, name, JSON.stringify([oldName])],
-            );
-            biomesCount = biomesResult.rowCount || 0;
-          }
-          // SOMET-609: rewrite only the `entity` key; x/y/respawn_s stay. The
-          // checked-in p5 spec (scripts/dungeon/content.js) still names the
-          // old entity, so a later seed-map re-inserts it unless the spec is
-          // updated to follow.
-          let bossCount = 0;
-          if (bossRef.rows.length > 0) {
-            const bossResult = await client.query(
-              `UPDATE worlds SET dungeon_boss = jsonb_set(dungeon_boss, '{entity}', to_jsonb($2::text))
-               WHERE dungeon_boss->>'entity' = $1`,
-              [oldName, name],
-            );
-            bossCount = bossResult.rowCount || 0;
-          }
-          renamedReferences = {
-            worlds: worldsCount,
-            biomes: biomesCount,
-            hadPlacedCreatures: creaturesRef.rows.length > 0,
-            dungeonBosses: bossCount,
-          };
-        }
+        // SOMET-228: cascade-rewrite every name-based reference (worlds,
+        // world_creatures, biomes, dungeon bosses) in this same transaction;
+        // null when nothing referenced the old name. Shared with seed-sync
+        // apply (services/seedSync/renameCascade.js).
+        renamedReferences = await cascadeEntityRename(client, oldName, name);
       }
     }
 
