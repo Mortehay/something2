@@ -21,6 +21,7 @@ const WHY = {
   never_exported: () => 'Nothing in git yet. Export to start.',
   tokens_missing: () => 'Some rows need a token that never travels through git. Set them on this PC.',
   in_sync: () => 'This PC and git agree.',
+  file_missing: () => 'This PC exported this group before, but the file is not in backend/seeds/sync — pull from git or export again.',
   schema_newer: (g) => `The file in git was exported from a newer database schema${g.inGit ? ` (${g.inGit.schema_version})` : ''}. Run migrations on this PC before seeding or exporting ${g.label}.`,
 };
 

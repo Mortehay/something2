@@ -4,14 +4,20 @@
 // backend; this file fetches and renders.
 import { useState } from 'react';
 import styled from 'styled-components';
+import { useSearchParams } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import {
-  useSeedGroups, useSeedRuns, useRestartStatus, useExportGroup, useRestartBackend, useSeedMeta,
+  useSeedGroups, useRestartStatus, useExportGroup, useExportAll, useRestartBackend, useSeedMeta,
 } from './useSeedExport.js';
-import { statusBadge, exportBlockReason, seedBlockReason } from './seedExportModel.js';
+import {
+  statusBadge, exportBlockReason, seedBlockReason, seedButtonLabel, exportAllPlan, seedAllGroups, exportAllMessage,
+} from './seedExportModel.js';
 import { Btn, Badge, Muted, Modal, fmtTime, StatusHead, PcLabelHint } from './seedUi.jsx';
 import AdminLoading from './AdminLoading.jsx';
 import SeedStatusPopup from './SeedStatusPopup.jsx';
 import SeedPreviewModal from './SeedPreviewModal.jsx';
+import SeedAllModal from './SeedAllModal.jsx';
+import SeedHistoryTab from './SeedHistoryTab.jsx';
 
 const Page = styled.div`
   padding: 2rem; color: var(--s2-text); max-width: 1200px; margin: 0 auto;
@@ -30,17 +36,29 @@ const Table = styled.table`
 const Acts = styled.div`display: flex; gap: 6px; justify-content: flex-end;`;
 const Err = styled.p`color: var(--s2-danger);`;
 
+const Tabs = styled.div`display: flex; gap: 4px; margin: 0.8rem 0; border-bottom: 1px solid var(--s2-border);`;
+const Tab = styled.button`
+  padding: 0.4rem 1rem; font-size: 1.4rem; cursor: pointer; background: transparent; color: var(--s2-text);
+  border: 0; border-bottom: 2px solid ${p => (p.$on ? 'var(--s2-accent)' : 'transparent')};
+  font-weight: ${p => (p.$on ? 700 : 400)};
+`;
+const AllBar = styled.div`display: flex; gap: 6px; margin-top: 0.8rem;`;
+
 const runLine = (r) => (r ? `${fmtTime(r.finished_at || r.started_at)} · ${r.pc_label}` : 'never');
 
 export default function SeedExportAdmin() {
   const groups = useSeedGroups();
-  const runs = useSeedRuns();
   const restart = useRestartStatus();
   const meta = useSeedMeta();
   const exportGroup = useExportGroup();
+  const exportAll = useExportAll();
   const restartBackend = useRestartBackend();
   const [popupId, setPopupId] = useState(null);
   const [previewId, setPreviewId] = useState(null);
+  const [seedAllOpen, setSeedAllOpen] = useState(false);
+  const [params, setParams] = useSearchParams();
+  const tab = params.get('tab') === 'history' ? 'history' : 'groups';
+  const setTab = (t) => setParams((p) => { const n = new URLSearchParams(p); if (t === 'groups') n.delete('tab'); else n.set('tab', t); return n; }, { replace: true });
   const [confirmRestart, setConfirmRestart] = useState(false);
 
   if (groups.isLoading) return <Page><AdminLoading /></Page>;
@@ -51,6 +69,15 @@ export default function SeedExportAdmin() {
   const popup = byId(popupId);
   const preview = byId(previewId);
   const doExport = (g) => exportGroup.mutate({ groupId: g.id });
+  const plan = exportAllPlan(list);
+  const seedable = seedAllGroups(list);
+  const doExportAll = async () => {
+    const results = await exportAll.mutateAsync(plan.toExport);
+    const msg = exportAllMessage(results, plan.skipped);
+    const opts = { style: { whiteSpace: 'pre-line' }, duration: 8000 };
+    if (results.some((r) => !r.ok)) toast.error(msg, opts);
+    else toast.success(msg, opts);
+  };
 
   return (
     <Page>
@@ -64,6 +91,22 @@ export default function SeedExportAdmin() {
           <Btn $primary onClick={() => setConfirmRestart(true)} disabled={restartBackend.isPending}>Restart backend</Btn>
         </Banner>
       )}
+
+      <Tabs role="tablist" aria-label="Seed / Export sections">
+        {[['groups', 'Groups'], ['history', 'History']].map(([id, label]) => (
+          <Tab key={id} role="tab" id={`seed-tab-${id}`} aria-selected={tab === id} $on={tab === id}
+            onClick={() => setTab(id)}>{label}</Tab>
+        ))}
+      </Tabs>
+
+      {tab === 'history' && <SeedHistoryTab groups={list} />}
+      {tab === 'groups' && (<>
+      <AllBar>
+        <Btn disabled={exportAll.isPending || (plan.toExport.length === 0 && plan.skipped.length === 0)}
+          title={plan.toExport.length === 0 ? 'nothing to export' : undefined}
+          onClick={doExportAll}>Export all</Btn>
+        <Btn disabled={seedable.length === 0} onClick={() => setSeedAllOpen(true)}>Seed all…</Btn>
+      </AllBar>
 
       <Table>
         <thead>
@@ -86,33 +129,14 @@ export default function SeedExportAdmin() {
                     title={exportWhy || undefined}
                     onClick={() => doExport(g)}>Export</Btn>
                   <Btn disabled={Boolean(seedWhy)} title={seedWhy || undefined}
-                    onClick={() => setPreviewId(g.id)}>Seed…</Btn>
+                    onClick={() => setPreviewId(g.id)}>{seedButtonLabel(g)}</Btn>
                 </Acts></td>
               </tr>
             );
           })}
         </tbody>
       </Table>
-
-      <h3 style={{ marginTop: '1.6rem' }}>History</h3>
-      {runs.isLoading && <Muted>Loading…</Muted>}
-      {runs.error && <Err>{runs.error.message}</Err>}
-      {runs.data && runs.data.length === 0 && <Muted>No runs yet.</Muted>}
-      {runs.data && runs.data.length > 0 && (
-        <Table>
-          <thead><tr><th>When</th><th>Group</th><th>Action</th><th>Status</th><th>PC</th><th>Result</th></tr></thead>
-          <tbody>
-            {runs.data.map((r) => (
-              <tr key={r.id}>
-                <td>{fmtTime(r.started_at)}</td><td>{r.group_id}</td><td>{r.action}</td>
-                <td>{r.status}</td><td>{r.pc_label}</td>
-                <td>{r.error ? <span style={{ color: 'var(--s2-danger)' }}>{r.error}</span>
-                  : Object.entries(r.summary || {}).map(([k, v]) => `${k} ${v}`).join(', ')}</td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-      )}
+      </>)}
 
       {popup && (
         <SeedStatusPopup group={popup} exporting={exportGroup.isPending}
@@ -120,6 +144,7 @@ export default function SeedExportAdmin() {
           onExport={() => { doExport(popup); setPopupId(null); }}
           onSeed={() => { setPreviewId(popup.id); setPopupId(null); }} />
       )}
+      {seedAllOpen && <SeedAllModal groups={seedable} onClose={() => setSeedAllOpen(false)} />}
       {preview && <SeedPreviewModal group={preview} onClose={() => setPreviewId(null)} />}
       {confirmRestart && (
         <Modal $w="420px" onClose={() => setConfirmRestart(false)} label="Restart backend">

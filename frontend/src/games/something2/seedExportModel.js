@@ -11,12 +11,13 @@ export function statusBadge(group) {
   switch (group.status) {
     case 'in_sync': return { label: 'in sync', tone: 'ok' };
     case 'local_edits': {
-      if (group.gitChanges > 0) return { label: `${group.localEdits} not exported · git is newer`, tone: 'warn' };
+      if (group.gitChanges > 0) return { label: `${group.localEdits} edit${group.localEdits === 1 ? '' : 's'} not exported · git is newer`, tone: 'warn' };
       const n = group.localEdits;
       return { label: `${n} edit${n === 1 ? '' : 's'} not exported`, tone: 'warn' };
     }
     case 'git_newer': return { label: 'git is newer', tone: 'info' };
     case 'never_exported': return { label: 'never exported', tone: 'info' };
+    case 'file_missing': return { label: 'export file missing', tone: 'bad' };
     case 'tokens_missing': {
       const n = group.tokensMissing;
       return { label: `${n} token${n === 1 ? '' : 's'} missing`, tone: 'warn' };
@@ -42,8 +43,61 @@ export const exportBlocked = (group) => exportBlockReason(group) !== null;
 export function seedBlockReason(group) {
   if (group.status === 'schema_newer') return SCHEMA_NEWER;
   if (group.status === 'bad_file') return 'fix or delete the export file first';
+  if (group.status === 'file_missing') return 'no export file';
   if (!group.inGit) return 'nothing in git yet';
   return null;
+}
+
+// Re-seed: Seed is available whenever an export file exists, whatever the
+// status; the label says whether this PC has seeded the group before.
+export const seedButtonLabel = (group) => (group.lastSeed ? 'Re-seed…' : 'Seed…');
+
+const EXPORT_ALL_STATUSES = new Set(['local_edits', 'never_exported', 'file_missing']);
+
+// "Export all": groups (registry order) worth exporting, plus the ones that
+// would qualify but are blocked, with the reason the export button shows.
+export function exportAllPlan(groups) {
+  const toExport = [];
+  const skipped = [];
+  for (const g of groups) {
+    if (!EXPORT_ALL_STATUSES.has(g.status)) continue;
+    const reason = exportBlockReason(g);
+    if (reason) skipped.push({ id: g.id, label: g.label, reason });
+    else toExport.push(g);
+  }
+  return { toExport, skipped };
+}
+
+// "Seed all": every group with a usable export file, registry (= dependency)
+// order.
+export const seedAllGroups = (groups) => groups.filter((g) => g.inGit && !seedBlockReason(g));
+
+export const HISTORY_PER_PAGE = 15;
+export const historyPageCount = (total, perPage = HISTORY_PER_PAGE) => (
+  Math.max(1, Math.ceil((Number(total) || 0) / perPage)));
+
+// Toast text for Export all. results: [{ label, ok, rowCount?, error? }].
+export function exportAllMessage(results, skipped) {
+  const lines = [];
+  const ok = results.filter((r) => r.ok);
+  if (results.length) lines.push(`Exported ${ok.length} of ${results.length} groups`);
+  else lines.push('Nothing to export');
+  for (const r of results) if (!r.ok) lines.push(`Failed: ${r.label} — ${r.error}`);
+  if (skipped.length) lines.push(`Skipped: ${skipped.map((s) => `${s.label} — ${s.reason}`).join('; ')}`);
+  return lines.join('\n');
+}
+
+// Apply gate over several groups' previews (also the single-group case).
+// sections: [{ rows, decisions }]. Apply needs every section decided and at
+// least one row somewhere to write.
+export function seedAllGate(sections) {
+  let undecided = 0;
+  let rows = 0;
+  for (const s of sections) {
+    undecided += applyGate(s.rows, s.decisions).undecided;
+    rows += s.rows.length;
+  }
+  return { canApply: undecided === 0 && rows > 0, undecided, rows };
 }
 
 const DECISION_LABEL = { git: 'Take git', local: 'Keep local', delete: 'Delete local' };

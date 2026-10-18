@@ -32,10 +32,12 @@ describe('preview modal backdrop', () => {
   });
   // vitest runs in node (no DOM to click), so the wiring is checked on source.
   it('every Modal of the seed preview opts out of backdrop close', () => {
-    const src = fs.readFileSync(path.join(__dirname, '..', 'SeedPreviewModal.jsx'), 'utf8');
-    const modals = src.match(/<Modal\b[^>]*>/g) || [];
-    expect(modals.length).toBeGreaterThan(0);
-    for (const m of modals) expect(m).toContain('closeOnBackdrop={false}');
+    for (const f of ['SeedPreviewModal.jsx', 'SeedAllModal.jsx']) {
+      const src = fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
+      const modals = src.match(/<Modal\b[^>]*>/g) || [];
+      expect(modals.length).toBeGreaterThan(0);
+      for (const m of modals) expect(m).toContain('closeOnBackdrop={false}');
+    }
     const ui = fs.readFileSync(path.join(__dirname, '..', 'seedUi.jsx'), 'utf8');
     expect(ui).toContain('<Backdrop onClick={backdropClick(onClose, closeOnBackdrop)}>');
   });

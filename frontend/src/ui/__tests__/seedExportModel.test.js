@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   statusBadge, initialDecisions, bulkSet, applyGate, allowedDecisions, kindLabel, exportBlocked, previewSignature,
   exportBlockReason, seedBlockReason, decisionLabel, seedRequestBody,
+  seedButtonLabel, exportAllPlan, seedAllGroups, historyPageCount, exportAllMessage, seedAllGate,
 } from '../../games/something2/seedExportModel.js';
 
 const row = (syncUuid, kind, defaultDecision, blockedReason = null) => (
@@ -12,11 +13,13 @@ describe('statusBadge', () => {
     expect(statusBadge({ status: 'in_sync' })).toEqual({ label: 'in sync', tone: 'ok' });
     expect(statusBadge({ status: 'local_edits', localEdits: 14, gitChanges: 0 })).toEqual({ label: '14 edits not exported', tone: 'warn' });
     expect(statusBadge({ status: 'local_edits', localEdits: 1, gitChanges: 0 }).label).toBe('1 edit not exported');
-    expect(statusBadge({ status: 'local_edits', localEdits: 3, gitChanges: 2 })).toEqual({ label: '3 not exported · git is newer', tone: 'warn' });
+    expect(statusBadge({ status: 'local_edits', localEdits: 3, gitChanges: 2 })).toEqual({ label: '3 edits not exported · git is newer', tone: 'warn' });
     expect(statusBadge({ status: 'git_newer' })).toEqual({ label: 'git is newer', tone: 'info' });
     expect(statusBadge({ status: 'never_exported' })).toEqual({ label: 'never exported', tone: 'info' });
     expect(statusBadge({ status: 'tokens_missing', tokensMissing: 2 })).toEqual({ label: '2 tokens missing', tone: 'warn' });
     expect(statusBadge({ status: 'tokens_missing', tokensMissing: 1 }).label).toBe('1 token missing');
+    expect(statusBadge({ status: 'local_edits', localEdits: 1, gitChanges: 2 }).label).toBe('1 edit not exported · git is newer');
+    expect(statusBadge({ status: 'file_missing' })).toEqual({ label: 'export file missing', tone: 'bad' });
     expect(statusBadge({ status: 'bad_file' })).toEqual({ label: 'bad export file', tone: 'bad' });
   });
 });
@@ -172,5 +175,74 @@ describe('stale-preview signature', () => {
     const one = previewSignature('g', { header: { exported_at: 't' }, rows, signature: 's1' });
     expect(previewSignature('g', { header: { exported_at: 't' }, rows, signature: 's1' })).toBe(one);
     expect(previewSignature('g', { header: { exported_at: 't' }, rows, signature: 's2' })).not.toBe(one);
+  });
+});
+
+const grp = (id, status, extra = {}) => ({ id, label: id.toUpperCase(), status, gitChanges: 0, localEdits: 0, inGit: null, ...extra });
+
+describe('re-seed rules', () => {
+  it('labels Re-seed once this PC has seeded', () => {
+    expect(seedButtonLabel({ lastSeed: { id: 1 } })).toBe('Re-seed…');
+    expect(seedButtonLabel({ lastSeed: null })).toBe('Seed…');
+  });
+  it('enables seed for any status with an export file, except the refused ones', () => {
+    for (const status of ['in_sync', 'local_edits', 'git_newer', 'tokens_missing']) {
+      expect(seedBlockReason(grp('a', status, { inGit: {} }))).toBe(null);
+    }
+    expect(seedBlockReason(grp('a', 'file_missing'))).toBe('no export file');
+    expect(seedBlockReason(grp('a', 'never_exported'))).toBe('nothing in git yet');
+  });
+  it('file_missing allows export', () => {
+    expect(exportBlockReason(grp('a', 'file_missing'))).toBe(null);
+  });
+});
+
+describe('exportAllPlan', () => {
+  it('exports local_edits / never_exported / file_missing in order and lists blocked ones', () => {
+    const groups = [
+      grp('a', 'never_exported'), grp('b', 'in_sync'), grp('q', 'local_edits', { gitChanges: 2 }),
+      grp('c', 'file_missing'), grp('d', 'git_newer', { gitChanges: 1 }), grp('e', 'local_edits', { localEdits: 1 }),
+    ];
+    const plan = exportAllPlan(groups);
+    expect(plan.toExport.map((g) => g.id)).toEqual(['a', 'c', 'e']);
+    expect(plan.skipped).toEqual([{ id: 'q', label: 'Q', reason: 'seed (preview) first' }]);
+  });
+  it('message reports successes, failures and skips', () => {
+    const msg = exportAllMessage(
+      [{ label: 'A', ok: true }, { label: 'B', ok: false, error: 'boom' }],
+      [{ label: 'Quests', reason: 'seed (preview) first' }]);
+    expect(msg).toContain('Exported 1 of 2 groups');
+    expect(msg).toContain('Failed: B — boom');
+    expect(msg).toContain('Skipped: Quests — seed (preview) first');
+  });
+});
+
+describe('seedAllGroups', () => {
+  it('keeps registry order and only groups with a usable file', () => {
+    const groups = [
+      grp('a', 'in_sync', { inGit: {} }), grp('b', 'never_exported'), grp('c', 'bad_file'),
+      grp('d', 'schema_newer', { inGit: {} }), grp('e', 'file_missing'), grp('f', 'git_newer', { inGit: {} }),
+    ];
+    expect(seedAllGroups(groups).map((g) => g.id)).toEqual(['a', 'f']);
+  });
+});
+
+describe('seedAllGate', () => {
+  it('blocks on undecided rows in any section and on an all-empty preview', () => {
+    const red = row('r', 'only_here', null);
+    const ok = row('o', 'changed', 'git');
+    expect(seedAllGate([{ rows: [ok], decisions: { o: 'git' } }, { rows: [red], decisions: {} }]))
+      .toEqual({ canApply: false, undecided: 1, rows: 2 });
+    expect(seedAllGate([{ rows: [ok], decisions: { o: 'git' } }, { rows: [red], decisions: { r: 'local' } }]).canApply).toBe(true);
+    expect(seedAllGate([{ rows: [], decisions: {} }]).canApply).toBe(false);
+  });
+});
+
+describe('historyPageCount', () => {
+  it('is at least one page and rounds up', () => {
+    expect(historyPageCount(0, 15)).toBe(1);
+    expect(historyPageCount(15, 15)).toBe(1);
+    expect(historyPageCount(16, 15)).toBe(2);
+    expect(historyPageCount(undefined, 15)).toBe(1);
   });
 });

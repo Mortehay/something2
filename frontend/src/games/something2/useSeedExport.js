@@ -1,7 +1,7 @@
 // SOMET-638. Data hooks for the Seed / Export tab over /api/seed-export.
 // authHeaders() is NOT optional: every route is admin-only, and a 401 without
 // it signs the admin out (same trap as useBulkImageJob.js).
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { authHeaders, apiFetch } from "./src/js/net/auth.js";
 import { API_URL } from "../../config.js";
@@ -52,9 +52,23 @@ export const useSeedPreview = (groupId, enabled) => useQuery({
   refetchOnReconnect: false,
 });
 
-export const useSeedRuns = (group) => useQuery({
-  queryKey: [...RUNS_KEY, group || "all"],
-  queryFn: () => call(`/runs?limit=50${group ? `&group=${encodeURIComponent(group)}` : ""}`),
+// One page of history: { runs, total }, newest first, filtered server-side.
+export const useSeedRuns = ({ group, page = 0, perPage = 15 } = {}) => useQuery({
+  queryKey: [...RUNS_KEY, group || "all", page, perPage],
+  queryFn: () => call(`/runs?limit=${perPage}&offset=${page * perPage}${group ? `&group=${encodeURIComponent(group)}` : ""}`),
+  placeholderData: (prev) => prev,
+});
+
+// Previews of several groups at once (Seed all); same no-auto-refetch rules.
+export const useSeedPreviews = (groupIds) => useQueries({
+  queries: groupIds.map((id) => ({
+    queryKey: ["seed-preview", id],
+    queryFn: () => call(`/groups/${encodeURIComponent(id)}/preview`),
+    gcTime: 0,
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  })),
 });
 
 export const useRestartStatus = () => useQuery({
@@ -104,3 +118,52 @@ export const useRestartBackend = () => useInvalidating(
   () => call("/restart", { method: "POST" }),
   () => toast.success("Restart requested"),
 );
+
+const refreshAll = (qc) => {
+  qc.invalidateQueries({ queryKey: GROUPS_KEY });
+  qc.invalidateQueries({ queryKey: RUNS_KEY });
+  qc.invalidateQueries({ queryKey: RESTART_KEY });
+};
+
+// Export all: sequential, one group at a time, a failure never stops the rest.
+// Resolves to [{ id, label, ok, rowCount?, error? }].
+export function useExportAll() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (groups) => {
+      const out = [];
+      for (const g of groups) {
+        try {
+          const r = await call(`/groups/${encodeURIComponent(g.id)}/export`, { method: "POST" });
+          out.push({ id: g.id, label: g.label, ok: true, rowCount: r.rowCount });
+        } catch (err) {
+          out.push({ id: g.id, label: g.label, ok: false, error: err.message, code: err.code });
+        }
+      }
+      return out;
+    },
+    onSettled: () => refreshAll(qc),
+  });
+}
+
+// Seed all: items [{ id, label, body }] in dependency order, sequential. A
+// refusal on one group is recorded and the next group still runs.
+// Resolves to [{ id, label, ok, summary?, code?, error? }].
+export function useApplyAll() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (items) => {
+      const out = [];
+      for (const it of items) {
+        try {
+          const r = await call(`/groups/${encodeURIComponent(it.id)}/seed`, { method: "POST", body: it.body });
+          out.push({ id: it.id, label: it.label, ok: true, summary: r.summary || {} });
+        } catch (err) {
+          out.push({ id: it.id, label: it.label, ok: false, code: err.code, error: err.message });
+        }
+      }
+      return out;
+    },
+    onSettled: () => refreshAll(qc),
+  });
+}
