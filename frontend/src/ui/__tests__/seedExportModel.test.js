@@ -202,10 +202,16 @@ describe('exportAllPlan', () => {
     const groups = [
       grp('a', 'never_exported'), grp('b', 'in_sync'), grp('q', 'local_edits', { gitChanges: 2 }),
       grp('c', 'file_missing'), grp('d', 'git_newer', { gitChanges: 1 }), grp('e', 'local_edits', { localEdits: 1 }),
+      grp('f', 'bad_file'), grp('g', 'schema_newer'),
     ];
     const plan = exportAllPlan(groups);
     expect(plan.toExport.map((g) => g.id)).toEqual(['a', 'c', 'e']);
-    expect(plan.skipped).toEqual([{ id: 'q', label: 'Q', reason: 'seed (preview) first' }]);
+    expect(plan.skipped).toEqual([
+      { id: 'q', label: 'Q', reason: 'seed (preview) first' },
+      { id: 'd', label: 'D', reason: 'seed (preview) first' },
+      { id: 'f', label: 'F', reason: 'fix or delete the export file first' },
+      { id: 'g', label: 'G', reason: 'run migrations first' },
+    ]);
   });
   it('message reports successes, failures and skips', () => {
     const msg = exportAllMessage(

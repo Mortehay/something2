@@ -60,10 +60,11 @@ export function exportAllPlan(groups) {
   const toExport = [];
   const skipped = [];
   for (const g of groups) {
-    if (!EXPORT_ALL_STATUSES.has(g.status)) continue;
     const reason = exportBlockReason(g);
+    // in_sync / tokens_missing are simply not candidates; any other group
+    // that is blocked is reported so the admin sees why it was left out.
     if (reason) skipped.push({ id: g.id, label: g.label, reason });
-    else toExport.push(g);
+    else if (EXPORT_ALL_STATUSES.has(g.status)) toExport.push(g);
   }
   return { toExport, skipped };
 }

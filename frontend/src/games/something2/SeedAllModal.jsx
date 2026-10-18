@@ -24,8 +24,8 @@ const Res = styled.div`
 
 const counts = (s) => `${s.updated || 0} updated, ${s.created || 0} created, ${s.deleted || 0} deleted, ${s.kept || 0} kept, ${s.adopted || 0} adopted`;
 
-function Section({ group, query, setState, done, open, toggle }) {
-  const { data } = query;
+function Section({ group, query, state, setState, done, open, toggle }) {
+  const data = query.error ? undefined : query.data;
   const rows = data ? data.rows || [] : [];
   const sig = data ? previewSignature(group.id, data) : null;
   const decisions = data && state && state.sig === sig ? state.d : (data ? initialDecisions(rows) : {});
@@ -70,8 +70,9 @@ export default function SeedAllModal({ groups, onClose }) {
 
   // Groups already seeded in this session are finished; a failed load blocks
   // nothing (it is simply not applied).
-  const live = groups.map((g, i) => ({ g, q: queries[i] })).filter(({ g, q }) => !done.has(g.id) && q.data);
-  const loading = groups.some((g, i) => !done.has(g.id) && queries[i].isLoading);
+  const failed = groups.filter((g, i) => !done.has(g.id) && queries[i].error);
+  const live = groups.map((g, i) => ({ g, q: queries[i] })).filter(({ g, q }) => !done.has(g.id) && q.data && !q.error);
+  const loading = groups.some((g, i) => !done.has(g.id) && (queries[i].isLoading || queries[i].isFetching));
   const sections = live.map(({ g, q }) => ({ rows: q.data.rows || [], decisions: decisionsOf(g, q) }));
   const gate = seedAllGate(sections);
 
@@ -103,6 +104,7 @@ export default function SeedAllModal({ groups, onClose }) {
           <Res role="status">
             <b>Seeded {okRes.length} of {results.length} groups</b>
             {okRes.map((r) => <div key={r.id}>{r.label}: {counts(r.summary)}</div>)}
+            {failed.map((g) => <div key={g.id} style={{ color: 'var(--s2-danger)' }}>Not applied: {g.label} — preview failed to load</div>)}
             {badRes.map((r) => (
               <div key={r.id} style={{ color: 'var(--s2-danger)' }}>
                 Refused: {r.label} — {r.code ? `${r.code}: ` : ''}{r.error}
@@ -113,7 +115,7 @@ export default function SeedAllModal({ groups, onClose }) {
         )}
         {groups.map((g, i) => (
           <Section key={g.id} group={g} query={queries[i]} done={done.has(g.id)}
-            setState={setState}
+            state={states[g.id]} setState={setState}
             open={!closed.has(g.id)}
             toggle={() => setClosed((c) => { const n = new Set(c); if (n.has(g.id)) n.delete(g.id); else n.add(g.id); return n; })} />
         ))}
@@ -121,6 +123,7 @@ export default function SeedAllModal({ groups, onClose }) {
           <Muted>
             {gate.rows === 0 && !loading ? 'Nothing to change — this PC already matches git.' : `${gate.rows} rows across ${sections.filter((s) => s.rows.length).length} groups`}
             {gate.undecided > 0 && ` · ${gate.undecided} rows still need a choice`}
+            {failed.length > 0 && ` · Not applied: ${failed.map((g) => g.label).join(', ')} — preview failed to load`}
           </Muted>
           <span style={{ display: 'flex', gap: 6 }}>
             <Btn onClick={onClose}>{results ? 'Close' : 'Cancel'}</Btn>
