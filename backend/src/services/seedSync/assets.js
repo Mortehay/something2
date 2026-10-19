@@ -383,6 +383,11 @@ function gitParts(asset, v, row) {
   const okHash = (p) => isObj(p) && typeof p.file === 'string' && SHA256_RE.test(p.sha256);
   if (asset.type === 'image') return okHash(v) ? [v] : null;
   if (asset.type === 'sprite') {
+    // Object keys never travel (uploadGitAssets would write them verbatim:
+    // a hand-edited file could point the row at any object), and a sprite
+    // without a single part is not one an export wrote.
+    if (v.atlas_key !== undefined || v.manifest_key !== undefined) return null;
+    if (v.atlas === undefined && v.manifest === undefined) return null;
     const parts = [];
     for (const k of ['atlas', 'manifest']) {
       if (v[k] === undefined) continue;

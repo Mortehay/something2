@@ -17,7 +17,7 @@ const { exportGroup, fileFor } = require('../src/services/seedSync/exportGroup.j
 const { diffGroup } = require('../src/services/seedSync/diffGroup.js');
 const { previewSeed, applySeed } = require('../src/services/seedSync/applySeed.js');
 const { stableStringify } = require('../src/services/seedSync/canonical.js');
-const { assetsRoot, localAssetValue } = require('../src/services/seedSync/assets.js');
+const { assetsRoot, localAssetValue, uploadGitAssets } = require('../src/services/seedSync/assets.js');
 const { shrinkToEdge } = require('../src/services/pngResample.js');
 const { encodeRGBA } = require('../src/services/pngTrim.js');
 
@@ -543,4 +543,31 @@ dbTest('export refuses a both-sides conflict before writing any asset file', asy
   await assert.rejects(exportGroup(pool, 'sx_assets', { store }), (e) => e.code === 'git_newer');
   assert.strictEqual(store.gets, gets, 'nothing downloaded');
   assert.deepStrictEqual(fs.readFileSync(path.join(root, 'sx_tiles/sx_a.png')), PNG_A, "git's file untouched");
+});
+
+// M-1: a git sprite value is untrusted. Object keys in it would be written
+// verbatim (pointing a row at any object); a value with no atlas/manifest
+// part is not a sprite this engine exported.
+dbTest('a git sprite value carrying object keys or no parts is a mismatch', async (t, pool, { store }) => {
+  await seedFixture(pool);
+  await exportGroup(pool, 'sx_assets', { store });
+  await forgetLocally(pool, 'sx_art');
+  const doc = readDoc('sx_assets');
+  const a = doc.tables.sx_art.find((r) => r.name === 'sx_a');
+  a.sprite.atlas_key = 'sxb/someone-elses/object.png';
+  const b = doc.tables.sx_art.find((r) => r.name === 'sx_b');
+  b.sprite = { static_frame: 0, frames: { idle: 2 } };
+  writeDoc('sx_assets', doc);
+  const p = await previewSeed(pool, 'sx_assets');
+  const by = Object.fromEntries(p.rows.map((r) => [r.key, r]));
+  for (const k of ['sx_a', 'sx_b']) {
+    assert.strictEqual(by[k].blockedReason, 'asset_file_mismatch', k);
+    assert.deepStrictEqual(by[k].allowedDecisions, ['local'], k);
+  }
+  // The upload refuses it too (never trusts the preview alone).
+  await assert.rejects(uploadGitAssets(store, [{ ...a, image: null }], artSpec), (e) => e.code === 'asset_file_mismatch');
+  await assert.rejects(uploadGitAssets(store, [{ ...b, image: null }], artSpec), (e) => e.code === 'asset_file_mismatch');
+  const manifestOnly = { ...a, image: null, sprite: { manifest: a.sprite.manifest, manifest_key: 'sxb/x.json' } };
+  await assert.rejects(uploadGitAssets(store, [manifestOnly], artSpec), (e) => e.code === 'asset_file_mismatch');
+  assert.strictEqual(store.puts.length, 0, 'nothing uploaded');
 });
