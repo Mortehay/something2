@@ -38,8 +38,8 @@
 // for a spec never tracked here whose worlds ARE in the DB (a PC that built
 // them before seed sync; "here" = the writer's seed-aware match): W == G is
 // a `baseline` row (group status baseline_pending, the only decision records
-// base = G -- no map data changes), recorded by the next seed or export under
-// the lock -- status never writes; W != G (or
+// base = G -- no map data changes; the entry world still follows git),
+// recorded by the next seed or export under the lock -- status never writes; W != G (or
 // only some of its worlds here) is a conflict, and Keep local makes it an
 // edit of G that export writes back.
 //
@@ -69,7 +69,7 @@ const TABLE = 'map_specs';
 const MANIFEST = `${GROUP_ID}.json`;
 const HEADER_FIELDS = ['group', 'exported_at', 'exported_by', 'schema_version', 'spec_count'];
 // `baseline`: a spec in sync whose base is not recorded here yet; its only
-// decision records it (no map data changes).
+// decision records it (no map data changes; the entry world follows git).
 const DEFAULTS = {
   new: 'git', git_newer: 'git', edited_here: 'local', conflict: null, only_here: 'local', baseline: 'local',
 };
@@ -78,7 +78,9 @@ const ALLOWED = {
   new: ['git'], git_newer: ['git', 'local'], edited_here: ['git', 'local'], conflict: ['git', 'local'], only_here: ['local'],
   baseline: ['local'],
 };
-const BASELINE_HINT = 'Seed Maps once to record this PC\'s baseline — no map data changes';
+// The baseline seed writes no map data, but like every Maps seed it puts the
+// entry world back to git's when this PC's has drifted.
+const BASELINE_HINT = 'Seed Maps once to record this PC\'s baseline — map data is not changed (the entry world follows git)';
 const KINDS = Object.keys(DEFAULTS);
 const LOCAL_EDIT_KINDS = ['edited_here', 'conflict'];
 const GIT_CHANGE_KINDS = ['new', 'git_newer', 'conflict'];

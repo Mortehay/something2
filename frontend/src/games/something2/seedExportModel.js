@@ -6,7 +6,7 @@
 // The git file was exported from a newer database schema: both export and
 // seed are refused until this PC runs its migrations.
 const SCHEMA_NEWER = 'run migrations first';
-const BASELINE_HINT = "Seed Maps once to record this PC's baseline — no map data changes";
+const BASELINE_HINT = "Seed Maps once to record this PC's baseline — map data is not changed (the entry world follows git)";
 
 export function statusBadge(group) {
   switch (group.status) {

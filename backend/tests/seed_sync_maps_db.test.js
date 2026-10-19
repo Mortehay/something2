@@ -374,7 +374,7 @@ dbTest('a failure after every spec applied is still partial_apply, entry world s
   assert.strictEqual(run.status, 'failed');
 });
 
-const BASELINE_HINT = "Seed Maps once to record this PC's baseline — no map data changes";
+const BASELINE_HINT = "Seed Maps once to record this PC's baseline — map data is not changed (the entry world follows git)";
 
 dbTest('existing PC, DB matches the files: baseline_pending, recorded by export', async (ctx) => {
   const { pool, mapsDir } = ctx;
