@@ -1,0 +1,84 @@
+<h2>Seed / Export tab: which layout?</h2>
+<p class="subtitle">Both show the same thing per group: when this PC last exported it, what's sitting in git (and which PC exported it, when), when this PC last seeded it, and a status. Click the one that feels right.</p>
+
+<style>
+  .ss { font: 13px/1.4 system-ui, sans-serif; color:#d6dbe4; background:#141a24; padding:14px; border-radius:8px; }
+  .ss .bar { display:flex; gap:8px; align-items:center; margin-bottom:12px; }
+  .ss .bar .t { font-size:16px; font-weight:600; margin-right:auto; }
+  .ss button { background:#2b3546; color:#d6dbe4; border:1px solid #3a4659; border-radius:5px; padding:4px 9px; font-size:12px; cursor:pointer; }
+  .ss button.p { background:#5b4fd6; border-color:#6d62e8; color:#fff; }
+  .ss table { width:100%; border-collapse:collapse; }
+  .ss th { text-align:left; font-weight:500; color:#8a96a8; font-size:11px; text-transform:uppercase; padding:6px 6px; border-bottom:1px solid #2b3546; }
+  .ss td { padding:7px 6px; border-bottom:1px solid #1f2735; vertical-align:middle; }
+  .ss .m { color:#8a96a8; font-size:11px; }
+  .b { display:inline-block; padding:1px 7px; border-radius:9px; font-size:11px; font-weight:600; }
+  .ok { background:#183d2a; color:#6fd39a; }
+  .warn { background:#45360f; color:#f2c14e; }
+  .bad { background:#4a1d22; color:#ff8a8a; }
+  .info { background:#1d3150; color:#7fb2ff; }
+  .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+  .card2 { background:#1b2230; border:1px solid #2b3546; border-radius:7px; padding:10px; }
+  .card2 h4 { margin:0 0 6px; font-size:14px; display:flex; justify-content:space-between; align-items:center; }
+  .card2 .row { display:flex; justify-content:space-between; font-size:12px; padding:2px 0; }
+  .card2 .acts { display:flex; gap:6px; margin-top:8px; }
+  .hist { margin-top:14px; }
+  .hist h5 { margin:0 0 6px; font-size:12px; color:#8a96a8; text-transform:uppercase; }
+</style>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>One table, one row per group</h3>
+      <p>Dense, scannable, easy to spot the yellow/red rows. History log underneath.</p>
+      <div class="ss">
+        <div class="bar"><span class="t">Seed / Export</span><button>Export all changed</button><button class="p">Seed all (preview)…</button></div>
+        <table>
+          <tr><th><input type="checkbox"></th><th>Group</th><th>Last export (this PC)</th><th>In git</th><th>Last seed (this PC)</th><th>Status</th><th></th></tr>
+          <tr><td><input type="checkbox"></td><td>Tile Types</td><td>Oct 17 21:04</td><td>Oct 17 21:04 <span class="m">· desktop</span></td><td>Oct 12 10:30</td><td><span class="b ok">in sync</span></td><td><button>Export</button> <button>Seed…</button></td></tr>
+          <tr><td><input type="checkbox" checked></td><td>Entities</td><td>Oct 10 18:22</td><td>Oct 10 18:22 <span class="m">· desktop</span></td><td>Oct 10 18:40</td><td><span class="b warn">14 edits not exported</span></td><td><button>Export</button> <button>Seed…</button></td></tr>
+          <tr><td><input type="checkbox"></td><td>Items</td><td>never</td><td>Oct 16 09:12 <span class="m">· laptop</span></td><td>Oct 02 14:00</td><td><span class="b info">git is newer</span></td><td><button>Export</button> <button>Seed…</button></td></tr>
+          <tr><td><input type="checkbox"></td><td>Quests</td><td>never</td><td>—</td><td>never</td><td><span class="b bad">never exported</span></td><td><button>Export</button> <button disabled>Seed…</button></td></tr>
+          <tr><td><input type="checkbox"></td><td>AI Providers</td><td>Oct 15 12:00</td><td>Oct 15 12:00 <span class="m">· desktop</span></td><td>Oct 15 12:05</td><td><span class="b warn">1 token missing</span></td><td><button>Export</button> <button>Seed…</button></td></tr>
+          <tr><td colspan="7" class="m">… Biomes, Creature Behaviors, Attack Effects, Aura Effects, Maps, Progression, Skill Tree, Art, Sprites, Audio</td></tr>
+        </table>
+        <div class="hist"><h5>History (this PC)</h5>
+          <div class="m">Oct 17 21:04 · export · Tile Types · 42 rows, 42 images · ok</div>
+          <div class="m">Oct 15 12:05 · seed · AI Providers · 2 updated, 1 kept local · ok</div>
+          <div class="m">Oct 12 10:30 · seed · Tile Types · failed: MinIO unreachable</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Card per group</h3>
+      <p>More room per group (counts, sizes), but harder to scan 15 at once. History in a side drawer.</p>
+      <div class="ss">
+        <div class="bar"><span class="t">Seed / Export</span><button>History</button><button>Export all changed</button><button class="p">Seed all (preview)…</button></div>
+        <div class="grid">
+          <div class="card2"><h4>Tile Types <span class="b ok">in sync</span></h4>
+            <div class="row"><span class="m">Exported here</span><span>Oct 17 21:04</span></div>
+            <div class="row"><span class="m">In git</span><span>Oct 17 · desktop</span></div>
+            <div class="row"><span class="m">Seeded here</span><span>Oct 12 10:30</span></div>
+            <div class="row"><span class="m">Contents</span><span>42 rows · 18 MB</span></div>
+            <div class="acts"><button>Export</button><button>Seed…</button></div></div>
+          <div class="card2"><h4>Entities <span class="b warn">14 unexported</span></h4>
+            <div class="row"><span class="m">Exported here</span><span>Oct 10 18:22</span></div>
+            <div class="row"><span class="m">In git</span><span>Oct 10 · desktop</span></div>
+            <div class="row"><span class="m">Seeded here</span><span>Oct 10 18:40</span></div>
+            <div class="row"><span class="m">Contents</span><span>371 rows · 96 MB</span></div>
+            <div class="acts"><button>Export</button><button>Seed…</button></div></div>
+          <div class="card2"><h4>Items <span class="b info">git newer</span></h4>
+            <div class="row"><span class="m">Exported here</span><span>never</span></div>
+            <div class="row"><span class="m">In git</span><span>Oct 16 · laptop</span></div>
+            <div class="row"><span class="m">Seeded here</span><span>Oct 02 14:00</span></div>
+            <div class="row"><span class="m">Contents</span><span>210 rows · 4 MB</span></div>
+            <div class="acts"><button>Export</button><button>Seed…</button></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
