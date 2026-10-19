@@ -82,4 +82,4 @@ __pycache__/
 backend/src/restart-trigger.json
 
 # Seed/Export temp files (atomic write leftovers of a crashed export)
-backend/seeds/sync/*.tmp
+backend/seeds/**/*.tmp

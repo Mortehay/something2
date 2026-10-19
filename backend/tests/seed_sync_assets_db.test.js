@@ -660,3 +660,38 @@ dbTest('seed upload progress is monotonic across the group', async (t, pool, { s
   assert.deepStrictEqual(seen.map((p) => [p.phase, p.done, p.total]),
     [['upload', 1, 4], ['upload', 2, 4], ['upload', 3, 4], ['upload', 4, 4]]);
 });
+
+// Follow-up (final review, parked): a backend that dies mid-export leaves its
+// staged <file>.<pid>.<n>.tmp files under the assets root. The next export
+// sweeps those of DEAD processes in the group's dirs; a live process's staging
+// (another export in a CLI, say) and other .tmp names are left alone.
+dbTest('stale staged tmp files of a dead process are swept at export start', async (t, pool, { root, store }) => {
+  const { spawnSync } = require('node:child_process');
+  const deadPid = spawnSync(process.execPath, ['-e', '0']).pid;
+  await seedFixture(pool);
+  fs.mkdirSync(path.join(root, 'sx_tiles'), { recursive: true });
+  const dead = path.join(root, 'sx_tiles', `sx_a.png.${deadPid}.3.tmp`);
+  const live = path.join(root, 'sx_tiles', `sx_b.png.${process.ppid}.0.tmp`);
+  const other = path.join(root, 'sx_tiles', 'notes.tmp');
+  for (const f of [dead, live, other]) fs.writeFileSync(f, 'x');
+  await exportGroup(pool, 'sx_assets', { store });
+  assert.ok(!fs.existsSync(dead), "a dead process's staged file is removed");
+  assert.ok(fs.existsSync(live), "a live process's staged file is kept");
+  assert.ok(fs.existsSync(other), 'a .tmp that is not a staged name is kept');
+});
+
+// Follow-up: the pre-export verify diff reads one snapshot (REPEATABLE READ),
+// so a concurrent admin commit cannot make its statements disagree.
+dbTest('the staged-file verify runs in a REPEATABLE READ transaction', async (t, pool, { root, store }) => {
+  const { getGroup } = require('../src/services/seedSync/registry.js');
+  const { prepareExportAssets } = require('../src/services/seedSync/assets.js');
+  await seedFixture(pool);
+  await exportGroup(pool, 'sx_assets', { store });
+  fs.writeFileSync(path.join(root, 'sx_tiles', 'sx_a.png'), 'different bytes on disk');
+  let iso = null;
+  await prepareExportAssets(pool, store, getGroup('sx_assets'), {
+    verify: async (c) => { iso = (await c.query('SHOW transaction_isolation')).rows[0].transaction_isolation; },
+  });
+  assert.strictEqual(iso, 'repeatable read');
+  assert.deepStrictEqual(fs.readFileSync(path.join(root, 'sx_tiles/sx_a.png')), PNG_A, 'staged file placed after verify');
+});

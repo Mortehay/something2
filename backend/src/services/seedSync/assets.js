@@ -256,11 +256,14 @@ async function writeAtomic(root, abs, buf) {
 // different bytes on disk) in place, and records their cache entries, only
 // when `verify(client)` passes with those entries visible (in one
 // transaction: a refusal rolls them back). Outside the seed_sync lock.
+// REPEATABLE READ: verify's diff is several statements, and a concurrent admin
+// commit between them must not make them disagree. The snapshot starts at the
+// recordCache INSERT, so the staged entries stay visible to it.
 async function placeStaged(pool, root, staged, verify) {
   const client = await pool.connect();
   let releaseErr;
   try {
-    await client.query('BEGIN');
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
     await recordCache(client, staged.map((s) => s.entry).filter(Boolean));
     if (verify) await verify(client);
     for (const s of staged) {
@@ -273,6 +276,27 @@ async function placeStaged(pool, root, staged, verify) {
     throw e;
   } finally {
     client.release(releaseErr);
+  }
+}
+
+// stageFile's names: <file>.<pid>.<n>.tmp. A backend that dies mid-export
+// leaves them behind; an export sweeps those of processes no longer alive from
+// its own dirs (not recursive, symlinks skipped). A live pid's file is another
+// export in progress (a CLI run, say) and stays.
+const STAGED_RE = /\.(\d+)\.\d+\.tmp$/;
+function pidAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
+}
+async function sweepStaleStaged(root, dirs) {
+  for (const dir of dirs) {
+    const abs = resolveFile(root, dir);
+    if (!abs) continue;
+    let names;
+    try { names = await fs.promises.readdir(abs, { withFileTypes: true }); } catch (e) { if (e.code === 'ENOENT') continue; throw e; }
+    for (const d of names) {
+      const m = d.isFile() && STAGED_RE.exec(d.name);
+      if (m && !pidAlive(Number(m[1]))) await fs.promises.unlink(path.join(abs, d.name)).catch(() => {});
+    }
   }
 }
 
@@ -348,6 +372,7 @@ async function prepareExportAssets(pool, store, group, { onProgress, signal, ver
     }
   }
   if (sha1Missing.length) return { downloaded: 0, reused: 0, missing: [], sha1Missing, orphanFiles: 0 };
+  await sweepStaleStaged(root, dirs);
   const cache = await loadCache(pool, tasks.filter((t) => t.kind === 'cached').map((t) => t.key));
 
   // Which tasks need a download (and the bytes of what is on disk now).
