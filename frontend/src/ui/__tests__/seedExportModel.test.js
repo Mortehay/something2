@@ -371,6 +371,10 @@ describe('jobProgressText', () => {
       .toBe('Failed: regenerate or clear these images first');
     expect(jobProgressText(job({ status: 'ok' }), 'Art')).toBe('Exported');
     expect(jobProgressText(job({ status: 'ok', action: 'seed' }), 'Art')).toBe('Seeded');
+    expect(jobProgressText(job({ status: 'ok', result: { boxNote: 'GPU box notes: 2 problems on a\nGPU box notes: 1 problem on b' } }), 'Maps'))
+      .toBe('Exported — GPU box notes: 2 problems on a; GPU box notes: 1 problem on b');
+    expect(jobProgressText(job({ status: 'ok', result: { rowCount: 1 } }), 'Maps')).toBe('Exported');
+    expect(jobProgressText(job({ status: 'ok', action: 'seed', result: { boxNote: 'x' } }), 'Maps')).toBe('Seeded');
     expect(jobProgressText(job({ cancelRequested: true, phase: 'download', done: 1, total: 9 }), 'Art')).toBe('Cancelling…');
     expect(jobProgressText(null)).toBe('');
   });

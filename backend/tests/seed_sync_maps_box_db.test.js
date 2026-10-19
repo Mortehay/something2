@@ -165,7 +165,7 @@ const jres = (obj, status = 200) => new Response(JSON.stringify(obj), {
 });
 // A fake box: `boxes` = spec name -> the spec the box holds (absent = 404).
 // GET answers with ETag "etag-<name>"; `put` = { status, body } for the PUT.
-function fakeBox(boxes, { put = { status: 200, body: { problems: [] } } } = {}) {
+function fakeBox(boxes, { put = { status: 200, body: { problems: [] } }, getStatus = 200, noEtag = false } = {}) {
   const calls = [];
   const fetchImpl = async (url, opts = {}) => {
     const method = opts.method || 'GET';
@@ -174,8 +174,9 @@ function fakeBox(boxes, { put = { status: 200, body: { problems: [] } } } = {}) 
     calls.push({ method, name, path: parts.slice(4).join('/'), body: opts.body ? JSON.parse(opts.body) : null, headers: opts.headers });
     if (!(name in boxes)) return jres({ detail: 'not found' }, 404);
     if (method === 'GET') {
+      if (getStatus !== 200) return jres({ detail: 'nope' }, getStatus);
       return new Response(JSON.stringify(boxes[name]), {
-        status: 200, headers: { 'content-type': 'application/json', etag: `"etag-${name}"` },
+        status: 200, headers: { 'content-type': 'application/json', ...(noEtag ? {} : { etag: `"etag-${name}"` }) },
       });
     }
     return jres(put.body, put.status);
@@ -289,6 +290,90 @@ dbTest('box does not know spec: skipped silently, no note', async (ctx) => {
   assert.strictEqual(st.box_error, null);
   assert.strictEqual(st.box_pushed_sha256, `skipped:${st.exported_sha256}`);
   assert.strictEqual((await diffGroup(pool, 'maps')).note, undefined);
+});
+
+const A_BOX = () => ({ 'sx-m4-a': JSON.parse(canonicalSpecJson(specA())) });
+
+dbTest('problems are scrubbed, capped at 10 x 200 chars, count kept', async (ctx) => {
+  const { pool } = ctx;
+  await editedA(ctx);
+  const many = Array.from({ length: 12 }, (_, i) => `p${i} sx-secret-token-123 ${'x'.repeat(300)}`);
+  const { deps } = fakeBox(A_BOX(), { put: { status: 200, body: { problems: many } } });
+  const ex = await exportGroup(pool, 'maps', { pushToBox: true, boxDeps: deps });
+  assert.strictEqual(ex.box[0].problems.length, 10);
+  assert.strictEqual(ex.box[0].problemCount, 12);
+  assert.ok(ex.box[0].problems.every((p) => p.length <= 200 && !p.includes('sx-secret-token-123')));
+  assert.strictEqual(ex.boxNote, 'GPU box notes: 12 problems on sx-m4-a');
+});
+
+dbTest('GET 401: auth_failed naming the connector, fatal', async (ctx) => {
+  const { pool } = ctx;
+  await editedA(ctx);
+  const { calls, deps } = fakeBox(A_BOX(), { getStatus: 401 });
+  const ex = await exportGroup(pool, 'maps', { pushToBox: true, boxDeps: deps });
+  assert.strictEqual(ex.box[0].status, 'failed');
+  assert.deepStrictEqual(calls.map((c) => c.method), ['GET']);
+  const st = await stateOf(pool, 'sx-m4-a');
+  assert.match(st.box_error, /^auth_failed: .*"sx box".*revoked.*update the AI provider token/);
+  assert.ok(st.box_error.length <= 300);
+});
+
+dbTest('PUT 403: auth_failed, the remaining specs are not tried', async (ctx) => {
+  const { pool } = ctx;
+  await editedA(ctx);
+  await pool.query(`INSERT INTO map_spec_state (spec_name, exported_sha256) VALUES ('sx-m4-b', 'abc')
+                    ON CONFLICT (spec_name) DO UPDATE SET exported_sha256 = 'abc'`);
+  await exportGroup(pool, 'maps');
+  const { calls, deps } = fakeBox({ ...A_BOX(), 'sx-m4-b': JSON.parse(canonicalSpecJson(specB())) }, { put: { status: 403, body: {} } });
+  const res = await mapsGroup.pushToBox(pool, ['sx-m4-a', 'sx-m4-b'], deps);
+  assert.ok(res.every((r) => r.status === 'failed' && /^auth_failed: /.test(r.error)));
+  assert.deepStrictEqual(calls.map((c) => `${c.method} ${c.name}`), ['GET sx-m4-a', 'PUT sx-m4-a']);
+});
+
+dbTest('PUT 404 after a good GET: failed (not skipped), retryable, shown in the note, not fatal', async (ctx) => {
+  const { pool } = ctx;
+  await editedA(ctx);
+  await pool.query(`INSERT INTO map_spec_state (spec_name, exported_sha256) VALUES ('sx-m4-b', 'abc')
+                    ON CONFLICT (spec_name) DO UPDATE SET exported_sha256 = 'abc'`);
+  await exportGroup(pool, 'maps');
+  const { calls, deps } = fakeBox({ ...A_BOX(), 'sx-m4-b': JSON.parse(canonicalSpecJson(specB())) }, { put: { status: 404, body: {} } });
+  const res = await mapsGroup.pushToBox(pool, ['sx-m4-a', 'sx-m4-b'], deps);
+  assert.deepStrictEqual(res.map((r) => r.status), ['failed', 'failed']);
+  assert.deepStrictEqual(calls.map((c) => `${c.method} ${c.name}`), ['GET sx-m4-a', 'PUT sx-m4-a', 'GET sx-m4-b', 'PUT sx-m4-b']);
+  const st = await stateOf(pool, 'sx-m4-a');
+  assert.strictEqual(st.box_error, 'not_found: PUT /spec returned 404 after the GET succeeded — the box may lack the spec endpoint');
+  assert.ok(!String(st.box_pushed_sha256).startsWith('skipped:'));
+  assert.ok(require('../src/services/seedSync/mapsBoxPush.js').needsPush(st));
+  assert.strictEqual((await diffGroup(pool, 'maps')).note.split('\n')[0], `GPU box not updated: sx-m4-a: ${st.box_error}`);
+});
+
+dbTest('PUT 428: failed service_error, recorded', async (ctx) => {
+  const { pool } = ctx;
+  await editedA(ctx);
+  const { deps } = fakeBox(A_BOX(), { put: { status: 428, body: { detail: 'If-Match required' } } });
+  const ex = await exportGroup(pool, 'maps', { pushToBox: true, boxDeps: deps });
+  assert.strictEqual(ex.box[0].status, 'failed');
+  assert.match((await stateOf(pool, 'sx-m4-a')).box_error, /^service_error: .*428/);
+});
+
+dbTest('GET without an ETag: failed, no PUT sent', async (ctx) => {
+  const { pool } = ctx;
+  await editedA(ctx);
+  const { calls, deps } = fakeBox(A_BOX(), { noEtag: true });
+  const ex = await exportGroup(pool, 'maps', { pushToBox: true, boxDeps: deps });
+  assert.strictEqual(ex.box[0].status, 'failed');
+  assert.deepStrictEqual(calls.map((c) => c.method), ['GET']);
+  assert.match((await stateOf(pool, 'sx-m4-a')).box_error, /^service_error: .*ETag/);
+});
+
+test('putWorldSpec refuses If-Match * and an empty etag without calling the box', async () => {
+  const wg = require('../src/services/worldGenService.js');
+  let called = 0;
+  const deps = { fetchImpl: async () => { called += 1; return jres({}); } };
+  for (const bad of ['*', ' * ', '', null, undefined]) {
+    await assert.rejects(() => wg.putWorldSpec(serviceDb, 'sx-m4-a', {}, bad, deps), (e) => e.code === 'bad_etag');
+  }
+  assert.strictEqual(called, 0);
 });
 
 dbTest('box PUT 500: service_error recorded, token never in box_error', async (ctx) => {

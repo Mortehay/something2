@@ -317,7 +317,12 @@ export function jobProgressText(job, label) {
   if (!job) return '';
   if (job.status === 'cancelled') return 'Cancelled';
   if (job.status === 'failed') return `Failed: ${job.error || 'unknown error'}`;
-  if (job.status === 'ok') return job.action === 'seed' ? 'Seeded' : 'Exported';
+  if (job.status === 'ok') {
+    if (job.action === 'seed') return 'Seeded';
+    // Maps: the GPU box's informational notes ride on the export result.
+    const n = job.result && typeof job.result.boxNote === 'string' ? job.result.boxNote : '';
+    return n ? `Exported — ${n.split('\n').join('; ')}` : 'Exported';
+  }
   if (job.cancelRequested) return 'Cancelling…';
   const total = Number(job.total) || 0;
   if (total === 0) return 'Writing database…';

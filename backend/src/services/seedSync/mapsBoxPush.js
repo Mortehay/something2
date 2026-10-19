@@ -79,7 +79,18 @@ async function setState(db, name, pushed, error) {
 }
 
 const BOX_CHANGED = 'box_changed: the region changed on the GPU box since this export — review it there, then export again';
-const AUTH_FAILED = 'auth_failed: the GPU box rejected the token (it may be revoked) — update the AI provider token, then export again';
+const authFailedText = (provider) => `auth_failed: the GPU box rejected the token of AI connector "${provider || '?'}" (it may be revoked) — update the AI provider token, then export again`;
+const PUT_404 = 'not_found: PUT /spec returned 404 after the GET succeeded — the box may lack the spec endpoint';
+const MAX_PROBLEMS = 10;
+const MAX_PROBLEM_LEN = 200;
+
+// The box's informational problems: scrubbed, at most 10 of 200 chars, plus
+// the full count. -> { problems: string[], problemCount }
+function cleanProblems(list, token) {
+  const arr = Array.isArray(list) ? list : [];
+  const problems = arr.slice(0, MAX_PROBLEMS).map((p) => scrub(typeof p === 'string' ? p : JSON.stringify(p), token).slice(0, MAX_PROBLEM_LEN));
+  return { problems, problemCount: arr.length };
+}
 
 function rejectedText(body, token) {
   const d = body && body.detail;
@@ -99,7 +110,12 @@ async function pushToBox(db, specNames, deps = {}, opts = {}) {
   const total = specNames.length;
   const progress = (done) => { if (opts.onProgress) opts.onProgress({ phase: 'box', done, total }); };
   let token = null;
-  try { token = (await wg.resolveWorldService(svcDb)).provider.auth_token; } catch { /* reported per spec */ }
+  let providerName = null;
+  try {
+    const svc = await wg.resolveWorldService(svcDb);
+    token = svc.provider.auth_token;
+    providerName = svc.providerName;
+  } catch { /* reported per spec */ }
   const states = await readStates(db);
   let fatal = null;
   progress(0);
@@ -137,21 +153,21 @@ async function pushToBox(db, specNames, deps = {}, opts = {}) {
             put = { status: 404 };
           }
           if (put.status === 404) {
-            await setState(db, name, skippedMarker(sha), null);
-            res = { spec: name, status: 'skipped', error: null };
+            // A race or a box without the /spec route: never a skip.
+            await setState(db, name, st.box_pushed_sha256 || null, PUT_404);
+            res = { spec: name, status: 'failed', error: PUT_404 };
           } else if (put.status === 409 || put.status === 422) {
             const error = put.status === 409 ? BOX_CHANGED : rejectedText(put.body, token);
             await setState(db, name, st.box_pushed_sha256 || null, error);
             res = { spec: name, status: 'failed', error };
           } else {
             await setState(db, name, sha, null);
-            const problems = put.body && Array.isArray(put.body.problems) ? put.body.problems : [];
-            res = { spec: name, status: 'pushed', error: null, problems };
+            res = { spec: name, status: 'pushed', error: null, ...cleanProblems(put.body && put.body.problems, token) };
           }
         }
       }
     } catch (e) {
-      const error = (e && e.code === 'auth_failed') ? AUTH_FAILED : errorText(e, token);
+      const error = (e && e.code === 'auth_failed') ? authFailedText(providerName).slice(0, MAX_ERROR) : errorText(e, token);
       if (e && FATAL.has(e.code)) fatal = error;
       try { await setState(db, name, st ? st.box_pushed_sha256 : null, error); } catch { /* best effort */ }
       res = { spec: name, status: 'failed', error };
@@ -165,8 +181,8 @@ async function pushToBox(db, specNames, deps = {}, opts = {}) {
 // Informational: "GPU box notes: N problems on <spec>" per pushed spec the box
 // flagged. Never an error, never blocks. [] -> null.
 function problemsNote(results) {
-  const lines = (results || []).filter((r) => r.problems && r.problems.length)
-    .map((r) => `GPU box notes: ${r.problems.length} problem${r.problems.length === 1 ? '' : 's'} on ${r.spec}`);
+  const lines = (results || []).filter((r) => r.problemCount > 0)
+    .map((r) => `GPU box notes: ${r.problemCount} problem${r.problemCount === 1 ? '' : 's'} on ${r.spec}`);
   if (!lines.length) return null;
   const shown = lines.slice(0, MAX_NOTE_LINES);
   if (lines.length > MAX_NOTE_LINES) shown.push(`+${lines.length - MAX_NOTE_LINES} more`);
