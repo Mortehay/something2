@@ -118,6 +118,10 @@ async function exportGroup(pool, groupId, opts = {}) {
     }
     const store = opts.store || require('../assetStore.js');
     const prep = await prepareExportAssets(pool, store, group, { onProgress: opts.onProgress, signal: opts.signal });
+    if (prep.sha1Missing.length) {
+      throw new SyncRefused('audio_sha1_missing',
+        'these clips have no sha1; regenerate or re-upload them first', { rows: prep.sha1Missing });
+    }
     if (prep.missing.length) {
       throw new SyncRefused('assets_missing', 'regenerate or clear these images first', { rows: prep.missing });
     }

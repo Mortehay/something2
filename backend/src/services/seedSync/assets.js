@@ -257,11 +257,16 @@ const keyText = (spec, row) => spec.naturalKey.map((k) => (typeof row[k] === 'st
 // or differs from the cached sha256 (then it keeps its recorded path). Audio is
 // fetched when its file is missing or its sha1 differs from the row's sha1.
 // Every object to fetch is checked first: any missing -> nothing is written
-// and `missing` lists them. Never under the seed_sync lock (long); the export
-// re-reads the cache under the lock and refuses a key it does not find.
+// and `missing` lists them. An audio row with no sha1 -> nothing is fetched
+// or written and `sha1Missing` lists them ({ table, key, label }). Never under
+// the seed_sync lock (long); the export re-reads the cache under the lock and
+// refuses a key it does not find.
 async function prepareExportAssets(pool, store, group, { onProgress, signal } = {}) {
   const root = path.resolve(assetsRoot());
   const tasks = []; // { kind: 'cached'|'audio', key, base, ext, maxEdge, file, sha1, table, rowKey }
+  // Audio travels by the row's sha1 (no cache): without one the value would
+  // read as a mismatch on every other PC. Refused before any file is written.
+  const sha1Missing = [];
   const seenKeys = new Set();
   const dirs = new Set();
   for (const spec of tableSpecs(group)) {
@@ -283,11 +288,13 @@ async function prepareExportAssets(pool, store, group, { onProgress, signal } = 
           if (!isEmpty(v.atlas_key)) add({ kind: 'cached', key: v.atlas_key, base: `${dir}/${name}.atlas`, ext: 'png' });
           if (!isEmpty(v.manifest_key)) add({ kind: 'cached', key: v.manifest_key, base: `${dir}/${name}.manifest`, ext: 'json' });
         } else if (a.type === 'audio' && typeof v === 'string') {
+          if (isEmpty(row.sha1)) sha1Missing.push({ table: spec.table, key: keyText(spec, row), label: row.label });
           add({ kind: 'audio', key: v, file: audioFile(a, row), sha1: row.sha1 });
         }
       }
     }
   }
+  if (sha1Missing.length) return { downloaded: 0, reused: 0, missing: [], sha1Missing, orphanFiles: 0 };
   const cache = await loadCache(pool, tasks.filter((t) => t.kind === 'cached').map((t) => t.key));
 
   // Which tasks need a download (and the bytes of what is on disk now).
@@ -313,7 +320,7 @@ async function prepareExportAssets(pool, store, group, { onProgress, signal } = 
     checkCancel(signal);
     if (!(await store.objectExists(t.key))) missing.push({ table: t.table, key: t.rowKey, objectKey: t.key });
   }
-  if (missing.length) return { downloaded: 0, reused, missing, orphanFiles: 0 };
+  if (missing.length) return { downloaded: 0, reused, missing, sha1Missing: [], orphanFiles: 0 };
 
   await fs.promises.mkdir(root, { recursive: true });
   matchOwner(root, path.dirname(root));
@@ -353,7 +360,7 @@ async function prepareExportAssets(pool, store, group, { onProgress, signal } = 
     try { names = await fs.promises.readdir(abs, { withFileTypes: true }); } catch (e) { if (e.code === 'ENOENT') continue; throw e; }
     for (const d of names) if (d.isFile() && !used.has(path.join(abs, d.name))) orphanFiles += 1;
   }
-  return { downloaded, reused, missing: [], orphanFiles };
+  return { downloaded, reused, missing: [], sha1Missing: [], orphanFiles };
 }
 
 const SHA256_RE = /^[0-9a-f]{64}$/;

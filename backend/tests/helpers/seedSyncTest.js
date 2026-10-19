@@ -59,7 +59,27 @@ async function cleanupSx(pool) {
     UNION ALL SELECT c.sync_uuid FROM class_loadouts c
       JOIN entity_types e ON e.id = c.entity_type_id JOIN item_types i ON i.id = c.item_type_id
       LEFT JOIN item_types s ON s.id = c.socket_into_item_type_id
-      WHERE e.name LIKE 'sx\\_%' OR i.name LIKE 'sx\\_%' OR s.name LIKE 'sx\\_%'`);
+      WHERE e.name LIKE 'sx\\_%' OR i.name LIKE 'sx\\_%' OR s.name LIKE 'sx\\_%'
+    UNION ALL SELECT sync_uuid FROM catalog_art WHERE subject_key LIKE 'sx\\_%'
+    UNION ALL SELECT sync_uuid FROM art_prompt_descriptions WHERE subject_key LIKE 'sx\\_%'
+    UNION ALL SELECT sync_uuid FROM art_prompt_notes WHERE subject_key LIKE 'sx\\_%'
+    UNION ALL SELECT a.sync_uuid FROM character_appearances a JOIN entity_types e ON e.id = a.entity_type_id
+      WHERE e.name LIKE 'sx\\_%'
+    UNION ALL SELECT sync_uuid FROM audio_clips WHERE label LIKE 'sx\\_%'
+    UNION ALL SELECT sync_uuid FROM audio_bindings WHERE subject_key LIKE 'sx\\_%'
+    UNION ALL SELECT sync_uuid FROM audio_prompts WHERE subject_key LIKE 'sx\\_%'`);
+  // Art / audio fixtures (plan 3) first: appearances reference sx_ entities
+  // (NO ACTION), and characters / sprite_sets reference appearances.
+  await pool.query("DELETE FROM users WHERE username LIKE 'sx\\_%'");
+  await pool.query("DELETE FROM sprite_sets WHERE creature LIKE 'sx\\_%'");
+  await pool.query(`DELETE FROM character_appearances WHERE entity_type_id IN
+    (SELECT id FROM entity_types WHERE name LIKE 'sx\\_%')`);
+  await pool.query("DELETE FROM catalog_art WHERE subject_key LIKE 'sx\\_%'");
+  await pool.query("DELETE FROM art_prompt_descriptions WHERE subject_key LIKE 'sx\\_%'");
+  await pool.query("DELETE FROM art_prompt_notes WHERE subject_key LIKE 'sx\\_%'");
+  await pool.query("DELETE FROM audio_bindings WHERE subject_key LIKE 'sx\\_%'");
+  await pool.query("DELETE FROM audio_clips WHERE label LIKE 'sx\\_%'");
+  await pool.query("DELETE FROM audio_prompts WHERE subject_key LIKE 'sx\\_%'");
   await pool.query("DELETE FROM quests WHERE key LIKE 'sx\\_%'");
   await pool.query("DELETE FROM tile_types WHERE name LIKE 'sx\\_%'");
   await pool.query("DELETE FROM ai_providers WHERE name LIKE 'sx\\_%'");

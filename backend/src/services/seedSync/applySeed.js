@@ -343,12 +343,15 @@ function paramsFor(columns, row) {
 }
 
 // Not scoped by rowFilter (a git row that exists here but is filtered out is
-// overwritten); a versioned table conflicts on its active version only.
+// overwritten); a versioned table conflicts on its active version only. When
+// its sync_uuid is UNIQUE outright (art_prompt_notes: one row per note, a
+// delete deactivates it), the conflict can hit the deactivated row: it is
+// reactivated, else git's row would be written yet stay invisible.
 async function upsertFromGit(db, spec, columns, row) {
   const names = columns.map((c) => quoteIdent(c.name));
   const vals = paramsFor(columns, row);
   const ph = vals.map((_, i) => `$${i + 2}`).join(', ');
-  const set = names.map((n) => `${n} = EXCLUDED.${n}`).join(', ');
+  const set = names.map((n) => `${n} = EXCLUDED.${n}`).join(', ') + (spec.versioned ? ', active = true' : '');
   const target = spec.versioned ? '(sync_uuid) WHERE active' : '(sync_uuid)';
   const res = await db.query(
     `INSERT INTO ${quoteIdent(spec.table)} (sync_uuid, ${names.join(', ')}) VALUES ($1, ${ph})
@@ -672,6 +675,12 @@ async function applySeed(pool, groupId, decisions, opts = {}) {
 
     // 1. Deletes, children first (reverse table order), before any write: a
     // git row may take the natural key of a local row deleted in this seed.
+    // The rows were picked by the (scoped) diff and locked FOR UPDATE above,
+    // so only `active` is re-applied here (a versioned table shares one
+    // sync_uuid across versions), never the rowFilter: it may read the
+    // group's own children (audio_clips: EXISTS a binding), which the
+    // children-first deletes just removed.
+    const deleteScope = (spec) => (spec.versioned ? ' AND active' : '');
     for (const spec of [...specs].reverse()) {
       const uuids = by('delete', (r) => r.table === spec.table).map((s) => s.row.syncUuid);
       if (!uuids.length) continue;
@@ -681,11 +690,11 @@ async function applySeed(pool, groupId, decisions, opts = {}) {
         if (ref.table !== spec.table || spec.versioned) continue;
         await client.query(
           `UPDATE ${quoteIdent(spec.table)} SET ${quoteIdent(col)} = NULL
-            WHERE sync_uuid = ANY($1::uuid[]) AND ${quoteIdent(col)} IS NOT NULL${scopeSql(spec)}`, [uuids]);
+            WHERE sync_uuid = ANY($1::uuid[]) AND ${quoteIdent(col)} IS NOT NULL${deleteScope(spec)}`, [uuids]);
       }
       const res = await client.query(spec.versioned
-        ? `UPDATE ${quoteIdent(spec.table)} SET active = false WHERE sync_uuid = ANY($1::uuid[])${scopeSql(spec)}`
-        : `DELETE FROM ${quoteIdent(spec.table)} WHERE sync_uuid = ANY($1::uuid[])${scopeSql(spec)}`, [uuids]);
+        ? `UPDATE ${quoteIdent(spec.table)} SET active = false WHERE sync_uuid = ANY($1::uuid[])${deleteScope(spec)}`
+        : `DELETE FROM ${quoteIdent(spec.table)} WHERE sync_uuid = ANY($1::uuid[])${deleteScope(spec)}`, [uuids]);
       if (res.rowCount !== uuids.length) {
         throw new Error(`delete ${spec.table}: expected ${uuids.length} rows, got ${res.rowCount}`);
       }

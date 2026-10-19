@@ -77,8 +77,19 @@ function dbTest(name, body) {
   });
 }
 
+// `--all` includes the binary groups (art, audio): their repo files go under
+// the temp sync dir, and the object store is pointed at a closed port, so the
+// child can never read the real store (the scratch DB holds no asset keys
+// anyway: those groups export without touching it).
 function cli(args, env = {}) {
-  const base = { ...process.env, DATABASE_URL: DB_URL, SEED_SYNC_DIR: process.env.SEED_SYNC_DIR };
+  const base = {
+    ...process.env,
+    DATABASE_URL: DB_URL,
+    SEED_SYNC_DIR: process.env.SEED_SYNC_DIR,
+    SEED_ASSETS_ROOT: path.join(process.env.SEED_SYNC_DIR, 'assets'),
+    MINIO_ENDPOINT: 'http://127.0.0.1:1',
+    MINIO_PORT: '1',
+  };
   for (const [k, v] of Object.entries(env)) { if (v === null) delete base[k]; else base[k] = v; }
   const r = spawnSync(process.execPath, [SCRIPT, ...args], { env: base, encoding: 'utf8', timeout: 120000 });
   const lines = r.stdout.split('\n').filter(Boolean);

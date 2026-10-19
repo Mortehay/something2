@@ -326,6 +326,7 @@ test('coverage: art-omitted columns sit in exactly one slice; slice columns are 
     'column a.w is in a slice but the full spec of a exports it',
     'column a.x is in 2 slices',
     'column a.y is omitted as art but in no slice',
+    'column b.q is omitted as art but in no slice',
   ]);
   const ok = [
     { table: 'a', naturalKey: ['name'], omit: { id: 'local', x: ART, y: ART } },

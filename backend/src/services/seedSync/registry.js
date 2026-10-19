@@ -22,17 +22,22 @@
 //  - rowFilter: string -- an SQL predicate over UNQUALIFIED columns of
 //    spec.table (a subquery may name the table itself, e.g.
 //    `EXISTS (SELECT 1 FROM audio_bindings b WHERE b.clip_id = audio_clips.id)`).
-//    Only rows it holds for are synced: every SELECT, lock-for-update, UPDATE
-//    and DELETE the engine issues for the table ANDs it in via scopeSql(), so
-//    a filtered-out row is never exported, listed, deleted or adopted. The
+//    Only rows it holds for are synced: every SELECT, lock-for-update and
+//    UPDATE the engine issues for the table ANDs it in via scopeSql(), so a
+//    filtered-out row is never exported, listed, deleted or adopted. The
 //    upsert of a git row (INSERT ... ON CONFLICT (sync_uuid)) is not filtered:
 //    a git row that exists here but is filtered out is overwritten by it.
+//    Apply's DELETE does not re-apply it (only `active`): its rows were picked
+//    by the scoped diff and locked, and the filter may read children the same
+//    seed deleted first (an audio clip whose bindings go with it).
 //  - versioned: true -- a history table with an `active` flag whose versions
 //    share the subject's sync_uuid (partial UNIQUE (sync_uuid) WHERE active).
 //    Implies the filter `active` (ANDed with any rowFilter); the upsert
-//    targets ON CONFLICT (sync_uuid) WHERE active, and a delete deactivates
-//    the active row (UPDATE ... SET active = false) instead of deleting it.
-//    Inactive history rows are never read or written.
+//    targets ON CONFLICT (sync_uuid) WHERE active (and sets active = true:
+//    with a plain UNIQUE (sync_uuid), as art_prompt_notes has, it may hit a
+//    deactivated row), and a delete deactivates the active row
+//    (UPDATE ... SET active = false) instead of deleting it.
+//    Inactive history rows are never read, and written only in that case.
 //  - slice: true, columns: string[] -- the group owns only `columns` of a
 //    table another group (the "owner", a full spec of the same table) owns.
 //    naturalKey and sync_uuid are read (display, deep keys, hashes) but never
@@ -332,6 +337,132 @@ const GROUPS = [
       secretColumns: [],
       refs: {},
     }],
+  },
+  // Binary groups (plan 3): rows plus repo files (asset columns). Last: their
+  // slices update rows the data groups above create.
+  {
+    id: 'art',
+    label: 'Art',
+    binary: true,
+    tables: [
+      {
+        table: 'catalog_art',
+        naturalKey: ['subject_kind', 'subject_key'],
+        omit: { created_at: 'local', updated_at: 'local', sync_uuid: 'identity' },
+        secretColumns: [],
+        refs: { provider_id: { table: 'ai_providers', by: 'uuid' } },
+        assets: {
+          image: {
+            type: 'image',
+            dir: (r) => ({
+              skill: 'textures/skills',
+              passive_label: 'textures/passives',
+              character_appearance: 'textures/character-appearances',
+              item: 'textures/items',
+            }[r.subject_kind] || `textures/catalog/${r.subject_kind}`),
+            // Icons are capped like the legacy exporter does.
+            maxEdge: (r) => (['skill', 'passive_label', 'item'].includes(r.subject_kind) ? 256 : null),
+          },
+        },
+      },
+      {
+        table: 'art_prompt_descriptions',
+        versioned: true,
+        naturalKey: ['subject_kind', 'subject_key'],
+        omit: { id: 'local', created_at: 'local', active: 'versioned: only the active version syncs', sync_uuid: 'identity' },
+        secretColumns: [],
+        refs: {},
+      },
+      {
+        table: 'art_prompt_notes',
+        versioned: true,
+        naturalKey: ['subject_kind', 'subject_key', 'kind', 'note'],
+        omit: { id: 'local', created_at: 'local', active: 'versioned: only active notes sync', sync_uuid: 'identity' },
+        secretColumns: [],
+        refs: {},
+      },
+      {
+        table: 'character_appearances',
+        naturalKey: ['entity_type_id', 'variant'],
+        omit: { updated_at: 'local', sync_uuid: 'identity' },
+        secretColumns: [],
+        refs: { entity_type_id: { table: 'entity_types', by: 'uuid' } },
+        assets: {
+          image: { type: 'image', dir: 'textures/character-appearances' },
+          sprite: { type: 'sprite', dir: 'textures/sprites/character_appearances' },
+        },
+      },
+      {
+        table: 'tile_types',
+        slice: true,
+        columns: ['image', 'render_mode', 'sprite'],
+        naturalKey: ['name'],
+        omit: {},
+        secretColumns: [],
+        refs: {},
+        assets: {
+          image: { type: 'image', dir: 'textures/tiles' },
+          sprite: { type: 'sprite', dir: 'textures/sprites/tile_types' },
+        },
+      },
+      {
+        table: 'entity_types',
+        slice: true,
+        columns: ['image', 'sprite', 'render_mode', 'display_width', 'display_height', 'prompt'],
+        naturalKey: ['name'],
+        omit: {},
+        secretColumns: [],
+        refs: {},
+        assets: {
+          image: { type: 'image', dir: 'textures/entities' },
+          sprite: { type: 'sprite', dir: 'textures/sprites/entity_types' },
+        },
+      },
+      {
+        table: 'item_types',
+        slice: true,
+        columns: ['icon'],
+        naturalKey: ['name'],
+        omit: {},
+        secretColumns: [],
+        refs: {},
+        assets: { icon: { type: 'image', dir: 'textures/items', maxEdge: 256 } },
+      },
+    ],
+  },
+  {
+    id: 'audio',
+    label: 'Audio',
+    binary: true,
+    tables: [
+      {
+        // The clip has no natural key of its own (a rename is a label edit):
+        // its identity is the key. Unbound clips stay on their PC.
+        table: 'audio_clips',
+        naturalKey: ['sync_uuid'],
+        rowFilter: 'EXISTS (SELECT 1 FROM audio_bindings b WHERE b.clip_id = audio_clips.id)',
+        // sync_uuid is read for the key like every row's, never as a column.
+        omit: { id: 'local', created_at: 'local', sync_uuid: 'identity' },
+        secretColumns: [],
+        refs: { provider_id: { table: 'ai_providers', by: 'uuid' } },
+        assets: { storage_key: { type: 'audio', dir: (r) => `audio/${r.kind}` } },
+      },
+      {
+        table: 'audio_bindings',
+        naturalKey: ['subject_kind', 'subject_key', 'slot', 'clip_id'],
+        omit: { id: 'local', created_at: 'local', sync_uuid: 'identity' },
+        secretColumns: [],
+        refs: { clip_id: { table: 'audio_clips', by: 'uuid' } },
+      },
+      {
+        table: 'audio_prompts',
+        versioned: true,
+        naturalKey: ['subject_kind', 'subject_key', 'slot'],
+        omit: { id: 'local', created_at: 'local', active: 'versioned: only the active version syncs', sync_uuid: 'identity' },
+        secretColumns: [],
+        refs: {},
+      },
+    ],
   },
 ];
 

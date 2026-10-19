@@ -8,13 +8,13 @@
 // as ART sits in exactly one slice (sliceProblems).
 const { GROUPS, tableSpecs } = require('./registry.js');
 
-const P3 = 'plan 3 (art/sprites/audio)';
 const P4 = 'plan 4 (maps)';
 
 const EXCLUDED = {
   // machine-local job / history / queue state
   art_jobs: 'machine-local art job queue',
   art_generations: 'machine-local generation history',
+  sprite_sets: 'machine-local sprite job queue; approved atlases travel in the sprite columns (art group)',
   audio_jobs: 'machine-local audio job queue',
   audio_misses: 'machine-local log of unbound audio lookups',
   // runtime / world state
@@ -56,14 +56,6 @@ const EXCLUDED = {
 };
 
 const PENDING = {
-  catalog_art: P3,
-  art_prompt_descriptions: P3,
-  art_prompt_notes: P3,
-  sprite_sets: P3,
-  character_appearances: P3,
-  audio_clips: P3,
-  audio_bindings: P3,
-  audio_prompts: P3,
   worlds: P4,
   map_links: P4,
   waypoints: P4,
@@ -86,12 +78,14 @@ function groupTables(specs = allSpecs()) {
   return specs.filter((s) => !s.slice).map((s) => s.table);
 }
 
-// Slice coverage per sliced table: a full spec exists, no column is in two
-// slices, every slice column is omitted by the full spec, and every column
-// the full spec omits as ART is in a slice. Sorted problem strings.
+// Slice coverage, sorted problem strings: every sliced table has a full
+// spec, no column is in two slices, every slice column is omitted by the full
+// spec, and every column a full spec omits as ART is in a slice -- for EVERY
+// full spec, so a table whose slice was never registered is caught too.
 function sliceProblems(specs) {
   const out = [];
-  const tables = [...new Set(specs.filter((s) => s.slice).map((s) => s.table))].sort();
+  const artOmitting = specs.filter((s) => !s.slice && Object.values(s.omit || {}).includes(ART)).map((s) => s.table);
+  const tables = [...new Set([...specs.filter((s) => s.slice).map((s) => s.table), ...artOmitting])].sort();
   for (const t of tables) {
     const full = specs.find((s) => s.table === t && !s.slice);
     if (!full) { out.push(`slices of ${t} have no full spec`); continue; }

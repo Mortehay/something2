@@ -30,9 +30,74 @@ function dbTest(name, body) {
 test('getGroup throws on unknown id and GROUPS is in seed order', () => {
   assert.deepStrictEqual(GROUPS.map((g) => g.id), [
     'ai_providers', 'tile_types', 'items', 'attack_effects', 'aura_effects', 'creature_behaviors', 'entities',
-    'biomes', 'skill_tree', 'progression', 'quests',
+    'biomes', 'skill_tree', 'progression', 'quests', 'art', 'audio',
   ]);
   assert.throws(() => getGroup('nope'), /unknown group/);
+});
+
+// Plan 3: the binary groups (rows + repo files) come last, flagged binary.
+test('art and audio are binary groups writing their tables in order', () => {
+  for (const g of GROUPS) {
+    if (['art', 'audio'].includes(g.id)) assert.strictEqual(g.binary, true, g.id);
+    else assert.ok(!('binary' in g), `${g.id}: binary absent`);
+  }
+  assert.strictEqual(getGroup('art').label, 'Art');
+  assert.strictEqual(getGroup('audio').label, 'Audio');
+  const shape = (id) => tableSpecs(getGroup(id)).map((s) => (s.slice ? `${s.table}[${s.columns.join(',')}]` : s.table));
+  assert.deepStrictEqual(shape('art'), [
+    'catalog_art', 'art_prompt_descriptions', 'art_prompt_notes', 'character_appearances',
+    'tile_types[image,render_mode,sprite]',
+    'entity_types[image,sprite,render_mode,display_width,display_height,prompt]',
+    'item_types[icon]',
+  ]);
+  assert.deepStrictEqual(shape('audio'), ['audio_clips', 'audio_bindings', 'audio_prompts']);
+
+  const art = Object.fromEntries(tableSpecs(getGroup('art')).map((s) => [s.table, s]));
+  assert.deepStrictEqual(art.catalog_art.naturalKey, ['subject_kind', 'subject_key']);
+  assert.deepStrictEqual(art.catalog_art.refs, { provider_id: { table: 'ai_providers', by: 'uuid' } });
+  const ca = art.catalog_art.assets.image;
+  assert.strictEqual(ca.type, 'image');
+  const dirs = { skill: 'textures/skills', passive_label: 'textures/passives', character_appearance: 'textures/character-appearances', item: 'textures/items', boss: 'textures/catalog/boss' };
+  for (const [kind, dir] of Object.entries(dirs)) assert.strictEqual(ca.dir({ subject_kind: kind }), dir, kind);
+  for (const kind of ['skill', 'passive_label', 'item']) assert.strictEqual(ca.maxEdge({ subject_kind: kind }), 256, kind);
+  for (const kind of ['character_appearance', 'boss']) assert.strictEqual(ca.maxEdge({ subject_kind: kind }), null, kind);
+  for (const t of ['art_prompt_descriptions', 'art_prompt_notes']) {
+    assert.strictEqual(art[t].versioned, true, t);
+    for (const c of ['id', 'created_at', 'active']) assert.ok(art[t].omit[c], `${t}.${c} omitted`);
+  }
+  assert.deepStrictEqual(art.art_prompt_descriptions.naturalKey, ['subject_kind', 'subject_key']);
+  assert.deepStrictEqual(art.art_prompt_notes.naturalKey, ['subject_kind', 'subject_key', 'kind', 'note']);
+  assert.deepStrictEqual(art.character_appearances.naturalKey, ['entity_type_id', 'variant']);
+  assert.deepStrictEqual(art.character_appearances.refs, { entity_type_id: { table: 'entity_types', by: 'uuid' } });
+  assert.deepStrictEqual(art.character_appearances.assets, {
+    image: { type: 'image', dir: 'textures/character-appearances' },
+    sprite: { type: 'sprite', dir: 'textures/sprites/character_appearances' },
+  });
+  assert.deepStrictEqual(art.tile_types.assets, {
+    image: { type: 'image', dir: 'textures/tiles' }, sprite: { type: 'sprite', dir: 'textures/sprites/tile_types' },
+  });
+  assert.deepStrictEqual(art.entity_types.assets, {
+    image: { type: 'image', dir: 'textures/entities' }, sprite: { type: 'sprite', dir: 'textures/sprites/entity_types' },
+  });
+  assert.deepStrictEqual(art.item_types.assets, { icon: { type: 'image', dir: 'textures/items', maxEdge: 256 } });
+  for (const t of ['tile_types', 'entity_types', 'item_types']) {
+    assert.strictEqual(art[t].slice, true, t);
+    assert.deepStrictEqual(art[t].naturalKey, ['name'], t);
+  }
+
+  const au = Object.fromEntries(tableSpecs(getGroup('audio')).map((s) => [s.table, s]));
+  assert.deepStrictEqual(au.audio_clips.naturalKey, ['sync_uuid']);
+  assert.strictEqual(au.audio_clips.rowFilter, 'EXISTS (SELECT 1 FROM audio_bindings b WHERE b.clip_id = audio_clips.id)');
+  assert.strictEqual(au.audio_clips.omit.id, 'local');
+  assert.ok(au.audio_clips.omit.created_at);
+  assert.deepStrictEqual(au.audio_clips.refs, { provider_id: { table: 'ai_providers', by: 'uuid' } });
+  assert.strictEqual(au.audio_clips.assets.storage_key.type, 'audio');
+  assert.strictEqual(au.audio_clips.assets.storage_key.dir({ kind: 'sfx' }), 'audio/sfx');
+  assert.deepStrictEqual(au.audio_bindings.naturalKey, ['subject_kind', 'subject_key', 'slot', 'clip_id']);
+  assert.deepStrictEqual(au.audio_bindings.refs, { clip_id: { table: 'audio_clips', by: 'uuid' } });
+  assert.strictEqual(au.audio_prompts.versioned, true);
+  assert.deepStrictEqual(au.audio_prompts.naturalKey, ['subject_kind', 'subject_key', 'slot']);
+  for (const c of ['id', 'created_at', 'active']) assert.ok(au.audio_prompts.omit[c], `audio_prompts.${c} omitted`);
 });
 
 // Global constraints: each group's tables, in the order the group writes them.

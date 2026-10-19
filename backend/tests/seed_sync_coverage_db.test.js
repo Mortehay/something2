@@ -1,7 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
-const { EXCLUDED, PENDING, groupTables, coverageProblems } = require('../src/services/seedSync/coverage.js');
+const { EXCLUDED, PENDING, groupTables, sliceProblems, coverageProblems } = require('../src/services/seedSync/coverage.js');
+const { GROUPS, tableSpecs } = require('../src/services/seedSync/registry.js');
 
 const DB_URL = process.env.TEST_DATABASE_URL
   || process.env.DATABASE_URL
@@ -14,10 +15,44 @@ async function baseTables(pool) {
   return rows.map((r) => r.table_name);
 }
 
-test('PENDING values name a known plan', () => {
+test('PENDING values name a known plan; plan 3 is no longer pending', () => {
   for (const [t, p] of Object.entries(PENDING)) {
-    assert.ok(/^plan [34] \(/.test(p), `${t}: ${p}`);
+    assert.ok(/^plan 4 \(/.test(p), `${t}: ${p}`);
   }
+  assert.strictEqual(EXCLUDED.sprite_sets,
+    'machine-local sprite job queue; approved atlases travel in the sprite columns (art group)');
+  assert.strictEqual(EXCLUDED.seed_asset_hashes, 'seed sync per-PC asset hash cache');
+});
+
+const ART = 'art group (plan 3)';
+
+// A full spec that omits a column as art, with NO slice of its table anywhere,
+// is a forgotten slice: the column would travel in no group at all.
+test('sliceProblems: an art-omitted column of a table with no slice is reported', () => {
+  const specs = [
+    { table: 'a', naturalKey: ['name'], omit: { id: 'local', x: ART } },
+    { table: 'b', naturalKey: ['name'], omit: { id: 'local', q: ART, r: ART, z: 'per-PC' } },
+    { table: 'b', slice: true, columns: ['q'], naturalKey: ['name'] },
+  ];
+  assert.deepStrictEqual(sliceProblems(specs), [
+    'column a.x is omitted as art but in no slice',
+    'column b.r is omitted as art but in no slice',
+  ]);
+  assert.deepStrictEqual(coverageProblems(['a', 'b'], { specs, excluded: {}, pending: {} }), sliceProblems(specs));
+});
+
+// The plan's claim: the real slices cover the plan-2 ART omits exactly.
+test('registered slices cover every art-omitted column exactly once', () => {
+  const specs = GROUPS.flatMap((g) => tableSpecs(g));
+  assert.deepStrictEqual(sliceProblems(specs), []);
+  const artOmits = specs.filter((s) => !s.slice)
+    .flatMap((s) => Object.entries(s.omit || {}).filter(([, why]) => why === ART).map(([c]) => `${s.table}.${c}`)).sort();
+  const sliced = specs.filter((s) => s.slice).flatMap((s) => s.columns.map((c) => `${s.table}.${c}`)).sort();
+  assert.deepStrictEqual(sliced, artOmits);
+  assert.ok(artOmits.length >= 10, artOmits.join(' '));
+  // Without the art group's slices the same specs are flagged.
+  const noSlices = specs.filter((s) => !s.slice);
+  assert.strictEqual(sliceProblems(noSlices).length, artOmits.length);
 });
 
 test('the checker flags unclassified, duplicate and stale entries (injected lists)', () => {
