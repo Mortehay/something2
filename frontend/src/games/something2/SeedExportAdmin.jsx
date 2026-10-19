@@ -8,9 +8,11 @@ import { useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
   useSeedGroups, useRestartStatus, useExportGroup, useExportAll, useRestartBackend, useSeedMeta,
+  useSeedJob, useCancelSeedJob,
 } from './useSeedExport.js';
 import {
   statusBadge, exportBlockReason, seedBlockReason, seedButtonLabel, exportAllPlan, seedAllGroups, exportAllMessage,
+  binaryGroups, BINARY_NOTE, BUSY_TEXT, jobRunning, jobProgressText, jobErrorRowsText,
 } from './seedExportModel.js';
 import { Btn, Badge, Muted, Modal, fmtTime, StatusHead, PcLabelHint } from './seedUi.jsx';
 import AdminLoading from './AdminLoading.jsx';
@@ -42,9 +44,65 @@ const Tab = styled.button`
   border: 0; border-bottom: 2px solid ${p => (p.$on ? 'var(--s2-accent)' : 'transparent')};
   font-weight: ${p => (p.$on ? 700 : 400)};
 `;
-const AllBar = styled.div`display: flex; gap: 6px; margin-top: 0.8rem;`;
+const AllBar = styled.div`display: flex; gap: 6px; margin-top: 0.8rem; align-items: center; flex-wrap: wrap;`;
+const JobBox = styled.div`
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 4px; font-size: 1.2rem;
+  progress { width: 140px; height: 10px; accent-color: var(--s2-accent); }
+`;
+const JobErr = styled.span`color: var(--s2-danger);`;
 
 const runLine = (r) => (r ? `${fmtTime(r.finished_at || r.started_at)} · ${r.pc_label}` : 'never');
+
+// SOMET-640. A binary group's background job, under its status badge: a
+// progress bar and Cancel while it runs, the outcome once it ends.
+export function JobStatus({ job, label, onCancel, cancelling }) {
+  const text = jobProgressText(job, label);
+  if (!jobRunning(job)) {
+    const rows = jobErrorRowsText(job);
+    const Line = job.status === 'failed' ? JobErr : Muted;
+    return <JobBox role="status"><Line>{text}</Line>{rows && <Muted>{rows}</Muted>}</JobBox>;
+  }
+  const total = Number(job.total) || 0;
+  return (
+    <JobBox role="status">
+      {/* No value while there is nothing to count: an indeterminate bar. */}
+      {total > 0
+        ? <progress max={total} value={Number(job.done) || 0} aria-label={text} />
+        : <progress aria-label={text} />}
+      <Muted>{text}</Muted>
+      <Btn onClick={onCancel} disabled={Boolean(cancelling || job.cancelRequested)}>Cancel</Btn>
+    </JobBox>
+  );
+}
+
+// One group's table row. `job` is the current job (any group, or null):
+// while it runs every Export / Seed is disabled with BUSY_TEXT.
+export function GroupRow({ g, job, exporting, onExport, onSeed, onBadge, onCancel, cancelling }) {
+  const badge = statusBadge(g);
+  const busy = jobRunning(job);
+  const exportWhy = busy ? BUSY_TEXT : exportBlockReason(g);
+  const seedWhy = busy ? BUSY_TEXT : seedBlockReason(g);
+  const own = job && job.groupId === g.id ? job : null;
+  return (
+    <tr>
+      <td><b>{g.label}</b></td>
+      <td>{runLine(g.lastExport)}</td>
+      <td>{g.inGit ? `${fmtTime(g.inGit.exported_at)} · ${g.inGit.exported_by}` : '—'}</td>
+      <td>{runLine(g.lastSeed)}</td>
+      <td>
+        <Badge as="button" $tone={badge.tone} onClick={onBadge}>{badge.label}</Badge>
+        {own && <JobStatus job={own} label={g.label} onCancel={onCancel} cancelling={cancelling} />}
+      </td>
+      <td><Acts>
+        <Btn disabled={Boolean(exportWhy) || Boolean(exporting)}
+          title={exportWhy || undefined}
+          onClick={onExport}>Export</Btn>
+        <Btn disabled={Boolean(seedWhy)} title={seedWhy || undefined}
+          onClick={onSeed}>{seedButtonLabel(g)}</Btn>
+      </Acts></td>
+    </tr>
+  );
+}
 
 export default function SeedExportAdmin() {
   const groups = useSeedGroups();
@@ -53,6 +111,8 @@ export default function SeedExportAdmin() {
   const exportGroup = useExportGroup();
   const exportAll = useExportAll();
   const restartBackend = useRestartBackend();
+  const jobQuery = useSeedJob();
+  const cancelJob = useCancelSeedJob();
   const [popupId, setPopupId] = useState(null);
   const [previewId, setPreviewId] = useState(null);
   const [seedAllOpen, setSeedAllOpen] = useState(false);
@@ -71,6 +131,9 @@ export default function SeedExportAdmin() {
   const doExport = (g) => exportGroup.mutate({ groupId: g.id });
   const plan = exportAllPlan(list);
   const seedable = seedAllGroups(list);
+  const binary = binaryGroups(list);
+  const job = jobQuery.data || null;
+  const busy = jobRunning(job);
   const doExportAll = async () => {
     const results = await exportAll.mutateAsync(plan.toExport);
     const msg = exportAllMessage(results, plan.skipped);
@@ -102,10 +165,21 @@ export default function SeedExportAdmin() {
       {tab === 'history' && <SeedHistoryTab groups={list} />}
       {tab === 'groups' && (<>
       <AllBar>
-        <Btn disabled={exportAll.isPending || (plan.toExport.length === 0 && plan.skipped.length === 0)}
-          title={plan.toExport.length === 0 ? 'nothing to export' : undefined}
+        <Btn disabled={busy || exportAll.isPending || (plan.toExport.length === 0 && plan.skipped.length === 0)}
+          title={busy ? BUSY_TEXT : (plan.toExport.length === 0 ? 'nothing to export' : undefined)}
           onClick={doExportAll}>Export all</Btn>
-        <Btn disabled={seedable.length === 0} onClick={() => setSeedAllOpen(true)}>Seed all…</Btn>
+        <Btn disabled={busy || seedable.length === 0} title={busy ? BUSY_TEXT : undefined}
+          onClick={() => setSeedAllOpen(true)}>Seed all…</Btn>
+        {binary.length > 0 && (<>
+          <Muted style={{ marginLeft: 8 }}>{BINARY_NOTE}:</Muted>
+          {binary.map((g) => {
+            const why = busy ? BUSY_TEXT : exportBlockReason(g);
+            return (
+              <Btn key={g.id} disabled={Boolean(why) || exportGroup.isPending} title={why || undefined}
+                onClick={() => doExport(g)}>{`Export ${g.label}`}</Btn>
+            );
+          })}
+        </>)}
       </AllBar>
 
       <Table>
@@ -113,39 +187,26 @@ export default function SeedExportAdmin() {
           <tr><th>Group</th><th>Last export (this PC)</th><th>In git (time · PC)</th><th>Last seed (this PC)</th><th><StatusHead restartRequired={Boolean(restart.data?.required)} /></th><th /></tr>
         </thead>
         <tbody>
-          {list.map((g) => {
-            const badge = statusBadge(g);
-            const exportWhy = exportBlockReason(g);
-            const seedWhy = seedBlockReason(g);
-            return (
-              <tr key={g.id}>
-                <td><b>{g.label}</b></td>
-                <td>{runLine(g.lastExport)}</td>
-                <td>{g.inGit ? `${fmtTime(g.inGit.exported_at)} · ${g.inGit.exported_by}` : '—'}</td>
-                <td>{runLine(g.lastSeed)}</td>
-                <td><Badge as="button" $tone={badge.tone} onClick={() => setPopupId(g.id)}>{badge.label}</Badge></td>
-                <td><Acts>
-                  <Btn disabled={Boolean(exportWhy) || exportGroup.isPending}
-                    title={exportWhy || undefined}
-                    onClick={() => doExport(g)}>Export</Btn>
-                  <Btn disabled={Boolean(seedWhy)} title={seedWhy || undefined}
-                    onClick={() => setPreviewId(g.id)}>{seedButtonLabel(g)}</Btn>
-                </Acts></td>
-              </tr>
-            );
-          })}
+          {list.map((g) => (
+            <GroupRow key={g.id} g={g} job={job} exporting={exportGroup.isPending}
+              onExport={() => doExport(g)} onSeed={() => setPreviewId(g.id)} onBadge={() => setPopupId(g.id)}
+              onCancel={() => cancelJob.mutate()} cancelling={cancelJob.isPending} />
+          ))}
         </tbody>
       </Table>
       </>)}
 
       {popup && (
-        <SeedStatusPopup group={popup} exporting={exportGroup.isPending}
+        <SeedStatusPopup group={popup} exporting={exportGroup.isPending} busy={busy}
           onClose={() => setPopupId(null)}
           onExport={() => { doExport(popup); setPopupId(null); }}
           onSeed={() => { setPreviewId(popup.id); setPopupId(null); }} />
       )}
-      {seedAllOpen && <SeedAllModal groups={seedable} onClose={() => setSeedAllOpen(false)} />}
-      {preview && <SeedPreviewModal group={preview} onClose={() => setPreviewId(null)} />}
+      {seedAllOpen && (
+        <SeedAllModal groups={seedable} binaryGroups={binary} busy={busy} onClose={() => setSeedAllOpen(false)}
+          onSeedGroup={(id) => { setSeedAllOpen(false); setPreviewId(id); }} />
+      )}
+      {preview && <SeedPreviewModal group={preview} busy={busy} onClose={() => setPreviewId(null)} />}
       {confirmRestart && (
         <Modal $w="420px" onClose={() => setConfirmRestart(false)} label="Restart backend">
           <>

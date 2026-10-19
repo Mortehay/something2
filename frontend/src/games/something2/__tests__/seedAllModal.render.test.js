@@ -32,3 +32,16 @@ describe('SeedAllModal render', () => {
     expect(html).toContain('failed to load');
   });
 });
+
+describe('SeedAllModal binary groups (SOMET-640)', () => {
+  it('lists Art and Audio under "Art and Audio run separately", each with its own button, outside the batch', () => {
+    queries = [q({ rows: [], signature: 's1', warnings: [] }), q({ rows: [], signature: 's2', warnings: [] })];
+    const binary = [{ id: 'art', label: 'Art', binary: true }, { id: 'audio', label: 'Audio', binary: true }];
+    const html = renderToString(h(SeedAllModal, { groups, binaryGroups: binary, onSeedGroup: () => {}, onClose: () => {} }));
+    expect(html).toContain('Art and Audio run separately');
+    expect(html).toContain('Seed Art…');
+    expect(html).toContain('Seed Audio…');
+    // Only the batch groups get a preview section; Art and Audio do not.
+    expect((html.match(/aria-expanded=/g) || []).length).toBe(2);
+  });
+});

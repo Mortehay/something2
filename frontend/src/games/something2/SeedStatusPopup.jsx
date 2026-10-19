@@ -3,7 +3,7 @@
 import { Link } from 'react-router-dom';
 import styled from 'styled-components';
 import { useSeedPreview } from './useSeedExport.js';
-import { statusBadge, kindLabel, tableLabel, exportBlockReason, seedBlockReason } from './seedExportModel.js';
+import { statusBadge, kindLabel, tableLabel, exportBlockReason, seedBlockReason, BUSY_TEXT } from './seedExportModel.js';
 import { Btn, Badge, Muted, Modal, fmtTime } from './seedUi.jsx';
 
 const Table = styled.table`
@@ -25,15 +25,16 @@ const WHY = {
   schema_newer: (g) => `The file in git was exported from a newer database schema${g.inGit ? ` (${g.inGit.schema_version})` : ''}. Run migrations on this PC before seeding or exporting ${g.label}.`,
 };
 
-export default function SeedStatusPopup({ group, onClose, onExport, onSeed, exporting }) {
+// busy: a background job (SOMET-640) is running; Export and Seed wait for it.
+export default function SeedStatusPopup({ group, onClose, onExport, onSeed, exporting, busy }) {
   const badge = statusBadge(group);
   const wantsRows = group.status === 'local_edits' || group.status === 'git_newer';
   const preview = useSeedPreview(group.id, wantsRows);
   const rows = preview.data?.rows || [];
   const tables = preview.data?.tables || [];
   const multi = tables.length > 1;
-  const exportWhy = exportBlockReason(group);
-  const seedWhy = seedBlockReason(group);
+  const exportWhy = busy ? BUSY_TEXT : exportBlockReason(group);
+  const seedWhy = busy ? BUSY_TEXT : seedBlockReason(group);
 
   return (
     <Modal onClose={onClose} label={`${group.label}: ${badge.label}`}>

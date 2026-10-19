@@ -6,6 +6,7 @@ import styled from 'styled-components';
 import {
   KINDS, kindLabel, allowedDecisions, bulkSet, decisionLabel,
   warningText, warningIsError, groupRowsByTable, renameNote,
+  assetText, blockedText, PAGE_ROWS, nextShown, limitSections, filterRows, pickedRows,
 } from './seedExportModel.js';
 import { Btn, Muted } from './seedUi.jsx';
 
@@ -44,6 +45,7 @@ const SegBtn = styled.button`
   &:disabled { opacity: 0.4; cursor: not-allowed; }
 `;
 export const Warn = styled.p`color: ${p => (p.$err ? 'var(--s2-danger)' : 'var(--s2-warning)')}; font-size: 1.4rem; margin: 0.4rem 0;`;
+const More = styled.div`display: flex; gap: 8px; align-items: center; margin-top: 0.6rem;`;
 const TableHead = styled.h4`margin: 0.9rem 0 0.2rem; font-size: 1.3rem; color: var(--s2-text-muted); text-transform: uppercase; letter-spacing: 0.04em;`;
 
 export { warningText };
@@ -51,16 +53,20 @@ const warningKey = (w) => (w && typeof w === 'object'
   ? `${w.code}:${w.table || ''}:${w.syncUuid || ''}:${w.key || ''}:${w.column || ''}:${w.name || ''}:${w.target || ''}` : String(w));
 export const NOTHING_TO_CHANGE = 'Nothing to change — this PC already matches git.';
 
-const show = (v) => (v === undefined ? '—' : typeof v === 'string' ? v : JSON.stringify(v));
+const show = (v) => (v === undefined ? '—' : typeof v === 'string' ? v : (assetText(v) ?? JSON.stringify(v)));
 
-export default function PreviewSection({ data, decisions, setDecisions }) {
+// initialShown: rows rendered before the first "Show 200 more" (tests render
+// a later page with it; the tab leaves it at PAGE_ROWS).
+export default function PreviewSection({ data, decisions, setDecisions, initialShown = PAGE_ROWS }) {
   const rows = data.rows || [];
   const [kinds, setKinds] = useState(() => new Set());
   const [q, setQ] = useState('');
   const [picked, setPicked] = useState(() => new Set());
+  const [shown, setShown] = useState(initialShown);
 
-  const visible = useMemo(() => rows.filter((r) => (kinds.size === 0 || kinds.has(r.kind))
-    && (!q || String(r.key).toLowerCase().includes(q.toLowerCase()))), [rows, kinds, q]);
+  // Every row under the filters: select-all and bulk act on these, rendered
+  // or not; only the first `shown` are rendered.
+  const visible = useMemo(() => filterRows(rows, kinds, q), [rows, kinds, q]);
   const kindCounts = useMemo(() => {
     const c = {};
     for (const r of rows) c[r.kind] = (c[r.kind] || 0) + 1;
@@ -71,9 +77,11 @@ export default function PreviewSection({ data, decisions, setDecisions }) {
   const togglePick = (u) => setPicked((s) => { const n = new Set(s); if (n.has(u)) n.delete(u); else n.add(u); return n; });
   const allPicked = visible.length > 0 && visible.every((r) => picked.has(r.syncUuid));
   // Only selected rows that are visible under the active filter.
-  const pickedVisible = visible.filter((r) => picked.has(r.syncUuid)).map((r) => r.syncUuid);
-  const sections = useMemo(() => groupRowsByTable(visible, data.tables), [visible, data.tables]);
-  const multi = (data.tables || []).length > 1 || sections.length > 1;
+  const pickedVisible = pickedRows(visible, picked);
+  const allSections = useMemo(() => groupRowsByTable(visible, data.tables), [visible, data.tables]);
+  const sections = useMemo(() => limitSections(allSections, shown), [allSections, shown]);
+  const multi = (data.tables || []).length > 1 || allSections.length > 1;
+  const hidden = visible.length - Math.min(shown, visible.length);
   const bulk = (d) => setDecisions((cur) => bulkSet(cur, pickedVisible, d, rows));
 
   return (
@@ -90,7 +98,7 @@ export default function PreviewSection({ data, decisions, setDecisions }) {
             <Input placeholder="filter by name…" value={q} onChange={(e) => setQ(e.target.value)} />
           </Chips>
           <Bulk>
-            <input type="checkbox" checked={allPicked} aria-label="select all listed rows"
+            <input type="checkbox" checked={allPicked} aria-label={`select all ${visible.length} listed rows`}
               onChange={() => setPicked(allPicked ? new Set() : new Set(visible.map((r) => r.syncUuid)))} />
             <b>{pickedVisible.length} selected</b>
             <Muted>→ set to</Muted>
@@ -112,14 +120,14 @@ export default function PreviewSection({ data, decisions, setDecisions }) {
                       <Mono key={f.name}>{f.name}: <Old>{show(f.local)}</Old> → <New>{show(f.git)}</New></Mono>
                     ))}
                     {renameNote(r) && <Muted>{renameNote(r)}</Muted>}
-                    {r.blockedReason && <Muted>{r.blockedMessage || r.blockedReason}</Muted>}
+                    {r.blockedReason && <Muted>{blockedText(r)}</Muted>}
                   </div>
                   <Seg>
                     {/* The kind's buttons; the ones this row does not allow are disabled. */}
                     {['git', 'delete', 'local'].filter((d) => allowedDecisions({ ...r, blockedReason: null, allowedDecisions: undefined }).includes(d)).map((d) => (
                       <SegBtn key={d} $on={decisions[r.syncUuid] === d}
                         disabled={!allowedDecisions(r).includes(d)}
-                        title={allowedDecisions(r).includes(d) ? undefined : (r.blockedMessage || r.blockedReason || 'not allowed for this row')}
+                        title={allowedDecisions(r).includes(d) ? undefined : (blockedText(r) || 'not allowed for this row')}
                         onClick={() => setDecisions((cur) => bulkSet(cur, [r.syncUuid], d, rows))}>
                         {decisionLabel(r, d)}
                       </SegBtn>
@@ -129,6 +137,12 @@ export default function PreviewSection({ data, decisions, setDecisions }) {
               ))}
             </section>
           ))}
+          {hidden > 0 && (
+            <More>
+              <Btn onClick={() => setShown((n) => nextShown(n))}>{`Show ${PAGE_ROWS} more`}</Btn>
+              <Muted>showing {visible.length - hidden} of {visible.length}</Muted>
+            </More>
+          )}
         </>
       )}
     </>

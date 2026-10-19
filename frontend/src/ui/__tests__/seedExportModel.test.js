@@ -345,3 +345,125 @@ describe('isRename', () => {
     expect(renameNote(null)).toBeNull();
   });
 });
+
+// SOMET-640 (plan 3): binary groups (Art, Audio) run as background jobs.
+import {
+  jobProgressText, jobErrorRowsText, jobRunning, jobSettled, binaryGroups, assetText, blockedText,
+  PAGE_ROWS, nextShown, limitSections, BUSY_TEXT,
+} from '../../games/something2/seedExportModel.js';
+
+describe('jobProgressText', () => {
+  const job = (extra) => ({ id: 1, groupId: 'art', action: 'export', phase: null, done: 0, total: 0, status: 'running', error: null, ...extra });
+  it('names the phase, the group and the counts', () => {
+    expect(jobProgressText(job({ phase: 'download', done: 120, total: 1100 }), 'Art')).toBe('Downloading art 120 / 1100');
+    expect(jobProgressText(job({ groupId: 'audio', action: 'seed', phase: 'upload', done: 3, total: 40 }), 'Audio')).toBe('Uploading audio 3 / 40');
+  });
+  it('falls back to the group id when no label is given', () => {
+    expect(jobProgressText(job({ phase: 'upload', done: 1, total: 2 }))).toBe('Uploading art 1 / 2');
+  });
+  it('says Writing database… while there is nothing to count', () => {
+    expect(jobProgressText(job({ phase: null, total: 0 }), 'Art')).toBe('Writing database…');
+    expect(jobProgressText(job({ phase: 'upload', total: 0 }), 'Art')).toBe('Writing database…');
+  });
+  it('final states', () => {
+    expect(jobProgressText(job({ status: 'cancelled' }), 'Art')).toBe('Cancelled');
+    expect(jobProgressText(job({ status: 'failed', error: 'regenerate or clear these images first' }), 'Art'))
+      .toBe('Failed: regenerate or clear these images first');
+    expect(jobProgressText(job({ status: 'ok' }), 'Art')).toBe('Exported');
+    expect(jobProgressText(job({ status: 'ok', action: 'seed' }), 'Art')).toBe('Seeded');
+    expect(jobProgressText(job({ cancelRequested: true, phase: 'download', done: 1, total: 9 }), 'Art')).toBe('Cancelling…');
+    expect(jobProgressText(null)).toBe('');
+  });
+  it('error rows: up to 5 keys then +N more', () => {
+    const rows = Array.from({ length: 7 }, (_, i) => ({ table: 'entity_types', key: `k${i}` }));
+    expect(jobErrorRowsText({ status: 'failed', errorDetails: { rows } })).toBe('k0, k1, k2, k3, k4 +2 more');
+    expect(jobErrorRowsText({ status: 'failed', errorDetails: { rows: rows.slice(0, 2) } })).toBe('k0, k1');
+    expect(jobErrorRowsText({ status: 'failed', errorDetails: null })).toBe(null);
+    expect(jobErrorRowsText({ status: 'running', errorDetails: { rows } })).toBe(null);
+  });
+  it('jobRunning', () => {
+    expect(jobRunning(job())).toBe(true);
+    expect(jobRunning(job({ status: 'ok' }))).toBe(false);
+    expect(jobRunning(null)).toBe(false);
+  });
+});
+
+describe('jobSettled (invalidate once per finished job)', () => {
+  it('fires on running -> final only, once', () => {
+    let s = jobSettled(null, { id: 1, status: 'running' });
+    expect(s.fire).toBe(false);
+    s = jobSettled(s.seen, { id: 1, status: 'running' });
+    expect(s.fire).toBe(false);
+    s = jobSettled(s.seen, { id: 1, status: 'ok' });
+    expect(s.fire).toBe(true);
+    s = jobSettled(s.seen, { id: 1, status: 'ok' });
+    expect(s.fire).toBe(false);
+  });
+  it('a job already finished at page load does not fire; a new finished job does', () => {
+    let s = jobSettled(null, { id: 3, status: 'failed' });
+    expect(s.fire).toBe(false);
+    s = jobSettled(s.seen, { id: 4, status: 'cancelled' });
+    expect(s.fire).toBe(true);
+    expect(jobSettled(s.seen, null).fire).toBe(false);
+  });
+});
+
+describe('binary groups stay out of the batches', () => {
+  it('seedAllGroups and exportAllPlan skip binary groups; binaryGroups lists them', () => {
+    const groups = [
+      grp('a', 'git_newer', { inGit: {} }),
+      grp('art', 'git_newer', { inGit: {}, binary: true }),
+      grp('b', 'never_exported'),
+      grp('audio', 'local_edits', { localEdits: 2, inGit: {}, binary: true }),
+    ];
+    expect(seedAllGroups(groups).map((g) => g.id)).toEqual(['a']);
+    const plan = exportAllPlan(groups);
+    expect(plan.toExport.map((g) => g.id)).toEqual(['b']);
+    expect(plan.skipped.map((g) => g.id)).toEqual(['a']);
+    expect(binaryGroups(groups).map((g) => g.id)).toEqual(['art', 'audio']);
+  });
+});
+
+describe('assetText', () => {
+  const h = 'abcdef0123456789';
+  it('image, audio, sprite and unhashed values', () => {
+    expect(assetText({ file: 'textures/items/sword.png', sha256: h })).toBe('textures/items/sword.png · abcdef01');
+    expect(assetText({ file: 'audio/sfx/hit-1234abcd.ogg', sha1: h })).toBe('audio/sfx/hit-1234abcd.ogg · abcdef01');
+    expect(assetText({ atlas: { file: 'sprites/a.png', sha256: h }, manifest: { file: 'sprites/a.json', sha256: '99887766554433' } }))
+      .toBe('atlas sprites/a.png · abcdef01, manifest sprites/a.json · 99887766');
+    expect(assetText({ unhashed: 'tiles/grass.png' })).toBe('local art not exported yet');
+    expect(assetText({ atlas: { unhashed: 'k' }, manifest: { file: 'm.json', sha256: h } }))
+      .toBe('atlas local art not exported yet, manifest m.json · abcdef01');
+  });
+  it('sprite keeps its other fields visible', () => {
+    expect(assetText({ atlas: { file: 'a.png', sha256: h }, frames: 4 })).toBe('atlas a.png · abcdef01, {"frames":4}');
+  });
+  it('null for anything that is not an asset value', () => {
+    expect(assetText({ a: 1 })).toBe(null);
+    expect(assetText('x')).toBe(null);
+    expect(assetText(null)).toBe(null);
+  });
+});
+
+describe('blockedText', () => {
+  it('asset and owner reasons have their own copy', () => {
+    expect(blockedText({ blockedReason: 'asset_file_missing', blockedMessage: 'x' }))
+      .toBe('File missing in git checkout — pull again or re-export on the other PC');
+    expect(blockedText({ blockedReason: 'asset_file_mismatch' })).toBe('File changed outside the tab — re-export');
+    expect(blockedText({ blockedReason: 'owner_missing', blockedMessage: 'seed Entities first' })).toBe('Seed Entities first');
+    expect(blockedText({ blockedReason: 'referenced', blockedMessage: 'used by 2 rows' })).toBe('used by 2 rows');
+    expect(blockedText({ blockedReason: 'key_clash' })).toBe('key_clash');
+    expect(blockedText({ blockedReason: null })).toBe(null);
+  });
+});
+
+describe('large previews', () => {
+  it('pages 200 rows at a time across table sections', () => {
+    expect(PAGE_ROWS).toBe(200);
+    expect(nextShown(200)).toBe(400);
+    const secs = [{ table: 'a', rows: [1, 2, 3] }, { table: 'b', rows: [4, 5] }];
+    expect(limitSections(secs, 4)).toEqual([{ table: 'a', rows: [1, 2, 3] }, { table: 'b', rows: [4] }]);
+    expect(limitSections(secs, 2)).toEqual([{ table: 'a', rows: [1, 2] }]);
+    expect(BUSY_TEXT).toBe('Another export or seed is running');
+  });
+});

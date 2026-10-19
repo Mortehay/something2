@@ -5,7 +5,7 @@ import { useState } from 'react';
 import styled from 'styled-components';
 import { useSeedPreview, useApplySeed } from './useSeedExport.js';
 import {
-  initialDecisions, applyGate, pluralize, previewSignature, seedRequestBody, seedAllGate,
+  initialDecisions, applyGate, pluralize, previewSignature, seedRequestBody, seedAllGate, BUSY_TEXT,
 } from './seedExportModel.js';
 import { Btn, Muted, Modal } from './seedUi.jsx';
 import PreviewSection from './SeedPreviewSection.jsx';
@@ -17,7 +17,8 @@ const Foot = styled.div`
 export const Err = styled.p`color: var(--s2-danger); font-size: 1.4rem;`;
 export { Foot };
 
-export default function SeedPreviewModal({ group, onClose }) {
+// busy: a background job (SOMET-640) is running; Apply waits for it.
+export default function SeedPreviewModal({ group, onClose, busy = false }) {
   const preview = useSeedPreview(group.id, true);
   if (preview.isLoading) return <Shell group={group} onClose={onClose}><Muted>Loading preview…</Muted></Shell>;
   if (preview.error) {
@@ -27,7 +28,7 @@ export default function SeedPreviewModal({ group, onClose }) {
   // keeps the decisions, a changed diff (after stale_preview) resets them.
   return (
     <PreviewBody key={previewSignature(group.id, preview.data)} group={group} data={preview.data}
-      onClose={onClose} reload={() => preview.refetch()} />
+      onClose={onClose} reload={() => preview.refetch()} busy={busy} />
   );
 }
 
@@ -41,13 +42,15 @@ function Shell({ group, onClose, children }) {
   );
 }
 
-function PreviewBody({ group, data, onClose, reload }) {
+function PreviewBody({ group, data, onClose, reload, busy }) {
   const rows = data.rows || [];
   const apply = useApplySeed();
   const [decisions, setDecisions] = useState(() => initialDecisions(rows));
   const gate = applyGate(rows, decisions);
   const canApply = seedAllGate([{ rows, decisions }]).canApply;
 
+  // A binary group answers 202 { job }: the modal closes and the group's row
+  // shows the job. A busy refusal keeps it open (the decisions survive).
   const submit = () => apply.mutate(
     { groupId: group.id, label: group.label, body: seedRequestBody(decisions, data) },
     {
@@ -68,6 +71,7 @@ function PreviewBody({ group, data, onClose, reload }) {
           Nothing is written until Apply.
         </Muted>
         <PreviewSection data={data} decisions={decisions} setDecisions={setDecisions} />
+        {apply.error && apply.error.code === 'busy' && <Err role="alert">{BUSY_TEXT}</Err>}
         <Foot>
           <Muted>
             Will write: {gate.summary.updated} updates, {gate.summary.created} creates, {gate.summary.deleted} deletes, {gate.summary.kept} kept, {gate.summary.adopted} adopted
@@ -75,7 +79,7 @@ function PreviewBody({ group, data, onClose, reload }) {
           </Muted>
           <span style={{ display: 'flex', gap: 6 }}>
             <Btn onClick={onClose}>Cancel</Btn>
-            <Btn $primary disabled={!canApply || apply.isPending} onClick={submit}>
+            <Btn $primary disabled={busy || !canApply || apply.isPending} title={busy ? BUSY_TEXT : undefined} onClick={submit}>
               {gate.canApply ? 'Apply' : `Apply (choose ${pluralize(gate.undecided, 'red row')} first)`}
             </Btn>
           </span>

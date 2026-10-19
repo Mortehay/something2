@@ -1,16 +1,18 @@
 // SOMET-638. Data hooks for the Seed / Export tab over /api/seed-export.
 // authHeaders() is NOT optional: every route is admin-only, and a 401 without
 // it signs the admin out (same trap as useBulkImageJob.js).
+import { useEffect, useRef } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { authHeaders, apiFetch } from "./src/js/net/auth.js";
 import { API_URL } from "../../config.js";
-import { refusalText } from "./seedExportModel.js";
+import { refusalText, jobSettled, BUSY_TEXT } from "./seedExportModel.js";
 
 const BASE = `${API_URL}/api/seed-export`;
 export const GROUPS_KEY = ["seed-groups"];
 export const RUNS_KEY = ["seed-runs"];
 export const RESTART_KEY = ["seed-restart"];
+export const JOB_KEY = ["seed-job"];
 
 // The API's `error` text plus its `code`, so a refusal says which rule fired.
 async function call(path, { method = "GET", body, label } = {}) {
@@ -21,6 +23,14 @@ async function call(path, { method = "GET", body, label } = {}) {
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
+    // SOMET-640: the job runner's busy (409 { error: 'busy', job }).
+    if (json.error === "busy" && json.job) {
+      const err = new Error(BUSY_TEXT);
+      err.code = "busy";
+      err.job = json.job;
+      err.status = res.status;
+      throw err;
+    }
     const text = json.error || `Request failed (${res.status})`;
     const d = json.details || {};
     const n = Array.isArray(d.uuids) ? d.uuids.length : null;
@@ -80,6 +90,45 @@ export const useRestartStatus = () => useQuery({
   queryFn: () => call("/restart"),
 });
 
+// SOMET-640. The background job of a binary group (Art, Audio): null or
+// { id, groupId, action, phase, done, total, status, error, ... }. Polled
+// every second while it runs; fetched on mount so a job started before the
+// page loaded shows up. When a job finishes, the groups and runs refresh once.
+export function useSeedJob() {
+  const qc = useQueryClient();
+  const query = useQuery({
+    queryKey: JOB_KEY,
+    queryFn: () => call("/jobs/current"),
+    refetchOnMount: "always",
+    refetchInterval: (q) => (q.state.data && q.state.data.status === "running" ? 1000 : false),
+  });
+  const seen = useRef(null);
+  const job = query.data;
+  useEffect(() => {
+    const r = jobSettled(seen.current, job);
+    seen.current = r.seen;
+    if (r.fire) {
+      qc.invalidateQueries({ queryKey: GROUPS_KEY });
+      qc.invalidateQueries({ queryKey: RUNS_KEY });
+      qc.invalidateQueries({ queryKey: RESTART_KEY });
+    }
+  }, [job, qc]);
+  return query;
+}
+
+export function useCancelSeedJob() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => call("/jobs/cancel", { method: "POST" }),
+    onSuccess: (r) => { if (r && r.job) qc.setQueryData(JOB_KEY, r.job); },
+    onError: (err) => toast.error(err.message),
+  });
+}
+
+// A 202 { job } (binary group) or a busy refusal hands over the job: put it
+// in the job query so the row shows it and polling starts.
+const takeJob = (qc, job) => { if (job) qc.setQueryData(JOB_KEY, job); };
+
 function useInvalidating(mutationFn, onSuccess) {
   const qc = useQueryClient();
   return useMutation({
@@ -88,11 +137,13 @@ function useInvalidating(mutationFn, onSuccess) {
       qc.invalidateQueries({ queryKey: GROUPS_KEY });
       qc.invalidateQueries({ queryKey: RUNS_KEY });
       qc.invalidateQueries({ queryKey: RESTART_KEY });
+      if (data && data.job) { takeJob(qc, data.job); return; }
       if (onSuccess) onSuccess(data, vars);
     },
     // A refusal can mean the state moved (stale_preview, busy): refresh too.
     onError: (err) => {
       qc.invalidateQueries({ queryKey: GROUPS_KEY });
+      takeJob(qc, err.job);
       toast.error(err.message);
     },
   });

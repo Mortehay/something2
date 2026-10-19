@@ -60,6 +60,9 @@ export function exportAllPlan(groups) {
   const toExport = [];
   const skipped = [];
   for (const g of groups) {
+    // Binary groups (Art, Audio) run as background jobs, one at a time:
+    // never part of the batch (binaryGroups lists them separately).
+    if (g.binary) continue;
     const reason = exportBlockReason(g);
     // in_sync / tokens_missing are simply not candidates; any other group
     // that is blocked is reported so the admin sees why it was left out.
@@ -70,8 +73,13 @@ export function exportAllPlan(groups) {
 }
 
 // "Seed all": every group with a usable export file, registry (= dependency)
-// order.
-export const seedAllGroups = (groups) => groups.filter((g) => g.inGit && !seedBlockReason(g));
+// order. Binary groups are left out (they run separately, see binaryGroups).
+export const seedAllGroups = (groups) => groups.filter((g) => !g.binary && g.inGit && !seedBlockReason(g));
+
+// SOMET-640. The binary groups (Art, Audio), listed under BINARY_NOTE in
+// Seed all / Export all, each with its own button.
+export const binaryGroups = (groups) => groups.filter((g) => g.binary);
+export const BINARY_NOTE = 'Art and Audio run separately';
 
 // 1 row / 2 rows. `plural` overrides the default +s.
 export const pluralize = (n, word, plural) => `${n} ${n === 1 ? word : (plural || `${word}s`)}`;
@@ -259,3 +267,122 @@ export const isRename = (row) => Boolean(row) && Object.prototype.hasOwnProperty
   && Array.isArray(row.fields) && row.fields.some((f) => f && f.name === 'name');
 // The per-table rename note for a row, or null when it is not a rename.
 export const renameNote = (row) => (isRename(row) ? RENAME_NOTES[row.table] : null);
+
+// SOMET-640 (plan 3). Background jobs of the binary groups. A job is
+// GET /jobs/current: { id, groupId, action, phase, done, total, status,
+// error, errorDetails, cancelRequested, ... }. The engine's phases are
+// 'download' (export: object store -> repo files) and 'upload' (seed: repo
+// files -> object store); before the first file, and when there are no files
+// to move, the count is 0 and the job is in its database step.
+export const BUSY_TEXT = 'Another export or seed is running';
+export const jobRunning = (job) => Boolean(job) && job.status === 'running';
+
+const PHASE_VERBS = { download: 'Downloading', upload: 'Uploading' };
+
+// One line for the group row. `label` is the group's label (falls back to the
+// job's group id).
+export function jobProgressText(job, label) {
+  if (!job) return '';
+  if (job.status === 'cancelled') return 'Cancelled';
+  if (job.status === 'failed') return `Failed: ${job.error || 'unknown error'}`;
+  if (job.status === 'ok') return job.action === 'seed' ? 'Seeded' : 'Exported';
+  if (job.cancelRequested) return 'Cancelling…';
+  const total = Number(job.total) || 0;
+  if (total === 0) return 'Writing database…';
+  const verb = PHASE_VERBS[job.phase] || 'Working on';
+  return `${verb} ${String(label || job.groupId).toLowerCase()} ${Number(job.done) || 0} / ${total}`;
+}
+
+// The failed job's offending rows (assets_missing, audio_sha1_missing):
+// up to 5 keys, then "+N more"; null when there are none.
+export function jobErrorRowsText(job, max = 5) {
+  const rows = job && job.status === 'failed' && job.errorDetails && job.errorDetails.rows;
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+  const keys = rows.slice(0, max).map((r) => (r && typeof r === 'object' ? String(r.key ?? r.label ?? '?') : String(r)));
+  return `${keys.join(', ')}${rows.length > max ? ` +${rows.length - max} more` : ''}`;
+}
+
+// Did the polled job just finish? `seen` is the last { id, status } observed
+// (null before the first poll). Fires once per running -> final transition,
+// or for a job first seen already final after an earlier one (it started and
+// ended between two polls); a job already final at page load does not fire.
+export function jobSettled(seen, job) {
+  if (!job) return { seen, fire: false };
+  const next = { id: job.id, status: job.status };
+  const final = job.status !== 'running';
+  if (!final) return { seen: next, fire: false };
+  if (!seen) return { seen: next, fire: false };
+  const fire = seen.id !== job.id || seen.status === 'running';
+  return { seen: next, fire };
+}
+
+// SOMET-640. Asset values in a field diff (backend seedSync/assets.js):
+// image { file, sha256 }, audio { file, sha1 }, sprite { atlas, manifest,
+// ...rest }, a local key not exported yet { unhashed }. null when `v` is not
+// one of them.
+const UNHASHED = 'local art not exported yet';
+const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+function filePart(v) {
+  if (!isObj(v)) return null;
+  if (has(v, 'unhashed')) return UNHASHED;
+  if (typeof v.file !== 'string') return null;
+  const hash = typeof v.sha256 === 'string' ? v.sha256 : (typeof v.sha1 === 'string' ? v.sha1 : null);
+  if (hash === null && !has(v, 'sha256') && !has(v, 'sha1')) return null;
+  return `${v.file} · ${hash ? hash.slice(0, 8) : 'no hash'}`;
+}
+export function assetText(v) {
+  if (!isObj(v)) return null;
+  const direct = filePart(v);
+  if (direct) return direct;
+  if (!has(v, 'atlas') && !has(v, 'manifest')) return null;
+  const { atlas, manifest, ...rest } = v;
+  const parts = [];
+  if (atlas !== undefined) parts.push(`atlas ${filePart(atlas) || JSON.stringify(atlas)}`);
+  if (manifest !== undefined) parts.push(`manifest ${filePart(manifest) || JSON.stringify(manifest)}`);
+  if (Object.keys(rest).length) parts.push(JSON.stringify(rest));
+  return parts.join(', ');
+}
+
+// Why a preview row is blocked, in the tab's words; null when it is not.
+const BLOCKED_COPY = {
+  asset_file_missing: 'File missing in git checkout — pull again or re-export on the other PC',
+  asset_file_mismatch: 'File changed outside the tab — re-export',
+};
+export function blockedText(row) {
+  const reason = row && row.blockedReason;
+  if (!reason) return null;
+  if (BLOCKED_COPY[reason]) return BLOCKED_COPY[reason];
+  // The server's message names the owner group: "seed Entities first".
+  if (reason === 'owner_missing') {
+    const m = row.blockedMessage || 'seed the owning group first';
+    return m.charAt(0).toUpperCase() + m.slice(1);
+  }
+  return row.blockedMessage || reason;
+}
+
+// SOMET-640. Large previews: a section renders PAGE_ROWS rows at a time;
+// filters, select-all and bulk actions act on every row of the section.
+export const PAGE_ROWS = 200;
+export const nextShown = (shown) => shown + PAGE_ROWS;
+
+// The first `n` rows across groupRowsByTable sections, in order.
+export function limitSections(sections, n) {
+  const out = [];
+  let left = n;
+  for (const s of sections) {
+    if (left <= 0) break;
+    out.push(s.rows.length <= left ? s : { ...s, rows: s.rows.slice(0, left) });
+    left -= s.rows.length;
+  }
+  return out;
+}
+
+// Rows under the kind chips (empty set = all) and the name filter.
+export function filterRows(rows, kinds, q) {
+  const needle = (q || '').toLowerCase();
+  return rows.filter((r) => (kinds.size === 0 || kinds.has(r.kind))
+    && (!needle || String(r.key).toLowerCase().includes(needle)));
+}
+// Selected uuids among the listed (filtered) rows, rendered or not.
+export const pickedRows = (visible, picked) => visible.filter((r) => picked.has(r.syncUuid)).map((r) => r.syncUuid);

@@ -6,7 +6,7 @@ import { useState } from 'react';
 import styled from 'styled-components';
 import { useSeedPreviews, useApplyAll } from './useSeedExport.js';
 import {
-  initialDecisions, previewSignature, seedRequestBody, seedAllGate, applyGate, pluralize,
+  initialDecisions, previewSignature, seedRequestBody, seedAllGate, applyGate, pluralize, BINARY_NOTE, BUSY_TEXT,
 } from './seedExportModel.js';
 import { Btn, Muted, Modal } from './seedUi.jsx';
 import PreviewSection from './SeedPreviewSection.jsx';
@@ -50,7 +50,10 @@ function Section({ group, query, state, setState, done, open, toggle }) {
   );
 }
 
-export default function SeedAllModal({ groups, onClose }) {
+// binaryGroups (Art, Audio) are never part of the batch: they run as
+// background jobs, one at a time, so each gets its own button that opens its
+// own preview (onSeedGroup). busy: a job is running; nothing can apply.
+export default function SeedAllModal({ groups, onClose, binaryGroups = [], onSeedGroup, busy = false }) {
   const queries = useSeedPreviews(groups.map((g) => g.id));
   const apply = useApplyAll();
   const [states, setStates] = useState({});
@@ -105,6 +108,17 @@ export default function SeedAllModal({ groups, onClose }) {
       <>
         <h3 style={{ margin: 0 }}>Seed all groups</h3>
         <Muted>Every group with an export file, in dependency order. Nothing is written until Apply.</Muted>
+        {binaryGroups.length > 0 && (
+          <Res>
+            <b>{BINARY_NOTE}</b>
+            <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+              {binaryGroups.map((g) => (
+                <Btn key={g.id} disabled={busy} title={busy ? BUSY_TEXT : undefined}
+                  onClick={() => onSeedGroup && onSeedGroup(g.id)}>{`Seed ${g.label}…`}</Btn>
+              ))}
+            </div>
+          </Res>
+        )}
         {results && (
           <Res role="status">
             <b>Seeded {okRes.length} of {results.length} groups</b>
@@ -141,7 +155,8 @@ export default function SeedAllModal({ groups, onClose }) {
             </Muted>
             <span style={{ display: 'flex', gap: 6 }}>
               <Btn onClick={onClose}>Cancel</Btn>
-              <Btn $primary disabled={!gate.canApply || loading || apply.isPending} onClick={submit}>
+              <Btn $primary disabled={busy || !gate.canApply || loading || apply.isPending}
+                title={busy ? BUSY_TEXT : undefined} onClick={submit}>
                 {gate.undecided > 0 ? `Apply (choose ${pluralize(gate.undecided, 'red row')} first)` : 'Apply all'}
               </Btn>
             </span>
