@@ -1,5 +1,6 @@
 {
   "generated_by": "backend/tools/world_gen_ref/make_fixtures.py",
+  "python": "3.11.16 (main, Sep 19 2026, 01:04:43) [GCC 14.2.0]",
   "reference_sha256": {
     "world_gen.py": "75178d631c0f8c87cb16ae8db490c3a0f4a33f79c6df1bd6f408638916c8b3a3",
     "bestiary_p4.json": "3c5e3c5c5b55e8fc0f0260b506eb9c004f3071fa42e9abb794e7cd64f094868a",
@@ -12855,6 +12856,1188 @@
         ]
       },
       "report_json": "{\n  \"worlds\": [\n    {\n      \"key\": \"gap_hub\",\n      \"name\": \"Gap Crossing\",\n      \"biomes\": [\n        \"Meadow\"\n      ],\n      \"density\": \"normal\",\n      \"per_screen\": 4.1,\n      \"creatures\": 295,\n      \"area\": 16384,\n      \"biome_multiplier\": 0.5,\n      \"flora\": [\n        \"bush\",\n        \"rose_bush\",\n        \"Tree\",\n        \"Stone\"\n      ],\n      \"creature_types\": [\n        \"Slime\",\n        \"Wolf\",\n        \"Beast Swarm\",\n        \"Beast Skirmisher\",\n        \"Beast Line\"\n      ],\n      \"variety\": 5,\n      \"leaders\": 0,\n      \"depth\": \"surface\",\n      \"socket_kib_s\": 149.1,\n      \"verdict\": \"ok\"\n    },\n    {\n      \"key\": \"gap_1\",\n      \"name\": \"Gap 1\",\n      \"biomes\": [\n        \"Deep Forest\",\n        \"Frozen Waste\"\n      ],\n      \"density\": \"normal\",\n      \"per_screen\": 4.1,\n      \"creatures\": 295,\n      \"area\": 16384,\n      \"biome_multiplier\": 1.05,\n      \"flora\": [\n        \"Tree\",\n        \"pine_tree\",\n        \"dead_tree\",\n        \"bush\",\n        \"Stone\",\n        \"IceRock\"\n      ],\n      \"creature_types\": [\n        \"Wolf\",\n        \"Bat\",\n        \"Skeleton\",\n        \"Woodland Swarm\",\n        \"Woodland Skirmisher\",\n        \"Woodland Line\",\n        \"Tundra Swarm\",\n        \"Tundra Skirmisher\",\n        \"Tundra Line\"\n      ],\n      \"variety\": 9,\n      \"leaders\": 0,\n      \"depth\": \"surface\",\n      \"socket_kib_s\": 149.1,\n      \"verdict\": \"ok\"\n    },\n    {\n      \"key\": \"gap_2\",\n      \"name\": \"Gap 2\",\n      \"biomes\": [\n        \"Catacombs\",\n        \"Crystal Hollows\",\n        \"Blightworks\"\n      ],\n      \"density\": \"normal\",\n      \"per_screen\": 4.1,\n      \"creatures\": 295,\n      \"area\": 16384,\n      \"biome_multiplier\": 1.97,\n      \"flora\": [\n        \"Stone\",\n        \"IceRock\",\n        \"dead_tree\"\n      ],\n      \"creature_types\": [\n        \"Undead Swarm\",\n        \"Undead Skirmisher\",\n        \"Undead Line\",\n        \"Crystal Swarm\",\n        \"Crystal Skirmisher\",\n        \"Crystal Line\",\n        \"Blight Swarm\",\n        \"Blight Skirmisher\",\n        \"Blight Line\"\n      ],\n      \"variety\": 9,\n      \"leaders\": 0,\n      \"depth\": \"deep\",\n      \"socket_kib_s\": 149.1,\n      \"verdict\": \"ok\"\n    },\n    {\n      \"key\": \"gap_3\",\n      \"name\": \"Gap 3\",\n      \"biomes\": [\n        \"Cavern\",\n        \"Deepvault\",\n        \"Gloomfen\"\n      ],\n      \"density\": \"normal\",\n      \"per_screen\": 4.1,\n      \"creatures\": 295,\n      \"area\": 16384,\n      \"biome_multiplier\": 1.87,\n      \"flora\": [\n        \"Stone\",\n        \"dead_tree\",\n        \"bush\"\n      ],\n      \"creature_types\": [\n        \"Cave Swarm\",\n        \"Cave Skirmisher\",\n        \"Cave Line\",\n        \"Construct Swarm\",\n        \"Construct Skirmisher\",\n        \"Construct Line\",\n        \"Gloom Swarm\",\n        \"Gloom Skirmisher\",\n        \"Gloom Line\"\n      ],\n      \"variety\": 9,\n      \"leaders\": 0,\n      \"depth\": \"deep\",\n      \"socket_kib_s\": 149.1,\n      \"verdict\": \"ok\"\n    }\n  ],\n  \"problems\": [],\n  \"caveats\": [\n    \"asked for 0.1 creatures/screen, this region averages 4.1. The tiers are coarse - sparse 2.0, normal 4.0, dense 8.1, horde 13.9, swarm 20.0 - and sparse is the closest one to your target. Ask for a number nearer a tier if the gap matters.\"\n  ],\n  \"ok\": true,\n  \"totals\": {\n    \"worlds\": 4,\n    \"creatures\": 1180,\n    \"mean_per_screen\": 4.1,\n    \"min_per_screen\": 4.1,\n    \"max_per_screen\": 4.1,\n    \"empty_worlds\": 0,\n    \"creature_types\": 31,\n    \"leaders\": 0\n  },\n  \"notes\": [\n    \"Creature counts are scatter only; packs are not modelled, so every figure is a floor. See PACKS_NOT_MODELLED.\",\n    \"One screen is ~225 tiles at something2's fixed 1280x720 canvas.\"\n  ]\n}"
+    },
+    {
+      "id": "to-name-equals-local-key",
+      "covers": "a to_name naming a LOCAL key links only its source: b stays unreachable (mutant: to_name counted in `linked`)",
+      "spec": {
+        "worlds": [
+          {
+            "key": "a",
+            "name": "a",
+            "biomes": [
+              "Meadow"
+            ],
+            "density": "normal",
+            "width": 128,
+            "height": 128,
+            "is_entry": true,
+            "allowed_creature_types": [
+              "Slime",
+              "Wolf",
+              "Beast Swarm",
+              "Beast Skirmisher",
+              "Beast Line"
+            ]
+          },
+          {
+            "key": "b",
+            "name": "b",
+            "biomes": [
+              "Mire"
+            ],
+            "density": "normal",
+            "width": 128,
+            "height": 128,
+            "is_entry": false,
+            "allowed_creature_types": [
+              "Slime",
+              "Bat",
+              "Swamp Swarm",
+              "Swamp Skirmisher",
+              "Swamp Line"
+            ]
+          }
+        ],
+        "links": [
+          {
+            "from": "a",
+            "edge": "E",
+            "to_name": "b"
+          }
+        ]
+      },
+      "target": null,
+      "report": {
+        "worlds": [
+          {
+            "key": "a",
+            "name": "a",
+            "biomes": [
+              "Meadow"
+            ],
+            "density": "normal",
+            "per_screen": 4.1,
+            "creatures": 295,
+            "area": 16384,
+            "biome_multiplier": 0.5,
+            "flora": [
+              "bush",
+              "rose_bush",
+              "Tree",
+              "Stone"
+            ],
+            "creature_types": [
+              "Slime",
+              "Wolf",
+              "Beast Swarm",
+              "Beast Skirmisher",
+              "Beast Line"
+            ],
+            "variety": 5,
+            "leaders": 0,
+            "depth": "surface",
+            "socket_kib_s": 149.1,
+            "verdict": "ok"
+          },
+          {
+            "key": "b",
+            "name": "b",
+            "biomes": [
+              "Mire"
+            ],
+            "density": "normal",
+            "per_screen": 4.1,
+            "creatures": 295,
+            "area": 16384,
+            "biome_multiplier": 2.0,
+            "flora": [
+              "dead_tree",
+              "bush",
+              "Stone"
+            ],
+            "creature_types": [
+              "Slime",
+              "Bat",
+              "Swamp Swarm",
+              "Swamp Skirmisher",
+              "Swamp Line"
+            ],
+            "variety": 5,
+            "leaders": 0,
+            "depth": "surface",
+            "socket_kib_s": 149.1,
+            "verdict": "ok"
+          }
+        ],
+        "problems": [
+          "b has no links - it is unreachable"
+        ],
+        "caveats": [],
+        "ok": false,
+        "totals": {
+          "worlds": 2,
+          "creatures": 590,
+          "mean_per_screen": 4.1,
+          "min_per_screen": 4.1,
+          "max_per_screen": 4.1,
+          "empty_worlds": 0,
+          "creature_types": 9,
+          "leaders": 0
+        },
+        "notes": [
+          "Creature counts are scatter only; packs are not modelled, so every figure is a floor. See PACKS_NOT_MODELLED.",
+          "One screen is ~225 tiles at something2's fixed 1280x720 canvas."
+        ]
+      },
+      "report_json": "{\n  \"worlds\": [\n    {\n      \"key\": \"a\",\n      \"name\": \"a\",\n      \"biomes\": [\n        \"Meadow\"\n      ],\n      \"density\": \"normal\",\n      \"per_screen\": 4.1,\n      \"creatures\": 295,\n      \"area\": 16384,\n      \"biome_multiplier\": 0.5,\n      \"flora\": [\n        \"bush\",\n        \"rose_bush\",\n        \"Tree\",\n        \"Stone\"\n      ],\n      \"creature_types\": [\n        \"Slime\",\n        \"Wolf\",\n        \"Beast Swarm\",\n        \"Beast Skirmisher\",\n        \"Beast Line\"\n      ],\n      \"variety\": 5,\n      \"leaders\": 0,\n      \"depth\": \"surface\",\n      \"socket_kib_s\": 149.1,\n      \"verdict\": \"ok\"\n    },\n    {\n      \"key\": \"b\",\n      \"name\": \"b\",\n      \"biomes\": [\n        \"Mire\"\n      ],\n      \"density\": \"normal\",\n      \"per_screen\": 4.1,\n      \"creatures\": 295,\n      \"area\": 16384,\n      \"biome_multiplier\": 2.0,\n      \"flora\": [\n        \"dead_tree\",\n        \"bush\",\n        \"Stone\"\n      ],\n      \"creature_types\": [\n        \"Slime\",\n        \"Bat\",\n        \"Swamp Swarm\",\n        \"Swamp Skirmisher\",\n        \"Swamp Line\"\n      ],\n      \"variety\": 5,\n      \"leaders\": 0,\n      \"depth\": \"surface\",\n      \"socket_kib_s\": 149.1,\n      \"verdict\": \"ok\"\n    }\n  ],\n  \"problems\": [\n    \"b has no links - it is unreachable\"\n  ],\n  \"caveats\": [],\n  \"ok\": false,\n  \"totals\": {\n    \"worlds\": 2,\n    \"creatures\": 590,\n    \"mean_per_screen\": 4.1,\n    \"min_per_screen\": 4.1,\n    \"max_per_screen\": 4.1,\n    \"empty_worlds\": 0,\n    \"creature_types\": 9,\n    \"leaders\": 0\n  },\n  \"notes\": [\n    \"Creature counts are scatter only; packs are not modelled, so every figure is a floor. See PACKS_NOT_MODELLED.\",\n    \"One screen is ~225 tiles at something2's fixed 1280x720 canvas.\"\n  ]\n}"
+    },
+    {
+      "id": "null-fields",
+      "covers": "density null (rate 0, printed None) and edge null (prints None, not '?') (mutant: dict.get treating a null value as absent)",
+      "spec": {
+        "worlds": [
+          {
+            "key": "a",
+            "name": null,
+            "biomes": [
+              "Meadow"
+            ],
+            "density": null,
+            "width": 128,
+            "height": 128,
+            "is_entry": true,
+            "allowed_creature_types": [
+              "Slime",
+              "Wolf",
+              "Beast Swarm",
+              "Beast Skirmisher",
+              "Beast Line"
+            ]
+          },
+          {
+            "key": "b",
+            "name": "b",
+            "biomes": [
+              "Mire"
+            ],
+            "density": "normal",
+            "width": 128,
+            "height": 128,
+            "is_entry": false,
+            "allowed_creature_types": [
+              "Slime",
+              "Bat",
+              "Swamp Swarm",
+              "Swamp Skirmisher",
+              "Swamp Line"
+            ]
+          }
+        ],
+        "links": [
+          {
+            "from": "a",
+            "edge": null,
+            "to": "b"
+          },
+          {
+            "from": "b",
+            "edge": "W",
+            "to": "a"
+          },
+          {
+            "from": "a",
+            "edge": null,
+            "to": "nowhere"
+          }
+        ]
+      },
+      "target": 6.0,
+      "report": {
+        "worlds": [
+          {
+            "key": "a",
+            "name": null,
+            "biomes": [
+              "Meadow"
+            ],
+            "density": null,
+            "per_screen": 0.0,
+            "creatures": 0,
+            "area": 16384,
+            "biome_multiplier": 0.5,
+            "flora": [
+              "bush",
+              "rose_bush",
+              "Tree",
+              "Stone"
+            ],
+            "creature_types": [
+              "Slime",
+              "Wolf",
+              "Beast Swarm",
+              "Beast Skirmisher",
+              "Beast Line"
+            ],
+            "variety": 5,
+            "leaders": 0,
+            "depth": "surface",
+            "socket_kib_s": 0.0,
+            "verdict": "EMPTY"
+          },
+          {
+            "key": "b",
+            "name": "b",
+            "biomes": [
+              "Mire"
+            ],
+            "density": "normal",
+            "per_screen": 4.1,
+            "creatures": 295,
+            "area": 16384,
+            "biome_multiplier": 2.0,
+            "flora": [
+              "dead_tree",
+              "bush",
+              "Stone"
+            ],
+            "creature_types": [
+              "Slime",
+              "Bat",
+              "Swamp Swarm",
+              "Swamp Skirmisher",
+              "Swamp Line"
+            ],
+            "variety": 5,
+            "leaders": 0,
+            "depth": "surface",
+            "socket_kib_s": 149.1,
+            "verdict": "ok"
+          }
+        ],
+        "problems": [
+          "a: 0.0 creatures/screen - reads as empty space. None over 16384 tiles. Raise the tier - the biome does not change this.",
+          "link a -None-> nowhere names a world that does not exist"
+        ],
+        "caveats": [
+          "asked for 6.0 creatures/screen, this region averages 2.0. The tiers are coarse - sparse 2.0, normal 4.0, dense 8.1, horde 13.9, swarm 20.0 - and normal is the closest one to your target. Ask for a number nearer a tier if the gap matters."
+        ],
+        "ok": false,
+        "totals": {
+          "worlds": 2,
+          "creatures": 295,
+          "mean_per_screen": 2.0,
+          "min_per_screen": 0.0,
+          "max_per_screen": 4.1,
+          "empty_worlds": 1,
+          "creature_types": 9,
+          "leaders": 0
+        },
+        "notes": [
+          "Creature counts are scatter only; packs are not modelled, so every figure is a floor. See PACKS_NOT_MODELLED.",
+          "One screen is ~225 tiles at something2's fixed 1280x720 canvas."
+        ]
+      },
+      "report_json": "{\n  \"worlds\": [\n    {\n      \"key\": \"a\",\n      \"name\": null,\n      \"biomes\": [\n        \"Meadow\"\n      ],\n      \"density\": null,\n      \"per_screen\": 0.0,\n      \"creatures\": 0,\n      \"area\": 16384,\n      \"biome_multiplier\": 0.5,\n      \"flora\": [\n        \"bush\",\n        \"rose_bush\",\n        \"Tree\",\n        \"Stone\"\n      ],\n      \"creature_types\": [\n        \"Slime\",\n        \"Wolf\",\n        \"Beast Swarm\",\n        \"Beast Skirmisher\",\n        \"Beast Line\"\n      ],\n      \"variety\": 5,\n      \"leaders\": 0,\n      \"depth\": \"surface\",\n      \"socket_kib_s\": 0.0,\n      \"verdict\": \"EMPTY\"\n    },\n    {\n      \"key\": \"b\",\n      \"name\": \"b\",\n      \"biomes\": [\n        \"Mire\"\n      ],\n      \"density\": \"normal\",\n      \"per_screen\": 4.1,\n      \"creatures\": 295,\n      \"area\": 16384,\n      \"biome_multiplier\": 2.0,\n      \"flora\": [\n        \"dead_tree\",\n        \"bush\",\n        \"Stone\"\n      ],\n      \"creature_types\": [\n        \"Slime\",\n        \"Bat\",\n        \"Swamp Swarm\",\n        \"Swamp Skirmisher\",\n        \"Swamp Line\"\n      ],\n      \"variety\": 5,\n      \"leaders\": 0,\n      \"depth\": \"surface\",\n      \"socket_kib_s\": 149.1,\n      \"verdict\": \"ok\"\n    }\n  ],\n  \"problems\": [\n    \"a: 0.0 creatures/screen - reads as empty space. None over 16384 tiles. Raise the tier - the biome does not change this.\",\n    \"link a -None-> nowhere names a world that does not exist\"\n  ],\n  \"caveats\": [\n    \"asked for 6.0 creatures/screen, this region averages 2.0. The tiers are coarse - sparse 2.0, normal 4.0, dense 8.1, horde 13.9, swarm 20.0 - and normal is the closest one to your target. Ask for a number nearer a tier if the gap matters.\"\n  ],\n  \"ok\": false,\n  \"totals\": {\n    \"worlds\": 2,\n    \"creatures\": 295,\n    \"mean_per_screen\": 2.0,\n    \"min_per_screen\": 0.0,\n    \"max_per_screen\": 4.1,\n    \"empty_worlds\": 1,\n    \"creature_types\": 9,\n    \"leaders\": 0\n  },\n  \"notes\": [\n    \"Creature counts are scatter only; packs are not modelled, so every figure is a floor. See PACKS_NOT_MODELLED.\",\n    \"One screen is ~225 tiles at something2's fixed 1280x720 canvas.\"\n  ]\n}"
+    },
+    {
+      "id": "socket-subset-six",
+      "covers": "exactly 6 hot worlds of 7: all six listed, no ', ...' (mutant: > 5)",
+      "spec": {
+        "worlds": [
+          {
+            "key": "h0",
+            "name": "h0",
+            "biomes": [
+              "Mire"
+            ],
+            "density": "swarm",
+            "width": 224,
+            "height": 224,
+            "is_entry": true,
+            "allowed_creature_types": [
+              "Slime",
+              "Bat",
+              "Swamp Swarm",
+              "Swamp Skirmisher",
+              "Swamp Line"
+            ],
+            "chunk_size": 24
+          },
+          {
+            "key": "h1",
+            "name": "h1",
+            "biomes": [
+              "Mire"
+            ],
+            "density": "swarm",
+            "width": 224,
+            "height": 224,
+            "is_entry": false,
+            "allowed_creature_types": [
+              "Slime",
+              "Bat",
+              "Swamp Swarm",
+              "Swamp Skirmisher",
+              "Swamp Line"
+            ],
+            "chunk_size": 28
+          },
+          {
+            "key": "h2",
+            "name": "h2",
+            "biomes": [
+              "Mire"
+            ],
+            "density": "swarm",
+            "width": 224,
+            "height": 224,
+            "is_entry": false,
+            "allowed_creature_types": [
+              "Slime",
+              "Bat",
+              "Swamp Swarm",
+              "Swamp Skirmisher",
+              "Swamp Line"
+            ],
+            "chunk_size": 32
+          },
+          {
+            "key": "h3",
+            "name": "h3",
+            "biomes": [
+              "Mire"
+            ],
+            "density": "swarm",
+            "width": 224,
+            "height": 224,
+            "is_entry": false,
+            "allowed_creature_types": [
+              "Slime",
+              "Bat",
+              "Swamp Swarm",
+              "Swamp Skirmisher",
+              "Swamp Line"
+            ],
+            "chunk_size": 36
+          },
+          {
+            "key": "h4",
+            "name": "h4",
+            "biomes": [
+              "Mire"
+            ],
+            "density": "swarm",
+            "width": 224,
+            "height": 224,
+            "is_entry": false,
+            "allowed_creature_types": [
+              "Slime",
+              "Bat",
+              "Swamp Swarm",
+              "Swamp Skirmisher",
+              "Swamp Line"
+            ],
+            "chunk_size": 40
+          },
+          {
+            "key": "h5",
+            "name": "h5",
+            "biomes": [
+              "Mire"
+            ],
+            "density": "swarm",
+            "width": 224,
+            "height": 224,
+            "is_entry": false,
+            "allowed_creature_types": [
+              "Slime",
+              "Bat",
+              "Swamp Swarm",
+              "Swamp Skirmisher",
+              "Swamp Line"
+            ],
+            "chunk_size": 44
+          },
+          {
+            "key": "cool",
+            "name": "cool",
+            "biomes": [
+              "Mire"
+            ],
+            "density": "normal",
+            "width": 224,
+            "height": 224,
+            "is_entry": false,
+            "allowed_creature_types": [
+              "Slime",
+              "Bat",
+              "Swamp Swarm",
+              "Swamp Skirmisher",
+              "Swamp Line"
+            ],
+            "chunk_size": 32
+          }
+        ],
+        "links": [
+          {
+            "from": "h0",
+            "edge": "E",
+            "to": "h1"
+          },
+          {
+            "from": "h1",
+            "edge": "E",
+            "to": "h2"
+          },
+          {
+            "from": "h2",
+            "edge": "E",
+            "to": "h3"
+          },
+          {
+            "from": "h3",
+            "edge": "E",
+            "to": "h4"
+          },
+          {
+            "from": "h4",
+            "edge": "E",
+            "to": "h5"
+          },
+          {
+            "from": "h5",
+            "edge": "E",
+            "to": "cool"
+          }
+        ]
+      },
+      "target": 14.0,
+      "report": {
+        "worlds": [
+          {
+            "key": "h0",
+            "name": "h0",
+            "biomes": [
+              "Mire"
+            ],
+            "density": "swarm",
+            "per_screen": 20.0,
+            "creatures": 4466,
+            "area": 50176,
+            "biome_multiplier": 2.0,
+            "flora": [
+              "dead_tree",
+              "bush",
+              "Stone"
+            ],
+            "creature_types": [
+              "Slime",
+              "Bat",
+              "Swamp Swarm",
+              "Swamp Skirmisher",
+              "Swamp Line"
+            ],
+            "variety": 5,
+            "leaders": 0,
+            "depth": "surface",
+            "socket_kib_s": 414.5,
+            "verdict": "ok"
+          },
+          {
+            "key": "h1",
+            "name": "h1",
+            "biomes": [
+              "Mire"
+            ],
+            "density": "swarm",
+            "per_screen": 20.0,
+            "creatures": 4466,
+            "area": 50176,
+            "biome_multiplier": 2.0,
+            "flora": [
+              "dead_tree",
+              "bush",
+              "Stone"
+            ],
+            "creature_types": [
+              "Slime",
+              "Bat",
+              "Swamp Swarm",
+              "Swamp Skirmisher",
+              "Swamp Line"
+            ],
+            "variety": 5,
+            "leaders": 0,
+            "depth": "surface",
+            "socket_kib_s": 564.2,
+            "verdict": "ok"
+          },
+          {
+            "key": "h2",
+            "name": "h2",
+            "biomes": [
+              "Mire"
+            ],
+            "density": "swarm",
+            "per_screen": 20.0,
+            "creatures": 4466,
+            "area": 50176,
+            "biome_multiplier": 2.0,
+            "flora": [
+              "dead_tree",
+              "bush",
+              "Stone"
+            ],
+            "creature_types": [
+              "Slime",
+              "Bat",
+              "Swamp Swarm",
+              "Swamp Skirmisher",
+              "Swamp Line"
+            ],
+            "variety": 5,
+            "leaders": 0,
+            "depth": "surface",
+            "socket_kib_s": 737.0,
+            "verdict": "ok"
+          },
+          {
+            "key": "h3",
+            "name": "h3",
+            "biomes": [
+              "Mire"
+            ],
+            "density": "swarm",
+            "per_screen": 20.0,
+            "creatures": 4466,
+            "area": 50176,
+            "biome_multiplier": 2.0,
+            "flora": [
+              "dead_tree",
+              "bush",
+              "Stone"
+            ],
+            "creature_types": [
+              "Slime",
+              "Bat",
+              "Swamp Swarm",
+              "Swamp Skirmisher",
+              "Swamp Line"
+            ],
+            "variety": 5,
+            "leaders": 0,
+            "depth": "surface",
+            "socket_kib_s": 932.7,
+            "verdict": "ok"
+          },
+          {
+            "key": "h4",
+            "name": "h4",
+            "biomes": [
+              "Mire"
+            ],
+            "density": "swarm",
+            "per_screen": 20.0,
+            "creatures": 4466,
+            "area": 50176,
+            "biome_multiplier": 2.0,
+            "flora": [
+              "dead_tree",
+              "bush",
+              "Stone"
+            ],
+            "creature_types": [
+              "Slime",
+              "Bat",
+              "Swamp Swarm",
+              "Swamp Skirmisher",
+              "Swamp Line"
+            ],
+            "variety": 5,
+            "leaders": 0,
+            "depth": "surface",
+            "socket_kib_s": 1151.5,
+            "verdict": "ok"
+          },
+          {
+            "key": "h5",
+            "name": "h5",
+            "biomes": [
+              "Mire"
+            ],
+            "density": "swarm",
+            "per_screen": 20.0,
+            "creatures": 4466,
+            "area": 50176,
+            "biome_multiplier": 2.0,
+            "flora": [
+              "dead_tree",
+              "bush",
+              "Stone"
+            ],
+            "creature_types": [
+              "Slime",
+              "Bat",
+              "Swamp Swarm",
+              "Swamp Skirmisher",
+              "Swamp Line"
+            ],
+            "variety": 5,
+            "leaders": 0,
+            "depth": "surface",
+            "socket_kib_s": 1393.3,
+            "verdict": "ok"
+          },
+          {
+            "key": "cool",
+            "name": "cool",
+            "biomes": [
+              "Mire"
+            ],
+            "density": "normal",
+            "per_screen": 4.0,
+            "creatures": 903,
+            "area": 50176,
+            "biome_multiplier": 2.0,
+            "flora": [
+              "dead_tree",
+              "bush",
+              "Stone"
+            ],
+            "creature_types": [
+              "Slime",
+              "Bat",
+              "Swamp Swarm",
+              "Swamp Skirmisher",
+              "Swamp Line"
+            ],
+            "variety": 5,
+            "leaders": 0,
+            "depth": "surface",
+            "socket_kib_s": 149.0,
+            "verdict": "ok"
+          }
+        ],
+        "problems": [
+          "6 of 7 worlds (h0, h1, h2, h3, h4, h5): ~415-1393 KiB/s down a single socket for one parked player (20.0/screen). Their measurement puts the cost at ~920 B/s per creature in the active neighbourhood, so this is a bandwidth decision rather than a flavour one. Two levers, and the biomes are neither: target_per_screen of 11 or below lands on `dense` (8.1/screen), or keep the density and halve chunk_size - the neighbourhood is 9 chunks, so the cost falls with the SQUARE of it (32 -> 16 is ~4x less)."
+        ],
+        "caveats": [
+          "asked for 14.0 creatures/screen, this region averages 17.7. The tiers are coarse - sparse 2.0, normal 4.0, dense 8.1, horde 13.9, swarm 20.0 - and horde is the closest one to your target. Ask for a number nearer a tier if the gap matters."
+        ],
+        "ok": false,
+        "totals": {
+          "worlds": 7,
+          "creatures": 27699,
+          "mean_per_screen": 17.7,
+          "min_per_screen": 4.0,
+          "max_per_screen": 20.0,
+          "empty_worlds": 0,
+          "creature_types": 5,
+          "leaders": 0
+        },
+        "notes": [
+          "Creature counts are scatter only; packs are not modelled, so every figure is a floor. See PACKS_NOT_MODELLED.",
+          "One screen is ~225 tiles at something2's fixed 1280x720 canvas."
+        ]
+      },
+      "report_json": "{\n  \"worlds\": [\n    {\n      \"key\": \"h0\",\n      \"name\": \"h0\",\n      \"biomes\": [\n        \"Mire\"\n      ],\n      \"density\": \"swarm\",\n      \"per_screen\": 20.0,\n      \"creatures\": 4466,\n      \"area\": 50176,\n      \"biome_multiplier\": 2.0,\n      \"flora\": [\n        \"dead_tree\",\n        \"bush\",\n        \"Stone\"\n      ],\n      \"creature_types\": [\n        \"Slime\",\n        \"Bat\",\n        \"Swamp Swarm\",\n        \"Swamp Skirmisher\",\n        \"Swamp Line\"\n      ],\n      \"variety\": 5,\n      \"leaders\": 0,\n      \"depth\": \"surface\",\n      \"socket_kib_s\": 414.5,\n      \"verdict\": \"ok\"\n    },\n    {\n      \"key\": \"h1\",\n      \"name\": \"h1\",\n      \"biomes\": [\n        \"Mire\"\n      ],\n      \"density\": \"swarm\",\n      \"per_screen\": 20.0,\n      \"creatures\": 4466,\n      \"area\": 50176,\n      \"biome_multiplier\": 2.0,\n      \"flora\": [\n        \"dead_tree\",\n        \"bush\",\n        \"Stone\"\n      ],\n      \"creature_types\": [\n        \"Slime\",\n        \"Bat\",\n        \"Swamp Swarm\",\n        \"Swamp Skirmisher\",\n        \"Swamp Line\"\n      ],\n      \"variety\": 5,\n      \"leaders\": 0,\n      \"depth\": \"surface\",\n      \"socket_kib_s\": 564.2,\n      \"verdict\": \"ok\"\n    },\n    {\n      \"key\": \"h2\",\n      \"name\": \"h2\",\n      \"biomes\": [\n        \"Mire\"\n      ],\n      \"density\": \"swarm\",\n      \"per_screen\": 20.0,\n      \"creatures\": 4466,\n      \"area\": 50176,\n      \"biome_multiplier\": 2.0,\n      \"flora\": [\n        \"dead_tree\",\n        \"bush\",\n        \"Stone\"\n      ],\n      \"creature_types\": [\n        \"Slime\",\n        \"Bat\",\n        \"Swamp Swarm\",\n        \"Swamp Skirmisher\",\n        \"Swamp Line\"\n      ],\n      \"variety\": 5,\n      \"leaders\": 0,\n      \"depth\": \"surface\",\n      \"socket_kib_s\": 737.0,\n      \"verdict\": \"ok\"\n    },\n    {\n      \"key\": \"h3\",\n      \"name\": \"h3\",\n      \"biomes\": [\n        \"Mire\"\n      ],\n      \"density\": \"swarm\",\n      \"per_screen\": 20.0,\n      \"creatures\": 4466,\n      \"area\": 50176,\n      \"biome_multiplier\": 2.0,\n      \"flora\": [\n        \"dead_tree\",\n        \"bush\",\n        \"Stone\"\n      ],\n      \"creature_types\": [\n        \"Slime\",\n        \"Bat\",\n        \"Swamp Swarm\",\n        \"Swamp Skirmisher\",\n        \"Swamp Line\"\n      ],\n      \"variety\": 5,\n      \"leaders\": 0,\n      \"depth\": \"surface\",\n      \"socket_kib_s\": 932.7,\n      \"verdict\": \"ok\"\n    },\n    {\n      \"key\": \"h4\",\n      \"name\": \"h4\",\n      \"biomes\": [\n        \"Mire\"\n      ],\n      \"density\": \"swarm\",\n      \"per_screen\": 20.0,\n      \"creatures\": 4466,\n      \"area\": 50176,\n      \"biome_multiplier\": 2.0,\n      \"flora\": [\n        \"dead_tree\",\n        \"bush\",\n        \"Stone\"\n      ],\n      \"creature_types\": [\n        \"Slime\",\n        \"Bat\",\n        \"Swamp Swarm\",\n        \"Swamp Skirmisher\",\n        \"Swamp Line\"\n      ],\n      \"variety\": 5,\n      \"leaders\": 0,\n      \"depth\": \"surface\",\n      \"socket_kib_s\": 1151.5,\n      \"verdict\": \"ok\"\n    },\n    {\n      \"key\": \"h5\",\n      \"name\": \"h5\",\n      \"biomes\": [\n        \"Mire\"\n      ],\n      \"density\": \"swarm\",\n      \"per_screen\": 20.0,\n      \"creatures\": 4466,\n      \"area\": 50176,\n      \"biome_multiplier\": 2.0,\n      \"flora\": [\n        \"dead_tree\",\n        \"bush\",\n        \"Stone\"\n      ],\n      \"creature_types\": [\n        \"Slime\",\n        \"Bat\",\n        \"Swamp Swarm\",\n        \"Swamp Skirmisher\",\n        \"Swamp Line\"\n      ],\n      \"variety\": 5,\n      \"leaders\": 0,\n      \"depth\": \"surface\",\n      \"socket_kib_s\": 1393.3,\n      \"verdict\": \"ok\"\n    },\n    {\n      \"key\": \"cool\",\n      \"name\": \"cool\",\n      \"biomes\": [\n        \"Mire\"\n      ],\n      \"density\": \"normal\",\n      \"per_screen\": 4.0,\n      \"creatures\": 903,\n      \"area\": 50176,\n      \"biome_multiplier\": 2.0,\n      \"flora\": [\n        \"dead_tree\",\n        \"bush\",\n        \"Stone\"\n      ],\n      \"creature_types\": [\n        \"Slime\",\n        \"Bat\",\n        \"Swamp Swarm\",\n        \"Swamp Skirmisher\",\n        \"Swamp Line\"\n      ],\n      \"variety\": 5,\n      \"leaders\": 0,\n      \"depth\": \"surface\",\n      \"socket_kib_s\": 149.0,\n      \"verdict\": \"ok\"\n    }\n  ],\n  \"problems\": [\n    \"6 of 7 worlds (h0, h1, h2, h3, h4, h5): ~415-1393 KiB/s down a single socket for one parked player (20.0/screen). Their measurement puts the cost at ~920 B/s per creature in the active neighbourhood, so this is a bandwidth decision rather than a flavour one. Two levers, and the biomes are neither: target_per_screen of 11 or below lands on `dense` (8.1/screen), or keep the density and halve chunk_size - the neighbourhood is 9 chunks, so the cost falls with the SQUARE of it (32 -> 16 is ~4x less).\"\n  ],\n  \"caveats\": [\n    \"asked for 14.0 creatures/screen, this region averages 17.7. The tiers are coarse - sparse 2.0, normal 4.0, dense 8.1, horde 13.9, swarm 20.0 - and horde is the closest one to your target. Ask for a number nearer a tier if the gap matters.\"\n  ],\n  \"ok\": false,\n  \"totals\": {\n    \"worlds\": 7,\n    \"creatures\": 27699,\n    \"mean_per_screen\": 17.7,\n    \"min_per_screen\": 4.0,\n    \"max_per_screen\": 20.0,\n    \"empty_worlds\": 0,\n    \"creature_types\": 5,\n    \"leaders\": 0\n  },\n  \"notes\": [\n    \"Creature counts are scatter only; packs are not modelled, so every figure is a floor. See PACKS_NOT_MODELLED.\",\n    \"One screen is ~225 tiles at something2's fixed 1280x720 canvas.\"\n  ]\n}"
+    },
+    {
+      "id": "leaders-at-cap",
+      "covers": "exactly one leader role: at the cap, no problem (mutant: >=)",
+      "spec": {
+        "worlds": [
+          {
+            "key": "w",
+            "name": "w",
+            "biomes": [
+              "Meadow"
+            ],
+            "density": "normal",
+            "width": 128,
+            "height": 128,
+            "is_entry": true,
+            "allowed_creature_types": [
+              "Slime",
+              "Wolf",
+              "Beast Swarm",
+              "Beast Skirmisher",
+              "Beast Champion"
+            ]
+          }
+        ],
+        "links": []
+      },
+      "target": null,
+      "report": {
+        "worlds": [
+          {
+            "key": "w",
+            "name": "w",
+            "biomes": [
+              "Meadow"
+            ],
+            "density": "normal",
+            "per_screen": 4.1,
+            "creatures": 295,
+            "area": 16384,
+            "biome_multiplier": 0.5,
+            "flora": [
+              "bush",
+              "rose_bush",
+              "Tree",
+              "Stone"
+            ],
+            "creature_types": [
+              "Slime",
+              "Wolf",
+              "Beast Swarm",
+              "Beast Skirmisher",
+              "Beast Champion"
+            ],
+            "variety": 5,
+            "leaders": 1,
+            "depth": "surface",
+            "socket_kib_s": 149.1,
+            "verdict": "ok"
+          }
+        ],
+        "problems": [],
+        "caveats": [],
+        "ok": true,
+        "totals": {
+          "worlds": 1,
+          "creatures": 295,
+          "mean_per_screen": 4.1,
+          "min_per_screen": 4.1,
+          "max_per_screen": 4.1,
+          "empty_worlds": 0,
+          "creature_types": 5,
+          "leaders": 1
+        },
+        "notes": [
+          "Creature counts are scatter only; packs are not modelled, so every figure is a floor. See PACKS_NOT_MODELLED.",
+          "One screen is ~225 tiles at something2's fixed 1280x720 canvas."
+        ]
+      },
+      "report_json": "{\n  \"worlds\": [\n    {\n      \"key\": \"w\",\n      \"name\": \"w\",\n      \"biomes\": [\n        \"Meadow\"\n      ],\n      \"density\": \"normal\",\n      \"per_screen\": 4.1,\n      \"creatures\": 295,\n      \"area\": 16384,\n      \"biome_multiplier\": 0.5,\n      \"flora\": [\n        \"bush\",\n        \"rose_bush\",\n        \"Tree\",\n        \"Stone\"\n      ],\n      \"creature_types\": [\n        \"Slime\",\n        \"Wolf\",\n        \"Beast Swarm\",\n        \"Beast Skirmisher\",\n        \"Beast Champion\"\n      ],\n      \"variety\": 5,\n      \"leaders\": 1,\n      \"depth\": \"surface\",\n      \"socket_kib_s\": 149.1,\n      \"verdict\": \"ok\"\n    }\n  ],\n  \"problems\": [],\n  \"caveats\": [],\n  \"ok\": true,\n  \"totals\": {\n    \"worlds\": 1,\n    \"creatures\": 295,\n    \"mean_per_screen\": 4.1,\n    \"min_per_screen\": 4.1,\n    \"max_per_screen\": 4.1,\n    \"empty_worlds\": 0,\n    \"creature_types\": 5,\n    \"leaders\": 1\n  },\n  \"notes\": [\n    \"Creature counts are scatter only; packs are not modelled, so every figure is a floor. See PACKS_NOT_MODELLED.\",\n    \"One screen is ~225 tiles at something2's fixed 1280x720 canvas.\"\n  ]\n}"
+    },
+    {
+      "id": "caveat-tie-dense-horde",
+      "covers": "target 11.025 ties dense and horde exactly: min() names dense (mutant: <=)",
+      "spec": {
+        "worlds": [
+          {
+            "key": "w",
+            "name": "w",
+            "biomes": [
+              "Mire"
+            ],
+            "density": "normal",
+            "width": 128,
+            "height": 128,
+            "is_entry": true,
+            "allowed_creature_types": [
+              "Slime",
+              "Bat",
+              "Swamp Swarm",
+              "Swamp Skirmisher",
+              "Swamp Line"
+            ]
+          }
+        ],
+        "links": []
+      },
+      "target": 11.025,
+      "report": {
+        "worlds": [
+          {
+            "key": "w",
+            "name": "w",
+            "biomes": [
+              "Mire"
+            ],
+            "density": "normal",
+            "per_screen": 4.1,
+            "creatures": 295,
+            "area": 16384,
+            "biome_multiplier": 2.0,
+            "flora": [
+              "dead_tree",
+              "bush",
+              "Stone"
+            ],
+            "creature_types": [
+              "Slime",
+              "Bat",
+              "Swamp Swarm",
+              "Swamp Skirmisher",
+              "Swamp Line"
+            ],
+            "variety": 5,
+            "leaders": 0,
+            "depth": "surface",
+            "socket_kib_s": 149.1,
+            "verdict": "ok"
+          }
+        ],
+        "problems": [],
+        "caveats": [
+          "asked for 11.0 creatures/screen, this region averages 4.1. The tiers are coarse - sparse 2.0, normal 4.0, dense 8.1, horde 13.9, swarm 20.0 - and dense is the closest one to your target. Ask for a number nearer a tier if the gap matters."
+        ],
+        "ok": true,
+        "totals": {
+          "worlds": 1,
+          "creatures": 295,
+          "mean_per_screen": 4.1,
+          "min_per_screen": 4.1,
+          "max_per_screen": 4.1,
+          "empty_worlds": 0,
+          "creature_types": 5,
+          "leaders": 0
+        },
+        "notes": [
+          "Creature counts are scatter only; packs are not modelled, so every figure is a floor. See PACKS_NOT_MODELLED.",
+          "One screen is ~225 tiles at something2's fixed 1280x720 canvas."
+        ]
+      },
+      "report_json": "{\n  \"worlds\": [\n    {\n      \"key\": \"w\",\n      \"name\": \"w\",\n      \"biomes\": [\n        \"Mire\"\n      ],\n      \"density\": \"normal\",\n      \"per_screen\": 4.1,\n      \"creatures\": 295,\n      \"area\": 16384,\n      \"biome_multiplier\": 2.0,\n      \"flora\": [\n        \"dead_tree\",\n        \"bush\",\n        \"Stone\"\n      ],\n      \"creature_types\": [\n        \"Slime\",\n        \"Bat\",\n        \"Swamp Swarm\",\n        \"Swamp Skirmisher\",\n        \"Swamp Line\"\n      ],\n      \"variety\": 5,\n      \"leaders\": 0,\n      \"depth\": \"surface\",\n      \"socket_kib_s\": 149.1,\n      \"verdict\": \"ok\"\n    }\n  ],\n  \"problems\": [],\n  \"caveats\": [\n    \"asked for 11.0 creatures/screen, this region averages 4.1. The tiers are coarse - sparse 2.0, normal 4.0, dense 8.1, horde 13.9, swarm 20.0 - and dense is the closest one to your target. Ask for a number nearer a tier if the gap matters.\"\n  ],\n  \"ok\": true,\n  \"totals\": {\n    \"worlds\": 1,\n    \"creatures\": 295,\n    \"mean_per_screen\": 4.1,\n    \"min_per_screen\": 4.1,\n    \"max_per_screen\": 4.1,\n    \"empty_worlds\": 0,\n    \"creature_types\": 5,\n    \"leaders\": 0\n  },\n  \"notes\": [\n    \"Creature counts are scatter only; packs are not modelled, so every figure is a floor. See PACKS_NOT_MODELLED.\",\n    \"One screen is ~225 tiles at something2's fixed 1280x720 canvas.\"\n  ]\n}"
+    },
+    {
+      "id": "sum-py311-mean",
+      "covers": "4 worlds at 4.0/4.0/8.1/8.1 per screen: mean_per_screen 6.1 under 3.11 (left-to-right sum), 6.0 under 3.12",
+      "spec": {
+        "worlds": [
+          {
+            "key": "s0",
+            "name": "s0",
+            "biomes": [
+              "Mire"
+            ],
+            "density": "normal",
+            "width": 32,
+            "height": 32,
+            "is_entry": true,
+            "allowed_creature_types": [
+              "Slime",
+              "Bat",
+              "Swamp Swarm",
+              "Swamp Skirmisher",
+              "Swamp Line"
+            ]
+          },
+          {
+            "key": "s1",
+            "name": "s1",
+            "biomes": [
+              "Mire"
+            ],
+            "density": "normal",
+            "width": 32,
+            "height": 32,
+            "is_entry": false,
+            "allowed_creature_types": [
+              "Slime",
+              "Bat",
+              "Swamp Swarm",
+              "Swamp Skirmisher",
+              "Swamp Line"
+            ]
+          },
+          {
+            "key": "s2",
+            "name": "s2",
+            "biomes": [
+              "Mire"
+            ],
+            "density": "dense",
+            "width": 32,
+            "height": 32,
+            "is_entry": false,
+            "allowed_creature_types": [
+              "Slime",
+              "Bat",
+              "Swamp Swarm",
+              "Swamp Skirmisher",
+              "Swamp Line"
+            ]
+          },
+          {
+            "key": "s3",
+            "name": "s3",
+            "biomes": [
+              "Mire"
+            ],
+            "density": "dense",
+            "width": 32,
+            "height": 32,
+            "is_entry": false,
+            "allowed_creature_types": [
+              "Slime",
+              "Bat",
+              "Swamp Swarm",
+              "Swamp Skirmisher",
+              "Swamp Line"
+            ]
+          }
+        ],
+        "links": [
+          {
+            "from": "s0",
+            "edge": "E",
+            "to": "s1"
+          },
+          {
+            "from": "s1",
+            "edge": "E",
+            "to": "s2"
+          },
+          {
+            "from": "s2",
+            "edge": "E",
+            "to": "s3"
+          }
+        ]
+      },
+      "target": 6.0,
+      "report": {
+        "worlds": [
+          {
+            "key": "s0",
+            "name": "s0",
+            "biomes": [
+              "Mire"
+            ],
+            "density": "normal",
+            "per_screen": 4.0,
+            "creatures": 18,
+            "area": 1024,
+            "biome_multiplier": 2.0,
+            "flora": [
+              "dead_tree",
+              "bush",
+              "Stone"
+            ],
+            "creature_types": [
+              "Slime",
+              "Bat",
+              "Swamp Swarm",
+              "Swamp Skirmisher",
+              "Swamp Line"
+            ],
+            "variety": 5,
+            "leaders": 0,
+            "depth": "surface",
+            "socket_kib_s": 145.5,
+            "verdict": "ok"
+          },
+          {
+            "key": "s1",
+            "name": "s1",
+            "biomes": [
+              "Mire"
+            ],
+            "density": "normal",
+            "per_screen": 4.0,
+            "creatures": 18,
+            "area": 1024,
+            "biome_multiplier": 2.0,
+            "flora": [
+              "dead_tree",
+              "bush",
+              "Stone"
+            ],
+            "creature_types": [
+              "Slime",
+              "Bat",
+              "Swamp Swarm",
+              "Swamp Skirmisher",
+              "Swamp Line"
+            ],
+            "variety": 5,
+            "leaders": 0,
+            "depth": "surface",
+            "socket_kib_s": 145.5,
+            "verdict": "ok"
+          },
+          {
+            "key": "s2",
+            "name": "s2",
+            "biomes": [
+              "Mire"
+            ],
+            "density": "dense",
+            "per_screen": 8.1,
+            "creatures": 37,
+            "area": 1024,
+            "biome_multiplier": 2.0,
+            "flora": [
+              "dead_tree",
+              "bush",
+              "Stone"
+            ],
+            "creature_types": [
+              "Slime",
+              "Bat",
+              "Swamp Swarm",
+              "Swamp Skirmisher",
+              "Swamp Line"
+            ],
+            "variety": 5,
+            "leaders": 0,
+            "depth": "surface",
+            "socket_kib_s": 299.2,
+            "verdict": "ok"
+          },
+          {
+            "key": "s3",
+            "name": "s3",
+            "biomes": [
+              "Mire"
+            ],
+            "density": "dense",
+            "per_screen": 8.1,
+            "creatures": 37,
+            "area": 1024,
+            "biome_multiplier": 2.0,
+            "flora": [
+              "dead_tree",
+              "bush",
+              "Stone"
+            ],
+            "creature_types": [
+              "Slime",
+              "Bat",
+              "Swamp Swarm",
+              "Swamp Skirmisher",
+              "Swamp Line"
+            ],
+            "variety": 5,
+            "leaders": 0,
+            "depth": "surface",
+            "socket_kib_s": 299.2,
+            "verdict": "ok"
+          }
+        ],
+        "problems": [],
+        "caveats": [],
+        "ok": true,
+        "totals": {
+          "worlds": 4,
+          "creatures": 110,
+          "mean_per_screen": 6.1,
+          "min_per_screen": 4.0,
+          "max_per_screen": 8.1,
+          "empty_worlds": 0,
+          "creature_types": 5,
+          "leaders": 0
+        },
+        "notes": [
+          "Creature counts are scatter only; packs are not modelled, so every figure is a floor. See PACKS_NOT_MODELLED.",
+          "One screen is ~225 tiles at something2's fixed 1280x720 canvas."
+        ]
+      },
+      "report_json": "{\n  \"worlds\": [\n    {\n      \"key\": \"s0\",\n      \"name\": \"s0\",\n      \"biomes\": [\n        \"Mire\"\n      ],\n      \"density\": \"normal\",\n      \"per_screen\": 4.0,\n      \"creatures\": 18,\n      \"area\": 1024,\n      \"biome_multiplier\": 2.0,\n      \"flora\": [\n        \"dead_tree\",\n        \"bush\",\n        \"Stone\"\n      ],\n      \"creature_types\": [\n        \"Slime\",\n        \"Bat\",\n        \"Swamp Swarm\",\n        \"Swamp Skirmisher\",\n        \"Swamp Line\"\n      ],\n      \"variety\": 5,\n      \"leaders\": 0,\n      \"depth\": \"surface\",\n      \"socket_kib_s\": 145.5,\n      \"verdict\": \"ok\"\n    },\n    {\n      \"key\": \"s1\",\n      \"name\": \"s1\",\n      \"biomes\": [\n        \"Mire\"\n      ],\n      \"density\": \"normal\",\n      \"per_screen\": 4.0,\n      \"creatures\": 18,\n      \"area\": 1024,\n      \"biome_multiplier\": 2.0,\n      \"flora\": [\n        \"dead_tree\",\n        \"bush\",\n        \"Stone\"\n      ],\n      \"creature_types\": [\n        \"Slime\",\n        \"Bat\",\n        \"Swamp Swarm\",\n        \"Swamp Skirmisher\",\n        \"Swamp Line\"\n      ],\n      \"variety\": 5,\n      \"leaders\": 0,\n      \"depth\": \"surface\",\n      \"socket_kib_s\": 145.5,\n      \"verdict\": \"ok\"\n    },\n    {\n      \"key\": \"s2\",\n      \"name\": \"s2\",\n      \"biomes\": [\n        \"Mire\"\n      ],\n      \"density\": \"dense\",\n      \"per_screen\": 8.1,\n      \"creatures\": 37,\n      \"area\": 1024,\n      \"biome_multiplier\": 2.0,\n      \"flora\": [\n        \"dead_tree\",\n        \"bush\",\n        \"Stone\"\n      ],\n      \"creature_types\": [\n        \"Slime\",\n        \"Bat\",\n        \"Swamp Swarm\",\n        \"Swamp Skirmisher\",\n        \"Swamp Line\"\n      ],\n      \"variety\": 5,\n      \"leaders\": 0,\n      \"depth\": \"surface\",\n      \"socket_kib_s\": 299.2,\n      \"verdict\": \"ok\"\n    },\n    {\n      \"key\": \"s3\",\n      \"name\": \"s3\",\n      \"biomes\": [\n        \"Mire\"\n      ],\n      \"density\": \"dense\",\n      \"per_screen\": 8.1,\n      \"creatures\": 37,\n      \"area\": 1024,\n      \"biome_multiplier\": 2.0,\n      \"flora\": [\n        \"dead_tree\",\n        \"bush\",\n        \"Stone\"\n      ],\n      \"creature_types\": [\n        \"Slime\",\n        \"Bat\",\n        \"Swamp Swarm\",\n        \"Swamp Skirmisher\",\n        \"Swamp Line\"\n      ],\n      \"variety\": 5,\n      \"leaders\": 0,\n      \"depth\": \"surface\",\n      \"socket_kib_s\": 299.2,\n      \"verdict\": \"ok\"\n    }\n  ],\n  \"problems\": [],\n  \"caveats\": [],\n  \"ok\": true,\n  \"totals\": {\n    \"worlds\": 4,\n    \"creatures\": 110,\n    \"mean_per_screen\": 6.1,\n    \"min_per_screen\": 4.0,\n    \"max_per_screen\": 8.1,\n    \"empty_worlds\": 0,\n    \"creature_types\": 5,\n    \"leaders\": 0\n  },\n  \"notes\": [\n    \"Creature counts are scatter only; packs are not modelled, so every figure is a floor. See PACKS_NOT_MODELLED.\",\n    \"One screen is ~225 tiles at something2's fixed 1280x720 canvas.\"\n  ]\n}"
+    },
+    {
+      "id": "sum-py311-biome-multiplier",
+      "covers": "biomes Meadow, Meadow, Highlands, Emberdepths: biome_multiplier 1.02 under 3.11, 1.03 under 3.12",
+      "spec": {
+        "worlds": [
+          {
+            "key": "w",
+            "name": "w",
+            "biomes": [
+              "Meadow",
+              "Meadow",
+              "Highlands",
+              "Emberdepths"
+            ],
+            "density": "normal",
+            "width": 128,
+            "height": 128,
+            "is_entry": true,
+            "allowed_creature_types": [
+              "Slime",
+              "Wolf",
+              "Beast Swarm",
+              "Beast Skirmisher",
+              "Beast Line",
+              "Highland Swarm",
+              "Highland Skirmisher",
+              "Highland Line",
+              "Ember Swarm",
+              "Ember Skirmisher",
+              "Ember Line"
+            ]
+          }
+        ],
+        "links": []
+      },
+      "target": null,
+      "report": {
+        "worlds": [
+          {
+            "key": "w",
+            "name": "w",
+            "biomes": [
+              "Meadow",
+              "Meadow",
+              "Highlands",
+              "Emberdepths"
+            ],
+            "density": "normal",
+            "per_screen": 4.1,
+            "creatures": 295,
+            "area": 16384,
+            "biome_multiplier": 1.02,
+            "flora": [
+              "bush",
+              "rose_bush",
+              "Tree",
+              "Stone",
+              "pine_tree"
+            ],
+            "creature_types": [
+              "Slime",
+              "Wolf",
+              "Beast Swarm",
+              "Beast Skirmisher",
+              "Beast Line",
+              "Highland Swarm",
+              "Highland Skirmisher",
+              "Highland Line",
+              "Ember Swarm",
+              "Ember Skirmisher",
+              "Ember Line"
+            ],
+            "variety": 11,
+            "leaders": 0,
+            "depth": "mixed",
+            "socket_kib_s": 149.1,
+            "verdict": "ok"
+          }
+        ],
+        "problems": [],
+        "caveats": [],
+        "ok": true,
+        "totals": {
+          "worlds": 1,
+          "creatures": 295,
+          "mean_per_screen": 4.1,
+          "min_per_screen": 4.1,
+          "max_per_screen": 4.1,
+          "empty_worlds": 0,
+          "creature_types": 11,
+          "leaders": 0
+        },
+        "notes": [
+          "Creature counts are scatter only; packs are not modelled, so every figure is a floor. See PACKS_NOT_MODELLED.",
+          "One screen is ~225 tiles at something2's fixed 1280x720 canvas."
+        ]
+      },
+      "report_json": "{\n  \"worlds\": [\n    {\n      \"key\": \"w\",\n      \"name\": \"w\",\n      \"biomes\": [\n        \"Meadow\",\n        \"Meadow\",\n        \"Highlands\",\n        \"Emberdepths\"\n      ],\n      \"density\": \"normal\",\n      \"per_screen\": 4.1,\n      \"creatures\": 295,\n      \"area\": 16384,\n      \"biome_multiplier\": 1.02,\n      \"flora\": [\n        \"bush\",\n        \"rose_bush\",\n        \"Tree\",\n        \"Stone\",\n        \"pine_tree\"\n      ],\n      \"creature_types\": [\n        \"Slime\",\n        \"Wolf\",\n        \"Beast Swarm\",\n        \"Beast Skirmisher\",\n        \"Beast Line\",\n        \"Highland Swarm\",\n        \"Highland Skirmisher\",\n        \"Highland Line\",\n        \"Ember Swarm\",\n        \"Ember Skirmisher\",\n        \"Ember Line\"\n      ],\n      \"variety\": 11,\n      \"leaders\": 0,\n      \"depth\": \"mixed\",\n      \"socket_kib_s\": 149.1,\n      \"verdict\": \"ok\"\n    }\n  ],\n  \"problems\": [],\n  \"caveats\": [],\n  \"ok\": true,\n  \"totals\": {\n    \"worlds\": 1,\n    \"creatures\": 295,\n    \"mean_per_screen\": 4.1,\n    \"min_per_screen\": 4.1,\n    \"max_per_screen\": 4.1,\n    \"empty_worlds\": 0,\n    \"creature_types\": 11,\n    \"leaders\": 0\n  },\n  \"notes\": [\n    \"Creature counts are scatter only; packs are not modelled, so every figure is a floor. See PACKS_NOT_MODELLED.\",\n    \"One screen is ~225 tiles at something2's fixed 1280x720 canvas.\"\n  ]\n}"
     }
   ]
 }

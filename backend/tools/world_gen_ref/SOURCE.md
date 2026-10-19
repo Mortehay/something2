@@ -46,17 +46,32 @@ new golden. Paths are relative to `backend/`.
 
 | File | Origin | sha256 |
 |---|---|---|
-| `tests/fixtures/world_gen/box_parity.json` | generated | `c8bb7623f4a26b694a68959a99490be96da3a255e45eafe4ae91bdf6e90100cc` |
-| `tests/fixtures/world_gen/constants.json` | generated | `8943bae14f58a2b19a7b5e22f498dc5d94abd07ca44b7a99085a4c839597a4d2` |
-| `tests/fixtures/world_gen/helpers.json` | generated | `ad23f79af53ea0248fedf362ff4a1e67667d3abc2df7d18202716ecdf9abaf61` |
-| `tests/fixtures/world_gen/plan_cases.json` | generated | `67cde5fde0312800068ee61d00dc92d69069d8a6975c5328a454bee40ca1f099` |
-| `tests/fixtures/world_gen/report_only.json` | generated | `c382eaa690be436e789147933068aa070d6535055aa6ee0f3c152864c1ba83d2` |
+| `tests/fixtures/world_gen/box_parity.json` | generated | `85c64371e49119615524523038d3ada47c3c344853030d723057a260246d88c4` |
+| `tests/fixtures/world_gen/constants.json` | generated | `e624c2b98e0e13ca90fe5c0aaa12eb0f2ffca09c9aa7b2215c476798c38f8500` |
+| `tests/fixtures/world_gen/helpers.json` | generated | `1023dbe057dd6e6c7f31aea8280ebe9e036343ffd813180eeaf239c408f3c1d3` |
+| `tests/fixtures/world_gen/plan_cases.json` | generated | `1f96f7b60dbe24c431b74765777f267516dd6a5d9cd40bdbf89cf7fbc75216db` |
+| `tests/fixtures/world_gen/report_only.json` | generated | `01d55107cc630dd0fbe841da33ce629796f6faeeaa4dcfd247cff2a67cfd6257` |
+
+## The oracle is Python 3.11
+
+The GPU box runs **Python 3.11.16**, and the fixtures are generated under
+that version (`python:3.11.16-slim`). Python 3.12 changed float `sum()` to
+compensated (Neumaier) summation, while 3.11 - and the JS port - add left to
+right. The two disagree whenever a mean or a biome multiplier lands on a
+rounding edge (report-only cases `sum-py311-mean` and
+`sum-py311-biome-multiplier` are such edges, and make_fixtures.py asserts their
+3.11 values). Fixtures from host 3.12 would therefore not describe the box.
+`make_fixtures.py` refuses to run under any major.minor other than 3.11 and
+records `sys.version` in every fixture's `python` header field;
+`world_gen_ref_integrity.test.js` asserts that header says 3.11.
 
 ## Regenerating the golden fixtures
 
-From the repository root, on the host (never inside the backend container):
+From the repository root, in a throwaway Python 3.11 container (never inside
+the backend container, and not with the host's python3):
 
-    python3 -I backend/tools/world_gen_ref/make_fixtures.py
+    docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/backend:/w" -w /w \
+        python:3.11.16-slim python -I tools/world_gen_ref/make_fixtures.py
 
 It writes `backend/tests/fixtures/world_gen/*.json` deterministically: two runs
 give byte-identical files. It prints the fixtures' sha256 rows; if a

@@ -291,7 +291,7 @@ test('report: every fixture report is byte-equal to Python json.dumps text', () 
     check(W.report(REPORT_ONLY_PY[i].spec, REPORT_ONLY_PY[i].target), c.report_json, `only:${c.id}`);
   });
   assert.equal(n, PLAN_CASES.length + 1 + REPORT_ONLY.length);
-  assert.equal(n, 69);
+  assert.equal(n, 76);
   assert.deepEqual(failed, [], `reports not byte-equal: ${failed.join(', ')}`);
 });
 

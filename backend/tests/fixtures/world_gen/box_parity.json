@@ -1,5 +1,6 @@
 {
   "generated_by": "backend/tools/world_gen_ref/make_fixtures.py",
+  "python": "3.11.16 (main, Sep 19 2026, 01:04:43) [GCC 14.2.0]",
   "reference_sha256": {
     "world_gen.py": "75178d631c0f8c87cb16ae8db490c3a0f4a33f79c6df1bd6f408638916c8b3a3",
     "bestiary_p4.json": "3c5e3c5c5b55e8fc0f0260b506eb9c004f3071fa42e9abb794e7cd64f094868a",
