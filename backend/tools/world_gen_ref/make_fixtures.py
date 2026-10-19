@@ -595,7 +595,17 @@ def main():
     ]
     for name in written:
         print(f"wrote {os.path.relpath(os.path.join(OUT, name), BACKEND)}")
-    print("box parity: spec bytes, parsed spec and report all match the live box")
+    print("box parity: parsed spec, to_json re-serialisation and report all "
+          "match the live box")
+    # The fixtures are pinned by sha256 in SOURCE.md, so a regeneration that
+    # changes any of them fails the integrity test until these rows are pasted
+    # in - an explicit, reviewed diff rather than a silent new golden.
+    print("\nfixture sha256 rows for SOURCE.md (Golden fixtures table):")
+    for name in sorted(written):
+        rel = os.path.relpath(os.path.join(OUT, name), BACKEND)
+        with open(os.path.join(OUT, name), "rb") as fh:
+            digest = hashlib.sha256(fh.read()).hexdigest()
+        print(f"| `{rel}` | generated | `{digest}` |")
 
 
 if __name__ == "__main__":

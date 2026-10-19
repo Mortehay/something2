@@ -20,7 +20,10 @@ replace them with a newer upstream copy, update the table below, and rerun
 `box_parity/` holds one live GPU-box `POST /api/worlds` exchange (author
 `rules`, region `parity-somet644`), captured 2026-10-20 with user approval. It
 is not from the repository above; it is what the running box returned, and
-`make_fixtures.py` asserts the vendored module reproduces it byte for byte.
+`make_fixtures.py` asserts the vendored module reproduces it: the parsed
+`spec` is equal, `to_json` of the generated spec equals `to_json` of the box's
+parsed spec (the re-serialisation, not the box's raw response bytes, which were
+not stored separately), and `report(spec, 4)` equals the box's `report`.
 
 | File | Origin | sha256 |
 |---|---|---|
@@ -33,6 +36,19 @@ relative to its own path at import time.
 `smoke-world-gen.py` is kept for reference only. It imports `world_preview`
 (PIL), which is not vendored, so it does not run here as-is.
 
+## Golden fixtures
+
+Pinned so that a regenerated or hand-edited fixture cannot silently become the
+new golden. Paths are relative to `backend/`.
+
+| File | Origin | sha256 |
+|---|---|---|
+| `tests/fixtures/world_gen/box_parity.json` | generated | `54092f09866b5ed503248472524593e01c9bd917567563d50e5aa3fc7a239f51` |
+| `tests/fixtures/world_gen/constants.json` | generated | `8943bae14f58a2b19a7b5e22f498dc5d94abd07ca44b7a99085a4c839597a4d2` |
+| `tests/fixtures/world_gen/helpers.json` | generated | `ad23f79af53ea0248fedf362ff4a1e67667d3abc2df7d18202716ecdf9abaf61` |
+| `tests/fixtures/world_gen/plan_cases.json` | generated | `dd8c138864f4399b2faa8e5737f2880d62a7a4985cd165b8c084a2ec40af5931` |
+| `tests/fixtures/world_gen/report_only.json` | generated | `22fdeaac7d8064de9c93432311d58582882827ffb5dce29bea2db410c578a3ca` |
+
 ## Regenerating the golden fixtures
 
 From the repository root, on the host (never inside the backend container):
@@ -40,6 +56,9 @@ From the repository root, on the host (never inside the backend container):
     python3 -I backend/tools/world_gen_ref/make_fixtures.py
 
 It writes `backend/tests/fixtures/world_gen/*.json` deterministically: two runs
-give byte-identical files. `backend/tests/world_gen_ref_integrity.test.js`
-checks the sha256 values above and that every fixture parses; it needs neither
+give byte-identical files. It prints the fixtures' sha256 rows; if a
+regeneration is intended, paste them into the Golden fixtures table above, and
+review the fixture diff with them. `backend/tests/world_gen_ref_integrity.test.js`
+checks every sha256 value above (reference, box capture and fixtures) and
+that every fixture parses; it needs neither
 python nor a database.
