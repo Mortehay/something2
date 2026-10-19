@@ -49,3 +49,15 @@ describe('GroupRow with a running job', () => {
     expect(row(quests, null)).not.toContain('disabled');
   });
 });
+
+describe('GroupRow GPU box note (SOMET-641)', () => {
+  const maps = { ...quests, id: 'maps', label: 'Maps', note: 'GPU box not updated: vale: service_error: boom' };
+  it('renders the note under the Maps row', () => {
+    const html = row(maps, null);
+    expect(html).toContain('role="note"');
+    expect(html).toContain('GPU box not updated: vale: service_error: boom');
+  });
+  it('renders no note element when the group has none', () => {
+    expect(row(quests, null)).not.toContain('role="note"');
+  });
+});

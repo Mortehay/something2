@@ -58,7 +58,7 @@ function refuseIfBusy() {
 
 // opts.store: the object store binary groups read / write (default: the
 // engine's, assetStore.js); tests inject a fake.
-module.exports = function seedExportRoutes(pool, { processStartedAt, store } = {}) {
+module.exports = function seedExportRoutes(pool, { processStartedAt, store, boxDeps } = {}) {
   const router = express.Router();
   router.use(requireAdmin(pool));
 
@@ -126,7 +126,7 @@ module.exports = function seedExportRoutes(pool, { processStartedAt, store } = {
     refuseIfBusy();
     if (runsAsJob(getGroup(groupId))) {
       const job = jobs.startJob({
-        groupId, action: 'export', run: (ctx) => exportGroup(pool, groupId, { ...storeOpt, ...ctx }),
+        groupId, action: 'export', run: (ctx) => exportGroup(pool, groupId, { ...storeOpt, pushToBox: true, boxDeps, ...ctx }),
       });
       return res.status(202).json({ job });
     }

@@ -1,0 +1,142 @@
+// SOMET-641 (Plan 4a, Task 5). After a Maps export, push each exported spec's
+// hand edits to the GPU box's world-spec generator (services/worldGenService.js).
+// BEST EFFORT: nothing here may fail an export, and nothing here runs under the
+// seed_sync advisory lock (the box can take 20s per call).
+//
+// Per spec: GET the box's own copy (404 = the box does not know this spec, e.g.
+// hand-authored vale-region: `skipped`), diff it against ours at whole top-level
+// key granularity (a `worlds` array is ONE key; no finer patch format is
+// invented), and PATCH only the differing keys. No difference = `pushed`
+// without a request.
+//
+// State (map_spec_state):
+//   pushed   box_pushed_sha256 = exported_sha256, box_error = NULL
+//   failed   box_error = '<code>: <message>' (<= 300 chars, token scrubbed)
+//   skipped  box_pushed_sha256 = 'skipped:<exported_sha256>', box_error = NULL.
+//            The marker keeps the exported hash in it so a later EXPORT of new
+//            content (which re-pushes) is distinguishable from a stale skip, and
+//            so the group note never fires for a spec the box does not know.
+// The group note (mapsGroup.computeStatus) reads this state; see boxNote.
+const nodeUtil = require('node:util');
+const wg = require('../worldGenService.js');
+const { readStates } = require('./mapSpecState.js');
+
+const MAX_ERROR = 300;
+const UNREACHABLE_NOTE = 'GPU box unreachable — new regions need the box (local generator: SOMET-644)';
+const MAX_NOTE_LINES = 3;
+// A failure that will hit every remaining spec too: stop calling the box.
+const FATAL = new Set(['unreachable', 'auth_failed', 'not_configured']);
+
+const skippedMarker = (sha) => `skipped:${sha}`;
+const isSkipped = (v) => typeof v === 'string' && v.startsWith('skipped:');
+
+function scrub(text, token) {
+  let out = String(text);
+  if (token) out = out.split(token).join('[token]');
+  return out.replace(/bearer\s+\S+/gi, '[token]');
+}
+function errorText(err, token) {
+  const code = (err && err.code && typeof err.code === 'string') ? err.code : 'error';
+  const msg = scrub((err && err.message) || String(err), token).replace(/\s+/g, ' ');
+  return `${code}: ${msg}`.slice(0, MAX_ERROR);
+}
+
+// The group note for specs with a box problem: [{ spec, error }] -> string|null.
+function boxNote(problems) {
+  if (!problems.length) return null;
+  if (problems.every((p) => /^unreachable:/.test(p.error))) return UNREACHABLE_NOTE;
+  const lines = problems.slice(0, MAX_NOTE_LINES).map((p) => `GPU box not updated: ${p.spec}: ${p.error}`);
+  if (problems.length > MAX_NOTE_LINES) lines.push(`+${problems.length - MAX_NOTE_LINES} more`);
+  return lines.join('\n');
+}
+
+// Specs from state rows (specs the box knows) that have a box problem.
+function boxProblems(states, specNames) {
+  const out = [];
+  for (const name of specNames) {
+    const st = states.get(name);
+    if (!st || !st.exported_sha256 || isSkipped(st.box_pushed_sha256)) continue;
+    if (st.box_error) out.push({ spec: name, error: st.box_error });
+    else if (st.box_pushed_sha256 !== st.exported_sha256) out.push({ spec: name, error: 'not pushed yet' });
+  }
+  return out;
+}
+
+async function setState(db, name, pushed, error) {
+  await db.query(
+    'UPDATE map_spec_state SET box_pushed_sha256 = $2, box_error = $3, updated_at = now() WHERE spec_name = $1',
+    [name, pushed, error]);
+}
+
+// Top-level keys of `ours` whose value differs from the box's copy. `name` is
+// the identity, never patched.
+function changedKeys(ours, theirs) {
+  const body = {};
+  for (const k of Object.keys(ours)) {
+    if (k === 'name') continue;
+    if (!theirs || !nodeUtil.isDeepStrictEqual(ours[k], theirs[k])) body[k] = ours[k];
+  }
+  return body;
+}
+
+// deps: { fetchImpl (tests), serviceDb (tests: where the box provider is read
+// from; default `db`) }. opts: { signal, onProgress, readSpec(name) }.
+// -> [{ spec, status: 'pushed'|'skipped'|'failed', error }]
+async function pushToBox(db, specNames, deps = {}, opts = {}) {
+  const wgDeps = deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {};
+  const svcDb = deps.serviceDb || db;
+  const { readSpec } = opts;
+  const results = [];
+  const total = specNames.length;
+  const progress = (done) => { if (opts.onProgress) opts.onProgress({ phase: 'box', done, total }); };
+  let token = null;
+  try { token = (await wg.resolveWorldService(svcDb)).provider.auth_token; } catch { /* reported per spec */ }
+  const states = await readStates(db);
+  let fatal = null;
+  progress(0);
+  for (const name of specNames) {
+    if (opts.signal && opts.signal.aborted) break;
+    const st = states.get(name);
+    const sha = st && st.exported_sha256;
+    let res;
+    try {
+      if (!sha) {
+        res = { spec: name, status: 'skipped', error: null };
+      } else if (!wg.NAME_RE.test(name)) {
+        await setState(db, name, skippedMarker(sha), null);
+        res = { spec: name, status: 'skipped', error: null };
+      } else if (fatal) {
+        await setState(db, name, st.box_pushed_sha256 || null, fatal);
+        res = { spec: name, status: 'failed', error: fatal };
+      } else {
+        const ours = readSpec(name);
+        let theirs = null;
+        let known = true;
+        try {
+          theirs = await wg.getWorldSpec(svcDb, name, wgDeps);
+        } catch (e) {
+          if (e && e.code === 'not_found') known = false; else throw e;
+        }
+        if (!known) {
+          await setState(db, name, skippedMarker(sha), null);
+          res = { spec: name, status: 'skipped', error: null };
+        } else {
+          const body = changedKeys(ours, theirs);
+          if (Object.keys(body).length) await wg.patchWorld(svcDb, name, body, wgDeps);
+          await setState(db, name, sha, null);
+          res = { spec: name, status: 'pushed', error: null };
+        }
+      }
+    } catch (e) {
+      const error = errorText(e, token);
+      if (e && FATAL.has(e.code)) fatal = error;
+      try { await setState(db, name, st ? st.box_pushed_sha256 : null, error); } catch { /* best effort */ }
+      res = { spec: name, status: 'failed', error };
+    }
+    results.push(res);
+    progress(results.length);
+  }
+  return results;
+}
+
+module.exports = { pushToBox, boxNote, boxProblems, UNREACHABLE_NOTE, _changedKeys: changedKeys };

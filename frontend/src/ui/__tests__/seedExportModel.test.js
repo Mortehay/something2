@@ -503,3 +503,19 @@ describe('large previews', () => {
     expect(BUSY_TEXT).toBe('Another export or seed is running');
   });
 });
+
+// SOMET-641: the GPU box note under the Maps row.
+import { groupNoteLines } from '../../games/something2/seedExportModel.js';
+
+describe('groupNoteLines / box phase', () => {
+  it('splits the note into one line per spec; none without a note', () => {
+    expect(groupNoteLines({ note: 'GPU box not updated: a: x\nGPU box not updated: b: y\n+1 more' })).toEqual([
+      'GPU box not updated: a: x', 'GPU box not updated: b: y', '+1 more']);
+    expect(groupNoteLines({})).toEqual([]);
+    expect(groupNoteLines(null)).toEqual([]);
+  });
+  it('the box phase reads as updating the GPU box', () => {
+    const job = { id: 1, groupId: 'maps', action: 'export', phase: 'box', done: 1, total: 2, status: 'running' };
+    expect(jobProgressText(job, 'Maps')).toBe('Updating GPU box for maps 1 / 2');
+  });
+});

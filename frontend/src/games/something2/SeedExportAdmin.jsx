@@ -12,7 +12,7 @@ import {
 } from './useSeedExport.js';
 import {
   statusBadge, exportBlockReason, seedBlockReason, seedButtonLabel, exportAllPlan, seedAllGroups, exportAllMessage,
-  binaryGroups, separateNote, BUSY_TEXT, jobRunning, jobProgressText, jobErrorRowsText,
+  binaryGroups, separateNote, BUSY_TEXT, jobRunning, jobProgressText, jobErrorRowsText, groupNoteLines,
 } from './seedExportModel.js';
 import { Btn, Badge, Muted, Modal, fmtTime, StatusHead, PcLabelHint } from './seedUi.jsx';
 import AdminLoading from './AdminLoading.jsx';
@@ -91,6 +91,9 @@ export function GroupRow({ g, job, exporting, onExport, onSeed, onBadge, onCance
       <td>{runLine(g.lastSeed)}</td>
       <td>
         <Badge as="button" $tone={badge.tone} onClick={onBadge}>{badge.label}</Badge>
+        {groupNoteLines(g).length > 0 && (
+          <div role="note">{groupNoteLines(g).map((line) => <div key={line}><Muted>{line}</Muted></div>)}</div>
+        )}
         {own && <JobStatus job={own} label={g.label} onCancel={onCancel} cancelling={cancelling} />}
       </td>
       <td><Acts>

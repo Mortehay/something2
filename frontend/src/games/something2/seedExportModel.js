@@ -32,6 +32,13 @@ export function statusBadge(group) {
   }
 }
 
+// SOMET-641. Lines under the Maps row when the GPU box was not updated (the
+// group's `note`, one line per spec), or [] -- shown like the hint.
+export function groupNoteLines(group) {
+  const n = group && group.note;
+  return typeof n === 'string' && n ? n.split('\n') : [];
+}
+
 // Why Export is disabled (its tooltip), or null. The server refuses export
 // whenever git holds changes, even when the badge says local edits (both can
 // be true at once), and over a newer-schema or unreadable file.
@@ -302,7 +309,7 @@ export const jobPollInterval = (job) => (jobRunning(job) ? 1000 : false);
 export const DISCARD_CONFIRM = 'Discard the choices made here?';
 export const hasChoices = (states) => Object.keys(states || {}).length > 0;
 
-const PHASE_VERBS = { download: 'Downloading', upload: 'Uploading' };
+const PHASE_VERBS = { download: 'Downloading', upload: 'Uploading', box: 'Updating GPU box for' };
 
 // One line for the group row. `label` is the group's label (falls back to the
 // job's group id).

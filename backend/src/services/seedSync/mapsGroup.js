@@ -58,6 +58,7 @@ const { specFromDb, canonicalSpecJson, compassSlots } = require('../mapSpecExpor
 const { validateMapSpec } = require('../../../seeds/mapSpec.js');
 const { oppositeEdge } = require('../mapService.js');
 const { setEntryWorldByName } = require('../entryWorld.js');
+const { pushToBox: pushSpecs, boxNote, boxProblems } = require('./mapsBoxPush.js');
 
 const GROUP_ID = 'maps';
 const TABLE = 'map_specs';
@@ -363,6 +364,13 @@ function zeroCounts() {
 }
 
 // The full status: { git, diff (diffGroup's summary shape), signature }.
+// Pushes the exported specs' edits to the GPU box (mapsBoxPush.js).
+const pushToBox = (db, names, deps, opts = {}) => pushSpecs(db, names, deps, {
+  readSpec: (name) => JSON.parse(fs.readFileSync(specFile(name), 'utf8')), ...opts,
+});
+
+const boxNoteOf = (states, specs) => boxNote(boxProblems(states, specs.map((g) => g.name)));
+
 async function computeStatus(db) {
   const git = await readGit();
   const dbVersion = await schemaVersion(db);
@@ -445,6 +453,8 @@ async function computeStatus(db) {
     tables: [{ table: TABLE, counts }], warnings, rows,
     // A baseline still to record (any status): the tab says so.
     ...(counts.baseline > 0 ? { hint: BASELINE_HINT } : {}),
+    // Specs the GPU box was not updated for (mapsBoxPush.js): the tab shows it.
+    ...(boxNoteOf(states, git.specs) ? { note: boxNoteOf(states, git.specs) } : {}),
   };
   // What a preview showed: the manifest, every row's kind/default and the git
   // and DB-side texts behind it. Apply recomputes it under the lock.
@@ -667,6 +677,7 @@ async function exportMaps(pool, opts = {}) {
   let runId = null;
   let releaseErr;
   let result;
+  const allSpecNames = new Set();
   try {
     await beginLocked(client);
     // Every DB read in ONE repeatable-read, read-only snapshot on its own
@@ -699,6 +710,7 @@ async function exportMaps(pool, opts = {}) {
         if (!listed.some((s) => s.name === name)) extra.push(await readSpecFile(name, 'maps dir'));
       }
       specs = [...listed, ...dependencyOrder(extra)];
+      for (const sp of specs) allSpecNames.add(sp.name);
       if (!specs.length) throw new SyncRefused('no_specs', `no map spec files in ${mapsDir()}`);
       const owner = worldOwners(specs, 'maps dir');
       entryWorld = cs.git ? cs.git.entryWorld : null;
@@ -788,11 +800,26 @@ async function exportMaps(pool, opts = {}) {
   }
   await finishRun(pool, runId, { status: 'ok', summary: { rowCount: result.rowCount, written: result.written } })
     .catch((e) => console.error(`seed-sync: maps export run ${runId} committed but not marked ok:`, e.message));
+  // The export is done and the lock is released. The box can be slow (20s per
+  // call), so its push comes last and can never fail the export.
+  if (opts.pushToBox) {
+    try {
+      const retry = [];
+      for (const [name, st] of await readStates(pool)) if (st.box_error && !result.written.includes(name)) retry.push(name);
+      const names = [...result.written, ...retry].filter((n) => allSpecNames.has(n));
+      result.box = await pushToBox(pool, names, opts.boxDeps || {}, {
+        signal: opts.signal, onProgress: opts.onProgress,
+      });
+    } catch (e) {
+      console.error('seed-sync: maps export committed but the GPU box push failed:', e.message);
+      result.box = [];
+    }
+  }
   return result;
 }
 
 module.exports = {
-  status, preview, apply, export: exportMaps,
+  status, preview, apply, export: exportMaps, pushToBox,
   // internals, for tests
-  _slotConflicts: slotConflicts, _reachFromFiles: reachFromFiles, _dependencyOrder: dependencyOrder, DEFAULTS, ALLOWED,
+  _boxNote: boxNote, _slotConflicts: slotConflicts, _reachFromFiles: reachFromFiles, _dependencyOrder: dependencyOrder, DEFAULTS, ALLOWED,
 };
