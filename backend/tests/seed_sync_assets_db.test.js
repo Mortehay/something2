@@ -17,7 +17,7 @@ const { exportGroup, fileFor } = require('../src/services/seedSync/exportGroup.j
 const { diffGroup } = require('../src/services/seedSync/diffGroup.js');
 const { previewSeed, applySeed } = require('../src/services/seedSync/applySeed.js');
 const { stableStringify } = require('../src/services/seedSync/canonical.js');
-const { assetsRoot, localAssetValue, uploadGitAssets } = require('../src/services/seedSync/assets.js');
+const { assetsRoot, localAssetValue, uploadGitAssets, _hashedFiles } = require('../src/services/seedSync/assets.js');
 const { shrinkToEdge } = require('../src/services/pngResample.js');
 const { encodeRGBA } = require('../src/services/pngTrim.js');
 
@@ -570,4 +570,45 @@ dbTest('a git sprite value carrying object keys or no parts is a mismatch', asyn
   const manifestOnly = { ...a, image: null, sprite: { manifest: a.sprite.manifest, manifest_key: 'sxb/x.json' } };
   await assert.rejects(uploadGitAssets(store, [manifestOnly], artSpec), (e) => e.code === 'asset_file_mismatch');
   assert.strictEqual(store.puts.length, 0, 'nothing uploaded');
+});
+
+// I-2: whether a row's git files are usable does not depend on its default or
+// decision. A red row (default null) whose file is missing must not offer
+// 'git' -- a legacy-seeded PC has every art row red, and bulk "take git"
+// would then fail as a whole.
+dbTest('a red row with a missing git file is blocked in preview', async (t, pool, { root, store }) => {
+  await seedFixture(pool);
+  await exportGroup(pool, 'sx_assets', { store });
+  // Another PC: same rows and keys, no cache, no baselines -> edited_here (red).
+  await pool.query(`DELETE FROM seed_asset_hashes WHERE object_key LIKE 'sx%'`);
+  await pool.query(`DELETE FROM seed_row_hashes WHERE group_id = 'sx_assets'`);
+  fs.unlinkSync(path.join(root, 'sx_tiles/sx_a.png'));
+  const p = await previewSeed(pool, 'sx_assets');
+  const by = Object.fromEntries(p.rows.map((r) => [r.key, r]));
+  assert.strictEqual(by.sx_a.kind, 'edited_here');
+  assert.strictEqual(by.sx_a.defaultDecision, null, 'red');
+  assert.strictEqual(by.sx_a.blockedReason, 'asset_file_missing');
+  assert.deepStrictEqual(by.sx_a.allowedDecisions, ['local'], 'git not offered');
+  assert.strictEqual(by.sx_b.blockedReason, null, "sx_b's file is there");
+  assert.deepStrictEqual(by.sx_b.allowedDecisions, ['git', 'local']);
+  // The same reason under any decision: apply refuses git with it, and
+  // accepts 'local' under the preview's signature.
+  await assert.rejects(applySeed(pool, 'sx_assets', { [by.sx_a.syncUuid]: 'git', [by.sx_b.syncUuid]: 'local' },
+    { signature: p.signature, store }), (e) => e.code === 'asset_file_missing');
+  assert.strictEqual(store.puts.length, 0, 'nothing uploaded');
+  const decisions = Object.fromEntries(p.rows.map((r) => [r.syncUuid, 'local']));
+  await applySeed(pool, 'sx_assets', decisions, { signature: p.signature, store });
+
+  // Repeated previews hash each unchanged file once per process.
+  const before = _hashedFiles();
+  await previewSeed(pool, 'sx_assets');
+  await pool.query(`DELETE FROM seed_row_hashes WHERE group_id = 'sx_assets'`);
+  await previewSeed(pool, 'sx_assets');
+  await previewSeed(pool, 'sx_assets');
+  assert.strictEqual(_hashedFiles(), before, 'no file re-hashed');
+  // An edited file (new size/mtime) is hashed again.
+  fs.writeFileSync(path.join(root, 'sx_tiles/sx_b.png'), 'edited');
+  const p2 = await previewSeed(pool, 'sx_assets');
+  assert.strictEqual(p2.rows.find((r) => r.key === 'sx_b').blockedReason, 'asset_file_mismatch');
+  assert.ok(_hashedFiles() > before);
 });

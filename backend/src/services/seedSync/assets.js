@@ -400,16 +400,58 @@ function gitParts(asset, v, row) {
   return ok ? [{ file: v.file, sha1: v.sha1 }] : null;
 }
 
-// Per call memo of file -> readRepoFile result (never hash a file twice).
+// Per process: abs path -> { dev, ino, size, mtimeMs, sha256, sha1 }. A
+// preview checks every differing git file (a first sync: ~1000 files,
+// ~200 MB); an unchanged file (same inode, size and mtime) is not re-read.
+const HASH_MEMO_MAX = 20000;
+const hashMemo = new Map();
+let hashedFiles = 0;
+
+// Hashes of a repo file, with readRepoFile's checks (no symlink anywhere
+// below root): { sha256, sha1 } | { missing: true } | { symlink: true }.
+async function hashRepoFile(root, file) {
+  const abs = resolveFile(root, file);
+  if (!abs) return { missing: true };
+  const walk = await walkUnder(path.resolve(root), abs, true);
+  if (walk === 'link') return { symlink: true };
+  if (walk === 'missing') return { missing: true };
+  let fh;
+  try {
+    fh = await fs.promises.open(abs, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  } catch (e) {
+    if (e.code === 'ELOOP') return { symlink: true };
+    if (e.code === 'ENOENT' || e.code === 'EISDIR' || e.code === 'ENOTDIR') return { missing: true };
+    throw e;
+  }
+  try {
+    const st = await fh.stat();
+    if (!st.isFile()) return { missing: true };
+    const m = hashMemo.get(abs);
+    if (m && m.dev === st.dev && m.ino === st.ino && m.size === st.size && m.mtimeMs === st.mtimeMs) {
+      return { sha256: m.sha256, sha1: m.sha1 };
+    }
+    const buf = await fh.readFile();
+    hashedFiles += 1;
+    const h = { sha256: sha256Of(buf), sha1: sha1Of(buf) };
+    if (hashMemo.size >= HASH_MEMO_MAX) hashMemo.clear();
+    hashMemo.set(abs, { dev: st.dev, ino: st.ino, size: st.size, mtimeMs: st.mtimeMs, ...h });
+    return h;
+  } finally {
+    await fh.close();
+  }
+}
+
+// Per call memo of file -> hashRepoFile result (never look at a file twice).
 function fileReader(root) {
   const memo = new Map();
   return async (file) => {
-    if (!memo.has(file)) memo.set(file, await readRepoFile(root, file));
+    if (!memo.has(file)) memo.set(file, await hashRepoFile(root, file));
     return memo.get(file);
   };
 }
 
 const partMatches = (part, buf) => (part.sha256 !== undefined ? sha256Of(buf) === part.sha256 : sha1Of(buf) === part.sha1);
+const hashMatches = (part, h) => (part.sha256 !== undefined ? h.sha256 === part.sha256 : h.sha1 === part.sha1);
 
 // Map(sync_uuid -> 'asset_file_missing' | 'asset_file_mismatch') for the git
 // (file-form) `rows` of `spec` whose asset files are not on disk or do not
@@ -425,7 +467,7 @@ async function checkGitAssets(root, rows, spec, read = fileReader(root)) {
       for (const p of parts) {
         const f = await read(p.file);
         if (f.missing) reason = ASSET_FILE_MISSING;
-        else if (f.symlink || !partMatches(p, f.buf)) reason = reason || ASSET_FILE_MISMATCH;
+        else if (f.symlink || !hashMatches(p, f)) reason = reason || ASSET_FILE_MISMATCH;
       }
     }
     if (reason) out.set(row.sync_uuid, reason);
@@ -515,4 +557,5 @@ module.exports = {
   ASSET_FILE_MISSING, ASSET_FILE_MISMATCH, ASSET_REASONS, BLOCKED_MESSAGES,
   isEmpty, assetsRoot, hasAssets, checkAssets, localAssetValue, translateRow, rowCacheKeys, hasUnhashed,
   loadCache, recordCache, prepareExportAssets, checkGitAssets, fileReader, uploadGitAssets,
+  _hashedFiles: () => hashedFiles,
 };

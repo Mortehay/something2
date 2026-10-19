@@ -10,7 +10,6 @@ const {
 } = require('./assets.js');
 
 const own = (obj, k) => Object.prototype.hasOwnProperty.call(obj, k);
-const decisionsObj = (d) => (d && typeof d === 'object' && !Array.isArray(d) ? d : {});
 
 // The local row a git write of r lands on (adopt: the same-key local row).
 function localRowOf(cd, r) {
@@ -40,20 +39,21 @@ function assetNeeds(cd, r) {
   return any ? out : null;
 }
 
-// Map(syncUuid -> asset_file_missing | asset_file_mismatch) for the rows that
-// need asset files and whose default or decision is 'git' (both: the
-// signature annotates with the defaults, plan with the decisions). Hashes
-// only those files, each once per call.
-async function assetInfoFor(cd, decisions) {
+// Map(syncUuid -> asset_file_missing | asset_file_mismatch) for every row
+// that needs asset files and could take git (`gitAllowed(r)`: its kind
+// allows it), whatever its default or decision -- so the preview, the
+// signature, planOnSnapshot and the locked path all see the same reasons, and
+// a red row whose file is unusable never offers 'git'. Hashes each file once
+// per call (and once per process while it is unchanged: hashRepoFile).
+async function assetInfoFor(cd, gitAllowed) {
   const out = new Map();
-  const dec = decisionsObj(decisions);
   if (!cd.diff.header) return out;
   const root = assetsRoot();
   const read = fileReader(root);
   for (const spec of cd.specs) {
     if (!hasAssets(spec)) continue;
     const rows = cd.diff.rows
-      .filter((r) => r.table === spec.table && (r.defaultDecision === 'git' || (own(dec, r.syncUuid) && dec[r.syncUuid] === 'git')))
+      .filter((r) => r.table === spec.table && gitAllowed(r))
       .map((r) => assetNeeds(cd, r)).filter(Boolean);
     for (const [uuid, reason] of await checkGitAssets(root, rows, spec, read)) out.set(uuid, reason);
   }

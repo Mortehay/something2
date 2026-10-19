@@ -49,6 +49,8 @@ const KEY_CLASH_REASON = 'key already used by a local row';
 // Decisions a row's kind allows (invalid_decision otherwise): a slice row is
 // never deleted.
 const kindAllowed = (cd, r) => (tableOf(cd, r).spec.slice ? ALLOWED[r.kind].filter((d) => d !== 'delete') : ALLOWED[r.kind]);
+// Rows whose kind allows 'git': the ones assetInfoFor checks files for.
+const gitAllowedIn = (cd) => (r) => kindAllowed(cd, r).includes('git');
 // A row that this seed may delete (FK references can block it).
 const deletableRow = (cd, r) => DELETABLE.has(r.kind) && !tableOf(cd, r).spec.slice;
 // Decisions apply accepts for an ANNOTATED row: kindAllowed minus what its
@@ -164,10 +166,11 @@ function blockReason(info, deleting) {
 //    drops the other PC's row, which must be a deliberate choice. (Adopt
 //    consumes the same-key local row, so a new/deleted_here row's key holder
 //    is never adopted in the same seed.)
-//  - A row whose decision (or default) is 'git' and whose asset files are
-//    missing or altered (assetInfo: Map(syncUuid -> reason), assetInfoFor) is
-//    blocked with that reason and a blockedMessage; left undecided it turns
-//    red (null): 'local' acknowledges git's version, which must be deliberate.
+//  - A row that could take git and whose asset files are missing or altered
+//    (assetInfo: Map(syncUuid -> reason), assetInfoFor) is blocked with that
+//    reason and a blockedMessage whatever its decision ('git' is not offered);
+//    a default of 'git' turns red (null): 'local' acknowledges git's version,
+//    which must be deliberate.
 function annotate(cd, refInfo, decisions, assetInfo = new Map()) {
   const { diff } = cd;
   const decisionOf = (r) => (own(decisions, r.syncUuid) ? decisions[r.syncUuid] : r.defaultDecision);
@@ -202,10 +205,10 @@ function annotate(cd, refInfo, decisions, assetInfo = new Map()) {
     }
   }
   for (const r of diff.rows) {
-    if (r.blockedReason || !assetInfo.has(r.syncUuid) || decisionOf(r) !== 'git') continue;
+    if (r.blockedReason || !assetInfo.has(r.syncUuid)) continue;
     r.blockedReason = assetInfo.get(r.syncUuid);
     r.blockedMessage = BLOCKED_MESSAGES[r.blockedReason];
-    if (!own(decisions, r.syncUuid)) r.defaultDecision = null;
+    if (r.defaultDecision === 'git') r.defaultDecision = null;
   }
   return diff.rows.map((row) => ({ row, decision: decisionOf(row) }));
 }
@@ -261,7 +264,7 @@ async function previewSeed(pool, groupId, opts = {}) {
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     const cd = await computeDiff(client, groupId);
     const refInfo = await referenceInfo(client, cd);
-    const assetInfo = await assetInfoFor(cd, {});
+    const assetInfo = await assetInfoFor(cd, gitAllowedIn(cd));
     const signature = previewSignatureOf(cd, refInfo, assetInfo);
     const steps = annotate(cd, refInfo, {}, assetInfo);
     // schema_older first, then the diff's dangling_name entries, then what
@@ -620,7 +623,7 @@ async function applySeed(pool, groupId, decisions, opts = {}) {
       // No file / newer schema: the locked path refuses it.
       if (!cd.diff.header || versionOf(cd.diff.header) > await schemaVersion(client)) return null;
       const refInfo = await referenceInfo(client, cd);
-      const info = await assetInfoFor(cd, decisions);
+      const info = await assetInfoFor(cd, gitAllowedIn(cd));
       if (typeof signature !== 'string' || signature !== previewSignatureOf(cd, refInfo, info)) {
         throw new SyncRefused('stale_preview', 'the diff changed since the preview; preview again', { uuids: [] });
       }

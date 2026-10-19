@@ -218,7 +218,9 @@ async function seedAllGit(pool, groupId, store) {
   const p = await previewSeed(pool, groupId);
   const decisions = {};
   for (const r of p.rows) {
-    assert.ok(r.allowedDecisions.includes('git'), `${groupId} ${r.table} ${r.key} ${r.kind}: ${r.blockedReason}`);
+    // Every git file is on disk and matches: nothing blocked, git offered.
+    assert.strictEqual(r.blockedReason, null, `${groupId} ${r.table} ${r.key} ${r.kind}`);
+    assert.ok(r.allowedDecisions.includes('git'), `${groupId} ${r.table} ${r.key} ${r.kind}`);
     decisions[r.syncUuid] = 'git';
   }
   return { preview: p, result: await applySeed(pool, groupId, decisions, { signature: p.signature, store }) };
@@ -337,12 +339,23 @@ dbTest('legacy-seeded PC: same pictures under legacy keys read red, one bulk git
   await cleanupCache(pool);
   await pool.query("DELETE FROM seed_row_hashes WHERE group_id = 'art'");
 
+  // A red row's git file is checked like any other: with the skill file
+  // missing, its row does not offer git (bulk take-git would fail on it).
+  const skillFile = path.join(root, s0.image.file);
+  const skillBytes = fs.readFileSync(skillFile);
+  fs.unlinkSync(skillFile);
+  const gone = (await previewSeed(pool, 'art')).rows.find((r) => r.syncUuid === s0.sync_uuid);
+  assert.deepStrictEqual([gone.defaultDecision, gone.blockedReason, gone.allowedDecisions],
+    [null, 'asset_file_missing', ['local']]);
+  fs.writeFileSync(skillFile, skillBytes);
+
   const p = await previewSeed(pool, 'art');
   const red = p.rows.filter((r) => [t0.sync_uuid, i0.sync_uuid, s0.sync_uuid].includes(r.syncUuid));
   assert.strictEqual(red.length, 3, JSON.stringify(p.rows.map((r) => [r.table, r.key, r.kind])));
   for (const r of red) {
     assert.ok(['edited_here', 'changed'].includes(r.kind), `${r.table} ${r.kind}`);
     assert.strictEqual(r.defaultDecision, null, `${r.table}: red`);
+    assert.strictEqual(r.blockedReason, null, `${r.table}: its file is there and matches`);
     assert.ok(r.allowedDecisions.includes('git'), r.table);
   }
   await seedAllGit(pool, 'art', legacy);
