@@ -1,0 +1,604 @@
+{
+  "generated_by": "backend/tools/world_gen_ref/make_fixtures.py",
+  "reference_sha256": {
+    "world_gen.py": "75178d631c0f8c87cb16ae8db490c3a0f4a33f79c6df1bd6f408638916c8b3a3",
+    "bestiary_p4.json": "3c5e3c5c5b55e8fc0f0260b506eb9c004f3071fa42e9abb794e7cd64f094868a",
+    "smoke-world-gen.py": "e5f39cfa4293c7c10a8f64e8db97974a99b201a59e1e30f86b0194ef31f98ee8"
+  },
+  "constants": {
+    "DENSITY_TIERS": {
+      "dead": 0.0,
+      "sparse": 9.0,
+      "normal": 18.0,
+      "dense": 36.0,
+      "horde": 62.0,
+      "swarm": 89.0
+    },
+    "DENSITY_TIERS_json": "{\"dead\": 0.0, \"sparse\": 9.0, \"normal\": 18.0, \"dense\": 36.0, \"horde\": 62.0, \"swarm\": 89.0}",
+    "DENSITY_ORDER": [
+      "dead",
+      "sparse",
+      "normal",
+      "dense",
+      "horde",
+      "swarm"
+    ],
+    "TILES_PER_SCREEN": 225,
+    "MAX_WORLD_CREATURES": 5000,
+    "BYTES_PER_CREATURE_PER_SEC": 920,
+    "NEIGHBOURHOOD_CHUNKS": 9,
+    "SOCKET_WARN_KIB_S": 400,
+    "THIN_VARIETY_BELOW": 5,
+    "THIN_FLORA_BELOW": 3,
+    "EMPTY_BELOW_PER_SCREEN": 3.0,
+    "CROWDED_ABOVE_PER_SCREEN": 22.0,
+    "SURFACE_BAND": [
+      1,
+      2
+    ],
+    "MAX_LEADER_ROLES_PER_WORLD": 1,
+    "LEADER_ROLES": [
+      "Apex",
+      "Champion"
+    ],
+    "TILE_PX": 100,
+    "SAFE_ROAD_RADIUS": 2,
+    "EDGES": [
+      "N",
+      "E",
+      "S",
+      "W"
+    ],
+    "BIOMES": {
+      "Meadow": {
+        "color": "#5aa84f",
+        "creature_density": 0.5,
+        "path_tile": "road_dirt",
+        "flora": [
+          "bush",
+          "rose_bush",
+          "Tree",
+          "Stone"
+        ],
+        "creatures": [
+          "Slime",
+          "Wolf",
+          "Beast Swarm",
+          "Beast Skirmisher",
+          "Beast Line"
+        ],
+        "depth": "surface"
+      },
+      "Deep Forest": {
+        "color": "#2f6b3a",
+        "creature_density": 1.0,
+        "path_tile": "road_dirt",
+        "flora": [
+          "Tree",
+          "pine_tree",
+          "dead_tree",
+          "bush",
+          "Stone"
+        ],
+        "creatures": [
+          "Wolf",
+          "Bat",
+          "Skeleton",
+          "Woodland Swarm",
+          "Woodland Skirmisher",
+          "Woodland Line"
+        ],
+        "depth": "surface"
+      },
+      "Arid Dunes": {
+        "color": "#c9a227",
+        "creature_density": 0.8,
+        "path_tile": "road_sand",
+        "flora": [
+          "dead_tree",
+          "Stone"
+        ],
+        "creatures": [
+          "Skeleton",
+          "Bat",
+          "Desert Swarm",
+          "Desert Skirmisher",
+          "Desert Line"
+        ],
+        "depth": "surface"
+      },
+      "Frozen Waste": {
+        "color": "#8fb8d6",
+        "creature_density": 1.1,
+        "path_tile": "road_snow",
+        "flora": [
+          "IceRock",
+          "pine_tree"
+        ],
+        "creatures": [
+          "Bat",
+          "Skeleton",
+          "Tundra Swarm",
+          "Tundra Skirmisher",
+          "Tundra Line"
+        ],
+        "depth": "surface"
+      },
+      "Mire": {
+        "color": "#4d6b41",
+        "creature_density": 2.0,
+        "path_tile": "road_dirt",
+        "flora": [
+          "dead_tree",
+          "bush",
+          "Stone"
+        ],
+        "creatures": [
+          "Slime",
+          "Bat",
+          "Swamp Swarm",
+          "Swamp Skirmisher",
+          "Swamp Line"
+        ],
+        "depth": "surface"
+      },
+      "Highlands": {
+        "color": "#7d8471",
+        "creature_density": 0.9,
+        "path_tile": "road_stone",
+        "flora": [
+          "Stone",
+          "pine_tree"
+        ],
+        "creatures": [
+          "Highland Swarm",
+          "Highland Skirmisher",
+          "Highland Line"
+        ],
+        "depth": "surface"
+      },
+      "Storm Coast": {
+        "color": "#6b7280",
+        "creature_density": 0.6,
+        "path_tile": "road_sand",
+        "flora": [
+          "Stone",
+          "dead_tree"
+        ],
+        "creatures": [
+          "Storm Swarm",
+          "Storm Skirmisher",
+          "Storm Line"
+        ],
+        "depth": "surface"
+      },
+      "Verdant Jungle": {
+        "color": "#1f6b2e",
+        "creature_density": 1.6,
+        "path_tile": "road_dirt",
+        "flora": [
+          "Tree",
+          "bush",
+          "rose_bush"
+        ],
+        "creatures": [
+          "Jungle Swarm",
+          "Jungle Skirmisher",
+          "Jungle Line"
+        ],
+        "depth": "surface"
+      },
+      "Abyssal Rift": {
+        "color": "#1c1a24",
+        "creature_density": 2.4,
+        "path_tile": "road_stone",
+        "flora": [],
+        "creatures": [
+          "Void Swarm",
+          "Void Skirmisher",
+          "Void Line"
+        ],
+        "depth": "deep"
+      },
+      "Ashfields": {
+        "color": "#4a4038",
+        "creature_density": 1.7,
+        "path_tile": "road_ash",
+        "flora": [
+          "dead_tree",
+          "Stone"
+        ],
+        "creatures": [
+          "Volcanic Swarm",
+          "Volcanic Skirmisher",
+          "Volcanic Line"
+        ],
+        "depth": "surface"
+      },
+      "Blightworks": {
+        "color": "#5e6b3a",
+        "creature_density": 2.0,
+        "path_tile": "road_ash",
+        "flora": [
+          "dead_tree",
+          "Stone"
+        ],
+        "creatures": [
+          "Blight Swarm",
+          "Blight Skirmisher",
+          "Blight Line"
+        ],
+        "depth": "deep"
+      },
+      "Catacombs": {
+        "color": "#55504a",
+        "creature_density": 2.3,
+        "path_tile": "road_stone",
+        "flora": [
+          "Stone"
+        ],
+        "creatures": [
+          "Undead Swarm",
+          "Undead Skirmisher",
+          "Undead Line"
+        ],
+        "depth": "deep"
+      },
+      "Cavern": {
+        "color": "#5a5148",
+        "creature_density": 1.9,
+        "path_tile": "road_dirt",
+        "flora": [
+          "Stone"
+        ],
+        "creatures": [
+          "Cave Swarm",
+          "Cave Skirmisher",
+          "Cave Line"
+        ],
+        "depth": "deep"
+      },
+      "Crystal Hollows": {
+        "color": "#6fa8c9",
+        "creature_density": 1.6,
+        "path_tile": "road_snow",
+        "flora": [
+          "IceRock",
+          "Stone"
+        ],
+        "creatures": [
+          "Crystal Swarm",
+          "Crystal Skirmisher",
+          "Crystal Line"
+        ],
+        "depth": "deep"
+      },
+      "Deepvault": {
+        "color": "#4f5560",
+        "creature_density": 1.8,
+        "path_tile": "road_stone",
+        "flora": [
+          "Stone"
+        ],
+        "creatures": [
+          "Construct Swarm",
+          "Construct Skirmisher",
+          "Construct Line"
+        ],
+        "depth": "deep"
+      },
+      "Dreaming Dark": {
+        "color": "#4a3f6b",
+        "creature_density": 2.3,
+        "path_tile": "road_stone",
+        "flora": [],
+        "creatures": [
+          "Nightmare Swarm",
+          "Nightmare Skirmisher",
+          "Nightmare Line"
+        ],
+        "depth": "deep"
+      },
+      "Emberdepths": {
+        "color": "#7a3b22",
+        "creature_density": 2.2,
+        "path_tile": "road_ash",
+        "flora": [
+          "Stone"
+        ],
+        "creatures": [
+          "Ember Swarm",
+          "Ember Skirmisher",
+          "Ember Line"
+        ],
+        "depth": "deep"
+      },
+      "Fallen Sanctum": {
+        "color": "#b8a97a",
+        "creature_density": 2.2,
+        "path_tile": "road_stone",
+        "flora": [],
+        "creatures": [
+          "Fallen Swarm",
+          "Fallen Skirmisher",
+          "Fallen Line"
+        ],
+        "depth": "deep"
+      },
+      "Frostvault": {
+        "color": "#a8c6d6",
+        "creature_density": 1.8,
+        "path_tile": "road_snow",
+        "flora": [
+          "IceRock"
+        ],
+        "creatures": [
+          "Rime Swarm",
+          "Rime Skirmisher",
+          "Rime Line"
+        ],
+        "depth": "deep"
+      },
+      "Fungal Deep": {
+        "color": "#6b7f3a",
+        "creature_density": 2.1,
+        "path_tile": "road_dirt",
+        "flora": [
+          "bush",
+          "Stone"
+        ],
+        "creatures": [
+          "Fungal Swarm",
+          "Fungal Skirmisher",
+          "Fungal Line"
+        ],
+        "depth": "deep"
+      },
+      "Gloomfen": {
+        "color": "#4a5a4a",
+        "creature_density": 1.9,
+        "path_tile": "road_dirt",
+        "flora": [
+          "dead_tree",
+          "bush"
+        ],
+        "creatures": [
+          "Gloom Swarm",
+          "Gloom Skirmisher",
+          "Gloom Line"
+        ],
+        "depth": "deep"
+      },
+      "Grave of Titans": {
+        "color": "#7a7266",
+        "creature_density": 2.1,
+        "path_tile": "road_stone",
+        "flora": [
+          "Stone"
+        ],
+        "creatures": [
+          "Titan Swarm",
+          "Titan Skirmisher",
+          "Titan Line"
+        ],
+        "depth": "deep"
+      },
+      "Hive Warrens": {
+        "color": "#8a6a2f",
+        "creature_density": 2.2,
+        "path_tile": "road_dirt",
+        "flora": [
+          "Stone"
+        ],
+        "creatures": [
+          "Hive Swarm",
+          "Hive Skirmisher",
+          "Hive Line"
+        ],
+        "depth": "deep"
+      },
+      "Infernal Gate": {
+        "color": "#8c3a1e",
+        "creature_density": 2.5,
+        "path_tile": "road_ash",
+        "flora": [],
+        "creatures": [
+          "Demonic Swarm",
+          "Demonic Skirmisher",
+          "Demonic Line"
+        ],
+        "depth": "deep"
+      },
+      "Ossuary": {
+        "color": "#c9c2ad",
+        "creature_density": 2.4,
+        "path_tile": "road_stone",
+        "flora": [
+          "Stone"
+        ],
+        "creatures": [
+          "Bonelord Swarm",
+          "Bonelord Skirmisher",
+          "Bonelord Line"
+        ],
+        "depth": "deep"
+      },
+      "Pestilent Deep": {
+        "color": "#6b6b33",
+        "creature_density": 2.4,
+        "path_tile": "road_ash",
+        "flora": [],
+        "creatures": [
+          "Plague Swarm",
+          "Plague Skirmisher",
+          "Plague Line"
+        ],
+        "depth": "deep"
+      },
+      "Shattered Vault": {
+        "color": "#6b2f6b",
+        "creature_density": 2.3,
+        "path_tile": "road_stone",
+        "flora": [],
+        "creatures": [
+          "Chaos Swarm",
+          "Chaos Skirmisher",
+          "Chaos Line"
+        ],
+        "depth": "deep"
+      },
+      "Sunken Cistern": {
+        "color": "#3f5a63",
+        "creature_density": 1.8,
+        "path_tile": "road_stone",
+        "flora": [
+          "Stone"
+        ],
+        "creatures": [
+          "Drowned Swarm",
+          "Drowned Skirmisher",
+          "Drowned Line"
+        ],
+        "depth": "deep"
+      },
+      "Sunken Foundry": {
+        "color": "#6a5a48",
+        "creature_density": 1.8,
+        "path_tile": "road_stone",
+        "flora": [
+          "Stone"
+        ],
+        "creatures": [
+          "Stoneborn Swarm",
+          "Stoneborn Skirmisher",
+          "Stoneborn Line"
+        ],
+        "depth": "deep"
+      },
+      "Sunken Ruins": {
+        "color": "#8a8577",
+        "creature_density": 1.4,
+        "path_tile": "road_stone",
+        "flora": [
+          "Stone",
+          "dead_tree",
+          "bush"
+        ],
+        "creatures": [
+          "Ruin Swarm",
+          "Ruin Skirmisher",
+          "Ruin Line"
+        ],
+        "depth": "surface"
+      },
+      "The Maw": {
+        "color": "#3d1f22",
+        "creature_density": 2.5,
+        "path_tile": "road_ash",
+        "flora": [],
+        "creatures": [
+          "Eldritch Swarm",
+          "Eldritch Skirmisher",
+          "Eldritch Line"
+        ],
+        "depth": "deep"
+      },
+      "Umbral Warren": {
+        "color": "#2e2a35",
+        "creature_density": 2.2,
+        "path_tile": "road_stone",
+        "flora": [
+          "Stone"
+        ],
+        "creatures": [
+          "Umbral Swarm",
+          "Umbral Skirmisher",
+          "Umbral Line"
+        ],
+        "depth": "deep"
+      }
+    },
+    "BIOMES_json": "{\"Meadow\": {\"color\": \"#5aa84f\", \"creature_density\": 0.5, \"path_tile\": \"road_dirt\", \"flora\": [\"bush\", \"rose_bush\", \"Tree\", \"Stone\"], \"creatures\": [\"Slime\", \"Wolf\", \"Beast Swarm\", \"Beast Skirmisher\", \"Beast Line\"], \"depth\": \"surface\"}, \"Deep Forest\": {\"color\": \"#2f6b3a\", \"creature_density\": 1.0, \"path_tile\": \"road_dirt\", \"flora\": [\"Tree\", \"pine_tree\", \"dead_tree\", \"bush\", \"Stone\"], \"creatures\": [\"Wolf\", \"Bat\", \"Skeleton\", \"Woodland Swarm\", \"Woodland Skirmisher\", \"Woodland Line\"], \"depth\": \"surface\"}, \"Arid Dunes\": {\"color\": \"#c9a227\", \"creature_density\": 0.8, \"path_tile\": \"road_sand\", \"flora\": [\"dead_tree\", \"Stone\"], \"creatures\": [\"Skeleton\", \"Bat\", \"Desert Swarm\", \"Desert Skirmisher\", \"Desert Line\"], \"depth\": \"surface\"}, \"Frozen Waste\": {\"color\": \"#8fb8d6\", \"creature_density\": 1.1, \"path_tile\": \"road_snow\", \"flora\": [\"IceRock\", \"pine_tree\"], \"creatures\": [\"Bat\", \"Skeleton\", \"Tundra Swarm\", \"Tundra Skirmisher\", \"Tundra Line\"], \"depth\": \"surface\"}, \"Mire\": {\"color\": \"#4d6b41\", \"creature_density\": 2.0, \"path_tile\": \"road_dirt\", \"flora\": [\"dead_tree\", \"bush\", \"Stone\"], \"creatures\": [\"Slime\", \"Bat\", \"Swamp Swarm\", \"Swamp Skirmisher\", \"Swamp Line\"], \"depth\": \"surface\"}, \"Highlands\": {\"color\": \"#7d8471\", \"creature_density\": 0.9, \"path_tile\": \"road_stone\", \"flora\": [\"Stone\", \"pine_tree\"], \"creatures\": [\"Highland Swarm\", \"Highland Skirmisher\", \"Highland Line\"], \"depth\": \"surface\"}, \"Storm Coast\": {\"color\": \"#6b7280\", \"creature_density\": 0.6, \"path_tile\": \"road_sand\", \"flora\": [\"Stone\", \"dead_tree\"], \"creatures\": [\"Storm Swarm\", \"Storm Skirmisher\", \"Storm Line\"], \"depth\": \"surface\"}, \"Verdant Jungle\": {\"color\": \"#1f6b2e\", \"creature_density\": 1.6, \"path_tile\": \"road_dirt\", \"flora\": [\"Tree\", \"bush\", \"rose_bush\"], \"creatures\": [\"Jungle Swarm\", \"Jungle Skirmisher\", \"Jungle Line\"], \"depth\": \"surface\"}, \"Abyssal Rift\": {\"color\": \"#1c1a24\", \"creature_density\": 2.4, \"path_tile\": \"road_stone\", \"flora\": [], \"creatures\": [\"Void Swarm\", \"Void Skirmisher\", \"Void Line\"], \"depth\": \"deep\"}, \"Ashfields\": {\"color\": \"#4a4038\", \"creature_density\": 1.7, \"path_tile\": \"road_ash\", \"flora\": [\"dead_tree\", \"Stone\"], \"creatures\": [\"Volcanic Swarm\", \"Volcanic Skirmisher\", \"Volcanic Line\"], \"depth\": \"surface\"}, \"Blightworks\": {\"color\": \"#5e6b3a\", \"creature_density\": 2.0, \"path_tile\": \"road_ash\", \"flora\": [\"dead_tree\", \"Stone\"], \"creatures\": [\"Blight Swarm\", \"Blight Skirmisher\", \"Blight Line\"], \"depth\": \"deep\"}, \"Catacombs\": {\"color\": \"#55504a\", \"creature_density\": 2.3, \"path_tile\": \"road_stone\", \"flora\": [\"Stone\"], \"creatures\": [\"Undead Swarm\", \"Undead Skirmisher\", \"Undead Line\"], \"depth\": \"deep\"}, \"Cavern\": {\"color\": \"#5a5148\", \"creature_density\": 1.9, \"path_tile\": \"road_dirt\", \"flora\": [\"Stone\"], \"creatures\": [\"Cave Swarm\", \"Cave Skirmisher\", \"Cave Line\"], \"depth\": \"deep\"}, \"Crystal Hollows\": {\"color\": \"#6fa8c9\", \"creature_density\": 1.6, \"path_tile\": \"road_snow\", \"flora\": [\"IceRock\", \"Stone\"], \"creatures\": [\"Crystal Swarm\", \"Crystal Skirmisher\", \"Crystal Line\"], \"depth\": \"deep\"}, \"Deepvault\": {\"color\": \"#4f5560\", \"creature_density\": 1.8, \"path_tile\": \"road_stone\", \"flora\": [\"Stone\"], \"creatures\": [\"Construct Swarm\", \"Construct Skirmisher\", \"Construct Line\"], \"depth\": \"deep\"}, \"Dreaming Dark\": {\"color\": \"#4a3f6b\", \"creature_density\": 2.3, \"path_tile\": \"road_stone\", \"flora\": [], \"creatures\": [\"Nightmare Swarm\", \"Nightmare Skirmisher\", \"Nightmare Line\"], \"depth\": \"deep\"}, \"Emberdepths\": {\"color\": \"#7a3b22\", \"creature_density\": 2.2, \"path_tile\": \"road_ash\", \"flora\": [\"Stone\"], \"creatures\": [\"Ember Swarm\", \"Ember Skirmisher\", \"Ember Line\"], \"depth\": \"deep\"}, \"Fallen Sanctum\": {\"color\": \"#b8a97a\", \"creature_density\": 2.2, \"path_tile\": \"road_stone\", \"flora\": [], \"creatures\": [\"Fallen Swarm\", \"Fallen Skirmisher\", \"Fallen Line\"], \"depth\": \"deep\"}, \"Frostvault\": {\"color\": \"#a8c6d6\", \"creature_density\": 1.8, \"path_tile\": \"road_snow\", \"flora\": [\"IceRock\"], \"creatures\": [\"Rime Swarm\", \"Rime Skirmisher\", \"Rime Line\"], \"depth\": \"deep\"}, \"Fungal Deep\": {\"color\": \"#6b7f3a\", \"creature_density\": 2.1, \"path_tile\": \"road_dirt\", \"flora\": [\"bush\", \"Stone\"], \"creatures\": [\"Fungal Swarm\", \"Fungal Skirmisher\", \"Fungal Line\"], \"depth\": \"deep\"}, \"Gloomfen\": {\"color\": \"#4a5a4a\", \"creature_density\": 1.9, \"path_tile\": \"road_dirt\", \"flora\": [\"dead_tree\", \"bush\"], \"creatures\": [\"Gloom Swarm\", \"Gloom Skirmisher\", \"Gloom Line\"], \"depth\": \"deep\"}, \"Grave of Titans\": {\"color\": \"#7a7266\", \"creature_density\": 2.1, \"path_tile\": \"road_stone\", \"flora\": [\"Stone\"], \"creatures\": [\"Titan Swarm\", \"Titan Skirmisher\", \"Titan Line\"], \"depth\": \"deep\"}, \"Hive Warrens\": {\"color\": \"#8a6a2f\", \"creature_density\": 2.2, \"path_tile\": \"road_dirt\", \"flora\": [\"Stone\"], \"creatures\": [\"Hive Swarm\", \"Hive Skirmisher\", \"Hive Line\"], \"depth\": \"deep\"}, \"Infernal Gate\": {\"color\": \"#8c3a1e\", \"creature_density\": 2.5, \"path_tile\": \"road_ash\", \"flora\": [], \"creatures\": [\"Demonic Swarm\", \"Demonic Skirmisher\", \"Demonic Line\"], \"depth\": \"deep\"}, \"Ossuary\": {\"color\": \"#c9c2ad\", \"creature_density\": 2.4, \"path_tile\": \"road_stone\", \"flora\": [\"Stone\"], \"creatures\": [\"Bonelord Swarm\", \"Bonelord Skirmisher\", \"Bonelord Line\"], \"depth\": \"deep\"}, \"Pestilent Deep\": {\"color\": \"#6b6b33\", \"creature_density\": 2.4, \"path_tile\": \"road_ash\", \"flora\": [], \"creatures\": [\"Plague Swarm\", \"Plague Skirmisher\", \"Plague Line\"], \"depth\": \"deep\"}, \"Shattered Vault\": {\"color\": \"#6b2f6b\", \"creature_density\": 2.3, \"path_tile\": \"road_stone\", \"flora\": [], \"creatures\": [\"Chaos Swarm\", \"Chaos Skirmisher\", \"Chaos Line\"], \"depth\": \"deep\"}, \"Sunken Cistern\": {\"color\": \"#3f5a63\", \"creature_density\": 1.8, \"path_tile\": \"road_stone\", \"flora\": [\"Stone\"], \"creatures\": [\"Drowned Swarm\", \"Drowned Skirmisher\", \"Drowned Line\"], \"depth\": \"deep\"}, \"Sunken Foundry\": {\"color\": \"#6a5a48\", \"creature_density\": 1.8, \"path_tile\": \"road_stone\", \"flora\": [\"Stone\"], \"creatures\": [\"Stoneborn Swarm\", \"Stoneborn Skirmisher\", \"Stoneborn Line\"], \"depth\": \"deep\"}, \"Sunken Ruins\": {\"color\": \"#8a8577\", \"creature_density\": 1.4, \"path_tile\": \"road_stone\", \"flora\": [\"Stone\", \"dead_tree\", \"bush\"], \"creatures\": [\"Ruin Swarm\", \"Ruin Skirmisher\", \"Ruin Line\"], \"depth\": \"surface\"}, \"The Maw\": {\"color\": \"#3d1f22\", \"creature_density\": 2.5, \"path_tile\": \"road_ash\", \"flora\": [], \"creatures\": [\"Eldritch Swarm\", \"Eldritch Skirmisher\", \"Eldritch Line\"], \"depth\": \"deep\"}, \"Umbral Warren\": {\"color\": \"#2e2a35\", \"creature_density\": 2.2, \"path_tile\": \"road_stone\", \"flora\": [\"Stone\"], \"creatures\": [\"Umbral Swarm\", \"Umbral Skirmisher\", \"Umbral Line\"], \"depth\": \"deep\"}}",
+    "BIOME_FAMILIES": {
+      "Meadow": [
+        "Beast",
+        "Woodland"
+      ],
+      "Deep Forest": [
+        "Woodland",
+        "Fungal",
+        "Gloom"
+      ],
+      "Arid Dunes": [
+        "Desert",
+        "Bonelord",
+        "Ruin"
+      ],
+      "Frozen Waste": [
+        "Tundra",
+        "Rime"
+      ],
+      "Mire": [
+        "Swamp",
+        "Drowned",
+        "Blight"
+      ]
+    },
+    "SURFACE": [
+      "Meadow",
+      "Deep Forest",
+      "Arid Dunes",
+      "Frozen Waste",
+      "Mire",
+      "Highlands",
+      "Storm Coast",
+      "Verdant Jungle",
+      "Ashfields",
+      "Sunken Ruins"
+    ],
+    "DEEP": [
+      "Abyssal Rift",
+      "Blightworks",
+      "Catacombs",
+      "Cavern",
+      "Crystal Hollows",
+      "Deepvault",
+      "Dreaming Dark",
+      "Emberdepths",
+      "Fallen Sanctum",
+      "Frostvault",
+      "Fungal Deep",
+      "Gloomfen",
+      "Grave of Titans",
+      "Hive Warrens",
+      "Infernal Gate",
+      "Ossuary",
+      "Pestilent Deep",
+      "Shattered Vault",
+      "Sunken Cistern",
+      "Sunken Foundry",
+      "The Maw",
+      "Umbral Warren"
+    ],
+    "FLORA_OPTIONAL": [
+      "Abyssal Rift",
+      "Dreaming Dark",
+      "Fallen Sanctum",
+      "Infernal Gate",
+      "Pestilent Deep",
+      "Shattered Vault",
+      "The Maw"
+    ],
+    "ROLES": [
+      "Swarm",
+      "Skirmisher",
+      "Line",
+      "Ranged",
+      "Caster",
+      "Brute",
+      "Heavy",
+      "Champion",
+      "Apex"
+    ]
+  }
+}
