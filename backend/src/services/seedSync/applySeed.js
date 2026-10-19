@@ -1,6 +1,7 @@
 const crypto = require('node:crypto');
-const { getGroup, tableSpecs } = require('./registry.js');
-const { computeDiff, tableOf, gitOf, localByKeyOf } = require('./diffGroup.js');
+const { getGroup, tableSpecs, scopeSql } = require('./registry.js');
+const { computeDiff, tableOf, gitOf, localByKeyOf, OWNER_MISSING } = require('./diffGroup.js');
+const { EXCLUDED } = require('./coverage.js');
 const { beginLocked, lockForApply, mapLockError, rollback } = require('./txn.js');
 const { buildRefMaps, resolveRow } = require('./refs.js');
 const { schemaVersion, startRun, finishRun } = require('./runs.js');
@@ -16,6 +17,9 @@ const { assertValid, isKnownKey } = require('../gameSettings.js');
 // never takes a natural key a kept local row holds, every ref of a row written
 // from git resolves before anything is written (missing_ref), secret columns
 // are never written, and everything happens in one transaction.
+// Plan 3 spec fields (registry.js header): every statement on a group table is
+// scoped by scopeSql (rowFilter / versioned `active`); a versioned delete
+// deactivates; a slice only UPDATEs its columns of rows that exist here.
 
 // Allowed decisions per kind; anything else is refused.
 const ALLOWED = {
@@ -35,13 +39,19 @@ const INSERTABLE = new Set(['new', 'deleted_here']);
 const UPDATE_KINDS = new Set(['changed', 'edited_here', 'not_exported']);
 const KEY_CLASH_REASON = 'key already used by a local row';
 
+// Decisions allowed on one diff row: a slice row is never deleted.
+const allowedFor = (cd, r) => (tableOf(cd, r).spec.slice ? ALLOWED[r.kind].filter((d) => d !== 'delete') : ALLOWED[r.kind]);
+// A row that this seed may delete (FK references can block it).
+const deletableRow = (cd, r) => DELETABLE.has(r.kind) && !tableOf(cd, r).spec.slice;
+
 const quoteIdent = (name) => `"${String(name).replace(/"/g, '""')}"`;
 const own = (obj, k) => Object.prototype.hasOwnProperty.call(obj, k);
 
-// Every FK pointing at the group's table, with its column pairs in key order.
+// Every FK pointing at the group's table, with its column pairs in key order
+// and its ON DELETE action (pg_constraint.confdeltype: 'n' = SET NULL).
 async function referencingFks(db, spec) {
   const { rows } = await db.query(
-    `SELECT c.oid, c.conrelid::regclass::text AS ref_table,
+    `SELECT c.oid, c.conrelid::regclass::text AS ref_table, c.confdeltype::text AS on_delete,
             (SELECT relname::text FROM pg_class WHERE oid = c.conrelid) AS ref_name,
             array_agg(a.attname::text ORDER BY k.ord) AS ref_cols,
             array_agg(fa.attname::text ORDER BY k.ord) AS target_cols
@@ -63,6 +73,10 @@ async function referencingFks(db, spec) {
 // data, maps): they always block. `inGroup` lists the referencing rows of the
 // group's own tables by sync_uuid: they block unless this seed deletes them
 // too (annotate). Includes self-references (item_types.ammo_type_id).
+// Never blocks: an FK from an EXCLUDED (machine-local) table that is ON DELETE
+// SET NULL (audio_jobs.clip_id): the delete only forgets a job's link.
+const relaxedFk = (fk) => fk.on_delete === 'n' && Object.prototype.hasOwnProperty.call(EXCLUDED, fk.ref_name);
+
 async function referenceInfo(db, cd) {
   const out = new Map();
   const groupTables = new Set(cd.specs.map((s) => s.table));
@@ -71,16 +85,17 @@ async function referenceInfo(db, cd) {
     return out.get(uuid);
   };
   for (const spec of cd.specs) {
-    const uuids = cd.diff.rows.filter((r) => r.table === spec.table && DELETABLE.has(r.kind)).map((r) => r.syncUuid);
+    const uuids = cd.diff.rows.filter((r) => r.table === spec.table && deletableRow(cd, r)).map((r) => r.syncUuid);
     if (!uuids.length) continue;
     for (const fk of await referencingFks(db, spec)) {
+      if (relaxedFk(fk)) continue;
       const on = fk.ref_cols.map((c, i) => `r.${quoteIdent(c)} = t.${quoteIdent(fk.target_cols[i])}`).join(' AND ');
       // ref_table is regclass output: already quoted/qualified as needed.
       if (groupTables.has(fk.ref_name)) {
         const { rows } = await db.query(
           `SELECT t.sync_uuid::text AS uuid, r.sync_uuid::text AS ref_uuid
              FROM ${quoteIdent(spec.table)} t JOIN ${fk.ref_table} r ON ${on}
-            WHERE t.sync_uuid = ANY($1::uuid[])`,
+            WHERE t.sync_uuid = ANY($1::uuid[])${scopeSql(spec, 't')}`,
           [uuids],
         );
         for (const r of rows) entry(r.uuid).inGroup.push({ table: fk.ref_name, uuid: r.ref_uuid });
@@ -89,7 +104,7 @@ async function referenceInfo(db, cd) {
       const { rows } = await db.query(
         `SELECT t.sync_uuid::text AS uuid, count(*)::int AS n
            FROM ${quoteIdent(spec.table)} t JOIN ${fk.ref_table} r ON ${on}
-          WHERE t.sync_uuid = ANY($1::uuid[])
+          WHERE t.sync_uuid = ANY($1::uuid[])${scopeSql(spec, 't')}
           GROUP BY t.sync_uuid`,
         [uuids],
       );
@@ -133,7 +148,7 @@ function blockReason(info, deleting) {
 function annotate(cd, refInfo, decisions) {
   const { diff } = cd;
   const decisionOf = (r) => (own(decisions, r.syncUuid) ? decisions[r.syncUuid] : r.defaultDecision);
-  const deletable = diff.rows.filter((r) => DELETABLE.has(r.kind));
+  const deletable = diff.rows.filter((r) => deletableRow(cd, r));
   const deletingNow = () => new Set(deletable
     .filter((r) => !r.blockedReason && decisionOf(r) === 'delete').map((r) => r.syncUuid));
   for (let changed = true; changed;) {
@@ -155,7 +170,8 @@ function annotate(cd, refInfo, decisions) {
   }
   const deleting = new Set(deletable.filter((r) => decisionOf(r) === 'delete').map((r) => r.syncUuid));
   for (const r of diff.rows) {
-    if (!INSERTABLE.has(r.kind)) continue;
+    // A slice never inserts (its git-only rows are owner_missing).
+    if (!INSERTABLE.has(r.kind) || tableOf(cd, r).spec.slice) continue;
     const holder = localByKeyOf(cd, r);
     if (holder && !deleting.has(holder.row.sync_uuid)) {
       r.blockedReason = KEY_CLASH_REASON;
@@ -242,7 +258,7 @@ function plan(cd, refInfo, decisions) {
   if (stale.length) {
     throw new SyncRefused('stale_preview', 'the diff changed since the preview; preview again', { uuids: stale });
   }
-  const invalid = Object.keys(decisions).filter((u) => !ALLOWED[byUuid.get(u).kind].includes(decisions[u]));
+  const invalid = Object.keys(decisions).filter((u) => !allowedFor(cd, byUuid.get(u)).includes(decisions[u]));
   if (invalid.length) {
     throw new SyncRefused('invalid_decision', 'decision not allowed for this row', { uuids: invalid });
   }
@@ -250,6 +266,10 @@ function plan(cd, refInfo, decisions) {
   const undecided = steps.filter((s) => s.decision === null).map((s) => s.row.syncUuid);
   if (undecided.length) {
     throw new SyncRefused('undecided', 'rows edited on this PC need a decision', { uuids: undecided });
+  }
+  const orphans = steps.filter((s) => s.decision === 'git' && s.row.blockedReason === OWNER_MISSING);
+  if (orphans.length) {
+    throw new SyncRefused(OWNER_MISSING, orphans[0].row.blockedMessage, { uuids: orphans.map((s) => s.row.syncUuid) });
   }
   const blocked = steps.filter((s) => s.decision === 'delete' && s.row.blockedReason);
   if (blocked.length) {
@@ -277,16 +297,31 @@ function paramsFor(columns, row) {
   });
 }
 
+// Not scoped by rowFilter (a git row that exists here but is filtered out is
+// overwritten); a versioned table conflicts on its active version only.
 async function upsertFromGit(db, spec, columns, row) {
   const names = columns.map((c) => quoteIdent(c.name));
   const vals = paramsFor(columns, row);
   const ph = vals.map((_, i) => `$${i + 2}`).join(', ');
   const set = names.map((n) => `${n} = EXCLUDED.${n}`).join(', ');
+  const target = spec.versioned ? '(sync_uuid) WHERE active' : '(sync_uuid)';
   const res = await db.query(
     `INSERT INTO ${quoteIdent(spec.table)} (sync_uuid, ${names.join(', ')}) VALUES ($1, ${ph})
-     ON CONFLICT (sync_uuid) DO UPDATE SET ${set} RETURNING *`,
+     ON CONFLICT ${target} DO UPDATE SET ${set} RETURNING *`,
     [row.sync_uuid, ...vals],
   );
+  return res.rows[0];
+}
+
+// A slice's write: its own columns of the (scoped) row that exists here.
+async function updateSlice(db, spec, columns, row) {
+  const cols = columns.filter((c) => spec.columns.includes(c.name));
+  const set = cols.map((c, i) => `${quoteIdent(c.name)} = $${i + 2}`).join(', ');
+  const res = await db.query(
+    `UPDATE ${quoteIdent(spec.table)} SET ${set} WHERE sync_uuid = $1${scopeSql(spec)} RETURNING *`,
+    [row.sync_uuid, ...paramsFor(cols, row)],
+  );
+  if (res.rowCount !== 1) throw new Error(`seed-sync: slice update ${spec.table} ${row.sync_uuid}: expected 1 row, got ${res.rowCount}`);
   return res.rows[0];
 }
 
@@ -296,7 +331,7 @@ async function adopt(db, spec, columns, row, localUuid) {
   const vals = columns ? paramsFor(columns, row) : [];
   const set = columns ? columns.map((c, i) => `, ${quoteIdent(c.name)} = $${i + 3}`).join('') : '';
   const res = await db.query(
-    `UPDATE ${quoteIdent(spec.table)} SET sync_uuid = $1${set} WHERE sync_uuid = $2 RETURNING *`,
+    `UPDATE ${quoteIdent(spec.table)} SET sync_uuid = $1${set} WHERE sync_uuid = $2${scopeSql(spec)} RETURNING *`,
     [row.sync_uuid, localUuid, ...vals],
   );
   if (res.rowCount !== 1) throw new Error(`adopt_identity: local row ${localUuid} not found`);
@@ -359,7 +394,8 @@ const RENAME_CASCADES = {
 // registry configuration error. (No real group does either: every target is
 // in another group.)
 function renameCascadesFor(specs) {
-  const mine = new Set(specs.map((s) => s.table));
+  // A slice never writes the name (its natural key): no cascade.
+  const mine = new Set(specs.filter((s) => !s.slice).map((s) => s.table));
   const out = {};
   for (const [table, c] of Object.entries(RENAME_CASCADES)) {
     if (!mine.has(table)) continue;
@@ -515,7 +551,7 @@ async function resolveForWrite(spec, gitRow, maps, written, order, deferred) {
 // their (blocking-aware) defaultDecision. `signature` is the one previewSeed
 // returned; required -- a missing or different one refuses stale_preview.
 // Refusals (busy, no_export, schema_newer, stale_preview, invalid_decision,
-// undecided, blocked, conflict, missing_ref, invalid_value) happen before a
+// undecided, owner_missing, blocked, conflict, missing_ref, invalid_value) happen before a
 // run is started, so they record no run -- like export's git_newer. A failure
 // after that (including a write conflict, 23505 -> SyncRefused('conflict'))
 // rolls everything back and finishes the run as failed; a committed seed
@@ -549,10 +585,10 @@ async function applySeed(pool, groupId, decisions, { signature } = {}) {
     // referencing row (FK KEY SHARE) from outside the group now waits for us,
     // and the count sees everything committed before it.
     for (const spec of specs) {
-      const uuids = diff.rows.filter((r) => r.table === spec.table && DELETABLE.has(r.kind)).map((r) => r.syncUuid);
+      const uuids = diff.rows.filter((r) => r.table === spec.table && deletableRow(cd, r)).map((r) => r.syncUuid);
       if (!uuids.length) continue;
       await client.query(
-        `SELECT 1 FROM ${quoteIdent(spec.table)} WHERE sync_uuid = ANY($1::uuid[]) FOR UPDATE`, [uuids]);
+        `SELECT 1 FROM ${quoteIdent(spec.table)} WHERE sync_uuid = ANY($1::uuid[])${scopeSql(spec)} FOR UPDATE`, [uuids]);
     }
     const refInfo = await referenceInfo(client, cd);
     if (typeof signature !== 'string' || signature !== previewSignatureOf(cd, refInfo)) {
@@ -571,14 +607,16 @@ async function applySeed(pool, groupId, decisions, { signature } = {}) {
       const uuids = by('delete', (r) => r.table === spec.table).map((s) => s.row.syncUuid);
       if (!uuids.length) continue;
       // Self-references among rows deleted together (ON DELETE RESTRICT).
+      // A versioned table only deactivates: its rows stay, so do their refs.
       for (const [col, ref] of Object.entries(spec.refs || {})) {
-        if (ref.table !== spec.table) continue;
+        if (ref.table !== spec.table || spec.versioned) continue;
         await client.query(
           `UPDATE ${quoteIdent(spec.table)} SET ${quoteIdent(col)} = NULL
-            WHERE sync_uuid = ANY($1::uuid[]) AND ${quoteIdent(col)} IS NOT NULL`, [uuids]);
+            WHERE sync_uuid = ANY($1::uuid[]) AND ${quoteIdent(col)} IS NOT NULL${scopeSql(spec)}`, [uuids]);
       }
-      const res = await client.query(
-        `DELETE FROM ${quoteIdent(spec.table)} WHERE sync_uuid = ANY($1::uuid[])`, [uuids]);
+      const res = await client.query(spec.versioned
+        ? `UPDATE ${quoteIdent(spec.table)} SET active = false WHERE sync_uuid = ANY($1::uuid[])${scopeSql(spec)}`
+        : `DELETE FROM ${quoteIdent(spec.table)} WHERE sync_uuid = ANY($1::uuid[])${scopeSql(spec)}`, [uuids]);
       if (res.rowCount !== uuids.length) {
         throw new Error(`delete ${spec.table}: expected ${uuids.length} rows, got ${res.rowCount}`);
       }
@@ -608,7 +646,11 @@ async function applySeed(pool, groupId, decisions, { signature } = {}) {
       }
       for (const { row } of by('git', (r) => mine(r) && r.kind !== 'adopt_identity')) {
         const g = gitOf(cd, row).row;
-        const out = await upsertFromGit(client, spec, t.columns, await resolveForWrite(spec, g, m, written, order, deferred));
+        const resolved = await resolveForWrite(spec, g, m, written, order, deferred);
+        if (spec.slice && !UPDATE_KINDS.has(row.kind)) throw new Error(`seed-sync: slice ${spec.table} cannot write kind ${row.kind}`);
+        const out = spec.slice
+          ? await updateSlice(client, spec, t.columns, resolved)
+          : await upsertFromGit(client, spec, t.columns, resolved);
         written.get(spec.table).set(g.sync_uuid, out);
         if (UPDATE_KINDS.has(row.kind)) {
           summary.updated += 1;
@@ -625,7 +667,8 @@ async function applySeed(pool, groupId, decisions, { signature } = {}) {
       const { row, missing } = await resolveRow({ [d.column]: d.value }, one, m, pendingFor(one, m, written));
       if (missing.length) throw new Error(`seed-sync: ${d.spec.table}.${d.column} = ${d.value} did not resolve`);
       const res = await client.query(
-        `UPDATE ${quoteIdent(d.spec.table)} SET ${quoteIdent(d.column)} = $1 WHERE sync_uuid = $2`, [row[d.column], d.uuid]);
+        `UPDATE ${quoteIdent(d.spec.table)} SET ${quoteIdent(d.column)} = $1 WHERE sync_uuid = $2${scopeSql(d.spec)}`,
+        [row[d.column], d.uuid]);
       if (res.rowCount !== 1) {
         throw new Error(`seed-sync: second pass ${d.spec.table}.${d.column} of ${d.uuid}: expected 1 row, got ${res.rowCount}`);
       }

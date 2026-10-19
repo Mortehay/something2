@@ -1,5 +1,5 @@
 const {
-  GROUPS, getGroup, tableSpecs, liveColumns, pairKeyCol, orderPair,
+  GROUPS, getGroup, tableSpecs, liveColumns, pairKeyCol, orderPair, scopeSql, ownerLabel,
 } = require('./registry.js');
 const { canonicalRow, rowHash, stableStringify } = require('./canonical.js');
 const { buildRefMaps, exportRow, exportColumns } = require('./refs.js');
@@ -25,6 +25,9 @@ const DEFAULTS = {
   only_here: 'local',
 };
 const KINDS = Object.keys(DEFAULTS);
+// blockedReason of a slice's git row whose owner row is not here (the row
+// also carries blockedMessage "seed <owner label> first").
+const OWNER_MISSING = 'owner_missing';
 const LOCAL_EDIT_KINDS = ['not_exported', 'edited_here', 'only_here', 'deleted_here'];
 const GIT_CHANGE_KINDS = ['changed', 'new', 'deleted_in_git', 'edited_here', 'adopt_identity'];
 // v1 (Plan 1): { header{..., row_count}, rows }; v2: { header{..., row_counts}, tables }.
@@ -51,7 +54,7 @@ async function countTokensMissing(db, spec) {
   if (!secrets.length) return 0;
   let cond = secrets.map((c) => `${quoteIdent(c)} IS NULL OR ${quoteIdent(c)} = ''`).join(' OR ');
   if (spec.secretNeededIf) cond = `btrim(coalesce(${quoteIdent(spec.secretNeededIf)}, '')) <> '' AND (${cond})`;
-  const { rows } = await db.query(`SELECT count(*)::int AS n FROM ${quoteIdent(spec.table)} WHERE ${cond}`);
+  const { rows } = await db.query(`SELECT count(*)::int AS n FROM ${quoteIdent(spec.table)} WHERE (${cond})${scopeSql(spec)}`);
   return rows[0].n;
 }
 
@@ -160,12 +163,12 @@ function diffFields(local, git, columns) {
 const own = (obj, k) => Object.prototype.hasOwnProperty.call(obj || {}, k);
 
 // The TableSpec that describes `table`: the group's own first, else any
-// registered group's. null when no group exports that table.
+// registered group's full (non-slice) spec. null when no group exports that table.
 function specFor(group, table) {
   const mine = tableSpecs(group).find((s) => s.table === table);
   if (mine) return mine;
   for (const g of GROUPS) {
-    const s = tableSpecs(g).find((x) => x.table === table);
+    const s = tableSpecs(g).find((x) => x.table === table && !x.slice);
     if (s) return s;
   }
   return null;
@@ -194,7 +197,7 @@ async function readLocal(db, group, specs, groupId) {
     const columns = exportColumns(await liveColumns(db, spec), spec);
     const maps = await buildRefMaps(db, spec);
     const select = [...columns.map((c) => quoteIdent(c.name)), 'sync_uuid'].join(', ');
-    const { rows } = await db.query(`SELECT ${select} FROM ${quoteIdent(spec.table)}`);
+    const { rows } = await db.query(`SELECT ${select} FROM ${quoteIdent(spec.table)} WHERE true${scopeSql(spec)}`);
     // Exactly what export would write (refs translated), so hL == B for an
     // unchanged row.
     const canon = rows.map((r) => canonicalRow(exportRow(r, spec, maps), columns));
@@ -216,7 +219,7 @@ async function readLocal(db, group, specs, groupId) {
     };
     const maps = await buildRefMaps(db, keySpec);
     const { rows } = await db.query(
-      `SELECT sync_uuid, ${ts.naturalKey.map(quoteIdent).join(', ')} FROM ${quoteIdent(table)}`);
+      `SELECT sync_uuid, ${ts.naturalKey.map(quoteIdent).join(', ')} FROM ${quoteIdent(table)} WHERE true${scopeSql(ts)}`);
     keyIndex.set(table, new Map(rows.map((r) => [r.sync_uuid, exportRow(r, keySpec, maps)])));
     todo.push(...uuidKeyRefs(keySpec).map((k) => keySpec.refs[k].table));
   }
@@ -226,7 +229,8 @@ async function readLocal(db, group, specs, groupId) {
     for (const nr of Object.values(spec.nameRefs || {})) {
       const id = `${nr.table}\u0000${nr.keyCol}`;
       if (names.has(id)) continue;
-      const { rows } = await db.query(`SELECT ${quoteIdent(nr.keyCol)} AS n FROM ${quoteIdent(nr.table)}`);
+      const { rows } = await db.query(
+        `SELECT ${quoteIdent(nr.keyCol)} AS n FROM ${quoteIdent(nr.table)} WHERE true${scopeSql(specFor(group, nr.table))}`);
       names.set(id, new Set(rows.map((r) => r.n)));
     }
   }
@@ -363,10 +367,11 @@ function diffTable(t, gitRaw, baseline, keys) {
   const consumed = new Set();
   const inSync = []; // identical on both sides
   const out = [];
-  const add = (kind, syncUuid, row, side, fields, defaultDecision = DEFAULTS[kind]) => {
+  const add = (kind, syncUuid, row, side, fields, defaultDecision = DEFAULTS[kind], extra = null) => {
     const keyParts = keys.display(spec, row, side);
     out.push({
       table: spec.table, syncUuid, key: joinKey(keyParts), keyParts, kind, defaultDecision, fields, blockedReason: null,
+      ...extra,
     });
   };
 
@@ -389,6 +394,15 @@ function diffTable(t, gitRaw, baseline, keys) {
       add(kind, uuid, l.row, 'local', diffFields(l.row, g.row, columns));
       continue;
     }
+    if (spec.slice) {
+      // A slice never inserts or adopts: the owner group creates the row.
+      // Red (null) like a key clash: 'local' sets B = hG, so the next export
+      // drops the row from git -- a deliberate choice.
+      add(baseline.has(uuid) ? 'deleted_here' : 'new', uuid, g.row, 'git', [], null, {
+        blockedReason: OWNER_MISSING, blockedMessage: `seed ${ownerLabel(spec.table)} first`,
+      });
+      continue;
+    }
     const cand = localByKey.get(gitKeyText.get(uuid));
     if (cand && !consumed.has(cand.row.sync_uuid)
         && !gitUuids.has(cand.row.sync_uuid) && !baseline.has(cand.row.sync_uuid)) {
@@ -409,7 +423,9 @@ function diffTable(t, gitRaw, baseline, keys) {
     const uuid = l.row.sync_uuid;
     if (gitUuids.has(uuid) || consumed.has(uuid)) continue;
     const b = baseline.get(uuid);
-    add(b !== undefined && l.hash === b ? 'deleted_in_git' : 'only_here', uuid, l.row, 'local', []);
+    const kind = b !== undefined && l.hash === b ? 'deleted_in_git' : 'only_here';
+    // A slice never deletes (the owner does): keep is the only choice.
+    add(kind, uuid, l.row, 'local', [], spec.slice ? 'local' : DEFAULTS[kind]);
   }
 
   out.sort((a, b) => cmp(String(a.key), String(b.key)) || cmp(a.syncUuid, b.syncUuid));
@@ -601,5 +617,5 @@ async function diffGroup(db, groupId) {
 }
 
 module.exports = {
-  diffGroup, computeDiff, validateDoc, tableOf, gitOf, localByKeyOf, KINDS, DEFAULTS,
+  diffGroup, computeDiff, validateDoc, tableOf, gitOf, localByKeyOf, KINDS, DEFAULTS, OWNER_MISSING,
 };

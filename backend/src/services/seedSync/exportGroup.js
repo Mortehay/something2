@@ -1,6 +1,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const { getGroup, tableSpecs, liveColumns, pairKeyCol, orderPair } = require('./registry.js');
+const {
+  getGroup, tableSpecs, specOfTable, liveColumns, pairKeyCol, orderPair, scopeSql,
+} = require('./registry.js');
 const { canonicalRow, rowHash, stableStringify, compareNaturalKey } = require('./canonical.js');
 const { buildRefMaps, exportRow, exportColumns } = require('./refs.js');
 const { pcLabel, schemaVersion, startRun, finishRun } = require('./runs.js');
@@ -8,6 +10,8 @@ const { SyncFileError, SyncRefused } = require('./errors.js');
 const { SEED_SYNC_LOCK_SQL, beginLocked, mapLockError, rollback, lockShare } = require('./txn.js');
 
 let tmpCounter = 0;
+
+const quoteIdent = (name) => `"${String(name).replace(/"/g, '""')}"`;
 
 function syncDir() {
   return process.env.SEED_SYNC_DIR || path.join(__dirname, '../../../seeds/sync');
@@ -50,13 +54,15 @@ async function readExport(groupId) {
 async function exportTable(client, spec) {
   const canonCols = exportColumns(await liveColumns(client, spec), spec);
   const maps = await buildRefMaps(client, spec);
-  const { rows: dbRows } = await client.query(`SELECT * FROM ${spec.table}`);
+  // rowFilter / versioned: only the rows that sync (scopeSql).
+  const { rows: dbRows } = await client.query(`SELECT * FROM ${quoteIdent(spec.table)} WHERE true${scopeSql(spec)}`);
   // An unordered pair travels ordered by its targets' natural keys, never by
   // local id order (diffGroup normalises the same way).
   let keyOf = null;
   if (spec.unorderedPair) {
     const { table, keyCol } = pairKeyCol(spec);
-    const { rows } = await client.query(`SELECT sync_uuid, "${keyCol}" AS k FROM ${table}`);
+    const { rows } = await client.query(
+      `SELECT sync_uuid, ${quoteIdent(keyCol)} AS k FROM ${quoteIdent(table)} WHERE true${scopeSql(specOfTable(table))}`);
     const keys = new Map(rows.map((r) => [r.sync_uuid, r.k]));
     keyOf = (u) => (keys.has(u) ? keys.get(u) : null);
   }

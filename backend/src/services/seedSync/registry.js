@@ -17,6 +17,35 @@
 // two resolved local ids LEAST/GREATEST. The target's natural key must be one
 // non-ref column (pairKeyCol).
 //
+//
+// Row and column scoping (plan 3):
+//  - rowFilter: string -- an SQL predicate over UNQUALIFIED columns of
+//    spec.table (a subquery may name the table itself, e.g.
+//    `EXISTS (SELECT 1 FROM audio_bindings b WHERE b.clip_id = audio_clips.id)`).
+//    Only rows it holds for are synced: every SELECT, lock-for-update, UPDATE
+//    and DELETE the engine issues for the table ANDs it in via scopeSql(), so
+//    a filtered-out row is never exported, listed, deleted or adopted. The
+//    upsert of a git row (INSERT ... ON CONFLICT (sync_uuid)) is not filtered:
+//    a git row that exists here but is filtered out is overwritten by it.
+//  - versioned: true -- a history table with an `active` flag whose versions
+//    share the subject's sync_uuid (partial UNIQUE (sync_uuid) WHERE active).
+//    Implies the filter `active` (ANDed with any rowFilter); the upsert
+//    targets ON CONFLICT (sync_uuid) WHERE active, and a delete deactivates
+//    the active row (UPDATE ... SET active = false) instead of deleting it.
+//    Inactive history rows are never read or written.
+//  - slice: true, columns: string[] -- the group owns only `columns` of a
+//    table another group (the "owner", a full spec of the same table) owns.
+//    naturalKey and sync_uuid are read (display, deep keys, hashes) but never
+//    written. Export and diff read only columns + naturalKey; apply only
+//    UPDATEs `columns` of rows that exist here -- it never inserts, deletes or
+//    adopts. A git row whose uuid is not here is blocked 'owner_missing'
+//    ("seed <owner label> first", the label of the first group with a full
+//    spec of the table, see ownerLabel); a local row missing from git is kept
+//    ('delete' is refused). Baselines are per group, so a slice hashes only
+//    its own columns and the owner (which omits them) never sees slice edits.
+//    coverage.js checks the owner omits every slice column and that its
+//    art-omitted columns sit in exactly one slice.
+//
 // Order rules (pinned by seed_sync_registry_db.test.js): inside a group a
 // table comes after every table of the group it references (deletes run
 // children first, deferred refs only for self/forward refs); across groups an
@@ -307,17 +336,70 @@ function getGroup(id) {
   return g;
 }
 
+// Throws on a TableSpec whose plan-3 fields are inconsistent.
+function checkSpec(spec) {
+  const where = `seed-sync: ${spec.table}`;
+  if (spec.rowFilter !== undefined && (typeof spec.rowFilter !== 'string' || !spec.rowFilter.trim())) {
+    throw new Error(`${where}: rowFilter must be a non-empty SQL predicate`);
+  }
+  if (spec.versioned !== undefined && spec.versioned !== true) throw new Error(`${where}: versioned must be true or absent`);
+  if (spec.slice !== undefined && spec.slice !== true) throw new Error(`${where}: slice must be true or absent`);
+  if (spec.slice) {
+    if (!Array.isArray(spec.columns) || !spec.columns.length) throw new Error(`${where}: a slice needs columns`);
+    const clash = spec.columns.filter((c) => spec.naturalKey.includes(c) || c === 'sync_uuid');
+    if (clash.length) throw new Error(`${where}: slice columns ${clash.join(', ')} are key columns (read, never written)`);
+    if (spec.unorderedPair) throw new Error(`${where}: a slice cannot be an unorderedPair`);
+  } else if (spec.columns !== undefined) {
+    throw new Error(`${where}: columns is only for a slice`);
+  }
+}
+
 function tableSpecs(group) {
+  group.tables.forEach(checkSpec);
   return group.tables;
 }
 
-// The registered TableSpec of `table` (first group that has it), or null.
+// The registered full (non-slice) TableSpec of `table` (first group that has
+// it), or null.
 function specOfTable(table) {
   for (const g of GROUPS) {
-    const s = g.tables.find((x) => x.table === table);
+    const s = g.tables.find((x) => x.table === table && !x.slice);
     if (s) return s;
   }
   return null;
+}
+
+// Label of the group owning a sliced table (first group with a full spec of
+// it); the table name when none is registered.
+function ownerLabel(table) {
+  const g = GROUPS.find((x) => x.tables.some((s) => s.table === table && !s.slice));
+  return g ? g.label : table;
+}
+
+// The row predicate of a spec (versioned -> `active`, ANDed with rowFilter),
+// or null when every row syncs.
+function rowPredicate(spec) {
+  const parts = [];
+  if (spec && spec.versioned) parts.push('active');
+  if (spec && spec.rowFilter) parts.push(`(${spec.rowFilter})`);
+  return parts.length ? parts.join(' AND ') : null;
+}
+
+const quoteIdent = (name) => `"${String(name).replace(/"/g, '""')}"`;
+
+// '' or ' AND (<row predicate>)', for appending to a WHERE that already has a
+// condition. Without `alias` (or with alias === spec.table) the statement must
+// name spec.table unaliased and have no other table whose columns could
+// capture the predicate's unqualified names. With another alias (a join), the
+// predicate is evaluated on the same physical row in a subquery of its own,
+// where its unqualified names (and spec.table inside it) bind to that row:
+// ' AND EXISTS (SELECT 1 FROM t WHERE t.ctid = alias.ctid AND (pred))'.
+function scopeSql(spec, alias) {
+  const pred = rowPredicate(spec);
+  if (!pred) return '';
+  if (!alias || alias === spec.table) return ` AND (${pred})`;
+  const t = quoteIdent(spec.table);
+  return ` AND EXISTS (SELECT 1 FROM ${t} WHERE ${t}.ctid = ${alias}.ctid AND (${pred}))`;
 }
 
 // The target table and its single natural-key column of an unorderedPair
@@ -388,16 +470,23 @@ async function _withTestGroups(groups, fn) {
 }
 
 // Exported columns of one table: everything but omit and secret columns (ref
-// columns included), sorted by name.
+// columns included), sorted by name. A slice: only its columns + naturalKey.
 async function liveColumns(db, spec) {
   const { rows } = await db.query(
     `SELECT column_name, data_type FROM information_schema.columns
       WHERE table_schema = current_schema() AND table_name = $1`,
     [spec.table],
   );
-  const skip = new Set([...Object.keys(spec.omit), ...(spec.secretColumns || [])]);
+  const skip = new Set([...Object.keys(spec.omit || {}), ...(spec.secretColumns || [])]);
+  // A slice reads only its columns plus the natural key.
+  const only = spec.slice ? new Set([...spec.columns, ...spec.naturalKey]) : null;
+  if (only) {
+    const have = new Set(rows.map((r) => r.column_name));
+    const gone = [...only].filter((c) => !have.has(c));
+    if (gone.length) throw new Error(`seed-sync: slice of ${spec.table} names missing columns ${gone.join(', ')}`);
+  }
   return rows
-    .filter((r) => !skip.has(r.column_name))
+    .filter((r) => !skip.has(r.column_name) && (!only || only.has(r.column_name)))
     .map((r) => ({ name: r.column_name, dataType: r.data_type }))
     .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
@@ -421,14 +510,18 @@ async function fkProblems(db, spec) {
     fkTargets.get(r.col).add(r.target);
   }
   const refs = spec.refs || {};
+  const omit = spec.omit || {};
+  // A slice answers only for the columns it reads (the owner covers the rest).
+  const reads = spec.slice ? new Set([...spec.columns, ...spec.naturalKey]) : null;
   const out = [];
   for (const [col, targets] of fkTargets) {
+    if (reads && !reads.has(col)) continue;
     const target = [...targets].sort().join(',');
     if (Object.prototype.hasOwnProperty.call(refs, col)) {
       if (targets.size !== 1 || !targets.has(refs[col].table)) {
         out.push({ column: col, problem: 'wrong_target', target, declared: refs[col].table });
       }
-    } else if (!Object.prototype.hasOwnProperty.call(spec.omit, col)) {
+    } else if (!Object.prototype.hasOwnProperty.call(omit, col)) {
       out.push({ column: col, problem: 'uncovered', target });
     }
   }
@@ -456,6 +549,9 @@ async function nameRefProblems(db, spec) {
   );
   const has = new Set(rows.map((r) => `${r.table_name}\u0000${r.column_name}`));
   const hidden = new Set([...Object.keys(spec.omit || {}), ...(spec.secretColumns || [])]);
+  if (spec.slice) {
+    for (const [col] of entries) if (!spec.columns.includes(col) && !spec.naturalKey.includes(col)) hidden.add(col);
+  }
   const out = [];
   for (const [col, nr] of entries) {
     const base = { column: col, target: nr && nr.table ? `${nr.table}.${nr.keyCol}` : null };
@@ -468,6 +564,6 @@ async function nameRefProblems(db, spec) {
 }
 
 module.exports = {
-  GROUPS, getGroup, tableSpecs, specOfTable, pairKeyCol, orderPair, soleSpec, liveColumns, fkProblems, nameRefProblems,
-  NAME_REF_SHAPES, _withTestGroups,
+  GROUPS, getGroup, tableSpecs, specOfTable, ownerLabel, rowPredicate, scopeSql, pairKeyCol, orderPair, soleSpec,
+  liveColumns, fkProblems, nameRefProblems, NAME_REF_SHAPES, _withTestGroups,
 };
