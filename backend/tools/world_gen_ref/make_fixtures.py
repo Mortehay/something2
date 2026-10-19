@@ -45,6 +45,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import platform
 import sys
 
 sys.dont_write_bytecode = True
@@ -112,7 +113,7 @@ def _call(fn, *args, **kwargs):
 def _write(name, payload):
     doc = {
         "generated_by": "backend/tools/world_gen_ref/make_fixtures.py",
-        "python": sys.version,
+        "python": platform.python_version(),
         "reference_sha256": REFERENCE,
         **payload,
     }

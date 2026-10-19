@@ -46,11 +46,11 @@ new golden. Paths are relative to `backend/`.
 
 | File | Origin | sha256 |
 |---|---|---|
-| `tests/fixtures/world_gen/box_parity.json` | generated | `85c64371e49119615524523038d3ada47c3c344853030d723057a260246d88c4` |
-| `tests/fixtures/world_gen/constants.json` | generated | `e624c2b98e0e13ca90fe5c0aaa12eb0f2ffca09c9aa7b2215c476798c38f8500` |
-| `tests/fixtures/world_gen/helpers.json` | generated | `1023dbe057dd6e6c7f31aea8280ebe9e036343ffd813180eeaf239c408f3c1d3` |
-| `tests/fixtures/world_gen/plan_cases.json` | generated | `1f96f7b60dbe24c431b74765777f267516dd6a5d9cd40bdbf89cf7fbc75216db` |
-| `tests/fixtures/world_gen/report_only.json` | generated | `01d55107cc630dd0fbe841da33ce629796f6faeeaa4dcfd247cff2a67cfd6257` |
+| `tests/fixtures/world_gen/box_parity.json` | generated | `a3e2cf74c4ee5ec1fe9b31870349648180fee8393c0c13e75a1ed6e00ccc1187` |
+| `tests/fixtures/world_gen/constants.json` | generated | `43e4a1bebc15c44c8b1b67ce136882f8b1f0976a20c4f6ba2251eb00b3470a06` |
+| `tests/fixtures/world_gen/helpers.json` | generated | `d1b2a4a83ee0852f1c570ecaced5c816c83a28b95bf5df36950360f2ea16bbf9` |
+| `tests/fixtures/world_gen/plan_cases.json` | generated | `3257790a3967d7e578716fcc8a45c086b4115b027c2b0a37a24869be05ec2919` |
+| `tests/fixtures/world_gen/report_only.json` | generated | `8b3262a1b8e7946cb603e2c6662306a37ed285bfebb151bf2810aa073fdf34df` |
 
 ## The oracle is Python 3.11
 
@@ -62,7 +62,7 @@ rounding edge (report-only cases `sum-py311-mean` and
 `sum-py311-biome-multiplier` are such edges, and make_fixtures.py asserts their
 3.11 values). Fixtures from host 3.12 would therefore not describe the box.
 `make_fixtures.py` refuses to run under any major.minor other than 3.11 and
-records `sys.version` in every fixture's `python` header field;
+records `platform.python_version()` (e.g. `3.11.16`, not the full `sys.version`, whose build date would change the hashes on an image rebuild) in every fixture's `python` header field;
 `world_gen_ref_integrity.test.js` asserts that header says 3.11.
 
 ## Regenerating the golden fixtures
