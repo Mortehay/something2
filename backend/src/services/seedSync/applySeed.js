@@ -8,6 +8,10 @@ const { schemaVersion, startRun, finishRun } = require('./runs.js');
 const { SyncRefused } = require('./errors.js');
 const { cascadeEntityRename, cascadeAuraRename } = require('./renameCascade.js');
 const { assertValid, isKnownKey } = require('../gameSettings.js');
+const { stableStringify } = require('./canonical.js');
+const {
+  ASSET_REASONS, BLOCKED_MESSAGES, assetsRoot, hasAssets, checkGitAssets, fileReader, uploadGitAssets, recordCache,
+} = require('./assets.js');
 
 // Seeding writes game data from the git export into this DB. Rules that keep it
 // safe: every red row needs an explicit decision, the diff is recomputed under
@@ -20,6 +24,11 @@ const { assertValid, isKnownKey } = require('../gameSettings.js');
 // Plan 3 spec fields (registry.js header): every statement on a group table is
 // scoped by scopeSql (rowFilter / versioned `active`); a versioned delete
 // deactivates; a slice only UPDATEs its columns of rows that exist here.
+// Asset columns (assets.js): a row that would take git whose asset file is
+// missing or does not match its hash is blocked (asset_file_missing /
+// asset_file_mismatch: 'git' unavailable); the files of the rows that take git
+// are uploaded before the locked transaction (cancellable), which then writes
+// their object keys and records them in the per-PC cache.
 
 // Allowed decisions per kind; anything else is refused.
 const ALLOWED = {
@@ -51,6 +60,7 @@ const deletableRow = (cd, r) => DELETABLE.has(r.kind) && !tableOf(cd, r).spec.sl
 function allowedDecisions(cd, r) {
   const a = kindAllowed(cd, r);
   if (!r.blockedReason) return a;
+  if (ASSET_REASONS.has(r.blockedReason)) return a.filter((d) => d !== 'git');
   if (deletableRow(cd, r)) return a.filter((d) => d !== 'delete');
   if (INSERTABLE.has(r.kind)) return a.filter((d) => d !== 'git');
   return a;
@@ -156,7 +166,11 @@ function blockReason(info, deleting) {
 //    drops the other PC's row, which must be a deliberate choice. (Adopt
 //    consumes the same-key local row, so a new/deleted_here row's key holder
 //    is never adopted in the same seed.)
-function annotate(cd, refInfo, decisions) {
+//  - A row whose decision (or default) is 'git' and whose asset files are
+//    missing or altered (assetInfo: Map(syncUuid -> reason), assetInfoFor) is
+//    blocked with that reason and a blockedMessage; left undecided it turns
+//    red (null): 'local' acknowledges git's version, which must be deliberate.
+function annotate(cd, refInfo, decisions, assetInfo = new Map()) {
   const { diff } = cd;
   const decisionOf = (r) => (own(decisions, r.syncUuid) ? decisions[r.syncUuid] : r.defaultDecision);
   const deletable = diff.rows.filter((r) => deletableRow(cd, r));
@@ -189,7 +203,131 @@ function annotate(cd, refInfo, decisions) {
       r.defaultDecision = null;
     }
   }
+  for (const r of diff.rows) {
+    if (r.blockedReason || !assetInfo.has(r.syncUuid) || decisionOf(r) !== 'git') continue;
+    r.blockedReason = assetInfo.get(r.syncUuid);
+    r.blockedMessage = BLOCKED_MESSAGES[r.blockedReason];
+    if (!own(decisions, r.syncUuid)) r.defaultDecision = null;
+  }
   return diff.rows.map((row) => ({ row, decision: decisionOf(row) }));
+}
+
+// ---- assets -----------------------------------------------------------------
+
+const isEmptyValue = (v) => v === null || v === undefined || v === '';
+const decisionsObj = (d) => (d && typeof d === 'object' && !Array.isArray(d) ? d : {});
+
+// The local row a git write of r lands on (adopt: the same-key local row).
+function localRowOf(cd, r) {
+  return r.kind === 'adopt_identity' ? localByKeyOf(cd, r) : tableOf(cd, r).local.get(r.syncUuid);
+}
+
+// Is git's value of asset column `col` what this row already holds here
+// (same file + hash through the cache)? Then nothing is read or uploaded and
+// the local key stays.
+function assetUnchanged(cd, r, col) {
+  const l = localRowOf(cd, r);
+  return !!l && stableStringify(l.row[col]) === stableStringify(gitOf(cd, r).row[col]);
+}
+
+// r's git row with every unchanged asset column blanked (null), or null when
+// no asset file needs reading: what checkGitAssets / uploadGitAssets get.
+function assetNeeds(cd, r) {
+  const { spec } = tableOf(cd, r);
+  const g = gitOf(cd, r);
+  if (!g) return null;
+  const out = { ...g.row };
+  let any = false;
+  for (const col of Object.keys(spec.assets)) {
+    if (isEmptyValue(out[col]) || assetUnchanged(cd, r, col)) out[col] = null;
+    else any = true;
+  }
+  return any ? out : null;
+}
+
+// Map(syncUuid -> asset_file_missing | asset_file_mismatch) for the rows that
+// need asset files and whose default or decision is 'git' (both: the
+// signature annotates with the defaults, plan with the decisions). Hashes
+// only those files, each once per call.
+async function assetInfoFor(cd, decisions) {
+  const out = new Map();
+  const dec = decisionsObj(decisions);
+  if (!cd.diff.header) return out;
+  const root = assetsRoot();
+  const read = fileReader(root);
+  for (const spec of cd.specs) {
+    if (!hasAssets(spec)) continue;
+    const rows = cd.diff.rows
+      .filter((r) => r.table === spec.table && (r.defaultDecision === 'git' || (own(dec, r.syncUuid) && dec[r.syncUuid] === 'git')))
+      .map((r) => assetNeeds(cd, r)).filter(Boolean);
+    for (const [uuid, reason] of await checkGitAssets(root, rows, spec, read)) out.set(uuid, reason);
+  }
+  return out;
+}
+
+// Before the locked transaction: plan the seed on a READ ONLY snapshot (same
+// refusals as the locked path, so a stale or refused seed uploads nothing),
+// then upload the asset files of the rows that take git. Returns { assetInfo,
+// uploads: Map(syncUuid -> { col: key }) with .cacheEntries }. The locked
+// path re-checks the signature, so these uploads match the rows it writes.
+async function stageUploads(pool, groupId, decisions, { signature, store, onProgress, signal }) {
+  const client = await pool.connect();
+  let releaseErr;
+  let cd;
+  let assetInfo;
+  let steps;
+  try {
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    cd = await computeDiff(client, groupId);
+    const empty = { assetInfo: new Map(), uploads: Object.assign(new Map(), { cacheEntries: [] }) };
+    // No file / newer schema: the locked path refuses it.
+    if (!cd.diff.header || versionOf(cd.diff.header) > await schemaVersion(client)) {
+      await client.query('COMMIT');
+      return empty;
+    }
+    const refInfo = await referenceInfo(client, cd);
+    assetInfo = await assetInfoFor(cd, decisions);
+    if (typeof signature !== 'string' || signature !== previewSignatureOf(cd, refInfo, assetInfo)) {
+      throw new SyncRefused('stale_preview', 'the diff changed since the preview; preview again', { uuids: [] });
+    }
+    steps = plan(cd, refInfo, decisions, assetInfo);
+    await client.query('COMMIT');
+  } catch (e) {
+    releaseErr = await rollback(client);
+    throw e;
+  } finally {
+    client.release(releaseErr);
+  }
+  const uploads = new Map();
+  uploads.cacheEntries = [];
+  for (const spec of cd.specs) {
+    if (!hasAssets(spec)) continue;
+    const rows = steps.filter((s) => s.decision === 'git' && s.row.table === spec.table)
+      .map((s) => assetNeeds(cd, s.row)).filter(Boolean);
+    const m = await uploadGitAssets(store, rows, spec, { onProgress, signal });
+    for (const [uuid, vals] of m) uploads.set(uuid, vals);
+    uploads.cacheEntries.push(...m.cacheEntries);
+  }
+  return { assetInfo, uploads };
+}
+
+// `resolved` (a git row about to be written) with each asset column as the
+// local DB value: the uploaded key, the local key when unchanged, '' / NULL
+// as they are.
+function withLocalAssets(cd, r, spec, resolved, uploads) {
+  if (!hasAssets(spec)) return resolved;
+  const t = tableOf(cd, r);
+  const up = (uploads && uploads.get(r.syncUuid)) || {};
+  const l = localRowOf(cd, r);
+  const raw = l && t.rawAssets ? t.rawAssets.get(l.row.sync_uuid) : null;
+  const out = { ...resolved };
+  for (const col of Object.keys(spec.assets)) {
+    if (own(up, col)) out[col] = up[col];
+    else if (isEmptyValue(resolved[col])) continue;
+    else if (raw && assetUnchanged(cd, r, col)) out[col] = raw[col];
+    else throw new Error(`seed-sync: ${spec.table}.${col} of ${r.syncUuid} has no uploaded object`);
+  }
+  return out;
 }
 
 function warningsFor(fileVersion, dbVersion) {
@@ -212,10 +350,10 @@ function localHashOf(cd, r) {
 // a diff the admin did not see (a row edited here since -- even again, with
 // the same kind --, a git pull that added/removed/changed rows, a new
 // reference).
-function previewSignatureOf(cd, refInfo) {
+function previewSignatureOf(cd, refInfo, assetInfo) {
   // annotate() mutates rows; sign a copy so the caller's rows stay untouched.
   const copy = { ...cd, diff: { ...cd.diff, rows: cd.diff.rows.map((r) => ({ ...r })) } };
-  annotate(copy, refInfo, {});
+  annotate(copy, refInfo, {}, assetInfo);
   const parts = copy.diff.rows
     .map((r) => {
       const g = gitOf(cd, r);
@@ -233,7 +371,9 @@ function previewSignatureOf(cd, refInfo) {
 // computeDiff's Pool path takes), opened here so the reference counts and the
 // schema version come from the same snapshot as the diff; no table locks, so
 // an open admin edit never blocks a preview.
-async function previewSeed(pool, groupId) {
+// opts ({ store, onProgress, signal }) are accepted for symmetry with
+// export/apply; a preview reads asset files from the repo only.
+async function previewSeed(pool, groupId, opts = {}) {
   getGroup(groupId); // unknown group -> throws before a connection is taken
   const client = await pool.connect();
   let releaseErr;
@@ -241,8 +381,9 @@ async function previewSeed(pool, groupId) {
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     const cd = await computeDiff(client, groupId);
     const refInfo = await referenceInfo(client, cd);
-    const signature = previewSignatureOf(cd, refInfo);
-    const steps = annotate(cd, refInfo, {});
+    const assetInfo = await assetInfoFor(cd, {});
+    const signature = previewSignatureOf(cd, refInfo, assetInfo);
+    const steps = annotate(cd, refInfo, {}, assetInfo);
     // schema_older first, then the diff's dangling_name entries, then what
     // applying the defaults would refuse (all { code, ... }).
     const schemaWarnings = cd.diff.header ? warningsFor(versionOf(cd.diff.header), await schemaVersion(client)) : [];
@@ -261,7 +402,7 @@ async function previewSeed(pool, groupId) {
 }
 
 // Refusals before any write; returns [{ row, decision }] for every listed row.
-function plan(cd, refInfo, decisions) {
+function plan(cd, refInfo, decisions, assetInfo) {
   if (decisions === null || decisions === undefined) decisions = {};
   if (typeof decisions !== 'object' || Array.isArray(decisions)) {
     throw new SyncRefused('invalid_decision', 'decisions must be an object keyed by sync_uuid', { uuids: [] });
@@ -275,7 +416,7 @@ function plan(cd, refInfo, decisions) {
   if (invalid.length) {
     throw new SyncRefused('invalid_decision', 'decision not allowed for this row', { uuids: invalid });
   }
-  const steps = annotate(cd, refInfo, decisions);
+  const steps = annotate(cd, refInfo, decisions, assetInfo);
   const undecided = steps.filter((s) => s.decision === null).map((s) => s.row.syncUuid);
   if (undecided.length) {
     throw new SyncRefused('undecided', 'rows edited on this PC need a decision', { uuids: undecided });
@@ -286,6 +427,10 @@ function plan(cd, refInfo, decisions) {
   const orphans = rejected.filter((s) => s.row.blockedReason === OWNER_MISSING);
   if (orphans.length) {
     throw new SyncRefused(OWNER_MISSING, orphans[0].row.blockedMessage, { uuids: orphans.map((s) => s.row.syncUuid) });
+  }
+  const noFile = rejected.filter((s) => ASSET_REASONS.has(s.row.blockedReason));
+  if (noFile.length) {
+    throw new SyncRefused(noFile[0].row.blockedReason, noFile[0].row.blockedMessage, { uuids: noFile.map((s) => s.row.syncUuid) });
   }
   const blocked = rejected.filter((s) => s.decision === 'delete');
   if (blocked.length) {
@@ -312,6 +457,7 @@ function paramsFor(columns, row) {
   return columns.map((c) => {
     const v = row[c.name];
     if (v === null || v === undefined) return null;
+    if (c.dataType === 'asset') return v && typeof v === 'object' ? JSON.stringify(v) : v; // key text or sprite jsonb
     return c.dataType === 'json' || c.dataType === 'jsonb' ? JSON.stringify(v) : v;
   });
 }
@@ -575,10 +721,21 @@ async function resolveForWrite(spec, gitRow, maps, written, order, deferred) {
 // after that (including a write conflict, 23505 -> SyncRefused('conflict'))
 // rolls everything back and finishes the run as failed; a committed seed
 // always finishes ok.
-async function applySeed(pool, groupId, decisions, { signature } = {}) {
+// opts.store (default assetStore), opts.onProgress, opts.signal: a group
+// with asset columns uploads the files of its git rows first (stageUploads,
+// outside the lock and cancellable -> SyncRefused('cancelled')).
+async function applySeed(pool, groupId, decisions, opts = {}) {
+  const { signature } = opts;
   const specs = tableSpecs(getGroup(groupId));
   const cascades = renameCascadesFor(specs);
   const order = new Map(specs.map((s, i) => [s.table, i]));
+  let assetInfo = new Map();
+  let uploads = null;
+  if (specs.some(hasAssets)) {
+    ({ assetInfo, uploads } = await stageUploads(pool, groupId, decisions, {
+      signature, store: opts.store || require('../assetStore.js'), onProgress: opts.onProgress, signal: opts.signal,
+    }));
+  }
   const client = await pool.connect();
   let runId = null;
   let releaseErr;
@@ -610,10 +767,12 @@ async function applySeed(pool, groupId, decisions, { signature } = {}) {
         `SELECT 1 FROM ${quoteIdent(spec.table)} WHERE sync_uuid = ANY($1::uuid[])${scopeSql(spec)} FOR UPDATE`, [uuids]);
     }
     const refInfo = await referenceInfo(client, cd);
-    if (typeof signature !== 'string' || signature !== previewSignatureOf(cd, refInfo)) {
+    // assetInfo is stageUploads': the files are not under the DB lock anyway,
+    // and an equal signature means the same rows need the same files.
+    if (typeof signature !== 'string' || signature !== previewSignatureOf(cd, refInfo, assetInfo)) {
       throw new SyncRefused('stale_preview', 'the diff changed since the preview; preview again', { uuids: [] });
     }
-    const steps = plan(cd, refInfo, decisions);
+    const steps = plan(cd, refInfo, decisions, assetInfo);
     const maps = await checkWrites(client, cd, steps);
 
     runId = await startRun(pool, groupId, 'seed');
@@ -656,7 +815,8 @@ async function applySeed(pool, groupId, decisions, { signature } = {}) {
         const g = gitOf(cd, row).row;
         const localUuid = localByKeyOf(cd, row).row.sync_uuid;
         const out = decision === 'git'
-          ? await adopt(client, spec, t.columns, await resolveForWrite(spec, g, m, written, order, deferred), localUuid)
+          ? await adopt(client, spec, t.columns,
+            withLocalAssets(cd, row, spec, await resolveForWrite(spec, g, m, written, order, deferred), uploads), localUuid)
           // Identity only: values and local refs stay (a ref's target keeps
           // its local id even when it is adopted too).
           : await adopt(client, spec, null, g, localUuid);
@@ -665,7 +825,7 @@ async function applySeed(pool, groupId, decisions, { signature } = {}) {
       }
       for (const { row } of by('git', (r) => mine(r) && r.kind !== 'adopt_identity')) {
         const g = gitOf(cd, row).row;
-        const resolved = await resolveForWrite(spec, g, m, written, order, deferred);
+        const resolved = withLocalAssets(cd, row, spec, await resolveForWrite(spec, g, m, written, order, deferred), uploads);
         if (spec.slice && !UPDATE_KINDS.has(row.kind)) throw new Error(`seed-sync: slice ${spec.table} cannot write kind ${row.kind}`);
         const out = spec.slice
           ? await updateSlice(client, spec, t.columns, resolved)
@@ -709,6 +869,8 @@ async function applySeed(pool, groupId, decisions, { signature } = {}) {
     }
     await dropBaselines(client, groupId, by('local', (r) => r.kind === 'deleted_in_git').map((s) => s.row.syncUuid));
     for (const s of cd.inSync) if (!s.hasBaseline) await setBaseline(client, groupId, s.syncUuid, s.hash);
+    // The uploaded keys translate to git's files from now on (next diff: in sync).
+    if (uploads) await recordCache(client, uploads.cacheEntries);
 
     await client.query('COMMIT');
     result = { runId, summary };

@@ -1,0 +1,445 @@
+const test = require('node:test');
+const assert = require('node:assert');
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { Readable } = require('node:stream');
+const { Pool } = require('pg');
+const { withSeedSyncLock, cleanupSx, makeTempSyncDir } = require('./helpers/seedSyncTest.js');
+
+const DB_URL = process.env.TEST_DATABASE_URL
+  || process.env.DATABASE_URL
+  || 'postgres://user:password@localhost:15432/game_db';
+
+const { _withTestGroups } = require('../src/services/seedSync/registry.js');
+const { exportGroup, fileFor } = require('../src/services/seedSync/exportGroup.js');
+const { diffGroup } = require('../src/services/seedSync/diffGroup.js');
+const { previewSeed, applySeed } = require('../src/services/seedSync/applySeed.js');
+const { stableStringify } = require('../src/services/seedSync/canonical.js');
+const { assetsRoot, localAssetValue } = require('../src/services/seedSync/assets.js');
+const { shrinkToEdge } = require('../src/services/pngResample.js');
+const { encodeRGBA } = require('../src/services/pngTrim.js');
+
+// SOMET-640 plan 3 Task 3: asset columns. A local object key travels as
+// { file, sha256 } (repo file + content hash); the per-PC cache
+// seed_asset_hashes translates between the two. Throwaway tables live in their
+// own schema (see seed_sync_spec_features_db.test.js for why).
+const SCHEMA = 'sx_asset';
+const ART = 'art group (plan 3)';
+const BUCKET = 'sxb';
+
+const artSpec = {
+  table: 'sx_art', naturalKey: ['name'], omit: { id: 'local', sync_uuid: 'identity' }, secretColumns: [], refs: {},
+  assets: {
+    image: { type: 'image', dir: 'sx_tiles', maxEdge: (row) => (row.val === 99 ? 16 : null) },
+    sprite: { type: 'sprite', dir: 'sx_sprites' },
+  },
+};
+const clipSpec = {
+  table: 'sx_clip', naturalKey: ['label'], omit: { id: 'local', sync_uuid: 'identity' }, secretColumns: [], refs: {},
+  assets: { storage_key: { type: 'audio', dir: (row) => `audio/${row.kind}` } },
+};
+const ownSpec = {
+  table: 'sx_own', naturalKey: ['name'], omit: { id: 'local', sync_uuid: 'identity', icon: ART }, secretColumns: [], refs: {},
+};
+const iconSlice = {
+  table: 'sx_own', slice: true, columns: ['icon'], naturalKey: ['name'], secretColumns: [], refs: {},
+  assets: { icon: { type: 'image', dir: 'sx_icons' } },
+};
+const GROUPS = [
+  { id: 'sx_assets', label: 'SX assets', tables: [artSpec, clipSpec] },
+  { id: 'sx_own', label: 'SX owner', tables: [ownSpec] },
+  { id: 'sx_icons', label: 'SX icons', tables: [iconSlice] },
+];
+
+const SCHEMA_SQL = `
+  DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE;
+  CREATE SCHEMA ${SCHEMA};
+  CREATE TABLE ${SCHEMA}.sx_art (
+    id serial PRIMARY KEY, name text NOT NULL UNIQUE, val int, image text, sprite jsonb,
+    sync_uuid uuid NOT NULL UNIQUE DEFAULT gen_random_uuid());
+  CREATE TABLE ${SCHEMA}.sx_clip (
+    id serial PRIMARY KEY, label text NOT NULL UNIQUE, kind text NOT NULL, storage_key text, sha1 text, bytes int,
+    sync_uuid uuid NOT NULL UNIQUE DEFAULT gen_random_uuid());
+  CREATE TABLE ${SCHEMA}.sx_own (
+    id serial PRIMARY KEY, name text NOT NULL UNIQUE, val int, icon text,
+    sync_uuid uuid NOT NULL UNIQUE DEFAULT gen_random_uuid());`;
+
+const sha256 = (b) => crypto.createHash('sha256').update(b).digest('hex');
+const sha1 = (b) => crypto.createHash('sha1').update(b).digest('hex');
+
+function png(w, h, rgba) {
+  const px = Buffer.alloc(w * h * 4);
+  for (let i = 0; i < w * h; i++) px.set(rgba, i * 4);
+  return encodeRGBA(w, h, px);
+}
+const PNG_A = png(4, 4, [255, 0, 0, 255]);
+const PNG_BIG = png(64, 32, [0, 0, 255, 255]);
+const ATLAS = png(8, 4, [0, 255, 0, 255]);
+const MANIFEST = Buffer.from('{"frames":2}\n');
+const OGG = Buffer.from('OggS fake audio payload');
+const ICON = png(2, 2, [9, 9, 9, 255]);
+const SPRITE = { atlas_key: 'sx/a_atlas.png', manifest_key: 'sx/a_man.json', static_frame: 0, frames: { idle: 2 } };
+
+// Fake object store (art_seed_policy.test.js pattern): counts downloads.
+function fakeStore() {
+  const objects = new Map([
+    ['sx/a.png', PNG_A], ['sx/big.png', PNG_BIG], ['sx/a_atlas.png', ATLAS], ['sx/a_man.json', MANIFEST],
+    ['sx/clip.ogg', OGG], ['sx/icon.png', ICON],
+  ]);
+  const store = {
+    objects,
+    gets: 0,
+    puts: [],
+    BUCKET: () => BUCKET,
+    async ensureBucket() {},
+    async getObjectStream(key) {
+      store.gets += 1;
+      if (!objects.has(key)) {
+        const e = new Error(`The specified key does not exist: ${key}`);
+        e.code = 'NoSuchKey';
+        throw e;
+      }
+      return Readable.from([objects.get(key)]);
+    },
+    async putObject(key, buffer, contentType) {
+      store.puts.push({ key, buffer, contentType });
+      objects.set(key, buffer);
+      return key;
+    },
+    async objectExists(key) { return objects.has(key); },
+  };
+  return store;
+}
+
+async function cleanupCache(pool) {
+  await pool.query(`DELETE FROM seed_asset_hashes WHERE object_key LIKE 'sx%'`);
+}
+
+function dbTest(name, body) {
+  test(name, async (t) => {
+    if (!process.env.TEST_DATABASE_URL) {
+      const msg = 'TEST_DATABASE_URL not set -- skipping to avoid mutating a real database (seed_sync assets)';
+      if (process.env.CI) assert.fail(msg);
+      t.skip(msg);
+      return;
+    }
+    const dir = makeTempSyncDir();
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'seed-assets-'));
+    const prev = { dir: process.env.SEED_SYNC_DIR, root: process.env.SEED_ASSETS_ROOT };
+    process.env.SEED_SYNC_DIR = dir;
+    process.env.SEED_ASSETS_ROOT = root;
+    const pool = new Pool({
+      connectionString: DB_URL, max: 4, connectionTimeoutMillis: 3000, options: `-c search_path=${SCHEMA},public`,
+    });
+    const pub = new Pool({ connectionString: DB_URL, max: 4, connectionTimeoutMillis: 3000 });
+    t.after(async () => {
+      for (const [k, v] of [['SEED_SYNC_DIR', prev.dir], ['SEED_ASSETS_ROOT', prev.root]]) {
+        if (v === undefined) delete process.env[k]; else process.env[k] = v;
+      }
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(root, { recursive: true, force: true });
+      await pool.end().catch(() => {});
+      await pub.end().catch(() => {});
+    });
+    await withSeedSyncLock(pub, async () => {
+      await cleanupSx(pub);
+      await cleanupCache(pub);
+      await pub.query(SCHEMA_SQL);
+      try {
+        await _withTestGroups(GROUPS, () => body(t, pool, { root, store: fakeStore() }));
+      } finally {
+        await pub.query(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`).catch(() => {});
+        await cleanupCache(pub).catch(() => {});
+        await cleanupSx(pub).catch(() => {});
+      }
+    });
+  });
+}
+
+const one = async (pool, sql, params) => (await pool.query(sql, params)).rows[0];
+const all = async (pool, sql, params) => (await pool.query(sql, params)).rows;
+const readDoc = (groupId) => JSON.parse(fs.readFileSync(fileFor(groupId), 'utf8'));
+function writeDoc(groupId, doc) {
+  for (const [tbl, rows] of Object.entries(doc.tables)) doc.header.row_counts[tbl] = rows.length;
+  fs.writeFileSync(fileFor(groupId), `${stableStringify(doc)}\n`);
+}
+async function apply(pool, groupId, decisions, opts) {
+  const { signature } = await previewSeed(pool, groupId);
+  return applySeed(pool, groupId, decisions || {}, { signature, ...opts });
+}
+function filesUnder(dir) {
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir, { recursive: true }).map(String)
+    .filter((f) => fs.statSync(path.join(dir, f)).isFile()).sort();
+}
+
+async function seedFixture(pool) {
+  await pool.query(
+    `INSERT INTO sx_art (name, val, image, sprite) VALUES
+       ('sx_a', 1, 'sx/a.png', $1), ('sx_b', 99, 'sx/big.png', NULL), ('sx_c', 2, '', NULL)`,
+    [JSON.stringify(SPRITE)]);
+  return (await one(pool,
+    `INSERT INTO sx_clip (label, kind, storage_key, sha1, bytes) VALUES ('sx_clip1', 'sfx', 'sx/clip.ogg', $1, $2)
+     RETURNING sync_uuid`, [sha1(OGG), OGG.length])).sync_uuid;
+}
+
+// Local state of a PC that pulled the file but never had these rows.
+// sx_art: its cache entries go too (sx_clip has none: audio is uncached).
+async function forgetLocally(pool, table) {
+  const uuids = (await all(pool, `SELECT sync_uuid FROM ${table}`)).map((r) => r.sync_uuid);
+  await pool.query(`DELETE FROM ${table}`);
+  await pool.query('DELETE FROM seed_row_hashes WHERE sync_uuid = ANY($1::uuid[])', [uuids]);
+  if (table === 'sx_art') await pool.query(`DELETE FROM seed_asset_hashes WHERE object_key LIKE 'sx%'`);
+}
+
+dbTest('export writes asset files and translates keys to file+hash', async (t, pool, { root, store }) => {
+  assert.strictEqual(assetsRoot(), root, 'SEED_ASSETS_ROOT read at call time');
+  const clipUuid = await seedFixture(pool);
+  const res = await exportGroup(pool, 'sx_assets', { store });
+  assert.strictEqual(res.downloaded, 5, 'four art objects + one clip');
+  assert.strictEqual(res.reused, 0);
+  assert.strictEqual(res.orphanFiles, 0);
+
+  const doc = readDoc('sx_assets');
+  const art = Object.fromEntries(doc.tables.sx_art.map((r) => [r.name, r]));
+  const shrunk = shrinkToEdge(PNG_BIG, 16).buffer;
+  assert.notDeepStrictEqual(shrunk, PNG_BIG, 'fixture really shrinks');
+  assert.deepStrictEqual(art.sx_a.image, { file: 'sx_tiles/sx_a.png', sha256: sha256(PNG_A) });
+  assert.deepStrictEqual(art.sx_b.image, { file: 'sx_tiles/sx_b.png', sha256: sha256(shrunk) });
+  assert.strictEqual(art.sx_c.image, '', 'empty travels unchanged');
+  assert.strictEqual(art.sx_b.sprite, null, 'NULL travels unchanged');
+  assert.deepStrictEqual(art.sx_a.sprite, {
+    atlas: { file: 'sx_sprites/sx_a.atlas.png', sha256: sha256(ATLAS) },
+    manifest: { file: 'sx_sprites/sx_a.manifest.json', sha256: sha256(MANIFEST) },
+    static_frame: 0, frames: { idle: 2 },
+  });
+  assert.deepStrictEqual(fs.readFileSync(path.join(root, 'sx_tiles/sx_a.png')), PNG_A);
+  assert.deepStrictEqual(fs.readFileSync(path.join(root, 'sx_tiles/sx_b.png')), shrunk);
+  assert.deepStrictEqual(fs.readFileSync(path.join(root, 'sx_sprites/sx_a.atlas.png')), ATLAS);
+  assert.deepStrictEqual(fs.readFileSync(path.join(root, 'sx_sprites/sx_a.manifest.json')), MANIFEST);
+
+  const clipFile = `audio/sfx/sx_clip1-${clipUuid.slice(0, 8)}.ogg`;
+  assert.deepStrictEqual(doc.tables.sx_clip[0].storage_key, { file: clipFile, sha1: sha1(OGG) });
+  assert.deepStrictEqual(fs.readFileSync(path.join(root, clipFile)), OGG);
+
+  const cache = await all(pool, `SELECT object_key, sha256, file, bytes FROM seed_asset_hashes
+                                  WHERE object_key LIKE 'sx/%' ORDER BY object_key`);
+  assert.deepStrictEqual(cache, [
+    { object_key: 'sx/a.png', sha256: sha256(PNG_A), file: 'sx_tiles/sx_a.png', bytes: PNG_A.length },
+    { object_key: 'sx/a_atlas.png', sha256: sha256(ATLAS), file: 'sx_sprites/sx_a.atlas.png', bytes: ATLAS.length },
+    { object_key: 'sx/a_man.json', sha256: sha256(MANIFEST), file: 'sx_sprites/sx_a.manifest.json', bytes: MANIFEST.length },
+    { object_key: 'sx/big.png', sha256: sha256(shrunk), file: 'sx_tiles/sx_b.png', bytes: shrunk.length },
+  ]);
+  assert.strictEqual((await diffGroup(pool, 'sx_assets')).status, 'in_sync', 'baseline == local hash');
+  assert.deepStrictEqual(filesUnder(root).filter((f) => f.endsWith('.tmp')), []);
+});
+
+dbTest('re-export reuses cached files without downloading', async (t, pool, { root, store }) => {
+  await seedFixture(pool);
+  await exportGroup(pool, 'sx_assets', { store });
+  const gets = store.gets;
+  fs.writeFileSync(path.join(root, 'sx_tiles', 'stray.png'), 'x');
+  const res = await exportGroup(pool, 'sx_assets', { store });
+  assert.strictEqual(store.gets, gets, 'no getObjectStream on the second export');
+  assert.strictEqual(res.downloaded, 0);
+  assert.strictEqual(res.reused, 5);
+  assert.strictEqual(res.orphanFiles, 1, 'stray file counted, not deleted');
+  assert.ok(fs.existsSync(path.join(root, 'sx_tiles', 'stray.png')));
+
+  // An altered file on disk is re-downloaded to its recorded path.
+  fs.writeFileSync(path.join(root, 'sx_tiles', 'sx_a.png'), 'tampered');
+  const res2 = await exportGroup(pool, 'sx_assets', { store });
+  assert.strictEqual(res2.downloaded, 1);
+  assert.deepStrictEqual(fs.readFileSync(path.join(root, 'sx_tiles/sx_a.png')), PNG_A);
+});
+
+dbTest('colliding file names get a hash suffix; a cached key keeps its path', async (t, pool, { store }) => {
+  // safeName('sx a') === safeName('sx_a') === 'sx_a'.
+  store.objects.set('sx/a2.png', ICON);
+  await pool.query(`INSERT INTO sx_art (name, val, image) VALUES ('sx_a', 1, 'sx/a.png'), ('sx a', 2, 'sx/a2.png')`);
+  await exportGroup(pool, 'sx_assets', { store });
+  const art = Object.fromEntries(readDoc('sx_assets').tables.sx_art.map((r) => [r.name, r.image.file]));
+  // 'sx a' sorts first and takes the plain name.
+  assert.strictEqual(art['sx a'], 'sx_tiles/sx_a.png');
+  assert.strictEqual(art.sx_a, `sx_tiles/sx_a-${sha256(PNG_A).slice(0, 8)}.png`);
+});
+
+dbTest('uncached local key reads as edited here', async (t, pool, { store }) => {
+  await seedFixture(pool);
+  await exportGroup(pool, 'sx_assets', { store });
+  // Another PC: same rows and keys, but no cache and no baselines.
+  await pool.query(`DELETE FROM seed_asset_hashes WHERE object_key LIKE 'sx%'`);
+  await pool.query(`DELETE FROM seed_row_hashes WHERE group_id = 'sx_assets'`);
+  const d = await diffGroup(pool, 'sx_assets');
+  const a = d.rows.find((r) => r.key === 'sx_a');
+  assert.strictEqual(a.kind, 'edited_here');
+  const f = a.fields.find((x) => x.name === 'image');
+  assert.deepStrictEqual(f.local, { unhashed: 'sx/a.png' });
+  assert.deepStrictEqual(f.git, { file: 'sx_tiles/sx_a.png', sha256: sha256(PNG_A) });
+  assert.ok(!d.rows.some((r) => r.key === 'sx_c'), 'a row without asset keys stays in sync');
+  // localAssetValue is pure: with a cache entry the same key translates.
+  assert.deepStrictEqual(
+    localAssetValue(artSpec, 'image', { image: 'sx/a.png' }, new Map([['sx/a.png', { sha256: 'h', file: 'f', bytes: 1 }]])),
+    { file: 'f', sha256: 'h' });
+});
+
+dbTest('export refuses assets_missing when an object is gone, and writes no file', async (t, pool, { root, store }) => {
+  await seedFixture(pool);
+  store.objects.delete('sx/big.png');
+  await assert.rejects(exportGroup(pool, 'sx_assets', { store }), (e) => {
+    assert.strictEqual(e.code, 'assets_missing');
+    assert.deepStrictEqual(e.details.rows, [{ table: 'sx_art', key: 'sx_b', objectKey: 'sx/big.png' }]);
+    return true;
+  });
+  assert.deepStrictEqual(filesUnder(root), [], 'no asset file written');
+  assert.ok(!fs.existsSync(fileFor('sx_assets')), 'no sync file written');
+  assert.strictEqual(store.gets, 0, 'nothing downloaded');
+});
+
+dbTest('preview blocks a row whose asset file is missing or altered', async (t, pool, { root, store }) => {
+  await seedFixture(pool);
+  await exportGroup(pool, 'sx_assets', { store });
+  await forgetLocally(pool, 'sx_art');
+  fs.unlinkSync(path.join(root, 'sx_tiles/sx_a.png'));
+  const b = path.join(root, 'sx_tiles/sx_b.png');
+  const bytes = fs.readFileSync(b);
+  bytes[bytes.length - 1] ^= 0xff;
+  fs.writeFileSync(b, bytes);
+
+  const p = await previewSeed(pool, 'sx_assets');
+  const by = Object.fromEntries(p.rows.map((r) => [r.key, r]));
+  assert.strictEqual(by.sx_a.kind, 'new');
+  assert.strictEqual(by.sx_a.blockedReason, 'asset_file_missing');
+  assert.strictEqual(by.sx_b.blockedReason, 'asset_file_mismatch');
+  for (const k of ['sx_a', 'sx_b']) {
+    assert.deepStrictEqual(by[k].allowedDecisions, ['local'], `${k}: git unavailable`);
+    assert.strictEqual(by[k].defaultDecision, null, `${k}: red`);
+    assert.strictEqual(typeof by[k].blockedMessage, 'string');
+  }
+  assert.strictEqual(by.sx_c.blockedReason, null, 'no asset, no block');
+
+  await assert.rejects(applySeed(pool, 'sx_assets', { [by.sx_a.syncUuid]: 'git', [by.sx_b.syncUuid]: 'local' },
+    { signature: p.signature, store }), (e) => e.code === 'asset_file_missing');
+  assert.strictEqual(store.puts.length, 0, 'nothing uploaded');
+});
+
+dbTest('apply uploads content-addressed objects and writes local keys', async (t, pool, { root, store }) => {
+  await seedFixture(pool);
+  await exportGroup(pool, 'sx_assets', { store });
+  await forgetLocally(pool, 'sx_art');
+  const p = await previewSeed(pool, 'sx_assets');
+  const by = Object.fromEntries(p.rows.map((r) => [r.key, r]));
+  // sx_b is kept local: its (shrunk) image is never uploaded.
+  const res = await applySeed(pool, 'sx_assets', { [by.sx_b.syncUuid]: 'local' }, { signature: p.signature, store });
+  assert.strictEqual(res.summary.created, 2);
+
+  const a = await one(pool, "SELECT image, sprite FROM sx_art WHERE name = 'sx_a'");
+  const key = `${BUCKET}/seedsync/${sha256(PNG_A)}.png`;
+  assert.strictEqual(a.image, key);
+  assert.deepStrictEqual(store.objects.get(key), PNG_A);
+  assert.deepStrictEqual(a.sprite, {
+    atlas_key: `${BUCKET}/seedsync/${sha256(ATLAS)}.png`,
+    manifest_key: `${BUCKET}/seedsync/${sha256(MANIFEST)}.json`,
+    static_frame: 0, frames: { idle: 2 },
+  });
+  assert.deepStrictEqual(store.objects.get(a.sprite.manifest_key), MANIFEST);
+  const shrunk = shrinkToEdge(PNG_BIG, 16).buffer;
+  assert.ok(!store.puts.some((x) => x.key.includes(sha256(shrunk))), 'a kept-local row is not uploaded');
+  assert.ok(!(await one(pool, "SELECT 1 AS x FROM sx_art WHERE name = 'sx_b'")), 'sx_b not inserted');
+  assert.deepStrictEqual(await one(pool, 'SELECT sha256, file, bytes FROM seed_asset_hashes WHERE object_key = $1', [key]),
+    { sha256: sha256(PNG_A), file: 'sx_tiles/sx_a.png', bytes: PNG_A.length });
+
+  const d = await diffGroup(pool, 'sx_assets');
+  // sx_b: 'local' acknowledged git's version (B = hG), so it now reads deleted_here.
+  assert.deepStrictEqual(d.rows.map((r) => [r.key, r.kind]), [['sx_b', 'deleted_here']], 'sx_a and sx_c in sync');
+
+  const puts = store.puts.length;
+  await pool.query("UPDATE sx_art SET val = 5 WHERE name = 'sx_a'");
+  const doc = readDoc('sx_assets');
+  doc.tables.sx_art.find((r) => r.name === 'sx_a').val = 7;
+  writeDoc('sx_assets', doc);
+  // A git write whose asset value equals local keeps the local key, no upload.
+  const sxa = (await previewSeed(pool, 'sx_assets')).rows.find((r) => r.key === 'sx_a');
+  await apply(pool, 'sx_assets', { [sxa.syncUuid]: 'git', [by.sx_b.syncUuid]: 'local' }, { store });
+  assert.strictEqual((await one(pool, "SELECT val, image FROM sx_art WHERE name = 'sx_a'")).image, key);
+  assert.strictEqual(store.puts.length, puts, 'nothing uploaded for an unchanged asset');
+  assert.ok(fs.existsSync(root));
+});
+
+dbTest('audio value uses sha1 column and per-clip key', async (t, pool, { root, store }) => {
+  const clipUuid = await seedFixture(pool);
+  await exportGroup(pool, 'sx_assets', { store });
+  const file = `audio/sfx/sx_clip1-${clipUuid.slice(0, 8)}.ogg`;
+  // localAssetValue is computed from the row alone (no cache).
+  assert.deepStrictEqual(
+    localAssetValue(clipSpec, 'storage_key', { label: 'sx_clip1', kind: 'sfx', sha1: 'abc', sync_uuid: clipUuid, storage_key: 'k' }, new Map()),
+    { file, sha1: 'abc' });
+
+  // Re-export: the file matches the row's sha1, so it is not downloaded again.
+  const gets = store.gets;
+  await exportGroup(pool, 'sx_assets', { store });
+  assert.strictEqual(store.gets, gets);
+
+  await forgetLocally(pool, 'sx_clip');
+  await apply(pool, 'sx_assets', {}, { store });
+  const row = await one(pool, 'SELECT storage_key, sha1, bytes, sync_uuid FROM sx_clip');
+  assert.deepStrictEqual(row, {
+    storage_key: `audio/sfx/${clipUuid}.ogg`, sha1: sha1(OGG), bytes: OGG.length, sync_uuid: clipUuid,
+  });
+  assert.deepStrictEqual(store.objects.get(row.storage_key), OGG);
+  assert.strictEqual(store.puts.find((x) => x.key === row.storage_key).contentType, 'audio/ogg');
+  const dd = await diffGroup(pool, 'sx_assets');
+  assert.strictEqual(dd.status, 'in_sync', JSON.stringify(dd.rows));
+
+  // An altered clip file blocks its git row.
+  await forgetLocally(pool, 'sx_clip');
+  fs.writeFileSync(path.join(root, file), 'other bytes');
+  const p = await previewSeed(pool, 'sx_assets');
+  assert.strictEqual(p.rows.find((r) => r.key === 'sx_clip1').blockedReason, 'asset_file_mismatch');
+});
+
+dbTest('asset column on a slice exports and seeds', async (t, pool, { root, store }) => {
+  await pool.query("INSERT INTO sx_own (name, val, icon) VALUES ('sx_o', 1, 'sx/icon.png')");
+  await exportGroup(pool, 'sx_own', { store });
+  await exportGroup(pool, 'sx_icons', { store });
+  const doc = readDoc('sx_icons');
+  assert.deepStrictEqual(doc.tables.sx_own[0].icon, { file: 'sx_icons/sx_o.png', sha256: sha256(ICON) });
+  assert.deepStrictEqual(fs.readFileSync(path.join(root, 'sx_icons/sx_o.png')), ICON);
+  assert.strictEqual((await diffGroup(pool, 'sx_icons')).status, 'in_sync');
+
+  // Another PC: the owner row is here without art, no cache, no baselines.
+  await pool.query("UPDATE sx_own SET icon = NULL WHERE name = 'sx_o'");
+  await pool.query(`DELETE FROM seed_asset_hashes WHERE object_key LIKE 'sx%'`);
+  await pool.query(`DELETE FROM seed_row_hashes WHERE group_id = 'sx_icons'`);
+  const p = await previewSeed(pool, 'sx_icons');
+  assert.deepStrictEqual(p.rows.map((r) => [r.key, r.kind]), [['sx_o', 'edited_here']]);
+  await apply(pool, 'sx_icons', { [p.rows[0].syncUuid]: 'git' }, { store });
+  assert.strictEqual((await one(pool, "SELECT icon FROM sx_own WHERE name = 'sx_o'")).icon,
+    `${BUCKET}/seedsync/${sha256(ICON)}.png`);
+  assert.strictEqual((await diffGroup(pool, 'sx_icons')).status, 'in_sync');
+});
+
+dbTest('cancel during prepare throws cancelled and leaves no tmp files', async (t, pool, { root, store }) => {
+  await seedFixture(pool);
+  const ac = new AbortController();
+  let calls = 0;
+  await assert.rejects(exportGroup(pool, 'sx_assets', {
+    store, signal: ac.signal, onProgress: () => { calls += 1; ac.abort(); },
+  }), (e) => e.code === 'cancelled');
+  assert.ok(calls >= 1);
+  assert.ok(store.gets < 5, 'stopped before the end');
+  assert.deepStrictEqual(filesUnder(root).filter((f) => f.endsWith('.tmp')), []);
+  assert.ok(!fs.existsSync(fileFor('sx_assets')), 'no sync file written');
+
+  // Apply's upload is cancellable too: nothing is written to the DB.
+  await exportGroup(pool, 'sx_assets', { store });
+  await forgetLocally(pool, 'sx_art');
+  const ac2 = new AbortController();
+  ac2.abort();
+  const { signature } = await previewSeed(pool, 'sx_assets');
+  await assert.rejects(applySeed(pool, 'sx_assets', {}, { signature, store, signal: ac2.signal }),
+    (e) => e.code === 'cancelled');
+  assert.strictEqual(Number((await one(pool, 'SELECT count(*) AS n FROM sx_art')).n), 0);
+});

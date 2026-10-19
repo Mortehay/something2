@@ -33,7 +33,9 @@ function canonicalValue(value, dataType) {
     if (dataType === 'date') return day;
     return `${day}T${p2(value.getHours())}:${p2(value.getMinutes())}:${p2(value.getSeconds())}.${String(value.getMilliseconds()).padStart(3, '0')}`;
   }
-  if (dataType === 'json' || dataType === 'jsonb') return sortDeep(value);
+  // 'asset': an asset column's sync-file form (seedSync/assets.js), a JSON
+  // object or '' -- canonicalized like json whatever the column's SQL type.
+  if (dataType === 'json' || dataType === 'jsonb' || dataType === 'asset') return sortDeep(value);
   return value;
 }
 

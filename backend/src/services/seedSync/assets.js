@@ -1,0 +1,439 @@
+// Asset columns (plan 3). A TableSpec may declare `assets: { [col]: AssetSpec }`:
+//   { type: 'image',  dir: string | (row) => string, maxEdge?: number | (row) => number|null }
+//   { type: 'sprite', dir }   -- jsonb { atlas_key, manifest_key, ...rest }
+//   { type: 'audio',  dir: (row) => string }  -- storage_key; the row needs label, kind, sha1
+// Locally the column holds object-store keys. In a sync file (and in the
+// diff's local form) it holds repo files plus content hashes:
+//   image:  { file: '<dir>/<name>.png', sha256 }
+//   sprite: { atlas: { file, sha256 }, manifest: { file, sha256 }, ...rest }
+//   audio:  { file: '<dir>/<safeName(label)>-<uuid8>.ogg', sha1 }  (from the row alone)
+// NULL and '' travel unchanged. Files live under assetsRoot(); `file` is
+// relative to it. A per-PC cache (seed_asset_hashes: object_key -> sha256,
+// file, bytes) translates keys to files with no download at status time; a
+// key with no cache entry reads as { unhashed: key }, which never equals a git
+// value (the row reads as a local edit until an export hashes it).
+//
+// Export downloads into the repo (prepareExportAssets, outside the seed_sync
+// lock, cancellable); seed uploads git files content-addressed
+// (uploadGitAssets, also outside the lock) and writes the keys in the locked
+// transaction, recording the cache entries there (recordCache).
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+const { getGroup, tableSpecs, scopeSql, quoteIdent } = require('./registry.js');
+const { compareNaturalKey } = require('./canonical.js');
+const { buildRefMaps, exportRow } = require('./refs.js');
+const { SyncRefused } = require('./errors.js');
+const { safeName, matchOwner, readObject } = require('../artSeed.js');
+const { shrinkToEdge } = require('../pngResample.js');
+
+const ASSET_TYPES = ['image', 'sprite', 'audio'];
+// blockedReasons of a git row whose asset file cannot be uploaded.
+const ASSET_FILE_MISSING = 'asset_file_missing';
+const ASSET_FILE_MISMATCH = 'asset_file_mismatch';
+const ASSET_REASONS = new Set([ASSET_FILE_MISSING, ASSET_FILE_MISMATCH]);
+const BLOCKED_MESSAGES = {
+  [ASSET_FILE_MISSING]: 'its asset file is missing from the repo; pull again or keep it local',
+  [ASSET_FILE_MISMATCH]: 'its asset file does not match the export (edited or corrupt); restore it or keep it local',
+};
+
+let tmpCounter = 0;
+
+function assetsRoot() {
+  return process.env.SEED_ASSETS_ROOT || path.join(__dirname, '../../../seeds');
+}
+
+const assetEntries = (spec) => Object.entries(spec.assets || {});
+const hasAssets = (spec) => assetEntries(spec).length > 0;
+const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+const isEmpty = (v) => v === null || v === undefined || v === '';
+const valueOf = (fnOrValue, row) => (typeof fnOrValue === 'function' ? fnOrValue(row) : fnOrValue);
+const sha256Of = (b) => crypto.createHash('sha256').update(b).digest('hex');
+const sha1Of = (b) => crypto.createHash('sha1').update(b).digest('hex');
+
+// Throws on a malformed `assets` declaration (registry checkSpec calls it).
+function checkAssets(spec) {
+  if (spec.assets === undefined) return;
+  const where = `seed-sync: ${spec.table}`;
+  if (!isObj(spec.assets)) throw new Error(`${where}: assets must be an object`);
+  for (const [col, a] of Object.entries(spec.assets)) {
+    if (!isObj(a) || !ASSET_TYPES.includes(a.type)) throw new Error(`${where}: asset ${col} needs a type (${ASSET_TYPES.join('/')})`);
+    if (typeof a.dir !== 'string' && typeof a.dir !== 'function') throw new Error(`${where}: asset ${col} needs a dir`);
+    if (a.type === 'audio' && typeof a.dir !== 'function') throw new Error(`${where}: audio asset ${col} needs dir: (row) => string`);
+    if (spec.naturalKey.includes(col) || Object.prototype.hasOwnProperty.call(spec.refs || {}, col)) {
+      throw new Error(`${where}: asset ${col} cannot be a key or ref column`);
+    }
+    if (Object.prototype.hasOwnProperty.call(spec.omit || {}, col)) throw new Error(`${where}: asset ${col} is omitted`);
+    if (spec.slice && !spec.columns.includes(col)) throw new Error(`${where}: asset ${col} is not a slice column`);
+  }
+}
+
+// `file` (from a sync file: untrusted) as an absolute path inside root, or
+// null when it is not a plain relative path that stays inside.
+function resolveFile(root, file) {
+  if (typeof file !== 'string' || !file || path.isAbsolute(file) || file.includes('\0')) return null;
+  const abs = path.resolve(root, file);
+  const rel = path.relative(path.resolve(root), abs);
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  return abs;
+}
+
+function audioFile(asset, row) {
+  return `${valueOf(asset.dir, row)}/${safeName(row.label)}-${String(row.sync_uuid).slice(0, 8)}.ogg`;
+}
+
+const cachedPart = (key, cache) => {
+  const c = cache.get(key);
+  return c ? { file: c.file, sha256: c.sha256 } : { unhashed: key };
+};
+
+// Object keys of one local asset value that the cache translates.
+function cacheKeys(asset, value) {
+  if (asset.type === 'image') return typeof value === 'string' && value ? [value] : [];
+  if (asset.type === 'sprite' && isObj(value)) {
+    return [value.atlas_key, value.manifest_key].filter((k) => typeof k === 'string' && k);
+  }
+  return [];
+}
+
+// Local (DB) value of `col` in the sync-file form. Pure. `spec` is the
+// TableSpec, `row` holds the column (and, for audio, label/kind/sha1/sync_uuid),
+// `cache` is loadCache's Map.
+function localAssetValue(spec, col, row, cache) {
+  const asset = spec.assets[col];
+  const v = row[col];
+  if (isEmpty(v)) return v === undefined ? null : v;
+  if (asset.type === 'image') return typeof v === 'string' ? cachedPart(v, cache) : v;
+  if (asset.type === 'sprite') {
+    if (!isObj(v)) return v;
+    const { atlas_key: atlasKey, manifest_key: manifestKey, ...rest } = v;
+    const out = { ...rest };
+    if (!isEmpty(atlasKey)) out.atlas = cachedPart(atlasKey, cache);
+    if (!isEmpty(manifestKey)) out.manifest = cachedPart(manifestKey, cache);
+    return out;
+  }
+  return { file: audioFile(asset, row), sha1: row.sha1 === undefined ? null : row.sha1 };
+}
+
+// `row` with every asset column in sync-file form.
+function translateRow(spec, row, cache) {
+  if (!hasAssets(spec)) return row;
+  const out = { ...row };
+  for (const [col] of assetEntries(spec)) out[col] = localAssetValue(spec, col, row, cache);
+  return out;
+}
+
+// Every key the cache translates for these local rows of `spec`.
+function rowCacheKeys(spec, rows) {
+  const keys = new Set();
+  for (const r of rows) for (const [col, a] of assetEntries(spec)) for (const k of cacheKeys(a, r[col])) keys.add(k);
+  return [...keys];
+}
+
+// Does a translated (sync-file form) value still name an uncached key?
+function hasUnhashed(v) {
+  if (!isObj(v)) return false;
+  if (Object.prototype.hasOwnProperty.call(v, 'unhashed')) return true;
+  return hasUnhashed(v.atlas) || hasUnhashed(v.manifest);
+}
+
+async function loadCache(db, keys) {
+  if (!keys.length) return new Map();
+  const { rows } = await db.query(
+    'SELECT object_key, sha256, file, bytes FROM seed_asset_hashes WHERE object_key = ANY($1::text[])', [keys]);
+  return new Map(rows.map((r) => [r.object_key, { sha256: r.sha256, file: r.file, bytes: r.bytes }]));
+}
+
+// entries: [{ key, sha256, file, bytes }] -> upserted.
+async function recordCache(db, entries) {
+  for (const e of entries) {
+    await db.query(
+      `INSERT INTO seed_asset_hashes (object_key, sha256, file, bytes) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (object_key) DO UPDATE SET sha256 = EXCLUDED.sha256, file = EXCLUDED.file, bytes = EXCLUDED.bytes`,
+      [e.key, e.sha256, e.file, e.bytes]);
+  }
+}
+
+function checkCancel(signal) {
+  if (signal && signal.aborted) throw new SyncRefused('cancelled', 'cancelled');
+}
+
+async function readIfExists(abs) {
+  try {
+    return await fs.promises.readFile(abs);
+  } catch (e) {
+    if (e.code === 'ENOENT' || e.code === 'EISDIR') return null;
+    throw e;
+  }
+}
+
+// tmp, rename, chown like the rest of the seeds tree (artSeed.matchOwner: the
+// backend runs as root in compose, the repo belongs to the host user).
+async function writeAtomic(root, abs, buf) {
+  const dir = path.dirname(abs);
+  await fs.promises.mkdir(dir, { recursive: true });
+  for (let d = dir; d.startsWith(root) && d !== root; d = path.dirname(d)) matchOwner(d, root);
+  const tmp = `${abs}.${process.pid}.${tmpCounter++}.tmp`;
+  try {
+    await fs.promises.writeFile(tmp, buf);
+    await fs.promises.rename(tmp, abs);
+  } catch (e) {
+    await fs.promises.unlink(tmp).catch(() => {});
+    throw e;
+  }
+  matchOwner(abs, root);
+}
+
+// Download one object; null when the store does not have it (any other error
+// -- network, auth -- throws: "missing" would then be a lie).
+async function download(store, key) {
+  try {
+    return await readObject(store, key);
+  } catch (e) {
+    if (!(await store.objectExists(key))) return null;
+    throw e;
+  }
+}
+
+// Exported-form rows (refs translated, natural-key order) of one spec, as the
+// export would read them, with display key text.
+async function exportedRows(db, spec) {
+  const maps = await buildRefMaps(db, spec);
+  const { rows } = await db.query(`SELECT * FROM ${quoteIdent(spec.table)} WHERE true${scopeSql(spec)}`);
+  return rows.map((r) => exportRow(r, spec, maps)).sort((a, b) => compareNaturalKey(a, b, spec.naturalKey));
+}
+
+const keyText = (spec, row) => spec.naturalKey.map((k) => (typeof row[k] === 'string' ? row[k] : JSON.stringify(row[k]))).join('|');
+
+// Download every local asset of `group` into assetsRoot() and cache its hash.
+// A key is fetched only when uncached, or its cached file is missing on disk
+// or differs from the cached sha256 (then it keeps its recorded path). Audio is
+// fetched when its file is missing or its sha1 differs from the row's sha1.
+// Every object to fetch is checked first: any missing -> nothing is written
+// and `missing` lists them. Never under the seed_sync lock (long); the export
+// re-reads the cache under the lock and refuses a key it does not find.
+async function prepareExportAssets(pool, store, group, { onProgress, signal } = {}) {
+  const root = path.resolve(assetsRoot());
+  const tasks = []; // { kind: 'cached'|'audio', key, base, ext, maxEdge, file, sha1, table, rowKey }
+  const seenKeys = new Set();
+  const dirs = new Set();
+  for (const spec of tableSpecs(group)) {
+    if (!hasAssets(spec)) continue;
+    for (const [, a] of assetEntries(spec)) if (typeof a.dir === 'string') dirs.add(a.dir);
+    const rows = await exportedRows(pool, spec);
+    for (const row of rows) {
+      const name = safeName(keyText(spec, row));
+      for (const [col, a] of assetEntries(spec)) {
+        const v = row[col];
+        if (isEmpty(v)) continue;
+        const dir = valueOf(a.dir, row);
+        dirs.add(dir);
+        const base = { table: spec.table, rowKey: keyText(spec, row) };
+        const add = (t) => { if (!seenKeys.has(t.key)) { seenKeys.add(t.key); tasks.push({ ...base, ...t }); } };
+        if (a.type === 'image' && typeof v === 'string') {
+          add({ kind: 'cached', key: v, base: `${dir}/${name}`, ext: 'png', maxEdge: valueOf(a.maxEdge, row) || null });
+        } else if (a.type === 'sprite' && isObj(v)) {
+          if (!isEmpty(v.atlas_key)) add({ kind: 'cached', key: v.atlas_key, base: `${dir}/${name}.atlas`, ext: 'png' });
+          if (!isEmpty(v.manifest_key)) add({ kind: 'cached', key: v.manifest_key, base: `${dir}/${name}.manifest`, ext: 'json' });
+        } else if (a.type === 'audio' && typeof v === 'string') {
+          add({ kind: 'audio', key: v, file: audioFile(a, row), sha1: row.sha1 });
+        }
+      }
+    }
+  }
+  const cache = await loadCache(pool, tasks.filter((t) => t.kind === 'cached').map((t) => t.key));
+
+  // Which tasks need a download (and the bytes of what is on disk now).
+  const fetch = [];
+  let reused = 0;
+  for (const t of tasks) {
+    checkCancel(signal);
+    if (t.kind === 'cached') {
+      const c = cache.get(t.key);
+      if (c) {
+        t.file = c.file;
+        const abs = resolveFile(root, c.file);
+        const disk = abs ? await readIfExists(abs) : null;
+        if (disk && sha256Of(disk) === c.sha256) { reused += 1; continue; }
+      }
+    } else {
+      const abs = resolveFile(root, t.file);
+      const disk = abs ? await readIfExists(abs) : null;
+      if (disk && t.sha1 && sha1Of(disk) === t.sha1) { reused += 1; continue; }
+    }
+    fetch.push(t);
+  }
+  const missing = [];
+  for (const t of fetch) {
+    checkCancel(signal);
+    if (!(await store.objectExists(t.key))) missing.push({ table: t.table, key: t.rowKey, objectKey: t.key });
+  }
+  if (missing.length) return { downloaded: 0, reused, missing, orphanFiles: 0 };
+
+  await fs.promises.mkdir(root, { recursive: true });
+  matchOwner(root, path.dirname(root));
+  // File names: a cached key keeps its recorded path; a new one takes
+  // <base>.<ext>, or <base>-<sha8>.<ext> when a key earlier in this export
+  // (natural-key order) holds that name.
+  const claimed = new Map();
+  for (const t of tasks) if (t.file) claimed.set(t.file, t.key);
+  let downloaded = 0;
+  const total = fetch.length;
+  for (const t of fetch) {
+    checkCancel(signal);
+    const raw = await download(store, t.key);
+    if (raw === null) throw new SyncRefused('assets_changed', 'art changed during export, run it again', { objectKey: t.key });
+    const buf = t.maxEdge ? shrinkToEdge(raw, t.maxEdge).buffer : raw;
+    const sha = sha256Of(buf);
+    if (!t.file) {
+      t.file = `${t.base}.${t.ext}`;
+      if (claimed.has(t.file) && claimed.get(t.file) !== t.key) t.file = `${t.base}-${sha.slice(0, 8)}.${t.ext}`;
+      claimed.set(t.file, t.key);
+    }
+    const abs = resolveFile(root, t.file);
+    if (!abs) throw new Error(`seed-sync: asset file ${JSON.stringify(t.file)} is outside ${root}`);
+    await writeAtomic(root, abs, buf);
+    if (t.kind === 'cached') await recordCache(pool, [{ key: t.key, sha256: sha, file: t.file, bytes: buf.length }]);
+    downloaded += 1;
+    if (onProgress) onProgress({ phase: 'download', done: downloaded, total, key: t.key });
+  }
+
+  // Orphans: files in a group-managed dir that no row of this export uses.
+  const used = new Set(tasks.map((t) => path.resolve(root, t.file)));
+  let orphanFiles = 0;
+  for (const dir of dirs) {
+    const abs = resolveFile(root, dir);
+    if (!abs) continue;
+    let names;
+    try { names = await fs.promises.readdir(abs, { withFileTypes: true }); } catch (e) { if (e.code === 'ENOENT') continue; throw e; }
+    for (const d of names) if (d.isFile() && !used.has(path.join(abs, d.name))) orphanFiles += 1;
+  }
+  return { downloaded, reused, missing: [], orphanFiles };
+}
+
+// Git-side parts of one asset value that reference repo files:
+// [{ file, sha256 } | { file, sha1 }], or null when the value is malformed.
+function gitParts(asset, v) {
+  if (isEmpty(v)) return [];
+  if (!isObj(v)) return null;
+  const okHash = (p) => isObj(p) && typeof p.file === 'string' && typeof p.sha256 === 'string';
+  if (asset.type === 'image') return okHash(v) ? [v] : null;
+  if (asset.type === 'sprite') {
+    const parts = [];
+    for (const k of ['atlas', 'manifest']) {
+      if (v[k] === undefined) continue;
+      if (!okHash(v[k])) return null;
+      parts.push(v[k]);
+    }
+    return parts;
+  }
+  return typeof v.file === 'string' ? [{ file: v.file, sha1: v.sha1 }] : null;
+}
+
+// Per call memo of file -> bytes | null (never hash a file twice).
+function fileReader(root) {
+  const memo = new Map();
+  return async (file) => {
+    if (!memo.has(file)) {
+      const abs = resolveFile(root, file);
+      memo.set(file, abs ? await readIfExists(abs) : null);
+    }
+    return memo.get(file);
+  };
+}
+
+const partMatches = (part, buf) => (part.sha256 !== undefined
+  ? sha256Of(buf) === part.sha256
+  : (typeof part.sha1 !== 'string' || sha1Of(buf) === part.sha1));
+
+// Map(sync_uuid -> 'asset_file_missing' | 'asset_file_mismatch') for the git
+// (file-form) `rows` of `spec` whose asset files are not on disk or do not
+// match their hash. Only the files of the rows passed are read. `read` (a
+// fileReader) shares the memo across specs of one call.
+async function checkGitAssets(root, rows, spec, read = fileReader(root)) {
+  const out = new Map();
+  for (const row of rows) {
+    let reason = null;
+    for (const [col, a] of assetEntries(spec)) {
+      const parts = gitParts(a, row[col]);
+      if (parts === null) { reason = reason || ASSET_FILE_MISMATCH; continue; }
+      for (const p of parts) {
+        const buf = await read(p.file);
+        if (buf === null) reason = ASSET_FILE_MISSING;
+        else if (!partMatches(p, buf)) reason = reason || ASSET_FILE_MISMATCH;
+      }
+    }
+    if (reason) out.set(row.sync_uuid, reason);
+  }
+  return out;
+}
+
+// Uploads the asset files of git `rows` of `spec` (the rows a seed writes from
+// git; their unchanged columns already blanked by the caller) and returns
+// Map(sync_uuid -> { [col]: local DB value }). Images and sprite parts go to
+// `${BUCKET()}/seedsync/<sha256>.<ext>` (skipped when the object exists);
+// audio to `audio/<kind>/<sync_uuid>.ogg`. The map's `cacheEntries` property
+// lists what recordCache must store once the keys are written. A file that no
+// longer matches its hash refuses 'assets_changed' (re-preview). Outside the
+// lock; checks `signal` between files.
+async function uploadGitAssets(store, rows, spec, { onProgress, signal, root = path.resolve(assetsRoot()) } = {}) {
+  const out = new Map();
+  out.cacheEntries = [];
+  const uploaded = new Map(); // object key -> true (once per call)
+  const total = rows.reduce((n, r) => n + assetEntries(spec).filter(([c]) => !isEmpty(r[c])).length, 0);
+  let done = 0;
+  const readChecked = async (part) => {
+    const abs = resolveFile(root, part.file);
+    const buf = abs ? await readIfExists(abs) : null;
+    if (buf === null || !partMatches(part, buf)) {
+      throw new SyncRefused('assets_changed', 'an asset file changed since the preview; preview again', { file: part.file });
+    }
+    return buf;
+  };
+  const putHashed = async (part, ext, contentType) => {
+    checkCancel(signal);
+    const buf = await readChecked(part);
+    const key = `${store.BUCKET()}/seedsync/${part.sha256}.${ext}`;
+    if (!uploaded.has(key)) {
+      if (!(await store.objectExists(key))) await store.putObject(key, buf, contentType);
+      uploaded.set(key, true);
+    }
+    out.cacheEntries.push({ key, sha256: part.sha256, file: part.file, bytes: buf.length });
+    return key;
+  };
+  checkCancel(signal);
+  for (const row of rows) {
+    const vals = {};
+    for (const [col, a] of assetEntries(spec)) {
+      const v = row[col];
+      if (isEmpty(v)) continue;
+      const parts = gitParts(a, v);
+      if (parts === null) throw new SyncRefused(ASSET_FILE_MISMATCH, BLOCKED_MESSAGES[ASSET_FILE_MISMATCH], { uuids: [row.sync_uuid] });
+      if (a.type === 'image') {
+        vals[col] = await putHashed(v, 'png', 'image/png');
+      } else if (a.type === 'sprite') {
+        const { atlas, manifest, ...rest } = v;
+        const s = { ...rest };
+        if (atlas !== undefined) s.atlas_key = await putHashed(atlas, 'png', 'image/png');
+        if (manifest !== undefined) s.manifest_key = await putHashed(manifest, 'json', 'application/json');
+        vals[col] = s;
+      } else {
+        checkCancel(signal);
+        const buf = await readChecked(parts[0]);
+        const key = `audio/${row.kind}/${row.sync_uuid}.ogg`;
+        await store.putObject(key, buf, 'audio/ogg');
+        vals[col] = key;
+      }
+      done += 1;
+      if (onProgress) onProgress({ phase: 'upload', done, total });
+    }
+    out.set(row.sync_uuid, vals);
+  }
+  return out;
+}
+
+module.exports = {
+  ASSET_FILE_MISSING, ASSET_FILE_MISMATCH, ASSET_REASONS, BLOCKED_MESSAGES,
+  assetsRoot, hasAssets, checkAssets, localAssetValue, translateRow, rowCacheKeys, hasUnhashed,
+  loadCache, recordCache, prepareExportAssets, checkGitAssets, fileReader, uploadGitAssets,
+};

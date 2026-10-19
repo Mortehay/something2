@@ -46,6 +46,11 @@
 //    coverage.js checks the owner omits every slice column and that its
 //    art-omitted columns sit in exactly one slice.
 //
+// Asset columns (plan 3 Task 3): assets: { [col]: { type: 'image'|'sprite'|
+// 'audio', dir, maxEdge? } } -- the column holds object-store keys locally and
+// travels as repo files + content hashes; see seedSync/assets.js. An asset
+// column of a slice must be one of its columns.
+//
 // Order rules (pinned by seed_sync_registry_db.test.js): inside a group a
 // table comes after every table of the group it references (deletes run
 // children first, deferred refs only for self/forward refs); across groups an
@@ -352,6 +357,8 @@ function checkSpec(spec) {
   } else if (spec.columns !== undefined) {
     throw new Error(`${where}: columns is only for a slice`);
   }
+  // Lazy: assets.js requires this module.
+  require('./assets.js').checkAssets(spec);
 }
 
 // A group lists each table once: a full spec, or one slice (a group that

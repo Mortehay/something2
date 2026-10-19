@@ -78,9 +78,16 @@ function exportRow(row, spec, maps) {
 // exported value (uuid or key text) after exportRow, so it is canonicalized
 // as-is ('ref'), never as the FK column's numeric type. Export and diff both
 // use this, so a baseline written by export equals the diff's local hash.
+// An asset column (spec.assets) holds its sync-file form ({ file, sha256 }
+// ...) after translation: 'asset', canonicalized as JSON.
 function exportColumns(columns, spec) {
   const refCols = new Set(Object.keys(spec.refs || {}));
-  return columns.map((c) => (refCols.has(c.name) ? { name: c.name, dataType: 'ref' } : c));
+  const assetCols = new Set(Object.keys(spec.assets || {}));
+  return columns.map((c) => {
+    if (refCols.has(c.name)) return { name: c.name, dataType: 'ref' };
+    if (assetCols.has(c.name)) return { name: c.name, dataType: 'asset' };
+    return c;
+  });
 }
 
 const pendingFor = (pending, table) => {

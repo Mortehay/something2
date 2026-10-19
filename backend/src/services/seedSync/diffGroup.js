@@ -7,6 +7,7 @@ const { readExport } = require('./exportGroup.js');
 const { SyncFileError } = require('./errors.js');
 const { schemaVersion } = require('./runs.js');
 const { rollback } = require('./txn.js');
+const { hasAssets, translateRow, rowCacheKeys, loadCache } = require('./assets.js');
 
 // Three-way diff of one group: git file (G) vs local DB (L) vs the baseline
 // hash written at the last export/seed (B). Decides what a seed may overwrite.
@@ -197,10 +198,21 @@ async function readLocal(db, group, specs, groupId) {
     const maps = await buildRefMaps(db, spec);
     const select = [...columns.map((c) => quoteIdent(c.name)), 'sync_uuid'].join(', ');
     const { rows } = await db.query(`SELECT ${select} FROM ${quoteIdent(spec.table)} WHERE true${scopeSql(spec)}`);
-    // Exactly what export would write (refs translated), so hL == B for an
-    // unchanged row.
-    const canon = rows.map((r) => canonicalRow(exportRow(r, spec, maps), columns));
-    tables.push({ spec, columns, rows: canon, tokensMissing: await countTokensMissing(db, spec) });
+    // Exactly what export would write (refs translated, asset keys through
+    // this PC's cache), so hL == B for an unchanged row. An uncached key
+    // reads { unhashed: key }: never equal to git, a local edit.
+    let exported = rows.map((r) => exportRow(r, spec, maps));
+    // rawAssets: uuid -> { col: local DB value } (apply keeps an unchanged
+    // asset's local key instead of uploading git's file again).
+    let rawAssets = null;
+    if (hasAssets(spec)) {
+      const cache = await loadCache(db, rowCacheKeys(spec, exported));
+      rawAssets = new Map(exported.map((r) => [r.sync_uuid,
+        Object.fromEntries(Object.keys(spec.assets).map((c) => [c, r[c]]))]));
+      exported = exported.map((r) => translateRow(spec, r, cache));
+    }
+    const canon = exported.map((r) => canonicalRow(r, columns));
+    tables.push({ spec, columns, rows: canon, rawAssets, tokensMissing: await countTokensMissing(db, spec) });
     keyIndex.set(spec.table, new Map(canon.map((r) => [r.sync_uuid, r])));
   }
   // Natural keys of by-uuid ref targets outside the group, transitively (a
@@ -434,6 +446,7 @@ function diffTable(t, gitRaw, baseline, keys) {
     detail: {
       spec,
       columns,
+      rawAssets: t.rawAssets,
       git: new Map(git.map((g) => [g.row.sync_uuid, g])),
       gitKeyText,
       local: localByUuid,

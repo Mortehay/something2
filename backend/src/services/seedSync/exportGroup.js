@@ -8,6 +8,9 @@ const { buildRefMaps, exportRow, exportColumns } = require('./refs.js');
 const { pcLabel, schemaVersion, startRun, finishRun } = require('./runs.js');
 const { SyncFileError, SyncRefused } = require('./errors.js');
 const { SEED_SYNC_LOCK_SQL, beginLocked, mapLockError, rollback, lockShare } = require('./txn.js');
+const {
+  hasAssets, translateRow, rowCacheKeys, hasUnhashed, loadCache, prepareExportAssets,
+} = require('./assets.js');
 
 let tmpCounter = 0;
 
@@ -64,16 +67,55 @@ async function exportTable(client, spec) {
     const keys = new Map(rows.map((r) => [r.sync_uuid, r.k]));
     keyOf = (u) => (keys.has(u) ? keys.get(u) : null);
   }
-  return dbRows
-    .map((r) => canonicalRow(orderPair(spec, exportRow(r, spec, maps), keyOf), canonCols))
+  let rows = dbRows.map((r) => exportRow(r, spec, maps));
+  if (hasAssets(spec)) {
+    // Asset keys -> { file, sha256 } through the cache prepareExportAssets
+    // filled before the lock. A key it did not see was set meanwhile.
+    const cache = await loadCache(client, rowCacheKeys(spec, rows));
+    rows = rows.map((r) => translateRow(spec, r, cache));
+    if (rows.some((r) => Object.keys(spec.assets).some((c) => hasUnhashed(r[c])))) {
+      throw new SyncRefused('assets_changed', 'art changed during export, run it again');
+    }
+  }
+  return rows
+    .map((r) => canonicalRow(orderPair(spec, r, keyOf), canonCols))
     .sort((a, b) => compareNaturalKey(a, b, spec.naturalKey));
 }
 
-async function exportGroup(pool, groupId) {
+// Kinds that are git changes whatever this PC's asset cache holds (an
+// uncached key only ever makes local differ from B and git).
+const DEFINITE_GIT_KINDS = new Set(['changed', 'new', 'deleted_in_git']);
+
+// opts: { store (default assetStore), onProgress, signal } -- used only by a
+// group with asset columns: their objects are downloaded into the repo and
+// hashed (prepareExportAssets) BEFORE the locked transaction (long and
+// cancellable; the lock is never held across downloads). The summary then
+// carries { downloaded, reused, orphanFiles }.
+async function exportGroup(pool, groupId, opts = {}) {
   const group = getGroup(groupId);
   const specs = tableSpecs(group);
   // Lazy require: diffGroup.js needs readExport from this module.
   const { diffGroup } = require('./diffGroup.js');
+  let assetSummary = null;
+  if (specs.some(hasAssets)) {
+    // Refuse a definite git_newer before writing any asset file: the files
+    // would land over the ones git's rows reference. (Re-checked under the lock.)
+    const pre = await diffGroup(pool, groupId);
+    if (pre.status === 'schema_newer') {
+      throw new SyncRefused('schema_newer', 'run migrations first', {
+        fileVersion: pre.header.schema_version, dbVersion: await schemaVersion(pool),
+      });
+    }
+    if (pre.rows.some((r) => DEFINITE_GIT_KINDS.has(r.kind))) {
+      throw new SyncRefused('git_newer', 'seed (preview) first', { gitChanges: pre.gitChanges });
+    }
+    const store = opts.store || require('../assetStore.js');
+    const prep = await prepareExportAssets(pool, store, group, { onProgress: opts.onProgress, signal: opts.signal });
+    if (prep.missing.length) {
+      throw new SyncRefused('assets_missing', 'regenerate or clear these images first', { rows: prep.missing });
+    }
+    assetSummary = { downloaded: prep.downloaded, reused: prep.reused, orphanFiles: prep.orphanFiles };
+  }
   const client = await pool.connect();
   let runId = null;
   let tmp = null;
@@ -141,7 +183,7 @@ async function exportGroup(pool, groupId) {
       );
     }
     await client.query('COMMIT');
-    result = { runId, rowCount: allRows.length, rowCounts };
+    result = { runId, rowCount: allRows.length, rowCounts, ...assetSummary };
   } catch (err) {
     const e = mapLockError(err);
     releaseErr = await rollback(client);
@@ -152,7 +194,7 @@ async function exportGroup(pool, groupId) {
     client.release(releaseErr);
   }
   // Committed: the run is ok whatever happens now; never report it failed.
-  await finishRun(pool, runId, { status: 'ok', summary: { rowCount: result.rowCount } })
+  await finishRun(pool, runId, { status: 'ok', summary: { rowCount: result.rowCount, ...assetSummary } })
     .catch((e) => console.error(`seed-sync: export run ${runId} committed but not marked ok:`, e.message));
   return result;
 }
