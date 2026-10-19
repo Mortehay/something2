@@ -7,7 +7,9 @@
 //
 // Output: one stable line per group, `<group> <ok|refused:<code>|error> <details>`
 // (status lines are `<group> <status> <localEdits> <gitChanges>`). Preview
-// warnings go to stderr as `warn <group> <code> <json>`.
+// warnings go to stderr as `warn <group> <code> <json>`. Binary groups (art,
+// audio) report asset progress to stderr as `progress <group> <phase>
+// <done>/<total>`, at most one line per 250 ms plus the last one.
 // Exit: 0 ok, 2 when any group was refused, 1 on any unexpected error.
 //
 // Like seed-gear-ladder.js this refuses to run without an explicit
@@ -74,7 +76,32 @@ function decide(rows, resolve) {
   return { decisions, notes, undecided };
 }
 
+// onProgress for one group: prints `progress <group> <phase> <done>/<total>`
+// via write, at most once per intervalMs; flush() prints the last event when
+// it was throttled away.
+function progressPrinter(id, { write = (l) => console.error(l), now = Date.now, intervalMs = 250 } = {}) {
+  let last = -Infinity;
+  let pending = null;
+  const print = (p) => { write(`progress ${id} ${p.phase} ${p.done}/${p.total}`); pending = null; };
+  const onProgress = (p) => {
+    pending = p;
+    const t = now();
+    if (t - last >= intervalMs) { last = t; print(p); }
+  };
+  onProgress.flush = () => { if (pending) print(pending); };
+  return onProgress;
+}
+
 async function runGroup(pool, opts, id) {
+  const onProgress = progressPrinter(id);
+  try {
+    return await runGroupWith(pool, opts, id, onProgress);
+  } finally {
+    onProgress.flush();
+  }
+}
+
+async function runGroupWith(pool, opts, id, onProgress) {
   if (opts.cmd === 'status') {
     try {
       const d = await diffGroup(pool, id);
@@ -85,7 +112,7 @@ async function runGroup(pool, opts, id) {
     }
   }
   if (opts.cmd === 'export') {
-    const r = await exportGroup(pool, id);
+    const r = await exportGroup(pool, id, { onProgress });
     return { line: `${id} ok rows=${r.rowCount} run=${r.runId}` };
   }
   const pre = await previewSeed(pool, id);
@@ -98,7 +125,7 @@ async function runGroup(pool, opts, id) {
     throw new SyncRefused('undecided', `${undecided} row(s) edited on this PC need --resolve=git|local`, { count: undecided });
   }
   for (const n of notes) console.error(`note ${id} ${oneLine(n)}`);
-  const r = await applySeed(pool, id, decisions, { signature: pre.signature });
+  const r = await applySeed(pool, id, decisions, { signature: pre.signature, onProgress });
   return { line: `${id} ok ${oneLine(JSON.stringify(r.summary))} run=${r.runId}` };
 }
 
@@ -136,6 +163,6 @@ async function main() {
   process.exitCode = failed ? 1 : (refused && opts.cmd !== 'status' ? 2 : 0);
 }
 
-module.exports = { decide, allowedDecisions };
+module.exports = { decide, allowedDecisions, progressPrinter };
 
 if (require.main === module) main().catch((err) => { console.error(oneLine(err && err.message)); process.exit(1); });

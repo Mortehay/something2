@@ -12,7 +12,7 @@ const DB_URL = process.env.TEST_DATABASE_URL
   || process.env.DATABASE_URL
   || 'postgres://user:password@localhost:15432/game_db';
 const SCRIPT = path.join(__dirname, '..', 'scripts', 'seed-sync.js');
-const { decide } = require('../scripts/seed-sync.js');
+const { decide, progressPrinter } = require('../scripts/seed-sync.js');
 const ALL_IDS = GROUPS.map((g) => g.id);
 
 // The CLI writes through the real engine: exports rewrite baselines of every
@@ -209,4 +209,21 @@ test('decide: defaults kept, red rows take --resolve, forbidden git degrades to 
   const none = decide(rows, null);
   assert.strictEqual(none.undecided, 2);
   assert.deepStrictEqual(none.decisions, { a: 'git' });
+});
+
+test('progressPrinter: at most one line per 250 ms, plus the final line on flush', () => {
+  const lines = [];
+  let t = 1000;
+  const p = progressPrinter('art', { write: (l) => lines.push(l), now: () => t });
+  p({ phase: 'download', done: 1, total: 5 }); // printed (first)
+  t += 100; p({ phase: 'download', done: 2, total: 5 }); // throttled
+  t += 100; p({ phase: 'download', done: 3, total: 5 }); // throttled
+  t += 60; p({ phase: 'download', done: 4, total: 5 }); // 260 ms since the last line: printed
+  t += 10; p({ phase: 'download', done: 5, total: 5 }); // throttled ...
+  p.flush(); // ... but it is the last one
+  p.flush(); // nothing new
+  assert.deepStrictEqual(lines, ['progress art download 1/5', 'progress art download 4/5', 'progress art download 5/5']);
+  const quiet = [];
+  progressPrinter('quests', { write: (l) => quiet.push(l) }).flush();
+  assert.deepStrictEqual(quiet, [], 'a data group prints no progress');
 });

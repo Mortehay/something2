@@ -59,4 +59,16 @@ async function recentRuns(db, { limit = 15, offset = 0, groupId } = {}) {
   return { runs: rows, total: c[0].n };
 }
 
-module.exports = { UNNAMED_PC, pcLabel, pcLabelSet, schemaVersion, startRun, finishRun, lastRuns, recentRuns };
+// At boot: a run still 'running' belonged to a process that is gone (jobs live
+// in memory only). Returns how many were marked.
+async function markInterruptedRuns(db) {
+  const { rowCount } = await db.query(
+    `UPDATE seed_export_runs SET status = 'failed', error = 'interrupted: backend restarted', finished_at = now()
+      WHERE status = 'running'`,
+  );
+  return rowCount;
+}
+
+module.exports = {
+  UNNAMED_PC, pcLabel, pcLabelSet, schemaVersion, startRun, finishRun, lastRuns, recentRuns, markInterruptedRuns,
+};

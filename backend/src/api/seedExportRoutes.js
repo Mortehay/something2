@@ -1,6 +1,12 @@
 // SOMET-637. Admin API over the seed/export engine (services/seedSync). Every
-// route is admin-only. Errors: SyncRefused -> 409, SyncFileError -> 422,
-// unknown group -> 404, anything else -> 500 with no internals.
+// route is admin-only. Errors: SyncRefused -> 409 (busy -> { error: 'busy',
+// job }), SyncFileError -> 422, unknown group -> 404, anything else -> 500
+// with no internals.
+//
+// SOMET-640: export / seed of a `binary` group (art, audio) runs as a
+// background job (seedSync/jobs.js) and answers 202 { job }; the tab polls
+// GET jobs/current. Data groups stay synchronous (200). While a job runs every
+// export / seed answers 409 busy.
 const fs = require('node:fs');
 const path = require('node:path');
 const express = require('express');
@@ -11,6 +17,7 @@ const { previewSeed, applySeed } = require('../services/seedSync/applySeed.js');
 const { exportGroup } = require('../services/seedSync/exportGroup.js');
 const { lastRuns, recentRuns, pcLabel, pcLabelSet } = require('../services/seedSync/runs.js');
 const { SyncRefused, SyncFileError } = require('../services/seedSync/errors.js');
+const jobs = require('../services/seedSync/jobs.js');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ZERO_COUNTS = {};
@@ -20,6 +27,11 @@ function triggerPath() {
 }
 
 function sendError(res, err) {
+  // The job runner's busy carries the running job. The engine's own 'busy'
+  // (lock timeout, txn.js) has none and keeps the generic 409 body below.
+  if (err instanceof SyncRefused && err.code === 'busy' && err.details && 'job' in err.details) {
+    return res.status(409).json({ error: 'busy', job: err.details.job });
+  }
   if (err instanceof SyncRefused) {
     return res.status(409).json({ error: err.message, code: err.code, details: err.details });
   }
@@ -36,10 +48,17 @@ function validDecisions(d) {
   return Object.entries(d).every(([k, v]) => UUID_RE.test(k) && typeof v === 'string');
 }
 
-module.exports = function seedExportRoutes(pool, { processStartedAt } = {}) {
+function refuseIfBusy() {
+  if (jobs.isBusy()) throw new SyncRefused('busy', 'another export or seed is running', { job: jobs.currentJob() });
+}
+
+// opts.store: the object store binary groups read / write (default: the
+// engine's, assetStore.js); tests inject a fake.
+module.exports = function seedExportRoutes(pool, { processStartedAt, store } = {}) {
   const router = express.Router();
   router.use(requireAdmin(pool));
 
+  const storeOpt = store ? { store } : {};
   const handler = (fn) => async (req, res) => {
     try { await fn(req, res); } catch (err) { sendError(res, err); }
   };
@@ -54,7 +73,7 @@ module.exports = function seedExportRoutes(pool, { processStartedAt } = {}) {
     const out = [];
     for (const g of GROUPS) {
       const last = runs[g.id] || {};
-      const base = { id: g.id, label: g.label, lastExport: last.export || null, lastSeed: last.seed || null };
+      const base = { id: g.id, label: g.label, binary: Boolean(g.binary), lastExport: last.export || null, lastSeed: last.seed || null };
       try {
         const d = await diffGroup(pool, g.id);
         out.push({
@@ -94,7 +113,15 @@ module.exports = function seedExportRoutes(pool, { processStartedAt } = {}) {
   }));
 
   router.post('/groups/:id/export', withGroup(async (req, res) => {
-    res.json(await exportGroup(pool, req.params.id));
+    const groupId = req.params.id;
+    refuseIfBusy();
+    if (getGroup(groupId).binary) {
+      const job = jobs.startJob({
+        groupId, action: 'export', run: (ctx) => exportGroup(pool, groupId, { ...storeOpt, ...ctx }),
+      });
+      return res.status(202).json({ job });
+    }
+    res.json(await exportGroup(pool, groupId));
   }));
 
   router.post('/groups/:id/seed', withGroup(async (req, res) => {
@@ -107,7 +134,30 @@ module.exports = function seedExportRoutes(pool, { processStartedAt } = {}) {
     if (typeof signature !== 'string' || !signature) {
       return res.status(400).json({ error: 'signature (from the preview) is required' });
     }
-    res.json(await applySeed(pool, req.params.id, decisions, { signature }));
+    const groupId = req.params.id;
+    refuseIfBusy();
+    if (getGroup(groupId).binary) {
+      // Engine refusals (stale_preview, undecided, ...) end the job failed
+      // with errorCode; the tab shows them.
+      const job = jobs.startJob({
+        groupId, action: 'seed', run: (ctx) => applySeed(pool, groupId, decisions, { signature, ...storeOpt, ...ctx }),
+      });
+      return res.status(202).json({ job });
+    }
+    res.json(await applySeed(pool, groupId, decisions, { signature }));
+  }));
+
+  // null until the first job of this process; the last job stays visible
+  // until the next one starts.
+  router.get('/jobs/current', handler(async (req, res) => {
+    res.json(jobs.currentJob());
+  }));
+
+  // Honoured only before the engine's locked transaction begins; after that
+  // the run completes. Idempotent: idle answers cancelled:false.
+  router.post('/jobs/cancel', handler(async (req, res) => {
+    const cancelled = jobs.cancelJob();
+    res.json({ cancelled, job: jobs.currentJob() });
   }));
 
   router.get('/runs', handler(async (req, res) => {
@@ -145,3 +195,5 @@ module.exports = function seedExportRoutes(pool, { processStartedAt } = {}) {
 
   return router;
 };
+
+module.exports.sendError = sendError; // tests

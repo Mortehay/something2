@@ -171,6 +171,7 @@ const passiveTreeRoutes = require('./api/passiveTreeRoutes.js');
 const passiveNodesRoutes = require('./api/passiveNodesRoutes.js');
 const auraEffectsRoutes = require('./api/auraEffectsRoutes.js');
 const seedExportRoutes = require('./api/seedExportRoutes.js');
+const { markInterruptedRuns } = require('./services/seedSync/runs.js');
 const { cascadeEntityRename } = require('./services/seedSync/renameCascade.js');
 const creatureSkillsRoutes = require('./api/creatureSkillsRoutes.js');
 const characterRoutes = require('./api/characterRoutes.js');
@@ -5681,6 +5682,15 @@ if (require.main === module) {
     // and blocking boot on a cache warm-up would trade a stale dropdown for an
     // unreachable server.
     refreshWeaponCatalogCache();
+
+    // SOMET-640: seed/export jobs live in memory, so a run row still
+    // 'running' belongs to a process that is gone. Never blocks boot.
+    try {
+      const n = await markInterruptedRuns(pool);
+      if (n) console.log(`seed-sync: marked ${n} interrupted run(s) failed`);
+    } catch (err) {
+      console.error('seed-sync: could not mark interrupted runs:', err.message);
+    }
 
     const server = app.listen(port, () => {
       console.log(`Backend server running on port ${port}`);

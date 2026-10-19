@@ -11,6 +11,7 @@ const { signToken } = require('../src/auth/tokens.js');
 const { withSeedSyncLock, cleanupSx, makeTempSyncDir } = require('./helpers/seedSyncTest.js');
 const { exportGroup, fileFor } = require('../src/services/seedSync/exportGroup.js');
 const seedExportRoutes = require('../src/api/seedExportRoutes.js');
+const jobs = require('../src/services/seedSync/jobs.js');
 
 // Registry (seed) order, global constraints.
 const ALL_GROUPS = [
@@ -42,14 +43,18 @@ function dbTest(name, body) {
     const trigger = path.join(os.tmpdir(), `sx-trigger-${process.pid}-${Math.random().toString(36).slice(2)}.json`);
     const prevDir = process.env.SEED_SYNC_DIR;
     const prevTrig = process.env.SEED_RESTART_TRIGGER;
+    const prevRoot = process.env.SEED_ASSETS_ROOT;
     process.env.SEED_SYNC_DIR = dir;
     process.env.SEED_RESTART_TRIGGER = trigger;
+    // Binary groups (art, audio) write repo asset files: never the real tree.
+    process.env.SEED_ASSETS_ROOT = path.join(dir, 'assets');
     const pool = new Pool({ connectionString: DB_URL, max: 4, connectionTimeoutMillis: 3000 });
     const users = [];
     let watermark = null;
     t.after(async () => {
       if (prevDir === undefined) delete process.env.SEED_SYNC_DIR; else process.env.SEED_SYNC_DIR = prevDir;
       if (prevTrig === undefined) delete process.env.SEED_RESTART_TRIGGER; else process.env.SEED_RESTART_TRIGGER = prevTrig;
+      if (prevRoot === undefined) delete process.env.SEED_ASSETS_ROOT; else process.env.SEED_ASSETS_ROOT = prevRoot;
       fs.rmSync(dir, { recursive: true, force: true });
       fs.rmSync(trigger, { force: true });
       await pool.end().catch(() => {});
@@ -62,6 +67,7 @@ function dbTest(name, body) {
         const player = await makeUser(pool, 'player'); users.push(player.id);
         await body({ pool, dir, trigger, admin, player, watermark });
       } finally {
+        await settleJob().catch(() => {});
         // seed runs only (see seedSyncTest.js note); export runs of this file are
         // removed too since they are above the watermark under the held lock.
         await pool.query('DELETE FROM seed_export_runs WHERE id > $1', [watermark]).catch(() => {});
@@ -72,16 +78,56 @@ function dbTest(name, body) {
   });
 }
 
+// The object store is always a fake: binary-group jobs never reach MinIO.
+function emptyStore() {
+  return {
+    BUCKET: () => 'sxb',
+    async ensureBucket() {},
+    async getObjectStream(key) { const e = new Error(`no such key ${key}`); e.code = 'NoSuchKey'; throw e; },
+    async putObject() { throw new Error('fake store: no uploads expected'); },
+    async objectExists() { return false; },
+  };
+}
+
 function appFor(pool, startedAt = new Date(0)) {
   const app = express();
   app.use(express.json());
-  app.use('/api/seed-export', seedExportRoutes(pool, { processStartedAt: startedAt }));
+  app.use('/api/seed-export', seedExportRoutes(pool, { processStartedAt: startedAt, store: emptyStore() }));
   return app;
+}
+
+// Polls the in-process job until it is no longer running.
+async function settleJob() {
+  for (let i = 0; i < 2000; i++) {
+    const j = jobs.currentJob();
+    if (!j || j.status !== 'running') return j;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  throw new Error('job never settled');
+}
+
+async function pollJob(app, h) {
+  for (let i = 0; i < 2000; i++) {
+    const r = await request(app).get('/api/seed-export/jobs/current').set(h);
+    assert.strictEqual(r.status, 200, r.text);
+    if (r.body && r.body.status !== 'running') return r.body;
+    await new Promise((res) => setTimeout(res, 10));
+  }
+  throw new Error('job never settled');
+}
+
+// A job that runs until release() (holds the runner busy).
+function holdBusy() {
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const job = jobs.startJob({ groupId: 'art', action: 'export', run: async () => { await gate; return {}; } });
+  return { job, release };
 }
 
 const ROUTES = [
   ['get', '/groups'], ['get', '/groups/quests/preview'], ['post', '/groups/quests/export'],
   ['post', '/groups/quests/seed'], ['get', '/runs'], ['get', '/restart'], ['post', '/restart'], ['get', '/meta'],
+  ['post', '/groups/audio/export'], ['post', '/groups/art/seed'], ['get', '/jobs/current'], ['post', '/jobs/cancel'],
 ];
 
 // Preview, then post the given decisions with the preview's signature (the
@@ -255,7 +301,16 @@ dbTest('no route response contains the provider auth_token', async ({ pool, admi
   await grab(request(app).get('/api/seed-export/groups').set(h));
   await grab(request(app).get('/api/seed-export/runs').set(h));
   await grab(request(app).get('/api/seed-export/restart').set(h));
-  assert.ok(bodies.length >= 7);
+  const bin = await grab(request(app).post('/api/seed-export/groups/audio/export').set(h));
+  assert.strictEqual(bin.status, 202, bin.text);
+  await settleJob();
+  await grab(request(app).get('/api/seed-export/jobs/current').set(h));
+  await grab(request(app).post('/api/seed-export/jobs/cancel').set(h));
+  const held = holdBusy();
+  try {
+    await grab(request(app).post('/api/seed-export/groups/ai_providers/export').set(h)); // 409 busy
+  } finally { held.release(); }
+  assert.ok(bodies.length >= 11);
   for (const b of bodies) assert.ok(!b.includes('sx-secret'), b.slice(0, 200));
   assert.ok(!fs.readFileSync(fileFor('ai_providers'), 'utf8').includes('sx-secret'));
 });
@@ -323,4 +378,113 @@ dbTest('GET /meta reports the PC label and whether it is set (never the hostname
   } finally {
     if (prev === undefined) delete process.env.SEED_PC_LABEL; else process.env.SEED_PC_LABEL = prev;
   }
+});
+
+dbTest('binary export answers 202 and runs as a job; GET /groups flags binary groups', async ({ pool, admin }) => {
+  const app = appFor(pool);
+  const h = { Authorization: admin.auth };
+  const list = await request(app).get('/api/seed-export/groups').set(h);
+  assert.deepStrictEqual(list.body.filter((g) => g.binary === true).map((g) => g.id), ['art', 'audio']);
+  assert.ok(list.body.every((g) => typeof g.binary === 'boolean'));
+  const res = await request(app).post('/api/seed-export/groups/audio/export').set(h);
+  assert.strictEqual(res.status, 202, res.text);
+  assert.deepStrictEqual([res.body.job.groupId, res.body.job.action], ['audio', 'export']);
+  assert.ok(Number.isInteger(res.body.job.id));
+  const done = await pollJob(app, h);
+  assert.strictEqual(done.id, res.body.job.id);
+  assert.strictEqual(done.status, 'ok', JSON.stringify(done));
+  assert.ok(done.result.runId);
+  const run = await pool.query('SELECT status, group_id FROM seed_export_runs WHERE id = $1', [done.result.runId]);
+  assert.deepStrictEqual(run.rows[0], { status: 'ok', group_id: 'audio' });
+  assert.ok(fs.existsSync(fileFor('audio')));
+  // A data group stays synchronous.
+  const data = await request(app).post('/api/seed-export/groups/tile_types/export').set(h);
+  assert.strictEqual(data.status, 200, data.text);
+  assert.ok(data.body.runId);
+});
+
+dbTest('any export or seed while a job runs -> 409 busy with the job', async ({ pool, admin }) => {
+  const app = appFor(pool);
+  const h = { Authorization: admin.auth };
+  await exportGroup(pool, 'tile_types');
+  const prev = await request(app).get('/api/seed-export/groups/tile_types/preview').set(h);
+  const held = holdBusy();
+  try {
+    const attempts = [
+      request(app).post('/api/seed-export/groups/tile_types/seed').set(h).send({ decisions: {}, signature: prev.body.signature }),
+      request(app).post('/api/seed-export/groups/tile_types/export').set(h),
+      request(app).post('/api/seed-export/groups/audio/export').set(h),
+      request(app).post('/api/seed-export/groups/art/seed').set(h).send({ decisions: {}, signature: 'x' }),
+    ];
+    for (const a of attempts) {
+      const r = await a;
+      assert.strictEqual(r.status, 409, r.text);
+      assert.strictEqual(r.body.error, 'busy');
+      assert.strictEqual(r.body.job.id, held.job.id);
+      assert.strictEqual(r.body.job.status, 'running');
+    }
+    const cur = await request(app).get('/api/seed-export/jobs/current').set(h);
+    assert.strictEqual(cur.body.id, held.job.id);
+  } finally {
+    held.release();
+  }
+  assert.strictEqual((await settleJob()).status, 'ok');
+  // Free again: the data-group seed goes through synchronously.
+  const ok = await previewThenSeed(app, h, 'tile_types', {});
+  assert.strictEqual(ok.status, 200, ok.text);
+});
+
+dbTest('jobs/cancel: idle -> cancelled:false; running -> cancelled:true and the job ends cancelled', async ({ pool, admin }) => {
+  const app = appFor(pool);
+  const h = { Authorization: admin.auth };
+  const idle = await request(app).post('/api/seed-export/jobs/cancel').set(h);
+  assert.strictEqual(idle.status, 200);
+  assert.strictEqual(idle.body.cancelled, false);
+  assert.ok('job' in idle.body);
+  // A job that honours its signal the way the engine's asset phases do.
+  const { SyncRefused } = require('../src/services/seedSync/errors.js');
+  jobs.startJob({
+    groupId: 'art', action: 'export',
+    run: ({ signal }) => new Promise((resolve, reject) => {
+      signal.addEventListener('abort', () => reject(new SyncRefused('cancelled', 'cancelled')));
+    }),
+  });
+  const r = await request(app).post('/api/seed-export/jobs/cancel').set(h);
+  assert.strictEqual(r.body.cancelled, true);
+  assert.strictEqual((await pollJob(app, h)).status, 'cancelled');
+});
+
+dbTest('binary seed: bad bodies 400 synchronously; engine refusals end the job failed with errorCode', async ({ pool, admin }) => {
+  const app = appFor(pool);
+  const h = { Authorization: admin.auth };
+  const before = jobs.currentJob();
+  for (const body of [{ decisions: 'x', signature: 's' }, { decisions: {}, signature: '' }]) {
+    const r = await request(app).post('/api/seed-export/groups/audio/seed').set(h).send(body);
+    assert.strictEqual(r.status, 400, r.text);
+  }
+  assert.strictEqual(jobs.currentJob() && jobs.currentJob().id, before && before.id, 'no job started');
+  await exportGroup(pool, 'audio', { store: emptyStore() });
+  const res = await request(app).post('/api/seed-export/groups/audio/seed').set(h).send({ decisions: {}, signature: 'stale' });
+  assert.strictEqual(res.status, 202, res.text);
+  assert.strictEqual(res.body.job.action, 'seed');
+  const done = await pollJob(app, h);
+  assert.deepStrictEqual([done.status, done.errorCode], ['failed', 'stale_preview'], JSON.stringify(done));
+  assert.ok(done.error);
+  // With the preview's signature it applies.
+  const prev = await request(app).get('/api/seed-export/groups/audio/preview').set(h);
+  const ok = await request(app).post('/api/seed-export/groups/audio/seed').set(h).send({ decisions: {}, signature: prev.body.signature });
+  assert.strictEqual(ok.status, 202, ok.text);
+  const applied = await pollJob(app, h);
+  assert.strictEqual(applied.status, 'ok', JSON.stringify(applied));
+  assert.ok(applied.result.runId);
+});
+
+test("sendError: the engine's lock-timeout busy keeps its message and code; the job runner's busy carries the job", () => {
+  const { SyncRefused } = require('../src/services/seedSync/errors.js');
+  const res = () => ({ code: null, body: null, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; } });
+  const lock = seedExportRoutes.sendError(res(), new SyncRefused('busy', 'another seed/export ... try again', { pgCode: '55P03' }));
+  assert.deepStrictEqual([lock.code, lock.body.code, lock.body.error], [409, 'busy', 'another seed/export ... try again']);
+  const job = { id: 7, status: 'running' };
+  const r = seedExportRoutes.sendError(res(), new SyncRefused('busy', 'another export or seed is running', { job }));
+  assert.deepStrictEqual([r.code, r.body], [409, { error: 'busy', job }]);
 });
