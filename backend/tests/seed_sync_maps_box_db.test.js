@@ -164,15 +164,21 @@ const jres = (obj, status = 200) => new Response(JSON.stringify(obj), {
   status, headers: { 'content-type': 'application/json' },
 });
 // A fake box: `boxes` = spec name -> the spec the box holds (absent = 404).
-function fakeBox(boxes, { patchStatus = 200 } = {}) {
+// GET answers with ETag "etag-<name>"; `put` = { status, body } for the PUT.
+function fakeBox(boxes, { put = { status: 200, body: { problems: [] } } } = {}) {
   const calls = [];
   const fetchImpl = async (url, opts = {}) => {
     const method = opts.method || 'GET';
-    const name = new URL(url).pathname.split('/')[3];
-    calls.push({ method, name, body: opts.body ? JSON.parse(opts.body) : null, headers: opts.headers });
+    const parts = new URL(url).pathname.split('/');
+    const name = parts[3];
+    calls.push({ method, name, path: parts.slice(4).join('/'), body: opts.body ? JSON.parse(opts.body) : null, headers: opts.headers });
     if (!(name in boxes)) return jres({ detail: 'not found' }, 404);
-    if (method === 'GET') return jres(boxes[name]);
-    return jres({ ok: true }, patchStatus);
+    if (method === 'GET') {
+      return new Response(JSON.stringify(boxes[name]), {
+        status: 200, headers: { 'content-type': 'application/json', etag: `"etag-${name}"` },
+      });
+    }
+    return jres(put.body, put.status);
   };
   return { calls, deps: { fetchImpl, serviceDb } };
 }
@@ -208,35 +214,68 @@ dbTest('box unreachable: export ok, box_error recorded, group note says so', asy
   assert.strictEqual((await diffGroup(pool, 'maps')).status, 'in_sync');
 });
 
-dbTest('box knows spec: PATCH carries only the changed keys; state records the push', async (ctx) => {
+dbTest('box 200: PUT carries our whole spec with the GET ETag; pushed, problems surfaced', async (ctx) => {
   const { pool } = ctx;
   await editedA(ctx);
-  const v1 = specA();
-  const { calls, deps } = fakeBox({ 'sx-m4-a': JSON.parse(canonicalSpecJson(v1)) });
+  const { calls, deps } = fakeBox({ 'sx-m4-a': JSON.parse(canonicalSpecJson(specA())) },
+    { put: { status: 200, body: { name: 'sx-m4-a', problems: ['p1', 'p2'] } } });
   const ex = await exportGroup(pool, 'maps', { pushToBox: true, boxDeps: deps });
   assert.deepStrictEqual(ex.box.map((b) => [b.spec, b.status]), [['sx-m4-a', 'pushed']]);
-  const patches = calls.filter((c) => c.method === 'PATCH');
-  assert.strictEqual(patches.length, 1);
-  assert.strictEqual(patches[0].name, 'sx-m4-a');
-  assert.deepStrictEqual(Object.keys(patches[0].body), ['worlds']);
-  assert.deepStrictEqual(patches[0].body.worlds, readSpec(ctx.mapsDir, 'sx-m4-a').worlds);
+  assert.deepStrictEqual(calls.map((c) => c.method), ['GET', 'PUT']);
+  assert.strictEqual(calls[1].path, 'spec');
+  assert.deepStrictEqual(calls[1].body, readSpec(ctx.mapsDir, 'sx-m4-a'));
+  assert.strictEqual(calls[1].headers['If-Match'], '"etag-sx-m4-a"');
+  assert.deepStrictEqual(ex.box[0].problems, ['p1', 'p2']);
+  assert.strictEqual(ex.boxNote, 'GPU box notes: 2 problems on sx-m4-a');
   const st = await stateOf(pool, 'sx-m4-a');
   assert.strictEqual(st.box_pushed_sha256, st.exported_sha256);
   assert.strictEqual(st.box_error, null);
   assert.strictEqual((await diffGroup(pool, 'maps')).note, undefined);
 });
 
-dbTest('box already identical: pushed with no PATCH sent', async (ctx) => {
+dbTest('box 409: failed box_changed, no second PUT in the same pass', async (ctx) => {
   const { pool } = ctx;
   await editedA(ctx);
-  const ex0 = await exportGroup(pool, 'maps');
-  assert.strictEqual(ex0.box, undefined);
-  const f = fakeBox({ 'sx-m4-a': readSpec(ctx.mapsDir, 'sx-m4-a') });
-  const res = await mapsGroup.pushToBox(pool, ['sx-m4-a'], f.deps);
-  assert.deepStrictEqual(res.map((r) => r.status), ['pushed']);
-  assert.deepStrictEqual(f.calls.map((c) => c.method), ['GET']);
+  const { calls, deps } = fakeBox({ 'sx-m4-a': JSON.parse(canonicalSpecJson(specA())) },
+    { put: { status: 409, body: { detail: 'spec changed on the box', sha256: 'x' } } });
+  const ex = await exportGroup(pool, 'maps', { pushToBox: true, boxDeps: deps });
+  assert.deepStrictEqual(ex.box.map((b) => [b.spec, b.status]), [['sx-m4-a', 'failed']]);
+  assert.deepStrictEqual(calls.map((c) => c.method), ['GET', 'PUT']);
   const st = await stateOf(pool, 'sx-m4-a');
-  assert.strictEqual(st.box_pushed_sha256, st.exported_sha256);
+  assert.strictEqual(st.box_error, 'box_changed: the region changed on the GPU box since this export — review it there, then export again');
+  assert.notStrictEqual(st.box_pushed_sha256, st.exported_sha256);
+});
+
+dbTest('box 422: failed box_rejected with the errors', async (ctx) => {
+  const { pool } = ctx;
+  await editedA(ctx);
+  const { deps } = fakeBox({ 'sx-m4-a': JSON.parse(canonicalSpecJson(specA())) },
+    { put: { status: 422, body: { detail: ['worlds[1].grid is bad', 'links[0].edge is bad'] } } });
+  const ex = await exportGroup(pool, 'maps', { pushToBox: true, boxDeps: deps });
+  assert.strictEqual(ex.box[0].status, 'failed');
+  const st = await stateOf(pool, 'sx-m4-a');
+  assert.strictEqual(st.box_error, 'box_rejected: worlds[1].grid is bad; links[0].edge is bad');
+  assert.strictEqual((await diffGroup(pool, 'maps')).note, `GPU box not updated: sx-m4-a: ${st.box_error}`);
+});
+
+dbTest('box 401: auth_failed, fatal for the remaining specs, token not in the error', async (ctx) => {
+  const { pool } = ctx;
+  await editedA(ctx);
+  await exportGroup(pool, 'maps');
+  await pool.query(`INSERT INTO map_spec_state (spec_name, exported_sha256) VALUES ('sx-m4-b', 'abc')
+                    ON CONFLICT (spec_name) DO UPDATE SET exported_sha256 = 'abc'`);
+  const boxes = { 'sx-m4-a': JSON.parse(canonicalSpecJson(specA())), 'sx-m4-b': JSON.parse(canonicalSpecJson(specB())) };
+  const { calls, deps } = fakeBox(boxes, { put: { status: 401, body: { detail: 'bad token' } } });
+  const res = await mapsGroup.pushToBox(pool, ['sx-m4-a', 'sx-m4-b'], deps);
+  assert.deepStrictEqual(res.map((r) => r.status), ['failed', 'failed']);
+  assert.ok(res.every((r) => /^auth_failed: /.test(r.error)));
+  assert.match(res[0].error, /revoked/);
+  assert.deepStrictEqual(calls.map((c) => `${c.method} ${c.name}`), ['GET sx-m4-a', 'PUT sx-m4-a']);
+  for (const n of ['sx-m4-a', 'sx-m4-b']) {
+    const st = await stateOf(pool, n);
+    assert.match(st.box_error, /^auth_failed: /);
+    assert.ok(!st.box_error.includes('sx-secret-token-123'));
+  }
 });
 
 dbTest('box does not know spec: skipped silently, no note', async (ctx) => {
@@ -252,10 +291,11 @@ dbTest('box does not know spec: skipped silently, no note', async (ctx) => {
   assert.strictEqual((await diffGroup(pool, 'maps')).note, undefined);
 });
 
-dbTest('box PATCH failure: per-spec note, error scrubbed of the token', async (ctx) => {
+dbTest('box PUT 500: service_error recorded, token never in box_error', async (ctx) => {
   const { pool } = ctx;
   await editedA(ctx);
-  const { deps } = fakeBox({ 'sx-m4-a': JSON.parse(canonicalSpecJson(specA())) }, { patchStatus: 500 });
+  const { deps } = fakeBox({ 'sx-m4-a': JSON.parse(canonicalSpecJson(specA())) },
+    { put: { status: 500, body: { detail: 'boom sx-secret-token-123' } } });
   const ex = await exportGroup(pool, 'maps', { pushToBox: true, boxDeps: deps });
   assert.strictEqual(ex.box[0].status, 'failed');
   const st = await stateOf(pool, 'sx-m4-a');
@@ -314,7 +354,7 @@ dbTest('a CLI-style export (no push) leaves "not pushed yet"; the next pushing e
   const ex = await exportGroup(pool, 'maps', { pushToBox: true, boxDeps: deps });
   assert.strictEqual(ex.rowCount, 0);
   assert.deepStrictEqual(ex.box.map((b) => [b.spec, b.status]), [['sx-m4-a', 'pushed']]);
-  assert.ok(calls.some((c) => c.method === 'PATCH'));
+  assert.ok(calls.some((c) => c.method === 'PUT'));
   assert.strictEqual((await diffGroup(pool, 'maps')).note, undefined);
 });
 
@@ -347,39 +387,4 @@ test('note lists at most 3 specs then +N more; unreachable replaces the lines', 
   assert.match(mapsGroup._boxNote(mixed), /^GPU box not updated: a: unreachable: x\n/);
   const allDown = [{ spec: 'a', error: 'unreachable: x' }, { spec: 'b', error: 'unreachable: y' }];
   assert.strictEqual(mapsGroup._boxNote(allDown), 'GPU box unreachable — new regions need the box (local generator: SOMET-644)');
-});
-
-// SOMET-641 final review I4: PATCH replaces whole top-level keys, so a box copy
-// whose shape differs from ours (a field we do not know) must not be PATCHed:
-// the push records shape_mismatch and the group note shows it.
-dbTest('box copy with a world field we do not have: no PATCH, box_error shape_mismatch', async (ctx) => {
-  const { pool } = ctx;
-  await editedA(ctx);
-  const theirs = JSON.parse(canonicalSpecJson(specA()));
-  theirs.worlds[1].sx_box_only = 7;
-  const { calls, deps } = fakeBox({ 'sx-m4-a': theirs });
-  const ex = await exportGroup(pool, 'maps', { pushToBox: true, boxDeps: deps });
-  assert.strictEqual(ex.rowCount, 1);
-  assert.deepStrictEqual(ex.box.map((b) => [b.spec, b.status]), [['sx-m4-a', 'failed']]);
-  assert.deepStrictEqual(calls.map((c) => c.method), ['GET'], 'no PATCH request sent');
-  const st = await stateOf(pool, 'sx-m4-a');
-  assert.strictEqual(st.box_error, 'shape_mismatch: box has worlds[].sx_box_only');
-  assert.notStrictEqual(st.box_pushed_sha256, st.exported_sha256);
-  assert.strictEqual((await diffGroup(pool, 'maps')).note, `GPU box not updated: sx-m4-a: ${st.box_error}`);
-});
-
-test('shape guard: extra keys at any level, and PATCHed top-level keys the box lacks', () => {
-  const { _shapeMismatch: shape } = require('../src/services/seedSync/mapsBoxPush.js');
-  const ours = { name: 'x', worlds: [{ key: 'a', graph: [1, 2] }, { key: 'b' }], links: [{ from: 'a', edge: 'E', to: 'b' }] };
-  const same = JSON.parse(JSON.stringify(ours));
-  assert.strictEqual(shape(ours, same, { worlds: ours.worlds }), null);
-  // An optional element key only we have (a hand-placed graph) is an edit, not a shape change.
-  const noGraph = { ...same, worlds: [{ key: 'a' }, { key: 'b' }] };
-  assert.strictEqual(shape(ours, noGraph, { worlds: ours.worlds }), null);
-  assert.strictEqual(shape(ours, { ...same, created_by: 'box' }, {}), 'box has created_by');
-  assert.strictEqual(shape(ours, { ...same, links: [{ from: 'a', edge: 'E', to: 'b', weight: 1 }] }, {}),
-    'box has links[].weight');
-  const { links, ...noLinks } = same;
-  assert.strictEqual(shape(ours, noLinks, { links }), 'box lacks links');
-  assert.strictEqual(shape(ours, { ...same, worlds: {} }, { worlds: ours.worlds }), 'box worlds is not an array');
 });

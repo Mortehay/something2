@@ -3,12 +3,12 @@
 // BEST EFFORT: nothing here may fail an export, and nothing here runs under the
 // seed_sync advisory lock (the box can take 20s per call).
 //
-// Per spec: GET the box's own copy (404 = the box does not know this spec, e.g.
-// hand-authored vale-region: `skipped`), diff it against ours at whole top-level
-// key granularity (a `worlds` array is ONE key; no finer patch format is
-// invented), and PATCH only the differing keys. No difference = `pushed`
-// without a request. A box copy whose shape differs from ours (shapeMismatch)
-// is never PATCHed: `failed` with box_error 'shape_mismatch: ...'.
+// Per spec: GET the box's own copy with its ETag (404 = the box does not know
+// this spec, e.g. hand-authored vale-region: `skipped`), then PUT our whole spec
+// with If-Match = that ETag (never `*`). 200 = `pushed` (the box's `problems`
+// list is informational); 409 = the region changed on the box since the GET:
+// `failed`, retried by the next export; 422 = rejected: `failed`; 401/403 =
+// fatal for the pass (auth_failed).
 //
 // State (map_spec_state):
 //   pushed   box_pushed_sha256 = exported_sha256, box_error = NULL
@@ -20,7 +20,6 @@
 //            spec counts as unpushed again (the box may know it by now) and
 //            the next export tries it.
 // The group note (mapsGroup.computeStatus) reads this state; see boxNote.
-const nodeUtil = require('node:util');
 const wg = require('../worldGenService.js');
 const { readStates } = require('./mapSpecState.js');
 
@@ -79,47 +78,19 @@ async function setState(db, name, pushed, error) {
     [name, pushed, error]);
 }
 
-// Top-level keys of `ours` whose value differs from the box's copy. `name` is
-// the identity, never patched.
-function changedKeys(ours, theirs) {
-  const body = {};
-  for (const k of Object.keys(ours)) {
-    if (k === 'name') continue;
-    if (!theirs || !nodeUtil.isDeepStrictEqual(ours[k], theirs[k])) body[k] = ours[k];
-  }
-  return body;
-}
+const BOX_CHANGED = 'box_changed: the region changed on the GPU box since this export — review it there, then export again';
+const AUTH_FAILED = 'auth_failed: the GPU box rejected the token (it may be revoked) — update the AI provider token, then export again';
 
-// The box's spec format is not verified, and a PATCH replaces whole top-level
-// keys: a key the box has and we do not would be dropped with them. Compared
-// before any PATCH: the top-level key sets, and the key sets of the `worlds`
-// and `links` elements (union over elements). A mismatch when the box has a
-// key we do not (any level), or lacks a top-level key we would PATCH. An
-// element key only we have (e.g. a hand-placed `graph`) is an edit, not a
-// shape change. -> null, or the first differing keys ('box has worlds[].x').
-const ELEMENT_ARRAYS = ['worlds', 'links'];
-const MAX_SHAPE_KEYS = 3;
-function shapeMismatch(ours, theirs, body) {
-  if (!theirs || typeof theirs !== 'object' || Array.isArray(theirs)) return 'box copy is not an object';
-  const extra = Object.keys(theirs).filter((k) => !(k in ours)).sort();
-  const lacks = Object.keys(body).filter((k) => !(k in theirs)).sort();
-  for (const k of ELEMENT_ARRAYS) {
-    if (!(k in theirs) || !(k in ours)) continue;
-    if (!Array.isArray(theirs[k])) return `box ${k} is not an array`;
-    const keysOf = (arr) => new Set((Array.isArray(arr) ? arr : [])
-      .flatMap((e) => (e && typeof e === 'object' && !Array.isArray(e) ? Object.keys(e) : [])));
-    const mine = keysOf(ours[k]);
-    for (const x of [...keysOf(theirs[k])].sort()) if (!mine.has(x)) extra.push(`${k}[].${x}`);
-  }
-  const parts = [];
-  if (extra.length) parts.push(`box has ${extra.slice(0, MAX_SHAPE_KEYS).join(', ')}${extra.length > MAX_SHAPE_KEYS ? ', …' : ''}`);
-  if (lacks.length) parts.push(`box lacks ${lacks.slice(0, MAX_SHAPE_KEYS).join(', ')}${lacks.length > MAX_SHAPE_KEYS ? ', …' : ''}`);
-  return parts.length ? parts.join('; ') : null;
+function rejectedText(body, token) {
+  const d = body && body.detail;
+  const list = Array.isArray(d) ? d : (d == null ? [] : [d]);
+  const first = list.slice(0, 3).map((e) => (typeof e === 'string' ? e : JSON.stringify(e))).join('; ');
+  return scrub(`box_rejected: ${first || 'the box refused the spec'}`, token).replace(/\s+/g, ' ').slice(0, MAX_ERROR);
 }
 
 // deps: { fetchImpl (tests), serviceDb (tests: where the box provider is read
 // from; default `db`) }. opts: { signal, onProgress, readSpec(name) }.
-// -> [{ spec, status: 'pushed'|'skipped'|'failed', error }]
+// -> [{ spec, status: 'pushed'|'skipped'|'failed', error, problems? }]
 async function pushToBox(db, specNames, deps = {}, opts = {}) {
   const wgDeps = deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {};
   const svcDb = deps.serviceDb || db;
@@ -148,33 +119,39 @@ async function pushToBox(db, specNames, deps = {}, opts = {}) {
         res = { spec: name, status: 'failed', error: fatal };
       } else {
         const ours = readSpec(name);
-        let theirs = null;
-        let known = true;
+        let got = null;
         try {
-          theirs = await wg.getWorldSpec(svcDb, name, wgDeps);
+          got = await wg.getWorldSpecWithEtag(svcDb, name, wgDeps);
         } catch (e) {
-          if (e && e.code === 'not_found') known = false; else throw e;
+          if (!(e && e.code === 'not_found')) throw e;
         }
-        if (!known) {
+        if (!got) {
           await setState(db, name, skippedMarker(sha), null);
           res = { spec: name, status: 'skipped', error: null };
         } else {
-          const body = changedKeys(ours, theirs);
-          const mismatch = Object.keys(body).length ? shapeMismatch(ours, theirs, body) : null;
-          if (mismatch) {
-            // Not PATCHed: recorded, and the group note shows it.
-            const error = `shape_mismatch: ${mismatch}`.slice(0, MAX_ERROR);
+          let put;
+          try {
+            put = await wg.putWorldSpec(svcDb, name, ours, got.etag, wgDeps);
+          } catch (e) {
+            if (!(e && e.code === 'not_found')) throw e;
+            put = { status: 404 };
+          }
+          if (put.status === 404) {
+            await setState(db, name, skippedMarker(sha), null);
+            res = { spec: name, status: 'skipped', error: null };
+          } else if (put.status === 409 || put.status === 422) {
+            const error = put.status === 409 ? BOX_CHANGED : rejectedText(put.body, token);
             await setState(db, name, st.box_pushed_sha256 || null, error);
             res = { spec: name, status: 'failed', error };
           } else {
-            if (Object.keys(body).length) await wg.patchWorld(svcDb, name, body, wgDeps);
             await setState(db, name, sha, null);
-            res = { spec: name, status: 'pushed', error: null };
+            const problems = put.body && Array.isArray(put.body.problems) ? put.body.problems : [];
+            res = { spec: name, status: 'pushed', error: null, problems };
           }
         }
       }
     } catch (e) {
-      const error = errorText(e, token);
+      const error = (e && e.code === 'auth_failed') ? AUTH_FAILED : errorText(e, token);
       if (e && FATAL.has(e.code)) fatal = error;
       try { await setState(db, name, st ? st.box_pushed_sha256 : null, error); } catch { /* best effort */ }
       res = { spec: name, status: 'failed', error };
@@ -185,6 +162,17 @@ async function pushToBox(db, specNames, deps = {}, opts = {}) {
   return results;
 }
 
+// Informational: "GPU box notes: N problems on <spec>" per pushed spec the box
+// flagged. Never an error, never blocks. [] -> null.
+function problemsNote(results) {
+  const lines = (results || []).filter((r) => r.problems && r.problems.length)
+    .map((r) => `GPU box notes: ${r.problems.length} problem${r.problems.length === 1 ? '' : 's'} on ${r.spec}`);
+  if (!lines.length) return null;
+  const shown = lines.slice(0, MAX_NOTE_LINES);
+  if (lines.length > MAX_NOTE_LINES) shown.push(`+${lines.length - MAX_NOTE_LINES} more`);
+  return shown.join('\n');
+}
+
 module.exports = {
-  pushToBox, boxNote, boxProblems, needsPush, UNREACHABLE_NOTE, _changedKeys: changedKeys, _shapeMismatch: shapeMismatch,
+  pushToBox, boxNote, boxProblems, problemsNote, needsPush, UNREACHABLE_NOTE,
 };

@@ -107,9 +107,11 @@ async function resolveWorldService(db) {
 // body), and a suite that had to arrange a real one would either be flaky or
 // would not cover them at all. safeFetch already takes the same injection
 // point, for the same reason.
-async function request(service, path, { method = 'GET', body = null, as = 'json' } = {}, deps = {}) {
+async function request(service, path, {
+  method = 'GET', body = null, as = 'json', headers: extra = null, passStatuses = null,
+} = {}, deps = {}) {
   const url = new URL(path, `${service.origin}/`).toString();
-  const headers = { ...authHeaders(service.provider) };
+  const headers = { ...authHeaders(service.provider), ...(extra || {}) };
   if (body !== null) headers['Content-Type'] = 'application/json';
 
   let res;
@@ -144,6 +146,12 @@ async function request(service, path, { method = 'GET', body = null, as = 'json'
   if (res.status === 404) {
     throw new WorldGenError('not_found', 'That region does not exist on the world-spec service.', { status: 404 });
   }
+  if (passStatuses && passStatuses.includes(res.status)) {
+    // The caller handles this status as data (409/422 on a spec PUT).
+    let json = null;
+    try { json = (await readJsonCapped(res, MAX_SPEC_BYTES())).json; } catch { /* body is optional */ }
+    return { json, status: res.status, headers: res.headers };
+  }
   if (!res.ok) {
     // The service answers errors as {"detail": "..."}; surface it verbatim
     // when present rather than replacing a specific complaint with a generic one.
@@ -169,7 +177,7 @@ async function request(service, path, { method = 'GET', body = null, as = 'json'
   }
   const read = await readJsonCapped(res, MAX_SPEC_BYTES());
   if (read.error) throw new WorldGenError('service_error', `Response rejected: ${read.error}`);
-  return { json: read.json };
+  return { json: read.json, status: res.status, headers: res.headers };
 }
 
 // A region name reaches us from the browser and is interpolated into a URL
@@ -200,6 +208,32 @@ async function getWorldSpec(db, name, deps = {}) {
   const service = await resolveWorldService(db);
   const { json } = await request(service, `/api/worlds/${name}`, {}, deps);
   return json;
+}
+
+// GET with the stored-bytes ETag, quoted exactly as the box sent it: the
+// If-Match of a following putWorldSpec. -> { spec, etag }
+async function getWorldSpecWithEtag(db, name, deps = {}) {
+  assertName(name);
+  const service = await resolveWorldService(db);
+  const { json, headers } = await request(service, `/api/worlds/${name}`, {}, deps);
+  const etag = headers && headers.get && headers.get('etag');
+  if (!etag) throw new WorldGenError('service_error', 'The world-spec service sent no ETag for that region.', { status: 502 });
+  return { spec: json, etag };
+}
+
+// Stores a WHOLE spec, only if the box copy is still the one `etag` names
+// (If-Match is mandatory; `*` is never sent). 409 (changed) and 422 (rejected)
+// come back as data: -> { status, body }. Other failures throw as elsewhere.
+async function putWorldSpec(db, name, spec, etag, deps = {}) {
+  assertName(name);
+  if (typeof etag !== 'string' || !etag || etag.trim() === '*') {
+    throw new WorldGenError('bad_etag', 'A spec PUT needs the ETag from the GET.', { status: 400 });
+  }
+  const service = await resolveWorldService(db);
+  const { json, status } = await request(service, `/api/worlds/${name}/spec`, {
+    method: 'PUT', body: spec, headers: { 'If-Match': etag }, passStatuses: [409, 422],
+  }, deps);
+  return { status, body: json };
 }
 
 async function getWorldReport(db, name, deps = {}) {
@@ -244,6 +278,8 @@ module.exports = {
   resolveWorldService,
   listWorlds,
   getWorldSpec,
+  getWorldSpecWithEtag,
+  putWorldSpec,
   getWorldReport,
   getPreview,
   createWorld,

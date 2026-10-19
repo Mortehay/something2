@@ -62,7 +62,7 @@ const { specFromDb, canonicalSpecJson, compassSlots } = require('../mapSpecExpor
 const { validateMapSpec, villagesOf } = require('../../../seeds/mapSpec.js');
 const { oppositeEdge } = require('../mapService.js');
 const { setEntryWorldByName } = require('../entryWorld.js');
-const { pushToBox: pushSpecs, boxNote, boxProblems, needsPush } = require('./mapsBoxPush.js');
+const { pushToBox: pushSpecs, boxNote, boxProblems, problemsNote, needsPush } = require('./mapsBoxPush.js');
 
 const GROUP_ID = 'maps';
 const TABLE = 'map_specs';
@@ -899,6 +899,9 @@ async function exportMaps(pool, opts = {}) {
       result.box = await pushToBox(pool, names, opts.boxDeps || {}, {
         signal: opts.signal, onProgress: opts.onProgress,
       });
+      // Informational, from this push only (not persisted).
+      const pn = problemsNote(result.box);
+      if (pn) result.boxNote = pn;
     } catch (e) {
       console.error('seed-sync: maps export committed but the GPU box push failed:', e.message);
       result.box = [];
