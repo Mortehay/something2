@@ -6,7 +6,7 @@ const { tableOf, gitOf, localByKeyOf } = require('./diffGroup.js');
 const { stableStringify } = require('./canonical.js');
 const { rollback } = require('./txn.js');
 const {
-  isEmpty, assetsRoot, hasAssets, checkGitAssets, fileReader, uploadGitAssets,
+  isEmpty, assetsRoot, hasAssets, checkGitAssets, fileReader, uploadGitAssets, uploadCount,
 } = require('./assets.js');
 
 const own = (obj, k) => Object.prototype.hasOwnProperty.call(obj, k);
@@ -87,11 +87,15 @@ async function stageUploads(pool, planOnSnapshot, { store, onProgress, signal })
   if (!planned) return { assetInfo: new Map(), uploads: noUploads() };
   const { cd, assetInfo, steps } = planned;
   const uploads = noUploads();
-  for (const spec of cd.specs) {
-    if (!hasAssets(spec)) continue;
-    const rows = steps.filter((s) => s.decision === 'git' && s.row.table === spec.table)
-      .map((s) => assetNeeds(cd, s.row)).filter(Boolean);
-    const up = await uploadGitAssets(store, rows, spec, { onProgress, signal });
+  // One total for the whole group, so progress never restarts per table.
+  const work = cd.specs.filter(hasAssets).map((spec) => ({
+    spec,
+    rows: steps.filter((s) => s.decision === 'git' && s.row.table === spec.table)
+      .map((s) => assetNeeds(cd, s.row)).filter(Boolean),
+  }));
+  const progress = { done: 0, total: work.reduce((n, w) => n + uploadCount(w.rows, w.spec), 0) };
+  for (const { spec, rows } of work) {
+    const up = await uploadGitAssets(store, rows, spec, { onProgress, signal, progress });
     for (const [uuid, vals] of up.values) uploads.values.set(uuid, vals);
     uploads.cacheEntries.push(...up.cacheEntries);
   }

@@ -646,3 +646,17 @@ dbTest("export never overwrites git's file before refusing git_newer", async (t,
     { file: 'sx_tiles/sx_a.png', sha256: sha256(ICON) });
   assert.deepStrictEqual(filesUnder(root).filter((f) => f.endsWith('.tmp')), []);
 });
+
+// P-1: seed upload progress counts the whole group (one total up front), like
+// the export's download progress -- never restarting per table.
+dbTest('seed upload progress is monotonic across the group', async (t, pool, { store }) => {
+  await seedFixture(pool);
+  await exportGroup(pool, 'sx_assets', { store });
+  await forgetLocally(pool, 'sx_art');
+  await forgetLocally(pool, 'sx_clip');
+  const seen = [];
+  await apply(pool, 'sx_assets', {}, { store: fakeStore(), onProgress: (p) => seen.push(p) });
+  // sx_a image + sprite, sx_b image (sx_c's is ''), the clip.
+  assert.deepStrictEqual(seen.map((p) => [p.phase, p.done, p.total]),
+    [['upload', 1, 4], ['upload', 2, 4], ['upload', 3, 4], ['upload', 4, 4]]);
+});

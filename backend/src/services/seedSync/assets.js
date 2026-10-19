@@ -555,13 +555,17 @@ function fileKeyName(file) {
 //    object stays as an orphan).
 // Both are skipped when the object exists. A file that no longer matches its
 // hash refuses 'assets_changed' (re-preview). Outside the lock; checks
-// `signal` between files.
-async function uploadGitAssets(store, rows, spec, { onProgress, signal, root = path.resolve(assetsRoot()) } = {}) {
+// `signal` between files. `progress` ({ done, total }, uploadCount) is shared
+// by the calls of one seed so onProgress counts the whole group; default:
+// this call alone.
+const uploadCount = (rows, spec) => rows.reduce((n, r) => n + assetEntries(spec).filter(([c]) => !isEmpty(r[c])).length, 0);
+
+async function uploadGitAssets(store, rows, spec, {
+  onProgress, signal, root = path.resolve(assetsRoot()), progress = { done: 0, total: uploadCount(rows, spec) },
+} = {}) {
   const values = new Map();
   const cacheEntries = [];
   const uploaded = new Set(); // object keys put or found in this call
-  const total = rows.reduce((n, r) => n + assetEntries(spec).filter(([c]) => !isEmpty(r[c])).length, 0);
-  let done = 0;
   const readChecked = async (part) => {
     const { buf } = await readRepoFile(root, part.file);
     if (!buf || !partMatches(part, buf)) {
@@ -605,8 +609,8 @@ async function uploadGitAssets(store, rows, spec, { onProgress, signal, root = p
         await putOnce(key, buf, 'audio/ogg');
         vals[col] = key;
       }
-      done += 1;
-      if (onProgress) onProgress({ phase: 'upload', done, total });
+      progress.done += 1;
+      if (onProgress) onProgress({ phase: 'upload', done: progress.done, total: progress.total });
     }
     values.set(row.sync_uuid, vals);
   }
@@ -616,6 +620,6 @@ async function uploadGitAssets(store, rows, spec, { onProgress, signal, root = p
 module.exports = {
   ASSET_FILE_MISSING, ASSET_FILE_MISMATCH, ASSET_REASONS, BLOCKED_MESSAGES,
   isEmpty, assetsRoot, hasAssets, checkAssets, localAssetValue, translateRow, rowCacheKeys, hasUnhashed,
-  loadCache, recordCache, prepareExportAssets, checkGitAssets, fileReader, uploadGitAssets,
+  loadCache, recordCache, prepareExportAssets, checkGitAssets, fileReader, uploadGitAssets, uploadCount,
   _hashedFiles: () => hashedFiles,
 };
