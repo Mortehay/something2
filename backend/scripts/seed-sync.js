@@ -3,6 +3,7 @@
 //
 //   node scripts/seed-sync.js status [--group=g]
 //   node scripts/seed-sync.js export --group=g | --all
+//   (Maps export here never pushes to the GPU box; the admin tab's export does.)
 //   node scripts/seed-sync.js seed   --group=g | --all [--resolve=git|local]
 //
 // Output: one stable line per group, `<group> <ok|refused:<code>|error> <details>`

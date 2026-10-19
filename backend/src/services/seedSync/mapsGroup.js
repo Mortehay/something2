@@ -58,7 +58,7 @@ const { specFromDb, canonicalSpecJson, compassSlots } = require('../mapSpecExpor
 const { validateMapSpec } = require('../../../seeds/mapSpec.js');
 const { oppositeEdge } = require('../mapService.js');
 const { setEntryWorldByName } = require('../entryWorld.js');
-const { pushToBox: pushSpecs, boxNote, boxProblems } = require('./mapsBoxPush.js');
+const { pushToBox: pushSpecs, boxNote, boxProblems, needsPush } = require('./mapsBoxPush.js');
 
 const GROUP_ID = 'maps';
 const TABLE = 'map_specs';
@@ -363,7 +363,6 @@ function zeroCounts() {
   return Object.fromEntries(KINDS.map((k) => [k, 0]));
 }
 
-// The full status: { git, diff (diffGroup's summary shape), signature }.
 // Pushes the exported specs' edits to the GPU box (mapsBoxPush.js).
 const pushToBox = (db, names, deps, opts = {}) => pushSpecs(db, names, deps, {
   readSpec: (name) => JSON.parse(fs.readFileSync(specFile(name), 'utf8')), ...opts,
@@ -371,6 +370,7 @@ const pushToBox = (db, names, deps, opts = {}) => pushSpecs(db, names, deps, {
 
 const boxNoteOf = (states, specs) => boxNote(boxProblems(states, specs.map((g) => g.name)));
 
+// The full status: { git, diff (diffGroup's summary shape), signature }.
 async function computeStatus(db) {
   const git = await readGit();
   const dbVersion = await schemaVersion(db);
@@ -448,13 +448,14 @@ async function computeStatus(db) {
   else if (localEdits > 0) status = 'local_edits';
   else if (gitChanges > 0) status = 'git_newer';
   else if (counts.baseline > 0) status = 'baseline_pending';
+  const boxNote0 = boxNoteOf(states, git.specs);
   const diff = {
     groupId: GROUP_ID, header: git.header, status, counts, localEdits, gitChanges, tokensMissing: 0,
     tables: [{ table: TABLE, counts }], warnings, rows,
     // A baseline still to record (any status): the tab says so.
     ...(counts.baseline > 0 ? { hint: BASELINE_HINT } : {}),
     // Specs the GPU box was not updated for (mapsBoxPush.js): the tab shows it.
-    ...(boxNoteOf(states, git.specs) ? { note: boxNoteOf(states, git.specs) } : {}),
+    ...(boxNote0 ? { note: boxNote0 } : {}),
   };
   // What a preview showed: the manifest, every row's kind/default and the git
   // and DB-side texts behind it. Apply recomputes it under the lock.
@@ -804,8 +805,11 @@ async function exportMaps(pool, opts = {}) {
   // call), so its push comes last and can never fail the export.
   if (opts.pushToBox) {
     try {
+      // Written specs, plus any spec the box has not settled for its current
+      // export (an earlier failure, a CLI export that never pushes -- the CLI
+      // deliberately does not call the box -- or a stale skip).
       const retry = [];
-      for (const [name, st] of await readStates(pool)) if (st.box_error && !result.written.includes(name)) retry.push(name);
+      for (const [name, st] of await readStates(pool)) if (needsPush(st) && !result.written.includes(name)) retry.push(name);
       const names = [...result.written, ...retry].filter((n) => allSpecNames.has(n));
       result.box = await pushToBox(pool, names, opts.boxDeps || {}, {
         signal: opts.signal, onProgress: opts.onProgress,

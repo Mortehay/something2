@@ -305,6 +305,35 @@ dbTest('progress: phase box with done/total per spec; a retry picks up an earlie
   assert.strictEqual((await stateOf(pool, 'sx-m4-a')).box_error, null);
 });
 
+dbTest('a CLI-style export (no push) leaves "not pushed yet"; the next pushing export retries it', async (ctx) => {
+  const { pool } = ctx;
+  await editedA(ctx);
+  await exportGroup(pool, 'maps');
+  assert.strictEqual((await diffGroup(pool, 'maps')).note, 'GPU box not updated: sx-m4-a: not pushed yet');
+  const { calls, deps } = fakeBox({ 'sx-m4-a': JSON.parse(canonicalSpecJson(specA())) });
+  const ex = await exportGroup(pool, 'maps', { pushToBox: true, boxDeps: deps });
+  assert.strictEqual(ex.rowCount, 0);
+  assert.deepStrictEqual(ex.box.map((b) => [b.spec, b.status]), [['sx-m4-a', 'pushed']]);
+  assert.ok(calls.some((c) => c.method === 'PATCH'));
+  assert.strictEqual((await diffGroup(pool, 'maps')).note, undefined);
+});
+
+dbTest('a stale skip marker counts as unpushed and is retried', async (ctx) => {
+  const { pool } = ctx;
+  await editedA(ctx);
+  await exportGroup(pool, 'maps', { pushToBox: true, boxDeps: fakeBox({}).deps });
+  const st = await stateOf(pool, 'sx-m4-a');
+  assert.strictEqual(st.box_pushed_sha256, `skipped:${st.exported_sha256}`);
+  assert.strictEqual((await diffGroup(pool, 'maps')).note, undefined);
+  // The spec is re-exported with other content: the old marker no longer matches.
+  await pool.query("UPDATE map_spec_state SET box_pushed_sha256 = 'skipped:old' WHERE spec_name = 'sx-m4-a'");
+  assert.strictEqual((await diffGroup(pool, 'maps')).note, 'GPU box not updated: sx-m4-a: not pushed yet');
+  const { deps } = fakeBox({ 'sx-m4-a': JSON.parse(canonicalSpecJson(specA())) });
+  const ex = await exportGroup(pool, 'maps', { pushToBox: true, boxDeps: deps });
+  assert.deepStrictEqual(ex.box.map((b) => b.status), ['pushed']);
+  assert.strictEqual((await diffGroup(pool, 'maps')).note, undefined);
+});
+
 test('note lists at most 3 specs then +N more; unreachable replaces the lines', () => {
   const rows = ['a', 'b', 'c', 'd', 'e'].map((k) => ({ spec: k, error: 'service_error: boom' }));
   assert.strictEqual(mapsGroup._boxNote(rows), [

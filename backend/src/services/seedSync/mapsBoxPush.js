@@ -13,9 +13,11 @@
 //   pushed   box_pushed_sha256 = exported_sha256, box_error = NULL
 //   failed   box_error = '<code>: <message>' (<= 300 chars, token scrubbed)
 //   skipped  box_pushed_sha256 = 'skipped:<exported_sha256>', box_error = NULL.
-//            The marker keeps the exported hash in it so a later EXPORT of new
-//            content (which re-pushes) is distinguishable from a stale skip, and
-//            so the group note never fires for a spec the box does not know.
+//            The marker keeps the exported hash in it: while it matches
+//            exported_sha256 the spec is settled and never produces a note; once
+//            the spec is re-exported with new content the marker is stale, the
+//            spec counts as unpushed again (the box may know it by now) and
+//            the next export tries it.
 // The group note (mapsGroup.computeStatus) reads this state; see boxNote.
 const nodeUtil = require('node:util');
 const wg = require('../worldGenService.js');
@@ -29,6 +31,15 @@ const FATAL = new Set(['unreachable', 'auth_failed', 'not_configured']);
 
 const skippedMarker = (sha) => `skipped:${sha}`;
 const isSkipped = (v) => typeof v === 'string' && v.startsWith('skipped:');
+
+// A state row whose current export the box has not settled: a recorded error,
+// or a pushed hash / skip marker that is not for the current exported hash.
+function needsPush(st) {
+  if (!st || !st.exported_sha256) return false;
+  if (st.box_error) return true;
+  const v = st.box_pushed_sha256;
+  return (isSkipped(v) ? v !== skippedMarker(st.exported_sha256) : v !== st.exported_sha256);
+}
 
 function scrub(text, token) {
   let out = String(text);
@@ -55,9 +66,8 @@ function boxProblems(states, specNames) {
   const out = [];
   for (const name of specNames) {
     const st = states.get(name);
-    if (!st || !st.exported_sha256 || isSkipped(st.box_pushed_sha256)) continue;
-    if (st.box_error) out.push({ spec: name, error: st.box_error });
-    else if (st.box_pushed_sha256 !== st.exported_sha256) out.push({ spec: name, error: 'not pushed yet' });
+    if (!needsPush(st)) continue;
+    out.push({ spec: name, error: st.box_error || 'not pushed yet' });
   }
   return out;
 }
@@ -139,4 +149,4 @@ async function pushToBox(db, specNames, deps = {}, opts = {}) {
   return results;
 }
 
-module.exports = { pushToBox, boxNote, boxProblems, UNREACHABLE_NOTE, _changedKeys: changedKeys };
+module.exports = { pushToBox, boxNote, boxProblems, needsPush, UNREACHABLE_NOTE, _changedKeys: changedKeys };
