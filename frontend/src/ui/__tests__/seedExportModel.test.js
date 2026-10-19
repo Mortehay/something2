@@ -438,6 +438,26 @@ describe('binary groups stay out of the batches', () => {
     expect(separateNote([{ label: 'Art' }, { label: 'Audio' }])).toBe('Art and Audio run separately');
     expect(separateNote([{ label: 'Maps' }])).toBe('Maps runs separately');
   });
+
+  // SOMET-641: a PC whose specs match git but whose baseline is not recorded.
+  it('baseline_pending: a warn badge with the hint, Seed enabled, and the baseline row applies', () => {
+    const g = grp('maps', 'baseline_pending', { inGit: { exported_at: 'x' }, job: true,
+      hint: "Seed Maps once to record this PC's baseline — no map data changes" });
+    expect(statusBadge(g)).toEqual({ label: "Seed Maps once to record this PC's baseline — no map data changes", tone: 'warn' });
+    expect(statusBadge({ ...g, hint: undefined }).label).toMatch(/record this PC's baseline/);
+    expect(statusBadge(g).label).not.toBe('in sync');
+    expect(seedBlockReason(g)).toBe(null);
+    expect(exportBlockReason(g)).toBe(null);
+    const rows = [{ syncUuid: 'u1', kind: 'baseline', defaultDecision: 'local', allowedDecisions: ['local'], fields: [] }];
+    const decisions = initialDecisions(rows);
+    expect(decisions).toEqual({ u1: 'local' });
+    expect(applyGate(rows, decisions).canApply).toBe(true);
+    expect(seedAllGate([{ rows, decisions }]).canApply).toBe(true);
+    expect(decisionLabel(rows[0], 'local')).toBe('Record baseline');
+    expect(kindLabel('baseline')).toBe('baseline not recorded here');
+    expect(kindLabel('conflict')).toBe('changed here and in git');
+    expect(kindLabel('git_newer')).toBe('changed in git');
+  });
 });
 
 describe('assetText', () => {

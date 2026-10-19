@@ -51,9 +51,10 @@ function Section({ group, query, state, setState, done, open, toggle }) {
   );
 }
 
-// binaryGroups (Art, Audio) are never part of the batch: they run as
-// background jobs, one at a time, so each gets its own button that opens its
-// own preview (onSeedGroup). busy: a job is running; nothing can apply.
+// binaryGroups -- every group that runs as a background job (Art, Audio,
+// Maps; runsSeparately) -- are never part of the batch: one job at a time, so
+// each gets its own button that opens its own preview (onSeedGroup). busy: a
+// job is running; nothing can apply.
 export default function SeedAllModal({ groups, onClose, binaryGroups = [], onSeedGroup, busy = false }) {
   const queries = useSeedPreviews(groups.map((g) => g.id));
   const apply = useApplyAll();

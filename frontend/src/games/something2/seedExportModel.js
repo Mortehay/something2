@@ -6,6 +6,7 @@
 // The git file was exported from a newer database schema: both export and
 // seed are refused until this PC runs its migrations.
 const SCHEMA_NEWER = 'run migrations first';
+const BASELINE_HINT = "Seed Maps once to record this PC's baseline — no map data changes";
 
 export function statusBadge(group) {
   switch (group.status) {
@@ -24,6 +25,9 @@ export function statusBadge(group) {
     }
     case 'bad_file': return { label: 'bad export file', tone: 'bad' };
     case 'schema_newer': return { label: SCHEMA_NEWER, tone: 'bad' };
+    // SOMET-641 (Maps): every spec matches git, but this PC has not recorded
+    // its baseline yet; one Seed records it without changing map data.
+    case 'baseline_pending': return { label: group.hint || BASELINE_HINT, tone: 'warn' };
     default: return { label: String(group.status), tone: 'info' };
   }
 }
@@ -127,6 +131,7 @@ const DECISION_LABEL = { git: 'Take git', local: 'Keep local', delete: 'Delete l
 export function decisionLabel(row, d) {
   if (row.kind === 'new' && d === 'local') return 'Skip (drops it from git on next export)';
   if (d === 'git' && (row.kind === 'new' || row.kind === 'deleted_here')) return 'Create';
+  if (row.kind === 'baseline' && d === 'local') return 'Record baseline';
   return DECISION_LABEL[d] || d;
 }
 
@@ -139,6 +144,10 @@ const KIND_LABELS = {
   new: 'new from git',
   deleted_in_git: 'deleted in git',
   only_here: 'only on this PC',
+  // Maps group (SOMET-641), one row per spec file.
+  git_newer: 'changed in git',
+  conflict: 'changed here and in git',
+  baseline: 'baseline not recorded here',
 };
 export const KINDS = Object.keys(KIND_LABELS);
 export const kindLabel = (kind) => KIND_LABELS[kind] || kind;

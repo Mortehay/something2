@@ -26,12 +26,16 @@
 //   conflict     G != B and W != B (red: no default)
 //   only_here    applied here, gone from git (keep only; never deletes)
 // "W != B" compares canonical texts. Without a base_spec (a state row written
-// before base_spec existed): when its hash equals G's, B = G; otherwise there
+// before base_spec existed): when its hash equals G's, B = G and the spec is
+// adopted (base_spec back-filled by the next seed / export); otherwise there
 // is no copy of B, so W is computed from G and any difference is BOTH an edit
-// and a git change, i.e. a conflict -- the admin decides. The same rule holds
+// and a git change, i.e. a conflict -- the admin decides; the row carries
+// blockedReason 'no_baseline' and a note, and stays red. The same rule holds
 // for a spec never tracked here whose worlds ARE in the DB (a PC that built
-// them before seed sync): W == G reads in_sync and is ADOPTED (base = G) by
-// the next seed or export, under the lock -- status never writes; W != G (or
+// them before seed sync; "here" = the writer's seed-aware match): W == G is
+// a `baseline` row (group status baseline_pending, the only decision records
+// base = G -- no map data changes), recorded by the next seed or export under
+// the lock -- status never writes; W != G (or
 // only some of its worlds here) is a conflict, and Keep local makes it an
 // edit of G that export writes back.
 //
@@ -59,11 +63,17 @@ const GROUP_ID = 'maps';
 const TABLE = 'map_specs';
 const MANIFEST = `${GROUP_ID}.json`;
 const HEADER_FIELDS = ['group', 'exported_at', 'exported_by', 'schema_version', 'spec_count'];
-const DEFAULTS = { new: 'git', git_newer: 'git', edited_here: 'local', conflict: null, only_here: 'local' };
+// `baseline`: a spec in sync whose base is not recorded here yet; its only
+// decision records it (no map data changes).
+const DEFAULTS = {
+  new: 'git', git_newer: 'git', edited_here: 'local', conflict: null, only_here: 'local', baseline: 'local',
+};
 // A new spec has nothing local to keep; a spec gone from git is never deleted.
 const ALLOWED = {
   new: ['git'], git_newer: ['git', 'local'], edited_here: ['git', 'local'], conflict: ['git', 'local'], only_here: ['local'],
+  baseline: ['local'],
 };
+const BASELINE_HINT = 'Seed Maps once to record this PC\'s baseline — no map data changes';
 const KINDS = Object.keys(DEFAULTS);
 const LOCAL_EDIT_KINDS = ['edited_here', 'conflict'];
 const GIT_CHANGE_KINDS = ['new', 'git_newer', 'conflict'];
@@ -291,36 +301,44 @@ function makeRow(name, kind, fields) {
 }
 
 // One spec's status on this PC (see the header). `inputs` from writerInputs.
-// `adopt: true` marks a spec that reads in_sync but has no usable base here
-// (first adoption on a PC that built its worlds before seed sync, or a legacy
-// state row): seed and export record base = git for it, under the lock --
-// status itself never writes.
+// `adopt: true` marks a spec whose base_spec is not recorded here although git's
+// version is known to be the base or to match the DB: a PC that built its
+// worlds before seed sync (no state row, DB == git), or a legacy state row
+// whose hash is git's. Seed and export record base = git for it, under the
+// lock -- status itself never writes.
+const NO_BASELINE = 'no_baseline';
+const NO_BASELINE_MESSAGE = 'No baseline on this PC — the two sides can\'t be told apart. '
+  + 'Take git unless you made these edits here.';
 async function specStatus(db, g, st, inputs) {
   const worldNames = g.spec.worlds.map((w) => w.name);
   const tracked = st && (st.applied_sha256 || st.exported_sha256);
   let baseText = tracked ? st.base_spec : null;
-  if (tracked && baseText == null && laterHash(st) === g.hash) baseText = g.text;
+  let adopt = false;
+  if (tracked && baseText == null && laterHash(st) === g.hash) {
+    // Legacy row (hashes only) whose hash is git's: git IS the base; back-fill it.
+    baseText = g.text;
+    adopt = true;
+  }
   if (baseText == null) {
-    let missing = 0;
-    if (!tracked) {
-      const { rows } = await db.query('SELECT name FROM worlds WHERE name = ANY($1::text[])', [worldNames]);
-      const here = new Set(rows.map((r) => r.name));
-      missing = worldNames.filter((n) => !here.has(n)).length;
-      // None of its worlds here: a spec this PC never built.
-      if (missing === worldNames.length) {
-        return { kind: 'new', fields: fieldsOf([], worldNames, worldNames), notes: [], outNames: [] };
-      }
-    }
-    // No copy of the base: compare the DB with git. Equal -> in sync (adopt);
-    // different -> both may have changed, a conflict. Some of its worlds
-    // missing is a conflict too (the writer keeps a missing world as the
-    // spec has it, so equality would not prove anything).
+    // No copy of the base (never tracked here, or a legacy row whose hash is
+    // not git's): compare the DB with git. Which worlds are here comes from
+    // the writer's seed-aware match, so a spec whose worlds were all renamed
+    // is not "new" (a seed would build them a second time).
     const w = await specFromDb(db, g.spec, inputs);
+    const matched = w.matchedWorlds.length;
+    if (!tracked && matched === 0) {
+      return { kind: 'new', fields: fieldsOf([], worldNames, worldNames), notes: [], outNames: [] };
+    }
+    // Equal -> in sync (adopt); different -> both sides may have changed, a
+    // conflict with no default. Some of its worlds missing is a conflict too
+    // (the writer keeps a missing world as the spec has it, so equality would
+    // not prove anything).
     const outText = canonicalSpecJson(w.spec);
-    const changed = outText !== g.text || missing > 0;
+    const changed = outText !== g.text || matched < worldNames.length;
     const names = changed ? changedWorlds(g.spec, w.spec) : [];
     return {
-      kind: changed ? 'conflict' : null, adopt: !changed, fields: fieldsOf(names, names, worldNames), notes: w.notes,
+      kind: changed ? 'conflict' : null, adopt: !changed, noBaseline: changed,
+      fields: fieldsOf(names, names, worldNames), notes: w.notes,
       outNames: w.spec.worlds.map((x) => x.name), outText,
     };
   }
@@ -332,6 +350,7 @@ async function specStatus(db, g, st, inputs) {
   const kind = edited && gitNewer ? 'conflict' : edited ? 'edited_here' : gitNewer ? 'git_newer' : null;
   return {
     kind,
+    adopt,
     fields: fieldsOf(edited ? changedWorlds(base, w.spec) : [], gitNewer ? changedWorlds(base, g.spec) : [], worldNames),
     notes: w.notes,
     outNames: w.spec.worlds.map((x) => x.name),
@@ -377,7 +396,14 @@ async function computeStatus(db) {
     // The writer's notes (a world matched by seed as a rename, a doorway no
     // spec owns, ...): never blocking, shown so the admin can confirm.
     for (const message of s.notes) warnings.push({ code: 'map_note', key: g.name, message });
-    if (s.kind) rows.push(makeRow(g.name, s.kind, s.fields));
+    if (s.kind) {
+      const row = makeRow(g.name, s.kind, s.fields);
+      // A legacy/no-base conflict: red, with a note on why (no default).
+      if (s.noBaseline) Object.assign(row, { blockedReason: NO_BASELINE, blockedMessage: NO_BASELINE_MESSAGE });
+      rows.push(row);
+    } else if (s.adopt) {
+      rows.push({ ...makeRow(g.name, 'baseline', []), blockedMessage: BASELINE_HINT });
+    }
   }
   const gitNames = new Set(git.specs.map((g) => g.name));
   for (const [name, st] of states) {
@@ -413,9 +439,12 @@ async function computeStatus(db) {
   if (fileVersion > dbVersion) status = 'schema_newer';
   else if (localEdits > 0) status = 'local_edits';
   else if (gitChanges > 0) status = 'git_newer';
+  else if (counts.baseline > 0) status = 'baseline_pending';
   const diff = {
     groupId: GROUP_ID, header: git.header, status, counts, localEdits, gitChanges, tokensMissing: 0,
     tables: [{ table: TABLE, counts }], warnings, rows,
+    // A baseline still to record (any status): the tab says so.
+    ...(counts.baseline > 0 ? { hint: BASELINE_HINT } : {}),
   };
   // What a preview showed: the manifest, every row's kind/default and the git
   // and DB-side texts behind it. Apply recomputes it under the lock.
@@ -423,7 +452,7 @@ async function computeStatus(db) {
     const d = details.get(r.key);
     return `${r.key}:${r.kind}:${r.defaultDecision}:${d ? d.g.hash : ''}:${d && d.outText ? textHash(d.outText) : ''}`;
   }).sort();
-  // Specs in sync here without a base: seed / export adopt them (base = git).
+  // Specs without a recorded base whose base is git: seed / export adopt them.
   const adopt = git.specs.filter((g) => details.get(g.name).adopt).map((g) => g.name);
   const signature = textHash(`${git.header.exported_at}\n${git.entryWorld}\n${parts.join('\n')}\nadopt:${adopt.join(',')}`);
   return { git, dbVersion, details, diff, signature, adopt };
@@ -473,7 +502,7 @@ function planDecisions(cs, decisions) {
 // runs its own transaction per spec (it reads catalogs and resolves to_name
 // through the pool, outside it), so a seed is NOT one transaction. Each
 // spec's applied hash is recorded right after it commits; a failure stops the
-// seed with SyncRefused('partial_apply', { applied, failed, error }). The
+// seed with SyncRefused('partial_apply', { applied, failed, step, error }). The
 // seed_sync advisory lock is held (on its own connection) for the whole run,
 // so no other seed or export interleaves. Then the manifest's entry world.
 async function apply(pool, decisions, opts = {}) {
@@ -510,16 +539,22 @@ async function apply(pool, decisions, opts = {}) {
         `entry world "${entry}" does not exist here; seed its spec (${cs.git.owner.get(entry)}) too`, { entryWorld: entry });
     }
 
+    // A cancel queued while this job waited for the lock still counts.
+    if (opts.signal && opts.signal.aborted) throw new SyncRefused('cancelled', 'cancelled');
     runId = await startRun(pool, GROUP_ID, 'seed');
     const reach = reachFromFiles(cs.git.specs);
     const gitOf = new Map(cs.git.specs.map((g) => [g.name, g]));
     const applied = [];
     let failed = null;
+    // The step that was running: adopt | apply (failed names the spec) |
+    // keep_local | entry. partial_apply reports it.
+    let step = 'adopt';
     let kept = 0;
     let forgotten = 0;
     try {
       // In sync without a base here (first adoption): base = git, no decision.
       for (const name of cs.adopt) await recordApplied(pool, name, gitOf.get(name).spec);
+      step = 'apply';
       for (const g of toApply) {
         failed = g.name;
         const { keepSlots } = writerInputs(cs.git.specs, g);
@@ -528,18 +563,20 @@ async function apply(pool, decisions, opts = {}) {
         applied.push(g.name);
         failed = null;
       }
+      step = 'keep_local';
       if (opts._afterSpecs) await opts._afterSpecs(); // test hook: a failure after every spec applied
       // Keep local: git's version is acknowledged (as applied, the base), so
       // the next status reads the DB as a local edit of it -- export then
       // writes it. A spec gone from git just stops being tracked; its worlds stay.
       for (const { row, decision } of steps) {
-        if (decision !== 'local') continue;
+        if (decision !== 'local' || row.kind === 'baseline') continue; // baseline: adopted above
         kept += 1;
         if (row.kind === 'only_here') { await forget(pool, row.key); forgotten += 1; } else if (row.kind !== 'edited_here') {
           await recordApplied(pool, row.key, gitOf.get(row.key).spec);
         }
       }
       // Git decides the entry world (plan decision 4); one atomic statement.
+      step = 'entry';
       await setEntryWorldByName(pool, entry);
       const { rows: entries } = await pool.query('SELECT name FROM worlds WHERE is_entry ORDER BY name');
       if (entries.length !== 1 || entries[0].name !== entry) {
@@ -555,8 +592,9 @@ async function apply(pool, decisions, opts = {}) {
         console.error('seed-sync: maps seed could not set the entry world after a failure:', ee.message);
       }
       const done = applied.length ? `applied ${applied.join(', ')}; ` : 'nothing applied; ';
-      throw new SyncRefused('partial_apply', `${done}${failed ? `${failed} failed` : 'then failed'}: ${e.message}`,
-        { applied: [...applied], failed, error: e.message });
+      const what = failed ? `${failed} failed` : `the ${step} step failed`;
+      throw new SyncRefused('partial_apply', `${done}${what}: ${e.message}`,
+        { applied: [...applied], failed, step, error: e.message });
     }
     await lock.query('COMMIT');
     // updated/created/deleted/adopted: the counts the tab's Seed all toast
@@ -714,6 +752,8 @@ async function exportMaps(pool, opts = {}) {
       snap.release(snapErr);
     }
 
+    // A cancel queued while this job waited for the lock still counts.
+    if (opts.signal && opts.signal.aborted) throw new SyncRefused('cancelled', 'cancelled');
     runId = await startRun(pool, GROUP_ID, 'export');
     // Spec files first, then the manifest, then this PC's state: a failure
     // after a file is written reads as "git changed" (safe), never as a sync

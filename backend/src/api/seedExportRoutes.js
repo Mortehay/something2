@@ -91,6 +91,8 @@ module.exports = function seedExportRoutes(pool, { processStartedAt, store } = {
           gitChanges: d.gitChanges,
           tokensMissing: d.tokensMissing,
           inGit: d.header || null,
+          // An adapter group's note for the badge (maps: baseline_pending).
+          ...(d.hint ? { hint: d.hint } : {}),
         });
       } catch (err) {
         if (!(err instanceof SyncFileError)) throw err;

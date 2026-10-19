@@ -354,7 +354,7 @@ dbTest('a failing spec: the ones before it stay applied and recorded (partial)',
   b.worlds[0].biomes = ['sx no such biome'];
   setup(ctx, [specA(), b], `${P}a`);
   await assert.rejects(seed(pool), (e) => e instanceof SyncRefused && e.code === 'partial_apply'
-    && JSON.stringify(e.details.applied) === '["sx-m4-a"]' && e.details.failed === 'sx-m4-b');
+    && JSON.stringify(e.details.applied) === '["sx-m4-a"]' && e.details.failed === 'sx-m4-b' && e.details.step === 'apply');
   assert.strictEqual((await stateOf(pool, 'sx-m4-a')).applied_sha256, sha(specA()));
   assert.strictEqual(await stateOf(pool, 'sx-m4-b'), undefined);
   assert.strictEqual(await kindOf(pool, 'sx-m4-a'), 'in_sync');
@@ -368,19 +368,25 @@ dbTest('a failure after every spec applied is still partial_apply, entry world s
   const boom = async () => { throw new Error('sx boom after specs'); };
   await assert.rejects(seed(pool, {}, { _afterSpecs: boom }), (e) => e instanceof SyncRefused && e.code === 'partial_apply'
     && JSON.stringify(e.details.applied) === '["sx-m4-a","sx-m4-b"]' && e.details.failed === null
-    && /sx boom after specs/.test(e.message));
+    && e.details.step === 'keep_local' && /the keep_local step failed: sx boom after specs/.test(e.message));
   assert.deepStrictEqual(await entryWorlds(pool), [`${P}c`]);
   const run = (await pool.query("SELECT status FROM seed_export_runs WHERE group_id = 'maps' ORDER BY id DESC LIMIT 1")).rows[0];
   assert.strictEqual(run.status, 'failed');
 });
 
-dbTest('existing PC, DB matches the files: in_sync, adopted by export', async (ctx) => {
+const BASELINE_HINT = "Seed Maps once to record this PC's baseline — no map data changes";
+
+dbTest('existing PC, DB matches the files: baseline_pending, recorded by export', async (ctx) => {
   const { pool, mapsDir } = ctx;
   setup(ctx, [specA(), specB()], `${P}a`);
   await buildWithoutState(pool, [specA(), specB()]);
   const d = await diffGroup(pool, 'maps');
-  assert.strictEqual(d.status, 'in_sync');
-  assert.deepStrictEqual((await previewSeed(pool, 'maps')).rows, []);
+  assert.strictEqual(d.status, 'baseline_pending');
+  assert.strictEqual(d.hint, BASELINE_HINT);
+  assert.deepStrictEqual([d.localEdits, d.gitChanges], [0, 0]);
+  const rows = (await previewSeed(pool, 'maps')).rows;
+  assert.deepStrictEqual(rows.map((r) => [r.key, r.kind, r.defaultDecision, r.allowedDecisions]),
+    [['sx-m4-a', 'baseline', 'local', ['local']], ['sx-m4-b', 'baseline', 'local', ['local']]]);
   assert.strictEqual(await stateOf(pool, 'sx-m4-a'), undefined, 'status never writes');
   const ex = await exportGroup(pool, 'maps');
   assert.strictEqual(ex.rowCount, 0);
@@ -406,7 +412,10 @@ dbTest('existing PC, DB differs: conflict → Keep local → edited_here → exp
   assert.strictEqual(row.kind, 'conflict');
   assert.strictEqual(row.defaultDecision, null);
   assert.deepStrictEqual(row.allowedDecisions, ['git', 'local']);
-  assert.strictEqual(await kindOf(pool, 'sx-m4-b'), 'in_sync');
+  assert.strictEqual(row.blockedReason, 'no_baseline');
+  assert.strictEqual(row.blockedMessage,
+    "No baseline on this PC — the two sides can't be told apart. Take git unless you made these edits here.");
+  assert.strictEqual(await kindOf(pool, 'sx-m4-b'), 'baseline');
   await assert.rejects(exportGroup(pool, 'maps'), (e) => e instanceof SyncRefused && e.code === 'git_newer');
   const res = await seed(pool, { [uuidOf('sx-m4-a')]: 'local' });
   assert.deepStrictEqual(res.summary.applied, []);
@@ -417,6 +426,48 @@ dbTest('existing PC, DB differs: conflict → Keep local → edited_here → exp
   assert.strictEqual((await exportGroup(pool, 'maps')).rowCount, 1);
   assert.deepStrictEqual(readSpec(mapsDir, 'sx-m4-a').worlds[1].graph, [x, 0]);
   assert.strictEqual((await diffGroup(pool, 'maps')).status, 'in_sync');
+});
+
+dbTest('baseline only: Seed records it without applying anything', async (ctx) => {
+  const { pool } = ctx;
+  setup(ctx, [specA(), specB()], `${P}a`);
+  await buildWithoutState(pool, [specA(), specB()]);
+  const snap = async () => (await pool.query(
+    "SELECT name, seed, graph_x, graph_y, entry_spawn FROM worlds WHERE name LIKE 'sx\\_m4\\_%' ORDER BY name")).rows;
+  const linkCount = async () => (await pool.query(
+    "SELECT count(*)::int AS n FROM map_links l JOIN worlds w ON w.id = l.from_world_id WHERE w.name LIKE 'sx\\_m4\\_%'")).rows[0].n;
+  const before = [await snap(), await linkCount()];
+  const res = await seed(pool);
+  assert.deepStrictEqual(res.summary.applied, []);
+  assert.strictEqual(res.summary.adopted, 2);
+  assert.strictEqual(res.summary.kept, 0);
+  assert.deepStrictEqual([await snap(), await linkCount()], before, 'no map data written');
+  for (const s of [specA(), specB()]) assert.strictEqual((await stateOf(pool, s.name)).base_spec, canonicalSpecJson(s));
+  const d = await diffGroup(pool, 'maps');
+  assert.strictEqual(d.status, 'in_sync');
+  assert.ok(!('hint' in d));
+});
+
+dbTest('legacy state row (hash only) is back-filled by the next seed', async (ctx) => {
+  const { pool } = ctx;
+  setup(ctx, [specA(), specB()], `${P}a`);
+  await seed(pool);
+  await pool.query("UPDATE map_spec_state SET base_spec = NULL WHERE spec_name = 'sx-m4-a'");
+  assert.strictEqual(await kindOf(pool, 'sx-m4-a'), 'baseline');
+  assert.strictEqual((await diffGroup(pool, 'maps')).status, 'baseline_pending');
+  await seed(pool);
+  assert.strictEqual((await stateOf(pool, 'sx-m4-a')).base_spec, canonicalSpecJson(specA()));
+  assert.strictEqual((await diffGroup(pool, 'maps')).status, 'in_sync');
+});
+
+dbTest('a spec whose worlds were all renamed is not new (seed-aware match)', async (ctx) => {
+  const { pool } = ctx;
+  setup(ctx, [specA(), specB()], `${P}a`);
+  await buildWithoutState(pool, [specA(), specB()]);
+  await pool.query('UPDATE worlds SET name = $2 WHERE name = $1', [`${P}c`, `${P}c_renamed`]);
+  const row = rowOf(await previewSeed(pool, 'maps'), 'sx-m4-b');
+  assert.strictEqual(row.kind, 'conflict', 'matched by seed: not new, so a seed never builds it twice');
+  assert.strictEqual(row.blockedReason, 'no_baseline');
 });
 
 dbTest('Take git on a conflict row rebuilds the spec from git', async (ctx) => {

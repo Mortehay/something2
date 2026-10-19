@@ -30,6 +30,9 @@
 //   externallyReachable  Set of this spec's world keys that another spec's
 //                        world links into -- pass it to validateMapSpec so a
 //                        world reached only from outside is not "unreachable".
+//   matchedWorlds        the spec's world keys found in the database (by name,
+//                        or by seed as a rename); the seed-sync Maps group
+//                        reads "none here" from it.
 const { EDGE_DELTA, villagesOf } = require('../../seeds/mapSpec.js');
 const { VILLAGE_POST_KINDS } = require('../../seeds/data/pointTypes.js');
 const { oppositeEdge } = require('./mapService.js');
@@ -456,7 +459,7 @@ async function specFromDb(db, spec, { otherSpecWorlds = new Map(), keepSlots = [
     }
   }
 
-  return { spec: out, notes, externallyReachable };
+  return { spec: out, notes, externallyReachable, matchedWorlds: [...rowOf.keys()] };
 }
 
 function writePortal(l, fwd, back, keyOfId, rows) {
