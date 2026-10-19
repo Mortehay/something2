@@ -1,5 +1,5 @@
 const {
-  GROUPS, getGroup, tableSpecs, liveColumns, pairKeyCol, orderPair, scopeSql, ownerLabel,
+  GROUPS, getGroup, tableSpecs, liveColumns, pairKeyCol, orderPair, scopeSql, ownerLabel, quoteIdent,
 } = require('./registry.js');
 const { canonicalRow, rowHash, stableStringify } = require('./canonical.js');
 const { buildRefMaps, exportRow, exportColumns } = require('./refs.js');
@@ -34,7 +34,6 @@ const GIT_CHANGE_KINDS = ['changed', 'new', 'deleted_in_git', 'edited_here', 'ad
 const HEADER_FIELDS_V1 = ['group', 'exported_at', 'exported_by', 'schema_version', 'row_count'];
 const HEADER_FIELDS_V2 = ['group', 'exported_at', 'exported_by', 'schema_version', 'row_counts'];
 
-const quoteIdent = (name) => `"${String(name).replace(/"/g, '""')}"`;
 const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 // Lowercase canonical uuid text, exactly as Postgres prints a uuid: a file
 // value in any other form would never match the local row's sync_uuid.

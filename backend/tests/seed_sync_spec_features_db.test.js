@@ -55,7 +55,9 @@ const SCHEMA_SQL = `
   CREATE UNIQUE INDEX sx_ver_name_active ON ${SCHEMA}.sx_ver (name) WHERE active;
   CREATE TABLE ${SCHEMA}.sx_own (
     id serial PRIMARY KEY, name text NOT NULL UNIQUE, val int, art text, art2 text,
-    sync_uuid uuid NOT NULL UNIQUE DEFAULT gen_random_uuid());`;
+    sync_uuid uuid NOT NULL UNIQUE DEFAULT gen_random_uuid());
+  CREATE TABLE ${SCHEMA}.sx_ref (
+    id serial PRIMARY KEY, own_id int REFERENCES ${SCHEMA}.sx_own(id) ON DELETE SET NULL);`;
 
 async function cleanupAudio(pool) {
   await pool.query("DELETE FROM audio_jobs WHERE subject_key LIKE 'sx\\_%'");
@@ -237,6 +239,7 @@ dbTest('slice git row missing locally is blocked owner_missing; delete decision 
     assert.strictEqual(r.blockedReason, 'owner_missing', r.key);
     assert.strictEqual(r.blockedMessage, 'seed SX owner first', r.key);
     assert.strictEqual(r.defaultDecision, null, r.key);
+    assert.deepStrictEqual(r.allowedDecisions, ['local'], r.key);
   }
   assert.ok(!p.rows.some((r) => r.kind === 'adopt_identity'));
   // The same-name local row stays a separate local row (no adopt).
@@ -244,6 +247,7 @@ dbTest('slice git row missing locally is blocked owner_missing; delete decision 
   // sx_c left git: a slice never deletes, so it defaults to keep.
   assert.strictEqual(byUuid.get(cUuid).kind, 'deleted_in_git');
   assert.strictEqual(byUuid.get(cUuid).defaultDecision, 'local');
+  assert.deepStrictEqual(byUuid.get(cUuid).allowedDecisions, ['local'], 'a slice row is keep-only');
 
   const { signature } = p;
   const base = { [ghost]: 'local', [twin]: 'local' };
@@ -254,6 +258,9 @@ dbTest('slice git row missing locally is blocked owner_missing; delete decision 
   const p2 = await previewSeed(pool, 'sx_art');
   const only = p2.rows.filter((r) => r.kind === 'only_here').map((r) => r.syncUuid).sort();
   assert.ok(only.includes(localTwin));
+  for (const r of p2.rows.filter((x) => x.kind === 'only_here')) {
+    assert.deepStrictEqual(r.allowedDecisions, ['local'], `${r.key}: no delete on a slice row`);
+  }
   for (const u of only) {
     await assert.rejects(applySeed(pool, 'sx_art', { ...base, [u]: 'delete' }, { signature: p2.signature }),
       (e) => e.code === 'invalid_decision', u);
@@ -291,6 +298,21 @@ dbTest('SET NULL fk from excluded table does not block delete', async (t, pool, 
     assert.strictEqual((await pub.query('SELECT 1 FROM audio_clips WHERE id = $1', [clip.id])).rowCount, 0);
     assert.strictEqual((await one(pub, 'SELECT clip_id FROM audio_jobs WHERE id = $1', [job.id])).clip_id, null);
   });
+});
+
+dbTest('SET NULL fk from a table NOT in EXCLUDED still blocks delete', async (t, pool) => {
+  const row = await one(pool, "INSERT INTO sx_own (name, val) VALUES ('sx_a', 1) RETURNING id, sync_uuid");
+  await exportGroup(pool, 'sx_own');
+  await pool.query('INSERT INTO sx_ref (own_id) VALUES ($1)', [row.id]);
+  const doc = readDoc('sx_own');
+  doc.tables.sx_own = [];
+  writeDoc('sx_own', doc);
+  const p = await previewSeed(pool, 'sx_own');
+  assert.deepStrictEqual(p.rows.map((r) => [r.kind, r.blockedReason, r.defaultDecision, r.allowedDecisions]),
+    [['deleted_in_git', '1 rows in sx_ref reference this', 'local', ['local']]]);
+  await assert.rejects(applySeed(pool, 'sx_own', { [row.sync_uuid]: 'delete' }, { signature: p.signature }),
+    (e) => e.code === 'blocked');
+  assert.strictEqual((await pool.query('SELECT 1 FROM sx_own WHERE id = $1', [row.id])).rowCount, 1);
 });
 
 test('coverage: art-omitted columns sit in exactly one slice; slice columns are omitted by the full spec', () => {

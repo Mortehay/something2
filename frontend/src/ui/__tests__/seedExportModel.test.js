@@ -118,6 +118,15 @@ describe('allowedDecisions / kindLabel', () => {
     const rs = [row('x', 'new', null, 'clash')];
     expect(bulkSet({}, ['x'], 'git', rs)).toEqual({});
   });
+  it("prefers the server's per-row allowedDecisions (slice rows are keep-only)", () => {
+    const slice = { ...row('s', 'only_here', 'local'), allowedDecisions: ['local'] };
+    expect(allowedDecisions(slice)).toEqual(['local']);
+    expect(bulkSet({}, ['s'], 'delete', [slice])).toEqual({});
+    const orphan = { ...row('o', 'new', null, 'owner_missing'), allowedDecisions: ['local'] };
+    expect(allowedDecisions(orphan)).toEqual(['local']);
+    expect(bulkSet({}, ['o'], 'git', [orphan])).toEqual({});
+    expect(bulkSet({}, ['o'], 'local', [orphan])).toEqual({ o: 'local' });
+  });
   it('drops delete on blocked rows', () => {
     expect(allowedDecisions(row('x', 'only_here', null, 'in use'))).toEqual(['local']);
   });

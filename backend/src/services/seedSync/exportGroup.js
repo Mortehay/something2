@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const {
-  getGroup, tableSpecs, specOfTable, liveColumns, pairKeyCol, orderPair, scopeSql,
+  getGroup, tableSpecs, specOfTable, liveColumns, pairKeyCol, orderPair, scopeSql, quoteIdent,
 } = require('./registry.js');
 const { canonicalRow, rowHash, stableStringify, compareNaturalKey } = require('./canonical.js');
 const { buildRefMaps, exportRow, exportColumns } = require('./refs.js');
@@ -10,8 +10,6 @@ const { SyncFileError, SyncRefused } = require('./errors.js');
 const { SEED_SYNC_LOCK_SQL, beginLocked, mapLockError, rollback, lockShare } = require('./txn.js');
 
 let tmpCounter = 0;
-
-const quoteIdent = (name) => `"${String(name).replace(/"/g, '""')}"`;
 
 function syncDir() {
   return process.env.SEED_SYNC_DIR || path.join(__dirname, '../../../seeds/sync');

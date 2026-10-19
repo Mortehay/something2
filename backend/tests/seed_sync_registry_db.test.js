@@ -50,8 +50,10 @@ test('plan-2 groups write exactly their tables, in order', () => {
   for (const [id, tables] of Object.entries(expected)) {
     assert.deepStrictEqual(tableSpecs(getGroup(id)).map((s) => s.table), tables, id);
   }
+  // One full spec per table; slices (registry `slice`) of it may sit in other groups.
+  const full = GROUPS.flatMap((g) => tableSpecs(g).filter((s) => !s.slice).map((s) => s.table));
+  assert.strictEqual(new Set(full).size, full.length, 'a table has one full spec only');
   const all = GROUPS.flatMap((g) => tableSpecs(g).map((s) => s.table));
-  assert.strictEqual(new Set(all).size, all.length, 'a table belongs to one group only');
   for (const lookup of ['elements', 'attack_origins', 'impact_behaviors', 'projectile_shapes', 'world_point_kinds', 'merchant_stock']) {
     assert.ok(!all.includes(lookup), `${lookup} is never exported`);
   }
@@ -137,9 +139,13 @@ test('renameCascadesFor accepts every registered group', () => {
 // written is deferred as NULL: both rely on every in-group FK pointing at an
 // EARLIER table (or the same one). Across groups, seeding in GROUPS order must
 // find every FK target already seeded. fks: [{ tbl, col, target }].
+// A table's position is its FULL spec's (the owner group): a slice group
+// never inserts or deletes rows, so it must not move its table.
 function fkOrderProblems(fks, groups) {
   const groupOf = new Map();
-  groups.forEach((g, gi) => tableSpecs(g).forEach((s, ti) => groupOf.set(s.table, { gi, ti, id: g.id })));
+  groups.forEach((g, gi) => tableSpecs(g).forEach((s, ti) => {
+    if (!s.slice) groupOf.set(s.table, { gi, ti, id: g.id });
+  }));
   const problems = [];
   let checked = 0;
   for (const r of fks) {
@@ -194,6 +200,30 @@ dbTest('FK order guard flags a forward in-group FK and a later-group FK', async 
   }
 });
 
+// A slice group registered LAST must not drag its table to the end: the guard
+// still places item_types in its owner group (items), before entities.
+dbTest('FK order guard keys tables by their full spec, not a slice', async (t, pool) => {
+  const fks = await allFks(pool);
+  const slice = { table: 'item_types', slice: true, columns: ['icon'], naturalKey: ['name'], secretColumns: [], refs: {} };
+  await _withTestGroups([{ id: 'sx_icons', label: 'SX icons', tables: [slice] }], async () => {
+    assert.strictEqual(GROUPS[GROUPS.length - 1].id, 'sx_icons');
+    const { problems, checked } = fkOrderProblems(fks, GROUPS);
+    assert.ok(checked > 10);
+    assert.deepStrictEqual(problems, []);
+  });
+});
+
+test('a group lists each table once (no full spec plus slice, no two slices)', () => {
+  const full = { table: 'sx_t', naturalKey: ['k'], omit: {}, secretColumns: [], refs: {} };
+  const sliceA = { table: 'sx_t', slice: true, columns: ['a'], naturalKey: ['k'], refs: {} };
+  const sliceB = { table: 'sx_t', slice: true, columns: ['b'], naturalKey: ['k'], refs: {} };
+  assert.throws(() => tableSpecs({ id: 'sx_g', tables: [full, sliceA] }), /sx_g lists sx_t twice/);
+  assert.throws(() => tableSpecs({ id: 'sx_g', tables: [sliceA, sliceB] }), /sx_g lists sx_t twice/);
+  assert.deepStrictEqual(tableSpecs({ id: 'sx_g', tables: [sliceA] }), [sliceA]);
+  assert.throws(() => tableSpecs({ id: 'sx_g', tables: [{ ...sliceA, columns: [] }] }), /needs columns/);
+  assert.throws(() => tableSpecs({ id: 'sx_g', tables: [{ ...sliceA, columns: ['k'] }] }), /key columns/);
+});
+
 test('every group is an ordered list of TableSpecs', () => {
   for (const g of GROUPS) {
     assert.ok(Array.isArray(g.tables) && g.tables.length > 0, `${g.id}: tables`);
@@ -230,6 +260,11 @@ dbTest('every live column is exported or explicitly omitted, with no stale omit 
       )).rows.map((r) => r.column_name);
       assert.ok(all.length > 0, `${s.table} has columns`);
       const live = (await liveColumns(pool, s)).map((c) => c.name);
+      if (s.slice) {
+        // A slice reads exactly its columns plus the natural key.
+        assert.deepStrictEqual([...live].sort(), [...new Set([...s.columns, ...s.naturalKey])].sort(), `${s.table} slice`);
+        continue;
+      }
       const omit = Object.keys(s.omit);
       const secret = s.secretColumns;
       for (const c of [...omit, ...secret]) assert.ok(all.includes(c), `${s.table}: stale omit/secret key ${c}`);

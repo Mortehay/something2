@@ -354,8 +354,15 @@ function checkSpec(spec) {
   }
 }
 
+// A group lists each table once: a full spec, or one slice (a group that
+// owns some columns of a table owns them through ONE slice).
 function tableSpecs(group) {
   group.tables.forEach(checkSpec);
+  const seen = new Set();
+  for (const s of group.tables) {
+    if (seen.has(s.table)) throw new Error(`seed-sync: group ${group.id} lists ${s.table} twice`);
+    seen.add(s.table);
+  }
   return group.tables;
 }
 
@@ -564,6 +571,6 @@ async function nameRefProblems(db, spec) {
 }
 
 module.exports = {
-  GROUPS, getGroup, tableSpecs, specOfTable, ownerLabel, rowPredicate, scopeSql, pairKeyCol, orderPair, soleSpec,
+  GROUPS, getGroup, tableSpecs, specOfTable, ownerLabel, rowPredicate, scopeSql, quoteIdent, pairKeyCol, orderPair, soleSpec,
   liveColumns, fkProblems, nameRefProblems, NAME_REF_SHAPES, _withTestGroups,
 };

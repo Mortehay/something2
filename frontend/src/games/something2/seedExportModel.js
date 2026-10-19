@@ -130,7 +130,11 @@ export const kindLabel = (kind) => KIND_LABELS[kind] || kind;
 const DELETE_KINDS = new Set(['deleted_in_git', 'only_here']);
 const CREATE_KINDS = new Set(['new', 'deleted_here']);
 
+// The server's per-row list (previewSeed `allowedDecisions`, the same rules
+// apply enforces: e.g. a column-slice row is keep-only) wins; the per-kind
+// table below is the fallback for responses without it.
 export function allowedDecisions(row) {
+  if (Array.isArray(row.allowedDecisions)) return row.allowedDecisions;
   if (DELETE_KINDS.has(row.kind)) return row.blockedReason ? ['local'] : ['delete', 'local'];
   // Key clash: a git row whose natural key a local row already uses. The
   // server refuses 'git' (conflict), so only 'local' is offered.

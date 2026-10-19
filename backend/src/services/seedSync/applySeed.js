@@ -1,5 +1,5 @@
 const crypto = require('node:crypto');
-const { getGroup, tableSpecs, scopeSql } = require('./registry.js');
+const { getGroup, tableSpecs, scopeSql, quoteIdent } = require('./registry.js');
 const { computeDiff, tableOf, gitOf, localByKeyOf, OWNER_MISSING } = require('./diffGroup.js');
 const { EXCLUDED } = require('./coverage.js');
 const { beginLocked, lockForApply, mapLockError, rollback } = require('./txn.js');
@@ -39,12 +39,23 @@ const INSERTABLE = new Set(['new', 'deleted_here']);
 const UPDATE_KINDS = new Set(['changed', 'edited_here', 'not_exported']);
 const KEY_CLASH_REASON = 'key already used by a local row';
 
-// Decisions allowed on one diff row: a slice row is never deleted.
-const allowedFor = (cd, r) => (tableOf(cd, r).spec.slice ? ALLOWED[r.kind].filter((d) => d !== 'delete') : ALLOWED[r.kind]);
+// Decisions a row's kind allows (invalid_decision otherwise): a slice row is
+// never deleted.
+const kindAllowed = (cd, r) => (tableOf(cd, r).spec.slice ? ALLOWED[r.kind].filter((d) => d !== 'delete') : ALLOWED[r.kind]);
 // A row that this seed may delete (FK references can block it).
 const deletableRow = (cd, r) => DELETABLE.has(r.kind) && !tableOf(cd, r).spec.slice;
+// Decisions apply accepts for an ANNOTATED row: kindAllowed minus what its
+// blockedReason forbids ('delete' of a referenced row; 'git' of a git-only row
+// whose key a local row holds, or whose slice owner row is missing). The one
+// source of truth for plan()'s refusals and preview's allowedDecisions.
+function allowedDecisions(cd, r) {
+  const a = kindAllowed(cd, r);
+  if (!r.blockedReason) return a;
+  if (deletableRow(cd, r)) return a.filter((d) => d !== 'delete');
+  if (INSERTABLE.has(r.kind)) return a.filter((d) => d !== 'git');
+  return a;
+}
 
-const quoteIdent = (name) => `"${String(name).replace(/"/g, '""')}"`;
 const own = (obj, k) => Object.prototype.hasOwnProperty.call(obj, k);
 
 // Every FK pointing at the group's table, with its column pairs in key order
@@ -238,7 +249,9 @@ async function previewSeed(pool, groupId) {
     const refusalWarnings = cd.diff.header ? await writeWarnings(client, cd, steps) : [];
     const warnings = [...schemaWarnings, ...cd.diff.warnings, ...refusalWarnings];
     await client.query('COMMIT');
-    return { ...cd.diff, warnings, signature };
+    // allowedDecisions: what apply accepts per row (the client offers only those).
+    const rows = steps.map(({ row }) => ({ ...row, allowedDecisions: allowedDecisions(cd, row) }));
+    return { ...cd.diff, rows, warnings, signature };
   } catch (e) {
     releaseErr = await rollback(client);
     throw e;
@@ -258,7 +271,7 @@ function plan(cd, refInfo, decisions) {
   if (stale.length) {
     throw new SyncRefused('stale_preview', 'the diff changed since the preview; preview again', { uuids: stale });
   }
-  const invalid = Object.keys(decisions).filter((u) => !allowedFor(cd, byUuid.get(u)).includes(decisions[u]));
+  const invalid = Object.keys(decisions).filter((u) => !kindAllowed(cd, byUuid.get(u)).includes(decisions[u]));
   if (invalid.length) {
     throw new SyncRefused('invalid_decision', 'decision not allowed for this row', { uuids: invalid });
   }
@@ -267,22 +280,28 @@ function plan(cd, refInfo, decisions) {
   if (undecided.length) {
     throw new SyncRefused('undecided', 'rows edited on this PC need a decision', { uuids: undecided });
   }
-  const orphans = steps.filter((s) => s.decision === 'git' && s.row.blockedReason === OWNER_MISSING);
+  // Every decision outside allowedDecisions is refused, by why it is not
+  // allowed (owner_missing, blocked, conflict).
+  const rejected = steps.filter((s) => !allowedDecisions(cd, s.row).includes(s.decision));
+  const orphans = rejected.filter((s) => s.row.blockedReason === OWNER_MISSING);
   if (orphans.length) {
     throw new SyncRefused(OWNER_MISSING, orphans[0].row.blockedMessage, { uuids: orphans.map((s) => s.row.syncUuid) });
   }
-  const blocked = steps.filter((s) => s.decision === 'delete' && s.row.blockedReason);
+  const blocked = rejected.filter((s) => s.decision === 'delete');
   if (blocked.length) {
     throw new SyncRefused('blocked', 'rows referenced elsewhere cannot be deleted', {
       uuids: blocked.map((s) => s.row.syncUuid),
       reasons: Object.fromEntries(blocked.map((s) => [s.row.syncUuid, s.row.blockedReason])),
     });
   }
-  const conflicts = steps.filter((s) => s.decision === 'git' && s.row.blockedReason === KEY_CLASH_REASON);
+  const conflicts = rejected.filter((s) => s.row.blockedReason === KEY_CLASH_REASON);
   if (conflicts.length) {
     throw new SyncRefused('conflict', `${KEY_CLASH_REASON}; keep it local or delete the local row`, {
       uuids: conflicts.map((s) => s.row.syncUuid),
     });
+  }
+  if (rejected.length) {
+    throw new SyncRefused('invalid_decision', 'decision not allowed for this row', { uuids: rejected.map((s) => s.row.syncUuid) });
   }
   return steps;
 }
@@ -708,5 +727,5 @@ async function applySeed(pool, groupId, decisions, { signature } = {}) {
 }
 
 module.exports = {
-  previewSeed, applySeed, ALLOWED, KEY_CLASH_REASON, annotate, renameCascadesFor, _mapWriteError: mapWriteError,
+  previewSeed, applySeed, ALLOWED, KEY_CLASH_REASON, allowedDecisions, annotate, renameCascadesFor, _mapWriteError: mapWriteError,
 };

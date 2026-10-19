@@ -112,13 +112,14 @@ export default function PreviewSection({ data, decisions, setDecisions }) {
                       <Mono key={f.name}>{f.name}: <Old>{show(f.local)}</Old> → <New>{show(f.git)}</New></Mono>
                     ))}
                     {renameNote(r) && <Muted>{renameNote(r)}</Muted>}
-                    {r.blockedReason && <Muted>{r.blockedReason}</Muted>}
+                    {r.blockedReason && <Muted>{r.blockedMessage || r.blockedReason}</Muted>}
                   </div>
                   <Seg>
-                    {['git', 'delete', 'local'].filter((d) => allowedDecisions({ ...r, blockedReason: null }).includes(d)).map((d) => (
+                    {/* The kind's buttons; the ones this row does not allow are disabled. */}
+                    {['git', 'delete', 'local'].filter((d) => allowedDecisions({ ...r, blockedReason: null, allowedDecisions: undefined }).includes(d)).map((d) => (
                       <SegBtn key={d} $on={decisions[r.syncUuid] === d}
                         disabled={!allowedDecisions(r).includes(d)}
-                        title={r.blockedReason && !allowedDecisions(r).includes(d) ? r.blockedReason : undefined}
+                        title={allowedDecisions(r).includes(d) ? undefined : (r.blockedMessage || r.blockedReason || 'not allowed for this row')}
                         onClick={() => setDecisions((cur) => bulkSet(cur, [r.syncUuid], d, rows))}>
                         {decisionLabel(r, d)}
                       </SegBtn>
