@@ -25,6 +25,7 @@ const EXCLUDED = {
   engine_mobs: 'runtime: engine (Go) mob state',
   engine_players: 'runtime: engine (Go) player state',
   world_chunks: 'cache: regenerable from world seed',
+  map_spec_state: 'seed sync per-PC map spec state',
   // player / account data
   users: 'player accounts and credentials',
   invite_codes: 'account invite codes',
