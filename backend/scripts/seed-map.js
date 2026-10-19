@@ -170,7 +170,12 @@ function requiredTilesFor(w, spec, row, doorwayEdges) {
 // the shared entry-world advisory key around the whole apply (60s idle,
 // 122-189s under suite load), starving every other holder. Not moving is_entry
 // in the first place leaves no window to guard.
-async function applyMapSpec(pool, spec, { moveEntry = true } = {}) {
+//
+// `keepSlots` (SOMET-641) are '<world name>:<edge>' compass slots that OTHER
+// specs declare. The prune spares them and their mirrors, so applying one spec
+// no longer deletes a cross-spec doorway another spec owns. Omitted, the prune
+// behaves exactly as before.
+async function applyMapSpec(pool, spec, { moveEntry = true, keepSlots = [] } = {}) {
   // One biome read, two catalog entries: biomeNames answers "does this biome
   // exist", biomeCreatureTypes answers "which creatures can actually spawn in
   // it" (SOMET-315). Deriving the name set from the same rows keeps them from
@@ -209,8 +214,34 @@ async function applyMapSpec(pool, spec, { moveEntry = true } = {}) {
       + 'and a null are both read as 1-1.\n');
   }
 
+  // SOMET-641. Resolve every `to_name` (a world another spec owns) in ONE
+  // query, BEFORE the transaction: a missing target refuses the whole spec
+  // with nothing written, naming every missing world at once. A compass
+  // target must be bounded -- an unbounded world has no wall ring and so no
+  // doorway to arrive through.
+  const idByName = new Map();
+  const crossNames = [...new Set(spec.links.filter((l) => l.to_name !== undefined).map((l) => l.to_name))];
+  if (crossNames.length) {
+    const found = (await pool.query(
+      'SELECT id, name, width, height FROM worlds WHERE name = ANY($1::text[])', [crossNames])).rows;
+    for (const r of found) idByName.set(r.name, r);
+    const missing = crossNames.filter((n) => !idByName.has(n));
+    if (missing.length) {
+      throw new Error(`spec "${spec.name}" links to world(s) that do not exist: `
+        + `${missing.map((n) => `"${n}"`).join(', ')} -- apply the spec that owns them first`);
+    }
+    const unbounded = spec.links.filter((l) => l.to_name !== undefined && l.kind !== 'portal')
+      .map((l) => idByName.get(l.to_name))
+      .filter((r) => r.width == null || r.height == null);
+    if (unbounded.length) {
+      throw new Error(`spec "${spec.name}" has a compass link into unbounded world(s): `
+        + `${[...new Set(unbounded.map((r) => `"${r.name}"`))].join(', ')}`);
+    }
+  }
+
   const client = await pool.connect();
   const idByKey = new Map();
+  const targetId = (l) => (l.to_name !== undefined ? idByName.get(l.to_name).id : idByKey.get(l.to));
   try {
     await client.query('BEGIN');
 
@@ -237,7 +268,11 @@ async function applyMapSpec(pool, spec, { moveEntry = true } = {}) {
       // position from -- graph_x/graph_y stay NULL, exactly the same NULL
       // the frontend already treats as "no stored position, use the layout
       // fallback" for any world an admin hasn't dragged yet.
-      const pos = w.grid ? graphPosition(w.grid) : { x: null, y: null };
+      //
+      // An explicit `graph` (SOMET-641) wins over the grid: it is a position an
+      // admin dragged in the World Map tab, written back into the spec.
+      const pos = w.graph ? { x: w.graph[0], y: w.graph[1] }
+        : w.grid ? graphPosition(w.grid) : { x: null, y: null };
       const r = await client.query(
         `INSERT INTO worlds (name, seed, chunk_size, width, height,
                              allowed_creature_types, entry_spawn, biomes, biome_cell,
@@ -316,10 +351,10 @@ async function applyMapSpec(pool, spec, { moveEntry = true } = {}) {
     for (const l of spec.links) {
       if (l.kind === 'portal') {
         const { id } = await setPortalLink(
-          client, idByKey.get(l.from), l.from_x, l.from_y, idByKey.get(l.to), l.to_x, l.to_y);
+          client, idByKey.get(l.from), l.from_x, l.from_y, targetId(l), l.to_x, l.to_y);
         portalLinkIds.set(`${l.from}:${l.from_x},${l.from_y}`, id);
       } else {
-        await setLink(client, idByKey.get(l.from), l.edge, idByKey.get(l.to));
+        await setLink(client, idByKey.get(l.from), l.edge, targetId(l));
       }
       linksWritten += 1;
     }
@@ -329,16 +364,20 @@ async function applyMapSpec(pool, spec, { moveEntry = true } = {}) {
     // deleted and re-created, which would reset its created_at and lose the
     // only forensic record of how a row got there).
     //
-    // Both directions of every declared link go into keepSlots: setLink writes
+    // Both directions of every declared link go into ownSlots: setLink writes
     // the mirror itself, so a prune that only knew the forward rows would
     // delete every mirror it had just written.
-    const keepSlots = [];
+    //
+    // A to_name link's mirror leaves a world this spec does not own; it is in
+    // this keep set by id, and the prune's inbound pass honours that.
+    const ownSlots = [];
     for (const l of spec.links) {
       if (l.kind === 'portal') continue;
-      keepSlots.push(`${idByKey.get(l.from)}:${l.edge}`);
-      keepSlots.push(`${idByKey.get(l.to)}:${oppositeEdge(l.edge)}`);
+      ownSlots.push(`${idByKey.get(l.from)}:${l.edge}`);
+      ownSlots.push(`${targetId(l)}:${oppositeEdge(l.edge)}`);
     }
-    linksRemoved = await pruneCompassLinks(client, [...idByKey.values()], keepSlots);
+    linksRemoved = await pruneCompassLinks(
+      client, [...idByKey.values()], ownSlots, { keepNames: keepSlots });
 
     // Guard packs are a separate pass (after every portal link exists) and
     // are call-site-guarded the same way village guards are just below:
