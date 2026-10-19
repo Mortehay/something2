@@ -32,6 +32,9 @@ not stored separately), and `report(spec, 4)` equals the box's `report`.
 
 `bestiary_p4.json` sits next to `world_gen.py` because the module loads it
 relative to its own path at import time.
+The JS port loads its own byte-identical copy,
+`src/services/worldGen/bestiary_p4.json`, the same way;
+`tests/world_gen_parity.test.js` pins both copies to the sha256 above.
 
 `smoke-world-gen.py` is kept for reference only. It imports `world_preview`
 (PIL), which is not vendored, so it does not run here as-is.
