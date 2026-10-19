@@ -8,10 +8,8 @@ const { schemaVersion, startRun, finishRun } = require('./runs.js');
 const { SyncRefused } = require('./errors.js');
 const { cascadeEntityRename, cascadeAuraRename } = require('./renameCascade.js');
 const { assertValid, isKnownKey } = require('../gameSettings.js');
-const { stableStringify } = require('./canonical.js');
-const {
-  ASSET_REASONS, BLOCKED_MESSAGES, assetsRoot, hasAssets, checkGitAssets, fileReader, uploadGitAssets, recordCache,
-} = require('./assets.js');
+const { ASSET_REASONS, BLOCKED_MESSAGES, hasAssets, recordCache } = require('./assets.js');
+const { assetInfoFor, stageUploads, withLocalAssets } = require('./assetApply.js');
 
 // Seeding writes game data from the git export into this DB. Rules that keep it
 // safe: every red row needs an explicit decision, the diff is recomputed under
@@ -210,124 +208,6 @@ function annotate(cd, refInfo, decisions, assetInfo = new Map()) {
     if (!own(decisions, r.syncUuid)) r.defaultDecision = null;
   }
   return diff.rows.map((row) => ({ row, decision: decisionOf(row) }));
-}
-
-// ---- assets -----------------------------------------------------------------
-
-const isEmptyValue = (v) => v === null || v === undefined || v === '';
-const decisionsObj = (d) => (d && typeof d === 'object' && !Array.isArray(d) ? d : {});
-
-// The local row a git write of r lands on (adopt: the same-key local row).
-function localRowOf(cd, r) {
-  return r.kind === 'adopt_identity' ? localByKeyOf(cd, r) : tableOf(cd, r).local.get(r.syncUuid);
-}
-
-// Is git's value of asset column `col` what this row already holds here
-// (same file + hash through the cache)? Then nothing is read or uploaded and
-// the local key stays.
-function assetUnchanged(cd, r, col) {
-  const l = localRowOf(cd, r);
-  return !!l && stableStringify(l.row[col]) === stableStringify(gitOf(cd, r).row[col]);
-}
-
-// r's git row with every unchanged asset column blanked (null), or null when
-// no asset file needs reading: what checkGitAssets / uploadGitAssets get.
-function assetNeeds(cd, r) {
-  const { spec } = tableOf(cd, r);
-  const g = gitOf(cd, r);
-  if (!g) return null;
-  const out = { ...g.row };
-  let any = false;
-  for (const col of Object.keys(spec.assets)) {
-    if (isEmptyValue(out[col]) || assetUnchanged(cd, r, col)) out[col] = null;
-    else any = true;
-  }
-  return any ? out : null;
-}
-
-// Map(syncUuid -> asset_file_missing | asset_file_mismatch) for the rows that
-// need asset files and whose default or decision is 'git' (both: the
-// signature annotates with the defaults, plan with the decisions). Hashes
-// only those files, each once per call.
-async function assetInfoFor(cd, decisions) {
-  const out = new Map();
-  const dec = decisionsObj(decisions);
-  if (!cd.diff.header) return out;
-  const root = assetsRoot();
-  const read = fileReader(root);
-  for (const spec of cd.specs) {
-    if (!hasAssets(spec)) continue;
-    const rows = cd.diff.rows
-      .filter((r) => r.table === spec.table && (r.defaultDecision === 'git' || (own(dec, r.syncUuid) && dec[r.syncUuid] === 'git')))
-      .map((r) => assetNeeds(cd, r)).filter(Boolean);
-    for (const [uuid, reason] of await checkGitAssets(root, rows, spec, read)) out.set(uuid, reason);
-  }
-  return out;
-}
-
-// Before the locked transaction: plan the seed on a READ ONLY snapshot (same
-// refusals as the locked path, so a stale or refused seed uploads nothing),
-// then upload the asset files of the rows that take git. Returns { assetInfo,
-// uploads: Map(syncUuid -> { col: key }) with .cacheEntries }. The locked
-// path re-checks the signature, so these uploads match the rows it writes.
-async function stageUploads(pool, groupId, decisions, { signature, store, onProgress, signal }) {
-  const client = await pool.connect();
-  let releaseErr;
-  let cd;
-  let assetInfo;
-  let steps;
-  try {
-    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
-    cd = await computeDiff(client, groupId);
-    const empty = { assetInfo: new Map(), uploads: Object.assign(new Map(), { cacheEntries: [] }) };
-    // No file / newer schema: the locked path refuses it.
-    if (!cd.diff.header || versionOf(cd.diff.header) > await schemaVersion(client)) {
-      await client.query('COMMIT');
-      return empty;
-    }
-    const refInfo = await referenceInfo(client, cd);
-    assetInfo = await assetInfoFor(cd, decisions);
-    if (typeof signature !== 'string' || signature !== previewSignatureOf(cd, refInfo, assetInfo)) {
-      throw new SyncRefused('stale_preview', 'the diff changed since the preview; preview again', { uuids: [] });
-    }
-    steps = plan(cd, refInfo, decisions, assetInfo);
-    await client.query('COMMIT');
-  } catch (e) {
-    releaseErr = await rollback(client);
-    throw e;
-  } finally {
-    client.release(releaseErr);
-  }
-  const uploads = new Map();
-  uploads.cacheEntries = [];
-  for (const spec of cd.specs) {
-    if (!hasAssets(spec)) continue;
-    const rows = steps.filter((s) => s.decision === 'git' && s.row.table === spec.table)
-      .map((s) => assetNeeds(cd, s.row)).filter(Boolean);
-    const m = await uploadGitAssets(store, rows, spec, { onProgress, signal });
-    for (const [uuid, vals] of m) uploads.set(uuid, vals);
-    uploads.cacheEntries.push(...m.cacheEntries);
-  }
-  return { assetInfo, uploads };
-}
-
-// `resolved` (a git row about to be written) with each asset column as the
-// local DB value: the uploaded key, the local key when unchanged, '' / NULL
-// as they are.
-function withLocalAssets(cd, r, spec, resolved, uploads) {
-  if (!hasAssets(spec)) return resolved;
-  const t = tableOf(cd, r);
-  const up = (uploads && uploads.get(r.syncUuid)) || {};
-  const l = localRowOf(cd, r);
-  const raw = l && t.rawAssets ? t.rawAssets.get(l.row.sync_uuid) : null;
-  const out = { ...resolved };
-  for (const col of Object.keys(spec.assets)) {
-    if (own(up, col)) out[col] = up[col];
-    else if (isEmptyValue(resolved[col])) continue;
-    else if (raw && assetUnchanged(cd, r, col)) out[col] = raw[col];
-    else throw new Error(`seed-sync: ${spec.table}.${col} of ${r.syncUuid} has no uploaded object`);
-  }
-  return out;
 }
 
 function warningsFor(fileVersion, dbVersion) {
@@ -732,8 +612,19 @@ async function applySeed(pool, groupId, decisions, opts = {}) {
   let assetInfo = new Map();
   let uploads = null;
   if (specs.some(hasAssets)) {
-    ({ assetInfo, uploads } = await stageUploads(pool, groupId, decisions, {
-      signature, store: opts.store || require('../assetStore.js'), onProgress: opts.onProgress, signal: opts.signal,
+    const planOnSnapshot = async (client) => {
+      const cd = await computeDiff(client, groupId);
+      // No file / newer schema: the locked path refuses it.
+      if (!cd.diff.header || versionOf(cd.diff.header) > await schemaVersion(client)) return null;
+      const refInfo = await referenceInfo(client, cd);
+      const info = await assetInfoFor(cd, decisions);
+      if (typeof signature !== 'string' || signature !== previewSignatureOf(cd, refInfo, info)) {
+        throw new SyncRefused('stale_preview', 'the diff changed since the preview; preview again', { uuids: [] });
+      }
+      return { cd, assetInfo: info, steps: plan(cd, refInfo, decisions, info) };
+    };
+    ({ assetInfo, uploads } = await stageUploads(pool, planOnSnapshot, {
+      store: opts.store || require('../assetStore.js'), onProgress: opts.onProgress, signal: opts.signal,
     }));
   }
   const client = await pool.connect();

@@ -82,9 +82,14 @@ async function exportTable(client, spec) {
     .sort((a, b) => compareNaturalKey(a, b, spec.naturalKey));
 }
 
-// Kinds that are git changes whatever this PC's asset cache holds (an
-// uncached key only ever makes local differ from B and git).
+// Git changes whatever this PC's asset cache holds (an uncached key only ever
+// makes local differ from B and git): changed / new / deleted_in_git, and an
+// edited_here that HAS a baseline -- B differs from git's hash too (else it
+// would read not_exported), a real both-sides conflict.
 const DEFINITE_GIT_KINDS = new Set(['changed', 'new', 'deleted_in_git']);
+function definiteGitChange(r, baselines) {
+  return DEFINITE_GIT_KINDS.has(r.kind) || (r.kind === 'edited_here' && baselines.has(r.syncUuid));
+}
 
 // opts: { store (default assetStore), onProgress, signal } -- used only by a
 // group with asset columns: their objects are downloaded into the repo and
@@ -106,7 +111,9 @@ async function exportGroup(pool, groupId, opts = {}) {
         fileVersion: pre.header.schema_version, dbVersion: await schemaVersion(pool),
       });
     }
-    if (pre.rows.some((r) => DEFINITE_GIT_KINDS.has(r.kind))) {
+    const { rows: base } = await pool.query('SELECT sync_uuid FROM seed_row_hashes WHERE group_id = $1', [groupId]);
+    const baselines = new Set(base.map((b) => b.sync_uuid));
+    if (pre.rows.some((r) => definiteGitChange(r, baselines))) {
       throw new SyncRefused('git_newer', 'seed (preview) first', { gitChanges: pre.gitChanges });
     }
     const store = opts.store || require('../assetStore.js');

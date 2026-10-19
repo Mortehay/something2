@@ -336,12 +336,12 @@ dbTest('apply uploads content-addressed objects and writes local keys', async (t
   assert.strictEqual(res.summary.created, 2);
 
   const a = await one(pool, "SELECT image, sprite FROM sx_art WHERE name = 'sx_a'");
-  const key = `${BUCKET}/seedsync/${sha256(PNG_A)}.png`;
+  const key = `${BUCKET}/seedsync/${sha256(PNG_A)}/sx_tiles_sx_a.png`;
   assert.strictEqual(a.image, key);
   assert.deepStrictEqual(store.objects.get(key), PNG_A);
   assert.deepStrictEqual(a.sprite, {
-    atlas_key: `${BUCKET}/seedsync/${sha256(ATLAS)}.png`,
-    manifest_key: `${BUCKET}/seedsync/${sha256(MANIFEST)}.json`,
+    atlas_key: `${BUCKET}/seedsync/${sha256(ATLAS)}/sx_sprites_sx_a_atlas.png`,
+    manifest_key: `${BUCKET}/seedsync/${sha256(MANIFEST)}/sx_sprites_sx_a_manifest.json`,
     static_frame: 0, frames: { idle: 2 },
   });
   assert.deepStrictEqual(store.objects.get(a.sprite.manifest_key), MANIFEST);
@@ -386,7 +386,7 @@ dbTest('audio value uses sha1 column and per-clip key', async (t, pool, { root, 
   await apply(pool, 'sx_assets', {}, { store });
   const row = await one(pool, 'SELECT storage_key, sha1, bytes, sync_uuid FROM sx_clip');
   assert.deepStrictEqual(row, {
-    storage_key: `audio/sfx/${clipUuid}.ogg`, sha1: sha1(OGG), bytes: OGG.length, sync_uuid: clipUuid,
+    storage_key: `audio/sfx/${clipUuid}-${sha1(OGG).slice(0, 8)}.ogg`, sha1: sha1(OGG), bytes: OGG.length, sync_uuid: clipUuid,
   });
   assert.deepStrictEqual(store.objects.get(row.storage_key), OGG);
   assert.strictEqual(store.puts.find((x) => x.key === row.storage_key).contentType, 'audio/ogg');
@@ -417,7 +417,7 @@ dbTest('asset column on a slice exports and seeds', async (t, pool, { root, stor
   assert.deepStrictEqual(p.rows.map((r) => [r.key, r.kind]), [['sx_o', 'edited_here']]);
   await apply(pool, 'sx_icons', { [p.rows[0].syncUuid]: 'git' }, { store });
   assert.strictEqual((await one(pool, "SELECT icon FROM sx_own WHERE name = 'sx_o'")).icon,
-    `${BUCKET}/seedsync/${sha256(ICON)}.png`);
+    `${BUCKET}/seedsync/${sha256(ICON)}/sx_icons_sx_o.png`);
   assert.strictEqual((await diffGroup(pool, 'sx_icons')).status, 'in_sync');
 });
 
@@ -442,4 +442,105 @@ dbTest('cancel during prepare throws cancelled and leaves no tmp files', async (
   await assert.rejects(applySeed(pool, 'sx_assets', {}, { signature, store, signal: ac2.signal }),
     (e) => e.code === 'cancelled');
   assert.strictEqual(Number((await one(pool, 'SELECT count(*) AS n FROM sx_art')).n), 0);
+});
+
+dbTest('identical bytes in two files seed to two keys, both in sync', async (t, pool, { store }) => {
+  store.objects.set('sx/a_copy.png', PNG_A);
+  await pool.query(`INSERT INTO sx_art (name, val, image) VALUES ('sx_a', 1, 'sx/a.png'), ('sx_d', 2, 'sx/a_copy.png')`);
+  await exportGroup(pool, 'sx_assets', { store });
+  await forgetLocally(pool, 'sx_art');
+  await apply(pool, 'sx_assets', {}, { store });
+  const d = await diffGroup(pool, 'sx_assets');
+  assert.strictEqual(d.status, 'in_sync', JSON.stringify(d.rows));
+  const keys = await all(pool, 'SELECT name, image FROM sx_art ORDER BY name');
+  assert.deepStrictEqual(keys, [
+    { name: 'sx_a', image: `${BUCKET}/seedsync/${sha256(PNG_A)}/sx_tiles_sx_a.png` },
+    { name: 'sx_d', image: `${BUCKET}/seedsync/${sha256(PNG_A)}/sx_tiles_sx_d.png` },
+  ]);
+  const cache = await all(pool, `SELECT object_key, file FROM seed_asset_hashes WHERE object_key LIKE '${BUCKET}/%' ORDER BY file`);
+  assert.deepStrictEqual(cache.map((c) => c.file), ['sx_tiles/sx_a.png', 'sx_tiles/sx_d.png'], 'two cache entries');
+});
+
+dbTest('a seed that fails after uploading leaves the served audio bytes untouched', async (t, pool, { root, store }) => {
+  const clipUuid = await seedFixture(pool);
+  await exportGroup(pool, 'sx_assets', { store });
+  await forgetLocally(pool, 'sx_clip');
+  await apply(pool, 'sx_assets', {}, { store });
+  const served = (await one(pool, 'SELECT storage_key FROM sx_clip')).storage_key;
+  assert.deepStrictEqual(store.objects.get(served), OGG);
+
+  // Git renames the clip onto a label a kept local row holds, with new bytes:
+  // the upload happens, then the write hits the unique label (conflict).
+  await pool.query("INSERT INTO sx_clip (label, kind) VALUES ('sx_clip2', 'sfx')");
+  const OGG2 = Buffer.from('OggS other payload');
+  const doc = readDoc('sx_assets');
+  const c = doc.tables.sx_clip[0];
+  c.label = 'sx_clip2';
+  c.sha1 = sha1(OGG2);
+  c.bytes = OGG2.length;
+  c.storage_key = { file: `audio/sfx/sx_clip2-${clipUuid.slice(0, 8)}.ogg`, sha1: sha1(OGG2) };
+  fs.writeFileSync(path.join(root, c.storage_key.file), OGG2);
+  writeDoc('sx_assets', doc);
+  const p = await previewSeed(pool, 'sx_assets');
+  assert.strictEqual(p.rows.find((r) => r.syncUuid === clipUuid).kind, 'changed');
+  await assert.rejects(applySeed(pool, 'sx_assets', {}, { signature: p.signature, store }), (e) => e.code === 'conflict');
+  assert.deepStrictEqual(store.objects.get(served), OGG, 'the served object is unchanged');
+  const newKey = `audio/sfx/${clipUuid}-${sha1(OGG2).slice(0, 8)}.ogg`;
+  assert.deepStrictEqual(store.objects.get(newKey), OGG2, 'the upload did happen (to a new key)');
+  assert.strictEqual((await one(pool, 'SELECT storage_key FROM sx_clip WHERE sync_uuid = $1', [clipUuid])).storage_key, served);
+});
+
+dbTest('symlinks are never followed: read blocks, write refuses', async (t, pool, { root, store }) => {
+  await seedFixture(pool);
+  await exportGroup(pool, 'sx_assets', { store });
+  await forgetLocally(pool, 'sx_art');
+  // A symlinked file whose target has exactly the right bytes still blocks.
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'seed-assets-out-'));
+  t.after(() => fs.rmSync(outside, { recursive: true, force: true }));
+  const target = path.join(outside, 'a.png');
+  fs.writeFileSync(target, PNG_A);
+  const file = path.join(root, 'sx_tiles/sx_a.png');
+  fs.unlinkSync(file);
+  fs.symlinkSync(target, file);
+  const p = await previewSeed(pool, 'sx_assets');
+  assert.strictEqual(p.rows.find((r) => r.key === 'sx_a').blockedReason, 'asset_file_mismatch');
+
+  // Export into a symlinked asset dir is refused before anything lands outside.
+  await pool.query('DELETE FROM sx_clip');
+  await pool.query("DELETE FROM seed_row_hashes WHERE group_id = 'sx_assets'");
+  fs.rmSync(fileFor('sx_assets'));
+  await pool.query("INSERT INTO sx_art (name, val, image) VALUES ('sx_e', 1, 'sx/a.png')");
+  fs.rmSync(path.join(root, 'sx_tiles'), { recursive: true });
+  fs.symlinkSync(outside, path.join(root, 'sx_tiles'));
+  await assert.rejects(exportGroup(pool, 'sx_assets', { store }), (e) => e.code === 'asset_path_unsafe');
+  assert.deepStrictEqual(fs.readdirSync(outside), ['a.png'], 'nothing written through the link');
+});
+
+dbTest('an audio git value without a sha1 is a mismatch', async (t, pool, { store }) => {
+  await seedFixture(pool);
+  await exportGroup(pool, 'sx_assets', { store });
+  await forgetLocally(pool, 'sx_clip');
+  const doc = readDoc('sx_assets');
+  doc.tables.sx_clip[0].storage_key.sha1 = null;
+  writeDoc('sx_assets', doc);
+  const p = await previewSeed(pool, 'sx_assets');
+  assert.strictEqual(p.rows.find((r) => r.key === 'sx_clip1').blockedReason, 'asset_file_mismatch');
+});
+
+dbTest('export refuses a both-sides conflict before writing any asset file', async (t, pool, { root, store }) => {
+  store.objects.set('sx/a2.png', ICON);
+  await seedFixture(pool);
+  await exportGroup(pool, 'sx_assets', { store });
+  // Git changed sx_a; here sx_a got new art (an uncached key that would take
+  // the file name sx_tiles/sx_a.png).
+  const doc = readDoc('sx_assets');
+  doc.tables.sx_art.find((r) => r.name === 'sx_a').val = 42;
+  writeDoc('sx_assets', doc);
+  await pool.query("UPDATE sx_art SET image = 'sx/a2.png' WHERE name = 'sx_a'");
+  const gets = store.gets;
+  const d = await diffGroup(pool, 'sx_assets');
+  assert.strictEqual(d.rows.find((r) => r.key === 'sx_a').kind, 'edited_here');
+  await assert.rejects(exportGroup(pool, 'sx_assets', { store }), (e) => e.code === 'git_newer');
+  assert.strictEqual(store.gets, gets, 'nothing downloaded');
+  assert.deepStrictEqual(fs.readFileSync(path.join(root, 'sx_tiles/sx_a.png')), PNG_A, "git's file untouched");
 });
