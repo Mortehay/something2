@@ -93,6 +93,8 @@ module.exports = function seedExportRoutes(pool, { processStartedAt, store, boxD
           inGit: d.header || null,
           // An adapter group's note for the badge (maps: baseline_pending).
           ...(d.hint ? { hint: d.hint } : {}),
+          // Maps: specs the GPU box was not updated for (mapsBoxPush.boxNote).
+          ...(d.note ? { note: d.note } : {}),
         });
       } catch (err) {
         if (!(err instanceof SyncFileError)) throw err;

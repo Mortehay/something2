@@ -509,3 +509,41 @@ test("sendError: the engine's lock-timeout busy keeps its message and code; the 
   const r = seedExportRoutes.sendError(res(), new SyncRefused('busy', 'another export or seed is running', { job }));
   assert.deepStrictEqual([r.code, r.body], [409, { error: 'busy', job }]);
 });
+
+// SOMET-641 final review I1: the Maps group's GPU-box note (computeStatus
+// `note`) must reach the tab through GET /groups, not stop at diffGroup.
+dbTest('GET /groups forwards the maps box note', async ({ pool, admin, dir }) => {
+  const spec = {
+    name: 'sx-routes-note',
+    worlds: [{
+      key: 'a', name: 'sx_routes_note_a', grid: [0, 0], seed: 742001, width: 64, height: 64, chunk_size: 64,
+      biomes: ['Deep Forest'], biome_cell: 32, allowed_creature_types: [], is_entry: true,
+      entry_spawn: { x: 3200, y: 3200 },
+    }],
+    links: [],
+  };
+  const { canonicalSpecJson } = require('../src/services/mapSpecExport.js');
+  const { specHash } = require('../src/services/seedSync/mapSpecState.js');
+  fs.mkdirSync(path.join(dir, 'maps'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'maps', `${spec.name}.map.json`), canonicalSpecJson(spec));
+  fs.writeFileSync(path.join(dir, 'maps.json'), JSON.stringify({
+    header: { group: 'maps', exported_at: '2026-10-19T00:00:00.000Z', exported_by: 'sx', schema_version: '', spec_count: 1 },
+    specs: [{ name: spec.name, sha256: specHash(spec) }],
+    entry_world: 'sx_routes_note_a',
+  }));
+  const app = appFor(pool);
+  const h = { Authorization: admin.auth };
+  try {
+    const clean = (await request(app).get('/api/seed-export/groups').set(h)).body.find((g) => g.id === 'maps');
+    assert.ok(!('note' in clean), 'no box problem: no note key');
+    await pool.query(
+      `INSERT INTO map_spec_state (spec_name, exported_sha256, box_error) VALUES ($1, 'abc', 'service_error: sx boom')`,
+      [spec.name]);
+    const res = await request(app).get('/api/seed-export/groups').set(h);
+    assert.strictEqual(res.status, 200, res.text);
+    const maps = res.body.find((g) => g.id === 'maps');
+    assert.strictEqual(maps.note, 'GPU box not updated: sx-routes-note: service_error: sx boom');
+  } finally {
+    await pool.query("DELETE FROM map_spec_state WHERE spec_name = 'sx-routes-note'");
+  }
+});
