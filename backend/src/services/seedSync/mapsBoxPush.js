@@ -7,7 +7,8 @@
 // hand-authored vale-region: `skipped`), diff it against ours at whole top-level
 // key granularity (a `worlds` array is ONE key; no finer patch format is
 // invented), and PATCH only the differing keys. No difference = `pushed`
-// without a request.
+// without a request. A box copy whose shape differs from ours (shapeMismatch)
+// is never PATCHed: `failed` with box_error 'shape_mismatch: ...'.
 //
 // State (map_spec_state):
 //   pushed   box_pushed_sha256 = exported_sha256, box_error = NULL
@@ -89,6 +90,33 @@ function changedKeys(ours, theirs) {
   return body;
 }
 
+// The box's spec format is not verified, and a PATCH replaces whole top-level
+// keys: a key the box has and we do not would be dropped with them. Compared
+// before any PATCH: the top-level key sets, and the key sets of the `worlds`
+// and `links` elements (union over elements). A mismatch when the box has a
+// key we do not (any level), or lacks a top-level key we would PATCH. An
+// element key only we have (e.g. a hand-placed `graph`) is an edit, not a
+// shape change. -> null, or the first differing keys ('box has worlds[].x').
+const ELEMENT_ARRAYS = ['worlds', 'links'];
+const MAX_SHAPE_KEYS = 3;
+function shapeMismatch(ours, theirs, body) {
+  if (!theirs || typeof theirs !== 'object' || Array.isArray(theirs)) return 'box copy is not an object';
+  const extra = Object.keys(theirs).filter((k) => !(k in ours)).sort();
+  const lacks = Object.keys(body).filter((k) => !(k in theirs)).sort();
+  for (const k of ELEMENT_ARRAYS) {
+    if (!(k in theirs) || !(k in ours)) continue;
+    if (!Array.isArray(theirs[k])) return `box ${k} is not an array`;
+    const keysOf = (arr) => new Set((Array.isArray(arr) ? arr : [])
+      .flatMap((e) => (e && typeof e === 'object' && !Array.isArray(e) ? Object.keys(e) : [])));
+    const mine = keysOf(ours[k]);
+    for (const x of [...keysOf(theirs[k])].sort()) if (!mine.has(x)) extra.push(`${k}[].${x}`);
+  }
+  const parts = [];
+  if (extra.length) parts.push(`box has ${extra.slice(0, MAX_SHAPE_KEYS).join(', ')}${extra.length > MAX_SHAPE_KEYS ? ', …' : ''}`);
+  if (lacks.length) parts.push(`box lacks ${lacks.slice(0, MAX_SHAPE_KEYS).join(', ')}${lacks.length > MAX_SHAPE_KEYS ? ', …' : ''}`);
+  return parts.length ? parts.join('; ') : null;
+}
+
 // deps: { fetchImpl (tests), serviceDb (tests: where the box provider is read
 // from; default `db`) }. opts: { signal, onProgress, readSpec(name) }.
 // -> [{ spec, status: 'pushed'|'skipped'|'failed', error }]
@@ -132,9 +160,17 @@ async function pushToBox(db, specNames, deps = {}, opts = {}) {
           res = { spec: name, status: 'skipped', error: null };
         } else {
           const body = changedKeys(ours, theirs);
-          if (Object.keys(body).length) await wg.patchWorld(svcDb, name, body, wgDeps);
-          await setState(db, name, sha, null);
-          res = { spec: name, status: 'pushed', error: null };
+          const mismatch = Object.keys(body).length ? shapeMismatch(ours, theirs, body) : null;
+          if (mismatch) {
+            // Not PATCHed: recorded, and the group note shows it.
+            const error = `shape_mismatch: ${mismatch}`.slice(0, MAX_ERROR);
+            await setState(db, name, st.box_pushed_sha256 || null, error);
+            res = { spec: name, status: 'failed', error };
+          } else {
+            if (Object.keys(body).length) await wg.patchWorld(svcDb, name, body, wgDeps);
+            await setState(db, name, sha, null);
+            res = { spec: name, status: 'pushed', error: null };
+          }
         }
       }
     } catch (e) {
@@ -149,4 +185,6 @@ async function pushToBox(db, specNames, deps = {}, opts = {}) {
   return results;
 }
 
-module.exports = { pushToBox, boxNote, boxProblems, needsPush, UNREACHABLE_NOTE, _changedKeys: changedKeys };
+module.exports = {
+  pushToBox, boxNote, boxProblems, needsPush, UNREACHABLE_NOTE, _changedKeys: changedKeys, _shapeMismatch: shapeMismatch,
+};

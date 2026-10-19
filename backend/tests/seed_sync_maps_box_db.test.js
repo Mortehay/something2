@@ -348,3 +348,38 @@ test('note lists at most 3 specs then +N more; unreachable replaces the lines', 
   const allDown = [{ spec: 'a', error: 'unreachable: x' }, { spec: 'b', error: 'unreachable: y' }];
   assert.strictEqual(mapsGroup._boxNote(allDown), 'GPU box unreachable — new regions need the box (local generator: SOMET-644)');
 });
+
+// SOMET-641 final review I4: PATCH replaces whole top-level keys, so a box copy
+// whose shape differs from ours (a field we do not know) must not be PATCHed:
+// the push records shape_mismatch and the group note shows it.
+dbTest('box copy with a world field we do not have: no PATCH, box_error shape_mismatch', async (ctx) => {
+  const { pool } = ctx;
+  await editedA(ctx);
+  const theirs = JSON.parse(canonicalSpecJson(specA()));
+  theirs.worlds[1].sx_box_only = 7;
+  const { calls, deps } = fakeBox({ 'sx-m4-a': theirs });
+  const ex = await exportGroup(pool, 'maps', { pushToBox: true, boxDeps: deps });
+  assert.strictEqual(ex.rowCount, 1);
+  assert.deepStrictEqual(ex.box.map((b) => [b.spec, b.status]), [['sx-m4-a', 'failed']]);
+  assert.deepStrictEqual(calls.map((c) => c.method), ['GET'], 'no PATCH request sent');
+  const st = await stateOf(pool, 'sx-m4-a');
+  assert.strictEqual(st.box_error, 'shape_mismatch: box has worlds[].sx_box_only');
+  assert.notStrictEqual(st.box_pushed_sha256, st.exported_sha256);
+  assert.strictEqual((await diffGroup(pool, 'maps')).note, `GPU box not updated: sx-m4-a: ${st.box_error}`);
+});
+
+test('shape guard: extra keys at any level, and PATCHed top-level keys the box lacks', () => {
+  const { _shapeMismatch: shape } = require('../src/services/seedSync/mapsBoxPush.js');
+  const ours = { name: 'x', worlds: [{ key: 'a', graph: [1, 2] }, { key: 'b' }], links: [{ from: 'a', edge: 'E', to: 'b' }] };
+  const same = JSON.parse(JSON.stringify(ours));
+  assert.strictEqual(shape(ours, same, { worlds: ours.worlds }), null);
+  // An optional element key only we have (a hand-placed graph) is an edit, not a shape change.
+  const noGraph = { ...same, worlds: [{ key: 'a' }, { key: 'b' }] };
+  assert.strictEqual(shape(ours, noGraph, { worlds: ours.worlds }), null);
+  assert.strictEqual(shape(ours, { ...same, created_by: 'box' }, {}), 'box has created_by');
+  assert.strictEqual(shape(ours, { ...same, links: [{ from: 'a', edge: 'E', to: 'b', weight: 1 }] }, {}),
+    'box has links[].weight');
+  const { links, ...noLinks } = same;
+  assert.strictEqual(shape(ours, noLinks, { links }), 'box lacks links');
+  assert.strictEqual(shape(ours, { ...same, worlds: {} }, { worlds: ours.worlds }), 'box worlds is not an array');
+});
