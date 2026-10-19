@@ -95,6 +95,24 @@ test('plan3 migration backfills deterministic identities and versioned inheritan
       (e) => e.code === '23505');
     await c.query('ROLLBACK TO s');
 
+    // audio_clips: id-only insert gets sync_uuid = id; explicit sync_uuid is kept.
+    const idOnly = (await c.query(`INSERT INTO audio_clips (id, kind, label, storage_key, bytes, duration_ms, source)
+      VALUES (gen_random_uuid(), 'ambience', 'y', $1, 1, 1, 'uploaded') RETURNING id, sync_uuid`, [`audio/${tag}_y.ogg`])).rows[0];
+    assert.strictEqual(idOnly.sync_uuid, idOnly.id);
+    const explicit = crypto.randomUUID();
+    const ex = (await c.query(`INSERT INTO audio_clips (kind, label, storage_key, bytes, duration_ms, source, sync_uuid)
+      VALUES ('ambience', 'z', $1, 1, 1, 'uploaded', $2) RETURNING id, sync_uuid`, [`audio/${tag}_z.ogg`, explicit])).rows[0];
+    assert.strictEqual(ex.sync_uuid, explicit);
+    assert.notStrictEqual(ex.sync_uuid, ex.id);
+
+    // art_prompt_descriptions: deactivate then insert keeps the uuid.
+    await c.query('UPDATE art_prompt_descriptions SET active = false WHERE subject_key = $1', [tag]);
+    await c.query(`INSERT INTO art_prompt_descriptions (subject_kind, subject_key, text) VALUES ('item', $1, 'v3')`, [tag]);
+    const dv = await one('SELECT sync_uuid, active FROM art_prompt_descriptions WHERE subject_key = $1 ORDER BY id');
+    assert.strictEqual(dv.length, 3);
+    assert.strictEqual(dv[2].sync_uuid, md5uuid('art_prompt_descriptions', `item|${tag}`));
+    assert.strictEqual(dv[2].active, true);
+
     // New rows elsewhere default to a random uuid.
     const fresh = (await c.query(`INSERT INTO catalog_art (subject_kind, subject_key, image) VALUES ('item', $1, 'b.png') RETURNING sync_uuid`, [`${tag}_c`])).rows[0].sync_uuid;
     assert.match(fresh, /^[0-9a-f-]{36}$/);

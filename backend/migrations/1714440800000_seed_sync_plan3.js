@@ -64,8 +64,19 @@ exports.up = async (pgm) => {
   // audio_clips: the identity IS the id.
   pgm.addColumns('audio_clips', { sync_uuid: { type: 'uuid' } });
   pgm.sql('UPDATE audio_clips SET sync_uuid = id');
-  pgm.alterColumn('audio_clips', 'sync_uuid', { notNull: true, default: pgm.func('gen_random_uuid()') });
+  // No column default: a trigger sets sync_uuid = id for rows inserted without
+  // one (inserters pass id explicitly), while an explicit sync_uuid (seed
+  // sync) is kept.
+  pgm.alterColumn('audio_clips', 'sync_uuid', { notNull: true });
   pgm.addConstraint('audio_clips', 'audio_clips_sync_uuid_key', { unique: ['sync_uuid'] });
+  pgm.sql(`CREATE FUNCTION audio_clips_sync_uuid_fill() RETURNS trigger LANGUAGE plpgsql AS $f$
+    BEGIN
+      IF NEW.sync_uuid IS NULL THEN NEW.sync_uuid := NEW.id; END IF;
+      RETURN NEW;
+    END
+  $f$`);
+  pgm.sql(`CREATE TRIGGER audio_clips_sync_uuid_fill BEFORE INSERT ON audio_clips
+    FOR EACH ROW EXECUTE FUNCTION audio_clips_sync_uuid_fill()`);
 
   for (const [table, keyExpr, joins] of KEYED) {
     pgm.addColumns(table, { sync_uuid: { type: 'uuid' } });
@@ -123,6 +134,8 @@ exports.down = (pgm) => {
     pgm.dropConstraint(table, `${table}_sync_uuid_key`);
     pgm.dropColumns(table, ['sync_uuid']);
   }
+  pgm.sql('DROP TRIGGER audio_clips_sync_uuid_fill ON audio_clips');
+  pgm.sql('DROP FUNCTION audio_clips_sync_uuid_fill()');
   pgm.dropConstraint('audio_clips', 'audio_clips_sync_uuid_key');
   pgm.dropColumns('audio_clips', ['sync_uuid']);
 };
