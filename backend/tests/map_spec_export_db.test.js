@@ -284,6 +284,12 @@ test('each admin edit appears in the written spec', async (t) => {
 
     const outA = await write(A, [A, B]);
     const outB = await write(B, [A, B]);
+    assert.deepEqual(outA.notes, [`world "c" matched by seed 731003 as "${P}c renamed", renamed from "${P}c"`],
+      'a rename by seed is reported so an admin can confirm it');
+    const staleGraph = structuredClone(A);
+    staleGraph.worlds[3].graph = [5, 5];
+    assert.ok(!('graph' in (await write(staleGraph, [staleGraph, B])).spec.worlds[3]),
+      'a grid-less world whose DB position is NULL drops a stale authored graph');
     const a = outA.spec;
     const byKey = Object.fromEntries(a.worlds.map((w) => [w.key, w]));
 
@@ -323,6 +329,7 @@ test('each admin edit appears in the written spec', async (t) => {
     for (const s of written) {
       const again = await write(s, written);
       assert.equal(canonicalSpecJson(again.spec), canonicalSpecJson(s), `${s.name} is a fixed point`);
+      assert.deepEqual(again.notes, [], `${s.name}: the written name is now the DB name`);
     }
   });
 });
@@ -354,6 +361,46 @@ test('a re-pointed doorway replaces the declared link; its stale mirror is repor
     const r = await applyMapSpec(pool, spec, { moveEntry: false });
     assert.deepEqual(r.linksRemoved.map((l) => `${l.from_name}:${l.edge}->${l.to_name}`), [`${P}b:W->${P}a`],
       're-applying the written spec removes exactly the stale one-way row');
+    const again = await specFromDb(pool, spec);
+    assert.deepEqual(again.notes, []);
+    assert.equal(canonicalSpecJson(again.spec), canonicalSpecJson(spec));
+  });
+});
+
+test('a doorway re-pointed from the side that did NOT declare it drops the declared link', async (t) => {
+  // The spec declares a-E->b. POST /api/worlds/b/links {edge:'W', to:c}
+  // re-points b's west door to c, leaving a:E->b one-way.
+  const D = {
+    name: 'sx-w3-d',
+    worlds: [
+      world('a', [0, 0], 731021, { is_entry: true, entry_spawn: { x: 3200, y: 3200 } }),
+      world('b', [1, 0], 731022),
+      world('c', [1, 1], 731023),
+      world('d', [0, 1], 731024),
+    ],
+    links: [
+      { from: 'a', edge: 'E', to: 'b' },
+      { from: 'b', edge: 'S', to: 'c' },
+      { from: 'a', edge: 'S', to: 'd' },
+      { from: 'd', edge: 'E', to: 'c' },
+    ],
+  };
+  assert.deepEqual(validateMapSpec(D), []);
+  await withDb(t, 'mirror-side re-point', async (pool) => {
+    await applyMapSpec(pool, D, { moveEntry: false });
+    await setLink(pool, await worldId(pool, `${P}b`), 'W', await worldId(pool, `${P}c`));
+    const { spec, notes, externallyReachable } = await specFromDb(pool, D);
+    assert.deepEqual(spec.links, [
+      { from: 'b', edge: 'S', to: 'c' },
+      { from: 'a', edge: 'S', to: 'd' },
+      { from: 'd', edge: 'E', to: 'c' },
+      { kind: 'edge', from: 'b', edge: 'W', to: 'c' },
+    ]);
+    assert.equal(notes.length, 1, JSON.stringify(notes));
+    assert.match(notes[0], /one-way doorway sx_w3_a -E-> sx_w3_b \(its mirror slot leads to sx_w3_c\)/);
+    assert.deepEqual(validateMapSpec(spec, { externallyReachable }), []);
+    const r = await applyMapSpec(pool, spec, { moveEntry: false });
+    assert.deepEqual(r.linksRemoved.map((l) => `${l.from_name}:${l.edge}->${l.to_name}`), [`${P}a:E->${P}b`]);
     const again = await specFromDb(pool, spec);
     assert.deepEqual(again.notes, []);
     assert.equal(canonicalSpecJson(again.spec), canonicalSpecJson(spec));

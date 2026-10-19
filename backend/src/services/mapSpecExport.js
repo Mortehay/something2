@@ -139,8 +139,12 @@ async function readState(db, worlds, otherNames, notes) {
     for (const w of missing) {
       const cands = candidates.filter((r) => Number(r.seed) === w.seed);
       const rivals = missing.filter((x) => x.seed === w.seed);
-      if (cands.length === 1 && rivals.length === 1) rowOf.set(w.key, cands[0]);   // a rename: an edit, no note
-      else notes.push(`world "${w.key}" ("${w.name}") is not in the database; kept as the spec has it`);
+      // Noted even when it matches, so the admin can confirm it is a rename
+      // and not an unrelated world that happens to share the seed.
+      if (cands.length === 1 && rivals.length === 1) {
+        rowOf.set(w.key, cands[0]);
+        notes.push(`world "${w.key}" matched by seed ${w.seed} as "${cands[0].name}", renamed from "${w.name}"`);
+      } else notes.push(`world "${w.key}" ("${w.name}") is not in the database; kept as the spec has it`);
     }
 
     const ids = [...rowOf.values()].map((w) => w.id);
@@ -213,8 +217,10 @@ function writeWorld(w, row, rows) {
     const derived = Array.isArray(o.grid) ? [o.grid[0] * GRID_SPACING, o.grid[1] * GRID_SPACING] : null;
     if (same(o.graph, pos)) { /* authored and unchanged */ } else if (same(derived, pos)) delete o.graph;
     else set('graph', pos);
-  } else if (Array.isArray(o.grid)) {
-    delete o.graph;   // NULL in the DB: apply's grid-derived position is the closest it can say
+  } else {
+    // NULL in the DB. With a grid, apply's grid-derived position is the closest
+    // a spec can say; without one, NULL is what omitting the key applies.
+    delete o.graph;
   }
 
   // Standalone waypoints (no map_link_id), matched by name.
@@ -366,14 +372,16 @@ async function specFromDb(db, spec, { otherSpecWorlds = new Map(), keepSlots = [
     const back = toId ? compassAt.get(slot(toId, oppositeEdge(l.edge))) : undefined;
     const fwdOk = fwd && fwd.to_world_id === toId;
     const backOk = back && back.to_world_id === fromId;
-    // The declaring side's slot decides. Gone from both sides is
-    // DELETE /api/worlds/:id/links/:edge, and the link goes, which IS the edit.
-    // Its slot now leading elsewhere is POST /api/worlds/:id/links re-pointing
-    // the doorway: the new pair is written below, and a mirror left behind is
-    // a one-way row the loose pass reports.
-    if (!fwdOk && !(backOk && !fwd)) continue;
-    consumed.add(fwdOk ? fwd.id : back.id);
-    if (fwdOk && backOk) consumed.add(back.id);
+    // Kept only while BOTH sides agree, or one agrees and the other slot is
+    // empty. Gone from both sides is DELETE /api/worlds/:id/links/:edge: the
+    // link goes, which IS the edit. Either slot now leading elsewhere is
+    // POST /api/worlds/:id/links re-pointing the doorway FROM THAT SIDE: the
+    // new pair is written below, and the half of this link left behind is a
+    // one-way row the loose pass names in a note.
+    const keepIt = (fwdOk && (backOk || !back)) || (backOk && !fwd);
+    if (!keepIt) continue;
+    if (fwdOk) consumed.add(fwd.id);
+    if (backOk) consumed.add(back.id);
     keptLinks.push(l);
   }
 
