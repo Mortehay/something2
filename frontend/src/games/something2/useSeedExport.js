@@ -6,7 +6,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import toast from "react-hot-toast";
 import { authHeaders, apiFetch } from "./src/js/net/auth.js";
 import { API_URL } from "../../config.js";
-import { refusalText, jobSettled, BUSY_TEXT } from "./seedExportModel.js";
+import { refusalText, jobSettled, jobPollInterval, BUSY_TEXT } from "./seedExportModel.js";
 
 const BASE = `${API_URL}/api/seed-export`;
 export const GROUPS_KEY = ["seed-groups"];
@@ -99,8 +99,8 @@ export function useSeedJob() {
   const query = useQuery({
     queryKey: JOB_KEY,
     queryFn: () => call("/jobs/current"),
-    refetchOnMount: "always",
-    refetchInterval: (q) => (q.state.data && q.state.data.status === "running" ? 1000 : false),
+    refetchOnMount: 'always',
+    refetchInterval: (q) => jobPollInterval(q.state.data),
   });
   const seen = useRef(null);
   const job = query.data;

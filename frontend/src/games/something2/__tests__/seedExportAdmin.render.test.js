@@ -28,6 +28,11 @@ describe('GroupRow with a running job', () => {
     expect(btn(html, 'Seed…')).toContain('disabled');
     expect(btn(html, 'Seed…')).toContain(BUSY);
   });
+  it('a requested cancel disables Cancel and says Cancelling…', () => {
+    const html = row(art, { ...running, cancelRequested: true });
+    expect(html).toContain('Cancelling…');
+    expect(btn(html, 'Cancel')).toContain('disabled');
+  });
   it('another group\'s buttons are disabled with the busy tooltip and show no progress', () => {
     const html = row(quests, running);
     expect(html).not.toContain('<progress');

@@ -276,6 +276,14 @@ export const renameNote = (row) => (isRename(row) ? RENAME_NOTES[row.table] : nu
 // to move, the count is 0 and the job is in its database step.
 export const BUSY_TEXT = 'Another export or seed is running';
 export const jobRunning = (job) => Boolean(job) && job.status === 'running';
+// useSeedJob's refetchInterval: poll every second only while a job runs.
+export const jobPollInterval = (job) => (jobRunning(job) ? 1000 : false);
+
+// Seed all: leaving for a binary group's own preview discards the choices
+// made in this modal. `states` holds a group only once the admin changed a
+// decision there, so any entry means there is something to lose.
+export const DISCARD_CONFIRM = 'Discard the choices made here?';
+export const hasChoices = (states) => Object.keys(states || {}).length > 0;
 
 const PHASE_VERBS = { download: 'Downloading', upload: 'Uploading' };
 

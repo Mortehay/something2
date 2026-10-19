@@ -7,6 +7,7 @@ import styled from 'styled-components';
 import { useSeedPreviews, useApplyAll } from './useSeedExport.js';
 import {
   initialDecisions, previewSignature, seedRequestBody, seedAllGate, applyGate, pluralize, BINARY_NOTE, BUSY_TEXT,
+  DISCARD_CONFIRM, hasChoices,
 } from './seedExportModel.js';
 import { Btn, Muted, Modal } from './seedUi.jsx';
 import PreviewSection from './SeedPreviewSection.jsx';
@@ -96,6 +97,14 @@ export default function SeedAllModal({ groups, onClose, binaryGroups = [], onSee
     });
   };
 
+  // Opening Art / Audio's own preview closes this modal: confirm first when
+  // the admin already made choices here.
+  const seedSeparately = (id) => {
+    if (!onSeedGroup) return;
+    if (hasChoices(states) && !window.confirm(DISCARD_CONFIRM)) return;
+    onSeedGroup(id);
+  };
+
   // Back from the result panel: reload every group not yet seeded.
   const reviewAgain = () => {
     setResults(null);
@@ -114,7 +123,7 @@ export default function SeedAllModal({ groups, onClose, binaryGroups = [], onSee
             <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
               {binaryGroups.map((g) => (
                 <Btn key={g.id} disabled={busy} title={busy ? BUSY_TEXT : undefined}
-                  onClick={() => onSeedGroup && onSeedGroup(g.id)}>{`Seed ${g.label}…`}</Btn>
+                  onClick={() => seedSeparately(g.id)}>{`Seed ${g.label}…`}</Btn>
               ))}
             </div>
           </Res>
