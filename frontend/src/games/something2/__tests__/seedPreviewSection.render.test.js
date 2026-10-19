@@ -139,3 +139,20 @@ describe('SeedPreviewSection Keep local on a no-baseline row', () => {
     expect(src).toContain('onClick={() => decide([r.syncUuid], d)}');
   });
 });
+
+// SOMET-641 final review E2: a baseline row (no blockedReason) shows its
+// blockedMessage under the row.
+describe('SeedPreviewSection baseline row message', () => {
+  it('renders the message of a row with no blockedReason', () => {
+    const data = {
+      tables: [{ table: 'map_specs' }], warnings: [],
+      rows: [{
+        syncUuid: 'b1', table: 'map_specs', key: 'vale-region', kind: 'baseline', defaultDecision: 'local',
+        allowedDecisions: ['local'], blockedReason: null, fields: [],
+        blockedMessage: 'Seed Maps once to record this PC baseline — sx row message',
+      }],
+    };
+    const html = renderToString(h(PreviewSection, { data, decisions: {}, setDecisions: () => {} }));
+    expect(html).toContain('sx row message');
+  });
+});

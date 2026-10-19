@@ -388,14 +388,16 @@ export function keepLocalConfirmText(rows, uuids) {
   return `${lines.join('\n\n')}\n\nKeep local anyway?`;
 }
 
-// Why a preview row is blocked, in the tab's words; null when it is not.
+// Why a preview row is blocked, in the tab's words; a row that is not blocked
+// shows its blockedMessage when it has one (a Maps baseline row's hint); else
+// null.
 const BLOCKED_COPY = {
   asset_file_missing: 'File missing in git checkout — pull again or re-export on the other PC',
   asset_file_mismatch: 'File changed outside the tab — re-export',
 };
 export function blockedText(row) {
   const reason = row && row.blockedReason;
-  if (!reason) return null;
+  if (!reason) return (row && row.blockedMessage) || null;
   if (BLOCKED_COPY[reason]) return BLOCKED_COPY[reason];
   // The server's message names the owner group: "seed Entities first".
   if (reason === 'owner_missing') {

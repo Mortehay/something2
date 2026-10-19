@@ -129,7 +129,7 @@ export default function PreviewSection({ data, decisions, setDecisions, initialS
                       <Mono key={f.name}>{f.name}: <Old>{show(f.local)}</Old> → <New>{show(f.git)}</New></Mono>
                     ))}
                     {renameNote(r) && <Muted>{renameNote(r)}</Muted>}
-                    {r.blockedReason && <Muted>{blockedText(r)}</Muted>}
+                    {blockedText(r) && <Muted>{blockedText(r)}</Muted>}
                   </div>
                   <Seg>
                     {/* The kind's buttons; the ones this row does not allow are disabled. */}

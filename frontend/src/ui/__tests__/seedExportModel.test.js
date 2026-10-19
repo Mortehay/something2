@@ -491,6 +491,9 @@ describe('blockedText', () => {
     expect(blockedText({ blockedReason: 'referenced', blockedMessage: 'used by 2 rows' })).toBe('used by 2 rows');
     expect(blockedText({ blockedReason: 'key_clash' })).toBe('key_clash');
     expect(blockedText({ blockedReason: null })).toBe(null);
+    // SOMET-641: a baseline row is not blocked but carries a message (the hint).
+    expect(blockedText({ blockedReason: null, blockedMessage: 'Seed Maps once to record this PC\'s baseline' }))
+      .toBe("Seed Maps once to record this PC's baseline");
   });
 });
 
