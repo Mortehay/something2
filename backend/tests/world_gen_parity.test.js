@@ -6,7 +6,11 @@
 // backend/tools/world_gen_ref/make_fixtures.py from the vendored reference
 // (their own integrity is world_gen_ref_integrity.test.js). No python, no DB.
 //
-// report() and its private helper _depth_of are Task 4 and are not covered here.
+// report() is held to Python's json.dumps(report, indent=2) TEXT (report_json),
+// not just to the parsed value: it emits integer-valued floats (14.0) that a
+// deep-equal cannot see. Its input specs are read with a float-preserving
+// loader (loadPyJson), because JSON.parse turns 6450.0 into 6450 - which
+// isTileCentre would accept where Python rejects it.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -15,7 +19,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const W = require('../src/services/worldGen/worldGen');
-const { pyFloat, dumpsPy } = require('../src/services/worldGen/pyCompat');
+const { pyFloat, isPyFloat, dumpsPy } = require('../src/services/worldGen/pyCompat');
 
 const FIXTURE_DIR = path.join(__dirname, 'fixtures', 'world_gen');
 const readFixture = (name) => JSON.parse(fs.readFileSync(path.join(FIXTURE_DIR, name), 'utf8'));
@@ -24,6 +28,75 @@ const HELPERS = readFixture('helpers.json').helpers;
 const CONSTANTS = readFixture('constants.json').constants;
 const PLAN_CASES = readFixture('plan_cases.json').cases;
 const BOX = readFixture('box_parity.json').case;
+
+// json.loads with Python's int/float split kept: a number token with a
+// fraction or exponent is a float and comes back as pyFloat(x) (arithmetic-
+// transparent, prints as a float); every other token is a plain number (an
+// int). Strings, literals and structure go through JSON.parse. Tests only:
+// it exists to hand report() exactly the spec Python saw.
+function loadPyJson(text) {
+  let i = 0;
+  const ws = () => { while (/\s/.test(text[i] ?? '')) i += 1; };
+  const STRING = /"(?:[^"\\]|\\.)*"/y;
+  const NUMBER = /-?(?:0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?/y;
+  const LITERAL = /true|false|null/y;
+  const match = (re) => {
+    re.lastIndex = i;
+    const m = re.exec(text);
+    if (!m) throw new SyntaxError(`loadPyJson: bad token at ${i}`);
+    i = re.lastIndex;
+    return m;
+  };
+  function value() {
+    ws();
+    const ch = text[i];
+    if (ch === '{') {
+      i += 1;
+      const out = {};
+      ws();
+      if (text[i] === '}') { i += 1; return out; }
+      for (;;) {
+        ws();
+        const key = JSON.parse(match(STRING)[0]);
+        ws();
+        if (text[i] !== ':') throw new SyntaxError(`loadPyJson: expected : at ${i}`);
+        i += 1;
+        out[key] = value();
+        ws();
+        if (text[i] === ',') { i += 1; continue; }
+        if (text[i] === '}') { i += 1; return out; }
+        throw new SyntaxError(`loadPyJson: expected , or } at ${i}`);
+      }
+    }
+    if (ch === '[') {
+      i += 1;
+      const out = [];
+      ws();
+      if (text[i] === ']') { i += 1; return out; }
+      for (;;) {
+        out.push(value());
+        ws();
+        if (text[i] === ',') { i += 1; continue; }
+        if (text[i] === ']') { i += 1; return out; }
+        throw new SyntaxError(`loadPyJson: expected , or ] at ${i}`);
+      }
+    }
+    if (ch === '"') return JSON.parse(match(STRING)[0]);
+    if (ch === 't' || ch === 'f' || ch === 'n') return JSON.parse(match(LITERAL)[0]);
+    const m = match(NUMBER);
+    return m[1] !== undefined || m[2] !== undefined ? pyFloat(Number(m[0])) : Number(m[0]);
+  }
+  const out = value();
+  ws();
+  if (i !== text.length) throw new SyntaxError(`loadPyJson: trailing data at ${i}`);
+  return out;
+}
+
+const readPyFixture = (name) => loadPyJson(fs.readFileSync(path.join(FIXTURE_DIR, name), 'utf8'));
+// Same files, floats kept: the report inputs (specs, targets) come from here.
+const PLAN_CASES_PY = readPyFixture('plan_cases.json').cases;
+const REPORT_ONLY = readFixture('report_only.json').cases;
+const REPORT_ONLY_PY = readPyFixture('report_only.json').cases;
 
 // Python helper name -> [JS function, does it return a Python float].
 // A float result is also checked as text against the fixture's result_json,
@@ -48,15 +121,14 @@ const HELPER_FNS = {
   is_tile_centre: [W.isTileCentre, false],
   _slug: [W.slug, false],
   _title: [W.title, false],
+  _depth_of: [W.depthOf, false],
 };
 // Not plain fn(args) -> result rows; tested on their own below.
 const SPECIAL = new Set(['check_units', 'plan_region_errors']);
-// report()'s private helper: Task 4.
-const DEFERRED = new Set(['_depth_of']);
 
 test('every helper in helpers.json is covered (none silently skipped)', () => {
   for (const key of Object.keys(HELPERS)) {
-    assert.ok(key in HELPER_FNS || SPECIAL.has(key) || DEFERRED.has(key), `no test for helper ${key}`);
+    assert.ok(key in HELPER_FNS || SPECIAL.has(key), `no test for helper ${key}`);
   }
   for (const [key, [fn]] of Object.entries(HELPER_FNS)) {
     assert.equal(typeof fn, 'function', `worldGen does not export the port of ${key}`);
@@ -166,4 +238,139 @@ test('the bundled bestiary_p4.json is byte-identical to the vendored reference',
   const pinned = '3c5e3c5c5b55e8fc0f0260b506eb9c004f3071fa42e9abb794e7cd64f094868a';
   assert.equal(sha(ref), pinned);
   assert.equal(sha(ours), pinned);
+});
+
+// --- report() ------------------------------------------------------------------
+
+test('loadPyJson keeps Python floats as pyFloat and ints as plain numbers', () => {
+  const v = loadPyJson('{"a": 6450.0, "b": 6450, "c": [1e+16, -0.0, 2.5, -3], "d": "x\\u00e9\\"", "e": [true, false, null, {}, []]}');
+  assert.ok(isPyFloat(v.a) && +v.a === 6450);
+  assert.equal(v.b, 6450);
+  assert.ok(isPyFloat(v.c[0]) && isPyFloat(v.c[1]) && isPyFloat(v.c[2]));
+  assert.ok(Object.is(+v.c[1], -0));
+  assert.equal(v.c[3], -3);
+  assert.equal(v.d, 'xé"');
+  assert.deepEqual(v.e, [true, false, null, {}, []]);
+  assert.equal(dumpsPy(v), '{"a": 6450.0, "b": 6450, "c": [1e+16, -0.0, 2.5, -3], "d": "x\\u00e9\\"", "e": [true, false, null, {}, []]}');
+  // Structure and order are JSON.parse's, floats aside.
+  const fixtureText = fs.readFileSync(path.join(FIXTURE_DIR, 'report_only.json'), 'utf8');
+  const unwrap = (x) => {
+    if (isPyFloat(x)) return x.value;
+    if (Array.isArray(x)) return x.map(unwrap);
+    if (x && typeof x === 'object') return Object.fromEntries(Object.entries(x).map(([k, y]) => [k, unwrap(y)]));
+    return x;
+  };
+  assert.deepEqual(unwrap(loadPyJson(fixtureText)), JSON.parse(fixtureText));
+});
+
+test('isTileCentre and checkUnits treat a float position the way Python does', () => {
+  assert.equal(W.isTileCentre(6450), true);
+  assert.equal(W.isTileCentre(pyFloat(6450)), false);
+  const problems = W.checkUnits({ key: 'f', width: 128, entry_spawn: { x: pyFloat(6450), y: 6450 } });
+  assert.deepEqual(problems, [
+    'f.entry_spawn.x = 6450.0 is not a tile centre - looks like TILE coordinates where '
+    + 'something2 reads PIXELS (100px per tile, so tile n is n*100+50)',
+  ]);
+});
+
+function assertReportText(got, c, where) {
+  // Structural first, so a failure shows a readable diff, then the bytes.
+  assert.deepEqual(JSON.parse(dumpsPy(got)), c.report, `${where} (value)`);
+  assert.equal(dumpsPy(got, { indent: 2 }), c.report_json, `${where} (json.dumps text)`);
+}
+
+test('report: every fixture report is byte-equal to Python json.dumps text', () => {
+  const failed = [];
+  let n = 0;
+  const check = (got, text, id) => { n += 1; if (dumpsPy(got, { indent: 2 }) !== text) failed.push(id); };
+  PLAN_CASES.forEach((c, i) => {
+    check(W.report(loadPyJson(c.to_json), PLAN_CASES_PY[i].report_target), c.report_json, `plan:${c.id}`);
+  });
+  check(W.report(loadPyJson(BOX.to_json), BOX.report_target), BOX.report_json, BOX.id);
+  REPORT_ONLY.forEach((c, i) => {
+    check(W.report(REPORT_ONLY_PY[i].spec, REPORT_ONLY_PY[i].target), c.report_json, `only:${c.id}`);
+  });
+  assert.equal(n, PLAN_CASES.length + 1 + REPORT_ONLY.length);
+  assert.equal(n, 69);
+  assert.deepEqual(failed, [], `reports not byte-equal: ${failed.join(', ')}`);
+});
+
+PLAN_CASES.forEach((c, i) => {
+  test(`report on plan case ${c.id} (the Python spec, and the JS planRegion spec)`, () => {
+    const target = PLAN_CASES_PY[i].report_target;
+    assertReportText(W.report(loadPyJson(c.to_json), target), c, c.id);
+    assertReportText(W.report(W.planRegion(structuredClone(c.args)), target), c, `${c.id} via planRegion`);
+  });
+});
+
+test('report on the live box parity-somet644 spec matches the box report', () => {
+  assertReportText(W.report(loadPyJson(BOX.to_json), BOX.report_target), BOX, BOX.id);
+  assert.deepEqual(BOX.report, BOX.box_report);
+});
+
+REPORT_ONLY.forEach((c, i) => {
+  test(`report-only case ${c.id}`, () => {
+    const { spec, target } = REPORT_ONLY_PY[i];
+    assertReportText(W.report(spec, target), c, c.id);
+  });
+});
+
+test('report-only float case really feeds floats (not ints) to report', () => {
+  const i = REPORT_ONLY.findIndex((c) => c.id === 'units-float-and-dict-positions');
+  assert.ok(i >= 0);
+  const w = REPORT_ONLY_PY[i].spec.worlds[0];
+  assert.ok(isPyFloat(w.entry_spawn.x));
+  // A plain JSON.parse would lose that and accept 6450 as a tile centre.
+  const lossy = W.report(REPORT_ONLY[i].spec, REPORT_ONLY[i].target);
+  assert.notEqual(dumpsPy(lossy, { indent: 2 }), REPORT_ONLY[i].report_json);
+});
+
+describeToName();
+function describeToName() {
+  const base = () => {
+    const spec = W.planRegion({ name: 'Links', world_count: 3 });
+    spec.worlds.push({
+      key: 'links_lonely', name: 'links_lonely', biomes: ['Mire'], density: 'normal',
+      width: 128, height: 128, is_entry: false, allowed_creature_types: W.spawnable(['Mire']),
+    });
+    // links_lonely's only exit is a cross-region doorway: to_name, no to.
+    spec.links.push({ from: 'links_lonely', edge: 'W', to_name: 'Far Away' });
+    return spec;
+  };
+
+  test('to_name link: report does not throw', () => {
+    assert.doesNotThrow(() => W.report(base(), 6.0));
+  });
+
+  test('to_name link: no "names a world that does not exist" problem', () => {
+    const r = W.report(base(), 6.0);
+    assert.deepEqual(r.problems.filter((p) => p.includes('names a world that does not exist')), []);
+    assert.ok(!r.problems.some((p) => p.includes('Far Away')));
+  });
+
+  test('to_name link: its source world is not reported unreachable', () => {
+    const r = W.report(base(), 6.0);
+    assert.ok(!r.problems.includes('links_lonely has no links - it is unreachable'), r.problems.join('\n'));
+    // Control: without the doorway it IS unreachable, so the assertion can fail.
+    const spec = base();
+    spec.links.pop();
+    assert.ok(W.report(spec, 6.0).problems.includes('links_lonely has no links - it is unreachable'));
+  });
+}
+
+test('a 6.0 target gives a caveat and still ok:true - caveats are not problems', () => {
+  const r = W.report(W.planRegion({ name: 'Gap', world_count: 4, target_per_screen: 6.0 }), 6.0);
+  assert.equal(r.problems.length, 0);
+  assert.equal(r.ok, true);
+  assert.equal(r.caveats.length, 1);
+  assert.match(r.caveats[0], /^asked for 6\.0 creatures\/screen/);
+});
+
+test('report does not mutate its spec', () => {
+  for (const [i, c] of REPORT_ONLY.entries()) {
+    const spec = REPORT_ONLY_PY[i].spec;
+    const before = dumpsPy(spec);
+    W.report(spec, REPORT_ONLY_PY[i].target);
+    assert.equal(dumpsPy(spec), before, c.id);
+  }
 });

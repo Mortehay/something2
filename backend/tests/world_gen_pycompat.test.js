@@ -195,6 +195,22 @@ test('pyStr of a list quotes its strings the way CPython repr does', () => {
   for (const [s, want] of cases) assert.equal(pyStr([s]), want, JSON.stringify(s));
 });
 
+test('pyStr of a dict prints CPython str(dict): repr keys and values, insertion order', () => {
+  // check_units f"{value}" can meet a dict or a list holding dicts. [value, str(value)]
+  // from python3 -I; floats are marked as they would be by the float-preserving loader.
+  const cases = [
+    [{}, '{}'],
+    [{ a: 1 }, "{'a': 1}"],
+    [{ a: 1, b: "it's", c: true, d: null, e: 1.5, f: pyFloat(2), g: [1, 'x'], h: 'é' },
+      "{'a': 1, 'b': \"it's\", 'c': True, 'd': None, 'e': 1.5, 'f': 2.0, 'g': [1, 'x'], 'h': 'é'}"],
+    [[{ k: false }, pyFloat(-0), pyFloat(1e16)], "[{'k': False}, -0.0, 1e+16]"],
+    [{ n: { m: [] }, q: 'say "hi"' }, "{'n': {'m': []}, 'q': 'say \"hi\"'}"],
+    [{ x: 'a\nb' }, "{'x': 'a\\nb'}"],
+    [new Map([['z', 1], ['a', pyFloat(3)]]), "{'z': 1, 'a': 3.0}"],
+  ];
+  for (const [v, want] of cases) assert.equal(pyStr(v), want, want);
+});
+
 // --- json.dumps ---------------------------------------------------------------
 
 function dumpsInput() {

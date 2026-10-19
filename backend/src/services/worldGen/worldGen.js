@@ -18,13 +18,17 @@
 // nothing - something2's creatureDensityField normalises to mean 1.0. The
 // reference keeps the superseded claim in prose; it is not ported.
 //
-// report() and its private helpers are not here yet (SOMET-644 Task 4).
+// report() returns JSON-ready objects whose Python floats are wrapped with
+// pyFloat at the output boundary only (see pyCompat's header); everything it
+// computes, compares, keys a Set on or formats is a plain number.
 
 const crypto = require('node:crypto');
 const path = require('node:path');
 const fs = require('node:fs');
 
-const { isPyFloat, floorDiv, pyMod, pyRound, pyStr, dumpsPy } = require('./pyCompat');
+const {
+  pyFloat, isPyFloat, floorDiv, pyMod, pyRound, pyFormatFixed, pyStr, dumpsPy,
+} = require('./pyCompat');
 
 // --- python semantics, spelled out ------------------------------------------
 
@@ -488,6 +492,13 @@ function chooseDensity(targetPerScreen, biomes = null) {
   return best;
 }
 
+/** `surface`, `deep`, or `mixed` for a transition world; null when no biome is known. */
+function depthOf(biomes) {
+  const depths = new Set(pyIter(biomes).filter(isBiome).map((n) => BIOMES[n].depth));
+  if (depths.size === 0) return null;
+  return depths.size === 1 ? [...depths][0] : 'mixed';
+}
+
 /**
  * JSON per second down ONE socket for a player parked in the thick of it:
  * ~920 B/s per creature in the radius-1 chunk neighbourhood. A bandwidth cost,
@@ -761,6 +772,286 @@ function title(region, i) {
   return i === 0 ? `${pyStr(region)} Crossing` : `${pyStr(region)} ${pyStr(i)}`;
 }
 
+// --- the report: does this world read as empty? -------------------------------
+
+// dict.get(key, default): the default only when the key is ABSENT - a key
+// holding null stays null, as in Python.
+const getOr = (obj, key, dflt) => (hasOwn(obj, key) ? obj[key] : dflt);
+
+// Python `x in container` for the str/number/bool/None values a spec holds.
+// A PyFloat is unwrapped so 1.0 matches 1, as Python's == does.
+const plain = (v) => (isPyFloat(v) ? v.value : v);
+
+function keyOf(w) {
+  if (!hasOwn(w, 'key')) throw new Error("KeyError: 'key'");
+  return w.key;
+}
+
+const join = (xs) => pyIter(xs).map(pyStr).join(', ');
+const orWord = (s, word) => (s === '' ? word : s);
+
+// Distinct creatures across every selectable biome, and the biomes beyond
+// them in something2's table - fixed numbers in the thin-variety message.
+const SELECTABLE_CREATURES = new Set(Object.keys(BIOMES).flatMap((n) => BIOME_CREATURES[n])).size;
+const UNSELECTABLE_BIOMES = Object.keys(BIOME_CREATURES).length - Object.keys(BIOMES).length;
+
+/**
+ * Per-world verdicts plus every structural check worth failing on - a report
+ * rather than an exception, because a spec with one thin world is still
+ * seedable. `targetPerScreen` is what the caller ASKED for, if known; a gap
+ * between it and what the tiers give is a CAVEAT, never a problem: `ok`
+ * counts problems only. Port of the reference's report(); returns a value
+ * whose dumpsPy(_, {indent: 2}) is byte-equal to Python's
+ * json.dumps(report(spec, target), indent=2).
+ */
+function report(spec, targetPerScreen = null) {
+  const worlds = pyIter(getOr(spec, 'worlds', []));
+  const keys = new Set(worlds.map((w) => plain(keyOf(w))));
+  const rows = [];
+  const problems = [];
+  // [key, KiB/s, per_screen] for every world over the socket threshold,
+  // reported once after the loop: the cost is a region-level fact.
+  const socketHot = [];
+  // Each row's per_screen as a plain number (the row holds the pyFloat).
+  const perRows = [];
+
+  for (const w of worlds) {
+    const key = keyOf(w);
+    const biomes = getOr(w, 'biomes', []);
+    const tier = getOr(w, 'density', 'normal');
+    const width = getOr(w, 'width', 0);
+    const height = getOr(w, 'height', 0);
+    const res = resolveDensity(tier, width, height);
+    const ps = perScreen(tier, biomes, width, height);
+    const flora = floraTypes(biomes);
+    const name = getOr(w, 'name', null);
+
+    // A tier budgets creatures; only the biome/allowed-type intersection lets
+    // any of them spawn. No intersection: zero, however healthy the tier.
+    const types = getOr(w, 'allowed_creature_types', []);
+    const can = spawnable(biomes);
+    const admitted = pyIter(types).filter((t) => can.includes(t));
+    if (admitted.length === 0) {
+      rows.push({
+        key, name, biomes,
+        density: tier, per_screen: pyFloat(0.0), creatures: 0,
+        area: res.area,
+        biome_multiplier: pyFloat(pyRound(biomeMultiplier(biomes), 2)),
+        flora, creature_types: types, variety: 0,
+        leaders: 0, verdict: 'EMPTY',
+      });
+      perRows.push(0.0);
+      problems.push(
+        `${pyStr(key)}: would seed ZERO creatures. Its biomes `
+        + `(${orWord(join(biomes), 'none')}) admit `
+        + `${orWord(join(can), 'nothing')}, but the world `
+        + `allows ${orWord(join(types), 'nothing')} - the two do not `
+        + 'intersect. A creature existing in entity_types is not the '
+        + 'same as a biome being able to spawn it.',
+      );
+      continue;
+    }
+
+    let verdict = 'ok';
+    if (ps < EMPTY_BELOW_PER_SCREEN) {
+      verdict = 'EMPTY';
+      problems.push(
+        `${pyStr(key)}: ${pyFormatFixed(ps, 1)} creatures/screen - reads as empty space. `
+        + `${pyStr(tier)} over ${pyStr(res.area)} tiles. `
+        + 'Raise the tier - the biome does not change this.',
+      );
+    } else if (ps > CROWDED_ABOVE_PER_SCREEN) {
+      verdict = 'CROWDED';
+      problems.push(
+        `${pyStr(key)}: ${pyFormatFixed(ps, 1)} creatures/screen and `
+        + `${pyStr(res.scatter)} creatures in the world - past the point `
+        + 'their own measurement shows the socket cost biting.',
+      );
+    }
+
+    const kib = socketKibS(ps, pyInt(getOr(w, 'chunk_size', 32)));
+    if (kib > SOCKET_WARN_KIB_S) socketHot.push([key, kib, ps]);
+
+    const typeList = pyIter(types);
+    const leaders = leaderCount(types);
+    if (typeList.length < THIN_VARIETY_BELOW) {
+      problems.push(
+        `${pyStr(key)}: only ${pyStr(typeList.length)} creature type(s) `
+        + `(${orWord(join(types), 'none')}) - the world will read `
+        + 'repetitive however many are on screen. The '
+        + `${pyStr(Object.keys(BIOMES).length)} selectable biomes admit `
+        + `${pyStr(SELECTABLE_CREATURES)} `
+        + 'creatures in total; the other '
+        + `${pyStr(UNSELECTABLE_BIOMES)} biomes in something2's `
+        + 'table are P4 and would fix this, but their metadata is not '
+        + 'known here yet.',
+      );
+    }
+    if (leaders > MAX_LEADER_ROLES_PER_WORLD) {
+      problems.push(
+        `${pyStr(key)}: ${pyStr(leaders)} leader roles. computeAuras is `
+        + 'O(leaders x population) every tick over the WHOLE world - '
+        + 'their measurement has 50 leaders eating most of the 8 ms '
+        + 'half-budget.',
+      );
+    }
+
+    const desolate = pyIter(biomes).some((n) => typeof n === 'string' && FLORA_OPTIONAL.has(n));
+    // Bare ground is the point of the desolate biomes; not a defect.
+    if (!desolate && flora.length < THIN_FLORA_BELOW) {
+      problems.push(
+        `${pyStr(key)}: only ${pyStr(flora.length)} flora type(s) `
+        + `(${orWord(join(flora), 'none')}) - the ground will read bare `
+        + 'between creatures. something2 has no per-world decoration '
+        + 'density, so the only fix is a biome with richer flora.',
+      );
+    }
+
+    if (res.clamped) problems.push(`${pyStr(key)}: clamped to ${pyStr(MAX_WORLD_CREATURES)}.`);
+
+    // Tiles-vs-pixels, checked rather than remembered.
+    problems.push(...checkUnits(w));
+
+    rows.push({
+      key, name, biomes,
+      density: tier, per_screen: pyFloat(pyRound(ps, 1)),
+      creatures: res.scatter, area: res.area,
+      biome_multiplier: pyFloat(pyRound(biomeMultiplier(biomes), 2)),
+      flora, creature_types: types,
+      variety: typeList.length, leaders,
+      depth: depthOf(biomes),
+      socket_kib_s: pyFloat(pyRound(kib, 1)),
+      verdict,
+    });
+    perRows.push(pyRound(ps, 1));
+  }
+
+  // A link may leave the region: something2's World Map Editor writes
+  // `to_name` (a world in ANOTHER region) and no `to`. Such a link is valid,
+  // and counts as linking its SOURCE only.
+  const links = pyIter(getOr(spec, 'links', [])).filter(isDict);
+  for (const l of links) {
+    const frm = getOr(l, 'from', null);
+    const to = getOr(l, 'to', null);
+    const toName = getOr(l, 'to_name', null);
+    if (!keys.has(plain(frm)) || (toName === null && !keys.has(plain(to)))) {
+      problems.push(
+        `link ${pyStr(frm)} -${pyStr(getOr(l, 'edge', '?'))}-> `
+        + `${pyStr(truthy(to) ? to : toName)} names a world that does not `
+        + 'exist',
+      );
+    }
+  }
+
+  const linked = new Set();
+  for (const l of links) {
+    for (const k of [getOr(l, 'from', null), getOr(l, 'to', null)]) {
+      if (truthy(k)) linked.add(plain(k));
+    }
+  }
+  for (const w of worlds) {
+    if (!linked.has(plain(w.key)) && worlds.length > 1) {
+      problems.push(`${pyStr(w.key)} has no links - it is unreachable`);
+    }
+  }
+
+  const entries = worlds.filter((w) => truthy(getOr(w, 'is_entry', null)));
+  if (entries.length !== 1) {
+    problems.push(`${pyStr(entries.length)} entry worlds - something2 expects one`);
+  }
+
+  // `[r["per_screen"] for r in rows] or [0]`: an int 0 when there are no
+  // rows, which is why min/max below print as 0 and not 0.0 then.
+  const noRows = rows.length === 0;
+  const per = noRows ? [0] : perRows;
+  let perSum = 0;
+  for (const p of per) perSum += p; // Python sum(): left to right from 0
+
+  // ONE line for the socket cost, however many worlds carry it.
+  if (socketHot.length > 0) {
+    const kibs = new Set(socketHot.map(([, k]) => pyRound(k)));
+    const screens = new Set(socketHot.map(([, , p]) => pyRound(p, 1)));
+    const scope = socketHot.length === rows.length
+      ? 'every world in the region'
+      : `${pyStr(socketHot.length)} of ${pyStr(rows.length)} worlds `
+        + `(${socketHot.slice(0, 6).map(([k]) => pyStr(k)).join(', ')}`
+        + `${socketHot.length > 6 ? ', ...' : ''})`;
+    const rate = kibs.size === 1
+      ? `~${pyFormatFixed([...kibs][0], 0)} KiB/s`
+      : `~${pyFormatFixed(Math.min(...kibs), 0)}-${pyFormatFixed(Math.max(...kibs), 0)} KiB/s`;
+    const dens = screens.size === 1
+      ? `${pyFormatFixed([...screens][0], 1)}/screen`
+      : `${pyFormatFixed(Math.min(...screens), 1)}-${pyFormatFixed(Math.max(...screens), 1)}/screen`;
+    problems.push(
+      `${scope}: ${rate} down a single socket for one parked player `
+      + `(${dens}). Their measurement puts the cost at `
+      + `~${pyStr(BYTES_PER_CREATURE_PER_SEC)} B/s per creature in the active `
+      + 'neighbourhood, so this is a bandwidth decision rather than a '
+      + 'flavour one. Two levers, and the biomes are neither: '
+      + 'target_per_screen of 11 or below lands on `dense` (8.1/screen), '
+      + 'or keep the density and halve chunk_size - the neighbourhood is '
+      + `${pyStr(NEIGHBOURHOOD_CHUNKS)} chunks, so the cost falls with the SQUARE `
+      + 'of it (32 -> 16 is ~4x less).',
+    );
+  }
+
+  // Questions the report cannot settle - deliberately NOT problems.
+  const caveats = [];
+  let raw = 0;
+  for (const r of rows) raw += r.creatures;
+
+  // The tiers are coarse (2.0, 4.1, 8.1, 14.0, 20.0 per screen) and the gap
+  // between what was asked and what a tier gives is silent without this.
+  const target = plain(targetPerScreen);
+  if (truthy(target)) {
+    const got = perSum / per.length;
+    if (Math.abs(got - target) > 0.15 * Math.max(target, 0.1)) {
+      const live = DENSITY_ORDER.filter((t) => t !== 'dead');
+      let nearer = live[0];
+      let best = Infinity;
+      for (const t of live) { // min(): the first of equal keys wins
+        const d = Math.abs(DENSITY_TIERS[t] * (TILES_PER_SCREEN / 1000.0) - target);
+        if (d < best) { nearer = t; best = d; }
+      }
+      caveats.push(
+        `asked for ${pyFormatFixed(target, 1)} creatures/screen, this `
+        + `region averages ${pyFormatFixed(got, 1)}. The tiers are coarse - `
+        + live.map((t) => `${t} ${pyFormatFixed((DENSITY_TIERS[t] * TILES_PER_SCREEN) / 1000, 1)}`).join(', ')
+        + ` - and ${nearer} is the closest one to your target. Ask for `
+        + 'a number nearer a tier if the gap matters.',
+      );
+    }
+  }
+
+  const allTypes = new Set();
+  for (const r of rows) for (const t of pyIter(r.creature_types)) allTypes.add(plain(t));
+  // min/max of the rounded floats; the int 0 fallback stays an int.
+  const edge = (x) => (noRows ? pyRound(x, 1) : pyFloat(pyRound(x, 1)));
+
+  return {
+    worlds: rows,
+    problems,
+    caveats,
+    ok: problems.length === 0,
+    totals: {
+      worlds: worlds.length,
+      creatures: raw,
+      mean_per_screen: pyFloat(pyRound(perSum / per.length, 1)),
+      min_per_screen: edge(Math.min(...per)),
+      max_per_screen: edge(Math.max(...per)),
+      empty_worlds: rows.filter((r) => r.verdict === 'EMPTY').length,
+      creature_types: allTypes.size,
+      leaders: rows.reduce((n, r) => n + r.leaders, 0),
+    },
+    notes: [
+      'Creature counts are scatter only; packs are not modelled, so '
+      + 'every figure is a floor. See PACKS_NOT_MODELLED.',
+      `One screen is ~${pyStr(TILES_PER_SCREEN)} tiles at something2's fixed `
+      + '1280x720 canvas.',
+    ],
+  };
+}
+
 /** The file `make seed-map SPEC=<name>` reads: json.dumps(spec, indent=2) + "\n". */
 function toJson(spec) {
   return `${dumpsPy(spec, { indent: 2 })}\n`;
@@ -779,6 +1070,6 @@ module.exports = {
   // functions, in reference order
   spawnable, familiesFor, bestiaryTypes, enrichVariety, leaderCount, toPx, isTileCentre,
   checkUnits, biomeMultiplier, perScreen, resolveDensity, chooseDensity, socketKibS,
-  floraTypes, enrichFlora, creatureTypes, seedFor, spiral, planRegion, addRoads, slug, title,
-  toJson,
+  depthOf, floraTypes, enrichFlora, creatureTypes, seedFor, spiral, planRegion, addRoads, slug,
+  title, report, toJson,
 };

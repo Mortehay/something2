@@ -5,7 +5,7 @@
 // Python operation whose JS spelling differs is routed through here. The set is
 // exactly what world_gen.py uses: round(x) / round(x, 1|2), `//`, `%`,
 // f"{x:.0f}" / f"{x:.1f}", f"{value}" / str() on ints, floats, bools, None,
-// strings and lists, and json.dumps(spec, indent=2).
+// strings, lists and dicts, and json.dumps(spec, indent=2).
 //
 // Floats vs ints. JS has one number type; Python prints 4.0 and 4 differently.
 // The rule here:
@@ -230,9 +230,15 @@ function pyRepr(v) {
   return pyStr(v);
 }
 
+const isPlainDict = (v) => v instanceof Map
+  || (v !== null && typeof v === 'object' && !Array.isArray(v)
+      && (Object.getPrototypeOf(v) === Object.prototype || Object.getPrototypeOf(v) === null));
+
 /**
- * Python's str(v) - what f"{v}" prints - for bool, int, float, None, str and
- * list (arrays print as Python lists, items via repr).
+ * Python's str(v) - what f"{v}" prints - for bool, int, float, None, str,
+ * list (arrays print as Python lists, items via repr) and dict (plain objects
+ * and Maps print as {'k': v, ...} in insertion order, keys and values via
+ * repr) - the shapes a JSON spec can put in front of check_units.
  */
 function pyStr(v) {
   if (v === null || v === undefined) return 'None';
@@ -242,6 +248,10 @@ function pyStr(v) {
   if (typeof v === 'number') return Number.isInteger(v) ? intStr(v) : pyFloatRepr(v);
   if (typeof v === 'string') return v;
   if (Array.isArray(v)) return `[${v.map(pyRepr).join(', ')}]`;
+  if (isPlainDict(v)) {
+    const entries = v instanceof Map ? [...v.entries()] : Object.entries(v);
+    return `{${entries.map(([k, x]) => `${pyRepr(k)}: ${pyRepr(x)}`).join(', ')}}`;
+  }
   throw new TypeError(`pyStr: unsupported value ${Object.prototype.toString.call(v)}`);
 }
 
