@@ -918,34 +918,63 @@ async function applyMapSpec(pool, spec, { moveEntry = true, keepSlots = [], exte
   }
 }
 
-module.exports = { applyMapSpec, loadSpecCatalogs, GRID_SPACING, graphPosition, requiredTilesFor };
+// SEED_MAPS_DIR (SOMET-641): the maps dir the seed-sync Maps group reads;
+// tests point both at a temp dir.
+const defaultMapsDir = () => process.env.SEED_MAPS_DIR || path.resolve(__dirname, '../seeds/maps');
+
+// The other spec files in `dir` ([{ name, spec }], by file stem). A sibling
+// that cannot be read as a spec is skipped with a warning: it must not block
+// seeding this one.
+function siblingSpecs(dir, name) {
+  const out = [];
+  for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.map.json')).sort()) {
+    const stem = f.slice(0, -'.map.json'.length);
+    if (stem === name) continue;
+    try {
+      const spec = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+      if (!spec || !Array.isArray(spec.worlds)) throw new Error('not a map spec (no worlds)');
+      out.push({ name: stem, spec: { ...spec, links: Array.isArray(spec.links) ? spec.links : [] } });
+    } catch (e) {
+      console.warn(`WARNING: skipping ${f} for cross-spec doorways: ${e.message}`);
+    }
+  }
+  return out;
+}
+
+// `make seed-map`'s work: apply <dir>/<name>.map.json with the same
+// cross-spec inputs the seed-sync Maps group passes (SOMET-641) -- so the
+// prune keeps doorways a sibling spec declares (to_name) and a world reached
+// only from a sibling validates -- then record it as applied on this PC (the
+// Maps group's "applied here", same hash).
+async function seedSpecFromDir(pool, name, { dir = defaultMapsDir(), moveEntry = true } = {}) {
+  const spec = JSON.parse(fs.readFileSync(path.resolve(dir, `${name}.map.json`), 'utf8'));
+  // Lazy: mapsGroup requires this file lazily too.
+  const { crossSpecInputs } = require('../src/services/seedSync/mapsGroup.js');
+  const all = [{ name, spec }, ...siblingSpecs(dir, name)];
+  const n = await applyMapSpec(pool, spec, { moveEntry, ...crossSpecInputs(all, name) });
+  // A missing map_spec_state (migrations not run) must not fail a seed that
+  // already committed: warn and go on.
+  try {
+    await recordApplied(pool, name, spec);
+  } catch (e) {
+    console.warn(`WARNING: applied ${name}, but could not record it in map_spec_state (${e.message}); `
+      + 'the Seed/Export tab will not know this PC has it -- run migrations.');
+  }
+  return n;
+}
+
+module.exports = { applyMapSpec, loadSpecCatalogs, seedSpecFromDir, GRID_SPACING, graphPosition, requiredTilesFor };
 
 if (require.main === module) {
   const name = process.env.SPEC;
   if (!name) { console.error('SPEC is required, e.g. make seed-map SPEC=vale-region'); process.exit(1); }
-  // SEED_MAPS_DIR (SOMET-641): the maps dir the seed-sync Maps group reads;
-  // tests point both at a temp dir.
-  const file = path.resolve(process.env.SEED_MAPS_DIR || path.resolve(__dirname, '../seeds/maps'), `${name}.map.json`);
+  const file = path.resolve(defaultMapsDir(), `${name}.map.json`);
   if (!fs.existsSync(file)) { console.error(`no such spec: ${file}`); process.exit(1); }
   const env = dotenv.config({ path: path.resolve(__dirname, '../../.env') }).parsed || {};
   const url = process.env.DATABASE_URL || env.DATABASE_URL;
   if (!url) { console.error('DATABASE_URL is not set in .env'); process.exit(1); }
   const pool = new Pool({ connectionString: url });
-  const spec = JSON.parse(fs.readFileSync(file, 'utf8'));
-  applyMapSpec(pool, spec)
-    // SOMET-641: this PC now holds this version of the spec (the seed-sync
-    // Maps group's "applied here", same hash as the group).
-    // A missing map_spec_state (migrations not run) must not fail a seed that
-    // already committed: warn and go on.
-    .then(async (n) => {
-      try {
-        await recordApplied(pool, name, spec);
-      } catch (e) {
-        console.warn(`WARNING: applied ${name}, but could not record it in map_spec_state (${e.message}); `
-          + 'the Seed/Export tab will not know this PC has it -- run migrations.');
-      }
-      return n;
-    })
+  seedSpecFromDir(pool, name)
     .then((n) => {
       console.log(
         `applied ${name}: ${n.worlds} worlds, ${n.links} links, `

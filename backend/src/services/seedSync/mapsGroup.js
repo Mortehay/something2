@@ -233,6 +233,14 @@ function reachFromFiles(all) {
   return out;
 }
 
+// applyMapSpec's cross-spec options for spec `name` among `all` ([{ name,
+// spec }]): the compass slots the other specs declare (kept by the prune) and
+// this spec's worlds they reach. The Maps seed and `make seed-map` both use it.
+function crossSpecInputs(all, name) {
+  const self = all.find((s) => s.name === name);
+  return { keepSlots: writerInputs(all, self).keepSlots, externallyReachable: reachFromFiles(all).get(name) };
+}
+
 // Two specs claiming one (world, edge) doorway slot for different targets: a
 // to_name compass mirror would silently rewrite a slot another spec owns.
 // Checked from the spec files, before any write. [{ slot, message }].
@@ -630,7 +638,6 @@ async function apply(pool, decisions, opts = {}) {
     // A cancel queued while this job waited for the lock still counts.
     if (opts.signal && opts.signal.aborted) throw new SyncRefused('cancelled', 'cancelled');
     runId = await startRun(pool, GROUP_ID, 'seed');
-    const reach = reachFromFiles(cs.git.specs);
     const gitOf = new Map(cs.git.specs.map((g) => [g.name, g]));
     const applied = [];
     let failed = null;
@@ -645,8 +652,7 @@ async function apply(pool, decisions, opts = {}) {
       step = 'apply';
       for (const g of toApply) {
         failed = g.name;
-        const { keepSlots } = writerInputs(cs.git.specs, g);
-        await applyMapSpec(pool, g.spec, { moveEntry: false, keepSlots, externallyReachable: reach.get(g.name) });
+        await applyMapSpec(pool, g.spec, { moveEntry: false, ...crossSpecInputs(cs.git.specs, g.name) });
         await recordApplied(pool, g.name, g.spec);
         applied.push(g.name);
         failed = null;
@@ -900,7 +906,7 @@ async function exportMaps(pool, opts = {}) {
 }
 
 module.exports = {
-  status, preview, apply, export: exportMaps, pushToBox,
+  status, preview, apply, export: exportMaps, pushToBox, crossSpecInputs,
   // internals, for tests
   _boxNote: boxNote, _noBaselineMessage: noBaselineMessage, _slotConflicts: slotConflicts, _reachFromFiles: reachFromFiles, _dependencyOrder: dependencyOrder, DEFAULTS, ALLOWED,
 };

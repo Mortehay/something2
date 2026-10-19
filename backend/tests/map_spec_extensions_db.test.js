@@ -279,3 +279,31 @@ test('existing specs validate and apply unchanged', async (t) => {
     assert.deepEqual(again.linksRemoved, []);
   });
 });
+
+// SOMET-641 final review I3: `make seed-map` (seed-map.js's CLI entry) applies
+// one spec with the cross-spec inputs the Maps group uses -- keepSlots and
+// externallyReachable from the sibling spec files in its directory -- so it
+// never prunes a doorway another spec declares by to_name.
+test('make seed-map keeps a cross-spec doorway its sibling spec declares', async (t) => {
+  const { seedSpecFromDir } = require('../scripts/seed-map.js');
+  const os = require('node:os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sx-mapext-cli-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  for (const s of [specA(), specB()]) fs.writeFileSync(path.join(dir, `${s.name}.map.json`), JSON.stringify(s));
+  await withDb(t, 'seed-map CLI keepSlots', async (pool) => {
+    try {
+      await applyMapSpec(pool, specA(), { moveEntry: false });
+      await applyMapSpec(pool, specB(), { moveEntry: false });
+      const all = await compassLinks(pool);
+      assert.ok(all.includes(`${P}d:W->${P}b`) && all.includes(`${P}b:E->${P}d`));
+      const r = await seedSpecFromDir(pool, 'sx-mapext-a', { dir, moveEntry: false });
+      assert.deepStrictEqual(r.linksRemoved, [], 'the doorway spec B declares is not pruned');
+      assert.deepStrictEqual(await compassLinks(pool), all);
+      // Still records this PC's applied state (make seed-map's contract).
+      const st = (await pool.query("SELECT applied_sha256 FROM map_spec_state WHERE spec_name = 'sx-mapext-a'")).rows[0];
+      assert.ok(st && st.applied_sha256);
+    } finally {
+      await pool.query("DELETE FROM map_spec_state WHERE spec_name LIKE 'sx-mapext-%'");
+    }
+  });
+});
