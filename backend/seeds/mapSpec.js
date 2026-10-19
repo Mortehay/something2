@@ -138,7 +138,7 @@ const WORLD_KEYS = new Set([
 
 function validateMapSpec(spec, {
   biomeNames = null, creatureTypeNames = null, biomeCreatureTypes = null,
-  pointArtTypes = null, bossTiers = null,
+  pointArtTypes = null, bossTiers = null, externallyReachable = null,
 } = {}) {
   const errors = [];
 
@@ -1076,9 +1076,15 @@ function validateMapSpec(spec, {
     connect(l);   // links are bidirectional (setLink mirrors)
   }
 
+  // `externallyReachable` (SOMET-641) is a Set of this spec's world keys that
+  // another spec's links reach. Each one counts as reachable, and so does every
+  // world reachable from it. Omitted, reachability is judged from the entry
+  // alone, exactly as before.
   if (entries.length === 1) {
-    const seen = new Set([entries[0].key]);
-    const queue = [entries[0].key];
+    const starts = [entries[0].key,
+      ...[...(externallyReachable ?? [])].filter((k) => byKey.has(k))];
+    const seen = new Set(starts);
+    const queue = [...seen];
     while (queue.length) {
       for (const next of adjacency.get(queue.shift()) ?? []) {
         if (!seen.has(next)) { seen.add(next); queue.push(next); }
