@@ -21,6 +21,7 @@ const { previewSeed, applySeed } = require('../src/services/seedSync/applySeed.j
 const { exportGroup } = require('../src/services/seedSync/exportGroup.js');
 const { SyncRefused, SyncFileError } = require('../src/services/seedSync/errors.js');
 const { withEntryPreserved } = require('./helpers/entryWorld.js');
+const { setEntryWorldByName } = require('../src/services/entryWorld.js');
 const { withSeedSyncLock, makeTempSyncDir } = require('./helpers/seedSyncTest.js');
 
 const DB_URL = process.env.TEST_DATABASE_URL
@@ -56,6 +57,8 @@ const specB = () => ({
 });
 
 async function cleanup(pool, watermark) {
+  await pool.query("DELETE FROM characters WHERE name LIKE 'sx\\_m4\\_%'");
+  await pool.query("DELETE FROM users WHERE username LIKE 'sx\\_m4\\_%'");
   await pool.query("DELETE FROM worlds WHERE name LIKE 'sx\\_m4\\_%'");
   await pool.query("DELETE FROM map_spec_state WHERE spec_name LIKE 'sx-m4-%'");
   if (watermark != null) await pool.query("DELETE FROM seed_export_runs WHERE group_id = 'maps' AND id > $1", [watermark]);
@@ -123,12 +126,21 @@ function setup(ctx, specs, entryWorld) {
 }
 
 // Preview, then apply every row on its default (plus `overrides`).
-async function seed(pool, overrides = {}) {
+async function seed(pool, overrides = {}, opts = {}) {
   const pre = await previewSeed(pool, 'maps');
   const decisions = {};
   for (const r of pre.rows) decisions[r.syncUuid] = r.defaultDecision;
   Object.assign(decisions, overrides);
-  return applySeed(pool, 'maps', decisions, { signature: pre.signature });
+  return applySeed(pool, 'maps', decisions, { signature: pre.signature, ...opts });
+}
+
+// A PC that built the worlds before seed sync (plain applyMapSpec, no state).
+async function buildWithoutState(pool, specs) {
+  const { applyMapSpec } = require('../scripts/seed-map.js');
+  const { compassSlots } = require('../src/services/mapSpecExport.js');
+  for (const s of specs) {
+    await applyMapSpec(pool, s, { moveEntry: false, keepSlots: specs.filter((o) => o !== s).flatMap(compassSlots) });
+  }
 }
 
 const rowOf = (d, name) => d.rows.find((r) => r.key === name);
@@ -267,8 +279,17 @@ dbTest('removed spec is only_here, nothing deleted', async (ctx) => {
   const { pool, mapsDir, syncDir } = ctx;
   setup(ctx, [specA(), specB()], `${P}a`);
   await seed(pool);
-  // A player's position in world c: player data must survive.
+  // A player standing in world c: player data must survive.
   const c = (await pool.query('SELECT id FROM worlds WHERE name = $1', [`${P}c`])).rows[0].id;
+  const user = (await pool.query(
+    "INSERT INTO users (username, password_hash) VALUES ('sx_m4_player', 'x') RETURNING id")).rows[0].id;
+  // A playable class with an appearance (characters_appearance_fk).
+  const ap = (await pool.query(
+    'SELECT entity_type_id, variant FROM character_appearances ORDER BY entity_type_id, variant LIMIT 1')).rows[0];
+  const ch = (await pool.query(
+    `INSERT INTO characters (user_id, slot, name, entity_type_id, appearance_variant)
+     VALUES ($1, 1, 'sx_m4_hero', $2, $3) RETURNING id`, [user, ap.entity_type_id, ap.variant])).rows[0].id;
+  await pool.query('INSERT INTO world_players (world_id, character_id, x, y) VALUES ($1, $2, 100, 100)', [c, ch]);
   fs.rmSync(path.join(mapsDir, 'sx-m4-b.map.json'));
   writeManifest(syncDir, [specA()], `${P}a`);
 
@@ -282,6 +303,9 @@ dbTest('removed spec is only_here, nothing deleted', async (ctx) => {
 
   await seed(pool);
   assert.strictEqual((await pool.query('SELECT count(*)::int AS n FROM worlds WHERE id = $1', [c])).rows[0].n, 1, 'world kept');
+  assert.strictEqual((await pool.query(
+    'SELECT count(*)::int AS n FROM world_players WHERE world_id = $1 AND character_id = $2', [c, ch])).rows[0].n, 1,
+  'player position kept');
   assert.strictEqual(await stateOf(pool, 'sx-m4-b'), undefined, 'acknowledged: no longer tracked');
   const after = await previewSeed(pool, 'maps');
   assert.deepStrictEqual(after.rows, []);
@@ -334,6 +358,97 @@ dbTest('a failing spec: the ones before it stay applied and recorded (partial)',
   assert.strictEqual((await stateOf(pool, 'sx-m4-a')).applied_sha256, sha(specA()));
   assert.strictEqual(await stateOf(pool, 'sx-m4-b'), undefined);
   assert.strictEqual(await kindOf(pool, 'sx-m4-a'), 'in_sync');
+  // Exactly one entry world: git's, which spec A built.
+  assert.deepStrictEqual(await entryWorlds(pool), [`${P}a`]);
+});
+
+dbTest('a failure after every spec applied is still partial_apply, entry world set', async (ctx) => {
+  const { pool } = ctx;
+  setup(ctx, [specA(), specB()], `${P}c`);
+  const boom = async () => { throw new Error('sx boom after specs'); };
+  await assert.rejects(seed(pool, {}, { _afterSpecs: boom }), (e) => e instanceof SyncRefused && e.code === 'partial_apply'
+    && JSON.stringify(e.details.applied) === '["sx-m4-a","sx-m4-b"]' && e.details.failed === null
+    && /sx boom after specs/.test(e.message));
+  assert.deepStrictEqual(await entryWorlds(pool), [`${P}c`]);
+  const run = (await pool.query("SELECT status FROM seed_export_runs WHERE group_id = 'maps' ORDER BY id DESC LIMIT 1")).rows[0];
+  assert.strictEqual(run.status, 'failed');
+});
+
+dbTest('existing PC, DB matches the files: in_sync, adopted by export', async (ctx) => {
+  const { pool, mapsDir } = ctx;
+  setup(ctx, [specA(), specB()], `${P}a`);
+  await buildWithoutState(pool, [specA(), specB()]);
+  const d = await diffGroup(pool, 'maps');
+  assert.strictEqual(d.status, 'in_sync');
+  assert.deepStrictEqual((await previewSeed(pool, 'maps')).rows, []);
+  assert.strictEqual(await stateOf(pool, 'sx-m4-a'), undefined, 'status never writes');
+  const ex = await exportGroup(pool, 'maps');
+  assert.strictEqual(ex.rowCount, 0);
+  assert.strictEqual(readSpecText(mapsDir, 'sx-m4-a'), canonicalSpecJson(specA()));
+  for (const s of [specA(), specB()]) {
+    const st = await stateOf(pool, s.name);
+    assert.strictEqual(st.applied_sha256, sha(s), s.name);
+    assert.strictEqual(st.base_spec, canonicalSpecJson(s), s.name);
+  }
+  // Adopted: a hand edit is now an ordinary local edit, and export writes it.
+  await pool.query('UPDATE worlds SET graph_x = graph_x + 33 WHERE name = $1', [`${P}a`]);
+  assert.strictEqual(await kindOf(pool, 'sx-m4-a'), 'edited_here');
+  assert.strictEqual((await exportGroup(pool, 'maps')).rowCount, 1);
+  assert.ok(Array.isArray(readSpec(mapsDir, 'sx-m4-a').worlds[0].graph));
+});
+
+dbTest('existing PC, DB differs: conflict → Keep local → edited_here → export writes the spec', async (ctx) => {
+  const { pool, mapsDir } = ctx;
+  setup(ctx, [specA(), specB()], `${P}a`);
+  await buildWithoutState(pool, [specA(), specB()]);
+  await pool.query('UPDATE worlds SET graph_x = graph_x + 55 WHERE name = $1', [`${P}b`]);
+  const row = rowOf(await previewSeed(pool, 'maps'), 'sx-m4-a');
+  assert.strictEqual(row.kind, 'conflict');
+  assert.strictEqual(row.defaultDecision, null);
+  assert.deepStrictEqual(row.allowedDecisions, ['git', 'local']);
+  assert.strictEqual(await kindOf(pool, 'sx-m4-b'), 'in_sync');
+  await assert.rejects(exportGroup(pool, 'maps'), (e) => e instanceof SyncRefused && e.code === 'git_newer');
+  const res = await seed(pool, { [uuidOf('sx-m4-a')]: 'local' });
+  assert.deepStrictEqual(res.summary.applied, []);
+  assert.strictEqual(res.summary.adopted, 1, 'spec B (in sync) adopted by the seed');
+  assert.strictEqual((await stateOf(pool, 'sx-m4-b')).base_spec, canonicalSpecJson(specB()));
+  assert.strictEqual(await kindOf(pool, 'sx-m4-a'), 'edited_here');
+  const x = await graphX(pool, `${P}b`);
+  assert.strictEqual((await exportGroup(pool, 'maps')).rowCount, 1);
+  assert.deepStrictEqual(readSpec(mapsDir, 'sx-m4-a').worlds[1].graph, [x, 0]);
+  assert.strictEqual((await diffGroup(pool, 'maps')).status, 'in_sync');
+});
+
+dbTest('Take git on a conflict row rebuilds the spec from git', async (ctx) => {
+  const { pool, mapsDir, syncDir } = ctx;
+  setup(ctx, [specA(), specB()], `${P}a`);
+  await seed(pool);
+  const x0 = await graphX(pool, `${P}b`);
+  await pool.query('UPDATE worlds SET graph_x = graph_x + 40 WHERE name = $1', [`${P}b`]);
+  const git = specA();
+  git.worlds[0].entry_spawn = { x: 3000, y: 3000 };
+  writeSpec(mapsDir, git);
+  writeManifest(syncDir, [git, specB()], `${P}a`);
+  assert.strictEqual(await kindOf(pool, 'sx-m4-a'), 'conflict');
+  const res = await seed(pool, { [uuidOf('sx-m4-a')]: 'git' });
+  assert.deepStrictEqual(res.summary.applied, ['sx-m4-a']);
+  assert.strictEqual(await graphX(pool, `${P}b`), x0, 'hand edit replaced by git');
+  const spawn = (await pool.query('SELECT entry_spawn FROM worlds WHERE name = $1', [`${P}a`])).rows[0].entry_spawn;
+  assert.deepStrictEqual(spawn, { x: 3000, y: 3000 });
+  assert.strictEqual((await stateOf(pool, 'sx-m4-a')).applied_sha256, sha(git));
+  assert.strictEqual((await diffGroup(pool, 'maps')).status, 'in_sync');
+});
+
+dbTest('entry world drift is a warning', async (ctx) => {
+  const { pool } = ctx;
+  setup(ctx, [specA(), specB()], `${P}a`);
+  await seed(pool);
+  assert.ok(!(await previewSeed(pool, 'maps')).warnings.some((w) => w.code === 'entry_world_drift'));
+  await setEntryWorldByName(pool, `${P}c`); // e.g. a `make seed-map` of spec B
+  const w = (await diffGroup(pool, 'maps')).warnings.find((x) => x.code === 'entry_world_drift');
+  assert.ok(w, 'drift warned');
+  assert.deepStrictEqual(w.here, [`${P}c`]);
+  assert.strictEqual(w.key, `${P}a`);
 });
 
 dbTest('make seed-map records applied hash', async (ctx) => {
@@ -347,4 +462,5 @@ dbTest('make seed-map records applied hash', async (ctx) => {
   const st = await stateOf(pool, 'sx-m4-b');
   assert.strictEqual(st.applied_sha256, sha(specB()));
   assert.ok(st.applied_at instanceof Date);
+  assert.strictEqual(st.base_spec, canonicalSpecJson(specB()));
 });

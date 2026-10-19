@@ -60,7 +60,9 @@
 // sync something other than table rows (maps: .map.json spec files). diffGroup,
 // previewSeed, applySeed and exportGroup hand such a group to its adapter
 // (seedSync/adapters.js), which returns the same shapes; its tables are
-// classified in coverage.js (SPEC_SYNCED), not here.
+// classified in coverage.js (SPEC_SYNCED), not here. `job: true` (any group;
+// implied by `binary`) makes the routes run its export / seed as a background
+// job answering 202 { job }.
 //
 // Order rules (pinned by seed_sync_registry_db.test.js): inside a group a
 // table comes after every table of the group it references (deletes run
@@ -347,7 +349,9 @@ const GROUPS = [
     }],
   },
   // Plan 4a: maps travel as spec files (seedSync/mapsGroup.js).
-  { id: 'maps', label: 'Maps', adapter: 'maps', tables: [] },
+  // job: its seed / export run as a background job (seedSync/jobs.js) like
+  // the binary groups: a seed re-applies whole maps (minutes on real specs).
+  { id: 'maps', label: 'Maps', adapter: 'maps', job: true, tables: [] },
   {
     id: 'quests',
     label: 'Quests',

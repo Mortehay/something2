@@ -60,9 +60,9 @@ export function exportAllPlan(groups) {
   const toExport = [];
   const skipped = [];
   for (const g of groups) {
-    // Binary groups (Art, Audio) run as background jobs, one at a time:
+    // Job groups (Art, Audio, Maps) run as background jobs, one at a time:
     // never part of the batch (binaryGroups lists them separately).
-    if (g.binary) continue;
+    if (runsSeparately(g)) continue;
     const reason = exportBlockReason(g);
     // in_sync / tokens_missing are simply not candidates; any other group
     // that is blocked is reported so the admin sees why it was left out.
@@ -73,13 +73,21 @@ export function exportAllPlan(groups) {
 }
 
 // "Seed all": every group with a usable export file, registry (= dependency)
-// order. Binary groups are left out (they run separately, see binaryGroups).
-export const seedAllGroups = (groups) => groups.filter((g) => !g.binary && g.inGit && !seedBlockReason(g));
+// order. Job groups are left out (they run separately, see binaryGroups).
+export const seedAllGroups = (groups) => groups.filter((g) => !runsSeparately(g) && g.inGit && !seedBlockReason(g));
 
-// SOMET-640. The binary groups (Art, Audio), listed under BINARY_NOTE in
-// Seed all / Export all, each with its own button.
-export const binaryGroups = (groups) => groups.filter((g) => g.binary);
-export const BINARY_NOTE = 'Art and Audio run separately';
+// SOMET-640/641. Groups whose export / seed run as a background job: the
+// binary groups (Art, Audio) and any the server flags `job` (Maps).
+export const runsSeparately = (g) => Boolean(g && (g.job || g.binary));
+// Those groups, listed under separateNote(...) in Seed all / Export all, each
+// with its own button. (Name kept from SOMET-640.)
+export const binaryGroups = (groups) => groups.filter(runsSeparately);
+// "Art and Audio run separately", "Art, Audio and Maps run separately".
+export function separateNote(groups) {
+  const labels = (groups || []).map((g) => g.label);
+  const list = labels.length > 1 ? `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}` : (labels[0] || '');
+  return `${list} run${labels.length === 1 ? 's' : ''} separately`;
+}
 
 // 1 row / 2 rows. `plural` overrides the default +s.
 export const pluralize = (n, word, plural) => `${n} ${n === 1 ? word : (plural || `${word}s`)}`;

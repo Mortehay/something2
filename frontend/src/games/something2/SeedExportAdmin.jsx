@@ -12,7 +12,7 @@ import {
 } from './useSeedExport.js';
 import {
   statusBadge, exportBlockReason, seedBlockReason, seedButtonLabel, exportAllPlan, seedAllGroups, exportAllMessage,
-  binaryGroups, BINARY_NOTE, BUSY_TEXT, jobRunning, jobProgressText, jobErrorRowsText,
+  binaryGroups, separateNote, BUSY_TEXT, jobRunning, jobProgressText, jobErrorRowsText,
 } from './seedExportModel.js';
 import { Btn, Badge, Muted, Modal, fmtTime, StatusHead, PcLabelHint } from './seedUi.jsx';
 import AdminLoading from './AdminLoading.jsx';
@@ -171,7 +171,7 @@ export default function SeedExportAdmin() {
         <Btn disabled={busy || seedable.length === 0} title={busy ? BUSY_TEXT : undefined}
           onClick={() => setSeedAllOpen(true)}>Seed all…</Btn>
         {binary.length > 0 && (<>
-          <Muted style={{ marginLeft: 8 }}>{BINARY_NOTE}:</Muted>
+          <Muted style={{ marginLeft: 8 }}>{separateNote(binary)}:</Muted>
           {binary.map((g) => {
             const why = busy ? BUSY_TEXT : exportBlockReason(g);
             return (

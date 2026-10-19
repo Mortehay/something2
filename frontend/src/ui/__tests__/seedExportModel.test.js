@@ -348,7 +348,7 @@ describe('isRename', () => {
 
 // SOMET-640 (plan 3): binary groups (Art, Audio) run as background jobs.
 import {
-  jobProgressText, jobErrorRowsText, jobRunning, jobSettled, binaryGroups, assetText, blockedText,
+  jobProgressText, jobErrorRowsText, jobRunning, jobSettled, binaryGroups, separateNote, assetText, blockedText,
   PAGE_ROWS, nextShown, limitSections, BUSY_TEXT,
 } from '../../games/something2/seedExportModel.js';
 
@@ -421,6 +421,22 @@ describe('binary groups stay out of the batches', () => {
     expect(plan.toExport.map((g) => g.id)).toEqual(['b']);
     expect(plan.skipped.map((g) => g.id)).toEqual(['a']);
     expect(binaryGroups(groups).map((g) => g.id)).toEqual(['art', 'audio']);
+  });
+
+  // SOMET-641: Maps runs as a job (server flag `job`) and is listed with them.
+  it('a job group (Maps) is out of the batches too, and the note lists every label', () => {
+    const groups = [
+      grp('a', 'git_newer', { inGit: {} }),
+      grp('maps', 'git_newer', { inGit: {}, job: true, label: 'Maps' }),
+      grp('art', 'local_edits', { localEdits: 1, inGit: {}, binary: true, job: true, label: 'Art' }),
+      grp('audio', 'local_edits', { localEdits: 1, inGit: {}, binary: true, job: true, label: 'Audio' }),
+    ];
+    expect(seedAllGroups(groups).map((g) => g.id)).toEqual(['a']);
+    expect(exportAllPlan(groups).skipped.map((g) => g.id)).toEqual(['a']);
+    expect(binaryGroups(groups).map((g) => g.id)).toEqual(['maps', 'art', 'audio']);
+    expect(separateNote(binaryGroups(groups))).toBe('Maps, Art and Audio run separately');
+    expect(separateNote([{ label: 'Art' }, { label: 'Audio' }])).toBe('Art and Audio run separately');
+    expect(separateNote([{ label: 'Maps' }])).toBe('Maps runs separately');
   });
 });
 

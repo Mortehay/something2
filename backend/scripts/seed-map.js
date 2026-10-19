@@ -935,7 +935,17 @@ if (require.main === module) {
   applyMapSpec(pool, spec)
     // SOMET-641: this PC now holds this version of the spec (the seed-sync
     // Maps group's "applied here", same hash as the group).
-    .then(async (n) => { await recordApplied(pool, name, spec); return n; })
+    // A missing map_spec_state (migrations not run) must not fail a seed that
+    // already committed: warn and go on.
+    .then(async (n) => {
+      try {
+        await recordApplied(pool, name, spec);
+      } catch (e) {
+        console.warn(`WARNING: applied ${name}, but could not record it in map_spec_state (${e.message}); `
+          + 'the Seed/Export tab will not know this PC has it -- run migrations.');
+      }
+      return n;
+    })
     .then((n) => {
       console.log(
         `applied ${name}: ${n.worlds} worlds, ${n.links} links, `

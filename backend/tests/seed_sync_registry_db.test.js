@@ -40,6 +40,7 @@ test('maps is an adapter group with no tables, right after progression', () => {
   const m = getGroup('maps');
   assert.strictEqual(m.label, 'Maps');
   assert.strictEqual(m.adapter, 'maps');
+  assert.strictEqual(m.job, true, 'seed/export run as background jobs');
   assert.deepStrictEqual(tableSpecs(m), []);
   assert.ok(!('binary' in m));
   const ids = GROUPS.map((g) => g.id);

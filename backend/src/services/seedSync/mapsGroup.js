@@ -18,7 +18,8 @@
 //
 // Status of one spec (plan decision 5). B = the base (base_spec), G = git's
 // spec, W = specFromDb(B) for the current DB:
-//   new          in git, never applied or exported here
+//   new          in git, never applied or exported here, and none of its
+//                worlds is in the DB (git only)
 //   in_sync      G == B and W == B (not a row)
 //   git_newer    G != B, W == B
 //   edited_here  G == B, W != B (a hand edit in the World Map Editor)
@@ -27,7 +28,15 @@
 // "W != B" compares canonical texts. Without a base_spec (a state row written
 // before base_spec existed): when its hash equals G's, B = G; otherwise there
 // is no copy of B, so W is computed from G and any difference is BOTH an edit
-// and a git change, i.e. a conflict -- the admin decides.
+// and a git change, i.e. a conflict -- the admin decides. The same rule holds
+// for a spec never tracked here whose worlds ARE in the DB (a PC that built
+// them before seed sync): W == G reads in_sync and is ADOPTED (base = G) by
+// the next seed or export, under the lock -- status never writes; W != G (or
+// only some of its worlds here) is a conflict, and Keep local makes it an
+// edit of G that export writes back.
+//
+// Seed and export run as background jobs (registry `job`). Export reads the
+// DB in one REPEATABLE READ snapshot, never under table locks.
 //
 // Never deletes a world: a spec removed from git is only_here, and Keep local
 // just stops tracking it (its worlds then show as "not in any map spec").
@@ -60,8 +69,6 @@ const LOCAL_EDIT_KINDS = ['edited_here', 'conflict'];
 const GIT_CHANGE_KINDS = ['new', 'git_newer', 'conflict'];
 // Export never writes over a spec git changed (or this PC never seeded).
 const EXPORT_BLOCKING = new Set(['new', 'git_newer', 'conflict']);
-// Tables the DB->spec writer reads; export holds them still (SHARE).
-const WRITER_TABLES = ['map_links', 'villages', 'waypoints', 'world_chests', 'worlds'];
 
 let tmpCounter = 0;
 
@@ -284,21 +291,37 @@ function makeRow(name, kind, fields) {
 }
 
 // One spec's status on this PC (see the header). `inputs` from writerInputs.
+// `adopt: true` marks a spec that reads in_sync but has no usable base here
+// (first adoption on a PC that built its worlds before seed sync, or a legacy
+// state row): seed and export record base = git for it, under the lock --
+// status itself never writes.
 async function specStatus(db, g, st, inputs) {
   const worldNames = g.spec.worlds.map((w) => w.name);
-  if (!st || !(st.applied_sha256 || st.exported_sha256)) {
-    return { kind: 'new', fields: fieldsOf([], worldNames, worldNames), notes: [], outNames: [] };
-  }
-  let baseText = st.base_spec;
-  if (baseText == null && laterHash(st) === g.hash) baseText = g.text;
+  const tracked = st && (st.applied_sha256 || st.exported_sha256);
+  let baseText = tracked ? st.base_spec : null;
+  if (tracked && baseText == null && laterHash(st) === g.hash) baseText = g.text;
   if (baseText == null) {
-    // No copy of the base: compare the DB with git; a difference is a conflict.
+    let missing = 0;
+    if (!tracked) {
+      const { rows } = await db.query('SELECT name FROM worlds WHERE name = ANY($1::text[])', [worldNames]);
+      const here = new Set(rows.map((r) => r.name));
+      missing = worldNames.filter((n) => !here.has(n)).length;
+      // None of its worlds here: a spec this PC never built.
+      if (missing === worldNames.length) {
+        return { kind: 'new', fields: fieldsOf([], worldNames, worldNames), notes: [], outNames: [] };
+      }
+    }
+    // No copy of the base: compare the DB with git. Equal -> in sync (adopt);
+    // different -> both may have changed, a conflict. Some of its worlds
+    // missing is a conflict too (the writer keeps a missing world as the
+    // spec has it, so equality would not prove anything).
     const w = await specFromDb(db, g.spec, inputs);
-    const changed = canonicalSpecJson(w.spec) !== g.text;
+    const outText = canonicalSpecJson(w.spec);
+    const changed = outText !== g.text || missing > 0;
     const names = changed ? changedWorlds(g.spec, w.spec) : [];
     return {
-      kind: changed ? 'conflict' : null, fields: fieldsOf(names, names, worldNames), notes: w.notes,
-      outNames: w.spec.worlds.map((x) => x.name), outText: canonicalSpecJson(w.spec),
+      kind: changed ? 'conflict' : null, adopt: !changed, fields: fieldsOf(names, names, worldNames), notes: w.notes,
+      outNames: w.spec.worlds.map((x) => x.name), outText,
     };
   }
   const base = JSON.parse(baseText);
@@ -332,6 +355,7 @@ async function computeStatus(db) {
     return {
       git: null,
       dbVersion,
+      adopt: [],
       details: new Map(),
       diff: {
         groupId: GROUP_ID, header: null, status: ex[0].x ? 'file_missing' : 'never_exported', counts: zeroCounts(),
@@ -361,6 +385,17 @@ async function computeStatus(db) {
     rows.push(makeRow(name, 'only_here', []));
   }
   warnings.push(...slotConflicts(git.specs));
+  // Git decides the entry world: say so when this PC's has drifted (e.g. a
+  // `make seed-map` moved it). The next Maps seed puts it back.
+  const { rows: entryRows } = await db.query('SELECT name FROM worlds WHERE is_entry ORDER BY name');
+  const entryHere = entryRows.map((r) => r.name);
+  if (entryHere.length !== 1 || entryHere[0] !== git.entryWorld) {
+    warnings.push({
+      code: 'entry_world_drift', key: git.entryWorld, here: entryHere,
+      message: `entry world here is ${entryHere.length ? entryHere.map((n) => `"${n}"`).join(', ') : 'none'}; `
+        + `git says "${git.entryWorld}" (a Maps seed sets it)`,
+    });
+  }
   const { rows: worlds } = await db.query('SELECT name FROM worlds ORDER BY name');
   for (const { name } of worlds) {
     if (inSpec.has(name)) continue;
@@ -388,8 +423,10 @@ async function computeStatus(db) {
     const d = details.get(r.key);
     return `${r.key}:${r.kind}:${r.defaultDecision}:${d ? d.g.hash : ''}:${d && d.outText ? textHash(d.outText) : ''}`;
   }).sort();
-  const signature = textHash(`${git.header.exported_at}\n${git.entryWorld}\n${parts.join('\n')}`);
-  return { git, dbVersion, details, diff, signature };
+  // Specs in sync here without a base: seed / export adopt them (base = git).
+  const adopt = git.specs.filter((g) => details.get(g.name).adopt).map((g) => g.name);
+  const signature = textHash(`${git.header.exported_at}\n${git.entryWorld}\n${parts.join('\n')}\nadopt:${adopt.join(',')}`);
+  return { git, dbVersion, details, diff, signature, adopt };
 }
 
 const withAllowed = (rows) => rows.map((r) => ({ ...r, allowedDecisions: ALLOWED[r.kind] }));
@@ -441,6 +478,7 @@ function planDecisions(cs, decisions) {
 // so no other seed or export interleaves. Then the manifest's entry world.
 async function apply(pool, decisions, opts = {}) {
   const { signature } = opts;
+  if (opts.signal && opts.signal.aborted) throw new SyncRefused('cancelled', 'cancelled');
   const { applyMapSpec } = require('../../../scripts/seed-map.js');
   const lock = await pool.connect();
   let runId = null;
@@ -474,37 +512,51 @@ async function apply(pool, decisions, opts = {}) {
 
     runId = await startRun(pool, GROUP_ID, 'seed');
     const reach = reachFromFiles(cs.git.specs);
+    const gitOf = new Map(cs.git.specs.map((g) => [g.name, g]));
     const applied = [];
-    for (const g of toApply) {
-      const { keepSlots } = writerInputs(cs.git.specs, g);
-      try {
-        await applyMapSpec(pool, g.spec, { moveEntry: false, keepSlots, externallyReachable: reach.get(g.name) });
-      } catch (e) {
-        throw new SyncRefused('partial_apply',
-          `${applied.length ? `applied ${applied.join(', ')}; ` : 'nothing applied; '}${g.name} failed: ${e.message}`,
-          { applied: [...applied], failed: g.name, error: e.message });
-      }
-      await recordApplied(pool, g.name, g.spec);
-      applied.push(g.name);
-    }
-    // Keep local: git's version is acknowledged (as applied, the base), so the
-    // next status reads the DB as a local edit of it -- export then writes it.
-    // A spec gone from git just stops being tracked; its worlds stay.
+    let failed = null;
     let kept = 0;
     let forgotten = 0;
-    const gitOf = new Map(cs.git.specs.map((g) => [g.name, g]));
-    for (const { row, decision } of steps) {
-      if (decision !== 'local') continue;
-      kept += 1;
-      if (row.kind === 'only_here') { await forget(pool, row.key); forgotten += 1; } else if (row.kind !== 'edited_here') {
-        await recordApplied(pool, row.key, gitOf.get(row.key).spec);
+    try {
+      // In sync without a base here (first adoption): base = git, no decision.
+      for (const name of cs.adopt) await recordApplied(pool, name, gitOf.get(name).spec);
+      for (const g of toApply) {
+        failed = g.name;
+        const { keepSlots } = writerInputs(cs.git.specs, g);
+        await applyMapSpec(pool, g.spec, { moveEntry: false, keepSlots, externallyReachable: reach.get(g.name) });
+        await recordApplied(pool, g.name, g.spec);
+        applied.push(g.name);
+        failed = null;
       }
-    }
-    // Git decides the entry world (plan decision 4); one atomic statement.
-    await setEntryWorldByName(pool, entry);
-    const { rows: entries } = await pool.query('SELECT name FROM worlds WHERE is_entry ORDER BY name');
-    if (entries.length !== 1 || entries[0].name !== entry) {
-      throw new Error(`entry world: expected exactly "${entry}", found ${JSON.stringify(entries.map((r) => r.name))}`);
+      if (opts._afterSpecs) await opts._afterSpecs(); // test hook: a failure after every spec applied
+      // Keep local: git's version is acknowledged (as applied, the base), so
+      // the next status reads the DB as a local edit of it -- export then
+      // writes it. A spec gone from git just stops being tracked; its worlds stay.
+      for (const { row, decision } of steps) {
+        if (decision !== 'local') continue;
+        kept += 1;
+        if (row.kind === 'only_here') { await forget(pool, row.key); forgotten += 1; } else if (row.kind !== 'edited_here') {
+          await recordApplied(pool, row.key, gitOf.get(row.key).spec);
+        }
+      }
+      // Git decides the entry world (plan decision 4); one atomic statement.
+      await setEntryWorldByName(pool, entry);
+      const { rows: entries } = await pool.query('SELECT name FROM worlds WHERE is_entry ORDER BY name');
+      if (entries.length !== 1 || entries[0].name !== entry) {
+        throw new Error(`entry world: expected exactly "${entry}", found ${JSON.stringify(entries.map((r) => r.name))}`);
+      }
+    } catch (e) {
+      // Specs before the failure are committed and recorded: keep "exactly
+      // one entry world" true (a fresh PC has none until git's exists), then
+      // report what was applied.
+      try {
+        if ((await pool.query('SELECT 1 FROM worlds WHERE name = $1', [entry])).rowCount) await setEntryWorldByName(pool, entry);
+      } catch (ee) {
+        console.error('seed-sync: maps seed could not set the entry world after a failure:', ee.message);
+      }
+      const done = applied.length ? `applied ${applied.join(', ')}; ` : 'nothing applied; ';
+      throw new SyncRefused('partial_apply', `${done}${failed ? `${failed} failed` : 'then failed'}: ${e.message}`,
+        { applied: [...applied], failed, error: e.message });
     }
     await lock.query('COMMIT');
     // updated/created/deleted/adopted: the counts the tab's Seed all toast
@@ -513,7 +565,8 @@ async function apply(pool, decisions, opts = {}) {
     result = {
       runId,
       summary: {
-        applied, kept, forgotten, entryWorld: entry, updated: applied.length - created, created, deleted: 0, adopted: 0,
+        applied, kept, forgotten, entryWorld: entry, updated: applied.length - created, created, deleted: 0,
+        adopted: cs.adopt.length,
       },
     };
   } catch (err) {
@@ -567,9 +620,10 @@ async function writerOutputs(db, specs) {
 
 // Writes every spec edited here (the writer's output, validated first), then
 // the manifest, then the exported hashes. Refuses while git holds a change
-// (new / git_newer / conflict): seed first. Under the seed_sync lock, with the
-// writer's tables held still (SHARE) so the specs describe one moment.
-async function exportMaps(pool) {
+// (new / git_newer / conflict): seed first. Under the seed_sync lock; the DB is
+// read in one repeatable-read snapshot (no table locks).
+async function exportMaps(pool, opts = {}) {
+  if (opts.signal && opts.signal.aborted) throw new SyncRefused('cancelled', 'cancelled');
   const { loadSpecCatalogs } = require('../../../scripts/seed-map.js');
   const client = await pool.connect();
   let runId = null;
@@ -577,72 +631,88 @@ async function exportMaps(pool) {
   let result;
   try {
     await beginLocked(client);
-    await client.query(`LOCK TABLE ${WRITER_TABLES.join(', ')} IN SHARE MODE`);
-    const cs = await computeStatus(client);
-    if (cs.git && String(cs.git.header.schema_version || '') > cs.dbVersion) {
-      throw new SyncRefused('schema_newer', 'run migrations first', {
-        fileVersion: cs.git.header.schema_version, dbVersion: cs.dbVersion,
-      });
-    }
-    const blocking = cs.diff.rows.filter((r) => EXPORT_BLOCKING.has(r.kind));
-    if (blocking.length) {
-      throw new SyncRefused('git_newer', 'seed (preview) first', {
-        gitChanges: blocking.length, rows: blocking.map((r) => ({ table: TABLE, key: r.key, kind: r.kind })),
-      });
-    }
-    // The manifest's specs, plus spec files it does not list yet (appended in
-    // dependency order). A first export lists every spec file.
-    const listed = cs.git ? cs.git.specs : [];
-    const extra = [];
-    for (const name of await dirSpecNames()) {
-      if (!listed.some((s) => s.name === name)) extra.push(await readSpecFile(name, 'maps dir'));
-    }
-    const specs = [...listed, ...dependencyOrder(extra)];
-    if (!specs.length) throw new SyncRefused('no_specs', `no map spec files in ${mapsDir()}`);
-    const owner = worldOwners(specs, 'maps dir');
-    let entryWorld = cs.git ? cs.git.entryWorld : null;
-    if (!entryWorld) {
-      // First export: this PC's entry world when a spec holds it, else the one
-      // world the specs declare is_entry.
-      const { rows } = await client.query('SELECT name FROM worlds WHERE is_entry');
-      const declared = specs.flatMap((s) => s.spec.worlds.filter((w) => w.is_entry).map((w) => w.name));
-      if (rows.length === 1 && owner.has(rows[0].name)) entryWorld = rows[0].name;
-      else if (declared.length === 1) entryWorld = declared[0];
-      else throw new SyncRefused('no_entry', 'cannot tell the entry world: make one world of a map spec the entry first');
-    }
+    // Every DB read in ONE repeatable-read, read-only snapshot on its own
+    // connection: the specs describe one moment without table locks (a SHARE
+    // lock on worlds / world_chests would stall chest opens during play). The
+    // seed_sync advisory lock (held above) keeps seeds and exports single-file.
+    // Files and state are written after the snapshot closes.
+    const snap = await pool.connect();
+    let snapErr;
+    let cs; let specs; let entryWorld; let writes; let finalSpecs; let notes;
+    try {
+      await snap.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      cs = await computeStatus(snap);
+      if (cs.git && String(cs.git.header.schema_version || '') > cs.dbVersion) {
+        throw new SyncRefused('schema_newer', 'run migrations first', {
+          fileVersion: cs.git.header.schema_version, dbVersion: cs.dbVersion,
+        });
+      }
+      const blocking = cs.diff.rows.filter((r) => EXPORT_BLOCKING.has(r.kind));
+      if (blocking.length) {
+        throw new SyncRefused('git_newer', 'seed (preview) first', {
+          gitChanges: blocking.length, rows: blocking.map((r) => ({ table: TABLE, key: r.key, kind: r.kind })),
+        });
+      }
+      // The manifest's specs, plus spec files it does not list yet (appended in
+      // dependency order). A first export lists every spec file.
+      const listed = cs.git ? cs.git.specs : [];
+      const extra = [];
+      for (const name of await dirSpecNames()) {
+        if (!listed.some((s) => s.name === name)) extra.push(await readSpecFile(name, 'maps dir'));
+      }
+      specs = [...listed, ...dependencyOrder(extra)];
+      if (!specs.length) throw new SyncRefused('no_specs', `no map spec files in ${mapsDir()}`);
+      const owner = worldOwners(specs, 'maps dir');
+      entryWorld = cs.git ? cs.git.entryWorld : null;
+      if (!entryWorld) {
+        // First export: this PC's entry world when a spec holds it, else the one
+        // world the specs declare is_entry.
+        const { rows } = await snap.query('SELECT name FROM worlds WHERE is_entry');
+        const declared = specs.flatMap((s) => s.spec.worlds.filter((w) => w.is_entry).map((w) => w.name));
+        if (rows.length === 1 && owner.has(rows[0].name)) entryWorld = rows[0].name;
+        else if (declared.length === 1) entryWorld = declared[0];
+        else throw new SyncRefused('no_entry', 'cannot tell the entry world: make one world of a map spec the entry first');
+      }
 
-    // Write only specs whose base is git's file (in sync or edited here).
-    const states = await readStates(client);
-    const outs = await writerOutputs(client, specs);
-    const finals = new Map(specs.map((s) => [s.name, s.spec]));
-    const writes = [];
-    const notes = [];
-    for (const o of outs) {
-      const s = specs.find((x) => x.name === o.name);
-      const st = states.get(o.name);
-      const base = st && (st.base_spec != null ? st.base_spec : (laterHash(st) === s.hash ? s.text : null));
-      notes.push(...o.notes.map((message) => ({ key: o.name, message })));
-      if (base !== s.text) continue;
-      if (canonicalSpecJson(o.spec) === s.text) continue;
-      writes.push(o);
-      finals.set(o.name, o.spec);
+      // Write only specs whose base is git's file (in sync or edited here).
+      const states = await readStates(snap);
+      const outs = await writerOutputs(snap, specs);
+      const finals = new Map(specs.map((s) => [s.name, s.spec]));
+      writes = [];
+      notes = [];
+      for (const o of outs) {
+        const s = specs.find((x) => x.name === o.name);
+        const st = states.get(o.name);
+        const base = st && (st.base_spec != null ? st.base_spec : (laterHash(st) === s.hash ? s.text : null));
+        notes.push(...o.notes.map((message) => ({ key: o.name, message })));
+        if (base !== s.text) continue;
+        if (canonicalSpecJson(o.spec) === s.text) continue;
+        writes.push(o);
+        finals.set(o.name, o.spec);
+      }
+      // Validate before writing anything: the specs as they will be in git.
+      finalSpecs = specs.map((s) => ({ name: s.name, spec: finals.get(s.name) }));
+      const reach = reachFromFiles(finalSpecs);
+      const catalogs = await loadSpecCatalogs(snap);
+      const invalid = [];
+      for (const o of writes) {
+        const externallyReachable = new Set([...o.externallyReachable, ...reach.get(o.name)]);
+        const errors = validateMapSpec(o.spec, { ...catalogs, externallyReachable });
+        if (errors.length) invalid.push({ spec: o.name, errors });
+      }
+      if (invalid.length) {
+        throw new SyncRefused('invalid_spec',
+          invalid.map((v) => `${v.name || v.spec}: ${v.errors.join('; ')}`).join(' | '), { specs: invalid });
+      }
+      const clashes = slotConflicts(finalSpecs);
+      if (clashes.length) throw new SyncRefused('slot_conflict', clashes.map((c) => c.message).join('; '), { conflicts: clashes });
+      await snap.query('COMMIT');
+    } catch (e) {
+      snapErr = await rollback(snap);
+      throw e;
+    } finally {
+      snap.release(snapErr);
     }
-    // Validate before writing anything: the specs as they will be in git.
-    const finalSpecs = specs.map((s) => ({ name: s.name, spec: finals.get(s.name) }));
-    const reach = reachFromFiles(finalSpecs);
-    const catalogs = await loadSpecCatalogs(client);
-    const invalid = [];
-    for (const o of writes) {
-      const externallyReachable = new Set([...o.externallyReachable, ...reach.get(o.name)]);
-      const errors = validateMapSpec(o.spec, { ...catalogs, externallyReachable });
-      if (errors.length) invalid.push({ spec: o.name, errors });
-    }
-    if (invalid.length) {
-      throw new SyncRefused('invalid_spec',
-        invalid.map((v) => `${v.name || v.spec}: ${v.errors.join('; ')}`).join(' | '), { specs: invalid });
-    }
-    const clashes = slotConflicts(finalSpecs);
-    if (clashes.length) throw new SyncRefused('slot_conflict', clashes.map((c) => c.message).join('; '), { conflicts: clashes });
 
     runId = await startRun(pool, GROUP_ID, 'export');
     // Spec files first, then the manifest, then this PC's state: a failure
@@ -662,6 +732,8 @@ async function exportMaps(pool) {
     };
     await writeAtomic(manifestFile(), `${JSON.stringify(doc, null, 2)}\n`);
     for (const o of writes) await recordExported(client, o.name, o.spec);
+    // In sync without a base here (first adoption): base = git.
+    for (const name of cs.adopt) await recordApplied(client, name, cs.details.get(name).g.spec);
     await client.query('COMMIT');
     result = {
       runId, rowCount: writes.length, rowCounts: { [TABLE]: writes.length }, written: writes.map((o) => o.name), notes,

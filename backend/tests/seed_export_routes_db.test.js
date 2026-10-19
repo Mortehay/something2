@@ -407,6 +407,23 @@ dbTest('binary export answers 202 and runs as a job; GET /groups flags binary gr
   assert.ok(data.body.runId);
 });
 
+// SOMET-641: Maps (registry `job`) runs as a job too; nothing to export in an
+// empty maps dir, so the job ends failed with the engine's refusal code.
+dbTest('maps export answers 202 and runs as a job; GET /groups flags it job', async ({ pool, admin }) => {
+  const app = appFor(pool);
+  const h = { Authorization: admin.auth };
+  const list = await request(app).get('/api/seed-export/groups').set(h);
+  const maps = list.body.find((g) => g.id === 'maps');
+  assert.deepStrictEqual([maps.binary, maps.job], [false, true]);
+  assert.deepStrictEqual(list.body.filter((g) => g.job).map((g) => g.id), ['maps', 'art', 'audio']);
+  const res = await request(app).post('/api/seed-export/groups/maps/export').set(h);
+  assert.strictEqual(res.status, 202, res.text);
+  assert.deepStrictEqual([res.body.job.groupId, res.body.job.action], ['maps', 'export']);
+  const done = await pollJob(app, h);
+  assert.strictEqual(done.status, 'failed', JSON.stringify(done));
+  assert.strictEqual(done.errorCode, 'no_specs');
+});
+
 dbTest('any export or seed while a job runs -> 409 busy with the job', async ({ pool, admin }) => {
   const app = appFor(pool);
   const h = { Authorization: admin.auth };

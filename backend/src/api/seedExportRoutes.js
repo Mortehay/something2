@@ -3,8 +3,8 @@
 // job }), SyncFileError -> 422, unknown group -> 404, anything else -> 500
 // with no internals.
 //
-// SOMET-640: export / seed of a `binary` group (art, audio) runs as a
-// background job (seedSync/jobs.js) and answers 202 { job }; the tab polls
+// SOMET-640: export / seed of a `binary` group (art, audio) -- or a group
+// flagged `job` (maps, SOMET-641) -- runs as a background job (seedSync/jobs.js) and answers 202 { job }; the tab polls
 // GET jobs/current. Data groups stay synchronous (200). While a job runs every
 // export / seed answers 409 busy.
 const fs = require('node:fs');
@@ -48,6 +48,10 @@ function validDecisions(d) {
   return Object.entries(d).every(([k, v]) => UUID_RE.test(k) && typeof v === 'string');
 }
 
+// Groups whose export / seed run as a background job: the binary groups
+// (asset files) and any group flagged `job` (maps: whole-map rebuilds).
+const runsAsJob = (g) => Boolean(g.binary || g.job);
+
 function refuseIfBusy() {
   if (jobs.isBusy()) throw new SyncRefused('busy', 'another export or seed is running', { job: jobs.currentJob() });
 }
@@ -73,7 +77,10 @@ module.exports = function seedExportRoutes(pool, { processStartedAt, store } = {
     const out = [];
     for (const g of GROUPS) {
       const last = runs[g.id] || {};
-      const base = { id: g.id, label: g.label, binary: Boolean(g.binary), lastExport: last.export || null, lastSeed: last.seed || null };
+      const base = {
+        id: g.id, label: g.label, binary: Boolean(g.binary), job: runsAsJob(g),
+        lastExport: last.export || null, lastSeed: last.seed || null,
+      };
       try {
         const d = await diffGroup(pool, g.id);
         out.push({
@@ -115,7 +122,7 @@ module.exports = function seedExportRoutes(pool, { processStartedAt, store } = {
   router.post('/groups/:id/export', withGroup(async (req, res) => {
     const groupId = req.params.id;
     refuseIfBusy();
-    if (getGroup(groupId).binary) {
+    if (runsAsJob(getGroup(groupId))) {
       const job = jobs.startJob({
         groupId, action: 'export', run: (ctx) => exportGroup(pool, groupId, { ...storeOpt, ...ctx }),
       });
@@ -136,7 +143,7 @@ module.exports = function seedExportRoutes(pool, { processStartedAt, store } = {
     }
     const groupId = req.params.id;
     refuseIfBusy();
-    if (getGroup(groupId).binary) {
+    if (runsAsJob(getGroup(groupId))) {
       // Engine refusals (stale_preview, undecided, ...) end the job failed
       // with errorCode; the tab shows them.
       const job = jobs.startJob({

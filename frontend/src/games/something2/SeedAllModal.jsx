@@ -6,7 +6,7 @@ import { useState } from 'react';
 import styled from 'styled-components';
 import { useSeedPreviews, useApplyAll } from './useSeedExport.js';
 import {
-  initialDecisions, previewSignature, seedRequestBody, seedAllGate, applyGate, pluralize, BINARY_NOTE, BUSY_TEXT,
+  initialDecisions, previewSignature, seedRequestBody, seedAllGate, applyGate, pluralize, separateNote, BUSY_TEXT,
   DISCARD_CONFIRM, hasChoices,
 } from './seedExportModel.js';
 import { Btn, Muted, Modal } from './seedUi.jsx';
@@ -119,7 +119,7 @@ export default function SeedAllModal({ groups, onClose, binaryGroups = [], onSee
         <Muted>Every group with an export file, in dependency order. Nothing is written until Apply.</Muted>
         {binaryGroups.length > 0 && (
           <Res>
-            <b>{BINARY_NOTE}</b>
+            <b>{separateNote(binaryGroups)}</b>
             <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
               {binaryGroups.map((g) => (
                 <Btn key={g.id} disabled={busy} title={busy ? BUSY_TEXT : undefined}
