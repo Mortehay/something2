@@ -625,6 +625,8 @@ function localByKeyOf(cd, r) {
 // `db` is a Pool (own consistent snapshot, see loadLocal) or a checked-out
 // client inside the caller's transaction.
 async function diffGroup(db, groupId) {
+  const adapter = require('./adapters.js').adapterOf(groupId);
+  if (adapter) return adapter.status(db);
   return (await computeDiff(db, groupId)).diff;
 }
 

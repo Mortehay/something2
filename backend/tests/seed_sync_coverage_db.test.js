@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
-const { EXCLUDED, PENDING, groupTables, sliceProblems, coverageProblems } = require('../src/services/seedSync/coverage.js');
+const { EXCLUDED, PENDING, SPEC_SYNCED, groupTables, sliceProblems, coverageProblems } = require('../src/services/seedSync/coverage.js');
 const { GROUPS, tableSpecs } = require('../src/services/seedSync/registry.js');
 
 const DB_URL = process.env.TEST_DATABASE_URL
@@ -15,10 +15,17 @@ async function baseTables(pool) {
   return rows.map((r) => r.table_name);
 }
 
-test('PENDING values name a known plan; plan 3 is no longer pending', () => {
-  for (const [t, p] of Object.entries(PENDING)) {
-    assert.ok(/^plan 4 \(/.test(p), `${t}: ${p}`);
-  }
+test('PENDING is empty; maps tables are spec-synced or excluded (plan 4)', () => {
+  assert.deepStrictEqual(PENDING, {});
+  const SPEC = 'synced as map spec files (maps group)';
+  assert.deepStrictEqual(SPEC_SYNCED, {
+    worlds: SPEC, map_links: SPEC, waypoints: SPEC, world_chests: SPEC, villages: SPEC,
+  });
+  const DEAD = 'dead: discrete-map system of the paused Go engine (0 rows, no writer)';
+  assert.strictEqual(EXCLUDED.maps, DEAD);
+  assert.strictEqual(EXCLUDED.map_entities, DEAD);
+  assert.strictEqual(EXCLUDED.map_spec_state, 'seed sync per-PC map spec state');
+  assert.ok(!('world_point_kinds' in EXCLUDED), 'world_point_kinds is in the Entities group');
   assert.strictEqual(EXCLUDED.sprite_sets,
     'machine-local sprite job queue; approved atlases travel in the sprite columns (art group)');
   assert.strictEqual(EXCLUDED.seed_asset_hashes, 'seed sync per-PC asset hash cache');
@@ -62,6 +69,12 @@ test('the checker flags unclassified, duplicate and stale entries (injected list
   assert.match(coverageProblems(['a', 'b'], base)[0], /does not exist: c/);
   assert.match(coverageProblems(['a', 'b', 'c'], { ...base, pending: { a: 'plan 4 (maps)', c: 'x' } })[0], /several lists: group, PENDING/);
   assert.match(coverageProblems(['a', 'b', 'c'], { ...base, excluded: { b: '' } })[0], /no reason/);
+  // SPEC_SYNCED is a classification of its own (maps group spec files).
+  const spec = { groupTables: ['a'], excluded: { b: 'why' }, pending: {}, specSynced: { c: 'maps' } };
+  assert.deepStrictEqual(coverageProblems(['a', 'b', 'c'], spec), []);
+  assert.match(coverageProblems(['a', 'b', 'c'], { ...spec, specSynced: { a: 'maps', c: 'maps' } })[0],
+    /several lists: group, SPEC_SYNCED/);
+  assert.match(coverageProblems(['a', 'b', 'c'], { ...spec, specSynced: { c: '' } })[0], /SPEC_SYNCED c has no reason/);
 });
 
 test('every public table is in a group, excluded with a reason, or pending a named plan', async (t) => {
@@ -95,6 +108,7 @@ test('a real unclassified table is detected (probe table rolled back)', async (t
   assert.ok(!(await baseTables(pool)).includes('sx_cov_probe'));
 });
 
-test('EXCLUDED and PENDING are disjoint', () => {
+test('EXCLUDED, PENDING and SPEC_SYNCED are disjoint', () => {
   for (const k of Object.keys(PENDING)) assert.ok(!(k in EXCLUDED), k);
+  for (const k of Object.keys(SPEC_SYNCED)) assert.ok(!(k in EXCLUDED) && !(k in PENDING), k);
 });

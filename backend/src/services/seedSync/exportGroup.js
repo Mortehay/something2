@@ -98,6 +98,9 @@ function definiteGitChange(r, baselines) {
 // carries { downloaded, reused, orphanFiles }.
 async function exportGroup(pool, groupId, opts = {}) {
   const group = getGroup(groupId);
+  // Lazy: the maps adapter requires this module (syncDir).
+  const adapter = require('./adapters.js').adapterOf(groupId);
+  if (adapter) return adapter.export(pool, opts);
   const specs = tableSpecs(group);
   // Lazy require: diffGroup.js needs readExport from this module.
   const { diffGroup } = require('./diffGroup.js');

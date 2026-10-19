@@ -47,6 +47,7 @@ const { loadTileTypes } = require('../src/services/tileTypes.js');
 const { loadDecorationDefs } = require('../src/services/decorationDefs.js');
 const { loadBiomes } = require('../src/services/biomes.js');
 const { setEntryWorld } = require('../src/services/entryWorld.js');
+const { recordApplied } = require('../src/services/seedSync/mapSpecState.js');
 
 // Pixels per grid cell for the World Map tab's canvas coordinates. Deriving
 // graph_x/graph_y from the same grid the links were validated against is what
@@ -158,6 +159,28 @@ function requiredTilesFor(w, spec, row, doorwayEdges) {
   return out;
 }
 
+// The validator's catalogs, read from the database. Exported for the seed-sync
+// Maps group (SOMET-641), which validates a spec before writing it to a file.
+async function loadSpecCatalogs(pool) {
+  // One biome read, two catalog entries: biomeNames answers "does this biome
+  // exist", biomeCreatureTypes answers "which creatures can actually spawn in
+  // it" (SOMET-315). Deriving the name set from the same rows keeps them from
+  // describing two different snapshots of the table.
+  const biomeRows = (await pool.query('SELECT name, creature_types FROM biomes')).rows;
+  return {
+    biomeNames: new Set(biomeRows.map((r) => r.name)),
+    biomeCreatureTypes: new Map(
+      biomeRows.map((r) => [r.name, Array.isArray(r.creature_types) ? r.creature_types : []])),
+    creatureTypeNames: new Set(
+      (await pool.query('SELECT name FROM entity_types WHERE is_creature = true')).rows.map((r) => r.name)),
+    pointArtTypes: await loadPointTypeNames(pool),
+    // SOMET-609: boss tiers for the `boss` block's catalog check.
+    bossTiers: new Map((await pool.query(
+      'SELECT name, boss_tier FROM entity_types WHERE is_creature = true AND boss_tier IS NOT NULL',
+    )).rows.map((r) => [r.name, r.boss_tier])),
+  };
+}
+
 // `moveEntry: false` applies everything EXCEPT the is_entry hand-over (SOMET-534).
 //
 // The default -- the spec's declared entry world becomes THE entry world -- is
@@ -175,25 +198,14 @@ function requiredTilesFor(w, spec, row, doorwayEdges) {
 // specs declare. The prune spares them and their mirrors, so applying one spec
 // no longer deletes a cross-spec doorway another spec owns. Omitted, the prune
 // behaves exactly as before.
-async function applyMapSpec(pool, spec, { moveEntry = true, keepSlots = [] } = {}) {
-  // One biome read, two catalog entries: biomeNames answers "does this biome
-  // exist", biomeCreatureTypes answers "which creatures can actually spawn in
-  // it" (SOMET-315). Deriving the name set from the same rows keeps them from
-  // describing two different snapshots of the table.
-  const biomeRows = (await pool.query('SELECT name, creature_types FROM biomes')).rows;
-  const catalogs = {
-    biomeNames: new Set(biomeRows.map((r) => r.name)),
-    biomeCreatureTypes: new Map(
-      biomeRows.map((r) => [r.name, Array.isArray(r.creature_types) ? r.creature_types : []])),
-    creatureTypeNames: new Set(
-      (await pool.query('SELECT name FROM entity_types WHERE is_creature = true')).rows.map((r) => r.name)),
-    pointArtTypes: await loadPointTypeNames(pool),
-    // SOMET-609: boss tiers for the `boss` block's catalog check.
-    bossTiers: new Map((await pool.query(
-      'SELECT name, boss_tier FROM entity_types WHERE is_creature = true AND boss_tier IS NOT NULL',
-    )).rows.map((r) => [r.name, r.boss_tier])),
-  };
-  const errors = validateMapSpec(spec, catalogs);
+//
+// `externallyReachable` (SOMET-641, Task 4) is the validator's option of the
+// same name: this spec's world keys another spec's links reach, so a world
+// reached only from outside is not "unreachable". Omitted, validation is
+// exactly as before.
+async function applyMapSpec(pool, spec, { moveEntry = true, keepSlots = [], externallyReachable = null } = {}) {
+  const catalogs = await loadSpecCatalogs(pool);
+  const errors = validateMapSpec(spec, externallyReachable ? { ...catalogs, externallyReachable } : catalogs);
   if (errors.length) {
     throw new Error(`invalid spec "${spec.name}":\n  - ${errors.join('\n  - ')}`);
   }
@@ -906,18 +918,24 @@ async function applyMapSpec(pool, spec, { moveEntry = true, keepSlots = [] } = {
   }
 }
 
-module.exports = { applyMapSpec, GRID_SPACING, graphPosition, requiredTilesFor };
+module.exports = { applyMapSpec, loadSpecCatalogs, GRID_SPACING, graphPosition, requiredTilesFor };
 
 if (require.main === module) {
   const name = process.env.SPEC;
   if (!name) { console.error('SPEC is required, e.g. make seed-map SPEC=vale-region'); process.exit(1); }
-  const file = path.resolve(__dirname, '../seeds/maps', `${name}.map.json`);
+  // SEED_MAPS_DIR (SOMET-641): the maps dir the seed-sync Maps group reads;
+  // tests point both at a temp dir.
+  const file = path.resolve(process.env.SEED_MAPS_DIR || path.resolve(__dirname, '../seeds/maps'), `${name}.map.json`);
   if (!fs.existsSync(file)) { console.error(`no such spec: ${file}`); process.exit(1); }
   const env = dotenv.config({ path: path.resolve(__dirname, '../../.env') }).parsed || {};
   const url = process.env.DATABASE_URL || env.DATABASE_URL;
   if (!url) { console.error('DATABASE_URL is not set in .env'); process.exit(1); }
   const pool = new Pool({ connectionString: url });
-  applyMapSpec(pool, JSON.parse(fs.readFileSync(file, 'utf8')))
+  const spec = JSON.parse(fs.readFileSync(file, 'utf8'));
+  applyMapSpec(pool, spec)
+    // SOMET-641: this PC now holds this version of the spec (the seed-sync
+    // Maps group's "applied here", same hash as the group).
+    .then(async (n) => { await recordApplied(pool, name, spec); return n; })
     .then((n) => {
       console.log(
         `applied ${name}: ${n.worlds} worlds, ${n.links} links, `

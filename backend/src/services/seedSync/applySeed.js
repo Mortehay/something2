@@ -10,6 +10,7 @@ const { cascadeEntityRename, cascadeAuraRename } = require('./renameCascade.js')
 const { assertValid, isKnownKey } = require('../gameSettings.js');
 const { ASSET_REASONS, BLOCKED_MESSAGES, hasAssets, recordCache } = require('./assets.js');
 const { assetInfoFor, stageUploads, withLocalAssets } = require('./assetApply.js');
+const { adapterOf } = require('./adapters.js');
 
 // Seeding writes game data from the git export into this DB. Rules that keep it
 // safe: every red row needs an explicit decision, the diff is recomputed under
@@ -258,6 +259,8 @@ function previewSignatureOf(cd, refInfo, assetInfo) {
 // export/apply; a preview reads asset files from the repo only.
 async function previewSeed(pool, groupId, opts = {}) {
   getGroup(groupId); // unknown group -> throws before a connection is taken
+  const adapter = adapterOf(groupId);
+  if (adapter) return adapter.preview(pool, opts);
   const client = await pool.connect();
   let releaseErr;
   try {
@@ -634,6 +637,8 @@ async function resolveForWrite(spec, gitRow, maps, written, order, deferred) {
 // with asset columns uploads the files of its git rows first (stageUploads,
 // outside the lock and cancellable -> SyncRefused('cancelled')).
 async function applySeed(pool, groupId, decisions, opts = {}) {
+  const adapter = adapterOf(groupId);
+  if (adapter) return adapter.apply(pool, decisions, opts);
   const { signature } = opts;
   const specs = tableSpecs(getGroup(groupId));
   const cascades = renameCascadesFor(specs);

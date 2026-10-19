@@ -16,7 +16,7 @@ const jobs = require('../src/services/seedSync/jobs.js');
 // Registry (seed) order, global constraints.
 const ALL_GROUPS = [
   'ai_providers', 'tile_types', 'items', 'attack_effects', 'aura_effects', 'creature_behaviors', 'entities',
-  'biomes', 'skill_tree', 'progression', 'quests', 'art', 'audio',
+  'biomes', 'skill_tree', 'progression', 'maps', 'quests', 'art', 'audio',
 ];
 
 const DB_URL = process.env.TEST_DATABASE_URL;
@@ -44,7 +44,10 @@ function dbTest(name, body) {
     const prevDir = process.env.SEED_SYNC_DIR;
     const prevTrig = process.env.SEED_RESTART_TRIGGER;
     const prevRoot = process.env.SEED_ASSETS_ROOT;
+    const prevMaps = process.env.SEED_MAPS_DIR;
     process.env.SEED_SYNC_DIR = dir;
+    // The maps group reads (and export writes) spec files: never the real seeds/maps.
+    process.env.SEED_MAPS_DIR = path.join(dir, 'maps');
     process.env.SEED_RESTART_TRIGGER = trigger;
     // Binary groups (art, audio) write repo asset files: never the real tree.
     process.env.SEED_ASSETS_ROOT = path.join(dir, 'assets');
@@ -55,6 +58,7 @@ function dbTest(name, body) {
       if (prevDir === undefined) delete process.env.SEED_SYNC_DIR; else process.env.SEED_SYNC_DIR = prevDir;
       if (prevTrig === undefined) delete process.env.SEED_RESTART_TRIGGER; else process.env.SEED_RESTART_TRIGGER = prevTrig;
       if (prevRoot === undefined) delete process.env.SEED_ASSETS_ROOT; else process.env.SEED_ASSETS_ROOT = prevRoot;
+      if (prevMaps === undefined) delete process.env.SEED_MAPS_DIR; else process.env.SEED_MAPS_DIR = prevMaps;
       fs.rmSync(dir, { recursive: true, force: true });
       fs.rmSync(trigger, { force: true });
       await pool.end().catch(() => {});

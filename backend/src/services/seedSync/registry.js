@@ -56,9 +56,18 @@
 // travels as repo files + content hashes; see seedSync/assets.js. An asset
 // column of a slice must be one of its columns.
 //
+// Adapter groups (plan 4a, SOMET-641): { id, label, adapter: '<name>', tables: [] }
+// sync something other than table rows (maps: .map.json spec files). diffGroup,
+// previewSeed, applySeed and exportGroup hand such a group to its adapter
+// (seedSync/adapters.js), which returns the same shapes; its tables are
+// classified in coverage.js (SPEC_SYNCED), not here.
+//
 // Order rules (pinned by seed_sync_registry_db.test.js): inside a group a
 // table comes after every table of the group it references (deletes run
-// children first, deferred refs only for self/forward refs); across groups an
+// children first, deferred refs only for self/forward refs) -- except a ref
+// declared { ..., deferred: true }: a FORWARD ref inside the group, written
+// NULL first and resolved by apply's second pass once its target table is
+// written (world_point_kinds.default_entity_type_id); across groups an
 // FK only points at a group that seeds earlier (ai_providers is first: tile
 // and entity types pin a provider by uuid).
 const LOCAL = { id: 'local', created_at: 'local', updated_at: 'local', sync_uuid: 'identity' };
@@ -219,6 +228,16 @@ const GROUPS = [
     label: 'Entities',
     tables: [
       {
+        // A lookup the map/entity UI edits (default art per point kind), and
+        // the by-key target of entity_types.point_kind: first, so that ref
+        // resolves; its own default entity is a deferred forward ref.
+        table: 'world_point_kinds',
+        naturalKey: ['kind'],
+        omit: { created_at: 'local', sync_uuid: 'identity' },
+        secretColumns: [],
+        refs: { default_entity_type_id: { table: 'entity_types', by: 'uuid', deferred: true } },
+      },
+      {
         table: 'entity_types',
         naturalKey: ['name'],
         omit: {
@@ -327,6 +346,8 @@ const GROUPS = [
       validate: 'game_settings',
     }],
   },
+  // Plan 4a: maps travel as spec files (seedSync/mapsGroup.js).
+  { id: 'maps', label: 'Maps', adapter: 'maps', tables: [] },
   {
     id: 'quests',
     label: 'Quests',

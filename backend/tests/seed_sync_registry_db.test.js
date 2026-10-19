@@ -30,9 +30,31 @@ function dbTest(name, body) {
 test('getGroup throws on unknown id and GROUPS is in seed order', () => {
   assert.deepStrictEqual(GROUPS.map((g) => g.id), [
     'ai_providers', 'tile_types', 'items', 'attack_effects', 'aura_effects', 'creature_behaviors', 'entities',
-    'biomes', 'skill_tree', 'progression', 'quests', 'art', 'audio',
+    'biomes', 'skill_tree', 'progression', 'maps', 'quests', 'art', 'audio',
   ]);
   assert.throws(() => getGroup('nope'), /unknown group/);
+});
+
+// SOMET-641: Maps is an adapter group (spec files, seedSync/mapsGroup.js), no TableSpecs.
+test('maps is an adapter group with no tables, right after progression', () => {
+  const m = getGroup('maps');
+  assert.strictEqual(m.label, 'Maps');
+  assert.strictEqual(m.adapter, 'maps');
+  assert.deepStrictEqual(tableSpecs(m), []);
+  assert.ok(!('binary' in m));
+  const ids = GROUPS.map((g) => g.id);
+  assert.strictEqual(ids.indexOf('maps'), ids.indexOf('progression') + 1);
+  for (const g of GROUPS) if (g.id !== 'maps') assert.ok(!('adapter' in g), g.id);
+});
+
+// SOMET-641: world_point_kinds is the FIRST table of Entities; its default
+// entity points forward inside the group, resolved in apply's deferred pass.
+test('world_point_kinds leads Entities with a deferred forward ref to entity_types', () => {
+  const [wpk] = tableSpecs(getGroup('entities'));
+  assert.strictEqual(wpk.table, 'world_point_kinds');
+  assert.deepStrictEqual(wpk.naturalKey, ['kind']);
+  assert.deepStrictEqual(Object.keys(wpk.omit).sort(), ['created_at', 'sync_uuid']);
+  assert.deepStrictEqual(wpk.refs, { default_entity_type_id: { table: 'entity_types', by: 'uuid', deferred: true } });
 });
 
 // Plan 3: the binary groups (rows + repo files) come last, flagged binary.
@@ -107,7 +129,7 @@ test('plan-2 groups write exactly their tables, in order', () => {
     attack_effects: ['vfx_effects', 'creature_skills'],
     aura_effects: ['aura_effects'],
     creature_behaviors: ['creature_behaviors', 'creature_abilities', 'creature_behavior_skills', 'behavior_drops', 'chest_loot'],
-    entities: ['entity_types', 'creature_drops', 'class_loadouts'],
+    entities: ['world_point_kinds', 'entity_types', 'creature_drops', 'class_loadouts'],
     biomes: ['biomes'],
     skill_tree: ['passive_nodes', 'passive_edges'],
     progression: ['game_settings'],
@@ -119,7 +141,7 @@ test('plan-2 groups write exactly their tables, in order', () => {
   const full = GROUPS.flatMap((g) => tableSpecs(g).filter((s) => !s.slice).map((s) => s.table));
   assert.strictEqual(new Set(full).size, full.length, 'a table has one full spec only');
   const all = GROUPS.flatMap((g) => tableSpecs(g).map((s) => s.table));
-  for (const lookup of ['elements', 'attack_origins', 'impact_behaviors', 'projectile_shapes', 'world_point_kinds', 'merchant_stock']) {
+  for (const lookup of ['elements', 'attack_origins', 'impact_behaviors', 'projectile_shapes', 'merchant_stock']) {
     assert.ok(!all.includes(lookup), `${lookup} is never exported`);
   }
 });
@@ -202,14 +224,15 @@ test('renameCascadesFor accepts every registered group', () => {
 
 // Deletes run children first (reverse table order) and a ref to a row not yet
 // written is deferred as NULL: both rely on every in-group FK pointing at an
-// EARLIER table (or the same one). Across groups, seeding in GROUPS order must
+// EARLIER table (or the same one), unless the ref is declared `deferred: true`
+// (a forward ref the second pass resolves: world_point_kinds -> entity_types). Across groups, seeding in GROUPS order must
 // find every FK target already seeded. fks: [{ tbl, col, target }].
 // A table's position is its FULL spec's (the owner group): a slice group
 // never inserts or deletes rows, so it must not move its table.
 function fkOrderProblems(fks, groups) {
   const groupOf = new Map();
   groups.forEach((g, gi) => tableSpecs(g).forEach((s, ti) => {
-    if (!s.slice) groupOf.set(s.table, { gi, ti, id: g.id });
+    if (!s.slice) groupOf.set(s.table, { gi, ti, id: g.id, spec: s });
   }));
   const problems = [];
   let checked = 0;
@@ -220,7 +243,8 @@ function fkOrderProblems(fks, groups) {
     checked += 1;
     const name = `${r.tbl}.${r.col}`;
     if (from.gi === to.gi) {
-      if (to.ti > from.ti) problems.push(`${name} -> ${r.target}: points forward inside ${from.id}`);
+      const ref = (from.spec.refs || {})[r.col];
+      if (to.ti > from.ti && !(ref && ref.deferred === true)) problems.push(`${name} -> ${r.target}: points forward inside ${from.id}`);
     } else if (to.gi > from.gi) {
       problems.push(`${name} -> ${r.target}: group ${to.id} seeds after ${from.id}`);
     }
@@ -256,6 +280,15 @@ dbTest('FK order guard flags a forward in-group FK and a later-group FK', async 
   const swapped = [...GROUPS.filter((g) => g !== items), items];
   assert.ok(fkOrderProblems(fks, swapped).problems
     .includes('creature_drops.item_type_id -> item_types: group items seeds after entities'));
+  // A forward in-group ref without `deferred: true` is caught.
+  const ent = getGroup('entities');
+  const undeferred = GROUPS.map((g) => (g === ent ? {
+    ...g,
+    tables: g.tables.map((s) => (s.table === 'world_point_kinds'
+      ? { ...s, refs: { default_entity_type_id: { table: 'entity_types', by: 'uuid' } } } : s)),
+  } : g));
+  assert.ok(fkOrderProblems(fks, undeferred).problems
+    .includes('world_point_kinds.default_entity_type_id -> entity_types: points forward inside entities'));
   // ai_providers last (the old order) is caught too: two groups pin a provider.
   const ai = getGroup('ai_providers');
   const aiLast = fkOrderProblems(fks, [...GROUPS.filter((g) => g !== ai), ai]).problems;
@@ -291,6 +324,8 @@ test('a group lists each table once (no full spec plus slice, no two slices)', (
 
 test('every group is an ordered list of TableSpecs', () => {
   for (const g of GROUPS) {
+    // An adapter group (maps) syncs files, not tables.
+    if (g.adapter) { assert.deepStrictEqual(g.tables, [], g.id); continue; }
     assert.ok(Array.isArray(g.tables) && g.tables.length > 0, `${g.id}: tables`);
     assert.strictEqual(tableSpecs(g), g.tables);
     for (const s of tableSpecs(g)) {

@@ -2,13 +2,14 @@
 // never be silently forgotten by seed sync. Each table is in exactly one of:
 //   - a registry group TableSpec (synced now),
 //   - EXCLUDED (never synced; short, specific reason),
-//   - PENDING (admin content that a named future plan will sync).
+//   - SPEC_SYNCED (synced by an adapter group as files, not rows: the maps
+//     group's .map.json specs, plan 4a),
+//   - PENDING (admin content that a named future plan will sync; empty since
+//     plan 4a, kept so the next unsynced table has a place to wait).
 // A grouped table has one full TableSpec plus any number of slices (registry
 // `slice`): the full spec omits every slice column, and every column it omits
 // as ART sits in exactly one slice (sliceProblems).
 const { GROUPS, tableSpecs } = require('./registry.js');
-
-const P4 = 'plan 4 (maps)';
 
 const EXCLUDED = {
   // machine-local job / history / queue state
@@ -26,6 +27,9 @@ const EXCLUDED = {
   engine_players: 'runtime: engine (Go) player state',
   world_chunks: 'cache: regenerable from world seed',
   map_spec_state: 'seed sync per-PC map spec state',
+  // dead tables
+  maps: 'dead: discrete-map system of the paused Go engine (0 rows, no writer)',
+  map_entities: 'dead: discrete-map system of the paused Go engine (0 rows, no writer)',
   // player / account data
   users: 'player accounts and credentials',
   invite_codes: 'account invite codes',
@@ -56,16 +60,15 @@ const EXCLUDED = {
   pgmigrations: 'node-pg-migrate ledger',
 };
 
-const PENDING = {
-  worlds: P4,
-  map_links: P4,
-  waypoints: P4,
-  world_chests: P4,
-  villages: P4,
-  maps: P4,
-  map_entities: P4,
-  // lookup, but edited with the map/entity UI; also a by-key ref target
-  world_point_kinds: P4,
+const PENDING = {};
+
+const SPEC = 'synced as map spec files (maps group)';
+const SPEC_SYNCED = {
+  worlds: SPEC,
+  map_links: SPEC,
+  waypoints: SPEC,
+  world_chests: SPEC,
+  villages: SPEC,
 };
 
 // The art-group omit reason of the plan-2 specs; plan 3 slices own those columns.
@@ -117,10 +120,14 @@ function coverageProblems(dbTables, lists = {}) {
   const grouped = lists.groupTables || [...full, ...sliceOnly];
   const excluded = lists.excluded || EXCLUDED;
   const pending = lists.pending || PENDING;
+  // Injected lists (lists.excluded given) describe a whole schema of their
+  // own: the real SPEC_SYNCED would name tables it does not have.
+  const specSynced = lists.specSynced || (lists.excluded ? {} : SPEC_SYNCED);
   const where = new Map();
   const add = (t, w) => where.set(t, [...(where.get(t) || []), w]);
   grouped.forEach((t) => add(t, 'group'));
   Object.keys(excluded).forEach((t) => add(t, 'EXCLUDED'));
+  Object.keys(specSynced).forEach((t) => add(t, 'SPEC_SYNCED'));
   Object.keys(pending).forEach((t) => add(t, 'PENDING'));
   const db = new Set(dbTables);
   const out = [];
@@ -132,8 +139,9 @@ function coverageProblems(dbTables, lists = {}) {
     if (!db.has(t)) out.push(`${w.join('/')} names a table that does not exist: ${t}`);
   }
   for (const [t, r] of Object.entries(excluded)) if (!r) out.push(`EXCLUDED ${t} has no reason`);
+  for (const [t, r] of Object.entries(specSynced)) if (!r) out.push(`SPEC_SYNCED ${t} has no reason`);
   out.push(...sliceProblems(specs));
   return out;
 }
 
-module.exports = { EXCLUDED, PENDING, groupTables, sliceProblems, coverageProblems };
+module.exports = { EXCLUDED, PENDING, SPEC_SYNCED, groupTables, sliceProblems, coverageProblems };

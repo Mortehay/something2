@@ -87,6 +87,8 @@ function cli(args, env = {}) {
     DATABASE_URL: DB_URL,
     SEED_SYNC_DIR: process.env.SEED_SYNC_DIR,
     SEED_ASSETS_ROOT: path.join(process.env.SEED_SYNC_DIR, 'assets'),
+    // The maps group reads (and export writes) spec files: never the real seeds/maps.
+    SEED_MAPS_DIR: path.join(process.env.SEED_SYNC_DIR, 'maps'),
     MINIO_ENDPOINT: 'http://127.0.0.1:1',
     MINIO_PORT: '1',
   };
