@@ -25,6 +25,10 @@ test('pyRound(x, n) matches CPython round(x, n), including binary ties', () => {
   for (const [x, n, want] of ROUND_N) {
     assert.equal(pyFloatRepr(pyRound(x, n)), want, `round(${x}, ${n})`);
   }
+  // Pinned by the Task 4 review (same under the box's 3.11.16 and host 3.12).
+  assert.equal(pyRound(0.625, 2), 0.62);
+  assert.equal(pyRound(2.675, 2), 2.67);
+  assert.equal(pyRound(3.05, 1), 3.0);
   // round(int, -n) on a Python int gives an int; the numeric value is what matters.
   assert.equal(pyRound(1250, -2), 1200);
   assert.equal(pyRound(1350, -2), 1400);

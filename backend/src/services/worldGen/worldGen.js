@@ -449,7 +449,7 @@ function biomeMultiplier(biomes) {
   const known = pyIter(biomes).filter(isBiome).map((n) => BIOMES[n].creature_density);
   if (known.length === 0) return 1.0;
   let sum = 0;
-  for (const k of known) sum += k; // Python sum(): left to right from int 0
+  for (const k of known) sum += k; // Python 3.11 sum() (the box): left to right from int 0. 3.12+ uses compensated summation and would differ.
   return sum / known.length;
 }
 
@@ -965,7 +965,7 @@ function report(spec, targetPerScreen = null) {
   const noRows = rows.length === 0;
   const per = noRows ? [0] : perRows;
   let perSum = 0;
-  for (const p of per) perSum += p; // Python sum(): left to right from 0
+  for (const p of per) perSum += p; // Python 3.11 sum() (the box): left to right from 0. 3.12+ uses compensated summation and would differ.
 
   // ONE line for the socket cost, however many worlds carry it.
   if (socketHot.length > 0) {
