@@ -612,3 +612,37 @@ dbTest('a red row with a missing git file is blocked in preview', async (t, pool
   assert.strictEqual(p2.rows.find((r) => r.key === 'sx_b').blockedReason, 'asset_file_mismatch');
   assert.ok(_hashedFiles() > before);
 });
+
+// I-1: on a legacy-seeded PC (uncached keys, no baselines) every asset row
+// reads edited_here, so the cheap pre-check lets the export through. Its
+// uncached key takes the natural file name -- the very file git's row
+// references. Local bytes that differ from git's must never land there when
+// the export then refuses git_newer.
+dbTest("export never overwrites git's file before refusing git_newer", async (t, pool, { root, store }) => {
+  store.objects.set('sx/a_legacy.png', ICON);
+  await seedFixture(pool);
+  await exportGroup(pool, 'sx_assets', { store });
+  const before = new Map(filesUnder(root).map((f) => [f, fs.readFileSync(path.join(root, f))]));
+  await pool.query("UPDATE sx_art SET image = 'sx/a_legacy.png' WHERE name = 'sx_a'");
+  await pool.query(`DELETE FROM seed_asset_hashes WHERE object_key LIKE 'sx%'`);
+  await pool.query(`DELETE FROM seed_row_hashes WHERE group_id = 'sx_assets'`);
+  const docBefore = fs.readFileSync(fileFor('sx_assets'));
+
+  await assert.rejects(exportGroup(pool, 'sx_assets', { store }), (e) => e.code === 'git_newer');
+  assert.deepStrictEqual(filesUnder(root), [...before.keys()], 'no file added, none left as .tmp');
+  for (const [f, bytes] of before) assert.ok(fs.readFileSync(path.join(root, f)).equals(bytes), `${f} byte-identical`);
+  assert.ok(fs.readFileSync(fileFor('sx_assets')).equals(docBefore), 'sync file untouched');
+  assert.strictEqual((await one(pool, "SELECT count(*)::int AS n FROM seed_asset_hashes WHERE object_key = 'sx/a_legacy.png'")).n, 0,
+    'the refused key is not cached under a file that does not hold it');
+
+  // A real local edit (baseline == git) still exports over git's file.
+  await pool.query("UPDATE sx_art SET image = 'sx/a.png' WHERE name = 'sx_a'");
+  await exportGroup(pool, 'sx_assets', { store });
+  await pool.query("UPDATE sx_art SET image = 'sx/a_legacy.png' WHERE name = 'sx_a'");
+  assert.strictEqual((await diffGroup(pool, 'sx_assets')).rows.find((r) => r.key === 'sx_a').kind, 'not_exported');
+  await exportGroup(pool, 'sx_assets', { store });
+  assert.deepStrictEqual(fs.readFileSync(path.join(root, 'sx_tiles/sx_a.png')), ICON);
+  assert.deepStrictEqual(readDoc('sx_assets').tables.sx_art.find((r) => r.name === 'sx_a').image,
+    { file: 'sx_tiles/sx_a.png', sha256: sha256(ICON) });
+  assert.deepStrictEqual(filesUnder(root).filter((f) => f.endsWith('.tmp')), []);
+});

@@ -117,7 +117,14 @@ async function exportGroup(pool, groupId, opts = {}) {
       throw new SyncRefused('git_newer', 'seed (preview) first', { gitChanges: pre.gitChanges });
     }
     const store = opts.store || require('../assetStore.js');
-    const prep = await prepareExportAssets(pool, store, group, { onProgress: opts.onProgress, signal: opts.signal });
+    // A file that would replace different bytes on disk goes in place only
+    // if, with every key now hashed, git has changed nothing (the locked
+    // check below, early): a refused export overwrites no repo file.
+    const verify = async (client) => {
+      const d = await diffGroup(client, groupId);
+      if (d.gitChanges > 0) throw new SyncRefused('git_newer', 'seed (preview) first', { gitChanges: d.gitChanges });
+    };
+    const prep = await prepareExportAssets(pool, store, group, { onProgress: opts.onProgress, signal: opts.signal, verify });
     if (prep.sha1Missing.length) {
       throw new SyncRefused('audio_sha1_missing',
         'these clips have no sha1; regenerate or re-upload them first', { rows: prep.sha1Missing });

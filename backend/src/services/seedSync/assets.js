@@ -27,6 +27,7 @@ const { getGroup, tableSpecs, scopeSql, quoteIdent } = require('./registry.js');
 const { compareNaturalKey } = require('./canonical.js');
 const { buildRefMaps, exportRow } = require('./refs.js');
 const { SyncRefused } = require('./errors.js');
+const { rollback } = require('./txn.js');
 const { safeName, matchOwner, readObject } = require('../artSeed.js');
 const { shrinkToEdge } = require('../pngResample.js');
 
@@ -216,8 +217,9 @@ const unsafeWrite = (file) => new SyncRefused('asset_path_unsafe',
 // tmp, rename, chown like the rest of the seeds tree (artSeed.matchOwner: the
 // backend runs as root in compose, the repo belongs to the host user). Never
 // through a symlinked directory: checked before mkdir (no stray dirs outside)
-// and by realpath after it.
-async function writeAtomic(root, abs, buf) {
+// and by realpath after it. stageFile writes the tmp next to `abs` and
+// returns its path; placeFile renames it over `abs`.
+async function stageFile(root, abs, buf) {
   const dir = path.dirname(abs);
   const rel = path.relative(root, abs);
   if ((await walkUnder(root, abs, false)) === 'link') throw unsafeWrite(rel);
@@ -229,12 +231,49 @@ async function writeAtomic(root, abs, buf) {
   const tmp = `${abs}.${process.pid}.${tmpCounter++}.tmp`;
   try {
     await fs.promises.writeFile(tmp, buf);
+  } catch (e) {
+    await fs.promises.unlink(tmp).catch(() => {});
+    throw e;
+  }
+  return tmp;
+}
+
+async function placeFile(root, tmp, abs) {
+  try {
     await fs.promises.rename(tmp, abs);
   } catch (e) {
     await fs.promises.unlink(tmp).catch(() => {});
     throw e;
   }
   matchOwner(abs, root);
+}
+
+async function writeAtomic(root, abs, buf) {
+  await placeFile(root, await stageFile(root, abs, buf), abs);
+}
+
+// Puts the staged files (prepareExportAssets: files that would replace
+// different bytes on disk) in place, and records their cache entries, only
+// when `verify(client)` passes with those entries visible (in one
+// transaction: a refusal rolls them back). Outside the seed_sync lock.
+async function placeStaged(pool, root, staged, verify) {
+  const client = await pool.connect();
+  let releaseErr;
+  try {
+    await client.query('BEGIN');
+    await recordCache(client, staged.map((s) => s.entry).filter(Boolean));
+    if (verify) await verify(client);
+    for (const s of staged) {
+      await placeFile(root, s.tmp, s.abs);
+      s.placed = true;
+    }
+    await client.query('COMMIT');
+  } catch (e) {
+    releaseErr = await rollback(client);
+    throw e;
+  } finally {
+    client.release(releaseErr);
+  }
 }
 
 // Download one object; null when the store does not have it (any other error
@@ -267,7 +306,15 @@ const keyText = (spec, row) => spec.naturalKey.map((k) => (typeof row[k] === 'st
 // or written and `sha1Missing` lists them ({ table, key, label }). Never under
 // the seed_sync lock (long); the export re-reads the cache under the lock and
 // refuses a key it does not find.
-async function prepareExportAssets(pool, store, group, { onProgress, signal } = {}) {
+// A download that would replace DIFFERENT bytes already on disk (e.g. the
+// file git's row references, which an uncached key on a legacy-seeded PC
+// names too) is only staged as a tmp file; once every key is cached,
+// `verify(client)` (exportGroup: refuses git_newer on a fresh diff) runs with
+// the staged entries visible, and only then do the staged files go in place.
+// So an export that ends refused there overwrites no file under the root.
+// Other files (new, or identical bytes) are written and cached as they come,
+// so a cancelled export keeps them for the next run.
+async function prepareExportAssets(pool, store, group, { onProgress, signal, verify } = {}) {
   const root = path.resolve(assetsRoot());
   const tasks = []; // { kind: 'cached'|'audio', key, base, ext, maxEdge, file, sha1, table, rowKey }
   // Audio travels by the row's sha1 (no cache): without one the value would
@@ -337,23 +384,36 @@ async function prepareExportAssets(pool, store, group, { onProgress, signal } = 
   for (const t of tasks) if (t.file) claimed.set(t.file, t.key);
   let downloaded = 0;
   const total = fetch.length;
-  for (const t of fetch) {
-    checkCancel(signal);
-    const raw = await download(store, t.key);
-    if (raw === null) throw new SyncRefused('assets_changed', 'art changed during export, run it again', { objectKey: t.key });
-    const buf = t.maxEdge ? shrinkToEdge(raw, t.maxEdge).buffer : raw;
-    const sha = sha256Of(buf);
-    if (!t.file) {
-      t.file = `${t.base}.${t.ext}`;
-      if (claimed.has(t.file) && claimed.get(t.file) !== t.key) t.file = `${t.base}-${sha.slice(0, 8)}.${t.ext}`;
-      claimed.set(t.file, t.key);
+  const staged = []; // { tmp, abs, entry, placed }
+  try {
+    for (const t of fetch) {
+      checkCancel(signal);
+      const raw = await download(store, t.key);
+      if (raw === null) throw new SyncRefused('assets_changed', 'art changed during export, run it again', { objectKey: t.key });
+      const buf = t.maxEdge ? shrinkToEdge(raw, t.maxEdge).buffer : raw;
+      const sha = sha256Of(buf);
+      if (!t.file) {
+        t.file = `${t.base}.${t.ext}`;
+        if (claimed.has(t.file) && claimed.get(t.file) !== t.key) t.file = `${t.base}-${sha.slice(0, 8)}.${t.ext}`;
+        claimed.set(t.file, t.key);
+      }
+      const abs = resolveFile(root, t.file);
+      if (!abs) throw new Error(`seed-sync: asset file ${JSON.stringify(t.file)} is outside ${root}`);
+      const entry = t.kind === 'cached' ? { key: t.key, sha256: sha, file: t.file, bytes: buf.length } : null;
+      const disk = await hashRepoFile(root, t.file);
+      if (disk.missing || disk.sha256 === sha) {
+        await writeAtomic(root, abs, buf);
+        if (entry) await recordCache(pool, [entry]);
+      } else {
+        staged.push({ tmp: await stageFile(root, abs, buf), abs, entry, placed: false });
+      }
+      downloaded += 1;
+      if (onProgress) onProgress({ phase: 'download', done: downloaded, total, key: t.key });
     }
-    const abs = resolveFile(root, t.file);
-    if (!abs) throw new Error(`seed-sync: asset file ${JSON.stringify(t.file)} is outside ${root}`);
-    await writeAtomic(root, abs, buf);
-    if (t.kind === 'cached') await recordCache(pool, [{ key: t.key, sha256: sha, file: t.file, bytes: buf.length }]);
-    downloaded += 1;
-    if (onProgress) onProgress({ phase: 'download', done: downloaded, total, key: t.key });
+    checkCancel(signal);
+    if (staged.length) await placeStaged(pool, root, staged, verify);
+  } finally {
+    for (const s of staged) if (!s.placed) await fs.promises.unlink(s.tmp).catch(() => {});
   }
 
   // Orphans: files in a group-managed dir that no row of this export uses.
