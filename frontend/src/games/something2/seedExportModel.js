@@ -301,7 +301,8 @@ export function jobProgressText(job, label) {
   return `${verb} ${String(label || job.groupId).toLowerCase()} ${Number(job.done) || 0} / ${total}`;
 }
 
-// The failed job's offending rows (assets_missing, audio_sha1_missing):
+// The failed job's offending rows (assets_missing, audio_sha1_missing, and any
+// refusal naming rows by uuid -- the backend adds their display keys):
 // up to 5 keys, then "+N more"; null when there are none.
 export function jobErrorRowsText(job, max = 5) {
   const rows = job && job.status === 'failed' && job.errorDetails && job.errorDetails.rows;

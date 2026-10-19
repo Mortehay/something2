@@ -284,8 +284,31 @@ async function previewSeed(pool, groupId, opts = {}) {
   }
 }
 
+// A refusal that names rows by sync_uuid also names them by display key
+// (details.rows: [{ table, key }], at most MAX_ERROR_ROWS): a failed
+// background job shows those (the tab's jobErrorRowsText), not the uuids.
+const MAX_ERROR_ROWS = 50;
+function withRowKeys(cd, e) {
+  if (!cd || !(e instanceof SyncRefused) || !e.details || e.details.rows !== undefined) return e;
+  const { uuids } = e.details;
+  if (!Array.isArray(uuids) || !uuids.length) return e;
+  const byUuid = new Map(cd.diff.rows.map((r) => [r.syncUuid, r]));
+  const rows = uuids.map((u) => byUuid.get(u)).filter(Boolean).slice(0, MAX_ERROR_ROWS)
+    .map((r) => ({ table: r.table, key: r.key }));
+  if (rows.length) e.details = { ...e.details, rows };
+  return e;
+}
+
 // Refusals before any write; returns [{ row, decision }] for every listed row.
 function plan(cd, refInfo, decisions, assetInfo) {
+  try {
+    return planSteps(cd, refInfo, decisions, assetInfo);
+  } catch (e) {
+    throw withRowKeys(cd, e);
+  }
+}
+
+function planSteps(cd, refInfo, decisions, assetInfo) {
   if (decisions === null || decisions === undefined) decisions = {};
   if (typeof decisions !== 'object' || Array.isArray(decisions)) {
     throw new SyncRefused('invalid_decision', 'decisions must be an object keyed by sync_uuid', { uuids: [] });
@@ -618,8 +641,10 @@ async function applySeed(pool, groupId, decisions, opts = {}) {
   let assetInfo = new Map();
   let uploads = null;
   if (specs.some(hasAssets)) {
+    let snapCd = null;
     const planOnSnapshot = async (client) => {
       const cd = await computeDiff(client, groupId);
+      snapCd = cd;
       // No file / newer schema: the locked path refuses it.
       if (!cd.diff.header || versionOf(cd.diff.header) > await schemaVersion(client)) return null;
       const refInfo = await referenceInfo(client, cd);
@@ -629,9 +654,13 @@ async function applySeed(pool, groupId, decisions, opts = {}) {
       }
       return { cd, assetInfo: info, steps: plan(cd, refInfo, decisions, info) };
     };
-    ({ assetInfo, uploads } = await stageUploads(pool, planOnSnapshot, {
-      store: opts.store || require('../assetStore.js'), onProgress: opts.onProgress, signal: opts.signal,
-    }));
+    try {
+      ({ assetInfo, uploads } = await stageUploads(pool, planOnSnapshot, {
+        store: opts.store || require('../assetStore.js'), onProgress: opts.onProgress, signal: opts.signal,
+      }));
+    } catch (e) {
+      throw withRowKeys(snapCd, e); // an upload's asset_file_mismatch
+    }
   }
   const client = await pool.connect();
   let runId = null;

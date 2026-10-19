@@ -8,6 +8,7 @@ const { Pool } = require('pg');
 const { withSeedSyncLock, cleanupSx, makeTempSyncDir } = require('./helpers/seedSyncTest.js');
 const { _withTestGroups } = require('../src/services/seedSync/registry.js');
 const { exportGroup } = require('../src/services/seedSync/exportGroup.js');
+const { previewSeed, applySeed } = require('../src/services/seedSync/applySeed.js');
 const { markInterruptedRuns } = require('../src/services/seedSync/runs.js');
 const { SyncRefused } = require('../src/services/seedSync/errors.js');
 const jobs = require('../src/services/seedSync/jobs.js');
@@ -208,4 +209,44 @@ dbTest('markInterruptedRuns marks only running rows', async ({ pub }) => {
   assert.strictEqual(rows[2].error, null, 'an already-failed row is untouched');
   assert.strictEqual((await pub.query("SELECT count(*)::int AS n FROM seed_export_runs WHERE status = 'running'")).rows[0].n, 0);
   assert.strictEqual(await markInterruptedRuns(pub), 0, 'idempotent');
+});
+
+// M-3: a failed seed job names its rows. Refusals that carry sync_uuids
+// (undecided, asset_*, conflict, ...) also carry rows: [{ table, key }]
+// (display keys, at most 50) -- what the tab's jobErrorRowsText lists.
+dbTest('a refused seed job lists its rows by display key, capped at 50', async ({ pool, root }) => {
+  for (let i = 0; i < 60; i++) {
+    await pool.query('INSERT INTO sx_jart (name, image) VALUES ($1, NULL)', [`sx_j${String(i).padStart(2, '0')}`]);
+  }
+  await exportGroup(pool, GROUP, { store: slowStore(0) });
+  // Edited here without baselines: every row is red (needs a decision).
+  await pool.query("UPDATE sx_jart SET image = ''");
+  await pool.query('DELETE FROM seed_row_hashes WHERE group_id = $1', [GROUP]);
+  const p = await previewSeed(pool, GROUP);
+  assert.strictEqual(p.rows.length, 60);
+  jobs.startJob({ groupId: GROUP, action: 'seed', run: (ctx) => applySeed(pool, GROUP, {}, { signature: p.signature, store: slowStore(0), ...ctx }) });
+  const j = await settle();
+  assert.deepStrictEqual([j.status, j.errorCode], ['failed', 'undecided']);
+  assert.strictEqual(j.errorDetails.uuids.length, 60);
+  assert.strictEqual(j.errorDetails.rows.length, 50, 'capped');
+  assert.deepStrictEqual(j.errorDetails.rows[0], { table: 'sx_jart', key: 'sx_j00' });
+  assert.ok(j.errorDetails.rows.every((r) => r.table === 'sx_jart' && /^sx_j\d\d$/.test(r.key)));
+
+  // An asset refusal: one row taking git whose file is missing.
+  await pool.query('UPDATE sx_jart SET image = NULL');
+  await exportGroup(pool, GROUP, { store: slowStore(0) }); // in sync again: baselines back
+  await pool.query("UPDATE sx_jart SET image = 'sxj/0.png' WHERE name = 'sx_j00'");
+  await exportGroup(pool, GROUP, { store: slowStore(0) });
+  await pool.query("UPDATE sx_jart SET image = NULL WHERE name = 'sx_j00'");
+  await pool.query("DELETE FROM seed_row_hashes WHERE group_id = $1", [GROUP]);
+  fs.rmSync(path.join(root, 'sx_jtiles'), { recursive: true, force: true });
+  const p2 = await previewSeed(pool, GROUP);
+  const r0 = p2.rows.find((r) => r.key === 'sx_j00');
+  jobs.startJob({
+    groupId: GROUP, action: 'seed',
+    run: (ctx) => applySeed(pool, GROUP, { [r0.syncUuid]: 'git' }, { signature: p2.signature, store: slowStore(0), ...ctx }),
+  });
+  const j2 = await settle();
+  assert.deepStrictEqual([j2.status, j2.errorCode], ['failed', 'asset_file_missing']);
+  assert.deepStrictEqual(j2.errorDetails.rows, [{ table: 'sx_jart', key: 'sx_j00' }]);
 });
