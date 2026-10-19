@@ -52,7 +52,7 @@
 //    art-omitted columns sit in exactly one slice.
 //
 // Asset columns (plan 3 Task 3): assets: { [col]: { type: 'image'|'sprite'|
-// 'audio', dir, maxEdge? } } -- the column holds object-store keys locally and
+// 'audio', dir, maxEdge?, name? } } -- the column holds object-store keys locally and
 // travels as repo files + content hashes; see seedSync/assets.js. An asset
 // column of a slice must be one of its columns.
 //
@@ -362,6 +362,9 @@ const GROUPS = [
             }[r.subject_kind] || `textures/catalog/${r.subject_kind}`),
             // Icons are capped like the legacy exporter does.
             maxEdge: (r) => (['skill', 'passive_label', 'item'].includes(r.subject_kind) ? 256 : null),
+            // Named by subject_key alone like the legacy exporter (each kind
+            // has its own dir): the default 'kind|key' would rename every file.
+            name: (r) => r.subject_key,
           },
         },
       },

@@ -267,7 +267,9 @@ dbTest('art and audio round trip byte-identical', async (t, pool, { root, store 
   assert.strictEqual(icon, 'textures/items/sx_aa_item.png');
   assert.deepStrictEqual(pngSize(files.get(icon)), { w: 256, h: 256 }, 'item icon capped at 256 px');
   const skill = art.catalog_art.find((r) => r.subject_key === 'sx_aa_skill').image.file;
-  assert.strictEqual(skill, 'textures/skills/skill_sx_aa_skill.png');
+  // I-3: catalog art is named by subject_key alone (each kind has its own
+  // dir), like the legacy exporter -- never 'skill_<key>'.
+  assert.strictEqual(skill, 'textures/skills/sx_aa_skill.png');
   assert.ok(Math.max(pngSize(files.get(skill)).w, pngSize(files.get(skill)).h) <= 256, 'skill art capped');
   const look = art.character_appearances.find((r) => r.label === 'sx look');
   assert.strictEqual(look.entity_type_id, owners.ent, 'appearance ref travels as the entity uuid');

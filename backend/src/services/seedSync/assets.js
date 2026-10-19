@@ -1,5 +1,8 @@
 // Asset columns (plan 3). A TableSpec may declare `assets: { [col]: AssetSpec }`:
 //   { type: 'image',  dir: string | (row) => string, maxEdge?: number | (row) => number|null }
+// image and sprite take an optional `name: (row) => string`: the file's base
+// name (through safeName) on a first export; default the natural key joined
+// by '|'.
 //   { type: 'sprite', dir }   -- jsonb { atlas_key, manifest_key, ...rest }
 //   { type: 'audio',  dir: (row) => string }  -- storage_key; the row needs label, kind, sha1
 // Locally the column holds object-store keys. In a sync file (and in the
@@ -60,6 +63,9 @@ function checkAssets(spec) {
     if (!isObj(a) || !ASSET_TYPES.includes(a.type)) throw new Error(`${where}: asset ${col} needs a type (${ASSET_TYPES.join('/')})`);
     if (typeof a.dir !== 'string' && typeof a.dir !== 'function') throw new Error(`${where}: asset ${col} needs a dir`);
     if (a.type === 'audio' && typeof a.dir !== 'function') throw new Error(`${where}: audio asset ${col} needs dir: (row) => string`);
+    if (a.name !== undefined && (typeof a.name !== 'function' || a.type === 'audio')) {
+      throw new Error(`${where}: asset ${col} name must be (row) => string (image/sprite only)`);
+    }
     if (spec.naturalKey.includes(col) || Object.prototype.hasOwnProperty.call(spec.refs || {}, col)) {
       throw new Error(`${where}: asset ${col} cannot be a key or ref column`);
     }
@@ -274,10 +280,10 @@ async function prepareExportAssets(pool, store, group, { onProgress, signal } = 
     for (const [, a] of assetEntries(spec)) if (typeof a.dir === 'string') dirs.add(a.dir);
     const rows = await exportedRows(pool, spec);
     for (const row of rows) {
-      const name = safeName(keyText(spec, row));
       for (const [col, a] of assetEntries(spec)) {
         const v = row[col];
         if (isEmpty(v)) continue;
+        const name = safeName(a.name ? String(a.name(row)) : keyText(spec, row));
         const dir = valueOf(a.dir, row);
         dirs.add(dir);
         const base = { table: spec.table, rowKey: keyText(spec, row) };
