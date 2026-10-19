@@ -6,7 +6,7 @@ import styled from 'styled-components';
 import {
   KINDS, kindLabel, allowedDecisions, bulkSet, decisionLabel,
   warningText, warningIsError, groupRowsByTable, renameNote,
-  assetText, blockedText, PAGE_ROWS, nextShown, limitSections, filterRows, pickedRows,
+  assetText, blockedText, PAGE_ROWS, nextShown, limitSections, filterRows, pickedRows, keepLocalConfirmText,
 } from './seedExportModel.js';
 import { Btn, Muted } from './seedUi.jsx';
 
@@ -82,7 +82,16 @@ export default function PreviewSection({ data, decisions, setDecisions, initialS
   const sections = useMemo(() => limitSections(allSections, shown), [allSections, shown]);
   const multi = (data.tables || []).length > 1 || allSections.length > 1;
   const hidden = visible.length - Math.min(shown, visible.length);
-  const bulk = (d) => setDecisions((cur) => bulkSet(cur, pickedVisible, d, rows));
+  // Keep local on a no-baseline row replaces git's version: confirm with the
+  // row's loss list first.
+  const decide = (uuids, d) => {
+    if (d === 'local') {
+      const msg = keepLocalConfirmText(rows, uuids);
+      if (msg && !window.confirm(msg)) return;
+    }
+    setDecisions((cur) => bulkSet(cur, uuids, d, rows));
+  };
+  const bulk = (d) => decide(pickedVisible, d);
 
   return (
     <>
@@ -103,7 +112,7 @@ export default function PreviewSection({ data, decisions, setDecisions, initialS
             <b>{pickedVisible.length} selected</b>
             <Muted>→ set to</Muted>
             <Btn $primary disabled={!pickedVisible.length} onClick={() => bulk('git')}>Take git</Btn>
-            <Btn disabled={!pickedVisible.length} onClick={() => bulk('local')}>Keep local</Btn>
+            <Btn disabled={!pickedVisible.length} onClick={() => decide(pickedVisible, 'local')}>Keep local</Btn>
             <Btn disabled={!pickedVisible.length} onClick={() => bulk('delete')}>Delete local</Btn>
             <Muted style={{ marginLeft: 'auto' }}>Red rows have no default: you must choose.</Muted>
           </Bulk>
@@ -128,7 +137,7 @@ export default function PreviewSection({ data, decisions, setDecisions, initialS
                       <SegBtn key={d} $on={decisions[r.syncUuid] === d}
                         disabled={!allowedDecisions(r).includes(d)}
                         title={allowedDecisions(r).includes(d) ? undefined : (blockedText(r) || 'not allowed for this row')}
-                        onClick={() => setDecisions((cur) => bulkSet(cur, [r.syncUuid], d, rows))}>
+                        onClick={() => decide([r.syncUuid], d)}>
                         {decisionLabel(r, d)}
                       </SegBtn>
                     ))}

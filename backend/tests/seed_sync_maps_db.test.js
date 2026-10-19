@@ -413,8 +413,9 @@ dbTest('existing PC, DB differs: conflict → Keep local → edited_here → exp
   assert.strictEqual(row.defaultDecision, null);
   assert.deepStrictEqual(row.allowedDecisions, ['git', 'local']);
   assert.strictEqual(row.blockedReason, 'no_baseline');
+  // The loss list: Keep local would write world b's hand-placed graph into git.
   assert.strictEqual(row.blockedMessage,
-    "No baseline on this PC — the two sides can't be told apart. Take git unless you made these edits here.");
+    "No baseline on this PC — Keep local will change graph on 1 world. Take git will discard this PC's differences.");
   assert.strictEqual(await kindOf(pool, 'sx-m4-b'), 'baseline');
   await assert.rejects(exportGroup(pool, 'maps'), (e) => e instanceof SyncRefused && e.code === 'git_newer');
   const res = await seed(pool, { [uuidOf('sx-m4-a')]: 'local' });
@@ -514,4 +515,59 @@ dbTest('make seed-map records applied hash', async (ctx) => {
   assert.strictEqual(st.applied_sha256, sha(specB()));
   assert.ok(st.applied_at instanceof Date);
   assert.strictEqual(st.base_spec, canonicalSpecJson(specB()));
+});
+
+// SOMET-641 final review I2: a no-baseline conflict's message lists what Keep
+// local would remove from (or change in) git, so the admin can see the cost.
+dbTest('no baseline: blockedMessage lists what Keep local removes from git', async (ctx) => {
+  const { pool } = ctx;
+  await buildWithoutState(pool, [specA(), specB()]);
+  // Git (another PC) added two portals a -> b and a village in b; this DB
+  // never had them.
+  const git = specA();
+  git.links.push(
+    { kind: 'portal', from: 'a', from_x: 1050, from_y: 1050, to: 'b', to_x: 1550, to_y: 1550 },
+    { kind: 'portal', from: 'a', from_x: 2050, from_y: 2050, to: 'b', to_x: 2550, to_y: 2550 });
+  git.worlds[1].village = {
+    key: 'bv', min_row: 40, min_col: 40, width: 6, height: 4, gate_edge: 'S', spawn_x: 4350, spawn_y: 4350,
+  };
+  setup(ctx, [git, specB()], `${P}a`);
+  const row = rowOf(await previewSeed(pool, 'maps'), 'sx-m4-a');
+  assert.strictEqual(row.kind, 'conflict');
+  assert.strictEqual(row.defaultDecision, null, 'still red: no default');
+  assert.strictEqual(row.blockedReason, 'no_baseline');
+  assert.strictEqual(row.blockedMessage,
+    "No baseline on this PC — Keep local will remove from git: 1 village, 2 portals. Take git will discard this PC's differences.");
+});
+
+test('noBaselineMessage: kinds, world fields by name, capped list', () => {
+  const { _noBaselineMessage: msg } = require('../src/services/seedSync/mapsGroup.js');
+  const w = (key, extra = {}) => ({ key, name: `${P}${key}`, ...extra });
+  const g = {
+    name: 'x',
+    worlds: [
+      w('a', { level_band: [1, 5], waypoints: [{ x: 1, y: 1, name: 'wp1' }], chest: { x: 1, y: 1 } }),
+      w('b', { level_band: [2, 6], allows_fast_travel: true }),
+      w('c', { level_band: [3, 7] }),
+      w('gone'),
+    ],
+    links: [
+      { from: 'a', edge: 'E', to: 'b' },
+      { kind: 'portal', from: 'a', from_x: 1, from_y: 1, to: 'c', to_x: 2, to_y: 2, is_waypoint: true },
+    ],
+  };
+  const out = {
+    name: 'x',
+    worlds: [w('a', { level_band: [1, 9] }), w('b', { level_band: [2, 9] }), w('c', { level_band: [3, 9] })],
+    links: [],
+  };
+  assert.strictEqual(msg(g, out),
+    'No baseline on this PC — Keep local will remove from git: 1 world, 2 waypoints, 1 chest, 1 compass link, 1 portal; '
+    + "change level_band on 3 worlds, …. Take git will discard this PC's differences.");
+  // Field changes only: the first names worlds, the rest a bare count.
+  const g2 = { name: 'x', worlds: [w('a', { level_band: [1, 5], allows_fast_travel: true }), w('b', { level_band: [1, 5] })], links: [] };
+  const o2 = { name: 'x', worlds: [w('a'), w('b')], links: [] };
+  assert.strictEqual(msg(g2, o2),
+    "No baseline on this PC — Keep local will change level_band on 2 worlds, allows_fast_travel on 1. Take git will discard this PC's differences.");
+  assert.strictEqual(msg(g2, g2), "No baseline on this PC — Keep local changes nothing in git. Take git will discard this PC's differences.");
 });

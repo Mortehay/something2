@@ -125,3 +125,17 @@ describe('SeedPreviewSection large previews (SOMET-640)', () => {
     expect(html).toContain('File missing in git checkout — pull again or re-export on the other PC');
   });
 });
+
+// SOMET-641 final review I2: Keep local (row button or bulk) on a no-baseline
+// row asks window.confirm with the loss list first (node-env: source gate).
+describe('SeedPreviewSection Keep local on a no-baseline row', () => {
+  it('confirms before both the row button and the bulk Keep local', () => {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'SeedPreviewSection.jsx'), 'utf8');
+    expect(src).toContain('keepLocalConfirmText');
+    expect(src).toContain('const decide = (uuids, d) => {');
+    expect(src).toContain("if (d === 'local') {");
+    expect(src).toContain('if (msg && !window.confirm(msg)) return;');
+    expect(src).toContain("onClick={() => decide(pickedVisible, 'local')}");
+    expect(src).toContain('onClick={() => decide([r.syncUuid], d)}');
+  });
+});

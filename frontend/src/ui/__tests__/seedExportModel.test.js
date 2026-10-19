@@ -519,3 +519,30 @@ describe('groupNoteLines / box phase', () => {
     expect(jobProgressText(job, 'Maps')).toBe('Updating GPU box for maps 1 / 2');
   });
 });
+
+// SOMET-641 final review I2: Keep local on a no-baseline Maps row replaces
+// git's spec with this PC's; the tab confirms with the row's loss list.
+import { keepLocalConfirmText } from '../../games/something2/seedExportModel.js';
+
+describe('keepLocalConfirmText', () => {
+  const nb = (u, key, msg) => ({ syncUuid: u, key, kind: 'conflict', defaultDecision: null, fields: [],
+    blockedReason: 'no_baseline', blockedMessage: msg, allowedDecisions: ['git', 'local'] });
+  const rows = [
+    nb('u1', 'vale-region', 'No baseline on this PC — Keep local will remove from git: 8 portals. Take git will discard this PC\'s differences.'),
+    nb('u2', 'p5-descent', 'No baseline on this PC — Keep local will change graph on 1 world. Take git will discard this PC\'s differences.'),
+    { syncUuid: 'u3', key: 'other', kind: 'conflict', defaultDecision: null, fields: [], blockedReason: null },
+  ];
+  it('null when no chosen row is a no-baseline row', () => {
+    expect(keepLocalConfirmText(rows, ['u3'])).toBe(null);
+    expect(keepLocalConfirmText(rows, [])).toBe(null);
+  });
+  it('lists each no-baseline row with its loss list', () => {
+    const t = keepLocalConfirmText(rows, ['u1', 'u3']);
+    expect(t).toContain('vale-region: No baseline on this PC — Keep local will remove from git: 8 portals.');
+    expect(t).not.toContain('p5-descent');
+    expect(t).toMatch(/Keep local anyway\?$/);
+    const both = keepLocalConfirmText(rows, ['u1', 'u2']);
+    expect(both).toContain('vale-region:');
+    expect(both).toContain('p5-descent: No baseline on this PC — Keep local will change graph on 1 world.');
+  });
+});

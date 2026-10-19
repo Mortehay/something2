@@ -377,6 +377,17 @@ export function assetText(v) {
   return parts.join(', ');
 }
 
+// SOMET-641. Keep local on a no-baseline Maps row writes this PC's spec over
+// git's; its blockedMessage is the loss list. The window.confirm text for
+// setting `uuids` to Keep local, or null when none of them needs one.
+export function keepLocalConfirmText(rows, uuids) {
+  const chosen = new Set(uuids);
+  const risky = rows.filter((r) => chosen.has(r.syncUuid) && r.blockedReason === 'no_baseline');
+  if (!risky.length) return null;
+  const lines = risky.map((r) => `${r.key}: ${r.blockedMessage || 'no baseline on this PC'}`);
+  return `${lines.join('\n\n')}\n\nKeep local anyway?`;
+}
+
 // Why a preview row is blocked, in the tab's words; null when it is not.
 const BLOCKED_COPY = {
   asset_file_missing: 'File missing in git checkout — pull again or re-export on the other PC',

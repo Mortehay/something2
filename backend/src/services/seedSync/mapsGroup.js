@@ -30,7 +30,11 @@
 // adopted (base_spec back-filled by the next seed / export); otherwise there
 // is no copy of B, so W is computed from G and any difference is BOTH an edit
 // and a git change, i.e. a conflict -- the admin decides; the row carries
-// blockedReason 'no_baseline' and a note, and stays red. The same rule holds
+// blockedReason 'no_baseline' and stays red. Its blockedMessage is the loss
+// list: what Keep local would remove from or change in git
+// (noBaselineMessage); the tab confirms before Keep local on such a row. The
+// default stays null: Take git by default would silently destroy edits that
+// exist only in this DB. The same rule holds
 // for a spec never tracked here whose worlds ARE in the DB (a PC that built
 // them before seed sync; "here" = the writer's seed-aware match): W == G is
 // a `baseline` row (group status baseline_pending, the only decision records
@@ -55,7 +59,7 @@ const {
   specHash, textHash, recordApplied, recordExported, forget, readStates,
 } = require('./mapSpecState.js');
 const { specFromDb, canonicalSpecJson, compassSlots } = require('../mapSpecExport.js');
-const { validateMapSpec } = require('../../../seeds/mapSpec.js');
+const { validateMapSpec, villagesOf } = require('../../../seeds/mapSpec.js');
 const { oppositeEdge } = require('../mapService.js');
 const { setEntryWorldByName } = require('../entryWorld.js');
 const { pushToBox: pushSpecs, boxNote, boxProblems, needsPush } = require('./mapsBoxPush.js');
@@ -308,8 +312,80 @@ function makeRow(name, kind, fields) {
 // whose hash is git's. Seed and export record base = git for it, under the
 // lock -- status itself never writes.
 const NO_BASELINE = 'no_baseline';
-const NO_BASELINE_MESSAGE = 'No baseline on this PC — the two sides can\'t be told apart. '
-  + 'Take git unless you made these edits here.';
+
+// What Keep local on a no-baseline row would REMOVE from or CHANGE in git's
+// spec `g` when git is replaced by the writer's output `w` (both spec
+// objects): { removed: [[label, n]], changed: [[label, n]], fields: [[name, n]] }.
+// Counted per kind -- worlds, compass/edge links, portals, waypoints, villages,
+// chests -- and world fields by name (the collections above excluded).
+const LOSS_COLLECTION_FIELDS = new Set(['key', 'village', 'villages', 'chest', 'waypoints']);
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+function lossCounts(g, w) {
+  const removed = new Map();
+  const changed = new Map();
+  const fields = new Map();
+  const bump = (m, k) => m.set(k, (m.get(k) || 0) + 1);
+  // Items of one kind, keyed by identity: gone from w = removed, different = changed.
+  const diffItems = (label, gItems, wItems, countChanged = true) => {
+    for (const [id, gv] of gItems) {
+      if (!wItems.has(id)) bump(removed, label);
+      else if (countChanged && !same(gv, wItems.get(id))) bump(changed, label);
+    }
+  };
+  const byKey = (spec) => new Map((spec.worlds || []).map((x) => [x.key, x]));
+  const gw = byKey(g);
+  const ww = byKey(w);
+  diffItems('world', gw, ww, false); // a kept world's changes: by field, below
+  for (const [k, gx] of gw) {
+    const wx = ww.get(k);
+    if (!wx) continue;
+    for (const f of new Set([...Object.keys(gx), ...Object.keys(wx)])) {
+      if (!LOSS_COLLECTION_FIELDS.has(f) && !same(gx[f], wx[f])) bump(fields, f);
+    }
+    const villages = (x) => new Map(villagesOf(x).map((v, i) => [v.key ?? `#${i}`, v]));
+    diffItems('village', villages(gx), villages(wx));
+    const wps = (x) => new Map((Array.isArray(x.waypoints) ? x.waypoints : []).map((p, i) => [p.name ?? `#${i}`, p]));
+    diffItems('waypoint', wps(gx), wps(wx));
+    const chest = (x) => new Map(x.chest ? [['chest', x.chest]] : []);
+    diffItems('chest', chest(gx), chest(wx));
+  }
+  const links = (spec, portal) => new Map((spec.links || []).filter((l) => (l.kind === 'portal') === portal)
+    .map((l) => [portal ? `${l.from}@${l.from_x},${l.from_y}` : `${l.from}:${l.edge}`, l]));
+  diffItems('compass link', links(g, false), links(w, false));
+  diffItems('portal', links(g, true), links(w, true));
+  // A waypoint portal: its waypoint goes when the portal or its flag does.
+  const wpPortals = (spec) => new Map([...links(spec, true)].filter(([, l]) => l.is_waypoint === true));
+  diffItems('waypoint', wpPortals(g), wpPortals(w));
+  return { removed: [...removed], changed: [...changed], fields: [...fields] };
+}
+
+const MAX_LOSS_ITEMS = 6;
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+// The no-baseline row's message: the loss list, capped at MAX_LOSS_ITEMS.
+function noBaselineMessage(g, w) {
+  const { removed, changed, fields } = lossCounts(g, w);
+  const rm = removed.map(([k, n]) => plural(n, k));
+  const ch = [
+    ...changed.map(([k, n]) => plural(n, k)),
+    ...fields.map(([f, n], i) => `${f} on ${i === 0 ? plural(n, 'world') : n}`),
+  ];
+  let left = MAX_LOSS_ITEMS;
+  const take = (items) => {
+    const out = items.slice(0, Math.max(left, 0));
+    left -= out.length;
+    return out;
+  };
+  const rmShown = take(rm);
+  const chShown = take(ch);
+  const cut = rmShown.length + chShown.length < rm.length + ch.length;
+  const parts = [];
+  if (rmShown.length) parts.push(`remove from git: ${rmShown.join(', ')}`);
+  if (chShown.length) parts.push(`change ${chShown.join(', ')}`);
+  const list = parts.length ? `Keep local will ${parts.join('; ')}${cut ? ', …' : ''}.` : 'Keep local changes nothing in git.';
+  return `No baseline on this PC — ${list} Take git will discard this PC's differences.`;
+}
+
 async function specStatus(db, g, st, inputs) {
   const worldNames = g.spec.worlds.map((w) => w.name);
   const tracked = st && (st.applied_sha256 || st.exported_sha256);
@@ -339,6 +415,7 @@ async function specStatus(db, g, st, inputs) {
     const names = changed ? changedWorlds(g.spec, w.spec) : [];
     return {
       kind: changed ? 'conflict' : null, adopt: !changed, noBaseline: changed,
+      noBaselineMessage: changed ? noBaselineMessage(g.spec, w.spec) : null,
       fields: fieldsOf(names, names, worldNames), notes: w.notes,
       outNames: w.spec.worlds.map((x) => x.name), outText,
     };
@@ -407,7 +484,7 @@ async function computeStatus(db) {
     if (s.kind) {
       const row = makeRow(g.name, s.kind, s.fields);
       // A legacy/no-base conflict: red, with a note on why (no default).
-      if (s.noBaseline) Object.assign(row, { blockedReason: NO_BASELINE, blockedMessage: NO_BASELINE_MESSAGE });
+      if (s.noBaseline) Object.assign(row, { blockedReason: NO_BASELINE, blockedMessage: s.noBaselineMessage });
       rows.push(row);
     } else if (s.adopt) {
       rows.push({ ...makeRow(g.name, 'baseline', []), blockedMessage: BASELINE_HINT });
@@ -825,5 +902,5 @@ async function exportMaps(pool, opts = {}) {
 module.exports = {
   status, preview, apply, export: exportMaps, pushToBox,
   // internals, for tests
-  _boxNote: boxNote, _slotConflicts: slotConflicts, _reachFromFiles: reachFromFiles, _dependencyOrder: dependencyOrder, DEFAULTS, ALLOWED,
+  _boxNote: boxNote, _noBaselineMessage: noBaselineMessage, _slotConflicts: slotConflicts, _reachFromFiles: reachFromFiles, _dependencyOrder: dependencyOrder, DEFAULTS, ALLOWED,
 };
