@@ -46,11 +46,11 @@ new golden. Paths are relative to `backend/`.
 
 | File | Origin | sha256 |
 |---|---|---|
-| `tests/fixtures/world_gen/box_parity.json` | generated | `54092f09866b5ed503248472524593e01c9bd917567563d50e5aa3fc7a239f51` |
+| `tests/fixtures/world_gen/box_parity.json` | generated | `c8bb7623f4a26b694a68959a99490be96da3a255e45eafe4ae91bdf6e90100cc` |
 | `tests/fixtures/world_gen/constants.json` | generated | `8943bae14f58a2b19a7b5e22f498dc5d94abd07ca44b7a99085a4c839597a4d2` |
 | `tests/fixtures/world_gen/helpers.json` | generated | `ad23f79af53ea0248fedf362ff4a1e67667d3abc2df7d18202716ecdf9abaf61` |
-| `tests/fixtures/world_gen/plan_cases.json` | generated | `dd8c138864f4399b2faa8e5737f2880d62a7a4985cd165b8c084a2ec40af5931` |
-| `tests/fixtures/world_gen/report_only.json` | generated | `22fdeaac7d8064de9c93432311d58582882827ffb5dce29bea2db410c578a3ca` |
+| `tests/fixtures/world_gen/plan_cases.json` | generated | `67cde5fde0312800068ee61d00dc92d69069d8a6975c5328a454bee40ca1f099` |
+| `tests/fixtures/world_gen/report_only.json` | generated | `c382eaa690be436e789147933068aa070d6535055aa6ee0f3c152864c1ba83d2` |
 
 ## Regenerating the golden fixtures
 

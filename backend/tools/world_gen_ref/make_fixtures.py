@@ -18,6 +18,11 @@ What the files hold, and why each shape:
                     parity-somet644, and the proof (asserted here) that the
                     vendored module reproduces it byte for byte.
   report_only.json  hand-built and checked-in specs run through `report()` only.
+
+Every report (plan, box and report-only cases) is stored twice: `report` as a
+JSON value, and `report_json`, the exact `json.dumps(report, indent=2)` text.
+report() emits integer-valued floats (`"per_screen": 14.0`), which a parsed
+value cannot tell apart from ints; the text is the byte-parity target.
   helpers.json      helper inputs and outputs. Wherever an output contains a
                     Python float, `result_json` holds `json.dumps(result)` so
                     float-vs-int survives (4.0 vs 4) - JSON.parse loses it.
@@ -211,13 +216,15 @@ def plan_cases():
         text = wg.to_json(spec)
         if target == DEFAULT:
             target = kwargs.get("target_per_screen", _PLAN_DEFAULT_TARGET)
+        rep = wg.report(spec, target)
         out.append({
             "id": cid,
             "covers": covers,
             "args": kwargs,
             "report_target": target,
             "to_json": text,
-            "report": wg.report(spec, target),
+            "report": rep,
+            "report_json": json.dumps(rep, indent=2),
         })
     ids = [c["id"] for c in out]
     assert len(ids) == len(set(ids)), "duplicate plan case id"
@@ -294,6 +301,7 @@ def box_parity():
         "box_report": response["report"],
         "to_json": ours,
         "report": rep,
+        "report_json": json.dumps(rep, indent=2),
     }
 
 
@@ -316,10 +324,13 @@ def report_only():
     cases = []
 
     def add(cid, covers, spec, target=None):
+        # A float in a spec input (6450.0) is written as a float token, and the
+        # parity test reads specs with a float-preserving loader - a plain
+        # JSON.parse would turn it into an int that Python never saw.
         spec = copy.deepcopy(spec)
-        assert not _has_float(spec), f"{cid}: float in a spec input loses its type in JSON"
-        cases.append({"id": cid, "covers": covers, "spec": spec,
-                      "target": target, "report": wg.report(copy.deepcopy(spec), target)})
+        rep = wg.report(copy.deepcopy(spec), target)
+        cases.append({"id": cid, "covers": covers, "spec": spec, "target": target,
+                      "report": rep, "report_json": json.dumps(rep, indent=2)})
 
     base = wg.plan_region("Links", world_count=3)
 
@@ -418,6 +429,20 @@ def report_only():
     add("units-tile-coords", "tile indices where pixels belong: 4 PIXELS problems", broken, 6.0)
     entry["roads"] = [[[mid, mid], [wg.to_px(mid), wg.to_px(mid)]]]
     add("units-pixel-roads", "a road written in pixels: 'roads are TILES' problems", broken, 6.0)
+
+    # Python's int/float split reaching check_units: 6450.0 is a float, so not a
+    # tile centre (str() prints it 6450.0), and dict/list pixel values print as
+    # Python's str(dict)/str(list) reprs.
+    odd = _w("f", ["Meadow"], entry=True, chunk_size=32,
+             entry_spawn={"x": 6450.0, "y": 6450},
+             chest={"x": {"a": 1, "b": "it's", "c": True, "d": None, "e": 1.5,
+                          "f": 2.0, "g": [1, "x"], "h": "\u00e9"},
+                    "y": [6450, "q", 3.0, {"k": False}, -0.0]},
+             village={"spawn_x": 1e16, "spawn_y": 6450},
+             waypoints=[{"x": 650.0, "y": 650, "name": "float wp"}])
+    add("units-float-and-dict-positions",
+        "float positions (6450.0, 650.0, 1e16) are not tile centres; dict/list values print as str()",
+        {"worlds": [odd], "links": []}, 6.0)
 
     # Caveats: a 6.0 target over a generated region (box session: caveats are
     # NOT problems, ok stays true).

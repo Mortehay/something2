@@ -41,9 +41,17 @@ const REPORT_ONLY_IDS = [
   'mismatch-no-biomes', 'clamp-512', 'bandwidth-224', 'variety-thin', 'leaders-over-cap',
   'unknown-tier', 'missing-density-and-size', 'entries-zero-and-unreachable', 'entries-two',
   'empty-region', 'empty-region-no-keys', 'socket-subset', 'socket-mixed-density',
-  'units-tile-coords', 'units-pixel-roads', 'caveat-gap-6', 'caveat-gap-int-6',
+  'units-tile-coords', 'units-pixel-roads', 'units-float-and-dict-positions', 'caveat-gap-6', 'caveat-gap-int-6',
   'caveat-tiny-target',
 ];
+
+// Every report is stored as a value AND as Python's json.dumps(report, indent=2)
+// text - the byte-parity target (integer-valued floats like 14.0 survive only
+// in the text).
+function assertReportJson(c, where) {
+  assert.equal(typeof c.report_json, 'string', `${where}: no report_json`);
+  assert.deepEqual(JSON.parse(c.report_json), c.report, `${where}: report_json disagrees with report`);
+}
 
 function sha256(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -120,6 +128,7 @@ test('plan cases carry a parseable to_json string and a report', () => {
     assert.equal(c.report.worlds.length, spec.worlds.length, c.id);
     assert.equal(typeof c.report.ok, 'boolean', c.id);
     assert.ok(Array.isArray(c.report.caveats), c.id);
+    assertReportJson(c, c.id);
   }
 });
 
@@ -128,6 +137,7 @@ test('the box parity fixture is the box spec, re-serialised identically', () => 
   assert.equal(box.id, 'box_parity-somet644');
   assert.deepEqual(JSON.parse(box.to_json), box.box_spec);
   assert.deepEqual(box.report, box.box_report);
+  assertReportJson(box, box.id);
   assert.equal(box.plan_region_args.world_count, box.post_body.worlds);
 });
 
@@ -136,6 +146,7 @@ test('report-only cases and helper rows parse', () => {
   assert.deepEqual(cases.map((c) => c.id), REPORT_ONLY_IDS);
   assert.ok(cases.some((c) => c.report.caveats.length > 0 && c.report.ok),
     'no case shows a caveat on an ok report');
+  for (const c of cases) assertReportJson(c, c.id);
   const { helpers } = readFixture('helpers.json');
   for (const [name, rows] of Object.entries(helpers)) {
     assert.ok(rows.length > 0, `${name} has no rows`);
