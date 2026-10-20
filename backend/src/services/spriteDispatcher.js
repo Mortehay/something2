@@ -17,6 +17,11 @@ const ENGINE_LABEL = 'Qwen-Image-Edit-2511 (GGUF)';
 // means the attached job will never produce a sheet, so the row resubmits.
 const RESUMABLE = new Set(['queued', 'running', 'done']);
 
+// Longest a row waits for a box job that is still `queued` (other users' jobs
+// ahead of it on the shared box) before the row fails; the box job is kept.
+const QUEUE_CAP_MS = 6 * 60 * 60 * 1000;
+const NO_ACTIONS = 'queued before GPU-box sheets — re-queue it from the Sprite Generation page';
+
 const safeName = (name) => String(name).replace(/[^A-Za-z0-9_-]/g, '_');
 
 // A box client result -> its value, or an Error carrying the box's words.
@@ -33,19 +38,28 @@ function createDispatcher({
   store,
   pollMs = 3000,
   stallMs = 20 * 60 * 1000,
+  queueCapMs = QUEUE_CAP_MS,
   cellTimeoutMs = 120000,
 }) {
   let run = null;
 
-  // Polls a box job to done. Fails on a terminal non-done status, on no
-  // progress change for stallMs (the box can wedge while its status endpoint
-  // stays green), or past the overall deadline. A transient poll error counts
-  // as "no progress" rather than failing the row outright.
-  async function pollToDone(provider, boxJobId, deadlineMs) {
-    const startedAt = Date.now();
+  // Polls a box job to done. While the box job is `queued` (behind other
+  // users' jobs on the shared box) neither the stall window nor the run
+  // deadline runs: both restart on every queued poll, so they start at the
+  // first `running` poll. Waiting is bounded only by queueCapMs. After that:
+  // fails on a terminal non-done status, on no progress change for stallMs
+  // (the box can wedge while its status endpoint stays green), or past the
+  // deadline. A transient poll error counts as "no progress" rather than
+  // failing the row outright. Resolves to the time of the first `running`
+  // observation (ms epoch) when `measure` is set and one was seen, else null.
+  async function pollToDone(provider, boxJobId, deadlineMs, { measure = true } = {}) {
+    const queueStart = Date.now();
+    let startedAt = queueStart;
     let lastSig = null;
     let lastChange = startedAt;
     let lastError = null;
+    let runningAt = null;
+    let sawRunning = false;
     for (;;) {
       // eslint-disable-next-line no-await-in-loop
       const r = await box.getSheetJob(provider, boxJobId);
@@ -53,12 +67,28 @@ function createDispatcher({
       if (r && r.ok) {
         lastError = null;
         const { status, progress = {}, error } = r.job;
-        if (status === 'done') return;
+        if (status === 'done') return runningAt;
         if (!RESUMABLE.has(status)) {
           throw new Error(`box job ${status}${error ? `: ${error}` : ''}`);
         }
-        const sig = JSON.stringify([status, progress.pct ?? null, progress.message ?? null, progress.stage ?? null]);
-        if (sig !== lastSig) { lastSig = sig; lastChange = now; }
+        if (status === 'queued' && !sawRunning) {
+          startedAt = now;
+          lastChange = now;
+          lastSig = null;
+          if (now - queueStart >= queueCapMs) {
+            const hours = Number((queueCapMs / 3600000).toFixed(2));
+            throw new Error(`still waiting behind other box jobs after ${hours} h — the box job ${boxJobId} may still run; re-queue to resume it`);
+          }
+        } else {
+          if (status === 'running' && !sawRunning) {
+            sawRunning = true;
+            startedAt = now;
+            lastChange = now;
+            if (measure) runningAt = now;
+          }
+          const sig = JSON.stringify([status, progress.pct ?? null, progress.message ?? null, progress.stage ?? null]);
+          if (sig !== lastSig) { lastSig = sig; lastChange = now; }
+        }
       } else if (r && r.retryable) {
         lastError = r.error;
       } else {
@@ -97,25 +127,29 @@ function createDispatcher({
   }
 
   async function execute(row) {
+    if (!Array.isArray(row.actions) || row.actions.length === 0) throw new Error(NO_ACTIONS);
     const provider = await loadProvider();
     if (!provider) throw new Error(NO_PROVIDER);
     const prefix = `${store.BUCKET()}/${safeName(row.creature)}/${row.id}/`;
 
     let attached = null;
+    // A resumed job that is already done or already running has an unknown
+    // start, so its sheet time is not measured (stored NULL).
+    let measure = true;
     if (row.box_job_id) {
       const st = must(await box.getSheetJob(provider, row.box_job_id));
       if (RESUMABLE.has(st.job.status)) {
         attached = { boxJobId: row.box_job_id, conceptKey: row.concept_key || null };
+        measure = st.job.status === 'queued';
       }
     }
-    const t0 = Date.now();
     const job = attached || await submit(provider, row, prefix);
 
     const plannedCells = (row.actions || []).length * (row.directions || []).length * (row.frames_per_action || 0);
     const cells = Number(job.cells) || plannedCells;
     const deadlineMs = Math.max(cells * cellTimeoutMs, (Number(job.estimatedSeconds) || 0) * 3 * 1000);
-    await pollToDone(provider, job.boxJobId, deadlineMs);
-    const sheetSeconds = (Date.now() - t0) / 1000;
+    const runningAt = await pollToDone(provider, job.boxJobId, deadlineMs, { measure });
+    const sheetSeconds = runningAt == null ? null : (Date.now() - runningAt) / 1000;
 
     const sheet = must(await box.fetchSheet(provider, job.boxJobId));
     const atlas = must(await box.fetchAtlas(provider, job.boxJobId));
@@ -199,4 +233,4 @@ function createDispatcher({
   return { start, stop, status };
 }
 
-module.exports = { createDispatcher, NO_PROVIDER };
+module.exports = { createDispatcher, NO_PROVIDER, QUEUE_CAP_MS };

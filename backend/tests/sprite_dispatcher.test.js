@@ -67,6 +67,24 @@ function fakeBox({ statuses = [{ status: 'done' }], ...over } = {}) {
   return box;
 }
 
+// A box whose job sits `queued` for queuedMs of wall time, then `running` for
+// runningMs, then done. estimatedSeconds 0 keeps the run deadline tiny so only
+// the queue-aware logic can save a long wait.
+function timedBox({ queuedMs, runningMs = 0, ...over }) {
+  let t0 = null;
+  return fakeBox({
+    createSheetJob: async () => ({ ok: true, boxJobId: 'box-1', cells: 16, estimatedSeconds: 0 }),
+    getSheetJob: async () => {
+      if (t0 === null) t0 = Date.now();
+      const el = Date.now() - t0;
+      if (el < queuedMs) return { ok: true, job: { status: 'queued', progress: {} } };
+      if (el < queuedMs + runningMs) return { ok: true, job: { status: 'running', progress: { pct: 1, message: `m${el}` } } };
+      return { ok: true, job: { status: 'done' } };
+    },
+    ...over,
+  });
+}
+
 function dispatcherFor({ rows, box = fakeBox(), store = fakeStore(), provider = PROVIDER, ...opts }) {
   const queue = fakeQueue(rows);
   const d = createDispatcher({
@@ -76,7 +94,9 @@ function dispatcherFor({ rows, box = fakeBox(), store = fakeStore(), provider = 
 }
 
 test('box job: concept, sheet, manifest stored under the row prefix', async () => {
-  const { d, queue, box, store } = dispatcherFor({ rows: [wolfRow()] });
+  const { d, queue, box, store } = dispatcherFor({
+    rows: [wolfRow()], box: fakeBox({ statuses: [{ status: 'running' }, { status: 'done' }] }),
+  });
 
   await d.start();
 
@@ -267,4 +287,70 @@ test('start while running is refused', async () => {
   release();
   await first;
   assert.equal(d.status().running, false);
+});
+
+test('queued behind other box jobs does not run the stall window or the run deadline', async () => {
+  // queued 120 ms > stallMs (30) and > deadline (16 cells x 2 ms = 32 ms).
+  const box = timedBox({ queuedMs: 120, runningMs: 10 });
+  const { d, queue } = dispatcherFor({ rows: [wolfRow()], box, stallMs: 30, cellTimeoutMs: 2 });
+
+  await d.start();
+
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(queue.log.completed.length, 1);
+});
+
+test('queue wait beyond the queue cap fails with a resumable message', async () => {
+  const box = timedBox({ queuedMs: 100000 });
+  const { d, queue } = dispatcherFor({ rows: [wolfRow()], box, queueCapMs: 40 });
+
+  await d.start();
+
+  assert.equal(queue.log.completed.length, 0);
+  assert.equal(queue.log.failed.length, 1);
+  assert.match(queue.log.failed[0].message,
+    /^still waiting behind other box jobs after [\d.]+ h — the box job box-1 may still run; re-queue to resume it$/);
+});
+
+test('default queue cap is 6 hours', () => {
+  assert.equal(require('../src/services/spriteDispatcher.js').QUEUE_CAP_MS, 6 * 3600 * 1000);
+});
+
+test('sheet_seconds counts from the first running poll, not the queue wait', async () => {
+  const box = timedBox({ queuedMs: 150, runningMs: 5 });
+  const { d, queue } = dispatcherFor({ rows: [wolfRow()], box, stallMs: 60000 });
+
+  await d.start();
+
+  const { sheet_seconds: secs } = queue.log.completed[0].result;
+  assert.equal(typeof secs, 'number');
+  assert.ok(secs < 0.1, `queue wait leaked into sheet_seconds: ${secs}`);
+});
+
+test('a resumed job already done or already running stores sheet_seconds null', async () => {
+  for (const first of ['done', 'running']) {
+    const box = fakeBox({ statuses: [{ status: first }, { status: first }, { status: 'done' }] });
+    const { d, queue } = dispatcherFor({ rows: [wolfRow({ box_job_id: 'box-old' })], box });
+    await d.start();
+    assert.equal(queue.log.completed.length, 1, first);
+    assert.equal(queue.log.completed[0].result.sheet_seconds, null, first);
+  }
+});
+
+test('a resumed job still queued is timed from when it starts running', async () => {
+  const box = timedBox({ queuedMs: 60, runningMs: 5 });
+  const { d, queue } = dispatcherFor({ rows: [wolfRow({ box_job_id: 'box-old' })], box });
+  await d.start();
+  assert.equal(typeof queue.log.completed[0].result.sheet_seconds, 'number');
+});
+
+test('a legacy row with no actions fails before any box call', async () => {
+  for (const actions of [null, []]) {
+    const { d, queue, box } = dispatcherFor({ rows: [wolfRow({ actions })] });
+    await d.start();
+    assert.deepEqual(queue.log.failed, [{
+      id: 'row-1', message: 'queued before GPU-box sheets — re-queue it from the Sprite Generation page',
+    }]);
+    assert.equal(box.calls.concept.length + box.calls.create.length + box.calls.get.length, 0);
+  }
 });
