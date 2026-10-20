@@ -1,6 +1,6 @@
 {
   "header": {
-    "exported_at": "2026-10-20T11:35:41.223Z",
+    "exported_at": "2026-10-20T20:12:13.493Z",
     "exported_by": "linux-dev",
     "group": "audio",
     "row_counts": {
@@ -8,7 +8,7 @@
       "audio_clips": 4944,
       "audio_prompts": 1825
     },
-    "schema_version": "1714440811000_map_spec_state_base"
+    "schema_version": "1714440812000_quests_objective_columns"
   },
   "tables": {
     "audio_bindings": [

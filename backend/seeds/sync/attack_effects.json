@@ -1,13 +1,13 @@
 {
   "header": {
-    "exported_at": "2026-10-20T11:34:19.468Z",
+    "exported_at": "2026-10-20T20:11:19.485Z",
     "exported_by": "linux-dev",
     "group": "attack_effects",
     "row_counts": {
       "creature_skills": 5,
       "vfx_effects": 70
     },
-    "schema_version": "1714440811000_map_spec_state_base"
+    "schema_version": "1714440812000_quests_objective_columns"
   },
   "tables": {
     "creature_skills": [

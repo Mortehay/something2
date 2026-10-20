@@ -1,12 +1,12 @@
 {
   "header": {
-    "exported_at": "2026-10-20T11:34:18.301Z",
+    "exported_at": "2026-10-20T20:11:15.451Z",
     "exported_by": "linux-dev",
     "group": "ai_providers",
     "row_counts": {
       "ai_providers": 4
     },
-    "schema_version": "1714440811000_map_spec_state_base"
+    "schema_version": "1714440812000_quests_objective_columns"
   },
   "tables": {
     "ai_providers": [

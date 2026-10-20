@@ -1,12 +1,12 @@
 {
   "header": {
-    "exported_at": "2026-10-20T11:34:25.584Z",
+    "exported_at": "2026-10-20T20:11:36.432Z",
     "exported_by": "linux-dev",
     "group": "progression",
     "row_counts": {
       "game_settings": 4
     },
-    "schema_version": "1714440811000_map_spec_state_base"
+    "schema_version": "1714440812000_quests_objective_columns"
   },
   "tables": {
     "game_settings": [

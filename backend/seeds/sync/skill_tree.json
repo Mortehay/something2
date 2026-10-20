@@ -1,13 +1,13 @@
 {
   "header": {
-    "exported_at": "2026-10-20T11:34:22.110Z",
+    "exported_at": "2026-10-20T20:11:29.576Z",
     "exported_by": "linux-dev",
     "group": "skill_tree",
     "row_counts": {
       "passive_edges": 2428,
       "passive_nodes": 1852
     },
-    "schema_version": "1714440811000_map_spec_state_base"
+    "schema_version": "1714440812000_quests_objective_columns"
   },
   "tables": {
     "passive_edges": [

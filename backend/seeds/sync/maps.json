@@ -1,9 +1,9 @@
 {
   "header": {
     "group": "maps",
-    "exported_at": "2026-10-20T11:40:17.575Z",
+    "exported_at": "2026-10-20T20:11:57.203Z",
     "exported_by": "linux-dev",
-    "schema_version": "1714440811000_map_spec_state_base",
+    "schema_version": "1714440812000_quests_objective_columns",
     "spec_count": 2
   },
   "specs": [

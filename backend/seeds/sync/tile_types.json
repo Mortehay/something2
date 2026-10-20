@@ -1,12 +1,12 @@
 {
   "header": {
-    "exported_at": "2026-10-20T11:34:18.426Z",
+    "exported_at": "2026-10-20T20:11:16.704Z",
     "exported_by": "linux-dev",
     "group": "tile_types",
     "row_counts": {
       "tile_types": 50
     },
-    "schema_version": "1714440811000_map_spec_state_base"
+    "schema_version": "1714440812000_quests_objective_columns"
   },
   "tables": {
     "tile_types": [

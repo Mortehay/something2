@@ -1,12 +1,12 @@
 {
   "header": {
-    "exported_at": "2026-10-20T11:34:19.627Z",
+    "exported_at": "2026-10-20T20:11:20.736Z",
     "exported_by": "linux-dev",
     "group": "aura_effects",
     "row_counts": {
       "aura_effects": 9
     },
-    "schema_version": "1714440811000_map_spec_state_base"
+    "schema_version": "1714440812000_quests_objective_columns"
   },
   "tables": {
     "aura_effects": [

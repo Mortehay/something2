@@ -1,6 +1,6 @@
 {
   "header": {
-    "exported_at": "2026-10-20T11:34:20.336Z",
+    "exported_at": "2026-10-20T20:11:23.585Z",
     "exported_by": "linux-dev",
     "group": "entities",
     "row_counts": {
@@ -9,7 +9,7 @@
       "entity_types": 371,
       "world_point_kinds": 8
     },
-    "schema_version": "1714440811000_map_spec_state_base"
+    "schema_version": "1714440812000_quests_objective_columns"
   },
   "tables": {
     "class_loadouts": [],

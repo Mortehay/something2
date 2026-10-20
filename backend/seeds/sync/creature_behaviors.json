@@ -1,6 +1,6 @@
 {
   "header": {
-    "exported_at": "2026-10-20T11:34:19.909Z",
+    "exported_at": "2026-10-20T20:11:21.959Z",
     "exported_by": "linux-dev",
     "group": "creature_behaviors",
     "row_counts": {
@@ -10,7 +10,7 @@
       "creature_behavior_skills": 11,
       "creature_behaviors": 24
     },
-    "schema_version": "1714440811000_map_spec_state_base"
+    "schema_version": "1714440812000_quests_objective_columns"
   },
   "tables": {
     "behavior_drops": [
