@@ -208,3 +208,23 @@ for (const bad of [null, 7, 'x', [], { entity_id: 0 }, { entity_id: '' }, { enti
     assert.equal(res.status, 400);
   });
 }
+
+test('jobs: an action without a finite max_frames falls back to the catalog max_frames', async () => {
+  const catalog = { ...CATALOG, actions: CATALOG.actions.map((a) => (a.id === 'attack' ? { ...a, max_frames: undefined } : a)) };
+  const a = routerApp(enqueuePool([]), { box: { actionCatalog: async () => ({ ok: true, catalog }) } });
+  const send = (frames) => request(a).post('/api/sprite-admin/jobs')
+    .send({ targets: [{ entity_id: 4 }], actions: ['idle', 'attack'], frames });
+  assert.equal((await send(CATALOG.max_frames)).status, 201);
+  const over = await send(CATALOG.max_frames + 1);
+  assert.equal(over.status, 400);
+  assert.match(over.body.error, new RegExp(`1 to ${CATALOG.max_frames}`));
+});
+
+test('jobs 400 "catalog has no frame limit" when neither action nor catalog has one', async () => {
+  const catalog = { ...CATALOG, max_frames: undefined, actions: CATALOG.actions.map((a) => ({ ...a, max_frames: undefined })) };
+  const a = routerApp(enqueuePool([]), { box: { actionCatalog: async () => ({ ok: true, catalog }) } });
+  const res = await request(a).post('/api/sprite-admin/jobs')
+    .send({ targets: [{ entity_id: 4 }], actions: ['idle'], frames: 2 });
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /catalog has no frame limit/);
+});

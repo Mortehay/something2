@@ -6,8 +6,8 @@ const SPRITE_DIRECTIONS = ['s', 'se', 'e', 'ne', 'n', 'nw', 'w', 'sw'];
 
 // Batch sprite jobs go to the GPU box (Qwen sheet generation). These options
 // describe WHAT to draw per entity or appearance variant: subject, prompt,
-// kind, frame count and facings. The box needs a flat concept image from the
-// entity's registered image provider; the dispatcher makes that, not this file.
+// kind, frame count and facings. The box needs a flat concept image; the
+// dispatcher gets it from the GPU box's own generate_core task, not this file.
 function optionsForEntity(entity) {
   const directional = entity.is_creature === true || entity.is_playable === true;
   const frames = directional || entity.render_mode === 'animated' ? 4 : 1;

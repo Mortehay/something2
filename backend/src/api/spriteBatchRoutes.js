@@ -193,7 +193,13 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       if (unknownAction !== undefined) {
         return res.status(400).json({ error: `unknown action "${unknownAction}" — not in the GPU box catalog` });
       }
-      const cap = Math.min(...actions.map((a) => known.get(a).max_frames));
+      // An action with no finite max_frames falls back to the catalog's own.
+      const limits = actions.map((a) => {
+        const own = known.get(a).max_frames;
+        return Number.isFinite(own) ? own : got.catalog.max_frames;
+      });
+      if (!limits.every(Number.isFinite)) return res.status(400).json({ error: 'catalog has no frame limit' });
+      const cap = Math.min(...limits);
       const frames = req.body.frames;
       if (!Number.isInteger(frames) || frames < 1 || frames > cap) {
         return res.status(400).json({ error: `frames must be an integer from 1 to ${cap} (the most the selected actions allow)` });
