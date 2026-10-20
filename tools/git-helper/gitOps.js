@@ -145,7 +145,8 @@ function createGitOps({ root }) {
       throw new GitRefusal('diverged', 'Local and remote have diverged; resolve this in a terminal. The helper never force-pushes.');
     }
     if (s.behind > 0) throw new GitRefusal('behind', 'The remote has newer commits; pull first.');
-    return result('push', await git(['push', 'origin', s.branch]));
+    // Fully qualified, no leading '+': a branch literally named '+x' must not become a forced refspec.
+    return result('push', await git(['push', 'origin', `refs/heads/${s.branch}:refs/heads/${s.branch}`]));
   });
 
   return { status, fetch, pull, commit, push };

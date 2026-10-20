@@ -177,6 +177,22 @@ test('push sends the current branch; refused when behind or diverged', async (t)
   assert.equal(git(origin, 'log', '-1', '--format=%s', 'main'), 'b', 'origin untouched');
 });
 
+test('push never force-updates, even for a branch named with a leading +', async (t) => {
+  const { a, b, origin, ops } = fixture(t);
+  git(a, 'checkout', '-b', '+main');
+  git(a, 'push', '-u', 'origin', 'refs/heads/+main:refs/heads/+main');
+  git(b, 'fetch', 'origin');
+  git(b, 'checkout', '-b', '+main', '--track', 'origin/+main');
+  write(b, 'b.txt', '1\n');
+  git(b, 'add', '-A'); git(b, 'commit', '-m', 'other pc'); git(b, 'push', 'origin', 'refs/heads/+main:refs/heads/+main');
+  // a's tracking ref is stale (no fetch), so the pre-check sees "ahead only"
+  write(a, 'a.txt', '1\n');
+  git(a, 'add', '-A'); git(a, 'commit', '-m', 'mine');
+  const r = await ops.push();
+  assert.equal(r.ok, false);
+  assert.equal(git(origin, 'log', '-1', '--format=%s', 'refs/heads/+main'), 'other pc', 'origin not overwritten');
+});
+
 test('no upstream is a refusal for pull and push', async (t) => {
   const { a, ops } = fixture(t);
   git(a, 'checkout', '-b', 'lonely');
