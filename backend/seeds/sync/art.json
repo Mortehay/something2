@@ -1,6 +1,6 @@
 {
   "header": {
-    "exported_at": "2026-10-20T11:35:20.440Z",
+    "exported_at": "2026-10-20T12:02:03.020Z",
     "exported_by": "linux-dev",
     "group": "art",
     "row_counts": {
@@ -12,7 +12,7 @@
       "item_types": 279,
       "tile_types": 50
     },
-    "schema_version": "1714440811000_map_spec_state_base"
+    "schema_version": "1714440812000_quests_objective_columns"
   },
   "tables": {
     "art_prompt_descriptions": [
@@ -4730,7 +4730,7 @@
       {
         "entity_type_id": "0759734c-e625-a8e3-74ce-a9213d340eed",
         "image": {
-          "file": "textures/character-appearances/0759734c-e625-a8e3-74ce-a9213d340eed_1.png",
+          "file": "textures/character-appearances/Mage_1.png",
           "sha256": "1327f6690811c1bef260a385998ebd6f575496f7c96bc5ef6c80748e9afe275b"
         },
         "label": "Appearance 1",
@@ -4742,7 +4742,7 @@
       {
         "entity_type_id": "0759734c-e625-a8e3-74ce-a9213d340eed",
         "image": {
-          "file": "textures/character-appearances/0759734c-e625-a8e3-74ce-a9213d340eed_2.png",
+          "file": "textures/character-appearances/Mage_2.png",
           "sha256": "f53c6f549c59f1b7c740589e19c04f2f4c0354127c0f02b6aa760cbeb7fa805b"
         },
         "label": "Appearance 2",
@@ -4754,7 +4754,7 @@
       {
         "entity_type_id": "0759734c-e625-a8e3-74ce-a9213d340eed",
         "image": {
-          "file": "textures/character-appearances/0759734c-e625-a8e3-74ce-a9213d340eed_3.png",
+          "file": "textures/character-appearances/Mage_3.png",
           "sha256": "76ab41dc9dd80ed5a98584f4e4ccbdf8de6e0364834a08979cdaba2b3a36c430"
         },
         "label": "Appearance 3",
@@ -4766,7 +4766,7 @@
       {
         "entity_type_id": "0759734c-e625-a8e3-74ce-a9213d340eed",
         "image": {
-          "file": "textures/character-appearances/0759734c-e625-a8e3-74ce-a9213d340eed_4.png",
+          "file": "textures/character-appearances/Mage_4.png",
           "sha256": "5039ef65851e73a489f2632d0dce062a7de4f2f57245508beb330d8c61f41efe"
         },
         "label": "Appearance 4",
@@ -4778,7 +4778,7 @@
       {
         "entity_type_id": "0759734c-e625-a8e3-74ce-a9213d340eed",
         "image": {
-          "file": "textures/character-appearances/0759734c-e625-a8e3-74ce-a9213d340eed_5.png",
+          "file": "textures/character-appearances/Mage_5.png",
           "sha256": "9bbde135d6cf95549d479da3f20796b4a298dc1ead5c2b6a88f69a995adeb067"
         },
         "label": "Appearance 5",
@@ -4790,7 +4790,7 @@
       {
         "entity_type_id": "30216815-30f9-3be4-7d08-836a4c21c407",
         "image": {
-          "file": "textures/character-appearances/30216815-30f9-3be4-7d08-836a4c21c407_1.png",
+          "file": "textures/character-appearances/Cultist_1.png",
           "sha256": "770bd0a909800c3bc40021076c0eef6af0ce369af3384dc6dc7721bcdbcd4dbb"
         },
         "label": "Appearance 1",
@@ -4802,7 +4802,7 @@
       {
         "entity_type_id": "30216815-30f9-3be4-7d08-836a4c21c407",
         "image": {
-          "file": "textures/character-appearances/30216815-30f9-3be4-7d08-836a4c21c407_2.png",
+          "file": "textures/character-appearances/Cultist_2.png",
           "sha256": "6355c1ef3e3e7540dff74d28591d36f6631ee67cca97f6928353f948f6053b21"
         },
         "label": "Appearance 2",
@@ -4814,7 +4814,7 @@
       {
         "entity_type_id": "30216815-30f9-3be4-7d08-836a4c21c407",
         "image": {
-          "file": "textures/character-appearances/30216815-30f9-3be4-7d08-836a4c21c407_3.png",
+          "file": "textures/character-appearances/Cultist_3.png",
           "sha256": "2c2ece482f4660be9222dcc5a139cbeeef53bb13135173a3eab8d8fff4ae8961"
         },
         "label": "Appearance 3",
@@ -4826,7 +4826,7 @@
       {
         "entity_type_id": "30216815-30f9-3be4-7d08-836a4c21c407",
         "image": {
-          "file": "textures/character-appearances/30216815-30f9-3be4-7d08-836a4c21c407_4.png",
+          "file": "textures/character-appearances/Cultist_4.png",
           "sha256": "61f94fbc3ad5be62d724b8de57c42cba517048c73280639e2f90c19e6efa8fd0"
         },
         "label": "Appearance 4",
@@ -4838,7 +4838,7 @@
       {
         "entity_type_id": "30216815-30f9-3be4-7d08-836a4c21c407",
         "image": {
-          "file": "textures/character-appearances/30216815-30f9-3be4-7d08-836a4c21c407_5.png",
+          "file": "textures/character-appearances/Cultist_5.png",
           "sha256": "ee31b8e19891ebaba5dd2139ccef9e49c01a59557a65e7a51548784c75bf5410"
         },
         "label": "Appearance 5",
@@ -4850,7 +4850,7 @@
       {
         "entity_type_id": "64424cba-3828-0fe6-f406-071d1e0e092a",
         "image": {
-          "file": "textures/character-appearances/64424cba-3828-0fe6-f406-071d1e0e092a_1.png",
+          "file": "textures/character-appearances/Druid_1.png",
           "sha256": "4ec634eedae6a05ece8c58b7f5e7f5cba06a80dc700de4bee7b09668a3e5cbf2"
         },
         "label": "Appearance 1",
@@ -4862,7 +4862,7 @@
       {
         "entity_type_id": "64424cba-3828-0fe6-f406-071d1e0e092a",
         "image": {
-          "file": "textures/character-appearances/64424cba-3828-0fe6-f406-071d1e0e092a_2.png",
+          "file": "textures/character-appearances/Druid_2.png",
           "sha256": "37e16cfb5cdc0953e3bfcacdb4886c07827b52d81ba1fe86fb28ebf6225eaa8b"
         },
         "label": "Appearance 2",
@@ -4874,7 +4874,7 @@
       {
         "entity_type_id": "64424cba-3828-0fe6-f406-071d1e0e092a",
         "image": {
-          "file": "textures/character-appearances/64424cba-3828-0fe6-f406-071d1e0e092a_3.png",
+          "file": "textures/character-appearances/Druid_3.png",
           "sha256": "f4298b411ed47257d4e439d9d7b15fc8ef0f0668dbe30d68923363569c47a884"
         },
         "label": "Appearance 3",
@@ -4886,7 +4886,7 @@
       {
         "entity_type_id": "64424cba-3828-0fe6-f406-071d1e0e092a",
         "image": {
-          "file": "textures/character-appearances/64424cba-3828-0fe6-f406-071d1e0e092a_4.png",
+          "file": "textures/character-appearances/Druid_4.png",
           "sha256": "1030f739dd5514ad1bbea4a7078fdd7ec899ed7a373f9779cab5a833cf52d5f7"
         },
         "label": "Appearance 4",
@@ -4898,7 +4898,7 @@
       {
         "entity_type_id": "64424cba-3828-0fe6-f406-071d1e0e092a",
         "image": {
-          "file": "textures/character-appearances/64424cba-3828-0fe6-f406-071d1e0e092a_5.png",
+          "file": "textures/character-appearances/Druid_5.png",
           "sha256": "c555565dc1f6da1a8aaaa926a9a8de31cac3ebcb7c46266db4cafba9bbcf4936"
         },
         "label": "Appearance 5",
@@ -4910,7 +4910,7 @@
       {
         "entity_type_id": "9fa4c2ef-f81c-98b6-f458-32dc1e83db2d",
         "image": {
-          "file": "textures/character-appearances/9fa4c2ef-f81c-98b6-f458-32dc1e83db2d_1.png",
+          "file": "textures/character-appearances/Warrior_1.png",
           "sha256": "1df6fa1e1fe31383c115b9765c73ea6815c8aa4ee766f551578c277743755687"
         },
         "label": "Appearance 1",
@@ -4922,7 +4922,7 @@
       {
         "entity_type_id": "9fa4c2ef-f81c-98b6-f458-32dc1e83db2d",
         "image": {
-          "file": "textures/character-appearances/9fa4c2ef-f81c-98b6-f458-32dc1e83db2d_2.png",
+          "file": "textures/character-appearances/Warrior_2.png",
           "sha256": "5863b8391c95cbf6460f4f9f49f302d642a9b599dd2baefcdeb61fdbc47595da"
         },
         "label": "Appearance 2",
@@ -4934,7 +4934,7 @@
       {
         "entity_type_id": "9fa4c2ef-f81c-98b6-f458-32dc1e83db2d",
         "image": {
-          "file": "textures/character-appearances/9fa4c2ef-f81c-98b6-f458-32dc1e83db2d_3.png",
+          "file": "textures/character-appearances/Warrior_3.png",
           "sha256": "a900edad10911d3c96f32e51eaf260ec1297efa4543eb63e9ddc237a48d45e60"
         },
         "label": "Appearance 3",
@@ -4946,7 +4946,7 @@
       {
         "entity_type_id": "9fa4c2ef-f81c-98b6-f458-32dc1e83db2d",
         "image": {
-          "file": "textures/character-appearances/9fa4c2ef-f81c-98b6-f458-32dc1e83db2d_4.png",
+          "file": "textures/character-appearances/Warrior_4.png",
           "sha256": "b36da1dcba0dc06cb7059f4718cb8cfc9a1da6e0338754c705396c204e6d2357"
         },
         "label": "Appearance 4",
@@ -4958,7 +4958,7 @@
       {
         "entity_type_id": "9fa4c2ef-f81c-98b6-f458-32dc1e83db2d",
         "image": {
-          "file": "textures/character-appearances/9fa4c2ef-f81c-98b6-f458-32dc1e83db2d_5.png",
+          "file": "textures/character-appearances/Warrior_5.png",
           "sha256": "43fdad8aed0e4091cacb9e4802b1ded243fd99bcad8ff7ada6b53b6309dae794"
         },
         "label": "Appearance 5",
@@ -4970,7 +4970,7 @@
       {
         "entity_type_id": "d9a253f3-9c76-2a1c-c089-136014893350",
         "image": {
-          "file": "textures/character-appearances/d9a253f3-9c76-2a1c-c089-136014893350_1.png",
+          "file": "textures/character-appearances/Archer_1.png",
           "sha256": "91e81ca486c31f6b715081cf3c641f04331a9d1a1afac2cab62983d473bed13f"
         },
         "label": "Appearance 1",
@@ -4982,7 +4982,7 @@
       {
         "entity_type_id": "d9a253f3-9c76-2a1c-c089-136014893350",
         "image": {
-          "file": "textures/character-appearances/d9a253f3-9c76-2a1c-c089-136014893350_2.png",
+          "file": "textures/character-appearances/Archer_2.png",
           "sha256": "5dab7aa0aaa7dd70e7f28fda45f70faefde7a492ddd46b902867eb53e0602749"
         },
         "label": "Appearance 2",
@@ -4994,7 +4994,7 @@
       {
         "entity_type_id": "d9a253f3-9c76-2a1c-c089-136014893350",
         "image": {
-          "file": "textures/character-appearances/d9a253f3-9c76-2a1c-c089-136014893350_3.png",
+          "file": "textures/character-appearances/Archer_3.png",
           "sha256": "a31d2ffa6a5d0170effaf714d3c25b6e2aaa1bb603ab1c6f1cad9bfb3d24752d"
         },
         "label": "Appearance 3",
@@ -5006,7 +5006,7 @@
       {
         "entity_type_id": "d9a253f3-9c76-2a1c-c089-136014893350",
         "image": {
-          "file": "textures/character-appearances/d9a253f3-9c76-2a1c-c089-136014893350_4.png",
+          "file": "textures/character-appearances/Archer_4.png",
           "sha256": "3405d12adf01fa525e14eb017437e1345549334011b67faadd7f0e2cbd225393"
         },
         "label": "Appearance 4",
@@ -5018,7 +5018,7 @@
       {
         "entity_type_id": "d9a253f3-9c76-2a1c-c089-136014893350",
         "image": {
-          "file": "textures/character-appearances/d9a253f3-9c76-2a1c-c089-136014893350_5.png",
+          "file": "textures/character-appearances/Archer_5.png",
           "sha256": "7d84cd19f248034d2128a160ffd6b53137f7d427013a2541c06f3312d1a6f529"
         },
         "label": "Appearance 5",
@@ -5030,7 +5030,7 @@
       {
         "entity_type_id": "ea7a21f9-29bd-1a4d-4400-b2664bba47f3",
         "image": {
-          "file": "textures/character-appearances/ea7a21f9-29bd-1a4d-4400-b2664bba47f3_1.png",
+          "file": "textures/character-appearances/Monk_1.png",
           "sha256": "2819d0c821766ab929747c5d2a9320945fe2714b957d1f26f106f1fb3ceaae36"
         },
         "label": "Appearance 1",
@@ -5042,7 +5042,7 @@
       {
         "entity_type_id": "ea7a21f9-29bd-1a4d-4400-b2664bba47f3",
         "image": {
-          "file": "textures/character-appearances/ea7a21f9-29bd-1a4d-4400-b2664bba47f3_2.png",
+          "file": "textures/character-appearances/Monk_2.png",
           "sha256": "4f3663a5c32533ff4b69cc38ed4857764c784cb70bde33d7c406f9e1640433d5"
         },
         "label": "Appearance 2",
@@ -5054,7 +5054,7 @@
       {
         "entity_type_id": "ea7a21f9-29bd-1a4d-4400-b2664bba47f3",
         "image": {
-          "file": "textures/character-appearances/ea7a21f9-29bd-1a4d-4400-b2664bba47f3_3.png",
+          "file": "textures/character-appearances/Monk_3.png",
           "sha256": "e27d665815355919158b148783675228bfd063688c7c71593e4317d5462b9a43"
         },
         "label": "Appearance 3",
@@ -5066,7 +5066,7 @@
       {
         "entity_type_id": "ea7a21f9-29bd-1a4d-4400-b2664bba47f3",
         "image": {
-          "file": "textures/character-appearances/ea7a21f9-29bd-1a4d-4400-b2664bba47f3_4.png",
+          "file": "textures/character-appearances/Monk_4.png",
           "sha256": "4b6d57738139f82770431d89f17425d109917c11862d0dbc3e0f9eeb13f698a5"
         },
         "label": "Appearance 4",
@@ -5078,7 +5078,7 @@
       {
         "entity_type_id": "ea7a21f9-29bd-1a4d-4400-b2664bba47f3",
         "image": {
-          "file": "textures/character-appearances/ea7a21f9-29bd-1a4d-4400-b2664bba47f3_5.png",
+          "file": "textures/character-appearances/Monk_5.png",
           "sha256": "d3523b27eb438e25e1da2a3a653359820af0e20590c6a08fe54b69d2d178b30a"
         },
         "label": "Appearance 5",
