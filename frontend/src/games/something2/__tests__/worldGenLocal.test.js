@@ -128,7 +128,24 @@ describe('showLocalFallback (latch)', () => {
   it('stays open once latched, after a refetch clears the error', () => {
     expect(showLocalFallback(true, { regionsError: null, createDown: false })).toBe(true);
   });
-  it('closes only when the latch is released (Back to GPU box) and the box is up', () => {
-    expect(showLocalFallback(false, { regionsError: null, createDown: false })).toBe(false);
+});
+
+// "Back to GPU box": the latch is released and dismissed is set, while
+// react-query still holds the OLD error until the refetch settles.
+describe('showLocalFallback after Back to GPU box', () => {
+  const stale = err('unreachable');
+  it('click time: latch released, stale regionsError still set, refetch pending -> closed', () => {
+    expect(showLocalFallback(false, { regionsError: stale, createDown: false, dismissed: true })).toBe(false);
+  });
+  it('refetch settles still box-down (dismissed cleared) -> open again', () => {
+    expect(showLocalFallback(false, { regionsError: err('unreachable'), dismissed: false })).toBe(true);
+    expect(showLocalFallback(false, { regionsError: err('not_configured'), dismissed: false })).toBe(true);
+  });
+  it('refetch settles ok (dismissed cleared, no error) -> stays closed', () => {
+    expect(showLocalFallback(false, { regionsError: null, dismissed: false })).toBe(false);
+  });
+  it('dismissed never overrides a live latch or a box-down create', () => {
+    expect(showLocalFallback(true, { regionsError: stale, dismissed: true })).toBe(true);
+    expect(showLocalFallback(false, { createDown: true, dismissed: true })).toBe(true);
   });
 });

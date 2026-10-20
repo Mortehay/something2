@@ -56,8 +56,18 @@ export function saveOutcome(err) {
 // Whether the local fallback is shown. LATCHED: once shown it stays shown --
 // a focus refetch that clears the list error (the box blipped back) must not
 // unmount a preview the admin is about to save. Only a reload or the explicit
-// "Back to GPU box" action (which passes latched=false and clears createDown)
-// resets it.
-export function showLocalFallback(latched, { regionsError = null, createDown = false } = {}) {
-  return Boolean(latched || createDown || isBoxDown(regionsError));
+// "Back to GPU box" action releases it.
+//
+// `dismissed` is what makes Back work. Back releases the latch and refetches,
+// but react-query keeps the OLD list error until that refetch settles, so
+// without it the stale error would reopen (and re-latch) the fallback on the
+// very next render. While dismissed, the list-error trigger is suppressed;
+// the caller clears `dismissed` when the refetch settles, so a refetch that
+// still fails with a box-down error shows the fallback again, and one that
+// succeeds leaves it closed.
+export function showLocalFallback(latched, {
+  regionsError = null, createDown = false, dismissed = false,
+} = {}) {
+  if (latched || createDown) return true;
+  return !dismissed && isBoxDown(regionsError);
 }

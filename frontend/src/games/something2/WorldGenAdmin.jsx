@@ -518,14 +518,22 @@ export default function WorldGenAdmin() {
   const [selected, setSelected] = useState(null);
   const [createSaidDown, setCreateSaidDown] = useState(false);
   const [localLatched, setLocalLatched] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
   const {
     regions, total, provider, isLoadingRegions, isRefetchingRegions, regionsError, refetchRegions,
   } = useGeneratedWorlds();
-  const showLocal = showLocalFallback(localLatched, { regionsError, createDown: createSaidDown });
+  const showLocal = showLocalFallback(localLatched, { regionsError, createDown: createSaidDown, dismissed });
   // Latch once shown, so a refetch that clears the error keeps it (and any
   // unsaved preview) mounted.
   useEffect(() => { if (showLocal && !localLatched) setLocalLatched(true); }, [showLocal, localLatched]);
-  const backToBox = () => { setLocalLatched(false); setCreateSaidDown(false); refetchRegions(); };
+  // Back: release the latch and suppress the (stale) list error until the
+  // refetch settles; then the fresh outcome decides (showLocalFallback).
+  const backToBox = () => {
+    setLocalLatched(false);
+    setCreateSaidDown(false);
+    setDismissed(true);
+    Promise.resolve(refetchRegions()).finally(() => setDismissed(false));
+  };
 
   return (
     <AdminContainer>
