@@ -446,22 +446,39 @@ export const GIT_MID_ACTION_TEXT = 'Git helper stopped mid-action — result unk
 const DIVERGED_TEXT = 'Local and origin have diverged — resolve in a terminal';
 const syncPath = (id) => `backend/seeds/sync/${id}.json`;
 
+export const GIT_PENDING_TEXT = 'A seed export or seed is running';
+export const GIT_ERROR_TEXT = 'Git helper is running but git failed — check backend/run/git-helper.log';
+const DETACHED_TEXT = 'Not on a branch — switch branch in a terminal';
+
+// SOMET-649. The unavailable strip copy: a live helper whose git broke must
+// not tell the admin to start the helper.
+export const gitUnavailableText = (s) => (s && s.reason === 'helper_error' ? GIT_ERROR_TEXT : GIT_UNAVAILABLE_TEXT);
+
+// The open dialog survives only while the status stays available.
+export const gitDialogAfterStatus = (dialog, status) => (status && status.available !== false ? dialog || null : null);
+
 export function gitStripText(s) {
   const n = (s.seedsDirty || []).length;
-  return `${s.branch} · ↑${s.ahead || 0} ↓${s.behind || 0} · ${pluralize(n, 'seed change')}`;
+  const changes = pluralize(n, 'seed change');
+  if (!s.branch) return `detached HEAD · ↑${s.ahead || 0} ↓${s.behind || 0} · ${changes}`;
+  if (!s.upstream) return `${s.branch} · no upstream · ${changes}`;
+  return `${s.branch} · ↑${s.ahead || 0} ↓${s.behind || 0} · ${changes}`;
 }
 
-// Per-button disabled reason (null = enabled). A running job disables all.
-export function gitActionStates(s, jobIsRunning) {
+// Per-button disabled reason (null = enabled). Precedence: busy job > pending
+// data-group mutation > detached > no upstream > diverged > dirty > behind.
+export function gitActionStates(s, jobIsRunning, mutationPending = false) {
   const seedsN = (s.seedsDirty || []).length;
   const dirty = seedsN + (s.otherDirty || []).length > 0;
-  const busy = jobIsRunning ? BUSY_TEXT : null;
+  const gate = (jobIsRunning ? BUSY_TEXT : null) || (mutationPending ? GIT_PENDING_TEXT : null);
+  const detached = s.branch ? null : DETACHED_TEXT;
+  const noUp = s.upstream ? null : `No origin/${s.branch} yet — push it once from a terminal`;
   const diverged = (s.ahead || 0) > 0 && (s.behind || 0) > 0 ? DIVERGED_TEXT : null;
   return {
-    pull: { reason: busy || diverged || (dirty ? 'Uncommitted changes in the working tree — commit or discard them first' : null) },
-    commit: { reason: busy || (seedsN === 0 ? 'No seed changes to commit' : null) },
+    pull: { reason: gate || detached || noUp || diverged || (dirty ? 'Uncommitted changes in the working tree — commit or discard them first' : null) },
+    commit: { reason: gate || detached || (seedsN === 0 ? 'No seed changes to commit' : null) },
     push: {
-      reason: busy
+      reason: gate || detached || noUp
         || diverged
         || ((s.behind || 0) > 0 ? 'Behind origin — pull first' : null)
         || ((s.ahead || 0) === 0 ? 'Nothing to push' : null),

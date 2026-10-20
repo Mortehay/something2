@@ -2,7 +2,7 @@
 // authHeaders() is NOT optional: every route is admin-only, and a 401 without
 // it signs the admin out (same trap as useBulkImageJob.js).
 import { useEffect, useRef } from "react";
-import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useIsMutating, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { authHeaders, apiFetch } from "./src/js/net/auth.js";
 import { API_URL } from "../../config.js";
@@ -146,9 +146,15 @@ export function useCancelSeedJob() {
 // in the job query so the row shows it and polling starts.
 const takeJob = (qc, job) => { if (job) qc.setQueryData(JOB_KEY, job); };
 
-function useInvalidating(mutationFn, onSuccess) {
+// SOMET-649. Every data-group export/seed mutation carries this key so the git
+// strip can disable itself while one is pending (the server answers 409 busy).
+export const SEED_DATA_KEY = ["seed-data-mutation"];
+export const useSeedDataPending = () => useIsMutating({ mutationKey: SEED_DATA_KEY }) > 0;
+
+function useInvalidating(mutationFn, onSuccess, mutationKey) {
   const qc = useQueryClient();
   return useMutation({
+    mutationKey,
     mutationFn,
     onSuccess: (data, vars) => {
       qc.invalidateQueries({ queryKey: GROUPS_KEY });
@@ -169,6 +175,7 @@ function useInvalidating(mutationFn, onSuccess) {
 export const useExportGroup = () => useInvalidating(
   ({ groupId }) => call(`/groups/${encodeURIComponent(groupId)}/export`, { method: "POST" }),
   (r) => toast.success(`Exported ${r.rowCount} row${r.rowCount === 1 ? "" : "s"}`),
+  SEED_DATA_KEY,
 );
 
 export const useSeedMeta = () => useQuery({
@@ -184,6 +191,7 @@ export const useApplySeed = () => useInvalidating(
     const s = r.summary || {};
     toast.success(`Seeded: ${s.updated || 0} updated, ${s.created || 0} created, ${s.deleted || 0} deleted, ${s.kept || 0} kept, ${s.adopted || 0} adopted`);
   },
+  SEED_DATA_KEY,
 );
 
 export const useRestartBackend = () => useInvalidating(
@@ -202,6 +210,7 @@ const refreshAll = (qc) => {
 export function useExportAll() {
   const qc = useQueryClient();
   return useMutation({
+    mutationKey: SEED_DATA_KEY,
     mutationFn: async (groups) => {
       const out = [];
       for (const g of groups) {
@@ -224,6 +233,7 @@ export function useExportAll() {
 export function useApplyAll() {
   const qc = useQueryClient();
   return useMutation({
+    mutationKey: SEED_DATA_KEY,
     mutationFn: async (items) => {
       const out = [];
       for (const it of items) {

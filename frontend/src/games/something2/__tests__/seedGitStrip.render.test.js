@@ -7,7 +7,7 @@ vi.mock('../useSeedExport.js', () => ({}));
 const { GitStripView, gitConfirmText } = await import('../SeedGitStrip.jsx');
 
 const ok = { available: true, branch: 'main', upstream: 'origin/main', ahead: 0, behind: 0, seedsDirty: [], otherDirty: [], lastFetchAt: '2026-10-20T10:00:00Z', suggestedMessage: 'seed export: quests from desk' };
-const view = (status, busy = false) => renderToStaticMarkup(h(GitStripView, { status, busy, pending: false, onRun: () => {} }));
+const view = (status, busy = false, pending = false) => renderToStaticMarkup(h(GitStripView, { status, busy, pending, onRun: () => {} }));
 const btn = (html, text) => (html.match(new RegExp(`<button[^>]*>${text}</button>`)) || [])[0] || '';
 
 describe('GitStripView', () => {
@@ -47,9 +47,45 @@ describe('GitStripView', () => {
   });
 });
 
+describe('GitStripView edge states (SOMET-649)', () => {
+  it('helper_error: git failed text, no make git-helper, no buttons', () => {
+    const html = view({ available: false, reason: 'helper_error', hint: 'x' });
+    expect(html).toContain('Git helper is running but git failed');
+    expect(html).toContain('backend/run/git-helper.log');
+    expect(html).not.toContain('make git-helper');
+    expect(html).not.toContain('<button');
+  });
+  it('detached HEAD: text and disabled reasons, no null', () => {
+    const html = view({ ...ok, branch: null, upstream: null, ahead: 1, seedsDirty: ['a'] });
+    expect(html).toContain('detached HEAD');
+    expect(html).not.toContain('null');
+    for (const t of ['Pull…', 'Commit seeds…', 'Push…']) {
+      expect(btn(html, t)).toContain('disabled');
+      expect(btn(html, t)).toContain('Not on a branch');
+    }
+  });
+  it('no upstream: text, push and pull blocked, commit enabled, never Nothing to push', () => {
+    const html = view({ ...ok, upstream: null, seedsDirty: ['a'] });
+    expect(html).toContain('no upstream');
+    expect(btn(html, 'Push…')).toContain('No origin/main yet');
+    expect(btn(html, 'Pull…')).toContain('No origin/main yet');
+    expect(btn(html, 'Commit seeds…')).not.toContain('disabled');
+    expect(html).not.toContain('Nothing to push');
+  });
+  it('a pending seed mutation disables every action with its reason', () => {
+    const html = view({ ...ok, ahead: 1, seedsDirty: ['a'] }, false, true);
+    for (const t of ['Pull…', 'Commit seeds…', 'Push…']) {
+      expect(btn(html, t)).toContain('A seed export or seed is running');
+    }
+    expect(btn(html, 'Fetch')).toContain('disabled');
+  });
+});
+
 describe('gitConfirmText', () => {
   it('says exactly what will happen', () => {
-    expect(gitConfirmText('pull', { ...ok, behind: 3 })).toBe('Fast-forward 3 commits from origin/main.');
+    expect(gitConfirmText('pull', { ...ok, behind: 3 })).toBe('Fetch and fast-forward from origin/main (3 new commits known so far).');
+    expect(gitConfirmText('pull', { ...ok, behind: 1 })).toBe('Fetch and fast-forward from origin/main (1 new commit known so far).');
+    expect(gitConfirmText('pull', ok)).toBe('Fetch and fast-forward from origin/main.');
     expect(gitConfirmText('push', { ...ok, ahead: 1 })).toBe('Push 1 commit to origin/main.');
     // the helper always pushes origin/<branch>, whatever the upstream is
     expect(gitConfirmText('push', { ...ok, ahead: 1, branch: 'feat/x', upstream: 'fork/other' })).toBe('Push 1 commit to origin/feat/x.');

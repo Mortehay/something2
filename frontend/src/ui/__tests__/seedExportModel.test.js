@@ -3,7 +3,7 @@ import {
   statusBadge, initialDecisions, bulkSet, applyGate, allowedDecisions, kindLabel, exportBlocked, previewSignature,
   exportBlockReason, seedBlockReason, decisionLabel, seedRequestBody,
   seedButtonLabel, exportAllPlan, seedAllGroups, historyPageCount, exportAllMessage, seedAllGate, pluralize,
-  gitHints, unpushedNote, gitActionStates, gitStripText, GIT_UNAVAILABLE_TEXT,
+  gitHints, unpushedNote, gitActionStates, gitStripText, GIT_UNAVAILABLE_TEXT, GIT_PENDING_TEXT, gitUnavailableText, gitDialogAfterStatus,
   tableLabel, warningText, warningIsError, refusalText, groupRowsByTable, isRename, renameNote,
 } from '../../games/something2/seedExportModel.js';
 
@@ -589,7 +589,7 @@ describe('gitHints (SOMET-642)', () => {
 });
 
 describe('gitActionStates (SOMET-642)', () => {
-  const st = (o) => ({ available: true, ahead: 0, behind: 0, seedsDirty: [], otherDirty: [], ...o });
+  const st = (o) => ({ available: true, branch: 'main', upstream: 'origin/main', ahead: 0, behind: 0, seedsDirty: [], otherDirty: [], ...o });
   it('everything is enabled-or-reasoned: nothing to do disables commit and push', () => {
     const a = gitActionStates(st(), false);
     expect(a.pull.reason).toBeNull();
@@ -621,10 +621,66 @@ describe('gitActionStates (SOMET-642)', () => {
 
 describe('gitStripText (SOMET-642)', () => {
   it('summarises branch, ahead/behind and seed changes', () => {
-    expect(gitStripText({ branch: 'main', ahead: 1, behind: 2, seedsDirty: ['a', 'b'] })).toBe('main · ↑1 ↓2 · 2 seed changes');
-    expect(gitStripText({ branch: 'main', ahead: 0, behind: 0, seedsDirty: ['a'] })).toBe('main · ↑0 ↓0 · 1 seed change');
+    expect(gitStripText({ branch: 'main', upstream: 'origin/main', ahead: 1, behind: 2, seedsDirty: ['a', 'b'] })).toBe('main · ↑1 ↓2 · 2 seed changes');
+    expect(gitStripText({ branch: 'main', upstream: 'origin/main', ahead: 0, behind: 0, seedsDirty: ['a'] })).toBe('main · ↑0 ↓0 · 1 seed change');
   });
   it('unavailable copy names the make target', () => {
     expect(GIT_UNAVAILABLE_TEXT).toBe('Git buttons need the git helper: run `make git-helper`');
+  });
+});
+
+describe('git edge states (SOMET-649)', () => {
+  const st = (o) => ({ available: true, branch: 'main', upstream: 'origin/main', ahead: 0, behind: 0, seedsDirty: [], otherDirty: [], ...o });
+  const DETACHED = 'Not on a branch — switch branch in a terminal';
+  it('a pending data-group mutation disables everything with its own reason', () => {
+    const a = gitActionStates(st({ ahead: 1, seedsDirty: ['a'] }), false, true);
+    for (const op of ['pull', 'commit', 'push']) expect(a[op].reason).toBe('A seed export or seed is running');
+    expect(GIT_PENDING_TEXT).toBe('A seed export or seed is running');
+  });
+  it('busy beats pending', () => {
+    expect(gitActionStates(st(), true, true).pull.reason).toBe(BUSY_TEXT);
+  });
+  it('pending beats detached', () => {
+    expect(gitActionStates(st({ branch: null, upstream: null }), false, true).push.reason).toBe(GIT_PENDING_TEXT);
+  });
+  it('detached HEAD disables pull, commit and push', () => {
+    const a = gitActionStates(st({ branch: null, upstream: null, ahead: 1, seedsDirty: ['a'] }), false);
+    for (const op of ['pull', 'commit', 'push']) expect(a[op].reason).toBe(DETACHED);
+  });
+  it('detached beats no-upstream', () => {
+    expect(gitActionStates(st({ branch: null, upstream: null }), false).pull.reason).toBe(DETACHED);
+  });
+  it('no upstream: push and pull disabled with the terminal reason, commit enabled', () => {
+    const a = gitActionStates(st({ upstream: null, ahead: 2, seedsDirty: ['a'] }), false);
+    expect(a.push.reason).toBe('No origin/main yet — push it once from a terminal');
+    expect(a.pull.reason).toBe('No origin/main yet — push it once from a terminal');
+    expect(a.commit.reason).toBeNull();
+  });
+  it('no upstream beats diverged, dirty, behind and nothing-to-push', () => {
+    const a = gitActionStates(st({ upstream: null, ahead: 1, behind: 1, otherDirty: ['x'] }), false);
+    expect(a.pull.reason).toMatch(/No origin\/main yet/);
+    expect(a.push.reason).toMatch(/No origin\/main yet/);
+    expect(gitActionStates(st({ upstream: null }), false).push.reason).toMatch(/No origin/);
+  });
+  it('strip text: detached and no upstream, never "null"', () => {
+    const d = gitStripText(st({ branch: null, upstream: null, seedsDirty: ['a'] }));
+    expect(d).toBe('detached HEAD · ↑0 ↓0 · 1 seed change');
+    const n = gitStripText(st({ upstream: null }));
+    expect(n).toBe('main · no upstream · 0 seed changes');
+    expect(n).not.toMatch(/null/);
+  });
+  it('unavailable text by reason', () => {
+    expect(gitUnavailableText({ available: false, reason: 'helper_unavailable' })).toBe(GIT_UNAVAILABLE_TEXT);
+    expect(gitUnavailableText({ available: false })).toBe(GIT_UNAVAILABLE_TEXT);
+    const e = gitUnavailableText({ available: false, reason: 'helper_error' });
+    expect(e).toBe('Git helper is running but git failed — check backend/run/git-helper.log');
+    expect(e).not.toMatch(/make git-helper/);
+  });
+  it('dialog clears when status is missing, unavailable or helper_error, and stays otherwise', () => {
+    expect(gitDialogAfterStatus('pull', st())).toBe('pull');
+    expect(gitDialogAfterStatus('pull', { available: false, reason: 'helper_unavailable' })).toBeNull();
+    expect(gitDialogAfterStatus('commit', { available: false, reason: 'helper_error' })).toBeNull();
+    expect(gitDialogAfterStatus('push', undefined)).toBeNull();
+    expect(gitDialogAfterStatus(null, st())).toBeNull();
   });
 });
