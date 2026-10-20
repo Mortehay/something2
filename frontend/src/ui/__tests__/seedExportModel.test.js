@@ -3,7 +3,7 @@ import {
   statusBadge, initialDecisions, bulkSet, applyGate, allowedDecisions, kindLabel, exportBlocked, previewSignature,
   exportBlockReason, seedBlockReason, decisionLabel, seedRequestBody,
   seedButtonLabel, exportAllPlan, seedAllGroups, historyPageCount, exportAllMessage, seedAllGate, pluralize,
-  gitHints, gitActionStates, gitStripText, GIT_UNAVAILABLE_TEXT,
+  gitHints, unpushedNote, gitActionStates, gitStripText, GIT_UNAVAILABLE_TEXT,
   tableLabel, warningText, warningIsError, refusalText, groupRowsByTable, isRename, renameNote,
 } from '../../games/something2/seedExportModel.js';
 
@@ -573,11 +573,14 @@ describe('gitHints (SOMET-642)', () => {
     expect(h.quests).toEqual(['exported, not committed yet']);
     expect(h.items).toBeUndefined();
   });
-  it('clean, exported groups read committed-not-pushed when ahead', () => {
-    const h = gitHints(st({ ahead: 2, seedsDirty: ['backend/seeds/sync/items.json'] }), [g('quests', 'in_sync'), g('items', 'in_sync'), g('maps', 'never_exported', null)]);
-    expect(h.quests).toEqual(['committed, not pushed (2 ahead)']);
+  it('ahead never makes a per-group claim; the branch note says so once', () => {
+    const state = st({ ahead: 2, seedsDirty: ['backend/seeds/sync/items.json'] });
+    const h = gitHints(state, [g('quests', 'in_sync'), g('items', 'in_sync')]);
+    expect(h.quests).toBeUndefined();
     expect(h.items).toEqual(['exported, not committed yet']);
-    expect(h.maps).toBeUndefined();
+    expect(unpushedNote(state)).toBe('This branch has 2 unpushed commits (not necessarily seed data)');
+    expect(unpushedNote(st())).toBeNull();
+    expect(unpushedNote({ available: false })).toBeNull();
   });
   it('nothing when the helper is unavailable or status is missing', () => {
     expect(gitHints({ available: false }, [g('quests', 'git_newer')])).toEqual({});

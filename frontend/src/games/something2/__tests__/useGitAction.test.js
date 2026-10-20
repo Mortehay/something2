@@ -23,6 +23,12 @@ describe('git actions when the helper is down', () => {
     reply(409, { error: 'behind', message: 'Behind origin: pull first' });
     await expect(gitRequest('push')).rejects.toMatchObject({ message: 'Behind origin: pull first', code: 'behind' });
   });
+  it('a 502 git failure carries the op and git output', async () => {
+    reply(502, { ok: false, op: 'pull', output: 'fatal: Not possible to fast-forward, aborting.', status: {} });
+    await expect(gitRequest('pull')).rejects.toMatchObject({
+      message: 'git pull failed: fatal: Not possible to fast-forward, aborting.', code: 'git_failed', status: 502,
+    });
+  });
   it('commit sends the message as the body', async () => {
     reply(200, { ok: true });
     await gitRequest('commit', 'seed export: a');
@@ -31,7 +37,7 @@ describe('git actions when the helper is down', () => {
   it('onError toasts and refetches the git status', () => {
     const qc = { invalidateQueries: vi.fn() };
     gitActionHandlers(qc).onError(new Error('Git buttons need the git helper: run `make git-helper`'));
-    expect(toast.error).toHaveBeenCalledWith('Git buttons need the git helper: run `make git-helper`');
+    expect(toast.error).toHaveBeenCalledWith('Git buttons need the git helper: run `make git-helper`', expect.objectContaining({ style: { whiteSpace: 'pre-line' } }));
     expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: GIT_KEY });
   });
 });

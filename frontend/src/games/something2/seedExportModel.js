@@ -476,8 +476,11 @@ export function gitHints(s, groups) {
       hints.push(`git is newer, but you're ${pluralize(s.behind, 'commit')} behind — pull first`);
     }
     if (dirty.has(syncPath(g.id))) hints.push('exported, not committed yet');
-    else if (s.ahead > 0 && g.inGit) hints.push(`committed, not pushed (${s.ahead} ahead)`);
     if (hints.length) out[g.id] = hints;
   }
   return out;
 }
+
+// Branch-level, never attributed to a group: the commits may be code-only.
+export const unpushedNote = (s) => (s && s.available !== false && s.ahead > 0
+  ? `This branch has ${pluralize(s.ahead, 'unpushed commit')} (not necessarily seed data)` : null);

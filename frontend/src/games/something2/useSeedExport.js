@@ -34,6 +34,13 @@ async function call(path, { method = "GET", body, label } = {}) {
     }
     // SOMET-642. The host git helper is down (503) or refused the action
     // (409 { error: <code>, message }): say so in words, not the bare code.
+    // git itself failed (502 { ok:false, op, output }): show git's own words.
+    if (path.startsWith("/git/") && json.ok === false) {
+      const err = new Error(`git ${json.op} failed: ${json.output || "no output"}`);
+      err.code = "git_failed";
+      err.status = res.status;
+      throw err;
+    }
     if (path.startsWith("/git/") && (json.error === "helper_unavailable" || json.message)) {
       const err = new Error(json.error === "helper_unavailable" ? GIT_UNAVAILABLE_TEXT : json.message);
       err.code = json.error;
@@ -256,7 +263,7 @@ export function gitActionHandlers(qc) {
   };
   return {
     onSuccess: (r, { op }) => { refresh(); toast.success(`git ${op} done`); },
-    onError: (err) => { refresh(); toast.error(err.message); },
+    onError: (err) => { refresh(); toast.error(err.message, { style: { whiteSpace: "pre-line" }, duration: 10000 }); },
   };
 }
 

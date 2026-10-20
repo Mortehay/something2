@@ -12,7 +12,7 @@ import {
 } from './useSeedExport.js';
 import {
   statusBadge, exportBlockReason, seedBlockReason, seedButtonLabel, exportAllPlan, seedAllGroups, exportAllMessage,
-  binaryGroups, separateNote, BUSY_TEXT, jobRunning, jobProgressText, jobErrorRowsText, groupNoteLines, gitHints,
+  binaryGroups, separateNote, BUSY_TEXT, jobRunning, jobProgressText, jobErrorRowsText, groupNoteLines, gitHints, unpushedNote,
 } from './seedExportModel.js';
 import { Btn, Badge, Muted, Modal, fmtTime, StatusHead, PcLabelHint } from './seedUi.jsx';
 import AdminLoading from './AdminLoading.jsx';
@@ -203,7 +203,7 @@ export default function SeedExportAdmin() {
       </>)}
 
       {popup && (
-        <SeedStatusPopup group={popup} hints={gitHints(git.data, list)[popup.id]} exporting={exportGroup.isPending} busy={busy}
+        <SeedStatusPopup group={popup} hints={[...(gitHints(git.data, list)[popup.id] || []), ...(unpushedNote(git.data) ? [unpushedNote(git.data)] : [])]} exporting={exportGroup.isPending} busy={busy}
           onClose={() => setPopupId(null)}
           onExport={() => { doExport(popup); setPopupId(null); }}
           onSeed={() => { setPreviewId(popup.id); setPopupId(null); }} />
