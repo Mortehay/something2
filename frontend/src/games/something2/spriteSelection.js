@@ -94,3 +94,9 @@ export function defaultActions(catalog) {
   const ids = new Set((catalog?.actions || []).map((action) => action.id));
   return DEFAULT_ACTIONS.filter((id) => ids.has(id));
 }
+
+// sheet.json -> one label per sheet row. Legacy local atlases have no `rows`.
+export function rowLabels(manifest) {
+  if (!manifest || !Array.isArray(manifest.rows)) return [];
+  return manifest.rows.map((r) => `row ${r.row} · ${r.action} · ${r.direction} · ${r.frames} frames`);
+}

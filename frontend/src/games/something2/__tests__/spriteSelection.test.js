@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   filterSpriteSubjects, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
-  targetsForSprites, framesCap, cellCount, estimateLabel, defaultActions,
+  targetsForSprites, framesCap, cellCount, estimateLabel, defaultActions, rowLabels,
 } from '../spriteSelection.js';
 import { PAGE_SIZE } from '../artSelection.js';
 
@@ -109,5 +109,18 @@ describe('sprite console action controls', () => {
     expect(defaultActions(catalog)).toEqual(['idle', 'sway']);
     expect(defaultActions({ actions: [{ id: 'sway' }, { id: 'walk' }] })).toEqual(['sway']);
     expect(defaultActions(null)).toEqual([]);
+  });
+
+  it('rowLabels formats each row', () => {
+    const manifest = { rows: [
+      { row: 0, action: 'idle', direction: 's', frames: 4 },
+      { row: 1, action: 'walk', direction: 'se', frames: 6 },
+    ] };
+    expect(rowLabels(manifest)).toEqual(['row 0 · idle · s · 4 frames', 'row 1 · walk · se · 6 frames']);
+  });
+
+  it('rowLabels is empty for a legacy atlas without rows', () => {
+    expect(rowLabels({ frames: {} })).toEqual([]);
+    expect(rowLabels(null)).toEqual([]);
   });
 });

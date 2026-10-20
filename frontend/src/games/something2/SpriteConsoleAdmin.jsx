@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import styled from 'styled-components';
+import SpritePreviewModal from './SpritePreviewModal.jsx';
 import AdminLoading from './AdminLoading.jsx';
 import { assetUrlVersioned } from './useTileSprites.js';
 import {
@@ -60,6 +61,7 @@ const Banner = styled.div`
 `;
 const Check = styled.label`display: inline-flex; gap: 0.3rem; align-items: center; font-size: 0.85rem;`;
 const ErrorText = styled.span`color: var(--s2-danger);`;
+const ThumbButton = styled.button`border: 0; padding: 0; background: none; cursor: zoom-in;`;
 const Pager = styled.div`display: flex; gap: 0.5rem; align-items: center; margin: 0.75rem 0;`;
 
 function derivedFrames(subject) {
@@ -75,6 +77,7 @@ function SpriteConsoleAdmin() {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState(new Set());
+  const [previewId, setPreviewId] = useState(null);
   const { catalog, isLoading: catalogLoading, error: catalogError } = useActionCatalog();
   const [chosenActions, setChosenActions] = useState(null);
   const [chosenFrames, setChosenFrames] = useState(4);
@@ -84,6 +87,8 @@ function SpriteConsoleAdmin() {
   const rescue = useRescueSpriteJobs();
   const clear = useClearSpriteJobs();
   const approve = useApproveSpriteJobs();
+
+  const previewSubject = subjects.find((subject) => subject.id === previewId);
 
   const matching = useMemo(
     () => filterSpriteSubjects(subjects, { shape, status, search }),
@@ -223,19 +228,27 @@ function SpriteConsoleAdmin() {
             <th><input type="checkbox" aria-label="Select this page"
               checked={isSpritePageSelected(selected, shown.rows)}
               onChange={(event) => setSelected(setSpritePageSelected(selected, shown.rows, event.target.checked))} /></th>
-            <th>Preview</th><th>Entity</th><th>Shape</th><th>Frames</th><th>Backend</th><th>Status</th><th>Prompt</th>
+            <th>Concept</th><th>Sheet</th><th>Entity</th><th>Shape</th><th>Actions</th><th>Frames</th><th>Backend</th><th>Status</th><th>Prompt</th>
           </tr></thead>
           <tbody>
             {shown.rows.map((subject) => {
-              const preview = subject.image_key || subject.atlas_key || subject.image;
+              const sheet = subject.atlas_key || subject.image_key || subject.image;
+              const thumb = (key, label) => (key ? (
+                <ThumbButton type="button" aria-label={`${label}: ${subject.name}`} onClick={() => setPreviewId(subject.id)}>
+                  <Thumb src={assetUrlVersioned(key, subject.job_updated_at)} alt="" />
+                </ThumbButton>
+              ) : '—');
               return (
                 <tr key={subject.id}>
                   <td><input type="checkbox" checked={selected.has(subject.id)}
                     onChange={() => setSelected(toggleSpriteSubject(selected, subject.id))} /></td>
-                  <td>{preview ? <Thumb src={assetUrlVersioned(preview, subject.job_updated_at)} alt="" /> : '—'}</td>
+                  <td>{thumb(subject.concept_key, 'Preview concept')}</td>
+                  <td>{thumb(sheet, 'Preview sheet')}</td>
                   <td>{subject.name}</td>
                   <td><Pill>{spriteShape(subject)}</Pill></td>
-                  <td>{derivedFrames(subject)}</td>
+                  <td>{Array.isArray(subject.actions) && subject.actions.length ? subject.actions.join(' · ') : '—'}</td>
+                  <td>{subject.backend === 'gpu-box' && subject.frames_per_action
+                    ? `${subject.frames_per_action} / action` : derivedFrames(subject)}</td>
                   <td>{subject.backend || 'local'}</td>
                   <td>{subject.job_state === 'failed'
                     ? <ErrorText title={subject.last_error || ''}>failed</ErrorText>
@@ -248,6 +261,7 @@ function SpriteConsoleAdmin() {
         </Table>
       </TableWrap>
       {pager}
+      {previewSubject && <SpritePreviewModal subject={previewSubject} onClose={() => setPreviewId(null)} />}
     </Wrap>
   );
 }

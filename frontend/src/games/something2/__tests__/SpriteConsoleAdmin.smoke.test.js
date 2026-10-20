@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import SpriteConsoleAdmin from '../SpriteConsoleAdmin.jsx';
+import SpritePreviewModal from '../SpritePreviewModal.jsx';
 
 // Vitest runs in a plain Node environment here (no jsdom/RTL), so this cannot
 // render. It exists because the appearance-variant rows change edits the JSX
@@ -9,5 +10,9 @@ import SpriteConsoleAdmin from '../SpriteConsoleAdmin.jsx';
 describe('SpriteConsoleAdmin', () => {
   it('is a component export', () => {
     expect(typeof SpriteConsoleAdmin).toBe('function');
+  });
+
+  it('preview modal is a component export', () => {
+    expect(typeof SpritePreviewModal).toBe('function');
   });
 });
