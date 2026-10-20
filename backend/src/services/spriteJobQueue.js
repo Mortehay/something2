@@ -129,7 +129,7 @@ async function attachBox(db, id, { boxJobId, conceptKey, providerId }) {
 async function complete(db, id, result) {
   const { rows } = await db.query(
     `UPDATE sprite_sets SET status = 'done', image_key = $2, atlas_key = $3,
-            manifest_key = $4, concept_key = COALESCE($5, concept_key), sheet_seconds = $6,
+            manifest_key = $4, concept_key = COALESCE($5, concept_key), sheet_seconds = COALESCE($6, sheet_seconds), finished_at = now(),
             last_error = NULL, claimed_at = NULL, updated_at = now()
       WHERE id = $1 RETURNING *`,
     [id, result.image_key || null, result.atlas_key || null, result.manifest_key || null,
@@ -163,16 +163,17 @@ async function requeueStale(db, staleMs = 60000) {
   return rows;
 }
 
-// Measured wall seconds per sheet cell (action x facing x frame) of the newest
-// finished sheet that recorded its time; null when none has. The route applies
+// Measured wall seconds per sheet cell (action x facing x frame) of the most
+// recently COMPLETED sheet that recorded a positive time (finished_at, which
+// approve does not bump); null when none has. The route applies
 // the seed default, so "no data yet" stays distinguishable here.
 async function lastSecondsPerCell(db) {
   const { rows } = await db.query(
     `SELECT sheet_seconds::float8 / (cardinality(actions) * cardinality(directions) * frames_per_action) AS spc
        FROM sprite_sets
-      WHERE status IN ('done','approved') AND sheet_seconds IS NOT NULL
+      WHERE status IN ('done','approved') AND sheet_seconds > 0
         AND cardinality(actions) > 0 AND cardinality(directions) > 0 AND frames_per_action > 0
-      ORDER BY updated_at DESC, id DESC LIMIT 1`,
+      ORDER BY finished_at DESC NULLS LAST, id DESC LIMIT 1`,
   );
   return rows[0] ? rows[0].spc : null;
 }

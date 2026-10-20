@@ -186,7 +186,7 @@ test('lastSecondsPerCell divides by cells', { skip }, async () => {
     // Newer than anything real, so it is the "newest done row with timing".
     await client.query(
       `INSERT INTO sprite_sets (creature, backend, seed, frames, status, actions, directions,
-                                frames_per_action, sheet_seconds, updated_at)
+                                frames_per_action, sheet_seconds, finished_at)
        VALUES ('spc-test', 'gpu-box', 1, 4, 'done', ARRAY['idle','walk'], ARRAY['s','e'], 4, 320,
                now() + interval '1 day')`,
     );
@@ -199,5 +199,45 @@ test('lastSecondsPerCell is null when no done row has timing', { skip }, async (
   await withRolledBackClient(async (client) => {
     await client.query(`UPDATE sprite_sets SET sheet_seconds = NULL`);
     assert.equal(await queue.lastSecondsPerCell(client), null);
+  });
+});
+
+const spcRow = (client, name, secs, finishedAt, updatedAt = 'now()') => client.query(
+  `INSERT INTO sprite_sets (creature, backend, seed, frames, status, actions, directions,
+                            frames_per_action, sheet_seconds, finished_at, updated_at)
+   VALUES ($1, 'gpu-box', 1, 4, 'done', ARRAY['idle'], ARRAY['s'], 4, $2, ${finishedAt}, ${updatedAt})`,
+  [name, secs],
+);
+
+test('complete sets finished_at and keeps a stored sheet_seconds when given none', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [e] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    const { rows: [row] } = await queue.enqueue(client, [{ entityId: e.id }],
+      { actions: ['idle'], framesPerAction: 4 });
+    const first = await queue.complete(client, row.id, { image_key: 'k.png', sheet_seconds: 90 });
+    assert.ok(first.finished_at, 'finished_at set on complete');
+    const again = await queue.complete(client, row.id, { image_key: 'k.png', sheet_seconds: null });
+    assert.equal(again.sheet_seconds, 90, 'a resumed/NULL completion must not erase the measured time');
+  });
+});
+
+test('lastSecondsPerCell orders by completion time, not by later updated_at bumps', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    // older completion, but touched later (approve bumps updated_at)
+    await spcRow(client, 'spc-old', 40, "now() + interval '1 day'", "now() + interval '3 days'");
+    // newer completion; 4 cells, 8 s -> 2 s/cell
+    await spcRow(client, 'spc-new', 8, "now() + interval '2 days'", "now() + interval '2 days'");
+    assert.equal(await queue.lastSecondsPerCell(client), 2);
+  });
+});
+
+test('lastSecondsPerCell ignores NULL and zero sheet_seconds', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    await spcRow(client, 'spc-good', 12, "now() + interval '1 day'");
+    await spcRow(client, 'spc-zero', 0, "now() + interval '2 days'");
+    await spcRow(client, 'spc-null', null, "now() + interval '3 days'");
+    assert.equal(await queue.lastSecondsPerCell(client), 3);
   });
 });
