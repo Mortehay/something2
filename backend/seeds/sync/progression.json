@@ -1,0 +1,57 @@
+{
+  "header": {
+    "exported_at": "2026-10-20T11:34:25.584Z",
+    "exported_by": "linux-dev",
+    "group": "progression",
+    "row_counts": {
+      "game_settings": 4
+    },
+    "schema_version": "1714440811000_map_spec_state_base"
+  },
+  "tables": {
+    "game_settings": [
+      {
+        "key": "ground_item_ttl_seconds",
+        "sync_uuid": "bd22150e-699f-5c55-f510-b1386a1b6b61",
+        "value": 180
+      },
+      {
+        "key": "passive_points_per_level",
+        "sync_uuid": "f3a6d29e-47cf-1f89-1f9a-425b73a30303",
+        "value": 1
+      },
+      {
+        "key": "rarity_weights",
+        "sync_uuid": "19a282fd-5f3f-e7f7-501a-f4f81bd81cee",
+        "value": [
+          {
+            "blue": 9,
+            "foxy": 0,
+            "item_level": 1,
+            "white": 90,
+            "yellow": 1
+          },
+          {
+            "blue": 21,
+            "foxy": 1,
+            "item_level": 50,
+            "white": 70,
+            "yellow": 8
+          },
+          {
+            "blue": 30,
+            "foxy": 5,
+            "item_level": 150,
+            "white": 45,
+            "yellow": 20
+          }
+        ]
+      },
+      {
+        "key": "respec_base_gold",
+        "sync_uuid": "23ff60fe-2eea-a0e8-e32d-d6f98a46080e",
+        "value": 50
+      }
+    ]
+  }
+}

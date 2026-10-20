@@ -1,0 +1,20 @@
+{
+  "header": {
+    "group": "maps",
+    "exported_at": "2026-10-20T11:40:17.575Z",
+    "exported_by": "linux-dev",
+    "schema_version": "1714440811000_map_spec_state_base",
+    "spec_count": 2
+  },
+  "specs": [
+    {
+      "name": "p5-descent",
+      "sha256": "94a4feb018fe544c83fc6f7fc99d80332ca4f385f6fa7b9facb666fb35e61a1c"
+    },
+    {
+      "name": "vale-region",
+      "sha256": "9128b4554c81e58d79dd4de97054760a1f2d8920def629e9baee41663861172a"
+    }
+  ],
+  "entry_world": "Vale Crossing"
+}

@@ -1,0 +1,106 @@
+{
+  "header": {
+    "exported_at": "2026-10-20T11:34:18.301Z",
+    "exported_by": "linux-dev",
+    "group": "ai_providers",
+    "row_counts": {
+      "ai_providers": 4
+    },
+    "schema_version": "1714440811000_map_spec_state_base"
+  },
+  "tables": {
+    "ai_providers": [
+      {
+        "auth_header_name": null,
+        "base_url": "http://192.168.0.218:8001/sdapi/v1/txt2img",
+        "enabled": true,
+        "modality": "image",
+        "model": "gguf:Qwen-Image-2512-Q3_K_M",
+        "models_path": "/sdapi/v1/sd-models",
+        "models_pointer": "$[*].model_name",
+        "name": "desktop gpu",
+        "request_template": {
+          "cfg_scale": 7,
+          "height": 512,
+          "negative_prompt": "sky, clouds, horizon, landscape, perspective, vignette, text, watermark, border",
+          "override_settings": {
+            "sd_model_checkpoint": "{{model}}"
+          },
+          "prompt": "{{prompt}}",
+          "seed": "{{seed}}",
+          "steps": 20,
+          "width": 512
+        },
+        "response_image_pointer": "images[0]",
+        "sheet_columns": null,
+        "sheet_directions": null,
+        "sheet_layout": null,
+        "sheet_rows": null,
+        "sync_uuid": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c"
+      },
+      {
+        "auth_header_name": null,
+        "base_url": "http://192.168.0.218:8001/sdapi/v1/txt2img",
+        "enabled": true,
+        "modality": "image",
+        "model": "stabilityai/stable-diffusion-xl-base-1.0+Muapi/soft-pixel-art-xl",
+        "models_path": "/sdapi/v1/sd-models",
+        "models_pointer": "$[*].model_name",
+        "name": "desktop gpu (objects)",
+        "request_template": {
+          "cfg_scale": 7,
+          "cutout": true,
+          "height": 1024,
+          "negative_prompt": "picture frame, framed art, poster, trading card, border, matte, vignette, sprite sheet, tileset, grid, panels, collage, multiple objects, duplicate, row of objects, scene, forest, landscape, background scenery, ground, floor, grass, shadow, reflection, text, watermark, signature, photo, realistic, 3d render, blurry",
+          "override_settings": {
+            "sd_model_checkpoint": "{{model}}"
+          },
+          "prompt": "{{prompt}}",
+          "seed": "{{seed}}",
+          "steps": 24,
+          "width": 1024
+        },
+        "response_image_pointer": "images[0]",
+        "sheet_columns": null,
+        "sheet_directions": null,
+        "sheet_layout": null,
+        "sheet_rows": null,
+        "sync_uuid": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2"
+      },
+      {
+        "auth_header_name": null,
+        "base_url": "http://192.168.0.218:8001",
+        "enabled": true,
+        "modality": "audio",
+        "model": null,
+        "models_path": null,
+        "models_pointer": null,
+        "name": "gpu-box-audio",
+        "request_template": {},
+        "response_image_pointer": null,
+        "sheet_columns": null,
+        "sheet_directions": null,
+        "sheet_layout": null,
+        "sheet_rows": null,
+        "sync_uuid": "b4eecb7a-9840-a607-3ae5-1949ebfc9bd7"
+      },
+      {
+        "auth_header_name": null,
+        "base_url": "http://192.168.0.218:8001",
+        "enabled": true,
+        "modality": "text",
+        "model": "qwen3.6-35b-a3b",
+        "models_path": null,
+        "models_pointer": null,
+        "name": "gpu-box-text",
+        "request_template": {},
+        "response_image_pointer": null,
+        "sheet_columns": null,
+        "sheet_directions": null,
+        "sheet_layout": null,
+        "sheet_rows": null,
+        "sync_uuid": "e4a709d4-6b32-f3df-6ecb-3cd7ff5c26af"
+      }
+    ]
+  }
+}

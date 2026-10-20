@@ -1,0 +1,939 @@
+{
+  "header": {
+    "exported_at": "2026-10-20T11:34:21.482Z",
+    "exported_by": "linux-dev",
+    "group": "biomes",
+    "row_counts": {
+      "biomes": 32
+    },
+    "schema_version": "1714440811000_map_spec_state_base"
+  },
+  "tables": {
+    "biomes": [
+      {
+        "art_style": "abyssal rift fantasy, vertiginous emptiness",
+        "color": "#1c1a24",
+        "creature_density": 2.4,
+        "creature_types": [
+          "Void Swarm",
+          "Void Skirmisher",
+          "Void Line",
+          "Void Miniboss",
+          "Void Elite Miniboss"
+        ],
+        "exclusions": "no daylight, no plants, no warmth",
+        "flora_types": [],
+        "name": "Abyssal Rift",
+        "palette": [
+          "void black",
+          "rift violet",
+          "cold starlight"
+        ],
+        "path_tile": "road_stone",
+        "sync_uuid": "baf9dfa7-75da-64f0-cccf-03b9f1b86499",
+        "terrain_tiles": [
+          "void_floor",
+          "umbral_floor",
+          "chasm"
+        ]
+      },
+      {
+        "art_style": "sun-bleached hand-drawn fantasy, harsh light",
+        "color": "#c9a227",
+        "creature_density": 0.8,
+        "creature_types": [
+          "Skeleton",
+          "Bat",
+          "Desert Swarm",
+          "Desert Skirmisher",
+          "Desert Line",
+          "Desert Miniboss"
+        ],
+        "exclusions": "no grass, no snow, no ice, no leaves",
+        "flora_types": [
+          "dead_tree",
+          "Stone"
+        ],
+        "name": "Arid Dunes",
+        "palette": [
+          "ochre",
+          "gold",
+          "burnt sienna"
+        ],
+        "path_tile": "road_sand",
+        "sync_uuid": "02e2156b-6986-48fb-3ddc-c9dd07b4acf8",
+        "terrain_tiles": [
+          "sand",
+          "rocks",
+          "dirt"
+        ]
+      },
+      {
+        "art_style": "volcanic ashfall fantasy, dim red-lit haze",
+        "color": "#4a4038",
+        "creature_density": 1.7,
+        "creature_types": [
+          "Volcanic Swarm",
+          "Volcanic Skirmisher",
+          "Volcanic Line",
+          "Volcanic Miniboss"
+        ],
+        "exclusions": "no grass, no water, no snow",
+        "flora_types": [
+          "dead_tree",
+          "Stone"
+        ],
+        "name": "Ashfields",
+        "palette": [
+          "ash grey",
+          "ember orange",
+          "charcoal"
+        ],
+        "path_tile": "road_ash",
+        "sync_uuid": "9d0c3149-0ae1-a137-25ba-624e4d24e710",
+        "terrain_tiles": [
+          "ash_waste",
+          "ember_rock",
+          "rocks"
+        ]
+      },
+      {
+        "art_style": "blighted underworks fantasy, diseased haze",
+        "color": "#5e6b3a",
+        "creature_density": 2,
+        "creature_types": [
+          "Blight Swarm",
+          "Blight Skirmisher",
+          "Blight Line",
+          "Blight Miniboss"
+        ],
+        "exclusions": "no clean water, no snow, no daylight",
+        "flora_types": [
+          "dead_tree",
+          "Stone"
+        ],
+        "name": "Blightworks",
+        "palette": [
+          "sickly ochre",
+          "rot brown",
+          "pale green"
+        ],
+        "path_tile": "road_ash",
+        "sync_uuid": "5df449f3-9cda-8321-9bc5-a3c20da0e847",
+        "terrain_tiles": [
+          "blight_floor",
+          "fungal_floor",
+          "dirt"
+        ]
+      },
+      {
+        "art_style": "claustrophobic catacomb fantasy, torchlit gloom",
+        "color": "#55504a",
+        "creature_density": 2.3,
+        "creature_types": [
+          "Undead Swarm",
+          "Undead Skirmisher",
+          "Undead Line",
+          "Undead Miniboss"
+        ],
+        "exclusions": "no sky, no grass, no daylight",
+        "flora_types": [
+          "Stone"
+        ],
+        "name": "Catacombs",
+        "palette": [
+          "cold stone grey",
+          "candle amber",
+          "deep shadow"
+        ],
+        "path_tile": "road_stone",
+        "sync_uuid": "c9efd7a8-d8c1-5ed6-b249-274c197fcda0",
+        "terrain_tiles": [
+          "cobblestone",
+          "crypt_floor",
+          "rocks"
+        ]
+      },
+      {
+        "art_style": "natural cave fantasy, damp echoing dark",
+        "color": "#5a5148",
+        "creature_density": 1.9,
+        "creature_types": [
+          "Cave Swarm",
+          "Cave Skirmisher",
+          "Cave Line",
+          "Cave Miniboss"
+        ],
+        "exclusions": "no sky, no grass, no built stone",
+        "flora_types": [
+          "Stone"
+        ],
+        "name": "Cavern",
+        "palette": [
+          "damp brown",
+          "wet grey",
+          "faint blue glow"
+        ],
+        "path_tile": "road_dirt",
+        "sync_uuid": "2bd1c19a-2ed3-7118-9e67-fa7cab884d42",
+        "terrain_tiles": [
+          "cave_floor",
+          "rocks",
+          "dirt"
+        ]
+      },
+      {
+        "art_style": "crystal cavern fantasy, refracted glow",
+        "color": "#6fa8c9",
+        "creature_density": 1.6,
+        "creature_types": [
+          "Crystal Swarm",
+          "Crystal Skirmisher",
+          "Crystal Line",
+          "Crystal Miniboss"
+        ],
+        "exclusions": "no fire, no grass, no mud",
+        "flora_types": [
+          "IceRock",
+          "Stone"
+        ],
+        "name": "Crystal Hollows",
+        "palette": [
+          "crystal blue",
+          "prismatic white",
+          "deep indigo"
+        ],
+        "path_tile": "road_snow",
+        "sync_uuid": "75aa2ca0-9255-6479-2830-c6d642b05f02",
+        "terrain_tiles": [
+          "crystal_floor",
+          "ice",
+          "rocks"
+        ]
+      },
+      {
+        "art_style": "dense hand-drawn fantasy, dappled shade",
+        "color": "#2f6b3a",
+        "creature_density": 1,
+        "creature_types": [
+          "Wolf",
+          "Bat",
+          "Skeleton",
+          "Woodland Swarm",
+          "Woodland Skirmisher",
+          "Woodland Line",
+          "Woodland Miniboss"
+        ],
+        "exclusions": "no sand, no snow",
+        "flora_types": [
+          "Tree",
+          "pine_tree",
+          "dead_tree",
+          "bush",
+          "Stone"
+        ],
+        "name": "Deep Forest",
+        "palette": [
+          "deep green",
+          "moss",
+          "bark brown"
+        ],
+        "path_tile": "road_dirt",
+        "sync_uuid": "93e3779d-7d33-b223-3192-e439fa667e05",
+        "terrain_tiles": [
+          "leafs",
+          "highgrass",
+          "earth"
+        ]
+      },
+      {
+        "art_style": "buried iron vault fantasy, dead still air",
+        "color": "#4f5560",
+        "creature_density": 1.8,
+        "creature_types": [
+          "Construct Swarm",
+          "Construct Skirmisher",
+          "Construct Line",
+          "Construct Miniboss"
+        ],
+        "exclusions": "no grass, no sky, no plants",
+        "flora_types": [
+          "Stone"
+        ],
+        "name": "Deepvault",
+        "palette": [
+          "iron grey",
+          "rust",
+          "lantern amber"
+        ],
+        "path_tile": "road_stone",
+        "sync_uuid": "152cf2b3-df00-919b-2741-0ad09bcaa147",
+        "terrain_tiles": [
+          "vault_floor",
+          "cobblestone",
+          "rubble"
+        ]
+      },
+      {
+        "art_style": "oneiric dark fantasy, softly impossible space",
+        "color": "#4a3f6b",
+        "creature_density": 2.3,
+        "creature_types": [
+          "Nightmare Swarm",
+          "Nightmare Skirmisher",
+          "Nightmare Line",
+          "Nightmare Miniboss",
+          "Nightmare Elite Miniboss"
+        ],
+        "exclusions": "no daylight, no hard edges, no fire",
+        "flora_types": [],
+        "name": "Dreaming Dark",
+        "palette": [
+          "indigo haze",
+          "dream silver",
+          "deep violet"
+        ],
+        "path_tile": "road_stone",
+        "sync_uuid": "4bb2b616-382f-ab62-b61f-f6384cec12ab",
+        "terrain_tiles": [
+          "dream_floor",
+          "umbral_floor",
+          "chasm"
+        ]
+      },
+      {
+        "art_style": "volcanic underdepth fantasy, glowing molten light",
+        "color": "#7a3b22",
+        "creature_density": 2.2,
+        "creature_types": [
+          "Ember Swarm",
+          "Ember Skirmisher",
+          "Ember Line",
+          "Ember Miniboss"
+        ],
+        "exclusions": "no water, no ice, no grass",
+        "flora_types": [
+          "Stone"
+        ],
+        "name": "Emberdepths",
+        "palette": [
+          "ember orange",
+          "basalt black",
+          "smoke"
+        ],
+        "path_tile": "road_ash",
+        "sync_uuid": "b0a8896b-e6e5-d47d-eb64-cf09a0f18755",
+        "terrain_tiles": [
+          "ember_rock",
+          "ash_waste",
+          "rocks"
+        ]
+      },
+      {
+        "art_style": "defiled holy sanctum, guttering sacred light",
+        "color": "#b8a97a",
+        "creature_density": 2.2,
+        "creature_types": [
+          "Fallen Swarm",
+          "Fallen Skirmisher",
+          "Fallen Line",
+          "Fallen Miniboss",
+          "Fallen Elite Miniboss"
+        ],
+        "exclusions": "no plants, no daylight, no snow",
+        "flora_types": [],
+        "name": "Fallen Sanctum",
+        "palette": [
+          "tarnished gold",
+          "marble white",
+          "deep crimson"
+        ],
+        "path_tile": "road_stone",
+        "sync_uuid": "67193d20-e75e-18b8-f526-e9b44ea359db",
+        "terrain_tiles": [
+          "sanctum_floor",
+          "cobblestone",
+          "rubble"
+        ]
+      },
+      {
+        "art_style": "frozen vault fantasy, cold blue underlight",
+        "color": "#a8c6d6",
+        "creature_density": 1.8,
+        "creature_types": [
+          "Rime Swarm",
+          "Rime Skirmisher",
+          "Rime Line",
+          "Rime Miniboss"
+        ],
+        "exclusions": "no fire, no grass, no sand",
+        "flora_types": [
+          "IceRock"
+        ],
+        "name": "Frostvault",
+        "palette": [
+          "frost white",
+          "pale cyan",
+          "deep blue shadow"
+        ],
+        "path_tile": "road_snow",
+        "sync_uuid": "489b05ce-f043-fdbe-a780-708c31906525",
+        "terrain_tiles": [
+          "rime_floor",
+          "ice",
+          "snow"
+        ]
+      },
+      {
+        "art_style": "cold hand-drawn fantasy, flat overcast light",
+        "color": "#8fb8d6",
+        "creature_density": 1.1,
+        "creature_types": [
+          "Bat",
+          "Skeleton",
+          "Tundra Swarm",
+          "Tundra Skirmisher",
+          "Tundra Line",
+          "Tundra Miniboss"
+        ],
+        "exclusions": "no grass, no sand, no flowers",
+        "flora_types": [
+          "IceRock",
+          "pine_tree"
+        ],
+        "name": "Frozen Waste",
+        "palette": [
+          "pale blue",
+          "white",
+          "slate grey"
+        ],
+        "path_tile": "road_snow",
+        "sync_uuid": "3307de13-cc76-d223-c530-20b91ed2cbb4",
+        "terrain_tiles": [
+          "snow",
+          "ice",
+          "rocks"
+        ]
+      },
+      {
+        "art_style": "fungal cavern fantasy, bioluminescent murk",
+        "color": "#6b7f3a",
+        "creature_density": 2.1,
+        "creature_types": [
+          "Fungal Swarm",
+          "Fungal Skirmisher",
+          "Fungal Line",
+          "Fungal Miniboss"
+        ],
+        "exclusions": "no sky, no fire, no snow",
+        "flora_types": [
+          "bush",
+          "Stone"
+        ],
+        "name": "Fungal Deep",
+        "palette": [
+          "spore green",
+          "bruised purple",
+          "damp umber"
+        ],
+        "path_tile": "road_dirt",
+        "sync_uuid": "355585f3-0bc0-b096-c4b6-0af2d9ef908c",
+        "terrain_tiles": [
+          "fungal_floor",
+          "swamp",
+          "dirt"
+        ]
+      },
+      {
+        "art_style": "subterranean fen fantasy, low drifting mist",
+        "color": "#4a5a4a",
+        "creature_density": 1.9,
+        "creature_types": [
+          "Gloom Swarm",
+          "Gloom Skirmisher",
+          "Gloom Line",
+          "Gloom Miniboss"
+        ],
+        "exclusions": "no fire, no sand, no daylight",
+        "flora_types": [
+          "dead_tree",
+          "bush"
+        ],
+        "name": "Gloomfen",
+        "palette": [
+          "fen grey",
+          "drowned green",
+          "mist white"
+        ],
+        "path_tile": "road_dirt",
+        "sync_uuid": "b53bf7ec-e25f-ecd8-a9db-bfdd0026b0ed",
+        "terrain_tiles": [
+          "swamp",
+          "fungal_floor",
+          "cistern_shallows"
+        ]
+      },
+      {
+        "art_style": "colossal buried ruin, monumental scale",
+        "color": "#7a7266",
+        "creature_density": 2.1,
+        "creature_types": [
+          "Titan Swarm",
+          "Titan Skirmisher",
+          "Titan Line",
+          "Titan Miniboss",
+          "Titan Elite Miniboss"
+        ],
+        "exclusions": "no plants, no daylight, no water",
+        "flora_types": [
+          "Stone"
+        ],
+        "name": "Grave of Titans",
+        "palette": [
+          "weathered granite",
+          "bone grey",
+          "dust gold"
+        ],
+        "path_tile": "road_stone",
+        "sync_uuid": "2684c57a-a66f-0e6b-1c1f-bade6aae9b90",
+        "terrain_tiles": [
+          "titan_floor",
+          "ruin_stone",
+          "rubble"
+        ]
+      },
+      {
+        "art_style": "windswept highland fantasy, cold clear light",
+        "color": "#7d8471",
+        "creature_density": 0.9,
+        "creature_types": [
+          "Highland Swarm",
+          "Highland Skirmisher",
+          "Highland Line",
+          "Highland Miniboss"
+        ],
+        "exclusions": "no sand, no jungle, no lava",
+        "flora_types": [
+          "Stone",
+          "pine_tree"
+        ],
+        "name": "Highlands",
+        "palette": [
+          "slate grey",
+          "moss green",
+          "pale sky"
+        ],
+        "path_tile": "road_stone",
+        "sync_uuid": "be585b8d-fa7a-a6a0-dba1-1ce46afabb69",
+        "terrain_tiles": [
+          "highland_rock",
+          "rocks",
+          "grass"
+        ]
+      },
+      {
+        "art_style": "insect hive fantasy, close humming dark",
+        "color": "#8a6a2f",
+        "creature_density": 2.2,
+        "creature_types": [
+          "Hive Swarm",
+          "Hive Skirmisher",
+          "Hive Line",
+          "Hive Miniboss"
+        ],
+        "exclusions": "no sky, no snow, no built stone",
+        "flora_types": [
+          "Stone"
+        ],
+        "name": "Hive Warrens",
+        "palette": [
+          "amber wax",
+          "chitin brown",
+          "sickly gold"
+        ],
+        "path_tile": "road_dirt",
+        "sync_uuid": "dbe1fbeb-5a5d-1910-5e88-58ee2762b37e",
+        "terrain_tiles": [
+          "hive_floor",
+          "dirt",
+          "cave_floor"
+        ]
+      },
+      {
+        "art_style": "infernal gateway fantasy, roaring furnace light",
+        "color": "#8c3a1e",
+        "creature_density": 2.5,
+        "creature_types": [
+          "Demonic Swarm",
+          "Demonic Skirmisher",
+          "Demonic Line",
+          "Demonic Miniboss",
+          "Demonic Elite Miniboss"
+        ],
+        "exclusions": "no water, no ice, no plants",
+        "flora_types": [],
+        "name": "Infernal Gate",
+        "palette": [
+          "hellfire red",
+          "brimstone yellow",
+          "charred black"
+        ],
+        "path_tile": "road_ash",
+        "sync_uuid": "4b974f4a-0fb6-a8cb-eb15-0ce9be77cd53",
+        "terrain_tiles": [
+          "brimstone",
+          "ember_rock",
+          "chasm"
+        ]
+      },
+      {
+        "art_style": "lush hand-drawn fantasy, soft daylight",
+        "color": "#5aa84f",
+        "creature_density": 0.5,
+        "creature_types": [
+          "Slime",
+          "Wolf",
+          "Beast Swarm",
+          "Beast Skirmisher",
+          "Beast Line",
+          "Beast Miniboss"
+        ],
+        "exclusions": "no snow, no ice, no dead trees",
+        "flora_types": [
+          "bush",
+          "rose_bush",
+          "Tree",
+          "Stone"
+        ],
+        "name": "Meadow",
+        "palette": [
+          "spring green",
+          "wildflower yellow",
+          "warm brown"
+        ],
+        "path_tile": "road_dirt",
+        "sync_uuid": "7b193038-46c8-38f8-29ee-3fa6211e5af5",
+        "terrain_tiles": [
+          "grass",
+          "highgrass",
+          "earth"
+        ]
+      },
+      {
+        "art_style": "damp hand-drawn fantasy, low misty light",
+        "color": "#4d6b41",
+        "creature_density": 2,
+        "creature_types": [
+          "Slime",
+          "Bat",
+          "Swamp Swarm",
+          "Swamp Skirmisher",
+          "Swamp Line",
+          "Swamp Miniboss"
+        ],
+        "exclusions": "no snow, no ice, no sand",
+        "flora_types": [
+          "dead_tree",
+          "bush",
+          "Stone"
+        ],
+        "name": "Mire",
+        "palette": [
+          "murky olive",
+          "peat brown",
+          "sickly green"
+        ],
+        "path_tile": "road_dirt",
+        "sync_uuid": "e21088f4-8a40-fff1-fb5c-f2d7a4654ae7",
+        "terrain_tiles": [
+          "swamp",
+          "water",
+          "earth"
+        ]
+      },
+      {
+        "art_style": "bone-stacked ossuary fantasy, cold dim light",
+        "color": "#c9c2ad",
+        "creature_density": 2.4,
+        "creature_types": [
+          "Bonelord Swarm",
+          "Bonelord Skirmisher",
+          "Bonelord Line",
+          "Bonelord Miniboss"
+        ],
+        "exclusions": "no grass, no daylight, no water",
+        "flora_types": [
+          "Stone"
+        ],
+        "name": "Ossuary",
+        "palette": [
+          "bone ivory",
+          "dried blood",
+          "ash grey"
+        ],
+        "path_tile": "road_stone",
+        "sync_uuid": "cb7e22a2-fd55-0440-7af0-442ad3d92c37",
+        "terrain_tiles": [
+          "bone_floor",
+          "crypt_floor",
+          "cobblestone"
+        ]
+      },
+      {
+        "art_style": "plague-choked deep, thick miasmic air",
+        "color": "#6b6b33",
+        "creature_density": 2.4,
+        "creature_types": [
+          "Plague Swarm",
+          "Plague Skirmisher",
+          "Plague Line",
+          "Plague Miniboss",
+          "Plague Elite Miniboss"
+        ],
+        "exclusions": "no clean water, no daylight, no snow",
+        "flora_types": [],
+        "name": "Pestilent Deep",
+        "palette": [
+          "pestilent yellow",
+          "rot green",
+          "bile"
+        ],
+        "path_tile": "road_ash",
+        "sync_uuid": "3ea7297c-5422-b810-9ddb-7082d6c3d8a4",
+        "terrain_tiles": [
+          "plague_floor",
+          "blight_floor",
+          "chasm"
+        ]
+      },
+      {
+        "art_style": "shattered arcane vault, unstable geometry",
+        "color": "#6b2f6b",
+        "creature_density": 2.3,
+        "creature_types": [
+          "Chaos Swarm",
+          "Chaos Skirmisher",
+          "Chaos Line",
+          "Chaos Miniboss",
+          "Chaos Elite Miniboss"
+        ],
+        "exclusions": "no plants, no daylight, no calm",
+        "flora_types": [],
+        "name": "Shattered Vault",
+        "palette": [
+          "fractured violet",
+          "broken steel",
+          "arcane sheen"
+        ],
+        "path_tile": "road_stone",
+        "sync_uuid": "5d10ff1a-2968-5b06-cf6a-70fb3c9a9c02",
+        "terrain_tiles": [
+          "chaos_floor",
+          "vault_floor",
+          "rubble"
+        ]
+      },
+      {
+        "art_style": "wind-lashed coastal fantasy, overcast squall light",
+        "color": "#6b7280",
+        "creature_density": 0.6,
+        "creature_types": [
+          "Storm Swarm",
+          "Storm Skirmisher",
+          "Storm Line",
+          "Storm Miniboss"
+        ],
+        "exclusions": "no lava, no jungle, no snow",
+        "flora_types": [
+          "Stone",
+          "dead_tree"
+        ],
+        "name": "Storm Coast",
+        "palette": [
+          "storm grey",
+          "sea foam",
+          "wet slate"
+        ],
+        "path_tile": "road_sand",
+        "sync_uuid": "c2f4e124-88fb-53e8-7d73-096cc8ab7b24",
+        "terrain_tiles": [
+          "storm_shingle",
+          "sand",
+          "water"
+        ]
+      },
+      {
+        "art_style": "flooded cistern fantasy, rippling reflected light",
+        "color": "#3f5a63",
+        "creature_density": 1.8,
+        "creature_types": [
+          "Drowned Swarm",
+          "Drowned Skirmisher",
+          "Drowned Line",
+          "Drowned Miniboss"
+        ],
+        "exclusions": "no fire, no grass, no sand",
+        "flora_types": [
+          "Stone"
+        ],
+        "name": "Sunken Cistern",
+        "palette": [
+          "stagnant green",
+          "wet stone",
+          "dim teal"
+        ],
+        "path_tile": "road_stone",
+        "sync_uuid": "267d2926-1b55-caf3-6af2-3ea33210ec80",
+        "terrain_tiles": [
+          "cistern_shallows",
+          "cobblestone",
+          "water"
+        ]
+      },
+      {
+        "art_style": "abandoned deep foundry fantasy, cooling forge light",
+        "color": "#6a5a48",
+        "creature_density": 1.8,
+        "creature_types": [
+          "Stoneborn Swarm",
+          "Stoneborn Skirmisher",
+          "Stoneborn Line",
+          "Stoneborn Miniboss"
+        ],
+        "exclusions": "no grass, no daylight, no snow",
+        "flora_types": [
+          "Stone"
+        ],
+        "name": "Sunken Foundry",
+        "palette": [
+          "soot black",
+          "forge orange",
+          "tarnished bronze"
+        ],
+        "path_tile": "road_stone",
+        "sync_uuid": "15d035d6-d27e-9593-ebf7-e4a97a4c50c0",
+        "terrain_tiles": [
+          "foundry_floor",
+          "vault_floor",
+          "ember_rock"
+        ]
+      },
+      {
+        "art_style": "crumbling overgrown ruins, flat ancient light",
+        "color": "#8a8577",
+        "creature_density": 1.4,
+        "creature_types": [
+          "Ruin Swarm",
+          "Ruin Skirmisher",
+          "Ruin Line",
+          "Ruin Miniboss"
+        ],
+        "exclusions": "no lava, no snow, no jungle",
+        "flora_types": [
+          "Stone",
+          "dead_tree",
+          "bush"
+        ],
+        "name": "Sunken Ruins",
+        "palette": [
+          "weathered limestone",
+          "lichen green",
+          "pale dust"
+        ],
+        "path_tile": "road_stone",
+        "sync_uuid": "292ae033-0b0c-13a6-7341-957cb0b9c140",
+        "terrain_tiles": [
+          "ruin_stone",
+          "cobblestone",
+          "earth"
+        ]
+      },
+      {
+        "art_style": "living devouring maw, organic horror",
+        "color": "#3d1f22",
+        "creature_density": 2.5,
+        "creature_types": [
+          "Eldritch Swarm",
+          "Eldritch Skirmisher",
+          "Eldritch Line",
+          "Eldritch Miniboss",
+          "Eldritch Elite Miniboss"
+        ],
+        "exclusions": "no stone, no daylight, no plants",
+        "flora_types": [],
+        "name": "The Maw",
+        "palette": [
+          "visceral red",
+          "black bile",
+          "wet crimson"
+        ],
+        "path_tile": "road_ash",
+        "sync_uuid": "a5d55565-db3c-53c3-d4a6-061ac616e6a7",
+        "terrain_tiles": [
+          "maw_floor",
+          "void_floor",
+          "chasm"
+        ]
+      },
+      {
+        "art_style": "lightless umbral warren, near-total dark",
+        "color": "#2e2a35",
+        "creature_density": 2.2,
+        "creature_types": [
+          "Umbral Swarm",
+          "Umbral Skirmisher",
+          "Umbral Line",
+          "Umbral Miniboss",
+          "Umbral Elite Miniboss"
+        ],
+        "exclusions": "no daylight, no grass, no fire",
+        "flora_types": [
+          "Stone"
+        ],
+        "name": "Umbral Warren",
+        "palette": [
+          "void violet",
+          "pitch black",
+          "faint silver"
+        ],
+        "path_tile": "road_stone",
+        "sync_uuid": "5e382393-728d-9bf4-a5c8-b39910127792",
+        "terrain_tiles": [
+          "umbral_floor",
+          "cave_floor",
+          "cave_wall"
+        ]
+      },
+      {
+        "art_style": "lush overgrown jungle fantasy, humid filtered light",
+        "color": "#1f6b2e",
+        "creature_density": 1.6,
+        "creature_types": [
+          "Jungle Swarm",
+          "Jungle Skirmisher",
+          "Jungle Line",
+          "Jungle Miniboss"
+        ],
+        "exclusions": "no snow, no ice, no sand",
+        "flora_types": [
+          "Tree",
+          "bush",
+          "rose_bush"
+        ],
+        "name": "Verdant Jungle",
+        "palette": [
+          "emerald",
+          "deep jade",
+          "wet bark"
+        ],
+        "path_tile": "road_dirt",
+        "sync_uuid": "d000284e-71d1-e0c6-7742-ba57a6b2e742",
+        "terrain_tiles": [
+          "jungle_floor",
+          "highgrass",
+          "leafs"
+        ]
+      }
+    ]
+  }
+}

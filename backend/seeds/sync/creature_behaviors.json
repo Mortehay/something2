@@ -1,0 +1,1241 @@
+{
+  "header": {
+    "exported_at": "2026-10-20T11:34:19.909Z",
+    "exported_by": "linux-dev",
+    "group": "creature_behaviors",
+    "row_counts": {
+      "behavior_drops": 11,
+      "chest_loot": 41,
+      "creature_abilities": 28,
+      "creature_behavior_skills": 11,
+      "creature_behaviors": 24
+    },
+    "schema_version": "1714440811000_map_spec_state_base"
+  },
+  "tables": {
+    "behavior_drops": [
+      {
+        "behavior_id": "21b19aa7-69b8-a891-9abb-d1a988033775",
+        "chance": 0.25,
+        "item_type_id": "f7235c0a-b9d6-530c-4712-8f4ea047c208",
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "bc2f82f2-980e-51d1-9ed4-6cdfa7a8d720"
+      },
+      {
+        "behavior_id": "418de594-7134-c047-8bd8-f968028e594e",
+        "chance": 0.1,
+        "item_type_id": "90580381-b3e6-1443-918a-20acde1eb2e2",
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "098de8e4-f74f-ac82-50f8-6fe29f841302"
+      },
+      {
+        "behavior_id": "43511038-407c-d5ad-833e-7a37757dd090",
+        "chance": 0.15,
+        "item_type_id": "22345b0a-eeb6-15de-908e-e08147a88f5c",
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "8effc2fd-856e-2479-f98f-9c440834e07a"
+      },
+      {
+        "behavior_id": "56347fb8-9bb4-8536-13fd-9c491599aff4",
+        "chance": 0.2,
+        "item_type_id": "5d06cc4a-f2cb-b35b-4376-3d8bc46824c8",
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "6b638dbf-458f-f7af-874b-8815e81bcc78"
+      },
+      {
+        "behavior_id": "59fda2db-228a-f879-c04c-6a8f0bb0c3dd",
+        "chance": 0.25,
+        "item_type_id": "2476ecee-b177-b2f3-5b42-82e515ad38b3",
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "b80d7b41-ae31-202a-4166-cabe6a06bddf"
+      },
+      {
+        "behavior_id": "7451dc24-8535-5c50-c973-e9f5ffd51f17",
+        "chance": 0.2,
+        "item_type_id": "ad3fe56a-521f-0e56-d777-77954e764c98",
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "8421f4c9-8d05-e5f7-8397-b3330ee18f07"
+      },
+      {
+        "behavior_id": "74d0687b-dbee-9334-0ea3-47a9eee96741",
+        "chance": 0.15,
+        "item_type_id": "957432e9-3bbe-25c4-28a9-8098c0b201e6",
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "11171d3a-12dc-91a9-60b0-3722b92f03b6"
+      },
+      {
+        "behavior_id": "a517bfce-5e1e-cfe4-285f-883618ea2d0e",
+        "chance": 0.2,
+        "item_type_id": "fe3e773f-3a4a-fe73-9f15-5cd2ed4275f2",
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "54451712-e548-1c65-b632-a013875bdd33"
+      },
+      {
+        "behavior_id": "a8774e5b-3788-d760-b0da-970f3f5d9d9d",
+        "chance": 0.3,
+        "item_type_id": "166ef576-31ae-842e-c36b-c1000410ee87",
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "39e7e6f8-c4c5-42fd-690d-8d4941c908f4"
+      },
+      {
+        "behavior_id": "d756f5a0-c8cd-9fa8-21a4-c99536c0666a",
+        "chance": 0.15,
+        "item_type_id": "bcc9f027-a023-22a8-2018-4958f6e0a8e9",
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "cc30f9ad-5b16-e3e1-1674-4225857a0634"
+      },
+      {
+        "behavior_id": "e829bf68-cecc-af95-a4e6-bbb85d59c4a2",
+        "chance": 0.2,
+        "item_type_id": "9db3acff-3f0b-f63f-d755-cebd8f528a20",
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "1fa25623-990c-3c3e-aab1-aecc67e607e9"
+      }
+    ],
+    "chest_loot": [
+      {
+        "chance": 0.55,
+        "item_type_id": "166ef576-31ae-842e-c36b-c1000410ee87",
+        "level_max": 4,
+        "level_min": 1,
+        "max_qty": 8,
+        "min_qty": 3,
+        "sync_uuid": "f1089354-4d47-c99c-254b-7d16524b4d22"
+      },
+      {
+        "chance": 0.15,
+        "item_type_id": "17851287-aa87-97f0-b8f3-909b32117b1a",
+        "level_max": 4,
+        "level_min": 1,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "e64a3754-e78a-c692-192f-62e0b7af4432"
+      },
+      {
+        "chance": 0.2,
+        "item_type_id": "2476ecee-b177-b2f3-5b42-82e515ad38b3",
+        "level_max": 4,
+        "level_min": 1,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "030757ee-0563-c731-70cf-33c5fa1d2937"
+      },
+      {
+        "chance": 0.3,
+        "item_type_id": "ad3fe56a-521f-0e56-d777-77954e764c98",
+        "level_max": 4,
+        "level_min": 1,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "3da27019-2963-ddb3-18c9-bea4f01d4859"
+      },
+      {
+        "chance": 0.45,
+        "item_type_id": "f7235c0a-b9d6-530c-4712-8f4ea047c208",
+        "level_max": 4,
+        "level_min": 1,
+        "max_qty": 8,
+        "min_qty": 3,
+        "sync_uuid": "86bf75a7-c058-5302-eb5e-57f2642c3952"
+      },
+      {
+        "chance": 0.18,
+        "item_type_id": "22345b0a-eeb6-15de-908e-e08147a88f5c",
+        "level_max": 19,
+        "level_min": 10,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "181dbdaf-f31e-6e9e-0928-63eb59dd49ca"
+      },
+      {
+        "chance": 0.18,
+        "item_type_id": "26c85b97-09c0-d711-b6e4-ec7bd9ad0cad",
+        "level_max": 19,
+        "level_min": 10,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "8764fa08-9cf5-f118-c6c2-1c1cee254a15"
+      },
+      {
+        "chance": 0.08,
+        "item_type_id": "521652f3-d8c0-7328-03c8-6f26a408bccf",
+        "level_max": 19,
+        "level_min": 10,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "a5d90a37-ae68-62cd-1faa-b20f7547f09f"
+      },
+      {
+        "chance": 0.15,
+        "item_type_id": "5bf2d761-ae1c-6b41-646d-0d84369228d8",
+        "level_max": 19,
+        "level_min": 10,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "6f9debc3-6ad8-cc20-cb46-e7cbea95a64c"
+      },
+      {
+        "chance": 0.45,
+        "item_type_id": "6f1a3b5d-495b-5853-c2de-1dd444ed7810",
+        "level_max": 19,
+        "level_min": 10,
+        "max_qty": 12,
+        "min_qty": 5,
+        "sync_uuid": "424eda21-2dbd-73f8-751d-0b671e15ee0d"
+      },
+      {
+        "chance": 0.22,
+        "item_type_id": "957432e9-3bbe-25c4-28a9-8098c0b201e6",
+        "level_max": 19,
+        "level_min": 10,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "7cf88c1f-d929-4c4f-d8cf-4d2302d29100"
+      },
+      {
+        "chance": 0.22,
+        "item_type_id": "fe3e773f-3a4a-fe73-9f15-5cd2ed4275f2",
+        "level_max": 19,
+        "level_min": 10,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "9a2508e4-2ca2-c3e8-e066-62bc68b007a7"
+      },
+      {
+        "chance": 0.18,
+        "item_type_id": "233dc344-6e0d-d17d-8a03-d064f63e6b61",
+        "level_max": 39,
+        "level_min": 20,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "1471ca3e-de32-6f26-f3b4-04cc41accc8f"
+      },
+      {
+        "chance": 0.22,
+        "item_type_id": "26c85b97-09c0-d711-b6e4-ec7bd9ad0cad",
+        "level_max": 39,
+        "level_min": 20,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "bc4e74eb-5dbf-4b6c-f488-2f269d9baf27"
+      },
+      {
+        "chance": 0.15,
+        "item_type_id": "3967fe15-bcfe-433b-f9d2-1281fe573cb2",
+        "level_max": 39,
+        "level_min": 20,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "e10916f8-491c-0945-4423-970589a4696b"
+      },
+      {
+        "chance": 0.1,
+        "item_type_id": "521652f3-d8c0-7328-03c8-6f26a408bccf",
+        "level_max": 39,
+        "level_min": 20,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "4913747a-2c1c-d14b-688e-5e285ccc68d4"
+      },
+      {
+        "chance": 0.4,
+        "item_type_id": "6f1a3b5d-495b-5853-c2de-1dd444ed7810",
+        "level_max": 39,
+        "level_min": 20,
+        "max_qty": 14,
+        "min_qty": 6,
+        "sync_uuid": "4aaf918b-d327-2db3-0fd4-7418da97b39c"
+      },
+      {
+        "chance": 0.2,
+        "item_type_id": "bcc9f027-a023-22a8-2018-4958f6e0a8e9",
+        "level_max": 39,
+        "level_min": 20,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "896ec13d-4757-9f21-7c16-62a9e1fc11fc"
+      },
+      {
+        "chance": 0.15,
+        "item_type_id": "cd759db6-6cb2-c9c3-be43-82639affff63",
+        "level_max": 39,
+        "level_min": 20,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "3e78fe10-84a3-d021-fbcf-cfe10d4f256b"
+      },
+      {
+        "chance": 0.15,
+        "item_type_id": "f78aa5be-cb16-78c1-ee55-d666e7faa089",
+        "level_max": 39,
+        "level_min": 20,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "a04d1844-fef0-5a3a-9ddd-20d1512b5e83"
+      },
+      {
+        "chance": 0.15,
+        "item_type_id": "1d587434-00ff-bea1-4a34-d9d1351a4eba",
+        "level_max": 79,
+        "level_min": 40,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "9f9adaa8-77ed-67c6-846a-e85b12dd5fc5"
+      },
+      {
+        "chance": 0.25,
+        "item_type_id": "26c85b97-09c0-d711-b6e4-ec7bd9ad0cad",
+        "level_max": 79,
+        "level_min": 40,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "0c742fe8-48f2-b355-b285-24fb42ae940b"
+      },
+      {
+        "chance": 0.12,
+        "item_type_id": "521652f3-d8c0-7328-03c8-6f26a408bccf",
+        "level_max": 79,
+        "level_min": 40,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "f16560db-659c-34b9-cb48-f3e8e1062e4d"
+      },
+      {
+        "chance": 0.35,
+        "item_type_id": "6f1a3b5d-495b-5853-c2de-1dd444ed7810",
+        "level_max": 79,
+        "level_min": 40,
+        "max_qty": 16,
+        "min_qty": 8,
+        "sync_uuid": "c829b8d8-5ca1-22cf-1bf2-9aec2c1877e1"
+      },
+      {
+        "chance": 0.16,
+        "item_type_id": "7e1b7b5a-e33e-e999-0517-afccef8c1f29",
+        "level_max": 79,
+        "level_min": 40,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "ebd0ab39-5604-0b4c-52ab-31360f9673f3"
+      },
+      {
+        "chance": 0.16,
+        "item_type_id": "8ebf56cd-ccd8-05e9-7e6b-efc0150a3cd8",
+        "level_max": 79,
+        "level_min": 40,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "af167744-5eb9-3577-0a6d-fe9a38e4fa7e"
+      },
+      {
+        "chance": 0.18,
+        "item_type_id": "90580381-b3e6-1443-918a-20acde1eb2e2",
+        "level_max": 79,
+        "level_min": 40,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "95234f5e-9960-8d48-301a-bca896fc1c2c"
+      },
+      {
+        "chance": 0.15,
+        "item_type_id": "b4008659-0220-c368-e804-1a49304046fb",
+        "level_max": 79,
+        "level_min": 40,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "8dc7e68e-17bb-4249-a4d4-0ff75babecb1"
+      },
+      {
+        "chance": 0.25,
+        "item_type_id": "17851287-aa87-97f0-b8f3-909b32117b1a",
+        "level_max": 9,
+        "level_min": 5,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "07a5f612-af8a-f63e-ac2e-cc977de86465"
+      },
+      {
+        "chance": 0.25,
+        "item_type_id": "5d06cc4a-f2cb-b35b-4376-3d8bc46824c8",
+        "level_max": 9,
+        "level_min": 5,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "eefd3182-aad7-e37a-b0ef-c6b11459a796"
+      },
+      {
+        "chance": 0.35,
+        "item_type_id": "6f1a3b5d-495b-5853-c2de-1dd444ed7810",
+        "level_max": 9,
+        "level_min": 5,
+        "max_qty": 10,
+        "min_qty": 4,
+        "sync_uuid": "5c4fa4aa-b8a1-ad37-e526-f3677308fe85"
+      },
+      {
+        "chance": 0.2,
+        "item_type_id": "9db3acff-3f0b-f63f-d755-cebd8f528a20",
+        "level_max": 9,
+        "level_min": 5,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "f55bfa27-59f2-5790-5900-1d41dfaa0f71"
+      },
+      {
+        "chance": 0.2,
+        "item_type_id": "e37e471a-e76f-4568-371b-2ff62a74bff7",
+        "level_max": 9,
+        "level_min": 5,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "9638244b-d9f4-a26c-6260-6ac8331107f3"
+      },
+      {
+        "chance": 0.5,
+        "item_type_id": "f7235c0a-b9d6-530c-4712-8f4ea047c208",
+        "level_max": 9,
+        "level_min": 5,
+        "max_qty": 10,
+        "min_qty": 4,
+        "sync_uuid": "f91bbdd8-5e9b-af07-c22c-ee656977c583"
+      },
+      {
+        "chance": 0.28,
+        "item_type_id": "26c85b97-09c0-d711-b6e4-ec7bd9ad0cad",
+        "level_max": 150,
+        "level_min": 80,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "d21b406d-568e-4334-043e-176f83153ad9"
+      },
+      {
+        "chance": 0.15,
+        "item_type_id": "521652f3-d8c0-7328-03c8-6f26a408bccf",
+        "level_max": 150,
+        "level_min": 80,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "56024a43-7d26-5642-91e3-fa2ac99ad1ec"
+      },
+      {
+        "chance": 0.16,
+        "item_type_id": "59336d74-51ec-b2be-e0d9-1961cc960a0e",
+        "level_max": 150,
+        "level_min": 80,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "899eea37-f4aa-b76f-4617-01f5234509f1"
+      },
+      {
+        "chance": 0.14,
+        "item_type_id": "6f0db484-612e-ecf8-c6de-88b1adf8942b",
+        "level_max": 150,
+        "level_min": 80,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "a7b092f9-75d5-d891-ad40-25d61865460c"
+      },
+      {
+        "chance": 0.35,
+        "item_type_id": "6f1a3b5d-495b-5853-c2de-1dd444ed7810",
+        "level_max": 150,
+        "level_min": 80,
+        "max_qty": 20,
+        "min_qty": 10,
+        "sync_uuid": "a0b63717-e27c-5381-bb6d-5fe28db1e16e"
+      },
+      {
+        "chance": 0.16,
+        "item_type_id": "90580381-b3e6-1443-918a-20acde1eb2e2",
+        "level_max": 150,
+        "level_min": 80,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "217d5d0c-f90c-9188-32b2-ae3b9b40f046"
+      },
+      {
+        "chance": 0.14,
+        "item_type_id": "dd2a8629-9548-3fae-edd7-08d540af44b1",
+        "level_max": 150,
+        "level_min": 80,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "264fda75-ade0-d5e3-4b54-0d417f610d99"
+      }
+    ],
+    "creature_abilities": [
+      {
+        "attack_cooldown": 1,
+        "attack_kind": "melee",
+        "attack_range": 60,
+        "behavior_id": "0cfe5d84-c65c-89ad-68a9-ef083306fe4c",
+        "damage_mult": 1,
+        "element": null,
+        "knockback": 0,
+        "name": "Line",
+        "projectile_radius": 0,
+        "projectile_speed": 0,
+        "slot": 1,
+        "sync_uuid": "52e5a3de-b99d-0775-a7e7-1ead73b80ff3"
+      },
+      {
+        "attack_cooldown": 1.1,
+        "attack_kind": "melee",
+        "attack_range": 65,
+        "behavior_id": "0fc40feb-7f9f-bfba-de67-3c49bdf119d0",
+        "damage_mult": 1,
+        "element": null,
+        "knockback": 0,
+        "name": "Champion",
+        "projectile_radius": 0,
+        "projectile_speed": 0,
+        "slot": 1,
+        "sync_uuid": "403b6ece-0d99-b64a-8eb1-c0e8faf7452f"
+      },
+      {
+        "attack_cooldown": 2,
+        "attack_kind": "ranged",
+        "attack_range": 380,
+        "behavior_id": "21b19aa7-69b8-a891-9abb-d1a988033775",
+        "damage_mult": 1,
+        "element": null,
+        "knockback": 0,
+        "name": "Sentry",
+        "projectile_radius": 6,
+        "projectile_speed": 500,
+        "slot": 1,
+        "sync_uuid": "487a1c39-1a11-1319-c764-162f72c15399"
+      },
+      {
+        "attack_cooldown": 2,
+        "attack_kind": "cast",
+        "attack_range": 260,
+        "behavior_id": "2c15d865-d313-a6a8-d321-d52dc54b67da",
+        "damage_mult": 1,
+        "element": null,
+        "knockback": 0,
+        "name": "Apex",
+        "projectile_radius": 10,
+        "projectile_speed": 460,
+        "slot": 1,
+        "sync_uuid": "aefc33d5-7a9b-4caf-c8a3-65c4f9675367"
+      },
+      {
+        "attack_cooldown": 1.2,
+        "attack_kind": "melee",
+        "attack_range": 90,
+        "behavior_id": "2c15d865-d313-a6a8-d321-d52dc54b67da",
+        "damage_mult": 1.4,
+        "element": "physical",
+        "knockback": 120,
+        "name": "Slam",
+        "projectile_radius": 0,
+        "projectile_speed": 0,
+        "slot": 2,
+        "sync_uuid": "f32be1af-876f-6c88-57c9-7185ebe3a0ef"
+      },
+      {
+        "attack_cooldown": 1.2,
+        "attack_kind": "melee",
+        "attack_range": 60,
+        "behavior_id": "334f0916-90aa-ea5c-534c-5d152c7c0be2",
+        "damage_mult": 1,
+        "element": null,
+        "knockback": 0,
+        "name": "Nip",
+        "projectile_radius": 0,
+        "projectile_speed": 0,
+        "slot": 1,
+        "sync_uuid": "5a9da6e4-7e6e-13fb-cc8f-1c75be39cb3f"
+      },
+      {
+        "attack_cooldown": 2,
+        "attack_kind": "cast",
+        "attack_range": 260,
+        "behavior_id": "3629d3ef-d338-22d3-385c-e48e2bd768cc",
+        "damage_mult": 1,
+        "element": null,
+        "knockback": 0,
+        "name": "Apex",
+        "projectile_radius": 10,
+        "projectile_speed": 460,
+        "slot": 1,
+        "sync_uuid": "763e01ae-50a1-e97a-5bf1-f519cdcbb8b5"
+      },
+      {
+        "attack_cooldown": 1.2,
+        "attack_kind": "melee",
+        "attack_range": 90,
+        "behavior_id": "3629d3ef-d338-22d3-385c-e48e2bd768cc",
+        "damage_mult": 1.4,
+        "element": "physical",
+        "knockback": 120,
+        "name": "Slam",
+        "projectile_radius": 0,
+        "projectile_speed": 0,
+        "slot": 2,
+        "sync_uuid": "370f523b-05ab-9644-0579-b8a5ef390254"
+      },
+      {
+        "attack_cooldown": 1.1,
+        "attack_kind": "melee",
+        "attack_range": 65,
+        "behavior_id": "3e90a580-2512-d161-434a-f0677a285e83",
+        "damage_mult": 1,
+        "element": null,
+        "knockback": 0,
+        "name": "Champion",
+        "projectile_radius": 0,
+        "projectile_speed": 0,
+        "slot": 1,
+        "sync_uuid": "ad2678ec-5dab-1ac9-577a-7ad0c95ba84c"
+      },
+      {
+        "attack_cooldown": 2,
+        "attack_kind": "cast",
+        "attack_range": 260,
+        "behavior_id": "418de594-7134-c047-8bd8-f968028e594e",
+        "damage_mult": 1,
+        "element": null,
+        "knockback": 0,
+        "name": "Apex",
+        "projectile_radius": 10,
+        "projectile_speed": 460,
+        "slot": 1,
+        "sync_uuid": "feb09523-8214-53f4-d49f-3c2260a27cc7"
+      },
+      {
+        "attack_cooldown": 1.2,
+        "attack_kind": "melee",
+        "attack_range": 90,
+        "behavior_id": "418de594-7134-c047-8bd8-f968028e594e",
+        "damage_mult": 1.4,
+        "element": "physical",
+        "knockback": 120,
+        "name": "Slam",
+        "projectile_radius": 0,
+        "projectile_speed": 0,
+        "slot": 2,
+        "sync_uuid": "38c58d93-a1b7-cf74-4344-7f1bcc494ce1"
+      },
+      {
+        "attack_cooldown": 2.4,
+        "attack_kind": "cast",
+        "attack_range": 300,
+        "behavior_id": "43511038-407c-d5ad-833e-7a37757dd090",
+        "damage_mult": 1,
+        "element": null,
+        "knockback": 0,
+        "name": "Caster",
+        "projectile_radius": 8,
+        "projectile_speed": 420,
+        "slot": 1,
+        "sync_uuid": "3032b46c-0feb-d158-b98c-b1f1c63d6e2e"
+      },
+      {
+        "attack_cooldown": 1.1,
+        "attack_kind": "melee",
+        "attack_range": 65,
+        "behavior_id": "45a3a690-4b2d-7c0f-92fc-5ce672947a12",
+        "damage_mult": 1,
+        "element": null,
+        "knockback": 0,
+        "name": "Champion",
+        "projectile_radius": 0,
+        "projectile_speed": 0,
+        "slot": 1,
+        "sync_uuid": "da107c04-fb73-5776-57ce-e2f2ae92fbcc"
+      },
+      {
+        "attack_cooldown": 1,
+        "attack_kind": "melee",
+        "attack_range": 60,
+        "behavior_id": "56347fb8-9bb4-8536-13fd-9c491599aff4",
+        "damage_mult": 1,
+        "element": null,
+        "knockback": 0,
+        "name": "Line",
+        "projectile_radius": 0,
+        "projectile_speed": 0,
+        "slot": 1,
+        "sync_uuid": "a08a3e49-0207-2009-4ca3-71761465e2bc"
+      },
+      {
+        "attack_cooldown": 0.9,
+        "attack_kind": "melee",
+        "attack_range": 60,
+        "behavior_id": "59fda2db-228a-f879-c04c-6a8f0bb0c3dd",
+        "damage_mult": 1,
+        "element": null,
+        "knockback": 0,
+        "name": "Skirmisher",
+        "projectile_radius": 0,
+        "projectile_speed": 0,
+        "slot": 1,
+        "sync_uuid": "3630f93a-839c-c00a-6b66-7f4dbbee5485"
+      },
+      {
+        "attack_cooldown": 0.9,
+        "attack_kind": "melee",
+        "attack_range": 60,
+        "behavior_id": "7451dc24-8535-5c50-c973-e9f5ffd51f17",
+        "damage_mult": 1,
+        "element": null,
+        "knockback": 0,
+        "name": "Lurker",
+        "projectile_radius": 0,
+        "projectile_speed": 0,
+        "slot": 1,
+        "sync_uuid": "e61e6d6e-b848-6f62-90ec-bd7558a05eb4"
+      },
+      {
+        "attack_cooldown": 1.1,
+        "attack_kind": "melee",
+        "attack_range": 65,
+        "behavior_id": "74d0687b-dbee-9334-0ea3-47a9eee96741",
+        "damage_mult": 1,
+        "element": null,
+        "knockback": 0,
+        "name": "Champion",
+        "projectile_radius": 0,
+        "projectile_speed": 0,
+        "slot": 1,
+        "sync_uuid": "568311cb-49ae-da24-b6ee-e365aeee3705"
+      },
+      {
+        "attack_cooldown": 1,
+        "attack_kind": "melee",
+        "attack_range": 60,
+        "behavior_id": "7c42ef45-8f01-1cf8-4982-c1402c14d714",
+        "damage_mult": 1,
+        "element": null,
+        "knockback": 0,
+        "name": "Line",
+        "projectile_radius": 0,
+        "projectile_speed": 0,
+        "slot": 1,
+        "sync_uuid": "ece4931f-70de-adb3-5c90-a56923b106b3"
+      },
+      {
+        "attack_cooldown": 1,
+        "attack_kind": "melee",
+        "attack_range": 60,
+        "behavior_id": "7ca67cd8-542f-e816-a488-1f77b88a27f2",
+        "damage_mult": 1,
+        "element": null,
+        "knockback": 0,
+        "name": "Guard",
+        "projectile_radius": 0,
+        "projectile_speed": 0,
+        "slot": 1,
+        "sync_uuid": "4dfa7a30-aeda-573e-4daf-1d4d1c576309"
+      },
+      {
+        "attack_cooldown": 2,
+        "attack_kind": "cast",
+        "attack_range": 260,
+        "behavior_id": "7cc76df8-d5a3-f3d3-686e-6276a035caf7",
+        "damage_mult": 1,
+        "element": null,
+        "knockback": 0,
+        "name": "Apex",
+        "projectile_radius": 10,
+        "projectile_speed": 460,
+        "slot": 1,
+        "sync_uuid": "14587ec0-3f17-64a6-ecc4-b22a46afd985"
+      },
+      {
+        "attack_cooldown": 1.2,
+        "attack_kind": "melee",
+        "attack_range": 90,
+        "behavior_id": "7cc76df8-d5a3-f3d3-686e-6276a035caf7",
+        "damage_mult": 1.4,
+        "element": "physical",
+        "knockback": 120,
+        "name": "Slam",
+        "projectile_radius": 0,
+        "projectile_speed": 0,
+        "slot": 2,
+        "sync_uuid": "8f5df633-a21f-4f7c-8f33-9d91e51bfe1e"
+      },
+      {
+        "attack_cooldown": 1,
+        "attack_kind": "melee",
+        "attack_range": 60,
+        "behavior_id": "9d2bd9b9-88bf-03b1-7815-5cb298e34f2f",
+        "damage_mult": 1,
+        "element": null,
+        "knockback": 0,
+        "name": "Line",
+        "projectile_radius": 0,
+        "projectile_speed": 0,
+        "slot": 1,
+        "sync_uuid": "06b32102-ff62-a8ce-c60f-c53f36fc8e42"
+      },
+      {
+        "attack_cooldown": 1.8,
+        "attack_kind": "ranged",
+        "attack_range": 340,
+        "behavior_id": "a517bfce-5e1e-cfe4-285f-883618ea2d0e",
+        "damage_mult": 1,
+        "element": null,
+        "knockback": 0,
+        "name": "Ranged",
+        "projectile_radius": 6,
+        "projectile_speed": 520,
+        "slot": 1,
+        "sync_uuid": "46c88f8b-c381-a2f5-65f2-a68006448c33"
+      },
+      {
+        "attack_cooldown": 0.7,
+        "attack_kind": "melee",
+        "attack_range": 60,
+        "behavior_id": "a8774e5b-3788-d760-b0da-970f3f5d9d9d",
+        "damage_mult": 1,
+        "element": null,
+        "knockback": 0,
+        "name": "Swarm",
+        "projectile_radius": 0,
+        "projectile_speed": 0,
+        "slot": 1,
+        "sync_uuid": "f09becaa-c782-9aa1-13cc-98c0d4c7ff24"
+      },
+      {
+        "attack_cooldown": 1,
+        "attack_kind": "melee",
+        "attack_range": 60,
+        "behavior_id": "c3296591-cd68-059c-382d-eb67705b171b",
+        "damage_mult": 1,
+        "element": null,
+        "knockback": 0,
+        "name": "Line",
+        "projectile_radius": 0,
+        "projectile_speed": 0,
+        "slot": 1,
+        "sync_uuid": "a4ced860-f0d7-9700-8081-e955bbe3fd3c"
+      },
+      {
+        "attack_cooldown": 1,
+        "attack_kind": "melee",
+        "attack_range": 60,
+        "behavior_id": "d0b13b17-0983-1397-ed85-483212880c40",
+        "damage_mult": 1,
+        "element": null,
+        "knockback": 0,
+        "name": "Line",
+        "projectile_radius": 0,
+        "projectile_speed": 0,
+        "slot": 1,
+        "sync_uuid": "ce642155-45b8-5967-7f82-5664526f1b77"
+      },
+      {
+        "attack_cooldown": 1.5,
+        "attack_kind": "melee",
+        "attack_range": 65,
+        "behavior_id": "d756f5a0-c8cd-9fa8-21a4-c99536c0666a",
+        "damage_mult": 1,
+        "element": null,
+        "knockback": 0,
+        "name": "Heavy",
+        "projectile_radius": 0,
+        "projectile_speed": 0,
+        "slot": 1,
+        "sync_uuid": "e8966e8b-fb56-4014-ab5d-2eec8d75d0c3"
+      },
+      {
+        "attack_cooldown": 1.8,
+        "attack_kind": "melee",
+        "attack_range": 70,
+        "behavior_id": "e829bf68-cecc-af95-a4e6-bbb85d59c4a2",
+        "damage_mult": 1,
+        "element": null,
+        "knockback": 140,
+        "name": "Brute",
+        "projectile_radius": 0,
+        "projectile_speed": 0,
+        "slot": 1,
+        "sync_uuid": "f2ffab99-8e84-6c81-382f-f5d2d2b07aed"
+      }
+    ],
+    "creature_behavior_skills": [
+      {
+        "behavior_id": "0cfe5d84-c65c-89ad-68a9-ef083306fe4c",
+        "power_scale": 1,
+        "skill_id": "44512583-b4de-032f-23c9-e499189d7ae7",
+        "slot": 1,
+        "sync_uuid": "687dced5-8562-e810-a335-1ad114ac9ddf"
+      },
+      {
+        "behavior_id": "0fc40feb-7f9f-bfba-de67-3c49bdf119d0",
+        "power_scale": 0.5,
+        "skill_id": "77a28553-bb12-2d2e-1b2a-daa3f68d76ac",
+        "slot": 1,
+        "sync_uuid": "b6d0ce4a-5fea-56bc-de6c-b206e5081056"
+      },
+      {
+        "behavior_id": "2c15d865-d313-a6a8-d321-d52dc54b67da",
+        "power_scale": 0.9,
+        "skill_id": "77a28553-bb12-2d2e-1b2a-daa3f68d76ac",
+        "slot": 1,
+        "sync_uuid": "1522abab-4094-b248-a924-b1dde4af9765"
+      },
+      {
+        "behavior_id": "3629d3ef-d338-22d3-385c-e48e2bd768cc",
+        "power_scale": 0.8,
+        "skill_id": "54e13b19-6523-07aa-4211-e8028106b396",
+        "slot": 1,
+        "sync_uuid": "729a6730-429b-9101-f8e6-ace90d50c174"
+      },
+      {
+        "behavior_id": "3e90a580-2512-d161-434a-f0677a285e83",
+        "power_scale": 0.5,
+        "skill_id": "54e13b19-6523-07aa-4211-e8028106b396",
+        "slot": 1,
+        "sync_uuid": "f0bc6ae7-be49-3b48-7625-5d0f4667730d"
+      },
+      {
+        "behavior_id": "45a3a690-4b2d-7c0f-92fc-5ce672947a12",
+        "power_scale": 0.5,
+        "skill_id": "44512583-b4de-032f-23c9-e499189d7ae7",
+        "slot": 1,
+        "sync_uuid": "cd036fa1-02fa-c54f-675e-eb5bacf72d4d"
+      },
+      {
+        "behavior_id": "7c42ef45-8f01-1cf8-4982-c1402c14d714",
+        "power_scale": 1,
+        "skill_id": "a2dafdd2-530c-a509-5a8c-e34740788cf2",
+        "slot": 1,
+        "sync_uuid": "e1a142c7-a626-df66-3b3c-9421a84a9f47"
+      },
+      {
+        "behavior_id": "7cc76df8-d5a3-f3d3-686e-6276a035caf7",
+        "power_scale": 0.7,
+        "skill_id": "44512583-b4de-032f-23c9-e499189d7ae7",
+        "slot": 1,
+        "sync_uuid": "22c25fc5-7d07-cd5b-bbf4-274242112baf"
+      },
+      {
+        "behavior_id": "9d2bd9b9-88bf-03b1-7815-5cb298e34f2f",
+        "power_scale": 0.4,
+        "skill_id": "44512583-b4de-032f-23c9-e499189d7ae7",
+        "slot": 1,
+        "sync_uuid": "8427797f-d7db-93cd-9d94-005e5239d889"
+      },
+      {
+        "behavior_id": "c3296591-cd68-059c-382d-eb67705b171b",
+        "power_scale": 1,
+        "skill_id": "54e13b19-6523-07aa-4211-e8028106b396",
+        "slot": 1,
+        "sync_uuid": "a52350af-6876-200b-4340-7babf617590d"
+      },
+      {
+        "behavior_id": "d0b13b17-0983-1397-ed85-483212880c40",
+        "power_scale": 1,
+        "skill_id": "98736345-3bd6-e0b6-0b5d-ef12afd89dc2",
+        "slot": 1,
+        "sync_uuid": "9f1873ea-523d-b6ee-82f6-1a139e41cdf2"
+      }
+    ],
+    "creature_behaviors": [
+      {
+        "aggro_radius": 400,
+        "chase_style": "charge",
+        "damage_override": null,
+        "gold_max": 5,
+        "gold_min": 1,
+        "leash_radius": 800,
+        "move_speed_mult": 1,
+        "name": "Abyssor, the Voidreaver",
+        "preferred_range": 0,
+        "sync_uuid": "c3296591-cd68-059c-382d-eb67705b171b"
+      },
+      {
+        "aggro_radius": 600,
+        "chase_style": "charge",
+        "damage_override": null,
+        "gold_max": 80,
+        "gold_min": 25,
+        "leash_radius": 1200,
+        "move_speed_mult": 0.95,
+        "name": "Apex",
+        "preferred_range": 0,
+        "sync_uuid": "418de594-7134-c047-8bd8-f968028e594e"
+      },
+      {
+        "aggro_radius": 380,
+        "chase_style": "charge",
+        "damage_override": null,
+        "gold_max": 14,
+        "gold_min": 4,
+        "leash_radius": 800,
+        "move_speed_mult": 0.7,
+        "name": "Brute",
+        "preferred_range": 0,
+        "sync_uuid": "e829bf68-cecc-af95-a4e6-bbb85d59c4a2"
+      },
+      {
+        "aggro_radius": 460,
+        "chase_style": "kite",
+        "damage_override": null,
+        "gold_max": 12,
+        "gold_min": 3,
+        "leash_radius": 800,
+        "move_speed_mult": 0.9,
+        "name": "Caster",
+        "preferred_range": 220,
+        "sync_uuid": "43511038-407c-d5ad-833e-7a37757dd090"
+      },
+      {
+        "aggro_radius": 480,
+        "chase_style": "charge",
+        "damage_override": null,
+        "gold_max": 30,
+        "gold_min": 10,
+        "leash_radius": 900,
+        "move_speed_mult": 1.05,
+        "name": "Champion",
+        "preferred_range": 0,
+        "sync_uuid": "74d0687b-dbee-9334-0ea3-47a9eee96741"
+      },
+      {
+        "aggro_radius": 480,
+        "chase_style": "charge",
+        "damage_override": null,
+        "gold_max": 30,
+        "gold_min": 10,
+        "leash_radius": 900,
+        "move_speed_mult": 1.05,
+        "name": "Cinder Matriarch",
+        "preferred_range": 0,
+        "sync_uuid": "45a3a690-4b2d-7c0f-92fc-5ce672947a12"
+      },
+      {
+        "aggro_radius": 400,
+        "chase_style": "charge",
+        "damage_override": null,
+        "gold_max": 5,
+        "gold_min": 1,
+        "leash_radius": 800,
+        "move_speed_mult": 1,
+        "name": "Fire Elemental Guard",
+        "preferred_range": 0,
+        "sync_uuid": "9d2bd9b9-88bf-03b1-7815-5cb298e34f2f"
+      },
+      {
+        "aggro_radius": 400,
+        "chase_style": "charge",
+        "damage_override": null,
+        "gold_max": 5,
+        "gold_min": 1,
+        "leash_radius": 800,
+        "move_speed_mult": 1,
+        "name": "Glacius, the Frost Leviathan",
+        "preferred_range": 0,
+        "sync_uuid": "7c42ef45-8f01-1cf8-4982-c1402c14d714"
+      },
+      {
+        "aggro_radius": 400,
+        "chase_style": "charge",
+        "damage_override": null,
+        "gold_max": 5,
+        "gold_min": 1,
+        "leash_radius": 800,
+        "move_speed_mult": 1,
+        "name": "Gorgon, the Thunder Titan",
+        "preferred_range": 0,
+        "sync_uuid": "d0b13b17-0983-1397-ed85-483212880c40"
+      },
+      {
+        "aggro_radius": 400,
+        "chase_style": "guard",
+        "damage_override": null,
+        "gold_max": 0,
+        "gold_min": 0,
+        "leash_radius": 600,
+        "move_speed_mult": 1,
+        "name": "Guard",
+        "preferred_range": 0,
+        "sync_uuid": "7ca67cd8-542f-e816-a488-1f77b88a27f2"
+      },
+      {
+        "aggro_radius": 300,
+        "chase_style": "charge",
+        "damage_override": null,
+        "gold_max": 18,
+        "gold_min": 5,
+        "leash_radius": 500,
+        "move_speed_mult": 0.6,
+        "name": "Heavy",
+        "preferred_range": 0,
+        "sync_uuid": "d756f5a0-c8cd-9fa8-21a4-c99536c0666a"
+      },
+      {
+        "aggro_radius": 400,
+        "chase_style": "charge",
+        "damage_override": null,
+        "gold_max": 5,
+        "gold_min": 1,
+        "leash_radius": 800,
+        "move_speed_mult": 1,
+        "name": "Ignis, the Magma Colossus",
+        "preferred_range": 0,
+        "sync_uuid": "0cfe5d84-c65c-89ad-68a9-ef083306fe4c"
+      },
+      {
+        "aggro_radius": 400,
+        "chase_style": "charge",
+        "damage_override": null,
+        "gold_max": 5,
+        "gold_min": 1,
+        "leash_radius": 800,
+        "move_speed_mult": 1,
+        "name": "Line",
+        "preferred_range": 0,
+        "sync_uuid": "56347fb8-9bb4-8536-13fd-9c491599aff4"
+      },
+      {
+        "aggro_radius": 180,
+        "chase_style": "ambush",
+        "damage_override": null,
+        "gold_max": 7,
+        "gold_min": 2,
+        "leash_radius": 700,
+        "move_speed_mult": 1.6,
+        "name": "Lurker",
+        "preferred_range": 0,
+        "sync_uuid": "7451dc24-8535-5c50-c973-e9f5ffd51f17"
+      },
+      {
+        "aggro_radius": 480,
+        "chase_style": "charge",
+        "damage_override": null,
+        "gold_max": 30,
+        "gold_min": 10,
+        "leash_radius": 900,
+        "move_speed_mult": 1.05,
+        "name": "Ossuary Warden",
+        "preferred_range": 0,
+        "sync_uuid": "0fc40feb-7f9f-bfba-de67-3c49bdf119d0"
+      },
+      {
+        "aggro_radius": 460,
+        "chase_style": "kite",
+        "damage_override": null,
+        "gold_max": 8,
+        "gold_min": 2,
+        "leash_radius": 800,
+        "move_speed_mult": 1,
+        "name": "Ranged",
+        "preferred_range": 240,
+        "sync_uuid": "a517bfce-5e1e-cfe4-285f-883618ea2d0e"
+      },
+      {
+        "aggro_radius": 400,
+        "chase_style": "hold",
+        "damage_override": null,
+        "gold_max": 9,
+        "gold_min": 2,
+        "leash_radius": 800,
+        "move_speed_mult": 1,
+        "name": "Sentry",
+        "preferred_range": 0,
+        "sync_uuid": "21b19aa7-69b8-a891-9abb-d1a988033775"
+      },
+      {
+        "aggro_radius": 480,
+        "chase_style": "charge",
+        "damage_override": null,
+        "gold_max": 30,
+        "gold_min": 10,
+        "leash_radius": 900,
+        "move_speed_mult": 1.05,
+        "name": "Shade Herald",
+        "preferred_range": 0,
+        "sync_uuid": "3e90a580-2512-d161-434a-f0677a285e83"
+      },
+      {
+        "aggro_radius": 450,
+        "chase_style": "skirmish",
+        "damage_override": null,
+        "gold_max": 6,
+        "gold_min": 1,
+        "leash_radius": 800,
+        "move_speed_mult": 1.5,
+        "name": "Skirmisher",
+        "preferred_range": 150,
+        "sync_uuid": "59fda2db-228a-f879-c04c-6a8f0bb0c3dd"
+      },
+      {
+        "aggro_radius": 300,
+        "chase_style": "skittish",
+        "damage_override": null,
+        "gold_max": 2,
+        "gold_min": 0,
+        "leash_radius": 500,
+        "move_speed_mult": 1.15,
+        "name": "Skittish",
+        "preferred_range": 150,
+        "sync_uuid": "334f0916-90aa-ea5c-534c-5d152c7c0be2"
+      },
+      {
+        "aggro_radius": 400,
+        "chase_style": "charge",
+        "damage_override": null,
+        "gold_max": 3,
+        "gold_min": 0,
+        "leash_radius": 800,
+        "move_speed_mult": 1.2,
+        "name": "Swarm",
+        "preferred_range": 0,
+        "sync_uuid": "a8774e5b-3788-d760-b0da-970f3f5d9d9d"
+      },
+      {
+        "aggro_radius": 600,
+        "chase_style": "charge",
+        "damage_override": null,
+        "gold_max": 80,
+        "gold_min": 25,
+        "leash_radius": 1200,
+        "move_speed_mult": 0.95,
+        "name": "The Bone Regent",
+        "preferred_range": 0,
+        "sync_uuid": "2c15d865-d313-a6a8-d321-d52dc54b67da"
+      },
+      {
+        "aggro_radius": 600,
+        "chase_style": "charge",
+        "damage_override": null,
+        "gold_max": 80,
+        "gold_min": 25,
+        "leash_radius": 1200,
+        "move_speed_mult": 0.95,
+        "name": "The Ember Queen",
+        "preferred_range": 0,
+        "sync_uuid": "7cc76df8-d5a3-f3d3-686e-6276a035caf7"
+      },
+      {
+        "aggro_radius": 600,
+        "chase_style": "charge",
+        "damage_override": null,
+        "gold_max": 80,
+        "gold_min": 25,
+        "leash_radius": 1200,
+        "move_speed_mult": 0.95,
+        "name": "The Umbral Gatekeeper",
+        "preferred_range": 0,
+        "sync_uuid": "3629d3ef-d338-22d3-385c-e48e2bd768cc"
+      }
+    ]
+  }
+}

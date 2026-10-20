@@ -1,0 +1,911 @@
+{
+  "header": {
+    "exported_at": "2026-10-20T11:34:18.426Z",
+    "exported_by": "linux-dev",
+    "group": "tile_types",
+    "row_counts": {
+      "tile_types": 50
+    },
+    "schema_version": "1714440811000_map_spec_state_base"
+  },
+  "tables": {
+    "tile_types": [
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Ashfields",
+        "color": "#4a4038",
+        "name": "ash_waste",
+        "place_order": 0,
+        "prompt": "deep soft drifts of grey ash and soot dust, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.7,
+        "sync_uuid": "12e1cd20-4659-5afc-fe93-bfbe13187943",
+        "valid_neighbors": [
+          "ash_waste",
+          "ember_rock",
+          "rocks",
+          "dirt"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Blightworks",
+        "color": "#5e6b3a",
+        "name": "blight_floor",
+        "place_order": 0,
+        "prompt": "cracked sickly grey-green crust over dead soil, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.7,
+        "sync_uuid": "4414b1df-e7de-7904-75df-2a3fc43d6541",
+        "valid_neighbors": [
+          "blight_floor",
+          "fungal_floor",
+          "swamp",
+          "dirt"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Ossuary",
+        "color": "#c9c2ad",
+        "name": "bone_floor",
+        "place_order": 0,
+        "prompt": "floor of packed bone fragments, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.8,
+        "sync_uuid": "8b4e08c3-77de-5738-0f1c-6c9ad12198cc",
+        "valid_neighbors": [
+          "bone_floor",
+          "crypt_floor",
+          "cobblestone"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Infernal Gate",
+        "color": "#8c3a1e",
+        "name": "brimstone",
+        "place_order": 0,
+        "prompt": "crusted yellow sulphur over dark rock, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.8,
+        "sync_uuid": "e1298ddf-ba4e-fd40-e371-dcd8fe1ab3e7",
+        "valid_neighbors": [
+          "brimstone",
+          "ember_rock",
+          "ash_waste"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Cavern",
+        "color": "#5a5148",
+        "name": "cave_floor",
+        "place_order": 0,
+        "prompt": "damp brown cave floor stone, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.9,
+        "sync_uuid": "0c80c421-1021-259f-8fce-4679c7485682",
+        "valid_neighbors": [
+          "cave_floor",
+          "rocks",
+          "dirt",
+          "cave_wall"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Umbral Warren",
+        "color": "#3a352e",
+        "name": "cave_wall",
+        "place_order": 0,
+        "prompt": "solid rough cave rock wall, flat material surface, straight-on view, fills the entire frame, even flat lighting, no shadows, pixel art",
+        "speed": 1,
+        "sync_uuid": "d15cd1d5-758c-6e80-e40b-f138c4638932",
+        "valid_neighbors": [
+          "cave_wall",
+          "cave_floor",
+          "rocks"
+        ],
+        "walkable": false,
+        "wall_height": 48
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Shattered Vault",
+        "color": "#6b2f6b",
+        "name": "chaos_floor",
+        "place_order": 0,
+        "prompt": "shifting iridescent chaos stone, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.9,
+        "sync_uuid": "b4cfb469-eefc-6392-636a-0ac8c9a0eb15",
+        "valid_neighbors": [
+          "chaos_floor",
+          "void_floor",
+          "crystal_floor"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Abyssal Rift",
+        "color": "#14121a",
+        "name": "chasm",
+        "place_order": 0,
+        "prompt": "pitch black rock, almost featureless darkness, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0,
+        "sync_uuid": "b92e435c-cf15-7625-c56f-48b1c7f87447",
+        "valid_neighbors": [
+          "chasm",
+          "cave_floor",
+          "void_floor"
+        ],
+        "walkable": false,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Sunken Cistern",
+        "color": "#3f5a63",
+        "name": "cistern_shallows",
+        "place_order": 0,
+        "prompt": "shallow clear water covering pale stone slabs, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.4,
+        "sync_uuid": "31f69ad2-1086-2109-c143-af0e1cba8804",
+        "valid_neighbors": [
+          "cistern_shallows",
+          "water",
+          "cobblestone",
+          "swamp"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Sunken Ruins",
+        "color": "#6e6a63",
+        "name": "cobblestone",
+        "place_order": 0,
+        "prompt": "worn grey cobblestone paving, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.9,
+        "sync_uuid": "20b4e178-37b7-84c4-0d3b-f87a610aee4a",
+        "valid_neighbors": [
+          "cobblestone",
+          "crypt_floor",
+          "ruin_stone",
+          "rocks"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Catacombs",
+        "color": "#55504a",
+        "name": "crypt_floor",
+        "place_order": 0,
+        "prompt": "cold crypt flagstone floor, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.9,
+        "sync_uuid": "f2cac0ce-ac29-eb1c-78d4-56e430871cba",
+        "valid_neighbors": [
+          "crypt_floor",
+          "cobblestone",
+          "bone_floor",
+          "rocks"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Crystal Hollows",
+        "color": "#6fa8c9",
+        "name": "crystal_floor",
+        "place_order": 0,
+        "prompt": "pale blue crystal shard floor, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.8,
+        "sync_uuid": "d723d867-899a-b203-3870-4586063c39f4",
+        "valid_neighbors": [
+          "crystal_floor",
+          "ice",
+          "rocks",
+          "cave_floor"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Arid Dunes",
+        "color": "#301604ff",
+        "name": "dirt",
+        "place_order": 0,
+        "prompt": "dark packed dirt ground, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.6,
+        "sync_uuid": "f2474334-d993-d5ce-ff91-d774bbeddd15",
+        "valid_neighbors": [
+          "dirt",
+          "earth",
+          "rocks",
+          "leafs",
+          "swamp"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Dreaming Dark",
+        "color": "#4a3f6b",
+        "name": "dream_floor",
+        "place_order": 0,
+        "prompt": "hazy indigo dreamlike ground, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.9,
+        "sync_uuid": "9bd7cb45-5ed2-9a0d-14c7-e81ed7de4ba1",
+        "valid_neighbors": [
+          "dream_floor",
+          "void_floor",
+          "umbral_floor"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Meadow",
+        "color": "#8B4513",
+        "name": "earth",
+        "place_order": 0,
+        "prompt": "bare brown soil with small clumps and pebbles, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 1,
+        "sync_uuid": "07d7dcf5-3513-8253-d258-5cefe264e47c",
+        "valid_neighbors": [
+          "earth",
+          "grass",
+          "sand",
+          "rocks",
+          "dirt",
+          "swamp"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Ashfields",
+        "color": "#7a3b22",
+        "name": "ember_rock",
+        "place_order": 0,
+        "prompt": "cracked rock veined with glowing embers, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.8,
+        "sync_uuid": "e12ea692-db0f-149f-7095-3e80900d1305",
+        "valid_neighbors": [
+          "ember_rock",
+          "ash_waste",
+          "rocks",
+          "brimstone"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Sunken Foundry",
+        "color": "#6a5a48",
+        "name": "foundry_floor",
+        "place_order": 0,
+        "prompt": "flat soot-blackened iron plate surface, riveted seams, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.9,
+        "sync_uuid": "9f821aa1-1734-bcec-29e2-513ed1d6a17d",
+        "valid_neighbors": [
+          "foundry_floor",
+          "vault_floor",
+          "ember_rock",
+          "rocks"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Fungal Deep",
+        "color": "#6b7f3a",
+        "name": "fungal_floor",
+        "place_order": 0,
+        "prompt": "dense pale mushroom caps and spongy mycelium, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.7,
+        "sync_uuid": "e7fa6cce-5120-3da4-d65b-7b5f066a1e1f",
+        "valid_neighbors": [
+          "fungal_floor",
+          "swamp",
+          "dirt",
+          "blight_floor"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Meadow",
+        "color": "#00FF00",
+        "name": "grass",
+        "place_order": 0,
+        "prompt": "lush green meadow grass, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 1,
+        "sync_uuid": "81ec6316-a9b1-d2db-5de4-bc0848746c01",
+        "valid_neighbors": [
+          "grass",
+          "highgrass",
+          "leafs",
+          "sand",
+          "earth"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Meadow",
+        "color": "#035c03ff",
+        "name": "highgrass",
+        "place_order": 0,
+        "prompt": "tall dense green grass blades, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.8,
+        "sync_uuid": "30e58d65-607b-11bf-d149-6d68f2b4f251",
+        "valid_neighbors": [
+          "highgrass",
+          "grass",
+          "leafs",
+          "swamp"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Highlands",
+        "color": "#7d8471",
+        "name": "highland_rock",
+        "place_order": 0,
+        "prompt": "windswept grey-green highland stone, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.8,
+        "sync_uuid": "a69c2ef3-e056-e6e2-ee0c-68e37101db37",
+        "valid_neighbors": [
+          "highland_rock",
+          "rocks",
+          "snow",
+          "grass"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Hive Warrens",
+        "color": "#8a6a2f",
+        "name": "hive_floor",
+        "place_order": 0,
+        "prompt": "amber honeycomb wax cells, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.8,
+        "sync_uuid": "04b5157d-66ac-3455-effb-f15f4ec35f9b",
+        "valid_neighbors": [
+          "hive_floor",
+          "dirt",
+          "cave_floor"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Frozen Waste",
+        "color": "#bae6fd",
+        "name": "ice",
+        "place_order": 0,
+        "prompt": "pale blue cracked ice, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.2,
+        "sync_uuid": "24a71658-9585-259f-2308-7ff8490c8aaa",
+        "valid_neighbors": [
+          "ice",
+          "snow",
+          "water"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Verdant Jungle",
+        "color": "#1f6b2e",
+        "name": "jungle_floor",
+        "place_order": 0,
+        "prompt": "fallen green leaves and creeping vines on soil, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.7,
+        "sync_uuid": "e24fcea1-f65f-1e08-ac6e-262375592756",
+        "valid_neighbors": [
+          "jungle_floor",
+          "highgrass",
+          "leafs",
+          "swamp"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Deep Forest",
+        "color": "#023b02ff",
+        "name": "leafs",
+        "place_order": 0,
+        "prompt": "dark green forest leaf litter, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.8,
+        "sync_uuid": "dc8210ec-7d46-b3bf-9be0-d735cc36ad39",
+        "valid_neighbors": [
+          "leafs",
+          "highgrass",
+          "grass",
+          "dirt"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "",
+        "color": "#6b4f2a",
+        "name": "map_doorway",
+        "place_order": 0,
+        "prompt": "heavy wooden door set in a stone frame, flat material surface, straight-on view, fills the entire frame, even flat lighting, no shadows, pixel art",
+        "speed": 1,
+        "sync_uuid": "ef4f2d56-ee65-f96f-c011-028c2f6862a1",
+        "valid_neighbors": [],
+        "walkable": true,
+        "wall_height": 24
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "",
+        "color": "#2b2b2b",
+        "name": "map_wall",
+        "place_order": 0,
+        "prompt": "mortared grey stone block wall, flat material surface, straight-on view, fills the entire frame, even flat lighting, no shadows, pixel art",
+        "speed": 1,
+        "sync_uuid": "bcaf4452-fb9a-7936-8e83-de264a7d4305",
+        "valid_neighbors": [],
+        "walkable": false,
+        "wall_height": 48
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "The Maw",
+        "color": "#3d1f22",
+        "name": "maw_floor",
+        "place_order": 0,
+        "prompt": "raw pulsing flesh-like ground, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.8,
+        "sync_uuid": "6ca2f87c-569e-bb95-7b1f-28a725f9f985",
+        "valid_neighbors": [
+          "maw_floor",
+          "void_floor",
+          "brimstone"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Pestilent Deep",
+        "color": "#6b6b33",
+        "name": "plague_floor",
+        "place_order": 0,
+        "prompt": "sickly yellow-green slime over wet mud, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.7,
+        "sync_uuid": "36b585f0-e84c-4483-bdfc-a08729c762e1",
+        "valid_neighbors": [
+          "plague_floor",
+          "blight_floor",
+          "fungal_floor"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Frostvault",
+        "color": "#a8c6d6",
+        "name": "rime_floor",
+        "place_order": 0,
+        "prompt": "frost-rimed pale stone floor, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.5,
+        "sync_uuid": "e5a4789d-73fd-2275-a4fe-93fe40055e49",
+        "valid_neighbors": [
+          "rime_floor",
+          "ice",
+          "snow",
+          "rocks"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "",
+        "color": "#6e6257",
+        "name": "road_ash",
+        "place_order": 0,
+        "prompt": "trodden grey cinders and coarse ash grit, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 1.15,
+        "sync_uuid": "80e91ad6-82b5-e3dd-aeba-005cb5cbf85b",
+        "valid_neighbors": [],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "",
+        "color": "#b08d5e",
+        "name": "road_dirt",
+        "place_order": 0,
+        "prompt": "dry tan earth with fine gravel and dust, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 1.15,
+        "sync_uuid": "e353c176-ebf8-dbee-468d-45c409766d3d",
+        "valid_neighbors": [],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "",
+        "color": "#e0c27a",
+        "name": "road_sand",
+        "place_order": 0,
+        "prompt": "dry pale desert sand, wind-scoured grit, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 1.1,
+        "sync_uuid": "c8c90bbb-04a4-db4d-7736-79300264ecac",
+        "valid_neighbors": [],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "",
+        "color": "#8fa3b3",
+        "name": "road_snow",
+        "place_order": 0,
+        "prompt": "grey-blue slush over packed snow, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 1.1,
+        "sync_uuid": "da73a285-c5fb-4b55-6a72-e80f7cc794d2",
+        "valid_neighbors": [],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "",
+        "color": "#9a958b",
+        "name": "road_stone",
+        "place_order": 0,
+        "prompt": "dressed pale flagstone paving, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 1.2,
+        "sync_uuid": "9490cfec-0e64-9e2f-943a-d930cb992c09",
+        "valid_neighbors": [],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Arid Dunes",
+        "color": "#808080",
+        "name": "rocks",
+        "place_order": 0,
+        "prompt": "grey rocky stone ground, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.8,
+        "sync_uuid": "c2d7485f-86a2-0b54-da29-4c1254f227e5",
+        "valid_neighbors": [
+          "rocks",
+          "earth",
+          "snow",
+          "dirt"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Deepvault",
+        "color": "#57524a",
+        "name": "rubble",
+        "place_order": 0,
+        "prompt": "impassable heap of collapsed rubble, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 1,
+        "sync_uuid": "7469b698-7e8a-70e4-b9c6-57b21a8aa83b",
+        "valid_neighbors": [
+          "rubble",
+          "cave_floor",
+          "cobblestone",
+          "rocks"
+        ],
+        "walkable": false,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Sunken Ruins",
+        "color": "#8a8577",
+        "name": "ruin_stone",
+        "place_order": 0,
+        "prompt": "cracked weathered ruin flagstones, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.9,
+        "sync_uuid": "38ecdbf1-7d85-cb4f-27ff-f1731e8bafd4",
+        "valid_neighbors": [
+          "ruin_stone",
+          "rocks",
+          "earth",
+          "cobblestone"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Fallen Sanctum",
+        "color": "#b8a97a",
+        "name": "sanctum_floor",
+        "place_order": 0,
+        "prompt": "cream marble slabs with thin gold veins, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 1,
+        "sync_uuid": "490004a6-8e86-6b3c-40b2-0bb4305fa717",
+        "valid_neighbors": [
+          "sanctum_floor",
+          "cobblestone",
+          "ruin_stone"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Arid Dunes",
+        "color": "#FFFF00",
+        "name": "sand",
+        "place_order": 0,
+        "prompt": "fine golden beach sand, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.6,
+        "sync_uuid": "713370f1-4fc1-28d2-acb5-f382793af616",
+        "valid_neighbors": [
+          "sand",
+          "grass",
+          "earth",
+          "water"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Frozen Waste",
+        "color": "#FFFFFF",
+        "name": "snow",
+        "place_order": 0,
+        "prompt": "fresh white snow with fine granular texture, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.5,
+        "sync_uuid": "d881fff9-95df-15ec-91c6-ee6a81ec2577",
+        "valid_neighbors": [
+          "snow",
+          "rocks",
+          "ice"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Storm Coast",
+        "color": "#6b7280",
+        "name": "storm_shingle",
+        "place_order": 0,
+        "prompt": "wet dark pebbles and shingle stones, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.6,
+        "sync_uuid": "001e9a04-7ed1-35e4-c9f2-2393c2cb380e",
+        "valid_neighbors": [
+          "storm_shingle",
+          "sand",
+          "water",
+          "rocks"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Mire",
+        "color": "#4d7c0f",
+        "name": "swamp",
+        "place_order": 0,
+        "prompt": "murky green-brown mud with algae scum, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.1,
+        "sync_uuid": "2a76f982-c359-5c97-f1f1-c7e2e718da32",
+        "valid_neighbors": [
+          "swamp",
+          "earth",
+          "dirt",
+          "water",
+          "highgrass"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Grave of Titans",
+        "color": "#7a7266",
+        "name": "titan_floor",
+        "place_order": 0,
+        "prompt": "colossal weathered titan masonry, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 1,
+        "sync_uuid": "4fe55562-71fa-6c8f-00ef-08d7e2a3b8e5",
+        "valid_neighbors": [
+          "titan_floor",
+          "ruin_stone",
+          "rocks"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Umbral Warren",
+        "color": "#2e2a35",
+        "name": "umbral_floor",
+        "place_order": 0,
+        "prompt": "lightless violet-black stone, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.9,
+        "sync_uuid": "b9f41c4e-b33e-970d-f944-0e65332ded85",
+        "valid_neighbors": [
+          "umbral_floor",
+          "cave_floor",
+          "void_floor",
+          "rocks"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Deepvault",
+        "color": "#4f5560",
+        "name": "vault_floor",
+        "place_order": 0,
+        "prompt": "flat riveted steel plates bolted flush together, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 1,
+        "sync_uuid": "c23feeb8-bfdb-e0d4-4b60-c47146a61585",
+        "valid_neighbors": [
+          "vault_floor",
+          "cobblestone",
+          "foundry_floor",
+          "rocks"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "",
+        "color": "#c9a24b",
+        "name": "village_gate",
+        "place_order": 0,
+        "prompt": "heavy timber gate with iron bands, flat material surface, straight-on view, fills the entire frame, even flat lighting, no shadows, pixel art",
+        "speed": 1,
+        "sync_uuid": "8a38e0e3-ddc5-f01b-20d9-e4ebf8a8bbb5",
+        "valid_neighbors": [],
+        "walkable": true,
+        "wall_height": 24
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Abyssal Rift",
+        "color": "#1c1a24",
+        "name": "void_floor",
+        "place_order": 0,
+        "prompt": "matte black surface with faint dark speckles, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.9,
+        "sync_uuid": "59b1f621-a625-3ca4-051c-4c64a1a61894",
+        "valid_neighbors": [
+          "void_floor",
+          "umbral_floor",
+          "chaos_floor"
+        ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "Mire",
+        "color": "#3b82f6",
+        "name": "water",
+        "place_order": 0,
+        "prompt": "clear blue water surface, scattered foam flecks, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0,
+        "sync_uuid": "19c2e1a4-65d7-8e69-dfc7-f561bc311ad6",
+        "valid_neighbors": [
+          "water",
+          "sand",
+          "ice",
+          "swamp"
+        ],
+        "walkable": false,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "",
+        "color": "#6b4a2a",
+        "name": "wooden_wall",
+        "place_order": 0,
+        "prompt": "vertical wooden plank wall, flat material surface, straight-on view, fills the entire frame, even flat lighting, no shadows, pixel art",
+        "speed": 1,
+        "sync_uuid": "c4df73ff-e4ae-785c-469a-b7ef76eb9b48",
+        "valid_neighbors": [],
+        "walkable": false,
+        "wall_height": 48
+      }
+    ]
+  }
+}
