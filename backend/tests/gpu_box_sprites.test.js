@@ -73,6 +73,15 @@ test('generateConcept ties the concept to the task result.url and never lists as
   assert.equal(calls.filter((c) => c.key.includes('task-status')).length, 3);
 });
 
+test('generateConcept omits llm_name when the provider has no model', async () => {
+  const { fetchImpl, calls } = fakeBox(conceptRoutes([fx('task-status-done.json')]));
+  const r = await box.generateConcept({ ...provider, model: null }, { prompt: 'a pine tree' }, { fetchImpl, sleep });
+  assert.equal(r.ok, true);
+  const form = new URLSearchParams(String(calls[0].body));
+  assert.equal(form.get('prompt'), 'a pine tree');
+  assert.equal(form.has('llm_name'), false);
+});
+
 test('generateConcept fails with the box words when the task fails', async () => {
   const failed = { task_id: 't', status: 'FAILURE', result: { error: 'CUDA out of memory' } };
   const { fetchImpl } = fakeBox(conceptRoutes([failed]));

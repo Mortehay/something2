@@ -402,15 +402,16 @@ async function fetchJobDocument(jobId) {
   return spriteGen.getJob(jobId);
 }
 let spriteGen = require('./services/spriteGen');
-const spriteDispatcher = createSpriteDispatcher({
-  db: guardPool,
-  spriteGen: {
-    postGenerate: (...args) => spriteGen.postGenerate(...args),
-    getJob: (...args) => spriteGen.getJob(...args),
-  },
-});
 const __setSpriteGen = (impl) => { spriteGen = impl; };
 const assetStore = require('./services/assetStore');
+// The batch queue runs on the GPU box (active modality='sprite' provider);
+// the single-entity /api/sprite-jobs paths keep using spriteGen.
+const spriteDispatcher = createSpriteDispatcher({
+  db: guardPool,
+  box: require('./services/gpuBoxSprites'),
+  loadProvider: () => aiProviders.loadActiveProviderWithSecret(guardPool, 'sprite'),
+  store: assetStore,
+});
 
 // DI seam, same shape as __setPool/__setSpriteGen above: tests inject a fake
 // runner to exercise runMigrations()'s success/failure paths without hitting

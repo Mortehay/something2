@@ -81,7 +81,10 @@ async function actionCatalog(provider, { fetchImpl = fetch } = {}) {
 async function generateConcept(provider, { prompt }, {
   fetchImpl = fetch, sleep = realSleep, pollMs = POLL_MS(), timeoutMs = CONCEPT_TIMEOUT_MS(),
 } = {}) {
-  const form = new URLSearchParams({ prompt, llm_name: provider.model || '' });
+  // No model on the provider -> no llm_name, so the box uses its own default
+  // instead of being told to load a model named "".
+  const form = new URLSearchParams({ prompt });
+  if (provider.model) form.set('llm_name', provider.model);
   const sub = await callJson(provider, 'POST', '/api/generate_core', {
     body: form.toString(),
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
