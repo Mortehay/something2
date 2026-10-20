@@ -80,3 +80,16 @@ review the fixture diff with them. `backend/tests/world_gen_ref_integrity.test.j
 checks every sha256 value above (reference, box capture and fixtures) and
 that every fixture parses; it needs neither
 python nor a database.
+
+## Drift check against the live box (SOMET-645)
+
+`node tools/world_gen_ref/drift-probe.js` (from `backend/`, `GAME_DB_URL` pointing at a DB with the
+GPU-box `ai_providers` row) rebuilds every region stored on the box from its stored params — and its
+stored `biome_plan` for LLM-authored regions — and compares sha256 with the box's `ETag`. Read-only.
+Any `DIFFERS` means the box generator has moved past the vendored commit: re-sync as above.
+
+Verified 2026-10-20 against the box (Python 3.11.16, 192.168.0.218): all 4 stored regions MATCH
+(2 rules-authored, 2 LLM-authored), and a fresh throwaway region with non-default
+`chunk_size: 16, biome_cell: 64, size: 96, worlds: 7, target_per_screen: 8` matched the stored-bytes
+ETag and the report text byte for byte. Note: the box's `POST /api/worlds` does not accept a
+`biome_plan` (it echoes `null`); the local route likewise reports it as ignored.
