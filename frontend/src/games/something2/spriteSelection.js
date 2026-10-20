@@ -1,3 +1,5 @@
+import { PAGE_SIZE, clampPage, pageCount } from './artSelection.js';
+
 export function spriteShape(subject) {
   return subject.is_creature || subject.is_playable ? 'directional' : 'flat';
 }
@@ -37,3 +39,28 @@ export function targetsForSprites(selectedRows) {
   }));
 }
 
+
+// One page of the filtered table. The page is clamped, not trusted: approving
+// the last "ready for review" rows while sitting on page 3 must not leave an
+// empty table with no way back. Paging rules are shared with the Art console.
+export function spritePage(matching, page) {
+  const shown = clampPage(page, matching.length);
+  return {
+    page: shown,
+    pages: pageCount(matching.length),
+    rows: matching.slice((shown - 1) * PAGE_SIZE, shown * PAGE_SIZE),
+  };
+}
+
+// The header checkbox means THIS PAGE, distinct from "select all matching".
+export function setSpritePageSelected(selected, pageRows, on) {
+  const next = new Set(selected);
+  for (const subject of pageRows) {
+    if (on) next.add(subject.id); else next.delete(subject.id);
+  }
+  return next;
+}
+
+export function isSpritePageSelected(selected, pageRows) {
+  return pageRows.length > 0 && pageRows.every((subject) => selected.has(subject.id));
+}

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { filterSpriteSubjects, selectAllSpriteSubjects, targetsForSprites } from '../spriteSelection.js';
+import {
+  filterSpriteSubjects, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
+  targetsForSprites,
+} from '../spriteSelection.js';
+import { PAGE_SIZE } from '../artSelection.js';
 
 const rows = [
   { id: 1, name: 'Wolf', is_creature: true, render_mode: 'static', sprite: null, image: '' },
@@ -39,3 +43,38 @@ describe('sprite console enqueue targets', () => {
   });
 });
 
+
+describe('sprite console paging', () => {
+  const many = Array.from({ length: PAGE_SIZE * 2 + 5 }, (_, i) => ({ id: i + 1, name: `e${i + 1}` }));
+
+  it('slices the requested page and counts pages', () => {
+    const { page, pages, rows: shown } = spritePage(many, 2);
+    expect([page, pages, shown.length]).toEqual([2, 3, PAGE_SIZE]);
+    expect(shown[0].id).toBe(PAGE_SIZE + 1);
+  });
+
+  it('clamps a page past the end to the last page instead of showing nothing', () => {
+    const { page, rows: shown } = spritePage(many.slice(0, 10), 3);
+    expect(page).toBe(1);
+    expect(shown.map((r) => r.id)).toEqual(many.slice(0, 10).map((r) => r.id));
+  });
+
+  it('has one empty page when nothing matches', () => {
+    expect(spritePage([], 1)).toEqual({ page: 1, pages: 1, rows: [] });
+  });
+
+  it('selects and deselects only the rows on the page, keeping others', () => {
+    const pageRows = spritePage(many, 1).rows;
+    const outside = many[PAGE_SIZE + 3].id;
+    const on = setSpritePageSelected(new Set([outside]), pageRows, true);
+    expect(on.size).toBe(PAGE_SIZE + 1);
+    expect(isSpritePageSelected(on, pageRows)).toBe(true);
+    const off = setSpritePageSelected(on, pageRows, false);
+    expect([...off]).toEqual([outside]);
+    expect(isSpritePageSelected(off, pageRows)).toBe(false);
+  });
+
+  it('never reports an empty page as fully selected', () => {
+    expect(isSpritePageSelected(new Set([1]), [])).toBe(false);
+  });
+});

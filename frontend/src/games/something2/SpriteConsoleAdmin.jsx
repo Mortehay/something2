@@ -7,7 +7,8 @@ import {
   useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
 } from './useSpriteConsole.js';
 import {
-  filterSpriteSubjects, selectAllSpriteSubjects, spriteShape, targetsForSprites, toggleSpriteSubject,
+  filterSpriteSubjects, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
+  spriteShape, targetsForSprites, toggleSpriteSubject,
 } from './spriteSelection.js';
 
 const Wrap = styled.div`
@@ -54,6 +55,7 @@ const Pill = styled.span`
   color: var(--s2-text-muted); background: var(--s2-bg-sunken); font-size: 0.75rem;
 `;
 const ErrorText = styled.span`color: var(--s2-danger);`;
+const Pager = styled.div`display: flex; gap: 0.5rem; align-items: center; margin: 0.75rem 0;`;
 
 function derivedFrames(subject) {
   return spriteShape(subject) === 'directional' || subject.render_mode === 'animated' ? 4 : 1;
@@ -66,6 +68,7 @@ function SpriteConsoleAdmin() {
   const [shape, setShape] = useState('all');
   const [status, setStatus] = useState('missing');
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
   const [selected, setSelected] = useState(new Set());
   const queue = useQueueSprites();
   const start = useStartSpriteBatch();
@@ -78,6 +81,9 @@ function SpriteConsoleAdmin() {
     () => filterSpriteSubjects(subjects, { shape, status, search }),
     [subjects, shape, status, search],
   );
+  const shown = spritePage(matching, page);
+  // A filter change starts from page 1; page 4 of the old filter means nothing.
+  const filter = (set) => (event) => { set(event.target.value); setPage(1); };
   const selectedRows = subjects.filter((subject) => selected.has(subject.id));
   const approvable = selectedRows.filter((subject) => subject.job_state === 'done' && subject.job_id);
 
@@ -88,6 +94,15 @@ function SpriteConsoleAdmin() {
   const approveSelected = () => approve.mutate(
     approvable.map((subject) => subject.job_id),
     { onSuccess: () => setSelected(new Set()) },
+  );
+
+  // Above AND below the table: at 100 rows the bottom copy is far down the page.
+  const pager = shown.pages > 1 && (
+    <Pager>
+      <Secondary onClick={() => setPage(shown.page - 1)} disabled={shown.page <= 1}>Prev</Secondary>
+      <span>Page {shown.page} of {shown.pages}</span>
+      <Secondary onClick={() => setPage(shown.page + 1)} disabled={shown.page >= shown.pages}>Next</Secondary>
+    </Pager>
   );
 
   if (isLoading) return <Wrap><AdminLoading label="Loading sprite subjects…" /></Wrap>;
@@ -113,14 +128,14 @@ function SpriteConsoleAdmin() {
 
       <Bar>
         <Field>Shape
-          <select value={shape} onChange={(event) => setShape(event.target.value)}>
+          <select value={shape} onChange={filter(setShape)}>
             <option value="all">All shapes</option>
             <option value="directional">Directional creatures</option>
             <option value="flat">Flat props</option>
           </select>
         </Field>
         <Field>Status
-          <select value={status} onChange={(event) => setStatus(event.target.value)}>
+          <select value={status} onChange={filter(setStatus)}>
             <option value="missing">Missing visual</option>
             <option value="queued">Queued</option>
             <option value="running">Running</option>
@@ -131,7 +146,7 @@ function SpriteConsoleAdmin() {
           </select>
         </Field>
         <Field>Search
-          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="entity name" />
+          <input value={search} onChange={filter(setSearch)} placeholder="entity name" />
         </Field>
       </Bar>
 
@@ -158,14 +173,17 @@ function SpriteConsoleAdmin() {
       </Bar>
 
       <Hint>{matching.length} matching · {selected.size} selected</Hint>
+      {pager}
       <TableWrap>
         <Table>
           <thead><tr>
-            <th aria-label="Select" />
+            <th><input type="checkbox" aria-label="Select this page"
+              checked={isSpritePageSelected(selected, shown.rows)}
+              onChange={(event) => setSelected(setSpritePageSelected(selected, shown.rows, event.target.checked))} /></th>
             <th>Preview</th><th>Entity</th><th>Shape</th><th>Frames</th><th>Backend</th><th>Status</th><th>Prompt</th>
           </tr></thead>
           <tbody>
-            {matching.map((subject) => {
+            {shown.rows.map((subject) => {
               const preview = subject.image_key || subject.atlas_key || subject.image;
               return (
                 <tr key={subject.id}>
@@ -186,6 +204,7 @@ function SpriteConsoleAdmin() {
           </tbody>
         </Table>
       </TableWrap>
+      {pager}
     </Wrap>
   );
 }
