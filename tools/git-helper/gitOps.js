@@ -118,6 +118,9 @@ function createGitOps({ root }) {
       throw new GitRefusal('dirty', 'The working tree has uncommitted changes; commit or discard them before pulling.');
     }
     if (!s.upstream) throw new GitRefusal('no_upstream', 'The current branch has no upstream to pull from.');
+    if (s.ahead > 0 && s.behind > 0) {
+      throw new GitRefusal('diverged', 'Local and remote have diverged; resolve this in a terminal.');
+    }
     return result('pull', await git(['pull', '--ff-only']));
   });
 

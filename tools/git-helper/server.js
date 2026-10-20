@@ -10,6 +10,7 @@ const { execFileSync } = require('node:child_process');
 const { createGitOps, GitRefusal } = require('./gitOps');
 
 const MAX_BODY = 64 * 1024;
+const MAX_SOCK_PATH = 107;
 
 function tokenOk(given, expected) {
   if (typeof given !== 'string') return false;
@@ -80,6 +81,11 @@ function createServer({ root, runDir, port } = {}) {
       if (inside !== 'true') throw new Error('no');
     } catch {
       throw new Error(`${repoRoot} is not a git work tree`);
+    }
+    // sun_path holds 107 bytes + NUL; listen() would silently truncate a longer path.
+    if (!tcpPort && Buffer.byteLength(sockPath) > MAX_SOCK_PATH) {
+      throw new Error(`socket path ${sockPath} is ${Buffer.byteLength(sockPath)} bytes, over the ${MAX_SOCK_PATH}-byte unix socket limit; `
+        + 'set GIT_HELPER_RUN_DIR to a shorter directory, or use GIT_HELPER_PORT');
     }
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     fs.chmodSync(dir, 0o700);

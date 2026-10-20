@@ -33,8 +33,8 @@ describe('GitStripView', () => {
     expect(btn(html, 'Commit seeds…')).not.toContain('disabled');
   });
   it('behind: push blocked with pull first, pull enabled', () => {
-    const html = view({ ...ok, ahead: 1, behind: 3 });
-    expect(html).toContain('↑1 ↓3');
+    const html = view({ ...ok, behind: 3 });
+    expect(html).toContain('↑0 ↓3');
     expect(btn(html, 'Push…')).toContain('Behind origin — pull first');
     expect(btn(html, 'Pull…')).not.toContain('disabled');
   });
@@ -51,6 +51,16 @@ describe('gitConfirmText', () => {
   it('says exactly what will happen', () => {
     expect(gitConfirmText('pull', { ...ok, behind: 3 })).toBe('Fast-forward 3 commits from origin/main.');
     expect(gitConfirmText('push', { ...ok, ahead: 1 })).toBe('Push 1 commit to origin/main.');
+    // the helper always pushes origin/<branch>, whatever the upstream is
+    expect(gitConfirmText('push', { ...ok, ahead: 1, branch: 'feat/x', upstream: 'fork/other' })).toBe('Push 1 commit to origin/feat/x.');
     expect(gitConfirmText('commit', { ...ok, seedsDirty: ['a', 'b'] })).toContain('2 files under backend/seeds/');
+  });
+});
+
+describe('GitStripView diverged', () => {
+  it('blocks pull and push with the terminal hint', () => {
+    const html = view({ ...ok, ahead: 1, behind: 3 });
+    expect(btn(html, 'Pull…')).toContain('diverged');
+    expect(btn(html, 'Push…')).toContain('diverged');
   });
 });

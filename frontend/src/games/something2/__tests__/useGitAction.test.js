@@ -29,6 +29,16 @@ describe('git actions when the helper is down', () => {
       message: 'git pull failed: fatal: Not possible to fast-forward, aborting.', code: 'git_failed', status: 502,
     });
   });
+  it('a git busy refusal with no job reads as words, not the bare code', async () => {
+    reply(409, { error: 'busy', job: null, message: 'Another git action or seed job is running' });
+    await expect(gitRequest('pull')).rejects.toMatchObject({ message: 'Another git action or seed job is running', code: 'busy' });
+  });
+  it('a 503 that happened mid-action says the result is unknown', async () => {
+    reply(503, { error: 'helper_unavailable', midAction: true, message: 'git helper unreachable: ECONNRESET' });
+    await expect(gitRequest('push')).rejects.toMatchObject({
+      message: 'Git helper stopped mid-action — result unknown; Fetch to check.', code: 'helper_unavailable', status: 503,
+    });
+  });
   it('commit sends the message as the body', async () => {
     reply(200, { ok: true });
     await gitRequest('commit', 'seed export: a');

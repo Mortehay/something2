@@ -156,6 +156,18 @@ test('pull fast-forwards when clean, and never merges a diverged branch (--ff-on
   assert.equal(git(a, 'rev-list', '--merges', '--count', 'HEAD'), '0');
 });
 
+test('pull is refused when diverged, before running git pull', async (t) => {
+  const { a, b, ops } = fixture(t);
+  write(b, 'b3.txt', '1\n');
+  git(b, 'add', '-A'); git(b, 'commit', '-m', 'b3'); git(b, 'push');
+  write(a, 'a3.txt', '1\n');
+  git(a, 'add', '-A'); git(a, 'commit', '-m', 'a3');
+  git(a, 'fetch');
+  const head = git(a, 'rev-parse', 'HEAD');
+  await assert.rejects(ops.pull(), (e) => refusal('diverged')(e) && /terminal/i.test(e.message));
+  assert.equal(git(a, 'rev-parse', 'HEAD'), head);
+});
+
 test('push sends the current branch; refused when behind or diverged', async (t) => {
   const { a, b, origin, ops } = fixture(t);
   write(a, 'local.txt', 'y\n');
@@ -269,4 +281,23 @@ test('server refuses to start outside a git work tree', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'git-helper-notrepo-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   await assert.rejects(createServer({ root: dir, runDir: path.join(dir, 'run') }).start(), /not a git work tree/);
+});
+
+test('server refuses a unix socket path over the sun_path limit and creates nothing', async (t) => {
+  const { spawnSync } = require('node:child_process');
+  const { a } = fixture(t);
+  const long = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-'));
+  t.after(() => fs.rmSync(long, { recursive: true, force: true }));
+  const runDir = path.join(long, 'x'.repeat(100));
+  const r = spawnSync(process.execPath, [path.join(__dirname, 'server.js')], {
+    env: { ...process.env, GIT_HELPER_ROOT: a, GIT_HELPER_RUN_DIR: runDir, GIT_HELPER_PORT: '' },
+    encoding: 'utf8', timeout: 15000,
+  });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /git-helper\.sock/);
+  assert.match(r.stderr, /GIT_HELPER_RUN_DIR/);
+  assert.match(r.stderr, /GIT_HELPER_PORT/);
+  assert.match(r.stderr, /107/);
+  assert.equal(fs.existsSync(runDir), false, 'no run dir, token or socket is created');
+  assert.deepEqual(fs.readdirSync(long), [], 'no stray (truncated) socket anywhere under the tmp dir');
 });

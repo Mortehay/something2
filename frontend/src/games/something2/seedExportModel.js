@@ -442,6 +442,8 @@ export const pickedRows = (visible, picked) => visible.filter((r) => picked.has(
 // ahead, behind, seedsDirty, otherDirty, headSubject, lastFetchAt,
 // suggestedMessage } or { available:false, hint }.
 export const GIT_UNAVAILABLE_TEXT = 'Git buttons need the git helper: run `make git-helper`';
+export const GIT_MID_ACTION_TEXT = 'Git helper stopped mid-action — result unknown; Fetch to check.';
+const DIVERGED_TEXT = 'Local and origin have diverged — resolve in a terminal';
 const syncPath = (id) => `backend/seeds/sync/${id}.json`;
 
 export function gitStripText(s) {
@@ -454,11 +456,13 @@ export function gitActionStates(s, jobIsRunning) {
   const seedsN = (s.seedsDirty || []).length;
   const dirty = seedsN + (s.otherDirty || []).length > 0;
   const busy = jobIsRunning ? BUSY_TEXT : null;
+  const diverged = (s.ahead || 0) > 0 && (s.behind || 0) > 0 ? DIVERGED_TEXT : null;
   return {
-    pull: { reason: busy || (dirty ? 'Uncommitted changes in the working tree — commit or discard them first' : null) },
+    pull: { reason: busy || diverged || (dirty ? 'Uncommitted changes in the working tree — commit or discard them first' : null) },
     commit: { reason: busy || (seedsN === 0 ? 'No seed changes to commit' : null) },
     push: {
       reason: busy
+        || diverged
         || ((s.behind || 0) > 0 ? 'Behind origin — pull first' : null)
         || ((s.ahead || 0) === 0 ? 'Nothing to push' : null),
     },

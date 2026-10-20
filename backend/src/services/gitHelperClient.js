@@ -14,8 +14,11 @@ const TIMEOUT_MS = 90000; // the helper's own git timeout is 60 s
 const HINT = 'Run make git-helper on this PC';
 
 class HelperUnavailable extends Error {
-  constructor(message) {
+  // midAction: the request had been sent when the helper went away, so the
+  // git action may or may not have happened.
+  constructor(message, { midAction = false } = {}) {
     super(message);
+    this.midAction = midAction;
     this.name = 'HelperUnavailable';
     this.code = 'helper_unavailable';
   }
@@ -48,12 +51,15 @@ function call(method, route, payload) {
         try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { /* non-JSON answer */ }
         // A wrong token means the helper restarted since the file was read.
         if (res.statusCode === 401) return reject(new HelperUnavailable('git helper rejected the token'));
-        if (!body) return reject(new HelperUnavailable('git helper sent an unreadable answer'));
+        if (!body) return reject(new HelperUnavailable('git helper sent an unreadable answer', { midAction: true }));
         return resolve({ status: res.statusCode, body });
       });
     });
     req.on('timeout', () => req.destroy(new Error('timeout')));
-    req.on('error', (e) => reject(new HelperUnavailable(`git helper unreachable: ${e.code || e.message}`)));
+    // ECONNREFUSED / ENOENT mean nothing was sent; anything else (reset, hang
+    // up, timeout) happened with the request in flight.
+    req.on('error', (e) => reject(new HelperUnavailable(`git helper unreachable: ${e.code || e.message}`,
+      { midAction: !['ECONNREFUSED', 'ENOENT', 'EACCES'].includes(e.code) })));
     if (data) req.write(data);
     req.end();
   });

@@ -6,7 +6,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import toast from "react-hot-toast";
 import { authHeaders, apiFetch } from "./src/js/net/auth.js";
 import { API_URL } from "../../config.js";
-import { refusalText, jobSettled, jobPollInterval, BUSY_TEXT, GIT_UNAVAILABLE_TEXT } from "./seedExportModel.js";
+import { refusalText, jobSettled, jobPollInterval, BUSY_TEXT, GIT_UNAVAILABLE_TEXT, GIT_MID_ACTION_TEXT } from "./seedExportModel.js";
 
 const BASE = `${API_URL}/api/seed-export`;
 export const GROUPS_KEY = ["seed-groups"];
@@ -42,7 +42,8 @@ async function call(path, { method = "GET", body, label } = {}) {
       throw err;
     }
     if (path.startsWith("/git/") && (json.error === "helper_unavailable" || json.message)) {
-      const err = new Error(json.error === "helper_unavailable" ? GIT_UNAVAILABLE_TEXT : json.message);
+      const unavailable = json.midAction ? GIT_MID_ACTION_TEXT : GIT_UNAVAILABLE_TEXT;
+      const err = new Error(json.error === "helper_unavailable" ? unavailable : json.message);
       err.code = json.error;
       err.status = res.status;
       throw err;

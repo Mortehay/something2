@@ -30,7 +30,9 @@ function fakeHelper(dir, handlers) {
       const rec = { method: req.method, url: req.url, token: req.headers['x-git-helper-token'], body: raw ? JSON.parse(raw) : null };
       calls.push(rec);
       const h = handlers[`${req.method} ${req.url}`];
-      const [code, body] = h ? await h(rec) : [404, { error: 'not_found' }];
+      const out = h ? await h(rec) : [404, { error: 'not_found' }];
+      if (out === 'destroy') { req.socket.destroy(); return; } // helper dies mid-request
+      const [code, body] = out;
       const data = JSON.stringify(body);
       res.writeHead(code, { 'Content-Type': 'application/json' });
       res.end(data);
@@ -248,6 +250,29 @@ gitTest('actions answer 503 helper_unavailable when the helper is down, and rele
   const runs = await gitRuns(pool, watermark);
   assert.deepStrictEqual(runs.map((r) => [r.action, r.status]), [['git_pull', 'failed'], ['git_commit', 'failed'], ['git_push', 'failed']]);
 }, { helper: false });
+
+gitTest('a helper that drops the connection mid-action is a 503 flagged midAction; a missing token is not', async ({ app, admin, tokenFile }) => {
+  const h = { Authorization: admin.auth };
+  const mid = await request(app).post(`${U}/push`).set(h);
+  assert.strictEqual(mid.status, 503);
+  assert.strictEqual(mid.body.error, 'helper_unavailable');
+  assert.strictEqual(mid.body.midAction, true);
+  assert.strictEqual(jobs.isBusy(), false);
+  fs.rmSync(tokenFile);
+  const before = await request(app).post(`${U}/push`).set(h);
+  assert.strictEqual(before.status, 503);
+  assert.ok(!before.body.midAction, 'token missing before sending is not mid-action');
+}, { handlers: { 'POST /push': () => 'destroy' } });
+
+gitTest('a busy refusal with no running job carries a readable message', async ({ app, admin }) => {
+  const release = jobs.holdExternal('other');
+  try {
+    const res = await request(app).post(`${U}/fetch`).set('Authorization', admin.auth);
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.error, 'busy');
+    assert.strictEqual(res.body.message, 'Another git action or seed job is running');
+  } finally { release(); }
+}, { handlers: {} });
 
 gitTest('a git action is refused 409 busy while a seed job runs', async ({ pool, app, admin, helper, watermark }) => {
   let release;

@@ -21,7 +21,7 @@ const Msg = styled.textarea`
 // What each confirm dialog says it will do.
 export function gitConfirmText(op, s) {
   if (op === 'pull') return `Fast-forward ${pluralize(s.behind, 'commit')} from ${s.upstream || `origin/${s.branch}`}.`;
-  if (op === 'push') return `Push ${pluralize(s.ahead, 'commit')} to ${s.upstream || `origin/${s.branch}`}.`;
+  if (op === 'push') return `Push ${pluralize(s.ahead, 'commit')} to origin/${s.branch}.`;
   return `Commit ${pluralize((s.seedsDirty || []).length, 'file')} under backend/seeds/ on ${s.branch}. Nothing else is staged.`;
 }
 

@@ -222,7 +222,7 @@ module.exports = function seedExportRoutes(pool, { processStartedAt, store, boxD
   // jobs.holdExternal). runAction records a seed_export_runs row (group 'git').
   async function gitAction(res, name, runAction, call) {
     const release = jobs.holdExternal(`git ${name}`);
-    if (!release) return res.status(409).json({ error: 'busy', job: jobs.busyDetails().job });
+    if (!release) return res.status(409).json({ error: 'busy', job: jobs.busyDetails().job, message: 'Another git action or seed job is running' });
     let runId = null;
     try {
       if (runAction) runId = await startRun(pool, 'git', runAction);
@@ -230,7 +230,7 @@ module.exports = function seedExportRoutes(pool, { processStartedAt, store, boxD
       try { out = await call(); } catch (err) {
         if (runId) await finishRun(pool, runId, { status: 'failed', error: err.message });
         if (err instanceof git.HelperUnavailable) {
-          return res.status(503).json({ error: 'helper_unavailable', message: err.message, hint: git.HINT });
+          return res.status(503).json({ error: 'helper_unavailable', message: err.message, hint: git.HINT, ...(err.midAction ? { midAction: true } : {}) });
         }
         throw err;
       }

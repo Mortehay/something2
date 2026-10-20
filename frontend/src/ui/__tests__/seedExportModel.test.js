@@ -604,8 +604,14 @@ describe('gitActionStates (SOMET-642)', () => {
     expect(gitActionStates(st({ seedsDirty: ['a'], otherDirty: ['b'] }), false).commit.reason).toBeNull();
   });
   it('push is blocked when behind (pull first) and enabled when only ahead', () => {
-    expect(gitActionStates(st({ ahead: 1, behind: 2 }), false).push.reason).toMatch(/pull first/i);
+    expect(gitActionStates(st({ behind: 2 }), false).push.reason).toMatch(/pull first/i);
     expect(gitActionStates(st({ ahead: 1 }), false).push.reason).toBeNull();
+  });
+  it('diverged (ahead and behind) blocks pull and push with a terminal hint', () => {
+    const a = gitActionStates(st({ ahead: 1, behind: 2 }), false);
+    expect(a.pull.reason).toMatch(/diverged.*terminal/i);
+    expect(a.push.reason).toMatch(/diverged.*terminal/i);
+    expect(gitActionStates(st({ behind: 2 }), false).pull.reason).toBeNull();
   });
   it('a running job disables all three with the busy text', () => {
     const a = gitActionStates(st({ ahead: 1, seedsDirty: ['a'] }), true);
