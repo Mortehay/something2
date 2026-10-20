@@ -57,6 +57,14 @@ function refuseIfBusy() {
   if (jobs.isBusy()) throw new SyncRefused('busy', 'another export or seed is running', jobs.busyDetails());
 }
 
+// Synchronous (non-job) export / seed: hold the runner for the whole call so a
+// git action cannot start beside it (SOMET-649). -> release().
+function holdSync(label) {
+  const release = jobs.holdExternal(label);
+  if (!release) throw new SyncRefused('busy', 'another export or seed is running', jobs.busyDetails());
+  return release;
+}
+
 // opts.store: the object store binary groups read / write (default: the
 // engine's, assetStore.js); tests inject a fake.
 module.exports = function seedExportRoutes(pool, { processStartedAt, store, boxDeps } = {}) {
@@ -133,7 +141,8 @@ module.exports = function seedExportRoutes(pool, { processStartedAt, store, boxD
       });
       return res.status(202).json({ job });
     }
-    res.json(await exportGroup(pool, groupId));
+    const release = holdSync(`export ${groupId}`);
+    try { res.json(await exportGroup(pool, groupId)); } finally { release(); }
   }));
 
   router.post('/groups/:id/seed', withGroup(async (req, res) => {
@@ -156,7 +165,8 @@ module.exports = function seedExportRoutes(pool, { processStartedAt, store, boxD
       });
       return res.status(202).json({ job });
     }
-    res.json(await applySeed(pool, groupId, decisions, { signature }));
+    const release = holdSync(`seed ${groupId}`);
+    try { res.json(await applySeed(pool, groupId, decisions, { signature })); } finally { release(); }
   }));
 
   // null until the first job of this process; the last job stays visible
@@ -199,7 +209,15 @@ module.exports = function seedExportRoutes(pool, { processStartedAt, store, boxD
       if (err instanceof git.HelperUnavailable) return res.json(unavailable);
       throw err;
     }
-    if (out.status !== 200) return res.json(unavailable);
+    if (out.status === 503 && out.body && out.body.error === 'shutting_down') return res.json(unavailable);
+    if (out.status !== 200) {
+      console.error('git helper status answered', out.status, JSON.stringify(out.body));
+      return res.json({
+        available: false,
+        reason: 'helper_error',
+        hint: 'The git helper is running but git status failed — check the helper log (backend/run/git-helper.log)',
+      });
+    }
     res.json({ available: true, ...out.body, suggestedMessage: git.suggestCommitMessage(out.body.seedsDirty) });
   }));
 
@@ -235,6 +253,18 @@ module.exports = function seedExportRoutes(pool, { processStartedAt, store, boxD
         throw err;
       }
       const { status, body } = out;
+      const shuttingDown = status === 503 && body && body.error === 'shutting_down';
+      const passthrough = [200, 409, 502].includes(status);
+      if (runId && !passthrough) {
+        // Raw helper detail stays in the run row and the log, never the response.
+        await finishRun(pool, runId, { status: 'failed', summary: { output: (body && body.output) || '' }, error: (body && (body.error || body.message)) || `helper answered ${status}` });
+        runId = null;
+      }
+      if (!passthrough) {
+        console.error('git helper answered', status, JSON.stringify(body));
+        if (shuttingDown) return res.status(503).json({ error: 'helper_unavailable', message: 'git helper is shutting down', hint: git.HINT });
+        return res.status(502).json({ error: 'helper_error', message: 'The git helper returned an error' });
+      }
       if (runId) {
         if (status === 200) {
           const head = body.status && body.status.headSubject;

@@ -132,16 +132,21 @@ gitTest('status passes the helper status through with the token and a suggested 
   assert.deepStrictEqual(helper.calls.map((c) => [c.method, c.url, c.token]), [['GET', '/status', TOKEN]]);
 }, { handlers: { 'GET /status': () => [200, STATUS] } });
 
-gitTest('status degrades when the socket or the token is missing', async ({ app, admin, tokenFile }) => {
+gitTest('status degrades when the socket is missing (valid token)', async ({ app, admin }) => {
   const want = { available: false, reason: 'helper_unavailable', hint: 'Run make git-helper on this PC' };
-  const noSock = await request(app).get(`${U}/status`).set('Authorization', admin.auth);
-  assert.strictEqual(noSock.status, 200);
-  assert.deepStrictEqual(noSock.body, want);
-  fs.writeFileSync(tokenFile, 'x');
-  fs.rmSync(tokenFile);
-  const noTok = await request(app).get(`${U}/status`).set('Authorization', admin.auth);
-  assert.deepStrictEqual(noTok.body, want);
+  const res = await request(app).get(`${U}/status`).set('Authorization', admin.auth);
+  assert.strictEqual(res.status, 200);
+  assert.deepStrictEqual(res.body, want);
 }, { helper: false });
+
+gitTest('status degrades when the token is missing (socket present)', async ({ app, admin, tokenFile, helper }) => {
+  const want = { available: false, reason: 'helper_unavailable', hint: 'Run make git-helper on this PC' };
+  fs.rmSync(tokenFile);
+  const res = await request(app).get(`${U}/status`).set('Authorization', admin.auth);
+  assert.strictEqual(res.status, 200);
+  assert.deepStrictEqual(res.body, want);
+  assert.strictEqual(helper.calls.length, 0, 'no request is sent without a token');
+}, { handlers: { 'GET /status': () => [200, STATUS] } });
 
 gitTest('status degrades on a refused connection and on a rejected token', async ({ app, admin, dir }) => {
   const want = { available: false, reason: 'helper_unavailable', hint: 'Run make git-helper on this PC' };
@@ -229,7 +234,7 @@ gitTest('a git failure on the helper is passed through as 502 and recorded faile
   assert.strictEqual(runs[0].summary.output, 'permission denied');
 }, { handlers: { 'POST /push': () => [502, { ok: false, op: 'push', output: 'permission denied', status: {} }] } });
 
-gitTest('commit needs a message, and a bad body from the helper stays a 400', async ({ app, admin, helper }) => {
+gitTest('commit needs a non-empty string message (400, helper never called)', async ({ app, admin, helper }) => {
   const h = { Authorization: admin.auth };
   for (const body of [{}, { message: '' }, { message: '   ' }, { message: 5 }]) {
     const res = await request(app).post(`${U}/commit`).set(h).send(body);
@@ -319,3 +324,99 @@ gitTest('a seed export is refused 409 busy while a git action runs', async ({ po
   assert.strictEqual(jobs.isBusy(), false, 'released after the action');
   void pool;
 }, { handlers: { 'POST /pull': () => handlersRef.pull() } });
+
+gitTest('a helper status 500 on an action becomes 502 helper_error with no raw detail, and the run keeps it', async ({ pool, app, admin, watermark }) => {
+  const res = await request(app).post(`${U}/push`).set('Authorization', admin.auth);
+  assert.strictEqual(res.status, 502);
+  assert.deepStrictEqual(res.body, { error: 'helper_error', message: 'The git helper returned an error' });
+  assert.ok(!res.text.includes('SECRET-STACK'));
+  const runs = await gitRuns(pool, watermark);
+  assert.strictEqual(runs[0].status, 'failed');
+  assert.ok(String(runs[0].error).includes('SECRET-STACK'));
+  assert.strictEqual(jobs.isBusy(), false);
+}, { handlers: { 'POST /push': () => [500, { error: 'SECRET-STACK at /home/x', message: 'boom' }] } });
+
+gitTest('an unexpected helper status (e.g. 418) is also 502 helper_error', async ({ app, admin }) => {
+  const res = await request(app).post(`${U}/fetch`).set('Authorization', admin.auth);
+  assert.strictEqual(res.status, 502);
+  assert.strictEqual(res.body.error, 'helper_error');
+}, { handlers: { 'POST /fetch': () => [418, { error: 'teapot' }] } });
+
+gitTest('a shutting_down helper is 503 helper_unavailable for actions and unavailable for status', async ({ app, admin }) => {
+  const h = { Authorization: admin.auth };
+  const res = await request(app).post(`${U}/pull`).set(h);
+  assert.strictEqual(res.status, 503);
+  assert.strictEqual(res.body.error, 'helper_unavailable');
+  const st = await request(app).get(`${U}/status`).set(h);
+  assert.strictEqual(st.status, 200);
+  assert.strictEqual(st.body.available, false);
+  assert.strictEqual(st.body.reason, 'helper_unavailable');
+}, { handlers: { 'POST /pull': () => [503, { error: 'shutting_down' }], 'GET /status': () => [503, { error: 'shutting_down' }] } });
+
+gitTest('a status 500 gives reason helper_error, not helper_unavailable', async ({ app, admin }) => {
+  const res = await request(app).get(`${U}/status`).set('Authorization', admin.auth);
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.available, false);
+  assert.strictEqual(res.body.reason, 'helper_error');
+  assert.ok(res.body.hint.includes('backend/run/git-helper.log'));
+  assert.ok(!res.text.includes('SECRET-STACK'));
+}, { handlers: { 'GET /status': () => [500, { error: 'SECRET-STACK' }] } });
+
+// Holds the engine's seed_sync lock so a synchronous export waits inside the
+// route (runner held) and then fails by lock timeout without writing files.
+async function withEngineLockHeld(pool, fn) {
+  const c = await pool.connect();
+  try {
+    await c.query('BEGIN');
+    await c.query("SELECT pg_advisory_xact_lock(hashtext('seed_sync'))");
+    return await fn();
+  } finally {
+    await c.query('ROLLBACK').catch(() => {});
+    c.release();
+  }
+}
+
+gitTest('a synchronous group export holds the runner: git gets 409, and it is released after the export fails', async ({ pool, app, admin, helper }) => {
+  const h = { Authorization: admin.auth };
+  const prev = process.env.SEED_SYNC_LOCK_TIMEOUT_MS;
+  process.env.SEED_SYNC_LOCK_TIMEOUT_MS = '1500';
+  try {
+    await withEngineLockHeld(pool, async () => {
+      const exporting = request(app).post('/api/seed-export/groups/quests/export').set(h).then((r) => r);
+      for (let i = 0; i < 300 && !jobs.isBusy(); i++) await new Promise((r) => setTimeout(r, 10));
+      assert.strictEqual(jobs.isBusy(), true, 'the export holds the runner while it waits');
+      for (const op of ['fetch', 'pull', 'commit', 'push']) {
+        const res = await request(app).post(`${U}/${op}`).set(h).send({ message: 'm' });
+        assert.strictEqual(res.status, 409, op);
+        assert.strictEqual(res.body.error, 'busy');
+      }
+      assert.strictEqual(helper.calls.length, 0);
+      const done = await exporting;
+      assert.strictEqual(done.status, 409, 'the engine lock timeout refuses the export');
+    });
+  } finally {
+    if (prev === undefined) delete process.env.SEED_SYNC_LOCK_TIMEOUT_MS; else process.env.SEED_SYNC_LOCK_TIMEOUT_MS = prev;
+  }
+  assert.strictEqual(jobs.isBusy(), false, 'released after the failing export');
+  const after = await request(app).post(`${U}/fetch`).set(h);
+  assert.strictEqual(after.status, 200, after.text);
+}, { handlers: { 'POST /fetch': () => [200, { ok: true, op: 'fetch', output: '', status: {} }] } });
+
+gitTest('a synchronous group seed holds the runner too', async ({ pool, app, admin }) => {
+  const h = { Authorization: admin.auth };
+  const prev = process.env.SEED_SYNC_LOCK_TIMEOUT_MS;
+  process.env.SEED_SYNC_LOCK_TIMEOUT_MS = '1500';
+  try {
+    await withEngineLockHeld(pool, async () => {
+      const seeding = request(app).post('/api/seed-export/groups/quests/seed').set(h).send({ decisions: {}, signature: 'x' }).then((r) => r);
+      for (let i = 0; i < 300 && !jobs.isBusy(); i++) await new Promise((r) => setTimeout(r, 10));
+      assert.strictEqual(jobs.isBusy(), true, 'the seed holds the runner');
+      const res = await request(app).post(`${U}/pull`).set(h);
+      assert.strictEqual(res.status, 409);
+      await seeding;
+    });
+  } finally {
+    if (prev === undefined) delete process.env.SEED_SYNC_LOCK_TIMEOUT_MS; else process.env.SEED_SYNC_LOCK_TIMEOUT_MS = prev;
+  }
+  assert.strictEqual(jobs.isBusy(), false);
+}, { handlers: {} });

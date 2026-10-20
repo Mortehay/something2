@@ -9,7 +9,7 @@ const { pcLabel } = require('./seedSync/runs.js');
 
 const DEFAULT_SOCKET = '/app/run/git-helper.sock';
 const DEFAULT_TOKEN_FILE = '/app/run/git-helper.token';
-const TIMEOUT_MS = 90000; // the helper's own git timeout is 60 s
+const TIMEOUT_MS = 130000; // the helper's overall op deadline is 120 s
 
 const HINT = 'Run make git-helper on this PC';
 
