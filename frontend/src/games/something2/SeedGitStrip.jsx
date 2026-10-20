@@ -1,10 +1,10 @@
 // SOMET-642. The git strip of the Seed / Export tab: branch, ahead/behind,
 // seed changes, and Pull / Commit seeds / Push, each behind a confirm dialog.
 // Presentational GitStripView (testable); the default export wires the hooks.
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import styled from 'styled-components';
-import { useGitStatus, useGitAction } from './useSeedExport.js';
-import { gitStripText, gitActionStates, pluralize, GIT_UNAVAILABLE_TEXT } from './seedExportModel.js';
+import { useGitStatus, useGitAction, useSeedDataPending } from './useSeedExport.js';
+import { gitStripText, gitActionStates, pluralize, gitUnavailableText, gitDialogAfterStatus, BUSY_TEXT, GIT_PENDING_TEXT } from './seedExportModel.js';
 import { Btn, Badge, Muted, Modal, fmtTime } from './seedUi.jsx';
 
 const Strip = styled.div`
@@ -20,7 +20,10 @@ const Msg = styled.textarea`
 
 // What each confirm dialog says it will do.
 export function gitConfirmText(op, s) {
-  if (op === 'pull') return `Fast-forward ${pluralize(s.behind, 'commit')} from ${s.upstream || `origin/${s.branch}`}.`;
+  if (op === 'pull') {
+    const known = s.behind > 0 ? ` (${s.behind} new ${s.behind === 1 ? 'commit' : 'commits'} known so far)` : '';
+    return `Fetch and fast-forward from origin/${s.branch}${known}.`;
+  }
   if (op === 'push') return `Push ${pluralize(s.ahead, 'commit')} to origin/${s.branch}.`;
   return `Commit ${pluralize((s.seedsDirty || []).length, 'file')} under backend/seeds/ on ${s.branch}. Nothing else is staged.`;
 }
@@ -30,16 +33,21 @@ const TITLES = { pull: 'Pull', commit: 'Commit seeds', push: 'Push' };
 export function GitStripView({ status, busy, pending, onRun }) {
   const [dialog, setDialog] = useState(null);
   const [message, setMessage] = useState('');
+  // A dialog never outlives the status it was opened on, and does not reopen
+  // when the helper comes back.
+  const kept = gitDialogAfterStatus(dialog, status);
+  useEffect(() => { if (kept !== dialog) setDialog(kept); }, [kept, dialog]);
   if (!status) return null;
   if (status.available === false) {
-    return <Strip role="status"><Muted>{GIT_UNAVAILABLE_TEXT}</Muted></Strip>;
+    return <Strip role="status"><Muted>{gitUnavailableText(status)}</Muted></Strip>;
   }
-  const acts = gitActionStates(status, busy);
+  const acts = gitActionStates(status, busy, pending);
+  const fetchWhy = busy ? BUSY_TEXT : (pending ? GIT_PENDING_TEXT : undefined);
   const other = (status.otherDirty || []).length;
   const open = (op) => { if (op === 'commit') setMessage(status.suggestedMessage || ''); setDialog(op); };
   const run = () => { onRun(dialog, message); setDialog(null); };
   const btn = (op) => (
-    <Btn key={op} disabled={Boolean(acts[op].reason) || pending} title={acts[op].reason || undefined}
+    <Btn key={op} disabled={Boolean(acts[op].reason)} title={acts[op].reason || undefined}
       onClick={() => open(op)}>{op === 'commit' ? 'Commit seeds…' : `${TITLES[op]}…`}</Btn>
   );
   return (
@@ -47,9 +55,9 @@ export function GitStripView({ status, busy, pending, onRun }) {
       <b>{gitStripText(status)}</b>
       {other > 0 && <Badge $tone="warn">{`${pluralize(other, 'change')} outside seeds/ — won't be committed`}</Badge>}
       <Muted>{status.lastFetchAt ? `fetched ${fmtTime(status.lastFetchAt)}` : 'never fetched'}</Muted>
-      <Btn disabled={busy || pending} title={busy ? acts.pull.reason : undefined} onClick={() => onRun('fetch')}>Fetch</Btn>
+      <Btn disabled={busy || pending} title={fetchWhy} onClick={() => onRun('fetch')}>Fetch</Btn>
       {btn('pull')}{btn('commit')}{btn('push')}
-      {dialog && (
+      {kept && (
         <Modal $w="480px" onClose={() => setDialog(null)} label={TITLES[dialog]}>
           <>
             <h3 style={{ marginTop: 0 }}>{TITLES[dialog]}</h3>
@@ -72,8 +80,9 @@ export function GitStripView({ status, busy, pending, onRun }) {
 export default function SeedGitStrip({ busy }) {
   const status = useGitStatus();
   const action = useGitAction();
+  const seedPending = useSeedDataPending();
   return (
-    <GitStripView status={status.data} busy={busy} pending={action.isPending}
+    <GitStripView status={status.data} busy={busy} pending={action.isPending || seedPending}
       onRun={(op, message) => action.mutate({ op, message })} />
   );
 }
