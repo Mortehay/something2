@@ -70,3 +70,40 @@ test('GET /api/sprite-admin/subjects lists each playable class plus one row per 
     assert.equal(v.prompt, appearancePrompt({ class_name: classRow.name, class_prompt: classRow.prompt, variant: v.variant }));
   }
 });
+
+test('subjects carry concept_key and actions from the newest job', { skip }, async (t) => {
+  const pool = new Pool({ connectionString: url });
+  __setPool(pool);
+  const username = `sprite-subjects-admin-${Math.random().toString(36).slice(2)}`;
+  const { rows: [admin] } = await pool.query(
+    'INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3) RETURNING id, token_version',
+    [username, 'x', 'admin'],
+  );
+  const { rows: [ent] } = await pool.query(
+    "INSERT INTO entity_types (name, prompt, color) VALUES ($1, 'a test prop', '#888888') RETURNING id",
+    [`subj-test-${Math.random().toString(36).slice(2)}`],
+  );
+  t.after(async () => {
+    await pool.query('DELETE FROM sprite_sets WHERE entity_type_id = $1', [ent.id]);
+    await pool.query('DELETE FROM entity_types WHERE id = $1', [ent.id]);
+    await pool.query('DELETE FROM users WHERE id = $1', [admin.id]);
+    await pool.end();
+  });
+  const AUTH = ['Authorization', `Bearer ${signToken({
+    userId: admin.id, username, role: 'admin', tokenVersion: admin.token_version,
+  })}`];
+  await pool.query(
+    `INSERT INTO sprite_sets (entity_type_id, creature, backend, status, actions, directions,
+                              frames_per_action, concept_key, box_job_id, manifest_key)
+     VALUES ($1, 'subj', 'gpu-box', 'done', '{idle,sway}', '{s}', 3, 'sprites/c.png', 'box-9', 'sprites/m.json')`,
+    [ent.id],
+  );
+  const res = await request(app).get('/api/sprite-admin/subjects').set(...AUTH);
+  const row = res.body.subjects.find((s) => s.id === ent.id);
+  assert.equal(row.concept_key, 'sprites/c.png');
+  assert.deepEqual(row.actions, ['idle', 'sway']);
+  assert.deepEqual(row.directions, ['s']);
+  assert.equal(row.frames_per_action, 3);
+  assert.equal(row.manifest_key, 'sprites/m.json');
+  assert.equal(row.box_job_id, 'box-9');
+});

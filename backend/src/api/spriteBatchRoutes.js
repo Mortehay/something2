@@ -1,6 +1,19 @@
 const express = require('express');
 const queue = require('../services/spriteJobQueue.js');
 const { appearancePrompt } = require('../services/catalogSubjects.js');
+const { staticFrameFor } = require('../services/spriteSheetManifest.js');
+
+// Measured seconds per sheet cell is preferred; until one sheet has finished,
+// this seed (Ruling R3) is what the page estimates with.
+const SEED_SECONDS_PER_CELL = 57;
+const CATALOG_TTL_MS = 60 * 1000;
+const NO_PROVIDER_ERROR = 'no sprite provider configured — add one in Settings → AI Providers (modality Sprite)';
+
+async function readJson(stream) {
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+}
 
 // targets: [{entity_id, variant}], variant omitted/null for the entity's own
 // sprite, 1-5 to target one of its character_appearances rows instead.
@@ -26,9 +39,46 @@ function jobIdsFrom(body) {
   return ids.every((id) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) ? ids : null;
 }
 
-function spriteBatchRoutes(pool, adminGuard, dispatcher) {
+// deps is the DI seam: { box: {actionCatalog}, loadProvider: () => provider|null,
+// store: {getObjectStream}, now: () => ms }. index.js passes the real ones.
+function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
+  const { box, loadProvider, store, now = Date.now } = deps;
   const router = express.Router();
   router.use(adminGuard);
+
+  // Live action catalog from the GPU box, cached 60 s in-process. Only a good
+  // answer is cached, so a 503 is retried on the very next request.
+  let cached = null;
+  async function getCatalog() {
+    if (!box || !loadProvider) return { status: 503, error: NO_PROVIDER_ERROR };
+    const provider = await loadProvider();
+    if (!provider) return { status: 503, error: NO_PROVIDER_ERROR };
+    const cacheKey = `${provider.id}|${provider.base_url}`;
+    if (cached && cached.key === cacheKey && now() - cached.at < CATALOG_TTL_MS) return { catalog: cached.catalog };
+    const r = await box.actionCatalog(provider);
+    if (!r.ok) return { status: 503, error: `GPU box action catalog unavailable: ${r.error}` };
+    cached = { key: cacheKey, at: now(), catalog: r.catalog };
+    return { catalog: r.catalog };
+  }
+
+  router.get('/action-catalog', async (_req, res) => {
+    try {
+      const got = await getCatalog();
+      if (got.error) return res.status(got.status).json({ error: got.error });
+      const c = got.catalog;
+      const measured = await queue.lastSecondsPerCell(pool);
+      return res.json({
+        actions: c.actions,
+        directions: c.directions,
+        max_frames: c.max_frames,
+        engine: c.engine,
+        seconds_per_cell: measured ?? SEED_SECONDS_PER_CELL,
+      });
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'Failed to read the sprite action catalog' });
+    }
+  });
 
   router.get('/subjects', async (_req, res) => {
     try {
@@ -38,6 +88,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher) {
                   e.point_kind, e.image, e.sprite,
                   j.id AS job_id, j.status AS job_state, j.generation_kind, j.frames,
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
+                  j.concept_key, j.actions, j.directions, j.frames_per_action, j.box_job_id,
                   j.updated_at AS job_updated_at
              FROM entity_types e
              LEFT JOIN LATERAL (
@@ -57,6 +108,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher) {
                   e.name AS class_name, e.prompt AS class_prompt,
                   j.id AS job_id, j.status AS job_state, j.generation_kind, j.frames,
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
+                  j.concept_key, j.actions, j.directions, j.frames_per_action, j.box_job_id,
                   j.updated_at AS job_updated_at
              FROM character_appearances ca
              JOIN entity_types e ON e.id = ca.entity_type_id AND e.is_playable = true
@@ -94,6 +146,11 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher) {
           image_key: a.image_key,
           atlas_key: a.atlas_key,
           manifest_key: a.manifest_key,
+          concept_key: a.concept_key,
+          actions: a.actions,
+          directions: a.directions,
+          frames_per_action: a.frames_per_action,
+          box_job_id: a.box_job_id,
           job_updated_at: a.job_updated_at,
         });
       }
@@ -122,8 +179,26 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher) {
   router.post('/jobs', async (req, res) => {
     const targets = targetsFrom(req.body);
     if (!targets) return res.status(400).json({ error: 'targets must contain 1 to 1000 {entity_id, variant?} pairs' });
+    const actions = Array.isArray(req.body.actions) ? [...new Set(req.body.actions)] : [];
+    if (actions.length === 0 || !actions.every((a) => typeof a === 'string' && a)) {
+      return res.status(400).json({ error: 'actions must be a non-empty list of action ids' });
+    }
     try {
-      const result = await queue.enqueue(pool, targets);
+      // enqueue comma-joins the ids into the row, so every one must be proven
+      // against the box's live catalog here, not trusted from the client.
+      const got = await getCatalog();
+      if (got.error) return res.status(got.status).json({ error: got.error });
+      const known = new Map(got.catalog.actions.map((a) => [a.id, a]));
+      const unknownAction = actions.find((a) => !known.has(a));
+      if (unknownAction !== undefined) {
+        return res.status(400).json({ error: `unknown action "${unknownAction}" — not in the GPU box catalog` });
+      }
+      const cap = Math.min(...actions.map((a) => known.get(a).max_frames));
+      const frames = req.body.frames;
+      if (!Number.isInteger(frames) || frames < 1 || frames > cap) {
+        return res.status(400).json({ error: `frames must be an integer from 1 to ${cap} (the most the selected actions allow)` });
+      }
+      const result = await queue.enqueue(pool, targets, { actions, framesPerAction: frames });
       const selected = new Set(targets.map((t) => `${t.entityId}:${t.variant ?? ''}`)).size;
       res.status(201).json({
         selected,
@@ -192,7 +267,8 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher) {
       );
       const approved = [];
       for (const job of jobs) {
-        if (job.generation_kind === 'object' && job.frames === 1) {
+        const boxRow = job.backend === 'gpu-box';
+        if (!boxRow && job.generation_kind === 'object' && job.frames === 1) {
           if (!job.image_key) continue;
           // eslint-disable-next-line no-await-in-loop
           await pool.query(
@@ -202,10 +278,27 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher) {
           );
         } else {
           if (!job.atlas_key || !job.manifest_key) continue;
-          const sprite = job.generation_kind === 'creature'
-            ? { atlas_key: job.atlas_key, manifest_key: job.manifest_key, static_frame: 'S/0' }
-            : { atlas_key: job.atlas_key, manifest_key: job.manifest_key, frames: job.frames };
-          const renderMode = job.generation_kind === 'creature' ? 'static' : 'animated';
+          const isCreature = job.generation_kind === 'creature';
+          let sprite;
+          if (!boxRow) {
+            sprite = isCreature
+              ? { atlas_key: job.atlas_key, manifest_key: job.manifest_key, static_frame: 'S/0' }
+              : { atlas_key: job.atlas_key, manifest_key: job.manifest_key, frames: job.frames };
+          } else if (isCreature) {
+            // The static frame must exist in THIS sheet's manifest; never guess it.
+            let staticFrame = null;
+            try {
+              // eslint-disable-next-line no-await-in-loop
+              staticFrame = staticFrameFor(await readJson(await store.getObjectStream(job.manifest_key)));
+            } catch (err) {
+              console.error(`sprite approve: cannot read ${job.manifest_key}:`, err.message);
+            }
+            if (!staticFrame) continue;
+            sprite = { atlas_key: job.atlas_key, manifest_key: job.manifest_key, static_frame: staticFrame };
+          } else {
+            sprite = { atlas_key: job.atlas_key, manifest_key: job.manifest_key, frames: job.frames_per_action };
+          }
+          const renderMode = isCreature ? 'static' : 'animated';
           if (job.appearance_variant != null) {
             // eslint-disable-next-line no-await-in-loop
             await pool.query(

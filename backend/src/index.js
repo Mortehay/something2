@@ -598,7 +598,11 @@ app.use('/api/quests', createQuestsRouter(guardPool));
 // Player routes (world bundle, misses) and admin routes (/admin/*) share one
 // mount; each route carries its own guard.
 app.use('/api/audio', audioRoutes(guardPool));
-app.use('/api/sprite-admin', spriteBatchRoutes(guardPool, adminGuard, spriteDispatcher));
+app.use('/api/sprite-admin', spriteBatchRoutes(guardPool, adminGuard, spriteDispatcher, {
+  box: gpuBoxSprites,
+  loadProvider: () => aiProviders.loadActiveProviderWithSecret(guardPool, 'sprite'),
+  store: assetStore,
+}));
 
 // The player's fog-of-war world map (SOMET-263). Read-only, and deliberately
 // NOT the payload the admin World Map tab reads from /api/world-graph: that one
