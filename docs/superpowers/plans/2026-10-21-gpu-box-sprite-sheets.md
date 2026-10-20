@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Work in ONE worktree: `.worktrees/wt-gpu-sprites`, branch `feat/gpu-box-sprite-sheets`; symlink `frontend/node_modules` and `backend/node_modules` with ABSOLUTE paths to the main checkout's. Never checkout/stash/reset in the shared checkout.
-- Box base: origin of the active `modality='image'` provider's `base_url` (today `http://192.168.0.218:8001`); auth via `authHeaders(provider)`; every call through `safeFetch`. The token never reaches the browser and is never printed/logged.
+- Box base: origin of the active `modality='sprite'` provider's `base_url` (Task 4b; today the box is `http://192.168.0.218:8001`); auth via `authHeaders(provider)`; every call through `safeFetch`. The token never reaches the browser and is never printed/logged.
 - All 8 facings for creatures/classes/appearance variants: `["s","se","e","ne","n","nw","w","sw"]`; props: `["s"]`.
 - JobSpec fixed values: `cell: "48x64"`, `colors: 24`, `concept_check: false`, `style_profile: null`, `seed` from `seedFor`.
 - Prop default actions: `idle` + `sway`. Concept from `POST /api/generate_core` with `llm_name = provider.model`.
@@ -123,6 +123,20 @@ The spec marks `GET /api/jobs/{id}`, `/sheet`, `/atlas` and the `generate_core` 
   - `lastSecondsPerCell divides by cells`.
   - options tests: `prop options get ['s']`, `appearance options get 8 facings`.
 - [ ] **Step 2:** Run with `TEST_DATABASE_URL` → FAIL. **Step 3:** Implement. **Step 4:** PASS (also existing queue tests). **Step 5: Commit** `feat(sprites): box sheet columns on sprite_sets`.
+
+### Task 4b: `sprite` provider modality (added 2026-10-21, user request)
+
+The user asked for a dedicated sprite connection in AI Providers instead of borrowing the image (txt2img) provider. Same pattern as the `text` modality (`backend/migrations/1714440610000_*.js`).
+
+**Files:**
+- Create: `backend/migrations/1714440821000_ai_providers_sprite_modality.js` (widen `ai_providers_modality_check` to `('image','audio','text','sprite')`; `down` deletes sprite rows and restores the 3-value check, as the text migration does)
+- Modify: `backend/src/services/aiProviders.js` (validation at ~:106-111 and templateless rule at ~:209 accept `sprite` like `text`), provider Test/Refresh for sprite → `GET /api/action-catalog` reports the action count
+- Modify: frontend `providerForm.js`, `SettingsAdmin.jsx` (and whatever lists modalities) — "Sprite" option; image-only fields hidden as for text/audio; base URL hint `http://<box>:8001`
+- Test: backend aiProviders tests for sprite create/validate/single-active; frontend `__tests__/aiProvidersModality.test.js` / `providerFormText.test.js` style test for sprite
+
+**Interfaces:** Produces `loadActiveProviderWithSecret(db, 'sprite')` returning the sprite provider. Tasks 5/6 use THIS (not `'image'`); no active sprite provider → Task 6 catalog route 503 "no sprite provider configured — add one in Settings → AI Providers (modality Sprite)", Task 5 job fails with the same text.
+
+- [ ] Failing tests → implement → pass (scratch DB for DB tests) → commit `feat(sprites): sprite modality for AI providers`.
 
 ### Task 5: Dispatcher box path
 
