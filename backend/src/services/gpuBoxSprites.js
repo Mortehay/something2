@@ -75,6 +75,18 @@ async function actionCatalog(provider, { fetchImpl = fetch } = {}) {
   return { ok: true, catalog: r.json };
 }
 
+// An authenticated read (GET /api/jobs?limit=1). /api/action-catalog is served
+// by the box WITHOUT auth, so it cannot prove a key is valid; /api/jobs can.
+// A 401/403 reads as "box rejected the key (N)".
+async function checkAuth(provider, { fetchImpl = fetch } = {}) {
+  const r = await callJson(provider, 'GET', '/api/jobs?limit=1', { fetchImpl });
+  if (r.ok) return { ok: true, status: r.status };
+  if (r.status === 401 || r.status === 403) {
+    return { ok: false, status: r.status, error: `box rejected the key (${r.status})` };
+  }
+  return r;
+}
+
 // Submits a concept task, polls it to a terminal state, downloads the image.
 // The concept is whatever THIS task's result.url names -- never the newest
 // asset, which a concurrent run (or another user of the box) can own.
@@ -175,5 +187,5 @@ async function fetchAtlas(provider, boxJobId, { fetchImpl = fetch } = {}) {
 }
 
 module.exports = {
-  STATUS_TERMINAL, actionCatalog, generateConcept, createSheetJob, getSheetJob, fetchSheet, fetchAtlas,
+  STATUS_TERMINAL, actionCatalog, checkAuth, generateConcept, createSheetJob, getSheetJob, fetchSheet, fetchAtlas,
 };

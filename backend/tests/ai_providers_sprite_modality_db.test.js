@@ -16,9 +16,15 @@ test('sprite modality providers', { skip }, async (t) => {
   __setPool(pool);
   const tag = `spr-${process.pid}-${Date.now()}`;
   const seen = [];
+  const boxKey = { current: 'k' };
   const box = http.createServer((req, res) => {
     seen.push({ url: req.url, auth: req.headers.authorization });
     res.setHeader('content-type', 'application/json');
+    // Like the real box: the catalog is public, /api/jobs checks the key.
+    if (req.url.startsWith('/api/jobs')) {
+      if (req.headers.authorization !== `Bearer ${boxKey.current}`) { res.statusCode = 401; return res.end('{"detail":"bad key"}'); }
+      return res.end('[]');
+    }
     if (req.url === '/api/action-catalog') {
       return res.end(JSON.stringify({ actions: Array.from({ length: 7 }, (_, i) => ({ name: `a${i}` })) }));
     }
@@ -51,9 +57,17 @@ test('sprite modality providers', { skip }, async (t) => {
   const tested = await request(app).post(`/api/ai-providers/${created.body.id}/test`).set('Authorization', auth);
   assert.equal(tested.body.ok, true, JSON.stringify(tested.body));
   assert.match(tested.body.detail, /7 actions/);
-  assert.equal(seen.at(-1).url, '/api/action-catalog');
-  assert.equal(seen.at(-1).auth, 'Bearer k');
+  assert.ok(seen.some((c) => c.url === '/api/action-catalog' && c.auth === 'Bearer k'));
+  assert.ok(seen.some((c) => c.url.startsWith('/api/jobs') && c.auth === 'Bearer k'), 'an authenticated read was made');
   assert.equal(JSON.stringify(tested.body).includes('"k"'), false);
+
+  // The catalog is served without auth, so a stale key must still fail Test.
+  boxKey.current = 'rotated';
+  const stale = await request(app).post(`/api/ai-providers/${created.body.id}/test`).set('Authorization', auth);
+  assert.equal(stale.body.ok, false, JSON.stringify(stale.body));
+  assert.match(stale.body.error, /box rejected the key \(401\)/);
+  assert.equal(JSON.stringify(stale.body).includes('"k"'), false);
+  boxKey.current = 'k';
 
   const refreshed = await request(app).post(`/api/ai-providers/${created.body.id}/refresh-models`).set('Authorization', auth);
   assert.equal(refreshed.status, 200);

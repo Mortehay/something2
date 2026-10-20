@@ -3036,11 +3036,13 @@ app.post('/api/ai-providers/:id/test', adminGuard, async (req, res) => {
       });
       return;
     }
-    // Sprite: GET /api/action-catalog is authenticated and is the very call the
-    // sprite page makes first, so ok means the sheet service is usable.
+    // Sprite: the box serves GET /api/action-catalog WITHOUT auth, so on its
+    // own it would test green with a stale key. Prove the key with an
+    // authenticated read (GET /api/jobs?limit=1) first, then the catalog.
     if (provider.modality === 'sprite') {
       const startedAt = Date.now();
-      const r = await gpuBoxSprites.actionCatalog(provider);
+      const authed = await gpuBoxSprites.checkAuth(provider);
+      const r = authed.ok ? await gpuBoxSprites.actionCatalog(provider) : authed;
       res.json({
         ok: r.ok, status: r.status ?? null, latency_ms: Date.now() - startedAt, error: r.error ?? null,
         detail: r.ok ? `${r.catalog.actions.length} actions` : null,
