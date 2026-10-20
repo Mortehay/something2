@@ -6,19 +6,19 @@ const { Pool } = require('pg');
 const { QUESTS } = require('../seeds/data/questsData.js');
 
 async function seedQuests() {
-  const pool = new Pool({
-    connectionString: process.env.DATABASE_URL || 'postgres://postgres:postgres@localhost:5432/game_db',
-  });
+  // DATABASE_URL is set inside the backend container. No fallback: a guessed
+  // URL either fails obscurely or writes to the wrong database.
+  if (!process.env.DATABASE_URL) {
+    console.error('seed-quests: DATABASE_URL is not set; refusing to guess a database.');
+    process.exitCode = 1;
+    return;
+  }
+  // The schema (objective, target_count, prerequisite_key) comes from
+  // migration 1714440812000_quests_objective_columns. A seeder must not change
+  // the schema; run the migrations first.
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
   try {
-    // Add missing columns if they don't exist yet
-    await pool.query(`
-      ALTER TABLE quests
-        ADD COLUMN IF NOT EXISTS objective text,
-        ADD COLUMN IF NOT EXISTS target_count integer NOT NULL DEFAULT 1,
-        ADD COLUMN IF NOT EXISTS prerequisite_key varchar(64);
-    `);
-
     let count = 0;
     for (const q of QUESTS) {
       await pool.query(
