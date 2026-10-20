@@ -3,7 +3,7 @@ import {
   statusBadge, initialDecisions, bulkSet, applyGate, allowedDecisions, kindLabel, exportBlocked, previewSignature,
   exportBlockReason, seedBlockReason, decisionLabel, seedRequestBody,
   seedButtonLabel, exportAllPlan, seedAllGroups, historyPageCount, exportAllMessage, seedAllGate, pluralize,
-  gitHints, unpushedNote, gitActionStates, gitStripText, GIT_UNAVAILABLE_TEXT, GIT_PENDING_TEXT, gitUnavailableText, gitDialogAfterStatus,
+  gitHints, unpushedNote, gitActionStates, gitStripText, GIT_UNAVAILABLE_TEXT, GIT_PENDING_TEXT, GIT_RUNNING_TEXT, gitUnavailableText, gitDialogAfterStatus,
   tableLabel, warningText, warningIsError, refusalText, groupRowsByTable, isRename, renameNote,
 } from '../../games/something2/seedExportModel.js';
 
@@ -633,15 +633,23 @@ describe('git edge states (SOMET-649)', () => {
   const st = (o) => ({ available: true, branch: 'main', upstream: 'origin/main', ahead: 0, behind: 0, seedsDirty: [], otherDirty: [], ...o });
   const DETACHED = 'Not on a branch — switch branch in a terminal';
   it('a pending data-group mutation disables everything with its own reason', () => {
-    const a = gitActionStates(st({ ahead: 1, seedsDirty: ['a'] }), false, true);
+    const a = gitActionStates(st({ ahead: 1, seedsDirty: ['a'] }), false, false, true);
     for (const op of ['pull', 'commit', 'push']) expect(a[op].reason).toBe('A seed export or seed is running');
     expect(GIT_PENDING_TEXT).toBe('A seed export or seed is running');
   });
   it('busy beats pending', () => {
-    expect(gitActionStates(st(), true, true).pull.reason).toBe(BUSY_TEXT);
+    expect(gitActionStates(st(), true, true, true).pull.reason).toBe(BUSY_TEXT);
+  });
+  it('a running git action has its own tooltip, between busy and seed-pending', () => {
+    expect(GIT_RUNNING_TEXT).toBe('A git action is running');
+    const a = gitActionStates(st({ ahead: 1, seedsDirty: ['a'] }), false, true, false);
+    for (const op of ['pull', 'commit', 'push']) expect(a[op].reason).toBe(GIT_RUNNING_TEXT);
+    expect(gitActionStates(st(), false, true, true).pull.reason).toBe(GIT_RUNNING_TEXT);
+    expect(gitActionStates(st(), true, true, false).pull.reason).toBe(BUSY_TEXT);
+    expect(gitActionStates(st({ branch: null, upstream: null }), false, true, false).push.reason).toBe(GIT_RUNNING_TEXT);
   });
   it('pending beats detached', () => {
-    expect(gitActionStates(st({ branch: null, upstream: null }), false, true).push.reason).toBe(GIT_PENDING_TEXT);
+    expect(gitActionStates(st({ branch: null, upstream: null }), false, false, true).push.reason).toBe(GIT_PENDING_TEXT);
   });
   it('detached HEAD disables pull, commit and push', () => {
     const a = gitActionStates(st({ branch: null, upstream: null, ahead: 1, seedsDirty: ['a'] }), false);
@@ -664,7 +672,7 @@ describe('git edge states (SOMET-649)', () => {
   });
   it('strip text: detached and no upstream, never "null"', () => {
     const d = gitStripText(st({ branch: null, upstream: null, seedsDirty: ['a'] }));
-    expect(d).toBe('detached HEAD · ↑0 ↓0 · 1 seed change');
+    expect(d).toBe('detached HEAD · 1 seed change');
     const n = gitStripText(st({ upstream: null }));
     expect(n).toBe('main · no upstream · 0 seed changes');
     expect(n).not.toMatch(/null/);
