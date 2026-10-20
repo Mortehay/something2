@@ -182,6 +182,7 @@ const spriteBatchRoutes = require('./api/spriteBatchRoutes.js');
 const { createDispatcher: createSpriteDispatcher } = require('./services/spriteDispatcher.js');
 const remoteAudioProvider = require('./services/remoteAudioProvider');
 const textProvider = require('./services/textProvider');
+const gpuBoxSprites = require('./services/gpuBoxSprites');
 const { DEFAULTS: GAME_SETTING_DEFAULTS, getSettings, setSetting } = require('./services/gameSettings.js');
 const { ownedCharacter } = require('./services/characters.js');
 const { listVisited } = require('./services/visitedWorlds.js');
@@ -2980,6 +2981,10 @@ app.post('/api/ai-providers/:id/refresh-models', adminGuard, async (req, res) =>
       await aiProviders.saveModelsCache(pool, id, r.models);
       return res.json({ ok: true, models: r.models });
     }
+    // The sprite box has an action catalog, not a model list.
+    if (provider.modality === 'sprite') {
+      return res.json({ ok: false, error: 'a sprite provider has no model list to refresh', status: null });
+    }
     const result = await providerDiscovery.fetchModels(provider);
     if (!result.ok) {
       return res.json({ ok: false, error: result.error, status: result.status ?? null });
@@ -3023,6 +3028,17 @@ app.post('/api/ai-providers/:id/test', adminGuard, async (req, res) => {
       const r = await textProvider.listTextModels(provider);
       res.json({
         ok: r.ok, status: r.status ?? null, latency_ms: Date.now() - startedAt, error: r.error ?? null,
+      });
+      return;
+    }
+    // Sprite: GET /api/action-catalog is authenticated and is the very call the
+    // sprite page makes first, so ok means the sheet service is usable.
+    if (provider.modality === 'sprite') {
+      const startedAt = Date.now();
+      const r = await gpuBoxSprites.actionCatalog(provider);
+      res.json({
+        ok: r.ok, status: r.status ?? null, latency_ms: Date.now() - startedAt, error: r.error ?? null,
+        detail: r.ok ? `${r.catalog.actions.length} actions` : null,
       });
       return;
     }

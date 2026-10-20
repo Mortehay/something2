@@ -25,6 +25,9 @@ export const EXAMPLE_TEMPLATE = {
   override_settings: { sd_model_checkpoint: '{{model}}' },
 };
 
+// Modalities with hand-written backend adapters: no request template.
+const TEMPLATELESS = new Set(['audio', 'text', 'sprite']);
+
 export const PLACEHOLDERS = ['{{prompt}}', '{{model}}', '{{seed}}', '{{width}}', '{{height}}', '{{frames}}'];
 
 export function emptyProviderForm() {
@@ -125,7 +128,7 @@ export function validateProviderForm(form) {
   }
   // Audio and text providers have no request template -- the server fills {}
   // for one -- so the image-only field below is not part of their validation.
-  if (form.modality === 'audio' || form.modality === 'text') return null;
+  if (TEMPLATELESS.has(form.modality)) return null;
   const parsed = parseTemplate(form.request_template);
   if (parsed.error) return `Request template ${parsed.error}`;
   return null;
@@ -146,14 +149,14 @@ export function templateWarning(text) {
 
 // The PATCH/POST body. See the token rules at the top of this file.
 //
-// An audio or text provider omits every image-only field rather than sending
+// An audio, text or sprite provider omits every image-only field rather than sending
 // empty/default values for them: the backend has no use for a request
 // template, model discovery path, response pointer or sprite-sheet grid on
 // an audio or text row, and sending them would just be dead columns to
 // ignore. The server fills a default request_template ({}) itself when it is
-// absent and modality is 'audio' or 'text'.
+// absent and modality is 'audio', 'text' or 'sprite'.
 export function providerFormToPayload(form) {
-  const modality = form.modality === 'audio' || form.modality === 'text' ? form.modality : 'image';
+  const modality = TEMPLATELESS.has(form.modality) ? form.modality : 'image';
   const payload = {
     name: form.name.trim(),
     base_url: form.base_url.trim(),

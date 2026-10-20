@@ -59,7 +59,8 @@ function ProviderCard({ provider, isOnlyActive }) {
   const isNew = !provider;
   const isAudio = form.modality === 'audio';
   const isText = form.modality === 'text';
-  const modalityLabel = isAudio ? 'Audio' : isText ? 'Text' : 'Image';
+  const isSprite = form.modality === 'sprite';
+  const modalityLabel = isAudio ? 'Audio' : isText ? 'Text' : isSprite ? 'Sprite' : 'Image';
   // The raw styles/cues an audio provider's Refresh returned. Not the same
   // as models_cache (which the backend flattens into plain strings, with
   // cues prefixed "cue:") -- this keeps the labels and cue engine/entity
@@ -102,6 +103,7 @@ function ProviderCard({ provider, isOnlyActive }) {
             <option value="image">Image</option>
             <option value="audio">Audio</option>
             <option value="text">Text</option>
+            <option value="sprite">Sprite</option>
           </Select>
         ) : (
           <span style={{ color: 'var(--s2-text-muted)' }}>
@@ -115,11 +117,13 @@ function ProviderCard({ provider, isOnlyActive }) {
         <Input
           value={form.base_url}
           onChange={e => set('base_url', e.target.value)}
-          placeholder="http://192.168.1.20:7860/sdapi/v1/txt2img"
+          placeholder={isSprite ? 'http://<box>:8001' : 'http://192.168.1.20:7860/sdapi/v1/txt2img'}
           style={{ minWidth: 380 }}
         />
       </Row>
-      <Hint>The full URL that generates an image. Model discovery uses the models path below.</Hint>
+      <Hint>{isSprite
+        ? 'The GPU box origin, e.g. http://<box>:8001. Sprite sheets and their concept art are generated here.'
+        : 'The full URL that generates an image. Model discovery uses the models path below.'}</Hint>
 
       <Row>
         <Label>Auth header</Label>
@@ -146,6 +150,11 @@ function ProviderCard({ provider, isOnlyActive }) {
 
       {isAudio ? (
         <Hint>Talks to the box's /api/audio endpoints. Refresh lists its styles and cues.</Hint>
+      ) : isSprite ? (
+        <Hint>
+          Generates sprite sheets on the Sprite Generation page (jobs and concept art on the box).
+          Test connection reads the box's action catalog and reports how many actions it offers.
+        </Hint>
       ) : isText ? (
         <Hint>
           Writes audio prompts. The base URL must be the GPU box's /api/text server (the audio box):
@@ -226,7 +235,7 @@ function ProviderCard({ provider, isOnlyActive }) {
       )}
 
       <Row>
-        <Label>{isAudio ? 'Styles' : isText ? 'Models' : 'Model'}</Label>
+        <Label>{isAudio ? 'Styles' : isText ? 'Models' : isSprite ? 'Box' : 'Model'}</Label>
         {isAudio ? (
           // The audio adapter never reads `model` -- the style is chosen per
           // subject by propose -- so there is nothing to pick here. models_cache
@@ -236,6 +245,8 @@ function ProviderCard({ provider, isOnlyActive }) {
               ? `${models.filter(m => !m.startsWith('cue:')).length} style(s), ${models.filter(m => m.startsWith('cue:')).length} cue(s) — chosen per subject, not here`
               : 'refresh to list styles and cues'}
           </Hint>
+        ) : isSprite ? (
+          <Hint style={{ margin: 0 }}>no model list — use Test connection to check the box</Hint>
         ) : isText ? (
           // The text adapter never reads `model` either -- the box's gateway
           // picks and loads one of its listed models on demand -- so this is
@@ -251,7 +262,7 @@ function ProviderCard({ provider, isOnlyActive }) {
         ) : (
           <Input value={form.model} onChange={e => set('model', e.target.value)} placeholder="refresh to list models" />
         )}
-        {!isNew && (
+        {!isNew && !isSprite && (
           <Button
             $bg="var(--s2-surface-raised)"
             onClick={() => refresh.mutate({ id: provider.id }, {

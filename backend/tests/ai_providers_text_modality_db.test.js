@@ -41,7 +41,7 @@ test('text modality providers', { skip }, async (t) => {
   const bad = await request(app).post('/api/ai-providers').set('Authorization', auth)
     .send({ name: `${tag}-bad`, base_url: 'http://x', modality: 'video' });
   assert.equal(bad.status, 400);
-  assert.match(bad.body.error, /'image', 'audio' or 'text'/);
+  assert.match(bad.body.error, /'image', 'audio', 'text' or 'sprite'/);
 
   const refreshed = await request(app).post(`/api/ai-providers/${created.body.id}/refresh-models`).set('Authorization', auth);
   assert.deepEqual({ ok: refreshed.body.ok, models: refreshed.body.models }, { ok: true, models: ['qwen-instruct'] });

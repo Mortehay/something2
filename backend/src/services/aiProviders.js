@@ -14,6 +14,9 @@
 // exception is loadActiveProviderWithSecret / loadProviderWithSecret, whose
 // names say what they hand back and whose callers are server-side only.
 
+// Modalities whose adapters are hand-written, so no request template.
+const TEMPLATELESS = new Set(['audio', 'text', 'sprite']);
+
 // Columns an admin may write through create/PATCH. is_active is deliberately
 // absent -- activation is POST /activate, because it has a cross-row effect
 // (deactivating the previous holder) that a field assignment does not express.
@@ -30,10 +33,10 @@ const WRITABLE = [
   'models_pointer',
   'response_image_pointer',
   'enabled',
-  // 'image' (default), 'audio' (game audio slice 1) or 'text' (audio prompt
-  // writer). An audio profile talks to the box's fixed audio API through
+  // 'image' (default), 'audio' (game audio slice 1), 'text' (audio prompt
+  // writer) or 'sprite' (GPU-box sprite sheets, gpuBoxSprites.js). An audio profile talks to the box's fixed audio API through
   // remoteAudioProvider.js, a text profile to the box's /api/text through
-  // textProvider.js; neither uses the image template/pointer/sheet fields.
+  // textProvider.js; none uses the image template/pointer/sheet fields.
   'modality',
   // SOMET-346: how to cut a multi-frame sheet the remote returns whole.
   'sheet_layout',
@@ -103,12 +106,12 @@ function providerFieldError(body, { partial = false } = {}) {
     if (bad) return bad;
   }
   const modality = has('modality') ? body.modality : undefined;
-  if (modality !== undefined && !['image', 'audio', 'text'].includes(modality)) {
-    return "modality must be 'image', 'audio' or 'text'";
+  if (modality !== undefined && !['image', 'audio', 'text', 'sprite'].includes(modality)) {
+    return "modality must be 'image', 'audio', 'text' or 'sprite'";
   }
-  // Neither audio nor text has a request template (both have hand-written
-  // adapters); only an image provider is template-driven.
-  const templateRequired = !partial && modality !== 'audio' && modality !== 'text';
+  // Only an image provider is template-driven; audio, text and sprite have
+  // hand-written adapters and no request template.
+  const templateRequired = !partial && !TEMPLATELESS.has(modality);
   if (templateRequired || has('request_template')) {
     // The template becomes a POST body. An array or a bare string would be
     // accepted by jsonb and then fail at generate time against the remote
@@ -204,9 +207,9 @@ async function loadActiveProviderWithSecret(db, modality = 'image') {
   return r.rows[0] || null;
 }
 
-// Audio and text profiles have no template, but the column is NOT NULL.
+// Audio, text and sprite profiles have no template, but the column is NOT NULL.
 async function createProvider(db, body) {
-  const templateless = body.modality === 'audio' || body.modality === 'text';
+  const templateless = TEMPLATELESS.has(body.modality);
   const withDefaults = templateless && body.request_template === undefined
     ? { ...body, request_template: {} }
     : body;
