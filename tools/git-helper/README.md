@@ -6,7 +6,7 @@ which runs as your host user with your own git and SSH setup.
 
     make git-helper          # start (detached); pid + log in backend/run/
     make git-helper-status
-    make git-helper-stop     # SIGTERM by pid file, waits up to 70s for the drain, then verifies with ss
+    make git-helper-stop     # SIGTERM by pid file, waits up to 130s for the drain, then verifies with ss
 
 ## Transport and auth
 - Default: unix socket `backend/run/git-helper.sock`.
@@ -19,7 +19,7 @@ which runs as your host user with your own git and SSH setup.
   socket (nothing answering) is replaced.
 - SIGTERM/SIGINT drains: no new connections, requests on open connections get 503
   `shutting_down`, the in-flight op finishes and its response flushes, then exit 0
-  and the socket is removed. After 65 s the git child is killed and it exits 1.
+  and the socket is removed. After 125 s the git child is killed (push/pull share one 120 s op deadline; each git call is also capped at 60 s) and it exits 1.
 - Every request needs header `X-Git-Helper-Token` = contents of
   `backend/run/git-helper.token` (0600, regenerated at each start). Missing or wrong: 401.
 - Env overrides: `GIT_HELPER_ROOT` (repo to operate on, default this repo),

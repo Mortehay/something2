@@ -8,6 +8,8 @@ const path = require('node:path');
 
 const SEEDS = 'backend/seeds';
 const TIMEOUT_MS = 60_000;
+// push/pull make several git calls; one overall budget keeps them bounded.
+const OP_DEADLINE_MS = 120_000;
 const OUTPUT_CAP = 4096;
 const MAX_MESSAGE = 10_000;
 
@@ -51,11 +53,22 @@ function credentialHint(text) {
     : text;
 }
 
-function createGitOps({ root }) {
+function createGitOps({ root, opDeadlineMs = OP_DEADLINE_MS }) {
   let busy = false;
   const children = new Set();
 
   const git = (args, opts) => runGit(root, args, { ...opts, children });
+  // A git runner whose every call is limited by min(60s, time left of the op deadline).
+  const deadlineGit = () => {
+    const end = Date.now() + opDeadlineMs;
+    return (args) => {
+      const left = end - Date.now();
+      if (left <= 0) {
+        return Promise.resolve({ ok: false, code: 1, stdout: '', stderr: `git operation timed out after ${opDeadlineMs / 1000}s overall` });
+      }
+      return git(args, { timeout: Math.min(TIMEOUT_MS, left) });
+    };
+  };
   // Shutdown cap reached: stop whatever git is still running.
   const abort = () => { for (const c of children) c.kill('SIGKILL'); };
   const isBusy = () => busy;
@@ -121,19 +134,20 @@ function createGitOps({ root }) {
   const fetch = () => exclusive(async () => result('fetch', await git(['fetch', '--prune'])));
 
   const pull = () => exclusive(async () => {
+    const g = deadlineGit();
     const s = await status();
     if (s.seedsDirty.length || s.otherDirty.length) {
       throw new GitRefusal('dirty', 'The working tree has uncommitted changes; commit or discard them before pulling.');
     }
     if (!s.upstream) throw new GitRefusal('no_upstream', 'The current branch has no upstream to pull from.');
     // Fetch first so ahead/behind below are fresh, not whatever the last fetch left.
-    const f = await git(['fetch']);
+    const f = await g(['fetch']);
     if (!f.ok) return result('pull', f);
     const fresh = await status();
     if (fresh.ahead > 0 && fresh.behind > 0) {
       throw new GitRefusal('diverged', 'Local and remote have diverged; resolve this in a terminal.');
     }
-    return result('pull', await git(['pull', '--ff-only']));
+    return result('pull', await g(['pull', '--ff-only']));
   });
 
   const commit = ({ message } = {}) => exclusive(async () => {
@@ -153,17 +167,18 @@ function createGitOps({ root }) {
   });
 
   const push = () => exclusive(async () => {
-    const branchR = await git(['symbolic-ref', '--short', '-q', 'HEAD']);
+    const g = deadlineGit();
+    const branchR = await g(['symbolic-ref', '--short', '-q', 'HEAD']);
     const branch = branchR.ok ? branchR.stdout.trim() : null;
     if (!branch) throw new GitRefusal('no_upstream', 'HEAD is detached; there is no branch to push.');
     // Fetch first: the push decision must rest on what origin has now, and is
     // measured against origin/<branch> (the push target), not @{u}.
-    const f = await git(['fetch', 'origin']);
+    const f = await g(['fetch', 'origin']);
     if (!f.ok) return result('push', f);
     const remoteRef = `refs/remotes/origin/${branch}`;
-    const exists = await git(['rev-parse', '--verify', '-q', remoteRef]);
+    const exists = await g(['rev-parse', '--verify', '-q', remoteRef]);
     if (!exists.ok) throw new GitRefusal('no_upstream', `origin has no branch '${branch}'; push it once from a terminal first.`);
-    const c = await git(['rev-list', '--left-right', '--count', `${remoteRef}...HEAD`]);
+    const c = await g(['rev-list', '--left-right', '--count', `${remoteRef}...HEAD`]);
     if (!c.ok) return result('push', c);
     const [behind, ahead] = c.stdout.trim().split(/\s+/).map(Number);
     if (behind > 0 && ahead > 0) {
@@ -171,7 +186,7 @@ function createGitOps({ root }) {
     }
     if (behind > 0) throw new GitRefusal('behind', 'The remote has newer commits; pull first.');
     // Fully qualified, no leading '+': a branch literally named '+x' must not become a forced refspec.
-    return result('push', await git(['push', 'origin', `refs/heads/${branch}:refs/heads/${branch}`]));
+    return result('push', await g(['push', 'origin', `refs/heads/${branch}:refs/heads/${branch}`]));
   });
 
   return { status, fetch, pull, commit, push, abort, isBusy };

@@ -660,9 +660,9 @@ git-helper-stop:
 	@sock="$(abspath $(GIT_HELPER_RUN))/git-helper.sock"; \
 	if [ -f $(GIT_HELPER_RUN)/git-helper.pid ]; then \
 	  pid=$$(cat $(GIT_HELPER_RUN)/git-helper.pid); kill $$pid 2>/dev/null || true; \
-	  echo "git-helper: SIGTERM sent to pid $$pid, draining (up to 70s)"; \
-	  i=0; while kill -0 $$pid 2>/dev/null && [ $$i -lt 233 ]; do sleep 0.3; i=$$((i+1)); done; \
-	  if kill -0 $$pid 2>/dev/null; then echo "error: git-helper pid $$pid is still alive after 70s; pid file kept ($(GIT_HELPER_RUN)/git-helper.pid)"; exit 1; fi; \
+	  echo "git-helper: SIGTERM sent to pid $$pid, draining (up to 130s)"; \
+	  i=0; while kill -0 $$pid 2>/dev/null && [ $$i -lt 433 ]; do sleep 0.3; i=$$((i+1)); done; \
+	  if kill -0 $$pid 2>/dev/null; then echo "error: git-helper pid $$pid is still alive after 130s; pid file kept ($(GIT_HELPER_RUN)/git-helper.pid)"; exit 1; fi; \
 	  rm -f $(GIT_HELPER_RUN)/git-helper.pid; \
 	else echo "git-helper: no pid file, nothing to stop"; fi; \
 	if ss -xln 2>/dev/null | grep -F "$$sock"; then echo "error: something is still listening on $$sock"; exit 1; fi; \
