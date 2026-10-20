@@ -210,7 +210,7 @@ dbTest('box unreachable: export ok, box_error recorded, group note says so', asy
   assert.ok(st.box_error.length <= 300);
   assert.notStrictEqual(st.box_pushed_sha256, st.exported_sha256);
   const d = await diffGroup(pool, 'maps');
-  assert.strictEqual(d.note, 'GPU box unreachable — new regions need the box (local generator: SOMET-644)');
+  assert.strictEqual(d.note, 'GPU box unreachable — generate regions locally in Generated Worlds; box sync resumes when it is back');
   // The spec file and state are written despite the box.
   assert.strictEqual((await diffGroup(pool, 'maps')).status, 'in_sync');
 });
@@ -471,5 +471,5 @@ test('note lists at most 3 specs then +N more; unreachable replaces the lines', 
   const mixed = [{ spec: 'a', error: 'unreachable: x' }, { spec: 'b', error: 'service_error: y' }];
   assert.match(mapsGroup._boxNote(mixed), /^GPU box not updated: a: unreachable: x\n/);
   const allDown = [{ spec: 'a', error: 'unreachable: x' }, { spec: 'b', error: 'unreachable: y' }];
-  assert.strictEqual(mapsGroup._boxNote(allDown), 'GPU box unreachable — new regions need the box (local generator: SOMET-644)');
+  assert.strictEqual(mapsGroup._boxNote(allDown), 'GPU box unreachable — generate regions locally in Generated Worlds; box sync resumes when it is back');
 });

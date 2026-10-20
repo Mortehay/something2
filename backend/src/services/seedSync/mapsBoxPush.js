@@ -24,7 +24,7 @@ const wg = require('../worldGenService.js');
 const { readStates } = require('./mapSpecState.js');
 
 const MAX_ERROR = 300;
-const UNREACHABLE_NOTE = 'GPU box unreachable — new regions need the box (local generator: SOMET-644)';
+const UNREACHABLE_NOTE = 'GPU box unreachable — generate regions locally in Generated Worlds; box sync resumes when it is back';
 const MAX_NOTE_LINES = 3;
 // A failure that will hit every remaining spec too: stop calling the box.
 const FATAL = new Set(['unreachable', 'auth_failed', 'not_configured']);
