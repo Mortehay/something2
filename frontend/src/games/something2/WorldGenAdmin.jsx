@@ -370,7 +370,8 @@ export function LocalPreviewResult({
       {saved && (
         <Mono>{`Saved as seeds/maps/${saved.file}${saved.overwrote ? ' (replaced the existing file)' : ''}. `
           + 'In Seed / Export → Maps, run Export to list it, then Seed to build it on this PC. '
-          + 'Commit seeds/ to share it.'}</Mono>
+          + 'Commit seeds/ to share it. It does not become the entry world and is not linked to your '
+          + 'other maps — link it in the World Map Editor.'}</Mono>
       )}
     </div>
   );

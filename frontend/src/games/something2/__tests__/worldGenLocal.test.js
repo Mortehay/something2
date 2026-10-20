@@ -106,7 +106,8 @@ describe('LocalPreviewResult', () => {
   it('after saving it points to Seed / Export → Maps', () => {
     const html = render({ saved: { file: 'emerald-reach.map.json', overwrote: false } });
     expect(html).toContain('Saved as seeds/maps/emerald-reach.map.json. In Seed / Export → Maps, run Export '
-      + 'to list it, then Seed to build it on this PC. Commit seeds/ to share it.');
+      + 'to list it, then Seed to build it on this PC. Commit seeds/ to share it.'
+      + ' It does not become the entry world and is not linked to your other maps — link it in the World Map Editor.');
     expect(html).not.toContain('shows there as new');
   });
   it('a save failure is shown', () => {

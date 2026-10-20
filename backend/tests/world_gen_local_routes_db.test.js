@@ -152,7 +152,8 @@ dbTest('save writes <slug>.map.json, byte-equal to toJson, and the file validate
   assert.strictEqual(res.body.file, 'local-vale.map.json');
   assert.strictEqual(res.body.overwrote, false);
   assert.strictEqual(res.body.next, 'Saved as seeds/maps/local-vale.map.json. In Seed / Export → Maps, run Export '
-    + 'to list it, then Seed to build it on this PC. Commit seeds/ to share it.');
+    + 'to list it, then Seed to build it on this PC. Commit seeds/ to share it.'
+    + ' It does not become the entry world and is not linked to your other maps — link it in the World Map Editor.');
   assert.deepStrictEqual(fs.readdirSync(dir), ['local-vale.map.json']);
   const text = fs.readFileSync(path.join(dir, 'local-vale.map.json'), 'utf8');
   assert.strictEqual(text, expectedSpecText());
