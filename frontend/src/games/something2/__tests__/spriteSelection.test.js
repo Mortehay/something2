@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   filterSpriteSubjects, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
-  targetsForSprites, framesCap, cellCount, estimateLabel, defaultActions, rowLabels,
+  targetsForSprites, framesCap, cellCount, estimateLabel, defaultActionsFor, rowLabels,
 } from '../spriteSelection.js';
 import { PAGE_SIZE } from '../artSelection.js';
 
@@ -105,10 +105,24 @@ describe('sprite console action controls', () => {
     expect(estimateLabel(10, 30)).toBe('10 cells · ~5 min');
   });
 
-  it('defaultActions keeps only catalog ids', () => {
-    expect(defaultActions(catalog)).toEqual(['idle', 'sway']);
-    expect(defaultActions({ actions: [{ id: 'sway' }, { id: 'walk' }] })).toEqual(['sway']);
-    expect(defaultActions(null)).toEqual([]);
+  describe('defaultActionsFor', () => {
+    const prop = { is_creature: false, is_playable: false };
+    const wolf = { is_creature: true };
+
+    it('idle + sway when a flat prop is selected', () => {
+      expect(defaultActionsFor(catalog, [wolf, prop])).toEqual(['idle', 'sway']);
+    });
+
+    it('idle only when only creatures are selected or nothing is', () => {
+      expect(defaultActionsFor(catalog, [wolf])).toEqual(['idle']);
+      expect(defaultActionsFor(catalog, [])).toEqual(['idle']);
+    });
+
+    it('keeps only ids the catalog has', () => {
+      expect(defaultActionsFor({ actions: [{ id: 'sway' }, { id: 'walk' }] }, [prop])).toEqual(['sway']);
+      expect(defaultActionsFor({ actions: [{ id: 'walk' }] }, [wolf])).toEqual([]);
+      expect(defaultActionsFor(null, [prop])).toEqual([]);
+    });
   });
 
   it('rowLabels formats each row', () => {

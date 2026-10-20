@@ -9,8 +9,11 @@ import { rowLabels } from './spriteSelection.js';
 
 const Cols = styled.div`display: flex; gap: 1.2rem; align-items: flex-start; flex-wrap: wrap; margin-top: 0.8rem;`;
 const Col = styled.div`display: flex; flex-direction: column; gap: 0.4rem; min-width: 0;`;
+// Checkerboard behind the art so an opaque backdrop is visible as one.
+const CHECKER = 'conic-gradient(#b8b8b8 25%, #e6e6e6 0 50%, #b8b8b8 0 75%, #e6e6e6 0) 0 0 / 16px 16px';
 const Img = styled.img`
-  max-width: 100%; background: var(--s2-bg-sunken); border: 1px solid var(--s2-border); border-radius: 4px;
+  background: ${CHECKER};
+  max-width: 100%; border: 1px solid var(--s2-border); border-radius: 4px;
   ${(p) => p.$pixel && 'image-rendering: pixelated;'}
 `;
 const Rows = styled.ul`margin: 0; padding-left: 1.2rem; list-style: none; font-size: 0.85rem; color: var(--s2-text-muted);`;

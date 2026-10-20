@@ -67,7 +67,6 @@ export function isSpritePageSelected(selected, pageRows) {
 
 // --- Box action catalog helpers ---------------------------------------------
 
-const DEFAULT_ACTIONS = ['idle', 'sway'];
 const FACINGS = { directional: 8, flat: 1 };
 
 export function framesCap(catalog, actions) {
@@ -90,9 +89,12 @@ export function estimateLabel(cells, secondsPerCell) {
   return `${noun} · ~${h ? `${h} h ` : ''}${h && !m ? '' : `${m} min`}`.trimEnd();
 }
 
-export function defaultActions(catalog) {
+// Initial action ticks: idle, plus sway when the current selection contains a
+// flat prop (creatures have no sway). Filtered to the catalog's ids.
+export function defaultActionsFor(catalog, rows) {
   const ids = new Set((catalog?.actions || []).map((action) => action.id));
-  return DEFAULT_ACTIONS.filter((id) => ids.has(id));
+  const wanted = (rows || []).some((row) => spriteShape(row) === 'flat') ? ['idle', 'sway'] : ['idle'];
+  return wanted.filter((id) => ids.has(id));
 }
 
 // sheet.json -> one label per sheet row. Legacy local atlases have no `rows`.

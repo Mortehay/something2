@@ -8,7 +8,7 @@ import {
   useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
 } from './useSpriteConsole.js';
 import {
-  cellCount, defaultActions, estimateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
+  cellCount, defaultActionsFor, estimateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   spriteShape, targetsForSprites, toggleSpriteSubject,
 } from './spriteSelection.js';
 
@@ -100,8 +100,9 @@ function SpriteConsoleAdmin() {
   const selectedRows = subjects.filter((subject) => selected.has(subject.id));
   const approvable = selectedRows.filter((subject) => subject.job_state === 'done' && subject.job_id);
 
-  // null = untouched, so the defaults follow the catalog once it loads.
-  const actions = chosenActions ?? defaultActions(catalog);
+  // null = untouched, so the defaults follow the catalog once it loads and the
+  // current selection; any explicit tick keeps the user's choice.
+  const actions = chosenActions ?? defaultActionsFor(catalog, selectedRows);
   const cap = framesCap(catalog, actions);
   const frames = Math.min(chosenFrames, cap);
   const cells = cellCount(selectedRows, actions, frames);
