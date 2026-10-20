@@ -23,3 +23,6 @@ backend/tools/world_gen_ref
 # planned home for a generated deploy key) exists.
 .env
 compose/orangepi/secrets/
+
+# Host git-helper socket/token (see tools/git-helper); also bind-mounted at runtime
+backend/run/

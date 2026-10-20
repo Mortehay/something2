@@ -1,4 +1,4 @@
-.PHONY: seed-sync-status seed-sync-export seed-sync-seed up down build logs restart rebuild clean nuke shell-backend shell-frontend db-shell \
+.PHONY: git-helper git-helper-stop git-helper-status seed-sync-status seed-sync-export seed-sync-seed up down build logs restart rebuild clean nuke shell-backend shell-frontend db-shell \
         engine-build engine-test engine-up engine-down engine-logs engine-shell engine-rebuild \
         redis-shell admin-password admin-password-rotate seed-catalogs seed-map seed-passive-tree \
         art-export art-seed audio-export audio-seed tiles-generate tiles-export tiles-seamless tiles-seed \
@@ -638,3 +638,33 @@ pi-db-shell:
 # Requires CONFIRM=<the board's address>. See compose/orangepi/scripts/reset.sh.
 pi-reset:
 	@bash compose/orangepi/scripts/reset.sh
+
+# --- Host git helper (Seed/Export git buttons) ------------------------------
+# Runs on the HOST as your user so it can use your git + SSH setup; the backend
+# container has no git and never sees a push key. See tools/git-helper/README.md.
+# Stopping goes by pid file, never by process name.
+GIT_HELPER_RUN = backend/run
+GIT_HELPER_PORT_ENV = $(if $(GIT_HELPER_PORT),GIT_HELPER_PORT=$(GIT_HELPER_PORT),)
+
+git-helper:
+	@mkdir -p $(GIT_HELPER_RUN) && chmod 700 $(GIT_HELPER_RUN)
+	@if [ -f $(GIT_HELPER_RUN)/git-helper.pid ] && kill -0 $$(cat $(GIT_HELPER_RUN)/git-helper.pid) 2>/dev/null; then \
+	  echo "git-helper already running (pid $$(cat $(GIT_HELPER_RUN)/git-helper.pid)); 'make git-helper-stop' first"; exit 1; fi
+	@$(GIT_HELPER_PORT_ENV) setsid nohup node tools/git-helper/server.js >$(GIT_HELPER_RUN)/git-helper.log 2>&1 </dev/null & echo $$! >$(GIT_HELPER_RUN)/git-helper.pid
+	@sleep 1
+	@if kill -0 $$(cat $(GIT_HELPER_RUN)/git-helper.pid) 2>/dev/null; then \
+	  cat $(GIT_HELPER_RUN)/git-helper.log; echo "pid $$(cat $(GIT_HELPER_RUN)/git-helper.pid), log $(GIT_HELPER_RUN)/git-helper.log"; \
+	else echo "git-helper failed to start:"; cat $(GIT_HELPER_RUN)/git-helper.log; rm -f $(GIT_HELPER_RUN)/git-helper.pid; exit 1; fi
+
+git-helper-stop:
+	@if [ -f $(GIT_HELPER_RUN)/git-helper.pid ]; then \
+	  pid=$$(cat $(GIT_HELPER_RUN)/git-helper.pid); kill $$pid 2>/dev/null || true; \
+	  for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 $$pid 2>/dev/null || break; sleep 0.3; done; \
+	  rm -f $(GIT_HELPER_RUN)/git-helper.pid; echo "git-helper stopped (pid $$pid)"; \
+	else echo "git-helper: no pid file, nothing to stop"; fi
+	@ss -xlp 2>/dev/null | grep -F git-helper.sock || echo "verified: nothing listening on git-helper.sock"
+
+git-helper-status:
+	@if [ -f $(GIT_HELPER_RUN)/git-helper.pid ] && kill -0 $$(cat $(GIT_HELPER_RUN)/git-helper.pid) 2>/dev/null; then \
+	  echo "git-helper running, pid $$(cat $(GIT_HELPER_RUN)/git-helper.pid)"; head -1 $(GIT_HELPER_RUN)/git-helper.log; \
+	else echo "git-helper not running (make git-helper)"; fi
