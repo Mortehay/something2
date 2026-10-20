@@ -172,13 +172,55 @@ JobSpec: `prompt, concept_image (path under the box's images/), actions[],
 directions[], frames (default 4), cell ("48x64"), colors (24), seed (0),
 style_profile (null), concept_check (true)`.
 
-**Not yet observed:** the body of `GET /api/jobs/{id}`, `/sheet` and `/atlas`
-(requires the key). **The builder's first step is to capture one real job
-end-to-end through the backend** (one creature, `idle`, 1–2 frames) and record
-the real response shapes in this doc before writing the parser. Wall time is
-known from the user's test (~22 s/cell); still record the capture's own timing. Memory/notes say the box can wedge (WSL2 `dxgkio` ENOMEM) while
-status endpoints stay green — a job that sits in `running` beyond a timeout
-must fail, not hang.
+## Observed contract (captured 2026-10-20/21 by `backend/scripts/capture-gpu-box-sprite.js`, fixtures in `backend/tests/fixtures/gpuBox/`)
+
+**Concept step.** `POST /api/generate_core` (form `prompt`, `llm_name`) answers 200
+`{"status":"queued","task_id":"<uuid>"}`. `GET /api/task-status/{task_id}` answers
+`{"task_id","status":"PENDING|PROGRESS|SUCCESS","result":null | {"status":"success","url":"/images/core_<hex>.png","duration_ms":N}}`.
+**Tie: `result.url` of the task-status body names the concept file** (no asset-list
+guessing needed). Corroboration: `GET /api/assets?source=image&kind=core` has an item
+with that same `url`, `title` equal to our prompt verbatim and `created_at` just after
+submit. The image is fetched at `GET <origin><result.url>` (auth header works, 200 image/png).
+Terminal states other than SUCCESS were not observed (assume FAILURE/REVOKED; treat anything not SUCCESS after a timeout as failed).
+Concept took 10-84 s wall (queue wait included).
+
+**Create job.** `concept_image` accepts `"images/core_<hex>.png"` (i.e. `result.url` minus the
+leading `/`). `POST /api/jobs` -> 202
+`{"job_id","status":"queued","cells":16,"estimated_seconds":888,"poll":"/api/jobs/<id>"}`.
+The id key is `job_id`, not `id`.
+
+**Poll.** `GET /api/jobs/{id}` ->
+`{"job_id","status":"queued|running|done","stage":null|"turnaround-encode"|"actions-denoise"|"compose","progress_pct":0-100,"progress_msg":"queued, 16 cells"|"running turnaround-encode"|"cell 5/16"|"complete","spec":{...echo of the request, incl. actions/directions/frames...},"created_at","updated_at","finished_at":null|ts,"error":null,"sheet_url":"/api/jobs/<id>/sheet","atlas_url":"/api/jobs/<id>/atlas"}`
+(`sheet_url`/`atlas_url` present only when done). A failed job was not observed.
+
+**Sheet.** `GET /api/jobs/{id}/sheet` -> 200 `image/png`, RGBA, flat grid: width = frames x 48,
+height = rows x 64 (Wolf 8 rows: 96x512; tree 2 rows: 96x128).
+
+**Atlas.** `GET /api/jobs/{id}/atlas` -> JSON:
+`{"cell":{"w":48,"h":64},"grid":{"columns":F,"rows":R},"directions":[...],"frames_per_action":F,"palette":[24 "#rrggbb"],"rows":[{"row":0,"action":"idle","direction":"s"},...],"something2":{"sprite_sheet":"flat","columns":F,"rows":R},"image":"sheet_<id>.png"}`.
+**There is no per-frame map**: frame (row r, column c) sits at x=c*cell.w, y=r*cell.h. Rows
+are ordered action-major, then the requested direction order. `rows[]` has no per-row frame
+count (use `frames_per_action`).
+
+**Timings (RTX 3060, box otherwise idle).** Wolf 16 cells (idle, 8 facings, 2 frames): 911 s
+(56.9 s/cell, incl. ~1-2 min turnaround-encode up front). Tree 4 cells (idle+sway, `s`, 2 frames):
+232 s (58 s/cell). The ~22 s/cell figure above is stale for small jobs: fixed per-job cost is large;
+the box's own `estimated_seconds` (888 for the Wolf) was accurate.
+
+**Decision gate results.** (a) concept tie = `task-status.result.url`. (b) `concept_check:false`
+does NOT give usable sheets: see below. Do Task 9 before Task 5.
+
+- Wolf (concept was a clean upright quadruped): every row has a centred subject, but a grey
+  circular backdrop is baked into 7 of 8 rows (row `n` is transparent), and frame 0 of 5 rows is a
+  standing bipedal humanoid-wolf while frame 1 is a quadruped. Facings are inconsistent
+  (the same row mixes two body plans).
+- Tree: `idle` frame 0 is a brown-jacketed MAN, not a tree; idle f1 and sway f0/f1 are trees on a
+  transparent background; sway f1 has a faint man silhouette in the trunk; the two sway frames are
+  nearly identical (no visible sway).
+The box evidently treats the concept as a character (turnaround), so non-humanoid subjects drift
+toward people. Props and wide creatures need the concept shaped or a box change (see Decisions).
+
+The box can wedge (WSL2 `dxgkio` ENOMEM) while status endpoints stay green: a job that sits in `running` without progress beyond a timeout must fail, not hang.
 
 ## Shape of the work
 

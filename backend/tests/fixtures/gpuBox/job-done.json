@@ -1,0 +1,36 @@
+{
+  "job_id": "f841ec70-3d4e-4ede-9928-6b840a283d76",
+  "status": "done",
+  "stage": "compose",
+  "progress_pct": 100,
+  "progress_msg": "complete",
+  "spec": {
+    "cell": "48x64",
+    "seed": 1,
+    "colors": 24,
+    "frames": 2,
+    "prompt": "pixel art, a grey wolf, single object, solid transparent background",
+    "actions": [
+      "idle"
+    ],
+    "directions": [
+      "s",
+      "se",
+      "e",
+      "ne",
+      "n",
+      "nw",
+      "w",
+      "sw"
+    ],
+    "concept_check": false,
+    "concept_image": "images/core_23e329cdf09d.png",
+    "style_profile": null
+  },
+  "created_at": "2026-10-20T21:26:31.482934+00:00",
+  "updated_at": "2026-10-20T21:41:36.678998+00:00",
+  "finished_at": "2026-10-20T21:41:36.672191+00:00",
+  "error": null,
+  "sheet_url": "/api/jobs/f841ec70-3d4e-4ede-9928-6b840a283d76/sheet",
+  "atlas_url": "/api/jobs/f841ec70-3d4e-4ede-9928-6b840a283d76/atlas"
+}
