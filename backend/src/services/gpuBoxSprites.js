@@ -99,8 +99,16 @@ async function generateConcept(provider, { prompt }, {
     const status = String(st.json && st.json.status || '').toUpperCase();
     if (status === 'SUCCESS') {
       const url = st.json.result && st.json.result.url;
-      if (typeof url !== 'string' || !url.startsWith('/')) {
+      if (typeof url !== 'string' || !url) {
         return { ok: false, error: 'GPU box concept task succeeded but result.url is missing, so no image can be tied to it', providerFault: true };
+      }
+      // The URL is box-supplied data and the auth header rides on every call,
+      // so it must resolve to the box's own origin (rejects //host/x, other
+      // absolute URLs and backslash tricks) before anything is fetched.
+      let sameOrigin = false;
+      try { sameOrigin = new URL(url, provider.base_url).origin === new URL(provider.base_url).origin; } catch (_) { /* invalid */ }
+      if (!url.startsWith('/') || url.startsWith('//') || url.includes('\\') || !sameOrigin) {
+        return { ok: false, error: 'GPU box concept task returned a result.url outside the box origin; refusing to fetch it', providerFault: true };
       }
       // eslint-disable-next-line no-await-in-loop
       const img = await callPng(provider, url, { fetchImpl });

@@ -181,3 +181,22 @@ test('unreachable box returns a readable retryable error', async () => {
   assert.equal(r.retryable, true);
   assert.match(r.error, /^could not reach/);
 });
+
+test('generateConcept refuses a result.url that leaves the box origin and sends no auth there', async () => {
+  for (const url of ['//evil.host/x.png', 'http://other:1/x.png', '/\\evil.host/x.png']) {
+    const seen = [];
+    const done = { task_id: 't', status: 'SUCCESS', result: { url } };
+    const routes = conceptRoutes([done]);
+    const fetchImpl = async (u, init = {}) => {
+      seen.push({ url: String(u), headers: init.headers || {} });
+      return routes[`${init.method || 'GET'} ${new URL(u).pathname}`]
+        ? routes[`${init.method || 'GET'} ${new URL(u).pathname}`](new URL(u), init, 1)
+        : new Response('nf', { status: 404 });
+    };
+    const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, sleep });
+    assert.equal(r.ok, false, url);
+    assert.match(r.error, /outside the box origin/);
+    assert.ok(seen.every((c) => new URL(c.url).origin === 'http://box:8001'), `request left the box for ${url}`);
+    assert.ok(!seen.some((c) => /evil|other/.test(c.url)));
+  }
+});
