@@ -544,3 +544,78 @@ test('push reaches git with the fully qualified non-force refspec (+branch)', as
   assert.deepEqual(added, ['push origin refs/heads/+main:refs/heads/+main']);
   assert.equal(git(origin, 'log', '-1', '--format=%s', 'refs/heads/+main'), 'mine');
 });
+
+test('origin/<branch> model: a branch pushed without -u is ahead of origin/<branch>, push lands', async (t) => {
+  const { a, origin, ops } = fixture(t);
+  git(a, 'checkout', '-b', 'bar');
+  git(a, 'push', 'origin', 'refs/heads/bar:refs/heads/bar'); // no -u
+  write(a, 'bar.txt', '1\n');
+  git(a, 'add', '-A'); git(a, 'commit', '-m', 'bar one');
+  const s = await ops.status();
+  assert.equal(s.upstream, 'origin/bar');
+  assert.equal(s.ahead, 1);
+  assert.equal(s.behind, 0);
+  const r = await ops.push();
+  assert.equal(r.ok, true);
+  assert.equal(git(origin, 'log', '-1', '--format=%s', 'refs/heads/bar'), 'bar one');
+  assert.equal((await ops.status()).ahead, 0);
+});
+
+test('origin/<branch> model: a branch auto-tracking main without origin/<branch> has no upstream; nothing moves', async (t) => {
+  const { a, b, origin, ops } = fixture(t);
+  git(a, 'checkout', '-b', 'foo', 'origin/main'); // tracks origin/main, no origin/foo
+  write(b, 'b.txt', '1\n');
+  git(b, 'add', '-A'); git(b, 'commit', '-m', 'main moved'); git(b, 'push');
+  const s = await ops.status();
+  assert.equal(s.upstream, null);
+  assert.equal(s.ahead, 0);
+  const head = git(a, 'rev-parse', 'HEAD');
+  await assert.rejects(ops.pull(), refusal('no_upstream'));
+  assert.equal(git(a, 'rev-parse', 'HEAD'), head, 'pull did not follow @{u}');
+  await assert.rejects(ops.push(), refusal('no_upstream'));
+  assert.equal(git(origin, 'rev-parse', '--verify', '-q', 'refs/heads/main'), git(b, 'rev-parse', 'HEAD'));
+});
+
+test('pull on a detached HEAD is refused', async (t) => {
+  const { a, ops } = fixture(t);
+  git(a, 'checkout', '-q', '--detach');
+  await assert.rejects(ops.pull(), refusal('no_upstream'));
+});
+
+test('a landed push is never reported failed because the trailing status failed', async (t) => {
+  const { a, origin } = fixture(t);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-shim-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const real = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+  fs.writeFileSync(path.join(dir, 'git'), `#!/bin/sh\ncase "$1" in status) echo boom >&2; exit 2;; esac\nexec ${real} "$@"\n`, { mode: 0o755 });
+  const prev = process.env.PATH;
+  process.env.PATH = `${dir}:${prev}`;
+  t.after(() => { process.env.PATH = prev; });
+  write(a, 'local.txt', 'y\n');
+  git(a, 'add', '-A'); git(a, 'commit', '-m', 'landed');
+  const r = await createGitOps({ root: a }).push();
+  assert.equal(r.ok, true);
+  assert.equal(r.status, null);
+  assert.match(r.note, /Status could not be refreshed/);
+  assert.equal(git(origin, 'log', '-1', '--format=%s', 'main'), 'landed');
+  // over HTTP the op's own ok decides the status code
+  const runDir = runDirFor(t);
+  const sock = path.join(runDir, 'git-helper.sock');
+  const h = await createServer({ root: a, runDir }).start();
+  t.after(() => h.close());
+  const token = fs.readFileSync(path.join(runDir, 'git-helper.token'), 'utf8').trim();
+  write(a, 'local2.txt', 'y\n');
+  git(a, 'add', '-A'); git(a, 'commit', '-m', 'landed2');
+  const res = await request(sock, 'POST', '/push', { token, body: {} });
+  assert.equal(res.status, 200);
+  assert.equal(res.json.status, null);
+});
+
+test('abort() makes runGit refuse to spawn new children', async (t) => {
+  const { a, ops } = fixture(t);
+  ops.abort();
+  await assert.rejects(ops.status(), /git status failed: aborted/);
+  const r = await ops.fetch();
+  assert.equal(r.ok, false);
+  assert.match(r.output, /aborted/);
+});

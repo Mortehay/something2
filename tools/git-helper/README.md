@@ -30,11 +30,13 @@ which runs as your host user with your own git and SSH setup.
 |---|---|
 | `GET /status` | `{ branch, upstream, ahead, behind, seedsDirty, otherDirty, headSubject, lastFetchAt }` |
 | `POST /fetch` | `git fetch --prune` |
-| `POST /pull` | `git fetch`, then `git pull --ff-only`; refused when the tree is dirty anywhere or diverged |
+| `POST /pull` | `git fetch origin`, then `git merge --ff-only refs/remotes/origin/<branch>`; refused when detached, dirty anywhere, diverged, or origin lacks the branch |
 | `POST /commit` `{message}` | `git add -- backend/seeds`, then commits only `backend/seeds`; message stored byte-exact (`--cleanup=verbatim`) |
 | `POST /push` | `git fetch origin`, then ahead/behind against `origin/<branch>`; `git push origin refs/heads/X:refs/heads/X`, never forced. `no_upstream` when origin lacks the branch |
 
-Results are `{ ok, op, output, status }` (output capped at 4 KB; HTTP 502 when git itself
+Model: Pull/Push always use `origin/<current branch>`; a non-origin upstream (or `@{u}` pointing elsewhere) is not supported in the tab, and `status.upstream` is `origin/<branch>` or null.
+
+Results are `{ ok, op, output, status }` (`status` is null, with a `note`, if the trailing status refresh failed or the op deadline was used up; the op's own `ok` still decides the HTTP code) (output capped at 4 KB; HTTP 502 when git itself
 failed). Refusals are 409 `{ error, message }` with `dirty`, `nothing_to_commit`,
 `behind` ("pull first"), `diverged`, `no_upstream`, `busy` (one mutating op at a time).
 A bad body is 400 `bad_request`.

@@ -25,7 +25,10 @@ function cap(s) {
   return t.length > OUTPUT_CAP ? `${t.slice(0, OUTPUT_CAP)}\n...[truncated]` : t;
 }
 
-function runGit(root, args, { timeout = TIMEOUT_MS, children } = {}) {
+function runGit(root, args, { timeout = TIMEOUT_MS, children, isAborted } = {}) {
+  if (isAborted && isAborted()) {
+    return Promise.resolve({ ok: false, code: 1, stdout: '', stderr: 'aborted' });
+  }
   const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' };
   // Never wait on an ssh password/host-key prompt; respect a user override.
   if (!env.GIT_SSH_COMMAND) env.GIT_SSH_COMMAND = 'ssh -o BatchMode=yes';
@@ -57,20 +60,23 @@ function createGitOps({ root, opDeadlineMs = OP_DEADLINE_MS }) {
   let busy = false;
   const children = new Set();
 
-  const git = (args, opts) => runGit(root, args, { ...opts, children });
+  let aborted = false;
+  const git = (args, opts) => runGit(root, args, { ...opts, children, isAborted: () => aborted });
   // A git runner whose every call is limited by min(60s, time left of the op deadline).
   const deadlineGit = () => {
     const end = Date.now() + opDeadlineMs;
-    return (args) => {
+    const run = (args) => {
       const left = end - Date.now();
       if (left <= 0) {
         return Promise.resolve({ ok: false, code: 1, stdout: '', stderr: `git operation timed out after ${opDeadlineMs / 1000}s overall` });
       }
       return git(args, { timeout: Math.min(TIMEOUT_MS, left) });
     };
+    run.left = () => end - Date.now();
+    return run;
   };
-  // Shutdown cap reached: stop whatever git is still running.
-  const abort = () => { for (const c of children) c.kill('SIGKILL'); };
+  // Shutdown cap reached: stop whatever git is still running and spawn nothing new.
+  const abort = () => { aborted = true; for (const c of children) c.kill('SIGKILL'); };
   const isBusy = () => busy;
 
   async function exclusive(fn) {
@@ -79,8 +85,8 @@ function createGitOps({ root, opDeadlineMs = OP_DEADLINE_MS }) {
     try { return await fn(); } finally { busy = false; }
   }
 
-  async function dirtyPaths() {
-    const r = await git(['status', '--porcelain=v1', '-z', '--untracked-files=all']);
+  async function dirtyPaths(run = git) {
+    const r = await run(['status', '--porcelain=v1', '-z', '--untracked-files=all']);
     if (!r.ok) throw new Error(`git status failed: ${cap(r.stderr)}`);
     const parts = r.stdout.split('\0');
     const out = [];
@@ -93,20 +99,21 @@ function createGitOps({ root, opDeadlineMs = OP_DEADLINE_MS }) {
     return out;
   }
 
-  async function status() {
-    const [branchR, upR, headR, fetchR, dirty] = await Promise.all([
-      git(['symbolic-ref', '--short', '-q', 'HEAD']),
-      git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']),
-      git(['log', '-1', '--format=%s']),
-      git(['rev-parse', '--git-path', 'FETCH_HEAD']),
-      dirtyPaths(),
+  // Pull/push always use origin/<current branch>; the configured @{u} is ignored.
+  async function status(run = git) {
+    const [branchR, headR, fetchR, dirty] = await Promise.all([
+      run(['symbolic-ref', '--short', '-q', 'HEAD']),
+      run(['log', '-1', '--format=%s']),
+      run(['rev-parse', '--git-path', 'FETCH_HEAD']),
+      dirtyPaths(run),
     ]);
     const branch = branchR.ok ? branchR.stdout.trim() : null;
-    const upstream = upR.ok ? upR.stdout.trim() : null;
+    const remoteRef = branch ? `refs/remotes/origin/${branch}` : null;
+    const upstream = remoteRef && (await run(['rev-parse', '--verify', '-q', remoteRef])).ok ? `origin/${branch}` : null;
     let ahead = 0;
     let behind = 0;
     if (upstream) {
-      const c = await git(['rev-list', '--left-right', '--count', '@{u}...HEAD']);
+      const c = await run(['rev-list', '--left-right', '--count', `${remoteRef}...HEAD`]);
       if (c.ok) [behind, ahead] = c.stdout.trim().split(/\s+/).map(Number);
     }
     let lastFetchAt = null;
@@ -126,28 +133,40 @@ function createGitOps({ root, opDeadlineMs = OP_DEADLINE_MS }) {
     };
   }
 
-  async function result(op, r) {
+  // The op already happened; a failing trailing status must never turn it into a failure.
+  async function result(op, r, run) {
     const text = cap(`${r.stdout.trim()}\n${r.stderr.trim()}`);
-    return { ok: r.ok, op, output: r.ok ? text : credentialHint(text), status: await status() };
+    const out = { ok: r.ok, op, output: r.ok ? text : credentialHint(text), status: null };
+    if (run && run.left() <= 0) {
+      out.note = 'Status was not refreshed: the operation deadline was used up.';
+      return out;
+    }
+    try {
+      out.status = await status(run || git);
+    } catch (e) {
+      out.note = `Status could not be refreshed: ${cap(e.message)}`;
+    }
+    return out;
   }
 
   const fetch = () => exclusive(async () => result('fetch', await git(['fetch', '--prune'])));
 
   const pull = () => exclusive(async () => {
     const g = deadlineGit();
-    const s = await status();
+    const s = await status(g);
+    if (!s.branch) throw new GitRefusal('no_upstream', 'HEAD is detached; there is no branch to pull.');
     if (s.seedsDirty.length || s.otherDirty.length) {
       throw new GitRefusal('dirty', 'The working tree has uncommitted changes; commit or discard them before pulling.');
     }
-    if (!s.upstream) throw new GitRefusal('no_upstream', 'The current branch has no upstream to pull from.');
     // Fetch first so ahead/behind below are fresh, not whatever the last fetch left.
-    const f = await g(['fetch']);
-    if (!f.ok) return result('pull', f);
-    const fresh = await status();
+    const f = await g(['fetch', 'origin']);
+    if (!f.ok) return result('pull', f, g);
+    const fresh = await status(g);
+    if (!fresh.upstream) throw new GitRefusal('no_upstream', `origin has no branch '${fresh.branch}'; there is nothing to pull.`);
     if (fresh.ahead > 0 && fresh.behind > 0) {
       throw new GitRefusal('diverged', 'Local and remote have diverged; resolve this in a terminal.');
     }
-    return result('pull', await g(['pull', '--ff-only']));
+    return result('pull', await g(['merge', '--ff-only', `refs/remotes/origin/${fresh.branch}`]), g);
   });
 
   const commit = ({ message } = {}) => exclusive(async () => {
@@ -174,19 +193,19 @@ function createGitOps({ root, opDeadlineMs = OP_DEADLINE_MS }) {
     // Fetch first: the push decision must rest on what origin has now, and is
     // measured against origin/<branch> (the push target), not @{u}.
     const f = await g(['fetch', 'origin']);
-    if (!f.ok) return result('push', f);
+    if (!f.ok) return result('push', f, g);
     const remoteRef = `refs/remotes/origin/${branch}`;
     const exists = await g(['rev-parse', '--verify', '-q', remoteRef]);
     if (!exists.ok) throw new GitRefusal('no_upstream', `origin has no branch '${branch}'; push it once from a terminal first.`);
     const c = await g(['rev-list', '--left-right', '--count', `${remoteRef}...HEAD`]);
-    if (!c.ok) return result('push', c);
+    if (!c.ok) return result('push', c, g);
     const [behind, ahead] = c.stdout.trim().split(/\s+/).map(Number);
     if (behind > 0 && ahead > 0) {
       throw new GitRefusal('diverged', 'Local and remote have diverged; resolve this in a terminal. The helper never force-pushes.');
     }
     if (behind > 0) throw new GitRefusal('behind', 'The remote has newer commits; pull first.');
     // Fully qualified, no leading '+': a branch literally named '+x' must not become a forced refspec.
-    return result('push', await g(['push', 'origin', `refs/heads/${branch}:refs/heads/${branch}`]));
+    return result('push', await g(['push', 'origin', `refs/heads/${branch}:refs/heads/${branch}`]), g);
   });
 
   return { status, fetch, pull, commit, push, abort, isBusy };
