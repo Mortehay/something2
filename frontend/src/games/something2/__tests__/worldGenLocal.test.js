@@ -50,6 +50,7 @@ describe('saveOutcome', () => {
     expect(saveOutcome(err('exists'))).toBe('confirm_overwrite');
     expect(saveOutcome(err('invalid_spec'))).toBe('failed');
     expect(saveOutcome(err('synced'))).toBe('failed');
+    expect(saveOutcome(err('authored'))).toBe('failed');
     expect(saveOutcome(null)).toBe(null);
   });
 });
@@ -115,6 +116,13 @@ describe('LocalPreviewResult', () => {
     const html = render({ saveError: err('synced', 'local-vale.map.json: this spec is synced through Seed / Export; edit it in the World Map Editor instead.') });
     expect(html).toContain('edit it in the World Map Editor instead');
     expect(html).not.toContain('Replace the existing map spec');
+  });
+  it('an authored-spec 409 shows its message, not an overwrite prompt', () => {
+    const msg = 'seeds/maps/vale-region.map.json is an authored map spec, not a generated region — choose another name';
+    const html = render({ saveError: err('authored', msg) });
+    expect(html).toContain(msg);
+    expect(html).not.toContain('Replace the existing map spec');
+    expect(btn(html, 'Overwrite')).toBe('');
   });
 });
 

@@ -23,7 +23,7 @@
 // Node's isalnum tables in the port's slug().
 const fs = require('node:fs');
 const path = require('node:path');
-const { planRegion, report, toJson } = require('./worldGen/worldGen.js');
+const { planRegion, report, toJson, title } = require('./worldGen/worldGen.js');
 const { dumpsPy } = require('./worldGen/pyCompat.js');
 const { WorldGenError } = require('./worldGenService.js');
 const { validateMapSpec } = require('../../seeds/mapSpec.js');
@@ -72,6 +72,27 @@ function assertNotSynced(name) {
   const specs = doc && Array.isArray(doc.specs) ? doc.specs : [];
   if (specs.some((e) => e && e.name === name)) {
     throw new WorldGenError('synced', `${name}.map.json: ${SYNCED_MSG}.`, { status: 409 });
+  }
+}
+
+// Was <dir>/<name>.map.json made by this generator for this same region?
+// Only then may it be replaced. A generated spec names every world
+// title(name, i) for its index, so a hand-authored spec (vale-region,
+// p5-descent: 'Vale Crossing', 'The Catacombs: Entry', ...) never matches.
+// This holds with no Maps manifest at all, where assertNotSynced passes.
+// Fails CLOSED: a file that cannot be read or parsed counts as authored.
+function isGeneratedFor(file, name) {
+  let doc;
+  try { doc = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return false; }
+  const worlds = doc && Array.isArray(doc.worlds) ? doc.worlds : null;
+  if (!worlds || worlds.length === 0) return false;
+  return worlds.every((w, i) => w && w.name === title(name, i));
+}
+
+function assertNotAuthored(file, fileName, name) {
+  if (!fs.existsSync(file)) return;
+  if (!isGeneratedFor(file, name)) {
+    throw new WorldGenError('authored', `seeds/maps/${fileName} is an authored map spec, not a generated region — choose another name`, { status: 409 });
   }
 }
 
@@ -163,7 +184,8 @@ function preview(body, catalogs) {
 // Regenerates from params (a client-supplied spec is never accepted),
 // validates, and writes <dir>/<slug>.map.json tmp-then-rename. Without
 // `overwrite: true` an existing file is a 409 (a spec listed in the Maps
-// manifest is a 409 even with it, see assertNotSynced) -- checked atomically with a
+// manifest, or one this generator did not make for this region, is a 409 even
+// with it: see assertNotSynced, assertNotAuthored) -- checked atomically with a
 // hard link, so a concurrent writer cannot be clobbered between check and write.
 function save(body, catalogs, { dir = mapsDir() } = {}) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw bad('The request body must be a JSON object.');
@@ -184,6 +206,8 @@ function save(body, catalogs, { dir = mapsDir() } = {}) {
   fs.mkdirSync(dir, { recursive: true });
   const fileName = `${params.name}.map.json`;
   const file = path.join(dir, fileName);
+  // Before the `exists` 409, so an authored spec never offers an overwrite.
+  assertNotAuthored(file, fileName, params.name);
   const tmp = path.join(dir, `.${fileName}.${process.pid}.${Date.now()}.tmp`);
   fs.writeFileSync(tmp, specText, 'utf8');
   let overwrote = false;

@@ -47,7 +47,8 @@ export function reportVerdict(report) {
 }
 
 // What a save error means for the UI: a 409 (`exists`) asks the admin to
-// confirm the overwrite; anything else is a failure to show.
+// confirm the overwrite; anything else -- including the 409s `synced` and
+// `authored`, which no overwrite can get past -- is a failure to show.
 export function saveOutcome(err) {
   if (!err) return null;
   return err.code === 'exists' ? 'confirm_overwrite' : 'failed';

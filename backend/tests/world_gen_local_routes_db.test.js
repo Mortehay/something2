@@ -175,14 +175,17 @@ dbTest('save refuses a name that disagrees with params.name', async ({ app, admi
   assert.deepStrictEqual(fs.readdirSync(dir), []);
 });
 
-dbTest('an existing file is a 409 unless overwrite: true', async ({ app, admin, dir }) => {
+// A file this generator made earlier for the same region (here with a
+// different world count): the 409 asks to confirm, and overwrite replaces it.
+dbTest('an existing generated file is a 409 unless overwrite: true', async ({ app, admin, dir }) => {
   const file = path.join(dir, 'local-vale.map.json');
-  fs.writeFileSync(file, '{"hand":"written"}\n');
+  const earlier = expectedSpecText({ ...PARAMS, worlds: 2 });
+  fs.writeFileSync(file, earlier);
   const refused = await request(app).post('/api/world-gen/local/save').set('Authorization', admin.auth)
     .send({ name: 'local-vale', params: PARAMS });
   assert.strictEqual(refused.status, 409, JSON.stringify(refused.body));
   assert.strictEqual(refused.body.code, 'exists');
-  assert.strictEqual(fs.readFileSync(file, 'utf8'), '{"hand":"written"}\n');
+  assert.strictEqual(fs.readFileSync(file, 'utf8'), earlier);
 
   const ok = await request(app).post('/api/world-gen/local/save').set('Authorization', admin.auth)
     .send({ name: 'local-vale', params: PARAMS, overwrite: true });
@@ -191,6 +194,40 @@ dbTest('an existing file is a 409 unless overwrite: true', async ({ app, admin, 
   assert.strictEqual(fs.readFileSync(file, 'utf8'), expectedSpecText());
   // tmp-then-rename leaves nothing behind, and no .gen.json is ever written.
   assert.deepStrictEqual(fs.readdirSync(dir), ['local-vale.map.json']);
+});
+
+// I1: a hand-authored spec (the checked-in vale-region, copied into the temp
+// dir) is never replaced, overwrite or not, even with no Maps manifest at all.
+const AUTHORED_MSG = 'seeds/maps/vale-region.map.json is an authored map spec, not a generated region — choose another name';
+dbTest('an authored spec is a 409 authored even with overwrite: true, and the file is unchanged', async ({ app, admin, dir, syncDir }) => {
+  assert.ok(!fs.existsSync(path.join(syncDir, 'maps.json')), 'no manifest: the synced guard cannot catch it');
+  const authored = fs.readFileSync(path.join(__dirname, '..', 'seeds', 'maps', 'vale-region.map.json'), 'utf8');
+  const file = path.join(dir, 'vale-region.map.json');
+  fs.writeFileSync(file, authored);
+  for (const overwrite of [false, true]) {
+    const res = await request(app).post('/api/world-gen/local/save').set('Authorization', admin.auth)
+      .send({ name: 'vale-region', params: { ...PARAMS, name: 'vale-region' }, overwrite });
+    assert.strictEqual(res.status, 409, JSON.stringify(res.body));
+    assert.strictEqual(res.body.code, 'authored');
+    assert.strictEqual(res.body.error, AUTHORED_MSG);
+  }
+  assert.strictEqual(fs.readFileSync(file, 'utf8'), authored);
+  // Unparseable and non-generated files are authored too (fails closed).
+  for (const text of ['{"hand":"written"}\n', '{not json']) {
+    fs.writeFileSync(file, text);
+    const res = await request(app).post('/api/world-gen/local/save').set('Authorization', admin.auth)
+      .send({ name: 'vale-region', params: { ...PARAMS, name: 'vale-region' }, overwrite: true });
+    assert.strictEqual(res.status, 409, `${text}: ${JSON.stringify(res.body)}`);
+    assert.strictEqual(res.body.code, 'authored');
+    assert.strictEqual(fs.readFileSync(file, 'utf8'), text);
+  }
+  // A generated spec for a DIFFERENT region saved under this name is not ours either.
+  const foreign = expectedSpecText({ ...PARAMS, name: 'other-vale' });
+  fs.writeFileSync(file, foreign);
+  const res = await request(app).post('/api/world-gen/local/save').set('Authorization', admin.auth)
+    .send({ name: 'vale-region', params: { ...PARAMS, name: 'vale-region' }, overwrite: true });
+  assert.strictEqual(res.body.code, 'authored', JSON.stringify(res.body));
+  assert.strictEqual(fs.readFileSync(file, 'utf8'), foreign);
 });
 
 // The REAL validateMapSpec, against catalogs that lack a biome the generator

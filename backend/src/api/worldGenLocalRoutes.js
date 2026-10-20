@@ -7,7 +7,7 @@
 //   POST /save     body: { name, params, overwrite? } -> 201 { name, file,
 //                  overwrote, worlds, author, ignored, note, next }
 //
-// Errors: 400 bad_params, 409 exists / synced / manifest_unreadable,
+// Errors: 400 bad_params, 409 exists / synced / authored / manifest_unreadable,
 // 422 invalid_spec (+ errors), 500.
 const express = require('express');
 const { requireAdmin } = require('../auth/middleware.js');
