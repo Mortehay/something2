@@ -5,8 +5,8 @@
 // specs listed in its manifest (<SEED_SYNC_DIR>/maps.json); a Maps Export
 // lists the new file, after which it reads `new` there and can be seeded.
 //
-// Rules only: there is no LLM here, so `theme`, `author` and `sfx_engine` are
-// IGNORED (and the response says so), the biomes are the deterministic descent
+// Rules only: there is no LLM here, so `theme`, `author`, `sfx_engine` and
+// `biome_plan` are IGNORED (and the response says so), the biomes are the deterministic descent
 // the box itself uses for author "rules", and there is no preview image.
 //
 // VALIDATE TYPES BEFORE planRegion. The port faithfully reproduces Python's
@@ -33,7 +33,9 @@ const { syncDir } = require('./seedSync/exportGroup.js');
 
 const LOCAL_AUTHOR = 'rules (local fallback)';
 const REGION_NAME_RE = /^[a-z0-9][a-z0-9-]{0,58}[a-z0-9]$/;
-const IGNORED_FIELDS = ['theme', 'author', 'sfx_engine'];
+// biome_plan too: the local route never forwards a client plan to planRegion
+// (the rules descent is the plan), so saying it was used would be a lie.
+const IGNORED_FIELDS = ['theme', 'author', 'sfx_engine', 'biome_plan'];
 
 // The box's WorldSpec bounds and defaults (planRegion's defaults).
 const INT_FIELDS = [

@@ -92,11 +92,11 @@ dbTest('preview returns the port\'s spec and report, authored as the local fallb
 
 dbTest('preview slugs the name (trim, lowercase, spaces to hyphens) and names ignored fields', async ({ app, admin }) => {
   const res = await request(app).post('/api/world-gen/local/preview').set('Authorization', admin.auth)
-    .send({ ...PARAMS, name: '  Local Vale ', theme: 'a valley', author: 'llm', sfx_engine: 'x' });
+    .send({ ...PARAMS, name: '  Local Vale ', theme: 'a valley', author: 'llm', sfx_engine: 'x', biome_plan: [['Meadow']] });
   assert.strictEqual(res.status, 200, JSON.stringify(res.body));
   assert.strictEqual(res.body.name, 'local-vale');
   assert.deepStrictEqual(res.body.spec, JSON.parse(expectedSpecText()));
-  assert.deepStrictEqual(res.body.ignored, ['theme', 'author', 'sfx_engine']);
+  assert.deepStrictEqual(res.body.ignored, ['theme', 'author', 'sfx_engine', 'biome_plan']);
   assert.match(res.body.note, /ignored/);
 });
 
