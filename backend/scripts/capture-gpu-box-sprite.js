@@ -8,6 +8,8 @@
 // DB access is a single read-only SELECT of the active image provider. The
 // token is used to build the auth header and is never printed or written.
 //
+// Raw captures land in --out as sheet.png / atlas.json; the committed fixtures
+// pair each atlas with its own sheet (atlas-wolf.json + wolf-sheet.png, atlas-tree.json + tree-sheet.png).
 //   node capture-gpu-box-sprite.js --out DIR --prompt "..." [--stage concept|job|all]
 //     [--concept images/x.png] [--actions idle,sway] [--directions s,e]
 //     [--frames 2] [--seed 1] [--max-minutes 30]
@@ -73,12 +75,19 @@ async function main() {
       st = (await getJson(`/api/task-status/${encodeURIComponent(taskId)}`)).body;
       console.log('task-status', JSON.stringify(st).slice(0, 400));
       const s = String((st && (st.status || st.state)) || '').toLowerCase();
-      if (['done', 'success', 'succeeded', 'completed', 'complete', 'failed', 'error'].includes(s)) break;
+      if (['done', 'success', 'succeeded', 'completed', 'complete'].includes(s)) break;
+      if (['failed', 'failure', 'error', 'revoked'].includes(s)) {
+        save('task-status-failed.json', st);
+        throw new Error(`concept task ended ${s}`);
+      }
       if (Date.now() - tc > 900000) throw new Error('concept timeout');
       await sleep(3000);
     }
     timings.concept_s = (Date.now() - tc) / 1000;
     save('task-status-done.json', st);
+    const url = st && st.result && st.result.url;
+    if (!url) throw new Error('task-status carried no result.url');
+    if (!concept) concept = String(url).replace(/^\//, '');
     save('assets-before.json', before);
     save('assets-after.json', (await getJson('/api/assets?source=image&kind=core&limit=5')).body);
   }
