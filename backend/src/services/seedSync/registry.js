@@ -74,6 +74,10 @@
 // and entity types pin a provider by uuid).
 const LOCAL = { id: 'local', created_at: 'local', updated_at: 'local', sync_uuid: 'identity' };
 const ART = 'art group (plan 3)';
+// File base name of a character appearance (image and sprite): the class's
+// entity name and the variant, e.g. 'Archer:1'. The exported row holds the
+// entity's sync_uuid; ctx.refKey turns it into the name (assets.nameContext).
+const appearanceName = (r, ctx) => `${ctx.refKey('entity_type_id', r.entity_type_id)}:${r.variant}`;
 
 const GROUPS = [
   {
@@ -415,9 +419,11 @@ const GROUPS = [
         omit: { updated_at: 'local', sync_uuid: 'identity' },
         secretColumns: [],
         refs: { entity_type_id: { table: 'entity_types', by: 'uuid' } },
+        // Named '<class name>:<variant>' (safeName -> Archer_1) like the
+        // legacy manifest key and files, not by the entity's sync_uuid.
         assets: {
-          image: { type: 'image', dir: 'textures/character-appearances' },
-          sprite: { type: 'sprite', dir: 'textures/sprites/character_appearances' },
+          image: { type: 'image', dir: 'textures/character-appearances', name: appearanceName },
+          sprite: { type: 'sprite', dir: 'textures/sprites/character_appearances', name: appearanceName },
         },
       },
       {

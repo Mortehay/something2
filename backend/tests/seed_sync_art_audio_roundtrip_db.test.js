@@ -107,12 +107,14 @@ const MANIFEST = Buffer.from('{"frames":{"idle":2}}\n');
 const ICON = png(512, 512, [10, 10, 200, 255]);
 const SKILL = png(300, 200, [120, 120, 0, 255]);
 const LOOK = png(6, 6, [0, 120, 120, 255]);
+const LOOK_ATLAS = png(12, 6, [0, 60, 120, 255]);
+const LOOK_MANIFEST = Buffer.from('{"frames":{"idle":3}}\n');
 const HIT = Buffer.from('OggS sx hit');
 const THEME = Buffer.from('OggS sx theme');
 const SPRITE = { atlas_key: 'sx/atlas.png', manifest_key: 'sx/man.json', static_frame: 0, frames: { idle: 2 } };
 const SOURCE = {
   'sx/tile.png': TILE, 'sx/atlas.png': ATLAS, 'sx/man.json': MANIFEST, 'sx/icon.png': ICON, 'sx/skill.png': SKILL,
-  'sx/look.png': LOOK, 'sx/hit.ogg': HIT, 'sx/theme.ogg': THEME,
+  'sx/look.png': LOOK, 'sx/look_atlas.png': LOOK_ATLAS, 'sx/look_man.json': LOOK_MANIFEST, 'sx/hit.ogg': HIT, 'sx/theme.ogg': THEME,
 };
 
 // Fake object store (art_seed_policy.test.js pattern).
@@ -181,8 +183,9 @@ async function seedFixture(pool) {
     VALUES ('item', 'sx_aa_item', 'sx second take', 'm2')`);
   await pool.query(`INSERT INTO art_prompt_notes (subject_kind, subject_key, kind, note, region)
     VALUES ('item', 'sx_aa_item', 'avoid', 'sx no red', '{"x":1,"y":2}'::jsonb)`);
-  await pool.query(`INSERT INTO character_appearances (entity_type_id, variant, label, image, render_mode)
-    SELECT id, 1, 'sx look', 'sx/look.png', 'static' FROM entity_types WHERE name = 'sx_aa_ent'`);
+  await pool.query(`INSERT INTO character_appearances (entity_type_id, variant, label, image, sprite, render_mode)
+    SELECT id, 1, 'sx look', 'sx/look.png', $1::jsonb, 'static' FROM entity_types WHERE name = 'sx_aa_ent'`,
+  [JSON.stringify({ atlas_key: 'sx/look_atlas.png', manifest_key: 'sx/look_man.json', static_frame: 0, frames: { idle: 3 } })]);
   const clip = async (kind, label, key, bytes) => (await one(pool,
     `INSERT INTO audio_clips (kind, label, storage_key, bytes, duration_ms, source, sha1)
      VALUES ($1, $2, $3, $4, 1200, 'generated', $5) RETURNING id`,
@@ -275,7 +278,12 @@ dbTest('art and audio round trip byte-identical', async (t, pool, { root, store 
   assert.ok(Math.max(pngSize(files.get(skill)).w, pngSize(files.get(skill)).h) <= 256, 'skill art capped');
   const look = art.character_appearances.find((r) => r.label === 'sx look');
   assert.strictEqual(look.entity_type_id, owners.ent, 'appearance ref travels as the entity uuid');
-  assert.strictEqual(look.image.file.startsWith('textures/character-appearances/'), true);
+  // SOMET-647: '<class name>_<variant>.png' like the legacy Archer_1.png,
+  // never '<entity sync_uuid>_1.png'. The in_sync diff below covers the diff
+  // side reading the same file.
+  assert.strictEqual(look.image.file, 'textures/character-appearances/sx_aa_ent_1.png');
+  assert.strictEqual(look.sprite.atlas.file, 'textures/sprites/character_appearances/sx_aa_ent_1.atlas.png');
+  assert.strictEqual(look.sprite.manifest.file, 'textures/sprites/character_appearances/sx_aa_ent_1.manifest.json');
   const desc = art.art_prompt_descriptions.filter((r) => r.subject_key === 'sx_aa_item');
   assert.deepStrictEqual(desc.map((r) => r.text), ['sx second take'], 'only the active version travels');
   assert.strictEqual(art.art_prompt_notes.filter((r) => r.subject_key === 'sx_aa_item').length, 1);

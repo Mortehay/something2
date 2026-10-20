@@ -92,9 +92,18 @@ test('art and audio are binary groups writing their tables in order', () => {
   assert.deepStrictEqual(art.art_prompt_notes.naturalKey, ['subject_kind', 'subject_key', 'kind', 'note']);
   assert.deepStrictEqual(art.character_appearances.naturalKey, ['entity_type_id', 'variant']);
   assert.deepStrictEqual(art.character_appearances.refs, { entity_type_id: { table: 'entity_types', by: 'uuid' } });
+  // SOMET-647: named '<class name>:<variant>' like the legacy files
+  // (Archer_1.png), through ctx.refKey -- never by the entity's sync_uuid.
+  const appName = art.character_appearances.assets.image.name;
+  assert.strictEqual(typeof appName, 'function');
+  assert.strictEqual(art.character_appearances.assets.sprite.name, appName, 'sprite and still share one name');
+  const seen = [];
+  const ctx = { refKey: (col, v) => { seen.push([col, v]); return 'Archer'; } };
+  assert.strictEqual(appName({ entity_type_id: 'u-1', variant: 1 }, ctx), 'Archer:1');
+  assert.deepStrictEqual(seen, [['entity_type_id', 'u-1']]);
   assert.deepStrictEqual(art.character_appearances.assets, {
-    image: { type: 'image', dir: 'textures/character-appearances' },
-    sprite: { type: 'sprite', dir: 'textures/sprites/character_appearances' },
+    image: { type: 'image', dir: 'textures/character-appearances', name: appName },
+    sprite: { type: 'sprite', dir: 'textures/sprites/character_appearances', name: appName },
   });
   assert.deepStrictEqual(art.tile_types.assets, {
     image: { type: 'image', dir: 'textures/tiles' }, sprite: { type: 'sprite', dir: 'textures/sprites/tile_types' },

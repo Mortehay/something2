@@ -1,8 +1,10 @@
 // Asset columns (plan 3). A TableSpec may declare `assets: { [col]: AssetSpec }`:
 //   { type: 'image',  dir: string | (row) => string, maxEdge?: number | (row) => number|null }
-// image and sprite take an optional `name: (row) => string`: the file's base
-// name (through safeName) on a first export; default the natural key joined
-// by '|'.
+// image and sprite take an optional `name: (row, ctx) => string`: the file's
+// base name (through safeName) on a first export; default the natural key
+// joined by '|'. `row` is the exported row (a by-uuid ref holds the target's
+// sync_uuid); ctx.refKey(col, value) gives that ref target's natural key text
+// (e.g. an entity's name), read once per export (nameContext).
 //   { type: 'sprite', dir }   -- jsonb { atlas_key, manifest_key, ...rest }
 //   { type: 'audio',  dir: (row) => string }  -- storage_key; the row needs label, kind, sha1
 // Locally the column holds object-store keys. In a sync file (and in the
@@ -23,7 +25,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const { getGroup, tableSpecs, scopeSql, quoteIdent } = require('./registry.js');
+const { getGroup, tableSpecs, specOfTable, scopeSql, quoteIdent } = require('./registry.js');
 const { compareNaturalKey } = require('./canonical.js');
 const { buildRefMaps, exportRow } = require('./refs.js');
 const { SyncRefused } = require('./errors.js');
@@ -65,7 +67,7 @@ function checkAssets(spec) {
     if (typeof a.dir !== 'string' && typeof a.dir !== 'function') throw new Error(`${where}: asset ${col} needs a dir`);
     if (a.type === 'audio' && typeof a.dir !== 'function') throw new Error(`${where}: audio asset ${col} needs dir: (row) => string`);
     if (a.name !== undefined && (typeof a.name !== 'function' || a.type === 'audio')) {
-      throw new Error(`${where}: asset ${col} name must be (row) => string (image/sprite only)`);
+      throw new Error(`${where}: asset ${col} name must be (row, ctx) => string (image/sprite only)`);
     }
     if (spec.naturalKey.includes(col) || Object.prototype.hasOwnProperty.call(spec.refs || {}, col)) {
       throw new Error(`${where}: asset ${col} cannot be a key or ref column`);
@@ -321,6 +323,36 @@ async function exportedRows(db, spec) {
 
 const keyText = (spec, row) => spec.naturalKey.map((k) => (typeof row[k] === 'string' ? row[k] : JSON.stringify(row[k]))).join('|');
 
+// The ctx an AssetSpec `name(row, ctx)` gets. ctx.refKey(col, value): the
+// natural key text (keyText) of the target of ref `col` whose exported value
+// is `value` -- a by-key ref's value is already that key; a by-uuid ref's is
+// looked up in one query per ref, made only for specs that declare a `name`.
+// A value with no target throws (exportRow already guarantees one).
+async function nameContext(db, spec) {
+  const byUuid = {};
+  if (assetEntries(spec).some(([, a]) => a.name)) {
+    for (const [col, ref] of Object.entries(spec.refs || {})) {
+      if (ref.by !== 'uuid') continue;
+      const target = specOfTable(ref.table);
+      if (!target) continue;
+      const cols = target.naturalKey.map((k) => quoteIdent(k)).join(', ');
+      const { rows } = await db.query(`SELECT sync_uuid AS "__ref", ${cols} FROM ${quoteIdent(ref.table)}`);
+      byUuid[col] = new Map(rows.map((r) => [r.__ref, keyText(target, r)]));
+    }
+  }
+  return {
+    refKey(col, value) {
+      const ref = (spec.refs || {})[col];
+      if (!ref) throw new Error(`seed-sync: ${spec.table}.${col} is not a ref`);
+      if (ref.by !== 'uuid') return value;
+      const m = byUuid[col];
+      if (!m) throw new Error(`seed-sync: ${spec.table}.${col}: ${ref.table} has no registered natural key`);
+      if (!m.has(value)) throw new Error(`seed-sync: ${spec.table}.${col} = ${JSON.stringify(value)} has no ${ref.table} target`);
+      return m.get(value);
+    },
+  };
+}
+
 // Download every local asset of `group` into assetsRoot() and cache its hash.
 // A key is fetched only when uncached, or its cached file is missing on disk
 // or differs from the cached sha256 (then it keeps its recorded path). Audio is
@@ -350,11 +382,12 @@ async function prepareExportAssets(pool, store, group, { onProgress, signal, ver
     if (!hasAssets(spec)) continue;
     for (const [, a] of assetEntries(spec)) if (typeof a.dir === 'string') dirs.add(a.dir);
     const rows = await exportedRows(pool, spec);
+    const ctx = await nameContext(pool, spec);
     for (const row of rows) {
       for (const [col, a] of assetEntries(spec)) {
         const v = row[col];
         if (isEmpty(v)) continue;
-        const name = safeName(a.name ? String(a.name(row)) : keyText(spec, row));
+        const name = safeName(a.name ? String(a.name(row, ctx)) : keyText(spec, row));
         const dir = valueOf(a.dir, row);
         dirs.add(dir);
         const base = { table: spec.table, rowKey: keyText(spec, row) };
