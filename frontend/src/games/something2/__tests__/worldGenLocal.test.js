@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
-  LOCAL_BANNER, isBoxDown, localRequestBody, reportVerdict, saveOutcome,
+  LOCAL_BANNER, isBoxDown, localRequestBody, reportVerdict, saveOutcome, showLocalFallback,
 } from '../worldGenLocal.js';
 
 // SOMET-644 Task 6: the Generated Worlds tab's local fallback. SSR render
@@ -49,6 +49,7 @@ describe('saveOutcome', () => {
   it('a 409 asks to confirm overwrite; other errors are failures', () => {
     expect(saveOutcome(err('exists'))).toBe('confirm_overwrite');
     expect(saveOutcome(err('invalid_spec'))).toBe('failed');
+    expect(saveOutcome(err('synced'))).toBe('failed');
     expect(saveOutcome(null)).toBe(null);
   });
 });
@@ -97,16 +98,37 @@ describe('LocalPreviewResult', () => {
   });
   it('a 409 asks to confirm the overwrite', () => {
     const html = render({ confirmOverwrite: true });
-    expect(html).toContain('emerald-reach.map.json already exists');
+    expect(html).toContain('Replace the existing map spec emerald-reach.map.json?');
     expect(btn(html, 'Overwrite')).not.toContain('disabled');
     expect(btn(html, 'Cancel')).toBeTruthy();
   });
   it('after saving it points to Seed / Export → Maps', () => {
     const html = render({ saved: { file: 'emerald-reach.map.json', overwrote: false } });
-    expect(html).toContain('Saved seeds/maps/emerald-reach.map.json');
-    expect(html).toContain('Seed / Export → Maps');
+    expect(html).toContain('Saved as seeds/maps/emerald-reach.map.json. In Seed / Export → Maps, run Export '
+      + 'to list it, then Seed to build it on this PC. Commit seeds/ to share it.');
+    expect(html).not.toContain('shows there as new');
   });
   it('a save failure is shown', () => {
     expect(render({ saveError: err('invalid_spec', 'does not validate') })).toContain('does not validate');
+  });
+  it('a synced-spec 409 is a failure, not an overwrite prompt', () => {
+    const html = render({ saveError: err('synced', 'local-vale.map.json: this spec is synced through Seed / Export; edit it in the World Map Editor instead.') });
+    expect(html).toContain('edit it in the World Map Editor instead');
+    expect(html).not.toContain('Replace the existing map spec');
+  });
+});
+
+describe('showLocalFallback (latch)', () => {
+  it('opens on a box-down list error or a box-down create', () => {
+    expect(showLocalFallback(false, { regionsError: err('unreachable') })).toBe(true);
+    expect(showLocalFallback(false, { createDown: true })).toBe(true);
+    expect(showLocalFallback(false, { regionsError: err('auth_failed') })).toBe(false);
+    expect(showLocalFallback(false, {})).toBe(false);
+  });
+  it('stays open once latched, after a refetch clears the error', () => {
+    expect(showLocalFallback(true, { regionsError: null, createDown: false })).toBe(true);
+  });
+  it('closes only when the latch is released (Back to GPU box) and the box is up', () => {
+    expect(showLocalFallback(false, { regionsError: null, createDown: false })).toBe(false);
   });
 });

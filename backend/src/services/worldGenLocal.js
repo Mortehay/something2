@@ -1,7 +1,9 @@
 // SOMET-644 Task 6. The LOCAL fallback for the Generated Worlds tab: when the
 // GPU box is unreachable, generate a region on this PC with the JS port of the
 // box's rules generator (services/worldGen/worldGen.js), preview its report,
-// and save it as a seeds/maps spec the Seed / Export Maps group then seeds.
+// and save it as a seeds/maps spec. The Seed / Export Maps group reads only
+// specs listed in its manifest (<SEED_SYNC_DIR>/maps.json); a Maps Export
+// lists the new file, after which it reads `new` there and can be seeded.
 //
 // Rules only: there is no LLM here, so `theme`, `author` and `sfx_engine` are
 // IGNORED (and the response says so), the biomes are the deterministic descent
@@ -26,6 +28,8 @@ const { dumpsPy } = require('./worldGen/pyCompat.js');
 const { WorldGenError } = require('./worldGenService.js');
 const { validateMapSpec } = require('../../seeds/mapSpec.js');
 const { matchOwner } = require('./artSeed.js');
+// The Maps group's manifest lives in syncDir() (SEED_SYNC_DIR, read at call time).
+const { syncDir } = require('./seedSync/exportGroup.js');
 
 const LOCAL_AUTHOR = 'rules (local fallback)';
 const REGION_NAME_RE = /^[a-z0-9][a-z0-9-]{0,58}[a-z0-9]$/;
@@ -43,6 +47,32 @@ const TARGET = { min: 0.5, max: 25, dflt: 6 };
 
 function mapsDir() {
   return process.env.SEED_MAPS_DIR || path.join(__dirname, '..', '..', 'seeds', 'maps');
+}
+
+
+const SYNCED_MSG = 'this spec is synced through Seed / Export; edit it in the World Map Editor instead';
+
+// Is `name` listed in the Maps manifest? A listed spec belongs to seed sync
+// (its hash and base are tracked there), so the local fallback never writes
+// it, overwrite or not. Fails CLOSED: a manifest that exists but cannot be
+// read or parsed refuses the write rather than guessing it is unlisted.
+function assertNotSynced(name) {
+  const file = path.join(syncDir(), 'maps.json');
+  let text;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch (e) {
+    if (e.code === 'ENOENT') return;
+    throw new WorldGenError('manifest_unreadable', `Could not read the Maps manifest (${e.message}), so it is not safe to write ${name}.map.json.`, { status: 409 });
+  }
+  let doc;
+  try { doc = JSON.parse(text); } catch {
+    throw new WorldGenError('manifest_unreadable', `The Maps manifest is not valid JSON, so it is not safe to write ${name}.map.json.`, { status: 409 });
+  }
+  const specs = doc && Array.isArray(doc.specs) ? doc.specs : [];
+  if (specs.some((e) => e && e.name === name)) {
+    throw new WorldGenError('synced', `${name}.map.json: ${SYNCED_MSG}.`, { status: 409 });
+  }
 }
 
 const bad = (message) => new WorldGenError('bad_params', message, { status: 400 });
@@ -113,10 +143,10 @@ function ignoredNote(ignored) {
     : null;
 }
 
-function preview(body, catalogs, { validate = validateMapSpec } = {}) {
+function preview(body, catalogs) {
   const { params, ignored } = parseLocalParams(body);
   const { spec, report: rep } = generateLocal(params);
-  const errors = validate(spec, catalogs);
+  const errors = validateMapSpec(spec, catalogs);
   return {
     name: params.name,
     params,
@@ -132,17 +162,19 @@ function preview(body, catalogs, { validate = validateMapSpec } = {}) {
 
 // Regenerates from params (a client-supplied spec is never accepted),
 // validates, and writes <dir>/<slug>.map.json tmp-then-rename. Without
-// `overwrite: true` an existing file is a 409 -- checked atomically with a
+// `overwrite: true` an existing file is a 409 (a spec listed in the Maps
+// manifest is a 409 even with it, see assertNotSynced) -- checked atomically with a
 // hard link, so a concurrent writer cannot be clobbered between check and write.
-function save(body, catalogs, { validate = validateMapSpec, dir = mapsDir() } = {}) {
+function save(body, catalogs, { dir = mapsDir() } = {}) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw bad('The request body must be a JSON object.');
   const { params, ignored } = parseLocalParams(body.params);
   if (body.name !== undefined && slugName(body.name) !== params.name) {
     throw bad(`name "${body.name}" does not match params.name "${body.params.name}".`);
   }
   const overwrite = body.overwrite === true;
+  assertNotSynced(params.name);
   const { spec, specText } = generateLocal(params);
-  const errors = validate(spec, catalogs);
+  const errors = validateMapSpec(spec, catalogs);
   if (errors.length) {
     const err = new WorldGenError('invalid_spec', `"${params.name}" does not validate against this database, so it was not written`, { status: 422 });
     err.errors = errors;
@@ -183,7 +215,8 @@ function save(body, catalogs, { validate = validateMapSpec, dir = mapsDir() } = 
     author: LOCAL_AUTHOR,
     ignored,
     note: ignoredNote(ignored),
-    next: 'Open Seed / Export → Maps: the new spec shows as "new" there and seeds from that tab.',
+    next: `Saved as seeds/maps/${fileName}. In Seed / Export → Maps, run Export to list it, `
+      + 'then Seed to build it on this PC. Commit seeds/ to share it.',
   };
 }
 

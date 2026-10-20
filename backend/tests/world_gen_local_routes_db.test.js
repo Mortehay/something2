@@ -33,7 +33,7 @@ async function makeUser(pool, role) {
   return u;
 }
 
-function dbTest(name, body, routeOpts = {}) {
+function dbTest(name, body, { wrapPool = (p) => p } = {}) {
   test(name, async (t) => {
     if (!DB_URL) {
       const msg = 'TEST_DATABASE_URL not set -- skipping to avoid mutating a real database (world-gen local)';
@@ -42,22 +42,28 @@ function dbTest(name, body, routeOpts = {}) {
       return;
     }
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wgl-maps-'));
+    const syncDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wgl-sync-'));
     const prevMaps = process.env.SEED_MAPS_DIR;
+    const prevSync = process.env.SEED_SYNC_DIR;
     process.env.SEED_MAPS_DIR = dir;
+    // The Maps manifest is read from here: never the real seeds/sync.
+    process.env.SEED_SYNC_DIR = syncDir;
     const pool = new Pool({ connectionString: DB_URL, max: 2, connectionTimeoutMillis: 3000 });
     const users = [];
     t.after(async () => {
       if (prevMaps === undefined) delete process.env.SEED_MAPS_DIR; else process.env.SEED_MAPS_DIR = prevMaps;
+      if (prevSync === undefined) delete process.env.SEED_SYNC_DIR; else process.env.SEED_SYNC_DIR = prevSync;
       fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(syncDir, { recursive: true, force: true });
       await pool.query('DELETE FROM users WHERE id = ANY($1::int[])', [users]).catch(() => {});
       await pool.end().catch(() => {});
     });
     const app = express();
     app.use(express.json());
-    app.use('/api/world-gen/local', worldGenLocalRoutes(pool, routeOpts));
+    app.use('/api/world-gen/local', worldGenLocalRoutes(wrapPool(pool)));
     const admin = await makeUser(pool, 'admin'); users.push(admin.id);
     const player = await makeUser(pool, 'player'); users.push(player.id);
-    await body({ app, pool, dir, admin, player });
+    await body({ app, pool, dir, syncDir, admin, player });
   });
 }
 
@@ -145,7 +151,8 @@ dbTest('save writes <slug>.map.json, byte-equal to toJson, and the file validate
   assert.strictEqual(res.body.author, AUTHOR);
   assert.strictEqual(res.body.file, 'local-vale.map.json');
   assert.strictEqual(res.body.overwrote, false);
-  assert.match(res.body.next, /Seed \/ Export/);
+  assert.strictEqual(res.body.next, 'Saved as seeds/maps/local-vale.map.json. In Seed / Export → Maps, run Export '
+    + 'to list it, then Seed to build it on this PC. Commit seeds/ to share it.');
   assert.deepStrictEqual(fs.readdirSync(dir), ['local-vale.map.json']);
   const text = fs.readFileSync(path.join(dir, 'local-vale.map.json'), 'utf8');
   assert.strictEqual(text, expectedSpecText());
@@ -186,14 +193,60 @@ dbTest('an existing file is a 409 unless overwrite: true', async ({ app, admin, 
   assert.deepStrictEqual(fs.readdirSync(dir), ['local-vale.map.json']);
 });
 
+// The REAL validateMapSpec, against catalogs that lack a biome the generator
+// uses: the pool wrapper drops Meadow from the biomes read (the entry world
+// is always Meadow), and nothing else changes.
+const withoutMeadow = (pool) => ({
+  query: async (sql, params) => {
+    const r = await pool.query(sql, params);
+    if (/^\s*SELECT name, creature_types FROM biomes/.test(sql)) {
+      return { ...r, rows: r.rows.filter((row) => row.name !== 'Meadow') };
+    }
+    return r;
+  },
+  connect: (...a) => pool.connect(...a),
+});
 dbTest('a spec that fails validation is a 422 with the errors and writes nothing', async ({ app, admin, dir }) => {
+  const p = await request(app).post('/api/world-gen/local/preview').set('Authorization', admin.auth).send(PARAMS);
+  assert.strictEqual(p.status, 200);
+  assert.strictEqual(p.body.valid, false);
   const res = await request(app).post('/api/world-gen/local/save').set('Authorization', admin.auth)
     .send({ name: 'local-vale', params: PARAMS });
   assert.strictEqual(res.status, 422, JSON.stringify(res.body));
   assert.strictEqual(res.body.code, 'invalid_spec');
-  assert.deepStrictEqual(res.body.errors, ['stub: biome "Meadow" is not in this database']);
+  assert.ok(res.body.errors.some((e) => e.includes('references unknown biome "Meadow"')), JSON.stringify(res.body.errors));
   assert.deepStrictEqual(fs.readdirSync(dir), []);
-}, { validate: () => ['stub: biome "Meadow" is not in this database'] });
+}, { wrapPool: withoutMeadow });
+
+dbTest('a spec listed in the Maps manifest is never written, even with overwrite: true', async ({ app, admin, dir, syncDir }) => {
+  const file = path.join(dir, 'local-vale.map.json');
+  fs.writeFileSync(file, '{"synced":true}\n');
+  fs.writeFileSync(path.join(syncDir, 'maps.json'), JSON.stringify({
+    header: { group: 'maps' }, specs: [{ name: 'local-vale', sha256: 'x' }], entry_world: 'local_vale_hub',
+  }));
+  for (const overwrite of [false, true]) {
+    const res = await request(app).post('/api/world-gen/local/save').set('Authorization', admin.auth)
+      .send({ name: 'local-vale', params: PARAMS, overwrite });
+    assert.strictEqual(res.status, 409, JSON.stringify(res.body));
+    assert.strictEqual(res.body.code, 'synced');
+    assert.match(res.body.error, /synced through Seed \/ Export; edit it in the World Map Editor instead/);
+  }
+  assert.strictEqual(fs.readFileSync(file, 'utf8'), '{"synced":true}\n');
+  // An unlisted spec beside it is still written.
+  const other = await request(app).post('/api/world-gen/local/save').set('Authorization', admin.auth)
+    .send({ name: 'other-vale', params: { ...PARAMS, name: 'other-vale' } });
+  assert.strictEqual(other.status, 201, JSON.stringify(other.body));
+  assert.deepStrictEqual(fs.readdirSync(dir).sort(), ['local-vale.map.json', 'other-vale.map.json']);
+});
+
+dbTest('an unreadable Maps manifest refuses the write (fails closed)', async ({ app, admin, dir, syncDir }) => {
+  fs.writeFileSync(path.join(syncDir, 'maps.json'), '{not json');
+  const res = await request(app).post('/api/world-gen/local/save').set('Authorization', admin.auth)
+    .send({ name: 'local-vale', params: PARAMS });
+  assert.strictEqual(res.status, 409);
+  assert.strictEqual(res.body.code, 'manifest_unreadable');
+  assert.deepStrictEqual(fs.readdirSync(dir), []);
+});
 
 dbTest('admin only: no token is 401, a player is 403, and nothing is written', async ({ app, player, dir }) => {
   for (const route of ['preview', 'save']) {

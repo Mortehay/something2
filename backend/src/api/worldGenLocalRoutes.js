@@ -7,8 +7,8 @@
 //   POST /save     body: { name, params, overwrite? } -> 201 { name, file,
 //                  overwrote, worlds, author, ignored, note, next }
 //
-// Errors: 400 bad_params, 409 exists, 422 invalid_spec (+ errors), 500.
-// opts.validate replaces validateMapSpec (tests provoke the 422 with it).
+// Errors: 400 bad_params, 409 exists / synced / manifest_unreadable,
+// 422 invalid_spec (+ errors), 500.
 const express = require('express');
 const { requireAdmin } = require('../auth/middleware.js');
 const local = require('../services/worldGenLocal.js');
@@ -24,16 +24,15 @@ function sendError(res, err, fallback) {
   return res.status(500).json({ error: fallback });
 }
 
-module.exports = function worldGenLocalRoutes(pool, { validate } = {}) {
+module.exports = function worldGenLocalRoutes(pool) {
   const router = express.Router();
   router.use(requireAdmin(pool));
-  const opts = validate ? { validate } : {};
 
   router.post('/preview', async (req, res) => {
     try {
       // Parse first: a bad body is a 400 without a DB round trip.
       local.parseLocalParams(req.body);
-      res.json(local.preview(req.body, await mapSpecCatalogs(pool), opts));
+      res.json(local.preview(req.body, await mapSpecCatalogs(pool)));
     } catch (err) {
       sendError(res, err, 'Failed to generate the region locally');
     }
@@ -42,7 +41,7 @@ module.exports = function worldGenLocalRoutes(pool, { validate } = {}) {
   router.post('/save', async (req, res) => {
     try {
       if (req.body && typeof req.body === 'object') local.parseLocalParams(req.body.params);
-      res.status(201).json(local.save(req.body, await mapSpecCatalogs(pool), opts));
+      res.status(201).json(local.save(req.body, await mapSpecCatalogs(pool)));
     } catch (err) {
       sendError(res, err, 'Failed to save the locally generated region');
     }

@@ -52,3 +52,12 @@ export function saveOutcome(err) {
   if (!err) return null;
   return err.code === 'exists' ? 'confirm_overwrite' : 'failed';
 }
+
+// Whether the local fallback is shown. LATCHED: once shown it stays shown --
+// a focus refetch that clears the list error (the box blipped back) must not
+// unmount a preview the admin is about to save. Only a reload or the explicit
+// "Back to GPU box" action (which passes latched=false and clears createDown)
+// resets it.
+export function showLocalFallback(latched, { regionsError = null, createDown = false } = {}) {
+  return Boolean(latched || createDown || isBoxDown(regionsError));
+}

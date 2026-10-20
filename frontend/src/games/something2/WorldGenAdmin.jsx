@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import styled from 'styled-components';
 import {
   HiOutlineArrowPath, HiOutlineArrowDownTray, HiOutlineTrash,
@@ -10,7 +10,7 @@ import {
   useLocalPreview, useLocalSave,
 } from './useWorldGen.js';
 import {
-  LOCAL_BANNER, isBoxDown, localRequestBody, reportVerdict, saveOutcome,
+  LOCAL_BANNER, isBoxDown, localRequestBody, reportVerdict, saveOutcome, showLocalFallback,
 } from './worldGenLocal.js';
 import { ACHIEVABLE, nearestAchievable, isMisleading } from './densityTargets.js';
 import AdminLoading from './AdminLoading.jsx';
@@ -290,7 +290,8 @@ function CreateForm({ onBoxDown }) {
 // Shown only when the box list or create says the box cannot be reached (or is
 // not configured). The backend runs the JS port of the box's rules generator:
 // no LLM biome choice, no preview image. Save writes seeds/maps/<slug>.map.json
-// and the Seed / Export tab's Maps group seeds it from there.
+// and the Seed / Export tab's Maps group lists it on its next Export, after
+// which it can be seeded there.
 export function LocalBanner() {
   return (
     <ErrorBanner>
@@ -350,7 +351,7 @@ export function LocalPreviewResult({
       </Row>
       {confirmOverwrite && (
         <Card>
-          <Row><strong>{file} already exists in seeds/maps.</strong></Row>
+          <Row><strong>Replace the existing map spec {file}?</strong></Row>
           <Row>
             <Button $bg="var(--s2-danger, #b4423a)" disabled={saving} onClick={onOverwrite}>Overwrite</Button>
             <Button $bg="var(--s2-border)" onClick={onCancelOverwrite}>Cancel</Button>
@@ -367,14 +368,15 @@ export function LocalPreviewResult({
         </ErrorBanner>
       )}
       {saved && (
-        <Mono>{`Saved seeds/maps/${saved.file}${saved.overwrote ? ' (overwrote the existing file)' : ''}\n`
-          + 'Next: open Seed / Export → Maps. The spec shows there as new and seeds from that tab.'}</Mono>
+        <Mono>{`Saved as seeds/maps/${saved.file}${saved.overwrote ? ' (replaced the existing file)' : ''}. `
+          + 'In Seed / Export → Maps, run Export to list it, then Seed to build it on this PC. '
+          + 'Commit seeds/ to share it.'}</Mono>
       )}
     </div>
   );
 }
 
-function LocalFallback() {
+function LocalFallback({ onBack }) {
   const [form, setForm] = useState({ ...DEFAULT_FORM, theme: '' });
   const [confirmOverwrite, setConfirmOverwrite] = useState(false);
   const preview = useLocalPreview();
@@ -397,7 +399,10 @@ function LocalFallback() {
   return (
     <Card>
       <LocalBanner />
-      <strong>Generate a region on this PC</strong>
+      <Row>
+        <strong>Generate a region on this PC</strong>
+        {onBack && <Button $bg="var(--s2-border)" onClick={onBack}>Back to GPU box</Button>}
+      </Row>
       <RegionFields form={form} set={set} showTheme={false} />
       <Row>
         <Button disabled={!form.name.trim() || preview.isPending} onClick={generate}>
@@ -512,9 +517,15 @@ function RegionCard({ region, selected, onSelect }) {
 export default function WorldGenAdmin() {
   const [selected, setSelected] = useState(null);
   const [createSaidDown, setCreateSaidDown] = useState(false);
+  const [localLatched, setLocalLatched] = useState(false);
   const {
     regions, total, provider, isLoadingRegions, isRefetchingRegions, regionsError, refetchRegions,
   } = useGeneratedWorlds();
+  const showLocal = showLocalFallback(localLatched, { regionsError, createDown: createSaidDown });
+  // Latch once shown, so a refetch that clears the error keeps it (and any
+  // unsaved preview) mounted.
+  useEffect(() => { if (showLocal && !localLatched) setLocalLatched(true); }, [showLocal, localLatched]);
+  const backToBox = () => { setLocalLatched(false); setCreateSaidDown(false); refetchRegions(); };
 
   return (
     <AdminContainer>
@@ -541,7 +552,7 @@ export default function WorldGenAdmin() {
       )}
 
       <CreateForm onBoxDown={() => setCreateSaidDown(true)} />
-      {(isBoxDown(regionsError) || createSaidDown) && <LocalFallback />}
+      {showLocal && <LocalFallback onBack={backToBox} />}
 
       {isLoadingRegions && <Stat><AdminLoading label="Loading regions…" inline size={16} /></Stat>}
       {!isLoadingRegions && !regionsError && regions.length === 0 && (
