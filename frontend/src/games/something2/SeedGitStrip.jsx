@@ -4,7 +4,7 @@
 import { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useGitStatus, useGitAction, useSeedDataPending } from './useSeedExport.js';
-import { gitStripText, gitActionStates, pluralize, gitUnavailableText, gitDialogAfterStatus, BUSY_TEXT, GIT_PENDING_TEXT } from './seedExportModel.js';
+import { gitStripText, gitActionStates, pluralize, gitUnavailableText, gitDialogAfterStatus, BUSY_TEXT, GIT_PENDING_TEXT, GIT_RUNNING_TEXT } from './seedExportModel.js';
 import { Btn, Badge, Muted, Modal, fmtTime } from './seedUi.jsx';
 
 const Strip = styled.div`
@@ -30,7 +30,7 @@ export function gitConfirmText(op, s) {
 
 const TITLES = { pull: 'Pull', commit: 'Commit seeds', push: 'Push' };
 
-export function GitStripView({ status, busy, pending, onRun }) {
+export function GitStripView({ status, busy, pending, seedPending = false, onRun }) {
   const [dialog, setDialog] = useState(null);
   const [message, setMessage] = useState('');
   // A dialog never outlives the status it was opened on, and does not reopen
@@ -41,8 +41,8 @@ export function GitStripView({ status, busy, pending, onRun }) {
   if (status.available === false) {
     return <Strip role="status"><Muted>{gitUnavailableText(status)}</Muted></Strip>;
   }
-  const acts = gitActionStates(status, busy, pending);
-  const fetchWhy = busy ? BUSY_TEXT : (pending ? GIT_PENDING_TEXT : undefined);
+  const acts = gitActionStates(status, busy, pending, seedPending);
+  const fetchWhy = busy ? BUSY_TEXT : (pending ? GIT_RUNNING_TEXT : (seedPending ? GIT_PENDING_TEXT : undefined));
   const other = (status.otherDirty || []).length;
   const open = (op) => { if (op === 'commit') setMessage(status.suggestedMessage || ''); setDialog(op); };
   const run = () => { onRun(dialog, message); setDialog(null); };
@@ -55,7 +55,7 @@ export function GitStripView({ status, busy, pending, onRun }) {
       <b>{gitStripText(status)}</b>
       {other > 0 && <Badge $tone="warn">{`${pluralize(other, 'change')} outside seeds/ — won't be committed`}</Badge>}
       <Muted>{status.lastFetchAt ? `fetched ${fmtTime(status.lastFetchAt)}` : 'never fetched'}</Muted>
-      <Btn disabled={busy || pending} title={fetchWhy} onClick={() => onRun('fetch')}>Fetch</Btn>
+      <Btn disabled={busy || pending || seedPending} title={fetchWhy} onClick={() => onRun('fetch')}>Fetch</Btn>
       {btn('pull')}{btn('commit')}{btn('push')}
       {kept && (
         <Modal $w="480px" onClose={() => setDialog(null)} label={TITLES[dialog]}>
@@ -82,7 +82,7 @@ export default function SeedGitStrip({ busy }) {
   const action = useGitAction();
   const seedPending = useSeedDataPending();
   return (
-    <GitStripView status={status.data} busy={busy} pending={action.isPending || seedPending}
+    <GitStripView status={status.data} busy={busy} pending={action.isPending} seedPending={seedPending}
       onRun={(op, message) => action.mutate({ op, message })} />
   );
 }

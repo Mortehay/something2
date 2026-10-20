@@ -447,6 +447,7 @@ const DIVERGED_TEXT = 'Local and origin have diverged — resolve in a terminal'
 const syncPath = (id) => `backend/seeds/sync/${id}.json`;
 
 export const GIT_PENDING_TEXT = 'A seed export or seed is running';
+export const GIT_RUNNING_TEXT = 'A git action is running';
 export const GIT_ERROR_TEXT = 'Git helper is running but git failed — check backend/run/git-helper.log';
 const DETACHED_TEXT = 'Not on a branch — switch branch in a terminal';
 
@@ -460,17 +461,17 @@ export const gitDialogAfterStatus = (dialog, status) => (status && status.availa
 export function gitStripText(s) {
   const n = (s.seedsDirty || []).length;
   const changes = pluralize(n, 'seed change');
-  if (!s.branch) return `detached HEAD · ↑${s.ahead || 0} ↓${s.behind || 0} · ${changes}`;
+  if (!s.branch) return `detached HEAD · ${changes}`;
   if (!s.upstream) return `${s.branch} · no upstream · ${changes}`;
   return `${s.branch} · ↑${s.ahead || 0} ↓${s.behind || 0} · ${changes}`;
 }
 
-// Per-button disabled reason (null = enabled). Precedence: busy job > pending
-// data-group mutation > detached > no upstream > diverged > dirty > behind.
-export function gitActionStates(s, jobIsRunning, mutationPending = false) {
+// Per-button disabled reason (null = enabled). Precedence: busy job > running git
+// action > pending data-group mutation > detached > no upstream > diverged > dirty > behind.
+export function gitActionStates(s, jobIsRunning, gitPending = false, seedPending = false) {
   const seedsN = (s.seedsDirty || []).length;
   const dirty = seedsN + (s.otherDirty || []).length > 0;
-  const gate = (jobIsRunning ? BUSY_TEXT : null) || (mutationPending ? GIT_PENDING_TEXT : null);
+  const gate = (jobIsRunning ? BUSY_TEXT : null) || (gitPending ? GIT_RUNNING_TEXT : null) || (seedPending ? GIT_PENDING_TEXT : null);
   const detached = s.branch ? null : DETACHED_TEXT;
   const noUp = s.upstream ? null : `No origin/${s.branch} yet — push it once from a terminal`;
   const diverged = (s.ahead || 0) > 0 && (s.behind || 0) > 0 ? DIVERGED_TEXT : null;

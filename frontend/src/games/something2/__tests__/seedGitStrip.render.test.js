@@ -7,10 +7,18 @@ vi.mock('../useSeedExport.js', () => ({}));
 const { GitStripView, gitConfirmText } = await import('../SeedGitStrip.jsx');
 
 const ok = { available: true, branch: 'main', upstream: 'origin/main', ahead: 0, behind: 0, seedsDirty: [], otherDirty: [], lastFetchAt: '2026-10-20T10:00:00Z', suggestedMessage: 'seed export: quests from desk' };
-const view = (status, busy = false, pending = false) => renderToStaticMarkup(h(GitStripView, { status, busy, pending, onRun: () => {} }));
+const view = (status, busy = false, pending = false, seedPending = false) => renderToStaticMarkup(h(GitStripView, { status, busy, pending, seedPending, onRun: () => {} }));
 const btn = (html, text) => (html.match(new RegExp(`<button[^>]*>${text}</button>`)) || [])[0] || '';
 
 describe('GitStripView', () => {
+  it('a running git action and a seed op get different tooltips', () => {
+    const g = view({ ...ok, ahead: 1 }, false, true, false);
+    expect(btn(g, 'Fetch')).toContain('title="A git action is running"');
+    expect(btn(g, 'Push…')).toContain('title="A git action is running"');
+    const sd = view({ ...ok, ahead: 1 }, false, false, true);
+    expect(btn(sd, 'Fetch')).toContain('title="A seed export or seed is running"');
+    expect(btn(sd, 'Push…')).toContain('title="A seed export or seed is running"');
+  });
   it('available: branch line, buttons, reasons as tooltips', () => {
     const html = view(ok);
     expect(html).toContain('main · ↑0 ↓0 · 0 seed changes');
@@ -57,7 +65,8 @@ describe('GitStripView edge states (SOMET-649)', () => {
   });
   it('detached HEAD: text and disabled reasons, no null', () => {
     const html = view({ ...ok, branch: null, upstream: null, ahead: 1, seedsDirty: ['a'] });
-    expect(html).toContain('detached HEAD');
+    expect(html).toContain('detached HEAD · 1 seed change');
+    expect(html).not.toMatch(/detached HEAD[^<]*[↑↓]/);
     expect(html).not.toContain('null');
     for (const t of ['Pull…', 'Commit seeds…', 'Push…']) {
       expect(btn(html, t)).toContain('disabled');
@@ -73,7 +82,7 @@ describe('GitStripView edge states (SOMET-649)', () => {
     expect(html).not.toContain('Nothing to push');
   });
   it('a pending seed mutation disables every action with its reason', () => {
-    const html = view({ ...ok, ahead: 1, seedsDirty: ['a'] }, false, true);
+    const html = view({ ...ok, ahead: 1, seedsDirty: ['a'] }, false, false, true);
     for (const t of ['Pull…', 'Commit seeds…', 'Push…']) {
       expect(btn(html, t)).toContain('A seed export or seed is running');
     }
