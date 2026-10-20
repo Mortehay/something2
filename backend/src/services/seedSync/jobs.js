@@ -24,7 +24,22 @@ function view(job) {
 }
 
 const currentJob = () => view(current);
-const isBusy = () => Boolean(current && current.status === 'running');
+// A non-job operation that must exclude jobs (SOMET-642: a git action on the
+// host helper). While held, startJob refuses busy and isBusy() is true.
+let external = null; // label of the in-flight external operation
+
+const jobRunning = () => Boolean(current && current.status === 'running');
+const isBusy = () => jobRunning() || external !== null;
+// What a busy refusal carries: the running job (null when only an external
+// operation holds the runner) and the external label, if any.
+const busyDetails = () => ({ job: jobRunning() ? currentJob() : null, external });
+
+// -> release(); null when something already holds the runner.
+function holdExternal(label) {
+  if (isBusy()) return null;
+  external = label;
+  return () => { if (external === label) external = null; };
+}
 
 function settle(job, fields) {
   Object.assign(job, fields, { finishedAt: new Date().toISOString() });
@@ -33,7 +48,7 @@ function settle(job, fields) {
 // run(ctx) -> Promise<result>, ctx = { onProgress({ phase, done, total }), signal }.
 // Never rejects: the outcome is recorded on the job.
 function startJob({ groupId, action, run }) {
-  if (isBusy()) throw new SyncRefused('busy', 'another export or seed is running', { job: currentJob() });
+  if (isBusy()) throw new SyncRefused('busy', 'another export or seed is running', busyDetails());
   const controller = new AbortController();
   seq += 1;
   const job = {
@@ -82,10 +97,10 @@ function startJob({ groupId, action, run }) {
 
 // true when a running job was asked to stop.
 function cancelJob() {
-  if (!isBusy()) return false;
+  if (!jobRunning()) return false;
   current.cancelRequested = true;
   current.controller.abort();
   return true;
 }
 
-module.exports = { startJob, currentJob, cancelJob, isBusy };
+module.exports = { startJob, currentJob, cancelJob, isBusy, holdExternal, busyDetails };

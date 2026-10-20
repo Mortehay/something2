@@ -15,9 +15,10 @@ const { GROUPS, getGroup } = require('../services/seedSync/registry.js');
 const { diffGroup } = require('../services/seedSync/diffGroup.js');
 const { previewSeed, applySeed } = require('../services/seedSync/applySeed.js');
 const { exportGroup } = require('../services/seedSync/exportGroup.js');
-const { lastRuns, recentRuns, pcLabel, pcLabelSet } = require('../services/seedSync/runs.js');
+const { lastRuns, recentRuns, pcLabel, pcLabelSet, startRun, finishRun } = require('../services/seedSync/runs.js');
 const { SyncRefused, SyncFileError } = require('../services/seedSync/errors.js');
 const jobs = require('../services/seedSync/jobs.js');
+const git = require('../services/gitHelperClient.js');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ZERO_COUNTS = {};
@@ -53,7 +54,7 @@ function validDecisions(d) {
 const runsAsJob = (g) => Boolean(g.binary || g.job);
 
 function refuseIfBusy() {
-  if (jobs.isBusy()) throw new SyncRefused('busy', 'another export or seed is running', { job: jobs.currentJob() });
+  if (jobs.isBusy()) throw new SyncRefused('busy', 'another export or seed is running', jobs.busyDetails());
 }
 
 // opts.store: the object store binary groups read / write (default: the
@@ -187,6 +188,66 @@ module.exports = function seedExportRoutes(pool, { processStartedAt, store, boxD
     // { runs: [...newest first], total } -- total counts runs matching `group`.
     res.json(await recentRuns(pool, { limit, offset, groupId }));
   }));
+
+  // SOMET-642. Git buttons, proxied to the host helper (tools/git-helper). The
+  // helper being down is a normal state: status degrades, actions answer 503.
+  const unavailable = { available: false, reason: 'helper_unavailable', hint: git.HINT };
+
+  router.get('/git/status', handler(async (req, res) => {
+    let out;
+    try { out = await git.call('GET', '/status'); } catch (err) {
+      if (err instanceof git.HelperUnavailable) return res.json(unavailable);
+      throw err;
+    }
+    if (out.status !== 200) return res.json(unavailable);
+    res.json({ available: true, ...out.body, suggestedMessage: git.suggestCommitMessage(out.body.seedsDirty) });
+  }));
+
+  // fetch changes no working-tree state and records no run.
+  router.post('/git/fetch', handler(async (req, res) => {
+    await gitAction(res, 'fetch', null, () => git.call('POST', '/fetch'));
+  }));
+  for (const action of ['pull', 'push']) {
+    router.post(`/git/${action}`, handler(async (req, res) => {
+      await gitAction(res, action, `git_${action}`, () => git.call('POST', `/${action}`));
+    }));
+  }
+  router.post('/git/commit', handler(async (req, res) => {
+    const message = req.body && req.body.message;
+    if (typeof message !== 'string' || !message.trim()) return res.status(400).json({ error: 'message is required' });
+    await gitAction(res, 'commit', 'git_commit', () => git.call('POST', '/commit', { message }));
+  }));
+
+  // One git action at a time and never beside a seed job (both directions, via
+  // jobs.holdExternal). runAction records a seed_export_runs row (group 'git').
+  async function gitAction(res, name, runAction, call) {
+    const release = jobs.holdExternal(`git ${name}`);
+    if (!release) return res.status(409).json({ error: 'busy', job: jobs.busyDetails().job });
+    let runId = null;
+    try {
+      if (runAction) runId = await startRun(pool, 'git', runAction);
+      let out;
+      try { out = await call(); } catch (err) {
+        if (runId) await finishRun(pool, runId, { status: 'failed', error: err.message });
+        if (err instanceof git.HelperUnavailable) {
+          return res.status(503).json({ error: 'helper_unavailable', message: err.message, hint: git.HINT });
+        }
+        throw err;
+      }
+      const { status, body } = out;
+      if (runId) {
+        if (status === 200) {
+          const head = body.status && body.status.headSubject;
+          await finishRun(pool, runId, { status: 'ok', summary: { output: body.output || '', ...(head ? { headSubject: head } : {}) } });
+        } else {
+          await finishRun(pool, runId, { status: 'failed', summary: { output: body.output || '' }, error: body.error || body.message || `helper answered ${status}` });
+        }
+      }
+      return res.status(status).json(body);
+    } finally {
+      release();
+    }
+  }
 
   router.get('/restart', handler(async (req, res) => {
     const { rows } = await pool.query(
