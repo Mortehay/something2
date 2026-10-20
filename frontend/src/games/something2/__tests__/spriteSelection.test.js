@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   filterSpriteSubjects, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
-  targetsForSprites,
+  targetsForSprites, framesCap, cellCount, estimateLabel, defaultActions,
 } from '../spriteSelection.js';
 import { PAGE_SIZE } from '../artSelection.js';
 
@@ -76,5 +76,38 @@ describe('sprite console paging', () => {
 
   it('never reports an empty page as fully selected', () => {
     expect(isSpritePageSelected(new Set([1]), [])).toBe(false);
+  });
+});
+
+describe('sprite console action controls', () => {
+  const catalog = {
+    max_frames: 8,
+    actions: [{ id: 'idle', max_frames: 8 }, { id: 'sway', max_frames: 6 }, { id: 'attack', max_frames: 4 }],
+  };
+
+  it('framesCap uses the smallest selected max', () => {
+    expect(framesCap(catalog, ['idle', 'attack'])).toBe(4);
+    expect(framesCap(catalog, ['idle'])).toBe(8);
+    expect(framesCap(catalog, [])).toBe(8);
+  });
+
+  it('cellCount gives props one facing', () => {
+    const creature = { is_creature: true };
+    const prop = { is_creature: false };
+    expect(cellCount([creature], ['idle', 'sway'], 4)).toBe(64);
+    expect(cellCount([prop], ['idle', 'sway'], 4)).toBe(8);
+    expect(cellCount([creature, prop], ['idle'], 2)).toBe(18);
+  });
+
+  it('estimateLabel formats 336 cells at 22 s', () => {
+    expect(estimateLabel(336, 22)).toBe('336 cells · ~2 h 3 min');
+    expect(estimateLabel(1, 22)).toBe('1 cell · < 1 min');
+    expect(estimateLabel(10, 30)).toBe('10 cells · ~5 min');
+  });
+
+  it('defaultActions keeps only catalog ids', () => {
+    expect(defaultActions(catalog)).toEqual(['idle', 'sway']);
+    expect(defaultActions({ actions: [{ id: 'sway' }, { id: 'walk' }] })).toEqual(['sway']);
+    expect(defaultActions(null)).toEqual([]);
   });
 });

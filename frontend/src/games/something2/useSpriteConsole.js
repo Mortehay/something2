@@ -25,6 +25,16 @@ export function useSpriteSubjects({ live = false } = {}) {
   return { subjects: query.data?.subjects || [], ...query };
 }
 
+export function useActionCatalog() {
+  const query = useQuery({
+    queryKey: ['spriteAdmin', 'actionCatalog'],
+    staleTime: 60_000,
+    retry: false,
+    queryFn: () => jsonRequest('/action-catalog'),
+  });
+  return { catalog: query.data || null, isLoading: query.isLoading, error: query.error };
+}
+
 export function useSpriteQueue() {
   const query = useQuery({
     queryKey: JOBS_KEY,
@@ -59,7 +69,7 @@ function mutation(path, success, body = (value) => value) {
 
 export const useQueueSprites = mutation('/jobs',
   (data) => `${data.queued} sprite job${data.queued === 1 ? '' : 's'} queued`,
-  (targets) => ({ targets }));
+  ({ targets, actions, frames }) => ({ targets, actions, frames }));
 export const useStartSpriteBatch = mutation('/jobs/dispatch', 'Sprite batch started', () => ({}));
 export const useStopSpriteBatch = mutation('/jobs/stop', 'Sprite batch stopping', () => ({}));
 export const useRescueSpriteJobs = mutation('/jobs/requeue-stale',

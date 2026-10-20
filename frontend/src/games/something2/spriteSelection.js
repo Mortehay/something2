@@ -64,3 +64,33 @@ export function setSpritePageSelected(selected, pageRows, on) {
 export function isSpritePageSelected(selected, pageRows) {
   return pageRows.length > 0 && pageRows.every((subject) => selected.has(subject.id));
 }
+
+// --- Box action catalog helpers ---------------------------------------------
+
+const DEFAULT_ACTIONS = ['idle', 'sway'];
+const FACINGS = { directional: 8, flat: 1 };
+
+export function framesCap(catalog, actions) {
+  const caps = (catalog?.actions || [])
+    .filter((action) => actions.includes(action.id))
+    .map((action) => action.max_frames);
+  return caps.length ? Math.min(...caps) : catalog?.max_frames ?? 1;
+}
+
+export function cellCount(rows, actions, frames) {
+  return rows.reduce((sum, row) => sum + FACINGS[spriteShape(row)] * actions.length * frames, 0);
+}
+
+export function estimateLabel(cells, secondsPerCell) {
+  const noun = `${cells} cell${cells === 1 ? '' : 's'}`;
+  const minutes = Math.round((cells * secondsPerCell) / 60);
+  if (minutes < 1) return `${noun} · < 1 min`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${noun} · ~${h ? `${h} h ` : ''}${h && !m ? '' : `${m} min`}`.trimEnd();
+}
+
+export function defaultActions(catalog) {
+  const ids = new Set((catalog?.actions || []).map((action) => action.id));
+  return DEFAULT_ACTIONS.filter((id) => ids.has(id));
+}

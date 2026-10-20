@@ -3,11 +3,11 @@ import styled from 'styled-components';
 import AdminLoading from './AdminLoading.jsx';
 import { assetUrlVersioned } from './useTileSprites.js';
 import {
-  useApproveSpriteJobs, useClearSpriteJobs, useQueueSprites, useRescueSpriteJobs,
+  useActionCatalog, useApproveSpriteJobs, useClearSpriteJobs, useQueueSprites, useRescueSpriteJobs,
   useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
 } from './useSpriteConsole.js';
 import {
-  filterSpriteSubjects, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
+  cellCount, defaultActions, estimateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   spriteShape, targetsForSprites, toggleSpriteSubject,
 } from './spriteSelection.js';
 
@@ -54,6 +54,11 @@ const Pill = styled.span`
   display: inline-block; border-radius: 999px; padding: 0.1rem 0.45rem;
   color: var(--s2-text-muted); background: var(--s2-bg-sunken); font-size: 0.75rem;
 `;
+const Banner = styled.div`
+  margin: 0.75rem 0; padding: 0.6rem 0.9rem; border-radius: 6px;
+  color: var(--s2-danger); border: 1px solid var(--s2-danger); background: var(--s2-bg-sunken);
+`;
+const Check = styled.label`display: inline-flex; gap: 0.3rem; align-items: center; font-size: 0.85rem;`;
 const ErrorText = styled.span`color: var(--s2-danger);`;
 const Pager = styled.div`display: flex; gap: 0.5rem; align-items: center; margin: 0.75rem 0;`;
 
@@ -70,6 +75,9 @@ function SpriteConsoleAdmin() {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState(new Set());
+  const { catalog, isLoading: catalogLoading, error: catalogError } = useActionCatalog();
+  const [chosenActions, setChosenActions] = useState(null);
+  const [chosenFrames, setChosenFrames] = useState(4);
   const queue = useQueueSprites();
   const start = useStartSpriteBatch();
   const stop = useStopSpriteBatch();
@@ -87,8 +95,19 @@ function SpriteConsoleAdmin() {
   const selectedRows = subjects.filter((subject) => selected.has(subject.id));
   const approvable = selectedRows.filter((subject) => subject.job_state === 'done' && subject.job_id);
 
+  // null = untouched, so the defaults follow the catalog once it loads.
+  const actions = chosenActions ?? defaultActions(catalog);
+  const cap = framesCap(catalog, actions);
+  const frames = Math.min(chosenFrames, cap);
+  const cells = cellCount(selectedRows, actions, frames);
+  const toggleAction = (id) => setChosenActions(
+    actions.includes(id) ? actions.filter((a) => a !== id) : [...actions, id],
+  );
+  const catalogReady = Boolean(catalog) && !catalogLoading && !catalogError;
+  const canQueue = catalogReady && selected.size > 0 && actions.length > 0 && !queue.isPending;
+
   const enqueue = () => queue.mutate(
-    targetsForSprites(selectedRows),
+    { targets: targetsForSprites(selectedRows), actions, frames },
     { onSuccess: () => setSelected(new Set()) },
   );
   const approveSelected = () => approve.mutate(
@@ -112,10 +131,12 @@ function SpriteConsoleAdmin() {
     <Wrap>
       <h2>Sprite generation</h2>
       <Hint>
-        Options come from each entity: prompt, creature/prop shape and animation frames. Every job
-        runs on the local sprite service; a single image from a registered provider belongs in Art
+        Options come from each entity: prompt and creature/prop shape.
+        {catalog?.engine?.label ? ` Engine: ${catalog.engine.label}. ` : ' '}
+        Jobs run on the GPU box; a single image from a registered provider belongs in Art
         Generation, which cuts it out before it reaches the entity.
       </Hint>
+      {catalogError && <Banner role="alert">{catalogError.message}</Banner>}
 
       <Progress>
         <strong>{run?.running ? 'Batch running' : 'Batch idle'}</strong>
@@ -151,9 +172,31 @@ function SpriteConsoleAdmin() {
       </Bar>
 
       <Bar>
-        <Button disabled={selected.size === 0 || queue.isPending} onClick={enqueue}>
+        <Field as="div">Actions
+          <span style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+            {(catalog?.actions || []).map((action) => (
+              <Check key={action.id}>
+                <input type="checkbox" checked={actions.includes(action.id)}
+                  onChange={() => toggleAction(action.id)} />
+                {action.label}
+              </Check>
+            ))}
+          </span>
+        </Field>
+        <Field>Frames
+          <select value={frames} disabled={!catalogReady}
+            onChange={(event) => setChosenFrames(Number(event.target.value))}>
+            {Array.from({ length: cap }, (_, i) => i + 1).map((n) => (
+              <option key={n} value={n}>{n}</option>
+            ))}
+          </select>
+        </Field>
+        <Button disabled={!canQueue} onClick={enqueue}>
           Queue {selected.size} selected
         </Button>
+        {catalogReady && selected.size > 0 && actions.length > 0 && (
+          <Hint>{estimateLabel(cells, catalog.seconds_per_cell)}</Hint>
+        )}
         <Secondary disabled={matching.length === 0}
           onClick={() => setSelected(selectAllSpriteSubjects(matching))}>
           Select all {matching.length} matching
