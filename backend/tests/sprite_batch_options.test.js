@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { optionsForEntity, optionsForAppearance } = require('../src/services/spriteBatchOptions.js');
+const { optionsForEntity, optionsForAppearance, SPRITE_DIRECTIONS } = require('../src/services/spriteBatchOptions.js');
 
 test('creatures derive a four-frame directional sprite job', () => {
   assert.deepEqual(optionsForEntity({
@@ -18,6 +18,7 @@ test('creatures derive a four-frame directional sprite job', () => {
     prompt: 'a grey forest wolf',
     kind: 'creature',
     frames: 4,
+    directions: SPRITE_DIRECTIONS,
   });
 });
 
@@ -36,6 +37,7 @@ test('static props fall back to their name when the entity has no prompt', () =>
     prompt: 'pine_tree',
     kind: 'object',
     frames: 1,
+    directions: ['s'],
   });
 });
 
@@ -67,4 +69,14 @@ test('an appearance variant derives a four-frame directional job keyed by class:
   assert.equal(options.kind, 'creature');
   assert.equal(options.frames, 4);
   assert.match(options.prompt, /Mage/);
+});
+
+test('prop options get ["s"]', () => {
+  const options = optionsForEntity({ id: 8, name: 'Torch', prompt: 'x', is_creature: false, is_playable: false, render_mode: 'animated' });
+  assert.deepEqual(options.directions, ['s']);
+});
+
+test('appearance options get 8 facings', () => {
+  const options = optionsForAppearance({ entity_type_id: 3, variant: 2, class_name: 'Mage', class_prompt: 'm' });
+  assert.deepEqual(options.directions, ['s', 'se', 'e', 'ne', 'n', 'nw', 'w', 'sw']);
 });

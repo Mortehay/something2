@@ -1,11 +1,13 @@
 const { appearancePrompt } = require('./catalogSubjects.js');
 
-// Every sprite batch job goes to the local sprite-gen service, whatever the
-// entity's provider pin says. Registered providers return one flat txt2img
-// image: they cannot draw a directional or multi-frame sheet, and their flat
-// image is opaque RGB, which only the Art Generation console's cutout, alpha
-// and size guards make safe to write into entity_types.image. A remote flat
-// image belongs there; this console is for the sheets only sprite-gen draws.
+// The eight facings a creature, class or appearance variant is drawn in. Props
+// (kind 'object') are drawn from one angle only.
+const SPRITE_DIRECTIONS = ['s', 'se', 'e', 'ne', 'n', 'nw', 'w', 'sw'];
+
+// Batch sprite jobs go to the GPU box (Qwen sheet generation). These options
+// describe WHAT to draw per entity or appearance variant: subject, prompt,
+// kind, frame count and facings. The box needs a flat concept image from the
+// entity's registered image provider; the dispatcher makes that, not this file.
 function optionsForEntity(entity) {
   const directional = entity.is_creature === true || entity.is_playable === true;
   const frames = directional || entity.render_mode === 'animated' ? 4 : 1;
@@ -17,6 +19,7 @@ function optionsForEntity(entity) {
     prompt: String(entity.prompt || '').trim() || entity.name,
     kind: directional ? 'creature' : 'object',
     frames,
+    directions: directional ? SPRITE_DIRECTIONS : ['s'],
   };
 }
 
@@ -34,7 +37,8 @@ function optionsForAppearance(appearance) {
     prompt: appearancePrompt(appearance),
     kind: 'creature',
     frames: 4,
+    directions: SPRITE_DIRECTIONS,
   };
 }
 
-module.exports = { optionsForEntity, optionsForAppearance };
+module.exports = { optionsForEntity, optionsForAppearance, SPRITE_DIRECTIONS };

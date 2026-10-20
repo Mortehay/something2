@@ -84,3 +84,120 @@ test('enqueue targets distinct appearance variants of the same class independent
     await pool.end();
   }
 });
+
+async function withRolledBackClient(fn) {
+  const pool = new Pool({ connectionString: url });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await fn(client);
+  } finally {
+    await client.query('ROLLBACK');
+    client.release();
+    await pool.end();
+  }
+}
+
+const FREE_ENTITY = `NOT EXISTS (SELECT 1 FROM sprite_sets s
+                      WHERE s.entity_type_id = e.id AND s.status IN ('queued','running'))`;
+const EIGHT = ['s', 'se', 'e', 'ne', 'n', 'nw', 'w', 'sw'];
+
+test('enqueue stores actions, frames and 8 facings for a creature', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [e] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    assert.ok(e, 'precondition: a creature with no live sprite job');
+
+    const { rows: [row] } = await queue.enqueue(client, [{ entityId: e.id }],
+      { actions: ['idle', 'walk'], framesPerAction: 6 });
+
+    assert.deepEqual(row.actions, ['idle', 'walk']);
+    assert.deepEqual(row.directions, EIGHT);
+    assert.equal(row.frames_per_action, 6);
+    assert.equal(row.frames, 6);
+    assert.equal(row.backend, 'gpu-box');
+    assert.equal(row.status, 'queued');
+  });
+});
+
+test('enqueue gives props one facing', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [creature] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    const { rows: [prop] } = await client.query(
+      `SELECT e.id FROM entity_types e
+        WHERE COALESCE(e.is_creature, false) = false AND COALESCE(e.is_playable, false) = false
+          AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    assert.ok(creature && prop, 'precondition: a free creature and a free prop');
+
+    const { rows } = await queue.enqueue(client,
+      [{ entityId: creature.id }, { entityId: prop.id }],
+      { actions: ['idle', 'sway'], framesPerAction: 4 });
+
+    const byEntity = new Map(rows.map((r) => [r.entity_type_id, r]));
+    assert.deepEqual(byEntity.get(creature.id).directions, EIGHT);
+    assert.deepEqual(byEntity.get(prop.id).directions, ['s']);
+    assert.deepEqual(byEntity.get(prop.id).actions, ['idle', 'sway']);
+  });
+});
+
+test('attachBox records the box job and concept', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [e] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    const { rows: [row] } = await queue.enqueue(client, [{ entityId: e.id }],
+      { actions: ['idle'], framesPerAction: 4 });
+    const { rows: [prov] } = await client.query('SELECT id FROM ai_providers ORDER BY id LIMIT 1');
+
+    const updated = await queue.attachBox(client, row.id, {
+      boxJobId: 'job-abc', conceptKey: 'images/core_ab12.png', providerId: prov ? prov.id : null,
+    });
+
+    assert.equal(updated.box_job_id, 'job-abc');
+    assert.equal(updated.concept_key, 'images/core_ab12.png');
+    assert.equal(updated.job_id, 'job-abc');
+    assert.equal(updated.provider_id, prov ? prov.id : null);
+    assert.equal(updated.backend, 'gpu-box');
+  });
+});
+
+test('complete stores concept_key and sheet_seconds', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [e] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    const { rows: [row] } = await queue.enqueue(client, [{ entityId: e.id }],
+      { actions: ['idle'], framesPerAction: 4 });
+    const done = await queue.complete(client, row.id, {
+      image_key: 'k.png', concept_key: 'images/core_x.png', sheet_seconds: 90,
+    });
+    assert.equal(done.status, 'done');
+    assert.equal(done.concept_key, 'images/core_x.png');
+    assert.equal(done.sheet_seconds, 90);
+  });
+});
+
+test('lastSecondsPerCell divides by cells', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    // Newer than anything real, so it is the "newest done row with timing".
+    await client.query(
+      `INSERT INTO sprite_sets (creature, backend, seed, frames, status, actions, directions,
+                                frames_per_action, sheet_seconds, updated_at)
+       VALUES ('spc-test', 'gpu-box', 1, 4, 'done', ARRAY['idle','walk'], ARRAY['s','e'], 4, 320,
+               now() + interval '1 day')`,
+    );
+    // 2 actions x 2 directions x 4 frames = 16 cells; 320 / 16 = 20.
+    assert.equal(await queue.lastSecondsPerCell(client), 20);
+  });
+});
+
+test('lastSecondsPerCell is null when no done row has timing', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    await client.query(`UPDATE sprite_sets SET sheet_seconds = NULL`);
+    assert.equal(await queue.lastSecondsPerCell(client), null);
+  });
+});

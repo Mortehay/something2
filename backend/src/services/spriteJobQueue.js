@@ -6,7 +6,15 @@ const { seedFor } = require('./artJobQueue.js');
 // rows. One query loads plain entities, a second loads the requested
 // (entity, variant) appearance rows; either can come back short, which is
 // how `unknown` is built (an id or an id:variant pair nothing matched).
-async function enqueue(db, targets) {
+//
+// `actions` / `framesPerAction` come from the admin's choice and apply to every
+// target; without them a creature gets idle+walk and a prop idle+sway, at the
+// frame count its options derive. Facings come from the options (8 or ['s']).
+// Rows are written for the GPU box (backend 'gpu-box'); `frames` mirrors
+// frames_per_action so older readers of `frames` still see the frame count.
+const DEFAULT_ACTIONS = { creature: ['idle', 'walk'], object: ['idle', 'sway'] };
+
+async function enqueue(db, targets, { actions, framesPerAction } = {}) {
   if (!Array.isArray(targets) || targets.length === 0) return { rows: [], unknown: [] };
   const normalized = targets
     .map((t) => ({ entityId: Number(t.entityId), variant: t.variant == null ? null : Number(t.variant) }))
@@ -58,19 +66,26 @@ async function enqueue(db, targets) {
     [opts.map((o) => o.subject)],
   );
   const counts = new Map(prior.map((r) => [r.creature, r.n]));
+  const chosenActions = Array.isArray(actions) && actions.length ? actions : null;
+  const rowFrames = (o) => (Number.isInteger(framesPerAction) ? framesPerAction : o.frames);
   const { rows } = await db.query(
     `INSERT INTO sprite_sets
-       (entity_type_id, appearance_variant, creature, generation_kind, base_prompt, backend, seed, frames, status)
-     SELECT entity_id, variant, subject, kind, prompt, 'auto', seed, frames, 'queued'
-       FROM unnest($1::int[], $2::smallint[], $3::text[], $4::text[], $5::text[], $6::int[], $7::int[])
-         AS t(entity_id, variant, subject, kind, prompt, seed, frames)
+       (entity_type_id, appearance_variant, creature, generation_kind, base_prompt, backend, seed, frames, status,
+        actions, directions, frames_per_action)
+     SELECT entity_id, variant, subject, kind, prompt, 'gpu-box', seed, frames, 'queued',
+            string_to_array(actions, ','), string_to_array(directions, ','), frames
+       FROM unnest($1::int[], $2::smallint[], $3::text[], $4::text[], $5::text[], $6::int[], $7::int[],
+                   $8::text[], $9::text[])
+         AS t(entity_id, variant, subject, kind, prompt, seed, frames, actions, directions)
      ON CONFLICT DO NOTHING
      RETURNING *`,
     [
       opts.map((o) => o.entityTypeId), opts.map((o) => o.appearanceVariant),
       opts.map((o) => o.subject), opts.map((o) => o.kind), opts.map((o) => o.prompt),
       opts.map((o) => seedFor('sprite', o.subject, counts.get(o.subject) || 0)),
-      opts.map((o) => o.frames),
+      opts.map(rowFrames),
+      opts.map((o) => (chosenActions || DEFAULT_ACTIONS[o.kind] || DEFAULT_ACTIONS.creature).join(',')),
+      opts.map((o) => o.directions.join(',')),
     ],
   );
   return { rows, unknown };
@@ -98,12 +113,28 @@ async function attach(db, id, { jobId, backend, frames }) {
   return rows[0] || null;
 }
 
+// Records the box job (and the concept image it was drawn from) the moment the
+// box accepts it, so a restart can resume polling instead of resubmitting.
+// job_id mirrors box_job_id: the existing queue view and stop paths read job_id.
+async function attachBox(db, id, { boxJobId, conceptKey, providerId }) {
+  const { rows } = await db.query(
+    `UPDATE sprite_sets SET box_job_id = $2, job_id = $2, concept_key = $3, provider_id = $4,
+            backend = 'gpu-box', updated_at = now()
+      WHERE id = $1 RETURNING *`,
+    [id, boxJobId, conceptKey || null, providerId ?? null],
+  );
+  return rows[0] || null;
+}
+
 async function complete(db, id, result) {
   const { rows } = await db.query(
     `UPDATE sprite_sets SET status = 'done', image_key = $2, atlas_key = $3,
-            manifest_key = $4, last_error = NULL, claimed_at = NULL, updated_at = now()
+            manifest_key = $4, concept_key = COALESCE($5, concept_key), sheet_seconds = $6,
+            last_error = NULL, claimed_at = NULL, updated_at = now()
       WHERE id = $1 RETURNING *`,
-    [id, result.image_key || null, result.atlas_key || null, result.manifest_key || null],
+    [id, result.image_key || null, result.atlas_key || null, result.manifest_key || null,
+      result.concept_key || null,
+      Number.isFinite(result.sheet_seconds) ? Math.round(result.sheet_seconds) : null],
   );
   return rows[0] || null;
 }
@@ -132,6 +163,20 @@ async function requeueStale(db, staleMs = 60000) {
   return rows;
 }
 
+// Measured wall seconds per sheet cell (action x facing x frame) of the newest
+// finished sheet that recorded its time; null when none has. The route applies
+// the seed default, so "no data yet" stays distinguishable here.
+async function lastSecondsPerCell(db) {
+  const { rows } = await db.query(
+    `SELECT sheet_seconds::float8 / (cardinality(actions) * cardinality(directions) * frames_per_action) AS spc
+       FROM sprite_sets
+      WHERE status IN ('done','approved') AND sheet_seconds IS NOT NULL
+        AND cardinality(actions) > 0 AND cardinality(directions) > 0 AND frames_per_action > 0
+      ORDER BY updated_at DESC, id DESC LIMIT 1`,
+  );
+  return rows[0] ? rows[0].spc : null;
+}
+
 async function stats(db) {
   const { rows } = await db.query(
     `SELECT status, count(*)::int AS n FROM sprite_sets
@@ -158,4 +203,4 @@ async function queueView(db) {
   return { stats: counts, jobs: active.rows };
 }
 
-module.exports = { enqueue, claim, attach, complete, fail, requeueStale, stats, queueView };
+module.exports = { enqueue, claim, attach, attachBox, complete, fail, requeueStale, lastSecondsPerCell, stats, queueView };
