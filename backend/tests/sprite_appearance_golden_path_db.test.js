@@ -12,6 +12,14 @@ const { Pool } = require('pg');
 const { app, __setPool } = require('../src/index.js');
 const { signToken } = require('../src/auth/tokens.js');
 const queue = require('../src/services/spriteJobQueue.js');
+const gpuBoxSprites = require('../src/services/gpuBoxSprites.js');
+const aiProviders = require('../src/services/aiProviders.js');
+const assetStore = require('../src/services/assetStore.js');
+const { Readable } = require('node:stream');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const CATALOG = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/gpuBox/action-catalog.json'), 'utf8'));
 
 const url = process.env.TEST_DATABASE_URL;
 const skip = !url ? 'no TEST_DATABASE_URL -- refusing to touch a real database' : false;
@@ -37,7 +45,27 @@ test('an appearance variant: queue -> complete -> approve writes its own directi
   const baseSql = 'SELECT sprite, render_mode, image FROM entity_types WHERE id = $1';
   const { rows: [baseBefore] } = await pool.query(baseSql, [target.entity_type_id]);
 
+  // The enqueue route validates actions against the GPU box's live catalog.
+  // index.js hands the route these module objects, which it calls at request
+  // time, so swapping the two functions on them is the seam; restored below.
+  const realCatalog = gpuBoxSprites.actionCatalog;
+  const realLoad = aiProviders.loadActiveProviderWithSecret;
+  gpuBoxSprites.actionCatalog = async () => ({ ok: true, catalog: CATALOG });
+  aiProviders.loadActiveProviderWithSecret = async () => (
+    { id: 'p1', base_url: 'http://box.test', auth_token: 'secret-token' });
+
+  // Box sheets are approved by reading the sheet manifest back from the store
+  // to find the static frame; serve a manifest shaped like the box path's.
+  const realStream = assetStore.getObjectStream;
+  assetStore.getObjectStream = async (key) => {
+    assert.equal(key, 'sprites/golden-path-test/manifest.json');
+    return Readable.from([JSON.stringify({ frames: { 'idle/s/0': [0, 0, 48, 64], 'idle/s/1': [48, 0, 48, 64] } })]);
+  };
+
   t.after(async () => {
+    assetStore.getObjectStream = realStream;
+    gpuBoxSprites.actionCatalog = realCatalog;
+    aiProviders.loadActiveProviderWithSecret = realLoad;
     await pool.query(
       `UPDATE character_appearances SET sprite = NULL, render_mode = NULL, updated_at = now()
         WHERE entity_type_id = $1 AND variant = $2`,
@@ -61,7 +89,11 @@ test('an appearance variant: queue -> complete -> approve writes its own directi
 
   // 2. Queue it through the real route.
   const queued = await request(app).post('/api/sprite-admin/jobs').set(...AUTH)
-    .send({ targets: [{ entity_id: target.entity_type_id, variant: target.variant }] });
+    .send({
+      targets: [{ entity_id: target.entity_type_id, variant: target.variant }],
+      actions: ['idle'],
+      frames: 2,
+    });
   assert.equal(queued.status, 201);
   assert.equal(queued.body.queued, 1);
 
@@ -90,7 +122,7 @@ test('an appearance variant: queue -> complete -> approve writes its own directi
     [target.entity_type_id, target.variant],
   );
   assert.equal(variantRow.sprite.atlas_key, 'sprites/golden-path-test/atlas.png');
-  assert.equal(variantRow.sprite.static_frame, 'S/0');
+  assert.equal(variantRow.sprite.static_frame, 'idle/s/0');
   assert.equal(variantRow.render_mode, 'static');
   const { rows: [baseAfter] } = await pool.query(baseSql, [target.entity_type_id]);
   assert.deepEqual(baseAfter, baseBefore, "approving a variant must not touch the class's own row");
