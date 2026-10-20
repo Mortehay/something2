@@ -10,6 +10,12 @@ docs
 tools
 **/__tests__
 **/*.test.js
+# The backend's test tree (helpers and fixtures, not just *.test.js) and the
+# Python reference the world-gen port is tested against (SOMET-644): neither
+# runs in an image. The dev image bind-mounts backend/ over /app, so dev
+# containers still see both.
+backend/tests
+backend/tools/world_gen_ref
 
 # Neither is COPYed by any Dockerfile today, but both would otherwise sit in
 # the build context uploaded to the daemon on the Pi. Excluded now, before
