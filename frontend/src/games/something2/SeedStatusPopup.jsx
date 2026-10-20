@@ -26,7 +26,7 @@ const WHY = {
 };
 
 // busy: a background job (SOMET-640) is running; Export and Seed wait for it.
-export default function SeedStatusPopup({ group, onClose, onExport, onSeed, exporting, busy }) {
+export default function SeedStatusPopup({ group, onClose, onExport, onSeed, exporting, busy, hints }) {
   const badge = statusBadge(group);
   const wantsRows = group.status === 'local_edits' || group.status === 'git_newer';
   const preview = useSeedPreview(group.id, wantsRows);
@@ -52,6 +52,8 @@ export default function SeedStatusPopup({ group, onClose, onExport, onSeed, expo
         ) : (
           <p style={{ fontSize: '1.4rem' }}>{(WHY[group.status] || WHY.in_sync)(group)}</p>
         )}
+
+        {(hints || []).map((h) => <div key={h} role="note"><Muted>{h}</Muted></div>)}
 
         {wantsRows && preview.isLoading && <Muted>Loading rows…</Muted>}
         {wantsRows && preview.error && <Err>{preview.error.message}</Err>}

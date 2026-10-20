@@ -3,6 +3,7 @@ import {
   statusBadge, initialDecisions, bulkSet, applyGate, allowedDecisions, kindLabel, exportBlocked, previewSignature,
   exportBlockReason, seedBlockReason, decisionLabel, seedRequestBody,
   seedButtonLabel, exportAllPlan, seedAllGroups, historyPageCount, exportAllMessage, seedAllGate, pluralize,
+  gitHints, gitActionStates, gitStripText, GIT_UNAVAILABLE_TEXT,
   tableLabel, warningText, warningIsError, refusalText, groupRowsByTable, isRename, renameNote,
 } from '../../games/something2/seedExportModel.js';
 
@@ -552,5 +553,69 @@ describe('keepLocalConfirmText', () => {
     const both = keepLocalConfirmText(rows, ['u1', 'u2']);
     expect(both).toContain('vale-region:');
     expect(both).toContain('p5-descent: No baseline on this PC — Keep local will change graph on 1 world.');
+  });
+});
+
+describe('gitHints (SOMET-642)', () => {
+  const st = (o) => ({ available: true, branch: 'main', ahead: 0, behind: 0, seedsDirty: [], otherDirty: [], ...o });
+  const g = (id, status, inGit = {}) => ({ id, status, inGit });
+  it('git newer while behind says pull first, with the count', () => {
+    const h = gitHints(st({ behind: 3 }), [g('quests', 'git_newer')]);
+    expect(h.quests).toEqual(["git is newer, but you're 3 commits behind — pull first"]);
+    expect(gitHints(st({ behind: 1 }), [g('quests', 'git_newer')]).quests[0]).toContain('1 commit behind');
+  });
+  it('no behind hint when not behind or not git-newer', () => {
+    expect(gitHints(st(), [g('quests', 'git_newer')])).toEqual({});
+    expect(gitHints(st({ behind: 2 }), [g('quests', 'in_sync')])).toEqual({});
+  });
+  it('a group whose sync file is dirty is exported, not committed', () => {
+    const h = gitHints(st({ seedsDirty: ['backend/seeds/sync/quests.json'] }), [g('quests', 'in_sync'), g('items', 'in_sync')]);
+    expect(h.quests).toEqual(['exported, not committed yet']);
+    expect(h.items).toBeUndefined();
+  });
+  it('clean, exported groups read committed-not-pushed when ahead', () => {
+    const h = gitHints(st({ ahead: 2, seedsDirty: ['backend/seeds/sync/items.json'] }), [g('quests', 'in_sync'), g('items', 'in_sync'), g('maps', 'never_exported', null)]);
+    expect(h.quests).toEqual(['committed, not pushed (2 ahead)']);
+    expect(h.items).toEqual(['exported, not committed yet']);
+    expect(h.maps).toBeUndefined();
+  });
+  it('nothing when the helper is unavailable or status is missing', () => {
+    expect(gitHints({ available: false }, [g('quests', 'git_newer')])).toEqual({});
+    expect(gitHints(undefined, [g('quests', 'git_newer')])).toEqual({});
+  });
+});
+
+describe('gitActionStates (SOMET-642)', () => {
+  const st = (o) => ({ available: true, ahead: 0, behind: 0, seedsDirty: [], otherDirty: [], ...o });
+  it('everything is enabled-or-reasoned: nothing to do disables commit and push', () => {
+    const a = gitActionStates(st(), false);
+    expect(a.pull.reason).toBeNull();
+    expect(a.commit.reason).toMatch(/no seed changes/i);
+    expect(a.push.reason).toMatch(/nothing to push/i);
+  });
+  it('pull is blocked by dirt anywhere, in seeds or outside', () => {
+    expect(gitActionStates(st({ seedsDirty: ['backend/seeds/sync/a.json'] }), false).pull.reason).toMatch(/uncommitted/i);
+    expect(gitActionStates(st({ otherDirty: ['x.js'] }), false).pull.reason).toMatch(/uncommitted/i);
+  });
+  it('commit is enabled with seed changes, even with other dirt', () => {
+    expect(gitActionStates(st({ seedsDirty: ['a'], otherDirty: ['b'] }), false).commit.reason).toBeNull();
+  });
+  it('push is blocked when behind (pull first) and enabled when only ahead', () => {
+    expect(gitActionStates(st({ ahead: 1, behind: 2 }), false).push.reason).toMatch(/pull first/i);
+    expect(gitActionStates(st({ ahead: 1 }), false).push.reason).toBeNull();
+  });
+  it('a running job disables all three with the busy text', () => {
+    const a = gitActionStates(st({ ahead: 1, seedsDirty: ['a'] }), true);
+    for (const k of ['pull', 'commit', 'push']) expect(a[k].reason).toBe(BUSY_TEXT);
+  });
+});
+
+describe('gitStripText (SOMET-642)', () => {
+  it('summarises branch, ahead/behind and seed changes', () => {
+    expect(gitStripText({ branch: 'main', ahead: 1, behind: 2, seedsDirty: ['a', 'b'] })).toBe('main · ↑1 ↓2 · 2 seed changes');
+    expect(gitStripText({ branch: 'main', ahead: 0, behind: 0, seedsDirty: ['a'] })).toBe('main · ↑0 ↓0 · 1 seed change');
+  });
+  it('unavailable copy names the make target', () => {
+    expect(GIT_UNAVAILABLE_TEXT).toBe('Git buttons need the git helper: run `make git-helper`');
   });
 });

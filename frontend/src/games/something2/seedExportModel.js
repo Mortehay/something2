@@ -437,3 +437,47 @@ export function filterRows(rows, kinds, q) {
 }
 // Selected uuids among the listed (filtered) rows, rendered or not.
 export const pickedRows = (visible, picked) => visible.filter((r) => picked.has(r.syncUuid)).map((r) => r.syncUuid);
+
+// SOMET-642. Git strip: GET /git/status is { available:true, branch, upstream,
+// ahead, behind, seedsDirty, otherDirty, headSubject, lastFetchAt,
+// suggestedMessage } or { available:false, hint }.
+export const GIT_UNAVAILABLE_TEXT = 'Git buttons need the git helper: run `make git-helper`';
+const syncPath = (id) => `backend/seeds/sync/${id}.json`;
+
+export function gitStripText(s) {
+  const n = (s.seedsDirty || []).length;
+  return `${s.branch} · ↑${s.ahead || 0} ↓${s.behind || 0} · ${pluralize(n, 'seed change')}`;
+}
+
+// Per-button disabled reason (null = enabled). A running job disables all.
+export function gitActionStates(s, jobIsRunning) {
+  const seedsN = (s.seedsDirty || []).length;
+  const dirty = seedsN + (s.otherDirty || []).length > 0;
+  const busy = jobIsRunning ? BUSY_TEXT : null;
+  return {
+    pull: { reason: busy || (dirty ? 'Uncommitted changes in the working tree — commit or discard them first' : null) },
+    commit: { reason: busy || (seedsN === 0 ? 'No seed changes to commit' : null) },
+    push: {
+      reason: busy
+        || ((s.behind || 0) > 0 ? 'Behind origin — pull first' : null)
+        || ((s.ahead || 0) === 0 ? 'Nothing to push' : null),
+    },
+  };
+}
+
+// { [groupId]: [hint, ...] } for the status popups.
+export function gitHints(s, groups) {
+  const out = {};
+  if (!s || s.available === false) return out;
+  const dirty = new Set(s.seedsDirty || []);
+  for (const g of groups || []) {
+    const hints = [];
+    if (g.status === 'git_newer' && s.behind > 0) {
+      hints.push(`git is newer, but you're ${pluralize(s.behind, 'commit')} behind — pull first`);
+    }
+    if (dirty.has(syncPath(g.id))) hints.push('exported, not committed yet');
+    else if (s.ahead > 0 && g.inGit) hints.push(`committed, not pushed (${s.ahead} ahead)`);
+    if (hints.length) out[g.id] = hints;
+  }
+  return out;
+}

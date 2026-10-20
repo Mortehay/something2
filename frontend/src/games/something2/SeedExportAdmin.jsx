@@ -8,17 +8,18 @@ import { useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
   useSeedGroups, useRestartStatus, useExportGroup, useExportAll, useRestartBackend, useSeedMeta,
-  useSeedJob, useCancelSeedJob,
+  useSeedJob, useCancelSeedJob, useGitStatus,
 } from './useSeedExport.js';
 import {
   statusBadge, exportBlockReason, seedBlockReason, seedButtonLabel, exportAllPlan, seedAllGroups, exportAllMessage,
-  binaryGroups, separateNote, BUSY_TEXT, jobRunning, jobProgressText, jobErrorRowsText, groupNoteLines,
+  binaryGroups, separateNote, BUSY_TEXT, jobRunning, jobProgressText, jobErrorRowsText, groupNoteLines, gitHints,
 } from './seedExportModel.js';
 import { Btn, Badge, Muted, Modal, fmtTime, StatusHead, PcLabelHint } from './seedUi.jsx';
 import AdminLoading from './AdminLoading.jsx';
 import SeedStatusPopup from './SeedStatusPopup.jsx';
 import SeedPreviewModal from './SeedPreviewModal.jsx';
 import SeedAllModal from './SeedAllModal.jsx';
+import SeedGitStrip from './SeedGitStrip.jsx';
 import SeedHistoryTab from './SeedHistoryTab.jsx';
 
 const Page = styled.div`
@@ -116,6 +117,7 @@ export default function SeedExportAdmin() {
   const restartBackend = useRestartBackend();
   const jobQuery = useSeedJob();
   const cancelJob = useCancelSeedJob();
+  const git = useGitStatus();
   const [popupId, setPopupId] = useState(null);
   const [previewId, setPreviewId] = useState(null);
   const [seedAllOpen, setSeedAllOpen] = useState(false);
@@ -150,6 +152,7 @@ export default function SeedExportAdmin() {
       <h2 style={{ marginTop: 0 }}>Seed / Export</h2>
       <Muted>Export writes this PC's data to the seed files in git. Seed reads them back after a pull, with a preview.</Muted>
       <PcLabelHint meta={meta.data} />
+      <SeedGitStrip busy={busy} />
 
       {restart.data?.required && (
         <Banner>
@@ -200,7 +203,7 @@ export default function SeedExportAdmin() {
       </>)}
 
       {popup && (
-        <SeedStatusPopup group={popup} exporting={exportGroup.isPending} busy={busy}
+        <SeedStatusPopup group={popup} hints={gitHints(git.data, list)[popup.id]} exporting={exportGroup.isPending} busy={busy}
           onClose={() => setPopupId(null)}
           onExport={() => { doExport(popup); setPopupId(null); }}
           onSeed={() => { setPreviewId(popup.id); setPopupId(null); }} />

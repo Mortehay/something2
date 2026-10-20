@@ -6,13 +6,14 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import toast from "react-hot-toast";
 import { authHeaders, apiFetch } from "./src/js/net/auth.js";
 import { API_URL } from "../../config.js";
-import { refusalText, jobSettled, jobPollInterval, BUSY_TEXT } from "./seedExportModel.js";
+import { refusalText, jobSettled, jobPollInterval, BUSY_TEXT, GIT_UNAVAILABLE_TEXT } from "./seedExportModel.js";
 
 const BASE = `${API_URL}/api/seed-export`;
 export const GROUPS_KEY = ["seed-groups"];
 export const RUNS_KEY = ["seed-runs"];
 export const RESTART_KEY = ["seed-restart"];
 export const JOB_KEY = ["seed-job"];
+export const GIT_KEY = ["seed-git"];
 
 // The API's `error` text plus its `code`, so a refusal says which rule fired.
 async function call(path, { method = "GET", body, label } = {}) {
@@ -28,6 +29,14 @@ async function call(path, { method = "GET", body, label } = {}) {
       const err = new Error(BUSY_TEXT);
       err.code = "busy";
       err.job = json.job;
+      err.status = res.status;
+      throw err;
+    }
+    // SOMET-642. The host git helper is down (503) or refused the action
+    // (409 { error: <code>, message }): say so in words, not the bare code.
+    if (path.startsWith("/git/") && (json.error === "helper_unavailable" || json.message)) {
+      const err = new Error(json.error === "helper_unavailable" ? GIT_UNAVAILABLE_TEXT : json.message);
+      err.code = json.error;
       err.status = res.status;
       throw err;
     }
@@ -220,5 +229,41 @@ export function useApplyAll() {
       return out;
     },
     onSettled: () => refreshAll(qc),
+  });
+}
+
+// SOMET-642. { available:true, branch, ahead, behind, seedsDirty, ... } or
+// { available:false, hint }. Polled every 15s (react-query pauses it while the
+// tab is hidden); every git action refetches it.
+export const useGitStatus = () => useQuery({
+  queryKey: GIT_KEY,
+  queryFn: () => call("/git/status"),
+  refetchInterval: 15000,
+});
+
+// op: 'fetch' | 'pull' | 'commit' | 'push'; message only for commit.
+export const gitRequest = (op, message) => call(`/git/${op}`, {
+  method: "POST",
+  ...(op === "commit" ? { body: { message } } : {}),
+});
+
+// A failure (including the helper going down mid-click, 503) toasts and
+// refetches the status, so the strip flips to its unavailable state.
+export function gitActionHandlers(qc) {
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: GIT_KEY });
+    qc.invalidateQueries({ queryKey: GROUPS_KEY });
+  };
+  return {
+    onSuccess: (r, { op }) => { refresh(); toast.success(`git ${op} done`); },
+    onError: (err) => { refresh(); toast.error(err.message); },
+  };
+}
+
+export function useGitAction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ op, message }) => gitRequest(op, message),
+    ...gitActionHandlers(qc),
   });
 }
