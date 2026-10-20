@@ -12,8 +12,8 @@ const { createGitOps, GitRefusal } = require('./gitOps');
 
 const MAX_BODY = 64 * 1024;
 const MAX_SOCK_PATH = 107;
-// Slightly over the per-call git timeout (60s), so a legitimately slow op can finish.
-const DRAIN_CAP_MS = 65_000;
+// Slightly over a push/pull's overall op deadline (120s), so a legitimately slow op can finish.
+const DRAIN_CAP_MS = 125_000;
 const PROBE_TIMEOUT_MS = 2000;
 
 // Is something accepting connections at this endpoint? Refused/missing/not-a-socket = stale.
@@ -62,7 +62,6 @@ function createServer({ root, runDir, port, drainMs } = {}) {
   let token = null;
   let shuttingDown = false;
   let inflight = 0;
-  let idleWaiter = null;
 
   const send = (res, code, body) => {
     const data = JSON.stringify(body);
@@ -98,7 +97,6 @@ function createServer({ root, runDir, port, drainMs } = {}) {
     // 'close' fires after the response has been flushed (or the client went away).
     res.once('close', () => {
       inflight -= 1;
-      if (inflight === 0 && idleWaiter) idleWaiter();
     });
     handle(req, res);
   });
@@ -109,14 +107,13 @@ function createServer({ root, runDir, port, drainMs } = {}) {
     shuttingDown = true;
     server.close();
     server.closeIdleConnections();
-    let clean = true;
-    if (inflight > 0) {
-      clean = await new Promise((resolve) => {
-        const timer = setTimeout(() => { idleWaiter = null; resolve(false); }, drainCap);
-        idleWaiter = () => { clearTimeout(timer); idleWaiter = null; resolve(true); };
-      });
-    }
-    if (!clean) { ops.abort(); await new Promise((r) => setTimeout(r, 100)); }
+    // Done = no request in flight AND no git op running. The second matters when a
+    // client gave up (response closed) while its git child is still going.
+    const settled = () => inflight === 0 && !ops.isBusy();
+    const deadline = Date.now() + drainCap;
+    while (!settled() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 25));
+    const clean = settled();
+    if (!clean || ops.isBusy()) { ops.abort(); await new Promise((r) => setTimeout(r, 100)); }
     server.closeAllConnections();
     fs.rmSync(sockPath, { force: true });
     return clean;
