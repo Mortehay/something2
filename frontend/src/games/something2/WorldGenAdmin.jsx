@@ -7,7 +7,11 @@ import {
 import {
   useGeneratedWorlds, useRegionSpec, useRegionPreview, useRegionReport,
   useCreateRegion, useEditRegion, useDeleteRegion, useDownloadRegion, useSeedRegion,
+  useLocalPreview, useLocalSave,
 } from './useWorldGen.js';
+import {
+  LOCAL_BANNER, isBoxDown, localRequestBody, reportVerdict, saveOutcome,
+} from './worldGenLocal.js';
 import { ACHIEVABLE, nearestAchievable, isMisleading } from './densityTargets.js';
 import AdminLoading from './AdminLoading.jsx';
 
@@ -213,24 +217,27 @@ function SeedConfirm({ name, onCancel, onSeeded }) {
   );
 }
 
-function CreateForm() {
-  const [form, setForm] = useState({
-    name: '', worlds: 6, target_per_screen: 6, size: 128, chunk_size: 32, biome_cell: 32, theme: '',
-  });
-  const create = useCreateRegion();
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+const DEFAULT_FORM = {
+  name: '', worlds: 6, target_per_screen: 6, size: 128, chunk_size: 32, biome_cell: 32, theme: '',
+};
+
+// The create form's fields, shared by the box form and the local fallback so
+// the two ask for exactly the same thing. The local form has no theme: there
+// is no LLM on this PC to read it.
+function RegionFields({ form, set, showTheme = true }) {
   return (
-    <Card>
-      <strong>Generate a new region</strong>
+    <>
       <Row><Label>Name</Label><Input value={form.name} onChange={e => set('name', e.target.value)} placeholder="emerald-reach" /></Row>
-      <Row><Label>Theme</Label>
-        <Input
-          style={{ flex: 1, minWidth: 260 }}
-          value={form.theme}
-          onChange={e => set('theme', e.target.value)}
-          placeholder="a green river valley that descends into buried ruins"
-        />
-      </Row>
+      {showTheme && (
+        <Row><Label>Theme</Label>
+          <Input
+            style={{ flex: 1, minWidth: 260 }}
+            value={form.theme}
+            onChange={e => set('theme', e.target.value)}
+            placeholder="a green river valley that descends into buried ruins"
+          />
+        </Row>
+      )}
       <Row>
         <Label>Worlds</Label><Input type="number" min="1" value={form.worlds} onChange={e => set('worlds', e.target.value)} />
         <Label>Creatures / screen</Label>
@@ -243,6 +250,18 @@ function CreateForm() {
         <Label>Chunk</Label><Input type="number" value={form.chunk_size} onChange={e => set('chunk_size', e.target.value)} />
         <Label>Biome cell</Label><Input type="number" value={form.biome_cell} onChange={e => set('biome_cell', e.target.value)} />
       </Row>
+    </>
+  );
+}
+
+function CreateForm({ onBoxDown }) {
+  const [form, setForm] = useState(DEFAULT_FORM);
+  const create = useCreateRegion();
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  return (
+    <Card>
+      <strong>Generate a new region</strong>
+      <RegionFields form={form} set={set} />
       <Row>
         <Button
           disabled={!form.name.trim() || create.isPending}
@@ -254,12 +273,148 @@ function CreateForm() {
             size: num(form.size, 128),
             chunk_size: num(form.chunk_size, 32),
             biome_cell: num(form.biome_cell, 32),
+          }, {
+            onError: (err) => { if (isBoxDown(err) && onBoxDown) onBoxDown(); },
           })}
         >
           <HiOutlineSparkles /> {create.isPending ? 'Generating…' : 'Generate'}
         </Button>
         <Stat>Spec generation is arithmetic on the far side — seconds, not minutes.</Stat>
       </Row>
+    </Card>
+  );
+}
+
+// --- SOMET-644: the local fallback --------------------------------------------
+//
+// Shown only when the box list or create says the box cannot be reached (or is
+// not configured). The backend runs the JS port of the box's rules generator:
+// no LLM biome choice, no preview image. Save writes seeds/maps/<slug>.map.json
+// and the Seed / Export tab's Maps group seeds it from there.
+export function LocalBanner() {
+  return (
+    <ErrorBanner>
+      <HiOutlineExclamationTriangle size={20} />
+      <div><strong>{LOCAL_BANNER}</strong></div>
+    </ErrorBanner>
+  );
+}
+
+// Pure: everything it shows comes in as props, so it renders under SSR tests.
+export function LocalPreviewResult({
+  preview, saving, confirmOverwrite, saved, saveError, onSave, onOverwrite, onCancelOverwrite,
+}) {
+  if (!preview) return null;
+  const v = reportVerdict(preview.report);
+  const failed = saveOutcome(saveError) === 'failed';
+  const file = `${preview.name}.map.json`;
+  return (
+    <div>
+      <Row>
+        <strong>{preview.name}</strong>
+        <Badge>{preview.author}</Badge>
+        <Badge $bg={v.ok ? 'var(--s2-accent)' : 'var(--s2-danger, #b4423a)'}>
+          {v.ok ? 'report ok' : `${v.problems.length} problem(s)`}
+        </Badge>
+        <Badge $bg={preview.valid ? 'var(--s2-accent)' : 'var(--s2-danger, #b4423a)'}>
+          {preview.valid ? 'validates against this database' : `${preview.errors.length} validation error(s)`}
+        </Badge>
+      </Row>
+      {v.totals && (
+        <Row>
+          <Stat>{v.totals.worlds} worlds</Stat>
+          <Stat>· {v.totals.creatures} creatures</Stat>
+          <Stat>· {v.totals.mean_per_screen} per screen (mean)</Stat>
+          <Stat>· {preview.spec?.links?.length ?? 0} links</Stat>
+        </Row>
+      )}
+      {preview.note && <Stat>{preview.note}</Stat>}
+      {v.problems.length > 0 && (
+        <ErrorBanner>
+          <HiOutlineExclamationTriangle size={20} />
+          <div>
+            <strong>The generator reports {v.problems.length} problem(s) with this region.</strong>
+            <Mono>{v.problems.map(p => (typeof p === 'string' ? p : JSON.stringify(p))).join('\n')}</Mono>
+          </div>
+        </ErrorBanner>
+      )}
+      {v.caveats.length > 0 && (
+        <Mono>{'caveats from the generator (these do not fail the region):\n'
+          + v.caveats.map(c => `  - ${typeof c === 'string' ? c : JSON.stringify(c)}`).join('\n')}</Mono>
+      )}
+      {!preview.valid && preview.errors.length > 0 && <Mono>{preview.errors.join('\n')}</Mono>}
+      <Row>
+        <Button disabled={!preview.valid || saving} onClick={onSave}>
+          {saving ? 'Saving…' : 'Save as map spec'}
+        </Button>
+      </Row>
+      {confirmOverwrite && (
+        <Card>
+          <Row><strong>{file} already exists in seeds/maps.</strong></Row>
+          <Row>
+            <Button $bg="var(--s2-danger, #b4423a)" disabled={saving} onClick={onOverwrite}>Overwrite</Button>
+            <Button $bg="var(--s2-border)" onClick={onCancelOverwrite}>Cancel</Button>
+          </Row>
+        </Card>
+      )}
+      {failed && (
+        <ErrorBanner>
+          <HiOutlineExclamationTriangle size={20} />
+          <div>
+            <strong>Not saved.</strong><div>{saveError.message}</div>
+            {Array.isArray(saveError.errors) && saveError.errors.length > 0 && <Mono>{saveError.errors.join('\n')}</Mono>}
+          </div>
+        </ErrorBanner>
+      )}
+      {saved && (
+        <Mono>{`Saved seeds/maps/${saved.file}${saved.overwrote ? ' (overwrote the existing file)' : ''}\n`
+          + 'Next: open Seed / Export → Maps. The spec shows there as new and seeds from that tab.'}</Mono>
+      )}
+    </div>
+  );
+}
+
+function LocalFallback() {
+  const [form, setForm] = useState({ ...DEFAULT_FORM, theme: '' });
+  const [confirmOverwrite, setConfirmOverwrite] = useState(false);
+  const preview = useLocalPreview();
+  const save = useLocalSave();
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const generate = () => {
+    save.reset();
+    setConfirmOverwrite(false);
+    preview.mutate(localRequestBody(form));
+  };
+  // Saves the params the PREVIEW was made from (server-normalised): the
+  // backend regenerates from them, so what is written is what was shown.
+  const doSave = (overwrite) => save.mutate(
+    { name: preview.data.name, params: preview.data.params, overwrite },
+    {
+      onSuccess: () => setConfirmOverwrite(false),
+      onError: (err) => setConfirmOverwrite(saveOutcome(err) === 'confirm_overwrite'),
+    },
+  );
+  return (
+    <Card>
+      <LocalBanner />
+      <strong>Generate a region on this PC</strong>
+      <RegionFields form={form} set={set} showTheme={false} />
+      <Row>
+        <Button disabled={!form.name.trim() || preview.isPending} onClick={generate}>
+          <HiOutlineSparkles /> {preview.isPending ? 'Generating…' : 'Generate locally'}
+        </Button>
+        <Stat>Nothing is written until you save.</Stat>
+      </Row>
+      <LocalPreviewResult
+        preview={preview.data}
+        saving={save.isPending}
+        confirmOverwrite={confirmOverwrite}
+        saved={save.data || null}
+        saveError={save.error || null}
+        onSave={() => doSave(false)}
+        onOverwrite={() => doSave(true)}
+        onCancelOverwrite={() => { setConfirmOverwrite(false); save.reset(); }}
+      />
     </Card>
   );
 }
@@ -356,6 +511,7 @@ function RegionCard({ region, selected, onSelect }) {
 
 export default function WorldGenAdmin() {
   const [selected, setSelected] = useState(null);
+  const [createSaidDown, setCreateSaidDown] = useState(false);
   const {
     regions, total, provider, isLoadingRegions, isRefetchingRegions, regionsError, refetchRegions,
   } = useGeneratedWorlds();
@@ -384,7 +540,8 @@ export default function WorldGenAdmin() {
         </ErrorBanner>
       )}
 
-      <CreateForm />
+      <CreateForm onBoxDown={() => setCreateSaidDown(true)} />
+      {(isBoxDown(regionsError) || createSaidDown) && <LocalFallback />}
 
       {isLoadingRegions && <Stat><AdminLoading label="Loading regions…" inline size={16} /></Stat>}
       {!isLoadingRegions && !regionsError && regions.length === 0 && (

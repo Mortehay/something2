@@ -10,9 +10,15 @@ const KEY = ["world-gen", "worlds"];
 // is not optional on ANY call here. useAiProviders.js records what happens when
 // it is forgotten on an admin-only GET: the request 401s, noteAuthFailure
 // fires, and the admin is signed out the moment they open the tab.
+//
+// The error keeps the route's `code` (e.g. `unreachable`) and HTTP status: the
+// tab decides on the code whether to offer the local fallback (SOMET-644), and
+// a local save's 409 asks to confirm an overwrite rather than failing.
 async function readError(res, fallback) {
   const body = await res.json().catch(() => ({}));
-  return new Error(body.error || fallback);
+  return Object.assign(new Error(body.error || fallback), {
+    code: body.code || null, status: res.status, errors: body.errors || null,
+  });
 }
 
 // The region list.
@@ -214,3 +220,34 @@ export const useSeedRegion = worldGenMutation({
   successMessage: (_d, arg) => `Seeded "${arg.name}" — restart the backend`,
   failMessage: "Failed to seed region",
 });
+
+// SOMET-644: the local, rules-only fallback when the GPU box is unreachable.
+// Nothing here touches the box or the region list. Preview generates on the
+// backend with the JS port and validates against this database; save writes
+// seeds/maps/<slug>.map.json for the Seed / Export Maps group.
+async function postLocal(path, body, fallback) {
+  const res = await apiFetch(`${API_URL}/api/world-gen/local/${path}`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw await readError(res, fallback);
+  return res.json();
+}
+
+export function useLocalPreview() {
+  return useMutation({
+    mutationFn: (body) => postLocal("preview", body, "Failed to generate the region locally"),
+    onError: (err) => toast.error(err.message),
+  });
+}
+
+// A 409 is NOT toasted: the tab turns it into an overwrite confirmation.
+export function useLocalSave() {
+  return useMutation({
+    mutationFn: ({ name, params, overwrite = false }) =>
+      postLocal("save", { name, params, overwrite }, "Failed to save the map spec"),
+    onSuccess: (data) => toast.success(`Saved seeds/maps/${data.file}`),
+    onError: (err) => { if (err.code !== "exists") toast.error(err.message); },
+  });
+}

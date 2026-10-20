@@ -171,6 +171,7 @@ const passiveTreeRoutes = require('./api/passiveTreeRoutes.js');
 const passiveNodesRoutes = require('./api/passiveNodesRoutes.js');
 const auraEffectsRoutes = require('./api/auraEffectsRoutes.js');
 const seedExportRoutes = require('./api/seedExportRoutes.js');
+const worldGenLocalRoutes = require('./api/worldGenLocalRoutes.js');
 const { markInterruptedRuns } = require('./services/seedSync/runs.js');
 const { cascadeEntityRename } = require('./services/seedSync/renameCascade.js');
 const creatureSkillsRoutes = require('./api/creatureSkillsRoutes.js');
@@ -3054,19 +3055,8 @@ app.post('/api/ai-providers/:id/test', adminGuard, async (req, res) => {
 // pointing at the generator would either need the credential in a query string
 // or fail -- and a token in a URL ends up in history and logs.
 
-// The two catalog reads validateMapSpec needs, identical to the ones
-// scripts/seed-map.js's applyMapSpec performs. Kept here rather than imported
-// so this route does not depend on the seeding script for a read-only check.
-async function mapSpecCatalogs(db) {
-  const biomeRows = (await db.query('SELECT name, creature_types FROM biomes')).rows;
-  return {
-    biomeNames: new Set(biomeRows.map((r) => r.name)),
-    biomeCreatureTypes: new Map(
-      biomeRows.map((r) => [r.name, Array.isArray(r.creature_types) ? r.creature_types : []])),
-    creatureTypeNames: new Set(
-      (await db.query('SELECT name FROM entity_types WHERE is_creature = true')).rows.map((r) => r.name)),
-  };
-}
+// The catalogs validateMapSpec needs: services/mapSpecCatalogs.js.
+const { mapSpecCatalogs } = require('./services/mapSpecCatalogs.js');
 
 // SOMET-587: mapSpecCatalogs() above feeds the world-gen download/seed
 // routes and deliberately omits pointArtTypes/bossTiers (neither route edits
@@ -3124,6 +3114,9 @@ function sendWorldGenError(res, err, fallback) {
   console.error(err);
   return res.status(500).json({ error: fallback });
 }
+
+// SOMET-644: the local rules-only fallback when the GPU box is unreachable.
+app.use('/api/world-gen/local', worldGenLocalRoutes(guardPool));
 
 app.get('/api/world-gen/worlds', adminGuard, async (req, res) => {
   try {

@@ -1,0 +1,192 @@
+// SOMET-644 Task 6. The LOCAL fallback for the Generated Worlds tab: when the
+// GPU box is unreachable, generate a region on this PC with the JS port of the
+// box's rules generator (services/worldGen/worldGen.js), preview its report,
+// and save it as a seeds/maps spec the Seed / Export Maps group then seeds.
+//
+// Rules only: there is no LLM here, so `theme`, `author` and `sfx_engine` are
+// IGNORED (and the response says so), the biomes are the deterministic descent
+// the box itself uses for author "rules", and there is no preview image.
+//
+// VALIDATE TYPES BEFORE planRegion. The port faithfully reproduces Python's
+// arithmetic but not its type errors: given "3" or 2.5 for a world count it
+// silently produces something, where the box raises. Every field is checked
+// here against the box's own WorldSpec bounds, and anything else is a 400.
+//
+// THE NAME. The box's region-name rule (ASCII, lowercase, hyphens) is applied
+// AFTER a light slug (trim, lowercase, whitespace/underscore runs -> '-'), and
+// the slug is then BOTH the spec's `name` and its file stem: the Maps group
+// requires the two to be equal, and the box's own create stores a region the
+// same way (spec.name == region name == the download route's file stem).
+// ASCII-only also removes the Unicode-version drift between Python's and
+// Node's isalnum tables in the port's slug().
+const fs = require('node:fs');
+const path = require('node:path');
+const { planRegion, report, toJson } = require('./worldGen/worldGen.js');
+const { dumpsPy } = require('./worldGen/pyCompat.js');
+const { WorldGenError } = require('./worldGenService.js');
+const { validateMapSpec } = require('../../seeds/mapSpec.js');
+const { matchOwner } = require('./artSeed.js');
+
+const LOCAL_AUTHOR = 'rules (local fallback)';
+const REGION_NAME_RE = /^[a-z0-9][a-z0-9-]{0,58}[a-z0-9]$/;
+const IGNORED_FIELDS = ['theme', 'author', 'sfx_engine'];
+
+// The box's WorldSpec bounds and defaults (planRegion's defaults).
+const INT_FIELDS = [
+  // [body field, min, max, default]
+  ['worlds', 1, 36, 6],
+  ['size', 32, 224, 128],
+  ['chunk_size', 8, 64, 32],
+  ['biome_cell', 8, 64, 32],
+];
+const TARGET = { min: 0.5, max: 25, dflt: 6 };
+
+function mapsDir() {
+  return process.env.SEED_MAPS_DIR || path.join(__dirname, '..', '..', 'seeds', 'maps');
+}
+
+const bad = (message) => new WorldGenError('bad_params', message, { status: 400 });
+
+function slugName(raw) {
+  if (typeof raw !== 'string') throw bad('name is required and must be a string.');
+  const s = raw.trim().toLowerCase().replace(/[\s_]+/g, '-');
+  if (!REGION_NAME_RE.test(s)) {
+    throw bad(`name "${raw}" does not fit the region-name rule: after trimming, lowercasing and turning `
+      + 'spaces/underscores into hyphens it must be 2-60 ASCII letters, digits or hyphens, '
+      + 'starting and ending with a letter or digit.');
+  }
+  return s;
+}
+
+// -> { params: { name, worlds, target_per_screen, size, chunk_size, biome_cell }, ignored }
+// Absent (undefined) numeric fields take the defaults; anything present must
+// be the right type and in range -- null included.
+function parseLocalParams(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw bad('The request body must be a JSON object.');
+  const params = { name: slugName(body.name) };
+  for (const [field, min, max, dflt] of INT_FIELDS) params[field] = intField(body, field, min, max, dflt);
+  const t = body.target_per_screen;
+  if (t === undefined) {
+    params.target_per_screen = TARGET.dflt;
+  } else if (typeof t !== 'number' || !Number.isFinite(t) || t < TARGET.min || t > TARGET.max) {
+    throw bad(`target_per_screen must be a number from ${TARGET.min} to ${TARGET.max} (got ${JSON.stringify(t)}).`);
+  } else {
+    params.target_per_screen = t;
+  }
+  const ignored = IGNORED_FIELDS.filter((f) => body[f] !== undefined && body[f] !== null && body[f] !== '');
+  return { params, ignored };
+}
+
+function intField(body, field, min, max, dflt) {
+  const v = body[field];
+  if (v === undefined) return dflt;
+  if (typeof v !== 'number' || !Number.isInteger(v) || v < min || v > max) {
+    throw bad(`${field} must be an integer from ${min} to ${max} (got ${JSON.stringify(v)}).`);
+  }
+  return v;
+}
+
+// Deterministic: the same params always give the same bytes.
+// -> { spec (plain JSON), specText (the file's bytes), report (plain JSON) }
+function generateLocal(params) {
+  const raw = planRegion({
+    name: params.name,
+    world_count: params.worlds,
+    target_per_screen: params.target_per_screen,
+    size: params.size,
+    chunk_size: params.chunk_size,
+    biome_cell: params.biome_cell,
+  });
+  const specText = toJson(raw);
+  // Through the Python-format JSON text, so any pyFloat in the report reaches
+  // the client as the number Python would print, never as a wrapper object.
+  return {
+    spec: JSON.parse(specText),
+    specText,
+    report: JSON.parse(dumpsPy(report(raw, params.target_per_screen))),
+  };
+}
+
+function ignoredNote(ignored) {
+  return ignored.length
+    ? `${ignored.join(', ')} ignored: the local fallback has no LLM, so biomes are chosen by the rules.`
+    : null;
+}
+
+function preview(body, catalogs, { validate = validateMapSpec } = {}) {
+  const { params, ignored } = parseLocalParams(body);
+  const { spec, report: rep } = generateLocal(params);
+  const errors = validate(spec, catalogs);
+  return {
+    name: params.name,
+    params,
+    author: LOCAL_AUTHOR,
+    spec,
+    report: rep,
+    valid: errors.length === 0,
+    errors,
+    ignored,
+    note: ignoredNote(ignored),
+  };
+}
+
+// Regenerates from params (a client-supplied spec is never accepted),
+// validates, and writes <dir>/<slug>.map.json tmp-then-rename. Without
+// `overwrite: true` an existing file is a 409 -- checked atomically with a
+// hard link, so a concurrent writer cannot be clobbered between check and write.
+function save(body, catalogs, { validate = validateMapSpec, dir = mapsDir() } = {}) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw bad('The request body must be a JSON object.');
+  const { params, ignored } = parseLocalParams(body.params);
+  if (body.name !== undefined && slugName(body.name) !== params.name) {
+    throw bad(`name "${body.name}" does not match params.name "${body.params.name}".`);
+  }
+  const overwrite = body.overwrite === true;
+  const { spec, specText } = generateLocal(params);
+  const errors = validate(spec, catalogs);
+  if (errors.length) {
+    const err = new WorldGenError('invalid_spec', `"${params.name}" does not validate against this database, so it was not written`, { status: 422 });
+    err.errors = errors;
+    throw err;
+  }
+
+  fs.mkdirSync(dir, { recursive: true });
+  const fileName = `${params.name}.map.json`;
+  const file = path.join(dir, fileName);
+  const tmp = path.join(dir, `.${fileName}.${process.pid}.${Date.now()}.tmp`);
+  fs.writeFileSync(tmp, specText, 'utf8');
+  let overwrote = false;
+  try {
+    if (overwrite) {
+      overwrote = fs.existsSync(file);
+      fs.renameSync(tmp, file);
+    } else {
+      try {
+        fs.linkSync(tmp, file);
+      } catch (e) {
+        if (e.code === 'EEXIST') {
+          throw new WorldGenError('exists', `${fileName} already exists in seeds/maps. Send overwrite: true to replace it.`, { status: 409 });
+        }
+        throw e;
+      }
+    }
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
+  // Root inside the container, a bind mount on the host: hand the file to
+  // whoever owns the maps directory, as the art exporter does.
+  matchOwner(file, dir);
+  return {
+    name: params.name,
+    file: fileName,
+    overwrote,
+    worlds: spec.worlds.length,
+    author: LOCAL_AUTHOR,
+    ignored,
+    note: ignoredNote(ignored),
+    next: 'Open Seed / Export → Maps: the new spec shows as "new" there and seeds from that tab.',
+  };
+}
+
+module.exports = {
+  LOCAL_AUTHOR, REGION_NAME_RE, parseLocalParams, generateLocal, preview, save, mapsDir,
+};
