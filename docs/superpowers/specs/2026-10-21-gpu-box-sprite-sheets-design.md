@@ -319,3 +319,40 @@ None. (Q1 resolved: props go to the box with idle + sway.)
 Box response parsing (after capture), timeouts, cache duration, error wording,
 exact migration shape, how the popup loads the JSON (backend-joined vs fetched
 from MinIO), test seams.
+
+## Verification 2026-10-21
+
+Isolated stack: worktree backend (`node src/index.js`, :13201) + worktree vite
+(:15273) against scratch DB `game_db_gpusprites`, real box at
+`192.168.0.218:8001` (reachable from the host), provider 15 active.
+
+**Timings (real box, Qwen-Image-Edit-2511 GGUF, 48x64 cells):**
+
+| Job | Cells | Concept | Whole job (`sheet_seconds`) | Per cell |
+|---|---|---|---|---|
+| Warrior, idle, 2 frames, 8 facings | 16 | ~36 s | 857 s (14 m 17 s) | ~53.6 s |
+| Tree, idle + sway, 2 frames, `s` | 4 | ~37 s | 269 s (4 m 29 s) | ~67 s (concept dominates small jobs) |
+
+UI estimate before queueing: "16 cells · ~15 min" and "4 cells · ~4 min" (seed
+57 s/cell); after the runs the catalog reports a measured 53.56 s/cell.
+
+**Results**
+- Page: engine line, action checkboxes from the box catalog, frames select,
+  estimate line, pagination all present.
+- Popup A (both jobs): concept left with its size (512×512), sheet right at ×2,
+  row labels equal to `sheet.json` rows, both download links resolve (200).
+  Sheet PNG sizes match the manifest grid (Warrior 96×512 = 2×8 cells; tree
+  96×128 = 2×2 cells).
+- Approve: Tree → `render_mode 'animated'`, `sprite.frames = 2`; Warrior →
+  `render_mode 'static'`, `static_frame 'idle/s/0'`. In `/game` the player
+  (Warrior, appearance 1 with no sprite of its own) draws the generated idle/s
+  frame; the client loads the tree's sheet.png + sheet.json. No tree instance
+  was on screen near the entry spawn, so the sway itself was not seen in game.
+- Box down (base_url → `:1`): page shows "GPU box action catalog unavailable:
+  could not reach …: fetch failed"; a queued tree job (idle, 1 frame) failed
+  within ~1 s with `last_error` "could not reach http://192.168.0.218:1/api/generate_core: fetch failed".
+
+**Quality (box side, not this branch):** the tree's idle row is a human figure
+and its sway row has an opaque backdrop (pose library is humanoid-oriented, as
+expected). Warrior rows `ne` and `n` keep an opaque white backdrop (~69 % opaque
+pixels vs ~25 % in the other rows), so those facings would draw as a white box.
