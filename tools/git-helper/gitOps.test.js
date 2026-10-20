@@ -150,8 +150,7 @@ test('pull fast-forwards when clean, and never merges a diverged branch (--ff-on
   write(a, 'a2.txt', '1\n');
   git(a, 'add', '-A'); git(a, 'commit', '-m', 'a2');
   const head = git(a, 'rev-parse', 'HEAD');
-  const bad = await ops.pull();
-  assert.equal(bad.ok, false);
+  await assert.rejects(ops.pull(), refusal('diverged')); // fetch-first sees it despite the stale ref
   assert.equal(git(a, 'rev-parse', 'HEAD'), head, 'no merge commit, no rebase');
   assert.equal(git(a, 'rev-list', '--merges', '--count', 'HEAD'), '0');
 });
@@ -189,7 +188,7 @@ test('push sends the current branch; refused when behind or diverged', async (t)
   assert.equal(git(origin, 'log', '-1', '--format=%s', 'main'), 'b', 'origin untouched');
 });
 
-test('push never force-updates, even for a branch named with a leading +', async (t) => {
+test('push fetches first: a stale tracking ref cannot hide that origin moved (leading + branch too)', async (t) => {
   const { a, b, origin, ops } = fixture(t);
   git(a, 'checkout', '-b', '+main');
   git(a, 'push', '-u', 'origin', 'refs/heads/+main:refs/heads/+main');
@@ -197,12 +196,57 @@ test('push never force-updates, even for a branch named with a leading +', async
   git(b, 'checkout', '-b', '+main', '--track', 'origin/+main');
   write(b, 'b.txt', '1\n');
   git(b, 'add', '-A'); git(b, 'commit', '-m', 'other pc'); git(b, 'push', 'origin', 'refs/heads/+main:refs/heads/+main');
-  // a's tracking ref is stale (no fetch), so the pre-check sees "ahead only"
+  // a's tracking ref is stale (no fetch); a pre-fetch check would see "ahead only"
+  assert.equal(git(a, 'rev-list', '--count', 'refs/remotes/origin/+main..HEAD'), '0');
   write(a, 'a.txt', '1\n');
   git(a, 'add', '-A'); git(a, 'commit', '-m', 'mine');
+  await assert.rejects(ops.push(), refusal('diverged'));
+  assert.equal(git(origin, 'log', '-1', '--format=%s', 'refs/heads/+main'), 'other pc', 'origin not overwritten');
+});
+
+test('push is refused behind when origin moved and the local tracking ref was stale', async (t) => {
+  const { a, b, origin, ops } = fixture(t);
+  write(b, 'b.txt', '1\n');
+  git(b, 'add', '-A'); git(b, 'commit', '-m', 'other pc'); git(b, 'push');
+  const stale = git(a, 'rev-parse', 'refs/remotes/origin/main');
+  await assert.rejects(ops.push(), refusal('behind'));
+  assert.notEqual(git(a, 'rev-parse', 'refs/remotes/origin/main'), stale, 'push fetched');
+  assert.equal(git(origin, 'log', '-1', '--format=%s', 'main'), 'other pc');
+});
+
+test('push gets no_upstream when origin has no such branch', async (t) => {
+  const { a, ops } = fixture(t);
+  git(a, 'checkout', '-b', 'fresh');
+  git(a, 'branch', '--set-upstream-to=origin/main', 'fresh');
+  await assert.rejects(ops.push(), refusal('no_upstream'));
+});
+
+test('push reports a fetch failure as a git failure', async (t) => {
+  const { a, ops } = fixture(t);
+  git(a, 'remote', 'set-url', 'origin', path.join(os.tmpdir(), 'git-helper-no-such-remote.git'));
   const r = await ops.push();
   assert.equal(r.ok, false);
-  assert.equal(git(origin, 'log', '-1', '--format=%s', 'refs/heads/+main'), 'other pc', 'origin not overwritten');
+  assert.equal(r.op, 'push');
+  assert.ok(r.output.length > 0);
+});
+
+test('pull decides diverged from fresh counts (stale tracking ref)', async (t) => {
+  const { a, b, ops } = fixture(t);
+  write(b, 'b3.txt', '1\n');
+  git(b, 'add', '-A'); git(b, 'commit', '-m', 'b3'); git(b, 'push');
+  write(a, 'a3.txt', '1\n');
+  git(a, 'add', '-A'); git(a, 'commit', '-m', 'a3'); // no fetch in a
+  const head = git(a, 'rev-parse', 'HEAD');
+  await assert.rejects(ops.pull(), refusal('diverged'));
+  assert.equal(git(a, 'rev-parse', 'HEAD'), head);
+});
+
+test('commit message is stored byte-exact (--cleanup=verbatim)', async (t) => {
+  const { a, ops } = fixture(t);
+  write(a, 'backend/seeds/one.json', '{"x":2}\n');
+  const msg = 'subject  \n\n\nbody with trailing   \n# not a comment\n\n';
+  await ops.commit({ message: msg });
+  assert.equal(execFileSync('git', ['log', '-1', '--format=%B'], { cwd: a, encoding: 'utf8' }), `${msg}\n`);
 });
 
 test('no upstream is a refusal for pull and push', async (t) => {
@@ -300,4 +344,115 @@ test('server refuses a unix socket path over the sun_path limit and creates noth
   assert.match(r.stderr, /107/);
   assert.equal(fs.existsSync(runDir), false, 'no run dir, token or socket is created');
   assert.deepEqual(fs.readdirSync(long), [], 'no stray (truncated) socket anywhere under the tmp dir');
+});
+
+// ---- drain / live-socket (spawned servers) --------------------------------
+const { spawn } = require('node:child_process');
+const net = require('node:net');
+
+function shimDir(t, sleepSecs) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-shim-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const real = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+  fs.writeFileSync(path.join(dir, 'git'), `#!/bin/sh\ncase " $* " in *" fetch "*) sleep ${sleepSecs};; esac\nexec ${real} "$@"\n`, { mode: 0o755 });
+  return dir;
+}
+function runDirFor(t) {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-'));
+  t.after(() => fs.rmSync(d, { recursive: true, force: true }));
+  return d;
+}
+function startChild(t, { root, runDir, shim, extraEnv = {} }) {
+  const env = { ...process.env, GIT_HELPER_ROOT: root, GIT_HELPER_RUN_DIR: runDir, GIT_HELPER_PORT: '', ...extraEnv };
+  if (shim) env.PATH = `${shim}:${process.env.PATH}`;
+  const child = spawn(process.execPath, [path.join(__dirname, 'server.js')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+  t.after(() => { if (child.exitCode === null) child.kill('SIGKILL'); });
+  let out = '';
+  let err = '';
+  child.stdout.on('data', (c) => { out += c; });
+  child.stderr.on('data', (c) => { err += c; });
+  const exited = new Promise((resolve) => child.on('exit', (code) => resolve(code)));
+  const ready = new Promise((resolve) => {
+    const iv = setInterval(() => { if (/listening/.test(out) || child.exitCode !== null) { clearInterval(iv); resolve(); } }, 20);
+  });
+  return { child, exited, ready, out: () => out, err: () => err };
+}
+
+test('drain: SIGTERM lets the in-flight op finish and flush, then exits 0 and removes the socket', async (t) => {
+  const { a } = fixture(t);
+  const runDir = runDirFor(t);
+  const sock = path.join(runDir, 'git-helper.sock');
+  const s = startChild(t, { root: a, runDir, shim: shimDir(t, 1.5) });
+  await s.ready;
+  const token = fs.readFileSync(path.join(runDir, 'git-helper.token'), 'utf8').trim();
+  const inflight = request(sock, 'POST', '/fetch', { token, body: {} });
+  await new Promise((r) => setTimeout(r, 400));
+  // a request whose headers finish only after the drain began gets 503
+  const late = net.connect(sock);
+  let lateBuf = '';
+  late.on('data', (c) => { lateBuf += c; });
+  late.write(`GET /status HTTP/1.1\r\nHost: x\r\nX-Git-Helper-Token: ${token}\r\nConnection: close\r\n`);
+  await new Promise((r) => setTimeout(r, 100));
+  s.child.kill('SIGTERM');
+  await new Promise((r) => setTimeout(r, 200));
+  late.write('\r\n');
+  const res = await inflight;
+  assert.equal(res.status, 200);
+  assert.equal(res.json.op, 'fetch');
+  assert.equal(await s.exited, 0);
+  assert.equal(fs.existsSync(sock), false);
+  assert.match(lateBuf, /^HTTP\/1\.1 503/);
+  assert.match(lateBuf, /shutting_down/);
+});
+
+test('drain cap: a stuck op is killed and the helper exits 1', async (t) => {
+  const { a } = fixture(t);
+  const runDir = runDirFor(t);
+  const sock = path.join(runDir, 'git-helper.sock');
+  const s = startChild(t, { root: a, runDir, shim: shimDir(t, 30), extraEnv: { GIT_HELPER_DRAIN_MS: '500' } });
+  await s.ready;
+  const token = fs.readFileSync(path.join(runDir, 'git-helper.token'), 'utf8').trim();
+  request(sock, 'POST', '/fetch', { token, body: {} }).catch(() => {});
+  await new Promise((r) => setTimeout(r, 300));
+  const t0 = Date.now();
+  s.child.kill('SIGTERM');
+  assert.equal(await s.exited, 1);
+  assert.ok(Date.now() - t0 < 5000);
+  assert.equal(fs.existsSync(sock), false);
+});
+
+test('second start is refused while the first is live; token and socket stay intact', async (t) => {
+  const { a } = fixture(t);
+  const runDir = runDirFor(t);
+  const sock = path.join(runDir, 'git-helper.sock');
+  const first = startChild(t, { root: a, runDir });
+  await first.ready;
+  const tokenFile = path.join(runDir, 'git-helper.token');
+  const before = fs.readFileSync(tokenFile, 'utf8');
+  const second = startChild(t, { root: a, runDir });
+  assert.equal(await second.exited, 1);
+  assert.match(second.err(), /a git helper is already listening on .*git-helper\.sock/);
+  assert.equal(fs.readFileSync(tokenFile, 'utf8'), before);
+  assert.equal((await request(sock, 'GET', '/status', { token: before.trim() })).status, 200);
+  first.child.kill('SIGTERM');
+  assert.equal(await first.exited, 0);
+});
+
+test('a stale socket (dead listener) is replaced on start', async (t) => {
+  const { a } = fixture(t);
+  const runDir = runDirFor(t);
+  const sock = path.join(runDir, 'git-helper.sock');
+  // a listener that is SIGKILLed leaves the socket inode behind with nobody home
+  const dead = spawn(process.execPath, ['-e', `require('net').createServer().listen(${JSON.stringify(sock)}, () => console.log('up'))`], { stdio: ['ignore', 'pipe', 'inherit'] });
+  await new Promise((r) => dead.stdout.once('data', r));
+  dead.kill('SIGKILL');
+  await new Promise((r) => dead.on('exit', r));
+  assert.equal(fs.statSync(sock).isSocket(), true);
+  const s = startChild(t, { root: a, runDir });
+  await s.ready;
+  assert.equal(s.child.exitCode, null);
+  const token = fs.readFileSync(path.join(runDir, 'git-helper.token'), 'utf8').trim();
+  assert.equal((await request(sock, 'GET', '/status', { token })).status, 200);
+  s.child.kill('SIGTERM');
+  assert.equal(await s.exited, 0);
 });

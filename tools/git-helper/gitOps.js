@@ -23,12 +23,12 @@ function cap(s) {
   return t.length > OUTPUT_CAP ? `${t.slice(0, OUTPUT_CAP)}\n...[truncated]` : t;
 }
 
-function runGit(root, args, { timeout = TIMEOUT_MS } = {}) {
+function runGit(root, args, { timeout = TIMEOUT_MS, children } = {}) {
   const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' };
   // Never wait on an ssh password/host-key prompt; respect a user override.
   if (!env.GIT_SSH_COMMAND) env.GIT_SSH_COMMAND = 'ssh -o BatchMode=yes';
   return new Promise((resolve) => {
-    execFile('git', args, { cwd: root, env, timeout, maxBuffer: 16 * 1024 * 1024, encoding: 'utf8' },
+    const child = execFile('git', args, { cwd: root, env, timeout, maxBuffer: 16 * 1024 * 1024, encoding: 'utf8' },
       (err, stdout, stderr) => {
         const timedOut = Boolean(err && err.killed);
         resolve({
@@ -38,6 +38,10 @@ function runGit(root, args, { timeout = TIMEOUT_MS } = {}) {
           stderr: timedOut ? `${stderr || ''}\ngit timed out after ${timeout / 1000}s` : (stderr || (err && !stdout ? err.message : '') || ''),
         });
       });
+    if (children) {
+      children.add(child);
+      child.once('close', () => children.delete(child));
+    }
   });
 }
 
@@ -49,8 +53,12 @@ function credentialHint(text) {
 
 function createGitOps({ root }) {
   let busy = false;
+  const children = new Set();
 
-  const git = (args, opts) => runGit(root, args, opts);
+  const git = (args, opts) => runGit(root, args, { ...opts, children });
+  // Shutdown cap reached: stop whatever git is still running.
+  const abort = () => { for (const c of children) c.kill('SIGKILL'); };
+  const isBusy = () => busy;
 
   async function exclusive(fn) {
     if (busy) throw new GitRefusal('busy', 'Another git operation is still running.');
@@ -118,7 +126,11 @@ function createGitOps({ root }) {
       throw new GitRefusal('dirty', 'The working tree has uncommitted changes; commit or discard them before pulling.');
     }
     if (!s.upstream) throw new GitRefusal('no_upstream', 'The current branch has no upstream to pull from.');
-    if (s.ahead > 0 && s.behind > 0) {
+    // Fetch first so ahead/behind below are fresh, not whatever the last fetch left.
+    const f = await git(['fetch']);
+    if (!f.ok) return result('pull', f);
+    const fresh = await status();
+    if (fresh.ahead > 0 && fresh.behind > 0) {
       throw new GitRefusal('diverged', 'Local and remote have diverged; resolve this in a terminal.');
     }
     return result('pull', await git(['pull', '--ff-only']));
@@ -137,22 +149,32 @@ function createGitOps({ root }) {
     }
     // "-m <msg>" is one argv pair; the trailing pathspec restricts the commit
     // to seeds even if the user had other things staged.
-    return result('commit', await git(['commit', '-m', msg, '--', SEEDS]));
+    return result('commit', await git(['commit', '--cleanup=verbatim', '-m', msg, '--', SEEDS]));
   });
 
   const push = () => exclusive(async () => {
-    const s = await status();
-    if (!s.branch) throw new GitRefusal('no_upstream', 'HEAD is detached; there is no branch to push.');
-    if (!s.upstream) throw new GitRefusal('no_upstream', 'The current branch has no upstream.');
-    if (s.behind > 0 && s.ahead > 0) {
+    const branchR = await git(['symbolic-ref', '--short', '-q', 'HEAD']);
+    const branch = branchR.ok ? branchR.stdout.trim() : null;
+    if (!branch) throw new GitRefusal('no_upstream', 'HEAD is detached; there is no branch to push.');
+    // Fetch first: the push decision must rest on what origin has now, and is
+    // measured against origin/<branch> (the push target), not @{u}.
+    const f = await git(['fetch', 'origin']);
+    if (!f.ok) return result('push', f);
+    const remoteRef = `refs/remotes/origin/${branch}`;
+    const exists = await git(['rev-parse', '--verify', '-q', remoteRef]);
+    if (!exists.ok) throw new GitRefusal('no_upstream', `origin has no branch '${branch}'; push it once from a terminal first.`);
+    const c = await git(['rev-list', '--left-right', '--count', `${remoteRef}...HEAD`]);
+    if (!c.ok) return result('push', c);
+    const [behind, ahead] = c.stdout.trim().split(/\s+/).map(Number);
+    if (behind > 0 && ahead > 0) {
       throw new GitRefusal('diverged', 'Local and remote have diverged; resolve this in a terminal. The helper never force-pushes.');
     }
-    if (s.behind > 0) throw new GitRefusal('behind', 'The remote has newer commits; pull first.');
+    if (behind > 0) throw new GitRefusal('behind', 'The remote has newer commits; pull first.');
     // Fully qualified, no leading '+': a branch literally named '+x' must not become a forced refspec.
-    return result('push', await git(['push', 'origin', `refs/heads/${s.branch}:refs/heads/${s.branch}`]));
+    return result('push', await git(['push', 'origin', `refs/heads/${branch}:refs/heads/${branch}`]));
   });
 
-  return { status, fetch, pull, commit, push };
+  return { status, fetch, pull, commit, push, abort, isBusy };
 }
 
 module.exports = { createGitOps, GitRefusal, runGit, OUTPUT_CAP };

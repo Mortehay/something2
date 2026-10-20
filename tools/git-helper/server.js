@@ -6,11 +6,26 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const net = require('node:net');
 const { execFileSync } = require('node:child_process');
 const { createGitOps, GitRefusal } = require('./gitOps');
 
 const MAX_BODY = 64 * 1024;
 const MAX_SOCK_PATH = 107;
+// Slightly over the per-call git timeout (60s), so a legitimately slow op can finish.
+const DRAIN_CAP_MS = 65_000;
+const PROBE_TIMEOUT_MS = 2000;
+
+// Is something accepting connections at this endpoint? Refused/missing/not-a-socket = stale.
+function probeLive(target) {
+  return new Promise((resolve) => {
+    const c = net.connect(target);
+    const done = (live) => { c.destroy(); resolve(live); };
+    c.setTimeout(PROBE_TIMEOUT_MS, () => done(true)); // accepts but hangs: treat as live
+    c.once('connect', () => done(true));
+    c.once('error', (e) => done(!['ECONNREFUSED', 'ENOENT', 'ENOTSOCK'].includes(e.code)));
+  });
+}
 
 function tokenOk(given, expected) {
   if (typeof given !== 'string') return false;
@@ -36,14 +51,18 @@ function readJson(req) {
   });
 }
 
-function createServer({ root, runDir, port } = {}) {
+function createServer({ root, runDir, port, drainMs } = {}) {
   const repoRoot = root || process.env.GIT_HELPER_ROOT || path.resolve(__dirname, '../..');
   const dir = runDir || process.env.GIT_HELPER_RUN_DIR || path.join(repoRoot, 'backend', 'run');
   const tcpPort = port || (process.env.GIT_HELPER_PORT ? Number(process.env.GIT_HELPER_PORT) : null);
   const sockPath = path.join(dir, 'git-helper.sock');
   const tokenPath = path.join(dir, 'git-helper.token');
   const ops = createGitOps({ root: repoRoot });
+  const drainCap = drainMs || (process.env.GIT_HELPER_DRAIN_MS ? Number(process.env.GIT_HELPER_DRAIN_MS) : DRAIN_CAP_MS);
   let token = null;
+  let shuttingDown = false;
+  let inflight = 0;
+  let idleWaiter = null;
 
   const send = (res, code, body) => {
     const data = JSON.stringify(body);
@@ -61,6 +80,7 @@ function createServer({ root, runDir, port } = {}) {
 
   async function handle(req, res) {
     if (!tokenOk(req.headers['x-git-helper-token'], token)) return send(res, 401, { error: 'unauthorized', message: 'Missing or wrong token.' });
+    if (shuttingDown) return send(res, 503, { error: 'shutting_down', message: 'The git helper is shutting down.' });
     const route = routes[`${req.method} ${(req.url || '').split('?')[0]}`];
     if (!route) return send(res, 404, { error: 'not_found', message: 'No such endpoint.' });
     try {
@@ -73,7 +93,34 @@ function createServer({ root, runDir, port } = {}) {
     }
   }
 
-  const server = http.createServer((req, res) => { handle(req, res); });
+  const server = http.createServer((req, res) => {
+    inflight += 1;
+    // 'close' fires after the response has been flushed (or the client went away).
+    res.once('close', () => {
+      inflight -= 1;
+      if (inflight === 0 && idleWaiter) idleWaiter();
+    });
+    handle(req, res);
+  });
+
+  // Stop listening, let in-flight requests (and their responses) finish, capped.
+  // Resolves true when drained cleanly, false when the cap hit and git was killed.
+  async function drain() {
+    shuttingDown = true;
+    server.close();
+    server.closeIdleConnections();
+    let clean = true;
+    if (inflight > 0) {
+      clean = await new Promise((resolve) => {
+        const timer = setTimeout(() => { idleWaiter = null; resolve(false); }, drainCap);
+        idleWaiter = () => { clearTimeout(timer); idleWaiter = null; resolve(true); };
+      });
+    }
+    if (!clean) { ops.abort(); await new Promise((r) => setTimeout(r, 100)); }
+    server.closeAllConnections();
+    fs.rmSync(sockPath, { force: true });
+    return clean;
+  }
 
   async function start() {
     try {
@@ -86,6 +133,11 @@ function createServer({ root, runDir, port } = {}) {
     if (!tcpPort && Buffer.byteLength(sockPath) > MAX_SOCK_PATH) {
       throw new Error(`socket path ${sockPath} is ${Buffer.byteLength(sockPath)} bytes, over the ${MAX_SOCK_PATH}-byte unix socket limit; `
         + 'set GIT_HELPER_RUN_DIR to a shorter directory, or use GIT_HELPER_PORT');
+    }
+    // Before anything on disk changes (the token especially): a live helper owns this endpoint.
+    const endpoint = tcpPort ? { port: tcpPort, host: '127.0.0.1' } : sockPath;
+    if (await probeLive(endpoint)) {
+      throw new Error(`a git helper is already listening on ${tcpPort ? `127.0.0.1:${tcpPort}` : sockPath}; stop it first (make git-helper-stop)`);
     }
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     fs.chmodSync(dir, 0o700);
@@ -102,6 +154,7 @@ function createServer({ root, runDir, port } = {}) {
     const listening = tcpPort ? `127.0.0.1:${tcpPort}` : sockPath;
     return {
       listening,
+      drain,
       close: () => new Promise((resolve) => {
         server.close(() => { fs.rmSync(sockPath, { force: true }); resolve(); });
         server.closeAllConnections();
@@ -116,7 +169,12 @@ if (require.main === module) {
   const h = createServer();
   h.start().then((handle) => {
     console.log(`git-helper listening on ${handle.listening}`);
-    const stop = () => handle.close().then(() => process.exit(0));
+    let stopping = false;
+    const stop = () => {
+      if (stopping) return;
+      stopping = true;
+      handle.drain().then((clean) => process.exit(clean ? 0 : 1));
+    };
     process.on('SIGTERM', stop);
     process.on('SIGINT', stop);
   }).catch((e) => { console.error(`git-helper: ${e.message}`); process.exit(1); });

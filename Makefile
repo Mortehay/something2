@@ -657,12 +657,17 @@ git-helper:
 	else echo "git-helper failed to start:"; cat $(GIT_HELPER_RUN)/git-helper.log; rm -f $(GIT_HELPER_RUN)/git-helper.pid; exit 1; fi
 
 git-helper-stop:
-	@if [ -f $(GIT_HELPER_RUN)/git-helper.pid ]; then \
+	@sock="$(abspath $(GIT_HELPER_RUN))/git-helper.sock"; \
+	if [ -f $(GIT_HELPER_RUN)/git-helper.pid ]; then \
 	  pid=$$(cat $(GIT_HELPER_RUN)/git-helper.pid); kill $$pid 2>/dev/null || true; \
-	  for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 $$pid 2>/dev/null || break; sleep 0.3; done; \
-	  rm -f $(GIT_HELPER_RUN)/git-helper.pid; echo "git-helper stopped (pid $$pid)"; \
-	else echo "git-helper: no pid file, nothing to stop"; fi
-	@ss -xlp 2>/dev/null | grep -F git-helper.sock || echo "verified: nothing listening on git-helper.sock"
+	  echo "git-helper: SIGTERM sent to pid $$pid, draining (up to 70s)"; \
+	  i=0; while kill -0 $$pid 2>/dev/null && [ $$i -lt 233 ]; do sleep 0.3; i=$$((i+1)); done; \
+	  if kill -0 $$pid 2>/dev/null; then echo "error: git-helper pid $$pid is still alive after 70s; pid file kept ($(GIT_HELPER_RUN)/git-helper.pid)"; exit 1; fi; \
+	  rm -f $(GIT_HELPER_RUN)/git-helper.pid; \
+	else echo "git-helper: no pid file, nothing to stop"; fi; \
+	if ss -xln 2>/dev/null | grep -F "$$sock"; then echo "error: something is still listening on $$sock"; exit 1; fi; \
+	$(if $(GIT_HELPER_PORT),if ss -tln 2>/dev/null | grep -E "127\.0\.0\.1:$(GIT_HELPER_PORT)[[:space:]]"; then echo "error: something is still listening on 127.0.0.1:$(GIT_HELPER_PORT)"; exit 1; fi; ,) \
+	echo "git-helper stopped (nothing listening on $$sock$(if $(GIT_HELPER_PORT), or 127.0.0.1:$(GIT_HELPER_PORT),))"
 
 git-helper-status:
 	@if [ -f $(GIT_HELPER_RUN)/git-helper.pid ] && kill -0 $$(cat $(GIT_HELPER_RUN)/git-helper.pid) 2>/dev/null; then \
