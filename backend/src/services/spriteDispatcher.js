@@ -66,6 +66,15 @@ function propPrompt(base) {
   return p;
 }
 
+const DEFAULT_SECONDS_PER_CELL = 57;
+
+// Cells one queued row will draw: a prop is one image, a creature sheet is
+// actions x directions x frames.
+function rowCells(row) {
+  if (row.generation_kind === 'object') return 1;
+  return (row.actions || []).length * (row.directions || []).length * (row.frames_per_action || 0);
+}
+
 const safeName = (name) => String(name).replace(/[^A-Za-z0-9_-]/g, '_');
 
 // A box client result -> its value, or an Error carrying the box's words.
@@ -112,7 +121,7 @@ function createDispatcher({
   // deadline. A transient poll error counts as "no progress" rather than
   // failing the row outright. Resolves to the time of the first `running`
   // observation (ms epoch) when `measure` is set and one was seen, else null.
-  async function pollToDone(provider, boxJobId, deadlineMs, { measure = true } = {}) {
+  async function pollToDone(provider, boxJobId, deadlineMs, { measure = true, onPoll = null } = {}) {
     const queueStart = Date.now();
     let startedAt = queueStart;
     let lastSig = null;
@@ -127,6 +136,7 @@ function createDispatcher({
       if (r && r.ok) {
         lastError = null;
         const { status, progress = {}, error } = r.job;
+        if (onPoll) onPoll(status, progress);
         if (status === 'done') return runningAt;
         if (!RESUMABLE.has(status)) {
           throw new Error(`box job ${status}${error ? `: ${error}` : ''}`);
@@ -196,7 +206,8 @@ function createDispatcher({
   // The raw cutout is stored as concept.png, the trimmed one as image.png.
   // When the entity already has an image (its latest approved art) that image
   // is the prop: a fresh txt2img would draw something unrelated to it.
-  async function executeProp(provider, row, prefix) {
+  async function executeProp(provider, row, prefix, cur) {
+    cur.phase = 'running';
     let png = await existingEntityImage(row.entity_type_id);
     if (!png) {
       const gen = must(await box.txt2imgProp(provider, { prompt: propPrompt(row.base_prompt), seed: Number(row.seed) }));
@@ -204,6 +215,8 @@ function createDispatcher({
       if (gate) throw new Error(gate);
       png = gen.png;
     }
+    cur.phase = 'storing';
+    cur.pct = 100;
     const conceptKey = `${prefix}concept.png`;
     await store.putObject(conceptKey, png, 'image/png');
     const imageKey = `${prefix}image.png`;
@@ -213,12 +226,12 @@ function createDispatcher({
     });
   }
 
-  async function execute(row) {
+  async function execute(row, cur) {
     if (!Array.isArray(row.actions) || row.actions.length === 0) throw new Error(NO_ACTIONS);
     const provider = await loadProvider();
     if (!provider) throw new Error(NO_PROVIDER);
     const prefix = `${store.BUCKET()}/${safeName(row.creature)}/${row.id}/`;
-    if (row.generation_kind === 'object') return executeProp(provider, row, prefix);
+    if (row.generation_kind === 'object') return executeProp(provider, row, prefix, cur);
 
     let attached = null;
     // A resumed job that is already done or already running has an unknown
@@ -231,12 +244,24 @@ function createDispatcher({
         measure = st.job.status === 'queued';
       }
     }
+    cur.phase = attached ? 'queued' : 'concept';
     const job = attached || await submit(provider, row, prefix);
+    cur.phase = 'queued';
 
     const plannedCells = (row.actions || []).length * (row.directions || []).length * (row.frames_per_action || 0);
     const cells = Number(job.cells) || plannedCells;
     const deadlineMs = Math.max(cells * cellTimeoutMs, (Number(job.estimatedSeconds) || 0) * 3 * 1000);
-    const runningAt = await pollToDone(provider, job.boxJobId, deadlineMs, { measure });
+    const runningAt = await pollToDone(provider, job.boxJobId, deadlineMs, {
+      measure,
+      onPoll: (status, progress) => {
+        cur.phase = status === 'queued' ? 'queued' : status === 'done' ? 'storing' : 'running';
+        const pct = status === 'done' ? 100 : Number(progress.pct);
+        cur.pct = Number.isFinite(pct) ? Math.max(0, Math.min(100, pct)) : (status === 'queued' ? 0 : cur.pct);
+        cur.message = progress.message || '';
+      },
+    });
+    cur.phase = 'storing';
+    cur.pct = 100;
     const sheetSeconds = runningAt == null ? null : (Date.now() - runningAt) / 1000;
 
     const sheet = must(await box.fetchSheet(provider, job.boxJobId));
@@ -265,22 +290,51 @@ function createDispatcher({
     });
   }
 
+  // Remaining queued cells, or 0 when the queue cannot say (test fakes).
+  async function queuedCells() {
+    if (typeof queue.queuedCells !== 'function') return 0;
+    try { return Number(await queue.queuedCells(db)) || 0; } catch { return 0; }
+  }
+
+  async function refreshSecondsPerCell(current) {
+    if (typeof queue.lastSecondsPerCell !== 'function') return;
+    try {
+      const spc = await queue.lastSecondsPerCell(db);
+      if (Number(spc) > 0) current.secondsPerCell = Number(spc);
+    } catch { /* keep the previous estimate */ }
+  }
+
   async function drain(current) {
     try {
+      await refreshSecondsPerCell(current);
+      current.totalCells = await queuedCells();
       while (!current.stopping) {
         // eslint-disable-next-line no-await-in-loop
         const row = await queue.claim(db);
         if (!row) break;
-        current.current = { id: row.id, entity_type_id: row.entity_type_id, creature: row.creature };
+        const cells = rowCells(row);
+        // eslint-disable-next-line no-await-in-loop
+        const remaining = await queuedCells();
+        current.totalCells = Math.max(current.totalCells, current.doneCells + cells + remaining);
+        const cur = {
+          id: row.id, entity_type_id: row.entity_type_id, creature: row.creature,
+          phase: 'concept', pct: 0, message: '', cells,
+        };
+        current.current = cur;
+        let ok = false;
         try {
           // eslint-disable-next-line no-await-in-loop
-          await execute(row);
+          await execute(row, cur);
           current.completed += 1;
+          ok = true;
         } catch (err) {
           // eslint-disable-next-line no-await-in-loop
           await queue.fail(db, row.id, err);
           current.failed += 1;
         }
+        current.doneCells += cells;
+        // eslint-disable-next-line no-await-in-loop
+        if (ok) await refreshSecondsPerCell(current);
       }
     } finally {
       current.running = false;
@@ -300,6 +354,9 @@ function createDispatcher({
       stopping: false,
       completed: 0,
       failed: 0,
+      totalCells: 0,
+      doneCells: 0,
+      secondsPerCell: DEFAULT_SECONDS_PER_CELL,
       current: null,
       started_at: new Date().toISOString(),
       finished_at: null,

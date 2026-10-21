@@ -111,6 +111,17 @@ async function claim(db) {
   return rows[0] || null;
 }
 
+// Cells still waiting to be claimed (same filter as claim): a prop is 1, a
+// creature sheet is actions x directions x frames.
+async function queuedCells(db) {
+  const { rows } = await db.query(
+    `SELECT COALESCE(SUM(CASE WHEN generation_kind = 'object' THEN 1
+              ELSE cardinality(actions) * cardinality(directions) * frames_per_action END), 0)::int AS cells
+       FROM sprite_sets WHERE status = 'queued' AND entity_type_id IS NOT NULL`,
+  );
+  return rows[0] ? rows[0].cells : 0;
+}
+
 async function attach(db, id, { jobId, backend, frames }) {
   const { rows } = await db.query(
     `UPDATE sprite_sets SET job_id = $2, backend = $3, frames = $4, updated_at = now()
@@ -211,4 +222,4 @@ async function queueView(db) {
   return { stats: counts, jobs: active.rows };
 }
 
-module.exports = { enqueue, claim, attach, attachBox, complete, fail, requeueStale, lastSecondsPerCell, stats, queueView, PROP_FX };
+module.exports = { enqueue, claim, attach, attachBox, complete, fail, requeueStale, lastSecondsPerCell, queuedCells, stats, queueView, PROP_FX };

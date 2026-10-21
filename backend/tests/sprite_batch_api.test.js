@@ -301,3 +301,20 @@ test('GET /api/sprite-admin/subjects shows an appearance variant its own art wit
   // A portrait is not a sprite sheet: the row must stay "missing visual" until it gets one.
   assert.equal(variant.image, null);
 });
+
+test('GET /jobs returns the run with live progress and batch totals', async () => {
+  const run = {
+    running: true, completed: 1, failed: 0, totalCells: 40, doneCells: 16, secondsPerCell: 12.5,
+    current: { id: 'row-2', entity_type_id: 4, creature: 'Bat', phase: 'running', pct: 37, message: 'cell 3/8', cells: 8 },
+  };
+  const pool = { query: async (sql) => (/GROUP BY status/i.test(sql) ? { rows: [{ status: 'running', n: 1 }] } : { rows: [] }) };
+  const live = { status: () => run };
+  const b = express();
+  b.use(express.json());
+  b.use('/api/sprite-admin', spriteBatchRoutes(pool, (_q, _s, next) => next(), live, {
+    box: {}, loadProvider: async () => PROVIDER,
+  }));
+  const res = await request(b).get('/api/sprite-admin/jobs');
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.run, run);
+});

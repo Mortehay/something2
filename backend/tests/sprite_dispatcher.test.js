@@ -21,12 +21,15 @@ function wolfRow(over = {}) {
 }
 
 // A queue fake over a fixed list of rows; records every write.
-function fakeQueue(rows) {
+function fakeQueue(rows, spc = null) {
   const pending = [...rows];
   const log = { claims: 0, attached: [], completed: [], failed: [] };
   return {
     log,
     claim: async () => { log.claims += 1; return pending.shift() || null; },
+    queuedCells: async () => pending.reduce((n, r) => n + (r.generation_kind === 'object' ? 1
+      : r.actions.length * r.directions.length * r.frames_per_action), 0),
+    lastSecondsPerCell: async () => spc,
     attachBox: async (_db, id, info) => { log.attached.push({ id, ...info }); },
     complete: async (_db, id, result) => { log.completed.push({ id, result }); },
     fail: async (_db, id, err) => { log.failed.push({ id, message: err.message }); },
@@ -108,8 +111,8 @@ function timedBox({ queuedMs, runningMs = 0, ...over }) {
   });
 }
 
-function dispatcherFor({ rows, box = fakeBox(), store = fakeStore(), provider = PROVIDER, ...opts }) {
-  const queue = fakeQueue(rows);
+function dispatcherFor({ rows, box = fakeBox(), store = fakeStore(), provider = PROVIDER, spc = null, ...opts }) {
+  const queue = fakeQueue(rows, spc);
   const d = createDispatcher({
     db: fakeDb(), queue, box, store, loadProvider: async () => provider, pollMs: 0, ...opts,
   });
@@ -547,4 +550,85 @@ test('prop row: an entity with no image takes the txt2img path', async () => {
 
   assert.deepEqual(queue.log.failed, []);
   assert.equal(box.calls.t2i.length, 1);
+});
+
+// --- SOMET-662: progress on run.current and cell-weighted batch totals ---
+
+test('progress: run.current carries phase, pct, message and cells while polling', async () => {
+  const snaps = [];
+  let dRef;
+  const inner = fakeBox({ statuses: [
+    { status: 'queued', progress: { pct: 0, message: 'queued, 16 cells' } },
+    { status: 'running', progress: { pct: 31, message: 'cell 5/16' } },
+    { status: 'running', progress: { pct: 62, message: 'running turnaround-encode' } },
+    { status: 'done' },
+  ] });
+  const box = {
+    ...inner,
+    generateConcept: async (...a) => { snaps.push({ ...dRef.status().current }); return inner.generateConcept(...a); },
+    getSheetJob: async (...a) => { snaps.push({ ...dRef.status().current }); return inner.getSheetJob(...a); },
+  };
+  const { d } = dispatcherFor({ rows: [wolfRow()], box });
+  dRef = d;
+  await d.start();
+
+  assert.deepEqual(snaps.map((x) => x.phase), ['concept', 'queued', 'queued', 'running', 'running']);
+  assert.deepEqual(snaps.map((x) => x.pct), [0, 0, 0, 31, 62]);
+  assert.equal(snaps[3].message, 'cell 5/16');
+  assert.equal(snaps[0].cells, 16);
+  assert.equal(snaps[0].id, 'row-1');
+  assert.equal(d.status().current, null);
+});
+
+test('progress: batch totals are cell-weighted; failed and prop rows count', async () => {
+  let dRef;
+  const mid = [];
+  const inner = propBox({ statuses: [{ status: 'running', progress: { pct: 50 } }, { status: 'done' }] });
+  const box = {
+    ...inner,
+    getSheetJob: async (...a) => {
+      const r = dRef.status();
+      mid.push({ done: r.doneCells, total: r.totalCells, cur: r.current && r.current.cells });
+      if (r.current && r.current.id === 'row-2') return { ok: false, error: 'box exploded' };
+      return inner.getSheetJob(...a);
+    },
+    txt2imgProp: inner.txt2imgProp,
+  };
+  const rows = [wolfRow(), wolfRow({ id: 'row-2', frames_per_action: 1 }), treeRow()];
+  const { d, queue } = dispatcherFor({ rows, box, spc: 12.5 });
+  dRef = d;
+  assert.equal(d.status(), null);
+  await d.start();
+
+  // 16 + 8 + 1 cells, all counted up front.
+  assert.ok(mid.every((m) => m.total === 25));
+  assert.equal(mid[0].done, 0);
+  assert.equal(mid.find((m) => m.cur === 8).done, 16);
+  assert.equal(queue.log.failed.length, 1);
+  const r = d.status();
+  assert.equal(r.totalCells, 25);
+  assert.equal(r.doneCells, 25, 'completed, failed and prop all counted');
+  assert.equal(r.completed, 2);
+  assert.equal(r.failed, 1);
+  assert.equal(r.secondsPerCell, 12.5);
+});
+
+test('progress: secondsPerCell defaults to 57 and rows queued mid-run grow the total', async () => {
+  const late = wolfRow({ id: 'row-late', frames_per_action: 1 });
+  const queue = fakeQueue([wolfRow()]);
+  const baseComplete = queue.complete;
+  let lateWaiting = false;
+  const baseClaim = queue.claim;
+  queue.claim = async () => (lateWaiting ? (lateWaiting = false, late) : baseClaim());
+  queue.queuedCells = async () => 0;
+  queue.complete = async (...a) => { await baseComplete(...a); lateWaiting = true; };
+  const d = createDispatcher({
+    db: fakeDb(), queue, box: fakeBox(), store: fakeStore(), loadProvider: async () => PROVIDER, pollMs: 0,
+  });
+  await d.start();
+  const r = d.status();
+  assert.equal(r.secondsPerCell, 57);
+  assert.equal(r.completed + r.failed, 2, 'the late row was claimed (its sheet may not match the wolf fixture)');
+  assert.equal(r.doneCells, 24);
+  assert.equal(r.totalCells, 24, 'total grew to include the late row');
 });
