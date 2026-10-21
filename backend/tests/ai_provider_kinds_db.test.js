@@ -48,7 +48,8 @@ test('unified provider kinds', { skip }, async (t) => {
     const audio = (await pool.query(
       `INSERT INTO ai_providers (name, base_url, request_template, modality, models_by_group)
        VALUES ($1, 'http://127.0.0.1:1', '{}', 'audio', NULL) RETURNING id`, [`${tag}-aud`])).rows[0];
-    await pool.query(BACKFILL_AUDIO_SQL);
+    // Scoped to this test's own row: the real statement, minus other audio rows.
+    await pool.query(`${BACKFILL_AUDIO_SQL} AND id = $1`, [audio.id]);
     const after = (await pool.query('SELECT models_by_group FROM ai_providers WHERE id = $1', [audio.id])).rows[0];
     assert.deepEqual(after.models_by_group, BACKFILL_AUDIO_MODELS);
 
@@ -77,6 +78,7 @@ test('unified provider kinds', { skip }, async (t) => {
     let editStatus = 200;
     const editBox = http.createServer((req, res) => {
       res.setHeader('content-type', 'application/json');
+      if (req.url.split('?')[0] === '/api/text/models') return res.end(JSON.stringify([{ value: 'm1' }]));
       if (req.url === '/api/edit-capabilities') {
         if (editStatus !== 200 || req.headers.authorization !== 'Bearer secret-k') {
           res.statusCode = editStatus === 200 ? 401 : editStatus; return res.end('{"error":"nope"}');
@@ -107,6 +109,17 @@ test('unified provider kinds', { skip }, async (t) => {
       const e401 = await request(app).post(`/api/ai-providers/${edit.body.id}/test`).set('Authorization', auth);
       assert.equal(e401.body.ok, false);
       assert.equal(e401.body.status, 401);
+      // A failing edit-capabilities read must not wipe the previously cached list,
+      // even though other box sources (/api/text/models) still answer.
+      editStatus = 401;
+      const before = (await pool.query('SELECT models_cache, discovery_cache FROM ai_providers WHERE id = $1', [edit.body.id])).rows[0];
+      const fail = await request(app).post(`/api/ai-providers/${edit.body.id}/refresh-models`).set('Authorization', auth);
+      assert.equal(fail.body.ok, false, JSON.stringify(fail.body));
+      assert.equal(fail.body.status, 401);
+      const afterFail = (await pool.query('SELECT models_cache, discovery_cache FROM ai_providers WHERE id = $1', [edit.body.id])).rows[0];
+      assert.deepEqual(afterFail.models_cache, before.models_cache);
+      assert.deepEqual(afterFail.discovery_cache, before.discovery_cache);
+      assert.deepEqual(afterFail.models_cache, ['', 'pixelate']);
     } finally { editBox.close(); }
   });
 });

@@ -3085,12 +3085,15 @@ app.post('/api/ai-providers/:id/refresh-models', adminGuard, async (req, res) =>
     // image_edit: the box's edit capabilities. models_cache carries their ids
     // ('' = base model) so the existing dropdown plumbing works.
     if (provider.modality === 'image_edit') {
-      const d = await providerCatalog.discover(provider);
-      if (!d.ok) return res.json({ ok: false, error: d.error, status: d.status ?? null });
-      const models = d.cache.entries.filter((e) => e.kind === 'image_edit').map((e) => e.id);
+      // Read edit-capabilities directly: discover() succeeds when ANY box source
+      // answers, so a failing capabilities read would cache an empty list.
+      const r = await providerCatalog.editCapabilities(provider);
+      if (!r.ok) return res.json({ ok: false, error: r.error, status: r.status ?? null });
+      const models = r.entries.map((e) => e.id);
+      const discovery = { entries: r.entries, unsupported: [], source: 'per_kind' };
       await aiProviders.saveModelsCache(pool, id, models);
-      await aiProviders.saveDiscoveryCache(pool, id, d.cache);
-      return res.json({ ok: true, models, discovery: d.cache });
+      await aiProviders.saveDiscoveryCache(pool, id, discovery);
+      return res.json({ ok: true, models, discovery });
     }
     const result = await providerDiscovery.fetchModels(provider);
     if (!result.ok) {
