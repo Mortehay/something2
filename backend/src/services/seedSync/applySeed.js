@@ -360,6 +360,11 @@ function planSteps(cd, refInfo, decisions, assetInfo) {
   return steps;
 }
 
+// The columns a git row carries: one it lacks (exported before the column
+// existed; diffGroup's canonicalGit) is never written -- left unchanged on
+// update, filled by the column default on insert.
+const presentColumns = (columns, absent) => (absent && absent.size ? columns.filter((c) => !absent.has(c.name)) : columns);
+
 // Live-column values of a resolved git row as query params. Ref columns
 // already hold local values (resolveRow); json/jsonb travel as text.
 function paramsFor(columns, row) {
@@ -749,10 +754,10 @@ async function applySeed(pool, groupId, decisions, opts = {}) {
       const m = maps.get(spec.table);
       const mine = (r) => r.table === spec.table;
       for (const { row, decision } of steps.filter((s) => mine(s.row) && s.row.kind === 'adopt_identity')) {
-        const g = gitOf(cd, row).row;
+        const { row: g, absent } = gitOf(cd, row);
         const localUuid = localByKeyOf(cd, row).row.sync_uuid;
         const out = decision === 'git'
-          ? await adopt(client, spec, t.columns,
+          ? await adopt(client, spec, presentColumns(t.columns, absent),
             withLocalAssets(cd, row, spec, await resolveForWrite(spec, g, m, written, order, deferred), uploads), localUuid)
           // Identity only: values and local refs stay (a ref's target keeps
           // its local id even when it is adopted too).
@@ -761,12 +766,13 @@ async function applySeed(pool, groupId, decisions, opts = {}) {
         if (decision === 'git') summary.adopted += 1;
       }
       for (const { row } of by('git', (r) => mine(r) && r.kind !== 'adopt_identity')) {
-        const g = gitOf(cd, row).row;
+        const { row: g, absent } = gitOf(cd, row);
+        const cols = presentColumns(t.columns, absent);
         const resolved = withLocalAssets(cd, row, spec, await resolveForWrite(spec, g, m, written, order, deferred), uploads);
         if (spec.slice && !UPDATE_KINDS.has(row.kind)) throw new Error(`seed-sync: slice ${spec.table} cannot write kind ${row.kind}`);
         const out = spec.slice
-          ? await updateSlice(client, spec, t.columns, resolved)
-          : await upsertFromGit(client, spec, t.columns, resolved);
+          ? await updateSlice(client, spec, cols, resolved)
+          : await upsertFromGit(client, spec, cols, resolved);
         written.get(spec.table).set(g.sync_uuid, out);
         if (UPDATE_KINDS.has(row.kind)) {
           summary.updated += 1;

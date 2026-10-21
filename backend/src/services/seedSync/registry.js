@@ -684,6 +684,29 @@ async function liveColumns(db, spec) {
     .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 
+// A column_default that is a plain constant ('none'::text, 0, (-1), true,
+// '[]'::jsonb): evaluated as-is. Anything else (nextval, now(), functions) is
+// not a value a git row can be compared against.
+const CONSTANT_DEFAULT = /^(?:'(?:[^']|'')*'|\(?-?\d+(?:\.\d+)?\)?|true|false)(?:::[a-z][a-z ]*(?:\[\])?)?$/i;
+
+// Constant defaults of `columns` (liveColumns' names) of spec.table, as node-pg
+// reads them: Map(column -> value). A git row exported before a column existed
+// lacks it; diff reads the absence as this value (apply leaves the column to
+// the database: unchanged on update, the default on insert).
+async function liveDefaults(db, spec, columns) {
+  const names = new Set(columns.map((c) => c.name));
+  const { rows } = await db.query(
+    `SELECT column_name, column_default FROM information_schema.columns
+      WHERE table_schema = current_schema() AND table_name = $1 AND column_default IS NOT NULL`,
+    [spec.table],
+  );
+  const consts = rows.filter((r) => names.has(r.column_name) && CONSTANT_DEFAULT.test(r.column_default.trim()));
+  if (!consts.length) return new Map();
+  const select = consts.map((r, i) => `${r.column_default} AS d${i}`).join(', ');
+  const { rows: [vals] } = await db.query(`SELECT ${select}`);
+  return new Map(consts.map((r, i) => [r.column_name, vals[`d${i}`]]));
+}
+
 // FK coverage of one TableSpec against the live schema, sorted by column:
 //  - uncovered:    an FK column in neither `refs` nor `omit` (would export a local id)
 //  - wrong_target: a declared ref whose table is not the FK's referenced table
@@ -758,5 +781,5 @@ async function nameRefProblems(db, spec) {
 
 module.exports = {
   GROUPS, getGroup, tableSpecs, specOfTable, ownerLabel, rowPredicate, scopeSql, quoteIdent, pairKeyCol, orderPair, soleSpec,
-  liveColumns, fkProblems, nameRefProblems, NAME_REF_SHAPES, _withTestGroups,
+  liveColumns, liveDefaults, fkProblems, nameRefProblems, NAME_REF_SHAPES, _withTestGroups,
 };

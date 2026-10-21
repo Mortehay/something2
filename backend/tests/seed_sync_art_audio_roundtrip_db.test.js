@@ -452,3 +452,53 @@ dbTest('an appearance a character or a sprite set uses is never deleted', async 
     (e) => e.code === 'blocked');
   assert.strictEqual((await pool.query('SELECT 1 FROM character_appearances WHERE sync_uuid = $1', [look.sync_uuid])).rowCount, 1);
 });
+
+// A git file exported before a column existed (art.json before
+// entity_types.idle_fx): the absent column is not NULL. Diff reads it as the
+// column's default; apply leaves it alone on update and lets the default fill
+// it on insert.
+const withoutColumn = (doc, table, col) => {
+  for (const r of doc.tables[table]) delete r[col];
+  return doc;
+};
+
+dbTest('git rows lacking a defaulted column diff identical to local rows at the default', async (t, pool, { store }) => {
+  const owners = await seedFixture(pool);
+  await exportGroup(pool, 'art', { store });
+  writeDoc('art', withoutColumn(readDoc('art'), 'entity_types', 'idle_fx'));
+  const d = await diffGroup(pool, 'art');
+  assert.deepStrictEqual(d.rows.filter((r) => r.table === 'entity_types').map((r) => [r.key, r.kind]), []);
+  assert.strictEqual(d.status, 'in_sync');
+  // No baseline (a PC that never seeded art): still identical, not edited_here.
+  await pool.query("DELETE FROM seed_row_hashes WHERE group_id = 'art' AND sync_uuid = $1", [owners.ent]);
+  const d2 = await diffGroup(pool, 'art');
+  assert.deepStrictEqual(d2.rows.filter((r) => r.table === 'entity_types').map((r) => [r.key, r.kind]), []);
+});
+
+dbTest('take-git on a row lacking a defaulted column keeps the local value (update) or the default (insert)', async (t, pool, { store }) => {
+  await seedFixture(pool);
+  for (const g of BINARY) await exportGroup(pool, g, { store });
+  // Update (art slice): the local 'shine' stays.
+  const doc = withoutColumn(readDoc('art'), 'entity_types', 'idle_fx');
+  doc.tables.entity_types.find((r) => r.name === 'sx_aa_ent').prompt = 'sx git prompt';
+  writeDoc('art', doc);
+  await pool.query("UPDATE entity_types SET idle_fx = 'shine' WHERE name = 'sx_aa_ent'");
+  const p = await previewSeed(pool, 'art');
+  assert.deepStrictEqual(p.rows.map((r) => [r.table, r.key, r.kind]), [['entity_types', 'sx_aa_ent', 'edited_here']]);
+  await applySeed(pool, 'art', { [p.rows[0].syncUuid]: 'git' }, { signature: p.signature, store });
+  assert.deepStrictEqual(await one(pool, "SELECT idle_fx, prompt FROM entity_types WHERE name = 'sx_aa_ent'"),
+    { idle_fx: 'shine', prompt: 'sx git prompt' });
+  // Insert (audio binding missing here): the column default fills it.
+  const audio = withoutColumn(readDoc('audio'), 'audio_bindings', 'weight');
+  writeDoc('audio', audio);
+  const b = audio.tables.audio_bindings.find((r) => r.subject_key === 'sx_aa_ent');
+  await pool.query('DELETE FROM audio_bindings WHERE sync_uuid = $1', [b.sync_uuid]);
+  await pool.query("DELETE FROM seed_row_hashes WHERE group_id = 'audio' AND sync_uuid = $1", [b.sync_uuid]);
+  const pa = await previewSeed(pool, 'audio');
+  // The clip reads deleted_here too: unbound clips are not exported.
+  assert.strictEqual(pa.rows.find((r) => r.syncUuid === b.sync_uuid).kind, 'new');
+  const all = Object.fromEntries(pa.rows.map((r) => [r.syncUuid, 'git']));
+  await applySeed(pool, 'audio', all, { signature: pa.signature, store });
+  assert.deepStrictEqual(await one(pool, 'SELECT weight, volume FROM audio_bindings WHERE sync_uuid = $1', [b.sync_uuid]),
+    { weight: 1, volume: 0.5 });
+});

@@ -1,5 +1,5 @@
 const {
-  GROUPS, getGroup, tableSpecs, liveColumns, pairKeyCol, orderPair, scopeSql, ownerLabel, quoteIdent,
+  GROUPS, getGroup, tableSpecs, liveColumns, liveDefaults, pairKeyCol, orderPair, scopeSql, ownerLabel, quoteIdent,
 } = require('./registry.js');
 const { canonicalRow, rowHash, stableStringify } = require('./canonical.js');
 const { buildRefMaps, exportRow, exportColumns } = require('./refs.js');
@@ -212,7 +212,9 @@ async function readLocal(db, group, specs, groupId) {
       exported = exported.map((r) => translateRow(spec, r, cache));
     }
     const canon = exported.map((r) => canonicalRow(r, columns));
-    tables.push({ spec, columns, rows: canon, rawAssets, tokensMissing: await countTokensMissing(db, spec) });
+    // Ref and asset columns travel in a translated form: no default applies.
+    const defaults = await liveDefaults(db, spec, columns.filter((c) => c.dataType !== 'ref' && c.dataType !== 'asset'));
+    tables.push({ spec, columns, defaults, rows: canon, rawAssets, tokensMissing: await countTokensMissing(db, spec) });
     keyIndex.set(spec.table, new Map(canon.map((r) => [r.sync_uuid, r])));
   }
   // Natural keys of by-uuid ref targets outside the group, transitively (a
@@ -359,6 +361,26 @@ const joinKey = (parts) => (parts.length === 1 ? parts[0] : parts.map((p) => Str
 
 // ---- diff ------------------------------------------------------------------
 
+// A git row in canonical form. A column the row lacks (the file was exported
+// before the column existed) reads as the column's constant default, so a
+// local row still at the default is identical; `absent` lists those columns,
+// which apply never writes (unchanged on update, the default on insert).
+function canonicalGit(r, t) {
+  const absent = new Set();
+  let filled = r;
+  if (isPlainObject(r)) {
+    for (const c of t.columns) {
+      if (Object.prototype.hasOwnProperty.call(r, c.name)) continue;
+      absent.add(c.name);
+      if (t.defaults && t.defaults.has(c.name)) {
+        if (filled === r) filled = { ...r };
+        filled[c.name] = t.defaults.get(c.name);
+      }
+    }
+  }
+  return { row: canonicalRow(filled, t.columns), absent };
+}
+
 // One table's three-way classification (Plan-1 rules, unchanged). Hashes are
 // on the uuid-translated export form; natural-key matching (adopt_identity,
 // localByKey for key clashes) on the deep key.
@@ -370,8 +392,8 @@ function diffTable(t, gitRaw, baseline, keys) {
   // Re-canonicalize git rows so a hand-edited file (other key order, extra or
   // missing columns) hashes exactly as the exporter would have written it.
   const git = gitRaw.map((r) => {
-    const row = canonicalRow(r, columns);
-    return { row, hash: rowHash(row) };
+    const { row, absent } = canonicalGit(r, t);
+    return { row, hash: rowHash(row), absent };
   });
   const gitKeyText = new Map(git.map((g) => [g.row.sync_uuid, keys.match(spec, g.row, 'git')]));
   const gitUuids = new Set(git.map((g) => g.row.sync_uuid));
@@ -524,7 +546,7 @@ async function computeDiff(db, groupId) {
 
   const gitCanon = new Map(); // table -> canonical git rows (for name checks)
   if (doc) {
-    for (const t of L.tables) gitCanon.set(t.spec.table, docRows(doc, t.spec.table).map((r) => canonicalRow(r, t.columns)));
+    for (const t of L.tables) gitCanon.set(t.spec.table, docRows(doc, t.spec.table).map((r) => canonicalGit(r, t).row));
   }
   const warnings = danglingNames([
     ...L.tables.map((t) => ({ spec: t.spec, rows: t.rows, side: 'local' })),
