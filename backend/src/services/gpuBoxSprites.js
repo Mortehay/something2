@@ -124,24 +124,13 @@ async function resolveConceptModel(provider, opts = {}) {
   return { ok: true, model: pick.value };
 }
 
-// Submits a concept task, polls it to a terminal state, downloads the image.
-// The concept is whatever THIS task's result.url names -- never the newest
-// asset, which a concurrent run (or another user of the box) can own.
-async function generateConcept(provider, { prompt }, {
-  fetchImpl = fetch, sleep = realSleep, pollMs = POLL_MS(), timeoutMs = CONCEPT_TIMEOUT_MS(),
-} = {}) {
-  const model = await resolveConceptModel(provider, { fetchImpl });
-  if (!model.ok) return model;
-  const form = new URLSearchParams({ prompt, llm_name: model.model });
-  const sub = await callJson(provider, 'POST', '/api/generate_core', {
-    body: form.toString(),
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    fetchImpl,
-  });
-  if (!sub.ok) return sub;
-  const taskId = sub.json && sub.json.task_id;
-  if (!taskId) return { ok: false, error: 'GPU box accepted the concept request but returned no task_id', providerFault: true };
-
+// Polls a box task (/api/task-status/{id}) to a terminal state and downloads
+// the image THIS task's result.url names -- never the newest asset, which a
+// concurrent run (or another user of the box) can own. `label` names the task
+// in errors ("concept", "edit"). Resolves { ok, path, png, result }.
+async function pollTaskImage(provider, taskId, label, {
+  fetchImpl, sleep, pollMs, timeoutMs,
+}) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     // eslint-disable-next-line no-await-in-loop
@@ -151,7 +140,7 @@ async function generateConcept(provider, { prompt }, {
     if (status === 'SUCCESS') {
       const url = st.json.result && st.json.result.url;
       if (typeof url !== 'string' || !url) {
-        return { ok: false, error: 'GPU box concept task succeeded but result.url is missing, so no image can be tied to it', providerFault: true };
+        return { ok: false, error: `GPU box ${label} task succeeded but result.url is missing, so no image can be tied to it`, providerFault: true };
       }
       // The URL is box-supplied data and the auth header rides on every call,
       // so it must resolve to the box's own origin (rejects //host/x, other
@@ -159,24 +148,65 @@ async function generateConcept(provider, { prompt }, {
       let sameOrigin = false;
       try { sameOrigin = new URL(url, provider.base_url).origin === new URL(provider.base_url).origin; } catch (_) { /* invalid */ }
       if (!url.startsWith('/') || url.startsWith('//') || url.includes('\\') || !sameOrigin) {
-        return { ok: false, error: 'GPU box concept task returned a result.url outside the box origin; refusing to fetch it', providerFault: true };
+        return { ok: false, error: `GPU box ${label} task returned a result.url outside the box origin; refusing to fetch it`, providerFault: true };
       }
       // eslint-disable-next-line no-await-in-loop
       const img = await callPng(provider, url, { fetchImpl });
       if (!img.ok) return img;
-      return { ok: true, conceptPath: url.replace(/^\/+/, ''), png: img.png };
+      return { ok: true, path: url.replace(/^\/+/, ''), png: img.png, result: st.json.result };
     }
     if (status !== 'PENDING' && status !== 'PROGRESS' && status !== 'STARTED') {
       const r = st.json.result;
       const why = r && (r.error || r.message || (typeof r === 'string' ? r : ''));
-      return { ok: false, error: `GPU box concept task ended ${status || 'UNKNOWN'}${why ? `: ${why}` : ''}` };
+      return { ok: false, error: `GPU box ${label} task ended ${status || 'UNKNOWN'}${why ? `: ${why}` : ''}` };
     }
     if (Date.now() >= deadline) {
-      return { ok: false, error: `GPU box concept task timed out after ${Math.round(timeoutMs / 1000)}s`, retryable: true };
+      return { ok: false, error: `GPU box ${label} task timed out after ${Math.round(timeoutMs / 1000)}s`, retryable: true };
     }
     // eslint-disable-next-line no-await-in-loop
     await sleep(pollMs);
   }
+}
+
+// Submits a form-urlencoded task (generate_core, edit) and polls it.
+async function submitTask(provider, path, form, label, opts) {
+  const sub = await callJson(provider, 'POST', path, {
+    body: new URLSearchParams(form).toString(),
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    fetchImpl: opts.fetchImpl,
+  });
+  if (!sub.ok) return sub;
+  const taskId = sub.json && sub.json.task_id;
+  if (!taskId) return { ok: false, error: `GPU box accepted the ${label} request but returned no task_id`, providerFault: true };
+  return pollTaskImage(provider, taskId, label, opts);
+}
+
+// Submits a concept task, polls it to a terminal state, downloads the image.
+async function generateConcept(provider, { prompt }, {
+  fetchImpl = fetch, sleep = realSleep, pollMs = POLL_MS(), timeoutMs = CONCEPT_TIMEOUT_MS(),
+} = {}) {
+  const model = await resolveConceptModel(provider, { fetchImpl });
+  if (!model.ok) return model;
+  const r = await submitTask(provider, '/api/generate_core', { prompt, llm_name: model.model }, 'concept', {
+    fetchImpl, sleep, pollMs, timeoutMs,
+  });
+  return r.ok ? { ok: true, conceptPath: r.path, png: r.png } : r;
+}
+
+// Edits an image already on the box (POST /api/edit, Qwen-Image-Edit-2511).
+// `source` is a basename under the box's images/ ("core_<hex>.png"). steps /
+// cfg_scale are deliberately never sent: the box's defaults (4-step Lightning,
+// cfg 1.0) are what it is tuned for. `transparent` is the box's 0..1 measure of
+// the result's transparent area, null when it does not report one.
+async function editImage(provider, { source, instruction }, {
+  fetchImpl = fetch, sleep = realSleep, pollMs = POLL_MS(), timeoutMs = CONCEPT_TIMEOUT_MS(),
+} = {}) {
+  const r = await submitTask(provider, '/api/edit', { source, instruction }, 'edit', {
+    fetchImpl, sleep, pollMs, timeoutMs,
+  });
+  if (!r.ok) return r;
+  const t = r.result && r.result.transparent;
+  return { ok: true, path: r.path, png: r.png, transparent: Number.isFinite(t) ? t : null };
 }
 
 async function createSheetJob(provider, spec, { fetchImpl = fetch } = {}) {
@@ -223,5 +253,5 @@ async function fetchAtlas(provider, boxJobId, { fetchImpl = fetch } = {}) {
 }
 
 module.exports = {
-  STATUS_TERMINAL, actionCatalog, checkAuth, listConceptModels, generateConcept, createSheetJob, getSheetJob, fetchSheet, fetchAtlas,
+  STATUS_TERMINAL, actionCatalog, checkAuth, listConceptModels, generateConcept, editImage, createSheetJob, getSheetJob, fetchSheet, fetchAtlas,
 };

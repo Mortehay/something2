@@ -241,3 +241,72 @@ test('generateConcept refuses a result.url that leaves the box origin and sends 
     assert.ok(!seen.some((c) => /evil|other/.test(c.url)));
   }
 });
+
+// POST /api/edit (Qwen-Image-Edit-2511 on the box, contract 2026-10-21):
+// form-urlencoded source + instruction, answers {status:'queued', task_id},
+// polled through /api/task-status like generate_core.
+function editRoutes(statuses, { url = '/images/edit_aa11bb22cc33.png' } = {}) {
+  return {
+    'POST /api/edit': () => json({ status: 'queued', task_id: 'edit-1' }),
+    'GET /api/task-status/edit-1': (u, i, n) => json(statuses[Math.min(n, statuses.length) - 1]),
+    [`GET ${url}`]: () => new Response(png('tree-sheet.png'), { status: 200 }),
+  };
+}
+const editDone = (extra = {}) => ({
+  task_id: 'edit-1',
+  status: 'SUCCESS',
+  result: { status: 'success', url: '/images/edit_aa11bb22cc33.png', transparent: 0.63, duration_ms: 61000, ...extra },
+});
+
+test('editImage posts source + instruction only, polls its own task and downloads THAT result', async () => {
+  const pending = { task_id: 'edit-1', status: 'PENDING' };
+  const { fetchImpl, calls } = fakeBox(editRoutes([pending, editDone()]));
+  const r = await box.editImage(provider, { source: 'core_2fd22411db4a.png', instruction: 'Remove any person.' }, { fetchImpl, sleep });
+  assert.equal(r.ok, true, r.error);
+  assert.equal(r.path, 'images/edit_aa11bb22cc33.png');
+  assert.deepEqual(r.png, png('tree-sheet.png'));
+  assert.equal(r.transparent, 0.63);
+  const submit = calls[0];
+  assert.equal(submit.key, 'POST /api/edit');
+  assert.equal(submit.headers['Content-Type'], 'application/x-www-form-urlencoded');
+  assert.equal(submit.headers.Authorization, 'Bearer sk_test');
+  const form = new URLSearchParams(String(submit.body));
+  assert.deepEqual([...form.keys()].sort(), ['instruction', 'source']);
+  assert.equal(form.get('source'), 'core_2fd22411db4a.png');
+  assert.equal(form.get('instruction'), 'Remove any person.');
+  assert.equal(calls.filter((c) => c.key === 'GET /api/task-status/edit-1').length, 2);
+  // No concept-model lookup: the edit runs the box's own engine.
+  assert.equal(calls.some((c) => c.key === 'GET /api/core-models'), false);
+});
+
+test('editImage surfaces the box 503 "editing disabled" words', async () => {
+  const { fetchImpl } = fakeBox({
+    'POST /api/edit': () => json({ error: 'image editing is disabled on this box', enable_with: 'EDIT_ENABLED=1' }, 503),
+  });
+  const r = await box.editImage(provider, { source: 'core_x.png', instruction: 'x' }, { fetchImpl, sleep });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /503/);
+  assert.match(r.error, /image editing is disabled/);
+});
+
+test('editImage fails with the box words when the edit task fails', async () => {
+  const { fetchImpl } = fakeBox(editRoutes([{ task_id: 'edit-1', status: 'FAILURE', result: { error: 'source not found' } }]));
+  const r = await box.editImage(provider, { source: 'core_x.png', instruction: 'x' }, { fetchImpl, sleep });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /edit task ended FAILURE: source not found/);
+});
+
+test('editImage refuses a result.url outside the box origin', async () => {
+  const { fetchImpl, calls } = fakeBox(editRoutes([editDone({ url: '//evil.host/x.png' })]));
+  const r = await box.editImage(provider, { source: 'core_x.png', instruction: 'x' }, { fetchImpl, sleep });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /outside the box origin/);
+  assert.ok(calls.every((c) => c.url.origin === 'http://box:8001'));
+});
+
+test('editImage reports transparent as null when the box omits it', async () => {
+  const { fetchImpl } = fakeBox(editRoutes([editDone({ transparent: undefined })]));
+  const r = await box.editImage(provider, { source: 'core_x.png', instruction: 'x' }, { fetchImpl, sleep });
+  assert.equal(r.ok, true);
+  assert.equal(r.transparent, null);
+});
