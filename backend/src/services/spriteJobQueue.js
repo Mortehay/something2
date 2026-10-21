@@ -8,15 +8,19 @@ const { seedFor } = require('./artJobQueue.js');
 // how `unknown` is built (an id or an id:variant pair nothing matched).
 //
 // `actions` / `framesPerAction` come from the admin's choice and apply to every
-// target; without them a creature gets idle+walk and a prop idle+sway, at the
-// frame count its options derive. Facings come from the options (8 or ['s']).
+// target; without them a creature gets idle+walk and a prop idle (unused: a
+// prop is not a sheet), at the frame count its options derive. Facings come from the options (8 or ['s']).
 // Rows are written for the GPU box (backend 'gpu-box'); `frames` mirrors
 // frames_per_action so older readers of `frames` still see the frame count.
 // For a prop ('object') row the actions are not drawn (Props v2: one edited
-// static image, no sheet); 'sway' among them means the prop sways in game.
-const DEFAULT_ACTIONS = { creature: ['idle', 'walk'], object: ['idle', 'sway'] };
+// static image, no sheet); its in-game idle effect is `propFx` (none | sway |
+// shine), stored as prop_fx on prop rows only and copied to
+// entity_types.idle_fx on approve. Creature rows get NULL.
+const DEFAULT_ACTIONS = { creature: ['idle', 'walk'], object: ['idle'] };
+const PROP_FX = ['none', 'sway', 'shine'];
 
-async function enqueue(db, targets, { actions, framesPerAction } = {}) {
+async function enqueue(db, targets, { actions, framesPerAction, propFx = 'none' } = {}) {
+  if (!PROP_FX.includes(propFx)) throw new Error(`propFx must be one of ${PROP_FX.join(', ')}`);
   if (!Array.isArray(targets) || targets.length === 0) return { rows: [], unknown: [] };
   const normalized = targets
     .map((t) => ({ entityId: Number(t.entityId), variant: t.variant == null ? null : Number(t.variant) }))
@@ -73,12 +77,12 @@ async function enqueue(db, targets, { actions, framesPerAction } = {}) {
   const { rows } = await db.query(
     `INSERT INTO sprite_sets
        (entity_type_id, appearance_variant, creature, generation_kind, base_prompt, backend, seed, frames, status,
-        actions, directions, frames_per_action)
+        actions, directions, frames_per_action, prop_fx)
      SELECT entity_id, variant, subject, kind, prompt, 'gpu-box', seed, frames, 'queued',
-            string_to_array(actions, ','), string_to_array(directions, ','), frames
+            string_to_array(actions, ','), string_to_array(directions, ','), frames, prop_fx
        FROM unnest($1::int[], $2::smallint[], $3::text[], $4::text[], $5::text[], $6::int[], $7::int[],
-                   $8::text[], $9::text[])
-         AS t(entity_id, variant, subject, kind, prompt, seed, frames, actions, directions)
+                   $8::text[], $9::text[], $10::text[])
+         AS t(entity_id, variant, subject, kind, prompt, seed, frames, actions, directions, prop_fx)
      ON CONFLICT DO NOTHING
      RETURNING *`,
     [
@@ -88,6 +92,7 @@ async function enqueue(db, targets, { actions, framesPerAction } = {}) {
       opts.map(rowFrames),
       opts.map((o) => (chosenActions || DEFAULT_ACTIONS[o.kind] || DEFAULT_ACTIONS.creature).join(',')),
       opts.map((o) => o.directions.join(',')),
+      opts.map((o) => (o.kind === 'object' ? propFx : null)),
     ],
   );
   return { rows, unknown };
@@ -206,4 +211,4 @@ async function queueView(db) {
   return { stats: counts, jobs: active.rows };
 }
 
-module.exports = { enqueue, claim, attach, attachBox, complete, fail, requeueStale, lastSecondsPerCell, stats, queueView };
+module.exports = { enqueue, claim, attach, attachBox, complete, fail, requeueStale, lastSecondsPerCell, stats, queueView, PROP_FX };

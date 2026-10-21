@@ -140,34 +140,38 @@ test('approve of a box appearance-variant creature writes character_appearances 
 });
 
 // Props v2: a box prop row is ONE edited static image (image_key, no sheet);
-// approve makes it the type's static image and records whether it sways.
+// approve makes it the type's static image and copies the effect chosen at
+// queue time (sprite_sets.prop_fx) onto entity_types.idle_fx. The row's
+// actions mean nothing for a prop.
 const PROP_JOB = {
   id: BOX_ID, entity_type_id: 8, status: 'done', backend: 'gpu-box', generation_kind: 'object',
-  frames: 4, frames_per_action: 4, actions: ['idle', 'sway'],
+  frames: 4, frames_per_action: 4, actions: ['idle', 'sway'], prop_fx: 'shine',
   image_key: 'sprites/Pine_Tree/r/image.png', concept_key: 'sprites/Pine_Tree/r/concept.png',
   atlas_key: null, manifest_key: null,
 };
 
-test('approve of a box prop sets the static image, clears the sprite and sets sway from its actions', async () => {
-  for (const [actions, sway] of [[['idle', 'sway'], true], [['idle'], false]]) {
+test('approve of a box prop sets the static image, clears the sprite and sets idle_fx from prop_fx', async () => {
+  for (const [propFx, want] of [['shine', 'shine'], ['sway', 'sway'], ['none', 'none'], [null, 'none'], [undefined, 'none']]) {
     const calls = [];
     const store = { getObjectStream: async () => { throw new Error('a prop approve must not read a manifest'); } };
+    // 'sway' in actions must NOT decide the effect any more.
     // eslint-disable-next-line no-await-in-loop
-    const res = await request(routerApp(boxApprovePool(calls, { ...PROP_JOB, actions }), store))
+    const res = await request(routerApp(boxApprovePool(calls, { ...PROP_JOB, prop_fx: propFx }), store))
       .post('/api/sprite-admin/jobs/approve').send({ job_ids: [BOX_ID] });
-    assert.deepEqual(res.body.approved, [BOX_ID], JSON.stringify(actions));
+    assert.deepEqual(res.body.approved, [BOX_ID], String(propFx));
     const up = calls.find((c) => /UPDATE entity_types SET image/i.test(c.sql));
     assert.ok(up, 'expected UPDATE entity_types SET image');
     assert.match(up.sql, /sprite = NULL/);
     assert.match(up.sql, /render_mode = 'static'/);
-    assert.match(up.sql, /sway = \$2/);
-    assert.deepEqual(up.params, [PROP_JOB.image_key, sway, 8]);
+    assert.match(up.sql, /idle_fx = \$2/);
+    assert.doesNotMatch(up.sql, /\bsway\b/);
+    assert.deepEqual(up.params, [PROP_JOB.image_key, want, 8]);
     assert.ok(!calls.some((c) => /UPDATE entity_types SET sprite/i.test(c.sql)));
     assert.ok(calls.some((c) => /UPDATE sprite_sets SET status = 'approved'/i.test(c.sql)));
   }
 });
 
-test('approve of a pre-v2 box prop that still has atlas_key takes the animated-sheet branch, not static+sway', async () => {
+test('approve of a pre-v2 box prop that still has atlas_key takes the animated-sheet branch, not static+idle_fx', async () => {
   const calls = [];
   const job = { ...PROP_JOB, atlas_key: 'sprites/x/sheet.png', manifest_key: 'sprites/x/sheet.json' };
   const res = await request(routerApp(boxApprovePool(calls, job), storeWith({ frames: {} })))
@@ -176,7 +180,7 @@ test('approve of a pre-v2 box prop that still has atlas_key takes the animated-s
   const up = calls.find((c) => /UPDATE entity_types SET sprite/i.test(c.sql));
   assert.ok(up, 'expected the sheet branch UPDATE');
   assert.equal(up.params[1], 'animated');
-  assert.ok(!calls.some((c) => /sway = \$2/.test(c.sql)), 'v2 static+sway branch must not run');
+  assert.ok(!calls.some((c) => /idle_fx = \$2/.test(c.sql)), 'v2 static+idle_fx branch must not run');
 });
 
 test('approve skips a box prop row with no image', async () => {

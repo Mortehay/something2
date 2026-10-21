@@ -228,3 +228,55 @@ test('jobs 400 "catalog has no frame limit" when neither action nor catalog has 
   assert.equal(res.status, 400);
   assert.match(res.body.error, /catalog has no frame limit/);
 });
+
+// Props v2: the prop's idle effect is chosen explicitly at queue time
+// (prop_fx), stored per row; creature rows carry none (NULL).
+function mixedPool(calls) {
+  return {
+    query: async (sql, params = []) => {
+      calls.push({ sql, params });
+      if (/FROM entity_types WHERE id = ANY/i.test(sql)) {
+        return { rows: [
+          { id: 4, name: 'Wolf', prompt: 'grey wolf', render_mode: 'static', is_creature: true, is_playable: false },
+          { id: 12, name: 'Crystal', prompt: 'a crystal', render_mode: 'static', is_creature: false, is_playable: false },
+        ] };
+      }
+      if (/count\(\*\).*FROM sprite_sets/is.test(sql)) return { rows: [] };
+      if (/INSERT INTO sprite_sets/i.test(sql)) return { rows: [{ id: 'a' }, { id: 'b' }] };
+      if (/SELECT status, count/i.test(sql)) return { rows: [] };
+      throw new Error(`unexpected query: ${sql}`);
+    },
+  };
+}
+// prop_fx is the INSERT's last unnest column ($10).
+const propFxParam = (insert) => {
+  assert.match(insert.sql, /\bprop_fx\b/, 'INSERT writes prop_fx');
+  assert.match(insert.sql, /\$10::text\[\]/);
+  return insert.params[9];
+};
+
+test('jobs stores prop_fx on prop rows only, defaulting to none', async () => {
+  for (const [sent, want] of [[undefined, 'none'], ['shine', 'shine'], ['sway', 'sway'], ['none', 'none']]) {
+    const calls = [];
+    // eslint-disable-next-line no-await-in-loop
+    const res = await request(routerApp(mixedPool(calls))).post('/api/sprite-admin/jobs')
+      .send({ targets: [{ entity_id: 4 }, { entity_id: 12 }], actions: ['idle'], frames: 1, prop_fx: sent });
+    assert.equal(res.status, 201, String(sent));
+    const insert = calls.find((c) => /INSERT INTO sprite_sets/i.test(c.sql));
+    const kinds = insert.params[3];
+    const fx = propFxParam(insert);
+    assert.deepEqual(kinds, ['creature', 'object']);
+    assert.deepEqual(fx, [null, want], String(sent));
+  }
+});
+
+for (const bad of ['glow', '', 'SHINE', 3, null]) {
+  test(`jobs 400 on prop_fx ${JSON.stringify(bad)}`, async () => {
+    const calls = [];
+    const res = await request(routerApp(mixedPool(calls))).post('/api/sprite-admin/jobs')
+      .send({ targets: [{ entity_id: 12 }], actions: ['idle'], frames: 1, prop_fx: bad });
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /prop_fx must be one of none, sway, shine/);
+    assert.ok(!calls.some((c) => /INSERT/i.test(c.sql)));
+  });
+}

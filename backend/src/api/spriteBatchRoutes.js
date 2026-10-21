@@ -1,5 +1,6 @@
 const express = require('express');
 const queue = require('../services/spriteJobQueue.js');
+const { PROP_FX } = queue;
 const { appearancePrompt } = require('../services/catalogSubjects.js');
 const { staticFrameFor } = require('../services/spriteSheetManifest.js');
 
@@ -89,7 +90,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   j.id AS job_id, j.status AS job_state, j.generation_kind, j.frames,
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
                   j.concept_key, j.actions, j.directions, j.frames_per_action, j.box_job_id,
-                  j.updated_at AS job_updated_at
+                  j.prop_fx, j.updated_at AS job_updated_at
              FROM entity_types e
              LEFT JOIN LATERAL (
                SELECT * FROM sprite_sets s
@@ -109,7 +110,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   j.id AS job_id, j.status AS job_state, j.generation_kind, j.frames,
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
                   j.concept_key, j.actions, j.directions, j.frames_per_action, j.box_job_id,
-                  j.updated_at AS job_updated_at
+                  j.prop_fx, j.updated_at AS job_updated_at
              FROM character_appearances ca
              JOIN entity_types e ON e.id = ca.entity_type_id AND e.is_playable = true
              LEFT JOIN LATERAL (
@@ -151,6 +152,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           directions: a.directions,
           frames_per_action: a.frames_per_action,
           box_job_id: a.box_job_id,
+          prop_fx: a.prop_fx,
           job_updated_at: a.job_updated_at,
         });
       }
@@ -183,6 +185,12 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     if (actions.length === 0 || !actions.every((a) => typeof a === 'string' && a)) {
       return res.status(400).json({ error: 'actions must be a non-empty list of action ids' });
     }
+    // Props v2: a prop's in-game idle effect (copied to entity_types.idle_fx
+    // on approve). Omitted means none; anything else sent must be a known one.
+    const propFx = 'prop_fx' in req.body ? req.body.prop_fx : 'none';
+    if (!PROP_FX.includes(propFx)) {
+      return res.status(400).json({ error: `prop_fx must be one of ${PROP_FX.join(', ')}` });
+    }
     try {
       // enqueue comma-joins the ids into the row, so every one must be proven
       // against the box's live catalog here, not trusted from the client.
@@ -204,7 +212,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       if (!Number.isInteger(frames) || frames < 1 || frames > cap) {
         return res.status(400).json({ error: `frames must be an integer from 1 to ${cap} (the most the selected actions allow)` });
       }
-      const result = await queue.enqueue(pool, targets, { actions, framesPerAction: frames });
+      const result = await queue.enqueue(pool, targets, { actions, framesPerAction: frames, propFx });
       const selected = new Set(targets.map((t) => `${t.entityId}:${t.variant ?? ''}`)).size;
       res.status(201).json({
         selected,
@@ -275,16 +283,16 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       for (const job of jobs) {
         const boxRow = job.backend === 'gpu-box';
         if (boxRow && job.generation_kind === 'object' && job.appearance_variant == null && !job.atlas_key) {
-          // Props v2: one edited static image (no sheet); the game sways it
-          // procedurally when 'sway' was among the queued actions. A box prop
-          // done before Props v2 still has a sheet and takes the branch below.
+          // Props v2: one edited static image (no sheet); the game gives it the
+          // idle effect chosen when it was queued (prop_fx). A box prop done
+          // before Props v2 still has a sheet and takes the branch below.
           if (!job.image_key) continue;
-          const sway = Array.isArray(job.actions) && job.actions.includes('sway');
+          const idleFx = PROP_FX.includes(job.prop_fx) ? job.prop_fx : 'none';
           // eslint-disable-next-line no-await-in-loop
           await pool.query(
-            `UPDATE entity_types SET image = $1, sprite = NULL, render_mode = 'static', sway = $2,
+            `UPDATE entity_types SET image = $1, sprite = NULL, render_mode = 'static', idle_fx = $2,
                     updated_at = now() WHERE id = $3`,
-            [job.image_key, sway, job.entity_type_id],
+            [job.image_key, idleFx, job.entity_type_id],
           );
         } else if (!boxRow && job.generation_kind === 'object' && job.frames === 1) {
           if (!job.image_key) continue;

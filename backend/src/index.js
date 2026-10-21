@@ -544,9 +544,9 @@ async function getEntityTypesMap() {
       // showed up in game (tile_types has always exposed its equivalents).
       render_mode: row.render_mode,
       sprite: row.sprite,
-      // Props v2: an approved GPU-box prop's static image sways procedurally
-      // in the renderer (systems/sway.js) when this is true.
-      sway: row.sway === true,
+      // Props v2: the procedural idle effect the renderer gives an approved
+      // GPU-box prop's static image (systems/idleFx.js): none | sway | shine.
+      idle_fx: IDLE_FX.includes(row.idle_fx) ? row.idle_fx : 'none',
       prompt: row.prompt,
       // SOMET-493 -- what the inspect card's aggression badge is derived from.
       // Shipped as the raw catalog facts (faction + the behaviour's chase
@@ -813,6 +813,9 @@ app.get('/api/map/tiles', async (req, res) => {
 // because `e.displayWidth || e.width || 40` treats 0 as falsy.
 const MAX_ENTITY_DISPLAY_PX = 400;
 
+// entity_types.idle_fx values (CHECK in migration 1714440824000).
+const IDLE_FX = ['none', 'sway', 'shine'];
+
 function entityTypeFieldError(body) {
   // SOMET-453. The pin rule lives in ONE place (services/providerPin.js) and is
   // reached from here, so every caller that asks "is this entity-type body
@@ -821,6 +824,11 @@ function entityTypeFieldError(body) {
   // unit test calling this function directly got null and threw on assert.match.
   const pinErr = providerPinFieldError(body);
   if (pinErr) return pinErr;
+  // Props v2: the renderer's procedural idle effect. NOT NULL in the DB, so
+  // a sent null is as wrong as an unknown name.
+  if (body.idle_fx !== undefined && !IDLE_FX.includes(body.idle_fx)) {
+    return `idle_fx must be one of ${IDLE_FX.join(', ')}`;
+  }
   if (body.attack_element != null && !ELEMENTS.includes(body.attack_element)) {
     return `attack_element must be one of ${ELEMENTS.join(', ')}`;
   }
@@ -967,8 +975,8 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
         display_width, display_height, render_mode, is_creature, prompt, place_order,
         behavior_id, attack_element, ai_provider_mode, ai_provider_id, point_kind,
         boss_tier, element, hitbox_size, xp_reward, base_damage, auras,
-        loot_rolls, loot_min_rarity, loot_rarity_bias, loot_chest
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35::jsonb, $36, $37, $38, $39) RETURNING *`,
+        loot_rolls, loot_min_rarity, loot_rarity_bias, loot_chest, idle_fx
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35::jsonb, $36, $37, $38, $39, $40) RETURNING *`,
       [
         name, color, walkable ?? false, JSON.stringify(spawn_tiles || []), chance ?? 0.1,
         strength ?? 0, dexterity ?? 0, constitution ?? 0, intelligence ?? 0, wisdom ?? 0, charisma ?? 0,
@@ -977,7 +985,8 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
         behavior_id ?? null, attack_element || 'physical', pin.mode, pin.id, point_kind ?? null,
         boss_tier ?? null, element ?? null, hitbox_size ?? null, xp_reward ?? null, base_damage ?? null,
         req.body.auras == null ? null : JSON.stringify(req.body.auras),
-        loot_rolls ?? null, loot_min_rarity ?? null, loot_rarity_bias ?? null, loot_chest ?? null
+        loot_rolls ?? null, loot_min_rarity ?? null, loot_rarity_bias ?? null, loot_chest ?? null,
+        req.body.idle_fx ?? 'none'
       ]
     );
     res.status(201).json(result.rows[0]);
@@ -1116,8 +1125,11 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
         loot_min_rarity = CASE WHEN $47::boolean THEN $48::text ELSE entity_types.loot_min_rarity END,
         loot_rarity_bias = CASE WHEN $49::boolean THEN $50::numeric ELSE entity_types.loot_rarity_bias END,
         loot_chest = CASE WHEN $51::boolean THEN $52::boolean ELSE entity_types.loot_chest END,
+        -- Props v2: omitted leaves the effect alone (entityTypeFieldError
+        -- already refused anything but none|sway|shine).
+        idle_fx = CASE WHEN $53::boolean THEN $54::text ELSE entity_types.idle_fx END,
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $53 RETURNING *`,
+      WHERE id = $55 RETURNING *`,
       [
         name, color, walkable, JSON.stringify(spawn_tiles), chance,
         strength, dexterity, constitution, intelligence, wisdom, charisma,
@@ -1164,6 +1176,7 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
         'loot_min_rarity' in req.body, loot_min_rarity ?? null,
         'loot_rarity_bias' in req.body, loot_rarity_bias ?? null,
         'loot_chest' in req.body, loot_chest ?? null,
+        'idle_fx' in req.body, req.body.idle_fx ?? null,
         id
       ]
     );

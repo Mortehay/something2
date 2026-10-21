@@ -94,8 +94,8 @@ test('subjects carry concept_key and actions from the newest job', { skip }, asy
   })}`];
   await pool.query(
     `INSERT INTO sprite_sets (entity_type_id, creature, backend, status, actions, directions,
-                              frames_per_action, concept_key, box_job_id, manifest_key)
-     VALUES ($1, 'subj', 'gpu-box', 'done', '{idle,sway}', '{s}', 3, 'sprites/c.png', 'box-9', 'sprites/m.json')`,
+                              frames_per_action, concept_key, box_job_id, manifest_key, prop_fx)
+     VALUES ($1, 'subj', 'gpu-box', 'done', '{idle,sway}', '{s}', 3, 'sprites/c.png', 'box-9', 'sprites/m.json', 'shine')`,
     [ent.id],
   );
   const res = await request(app).get('/api/sprite-admin/subjects').set(...AUTH);
@@ -106,4 +106,6 @@ test('subjects carry concept_key and actions from the newest job', { skip }, asy
   assert.equal(row.frames_per_action, 3);
   assert.equal(row.manifest_key, 'sprites/m.json');
   assert.equal(row.box_job_id, 'box-9');
+  // Props v2: the preview popup labels "Effect on approve" from this.
+  assert.equal(row.prop_fx, 'shine');
 });

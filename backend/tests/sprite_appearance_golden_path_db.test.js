@@ -136,10 +136,10 @@ test('an appearance variant: queue -> complete -> approve writes its own directi
   assert.equal(afterRow.job_state, 'approved');
 });
 
-// Props v2 golden path: a prop queued with 'sway' -> (dispatcher result:
-// one edited image, no sheet) -> approve -> the type's static image + sway,
-// and /api/map/config ships sway to the client renderer.
-test('a prop: queue with sway -> complete with one image -> approve sets static image + sway', { skip }, async (t) => {
+// Props v2 golden path: a prop queued with prop_fx 'shine' -> (dispatcher
+// result: one edited image, no sheet) -> approve -> the type's static image +
+// idle_fx, and /api/map/config ships idle_fx to the client renderer.
+test('a prop: queue with prop_fx -> complete with one image -> approve sets static image + idle_fx', { skip }, async (t) => {
   const pool = new Pool({ connectionString: url });
   __setPool(pool);
   const tag = Math.random().toString(36).slice(2);
@@ -151,13 +151,13 @@ test('a prop: queue with sway -> complete with one image -> approve sets static 
   const AUTH = ['Authorization', `Bearer ${signToken({
     userId: admin.id, username, role: 'admin', tokenVersion: admin.token_version,
   })}`];
-  const name = `Sway Test Pine ${tag}`;
+  const name = `Idle Fx Test Crystal ${tag}`;
   const { rows: [prop] } = await pool.query(
     `INSERT INTO entity_types (name, color, is_creature, render_mode, prompt)
-     VALUES ($1, '#2f6b2f', false, 'rect', 'a pine tree') RETURNING id, sway`,
+     VALUES ($1, '#2f6b2f', false, 'rect', 'a crystal') RETURNING id, idle_fx`,
     [name],
   );
-  assert.equal(prop.sway, false, 'sway defaults to false');
+  assert.equal(prop.idle_fx, 'none', 'idle_fx defaults to none');
 
   const realCatalog = gpuBoxSprites.actionCatalog;
   const realLoad = aiProviders.loadActiveProviderWithSecret;
@@ -174,14 +174,14 @@ test('a prop: queue with sway -> complete with one image -> approve sets static 
   });
 
   const queued = await request(app).post('/api/sprite-admin/jobs').set(...AUTH)
-    .send({ targets: [{ entity_id: prop.id }], actions: ['idle', 'sway'], frames: 4 });
+    .send({ targets: [{ entity_id: prop.id }], actions: ['idle'], frames: 1, prop_fx: 'shine' });
   assert.equal(queued.status, 201);
   assert.equal(queued.body.queued, 1);
   const { rows: [job] } = await pool.query(
-    'SELECT id, generation_kind, actions FROM sprite_sets WHERE entity_type_id = $1', [prop.id],
+    'SELECT id, generation_kind, prop_fx FROM sprite_sets WHERE entity_type_id = $1', [prop.id],
   );
   assert.equal(job.generation_kind, 'object');
-  assert.deepEqual(job.actions, ['idle', 'sway']);
+  assert.equal(job.prop_fx, 'shine');
 
   // What the dispatcher's prop path completes a row with.
   await queue.complete(pool, job.id, {
@@ -195,12 +195,12 @@ test('a prop: queue with sway -> complete with one image -> approve sets static 
   assert.deepEqual(approved.body.approved, [job.id]);
 
   const { rows: [after] } = await pool.query(
-    'SELECT image, sprite, render_mode, sway FROM entity_types WHERE id = $1', [prop.id],
+    'SELECT image, sprite, render_mode, idle_fx FROM entity_types WHERE id = $1', [prop.id],
   );
-  assert.deepEqual(after, { image: `sprites/prop-${tag}/image.png`, sprite: null, render_mode: 'static', sway: true });
+  assert.deepEqual(after, { image: `sprites/prop-${tag}/image.png`, sprite: null, render_mode: 'static', idle_fx: 'shine' });
 
   const config = await request(app).get('/api/map/config').set(...AUTH);
   assert.equal(config.status, 200);
-  assert.equal(config.body.entityTypes[name].sway, true);
+  assert.equal(config.body.entityTypes[name].idle_fx, 'shine');
   assert.equal(config.body.entityTypes[name].render_mode, 'static');
 });

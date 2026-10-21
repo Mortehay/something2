@@ -141,6 +141,33 @@ test('enqueue gives props one facing', { skip }, async () => {
     assert.deepEqual(byEntity.get(creature.id).directions, EIGHT);
     assert.deepEqual(byEntity.get(prop.id).directions, ['s']);
     assert.deepEqual(byEntity.get(prop.id).actions, ['idle', 'sway']);
+    // Props v2: no propFx means none on the prop row; creatures carry NULL.
+    assert.equal(byEntity.get(prop.id).prop_fx, 'none');
+    assert.equal(byEntity.get(creature.id).prop_fx, null);
+  });
+});
+
+test('enqueue stores the chosen prop effect on prop rows only', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [creature] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    const { rows: [prop] } = await client.query(
+      `SELECT e.id FROM entity_types e
+        WHERE COALESCE(e.is_creature, false) = false AND COALESCE(e.is_playable, false) = false
+          AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    assert.ok(creature && prop, 'precondition: a free creature and a free prop');
+    const { rows } = await queue.enqueue(client,
+      [{ entityId: creature.id }, { entityId: prop.id }],
+      { actions: ['idle'], framesPerAction: 1, propFx: 'shine' });
+    const byEntity = new Map(rows.map((r) => [r.entity_type_id, r]));
+    assert.equal(byEntity.get(prop.id).prop_fx, 'shine');
+    assert.equal(byEntity.get(creature.id).prop_fx, null);
+    await assert.rejects(
+      queue.enqueue(client, [{ entityId: prop.id }], { actions: ['idle'], propFx: 'glow' }),
+      /propFx must be one of none, sway, shine/,
+    );
   });
 });
 

@@ -267,7 +267,7 @@ const GROUPS = [
           display_width: ART,
           display_height: ART,
           prompt: ART,
-          sway: ART,
+          idle_fx: ART,
           ai_provider_mode: 'per-PC',
         },
         secretColumns: [],
@@ -456,7 +456,7 @@ const GROUPS = [
       {
         table: 'entity_types',
         slice: true,
-        columns: ['image', 'sprite', 'render_mode', 'display_width', 'display_height', 'prompt', 'sway'],
+        columns: ['image', 'sprite', 'render_mode', 'display_width', 'display_height', 'prompt', 'idle_fx'],
         naturalKey: ['name'],
         omit: {},
         secretColumns: [],
