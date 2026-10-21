@@ -8,19 +8,28 @@
 // Directions are lower-case, rows are contiguous 0..frames-1. Legacy atlases
 // ("S/0" keys) have no `rows`, which is how they are told apart.
 
-// Clockwise around the compass, so index distance is angular distance.
+// In order around the compass, so index distance is angular distance.
 const DIR_ORDER = ["s", "se", "e", "ne", "n", "nw", "w", "sw"];
 const DIR_INDEX = new Map(DIR_ORDER.map((d, i) => [d, i]));
+
+// Actor facings are WORLD directions (server DIR_FACING, Player.facingFromVector);
+// box sheet rows are SCREEN directions -- the camera azimuth the box rendered,
+// "s" = facing the viewer. Under worldToScreen (core/iso.js) world SE is
+// straight down and world NW straight up, so the sheet row is the world facing
+// turned 45 degrees.
+const WORLD_TO_SCREEN = {
+  e: "se", se: "s", s: "sw", sw: "w", w: "nw", nw: "n", n: "ne", ne: "e",
+};
 const LOOPED = new Set(["idle", "walk", "sway"]);
 
 export const DEFAULT_FPS = 8;
 export const DAMAGE_MS = 300;
 
-// Either facing format (creatures: "SE", players: "se") -> a box direction.
+// Either world-facing format (creatures: "SE", players: "se") -> the on-screen
+// box sheet direction.
 export function boxDir(facing) {
   if (typeof facing !== "string") return "s";
-  const d = facing.toLowerCase();
-  return DIR_INDEX.has(d) ? d : "s";
+  return WORLD_TO_SCREEN[facing.toLowerCase()] || "s";
 }
 
 export function isBoxManifest(m) {

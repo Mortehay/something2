@@ -21,12 +21,20 @@ function sheet(actions, dirs, n = 4) {
 const ALL = ["s", "se", "e", "ne", "n", "nw", "w", "sw"];
 
 describe("boxDir", () => {
-  it("lower-cases the creature's upper-case facing", () => {
-    expect(["E", "SE", "S", "SW", "W", "NW", "N", "NE"].map(boxDir))
-      .toEqual(["e", "se", "s", "sw", "w", "nw", "n", "ne"]);
+  // Facings are WORLD directions; box sheet rows are SCREEN (camera) directions,
+  // "s" = facing the viewer. worldToScreen (core/iso.js) turns world SE (+x,+y)
+  // into straight down and world NW into straight up, i.e. a 45-degree turn.
+  const WORLD = ["E", "SE", "S", "SW", "W", "NW", "N", "NE"];
+  const SCREEN = ["se", "s", "sw", "w", "nw", "n", "ne", "e"];
+  it("maps the creature's upper-case world facing to the on-screen sheet direction", () => {
+    expect(WORLD.map(boxDir)).toEqual(SCREEN);
   });
-  it("passes the player's lower-case facing through", () => {
-    for (const d of ALL) expect(boxDir(d)).toBe(d);
+  it("maps the player's lower-case world facing the same way", () => {
+    expect(WORLD.map((d) => boxDir(d.toLowerCase()))).toEqual(SCREEN);
+  });
+  it("walking up the screen (W key: world nw) shows the back row, down the screen (world se) the front", () => {
+    expect(boxDir("nw")).toBe("n");
+    expect(boxDir("se")).toBe("s");
   });
   it("defaults anything unknown to s", () => {
     for (const f of [undefined, null, "", "x", "south", 3, {}]) expect(boxDir(f)).toBe("s");
