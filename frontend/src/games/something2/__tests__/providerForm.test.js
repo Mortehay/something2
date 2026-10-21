@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   emptyProviderForm, providerToForm, providerFormToPayload, validateProviderForm,
-  parseTemplate, templateWarning, EXAMPLE_TEMPLATE, PLACEHOLDERS,
+  parseTemplate, templateWarning, EXAMPLE_TEMPLATE, PLACEHOLDERS, applyTemplate,
 } from '../providerForm.js';
 
 // A row as GET /api/ai-providers returns it: has_token, never auth_token.
@@ -20,6 +20,19 @@ const row = (over = {}) => ({
   has_token: true,
   ...over,
 });
+
+// An A1111-like template, as the built-in preset supplies it. emptyProviderForm()
+// is blank now, so tests that need a valid image form apply this.
+const A1111_TEMPLATE = {
+  modality: 'image',
+  adapter: 'a1111',
+  defaults: {
+    request_template: EXAMPLE_TEMPLATE,
+    models_path: '/sdapi/v1/sd-models',
+    models_pointer: '$[*].model_name',
+    response_image_pointer: 'images[0]',
+  },
+};
 
 describe('the token field, which is the bug this module exists to prevent', () => {
   it('never prefills the token, because the server never sends it', () => {
@@ -93,7 +106,7 @@ describe('template parsing', () => {
 });
 
 describe('validation mirrors the server rules', () => {
-  const valid = () => ({ ...emptyProviderForm(), name: 'x', base_url: 'http://h:7860' });
+  const valid = () => ({ ...applyTemplate(emptyProviderForm(), A1111_TEMPLATE), name: 'x', base_url: 'http://h:7860' });
 
   it('accepts a well-formed form', () => {
     expect(validateProviderForm(valid())).toBeNull();
@@ -146,8 +159,9 @@ describe('round trip', () => {
     expect(payload.response_image_pointer).toBeNull();
   });
 
-  it('an empty row yields a usable starting form with a worked example', () => {
-    const form = providerToForm(null);
+  it('an empty row is blank; applying the A1111 template yields a usable form with a worked example', () => {
+    expect(providerToForm(null).request_template).toBe('');
+    const form = applyTemplate(providerToForm(null), A1111_TEMPLATE);
     expect(parseTemplate(form.request_template).template).toEqual(EXAMPLE_TEMPLATE);
     expect(templateWarning(form.request_template)).toBeNull();
   });

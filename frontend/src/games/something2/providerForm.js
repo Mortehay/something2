@@ -25,12 +25,28 @@ export const EXAMPLE_TEMPLATE = {
   override_settings: { sd_model_checkpoint: '{{model}}' },
 };
 
-// Modalities with hand-written backend adapters: no request template.
+// The provider kinds an admin can add. Drives the kind picker.
+export const KINDS = [
+  { value: 'image', label: 'Image' },
+  { value: 'image_edit', label: 'Image edit' },
+  { value: 'text', label: 'Text' },
+  { value: 'audio', label: 'Audio' },
+  { value: 'sprite', label: 'Sprite sheets' },
+];
+
+// Whether the game consumes a provider of this kind yet. image_edit can be
+// configured and tested but nothing in the game calls it, so the UI says so.
+export const GAME_USES = { image: true, image_edit: false, text: true, audio: true, sprite: true };
+
+const KIND_VALUES = new Set(KINDS.map((k) => k.value));
+
+// Kinds with hand-written backend adapters: no request template to validate
+// or send. (image_edit has an OPTIONAL template, handled on its own.)
 const TEMPLATELESS = new Set(['audio', 'text', 'sprite']);
 
 export const PLACEHOLDERS = ['{{prompt}}', '{{model}}', '{{seed}}', '{{width}}', '{{height}}', '{{frames}}'];
 
-export function emptyProviderForm() {
+export function emptyProviderForm(modality = 'image') {
   return {
     name: '',
     base_url: '',
@@ -39,11 +55,13 @@ export function emptyProviderForm() {
     // Held as TEXT, not as an object: the admin is editing JSON by hand and
     // needs their formatting (and their syntax errors) preserved between
     // keystrokes. Parsing happens at save.
-    request_template: JSON.stringify(EXAMPLE_TEMPLATE, null, 2),
+    // BLANK on purpose: a worked example is now a template the admin applies
+    // (applyTemplate), not a default that leaks A1111 into every kind.
+    request_template: '',
     model: '',
-    models_path: '/sdapi/v1/sd-models',
-    models_pointer: '$[*].model_name',
-    response_image_pointer: 'images[0]',
+    models_path: '',
+    models_pointer: '',
+    response_image_pointer: '',
     // SOMET-346: how to cut a multi-frame sheet the remote returns whole.
     // Blank = a single static image, which is the pre-346 behaviour.
     sheet_layout: '',
@@ -55,7 +73,13 @@ export function emptyProviderForm() {
     // create time -- see providerToForm and the SettingsAdmin form, which
     // renders this read-only once a row exists, because changing it would
     // orphan clips' provider attribution.
-    modality: 'image',
+    modality,
+    // 'box' | 'a1111' | 'openai_compatible' | 'ollama' | 'generic', or ''
+    // for none. Set by the template the admin picked, sent as null when blank.
+    adapter: '',
+    // Audio only: per-group gateway model ({music, ambience, sfx_realistic,
+    // sfx_retro}). Blank values are dropped at save.
+    models_by_group: {},
     // Never populated from the server -- it cannot be. Tracks whether a token
     // exists so the UI can say so without knowing its value.
     has_token: false,
@@ -68,7 +92,7 @@ export function emptyProviderForm() {
 export function providerToForm(row) {
   if (!row) return emptyProviderForm();
   return {
-    ...emptyProviderForm(),
+    ...emptyProviderForm(row.modality || 'image'),
     name: row.name || '',
     base_url: row.base_url || '',
     auth_header_name: row.auth_header_name || '',
@@ -84,9 +108,65 @@ export function providerToForm(row) {
     sheet_directions: row.sheet_directions || '',
     enabled: row.enabled !== false,
     modality: row.modality || 'image',
+    adapter: row.adapter || '',
+    models_by_group: { ...(row.models_by_group || {}) },
     has_token: Boolean(row.has_token),
     token_touched: false,
   };
+}
+
+// Template `defaults` (or a stored row's fields) -> the form fields they set.
+// Only keys PRESENT in `defaults` appear in the result, so applying a template
+// that lacks a field leaves the form's current value alone. Same conversions
+// as providerToForm: the request template becomes editable JSON text and the
+// sheet grid numbers become strings.
+function defaultsToForm(defaults) {
+  const d = defaults || {};
+  const out = {};
+  for (const key of ['base_url', 'auth_header_name', 'model', 'models_path', 'models_pointer',
+    'response_image_pointer', 'sheet_layout', 'sheet_directions']) {
+    if (key in d) out[key] = d[key] == null ? '' : String(d[key]);
+  }
+  for (const key of ['sheet_columns', 'sheet_rows']) {
+    if (key in d) out[key] = d[key] == null ? '' : String(d[key]);
+  }
+  if ('request_template' in d) out.request_template = JSON.stringify(d.request_template ?? {}, null, 2);
+  if ('models_by_group' in d) out.models_by_group = { ...(d.models_by_group || {}) };
+  return out;
+}
+
+// Pre-fills a form from a provider template. Overwrites modality and adapter
+// (always from the template; adapter null -> '') plus every key in
+// template.defaults. NEVER touches name, auth_token, token_touched, has_token
+// or enabled: a template carries no credentials, and applying one over an
+// existing row must not read as "the token was edited" (see the file header).
+export function applyTemplate(form, template) {
+  return {
+    ...form,
+    modality: template.modality,
+    adapter: template.adapter || '',
+    ...defaultsToForm(template.defaults),
+  };
+}
+
+// Templates of one kind, built-in ones first (stable within each group).
+export function templatesForKind(templates, modality) {
+  const list = (templates || []).filter((t) => t.modality === modality);
+  return [...list.filter((t) => t.builtin), ...list.filter((t) => !t.builtin)];
+}
+
+// Dropdown options for a model field, from a discovery_cache ({entries:[{kind,
+// id,label,available,group?}]}). Entries of the form's kind only (and, for
+// audio, optionally one group). A saved `current` the provider no longer lists
+// stays selectable, so opening the form cannot silently change it.
+export function modelOptions(discoveryCache, modality, current, group) {
+  const entries = (discoveryCache?.entries || [])
+    .filter((e) => e.kind === modality && (group == null || e.group === group));
+  const options = entries.map((e) => ({ value: e.id, label: e.label || e.id }));
+  if (current && !options.some((o) => o.value === current)) {
+    options.push({ value: current, label: current });
+  }
+  return options;
 }
 
 // Returns { template } or { error }. Kept separate from validateProviderForm
@@ -126,9 +206,17 @@ export function validateProviderForm(form) {
   if (url.username || url.password) {
     return 'Base URL must not embed credentials; use the auth header fields instead';
   }
-  // Audio and text providers have no request template -- the server fills {}
-  // for one -- so the image-only field below is not part of their validation.
+  // An enabled text provider is useless without a model (the server rejects it
+  // too: 'a text provider needs a model').
+  if (form.modality === 'text' && form.enabled !== false && !(form.model || '').trim()) {
+    return 'Pick or type a model';
+  }
+  // Audio, text and sprite providers have no request template -- the server
+  // fills {} for one -- so the image-only field below is not part of their
+  // validation.
   if (TEMPLATELESS.has(form.modality)) return null;
+  // image_edit's template is optional: blank is fine, non-blank must parse.
+  if (form.modality === 'image_edit' && !(form.request_template || '').trim()) return null;
   const parsed = parseTemplate(form.request_template);
   if (parsed.error) return `Request template ${parsed.error}`;
   return null;
@@ -142,9 +230,8 @@ export function validateProviderForm(form) {
 // default is SDXL, which is never used implicitly. A saved model the box no
 // longer lists stays selectable, so opening the form cannot silently change it.
 export function spriteModelOptions(models, current) {
-  const values = [...(models || [])];
-  if (current && !values.includes(current)) values.push(current);
-  return [{ value: '', label: 'Box default (Qwen)' }, ...values.map((v) => ({ value: v, label: v }))];
+  const entries = (models || []).map((id) => ({ kind: 'sprite', id }));
+  return [{ value: '', label: 'Box default (Qwen)' }, ...modelOptions({ entries }, 'sprite', current)];
 }
 
 export function templateWarning(text) {
@@ -166,7 +253,7 @@ export function templateWarning(text) {
 // ignore. The server fills a default request_template ({}) itself when it is
 // absent and modality is 'audio', 'text' or 'sprite'.
 export function providerFormToPayload(form) {
-  const modality = TEMPLATELESS.has(form.modality) ? form.modality : 'image';
+  const modality = KIND_VALUES.has(form.modality) ? form.modality : 'image';
   const payload = {
     name: form.name.trim(),
     base_url: form.base_url.trim(),
@@ -174,7 +261,21 @@ export function providerFormToPayload(form) {
     model: form.model.trim() || null,
     enabled: form.enabled !== false,
     modality,
+    adapter: form.adapter || null,
   };
+  if (modality === 'audio') {
+    // Blank groups are dropped, not sent as "": a missing key means "use the
+    // provider's default model for that group".
+    const byGroup = {};
+    for (const [group, value] of Object.entries(form.models_by_group || {})) {
+      if (typeof value === 'string' && value.trim()) byGroup[group] = value.trim();
+    }
+    payload.models_by_group = byGroup;
+  }
+  if (modality === 'image_edit') {
+    const text = form.request_template || '';
+    payload.request_template = text.trim() ? (parseTemplate(text).template ?? {}) : {};
+  }
   if (modality === 'image') {
     const parsed = parseTemplate(form.request_template);
     payload.request_template = parsed.template;
@@ -191,4 +292,61 @@ export function providerFormToPayload(form) {
   // The three-way token decision, and the only place it is made.
   if (form.token_touched) payload.auth_token = form.auth_token;
   return payload;
+}
+
+// --- Provider templates (admin-managed presets) ---------------------------
+// A template is a provider form minus identity and credentials: `defaults`
+// never holds name, enabled or any token. Blank fields are omitted so applying
+// the template leaves the target form's value alone instead of blanking it.
+
+// Form -> POST/PATCH /api/ai-provider-templates body.
+export function templateToPayload(form) {
+  const defaults = {};
+  const put = (key, value) => { if (value !== '' && value != null) defaults[key] = value; };
+  put('base_url', (form.base_url || '').trim());
+  put('auth_header_name', (form.auth_header_name || '').trim());
+  put('model', (form.model || '').trim());
+  if (form.modality === 'image' || form.modality === 'image_edit') {
+    const text = form.request_template || '';
+    if (text.trim()) {
+      const parsed = parseTemplate(text);
+      if (parsed.template) defaults.request_template = parsed.template;
+    }
+  }
+  if (form.modality === 'image') {
+    put('models_path', (form.models_path || '').trim());
+    put('models_pointer', (form.models_pointer || '').trim());
+    put('response_image_pointer', (form.response_image_pointer || '').trim());
+    put('sheet_layout', form.sheet_layout || '');
+    put('sheet_columns', form.sheet_columns === '' ? '' : Number(form.sheet_columns));
+    put('sheet_rows', form.sheet_rows === '' ? '' : Number(form.sheet_rows));
+    put('sheet_directions', (form.sheet_directions || '').trim());
+  }
+  if (form.modality === 'audio') {
+    const byGroup = {};
+    for (const [group, value] of Object.entries(form.models_by_group || {})) {
+      if (typeof value === 'string' && value.trim()) byGroup[group] = value.trim();
+    }
+    if (Object.keys(byGroup).length) defaults.models_by_group = byGroup;
+  }
+  return {
+    name: (form.name || '').trim(),
+    modality: KIND_VALUES.has(form.modality) ? form.modality : 'image',
+    adapter: form.adapter || null,
+    description: form.description || '',
+    defaults,
+  };
+}
+
+// Template row -> editable form (the inverse of templateToPayload). Blank
+// token and has_token=false: a template never carries credentials.
+export function templateToForm(row) {
+  if (!row) return { ...emptyProviderForm(), description: '' };
+  return {
+    ...emptyProviderForm(row.modality || 'image'),
+    name: row.name || '',
+    description: row.description || '',
+    adapter: row.adapter || '',
+    ...defaultsToForm(row.defaults),
+  };
 }
