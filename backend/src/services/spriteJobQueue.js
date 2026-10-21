@@ -12,6 +12,8 @@ const { seedFor } = require('./artJobQueue.js');
 // frame count its options derive. Facings come from the options (8 or ['s']).
 // Rows are written for the GPU box (backend 'gpu-box'); `frames` mirrors
 // frames_per_action so older readers of `frames` still see the frame count.
+// For a prop ('object') row the actions are not drawn (Props v2: one edited
+// static image, no sheet); 'sway' among them means the prop sways in game.
 const DEFAULT_ACTIONS = { creature: ['idle', 'walk'], object: ['idle', 'sway'] };
 
 async function enqueue(db, targets, { actions, framesPerAction } = {}) {

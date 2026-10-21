@@ -138,3 +138,39 @@ test('approve of a box appearance-variant creature writes character_appearances 
   assert.equal(JSON.parse(up.params[0]).static_frame, 'idle/s/0');
   assert.deepEqual(up.params.slice(2), [8, 3]);
 });
+
+// Props v2: a box prop row is ONE edited static image (image_key, no sheet);
+// approve makes it the type's static image and records whether it sways.
+const PROP_JOB = {
+  id: BOX_ID, entity_type_id: 8, status: 'done', backend: 'gpu-box', generation_kind: 'object',
+  frames: 4, frames_per_action: 4, actions: ['idle', 'sway'],
+  image_key: 'sprites/Pine_Tree/r/image.png', concept_key: 'sprites/Pine_Tree/r/concept.png',
+  atlas_key: null, manifest_key: null,
+};
+
+test('approve of a box prop sets the static image, clears the sprite and sets sway from its actions', async () => {
+  for (const [actions, sway] of [[['idle', 'sway'], true], [['idle'], false]]) {
+    const calls = [];
+    const store = { getObjectStream: async () => { throw new Error('a prop approve must not read a manifest'); } };
+    // eslint-disable-next-line no-await-in-loop
+    const res = await request(routerApp(boxApprovePool(calls, { ...PROP_JOB, actions }), store))
+      .post('/api/sprite-admin/jobs/approve').send({ job_ids: [BOX_ID] });
+    assert.deepEqual(res.body.approved, [BOX_ID], JSON.stringify(actions));
+    const up = calls.find((c) => /UPDATE entity_types SET image/i.test(c.sql));
+    assert.ok(up, 'expected UPDATE entity_types SET image');
+    assert.match(up.sql, /sprite = NULL/);
+    assert.match(up.sql, /render_mode = 'static'/);
+    assert.match(up.sql, /sway = \$2/);
+    assert.deepEqual(up.params, [PROP_JOB.image_key, sway, 8]);
+    assert.ok(!calls.some((c) => /UPDATE entity_types SET sprite/i.test(c.sql)));
+    assert.ok(calls.some((c) => /UPDATE sprite_sets SET status = 'approved'/i.test(c.sql)));
+  }
+});
+
+test('approve skips a box prop row with no image', async () => {
+  const calls = [];
+  const res = await request(routerApp(boxApprovePool(calls, { ...PROP_JOB, image_key: null }), storeWith({ frames: {} })))
+    .post('/api/sprite-admin/jobs/approve').send({ job_ids: [BOX_ID] });
+  assert.deepEqual(res.body, { approved: [], skipped: 1 });
+  assert.ok(!calls.some((c) => /UPDATE/i.test(c.sql)));
+});

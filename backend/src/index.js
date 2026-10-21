@@ -544,6 +544,9 @@ async function getEntityTypesMap() {
       // showed up in game (tile_types has always exposed its equivalents).
       render_mode: row.render_mode,
       sprite: row.sprite,
+      // Props v2: an approved GPU-box prop's static image sways procedurally
+      // in the renderer (systems/sway.js) when this is true.
+      sway: row.sway === true,
       prompt: row.prompt,
       // SOMET-493 -- what the inspect card's aggression badge is derived from.
       // Shipped as the raw catalog facts (faction + the behaviour's chase

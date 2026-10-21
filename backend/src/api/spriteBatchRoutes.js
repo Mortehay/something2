@@ -274,7 +274,19 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       const approved = [];
       for (const job of jobs) {
         const boxRow = job.backend === 'gpu-box';
-        if (!boxRow && job.generation_kind === 'object' && job.frames === 1) {
+        if (boxRow && job.generation_kind === 'object' && job.appearance_variant == null && !job.atlas_key) {
+          // Props v2: one edited static image (no sheet); the game sways it
+          // procedurally when 'sway' was among the queued actions. A box prop
+          // done before Props v2 still has a sheet and takes the branch below.
+          if (!job.image_key) continue;
+          const sway = Array.isArray(job.actions) && job.actions.includes('sway');
+          // eslint-disable-next-line no-await-in-loop
+          await pool.query(
+            `UPDATE entity_types SET image = $1, sprite = NULL, render_mode = 'static', sway = $2,
+                    updated_at = now() WHERE id = $3`,
+            [job.image_key, sway, job.entity_type_id],
+          );
+        } else if (!boxRow && job.generation_kind === 'object' && job.frames === 1) {
           if (!job.image_key) continue;
           // eslint-disable-next-line no-await-in-loop
           await pool.query(
