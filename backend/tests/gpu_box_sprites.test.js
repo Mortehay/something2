@@ -73,13 +73,45 @@ test('generateConcept ties the concept to the task result.url and never lists as
   assert.equal(calls.filter((c) => c.key.includes('task-status')).length, 3);
 });
 
-test('generateConcept omits llm_name when the provider has no model', async () => {
-  const { fetchImpl, calls } = fakeBox(conceptRoutes([fx('task-status-done.json')]));
+// Roster shape as the box serves GET /api/core-models (captured 2026-10-21):
+// its API default is SDXL, its own UI defaults to Qwen-Image.
+const coreModels = (models) => () => json({ models });
+const SDXL = { value: 'stabilityai/stable-diffusion-xl-base-1.0+nerijs/pixel-art-xl', default: true, ui_default: false, available: true };
+const QWEN_FAST = { value: 'gguf:qwen-image-2512-Q2_K+lightning8', default: false, ui_default: true, available: true };
+const QWEN_BEST = { value: 'gguf:Qwen-Image-2512-Q3_K_M', default: false, ui_default: false, available: true };
+
+test('generateConcept with no provider model uses the box UI default Qwen model, never the SDXL API default', async () => {
+  const { fetchImpl, calls } = fakeBox({
+    ...conceptRoutes([fx('task-status-done.json')]),
+    'GET /api/core-models': coreModels([SDXL, QWEN_FAST, QWEN_BEST]),
+  });
   const r = await box.generateConcept({ ...provider, model: null }, { prompt: 'a pine tree' }, { fetchImpl, sleep });
   assert.equal(r.ok, true);
-  const form = new URLSearchParams(String(calls[0].body));
+  const form = new URLSearchParams(String(calls.find((c) => c.key === 'POST /api/generate_core').body));
   assert.equal(form.get('prompt'), 'a pine tree');
-  assert.equal(form.has('llm_name'), false);
+  assert.equal(form.get('llm_name'), 'gguf:qwen-image-2512-Q2_K+lightning8');
+});
+
+test('generateConcept falls back to any available Qwen model when the UI default is not Qwen', async () => {
+  const { fetchImpl, calls } = fakeBox({
+    ...conceptRoutes([fx('task-status-done.json')]),
+    'GET /api/core-models': coreModels([{ ...SDXL, ui_default: true }, { ...QWEN_FAST, ui_default: false, available: false }, QWEN_BEST]),
+  });
+  const r = await box.generateConcept({ ...provider, model: '' }, { prompt: 'x' }, { fetchImpl, sleep });
+  assert.equal(r.ok, true);
+  const form = new URLSearchParams(String(calls.find((c) => c.key === 'POST /api/generate_core').body));
+  assert.equal(form.get('llm_name'), 'gguf:Qwen-Image-2512-Q3_K_M');
+});
+
+test('generateConcept refuses to run when the box offers no available Qwen model', async () => {
+  const { fetchImpl, calls } = fakeBox({
+    ...conceptRoutes([fx('task-status-done.json')]),
+    'GET /api/core-models': coreModels([SDXL, { ...QWEN_FAST, available: false }]),
+  });
+  const r = await box.generateConcept({ ...provider, model: null }, { prompt: 'x' }, { fetchImpl, sleep });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /no available Qwen concept model/);
+  assert.equal(calls.some((c) => c.key === 'POST /api/generate_core'), false);
 });
 
 test('generateConcept fails with the box words when the task fails', async () => {

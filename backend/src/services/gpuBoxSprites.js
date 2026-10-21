@@ -87,16 +87,33 @@ async function checkAuth(provider, { fetchImpl = fetch } = {}) {
   return r;
 }
 
+const isQwen = (m) => /qwen/i.test(String(m && m.value || ''));
+
+// The concept model when the provider names none. The box's API default is
+// SDXL + pixel-art LoRA, which the user rejected (its concepts feed the Qwen
+// sheet builder badly); the box's own web UI defaults to Qwen-Image. So: the
+// UI default if it is an available Qwen model, else any available Qwen model,
+// else refuse -- never silently fall back to SDXL.
+async function resolveConceptModel(provider, { fetchImpl = fetch } = {}) {
+  if (provider.model) return { ok: true, model: provider.model };
+  const r = await callJson(provider, 'GET', '/api/core-models', { fetchImpl });
+  if (!r.ok) return r;
+  const qwen = (Array.isArray(r.json && r.json.models) ? r.json.models : [])
+    .filter((m) => m && m.available !== false && isQwen(m));
+  const pick = qwen.find((m) => m.ui_default) || qwen[0];
+  if (!pick) return { ok: false, error: 'GPU box has no available Qwen concept model (GET /api/core-models)', providerFault: true };
+  return { ok: true, model: pick.value };
+}
+
 // Submits a concept task, polls it to a terminal state, downloads the image.
 // The concept is whatever THIS task's result.url names -- never the newest
 // asset, which a concurrent run (or another user of the box) can own.
 async function generateConcept(provider, { prompt }, {
   fetchImpl = fetch, sleep = realSleep, pollMs = POLL_MS(), timeoutMs = CONCEPT_TIMEOUT_MS(),
 } = {}) {
-  // No model on the provider -> no llm_name, so the box uses its own default
-  // instead of being told to load a model named "".
-  const form = new URLSearchParams({ prompt });
-  if (provider.model) form.set('llm_name', provider.model);
+  const model = await resolveConceptModel(provider, { fetchImpl });
+  if (!model.ok) return model;
+  const form = new URLSearchParams({ prompt, llm_name: model.model });
   const sub = await callJson(provider, 'POST', '/api/generate_core', {
     body: form.toString(),
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
