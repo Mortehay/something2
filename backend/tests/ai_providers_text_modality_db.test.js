@@ -45,8 +45,11 @@ test('text modality providers', { skip }, async (t) => {
 
   const refreshed = await request(app).post(`/api/ai-providers/${created.body.id}/refresh-models`).set('Authorization', auth);
   assert.deepEqual({ ok: refreshed.body.ok, models: refreshed.body.models }, { ok: true, models: ['qwen-instruct'] });
-  assert.equal(seen.at(-1).url, '/api/text/models');
-  assert.equal(seen.at(-1).auth, 'Bearer k', 'refresh must hit the authenticated text endpoint');
+  // Refresh also runs kind-aware discovery (other box endpoints), so look for
+  // the text call rather than assuming it was the last request.
+  const textCall = seen.find((r) => r.url === '/api/text/models');
+  assert.ok(textCall, 'refresh must hit the text endpoint');
+  assert.equal(textCall.auth, 'Bearer k', 'refresh must hit the authenticated text endpoint');
 
   const tested = await request(app).post(`/api/ai-providers/${created.body.id}/test`).set('Authorization', auth);
   assert.equal(tested.body.ok, true);

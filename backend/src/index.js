@@ -359,6 +359,7 @@ function evictOrWarn(worldId) {
 const aiProviders = require('./services/aiProviders');
 const aiProviderTemplates = require('./services/aiProviderTemplates');
 const providerDiscovery = require('./services/providerDiscovery');
+const providerCatalog = require('./services/providerCatalog');
 const remoteImageProvider = require('./services/remoteImageProvider');
 const {
   resolveGenerationTarget, loadTypeOverride, typeTableForKind,
@@ -3043,6 +3044,19 @@ app.post('/api/ai-providers/:id/activate', adminGuard, async (req, res) => {
 app.post('/api/ai-providers/:id/refresh-models', adminGuard, async (req, res) => {
   const { id } = req.params;
   if (invalidId(id)) return res.status(400).json({ error: 'id must be an integer' });
+  // Kind-aware discovery rides along on success only. It must never change the
+  // ok/error outcome of the legacy refresh, so any failure here is swallowed.
+  const withDiscovery = async (provider, body) => {
+    try {
+      const d = await providerCatalog.discover(provider);
+      if (!d.ok) return body;
+      await aiProviders.saveDiscoveryCache(pool, id, d.cache);
+      return { ...body, discovery: d.cache };
+    } catch (err) {
+      console.error('provider discovery failed', err.message);
+      return body;
+    }
+  };
   try {
     const provider = await aiProviders.loadProviderWithSecret(pool, id);
     if (!provider) return res.status(404).json({ error: 'AI provider not found' });
@@ -3051,13 +3065,13 @@ app.post('/api/ai-providers/:id/refresh-models', adminGuard, async (req, res) =>
       if (!r.ok) return res.json({ ok: false, error: r.error, status: r.status ?? null });
       const models = [...r.styles.map((s) => s.value), ...r.cues.map((c) => `cue:${c.value}`)];
       await aiProviders.saveModelsCache(pool, id, models);
-      return res.json({ ok: true, models, styles: r.styles, cues: r.cues });
+      return res.json(await withDiscovery(provider, { ok: true, models, styles: r.styles, cues: r.cues }));
     }
     if (provider.modality === 'text') {
       const r = await textProvider.listTextModels(provider);
       if (!r.ok) return res.json({ ok: false, error: r.error, status: r.status ?? null });
       await aiProviders.saveModelsCache(pool, id, r.models);
-      return res.json({ ok: true, models: r.models });
+      return res.json(await withDiscovery(provider, { ok: true, models: r.models }));
     }
     // A sprite provider's models are the box's CONCEPT models (the sheet
     // builder's model is fixed by the box). Blank model = the box's Qwen default.
@@ -3065,14 +3079,14 @@ app.post('/api/ai-providers/:id/refresh-models', adminGuard, async (req, res) =>
       const r = await gpuBoxSprites.listConceptModels(provider);
       if (!r.ok) return res.json({ ok: false, error: r.error, status: r.status ?? null });
       await aiProviders.saveModelsCache(pool, id, r.models);
-      return res.json({ ok: true, models: r.models });
+      return res.json(await withDiscovery(provider, { ok: true, models: r.models }));
     }
     const result = await providerDiscovery.fetchModels(provider);
     if (!result.ok) {
       return res.json({ ok: false, error: result.error, status: result.status ?? null });
     }
     await aiProviders.saveModelsCache(pool, id, result.models);
-    res.json({ ok: true, models: result.models });
+    res.json(await withDiscovery(provider, { ok: true, models: result.models }));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to refresh models' });

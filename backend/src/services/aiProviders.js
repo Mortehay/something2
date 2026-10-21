@@ -339,6 +339,16 @@ async function saveModelsCache(db, id, models) {
   return serializeProvider(r.rows[0]);
 }
 
+// Stores the kind-aware discovery result (providerCatalog.discover().cache).
+async function saveDiscoveryCache(db, id, cache) {
+  const r = await db.query(
+    `UPDATE ai_providers SET discovery_cache = $1, discovery_fetched_at = now(), updated_at = now()
+     WHERE id = $2 RETURNING *`,
+    [JSON.stringify(cache), id],
+  );
+  return serializeProvider(r.rows[0]);
+}
+
 module.exports = {
   serializeProvider,
   serializeProviders,
@@ -355,6 +365,7 @@ module.exports = {
   deleteProvider,
   setActiveProvider,
   saveModelsCache,
+  saveDiscoveryCache,
   WRITABLE,
   MODALITIES,
   ADAPTERS,
