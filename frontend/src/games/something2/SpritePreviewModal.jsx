@@ -8,7 +8,7 @@ import styled, { keyframes } from 'styled-components';
 import { useQuery } from '@tanstack/react-query';
 import { Modal, Muted } from './seedUi.jsx';
 import { assetUrl, assetUrlVersioned } from './useTileSprites.js';
-import { conceptImageOf, isBoxProp, propEffect, propFxLabel, rowLabels } from './spriteSelection.js';
+import { conceptImageOf, conceptLabelOf, isBoxProp, sheetImageOf, propEffect, propFxLabel, rowLabels } from './spriteSelection.js';
 
 const Cols = styled.div`display: flex; gap: 1.2rem; align-items: flex-start; flex-wrap: wrap; margin-top: 0.8rem;`;
 const Col = styled.div`display: flex; flex-direction: column; gap: 0.4rem; min-width: 0;`;
@@ -87,7 +87,7 @@ function PropResult({ subject, version }) {
 export default function SpritePreviewModal({ subject, onClose }) {
   const [size, setSize] = useState(null);
   const [sheetWidth, setSheetWidth] = useState(null);
-  const sheetKey = subject.atlas_key || subject.image_key;
+  const sheetKey = sheetImageOf(subject);
   const manifest = useSheetManifest(subject.manifest_key, true);
   const engine = manifest.data?.engine;
   const header = [subject.name, subject.box_job_id, engine].filter(Boolean).join(' · ');
@@ -98,7 +98,7 @@ export default function SpritePreviewModal({ subject, onClose }) {
       <h3 style={{ margin: 0 }}>{header}</h3>
       <Cols>
         <Col>
-          <strong>{subject.concept_key || !subject.appearance_image ? 'Used image' : 'Appearance art'}</strong>
+          <strong>{conceptLabelOf(subject)}</strong>
           {conceptImageOf(subject) ? (
             <>
               <Img src={assetUrlVersioned(conceptImageOf(subject), version)} alt="Concept"

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   filterSpriteSubjects, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   targetsForSprites, framesCap, cellCount, estimateLabel, defaultActionsFor, rowLabels,
-  isBoxProp, PROP_FX_OPTIONS, propFxLabel, propEffect, selectionKinds, queuePayload, conceptImageOf,
+  isBoxProp, PROP_FX_OPTIONS, propFxLabel, propEffect, selectionKinds, queuePayload, conceptImageOf, sheetImageOf, conceptLabelOf,
 } from '../spriteSelection.js';
 import { PAGE_SIZE } from '../artSelection.js';
 
@@ -206,5 +206,28 @@ describe('conceptImageOf', () => {
     expect(conceptImageOf({ concept_key: null, appearance_image: 'a.png' })).toBe('a.png');
     expect(conceptImageOf({ concept_key: null, appearance_image: null })).toBe(null);
     expect(conceptImageOf({})).toBe(null);
+  });
+  it('falls back to the entity\'s existing art last', () => {
+    expect(conceptImageOf({ image: 'art.png' })).toBe('art.png');
+    expect(conceptImageOf({ appearance_image: 'a.png', image: 'art.png' })).toBe('a.png');
+  });
+});
+
+describe('sheetImageOf', () => {
+  it('is only something a sprite job produced or an approved sprite sheet -- never the plain entity art', () => {
+    expect(sheetImageOf({ image: 'art.png' })).toBe(null);
+    expect(sheetImageOf({ atlas_key: 'sheet.png', image: 'art.png' })).toBe('sheet.png');
+    expect(sheetImageOf({ image_key: 'result.png', image: 'art.png' })).toBe('result.png');
+    expect(sheetImageOf({ sprite: { atlas_key: 'approved.png' }, image: 'art.png' })).toBe('approved.png');
+    expect(sheetImageOf({})).toBe(null);
+  });
+});
+
+describe('conceptLabelOf', () => {
+  it('names what the concept image is', () => {
+    expect(conceptLabelOf({ concept_key: 'c.png', image: 'a.png' })).toBe('Used image');
+    expect(conceptLabelOf({ appearance_image: 'a.png' })).toBe('Appearance art');
+    expect(conceptLabelOf({ image: 'a.png' })).toBe('Current art');
+    expect(conceptLabelOf({})).toBe('Used image');
   });
 });

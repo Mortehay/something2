@@ -8,7 +8,7 @@ import {
   useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
 } from './useSpriteConsole.js';
 import {
-  cellCount, conceptImageOf, defaultActionsFor, isBoxProp, estimateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
+  cellCount, conceptImageOf, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   PROP_FX_OPTIONS, propFxLabel, queuePayload, selectionKinds, spriteShape, toggleSpriteSubject,
 } from './spriteSelection.js';
 
@@ -264,7 +264,7 @@ function SpriteConsoleAdmin() {
           </tr></thead>
           <tbody>
             {shown.rows.map((subject) => {
-              const sheet = subject.atlas_key || subject.image_key || subject.image;
+              const sheet = sheetImageOf(subject);
               const thumb = (key, label) => (key ? (
                 <ThumbButton type="button" aria-label={`${label}: ${subject.name}`} onClick={() => setPreviewId(subject.id)}>
                   <Thumb src={assetUrlVersioned(key, subject.job_updated_at)} alt="" />

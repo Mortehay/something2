@@ -88,10 +88,24 @@ export function cellCount(rows, actions, frames) {
 
 // A GPU-box prop row made the Props v2 way: one generated cutout image, no sheet. A box
 // prop done before Props v2 still carries a sheet (atlas_key) and previews as one.
-// The image a row was (or, for a hero appearance, should be) drawn from: the
-// box concept once generated, else the appearance's own art, else nothing.
+// The image a row was (or would be) drawn from: the box concept once
+// generated, else a hero appearance's own art, else the entity's existing art.
 export function conceptImageOf(subject) {
-  return subject?.concept_key || subject?.appearance_image || null;
+  return subject?.concept_key || subject?.appearance_image || subject?.image || null;
+}
+
+export function conceptLabelOf(subject) {
+  if (subject?.concept_key) return 'Used image';
+  if (subject?.appearance_image) return 'Appearance art';
+  if (subject?.image) return 'Current art';
+  return 'Used image';
+}
+
+// What the Sheet / Result column shows: only output of a sprite job (sheet or
+// prop result) or an approved sprite sheet -- never the entity's plain art,
+// which made every entity with Art Generation art look already rendered.
+export function sheetImageOf(subject) {
+  return subject?.atlas_key || subject?.image_key || subject?.sprite?.atlas_key || null;
 }
 
 export function isBoxProp(subject) {
