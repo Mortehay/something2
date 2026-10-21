@@ -76,7 +76,7 @@ test('GET /chunk (cache miss) returns decorations matching generateChunkDecorati
   assert.deepEqual(res.body.decorations, expectedDecorations);
   assert.ok(expectedDecorations.length > 0, 'fixture should place at least one decoration');
   for (const d of res.body.decorations) {
-    assert.deepEqual(Object.keys(d).sort(), ['blocking', 'col', 'name', 'row']);
+    assert.deepEqual(Object.keys(d).sort(), ['blocking', 'col', 'layer', 'name', 'ox', 'oy', 'radius', 'row']);
     assert.equal(d.name, 'Tree');
     assert.equal(d.blocking, true);
   }

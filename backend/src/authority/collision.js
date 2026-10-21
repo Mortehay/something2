@@ -192,7 +192,7 @@ class ServerMap {
     set = new Set();
     if (this.decorationDefs.length > 0) {
       const grid = this.getChunk(cx, cy);
-      for (const d of generateChunkDecorations(this.world, cx, cy, grid, this.decorationDefs)) {
+      for (const d of generateChunkDecorations(this.world, cx, cy, grid, this.decorationDefs, { cover: false })) {
         if (d.blocking) set.add(`${d.row},${d.col}`);
       }
     }

@@ -20,7 +20,8 @@
 // to pick it up. Rare and admin-only; acceptable.
 async function loadDecorationDefs(pool) {
   const { rows } = await pool.query(
-    `SELECT name, walkable, spawn_tiles, chance
+    `SELECT name, walkable, spawn_tiles, chance,
+            scenery_layer, block_radius, max_per_tile
        FROM entity_types
       WHERE is_creature = false
         AND spawn_tiles IS NOT NULL

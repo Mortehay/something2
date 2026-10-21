@@ -77,7 +77,7 @@ function blockingDecorationCells(world, decorationDefs) {
   for (let cy = 0; cy * N < height; cy++) {
     for (let cx = 0; cx * N < width; cx++) {
       const tiles = generateRegion(world, cy * N, cx * N, N, N);
-      for (const d of generateChunkDecorations(world, cx, cy, tiles, decorationDefs)) {
+      for (const d of generateChunkDecorations(world, cx, cy, tiles, decorationDefs, { cover: false })) {
         if (!d.blocking) continue;
         const gRow = cy * N + d.row, gCol = cx * N + d.col;
         if (gRow < 0 || gRow >= height || gCol < 0 || gCol >= width) continue;
