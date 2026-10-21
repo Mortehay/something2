@@ -8,7 +8,7 @@ import {
   useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
 } from './useSpriteConsole.js';
 import {
-  cellCount, conceptImageOf, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
+  cellCount, conceptImageOf, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, batchProgress, currentProgressLabel, rowProgressLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   PROP_FX_OPTIONS, propFxLabel, queuePayload, selectionKinds, spriteShape, toggleSpriteSubject,
 } from './spriteSelection.js';
 
@@ -36,6 +36,10 @@ const Hint = styled.p`margin: 0.35rem 0; color: var(--s2-text-muted); font-size:
 const Progress = styled.section`
   padding: 0.75rem 1rem; border: 1px solid var(--s2-border); border-radius: 8px;
   background: var(--s2-surface-raised); margin: 0.75rem 0;
+`;
+const BatchBar = styled.div`
+  height: 6px; margin: 0.4rem 0; border-radius: 999px; overflow: hidden; background: var(--s2-bg-sunken);
+  > div { height: 100%; background: var(--s2-accent); transition: width 0.4s ease; }
 `;
 const TableWrap = styled.div`
   overflow-x: auto; border: 1px solid var(--s2-border); border-radius: 8px;
@@ -80,6 +84,7 @@ function derivedFrames(subject) {
 
 function SpriteConsoleAdmin() {
   const { stats, run } = useSpriteQueue();
+  const batch = batchProgress(run);
   const live = Boolean(run?.running || stats.queued || stats.running);
   const { subjects, isLoading, error } = useSpriteSubjects({ live });
   const [shape, setShape] = useState('all');
@@ -162,7 +167,20 @@ function SpriteConsoleAdmin() {
           {stats.queued || 0} queued · {stats.running || 0} running · {stats.done || 0} ready for review
           {' · '}{stats.failed || 0} failed · {stats.approved || 0} approved
         </Hint>
-        {run?.current && <Hint>Generating {run.current.creature}</Hint>}
+        {run?.running && batch.totalCells > 0 && (
+          <>
+            <BatchBar role="progressbar" aria-label="Batch progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={batch.pct}>
+              <div style={{ width: `${batch.pct}%` }} />
+            </BatchBar>
+            <Hint>
+              Batch {batch.pct}% · {batch.doneCells.toLocaleString('en-US')} / {batch.totalCells.toLocaleString('en-US')} cells
+              {batch.leftLabel && ` · ${batch.leftLabel}`}
+            </Hint>
+          </>
+        )}
+        {run?.current && (
+          <Hint>Generating {run.current.creature}{currentProgressLabel(run) && ` · ${currentProgressLabel(run)}`}</Hint>
+        )}
       </Progress>
 
       <Bar>
@@ -286,7 +304,7 @@ function SpriteConsoleAdmin() {
                   <td>{subject.backend || 'local'}</td>
                   <td>{subject.job_state === 'failed'
                     ? <ErrorText title={subject.last_error || ''}>failed</ErrorText>
-                    : <Pill>{subject.job_state || 'not queued'}</Pill>}</td>
+                    : <Pill>{rowProgressLabel(subject, run) || subject.job_state || 'not queued'}</Pill>}</td>
                   <td title={subject.prompt || subject.name}>{subject.prompt || subject.name}</td>
                 </tr>
               );

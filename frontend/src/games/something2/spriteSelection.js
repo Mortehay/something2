@@ -158,6 +158,45 @@ export function estimateLabel(cells, secondsPerCell) {
   return `${noun} · ~${h ? `${h} h ` : ''}${h && !m ? '' : `${m} min`}`.trimEnd();
 }
 
+// Batch progress from the dispatcher's run: cell-weighted, the running row
+// counting by its box percentage. leftLabel follows estimateLabel's style.
+export function batchProgress(run) {
+  const total = Number(run?.totalCells) || 0;
+  if (!run || total <= 0) return { pct: 0, doneCells: 0, totalCells: total, leftLabel: '' };
+  const cur = run.current;
+  const partial = cur && cur.phase !== 'concept' ? (Number(cur.cells) || 0) * ((Number(cur.pct) || 0) / 100) : 0;
+  const done = Math.min(total, (Number(run.doneCells) || 0) + partial);
+  const minutes = Math.round(((total - done) * (Number(run.secondsPerCell) || 57)) / 60);
+  let leftLabel = '< 1 min left';
+  if (minutes >= 1) {
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    const span = h >= 10 ? `~${h} h` : `~${h ? `${h} h ` : ''}${h && !m ? '' : `${m} min`}`.trimEnd();
+    leftLabel = `${span} left`;
+  }
+  return { pct: Math.round((done / total) * 100), doneCells: Math.floor(done), totalCells: total, leftLabel };
+}
+
+// What the running row is doing right now, from run.current.
+export function currentProgressLabel(run) {
+  const cur = run?.current;
+  if (!cur) return '';
+  if (cur.phase === 'concept') return 'making concept…';
+  if (cur.phase === 'queued') return "waiting in the box's queue";
+  if (cur.phase === 'storing') return 'storing…';
+  const pct = `${Math.round(Number(cur.pct) || 0)}%`;
+  return cur.message ? `${pct} · ${cur.message}` : pct;
+}
+
+// "running 37%" for the row the dispatcher is drawing (run.current.id is the
+// sprite_sets id, i.e. the subject's job_id); null for every other row.
+export function rowProgressLabel(subject, run) {
+  const cur = run?.current;
+  if (!cur || cur.phase !== 'running' || subject?.job_state !== 'running') return null;
+  if (!subject.job_id || cur.id !== subject.job_id) return null;
+  return `running ${Math.round(Number(cur.pct) || 0)}%`;
+}
+
 // Initial action ticks: idle, filtered to the catalog's ids. Props never
 // add actions (their effect is the separate prop_fx select).
 export function defaultActionsFor(catalog, _rows) {

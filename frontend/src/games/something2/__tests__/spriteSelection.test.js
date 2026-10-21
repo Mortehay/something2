@@ -3,6 +3,7 @@ import {
   filterSpriteSubjects, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   targetsForSprites, framesCap, cellCount, estimateLabel, defaultActionsFor, rowLabels,
   isBoxProp, PROP_FX_OPTIONS, propFxLabel, propEffect, selectionKinds, queuePayload, conceptImageOf, sheetImageOf, conceptLabelOf,
+  batchProgress, currentProgressLabel, rowProgressLabel,
 } from '../spriteSelection.js';
 import { PAGE_SIZE } from '../artSelection.js';
 
@@ -229,5 +230,45 @@ describe('conceptLabelOf', () => {
     expect(conceptLabelOf({ appearance_image: 'a.png' })).toBe('Appearance art');
     expect(conceptLabelOf({ image: 'a.png' })).toBe('Current art');
     expect(conceptLabelOf({})).toBe('Used image');
+  });
+});
+
+describe('sprite batch progress (SOMET-662)', () => {
+  const run = {
+    running: true, totalCells: 4368, doneCells: 500, secondsPerCell: 50,
+    current: { id: 'r1', phase: 'running', pct: 20, message: 'cell 3/16', cells: 150 },
+  };
+
+  it('weights the running row into the batch percentage and counts', () => {
+    const p = batchProgress(run);
+    expect(p.doneCells).toBe(530);
+    expect(p.totalCells).toBe(4368);
+    expect(p.pct).toBe(12);
+    // (4368 - 530) * 50 s = 53.3 h
+    expect(p.leftLabel).toBe('~53 h left');
+  });
+
+  it('formats short remainders and tolerates no run', () => {
+    expect(batchProgress({ totalCells: 10, doneCells: 8, secondsPerCell: 30, current: null }).leftLabel).toBe('~1 min left');
+    expect(batchProgress({ totalCells: 10, doneCells: 10, secondsPerCell: 30, current: null }).leftLabel).toBe('< 1 min left');
+    expect(batchProgress({ totalCells: 600, doneCells: 100, secondsPerCell: 10, current: null }).leftLabel).toBe('~1 h 23 min left');
+    expect(batchProgress(null)).toEqual({ pct: 0, doneCells: 0, totalCells: 0, leftLabel: '' });
+    expect(batchProgress({ running: true, totalCells: 0, doneCells: 0 }).pct).toBe(0);
+  });
+
+  it('labels the current row by phase', () => {
+    expect(currentProgressLabel(run)).toBe('20% · cell 3/16');
+    expect(currentProgressLabel({ current: { phase: 'concept', pct: 0, cells: 4 } })).toBe('making concept…');
+    expect(currentProgressLabel({ current: { phase: 'queued', pct: 0, cells: 4 } })).toBe("waiting in the box's queue");
+    expect(currentProgressLabel({ current: { phase: 'storing', pct: 100, cells: 4 } })).toBe('storing…');
+    expect(currentProgressLabel({ current: { phase: 'running', pct: 5, message: '', cells: 4 } })).toBe('5%');
+    expect(currentProgressLabel(null)).toBe('');
+  });
+
+  it('shows a percentage only on the running row', () => {
+    expect(rowProgressLabel({ job_id: 'r1', job_state: 'running' }, run)).toBe('running 20%');
+    expect(rowProgressLabel({ job_id: 'r2', job_state: 'running' }, run)).toBeNull();
+    expect(rowProgressLabel({ job_id: 'r1', job_state: 'queued' }, run)).toBeNull();
+    expect(rowProgressLabel({ job_id: 'r1', job_state: 'running' }, { current: { id: 'r1', phase: 'concept', pct: 0 } })).toBeNull();
   });
 });
