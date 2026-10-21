@@ -70,7 +70,7 @@ test('art and audio are binary groups writing their tables in order', () => {
   assert.deepStrictEqual(shape('art'), [
     'catalog_art', 'art_prompt_descriptions', 'art_prompt_notes', 'character_appearances',
     'tile_types[image,render_mode,sprite]',
-    'entity_types[image,sprite,render_mode,display_width,display_height,prompt]',
+    'entity_types[image,sprite,render_mode,display_width,display_height,prompt,sway]',
     'item_types[icon]',
   ]);
   assert.deepStrictEqual(shape('audio'), ['audio_clips', 'audio_bindings', 'audio_prompts']);
@@ -160,7 +160,7 @@ const specOf = (table) => GROUPS.flatMap((g) => tableSpecs(g)).find((s) => s.tab
 
 test('plan-2 fixed decisions (brief) are registered as decided', () => {
   const et = specOf('entity_types');
-  for (const c of ['image', 'sprite', 'render_mode', 'display_width', 'display_height', 'prompt']) {
+  for (const c of ['image', 'sprite', 'render_mode', 'display_width', 'display_height', 'prompt', 'sway']) {
     assert.strictEqual(et.omit[c], 'art group (plan 3)', `entity_types.${c}`);
   }
   assert.strictEqual(et.omit.ai_provider_mode, 'per-PC');

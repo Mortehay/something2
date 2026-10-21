@@ -115,7 +115,7 @@ describe('sprite console action controls', () => {
   });
 
   it('actionHint explains what sway means for props', () => {
-    expect(actionHint('sway')).toBe('props: sway in the game (no sheet)');
+    expect(actionHint('sway')).toBe('props: sway in the game, no sheet');
     expect(actionHint('idle')).toBe(null);
   });
 

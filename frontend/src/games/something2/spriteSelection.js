@@ -98,7 +98,7 @@ export function propSways(subject) {
   return Array.isArray(subject?.actions) && subject.actions.includes('sway');
 }
 
-const ACTION_HINTS = { sway: 'props: sway in the game (no sheet)' };
+const ACTION_HINTS = { sway: 'props: sway in the game, no sheet' };
 export function actionHint(id) {
   return ACTION_HINTS[id] ?? null;
 }

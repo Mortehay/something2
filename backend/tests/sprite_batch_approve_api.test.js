@@ -167,6 +167,18 @@ test('approve of a box prop sets the static image, clears the sprite and sets sw
   }
 });
 
+test('approve of a pre-v2 box prop that still has atlas_key takes the animated-sheet branch, not static+sway', async () => {
+  const calls = [];
+  const job = { ...PROP_JOB, atlas_key: 'sprites/x/sheet.png', manifest_key: 'sprites/x/sheet.json' };
+  const res = await request(routerApp(boxApprovePool(calls, job), storeWith({ frames: {} })))
+    .post('/api/sprite-admin/jobs/approve').send({ job_ids: [BOX_ID] });
+  assert.deepEqual(res.body.approved, [BOX_ID]);
+  const up = calls.find((c) => /UPDATE entity_types SET sprite/i.test(c.sql));
+  assert.ok(up, 'expected the sheet branch UPDATE');
+  assert.equal(up.params[1], 'animated');
+  assert.ok(!calls.some((c) => /sway = \$2/.test(c.sql)), 'v2 static+sway branch must not run');
+});
+
 test('approve skips a box prop row with no image', async () => {
   const calls = [];
   const res = await request(routerApp(boxApprovePool(calls, { ...PROP_JOB, image_key: null }), storeWith({ frames: {} })))

@@ -136,9 +136,10 @@ function createDispatcher({
     const concept = must(await box.generateConcept(provider, { prompt: row.base_prompt }));
     const conceptKey = `${prefix}concept.png`;
     await store.putObject(conceptKey, concept.png, 'image/png');
+    const name = String(row.creature).replace(/[_-]+/g, ' ').trim();
     const edited = must(await box.editImage(provider, {
       source: concept.conceptPath.split('/').pop(),
-      instruction: `Remove any person or character. Keep only the ${row.creature}, unchanged, on the same plain background.`,
+      instruction: `Remove any person or character. Keep only the ${name}, unchanged, on the same plain background.`,
     }));
     const imageKey = `${prefix}image.png`;
     await store.putObject(imageKey, edited.png, 'image/png');

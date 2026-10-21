@@ -405,6 +405,15 @@ test('prop row: concept -> edit -> concept.png + image.png, no sheet job', async
   }]);
 });
 
+test('prop row: a snake_case catalog name is humanised in the edit instruction', async () => {
+  const box = editBox();
+  const { d } = dispatcherFor({ rows: [treeRow({ creature: 'pine_tree' })], box });
+  await d.start();
+  const { instruction } = box.calls.edit[0].args;
+  assert.ok(instruction.includes('pine tree'), instruction);
+  assert.ok(!instruction.includes('pine_tree'), instruction);
+});
+
 test('prop row: an edit failure fails the row with the box words', async () => {
   const box = editBox({
     editImage: async () => ({ ok: false, error: 'GPU box answered 503 for POST /api/edit: image editing is disabled' }),

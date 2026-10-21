@@ -55,7 +55,7 @@ function PropResult({ subject, version }) {
         <SwayImg src={assetUrlVersioned(subject.image_key, version)} alt="Result"
           data-sway={sways ? 'on' : 'off'} />
       ) : <Muted>No result yet</Muted>}
-      <Muted>{`Sways in game: ${sways ? 'yes' : 'no'}`}</Muted>
+      <Muted>{`Will sway in game (on approve): ${sways ? 'yes' : 'no'}`}</Muted>
       {subject.image_key && (
         <Links><a href={assetUrl(subject.image_key)} download>Download image PNG</a></Links>
       )}

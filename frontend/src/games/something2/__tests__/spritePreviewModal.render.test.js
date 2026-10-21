@@ -23,14 +23,14 @@ describe('SpritePreviewModal for a box prop', () => {
     expect(html).toMatch(/<strong[^>]*>Result<\/strong>/);
     expect(html).toContain('concept.png');
     expect(html).toMatch(/alt="Result"[^>]*>|src="[^"]*image\.png[^"]*"[^>]*alt="Result"/);
-    expect(html).toContain('Sways in game: yes');
+    expect(html).toContain('Will sway in game (on approve): yes');
     expect(html).toContain('data-sway="on"');
     expect(html).not.toContain('Sheet (×2)');
   });
 
   it('a prop without sway says so and does not animate', () => {
     const html = render(prop({ actions: ['idle'] }));
-    expect(html).toContain('Sways in game: no');
+    expect(html).toContain('Will sway in game (on approve): no');
     expect(html).not.toContain('data-sway="on"');
   });
 });
@@ -42,6 +42,6 @@ describe('SpritePreviewModal for a creature', () => {
       concept_key: 'c.png', atlas_key: 'sheet.png', manifest_key: null, actions: ['idle'],
     });
     expect(html).toContain('Sheet (×2)');
-    expect(html).not.toContain('Sways in game');
+    expect(html).not.toContain('Will sway in game (on approve)');
   });
 });
