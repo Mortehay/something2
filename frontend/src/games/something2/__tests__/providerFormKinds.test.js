@@ -130,3 +130,14 @@ describe('template payload/form', () => {
     expect(p.adapter).toBeNull();
   });
 });
+
+describe('isProviderFormDirty', () => {
+  const row = { name: 'a', base_url: 'http://x', modality: 'text', adapter: 'ollama', model: 'm', enabled: true };
+  it('is clean for an untouched form and dirty after an edit', async () => {
+    const { isProviderFormDirty, providerToForm } = await import('../providerForm.js');
+    const form = providerToForm(row);
+    expect(isProviderFormDirty(form, row)).toBe(false);
+    expect(isProviderFormDirty({ ...form, base_url: 'http://y' }, row)).toBe(true);
+    expect(isProviderFormDirty({ ...form, auth_token: 't', token_touched: true }, row)).toBe(true);
+  });
+});

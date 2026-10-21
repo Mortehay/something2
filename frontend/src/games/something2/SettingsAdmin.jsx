@@ -7,7 +7,7 @@ import {
 } from './useAiProviders.js';
 import { useAiProviderTemplates } from './useAiProviderTemplates.js';
 import {
-  providerToForm, providerFormToPayload, validateProviderForm,
+  providerToForm, providerFormToPayload, isProviderFormDirty, validateProviderForm,
   emptyProviderForm, applyTemplate, templatesForKind, KINDS, GAME_USES,
 } from './providerForm.js';
 import {
@@ -228,7 +228,11 @@ function ProviderCard({ provider, isOnlyActive, initialForm, onCreated, onSaveAs
           </QuietButton>
         )}
         {!isNew && templateName === null && (
-          <QuietButton onClick={() => setTemplateName(`${provider.name} template`)}>Save as template</QuietButton>
+          <QuietButton
+            onClick={() => setTemplateName(`${provider.name} template`)}
+            disabled={isProviderFormDirty(form, provider)}
+            title={isProviderFormDirty(form, provider) ? 'Save the provider first — templates copy the saved settings' : undefined}
+          >Save as template</QuietButton>
         )}
         {!isNew && (
           <Button

@@ -403,3 +403,10 @@ export function duplicateTemplatePayload(row) {
     defaults: { ...(row.defaults || {}) },
   };
 }
+
+// True when the card's form differs from the stored row (unsaved edits).
+// Compared through the payload so cosmetic form state is ignored.
+export function isProviderFormDirty(form, row) {
+  if (!row) return true;
+  return JSON.stringify(providerFormToPayload(form)) !== JSON.stringify(providerFormToPayload(providerToForm(row)));
+}
