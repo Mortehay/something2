@@ -290,6 +290,18 @@ describe("rowFor (western rows are mirrored eastern rows)", () => {
     expect(row(only, "sw")).toEqual(["s", false]);
   });
 
+  it("a nearest-direction fallback never lands on a broken western row while its eastern twin exists", () => {
+    // n missing; the nearest search ties nw/ne and would pick nw (unflipped) first.
+    const gap = sheet(["idle"], ["s", "se", "e", "ne", "nw", "w", "sw"], 2);
+    expect(row(gap, "n")).toEqual(["ne", true]);
+    // s missing: the tie between se and sw goes to se first, an eastern row, so no flip.
+    const gapS = sheet(["idle"], ["se", "e", "ne", "n", "nw", "w", "sw"], 2);
+    expect(row(gapS, "s")).toEqual(["se", false]);
+    // w has neither its own row nor e; the nearest is nw, whose twin ne exists -> ne mirrored.
+    const gapW = sheet(["idle"], ["s", "ne", "n", "nw"], 2);
+    expect(row(gapW, "w")).toEqual(["ne", true]);
+  });
+
   it("returns null for a missing action or a non-box manifest", () => {
     expect(row(full, "w", "cast")).toEqual([null, false]);
     expect(row({ frames: {} }, "w")).toEqual([null, false]);

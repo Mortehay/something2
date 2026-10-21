@@ -142,7 +142,16 @@ function pickRow(byDir, dir, out) {
     if (out) out.flipX = true;
     return east;
   }
-  return nearestDir(byDir, dir);
+  if (byDir.has(dir)) return dir;
+  // The nearest fallback can land on a western row too (e.g. "n" missing ties
+  // nw/ne); the same rule applies to it: its eastern twin, mirrored.
+  const near = nearestDir(byDir, dir);
+  const twin = MIRROR_OF[near];
+  if (twin !== undefined && byDir.has(twin)) {
+    if (out) out.flipX = true;
+    return twin;
+  }
+  return near;
 }
 
 // Positional core of actionFrameKey (no options literal): the renderer's hot
