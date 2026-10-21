@@ -30,6 +30,7 @@ import SubjectSounds from './SubjectSounds.jsx';
 import { useAuraEffectsAdmin } from './useAuraEffects.js';
 import { toggleAura, aurasForPayload } from './entityAuras.js';
 import EntityAuraPicker from './EntityAuraPicker.jsx';
+import { PROP_FX_OPTIONS } from './spriteSelection.js';
 
 const PAGE_SIZE = 6;
 
@@ -957,6 +958,7 @@ function EntityTypesAdmin() {
     image: '',
     prompt: '',
     render_mode: 'rect',
+    idle_fx: 'none',
     strength: 0,
     dexterity: 0,
     constitution: 0,
@@ -993,6 +995,7 @@ function EntityTypesAdmin() {
         image: editingEntity.image || '',
         prompt: editingEntity.prompt || '',
         render_mode: editingEntity.render_mode || 'rect',
+        idle_fx: editingEntity.idle_fx || 'none',
         strength: editingEntity.strength || 0,
         dexterity: editingEntity.dexterity || 0,
         constitution: editingEntity.constitution || 0,
@@ -1038,6 +1041,7 @@ function EntityTypesAdmin() {
         image: '',
         prompt: '',
         render_mode: 'rect',
+        idle_fx: 'none',
         strength: 10,
         dexterity: 10,
         constitution: 10,
@@ -1536,6 +1540,20 @@ function EntityTypesAdmin() {
                   <option value="rect">rect — colored rectangle (default, fast)</option>
                   <option value="static">static — image sprite</option>
                   <option value="animated">animated — moving sprite</option>
+                </select>
+              </FormGroup>
+
+              {/* Props v2: the procedural idle effect the game gives a static
+                  image (set on approve from the Sprite Generation page). */}
+              <FormGroup>
+                <label>Idle effect</label>
+                <select
+                  value={formData.idle_fx}
+                  onChange={e => setFormData({...formData, idle_fx: e.target.value})}
+                >
+                  {PROP_FX_OPTIONS.map((option) => (
+                    <option key={option.id} value={option.id}>{option.label}</option>
+                  ))}
                 </select>
               </FormGroup>
 
