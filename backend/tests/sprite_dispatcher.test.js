@@ -354,3 +354,82 @@ test('a legacy row with no actions fails before any box call', async () => {
     assert.equal(box.calls.concept.length + box.calls.create.length + box.calls.get.length, 0);
   }
 });
+
+// Props v2: the box's sheet builder draws a person into every action, so an
+// 'object' row is a concept -> edit (person removed) -> one static image; the
+// sway is procedural in the game renderer. No sheet job is ever created.
+const EDITED_PNG = Buffer.from('edited-bytes');
+function treeRow(over = {}) {
+  return wolfRow({
+    id: 'row-t', entity_type_id: 12, creature: 'Pine Tree', generation_kind: 'object',
+    base_prompt: 'a pine tree', actions: ['idle', 'sway'], directions: ['s'], frames_per_action: 4, ...over,
+  });
+}
+function editBox(over = {}) {
+  const edits = [];
+  const box = fakeBox({
+    editImage: async (provider, args) => { edits.push({ provider, args }); return { ok: true, path: 'images/edit_1.png', png: EDITED_PNG, transparent: 0.6 }; },
+    ...over,
+  });
+  box.calls.edit = edits;
+  return box;
+}
+
+test('prop row: concept -> edit -> concept.png + image.png, no sheet job', async () => {
+  const box = editBox();
+  const { d, queue, store } = dispatcherFor({ rows: [treeRow()], box });
+  await d.start();
+
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.create.length, 0, 'no sheet job for a prop');
+  assert.equal(box.calls.get.length, 0);
+  assert.equal(box.calls.sheet + box.calls.atlas, 0);
+  assert.deepEqual(box.calls.concept.map((c) => c.args), [{ prompt: 'a pine tree' }]);
+  assert.equal(box.calls.edit.length, 1);
+  assert.equal(box.calls.edit[0].provider, PROVIDER);
+  assert.deepEqual(box.calls.edit[0].args, {
+    source: 'core_abc.png',
+    instruction: 'Remove any person or character. Keep only the Pine Tree, unchanged, on the same plain background.',
+  });
+  const prefix = 'sprites/Pine_Tree/row-t/';
+  assert.deepEqual(store.puts.map((p) => [p.key, p.type]), [
+    [`${prefix}concept.png`, 'image/png'],
+    [`${prefix}image.png`, 'image/png'],
+  ]);
+  assert.deepEqual(store.puts[0].buf, CONCEPT_PNG);
+  assert.deepEqual(store.puts[1].buf, EDITED_PNG);
+  assert.deepEqual(queue.log.attached, []);
+  assert.deepEqual(queue.log.completed, [{
+    id: 'row-t',
+    result: { image_key: `${prefix}image.png`, concept_key: `${prefix}concept.png`, atlas_key: null, manifest_key: null, sheet_seconds: null },
+  }]);
+});
+
+test('prop row: an edit failure fails the row with the box words', async () => {
+  const box = editBox({
+    editImage: async () => ({ ok: false, error: 'GPU box answered 503 for POST /api/edit: image editing is disabled' }),
+  });
+  const { d, queue, store } = dispatcherFor({ rows: [treeRow()], box });
+  await d.start();
+  assert.equal(queue.log.completed.length, 0);
+  assert.deepEqual(queue.log.failed, [{ id: 'row-t', message: 'GPU box answered 503 for POST /api/edit: image editing is disabled' }]);
+  assert.ok(!store.puts.some((p) => p.key.endsWith('image.png')));
+});
+
+test('prop row with a stale box_job_id still takes the edit path', async () => {
+  const box = editBox();
+  const { d, queue } = dispatcherFor({ rows: [treeRow({ box_job_id: 'old-sheet' })], box });
+  await d.start();
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.get.length + box.calls.create.length, 0);
+  assert.equal(box.calls.edit.length, 1);
+});
+
+test('creature rows never call editImage', async () => {
+  const box = editBox();
+  const { d, queue } = dispatcherFor({ rows: [wolfRow()], box });
+  await d.start();
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.edit.length, 0);
+  assert.equal(box.calls.create.length, 1);
+});

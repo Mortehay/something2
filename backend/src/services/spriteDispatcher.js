@@ -1,6 +1,7 @@
 // Drains the sprite batch queue one row at a time on the GPU box (Qwen sheet
-// jobs). Per row: concept (our own generate_core task) -> sheet job -> poll ->
-// sheet.png + atlas -> sheet.json built from THAT atlas -> stored -> done.
+// jobs). Per creature row: concept (our own generate_core task) -> sheet job ->
+// poll -> sheet.png + atlas -> sheet.json built from THAT atlas -> stored ->
+// done. Per prop ('object') row: concept -> edit (person removed) -> image.png.
 //
 // The box job id is recorded (attachBox) the moment the box accepts it, so a
 // row put back by requeueStale after a restart resumes polling the same box
@@ -126,11 +127,32 @@ function createDispatcher({
     return { boxJobId: job.boxJobId, conceptKey, cells: job.cells, estimatedSeconds: job.estimatedSeconds };
   }
 
+  // Props v2: the box's sheet builder animates every action through human
+  // poses, so a prop sheet comes back with a person in it. A prop is instead
+  // one clean static image -- the concept with the person edited out -- and
+  // the game sways it procedurally ('sway' in row.actions). No sheet job, so
+  // nothing to attach or resume: a re-run simply redoes concept + edit.
+  async function executeProp(provider, row, prefix) {
+    const concept = must(await box.generateConcept(provider, { prompt: row.base_prompt }));
+    const conceptKey = `${prefix}concept.png`;
+    await store.putObject(conceptKey, concept.png, 'image/png');
+    const edited = must(await box.editImage(provider, {
+      source: concept.conceptPath.split('/').pop(),
+      instruction: `Remove any person or character. Keep only the ${row.creature}, unchanged, on the same plain background.`,
+    }));
+    const imageKey = `${prefix}image.png`;
+    await store.putObject(imageKey, edited.png, 'image/png');
+    await queue.complete(db, row.id, {
+      image_key: imageKey, concept_key: conceptKey, atlas_key: null, manifest_key: null, sheet_seconds: null,
+    });
+  }
+
   async function execute(row) {
     if (!Array.isArray(row.actions) || row.actions.length === 0) throw new Error(NO_ACTIONS);
     const provider = await loadProvider();
     if (!provider) throw new Error(NO_PROVIDER);
     const prefix = `${store.BUCKET()}/${safeName(row.creature)}/${row.id}/`;
+    if (row.generation_kind === 'object') return executeProp(provider, row, prefix);
 
     let attached = null;
     // A resumed job that is already done or already running has an unknown
