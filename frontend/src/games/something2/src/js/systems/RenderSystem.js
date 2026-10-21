@@ -32,6 +32,7 @@ import {
 } from "./inspect.js";
 import { rarityGlowColor, withAlpha } from "../core/rarityColors.js";
 import { artIcon, drawIconFit } from "./gameArt.js";
+import { swayShear, swayPhaseSeed } from "./sway.js";
 import {
   rarityBorderColor, affixLine, clipToWidth, rowTextOffsets, AFFIX_FONT_PX, itemIcon,
 } from "./itemDisplay.js";
@@ -3593,6 +3594,21 @@ export class RenderSystem {
     if (!img) return false;
     // SOMET-569: fit, do not stretch.
     const r = fitSpriteRect(img.width, img.height, drawX, drawY, w, h);
+    if (e.sway === true) {
+      // Props v2: a horizontal shear about the image's bottom-centre, phased
+      // per world position. ctx.transform MULTIPLIES into the camera
+      // transform already on the context; setTransform would replace it.
+      const bx = r.dx + r.dw / 2;
+      const by = r.dy + r.dh;
+      const k = swayShear(this.nowMs, swayPhaseSeed(e.x, e.y));
+      this.ctx.save();
+      this.ctx.translate(bx, by);
+      this.ctx.transform(1, 0, k, 1, 0, 0);
+      this.ctx.translate(-bx, -by);
+      this.ctx.drawImage(img, r.dx, r.dy, r.dw, r.dh);
+      this.ctx.restore();
+      return r.dh;
+    }
     this.ctx.drawImage(img, r.dx, r.dy, r.dw, r.dh);
     return r.dh;
   }
