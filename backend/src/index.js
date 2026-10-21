@@ -357,6 +357,7 @@ function evictOrWarn(worldId) {
 
 // Sprite-gen HTTP bridge (mutable holder so tests can mock the outbound calls).
 const aiProviders = require('./services/aiProviders');
+const aiProviderTemplates = require('./services/aiProviderTemplates');
 const providerDiscovery = require('./services/providerDiscovery');
 const remoteImageProvider = require('./services/remoteImageProvider');
 const {
@@ -2938,6 +2939,78 @@ app.delete('/api/ai-providers/:id', adminGuard, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to delete AI provider' });
+  }
+});
+
+// Provider templates: presets that pre-fill the Add-provider form. A template
+// never holds a token (templateFieldError), and save-as-template reads the
+// provider through the secret-free getProvider so the token is never in memory.
+const TEMPLATE_DUP = 'a template with that name exists';
+
+app.get('/api/ai-provider-templates', adminGuard, async (req, res) => {
+  try {
+    res.json(await aiProviderTemplates.listTemplates(pool));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch AI provider templates' });
+  }
+});
+
+app.post('/api/ai-provider-templates', adminGuard, async (req, res) => {
+  const bad = aiProviderTemplates.templateFieldError(req.body);
+  if (bad) return res.status(400).json({ error: bad });
+  try {
+    res.status(201).json(await aiProviderTemplates.createTemplate(pool, req.body));
+  } catch (err) {
+    if (isUniqueViolation(err)) return res.status(409).json({ error: TEMPLATE_DUP });
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create AI provider template' });
+  }
+});
+
+app.patch('/api/ai-provider-templates/:id', adminGuard, async (req, res) => {
+  const { id } = req.params;
+  if (invalidId(id)) return res.status(400).json({ error: 'id must be an integer' });
+  const bad = aiProviderTemplates.templateFieldError(req.body, { partial: true });
+  if (bad) return res.status(400).json({ error: bad });
+  try {
+    const row = await aiProviderTemplates.updateTemplate(pool, id, req.body);
+    if (!row) return res.status(404).json({ error: 'AI provider template not found' });
+    res.json(row);
+  } catch (err) {
+    if (isUniqueViolation(err)) return res.status(409).json({ error: TEMPLATE_DUP });
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update AI provider template' });
+  }
+});
+
+app.delete('/api/ai-provider-templates/:id', adminGuard, async (req, res) => {
+  const { id } = req.params;
+  if (invalidId(id)) return res.status(400).json({ error: 'id must be an integer' });
+  try {
+    const deleted = await aiProviderTemplates.deleteTemplate(pool, id);
+    if (!deleted) return res.status(404).json({ error: 'AI provider template not found' });
+    res.status(204).end();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete AI provider template' });
+  }
+});
+
+app.post('/api/ai-providers/:id/save-as-template', adminGuard, async (req, res) => {
+  const { id } = req.params;
+  if (invalidId(id)) return res.status(400).json({ error: 'id must be an integer' });
+  const name = req.body && req.body.name;
+  if (typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'name is required' });
+  try {
+    const provider = await aiProviders.getProvider(pool, id);
+    if (!provider) return res.status(404).json({ error: 'AI provider not found' });
+    const body = aiProviderTemplates.templateFromProvider(provider, name.trim());
+    res.status(201).json(await aiProviderTemplates.createTemplate(pool, body));
+  } catch (err) {
+    if (isUniqueViolation(err)) return res.status(409).json({ error: TEMPLATE_DUP });
+    console.error(err);
+    res.status(500).json({ error: 'Failed to save AI provider template' });
   }
 });
 
