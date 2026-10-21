@@ -10,6 +10,9 @@ const dotenv = require('dotenv');
 const { Pool } = require('pg');
 const { DEFAULT_TILE_TYPES } = require('../seeds/data/tileTypes.js');
 const { STARTER_BIOMES } = require('../seeds/data/biomes.js');
+const {
+  SCENERY_TYPES, SPAWN_TILE_ADDITIONS, EXISTING_BLOCK_RADIUS,
+} = require('../seeds/data/sceneryCatalog.js');
 const { NEW_DECORATIONS } = require('../seeds/data/decorationTypes.js');
 const { POINT_TYPES, POINT_KINDS } = require('../seeds/data/pointTypes.js');
 const {
@@ -97,8 +100,9 @@ async function seedOneTile(db, t) {
 // can be tested against the REAL statement rather than a restatement of it.
 async function seedOneBiome(db, b) {
   await db.query(
-    `INSERT INTO biomes (name, terrain_tiles, flora_types, creature_types, palette, art_style, exclusions, color, creature_density, path_tile)
-     VALUES ($1,$2::jsonb,$3::jsonb,$4::jsonb,$5::jsonb,$6,$7,$8,$9,$10)
+    `INSERT INTO biomes (name, terrain_tiles, flora_types, creature_types, palette, art_style, exclusions, color, creature_density, path_tile,
+                         feature_density, cover_density)
+     VALUES ($1,$2::jsonb,$3::jsonb,$4::jsonb,$5::jsonb,$6,$7,$8,$9,$10,$11,$12)
      ON CONFLICT (name) DO UPDATE
        SET terrain_tiles = EXCLUDED.terrain_tiles, flora_types = EXCLUDED.flora_types,
            creature_types = CASE
@@ -107,10 +111,16 @@ async function seedOneBiome(db, b) {
            palette = EXCLUDED.palette,
            art_style = EXCLUDED.art_style, exclusions = EXCLUDED.exclusions,
            color = EXCLUDED.color, creature_density = EXCLUDED.creature_density,
-           path_tile = COALESCE($10, biomes.path_tile)`,
+           path_tile = COALESCE($10, biomes.path_tile),
+           -- scenery densities are admin-tunable: the seed only fills a value
+           -- nobody has set (NULL feature_density, 0 cover_density)
+           feature_density = COALESCE(biomes.feature_density, EXCLUDED.feature_density),
+           cover_density = CASE WHEN biomes.cover_density = 0 THEN EXCLUDED.cover_density
+                                ELSE biomes.cover_density END`,
     [b.name, JSON.stringify(b.terrain_tiles ?? []), JSON.stringify(b.flora_types ?? []),
      JSON.stringify(b.creature_types ?? []), JSON.stringify(b.palette ?? []),
-     b.art_style, b.exclusions, b.color, b.creature_density ?? 1, b.path_tile ?? null],
+     b.art_style, b.exclusions, b.color, b.creature_density ?? 1, b.path_tile ?? null,
+     b.feature_density ?? null, b.cover_density ?? 0],
   );
 }
 
@@ -617,6 +627,44 @@ async function seedCatalogs(pool) {
     );
     decorations += 1;
   }
+
+  // Biome scenery (feature + ground-cover types). Same policy as the
+  // decorations above: a new row is inserted whole, an existing one only has
+  // an EMPTY prompt filled, so an admin's edit to chance / spawn_tiles /
+  // size / radius survives every re-seed. The pre-existing decorations only
+  // gain what is missing: spawn floors are APPENDED (never removed) and
+  // block_radius is set where still NULL.
+  let sceneryTypes = 0;
+  for (const t of SCENERY_TYPES) {
+    await pool.query(
+      `INSERT INTO entity_types
+        (name, is_creature, walkable, render_mode, spawn_tiles, chance, display_width, display_height,
+         color, prompt, scenery_layer, block_radius, max_per_tile)
+       VALUES ($1,false,$2,'static',$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11)
+       ON CONFLICT (name) DO UPDATE
+         SET prompt = COALESCE(NULLIF(entity_types.prompt, ''), EXCLUDED.prompt)`,
+      [t.name, t.walkable, JSON.stringify(t.spawn_tiles), t.chance, t.display_width,
+       t.display_height, t.color, t.prompt, t.scenery_layer, t.block_radius, t.max_per_tile],
+    );
+    sceneryTypes += 1;
+  }
+  for (const [name, tiles] of Object.entries(SPAWN_TILE_ADDITIONS)) {
+    await pool.query(
+      `UPDATE entity_types
+          SET spawn_tiles = spawn_tiles || COALESCE((
+                SELECT jsonb_agg(e.t ORDER BY e.o)
+                  FROM jsonb_array_elements_text($2::jsonb) WITH ORDINALITY AS e(t, o)
+                 WHERE NOT (entity_types.spawn_tiles ? e.t)), '[]'::jsonb)
+        WHERE name = $1`,
+      [name, JSON.stringify(tiles)],
+    );
+  }
+  for (const [name, r] of Object.entries(EXISTING_BLOCK_RADIUS)) {
+    await pool.query(
+      'UPDATE entity_types SET block_radius = $2 WHERE name = $1 AND block_radius IS NULL', [name, r],
+    );
+  }
+  console.log(`Seeded ${sceneryTypes} scenery types`);
 
   // World point placeholder types (SOMET-577). Same "fill only what is empty"
   // posture as decorations: point_kind is re-asserted (it is the catalog's
