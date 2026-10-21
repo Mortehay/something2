@@ -15,7 +15,7 @@ const jobs = require('../src/services/seedSync/jobs.js');
 
 // Registry (seed) order, global constraints.
 const ALL_GROUPS = [
-  'ai_providers', 'tile_types', 'items', 'attack_effects', 'aura_effects', 'creature_behaviors', 'entities',
+  'ai_provider_templates', 'ai_providers', 'tile_types', 'items', 'attack_effects', 'aura_effects', 'creature_behaviors', 'entities',
   'biomes', 'skill_tree', 'progression', 'maps', 'quests', 'art', 'audio',
 ];
 
