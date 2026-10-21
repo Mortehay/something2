@@ -182,4 +182,7 @@ async function discover(provider, { fetchImpl = fetch } = {}) {
   }
 }
 
-module.exports = { discover, listOllamaModels, listOpenAiModels };
+// Authenticated GET /api/edit-capabilities -> { ok, entries } | { ok:false, error, status? }.
+const editCapabilities = (provider, { fetchImpl = fetch } = {}) => boxImageEdit(provider, fetchImpl);
+
+module.exports = { discover, editCapabilities, listOllamaModels, listOpenAiModels };

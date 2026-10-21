@@ -51,8 +51,12 @@ test('text modality providers', { skip }, async (t) => {
   assert.ok(textCall, 'refresh must hit the text endpoint');
   assert.equal(textCall.auth, 'Bearer k', 'refresh must hit the authenticated text endpoint');
 
+  const textCallsBefore = seen.filter((r) => r.url === '/api/text/models').length;
   const tested = await request(app).post(`/api/ai-providers/${created.body.id}/test`).set('Authorization', auth);
   assert.equal(tested.body.ok, true);
-  assert.equal(seen.at(-1).url, '/api/text/models', 'test must not certify the unauthenticated root');
+  // Test also runs the model check (other box endpoints), so look for the text
+  // call rather than assuming it was the last request.
+  assert.ok(seen.filter((r) => r.url === '/api/text/models').length > textCallsBefore, 'test must hit the authenticated text endpoint');
+  assert.equal(seen.some((r) => r.url === '/' || r.url === ''), false, 'test must not certify the unauthenticated root');
   assert.equal(JSON.stringify(tested.body).includes('"k"'), false);
 });

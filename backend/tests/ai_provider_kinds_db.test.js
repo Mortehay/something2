@@ -73,5 +73,40 @@ test('unified provider kinds', { skip }, async (t) => {
       assert.deepEqual(row.discovery_cache, refreshed.body.discovery);
       assert.ok(row.discovery_fetched_at);
     } finally { box.close(); }
+    // image_edit: refresh + Test run against /api/edit-capabilities; a 401 fails Test.
+    let editStatus = 200;
+    const editBox = http.createServer((req, res) => {
+      res.setHeader('content-type', 'application/json');
+      if (req.url === '/api/edit-capabilities') {
+        if (editStatus !== 200 || req.headers.authorization !== 'Bearer secret-k') {
+          res.statusCode = editStatus === 200 ? 401 : editStatus; return res.end('{"error":"nope"}');
+        }
+        return res.end(JSON.stringify([null, 'pixelate']));
+      }
+      res.statusCode = 404; res.end('{}');
+    });
+    await new Promise((r) => editBox.listen(0, '127.0.0.1', r));
+    try {
+      await pool.query('UPDATE ai_providers SET base_url = $1 WHERE id = $2', [`http://127.0.0.1:${editBox.address().port}`, edit.body.id]);
+      const er = await request(app).post(`/api/ai-providers/${edit.body.id}/refresh-models`).set('Authorization', auth);
+      assert.equal(er.body.ok, true, JSON.stringify(er.body));
+      assert.deepEqual(er.body.models, ['', 'pixelate']);
+      const erow = (await pool.query('SELECT models_cache, discovery_cache FROM ai_providers WHERE id = $1', [edit.body.id])).rows[0];
+      assert.deepEqual(erow.models_cache, ['', 'pixelate']);
+      assert.deepEqual(erow.discovery_cache.entries.map((e) => e.id), ['', 'pixelate']);
+      const et = await request(app).post(`/api/ai-providers/${edit.body.id}/test`).set('Authorization', auth);
+      assert.equal(et.body.ok, true, JSON.stringify(et.body));
+      assert.equal(JSON.stringify(et.body).includes('secret-k'), false);
+      // a model the box no longer offers fails Test
+      await pool.query("UPDATE ai_providers SET model = 'gone' WHERE id = $1", [edit.body.id]);
+      const gone = await request(app).post(`/api/ai-providers/${edit.body.id}/test`).set('Authorization', auth);
+      assert.equal(gone.body.ok, false);
+      assert.match(gone.body.error, /provider no longer offers: gone/);
+      await pool.query("UPDATE ai_providers SET model = '' WHERE id = $1", [edit.body.id]);
+      editStatus = 401;
+      const e401 = await request(app).post(`/api/ai-providers/${edit.body.id}/test`).set('Authorization', auth);
+      assert.equal(e401.body.ok, false);
+      assert.equal(e401.body.status, 401);
+    } finally { editBox.close(); }
   });
 });

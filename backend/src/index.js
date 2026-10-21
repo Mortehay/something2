@@ -360,6 +360,7 @@ const aiProviders = require('./services/aiProviders');
 const aiProviderTemplates = require('./services/aiProviderTemplates');
 const providerDiscovery = require('./services/providerDiscovery');
 const providerCatalog = require('./services/providerCatalog');
+const providerModelCheck = require('./services/providerModelCheck');
 const remoteImageProvider = require('./services/remoteImageProvider');
 const {
   resolveGenerationTarget, loadTypeOverride, typeTableForKind,
@@ -3081,6 +3082,16 @@ app.post('/api/ai-providers/:id/refresh-models', adminGuard, async (req, res) =>
       await aiProviders.saveModelsCache(pool, id, r.models);
       return res.json(await withDiscovery(provider, { ok: true, models: r.models }));
     }
+    // image_edit: the box's edit capabilities. models_cache carries their ids
+    // ('' = base model) so the existing dropdown plumbing works.
+    if (provider.modality === 'image_edit') {
+      const d = await providerCatalog.discover(provider);
+      if (!d.ok) return res.json({ ok: false, error: d.error, status: d.status ?? null });
+      const models = d.cache.entries.filter((e) => e.kind === 'image_edit').map((e) => e.id);
+      await aiProviders.saveModelsCache(pool, id, models);
+      await aiProviders.saveDiscoveryCache(pool, id, d.cache);
+      return res.json({ ok: true, models, discovery: d.cache });
+    }
     const result = await providerDiscovery.fetchModels(provider);
     if (!result.ok) {
       return res.json({ ok: false, error: result.error, status: result.status ?? null });
@@ -3097,6 +3108,26 @@ app.post('/api/ai-providers/:id/refresh-models', adminGuard, async (req, res) =>
 app.post('/api/ai-providers/:id/test', adminGuard, async (req, res) => {
   const { id } = req.params;
   if (invalidId(id)) return res.status(400).json({ error: 'id must be an integer' });
+  // After a passing reachability check, flag models the row names that the
+  // provider no longer offers. Only a positive "missing" result changes the
+  // outcome; a discovery failure leaves an ok Test ok. `known` skips a second
+  // fetch when the caller already holds the entries.
+  const withModelCheck = async (provider, body, known = null) => {
+    if (!body.ok) return body;
+    try {
+      let entries = known;
+      if (!entries) {
+        const d = await providerCatalog.discover(provider);
+        if (!d.ok) return body;
+        entries = d.cache.entries;
+      }
+      const missing = providerModelCheck.missingModels(provider, entries);
+      if (missing.length) return { ...body, ok: false, error: `provider no longer offers: ${missing.join(', ')}` };
+    } catch (err) {
+      console.error('provider model check failed', err.message);
+    }
+    return body;
+  };
   try {
     const provider = await aiProviders.loadProviderWithSecret(pool, id);
     if (!provider) return res.status(404).json({ error: 'AI provider not found' });
@@ -3112,9 +3143,9 @@ app.post('/api/ai-providers/:id/test', adminGuard, async (req, res) => {
       // Spread explicitly rather than returning `r`: nothing from the
       // provider row or an unrecognised field on `r` belongs in this
       // response, least of all auth_token.
-      res.json({
+      res.json(await withModelCheck(provider, {
         ok: r.ok, status: r.status ?? null, latency_ms: Date.now() - startedAt, error: r.error ?? null,
-      });
+      }));
       return;
     }
     // Same reasoning as audio: probe an AUTHENTICATED text endpoint, so a
@@ -3122,9 +3153,9 @@ app.post('/api/ai-providers/:id/test', adminGuard, async (req, res) => {
     if (provider.modality === 'text') {
       const startedAt = Date.now();
       const r = await textProvider.listTextModels(provider);
-      res.json({
+      res.json(await withModelCheck(provider, {
         ok: r.ok, status: r.status ?? null, latency_ms: Date.now() - startedAt, error: r.error ?? null,
-      });
+      }));
       return;
     }
     // Sprite: the box serves GET /api/action-catalog WITHOUT auth, so on its
@@ -3134,10 +3165,20 @@ app.post('/api/ai-providers/:id/test', adminGuard, async (req, res) => {
       const startedAt = Date.now();
       const authed = await gpuBoxSprites.checkAuth(provider);
       const r = authed.ok ? await gpuBoxSprites.actionCatalog(provider) : authed;
-      res.json({
+      res.json(await withModelCheck(provider, {
         ok: r.ok, status: r.status ?? null, latency_ms: Date.now() - startedAt, error: r.error ?? null,
         detail: r.ok ? `${r.catalog.actions.length} actions` : null,
-      });
+      }));
+      return;
+    }
+    // image_edit: an authenticated read of the box's edit capabilities.
+    if (provider.modality === 'image_edit') {
+      const startedAt = Date.now();
+      const r = await providerCatalog.editCapabilities(provider);
+      res.json(await withModelCheck(provider, {
+        ok: r.ok, status: r.status ?? null, latency_ms: Date.now() - startedAt, error: r.error ?? null,
+        detail: r.ok ? `${r.entries.length} edit capabilities` : null,
+      }, r.ok ? r.entries : null));
       return;
     }
     // Spread explicitly rather than returning the provider: nothing from the
