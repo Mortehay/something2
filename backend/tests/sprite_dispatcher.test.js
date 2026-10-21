@@ -442,3 +442,38 @@ test('creature rows never call editImage', async () => {
   assert.equal(box.calls.edit.length, 0);
   assert.equal(box.calls.create.length, 1);
 });
+
+// The box's edit keeps the concept's canvas: the real pine came back with 34%
+// empty canvas under the trunk, so the bottom-anchored sway pivoted in empty
+// space and the prop drew at ~45% of its box. The stored image is trimmed
+// with the SAME function the Art pipeline uses (trimForStorage(buf, 'object')).
+test('prop row: the edited image is stored trimmed to its opaque content', async () => {
+  const { encodeRGBA } = require('../src/services/pngTrim.js');
+  const { decodeRGBA } = require('../src/services/pngAlpha.js');
+  const W = 100, H = 160;
+  const px = Buffer.alloc(W * H * 4);
+  // An opaque 30x50 trunk-and-crown block at (35..64, 20..69); the rest clear.
+  for (let y = 20; y < 70; y += 1) {
+    for (let x = 35; x < 65; x += 1) px.set([40, 120, 40, 255], (y * W + x) * 4);
+  }
+  const padded = encodeRGBA(W, H, px);
+  const box = editBox({ editImage: async () => ({ ok: true, path: 'images/edit_1.png', png: padded, transparent: 0.9 }) });
+  const { d, queue, store } = dispatcherFor({ rows: [treeRow()], box });
+  await d.start();
+  assert.deepEqual(queue.log.failed, []);
+  const stored = store.puts.find((p) => p.key.endsWith('image.png'));
+  const img = decodeRGBA(stored.buf);
+  assert.ok(img.width < W && img.height < H, `trimmed: ${img.width}x${img.height}`);
+  // Opaque bbox reaches within the trim margin (3% of content, >= 1 px) of every edge.
+  let minX = img.width, maxX = -1, minY = img.height, maxY = -1;
+  for (let y = 0; y < img.height; y += 1) {
+    for (let x = 0; x < img.width; x += 1) {
+      if (img.px[(y * img.width + x) * 4 + 3] > 0) {
+        minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+      }
+    }
+  }
+  assert.ok(minX <= 2 && minY <= 2, `top-left gap ${minX},${minY}`);
+  assert.ok(img.width - 1 - maxX <= 2 && img.height - 1 - maxY <= 2, `bottom-right gap ${img.width - 1 - maxX},${img.height - 1 - maxY}`);
+  assert.equal(maxY - minY + 1, 50, 'content height preserved');
+});

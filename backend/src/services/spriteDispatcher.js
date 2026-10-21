@@ -9,6 +9,10 @@
 // failure is a failed row with a readable last_error.
 const defaultQueue = require('./spriteJobQueue.js');
 const { buildBoxSheetManifest } = require('./spriteSheetManifest.js');
+// The Art pipeline's trim (SOMET-563): a prop is stored cropped to its opaque
+// content, so the renderer's fit fills the display box and a bottom-anchored
+// idle effect pivots at the real base, not in empty canvas.
+const { trimForStorage } = require('./remoteImageProvider.js');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -130,8 +134,9 @@ function createDispatcher({
   // Props v2: the box's sheet builder animates every action through human
   // poses, so a prop sheet comes back with a person in it. A prop is instead
   // one clean static image -- the concept with the person edited out -- and
-  // the game sways it procedurally ('sway' in row.actions). No sheet job, so
-  // nothing to attach or resume: a re-run simply redoes concept + edit.
+  // the game animates it procedurally (row.prop_fx -> entity_types.idle_fx on
+  // approve). No sheet job, so nothing to attach or resume: a re-run simply
+  // redoes concept + edit. The edited image is trimmed before it is stored.
   async function executeProp(provider, row, prefix) {
     const concept = must(await box.generateConcept(provider, { prompt: row.base_prompt }));
     const conceptKey = `${prefix}concept.png`;
@@ -142,7 +147,7 @@ function createDispatcher({
       instruction: `Remove any person or character. Keep only the ${name}, unchanged, on the same plain background.`,
     }));
     const imageKey = `${prefix}image.png`;
-    await store.putObject(imageKey, edited.png, 'image/png');
+    await store.putObject(imageKey, trimForStorage(edited.png, 'object').buffer, 'image/png');
     await queue.complete(db, row.id, {
       image_key: imageKey, concept_key: conceptKey, atlas_key: null, manifest_key: null, sheet_seconds: null,
     });
