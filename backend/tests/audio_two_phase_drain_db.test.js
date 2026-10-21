@@ -563,6 +563,18 @@ test('audio drain in phases', { skip }, async (t) => {
         assert.deepEqual(row, { style: null, prompt: null }, "the job's own style and prompt were cleared");
       });
 
+      await t.test('an ollama text provider is called directly: the prompt phase makes no switch to a brain: model', async () => {
+        reset();
+        const k = await world('ol1');
+        await q.enqueue(pool, [music(k)]);
+        d.startDrain(pool, { deps: depsWith({ loadTextProvider: async () => ({ ...textProvider, adapter: 'ollama', model: 'llama3:8b' }) }) });
+        const s = await waitIdle();
+        assert.equal(s.stopped_reason, 'empty', s.error);
+        assert.equal(s.failed, 0, s.error);
+        assert.deepEqual(calls.map((c) => c.replace(/^generate:.*/, 'generate')), ['text', `switch:${ACE}`, 'generate'],
+          'only the audio phase switches; no brain: switch for a non-box text provider');
+      });
+
       await t.test('a text provider with no model fails its prompt jobs with that reason; nothing waits', async () => {
         reset();
         const k = await world('nm1');

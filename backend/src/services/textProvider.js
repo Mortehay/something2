@@ -1,6 +1,7 @@
 // Audio prompt writer (spec 2026-09-30 §3.3). One way to ask a model for
-// text: the active 'text' AI provider (the GPU box's /api/text) first, the
-// local Ollama the art describer already uses as the fallback.
+// text: the active 'text' AI provider first -- the GPU box's /api/text, or,
+// for an 'ollama' / 'openai_compatible' adapter, its /v1/chat/completions --
+// the local Ollama the art describer already uses as the fallback.
 //
 // FALLBACK WHEN THE BOX COULD NOT ANSWER, OR ANSWERED WITH A FAULT THAT IS
 // NOT OUR REQUEST'S FAULT: no provider, a malformed provider row, a
@@ -25,6 +26,9 @@ const {
   safeFetch, readJsonCapped, redactUrl, errorDetail,
 } = require('./safeFetch');
 const { authHeaders, resolveUrl } = require('./providerDiscovery');
+// providerCatalog requires this module lazily (box-text branch), so this
+// top-level require is cycle-free.
+const providerCatalog = require('./providerCatalog');
 
 const TIMEOUT_MS = () => Number(process.env.TEXT_PROVIDER_TIMEOUT_MS) || 300000;
 const FALLBACK_URL = () => process.env.ART_DESCRIBER_URL || 'http://localhost:20434/v1/chat/completions';
@@ -90,35 +94,94 @@ async function callBox(provider, req, fetchImpl) {
   };
 }
 
-async function callFallback(req, fetchImpl) {
+// One OpenAI-style /v1/chat/completions exchange. `target.guarded` picks the
+// transport: the active non-box provider goes through safeFetch (SSRF and
+// redirect guard) with its own auth headers and gets callBox's busy /
+// fallbackable classification; the CPU fallback keeps a plain fetchImpl call
+// and its bare { ok, error } failures.
+// -> { ok: true, text, json, model, ms } | { ok: false, error, ... }
+async function callChat(target, req, fetchImpl) {
+  const { url, model, headers, guarded } = target;
   const started = Date.now();
   const messages = [];
   if (req.system) messages.push({ role: 'system', content: req.system });
   messages.push({ role: 'user', content: req.prompt });
   const body = {
-    model: FALLBACK_MODEL(), messages, temperature: req.temperature, max_tokens: req.maxTokens, stream: false,
+    model, messages, temperature: req.temperature, max_tokens: req.maxTokens, stream: false,
   };
   if (req.jsonSchema) body.response_format = { type: 'json_schema', json_schema: { name: 'answer', schema: req.jsonSchema } };
+  const init = {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(TIMEOUT_MS()),
+  };
+  const fromChoices = (j) => {
+    const msg = j && j.choices && j.choices[0] && j.choices[0].message;
+    const text = msg ? String(msg.content || '') : '';
+    return {
+      ok: true, text, json: req.jsonSchema ? parseJson(text) : null, model, ms: Date.now() - started,
+    };
+  };
+  if (!guarded) {
+    let res;
+    try {
+      res = await fetchImpl(url, init);
+    } catch (err) {
+      return { ok: false, error: `fallback model unreachable: ${err.message}` };
+    }
+    if (!res.ok) return { ok: false, error: `fallback model answered ${res.status}` };
+    return fromChoices(await res.json().catch(() => null));
+  }
   let res;
   try {
-    res = await fetchImpl(FALLBACK_URL(), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(TIMEOUT_MS()),
-    });
+    res = await safeFetch(url, init, { fetchImpl });
   } catch (err) {
-    return { ok: false, error: `fallback model unreachable: ${err.message}` };
+    return { ok: false, busy: true, fallbackable: true, error: `could not reach ${redactUrl(url)}: ${err.message}` };
   }
-  if (!res.ok) return { ok: false, error: `fallback model answered ${res.status}` };
-  const j = await res.json().catch(() => null);
-  const msg = j && j.choices && j.choices[0] && j.choices[0].message;
-  const text = msg ? String(msg.content || '') : '';
-  return {
-    ok: true, text, json: req.jsonSchema ? parseJson(text) : null, model: FALLBACK_MODEL(), ms: Date.now() - started,
-  };
+  if (!res.ok) {
+    const detail = await errorDetail(res);
+    const busy = BUSY_STATUSES.has(res.status);
+    return {
+      ok: false, busy, fallbackable: busy || res.status >= 500, status: res.status,
+      error: `text service answered ${res.status}${detail ? `: ${detail}` : ''}`,
+    };
+  }
+  const read = await readJsonCapped(res, JSON_CAP);
+  if (read.error) return { ok: false, busy: false, fallbackable: false, error: `text service did not answer with usable JSON: ${read.error}` };
+  return fromChoices(read.json);
 }
 
+function callFallback(req, fetchImpl) {
+  return callChat({
+    url: FALLBACK_URL(), model: FALLBACK_MODEL(), headers: {}, guarded: false,
+  }, req, fetchImpl);
+}
+
+// The active text provider is the GPU box (adapter NULL or 'box': /api/text,
+// the model chosen by the box's gateway) unless an adapter says otherwise.
+function isBoxText(provider) {
+  return !provider.adapter || provider.adapter === 'box';
+}
+
+// Non-box text provider: OpenAI-style chat (Ollama serves the same path).
+async function callProviderChat(provider, req, fetchImpl) {
+  const model = typeof provider.model === 'string' ? provider.model.trim() : '';
+  if (!model) return { ok: false, busy: false, fallbackable: false, error: 'text provider has no model' };
+  let url;
+  try {
+    url = resolveUrl(provider.base_url, '/v1/chat/completions');
+  } catch (err) {
+    return { ok: false, busy: false, fallbackable: false, error: `invalid base_url: ${err.message}` };
+  }
+  return callChat({
+    url, model, headers: authHeaders(provider), guarded: true,
+  }, req, fetchImpl);
+}
+
+// `boxOnly` = no CPU fallback: whichever provider is active (box or not)
+// either answers or the call fails. `via` says who answered or failed:
+// 'box' (GPU box /api/text), 'provider' (another adapter), 'fallback' (CPU).
 async function complete(db, request, { fetchImpl = fetch, boxOnly = false } = {}) {
   const req = {
     system: request.system || '',
@@ -136,15 +199,18 @@ async function complete(db, request, { fetchImpl = fetch, boxOnly = false } = {}
     return { ok: false, error: `could not read the text provider: ${err.message}`, busy: false, via: 'box' };
   }
   let boxErr = null;
+  const via = provider && !isBoxText(provider) ? 'provider' : 'box';
   if (provider) {
-    const b = await callBox(provider, req, fetchImpl);
-    if (b.ok) return { ...b, via: 'box' };
-    if (!b.fallbackable) return { ok: false, error: b.error, busy: false, via: 'box' };
+    const b = via === 'box'
+      ? await callBox(provider, req, fetchImpl)
+      : await callProviderChat(provider, req, fetchImpl);
+    if (b.ok) return { ...b, via };
+    if (!b.fallbackable) return { ok: false, error: b.error, busy: false, via };
     boxErr = b;
   }
   if (boxOnly) {
     return {
-      ok: false, error: boxErr ? boxErr.error : 'no active text provider', busy: Boolean(boxErr && boxErr.busy), via: 'box',
+      ok: false, error: boxErr ? boxErr.error : 'no active text provider', busy: Boolean(boxErr && boxErr.busy), via,
     };
   }
   const f = await callFallback(req, fetchImpl);
@@ -155,6 +221,8 @@ async function complete(db, request, { fetchImpl = fetch, boxOnly = false } = {}
 }
 
 async function listTextModels(provider, { fetchImpl = fetch } = {}) {
+  if (provider.adapter === 'ollama') return providerCatalog.listOllamaModels(provider, { fetchImpl });
+  if (provider.adapter === 'openai_compatible') return providerCatalog.listOpenAiModels(provider, { fetchImpl });
   let url;
   try {
     url = resolveUrl(provider.base_url, '/api/text/models');
@@ -178,4 +246,4 @@ async function listTextModels(provider, { fetchImpl = fetch } = {}) {
   return { ok: true, models: read.json.map((m) => m && m.value).filter((v) => typeof v === 'string') };
 }
 
-module.exports = { complete, listTextModels };
+module.exports = { complete, listTextModels, isBoxText };

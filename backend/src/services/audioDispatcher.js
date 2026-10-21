@@ -808,7 +808,9 @@ function startDrain(db, opts = {}) {
     self.phase = 'prompt';
     const textProv = await deps.loadTextProvider(db);
     // /api/text/models lists ids without the gateway's prefix (plan Task 0).
-    const textModel = textProv && textProv.model ? `brain:${textProv.model}` : null;
+    // Only the box text provider sits behind the model gateway; any other
+    // adapter (Ollama, OpenAI-compatible) is called directly, no switch.
+    const textModel = textProv && textProv.model && textProvider.isBoxText(textProv) ? `brain:${textProv.model}` : null;
     const cache = {};
     settledModel = null; // a phase boundary always switches (see settledModel)
     for (;;) {

@@ -3,9 +3,11 @@
 // cleared on purpose.
 import { draftText } from './artDescriptionDraft.js';
 
+const VIA_LABEL = { fallback: 'CPU fallback', provider: 'text provider' };
+
 export function provenanceText(active) {
   if (!active) return 'no stored prompt';
-  if (active.model) return `written by ${active.model} (${active.via === 'fallback' ? 'CPU fallback' : 'GPU box'})`;
+  if (active.model) return `written by ${active.model} (${VIA_LABEL[active.via] || 'GPU box'})`;
   return active.text ? 'edited by hand' : 'cleared by hand — generation ignores it';
 }
 
