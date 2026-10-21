@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   boxDir, isBoxManifest, actionFrameKey, actionFrameCount, actionDurationMs, pickAction,
-  frameKeyFor, actionTimings, DEFAULT_FPS,
+  frameKeyFor, actionTimings, rowFor, DEFAULT_FPS,
 } from "../sheetActions.js";
 
 // A box sheet.json: `actions` x `dirs`, `n` frames each, rects from the grid.
@@ -132,9 +132,9 @@ describe("actionFrameKey", () => {
 
   it("falls back to idle at the same direction when the action is absent", () => {
     const only = sheet(["idle"], ALL, 4);
-    expect(actionFrameKey(only, { dir: "w", action: "cast", startedAt: 0, now: 0 })).toBe("idle/w/0");
+    expect(actionFrameKey(only, { dir: "n", action: "cast", startedAt: 0, now: 0 })).toBe("idle/n/0");
     // the idle fallback LOOPS (it is idle's own semantics), not clamps
-    expect(actionFrameKey(only, { dir: "w", action: "damage", startedAt: 0, now: 500 })).toBe("idle/w/0");
+    expect(actionFrameKey(only, { dir: "n", action: "damage", startedAt: 0, now: 500 })).toBe("idle/n/0");
   });
 
   it("falls back to idle at the nearest direction", () => {
@@ -256,5 +256,61 @@ describe("frameKeyFor", () => {
         .toBe(actionFrameKey(m, { dir: "e", action, startedAt: 100, now: 460 }));
     }
     expect(frameKeyFor(null, "e", "idle", 0, 0, DEFAULT_FPS)).toBe(null);
+  });
+});
+
+// SOMET-659: the box's western rows are broken, so a western screen direction
+// is drawn as the eastern row mirrored horizontally.
+describe("rowFor (western rows are mirrored eastern rows)", () => {
+  const full = sheet(["idle", "attack"], ALL, 2);
+  const out = { flipX: null };
+  const row = (m, dir, action = "idle") => [rowFor(m, action, dir, out), out.flipX];
+
+  it("draws w / nw / sw as e / ne / se flipped", () => {
+    expect(row(full, "w")).toEqual(["e", true]);
+    expect(row(full, "nw")).toEqual(["ne", true]);
+    expect(row(full, "sw")).toEqual(["se", true]);
+  });
+
+  it("leaves the other directions alone, unflipped", () => {
+    for (const d of ["s", "se", "e", "ne", "n"]) expect(row(full, d)).toEqual([d, false]);
+  });
+
+  it("uses the western row unflipped when the eastern counterpart is missing", () => {
+    const west = sheet(["idle"], ["s", "n", "w", "nw", "sw"], 2);
+    expect(row(west, "w")).toEqual(["w", false]);
+    expect(row(west, "nw")).toEqual(["nw", false]);
+    expect(row(west, "sw")).toEqual(["sw", false]);
+  });
+
+  it("falls back to the nearest direction, unflipped, when both are missing", () => {
+    const only = sheet(["idle"], ["s", "n"], 2);
+    expect(row(only, "w")).toEqual(["s", false]);
+    expect(row(only, "nw")).toEqual(["n", false]);
+    expect(row(only, "sw")).toEqual(["s", false]);
+  });
+
+  it("returns null for a missing action or a non-box manifest", () => {
+    expect(row(full, "w", "cast")).toEqual([null, false]);
+    expect(row({ frames: {} }, "w")).toEqual([null, false]);
+  });
+
+  it("frameKeyFor / actionFrameKey draw the mirrored key and report the flip", () => {
+    const rec = { flipX: false };
+    expect(frameKeyFor(full, "w", "attack", 0, 125, DEFAULT_FPS, rec)).toBe("attack/e/1");
+    expect(rec.flipX).toBe(true);
+    expect(frameKeyFor(full, "e", "attack", 0, 125, DEFAULT_FPS, rec)).toBe("attack/e/1");
+    expect(rec.flipX).toBe(false);
+    // the idle fallback mirrors too
+    expect(frameKeyFor(full, "sw", "walk", 0, 0, DEFAULT_FPS, rec)).toBe("idle/se/0");
+    expect(rec.flipX).toBe(true);
+    // no key -> no flip
+    expect(frameKeyFor(sheet(["walk"], ["s"]), "w", "attack", 0, 0, DEFAULT_FPS, rec)).toBe(null);
+    expect(rec.flipX).toBe(false);
+    const o = { flipX: false };
+    expect(actionFrameKey(full, { dir: "nw", action: "idle", startedAt: 0, now: 0, out: o })).toBe("idle/ne/0");
+    expect(o.flipX).toBe(true);
+    // without a record it still returns the mirrored key
+    expect(frameKeyFor(full, "w", "idle", 0, 0, DEFAULT_FPS)).toBe("idle/e/0");
   });
 });

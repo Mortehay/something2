@@ -51,6 +51,8 @@ export class EntityAnimState {
         phase: phaseFor(key),
         // Filled by the renderer from the sheet before pickAction.
         attackDurMs: 0, castDurMs: 0, damageMs: 0,
+        // Written by frameKeyFor (SOMET-659): draw the sheet row mirrored.
+        flipX: false,
       };
       this._map.set(key, r);
     }

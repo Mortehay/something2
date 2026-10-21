@@ -3433,9 +3433,8 @@ export class RenderSystem {
     );
     this.ctx.globalAlpha = alpha;
     if (resolved) {
-      const [sx, sy, sw, sh] = resolved.crop;
-      const r = fitSpriteRect(sw, sh, drawX, drawY, w, h);
-      this.ctx.drawImage(resolved.img, sx, sy, sw, sh, r.dx, r.dy, r.dw, r.dh);
+      const r = fitSpriteRect(resolved.crop[2], resolved.crop[3], drawX, drawY, w, h);
+      this._drawSpriteFrame(resolved, r);
     } else if (img) {
       // SOMET-569: fit, do not stretch. See fitSpriteRect.
       const r = fitSpriteRect(img.width, img.height, drawX, drawY, w, h);
@@ -3460,6 +3459,31 @@ export class RenderSystem {
     }
   }
 
+  // Draw a resolved atlas frame into dest rect `r`. SOMET-659: a `flipX`
+  // frame (a western box-sheet row drawn as its mirrored eastern row) is
+  // mirrored about the rect's horizontal centre, so it covers exactly the same
+  // screen rect -- the feet anchor does not move. The mirror COMPOSES with
+  // the camera transform (translate/scale inside save/restore); setTransform
+  // would replace it. Only this drawImage is mirrored: shadows, rings, bars
+  // and labels are drawn by the callers outside it.
+  _drawSpriteFrame(sprite, r) {
+    const ctx = this.ctx;
+    const [sx, sy, sw, sh] = sprite.crop;
+    if (!sprite.flipX) {
+      ctx.drawImage(sprite.img, sx, sy, sw, sh, r.dx, r.dy, r.dw, r.dh);
+      return;
+    }
+    const cx = r.dx + r.dw / 2;
+    ctx.save();
+    ctx.translate(cx, 0);
+    ctx.scale(-1, 1);
+    // r.dx - cx (== -r.dw/2), not a literal: a non-finite rect stays
+    // non-finite, so Canvas drops the draw exactly as the unflipped path does
+    // instead of drawing at the origin after ignoring translate(NaN).
+    ctx.drawImage(sprite.img, sx, sy, sw, sh, r.dx - cx, r.dy, r.dw, r.dh);
+    ctx.restore();
+  }
+
   // Resolve the atlas image + source-crop rect for an entity in a sprite mode,
   // or null to fall through. Requires a loaded atlas and an attached manifest.
   // Animated mode cycles the facing's frames at timeMs; static shows one frame.
@@ -3467,6 +3491,8 @@ export class RenderSystem {
   // SOMET-656: with `anim` (an EntityAnimState) and `animKey`, a GPU-box sheet
   // (manifest with `rows`) plays the actor's current action -- idle, walk,
   // attack, cast, damage -- in either sprite mode. Legacy atlases ignore both.
+  // SOMET-659: the box result carries `flipX` (draw mirrored; see
+  // _drawSpriteFrame); legacy results never set it.
   static resolveSprite(entity, imageManager, mode, timeMs = 0, anim = null, animKey = null) {
     if (mode === "rect" || !entity.sprite || !imageManager) return null;
     const atlas = imageManager.get(entity.sprite.atlas_key);
@@ -3475,7 +3501,11 @@ export class RenderSystem {
     if (anim && animKey && isBoxManifest(manifest) && !stateFrameKey(manifest, entity.stateKey)) {
       const key = RenderSystem._actionKey(entity, manifest, timeMs, anim, animKey);
       const rect = frameRect(manifest, key || staticFrameKey(entity.sprite, manifest));
-      return rect ? { img: atlas, crop: rect } : null;
+      if (!rect) return null;
+      // frameKeyFor wrote the flip onto the anim record; a null key means
+      // the static frame, which is never mirrored.
+      const st = key ? anim.stateFor(animKey) : null;
+      return { img: atlas, crop: rect, flipX: Boolean(st && st.flipX) };
     }
     // Animated -> cycle the facing's frames; entity atlases generated through
     // the object/tile pipeline are FLAT (keys "0","1",… with no direction), so
@@ -3504,7 +3534,7 @@ export class RenderSystem {
     st.castDurMs = t.castDurMs;
     st.damageMs = t.damageMs;
     const action = pickAction(st, now);
-    return frameKeyFor(manifest, boxDir(entity.facing), action, st.actionStartedAt, now, DEFAULT_FPS);
+    return frameKeyFor(manifest, boxDir(entity.facing), action, st.actionStartedAt, now, DEFAULT_FPS, st);
   }
 
   _drawWorldBoss(e, drawX, drawY, w, h, s) {
@@ -3634,10 +3664,9 @@ export class RenderSystem {
     const mode = RenderSystem.resolveRenderMode(e, this.renderModeOverride);
     const sprite = RenderSystem.resolveSprite(e, this.imageManager, mode, this.nowMs, this._playbackAnim(), animKey);
     if (sprite) {
-      const [sx, sy, sw, sh] = sprite.crop;
       // SOMET-569: the FRAME's dimensions decide the fit, not the atlas's.
-      const r = fitSpriteRect(sw, sh, drawX, drawY, w, h);
-      this.ctx.drawImage(sprite.img, sx, sy, sw, sh, r.dx, r.dy, r.dw, r.dh);
+      const r = fitSpriteRect(sprite.crop[2], sprite.crop[3], drawX, drawY, w, h);
+      this._drawSpriteFrame(sprite, r);
       return r.dh;
     }
     const img = mode !== "rect" && e.image && this.imageManager

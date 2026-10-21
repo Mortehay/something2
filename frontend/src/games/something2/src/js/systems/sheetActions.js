@@ -121,21 +121,47 @@ function frameIndex(n, startedAt, now, fps, loop) {
   return f < 0 ? 0 : (f >= n ? n - 1 : f);
 }
 
-// Positional core of actionFrameKey (no options literal): the renderer's hot
-// path. `loop` is derived from the action. Returns the key or null.
-export function frameKeyFor(manifest, dir, action, startedAt, now, fps) {
-  return keyFor(manifest, dir, action, startedAt, now, fps, undefined);
+// SOMET-659: western screen rows -> the eastern row drawn mirrored.
+const MIRROR_OF = { w: "e", nw: "ne", sw: "se" };
+
+// The sheet row (direction) to draw `action` at screen direction `dir`, or
+// null when the sheet has no such action. Writes `out.flipX` (when `out` is
+// given): true when the row must be drawn mirrored horizontally. A western
+// dir uses its eastern counterpart flipped; if that row is missing but the
+// western one exists, the western row unflipped; otherwise the nearest row.
+export function rowFor(manifest, action, dir, out) {
+  if (out) out.flipX = false;
+  if (!isBoxManifest(manifest)) return null;
+  return pickRow(rowIndex(manifest).get(action), dir, out);
 }
 
-function keyFor(manifest, dir, action, startedAt, now, fps, loop) {
+function pickRow(byDir, dir, out) {
+  if (!byDir) return null;
+  const east = MIRROR_OF[dir];
+  if (east !== undefined && byDir.has(east)) {
+    if (out) out.flipX = true;
+    return east;
+  }
+  return nearestDir(byDir, dir);
+}
+
+// Positional core of actionFrameKey (no options literal): the renderer's hot
+// path. `loop` is derived from the action. Returns the key or null, and writes
+// `out.flipX` (see rowFor) when `out` -- e.g. the actor's anim record -- is given.
+export function frameKeyFor(manifest, dir, action, startedAt, now, fps, out) {
+  return keyFor(manifest, dir, action, startedAt, now, fps, undefined, out);
+}
+
+function keyFor(manifest, dir, action, startedAt, now, fps, loop, out) {
+  if (out) out.flipX = false;
   if (!isBoxManifest(manifest)) return null;
   const idx = rowIndex(manifest);
   let useAction = action;
-  let d = nearestDir(idx.get(action), dir);
+  let d = pickRow(idx.get(action), dir, out);
   let looped = loop !== undefined ? loop : LOOPED.has(action);
   if (d === null && action !== "idle") {
     useAction = "idle";
-    d = nearestDir(idx.get("idle"), dir);
+    d = pickRow(idx.get("idle"), dir, out);
     looped = true;
   }
   if (d === null) return null;
@@ -146,8 +172,10 @@ function keyFor(manifest, dir, action, startedAt, now, fps, loop) {
 // The frame key to draw, or null (the caller then uses staticFrameKey).
 // Fallbacks: action+dir -> action at the nearest dir -> idle+dir -> idle at
 // the nearest dir -> null. An idle fallback loops, as idle always does.
-export function actionFrameKey(manifest, { dir, action, startedAt, now, fps = DEFAULT_FPS, loop } = {}) {
-  return keyFor(manifest, dir, action, startedAt, now, fps, loop);
+// Western dirs resolve to the mirrored eastern row (see rowFor); pass `out`
+// to learn whether to flip.
+export function actionFrameKey(manifest, { dir, action, startedAt, now, fps = DEFAULT_FPS, loop, out } = {}) {
+  return keyFor(manifest, dir, action, startedAt, now, fps, loop, out);
 }
 
 const at = (v) => (Number.isFinite(v) ? v : -Infinity);

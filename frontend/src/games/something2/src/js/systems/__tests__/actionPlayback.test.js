@@ -126,7 +126,8 @@ describe("RenderSystem.resolveSprite with a box sheet and anim state", () => {
     const m = boxSheet();
     const anim = new EntityAnimState();
     anim.noteAttack("self", 0, false);
-    expect(resolveAt(creature(m, { facing: "w" }), anim, 0, "self")).toBe("attack/nw/0");
+    // world w -> screen nw, drawn as the mirrored ne row (SOMET-659)
+    expect(resolveAt(creature(m, { facing: "w" }), anim, 0, "self")).toBe("attack/ne/0");
   });
 
   it("falls back to the static frame when the sheet has neither the action nor idle", () => {
@@ -248,7 +249,7 @@ describe("draw paths play box actions", () => {
 
   it("drawCreature (players) plays via its key, and honours a static override", () => {
     const m = boxSheet();
-    for (const [override, want] of [[null, "attack/sw/1"], ["static", "idle/s/0"]]) {
+    for (const [override, want] of [[null, "attack/se/1"], ["static", "idle/s/0"]]) {
       const { canvas, calls } = recordingCanvas();
       const rs = new RenderSystem(canvas, imgs);
       rs.entityAnim = new EntityAnimState();
@@ -259,5 +260,131 @@ describe("draw paths play box actions", () => {
       rs.drawCreature(p, "player", 0.85, "42", "p:42");
       expect(drawnKey(m, calls)).toBe(want);
     }
+  });
+});
+
+// SOMET-659: a western-facing box actor is drawn as its eastern row mirrored.
+// The mirror must COMPOSE with the camera transform (save/translate/scale/
+// restore), never replace it, and must wrap only the sprite's drawImage.
+function opCanvas() {
+  const calls = [];
+  const rec = (op) => (...args) => calls.push({ op, args });
+  const ctx = {
+    imageSmoothingEnabled: false, globalAlpha: 1, fillStyle: "", strokeStyle: "", lineWidth: 1, font: "", textAlign: "",
+    drawImage: rec("drawImage"), fillRect: rec("fillRect"), save: rec("save"), restore: rec("restore"),
+    translate: rec("translate"), transform: rec("transform"), setTransform: rec("setTransform"),
+    resetTransform: rec("resetTransform"), scale: rec("scale"), rotate: rec("rotate"),
+    ellipse: rec("ellipse"), beginPath() {}, closePath() {}, moveTo() {}, lineTo() {}, arc: rec("arc"),
+    fill() {}, stroke() {}, fillText: rec("fillText"), strokeText: rec("strokeText"),
+    measureText: () => ({ width: 10 }),
+    createRadialGradient: () => ({ addColorStop() {} }), createLinearGradient: () => ({ addColorStop() {} }),
+  };
+  return { canvas: { getContext: () => ctx }, calls };
+}
+
+// The on-screen x-span a drawImage call covers under the recorded translate/
+// scale (x only; this test never rotates or skews).
+function screenSpan(calls, iDraw) {
+  let tx = 0;
+  let sx = 1;
+  const depth = [];
+  for (let i = 0; i < iDraw; i += 1) {
+    const c = calls[i];
+    if (c.op === "save") depth.push([tx, sx]);
+    else if (c.op === "restore") [tx, sx] = depth.pop();
+    else if (c.op === "translate") tx += sx * c.args[0];
+    else if (c.op === "scale") sx *= c.args[0];
+  }
+  const [dx, , dw] = calls[iDraw].args.slice(-4);
+  const a = tx + sx * dx;
+  const b = tx + sx * (dx + dw);
+  return [Math.min(a, b), Math.max(a, b), calls[iDraw].args.slice(-3)];
+}
+
+const atlasDraw = (calls) => calls.findIndex((c) => c.op === "drawImage" && c.args[0] === ATLAS);
+
+function drawCreatureEntity(m, facing, over = {}) {
+  const { canvas, calls } = opCanvas();
+  const rs = new RenderSystem(canvas, imgs);
+  rs.entityAnim = new EntityAnimState();
+  rs.nowMs = 1125;
+  rs.drawEntity(creature(m, { facing, hp: 5, maxHp: 10, ...over }), "c:9");
+  return calls;
+}
+
+function drawPlayer(m, facing) {
+  const { canvas, calls } = opCanvas();
+  const rs = new RenderSystem(canvas, imgs);
+  rs.entityAnim = new EntityAnimState();
+  rs.nowMs = 1125;
+  const p = { x: 500, y: 500, width: 64, height: 64, facing, hp: 5, maxHp: 10, renderMode: "static", sprite: creature(m).sprite };
+  rs.drawCreature(p, "player", 0.85, "42", "p:42");
+  return calls;
+}
+
+describe("western box actors draw mirrored (SOMET-659)", () => {
+  it("resolveSprite reports flipX for a western facing only", () => {
+    const m = boxSheet();
+    const anim = new EntityAnimState();
+    const flip = (facing) => RenderSystem.resolveSprite(creature(m, { facing }), imgs, "static", 0, anim, "c:9").flipX;
+    expect(flip("W")).toBe(true); // screen nw -> ne mirrored
+    expect(flip("S")).toBe(true); // screen sw -> se mirrored
+    expect(flip("SW")).toBe(true); // screen w -> e mirrored
+    for (const f of ["E", "SE", "NE", "N", "NW"]) expect(flip(f)).toBe(false);
+    // static frame without anim state: never flipped
+    expect(RenderSystem.resolveSprite(creature(m, { facing: "W" }), imgs, "static", 0).flipX).toBeFalsy();
+  });
+
+  for (const [name, draw] of [["drawEntity (creatures)", drawCreatureEntity], ["drawCreature (players)", drawPlayer]]) {
+    it(`${name}: save, translate(centre), scale(-1,1), drawImage, restore; same screen rect`, () => {
+      const m = boxSheet();
+      const west = draw(m, name.startsWith("drawEntity") ? "SW" : "sw"); // screen w -> e mirrored
+      const east = draw(m, name.startsWith("drawEntity") ? "NE" : "ne"); // screen e, as is
+      expect(west.some((c) => c.op === "setTransform" || c.op === "resetTransform")).toBe(false);
+      const i = atlasDraw(west);
+      expect(i).toBeGreaterThan(-1);
+      expect(west.slice(i - 3, i + 2).map((c) => c.op)).toEqual(["save", "translate", "scale", "drawImage", "restore"]);
+      expect(west[i - 1].args).toEqual([-1, 1]);
+      expect(west[i - 2].args[1]).toBe(0);
+      // same frame as the east-facing actor ...
+      const j = atlasDraw(east);
+      expect(west[i].args.slice(1, 5)).toEqual(east[j].args.slice(1, 5));
+      // ... landing on exactly the same screen rect (feet anchor unmoved)
+      const [wa, wb, wRest] = screenSpan(west, i);
+      const [ea, eb, eRest] = screenSpan(east, j);
+      expect(wa).toBeCloseTo(ea, 9);
+      expect(wb).toBeCloseTo(eb, 9);
+      expect(wRest).toEqual(eRest);
+      // the translate is the dest rect's horizontal centre
+      expect(west[i - 2].args[0]).toBeCloseTo((ea + eb) / 2, 9);
+      // everything else (shadow, rings, hp bar, labels) is outside the mirror
+      expect(west.filter((c) => c.op === "scale")).toHaveLength(1);
+      expect(west.filter((c) => c.op === "fillRect").length).toBeGreaterThan(0);
+      expect(west.slice(i - 3, i + 2).some((c) => c.op === "fillRect" || c.op === "fillText")).toBe(false);
+    });
+
+    it(`${name}: an east-facing actor draws with no scale at all`, () => {
+      const m = boxSheet();
+      const calls = draw(m, name.startsWith("drawEntity") ? "E" : "e");
+      expect(atlasDraw(calls)).toBeGreaterThan(-1);
+      expect(calls.some((c) => c.op === "scale" || c.op === "setTransform")).toBe(false);
+    });
+  }
+
+  it("legacy atlases and plain-image props never flip", () => {
+    const legacy = { frames: { "W/0": [0, 0, 64, 64], "S/0": [64, 0, 64, 64] } };
+    for (const mode of ["static", "animated"]) {
+      const calls = drawCreatureEntity(legacy, "W", { render_mode: mode });
+      expect(atlasDraw(calls)).toBeGreaterThan(-1);
+      expect(calls.some((c) => c.op === "scale")).toBe(false);
+    }
+    const PROP = { width: 64, height: 64 };
+    const { canvas, calls } = opCanvas();
+    const rs = new RenderSystem(canvas, { get: (k) => (k === "prop.png" ? PROP : null) });
+    rs.entityAnim = new EntityAnimState();
+    rs.nowMs = 1125;
+    rs.drawEntity({ id: 3, x: 0, y: 0, width: 64, height: 64, facing: "W", image: "prop.png", render_mode: "static" }, "c:3");
+    expect(calls.some((c) => c.op === "drawImage" && c.args[0] === PROP)).toBe(true);
+    expect(calls.some((c) => c.op === "scale")).toBe(false);
   });
 });
