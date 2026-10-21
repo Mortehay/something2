@@ -77,7 +77,7 @@ export function framesCap(catalog, actions) {
 }
 
 // A flat prop is one edit on the box (Props v2: concept -> person removed ->
-// one static image, swayed by the game), so it counts as 1 cell whatever the
+// one static image, animated by the game's idle effect), so it counts as 1 cell whatever the
 // actions and frames; a creature is a sheet of facings x actions x frames.
 export function cellCount(rows, actions, frames) {
   return rows.reduce(
@@ -92,15 +92,41 @@ export function isBoxProp(subject) {
   return subject?.backend === 'gpu-box' && subject?.generation_kind === 'object' && !subject?.atlas_key;
 }
 
-// For a prop the queued actions are not drawn; 'sway' among them means the
-// prop sways in game (approve sets entity_types.sway from it).
-export function propSways(subject) {
-  return Array.isArray(subject?.actions) && subject.actions.includes('sway');
+// Props v2: a prop's in-game idle effect, chosen when it is queued (prop_fx)
+// and copied to entity_types.idle_fx on approve. Props do not use actions.
+export const PROP_FX_OPTIONS = [
+  { id: 'none', label: 'None' },
+  { id: 'sway', label: 'Sway' },
+  { id: 'shine', label: 'Shine' },
+];
+const PROP_FX_IDS = new Set(PROP_FX_OPTIONS.map((o) => o.id));
+
+export function propFxLabel(fx) {
+  return (PROP_FX_OPTIONS.find((o) => o.id === fx) || PROP_FX_OPTIONS[0]).label;
 }
 
-const ACTION_HINTS = { sway: 'props: sway in the game, no sheet' };
-export function actionHint(id) {
-  return ACTION_HINTS[id] ?? null;
+// The effect a prop row will get on approve: its prop_fx, else none.
+export function propEffect(subject) {
+  return PROP_FX_IDS.has(subject?.prop_fx) ? subject.prop_fx : 'none';
+}
+
+export function selectionKinds(rows) {
+  const props = rows.some((row) => spriteShape(row) === 'flat');
+  const creatures = rows.some((row) => spriteShape(row) !== 'flat');
+  return { props, creatures, propsOnly: props && !creatures };
+}
+
+// Selected rows + controls -> POST /jobs body. A props-only selection has no
+// actions or frames to choose (the route still wants a valid action, so idle
+// x1 stands in); prop_fx travels whenever a prop is selected.
+export function queuePayload(catalog, rows, { actions, frames, propFx = 'none' }) {
+  const { props, propsOnly } = selectionKinds(rows);
+  const ids = (catalog?.actions || []).map((action) => action.id);
+  const body = propsOnly
+    ? { targets: targetsForSprites(rows), actions: ids.includes('idle') ? ['idle'] : ids.slice(0, 1), frames: 1 }
+    : { targets: targetsForSprites(rows), actions, frames };
+  if (props) body.prop_fx = propFx;
+  return body;
 }
 
 export function estimateLabel(cells, secondsPerCell) {
@@ -112,12 +138,11 @@ export function estimateLabel(cells, secondsPerCell) {
   return `${noun} · ~${h ? `${h} h ` : ''}${h && !m ? '' : `${m} min`}`.trimEnd();
 }
 
-// Initial action ticks: idle, plus sway when the current selection contains a
-// flat prop (creatures have no sway). Filtered to the catalog's ids.
-export function defaultActionsFor(catalog, rows) {
+// Initial action ticks: idle, filtered to the catalog's ids. Props never
+// add actions (their effect is the separate prop_fx select).
+export function defaultActionsFor(catalog, _rows) {
   const ids = new Set((catalog?.actions || []).map((action) => action.id));
-  const wanted = (rows || []).some((row) => spriteShape(row) === 'flat') ? ['idle', 'sway'] : ['idle'];
-  return wanted.filter((id) => ids.has(id));
+  return ['idle'].filter((id) => ids.has(id));
 }
 
 // sheet.json -> one label per sheet row. Legacy local atlases have no `rows`.

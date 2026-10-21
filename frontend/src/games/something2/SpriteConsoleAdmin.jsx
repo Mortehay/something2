@@ -8,8 +8,8 @@ import {
   useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
 } from './useSpriteConsole.js';
 import {
-  actionHint, cellCount, defaultActionsFor, isBoxProp, estimateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
-  spriteShape, targetsForSprites, toggleSpriteSubject,
+  cellCount, defaultActionsFor, isBoxProp, estimateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
+  PROP_FX_OPTIONS, propFxLabel, queuePayload, selectionKinds, spriteShape, toggleSpriteSubject,
 } from './spriteSelection.js';
 
 const Wrap = styled.div`
@@ -81,6 +81,8 @@ function SpriteConsoleAdmin() {
   const { catalog, isLoading: catalogLoading, error: catalogError } = useActionCatalog();
   const [chosenActions, setChosenActions] = useState(null);
   const [chosenFrames, setChosenFrames] = useState(4);
+  // Props v2: the idle effect selected props get in game (prop_fx).
+  const [propFx, setPropFx] = useState('none');
   const queue = useQueueSprites();
   const start = useStartSpriteBatch();
   const stop = useStopSpriteBatch();
@@ -105,17 +107,17 @@ function SpriteConsoleAdmin() {
   const actions = chosenActions ?? defaultActionsFor(catalog, selectedRows);
   const cap = framesCap(catalog, actions);
   const frames = Math.min(chosenFrames, cap);
-  const cells = cellCount(selectedRows, actions, frames);
+  const kinds = selectionKinds(selectedRows);
+  const payload = queuePayload(catalog, selectedRows, { actions, frames, propFx });
+  const cells = cellCount(selectedRows, payload.actions, payload.frames);
   const toggleAction = (id) => setChosenActions(
     actions.includes(id) ? actions.filter((a) => a !== id) : [...actions, id],
   );
   const catalogReady = Boolean(catalog) && !catalogLoading && !catalogError;
-  const canQueue = catalogReady && selected.size > 0 && actions.length > 0 && !queue.isPending;
+  const queueable = catalogReady && selected.size > 0 && payload.actions.length > 0;
+  const canQueue = queueable && !queue.isPending;
 
-  const enqueue = () => queue.mutate(
-    { targets: targetsForSprites(selectedRows), actions, frames },
-    { onSuccess: () => setSelected(new Set()) },
-  );
+  const enqueue = () => queue.mutate(payload, { onSuccess: () => setSelected(new Set()) });
   const approveSelected = () => approve.mutate(
     approvable.map((subject) => subject.job_id),
     { onSuccess: () => setSelected(new Set()) },
@@ -178,30 +180,46 @@ function SpriteConsoleAdmin() {
       </Bar>
 
       <Bar>
-        <Field as="div">Actions
-          <span style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-            {(catalog?.actions || []).map((action) => (
-              <Check key={action.id}>
-                <input type="checkbox" checked={actions.includes(action.id)}
-                  onChange={() => toggleAction(action.id)} />
-                {action.label}
-                {actionHint(action.id) && <small style={{ color: 'var(--s2-text-muted)' }}>({actionHint(action.id)})</small>}
-              </Check>
-            ))}
-          </span>
-        </Field>
-        <Field>Frames
-          <select value={frames} disabled={!catalogReady}
-            onChange={(event) => setChosenFrames(Number(event.target.value))}>
-            {Array.from({ length: cap }, (_, i) => i + 1).map((n) => (
-              <option key={n} value={n}>{n}</option>
-            ))}
-          </select>
-        </Field>
+        {/* Actions and frames shape a creature's sheet; a prop is one image
+            with an idle effect, so a props-only selection hides them. */}
+        {kinds.propsOnly ? (
+          <Hint>Props are one image each: actions and frames do not apply.</Hint>
+        ) : (
+          <>
+            <Field as="div">Actions
+              <span style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                {(catalog?.actions || []).map((action) => (
+                  <Check key={action.id}>
+                    <input type="checkbox" checked={actions.includes(action.id)}
+                      onChange={() => toggleAction(action.id)} />
+                    {action.label}
+                  </Check>
+                ))}
+              </span>
+            </Field>
+            <Field>Frames
+              <select value={frames} disabled={!catalogReady}
+                onChange={(event) => setChosenFrames(Number(event.target.value))}>
+                {Array.from({ length: cap }, (_, i) => i + 1).map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </Field>
+          </>
+        )}
+        {kinds.props && (
+          <Field>Prop effect
+            <select value={propFx} onChange={(event) => setPropFx(event.target.value)}>
+              {PROP_FX_OPTIONS.map((option) => (
+                <option key={option.id} value={option.id}>{option.label}</option>
+              ))}
+            </select>
+          </Field>
+        )}
         <Button disabled={!canQueue} onClick={enqueue}>
           Queue {selected.size} selected
         </Button>
-        {catalogReady && selected.size > 0 && actions.length > 0 && (
+        {queueable && (
           <Hint>{estimateLabel(cells, catalog.seconds_per_cell)}</Hint>
         )}
         <Secondary disabled={matching.length === 0}
@@ -248,7 +266,9 @@ function SpriteConsoleAdmin() {
                   <td>{thumb(sheet, isBoxProp(subject) ? 'Preview result' : 'Preview sheet')}</td>
                   <td>{subject.name}</td>
                   <td><Pill>{spriteShape(subject)}</Pill></td>
-                  <td>{Array.isArray(subject.actions) && subject.actions.length ? subject.actions.join(' · ') : '—'}</td>
+                  {/* A prop's queued actions mean nothing; show its effect instead. */}
+                  <td>{isBoxProp(subject) && subject.prop_fx ? `effect: ${propFxLabel(subject.prop_fx)}`
+                    : Array.isArray(subject.actions) && subject.actions.length ? subject.actions.join(' · ') : '—'}</td>
                   <td>{subject.backend === 'gpu-box' && subject.frames_per_action
                     ? `${subject.frames_per_action} / action` : derivedFrames(subject)}</td>
                   <td>{subject.backend || 'local'}</td>

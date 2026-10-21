@@ -1,13 +1,14 @@
 // Preview popup for one sprite subject: concept image (left) beside the
 // generated sheet at x2 (right), every sheet row labelled from sheet.json.
 // A GPU-box prop (Props v2) has no sheet: the right side is the edited image
-// (person removed), previewed with the in-game sway when the prop sways.
+// (person removed), previewed with a CSS stand-in for the idle effect it will
+// get in game on approve (prop_fx: none | sway | shine).
 import { useState } from 'react';
 import styled, { keyframes } from 'styled-components';
 import { useQuery } from '@tanstack/react-query';
 import { Modal, Muted } from './seedUi.jsx';
 import { assetUrl, assetUrlVersioned } from './useTileSprites.js';
-import { isBoxProp, propSways, rowLabels } from './spriteSelection.js';
+import { isBoxProp, propEffect, propFxLabel, rowLabels } from './spriteSelection.js';
 
 const Cols = styled.div`display: flex; gap: 1.2rem; align-items: flex-start; flex-wrap: wrap; margin-top: 0.8rem;`;
 const Col = styled.div`display: flex; flex-direction: column; gap: 0.4rem; min-width: 0;`;
@@ -26,10 +27,26 @@ const swayKeys = keyframes`
   0%, 100% { transform: skewX(-2deg); }
   50% { transform: skewX(2deg); }
 `;
-const SwayImg = styled(Img)`
-  transform-origin: bottom center;
-  &[data-sway='on'] { animation: ${swayKeys} 2.8s ease-in-out infinite; }
-  @media (prefers-reduced-motion: reduce) { &[data-sway='on'] { animation: none; } }
+// The CSS stand-in for systems/shine.js: a diagonal glint crossing in 0.6 s
+// of every 4.5 s (13.3%), masked by the image itself so it lights only the
+// opaque pixels.
+const shineKeys = keyframes`
+  0% { background-position: 150% 0; }
+  13.3%, 100% { background-position: -50% 0; }
+`;
+const FxFrame = styled.span`
+  position: relative; display: inline-block; max-width: 100%; line-height: 0;
+  & > img { transform-origin: bottom center; }
+  &[data-fx='sway'] > img { animation: ${swayKeys} 2.8s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) { &[data-fx='sway'] > img { animation: none; } }
+`;
+const Glint = styled.span`
+  position: absolute; inset: 1px; pointer-events: none;
+  background: linear-gradient(115deg, transparent 40%, rgba(255, 255, 240, 0.85) 50%, transparent 60%) 150% 0 / 300% 100% no-repeat;
+  mix-blend-mode: screen;
+  mask-size: 100% 100%; -webkit-mask-size: 100% 100%;
+  animation: ${shineKeys} 4.5s linear infinite;
+  @media (prefers-reduced-motion: reduce) { animation: none; opacity: 0; }
 `;
 
 function useSheetManifest(key, enabled) {
@@ -47,15 +64,19 @@ function useSheetManifest(key, enabled) {
 const fileName = (key) => String(key).split('/').pop();
 
 function PropResult({ subject, version }) {
-  const sways = propSways(subject);
+  const fx = propEffect(subject);
+  const src = subject.image_key ? assetUrlVersioned(subject.image_key, version) : null;
+  const mask = src ? `url(${JSON.stringify(src)})` : null;
   return (
     <Col>
       <strong>Result</strong>
-      {subject.image_key ? (
-        <SwayImg src={assetUrlVersioned(subject.image_key, version)} alt="Result"
-          data-sway={sways ? 'on' : 'off'} />
+      {src ? (
+        <FxFrame data-fx={fx}>
+          <Img src={src} alt="Result" />
+          {fx === 'shine' && <Glint data-glint="on" style={{ maskImage: mask, WebkitMaskImage: mask }} />}
+        </FxFrame>
       ) : <Muted>No result yet</Muted>}
-      <Muted>{`Will sway in game (on approve): ${sways ? 'yes' : 'no'}`}</Muted>
+      <Muted>{`Effect on approve: ${propFxLabel(fx)}`}</Muted>
       {subject.image_key && (
         <Links><a href={assetUrl(subject.image_key)} download>Download image PNG</a></Links>
       )}

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   filterSpriteSubjects, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   targetsForSprites, framesCap, cellCount, estimateLabel, defaultActionsFor, rowLabels,
-  isBoxProp, propSways, actionHint,
+  isBoxProp, PROP_FX_OPTIONS, propFxLabel, propEffect, selectionKinds, queuePayload,
 } from '../spriteSelection.js';
 import { PAGE_SIZE } from '../artSelection.js';
 
@@ -108,15 +108,55 @@ describe('sprite console action controls', () => {
     expect(isBoxProp({ backend: 'local', generation_kind: 'object', image_key: 'i.png' })).toBe(false);
   });
 
-  it('propSways follows the queued actions', () => {
-    expect(propSways({ actions: ['idle', 'sway'] })).toBe(true);
-    expect(propSways({ actions: ['idle'] })).toBe(false);
-    expect(propSways({ actions: null })).toBe(false);
+  // Props v2: a prop's in-game idle effect is chosen explicitly (prop_fx),
+  // not derived from the action checkboxes.
+  it('PROP_FX_OPTIONS / propFxLabel: None (default), Sway, Shine', () => {
+    expect(PROP_FX_OPTIONS.map((o) => [o.id, o.label])).toEqual([['none', 'None'], ['sway', 'Sway'], ['shine', 'Shine']]);
+    expect(propFxLabel('shine')).toBe('Shine');
+    expect(propFxLabel('sway')).toBe('Sway');
+    expect(propFxLabel('none')).toBe('None');
+    expect(propFxLabel(undefined)).toBe('None');
   });
 
-  it('actionHint explains what sway means for props', () => {
-    expect(actionHint('sway')).toBe('props: sway in the game, no sheet');
-    expect(actionHint('idle')).toBe(null);
+  it('propEffect reads the row prop_fx, never the actions', () => {
+    expect(propEffect({ prop_fx: 'shine', actions: ['idle'] })).toBe('shine');
+    expect(propEffect({ prop_fx: 'sway' })).toBe('sway');
+    expect(propEffect({ prop_fx: null, actions: ['idle', 'sway'] })).toBe('none');
+    expect(propEffect({ prop_fx: 'glow' })).toBe('none');
+    expect(propEffect(null)).toBe('none');
+  });
+
+  it('selectionKinds tells props and creatures apart', () => {
+    const wolf = { is_creature: true };
+    const prop = { is_creature: false };
+    expect(selectionKinds([wolf, prop])).toEqual({ props: true, creatures: true, propsOnly: false });
+    expect(selectionKinds([prop])).toEqual({ props: true, creatures: false, propsOnly: true });
+    expect(selectionKinds([wolf])).toEqual({ props: false, creatures: true, propsOnly: false });
+    expect(selectionKinds([])).toEqual({ props: false, creatures: false, propsOnly: false });
+  });
+
+  describe('queuePayload', () => {
+    const wolf = { id: 4, is_creature: true, variant: null };
+    const prop = { id: 12, is_creature: false, variant: null };
+
+    it('creatures only: the chosen actions and frames, no prop_fx', () => {
+      expect(queuePayload(catalog, [wolf], { actions: ['idle', 'attack'], frames: 3, propFx: 'shine' })).toEqual({
+        targets: [{ entity_id: 4, variant: null }], actions: ['idle', 'attack'], frames: 3,
+      });
+    });
+
+    it('props only: actions/frames do not apply (idle x1 placeholder) and prop_fx is sent', () => {
+      expect(queuePayload(catalog, [prop], { actions: [], frames: 6, propFx: 'shine' })).toEqual({
+        targets: [{ entity_id: 12, variant: null }], actions: ['idle'], frames: 1, prop_fx: 'shine',
+      });
+    });
+
+    it('mixed: creature actions/frames plus prop_fx (default none)', () => {
+      expect(queuePayload(catalog, [wolf, prop], { actions: ['idle'], frames: 4 })).toEqual({
+        targets: [{ entity_id: 4, variant: null }, { entity_id: 12, variant: null }],
+        actions: ['idle'], frames: 4, prop_fx: 'none',
+      });
+    });
   });
 
   it('estimateLabel formats 336 cells at 22 s', () => {
@@ -129,8 +169,9 @@ describe('sprite console action controls', () => {
     const prop = { is_creature: false, is_playable: false };
     const wolf = { is_creature: true };
 
-    it('idle + sway when a flat prop is selected', () => {
-      expect(defaultActionsFor(catalog, [wolf, prop])).toEqual(['idle', 'sway']);
+    it('idle only, even when a flat prop is selected (props do not use actions)', () => {
+      expect(defaultActionsFor(catalog, [wolf, prop])).toEqual(['idle']);
+      expect(defaultActionsFor(catalog, [prop])).toEqual(['idle']);
     });
 
     it('idle only when only creatures are selected or nothing is', () => {
@@ -139,7 +180,7 @@ describe('sprite console action controls', () => {
     });
 
     it('keeps only ids the catalog has', () => {
-      expect(defaultActionsFor({ actions: [{ id: 'sway' }, { id: 'walk' }] }, [prop])).toEqual(['sway']);
+      expect(defaultActionsFor({ actions: [{ id: 'sway' }, { id: 'walk' }] }, [prop])).toEqual([]);
       expect(defaultActionsFor({ actions: [{ id: 'walk' }] }, [wolf])).toEqual([]);
       expect(defaultActionsFor(null, [prop])).toEqual([]);
     });

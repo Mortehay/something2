@@ -69,7 +69,8 @@ function mutation(path, success, body = (value) => value) {
 
 export const useQueueSprites = mutation('/jobs',
   (data) => `${data.queued} sprite job${data.queued === 1 ? '' : 's'} queued`,
-  ({ targets, actions, frames }) => ({ targets, actions, frames }));
+  // prop_fx (Props v2) is only present when props are selected.
+  ({ targets, actions, frames, prop_fx }) => ({ targets, actions, frames, prop_fx }));
 export const useStartSpriteBatch = mutation('/jobs/dispatch', 'Sprite batch started', () => ({}));
 export const useStopSpriteBatch = mutation('/jobs/stop', 'Sprite batch stopping', () => ({}));
 export const useRescueSpriteJobs = mutation('/jobs/requeue-stale',
