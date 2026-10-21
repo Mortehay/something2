@@ -26,7 +26,7 @@ function boxSheet(actions = ACTIONS, dirs = DIRS, n = N) {
 const ATLAS = { width: 256, height: 2560 };
 const imgs = { get: (k) => (k === "atlas" ? ATLAS : null) };
 const creature = (manifest, over = {}) => ({
-  id: 9, x: 1000, y: 1000, tx: 1000, ty: 1000, width: 48, height: 48, facing: "NE",
+  id: 9, x: 1000, y: 1000, tx: 1000, ty: 1000, width: 48, height: 48, facing: "SW",
   render_mode: "static",
   sprite: { atlas_key: "atlas", manifest_key: "m", static_frame: "idle/s/0", manifest },
   ...over,
@@ -119,14 +119,14 @@ describe("RenderSystem.resolveSprite with a box sheet and anim state", () => {
     const m = boxSheet(["idle", "attack"], ["s", "n"]);
     const anim = new EntityAnimState();
     anim.noteAttack("c:9", 0, false);
-    expect(resolveAt(creature(m, { facing: "N" }), anim, 0)).toBe("attack/n/0");
+    expect(resolveAt(creature(m, { facing: "W" }), anim, 0)).toBe("attack/n/0");
   });
 
   it("reads a player's lower-case facing", () => {
     const m = boxSheet();
     const anim = new EntityAnimState();
     anim.noteAttack("self", 0, false);
-    expect(resolveAt(creature(m, { facing: "w" }), anim, 0, "self")).toBe("attack/nw/0");
+    expect(resolveAt(creature(m, { facing: "n" }), anim, 0, "self")).toBe("attack/nw/0");
   });
 
   it("falls back to the static frame when the sheet has neither the action nor idle", () => {
@@ -255,7 +255,7 @@ describe("draw paths play box actions", () => {
       rs.entityAnim.noteAttack("p:42", 1000, false);
       rs.renderModeOverride = override;
       rs.nowMs = 1125;
-      const p = { x: 500, y: 500, width: 64, height: 64, facing: "s", renderMode: "static", sprite: creature(m).sprite };
+      const p = { x: 500, y: 500, width: 64, height: 64, facing: "e", renderMode: "static", sprite: creature(m).sprite };
       rs.drawCreature(p, "player", 0.85, "42", "p:42");
       expect(drawnKey(m, calls)).toBe(want);
     }

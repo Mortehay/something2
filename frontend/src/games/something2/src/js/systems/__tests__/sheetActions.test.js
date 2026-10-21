@@ -24,9 +24,10 @@ const ALL = ["s", "se", "e", "ne", "n", "nw", "w", "sw"];
 describe("boxDir", () => {
   // Facings are WORLD directions; box sheet rows are SCREEN (camera) directions,
   // "s" = facing the viewer. worldToScreen (core/iso.js) turns world SE (+x,+y)
-  // into straight down and world NW into straight up, i.e. a 45-degree turn.
+  // into straight down and world NW into straight up (45-degree turn), and the
+  // LoRA's "right side" renders facing screen-left, so left/right are mirrored.
   const WORLD = ["E", "SE", "S", "SW", "W", "NW", "N", "NE"];
-  const SCREEN = ["se", "s", "sw", "w", "nw", "n", "ne", "e"];
+  const SCREEN = ["sw", "s", "se", "e", "ne", "n", "nw", "w"];
   it("maps the creature's upper-case world facing to the on-screen sheet direction", () => {
     expect(WORLD.map(boxDir)).toEqual(SCREEN);
   });
