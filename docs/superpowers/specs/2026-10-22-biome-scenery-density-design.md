@@ -211,24 +211,24 @@ New types to add (all walk-through unless marked ■ blocking). Names indicative
 | Cavern, Umbral Warren, Hive Warrens | stalagmite ■, Stone ■ | cave_pebbles, glowworm_moss, small_stalagmite |
 | Abyssal Rift, Dreaming Dark, The Maw, Pestilent Deep, Shattered Vault | void_crystal ■ | void_motes_rock, chaos_shards, plague_pustule, dream_wisp_stone |
 
-**Plus five more per biome group (user's request).** Mostly walk-through, so
+**Plus ten more per biome group (user's request, raised from five).** Mostly walk-through, so
 the overall feel stays mostly walkable. ■ = blocking; all others walk-through.
 
-| Biome group | +5 |
+| Biome group | +10 |
 |---|---|
-| Meadow, Highlands | dandelions, tall_grass_clump, lavender_patch, mole_hill, berry_bush |
-| Deep Forest, Verdant Jungle | tree_stump, fallen_log ■, vines_patch, pinecones, jungle_flowers |
-| Arid Dunes, Storm Coast | sandstone_rock ■, tumbleweed, desert_flower, seashells, beach_grass |
-| Frozen Waste, Frostvault, Crystal Hollows | frozen_shrub, icicle_cluster, snowdrift, frozen_bones, blue_crystal_shards |
-| Mire, Gloomfen, Fungal Deep, Blightworks | swamp_log ■, mossy_stump, cattails, toadstools, bog_lily |
-| Ashfields, Emberdepths, Infernal Gate, Sunken Foundry | burnt_shrub, scorched_bones, lava_crack, obsidian_shard, sulfur_vent |
-| Catacombs, Ossuary, Deepvault, Fallen Sanctum, Grave of Titans, Sunken Ruins, Sunken Cistern | tombstone ■, fallen_statue_head, broken_urn, cobwebs, rusty_chains |
-| Cavern, Umbral Warren, Hive Warrens | crystal_vein_rock ■, cave_mushrooms, dripping_puddle, hive_resin, small_loose_rocks |
-| Abyssal Rift, Dreaming Dark, The Maw, Pestilent Deep, Shattered Vault | floating_rune_stone, void_tendrils, shattered_glass, rotting_spores, dream_lilies |
+| Meadow, Highlands | dandelions, tall_grass_clump, lavender_patch, mole_hill, berry_bush, daisies, buttercups, mushroom_ring, fallen_branch, hay_tuft |
+| Deep Forest, Verdant Jungle | tree_stump, fallen_log ■, vines_patch, pinecones, jungle_flowers, bamboo_cluster ■, bluebells, acorns, exposed_roots, orchid_patch |
+| Arid Dunes, Storm Coast | sandstone_rock ■, tumbleweed, desert_flower, seashells, beach_grass, desert_succulent, animal_skull, cracked_earth_patch, washed_up_seaweed, crab_shell |
+| Frozen Waste, Frostvault, Crystal Hollows | frozen_shrub, icicle_cluster, snowdrift, frozen_bones, blue_crystal_shards, mammoth_tusk ■, pine_sapling, frozen_puddle, snow_rock, frost_flowers |
+| Mire, Gloomfen, Fungal Deep, Blightworks | swamp_log ■, mossy_stump, cattails, toadstools, bog_lily, gnarled_roots, lily_pads, swamp_skull, glowing_spores, wisp_stone |
+| Ashfields, Emberdepths, Infernal Gate, Sunken Foundry | burnt_shrub, scorched_bones, lava_crack, obsidian_shard, sulfur_vent, magma_rock ■, ash_skeleton, ember_flowers, charcoal_chunks, cinder_tuft |
+| Catacombs, Ossuary, Deepvault, Fallen Sanctum, Grave of Titans, Sunken Ruins, Sunken Cistern | tombstone ■, fallen_statue_head, broken_urn, cobwebs, rusty_chains, coffin_lid ■, bone_pile, candle_cluster, scattered_scrolls, offering_bowl |
+| Cavern, Umbral Warren, Hive Warrens | crystal_vein_rock ■, cave_mushrooms, dripping_puddle, hive_resin, small_loose_rocks, rock_column ■, cave_bones, glowing_fungus, drip_stones, spider_webs |
+| Abyssal Rift, Dreaming Dark, The Maw, Pestilent Deep, Shattered Vault | floating_rune_stone, void_tendrils, shattered_glass, rotting_spores, dream_lilies, obelisk_fragment ■, void_pool_rock, star_shards, eye_stalks, corrupted_bones |
 
-Totals: each biome group gains 9–12 new types (roughly 11–16 scenery kinds per
-biome including existing ones). That is about **93 new types**, so about 93
-pictures to generate. Within a group, a type spawns only where its
+Totals: each biome group gains 14–17 new types (roughly 16–21 scenery kinds per
+biome including existing ones). That is about **138 new types**, so about 138
+pictures to generate. 11 of the 90 extra types block. Within a group, a type spawns only where its
 `spawn_tiles` meet that biome's floors (seashells and driftwood on the coast,
 not the dunes), so biomes in one group still differ.
 
