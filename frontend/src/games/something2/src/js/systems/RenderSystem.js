@@ -33,7 +33,7 @@ import {
 import { rarityGlowColor, withAlpha } from "../core/rarityColors.js";
 import { artIcon, drawIconFit } from "./gameArt.js";
 import { swayShear, swayPhaseSeed } from "./sway.js";
-import { shineBand, SHINE_ALPHA } from "./shine.js";
+import { shineBand, shineGeometry, SHINE_ALPHA } from "./shine.js";
 import {
   rarityBorderColor, affixLine, clipToWidth, rowTextOffsets, AFFIX_FONT_PX, itemIcon,
 } from "./itemDisplay.js";
@@ -3627,8 +3627,11 @@ export class RenderSystem {
   // filled with 'source-in' (so it exists only over opaque pixels), then that
   // scratch added onto the scene with 'lighter' at SHINE_ALPHA. Drawn in the
   // same world-space rect as the image, so it composes with the camera
-  // transform already on the context (no setTransform); save/restore puts
-  // globalCompositeOperation and globalAlpha back.
+  // transform already on the context (no setTransform); save/restore (in a
+  // finally) puts globalCompositeOperation and globalAlpha back. Mask and
+  // scratch draw with smoothing off, like the sprite itself (constructor), so
+  // the glint stays inside the on-screen silhouette; the glint pass inherits
+  // the main ctx's smoothing, the same the sprite drew with.
   _drawShine(img, r, e) {
     const band = shineBand(this.nowMs, swayPhaseSeed(e.x, e.y));
     if (!band) return;
@@ -3639,13 +3642,11 @@ export class RenderSystem {
     const scratch = this._shineScratchFor(w, h);
     const sctx = scratch.getContext("2d");
     sctx.globalCompositeOperation = "source-over";
+    sctx.imageSmoothingEnabled = false;
     sctx.clearRect(0, 0, scratch.width, scratch.height);
     sctx.drawImage(mask, 0, 0);
-    // The band runs along x+y (a 45-degree diagonal): its centre m, in units
-    // of (x+y)/2, travels from just before the top-left corner (-half) to
-    // just past the bottom-right ((w+h)/2 + half).
-    const half = Math.max(4, Math.min(w, h) * 0.22);
-    const m = -half + band.t * ((w + h) / 2 + 2 * half);
+    // The band runs along x+y (a 45-degree diagonal): shineGeometry.
+    const { m, half } = shineGeometry(band.t, w, h);
     const grad = sctx.createLinearGradient(m - half, m - half, m + half, m + half);
     grad.addColorStop(0, "rgba(255,255,255,0)");
     grad.addColorStop(0.5, "rgba(255,255,240,0.95)");
@@ -3657,10 +3658,13 @@ export class RenderSystem {
 
     const ctx = this.ctx;
     ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    ctx.globalAlpha = ctx.globalAlpha * SHINE_ALPHA;
-    ctx.drawImage(scratch, 0, 0, w, h, r.dx, r.dy, r.dw, r.dh);
-    ctx.restore();
+    try {
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = ctx.globalAlpha * SHINE_ALPHA;
+      ctx.drawImage(scratch, 0, 0, w, h, r.dx, r.dy, r.dw, r.dh);
+    } finally {
+      ctx.restore();
+    }
   }
 
   // The sprite drawn once at w x h: what the band is masked against.
@@ -3671,7 +3675,9 @@ export class RenderSystem {
     let mask = bySize.get(key);
     if (!mask) {
       mask = this.createCanvas(w, h);
-      mask.getContext("2d").drawImage(img, 0, 0, w, h);
+      const mctx = mask.getContext("2d");
+      mctx.imageSmoothingEnabled = false;
+      mctx.drawImage(img, 0, 0, w, h);
       bySize.set(key, mask);
     }
     return mask;

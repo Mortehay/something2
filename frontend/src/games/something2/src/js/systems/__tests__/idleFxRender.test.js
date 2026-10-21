@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { RenderSystem } from "../RenderSystem.js";
 import { swayShear, swayPhaseSeed } from "../sway.js";
-import { shineBand, SHINE_PERIOD_MS } from "../shine.js";
+import { shineBand, SHINE_PERIOD_MS, SHINE_BAND_FRACTION } from "../shine.js";
 import { MAP_TILE_SIZE } from "../../core/constants.js";
 
 // Props v2: a static-image prop whose type has idle_fx 'sway' is sheared about its
@@ -96,11 +96,12 @@ describe("prop sway in the static image path", () => {
 // 'lighter' at alpha <= 0.45. Idle frames cost nothing extra.
 function stateCanvas(label, log) {
   const stack = [];
-  const state = { globalCompositeOperation: "source-over", globalAlpha: 1, fillStyle: "" };
+  const state = { globalCompositeOperation: "source-over", globalAlpha: 1, fillStyle: "", imageSmoothingEnabled: true };
   const rec = (op) => (...args) => log.push({ on: label, op, args });
   const ctx = {
-    imageSmoothingEnabled: true, strokeStyle: "", lineWidth: 1, font: "", textAlign: "",
-    drawImage: rec("drawImage"), fillRect: rec("fillRect"), clearRect: rec("clearRect"),
+    strokeStyle: "", lineWidth: 1, font: "", textAlign: "",
+    // Records the smoothing in force at each draw (a fresh canvas defaults to true).
+    drawImage: (...args) => log.push({ on: label, op: "drawImage", args, smooth: state.imageSmoothingEnabled }), fillRect: rec("fillRect"), clearRect: rec("clearRect"),
     translate: rec("translate"), transform: rec("transform"), setTransform: rec("setTransform"),
     scale: rec("scale"), rotate: rec("rotate"),
     save: (...a) => { stack.push({ ...state }); rec("save")(...a); },
@@ -215,5 +216,50 @@ describe("prop shine in the static image path", () => {
       return log.find((c) => c.op === "createLinearGradient").args[0];
     };
     expect(at((b) => b && b.t < 0.1)).toBeLessThan(at((b) => b && b.t > 0.9));
+  });
+
+  it("mask and scratch draw with smoothing off, the glint pass with the sprite's own smoothing", () => {
+    const { rs, log, made } = shineRig();
+    rs.nowMs = timeWhere((b) => b && b.t > 0.45 && b.t < 0.55);
+    rs.drawEntity(deco({ idle_fx: "shine" }));
+    const off = log.filter((c) => c.op === "drawImage" && c.on !== "main");
+    expect(off.length).toBe(2); // the image onto the mask, the mask onto the scratch
+    expect(made.map((m) => m.getContext().imageSmoothingEnabled)).toEqual([false, false]);
+    for (const d of off) expect(d.smooth).toBe(false);
+    const draws = log.filter((c) => c.on === "main" && c.op === "drawImage");
+    expect(draws).toHaveLength(2);
+    expect(draws[0].smooth).toBe(false); // RenderSystem's main ctx: nearest sampling
+    expect(draws[1].smooth).toBe(draws[0].smooth);
+  });
+
+  it("an exception in the glint draw still restores composite and alpha", () => {
+    const { rs, main } = shineRig();
+    rs.nowMs = timeWhere((b) => b && b.t > 0.45 && b.t < 0.55);
+    const real = main.ctx.drawImage;
+    let n = 0;
+    main.ctx.drawImage = (...a) => {
+      n += 1;
+      if (n === 2) throw new Error("boom");
+      return real(...a);
+    };
+    expect(() => rs.drawEntity(deco({ idle_fx: "shine" }))).toThrow("boom");
+    expect(main.ctx.globalCompositeOperation).toBe("source-over");
+    expect(main.ctx.globalAlpha).toBe(1);
+  });
+
+  it("the band is a thin streak: SHINE_BAND_FRACTION of the sprite's diagonal extent", () => {
+    expect(SHINE_BAND_FRACTION).toBeCloseTo(0.28, 10);
+    const { rs, log } = shineRig();
+    rs.nowMs = timeWhere((b) => b && b.t > 0.45 && b.t < 0.55);
+    rs.drawEntity(deco({ idle_fx: "shine" }));
+    const [x0, y0, x1, y1] = log.find((c) => c.op === "createLinearGradient").args;
+    const draw = log.find((c) => c.on === "main" && c.op === "drawImage");
+    const [, , dw, dh] = draw.args.slice(-4);
+    const w = Math.ceil(dw);
+    const h = Math.ceil(dh);
+    // Along the 45-degree diagonal, in units of (x+y)/2: the band spans
+    // (x1+y1)/2 - (x0+y0)/2 of the sprite's (w+h)/2.
+    const width = (x1 + y1) / 2 - (x0 + y0) / 2;
+    expect(width / ((w + h) / 2)).toBeCloseTo(0.28, 2);
   });
 });

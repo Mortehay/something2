@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { shineBand, SHINE_PERIOD_MS, SHINE_SWEEP_MS } from "../shine.js";
+import { shineBand, shineGeometry, SHINE_PERIOD_MS, SHINE_SWEEP_MS, SHINE_BAND_FRACTION } from "../shine.js";
 
 // Props v2 'shine': a glint band sweeps across the sprite once per ~4.5 s,
 // taking ~0.6 s, idle (null) the rest. Phase comes from the same per-position
@@ -57,5 +57,27 @@ describe("shineBand", () => {
       const b = shineBand(t, s);
       if (b !== null) expect(Number.isFinite(b.t)).toBe(true);
     }
+  });
+});
+
+// The band's geometry along the sprite's 45-degree diagonal, in units of
+// (x+y)/2: `half` is half its width, `m` its centre.
+describe("shineGeometry", () => {
+  it("the band is SHINE_BAND_FRACTION (0.28) of the diagonal extent", () => {
+    expect(SHINE_BAND_FRACTION).toBe(0.28);
+    for (const [w, h] of [[48, 64], [64, 140], [200, 200], [10, 300]]) {
+      const { half } = shineGeometry(0.5, w, h);
+      expect((2 * half) / ((w + h) / 2)).toBeCloseTo(0.28, 10);
+    }
+  });
+
+  it("travels from fully before the top-left corner to fully past the bottom-right", () => {
+    const w = 48;
+    const h = 64;
+    const start = shineGeometry(0, w, h);
+    const end = shineGeometry(1, w, h);
+    expect(start.m + start.half).toBeCloseTo(0, 10);
+    expect(end.m - end.half).toBeCloseTo((w + h) / 2, 10);
+    expect(shineGeometry(0.5, w, h).m).toBeCloseTo((w + h) / 4, 10);
   });
 });
