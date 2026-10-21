@@ -33,6 +33,7 @@ import {
 import { rarityGlowColor, withAlpha } from "../core/rarityColors.js";
 import { artIcon, drawIconFit } from "./gameArt.js";
 import { swayShear, swayPhaseSeed } from "./sway.js";
+import { shineBand, SHINE_ALPHA } from "./shine.js";
 import {
   rarityBorderColor, affixLine, clipToWidth, rowTextOffsets, AFFIX_FONT_PX, itemIcon,
 } from "./itemDisplay.js";
@@ -165,6 +166,12 @@ export class RenderSystem {
     // whole render trace -- together ~3x the entire minimap -- redrawing a
     // dozen identical strings once per creature per frame.
     this._labelCache = createTextLabelCache({ createCanvas: domCanvasFactory });
+    // Props v2 'shine' (see _drawShine): offscreen canvases come from here
+    // (tests swap in a recorder). Masks are cached per (image, size), the
+    // compositing scratch per size bucket -- nothing is allocated per frame.
+    this.createCanvas = domCanvasFactory;
+    this._shineMasks = new WeakMap();
+    this._shineScratch = new Map();
     // Hit-test rects for the inventory panel, recorded while drawing it and
     // read back by Game on click. Empty whenever the panel isn't open.
     this._invHitAreas = [];
@@ -3594,7 +3601,7 @@ export class RenderSystem {
     if (!img) return false;
     // SOMET-569: fit, do not stretch.
     const r = fitSpriteRect(img.width, img.height, drawX, drawY, w, h);
-    if (e.sway === true) {
+    if (e.idle_fx === "sway") {
       // Props v2: a horizontal shear about the image's bottom-centre, phased
       // per world position. ctx.transform MULTIPLIES into the camera
       // transform already on the context; setTransform would replace it.
@@ -3610,7 +3617,77 @@ export class RenderSystem {
       return r.dh;
     }
     this.ctx.drawImage(img, r.dx, r.dy, r.dw, r.dh);
+    if (e.idle_fx === "shine") this._drawShine(img, r, e);
     return r.dh;
+  }
+
+  // Props v2 'shine': a soft diagonal glint band sweeping across the sprite's
+  // opaque pixels. Draws NOTHING outside the sweep window (most frames). In
+  // it: on a reused scratch canvas, the cached sprite mask, then the band
+  // filled with 'source-in' (so it exists only over opaque pixels), then that
+  // scratch added onto the scene with 'lighter' at SHINE_ALPHA. Drawn in the
+  // same world-space rect as the image, so it composes with the camera
+  // transform already on the context (no setTransform); save/restore puts
+  // globalCompositeOperation and globalAlpha back.
+  _drawShine(img, r, e) {
+    const band = shineBand(this.nowMs, swayPhaseSeed(e.x, e.y));
+    if (!band) return;
+    const w = Math.max(1, Math.ceil(r.dw));
+    const h = Math.max(1, Math.ceil(r.dh));
+    if (!Number.isFinite(w + h) || w > 2048 || h > 2048) return;
+    const mask = this._shineMask(img, w, h);
+    const scratch = this._shineScratchFor(w, h);
+    const sctx = scratch.getContext("2d");
+    sctx.globalCompositeOperation = "source-over";
+    sctx.clearRect(0, 0, scratch.width, scratch.height);
+    sctx.drawImage(mask, 0, 0);
+    // The band runs along x+y (a 45-degree diagonal): its centre m, in units
+    // of (x+y)/2, travels from just before the top-left corner (-half) to
+    // just past the bottom-right ((w+h)/2 + half).
+    const half = Math.max(4, Math.min(w, h) * 0.22);
+    const m = -half + band.t * ((w + h) / 2 + 2 * half);
+    const grad = sctx.createLinearGradient(m - half, m - half, m + half, m + half);
+    grad.addColorStop(0, "rgba(255,255,255,0)");
+    grad.addColorStop(0.5, "rgba(255,255,240,0.95)");
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+    sctx.globalCompositeOperation = "source-in";
+    sctx.fillStyle = grad;
+    sctx.fillRect(0, 0, w, h);
+    sctx.globalCompositeOperation = "source-over";
+
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = ctx.globalAlpha * SHINE_ALPHA;
+    ctx.drawImage(scratch, 0, 0, w, h, r.dx, r.dy, r.dw, r.dh);
+    ctx.restore();
+  }
+
+  // The sprite drawn once at w x h: what the band is masked against.
+  _shineMask(img, w, h) {
+    let bySize = this._shineMasks.get(img);
+    if (!bySize) { bySize = new Map(); this._shineMasks.set(img, bySize); }
+    const key = `${w}x${h}`;
+    let mask = bySize.get(key);
+    if (!mask) {
+      mask = this.createCanvas(w, h);
+      mask.getContext("2d").drawImage(img, 0, 0, w, h);
+      bySize.set(key, mask);
+    }
+    return mask;
+  }
+
+  // One compositing scratch per 64-px size bucket, reused by every shining prop.
+  _shineScratchFor(w, h) {
+    const bw = Math.ceil(w / 64) * 64;
+    const bh = Math.ceil(h / 64) * 64;
+    const key = `${bw}x${bh}`;
+    let scratch = this._shineScratch.get(key);
+    if (!scratch) {
+      scratch = this.createCanvas(bw, bh);
+      this._shineScratch.set(key, scratch);
+    }
+    return scratch;
   }
 
   drawEntity(e) {

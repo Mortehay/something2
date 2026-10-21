@@ -1,5 +1,5 @@
 // Procedural wind sway for props (Props v2). An approved GPU-box prop is ONE
-// clean static image; when its entity type has `sway`, RenderSystem shears it
+// clean static image; when its entity type has idle_fx 'sway', RenderSystem shears it
 // horizontally about its base: x' = x + k * (y - baseY). Pure, no canvas.
 
 export const SWAY_AMPLITUDE = 0.035;

@@ -545,7 +545,7 @@ async function getEntityTypesMap() {
       render_mode: row.render_mode,
       sprite: row.sprite,
       // Props v2: the procedural idle effect the renderer gives an approved
-      // GPU-box prop's static image (systems/idleFx.js): none | sway | shine.
+      // GPU-box prop's static image (systems/sway.js, systems/shine.js): none | sway | shine.
       idle_fx: IDLE_FX.includes(row.idle_fx) ? row.idle_fx : 'none',
       prompt: row.prompt,
       // SOMET-493 -- what the inspect card's aggression badge is derived from.

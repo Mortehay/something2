@@ -1,7 +1,7 @@
 exports.shorthands = undefined;
 
 // Props v2: a GPU-box prop is one clean static image; the game renderer gives
-// it a procedural idle effect (systems/idleFx.js): 'sway' (wind shear about
+// it a procedural idle effect (frontend systems/sway.js, shine.js): 'sway' (wind shear about
 // the base) or 'shine' (a glint sweeping across the opaque pixels).
 // sprite_sets.prop_fx is the effect chosen when the prop was queued; approve
 // copies it onto entity_types.idle_fx. NULL on creature rows (no effect).
