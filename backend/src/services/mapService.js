@@ -807,6 +807,7 @@ function generateChunkDecorations(world, cx, cy, tiles, decorationDefs, opts = {
   const portals = portalTileCells(world);
   const coverDefs = withCover ? decorationDefs.filter((d) => d.scenery_layer === 'cover') : [];
   const out = [];
+  const featureDefs = decorationDefs.filter((d) => d.scenery_layer !== 'cover');
   const covers = [];
   for (let r = 0; r < N; r++) {
     if (!tiles[r]) continue;
@@ -821,7 +822,7 @@ function generateChunkDecorations(world, cx, cy, tiles, decorationDefs, opts = {
       // is deliberately no fallback to the global def list.
       const region = sampleBiomeRegion(cfg, gRow, gCol);
       const flora = region ? region.floraTypes : null;
-      const placed = placeFeature(cfg, decorationDefs, region, flora, terrain, gRow, gCol, spawn, portals);
+      const placed = placeFeature(cfg, featureDefs, region, flora, terrain, gRow, gCol, spawn, portals);
       if (placed) out.push({ ...placed, row: r, col: c });
       if (coverDefs.length > 0 && region && region.coverDensity > 0) {
         placeCover(cfg, coverDefs, region, flora, terrain, gRow, gCol, r, c, covers);
@@ -854,12 +855,6 @@ function placeFeature(cfg, defs, region, flora, terrain, gRow, gCol, spawn, port
   let roll = hash2((cfg.seed ^ DECO_PICK_XOR) >>> 0, gCol, gRow) * totalW;
   let picked = matches[matches.length - 1];
   for (const def of matches) { roll -= (def.chance || 0); if (roll <= 0) { picked = def; break; } }
-  // A cover pick leaves the tile without a feature: cover is placed by its own
-  // pass. Cover types stay in the weighted pool ON PURPOSE -- they take the
-  // share of in-clump tiles the same walkable flora took before the layer
-  // split, so the blocking-feature density (and with it every shipped world's
-  // navigability) is unchanged. Excluding them tripled the blocker rate.
-  if (picked.scenery_layer === 'cover') return null;
   const blocking = picked.walkable === false;
   // A blocking pick near spawn / in a village would trap the player -> skip
   // the tile entirely (leave it open) rather than force a passable type.

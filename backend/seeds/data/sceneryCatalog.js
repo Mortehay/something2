@@ -287,7 +287,7 @@ for (const b of STARTER_BIOMES) {
   const add = SCENERY_TYPES
     .filter((t, i) => ROWS[i][7].includes(group) && t.spawn_tiles.some((s) => terrain.has(s)))
     .map((t) => t.name);
-  BIOME_SCENERY[b.name] = { add, feature_density: null, cover_density: GROUP_COVER_DENSITY[group] };
+  BIOME_SCENERY[b.name] = { add, feature_density: b.feature_density ?? null, cover_density: GROUP_COVER_DENSITY[group] };
 }
 
 module.exports = { SCENERY_TYPES, SPAWN_TILE_ADDITIONS, BIOME_SCENERY, EXISTING_BLOCK_RADIUS };
