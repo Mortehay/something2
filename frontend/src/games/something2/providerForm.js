@@ -156,12 +156,10 @@ export function templatesForKind(templates, modality) {
 }
 
 // Dropdown options for a model field, from a discovery_cache ({entries:[{kind,
-// id,label,available,group?}]}). Entries of the form's kind only (and, for
-// audio, optionally one group). A saved `current` the provider no longer lists
+// id,label,available,group?}]}). Entries of the form's kind only. A saved `current` the provider no longer lists
 // stays selectable, so opening the form cannot silently change it.
-export function modelOptions(discoveryCache, modality, current, group) {
-  const entries = (discoveryCache?.entries || [])
-    .filter((e) => e.kind === modality && (group == null || e.group === group));
+export function modelOptions(discoveryCache, modality, current) {
+  const entries = (discoveryCache?.entries || []).filter((e) => e.kind === modality);
   const options = entries.map((e) => ({ value: e.id, label: e.label || e.id }));
   if (current && !options.some((o) => o.value === current)) {
     options.push({ value: current, label: current });
