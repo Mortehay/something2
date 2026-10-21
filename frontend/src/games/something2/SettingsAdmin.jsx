@@ -5,11 +5,16 @@ import {
   useAiProviders, useCreateProvider, useUpdateProvider, useDeleteProvider,
   useActivateProvider, useRefreshModels, useTestProvider,
 } from './useAiProviders.js';
+import { useAiProviderTemplates } from './useAiProviderTemplates.js';
 import {
   providerToForm, providerFormToPayload, validateProviderForm,
-  parseTemplate, templateWarning, PLACEHOLDERS,
-  spriteModelOptions,
+  emptyProviderForm, applyTemplate, templatesForKind, KINDS, GAME_USES,
 } from './providerForm.js';
+import {
+  Button, QuietButton, Card, Row, Input, Label, Hint, ErrorText, WarnText, Badge,
+  KindFields, KindPicker, AdapterField,
+} from './ProviderKindFields.jsx';
+import ProviderTemplatesSection from './ProviderTemplatesSection.jsx';
 import AdminLoading from './AdminLoading.jsx';
 
 const AdminContainer = styled.div`
@@ -17,40 +22,13 @@ const AdminContainer = styled.div`
   height: 100%; overflow-y: auto; background-color: var(--s2-surface);
 `;
 const Header = styled.div`display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;`;
-const Button = styled.button`
-  background: ${p => p.$bg || 'var(--s2-accent)'}; color: var(--s2-on-accent); border: none; border-radius: 6px;
-  padding: 0.5rem 1rem; font-weight: bold; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
-  &:disabled { opacity: 0.5; cursor: default; }
-`;
-const Card = styled.div`
-  background: var(--s2-surface-raised); border: 1px solid var(--s2-border); border-radius: 8px;
-  padding: 1rem; margin-bottom: 1rem;
-`;
-const Row = styled.div`display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin: 0.4rem 0;`;
-const Input = styled.input`
-  background: var(--s2-bg-sunken); color: var(--s2-text); border: 1px solid var(--s2-border-strong);
-  border-radius: 4px; padding: 0.4rem; min-width: 220px;
-`;
-const Select = styled.select`
-  background: var(--s2-bg-sunken); color: var(--s2-text); border: 1px solid var(--s2-border-strong);
-  border-radius: 4px; padding: 0.4rem; min-width: 220px;
-`;
-const TemplateArea = styled.textarea`
-  background: var(--s2-bg-sunken); color: var(--s2-text); border: 1px solid var(--s2-border-strong);
-  border-radius: 4px; padding: 0.5rem; width: 100%; min-height: 200px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem;
-`;
-const Label = styled.span`color: var(--s2-text-muted); min-width: 150px;`;
-const Hint = styled.p`color: var(--s2-text-muted); font-size: 0.85rem; margin: 0.25rem 0;`;
-const ErrorText = styled.p`color: var(--s2-danger, #e5484d); font-size: 0.85rem; margin: 0.25rem 0;`;
-const WarnText = styled.p`color: var(--s2-warning, #d9822b); font-size: 0.85rem; margin: 0.25rem 0;`;
-const Badge = styled.span`
-  background: ${p => p.$bg || 'var(--s2-accent)'}; color: var(--s2-on-accent); border-radius: 999px;
-  padding: 0.1rem 0.6rem; font-size: 0.75rem; font-weight: bold;
-`;
 
-function ProviderCard({ provider, isOnlyActive }) {
-  const [form, setForm] = useState(() => providerToForm(provider));
+const kindLabel = (modality) => (KINDS.find(k => k.value === modality) || KINDS[0]).label;
+
+// `provider` null = a new, unsaved provider pre-filled with `initialForm`
+// (the kind + template the admin picked in the Add flow).
+function ProviderCard({ provider, isOnlyActive, initialForm, onCreated, onSaveAsTemplate }) {
+  const [form, setForm] = useState(() => (provider ? providerToForm(provider) : initialForm));
   const create = useCreateProvider();
   const update = useUpdateProvider();
   const del = useDeleteProvider();
@@ -61,12 +39,14 @@ function ProviderCard({ provider, isOnlyActive }) {
   const isAudio = form.modality === 'audio';
   const isText = form.modality === 'text';
   const isSprite = form.modality === 'sprite';
-  const modalityLabel = isAudio ? 'Audio' : isText ? 'Text' : isSprite ? 'Sprite' : 'Image';
+  const isEdit = form.modality === 'image_edit';
   // The raw styles/cues an audio provider's Refresh returned. Not the same
   // as models_cache (which the backend flattens into plain strings, with
   // cues prefixed "cue:") -- this keeps the labels and cue engine/entity
   // metadata Refresh's response carries, for display only.
   const [audioDiscovery, setAudioDiscovery] = useState(null);
+  // null = the Save-as-template name input is closed.
+  const [templateName, setTemplateName] = useState(null);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   // Editing the token field is what makes the difference between "left it
@@ -74,17 +54,26 @@ function ProviderCard({ provider, isOnlyActive }) {
   // delete the stored token). See providerForm.js.
   const setToken = (v) => setForm(f => ({ ...f, auth_token: v, token_touched: true }));
 
-  const parseError = parseTemplate(form.request_template).error;
-  const warning = templateWarning(form.request_template);
   const validation = validateProviderForm(form);
   const models = provider?.models_cache || [];
+  const discoveryCache = provider?.discovery_cache || null;
+  const unsupported = discoveryCache?.unsupported || [];
+  // Text providers from the Ollama / OpenAI-compatible templates speak
+  // chat-completions, not the box's /api/text.
+  const chatText = isText && (form.adapter === 'ollama' || form.adapter === 'openai_compatible');
 
   const save = () => {
     if (validation) return;
     const body = providerFormToPayload(form);
-    if (isNew) create.mutate({ body });
+    if (isNew) create.mutate({ body }, { onSuccess: () => onCreated?.() });
     else update.mutate({ id: provider.id, body });
     setForm(f => ({ ...f, token_touched: false, auth_token: '' }));
+  };
+
+  const saveTemplate = () => {
+    const name = (templateName || '').trim();
+    if (!name) return;
+    onSaveAsTemplate(provider.id, name).then(() => setTemplateName(null), () => {});
   };
 
   return (
@@ -92,39 +81,29 @@ function ProviderCard({ provider, isOnlyActive }) {
       <Row>
         <Label>Name</Label>
         <Input value={form.name} onChange={e => set('name', e.target.value)} placeholder="desktop GPU box" />
-        <Badge $bg="var(--s2-surface-raised)">{modalityLabel.toUpperCase()}</Badge>
+        <Badge $bg="var(--s2-surface-raised)">{kindLabel(form.modality).toUpperCase()}</Badge>
         {provider?.is_active && <Badge>ACTIVE</Badge>}
         {provider && !provider.enabled && <span style={{ color: 'var(--s2-text-muted)' }}>disabled</span>}
       </Row>
-
-      <Row>
-        <Label>Modality</Label>
-        {isNew ? (
-          <Select value={form.modality} onChange={e => set('modality', e.target.value)}>
-            <option value="image">Image</option>
-            <option value="audio">Audio</option>
-            <option value="text">Text</option>
-            <option value="sprite">Sprite</option>
-          </Select>
-        ) : (
-          <span style={{ color: 'var(--s2-text-muted)' }}>
-            {modalityLabel} — fixed after creation
-          </span>
-        )}
-      </Row>
+      {!GAME_USES[form.modality] && <WarnText>Not used by the game yet.</WarnText>}
+      {!isNew && <Hint style={{ marginTop: 0 }}>Kind is fixed after creation.</Hint>}
 
       <Row>
         <Label>Base URL</Label>
         <Input
           value={form.base_url}
           onChange={e => set('base_url', e.target.value)}
-          placeholder={isSprite ? 'http://<box>:8001' : 'http://192.168.1.20:7860/sdapi/v1/txt2img'}
+          placeholder={form.modality === 'image' ? 'http://192.168.1.20:7860/sdapi/v1/txt2img' : 'http://<box>:8001'}
           style={{ minWidth: 380 }}
         />
       </Row>
-      <Hint>{isSprite
-        ? 'The GPU box origin, e.g. http://<box>:8001. Sprite sheets and their concept art are generated here.'
-        : 'The full URL that generates an image. Model discovery uses the models path below.'}</Hint>
+      <Hint>{form.modality === 'image'
+        ? 'The full URL that generates an image. Model discovery uses the models path below.'
+        : chatText
+          ? 'The server origin, e.g. http://localhost:11434 for Ollama.'
+          : isSprite
+            ? 'The GPU box origin, e.g. http://<box>:8001. Sprite sheets and their concept art are generated here.'
+            : 'The GPU box origin, e.g. http://<box>:8001.'}</Hint>
 
       <Row>
         <Label>Auth header</Label>
@@ -150,7 +129,10 @@ function ProviderCard({ provider, isOnlyActive }) {
       )}
 
       {isAudio ? (
-        <Hint>Talks to the box's /api/audio endpoints. Refresh lists its styles and cues.</Hint>
+        <Hint>
+          Talks to the box's /api/audio endpoints. Refresh lists its styles and cues, and the gateway's
+          audio models for each drain group below. A blank group lets the box decide.
+        </Hint>
       ) : isSprite ? (
         <Hint>
           Generates sprite sheets on the Sprite Generation page (jobs and concept art on the box).
@@ -158,119 +140,30 @@ function ProviderCard({ provider, isOnlyActive }) {
           model (never SDXL); Refresh models lists what the box offers. The sheet itself is always
           drawn by the box's Qwen-Image-Edit. Test connection checks the key and the action catalog.
         </Hint>
+      ) : chatText ? (
+        <Hint>
+          Writes audio and art prompts through a chat-completions API; the model below is sent with
+          every request. Refresh lists the models the server has.
+        </Hint>
       ) : isText ? (
         <Hint>
           Writes audio prompts. The base URL must be the GPU box's /api/text server (the audio box):
           any other server answers 4xx, which is treated as our bug, so there is no CPU fallback.
           To use the local CPU fallback instead, leave Text providers inactive.
-          Refresh lists its models; the box's gateway loads them on demand.
+          Refresh lists its models; the audio drain switches the box's gateway to the one picked here.
         </Hint>
-      ) : (
-        <>
-          <Row>
-            <Label>Request template</Label>
-          </Row>
-          <TemplateArea
-            value={form.request_template}
-            onChange={e => set('request_template', e.target.value)}
-            spellCheck={false}
-          />
-          <Hint>Placeholders: {PLACEHOLDERS.join('  ')} — only the prompt comes from the entity or tile.</Hint>
-          {parseError && <ErrorText>Template {parseError}</ErrorText>}
-          {!parseError && warning && <WarnText>{warning}</WarnText>}
+      ) : isEdit ? (
+        <Hint>
+          Edits an existing image on the box (/api/edit). Capability is the default LoRA; Base model
+          uses none. Steps and CFG go into every request.
+        </Hint>
+      ) : null}
 
-          <Row>
-            <Label>Models path</Label>
-            <Input value={form.models_path} onChange={e => set('models_path', e.target.value)} placeholder="/sdapi/v1/sd-models" />
-            <Label>Models pointer</Label>
-            <Input value={form.models_pointer} onChange={e => set('models_pointer', e.target.value)} placeholder="$[*].model_name" />
-          </Row>
+      <KindFields form={form} set={set} models={models} discoveryCache={discoveryCache} />
 
-          <Row>
-            <Label>Image pointer</Label>
-            <Input
-              value={form.response_image_pointer}
-              onChange={e => set('response_image_pointer', e.target.value)}
-              placeholder="images[0] — blank if the response IS the image"
-              style={{ minWidth: 320 }}
-            />
-          </Row>
-
-          <Row>
-            <Label>Sprite sheet</Label>
-            <Select value={form.sheet_layout} onChange={e => set('sheet_layout', e.target.value)}>
-              <option value="">Single image (no animation)</option>
-              <option value="flat">Flat grid — frames "0","1",… (tiles, objects)</option>
-              <option value="directional">Directional — one row per facing (creatures)</option>
-            </Select>
-          </Row>
-          {form.sheet_layout && (
-            <>
-              <Row>
-                <Label>Grid</Label>
-                <Input
-                  type="number" min="1" style={{ minWidth: 90 }}
-                  value={form.sheet_columns} onChange={e => set('sheet_columns', e.target.value)}
-                  placeholder="columns"
-                />
-                <Input
-                  type="number" min="1" style={{ minWidth: 90 }}
-                  value={form.sheet_rows} onChange={e => set('sheet_rows', e.target.value)}
-                  placeholder="rows"
-                />
-                {form.sheet_layout === 'directional' && (
-                  <Input
-                    value={form.sheet_directions}
-                    onChange={e => set('sheet_directions', e.target.value)}
-                    placeholder="S,SW,W,NW,N,NE,E,SE (row order)"
-                    style={{ minWidth: 300 }}
-                  />
-                )}
-              </Row>
-              <Hint>
-                The other machine returns the whole sheet; this only says how to cut it. Blank columns
-                uses the requested frame count; blank rows uses 1 (or one per direction). The image must
-                divide evenly into the grid or the job fails rather than cropping wrongly.
-              </Hint>
-            </>
-          )}
-        </>
-      )}
-
-      <Row>
-        <Label>{isAudio ? 'Styles' : isText ? 'Models' : isSprite ? 'Concept model' : 'Model'}</Label>
-        {isAudio ? (
-          // The audio adapter never reads `model` -- the style is chosen per
-          // subject by propose -- so there is nothing to pick here. models_cache
-          // holds the box's styles plus "cue:"-prefixed SFX cues; show them.
-          <Hint style={{ margin: 0 }}>
-            {models.length > 0
-              ? `${models.filter(m => !m.startsWith('cue:')).length} style(s), ${models.filter(m => m.startsWith('cue:')).length} cue(s) — chosen per subject, not here`
-              : 'refresh to list styles and cues'}
-          </Hint>
-        ) : isSprite ? (
-          // The CONCEPT model; the sheet builder's model is fixed by the box.
-          <Select value={form.model} onChange={e => set('model', e.target.value)}>
-            {spriteModelOptions(models, form.model).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </Select>
-        ) : isText ? (
-          // The text adapter never reads `model` either -- the box's gateway
-          // picks and loads one of its listed models on demand -- so this is
-          // display-only, same reasoning as the audio styles hint above.
-          <Hint style={{ margin: 0 }}>
-            {models.length ? `${models.join(', ')} — the box picks and loads it` : 'refresh to list models'}
-          </Hint>
-        ) : models.length > 0 ? (
-          <Select value={form.model} onChange={e => set('model', e.target.value)}>
-            <option value="">— none —</option>
-            {models.map(m => <option key={m} value={m}>{m}</option>)}
-          </Select>
-        ) : (
-          <Input value={form.model} onChange={e => set('model', e.target.value)} placeholder="refresh to list models" />
-        )}
-        {!isNew && (
-          <Button
-            $bg="var(--s2-surface-raised)"
+      {!isNew && (
+        <Row>
+          <QuietButton
             onClick={() => refresh.mutate({ id: provider.id }, {
               // Audio's response carries styles/cues alongside the flattened
               // `models` list the query cache stores -- captured here rather
@@ -284,20 +177,20 @@ function ProviderCard({ provider, isOnlyActive }) {
             disabled={refresh.isPending}
           >
             <HiOutlineArrowPath /> {refresh.isPending ? 'Refreshing…' : (isAudio ? 'Refresh styles' : 'Refresh models')}
-          </Button>
-        )}
-        {!isNew && (
-          <Button $bg="var(--s2-surface-raised)" onClick={() => test.mutate({ id: provider.id })} disabled={test.isPending}>
+          </QuietButton>
+          <QuietButton onClick={() => test.mutate({ id: provider.id })} disabled={test.isPending}>
             {test.isPending ? 'Testing…' : 'Test connection'}
-          </Button>
-        )}
-      </Row>
+          </QuietButton>
+        </Row>
+      )}
+      {isNew && <Hint>Create the provider first; Refresh and Test then list its models.</Hint>}
       {provider?.models_fetched_at && (
         <Hint>{models.length} {isAudio ? 'style/cue' : 'model'}(s) cached at {new Date(provider.models_fetched_at).toLocaleString()}</Hint>
       )}
       {isAudio && (audioDiscovery || models.length > 0) && (
         // Labels from this session's Refresh when there is one; otherwise the
         // raw values from models_cache, so the list survives a page reload.
+        // Styles and cues are chosen per subject, not here.
         <Hint>
           Styles: {(audioDiscovery
             ? audioDiscovery.styles.map(s => s.label || s.value)
@@ -308,6 +201,14 @@ function ProviderCard({ provider, isOnlyActive }) {
             : models.filter(m => m.startsWith('cue:')).map(m => m.slice(4))).join(', ') || '—'}
         </Hint>
       )}
+      {unsupported.length > 0 && (
+        <Hint>
+          Available on the provider, not used by the game:{' '}
+          {unsupported.map(u => `${u.label || u.id} (${u.kind})`).join(', ')}
+        </Hint>
+      )}
+
+      <AdapterField form={form} set={set} />
 
       <Row>
         <label style={{ color: 'var(--s2-text-secondary)' }}>
@@ -322,9 +223,12 @@ function ProviderCard({ provider, isOnlyActive }) {
           {isNew ? 'Create provider' : 'Save'}
         </Button>
         {!isNew && !provider.is_active && (
-          <Button $bg="var(--s2-surface-raised)" onClick={() => activate.mutate({ id: provider.id })}>
+          <QuietButton onClick={() => activate.mutate({ id: provider.id })}>
             <HiOutlineBolt /> Make active
-          </Button>
+          </QuietButton>
+        )}
+        {!isNew && templateName === null && (
+          <QuietButton onClick={() => setTemplateName(`${provider.name} template`)}>Save as template</QuietButton>
         )}
         {!isNew && (
           <Button
@@ -336,12 +240,58 @@ function ProviderCard({ provider, isOnlyActive }) {
           </Button>
         )}
       </Row>
+      {templateName !== null && (
+        <Row>
+          <Label>Template name</Label>
+          <Input aria-label="Template name" value={templateName} onChange={e => setTemplateName(e.target.value)} autoFocus />
+          <Button onClick={saveTemplate} disabled={!templateName.trim()}>Save template</Button>
+          <QuietButton onClick={() => setTemplateName(null)}>Cancel</QuietButton>
+        </Row>
+      )}
+    </Card>
+  );
+}
+
+// Add provider: pick a kind, then a template of that kind (or Blank), then the
+// pre-filled card. `step` is {kind:null} (pick a kind), {kind} (pick a
+// template) or {kind, form} (the card).
+function AddProviderFlow({ templates, onDone }) {
+  const [step, setStep] = useState({ kind: null });
+  if (step.form) {
+    return <ProviderCard provider={null} initialForm={step.form} onCreated={onDone} />;
+  }
+  if (!step.kind) {
+    return (
+      <Card>
+        <Hint style={{ marginTop: 0 }}>What kind of provider?</Hint>
+        <KindPicker onPick={kind => setStep({ kind })} />
+      </Card>
+    );
+  }
+  const blank = emptyProviderForm(step.kind);
+  const choices = templatesForKind(templates, step.kind);
+  return (
+    <Card>
+      <Hint style={{ marginTop: 0 }}>{kindLabel(step.kind)} provider — start from a template:</Hint>
+      <Row>
+        {choices.map(t => (
+          <QuietButton key={t.id} title={t.description || undefined}
+            onClick={() => setStep({ kind: step.kind, form: applyTemplate(blank, t) })}>
+            {t.name}
+          </QuietButton>
+        ))}
+        <QuietButton onClick={() => setStep({ kind: step.kind, form: blank })}>Blank</QuietButton>
+      </Row>
+      <Row>
+        <QuietButton onClick={() => setStep({ kind: null })}>← Back</QuietButton>
+      </Row>
     </Card>
   );
 }
 
 export default function SettingsAdmin() {
   const { providers, isLoadingProviders, activeProvider } = useAiProviders();
+  const templatesApi = useAiProviderTemplates();
   const [adding, setAdding] = useState(false);
 
   return (
@@ -354,9 +304,10 @@ export default function SettingsAdmin() {
       </Header>
 
       <Hint>
-        Register an image-generation service running on another machine. The active provider becomes the
-        default for tile and entity image generation; individual types can override it. With no active
-        provider, generation uses the local sprite-gen service exactly as before.
+        Register an AI service running on another machine: image, image edit, text, audio or sprite
+        sheets. The active image provider becomes the default for tile and entity image generation;
+        individual types can override it. With no active image provider, generation uses the local
+        sprite-gen service exactly as before.
       </Hint>
       <Hint>
         The other machine creates the image or sprite; this side only sends the request, waits, and
@@ -367,7 +318,7 @@ export default function SettingsAdmin() {
         <WarnText>No provider is active — generation is using the local sprite-gen service.</WarnText>
       )}
 
-      {adding && <ProviderCard provider={null} />}
+      {adding && <AddProviderFlow templates={templatesApi.templates} onDone={() => setAdding(false)} />}
 
       {isLoadingProviders ? (
         <AdminLoading label="Loading AI providers…" inline size={16} />
@@ -375,9 +326,14 @@ export default function SettingsAdmin() {
         <Hint>No providers registered yet.</Hint>
       ) : (
         providers.map(p => (
-          <ProviderCard key={p.id} provider={p} isOnlyActive={p.is_active} />
+          <ProviderCard
+            key={p.id} provider={p} isOnlyActive={p.is_active}
+            onSaveAsTemplate={templatesApi.saveProviderAsTemplate}
+          />
         ))
       )}
+
+      <ProviderTemplatesSection {...templatesApi} />
     </AdminContainer>
   );
 }

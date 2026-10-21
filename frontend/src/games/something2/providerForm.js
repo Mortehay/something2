@@ -348,3 +348,58 @@ export function templateToForm(row) {
     ...defaultsToForm(row.defaults),
   };
 }
+
+// --- Per-kind field helpers (Task 9) ---------------------------------------
+
+// The adapter picker. Blank means "today's per-kind behaviour" (the server
+// treats NULL as box for audio/text/sprite/image_edit, models_path for image).
+export const ADAPTER_OPTIONS = [
+  { value: '', label: 'Per-kind default' },
+  { value: 'box', label: 'GPU box' },
+  { value: 'a1111', label: 'Stable Diffusion WebUI (A1111)' },
+  { value: 'openai_compatible', label: 'OpenAI-compatible' },
+  { value: 'ollama', label: 'Ollama' },
+  { value: 'generic', label: 'Generic (models path)' },
+];
+
+// Mirror of the backend's audio drain groups (aiProviders.AUDIO_GROUPS).
+export const AUDIO_GROUPS = ['music', 'ambience', 'sfx_realistic', 'sfx_retro'];
+
+// image_edit's capability dropdown. Blank is the base model and is always
+// offered, Refresh or not; the box lists it too (as null -> ''), so it is not
+// added twice.
+export function editCapabilityOptions(discoveryCache, current) {
+  const options = modelOptions(discoveryCache, 'image_edit', current);
+  if (options.some((o) => o.value === '')) return options;
+  return [{ value: '', label: 'Base model' }, ...options];
+}
+
+// image_edit keeps steps and cfg in request_template, like an image provider.
+// Read as strings for the inputs; blank when absent or the JSON is broken.
+export function editSettings(text) {
+  const parsed = (text || '').trim() ? parseTemplate(text).template : null;
+  const read = (k) => (parsed && parsed[k] != null ? String(parsed[k]) : '');
+  return { steps: read('steps'), cfg_scale: read('cfg_scale') };
+}
+
+// Writes one setting back into the template text. A blank value removes the
+// key; an all-empty result is blank text, since the template is optional.
+export function withEditSetting(text, key, value) {
+  const base = ((text || '').trim() && parseTemplate(text).template) || {};
+  const next = { ...base };
+  if (value === '' || value == null) delete next[key];
+  else next[key] = Number(value);
+  return Object.keys(next).length ? JSON.stringify(next, null, 2) : '';
+}
+
+// POST body for the Templates section's Duplicate. builtin is left out (the
+// server defaults it to false): a copy is the admin's own.
+export function duplicateTemplatePayload(row) {
+  return {
+    name: `${row.name} copy`,
+    modality: row.modality,
+    adapter: row.adapter ?? null,
+    description: row.description || '',
+    defaults: { ...(row.defaults || {}) },
+  };
+}
