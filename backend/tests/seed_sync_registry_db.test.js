@@ -29,7 +29,7 @@ function dbTest(name, body) {
 
 test('getGroup throws on unknown id and GROUPS is in seed order', () => {
   assert.deepStrictEqual(GROUPS.map((g) => g.id), [
-    'ai_providers', 'tile_types', 'items', 'attack_effects', 'aura_effects', 'creature_behaviors', 'entities',
+    'ai_provider_templates', 'ai_providers', 'tile_types', 'items', 'attack_effects', 'aura_effects', 'creature_behaviors', 'entities',
     'biomes', 'skill_tree', 'progression', 'maps', 'quests', 'art', 'audio',
   ]);
   assert.throws(() => getGroup('nope'), /unknown group/);
@@ -470,13 +470,15 @@ test('_withTestGroups registers groups for the callback only', async () => {
 });
 
 // Frozen Plan-1 omit/secret lists: the refactor must export exactly what
-// Plan 1 exported, except tile_types.ai_provider_id, which plan 2 (Task 6,
+// Plan 1 exported (plus the unified-provider-kinds discovery cache, a machine
+// cache like models_cache), except tile_types.ai_provider_id, which plan 2 (Task 6,
 // ruling R1) exports as a ref (the provider's sync_uuid).
 const PLAN1 = {
   tile_types: { omit: ['id', 'created_at', 'updated_at', 'image', 'render_mode', 'sprite', 'sync_uuid'], secret: [] },
   quests: { omit: ['id', 'created_at', 'sync_uuid'], secret: [] },
   ai_providers: {
-    omit: ['id', 'created_at', 'updated_at', 'sync_uuid', 'models_cache', 'models_fetched_at', 'is_active'],
+    omit: ['id', 'created_at', 'updated_at', 'sync_uuid', 'models_cache', 'models_fetched_at', 'is_active',
+      'discovery_cache', 'discovery_fetched_at'],
     secret: ['auth_token'],
   },
 };

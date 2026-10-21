@@ -229,7 +229,7 @@ const TABLE_LABELS = {
   creature_behavior_skills: 'Behavior skills', behavior_drops: 'Behavior drops', chest_loot: 'Chest loot',
   entity_types: 'Entities', creature_drops: 'Drops', class_loadouts: 'Class loadouts', biomes: 'Biomes',
   passive_nodes: 'Nodes', passive_edges: 'Edges', game_settings: 'Settings', tile_types: 'Tile types',
-  quests: 'Quests', ai_providers: 'AI providers',
+  quests: 'Quests', ai_providers: 'AI providers', ai_provider_templates: 'AI provider templates',
 };
 export const tableLabel = (table) => TABLE_LABELS[table] || String(table);
 

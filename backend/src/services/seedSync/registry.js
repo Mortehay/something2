@@ -70,8 +70,8 @@
 // declared { ..., deferred: true }: a FORWARD ref inside the group, written
 // NULL first and resolved by apply's second pass once its target table is
 // written (world_point_kinds.default_entity_type_id); across groups an
-// FK only points at a group that seeds earlier (ai_providers is first: tile
-// and entity types pin a provider by uuid).
+// FK only points at a group that seeds earlier (ai_provider_templates and
+// ai_providers come first: tile and entity types pin a provider by uuid).
 const LOCAL = { id: 'local', created_at: 'local', updated_at: 'local', sync_uuid: 'identity' };
 const ART = 'art group (plan 3)';
 // File base name of a character appearance (image and sprite): the class's
@@ -80,6 +80,17 @@ const ART = 'art group (plan 3)';
 const appearanceName = (r, ctx) => `${ctx.refKey('entity_type_id', r.entity_type_id)}:${r.variant}`;
 
 const GROUPS = [
+  {
+    id: 'ai_provider_templates',
+    label: 'AI Provider Templates',
+    tables: [{
+      table: 'ai_provider_templates',
+      naturalKey: ['name'],
+      omit: { ...LOCAL },
+      secretColumns: [],
+      refs: {},
+    }],
+  },
   {
     id: 'ai_providers',
     label: 'AI Providers',
@@ -93,6 +104,8 @@ const GROUPS = [
         sync_uuid: 'identity',
         models_cache: 'machine cache',
         models_fetched_at: 'machine cache',
+        discovery_cache: 'machine cache',
+        discovery_fetched_at: 'machine cache',
         is_active: 'per-PC choice: which box this PC can reach',
       },
       secretColumns: ['auth_token'],

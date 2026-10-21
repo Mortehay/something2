@@ -1,21 +1,23 @@
 {
   "header": {
-    "exported_at": "2026-10-20T20:11:15.451Z",
-    "exported_by": "linux-dev",
+    "exported_at": "2026-10-21T10:27:16.643Z",
+    "exported_by": "unnamed-pc",
     "group": "ai_providers",
     "row_counts": {
       "ai_providers": 4
     },
-    "schema_version": "1714440812000_quests_objective_columns"
+    "schema_version": "1714440823000_ai_provider_kinds_templates"
   },
   "tables": {
     "ai_providers": [
       {
+        "adapter": null,
         "auth_header_name": null,
         "base_url": "http://192.168.0.218:8001/sdapi/v1/txt2img",
         "enabled": true,
         "modality": "image",
         "model": "gguf:Qwen-Image-2512-Q3_K_M",
+        "models_by_group": null,
         "models_path": "/sdapi/v1/sd-models",
         "models_pointer": "$[*].model_name",
         "name": "desktop gpu",
@@ -39,11 +41,13 @@
         "sync_uuid": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c"
       },
       {
+        "adapter": null,
         "auth_header_name": null,
         "base_url": "http://192.168.0.218:8001/sdapi/v1/txt2img",
         "enabled": true,
         "modality": "image",
         "model": "stabilityai/stable-diffusion-xl-base-1.0+Muapi/soft-pixel-art-xl",
+        "models_by_group": null,
         "models_path": "/sdapi/v1/sd-models",
         "models_pointer": "$[*].model_name",
         "name": "desktop gpu (objects)",
@@ -68,11 +72,16 @@
         "sync_uuid": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2"
       },
       {
+        "adapter": null,
         "auth_header_name": null,
         "base_url": "http://192.168.0.218:8001",
         "enabled": true,
         "modality": "audio",
         "model": null,
+        "models_by_group": {
+          "ambience": "audio:stable-audio",
+          "music": "audio:ace-step"
+        },
         "models_path": null,
         "models_pointer": null,
         "name": "gpu-box-audio",
@@ -85,11 +94,13 @@
         "sync_uuid": "b4eecb7a-9840-a607-3ae5-1949ebfc9bd7"
       },
       {
+        "adapter": null,
         "auth_header_name": null,
         "base_url": "http://192.168.0.218:8001",
         "enabled": true,
         "modality": "text",
         "model": "qwen3.6-35b-a3b",
+        "models_by_group": null,
         "models_path": null,
         "models_pointer": null,
         "name": "gpu-box-text",

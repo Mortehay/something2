@@ -1,0 +1,188 @@
+{
+  "header": {
+    "exported_at": "2026-10-21T10:27:47.761Z",
+    "exported_by": "unnamed-pc",
+    "group": "ai_provider_templates",
+    "row_counts": {
+      "ai_provider_templates": 10
+    },
+    "schema_version": "1714440823000_ai_provider_kinds_templates"
+  },
+  "tables": {
+    "ai_provider_templates": [
+      {
+        "adapter": "box",
+        "builtin": true,
+        "defaults": {
+          "base_url": "http://192.168.0.218:8001/sdapi/v1/txt2img",
+          "model": "gguf:Qwen-Image-2512-Q3_K_M",
+          "models_path": "/sdapi/v1/sd-models",
+          "models_pointer": "$[*].model_name",
+          "request_template": {
+            "cfg_scale": 7,
+            "height": 512,
+            "negative_prompt": "sky, clouds, horizon, landscape, perspective, vignette, text, watermark, border",
+            "override_settings": {
+              "sd_model_checkpoint": "{{model}}"
+            },
+            "prompt": "{{prompt}}",
+            "seed": "{{seed}}",
+            "steps": 20,
+            "width": 512
+          },
+          "response_image_pointer": "images[0]"
+        },
+        "description": "Qwen-Image on the GPU box (A1111-style txt2img).",
+        "modality": "image",
+        "name": "GPU box — Qwen-Image",
+        "sync_uuid": "04ed2c3f-ca30-a132-4319-e29a5ee4e1a7"
+      },
+      {
+        "adapter": "box",
+        "builtin": true,
+        "defaults": {
+          "base_url": "http://192.168.0.218:8001/sdapi/v1/txt2img",
+          "model": "stabilityai/stable-diffusion-xl-base-1.0+Muapi/soft-pixel-art-xl",
+          "models_path": "/sdapi/v1/sd-models",
+          "models_pointer": "$[*].model_name",
+          "request_template": {
+            "cfg_scale": 7,
+            "cutout": true,
+            "height": 1024,
+            "negative_prompt": "picture frame, framed art, poster, trading card, border, matte, vignette, sprite sheet, tileset, grid, panels, collage, multiple objects, duplicate, row of objects, scene, forest, landscape, background scenery, ground, floor, grass, shadow, reflection, text, watermark, signature, photo, realistic, 3d render, blurry",
+            "override_settings": {
+              "sd_model_checkpoint": "{{model}}"
+            },
+            "prompt": "{{prompt}}",
+            "seed": "{{seed}}",
+            "steps": 24,
+            "width": 1024
+          },
+          "response_image_pointer": "images[0]"
+        },
+        "description": "SDXL pixel-art objects on the GPU box, cutout enabled.",
+        "modality": "image",
+        "name": "GPU box — SDXL objects",
+        "sync_uuid": "d78f978e-e8c2-8b2d-7846-2e39613c69c1"
+      },
+      {
+        "adapter": "box",
+        "builtin": true,
+        "defaults": {
+          "base_url": "http://192.168.0.218:8001",
+          "models_by_group": {
+            "ambience": "audio:stable-audio",
+            "music": "audio:ace-step"
+          },
+          "request_template": {}
+        },
+        "description": "Music and ambience generation on the GPU box.",
+        "modality": "audio",
+        "name": "GPU box — audio",
+        "sync_uuid": "2534485a-8a30-1703-d8a6-6f3314886549"
+      },
+      {
+        "adapter": "box",
+        "builtin": true,
+        "defaults": {
+          "base_url": "http://192.168.0.218:8001",
+          "model": "qwen3.6-35b-a3b",
+          "request_template": {}
+        },
+        "description": "Text LLM on the GPU box.",
+        "modality": "text",
+        "name": "GPU box — brain",
+        "sync_uuid": "5889db22-fcde-e0ba-0a18-8834762f3cf8"
+      },
+      {
+        "adapter": "box",
+        "builtin": true,
+        "defaults": {
+          "base_url": "http://192.168.0.218:8001",
+          "request_template": {
+            "cfg_scale": 4,
+            "steps": 20
+          }
+        },
+        "description": "Image edit on the GPU box.",
+        "modality": "image_edit",
+        "name": "GPU box — image edit",
+        "sync_uuid": "7d7fd4bb-e848-d4f8-2b68-a7956f837344"
+      },
+      {
+        "adapter": "box",
+        "builtin": true,
+        "defaults": {
+          "base_url": "http://192.168.0.218:8001"
+        },
+        "description": "Sprite sheet generation on the GPU box.",
+        "modality": "sprite",
+        "name": "GPU box — sprite sheets",
+        "sync_uuid": "755eb4b2-471e-6529-d1ea-599416b1db5a"
+      },
+      {
+        "adapter": "ollama",
+        "builtin": true,
+        "defaults": {
+          "base_url": "http://localhost:11434"
+        },
+        "description": "Local Ollama server.",
+        "modality": "text",
+        "name": "Ollama",
+        "sync_uuid": "fa9de841-55a5-0a92-f7b7-d00c8691dbc3"
+      },
+      {
+        "adapter": "openai_compatible",
+        "builtin": true,
+        "defaults": {
+          "models_path": "/v1/models",
+          "models_pointer": "data[*].id",
+          "request_template": {
+            "model": "{{model}}",
+            "prompt": "{{prompt}}",
+            "response_format": "b64_json",
+            "size": "{{width}}x{{height}}"
+          },
+          "response_image_pointer": "data[0].b64_json"
+        },
+        "description": "Any OpenAI-style /v1/images/generations service.",
+        "modality": "image",
+        "name": "OpenAI-compatible images",
+        "sync_uuid": "4c30826e-79c6-bac8-c66e-efdf3e528ad2"
+      },
+      {
+        "adapter": "openai_compatible",
+        "builtin": true,
+        "defaults": {},
+        "description": "Any OpenAI-style chat service.",
+        "modality": "text",
+        "name": "OpenAI-compatible text",
+        "sync_uuid": "f6c6b199-2b26-3cad-db01-779de86fef34"
+      },
+      {
+        "adapter": "a1111",
+        "builtin": true,
+        "defaults": {
+          "models_path": "/sdapi/v1/sd-models",
+          "models_pointer": "$[*].model_name",
+          "request_template": {
+            "cfg_scale": 7,
+            "height": "{{height}}",
+            "override_settings": {
+              "sd_model_checkpoint": "{{model}}"
+            },
+            "prompt": "{{prompt}}",
+            "seed": "{{seed}}",
+            "steps": 20,
+            "width": "{{width}}"
+          },
+          "response_image_pointer": "images[0]"
+        },
+        "description": "Automatic1111 / SD WebUI txt2img.",
+        "modality": "image",
+        "name": "Stable Diffusion WebUI (A1111)",
+        "sync_uuid": "1e677223-1ad5-8f49-dfe2-f4db5a1b31da"
+      }
+    ]
+  }
+}
