@@ -8,7 +8,7 @@ import styled, { keyframes } from 'styled-components';
 import { useQuery } from '@tanstack/react-query';
 import { Modal, Muted } from './seedUi.jsx';
 import { assetUrl, assetUrlVersioned } from './useTileSprites.js';
-import { isBoxProp, propEffect, propFxLabel, rowLabels } from './spriteSelection.js';
+import { conceptImageOf, isBoxProp, propEffect, propFxLabel, rowLabels } from './spriteSelection.js';
 
 const Cols = styled.div`display: flex; gap: 1.2rem; align-items: flex-start; flex-wrap: wrap; margin-top: 0.8rem;`;
 const Col = styled.div`display: flex; flex-direction: column; gap: 0.4rem; min-width: 0;`;
@@ -98,12 +98,12 @@ export default function SpritePreviewModal({ subject, onClose }) {
       <h3 style={{ margin: 0 }}>{header}</h3>
       <Cols>
         <Col>
-          <strong>Used image</strong>
-          {subject.concept_key ? (
+          <strong>{subject.concept_key || !subject.appearance_image ? 'Used image' : 'Appearance art'}</strong>
+          {conceptImageOf(subject) ? (
             <>
-              <Img src={assetUrlVersioned(subject.concept_key, version)} alt="Concept"
+              <Img src={assetUrlVersioned(conceptImageOf(subject), version)} alt="Concept"
                 onLoad={(e) => setSize(`${e.target.naturalWidth}×${e.target.naturalHeight}`)} />
-              <Muted>{fileName(subject.concept_key)}{size && ` · ${size}`}</Muted>
+              <Muted>{fileName(conceptImageOf(subject))}{size && ` · ${size}`}</Muted>
             </>
           ) : <Muted>No concept image</Muted>}
         </Col>

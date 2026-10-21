@@ -8,7 +8,7 @@ import {
   useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
 } from './useSpriteConsole.js';
 import {
-  cellCount, defaultActionsFor, isBoxProp, estimateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
+  cellCount, conceptImageOf, defaultActionsFor, isBoxProp, estimateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   PROP_FX_OPTIONS, propFxLabel, queuePayload, selectionKinds, spriteShape, toggleSpriteSubject,
 } from './spriteSelection.js';
 
@@ -274,7 +274,7 @@ function SpriteConsoleAdmin() {
                 <tr key={subject.id}>
                   <td><input type="checkbox" checked={selected.has(subject.id)}
                     onChange={() => setSelected(toggleSpriteSubject(selected, subject.id))} /></td>
-                  <td>{thumb(subject.concept_key, 'Preview concept')}</td>
+                  <td>{thumb(conceptImageOf(subject), 'Preview concept')}</td>
                   <td>{thumb(sheet, isBoxProp(subject) ? 'Preview result' : 'Preview sheet')}</td>
                   <td>{subject.name}</td>
                   <td><Pill>{spriteShape(subject)}</Pill></td>

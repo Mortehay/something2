@@ -88,6 +88,12 @@ export function cellCount(rows, actions, frames) {
 
 // A GPU-box prop row made the Props v2 way: one generated cutout image, no sheet. A box
 // prop done before Props v2 still carries a sheet (atlas_key) and previews as one.
+// The image a row was (or, for a hero appearance, should be) drawn from: the
+// box concept once generated, else the appearance's own art, else nothing.
+export function conceptImageOf(subject) {
+  return subject?.concept_key || subject?.appearance_image || null;
+}
+
 export function isBoxProp(subject) {
   return subject?.backend === 'gpu-box' && subject?.generation_kind === 'object' && !subject?.atlas_key;
 }

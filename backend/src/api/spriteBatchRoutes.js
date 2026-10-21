@@ -105,7 +105,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
         // batch is for giving a variant its OWN directional sheet, not a
         // prerequisite for it to appear in-game at all.
         pool.query(
-          `SELECT ca.entity_type_id, ca.variant, ca.render_mode, ca.sprite,
+          `SELECT ca.entity_type_id, ca.variant, ca.render_mode, ca.sprite, ca.image,
                   e.name AS class_name, e.prompt AS class_prompt,
                   j.id AS job_id, j.status AS job_state, j.generation_kind, j.frames,
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
@@ -136,7 +136,11 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           is_creature: false,
           is_playable: true,
           point_kind: null,
+          // The appearance's own art, shown on the page as what this hero
+          // looks like. Kept out of `image`: a portrait is not a sprite sheet,
+          // so the row stays "missing visual" until it gets one.
           image: null,
+          appearance_image: a.image || null,
           sprite: a.sprite,
           job_id: a.job_id,
           job_state: a.job_state,

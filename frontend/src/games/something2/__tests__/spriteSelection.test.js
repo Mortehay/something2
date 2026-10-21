@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   filterSpriteSubjects, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   targetsForSprites, framesCap, cellCount, estimateLabel, defaultActionsFor, rowLabels,
-  isBoxProp, PROP_FX_OPTIONS, propFxLabel, propEffect, selectionKinds, queuePayload,
+  isBoxProp, PROP_FX_OPTIONS, propFxLabel, propEffect, selectionKinds, queuePayload, conceptImageOf,
 } from '../spriteSelection.js';
 import { PAGE_SIZE } from '../artSelection.js';
 
@@ -197,5 +197,14 @@ describe('sprite console action controls', () => {
   it('rowLabels is empty for a legacy atlas without rows', () => {
     expect(rowLabels({ frames: {} })).toEqual([]);
     expect(rowLabels(null)).toEqual([]);
+  });
+});
+
+describe('conceptImageOf', () => {
+  it('prefers the generated concept, else a hero appearance\'s own art, else nothing', () => {
+    expect(conceptImageOf({ concept_key: 'c.png', appearance_image: 'a.png' })).toBe('c.png');
+    expect(conceptImageOf({ concept_key: null, appearance_image: 'a.png' })).toBe('a.png');
+    expect(conceptImageOf({ concept_key: null, appearance_image: null })).toBe(null);
+    expect(conceptImageOf({})).toBe(null);
   });
 });

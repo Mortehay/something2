@@ -280,3 +280,24 @@ for (const bad of ['glow', '', 'SHINE', 3, null]) {
     assert.ok(!calls.some((c) => /INSERT/i.test(c.sql)));
   });
 }
+
+test('GET /api/sprite-admin/subjects shows an appearance variant its own art without counting it as a sprite', async () => {
+  const pool = {
+    query: async (sql) => {
+      if (/FROM character_appearances ca/i.test(sql)) {
+        return { rows: [{ entity_type_id: 3, variant: 2, render_mode: 'static', sprite: null, image: 'sprites/mage/appearance-2.png',
+          class_name: 'Mage', class_prompt: 'a spell-flinging mage' }] };
+      }
+      if (/FROM entity_types e/i.test(sql)) {
+        return { rows: [{ id: 3, name: 'Mage', prompt: 'a spell-flinging mage', render_mode: 'static', is_creature: false, is_playable: true, image: null, sprite: null }] };
+      }
+      throw new Error(`unexpected query: ${sql}`);
+    },
+  };
+  const res = await request(routerApp(pool)).get('/api/sprite-admin/subjects');
+  assert.equal(res.status, 200);
+  const variant = res.body.subjects.find((s) => s.id === '3:2');
+  assert.equal(variant.appearance_image, 'sprites/mage/appearance-2.png');
+  // A portrait is not a sprite sheet: the row must stay "missing visual" until it gets one.
+  assert.equal(variant.image, null);
+});
