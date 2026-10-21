@@ -119,8 +119,11 @@ export class CreatureManager {
         }));
       }
     }
-    for (const id of [...this.creatures.keys()]) {
-      if (!seen.has(id)) this.creatures.delete(id);
+    for (const [id, c] of [...this.creatures]) {
+      if (seen.has(id)) continue;
+      this.creatures.delete(id);
+      // SOMET-656: lets Game drop the creature's animation record.
+      if (typeof this.onCreatureRemoved === 'function') this.onCreatureRemoved(c);
     }
   }
 

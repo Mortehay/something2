@@ -12,6 +12,8 @@ export const MOVE_EPS_PX = 1;
 // Creatures arrive at ~5 Hz; holding 'moving' bridges the gap between frames
 // where the interpolated position has caught up with its target.
 export const MOVING_HOLD_MS = 150;
+// Half the 300 ms damage window (sheetActions DAMAGE_MS); see noteHit.
+export const HIT_MERGE_MS = 150;
 
 // A stable 0..999 ms offset per key (FNV-1a), so a crowd's idle/walk loops
 // do not tick in lockstep.
@@ -52,8 +54,13 @@ export class EntityAnimState {
     if (isCast) r.castAt = now; else r.attackAt = now;
   }
 
+  // One hit reaches the client twice -- the world-state impact and the hp
+  // drop on the next creatures/state frame -- so a hit inside the first half
+  // of a flinch already showing keeps its clock rather than restarting it.
   noteHit(key, now) {
-    this._rec(key).hitAt = now;
+    const r = this._rec(key);
+    if (now - r.hitAt < HIT_MERGE_MS) return;
+    r.hitAt = now;
   }
 
   // Called once per draw. `tx`/`ty` (creatures only) are the latest snapshot
@@ -81,5 +88,51 @@ export class EntityAnimState {
 
   clear() {
     this._map.clear();
+  }
+}
+
+// Wire actor ('c:<id>' / 'p:<userId>') -> anim key; the local player's own
+// id becomes 'self'. Anything else is null.
+export function actorKey(a, localUserId) {
+  if (typeof a !== "string" || a.length < 3) return null;
+  if (a.startsWith("c:")) return a;
+  if (a.startsWith("p:")) return localUserId != null && a === `p:${localUserId}` ? "self" : a;
+  return null;
+}
+
+const FULL_CIRCLE = Math.PI * 2 - 1e-6;
+
+// Take one world-state frame's single-shot events into `anim`:
+//  - attacks: a swing by `a`. A full-circle arc (slam/nova) is a cast. Skill
+//    effect names are free-form vfx library rows, so they are NOT used as a
+//    cast signal. The local player's plain swings are skipped: Game notes them
+//    at send time, and the echo one round trip later would restart the swing.
+//  - impacts: `t` was hit.
+//  - sfx: a creature's 'skill_cast' (it carries a: 'c:<id>') is a cast; this
+//    also covers projectile/summon skills, which stamp no attack descriptor.
+export function noteFrameEvents(anim, msg, now, localUserId) {
+  if (!anim || !msg) return;
+  if (Array.isArray(msg.attacks)) {
+    for (const e of msg.attacks) {
+      if (!e || e.b === true) continue;
+      const key = actorKey(e.a, localUserId);
+      if (!key) continue;
+      const isCast = Number.isFinite(e.arc) && e.arc >= FULL_CIRCLE;
+      if (key === "self" && !isCast) continue;
+      anim.noteAttack(key, now, isCast);
+    }
+  }
+  if (Array.isArray(msg.impacts)) {
+    for (const e of msg.impacts) {
+      const key = e && actorKey(e.t, localUserId);
+      if (key) anim.noteHit(key, now);
+    }
+  }
+  if (Array.isArray(msg.sfx)) {
+    for (const e of msg.sfx) {
+      if (!e || e.e !== "skill_cast") continue;
+      const key = actorKey(e.a, localUserId);
+      if (key) anim.noteAttack(key, now, true);
+    }
   }
 }

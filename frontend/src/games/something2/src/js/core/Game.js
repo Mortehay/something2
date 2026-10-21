@@ -60,6 +60,7 @@ import { GameArt } from "../systems/gameArt.js";
 import { fetchGameArt } from "../net/gameArtClient.js";
 import { fetchAllQuests, fetchCharacterQuests, startQuest, completeQuest } from "../net/questsClient.js";
 import { findWorldBossCreature } from "./worldBossMatch.js";
+import { EntityAnimState, noteFrameEvents } from "../systems/entityAnimState.js";
 
 // How long the "out of ammo" HUD flash stays up after the server's `noammo`
 // frame arrives.
@@ -185,6 +186,9 @@ export class Game {
         this.engine = null;
         this.localUserId = null;
         this.remotePlayers = new NativeMap(); // user_id -> {x, y, hp}
+        // SOMET-656: per-actor animation timing for box sprite sheets;
+        // created per world in initChunked and shared with the renderer.
+        this.entityAnim = null;
         this.waves = [];              // SOMET-528, replaced by each world frame
         this.telegraphs = [];         // SOMET-608, same replace-every-frame rule
         this.lastServerTick = 0;
@@ -612,6 +616,9 @@ export class Game {
                 .catch((err) => console.warn('game art index unavailable, using fallback icons', err));
         }
         this.renderSystem.gameArt = this.gameArt;
+        // SOMET-656: fresh per world -- no old world's actor survives entry.
+        this.entityAnim = new EntityAnimState();
+        this.renderSystem.entityAnim = this.entityAnim;
         this.chunkedMap = new ChunkedMap(chunkSize, tileTypes);
         this._preloadTileAssets(tileTypes);
         // Names arrive on the wire already resolved; this is the only lookup
@@ -635,6 +642,7 @@ export class Game {
             const jitterY = (Math.random() - 0.5) * 8;
             this.spawnFloatingText(cx + jitterX, cy - 25 + jitterY, `-${dmg}`, '#ef4444', { size: 15, bold: true });
         };
+        this._bindCreatureAnim(this.creatures);
         this.projectiles = new ProjectileManager();
         // Non-creature entity types (map decorations: rocks, bushes, ...),
         // keyed by name for RenderSystem.collectDecorations. Built once here
@@ -1216,6 +1224,20 @@ export class Game {
         return true;
     }
 
+    // SOMET-656: a creature's hp drop plays its damage action (on top of
+    // whatever onCreatureDamage already does), and a creature that leaves the
+    // snapshot drops its animation record.
+    _bindCreatureAnim(manager) {
+        const prev = manager.onCreatureDamage;
+        manager.onCreatureDamage = (creature, dmg) => {
+            if (this.entityAnim) this.entityAnim.noteHit(`c:${creature.id}`, performance.now());
+            if (typeof prev === 'function') prev(creature, dmg);
+        };
+        manager.onCreatureRemoved = (creature) => {
+            if (this.entityAnim) this.entityAnim.forget(`c:${creature.id}`);
+        };
+    }
+
     // SOMET-494 -- send an attack toward wherever the cursor is NOW.
     //
     // The aim is recomputed per send rather than captured at mousedown, so a
@@ -1234,6 +1256,8 @@ export class Game {
         );
         this.authorityClient.sendAttack(nx, ny);
         this._lastAttackSentAt = performance.now();
+        // SOMET-656: the local swing plays at send time, not one round trip later.
+        if (this.entityAnim) this.entityAnim.noteAttack('self', this._lastAttackSentAt, false);
         if (this.player) {
             const f = facingFromVector(
                 Math.abs(nx) > 0.3 ? Math.sign(nx) : 0,
@@ -1560,6 +1584,7 @@ export class Game {
                 const dmg = Math.round(prevRemote.hp - p.hp);
                 if (dmg > 0) {
                     this.spawnFloatingText(p.x, p.y - 25, `-${dmg}`, '#ef4444', { size: 14, bold: true });
+                    if (this.entityAnim) this.entityAnim.noteHit(`p:${p.id}`, performance.now());
                 }
             }
             // The field list lives in worldPlayers.js so a test can hold it:
@@ -1575,11 +1600,18 @@ export class Game {
             }
             next.set(p.id, remote);
         }
+        // SOMET-656: a player who left this frame takes its anim record along.
+        if (this.entityAnim && this.remotePlayers) {
+            for (const id of this.remotePlayers.keys()) {
+                if (!next.has(id)) this.entityAnim.forget(`p:${id}`);
+            }
+        }
         this.remotePlayers = next;
         if (mine) {
             if (this.player && this.player.hp !== undefined && mine.hp !== undefined && mine.hp < this.player.hp) {
                 const dmg = Math.round(this.player.hp - mine.hp);
                 if (dmg > 0) {
+                    if (this.entityAnim) this.entityAnim.noteHit('self', performance.now());
                     const jitterX = (Math.random() - 0.5) * 12;
                     this.spawnFloatingText(this.player.x + jitterX, this.player.y - 25, `-${dmg}`, '#ef4444', { size: 16, bold: true });
                 }
@@ -1691,6 +1723,9 @@ export class Game {
         if (msg.attacks && msg.attacks.length) {
             addEffects(this.vfx, msg.attacks, performance.now(), this.vfxDefs);
         }
+        // SOMET-656: the same single-shot attacks/impacts/sfx drive box-sheet
+        // action playback (attack, cast, damage) for every actor.
+        noteFrameEvents(this.entityAnim, msg, performance.now(), this.localUserId);
         // Slice C: impacts ride the same frame and are equally single-shot.
         // They go through addEffects too -- an impact IS an effect, just one
         // positioned on the target rather than the attacker -- so pruning,
@@ -2729,6 +2764,7 @@ export class Game {
         // 8. Dispatch real skill cast to server so creatures take real damage and server deducts resources / applies buffs
         if (this.authorityClient && (s.type === 'melee' || s.type === 'magic' || s.type === 'debuff' || s.type === 'buff')) {
             this.authorityClient.sendCastSkill(s.id, targetX, targetY, nx, ny);
+            if (this.entityAnim) this.entityAnim.noteAttack('self', performance.now(), true);
         }
 
         // Skill cast toast
