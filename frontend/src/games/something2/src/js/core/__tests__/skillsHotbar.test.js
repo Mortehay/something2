@@ -241,6 +241,20 @@ describe("Skills Panel & Hotbar Interactions", () => {
     expect(sent[0].skillId).toBe("dru_entangling_roots");
   });
 
+  it("a dispatched local skill cast notes a cast on 'self' (SOMET-656)", () => {
+    const noted = [];
+    g.entityAnim = { noteAttack: (...args) => noted.push(args) };
+    g.authorityClient = { sendCastSkill: () => {} };
+    g.camera = { screenX: 0, screenY: 0 };
+    g.localMana = 100;
+    g.hotbarSkills.set(3, getSkillById("dru_entangling_roots"));
+
+    g._keydownHandler({ key: "3", code: "Digit3", repeat: false, preventDefault: () => {} });
+    expect(noted.length).toBe(1);
+    expect(noted[0][0]).toBe("self");
+    expect(noted[0][2]).toBe(true);
+  });
+
   it("spawns distinct visual effects: Fireball launches projectile, Lightning strikes with branches", () => {
     g.localMana = 100;
     g.inventory = {
