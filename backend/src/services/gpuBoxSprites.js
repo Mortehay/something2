@@ -22,7 +22,7 @@ const realSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // A box job in one of these will never change again.
 const STATUS_TERMINAL = new Set(['done', 'failed', 'cancelled', 'missing']);
 
-async function call(provider, method, pathAndQuery, { body, headers: extra, fetchImpl } = {}) {
+async function call(provider, method, pathAndQuery, { body, headers: extra, fetchImpl, timeoutMs } = {}) {
   const url = resolveUrl(provider.base_url, pathAndQuery);
   const headers = { ...authHeaders(provider), ...(extra || {}) };
   try {
@@ -30,7 +30,7 @@ async function call(provider, method, pathAndQuery, { body, headers: extra, fetc
       method,
       headers,
       body,
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS()),
+      signal: AbortSignal.timeout(timeoutMs || REQUEST_TIMEOUT_MS()),
     }, { fetchImpl });
     return { res };
   } catch (err) {
@@ -127,7 +127,7 @@ async function resolveConceptModel(provider, opts = {}) {
 // Polls a box task (/api/task-status/{id}) to a terminal state and downloads
 // the image THIS task's result.url names -- never the newest asset, which a
 // concurrent run (or another user of the box) can own. `label` names the task
-// in errors ("concept", "edit"). Resolves { ok, path, png, result }.
+// in errors ("concept"). Resolves { ok, path, png, result }.
 async function pollTaskImage(provider, taskId, label, {
   fetchImpl, sleep, pollMs, timeoutMs,
 }) {
@@ -168,7 +168,7 @@ async function pollTaskImage(provider, taskId, label, {
   }
 }
 
-// Submits a form-urlencoded task (generate_core, edit) and polls it.
+// Submits a form-urlencoded task (generate_core) and polls it.
 async function submitTask(provider, path, form, label, opts) {
   const sub = await callJson(provider, 'POST', path, {
     body: new URLSearchParams(form).toString(),
@@ -193,20 +193,54 @@ async function generateConcept(provider, { prompt }, {
   return r.ok ? { ok: true, conceptPath: r.path, png: r.png } : r;
 }
 
-// Edits an image already on the box (POST /api/edit, Qwen-Image-Edit-2511).
-// `source` is a basename under the box's images/ ("core_<hex>.png"). steps /
-// cfg_scale are deliberately never sent: the box's defaults (4-step Lightning,
-// cfg 1.0) are what it is tuned for. `transparent` is the box's 0..1 measure of
-// the result's transparent area, null when it does not report one.
-async function editImage(provider, { source, instruction }, {
-  fetchImpl = fetch, sleep = realSleep, pollMs = POLL_MS(), timeoutMs = CONCEPT_TIMEOUT_MS(),
-} = {}) {
-  const r = await submitTask(provider, '/api/edit', { source, instruction }, 'edit', {
-    fetchImpl, sleep, pollMs, timeoutMs,
+// Prop txt2img (SOMET-657): POST /sdapi/v1/txt2img with cutout:true returns an
+// isolated, transparent subject straight from the prompt -- no concept, no edit
+// round trip. The answer is JSON with the PNG base64-encoded, so it needs a
+// bigger read cap than the small control-plane answers.
+const TXT2IMG_CAP = () => Math.max(JSON_CAP(), 16 * 1024 * 1024);
+const TXT2IMG_TIMEOUT_MS = () => Number(process.env.GPU_BOX_TXT2IMG_TIMEOUT_MS) || 5 * 60 * 1000;
+const PROP_NEGATIVE_PROMPT = 'picture frame, framed art, poster, trading card, border, matte, vignette, sprite sheet, '
+  + 'tileset, grid, panels, collage, multiple objects, duplicate, row of objects, scene, forest, landscape, '
+  + 'background scenery, ground, floor, grass, shadow, reflection, text, watermark, signature, photo, realistic, '
+  + '3d render, blurry';
+
+function parseInfo(info) {
+  if (info && typeof info === 'object') return info;
+  if (typeof info !== 'string') return null;
+  try { return JSON.parse(info); } catch (_) { return null; }
+}
+
+async function txt2imgProp(provider, { prompt, seed }, { fetchImpl = fetch } = {}) {
+  const model = await resolveConceptModel(provider, { fetchImpl });
+  if (!model.ok) return model;
+  const body = {
+    prompt,
+    negative_prompt: PROP_NEGATIVE_PROMPT,
+    steps: 24,
+    width: 1024,
+    height: 1024,
+    cfg_scale: 7,
+    cutout: true,
+    override_settings: { sd_model_checkpoint: model.model },
+  };
+  if (Number.isFinite(Number(seed))) body.seed = Number(seed);
+  const { res, error, retryable } = await call(provider, 'POST', '/sdapi/v1/txt2img', {
+    body: JSON.stringify(body),
+    headers: { 'Content-Type': 'application/json' },
+    fetchImpl,
+    timeoutMs: TXT2IMG_TIMEOUT_MS(),
   });
-  if (!r.ok) return r;
-  const t = r.result && r.result.transparent;
-  return { ok: true, path: r.path, png: r.png, transparent: Number.isFinite(t) ? t : null };
+  if (error) return { ok: false, error, retryable };
+  if (!res.ok) return httpFailure(res, 'POST', '/sdapi/v1/txt2img');
+  const read = await readJsonCapped(res, TXT2IMG_CAP());
+  if (read.error) return { ok: false, error: `GPU box did not answer with usable JSON: ${read.error}`, providerFault: true };
+  const first = read.json && Array.isArray(read.json.images) ? read.json.images[0] : null;
+  if (typeof first !== 'string' || !first) {
+    return { ok: false, error: 'GPU box txt2img answered without an image', providerFault: true };
+  }
+  const png = Buffer.from(first.replace(/^data:[^,]*,/, ''), 'base64');
+  if (png.length === 0) return { ok: false, error: 'GPU box txt2img image decoded to zero bytes', providerFault: true };
+  return { ok: true, png, info: parseInfo(read.json.info) };
 }
 
 async function createSheetJob(provider, spec, { fetchImpl = fetch } = {}) {
@@ -253,5 +287,5 @@ async function fetchAtlas(provider, boxJobId, { fetchImpl = fetch } = {}) {
 }
 
 module.exports = {
-  STATUS_TERMINAL, actionCatalog, checkAuth, listConceptModels, generateConcept, editImage, createSheetJob, getSheetJob, fetchSheet, fetchAtlas,
+  STATUS_TERMINAL, actionCatalog, checkAuth, listConceptModels, generateConcept, txt2imgProp, PROP_NEGATIVE_PROMPT, createSheetJob, getSheetJob, fetchSheet, fetchAtlas,
 };

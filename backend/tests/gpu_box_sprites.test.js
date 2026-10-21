@@ -242,71 +242,78 @@ test('generateConcept refuses a result.url that leaves the box origin and sends 
   }
 });
 
-// POST /api/edit (Qwen-Image-Edit-2511 on the box, contract 2026-10-21):
-// form-urlencoded source + instruction, answers {status:'queued', task_id},
-// polled through /api/task-status like generate_core.
-function editRoutes(statuses, { url = '/images/edit_aa11bb22cc33.png' } = {}) {
-  return {
-    'POST /api/edit': () => json({ status: 'queued', task_id: 'edit-1' }),
-    'GET /api/task-status/edit-1': (u, i, n) => json(statuses[Math.min(n, statuses.length) - 1]),
-    [`GET ${url}`]: () => new Response(png('tree-sheet.png'), { status: 200 }),
-  };
-}
-const editDone = (extra = {}) => ({
-  task_id: 'edit-1',
-  status: 'SUCCESS',
-  result: { status: 'success', url: '/images/edit_aa11bb22cc33.png', transparent: 0.63, duration_ms: 61000, ...extra },
+// POST /sdapi/v1/txt2img with cutout:true (SOMET-657): the prop route. JSON in,
+// {images:[base64 png], info} out.
+const PNG_B64 = (b) => b.toString('base64');
+const t2iOk = (extra = {}) => () => json({
+  images: [PNG_B64(png('tree-sheet.png'))],
+  info: JSON.stringify({ seed: 7, model: 'qwen-x', width: 1024, height: 1024, duration_ms: 41000, cutout: { transparent: 0.7 } }),
+  ...extra,
 });
 
-test('editImage posts source + instruction only, polls its own task and downloads THAT result', async () => {
-  const pending = { task_id: 'edit-1', status: 'PENDING' };
-  const { fetchImpl, calls } = fakeBox(editRoutes([pending, editDone()]));
-  const r = await box.editImage(provider, { source: 'core_2fd22411db4a.png', instruction: 'Remove any person.' }, { fetchImpl, sleep });
+test('txt2imgProp posts the cutout request with the model checkpoint and decodes the base64 png', async () => {
+  const { fetchImpl, calls } = fakeBox({ 'POST /sdapi/v1/txt2img': t2iOk() });
+  const r = await box.txt2imgProp(provider, { prompt: 'pixel art, a pine tree', seed: 7 }, { fetchImpl });
   assert.equal(r.ok, true, r.error);
-  assert.equal(r.path, 'images/edit_aa11bb22cc33.png');
   assert.deepEqual(r.png, png('tree-sheet.png'));
-  assert.equal(r.transparent, 0.63);
-  const submit = calls[0];
-  assert.equal(submit.key, 'POST /api/edit');
-  assert.equal(submit.headers['Content-Type'], 'application/x-www-form-urlencoded');
-  assert.equal(submit.headers.Authorization, 'Bearer sk_test');
-  const form = new URLSearchParams(String(submit.body));
-  assert.deepEqual([...form.keys()].sort(), ['instruction', 'source']);
-  assert.equal(form.get('source'), 'core_2fd22411db4a.png');
-  assert.equal(form.get('instruction'), 'Remove any person.');
-  assert.equal(calls.filter((c) => c.key === 'GET /api/task-status/edit-1').length, 2);
-  // No concept-model lookup: the edit runs the box's own engine.
-  assert.equal(calls.some((c) => c.key === 'GET /api/core-models'), false);
+  assert.equal(r.info.duration_ms, 41000);
+  assert.equal(calls.length, 1, 'provider.model is explicit: no roster lookup');
+  const c = calls[0];
+  assert.equal(c.headers.Authorization, 'Bearer sk_test');
+  assert.equal(c.headers['Content-Type'], 'application/json');
+  assert.equal(c.url.href, 'http://box:8001/sdapi/v1/txt2img');
+  const b = JSON.parse(c.body);
+  assert.equal(b.prompt, 'pixel art, a pine tree');
+  assert.equal(b.seed, 7);
+  assert.equal(b.cutout, true);
+  assert.deepEqual(b.override_settings, { sd_model_checkpoint: 'qwen-x' });
+  assert.equal(b.steps, 24);
+  assert.equal(b.width, 1024);
+  assert.equal(b.height, 1024);
+  assert.equal(b.cfg_scale, 7);
+  assert.equal(b.negative_prompt, box.PROP_NEGATIVE_PROMPT);
+  assert.match(b.negative_prompt, /picture frame/);
 });
 
-test('editImage surfaces the box 503 "editing disabled" words', async () => {
-  const { fetchImpl } = fakeBox({
-    'POST /api/edit': () => json({ error: 'image editing is disabled on this box', enable_with: 'EDIT_ENABLED=1' }, 503),
+test('txt2imgProp accepts info as an object and defaults the model to the box Qwen', async () => {
+  const { fetchImpl, calls } = fakeBox({
+    'GET /api/core-models': coreModels([SDXL, QWEN_FAST, QWEN_BEST]),
+    'POST /sdapi/v1/txt2img': t2iOk({ info: { seed: 3 } }),
   });
-  const r = await box.editImage(provider, { source: 'core_x.png', instruction: 'x' }, { fetchImpl, sleep });
-  assert.equal(r.ok, false);
-  assert.match(r.error, /503/);
-  assert.match(r.error, /image editing is disabled/);
+  const r = await box.txt2imgProp({ ...provider, model: '' }, { prompt: 'x', seed: 3 }, { fetchImpl });
+  assert.equal(r.ok, true, r.error);
+  assert.equal(r.info.seed, 3);
+  const post = calls.find((c) => c.key === 'POST /sdapi/v1/txt2img');
+  assert.equal(JSON.parse(post.body).override_settings.sd_model_checkpoint, 'gguf:qwen-image-2512-Q2_K+lightning8');
 });
 
-test('editImage fails with the box words when the edit task fails', async () => {
-  const { fetchImpl } = fakeBox(editRoutes([{ task_id: 'edit-1', status: 'FAILURE', result: { error: 'source not found' } }]));
-  const r = await box.editImage(provider, { source: 'core_x.png', instruction: 'x' }, { fetchImpl, sleep });
-  assert.equal(r.ok, false);
-  assert.match(r.error, /edit task ended FAILURE: source not found/);
+test('txt2imgProp reads a response larger than the small-JSON cap', async () => {
+  const big = Buffer.concat([png('tree-sheet.png'), Buffer.alloc(9 * 1024 * 1024, 1)]);
+  const { fetchImpl } = fakeBox({ 'POST /sdapi/v1/txt2img': () => json({ images: [PNG_B64(big)], info: '{}' }) });
+  const r = await box.txt2imgProp(provider, { prompt: 'x', seed: 1 }, { fetchImpl });
+  assert.equal(r.ok, true, r.error);
+  assert.equal(r.png.length, big.length);
 });
 
-test('editImage refuses a result.url outside the box origin', async () => {
-  const { fetchImpl, calls } = fakeBox(editRoutes([editDone({ url: '//evil.host/x.png' })]));
-  const r = await box.editImage(provider, { source: 'core_x.png', instruction: 'x' }, { fetchImpl, sleep });
+test('txt2imgProp surfaces the box error text', async () => {
+  const { fetchImpl } = fakeBox({ 'POST /sdapi/v1/txt2img': () => json({ error: 'cutout refused: opaque square' }, 422) });
+  const r = await box.txt2imgProp(provider, { prompt: 'x', seed: 1 }, { fetchImpl });
   assert.equal(r.ok, false);
-  assert.match(r.error, /outside the box origin/);
-  assert.ok(calls.every((c) => c.url.origin === 'http://box:8001'));
+  assert.match(r.error, /422/);
+  assert.match(r.error, /cutout refused/);
 });
 
-test('editImage reports transparent as null when the box omits it', async () => {
-  const { fetchImpl } = fakeBox(editRoutes([editDone({ transparent: undefined })]));
-  const r = await box.editImage(provider, { source: 'core_x.png', instruction: 'x' }, { fetchImpl, sleep });
-  assert.equal(r.ok, true);
-  assert.equal(r.transparent, null);
+test('txt2imgProp fails when the answer has no image', async () => {
+  const { fetchImpl } = fakeBox({ 'POST /sdapi/v1/txt2img': () => json({ images: [], info: '{}' }) });
+  const r = await box.txt2imgProp(provider, { prompt: 'x', seed: 1 }, { fetchImpl });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /without an image/);
+});
+
+test('txt2imgProp reports an unreachable box as retryable', async () => {
+  const fetchImpl = async () => { throw new Error('ECONNREFUSED'); };
+  const r = await box.txt2imgProp(provider, { prompt: 'x', seed: 1 }, { fetchImpl });
+  assert.equal(r.ok, false);
+  assert.equal(r.retryable, true);
+  assert.match(r.error, /could not reach/);
 });

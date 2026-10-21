@@ -1,7 +1,7 @@
 // Drains the sprite batch queue one row at a time on the GPU box (Qwen sheet
 // jobs). Per creature row: concept (our own generate_core task) -> sheet job ->
 // poll -> sheet.png + atlas -> sheet.json built from THAT atlas -> stored ->
-// done. Per prop ('object') row: concept -> edit (person removed) -> image.png.
+// done. Per prop ('object') row: one txt2img cutout -> image.png.
 //
 // The box job id is recorded (attachBox) the moment the box accepts it, so a
 // row put back by requeueStale after a restart resumes polling the same box
@@ -13,6 +13,7 @@ const { buildBoxSheetManifest } = require('./spriteSheetManifest.js');
 // content, so the renderer's fit fills the display box and a bottom-anchored
 // idle effect pivots at the real base, not in empty canvas.
 const { trimForStorage } = require('./remoteImageProvider.js');
+const { decodeRGBA, CLEAR } = require('./pngAlpha.js');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -26,6 +27,44 @@ const RESUMABLE = new Set(['queued', 'running', 'done']);
 // ahead of it on the shared box) before the row fails; the box job is kept.
 const QUEUE_CAP_MS = 6 * 60 * 60 * 1000;
 const NO_ACTIONS = 'queued before GPU-box sheets — re-queue it from the Sprite Generation page';
+
+// Sanity gate for a prop cutout, BEFORE anything is stored. An image we cannot
+// decode (not 8-bit RGBA) gets no opinion -- the same rule pngAlpha follows.
+const MIN_TRANSPARENT_FRACTION = 0.15;
+const MIN_SUBJECT_FRACTION = 0.03;
+function checkCutout(png) {
+  const img = decodeRGBA(png);
+  if (!img) return null;
+  const { width, height, px } = img;
+  let clear = 0;
+  let minX = width; let maxX = -1; let minY = height; let maxY = -1;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (px[(y * width + x) * 4 + 3] < CLEAR) clear += 1;
+      else {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  const frac = clear / (width * height);
+  if (frac < MIN_TRANSPARENT_FRACTION) {
+    return `cutout came back mostly opaque (${Math.round(frac * 100)}% transparent)`;
+  }
+  const bbox = maxX < 0 ? 0 : ((maxX - minX + 1) * (maxY - minY + 1)) / (width * height);
+  if (bbox < MIN_SUBJECT_FRACTION) return 'subject too small';
+  return null;
+}
+
+// The row's prompt, steered at pixel art and one centred object.
+function propPrompt(base) {
+  let p = String(base || '').trim();
+  if (!/pixel art/i.test(p)) p = `pixel art, ${p}`;
+  if (!/single object, centered/i.test(p)) p = `${p}, single object, centered`;
+  return p;
+}
 
 const safeName = (name) => String(name).replace(/[^A-Za-z0-9_-]/g, '_');
 
@@ -133,21 +172,20 @@ function createDispatcher({
 
   // Props v2: the box's sheet builder animates every action through human
   // poses, so a prop sheet comes back with a person in it. A prop is instead
-  // one clean static image -- the concept with the person edited out -- and
+  // one clean static image -- a single txt2img with the box's cutout -- and
   // the game animates it procedurally (row.prop_fx -> entity_types.idle_fx on
-  // approve). No sheet job, so nothing to attach or resume: a re-run simply
-  // redoes concept + edit. The edited image is trimmed before it is stored.
+  // approve). SOMET-657: the earlier concept -> /api/edit route was dropped
+  // (the edit's VAE round trip re-renders the whole image and is unreliable).
+  // No sheet job, so nothing to attach or resume: a re-run redoes the txt2img.
+  // The raw cutout is stored as concept.png, the trimmed one as image.png.
   async function executeProp(provider, row, prefix) {
-    const concept = must(await box.generateConcept(provider, { prompt: row.base_prompt }));
+    const gen = must(await box.txt2imgProp(provider, { prompt: propPrompt(row.base_prompt), seed: Number(row.seed) }));
+    const gate = checkCutout(gen.png);
+    if (gate) throw new Error(gate);
     const conceptKey = `${prefix}concept.png`;
-    await store.putObject(conceptKey, concept.png, 'image/png');
-    const name = String(row.creature).replace(/[_-]+/g, ' ').trim();
-    const edited = must(await box.editImage(provider, {
-      source: concept.conceptPath.split('/').pop(),
-      instruction: `Remove any person or character. Keep only the ${name}, unchanged, on the same plain background.`,
-    }));
+    await store.putObject(conceptKey, gen.png, 'image/png');
     const imageKey = `${prefix}image.png`;
-    await store.putObject(imageKey, trimForStorage(edited.png, 'object').buffer, 'image/png');
+    await store.putObject(imageKey, trimForStorage(gen.png, 'object').buffer, 'image/png');
     await queue.complete(db, row.id, {
       image_key: imageKey, concept_key: conceptKey, atlas_key: null, manifest_key: null, sheet_seconds: null,
     });

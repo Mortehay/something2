@@ -1,7 +1,7 @@
 // Preview popup for one sprite subject: concept image (left) beside the
 // generated sheet at x2 (right), every sheet row labelled from sheet.json.
-// A GPU-box prop (Props v2) has no sheet: the right side is the edited image
-// (person removed), previewed with a CSS stand-in for the idle effect it will
+// A GPU-box prop (Props v2) has no sheet: the right side is the generated
+// (trimmed) cutout image, previewed with a CSS stand-in for the idle effect it will
 // get in game on approve (prop_fx: none | sway | shine).
 import { useState } from 'react';
 import styled, { keyframes } from 'styled-components';
@@ -69,10 +69,10 @@ function PropResult({ subject, version }) {
   const mask = src ? `url(${JSON.stringify(src)})` : null;
   return (
     <Col>
-      <strong>Result</strong>
+      <strong>Generated (trimmed)</strong>
       {src ? (
         <FxFrame data-fx={fx}>
-          <Img src={src} alt="Result" />
+          <Img src={src} alt="Generated (trimmed)" />
           {fx === 'shine' && <Glint data-glint="on" style={{ maskImage: mask, WebkitMaskImage: mask }} />}
         </FxFrame>
       ) : <Muted>No result yet</Muted>}

@@ -76,7 +76,7 @@ export function framesCap(catalog, actions) {
   return caps.length ? Math.min(...caps) : catalog?.max_frames ?? 1;
 }
 
-// A flat prop is one edit on the box (Props v2: concept -> person removed ->
+// A flat prop is one txt2img cutout on the box (Props v2, SOMET-657:
 // one static image, animated by the game's idle effect), so it counts as 1 cell whatever the
 // actions and frames; a creature is a sheet of facings x actions x frames.
 export function cellCount(rows, actions, frames) {
@@ -86,7 +86,7 @@ export function cellCount(rows, actions, frames) {
   );
 }
 
-// A GPU-box prop row made the Props v2 way: one edited image, no sheet. A box
+// A GPU-box prop row made the Props v2 way: one generated cutout image, no sheet. A box
 // prop done before Props v2 still carries a sheet (atlas_key) and previews as one.
 export function isBoxProp(subject) {
   return subject?.backend === 'gpu-box' && subject?.generation_kind === 'object' && !subject?.atlas_key;

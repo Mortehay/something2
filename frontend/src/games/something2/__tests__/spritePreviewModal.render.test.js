@@ -17,12 +17,12 @@ const prop = (over = {}) => ({
 });
 
 describe('SpritePreviewModal for a box prop', () => {
-  it('shows the raw concept as Used image and the edited image as Result', () => {
+  it('shows the raw concept as Used image and the generated (trimmed) image', () => {
     const html = render(prop({ prop_fx: 'sway' }));
     expect(html).toContain('Used image');
-    expect(html).toMatch(/<strong[^>]*>Result<\/strong>/);
+    expect(html).toMatch(/<strong[^>]*>Generated \(trimmed\)<\/strong>/);
     expect(html).toContain('concept.png');
-    expect(html).toMatch(/alt="Result"[^>]*>|src="[^"]*image\.png[^"]*"[^>]*alt="Result"/);
+    expect(html).toMatch(/alt="Generated \(trimmed\)"[^>]*>|src="[^"]*image\.png[^"]*"[^>]*alt="Generated \(trimmed\)"/);
     expect(html).not.toContain('Sheet (×2)');
   });
 

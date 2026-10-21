@@ -355,49 +355,63 @@ test('a legacy row with no actions fails before any box call', async () => {
   }
 });
 
-// Props v2: the box's sheet builder draws a person into every action, so an
-// 'object' row is a concept -> edit (person removed) -> one static image; the
-// sway is procedural in the game renderer. No sheet job is ever created.
-const EDITED_PNG = Buffer.from('edited-bytes');
+// Props v2 (SOMET-657): an 'object' row is ONE txt2img cutout (no concept, no
+// edit, no sheet job); the sway is procedural in the game renderer.
+const { encodeRGBA } = require('../src/services/pngTrim.js');
+const { decodeRGBA } = require('../src/services/pngAlpha.js');
+
+// 100x160 frame with an opaque block at cols x0..x1, rows y0..y1.
+function cutoutPng({ x0 = 35, x1 = 64, y0 = 20, y1 = 69, fill = false } = {}) {
+  const W = 100, H = 160;
+  const px = Buffer.alloc(W * H * 4);
+  for (let y = 0; y < H; y += 1) {
+    for (let x = 0; x < W; x += 1) {
+      if (fill || (y >= y0 && y <= y1 && x >= x0 && x <= x1)) px.set([40, 120, 40, 255], (y * W + x) * 4);
+    }
+  }
+  return encodeRGBA(W, H, px);
+}
+const GOOD_PNG = cutoutPng();
+
 function treeRow(over = {}) {
   return wolfRow({
     id: 'row-t', entity_type_id: 12, creature: 'Pine Tree', generation_kind: 'object',
     base_prompt: 'a pine tree', actions: ['idle', 'sway'], directions: ['s'], frames_per_action: 4, ...over,
   });
 }
-function editBox(over = {}) {
-  const edits = [];
+function propBox(over = {}) {
+  const t2i = [];
   const box = fakeBox({
-    editImage: async (provider, args) => { edits.push({ provider, args }); return { ok: true, path: 'images/edit_1.png', png: EDITED_PNG, transparent: 0.6 }; },
+    txt2imgProp: async (provider, args) => { t2i.push({ provider, args }); return { ok: true, png: GOOD_PNG, info: {} }; },
+    editImage: async () => { throw new Error('editImage must not be called'); },
     ...over,
   });
-  box.calls.edit = edits;
+  box.calls.t2i = t2i;
   return box;
 }
 
-test('prop row: concept -> edit -> concept.png + image.png, no sheet job', async () => {
-  const box = editBox();
+test('prop row: one txt2img -> concept.png (raw) + image.png (trimmed), no concept/edit/sheet job', async () => {
+  const box = propBox();
   const { d, queue, store } = dispatcherFor({ rows: [treeRow()], box });
   await d.start();
 
   assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.concept.length, 0, 'no generate_core for a prop');
   assert.equal(box.calls.create.length, 0, 'no sheet job for a prop');
   assert.equal(box.calls.get.length, 0);
   assert.equal(box.calls.sheet + box.calls.atlas, 0);
-  assert.deepEqual(box.calls.concept.map((c) => c.args), [{ prompt: 'a pine tree' }]);
-  assert.equal(box.calls.edit.length, 1);
-  assert.equal(box.calls.edit[0].provider, PROVIDER);
-  assert.deepEqual(box.calls.edit[0].args, {
-    source: 'core_abc.png',
-    instruction: 'Remove any person or character. Keep only the Pine Tree, unchanged, on the same plain background.',
-  });
+  assert.equal(box.calls.t2i.length, 1);
+  assert.equal(box.calls.t2i[0].provider, PROVIDER);
+  assert.deepEqual(box.calls.t2i[0].args, { prompt: 'pixel art, a pine tree, single object, centered', seed: 7 });
   const prefix = 'sprites/Pine_Tree/row-t/';
   assert.deepEqual(store.puts.map((p) => [p.key, p.type]), [
     [`${prefix}concept.png`, 'image/png'],
     [`${prefix}image.png`, 'image/png'],
   ]);
-  assert.deepEqual(store.puts[0].buf, CONCEPT_PNG);
-  assert.deepEqual(store.puts[1].buf, EDITED_PNG);
+  assert.deepEqual(store.puts[0].buf, GOOD_PNG, 'concept.png is the raw cutout');
+  const img = decodeRGBA(store.puts[1].buf);
+  assert.ok(img.width < 100 && img.height < 160, `trimmed: ${img.width}x${img.height}`);
+  assert.ok(img.height >= 50 && img.height <= 56, `content kept with a small margin: ${img.height}`);
   assert.deepEqual(queue.log.attached, []);
   assert.deepEqual(queue.log.completed, [{
     id: 'row-t',
@@ -405,75 +419,64 @@ test('prop row: concept -> edit -> concept.png + image.png, no sheet job', async
   }]);
 });
 
-test('prop row: a snake_case catalog name is humanised in the edit instruction', async () => {
-  const box = editBox();
-  const { d } = dispatcherFor({ rows: [treeRow({ creature: 'pine_tree' })], box });
+test('prop row: the prompt keeps an existing "pixel art" / "single object, centered"', async () => {
+  const box = propBox();
+  const { d } = dispatcherFor({ rows: [treeRow({ base_prompt: 'Pixel Art oak, single object, centered' })], box });
   await d.start();
-  const { instruction } = box.calls.edit[0].args;
-  assert.ok(instruction.includes('pine tree'), instruction);
-  assert.ok(!instruction.includes('pine_tree'), instruction);
+  assert.equal(box.calls.t2i[0].args.prompt, 'Pixel Art oak, single object, centered');
 });
 
-test('prop row: an edit failure fails the row with the box words', async () => {
-  const box = editBox({
-    editImage: async () => ({ ok: false, error: 'GPU box answered 503 for POST /api/edit: image editing is disabled' }),
-  });
+test('prop row: a txt2img failure fails the row with the box words and stores nothing', async () => {
+  const box = propBox({ txt2imgProp: async () => ({ ok: false, error: 'GPU box answered 422 for POST /sdapi/v1/txt2img: cutout refused' }) });
   const { d, queue, store } = dispatcherFor({ rows: [treeRow()], box });
   await d.start();
   assert.equal(queue.log.completed.length, 0);
-  assert.deepEqual(queue.log.failed, [{ id: 'row-t', message: 'GPU box answered 503 for POST /api/edit: image editing is disabled' }]);
-  assert.ok(!store.puts.some((p) => p.key.endsWith('image.png')));
+  assert.deepEqual(queue.log.failed, [{ id: 'row-t', message: 'GPU box answered 422 for POST /sdapi/v1/txt2img: cutout refused' }]);
+  assert.equal(store.puts.length, 0);
 });
 
-test('prop row with a stale box_job_id still takes the edit path', async () => {
-  const box = editBox();
+test('prop row with a stale box_job_id still takes the txt2img path', async () => {
+  const box = propBox();
   const { d, queue } = dispatcherFor({ rows: [treeRow({ box_job_id: 'old-sheet' })], box });
   await d.start();
   assert.deepEqual(queue.log.failed, []);
   assert.equal(box.calls.get.length + box.calls.create.length, 0);
-  assert.equal(box.calls.edit.length, 1);
+  assert.equal(box.calls.t2i.length, 1);
 });
 
-test('creature rows never call editImage', async () => {
-  const box = editBox();
+test('creature rows never call txt2imgProp', async () => {
+  const box = propBox();
   const { d, queue } = dispatcherFor({ rows: [wolfRow()], box });
   await d.start();
   assert.deepEqual(queue.log.failed, []);
-  assert.equal(box.calls.edit.length, 0);
+  assert.equal(box.calls.t2i.length, 0);
   assert.equal(box.calls.create.length, 1);
 });
 
-// The box's edit keeps the concept's canvas: the real pine came back with 34%
-// empty canvas under the trunk, so the bottom-anchored sway pivoted in empty
-// space and the prop drew at ~45% of its box. The stored image is trimmed
-// with the SAME function the Art pipeline uses (trimForStorage(buf, 'object')).
-test('prop row: the edited image is stored trimmed to its opaque content', async () => {
-  const { encodeRGBA } = require('../src/services/pngTrim.js');
-  const { decodeRGBA } = require('../src/services/pngAlpha.js');
-  const W = 100, H = 160;
-  const px = Buffer.alloc(W * H * 4);
-  // An opaque 30x50 trunk-and-crown block at (35..64, 20..69); the rest clear.
-  for (let y = 20; y < 70; y += 1) {
-    for (let x = 35; x < 65; x += 1) px.set([40, 120, 40, 255], (y * W + x) * 4);
-  }
-  const padded = encodeRGBA(W, H, px);
-  const box = editBox({ editImage: async () => ({ ok: true, path: 'images/edit_1.png', png: padded, transparent: 0.9 }) });
+test('prop row: a mostly-opaque cutout fails before anything is stored', async () => {
+  const opaque = cutoutPng({ fill: true });
+  const box = propBox({ txt2imgProp: async () => ({ ok: true, png: opaque, info: {} }) });
+  const { d, queue, store } = dispatcherFor({ rows: [treeRow()], box });
+  await d.start();
+  assert.equal(queue.log.completed.length, 0);
+  assert.deepEqual(queue.log.failed, [{ id: 'row-t', message: 'cutout came back mostly opaque (0% transparent)' }]);
+  assert.equal(store.puts.length, 0);
+});
+
+test('prop row: a speck of a subject fails as too small', async () => {
+  const speck = cutoutPng({ x0: 10, x1: 14, y0: 10, y1: 14 });
+  const box = propBox({ txt2imgProp: async () => ({ ok: true, png: speck, info: {} }) });
+  const { d, queue, store } = dispatcherFor({ rows: [treeRow()], box });
+  await d.start();
+  assert.deepEqual(queue.log.failed, [{ id: 'row-t', message: 'subject too small' }]);
+  assert.equal(store.puts.length, 0);
+});
+
+test('prop row: an undecodable png gets no opinion from the gate and is stored as-is', async () => {
+  const odd = Buffer.from('not-a-png');
+  const box = propBox({ txt2imgProp: async () => ({ ok: true, png: odd, info: {} }) });
   const { d, queue, store } = dispatcherFor({ rows: [treeRow()], box });
   await d.start();
   assert.deepEqual(queue.log.failed, []);
-  const stored = store.puts.find((p) => p.key.endsWith('image.png'));
-  const img = decodeRGBA(stored.buf);
-  assert.ok(img.width < W && img.height < H, `trimmed: ${img.width}x${img.height}`);
-  // Opaque bbox reaches within the trim margin (3% of content, >= 1 px) of every edge.
-  let minX = img.width, maxX = -1, minY = img.height, maxY = -1;
-  for (let y = 0; y < img.height; y += 1) {
-    for (let x = 0; x < img.width; x += 1) {
-      if (img.px[(y * img.width + x) * 4 + 3] > 0) {
-        minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y);
-      }
-    }
-  }
-  assert.ok(minX <= 2 && minY <= 2, `top-left gap ${minX},${minY}`);
-  assert.ok(img.width - 1 - maxX <= 2 && img.height - 1 - maxY <= 2, `bottom-right gap ${img.width - 1 - maxX},${img.height - 1 - maxY}`);
-  assert.equal(maxY - minY + 1, 50, 'content height preserved');
+  assert.deepEqual(store.puts[1].buf, odd);
 });

@@ -362,29 +362,40 @@ pixels vs ~25 % in the other rows), so those facings would draw as a white box.
 **Why.** The box's sheet builder animates every action (sway included) through human poses, so prop
 sheets (trees, towers, chests) came back with a person drawn in, even from a person-free concept. The
 box's `generate_core` also appends "one character alone, full body, standing" to every concept prompt,
-so a prop concept itself contains a person. The box's `/api/edit` (Qwen-Image-Edit-2511) removes it
-cleanly and keeps transparency. Decision: props = one clean static image + a procedural idle effect
+so a prop concept itself contains a person (the first fix, `/api/edit`, was replaced -- see below). Decision: props = one clean static image + a procedural idle effect
 (none / sway / shine) in the game renderer. Creatures, classes and appearance variants keep box sheets unchanged.
 
-**Box contract (`/api/edit`).** `POST /api/edit`, form-urlencoded `source` (basename under the box's
-`images/`, e.g. `core_<hex>.png`) + `instruction`; `steps`/`cfg_scale` are never sent (box defaults:
-4-step Lightning, cfg 1.0). Answers `{status:"queued", task_id}`, polled through `/api/task-status/{id}`
-exactly like `generate_core`; SUCCESS → `result {url:"/images/edit_<hex>.png", transparent: 0..1}`.
-503 `{error, enable_with:"EDIT_ENABLED=1"}` when editing is disabled. Same same-origin check on
-`result.url` as the concept. ~60 s warm, ~170 s cold.
+**Why not concept -> edit (SOMET-657, 2026-10-21).** The first Props v2 route was `generate_core` concept
+-> `POST /api/edit` ("remove any person or character") -> trim. The box session measured `/api/edit` as
+unreliable for this: it round-trips the whole image through the VAE and re-renders it, so it invented
+content, zoomed 2x, kept the person on small subjects, was seed-dependent and turned the pixel grid into
+gradients. A spike (seed 7) of `POST /sdapi/v1/txt2img` with `cutout: true` and our own prompt gave six
+clean, isolated, transparent props (pine / banner / bare tree) on both qwen-image-2512 and SDXL
+pixel-art-xl (transparent 0.59-0.93, opaque-bbox cover 0.21-0.81). So the edit step, and the concept
+step with its forced "one character" suffix, are gone: a prop is one txt2img call.
+
+**Box contract (`POST /sdapi/v1/txt2img`, cutout).** JSON body `{prompt, seed, steps: 24, width: 1024,
+height: 1024, cfg_scale: 7, cutout: true, negative_prompt, override_settings: {sd_model_checkpoint}}`
+-> 200 `{images: [<base64 png>], info: "<json string or object: seed, model, width, height, steps,
+duration_ms, cutout ...>"}`. ~35-45 s Qwen warm, ~20 s SDXL, ~143 s cold. Auth as everywhere
+(`authHeaders(provider)`). The negative prompt is the `PROP_NEGATIVE_PROMPT` constant (no frames, sheets,
+scenes, shadows, text, photo/3d). The model is the provider's `model`, else the box's Qwen default
+(`resolveConceptModel`). The base64 JSON is read with a >= 16 MB cap.
 
 **Pipeline.**
-- `gpuBoxSprites.editImage(provider, {source, instruction})` → `{ok, path, png, transparent}`; shares
-  one task poll (`pollTaskImage`) with `generateConcept`.
-- Dispatcher, `generation_kind = 'object'` rows: concept → `editImage(source = basename of the concept
-  path, instruction = "Remove any person or character. Keep only the <subject>, unchanged, on the same
-  plain background.")` → stores `<prefix>/concept.png` (raw) and `<prefix>/image.png` (edited, trimmed to
-  its opaque content with the Art pipeline's `remoteImageProvider.trimForStorage(buf, 'object')` — the
-  edit keeps the concept's canvas, and untrimmed the prop drew at ~45% of its box with the sway pivot in
-  empty space) →
-  completes with `image_key` = image, `concept_key` = concept, no atlas/manifest, `sheet_seconds` NULL.
-  No sheet job is ever created for a prop (a stale `box_job_id` is ignored). An edit failure fails the
-  row with the box's words (including the 503 "disabled" text).
+- `gpuBoxSprites.txt2imgProp(provider, {prompt, seed})` -> `{ok, png, info}`. `editImage` was deleted
+  (nothing else used it); `pollTaskImage` now serves `generateConcept` only.
+- Dispatcher, `generation_kind = 'object'` rows: `txt2imgProp` with prompt = `base_prompt` prefixed
+  "pixel art, " unless it already says "pixel art" and suffixed ", single object, centered" unless
+  present, seed = row seed. Sanity gate BEFORE anything is stored (via `pngAlpha.decodeRGBA`; an
+  undecodable PNG gets no opinion): under 15% alpha-transparent -> fail "cutout came back mostly opaque
+  (N% transparent)"; opaque bbox under 3% of the frame -> fail "subject too small". Then stores
+  `<prefix>/concept.png` (the raw cutout) and `<prefix>/image.png` (trimmed to its opaque content with
+  the Art pipeline's `remoteImageProvider.trimForStorage(buf, 'object')`, so the renderer's fit fills
+  the box and the sway pivot is at the real base) and completes with `image_key` = image, `concept_key`
+  = raw, no atlas/manifest, `sheet_seconds` NULL. No sheet job is ever created for a prop (a stale
+  `box_job_id` is ignored). A box failure fails the row with the box's words. The popup's left/right
+  still mean "generated" (raw) vs "stored" (trimmed).
 - Enqueue: `POST /jobs` takes `prop_fx: 'none'|'sway'|'shine'` (default none, 400 otherwise), stored as
   `sprite_sets.prop_fx` on prop rows only (NULL on creature rows); `/subjects` returns it. Actions are
   still validated against the box catalog but mean nothing for a prop (backend default prop actions:
@@ -412,7 +423,7 @@ exactly like `generate_core`; SUCCESS → `result {url:"/images/edit_<hex>.png",
   - Pick/hover/minimap ignore `idle_fx` (the inspect hit-box ignores the sway shear, ≤7 px at peak).
 - Sprite Generation page: actions/frames apply to creatures only; a props-only selection hides them. A
   selection containing props shows a "Prop effect" select (None default / Sway / Shine) sent as
-  `prop_fx`. Prop rows show Concept (raw) + Result (edited) thumbnails and "effect: …" in the Actions
+  `prop_fx`. Prop rows show Concept (raw cutout) + Result (trimmed) thumbnails and "effect: …" in the Actions
   column; the preview shows "Used image" beside "Result" with a CSS preview of the chosen effect (sway =
   skewX ±2° about the base; shine = a gradient sweep masked by the same image URL via
   `mask-image`/`-webkit-mask-image`) and "Effect on approve: Sway/Shine/None".
