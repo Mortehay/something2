@@ -368,8 +368,8 @@ async function runOne(db, job, {
 }
 
 // Write a fresh model-authored subject phrase before image generation. Forced
-// batches insist on the GPU box: falling back to a small/local model would
-// make the checkbox promise false.
+// batches use boxOnly: no CPU fallback, but any active text provider (the GPU
+// box, Ollama or an OpenAI-compatible one) may write it.
 async function writePromptForJob(db, job, {
   subjects = catalogSubjects,
   describer = subjectDescriber,

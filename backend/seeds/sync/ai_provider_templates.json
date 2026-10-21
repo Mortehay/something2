@@ -126,7 +126,7 @@
         "defaults": {
           "base_url": "http://localhost:11434"
         },
-        "description": "Local Ollama server.",
+        "description": "Local Ollama server. Inside the backend container localhost is the container itself, so use the host's address (its LAN IP or host.docker.internal) and Ollama's real port.",
         "modality": "text",
         "name": "Ollama",
         "sync_uuid": "fa9de841-55a5-0a92-f7b7-d00c8691dbc3"
