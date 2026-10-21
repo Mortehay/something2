@@ -59,7 +59,17 @@ const Banner = styled.div`
   margin: 0.75rem 0; padding: 0.6rem 0.9rem; border-radius: 6px;
   color: var(--s2-danger); border: 1px solid var(--s2-danger); background: var(--s2-bg-sunken);
 `;
-const Check = styled.label`display: inline-flex; gap: 0.3rem; align-items: center; font-size: 0.85rem;`;
+// Each action is one clickable chip, box and label together. Field's
+// `input { min-width: 140px }` is undone here: it stretched every checkbox
+// away from its own label, so a click near a label hit the neighbour's box.
+const ActionChips = styled.span`display: flex; gap: 0.4rem; flex-wrap: wrap;`;
+const Check = styled.label`
+  display: inline-flex; gap: 0.4rem; align-items: center; cursor: pointer; user-select: none;
+  padding: 0.3rem 0.6rem; border: 1px solid var(--s2-border-strong); border-radius: 999px;
+  color: var(--s2-text); background: var(--s2-bg-sunken); font-size: 0.85rem;
+  &:has(input:checked) { border-color: var(--s2-accent); }
+  && input { min-width: 0; margin: 0; padding: 0; cursor: pointer; }
+`;
 const ErrorText = styled.span`color: var(--s2-danger);`;
 const ThumbButton = styled.button`border: 0; padding: 0; background: none; cursor: zoom-in;`;
 const Pager = styled.div`display: flex; gap: 0.5rem; align-items: center; margin: 0.75rem 0;`;
@@ -186,8 +196,10 @@ function SpriteConsoleAdmin() {
           <Hint>Props are one image each: actions and frames do not apply.</Hint>
         ) : (
           <>
-            <Field as="div">Actions
-              <span style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+            <Field as="div">
+              Actions ({actions.length} of {catalog?.actions?.length ?? 0}) · each drawn in
+              all {catalog?.directions?.length ?? 8} directions
+              <ActionChips>
                 {(catalog?.actions || []).map((action) => (
                   <Check key={action.id}>
                     <input type="checkbox" checked={actions.includes(action.id)}
@@ -195,7 +207,7 @@ function SpriteConsoleAdmin() {
                     {action.label}
                   </Check>
                 ))}
-              </span>
+              </ActionChips>
             </Field>
             <Field>Frames
               <select value={frames} disabled={!catalogReady}
