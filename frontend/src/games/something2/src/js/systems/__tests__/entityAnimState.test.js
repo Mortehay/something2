@@ -175,3 +175,69 @@ describe("actorKey", () => {
     expect(actorKey(undefined, "1")).toBe(null);
   });
 });
+
+describe("SOMET-656 fix round", () => {
+  it("noteAttack does not restart a swing that is still running", () => {
+    const s = new EntityAnimState();
+    s.noteAttack("self", 0, false);
+    s.stateFor("self").attackDurMs = 500;
+    for (let t = 50; t < 500; t += 50) s.noteAttack("self", t, false);
+    expect(s.stateFor("self").attackAt).toBe(0);
+    s.noteAttack("self", 500, false);
+    expect(s.stateFor("self").attackAt).toBe(500);
+  });
+
+  it("same for casts, and with an unknown duration waits a 250 ms minimum", () => {
+    const s = new EntityAnimState();
+    s.noteAttack("c:1", 0, true);
+    s.stateFor("c:1").castDurMs = 400;
+    s.noteAttack("c:1", 399, true);
+    expect(s.stateFor("c:1").castAt).toBe(0);
+    s.noteAttack("c:2", 0, false);
+    s.noteAttack("c:2", 249, false);
+    expect(s.stateFor("c:2").attackAt).toBe(0);
+    s.noteAttack("c:2", 250, false);
+    expect(s.stateFor("c:2").attackAt).toBe(250);
+  });
+
+  it("sweep drops records idle for over 10 s and keeps active ones", () => {
+    const s = new EntityAnimState();
+    s.noteAttack("c:old", 0, false);
+    s.noteAttack("c:new", 9000, false);
+    s.observePosition("c:walker", 0, 0, 0);
+    s.observePosition("c:walker", 50, 0, 15000);
+    s.sweep(15000);
+    expect(s.stateFor("c:old")).toBe(null);
+    expect(s.stateFor("c:new")).not.toBe(null);
+    expect(s.stateFor("c:walker")).not.toBe(null);
+  });
+
+  it("noteFrameEvents only notes tracked keys ('self' always)", () => {
+    const s = new EntityAnimState();
+    const tracked = (k) => k === "c:1";
+    noteFrameEvents(s, {
+      attacks: [{ a: "c:1", arc: 1 }, { a: "c:2", arc: 1 }, { a: "p:9", arc: 1 }],
+      impacts: [{ t: "c:3" }, { t: "p:me" }],
+      sfx: [{ e: "skill_cast", a: "c:4" }],
+    }, 10, "me", tracked);
+    expect(s.size).toBe(2);
+    expect(s.stateFor("c:1")).not.toBe(null);
+    expect(s.stateFor("self")).not.toBe(null);
+  });
+
+  it("a remote player's skill use sfx is a cast; self is skipped", () => {
+    const s = new EntityAnimState();
+    noteFrameEvents(s, {
+      sfx: [
+        { e: "use", s: "skill:fireball", a: "p:u7" },
+        { e: "use", s: "skill:fireball", a: "p:me" },
+        { e: "use", s: "potion", a: "p:u8" },
+        { e: "use", a: "p:u9" },
+      ],
+    }, 10, "me");
+    expect(s.stateFor("p:u7").castAt).toBe(10);
+    expect(s.stateFor("self")).toBe(null);
+    expect(s.stateFor("p:u8")).toBe(null);
+    expect(s.stateFor("p:u9")).toBe(null);
+  });
+});

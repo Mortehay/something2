@@ -38,6 +38,8 @@ afterEach(() => {
 describe("world-state frames feed the anim state", () => {
   it("notes attacks (cast on a full circle) and impacts by actor", () => {
     const g = makeGame();
+    g.creatures = new CreatureManager();
+    g.creatures.applySnapshot([5, 6, 9].map((id) => ({ id, type: "Wolf", x: 0, y: 0, facing: "S", hp: 10 })));
     g._onWorldState({
       tick: 1, players: [me(), other()],
       attacks: [
@@ -103,5 +105,52 @@ describe("creature manager callbacks", () => {
     expect(floated).toEqual([[5, 3]]);
     m.applySnapshot([]);
     expect(g.entityAnim.stateFor("c:5")).toBe(null);
+  });
+});
+
+describe("SOMET-656 fix round wiring", () => {
+  it("constant attack (send every 50 ms) cycles through the swing, not frame 0", () => {
+    const g = makeGame();
+    g.camera = { screenX: 0, screenY: 0 };
+    g.canvas = { width: 1280, height: 720 };
+    g.authorityClient = { sendAttack: () => {} };
+    const starts = new Set();
+    for (clock = 1000; clock < 2000; clock += 50) {
+      g._sendAttackAtCursor();
+      const r = g.entityAnim.stateFor("self");
+      r.attackDurMs = 500;
+      starts.add(r.attackAt);
+    }
+    expect(starts.size).toBe(2);
+  });
+
+  it("world-wide events for actors the client does not track leave no record", () => {
+    const g = makeGame();
+    g.creatures = new CreatureManager();
+    g.creatures.applySnapshot([{ id: 5, type: "Wolf", x: 0, y: 0, facing: "S", hp: 10 }]);
+    g._onWorldState({
+      tick: 1, players: [me(), other()],
+      attacks: [{ a: "c:5", arc: 1 }, { a: "c:99", arc: 1 }, { a: "p:far", arc: 1 }],
+      impacts: [{ t: "p:u7" }, { t: "p:ghost" }],
+    });
+    expect(g.entityAnim.stateFor("c:5")).not.toBe(null);
+    expect(g.entityAnim.stateFor("c:99")).toBe(null);
+    expect(g.entityAnim.stateFor("p:far")).toBe(null);
+    expect(g.entityAnim.stateFor("p:ghost")).toBe(null);
+    expect(g.entityAnim.stateFor("p:u7")).not.toBe(null);
+  });
+
+  it("a state frame sweeps stale records", () => {
+    const g = makeGame();
+    g.entityAnim.noteAttack("c:old", 0, false);
+    clock = 20000;
+    g._onWorldState({ tick: 1, players: [me()] });
+    expect(g.entityAnim.stateFor("c:old")).toBe(null);
+  });
+
+  it("a remote player's skill-use sfx casts", () => {
+    const g = makeGame();
+    g._onWorldState({ tick: 1, players: [me(), other()], sfx: [{ e: "use", s: "skill:bolt", a: "p:u7" }] });
+    expect(g.entityAnim.stateFor("p:u7").castAt).toBe(1000);
   });
 });

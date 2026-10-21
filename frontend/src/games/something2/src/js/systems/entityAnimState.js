@@ -14,6 +14,12 @@ export const MOVE_EPS_PX = 1;
 export const MOVING_HOLD_MS = 150;
 // Half the 300 ms damage window (sheetActions DAMAGE_MS); see noteHit.
 export const HIT_MERGE_MS = 150;
+// A swing/cast still playing is not restarted by a repeat send; when the
+// sheet's duration is unknown (0) this is how long it is left alone.
+export const MIN_RESTART_MS = 250;
+// A record with no event, no observation and no movement for this long is
+// dropped by sweep().
+export const STALE_MS = 10000;
 
 // A stable 0..999 ms offset per key (FNV-1a), so a crowd's idle/walk loops
 // do not tick in lockstep.
@@ -39,7 +45,7 @@ export class EntityAnimState {
     if (!r) {
       r = {
         attackAt: -Infinity, castAt: -Infinity, hitAt: -Infinity,
-        lastX: NaN, lastY: NaN, movingUntil: -Infinity,
+        lastX: NaN, lastY: NaN, movingUntil: -Infinity, seenAt: -Infinity,
         phase: phaseFor(key),
         // Filled by the renderer from the sheet before pickAction.
         attackDurMs: 0, castDurMs: 0, damageMs: 0,
@@ -51,7 +57,21 @@ export class EntityAnimState {
 
   noteAttack(key, now, isCast = false) {
     const r = this._rec(key);
+    // Constant attack resends every 50 ms and click-spam resends refused
+    // swings: restarting each time would pin the sprite on frame 0.
+    const at = isCast ? r.castAt : r.attackAt;
+    const dur = (isCast ? r.castDurMs : r.attackDurMs) || MIN_RESTART_MS;
+    if (now - at < dur) return;
     if (isCast) r.castAt = now; else r.attackAt = now;
+  }
+
+  // Drop records of actors that went quiet (e.g. world-wide events for
+  // far-away actors the client never tracked). Called once per state frame.
+  sweep(now) {
+    for (const [key, r] of this._map) {
+      const last = Math.max(r.attackAt, r.castAt, r.hitAt, r.movingUntil, r.seenAt);
+      if (now - last > STALE_MS) this._map.delete(key);
+    }
   }
 
   // One hit reaches the client twice -- the world-state impact and the hp
@@ -76,6 +96,7 @@ export class EntityAnimState {
     if (moved || short) r.movingUntil = now + MOVING_HOLD_MS;
     r.lastX = x;
     r.lastY = y;
+    r.seenAt = now;
   }
 
   stateFor(key) {
@@ -108,14 +129,21 @@ const FULL_CIRCLE = Math.PI * 2 - 1e-6;
 //    cast signal. The local player's plain swings are skipped: Game notes them
 //    at send time, and the echo one round trip later would restart the swing.
 //  - impacts: `t` was hit.
-//  - sfx: a creature's 'skill_cast' (it carries a: 'c:<id>') is a cast; this
+//  - sfx: a remote player's skill use ({e:'use', s:'skill:<id>', a:'p:<uid>'})
+//    is a cast too: castSkill stamps no attack descriptor. A creature's 'skill_cast' (it carries a: 'c:<id>') is a cast; this
 //    also covers projectile/summon skills, which stamp no attack descriptor.
-export function noteFrameEvents(anim, msg, now, localUserId) {
+export function noteFrameEvents(anim, msg, now, localUserId, tracked) {
   if (!anim || !msg) return;
+  // These lists are world-wide broadcasts; `tracked(key)` (when given) keeps
+  // records from being created for actors this client never draws.
+  const keyOf = (a) => {
+    const key = actorKey(a, localUserId);
+    return key && (key === "self" || !tracked || tracked(key)) ? key : null;
+  };
   if (Array.isArray(msg.attacks)) {
     for (const e of msg.attacks) {
       if (!e || e.b === true) continue;
-      const key = actorKey(e.a, localUserId);
+      const key = keyOf(e.a);
       if (!key) continue;
       const isCast = Number.isFinite(e.arc) && e.arc >= FULL_CIRCLE;
       if (key === "self" && !isCast) continue;
@@ -124,15 +152,19 @@ export function noteFrameEvents(anim, msg, now, localUserId) {
   }
   if (Array.isArray(msg.impacts)) {
     for (const e of msg.impacts) {
-      const key = e && actorKey(e.t, localUserId);
+      const key = e && keyOf(e.t);
       if (key) anim.noteHit(key, now);
     }
   }
   if (Array.isArray(msg.sfx)) {
     for (const e of msg.sfx) {
-      if (!e || e.e !== "skill_cast") continue;
-      const key = actorKey(e.a, localUserId);
-      if (key) anim.noteAttack(key, now, true);
+      if (!e) continue;
+      const isCast = e.e === "skill_cast"
+        || (e.e === "use" && typeof e.s === "string" && e.s.startsWith("skill:"));
+      if (!isCast) continue;
+      const key = keyOf(e.a);
+      // 'self' is noted at send time; the echo would restart the cast.
+      if (key && key !== "self") anim.noteAttack(key, now, true);
     }
   }
 }

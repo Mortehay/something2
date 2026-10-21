@@ -1227,6 +1227,18 @@ export class Game {
     // SOMET-656: a creature's hp drop plays its damage action (on top of
     // whatever onCreatureDamage already does), and a creature that leaves the
     // snapshot drops its animation record.
+    // Whether the client currently tracks the actor behind an anim key; the
+    // server broadcasts attacks/impacts/sfx world-wide, tracked or not.
+    _isTrackedActor(key) {
+        if (key === 'self') return true;
+        const id = key.slice(2);
+        const num = Number(id);
+        const has = (m) => !!m && (m.has(id) || (Number.isFinite(num) && m.has(num)));
+        if (key.startsWith('c:')) return has(this.creatures);
+        if (key.startsWith('p:')) return has(this.remotePlayers);
+        return false;
+    }
+
     _bindCreatureAnim(manager) {
         const prev = manager.onCreatureDamage;
         manager.onCreatureDamage = (creature, dmg) => {
@@ -1725,7 +1737,9 @@ export class Game {
         }
         // SOMET-656: the same single-shot attacks/impacts/sfx drive box-sheet
         // action playback (attack, cast, damage) for every actor.
-        noteFrameEvents(this.entityAnim, msg, performance.now(), this.localUserId);
+        const animNow = performance.now();
+        noteFrameEvents(this.entityAnim, msg, animNow, this.localUserId, (k) => this._isTrackedActor(k));
+        if (this.entityAnim) this.entityAnim.sweep(animNow);
         // Slice C: impacts ride the same frame and are equally single-shot.
         // They go through addEffects too -- an impact IS an effect, just one
         // positioned on the target rather than the attacker -- so pruning,
