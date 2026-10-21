@@ -87,6 +87,22 @@ function createDispatcher({
 }) {
   let run = null;
 
+  // The entity's current image bytes, or null when it has none or the stored
+  // object is gone (then the prop is drawn fresh, as before).
+  async function existingEntityImage(entityTypeId) {
+    const { rows } = await db.query('SELECT image FROM entity_types WHERE id = $1', [entityTypeId]);
+    const key = rows[0] && rows[0].image;
+    if (!key) return null;
+    try {
+      const chunks = [];
+      for await (const chunk of await store.getObjectStream(key)) chunks.push(chunk);
+      return Buffer.concat(chunks);
+    } catch (err) {
+      if (err && (err.code === 'NoSuchKey' || err.code === 'NotFound')) return null;
+      throw err;
+    }
+  }
+
   // Polls a box job to done. While the box job is `queued` (behind other
   // users' jobs on the shared box) neither the stall window nor the run
   // deadline runs: both restart on every queued poll, so they start at the
@@ -178,14 +194,20 @@ function createDispatcher({
   // (the edit's VAE round trip re-renders the whole image and is unreliable).
   // No sheet job, so nothing to attach or resume: a re-run redoes the txt2img.
   // The raw cutout is stored as concept.png, the trimmed one as image.png.
+  // When the entity already has an image (its latest approved art) that image
+  // is the prop: a fresh txt2img would draw something unrelated to it.
   async function executeProp(provider, row, prefix) {
-    const gen = must(await box.txt2imgProp(provider, { prompt: propPrompt(row.base_prompt), seed: Number(row.seed) }));
-    const gate = checkCutout(gen.png);
-    if (gate) throw new Error(gate);
+    let png = await existingEntityImage(row.entity_type_id);
+    if (!png) {
+      const gen = must(await box.txt2imgProp(provider, { prompt: propPrompt(row.base_prompt), seed: Number(row.seed) }));
+      const gate = checkCutout(gen.png);
+      if (gate) throw new Error(gate);
+      png = gen.png;
+    }
     const conceptKey = `${prefix}concept.png`;
-    await store.putObject(conceptKey, gen.png, 'image/png');
+    await store.putObject(conceptKey, png, 'image/png');
     const imageKey = `${prefix}image.png`;
-    await store.putObject(imageKey, trimForStorage(gen.png, 'object').buffer, 'image/png');
+    await store.putObject(imageKey, trimForStorage(png, 'object').buffer, 'image/png');
     await queue.complete(db, row.id, {
       image_key: imageKey, concept_key: conceptKey, atlas_key: null, manifest_key: null, sheet_seconds: null,
     });

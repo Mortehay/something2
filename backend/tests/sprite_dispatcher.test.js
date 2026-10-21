@@ -33,9 +33,32 @@ function fakeQueue(rows) {
   };
 }
 
-function fakeStore() {
+// `objects` are what getObjectStream can read; any other key throws the way
+// MinIO does for a missing object.
+function fakeStore(objects = {}) {
   const puts = [];
-  return { puts, BUCKET: () => 'sprites', putObject: async (key, buf, type) => { puts.push({ key, buf, type }); } };
+  return {
+    puts,
+    BUCKET: () => 'sprites',
+    putObject: async (key, buf, type) => { puts.push({ key, buf, type }); },
+    getObjectStream: async (key) => {
+      if (!objects[key]) throw Object.assign(new Error('The specified key does not exist.'), { code: 'NoSuchKey' });
+      return [objects[key]];
+    },
+  };
+}
+
+// entity_types.image by id; anything else has no image.
+function fakeDb(images = {}) {
+  const queries = [];
+  return {
+    queries,
+    query: async (sql, params) => {
+      queries.push({ sql, params });
+      const image = images[params[0]];
+      return { rows: image ? [{ image }] : [] };
+    },
+  };
 }
 
 // A box fake. `statuses` is the sequence getSheetJob walks through (the last
@@ -88,7 +111,7 @@ function timedBox({ queuedMs, runningMs = 0, ...over }) {
 function dispatcherFor({ rows, box = fakeBox(), store = fakeStore(), provider = PROVIDER, ...opts }) {
   const queue = fakeQueue(rows);
   const d = createDispatcher({
-    db: {}, queue, box, store, loadProvider: async () => provider, pollMs: 0, ...opts,
+    db: fakeDb(), queue, box, store, loadProvider: async () => provider, pollMs: 0, ...opts,
   });
   return { d, queue, box, store };
 }
@@ -479,4 +502,49 @@ test('prop row: an undecodable png gets no opinion from the gate and is stored a
   await d.start();
   assert.deepEqual(queue.log.failed, []);
   assert.deepEqual(store.puts[1].buf, odd);
+});
+
+// The entity's current image is the latest approved art. A prop is one static
+// image, so when that image exists it IS the sprite: no fresh txt2img, which
+// would draw something unrelated to what was approved in Art Generation.
+test('prop row: reuses the entity\'s current image instead of a fresh txt2img', async () => {
+  const box = propBox();
+  const db = fakeDb({ 12: 'sprites/objects/pine_tree/rmt_last/static.png' });
+  const store = fakeStore({ 'sprites/objects/pine_tree/rmt_last/static.png': GOOD_PNG });
+  const { d, queue } = dispatcherFor({ rows: [treeRow()], box, db, store });
+  await d.start();
+
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.t2i.length, 0, 'no box call when the entity has an image');
+  assert.equal(db.queries.length, 1);
+  assert.deepEqual(db.queries[0].params, [12]);
+  const prefix = 'sprites/Pine_Tree/row-t/';
+  assert.deepEqual(store.puts.map((p) => p.key), [`${prefix}concept.png`, `${prefix}image.png`]);
+  assert.deepEqual(store.puts[0].buf, GOOD_PNG, 'concept.png is the entity image as stored');
+  const img = decodeRGBA(store.puts[1].buf);
+  assert.ok(img.width < 100 && img.height < 160, `trimmed: ${img.width}x${img.height}`);
+  assert.deepEqual(queue.log.completed, [{
+    id: 'row-t',
+    result: { image_key: `${prefix}image.png`, concept_key: `${prefix}concept.png`, atlas_key: null, manifest_key: null, sheet_seconds: null },
+  }]);
+});
+
+test('prop row: an image key whose object is gone falls back to txt2img', async () => {
+  const box = propBox();
+  const db = fakeDb({ 12: 'sprites/objects/pine_tree/deleted/static.png' });
+  const { d, queue, store } = dispatcherFor({ rows: [treeRow()], box, db });
+  await d.start();
+
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.t2i.length, 1);
+  assert.deepEqual(store.puts[0].buf, GOOD_PNG);
+});
+
+test('prop row: an entity with no image takes the txt2img path', async () => {
+  const box = propBox();
+  const { d, queue } = dispatcherFor({ rows: [treeRow()], box });
+  await d.start();
+
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.t2i.length, 1);
 });
