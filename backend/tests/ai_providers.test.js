@@ -391,3 +391,21 @@ test('POST /api/ai-providers/:id/test probes the audio API for an audio provider
     assert.strictEqual(rootHit, false, 'the audio Test route must not probe the base_url root at all');
     assert.doesNotMatch(JSON.stringify(res.body), /sk_secret_token/, 'the token must never leave the process');
   });
+
+// --- Unified provider kinds ----------------------------------------------
+
+test('provider kinds: image_edit, adapter, models_by_group and text model rules', () => {
+  const b = { name: 'a', base_url: 'http://x' };
+  assert.equal(providerFieldError({ ...b, modality: 'image_edit' }), null);
+  assert.equal(providerFieldError({ ...b, modality: 'text', model: '' }), 'a text provider needs a model');
+  assert.equal(providerFieldError({ ...b, modality: 'text', model: '', enabled: false }), null);
+  assert.match(providerFieldError({ ...b, modality: 'audio', adapter: 'nope' }), /adapter must be one of/);
+  assert.match(providerFieldError({ ...b, modality: 'audio', models_by_group: { jazz: 'x' } }), /unknown audio group 'jazz'/);
+  assert.match(providerFieldError({ ...b, modality: 'audio', models_by_group: { music: 3 } }), /must be a string/);
+  assert.match(providerFieldError({ ...b, modality: 'image', models_by_group: { music: 'x' } }), /only an audio provider/);
+  assert.equal(providerFieldError({ ...b, modality: 'audio', models_by_group: { music: 'm' }, adapter: 'box' }), null);
+  // PATCH: only an explicit blank model on a text row is rejected.
+  assert.equal(providerFieldError({ model: '' }, { partial: true }), null);
+  assert.equal(providerFieldError({ modality: 'text', model: ' ' }, { partial: true }), 'a text provider needs a model');
+  assert.equal(providerFieldError({ modality: 'text', enabled: false }, { partial: true }), null);
+});

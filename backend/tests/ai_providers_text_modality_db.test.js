@@ -34,14 +34,14 @@ test('text modality providers', { skip }, async (t) => {
   });
 
   const created = await request(app).post('/api/ai-providers').set('Authorization', auth)
-    .send({ name: tag, base_url: `http://127.0.0.1:${box.address().port}`, modality: 'text', auth_token: 'k' });
+    .send({ name: tag, base_url: `http://127.0.0.1:${box.address().port}`, modality: 'text', model: 'qwen-instruct', auth_token: 'k' });
   assert.equal(created.status, 201, JSON.stringify(created.body));
   assert.equal(created.body.modality, 'text');
 
   const bad = await request(app).post('/api/ai-providers').set('Authorization', auth)
     .send({ name: `${tag}-bad`, base_url: 'http://x', modality: 'video' });
   assert.equal(bad.status, 400);
-  assert.match(bad.body.error, /'image', 'audio', 'text' or 'sprite'/);
+  assert.match(bad.body.error, /modality must be one of image, audio, text, sprite, image_edit/);
 
   const refreshed = await request(app).post(`/api/ai-providers/${created.body.id}/refresh-models`).set('Authorization', auth);
   assert.deepEqual({ ok: refreshed.body.ok, models: refreshed.body.models }, { ok: true, models: ['qwen-instruct'] });

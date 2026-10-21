@@ -61,7 +61,7 @@ test('sprite modality providers', { skip }, async (t) => {
   const bad = await request(app).post('/api/ai-providers').set('Authorization', auth)
     .send({ name: `${tag}-bad`, base_url: 'http://x', modality: 'video' });
   assert.equal(bad.status, 400);
-  assert.match(bad.body.error, /'image', 'audio', 'text' or 'sprite'/);
+  assert.match(bad.body.error, /modality must be one of image, audio, text, sprite, image_edit/);
 
   const tested = await request(app).post(`/api/ai-providers/${created.body.id}/test`).set('Authorization', auth);
   assert.equal(tested.body.ok, true, JSON.stringify(tested.body));
