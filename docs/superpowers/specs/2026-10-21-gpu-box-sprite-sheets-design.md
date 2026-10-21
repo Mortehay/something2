@@ -357,14 +357,14 @@ and its sway row has an opaque backdrop (pose library is humanoid-oriented, as
 expected). Warrior rows `ne` and `n` keep an opaque white backdrop (~69 % opaque
 pixels vs ~25 % in the other rows), so those facings would draw as a white box.
 
-## Props v2 — static image + procedural sway (user-approved 2026-10-21)
+## Props v2 — static image + procedural idle effect (user-approved 2026-10-21; idle_fx 2026-10-21)
 
 **Why.** The box's sheet builder animates every action (sway included) through human poses, so prop
 sheets (trees, towers, chests) came back with a person drawn in, even from a person-free concept. The
 box's `generate_core` also appends "one character alone, full body, standing" to every concept prompt,
 so a prop concept itself contains a person. The box's `/api/edit` (Qwen-Image-Edit-2511) removes it
-cleanly and keeps transparency. Decision: props = one clean static image + procedural wind sway in the
-game renderer. Creatures, classes and appearance variants keep box sheets unchanged.
+cleanly and keeps transparency. Decision: props = one clean static image + a procedural idle effect
+(none / sway / shine) in the game renderer. Creatures, classes and appearance variants keep box sheets unchanged.
 
 **Box contract (`/api/edit`).** `POST /api/edit`, form-urlencoded `source` (basename under the box's
 `images/`, e.g. `core_<hex>.png`) + `instruction`; `steps`/`cfg_scale` are never sent (box defaults:
@@ -378,22 +378,41 @@ exactly like `generate_core`; SUCCESS → `result {url:"/images/edit_<hex>.png",
   one task poll (`pollTaskImage`) with `generateConcept`.
 - Dispatcher, `generation_kind = 'object'` rows: concept → `editImage(source = basename of the concept
   path, instruction = "Remove any person or character. Keep only the <subject>, unchanged, on the same
-  plain background.")` → stores `<prefix>/concept.png` (raw) and `<prefix>/image.png` (edited) →
+  plain background.")` → stores `<prefix>/concept.png` (raw) and `<prefix>/image.png` (edited, trimmed to
+  its opaque content with the Art pipeline's `remoteImageProvider.trimForStorage(buf, 'object')` — the
+  edit keeps the concept's canvas, and untrimmed the prop drew at ~45% of its box with the sway pivot in
+  empty space) →
   completes with `image_key` = image, `concept_key` = concept, no atlas/manifest, `sheet_seconds` NULL.
   No sheet job is ever created for a prop (a stale `box_job_id` is ignored). An edit failure fails the
   row with the box's words (including the 503 "disabled" text).
-- Enqueue: actions are still validated against the box catalog; for a prop the stored actions mean only
-  "sway ∈ actions → sways in game". The page estimates a prop as 1 cell whatever the actions/frames.
+- Enqueue: `POST /jobs` takes `prop_fx: 'none'|'sway'|'shine'` (default none, 400 otherwise), stored as
+  `sprite_sets.prop_fx` on prop rows only (NULL on creature rows); `/subjects` returns it. Actions are
+  still validated against the box catalog but mean nothing for a prop (backend default prop actions:
+  `['idle']`). The page estimates a prop as 1 cell.
 - Approve (gpu-box `object` row with no sheet): `entity_types.image = image_key, sprite = NULL,
-  render_mode = 'static', sway = ('sway' = ANY(actions))`. Migration `1714440824000_entity_types_sway`
-  adds `entity_types.sway boolean NOT NULL DEFAULT false`. A box prop finished before Props v2 (it has a
-  sheet) still approves as an animated sheet. Legacy/local approve paths unchanged.
-- Client: `/api/map/config` entityTypes carry `sway`; decorations (`collectDecorations`) and world
-  points (`pointBodyRef`) spread the catalog def, so `drawEntity` → `_drawEntityArt` sees it. The static
-  image path shears about the image's bottom-centre: `translate(base) · transform(1,0,k,1,0,0) ·
-  translate(-base)` inside save/restore, `k = 0.035·sin(2πt/2.8 s + phase)`, phase from a stable hash of
-  the entity's world position (`systems/sway.js`). It composes with the camera transform — never
-  `setTransform`.
-- Sprite Generation page: prop rows show Concept (raw) + Result (edited) thumbnails; the preview shows
-  "Used image" (raw concept) beside "Result" (edited) with a CSS skewX ±2° sway (origin bottom) when sway
-  is on and "Sways in game: yes/no". The Sway (Wind) checkbox hints "props: sway in the game (no sheet)".
+  render_mode = 'static', idle_fx = prop_fx` (NULL/unknown → none). Migration
+  `1714440824000_entity_types_idle_fx` (the unmerged sway migration rewritten in place) adds
+  `entity_types.idle_fx text NOT NULL DEFAULT 'none' CHECK (idle_fx IN ('none','sway','shine'))` and
+  `sprite_sets.prop_fx text` with the same CHECK. A box prop finished before Props v2 (it has a sheet)
+  still approves as an animated sheet. Legacy/local approve paths unchanged. Entity-type POST/PUT accept
+  `idle_fx` (400 on anything else; PUT leaves it alone when omitted); the entity editor has an "Idle
+  effect" select. Seed sync carries `idle_fx` on the ART slice.
+- Client: `/api/map/config` entityTypes carry `idle_fx`; decorations (`collectDecorations`) and world
+  points (`pointBodyRef`) spread the catalog def, so `drawEntity` → `_drawEntityArt` sees it.
+  - `sway`: the static image path shears about the image's bottom-centre: `translate(base) ·
+    transform(1,0,k,1,0,0) · translate(-base)` inside save/restore, `k = 0.035·sin(2πt/2.8 s + phase)`,
+    phase from a stable hash of the entity's world position (`systems/sway.js`). It composes with the
+    camera transform — never `setTransform`.
+  - `shine`: the image draws normally; `shineBand(t, phase)` (`systems/shine.js`, same position hash) is
+    null except for a 0.6 s sweep every 4.5 s. Only then: on a scratch canvas (one per 64-px size
+    bucket) clear → draw the cached mask (the image drawn once per (image, size)) → `source-in` → fill a
+    45° linear-gradient band at the current offset; then onto the scene in the image's rect with
+    `lighter` at `globalAlpha × 0.4`, inside save/restore. No allocation per frame, nothing extra drawn
+    while idle, no `setTransform`.
+  - Pick/hover/minimap ignore `idle_fx` (the inspect hit-box ignores the sway shear, ≤7 px at peak).
+- Sprite Generation page: actions/frames apply to creatures only; a props-only selection hides them. A
+  selection containing props shows a "Prop effect" select (None default / Sway / Shine) sent as
+  `prop_fx`. Prop rows show Concept (raw) + Result (edited) thumbnails and "effect: …" in the Actions
+  column; the preview shows "Used image" beside "Result" with a CSS preview of the chosen effect (sway =
+  skewX ±2° about the base; shine = a gradient sweep masked by the same image URL via
+  `mask-image`/`-webkit-mask-image`) and "Effect on approve: Sway/Shine/None".
