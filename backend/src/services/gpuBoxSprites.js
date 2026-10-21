@@ -89,18 +89,37 @@ async function checkAuth(provider, { fetchImpl = fetch } = {}) {
 
 const isQwen = (m) => /qwen/i.test(String(m && m.value || ''));
 
+// The box's available concept models (GET /api/core-models), Qwen first and
+// the box UI's default first among those -- the order the provider's Model
+// dropdown shows them in. Each entry is the raw roster row.
+async function conceptModels(provider, { fetchImpl = fetch } = {}) {
+  const r = await callJson(provider, 'GET', '/api/core-models', { fetchImpl });
+  if (!r.ok) return r;
+  const rank = (m) => (isQwen(m) ? (m.ui_default ? 0 : 1) : 2);
+  const models = (Array.isArray(r.json && r.json.models) ? r.json.models : [])
+    .filter((m) => m && typeof m.value === 'string' && m.available !== false)
+    .map((m, i) => ({ m, i }))
+    .sort((a, b) => rank(a.m) - rank(b.m) || a.i - b.i)
+    .map(({ m }) => m);
+  return { ok: true, models };
+}
+
+// For the provider's Refresh button: plain model ids for models_cache.
+async function listConceptModels(provider, opts = {}) {
+  const r = await conceptModels(provider, opts);
+  return r.ok ? { ok: true, models: r.models.map((m) => m.value) } : r;
+}
+
 // The concept model when the provider names none. The box's API default is
 // SDXL + pixel-art LoRA, which the user rejected (its concepts feed the Qwen
 // sheet builder badly); the box's own web UI defaults to Qwen-Image. So: the
 // UI default if it is an available Qwen model, else any available Qwen model,
 // else refuse -- never silently fall back to SDXL.
-async function resolveConceptModel(provider, { fetchImpl = fetch } = {}) {
+async function resolveConceptModel(provider, opts = {}) {
   if (provider.model) return { ok: true, model: provider.model };
-  const r = await callJson(provider, 'GET', '/api/core-models', { fetchImpl });
+  const r = await conceptModels(provider, opts);
   if (!r.ok) return r;
-  const qwen = (Array.isArray(r.json && r.json.models) ? r.json.models : [])
-    .filter((m) => m && m.available !== false && isQwen(m));
-  const pick = qwen.find((m) => m.ui_default) || qwen[0];
+  const pick = r.models.find(isQwen);
   if (!pick) return { ok: false, error: 'GPU box has no available Qwen concept model (GET /api/core-models)', providerFault: true };
   return { ok: true, model: pick.value };
 }
@@ -204,5 +223,5 @@ async function fetchAtlas(provider, boxJobId, { fetchImpl = fetch } = {}) {
 }
 
 module.exports = {
-  STATUS_TERMINAL, actionCatalog, checkAuth, generateConcept, createSheetJob, getSheetJob, fetchSheet, fetchAtlas,
+  STATUS_TERMINAL, actionCatalog, checkAuth, listConceptModels, generateConcept, createSheetJob, getSheetJob, fetchSheet, fetchAtlas,
 };

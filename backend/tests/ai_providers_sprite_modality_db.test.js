@@ -25,6 +25,15 @@ test('sprite modality providers', { skip }, async (t) => {
       if (req.headers.authorization !== `Bearer ${boxKey.current}`) { res.statusCode = 401; return res.end('{"detail":"bad key"}'); }
       return res.end('[]');
     }
+    if (req.url === '/api/core-models') {
+      if (req.headers.authorization !== `Bearer ${boxKey.current}`) { res.statusCode = 401; return res.end('{"detail":"bad key"}'); }
+      return res.end(JSON.stringify({ models: [
+        { value: 'stabilityai/stable-diffusion-xl-base-1.0+nerijs/pixel-art-xl', default: true, available: true },
+        { value: 'gguf:qwen-image-2512-Q2_K+lightning8', ui_default: true, available: true },
+        { value: 'gguf:Qwen-Image-2512-Q3_K_M', available: true },
+        { value: 'gone-model', available: false },
+      ] }));
+    }
     if (req.url === '/api/action-catalog') {
       return res.end(JSON.stringify({ actions: Array.from({ length: 7 }, (_, i) => ({ name: `a${i}` })) }));
     }
@@ -71,8 +80,15 @@ test('sprite modality providers', { skip }, async (t) => {
 
   const refreshed = await request(app).post(`/api/ai-providers/${created.body.id}/refresh-models`).set('Authorization', auth);
   assert.equal(refreshed.status, 200);
-  assert.equal(refreshed.body.ok, false);
-  assert.match(refreshed.body.error, /no model list/);
+  assert.equal(refreshed.body.ok, true, JSON.stringify(refreshed.body));
+  // Available concept models only, the box's Qwen UI default first.
+  assert.deepEqual(refreshed.body.models, [
+    'gguf:qwen-image-2512-Q2_K+lightning8',
+    'gguf:Qwen-Image-2512-Q3_K_M',
+    'stabilityai/stable-diffusion-xl-base-1.0+nerijs/pixel-art-xl',
+  ]);
+  const cached = await pool.query('SELECT models_cache FROM ai_providers WHERE id = $1', [created.body.id]);
+  assert.deepEqual(cached.rows[0].models_cache, refreshed.body.models);
 
   // single active per modality: a second sprite provider takes over, image untouched.
   const second = await request(app).post('/api/ai-providers').set('Authorization', auth)

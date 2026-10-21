@@ -2986,9 +2986,13 @@ app.post('/api/ai-providers/:id/refresh-models', adminGuard, async (req, res) =>
       await aiProviders.saveModelsCache(pool, id, r.models);
       return res.json({ ok: true, models: r.models });
     }
-    // The sprite box has an action catalog, not a model list.
+    // A sprite provider's models are the box's CONCEPT models (the sheet
+    // builder's model is fixed by the box). Blank model = the box's Qwen default.
     if (provider.modality === 'sprite') {
-      return res.json({ ok: false, error: 'a sprite provider has no model list to refresh', status: null });
+      const r = await gpuBoxSprites.listConceptModels(provider);
+      if (!r.ok) return res.json({ ok: false, error: r.error, status: r.status ?? null });
+      await aiProviders.saveModelsCache(pool, id, r.models);
+      return res.json({ ok: true, models: r.models });
     }
     const result = await providerDiscovery.fetchModels(provider);
     if (!result.ok) {

@@ -137,6 +137,16 @@ export function validateProviderForm(form) {
 // Warns about a template that will produce the same picture every time, or no
 // picture at all. Not an error -- a fixed prompt is legal, just almost never
 // what the admin meant, and the entity's own prompt would be ignored.
+// The sprite provider's Model dropdown. Blank means "let the box pick its Qwen
+// concept model" (gpuBoxSprites.resolveConceptModel) -- the box's own API
+// default is SDXL, which is never used implicitly. A saved model the box no
+// longer lists stays selectable, so opening the form cannot silently change it.
+export function spriteModelOptions(models, current) {
+  const values = [...(models || [])];
+  if (current && !values.includes(current)) values.push(current);
+  return [{ value: '', label: 'Box default (Qwen)' }, ...values.map((v) => ({ value: v, label: v }))];
+}
+
 export function templateWarning(text) {
   const parsed = parseTemplate(text);
   if (parsed.error) return null;

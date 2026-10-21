@@ -8,6 +8,7 @@ import {
 import {
   providerToForm, providerFormToPayload, validateProviderForm,
   parseTemplate, templateWarning, PLACEHOLDERS,
+  spriteModelOptions,
 } from './providerForm.js';
 import AdminLoading from './AdminLoading.jsx';
 
@@ -153,7 +154,9 @@ function ProviderCard({ provider, isOnlyActive }) {
       ) : isSprite ? (
         <Hint>
           Generates sprite sheets on the Sprite Generation page (jobs and concept art on the box).
-          Test connection reads the box's action catalog and reports how many actions it offers.
+          Concept model: the image each sheet is built from. Box default picks the box's Qwen-Image
+          model (never SDXL); Refresh models lists what the box offers. The sheet itself is always
+          drawn by the box's Qwen-Image-Edit. Test connection checks the key and the action catalog.
         </Hint>
       ) : isText ? (
         <Hint>
@@ -235,7 +238,7 @@ function ProviderCard({ provider, isOnlyActive }) {
       )}
 
       <Row>
-        <Label>{isAudio ? 'Styles' : isText ? 'Models' : isSprite ? 'Box' : 'Model'}</Label>
+        <Label>{isAudio ? 'Styles' : isText ? 'Models' : isSprite ? 'Concept model' : 'Model'}</Label>
         {isAudio ? (
           // The audio adapter never reads `model` -- the style is chosen per
           // subject by propose -- so there is nothing to pick here. models_cache
@@ -246,7 +249,10 @@ function ProviderCard({ provider, isOnlyActive }) {
               : 'refresh to list styles and cues'}
           </Hint>
         ) : isSprite ? (
-          <Hint style={{ margin: 0 }}>no model list — use Test connection to check the box</Hint>
+          // The CONCEPT model; the sheet builder's model is fixed by the box.
+          <Select value={form.model} onChange={e => set('model', e.target.value)}>
+            {spriteModelOptions(models, form.model).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </Select>
         ) : isText ? (
           // The text adapter never reads `model` either -- the box's gateway
           // picks and loads one of its listed models on demand -- so this is
@@ -262,7 +268,7 @@ function ProviderCard({ provider, isOnlyActive }) {
         ) : (
           <Input value={form.model} onChange={e => set('model', e.target.value)} placeholder="refresh to list models" />
         )}
-        {!isNew && !isSprite && (
+        {!isNew && (
           <Button
             $bg="var(--s2-surface-raised)"
             onClick={() => refresh.mutate({ id: provider.id }, {
