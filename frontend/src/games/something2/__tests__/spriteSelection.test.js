@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   filterSpriteSubjects, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   targetsForSprites, framesCap, cellCount, estimateLabel, defaultActionsFor, rowLabels,
+  isBoxProp, propSways, actionHint,
 } from '../spriteSelection.js';
 import { PAGE_SIZE } from '../artSelection.js';
 
@@ -91,12 +92,31 @@ describe('sprite console action controls', () => {
     expect(framesCap(catalog, [])).toBe(8);
   });
 
-  it('cellCount gives props one facing', () => {
+  it('cellCount: a prop is one edit (1 cell) whatever the actions and frames', () => {
     const creature = { is_creature: true };
     const prop = { is_creature: false };
     expect(cellCount([creature], ['idle', 'sway'], 4)).toBe(64);
-    expect(cellCount([prop], ['idle', 'sway'], 4)).toBe(8);
-    expect(cellCount([creature, prop], ['idle'], 2)).toBe(18);
+    expect(cellCount([prop], ['idle', 'sway'], 4)).toBe(1);
+    expect(cellCount([prop], ['idle'], 1)).toBe(1);
+    expect(cellCount([creature, prop], ['idle'], 2)).toBe(17);
+  });
+
+  it('isBoxProp: a GPU-box object row without a sheet (Props v2)', () => {
+    expect(isBoxProp({ backend: 'gpu-box', generation_kind: 'object', image_key: 'i.png' })).toBe(true);
+    expect(isBoxProp({ backend: 'gpu-box', generation_kind: 'object', atlas_key: 'old-sheet.png' })).toBe(false);
+    expect(isBoxProp({ backend: 'gpu-box', generation_kind: 'creature' })).toBe(false);
+    expect(isBoxProp({ backend: 'local', generation_kind: 'object', image_key: 'i.png' })).toBe(false);
+  });
+
+  it('propSways follows the queued actions', () => {
+    expect(propSways({ actions: ['idle', 'sway'] })).toBe(true);
+    expect(propSways({ actions: ['idle'] })).toBe(false);
+    expect(propSways({ actions: null })).toBe(false);
+  });
+
+  it('actionHint explains what sway means for props', () => {
+    expect(actionHint('sway')).toBe('props: sway in the game (no sheet)');
+    expect(actionHint('idle')).toBe(null);
   });
 
   it('estimateLabel formats 336 cells at 22 s', () => {

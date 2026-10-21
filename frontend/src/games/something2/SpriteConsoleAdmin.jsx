@@ -8,7 +8,7 @@ import {
   useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
 } from './useSpriteConsole.js';
 import {
-  cellCount, defaultActionsFor, estimateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
+  actionHint, cellCount, defaultActionsFor, isBoxProp, estimateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   spriteShape, targetsForSprites, toggleSpriteSubject,
 } from './spriteSelection.js';
 
@@ -185,6 +185,7 @@ function SpriteConsoleAdmin() {
                 <input type="checkbox" checked={actions.includes(action.id)}
                   onChange={() => toggleAction(action.id)} />
                 {action.label}
+                {actionHint(action.id) && <small style={{ color: 'var(--s2-text-muted)' }}>({actionHint(action.id)})</small>}
               </Check>
             ))}
           </span>
@@ -229,7 +230,7 @@ function SpriteConsoleAdmin() {
             <th><input type="checkbox" aria-label="Select this page"
               checked={isSpritePageSelected(selected, shown.rows)}
               onChange={(event) => setSelected(setSpritePageSelected(selected, shown.rows, event.target.checked))} /></th>
-            <th>Concept</th><th>Sheet</th><th>Entity</th><th>Shape</th><th>Actions</th><th>Frames</th><th>Backend</th><th>Status</th><th>Prompt</th>
+            <th>Concept</th><th>Sheet / Result</th><th>Entity</th><th>Shape</th><th>Actions</th><th>Frames</th><th>Backend</th><th>Status</th><th>Prompt</th>
           </tr></thead>
           <tbody>
             {shown.rows.map((subject) => {
@@ -244,7 +245,7 @@ function SpriteConsoleAdmin() {
                   <td><input type="checkbox" checked={selected.has(subject.id)}
                     onChange={() => setSelected(toggleSpriteSubject(selected, subject.id))} /></td>
                   <td>{thumb(subject.concept_key, 'Preview concept')}</td>
-                  <td>{thumb(sheet, 'Preview sheet')}</td>
+                  <td>{thumb(sheet, isBoxProp(subject) ? 'Preview result' : 'Preview sheet')}</td>
                   <td>{subject.name}</td>
                   <td><Pill>{spriteShape(subject)}</Pill></td>
                   <td>{Array.isArray(subject.actions) && subject.actions.length ? subject.actions.join(' · ') : '—'}</td>

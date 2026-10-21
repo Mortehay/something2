@@ -67,7 +67,7 @@ export function isSpritePageSelected(selected, pageRows) {
 
 // --- Box action catalog helpers ---------------------------------------------
 
-const FACINGS = { directional: 8, flat: 1 };
+const FACINGS = { directional: 8 };
 
 export function framesCap(catalog, actions) {
   const caps = (catalog?.actions || [])
@@ -76,8 +76,31 @@ export function framesCap(catalog, actions) {
   return caps.length ? Math.min(...caps) : catalog?.max_frames ?? 1;
 }
 
+// A flat prop is one edit on the box (Props v2: concept -> person removed ->
+// one static image, swayed by the game), so it counts as 1 cell whatever the
+// actions and frames; a creature is a sheet of facings x actions x frames.
 export function cellCount(rows, actions, frames) {
-  return rows.reduce((sum, row) => sum + FACINGS[spriteShape(row)] * actions.length * frames, 0);
+  return rows.reduce(
+    (sum, row) => sum + (spriteShape(row) === 'flat' ? 1 : FACINGS.directional * actions.length * frames),
+    0,
+  );
+}
+
+// A GPU-box prop row made the Props v2 way: one edited image, no sheet. A box
+// prop done before Props v2 still carries a sheet (atlas_key) and previews as one.
+export function isBoxProp(subject) {
+  return subject?.backend === 'gpu-box' && subject?.generation_kind === 'object' && !subject?.atlas_key;
+}
+
+// For a prop the queued actions are not drawn; 'sway' among them means the
+// prop sways in game (approve sets entity_types.sway from it).
+export function propSways(subject) {
+  return Array.isArray(subject?.actions) && subject.actions.includes('sway');
+}
+
+const ACTION_HINTS = { sway: 'props: sway in the game (no sheet)' };
+export function actionHint(id) {
+  return ACTION_HINTS[id] ?? null;
 }
 
 export function estimateLabel(cells, secondsPerCell) {

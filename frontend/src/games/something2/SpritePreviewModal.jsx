@@ -1,11 +1,13 @@
 // Preview popup for one sprite subject: concept image (left) beside the
 // generated sheet at x2 (right), every sheet row labelled from sheet.json.
+// A GPU-box prop (Props v2) has no sheet: the right side is the edited image
+// (person removed), previewed with the in-game sway when the prop sways.
 import { useState } from 'react';
-import styled from 'styled-components';
+import styled, { keyframes } from 'styled-components';
 import { useQuery } from '@tanstack/react-query';
 import { Modal, Muted } from './seedUi.jsx';
 import { assetUrl, assetUrlVersioned } from './useTileSprites.js';
-import { rowLabels } from './spriteSelection.js';
+import { isBoxProp, propSways, rowLabels } from './spriteSelection.js';
 
 const Cols = styled.div`display: flex; gap: 1.2rem; align-items: flex-start; flex-wrap: wrap; margin-top: 0.8rem;`;
 const Col = styled.div`display: flex; flex-direction: column; gap: 0.4rem; min-width: 0;`;
@@ -18,6 +20,17 @@ const Img = styled.img`
 `;
 const Rows = styled.ul`margin: 0; padding-left: 1.2rem; list-style: none; font-size: 0.85rem; color: var(--s2-text-muted);`;
 const Links = styled.div`display: flex; gap: 1rem; font-size: 0.9rem;`;
+// The CSS stand-in for the renderer's shear (systems/sway.js): about the base,
+// 2.8 s period, ~±2° (atan 0.035).
+const swayKeys = keyframes`
+  0%, 100% { transform: skewX(-2deg); }
+  50% { transform: skewX(2deg); }
+`;
+const SwayImg = styled(Img)`
+  transform-origin: bottom center;
+  &[data-sway='on'] { animation: ${swayKeys} 2.8s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) { &[data-sway='on'] { animation: none; } }
+`;
 
 function useSheetManifest(key, enabled) {
   return useQuery({
@@ -32,6 +45,23 @@ function useSheetManifest(key, enabled) {
 }
 
 const fileName = (key) => String(key).split('/').pop();
+
+function PropResult({ subject, version }) {
+  const sways = propSways(subject);
+  return (
+    <Col>
+      <strong>Result</strong>
+      {subject.image_key ? (
+        <SwayImg src={assetUrlVersioned(subject.image_key, version)} alt="Result"
+          data-sway={sways ? 'on' : 'off'} />
+      ) : <Muted>No result yet</Muted>}
+      <Muted>{`Sways in game: ${sways ? 'yes' : 'no'}`}</Muted>
+      {subject.image_key && (
+        <Links><a href={assetUrl(subject.image_key)} download>Download image PNG</a></Links>
+      )}
+    </Col>
+  );
+}
 
 export default function SpritePreviewModal({ subject, onClose }) {
   const [size, setSize] = useState(null);
@@ -56,6 +86,7 @@ export default function SpritePreviewModal({ subject, onClose }) {
             </>
           ) : <Muted>No concept image</Muted>}
         </Col>
+        {isBoxProp(subject) ? <PropResult subject={subject} version={version} /> : (
         <Col>
           <strong>Sheet (×2)</strong>
           {sheetKey ? (
@@ -71,6 +102,7 @@ export default function SpritePreviewModal({ subject, onClose }) {
             {subject.manifest_key && <a href={assetUrl(subject.manifest_key)} download>Download sheet.json</a>}
           </Links>
         </Col>
+        )}
       </Cols>
     </Modal>
   );
