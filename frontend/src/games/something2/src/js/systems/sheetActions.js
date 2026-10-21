@@ -36,12 +36,14 @@ export function isBoxManifest(m) {
   return Boolean(m && Array.isArray(m.rows) && m.rows.length);
 }
 
-// action -> dir -> frame count, built once per manifest object.
+// Per-manifest entry, built once: `byAction` is action -> dir -> frame count;
+// `timings` is the lazily computed {attackDurMs, castDurMs, damageMs} for the
+// fps in `timingsFps`.
 const indexCache = new WeakMap();
-function rowIndex(manifest) {
-  let idx = indexCache.get(manifest);
-  if (idx) return idx;
-  idx = new Map();
+function entryFor(manifest) {
+  let entry = indexCache.get(manifest);
+  if (entry) return entry;
+  const idx = new Map();
   for (const r of manifest.rows) {
     if (!r || typeof r.action !== "string" || typeof r.direction !== "string") continue;
     const n = Number(r.frames);
@@ -50,22 +52,47 @@ function rowIndex(manifest) {
     if (!byDir) { byDir = new Map(); idx.set(r.action, byDir); }
     byDir.set(r.direction, Math.floor(n));
   }
-  indexCache.set(manifest, idx);
-  return idx;
+  entry = { byAction: idx, timings: null, timingsFps: NaN };
+  indexCache.set(manifest, entry);
+  return entry;
 }
+const rowIndex = (manifest) => entryFor(manifest).byAction;
 
-// Frames in one cycle of `action` (the longest of its rows); 0 when absent.
-export function actionFrameCount(manifest, action) {
-  if (!isBoxManifest(manifest)) return 0;
-  const byDir = rowIndex(manifest).get(action);
+function countIn(idx, action) {
+  const byDir = idx.get(action);
   if (!byDir) return 0;
   let n = 0;
   for (const c of byDir.values()) if (c > n) n = c;
   return n;
 }
 
+// Frames in one cycle of `action` (the longest of its rows); 0 when absent.
+export function actionFrameCount(manifest, action) {
+  if (!isBoxManifest(manifest)) return 0;
+  return countIn(rowIndex(manifest), action);
+}
+
 export function actionDurationMs(manifest, action, fps = DEFAULT_FPS) {
   return (actionFrameCount(manifest, action) / fps) * 1000;
+}
+
+const NO_TIMINGS = Object.freeze({ attackDurMs: 0, castDurMs: 0, damageMs: 0 });
+
+// {attackDurMs, castDurMs, damageMs} for a manifest, cached on the manifest's
+// index entry (recomputed only if a different fps is asked for). The returned
+// object is shared: do not mutate it.
+export function actionTimings(manifest, fps = DEFAULT_FPS) {
+  if (!isBoxManifest(manifest)) return NO_TIMINGS;
+  const entry = entryFor(manifest);
+  if (entry.timings && entry.timingsFps === fps) return entry.timings;
+  const idx = entry.byAction;
+  entry.timings = {
+    attackDurMs: (countIn(idx, "attack") / fps) * 1000,
+    castDurMs: (countIn(idx, "cast") / fps) * 1000,
+    damageMs: countIn(idx, "damage") > 0 ? DAMAGE_MS : 0,
+  };
+  entry.timingsFps = fps;
+  return entry.timings;
 }
 
 // The direction of `byDir` closest to `dir`, or null. Ties go to the next
@@ -91,10 +118,13 @@ function frameIndex(n, startedAt, now, fps, loop) {
   return f < 0 ? 0 : (f >= n ? n - 1 : f);
 }
 
-// The frame key to draw, or null (the caller then uses staticFrameKey).
-// Fallbacks: action+dir -> action at the nearest dir -> idle+dir -> idle at
-// the nearest dir -> null. An idle fallback loops, as idle always does.
-export function actionFrameKey(manifest, { dir, action, startedAt, now, fps = DEFAULT_FPS, loop } = {}) {
+// Positional core of actionFrameKey (no options literal): the renderer's hot
+// path. `loop` is derived from the action. Returns the key or null.
+export function frameKeyFor(manifest, dir, action, startedAt, now, fps) {
+  return keyFor(manifest, dir, action, startedAt, now, fps, undefined);
+}
+
+function keyFor(manifest, dir, action, startedAt, now, fps, loop) {
   if (!isBoxManifest(manifest)) return null;
   const idx = rowIndex(manifest);
   let useAction = action;
@@ -110,9 +140,18 @@ export function actionFrameKey(manifest, { dir, action, startedAt, now, fps = DE
   return `${useAction}/${d}/${frameIndex(n, startedAt, now, fps, looped)}`;
 }
 
+// The frame key to draw, or null (the caller then uses staticFrameKey).
+// Fallbacks: action+dir -> action at the nearest dir -> idle+dir -> idle at
+// the nearest dir -> null. An idle fallback loops, as idle always does.
+export function actionFrameKey(manifest, { dir, action, startedAt, now, fps = DEFAULT_FPS, loop } = {}) {
+  return keyFor(manifest, dir, action, startedAt, now, fps, loop);
+}
+
 const at = (v) => (Number.isFinite(v) ? v : -Infinity);
 
-// What an actor is doing at `now`, and the time its animation clock started.
+// What an actor is doing at `now`: returns the action name and writes it, and
+// the time its animation clock started, to `state.action` / `state.actionStartedAt`
+// (the anim record itself, so a steady actor allocates nothing).
 // state: { moving?, movingUntil?, attackAt?, castAt?, hitAt?, attackDurMs?,
 //          castDurMs?, damageMs? (default 300), phase? }.
 // Priority: damage > (the more recent of cast/attack) > walk > idle. Loops
@@ -121,14 +160,20 @@ export function pickAction(state, now) {
   const s = state || {};
   const hitAt = at(s.hitAt);
   const damageMs = Number.isFinite(s.damageMs) ? s.damageMs : DAMAGE_MS;
-  if (now - hitAt < damageMs) return { action: "damage", startedAt: hitAt };
+  if (now - hitAt < damageMs) return set(s, "damage", hitAt);
   const attackAt = at(s.attackAt);
   const castAt = at(s.castAt);
   const attacking = now - attackAt < (s.attackDurMs || 0);
   const casting = now - castAt < (s.castDurMs || 0);
-  if (casting && (!attacking || castAt >= attackAt)) return { action: "cast", startedAt: castAt };
-  if (attacking) return { action: "attack", startedAt: attackAt };
+  if (casting && (!attacking || castAt >= attackAt)) return set(s, "cast", castAt);
+  if (attacking) return set(s, "attack", attackAt);
   const phase = Number.isFinite(s.phase) ? s.phase : 0;
   const moving = s.moving === true || now < at(s.movingUntil);
-  return { action: moving ? "walk" : "idle", startedAt: phase };
+  return set(s, moving ? "walk" : "idle", phase);
+}
+
+function set(s, action, startedAt) {
+  s.action = action;
+  s.actionStartedAt = startedAt;
+  return action;
 }

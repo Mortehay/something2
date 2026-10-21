@@ -33,7 +33,7 @@ import {
 import { rarityGlowColor, withAlpha } from "../core/rarityColors.js";
 import { artIcon, drawIconFit } from "./gameArt.js";
 import { swayShear, swayPhaseSeed } from "./sway.js";
-import { boxDir, isBoxManifest, actionFrameKey, actionFrameCount, actionDurationMs, pickAction, DAMAGE_MS } from "./sheetActions.js";
+import { boxDir, isBoxManifest, frameKeyFor, actionTimings, pickAction, DEFAULT_FPS } from "./sheetActions.js";
 import { shineBand, shineGeometry, SHINE_ALPHA } from "./shine.js";
 import {
   rarityBorderColor, affixLine, clipToWidth, rowTextOffsets, AFFIX_FONT_PX, itemIcon,
@@ -3499,11 +3499,12 @@ export class RenderSystem {
     anim.observePosition(animKey, entity.x, entity.y, now, entity.tx, entity.ty);
     const st = anim.stateFor(animKey);
     if (!st) return null; // non-finite position: never tracked
-    st.attackDurMs = actionDurationMs(manifest, "attack");
-    st.castDurMs = actionDurationMs(manifest, "cast");
-    st.damageMs = actionFrameCount(manifest, "damage") > 0 ? DAMAGE_MS : 0;
-    const { action, startedAt } = pickAction(st, now);
-    return actionFrameKey(manifest, { dir: boxDir(entity.facing), action, startedAt, now });
+    const t = actionTimings(manifest, DEFAULT_FPS);
+    st.attackDurMs = t.attackDurMs;
+    st.castDurMs = t.castDurMs;
+    st.damageMs = t.damageMs;
+    const action = pickAction(st, now);
+    return frameKeyFor(manifest, boxDir(entity.facing), action, st.actionStartedAt, now, DEFAULT_FPS);
   }
 
   _drawWorldBoss(e, drawX, drawY, w, h, s) {

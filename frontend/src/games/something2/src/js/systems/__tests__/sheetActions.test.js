@@ -1,6 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   boxDir, isBoxManifest, actionFrameKey, actionFrameCount, actionDurationMs, pickAction,
+  frameKeyFor, actionTimings, DEFAULT_FPS,
 } from "../sheetActions.js";
 
 // A box sheet.json: `actions` x `dirs`, `n` frames each, rects from the grid.
@@ -154,55 +155,106 @@ describe("actionFrameKey", () => {
   });
 });
 
+// Old object-shaped view over the in-place pickAction.
+function pick(state, now) {
+  const rec = { ...state };
+  const action = pickAction(rec, now);
+  return { action, startedAt: rec.actionStartedAt };
+}
+
 describe("pickAction", () => {
   const base = { attackDurMs: 500, castDurMs: 750, phase: 37 };
 
   it("is idle when nothing happened, started at the entity's phase", () => {
-    expect(pickAction({ ...base }, 1000)).toEqual({ action: "idle", startedAt: 37 });
+    expect(pick({ ...base }, 1000)).toEqual({ action: "idle", startedAt: 37 });
   });
 
   it("is walk while moving, on the same stable phase", () => {
-    expect(pickAction({ ...base, moving: true }, 1000)).toEqual({ action: "walk", startedAt: 37 });
-    expect(pickAction({ ...base, movingUntil: 1100 }, 1000)).toEqual({ action: "walk", startedAt: 37 });
-    expect(pickAction({ ...base, movingUntil: 1000 }, 1000).action).toBe("idle");
+    expect(pick({ ...base, moving: true }, 1000)).toEqual({ action: "walk", startedAt: 37 });
+    expect(pick({ ...base, movingUntil: 1100 }, 1000)).toEqual({ action: "walk", startedAt: 37 });
+    expect(pick({ ...base, movingUntil: 1000 }, 1000).action).toBe("idle");
   });
 
   it("plays attack for one cycle from the event, then returns to walk/idle", () => {
     const s = { ...base, moving: true, attackAt: 1000 };
-    expect(pickAction(s, 1000)).toEqual({ action: "attack", startedAt: 1000 });
-    expect(pickAction(s, 1499)).toEqual({ action: "attack", startedAt: 1000 });
-    expect(pickAction(s, 1500).action).toBe("walk");
+    expect(pick(s, 1000)).toEqual({ action: "attack", startedAt: 1000 });
+    expect(pick(s, 1499)).toEqual({ action: "attack", startedAt: 1000 });
+    expect(pick(s, 1500).action).toBe("walk");
   });
 
   it("plays cast for its own duration", () => {
     const s = { ...base, castAt: 1000 };
-    expect(pickAction(s, 1749)).toEqual({ action: "cast", startedAt: 1000 });
-    expect(pickAction(s, 1750).action).toBe("idle");
+    expect(pick(s, 1749)).toEqual({ action: "cast", startedAt: 1000 });
+    expect(pick(s, 1750).action).toBe("idle");
   });
 
   it("does not play an action the sheet lacks (duration 0)", () => {
-    expect(pickAction({ ...base, castDurMs: 0, castAt: 1000 }, 1000).action).toBe("idle");
+    expect(pick({ ...base, castDurMs: 0, castAt: 1000 }, 1000).action).toBe("idle");
   });
 
   it("damage wins over attack, cast and walk for 300 ms", () => {
     const s = { ...base, moving: true, attackAt: 1000, castAt: 1000, hitAt: 1050 };
-    expect(pickAction(s, 1100)).toEqual({ action: "damage", startedAt: 1050 });
-    expect(pickAction(s, 1349)).toEqual({ action: "damage", startedAt: 1050 });
+    expect(pick(s, 1100)).toEqual({ action: "damage", startedAt: 1050 });
+    expect(pick(s, 1349)).toEqual({ action: "damage", startedAt: 1050 });
     // after the flinch, the still-running attack/cast resumes on ITS clock
-    expect(pickAction(s, 1350).action).toBe("cast");
-    expect(pickAction(s, 1350).startedAt).toBe(1000);
+    expect(pick(s, 1350).action).toBe("cast");
+    expect(pick(s, 1350).startedAt).toBe(1000);
   });
 
   it("honours a caller damage window (0 = the sheet has no damage rows)", () => {
-    expect(pickAction({ ...base, hitAt: 1000, damageMs: 0 }, 1000).action).toBe("idle");
+    expect(pick({ ...base, hitAt: 1000, damageMs: 0 }, 1000).action).toBe("idle");
   });
 
   it("the more recent of attack and cast wins when both are running", () => {
-    expect(pickAction({ ...base, attackAt: 1000, castAt: 1100 }, 1200)).toEqual({ action: "cast", startedAt: 1100 });
-    expect(pickAction({ ...base, attackAt: 1100, castAt: 1000 }, 1200)).toEqual({ action: "attack", startedAt: 1100 });
+    expect(pick({ ...base, attackAt: 1000, castAt: 1100 }, 1200)).toEqual({ action: "cast", startedAt: 1100 });
+    expect(pick({ ...base, attackAt: 1100, castAt: 1000 }, 1200)).toEqual({ action: "attack", startedAt: 1100 });
   });
 
   it("treats missing timestamps as never", () => {
-    expect(pickAction({}, 0)).toEqual({ action: "idle", startedAt: 0 });
+    expect(pick({}, 0)).toEqual({ action: "idle", startedAt: 0 });
+  });
+});
+
+describe("actionTimings (per-manifest cache)", () => {
+  it("returns the same object each call, with attack/cast/damage values", () => {
+    const m = sheet(["idle", "attack", "damage"], ["s"], 6);
+    const t = actionTimings(m);
+    expect(t).toBe(actionTimings(m));
+    expect(t.attackDurMs).toBe(750);
+    expect(t.castDurMs).toBe(0);
+    expect(t.damageMs).toBe(300);
+    expect(actionTimings(sheet(["idle"], ["s"])).damageMs).toBe(0);
+  });
+
+  it("computes once per manifest: repeat calls do not re-walk the rows", () => {
+    const m = sheet(["idle", "attack"], ["s"], 6);
+    actionTimings(m);
+    const spy = vi.spyOn(Map.prototype, "values");
+    for (let i = 0; i < 50; i += 1) actionTimings(m);
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+});
+
+describe("pickAction on an existing record", () => {
+  it("writes action/actionStartedAt into the record and returns the action string", () => {
+    const rec = { attackAt: 1000, attackDurMs: 500, phase: 3 };
+    const r1 = pickAction(rec, 1100);
+    expect(r1).toBe("attack");
+    expect(rec.action).toBe("attack");
+    expect(rec.actionStartedAt).toBe(1000);
+    expect(pickAction(rec, 2000)).toBe("idle");
+    expect(rec.actionStartedAt).toBe(3);
+  });
+});
+
+describe("frameKeyFor", () => {
+  it("matches actionFrameKey for the same inputs", () => {
+    const m = sheet(["idle", "walk", "attack"], ALL, 4);
+    for (const action of ["idle", "walk", "attack", "cast"]) {
+      expect(frameKeyFor(m, "e", action, 100, 460, DEFAULT_FPS))
+        .toBe(actionFrameKey(m, { dir: "e", action, startedAt: 100, now: 460 }));
+    }
+    expect(frameKeyFor(null, "e", "idle", 0, 0, DEFAULT_FPS)).toBe(null);
   });
 });

@@ -6,14 +6,16 @@
 // One record per actor, mutated in place: a steady actor allocates nothing
 // per frame. Times are on RenderSystem.nowMs's clock (performance.now).
 
+import { DAMAGE_MS } from "./sheetActions.js";
+
 // 0.01 tile (MAP_TILE_SIZE = 100 world px): below this, a position change is
 // reconciliation jitter, not walking.
 export const MOVE_EPS_PX = 1;
 // Creatures arrive at ~5 Hz; holding 'moving' bridges the gap between frames
 // where the interpolated position has caught up with its target.
 export const MOVING_HOLD_MS = 150;
-// Half the 300 ms damage window (sheetActions DAMAGE_MS); see noteHit.
-export const HIT_MERGE_MS = 150;
+// The whole damage window (sheetActions DAMAGE_MS); see noteHit.
+export const HIT_MERGE_MS = DAMAGE_MS;
 // A swing/cast still playing is not restarted by a repeat send; when the
 // sheet's duration is unknown (0) this is how long it is left alone.
 export const MIN_RESTART_MS = 250;
@@ -75,8 +77,8 @@ export class EntityAnimState {
   }
 
   // One hit reaches the client twice -- the world-state impact and the hp
-  // drop on the next creatures/state frame -- so a hit inside the first half
-  // of a flinch already showing keeps its clock rather than restarting it.
+  // drop on the next creatures/state frame (~5 Hz, so up to ~200 ms later) --
+  // so a hit inside the flinch already showing keeps its clock.
   noteHit(key, now) {
     const r = this._rec(key);
     if (now - r.hitAt < HIT_MERGE_MS) return;
@@ -142,7 +144,7 @@ export function noteFrameEvents(anim, msg, now, localUserId, tracked) {
   };
   if (Array.isArray(msg.attacks)) {
     for (const e of msg.attacks) {
-      if (!e || e.b === true) continue;
+      if (!e) continue;
       const key = keyOf(e.a);
       if (!key) continue;
       const isCast = Number.isFinite(e.arc) && e.arc >= FULL_CIRCLE;
@@ -152,7 +154,9 @@ export function noteFrameEvents(anim, msg, now, localUserId, tracked) {
   }
   if (Array.isArray(msg.impacts)) {
     for (const e of msg.impacts) {
-      const key = e && keyOf(e.t);
+      // A blocked impact (authority/vfx blockedImpact) carries no damage.
+      if (!e || e.b === true) continue;
+      const key = keyOf(e.t);
       if (key) anim.noteHit(key, now);
     }
   }

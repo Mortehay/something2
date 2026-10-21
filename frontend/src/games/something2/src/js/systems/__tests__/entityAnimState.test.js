@@ -100,8 +100,15 @@ describe("EntityAnimState.noteHit does not restart a flinch already showing", ()
     s.noteHit("c:1", 1000);   // impact on the world-state frame
     s.noteHit("c:1", 1100);   // the same hit's hp drop on the creatures frame
     expect(s.stateFor("c:1").hitAt).toBe(1000);
-    s.noteHit("c:1", 1150);   // a genuinely new hit
-    expect(s.stateFor("c:1").hitAt).toBe(1150);
+    s.noteHit("c:1", 1300);   // a genuinely new hit, flinch over
+    expect(s.stateFor("c:1").hitAt).toBe(1300);
+  });
+
+  it("merges a creature hp drop arriving ~200 ms late (5 Hz frame) into the impact", () => {
+    const s = new EntityAnimState();
+    s.noteHit("c:1", 1000);
+    s.noteHit("c:1", 1200);
+    expect(s.stateFor("c:1").hitAt).toBe(1000);
   });
 });
 
@@ -133,8 +140,14 @@ describe("noteFrameEvents", () => {
   it("ignores refused attacks and junk actors", () => {
     const s = new EntityAnimState();
     noteFrameEvents(s, frame({ attacks: [
-      { a: "c:5", arc: 1.2, b: true }, { a: null }, { a: "x:1" }, null, { a: 5 },
+      { a: null }, { a: "x:1" }, null, { a: 5 },
     ] }), 500, "1");
+    expect(s.size).toBe(0);
+  });
+
+  it("skips blocked impacts (b:true carries no damage)", () => {
+    const s = new EntityAnimState();
+    noteFrameEvents(s, frame({ impacts: [{ t: "c:5", b: true }] }), 700, "1");
     expect(s.size).toBe(0);
   });
 
