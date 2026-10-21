@@ -75,7 +75,7 @@
   - `every non-empty-floor biome gets at least one feature type that spawns on its terrain`. This closes the "listed but never spawns" gap. Walls/chasm/water floors don't count.
   - `every spawn_tiles entry names a real tile type`. Read names from `backend/seeds/data` tile-type seed, or hard-code the 50 names listed in the spec's DB dump if no seed module exports them.
   - `every type has a non-empty prompt built with styleEntityPrompt`. Cover prompts describe a flat, low object.
-  - Content: the spec's catalogue table (section "Scenery catalogue") is the starting list. Cover sizes are 16–32 px; feature sizes follow existing trees/rocks.
+  - Content: both catalogue tables in the spec (section "Scenery catalogue": the base table plus the "+5 per biome group" table, ~93 types) are the starting list. Cover sizes are 16–32 px; feature sizes follow existing trees/rocks.
 
 - [ ] **Step 2: Run** `cd backend && node --test tests/scenery_catalog.test.js`. Expected: FAIL (module not found).
 

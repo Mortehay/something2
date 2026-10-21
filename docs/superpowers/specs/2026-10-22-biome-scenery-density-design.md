@@ -211,6 +211,27 @@ New types to add (all walk-through unless marked ■ blocking). Names indicative
 | Cavern, Umbral Warren, Hive Warrens | stalagmite ■, Stone ■ | cave_pebbles, glowworm_moss, small_stalagmite |
 | Abyssal Rift, Dreaming Dark, The Maw, Pestilent Deep, Shattered Vault | void_crystal ■ | void_motes_rock, chaos_shards, plague_pustule, dream_wisp_stone |
 
+**Plus five more per biome group (user's request).** Mostly walk-through, so
+the overall feel stays mostly walkable. ■ = blocking; all others walk-through.
+
+| Biome group | +5 |
+|---|---|
+| Meadow, Highlands | dandelions, tall_grass_clump, lavender_patch, mole_hill, berry_bush |
+| Deep Forest, Verdant Jungle | tree_stump, fallen_log ■, vines_patch, pinecones, jungle_flowers |
+| Arid Dunes, Storm Coast | sandstone_rock ■, tumbleweed, desert_flower, seashells, beach_grass |
+| Frozen Waste, Frostvault, Crystal Hollows | frozen_shrub, icicle_cluster, snowdrift, frozen_bones, blue_crystal_shards |
+| Mire, Gloomfen, Fungal Deep, Blightworks | swamp_log ■, mossy_stump, cattails, toadstools, bog_lily |
+| Ashfields, Emberdepths, Infernal Gate, Sunken Foundry | burnt_shrub, scorched_bones, lava_crack, obsidian_shard, sulfur_vent |
+| Catacombs, Ossuary, Deepvault, Fallen Sanctum, Grave of Titans, Sunken Ruins, Sunken Cistern | tombstone ■, fallen_statue_head, broken_urn, cobwebs, rusty_chains |
+| Cavern, Umbral Warren, Hive Warrens | crystal_vein_rock ■, cave_mushrooms, dripping_puddle, hive_resin, small_loose_rocks |
+| Abyssal Rift, Dreaming Dark, The Maw, Pestilent Deep, Shattered Vault | floating_rune_stone, void_tendrils, shattered_glass, rotting_spores, dream_lilies |
+
+Totals: each biome group gains 9–12 new types (roughly 11–16 scenery kinds per
+biome including existing ones). That is about **93 new types**, so about 93
+pictures to generate. Within a group, a type spawns only where its
+`spawn_tiles` meet that biome's floors (seashells and driftwood on the coast,
+not the dunes), so biomes in one group still differ.
+
 Every new type's `spawn_tiles` lists the floors of the biomes that use it, so
 the "listed but never spawns" gap closes. Existing types gain the missing floors
 where they fit (e.g. Stone on cave_floor and cobblestone).
