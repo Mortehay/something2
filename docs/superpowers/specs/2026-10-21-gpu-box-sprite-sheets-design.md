@@ -356,3 +356,44 @@ UI estimate before queueing: "16 cells · ~15 min" and "4 cells · ~4 min" (seed
 and its sway row has an opaque backdrop (pose library is humanoid-oriented, as
 expected). Warrior rows `ne` and `n` keep an opaque white backdrop (~69 % opaque
 pixels vs ~25 % in the other rows), so those facings would draw as a white box.
+
+## Props v2 — static image + procedural sway (user-approved 2026-10-21)
+
+**Why.** The box's sheet builder animates every action (sway included) through human poses, so prop
+sheets (trees, towers, chests) came back with a person drawn in, even from a person-free concept. The
+box's `generate_core` also appends "one character alone, full body, standing" to every concept prompt,
+so a prop concept itself contains a person. The box's `/api/edit` (Qwen-Image-Edit-2511) removes it
+cleanly and keeps transparency. Decision: props = one clean static image + procedural wind sway in the
+game renderer. Creatures, classes and appearance variants keep box sheets unchanged.
+
+**Box contract (`/api/edit`).** `POST /api/edit`, form-urlencoded `source` (basename under the box's
+`images/`, e.g. `core_<hex>.png`) + `instruction`; `steps`/`cfg_scale` are never sent (box defaults:
+4-step Lightning, cfg 1.0). Answers `{status:"queued", task_id}`, polled through `/api/task-status/{id}`
+exactly like `generate_core`; SUCCESS → `result {url:"/images/edit_<hex>.png", transparent: 0..1}`.
+503 `{error, enable_with:"EDIT_ENABLED=1"}` when editing is disabled. Same same-origin check on
+`result.url` as the concept. ~60 s warm, ~170 s cold.
+
+**Pipeline.**
+- `gpuBoxSprites.editImage(provider, {source, instruction})` → `{ok, path, png, transparent}`; shares
+  one task poll (`pollTaskImage`) with `generateConcept`.
+- Dispatcher, `generation_kind = 'object'` rows: concept → `editImage(source = basename of the concept
+  path, instruction = "Remove any person or character. Keep only the <subject>, unchanged, on the same
+  plain background.")` → stores `<prefix>/concept.png` (raw) and `<prefix>/image.png` (edited) →
+  completes with `image_key` = image, `concept_key` = concept, no atlas/manifest, `sheet_seconds` NULL.
+  No sheet job is ever created for a prop (a stale `box_job_id` is ignored). An edit failure fails the
+  row with the box's words (including the 503 "disabled" text).
+- Enqueue: actions are still validated against the box catalog; for a prop the stored actions mean only
+  "sway ∈ actions → sways in game". The page estimates a prop as 1 cell whatever the actions/frames.
+- Approve (gpu-box `object` row with no sheet): `entity_types.image = image_key, sprite = NULL,
+  render_mode = 'static', sway = ('sway' = ANY(actions))`. Migration `1714440824000_entity_types_sway`
+  adds `entity_types.sway boolean NOT NULL DEFAULT false`. A box prop finished before Props v2 (it has a
+  sheet) still approves as an animated sheet. Legacy/local approve paths unchanged.
+- Client: `/api/map/config` entityTypes carry `sway`; decorations (`collectDecorations`) and world
+  points (`pointBodyRef`) spread the catalog def, so `drawEntity` → `_drawEntityArt` sees it. The static
+  image path shears about the image's bottom-centre: `translate(base) · transform(1,0,k,1,0,0) ·
+  translate(-base)` inside save/restore, `k = 0.035·sin(2πt/2.8 s + phase)`, phase from a stable hash of
+  the entity's world position (`systems/sway.js`). It composes with the camera transform — never
+  `setTransform`.
+- Sprite Generation page: prop rows show Concept (raw) + Result (edited) thumbnails; the preview shows
+  "Used image" (raw concept) beside "Result" (edited) with a CSS skewX ±2° sway (origin bottom) when sway
+  is on and "Sways in game: yes/no". The Sway (Wind) checkbox hints "props: sway in the game (no sheet)".
