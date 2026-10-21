@@ -432,8 +432,8 @@ function startDrain(db, opts = {}) {
   // box (or a person in its UI) may have moved the card since, and a switch
   // to the model already active is only the box re-pinning it. `learned` is the model a refusal named for a
   // drain group ("requested X, but Y holds the card"), which then overrides
-  // GATEWAY_MODEL_FOR_GROUP for that group -- it covers the groups with no
-  // map entry (the sfx engines) and a map entry gone stale. `refusalSwitch`
+  // the provider row's models_by_group entry for that group -- it covers the
+  // groups with no entry (the sfx engines) and an entry gone stale. `refusalSwitch`
   // is the model the drain already switched to because of a refusal and has
   // not seen a success since: a second refusal for it takes the ordinary
   // busy path (attempt refunded, backoff, pause) instead of switching again,
@@ -441,6 +441,17 @@ function startDrain(db, opts = {}) {
   let settledModel = null;
   const learned = {};
   let refusalSwitch = null;
+  // One warning per (group, learned model) per drain when a refusal-learned
+  // model replaces a different configured one.
+  const warnedOverrides = new Set();
+  function warnLearnedOverride(provider, group, model) {
+    const configured = provider && provider.models_by_group && provider.models_by_group[group];
+    if (!configured || model === configured || learned[group] !== model) return;
+    const key = `${group}|${model}`;
+    if (warnedOverrides.has(key)) return;
+    warnedOverrides.add(key);
+    console.warn(`audio drain: ${group} is configured for ${configured} but the box asked for ${model}; using ${model}`);
+  }
   let pendingSwitch = null;
 
   // Make `model` the box's model. True once it is (or once the box answered
@@ -846,7 +857,8 @@ function startDrain(db, opts = {}) {
       settledModel = null; // a group boundary always switches (see settledModel)
       for (;;) {
         if (self.stopping) return 'stopped';
-        const model = learned[group] || rap.GATEWAY_MODEL_FOR_GROUP[group];
+        const model = rap.modelForGroup(switchProv, group, learned);
+        warnLearnedOverride(switchProv, group, model);
         // eslint-disable-next-line no-await-in-loop
         if (!(await ensureModel(model, switchProv))) return 'stopped';
         // eslint-disable-next-line no-await-in-loop

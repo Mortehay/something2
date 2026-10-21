@@ -300,3 +300,13 @@ test('isGatewayRefusal recognises the gateway refusal text, whatever carried it'
   assert.equal(rap.isGatewayRefusal('switch pending'), false);
   assert.equal(rap.isGatewayRefusal(undefined), false);
 });
+
+test('modelForGroup: a model learned from a refusal wins, then the provider row, else null', () => {
+  assert.equal(rap.modelForGroup({ models_by_group: { music: 'audio:x' } }, 'music', { music: 'audio:y' }), 'audio:y');
+  assert.equal(rap.modelForGroup({ models_by_group: { music: 'audio:x' } }, 'music', {}), 'audio:x');
+  assert.equal(rap.modelForGroup({ models_by_group: { music: 'audio:x' } }, 'music'), 'audio:x');
+  assert.equal(rap.modelForGroup({ models_by_group: {} }, 'music', { music: 'audio:y' }), 'audio:y');
+  assert.equal(rap.modelForGroup(null, 'music', {}), null);
+  assert.equal(rap.modelForGroup({ models_by_group: { music: '' } }, 'music', {}), null);
+  assert.equal(rap.modelForGroup({ models_by_group: { music: 'audio:x' } }, 'ambience', {}), null);
+});
