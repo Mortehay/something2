@@ -33,6 +33,7 @@ import {
 import { rarityGlowColor, withAlpha } from "../core/rarityColors.js";
 import { artIcon, drawIconFit } from "./gameArt.js";
 import { swayShear, swayPhaseSeed } from "./sway.js";
+import { boxDir, isBoxManifest, actionFrameKey, actionFrameCount, actionDurationMs, pickAction, DAMAGE_MS } from "./sheetActions.js";
 import { shineBand, shineGeometry, SHINE_ALPHA } from "./shine.js";
 import {
   rarityBorderColor, affixLine, clipToWidth, rowTextOffsets, AFFIX_FONT_PX, itemIcon,
@@ -159,6 +160,9 @@ export class RenderSystem {
     // Global render-mode override (dev toggle). null = use each entity's own
     // renderMode; a mode string forces every entity to that mode.
     this.renderModeOverride = null;
+    // SOMET-656: per-actor animation timing (systems/entityAnimState.js), set
+    // by Game. null = box sheets show their static frame, as before.
+    this.entityAnim = null;
     this.tileTexturesOff = false;
     this._tileCache = new TileDiamondCache();
     // SOMET-445: creature level tags, rasterised once per distinct string.
@@ -219,6 +223,23 @@ export class RenderSystem {
 
   // Pure, canvas-free: collect every world object into one list tagged with a
   // depth key, sorted back-to-front for the painter's algorithm.
+  // SOMET-656: the EntityAnimState key of a drawable's actor, or null for
+  // anything that does not play actions (decorations, props, point art).
+  // "entity" drawables are the creature list (see render()).
+  static animKeyFor(d) {
+    if (d.kind === "player") return "self";
+    if (d.kind === "remote") return d.userId != null ? `p:${d.userId}` : null;
+    if (d.kind === "entity") return d.ref && d.ref.id != null ? `c:${d.ref.id}` : null;
+    return null;
+  }
+
+  // SOMET-656: the anim state to play box-sheet actions with, or null. A
+  // 'static' or 'rect' global override (the dev toggle) freezes playback.
+  _playbackAnim() {
+    const o = this.renderModeOverride;
+    return o === "static" || o === "rect" ? null : this.entityAnim;
+  }
+
   static buildDrawables(player, map, remotePlayers) {
     const out = [];
     const entities = (map && map.entities) || [];
@@ -513,8 +534,8 @@ export class RenderSystem {
     for (const d of drawables) {
       if (d.kind === "wall") {
         drawWall(this.ctx, { s: d.s, def: d.def, visual: d.visual, H: d.H, alpha: 1, halfW, halfH, tileCache: this._tileCache });
-      } else if (d.kind === "player") this.drawCreature(d.ref, d.ref.imageKey || "player", 1);
-      else if (d.kind === "remote") this.drawCreature(d.ref, d.ref.imageKey || "player", 0.85, d.userId);
+      } else if (d.kind === "player") this.drawCreature(d.ref, d.ref.imageKey || "player", 1, null, "self");
+      else if (d.kind === "remote") this.drawCreature(d.ref, d.ref.imageKey || "player", 0.85, d.userId, RenderSystem.animKeyFor(d));
       else if (d.kind === "grounditem") this.drawGroundItem(d.ref, inventory, player);
       else if (d.kind === "merchant") this.drawMerchant(d.ref, player);
       else if (d.kind === "gem_merchant") this.drawGemMerchant(d.ref, player);
@@ -524,7 +545,7 @@ export class RenderSystem {
       else if (d.kind === "worldchest") this.drawWorldChest(d.ref, player);
       else if (d.kind === "pointart") this.drawPointBody(d.ref.def, d.ref.x, d.ref.y, d.ref.treatment);
       else if (d.kind === "decoration") this.drawEntity(d.ref);
-      else this.drawEntity(d.ref);
+      else this.drawEntity(d.ref, RenderSystem.animKeyFor(d));
     }
 
     // SOMET-584 review round 2 (T9 finding A). The pre-sort drawLandmarks call
@@ -3380,7 +3401,8 @@ export class RenderSystem {
   }
 
   // Draw a sprite so its feet sit on the tile center for its world (x,y).
-  drawCreature(obj, imageKey, alpha = 1, tag = null) {
+  // `animKey` (SOMET-656): the actor's EntityAnimState key ('self', 'p:<id>').
+  drawCreature(obj, imageKey, alpha = 1, tag = null, animKey = null) {
     const w = obj.width || 64;
     const h = obj.height || 64;
     // Anchor: project the actor's world box CENTER — the exact point movement
@@ -3407,6 +3429,7 @@ export class RenderSystem {
     const img = this.imageManager.get(imageKey);
     const resolved = RenderSystem.resolveSprite(
       obj, this.imageManager, obj.renderMode || 'static', this.nowMs,
+      this._playbackAnim(), animKey,
     );
     this.ctx.globalAlpha = alpha;
     if (resolved) {
@@ -3440,11 +3463,20 @@ export class RenderSystem {
   // Resolve the atlas image + source-crop rect for an entity in a sprite mode,
   // or null to fall through. Requires a loaded atlas and an attached manifest.
   // Animated mode cycles the facing's frames at timeMs; static shows one frame.
-  static resolveSprite(entity, imageManager, mode, timeMs = 0) {
+  //
+  // SOMET-656: with `anim` (an EntityAnimState) and `animKey`, a GPU-box sheet
+  // (manifest with `rows`) plays the actor's current action -- idle, walk,
+  // attack, cast, damage -- in either sprite mode. Legacy atlases ignore both.
+  static resolveSprite(entity, imageManager, mode, timeMs = 0, anim = null, animKey = null) {
     if (mode === "rect" || !entity.sprite || !imageManager) return null;
     const atlas = imageManager.get(entity.sprite.atlas_key);
     const manifest = entity.sprite.manifest;
     if (!atlas || !manifest) return null;
+    if (anim && animKey && isBoxManifest(manifest) && !stateFrameKey(manifest, entity.stateKey)) {
+      const key = RenderSystem._actionKey(entity, manifest, timeMs, anim, animKey);
+      const rect = frameRect(manifest, key || staticFrameKey(entity.sprite, manifest));
+      return rect ? { img: atlas, crop: rect } : null;
+    }
     // Animated -> cycle the facing's frames; entity atlases generated through
     // the object/tile pipeline are FLAT (keys "0","1",… with no direction), so
     // fall back to the flat cycle before giving up on a single static frame.
@@ -3460,6 +3492,18 @@ export class RenderSystem {
       : staticFrameKey(entity.sprite, manifest));
     const rect = frameRect(manifest, key);
     return rect ? { img: atlas, crop: rect } : null;
+  }
+
+  // The box-sheet frame key for an actor's current action, or null.
+  static _actionKey(entity, manifest, now, anim, animKey) {
+    anim.observePosition(animKey, entity.x, entity.y, now, entity.tx, entity.ty);
+    const st = anim.stateFor(animKey);
+    if (!st) return null; // non-finite position: never tracked
+    st.attackDurMs = actionDurationMs(manifest, "attack");
+    st.castDurMs = actionDurationMs(manifest, "cast");
+    st.damageMs = actionFrameCount(manifest, "damage") > 0 ? DAMAGE_MS : 0;
+    const { action, startedAt } = pickAction(st, now);
+    return actionFrameKey(manifest, { dir: boxDir(entity.facing), action, startedAt, now });
   }
 
   _drawWorldBoss(e, drawX, drawY, w, h, s) {
@@ -3585,9 +3629,9 @@ export class RenderSystem {
   // the box passed in is an upper bound, not what a width-constrained sprite
   // actually fills -- see fitSpriteRect), or `false` when the caller must supply
   // its own fallback (a rectangle, or a boss's procedural body).
-  _drawEntityArt(e, drawX, drawY, w, h) {
+  _drawEntityArt(e, drawX, drawY, w, h, animKey = null) {
     const mode = RenderSystem.resolveRenderMode(e, this.renderModeOverride);
-    const sprite = RenderSystem.resolveSprite(e, this.imageManager, mode, this.nowMs);
+    const sprite = RenderSystem.resolveSprite(e, this.imageManager, mode, this.nowMs, this._playbackAnim(), animKey);
     if (sprite) {
       const [sx, sy, sw, sh] = sprite.crop;
       // SOMET-569: the FRAME's dimensions decide the fit, not the atlas's.
@@ -3696,7 +3740,7 @@ export class RenderSystem {
     return scratch;
   }
 
-  drawEntity(e) {
+  drawEntity(e, animKey = null) {
     // SOMET-603: `bossTier` is the ONE boss flag; no name matching.
     const isBoss = Boolean(e.bossTier);
     const fallback = isBoss ? 96 : 40;
@@ -3716,7 +3760,7 @@ export class RenderSystem {
     this._drawAuraEffects(s.x, drawY + h, e.auras);
 
     if (isBoss) {
-      const artH = this._drawEntityArt(e, drawX, drawY, w, h);
+      const artH = this._drawEntityArt(e, drawX, drawY, w, h, animKey);
       if (!artH) this._drawWorldBoss(e, drawX, drawY, w, h, s);
       this._drawBossPlate(e, drawX, drawY, w, s);
       this._drawEffectPips(drawX, drawY, e.effects);
@@ -3726,7 +3770,7 @@ export class RenderSystem {
     // SOMET-588: the caller (drawPointBody, for a caption's lift) needs the
     // REAL drawn height, not this box -- a width-constrained sprite fits
     // shorter than `h` and leaves empty space above it inside the box.
-    const artH = this._drawEntityArt(e, drawX, drawY, w, h);
+    const artH = this._drawEntityArt(e, drawX, drawY, w, h, animKey);
     if (!artH) {
       // Degrade to a rectangle so a missing asset never leaves a hole.
       this.ctx.fillStyle = e.color || "#c0392b";
