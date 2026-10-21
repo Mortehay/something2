@@ -5092,6 +5092,7 @@
       {
         "display_height": 80,
         "display_width": 80,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Abyssor__the_Voidreaver.png",
           "sha256": "d2403839cac67316e6f9d316c7e48d043a89fe0807e82ea18c62fd290f44ac62"
@@ -5105,6 +5106,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Arcane_Elemental_Guard.png",
           "sha256": "46365c695ca7d861732707192ec3828593830d732488fe6c7b9a333ecd0220c4"
@@ -5118,6 +5120,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Archer.png",
           "sha256": "1ca252e2ae07bd0b591ef1851d2cb2f23dda248419cc7db370a6c683833e06db"
@@ -5131,6 +5134,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Bat.png",
           "sha256": "8f56fa31abe8e5fea3912d0f0eb25eaa4a48f536aedf04d06e20f44bb889848a"
@@ -5144,6 +5148,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Beast_Apex.png",
           "sha256": "00975b0bd3b88d83a3c41690396c6c17b6e50a64745633d164a45234c61acbc9"
@@ -5157,6 +5162,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Beast_Brute.png",
           "sha256": "af7d62391173719fe210d6a1efdccb8bb69f01d3933826a88e41a4dca8f8e505"
@@ -5170,6 +5176,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Beast_Caster.png",
           "sha256": "b339fa268517e2d221d547e37c87f39b7471cbc0423262d494722e03eac8e8cc"
@@ -5183,6 +5190,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Beast_Champion.png",
           "sha256": "463e8fa3d0b80b2fc91df14fe407b2bb30fb74b73993acfad2d7fb923287c99a"
@@ -5196,6 +5204,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Beast_Heavy.png",
           "sha256": "b23bc5c4972bf49027ae8c450b80e97024acbad0dba6825c0187b2cdb45df4ab"
@@ -5209,6 +5218,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Beast_Line.png",
           "sha256": "ee6dc254d73cdecd92eb0480775b2003ff76d4b652bd689eab325fd570f6c62f"
@@ -5222,6 +5232,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Beast_Miniboss.png",
           "sha256": "d27740777ef92e48e53cc4efa43d75e2bf03b4ae9f57eeae1d146fa09530c82b"
@@ -5235,6 +5246,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Beast_Ranged.png",
           "sha256": "4e0f00870d6363f84b9889a0330249107fc3baed1bfef96a9217698fe1c227ed"
@@ -5248,6 +5260,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Beast_Skirmisher.png",
           "sha256": "3b014cb1499ed1dc408712cdc49c7940eca0e157df0d32de88ba64e816bb8821"
@@ -5261,6 +5274,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Beast_Swarm.png",
           "sha256": "0f27de34b80a24d14bc72e38cbd0b386fa9a7b4cf17ff69f8b147c936191be42"
@@ -5274,6 +5288,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Blight_Apex.png",
           "sha256": "b79fb74eedd8bf1ed79bca957c9328102e601546bcdcab2f580880dae54074fc"
@@ -5287,6 +5302,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Blight_Brute.png",
           "sha256": "3f9c25ea635e8abfa2e0fbb8229cb66e9b53412af7e557da3523b4a47d67aa24"
@@ -5300,6 +5316,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Blight_Caster.png",
           "sha256": "08b474253be3c2a796b506dc9236b17c36dd03a08dd22b1fa4973bafd0144ca0"
@@ -5313,6 +5330,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Blight_Champion.png",
           "sha256": "d7ddebbcdbae073fc084b506f3c81d3358dd91fb8e9e1704e539989263de95b0"
@@ -5326,6 +5344,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Blight_Heavy.png",
           "sha256": "3fcce02149be157b5b71ca624cb13f1e2ee19b0969f9ba1669a442f11c7a12e8"
@@ -5339,6 +5358,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Blight_Line.png",
           "sha256": "8029afafaf993eaab8adb2b77a2b466976cac86e56481d56a15fb6580907123b"
@@ -5352,6 +5372,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Blight_Miniboss.png",
           "sha256": "91b4687146c03522e0df2372a0d40abdc06643c48447cd9296672a630c8ddfbb"
@@ -5365,6 +5386,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Blight_Ranged.png",
           "sha256": "dd0196aaaabe7e01d1896bb45baba057621e8df3f1c4e2b343750fca96db7cce"
@@ -5378,6 +5400,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Blight_Skirmisher.png",
           "sha256": "9b648138a76ee34afa76a6d3f794b79f676bf9d0cfa76366f09f9561f64701f2"
@@ -5391,6 +5414,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Blight_Swarm.png",
           "sha256": "c914ded6a80114cbfc42f532705a6ceb4e77ded0d412ccc129f7461917aad57d"
@@ -5404,6 +5428,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Bonelord_Apex.png",
           "sha256": "70a582693ed0edf8de045f6f2f15c5695d7ba40493e4b30ab433b8144075b84e"
@@ -5417,6 +5442,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Bonelord_Brute.png",
           "sha256": "26d5426deb6649ce86960aeb6a14d34ca1f0f2ef72854b4471d63ca9330e91fc"
@@ -5430,6 +5456,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Bonelord_Caster.png",
           "sha256": "ff16e5ce2c1f8d3ead2d45e9983f6193adef86379e955f472d8b588cb7437291"
@@ -5443,6 +5470,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Bonelord_Champion.png",
           "sha256": "ae4702d7e9464df6e2b4bdc4976850180e2e1ab5ff7e64c4e55a6a4e425784a2"
@@ -5456,6 +5484,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Bonelord_Heavy.png",
           "sha256": "d8ad149a9d33f46d9111270351e8560a812ba0532523984e94608cc813044867"
@@ -5469,6 +5498,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Bonelord_Line.png",
           "sha256": "6899262ea2f616481497695188569a2c7cb2ed25189251de66a552acfecb43f9"
@@ -5482,6 +5512,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Bonelord_Miniboss.png",
           "sha256": "b39efaea9d3c55da2aa200dd6809d642e85913b0eb651df0383c8d17373d0734"
@@ -5495,6 +5526,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Bonelord_Ranged.png",
           "sha256": "960a583409683ffa90c27ddd43f6edf57bd6b9adaced2b854fe6f80f1ee3d7c6"
@@ -5508,6 +5540,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Bonelord_Skirmisher.png",
           "sha256": "2de5930f2c33fdba9beb0305be7ba09d2ff61ca0a2c3396edde81b344fe202c4"
@@ -5521,6 +5554,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Bonelord_Swarm.png",
           "sha256": "29c215e2cca28a559ed45c366ae92913b91ce65fc9adf846cab23f4baae1f670"
@@ -5534,6 +5568,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Cave_Apex.png",
           "sha256": "57a8b5357d2d2817ea9e3c7d0d740d0c1fc88e24e420aa796bd81c90dcbe4114"
@@ -5547,6 +5582,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Cave_Brute.png",
           "sha256": "e64a49aadf729a04828958902a86572f4bd8c6a3b8e6794d51a99be104f2cee3"
@@ -5560,6 +5596,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Cave_Caster.png",
           "sha256": "404b22222f8125c3b47fb14cb35f80683d7a7a2d24b546fe6ba4b8a9f058edab"
@@ -5573,6 +5610,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Cave_Champion.png",
           "sha256": "8a02b0118bcac8d874af7b4910ed309ee375fa306a35e81fdb0bd6167dc33078"
@@ -5586,6 +5624,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Cave_Heavy.png",
           "sha256": "5538a491764cfaa4d6ea4bae05136d18a44cac7724241e7be07fd7495c099aaf"
@@ -5599,6 +5638,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Cave_Line.png",
           "sha256": "29ca75ebd915dea3c7049ddf845cb8b41cb4af4a7f660d0a7674a0e29f9e01f8"
@@ -5612,6 +5652,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Cave_Miniboss.png",
           "sha256": "a0336810e46c62bab09801ec10ac450914abd67b9ff3cece9c2b3949e537663e"
@@ -5625,6 +5666,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Cave_Ranged.png",
           "sha256": "ee5bded266c60e0bf635f55ee893aa68c14257ebe116f6bf0b8e58e98c0b8288"
@@ -5638,6 +5680,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Cave_Skirmisher.png",
           "sha256": "c56472443cd4380282919495165360d65af1eeda3bd12b88d8947dc1299b6ab9"
@@ -5651,6 +5694,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Cave_Swarm.png",
           "sha256": "8aad8bba7202856154cf40491c88c6c26828acce5f0696c6d36b18d5001d8df7"
@@ -5664,6 +5708,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Chaos_Apex.png",
           "sha256": "a53dde10051177bbd52feb5fb240cb9d089b87fba865a99f730fc40ffcb7382d"
@@ -5677,6 +5722,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Chaos_Brute.png",
           "sha256": "63a24e902ce463c4b0c171557f9a69440876af2a31df6bc789424cbf6d250f86"
@@ -5690,6 +5736,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Chaos_Caster.png",
           "sha256": "eee05cceedbf56006cba1c43f87be3eb8cc989abb66312cd39b6a71d578aa67f"
@@ -5703,6 +5750,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Chaos_Champion.png",
           "sha256": "07073ef0543d160c0ece7ddf37f0f643c31b8e5e3140bd91b65c3a6cbe4d9437"
@@ -5716,6 +5764,7 @@
       {
         "display_height": 72,
         "display_width": 72,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Chaos_Elite_Miniboss.png",
           "sha256": "7de18038e35f3a8c385e22cae5a1ae02d0f198b531c098239bcad4f36fc3f5cf"
@@ -5729,6 +5778,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Chaos_Heavy.png",
           "sha256": "d63e70e8ce3aa9ec1c3f67469e111ad57df23d25e5944919d4586c08be0d0495"
@@ -5742,6 +5792,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Chaos_Line.png",
           "sha256": "17af7e5b34942ba251d1ab4aa466aac5982d924e7c6fbc5b6a26859edbeee49a"
@@ -5755,6 +5806,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Chaos_Miniboss.png",
           "sha256": "94b2d847e855cdc354a8d184d04a301e6106b4d95b5f7cb3919bfc7b30ab5d93"
@@ -5768,6 +5820,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Chaos_Ranged.png",
           "sha256": "5b40c0e4faba9f2be3b532a33c8d5224346a31b2c2515a9b60307e3b59b76976"
@@ -5781,6 +5834,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Chaos_Skirmisher.png",
           "sha256": "1f115af1113d27483f1d1ed6d546064f28c94fe8c00e2a788aea38f2cce5a862"
@@ -5794,6 +5848,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Chaos_Swarm.png",
           "sha256": "aa45e919dca2ede7fa31da1855ac15239820ffef66445d6611f00966ece08c63"
@@ -5807,6 +5862,7 @@
       {
         "display_height": 72,
         "display_width": 72,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Cinder_Matriarch.png",
           "sha256": "9127550f092cc11c66de4c036a86b49c2e1383712d926a480f1ffa11cc6ba0bd"
@@ -5820,6 +5876,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Construct_Apex.png",
           "sha256": "5acdae151cd31822f2a3c3868abd4c94df047f649afcbffb4cc3e1f311db9d93"
@@ -5833,6 +5890,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Construct_Brute.png",
           "sha256": "cb62a77a4eede98d2862d932d333f2fede5a8ecbe462e592b473f28a2acddee9"
@@ -5846,6 +5904,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Construct_Caster.png",
           "sha256": "f0ddf3cc2cd8d2b24e9d9b4f7f79de5125a747d04f1da9ad213b218e555f39e6"
@@ -5859,6 +5918,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Construct_Champion.png",
           "sha256": "c99f4ee8cb7de6372f82895c8e8edc5c527d0da32e684f1109a3a884db6049ee"
@@ -5872,6 +5932,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Construct_Heavy.png",
           "sha256": "c9ce70c657eef8367591fa7e38c74d50a71dcd08cc098089ed65c067c22bdcc5"
@@ -5885,6 +5946,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Construct_Line.png",
           "sha256": "62d1b24bacec28cf289194097ac6471211c08a58eb8d83e9911de574f4a97067"
@@ -5898,6 +5960,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Construct_Miniboss.png",
           "sha256": "f4afd962f6fef970c7c3153f3e0a35df98415cabd0641e35e89a974f27dc8260"
@@ -5911,6 +5974,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Construct_Ranged.png",
           "sha256": "085cb36622f069b06a6c0976fafd1b7477be33a9544bd9ed2a00dddd4828e9ee"
@@ -5924,6 +5988,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Construct_Skirmisher.png",
           "sha256": "dda35edbe0180564b29562cd5eddfca5006ee0e189a387392fa671355aa1ffdf"
@@ -5937,6 +6002,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Construct_Swarm.png",
           "sha256": "84df033ba9d40c678f97231142ae0308704167e60894db527d3f2f0b58375f8f"
@@ -5950,6 +6016,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Crystal_Apex.png",
           "sha256": "b45815abc75097181d35d015678f07eda4f252df665d87f31a1db82b3ed5a499"
@@ -5963,6 +6030,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Crystal_Brute.png",
           "sha256": "785d13821ec16d579a3dcb36c6ba9c17ceb63ed0500975c3a149d953cb6f747f"
@@ -5976,6 +6044,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Crystal_Caster.png",
           "sha256": "734fa158954ac594768f6e3e9848520fc800e20f88f9a6d8efd655be9bb7a08c"
@@ -5989,6 +6058,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Crystal_Champion.png",
           "sha256": "53294b83d00c209b1e0b25879e4eaf5a9e1a1bb33f289c3a13b8727683159570"
@@ -6002,6 +6072,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Crystal_Heavy.png",
           "sha256": "f1e414b00a191fba1ad81099891bd65ff4775edb35a16208e56a050250efa28f"
@@ -6015,6 +6086,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Crystal_Line.png",
           "sha256": "68628ab1e1a9ccf2450e624cc423982d8781c9210b2dc0ded1b7b23601b4dfcd"
@@ -6028,6 +6100,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Crystal_Miniboss.png",
           "sha256": "0ab7ea41812913f2f907306b6543d1cd2f63b0d9190532f9950e420f2d00a2e0"
@@ -6041,6 +6114,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Crystal_Ranged.png",
           "sha256": "0ad9b54fd92b6a81dcdc723c4e5d4ba068e2365909f0d2071c479cc3007e64f3"
@@ -6054,6 +6128,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Crystal_Skirmisher.png",
           "sha256": "cc0d93d4218ccceda9d187987b4f88e8c31983ae956b4796053dc19302b02304"
@@ -6067,6 +6142,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Crystal_Swarm.png",
           "sha256": "91da7cb80d43c31c6e4acb302b1b8f7e8edeab8b6750bf97068ff49e3f362333"
@@ -6080,6 +6156,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Cultist.png",
           "sha256": "617071a4d5dac4b49914ac96a9e4ea80c394963e1a7b1e3dd95969c2ed269687"
@@ -6093,6 +6170,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Demonic_Apex.png",
           "sha256": "45f61dbbdab8e6aa4926af22c147d10d383efb61bfb87e8baca5953549bc913d"
@@ -6106,6 +6184,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Demonic_Brute.png",
           "sha256": "7ee5235e1240a4852b089fd8980db6293e97f1a56a2c3acc7ec49f7302086ce4"
@@ -6119,6 +6198,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Demonic_Caster.png",
           "sha256": "8696e6f5c30ff4da593821db0143babae986cc4abd7a5f8ee0f55b49fff0c806"
@@ -6132,6 +6212,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Demonic_Champion.png",
           "sha256": "91ea41c8ef7a6f845d7e6266bc0e0b37e7dd4abf2004e76c255fbbd57e635b31"
@@ -6145,6 +6226,7 @@
       {
         "display_height": 72,
         "display_width": 72,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Demonic_Elite_Miniboss.png",
           "sha256": "70bbeb4cfb2b0ce5fd5e9e58acb591a0163715fa4aca2a6fbdcdc98bab6d7501"
@@ -6158,6 +6240,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Demonic_Heavy.png",
           "sha256": "61a7f233e5a8d47082e82d4d1c561b8ba36d795bd6c0a64ff58ea7d2864a916a"
@@ -6171,6 +6254,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Demonic_Line.png",
           "sha256": "a2a95b86a83875f8eb1cdd96429d8d7a76027d5492b9c3216cb44fb33b40a66a"
@@ -6184,6 +6268,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Demonic_Miniboss.png",
           "sha256": "a44602f4d97a79d9b0f4fd70040a7fcb33adc71094481fd86857a4f964c1aa11"
@@ -6197,6 +6282,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Demonic_Ranged.png",
           "sha256": "b79a7bbd37fd2132b159f33b643913805f205360fd4f742e59cd4346bcef78f8"
@@ -6210,6 +6296,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Demonic_Skirmisher.png",
           "sha256": "1ccd216339a67cfb3b923b150b2a7f28960de2baea2b692fb74a0f876d30bef8"
@@ -6223,6 +6310,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Demonic_Swarm.png",
           "sha256": "ab68c1d28aaef91baa4502bbfbd5471e0082d2ac63c46416f0cbce7ff719ab95"
@@ -6236,6 +6324,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Desert_Apex.png",
           "sha256": "6f016e9670723626c7157f0f2ead5d4b1fe9baeacb83b1cc6045ba5db7c210eb"
@@ -6249,6 +6338,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Desert_Brute.png",
           "sha256": "e0e22d4db2af184f335c707e5fb07f4c1ba9b155208703999ff8515404ff8e87"
@@ -6262,6 +6352,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Desert_Caster.png",
           "sha256": "ef507185858276036dde62e8005c0a811e8cee67af3a4c743578ff49dc5ac38d"
@@ -6275,6 +6366,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Desert_Champion.png",
           "sha256": "74f87f472fa6d6e60c0157ddf68d57fcbb4837f2d4305bdaf4411db52a3cb247"
@@ -6288,6 +6380,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Desert_Heavy.png",
           "sha256": "cb156257858e0bed3cb260ffb2a78378a6b89e86a92459f51c4632395af8cad8"
@@ -6301,6 +6394,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Desert_Line.png",
           "sha256": "22a9f696bf68cbb00685de9bd98b094c4c4cf6bac3657061055b8014f7a752d7"
@@ -6314,6 +6408,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Desert_Miniboss.png",
           "sha256": "7a2b605b638a761af883148726258efad48e2ae15b5a3a69ae80b1b7198e9ebe"
@@ -6327,6 +6422,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Desert_Ranged.png",
           "sha256": "ed454c4476bbe26e9e97a950e4236e5020caba04b7085f620acc452ae685dcdf"
@@ -6340,6 +6436,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Desert_Skirmisher.png",
           "sha256": "a3c75c6584f57fd7d24368b0eff8eebbbe3abfaaae336b01f0522d764418ec6b"
@@ -6353,6 +6450,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Desert_Swarm.png",
           "sha256": "998a19f44a2964c9639b536bb2e72e706f94a0357efd6e51ffe985995e954b10"
@@ -6366,6 +6464,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Drowned_Apex.png",
           "sha256": "e7022293ef789d997183207c898c36db01371f21cdeecf19fbceb37279d1a397"
@@ -6379,6 +6478,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Drowned_Brute.png",
           "sha256": "f577aa3518cc719d0ac8a50a78ff691ad20a40b1a0dd7c66b8baf81f57f8b67d"
@@ -6392,6 +6492,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Drowned_Caster.png",
           "sha256": "6813914c438ae50a7b8a8e6991a35a9b6098abbdb8f0185e5390dcf65b63297f"
@@ -6405,6 +6506,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Drowned_Champion.png",
           "sha256": "758bcb7a5fd2ab27524b2aa0e3a86e5db102cac0b15584ef6bb84b0b211bde8d"
@@ -6418,6 +6520,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Drowned_Heavy.png",
           "sha256": "c5f5c085e0e3c2c15b259fddf2631092e2b8ea2d7bc199390e5d628c109c2182"
@@ -6431,6 +6534,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Drowned_Line.png",
           "sha256": "45e9ed945af59db5e6b11ba885d9df83f5977b72b5dc0d93443b989859643f60"
@@ -6444,6 +6548,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Drowned_Miniboss.png",
           "sha256": "a8652893bff0eff1e8df61aa0b5b29ec2011916b04648fcfe9e0a2b0d06fb5bc"
@@ -6457,6 +6562,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Drowned_Ranged.png",
           "sha256": "3882f779254d33e512ec9724d24b0de1b425b617c146f3c5ec4bcfcf16e638ec"
@@ -6470,6 +6576,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Drowned_Skirmisher.png",
           "sha256": "a7ac6bda87d8b14f2495ea96a4e626e4eb6eff63254c1b5c2ad4e770ee5832e6"
@@ -6483,6 +6590,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Drowned_Swarm.png",
           "sha256": "c650086b1222f2a0989b9fa880aa76632e6732ded4ee74b7a13d299108cf30ac"
@@ -6496,6 +6604,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Druid.png",
           "sha256": "70693e4b95811613d1573d540064883717e555f40f16e27bc2a5009acd75bc45"
@@ -6509,6 +6618,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Eldritch_Apex.png",
           "sha256": "d836fb6f8ff46a320c66ecfd537640d12466e78680caa17c7e32634075722b63"
@@ -6522,6 +6632,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Eldritch_Brute.png",
           "sha256": "bcf913af40302a407ee0124c84c165cb68c3e3542ba8b96e9bffa9614846c2a2"
@@ -6535,6 +6646,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Eldritch_Caster.png",
           "sha256": "a85433b277295c3574f4791a17dbff2eb2a0b8e5c648c2f01216acbd2055c50c"
@@ -6548,6 +6660,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Eldritch_Champion.png",
           "sha256": "e6b68f20889ade369625216f6a55ff1a5ecbeea753c65efc6c1c82d5f94aa9a6"
@@ -6561,6 +6674,7 @@
       {
         "display_height": 72,
         "display_width": 72,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Eldritch_Elite_Miniboss.png",
           "sha256": "43579b312bec3fb798268222efca1b560382a102bbacd060ac772776c5e43189"
@@ -6574,6 +6688,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Eldritch_Heavy.png",
           "sha256": "482703c3ce4976318f6dbfcfb25d1bcee9fff2fd54a705713c0b30da4017d005"
@@ -6587,6 +6702,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Eldritch_Line.png",
           "sha256": "009ead7bccd77750e1826783544789842f618894418f5699147f6f06000e9cd1"
@@ -6600,6 +6716,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Eldritch_Miniboss.png",
           "sha256": "82c2c5b5826e46af01dd486a24462db7f6d8590e5378b47beef448a4ec44a2d3"
@@ -6613,6 +6730,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Eldritch_Ranged.png",
           "sha256": "a7f8a5b180418a1456d0f742c3d1e9a94d8fde939e44ac3490e158a2d476f5b3"
@@ -6626,6 +6744,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Eldritch_Skirmisher.png",
           "sha256": "ef8e567677ce457513e4198c1823992ebf19595431a556b2bd5c86e3fcde7ec8"
@@ -6639,6 +6758,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Eldritch_Swarm.png",
           "sha256": "ef59178d0b05461bfc88f101642b44520fb872ea4b811eec995b7cc5a2a647a1"
@@ -6652,6 +6772,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Ember_Apex.png",
           "sha256": "f7c100adbda8bf4bc0319d263ef4dbe472e9d9aee0c881421921c9863620e927"
@@ -6665,6 +6786,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Ember_Brute.png",
           "sha256": "145859ac38b6118398044956596b57033f86137b2b32378c4d92a2c399dc7d50"
@@ -6678,6 +6800,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Ember_Caster.png",
           "sha256": "39264e0b0d655f5a99c2bbaf41b37015a4e8f820b79d9ff59a1aa6492533cbce"
@@ -6691,6 +6814,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Ember_Champion.png",
           "sha256": "a37cc3445ef5d50112c567d2787bcdd38f9573df5f66ede4d883cbb89572b041"
@@ -6704,6 +6828,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Ember_Heavy.png",
           "sha256": "502cd476fb12cae191b72195731989243c48c34f3d5bbc7fa21e442adda160d2"
@@ -6717,6 +6842,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Ember_Line.png",
           "sha256": "7f512929e65ccc2ef8d149bab86149293760974a19dd8795e293be34cf35d80e"
@@ -6730,6 +6856,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Ember_Miniboss.png",
           "sha256": "1742ea44def44a25673c3d8e95a73969811484f858dbfedc852cfe901b4774a8"
@@ -6743,6 +6870,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Ember_Ranged.png",
           "sha256": "ac95580857335f2edf120af59d465ee1cbbe2a3cea5035193905a601eec30e1f"
@@ -6756,6 +6884,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Ember_Skirmisher.png",
           "sha256": "3cc1758bc44240b76f2e195625c06b816d64cc35e20d1184d328593f40abb546"
@@ -6769,6 +6898,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Ember_Swarm.png",
           "sha256": "32a02dec03ce0018b24e75bf1d53891ea05664bef6a8690af9985aa735f00d70"
@@ -6782,6 +6912,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Fallen_Apex.png",
           "sha256": "650901ccc4a7761a7f49dd50d2e01d4953f885a600f67ce3faf1489f2b277714"
@@ -6795,6 +6926,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Fallen_Brute.png",
           "sha256": "530e14e1df6ec4d08c65ab537c88c446d6a0ceecb1089835bf40b46898c2c5ad"
@@ -6808,6 +6940,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Fallen_Caster.png",
           "sha256": "454f08c040041d97f8827116cd50e6154cce83ad1e000623a200cf7513c91674"
@@ -6821,6 +6954,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Fallen_Champion.png",
           "sha256": "a1b3620499bd1942b84a814a51db0b01bea0ccb10aaff70e06bf1c05870be6ca"
@@ -6834,6 +6968,7 @@
       {
         "display_height": 72,
         "display_width": 72,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Fallen_Elite_Miniboss.png",
           "sha256": "6a0a79bbdde19620d0ded2c87bb5f515058b760560812dc593cf857591b3fd81"
@@ -6847,6 +6982,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Fallen_Heavy.png",
           "sha256": "87db011244e07b2ce8f2e6dec850604e83a5bc163cc36f845a43251ee354e6cb"
@@ -6860,6 +6996,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Fallen_Line.png",
           "sha256": "4f6a0851e68f9f179079f70a26639728cafa23dada444ac1865c9751ccf2a61f"
@@ -6873,6 +7010,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Fallen_Miniboss.png",
           "sha256": "f6077826e0659cf284bd1142f7d30aa3e89aab023d5bd2926c31838133eb8227"
@@ -6886,6 +7024,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Fallen_Ranged.png",
           "sha256": "3182de1ecee1390f74ad4f12d276b98958a4ad418bfafc7bcc89093398901b31"
@@ -6899,6 +7038,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Fallen_Skirmisher.png",
           "sha256": "3a43683b77a5cf2a35d1b148ecca419c8f663951dd0a12990d4709c11ed69c62"
@@ -6912,6 +7052,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Fallen_Swarm.png",
           "sha256": "9b3be0b418ace17f22257afb006e284f526acb05a0f4ad2877820902da929505"
@@ -6925,6 +7066,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Fire_Elemental_Guard.png",
           "sha256": "ff2542a34c3cba1947373e85af554db185d3d30ae39843f2084847424d0aaced"
@@ -6938,6 +7080,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Fungal_Apex.png",
           "sha256": "893bb708b4ab186d92cbd704037070f878d622b7a8b4925075e9c34eb46a5622"
@@ -6951,6 +7094,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Fungal_Brute.png",
           "sha256": "e38f596c1b33e2793b97d866c0ddb3f26072a8f6d43515b9ed4a2779e17efd3b"
@@ -6964,6 +7108,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Fungal_Caster.png",
           "sha256": "d18823eb70cda06c1cc87212998173549a5f1d54c360a55d9af6b82e2d2ad6d7"
@@ -6977,6 +7122,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Fungal_Champion.png",
           "sha256": "c70f1e7fc888a3e9e28682ddf054d285a003b1df5df43c723963fc9a2ed8ca5e"
@@ -6990,6 +7136,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Fungal_Heavy.png",
           "sha256": "1b3ebe71e6e0454b0dbfa3073c59a54fdab18e442ebe7c925e571b51239b1019"
@@ -7003,6 +7150,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Fungal_Line.png",
           "sha256": "607a3adc360844cd84eecc426362dc0db1c76c6c19f632a82a1dbdeaa1702ed8"
@@ -7016,6 +7164,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Fungal_Miniboss.png",
           "sha256": "432f543b0ff1a831c595e4beabdd01ad1c3a8673cf016b38ffc53224ac8646d3"
@@ -7029,6 +7178,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Fungal_Ranged.png",
           "sha256": "5fd6735eda4a1791cd549080131487abed3c7b7ce7b6f8e66a34c314e3ff6a28"
@@ -7042,6 +7192,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Fungal_Skirmisher.png",
           "sha256": "5369395079baaec6a69f3ead5e1ad56b0f61115ff739404f4855a3e242ec4850"
@@ -7055,6 +7206,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Fungal_Swarm.png",
           "sha256": "2e2b62c2e4ea7550d856bcf870db4e333e7f4355ffffaa7f9833b30214c45907"
@@ -7068,6 +7220,7 @@
       {
         "display_height": 96,
         "display_width": 96,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Glacius__the_Frost_Leviathan.png",
           "sha256": "b51497b615fc149f8bdb16fa823aa8d3ccdadba4905ea49d4f9e323637e3d17e"
@@ -7081,6 +7234,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Gloom_Apex.png",
           "sha256": "787699cda4ba3b2378c551f7ccfe3ea9a48dad0519b3b9494e48b3039c801293"
@@ -7094,6 +7248,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Gloom_Brute.png",
           "sha256": "0c9b45a767bb34449f70f13b47738baf90096898830dbf295aa94fb4a062ea52"
@@ -7107,6 +7262,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Gloom_Caster.png",
           "sha256": "379b26d97d61a8b2e9dd5228e97babce4f1f7e7347f97cefccb02cb7bc349d7e"
@@ -7120,6 +7276,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Gloom_Champion.png",
           "sha256": "14186f8d00914dad759ef1ba2ad0fe49d3cc2ba57bf932bfe5a2ae4aa3afb5ea"
@@ -7133,6 +7290,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Gloom_Heavy.png",
           "sha256": "aba947bf773850a9bbf9b1178682fb47145a56fbd4634c731a9dd3815d50af95"
@@ -7146,6 +7304,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Gloom_Line.png",
           "sha256": "7c5901f035e28aebdc2ec4a249ba2f298c38b57f7965c80496a45e24e7941b57"
@@ -7159,6 +7318,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Gloom_Miniboss.png",
           "sha256": "5a2a3c867fd0ca4f529b512fa9844dec404f4ebdc3dab8c55eb7d3d3e83bfc15"
@@ -7172,6 +7332,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Gloom_Ranged.png",
           "sha256": "0c0367aa21c05e50a09e1293c6c50f64ce0fb4eecd4f0b4064b418af6be8593a"
@@ -7185,6 +7346,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Gloom_Skirmisher.png",
           "sha256": "1518d279b61544807436c286c8fc8ca641616d2c9a05b281f21eee11e66d685f"
@@ -7198,6 +7360,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Gloom_Swarm.png",
           "sha256": "ba9772c6856ff3ae29501f3192fb66531ae17932a33974bd28f0f60ea937eacf"
@@ -7211,6 +7374,7 @@
       {
         "display_height": 96,
         "display_width": 96,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Gorgon__the_Thunder_Titan.png",
           "sha256": "3079934466d911afefa8a36b5cb8b5cbcc0d75dc79b703100da3d9b648a477f1"
@@ -7224,6 +7388,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Highland_Apex.png",
           "sha256": "81401e3f2114b52330a9c23e8e0fac7aa8f204a2789bd842a5cf30c993d4e2c1"
@@ -7237,6 +7402,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Highland_Brute.png",
           "sha256": "47c0d42f8294f2c96944184bef37963661e7099eb9f31380b0dfa4d262c40bd6"
@@ -7250,6 +7416,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Highland_Caster.png",
           "sha256": "ad3c009483cfc84fe129502f4f564c765f8b79fb658027b7ab91ce0245682b32"
@@ -7263,6 +7430,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Highland_Champion.png",
           "sha256": "d3cc575baa78584ea348afb378905128fd4f2e35f7c59b03bbc3e47b1417c45b"
@@ -7276,6 +7444,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Highland_Heavy.png",
           "sha256": "380e5caa6882ae988efef67578f0fc1238e9b946a9974f2c5c9530fbc572cc77"
@@ -7289,6 +7458,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Highland_Line.png",
           "sha256": "623cae3bb765cd68b721d86c04ece76fb37008a0dc981a18473b302ec527b92f"
@@ -7302,6 +7472,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Highland_Miniboss.png",
           "sha256": "9f8038a2108ed5af37fe673c288e9a0f4d74f01cea8f571c884f6a566751b496"
@@ -7315,6 +7486,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Highland_Ranged.png",
           "sha256": "c01db2cd48712f74b7ae7db37e35195f7b2fd43c1ffd5b6d9b0caca6bfdf5b9e"
@@ -7328,6 +7500,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Highland_Skirmisher.png",
           "sha256": "d78f149684e348c5966aea769cc7894477835c13fe4ba3cceacb4732164b7bb3"
@@ -7341,6 +7514,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Highland_Swarm.png",
           "sha256": "fa7b8b5030c60d16bd5e18acf644b442ba55c08022342381c393c5fa9c783b74"
@@ -7354,6 +7528,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Hive_Apex.png",
           "sha256": "22c94332c42729671ae9bbd499358abfe9f1409873c0c2d950c08a45913102a2"
@@ -7367,6 +7542,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Hive_Brute.png",
           "sha256": "565fdeeaaf941da53f29a5ae1687b44fc67c97cef2d8be2e2ce1f0c30c60cf72"
@@ -7380,6 +7556,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Hive_Caster.png",
           "sha256": "e4adc0c241a83c47027aa6f20c33c67010aed97c2184c91f2f34783b88f8ae23"
@@ -7393,6 +7570,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Hive_Champion.png",
           "sha256": "6d0da06eabee6f668889e2e534d89e422b35a2a403f59c73017b901f25f0f810"
@@ -7406,6 +7584,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Hive_Heavy.png",
           "sha256": "649ae5a3f135f0cd67ab220741509d140a4e2fd9745fe7559033e799857477b2"
@@ -7419,6 +7598,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Hive_Line.png",
           "sha256": "f8852014ac970c9f0058196a147b8d7ba0d2200c83dfa2757e2b67284b19c2f3"
@@ -7432,6 +7612,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Hive_Miniboss.png",
           "sha256": "d759f4928f04385869ebf000896a76c8109525a1e84e2e7c6fab4ac0eace066d"
@@ -7445,6 +7626,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Hive_Ranged.png",
           "sha256": "8ba79c5459b4075c3fc67caf64ab221a4583250cd7d6d96be75fe20cf869589d"
@@ -7458,6 +7640,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Hive_Skirmisher.png",
           "sha256": "d2044a1e757ea87ff1b39feabf9c18c23ed51cdfdbe7cc6f7a770c8cdbc26b18"
@@ -7471,6 +7654,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Hive_Swarm.png",
           "sha256": "5ce8646e39480935a385e0ebd9fdc197814830a88abea97424ca578ba2997a4c"
@@ -7484,6 +7668,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Ice_Elemental_Guard.png",
           "sha256": "57d7f9fbc9b00dc7d981d75baf704666bc88f31ee22f323d2d6887c25bf9b42d"
@@ -7497,6 +7682,7 @@
       {
         "display_height": 48,
         "display_width": 48,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/IceRock.png",
           "sha256": "5e4867e18bebb8e8af2e2c0112e7f44a5eb15c4c86a9fbaf0c08bb89d435ed8b"
@@ -7510,6 +7696,7 @@
       {
         "display_height": 96,
         "display_width": 96,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Ignis__the_Magma_Colossus.png",
           "sha256": "64f7f651be3f7ea2b3287093469d544668e7b407910abe09b15884f463561c30"
@@ -7523,6 +7710,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Jungle_Apex.png",
           "sha256": "e805aa81db0d7989e2c6645f9b31b5b3fc02efeca9b6fc24ab2a992fc7627d68"
@@ -7536,6 +7724,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Jungle_Brute.png",
           "sha256": "fc00797ff9c4311fcd95d5eabad5c2ce169ac864484b4e002da9f0db951873c4"
@@ -7549,6 +7738,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Jungle_Caster.png",
           "sha256": "e34e09b2652ecf2b1ae3fc2ad529f5c8abe10dafaa76853628b70c6f4bbdcb3b"
@@ -7562,6 +7752,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Jungle_Champion.png",
           "sha256": "7142ae2421a560dd6ce64a8864c3b8fe66013a88b44262418a895647c2c5932f"
@@ -7575,6 +7766,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Jungle_Heavy.png",
           "sha256": "0badb25f24a9d8d3b4e15fbd46f99a88fffc495b0db63cd54934f179773cca31"
@@ -7588,6 +7780,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Jungle_Line.png",
           "sha256": "92c2094afb3ae1978e5cfdccf7385beeab39fd194fa28b3913497b5dd478deae"
@@ -7601,6 +7794,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Jungle_Miniboss.png",
           "sha256": "e3ded942017fad6bab0a231d6addd89da09fc19ad83ab98903c44d6ca9f5b2e9"
@@ -7614,6 +7808,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Jungle_Ranged.png",
           "sha256": "04ff2be462f6854a78d816e52d8cfee2acd7424c2122fd35ce4e826175c75d95"
@@ -7627,6 +7822,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Jungle_Skirmisher.png",
           "sha256": "54e40a351afde8680f9eea0adb242c587d8db39be8e31c29575875e8547c408f"
@@ -7640,6 +7836,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Jungle_Swarm.png",
           "sha256": "171dd0e0f3df4647b3b353571a8027c43dab46bbf2b8eb71fc70b34008f80c4d"
@@ -7653,6 +7850,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Lightning_Elemental_Guard.png",
           "sha256": "3b334319572f65eac4587f1c5c8fa22a63e72e031e0a70e373e2c1f4ce4a1603"
@@ -7666,6 +7864,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Mage.png",
           "sha256": "d292389032c00286eeefb5eacab89487d9168968cf9b405ed91392388a8c94a9"
@@ -7679,6 +7878,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Monk.png",
           "sha256": "1098f78dcdd6779790422301fe8883f581e7a794b11a8293385db3bbb4e1c4b3"
@@ -7692,6 +7892,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Nightmare_Apex.png",
           "sha256": "1a0cd90554eb86d92782a612d7394183338049e8435d4668040f42f7d471575f"
@@ -7705,6 +7906,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Nightmare_Brute.png",
           "sha256": "56af22507dff04646c59a04a27756780935a7d4bc1af505de9143eff28db900e"
@@ -7718,6 +7920,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Nightmare_Caster.png",
           "sha256": "f2e04dfae4ef6c56f9d03612400a966df17eee6c4c7e010e94cd65cb9352f078"
@@ -7731,6 +7934,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Nightmare_Champion.png",
           "sha256": "226707e534d2686e08fae10f9bea0bdd89749d5dcd4247bb08741998ba912fe5"
@@ -7744,6 +7948,7 @@
       {
         "display_height": 72,
         "display_width": 72,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Nightmare_Elite_Miniboss.png",
           "sha256": "0f10a1ba0208784a2b2b5431c33a60a45cdcbeb968a26d451f14761a5c8409fe"
@@ -7757,6 +7962,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Nightmare_Heavy.png",
           "sha256": "9bb244e17674f147cc5f70f24873ff0332dd57797d9f232d75b536404c21c35d"
@@ -7770,6 +7976,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Nightmare_Line.png",
           "sha256": "e931c85c8786cd03dce5f0079d9dd2b4221c4f286749711ab3b9fd708562492e"
@@ -7783,6 +7990,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Nightmare_Miniboss.png",
           "sha256": "fca1e7312c4c58cfa13eb889090fdf5bdf00628304906d9528e3b70a895b79b6"
@@ -7796,6 +8004,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Nightmare_Ranged.png",
           "sha256": "7afec0b617b25fac3e3c1908201a1dff045f23e5f6a049bb6dd4236d4bf40e92"
@@ -7809,6 +8018,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Nightmare_Skirmisher.png",
           "sha256": "8014887521f7bfed24d179baae05aa12d8df5953de95196b28f85eadab71384a"
@@ -7822,6 +8032,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Nightmare_Swarm.png",
           "sha256": "17e3e9d2724f8132e7e13d6a28187e05100ea0baacbed1a5c3ff8e7461ce2642"
@@ -7835,6 +8046,7 @@
       {
         "display_height": 72,
         "display_width": 72,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Ossuary_Warden.png",
           "sha256": "252dc4396a3b21228a8650c44c1768983c893789223b2eda7546c27b0fa22fef"
@@ -7848,6 +8060,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Plague_Apex.png",
           "sha256": "7e8b56d12bde8137410bb664adaec19c302094b6bb0440655684d574034aabbf"
@@ -7861,6 +8074,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Plague_Brute.png",
           "sha256": "6b2c94e823e1617c219da95e03be0f8857a18ccfa52b3ae8c6982d8b461a0ed9"
@@ -7874,6 +8088,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Plague_Caster.png",
           "sha256": "d544c0b1afcbb862dff5acd5da3c7fb1bf6de16adff7025c7260943c3b8c8834"
@@ -7887,6 +8102,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Plague_Champion.png",
           "sha256": "42c9c3de746cca9279ab6be8ea046fd316ce55193da3cca84c40b77cb558ab73"
@@ -7900,6 +8116,7 @@
       {
         "display_height": 72,
         "display_width": 72,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Plague_Elite_Miniboss.png",
           "sha256": "ecc01c94edf0096a4ea701d7f673662627eec3e048accfba15dbecfe5f306ed6"
@@ -7913,6 +8130,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Plague_Heavy.png",
           "sha256": "e2cafb93465165a2f197a40cc26c107666aa038c3cb43a8125fc8b995a56a2fb"
@@ -7926,6 +8144,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Plague_Line.png",
           "sha256": "a87f5c85cfa2f11613fd86127c023c247ca62ff1d6a1aa5ab54fad666793514c"
@@ -7939,6 +8158,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Plague_Miniboss.png",
           "sha256": "0fad57d74f0ae16ee34790c3397dc9828185f31ac101839f0b4c77495841096d"
@@ -7952,6 +8172,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Plague_Ranged.png",
           "sha256": "4874a1710269f5ca3b85d75f820ef54aaf8249f0ef1f1246d7c933b8ad4b4dc8"
@@ -7965,6 +8186,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Plague_Skirmisher.png",
           "sha256": "2da521fc111e855c32d27660e81109b3e90a6e6580e573190932105c169e73ef"
@@ -7978,6 +8200,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Plague_Swarm.png",
           "sha256": "f2c4b49b92dd37bd437ad0a429a8c0212c51b4e5dd9df765d76a20677f697326"
@@ -7991,6 +8214,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Player.png",
           "sha256": "a190cf668334f9d3aa2ac3b47d17de3aeb5c95a1e5d88f6a34a87c118272d1f4"
@@ -8004,6 +8228,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Ranger.png",
           "sha256": "0586be471b6869dc4983abe475616fc42d2752f6d14ebcfa204621af20214392"
@@ -8017,6 +8242,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Rime_Apex.png",
           "sha256": "542fb49423445b81ecedbe6f769ded7875589de4f4fe3874b779588b19425b2c"
@@ -8030,6 +8256,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Rime_Brute.png",
           "sha256": "690d12e91df5f82fdf9ac7d0f4075a6e388b9c50759e1e8182bed3b395707a3e"
@@ -8043,6 +8270,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Rime_Caster.png",
           "sha256": "646533c6d227606a103cf75cfa95e8c8991067ed9c08189d5cc26e1ce75a9521"
@@ -8056,6 +8284,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Rime_Champion.png",
           "sha256": "2843ed089c20457cd5ddb2957790dbe6a7e454dce9c10872797a16accf58832f"
@@ -8069,6 +8298,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Rime_Heavy.png",
           "sha256": "68ae36e94ef7f5df59c8982fc6f3dd4b0423e99de0b5cee1b09f19075d0a7b23"
@@ -8082,6 +8312,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Rime_Line.png",
           "sha256": "edee777406568d1b74dd8c777e5c2dac4a4db13b2e42e6d3ad4466226792dfb5"
@@ -8095,6 +8326,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Rime_Miniboss.png",
           "sha256": "bf186afc6a6dbcbc9453ccccf76e4a859e23989d8ae84a18912b588e2e12bbee"
@@ -8108,6 +8340,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Rime_Ranged.png",
           "sha256": "55e11d0ee81454b82e33bb88a9043b339166567aa73d98bc855cc07204756d8e"
@@ -8121,6 +8354,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Rime_Skirmisher.png",
           "sha256": "936e122c9bad836c44ac35be97317dd9fb5bf45b80232494e8ce8e9313da0e6f"
@@ -8134,6 +8368,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Rime_Swarm.png",
           "sha256": "5c4fe68842c8473e57a9278ea1677524619f99ca0d1f805534faae82d0190595"
@@ -8147,6 +8382,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Ruin_Apex.png",
           "sha256": "536e2abd655b3221851e24db1e633377c28862814f04b33aeac0841622751353"
@@ -8160,6 +8396,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Ruin_Brute.png",
           "sha256": "69671784d9b962574eb620ee5822ed46f19d707917f3d337ec67a6819fc594a7"
@@ -8173,6 +8410,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Ruin_Caster.png",
           "sha256": "87dd19af53b03b1580b94b0f88e94c8b6e72d37c925ce01693b1fa04fdcff72a"
@@ -8186,6 +8424,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Ruin_Champion.png",
           "sha256": "31a822b45585cb8a763ad611d4e473af659414b2921c14a8afcfcc8bbb4eff79"
@@ -8199,6 +8438,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Ruin_Heavy.png",
           "sha256": "081dd9e7cb50b7110dceda88e203265ca4cea53e1290d7ce833b8d0fb0b58716"
@@ -8212,6 +8452,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Ruin_Line.png",
           "sha256": "6f7ae23e12072245eb990cb940e80042ed44e72b856413b81d8f737f0a633975"
@@ -8225,6 +8466,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Ruin_Miniboss.png",
           "sha256": "dc33a33d397b63b3d23f3e4ce8d87868c5c379eaf83e5e82cafe5c27ef82b2bb"
@@ -8238,6 +8480,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Ruin_Ranged.png",
           "sha256": "807b155c02a4a8f11cda453c42e63f8b45f02b97acc6d5324eb79142506f21a0"
@@ -8251,6 +8494,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Ruin_Skirmisher.png",
           "sha256": "ecffd8992b6d6f70e78c9787ae764160661d9651a0ab58b979e0f392e5f36503"
@@ -8264,6 +8508,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Ruin_Swarm.png",
           "sha256": "7f63b613dae25490d14833225b20938c640886799fa4c4399306ce827e9bef95"
@@ -8277,6 +8522,7 @@
       {
         "display_height": 80,
         "display_width": 80,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Shade_Herald.png",
           "sha256": "e1d3e7f2d34759c52d110b152baeb8f639c1d2df7089b6baa07de5e5e0c4bb2e"
@@ -8290,6 +8536,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Skeleton.png",
           "sha256": "6f5d2ae9e6b598776378fe838636270fdfe6940bf7112e309151f56bf5440081"
@@ -8303,6 +8550,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Slime.png",
           "sha256": "577bbfdd938901f85826749199f3588a025caab1d76b1f819f138ae0cac15cc3"
@@ -8316,6 +8564,7 @@
       {
         "display_height": 48,
         "display_width": 48,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Stone.png",
           "sha256": "e2fe5769c9f12427e5df2fd83a09ea591a02760c4d69bc60609b47f6faca1d1f"
@@ -8329,6 +8578,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Stoneborn_Apex.png",
           "sha256": "b6725ed3c6bb2f79d70089e7e04a078fd7da08ceaad41984b319c50a939f907f"
@@ -8342,6 +8592,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Stoneborn_Brute.png",
           "sha256": "31b9af10cc02fcd9b8f232c7beea719af9b6b3311dd719a9449f7a62905af90e"
@@ -8355,6 +8606,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Stoneborn_Caster.png",
           "sha256": "2c5598f5335c335e8bcc9635e4393601393b677741fe9f360419a259a925cf53"
@@ -8368,6 +8620,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Stoneborn_Champion.png",
           "sha256": "73fb34cc1bad56e5b154c133abe1b7c48b5301b6071e5019581f1601288005a8"
@@ -8381,6 +8634,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Stoneborn_Heavy.png",
           "sha256": "0e09f67120daa5afc82d03e058594919df21427871dcd6cbb120ca32d7ec0d87"
@@ -8394,6 +8648,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Stoneborn_Line.png",
           "sha256": "336ea7ad599c3c986bcc4bac9950d6c72161492fccbcbbf6a6629e962019ddb2"
@@ -8407,6 +8662,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Stoneborn_Miniboss.png",
           "sha256": "f43dc3cf6a5c9bf610eb9c51d10accf04071a902fc87fec70b8d1a915b2f1a04"
@@ -8420,6 +8676,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Stoneborn_Ranged.png",
           "sha256": "b1f8111279710dc36bd70c70c2bc94c2ec8751aa20d090b80e5dbee416bab0d6"
@@ -8433,6 +8690,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Stoneborn_Skirmisher.png",
           "sha256": "0344b11cab48db1299b63ab15bd39f17c002bcca74c1ecab802554793573228d"
@@ -8446,6 +8704,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Stoneborn_Swarm.png",
           "sha256": "4370075843d4f7e80031bd2bc8e009f12fbe92566b78cc43211c414517fdfe3b"
@@ -8459,6 +8718,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Storm_Apex.png",
           "sha256": "528b239c73584290ed54c34f208722553dca285fe5cc86e946f1f1fef3cf49f8"
@@ -8472,6 +8732,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Storm_Brute.png",
           "sha256": "7e1ba1e80b3f7948010dce560a968eaf344f871e1975996cd812f96367073bb2"
@@ -8485,6 +8746,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Storm_Caster.png",
           "sha256": "0a65478dbba8435015ef14612ad68c519d45c579f98a9ae770001d5894aa4a14"
@@ -8498,6 +8760,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Storm_Champion.png",
           "sha256": "1443b71d27a39c62299f8fb301a038a71839a91d3dd24cad9af6644df3612579"
@@ -8511,6 +8774,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Storm_Heavy.png",
           "sha256": "29b53aa9c73ec66a669a34798e809326e044dabbd330231a44d0725a43e3a7d4"
@@ -8524,6 +8788,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Storm_Line.png",
           "sha256": "abfd7c1a9117e8ab2a2435d095a8839e9969e2108dda6d0859d84ecb5fca8d59"
@@ -8537,6 +8802,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Storm_Miniboss.png",
           "sha256": "42bffd11b9f4ae797df9422ca53c257a69f874eebe78b9aca884c502bec4277c"
@@ -8550,6 +8816,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Storm_Ranged.png",
           "sha256": "1a340f5d661eac6865eac6c3b662d65070eca64262518dbbc1330dab4656fdb2"
@@ -8563,6 +8830,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Storm_Skirmisher.png",
           "sha256": "93d79ea6c62ec94951bc7f218fb0e6d29b71369d9935bfcac3aa833e6d6b3c50"
@@ -8576,6 +8844,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Storm_Swarm.png",
           "sha256": "2eaf19017401246b0799a9dc150ddb06ca84fc2c84ca3d1ee56215a447d00392"
@@ -8589,6 +8858,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Swamp_Apex.png",
           "sha256": "d9a2042b18230b2cc6949f7e73d8a2b17651fb75fed6eee4b6f6b1e84fc034da"
@@ -8602,6 +8872,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Swamp_Brute.png",
           "sha256": "b6b8298b4473b9beacdc134203c2ab8fde7a2a7866567deb33b9ea8866ed803b"
@@ -8615,6 +8886,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Swamp_Caster.png",
           "sha256": "0c02058c46ea2fd10810bb9f579dbb3ddddc14a204633347f0a1223125fe0976"
@@ -8628,6 +8900,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Swamp_Champion.png",
           "sha256": "5b030a50f8e9cd85d357362987b5900769131b3571cf50eccd4b9228fdbb08c5"
@@ -8641,6 +8914,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Swamp_Heavy.png",
           "sha256": "7548ce8763f5ab6ef0840f38d2b659bb30f4214d1707e30ccc1dfdf2acefc603"
@@ -8654,6 +8928,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Swamp_Line.png",
           "sha256": "cbd987fec9c984430565184ad618b7017e54ba2aae40a0ea2fae639ee75d3653"
@@ -8667,6 +8942,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Swamp_Miniboss.png",
           "sha256": "f8d6048d4e96d1caef0e2f5c73a62236702359b2492db6157a1a890c4992cd20"
@@ -8680,6 +8956,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Swamp_Ranged.png",
           "sha256": "d015456eac7896ac25d8b86bed27cd14d81a69744cf17a4e9e837be090411faa"
@@ -8693,6 +8970,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Swamp_Skirmisher.png",
           "sha256": "d9610a087bd8516dfb50dd4af78bb945e7d4be8436dc080b88230fa9391e8c59"
@@ -8706,6 +8984,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Swamp_Swarm.png",
           "sha256": "426f9343f64307b42817db067034cac6c21084284802e7891c0243a29ba005e4"
@@ -8719,6 +8998,7 @@
       {
         "display_height": 96,
         "display_width": 96,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/The_Bone_Regent.png",
           "sha256": "bf80555faf34f0e2c3abcac814e35ab043735b58ab16b53b53b734dd90bf9c46"
@@ -8732,6 +9012,7 @@
       {
         "display_height": 96,
         "display_width": 96,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/The_Ember_Queen.png",
           "sha256": "fc45ff6ae928f3127711e491619dbfcdf915e627cc1d5381c795bbe058bb2be9"
@@ -8745,6 +9026,7 @@
       {
         "display_height": 112,
         "display_width": 112,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/The_Umbral_Gatekeeper.png",
           "sha256": "3da5b25af1ba4050299f75e4234c490019d4f2932eaba40434f5a8f73cbc5053"
@@ -8758,6 +9040,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Titan_Apex.png",
           "sha256": "8009d5b2dfaf1d2406aff59f6bb4fee6cae2d09e2ac94c4959cbdc19834ef4e2"
@@ -8771,6 +9054,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Titan_Brute.png",
           "sha256": "559d3d5b1d69383ca8ae6a65159030ce0bfd486c6cdb8173c72f769722006afc"
@@ -8784,6 +9068,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Titan_Caster.png",
           "sha256": "5903b4dba1f4e3d040e4beed71537f425fa43adf69ba40502dfc2f28a33235d6"
@@ -8797,6 +9082,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Titan_Champion.png",
           "sha256": "adffd7b65de08d8979d940d2dde4a2d2504ca7e7ee509db4cc49ebc19049cd39"
@@ -8810,6 +9096,7 @@
       {
         "display_height": 72,
         "display_width": 72,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Titan_Elite_Miniboss.png",
           "sha256": "0984748d1fb360c9e566df8d67fb5162622daa1923dc11d69e5cd5db16082bf1"
@@ -8823,6 +9110,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Titan_Heavy.png",
           "sha256": "919c93ef3c41b88c76fbb472c137e94c9c4f2cc118f5107af0a48813abbea26d"
@@ -8836,6 +9124,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Titan_Line.png",
           "sha256": "fe33d52e07aa7bb05d1741c40d9fb8367858c445791b9e1ed5ed507d3d43e552"
@@ -8849,6 +9138,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Titan_Miniboss.png",
           "sha256": "4acd5dd69b8c0df50d6ee47a70f56930d15f9e656da56f63e1577fd1b6d89d24"
@@ -8862,6 +9152,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Titan_Ranged.png",
           "sha256": "f5318294db5c59b2122c0a7fd55eec1a9741036f03bb5f1f049beb8f8b749b85"
@@ -8875,6 +9166,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Titan_Skirmisher.png",
           "sha256": "2bae5630ac80ef49c9d87311c7c0ff4879c375cbaac69f0704259c6a4df895b0"
@@ -8888,6 +9180,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Titan_Swarm.png",
           "sha256": "918a29ae27cceec629c3b07a118d0e7e6bbcd3fda31fd69eaf5087dca5510568"
@@ -8901,6 +9194,7 @@
       {
         "display_height": 96,
         "display_width": 64,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Tree.png",
           "sha256": "89034678788aa46090c4eec1043b2b7bf14cc0c798c5cf8b9f092c968bc04a83"
@@ -8914,6 +9208,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Tundra_Apex.png",
           "sha256": "d435eb8332b7ff9916cf6ec129795c01ffa1d4868e1da581f5babb9d7ab12264"
@@ -8927,6 +9222,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Tundra_Brute.png",
           "sha256": "7d0094a794acec662990dfe39449c3ed4d8acae3d8e23dadfdd83a4bbaf2daed"
@@ -8940,6 +9236,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Tundra_Caster.png",
           "sha256": "634eb2713113649a098db8dfa219dae3da39ebbc5d01b3811a0f06fa808155bb"
@@ -8953,6 +9250,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Tundra_Champion.png",
           "sha256": "47f3f3f2cd04629703d8d38ae1b1bbe6db40e1f93d3adb89cec1c76700cabff4"
@@ -8966,6 +9264,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Tundra_Heavy.png",
           "sha256": "279507af4e2dc8fefd279277226bfe10ee1f68d9fde24189581ec1ff1abdf2b5"
@@ -8979,6 +9278,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Tundra_Line.png",
           "sha256": "0a17516ed1d373bbcc1426e6ead90fe5f6fd99de60936550c1bf59d221aa26eb"
@@ -8992,6 +9292,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Tundra_Miniboss.png",
           "sha256": "bddd5cd57ff2183f7068664f14892713970b97642f053a88eb5cc7d1c55aa03b"
@@ -9005,6 +9306,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Tundra_Ranged.png",
           "sha256": "e740d395c5baad67c75fde4bcf7ed0498dd65707f68fae7282ca5cdc2a24e9df"
@@ -9018,6 +9320,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Tundra_Skirmisher.png",
           "sha256": "8b3ef3ebc1ce48d07a8c040ad9af2504afe19f78acaac8755a1e05852ccfe5b2"
@@ -9031,6 +9334,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Tundra_Swarm.png",
           "sha256": "0ed07f5158464201509f962310772d780fd49a282d4229c3a55dfc969796addf"
@@ -9044,6 +9348,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Umbral_Apex.png",
           "sha256": "2202ed950212afaa702aed43f2a41cf028769c43e7a5a302f3a977d6f9a24ccd"
@@ -9057,6 +9362,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Umbral_Brute.png",
           "sha256": "457e4d10564a1fac03528a89e2fa03df04af6d57d8fa1b9c8a7701cbb29c25b5"
@@ -9070,6 +9376,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Umbral_Caster.png",
           "sha256": "fc14f9b2e572e04247ca9623d9c138cc95dd493a179a8d9935cc529d0c580b26"
@@ -9083,6 +9390,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Umbral_Champion.png",
           "sha256": "a1c774e4b322353b813644d7daf18c474fc4053e54ee36fd9fc9f0f8bc4f57be"
@@ -9096,6 +9404,7 @@
       {
         "display_height": 72,
         "display_width": 72,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Umbral_Elite_Miniboss.png",
           "sha256": "11253c0b32039f0f5af51498595cded07c2a013b81da372aeb6a387b69869b52"
@@ -9109,6 +9418,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Umbral_Heavy.png",
           "sha256": "d689bdf58f16f940af6eae26803dbe98df79f5b717f32dee4df4c108a9a93241"
@@ -9122,6 +9432,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Umbral_Line.png",
           "sha256": "d4cb5e3a0972593453c3a4651d64050c4125d46e5ec5a3685b8b954060c8b30a"
@@ -9135,6 +9446,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Umbral_Miniboss.png",
           "sha256": "90607bc3917f21d3e8f33862725f7b8bd3541ca0207487eac9883c688ebf434a"
@@ -9148,6 +9460,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Umbral_Ranged.png",
           "sha256": "2a38adbe9c80aa2162786bc3a798df6b700801d80ad862fdcc91dbb4115ac8c8"
@@ -9161,6 +9474,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Umbral_Skirmisher.png",
           "sha256": "3fd1e2fcebb5910f1faff29999842c1bf86a42a06a4101e0df37dd4be269de12"
@@ -9174,6 +9488,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Umbral_Swarm.png",
           "sha256": "9ebdc478a2e9a9274d29c99e2ca037aee74c75e47afef31c49c9f34f76af426e"
@@ -9187,6 +9502,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Undead_Apex.png",
           "sha256": "fd163f301df9eec4ad583fe632f3901c74c489875991e4500d859426267bd1bd"
@@ -9200,6 +9516,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Undead_Brute.png",
           "sha256": "07f7499ad73804338a3d18a672ada1389c8ffd73a0f41b4114d8dec443dbbb24"
@@ -9213,6 +9530,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Undead_Caster.png",
           "sha256": "2d75f660e985b25850c0904b04da79cbc906df7bdfc9b5d5840269553328fe1a"
@@ -9226,6 +9544,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Undead_Champion.png",
           "sha256": "5410f81e9857c1d181c16bb2cda880b99b2588451af9dae08aeb16b09ccb9589"
@@ -9239,6 +9558,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Undead_Heavy.png",
           "sha256": "8cf56f7d315c29c1979d885cddebc55481e211b6bca55bca18fef4339c2bcae6"
@@ -9252,6 +9572,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Undead_Line.png",
           "sha256": "b0da0399f30ab5ac6a83c7b6f1a982aab9bdf53a7b3174079bcbb9faaa7eda94"
@@ -9265,6 +9586,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Undead_Miniboss.png",
           "sha256": "05b65c9d745b27c293906b7171d29b35c8a0f4cd8c2f672c9e6b4b6b0248721d"
@@ -9278,6 +9600,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Undead_Ranged.png",
           "sha256": "17aaccf3f6081ac492ead60b1529bae24c48a1720a7dc1abd987e68a0162c61f"
@@ -9291,6 +9614,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Undead_Skirmisher.png",
           "sha256": "1dd86fa1ae232ef9422fe35812e631d63a959fa6dc2f9f5cd2c8cc5a1bcaa1cb"
@@ -9304,6 +9628,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Undead_Swarm.png",
           "sha256": "04e308988761970515ae35864352340181fdba1d6c64f4466c8454966737fd19"
@@ -9317,6 +9642,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Village_Guard.png",
           "sha256": "0515594847279ca6316eb12e1947f164da2cd07a06da87a3f102711d68d8efbb"
@@ -9330,6 +9656,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Void_Apex.png",
           "sha256": "f3339d7eb64e998ba022cc09263d3c484735f03ba2d67ed097042fc222940cea"
@@ -9343,6 +9670,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Void_Brute.png",
           "sha256": "7c3d3995745813535d3097dd8cb97d6b104f29610c59b6fb1573ddddbea5bcd4"
@@ -9356,6 +9684,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Void_Caster.png",
           "sha256": "1001342e2b9960dc181b5e05a788ac1b6b35011dfe97c9bbc7e9578978afa2c6"
@@ -9369,6 +9698,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Void_Champion.png",
           "sha256": "3e565d4ea104c544b9cff7d942eb2adf0dc525e847d9d8b00f51d8d07bb3e592"
@@ -9382,6 +9712,7 @@
       {
         "display_height": 72,
         "display_width": 72,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Void_Elite_Miniboss.png",
           "sha256": "f4a6caf70986979c7210de2e6c037dcaef1c71e61db46bf8d9015533bec50974"
@@ -9395,6 +9726,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Void_Heavy.png",
           "sha256": "ccff4036770aaa4e1ac2c4e33ab5a4f3e6335639c26e272f5f4f1d262949dcce"
@@ -9408,6 +9740,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Void_Line.png",
           "sha256": "bd4a229fbbd08ccf6047b476941207decb9f34030dd467a759cbdbfcd7bc4a6e"
@@ -9421,6 +9754,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Void_Miniboss.png",
           "sha256": "e8fd169859ac83f731bd0920ac40441d475097033a46e5d907fe7631538de1f7"
@@ -9434,6 +9768,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Void_Ranged.png",
           "sha256": "5c4ea048c033c4851052399d0031f158e44a6025f408f23634e58e501140f66c"
@@ -9447,6 +9782,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Void_Skirmisher.png",
           "sha256": "9a816e0529ead51779d90c596d7b03cb370cde4baa62ce66dea76fe87be27b03"
@@ -9460,6 +9796,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Void_Swarm.png",
           "sha256": "84cee269ecd3502347232bdfe666b072892cb4c883a0cdcaaa59cf7b39bf29ea"
@@ -9473,6 +9810,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Volcanic_Apex.png",
           "sha256": "48f27ac28597ebfa2f7f99a413cace30f9cd6e2b52d78372f869592304228e23"
@@ -9486,6 +9824,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Volcanic_Brute.png",
           "sha256": "6947d7b744ccf756f29f6fa0846b5c10b238d6f33bf85e244e8f56551c26a820"
@@ -9499,6 +9838,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Volcanic_Caster.png",
           "sha256": "85f693ebbc2fba6dd64291d7fcb5ae246e842b8affca929fe4a42cc650246c5f"
@@ -9512,6 +9852,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Volcanic_Champion.png",
           "sha256": "aac2d69a252cec6bcd4ccc59ef46b852ed1616393f15ebd4459c401d21ab9dba"
@@ -9525,6 +9866,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Volcanic_Heavy.png",
           "sha256": "b5bd0a065e08e0d0b8e59e179781d46f0a3c221c726a53150ac0496b170acd17"
@@ -9538,6 +9880,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Volcanic_Line.png",
           "sha256": "e7659732525a47e524c90b063b73a7935ac9532f07fb5c9907589439f7df60e3"
@@ -9551,6 +9894,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Volcanic_Miniboss.png",
           "sha256": "38742019c3b804c126a8dee6cb89b0c601148bf5119c6219f70e11b8dae43a47"
@@ -9564,6 +9908,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Volcanic_Ranged.png",
           "sha256": "d3b6dfdb213f52c05f41b91f71a602dbc1f1892f689a72ae435d016d941362e6"
@@ -9577,6 +9922,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Volcanic_Skirmisher.png",
           "sha256": "2c9fb1d2b7bf49e50d0ee02dfdafe6f338afd7dd008f388d83398ade1413c8d6"
@@ -9590,6 +9936,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Volcanic_Swarm.png",
           "sha256": "7f6910f9eb069984b6994474ce22e1c0807c37a32d7e3303afb3bc926d96e945"
@@ -9603,6 +9950,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Warrior.png",
           "sha256": "571d42a3822f5daf8f0604e173dc5b11dc53c608a0c0fbbc56853a89276ac288"
@@ -9616,6 +9964,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Wolf.png",
           "sha256": "2533e5058b6c2d2c235c1cf3b62ae9d94481ee38400860ba3606375e5e53ffdb"
@@ -9629,6 +9978,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Woodland_Apex.png",
           "sha256": "7029b5eed6d35fe38615840007ae1e79d249a88faf288c988a4e1b91ef6dbb8a"
@@ -9642,6 +9992,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Woodland_Brute.png",
           "sha256": "b5001c1d23f610d02c1e82a461c0298ed051922dd54faaaf6146548dcb581334"
@@ -9655,6 +10006,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Woodland_Caster.png",
           "sha256": "60779ef97b7c70330a95320cd917fb0f158c0492e374bd5f61d390a04930b008"
@@ -9668,6 +10020,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Woodland_Champion.png",
           "sha256": "1642b53230a1d64317d50c5aa49847520b2b1d5ba8e552282074c00e7a998467"
@@ -9681,6 +10034,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Woodland_Heavy.png",
           "sha256": "cb528bbbce05d6d7742cac1f424aed6410278a3e02f284b0cd695e8085301c2b"
@@ -9694,6 +10048,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Woodland_Line.png",
           "sha256": "bca3674d0794d0554536688a9ac8925b72d8d575e4ff665bed6cc24546ec90dd"
@@ -9707,6 +10062,7 @@
       {
         "display_height": 56,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Woodland_Miniboss.png",
           "sha256": "3a6ff395c049ef9396aa1ca3e1b482b54916291586f99e12665a1a7d0ad4f5d8"
@@ -9720,6 +10076,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Woodland_Ranged.png",
           "sha256": "a12a3effdb3ff850b3160ff696b7266edae6309de774600ebda4f1a6eccb41b9"
@@ -9733,6 +10090,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Woodland_Skirmisher.png",
           "sha256": "80cdb9a41f2506c6907ef3a47e8e89f9dbee9961f69160f5230e738fb36548c6"
@@ -9746,6 +10104,7 @@
       {
         "display_height": null,
         "display_width": null,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/Woodland_Swarm.png",
           "sha256": "65225308ee895ae128494213188ee412a4ef8dbdb88683b81eeb8c0dc81ae2d8"
@@ -9759,6 +10118,7 @@
       {
         "display_height": 100,
         "display_width": 80,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/bank_post.png",
           "sha256": "fcc07ef9a82c782674df6174f8fca184ed229fac9cb383350fbe9bdef16a414e"
@@ -9772,6 +10132,7 @@
       {
         "display_height": 40,
         "display_width": 40,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/bush.png",
           "sha256": "f66f74218dcaa7d8380dd387b6ca06b1910e38b1d02f3763124be3302aac1fa0"
@@ -9785,6 +10146,7 @@
       {
         "display_height": 50,
         "display_width": 60,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/chest_field.png",
           "sha256": "9cd09bda3dfc0278492d9983eccc33589305dd2979937887c59abdb86ab127f0"
@@ -9798,6 +10160,7 @@
       {
         "display_height": 60,
         "display_width": 70,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/chest_vault.png",
           "sha256": "3bc1d36825766e7254fa5520386b7bdbd1cab047e478391172707a6b335c46f7"
@@ -9811,6 +10174,7 @@
       {
         "display_height": 92,
         "display_width": 56,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/dead_tree.png",
           "sha256": "3faa306b752bb592efa8b330871ce79367b6ffea71e090aadf76dd56857b115f"
@@ -9824,6 +10188,7 @@
       {
         "display_height": 100,
         "display_width": 80,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/gem_merchant_post.png",
           "sha256": "6cf64ae3371edbfb9095b40d467aad183aaa301bb82755d84cf666b7f984abce"
@@ -9837,6 +10202,7 @@
       {
         "display_height": 100,
         "display_width": 80,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/merchant_post.png",
           "sha256": "995e1f5018833c331c9efe3409918f8cdf78c20fc0125e113bc6df4b9341f82a"
@@ -9850,6 +10216,7 @@
       {
         "display_height": 104,
         "display_width": 64,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/pine_tree.png",
           "sha256": "af5f1bbc744b99d658f4313c4a521eb5d03344ff03c7ef3006d44be082519335"
@@ -9863,6 +10230,7 @@
       {
         "display_height": 130,
         "display_width": 110,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/portal.png",
           "sha256": "21186e1b1f0bd9cfdd9492352139a4da01ac1e7b64d81df5fe4431d92856e753"
@@ -9876,6 +10244,7 @@
       {
         "display_height": 44,
         "display_width": 40,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/rose_bush.png",
           "sha256": "27dbe86ba18ee8db94f5c481a194b31bab8e29e56722f9409112edfa7c6fce4f"
@@ -9889,6 +10258,7 @@
       {
         "display_height": 100,
         "display_width": 80,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/skill_merchant_post.png",
           "sha256": "4f4fb8a63cd452e9727526a31b5adf856a1d7e9c632b93450050370c90d91e77"
@@ -9902,6 +10272,7 @@
       {
         "display_height": 90,
         "display_width": 70,
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/waypoint_stone.png",
           "sha256": "b7a41c8d11c9d9c7e867112e9a8c3ea8ebfd477e243b97dc9df3bf6bbdc0512f"
