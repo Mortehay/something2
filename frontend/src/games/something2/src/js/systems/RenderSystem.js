@@ -313,20 +313,13 @@ export class RenderSystem {
         // the tile's true center (x+50 for a 100px tile), floating the
         // decoration ~19px above its tile. displayWidth/displayHeight (from
         // `type`, spread in first) still control the drawn sprite size.
-        // Sort depth at the tile CENTER (matching walls/actors, e.g. line 67's
-        // depthKey(e.x, e.y) where e.x/e.y are already center-anchored) even
-        // though x/y above are top-left. Decorations are DRAWN centered (see
-        // the width/height=MAP_TILE_SIZE comment above), so sorting at
-        // top-left put a decoration's depth key one tile toward the back of
-        // its actual drawn position — wrongly occluded by an actor/wall a
-        // tile closer to the camera that should have been behind it.
         // `name` is spread in from `d`, not from `type`: getEntityTypesMap
         // keys the map BY name and does not repeat it inside the value, so a
         // decoration drawable carried no way to say what it was until the
         // inspect card needed one (SOMET-493).
-        // With anchors, "tile CENTER" above now reads "the feature's anchor":
-        // depth is computed from (ax, ay), so two features in one tile sort
-        // against each other and against an actor standing between them.
+        // Depth is computed from the feature's anchor (ax, ay), so two features
+        // in one tile sort against each other and against an actor standing
+        // between them.
         // `decoration: true` lets drawEntity pick the no-art placeholder
         // (soft ellipse) over its creature-style solid rectangle.
         out.push({ kind: "decoration", ref: { ...type, name: d.name, x, y, width: MAP_TILE_SIZE, height: MAP_TILE_SIZE, decoration: true }, order: type.place_order || 0, depth: depthKey(ax, ay) });

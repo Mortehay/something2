@@ -244,3 +244,34 @@ test('an admin-set cover_density of 0 survives a re-run of the migration fill an
   r = (await c.query("SELECT cover_density FROM biomes WHERE name = 'Meadow'")).rows[0];
   assert.equal(r.cover_density, meadow.cover_density);
 }));
+
+// The rows survive `down` (only the columns go), so the next `up` re-creates the
+// columns at their defaults over rows that already exist. Without a re-assert
+// every cover type would silently become a 'feature' with no radius.
+test('up -> down -> up with the rows present restores layer, radius and max', { skip }, () => inTxn(async (c) => {
+  await run(c, 'up');
+  await run(c, 'down');
+  const present = await c.query('SELECT count(*)::int AS n FROM entity_types WHERE name = ANY($1)', [SCENERY_TYPES.map((t) => t.name)]);
+  assert.equal(present.rows[0].n, SCENERY_TYPES.length, 'down must leave the rows in place for this test to mean anything');
+  await run(c, 'up');
+  const by = new Map((await c.query('SELECT name, scenery_layer, block_radius, max_per_tile FROM entity_types WHERE name = ANY($1)',
+    [SCENERY_TYPES.map((t) => t.name)])).rows.map((r) => [r.name, r]));
+  assert.ok(SCENERY_TYPES.some((t) => t.scenery_layer === 'cover'), 'catalogue must contain cover types');
+  for (const t of SCENERY_TYPES) {
+    const r = by.get(t.name);
+    assert.equal(r.scenery_layer, t.scenery_layer, `${t.name} layer`);
+    assert.equal(r.block_radius, t.block_radius, `${t.name} radius`);
+    assert.equal(r.max_per_tile, t.max_per_tile, `${t.name} max`);
+  }
+  const ex = (await c.query('SELECT name, block_radius FROM entity_types WHERE name = ANY($1)', [Object.keys(EXISTING_BLOCK_RADIUS)])).rows;
+  for (const r of ex) assert.equal(r.block_radius, EXISTING_BLOCK_RADIUS[r.name], r.name);
+}));
+
+test('a plain re-run of up keeps admin edits to the catalogue rows', { skip }, () => inTxn(async (c) => {
+  await run(c, 'up');
+  const cover = SCENERY_TYPES.find((t) => t.scenery_layer === 'cover').name;
+  await c.query("UPDATE entity_types SET scenery_layer = 'feature', block_radius = 33, max_per_tile = 7 WHERE name = $1", [cover]);
+  await run(c, 'up');
+  const r = (await c.query('SELECT scenery_layer, block_radius, max_per_tile FROM entity_types WHERE name = $1', [cover])).rows[0];
+  assert.deepEqual({ ...r }, { scenery_layer: 'feature', block_radius: 33, max_per_tile: 7 });
+}));

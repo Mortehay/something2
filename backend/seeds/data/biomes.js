@@ -133,20 +133,12 @@ const STARTER_BIOMES = [
   // explicit list, not a tier rule -- a tier rule would sweep in Crystal
   // Hollows and Hive Warrens, which sit at bands 4-6.
   //
-  // KNOWN, DELIBERATE, NOT A BUG YET: nine of these biomes render BARREN.
-  // Decoration placement only puts a flora object on a tile named in that
-  // decoration's OWN entity_types.spawn_tiles, and every decoration we ship
-  // spawns on surface terrain only (Stone -> earth/rocks/sand, bush ->
-  // grass/highgrass, dead_tree -> earth/dirt/sand, and so on). So a biome whose
-  // terrain is entirely new underground tiles declares flora that nothing can
-  // ever place:
-  //   Ossuary, Fungal Deep, Deepvault, Hive Warrens, Sunken Cistern,
-  //   Umbral Warren, Gloomfen, Sunken Foundry, Grave of Titans
-  // The flora_types lists above are correct as INTENT and are left alone. The
-  // fix is on the decoration side -- extend the relevant decorations'
-  // spawn_tiles to include the underground terrain names (or author underground
-  // decorations of their own) -- and it is content work for a later
-  // sub-project, not something to paper over by editing these lists.
+  // Underground biomes (Ossuary, Fungal Deep, Deepvault, ...) are decorated like
+  // any other: placement needs a flora type whose spawn_tiles name the tile's
+  // terrain, and the biome-scenery migration (1714440825000_biome_scenery.js,
+  // data in seeds/data/sceneryCatalog.js) widens spawn_tiles and appends the
+  // matching flora to each biome's list. A flora name that no def can place on
+  // the biome's terrain is therefore a content bug, not an intentional state.
 
   // Surface
   { name: 'Highlands', path_tile: 'road_stone', terrain_tiles: ['highland_rock', 'rocks', 'grass'], flora_types: ['Stone', 'pine_tree', 'boulder', 'grass_tuft', 'wildflowers', 'pebbles', 'clover', 'dandelions', 'tall_grass_clump', 'lavender_patch', 'mole_hill', 'berry_bush', 'daisies', 'buttercups', 'mushroom_ring', 'fallen_branch', 'hay_tuft'], creature_types: ['Highland Swarm', 'Highland Skirmisher', 'Highland Line'], palette: ['slate grey', 'moss green', 'pale sky'], art_style: 'windswept highland fantasy, cold clear light', exclusions: 'no sand, no jungle, no lava', color: '#7d8471', creature_density: 0.9, cover_density: 2 },

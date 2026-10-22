@@ -209,10 +209,8 @@ test('response cover decodes to exactly the generator\'s cover entries; decorati
   assert.deepEqual(res.body.decorations, all.filter((d) => d.layer !== 'cover'));
   assert.ok(res.body.decorations.every((d) => d.layer === 'feature'));
 
-  // Size record (printed for the commit message).
   const legacy = JSON.stringify({ decorations: all }).length;
   const compact = JSON.stringify({ decorations: res.body.decorations, cover: res.body.cover }).length;
-  console.log(`# cover bytes: legacy=${legacy} compact=${compact} cells=${expected.length}`);
   assert.ok(compact < legacy);
 });
 

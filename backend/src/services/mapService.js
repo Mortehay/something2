@@ -817,10 +817,11 @@ function generateChunkDecorations(world, cx, cy, tiles, decorationDefs, opts = {
   // requiredTilesFor lists it next to the arrival points).
   const boss = bossTileCell(world);
   const portals = boss ? portalTileCells(world).concat(boss) : portalTileCells(world);
-  const coverDefs = withCover ? decorationDefs.filter((d) => d.scenery_layer === 'cover') : [];
   const out = [];
-  const featureDefs = decorationDefs.filter((d) => d.scenery_layer !== 'cover');
   const covers = [];
+  // Eligible defs depend only on (owning region, terrain), so resolve them once
+  // per call instead of re-scanning every def on every tile.
+  const eligibility = makeEligibilityCache(decorationDefs, withCover);
   for (let r = 0; r < N; r++) {
     if (!tiles[r]) continue;
     for (let c = 0; c < N; c++) {
@@ -833,19 +834,58 @@ function generateChunkDecorations(world, cx, cy, tiles, decorationDefs, opts = {
       // authored choice ("this biome is barren"), not a config error -- there
       // is deliberately no fallback to the global def list.
       const region = sampleBiomeRegion(cfg, gRow, gCol);
-      const flora = region ? region.floraTypes : null;
-      const placed = placeFeature(cfg, featureDefs, region, flora, terrain, gRow, gCol, spawn, portals);
+      const elig = eligibility(region, terrain);
+      const placed = placeFeature(cfg, elig.features, elig.featureWeight, region, terrain, gRow, gCol, spawn, portals);
       if (placed) out.push({ ...placed, row: r, col: c });
-      if (coverDefs.length > 0 && region && region.coverDensity > 0) {
-        placeCover(cfg, coverDefs, region, flora, terrain, gRow, gCol, r, c, covers);
+      if (withCover && region && region.coverDensity > 0 && elig.covers.length > 0) {
+        placeCover(cfg, elig.covers, region, gRow, gCol, r, c, covers);
       }
     }
   }
   return out.concat(covers);
 }
 
+// (region, terrain) -> { features, featureWeight, covers }, built lazily and
+// memoised for one generateChunkDecorations call. A region is the biome object
+// itself (stable for the call); null means "world declares no biomes" and the
+// flora filter is off. List order is the def order, which the weighted picks
+// depend on. Cover entries carry max_per_tile resolved up front.
+function makeEligibilityCache(defs, withCover) {
+  const byRegion = new Map();
+  const floraSets = new Map();
+  return function lookup(region, terrain) {
+    let byTerrain = byRegion.get(region);
+    if (!byTerrain) { byTerrain = new Map(); byRegion.set(region, byTerrain); }
+    let e = byTerrain.get(terrain);
+    if (e) return e;
+    let flora = null;
+    if (region) {
+      flora = floraSets.get(region);
+      if (!flora) { flora = new Set(region.floraTypes); floraSets.set(region, flora); }
+    }
+    e = { features: [], featureWeight: 0, covers: [] };
+    for (const def of defs) {
+      if (flora && !flora.has(def.name)) continue;
+      const spawnTiles = def.spawn_tiles || def.spawnTiles;
+      if (!spawnTiles || !spawnTiles.includes(terrain)) continue;
+      if (def.scenery_layer === 'cover') {
+        if (withCover && (def.chance || 0) > 0) {
+          e.covers.push({ name: def.name, chance: def.chance, max: Number.isFinite(def.max_per_tile) ? def.max_per_tile : 2 });
+        }
+      } else {
+        e.features.push(def);
+        e.featureWeight += (def.chance || 0);
+      }
+    }
+    byTerrain.set(terrain, e);
+    return e;
+  };
+}
+
 // The one feature (if any) on a tile: { name, ox, oy, blocking, radius, layer }.
-function placeFeature(cfg, defs, region, flora, terrain, gRow, gCol, spawn, portals) {
+// `matches` is the eligible list for this tile's (region, terrain) and `totalW`
+// the sum of its chances.
+function placeFeature(cfg, matches, totalW, region, terrain, gRow, gCol, spawn, portals) {
   // Two independent gates decide IF a tile gets an object: the density
   // field (where clumps form) and a per-tile fill roll (holes in a clump).
   const density = globalValueNoise((cfg.seed ^ DECO_SEED_XOR) >>> 0, gRow, gCol, DECO_CELL);
@@ -856,13 +896,6 @@ function placeFeature(cfg, defs, region, flora, terrain, gRow, gCol, spawn, port
   // terrain, weighted by `chance`. (Not first-match -- that shadowed every
   // type but the lowest-id one on shared terrain.) Deterministic: the roll
   // is a seeded per-tile hash and `decorationDefs` is ORDER BY id.
-  let totalW = 0;
-  const matches = [];
-  for (const def of defs) {
-    if (flora && !flora.includes(def.name)) continue;
-    const spawnTiles = def.spawn_tiles || def.spawnTiles;
-    if (spawnTiles && spawnTiles.includes(terrain)) { matches.push(def); totalW += (def.chance || 0); }
-  }
   if (matches.length === 0 || totalW <= 0) return null;
   let roll = hash2((cfg.seed ^ DECO_PICK_XOR) >>> 0, gCol, gRow) * totalW;
   let picked = matches[matches.length - 1];
@@ -871,6 +904,7 @@ function placeFeature(cfg, defs, region, flora, terrain, gRow, gCol, spawn, port
   // A blocking pick near spawn / in a village would trap the player -> skip
   // the tile entirely (leave it open) rather than force a passable type.
   if (blocking && isExcludedBlockerCell(cfg, spawn, portals, gRow, gCol)) return null;
+  // block_radius 0 and null both mean "use DEFAULT_BLOCK_RADIUS": a blocking type must always block something.
   const radius = blocking
     ? Math.min(50, Number.isFinite(picked.block_radius) && picked.block_radius > 0 ? picked.block_radius : DEFAULT_BLOCK_RADIUS)
     : 0; // capped at half a tile: a larger circle could not stay inside its tile
@@ -902,29 +936,31 @@ function splitChunkDecorations(all) {
 // Ground cover on one tile: stochastic-rounded count, weighted type pick among
 // types still under max_per_tile. Never blocking, never excluded by blocker
 // rules (the caller already skipped carved path cells).
-function placeCover(cfg, defs, region, flora, terrain, gRow, gCol, r, c, outCovers) {
-  const eligible = [];
-  for (const def of defs) {
-    if (flora && !flora.includes(def.name)) continue;
-    const spawnTiles = def.spawn_tiles || def.spawnTiles;
-    if (spawnTiles && spawnTiles.includes(terrain) && (def.chance || 0) > 0) eligible.push(def);
-  }
-  if (eligible.length === 0) return;
+function placeCover(cfg, eligible, region, gRow, gCol, r, c, outCovers) {
   const n = Math.floor(region.coverDensity + hash2((cfg.seed ^ COVER_N_XOR) >>> 0, gCol, gRow));
-  const counts = new Map();
+  if (n <= 0) return;
+  const len = eligible.length;
+  const used = new Array(len).fill(0); // per-def count already placed on this tile
   for (let k = 0; k < n; k++) {
-    const open = eligible.filter((d) => (counts.get(d.name) || 0) < (Number.isFinite(d.max_per_tile) ? d.max_per_tile : 2));
-    if (open.length === 0) break;
-    let totalW = 0;
-    for (const d of open) totalW += d.chance;
+    // Defs still under max_per_tile, in def order: same arithmetic as filtering
+    // first, without allocating a list per object.
+    let totalW = 0, lastOpen = -1;
+    for (let i = 0; i < len; i++) {
+      if (used[i] < eligible[i].max) { totalW += eligible[i].chance; lastOpen = i; }
+    }
+    if (lastOpen < 0) break;
     const kSalt = Math.imul(k, 0x9e3779b1);
     let roll = hash2((cfg.seed ^ COVER_PICK_XOR ^ kSalt) >>> 0, gCol, gRow) * totalW;
-    let picked = open[open.length - 1];
-    for (const d of open) { roll -= d.chance; if (roll <= 0) { picked = d; break; } }
-    counts.set(picked.name, (counts.get(picked.name) || 0) + 1);
+    let picked = lastOpen;
+    for (let i = 0; i < len; i++) {
+      if (used[i] >= eligible[i].max) continue;
+      roll -= eligible[i].chance;
+      if (roll <= 0) { picked = i; break; }
+    }
+    used[picked]++;
     const ox = 10 + Math.floor(hash2((cfg.seed ^ COVER_X_XOR ^ kSalt) >>> 0, gCol, gRow) * 81);
     const oy = 10 + Math.floor(hash2((cfg.seed ^ COVER_Y_XOR ^ kSalt) >>> 0, gCol, gRow) * 81);
-    outCovers.push({ name: picked.name, row: r, col: c, ox, oy, blocking: false, radius: 0, layer: 'cover' });
+    outCovers.push({ name: eligible[picked].name, row: r, col: c, ox, oy, blocking: false, radius: 0, layer: 'cover' });
   }
 }
 

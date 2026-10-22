@@ -15,7 +15,8 @@ exports.shorthands = undefined;
 // Catalogue data lives in seeds/data/sceneryCatalog.js so
 // `make seed-catalogs` and this migration cannot drift (same precedent as
 // 1714440042000_decoration_types.js). `down` drops the columns only and
-// leaves the rows alone.
+// leaves the rows alone; a later `up` that re-creates the columns re-asserts
+// scenery_layer / block_radius / max_per_tile for the catalogue rows.
 const {
   SCENERY_TYPES, SPAWN_TILE_ADDITIONS, BIOME_SCENERY, EXISTING_BLOCK_RADIUS,
 } = require('../seeds/data/sceneryCatalog.js');
@@ -29,7 +30,16 @@ const appendMissing = (column, table, names) =>
       FROM jsonb_array_elements_text(${jsonb(names)}) WITH ORDINALITY AS e(t, o)
       WHERE NOT (${table}.${column} ? e.t)), '[]'::jsonb)`;
 
+// A migration's statements are static SQL, so "did `up` just create the
+// columns?" is carried in a session setting: recorded before ADD COLUMN,
+// consulted by the re-assert below, cleared at the end.
+const FRESH = 'scenery_migration.fresh_columns';
+
 exports.up = (pgm) => {
+  pgm.sql(`SELECT set_config('${FRESH}', CASE WHEN EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = current_schema() AND table_name = 'entity_types' AND column_name = 'scenery_layer')
+    THEN 'no' ELSE 'yes' END, false)`);
   pgm.sql(`ALTER TABLE entity_types
     ADD COLUMN IF NOT EXISTS scenery_layer text NOT NULL DEFAULT 'feature'
       CONSTRAINT entity_types_scenery_layer_check CHECK (scenery_layer IN ('feature', 'cover')),
@@ -50,6 +60,17 @@ exports.up = (pgm) => {
         SET prompt = COALESCE(NULLIF(entity_types.prompt, ''), EXCLUDED.prompt)`);
   }
 
+  // After a down -> up the rows survive but the columns come back at their
+  // defaults (every cover type a 'feature', radius NULL, max 2), which would
+  // silently turn the catalogue into features. Re-assert the catalogue values
+  // -- but ONLY when this run created the columns: on a normal forward apply
+  // they hold admin edits that must survive.
+  for (const t of SCENERY_TYPES) {
+    pgm.sql(`UPDATE entity_types
+      SET scenery_layer = ${q(t.scenery_layer)}, block_radius = ${t.block_radius}, max_per_tile = ${t.max_per_tile}
+      WHERE name = ${q(t.name)} AND current_setting('${FRESH}', true) = 'yes'`);
+  }
+
   for (const [name, tiles] of Object.entries(SPAWN_TILE_ADDITIONS)) {
     pgm.sql(`UPDATE entity_types
       SET spawn_tiles = ${appendMissing('spawn_tiles', 'entity_types', tiles)}
@@ -58,6 +79,7 @@ exports.up = (pgm) => {
   for (const [name, r] of Object.entries(EXISTING_BLOCK_RADIUS)) {
     pgm.sql(`UPDATE entity_types SET block_radius = ${r} WHERE name = ${q(name)} AND block_radius IS NULL`);
   }
+  pgm.sql(`SELECT set_config('${FRESH}', '', false)`);
 
   for (const [name, s] of Object.entries(BIOME_SCENERY)) {
     pgm.sql(`UPDATE biomes

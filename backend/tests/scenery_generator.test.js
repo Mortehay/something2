@@ -187,3 +187,15 @@ test('a block_radius above half a tile is clamped to 50 and its circle stays in 
     assert.ok(d.oy - d.radius >= 0 && d.oy + d.radius <= 100, `oy ${d.oy}`);
   }
 });
+
+test('block_radius 0 and null on a blocking type both mean the default radius', () => {
+  for (const br of [0, null, undefined]) {
+    const defs = [{ ...TREE, block_radius: br }];
+    const { out } = gen(world({ biomes: [] }), defs);
+    assert.ok(out.length > 0);
+    for (const d of out) {
+      assert.equal(d.blocking, true);
+      assert.equal(d.radius, DEFAULT_BLOCK_RADIUS, `block_radius ${br}`);
+    }
+  }
+});

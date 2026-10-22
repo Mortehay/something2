@@ -1427,7 +1427,7 @@ function EntityTypesAdmin() {
                   </FormGroup>
                   {!formData.walkable && (
                     <FormGroup style={{ flex: 1 }}>
-                      <label>Block radius (px)</label>
+                      <label>Block radius (px, empty = default 12)</label>
                       <input
                         type="number"
                         step="1"
