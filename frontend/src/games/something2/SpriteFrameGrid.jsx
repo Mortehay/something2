@@ -28,6 +28,14 @@ const Flag = styled.span`
   position: absolute; top: 2px; right: 2px; background: var(--s2-warning); color: #000;
   font-size: 1rem; line-height: 1; padding: 1px 4px; border-radius: 3px;
 `;
+const Prev = styled.span`
+  display: inline-block; flex: none; image-rendering: pixelated; background-repeat: no-repeat; opacity: 0.85;
+  outline: ${(p) => (p.$redrawn ? '3px solid var(--s2-accent)' : '1px solid var(--s2-border)')}; outline-offset: -1px;
+`;
+const Changed = styled.span`
+  position: absolute; bottom: 2px; left: 2px; right: 2px; background: var(--s2-warning); color: #000;
+  font-size: 1rem; line-height: 1.1; padding: 1px 3px; border-radius: 3px; text-align: center;
+`;
 const Cross = styled.span`
   position: absolute; top: 2px; left: 4px; color: var(--s2-danger); font-weight: 700; font-size: 1.6rem; line-height: 1;
 `;
@@ -48,13 +56,13 @@ function stepFocus(e) {
 }
 
 export default function SpriteFrameGrid({
-  sheetUrl, sheetPx, manifest, initialMarks, onSend, onMarksChange, secondsPerCell, sending,
+  sheetUrl, sheetPx, manifest, initialMarks, initialAction, compare, onSend, onMarksChange, secondsPerCell, sending,
 }) {
   const [marks, setMarksState] = useState(() => new Set(initialMarks || []));
   const rows = manifest?.rows || [];
   const actions = [...new Set(rows.map((r) => r.action))];
   const firstMarked = actions.find((a) => [...marks].some((k) => k.startsWith(`${a}/`)));
-  const [action, setAction] = useState(firstMarked || actions[0]);
+  const [action, setAction] = useState(firstMarked || initialAction || actions[0]);
   // The loaded image's real size wins; the rect bounding box is only a fallback until it loads.
   const size = sheetPx?.w ? sheetPx : sheetSize(manifest);
   const quality = qualityByFrame(manifest);
@@ -63,6 +71,14 @@ export default function SpriteFrameGrid({
   const flaggedKeys = (a) => [...quality.keys()].filter((k) => (a ? k.startsWith(`${a}/`) : true) && isMarkable(k.split('/')[1]));
   const markFlagged = (a) => setMarks(new Set([...marks, ...flaggedKeys(a)]));
   const payload = redrawPayload(marks, manifest);
+  const redrawnKeys = new Set((compare?.redrawFrames || []).map((f) => frameKey(f.action, f.direction, f.frame)));
+  const changedKeys = new Set(compare?.changedUnmarked || []);
+  const cropStyle = (url, [x, y, w, h]) => ({
+    width: w * 2, height: h * 2,
+    backgroundImage: `url(${JSON.stringify(url)})`,
+    backgroundSize: `${size.w * 2}px ${size.h * 2}px`,
+    backgroundPosition: `${-x * 2}px ${-y * 2}px`,
+  });
 
   const renderRow = (row) => {
     const { direction } = row;
@@ -71,6 +87,10 @@ export default function SpriteFrameGrid({
     for (let i = 0; i < row.frames; i += 1) if (marks.has(frameKey(action, direction, i))) markedIdx.push(i);
     const ctx = new Set(contextFrames(row.frames, markedIdx));
     const summary = rowSummary(row.frames, markedIdx);
+    const rowRedrawn = compare && Array.from({ length: row.frames }, (_, i) => i)
+      .some((i) => redrawnKeys.has(frameKey(action, direction, i)));
+    const cells = Array.from({ length: row.frames }, (_, i) => i)
+      .filter((i) => manifest.frames?.[frameKey(action, direction, i)]);
     return (
       <div key={`${action}/${direction}`}>
         <RowHead>
@@ -83,12 +103,27 @@ export default function SpriteFrameGrid({
             </>
           )}
         </RowHead>
-        <Strip>
+        {rowRedrawn && (
+          <>
+            <Muted>previous</Muted>
+            <Strip data-strip="previous">
+              {cells.map((i) => {
+                const key = frameKey(action, direction, i);
+                return (
+                  <Checker key={key}>
+                    <Prev $redrawn={redrawnKeys.has(key)} style={cropStyle(compare.previousUrl, manifest.frames[key])} />
+                  </Checker>
+                );
+              })}
+            </Strip>
+            <Muted>new</Muted>
+          </>
+        )}
+        <Strip data-strip="new">
           {Array.from({ length: row.frames }, (_, i) => {
             const key = frameKey(action, direction, i);
             const rect = manifest.frames?.[key];
             if (!rect) return null;
-            const [x, y, w, h] = rect;
             const q = quality.get(key);
             const on = marks.has(key);
             return (
@@ -98,12 +133,11 @@ export default function SpriteFrameGrid({
                   $marked={on} $context={ctx.has(i)} onKeyDown={stepFocus}
                   onClick={() => setMarks(toggleMark(marks, key))}
                   style={{
-                    width: w * 2, height: h * 2,
-                    backgroundImage: `url(${JSON.stringify(sheetUrl)})`,
-                    backgroundSize: `${size.w * 2}px ${size.h * 2}px`,
-                    backgroundPosition: `${-x * 2}px ${-y * 2}px`,
+                    ...cropStyle(sheetUrl, rect),
+                    ...(redrawnKeys.has(key) && !on ? { outline: '3px solid var(--s2-accent)' } : {}),
                   }}>
                   {on && <Cross aria-hidden="true">✕</Cross>}
+                  {changedKeys.has(key) && <Changed>changed, not marked</Changed>}
                   {q && <Flag title={flagTitle(q)}>!</Flag>}
                 </Frame>
               </Checker>
@@ -125,6 +159,9 @@ export default function SpriteFrameGrid({
           <Tab key={a} type="button" $active={a === action} onClick={() => setAction(a)}>
             {a}
             {countIn(a, marks) > 0 && <Badge $tone="bad">{`${countIn(a, marks)}`}</Badge>}
+            {[...changedKeys].filter((k) => k.startsWith(`${a}/`)).length > 0 && (
+              <Badge $tone="warn">{`${[...changedKeys].filter((k) => k.startsWith(`${a}/`)).length} changed, not marked`}</Badge>
+            )}
             {flaggedKeys(a).length > 0 && <Badge $tone="warn">{`${flaggedKeys(a).length} flagged`}</Badge>}
           </Tab>
         ))}

@@ -125,6 +125,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   j.concept_key, j.actions, j.directions, j.frames_per_action, j.box_job_id,
                   j.prop_fx, j.updated_at AS job_updated_at,
                   j.redraw_of, j.redraw_frames, j.box_task_id,
+                  (SELECT r.atlas_key FROM sprite_sets r WHERE r.id = j.redraw_of) AS redraw_source_atlas_key,
                   sh.id AS sheet_job_id, sh.atlas_key AS sheet_atlas_key,
                   sh.manifest_key AS sheet_manifest_key, sh.updated_at AS sheet_updated_at
              FROM entity_types e
@@ -153,6 +154,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   j.concept_key, j.actions, j.directions, j.frames_per_action, j.box_job_id,
                   j.prop_fx, j.updated_at AS job_updated_at,
                   j.redraw_of, j.redraw_frames, j.box_task_id,
+                  (SELECT r.atlas_key FROM sprite_sets r WHERE r.id = j.redraw_of) AS redraw_source_atlas_key,
                   sh.id AS sheet_job_id, sh.atlas_key AS sheet_atlas_key,
                   sh.manifest_key AS sheet_manifest_key, sh.updated_at AS sheet_updated_at
              FROM character_appearances ca
@@ -210,6 +212,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           job_updated_at: a.job_updated_at,
           redraw_of: a.redraw_of,
           redraw_frames: a.redraw_frames,
+          redraw_source_atlas_key: a.redraw_source_atlas_key,
           box_task_id: a.box_task_id,
           sheet_job_id: a.sheet_job_id,
           sheet_atlas_key: a.sheet_atlas_key,

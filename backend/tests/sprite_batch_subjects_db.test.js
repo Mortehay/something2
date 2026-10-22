@@ -108,6 +108,7 @@ test('subjects carry concept_key and actions from the newest job', { skip }, asy
   assert.equal(row.box_job_id, 'box-9');
   // Props v2: the preview popup labels "Effect on approve" from this.
   assert.equal(row.prop_fx, 'shine');
+  assert.equal(row.redraw_source_atlas_key, null);
 });
 
 test('a subject whose latest row is a queued redraw carries redraw_of and the sheet from the source row', { skip }, async (t) => {
@@ -150,6 +151,7 @@ test('a subject whose latest row is a queued redraw carries redraw_of and the sh
   assert.equal(row.redraw_of, src.id);
   assert.deepEqual(row.redraw_frames, [{ action: 'idle', direction: 's', frame: 2 }]);
   assert.equal(row.box_task_id, null);
+  assert.equal(row.redraw_source_atlas_key, 'sprites/a.png');
   assert.equal(row.sheet_job_id, src.id);
   assert.equal(row.sheet_atlas_key, 'sprites/a.png');
   assert.equal(row.sheet_manifest_key, 'sprites/sheet.json');

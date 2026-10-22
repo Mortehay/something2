@@ -60,4 +60,23 @@ describe('SpriteFrameGrid', () => {
     const html = render({ initialMarks: marks, sheetPx: { w: 1000, h: 3000 } });
     expect(html).toContain('background-size:2000px 6000px');
   });
+  it('compare: previous strip only for rows with redrawn frames, one changed badge', () => {
+    const html = render({
+      initialMarks: new Set(),
+      initialAction: 'attack',
+      compare: {
+        previousUrl: 'http://x/prev.png',
+        redrawFrames: [{ action: 'attack', direction: 'e', frame: 2 }],
+        changedUnmarked: ['attack/s/1'],
+      },
+    });
+    expect(html.match(/data-strip="previous"/g)).toHaveLength(1);
+    expect(html).toContain('prev.png');
+    expect(html.match(/changed, not marked/g).length).toBe(2); // frame badge + tab count
+    expect(html.match(/<span[^>]*>changed, not marked<\/span>/g)).toHaveLength(1);
+    expect(html).toContain('attack · e');
+  });
+  it('no compare: no previous strips', () => {
+    expect(render({ initialMarks: marks })).not.toContain('data-strip="previous"');
+  });
 });

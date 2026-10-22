@@ -3,14 +3,14 @@
 // A GPU-box prop (Props v2) has no sheet: the right side is the generated
 // (trimmed) cutout image, previewed with a CSS stand-in for the idle effect it will
 // get in game on approve (prop_fx: none | sway | shine).
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import styled, { keyframes } from 'styled-components';
 import { useQuery } from '@tanstack/react-query';
 import { Btn, Modal, Muted } from './seedUi.jsx';
 import { assetUrl, assetUrlVersioned } from './useTileSprites.js';
 import { conceptImageOf, conceptLabelOf, isBoxProp, sheetImageOf, sheetManifestOf, propEffect, propFxLabel, rowLabels } from './spriteSelection.js';
 import SpriteFrameGrid from './SpriteFrameGrid.jsx';
-import { initialMarksFor, redrawPayload, shouldConfirmClose } from './frameRedraw.js';
+import { changedUnmarked, initialMarksFor, redrawPayload, shouldConfirmClose } from './frameRedraw.js';
 import { useActionCatalog, useDiscardRedraw, useRedrawFrames } from './useSpriteConsole.js';
 
 const Cols = styled.div`display: flex; gap: 1.2rem; align-items: flex-start; flex-wrap: wrap; margin-top: 0.8rem;`;
@@ -56,6 +56,47 @@ const Glint = styled.span`
   @media (prefers-reduced-motion: reduce) { animation: none; opacity: 0; }
 `;
 
+// Decode a same-origin PNG into RGBA pixels (off-screen canvas).
+function loadImageData(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        const { data, width } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        resolve({ data, width });
+      } catch (err) { reject(err); }
+    };
+    img.onerror = () => reject(new Error('image failed to load'));
+    img.src = url;
+  });
+}
+
+// Compare a done redraw's sheet with the sheet it started from; only runs once `enabled`.
+function useCompare(enabled, previousUrl, nextUrl, manifest, redrawFrames) {
+  const [state, setState] = useState({ status: 'idle', changed: [] });
+  // Polled subjects hand back fresh arrays; depend on the content so the PNGs are not reloaded every poll.
+  const framesKey = JSON.stringify(redrawFrames || []);
+  useEffect(() => {
+    if (!enabled || !previousUrl || !nextUrl || !manifest) return undefined;
+    let live = true;
+    setState({ status: 'loading', changed: [] });
+    Promise.all([loadImageData(previousUrl), loadImageData(nextUrl)])
+      .then(([prev, next]) => {
+        if (live) setState({ status: 'ready', changed: changedUnmarked(prev, next, manifest, redrawFrames) });
+      })
+      .catch(() => { if (live) setState({ status: 'failed', changed: [] }); });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, previousUrl, nextUrl, manifest, framesKey]);
+  return state;
+}
+
 function useSheetManifest(key, enabled) {
   return useQuery({
     queryKey: ['sprite-sheet-manifest', key],
@@ -100,6 +141,7 @@ export default function SpritePreviewModal({ subject, onClose }) {
   const [initialMarks] = useState(() => initialMarksFor(subject));
   const marksRef = useRef(initialMarks);
   const [sheetPx, setSheetPx] = useState(null);
+  const [compareOn, setCompareOn] = useState(false);
   const redraw = useRedrawFrames();
   const discard = useDiscardRedraw();
   const { catalog } = useActionCatalog();
@@ -114,6 +156,13 @@ export default function SpritePreviewModal({ subject, onClose }) {
   const showGrid = subject.backend === 'gpu-box' && subject.generation_kind === 'creature'
     && Boolean(manifest.data) && Boolean(sheetKey) && gridState;
   const discardable = failedRedraw && (!subject.box_task_id || !subject.atlas_key);
+  const canCompare = isRedraw && subject.job_state === 'done' && Boolean(subject.redraw_source_atlas_key);
+  const previousUrl = canCompare ? assetUrl(subject.redraw_source_atlas_key) : null;
+  const cmp = useCompare(compareOn && canCompare && showGrid, previousUrl, showGrid ? assetUrlVersioned(sheetKey, version) : null,
+    manifest.data, subject.redraw_frames);
+  const compareProps = compareOn && canCompare
+    ? { previousUrl, redrawFrames: subject.redraw_frames || [], changedUnmarked: cmp.changed } : undefined;
+  const firstRedrawnAction = canCompare ? (subject.redraw_frames || [])[0]?.action : undefined;
   const close = () => {
     const n = marksRef.current.size;
     if (shouldConfirmClose(marksRef.current) && !window.confirm(`Discard ${n} unsent frame marks?`)) return;
@@ -149,9 +198,18 @@ export default function SpritePreviewModal({ subject, onClose }) {
           )}
           <img src={assetUrlVersioned(sheetKey, version)} alt="" hidden
             onLoad={(e) => setSheetPx({ url: assetUrlVersioned(sheetKey, version), w: e.target.naturalWidth, h: e.target.naturalHeight })} />
+          {canCompare && (
+            <label style={{ fontSize: '1.2rem' }}>
+              <input type="checkbox" checked={compareOn} onChange={(e) => setCompareOn(e.target.checked)} />
+              {' Compare with previous'}
+            </label>
+          )}
+          {compareOn && cmp.status === 'loading' && <Muted>Comparing sheets…</Muted>}
+          {compareOn && cmp.status === 'failed' && <Muted>Could not compare the sheets, so no changed-frame warnings are shown.</Muted>}
           <SpriteFrameGrid sheetUrl={assetUrlVersioned(sheetKey, version)} manifest={manifest.data}
             sheetPx={sheetPx && sheetPx.url === assetUrlVersioned(sheetKey, version) ? { w: sheetPx.w, h: sheetPx.h } : null}
-            initialMarks={initialMarks} onMarksChange={(m) => { marksRef.current = m; }}
+            initialMarks={initialMarks} initialAction={firstRedrawnAction} compare={compareProps}
+            onMarksChange={(m) => { marksRef.current = m; }}
             onSend={sendFrames(failedRedraw ? subject.sheet_job_id : subject.job_id)}
             secondsPerCell={catalog?.seconds_per_cell} sending={redraw.isPending} />
         </Col>

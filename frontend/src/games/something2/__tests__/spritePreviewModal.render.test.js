@@ -93,4 +93,10 @@ describe('SpritePreviewModal frame redraw', () => {
     expect(html).not.toContain('Retry redraw');
     expect(html).toContain('Generated (trimmed)');
   });
+  it('a done redraw offers Compare with previous only when the source sheet is known', () => {
+    const done = failed({ job_state: 'done', last_error: null, atlas_key: 'new.png', manifest_key: 'sheet.json', redraw_source_atlas_key: 'old.png' });
+    expect(renderWith(done)).toContain('Compare with previous');
+    expect(renderWith({ ...done, redraw_source_atlas_key: null })).not.toContain('Compare with previous');
+    expect(renderWith(failed({ redraw_source_atlas_key: 'old.png' }))).not.toContain('Compare with previous');
+  });
 });
