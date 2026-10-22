@@ -682,6 +682,14 @@ function spawnTileCell(world) {
   return { row: Math.floor(sp.y / 100), col: Math.floor(sp.x / 100) };
 }
 
+// The dungeon boss post as a (row,col) tile, or null (world pixels, like
+// entry_spawn; set by buildWorldGenConfig from worlds.dungeon_boss).
+function bossTileCell(world) {
+  const b = world && world.dungeonBoss;
+  if (!b || typeof b.x !== 'number' || typeof b.y !== 'number') return null;
+  return { row: Math.floor(b.y / 100), col: Math.floor(b.x / 100) };
+}
+
 // SOMET-510 — every PORTAL endpoint in this world, as (row,col) tiles.
 //
 // `world.portals` is world PIXELS, matching entry_spawn above and the
@@ -804,7 +812,11 @@ function generateChunkDecorations(world, cx, cy, tiles, decorationDefs, opts = {
   const rMin = cy * N, cMin = cx * N;
   const paths = collectPathCells(cfg, rMin, cMin, N, N);
   const spawn = spawnTileCell(world);
-  const portals = portalTileCells(world);
+  // The dungeon boss post gets the portal endpoint's clearance: the same
+  // open-ground point a player must be able to walk up to (seed-map's
+  // requiredTilesFor lists it next to the arrival points).
+  const boss = bossTileCell(world);
+  const portals = boss ? portalTileCells(world).concat(boss) : portalTileCells(world);
   const coverDefs = withCover ? decorationDefs.filter((d) => d.scenery_layer === 'cover') : [];
   const out = [];
   const featureDefs = decorationDefs.filter((d) => d.scenery_layer !== 'cover');
