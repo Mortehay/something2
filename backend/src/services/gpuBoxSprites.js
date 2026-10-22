@@ -268,13 +268,26 @@ async function redrawFrames(provider, boxJobId, frames, { fetchImpl = fetch } = 
   });
   if (error) return { ok: false, error, retryable };
   if (res.status === 404) {
-    return { ok: false, error: "The GPU box no longer has this sheet's job. Queue the whole sheet again." };
+    // A 404 is either "no such sheet job" or "no /redraw route on this box".
+    // Ask about the sheet job itself before telling the admin it is gone.
+    const probe = await getSheetJob(provider, boxJobId, { fetchImpl });
+    if (!probe.ok) {
+      return {
+        ok: false,
+        retryable: probe.retryable,
+        error: `GPU box answered 404 for POST ${p}, and checking the sheet job failed: ${probe.error}`,
+      };
+    }
+    if (probe.job.status === 'missing') {
+      return { ok: false, error: "The GPU box no longer has this sheet's job. Queue the whole sheet again." };
+    }
+    return { ok: false, error: 'The GPU box does not support frame redraw yet.' };
   }
   if (!res.ok) return httpFailure(res, 'POST', p);
   const read = await readJsonCapped(res, JSON_CAP());
   if (read.error) return { ok: false, error: `GPU box did not answer with usable JSON: ${read.error}`, providerFault: true };
   const taskId = read.json && (read.json.task_id || read.json.job_id);
-  if (!taskId) return { ok: false, error: 'GPU box accepted the redraw but returned no task id', providerFault: true };
+  if (typeof taskId !== 'string' || taskId === '') return { ok: false, error: 'GPU box accepted the redraw but returned no task id', providerFault: true };
   return { ok: true, taskId };
 }
 

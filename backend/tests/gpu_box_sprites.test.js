@@ -357,15 +357,50 @@ test('redrawFrames falls back to job_id, and flags a reply with no id', async ()
   assert.equal(r.error, 'GPU box accepted the redraw but returned no task id');
 });
 
-test('redrawFrames maps 404 to the gone-job message and 500 to a failure', async () => {
+test('redrawFrames maps 404 with a missing sheet job to the gone-job message and 500 to a failure', async () => {
   const f = [{ action: 'idle', direction: 's', frame: 0 }];
-  const { fetchImpl } = fakeBox({
+  const { fetchImpl, calls } = fakeBox({
     'POST /api/jobs/gone/redraw': () => new Response('no such job', { status: 404 }),
     'POST /api/jobs/bad/redraw': () => new Response('boom', { status: 500 }),
   });
   const gone = await box.redrawFrames(provider, 'gone', f, { fetchImpl });
   assert.deepEqual(gone, { ok: false, error: "The GPU box no longer has this sheet's job. Queue the whole sheet again." });
+  assert.ok(calls.some((c) => c.key === 'GET /api/jobs/gone'), 'probes the sheet job before blaming it');
   const bad = await box.redrawFrames(provider, 'bad', f, { fetchImpl });
   assert.equal(bad.ok, false);
   assert.match(bad.error, /500 for POST \/api\/jobs\/bad\/redraw/);
+});
+
+test('redrawFrames: a 404 while the sheet job still exists means the box has no redraw route', async () => {
+  const f = [{ action: 'idle', direction: 's', frame: 0 }];
+  const { fetchImpl } = fakeBox({
+    'POST /api/jobs/j/redraw': () => new Response('Not Found', { status: 404 }),
+    'GET /api/jobs/j': () => json({ status: 'done' }),
+  });
+  const r = await box.redrawFrames(provider, 'j', f, { fetchImpl });
+  assert.deepEqual(r, { ok: false, error: 'The GPU box does not support frame redraw yet.' });
+});
+
+test('redrawFrames: a 404 whose sheet-job probe fails reports the probe failure, not a gone job', async () => {
+  const f = [{ action: 'idle', direction: 's', frame: 0 }];
+  const { fetchImpl } = fakeBox({
+    'POST /api/jobs/j/redraw': () => new Response('Not Found', { status: 404 }),
+    'GET /api/jobs/j': () => new Response('down', { status: 503 }),
+  });
+  const r = await box.redrawFrames(provider, 'j', f, { fetchImpl });
+  assert.equal(r.ok, false);
+  assert.equal(r.retryable, true);
+  assert.doesNotMatch(r.error, /no longer has/);
+  assert.match(r.error, /404 for POST \/api\/jobs\/j\/redraw/);
+});
+
+test('redrawFrames requires the task id to be a non-empty string', async () => {
+  const f = [{ action: 'idle', direction: 's', frame: 0 }];
+  for (const reply of [{ task_id: 7 }, { task_id: '' }, { task_id: { id: 'x' } }, { job_id: ['x'] }]) {
+    const { fetchImpl } = fakeBox({ 'POST /api/jobs/j/redraw': () => json(reply) });
+    const r = await box.redrawFrames(provider, 'j', f, { fetchImpl });
+    assert.equal(r.ok, false, JSON.stringify(reply));
+    assert.equal(r.providerFault, true);
+    assert.equal(r.error, 'GPU box accepted the redraw but returned no task id');
+  }
 });
