@@ -331,3 +331,41 @@ test('txt2imgProp reports an unreachable box as retryable', async () => {
   assert.equal(r.retryable, true);
   assert.match(r.error, /could not reach/);
 });
+
+test('redrawFrames posts the frames to the sheet job and returns the task id', async () => {
+  const frames = [{ action: 'idle', direction: 's', frame: 2 }];
+  const { fetchImpl, calls } = fakeBox({
+    'POST /api/jobs/j%201/redraw': () => json({ task_id: 't9' }, 202),
+  });
+  const r = await box.redrawFrames(provider, 'j 1', frames, { fetchImpl });
+  assert.deepEqual(r, { ok: true, taskId: 't9' });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url.pathname, '/api/jobs/j%201/redraw');
+  assert.deepEqual(JSON.parse(calls[0].body), { frames });
+  assert.equal(calls[0].headers['Content-Type'], 'application/json');
+  assert.match(JSON.stringify(calls[0].headers), /sk_test/);
+});
+
+test('redrawFrames falls back to job_id, and flags a reply with no id', async () => {
+  const f = [{ action: 'idle', direction: 's', frame: 0 }];
+  const a = fakeBox({ 'POST /api/jobs/j/redraw': () => json({ job_id: 'k' }) });
+  assert.deepEqual(await box.redrawFrames(provider, 'j', f, { fetchImpl: a.fetchImpl }), { ok: true, taskId: 'k' });
+  const b = fakeBox({ 'POST /api/jobs/j/redraw': () => json({}) });
+  const r = await box.redrawFrames(provider, 'j', f, { fetchImpl: b.fetchImpl });
+  assert.equal(r.ok, false);
+  assert.equal(r.providerFault, true);
+  assert.equal(r.error, 'GPU box accepted the redraw but returned no task id');
+});
+
+test('redrawFrames maps 404 to the gone-job message and 500 to a failure', async () => {
+  const f = [{ action: 'idle', direction: 's', frame: 0 }];
+  const { fetchImpl } = fakeBox({
+    'POST /api/jobs/gone/redraw': () => new Response('no such job', { status: 404 }),
+    'POST /api/jobs/bad/redraw': () => new Response('boom', { status: 500 }),
+  });
+  const gone = await box.redrawFrames(provider, 'gone', f, { fetchImpl });
+  assert.deepEqual(gone, { ok: false, error: "The GPU box no longer has this sheet's job. Queue the whole sheet again." });
+  const bad = await box.redrawFrames(provider, 'bad', f, { fetchImpl });
+  assert.equal(bad.ok, false);
+  assert.match(bad.error, /500 for POST \/api\/jobs\/bad\/redraw/);
+});

@@ -254,6 +254,30 @@ async function createSheetJob(provider, spec, { fetchImpl = fetch } = {}) {
   return { ok: true, boxJobId: r.json.job_id, cells: r.json.cells, estimatedSeconds: r.json.estimated_seconds };
 }
 
+// [ASSUMED] box contract (the box's redraw API is not built yet):
+// POST /api/jobs/{boxJobId}/redraw with {"frames":[{action,direction,frame}]}
+// answers JSON with task_id (or job_id). The task is then polled and cancelled
+// like a sheet job (GET / DELETE /api/jobs/{taskId}); once done, the original
+// job's /sheet and /atlas return the updated sheet.
+async function redrawFrames(provider, boxJobId, frames, { fetchImpl = fetch } = {}) {
+  const p = `/api/jobs/${encodeURIComponent(boxJobId)}/redraw`;
+  const { res, error, retryable } = await call(provider, 'POST', p, {
+    body: JSON.stringify({ frames }),
+    headers: { 'Content-Type': 'application/json' },
+    fetchImpl,
+  });
+  if (error) return { ok: false, error, retryable };
+  if (res.status === 404) {
+    return { ok: false, error: "The GPU box no longer has this sheet's job. Queue the whole sheet again." };
+  }
+  if (!res.ok) return httpFailure(res, 'POST', p);
+  const read = await readJsonCapped(res, JSON_CAP());
+  if (read.error) return { ok: false, error: `GPU box did not answer with usable JSON: ${read.error}`, providerFault: true };
+  const taskId = read.json && (read.json.task_id || read.json.job_id);
+  if (!taskId) return { ok: false, error: 'GPU box accepted the redraw but returned no task id', providerFault: true };
+  return { ok: true, taskId };
+}
+
 const STATUS_MAP = { queued: 'queued', running: 'running', done: 'done', failed: 'failed', error: 'failed', cancelled: 'cancelled', canceled: 'cancelled' };
 
 async function getSheetJob(provider, boxJobId, { fetchImpl = fetch } = {}) {
@@ -299,5 +323,5 @@ async function fetchAtlas(provider, boxJobId, { fetchImpl = fetch } = {}) {
 }
 
 module.exports = {
-  STATUS_TERMINAL, actionCatalog, checkAuth, listConceptModels, generateConcept, txt2imgProp, PROP_NEGATIVE_PROMPT, createSheetJob, getSheetJob, cancelSheetJob, fetchSheet, fetchAtlas,
+  STATUS_TERMINAL, actionCatalog, checkAuth, listConceptModels, generateConcept, txt2imgProp, PROP_NEGATIVE_PROMPT, createSheetJob, redrawFrames, getSheetJob, cancelSheetJob, fetchSheet, fetchAtlas,
 };
