@@ -228,6 +228,36 @@ A sheet is "clean" when, for every cell:
    rest of the sheet is pixel-identical, and the new frames pass the
    continuity check against their neighbours.
 
+## Spike results (something2 side, 2026-10-22, throwaway)
+
+A ~150-line numpy/PIL checker was run on the two evidence sheets. It only sees
+fitted cells (no raw outputs, no embeddings). It is a starting point for
+thresholds, not the implementation. (The spike script is not committed; the
+checks are described here so they can be rebuilt on the box.)
+
+| Check | Rule that worked | Result |
+|---|---|---|
+| Front copy in `se`/`sw` | idle row's mean abs diff to idle `s` < 0.6× (`e` to `s`) | Caught in both sheets (6.7 / 6.2 vs 17.8; 9.9 / 10.3 vs 17.4) |
+| Close-up | opaque fraction > 1.6× the direction's idle median, OR bbox width ≥ 46 of 48 with opaque > 1.25× | Caught Cultist:2 attack `s` f2/f4, and most of cast `s`/`se`/`sw`/`e` |
+| Backdrop | opaque > 1.4× idle median AND > 15 % of border pixels opaque | Fired 0 times; the backdrop cells came out as close-ups instead. Flagged, wrong label. Needs a colour test (flat low-saturation region touching the figure) |
+| Facing | silhouette IoU with the direction's idle f0 vs its mirror; mirror wins by > 0.08 | Good on calm poses (idle/sway/walk `ne`/`nw` alternation all caught). **Missed** Cultist:1 attack `e` f3 (caught only as a close-up). Silhouettes fail on big poses; use a pose/embedding signal there |
+| Identity | colour-histogram distance to the concept > 0.55 | **Useless**: fires on every back view (`n`), because the back of a robe has different colours from the front concept. Needs an embedding (e.g. DINO/CLIP image features) against the turnaround frame for that direction, not against the front concept |
+
+**New cause found: spell effects.** In Cultist:2's cast row (and some
+attack/use/sway frames), the "backdrop" is mostly a grey or beige glow, aura or
+energy arc painted behind the character, which background removal keeps as part
+of the figure. Some frames also have speckle noise around the figure. The game
+draws its own attack/cast effects, so sheets must not contain any.
+**Box-side prompt fix:** the action prompts for attack/cast/use (and
+everything else) must exclude effects, e.g. "no spell effects, no glow, no
+aura, no energy, no particles, no background", and a check should treat
+detached or low-saturation blobs around the figure as a backdrop.
+
+Flag counts with these rules: Cultist:1 72/336, Cultist:2 57/336. Many of
+Cultist:1's are the identity false positives on `n`; with identity removed,
+Cultist:1 is mostly facing flips in `ne`/`nw` and Cultist:2 mostly close-ups
+and effects in cast/attack/use.
+
 ## Left to the box session
 
 How to measure facing and identity (embedding similarity, mirror comparison,
