@@ -7,7 +7,7 @@ const { applyTrustProxy, clientIpKey } = require('./clientIp');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
-const { generateChunk, generateChunkDecorations, generateWorldPreview, isBoundedWorld, CREATURE_TILE_PX, generateWorldOverview, overviewOrigin, worldConfig, chunkBiomeGrid } = require('./services/mapService');
+const { generateChunk, generateChunkDecorations, splitChunkDecorations, generateWorldPreview, isBoundedWorld, CREATURE_TILE_PX, generateWorldOverview, overviewOrigin, worldConfig, chunkBiomeGrid } = require('./services/mapService');
 const { fetchLinks, setLink, clearLink } = require('./services/mapLinks');
 const worldGen = require('./services/worldGenService.js');
 const { validateMapSpec } = require('../seeds/mapSpec.js');
@@ -816,7 +816,32 @@ const MAX_ENTITY_DISPLAY_PX = 400;
 // entity_types.idle_fx values (CHECK in migration 1714440824000).
 const IDLE_FX = ['none', 'sway', 'shine'];
 
+// Scenery fields (biome scenery density). Numeric strings are coerced, so a
+// form that posts "6" behaves like 6; anything else non-numeric is not an int.
+const SCENERY_LAYERS = ['feature', 'cover'];
+function intOrNaN(v) {
+  if (typeof v === 'number') return Number.isInteger(v) ? v : NaN;
+  if (typeof v === 'string' && v.trim() !== '' && Number.isInteger(Number(v))) return Number(v);
+  return NaN;
+}
+function sceneryFieldError(body) {
+  if (body.scenery_layer !== undefined && !SCENERY_LAYERS.includes(body.scenery_layer)) {
+    return `scenery_layer must be one of ${SCENERY_LAYERS.join(', ')}`;
+  }
+  if (body.block_radius != null) {
+    const n = intOrNaN(body.block_radius);
+    if (!(n >= 0 && n <= 20)) return 'block_radius must be an integer between 0 and 20, or null';
+  }
+  if (body.max_per_tile !== undefined) {
+    const n = intOrNaN(body.max_per_tile);
+    if (!(n >= 1 && n <= 6)) return 'max_per_tile must be an integer between 1 and 6';
+  }
+  return null;
+}
+
 function entityTypeFieldError(body) {
+  const sceneryErr = sceneryFieldError(body);
+  if (sceneryErr) return sceneryErr;
   // SOMET-453. The pin rule lives in ONE place (services/providerPin.js) and is
   // reached from here, so every caller that asks "is this entity-type body
   // valid" gets the same answer. It used to be consulted only by the PUT route,
@@ -975,8 +1000,9 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
         display_width, display_height, render_mode, is_creature, prompt, place_order,
         behavior_id, attack_element, ai_provider_mode, ai_provider_id, point_kind,
         boss_tier, element, hitbox_size, xp_reward, base_damage, auras,
-        loot_rolls, loot_min_rarity, loot_rarity_bias, loot_chest, idle_fx
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35::jsonb, $36, $37, $38, $39, $40) RETURNING *`,
+        loot_rolls, loot_min_rarity, loot_rarity_bias, loot_chest, idle_fx,
+        scenery_layer, block_radius, max_per_tile
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35::jsonb, $36, $37, $38, $39, $40, $41, $42, $43) RETURNING *`,
       [
         name, color, walkable ?? false, JSON.stringify(spawn_tiles || []), chance ?? 0.1,
         strength ?? 0, dexterity ?? 0, constitution ?? 0, intelligence ?? 0, wisdom ?? 0, charisma ?? 0,
@@ -986,7 +1012,10 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
         boss_tier ?? null, element ?? null, hitbox_size ?? null, xp_reward ?? null, base_damage ?? null,
         req.body.auras == null ? null : JSON.stringify(req.body.auras),
         loot_rolls ?? null, loot_min_rarity ?? null, loot_rarity_bias ?? null, loot_chest ?? null,
-        req.body.idle_fx ?? 'none'
+        req.body.idle_fx ?? 'none',
+        req.body.scenery_layer ?? 'feature',
+        req.body.block_radius == null ? null : intOrNaN(req.body.block_radius),
+        req.body.max_per_tile === undefined ? 2 : intOrNaN(req.body.max_per_tile)
       ]
     );
     res.status(201).json(result.rows[0]);
@@ -1128,8 +1157,13 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
         -- Props v2: omitted leaves the effect alone (entityTypeFieldError
         -- already refused anything but none|sway|shine).
         idle_fx = CASE WHEN $53::boolean THEN $54::text ELSE entity_types.idle_fx END,
+        -- Biome scenery: omitted leaves the stored value alone; block_radius
+        -- also accepts an explicit null (back to the generator default).
+        scenery_layer = COALESCE($55::text, entity_types.scenery_layer),
+        block_radius = CASE WHEN $56::boolean THEN $57::integer ELSE entity_types.block_radius END,
+        max_per_tile = COALESCE($58::integer, entity_types.max_per_tile),
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $55 RETURNING *`,
+      WHERE id = $59 RETURNING *`,
       [
         name, color, walkable, JSON.stringify(spawn_tiles), chance,
         strength, dexterity, constitution, intelligence, wisdom, charisma,
@@ -1177,6 +1211,11 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
         'loot_rarity_bias' in req.body, loot_rarity_bias ?? null,
         'loot_chest' in req.body, loot_chest ?? null,
         'idle_fx' in req.body, req.body.idle_fx ?? null,
+        // scenery params ($55-$58) precede id for the same id-is-last reason.
+        req.body.scenery_layer ?? null,
+        'block_radius' in req.body,
+        req.body.block_radius == null ? null : intOrNaN(req.body.block_radius),
+        req.body.max_per_tile == null ? null : intOrNaN(req.body.max_per_tile),
         id
       ]
     );
@@ -2688,6 +2727,18 @@ function biomeCreatureDensity(v) {
   return (Number.isFinite(n) && n > 0) ? n : 1;
 }
 
+// Scenery densities. null/'' = unset (the generator falls back: feature 0.6,
+// cover 0); numbers clamp to [0,1] / [0,3]; other junk is 0 for cover (never
+// scatter by accident) and unset for feature. Numeric strings are coerced.
+function biomeSceneryDensity(v, max, junk) {
+  if (v === null || v === undefined || (typeof v === 'string' && v.trim() === '')) return null;
+  const n = Number(v);
+  if (Number.isNaN(n)) return junk;
+  return Math.min(max, Math.max(0, n));
+}
+const biomeFeatureDensity = (v) => biomeSceneryDensity(v, 1, null);
+const biomeCoverDensity = (v) => biomeSceneryDensity(v, 3, 0);
+
 // Worlds that still list `name` in their biome set. worlds.biomes is a jsonb
 // array of names with no FK (same as allowed_creature_types), so a rename or
 // delete here would silently orphan the reference and quietly revert those
@@ -2713,7 +2764,7 @@ app.post('/api/biomes', adminGuard, async (req, res) => {
   try {
     const {
       name, terrain_tiles, flora_types, creature_types, palette, art_style, exclusions, color,
-      creature_density,
+      creature_density, feature_density, cover_density,
     } = req.body;
     if (!name || typeof name !== 'string' || !name.trim()) {
       return res.status(400).json({ error: 'name is required' });
@@ -2722,13 +2773,15 @@ app.post('/api/biomes', adminGuard, async (req, res) => {
       return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
     }
     const result = await pool.query(
-      `INSERT INTO biomes (name, terrain_tiles, flora_types, creature_types, palette, art_style, exclusions, color, creature_density)
-       VALUES ($1, $2::jsonb, $3::jsonb, $4::jsonb, $5::jsonb, $6, $7, $8, $9) RETURNING *`,
+      `INSERT INTO biomes (name, terrain_tiles, flora_types, creature_types, palette, art_style, exclusions, color, creature_density,
+                           feature_density, cover_density)
+       VALUES ($1, $2::jsonb, $3::jsonb, $4::jsonb, $5::jsonb, $6, $7, $8, $9, $10, $11) RETURNING *`,
       [
         name.trim(),
         JSON.stringify(nameArray(terrain_tiles)), JSON.stringify(nameArray(flora_types)),
         JSON.stringify(nameArray(creature_types)), JSON.stringify(nameArray(palette)),
         art_style || '', exclusions || '', color || '#888888', biomeCreatureDensity(creature_density),
+        biomeFeatureDensity(feature_density), biomeCoverDensity(cover_density),
       ],
     );
     res.status(201).json(result.rows[0]);
@@ -2744,7 +2797,7 @@ app.put('/api/biomes/:id', adminGuard, async (req, res) => {
     const { id } = req.params;
     const {
       name, terrain_tiles, flora_types, creature_types, palette, art_style, exclusions, color,
-      creature_density,
+      creature_density, feature_density, cover_density,
     } = req.body;
     if (!name || typeof name !== 'string' || !name.trim()) {
       return res.status(400).json({ error: 'name is required' });
@@ -2753,7 +2806,8 @@ app.put('/api/biomes/:id', adminGuard, async (req, res) => {
       return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
     }
     const cur = await pool.query(
-      'SELECT name, terrain_tiles, flora_types, creature_types, creature_density FROM biomes WHERE id = $1', [id],
+      // one line: tests/biomesApi.test.js routes this query by a no-newline regex
+      'SELECT name, terrain_tiles, flora_types, creature_types, creature_density, feature_density, cover_density FROM biomes WHERE id = $1', [id],
     );
     if (cur.rows.length === 0) return res.status(404).json({ error: 'Biome not found' });
     const oldName = cur.rows[0].name;
@@ -2813,20 +2867,29 @@ app.put('/api/biomes/:id', adminGuard, async (req, res) => {
     // without this an admin edit would appear to save and then change nothing
     // about placement until the world happened to reload.
     const densityChanged = biomeCreatureDensity(cur.rows[0].creature_density) !== nextDensity;
+    // Scenery densities: absent keeps the stored value (a form that predates
+    // them must not wipe them); an explicit null stores NULL (= unset).
+    const nextFeature = feature_density === undefined
+      ? (cur.rows[0].feature_density ?? null) : biomeFeatureDensity(feature_density);
+    const nextCover = cover_density === undefined
+      ? (cur.rows[0].cover_density ?? null) : biomeCoverDensity(cover_density);
+    const sceneryChanged = (cur.rows[0].feature_density ?? null) !== nextFeature
+      || (cur.rows[0].cover_density ?? null) !== nextCover;
     const decorationChanged =
-      JSON.stringify(nameArray(cur.rows[0].flora_types)) !== JSON.stringify(nextFlora)
+      sceneryChanged || JSON.stringify(nameArray(cur.rows[0].flora_types)) !== JSON.stringify(nextFlora)
       || JSON.stringify(nameArray(cur.rows[0].creature_types)) !== JSON.stringify(nextCreatures)
       || densityChanged;
     const result = await pool.query(
       `UPDATE biomes SET name = $1, terrain_tiles = $2::jsonb, flora_types = $3::jsonb,
          creature_types = $4::jsonb, palette = $5::jsonb, art_style = $6, exclusions = $7,
-         color = $8, creature_density = $9, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $10 RETURNING *`,
+         color = $8, creature_density = $9, feature_density = $10, cover_density = $11,
+         updated_at = CURRENT_TIMESTAMP
+       WHERE id = $12 RETURNING *`,
       [
         name.trim(),
         JSON.stringify(nextTerrainTiles), JSON.stringify(nextFlora),
         JSON.stringify(nextCreatures), JSON.stringify(nameArray(palette)),
-        art_style || '', exclusions || '', color || '#888888', nextDensity, id,
+        art_style || '', exclusions || '', color || '#888888', nextDensity, nextFeature, nextCover, id,
       ],
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Biome not found' });
@@ -5708,8 +5771,10 @@ app.get('/api/worlds/:id/chunk', playerGuard, async (req, res) => {
     );
     if (cached.rows[0]) {
       const data = cached.rows[0].data;
-      const decorations = generateChunkDecorations(worldCfg, cx, cy, data, decorationDefs);
-      return res.json({ world_id: worldId, cx, cy, data, decorations, biomes: chunkBiomes });
+      const { decorations, cover } = splitChunkDecorations(
+        generateChunkDecorations(worldCfg, cx, cy, data, decorationDefs),
+      );
+      return res.json({ world_id: worldId, cx, cy, data, decorations, cover, biomes: chunkBiomes });
     }
 
     // Miss: generate terrain and return it WITHOUT persisting. The authority is
@@ -5717,9 +5782,11 @@ app.get('/api/worlds/:id/chunk', playerGuard, async (req, res) => {
     // chunk activation); terrain is deterministic so this unpersisted view
     // equals the row the authority later writes.
     const data = generateChunk(worldCfg, cx, cy);
-    const decorations = generateChunkDecorations(worldCfg, cx, cy, data, decorationDefs);
+    const { decorations, cover } = splitChunkDecorations(
+      generateChunkDecorations(worldCfg, cx, cy, data, decorationDefs),
+    );
 
-    res.json({ world_id: worldId, cx, cy, data, decorations, biomes: chunkBiomes });
+    res.json({ world_id: worldId, cx, cy, data, decorations, cover, biomes: chunkBiomes });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch chunk' });

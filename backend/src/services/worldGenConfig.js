@@ -63,6 +63,17 @@ function toPortalPoints(links) {
   return out;
 }
 
+// The dungeon boss post (SOMET-609) as a world-pixel point, or null. It feeds
+// generateChunkDecorations' blocker exclusion: seed-map's requiredTilesFor
+// requires the post to be reachable, so no blocking decoration may land on or
+// around it. Mapped HERE for the same reason as the portals above -- /chunk and
+// the authority (whose SELECT names dungeon_boss) must both see it.
+function toBossPoint(boss) {
+  if (!boss || typeof boss !== 'object' || boss.x == null || boss.y == null) return null;
+  const x = Number(boss.x), y = Number(boss.y);
+  return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+}
+
 function buildWorldGenConfig({ row, tileTypes, doorways, villages, biomes, links }) {
   return {
     seed: Number(row.seed),
@@ -77,6 +88,7 @@ function buildWorldGenConfig({ row, tileTypes, doorways, villages, biomes, links
     // missing mapping must present as "this world has no portals", which is
     // what a world with no PORTAL rows produces anyway.
     portals: toPortalPoints(links),
+    dungeonBoss: toBossPoint(row.dungeon_boss),
     biomes: biomes || [],
     // null (not undefined) so worldConfig's derive-from-bounds branch runs.
     biomeCell: Number.isFinite(row.biome_cell) ? row.biome_cell : null,

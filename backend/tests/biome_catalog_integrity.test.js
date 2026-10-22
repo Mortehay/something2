@@ -41,7 +41,8 @@ test("every biome's terrain_tiles exist in the tile catalog", () => {
 // NEW_DECORATIONS is what seed-catalogs.js inserts. A hand-written literal here
 // would go stale the moment a decoration is renamed and would then agree with
 // nothing.
-const LIVE_FLORA = new Set([...Object.keys(SIZE_FIXES), ...NEW_DECORATIONS.map((d) => d.name)]);
+const { SCENERY_TYPES } = require('../seeds/data/sceneryCatalog.js');
+const LIVE_FLORA = new Set([...Object.keys(SIZE_FIXES), ...NEW_DECORATIONS.map((d) => d.name), ...SCENERY_TYPES.map((d) => d.name)]);
 
 test("every biome's flora_types exist in the decoration catalog", () => {
   // Guard the derivation itself: if both seed sources were emptied or renamed

@@ -13,7 +13,9 @@ const LIVE_TILES = new Set([
   'snow', 'ice', 'swamp', 'water',
 ]);
 // Decoration entity types seeded by migrations 1714440003000 and 1714440042000.
-const LIVE_FLORA = new Set(['Tree', 'Stone', 'IceRock', 'bush', 'rose_bush', 'pine_tree', 'dead_tree']);
+const { SCENERY_TYPES } = require('../seeds/data/sceneryCatalog.js');
+const LIVE_FLORA = new Set(['Tree', 'Stone', 'IceRock', 'bush', 'rose_bush', 'pine_tree', 'dead_tree',
+  ...SCENERY_TYPES.map((t) => t.name)]);
 // DERIVED, not hand-listed. This used to be the literal
 // `['Slime','Bat','Skeleton','Wolf']`, which made the reference check below
 // vacuous in the one case that mattered: `Wolf` sat in this set AND in two

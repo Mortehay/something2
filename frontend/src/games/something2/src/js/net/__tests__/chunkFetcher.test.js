@@ -20,7 +20,7 @@ describe("makeChunkFetcher", () => {
     const fetchImpl = fakeFetch({ world_id: "w1", cx: 2, cy: -1, data: grid, decorations });
     const fetchChunk = makeChunkFetcher("w1", "http://api", fetchImpl);
     const out = await fetchChunk(2, -1);
-    expect(out).toEqual({ tiles: grid, decorations, biomes: null }); // NOT { data: grid, ... }
+    expect(out).toEqual({ tiles: grid, decorations, cover: { types: [], cells: [] }, biomes: null }); // NOT { data: grid, ... }
   });
 
   it("defaults decorations to [] and biomes to null when the envelope omits them", async () => {
@@ -28,7 +28,7 @@ describe("makeChunkFetcher", () => {
     const fetchImpl = fakeFetch({ world_id: "w1", cx: 0, cy: 0, data: grid });
     const fetchChunk = makeChunkFetcher("w1", "http://api", fetchImpl);
     const out = await fetchChunk(0, 0);
-    expect(out).toEqual({ tiles: grid, decorations: [], biomes: null });
+    expect(out).toEqual({ tiles: grid, decorations: [], cover: { types: [], cells: [] }, biomes: null });
   });
 
   it("passes through the biomes grid when the envelope includes it", async () => {
@@ -37,7 +37,16 @@ describe("makeChunkFetcher", () => {
     const fetchImpl = fakeFetch({ world_id: "w1", cx: 0, cy: 0, data: grid, biomes });
     const fetchChunk = makeChunkFetcher("w1", "http://api", fetchImpl);
     const out = await fetchChunk(0, 0);
-    expect(out).toEqual({ tiles: grid, decorations: [], biomes });
+    expect(out).toEqual({ tiles: grid, decorations: [], cover: { types: [], cells: [] }, biomes });
+  });
+
+  it("passes cover through and defaults it", async () => {
+    const grid = [["grass"]];
+    const cover = { types: ["Moss"], cells: [0, 1, 2, 3, 4] };
+    const withCover = makeChunkFetcher("w1", "http://api", fakeFetch({ data: grid, cover }));
+    expect((await withCover(0, 0)).cover).toEqual(cover);
+    const without = makeChunkFetcher("w1", "http://api", fakeFetch({ data: grid }));
+    expect((await without(0, 0)).cover).toEqual({ types: [], cells: [] });
   });
 
   it("builds the correct URL incl. negative coords", async () => {

@@ -161,6 +161,16 @@ function biomeRoadTile(biome, names) {
   return (typeof t === 'string' && names.includes(t)) ? t : null;
 }
 
+// Numeric column -> finite number clamped to [0, max]; anything else -> fallback.
+// pg returns `real` as a number, but admin/test input may be a string.
+function clampDensity(v, fallback, max) {
+  if (v === null || v === undefined || typeof v === 'boolean') return fallback;
+  if (typeof v === 'string' && v.trim() === '') return fallback;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(0, n));
+}
+
 // Normalize raw biome rows (services/biomes.js shape) into the compact records
 // the samplers use. Done once per worldConfig call rather than per tile.
 function normalizeBiomes(rawBiomes, names) {
@@ -179,6 +189,10 @@ function normalizeBiomes(rawBiomes, names) {
       // NaN would poison the whole normalized field through the mean.
       creatureDensity: (Number.isFinite(b.creature_density) && b.creature_density > 0)
         ? Number(b.creature_density) : 1,
+      // Scenery density (biome-scenery spec). feature_density null/invalid ->
+      // DECO_FILL (today's look); cover_density null/invalid -> 0 (no cover).
+      featureDensity: clampDensity(b.feature_density, DECO_FILL, 1),
+      coverDensity: clampDensity(b.cover_density, 0, 3),
     }));
 }
 
@@ -624,6 +638,13 @@ const DECO_PICK_XOR = 0x27d4eb2d; // weighted type-pick seed (which def wins a t
 const DECO_CELL = 6;              // clump cell size (smaller = tighter stands)
 const DECO_DENSITY = 0.58;        // a tile is "in a clump" when the density field >= this
 const DECO_FILL = 0.6;            // fraction of in-clump tiles that actually get an object
+const DECO_OFFX_XOR = 0x68e31da4; // sub-tile x offset of a feature
+const DECO_OFFY_XOR = 0xb5297a4d; // sub-tile y offset of a feature
+const COVER_N_XOR = 0x1b873593;   // stochastic rounding of cover count per tile
+const COVER_X_XOR = 0xcc9e2d51;   // cover x offset (per emission index)
+const COVER_Y_XOR = 0xe6546b64;   // cover y offset
+const COVER_PICK_XOR = 0x7feb352d; // cover type pick
+const DEFAULT_BLOCK_RADIUS = 12;  // px, for a blocking def with null block_radius
 const SPAWN_CLEAR_RADIUS = 1;     // Chebyshev tiles around entry spawn kept clear of blockers
 
 // SOMET-339 — the lane kept clear of blockers directly outside a village gate.
@@ -659,6 +680,14 @@ function spawnTileCell(world) {
   const sp = world.entry_spawn;
   if (!sp || typeof sp.x !== 'number' || typeof sp.y !== 'number') return null;
   return { row: Math.floor(sp.y / 100), col: Math.floor(sp.x / 100) };
+}
+
+// The dungeon boss post as a (row,col) tile, or null (world pixels, like
+// entry_spawn; set by buildWorldGenConfig from worlds.dungeon_boss).
+function bossTileCell(world) {
+  const b = world && world.dungeonBoss;
+  if (!b || typeof b.x !== 'number' || typeof b.y !== 'number') return null;
+  return { row: Math.floor(b.y / 100), col: Math.floor(b.x / 100) };
 }
 
 // SOMET-510 — every PORTAL endpoint in this world, as (row,col) tiles.
@@ -772,16 +801,27 @@ function isExcludedBlockerCell(cfg, spawn, portals, gRow, gCol) {
 // chunk's generated tiles, decorationDefs). Reads the FINAL tile grid (so
 // stamped walls/gates/village tiles are never decorated) and samples a GLOBAL
 // density field at absolute coords, so clumps are continuous across chunk
-// borders. Returns chunk-local [{ name, row, col, blocking }].
-function generateChunkDecorations(world, cx, cy, tiles, decorationDefs) {
+// borders. Returns chunk-local [{ name, row, col, ox, oy, blocking, radius, layer }]:
+// features first, then ground cover (layer "cover", never blocking). opts.cover
+// === false returns features only (authority, navigability).
+function generateChunkDecorations(world, cx, cy, tiles, decorationDefs, opts = { cover: true }) {
   if (!decorationDefs || decorationDefs.length === 0 || !tiles) return [];
+  const withCover = !opts || opts.cover !== false;
   const cfg = worldConfig(world);
   const N = cfg.chunkSize;
   const rMin = cy * N, cMin = cx * N;
   const paths = collectPathCells(cfg, rMin, cMin, N, N);
   const spawn = spawnTileCell(world);
-  const portals = portalTileCells(world);
+  // The dungeon boss post gets the portal endpoint's clearance: the same
+  // open-ground point a player must be able to walk up to (seed-map's
+  // requiredTilesFor lists it next to the arrival points).
+  const boss = bossTileCell(world);
+  const portals = boss ? portalTileCells(world).concat(boss) : portalTileCells(world);
   const out = [];
+  const covers = [];
+  // Eligible defs depend only on (owning region, terrain), so resolve them once
+  // per call instead of re-scanning every def on every tile.
+  const eligibility = makeEligibilityCache(decorationDefs, withCover);
   for (let r = 0; r < N; r++) {
     if (!tiles[r]) continue;
     for (let c = 0; c < N; c++) {
@@ -789,40 +829,139 @@ function generateChunkDecorations(world, cx, cy, tiles, decorationDefs) {
       if (cfg.bounds && (gRow < 0 || gCol < 0 || gRow >= cfg.bounds.height || gCol >= cfg.bounds.width)) continue;
       if (paths.has(`${gRow},${gCol}`)) continue; // keep carved paths clear
       const terrain = tiles[r][c];
-      // Two independent gates decide IF a tile gets an object: the density
-      // field (where clumps form) and a per-tile fill roll (holes in a clump).
-      const density = globalValueNoise((cfg.seed ^ DECO_SEED_XOR) >>> 0, gRow, gCol, DECO_CELL);
-      if (density < DECO_DENSITY) continue;
-      if (hash2((cfg.seed ^ DECO_FILL_XOR) >>> 0, gCol, gRow) >= DECO_FILL) continue;
       // WHICH types are eligible here at all: when the world has biomes, only
       // the flora the owning biome lists. Empty flora_types is a legitimate
       // authored choice ("this biome is barren"), not a config error -- there
       // is deliberately no fallback to the global def list.
       const region = sampleBiomeRegion(cfg, gRow, gCol);
-      const flora = region ? region.floraTypes : null;
-      // WHICH object: weighted pick among ALL defs whose spawn_tiles match this
-      // terrain, weighted by `chance`. (Not first-match — that shadowed every
-      // type but the lowest-id one on shared terrain.) Deterministic: the roll
-      // is a seeded per-tile hash and `decorationDefs` is ORDER BY id.
-      let totalW = 0;
-      const matches = [];
-      for (const def of decorationDefs) {
-        if (flora && !flora.includes(def.name)) continue;
-        const spawnTiles = def.spawn_tiles || def.spawnTiles;
-        if (spawnTiles && spawnTiles.includes(terrain)) { matches.push(def); totalW += (def.chance || 0); }
+      const elig = eligibility(region, terrain);
+      const placed = placeFeature(cfg, elig.features, elig.featureWeight, region, terrain, gRow, gCol, spawn, portals);
+      if (placed) out.push({ ...placed, row: r, col: c });
+      if (withCover && region && region.coverDensity > 0 && elig.covers.length > 0) {
+        placeCover(cfg, elig.covers, region, gRow, gCol, r, c, covers);
       }
-      if (matches.length === 0 || totalW <= 0) continue;
-      let roll = hash2((cfg.seed ^ DECO_PICK_XOR) >>> 0, gCol, gRow) * totalW;
-      let picked = matches[matches.length - 1];
-      for (const def of matches) { roll -= (def.chance || 0); if (roll <= 0) { picked = def; break; } }
-      const blocking = picked.walkable === false;
-      // A blocking pick near spawn / in a village would trap the player -> skip
-      // the tile entirely (leave it open) rather than force a passable type.
-      if (blocking && isExcludedBlockerCell(cfg, spawn, portals, gRow, gCol)) continue;
-      out.push({ name: picked.name, row: r, col: c, blocking });
     }
   }
-  return out;
+  return out.concat(covers);
+}
+
+// (region, terrain) -> { features, featureWeight, covers }, built lazily and
+// memoised for one generateChunkDecorations call. A region is the biome object
+// itself (stable for the call); null means "world declares no biomes" and the
+// flora filter is off. List order is the def order, which the weighted picks
+// depend on. Cover entries carry max_per_tile resolved up front.
+function makeEligibilityCache(defs, withCover) {
+  const byRegion = new Map();
+  const floraSets = new Map();
+  return function lookup(region, terrain) {
+    let byTerrain = byRegion.get(region);
+    if (!byTerrain) { byTerrain = new Map(); byRegion.set(region, byTerrain); }
+    let e = byTerrain.get(terrain);
+    if (e) return e;
+    let flora = null;
+    if (region) {
+      flora = floraSets.get(region);
+      if (!flora) { flora = new Set(region.floraTypes); floraSets.set(region, flora); }
+    }
+    e = { features: [], featureWeight: 0, covers: [] };
+    for (const def of defs) {
+      if (flora && !flora.has(def.name)) continue;
+      const spawnTiles = def.spawn_tiles || def.spawnTiles;
+      if (!spawnTiles || !spawnTiles.includes(terrain)) continue;
+      if (def.scenery_layer === 'cover') {
+        if (withCover && (def.chance || 0) > 0) {
+          e.covers.push({ name: def.name, chance: def.chance, max: Number.isFinite(def.max_per_tile) ? def.max_per_tile : 2 });
+        }
+      } else {
+        e.features.push(def);
+        e.featureWeight += (def.chance || 0);
+      }
+    }
+    byTerrain.set(terrain, e);
+    return e;
+  };
+}
+
+// The one feature (if any) on a tile: { name, ox, oy, blocking, radius, layer }.
+// `matches` is the eligible list for this tile's (region, terrain) and `totalW`
+// the sum of its chances.
+function placeFeature(cfg, matches, totalW, region, terrain, gRow, gCol, spawn, portals) {
+  // Two independent gates decide IF a tile gets an object: the density
+  // field (where clumps form) and a per-tile fill roll (holes in a clump).
+  const density = globalValueNoise((cfg.seed ^ DECO_SEED_XOR) >>> 0, gRow, gCol, DECO_CELL);
+  if (density < DECO_DENSITY) return null;
+  const fill = region ? region.featureDensity : DECO_FILL;
+  if (hash2((cfg.seed ^ DECO_FILL_XOR) >>> 0, gCol, gRow) >= fill) return null;
+  // WHICH object: weighted pick among ALL defs whose spawn_tiles match this
+  // terrain, weighted by `chance`. (Not first-match -- that shadowed every
+  // type but the lowest-id one on shared terrain.) Deterministic: the roll
+  // is a seeded per-tile hash and `decorationDefs` is ORDER BY id.
+  if (matches.length === 0 || totalW <= 0) return null;
+  let roll = hash2((cfg.seed ^ DECO_PICK_XOR) >>> 0, gCol, gRow) * totalW;
+  let picked = matches[matches.length - 1];
+  for (const def of matches) { roll -= (def.chance || 0); if (roll <= 0) { picked = def; break; } }
+  const blocking = picked.walkable === false;
+  // A blocking pick near spawn / in a village would trap the player -> skip
+  // the tile entirely (leave it open) rather than force a passable type.
+  if (blocking && isExcludedBlockerCell(cfg, spawn, portals, gRow, gCol)) return null;
+  // block_radius 0 and null both mean "use DEFAULT_BLOCK_RADIUS": a blocking type must always block something.
+  const radius = blocking
+    ? Math.min(50, Number.isFinite(picked.block_radius) && picked.block_radius > 0 ? picked.block_radius : DEFAULT_BLOCK_RADIUS)
+    : 0; // capped at half a tile: a larger circle could not stay inside its tile
+  // The blocking circle must never cross the tile edge (collision reads one
+  // tile only), so the jitter range shrinks as the radius grows.
+  const J = Math.max(0, Math.min(25, 50 - radius));
+  const ox = 50 + Math.round((hash2((cfg.seed ^ DECO_OFFX_XOR) >>> 0, gCol, gRow) - 0.5) * 2 * J);
+  const oy = 50 + Math.round((hash2((cfg.seed ^ DECO_OFFY_XOR) >>> 0, gCol, gRow) - 0.5) * 2 * J);
+  return { name: picked.name, ox, oy, blocking, radius, layer: 'feature' };
+}
+
+// /chunk wire shape: features stay full objects; ground cover (hundreds per
+// chunk, never blocking) is packed as { types, cells } where cells is a flat
+// array of 5-tuples [typeIndex, row, col, ox, oy, ...] in generator order.
+function splitChunkDecorations(all) {
+  const decorations = [];
+  const types = [];
+  const index = new Map();
+  const cells = [];
+  for (const d of all) {
+    if (d.layer !== 'cover') { decorations.push(d); continue; }
+    let t = index.get(d.name);
+    if (t === undefined) { t = types.length; types.push(d.name); index.set(d.name, t); }
+    cells.push(t, d.row, d.col, d.ox, d.oy);
+  }
+  return { decorations, cover: { types, cells } };
+}
+
+// Ground cover on one tile: stochastic-rounded count, weighted type pick among
+// types still under max_per_tile. Never blocking, never excluded by blocker
+// rules (the caller already skipped carved path cells).
+function placeCover(cfg, eligible, region, gRow, gCol, r, c, outCovers) {
+  const n = Math.floor(region.coverDensity + hash2((cfg.seed ^ COVER_N_XOR) >>> 0, gCol, gRow));
+  if (n <= 0) return;
+  const len = eligible.length;
+  const used = new Array(len).fill(0); // per-def count already placed on this tile
+  for (let k = 0; k < n; k++) {
+    // Defs still under max_per_tile, in def order: same arithmetic as filtering
+    // first, without allocating a list per object.
+    let totalW = 0, lastOpen = -1;
+    for (let i = 0; i < len; i++) {
+      if (used[i] < eligible[i].max) { totalW += eligible[i].chance; lastOpen = i; }
+    }
+    if (lastOpen < 0) break;
+    const kSalt = Math.imul(k, 0x9e3779b1);
+    let roll = hash2((cfg.seed ^ COVER_PICK_XOR ^ kSalt) >>> 0, gCol, gRow) * totalW;
+    let picked = lastOpen;
+    for (let i = 0; i < len; i++) {
+      if (used[i] >= eligible[i].max) continue;
+      roll -= eligible[i].chance;
+      if (roll <= 0) { picked = i; break; }
+    }
+    used[picked]++;
+    const ox = 10 + Math.floor(hash2((cfg.seed ^ COVER_X_XOR ^ kSalt) >>> 0, gCol, gRow) * 81);
+    const oy = 10 + Math.floor(hash2((cfg.seed ^ COVER_Y_XOR ^ kSalt) >>> 0, gCol, gRow) * 81);
+    outCovers.push({ name: eligible[picked].name, row: r, col: c, ox, oy, blocking: false, radius: 0, layer: 'cover' });
+  }
 }
 
 // --- Global carved paths --------------------------------------------------
@@ -1980,6 +2119,7 @@ module.exports = {
     generateRegion,
     generateChunk,
     generateChunkDecorations,
+    splitChunkDecorations,
     pathAnchor,
     pathSegmentCells,
     collectPathCells,
@@ -2026,6 +2166,7 @@ module.exports = {
     SPAWN_CLEAR_RADIUS,
     VILLAGE_RING,
     DECO_CELL,
+    DEFAULT_BLOCK_RADIUS,
     oppositeEdge,
     edgeOfDoorwayTile,
     arrivalPoint,

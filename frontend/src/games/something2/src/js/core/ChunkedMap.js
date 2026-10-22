@@ -10,8 +10,9 @@ export class ChunkedMap {
     this.chunkSize = chunkSize;
     this.tileSize = MAP_TILE_SIZE;
     this.chunks = new Map(); // "cx,cy" -> string[][]
-    this.decorations = new Map(); // "cx,cy" -> { list, blocked: Set<"row,col"> }
+    this.decorations = new Map(); // "cx,cy" -> { list, blocked: Map<"row,col", {x,y,r}[]> }
     this.biomes = new Map(); // "cx,cy" -> string[][] (coarse biome grid, or absent)
+    this.cover = new Map(); // "cx,cy" -> { types: string[], cells: number[] } (5-tuples), or absent
     this.setMapTiles(mapTiles);
   }
 
@@ -34,23 +35,34 @@ export class ChunkedMap {
     }
   }
 
-  setChunk(cx, cy, grid, decorations = [], biomes = null) {
+  setChunk(cx, cy, grid, decorations = [], biomes = null, cover = null) {
     this.chunks.set(CHUNK_KEY(cx, cy), grid);
-    // Precompute the blocking-tile set for O(1) walkability checks.
-    const blocked = new Set();
-    for (const d of decorations) if (d.blocking) blocked.add(`${d.row},${d.col}`);
+    // Precompute the blocking circles (tile-local px) per tile for cheap
+    // walkability checks; same structure as ServerMap.blockedDecorationsFor.
+    const blocked = new Map();
+    for (const d of decorations) {
+      if (d.blocking !== true) continue;
+      const k = `${d.row},${d.col}`;
+      let list = blocked.get(k);
+      if (!list) { list = []; blocked.set(k, list); }
+      list.push({ x: d.ox, y: d.oy, r: d.radius });
+    }
     this.decorations.set(CHUNK_KEY(cx, cy), { list: decorations, blocked });
     if (biomes) this.biomes.set(CHUNK_KEY(cx, cy), biomes);
     else this.biomes.delete(CHUNK_KEY(cx, cy));
+    if (cover && cover.cells && cover.cells.length) this.cover.set(CHUNK_KEY(cx, cy), cover);
+    else this.cover.delete(CHUNK_KEY(cx, cy));
   }
   hasChunk(cx, cy) { return this.chunks.has(CHUNK_KEY(cx, cy)); }
   removeChunk(cx, cy) {
     this.chunks.delete(CHUNK_KEY(cx, cy));
     this.decorations.delete(CHUNK_KEY(cx, cy));
     this.biomes.delete(CHUNK_KEY(cx, cy));
+    this.cover.delete(CHUNK_KEY(cx, cy));
   }
   getChunk(cx, cy) { return this.chunks.get(CHUNK_KEY(cx, cy)) || null; }
   decorationsInChunk(cx, cy) { const e = this.decorations.get(CHUNK_KEY(cx, cy)); return e ? e.list : []; }
+  coverInChunk(cx, cy) { return this.cover.get(CHUNK_KEY(cx, cy)) || { types: [], cells: [] }; }
   loadedKeys() { return [...this.chunks.keys()]; }
 
   getTileAt(worldX, worldY) {
@@ -78,21 +90,50 @@ export class ChunkedMap {
     if (tile === null) return false; // unloaded/unknown -> blocked (streaming frontier)
     const def = this._tileDef(tile);
     if (def && def.walkable === false) return false;
-    // Blocking-decoration overlay mirrors the server's ServerMap.isWalkable
-    // so client-side prediction and server authority agree.
-    // Decorations occupy their center footprint (~36x36) rather than the whole 100x100 tile.
+    // Blocking-decoration overlay mirrors the server's ServerMap.isWalkable so
+    // client-side prediction and server authority agree: a blocking feature is
+    // a circle of r px (inclusive) around its tile-local anchor, never
+    // crossing its tile's edge.
     const { cx, cy, lr, lc } = worldToChunkLocal(worldX, worldY, this.chunkSize);
     const e = this.decorations.get(CHUNK_KEY(cx, cy));
-    if (e && e.blocked.has(`${lr},${lc}`)) {
+    const circles = e && e.blocked.get(`${lr},${lc}`);
+    if (circles) {
       const gCol = cx * this.chunkSize + lc;
       const gRow = cy * this.chunkSize + lr;
       const lx = worldX - gCol * this.tileSize;
       const ly = worldY - gRow * this.tileSize;
-      if (Math.abs(lx - 50) <= 10 && Math.abs(ly - 50) <= 10) {
-        return false;
+      for (const c of circles) {
+        const dx = lx - c.x, dy = ly - c.y;
+        if (dx * dx + dy * dy <= c.r * c.r) return false;
       }
     }
     return true;
+  }
+
+  // True when a blocking decoration circle touches the axis-aligned segment
+  // (x0,y0)-(x1,y1), edge inclusive like isWalkable. resolveMove's faceClear
+  // tests a whole leading face with this, not just its two corners. A circle
+  // never crosses its tile's edge, so only the tiles the segment passes
+  // through are read. Mirrors ServerMap.segmentHitsBlocker.
+  segmentHitsBlocker(x0, y0, x1, y1) {
+    const T = MAP_TILE_SIZE, N = this.chunkSize;
+    const minX = Math.min(x0, x1), maxX = Math.max(x0, x1);
+    const minY = Math.min(y0, y1), maxY = Math.max(y0, y1);
+    for (let gRow = Math.floor(minY / T); gRow <= Math.floor(maxY / T); gRow++) {
+      for (let gCol = Math.floor(minX / T); gCol <= Math.floor(maxX / T); gCol++) {
+        const cx = Math.floor(gCol / N), cy = Math.floor(gRow / N);
+        const e = this.decorations.get(CHUNK_KEY(cx, cy));
+        const circles = e && e.blocked.get(`${gRow - cy * N},${gCol - cx * N}`);
+        if (!circles) continue;
+        for (const c of circles) {
+          const ax = gCol * T + c.x, ay = gRow * T + c.y;
+          const dx = Math.min(Math.max(ax, minX), maxX) - ax;
+          const dy = Math.min(Math.max(ay, minY), maxY) - ay;
+          if (dx * dx + dy * dy <= c.r * c.r) return true;
+        }
+      }
+    }
+    return false;
   }
 
   speedAt(worldX, worldY) {

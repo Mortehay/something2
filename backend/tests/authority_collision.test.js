@@ -213,9 +213,13 @@ test('ServerMap.isWalkable blocks a tile occupied by a blocking decoration', () 
   // while a decoration-free grass tile stays walkable.
   const decos = generateChunkDecorations(world, 0, 0, generateChunk(world, 0, 0), world.decorationDefs);
   assert.ok(decos.length > 0, 'expected at least one decoration');
-  const d = decos[0];
-  const bx = d.col * 100 + 50, by = d.row * 100 + 50; // tile center, world px
-  assert.equal(map.isWalkable(bx, by), false, 'decoration tile blocks');
+  const d = decos.find((dd) => dd.blocking);
+  assert.ok(d, 'expected a blocking decoration');
+  const bx = d.col * 100 + d.ox, by = d.row * 100 + d.oy; // feature anchor, world px
+  assert.equal(map.isWalkable(bx, by), false, 'decoration anchor blocks');
+  // The block is a circle at the anchor, not the whole tile: just outside it is open.
+  assert.equal(map.isWalkable(bx + d.radius + 1, by), true, 'just outside the circle walks');
+  assert.equal(map.isWalkable(bx + d.radius, by), false, 'the circle edge is inclusive');
 });
 
 test('ServerMap.isWalkable ignores a passable (walkable) decoration', () => {
@@ -250,8 +254,8 @@ test('ServerMap.isWalkable applies the decoration overlay in a NON-zero chunk (e
   assert.ok(d, 'expected a blocking decoration to place in chunk (1,0)');
   const worldCol = 1 * world.chunkSize + d.col; // chunk (1,0) offset in the col axis
   const worldRow = d.row; // cy=0, no row offset
-  const bx = worldCol * 100 + 50, by = worldRow * 100 + 50;
-  assert.equal(map.isWalkable(bx, by), false, 'decoration tile in a non-zero chunk blocks');
+  const bx = worldCol * 100 + d.ox, by = worldRow * 100 + d.oy;
+  assert.equal(map.isWalkable(bx, by), false, 'decoration anchor in a non-zero chunk blocks');
 });
 
 test('ServerMap.isWalkable keeps the entry-spawn tile clear of blocking decorations (spawn-clear-radius exclusion is live end-to-end)', () => {

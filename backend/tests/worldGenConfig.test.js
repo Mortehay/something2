@@ -37,7 +37,7 @@ test('coerces the seed to a number (the column is bigint -> string)', () => {
 test('carries every field the generator reads', () => {
   const c = buildWorldGenConfig(cfgArgs());
   assert.deepStrictEqual(Object.keys(c).sort(), [
-    'authoredRoads', 'biomeCell', 'biomes', 'chunkSize', 'doorways', 'entry_spawn',
+    'authoredRoads', 'biomeCell', 'biomes', 'chunkSize', 'doorways', 'dungeonBoss', 'entry_spawn',
     'height', 'levelMax', 'levelMin', 'portals', 'safeRects', 'safeRoadRadius',
     'seed', 'tileTypes', 'villages', 'width',
   ]);
@@ -46,6 +46,7 @@ test('carries every field the generator reads', () => {
   assert.equal(c.height, 30);
   assert.deepEqual(c.entry_spawn, { x: 1500, y: 1500 });
   assert.deepEqual(c.biomes, BIOMES);
+  assert.strictEqual(c.dungeonBoss, null, 'a row with no dungeon_boss maps to null, never undefined');
 });
 
 // SOMET-510. `portals` feeds generateChunkDecorations' blocking-decoration
