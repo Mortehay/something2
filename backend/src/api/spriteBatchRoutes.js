@@ -63,6 +63,30 @@ function redrawFramesFrom(body) {
   return { frames };
 }
 
+// For a redraw row `j`: the sheet its Compare runs against and the frames it
+// counts as marked. Failed ancestors (walking redraw_of) may have changed the
+// box's sheet too, so they are skipped: the source is the newest ancestor that
+// is done or approved, and the marked set is the union of this row's frames and
+// every skipped failed ancestor's. Both NULL for a non-redraw row.
+const REDRAW_LINEAGE_JOIN = `LEFT JOIN LATERAL (
+               WITH RECURSIVE anc AS (
+                 SELECT r.id, r.status, r.atlas_key, r.redraw_of, r.redraw_frames, 1 AS depth
+                   FROM sprite_sets r WHERE r.id = j.redraw_of
+                 UNION ALL
+                 SELECT r.id, r.status, r.atlas_key, r.redraw_of, r.redraw_frames, anc.depth + 1
+                   FROM anc JOIN sprite_sets r ON r.id = anc.redraw_of
+                  WHERE anc.status = 'failed' AND anc.depth < 100
+               )
+               SELECT
+                 (SELECT a.atlas_key FROM anc a WHERE a.status IN ('done', 'approved')
+                   ORDER BY a.depth LIMIT 1) AS redraw_source_atlas_key,
+                 (SELECT jsonb_agg(DISTINCT f.value)
+                    FROM (SELECT j.redraw_frames AS fr
+                          UNION ALL SELECT a.redraw_frames FROM anc a WHERE a.status = 'failed') x
+                    CROSS JOIN LATERAL jsonb_array_elements(COALESCE(x.fr, '[]'::jsonb)) f
+                   WHERE j.redraw_of IS NOT NULL) AS redraw_compare_frames
+             ) rl ON true`;
+
 // deps is the DI seam: { box: {actionCatalog}, loadProvider: () => provider|null,
 // store: {getObjectStream}, now: () => ms }. index.js passes the real ones.
 function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
@@ -125,7 +149,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   j.concept_key, j.actions, j.directions, j.frames_per_action, j.box_job_id,
                   j.prop_fx, j.updated_at AS job_updated_at,
                   j.redraw_of, j.redraw_frames, j.box_task_id,
-                  (SELECT r.atlas_key FROM sprite_sets r WHERE r.id = j.redraw_of) AS redraw_source_atlas_key,
+                  rl.redraw_source_atlas_key, rl.redraw_compare_frames,
                   sh.id AS sheet_job_id, sh.atlas_key AS sheet_atlas_key,
                   sh.manifest_key AS sheet_manifest_key, sh.updated_at AS sheet_updated_at
              FROM entity_types e
@@ -134,6 +158,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                 WHERE s.entity_type_id = e.id AND s.appearance_variant IS NULL
                 ORDER BY s.created_at DESC LIMIT 1
              ) j ON true
+             ${REDRAW_LINEAGE_JOIN}
              LEFT JOIN LATERAL (
                SELECT s2.id, s2.atlas_key, s2.manifest_key, s2.updated_at FROM sprite_sets s2
                 WHERE s2.entity_type_id = e.id AND s2.appearance_variant IS NULL AND s2.atlas_key IS NOT NULL
@@ -154,7 +179,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   j.concept_key, j.actions, j.directions, j.frames_per_action, j.box_job_id,
                   j.prop_fx, j.updated_at AS job_updated_at,
                   j.redraw_of, j.redraw_frames, j.box_task_id,
-                  (SELECT r.atlas_key FROM sprite_sets r WHERE r.id = j.redraw_of) AS redraw_source_atlas_key,
+                  rl.redraw_source_atlas_key, rl.redraw_compare_frames,
                   sh.id AS sheet_job_id, sh.atlas_key AS sheet_atlas_key,
                   sh.manifest_key AS sheet_manifest_key, sh.updated_at AS sheet_updated_at
              FROM character_appearances ca
@@ -164,6 +189,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                 WHERE s.entity_type_id = ca.entity_type_id AND s.appearance_variant = ca.variant
                 ORDER BY s.created_at DESC LIMIT 1
              ) j ON true
+             ${REDRAW_LINEAGE_JOIN}
              LEFT JOIN LATERAL (
                SELECT s2.id, s2.atlas_key, s2.manifest_key, s2.updated_at FROM sprite_sets s2
                 WHERE s2.entity_type_id = ca.entity_type_id AND s2.appearance_variant = ca.variant
@@ -213,6 +239,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           redraw_of: a.redraw_of,
           redraw_frames: a.redraw_frames,
           redraw_source_atlas_key: a.redraw_source_atlas_key,
+          redraw_compare_frames: a.redraw_compare_frames,
           box_task_id: a.box_task_id,
           sheet_job_id: a.sheet_job_id,
           sheet_atlas_key: a.sheet_atlas_key,

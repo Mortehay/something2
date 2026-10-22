@@ -157,3 +157,67 @@ test('a subject whose latest row is a queued redraw carries redraw_of and the sh
   assert.equal(row.sheet_manifest_key, 'sprites/sheet.json');
   assert.ok(row.sheet_updated_at);
 });
+
+// A (done) -> B (failed, captured a sheet) -> C (done): B changed the box's
+// sheet too, so C compares against A and treats B's frames as marked.
+test('a redraw after a failed redraw compares against the last good sheet, with both rows\' frames', { skip }, async (t) => {
+  const pool = new Pool({ connectionString: url });
+  __setPool(pool);
+  const username = `sprite-subjects-admin-${Math.random().toString(36).slice(2)}`;
+  const { rows: [admin] } = await pool.query(
+    'INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3) RETURNING id, token_version',
+    [username, 'x', 'admin'],
+  );
+  const { rows: [ent] } = await pool.query(
+    "INSERT INTO entity_types (name, prompt, color) VALUES ($1, 'a test wolf', '#888888') RETURNING id",
+    [`redraw-chain-${Math.random().toString(36).slice(2)}`],
+  );
+  const { rows: [cls] } = await pool.query(
+    `SELECT ca.entity_type_id AS id, ca.variant FROM character_appearances ca
+       JOIN entity_types e ON e.id = ca.entity_type_id AND e.is_playable = true
+      ORDER BY ca.entity_type_id, ca.variant LIMIT 1`,
+  );
+  assert.ok(cls, 'precondition: a playable class with an appearance variant');
+  const made = [];
+  t.after(async () => {
+    await pool.query('DELETE FROM sprite_sets WHERE id = ANY($1::uuid[])', [made]);
+    await pool.query('DELETE FROM entity_types WHERE id = $1', [ent.id]);
+    await pool.query('DELETE FROM users WHERE id = $1', [admin.id]);
+    await pool.end();
+  });
+  const AUTH = ['Authorization', `Bearer ${signToken({
+    userId: admin.id, username, role: 'admin', tokenVersion: admin.token_version,
+  })}`];
+  const F1 = { action: 'idle', direction: 's', frame: 1 };
+  const F2 = { action: 'idle', direction: 's', frame: 2 };
+  // Far-future created_at keeps the appearance chain newest for its variant.
+  async function chain(entityId, variant, tag) {
+    const ins = async (status, atlas, redrawOf, frames, secs) => {
+      const { rows: [r] } = await pool.query(
+        `INSERT INTO sprite_sets (entity_type_id, appearance_variant, creature, generation_kind, backend, status,
+                                  actions, directions, frames_per_action, box_job_id, atlas_key, manifest_key,
+                                  redraw_of, redraw_frames, created_at)
+         VALUES ($1, $2, 'wolf', 'creature', 'gpu-box', $3, '{idle}', '{s}', 6, 'box-7', $4, 'sprites/m.json',
+                 $5, $6::jsonb, now() + interval '1 day' + make_interval(secs => $7))
+         RETURNING id`,
+        [entityId, variant, status, atlas, redrawOf, frames && JSON.stringify(frames), secs],
+      );
+      made.push(r.id);
+      return r.id;
+    };
+    const a = await ins('approved', `${tag}/a.png`, null, null, 0);
+    const b = await ins('failed', `${tag}/b.png`, a, [F1], 1);
+    await ins('done', `${tag}/c.png`, b, [F2], 2);
+  }
+  await chain(ent.id, null, 'ent');
+  await chain(cls.id, cls.variant, 'app');
+  const res = await request(app).get('/api/sprite-admin/subjects').set(...AUTH);
+  assert.equal(res.status, 200);
+  const key = (f) => `${f.action}/${f.direction}/${f.frame}`;
+  for (const [id, tag] of [[ent.id, 'ent'], [`${cls.id}:${cls.variant}`, 'app']]) {
+    const row = res.body.subjects.find((s) => s.id === id);
+    assert.equal(row.atlas_key, `${tag}/c.png`, id);
+    assert.equal(row.redraw_source_atlas_key, `${tag}/a.png`, `${id}: skips the failed ancestor`);
+    assert.deepEqual(row.redraw_compare_frames.map(key).sort(), [key(F1), key(F2)], id);
+  }
+});
