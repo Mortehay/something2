@@ -1,5 +1,5 @@
 import { GAME_WIDTH, GAME_HEIGHT, ISO_TILE_H, ISO_TILE_W, MAP_TILE_SIZE } from "../core/constants.js";
-import { worldToScreen, depthKey } from "../core/iso.js";
+import { worldToScreen, depthKey, ISO_K } from "../core/iso.js";
 import { compareDrawables, drawWall } from "./wallRenderer.js";
 import { drawLandmarks, landmarkColor } from "./landmarkRenderer.js";
 import { pointArtDef, pointBodyRef, pointStateTreatment, planLandmarkBodies } from "./pointArt.js";
@@ -12,7 +12,8 @@ import { createTextLabelCache, drawCachedLabel } from "./textLabelCache.js";
 // nothing minimap-specific about it, and duplicating it here to avoid the
 // odd-looking import would be the worse trade.
 import { domCanvasFactory } from "./minimapTerrainLayer.js";
-import { chunkTileCells } from "../core/chunkTiles.js";
+import { chunkTileCells, chunkVisible } from "../core/chunkTiles.js";
+import { parseKey } from "../core/worldCoords.js";
 import { layoutInventory, drawInventory } from "./inventoryPanel.js";
 import { layoutPassiveTree, drawPassiveTree } from "./passiveTreePanel.js";
 import { layoutSkillsPanel, drawSkillsPanel } from "./skillsPanel.js";
@@ -148,6 +149,11 @@ export function fitSpriteRect(imgW, imgH, boxX, boxY, boxW, boxH) {
   };
 }
 
+// Reused by RenderSystem._resolveCoverTypes so the cover pass allocates no
+// per-chunk palette array each frame. Safe: collectCover is synchronous and
+// finishes with one chunk's palette before resolving the next.
+const COVER_RESOLVED_SCRATCH = [];
+
 export class RenderSystem {
   constructor(canvas, imageManager) {
     this.canvas = canvas;
@@ -165,6 +171,8 @@ export class RenderSystem {
     this.entityAnim = null;
     this.tileTexturesOff = false;
     this._tileCache = new TileDiamondCache();
+    // Ground-cover type name -> resolved image + fitted size (collectCover).
+    this._coverCache = new Map();
     // SOMET-445: creature level tags, rasterised once per distinct string.
     // strokeText + fillText were the 3rd and 4th costliest entries in the
     // whole render trace -- together ~3x the entire minimap -- redrawing a
@@ -285,8 +293,18 @@ export class RenderSystem {
       for (const d of chunkedMap.decorationsInChunk(cx, cy)) {
         const type = decoTypes && decoTypes.get(d.name);
         if (!type) continue; // type/sprite not loaded yet -> skip (no hole)
-        const x = (cx * N + d.col) * MAP_TILE_SIZE;
-        const y = (cy * N + d.row) * MAP_TILE_SIZE;
+        // Scenery density: a feature sits at its own sub-tile point
+        // (tileOrigin + ox/oy, tile-local px in [0, MAP_TILE_SIZE]). x/y are
+        // offset back by half a tile so drawEntity's `+ width/2` centring lands
+        // exactly on that anchor (its sprite bottom is drawn AT the anchor).
+        // Missing ox/oy (older payloads) default to the tile centre, which
+        // reproduces the previous top-left x/y and centre depth byte-for-byte.
+        const tileX = (cx * N + d.col) * MAP_TILE_SIZE;
+        const tileY = (cy * N + d.row) * MAP_TILE_SIZE;
+        const ax = tileX + (Number.isFinite(d.ox) ? d.ox : MAP_TILE_SIZE / 2);
+        const ay = tileY + (Number.isFinite(d.oy) ? d.oy : MAP_TILE_SIZE / 2);
+        const x = ax - MAP_TILE_SIZE / 2;
+        const y = ay - MAP_TILE_SIZE / 2;
         // width/height = MAP_TILE_SIZE anchors drawEntity's centering math
         // (worldToScreen(e.x + (e.width||40)/2, ...)) on the tile CENTER.
         // Backend entity types only ever carry displayWidth/displayHeight
@@ -306,10 +324,97 @@ export class RenderSystem {
         // keys the map BY name and does not repeat it inside the value, so a
         // decoration drawable carried no way to say what it was until the
         // inspect card needed one (SOMET-493).
-        out.push({ kind: "decoration", ref: { ...type, name: d.name, x, y, width: MAP_TILE_SIZE, height: MAP_TILE_SIZE }, order: type.place_order || 0, depth: depthKey(x + MAP_TILE_SIZE / 2, y + MAP_TILE_SIZE / 2) });
+        // With anchors, "tile CENTER" above now reads "the feature's anchor":
+        // depth is computed from (ax, ay), so two features in one tile sort
+        // against each other and against an actor standing between them.
+        // `decoration: true` lets drawEntity pick the no-art placeholder
+        // (soft ellipse) over its creature-style solid rectangle.
+        out.push({ kind: "decoration", ref: { ...type, name: d.name, x, y, width: MAP_TILE_SIZE, height: MAP_TILE_SIZE, decoration: true }, order: type.place_order || 0, depth: depthKey(ax, ay) });
       }
     }
     return out;
+  }
+
+  // Ground cover -> flat, UNSORTED quads for the pass between the floor tiles
+  // and the depth-sorted list (spec "Rendering": sorting cover would put a
+  // fern over a player's feet). Returns [{ img, x, y, w, h }] in the same
+  // projected space the tile pass draws in (before camera.apply's offset),
+  // with each image fitted into its display box (no stretch) and its
+  // bottom-centre on the projected anchor tileOrigin + (ox, oy).
+  //
+  // Skipped: types not in decoTypes, types with no `image` (no art yet: never
+  // a box, spec anti-goal), images not loaded yet, whole chunks off-screen
+  // (chunkVisible), and anchors outside the same generous margin the tile
+  // pass culls with. `cache` (name -> { image, img, w, h }) holds the resolved
+  // image and fitted size so a frame does one Map lookup per item; an entry is
+  // trusted only while the type's image key is unchanged, and only LOADED
+  // images are cached, so a still-loading one is retried next frame.
+  // `renderModeOverride` mirrors drawEntity: a type whose mode resolves to
+  // "rect" (the column default, or the dev toggle forcing rect) shows no
+  // image for a feature, so its cover is skipped too.
+  static collectCover(chunkedMap, camera, decoTypes, images, cache = null, renderModeOverride = null) {
+    const out = [];
+    if (!chunkedMap || typeof chunkedMap.coverInChunk !== "function" || !decoTypes || !images) return out;
+    const N = chunkedMap.chunkSize;
+    const K = ISO_K;
+    for (const key of chunkedMap.loadedKeys()) {
+      const { cx, cy } = parseKey(key);
+      if (camera && !chunkVisible(cx, cy, N, camera)) continue;
+      const { types, cells } = chunkedMap.coverInChunk(cx, cy);
+      if (!cells || cells.length === 0) continue;
+      // Resolve this chunk's palette once: index -> cache entry or null.
+      const resolved = RenderSystem._resolveCoverTypes(types, decoTypes, images, cache, renderModeOverride);
+      const baseX = cx * N * MAP_TILE_SIZE;
+      const baseY = cy * N * MAP_TILE_SIZE;
+      for (let i = 0; i + 4 < cells.length; i += 5) {
+        const entry = resolved[cells[i]];
+        if (!entry) continue;
+        const wx = baseX + cells[i + 2] * MAP_TILE_SIZE + cells[i + 3];
+        const wy = baseY + cells[i + 1] * MAP_TILE_SIZE + cells[i + 4];
+        // worldToScreen inlined: no per-item allocation.
+        const sx = (wx - wy) * K;
+        const sy = (wx + wy) * K / 2;
+        if (camera) {
+          const relX = sx - camera.screenX, relY = sy - camera.screenY;
+          if (relX < -camera.width || relX > camera.width || relY < -camera.height || relY > camera.height) continue;
+        }
+        out.push({ img: entry.img, x: sx - entry.w / 2, y: sy - entry.h, w: entry.w, h: entry.h });
+      }
+    }
+    return out;
+  }
+
+  // Fills (and returns) a reused scratch array: per-chunk palette index ->
+  // cache entry, or null when that type cannot draw right now.
+  static _resolveCoverTypes(types, decoTypes, images, cache, renderModeOverride) {
+    const resolved = COVER_RESOLVED_SCRATCH;
+    resolved.length = types ? types.length : 0;
+    for (let t = 0; t < resolved.length; t++) {
+      const name = types[t];
+      const type = decoTypes.get(name);
+      if (!type || !type.image || RenderSystem.resolveRenderMode(type, renderModeOverride) === "rect") { resolved[t] = null; continue; }
+      let entry = cache ? cache.get(name) : null;
+      if (!entry || entry.image !== type.image) {
+        const img = images.get(type.image);
+        if (!img) { resolved[t] = null; continue; }
+        const bw = (type.displayWidth > 0 ? type.displayWidth : type.display_width) || 40;
+        const bh = (type.displayHeight > 0 ? type.displayHeight : type.display_height) || 40;
+        const r = fitSpriteRect(img.width, img.height, 0, 0, bw, bh);
+        entry = { image: type.image, img, w: r.dw, h: r.dh };
+        if (cache) cache.set(name, entry);
+      }
+      resolved[t] = entry;
+    }
+    return resolved;
+  }
+
+  _drawCover(chunkedMap, camera, decoTypes) {
+    const quads = RenderSystem.collectCover(chunkedMap, camera, decoTypes, this.imageManager, this._coverCache, this.renderModeOverride);
+    const ctx = this.ctx;
+    for (let i = 0; i < quads.length; i++) {
+      const q = quads[i];
+      ctx.drawImage(q.img, q.x, q.y, q.w, q.h);
+    }
   }
 
   renderChunked({
@@ -448,6 +553,14 @@ export class RenderSystem {
         this.ctx.fill();
       }
     }
+
+    // Ground cover: flat clutter on the floor, its own unsorted pass right
+    // after the floor tiles and before everything else, so markers, rings and
+    // every depth-sorted body (features, actors, items) draw over it -- a
+    // tuft never covers a player's feet (spec "Rendering", visual-mud
+    // anti-goal). Cover on a wall tile's cell is still drawn here, under the
+    // wall, which is the honest place for it.
+    this._drawCover(chunkedMap, camera, decoTypes);
 
     // Landmark markers (SOMET-297) sit between the two passes on purpose: after
     // the flat floor so they are visible on it, before the depth-sorted pass so
@@ -3801,7 +3914,19 @@ export class RenderSystem {
     // REAL drawn height, not this box -- a width-constrained sprite fits
     // shorter than `h` and leaves empty space above it inside the box.
     const artH = this._drawEntityArt(e, drawX, drawY, w, h, animKey);
-    if (!artH) {
+    if (!artH && e.decoration) {
+      // Scenery with no art (yet, or still loading): a soft ground ellipse in
+      // the type's colour at the anchor, never a solid box (spec anti-goal
+      // "bare tiles where art is missing"). display_width x display_height/3.
+      const ctx = this.ctx;
+      const prevAlpha = ctx.globalAlpha;
+      ctx.globalAlpha = 0.6;
+      ctx.fillStyle = e.color || "#6b7d5a";
+      ctx.beginPath();
+      ctx.ellipse(s.x, s.y, w / 2, h / 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = prevAlpha;
+    } else if (!artH) {
       // Degrade to a rectangle so a missing asset never leaves a hole.
       this.ctx.fillStyle = e.color || "#c0392b";
       this.ctx.fillRect(drawX, drawY, w, h);
