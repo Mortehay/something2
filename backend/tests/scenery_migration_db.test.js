@@ -55,7 +55,8 @@ test('up adds the five columns with their defaults', { skip }, () => inTxn(async
   assert.match(by['entity_types.max_per_tile'].column_default, /^2/);
   assert.equal(by['biomes.feature_density'].is_nullable, 'YES');
   assert.equal(by['biomes.feature_density'].column_default, null);
-  assert.match(by['biomes.cover_density'].column_default, /^0/);
+  assert.equal(by['biomes.cover_density'].is_nullable, 'YES');
+  assert.equal(by['biomes.cover_density'].column_default, null);
   // the layer CHECK is live
   await c.query('SAVEPOINT s');
   await assert.rejects(c.query("UPDATE entity_types SET scenery_layer = 'sky' WHERE name = 'Tree'"), (e) => e.code === '23514');
@@ -192,4 +193,24 @@ test('up sets feature_density from the catalogue only where it is NULL', { skip 
   assert.equal(second.Meadow, 0.77);
   assert.equal(second.Ossuary, BIOME_SCENERY.Ossuary.feature_density);
   assert.equal(second.Highlands, null);
+}));
+
+test('an admin-set cover_density of 0 survives a re-run of the migration fill and the seed', { skip }, () => inTxn(async (c) => {
+  await run(c, 'up');
+  await c.query("UPDATE biomes SET cover_density = 0 WHERE name = 'Meadow'");
+  await run(c, 'up');
+  let r = (await c.query("SELECT cover_density FROM biomes WHERE name = 'Meadow'")).rows[0];
+  assert.equal(r.cover_density, 0, 'migration fill refilled a deliberate 0');
+  const { seedOneBiome } = require('../scripts/seed-catalogs.js');
+  const { STARTER_BIOMES } = require('../seeds/data/biomes.js');
+  const meadow = STARTER_BIOMES.find((b) => b.name === 'Meadow');
+  assert.ok(meadow.cover_density > 0);
+  await seedOneBiome(c, meadow);
+  r = (await c.query("SELECT cover_density FROM biomes WHERE name = 'Meadow'")).rows[0];
+  assert.equal(r.cover_density, 0, 'seed refilled a deliberate 0');
+  // but an unset (NULL) one is filled
+  await c.query("UPDATE biomes SET cover_density = NULL WHERE name = 'Meadow'");
+  await seedOneBiome(c, meadow);
+  r = (await c.query("SELECT cover_density FROM biomes WHERE name = 'Meadow'")).rows[0];
+  assert.equal(r.cover_density, meadow.cover_density);
 }));

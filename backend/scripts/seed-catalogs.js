@@ -113,10 +113,9 @@ async function seedOneBiome(db, b) {
            color = EXCLUDED.color, creature_density = EXCLUDED.creature_density,
            path_tile = COALESCE($10, biomes.path_tile),
            -- scenery densities are admin-tunable: the seed only fills a value
-           -- nobody has set (NULL feature_density, 0 cover_density)
+           -- nobody has set (NULL feature_density, NULL cover_density; 0 is a deliberate admin choice)
            feature_density = COALESCE(biomes.feature_density, EXCLUDED.feature_density),
-           cover_density = CASE WHEN biomes.cover_density = 0 THEN EXCLUDED.cover_density
-                                ELSE biomes.cover_density END`,
+           cover_density = COALESCE(biomes.cover_density, EXCLUDED.cover_density)`,
     [b.name, JSON.stringify(b.terrain_tiles ?? []), JSON.stringify(b.flora_types ?? []),
      JSON.stringify(b.creature_types ?? []), JSON.stringify(b.palette ?? []),
      b.art_style, b.exclusions, b.color, b.creature_density ?? 1, b.path_tile ?? null,

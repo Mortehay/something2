@@ -11,8 +11,8 @@ describe('biomeForm', () => {
   it('an empty form has every field and no undefined', () => {
     const f = emptyBiomeForm();
     expect(Object.keys(f).sort()).toEqual([
-      'art_style', 'color', 'creature_types', 'exclusions', 'flora_types',
-      'name', 'palette', 'terrain_tiles',
+      'art_style', 'color', 'cover_density', 'creature_types', 'exclusions',
+      'feature_density', 'flora_types', 'name', 'palette', 'terrain_tiles',
     ]);
     for (const v of Object.values(f)) expect(v).toBeDefined();
   });
@@ -23,7 +23,18 @@ describe('biomeForm', () => {
       name: 'Meadow', terrain_tiles: ['grass', 'earth'], flora_types: ['bush'],
       creature_types: ['Slime'], palette: ['spring green', 'warm brown'],
       art_style: 'lush', exclusions: 'no snow', color: '#5aa84f',
+      feature_density: null, cover_density: null,
     });
+  });
+
+  it('scenery densities round-trip; a deliberate 0 stays 0 and blank stays unset', () => {
+    const p = biomeFormToPayload(biomeToForm({ ...ROW, feature_density: 0.4, cover_density: 0 }));
+    expect(p.feature_density).toBe(0.4);
+    expect(p.cover_density).toBe(0);
+    const blank = biomeFormToPayload({ ...biomeToForm(ROW), feature_density: '', cover_density: '' });
+    expect(blank.feature_density).toBeNull();
+    expect(blank.cover_density).toBeNull();
+    expect(biomeFormToPayload({ ...biomeToForm(ROW), cover_density: '1.5' }).cover_density).toBe(1.5);
   });
 
   it('palette is edited as comma-separated text and split on save', () => {
@@ -36,6 +47,7 @@ describe('biomeForm', () => {
     expect(biomeFormToPayload(f)).toEqual({
       name: 'X', terrain_tiles: [], flora_types: [], creature_types: [],
       palette: [], art_style: '', exclusions: '', color: '#888888',
+      feature_density: null, cover_density: null,
     });
   });
 

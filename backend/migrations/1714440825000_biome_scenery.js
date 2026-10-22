@@ -10,7 +10,8 @@ exports.shorthands = undefined;
 //     where still NULL;
 //   - each biome's flora_types APPENDED to (names already present are
 //     skipped; nothing is removed or reordered);
-//   - cover_density set where it is still the 0 default.
+//   - cover_density set where it is still NULL (unset); an admin's deliberate
+//     0 means "no ground cover" and survives a re-run.
 // Catalogue data lives in seeds/data/sceneryCatalog.js so
 // `make seed-catalogs` and this migration cannot drift (same precedent as
 // 1714440042000_decoration_types.js). `down` drops the columns only and
@@ -36,7 +37,7 @@ exports.up = (pgm) => {
     ADD COLUMN IF NOT EXISTS max_per_tile integer NOT NULL DEFAULT 2`);
   pgm.sql(`ALTER TABLE biomes
     ADD COLUMN IF NOT EXISTS feature_density real,
-    ADD COLUMN IF NOT EXISTS cover_density real NOT NULL DEFAULT 0`);
+    ADD COLUMN IF NOT EXISTS cover_density real`);
 
   for (const t of SCENERY_TYPES) {
     pgm.sql(`INSERT INTO entity_types
@@ -63,7 +64,7 @@ exports.up = (pgm) => {
       SET flora_types = ${appendMissing('flora_types', 'biomes', s.add)}
       WHERE name = ${q(name)}`);
     pgm.sql(`UPDATE biomes SET cover_density = ${s.cover_density}
-      WHERE name = ${q(name)} AND cover_density = 0`);
+      WHERE name = ${q(name)} AND cover_density IS NULL`);
     if (s.feature_density !== null) {
       pgm.sql(`UPDATE biomes SET feature_density = ${s.feature_density}
         WHERE name = ${q(name)} AND feature_density IS NULL`);

@@ -959,6 +959,9 @@ function EntityTypesAdmin() {
     prompt: '',
     render_mode: 'rect',
     idle_fx: 'none',
+    scenery_layer: 'feature',
+    block_radius: '',
+    max_per_tile: 2,
     strength: 0,
     dexterity: 0,
     constitution: 0,
@@ -996,6 +999,10 @@ function EntityTypesAdmin() {
         prompt: editingEntity.prompt || '',
         render_mode: editingEntity.render_mode || 'rect',
         idle_fx: editingEntity.idle_fx || 'none',
+        scenery_layer: editingEntity.scenery_layer || 'feature',
+        // '' = unset (NULL = the generator's default radius); handleSubmit sends null
+        block_radius: editingEntity.block_radius ?? '',
+        max_per_tile: editingEntity.max_per_tile ?? 2,
         strength: editingEntity.strength || 0,
         dexterity: editingEntity.dexterity || 0,
         constitution: editingEntity.constitution || 0,
@@ -1042,6 +1049,9 @@ function EntityTypesAdmin() {
         prompt: '',
         render_mode: 'rect',
         idle_fx: 'none',
+        scenery_layer: 'feature',
+        block_radius: '',
+        max_per_tile: 2,
         strength: 10,
         dexterity: 10,
         constitution: 10,
@@ -1113,6 +1123,8 @@ function EntityTypesAdmin() {
       auras: aurasForPayload(formData),
       display_width: optionalPx(rest.display_width),
       display_height: optionalPx(rest.display_height),
+      block_radius: optionalPx(rest.block_radius) === null ? null : Number(rest.block_radius),
+      max_per_tile: Number(rest.max_per_tile) || 2,
       ...bossFieldsPayload(formData),
     };
 
@@ -1398,6 +1410,48 @@ function EntityTypesAdmin() {
                       onChange={e => setFormData({...formData, chance: parseFloat(e.target.value)})}
                     />
                   </FormGroup>
+                </div>
+              )}
+
+              {!pointKindHidesWorldFields(formData.point_kind) && !formData.is_creature && (
+                <div style={{ display: 'flex', gap: '2rem' }}>
+                  <FormGroup style={{ flex: 1 }}>
+                    <label>Layer</label>
+                    <select
+                      value={formData.scenery_layer}
+                      onChange={e => setFormData({...formData, scenery_layer: e.target.value})}
+                    >
+                      <option value="feature">feature (rocks, trees, bushes)</option>
+                      <option value="cover">cover (ground cover: moss, clover)</option>
+                    </select>
+                  </FormGroup>
+                  {!formData.walkable && (
+                    <FormGroup style={{ flex: 1 }}>
+                      <label>Block radius (px)</label>
+                      <input
+                        type="number"
+                        step="1"
+                        min="0"
+                        max="20"
+                        placeholder="default"
+                        value={formData.block_radius}
+                        onChange={e => setFormData({...formData, block_radius: e.target.value})}
+                      />
+                    </FormGroup>
+                  )}
+                  {formData.scenery_layer === 'cover' && (
+                    <FormGroup style={{ flex: 1 }}>
+                      <label>Max per tile</label>
+                      <input
+                        type="number"
+                        step="1"
+                        min="1"
+                        max="6"
+                        value={formData.max_per_tile}
+                        onChange={e => setFormData({...formData, max_per_tile: e.target.value})}
+                      />
+                    </FormGroup>
+                  )}
                 </div>
               )}
 
