@@ -77,6 +77,14 @@ function rowCells(row) {
 
 const safeName = (name) => String(name).replace(/[^A-Za-z0-9_-]/g, '_');
 
+// Thrown where a halt is noticed; drain() puts the row back in the queue
+// instead of failing it.
+function haltedError() {
+  const err = new Error('halted');
+  err.halted = true;
+  return err;
+}
+
 // A box client result -> its value, or an Error carrying the box's words.
 function must(result) {
   if (result && result.ok) return result;
@@ -130,6 +138,15 @@ function createDispatcher({
     let runningAt = null;
     let sawRunning = false;
     for (;;) {
+      // Halt: cancel the box job (cooperative there -- the cell in progress
+      // finishes) and stop polling. A failed cancel is logged, not fatal: the
+      // row is requeued detached either way, so it never resumes this job.
+      if (run && run.halting) {
+        // eslint-disable-next-line no-await-in-loop
+        const c = await box.cancelSheetJob(provider, boxJobId);
+        if (!c || !c.ok) console.error(`sprite halt: could not cancel box job ${boxJobId}: ${c && c.error}`);
+        throw haltedError();
+      }
       // eslint-disable-next-line no-await-in-loop
       const r = await box.getSheetJob(provider, boxJobId);
       const now = Date.now();
@@ -180,6 +197,9 @@ function createDispatcher({
     const concept = must(await box.generateConcept(provider, { prompt: row.base_prompt }));
     const conceptKey = `${prefix}concept.png`;
     await store.putObject(conceptKey, concept.png, 'image/png');
+    // The concept call cannot be interrupted; a halt during it lands here,
+    // before a sheet job is ever created.
+    if (run && run.halting) throw haltedError();
     const job = must(await box.createSheetJob(provider, {
       prompt: row.base_prompt,
       concept_image: concept.conceptPath,
@@ -328,9 +348,15 @@ function createDispatcher({
           current.completed += 1;
           ok = true;
         } catch (err) {
-          // eslint-disable-next-line no-await-in-loop
-          await queue.fail(db, row.id, err);
-          current.failed += 1;
+          if (err.halted) {
+            // eslint-disable-next-line no-await-in-loop
+            await queue.requeueHalted(db, row.id);
+            current.halted += 1;
+          } else {
+            // eslint-disable-next-line no-await-in-loop
+            await queue.fail(db, row.id, err);
+            current.failed += 1;
+          }
         }
         current.doneCells += cells;
         // eslint-disable-next-line no-await-in-loop
@@ -352,8 +378,10 @@ function createDispatcher({
     run = {
       running: true,
       stopping: false,
+      halting: false,
       completed: 0,
       failed: 0,
+      halted: 0,
       totalCells: 0,
       doneCells: 0,
       secondsPerCell: DEFAULT_SECONDS_PER_CELL,
@@ -371,11 +399,21 @@ function createDispatcher({
     return true;
   }
 
+  // Stop AND cut off the job in progress: its box job is cancelled and the
+  // row goes back to the queue (drain's halted branch). Within a poll
+  // interval, plus the cell the box is finishing.
+  function halt() {
+    if (!run || !run.running) return false;
+    run.stopping = true;
+    run.halting = true;
+    return true;
+  }
+
   function status() {
     return run ? { ...run, current: run.current ? { ...run.current } : null } : null;
   }
 
-  return { start, stop, status };
+  return { start, stop, halt, status };
 }
 
 module.exports = { createDispatcher, NO_PROVIDER, QUEUE_CAP_MS };

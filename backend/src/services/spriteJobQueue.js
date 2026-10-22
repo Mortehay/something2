@@ -81,16 +81,23 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = 'none' 
   // mistaken queue is fixed in place. `status = 'queued'` is re-checked after
   // claim()'s row lock, so a job the dispatcher just took is left alone; the
   // INSERT below then conflicts on it and it counts as skipped.
+  // A rescued row keeps its box job so the batch resumes it -- but that job
+  // draws the OLD actions/frames, so a change detaches it (the next claim
+  // submits afresh) and `dropped_box_job_id` names it for the caller to cancel.
   const { rows: updated } = await db.query(
     `UPDATE sprite_sets s
         SET actions = string_to_array(t.actions, ','), frames = t.frames, frames_per_action = t.frames,
-            prop_fx = t.prop_fx, updated_at = now()
+            prop_fx = t.prop_fx, updated_at = now(),
+            box_job_id = CASE WHEN s.actions IS DISTINCT FROM string_to_array(t.actions, ',')
+                                OR s.frames_per_action IS DISTINCT FROM t.frames
+                              THEN NULL ELSE s.box_job_id END
        FROM unnest($1::int[], $2::smallint[], $3::int[], $4::text[], $5::text[])
-         AS t(entity_id, variant, frames, actions, prop_fx)
+         AS t(entity_id, variant, frames, actions, prop_fx),
+            sprite_sets o
       WHERE s.entity_type_id = t.entity_id
         AND COALESCE(s.appearance_variant, 0) = COALESCE(t.variant, 0)
-        AND s.status = 'queued'
-      RETURNING s.*`,
+        AND s.status = 'queued' AND o.id = s.id
+      RETURNING s.*, CASE WHEN s.box_job_id IS NULL THEN o.box_job_id END AS dropped_box_job_id`,
     [
       opts.map((o) => o.entityTypeId), opts.map((o) => o.appearanceVariant),
       opts.map(rowFrames), opts.map(rowActions), opts.map(rowPropFx),
@@ -203,6 +210,18 @@ async function requeueStale(db, staleMs = 60000) {
   return rows;
 }
 
+// A row the admin halted mid-run goes back to the queue to be drawn afresh:
+// its box job was cancelled, so it is detached rather than resumed.
+async function requeueHalted(db, id) {
+  const { rows } = await db.query(
+    `UPDATE sprite_sets SET status = 'queued', claimed_at = NULL, box_job_id = NULL,
+            last_error = 'halted from the Sprite Generation page', updated_at = now()
+      WHERE id = $1 AND status = 'running' RETURNING *`,
+    [id],
+  );
+  return rows[0] || null;
+}
+
 // Measured wall seconds per sheet cell (action x facing x frame) of the most
 // recently COMPLETED sheet that recorded a positive time (finished_at, which
 // approve does not bump); null when none has. The route applies
@@ -244,4 +263,4 @@ async function queueView(db) {
   return { stats: counts, jobs: active.rows };
 }
 
-module.exports = { enqueue, claim, attach, attachBox, complete, fail, requeueStale, lastSecondsPerCell, queuedCells, stats, queueView, PROP_FX };
+module.exports = { enqueue, claim, attach, attachBox, complete, fail, requeueStale, requeueHalted, lastSecondsPerCell, queuedCells, stats, queueView, PROP_FX };

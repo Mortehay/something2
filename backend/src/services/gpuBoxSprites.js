@@ -277,6 +277,18 @@ async function getSheetJob(provider, boxJobId, { fetchImpl = fetch } = {}) {
   };
 }
 
+// DELETE asks the box to stop a sheet job. Cooperative there: the cell being
+// denoised finishes first, and a job that already ended is left alone, so a
+// late cancel is harmless. A 404 (job gone) counts as cancelled.
+async function cancelSheetJob(provider, boxJobId, { fetchImpl = fetch } = {}) {
+  const p = `/api/jobs/${encodeURIComponent(boxJobId)}`;
+  const { res, error, retryable } = await call(provider, 'DELETE', p, { fetchImpl });
+  if (error) return { ok: false, error, retryable };
+  if (res.status === 404) return { ok: true };
+  if (!res.ok) return httpFailure(res, 'DELETE', p);
+  return { ok: true };
+}
+
 const fetchSheet = (provider, boxJobId, { fetchImpl = fetch } = {}) =>
   callPng(provider, `/api/jobs/${encodeURIComponent(boxJobId)}/sheet`, { fetchImpl });
 
@@ -287,5 +299,5 @@ async function fetchAtlas(provider, boxJobId, { fetchImpl = fetch } = {}) {
 }
 
 module.exports = {
-  STATUS_TERMINAL, actionCatalog, checkAuth, listConceptModels, generateConcept, txt2imgProp, PROP_NEGATIVE_PROMPT, createSheetJob, getSheetJob, fetchSheet, fetchAtlas,
+  STATUS_TERMINAL, actionCatalog, checkAuth, listConceptModels, generateConcept, txt2imgProp, PROP_NEGATIVE_PROMPT, createSheetJob, getSheetJob, cancelSheetJob, fetchSheet, fetchAtlas,
 };

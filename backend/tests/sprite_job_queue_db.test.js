@@ -148,6 +148,47 @@ test('enqueue re-takes options on a queued job and leaves a running one alone', 
   });
 });
 
+test('an update detaches a rescued row from its box job only when the sheet changes', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [a, b] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 2`,
+    );
+    assert.ok(a && b, 'precondition: two creatures with no live sprite job');
+    await queue.enqueue(client, [{ entityId: a.id }, { entityId: b.id }], { actions: ['idle'], framesPerAction: 4 });
+    await client.query(
+      `UPDATE sprite_sets SET box_job_id = 'box-' || entity_type_id
+        WHERE entity_type_id = ANY($1::int[]) AND status = 'queued'`,
+      [[a.id, b.id]],
+    );
+
+    const same = await queue.enqueue(client, [{ entityId: a.id }], { actions: ['idle'], framesPerAction: 4 });
+    assert.equal(same.updated[0].box_job_id, `box-${a.id}`, 'unchanged options keep the resumable job');
+    assert.equal(same.updated[0].dropped_box_job_id, null);
+
+    const changed = await queue.enqueue(client, [{ entityId: b.id }], { actions: ['idle'], framesPerAction: 6 });
+    assert.equal(changed.updated[0].box_job_id, null);
+    assert.equal(changed.updated[0].dropped_box_job_id, `box-${b.id}`);
+  });
+});
+
+test('requeueHalted puts a running row back detached, and leaves other states alone', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [e] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    const { rows: [row] } = await queue.enqueue(client, [{ entityId: e.id }], { actions: ['idle'], framesPerAction: 4 });
+    assert.equal(await queue.requeueHalted(client, row.id), null, 'a queued row is not "halted"');
+    await client.query(
+      `UPDATE sprite_sets SET status = 'running', claimed_at = now(), box_job_id = 'bx' WHERE id = $1`, [row.id],
+    );
+    const back = await queue.requeueHalted(client, row.id);
+    assert.equal(back.status, 'queued');
+    assert.equal(back.box_job_id, null);
+    assert.equal(back.claimed_at, null);
+    assert.match(back.last_error, /halted/);
+  });
+});
+
 test('enqueue gives props one facing', { skip }, async () => {
   await withRolledBackClient(async (client) => {
     const { rows: [creature] } = await client.query(

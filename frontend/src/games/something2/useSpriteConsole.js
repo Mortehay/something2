@@ -77,6 +77,7 @@ export const useQueueSprites = mutation('/jobs',
   ({ targets, actions, frames, prop_fx }) => ({ targets, actions, frames, prop_fx }));
 export const useStartSpriteBatch = mutation('/jobs/dispatch', 'Sprite batch started', () => ({}));
 export const useStopSpriteBatch = mutation('/jobs/stop', 'Sprite batch stopping', () => ({}));
+export const useHaltSpriteBatch = mutation('/jobs/halt', 'Sprite batch halting: the current sheet goes back to the queue', () => ({}));
 export const useRescueSpriteJobs = mutation('/jobs/requeue-stale',
   (data) => `${data.requeued} stranded job${data.requeued === 1 ? '' : 's'} rescued`, () => ({}));
 export const useClearSpriteJobs = mutation('/jobs/clear',

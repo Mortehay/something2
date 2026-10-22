@@ -192,6 +192,20 @@ test('getSheetJob maps 404 to missing', async () => {
   assert.ok(!box.STATUS_TERMINAL.has('running'));
 });
 
+test('cancelSheetJob sends DELETE; a gone job counts as cancelled, a 5xx does not', async () => {
+  const { fetchImpl, calls } = fakeBox({
+    'DELETE /api/jobs/j': () => json({ job_id: 'j', status: 'cancelled' }),
+    'DELETE /api/jobs/gone': () => new Response('no such job', { status: 404 }),
+    'DELETE /api/jobs/bad': () => new Response('boom', { status: 500 }),
+  });
+  assert.deepEqual(await box.cancelSheetJob(provider, 'j', { fetchImpl }), { ok: true });
+  assert.deepEqual(await box.cancelSheetJob(provider, 'gone', { fetchImpl }), { ok: true });
+  const bad = await box.cancelSheetJob(provider, 'bad', { fetchImpl });
+  assert.equal(bad.ok, false);
+  assert.match(bad.error, /500 for DELETE \/api\/jobs\/bad/);
+  assert.deepEqual(calls.map((c) => c.key), ['DELETE /api/jobs/j', 'DELETE /api/jobs/gone', 'DELETE /api/jobs/bad']);
+});
+
 test('fetchSheet returns the PNG bytes and fetchAtlas the raw atlas', async () => {
   const { fetchImpl, calls } = fakeBox({
     'GET /api/jobs/j/sheet': () => new Response(png('wolf-sheet.png'), { status: 200 }),

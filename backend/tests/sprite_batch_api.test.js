@@ -347,3 +347,43 @@ test('GET /jobs returns the run with live progress and batch totals', async () =
   assert.equal(res.status, 200);
   assert.deepEqual(res.body.run, run);
 });
+
+test('POST /jobs/halt halts the dispatcher and returns its run', async () => {
+  let halted = 0;
+  const d = { status: () => ({ running: true, halting: halted > 0 }), halt: () => { halted += 1; return true; } };
+  const a = express();
+  a.use(express.json());
+  a.use('/api/sprite-admin', spriteBatchRoutes(enqueuePool([]), (_q, _s, next) => next(), d, {}));
+  const res = await request(a).post('/api/sprite-admin/jobs/halt').send({});
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body, { halting: true, run: { running: true, halting: true } });
+  assert.equal(halted, 1);
+});
+
+// Updating a rescued row's options detaches its box job (that job draws the
+// old sheet); the route then asks the box to cancel it.
+test('jobs: a box job detached by an update is cancelled on the box', async () => {
+  const base = enqueuePool([]);
+  const pool = {
+    query: async (sql, params) => {
+      if (/UPDATE sprite_sets/i.test(sql)) return { rows: [{ id: 'r', status: 'queued', dropped_box_job_id: 'old-box-job' }] };
+      if (/INSERT INTO sprite_sets/i.test(sql)) return { rows: [] };
+      return base.query(sql, params);
+    },
+  };
+  const cancelled = [];
+  let done;
+  const finished = new Promise((r) => { done = r; });
+  const a = routerApp(pool, {
+    box: {
+      actionCatalog: async () => ({ ok: true, catalog: CATALOG }),
+      cancelSheetJob: async (provider, id) => { cancelled.push([provider.id, id]); done(); return { ok: true }; },
+    },
+  });
+  const res = await request(a).post('/api/sprite-admin/jobs')
+    .send({ targets: [{ entity_id: 4 }], actions: ['idle', 'walk'], frames: 6 });
+  assert.equal(res.status, 201);
+  assert.equal(res.body.updated, 1);
+  await finished;
+  assert.deepEqual(cancelled, [['p1', 'old-box-job']]);
+});

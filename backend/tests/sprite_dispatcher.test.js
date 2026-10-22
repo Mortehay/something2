@@ -23,7 +23,7 @@ function wolfRow(over = {}) {
 // A queue fake over a fixed list of rows; records every write.
 function fakeQueue(rows, spc = null) {
   const pending = [...rows];
-  const log = { claims: 0, attached: [], completed: [], failed: [] };
+  const log = { claims: 0, attached: [], completed: [], failed: [], requeued: [] };
   return {
     log,
     claim: async () => { log.claims += 1; return pending.shift() || null; },
@@ -33,6 +33,7 @@ function fakeQueue(rows, spc = null) {
     attachBox: async (_db, id, info) => { log.attached.push({ id, ...info }); },
     complete: async (_db, id, result) => { log.completed.push({ id, result }); },
     fail: async (_db, id, err) => { log.failed.push({ id, message: err.message }); },
+    requeueHalted: async (_db, id) => { log.requeued.push(id); },
   };
 }
 
@@ -631,4 +632,56 @@ test('progress: secondsPerCell defaults to 57 and rows queued mid-run grow the t
   assert.equal(r.completed + r.failed, 2, 'the late row was claimed (its sheet may not match the wolf fixture)');
   assert.equal(r.doneCells, 24);
   assert.equal(r.totalCells, 24, 'total grew to include the late row');
+});
+
+// Halt: the sheet on the box is cancelled, its row goes back to the queue
+// (not failed, not completed), and nothing after it is claimed.
+test('halt mid-sheet cancels the box job and requeues the row', async () => {
+  let d;
+  const cancelled = [];
+  const box = fakeBox({
+    getSheetJob: async () => { d.halt(); return { ok: true, job: { status: 'running', progress: { pct: 40 } } }; },
+    cancelSheetJob: async (_p, id) => { cancelled.push(id); return { ok: true }; },
+  });
+  const made = dispatcherFor({ rows: [wolfRow(), wolfRow({ id: 'row-2' })], box });
+  d = made.d;
+  await d.start();
+  assert.deepEqual(cancelled, ['box-1']);
+  assert.deepEqual(made.queue.log.requeued, ['row-1']);
+  assert.deepEqual(made.queue.log.failed, []);
+  assert.deepEqual(made.queue.log.completed, []);
+  assert.equal(made.queue.log.claims, 1, 'row-2 is never claimed');
+  assert.equal(d.status().halted, 1);
+  assert.equal(d.status().running, false);
+});
+
+test('halt during the concept never creates a sheet job', async () => {
+  let d;
+  const box = fakeBox({
+    generateConcept: async () => { d.halt(); return { ok: true, conceptPath: 'images/c.png', png: CONCEPT_PNG }; },
+    cancelSheetJob: async () => { throw new Error('nothing to cancel'); },
+  });
+  const made = dispatcherFor({ rows: [wolfRow()], box });
+  d = made.d;
+  await d.start();
+  assert.equal(box.calls.create.length, 0);
+  assert.deepEqual(made.queue.log.requeued, ['row-1']);
+});
+
+test('a failed cancel still requeues the halted row', async () => {
+  let d;
+  const box = fakeBox({
+    getSheetJob: async () => { d.halt(); return { ok: true, job: { status: 'running', progress: {} } }; },
+    cancelSheetJob: async () => ({ ok: false, error: 'box unreachable' }),
+  });
+  const made = dispatcherFor({ rows: [wolfRow()], box });
+  d = made.d;
+  await d.start();
+  assert.deepEqual(made.queue.log.requeued, ['row-1']);
+  assert.deepEqual(made.queue.log.failed, []);
+});
+
+test('halt with no batch running reports false', () => {
+  const { d } = dispatcherFor({ rows: [] });
+  assert.equal(d.halt(), false);
 });

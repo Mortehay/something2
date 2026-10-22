@@ -62,6 +62,16 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     return { catalog: r.catalog };
   }
 
+  async function cancelBoxJobs(ids) {
+    const provider = await loadProvider();
+    if (!provider) return;
+    for (const id of ids) {
+      // eslint-disable-next-line no-await-in-loop
+      const r = await box.cancelSheetJob(provider, id);
+      if (!r.ok) console.error(`sprite update: could not cancel box job ${id}: ${r.error}`);
+    }
+  }
+
   router.get('/action-catalog', async (_req, res) => {
     try {
       const got = await getCatalog();
@@ -217,6 +227,12 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
         return res.status(400).json({ error: `frames must be an integer from 1 to ${cap} (the most the selected actions allow)` });
       }
       const result = await queue.enqueue(pool, targets, { actions, framesPerAction: frames, propFx });
+      // Box jobs detached by an options change would otherwise keep the GPU
+      // busy drawing a sheet nothing will collect. Best effort, not awaited.
+      const dropped = result.updated.map((r) => r.dropped_box_job_id).filter(Boolean);
+      if (dropped.length && box && typeof box.cancelSheetJob === 'function') {
+        cancelBoxJobs(dropped).catch((err) => console.error('sprite update: cancelling detached box jobs failed:', err));
+      }
       const selected = new Set(targets.map((t) => `${t.entityId}:${t.variant ?? ''}`)).size;
       res.status(201).json({
         selected,
@@ -248,6 +264,11 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
 
   router.post('/jobs/stop', (_req, res) => {
     res.json({ stopping: dispatcher.stop(), run: dispatcher.status() });
+  });
+
+  // Stop plus cancel the sheet in progress; that row goes back to the queue.
+  router.post('/jobs/halt', (_req, res) => {
+    res.json({ halting: dispatcher.halt(), run: dispatcher.status() });
   });
 
   router.post('/jobs/requeue-stale', async (req, res) => {

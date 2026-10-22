@@ -4,7 +4,7 @@ import SpritePreviewModal from './SpritePreviewModal.jsx';
 import AdminLoading from './AdminLoading.jsx';
 import { assetUrlVersioned } from './useTileSprites.js';
 import {
-  useActionCatalog, useApproveSpriteJobs, useClearSpriteJobs, useQueueSprites, useRescueSpriteJobs,
+  useActionCatalog, useApproveSpriteJobs, useClearSpriteJobs, useHaltSpriteBatch, useQueueSprites, useRescueSpriteJobs,
   useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
 } from './useSpriteConsole.js';
 import {
@@ -101,6 +101,7 @@ function SpriteConsoleAdmin() {
   const queue = useQueueSprites();
   const start = useStartSpriteBatch();
   const stop = useStopSpriteBatch();
+  const halt = useHaltSpriteBatch();
   const rescue = useRescueSpriteJobs();
   const clear = useClearSpriteJobs();
   const approve = useApproveSpriteJobs();
@@ -262,7 +263,15 @@ function SpriteConsoleAdmin() {
         <Button disabled={run?.running || !(stats.queued > 0)} onClick={() => start.mutate()}>
           {run?.running ? 'Running…' : 'Start batch'}
         </Button>
-        {run?.running && <Secondary onClick={() => stop.mutate()}>Stop</Secondary>}
+        {/* Stop lets the sheet in progress finish; Halt cancels it on the box
+            and puts that row back in the queue. */}
+        {run?.running && <Secondary disabled={run.stopping} onClick={() => stop.mutate()}>Stop</Secondary>}
+        {run?.running && (
+          <Secondary disabled={run.halting} onClick={() => {
+            const name = run.current?.creature;
+            if (window.confirm(`Halt the batch now?${name ? ` ${name} is cancelled on the GPU box and goes back to the queue.` : ''}`)) halt.mutate();
+          }}>{run.halting ? 'Halting…' : 'Halt'}</Secondary>
+        )}
         <Secondary onClick={() => rescue.mutate()}>Rescue stranded</Secondary>
         <Secondary disabled={run?.running || !(stats.queued > 0)} onClick={() => {
           if (window.confirm(`Clear ${stats.queued || 0} queued sprite jobs?`)) clear.mutate();
