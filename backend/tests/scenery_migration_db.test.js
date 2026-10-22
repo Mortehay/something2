@@ -181,15 +181,15 @@ test('up sets feature_density from the catalogue only where it is NULL', { skip 
   const dens = async () => Object.fromEntries(
     (await c.query('SELECT name, feature_density FROM biomes')).rows.map((r) => [r.name, r.feature_density]));
   const first = await dens();
-  for (const [name, s] of Object.entries(BIOME_SCENERY)) {
-    assert.ok(s.feature_density > 0, `${name} needs an explicit catalogue feature_density`);
-    assert.equal(first[name], s.feature_density, name);
-  }
+  for (const [name, s] of Object.entries(BIOME_SCENERY)) assert.equal(first[name], s.feature_density, name);
+  assert.ok(Object.values(BIOME_SCENERY).some((s) => s.feature_density !== null), 'some biomes are tuned');
+  assert.ok(Object.values(BIOME_SCENERY).some((s) => s.feature_density === null), 'untuned biomes stay NULL (today\'s look)');
   // an admin value wins over a re-run; a NULL is filled again
   await c.query("UPDATE biomes SET feature_density = 0.77 WHERE name = 'Meadow'");
-  await c.query("UPDATE biomes SET feature_density = NULL WHERE name = 'Highlands'");
+  await c.query("UPDATE biomes SET feature_density = NULL WHERE name = 'Ossuary'");
   await run(c, 'up');
   const second = await dens();
   assert.equal(second.Meadow, 0.77);
-  assert.equal(second.Highlands, BIOME_SCENERY.Highlands.feature_density);
+  assert.equal(second.Ossuary, BIOME_SCENERY.Ossuary.feature_density);
+  assert.equal(second.Highlands, null);
 }));
