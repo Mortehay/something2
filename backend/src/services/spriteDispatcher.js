@@ -71,6 +71,7 @@ const DEFAULT_SECONDS_PER_CELL = 57;
 // Cells one queued row will draw: a prop is one image, a creature sheet is
 // actions x directions x frames.
 function rowCells(row) {
+  if (row.redraw_of) return (row.redraw_frames || []).length;
   if (row.generation_kind === 'object') return 1;
   return (row.actions || []).length * (row.directions || []).length * (row.frames_per_action || 0);
 }
@@ -84,6 +85,8 @@ function haltedError() {
   err.halted = true;
   return err;
 }
+
+const BOX_JOB_GONE = "The GPU box no longer has this sheet's job. Queue the whole sheet again.";
 
 // A box client result -> its value, or an Error carrying the box's words.
 function must(result) {
@@ -246,12 +249,89 @@ function createDispatcher({
     });
   }
 
+  // Fetches the box's current sheet for the row's box job, builds its manifest
+  // from that atlas and stores both under the row's own prefix.
+  async function storeBoxSheet(provider, row, prefix) {
+    const sheet = must(await box.fetchSheet(provider, row.box_job_id));
+    const atlas = must(await box.fetchAtlas(provider, row.box_job_id));
+    const built = buildBoxSheetManifest({
+      atlas: atlas.atlas,
+      sheetPng: sheet.png,
+      actions: row.actions,
+      directions: row.directions,
+      frames: row.frames_per_action,
+      engine: ENGINE_LABEL,
+      boxJobId: row.box_job_id,
+      kind: row.generation_kind,
+    });
+    if (!built.ok) throw new Error(`box sheet rejected: ${built.error}`);
+    const keys = { atlas_key: `${prefix}sheet.png`, manifest_key: `${prefix}sheet.json` };
+    await store.putObject(keys.atlas_key, sheet.png, 'image/png');
+    await store.putObject(keys.manifest_key, Buffer.from(JSON.stringify(built.manifest)), 'application/json');
+    return keys;
+  }
+
+  // Frame redraw (row.redraw_of). The box redraw contract is [ASSUMED]:
+  // POST /api/jobs/{box_job_id}/redraw returns a task that is polled and
+  // cancelled at /api/jobs/{taskId} (same statuses as a sheet job); once done,
+  // /api/jobs/{box_job_id}/sheet and /atlas return the UPDATED sheet. The row
+  // keeps box_job_id (the sheet) and records box_task_id (the redraw), so a
+  // restart resumes polling the same task instead of redrawing twice. Unlike a
+  // full sheet it never resubmits a lost job: the box no longer having the
+  // sheet or the task is a failure that tells the admin to queue it again.
+  // When the task fails after it started, the box's current sheet is still
+  // stored (frames redrawn before the failure are kept) and recorded on the row.
+  async function executeRedraw(provider, row, prefix, cur) {
+    if (!row.box_job_id) throw new Error(BOX_JOB_GONE);
+    const frames = row.redraw_frames || [];
+    cur.phase = 'queued';
+    cur.message = `Redrawing ${frames.length} frames`;
+    let taskId = row.box_task_id;
+    if (!taskId) {
+      taskId = must(await box.redrawFrames(provider, row.box_job_id, frames)).taskId;
+      await queue.attachRedrawTask(db, row.id, taskId);
+    }
+    try {
+      await pollToDone(provider, taskId, frames.length * cellTimeoutMs, {
+        measure: false,
+        onPoll: (status, progress) => {
+          cur.phase = status === 'queued' ? 'queued' : status === 'done' ? 'storing' : 'running';
+          const pct = status === 'done' ? 100 : Number(progress.pct);
+          cur.pct = Number.isFinite(pct) ? Math.max(0, Math.min(100, pct)) : (status === 'queued' ? 0 : cur.pct);
+          if (progress.message) cur.message = progress.message;
+        },
+      });
+      cur.phase = 'storing';
+      cur.pct = 100;
+      let conceptKey = null;
+      if (row.concept_key) {
+        const chunks = [];
+        for await (const chunk of await store.getObjectStream(row.concept_key)) chunks.push(chunk);
+        conceptKey = `${prefix}concept.png`;
+        await store.putObject(conceptKey, Buffer.concat(chunks), 'image/png');
+      }
+      const keys = await storeBoxSheet(provider, row, prefix);
+      await queue.complete(db, row.id, { ...keys, concept_key: conceptKey, sheet_seconds: null });
+    } catch (err) {
+      if (err.halted) throw err;
+      try {
+        const keys = await storeBoxSheet(provider, row, prefix);
+        await queue.recordRedrawSheet(db, row.id, keys);
+      } catch (capErr) {
+        console.error(`sprite redraw: could not keep the box's sheet for ${row.id}: ${capErr.message}`);
+      }
+      if (/^box job missing/.test(err.message)) throw new Error(BOX_JOB_GONE);
+      throw err;
+    }
+  }
+
   async function execute(row, cur) {
     if (!Array.isArray(row.actions) || row.actions.length === 0) throw new Error(NO_ACTIONS);
     const provider = await loadProvider();
     if (!provider) throw new Error(NO_PROVIDER);
     const prefix = `${store.BUCKET()}/${safeName(row.creature)}/${row.id}/`;
     if (row.generation_kind === 'object') return executeProp(provider, row, prefix, cur);
+    if (row.redraw_of) return executeRedraw(provider, row, prefix, cur);
 
     let attached = null;
     // A resumed job that is already done or already running has an unknown

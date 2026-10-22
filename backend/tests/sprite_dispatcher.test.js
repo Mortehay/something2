@@ -23,17 +23,19 @@ function wolfRow(over = {}) {
 // A queue fake over a fixed list of rows; records every write.
 function fakeQueue(rows, spc = null) {
   const pending = [...rows];
-  const log = { claims: 0, attached: [], completed: [], failed: [], requeued: [] };
+  const log = { claims: 0, attached: [], completed: [], failed: [], requeued: [], redrawTasks: [], redrawSheets: [] };
   return {
     log,
     claim: async () => { log.claims += 1; return pending.shift() || null; },
-    queuedCells: async () => pending.reduce((n, r) => n + (r.generation_kind === 'object' ? 1
+    queuedCells: async () => pending.reduce((n, r) => n + (r.redraw_of ? r.redraw_frames.length : r.generation_kind === 'object' ? 1
       : r.actions.length * r.directions.length * r.frames_per_action), 0),
     lastSecondsPerCell: async () => spc,
     attachBox: async (_db, id, info) => { log.attached.push({ id, ...info }); },
     complete: async (_db, id, result) => { log.completed.push({ id, result }); },
     fail: async (_db, id, err) => { log.failed.push({ id, message: err.message }); },
     requeueHalted: async (_db, id) => { log.requeued.push(id); },
+    attachRedrawTask: async (_db, id, taskId) => { log.redrawTasks.push({ id, taskId }); return { id }; },
+    recordRedrawSheet: async (_db, id, keys) => { log.redrawSheets.push({ id, ...keys }); return { id }; },
   };
 }
 
@@ -68,7 +70,7 @@ function fakeDb(images = {}) {
 // A box fake. `statuses` is the sequence getSheetJob walks through (the last
 // one repeats); everything else answers like the captured Wolf job.
 function fakeBox({ statuses = [{ status: 'done' }], ...over } = {}) {
-  const calls = { concept: [], create: [], get: [], sheet: 0, atlas: 0 };
+  const calls = { concept: [], create: [], redraw: [], get: [], sheet: 0, atlas: 0 };
   let i = 0;
   const box = {
     calls,
@@ -79,6 +81,10 @@ function fakeBox({ statuses = [{ status: 'done' }], ...over } = {}) {
     createSheetJob: async (provider, spec) => {
       calls.create.push({ provider, spec });
       return { ok: true, boxJobId: `box-${calls.create.length}`, cells: 16, estimatedSeconds: 888 };
+    },
+    redrawFrames: async (provider, boxJobId, frames) => {
+      calls.redraw.push({ provider, boxJobId, frames });
+      return { ok: true, taskId: 'task-1' };
     },
     getSheetJob: async (_p, id) => {
       calls.get.push(id);
@@ -684,4 +690,148 @@ test('a failed cancel still requeues the halted row', async () => {
 test('halt with no batch running reports false', () => {
   const { d } = dispatcherFor({ rows: [] });
   assert.equal(d.halt(), false);
+});
+
+// --- Frame redraw rows ---
+
+const QUEUE_AGAIN = "The GPU box no longer has this sheet's job. Queue the whole sheet again.";
+const REDRAW_FRAMES = [{ action: 'idle', direction: 's', frame: 1 }, { action: 'idle', direction: 'e', frame: 0 }];
+const OLD_CONCEPT = 'sprites/Grey_Wolf/row-0/concept.png';
+
+function redrawRow(over = {}) {
+  return wolfRow({
+    id: 'row-2', redraw_of: 'row-0', redraw_frames: REDRAW_FRAMES, box_job_id: 'box-old',
+    box_task_id: null, concept_key: OLD_CONCEPT, ...over,
+  });
+}
+const conceptStore = () => fakeStore({ [OLD_CONCEPT]: CONCEPT_PNG });
+
+test('redraw row calls redrawFrames with the marked frames and stores under its own prefix', async () => {
+  const { d, queue, box, store } = dispatcherFor({
+    rows: [redrawRow()], store: conceptStore(),
+    box: fakeBox({ statuses: [{ status: 'running' }, { status: 'done' }] }),
+  });
+  await d.start();
+
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.redraw.length, 1);
+  assert.equal(box.calls.redraw[0].provider, PROVIDER);
+  assert.equal(box.calls.redraw[0].boxJobId, 'box-old');
+  assert.deepEqual(box.calls.redraw[0].frames, REDRAW_FRAMES);
+  assert.deepEqual(queue.log.redrawTasks, [{ id: 'row-2', taskId: 'task-1' }]);
+  assert.ok(box.calls.get.every((id) => id === 'task-1'), 'polls the task, not the sheet job');
+  const prefix = 'sprites/Grey_Wolf/row-2/';
+  assert.deepEqual(store.puts.map((p) => p.key), [`${prefix}concept.png`, `${prefix}sheet.png`, `${prefix}sheet.json`]);
+  assert.deepEqual(store.puts[0].buf, CONCEPT_PNG);
+  assert.deepEqual(store.puts[1].buf, WOLF_SHEET);
+  assert.equal(JSON.parse(store.puts[2].buf.toString('utf8')).box_job_id, 'box-old');
+  assert.deepEqual(queue.log.completed, [{ id: 'row-2', result: {
+    atlas_key: `${prefix}sheet.png`, manifest_key: `${prefix}sheet.json`,
+    concept_key: `${prefix}concept.png`, sheet_seconds: null,
+  } }]);
+  assert.equal(box.calls.create.length, 0);
+  assert.equal(box.calls.concept.length, 0);
+});
+
+test('redraw row never takes the resume-a-done-sheet path', async () => {
+  const { d, queue, box } = dispatcherFor({
+    rows: [redrawRow()], store: conceptStore(), box: fakeBox({ statuses: [{ status: 'done' }] }),
+  });
+  await d.start();
+  assert.equal(box.calls.redraw.length, 1);
+  assert.equal(queue.log.completed.length, 1);
+});
+
+test('redraw row with box_task_id resumes polling and does not resubmit', async () => {
+  const { d, queue, box } = dispatcherFor({
+    rows: [redrawRow({ box_task_id: 'task-9' })], store: conceptStore(),
+    box: fakeBox({ statuses: [{ status: 'running' }, { status: 'done' }] }),
+  });
+  await d.start();
+  assert.equal(box.calls.redraw.length, 0);
+  assert.deepEqual(queue.log.redrawTasks, []);
+  assert.ok(box.calls.get.length >= 2 && box.calls.get.every((id) => id === 'task-9'));
+  assert.equal(queue.log.completed.length, 1);
+});
+
+test('redraw with no box_job_id fails with the queue-again message', async () => {
+  const { d, queue, box } = dispatcherFor({ rows: [redrawRow({ box_job_id: null })], store: conceptStore() });
+  await d.start();
+  assert.deepEqual(queue.log.failed, [{ id: 'row-2', message: QUEUE_AGAIN }]);
+  assert.equal(box.calls.redraw.length, 0);
+});
+
+test('redraw task missing on the box fails with the same message', async () => {
+  const { d, queue } = dispatcherFor({
+    rows: [redrawRow({ box_task_id: 'task-9' })], store: conceptStore(),
+    box: fakeBox({ statuses: [{ status: 'missing' }] }),
+  });
+  await d.start();
+  assert.deepEqual(queue.log.failed, [{ id: 'row-2', message: QUEUE_AGAIN }]);
+});
+
+test('failed redraw stores the box\'s current sheet and rethrows', async () => {
+  const { d, queue, store } = dispatcherFor({
+    rows: [redrawRow()], store: conceptStore(),
+    box: fakeBox({ statuses: [{ status: 'failed', error: 'cell 3 oom' }] }),
+  });
+  await d.start();
+  const prefix = 'sprites/Grey_Wolf/row-2/';
+  assert.deepEqual(queue.log.redrawSheets, [{ id: 'row-2', atlas_key: `${prefix}sheet.png`, manifest_key: `${prefix}sheet.json` }]);
+  assert.ok(store.puts.some((p) => p.key === `${prefix}sheet.png`));
+  assert.equal(queue.log.failed.length, 1);
+  assert.match(queue.log.failed[0].message, /cell 3 oom/);
+  assert.deepEqual(queue.log.completed, []);
+});
+
+test('failed redraw still fails the row when capturing the sheet also fails', async () => {
+  const { d, queue } = dispatcherFor({
+    rows: [redrawRow()], store: conceptStore(),
+    box: fakeBox({
+      statuses: [{ status: 'failed', error: 'cell 3 oom' }],
+      fetchSheet: async () => ({ ok: false, error: 'gone' }),
+    }),
+  });
+  const errs = [];
+  const orig = console.error;
+  console.error = (...a) => errs.push(a.join(' '));
+  try { await d.start(); } finally { console.error = orig; }
+  assert.deepEqual(queue.log.redrawSheets, []);
+  assert.match(queue.log.failed[0].message, /cell 3 oom/);
+  assert.ok(errs.some((e) => /gone/.test(e)));
+});
+
+test('halt mid-redraw cancels the task id and requeues the row', async () => {
+  let d;
+  const cancelled = [];
+  const box = fakeBox({
+    getSheetJob: async () => { d.halt(); return { ok: true, job: { status: 'running', progress: {} } }; },
+    cancelSheetJob: async (_p, id) => { cancelled.push(id); return { ok: true }; },
+  });
+  const made = dispatcherFor({ rows: [redrawRow()], box, store: conceptStore() });
+  d = made.d;
+  await d.start();
+  assert.deepEqual(cancelled, ['task-1']);
+  assert.deepEqual(made.queue.log.requeued, ['row-2']);
+  assert.deepEqual(made.queue.log.failed, []);
+  assert.deepEqual(made.queue.log.redrawSheets, [], 'a halt does not capture a partial sheet');
+});
+
+test('progress counts a redraw row as its marked frames', async () => {
+  let dRef;
+  const seen = [];
+  const inner = fakeBox({ statuses: [{ status: 'running', progress: { pct: 50, message: 'frame 1/2' } }, { status: 'done' }] });
+  const box = {
+    ...inner,
+    getSheetJob: async (...a) => { seen.push({ ...dRef.status().current }); return inner.getSheetJob(...a); },
+  };
+  const { d } = dispatcherFor({ rows: [redrawRow()], box, store: conceptStore() });
+  dRef = d;
+  await d.start();
+  assert.equal(seen[0].cells, 2);
+  assert.equal(seen[1].phase, 'running');
+  assert.equal(seen[1].pct, 50);
+  assert.equal(seen[1].message, 'frame 1/2');
+  assert.equal(d.status().doneCells, 2);
+  assert.equal(d.status().totalCells, 2);
 });
