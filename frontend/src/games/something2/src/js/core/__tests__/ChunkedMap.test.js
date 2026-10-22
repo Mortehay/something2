@@ -125,3 +125,17 @@ describe("ChunkedMap resolves a chunk offset in both cx and cy", () => {
     expect(m.getTileAt(worldX, worldY)).toBe("Q-13"); // lr=1, lc=3 (NOT "Q-31")
   });
 });
+
+describe("ChunkedMap cover", () => {
+  it("stores cover per chunk, empty shape when absent, cleared on removeChunk", () => {
+    const m = new ChunkedMap(2);
+    const grid = [["grass", "grass"], ["grass", "grass"]];
+    const cover = { types: ["Moss"], cells: [0, 1, 1, 5, 6] };
+    m.setChunk(0, 0, grid, [], null, cover);
+    m.setChunk(1, 0, grid);
+    expect(m.coverInChunk(0, 0)).toEqual(cover);
+    expect(m.coverInChunk(1, 0)).toEqual({ types: [], cells: [] });
+    m.removeChunk(0, 0);
+    expect(m.coverInChunk(0, 0)).toEqual({ types: [], cells: [] });
+  });
+});

@@ -12,6 +12,7 @@ export class ChunkedMap {
     this.chunks = new Map(); // "cx,cy" -> string[][]
     this.decorations = new Map(); // "cx,cy" -> { list, blocked: Map<"row,col", {x,y,r}[]> }
     this.biomes = new Map(); // "cx,cy" -> string[][] (coarse biome grid, or absent)
+    this.cover = new Map(); // "cx,cy" -> { types: string[], cells: number[] } (5-tuples), or absent
     this.setMapTiles(mapTiles);
   }
 
@@ -34,7 +35,7 @@ export class ChunkedMap {
     }
   }
 
-  setChunk(cx, cy, grid, decorations = [], biomes = null) {
+  setChunk(cx, cy, grid, decorations = [], biomes = null, cover = null) {
     this.chunks.set(CHUNK_KEY(cx, cy), grid);
     // Precompute the blocking circles (tile-local px) per tile for cheap
     // walkability checks; same structure as ServerMap.blockedDecorationsFor.
@@ -49,15 +50,19 @@ export class ChunkedMap {
     this.decorations.set(CHUNK_KEY(cx, cy), { list: decorations, blocked });
     if (biomes) this.biomes.set(CHUNK_KEY(cx, cy), biomes);
     else this.biomes.delete(CHUNK_KEY(cx, cy));
+    if (cover && cover.cells && cover.cells.length) this.cover.set(CHUNK_KEY(cx, cy), cover);
+    else this.cover.delete(CHUNK_KEY(cx, cy));
   }
   hasChunk(cx, cy) { return this.chunks.has(CHUNK_KEY(cx, cy)); }
   removeChunk(cx, cy) {
     this.chunks.delete(CHUNK_KEY(cx, cy));
     this.decorations.delete(CHUNK_KEY(cx, cy));
     this.biomes.delete(CHUNK_KEY(cx, cy));
+    this.cover.delete(CHUNK_KEY(cx, cy));
   }
   getChunk(cx, cy) { return this.chunks.get(CHUNK_KEY(cx, cy)) || null; }
   decorationsInChunk(cx, cy) { const e = this.decorations.get(CHUNK_KEY(cx, cy)); return e ? e.list : []; }
+  coverInChunk(cx, cy) { return this.cover.get(CHUNK_KEY(cx, cy)) || { types: [], cells: [] }; }
   loadedKeys() { return [...this.chunks.keys()]; }
 
   getTileAt(worldX, worldY) {

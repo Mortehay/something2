@@ -870,6 +870,23 @@ function placeFeature(cfg, defs, region, flora, terrain, gRow, gCol, spawn, port
   return { name: picked.name, ox, oy, blocking, radius, layer: 'feature' };
 }
 
+// /chunk wire shape: features stay full objects; ground cover (hundreds per
+// chunk, never blocking) is packed as { types, cells } where cells is a flat
+// array of 5-tuples [typeIndex, row, col, ox, oy, ...] in generator order.
+function splitChunkDecorations(all) {
+  const decorations = [];
+  const types = [];
+  const index = new Map();
+  const cells = [];
+  for (const d of all) {
+    if (d.layer !== 'cover') { decorations.push(d); continue; }
+    let t = index.get(d.name);
+    if (t === undefined) { t = types.length; types.push(d.name); index.set(d.name, t); }
+    cells.push(t, d.row, d.col, d.ox, d.oy);
+  }
+  return { decorations, cover: { types, cells } };
+}
+
 // Ground cover on one tile: stochastic-rounded count, weighted type pick among
 // types still under max_per_tile. Never blocking, never excluded by blocker
 // rules (the caller already skipped carved path cells).
@@ -2054,6 +2071,7 @@ module.exports = {
     generateRegion,
     generateChunk,
     generateChunkDecorations,
+    splitChunkDecorations,
     pathAnchor,
     pathSegmentCells,
     collectPathCells,
