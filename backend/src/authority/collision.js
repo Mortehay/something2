@@ -146,7 +146,9 @@ class ServerMap {
     this.tileTypes = world.tileTypes;
     this.chunks = new Map(); // "cx,cy" -> string[][]
     this.decorationDefs = world.decorationDefs || [];
-    this.blockedDecoTiles = new Map(); // "cx,cy" -> Set<"lr,lc"> of blocking decoration cells
+    // "cx,cy" -> Map<"lr,lc", {x,y,r}[]>: the blocking circles (tile-local px)
+    // of each tile. ChunkedMap.setChunk builds the identical structure.
+    this.blockedDecoCircles = new Map();
   }
 
   getChunk(cx, cy) {
@@ -180,27 +182,30 @@ class ServerMap {
     return t === undefined ? null : t;
   }
 
-  // Lazily builds (and memoizes, LRU-capped like getChunk) the set of
-  // chunk-local "row,col" cells occupied by a BLOCKING decoration, using the
-  // same generateChunkDecorations the /chunk endpoint uses — the parity
-  // mechanism that keeps client-visible decorations and server collision in
-  // lockstep.
+  // Lazily builds (and memoizes, LRU-capped like getChunk) the blocking circles
+  // per chunk-local "row,col" tile, using the same generateChunkDecorations the
+  // /chunk endpoint uses -- the parity mechanism that keeps client-visible
+  // decorations and server collision in lockstep.
   blockedDecorationsFor(cx, cy) {
     const key = `${cx},${cy}`;
-    let set = this.blockedDecoTiles.get(key);
-    if (set !== undefined) return set;
-    set = new Set();
+    let tiles = this.blockedDecoCircles.get(key);
+    if (tiles !== undefined) return tiles;
+    tiles = new Map();
     if (this.decorationDefs.length > 0) {
       const grid = this.getChunk(cx, cy);
       for (const d of generateChunkDecorations(this.world, cx, cy, grid, this.decorationDefs, { cover: false })) {
-        if (d.blocking) set.add(`${d.row},${d.col}`);
+        if (!d.blocking) continue;
+        const k = `${d.row},${d.col}`;
+        let list = tiles.get(k);
+        if (!list) { list = []; tiles.set(k, list); }
+        list.push({ x: d.ox, y: d.oy, r: d.radius });
       }
     }
-    this.blockedDecoTiles.set(key, set);
-    if (this.blockedDecoTiles.size > MAX_CHUNKS) {
-      this.blockedDecoTiles.delete(this.blockedDecoTiles.keys().next().value);
+    this.blockedDecoCircles.set(key, tiles);
+    if (this.blockedDecoCircles.size > MAX_CHUNKS) {
+      this.blockedDecoCircles.delete(this.blockedDecoCircles.keys().next().value);
     }
-    return set;
+    return tiles;
   }
 
   isWalkable(worldX, worldY) {
@@ -208,18 +213,22 @@ class ServerMap {
     if (t === null) return false;
     const def = this.tileTypes[t];
     if (def && def.walkable === false) return false;
-    // Decoration overlay: blocking decorations occupy their center footprint (~36x36) rather than the whole 100x100 tile
+    // Decoration overlay: a blocking feature is a circle of `r` px around its
+    // tile-local anchor (x, y), inclusive of the edge. The generator keeps the
+    // circle inside its own tile, so only that tile's circles are tested.
     const gCol = Math.floor(worldX / MAP_TILE_SIZE);
     const gRow = Math.floor(worldY / MAP_TILE_SIZE);
     const cx = Math.floor(gCol / this.chunkSize);
     const cy = Math.floor(gRow / this.chunkSize);
     const lc = gCol - cx * this.chunkSize;
     const lr = gRow - cy * this.chunkSize;
-    if (this.blockedDecorationsFor(cx, cy).has(`${lr},${lc}`)) {
+    const circles = this.blockedDecorationsFor(cx, cy).get(`${lr},${lc}`);
+    if (circles) {
       const lx = worldX - gCol * MAP_TILE_SIZE;
       const ly = worldY - gRow * MAP_TILE_SIZE;
-      if (Math.abs(lx - 50) <= 10 && Math.abs(ly - 50) <= 10) {
-        return false;
+      for (const c of circles) {
+        const dx = lx - c.x, dy = ly - c.y;
+        if (dx * dx + dy * dy <= c.r * c.r) return false;
       }
     }
     return true;

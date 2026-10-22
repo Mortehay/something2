@@ -10,7 +10,7 @@ export class ChunkedMap {
     this.chunkSize = chunkSize;
     this.tileSize = MAP_TILE_SIZE;
     this.chunks = new Map(); // "cx,cy" -> string[][]
-    this.decorations = new Map(); // "cx,cy" -> { list, blocked: Set<"row,col"> }
+    this.decorations = new Map(); // "cx,cy" -> { list, blocked: Map<"row,col", {x,y,r}[]> }
     this.biomes = new Map(); // "cx,cy" -> string[][] (coarse biome grid, or absent)
     this.setMapTiles(mapTiles);
   }
@@ -36,9 +36,16 @@ export class ChunkedMap {
 
   setChunk(cx, cy, grid, decorations = [], biomes = null) {
     this.chunks.set(CHUNK_KEY(cx, cy), grid);
-    // Precompute the blocking-tile set for O(1) walkability checks.
-    const blocked = new Set();
-    for (const d of decorations) if (d.blocking) blocked.add(`${d.row},${d.col}`);
+    // Precompute the blocking circles (tile-local px) per tile for cheap
+    // walkability checks; same structure as ServerMap.blockedDecorationsFor.
+    const blocked = new Map();
+    for (const d of decorations) {
+      if (d.blocking !== true) continue;
+      const k = `${d.row},${d.col}`;
+      let list = blocked.get(k);
+      if (!list) { list = []; blocked.set(k, list); }
+      list.push({ x: d.ox, y: d.oy, r: d.radius });
+    }
     this.decorations.set(CHUNK_KEY(cx, cy), { list: decorations, blocked });
     if (biomes) this.biomes.set(CHUNK_KEY(cx, cy), biomes);
     else this.biomes.delete(CHUNK_KEY(cx, cy));
@@ -78,18 +85,21 @@ export class ChunkedMap {
     if (tile === null) return false; // unloaded/unknown -> blocked (streaming frontier)
     const def = this._tileDef(tile);
     if (def && def.walkable === false) return false;
-    // Blocking-decoration overlay mirrors the server's ServerMap.isWalkable
-    // so client-side prediction and server authority agree.
-    // Decorations occupy their center footprint (~36x36) rather than the whole 100x100 tile.
+    // Blocking-decoration overlay mirrors the server's ServerMap.isWalkable so
+    // client-side prediction and server authority agree: a blocking feature is
+    // a circle of r px (inclusive) around its tile-local anchor, never
+    // crossing its tile's edge.
     const { cx, cy, lr, lc } = worldToChunkLocal(worldX, worldY, this.chunkSize);
     const e = this.decorations.get(CHUNK_KEY(cx, cy));
-    if (e && e.blocked.has(`${lr},${lc}`)) {
+    const circles = e && e.blocked.get(`${lr},${lc}`);
+    if (circles) {
       const gCol = cx * this.chunkSize + lc;
       const gRow = cy * this.chunkSize + lr;
       const lx = worldX - gCol * this.tileSize;
       const ly = worldY - gRow * this.tileSize;
-      if (Math.abs(lx - 50) <= 10 && Math.abs(ly - 50) <= 10) {
-        return false;
+      for (const c of circles) {
+        const dx = lx - c.x, dy = ly - c.y;
+        if (dx * dx + dy * dy <= c.r * c.r) return false;
       }
     }
     return true;

@@ -89,9 +89,11 @@ describe("ChunkedMap decorations overlay", () => {
   it("blocks a tile occupied by a blocking decoration", () => {
     const m = new ChunkedMap(8, { grass: { walkable: true, speed: 1 } });
     const grid = Array.from({ length: 8 }, () => Array(8).fill("grass"));
-    m.setChunk(0, 0, grid, [{ name: "Tree", row: 2, col: 3, blocking: true }]);
-    // tile (col3,row2) center world px = (350,250)
-    expect(m.isWalkable(350, 250)).toBe(false);
+    m.setChunk(0, 0, grid, [{ name: "Tree", row: 2, col: 3, ox: 70, oy: 40, blocking: true, radius: 12 }]);
+    // feature anchor world px = (370,240); the block is a circle, not the tile
+    expect(m.isWalkable(370, 240)).toBe(false);
+    expect(m.isWalkable(362, 244)).toBe(false); // inside r=12 of the anchor
+    expect(m.isWalkable(350, 250)).toBe(true);  // old tile-centre spot, outside the circle
     // a neighboring grass tile stays walkable
     expect(m.isWalkable(50, 50)).toBe(true);
   });
