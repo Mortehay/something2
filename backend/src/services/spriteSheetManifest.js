@@ -52,6 +52,10 @@ function buildBoxSheetManifest({ atlas, sheetPng, actions, directions, frames, e
     cell: [cell.w, cell.h], actions, frames_per_action: frames, rows, frames: out,
   };
 
+  if (Array.isArray(atlas.quality)) {
+    manifest.quality = atlas.quality.filter((q) => q && `${q.action}/${q.direction}/${q.frame}` in out);
+  }
+
   if (kind === 'object') {
     const loop = rows.find((r) => r.action === 'sway') || rows.find((r) => r.action === 'idle') || rows[0];
     const bare = {};

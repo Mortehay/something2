@@ -101,3 +101,23 @@ test('game reads it: only bare keys parse as tile frame keys', () => {
   const keys = Object.keys(tree().manifest.frames).filter((k) => Number.isFinite(parseInt(k, 10)));
   assert.deepEqual(keys, ['0', '1']);
 });
+
+test('copies atlas.quality for known frames', () => {
+  const atlas = load('atlas-wolf.json');
+  const known = { action: 'idle', direction: 's', frame: 1, flags: ['soft'] };
+  atlas.quality = [known, { action: 'idle', direction: 's', frame: 99, flags: ['soft'] }];
+  const r = wolf({ atlas });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.manifest.quality, [known]);
+  assert.equal(r.manifest.version, 1);
+});
+
+test('no quality key without atlas.quality', () => {
+  assert.equal('quality' in wolf().manifest, false);
+});
+
+test('non-array quality is ignored', () => {
+  const atlas = load('atlas-wolf.json');
+  atlas.quality = { action: 'idle' };
+  assert.equal('quality' in wolf({ atlas }).manifest, false);
+});
