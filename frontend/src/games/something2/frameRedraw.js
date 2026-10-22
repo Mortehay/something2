@@ -120,3 +120,9 @@ export function sheetSize(manifest) {
   }
   return { w, h };
 }
+
+// Marks to pre-fill for a failed redraw row: redraw_frames as strings or {action,direction,frame}.
+export function initialMarksFor(subject) {
+  if (!(subject?.redraw_of && subject.job_state === 'failed')) return new Set();
+  return new Set((subject.redraw_frames || []).map((f) => (typeof f === 'string' ? f : frameKey(f.action, f.direction, f.frame))));
+}

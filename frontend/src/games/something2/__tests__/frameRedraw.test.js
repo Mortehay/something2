@@ -157,3 +157,17 @@ describe('sheetSize', () => {
     expect(sheetSize({})).toEqual({ w: 0, h: 0 });
   });
 });
+
+import { initialMarksFor } from '../frameRedraw.js';
+
+describe('initialMarksFor', () => {
+  const base = { redraw_of: 3, job_state: 'failed' };
+  it('accepts objects and strings', () => {
+    const m = initialMarksFor({ ...base, redraw_frames: [{ action: 'a', direction: 's', frame: 1 }, 'a/e/2'] });
+    expect([...m].sort()).toEqual(['a/e/2', 'a/s/1']);
+  });
+  it('is empty unless the row is a failed redraw', () => {
+    expect(initialMarksFor({ ...base, job_state: 'done', redraw_frames: ['a/s/1'] }).size).toBe(0);
+    expect(initialMarksFor({}).size).toBe(0);
+  });
+});

@@ -10,7 +10,7 @@ import { Btn, Modal, Muted } from './seedUi.jsx';
 import { assetUrl, assetUrlVersioned } from './useTileSprites.js';
 import { conceptImageOf, conceptLabelOf, isBoxProp, sheetImageOf, sheetManifestOf, propEffect, propFxLabel, rowLabels } from './spriteSelection.js';
 import SpriteFrameGrid from './SpriteFrameGrid.jsx';
-import { frameKey, shouldConfirmClose } from './frameRedraw.js';
+import { initialMarksFor, redrawPayload, shouldConfirmClose } from './frameRedraw.js';
 import { useActionCatalog, useDiscardRedraw, useRedrawFrames } from './useSpriteConsole.js';
 
 const Cols = styled.div`display: flex; gap: 1.2rem; align-items: flex-start; flex-wrap: wrap; margin-top: 0.8rem;`;
@@ -97,7 +97,9 @@ export default function SpritePreviewModal({ subject, onClose }) {
   const sheetKey = sheetImageOf(subject);
   const manifestKey = sheetManifestOf(subject);
   const manifest = useSheetManifest(manifestKey, true);
-  const marksRef = useRef(new Set());
+  const [initialMarks] = useState(() => initialMarksFor(subject));
+  const marksRef = useRef(initialMarks);
+  const [sheetPx, setSheetPx] = useState(null);
   const redraw = useRedrawFrames();
   const discard = useDiscardRedraw();
   const { catalog } = useActionCatalog();
@@ -112,10 +114,6 @@ export default function SpritePreviewModal({ subject, onClose }) {
   const showGrid = subject.backend === 'gpu-box' && subject.generation_kind === 'creature'
     && Boolean(manifest.data) && Boolean(sheetKey) && gridState;
   const discardable = failedRedraw && (!subject.box_task_id || !subject.atlas_key);
-  const initialMarks = failedRedraw
-    ? new Set((subject.redraw_frames || []).map((f) => (typeof f === 'string' ? f : frameKey(f.action, f.direction, f.frame))))
-    : new Set();
-  if (failedRedraw && marksRef.current.size === 0) marksRef.current = initialMarks;
   const close = () => {
     const n = marksRef.current.size;
     if (shouldConfirmClose(marksRef.current) && !window.confirm(`Discard ${n} unsent frame marks?`)) return;
@@ -142,14 +140,17 @@ export default function SpritePreviewModal({ subject, onClose }) {
           {failedRedraw && (
             <Banner>
               <span>{`Redraw failed: ${subject.last_error || 'unknown error'}`}</span>
-              <Btn type="button" disabled={redraw.isPending} onClick={() => sendFrames(subject.sheet_job_id)(subject.redraw_frames)}>Retry redraw</Btn>
+              <Btn type="button" disabled={redraw.isPending} onClick={() => sendFrames(subject.sheet_job_id)(redrawPayload(initialMarks, manifest.data))}>Retry redraw</Btn>
               {discardable && (
                 <Btn type="button" disabled={discard.isPending}
                   onClick={() => discard.mutate(subject.job_id, { onSuccess: onClose })}>Discard redraw</Btn>
               )}
             </Banner>
           )}
+          <img src={assetUrlVersioned(sheetKey, version)} alt="" hidden
+            onLoad={(e) => setSheetPx({ url: assetUrlVersioned(sheetKey, version), w: e.target.naturalWidth, h: e.target.naturalHeight })} />
           <SpriteFrameGrid sheetUrl={assetUrlVersioned(sheetKey, version)} manifest={manifest.data}
+            sheetPx={sheetPx && sheetPx.url === assetUrlVersioned(sheetKey, version) ? { w: sheetPx.w, h: sheetPx.h } : null}
             initialMarks={initialMarks} onMarksChange={(m) => { marksRef.current = m; }}
             onSend={sendFrames(failedRedraw ? subject.sheet_job_id : subject.job_id)}
             secondsPerCell={catalog?.seconds_per_cell} sending={redraw.isPending} />

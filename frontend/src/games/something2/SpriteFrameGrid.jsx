@@ -48,14 +48,15 @@ function stepFocus(e) {
 }
 
 export default function SpriteFrameGrid({
-  sheetUrl, manifest, initialMarks, onSend, onMarksChange, secondsPerCell, sending,
+  sheetUrl, sheetPx, manifest, initialMarks, onSend, onMarksChange, secondsPerCell, sending,
 }) {
   const [marks, setMarksState] = useState(() => new Set(initialMarks || []));
   const rows = manifest?.rows || [];
   const actions = [...new Set(rows.map((r) => r.action))];
   const firstMarked = actions.find((a) => [...marks].some((k) => k.startsWith(`${a}/`)));
   const [action, setAction] = useState(firstMarked || actions[0]);
-  const size = sheetSize(manifest);
+  // The loaded image's real size wins; the rect bounding box is only a fallback until it loads.
+  const size = sheetPx?.w ? sheetPx : sheetSize(manifest);
   const quality = qualityByFrame(manifest);
   const setMarks = (next) => { setMarksState(next); if (onMarksChange) onMarksChange(next); };
   const countIn = (a, set) => [...set].filter((k) => k.startsWith(`${a}/`)).length;

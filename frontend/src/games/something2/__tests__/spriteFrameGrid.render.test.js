@@ -56,4 +56,8 @@ describe('SpriteFrameGrid', () => {
   it('disables send with no marks', () => {
     expect(render()).toMatch(/<button[^>]*disabled[^>]*>Redraw 0 frames/);
   });
+  it('crops against the passed real sheet size, not the rect box', () => {
+    const html = render({ initialMarks: marks, sheetPx: { w: 1000, h: 3000 } });
+    expect(html).toContain('background-size:2000px 6000px');
+  });
 });
