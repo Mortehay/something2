@@ -413,6 +413,21 @@ test('requeueHalted keeps box_job_id on a redraw row and clears box_task_id', { 
   });
 });
 
+test('requeueHalted with keepTask keeps box_task_id (the cancel failed, the task may still run)', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { source } = await doneSource(client);
+    const redraw = await queue.createRedraw(client, source, FRAMES);
+    await client.query("UPDATE sprite_sets SET status = 'running', claimed_at = now() WHERE id = $1", [redraw.id]);
+    await queue.attachRedrawTask(client, redraw.id, 'task-1');
+    const back = await queue.requeueHalted(client, redraw.id, { keepTask: true });
+    assert.equal(back.status, 'queued');
+    assert.equal(back.box_job_id, source.box_job_id);
+    assert.equal(back.box_task_id, 'task-1');
+    const off = await queue.requeueHalted(client, redraw.id, { keepTask: false });
+    assert.equal(off, null, 'already queued');
+  });
+});
+
 test('attachRedrawTask sets box_task_id; recordRedrawSheet sets only the keys', { skip }, async () => {
   await withRolledBackClient(async (client) => {
     const { source } = await doneSource(client);

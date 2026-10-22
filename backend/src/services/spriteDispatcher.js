@@ -79,10 +79,20 @@ function rowCells(row) {
 const safeName = (name) => String(name).replace(/[^A-Za-z0-9_-]/g, '_');
 
 // Thrown where a halt is noticed; drain() puts the row back in the queue
-// instead of failing it.
-function haltedError() {
+// instead of failing it. `cancelled` is false when the box task was asked to
+// stop and refused (it may still run), so a redraw keeps its task link.
+function haltedError(cancelled = true) {
   const err = new Error('halted');
   err.halted = true;
+  err.cancelled = cancelled;
+  return err;
+}
+
+// A poll that gave up while the box task may still be running (stall, run
+// deadline, queue cap), as opposed to a task that ended.
+function mayStillRun(message) {
+  const err = new Error(message);
+  err.taskMayRun = true;
   return err;
 }
 
@@ -132,7 +142,8 @@ function createDispatcher({
   // deadline. A transient poll error counts as "no progress" rather than
   // failing the row outright. Resolves to the time of the first `running`
   // observation (ms epoch) when `measure` is set and one was seen, else null.
-  async function pollToDone(provider, boxJobId, deadlineMs, { measure = true, onPoll = null } = {}) {
+  // `queueCapMessage(hours)` overrides the queue-cap failure text.
+  async function pollToDone(provider, boxJobId, deadlineMs, { measure = true, onPoll = null, queueCapMessage = null } = {}) {
     const queueStart = Date.now();
     let startedAt = queueStart;
     let lastSig = null;
@@ -142,13 +153,15 @@ function createDispatcher({
     let sawRunning = false;
     for (;;) {
       // Halt: cancel the box job (cooperative there -- the cell in progress
-      // finishes) and stop polling. A failed cancel is logged, not fatal: the
-      // row is requeued detached either way, so it never resumes this job.
+      // finishes) and stop polling. A failed cancel is logged, not fatal: a
+      // sheet row is requeued detached either way; a redraw row keeps its
+      // task (drain passes keepTask) so the next run resumes it.
       if (run && run.halting) {
         // eslint-disable-next-line no-await-in-loop
         const c = await box.cancelSheetJob(provider, boxJobId);
-        if (!c || !c.ok) console.error(`sprite halt: could not cancel box job ${boxJobId}: ${c && c.error}`);
-        throw haltedError();
+        const cancelled = Boolean(c && c.ok);
+        if (!cancelled) console.error(`sprite halt: could not cancel box job ${boxJobId}: ${c && c.error}`);
+        throw haltedError(cancelled);
       }
       // eslint-disable-next-line no-await-in-loop
       const r = await box.getSheetJob(provider, boxJobId);
@@ -167,7 +180,8 @@ function createDispatcher({
           lastSig = null;
           if (now - queueStart >= queueCapMs) {
             const hours = Number((queueCapMs / 3600000).toFixed(2));
-            throw new Error(`still waiting behind other box jobs after ${hours} h — the box job ${boxJobId} may still run; re-queue to resume it`);
+            throw mayStillRun(queueCapMessage ? queueCapMessage(hours)
+              : `still waiting behind other box jobs after ${hours} h — the box job ${boxJobId} may still run; re-queue to resume it`);
           }
         } else {
           if (status === 'running' && !sawRunning) {
@@ -186,10 +200,10 @@ function createDispatcher({
       }
       if (now - lastChange >= stallMs) {
         const mins = Math.round(stallMs / 60000);
-        throw new Error(`box stalled: no progress for ${mins} min${lastError ? ` (${lastError})` : ''}`);
+        throw mayStillRun(`box stalled: no progress for ${mins} min${lastError ? ` (${lastError})` : ''}`);
       }
       if (now - startedAt >= deadlineMs) {
-        throw new Error(`box job ${boxJobId} timed out after ${Math.round(deadlineMs / 1000)}s`);
+        throw mayStillRun(`box job ${boxJobId} timed out after ${Math.round(deadlineMs / 1000)}s`);
       }
       // eslint-disable-next-line no-await-in-loop
       await wait(pollMs);
@@ -281,11 +295,14 @@ function createDispatcher({
   // sheet or the task is a failure that tells the admin to queue it again.
   // When the task fails after it started, the box's current sheet is still
   // stored (frames redrawn before the failure are kept) and recorded on the row.
+  // A poll that gave up on a task that may still run (stall, deadline, queue
+  // cap) cancels it first; if that cancel fails, no sheet is stored (it would
+  // be a mid-task snapshot) and the row keeps box_task_id.
   async function executeRedraw(provider, row, prefix, cur) {
     if (!row.box_job_id) throw new Error(BOX_JOB_GONE);
     const frames = row.redraw_frames || [];
     cur.phase = 'queued';
-    cur.message = `Redrawing ${frames.length} frames`;
+    cur.message = `Redrawing ${frames.length} frame${frames.length === 1 ? '' : 's'}`;
     let taskId = row.box_task_id;
     if (!taskId) {
       taskId = must(await box.redrawFrames(provider, row.box_job_id, frames)).taskId;
@@ -294,6 +311,7 @@ function createDispatcher({
     try {
       await pollToDone(provider, taskId, frames.length * cellTimeoutMs, {
         measure: false,
+        queueCapMessage: (hours) => `the redraw waited too long in the GPU box queue (over ${hours} h); retry it`,
         onPoll: (status, progress) => {
           cur.phase = status === 'queued' ? 'queued' : status === 'done' ? 'storing' : 'running';
           const pct = status === 'done' ? 100 : Number(progress.pct);
@@ -314,11 +332,21 @@ function createDispatcher({
       await queue.complete(db, row.id, { ...keys, concept_key: conceptKey, sheet_seconds: null });
     } catch (err) {
       if (err.halted) throw err;
-      try {
-        const keys = await storeBoxSheet(provider, row, prefix);
-        await queue.recordRedrawSheet(db, row.id, keys);
-      } catch (capErr) {
-        console.error(`sprite redraw: could not keep the box's sheet for ${row.id}: ${capErr.message}`);
+      let capture = true;
+      if (err.taskMayRun) {
+        const c = await box.cancelSheetJob(provider, taskId);
+        if (!c || !c.ok) {
+          capture = false;
+          console.error(`sprite redraw: could not cancel box task ${taskId} for ${row.id}: ${c && c.error}`);
+        }
+      }
+      if (capture) {
+        try {
+          const keys = await storeBoxSheet(provider, row, prefix);
+          await queue.recordRedrawSheet(db, row.id, keys);
+        } catch (capErr) {
+          console.error(`sprite redraw: could not keep the box's sheet for ${row.id}: ${capErr.message}`);
+        }
       }
       if (/^box job missing/.test(err.message)) throw new Error(BOX_JOB_GONE);
       throw err;
@@ -430,7 +458,7 @@ function createDispatcher({
         } catch (err) {
           if (err.halted) {
             // eslint-disable-next-line no-await-in-loop
-            await queue.requeueHalted(db, row.id);
+            await queue.requeueHalted(db, row.id, { keepTask: err.cancelled === false });
             current.halted += 1;
           } else {
             // eslint-disable-next-line no-await-in-loop

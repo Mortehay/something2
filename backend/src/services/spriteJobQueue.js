@@ -223,14 +223,17 @@ async function requeueStale(db, staleMs = 60000) {
 
 // A row the admin halted mid-run goes back to the queue to be drawn afresh:
 // its box job was cancelled, so it is detached rather than resumed.
-async function requeueHalted(db, id) {
+// A redraw row keeps its sheet's box_job_id; its redraw task is dropped unless
+// `keepTask` (the cancel failed, so the task may still run and the next run
+// resumes polling it instead of submitting a second one).
+async function requeueHalted(db, id, { keepTask = false } = {}) {
   const { rows } = await db.query(
     `UPDATE sprite_sets SET status = 'queued', claimed_at = NULL,
             box_job_id = CASE WHEN redraw_of IS NOT NULL THEN box_job_id END,
-            box_task_id = NULL,
+            box_task_id = CASE WHEN $2::boolean THEN box_task_id END,
             last_error = 'halted from the Sprite Generation page', updated_at = now()
       WHERE id = $1 AND status = 'running' RETURNING *`,
-    [id],
+    [id, keepTask],
   );
   return rows[0] || null;
 }
