@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   filterSpriteSubjects, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   targetsForSprites, framesCap, cellCount, estimateLabel, defaultActionsFor, rowLabels,
-  isBoxProp, PROP_FX_OPTIONS, propFxLabel, propEffect, selectionKinds, queueButtonLabel, queuePayload, conceptImageOf, sheetImageOf, conceptLabelOf,
+  isBoxProp, PROP_FX_OPTIONS, propFxLabel, propEffect, selectionKinds, queueButtonLabel, queuePayload, conceptImageOf, sheetImageOf, sheetManifestOf, jobStateLabel, conceptLabelOf,
   batchProgress, currentProgressLabel, rowProgressLabel,
 } from '../spriteSelection.js';
 import { PAGE_SIZE } from '../artSelection.js';
@@ -292,5 +292,26 @@ describe('sprite batch progress (SOMET-662)', () => {
     expect(rowProgressLabel({ job_id: 'r2', job_state: 'running' }, run)).toBeNull();
     expect(rowProgressLabel({ job_id: 'r1', job_state: 'queued' }, run)).toBeNull();
     expect(rowProgressLabel({ job_id: 'r1', job_state: 'running' }, { current: { id: 'r1', phase: 'concept', pct: 0 } })).toBeNull();
+  });
+});
+
+describe('sheet payload keys (frame redraw)', () => {
+  it('sheetImageOf prefers atlas_key then sheet_atlas_key', () => {
+    expect(sheetImageOf({ atlas_key: 'a.png', sheet_atlas_key: 'b.png' })).toBe('a.png');
+    expect(sheetImageOf({ sheet_atlas_key: 'b.png', image_key: 'c.png' })).toBe('b.png');
+  });
+  it('sheetManifestOf', () => {
+    expect(sheetManifestOf({ manifest_key: 'm', sheet_manifest_key: 'n' })).toBe('m');
+    expect(sheetManifestOf({ sheet_manifest_key: 'n' })).toBe('n');
+    expect(sheetManifestOf({})).toBe(null);
+  });
+  it('jobStateLabel', () => {
+    const r = (job_state) => ({ redraw_of: 5, job_state });
+    expect(jobStateLabel(r('queued'))).toBe('redraw queued');
+    expect(jobStateLabel(r('running'))).toBe('redrawing');
+    expect(jobStateLabel(r('done'))).toBe('ready for review');
+    expect(jobStateLabel(r('failed'))).toBe('redraw failed');
+    expect(jobStateLabel({ job_state: 'running' })).toBe('running');
+    expect(jobStateLabel({})).toBe('not queued');
   });
 });

@@ -105,7 +105,20 @@ export function conceptLabelOf(subject) {
 // prop result) or an approved sprite sheet -- never the entity's plain art,
 // which made every entity with Art Generation art look already rendered.
 export function sheetImageOf(subject) {
-  return subject?.atlas_key || subject?.image_key || subject?.sprite?.atlas_key || null;
+  return subject?.atlas_key || subject?.sheet_atlas_key || subject?.image_key || subject?.sprite?.atlas_key || null;
+}
+
+export function sheetManifestOf(subject) {
+  return subject?.manifest_key || subject?.sheet_manifest_key || null;
+}
+
+const REDRAW_STATE_LABELS = {
+  queued: 'redraw queued', running: 'redrawing', done: 'ready for review', failed: 'redraw failed',
+};
+
+export function jobStateLabel(subject) {
+  if (subject?.redraw_of) return REDRAW_STATE_LABELS[subject.job_state] || subject.job_state || 'not queued';
+  return subject?.job_state || 'not queued';
 }
 
 export function isBoxProp(subject) {
