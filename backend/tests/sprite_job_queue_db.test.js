@@ -121,6 +121,33 @@ test('enqueue stores actions, frames and 8 facings for a creature', { skip }, as
   });
 });
 
+test('enqueue re-takes options on a queued job and leaves a running one alone', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [a, b] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 2`,
+    );
+    assert.ok(a && b, 'precondition: two creatures with no live sprite job');
+
+    const first = await queue.enqueue(client, [{ entityId: a.id }, { entityId: b.id }],
+      { actions: ['idle'], framesPerAction: 4 });
+    const running = first.rows.find((r) => r.entity_type_id === b.id);
+    await client.query("UPDATE sprite_sets SET status = 'running' WHERE id = $1", [running.id]);
+
+    const again = await queue.enqueue(client, [{ entityId: a.id }, { entityId: b.id }],
+      { actions: ['idle', 'walk', 'attack'], framesPerAction: 6 });
+
+    assert.equal(again.rows.length, 0, 'no second live row');
+    assert.equal(again.updated.length, 1);
+    const fixed = again.updated[0];
+    assert.equal(fixed.id, first.rows.find((r) => r.entity_type_id === a.id).id, 'same row, same place in line');
+    assert.deepEqual(fixed.actions, ['idle', 'walk', 'attack']);
+    assert.equal(fixed.frames_per_action, 6);
+    assert.equal(fixed.frames, 6);
+    const { rows: [still] } = await client.query('SELECT actions, frames_per_action FROM sprite_sets WHERE id = $1', [running.id]);
+    assert.deepEqual(still, { actions: ['idle'], frames_per_action: 4 });
+  });
+});
+
 test('enqueue gives props one facing', { skip }, async () => {
   await withRolledBackClient(async (client) => {
     const { rows: [creature] } = await client.query(

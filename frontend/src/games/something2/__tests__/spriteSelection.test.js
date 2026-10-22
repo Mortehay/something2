@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   filterSpriteSubjects, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   targetsForSprites, framesCap, cellCount, estimateLabel, defaultActionsFor, rowLabels,
-  isBoxProp, PROP_FX_OPTIONS, propFxLabel, propEffect, selectionKinds, queuePayload, conceptImageOf, sheetImageOf, conceptLabelOf,
+  isBoxProp, PROP_FX_OPTIONS, propFxLabel, propEffect, selectionKinds, queueButtonLabel, queuePayload, conceptImageOf, sheetImageOf, conceptLabelOf,
   batchProgress, currentProgressLabel, rowProgressLabel,
 } from '../spriteSelection.js';
 import { PAGE_SIZE } from '../artSelection.js';
@@ -134,6 +134,28 @@ describe('sprite console action controls', () => {
     expect(selectionKinds([prop])).toEqual({ props: true, creatures: false, propsOnly: true });
     expect(selectionKinds([wolf])).toEqual({ props: false, creatures: true, propsOnly: false });
     expect(selectionKinds([])).toEqual({ props: false, creatures: false, propsOnly: false });
+  });
+
+  describe('queueButtonLabel', () => {
+    const fresh = { id: 1 };
+    const done = { id: 2, job_state: 'done' };
+    const queued = { id: 3, job_state: 'queued' };
+    const running = { id: 4, job_state: 'running' };
+
+    it('says queue for rows without a live job, finished ones included', () => {
+      expect(queueButtonLabel([fresh, done])).toEqual({ label: 'Queue 2 selected', actionable: true });
+    });
+    it('says update when every row is already queued', () => {
+      expect(queueButtonLabel([queued])).toEqual({ label: 'Update 1 queued', actionable: true });
+    });
+    it('counts both when the selection mixes new and queued rows', () => {
+      expect(queueButtonLabel([fresh, queued, queued]).label).toBe('Queue 1 · update 2');
+    });
+    it('names running rows as unchanged and is inert when only they are selected', () => {
+      expect(queueButtonLabel([queued, running]).label).toBe('Update 1 queued · 1 running, unchanged');
+      expect(queueButtonLabel([running])).toEqual({ label: '1 running, unchanged', actionable: false });
+      expect(queueButtonLabel([])).toEqual({ label: 'Queue 0 selected', actionable: false });
+    });
   });
 
   describe('queuePayload', () => {

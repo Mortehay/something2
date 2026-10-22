@@ -149,6 +149,21 @@ export function queuePayload(catalog, rows, { actions, frames, propFx = 'none' }
   return body;
 }
 
+// What the queue button will do to the selection: POST /jobs inserts rows
+// with no live job, re-takes the options on queued ones, and leaves a running
+// job alone (the box is drawing it). `actionable` is false when nothing would change.
+export function queueButtonLabel(rows) {
+  const update = rows.filter((row) => row.job_state === 'queued').length;
+  const running = rows.filter((row) => row.job_state === 'running').length;
+  const fresh = rows.length - update - running;
+  const parts = [];
+  if (fresh && update) parts.push(`Queue ${fresh} · update ${update}`);
+  else if (update) parts.push(`Update ${update} queued`);
+  else if (fresh || !running) parts.push(`Queue ${fresh} selected`);
+  if (running) parts.push(`${running} running, unchanged`);
+  return { label: parts.join(' · '), actionable: fresh + update > 0 };
+}
+
 export function estimateLabel(cells, secondsPerCell) {
   const noun = `${cells} cell${cells === 1 ? '' : 's'}`;
   const minutes = Math.round((cells * secondsPerCell) / 60);

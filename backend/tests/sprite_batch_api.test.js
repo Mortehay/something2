@@ -34,6 +34,7 @@ function enqueuePool(calls, { spc = null } = {}) {
         return { rows: [{ id: 4, name: 'Wolf', prompt: 'grey wolf', render_mode: 'static', is_creature: true, is_playable: false }] };
       }
       if (/count\(\*\).*FROM sprite_sets/is.test(sql)) return { rows: [] };
+      if (/UPDATE sprite_sets/i.test(sql)) return { rows: [] };
       if (/INSERT INTO sprite_sets/i.test(sql)) return { rows: [{ id: 'job-row', status: 'queued' }] };
       if (/SELECT status, count/i.test(sql)) return { rows: [{ status: 'queued', n: 1 }] };
       throw new Error(`unexpected query: ${sql}`);
@@ -67,6 +68,7 @@ test('POST /api/sprite-admin/jobs targets an appearance variant instead of the c
         return { rows: [{ entity_type_id: 3, variant: 2, class_name: 'Mage', class_prompt: 'a spell-flinging mage' }] };
       }
       if (/count\(\*\).*FROM sprite_sets/is.test(sql)) return { rows: [] };
+      if (/UPDATE sprite_sets/i.test(sql)) return { rows: [] };
       if (/INSERT INTO sprite_sets/i.test(sql)) return { rows: [{ id: 'job-row', status: 'queued' }] };
       if (/SELECT status, count/i.test(sql)) return { rows: [{ status: 'queued', n: 1 }] };
       throw new Error(`unexpected query: ${sql}`);
@@ -190,6 +192,32 @@ test('jobs 201 queues with actions and frames', async () => {
   assert.deepEqual(insert.params[7], ['idle,walk'], 'duplicates collapsed, comma-joined');
 });
 
+// A mistaken queue (idle only, 4 frames) is fixed by queuing the row again:
+// the queued job takes the new options, a running one is reported skipped.
+test('jobs 201 updates an already-queued target and skips a running one', async () => {
+  for (const [updatedRows, expected] of [
+    [[{ id: 'job-row', status: 'queued' }], { queued: 0, updated: 1, skipped: 0 }],
+    [[], { queued: 0, updated: 0, skipped: 1 }],
+  ]) {
+    const calls = [];
+    const base = enqueuePool(calls);
+    const pool = {
+      query: async (sql, params) => {
+        if (/UPDATE sprite_sets/i.test(sql)) { calls.push({ sql, params }); return { rows: updatedRows }; }
+        if (/INSERT INTO sprite_sets/i.test(sql)) { calls.push({ sql, params }); return { rows: [] }; }
+        return base.query(sql, params);
+      },
+    };
+    const res = await request(routerApp(pool)).post('/api/sprite-admin/jobs')
+      .send({ targets: [{ entity_id: 4 }], actions: ['idle', 'walk', 'attack'], frames: 6 });
+    assert.equal(res.status, 201);
+    assert.deepEqual({ queued: res.body.queued, updated: res.body.updated, skipped: res.body.skipped }, expected);
+    const update = calls.find((c) => /UPDATE sprite_sets/i.test(c.sql));
+    assert.match(update.sql, /status = 'queued'/);
+    assert.deepEqual(update.params, [[4], [null], [6], ['idle,walk,attack'], [null]]);
+  }
+});
+
 test('POST /api/sprite-admin/jobs rejects an out-of-range variant', async () => {
   __setPool({ query: async (sql) => { if (isUserLookup(sql)) return ADMIN_USER_ROW; throw new Error(`unexpected query: ${sql}`); } });
   const res = await request(app).post('/api/sprite-admin/jobs').set(...AUTH)
@@ -242,6 +270,7 @@ function mixedPool(calls) {
         ] };
       }
       if (/count\(\*\).*FROM sprite_sets/is.test(sql)) return { rows: [] };
+      if (/UPDATE sprite_sets/i.test(sql)) return { rows: [] };
       if (/INSERT INTO sprite_sets/i.test(sql)) return { rows: [{ id: 'a' }, { id: 'b' }] };
       if (/SELECT status, count/i.test(sql)) return { rows: [] };
       throw new Error(`unexpected query: ${sql}`);

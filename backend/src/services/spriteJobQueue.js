@@ -21,7 +21,7 @@ const PROP_FX = ['none', 'sway', 'shine'];
 
 async function enqueue(db, targets, { actions, framesPerAction, propFx = 'none' } = {}) {
   if (!PROP_FX.includes(propFx)) throw new Error(`propFx must be one of ${PROP_FX.join(', ')}`);
-  if (!Array.isArray(targets) || targets.length === 0) return { rows: [], unknown: [] };
+  if (!Array.isArray(targets) || targets.length === 0) return { rows: [], updated: [], unknown: [] };
   const normalized = targets
     .map((t) => ({ entityId: Number(t.entityId), variant: t.variant == null ? null : Number(t.variant) }))
     .filter((t) => Number.isInteger(t.entityId) && (t.variant === null || (t.variant >= 1 && t.variant <= 5)));
@@ -64,7 +64,7 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = 'none' 
     .map((t) => (t.variant === null ? t.entityId : `${t.entityId}:${t.variant}`));
 
   const opts = [...entities.map((e) => optionsForEntity(e)), ...matchedAppearances.map((a) => optionsForAppearance(a))];
-  if (opts.length === 0) return { rows: [], unknown };
+  if (opts.length === 0) return { rows: [], updated: [], unknown };
 
   const { rows: prior } = await db.query(
     `SELECT creature, count(*)::int AS n FROM sprite_sets
@@ -74,6 +74,28 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = 'none' 
   const counts = new Map(prior.map((r) => [r.creature, r.n]));
   const chosenActions = Array.isArray(actions) && actions.length ? actions : null;
   const rowFrames = (o) => (Number.isInteger(framesPerAction) ? framesPerAction : o.frames);
+  const rowActions = (o) => (chosenActions || DEFAULT_ACTIONS[o.kind] || DEFAULT_ACTIONS.creature).join(',');
+  const rowPropFx = (o) => (o.kind === 'object' ? propFx : null);
+  // A target that already has a QUEUED job gets this call's actions, frames and
+  // prop effect instead of a second row (the live-job index forbids one), so a
+  // mistaken queue is fixed in place. `status = 'queued'` is re-checked after
+  // claim()'s row lock, so a job the dispatcher just took is left alone; the
+  // INSERT below then conflicts on it and it counts as skipped.
+  const { rows: updated } = await db.query(
+    `UPDATE sprite_sets s
+        SET actions = string_to_array(t.actions, ','), frames = t.frames, frames_per_action = t.frames,
+            prop_fx = t.prop_fx, updated_at = now()
+       FROM unnest($1::int[], $2::smallint[], $3::int[], $4::text[], $5::text[])
+         AS t(entity_id, variant, frames, actions, prop_fx)
+      WHERE s.entity_type_id = t.entity_id
+        AND COALESCE(s.appearance_variant, 0) = COALESCE(t.variant, 0)
+        AND s.status = 'queued'
+      RETURNING s.*`,
+    [
+      opts.map((o) => o.entityTypeId), opts.map((o) => o.appearanceVariant),
+      opts.map(rowFrames), opts.map(rowActions), opts.map(rowPropFx),
+    ],
+  );
   const { rows } = await db.query(
     `INSERT INTO sprite_sets
        (entity_type_id, appearance_variant, creature, generation_kind, base_prompt, backend, seed, frames, status,
@@ -90,12 +112,12 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = 'none' 
       opts.map((o) => o.subject), opts.map((o) => o.kind), opts.map((o) => o.prompt),
       opts.map((o) => seedFor('sprite', o.subject, counts.get(o.subject) || 0)),
       opts.map(rowFrames),
-      opts.map((o) => (chosenActions || DEFAULT_ACTIONS[o.kind] || DEFAULT_ACTIONS.creature).join(',')),
+      opts.map(rowActions),
       opts.map((o) => o.directions.join(',')),
-      opts.map((o) => (o.kind === 'object' ? propFx : null)),
+      opts.map(rowPropFx),
     ],
   );
-  return { rows, unknown };
+  return { rows, updated, unknown };
 }
 
 async function claim(db) {

@@ -9,7 +9,7 @@ import {
 } from './useSpriteConsole.js';
 import {
   cellCount, conceptImageOf, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, batchProgress, currentProgressLabel, rowProgressLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
-  PROP_FX_OPTIONS, propFxLabel, queuePayload, selectionKinds, spriteShape, toggleSpriteSubject,
+  PROP_FX_OPTIONS, propFxLabel, queueButtonLabel, queuePayload, selectionKinds, spriteShape, toggleSpriteSubject,
 } from './spriteSelection.js';
 
 const Wrap = styled.div`
@@ -124,12 +124,14 @@ function SpriteConsoleAdmin() {
   const frames = Math.min(chosenFrames, cap);
   const kinds = selectionKinds(selectedRows);
   const payload = queuePayload(catalog, selectedRows, { actions, frames, propFx });
-  const cells = cellCount(selectedRows, payload.actions, payload.frames);
+  // A running job keeps its options, so its cells are not this press's work.
+  const cells = cellCount(selectedRows.filter((row) => row.job_state !== 'running'), payload.actions, payload.frames);
   const toggleAction = (id) => setChosenActions(
     actions.includes(id) ? actions.filter((a) => a !== id) : [...actions, id],
   );
   const catalogReady = Boolean(catalog) && !catalogLoading && !catalogError;
-  const queueable = catalogReady && selected.size > 0 && payload.actions.length > 0;
+  const queueButton = queueButtonLabel(selectedRows);
+  const queueable = catalogReady && queueButton.actionable && payload.actions.length > 0;
   const canQueue = queueable && !queue.isPending;
 
   const enqueue = () => queue.mutate(payload, { onSuccess: () => setSelected(new Set()) });
@@ -247,7 +249,7 @@ function SpriteConsoleAdmin() {
           </Field>
         )}
         <Button disabled={!canQueue} onClick={enqueue}>
-          Queue {selected.size} selected
+          {queueButton.label}
         </Button>
         {queueable && (
           <Hint>{estimateLabel(cells, catalog.seconds_per_cell)}</Hint>

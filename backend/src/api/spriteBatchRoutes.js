@@ -221,7 +221,10 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       res.status(201).json({
         selected,
         queued: result.rows.length,
-        skipped: selected - result.rows.length - result.unknown.length,
+        // Already-queued targets re-take this request's options in place;
+        // skipped is what is left: a job the box is running right now.
+        updated: result.updated.length,
+        skipped: selected - result.rows.length - result.updated.length - result.unknown.length,
         unknown: result.unknown,
         stats: await queue.stats(pool),
       });
