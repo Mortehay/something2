@@ -109,3 +109,49 @@ test('subjects carry concept_key and actions from the newest job', { skip }, asy
   // Props v2: the preview popup labels "Effect on approve" from this.
   assert.equal(row.prop_fx, 'shine');
 });
+
+test('a subject whose latest row is a queued redraw carries redraw_of and the sheet from the source row', { skip }, async (t) => {
+  const pool = new Pool({ connectionString: url });
+  __setPool(pool);
+  const username = `sprite-subjects-admin-${Math.random().toString(36).slice(2)}`;
+  const { rows: [admin] } = await pool.query(
+    'INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3) RETURNING id, token_version',
+    [username, 'x', 'admin'],
+  );
+  const { rows: [ent] } = await pool.query(
+    "INSERT INTO entity_types (name, prompt, color) VALUES ($1, 'a test wolf', '#888888') RETURNING id",
+    [`redraw-subj-${Math.random().toString(36).slice(2)}`],
+  );
+  t.after(async () => {
+    await pool.query('DELETE FROM sprite_sets WHERE entity_type_id = $1', [ent.id]);
+    await pool.query('DELETE FROM entity_types WHERE id = $1', [ent.id]);
+    await pool.query('DELETE FROM users WHERE id = $1', [admin.id]);
+    await pool.end();
+  });
+  const AUTH = ['Authorization', `Bearer ${signToken({
+    userId: admin.id, username, role: 'admin', tokenVersion: admin.token_version,
+  })}`];
+  const { rows: [src] } = await pool.query(
+    `INSERT INTO sprite_sets (entity_type_id, creature, generation_kind, backend, status, actions, directions,
+                              frames_per_action, box_job_id, atlas_key, manifest_key)
+     VALUES ($1, 'wolf', 'creature', 'gpu-box', 'done', '{idle}', '{s}', 6, 'box-7', 'sprites/a.png', 'sprites/sheet.json')
+     RETURNING id`,
+    [ent.id],
+  );
+  await pool.query(
+    `INSERT INTO sprite_sets (entity_type_id, creature, generation_kind, backend, status, actions, directions,
+                              frames_per_action, box_job_id, redraw_of, redraw_frames, created_at)
+     VALUES ($1, 'wolf', 'creature', 'gpu-box', 'queued', '{idle}', '{s}', 6, 'box-7', $2, $3::jsonb, now() + interval '1 second')`,
+    [ent.id, src.id, JSON.stringify([{ action: 'idle', direction: 's', frame: 2 }])],
+  );
+  const res = await request(app).get('/api/sprite-admin/subjects').set(...AUTH);
+  const row = res.body.subjects.find((s) => s.id === ent.id);
+  assert.equal(row.job_state, 'queued');
+  assert.equal(row.redraw_of, src.id);
+  assert.deepEqual(row.redraw_frames, [{ action: 'idle', direction: 's', frame: 2 }]);
+  assert.equal(row.box_task_id, null);
+  assert.equal(row.sheet_job_id, src.id);
+  assert.equal(row.sheet_atlas_key, 'sprites/a.png');
+  assert.equal(row.sheet_manifest_key, 'sprites/sheet.json');
+  assert.ok(row.sheet_updated_at);
+});

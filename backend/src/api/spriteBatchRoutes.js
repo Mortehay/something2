@@ -33,11 +33,34 @@ function targetsFrom(body) {
   return valid ? targets : null;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+// The game mirrors the western facings from e / ne / se, so they are never drawn.
+const WESTERN = new Set(['w', 'nw', 'sw']);
+
 function jobIdsFrom(body) {
   const values = body && body.job_ids;
   if (!Array.isArray(values) || values.length === 0 || values.length > 1000) return null;
   const ids = values.map(String);
-  return ids.every((id) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) ? ids : null;
+  return ids.every((id) => UUID_RE.test(id)) ? ids : null;
+}
+
+// Body shape only: [{action, direction, frame}], each field typed. Returns
+// { frames } or { error } (naming the first bad entry where it can).
+function redrawFramesFrom(body) {
+  const values = body && body.frames;
+  if (!Array.isArray(values) || values.length === 0 || values.length > 1000) {
+    return { error: 'frames must list 1 to 1000 frames' };
+  }
+  const frames = [];
+  for (const v of values) {
+    if (!v || typeof v !== 'object' || Array.isArray(v)
+        || typeof v.action !== 'string' || typeof v.direction !== 'string'
+        || !Number.isInteger(v.frame) || v.frame < 0) {
+      return { error: 'each frame needs a string action, a string direction and a non-negative integer frame' };
+    }
+    frames.push({ action: v.action, direction: v.direction, frame: v.frame });
+  }
+  return { frames };
 }
 
 // deps is the DI seam: { box: {actionCatalog}, loadProvider: () => provider|null,
@@ -100,13 +123,21 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   j.id AS job_id, j.status AS job_state, j.generation_kind, j.frames,
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
                   j.concept_key, j.actions, j.directions, j.frames_per_action, j.box_job_id,
-                  j.prop_fx, j.updated_at AS job_updated_at
+                  j.prop_fx, j.updated_at AS job_updated_at,
+                  j.redraw_of, j.redraw_frames, j.box_task_id,
+                  sh.id AS sheet_job_id, sh.atlas_key AS sheet_atlas_key,
+                  sh.manifest_key AS sheet_manifest_key, sh.updated_at AS sheet_updated_at
              FROM entity_types e
              LEFT JOIN LATERAL (
                SELECT * FROM sprite_sets s
                 WHERE s.entity_type_id = e.id AND s.appearance_variant IS NULL
                 ORDER BY s.created_at DESC LIMIT 1
              ) j ON true
+             LEFT JOIN LATERAL (
+               SELECT s2.id, s2.atlas_key, s2.manifest_key, s2.updated_at FROM sprite_sets s2
+                WHERE s2.entity_type_id = e.id AND s2.appearance_variant IS NULL AND s2.atlas_key IS NOT NULL
+                ORDER BY s2.created_at DESC LIMIT 1
+             ) sh ON true
             ORDER BY e.name`,
         ),
         // Each playable class's 5 appearance variants, alongside the class's
@@ -120,7 +151,10 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   j.id AS job_id, j.status AS job_state, j.generation_kind, j.frames,
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
                   j.concept_key, j.actions, j.directions, j.frames_per_action, j.box_job_id,
-                  j.prop_fx, j.updated_at AS job_updated_at
+                  j.prop_fx, j.updated_at AS job_updated_at,
+                  j.redraw_of, j.redraw_frames, j.box_task_id,
+                  sh.id AS sheet_job_id, sh.atlas_key AS sheet_atlas_key,
+                  sh.manifest_key AS sheet_manifest_key, sh.updated_at AS sheet_updated_at
              FROM character_appearances ca
              JOIN entity_types e ON e.id = ca.entity_type_id AND e.is_playable = true
              LEFT JOIN LATERAL (
@@ -128,6 +162,12 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                 WHERE s.entity_type_id = ca.entity_type_id AND s.appearance_variant = ca.variant
                 ORDER BY s.created_at DESC LIMIT 1
              ) j ON true
+             LEFT JOIN LATERAL (
+               SELECT s2.id, s2.atlas_key, s2.manifest_key, s2.updated_at FROM sprite_sets s2
+                WHERE s2.entity_type_id = ca.entity_type_id AND s2.appearance_variant = ca.variant
+                  AND s2.atlas_key IS NOT NULL
+                ORDER BY s2.created_at DESC LIMIT 1
+             ) sh ON true
             ORDER BY e.name, ca.variant`,
         ),
       ]);
@@ -168,6 +208,13 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           box_job_id: a.box_job_id,
           prop_fx: a.prop_fx,
           job_updated_at: a.job_updated_at,
+          redraw_of: a.redraw_of,
+          redraw_frames: a.redraw_frames,
+          box_task_id: a.box_task_id,
+          sheet_job_id: a.sheet_job_id,
+          sheet_atlas_key: a.sheet_atlas_key,
+          sheet_manifest_key: a.sheet_manifest_key,
+          sheet_updated_at: a.sheet_updated_at,
         });
       }
       // The console renders this list in order, so each class's variants go
@@ -259,6 +306,95 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       if (err.code === 'ALREADY_RUNNING') return res.status(409).json({ error: err.message });
       console.error(err);
       return res.status(500).json({ error: 'Failed to start the sprite batch' });
+    }
+  });
+
+  // Queue a redraw of chosen frames of a finished GPU-box creature sheet.
+  router.post('/jobs/redraw', async (req, res) => {
+    const jobId = req.body && req.body.job_id;
+    if (typeof jobId !== 'string' || !UUID_RE.test(jobId)) {
+      return res.status(400).json({ error: 'job_id must be a UUID' });
+    }
+    const parsed = redrawFramesFrom(req.body);
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+    const label = (f) => `${f.action}/${f.direction}/${f.frame}`;
+    const west = parsed.frames.find((f) => WESTERN.has(f.direction));
+    if (west) {
+      return res.status(400).json({ error: `${label(west)}: western directions are mirrored in game and cannot be redrawn` });
+    }
+    try {
+      const { rows: [source] } = await pool.query('SELECT * FROM sprite_sets WHERE id = $1', [jobId]);
+      if (!source) return res.status(404).json({ error: 'sprite job not found' });
+      const sheetStatus = source.status === 'done' || source.status === 'approved'
+        || (source.status === 'failed' && source.redraw_of != null && source.atlas_key);
+      if (source.entity_type_id == null || source.backend !== 'gpu-box' || source.generation_kind !== 'creature'
+          || !source.atlas_key || !source.manifest_key || !source.box_job_id || !sheetStatus) {
+        return res.status(409).json({ error: 'only a finished GPU-box creature sheet can have frames redrawn' });
+      }
+      const { rows: newer } = await pool.query(
+        `SELECT 1 FROM sprite_sets
+          WHERE entity_type_id = $1
+            AND COALESCE(appearance_variant, 0) = COALESCE($2::int, 0)
+            AND id <> $3 AND atlas_key IS NOT NULL AND created_at > $4
+          LIMIT 1`,
+        [source.entity_type_id, source.appearance_variant, source.id, source.created_at],
+      );
+      if (newer.length) {
+        return res.status(409).json({ error: 'a newer sheet exists for this subject; reopen it and redraw from that one' });
+      }
+      let manifest;
+      try {
+        manifest = await readJson(await store.getObjectStream(source.manifest_key));
+      } catch (err) {
+        console.error(`sprite redraw: cannot read ${source.manifest_key}:`, err.message);
+        return res.status(500).json({ error: `Could not read the sheet manifest: ${err.message}` });
+      }
+      const mRows = Array.isArray(manifest && manifest.rows) ? manifest.rows : [];
+      const perAction = Number(manifest && manifest.frames_per_action);
+      const known = manifest && manifest.frames && typeof manifest.frames === 'object' ? manifest.frames : {};
+      if (parsed.frames.length > mRows.length * perAction) {
+        return res.status(400).json({ error: 'more frames than the sheet has cells' });
+      }
+      const order = new Map(mRows.map((r, i) => [`${r.action}/${r.direction}`, i]));
+      const seen = new Set();
+      for (const f of parsed.frames) {
+        const key = label(f);
+        if (!order.has(`${f.action}/${f.direction}`) || !(f.frame < perAction) || !(key in known)) {
+          return res.status(400).json({ error: `${key}: not a frame of this sheet` });
+        }
+        if (seen.has(key)) return res.status(400).json({ error: `${key}: listed twice` });
+        seen.add(key);
+      }
+      const frames = [...parsed.frames].sort((a, b) => (order.get(`${a.action}/${a.direction}`)
+        - order.get(`${b.action}/${b.direction}`)) || (a.frame - b.frame));
+      const created = await queue.createRedraw(pool, source, frames);
+      if (!created) return res.status(409).json({ error: 'this subject already has a queued or running sprite job' });
+      let started = false;
+      if (!dispatcher.status()?.running) {
+        try {
+          dispatcher.start().catch((err) => console.error('sprite dispatcher stopped:', err));
+          started = true;
+        } catch (err) {
+          if (err.code !== 'ALREADY_RUNNING') console.error('sprite redraw: could not start the dispatcher:', err);
+        }
+      }
+      return res.status(201).json({ id: created.id, started });
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'Failed to queue the frame redraw' });
+    }
+  });
+
+  router.delete('/jobs/:id/redraw', async (req, res) => {
+    if (!UUID_RE.test(req.params.id)) return res.status(404).json({ error: 'redraw not found' });
+    try {
+      const result = await queue.discardRedraw(pool, req.params.id);
+      if (result === 'deleted') return res.json({ deleted: true });
+      if (result === 'not_found') return res.status(404).json({ error: 'redraw not found' });
+      return res.status(409).json({ error: 'a redraw the box already worked on cannot be discarded' });
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'Failed to discard the redraw' });
     }
   });
 

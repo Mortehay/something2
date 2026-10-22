@@ -190,3 +190,20 @@ test('approve skips a box prop row with no image', async () => {
   assert.deepEqual(res.body, { approved: [], skipped: 1 });
   assert.ok(!calls.some((c) => /UPDATE/i.test(c.sql)));
 });
+
+test('approving a done redraw row points the entity at the redraw\'s keys', async () => {
+  const calls = [];
+  const redraw = {
+    ...BOX_JOB, generation_kind: 'creature', redraw_of: '323e4567-e89b-42d3-a456-426614174000',
+    redraw_frames: [{ action: 'idle', direction: 's', frame: 1 }],
+    atlas_key: 'sprites/redraw/atlas.png', manifest_key: 'sprites/redraw/sheet.json',
+  };
+  const manifest = { frames: { 'idle/s/0': [0, 0, 48, 64] } };
+  const res = await request(routerApp(boxApprovePool(calls, redraw), storeWith(manifest)))
+    .post('/api/sprite-admin/jobs/approve').send({ job_ids: [BOX_ID] });
+  assert.deepEqual(res.body.approved, [BOX_ID]);
+  const up = calls.find((c) => /UPDATE entity_types SET sprite/i.test(c.sql));
+  assert.deepEqual(JSON.parse(up.params[0]), {
+    atlas_key: 'sprites/redraw/atlas.png', manifest_key: 'sprites/redraw/sheet.json', static_frame: 'idle/s/0',
+  });
+});
