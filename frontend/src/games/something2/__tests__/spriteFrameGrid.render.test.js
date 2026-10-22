@@ -31,6 +31,11 @@ describe('SpriteFrameGrid', () => {
     expect(html).toContain('Redraw 2 frames');
     expect(html).toContain('2 frames marked');
   });
+  it('says "1 frame marked" for a single mark', () => {
+    const html = render({ initialMarks: new Set(['attack/e/2']) });
+    expect(html).toContain('1 frame marked');
+    expect(html).toContain('Redraw 1 frame<');
+  });
   it('opens on the first action with marks and doubles e', () => {
     const html = render({ initialMarks: marks });
     expect(html).toContain('×2 in game');

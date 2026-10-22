@@ -176,7 +176,7 @@ export default function SpriteFrameGrid({
         {rowsOf(WESTERN).map(renderRow)}
       </details>
       <Footer>
-        <Muted>{`${payload.length} frames marked · ${estimateLabel(payload.length, secondsPerCell || 57)}`}</Muted>
+        <Muted>{`${payload.length} frame${payload.length === 1 ? '' : 's'} marked · ${estimateLabel(payload.length, secondsPerCell || 57)}`}</Muted>
         <Btn type="button" $primary disabled={!payload.length || sending} onClick={() => onSend(payload)}>
           {`Redraw ${payload.length} frame${payload.length === 1 ? '' : 's'}`}
         </Btn>

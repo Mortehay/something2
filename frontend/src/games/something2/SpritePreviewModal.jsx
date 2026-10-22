@@ -10,7 +10,7 @@ import { Btn, Modal, Muted } from './seedUi.jsx';
 import { assetUrl, assetUrlVersioned } from './useTileSprites.js';
 import { conceptImageOf, conceptLabelOf, isBoxProp, sheetImageOf, sheetManifestOf, propEffect, propFxLabel, rowLabels } from './spriteSelection.js';
 import SpriteFrameGrid from './SpriteFrameGrid.jsx';
-import { changedUnmarked, initialMarksFor, redrawPayload, shouldConfirmClose } from './frameRedraw.js';
+import { changedUnmarked, compareMarkedFrames, initialMarksFor, redrawPayload, shouldConfirmClose } from './frameRedraw.js';
 import { useActionCatalog, useDiscardRedraw, useRedrawFrames } from './useSpriteConsole.js';
 
 const Cols = styled.div`display: flex; gap: 1.2rem; align-items: flex-start; flex-wrap: wrap; margin-top: 0.8rem;`;
@@ -140,6 +140,8 @@ export default function SpritePreviewModal({ subject, onClose }) {
   const manifest = useSheetManifest(manifestKey, true);
   const [initialMarks] = useState(() => initialMarksFor(subject));
   const marksRef = useRef(initialMarks);
+  // Mirrors the grid's marks so Retry (re)renders with what is marked now.
+  const [marks, setMarks] = useState(initialMarks);
   const [sheetPx, setSheetPx] = useState(null);
   const [compareOn, setCompareOn] = useState(false);
   const redraw = useRedrawFrames();
@@ -158,14 +160,17 @@ export default function SpritePreviewModal({ subject, onClose }) {
   const discardable = failedRedraw && (!subject.box_task_id || !subject.atlas_key);
   const canCompare = isRedraw && subject.job_state === 'done' && Boolean(subject.redraw_source_atlas_key);
   const previousUrl = canCompare ? assetUrl(subject.redraw_source_atlas_key) : null;
+  const compareFrames = compareMarkedFrames(subject);
   const cmp = useCompare(compareOn && canCompare && showGrid, previousUrl, showGrid ? assetUrlVersioned(sheetKey, version) : null,
-    manifest.data, subject.redraw_frames);
+    manifest.data, compareFrames);
   const compareProps = compareOn && canCompare
-    ? { previousUrl, redrawFrames: subject.redraw_frames || [], changedUnmarked: cmp.changed } : undefined;
+    ? { previousUrl, redrawFrames: compareFrames, changedUnmarked: cmp.changed } : undefined;
+  const retryFrames = failedRedraw ? redrawPayload(marks, manifest.data) : [];
+  const boxStateUnknown = failedRedraw && Boolean(subject.box_task_id) && !subject.atlas_key;
   const firstRedrawnAction = canCompare ? (subject.redraw_frames || [])[0]?.action : undefined;
   const close = () => {
     const n = marksRef.current.size;
-    if (shouldConfirmClose(marksRef.current) && !window.confirm(`Discard ${n} unsent frame marks?`)) return;
+    if (shouldConfirmClose(marksRef.current, initialMarks) && !window.confirm(`Discard ${n} unsent frame marks?`)) return;
     onClose();
   };
   const sendFrames = (jobId) => (frames) => redraw.mutate({ jobId, frames }, { onSuccess: onClose });
@@ -189,7 +194,9 @@ export default function SpritePreviewModal({ subject, onClose }) {
           {failedRedraw && (
             <Banner>
               <span>{`Redraw failed: ${subject.last_error || 'unknown error'}`}</span>
-              <Btn type="button" disabled={redraw.isPending} onClick={() => sendFrames(subject.sheet_job_id)(redrawPayload(initialMarks, manifest.data))}>Retry redraw</Btn>
+              {boxStateUnknown && <span>The GPU box state is unknown. Queue the whole sheet again to be safe.</span>}
+              <Btn type="button" disabled={redraw.isPending || retryFrames.length === 0}
+                onClick={() => sendFrames(subject.sheet_job_id)(retryFrames)}>Retry redraw</Btn>
               {discardable && (
                 <Btn type="button" disabled={discard.isPending}
                   onClick={() => discard.mutate(subject.job_id, { onSuccess: onClose })}>Discard redraw</Btn>
@@ -209,7 +216,7 @@ export default function SpritePreviewModal({ subject, onClose }) {
           <SpriteFrameGrid sheetUrl={assetUrlVersioned(sheetKey, version)} manifest={manifest.data}
             sheetPx={sheetPx && sheetPx.url === assetUrlVersioned(sheetKey, version) ? { w: sheetPx.w, h: sheetPx.h } : null}
             initialMarks={initialMarks} initialAction={firstRedrawnAction} compare={compareProps}
-            onMarksChange={(m) => { marksRef.current = m; }}
+            onMarksChange={(m) => { marksRef.current = m; setMarks(m); }}
             onSend={sendFrames(failedRedraw ? subject.sheet_job_id : subject.job_id)}
             secondsPerCell={catalog?.seconds_per_cell} sending={redraw.isPending} />
         </Col>

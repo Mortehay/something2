@@ -106,8 +106,20 @@ export function changedUnmarked(prev, next, manifest, redrawFrames) {
   return changed;
 }
 
-export function shouldConfirmClose(marks) {
-  return marks.size > 0;
+// Unsent marks need a confirm, unless they are exactly the marks the popup
+// opened with (a failed redraw's seeded frames, left untouched).
+export function shouldConfirmClose(marks, initial = new Set()) {
+  if (marks.size === 0) return false;
+  if (marks.size !== initial.size) return true;
+  for (const key of marks) if (!initial.has(key)) return true;
+  return false;
+}
+
+// The frames a done redraw's Compare treats as marked: this row's plus those of
+// failed redraws between it and the compared sheet (redraw_compare_frames from
+// the API), so their changes are not flagged "changed, not marked".
+export function compareMarkedFrames(subject) {
+  return subject?.redraw_compare_frames || subject?.redraw_frames || [];
 }
 
 // Pixel size of the sheet, from the furthest frame rect edges.

@@ -83,6 +83,17 @@ describe('SpritePreviewModal frame redraw', () => {
     expect(html).toContain('Discard redraw');
     expect(html).toContain('aria-pressed="true"');
   });
+  it('Retry sends the grid\'s marks: disabled when there are none', () => {
+    const retryBtn = (html) => /<button[^>]*>Retry redraw<\/button>/.exec(html)[0];
+    expect(retryBtn(renderWith(failed()))).not.toMatch(/disabled/);
+    expect(retryBtn(renderWith(failed({ redraw_frames: [] })))).toMatch(/disabled/);
+  });
+  it('a failed redraw whose task never stored a sheet warns that the box state is unknown', () => {
+    const unknown = 'The GPU box state is unknown. Queue the whole sheet again to be safe.';
+    expect(renderWith(failed({ box_task_id: 't1', atlas_key: null }))).toContain(unknown);
+    expect(renderWith(failed({ box_task_id: null }))).not.toContain(unknown);
+    expect(renderWith(failed({ box_task_id: 't1', atlas_key: 'x.png', manifest_key: 'sheet.json' }))).not.toContain(unknown);
+  });
   it('not discardable once the box task has a sheet', () => {
     const html = renderWith(failed({ box_task_id: 't1', atlas_key: 'x.png', manifest_key: 'sheet.json' }));
     expect(html).toContain('Retry redraw');

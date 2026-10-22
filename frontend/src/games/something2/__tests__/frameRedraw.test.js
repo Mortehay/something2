@@ -60,6 +60,14 @@ describe('marks', () => {
     expect(shouldConfirmClose(new Set())).toBe(false);
     expect(shouldConfirmClose(new Set(['walk/s/0']))).toBe(true);
   });
+  it('shouldConfirmClose: seeded marks left as they were need no confirm', () => {
+    const seeded = new Set(['walk/s/0', 'walk/s/1']);
+    expect(shouldConfirmClose(new Set(['walk/s/1', 'walk/s/0']), seeded)).toBe(false);
+    expect(shouldConfirmClose(new Set(['walk/s/0']), seeded)).toBe(true);
+    expect(shouldConfirmClose(new Set(['walk/s/0', 'walk/s/1', 'walk/s/2']), seeded)).toBe(true);
+    expect(shouldConfirmClose(new Set(['walk/s/0', 'walk/s/2']), seeded)).toBe(true);
+    expect(shouldConfirmClose(new Set(), seeded)).toBe(false);
+  });
 });
 
 describe('contextFrames', () => {
@@ -171,3 +179,23 @@ describe('initialMarksFor', () => {
     expect(initialMarksFor({}).size).toBe(0);
   });
 });
+
+import { compareMarkedFrames } from '../frameRedraw.js';
+
+describe('compareMarkedFrames', () => {
+  it('uses the lineage set (this row + skipped failed ancestors) when the API sends one', () => {
+    const f = (frame) => ({ action: 'idle', direction: 's', frame });
+    expect(compareMarkedFrames({ redraw_frames: [f(2)], redraw_compare_frames: [f(1), f(2)] })).toEqual([f(1), f(2)]);
+    expect(compareMarkedFrames({ redraw_frames: [f(2)], redraw_compare_frames: null })).toEqual([f(2)]);
+    expect(compareMarkedFrames({})).toEqual([]);
+  });
+  it('the lineage set keeps a failed ancestor\'s frame out of "changed, not marked"', () => {
+    const m = { frames: { 'a/s/0': [0, 0, 1, 1], 'a/s/1': [1, 0, 1, 1] } };
+    const prev = { width: 2, data: new Uint8ClampedArray([0, 0, 0, 0, 0, 0, 0, 0]) };
+    const next = { width: 2, data: new Uint8ClampedArray([9, 0, 0, 0, 9, 0, 0, 0]) };
+    const subject = { redraw_frames: ['a/s/1'], redraw_compare_frames: ['a/s/0', 'a/s/1'] };
+    expect(changedUnmarked(prev, next, m, subject.redraw_frames)).toEqual(['a/s/0']);
+    expect(changedUnmarked(prev, next, m, compareMarkedFrames(subject))).toEqual([]);
+  });
+});
+
