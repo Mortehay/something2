@@ -19,6 +19,19 @@ const WALL_EPS = 0.01; // clamp/inset margin so a clamped face stays inside the 
 // is centred on the same box centre movement already resolved against.
 const FOOTPRINT_SCALE = 0.5;
 
+// A leading face is clear when both of its end samples are walkable (tiles,
+// walls and decoration circles exactly as the corner test has always read
+// them) AND no blocking decoration circle touches the face between them. The
+// second half closes the gap where a circle narrower than the face sat between
+// the two corners and an actor walked straight through a tree trunk. A map
+// without segmentHitsBlocker (test stubs) keeps the corner-only behaviour.
+// Mirrored byte-for-byte in frontend systems/movement.js / backend
+// authority/collision.js -- change both or neither.
+function faceClear(map, x0, y0, x1, y1) {
+  if (!map.isWalkable(x0, y0) || !map.isWalkable(x1, y1)) return false;
+  return typeof map.segmentHitsBlocker !== 'function' || !map.segmentHitsBlocker(x0, y0, x1, y1);
+}
+
 export function resolveMove(map, actor, dirX, dirY, dt) {
   if (dirX === 0 && dirY === 0) return { x: actor.x, y: actor.y, moved: false };
 
@@ -54,7 +67,7 @@ export function resolveMove(map, actor, dirX, dirY, dt) {
     const destFace = face + stepX;
     const top = cy - fhh + WALL_EPS;
     const bot = cy + fhh - WALL_EPS;
-    if (map.isWalkable(destFace, top) && map.isWalkable(destFace, bot)) {
+    if (faceClear(map, destFace, top, destFace, bot)) {
       x += stepX;
       moved = true;
     } else {
@@ -63,7 +76,7 @@ export function resolveMove(map, actor, dirX, dirY, dt) {
         : Math.ceil(destFace / MAP_TILE_SIZE) * MAP_TILE_SIZE;
       const tileFace = boundary - dir * WALL_EPS;
       const tileMove = tileFace - face;
-      if (tileMove * dir > 0 && map.isWalkable(tileFace, top) && map.isWalkable(tileFace, bot) &&
+      if (tileMove * dir > 0 && faceClear(map, tileFace, top, tileFace, bot) &&
           (!map.isWalkable(boundary + dir * WALL_EPS, top) || !map.isWalkable(boundary + dir * WALL_EPS, bot))) {
         x += tileMove;
         moved = true;
@@ -73,7 +86,7 @@ export function resolveMove(map, actor, dirX, dirY, dt) {
         for (let iter = 0; iter < 16; iter++) {
           const mid = (lo + hi) / 2;
           const testFace = face + mid;
-          if (map.isWalkable(testFace, top) && map.isWalkable(testFace, bot)) {
+          if (faceClear(map, testFace, top, testFace, bot)) {
             lo = mid;
           } else {
             hi = mid;
@@ -93,7 +106,7 @@ export function resolveMove(map, actor, dirX, dirY, dt) {
     const destFace = face + stepY;
     const left = cx - fhw + WALL_EPS;
     const right = cx + fhw - WALL_EPS;
-    if (map.isWalkable(left, destFace) && map.isWalkable(right, destFace)) {
+    if (faceClear(map, left, destFace, right, destFace)) {
       y += stepY;
       moved = true;
     } else {
@@ -102,7 +115,7 @@ export function resolveMove(map, actor, dirX, dirY, dt) {
         : Math.ceil(destFace / MAP_TILE_SIZE) * MAP_TILE_SIZE;
       const tileFace = boundary - dir * WALL_EPS;
       const tileMove = tileFace - face;
-      if (tileMove * dir > 0 && map.isWalkable(left, tileFace) && map.isWalkable(right, tileFace) &&
+      if (tileMove * dir > 0 && faceClear(map, left, tileFace, right, tileFace) &&
           (!map.isWalkable(left, boundary + dir * WALL_EPS) || !map.isWalkable(right, boundary + dir * WALL_EPS))) {
         y += tileMove;
         moved = true;
@@ -112,7 +125,7 @@ export function resolveMove(map, actor, dirX, dirY, dt) {
         for (let iter = 0; iter < 16; iter++) {
           const mid = (lo + hi) / 2;
           const testFace = face + mid;
-          if (map.isWalkable(left, testFace) && map.isWalkable(right, testFace)) {
+          if (faceClear(map, left, testFace, right, testFace)) {
             lo = mid;
           } else {
             hi = mid;

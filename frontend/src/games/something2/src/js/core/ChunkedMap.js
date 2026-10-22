@@ -110,6 +110,32 @@ export class ChunkedMap {
     return true;
   }
 
+  // True when a blocking decoration circle touches the axis-aligned segment
+  // (x0,y0)-(x1,y1), edge inclusive like isWalkable. resolveMove's faceClear
+  // tests a whole leading face with this, not just its two corners. A circle
+  // never crosses its tile's edge, so only the tiles the segment passes
+  // through are read. Mirrors ServerMap.segmentHitsBlocker.
+  segmentHitsBlocker(x0, y0, x1, y1) {
+    const T = MAP_TILE_SIZE, N = this.chunkSize;
+    const minX = Math.min(x0, x1), maxX = Math.max(x0, x1);
+    const minY = Math.min(y0, y1), maxY = Math.max(y0, y1);
+    for (let gRow = Math.floor(minY / T); gRow <= Math.floor(maxY / T); gRow++) {
+      for (let gCol = Math.floor(minX / T); gCol <= Math.floor(maxX / T); gCol++) {
+        const cx = Math.floor(gCol / N), cy = Math.floor(gRow / N);
+        const e = this.decorations.get(CHUNK_KEY(cx, cy));
+        const circles = e && e.blocked.get(`${gRow - cy * N},${gCol - cx * N}`);
+        if (!circles) continue;
+        for (const c of circles) {
+          const ax = gCol * T + c.x, ay = gRow * T + c.y;
+          const dx = Math.min(Math.max(ax, minX), maxX) - ax;
+          const dy = Math.min(Math.max(ay, minY), maxY) - ay;
+          if (dx * dx + dy * dy <= c.r * c.r) return true;
+        }
+      }
+    }
+    return false;
+  }
+
   speedAt(worldX, worldY) {
     const def = this._tileDef(this.getTileAt(worldX, worldY));
     return def && def.speed !== undefined ? def.speed : 1;

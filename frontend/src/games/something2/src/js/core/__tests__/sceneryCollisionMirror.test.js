@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { ChunkedMap } from '../ChunkedMap.js';
+import { resolveMove as clientResolveMove } from '../../systems/movement.js';
 
 // Scenery collision: a blocking feature is a CIRCLE (radius px) at its
 // tile-local anchor (ox, oy). The client (ChunkedMap) and the authority
@@ -9,7 +10,7 @@ import { ChunkedMap } from '../ChunkedMap.js';
 // output, or client prediction rubber-bands against server collision.
 const require = createRequire(import.meta.url);
 const backendDir = path.resolve(__dirname, '../../../../../../../../backend/src');
-const { ServerMap } = require(path.join(backendDir, 'authority/collision.js'));
+const { ServerMap, resolveMove: serverResolveMove } = require(path.join(backendDir, 'authority/collision.js'));
 const { generateChunk, generateChunkDecorations } = require(path.join(backendDir, 'services/mapService.js'));
 
 const CHUNK = 16; // dense enough: blockers clump (density field); 8 tiles yields ~1
@@ -83,6 +84,40 @@ describe.each(WORLDS)('scenery collision mirror: $label', ({ world, cover }) => 
       expect(server.isWalkable(ax - d.radius, ay)).toBe(false);
     }
   });
+
+  it('client and server movement resolve scripted walks through the scenery to the same position', () => {
+    // Every blocker approached head-on and slightly off-axis from 4 sides plus
+    // 2 diagonals: the exact moves where the face-vs-circle test decides.
+    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1]];
+    let walks = 0, stopped = 0;
+    // Kept inside the one loaded chunk: beyond it the client's streaming map
+    // reads "unloaded" as blocked while the server generates the neighbour.
+    const px = CHUNK * 100, M = 220;
+    for (const d of blockers) {
+      const ax = d.col * 100 + d.ox, ay = d.row * 100 + d.oy;
+      if (ax < M || ay < M || ax > px - M || ay > px - M) continue;
+      for (const [dx, dy] of dirs) {
+        for (const lat of [0, 5, 20]) {
+          const sx = ax - dx * 70 + (dy !== 0 && dx === 0 ? lat : 0) - 32;
+          const sy = ay - dy * 70 + (dx !== 0 && dy === 0 ? lat : 0) - 32;
+          let c = { x: sx, y: sy, width: 64, height: 64, speed: 200 };
+          let s = { ...c };
+          for (let i = 0; i < 40; i++) {
+            const rc = clientResolveMove(client, c, dx, dy, 1 / 60);
+            const rs = serverResolveMove(server, s, dx, dy, 1 / 60);
+            c = { ...c, x: rc.x, y: rc.y };
+            s = { ...s, x: rs.x, y: rs.y };
+          }
+          walks++;
+          if (c.x !== s.x || c.y !== s.y) expect.fail(`diverged from (${sx},${sy}) dir ${dx},${dy}: client (${c.x},${c.y}) server (${s.x},${s.y})`);
+          const free = 200 * (40 / 60);
+          if (Math.hypot(c.x - sx, c.y - sy) < free - 1) stopped++;
+        }
+      }
+    }
+    expect(walks).toBeGreaterThan(30);
+    expect(stopped, 'some scripted walks must actually hit scenery').toBeGreaterThan(0);
+  }, 60000);
 
   it('a point at a feature anchor is blocked', () => {
     for (const d of blockers) {
