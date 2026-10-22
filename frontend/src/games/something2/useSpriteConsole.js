@@ -1,7 +1,9 @@
+import { useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { API_URL } from '../../config.js';
 import { apiFetch, authHeaders } from './src/js/net/auth.js';
+import { queueIsLive, runJustEnded } from './spriteSelection.js';
 
 const SUBJECTS_KEY = ['sprite-admin-subjects'];
 const JOBS_KEY = ['sprite-admin-jobs'];
@@ -44,7 +46,18 @@ export function useSpriteQueue() {
     },
     queryFn: () => jsonRequest('/jobs'),
   });
-  return { stats: query.data?.stats || {}, jobs: query.data?.jobs || [], run: query.data?.run || null };
+  const stats = query.data?.stats || {};
+  const run = query.data?.run || null;
+  // Subjects stop polling once the queue is idle; refresh them once when a run
+  // ends so the last row's pill and popup show its final state.
+  const qc = useQueryClient();
+  const live = queueIsLive({ run, stats });
+  const wasLive = useRef(live);
+  useEffect(() => {
+    if (runJustEnded(wasLive.current, live)) qc.invalidateQueries({ queryKey: SUBJECTS_KEY });
+    wasLive.current = live;
+  }, [live, qc]);
+  return { stats, jobs: query.data?.jobs || [], run };
 }
 
 // `path` may be a function of the value; method defaults to POST (DELETE sends no body).

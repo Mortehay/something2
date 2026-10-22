@@ -222,7 +222,18 @@ export function rowProgressLabel(subject, run) {
   const cur = run?.current;
   if (!cur || cur.phase !== 'running' || subject?.job_state !== 'running') return null;
   if (!subject.job_id || cur.id !== subject.job_id) return null;
-  return `running ${Math.round(Number(cur.pct) || 0)}%`;
+  return `${subject.redraw_of ? 'redrawing' : 'running'} ${Math.round(Number(cur.pct) || 0)}%`;
+}
+
+// The queue has work in flight: a batch is running or rows are queued/running.
+export function queueIsLive({ run, stats } = {}) {
+  return Boolean(run?.running || stats?.queued || stats?.running);
+}
+
+// Live -> idle: the run just ended, so the (no longer polled) subjects list
+// needs one last refresh to show the final row states.
+export function runJustEnded(wasLive, isLive) {
+  return wasLive === true && !isLive;
 }
 
 // Initial action ticks: idle, filtered to the catalog's ids. Props never

@@ -9,7 +9,7 @@ import {
 } from './useSpriteConsole.js';
 import {
   cellCount, conceptImageOf, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, batchProgress, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
-  PROP_FX_OPTIONS, propFxLabel, queueButtonLabel, queuePayload, selectionKinds, spriteShape, toggleSpriteSubject,
+  PROP_FX_OPTIONS, propFxLabel, queueButtonLabel, queuePayload, queueIsLive, selectionKinds, spriteShape, toggleSpriteSubject,
 } from './spriteSelection.js';
 
 const Wrap = styled.div`
@@ -78,6 +78,15 @@ const ErrorText = styled.span`color: var(--s2-danger);`;
 const ThumbButton = styled.button`border: 0; padding: 0; background: none; cursor: zoom-in;`;
 const Pager = styled.div`display: flex; gap: 0.5rem; align-items: center; margin: 0.75rem 0;`;
 
+// The Status column: "failed" / "redraw failed" in red with the error as its
+// title, else the live progress ("running 37%" / "redrawing 37%") or the state.
+export function JobStatusCell({ subject, run }) {
+  if (subject.job_state === 'failed') {
+    return <ErrorText title={subject.last_error || ''}>{jobStateLabel(subject)}</ErrorText>;
+  }
+  return <Pill>{rowProgressLabel(subject, run) || jobStateLabel(subject)}</Pill>;
+}
+
 function derivedFrames(subject) {
   return spriteShape(subject) === 'directional' || subject.render_mode === 'animated' ? 4 : 1;
 }
@@ -85,7 +94,7 @@ function derivedFrames(subject) {
 function SpriteConsoleAdmin() {
   const { stats, run } = useSpriteQueue();
   const batch = batchProgress(run);
-  const live = Boolean(run?.running || stats.queued || stats.running);
+  const live = queueIsLive({ run, stats });
   const { subjects, isLoading, error } = useSpriteSubjects({ live });
   const [shape, setShape] = useState('all');
   const [status, setStatus] = useState('missing');
@@ -313,9 +322,7 @@ function SpriteConsoleAdmin() {
                   <td>{subject.backend === 'gpu-box' && subject.frames_per_action
                     ? `${subject.frames_per_action} / action` : derivedFrames(subject)}</td>
                   <td>{subject.backend || 'local'}</td>
-                  <td>{subject.job_state === 'failed'
-                    ? <ErrorText title={subject.last_error || ''}>failed</ErrorText>
-                    : <Pill>{rowProgressLabel(subject, run) || jobStateLabel(subject)}</Pill>}</td>
+                  <td><JobStatusCell subject={subject} run={run} /></td>
                   <td title={subject.prompt || subject.name}>{subject.prompt || subject.name}</td>
                 </tr>
               );

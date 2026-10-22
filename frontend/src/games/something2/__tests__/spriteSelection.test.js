@@ -3,7 +3,7 @@ import {
   filterSpriteSubjects, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   targetsForSprites, framesCap, cellCount, estimateLabel, defaultActionsFor, rowLabels,
   isBoxProp, PROP_FX_OPTIONS, propFxLabel, propEffect, selectionKinds, queueButtonLabel, queuePayload, conceptImageOf, sheetImageOf, sheetManifestOf, jobStateLabel, conceptLabelOf,
-  batchProgress, currentProgressLabel, rowProgressLabel,
+  batchProgress, currentProgressLabel, rowProgressLabel, queueIsLive, runJustEnded,
 } from '../spriteSelection.js';
 import { PAGE_SIZE } from '../artSelection.js';
 
@@ -293,6 +293,10 @@ describe('sprite batch progress (SOMET-662)', () => {
     expect(rowProgressLabel({ job_id: 'r1', job_state: 'queued' }, run)).toBeNull();
     expect(rowProgressLabel({ job_id: 'r1', job_state: 'running' }, { current: { id: 'r1', phase: 'concept', pct: 0 } })).toBeNull();
   });
+
+  it('a running redraw row reads "redrawing N%"', () => {
+    expect(rowProgressLabel({ job_id: 'r1', job_state: 'running', redraw_of: 'r0' }, run)).toBe('redrawing 20%');
+  });
 });
 
 describe('sheet payload keys (frame redraw)', () => {
@@ -315,5 +319,22 @@ describe('sheet payload keys (frame redraw)', () => {
     expect(jobStateLabel(r('failed'))).toBe('redraw failed');
     expect(jobStateLabel({ job_state: 'running' })).toBe('running');
     expect(jobStateLabel({})).toBe('not queued');
+  });
+});
+
+describe('run end refreshes the subjects list', () => {
+  it('queueIsLive: a running batch or any queued/running row', () => {
+    expect(queueIsLive({ run: { running: true }, stats: {} })).toBe(true);
+    expect(queueIsLive({ run: null, stats: { queued: 2 } })).toBe(true);
+    expect(queueIsLive({ run: null, stats: { running: 1 } })).toBe(true);
+    expect(queueIsLive({ run: { running: false }, stats: { queued: 0, running: 0 } })).toBe(false);
+    expect(queueIsLive({})).toBe(false);
+  });
+  it('runJustEnded fires only on live -> idle', () => {
+    expect(runJustEnded(true, false)).toBe(true);
+    expect(runJustEnded(false, false)).toBe(false);
+    expect(runJustEnded(false, true)).toBe(false);
+    expect(runJustEnded(true, true)).toBe(false);
+    expect(runJustEnded(undefined, false)).toBe(false);
   });
 });
