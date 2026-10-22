@@ -298,7 +298,9 @@ describe('sprite batch progress (SOMET-662)', () => {
 describe('sheet payload keys (frame redraw)', () => {
   it('sheetImageOf prefers atlas_key then sheet_atlas_key', () => {
     expect(sheetImageOf({ atlas_key: 'a.png', sheet_atlas_key: 'b.png' })).toBe('a.png');
-    expect(sheetImageOf({ sheet_atlas_key: 'b.png', image_key: 'c.png' })).toBe('b.png');
+    expect(sheetImageOf({ sheet_atlas_key: 'b.png' })).toBe('b.png');
+    // gpu-box prop: newest row has image_key and no atlas; an older sheet row must not win
+    expect(sheetImageOf({ image_key: 'c.png', sheet_atlas_key: 'b.png' })).toBe('c.png');
   });
   it('sheetManifestOf', () => {
     expect(sheetManifestOf({ manifest_key: 'm', sheet_manifest_key: 'n' })).toBe('m');

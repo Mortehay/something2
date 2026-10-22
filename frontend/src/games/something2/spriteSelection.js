@@ -105,7 +105,7 @@ export function conceptLabelOf(subject) {
 // prop result) or an approved sprite sheet -- never the entity's plain art,
 // which made every entity with Art Generation art look already rendered.
 export function sheetImageOf(subject) {
-  return subject?.atlas_key || subject?.sheet_atlas_key || subject?.image_key || subject?.sprite?.atlas_key || null;
+  return subject?.atlas_key || subject?.image_key || subject?.sheet_atlas_key || subject?.sprite?.atlas_key || null;
 }
 
 export function sheetManifestOf(subject) {

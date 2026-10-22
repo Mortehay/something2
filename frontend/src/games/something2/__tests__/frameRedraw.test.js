@@ -133,4 +133,16 @@ describe('changedUnmarked', () => {
     expect(changedUnmarked(prev, next, m, [{ action: 'a', direction: 's', frame: 1 }])).toEqual(['a/s/0']);
     expect(changedUnmarked(prev, prev, m, [])).toEqual([]);
   });
+  it('uses the row stride for cells in a second row', () => {
+    const tall = { frames: { 'a/s/0': [0, 0, 1, 1], 'a/s/1': [0, 1, 1, 1] } };
+    const mk = (a, b) => ({ width: 1, data: new Uint8ClampedArray([...a, ...b]) });
+    const prev = mk([1, 1, 1, 1], [2, 2, 2, 2]);
+    expect(changedUnmarked(prev, mk([1, 1, 1, 1], [2, 2, 2, 3]), tall, [])).toEqual(['a/s/1']);
+    expect(changedUnmarked(prev, mk([9, 1, 1, 1], [2, 2, 2, 2]), tall, [])).toEqual(['a/s/0']);
+  });
+  it('different widths do not throw; pixels missing from either buffer count as changed', () => {
+    const prev = px([1, 2, 3, 4], [5, 6, 7, 8]);
+    const next = { width: 1, data: new Uint8ClampedArray([1, 2, 3, 4]) };
+    expect(changedUnmarked(prev, next, m, [])).toEqual(['a/s/1']);
+  });
 });

@@ -83,6 +83,7 @@ export function qualityByFrame(manifest) {
   return map;
 }
 
+// Each image is indexed with its own width; a pixel missing from either buffer counts as changed.
 export function changedUnmarked(prev, next, manifest, redrawFrames) {
   const skip = new Set((redrawFrames || []).map((f) => (typeof f === 'string' ? f : frameKey(f.action, f.direction, f.frame))));
   const changed = [];
