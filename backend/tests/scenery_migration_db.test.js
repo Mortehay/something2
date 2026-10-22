@@ -23,12 +23,42 @@ async function run(client, direction) {
 // `body` gets a client in a fresh rolled-back transaction, with the five
 // columns and the scenery rows removed first so `up` starts from the pre-
 // migration shape even on a database where it has already been applied.
+//
+// LOCKING. down/up ALTER entity_types and biomes, and every catalog test running
+// in parallel (seed_catalogs_db, seed_auras_db, ...) touches the same tables in
+// its own order. Taking the locks implicitly, one statement at a time, made
+// this file the hub of deadlock cycles in which an innocent PEER was the victim
+// (full suite: seed_catalogs_db / seed_auras_db red in 3-4 of 4 runs, green at
+// 41b10a9d; reproduced 2/2 by running the three files together). So both
+// tables are locked ACCESS EXCLUSIVE up front, with lock_timeout BELOW
+// deadlock_timeout (1s): this session always gives up its own wait before
+// Postgres' detector runs, and retries the whole transaction from BEGIN. Once
+// it holds both locks it never waits again, so it cannot close a cycle.
+// A time budget, not a try count: under the full suite a peer's long seeding
+// transaction can hold a conflicting lock for well over a minute. Kept well
+// inside the per-file --test-timeout (420s).
+const LOCK_DEADLINE_MS = 240000;
 async function inTxn(body) {
   const client = new Client({ connectionString: url });
   await client.connect();
   try {
-    await client.query('BEGIN');
-    await client.query("SET LOCAL lock_timeout = '5s'");
+    const deadline = Date.now() + LOCK_DEADLINE_MS;
+    for (let attempt = 1; ; attempt++) {
+      await client.query('BEGIN');
+      try {
+        await client.query("SET LOCAL lock_timeout = '750ms'");
+        await client.query('LOCK TABLE entity_types, biomes IN ACCESS EXCLUSIVE MODE');
+        await client.query('SET LOCAL lock_timeout = 0');
+        break;
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        if ((err.code !== '55P03' && err.code !== '40P01') || Date.now() >= deadline) {
+          throw new Error(`scenery_migration_db: could not lock entity_types+biomes after ${attempt} tries in ${LOCK_DEADLINE_MS / 1000}s `
+            + `(a peer held a conflicting lock for the whole window): ${err.message}`);
+        }
+        await new Promise((r) => { setTimeout(r, 100 + Math.floor(Math.random() * 200)); });
+      }
+    }
     await client.query('DELETE FROM entity_types WHERE name = ANY($1)', [SCENERY_TYPES.map((t) => t.name)]);
     await run(client, 'down');
     await body(client);
