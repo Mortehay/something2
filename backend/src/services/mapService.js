@@ -860,8 +860,8 @@ function placeFeature(cfg, defs, region, flora, terrain, gRow, gCol, spawn, port
   // the tile entirely (leave it open) rather than force a passable type.
   if (blocking && isExcludedBlockerCell(cfg, spawn, portals, gRow, gCol)) return null;
   const radius = blocking
-    ? (Number.isFinite(picked.block_radius) && picked.block_radius > 0 ? picked.block_radius : DEFAULT_BLOCK_RADIUS)
-    : 0;
+    ? Math.min(50, Number.isFinite(picked.block_radius) && picked.block_radius > 0 ? picked.block_radius : DEFAULT_BLOCK_RADIUS)
+    : 0; // capped at half a tile: a larger circle could not stay inside its tile
   // The blocking circle must never cross the tile edge (collision reads one
   // tile only), so the jitter range shrinks as the radius grows.
   const J = Math.max(0, Math.min(25, 50 - radius));

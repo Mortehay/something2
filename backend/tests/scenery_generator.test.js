@@ -175,3 +175,15 @@ test('deterministic; opts.cover=false equals the feature subset; cover emitted a
   const firstCover = a.findIndex((d) => d.layer === 'cover');
   assert.ok(a.slice(firstCover).every((d) => d.layer === 'cover'));
 });
+
+test('a block_radius above half a tile is clamped to 50 and its circle stays in the tile', () => {
+  const huge = [{ name: 'Tree', walkable: false, spawn_tiles: ['grass'], chance: 1, block_radius: 80 }];
+  const { out } = gen(world({ biomes: [] }), huge);
+  const f = feats(out).filter((d) => d.blocking);
+  assert.ok(f.length > 20);
+  for (const d of f) {
+    assert.equal(d.radius, 50);
+    assert.ok(d.ox - d.radius >= 0 && d.ox + d.radius <= 100, `ox ${d.ox}`);
+    assert.ok(d.oy - d.radius >= 0 && d.oy + d.radius <= 100, `oy ${d.oy}`);
+  }
+});

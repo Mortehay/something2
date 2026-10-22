@@ -12,34 +12,50 @@ const backendDir = path.resolve(__dirname, '../../../../../../../../backend/src'
 const { ServerMap } = require(path.join(backendDir, 'authority/collision.js'));
 const { generateChunk, generateChunkDecorations } = require(path.join(backendDir, 'services/mapService.js'));
 
-const CHUNK = 16; // dense enough: blockers clump (density field), 8 tiles yields ~1
-const world = {
-  seed: 4242, chunkSize: CHUNK, width: 48, height: 48,
-  tileTypes: { grass: { walkable: true, speed: 1 } },
-  decorationDefs: [
-    { name: 'Boulder', walkable: false, spawn_tiles: ['grass'], chance: 1, block_radius: 30 },
-    { name: 'Stump', walkable: false, spawn_tiles: ['grass'], chance: 1, block_radius: 8 },
-    { name: 'Daisy', walkable: true, spawn_tiles: ['grass'], chance: 1 },
-  ],
-};
+const CHUNK = 16; // dense enough: blockers clump (density field); 8 tiles yields ~1
+const TILES = { grass: { walkable: true, speed: 1 } };
+const DEFS = [
+  { name: 'Boulder', walkable: false, spawn_tiles: ['grass'], chance: 1, block_radius: 30 },
+  { name: 'Stump', walkable: false, spawn_tiles: ['grass'], chance: 1, block_radius: 8 },
+  { name: 'Daisy', walkable: true, spawn_tiles: ['grass'], chance: 1 },
+];
+const COVER_DEFS = [
+  ...DEFS.map((d) => ({ ...d, scenery_layer: 'feature' })),
+  { name: 'Moss', walkable: true, spawn_tiles: ['grass'], chance: 1, scenery_layer: 'cover', max_per_tile: 3 },
+];
+const mk = (seed, defs, biomes, extra = {}) => ({
+  seed, chunkSize: CHUNK, width: 48, height: 48, tileTypes: TILES, decorationDefs: defs,
+  biomeCell: 16, ...(biomes ? { biomes } : {}), ...extra,
+});
+const BIOME = { name: 'Meadow', terrain_tiles: ['grass'], flora_types: ['Boulder', 'Stump', 'Daisy', 'Moss'], creature_types: [], cover_density: 2 };
+// The client receives cover-on output (what /chunk sends); the server generates cover-off.
+const WORLDS = [
+  { label: 'seed 4242, no biomes', world: mk(4242, DEFS, null), cover: false },
+  { label: 'seed 9, no biomes', world: mk(9, DEFS, null), cover: false },
+  { label: 'seed 31337, biome with cover', world: mk(31337, COVER_DEFS, [BIOME]), cover: true },
+  { label: 'seed 7, biome with cover', world: mk(7, COVER_DEFS, [BIOME]), cover: true },
+];
 
-function build() {
+function build(world) {
   const server = new ServerMap(world);
   const grid = generateChunk(world, 0, 0);
-  const decos = generateChunkDecorations(world, 0, 0, grid, world.decorationDefs);
-  const client = new ChunkedMap(CHUNK, { grass: { walkable: true, speed: 1 } });
+  const decos = generateChunkDecorations(world, 0, 0, grid, world.decorationDefs); // cover on
+  const client = new ChunkedMap(CHUNK, TILES);
   client.setChunk(0, 0, grid, decos);
   return { server, client, decos };
 }
 
-describe('scenery collision mirror', () => {
-  const { server, client, decos } = build();
+describe.each(WORLDS)('scenery collision mirror: $label', ({ world, cover }) => {
+  const { server, client, decos } = build(world);
   const blockers = decos.filter((d) => d.blocking);
 
-  it('fixture places blockers of more than one radius, some off-centre', () => {
+  it('fixture is not vacuous: several radii, some off-centre, cover present when expected', () => {
     expect(blockers.length).toBeGreaterThan(3);
     expect(new Set(blockers.map((d) => d.radius)).size).toBeGreaterThan(1);
     expect(blockers.some((d) => d.ox !== 50 || d.oy !== 50)).toBe(true);
+    const covers = client.decorationsInChunk(0, 0).filter((d) => d.layer === 'cover');
+    if (cover) expect(covers.length).toBeGreaterThan(0);
+    else expect(covers.length).toBe(0);
   });
 
   it('client and server agree on a 5px grid over the chunk', () => {
@@ -49,7 +65,7 @@ describe('scenery collision mirror', () => {
       for (let x = 0; x < px; x += 5) {
         const s = server.isWalkable(x, y);
         if (!s) blocked++;
-        expect(client.isWalkable(x, y), `(${x},${y})`).toBe(s);
+        if (client.isWalkable(x, y) !== s) expect.fail(`mismatch at (${x},${y}) server=${s}`);
       }
     }
     expect(blocked).toBeGreaterThan(0);
@@ -64,8 +80,6 @@ describe('scenery collision mirror', () => {
       ]) {
         expect(client.isWalkable(px, py)).toBe(server.isWalkable(px, py));
       }
-      // West edge: always inside this tile (the east edge can sit exactly on the
-      // tile boundary, which belongs to the neighbour).
       expect(server.isWalkable(ax - d.radius, ay)).toBe(false);
     }
   });
@@ -86,13 +100,19 @@ describe('scenery collision mirror', () => {
     expect(client.isWalkable(cx, cy)).toBe(true);
   });
 
-  it('non-blocking entries never block', () => {
-    for (const d of decos.filter((x) => !x.blocking)) {
+  it('non-blocking entries never block, on either side', () => {
+    const nonBlocking = decos.filter((x) => !x.blocking);
+    expect(nonBlocking.length).toBeGreaterThan(0);
+    let checked = 0;
+    for (const d of nonBlocking) {
       const x = d.col * 100 + d.ox, y = d.row * 100 + d.oy;
-      // unless a blocker on the same tile covers it, the point is walkable
       const covered = blockers.some((b) => b.row === d.row && b.col === d.col
         && (x - (b.col * 100 + b.ox)) ** 2 + (y - (b.row * 100 + b.oy)) ** 2 <= b.radius ** 2);
-      if (!covered) expect(client.isWalkable(x, y)).toBe(true);
+      if (covered) continue;
+      checked++;
+      expect(client.isWalkable(x, y)).toBe(true);
+      expect(server.isWalkable(x, y)).toBe(true);
     }
+    expect(checked).toBeGreaterThan(0);
   });
 });
