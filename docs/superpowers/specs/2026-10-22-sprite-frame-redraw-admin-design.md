@@ -1,6 +1,6 @@
 # Sprite frame redraw — something2 admin design
 
-Date: 2026-10-22. Status: draft for approval.
+Date: 2026-10-22. Status: approved 2026-10-22.
 Depends on: `2026-10-22-gpu-box-sheet-quality-design.md` (box side; the
 per-frame folders, `atlas.quality` and the redraw API are **not built on the
 box yet**, so every box detail below marked **[ASSUMED]** is a guess at that
