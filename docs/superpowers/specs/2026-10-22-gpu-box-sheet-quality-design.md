@@ -19,14 +19,19 @@ Measurement on something2's side (below) shows that all four come from the
 sheet builder, not from the concept prompt. The user decided the fix goes on
 the box.
 
-## Evidence (both jobs are still on the box)
+## Evidence (all three jobs are still on the box)
 
 | Our subject | Box job id | Concept style |
 |---|---|---|
 | Cultist:1 | `212d56d7-c934-4a76-ae19-3fc87d438205` | pixel-art-like, flat |
 | Cultist:2 | `8d9d164d-32ed-432a-aca1-c228f246d650` | painterly, highly detailed |
+| Demonic Miniboss | `831ddbcb-1527-4425-9878-32f998db360c` | pixel-art-like, full body, wide horns and shoulder spikes |
 
-Both: actions `idle, attack, cast, damage, sway, use, walk`, frames 6, all 8
+The Demonic Miniboss job (added 2026-10-22) has actions `idle, walk, attack`,
+4 frames each, all 8 directions, cell 48x64. Its findings are under "Cut
+before fitting" below.
+
+Both Cultist jobs: actions `idle, attack, cast, damage, sway, use, walk`, frames 6, all 8
 directions, cell 48x64, colors 24. Rows are action-major, directions in order
 `s, se, e, ne, n, nw, w, sw` (row = action_index*8 + dir_index). Fetch them with
 `GET /api/jobs/{id}/sheet` and `/atlas`.
@@ -55,6 +60,29 @@ Per-cell measurements (alpha > 128 = opaque):
   wolves before): idle `w` faces right, like `e` (difference from `e` 7.8,
   from mirrored `e` 12.7). Cultist:2's `w` is ambiguous by the same measure
   (11.7 vs 10.2).
+- **Cut before fitting (Demonic Miniboss, `831ddbcb…`).** The concept is a
+  clean full body, head to feet. In the sheet, many cells show a figure with
+  its head, legs or fist sliced off along a straight line.
+  - **Every cell is the same height.** The figure is 45-46 px tall
+    (rows 17-62) in every idle, walk and attack cell measured, whatever the
+    pose: walk `e` f2 is 19 px wide and attack `e` f3 is 46 px wide, both
+    46 px tall.
+  - **The cut is not at the cell border.** No opaque pixel touches any edge
+    of the 48x64 cell in any of those cells.
+  - **The cut shows as flat rows inside the cell.** A full head with horns
+    starts with 2-5 opaque pixels at the top of its bounding box, as attack
+    `n` f1-f3 do. Attack `s` f0 starts with a solid 21 px row, and attack
+    `se` f0 with 15 px. Attack `s` f2/f3 end in a solid 24 px row at the
+    bottom, which is a cut through the legs, not feet. Idle `e` f0-f3 is a
+    torso with no head.
+  - **Facing:** walk `e` f0 and f3 walk to the LEFT in a row that must face
+    right.
+  - **Order of events:**
+    1. The model draws the pose larger than its own output image, or as a
+       close-up, and that image's border cuts the figure.
+    2. The builder trims to what is left and fits it to the cell height.
+    3. The cut edge ends up a few pixels inside the cell, so the cell-edge
+       check below never sees it.
 - **Identity drift:** attack/cast/use frames in Cultist:2 change body
   proportions, face and costume between frames. Cultist:1 drifts much less, so
   a detailed, painterly concept makes drift worse.
@@ -147,6 +175,12 @@ A sheet is "clean" when, for every cell:
    Checks, against the row's own reference and the concept:
    - figure size compared to the idle `s` frame (or the turnaround frame for
      that direction), measured before any fitting;
+   - **raw-edge contact:** the figure in the model's raw output (before
+     background removal, trimming or fitting) touches or crosses that image's
+     border. If it does, the figure overflowed or is a close-up: redraw it,
+     never shrink it to fit. Measuring the fitted cell cannot replace this
+     check, because fitting moves the cut edge away from the cell border
+     (see "Cut before fitting" in Evidence);
    - opaque fraction / opaque border pixels (backdrop left behind);
    - facing compared to the row's direction (e.g. compare against the
      turnaround frame for that direction and its mirror image; the closer one
@@ -196,7 +230,11 @@ A sheet is "clean" when, for every cell:
   Evidence: re-score jobs `212d56d7…` and `8d9d164d…` with the new checks and
   show they flag at least attack `e` f3 (Cultist:1, facing), attack `s` f2/f4
   (Cultist:2, close-up), attack `se` f3/f4 (Cultist:2, backdrop), and idle `se`
-  (both sheets, front view in a three-quarter row).
+  (both sheets, front view in a three-quarter row). On the Demonic Miniboss job
+  `831ddbcb…`, they must flag:
+  - idle `e` f0-f3 (torso, no head);
+  - attack `s` f0 (head cut flat) and attack `s` f2/f3 (legs cut flat);
+  - walk `e` f0/f3 (facing left in an `e` row).
 - Fixing scale by shrinking every cell so the figure is tiny. The idle `s`
   figure should stay about the size it is now (~44 px tall in a 64 px cell).
 - Breaking the existing API: `POST /api/jobs` body, job status fields,
@@ -206,7 +244,7 @@ A sheet is "clean" when, for every cell:
 
 ## Verification
 
-1. Re-score the two evidence jobs as above (checks only, no redraw).
+1. Re-score the three evidence jobs as above (checks only, no redraw).
    **Claude's call:** if the box no longer has those jobs' raw, pre-fit cell
    outputs, the close-up proof may use a proxy on the fitted cell (head size
    relative to the reference, bbox width, similarity to the reference crop) and
@@ -217,7 +255,11 @@ A sheet is "clean" when, for every cell:
    script: every cell's figure height within ±15 % of idle `s` except
    deliberate pose changes, no cell over 40 % opaque, `se`/`sw` visibly
    different from `s`, no wrong-facing frames in `e`/`ne`/`se` (checked by
-   eye on a 3× row view).
+   eye on a 3× row view). Also no flat cut: no figure whose top or bottom
+   bounding-box row is a solid run of more than about 12 px unless the pose
+   explains it, and no cell that the raw-edge check flagged and that still
+   ended up in the sheet. Regenerate Demonic Miniboss too (idle, walk, attack ×
+   4 frames) and measure it the same way.
 3. Report the measured time per cell before and after, the number of frame
    redraws and row redraws, and the cost of each extra input image per edit.
 4. `sheet.png` is pixel-for-pixel equal to the frame PNGs placed in the grid
