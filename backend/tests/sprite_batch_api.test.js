@@ -35,6 +35,7 @@ function enqueuePool(calls, { spc = null } = {}) {
       }
       if (/count\(\*\).*FROM sprite_sets/is.test(sql)) return { rows: [] };
       if (/UPDATE sprite_sets/i.test(sql)) return { rows: [] };
+      if (/DELETE FROM sprite_sets/i.test(sql)) return { rows: [] };
       if (/INSERT INTO sprite_sets/i.test(sql)) return { rows: [{ id: 'job-row', status: 'queued' }] };
       if (/SELECT status, count/i.test(sql)) return { rows: [{ status: 'queued', n: 1 }] };
       throw new Error(`unexpected query: ${sql}`);
@@ -69,6 +70,7 @@ test('POST /api/sprite-admin/jobs targets an appearance variant instead of the c
       }
       if (/count\(\*\).*FROM sprite_sets/is.test(sql)) return { rows: [] };
       if (/UPDATE sprite_sets/i.test(sql)) return { rows: [] };
+      if (/DELETE FROM sprite_sets/i.test(sql)) return { rows: [] };
       if (/INSERT INTO sprite_sets/i.test(sql)) return { rows: [{ id: 'job-row', status: 'queued' }] };
       if (/SELECT status, count/i.test(sql)) return { rows: [{ status: 'queued', n: 1 }] };
       throw new Error(`unexpected query: ${sql}`);
@@ -271,6 +273,7 @@ function mixedPool(calls) {
       }
       if (/count\(\*\).*FROM sprite_sets/is.test(sql)) return { rows: [] };
       if (/UPDATE sprite_sets/i.test(sql)) return { rows: [] };
+      if (/DELETE FROM sprite_sets/i.test(sql)) return { rows: [] };
       if (/INSERT INTO sprite_sets/i.test(sql)) return { rows: [{ id: 'a' }, { id: 'b' }] };
       if (/SELECT status, count/i.test(sql)) return { rows: [] };
       throw new Error(`unexpected query: ${sql}`);

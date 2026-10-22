@@ -84,6 +84,16 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = 'none' 
   // A rescued row keeps its box job so the batch resumes it -- but that job
   // draws the OLD actions/frames, so a change detaches it (the next claim
   // submits afresh) and `dropped_box_job_id` names it for the caller to cancel.
+  // A queued REDRAW row of a target is deleted first: a full "Queue" supersedes
+  // it with a fresh full-sheet row (below), never a hybrid of the two.
+  await db.query(
+    `DELETE FROM sprite_sets s
+      USING unnest($1::int[], $2::smallint[]) AS t(entity_id, variant)
+      WHERE s.redraw_of IS NOT NULL AND s.status = 'queued'
+        AND s.entity_type_id = t.entity_id
+        AND COALESCE(s.appearance_variant, 0) = COALESCE(t.variant, 0)`,
+    [opts.map((o) => o.entityTypeId), opts.map((o) => o.appearanceVariant)],
+  );
   const { rows: updated } = await db.query(
     `UPDATE sprite_sets s
         SET actions = string_to_array(t.actions, ','), frames = t.frames, frames_per_action = t.frames,
@@ -96,7 +106,7 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = 'none' 
             sprite_sets o
       WHERE s.entity_type_id = t.entity_id
         AND COALESCE(s.appearance_variant, 0) = COALESCE(t.variant, 0)
-        AND s.status = 'queued' AND o.id = s.id
+        AND s.status = 'queued' AND s.redraw_of IS NULL AND o.id = s.id
       RETURNING s.*, CASE WHEN s.box_job_id IS NULL THEN o.box_job_id END AS dropped_box_job_id`,
     [
       opts.map((o) => o.entityTypeId), opts.map((o) => o.appearanceVariant),
@@ -144,7 +154,8 @@ async function claim(db) {
 // creature sheet is actions x directions x frames.
 async function queuedCells(db) {
   const { rows } = await db.query(
-    `SELECT COALESCE(SUM(CASE WHEN generation_kind = 'object' THEN 1
+    `SELECT COALESCE(SUM(CASE WHEN redraw_of IS NOT NULL THEN jsonb_array_length(redraw_frames)
+              WHEN generation_kind = 'object' THEN 1
               ELSE cardinality(actions) * cardinality(directions) * frames_per_action END), 0)::int AS cells
        FROM sprite_sets WHERE status = 'queued' AND entity_type_id IS NOT NULL`,
   );
@@ -214,12 +225,70 @@ async function requeueStale(db, staleMs = 60000) {
 // its box job was cancelled, so it is detached rather than resumed.
 async function requeueHalted(db, id) {
   const { rows } = await db.query(
-    `UPDATE sprite_sets SET status = 'queued', claimed_at = NULL, box_job_id = NULL,
+    `UPDATE sprite_sets SET status = 'queued', claimed_at = NULL,
+            box_job_id = CASE WHEN redraw_of IS NOT NULL THEN box_job_id END,
+            box_task_id = NULL,
             last_error = 'halted from the Sprite Generation page', updated_at = now()
       WHERE id = $1 AND status = 'running' RETURNING *`,
     [id],
   );
   return rows[0] || null;
+}
+
+// Redraw rows: a copy of a finished sheet row plus the frames to redraw. The
+// copy keeps box_job_id/concept_key so the box redraws inside the same job.
+// The live-job unique index rejects it (-> null) while the subject has a
+// queued/running row. sheet_seconds stays NULL: a redraw has no sheet timing.
+async function createRedraw(db, source, frames) {
+  const { rows } = await db.query(
+    `INSERT INTO sprite_sets
+       (entity_type_id, appearance_variant, creature, generation_kind, base_prompt, backend, seed, frames,
+        actions, directions, frames_per_action, concept_key, box_job_id, provider_id,
+        status, redraw_of, redraw_frames)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'queued', $15, $16::jsonb)
+     ON CONFLICT DO NOTHING
+     RETURNING *`,
+    [source.entity_type_id, source.appearance_variant, source.creature, source.generation_kind,
+      source.base_prompt, source.backend, source.seed, source.frames,
+      source.actions, source.directions, source.frames_per_action, source.concept_key,
+      source.box_job_id, source.provider_id, source.id, JSON.stringify(frames)],
+  );
+  return rows[0] || null;
+}
+
+async function attachRedrawTask(db, id, taskId) {
+  const { rows } = await db.query(
+    'UPDATE sprite_sets SET box_task_id = $2, updated_at = now() WHERE id = $1 RETURNING *',
+    [id, taskId],
+  );
+  return rows[0] || null;
+}
+
+// Sheet keys only, no status change: a failed redraw may still have changed
+// the box's sheet, and this keeps a way to view it.
+async function recordRedrawSheet(db, id, { atlas_key, manifest_key }) {
+  const { rows } = await db.query(
+    'UPDATE sprite_sets SET atlas_key = $2, manifest_key = $3, updated_at = now() WHERE id = $1 RETURNING *',
+    [id, atlas_key || null, manifest_key || null],
+  );
+  return rows[0] || null;
+}
+
+// Deletes a redraw that never changed the box's sheet: still queued, or failed
+// before a task / sheet existed. Anything else (done, or failed with a sheet)
+// stays, as the box sheet may already carry its frames.
+async function discardRedraw(db, id) {
+  const { rows } = await db.query(
+    `DELETE FROM sprite_sets
+      WHERE id = $1 AND redraw_of IS NOT NULL
+        AND (status = 'queued'
+             OR (status = 'failed' AND (box_task_id IS NULL OR atlas_key IS NULL)))
+      RETURNING id`,
+    [id],
+  );
+  if (rows[0]) return 'deleted';
+  const { rows: found } = await db.query('SELECT 1 FROM sprite_sets WHERE id = $1 AND redraw_of IS NOT NULL', [id]);
+  return found[0] ? 'not_discardable' : 'not_found';
 }
 
 // Measured wall seconds per sheet cell (action x facing x frame) of the most
@@ -263,4 +332,4 @@ async function queueView(db) {
   return { stats: counts, jobs: active.rows };
 }
 
-module.exports = { enqueue, claim, attach, attachBox, complete, fail, requeueStale, requeueHalted, lastSecondsPerCell, queuedCells, stats, queueView, PROP_FX };
+module.exports = { enqueue, claim, attach, attachBox, complete, fail, requeueStale, requeueHalted, createRedraw, attachRedrawTask, recordRedrawSheet, discardRedraw, lastSecondsPerCell, queuedCells, stats, queueView, PROP_FX };

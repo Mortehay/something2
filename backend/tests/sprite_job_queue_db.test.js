@@ -336,3 +336,136 @@ test('lastSecondsPerCell ignores NULL and zero sheet_seconds', { skip }, async (
     assert.equal(await queue.lastSecondsPerCell(client), 3);
   });
 });
+
+// ---- redraw rows ----------------------------------------------------------
+// A finished sheet row (source) for a free creature; returns { entity, source }.
+async function doneSource(client, nth = 0) {
+  const { rows } = await client.query(
+    `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT ${nth + 1}`,
+  );
+  const entity = rows[nth];
+  assert.ok(entity, 'precondition: a creature with no live sprite job');
+  const { rows: [queued] } = await queue.enqueue(client, [{ entityId: entity.id }],
+    { actions: ['idle', 'walk'], framesPerAction: 6 });
+  await queue.attachBox(client, queued.id, { boxJobId: `box-${queued.id}`, conceptKey: 'images/core_src.png', providerId: null });
+  const source = await queue.complete(client, queued.id, {
+    image_key: 'k.png', atlas_key: 'a.json', manifest_key: 'm.json', sheet_seconds: 90,
+  });
+  return { entity, source };
+}
+const FRAMES = [{ action: 'walk', direction: 'e', frame: 2 }, { action: 'walk', direction: 'e', frame: 3 }];
+
+test('createRedraw copies the source and stores frames', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { source } = await doneSource(client);
+    const row = await queue.createRedraw(client, source, FRAMES);
+    assert.ok(row);
+    assert.notEqual(row.id, source.id);
+    assert.equal(row.redraw_of, source.id);
+    assert.deepEqual(row.redraw_frames, FRAMES);
+    assert.equal(row.box_job_id, source.box_job_id);
+    assert.equal(row.concept_key, 'images/core_src.png');
+    assert.equal(row.entity_type_id, source.entity_type_id);
+    assert.deepEqual(row.actions, source.actions);
+    assert.deepEqual(row.directions, source.directions);
+    assert.equal(row.frames_per_action, 6);
+    assert.equal(row.status, 'queued');
+    assert.equal(row.sheet_seconds, null);
+    assert.equal(row.box_task_id, null);
+  });
+});
+
+test('createRedraw returns null when the subject already has a live job', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { source } = await doneSource(client);
+    assert.ok(await queue.createRedraw(client, source, FRAMES));
+    assert.equal(await queue.createRedraw(client, source, FRAMES), null);
+    const { rows: [{ n }] } = await client.query(
+      "SELECT count(*)::int AS n FROM sprite_sets WHERE entity_type_id = $1 AND status = 'queued'", [source.entity_type_id]);
+    assert.equal(n, 1);
+  });
+});
+
+test('queuedCells counts only marked frames for a redraw row', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { source } = await doneSource(client);
+    // A source on 7 x 8 x 6 so the full-sheet figure would be 336.
+    await client.query(
+      `UPDATE sprite_sets SET actions = ARRAY['a','b','c','d','e','f','g'], frames_per_action = 6 WHERE id = $1`, [source.id]);
+    const { rows: [fresh] } = await client.query('SELECT * FROM sprite_sets WHERE id = $1', [source.id]);
+    const before = await queue.queuedCells(client);
+    const three = [0, 1, 2].map((frame) => ({ action: 'a', direction: 's', frame }));
+    await queue.createRedraw(client, fresh, three);
+    assert.equal(await queue.queuedCells(client) - before, 3);
+  });
+});
+
+test('requeueHalted keeps box_job_id on a redraw row and clears box_task_id', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { source } = await doneSource(client);
+    const redraw = await queue.createRedraw(client, source, FRAMES);
+    await client.query("UPDATE sprite_sets SET status = 'running', claimed_at = now() WHERE id = $1", [redraw.id]);
+    await queue.attachRedrawTask(client, redraw.id, 'task-1');
+    const back = await queue.requeueHalted(client, redraw.id);
+    assert.equal(back.status, 'queued');
+    assert.equal(back.box_job_id, source.box_job_id);
+    assert.equal(back.box_task_id, null);
+  });
+});
+
+test('attachRedrawTask sets box_task_id; recordRedrawSheet sets only the keys', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { source } = await doneSource(client);
+    const redraw = await queue.createRedraw(client, source, FRAMES);
+    const attached = await queue.attachRedrawTask(client, redraw.id, 'task-9');
+    assert.equal(attached.box_task_id, 'task-9');
+    const rec = await queue.recordRedrawSheet(client, redraw.id, { atlas_key: 'a2.json', manifest_key: 'm2.json' });
+    assert.equal(rec.atlas_key, 'a2.json');
+    assert.equal(rec.manifest_key, 'm2.json');
+    assert.equal(rec.status, 'queued');
+    assert.equal(rec.box_task_id, 'task-9');
+  });
+});
+
+test('enqueue replaces a queued redraw with a fresh full sheet', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { entity, source } = await doneSource(client);
+    const redraw = await queue.createRedraw(client, source, FRAMES);
+    const out = await queue.enqueue(client, [{ entityId: entity.id }], { actions: ['idle'], framesPerAction: 4 });
+    const { rows: gone } = await client.query('SELECT 1 FROM sprite_sets WHERE id = $1', [redraw.id]);
+    assert.equal(gone.length, 0, 'the redraw row is deleted');
+    assert.equal(out.updated.length, 0, 'never updated in place');
+    assert.equal(out.rows.length, 1);
+    assert.equal(out.rows[0].redraw_of, null);
+    assert.equal(out.rows[0].redraw_frames, null);
+    assert.deepEqual(out.rows[0].actions, ['idle']);
+    assert.equal(out.rows[0].frames_per_action, 4);
+  });
+});
+
+test('discardRedraw deletes queued and half-finished failed redraws only', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { source } = await doneSource(client);
+    const mk = async (status, extra = '') => {
+      // One live row per subject: park the previous one before making the next.
+      await client.query("UPDATE sprite_sets SET status = 'done' WHERE redraw_of = $1 AND status IN ('queued','running')", [source.id]);
+      const r = await queue.createRedraw(client, source, FRAMES);
+      await client.query(`UPDATE sprite_sets SET status = $2 ${extra} WHERE id = $1`, [r.id, status]);
+      return r;
+    };
+    const queued = await mk('queued');
+    assert.equal(await queue.discardRedraw(client, queued.id), 'deleted');
+
+    const failedWithSheet = await mk('failed', ", box_task_id = 't', atlas_key = 'a.json'");
+    assert.equal(await queue.discardRedraw(client, failedWithSheet.id), 'not_discardable');
+
+    const failedNoSheet = await mk('failed', ", box_task_id = 't'");
+    assert.equal(await queue.discardRedraw(client, failedNoSheet.id), 'deleted');
+
+    const done = await mk('done', ", box_task_id = 't', atlas_key = 'a.json'");
+    assert.equal(await queue.discardRedraw(client, done.id), 'not_discardable');
+
+    assert.equal(await queue.discardRedraw(client, source.id), 'not_found', 'a plain sheet row is not a redraw');
+    assert.equal(await queue.discardRedraw(client, '00000000-0000-0000-0000-000000000000'), 'not_found');
+  });
+});
