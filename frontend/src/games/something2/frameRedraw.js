@@ -109,3 +109,14 @@ export function changedUnmarked(prev, next, manifest, redrawFrames) {
 export function shouldConfirmClose(marks) {
   return marks.size > 0;
 }
+
+// Pixel size of the sheet, from the furthest frame rect edges.
+export function sheetSize(manifest) {
+  let w = 0;
+  let h = 0;
+  for (const [x, y, fw, fh] of Object.values(manifest?.frames || {})) {
+    w = Math.max(w, x + fw);
+    h = Math.max(h, y + fh);
+  }
+  return { w, h };
+}

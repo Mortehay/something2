@@ -146,3 +146,14 @@ describe('changedUnmarked', () => {
     expect(changedUnmarked(prev, next, m, [])).toEqual(['a/s/1']);
   });
 });
+
+import { sheetSize } from '../frameRedraw.js';
+
+describe('sheetSize', () => {
+  it('is the bounding box of the frame rects', () => {
+    expect(sheetSize({ frames: { a: [0, 0, 96, 96], b: [96, 96, 96, 96], c: [192, 0, 96, 96] } })).toEqual({ w: 288, h: 192 });
+  });
+  it('is zero for an empty manifest', () => {
+    expect(sheetSize({})).toEqual({ w: 0, h: 0 });
+  });
+});

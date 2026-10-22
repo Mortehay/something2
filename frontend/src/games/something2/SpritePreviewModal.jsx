@@ -3,12 +3,15 @@
 // A GPU-box prop (Props v2) has no sheet: the right side is the generated
 // (trimmed) cutout image, previewed with a CSS stand-in for the idle effect it will
 // get in game on approve (prop_fx: none | sway | shine).
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import styled, { keyframes } from 'styled-components';
 import { useQuery } from '@tanstack/react-query';
-import { Modal, Muted } from './seedUi.jsx';
+import { Btn, Modal, Muted } from './seedUi.jsx';
 import { assetUrl, assetUrlVersioned } from './useTileSprites.js';
-import { conceptImageOf, conceptLabelOf, isBoxProp, sheetImageOf, propEffect, propFxLabel, rowLabels } from './spriteSelection.js';
+import { conceptImageOf, conceptLabelOf, isBoxProp, sheetImageOf, sheetManifestOf, propEffect, propFxLabel, rowLabels } from './spriteSelection.js';
+import SpriteFrameGrid from './SpriteFrameGrid.jsx';
+import { frameKey, shouldConfirmClose } from './frameRedraw.js';
+import { useActionCatalog, useDiscardRedraw, useRedrawFrames } from './useSpriteConsole.js';
 
 const Cols = styled.div`display: flex; gap: 1.2rem; align-items: flex-start; flex-wrap: wrap; margin-top: 0.8rem;`;
 const Col = styled.div`display: flex; flex-direction: column; gap: 0.4rem; min-width: 0;`;
@@ -20,6 +23,10 @@ const Img = styled.img`
   ${(p) => p.$pixel && 'image-rendering: pixelated;'}
 `;
 const Rows = styled.ul`margin: 0; padding-left: 1.2rem; list-style: none; font-size: 0.85rem; color: var(--s2-text-muted);`;
+const Banner = styled.div`
+  border: 1px solid var(--s2-danger); color: var(--s2-danger); border-radius: 6px; padding: 0.5rem 0.8rem;
+  display: flex; gap: 0.8rem; align-items: center; flex-wrap: wrap; font-size: 1.2rem;
+`;
 const Links = styled.div`display: flex; gap: 1rem; font-size: 0.9rem;`;
 // The CSS stand-in for the renderer's shear (systems/sway.js): about the base,
 // 2.8 s period, ~±2° (atan 0.035).
@@ -88,13 +95,35 @@ export default function SpritePreviewModal({ subject, onClose }) {
   const [size, setSize] = useState(null);
   const [sheetWidth, setSheetWidth] = useState(null);
   const sheetKey = sheetImageOf(subject);
-  const manifest = useSheetManifest(subject.manifest_key, true);
+  const manifestKey = sheetManifestOf(subject);
+  const manifest = useSheetManifest(manifestKey, true);
+  const marksRef = useRef(new Set());
+  const redraw = useRedrawFrames();
+  const discard = useDiscardRedraw();
+  const { catalog } = useActionCatalog();
   const engine = manifest.data?.engine;
   const header = [subject.name, subject.box_job_id, engine].filter(Boolean).join(' · ');
   const labels = rowLabels(manifest.data);
-  const version = subject.job_updated_at;
+  // A queued/failed redraw row has no sheet of its own: show the one it came from.
+  const version = subject.atlas_key ? subject.job_updated_at : (subject.sheet_updated_at || subject.job_updated_at);
+  const isRedraw = Boolean(subject.redraw_of);
+  const failedRedraw = isRedraw && subject.job_state === 'failed';
+  const gridState = ['done', 'approved'].includes(subject.job_state) || failedRedraw;
+  const showGrid = subject.backend === 'gpu-box' && subject.generation_kind === 'creature'
+    && Boolean(manifest.data) && Boolean(sheetKey) && gridState;
+  const discardable = failedRedraw && (!subject.box_task_id || !subject.atlas_key);
+  const initialMarks = failedRedraw
+    ? new Set((subject.redraw_frames || []).map((f) => (typeof f === 'string' ? f : frameKey(f.action, f.direction, f.frame))))
+    : new Set();
+  if (failedRedraw && marksRef.current.size === 0) marksRef.current = initialMarks;
+  const close = () => {
+    const n = marksRef.current.size;
+    if (shouldConfirmClose(marksRef.current) && !window.confirm(`Discard ${n} unsent frame marks?`)) return;
+    onClose();
+  };
+  const sendFrames = (jobId) => (frames) => redraw.mutate({ jobId, frames }, { onSuccess: onClose });
   return (
-    <Modal $w="900px" onClose={onClose} label={`Sprite preview: ${subject.name}`}>
+    <Modal $w="900px" onClose={close} label={`Sprite preview: ${subject.name}`}>
       <h3 style={{ margin: 0 }}>{header}</h3>
       <Cols>
         <Col>
@@ -107,8 +136,29 @@ export default function SpritePreviewModal({ subject, onClose }) {
             </>
           ) : <Muted>No concept image</Muted>}
         </Col>
-        {isBoxProp(subject) ? <PropResult subject={subject} version={version} /> : (
+        {isBoxProp(subject) ? <PropResult subject={subject} version={version} /> : showGrid ? (
         <Col>
+          <strong>Frames (×2)</strong>
+          {failedRedraw && (
+            <Banner>
+              <span>{`Redraw failed: ${subject.last_error || 'unknown error'}`}</span>
+              <Btn type="button" disabled={redraw.isPending} onClick={() => sendFrames(subject.sheet_job_id)(subject.redraw_frames)}>Retry redraw</Btn>
+              {discardable && (
+                <Btn type="button" disabled={discard.isPending}
+                  onClick={() => discard.mutate(subject.job_id, { onSuccess: onClose })}>Discard redraw</Btn>
+              )}
+            </Banner>
+          )}
+          <SpriteFrameGrid sheetUrl={assetUrlVersioned(sheetKey, version)} manifest={manifest.data}
+            initialMarks={initialMarks} onMarksChange={(m) => { marksRef.current = m; }}
+            onSend={sendFrames(failedRedraw ? subject.sheet_job_id : subject.job_id)}
+            secondsPerCell={catalog?.seconds_per_cell} sending={redraw.isPending} />
+        </Col>
+        ) : (
+        <Col>
+          {isRedraw && ['queued', 'running'].includes(subject.job_state) && (
+            <Muted>{`Redraw ${subject.job_state}: showing the current sheet, read-only`}</Muted>
+          )}
           <strong>Sheet (×2)</strong>
           {sheetKey ? (
             <Img $pixel src={assetUrlVersioned(sheetKey, version)} alt="Sprite sheet"

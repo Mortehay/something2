@@ -63,3 +63,34 @@ describe('SpritePreviewModal for a creature', () => {
     expect(html).not.toContain('Effect on approve');
   });
 });
+
+describe('SpritePreviewModal frame redraw', () => {
+  const manifest = { version: 1, cell: [96, 96], frames_per_action: 1, rows: [{ row: 0, action: 'idle', direction: 's', frames: 1 }], frames: { 'idle/s/0': [0, 0, 96, 96] } };
+  const failed = (over = {}) => ({
+    id: 4, name: 'Wolf', backend: 'gpu-box', generation_kind: 'creature', is_creature: true,
+    concept_key: 'c.png', atlas_key: null, sheet_atlas_key: 'sheet.png', sheet_manifest_key: 'sheet.json',
+    job_state: 'failed', redraw_of: 3, redraw_frames: [{ action: 'idle', direction: 's', frame: 0 }],
+    last_error: 'box exploded', sheet_job_id: 3, job_id: 9, box_task_id: null, ...over,
+  });
+  const renderWith = (subject) => renderToString(h(
+    QueryClientProvider, { client: (() => { const c = new QueryClient(); c.setQueryData(['sprite-sheet-manifest', subject.manifest_key || subject.sheet_manifest_key], manifest); return c; })() },
+    h(SpritePreviewModal, { subject, onClose: () => {} }),
+  ));
+  it('failed redraw: banner, retry, discard when discardable', () => {
+    const html = renderWith(failed());
+    expect(html).toContain('box exploded');
+    expect(html).toContain('Retry redraw');
+    expect(html).toContain('Discard redraw');
+    expect(html).toContain('aria-pressed="true"');
+  });
+  it('not discardable once the box task has a sheet', () => {
+    const html = renderWith(failed({ box_task_id: 't1', atlas_key: 'x.png', manifest_key: 'sheet.json' }));
+    expect(html).toContain('Retry redraw');
+    expect(html).not.toContain('Discard redraw');
+  });
+  it('a prop keeps the prop view', () => {
+    const html = renderWith(prop());
+    expect(html).not.toContain('Retry redraw');
+    expect(html).toContain('Generated (trimmed)');
+  });
+});

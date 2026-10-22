@@ -47,16 +47,17 @@ export function useSpriteQueue() {
   return { stats: query.data?.stats || {}, jobs: query.data?.jobs || [], run: query.data?.run || null };
 }
 
-function mutation(path, success, body = (value) => value) {
+// `path` may be a function of the value; method defaults to POST (DELETE sends no body).
+function mutation(path, success, body = (value) => value, method = 'POST') {
   return function useSpriteMutation() {
     const qc = useQueryClient();
     return useMutation({
-      mutationFn: (value) => jsonRequest(path, {
-        method: 'POST',
-        body: JSON.stringify(body(value)),
+      mutationFn: (value) => jsonRequest(typeof path === 'function' ? path(value) : path, {
+        method,
+        ...(method === 'POST' ? { body: JSON.stringify(body(value)) } : {}),
       }),
-      onSuccess: (data) => {
-        if (success) toast.success(typeof success === 'function' ? success(data) : success);
+      onSuccess: (data, value) => {
+        if (success) toast.success(typeof success === 'function' ? success(data, value) : success);
         qc.invalidateQueries({ queryKey: SUBJECTS_KEY });
         qc.invalidateQueries({ queryKey: JOBS_KEY });
         qc.invalidateQueries({ queryKey: ['entityTypes'] });
@@ -86,3 +87,7 @@ export const useApproveSpriteJobs = mutation('/jobs/approve',
   (data) => `${data.approved.length} sprite${data.approved.length === 1 ? '' : 's'} approved`,
   (jobIds) => ({ job_ids: jobIds }));
 
+export const useRedrawFrames = mutation('/jobs/redraw',
+  (_data, { frames }) => `${frames.length} frame${frames.length === 1 ? '' : 's'} queued for redraw`,
+  ({ jobId, frames }) => ({ job_id: jobId, frames }));
+export const useDiscardRedraw = mutation((id) => `/jobs/${id}/redraw`, 'Redraw discarded', undefined, 'DELETE');

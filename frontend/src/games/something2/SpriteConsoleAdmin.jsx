@@ -8,7 +8,7 @@ import {
   useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
 } from './useSpriteConsole.js';
 import {
-  cellCount, conceptImageOf, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, batchProgress, currentProgressLabel, rowProgressLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
+  cellCount, conceptImageOf, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, batchProgress, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   PROP_FX_OPTIONS, propFxLabel, queueButtonLabel, queuePayload, selectionKinds, spriteShape, toggleSpriteSubject,
 } from './spriteSelection.js';
 
@@ -315,7 +315,7 @@ function SpriteConsoleAdmin() {
                   <td>{subject.backend || 'local'}</td>
                   <td>{subject.job_state === 'failed'
                     ? <ErrorText title={subject.last_error || ''}>failed</ErrorText>
-                    : <Pill>{rowProgressLabel(subject, run) || subject.job_state || 'not queued'}</Pill>}</td>
+                    : <Pill>{rowProgressLabel(subject, run) || jobStateLabel(subject)}</Pill>}</td>
                   <td title={subject.prompt || subject.name}>{subject.prompt || subject.name}</td>
                 </tr>
               );
