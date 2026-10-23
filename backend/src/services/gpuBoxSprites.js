@@ -254,6 +254,16 @@ async function createSheetJob(provider, spec, { fetchImpl = fetch } = {}) {
   return { ok: true, boxJobId: r.json.job_id, cells: r.json.cells, estimatedSeconds: r.json.estimated_seconds };
 }
 
+// Is a concept image still on the box? true only on a 200; every other answer
+// (404, 5xx, network error, timeout) is false. The body is never read: it is
+// cancelled so a large image is not downloaded to answer a yes/no.
+async function conceptAvailable(provider, conceptPath, { fetchImpl = fetch } = {}) {
+  const { res } = await call(provider, 'GET', `/${String(conceptPath || '').replace(/^\/+/, '')}`, { fetchImpl });
+  if (!res) return false;
+  try { if (res.body) await res.body.cancel(); } catch { /* nothing to drain */ }
+  return res.status === 200;
+}
+
 // [ASSUMED] box contract (the box's redraw API is not built yet):
 // POST /api/jobs/{boxJobId}/redraw with {"frames":[{action,direction,frame}]}
 // answers JSON with task_id (or job_id). The task is then polled and cancelled
@@ -336,5 +346,5 @@ async function fetchAtlas(provider, boxJobId, { fetchImpl = fetch } = {}) {
 }
 
 module.exports = {
-  STATUS_TERMINAL, actionCatalog, checkAuth, listConceptModels, generateConcept, txt2imgProp, PROP_NEGATIVE_PROMPT, createSheetJob, redrawFrames, getSheetJob, cancelSheetJob, fetchSheet, fetchAtlas,
+  STATUS_TERMINAL, actionCatalog, checkAuth, listConceptModels, generateConcept, txt2imgProp, PROP_NEGATIVE_PROMPT, createSheetJob, conceptAvailable, redrawFrames, getSheetJob, cancelSheetJob, fetchSheet, fetchAtlas,
 };

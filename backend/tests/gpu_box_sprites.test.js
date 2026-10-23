@@ -404,3 +404,39 @@ test('redrawFrames requires the task id to be a non-empty string', async () => {
     assert.equal(r.error, 'GPU box accepted the redraw but returned no task id');
   }
 });
+
+test('conceptAvailable: 200 -> true, GET on the bare path with the auth header', async () => {
+  const { fetchImpl, calls } = fakeBox({ 'GET /images/core_abc.png': () => new Response(png('wolf-sheet.png'), { status: 200 }) });
+  assert.equal(await box.conceptAvailable(provider, '/images/core_abc.png', { fetchImpl }), true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url.href, 'http://box:8001/images/core_abc.png');
+  assert.equal(calls[0].headers.Authorization, 'Bearer sk_test');
+});
+
+test('conceptAvailable: path without a leading slash resolves the same', async () => {
+  const { fetchImpl, calls } = fakeBox({ 'GET /images/core_abc.png': () => new Response('x', { status: 200 }) });
+  assert.equal(await box.conceptAvailable(provider, 'images/core_abc.png', { fetchImpl }), true);
+  assert.equal(calls[0].url.pathname, '/images/core_abc.png');
+});
+
+test('conceptAvailable: 404 -> false', async () => {
+  const { fetchImpl } = fakeBox({});
+  assert.equal(await box.conceptAvailable(provider, 'images/gone.png', { fetchImpl }), false);
+});
+
+test('conceptAvailable: 500 -> false', async () => {
+  const { fetchImpl } = fakeBox({ 'GET /images/x.png': () => new Response('boom', { status: 500 }) });
+  assert.equal(await box.conceptAvailable(provider, 'images/x.png', { fetchImpl }), false);
+});
+
+test('conceptAvailable: a rejecting fetch -> false', async () => {
+  const fetchImpl = async () => { throw new Error('ECONNREFUSED'); };
+  assert.equal(await box.conceptAvailable(provider, 'images/x.png', { fetchImpl }), false);
+});
+
+test('createSheetJob failure exposes the HTTP status', async () => {
+  const { fetchImpl } = fakeBox({ 'POST /api/jobs': () => json({ detail: 'concept_image not found' }, 422) });
+  const r = await box.createSheetJob(provider, { prompt: 'p' }, { fetchImpl });
+  assert.equal(r.ok, false);
+  assert.equal(r.status, 422);
+});
