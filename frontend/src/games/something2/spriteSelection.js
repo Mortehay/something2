@@ -90,15 +90,38 @@ export function cellCount(rows, actions, frames) {
 // prop done before Props v2 still carries a sheet (atlas_key) and previews as one.
 // The image a row was (or would be) drawn from: the box concept once
 // generated, else a hero appearance's own art, else the entity's existing art.
+function isPropSubject(subject) {
+  return subject?.generation_kind === 'object' || isBoxProp(subject);
+}
+
 export function conceptImageOf(subject) {
-  return subject?.concept_key || subject?.appearance_image || subject?.image || null;
+  if (isPropSubject(subject)) return subject?.concept_key || subject?.appearance_image || subject?.image || null;
+  return subject?.concept_key || subject?.kept_concept_key || null;
 }
 
 export function conceptLabelOf(subject) {
-  if (subject?.concept_key) return 'Used image';
-  if (subject?.appearance_image) return 'Appearance art';
-  if (subject?.image) return 'Current art';
-  return 'Used image';
+  if (isPropSubject(subject)) {
+    if (subject?.concept_key) return 'Used image';
+    if (subject?.appearance_image) return 'Appearance art';
+    if (subject?.image) return 'Current art';
+    return 'Used image';
+  }
+  if (subject?.concept_key) return 'Used concept';
+  if (subject?.kept_concept_key) return 'Concept — reused';
+  return 'New concept will be drawn';
+}
+
+const LAST_UPDATE_OPTIONS = { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false };
+
+// The Last update column: local "23 Oct 01:12", the raw ISO as the hover title.
+export function lastUpdateLabel(iso) {
+  const date = iso ? new Date(iso) : null;
+  if (!date || Number.isNaN(date.getTime())) return { text: '—', title: '' };
+  return { text: new Intl.DateTimeFormat('en-GB', LAST_UPDATE_OPTIONS).format(date).replace(',', ''), title: String(iso) };
+}
+
+export function deleteConfirmText(n) {
+  return `Delete all generated sprites for ${n} subject${n === 1 ? '' : 's'}? Sheets, redraws and queued jobs are removed; concepts are kept. This cannot be undone.`;
 }
 
 // What the Sheet / Result column shows: only output of a sprite job (sheet or

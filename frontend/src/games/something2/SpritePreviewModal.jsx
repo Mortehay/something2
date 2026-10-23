@@ -196,6 +196,7 @@ export default function SpritePreviewModal({ subject, onClose }) {
               <Muted>{fileName(conceptImageOf(subject))}{size && ` · ${size}`}</Muted>
             </>
           ) : <Muted>No concept image</Muted>}
+          {subject.note && <Muted>{subject.note}</Muted>}
         </Col>
         {isBoxProp(subject) ? <PropResult subject={subject} version={version} /> : showGrid ? (
         <Col>

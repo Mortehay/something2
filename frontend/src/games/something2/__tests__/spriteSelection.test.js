@@ -1,8 +1,9 @@
+process.env.TZ = 'UTC';
 import { describe, expect, it } from 'vitest';
 import {
   filterSpriteSubjects, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   targetsForSprites, framesCap, cellCount, estimateLabel, defaultActionsFor, rowLabels,
-  isBoxProp, PROP_FX_OPTIONS, propFxLabel, propEffect, selectionKinds, queueButtonLabel, queuePayload, conceptImageOf, sheetImageOf, sheetManifestOf, jobStateLabel, conceptLabelOf,
+  isBoxProp, PROP_FX_OPTIONS, propFxLabel, propEffect, selectionKinds, queueButtonLabel, queuePayload, conceptImageOf, sheetImageOf, sheetManifestOf, jobStateLabel, conceptLabelOf, lastUpdateLabel, deleteConfirmText,
   batchProgress, currentProgressLabel, rowProgressLabel, queueIsLive, runJustEnded,
 } from '../spriteSelection.js';
 import { PAGE_SIZE } from '../artSelection.js';
@@ -224,15 +225,19 @@ describe('sprite console action controls', () => {
 });
 
 describe('conceptImageOf', () => {
-  it('prefers the generated concept, else a hero appearance\'s own art, else nothing', () => {
-    expect(conceptImageOf({ concept_key: 'c.png', appearance_image: 'a.png' })).toBe('c.png');
-    expect(conceptImageOf({ concept_key: null, appearance_image: 'a.png' })).toBe('a.png');
-    expect(conceptImageOf({ concept_key: null, appearance_image: null })).toBe(null);
-    expect(conceptImageOf({})).toBe(null);
+  it('a prop prefers the generated concept, else appearance art, else the entity art', () => {
+    const prop = { generation_kind: 'object' };
+    expect(conceptImageOf({ ...prop, concept_key: 'c.png', appearance_image: 'a.png' })).toBe('c.png');
+    expect(conceptImageOf({ ...prop, appearance_image: 'a.png', image: 'art.png' })).toBe('a.png');
+    expect(conceptImageOf({ ...prop, image: 'art.png' })).toBe('art.png');
+    expect(conceptImageOf({ ...prop })).toBe(null);
+    expect(conceptImageOf({ backend: 'gpu-box', generation_kind: 'object', image: 'art.png' })).toBe('art.png');
   });
-  it('falls back to the entity\'s existing art last', () => {
-    expect(conceptImageOf({ image: 'art.png' })).toBe('art.png');
-    expect(conceptImageOf({ appearance_image: 'a.png', image: 'art.png' })).toBe('a.png');
+  it('a creature uses its job concept, else the kept concept, else nothing', () => {
+    const c = { generation_kind: 'creature', image: 'art.png', appearance_image: 'a.png' };
+    expect(conceptImageOf({ ...c, concept_key: 'j.png', kept_concept_key: 'k.png' })).toBe('j.png');
+    expect(conceptImageOf({ ...c, kept_concept_key: 'k.png' })).toBe('k.png');
+    expect(conceptImageOf({ ...c })).toBe(null);
   });
 });
 
@@ -247,11 +252,35 @@ describe('sheetImageOf', () => {
 });
 
 describe('conceptLabelOf', () => {
-  it('names what the concept image is', () => {
-    expect(conceptLabelOf({ concept_key: 'c.png', image: 'a.png' })).toBe('Used image');
-    expect(conceptLabelOf({ appearance_image: 'a.png' })).toBe('Appearance art');
-    expect(conceptLabelOf({ image: 'a.png' })).toBe('Current art');
-    expect(conceptLabelOf({})).toBe('Used image');
+  it('a creature: used, reused, or a new one will be drawn', () => {
+    const c = { generation_kind: 'creature' };
+    expect(conceptLabelOf({ ...c, concept_key: 'j.png', kept_concept_key: 'k.png' })).toBe('Used concept');
+    expect(conceptLabelOf({ ...c, kept_concept_key: 'k.png' })).toBe('Concept — reused');
+    expect(conceptLabelOf({ ...c })).toBe('New concept will be drawn');
+  });
+  it('a prop keeps its labels', () => {
+    const prop = { generation_kind: 'object' };
+    expect(conceptLabelOf({ ...prop, concept_key: 'c.png', image: 'a.png' })).toBe('Used image');
+    expect(conceptLabelOf({ ...prop, appearance_image: 'a.png' })).toBe('Appearance art');
+    expect(conceptLabelOf({ ...prop, image: 'a.png' })).toBe('Current art');
+    expect(conceptLabelOf({ ...prop })).toBe('Used image');
+  });
+});
+
+describe('lastUpdateLabel', () => {
+  it('formats local D Mon HH:MM with the ISO as title', () => {
+    expect(lastUpdateLabel('2026-10-23T01:12:00.000Z')).toEqual({ text: '23 Oct 01:12', title: '2026-10-23T01:12:00.000Z' });
+  });
+  it('is a dash for none or garbage', () => {
+    expect(lastUpdateLabel(null)).toEqual({ text: '—', title: '' });
+    expect(lastUpdateLabel('nope')).toEqual({ text: '—', title: '' });
+  });
+});
+
+describe('deleteConfirmText', () => {
+  it('is the verbatim confirm copy, singular for one', () => {
+    expect(deleteConfirmText(1)).toBe('Delete all generated sprites for 1 subject? Sheets, redraws and queued jobs are removed; concepts are kept. This cannot be undone.');
+    expect(deleteConfirmText(3)).toBe('Delete all generated sprites for 3 subjects? Sheets, redraws and queued jobs are removed; concepts are kept. This cannot be undone.');
   });
 });
 
