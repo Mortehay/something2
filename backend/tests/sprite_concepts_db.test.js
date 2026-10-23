@@ -61,6 +61,19 @@ test('entity and its appearance variant keep separate concepts', { skip }, async
   });
 });
 
+test('removeKept forgets only the given subject\'s concept', { skip }, async () => {
+  await inTxn(async (c) => {
+    const { id, variant } = await creatureWithVariant(c);
+    await concepts.upsertKept(c, args(id, null, '/p/entity.png'));
+    await concepts.upsertKept(c, args(id, variant, '/p/variant.png'));
+    await concepts.removeKept(c, { entityTypeId: id, variant });
+    assert.equal(await concepts.getKept(c, { entityTypeId: id, variant }), null);
+    assert.ok(await concepts.getKept(c, { entityTypeId: id, variant: null }));
+    await concepts.removeKept(c, { entityTypeId: id, variant: null });
+    assert.equal(await concepts.getKept(c, { entityTypeId: id, variant: null }), null);
+  });
+});
+
 test('clearKept removes and skips a running subject', { skip }, async () => {
   await inTxn(async (c) => {
     const { id, variant } = await creatureWithVariant(c);

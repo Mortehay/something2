@@ -265,6 +265,9 @@ function createDispatcher({
           if (!refused) must(reused);
         }
       }
+      // Unusable: forget it now, so a failure while drawing the new concept
+      // never leaves a kept row pointing at a file that may be overwritten.
+      await concepts.removeKept(db, { entityTypeId: row.entity_type_id, variant: row.appearance_variant });
       await queue.setNote(db, row.id, KEPT_CONCEPT_NOTE);
       if (cur) cur.message = KEPT_CONCEPT_NOTE;
     }

@@ -70,11 +70,12 @@ function fakeDb(images = {}) {
 
 // spriteConcepts fake: `kept` is what getKept returns (or null); upserts are recorded.
 function fakeConcepts(kept = null) {
-  const log = { gets: [], upserts: [] };
+  const log = { gets: [], upserts: [], removes: [] };
   return {
     log,
     getKept: async (_db, key) => { log.gets.push(key); return kept; },
     upsertKept: async (_db, args) => { log.upserts.push(args); return args; },
+    removeKept: async (_db, key) => { log.removes.push(key); },
   };
 }
 
@@ -1030,6 +1031,40 @@ test('kept object gone from storage draws a new concept and sets the note', asyn
   await d.start();
   assert.equal(box.calls.concept.length, 1);
   assert.deepEqual(queue.log.notes, [{ id: 'row-1', note: NOTE }]);
+});
+
+// Every way a kept concept is judged unusable forgets it BEFORE the new concept
+// is drawn, so a later failure never leaves it pointing at an overwritten file.
+for (const [why, setup] of [
+  ['missing on the box', () => ({ box: fakeBox({ conceptAvailable: async () => false }), kept: KEPT, store: keptStore() })],
+  ['another origin', () => ({ box: fakeBox(), kept: { ...KEPT, box_origin: 'http://old-box.test:8001' }, store: keptStore() })],
+  ['object gone from storage', () => ({ box: fakeBox(), kept: KEPT, store: fakeStore() })],
+  ['refused by the box', () => {
+    let n = 0;
+    return {
+      box: fakeBox({ createSheetJob: async () => { n += 1; return n === 1 ? { ok: false, status: 422, error: 'no' } : { ok: true, boxJobId: 'b2', cells: 1, estimatedSeconds: 1 }; } }),
+      kept: KEPT, store: keptStore(),
+    };
+  }],
+]) {
+  test(`kept concept ${why}: its row is removed before the new concept is drawn, even if drawing then fails`, async () => {
+    const { box, kept, store } = setup();
+    const concepts = fakeConcepts(kept);
+    let removedAtDraw = null;
+    box.generateConcept = async () => { removedAtDraw = concepts.log.removes.length; return { ok: false, status: 500, error: 'GPU box answered 500' }; };
+    const { d, queue } = dispatcherFor({ rows: [wolfRow({ appearance_variant: 2 })], box, concepts, store });
+    await d.start();
+    assert.equal(removedAtDraw, 1);
+    assert.deepEqual(concepts.log.removes, [{ entityTypeId: 4, variant: 2 }]);
+    assert.equal(queue.log.failed.length, 1);
+    assert.deepEqual(concepts.log.upserts, []);
+  });
+}
+
+test('a reused kept concept is never removed', async () => {
+  const { d, concepts } = dispatcherFor({ rows: [wolfRow()], concepts: fakeConcepts(KEPT), store: keptStore() });
+  await d.start();
+  assert.deepEqual(concepts.log.removes, []);
 });
 
 test('redraw rows never consult the kept concept', async () => {

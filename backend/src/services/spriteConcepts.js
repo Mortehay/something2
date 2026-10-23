@@ -29,6 +29,16 @@ async function upsertKept(db, { entityTypeId, variant, conceptKey, boxConceptPat
   return rows[0];
 }
 
+// Forgets one subject's kept concept (the dispatcher, once it judged the
+// concept unusable and before it draws the replacement).
+async function removeKept(db, { entityTypeId, variant }) {
+  await db.query(
+    `DELETE FROM sprite_concepts
+      WHERE entity_type_id = $1 AND COALESCE(appearance_variant, 0) = COALESCE($2::smallint, 0)`,
+    [entityTypeId, norm(variant)],
+  );
+}
+
 // Forgets the kept concepts of the given subjects, except those with a running
 // job (their sheet is being drawn from it). Returns the subjects skipped.
 async function clearKept(db, targets) {
@@ -60,4 +70,4 @@ async function clearKept(db, targets) {
   return { cleared, skipped_running };
 }
 
-module.exports = { getKept, upsertKept, clearKept };
+module.exports = { getKept, upsertKept, removeKept, clearKept };
