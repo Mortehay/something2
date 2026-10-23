@@ -8,7 +8,7 @@ import {
   useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
 } from './useSpriteConsole.js';
 import {
-  cellCount, conceptImageOf, conceptLabelOf, deleteConfirmText, isPropSubject, lastUpdateLabel, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, batchProgress, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
+  cellCount, conceptImageOf, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, batchProgress, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   PROP_FX_OPTIONS, propFxLabel, queueButtonLabel, queuePayload, queueIsLive, selectionKinds, spriteShape, toggleSpriteSubject,
 } from './spriteSelection.js';
 
@@ -75,6 +75,7 @@ const Check = styled.label`
   && input { min-width: 0; margin: 0; padding: 0; cursor: pointer; }
 `;
 const ErrorText = styled.span`color: var(--s2-danger);`;
+const Caption = styled.span`display: block; margin-top: 0.2rem; color: var(--s2-text-muted); font-size: 0.72rem;`;
 const ThumbButton = styled.button`border: 0; padding: 0; background: none; cursor: zoom-in;`;
 const Pager = styled.div`display: flex; gap: 0.5rem; align-items: center; margin: 0.75rem 0;`;
 
@@ -99,6 +100,13 @@ export function selectionBody(rows) {
 // Nothing is sent unless the operator confirms.
 export function confirmAndDelete(confirmFn, mutateFn, rows) {
   if (!confirmFn(deleteConfirmText(rows.length))) return false;
+  mutateFn(selectionBody(rows));
+  return true;
+}
+
+// Nothing is sent unless the operator confirms.
+export function confirmAndClearConcepts(confirmFn, mutateFn, rows) {
+  if (!confirmFn(newConceptConfirmText(rows.length))) return false;
   mutateFn(selectionBody(rows));
   return true;
 }
@@ -136,9 +144,9 @@ export function SpriteTable({ rows, selected, run, onToggle, onTogglePage, onPre
               <tr key={subject.id}>
                 <td><input type="checkbox" checked={selected.has(subject.id)}
                   onChange={() => onToggle(subject.id)} /></td>
-                <td>{concept || isPropSubject(subject)
-                  ? thumb(concept, 'Preview concept')
-                  : <Hint>{conceptLabelOf(subject)}</Hint>}</td>
+                <td>{concept ? (
+                  <>{thumb(concept, 'Preview concept')}<Caption>{nextConceptCaption(subject)}</Caption></>
+                ) : isPropSubject(subject) ? '—' : <Hint>{nextConceptCaption(subject)}</Hint>}</td>
                 <td>{thumb(sheet, isBoxProp(subject) ? 'Preview result' : 'Preview sheet')}</td>
                 <td>{subject.name}</td>
                 <td><Pill>{spriteShape(subject)}</Pill></td>
@@ -226,7 +234,11 @@ function SpriteConsoleAdmin() {
     (body) => deleteGenerated.mutate(body, { onSuccess: () => setSelected(new Set()) }),
     selectedRows,
   );
-  const clearSelectedConcepts = () => clearConcepts.mutate(selectionBody(selectedRows));
+  const clearSelectedConcepts = () => confirmAndClearConcepts(
+    (text) => window.confirm(text),
+    (body) => clearConcepts.mutate(body),
+    selectedRows,
+  );
 
   // Above AND below the table: at 100 rows the bottom copy is far down the page.
   const pager = shown.pages > 1 && (

@@ -4,6 +4,7 @@ import {
   filterSpriteSubjects, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   targetsForSprites, framesCap, cellCount, estimateLabel, defaultActionsFor, rowLabels,
   isBoxProp, PROP_FX_OPTIONS, propFxLabel, propEffect, selectionKinds, queueButtonLabel, queuePayload, conceptImageOf, sheetImageOf, sheetManifestOf, jobStateLabel, conceptLabelOf, lastUpdateLabel, deleteConfirmText,
+  isPropSubject, nextConceptCaption, newConceptConfirmText,
   batchProgress, currentProgressLabel, rowProgressLabel, queueIsLive, runJustEnded,
 } from '../spriteSelection.js';
 import { PAGE_SIZE } from '../artSelection.js';
@@ -264,6 +265,37 @@ describe('conceptLabelOf', () => {
     expect(conceptLabelOf({ ...prop, appearance_image: 'a.png' })).toBe('Appearance art');
     expect(conceptLabelOf({ ...prop, image: 'a.png' })).toBe('Current art');
     expect(conceptLabelOf({ ...prop })).toBe('Used image');
+  });
+});
+
+describe('nextConceptCaption', () => {
+  const c = { generation_kind: 'creature', is_creature: true };
+  it('a creature: what the NEXT run uses', () => {
+    expect(nextConceptCaption({ ...c, kept_concept_key: 'k.png' })).toBe('Concept — reused');
+    expect(nextConceptCaption({ ...c, concept_key: 'j.png', kept_concept_key: 'k.png' })).toBe('Concept — reused');
+    expect(nextConceptCaption({ ...c, concept_key: 'j.png' })).toBe('New concept will be drawn');
+    expect(nextConceptCaption({ ...c })).toBe('New concept will be drawn');
+  });
+  it('a prop: its image label', () => {
+    expect(nextConceptCaption({ generation_kind: 'object', image: 'a.png' })).toBe('Current art');
+  });
+});
+
+describe('newConceptConfirmText', () => {
+  it('names the count, singular for one', () => {
+    expect(newConceptConfirmText(1)).toBe('Forget the kept concept for 1 subject? The next run draws a new one.');
+    expect(newConceptConfirmText(3)).toBe('Forget the kept concept for 3 subjects? The next run draws a new one.');
+  });
+});
+
+describe('isPropSubject', () => {
+  it('generation_kind decides when present, over a stale shape', () => {
+    expect(isPropSubject({ generation_kind: 'creature', is_creature: false, is_playable: false })).toBe(false);
+    expect(isPropSubject({ generation_kind: 'object', is_creature: true })).toBe(true);
+  });
+  it('falls back to the shape when absent', () => {
+    expect(isPropSubject({ is_creature: false, is_playable: false })).toBe(true);
+    expect(isPropSubject({ is_creature: true })).toBe(false);
   });
 });
 

@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 import { createElement as h } from 'react';
 import { renderToString } from 'react-dom/server';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { SpriteTable, ConceptButtons, confirmAndDelete } from '../SpriteConsoleAdmin.jsx';
+import { SpriteTable, ConceptButtons, confirmAndDelete, confirmAndClearConcepts } from '../SpriteConsoleAdmin.jsx';
 
 const render = (rows) => renderToString(h(
   QueryClientProvider, { client: new QueryClient() },
@@ -25,6 +25,23 @@ describe('sprite table', () => {
     const html = render([creature()]);
     expect(html).toContain('New concept will be drawn');
     expect(html).not.toContain('Preview concept');
+  });
+  it('a kept-concept row shows the thumbnail with the caption "Concept — reused"', () => {
+    const html = render([creature({ kept_concept_key: 'sprites/Cultist/c.png' })]);
+    expect(html).toContain('Preview concept: Cultist');
+    expect(html).toMatch(/Preview concept: Cultist[\s\S]*Concept — reused/);
+  });
+  it('a used concept with no kept one (after New concept) shows the old thumbnail and "New concept will be drawn"', () => {
+    const html = render([creature({ concept_key: 'sprites/Cultist/r1/concept.png' })]);
+    expect(html).toContain('Preview concept: Cultist');
+    expect(html).toContain('r1/concept.png');
+    expect(html).toMatch(/Preview concept: Cultist[\s\S]*New concept will be drawn/);
+    expect(html).not.toContain('Used concept');
+  });
+  it('a no-concept row shows only the hint', () => {
+    const html = render([creature()]);
+    expect(html.match(/New concept will be drawn/g)).toHaveLength(1);
+    expect(html).not.toContain('<img');
   });
   it('a creature with a kept concept keeps the thumbnail button', () => {
     const html = render([creature({ kept_concept_key: 'sprites/Cultist/c.png' })]);
@@ -61,6 +78,19 @@ describe('flat prop and confirm', () => {
     expect(confirmAndDelete(() => false, (b) => sent.push(b), rows)).toBe(false);
     expect(sent).toEqual([]);
     expect(confirmAndDelete(() => true, (b) => sent.push(b), rows)).toBe(true);
+    expect(sent).toEqual([{ targets: [{ entity_id: 'e1', variant: undefined }], names: { e1: 'Cultist' } }]);
+  });
+});
+
+describe('New concept confirm', () => {
+  it('cancelling sends nothing; accepting sends targets and names; the text names the count', () => {
+    const rows = [{ id: 'e1', name: 'Cultist' }];
+    const asked = [];
+    const sent = [];
+    expect(confirmAndClearConcepts((t) => { asked.push(t); return false; }, (b) => sent.push(b), rows)).toBe(false);
+    expect(sent).toEqual([]);
+    expect(asked).toEqual(['Forget the kept concept for 1 subject? The next run draws a new one.']);
+    expect(confirmAndClearConcepts(() => true, (b) => sent.push(b), rows)).toBe(true);
     expect(sent).toEqual([{ targets: [{ entity_id: 'e1', variant: undefined }], names: { e1: 'Cultist' } }]);
   });
 });
