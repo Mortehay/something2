@@ -23,7 +23,7 @@ function wolfRow(over = {}) {
 // A queue fake over a fixed list of rows; records every write.
 function fakeQueue(rows, spc = null) {
   const pending = [...rows];
-  const log = { claims: 0, attached: [], completed: [], failed: [], requeued: [], requeueOpts: [], redrawTasks: [], redrawSheets: [] };
+  const log = { claims: 0, attached: [], completed: [], failed: [], requeued: [], requeueOpts: [], redrawTasks: [], redrawSheets: [], notes: [] };
   return {
     log,
     claim: async () => { log.claims += 1; return pending.shift() || null; },
@@ -35,6 +35,7 @@ function fakeQueue(rows, spc = null) {
     fail: async (_db, id, err) => { log.failed.push({ id, message: err.message }); },
     requeueHalted: async (_db, id, opts) => { log.requeued.push(id); log.requeueOpts.push(opts || {}); },
     attachRedrawTask: async (_db, id, taskId) => { log.redrawTasks.push({ id, taskId }); return { id }; },
+    setNote: async (_db, id, note) => { log.notes.push({ id, note }); },
     recordRedrawSheet: async (_db, id, keys) => { log.redrawSheets.push({ id, ...keys }); return { id }; },
   };
 }
@@ -67,10 +68,20 @@ function fakeDb(images = {}) {
   };
 }
 
+// spriteConcepts fake: `kept` is what getKept returns (or null); upserts are recorded.
+function fakeConcepts(kept = null) {
+  const log = { gets: [], upserts: [] };
+  return {
+    log,
+    getKept: async (_db, key) => { log.gets.push(key); return kept; },
+    upsertKept: async (_db, args) => { log.upserts.push(args); return args; },
+  };
+}
+
 // A box fake. `statuses` is the sequence getSheetJob walks through (the last
 // one repeats); everything else answers like the captured Wolf job.
 function fakeBox({ statuses = [{ status: 'done' }], ...over } = {}) {
-  const calls = { concept: [], create: [], redraw: [], get: [], sheet: 0, atlas: 0 };
+  const calls = { concept: [], create: [], avail: [], redraw: [], get: [], sheet: 0, atlas: 0 };
   let i = 0;
   const box = {
     calls,
@@ -82,6 +93,7 @@ function fakeBox({ statuses = [{ status: 'done' }], ...over } = {}) {
       calls.create.push({ provider, spec });
       return { ok: true, boxJobId: `box-${calls.create.length}`, cells: 16, estimatedSeconds: 888 };
     },
+    conceptAvailable: async (_p, path) => { calls.avail.push(path); return true; },
     redrawFrames: async (provider, boxJobId, frames) => {
       calls.redraw.push({ provider, boxJobId, frames });
       return { ok: true, taskId: 'task-1' };
@@ -118,12 +130,12 @@ function timedBox({ queuedMs, runningMs = 0, ...over }) {
   });
 }
 
-function dispatcherFor({ rows, box = fakeBox(), store = fakeStore(), provider = PROVIDER, spc = null, ...opts }) {
+function dispatcherFor({ rows, box = fakeBox(), store = fakeStore(), provider = PROVIDER, spc = null, concepts = fakeConcepts(), ...opts }) {
   const queue = fakeQueue(rows, spc);
   const d = createDispatcher({
-    db: fakeDb(), queue, box, store, loadProvider: async () => provider, pollMs: 0, ...opts,
+    db: fakeDb(), queue, box, store, concepts, loadProvider: async () => provider, pollMs: 0, ...opts,
   });
-  return { d, queue, box, store };
+  return { d, queue, box, store, concepts };
 }
 
 test('box job: concept, sheet, manifest stored under the row prefix', async () => {
@@ -910,4 +922,120 @@ test('redraw progress message counts frames with the right plural', async () => 
     await d.start();
     assert.equal(seen[0], want);
   }
+});
+
+// ---- kept concept reuse ----
+const KEPT = {
+  entity_type_id: 4, appearance_variant: null, concept_key: 'sprites/Grey_Wolf/old-row/concept.png',
+  box_concept_path: 'images/core_kept.png', provider_id: 9, box_origin: 'http://box.test:8001',
+};
+const NOTE = 'kept concept unavailable on the box; drew a new one';
+const keptStore = () => fakeStore({ [KEPT.concept_key]: Buffer.from('kept-bytes') });
+
+test('reuses the kept concept: no generateConcept, concept_image is the kept path, copy stored under the row prefix', async () => {
+  const { d, queue, box, store, concepts } = dispatcherFor({ rows: [wolfRow()], concepts: fakeConcepts(KEPT), store: keptStore() });
+  await d.start();
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.concept.length, 0);
+  assert.deepEqual(box.calls.avail, ['images/core_kept.png']);
+  assert.equal(box.calls.create[0].spec.concept_image, 'images/core_kept.png');
+  const copy = store.puts.find((p) => p.key === 'sprites/Grey_Wolf/row-1/concept.png');
+  assert.equal(copy.buf.toString(), 'kept-bytes');
+  assert.equal(queue.log.attached[0].conceptKey, 'sprites/Grey_Wolf/row-1/concept.png');
+  assert.deepEqual(concepts.log.upserts, []);
+  assert.deepEqual(queue.log.notes, []);
+  assert.deepEqual(concepts.log.gets, [{ entityTypeId: 4, variant: undefined }]);
+});
+
+test('no kept concept: draws one and keeps it after the sheet job is accepted', async () => {
+  const { d, queue, box, concepts } = dispatcherFor({ rows: [wolfRow({ appearance_variant: 2 })] });
+  await d.start();
+  assert.equal(box.calls.concept.length, 1);
+  assert.deepEqual(concepts.log.upserts, [{
+    entityTypeId: 4, variant: 2, conceptKey: 'sprites/Grey_Wolf/row-1/concept.png',
+    boxConceptPath: 'images/core_abc.png', providerId: 9, boxOrigin: 'http://box.test:8001',
+  }]);
+  assert.deepEqual(queue.log.notes, []);
+});
+
+test('a new concept whose sheet job is refused is not kept', async () => {
+  const box = fakeBox({ createSheetJob: async () => ({ ok: false, status: 400, error: 'GPU box answered 400 for POST /api/jobs: bad' }) });
+  const { d, queue, concepts } = dispatcherFor({ rows: [wolfRow()], box });
+  await d.start();
+  assert.equal(queue.log.failed.length, 1);
+  assert.deepEqual(concepts.log.upserts, []);
+});
+
+test('kept concept missing on the box draws a new one and sets the note', async () => {
+  const box = fakeBox({ conceptAvailable: async () => false });
+  const { d, queue, concepts } = dispatcherFor({ rows: [wolfRow()], box, concepts: fakeConcepts(KEPT), store: keptStore() });
+  await d.start();
+  assert.equal(box.calls.concept.length, 1);
+  assert.equal(box.calls.create[0].spec.concept_image, 'images/core_abc.png');
+  assert.deepEqual(queue.log.notes, [{ id: 'row-1', note: NOTE }]);
+  assert.equal(concepts.log.upserts.length, 1);
+});
+
+test('kept concept from a different origin (same provider id) draws a new one and sets the note', async () => {
+  const other = { ...KEPT, box_origin: 'http://old-box.test:8001' };
+  const { d, queue, box } = dispatcherFor({ rows: [wolfRow()], concepts: fakeConcepts(other), store: keptStore() });
+  await d.start();
+  assert.equal(box.calls.avail.length, 0);
+  assert.equal(box.calls.concept.length, 1);
+  assert.deepEqual(queue.log.notes, [{ id: 'row-1', note: NOTE }]);
+});
+
+test('kept concept from a different provider id (same origin) draws a new one and sets the note', async () => {
+  const other = { ...KEPT, provider_id: 3 };
+  const { d, queue, box } = dispatcherFor({ rows: [wolfRow()], concepts: fakeConcepts(other), store: keptStore() });
+  await d.start();
+  assert.equal(box.calls.concept.length, 1);
+  assert.deepEqual(queue.log.notes, [{ id: 'row-1', note: NOTE }]);
+});
+
+test('box rejects the reused concept: falls back once to a new concept; a second refusal fails the row', async () => {
+  const refuse = (spec) => ({ ok: false, status: 422, error: `GPU box answered 422 for POST /api/jobs: no ${spec.concept_image}` });
+  // first refusal only -> the new concept succeeds
+  let n = 0;
+  const box1 = fakeBox({ createSheetJob: async (_p, spec) => { n += 1; return n === 1 ? refuse(spec) : { ok: true, boxJobId: 'box-2', cells: 16, estimatedSeconds: 1 }; } });
+  const a = dispatcherFor({ rows: [wolfRow()], box: box1, concepts: fakeConcepts(KEPT), store: keptStore() });
+  await a.d.start();
+  assert.deepEqual(a.queue.log.failed, []);
+  assert.equal(box1.calls.concept.length, 1);
+  assert.deepEqual(a.queue.log.notes, [{ id: 'row-1', note: NOTE }]);
+  assert.equal(a.concepts.log.upserts.length, 1);
+
+  // both refused -> fails with the box's words, exactly two attempts
+  let m = 0;
+  const box2 = fakeBox({ createSheetJob: async (_p, spec) => { m += 1; return refuse(spec); } });
+  const b = dispatcherFor({ rows: [wolfRow()], box: box2, concepts: fakeConcepts(KEPT), store: keptStore() });
+  await b.d.start();
+  assert.equal(m, 2);
+  assert.equal(box2.calls.concept.length, 1);
+  assert.equal(b.queue.log.failed.length, 1);
+  assert.match(b.queue.log.failed[0].message, /422.*images\/core_abc\.png/);
+  assert.deepEqual(b.concepts.log.upserts, []);
+});
+
+test('a 5xx on the reused concept fails the row without drawing a new one', async () => {
+  const box = fakeBox({ createSheetJob: async () => ({ ok: false, status: 500, error: 'GPU box answered 500' }) });
+  const { d, queue } = dispatcherFor({ rows: [wolfRow()], box, concepts: fakeConcepts(KEPT), store: keptStore() });
+  await d.start();
+  assert.equal(box.calls.concept.length, 0);
+  assert.equal(queue.log.failed.length, 1);
+});
+
+test('kept object gone from storage draws a new concept and sets the note', async () => {
+  const { d, queue, box } = dispatcherFor({ rows: [wolfRow()], concepts: fakeConcepts(KEPT) });
+  await d.start();
+  assert.equal(box.calls.concept.length, 1);
+  assert.deepEqual(queue.log.notes, [{ id: 'row-1', note: NOTE }]);
+});
+
+test('redraw rows never consult the kept concept', async () => {
+  const row = wolfRow({ redraw_of: 'sheet-1', redraw_frames: [{ action: 'idle', direction: 's', frame: 0 }], box_job_id: 'job-1', concept_key: null });
+  const { d, concepts, box } = dispatcherFor({ rows: [row], concepts: fakeConcepts(KEPT) });
+  await d.start();
+  assert.deepEqual(concepts.log.gets, []);
+  assert.equal(box.calls.avail.length, 0);
 });

@@ -8,6 +8,7 @@
 // job instead of paying for a second one. There is no local fallback: a box
 // failure is a failed row with a readable last_error.
 const defaultQueue = require('./spriteJobQueue.js');
+const defaultConcepts = require('./spriteConcepts.js');
 const { buildBoxSheetManifest } = require('./spriteSheetManifest.js');
 // The Art pipeline's trim (SOMET-563): a prop is stored cropped to its opaque
 // content, so the renderer's fit fills the display box and a bottom-anchored
@@ -18,6 +19,7 @@ const { decodeRGBA, CLEAR } = require('./pngAlpha.js');
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const NO_PROVIDER = 'no sprite provider configured — add one in Settings → AI Providers (modality Sprite)';
+const KEPT_CONCEPT_NOTE = 'kept concept unavailable on the box; drew a new one';
 const ENGINE_LABEL = 'Qwen-Image-Edit-2511 (GGUF)';
 // Box statuses worth resuming; anything else (failed, cancelled, missing)
 // means the attached job will never produce a sheet, so the row resubmits.
@@ -110,6 +112,7 @@ function createDispatcher({
   box,
   loadProvider,
   store,
+  concepts = defaultConcepts,
   pollMs = 3000,
   stallMs = 20 * 60 * 1000,
   queueCapMs = QUEUE_CAP_MS,
@@ -210,25 +213,75 @@ function createDispatcher({
     }
   }
 
-  async function submit(provider, row, prefix) {
-    const concept = must(await box.generateConcept(provider, { prompt: row.base_prompt }));
+  // The sheet job spec for a row, drawn from the given box concept path.
+  const sheetSpec = (row, conceptPath) => ({
+    prompt: row.base_prompt,
+    concept_image: conceptPath,
+    actions: row.actions,
+    directions: row.directions,
+    frames: row.frames_per_action,
+    cell: '48x64',
+    colors: 24,
+    seed: Number(row.seed),
+    style_profile: null,
+    concept_check: false,
+  });
+
+  // Copies the kept concept's object under the row's own prefix; null when the
+  // stored object is gone (the caller then draws a new concept).
+  async function copyKeptConcept(kept, conceptKey) {
+    try {
+      const chunks = [];
+      for await (const chunk of await store.getObjectStream(kept.concept_key)) chunks.push(chunk);
+      await store.putObject(conceptKey, Buffer.concat(chunks), 'image/png');
+      return conceptKey;
+    } catch (err) {
+      if (err && (err.code === 'NoSuchKey' || err.code === 'NotFound')) return null;
+      throw err;
+    }
+  }
+
+  // Draws (or reuses) the concept, then creates the sheet job. A subject keeps
+  // one concept (sprite_concepts): it is reused while the SAME box (provider id
+  // and origin) still has it. If the box refuses the reused concept with a
+  // non-retryable 4xx, a new one is drawn once; a second refusal fails the row.
+  async function submit(provider, row, prefix, cur = null) {
     const conceptKey = `${prefix}concept.png`;
+    const origin = new URL(provider.base_url).origin;
+    const kept = await concepts.getKept(db, { entityTypeId: row.entity_type_id, variant: row.appearance_variant });
+    if (kept) {
+      const sameBox = String(kept.provider_id) === String(provider.id) && kept.box_origin === origin;
+      if (sameBox && await box.conceptAvailable(provider, kept.box_concept_path)) {
+        const copied = await copyKeptConcept(kept, conceptKey);
+        if (copied) {
+          if (run && run.halting) throw haltedError();
+          const reused = await box.createSheetJob(provider, sheetSpec(row, kept.box_concept_path));
+          if (reused.ok) {
+            await queue.attachBox(db, row.id, { boxJobId: reused.boxJobId, conceptKey, providerId: provider.id });
+            return { boxJobId: reused.boxJobId, conceptKey, cells: reused.cells, estimatedSeconds: reused.estimatedSeconds };
+          }
+          const refused = reused.status >= 400 && reused.status < 500 && !reused.retryable;
+          if (!refused) must(reused);
+        }
+      }
+      await queue.setNote(db, row.id, KEPT_CONCEPT_NOTE);
+      if (cur) cur.message = KEPT_CONCEPT_NOTE;
+    }
+
+    const concept = must(await box.generateConcept(provider, { prompt: row.base_prompt }));
     await store.putObject(conceptKey, concept.png, 'image/png');
     // The concept call cannot be interrupted; a halt during it lands here,
     // before a sheet job is ever created.
     if (run && run.halting) throw haltedError();
-    const job = must(await box.createSheetJob(provider, {
-      prompt: row.base_prompt,
-      concept_image: concept.conceptPath,
-      actions: row.actions,
-      directions: row.directions,
-      frames: row.frames_per_action,
-      cell: '48x64',
-      colors: 24,
-      seed: Number(row.seed),
-      style_profile: null,
-      concept_check: false,
-    }));
+    const job = must(await box.createSheetJob(provider, sheetSpec(row, concept.conceptPath)));
+    await concepts.upsertKept(db, {
+      entityTypeId: row.entity_type_id,
+      variant: row.appearance_variant,
+      conceptKey,
+      boxConceptPath: concept.conceptPath,
+      providerId: provider.id,
+      boxOrigin: origin,
+    });
     await queue.attachBox(db, row.id, { boxJobId: job.boxJobId, conceptKey, providerId: provider.id });
     return { boxJobId: job.boxJobId, conceptKey, cells: job.cells, estimatedSeconds: job.estimatedSeconds };
   }
@@ -373,7 +426,7 @@ function createDispatcher({
       }
     }
     cur.phase = attached ? 'queued' : 'concept';
-    const job = attached || await submit(provider, row, prefix);
+    const job = attached || await submit(provider, row, prefix, cur);
     cur.phase = 'queued';
 
     const plannedCells = (row.actions || []).length * (row.directions || []).length * (row.frames_per_action || 0);
