@@ -106,7 +106,7 @@ describe('sprite console action controls', () => {
   it('isBoxProp: a GPU-box object row without a sheet (Props v2)', () => {
     expect(isBoxProp({ backend: 'gpu-box', generation_kind: 'object', image_key: 'i.png' })).toBe(true);
     expect(isBoxProp({ backend: 'gpu-box', generation_kind: 'object', atlas_key: 'old-sheet.png' })).toBe(false);
-    expect(isBoxProp({ backend: 'gpu-box', generation_kind: 'creature' })).toBe(false);
+    expect(isBoxProp({ backend: 'gpu-box', generation_kind: 'creature', is_creature: true })).toBe(false);
     expect(isBoxProp({ backend: 'local', generation_kind: 'object', image_key: 'i.png' })).toBe(false);
   });
 
@@ -234,7 +234,7 @@ describe('conceptImageOf', () => {
     expect(conceptImageOf({ backend: 'gpu-box', generation_kind: 'object', image: 'art.png' })).toBe('art.png');
   });
   it('a creature uses its job concept, else the kept concept, else nothing', () => {
-    const c = { generation_kind: 'creature', image: 'art.png', appearance_image: 'a.png' };
+    const c = { generation_kind: 'creature', is_creature: true, image: 'art.png', appearance_image: 'a.png' };
     expect(conceptImageOf({ ...c, concept_key: 'j.png', kept_concept_key: 'k.png' })).toBe('j.png');
     expect(conceptImageOf({ ...c, kept_concept_key: 'k.png' })).toBe('k.png');
     expect(conceptImageOf({ ...c })).toBe(null);
@@ -253,7 +253,7 @@ describe('sheetImageOf', () => {
 
 describe('conceptLabelOf', () => {
   it('a creature: used, reused, or a new one will be drawn', () => {
-    const c = { generation_kind: 'creature' };
+    const c = { generation_kind: 'creature', is_creature: true };
     expect(conceptLabelOf({ ...c, concept_key: 'j.png', kept_concept_key: 'k.png' })).toBe('Used concept');
     expect(conceptLabelOf({ ...c, kept_concept_key: 'k.png' })).toBe('Concept — reused');
     expect(conceptLabelOf({ ...c })).toBe('New concept will be drawn');
@@ -267,7 +267,18 @@ describe('conceptLabelOf', () => {
   });
 });
 
+describe('never-queued flat prop', () => {
+  it('keeps its current image and label with no generation_kind', () => {
+    const p = { is_creature: false, is_playable: false, image: 'x.png' };
+    expect(conceptImageOf(p)).toBe('x.png');
+    expect(conceptLabelOf(p)).toBe('Current art');
+  });
+});
+
 describe('lastUpdateLabel', () => {
+  it('spells September as Sep', () => {
+    expect(lastUpdateLabel('2026-09-03T14:05:00Z').text).toBe('3 Sep 14:05');
+  });
   it('formats local D Mon HH:MM with the ISO as title', () => {
     expect(lastUpdateLabel('2026-10-23T01:12:00.000Z')).toEqual({ text: '23 Oct 01:12', title: '2026-10-23T01:12:00.000Z' });
   });

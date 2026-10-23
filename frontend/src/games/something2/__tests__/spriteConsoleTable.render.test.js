@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 import { createElement as h } from 'react';
 import { renderToString } from 'react-dom/server';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { SpriteTable, ConceptButtons } from '../SpriteConsoleAdmin.jsx';
+import { SpriteTable, ConceptButtons, confirmAndDelete } from '../SpriteConsoleAdmin.jsx';
 
 const render = (rows) => renderToString(h(
   QueryClientProvider, { client: new QueryClient() },
@@ -46,5 +46,21 @@ describe('concept buttons', () => {
     expect(buttons({ count: 2, deletePending: true })).toMatch(/<button[^>]*disabled[^>]*>Delete generated</);
     expect(buttons({ count: 2, deletePending: true })).not.toMatch(/<button[^>]*disabled[^>]*>New concept</);
     expect(buttons({ count: 2, clearPending: true })).toMatch(/<button[^>]*disabled[^>]*>New concept</);
+  });
+});
+
+describe('flat prop and confirm', () => {
+  it('a never-queued prop shows its thumbnail, not the hint', () => {
+    const html = render([{ id: 'p1', name: 'Rock', is_creature: false, is_playable: false, image: 'art/rock.png' }]);
+    expect(html).toContain('Preview concept: Rock');
+    expect(html).not.toContain('New concept will be drawn');
+  });
+  it('cancelling the confirm sends no request; accepting sends targets and names', () => {
+    const rows = [{ id: 'e1', name: 'Cultist' }];
+    const sent = [];
+    expect(confirmAndDelete(() => false, (b) => sent.push(b), rows)).toBe(false);
+    expect(sent).toEqual([]);
+    expect(confirmAndDelete(() => true, (b) => sent.push(b), rows)).toBe(true);
+    expect(sent).toEqual([{ targets: [{ entity_id: 'e1', variant: undefined }], names: { e1: 'Cultist' } }]);
   });
 });

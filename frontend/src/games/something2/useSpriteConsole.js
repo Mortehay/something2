@@ -106,15 +106,15 @@ export const useRedrawFrames = mutation('/jobs/redraw',
 export const useDiscardRedraw = mutation((id) => `/jobs/${id}/redraw`, 'Redraw discarded', undefined, 'DELETE');
 
 // `names` maps a skipped label (a selected row's id) to its display name; an unknown label is shown as is.
+function skippedNote(data, names = {}) {
+  const skipped = data.skipped_running || [];
+  return skipped.length
+    ? ` · skipped running: ${skipped.map((label) => names[label] || label).join(', ')} (Halt or Rescue stranded first)`
+    : '';
+}
 export const useDeleteGenerated = mutation('/jobs/delete-generated',
-  (data, { names = {} } = {}) => {
-    const skipped = data.skipped_running || [];
-    const head = `Deleted ${data.deleted_jobs} job${data.deleted_jobs === 1 ? '' : 's'} from ${data.subjects} subject${data.subjects === 1 ? '' : 's'}`;
-    return skipped.length
-      ? `${head} · skipped running: ${skipped.map((label) => names[label] || label).join(', ')} (Halt or Rescue stranded first)`
-      : head;
-  },
+  (data, { names } = {}) => `Deleted ${data.deleted_jobs} job${data.deleted_jobs === 1 ? '' : 's'} from ${data.subjects} subject${data.subjects === 1 ? '' : 's'}${skippedNote(data, names)}`,
   ({ targets }) => ({ targets }));
 export const useClearConcepts = mutation('/concepts/clear',
-  (data) => `New concept for ${data.cleared} subject${data.cleared === 1 ? '' : 's'}`,
+  (data, { names } = {}) => `New concept for ${data.cleared} subject${data.cleared === 1 ? '' : 's'}${skippedNote(data, names)}`,
   ({ targets }) => ({ targets }));

@@ -8,7 +8,7 @@ import {
   useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
 } from './useSpriteConsole.js';
 import {
-  cellCount, conceptImageOf, conceptLabelOf, deleteConfirmText, lastUpdateLabel, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, batchProgress, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
+  cellCount, conceptImageOf, conceptLabelOf, deleteConfirmText, isPropSubject, lastUpdateLabel, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, batchProgress, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   PROP_FX_OPTIONS, propFxLabel, queueButtonLabel, queuePayload, queueIsLive, selectionKinds, spriteShape, toggleSpriteSubject,
 } from './spriteSelection.js';
 
@@ -91,6 +91,18 @@ function derivedFrames(subject) {
   return spriteShape(subject) === 'directional' || subject.render_mode === 'animated' ? 4 : 1;
 }
 
+// Selected rows -> mutate body; `names` maps a selected row's id to its display name for toasts.
+export function selectionBody(rows) {
+  return { targets: targetsForSprites(rows), names: Object.fromEntries(rows.map((row) => [row.id, row.name])) };
+}
+
+// Nothing is sent unless the operator confirms.
+export function confirmAndDelete(confirmFn, mutateFn, rows) {
+  if (!confirmFn(deleteConfirmText(rows.length))) return false;
+  mutateFn(selectionBody(rows));
+  return true;
+}
+
 export function ConceptButtons({ count, deletePending, clearPending, onDelete, onClear }) {
   return (
     <>
@@ -124,7 +136,7 @@ export function SpriteTable({ rows, selected, run, onToggle, onTogglePage, onPre
               <tr key={subject.id}>
                 <td><input type="checkbox" checked={selected.has(subject.id)}
                   onChange={() => onToggle(subject.id)} /></td>
-                <td>{concept || isBoxProp(subject) || subject.generation_kind === 'object'
+                <td>{concept || isPropSubject(subject)
                   ? thumb(concept, 'Preview concept')
                   : <Hint>{conceptLabelOf(subject)}</Hint>}</td>
                 <td>{thumb(sheet, isBoxProp(subject) ? 'Preview result' : 'Preview sheet')}</td>
@@ -209,12 +221,12 @@ function SpriteConsoleAdmin() {
     { onSuccess: () => setSelected(new Set()) },
   );
 
-  const deleteSelected = () => {
-    if (!window.confirm(deleteConfirmText(selectedRows.length))) return;
-    const names = Object.fromEntries(selectedRows.map((row) => [row.id, row.name]));
-    deleteGenerated.mutate({ targets: targetsForSprites(selectedRows), names }, { onSuccess: () => setSelected(new Set()) });
-  };
-  const clearSelectedConcepts = () => clearConcepts.mutate({ targets: targetsForSprites(selectedRows) });
+  const deleteSelected = () => confirmAndDelete(
+    (text) => window.confirm(text),
+    (body) => deleteGenerated.mutate(body, { onSuccess: () => setSelected(new Set()) }),
+    selectedRows,
+  );
+  const clearSelectedConcepts = () => clearConcepts.mutate(selectionBody(selectedRows));
 
   // Above AND below the table: at 100 rows the bottom copy is far down the page.
   const pager = shown.pages > 1 && (

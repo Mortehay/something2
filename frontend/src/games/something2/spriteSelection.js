@@ -90,8 +90,10 @@ export function cellCount(rows, actions, frames) {
 // prop done before Props v2 still carries a sheet (atlas_key) and previews as one.
 // The image a row was (or would be) drawn from: the box concept once
 // generated, else a hero appearance's own art, else the entity's existing art.
-function isPropSubject(subject) {
-  return subject?.generation_kind === 'object' || isBoxProp(subject);
+// A prop never uses a kept concept. A never-queued flat prop has no
+// generation_kind (it comes from the latest job), so its shape decides too.
+export function isPropSubject(subject) {
+  return subject?.generation_kind === 'object' || isBoxProp(subject) || spriteShape(subject || {}) === 'flat';
 }
 
 export function conceptImageOf(subject) {
@@ -111,13 +113,17 @@ export function conceptLabelOf(subject) {
   return 'New concept will be drawn';
 }
 
-const LAST_UPDATE_OPTIONS = { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false };
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const pad2 = (n) => String(n).padStart(2, '0');
 
 // The Last update column: local "23 Oct 01:12", the raw ISO as the hover title.
 export function lastUpdateLabel(iso) {
   const date = iso ? new Date(iso) : null;
   if (!date || Number.isNaN(date.getTime())) return { text: '—', title: '' };
-  return { text: new Intl.DateTimeFormat('en-GB', LAST_UPDATE_OPTIONS).format(date).replace(',', ''), title: String(iso) };
+  return {
+    text: `${date.getDate()} ${MONTHS[date.getMonth()]} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`,
+    title: String(iso),
+  };
 }
 
 export function deleteConfirmText(n) {
