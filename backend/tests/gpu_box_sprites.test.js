@@ -405,8 +405,10 @@ test('redrawFrames requires the task id to be a non-empty string', async () => {
   }
 });
 
-test('conceptAvailable: 200 -> true, GET on the bare path with the auth header', async () => {
-  const { fetchImpl, calls } = fakeBox({ 'GET /images/core_abc.png': () => new Response(png('wolf-sheet.png'), { status: 200 }) });
+const IMG = { 'Content-Type': 'image/png' };
+
+test('conceptAvailable: 200 image -> true, GET on the bare path with the auth header', async () => {
+  const { fetchImpl, calls } = fakeBox({ 'GET /images/core_abc.png': () => new Response(png('wolf-sheet.png'), { status: 200, headers: IMG }) });
   assert.equal(await box.conceptAvailable(provider, '/images/core_abc.png', { fetchImpl }), true);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url.href, 'http://box:8001/images/core_abc.png');
@@ -414,9 +416,16 @@ test('conceptAvailable: 200 -> true, GET on the bare path with the auth header',
 });
 
 test('conceptAvailable: path without a leading slash resolves the same', async () => {
-  const { fetchImpl, calls } = fakeBox({ 'GET /images/core_abc.png': () => new Response('x', { status: 200 }) });
+  const { fetchImpl, calls } = fakeBox({ 'GET /images/core_abc.png': () => new Response('x', { status: 200, headers: IMG }) });
   assert.equal(await box.conceptAvailable(provider, 'images/core_abc.png', { fetchImpl }), true);
   assert.equal(calls[0].url.pathname, '/images/core_abc.png');
+});
+
+test('conceptAvailable: a 200 that is not an image (HTML page, no type) -> false', async () => {
+  for (const headers of [{ 'Content-Type': 'text/html; charset=utf-8' }, {}]) {
+    const { fetchImpl } = fakeBox({ 'GET /images/x.png': () => new Response(new Uint8Array([60, 104]), { status: 200, headers }) });
+    assert.equal(await box.conceptAvailable(provider, 'images/x.png', { fetchImpl }), false, JSON.stringify(headers));
+  }
 });
 
 test('conceptAvailable: 404 -> false', async () => {
