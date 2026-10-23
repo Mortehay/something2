@@ -297,8 +297,9 @@ async function discardRedraw(db, id) {
 // "Delete generated": removes every sprite_sets row of each target subject
 // (any status, redraw chains included) and un-publishes the sprite a creature
 // subject had approved. Runs inside the CALLER's transaction. A subject with a
-// running row is skipped whole. Props keep their entity row (their image is
-// the entity's own art, not a sheet). `cancel_box_job_ids` are the box jobs of
+// running row is skipped whole. Props keep their image (the entity's own art,
+// not a sheet); only an animated sheet they show from a deleted row's folder is
+// dropped. `cancel_box_job_ids` are the box jobs of
 // deleted queued rows, for the caller to cancel after commit.
 async function deleteGeneratedRows(client, targets) {
   const seen = new Map();
@@ -334,7 +335,28 @@ async function deleteGeneratedRows(client, targets) {
     for (const r of deleted) if (r.status === 'queued' && r.box_job_id) cancel.push(r.box_job_id);
     const isProp = deleted.some((r) => r.generation_kind === 'object')
       && !deleted.some((r) => r.generation_kind === 'creature');
-    if (isProp) continue;
+    if (isProp) {
+      // A prop keeps its own image, but an animated sheet it shows from one of
+      // the deleted rows' folders (/<row id>/) is about to vanish: fall back to
+      // the image, as a creature does.
+      const ids = deleted.map((r) => String(r.id));
+      const pointsIntoDeleted = `EXISTS (SELECT 1 FROM unnest($2::text[]) AS d(id)
+         WHERE strpos(COALESCE(sprite->>'atlas_key', ''), '/' || d.id || '/') > 0
+            OR strpos(COALESCE(sprite->>'manifest_key', ''), '/' || d.id || '/') > 0)`;
+      if (variant == null) {
+        await client.query(
+          `UPDATE entity_types SET sprite = NULL, render_mode = 'static' WHERE id = $1 AND ${pointsIntoDeleted}`,
+          [entityId, ids],
+        );
+      } else {
+        await client.query(
+          `UPDATE character_appearances SET sprite = NULL, render_mode = 'static', updated_at = now()
+            WHERE entity_type_id = $1 AND variant = $3 AND ${pointsIntoDeleted}`,
+          [entityId, ids, variant],
+        );
+      }
+      continue;
+    }
     if (variant == null) {
       await client.query(
         `UPDATE entity_types SET sprite = NULL, render_mode = 'static' WHERE id = $1`, [entityId],

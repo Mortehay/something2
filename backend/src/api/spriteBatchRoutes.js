@@ -476,7 +476,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
   // skipped) and then their stored files. Files go AFTER the commit and only
   // per row-id folder, never a shorter prefix (sprites/Cultist_1/ would also
   // match sprites/Cultist_10/); kept concepts and keys an entity or appearance
-  // still shows are never removed.
+  // still shows (image, or a live sprite's atlas/manifest) are never removed.
   router.post('/jobs/delete-generated', async (req, res) => {
     const targets = targetsFrom(req.body);
     if (!targets) return res.status(400).json({ error: 'targets must list 1 to 1000 subjects' });
@@ -524,7 +524,11 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
         const { rows } = await pool.query(
           `SELECT concept_key AS k FROM sprite_concepts
            UNION SELECT image FROM entity_types WHERE image IS NOT NULL
-           UNION SELECT image FROM character_appearances WHERE image IS NOT NULL`,
+           UNION SELECT image FROM character_appearances WHERE image IS NOT NULL
+           UNION SELECT sprite->>'atlas_key' FROM entity_types WHERE sprite->>'atlas_key' IS NOT NULL
+           UNION SELECT sprite->>'manifest_key' FROM entity_types WHERE sprite->>'manifest_key' IS NOT NULL
+           UNION SELECT sprite->>'atlas_key' FROM character_appearances WHERE sprite->>'atlas_key' IS NOT NULL
+           UNION SELECT sprite->>'manifest_key' FROM character_appearances WHERE sprite->>'manifest_key' IS NOT NULL`,
         );
         protectedKeys = new Set(rows.map((r) => r.k));
       } catch (err) {

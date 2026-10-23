@@ -177,6 +177,57 @@ test('deleteGeneratedRows leaves a prop entity row unchanged', { skip }, async (
   });
 });
 
+test('deleteGeneratedRows drops a prop sprite that points into a deleted row and keeps its image', { skip }, async () => {
+  await inTxn(async (c) => {
+    const { rows: [p] } = await c.query('SELECT id FROM entity_types WHERE is_creature = false ORDER BY id LIMIT 1');
+    assert.ok(p, 'precondition: a non-creature entity');
+    await c.query('DELETE FROM sprite_sets WHERE entity_type_id = $1', [p.id]);
+    const sheet = await row(c, p.id, null, 'approved', { kind: 'object' });
+    const sprite = { atlas_key: `sprites/Lamp/${sheet.id}/atlas.png`, manifest_key: `sprites/Lamp/${sheet.id}/m.json`, frames: 4 };
+    await c.query(
+      `UPDATE entity_types SET sprite = $2::jsonb, render_mode = 'animated', image = 'images/lamp-own.png' WHERE id = $1`,
+      [p.id, JSON.stringify(sprite)],
+    );
+    await queue.deleteGeneratedRows(c, [{ entityId: p.id, variant: null }]);
+    const { rows: [e] } = await c.query('SELECT sprite, render_mode, image FROM entity_types WHERE id = $1', [p.id]);
+    assert.equal(e.sprite, null);
+    assert.equal(e.render_mode, 'static');
+    assert.equal(e.image, 'images/lamp-own.png');
+  });
+});
+
+test('deleteGeneratedRows drops a variant prop sprite that points into a deleted row', { skip }, async () => {
+  await inTxn(async (c) => {
+    const { id, variant } = await creatureWithVariant(c);
+    await c.query('DELETE FROM sprite_sets WHERE entity_type_id = $1', [id]);
+    const sheet = await row(c, id, variant, 'approved', { kind: 'object' });
+    await c.query(
+      `UPDATE character_appearances SET sprite = $3::jsonb, render_mode = 'animated'
+        WHERE entity_type_id = $1 AND variant = $2`,
+      [id, variant, JSON.stringify({ manifest_key: `sprites/V/${sheet.id}/m.json`, frames: 2 })],
+    );
+    await queue.deleteGeneratedRows(c, [{ entityId: id, variant }]);
+    const { rows: [a] } = await c.query(
+      'SELECT sprite, render_mode FROM character_appearances WHERE entity_type_id = $1 AND variant = $2', [id, variant]);
+    assert.equal(a.sprite, null);
+    assert.equal(a.render_mode, 'static');
+  });
+});
+
+test('deleteGeneratedRows keeps a prop sprite that points into another row\'s folder', { skip }, async () => {
+  await inTxn(async (c) => {
+    const { rows: [p] } = await c.query('SELECT id FROM entity_types WHERE is_creature = false ORDER BY id LIMIT 1');
+    await c.query('DELETE FROM sprite_sets WHERE entity_type_id = $1', [p.id]);
+    await row(c, p.id, null, 'approved', { kind: 'object' });
+    const sprite = { atlas_key: 'sprites/Lamp/00000000-0000-4000-8000-000000000000/atlas.png', frames: 4 };
+    await c.query(`UPDATE entity_types SET sprite = $2::jsonb, render_mode = 'animated' WHERE id = $1`, [p.id, JSON.stringify(sprite)]);
+    await queue.deleteGeneratedRows(c, [{ entityId: p.id, variant: null }]);
+    const { rows: [e] } = await c.query('SELECT sprite, render_mode FROM entity_types WHERE id = $1', [p.id]);
+    assert.deepEqual(e.sprite, sprite);
+    assert.equal(e.render_mode, 'animated');
+  });
+});
+
 test('deleteGeneratedRows returns the box job ids of queued rows to cancel', { skip }, async () => {
   await inTxn(async (c) => {
     const { id, variant } = await creatureWithVariant(c);

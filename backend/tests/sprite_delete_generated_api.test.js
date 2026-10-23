@@ -14,7 +14,7 @@ const row = (id, over = {}) => ({
 
 // A client whose queries answer by shape; `deleted` is what the DELETE returns.
 function build({ deleted = [row(ID_A)], running = false, files = {}, protectedKeys = [], removeFail = [], failDelete = false,
-  listFail = false, clearKept } = {}) {
+  listFail = false, clearKept, liveSpriteKeys = [] } = {}) {
   const calls = [];
   const log = [];
   const client = {
@@ -36,7 +36,12 @@ function build({ deleted = [row(ID_A)], running = false, files = {}, protectedKe
     query: async (sql, params = []) => {
       const s = String(sql).trim();
       calls.push({ sql: s, params, pool: true });
-      if (/FROM sprite_concepts/.test(s) && /UNION/.test(s)) return { rows: protectedKeys.map((k) => ({ k })) };
+      if (/FROM sprite_concepts/.test(s) && /UNION/.test(s)) {
+        // Live sprite keys answer only when the query reads BOTH tables' sprite atlas and manifest keys.
+        const readsSprites = ['entity_types', 'character_appearances'].every((t) => ['atlas_key', 'manifest_key']
+          .every((f) => new RegExp(`sprite->>'${f}'[^;]*?FROM ${t}`).test(s)));
+        return { rows: [...protectedKeys, ...(readsSprites ? liveSpriteKeys : [])].map((k) => ({ k })) };
+      }
       if (/^DELETE FROM sprite_concepts/.test(s)) return { rowCount: 2, rows: [] };
       if (/^SELECT 1 FROM sprite_sets/.test(s)) return { rows: running ? [{}] : [] };
       throw new Error(`unexpected pool query: ${s}`);
@@ -126,6 +131,16 @@ test('a prop\'s entity image and a kept concept inside a deleted folder are not 
   const con = `sprites/Cultist_1/${ID_A}/concept.png`;
   const other = `sprites/Cultist_1/${ID_A}/atlas.png`;
   const ctx = build({ files: { [img]: 1, [con]: 1, [other]: 1 }, protectedKeys: [img, con] });
+  const res = await del(ctx, T);
+  assert.deepEqual(ctx.removed, [other]);
+  assert.equal(res.body.files_deleted, 1);
+});
+
+test('a key a live entity or appearance sprite still shows is never removed', async () => {
+  const atlas = `sprites/Cultist_1/${ID_A}/atlas.png`;
+  const man = `sprites/Cultist_1/${ID_A}/m.json`;
+  const other = `sprites/Cultist_1/${ID_A}/f0.png`;
+  const ctx = build({ files: { [atlas]: 1, [man]: 1, [other]: 1 }, liveSpriteKeys: [atlas, man] });
   const res = await del(ctx, T);
   assert.deepEqual(ctx.removed, [other]);
   assert.equal(res.body.files_deleted, 1);
