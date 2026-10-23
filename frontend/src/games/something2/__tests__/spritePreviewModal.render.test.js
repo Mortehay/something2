@@ -133,3 +133,22 @@ describe('SpritePreviewModal frame redraw', () => {
     expect(renderWith(failed({ redraw_source_atlas_key: 'old.png' }))).not.toContain('Compare with previous');
   });
 });
+
+describe('SpritePreviewModal concept label and note', () => {
+  const creature = (over = {}) => ({
+    id: 'e1', name: 'Cultist', generation_kind: 'creature', is_creature: true, backend: 'gpu-box',
+    job_updated_at: 't1', ...over,
+  });
+  it('labels a reused concept and shows the note as a muted line', () => {
+    const html = render(creature({
+      kept_concept_key: 'sprites/Cultist/c.png', note: 'kept concept unavailable on the box; drew a new one',
+    }));
+    expect(html).toContain('Concept — reused');
+    expect(html).toContain('kept concept unavailable on the box; drew a new one');
+  });
+  it('says a new concept will be drawn, without a note line', () => {
+    const html = render(creature());
+    expect(html).toContain('New concept will be drawn');
+    expect(html).not.toContain('unavailable on the box');
+  });
+});

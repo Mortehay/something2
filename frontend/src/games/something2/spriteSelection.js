@@ -90,15 +90,60 @@ export function cellCount(rows, actions, frames) {
 // prop done before Props v2 still carries a sheet (atlas_key) and previews as one.
 // The image a row was (or would be) drawn from: the box concept once
 // generated, else a hero appearance's own art, else the entity's existing art.
+// A prop never uses a kept concept. generation_kind (from the latest job)
+// decides when present, so an entity whose shape changed after its job still
+// labels that job's art right; a never-queued subject has none, so its shape decides.
+export function isPropSubject(subject) {
+  if (subject?.generation_kind === 'creature') return false;
+  if (subject?.generation_kind === 'object') return true;
+  return isBoxProp(subject) || spriteShape(subject || {}) === 'flat';
+}
+
 export function conceptImageOf(subject) {
-  return subject?.concept_key || subject?.appearance_image || subject?.image || null;
+  if (isPropSubject(subject)) return subject?.concept_key || subject?.appearance_image || subject?.image || null;
+  return subject?.concept_key || subject?.kept_concept_key || null;
 }
 
 export function conceptLabelOf(subject) {
-  if (subject?.concept_key) return 'Used image';
-  if (subject?.appearance_image) return 'Appearance art';
-  if (subject?.image) return 'Current art';
-  return 'Used image';
+  if (isPropSubject(subject)) {
+    if (subject?.concept_key) return 'Used image';
+    if (subject?.appearance_image) return 'Appearance art';
+    if (subject?.image) return 'Current art';
+    return 'Used image';
+  }
+  if (subject?.concept_key) return 'Used concept';
+  if (subject?.kept_concept_key) return 'Concept — reused';
+  return 'New concept will be drawn';
+}
+
+// The table's Concept caption: what the NEXT run uses. A creature reuses its
+// kept concept, else draws a new one (even when its last job used one that
+// "New concept" has since forgotten). The preview keeps conceptLabelOf, which
+// describes that job's own concept.
+export function nextConceptCaption(subject) {
+  if (isPropSubject(subject)) return conceptLabelOf(subject);
+  return subject?.kept_concept_key ? 'Concept — reused' : 'New concept will be drawn';
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const pad2 = (n) => String(n).padStart(2, '0');
+
+// The Last update column: local "23 Oct 01:12", the raw ISO as the hover title.
+export function lastUpdateLabel(iso) {
+  const date = iso ? new Date(iso) : null;
+  if (!date || Number.isNaN(date.getTime())) return { text: '—', title: '' };
+  return {
+    text: `${date.getDate()} ${MONTHS[date.getMonth()]} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`,
+    title: String(iso),
+  };
+}
+
+export function newConceptConfirmText(n) {
+  return `Forget the kept concept for ${n} subject${n === 1 ? '' : 's'}? The next run draws a new one.`;
+}
+
+export function deleteConfirmText(n) {
+  return `Delete all generated sprites for ${n} subject${n === 1 ? '' : 's'}? Sheets, redraws and queued jobs are removed; concepts are kept. This cannot be undone.`;
 }
 
 // What the Sheet / Result column shows: only output of a sprite job (sheet or

@@ -4,11 +4,11 @@ import SpritePreviewModal from './SpritePreviewModal.jsx';
 import AdminLoading from './AdminLoading.jsx';
 import { assetUrlVersioned } from './useTileSprites.js';
 import {
-  useActionCatalog, useApproveSpriteJobs, useClearSpriteJobs, useHaltSpriteBatch, useQueueSprites, useRescueSpriteJobs,
+  useActionCatalog, useApproveSpriteJobs, useClearConcepts, useClearSpriteJobs, useDeleteGenerated, useHaltSpriteBatch, useQueueSprites, useRescueSpriteJobs,
   useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
 } from './useSpriteConsole.js';
 import {
-  cellCount, conceptImageOf, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, batchProgress, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
+  cellCount, conceptImageOf, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, batchProgress, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   PROP_FX_OPTIONS, propFxLabel, queueButtonLabel, queuePayload, queueIsLive, selectionKinds, spriteShape, toggleSpriteSubject,
 } from './spriteSelection.js';
 
@@ -75,6 +75,7 @@ const Check = styled.label`
   && input { min-width: 0; margin: 0; padding: 0; cursor: pointer; }
 `;
 const ErrorText = styled.span`color: var(--s2-danger);`;
+const Caption = styled.span`display: block; margin-top: 0.2rem; color: var(--s2-text-muted); font-size: 0.72rem;`;
 const ThumbButton = styled.button`border: 0; padding: 0; background: none; cursor: zoom-in;`;
 const Pager = styled.div`display: flex; gap: 0.5rem; align-items: center; margin: 0.75rem 0;`;
 
@@ -89,6 +90,82 @@ export function JobStatusCell({ subject, run }) {
 
 function derivedFrames(subject) {
   return spriteShape(subject) === 'directional' || subject.render_mode === 'animated' ? 4 : 1;
+}
+
+// Selected rows -> mutate body; `names` maps a selected row's id to its display name for toasts.
+export function selectionBody(rows) {
+  return { targets: targetsForSprites(rows), names: Object.fromEntries(rows.map((row) => [row.id, row.name])) };
+}
+
+// Nothing is sent unless the operator confirms.
+export function confirmAndDelete(confirmFn, mutateFn, rows) {
+  if (!confirmFn(deleteConfirmText(rows.length))) return false;
+  mutateFn(selectionBody(rows));
+  return true;
+}
+
+// Nothing is sent unless the operator confirms.
+export function confirmAndClearConcepts(confirmFn, mutateFn, rows) {
+  if (!confirmFn(newConceptConfirmText(rows.length))) return false;
+  mutateFn(selectionBody(rows));
+  return true;
+}
+
+export function ConceptButtons({ count, deletePending, clearPending, onDelete, onClear }) {
+  return (
+    <>
+      <Secondary disabled={count === 0 || deletePending} onClick={onDelete}>Delete generated</Secondary>
+      <Secondary disabled={count === 0 || clearPending} onClick={onClear}>New concept</Secondary>
+    </>
+  );
+}
+
+export function SpriteTable({ rows, selected, run, onToggle, onTogglePage, onPreview }) {
+  return (
+    <TableWrap>
+      <Table>
+        <thead><tr>
+          <th><input type="checkbox" aria-label="Select this page"
+            checked={isSpritePageSelected(selected, rows)}
+            onChange={(event) => onTogglePage(event.target.checked)} /></th>
+          <th>Concept</th><th>Sheet / Result</th><th>Entity</th><th>Shape</th><th>Actions</th><th>Frames</th><th>Backend</th><th>Status</th><th>Last update</th><th>Prompt</th>
+        </tr></thead>
+        <tbody>
+          {rows.map((subject) => {
+            const sheet = sheetImageOf(subject);
+            const thumb = (key, label) => (key ? (
+              <ThumbButton type="button" aria-label={`${label}: ${subject.name}`} onClick={() => onPreview(subject.id)}>
+                <Thumb src={assetUrlVersioned(key, subject.job_updated_at)} alt="" />
+              </ThumbButton>
+            ) : '—');
+            const concept = conceptImageOf(subject);
+            const lastUpdate = lastUpdateLabel(subject.job_updated_at);
+            return (
+              <tr key={subject.id}>
+                <td><input type="checkbox" checked={selected.has(subject.id)}
+                  onChange={() => onToggle(subject.id)} /></td>
+                <td>{concept ? (
+                  <>{thumb(concept, 'Preview concept')}<Caption>{nextConceptCaption(subject)}</Caption></>
+                ) : isPropSubject(subject) ? '—' : <Hint>{nextConceptCaption(subject)}</Hint>}</td>
+                <td>{thumb(sheet, isBoxProp(subject) ? 'Preview result' : 'Preview sheet')}</td>
+                <td>{subject.name}</td>
+                <td><Pill>{spriteShape(subject)}</Pill></td>
+                {/* A prop's queued actions mean nothing; show its effect instead. */}
+                <td>{isBoxProp(subject) && subject.prop_fx ? `effect: ${propFxLabel(subject.prop_fx)}`
+                  : Array.isArray(subject.actions) && subject.actions.length ? subject.actions.join(' · ') : '—'}</td>
+                <td>{subject.backend === 'gpu-box' && subject.frames_per_action
+                  ? `${subject.frames_per_action} / action` : derivedFrames(subject)}</td>
+                <td>{subject.backend || 'local'}</td>
+                <td><JobStatusCell subject={subject} run={run} /></td>
+                <td title={lastUpdate.title}>{lastUpdate.text}</td>
+                <td title={subject.prompt || subject.name}>{subject.prompt || subject.name}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </Table>
+    </TableWrap>
+  );
 }
 
 function SpriteConsoleAdmin() {
@@ -114,6 +191,8 @@ function SpriteConsoleAdmin() {
   const rescue = useRescueSpriteJobs();
   const clear = useClearSpriteJobs();
   const approve = useApproveSpriteJobs();
+  const deleteGenerated = useDeleteGenerated();
+  const clearConcepts = useClearConcepts();
 
   const previewSubject = subjects.find((subject) => subject.id === previewId);
 
@@ -148,6 +227,17 @@ function SpriteConsoleAdmin() {
   const approveSelected = () => approve.mutate(
     approvable.map((subject) => subject.job_id),
     { onSuccess: () => setSelected(new Set()) },
+  );
+
+  const deleteSelected = () => confirmAndDelete(
+    (text) => window.confirm(text),
+    (body) => deleteGenerated.mutate(body, { onSuccess: () => setSelected(new Set()) }),
+    selectedRows,
+  );
+  const clearSelectedConcepts = () => confirmAndClearConcepts(
+    (text) => window.confirm(text),
+    (body) => clearConcepts.mutate(body),
+    selectedRows,
   );
 
   // Above AND below the table: at 100 rows the bottom copy is far down the page.
@@ -285,6 +375,8 @@ function SpriteConsoleAdmin() {
         <Secondary disabled={run?.running || !(stats.queued > 0)} onClick={() => {
           if (window.confirm(`Clear ${stats.queued || 0} queued sprite jobs?`)) clear.mutate();
         }}>Clear queue</Secondary>
+        <ConceptButtons count={selectedRows.length} deletePending={deleteGenerated.isPending}
+          clearPending={clearConcepts.isPending} onDelete={deleteSelected} onClear={clearSelectedConcepts} />
         <Button disabled={approvable.length === 0 || approve.isPending} onClick={approveSelected}>
           Approve {approvable.length} completed
         </Button>
@@ -292,44 +384,10 @@ function SpriteConsoleAdmin() {
 
       <Hint>{matching.length} matching · {selected.size} selected</Hint>
       {pager}
-      <TableWrap>
-        <Table>
-          <thead><tr>
-            <th><input type="checkbox" aria-label="Select this page"
-              checked={isSpritePageSelected(selected, shown.rows)}
-              onChange={(event) => setSelected(setSpritePageSelected(selected, shown.rows, event.target.checked))} /></th>
-            <th>Concept</th><th>Sheet / Result</th><th>Entity</th><th>Shape</th><th>Actions</th><th>Frames</th><th>Backend</th><th>Status</th><th>Prompt</th>
-          </tr></thead>
-          <tbody>
-            {shown.rows.map((subject) => {
-              const sheet = sheetImageOf(subject);
-              const thumb = (key, label) => (key ? (
-                <ThumbButton type="button" aria-label={`${label}: ${subject.name}`} onClick={() => setPreviewId(subject.id)}>
-                  <Thumb src={assetUrlVersioned(key, subject.job_updated_at)} alt="" />
-                </ThumbButton>
-              ) : '—');
-              return (
-                <tr key={subject.id}>
-                  <td><input type="checkbox" checked={selected.has(subject.id)}
-                    onChange={() => setSelected(toggleSpriteSubject(selected, subject.id))} /></td>
-                  <td>{thumb(conceptImageOf(subject), 'Preview concept')}</td>
-                  <td>{thumb(sheet, isBoxProp(subject) ? 'Preview result' : 'Preview sheet')}</td>
-                  <td>{subject.name}</td>
-                  <td><Pill>{spriteShape(subject)}</Pill></td>
-                  {/* A prop's queued actions mean nothing; show its effect instead. */}
-                  <td>{isBoxProp(subject) && subject.prop_fx ? `effect: ${propFxLabel(subject.prop_fx)}`
-                    : Array.isArray(subject.actions) && subject.actions.length ? subject.actions.join(' · ') : '—'}</td>
-                  <td>{subject.backend === 'gpu-box' && subject.frames_per_action
-                    ? `${subject.frames_per_action} / action` : derivedFrames(subject)}</td>
-                  <td>{subject.backend || 'local'}</td>
-                  <td><JobStatusCell subject={subject} run={run} /></td>
-                  <td title={subject.prompt || subject.name}>{subject.prompt || subject.name}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </Table>
-      </TableWrap>
+      <SpriteTable rows={shown.rows} selected={selected} run={run}
+        onToggle={(id) => setSelected(toggleSpriteSubject(selected, id))}
+        onTogglePage={(on) => setSelected(setSpritePageSelected(selected, shown.rows, on))}
+        onPreview={setPreviewId} />
       {pager}
       {previewSubject && <SpritePreviewModal subject={previewSubject} onClose={() => setPreviewId(null)} />}
     </Wrap>

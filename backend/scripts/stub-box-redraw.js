@@ -20,7 +20,20 @@
 //   POST   /api/jobs/:id/redraw             {frames:[{action,direction,frame}]} -> {task_id}
 //   DELETE /api/jobs/:id                    cancel a task (404 if unknown)
 //   POST   /__stub/fail-next                the next accepted redraw fails while running
-//   GET    /__stub/state                    debug: tasks + tinted cells
+//   GET    /__stub/state                    debug: tasks + tinted cells + call log
+//
+// Concept reuse checks (docs/superpowers/specs/2026-10-23-sprite-concept-reuse-and-delete-design.md):
+//   GET    /api/core-models                 one available Qwen concept model
+//   POST   /api/generate_core               form {prompt, llm_name} -> {task_id}; draws core_<n>.png
+//   GET    /api/task-status/:id             PENDING ~1 s, then SUCCESS {result:{url:"/images/core_<n>.png"}}
+//   GET    /images/:file                    a concept drawn by THIS stub process (404 otherwise)
+//   POST   /api/jobs                        sheet job from a spec; logs its concept_image -> {job_id, cells}
+//   GET    /api/jobs/:id (+ /sheet, /atlas) that job: queued ~1 s, running to ~4 s, done
+//   POST   /__stub/concepts-404             every concept drawn SO FAR answers 404 (new ones still serve)
+//   POST   /__stub/concepts-404?off=1       serve them all again
+//
+// Each concept is a 96x96 square of its own hue with <n> printed on it, so
+// which concept a sheet was drawn from is visible in a screenshot.
 //
 // A redraw task is queued ~1 s, running to ~5 s, then done; on done the marked
 // cells are tinted red in the in-memory sheet. With fail-next (or
@@ -91,9 +104,16 @@ function hsl(hDeg, s, l) {
   return [f(0), f(8), f(4)].map((v) => Math.round(v * 255));
 }
 const sheet = Buffer.alloc(W * H * 4);
+// The canvas px/text draw into; drawOn() points it elsewhere for a moment.
+let canvas = { buf: sheet, w: W };
 function px(x, y, [r, g, b], a = 255) {
-  const i = (y * W + x) * 4;
-  sheet[i] = r; sheet[i + 1] = g; sheet[i + 2] = b; sheet[i + 3] = a;
+  const i = (y * canvas.w + x) * 4;
+  canvas.buf[i] = r; canvas.buf[i + 1] = g; canvas.buf[i + 2] = b; canvas.buf[i + 3] = a;
+}
+function drawOn(buf, w, fn) {
+  const prev = canvas;
+  canvas = { buf, w };
+  try { fn(); } finally { canvas = prev; }
 }
 function text(str, x0, y0, scale, color) {
   let x = x0;
@@ -121,12 +141,15 @@ function drawCell(row, frame) {
   text(String(row).padStart(2, '0'), x0 + 8, y0 + 8, 4, [255, 255, 255]);
   text(`f${frame}`, x0 + 8, y0 + 34, 4, [0, 0, 0]);
 }
+function drawCellsFor(rowCount) {
+  for (let row = 0; row < rowCount; row += 1) for (let f = 0; f < FRAMES; f += 1) drawCell(row, f);
+}
 const rows = [];
 ACTIONS.forEach((action, ai) => DIRECTIONS.forEach((direction, di) => {
   const row = ai * DIRECTIONS.length + di;
   rows.push({ row, action, direction });
-  for (let f = 0; f < FRAMES; f += 1) drawCell(row, f);
 }));
+drawCellsFor(rows.length);
 function tintCell(row, frame) {
   for (let y = row * CH; y < (row + 1) * CH; y += 1) {
     for (let x = frame * CW; x < (frame + 1) * CW; x += 1) {
@@ -158,6 +181,64 @@ const tasks = new Map();
 const tinted = [];
 let failNext = process.env.STUB_FAIL_NEXT === '1';
 let seq = 0;
+
+// ---- concepts + sheet jobs (concept reuse checks) ---------------------------
+const CONCEPT_PX = 96;
+const SHEET_QUEUED_MS = 1000;
+const SHEET_DONE_MS = 4000;
+const CORE_PENDING_MS = 1000;
+const images = new Map(); // "core_<n>.png" -> png
+const hidden = new Set(); // images that answer 404 (concepts-404 switch)
+const coreTasks = new Map();
+const sheetJobs = new Map();
+const calls = []; // what the backend asked for, in order
+let coreSeq = 0;
+let sheetSeq = 0;
+
+function conceptPng(n) {
+  const buf = Buffer.alloc(CONCEPT_PX * CONCEPT_PX * 4);
+  const fill = hsl((n * 67) % 360, 0.7, 0.45);
+  drawOn(buf, CONCEPT_PX, () => {
+    for (let y = 6; y < CONCEPT_PX - 6; y += 1) for (let x = 6; x < CONCEPT_PX - 6; x += 1) px(x, y, fill);
+    text(String(n), 18, 28, 8, [255, 255, 255]);
+  });
+  return encodePng(buf, CONCEPT_PX, CONCEPT_PX);
+}
+
+// A sheet job draws its own sheet for exactly the rows it was asked for, the
+// same cell art as the redraw sheet (row number + f<frame>).
+function makeSheetJob(spec) {
+  const actions = Array.isArray(spec.actions) && spec.actions.length ? spec.actions : ACTIONS;
+  const directions = Array.isArray(spec.directions) && spec.directions.length ? spec.directions : DIRECTIONS;
+  const frames = Number.isInteger(spec.frames) && spec.frames > 0 && spec.frames <= FRAMES ? spec.frames : FRAMES;
+  const jobRows = [];
+  actions.forEach((action, ai) => directions.forEach((direction, di) => {
+    jobRows.push({ row: ai * directions.length + di, action, direction });
+  }));
+  const w = CW * FRAMES;
+  const h = CH * jobRows.length;
+  const buf = Buffer.alloc(w * h * 4);
+  drawOn(buf, w, () => drawCellsFor(jobRows.length));
+  sheetSeq += 1;
+  const id = `stub-sheet-job-${sheetSeq}`;
+  const job = {
+    id, created: Date.now(), concept_image: spec.concept_image, png: encodePng(buf, w, h),
+    atlas: {
+      cell: { w: CW, h: CH }, grid: { columns: FRAMES, rows: jobRows.length }, directions,
+      frames_per_action: frames, rows: jobRows, quality: [], image: `sheet_${id}.png`,
+    },
+    cells: jobRows.length * frames,
+  };
+  sheetJobs.set(id, job);
+  return job;
+}
+function sheetJobStatus(j) {
+  if (j.final) return j.final;
+  const age = Date.now() - j.created;
+  if (age < SHEET_QUEUED_MS) return 'queued';
+  if (age < SHEET_DONE_MS) return 'running';
+  return 'done';
+}
 
 function taskStatus(t) {
   if (t.final) return t.final;
@@ -206,13 +287,77 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.method === 'POST' && url.pathname === '/__stub/fail-next') { failNext = true; return send(res, 200, { failNext }); }
     if (req.method === 'GET' && url.pathname === '/__stub/state') {
-      return send(res, 200, { failNext, tinted, tasks: [...tasks.values()].map((t) => ({ id: t.id, status: taskStatus(t), frames: t.frames })) });
+      return send(res, 200, {
+        calls, hidden: [...hidden], images: [...images.keys()],
+        sheetJobs: [...sheetJobs.values()].map((j) => ({ id: j.id, status: sheetJobStatus(j), concept_image: j.concept_image })),
+        failNext, tinted, tasks: [...tasks.values()].map((t) => ({ id: t.id, status: taskStatus(t), frames: t.frames })),
+      });
     }
     if (req.method === 'GET' && url.pathname === '/api/action-catalog') return send(res, 200, CATALOG);
+    if (req.method === 'POST' && url.pathname === '/__stub/concepts-404') {
+      if (url.searchParams.get('off') === '1') hidden.clear();
+      else for (const k of images.keys()) hidden.add(k);
+      return send(res, 200, { hidden: [...hidden] });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/core-models') {
+      return send(res, 200, { models: [{ value: 'qwen-image-stub', label: 'Qwen-Image (stub)', available: true, ui_default: true }] });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/generate_core') {
+      const form = new URLSearchParams(await readBody(req));
+      coreSeq += 1;
+      const n = coreSeq;
+      const task = { id: `stub-core-task-${n}`, n, created: Date.now() };
+      coreTasks.set(task.id, task);
+      calls.push({ at: new Date().toISOString(), call: 'generate_core', task_id: task.id, llm_name: form.get('llm_name'), prompt: form.get('prompt') });
+      console.log(`  generate_core ${task.id} llm_name=${form.get('llm_name')} prompt=${JSON.stringify(form.get('prompt'))}`);
+      return send(res, 200, { task_id: task.id });
+    }
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'task-status' && parts[2]) {
+      const task = coreTasks.get(parts[2]);
+      if (!task) return send(res, 404, { detail: `no task ${parts[2]}` });
+      if (Date.now() - task.created < CORE_PENDING_MS) return send(res, 200, { status: 'PENDING' });
+      const file = `core_${task.n}.png`;
+      if (!images.has(file)) images.set(file, conceptPng(task.n));
+      return send(res, 200, { status: 'SUCCESS', result: { url: `/images/${file}` } });
+    }
+    if (req.method === 'GET' && parts[0] === 'images' && parts.length === 2) {
+      const png = images.get(parts[1]);
+      if (!png || hidden.has(parts[1])) {
+        console.log(`  images/${parts[1]} -> 404${png ? ' (concepts-404 switch)' : ''}`);
+        return send(res, 404, { detail: 'image not found' });
+      }
+      return send(res, 200, png, 'image/png');
+    }
+    if (req.method === 'POST' && url.pathname === '/api/jobs') {
+      let spec;
+      try { spec = JSON.parse(await readBody(req)); } catch (_) { return send(res, 400, { detail: 'bad json' }); }
+      const job = makeSheetJob(spec || {});
+      calls.push({ at: new Date().toISOString(), call: 'jobs', job_id: job.id, concept_image: job.concept_image });
+      console.log(`  sheet job ${job.id} concept_image=${job.concept_image} cells=${job.cells}`);
+      return send(res, 200, { job_id: job.id, cells: job.cells, estimated_seconds: 4 });
+    }
     if (parts[0] !== 'api' || parts[1] !== 'jobs') return send(res, 404, { detail: 'not found' });
     if (parts.length === 2 && req.method === 'GET') return send(res, 200, { jobs: [] });
     const id = parts[2];
     const sub = parts[3];
+    const sj = sheetJobs.get(id);
+    if (sj) {
+      if (req.method === 'GET' && !sub) {
+        const status = sheetJobStatus(sj);
+        return send(res, 200, {
+          job_id: sj.id, status, stage: 'sheet', error: null,
+          progress_pct: status === 'done' ? 100 : status === 'queued' ? 0 : 50,
+          progress_msg: `drawing ${sj.cells} cells`,
+        });
+      }
+      if (req.method === 'GET' && sub === 'sheet') return send(res, 200, sj.png, 'image/png');
+      if (req.method === 'GET' && sub === 'atlas') return send(res, 200, sj.atlas);
+      if (req.method === 'DELETE' && !sub) {
+        if (!sj.final && sheetJobStatus(sj) !== 'done') sj.final = 'cancelled';
+        return send(res, 200, { cancelled: sj.final === 'cancelled' });
+      }
+      return send(res, 404, { detail: 'not found' });
+    }
     if (id === JOB_ID) {
       if (req.method === 'GET' && !sub) {
         return send(res, 200, { job_id: JOB_ID, status: 'done', stage: 'compose', progress_pct: 100, progress_msg: 'complete', error: null });

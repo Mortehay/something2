@@ -104,3 +104,17 @@ export const useRedrawFrames = mutation('/jobs/redraw',
   (_data, { frames }) => `${frames.length} frame${frames.length === 1 ? '' : 's'} queued for redraw`,
   ({ jobId, frames }) => ({ job_id: jobId, frames }));
 export const useDiscardRedraw = mutation((id) => `/jobs/${id}/redraw`, 'Redraw discarded', undefined, 'DELETE');
+
+// `names` maps a skipped label (a selected row's id) to its display name; an unknown label is shown as is.
+function skippedNote(data, names = {}) {
+  const skipped = data.skipped_running || [];
+  return skipped.length
+    ? ` · skipped running: ${skipped.map((label) => names[label] || label).join(', ')} (Halt or Rescue stranded first)`
+    : '';
+}
+export const useDeleteGenerated = mutation('/jobs/delete-generated',
+  (data, { names } = {}) => `Deleted ${data.deleted_jobs} job${data.deleted_jobs === 1 ? '' : 's'} from ${data.subjects} subject${data.subjects === 1 ? '' : 's'}${skippedNote(data, names)}`,
+  ({ targets }) => ({ targets }));
+export const useClearConcepts = mutation('/concepts/clear',
+  (data, { names } = {}) => `New concept for ${data.cleared} subject${data.cleared === 1 ? '' : 's'}${skippedNote(data, names)}`,
+  ({ targets }) => ({ targets }));

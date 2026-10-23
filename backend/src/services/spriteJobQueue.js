@@ -294,6 +294,90 @@ async function discardRedraw(db, id) {
   return found[0] ? 'not_discardable' : 'not_found';
 }
 
+// "Delete generated": removes every sprite_sets row of each target subject
+// (any status, redraw chains included) and un-publishes the sprite a creature
+// subject had approved. Runs inside the CALLER's transaction. A subject with a
+// running row is skipped whole. Props keep their image (the entity's own art,
+// not a sheet); only an animated sheet they show from a deleted row's folder is
+// dropped. `cancel_box_job_ids` are the box jobs of
+// deleted queued rows, for the caller to cancel after commit.
+async function deleteGeneratedRows(client, targets) {
+  const seen = new Map();
+  for (const t of targets || []) {
+    const variant = t.variant == null ? null : Number(t.variant);
+    seen.set(`${t.entityId}:${variant ?? ''}`, { entityId: Number(t.entityId), variant });
+  }
+  const rows = [];
+  const skipped_running = [];
+  const cancel = [];
+  let subjects = 0;
+  for (const { entityId, variant } of seen.values()) {
+    const where = 'entity_type_id = $1 AND COALESCE(appearance_variant, 0) = COALESCE($2::smallint, 0)';
+    // Lock the subject's rows first: a dispatcher claim() waits (or skips them)
+    // until this transaction ends, so the running check below cannot go stale
+    // before the DELETE.
+    await client.query(`SELECT id FROM sprite_sets WHERE ${where} FOR UPDATE`, [entityId, variant]);
+    const { rows: running } = await client.query(
+      `SELECT 1 FROM sprite_sets WHERE ${where} AND status = 'running' LIMIT 1`, [entityId, variant],
+    );
+    if (running[0]) {
+      skipped_running.push(variant == null ? String(entityId) : `${entityId}:${variant}`);
+      continue;
+    }
+    // One statement removes parents and children together; redraw_of's
+    // ON DELETE SET NULL has nothing left to null.
+    const { rows: deleted } = await client.query(
+      `DELETE FROM sprite_sets WHERE ${where} RETURNING *`, [entityId, variant],
+    );
+    if (deleted.length === 0) continue;
+    subjects += 1;
+    rows.push(...deleted);
+    for (const r of deleted) if (r.status === 'queued' && r.box_job_id) cancel.push(r.box_job_id);
+    const isProp = deleted.some((r) => r.generation_kind === 'object')
+      && !deleted.some((r) => r.generation_kind === 'creature');
+    if (isProp) {
+      // A prop keeps its own image, but an animated sheet it shows from one of
+      // the deleted rows' folders (/<row id>/) is about to vanish: fall back to
+      // the image, as a creature does.
+      const ids = deleted.map((r) => String(r.id));
+      const pointsIntoDeleted = `EXISTS (SELECT 1 FROM unnest($2::text[]) AS d(id)
+         WHERE strpos(COALESCE(sprite->>'atlas_key', ''), '/' || d.id || '/') > 0
+            OR strpos(COALESCE(sprite->>'manifest_key', ''), '/' || d.id || '/') > 0)`;
+      if (variant == null) {
+        await client.query(
+          `UPDATE entity_types SET sprite = NULL, render_mode = 'static' WHERE id = $1 AND ${pointsIntoDeleted}`,
+          [entityId, ids],
+        );
+      } else {
+        await client.query(
+          `UPDATE character_appearances SET sprite = NULL, render_mode = 'static', updated_at = now()
+            WHERE entity_type_id = $1 AND variant = $3 AND ${pointsIntoDeleted}`,
+          [entityId, ids, variant],
+        );
+      }
+      continue;
+    }
+    if (variant == null) {
+      await client.query(
+        `UPDATE entity_types SET sprite = NULL, render_mode = 'static' WHERE id = $1`, [entityId],
+      );
+    } else {
+      await client.query(
+        `UPDATE character_appearances SET sprite = NULL, render_mode = 'static', updated_at = now()
+          WHERE entity_type_id = $1 AND variant = $2`, [entityId, variant],
+      );
+    }
+  }
+  return { rows, subjects, skipped_running, cancel_box_job_ids: cancel };
+}
+
+async function setNote(db, id, note) {
+  const { rows } = await db.query(
+    'UPDATE sprite_sets SET note = $2, updated_at = now() WHERE id = $1 RETURNING *', [id, note ?? null],
+  );
+  return rows[0] || null;
+}
+
 // Measured wall seconds per sheet cell (action x facing x frame) of the most
 // recently COMPLETED sheet that recorded a positive time (finished_at, which
 // approve does not bump); null when none has. The route applies
@@ -335,4 +419,4 @@ async function queueView(db) {
   return { stats: counts, jobs: active.rows };
 }
 
-module.exports = { enqueue, claim, attach, attachBox, complete, fail, requeueStale, requeueHalted, createRedraw, attachRedrawTask, recordRedrawSheet, discardRedraw, lastSecondsPerCell, queuedCells, stats, queueView, PROP_FX };
+module.exports = { enqueue, claim, attach, attachBox, complete, fail, requeueStale, requeueHalted, createRedraw, attachRedrawTask, recordRedrawSheet, discardRedraw, deleteGeneratedRows, setNote, lastSecondsPerCell, queuedCells, stats, queueView, PROP_FX };
