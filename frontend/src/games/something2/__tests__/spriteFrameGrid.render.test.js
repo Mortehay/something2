@@ -22,6 +22,18 @@ const render = (props = {}) => renderToString(h(SpriteFrameGrid, {
 }));
 const marks = new Set(['attack/e/2', 'attack/e/3']);
 
+describe('SpriteFrameGrid read-only', () => {
+  it('shows frames and flags but no marking controls', () => {
+    const html = render({ readOnly: true, manifest: makeManifest([{ action: 'idle', direction: 'e', frame: 1, attempts: 2, passed: false, failed_checks: ['facing'] }]) });
+    expect(html).toContain('aria-label="idle s frame 0"');
+    expect(html.match(/<button[^>]*aria-label="idle [a-z]+ frame \d"[^>]*>/g).every((b) => /disabled/.test(b))).toBe(true);
+    expect(html).not.toContain('Mark row');
+    expect(html).not.toContain('Mark flagged');
+    expect(html).not.toMatch(/Redraw \d+ frame/);
+    expect(html).toContain('1 flagged');
+  });
+});
+
 describe('SpriteFrameGrid', () => {
   it('shows marked counts, row summary, pressed frames and the send button', () => {
     const html = render({ initialMarks: marks });

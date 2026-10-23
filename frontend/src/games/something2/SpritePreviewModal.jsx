@@ -132,6 +132,13 @@ function PropResult({ subject, version }) {
   );
 }
 
+function liveJobNote(subject) {
+  if (subject.redraw_of) return `Redraw ${subject.job_state}: showing the current sheet, read-only`;
+  return subject.job_state === 'running'
+    ? 'A new sheet is being drawn; marking is off until it finishes.'
+    : 'A new sheet is queued; marking is off until it finishes.';
+}
+
 export default function SpritePreviewModal({ subject, onClose }) {
   const [size, setSize] = useState(null);
   const [sheetWidth, setSheetWidth] = useState(null);
@@ -154,7 +161,9 @@ export default function SpritePreviewModal({ subject, onClose }) {
   const version = subject.atlas_key ? subject.job_updated_at : (subject.sheet_updated_at || subject.job_updated_at);
   const isRedraw = Boolean(subject.redraw_of);
   const failedRedraw = isRedraw && subject.job_state === 'failed';
-  const gridState = ['done', 'approved'].includes(subject.job_state) || failedRedraw;
+  // A queued/running job (new sheet or redraw) blocks a redraw: show the current sheet's frames read-only.
+  const liveJob = ['queued', 'running'].includes(subject.job_state);
+  const gridState = ['done', 'approved'].includes(subject.job_state) || failedRedraw || liveJob;
   const showGrid = subject.backend === 'gpu-box' && subject.generation_kind === 'creature'
     && Boolean(manifest.data) && Boolean(sheetKey) && gridState;
   const discardable = failedRedraw && (!subject.box_task_id || !subject.atlas_key);
@@ -191,6 +200,7 @@ export default function SpritePreviewModal({ subject, onClose }) {
         {isBoxProp(subject) ? <PropResult subject={subject} version={version} /> : showGrid ? (
         <Col>
           <strong>Frames (×2)</strong>
+          {liveJob && <Muted>{liveJobNote(subject)}</Muted>}
           {failedRedraw && (
             <Banner>
               <span>{`Redraw failed: ${subject.last_error || 'unknown error'}`}</span>
@@ -218,7 +228,7 @@ export default function SpritePreviewModal({ subject, onClose }) {
             initialMarks={initialMarks} initialAction={firstRedrawnAction} compare={compareProps}
             onMarksChange={(m) => { marksRef.current = m; setMarks(m); }}
             onSend={sendFrames(failedRedraw ? subject.sheet_job_id : subject.job_id)}
-            secondsPerCell={catalog?.seconds_per_cell} sending={redraw.isPending} />
+            secondsPerCell={catalog?.seconds_per_cell} sending={redraw.isPending} readOnly={liveJob} />
         </Col>
         ) : (
         <Col>

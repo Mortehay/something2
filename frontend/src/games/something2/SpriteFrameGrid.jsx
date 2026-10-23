@@ -57,6 +57,7 @@ function stepFocus(e) {
 
 export default function SpriteFrameGrid({
   sheetUrl, sheetPx, manifest, initialMarks, initialAction, compare, onSend, onMarksChange, secondsPerCell, sending,
+  readOnly = false,
 }) {
   const [marks, setMarksState] = useState(() => new Set(initialMarks || []));
   const rows = manifest?.rows || [];
@@ -82,7 +83,7 @@ export default function SpriteFrameGrid({
 
   const renderRow = (row) => {
     const { direction } = row;
-    const markable = isMarkable(direction);
+    const markable = !readOnly && isMarkable(direction);
     const markedIdx = [];
     for (let i = 0; i < row.frames; i += 1) if (marks.has(frameKey(action, direction, i))) markedIdx.push(i);
     const ctx = new Set(contextFrames(row.frames, markedIdx));
@@ -165,9 +166,9 @@ export default function SpriteFrameGrid({
             {flaggedKeys(a).length > 0 && <Badge $tone="warn">{`${flaggedKeys(a).length} flagged`}</Badge>}
           </Tab>
         ))}
-        {flaggedAll > 0 && <Btn type="button" onClick={() => markFlagged(null)}>{`Mark flagged (${flaggedAll}) in sheet`}</Btn>}
+        {!readOnly && flaggedAll > 0 && <Btn type="button" onClick={() => markFlagged(null)}>{`Mark flagged (${flaggedAll}) in sheet`}</Btn>}
       </Tabs>
-      {flaggedTab > 0 && (
+      {!readOnly && flaggedTab > 0 && (
         <RowHead><Btn type="button" onClick={() => markFlagged(action)}>{`Mark flagged (${flaggedTab})`}</Btn></RowHead>
       )}
       {rowsOf(DIRECTION_ORDER).map(renderRow)}
@@ -175,12 +176,14 @@ export default function SpriteFrameGrid({
         <summary>Not drawn in game (mirrored from e / ne / se)</summary>
         {rowsOf(WESTERN).map(renderRow)}
       </details>
+      {!readOnly && (
       <Footer>
         <Muted>{`${payload.length} frame${payload.length === 1 ? '' : 's'} marked · ${estimateLabel(payload.length, secondsPerCell || 57)}`}</Muted>
         <Btn type="button" $primary disabled={!payload.length || sending} onClick={() => onSend(payload)}>
           {`Redraw ${payload.length} frame${payload.length === 1 ? '' : 's'}`}
         </Btn>
       </Footer>
+      )}
     </div>
   );
 }

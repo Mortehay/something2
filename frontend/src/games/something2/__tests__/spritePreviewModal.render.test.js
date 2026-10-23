@@ -99,6 +99,28 @@ describe('SpritePreviewModal frame redraw', () => {
     expect(html).toContain('Retry redraw');
     expect(html).not.toContain('Discard redraw');
   });
+  it('a queued or running new sheet shows the current sheet as a read-only frame grid', () => {
+    const live = (job_state) => renderWith(failed({ job_state, redraw_of: null, redraw_frames: null, last_error: null }));
+    for (const [state, line] of [
+      ['queued', 'A new sheet is queued; marking is off until it finishes.'],
+      ['running', 'A new sheet is being drawn; marking is off until it finishes.'],
+    ]) {
+      const html = live(state);
+      expect(html).toContain('Frames (×2)');
+      expect(html).toContain(line);
+      expect(html).not.toContain('Sheet (×2)');
+      expect(html).not.toMatch(/Redraw \d+ frame/);
+      expect(html).not.toContain('Mark row');
+      expect(html).toMatch(/aria-label="idle s frame 0"[^>]*disabled|disabled[^>]*aria-label="idle s frame 0"/);
+    }
+  });
+  it('a queued redraw shows the current sheet as a read-only frame grid', () => {
+    const html = renderWith(failed({ job_state: 'queued', last_error: null }));
+    expect(html).toContain('Frames (×2)');
+    expect(html).toContain('Redraw queued: showing the current sheet, read-only');
+    expect(html).not.toContain('Retry redraw');
+    expect(html).not.toMatch(/Redraw \d+ frame/);
+  });
   it('a prop keeps the prop view', () => {
     const html = renderWith(prop());
     expect(html).not.toContain('Retry redraw');
