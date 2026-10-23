@@ -312,6 +312,10 @@ async function deleteGeneratedRows(client, targets) {
   let subjects = 0;
   for (const { entityId, variant } of seen.values()) {
     const where = 'entity_type_id = $1 AND COALESCE(appearance_variant, 0) = COALESCE($2::smallint, 0)';
+    // Lock the subject's rows first: a dispatcher claim() waits (or skips them)
+    // until this transaction ends, so the running check below cannot go stale
+    // before the DELETE.
+    await client.query(`SELECT id FROM sprite_sets WHERE ${where} FOR UPDATE`, [entityId, variant]);
     const { rows: running } = await client.query(
       `SELECT 1 FROM sprite_sets WHERE ${where} AND status = 'running' LIMIT 1`, [entityId, variant],
     );

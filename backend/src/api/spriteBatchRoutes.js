@@ -1,5 +1,7 @@
 const express = require('express');
 const queue = require('../services/spriteJobQueue.js');
+const concepts = require('../services/spriteConcepts.js');
+const { safeName } = require('../services/spriteDispatcher.js');
 const { PROP_FX } = queue;
 const { appearancePrompt } = require('../services/catalogSubjects.js');
 const { staticFrameFor } = require('../services/spriteSheetManifest.js');
@@ -147,7 +149,8 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   j.id AS job_id, j.status AS job_state, j.generation_kind, j.frames,
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
                   j.concept_key, j.actions, j.directions, j.frames_per_action, j.box_job_id,
-                  j.prop_fx, j.updated_at AS job_updated_at,
+                  j.prop_fx, j.updated_at AS job_updated_at, j.note,
+                  kc.concept_key AS kept_concept_key,
                   j.redraw_of, j.redraw_frames, j.box_task_id,
                   rl.redraw_source_atlas_key, rl.redraw_compare_frames,
                   sh.id AS sheet_job_id, sh.atlas_key AS sheet_atlas_key,
@@ -159,6 +162,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                 ORDER BY s.created_at DESC LIMIT 1
              ) j ON true
              ${REDRAW_LINEAGE_JOIN}
+             LEFT JOIN sprite_concepts kc ON kc.entity_type_id = e.id AND kc.appearance_variant IS NULL
              LEFT JOIN LATERAL (
                SELECT s2.id, s2.atlas_key, s2.manifest_key, s2.updated_at FROM sprite_sets s2
                 WHERE s2.entity_type_id = e.id AND s2.appearance_variant IS NULL AND s2.atlas_key IS NOT NULL
@@ -177,7 +181,8 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   j.id AS job_id, j.status AS job_state, j.generation_kind, j.frames,
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
                   j.concept_key, j.actions, j.directions, j.frames_per_action, j.box_job_id,
-                  j.prop_fx, j.updated_at AS job_updated_at,
+                  j.prop_fx, j.updated_at AS job_updated_at, j.note,
+                  kc.concept_key AS kept_concept_key,
                   j.redraw_of, j.redraw_frames, j.box_task_id,
                   rl.redraw_source_atlas_key, rl.redraw_compare_frames,
                   sh.id AS sheet_job_id, sh.atlas_key AS sheet_atlas_key,
@@ -190,6 +195,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                 ORDER BY s.created_at DESC LIMIT 1
              ) j ON true
              ${REDRAW_LINEAGE_JOIN}
+             LEFT JOIN sprite_concepts kc ON kc.entity_type_id = ca.entity_type_id AND kc.appearance_variant = ca.variant
              LEFT JOIN LATERAL (
                SELECT s2.id, s2.atlas_key, s2.manifest_key, s2.updated_at FROM sprite_sets s2
                 WHERE s2.entity_type_id = ca.entity_type_id AND s2.appearance_variant = ca.variant
@@ -236,6 +242,8 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           box_job_id: a.box_job_id,
           prop_fx: a.prop_fx,
           job_updated_at: a.job_updated_at,
+          note: a.note,
+          kept_concept_key: a.kept_concept_key,
           redraw_of: a.redraw_of,
           redraw_frames: a.redraw_frames,
           redraw_source_atlas_key: a.redraw_source_atlas_key,
@@ -461,6 +469,110 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     } catch (err) {
       console.error(err);
       res.status(500).json({ error: 'Failed to clear sprite jobs' });
+    }
+  });
+
+  // Deletes every sprite_sets row of the targeted subjects (running ones are
+  // skipped) and then their stored files. Files go AFTER the commit and only
+  // per row-id folder, never a shorter prefix (sprites/Cultist_1/ would also
+  // match sprites/Cultist_10/); kept concepts and keys an entity or appearance
+  // still shows are never removed.
+  router.post('/jobs/delete-generated', async (req, res) => {
+    const targets = targetsFrom(req.body);
+    if (!targets) return res.status(400).json({ error: 'targets must list 1 to 1000 subjects' });
+    let out;
+    let client;
+    try {
+      client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        out = await queue.deleteGeneratedRows(client, targets);
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+      }
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'Failed to delete generated sprites' });
+    } finally {
+      if (client) client.release();
+    }
+    if (out.cancel_box_job_ids.length) {
+      Promise.resolve().then(() => cancelBoxJobs(out.cancel_box_job_ids))
+        .catch((err) => console.error('sprite delete: box cancel failed', err));
+    }
+
+    // Folders are sprites/<name>/<row id>/ -- a key whose directory is not
+    // exactly that is never trusted as a prefix.
+    const folders = new Set();
+    for (const row of out.rows) {
+      const tail = `/${row.id}/`;
+      let found = false;
+      for (const k of [row.atlas_key, row.manifest_key, row.image_key, row.concept_key]) {
+        if (typeof k !== 'string') continue;
+        const dir = k.slice(0, k.lastIndexOf('/') + 1);
+        if (dir.endsWith(tail)) { folders.add(dir); found = true; }
+      }
+      if (!found) folders.add(`${store.BUCKET()}/${safeName(row.creature)}/${row.id}/`);
+    }
+    let filesDeleted = 0;
+    const failed = [];
+    if (folders.size) {
+      let protectedKeys = null;
+      try {
+        const { rows } = await pool.query(
+          `SELECT concept_key AS k FROM sprite_concepts
+           UNION SELECT image FROM entity_types WHERE image IS NOT NULL
+           UNION SELECT image FROM character_appearances WHERE image IS NOT NULL`,
+        );
+        protectedKeys = new Set(rows.map((r) => r.k));
+      } catch (err) {
+        console.error('sprite delete: could not read protected keys; leaving files', err);
+        failed.push(...folders);
+      }
+      if (protectedKeys) {
+        for (const prefix of folders) {
+          let keys;
+          try {
+            // eslint-disable-next-line no-await-in-loop
+            keys = await store.listObjectKeys(prefix);
+          } catch (err) {
+            console.error(`sprite delete: could not list ${prefix}`, err);
+            failed.push(prefix);
+            continue;
+          }
+          for (const key of keys) {
+            if (protectedKeys.has(key) || !key.startsWith(prefix)) continue;
+            try {
+              // eslint-disable-next-line no-await-in-loop
+              await store.removeObject(key);
+              filesDeleted += 1;
+            } catch (err) {
+              console.error(`sprite delete: could not remove ${key}`, err);
+              failed.push(key);
+            }
+          }
+        }
+      }
+    }
+    res.json({
+      deleted_jobs: out.rows.length,
+      subjects: out.subjects,
+      skipped_running: out.skipped_running,
+      files_deleted: filesDeleted,
+      files_failed: failed.slice(0, 50),
+    });
+  });
+
+  router.post('/concepts/clear', async (req, res) => {
+    const targets = targetsFrom(req.body);
+    if (!targets) return res.status(400).json({ error: 'targets must list 1 to 1000 subjects' });
+    try {
+      res.json(await concepts.clearKept(pool, targets));
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to clear kept concepts' });
     }
   });
 

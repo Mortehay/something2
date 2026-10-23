@@ -583,4 +583,4 @@ function createDispatcher({
   return { start, stop, halt, status };
 }
 
-module.exports = { createDispatcher, NO_PROVIDER, QUEUE_CAP_MS };
+module.exports = { createDispatcher, NO_PROVIDER, QUEUE_CAP_MS, safeName };
