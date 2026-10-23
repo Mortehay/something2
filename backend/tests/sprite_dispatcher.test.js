@@ -1039,3 +1039,25 @@ test('redraw rows never consult the kept concept', async () => {
   assert.deepEqual(concepts.log.gets, []);
   assert.equal(box.calls.avail.length, 0);
 });
+
+for (const [status, retryable] of [[429, true], [401, false], [403, false]]) {
+  test(`a ${status} on the reused concept fails the row without drawing a new one`, async () => {
+    const box = fakeBox({ createSheetJob: async () => ({ ok: false, status, retryable, error: `GPU box answered ${status}` }) });
+    const { d, queue, concepts } = dispatcherFor({ rows: [wolfRow()], box, concepts: fakeConcepts(KEPT), store: keptStore() });
+    await d.start();
+    assert.equal(box.calls.concept.length, 0);
+    assert.equal(queue.log.failed.length, 1);
+    assert.deepEqual(queue.log.notes, []);
+    assert.deepEqual(concepts.log.upserts, []);
+  });
+}
+
+test('upsertKept throwing does not fail the row; the box job is already recorded', async () => {
+  const concepts = fakeConcepts(null);
+  concepts.upsertKept = async () => { throw new Error('db down'); };
+  const { d, queue } = dispatcherFor({ rows: [wolfRow()], concepts });
+  await d.start();
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(queue.log.attached.length, 1);
+  assert.equal(queue.log.completed.length, 1);
+});

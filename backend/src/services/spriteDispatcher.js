@@ -260,7 +260,8 @@ function createDispatcher({
             await queue.attachBox(db, row.id, { boxJobId: reused.boxJobId, conceptKey, providerId: provider.id });
             return { boxJobId: reused.boxJobId, conceptKey, cells: reused.cells, estimatedSeconds: reused.estimatedSeconds };
           }
-          const refused = reused.status >= 400 && reused.status < 500 && !reused.retryable;
+          const refused = reused.status >= 400 && reused.status < 500 && !reused.retryable
+            && reused.status !== 401 && reused.status !== 403;
           if (!refused) must(reused);
         }
       }
@@ -274,15 +275,20 @@ function createDispatcher({
     // before a sheet job is ever created.
     if (run && run.halting) throw haltedError();
     const job = must(await box.createSheetJob(provider, sheetSpec(row, concept.conceptPath)));
-    await concepts.upsertKept(db, {
-      entityTypeId: row.entity_type_id,
-      variant: row.appearance_variant,
-      conceptKey,
-      boxConceptPath: concept.conceptPath,
-      providerId: provider.id,
-      boxOrigin: origin,
-    });
     await queue.attachBox(db, row.id, { boxJobId: job.boxJobId, conceptKey, providerId: provider.id });
+    // Best effort: a missed keep only costs a re-draw next time.
+    try {
+      await concepts.upsertKept(db, {
+        entityTypeId: row.entity_type_id,
+        variant: row.appearance_variant,
+        conceptKey,
+        boxConceptPath: concept.conceptPath,
+        providerId: provider.id,
+        boxOrigin: origin,
+      });
+    } catch (err) {
+      console.error(`sprite concept: could not keep the concept for ${row.id}: ${err.message}`);
+    }
     return { boxJobId: job.boxJobId, conceptKey, cells: job.cells, estimatedSeconds: job.estimatedSeconds };
   }
 
