@@ -223,6 +223,40 @@ test('AC2: no blocking decoration on or around a portal endpoint, roads off', ()
     'ground just outside the portal clear radius must still be decorated');
 });
 
+// The dungeon boss post (SOMET-609) is a required tile in seed-map, so it gets
+// the portal endpoint's clearance. Found by the full suite: after the scenery
+// rollout widened Stone onto crypt_floor, p5-descent's d1_end boss post at
+// (54,49) landed under a Stone and seeding refused the spec.
+test('the dungeon boss post gets the portal clear radius, roads off', () => {
+  const R = PORTAL_CLEAR_RADIUS;
+  const { row, col } = CLUMPED_PORTAL;
+  const without = blockers(forestWorld());
+  assert.ok(without.has(`${row},${col}`), 'fixture: the post tile is a blocker with no boss declared');
+
+  const placed = blockers(forestWorld({ dungeonBoss: { x: col * 100 + 50, y: row * 100 + 50 } }));
+  const offenders = [];
+  for (let dr = -R; dr <= R; dr++) {
+    for (let dc = -R; dc <= R; dc++) {
+      if (placed.has(`${row + dr},${col + dc}`)) offenders.push(`(${row + dr},${col + dc})`);
+    }
+  }
+  assert.deepStrictEqual(offenders, [], `blockers within the boss clear radius: ${offenders.join(', ')}`);
+  assert.ok(placed.has(`${row},${col + R + 1}`) || placed.has(`${row + R + 1},${col}`),
+    'ground just outside the boss clear radius must still be decorated');
+});
+
+test('buildWorldGenConfig maps worlds.dungeon_boss to a point, and junk to null', () => {
+  const { buildWorldGenConfig } = require('../src/services/worldGenConfig');
+  const cfg = (dungeon_boss) => buildWorldGenConfig({
+    row: { seed: 1, chunk_size: 32, width: 64, height: 64, dungeon_boss }, tileTypes: TILE_TYPES,
+  }).dungeonBoss;
+  assert.deepStrictEqual(cfg({ entity: 'X', x: 4950, y: '5450', respawn_s: 900 }), { x: 4950, y: 5450 });
+  assert.strictEqual(cfg(null), null);
+  assert.strictEqual(cfg(undefined), null);
+  assert.strictEqual(cfg({ entity: 'X' }), null);
+  assert.strictEqual(cfg({ x: 'a', y: 1 }), null);
+});
+
 test('AC2: portalTileCells converts world pixels to tiles and drops junk', () => {
   assert.deepStrictEqual(
     portalTileCells({ portals: [{ x: 2050, y: 199 }] }), [{ row: 1, col: 20 }]);

@@ -76,7 +76,7 @@ test('GET /chunk (cache miss) returns decorations matching generateChunkDecorati
   assert.deepEqual(res.body.decorations, expectedDecorations);
   assert.ok(expectedDecorations.length > 0, 'fixture should place at least one decoration');
   for (const d of res.body.decorations) {
-    assert.deepEqual(Object.keys(d).sort(), ['blocking', 'col', 'name', 'row']);
+    assert.deepEqual(Object.keys(d).sort(), ['blocking', 'col', 'layer', 'name', 'ox', 'oy', 'radius', 'row']);
     assert.equal(d.name, 'Tree');
     assert.equal(d.blocking, true);
   }
@@ -164,4 +164,58 @@ test('GET /chunk rejects a token whose token_version is stale (revocation is liv
   });
   const res = await request(app).get('/api/worlds/w1/chunk?cx=0&cy=0').set(...AUTH);
   assert.equal(res.status, 401);
+});
+
+// Ground cover rides in a compact side channel (spec: cover over /chunk), not in
+// `decorations`. A cover-dense biome world, via the same mocked pool.
+const MOSS_DEF = { name: 'Moss', walkable: true, spawn_tiles: ['grass'], chance: 1, scenery_layer: 'cover', block_radius: null, max_per_tile: 3 };
+const COVER_WORLD = { ...WORLD_ROW, biomes: ['Meadow'] };
+const MEADOW = { id: 1, name: 'Meadow', terrain_tiles: ['grass'], flora_types: ['Moss'], creature_types: [], feature_density: 0, cover_density: 3 };
+
+function coverPool() {
+  return mockPool([
+    [/FROM world_chunks WHERE world_id/i, () => ({ rows: [] })],
+    [/FROM worlds WHERE id/i, () => ({ rows: [COVER_WORLD] })],
+    [/FROM tile_types/i, () => TILE_ROWS],
+    [/FROM entity_types/i, () => ({ rows: [DECORATION_DEF, MOSS_DEF] })],
+    [/FROM map_links/i, () => ({ rows: [] })],
+    [/FROM villages v\b[\s\S]*WHERE v\.world_id/i, () => ({ rows: [] })],
+    [/FROM biomes/i, () => ({ rows: [MEADOW] })],
+  ]);
+}
+
+test('response cover decodes to exactly the generator\'s cover entries; decorations has no cover entries', async () => {
+  __setPool(coverPool());
+  const res = await request(app).get('/api/worlds/w1/chunk?cx=0&cy=0').set(...AUTH);
+  assert.equal(res.status, 200);
+
+  const cfg = buildWorldGenConfig({
+    row: COVER_WORLD, tileTypes: { grass: { walkable: true, speed: 1 } },
+    doorways: [], villages: [], biomes: [MEADOW],
+  });
+  const data = generateChunk(cfg, 0, 0);
+  const all = generateChunkDecorations(cfg, 0, 0, data, [DECORATION_DEF, MOSS_DEF]);
+  const expected = all.filter((d) => d.layer === 'cover')
+    .map(({ name, row, col, ox, oy }) => ({ name, row, col, ox, oy }));
+  assert.ok(expected.length > 0, 'fixture should place cover');
+
+  const { types, cells } = res.body.cover;
+  assert.equal(cells.length % 5, 0);
+  const decoded = [];
+  for (let i = 0; i < cells.length; i += 5) {
+    decoded.push({ name: types[cells[i]], row: cells[i + 1], col: cells[i + 2], ox: cells[i + 3], oy: cells[i + 4] });
+  }
+  assert.deepEqual(decoded, expected);
+  assert.deepEqual(res.body.decorations, all.filter((d) => d.layer !== 'cover'));
+  assert.ok(res.body.decorations.every((d) => d.layer === 'feature'));
+
+  const legacy = JSON.stringify({ decorations: all }).length;
+  const compact = JSON.stringify({ decorations: res.body.decorations, cover: res.body.cover }).length;
+  assert.ok(compact < legacy);
+});
+
+test('GET /chunk without cover returns cover { types: [], cells: [] }', async () => {
+  __setPool(poolFor());
+  const res = await request(app).get('/api/worlds/w1/chunk?cx=0&cy=0').set(...AUTH);
+  assert.deepEqual(res.body.cover, { types: [], cells: [] });
 });

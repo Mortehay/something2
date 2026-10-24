@@ -93,6 +93,16 @@ function BiomeCard({ biome, tileNames, floraNames, creatureNames }) {
       <NameChecks options={creatureNames} selected={form.creature_types} onToggle={toggle('creature_types')} />
 
       <Row>
+        <Label>Feature density</Label>
+        <Input type="number" step="0.05" min="0" max="1" style={{ width: 90 }} placeholder="0.6"
+          value={form.feature_density} onChange={e => set('feature_density', e.target.value)}
+          title="Share of eligible tiles that get a rock/tree/bush (0-1). Blank = default 0.6." />
+        <Label>Cover density</Label>
+        <Input type="number" step="0.1" min="0" max="3" style={{ width: 90 }} placeholder="0"
+          value={form.cover_density} onChange={e => set('cover_density', e.target.value)}
+          title="Ground-cover pieces per tile (0-3). Blank or 0 = none." />
+      </Row>
+      <Row>
         <Label>Palette</Label>
         <Input style={{ flex: 1, minWidth: 260 }} placeholder="ochre, gold, burnt sienna"
           value={form.palette} onChange={e => set('palette', e.target.value)} />

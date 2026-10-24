@@ -247,8 +247,30 @@ test('a real Druid charms a real creature', { skip: !DB_URL ? 'no database URL' 
     const pet = druid.world.creatures.get(petId);
     // Well beyond CHARM_FOLLOW_RANGE (120), and beyond a hostile's own aggro
     // too, so "it moved toward the player" cannot be ordinary chasing.
-    pet.x = druid.player.x + 600;
-    pet.y = druid.player.y;
+    //
+    // The spot is SCANNED for, not fixed at druid+600: the world carries
+    // blocking scenery (sub-tile circles), and a pet teleported onto one is
+    // pinned there by collision, which says nothing about following. Nearest
+    // offset first, ~600px east, whose whole 48px box AND the lane it will walk
+    // toward the druid read walkable on the authority's own map.
+    const map = druid.world.map;
+    const clear = (x0, y0, x1, y1) => {
+      for (let y = y0; y <= y1; y += 4) for (let x = x0; x <= x1; x += 4) if (!map.isWalkable(x, y)) return false;
+      return true;
+    };
+    let spot = null;
+    for (let k = 0; k <= 40 && !spot; k++) {
+      for (const dx of [600 + k * 10, 600 - k * 10]) {
+        for (const dy of [0, k * 10, -k * 10]) {
+          const x = druid.player.x + dx, y = druid.player.y + dy;
+          if (clear(x - 60, y, x + 48, y + 48)) { spot = { x, y }; break; }
+        }
+        if (spot) break;
+      }
+    }
+    assert.ok(spot, 'no open ground ~600px from the druid to put the pet on');
+    pet.x = spot.x;
+    pet.y = spot.y;
     const before = pet.x;
     // The authority's own loop, over the authority's OWN active chunk set --
     // not creatures.tick() with a hand-rolled key list. This is the exact call

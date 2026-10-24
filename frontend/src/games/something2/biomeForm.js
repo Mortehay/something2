@@ -9,10 +9,18 @@ function names(v) {
   return Array.isArray(v) ? v.filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim()) : [];
 }
 
+// '' / null -> null (unset); anything else goes as the number the server clamps.
+function densityOrNull(v) {
+  if (v === '' || v == null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 export function emptyBiomeForm() {
   return {
     name: '', terrain_tiles: [], flora_types: [], creature_types: [],
     palette: '', art_style: '', exclusions: '', color: DEFAULT_COLOR,
+    feature_density: '', cover_density: '',
   };
 }
 
@@ -26,6 +34,9 @@ export function biomeToForm(row) {
     art_style: row?.art_style || '',
     exclusions: row?.exclusions || '',
     color: row?.color || DEFAULT_COLOR,
+    // '' = unset (NULL): the generator then uses feature 0.6 / cover 0
+    feature_density: row?.feature_density ?? '',
+    cover_density: row?.cover_density ?? '',
   };
 }
 
@@ -49,6 +60,8 @@ export function biomeFormToPayload(form, catalogs = {}) {
     art_style: form.art_style || '',
     exclusions: form.exclusions || '',
     color: form.color || DEFAULT_COLOR,
+    feature_density: densityOrNull(form.feature_density),
+    cover_density: densityOrNull(form.cover_density),
   };
 }
 

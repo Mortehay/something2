@@ -26,7 +26,8 @@ async function loadBiomes(pool, names) {
     // roads that are invisible again -- the precise bug the column was added
     // to fix -- with nothing anywhere reporting an error.
     `SELECT id, name, terrain_tiles, flora_types, creature_types,
-            palette, art_style, exclusions, color, creature_density, path_tile
+            palette, art_style, exclusions, color, creature_density, path_tile,
+            feature_density, cover_density
        FROM biomes
       WHERE name = ANY($1::text[])`,
     [wanted],
