@@ -82,6 +82,8 @@ post-processing.
 
 ```
 git pull
+make seed                      # runs all seed targets (catalogs, passives, quests, art, audio, map)
+# or individually:
 make seed-catalogs             # the rows the art attaches to must exist
 make seed-passive-tree         # if passive_label art is included
 make art-seed                  # or KIND=...

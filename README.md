@@ -86,6 +86,8 @@ separate migrate step on a fresh database.
 worlds, so the game has nothing to render:
 
 ```bash
+make seed                      # runs all seeders: catalogs, passives, quests, art, audio, and starter map (vale-region)
+# or step-by-step:
 make seed-catalogs             # tiles, biomes, creatures, decorations
 make list-specs                # which maps you can seed
 make seed-map SPEC=vale-region # seed one — see the note below

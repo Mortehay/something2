@@ -1,6 +1,7 @@
 .PHONY: git-helper git-helper-stop git-helper-status seed-sync-status seed-sync-export seed-sync-seed up down build logs restart rebuild clean nuke shell-backend shell-frontend db-shell \
         engine-build engine-test engine-up engine-down engine-logs engine-shell engine-rebuild \
         redis-shell admin-password admin-password-rotate seed-catalogs seed-map seed-passive-tree \
+        seed-quests seed-all seed \
         art-export art-seed audio-export audio-seed tiles-generate tiles-export tiles-seamless tiles-seed \
         entities-generate entities-export entities-cutout entities-seed \
         entities-restyle-prompts art-describe audio-describe \
@@ -235,6 +236,9 @@ admin-password-rotate:
 
 seed-catalogs:
 	$(COMPOSE) exec -T backend node scripts/seed-catalogs.js
+
+seed-quests:
+	$(COMPOSE) exec -T backend node scripts/seed-quests.js
 
 # --- Catalog art: export / seed (SOMET-572) ------------------------------
 #
@@ -474,6 +478,45 @@ reseed-map:
 	RESEED_SPEC=$(SPEC) $(MAKE) clear-maps
 	$(MAKE) seed-catalogs
 	$(MAKE) seed-map SPEC=$(SPEC)
+
+# --- Complete seed (runs all seed targets in dependency order) --------------
+#
+# Seeding order:
+#   1. seed-catalogs      (tiles, biomes, decorations, creatures, loot, classes)
+#   2. seed-passive-tree  (passive skill tree)
+#   3. seed-quests        (storyline quests)
+#   4. art-seed           (committed textures -> MinIO + catalog rows)
+#   5. audio-seed         (committed audio clips -> MinIO + bindings)
+#   6. seed-map           (default SPEC=vale-region, or pass SPEC=<name>; skip with NO_MAP=1)
+#
+# Flags passed through:
+#   SPEC=<name>           map spec to seed (default: vale-region)
+#   NO_MAP=1              skip seeding map
+#   FORCE=1               overwrite existing art and force-reseed passive tree
+#   KIND=<kinds>          limit art-seed and audio-seed to specific kinds
+#   ONLY=<subjects>       limit art-seed and audio-seed to specific subjects
+#
+seed-all:
+	@echo "==> [1/6] Seeding catalogs (tiles, biomes, creatures, decorations, classes)..."
+	@$(MAKE) --no-print-directory seed-catalogs
+	@echo "==> [2/6] Seeding passive skill tree..."
+	@$(MAKE) --no-print-directory seed-passive-tree $(if $(FORCE),FORCE=$(FORCE),)
+	@echo "==> [3/6] Seeding storyline quests..."
+	@$(MAKE) --no-print-directory seed-quests
+	@echo "==> [4/6] Seeding art textures (MinIO)..."
+	@$(MAKE) --no-print-directory art-seed $(if $(KIND),KIND=$(KIND),) $(if $(ONLY),ONLY=$(ONLY),) $(if $(FORCE),FORCE=$(FORCE),)
+	@echo "==> [5/6] Seeding audio clips (MinIO)..."
+	@$(MAKE) --no-print-directory audio-seed $(if $(KIND),KIND=$(KIND),) $(if $(ONLY),ONLY=$(ONLY),) $(if $(FORCE),FORCE=$(FORCE),)
+	@if [ -z "$(NO_MAP)$(NOMAP)" ]; then \
+		echo "==> [6/6] Seeding map ($(or $(SPEC),vale-region))..."; \
+		$(MAKE) --no-print-directory seed-map SPEC=$(or $(SPEC),vale-region); \
+	else \
+		echo "==> [6/6] Skipping map seeding (NO_MAP is set)"; \
+	fi
+	@echo
+	@echo "==> All seeds applied successfully!"
+
+seed: seed-all
 
 # --- Orange Pi production stack (SOMET-423) --------------------------------
 # compose/orangepi/ is the production-shaped stack: see the README's
