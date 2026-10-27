@@ -132,7 +132,19 @@ async function clearPortalLink(pool, fromId, fromX, fromY) {
 //
 // `keepSlots` are `${worldId}:${edge}` strings for BOTH directions of every
 // declared link; setLink writes the mirror itself, so pruning has to expect it.
-async function pruneCompassLinks(client, worldIds, keepSlots) {
+//
+// SOMET-641 lifts the "cannot survive" limitation above, without weakening the
+// prune for anything a spec does not declare:
+//   - a spec may declare a cross-spec link (`to_name`). Its mirror leaves a
+//     world this spec does not own, so it is in `keepSlots` by id, and the
+//     INBOUND pass now spares keepSlots too (for a spec with no cross-spec
+//     links, keepSlots holds only its own worlds' ids, which the inbound pass
+//     never matches -- unchanged behaviour).
+//   - `keepNames` are '<world name>:<edge>' slots OTHER specs declare. The
+//     inbound pass spares a row whose own from_name:edge is one of them; the
+//     outbound pass spares a row that is the MIRROR of one (its target's
+//     name:opposite-edge is kept), since that spec's setLink wrote it.
+async function pruneCompassLinks(client, worldIds, keepSlots, { keepNames = [] } = {}) {
   const removed = [];
   const outbound = await client.query(
     `DELETE FROM map_links ml
@@ -141,8 +153,10 @@ async function pruneCompassLinks(client, worldIds, keepSlots) {
         AND ml.edge <> 'PORTAL'
         AND ml.from_world_id = ANY($1::uuid[])
         AND (ml.from_world_id::text || ':' || ml.edge) <> ALL($2::text[])
+        AND (wt.name || ':' || CASE ml.edge WHEN 'N' THEN 'S' WHEN 'S' THEN 'N'
+                                            WHEN 'E' THEN 'W' WHEN 'W' THEN 'E' END) <> ALL($3::text[])
       RETURNING wf.name AS from_name, ml.edge, wt.name AS to_name`,
-    [worldIds, keepSlots],
+    [worldIds, keepSlots, keepNames],
   );
   removed.push(...outbound.rows.map((r) => ({ ...r, reason: 'not declared by this spec' })));
 
@@ -153,8 +167,10 @@ async function pruneCompassLinks(client, worldIds, keepSlots) {
         AND ml.edge <> 'PORTAL'
         AND ml.to_world_id = ANY($1::uuid[])
         AND ml.from_world_id <> ALL($1::uuid[])
+        AND (ml.from_world_id::text || ':' || ml.edge) <> ALL($2::text[])
+        AND (wf.name || ':' || ml.edge) <> ALL($3::text[])
       RETURNING wf.name AS from_name, ml.edge, wt.name AS to_name`,
-    [worldIds],
+    [worldIds, keepSlots, keepNames],
   );
   removed.push(...inbound.rows.map((r) => ({ ...r, reason: 'one-way link in from a world this spec does not own' })));
 

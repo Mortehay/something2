@@ -82,6 +82,7 @@ test('audio drain in phases', { skip }, async (t) => {
     let written = 0;
     const provider = {
       id: null, base_url: 'http://box.invalid', modality: 'audio', models_cache: ['cue:hit', 'cue:death'],
+      models_by_group: { music: 'audio:ace-step', ambience: 'audio:stable-audio' },
     };
     const textProvider = { id: null, modality: 'text', model: 'qwen3.6-35b-a3b', base_url: 'http://box.invalid' };
     const fakeLib = {
@@ -310,6 +311,34 @@ test('audio drain in phases', { skip }, async (t) => {
         const j = await jobOf(k);
         assert.deepEqual([j.state, j.attempts], ['queued', 0], 'never claimed, never failed');
         await pool.query('DELETE FROM audio_jobs WHERE subject_key = $1', [k]);
+      });
+
+      await t.test('a sfx_retro job switches to the model configured on the provider row for that group', async () => {
+        reset();
+        await q.enqueue(pool, [{
+          subject_kind: 'creature', subject_key: `${tag}-q-retro`, slot: 'hurt', clip_kind: 'sfx', engine: 'retro', prompt: 'a beast',
+        }]);
+        const generateSfxPack = async (p, body) => ({
+          ok: true,
+          items: body.items.map((it) => ({
+            ok: true, cue: it.cue, entity: it.entity, clips: [{ buffer: OGG, durationMs: 500 }], prompt: 'p', seed: 1, cached: false,
+          })),
+        });
+        d.startDrain(pool, {
+          deps: depsWith({
+            resolveAudioProvider: async () => ({ ...provider, models_by_group: { sfx_retro: 'audio:retro-engine' } }),
+            generateSfxPackForJobs: (db, p, jobs, opts) => gen.generateSfxPackForJobs(db, p, jobs, {
+              ...opts, rap: { generateSfxPack }, lib: fakeLib,
+            }),
+            generateForSlot: (db, p, spec) => gen.generateForSlot(db, p, spec, {
+              rap: { ...rap, generateSfx: async () => ({ ok: true, clips: [{ buffer: OGG, durationMs: 500 }], prompt: 'p', seed: 1 }) }, lib: fakeLib,
+            }),
+          }),
+        });
+        const s = await waitIdle();
+        assert.equal(s.failed, 0, s.error);
+        assert.equal(s.done, 1);
+        assert.deepEqual(calls.filter((c) => c.startsWith('switch:')), ['switch:audio:retro-engine']);
       });
 
       await t.test('a refusal naming another model switches to it and retries, for a group with no map entry', async () => {
@@ -561,6 +590,18 @@ test('audio drain in phases', { skip }, async (t) => {
         assert.deepEqual(calls.filter((c) => c.startsWith('generate:')), [`generate:${active.text}`]);
         const row = (await pool.query('SELECT style, prompt FROM audio_jobs WHERE subject_key = $1', [k])).rows[0];
         assert.deepEqual(row, { style: null, prompt: null }, "the job's own style and prompt were cleared");
+      });
+
+      await t.test('an ollama text provider is called directly: the prompt phase makes no switch to a brain: model', async () => {
+        reset();
+        const k = await world('ol1');
+        await q.enqueue(pool, [music(k)]);
+        d.startDrain(pool, { deps: depsWith({ loadTextProvider: async () => ({ ...textProvider, adapter: 'ollama', model: 'llama3:8b' }) }) });
+        const s = await waitIdle();
+        assert.equal(s.stopped_reason, 'empty', s.error);
+        assert.equal(s.failed, 0, s.error);
+        assert.deepEqual(calls.map((c) => c.replace(/^generate:.*/, 'generate')), ['text', `switch:${ACE}`, 'generate'],
+          'only the audio phase switches; no brain: switch for a non-box text provider');
       });
 
       await t.test('a text provider with no model fails its prompt jobs with that reason; nothing waits', async () => {

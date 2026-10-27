@@ -60,6 +60,23 @@ class Settings:
     # so an unconfigured deploy never even starts; this default only matters
     # for direct/non-compose runs (bare uvicorn, this test suite).
     sprite_gen_shared_secret: str = os.getenv("SPRITE_GEN_SHARED_SECRET", "")
+    # SOMET-539. Redis stays LOCAL to this sprite-gen instance -- a GPU-box
+    # deployment runs its own sprite-gen + its own Redis; only HTTP crosses
+    # machines. DB 1 (not 0) so dev's shared `redis` container doesn't mix
+    # job-store keys with the game-engine's live state.
+    redis_url: str = os.getenv("REDIS_URL", "redis://redis:6379/1")
+    # Test-only escape hatch: fakeredis instead of a real server, so the unit
+    # suite never needs a reachable Redis (same reasoning as the MinIO-
+    # blocking fixture in conftest.py). conftest.py sets this before
+    # app.main is imported; production never sets it.
+    redis_backend: str = os.getenv("SPRITE_GEN_REDIS_BACKEND", "real")
+    sprite_gen_workers: int = int(os.getenv("SPRITE_GEN_WORKERS", "1"))
+    job_deadline_seconds: int = int(os.getenv("SPRITE_GEN_JOB_DEADLINE_SECONDS", "900"))
+    job_max_retries: int = int(os.getenv("SPRITE_GEN_JOB_MAX_RETRIES", "2"))
+    job_ttl_seconds: int = int(os.getenv("SPRITE_GEN_JOB_TTL_SECONDS", str(24 * 3600)))
+    job_watchdog_interval_seconds: float = float(
+        os.getenv("SPRITE_GEN_WATCHDOG_INTERVAL_SECONDS", "5")
+    )
 
     def capability(self) -> dict:
         return build_capability(self.device)

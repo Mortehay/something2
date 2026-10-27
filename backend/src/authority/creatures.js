@@ -4,19 +4,21 @@
 // creature's CURRENT chunk (chunkOf), never its spawn chunk.
 const { resolveMove, MAP_TILE_SIZE } = require('./collision');
 const { chunkOf, CHUNK_KEY } = require('./coords');
-const { inArc, hasLineOfSight } = require('./weapons');
+const { inArc, hasLineOfSight, hitRadius } = require('./weapons');
 const {
   applyDamageWithEffects, NO_MITIGATION, isProvokedBy, provoke, playerKey, creatureKey,
 } = require('./damage');
 const { resolveEffectName } = require('./vfx.js');
 const { bodyLift } = require('./attackOrigin.js');
 const {
-  creatureUse, creatureHit, creatureHurt, creatureDeath, pushSfxEvent,
+  creatureUse, creatureHit, creatureHurt, creatureDeath, bossSfx, creatureSkillSfx, pushSfxEvent,
 } = require('./sfxEvents.js');
 const {
   applyElementEffect, applyHitStatuses, activeEffectKeys, canAct, charmerOf,
 } = require('./effects');
 const { resolveBehavior, DEFAULT_BEHAVIOR, DEFAULT_ABILITY } = require('../services/creatureBehaviors');
+const { resolveInstanceAuras, AURAS_LATERAL } = require('../services/auraEffects.js');
+const { DEFAULT_SKILL } = require('../services/creatureSkills');
 const { shoveAwayFrom } = require('./knockback');
 
 const DIRS = [
@@ -24,8 +26,28 @@ const DIRS = [
 ];
 const DIR_FACING = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE'];
 const CREATURE_SIZE = 48;
+
+// SOMET-603: the largest server hitbox a catalog row may ask for. Same ceiling
+// as MAX_ENTITY_DISPLAY_PX in index.js (4 tiles at MAP_TILE_SIZE 100) and as
+// the entity_types_hitbox_size_check constraint.
+const MAX_HITBOX_SIZE = 400;
+
+// A usable hitbox or null. Strict on purpose: a string '96' or a 12.5 is a
+// fixture/admin bug, and null makes the caller fall back to CREATURE_SIZE.
+function hitboxOrNull(v) {
+  return Number.isInteger(v) && v > 0 && v <= MAX_HITBOX_SIZE ? v : null;
+}
 const CREATURE_SPEED = 40;    // world px/s
 const REDIRECT_CHANCE = 0.02;
+
+// SOMET-608 (S6). creature_skills has no projectile_speed column of its own
+// (spec §3.3's table does not give the `projectile` kind one, unlike
+// creature_abilities) -- `radius` serves the AoE role for slam/nova and the
+// projectile_radius (hit-size) role for `projectile`, and speed is this one
+// fixed default rather than a second configurable number the spec never
+// asked for. 400 sits in the middle of the existing ability speeds (Ranged
+// 520, Caster 420, Apex 460).
+const SKILL_PROJECTILE_SPEED = 400;
 
 // SOMET-254: AGGRO_RADIUS/LEASH_RADIUS/CONTACT_RANGE/CREATURE_ATTACK_COOLDOWN
 // are no longer read by any tick/behaviour-resolution code in this file --
@@ -150,6 +172,49 @@ function creatureMitigation(row) {
   };
 }
 
+// SOMET-603/624: the four boss tiers (entity_types_boss_tier_check). NULL =
+// an ordinary creature. 'miniboss' (SOMET-624) spawns via the regular biome
+// creature_types path, not a singular-encounter manager -- it is still a
+// boss_tier for render/UI/loot purposes.
+const BOSS_TIERS = Object.freeze(['world', 'dungeon_end', 'dungeon_elite', 'miniboss']);
+
+// SOMET-603 (spec §4.1): the ONE row -> addCreatures-input mapping. Every
+// path that puts a creature into a CreatureSim from the database goes through
+// here: server.js's activateChunk and injectGuardIntoSim (instance rows from
+// CREATURE_JOINED_SELECT) and WorldBossManager (type rows from
+// ENTITY_CATALOG_SELECT plus instance overrides). Two mappings is how
+// SOMET-249 nearly shipped a catalog inert; this is the third column set
+// (boss fields) that would otherwise have needed adding in three places.
+//
+// `instance` wins over `row`, which is how a type row becomes an instance:
+// the manager supplies id/x/y/hp/level. A type row has `name` and no `type`;
+// an instance row has `type` (wc.type) and no `name`.
+//
+// damage: base_damage -> damage lives HERE and nowhere else (controller
+// ruling P1). An explicit instance damage wins; otherwise a non-null
+// entity_types.base_damage; otherwise the row's own damage (wc.damage, the
+// per-instance level-scaled value). Left undefined when none is set so
+// addCreatures keeps its CREATURE_DAMAGE fallback. Consumers read the
+// hydrated `.damage` and must not re-derive it.
+//
+// One returned key per normalised field: a later column set (S3's
+// aura_names/aura_defs) adds its own line here, not a second mapping.
+function hydrateCreatureRow(row, instance = {}) {
+  const merged = { ...row, ...instance };
+  const type = merged.type ?? row.name;
+  let damage = merged.damage;
+  if (instance.damage == null && row.base_damage != null) damage = Number(row.base_damage);
+  return {
+    ...merged,
+    type,
+    name: instance.name ?? row.name ?? type,
+    damage,
+    bossTier: BOSS_TIERS.includes(merged.boss_tier) ? merged.boss_tier : null,
+    element: typeof merged.element === 'string' && merged.element !== '' ? merged.element : null,
+    hitboxSize: merged.hitbox_size == null ? null : hitboxOrNull(Number(merged.hitbox_size)),
+  };
+}
+
 // Abilities as one JSON array per creature, rather than a second round-trip
 // or a row-multiplying join. ORDER BY a.slot inside the aggregate is
 // load-bearing: slot order IS priority order, and json_agg over an unordered
@@ -181,6 +246,53 @@ const ABILITIES_LATERAL = `
     FROM creature_abilities a WHERE a.behavior_id = b.id
   ) ab ON true`;
 
+// SOMET-608 (S6): a behaviour's SKILL repertoire, the same one-JSON-array-
+// per-creature shape ABILITIES_LATERAL uses and for the same reasons --
+// `cbs.slot` inside the aggregate is load-bearing (slot order IS priority
+// order), and this is written once and shared by every query that loads a
+// behaviour, so a column added to creature_skills and forgotten here is
+// inert everywhere at once rather than merely untested in one place.
+const SKILLS_LATERAL = `
+  LEFT JOIN LATERAL (
+    SELECT COALESCE(json_agg(
+             json_build_object(
+               'slot', cbs.slot, 'skill_id', cs.id, 'name', cs.name, 'kind', cs.kind,
+               'telegraph_ms', cs.telegraph_ms, 'cooldown_ms', cs.cooldown_ms,
+               'radius', cs.radius, 'range', cs.range, 'damage_mult', cs.damage_mult,
+               'element', cs.element, 'summon_entity', cs.summon_entity,
+               'summon_count', cs.summon_count, 'vfx', cs.vfx, 'power_scale', cbs.power_scale
+             ) ORDER BY cbs.slot
+           ), '[]'::json) AS skills
+    FROM creature_behavior_skills cbs
+    JOIN creature_skills cs ON cs.id = cbs.skill_id
+    WHERE cbs.behavior_id = b.id
+  ) sk ON true`;
+
+// SOMET-603: entity TYPE rows with everything hydrateCreatureRow and
+// resolveBehavior read, for callers that spawn an instance with no
+// world_creatures row (WorldBossManager now; S9 dungeon bosses next). Callers
+// append their own WHERE/ORDER BY, against the entity_types alias `et` (the
+// alias AURAS_LATERAL expects). b.aura_* no longer exist (SOMET-604 dropped
+// them).
+//
+// SOMET-604: `et.auras AS aura_names, au.aura_defs` + AURAS_LATERAL, the same
+// pair CREATURE_JOINED_SELECT carries, so a boss or minion bound to an aura
+// gets it through hydrateCreatureRow -> addCreatures -> resolveInstanceAuras.
+// Without them every boss aura is inert with the chunk-loader tests green;
+// boss_aura_hydration_db.test.js guards this.
+const ENTITY_CATALOG_SELECT = `SELECT et.id, et.name, et.color, et.hp, et.max_hp, et.defense, et.resistances,
+         et.faction, et.gold_min, et.gold_max, et.attack_element, et.vfx, et.prompt,
+         et.boss_tier, et.element, et.hitbox_size, et.xp_reward, et.base_damage,
+         et.display_width, et.display_height, et.behavior_id,
+         et.loot_rolls, et.loot_min_rarity, et.loot_rarity_bias, et.loot_chest,
+         et.auras AS aura_names, au.aura_defs,
+         b.name AS behavior_name, b.aggro_radius, b.leash_radius, b.chase_style, b.preferred_range,
+         b.move_speed_mult, b.damage_override,
+         b.gold_min AS behavior_gold_min, b.gold_max AS behavior_gold_max,
+         ab.abilities, sk.skills
+    FROM entity_types et
+    LEFT JOIN creature_behaviors b ON b.id = et.behavior_id${ABILITIES_LATERAL}${AURAS_LATERAL}${SKILLS_LATERAL}`;
+
 // Load the creature entity types. Named + exported (rather than inlined in
 // server.js) so a guard test can assert the SELECT names every column the
 // mapping consumes: a mapped column missing from the SELECT loads as
@@ -204,19 +316,17 @@ async function loadCreatureTypes(pool) {
   // creatureGold below) -- an unaliased pair would collide into a single
   // "gold_min" key with the later column silently winning, corrupting
   // creatureGold with the per-rung fallback instead of the per-creature
-  // value. b.aura_* columns have no such collision and stay unaliased, same
-  // as aggro_radius/leash_radius/etc above.
+  // value.
   const r = await pool.query(
     `SELECT e.id, e.name, e.color, e.hp, e.defense, e.resistances, e.faction,
             e.gold_min, e.gold_max, e.attack_element, e.behavior_id,
             b.name AS behavior_name,
             b.aggro_radius, b.leash_radius, b.chase_style, b.preferred_range,
             b.move_speed_mult, b.damage_override,
-            b.aura_radius, b.aura_damage_mult, b.aura_defense_mult, b.aura_speed_mult,
             b.gold_min AS behavior_gold_min, b.gold_max AS behavior_gold_max,
-            ab.abilities
+            ab.abilities, sk.skills
      FROM entity_types e
-     LEFT JOIN creature_behaviors b ON b.id = e.behavior_id${ABILITIES_LATERAL}
+     LEFT JOIN creature_behaviors b ON b.id = e.behavior_id${ABILITIES_LATERAL}${SKILLS_LATERAL}
      WHERE e.is_creature = true ORDER BY e.id ASC`,
   );
   const creatureTypes = r.rows.map((row) => ({
@@ -262,13 +372,26 @@ async function loadCreatureTypes(pool) {
   // entirely for it -- same "unknown/absent -> no drops" posture as an
   // entity_type name missing from creatureTypeIds.
   const behaviorDrops = new Map(r.rows.map((row) => [row.name, row.behavior_id]));
+  // SOMET-608 (S6): a `summon`-kind skill names an entity_types row by NAME
+  // (creature_skills.summon_entity) and needs the FULL raw row --
+  // hydrateCreatureRow-shaped, with boss_tier/hitbox_size/vfx/auras/display
+  // size, none of which the narrower SELECT above carries -- to build a real
+  // instance at resolve time. CreatureSim.tick() is synchronous and runs
+  // every tick, so this cannot be a live per-summon query; it has to be a
+  // map already in hand. ENTITY_CATALOG_SELECT already names every column
+  // hydrateCreatureRow reads (it is the same query WorldBossManager and
+  // dungeonBosses.js use for their own one-off catalog fetches), so this
+  // reuses it verbatim rather than hand-merging a second column list into
+  // the query above and risking the two drifting apart.
+  const catalogRows = await pool.query(`${ENTITY_CATALOG_SELECT} WHERE et.is_creature = true`);
+  const rowsByName = new Map(catalogRows.rows.map((row) => [row.name, row]));
   // creatureTypes/creatureTypeIds stay COMPLETE (guards included): drops and
   // name→id lookups still need to see guards. The wild-spawn exclusion of
   // guard-faction types lives at the one place that still rolls a wild-spawn
   // pool -- worldPopulation.js's own `hostileTypes` filter -- not here; this
   // function no longer has a wild-spawn caller of its own (SOMET-246).
   return {
-    creatureTypes, creatureTypeIds, creatureGold, behaviorGold, behaviorDrops,
+    creatureTypes, creatureTypeIds, creatureGold, behaviorGold, behaviorDrops, rowsByName,
   };
 }
 
@@ -327,6 +450,18 @@ function stampCreatureAttack(attacks, impacts, c, target, from, to, sfx = null) 
   }
 }
 function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; }
+
+// SOMET-608 (S6). Scatters a summon-kind skill's brood evenly around its
+// origin point, for any count -- unlike dungeonBosses.js's fixed two-entry
+// MINION_OFFSETS (that mechanic only ever summons 1 or 2), a creature skill's
+// summon_count is admin-authored and scaled further by power_scale, so this
+// has to handle an arbitrary count rather than a short hand list.
+const SUMMON_RING_RADIUS = 50;
+function summonOffset(i, total) {
+  if (total <= 1) return [0, 0];
+  const angle = (i / total) * Math.PI * 2;
+  return [Math.cos(angle) * SUMMON_RING_RADIUS, Math.sin(angle) * SUMMON_RING_RADIUS];
+}
 
 // SOMET-314 — the player spawn sanctuary.
 //
@@ -949,51 +1084,364 @@ function movedWith(map, c, vx, vy, dt, mult) {
   return resolveMove(map, { ...c, speed: c.speed * mult }, vx, vy, dt);
 }
 
-// Pack-leader auras (SOMET-253 Task 5). Recomputed from scratch every tick and
-// never persisted: a leader's death removes its buff on the next tick with no
-// cleanup path, so the failure mode where a buff outlives its source cannot
-// occur.
+// Ally-side auras (SOMET-253 Task 5, moved to the aura library by SOMET-604).
+// Recomputed from scratch every tick and never persisted: a source's death
+// removes its buff on the next tick with no cleanup path.
 //
-// NON-STACKING: the strongest single value wins per stat. Two overlapping
-// Champions must not compound into a 1.5625x damage pack -- that is the
-// difference between a hard fight and an unwinnable one.
+// STACKING (spec §3.2):
+//   - the SAME aura from several sources -> strongest value per stat (Math.max).
+//     Two overlapping Champions stay x1.25, never x1.5625.
+//   - DIFFERENT auras -> multiply, in the order each aura FIRST reached that
+//     target (float multiplication is not associative past two factors, so the
+//     order is part of the result, not a detail).
+// A source never buffs itself. Enemy-side auras are S4 and are ignored here.
 //
-// A leader does not buff itself.
+// O(sources x same-faction candidates); radius is CHECK-bounded to 2000
+// (1714440680000).
 //
-// O(leaders x creatures). Leaders are rare and MAX_WORLD_CREATURES bounds the
-// inner term, so this stays cheap without an index.
-function computeAuras(creatures) {
-  const buffs = new Map();
-  const leaders = [];
-  for (const c of creatures) {
-    const bh = c.behavior || DEFAULT_BEHAVIOR;
-    if (bh.auraRadius > 0 && c.hp > 0) leaders.push({ c, bh });
+// SOMET-617: a hot path (once per tick, over EVERY creature, unscoped by the
+// chunk gate). Centres are computed once per tick into typed arrays, targets
+// are pre-bucketed by faction, and the per-(target, aura) accumulators live in
+// module-level scratch buffers reused across ticks -- the inner loop allocates
+// nothing and only one result object is built per buffed target. Semantics are
+// pinned to the pre-617 algorithm by tests/aura_apply_equivalence.test.js,
+// which keeps that algorithm as its reference; change both or neither.
+let auraAcc = new Float64Array(0); // [slot*G + g]*3 + {0 dmg, 1 def, 2 spd}
+let auraSeen = new Uint8Array(0); // [slot*G + g] -> 1 once that aura reached that slot
+let auraOrder = new Int32Array(0); // [slot*G + k] -> k-th aura group to reach that slot
+let auraCount = new Int32Array(0); // [slot] -> number of groups in auraOrder
+// Grows only, never shrinks; contents are NOT preserved (callers size first).
+function auraScratch(cells, slots) {
+  if (auraSeen.length < cells) {
+    const size = Math.max(cells, auraSeen.length * 2);
+    auraAcc = new Float64Array(size * 3);
+    auraSeen = new Uint8Array(size);
+    auraOrder = new Int32Array(size);
   }
-  if (leaders.length === 0) return buffs;
-  for (const { c: leader, bh } of leaders) {
-    const lc = center(leader);
-    const r2 = bh.auraRadius * bh.auraRadius;
-    for (const other of creatures) {
-      if (other === leader || other.hp <= 0) continue;
-      if (other.faction !== leader.faction) continue;
-      const oc = center(other);
-      if (dist2(lc.x, lc.y, oc.x, oc.y) > r2) continue;
-      const cur = buffs.get(other.id);
-      if (!cur) {
-        buffs.set(other.id, {
-          damageMult: bh.auraDamageMult,
-          defenseMult: bh.auraDefenseMult,
-          speedMult: bh.auraSpeedMult,
-        });
+  if (auraCount.length < slots) auraCount = new Int32Array(Math.max(slots, auraCount.length * 2));
+}
+
+function applyAuras(creatures) {
+  const buffs = new Map();
+  const list = Array.isArray(creatures) ? creatures : [...creatures];
+  const n = list.length;
+
+  // Sources, in creature order then aura order (the order the old pass met them).
+  const srcIdx = [];
+  const srcAura = [];
+  for (let i = 0; i < n; i++) {
+    const c = list[i];
+    if (!(c.hp > 0)) continue;
+    const auras = c.auras;
+    if (!Array.isArray(auras) || auras.length === 0) continue; // most creatures
+    for (let k = 0; k < auras.length; k++) {
+      const a = auras[k];
+      if (a.targetSide === 'allies' && a.radius > 0) { srcIdx.push(i); srcAura.push(a); }
+    }
+  }
+  const S = srcIdx.length;
+  if (S === 0) return buffs;
+
+  // Aura name -> group index (same-name sources max together; groups multiply).
+  const groupOf = new Map();
+  const srcGroup = new Int32Array(S);
+  for (let s = 0; s < S; s++) {
+    const name = srcAura[s].name;
+    let g = groupOf.get(name);
+    if (g === undefined) { g = groupOf.size; groupOf.set(name, g); }
+    srcGroup[s] = g;
+  }
+  const G = groupOf.size;
+
+  // Candidate targets bucketed by faction, in creature order, for factions that
+  // actually have a source. `!==` never matches NaN, so a NaN faction neither
+  // buffs nor is buffed (a Map key would have matched it to itself).
+  const buckets = new Map();
+  for (let s = 0; s < S; s++) {
+    const f = list[srcIdx[s]].faction;
+    if (f !== f) continue;
+    if (!buckets.has(f)) buckets.set(f, []);
+  }
+  if (buckets.size === 0) return buffs;
+  const cx = new Float64Array(n);
+  const cy = new Float64Array(n);
+  let lastF; let lastB = null;
+  for (let j = 0; j < n; j++) {
+    const o = list[j];
+    if (o.hp <= 0) continue;
+    const f = o.faction;
+    let b;
+    if (lastB !== null && f === lastF) b = lastB;
+    else { b = f === f ? buckets.get(f) : undefined; lastF = f; lastB = b === undefined ? null : b; }
+    if (b === undefined || b === null) continue;
+    b.push(j);
+    // Same expression as center(): x + width / 2.
+    cx[j] = o.x + o.width / 2;
+    cy[j] = o.y + o.height / 2;
+  }
+
+  // Slots: one per distinct target id, numbered in first-hit order (the old
+  // perTarget Map's insertion order, so `buffs` iterates identically). Keyed by
+  // id, not index, so two entries sharing an id merge exactly as they did.
+  const slotOfIdx = new Int32Array(n).fill(-1);
+  const slotOfId = new Map();
+  const slotIds = [];
+  // Sized once, up front: there are at most n slots, and growing mid-pass
+  // would drop the accumulators already written.
+  auraScratch(n * G, n);
+
+  for (let s = 0; s < S; s++) {
+    const si = srcIdx[s];
+    const src = list[si];
+    const f = src.faction;
+    if (f !== f) continue;
+    const bucket = buckets.get(f);
+    const a = srcAura[s];
+    const g = srcGroup[s];
+    const dm = a.damageMult; const fm = a.defenseMult; const sm = a.speedMult;
+    const r2 = a.radius * a.radius;
+    const sx = src.x + src.width / 2;
+    const sy = src.y + src.height / 2;
+    for (let b = 0; b < bucket.length; b++) {
+      const j = bucket[b];
+      const dx = sx - cx[j]; const dy = sy - cy[j];
+      if (dx * dx + dy * dy > r2) continue;
+      if (list[j] === src) continue; // a source never buffs itself
+      let slot = slotOfIdx[j];
+      if (slot < 0) {
+        const id = list[j].id;
+        slot = slotOfId.get(id);
+        if (slot === undefined) {
+          slot = slotIds.length;
+          slotOfId.set(id, slot);
+          slotIds.push(id);
+          auraCount[slot] = 0;
+          auraSeen.fill(0, slot * G, (slot + 1) * G);
+        }
+        slotOfIdx[j] = slot;
+      }
+      const cell = slot * G + g;
+      const p = cell * 3;
+      if (auraSeen[cell] === 0) {
+        auraSeen[cell] = 1;
+        auraOrder[slot * G + auraCount[slot]++] = g;
+        auraAcc[p] = dm; auraAcc[p + 1] = fm; auraAcc[p + 2] = sm;
       } else {
-        // Math.max, never multiplication -- this line IS the non-stacking rule.
-        cur.damageMult = Math.max(cur.damageMult, bh.auraDamageMult);
-        cur.defenseMult = Math.max(cur.defenseMult, bh.auraDefenseMult);
-        cur.speedMult = Math.max(cur.speedMult, bh.auraSpeedMult);
+        // Math.max within one aura name -- this line IS the non-stacking rule.
+        auraAcc[p] = Math.max(auraAcc[p], dm);
+        auraAcc[p + 1] = Math.max(auraAcc[p + 1], fm);
+        auraAcc[p + 2] = Math.max(auraAcc[p + 2], sm);
       }
     }
   }
+
+  for (let slot = 0; slot < slotIds.length; slot++) {
+    let d = 1; let f = 1; let s = 1;
+    const base = slot * G;
+    for (let k = 0; k < auraCount[slot]; k++) {
+      const p = (base + auraOrder[base + k]) * 3;
+      d *= auraAcc[p]; f *= auraAcc[p + 1]; s *= auraAcc[p + 2];
+    }
+    buffs.set(slotIds[slot], { damageMult: d, defenseMult: f, speedMult: s });
+  }
   return buffs;
+}
+
+// SOMET-606 (S4). ENEMY-side auras: hostile creatures debuff PLAYERS in radius.
+//
+// A SEPARATE pass from applyAuras, deliberately (SOMET-617 review): player and
+// creature ids do not share a namespace, the candidates are the world's few
+// players rather than its thousands of creatures, and applyAuras is pinned
+// bit-for-bit by aura_apply_equivalence -- touching it would re-open that.
+//
+// STACKING (spec §3.2), the mirror image of the allies pass:
+//   - same aura name from several sources -> the STRONGEST debuff, i.e. the
+//     SMALLEST multiplier (Math.min). Math.max here would let a weak, stale
+//     source win; that is the defect enemy_auras.test.js pins.
+//   - different names -> multiply, in first-reach order;
+//   - each TOTAL floored at ENEMY_AURA_FLOOR (0.5).
+//   - DoT: per name, the LARGEST dps, attributed to the first source holding it.
+// Only an uncharmed live HOSTILE is a source (a Druid's pet never debuffs its
+// owner; a guard's enemies are creatures, not players). Each per-aura value is
+// clamped to <= 1: an enemies aura only ever hinders.
+//
+// Cost: O(enemy sources x players). No cap -- players per world are tens, not
+// thousands; creature_tick_cost's enemy row is the measurement (Task 6).
+// The inner loop allocates nothing; one result object (+ one entry per aura
+// name) per DEBUFFED player.
+const ENEMY_AURA_FLOOR = 0.5;
+let enemyAcc = new Float64Array(0);   // [slot*G + g]*4 + {0 dmg, 1 def, 2 spd, 3 dps}
+let enemySeen = new Uint8Array(0);    // [slot*G + g] -> 1 once that name reached that player
+let enemyOrder = new Int32Array(0);   // [slot*G + k] -> k-th name group to reach that player
+let enemyDotSrc = new Int32Array(0);  // [slot*G + g] -> source index holding the max dps
+let enemyCount = new Int32Array(0);   // [slot] -> number of groups in enemyOrder
+let enemyPx = new Float64Array(0);    // [slot] -> player centre x
+let enemyPy = new Float64Array(0);
+let enemyScratchGrowths = 0;          // test hook: must stay flat across ticks of one size
+function enemyScratch(cells, slots) {
+  if (enemySeen.length < cells) {
+    const size = Math.max(cells, enemySeen.length * 2);
+    enemyAcc = new Float64Array(size * 4);
+    enemySeen = new Uint8Array(size);
+    enemyOrder = new Int32Array(size);
+    enemyDotSrc = new Int32Array(size);
+    enemyScratchGrowths++;
+  }
+  if (enemyCount.length < slots) {
+    const size = Math.max(slots, enemyCount.length * 2);
+    enemyCount = new Int32Array(size);
+    enemyPx = new Float64Array(size);
+    enemyPy = new Float64Array(size);
+    enemyScratchGrowths++;
+  }
+}
+// `v < 1 ? v : 1`: NaN compares false, so a NaN multiplier is neutral (1).
+function hinder(v) { return v < 1 ? v : 1; }
+
+function applyEnemyAuras(creatures, players) {
+  const out = new Map();
+  const plist = Array.isArray(players) ? players : [...players];
+  const P = plist.length;
+  if (P === 0) return out;
+  const list = Array.isArray(creatures) ? creatures : [...creatures];
+
+  const srcIdx = [];
+  const srcAura = [];
+  for (let i = 0; i < list.length; i++) {
+    const c = list[i];
+    const auras = c.auras;
+    if (!Array.isArray(auras) || auras.length === 0) continue; // most creatures
+    if (!(c.hp > 0) || c.faction !== 'hostile' || c.charmOwnerUserId != null) continue;
+    for (let k = 0; k < auras.length; k++) {
+      const a = auras[k];
+      if (a.targetSide === 'enemies' && a.radius > 0) { srcIdx.push(i); srcAura.push(a); }
+    }
+  }
+  const S = srcIdx.length;
+  if (S === 0) return out;
+
+  const groupOf = new Map();
+  const srcGroup = new Int32Array(S);
+  for (let s = 0; s < S; s++) {
+    const name = srcAura[s].name;
+    let g = groupOf.get(name);
+    if (g === undefined) { g = groupOf.size; groupOf.set(name, g); }
+    srcGroup[s] = g;
+  }
+  const G = groupOf.size;
+
+  // Slots ARE player indices: players are distinct objects keyed by userId in
+  // World.players, so no id-merge step is needed (unlike the creature pass).
+  enemyScratch(P * G, P);
+  enemySeen.fill(0, 0, P * G);
+  for (let j = 0; j < P; j++) {
+    const p = plist[j];
+    enemyCount[j] = 0;
+    enemyPx[j] = p.x + p.width / 2;
+    enemyPy[j] = p.y + p.height / 2;
+  }
+
+  for (let s = 0; s < S; s++) {
+    const src = list[srcIdx[s]];
+    const a = srcAura[s];
+    const g = srcGroup[s];
+    const dm = hinder(a.damageMult); const fm = hinder(a.defenseMult); const sm = hinder(a.speedMult);
+    const dps = a.dotDps > 0 ? a.dotDps : 0;
+    const r2 = a.radius * a.radius;
+    const sx = src.x + src.width / 2;
+    const sy = src.y + src.height / 2;
+    for (let j = 0; j < P; j++) {
+      if (!(plist[j].hp > 0)) continue;
+      const dx = sx - enemyPx[j]; const dy = sy - enemyPy[j];
+      if (!(dx * dx + dy * dy <= r2)) continue; // NaN position -> excluded
+      const cell = j * G + g;
+      const p4 = cell * 4;
+      if (enemySeen[cell] === 0) {
+        enemySeen[cell] = 1;
+        enemyOrder[j * G + enemyCount[j]++] = g;
+        enemyAcc[p4] = dm; enemyAcc[p4 + 1] = fm; enemyAcc[p4 + 2] = sm; enemyAcc[p4 + 3] = dps;
+        enemyDotSrc[cell] = s;
+      } else {
+        // Math.MIN within one aura name -- this line IS the enemies-side rule.
+        if (dm < enemyAcc[p4]) enemyAcc[p4] = dm;
+        if (fm < enemyAcc[p4 + 1]) enemyAcc[p4 + 1] = fm;
+        if (sm < enemyAcc[p4 + 2]) enemyAcc[p4 + 2] = sm;
+        if (dps > enemyAcc[p4 + 3]) { enemyAcc[p4 + 3] = dps; enemyDotSrc[cell] = s; }
+      }
+    }
+  }
+
+  for (let j = 0; j < P; j++) {
+    const k = enemyCount[j];
+    if (k === 0) continue;
+    let d = 1; let f = 1; let sp = 1;
+    const auras = new Array(k);
+    for (let q = 0; q < k; q++) {
+      const g = enemyOrder[j * G + q];
+      const cell = j * G + g;
+      const p4 = cell * 4;
+      d *= enemyAcc[p4]; f *= enemyAcc[p4 + 1]; sp *= enemyAcc[p4 + 2];
+      const ds = enemyDotSrc[cell];
+      const a = srcAura[ds];
+      auras[q] = {
+        name: a.name,
+        damageMult: enemyAcc[p4], defenseMult: enemyAcc[p4 + 1], speedMult: enemyAcc[p4 + 2],
+        dotDps: enemyAcc[p4 + 3],
+        dotElement: typeof a.dotElement === 'string' ? a.dotElement : 'physical',
+        tickMs: a.tickMs,
+        sourceId: list[srcIdx[ds]].id,
+      };
+    }
+    out.set(plist[j].userId, {
+      damageMult: d > ENEMY_AURA_FLOOR ? d : ENEMY_AURA_FLOOR,
+      defenseMult: f > ENEMY_AURA_FLOOR ? f : ENEMY_AURA_FLOOR,
+      speedMult: sp > ENEMY_AURA_FLOOR ? sp : ENEMY_AURA_FLOOR,
+      auras,
+    });
+  }
+  return out;
+}
+function __enemyAuraScratchGrowths() { return enemyScratchGrowths; }
+
+// A DoT cadence the aura_effects CHECK would accept, else 1000 -- a NaN or 0
+// tick_ms must not charge every tick (or never). Same bounds as AURA_LIMITS.
+function dotTickMs(t) {
+  return t >= 100 && t <= 5000 ? t : 1000;
+}
+
+// SOMET-606. Charges each enemy-aura DoT on its own per-name clock. Called
+// from tick() right after applyEnemyAuras stamped p._buff.
+//
+// THROUGH THE DAMAGE PATH (spec §4.2): applyDamageWithEffects with
+// effectiveMit(p), so defense (and the aura's own defense debuff, already on
+// p._buff), resistances, shock vulnerability, the min-1 floor and the
+// provocation stamp all apply exactly as for a bite. A kill is left at
+// hp <= 0 for World.resolveDeaths(), the ONE player-death path -- this
+// function never respawns or reports anyone.
+//
+// Different names ADD (each its own clock, element and cadence -- the entry
+// carries the values of the source that holds that name's max dps).
+//
+// NO BANKING: `_auraDotAt` stores the next DUE time per name. A name is due
+// when now >= nextAt, so the first charge lands on entry, time spent outside
+// accumulates nothing, and stepping out and back inside tick_ms re-charges
+// nothing.
+function chargeAuraDots(players, now) {
+  for (const p of players) {
+    const b = p._buff;
+    if (b === NO_BUFF || !b || !Array.isArray(b.auras) || !(p.hp > 0)) continue;
+    for (let k = 0; k < b.auras.length; k++) {
+      const a = b.auras[k];
+      if (!(a.dotDps > 0)) continue;
+      const at = p._auraDotAt;
+      const due = at ? at.get(a.name) : undefined;
+      if (due !== undefined && now < due) continue;
+      const tickMs = dotTickMs(a.tickMs);
+      (at || (p._auraDotAt = new Map())).set(a.name, now + tickMs);
+      applyDamageWithEffects(p, a.dotDps * tickMs / 1000, a.dotElement, effectiveMit(p), now, creatureKey(a.sourceId));
+      if (!(p.hp > 0)) break;
+    }
+  }
 }
 
 // The neutral buff every creature gets when no leader's aura reaches it.
@@ -1061,12 +1509,22 @@ function completeAbilities(list) {
   return list.map((a) => ({ ...DEFAULT_ABILITY, ...a })).sort((x, y) => x.slot - y.slot);
 }
 
+// SOMET-608 (S6): same treatment, for a hand-built behaviour's `skills`
+// array -- except the empty case returns [] (DEFAULT_BEHAVIOR.skills),
+// never a fallback skill: unlike an attack ability, "no skill bound" really
+// does mean no skill, not "use the default one instead".
+function completeSkills(list) {
+  if (!Array.isArray(list) || list.length === 0) return DEFAULT_BEHAVIOR.skills;
+  return list.map((s) => ({ ...DEFAULT_SKILL, ...s })).sort((x, y) => x.slot - y.slot);
+}
+
 function resolveInstanceBehavior(c) {
   if (c.behavior) {
     return {
       ...DEFAULT_BEHAVIOR,
       ...c.behavior,
       abilities: completeAbilities(c.behavior.abilities),
+      skills: completeSkills(c.behavior.skills),
     };
   }
   if (c.behavior_name != null) return resolveBehavior(c);
@@ -1104,6 +1562,23 @@ function selectAbility(c, bh, dist) {
     if ((c._abilityCd.get(a.slot) || 0) > 0) continue;
     if (dist > a.attackRange) continue;
     return a;
+  }
+  return null;
+}
+
+// SOMET-608 (S6). The skill twin of selectAbility above -- same rule
+// (deterministic, lowest-slot-first among off-cooldown + in-range), same
+// cooldown-lives-on-the-instance reasoning, just over `bh.skills` /
+// `c._skillCd` instead of `bh.abilities` / `c._abilityCd`. `range` gates
+// every kind uniformly, nova included: "how close a target needs to be for
+// the creature to bother casting this at all" is a property the catalog
+// author sets (typically close to the skill's own radius for a
+// self-centred burst), not something this function special-cases by kind.
+function selectSkill(c, bh, dist) {
+  for (const s of bh.skills) {
+    if ((c._skillCd.get(s.slot) || 0) > 0) continue;
+    if (dist > s.range) continue;
+    return s;
   }
   return null;
 }
@@ -1189,9 +1664,19 @@ class CreatureSim {
       // pack back to the guards, with the charm columns still perfectly
       // populated.
       const charmOwner = c.charmOwnerUserId ?? null;
+      const hitbox = hitboxOrNull(c.hitboxSize);
       this.creatures.set(c.id, {
         id: c.id, type: c.type, x: c.x, y: c.y,
-        width: CREATURE_SIZE, height: CREATURE_SIZE, speed: CREATURE_SPEED,
+        // SOMET-603: the catalog's hitbox, not a constant. This is what makes a
+        // boss's server collision/hit radius (world.js:1120, projectiles.js:507,
+        // creatures.js:2243 all read width/2) match its catalog size.
+        width: hitbox ?? CREATURE_SIZE, height: hitbox ?? CREATURE_SIZE, speed: CREATURE_SPEED,
+        // SOMET-603: the ONE boss flag (render, audio, HUD, spawn) and its
+        // element; name for the nameplate. Null for every ordinary creature.
+        name: c.name ?? c.type,
+        bossTier: c.bossTier ?? null,
+        element: c.element ?? null,
+        hitboxSize: hitbox,
         facing: c.facing || 'S', hp: c.hp, maxHp: c.hp, color: c.color,
         mit: creatureMitigation(c),
         // Slice D: effect bindings from entity_types.vfx, normalized to null
@@ -1232,6 +1717,9 @@ class CreatureSim {
         // instance the same way `mit`, `level` and `damage` are: attached
         // once, never recomputed inside the tick. See resolveInstanceBehavior.
         behavior: resolveInstanceBehavior(c),
+        // SOMET-604: entity-bound auras (aura_effects via AURAS_LATERAL), resolved
+        // once like `behavior`. applyAuras reads ONLY this, never behavior.aura*.
+        auras: resolveInstanceAuras(c),
         // c.attackElement covers an already-shaped instance; c.attack_element
         // is the raw column name server.js's SELECT aliases it as (et.attack_element).
         attackElement: c.attackElement || c.attack_element || 'physical',
@@ -1260,7 +1748,20 @@ class CreatureSim {
         // same thing the old scalar `_attackCd: 0` meant), so a creature that
         // has never attacked can attack on its first tick.
         _abilityCd: new Map(),
+        // SOMET-608 (S6): same per-instance-per-slot cooldown convention, for
+        // the creature's SKILL repertoire (a separate list from its ordinary
+        // attack abilities above). `_pendingSkill` is at most one in-flight
+        // telegraph -- a creature commits to one skill at a time, exactly
+        // like selectAbility's single-pick rule for ordinary attacks.
+        _skillCd: new Map(),
+        _pendingSkill: null,
       });
+      // SOMET-605: a boss announces itself on arrival. quietSpawn is an input
+      // flag only (never stored), set by a re-place of a boss already in the fight.
+      const added = this.creatures.get(c.id);
+      if (added.bossTier && !c.quietSpawn) {
+        pushSfxEvent(this.sfx, bossSfx('spawn', added, added.x + added.width / 2, added.y + added.height / 2));
+      }
     }
   }
 
@@ -1272,6 +1773,11 @@ class CreatureSim {
   // `all()` would work but forces a full-map copy per swing, and `has()`
   // alone can't hand back the object. Named `get` to match the Map it wraps.
   get(id) { return this.creatures.get(id); }
+  // SOMET-603: SILENT removal (no death sfx, no kill accounting) for an
+  // instance its owner retires -- a world boss that timed out or was
+  // force-despawned. worldBoss.js and server.js's debug `slay` always called
+  // creatures.remove(); it never existed, so those bosses stayed in the world.
+  remove(id) { return this.creatures.delete(id); }
 
   // SOMET-473 -- take control of a creature. Returns false for an id this sim
   // does not hold, so the caller can tell "charmed" from "that creature is
@@ -1318,7 +1824,11 @@ class CreatureSim {
   // `now` is the world clock, threaded in for the same reason the attack
   // resolvers take it: damage reads the target's live status effects (shock's
   // vulnerability) and this module must never read a clock of its own.
-  tick(dt, activeChunkKeys, players = [], now = 0) {
+  // `catalogRows` (SOMET-608, S6, optional): name -> full entity_types row,
+  // consulted ONLY by a `summon`-kind skill's resolve. See world.js's
+  // tickCreatures for where it comes from.
+  tick(dt, activeChunkKeys, players = [], now = 0, catalogRows = null) {
+    this._skillCatalogRows = catalogRows;
     const active = activeChunkKeys instanceof Set ? activeChunkKeys : new Set(activeChunkKeys);
     const byId = new Map(players.map((p) => [p.userId, p]));
     const killed = [];
@@ -1334,12 +1844,24 @@ class CreatureSim {
     // World.tick and pushed onto the same frame keys player swings use.
     const attacks = [];
     const impacts = [];
+    // SOMET-608 (S6): new telegraphs STARTED this tick, for World to append
+    // to its own persistent, decaying `activeTelegraphs` list (purely a
+    // client-rendering aid -- see world.js's tickCreatures).
+    const telegraphs = [];
+    // A summon-kind skill's resolve fills this instead of calling
+    // addCreatures() directly: `this.creatures` is a Map, and Map iteration
+    // sees entries added WHILE it is running -- a creature added mid-loop
+    // would be visited later in this SAME tick despite never having gone
+    // through the `all`/`_buff` setup above, crashing the first thing that
+    // reads `c._buff.speedMult`. Collected here and added once, after the
+    // main loop below has finished.
+    const pendingSummons = [];
     const all = [...this.creatures.values()];
     // Computed once per tick over the whole set, not per creature: an aura is
     // a property of the field, and recomputing it inside the loop would let a
     // creature that moved earlier this tick buff differently than one that
     // has not moved yet.
-    const buffs = computeAuras(all);
+    const buffs = applyAuras(all);
     // Every creature gets a fresh `_buff` here, including one whose chunk is
     // outside the active set and will be skipped by the loop below --
     // otherwise it would keep a stale buff from whenever it was last active.
@@ -1347,6 +1869,14 @@ class CreatureSim {
     // read from OUTSIDE this loop too: another creature's attack and a
     // projectile collision both need a target's defence buff.
     for (const c of all) c._buff = buffs.get(c.id) || NO_BUFF;
+    // SOMET-606 (S4): enemy-side auras over PLAYERS, same once-per-tick rule.
+    // EVERY player gets a fresh _buff (NO_BUFF when nothing reaches them) so a
+    // debuff can never outlive its source or the player's exit. p._buff is
+    // read by effectiveMit (every damage-taken site), world.js's speed and
+    // outgoing-damage reads, and the self frame.
+    const debuffs = applyEnemyAuras(all, players);
+    for (const p of players) p._buff = debuffs.get(p.userId) || NO_BUFF;
+    if (debuffs.size > 0) chargeAuraDots(players, now);
     // SOMET-314. Resolved once per tick rather than per creature: it is a
     // property of the world, it never changes for the life of this manager, and
     // the roam clamp below is on the hot path.
@@ -1358,7 +1888,7 @@ class CreatureSim {
       // every entry in `this.creatures` was populated by addCreatures, which
       // always stamps `behavior: resolveInstanceBehavior(c)`, and every
       // branch of resolveInstanceBehavior returns a real object, never a
-      // falsy value. Unlike computeAuras above (an exported function some
+      // falsy value. Unlike applyAuras above (an exported function some
       // tests call directly with hand-built fixtures that omit `.behavior`),
       // this loop only ever sees addCreatures-shaped entries, so the
       // fallback here could never fire.
@@ -1367,6 +1897,22 @@ class CreatureSim {
       // `_attackCd` decrement -- only the number of timers changed.
       for (const [slot, cd] of c._abilityCd) {
         if (cd > 0) c._abilityCd.set(slot, Math.max(0, cd - dt));
+      }
+      // SOMET-608 (S6). Same per-slot decrement for the SKILL repertoire, a
+      // separate timer set from the ordinary attack above. Resolved BEFORE
+      // any movement/attack decision below: a creature mid-telegraph is
+      // STOPPED for its whole duration (spec §4.3's "target in range and off
+      // cooldown -> stop, emit skill_telegraph, wait, resolve"), so once
+      // `_pendingSkill` is set this is the ONLY thing that runs for it until
+      // the telegraph resolves -- nothing today cancels one early.
+      for (const [id, cd] of c._skillCd) {
+        if (cd > 0) c._skillCd.set(id, Math.max(0, cd - dt));
+      }
+      if (c._pendingSkill) {
+        if (now >= c._pendingSkill.resolveAt) {
+          this._resolveSkill(c, players, attacks, impacts, shots, pendingSummons, now);
+        }
+        continue;
       }
 
       const cc = center(c);
@@ -1960,6 +2506,51 @@ class CreatureSim {
         // refused: no ability, therefore no cooldown stamped for the bite it
         // never took, so a creature provoked mid-flee bites immediately
         // instead of first serving 1.2s for a swing that never happened.
+        // SOMET-608 (S6). Skills take priority over the ordinary attack: a
+        // creature that commits to a telegraph is STOPPED for its whole
+        // duration (spec §4.3's "stop, emit skill_telegraph, wait, resolve"),
+        // so if one is available this tick, nothing else below runs for it
+        // this tick. `bh.skills.length > 0` costs exactly one check on the
+        // hot path for the overwhelming majority of creatures, which have
+        // none bound at all.
+        const skill = (!fleeing && bh.skills.length > 0 && canAct(c, now)) ? selectSkill(c, bh, dist) : null;
+        if (skill) {
+          // `_skillCd` is decremented by `dt` every tick, exactly like
+          // `_abilityCd` -- and `dt` is SECONDS (World.tick's own dtMs
+          // conversion is what makes `now` milliseconds instead). The
+          // catalog column is `cooldown_ms`, so this is the one place that
+          // unit conversion has to happen; `resolveAt` below stays in `now`'s
+          // own ms unit, no conversion needed there.
+          c._skillCd.set(skill.slot, skill.cooldownMs / 1000);
+          // Locked NOW, not re-measured at resolve time: the caster does not
+          // move while a skill is pending (see the per-tick top-of-loop
+          // check above). Only `slam` is target-centred (a ground target
+          // that should not silently follow a player who sidesteps during
+          // the wind-up -- the whole point of a telegraph is that the spot
+          // is already committed); `nova` and `projectile` both originate
+          // from the CASTER -- a nova bursts around itself, and a
+          // projectile is fired FROM it (toward the target, re-aimed at
+          // resolve time off the target's live position -- see
+          // _resolveSkill's projectile branch).
+          const origin = skill.kind === 'slam' ? { x: tc.x, y: tc.y } : { x: cc.x, y: cc.y };
+          c._pendingSkill = {
+            skill, targetUserId: tp.userId, x: origin.x, y: origin.y, resolveAt: now + skill.telegraphMs,
+          };
+          telegraphs.push({
+            creatureId: c.id, skill: skill.name, x: origin.x, y: origin.y,
+            radius: skill.radius, telegraphMs: skill.telegraphMs,
+            // SOMET-610 (S7): resolved now, server-side, same reason every
+            // other vfx binding resolves on this side of the wire -- the
+            // client holds no creature_skills catalog to look `skill.vfx`
+            // up in. `resolveEffectName` is a generic `vfx[moment]` lookup
+            // with no fixed moment vocabulary (vfx.js), so 'telegraph'
+            // needs no change there; null when unset, and the renderer
+            // keeps its own default for that case.
+            v: resolveEffectName({ kind: 'creature', vfx: { telegraph: skill.vfx && skill.vfx.telegraph } }, 'telegraph'),
+          });
+          if (this.sfx) pushSfxEvent(this.sfx, creatureSkillSfx('skill_telegraph', skill.name, c, origin.x, origin.y));
+          continue;
+        }
         const ability = fleeing ? null : selectAbility(c, bh, dist);
         if (ability && canAct(c, now)) {
           // SOMET-254: see the guard block above -- `c.damage` is always
@@ -1967,10 +2558,11 @@ class CreatureSim {
           // loop, so the inner `?? CREATURE_DAMAGE` fallback here was dead.
           const dmg = (bh.damageOverride ?? c.damage) * ability.damageMult * c._buff.damageMult;
           if (ability.attackKind === 'melee') {
-            // tp is a PLAYER, not a creature: no aura ever buffs a player's
-            // defence, so tp.mit is read as-is here, unlike the three
-            // creature-target sites below which read effectiveMit(target).
-            applyDamageWithEffects(tp, dmg, 'physical', tp.mit || NO_MITIGATION, now, creatureKey(c.id));
+            // SOMET-606: tp is a PLAYER, and an enemy aura CAN lower a player's
+            // defence now -- effectiveMit reads tp._buff exactly as it does a
+            // creature's, so this is the same one defence read as the
+            // creature-target sites.
+            applyDamageWithEffects(tp, dmg, 'physical', effectiveMit(tp), now, creatureKey(c.id));
             // SOMET-290 — a landed blow re-arms the creature's OWN memory, so
             // provocation lasts "for that engagement" (spec §3) rather than for
             // a fixed number of seconds from the first hit. Without it a
@@ -2137,7 +2729,119 @@ class CreatureSim {
         c._dir = (c._dir + 1) % DIRS.length; // blocked → turn
       }
     }
-    return { killed, killCredits, shots, attacks, impacts };
+    // SOMET-608: summons land now, once, after every creature's own move/
+    // attack/skill decision for this tick has already been made -- see
+    // `pendingSummons`'s own comment above for why this cannot happen
+    // inline during the loop.
+    if (pendingSummons.length > 0) this.addCreatures(pendingSummons);
+    return { killed, killCredits, shots, attacks, impacts, telegraphs };
+  }
+
+  // SOMET-608 (S6). Resolve one creature's committed skill once its
+  // telegraph has elapsed. Called from tick()'s per-creature loop, which
+  // leaves `_pendingSkill` set until this runs -- clearing it here (rather
+  // than at telegraph-start) is what lets a second cast attempt never start
+  // while one is already in flight, since selectSkill is never even reached
+  // for a creature whose `_pendingSkill` is non-null (see the top-of-loop
+  // `continue`).
+  //
+  // Scoped to PLAYERS only for slam/nova, matching every other hostile
+  // creature damage path in this file -- hostiles never damage each other
+  // today, and an AoE skill is not the seam to introduce that.
+  _resolveSkill(c, players, attacks, impacts, shots, pendingSummons, now) {
+    const pending = c._pendingSkill;
+    c._pendingSkill = null;
+    const {
+      skill, targetUserId, x: originX, y: originY,
+    } = pending;
+    const bh = c.behavior;
+    const dmg = (bh.damageOverride ?? c.damage) * skill.damageMult * c._buff.damageMult;
+    const element = skill.element || c.attackElement;
+
+    if (skill.kind === 'slam' || skill.kind === 'nova') {
+      const r2 = skill.radius * skill.radius;
+      for (const p of players) {
+        const pc = center(p);
+        if (dist2(pc.x, pc.y, originX, originY) > r2) continue;
+        applyDamageWithEffects(p, dmg, element, effectiveMit(p), now, creatureKey(c.id));
+        impacts.push({
+          t: `p:${p.userId}`, x: pc.x, y: pc.y,
+          v: resolveEffectName({ kind: 'creature', vfx: { impact: skill.vfx && skill.vfx.impact } }, 'impact'),
+          el: element, o: bodyLift(p.height, 'middle'),
+        });
+      }
+      // One attack descriptor for the cast itself, a full circle centred on
+      // the locked origin -- `reach`/`arc` describe the AoE's own footprint,
+      // not a directional swing, so `nx`/`ny` carry no meaning here.
+      attacks.push({
+        a: `c:${c.id}`,
+        v: resolveEffectName({ kind: 'creature', vfx: { attack: skill.vfx && skill.vfx.cast } }, 'attack'),
+        x: originX, y: originY, nx: 0, ny: 1,
+        o: bodyLift(c.height, 'middle'), reach: skill.radius, arc: Math.PI * 2, hit: true,
+      });
+      // SOMET-610 (S7): the SKILL's own cast/hit cues (creature_skill/
+      // <name>/use, .../hit), not the creature's generic attack sound --
+      // this is what lets Magma Slam sound different from an ordinary
+      // Line bite, and what sfxPriority's boss-tier check (bossActorIds,
+      // AudioEngine.js) keys off instead of the always-'nearest' ordinary
+      // creature events.
+      if (this.sfx) {
+        pushSfxEvent(this.sfx, creatureSkillSfx('skill_cast', skill.name, c, originX, originY));
+        pushSfxEvent(this.sfx, creatureSkillSfx('skill_hit', skill.name, c, originX, originY));
+      }
+      return;
+    }
+
+    if (skill.kind === 'projectile') {
+      // Aim at the target's LIVE position if they are still around -- a
+      // charged shot that still tracks someone who merely moved during the
+      // wind-up -- else along the locked origin's facing (straight "south",
+      // the same default a swing with no real aim uses elsewhere); never
+      // thrown at a target who is simply gone.
+      const target = targetUserId != null ? players.find((p) => p.userId === targetUserId) : null;
+      const aim = target ? center(target) : { x: originX, y: originY + 1 };
+      const dx = aim.x - originX;
+      const dy = aim.y - originY;
+      const d = Math.hypot(dx, dy) || 1;
+      shots.push({
+        ownerId: c.id, ownerType: c.type, ownerFaction: c.faction || 'hostile',
+        x: originX, y: originY, nx: dx / d, ny: dy / d,
+        damage: dmg, originLift: bodyLift(c.height, 'middle'), element,
+        speed: SKILL_PROJECTILE_SPEED, radius: skill.radius, range: skill.range || LEASH_RADIUS,
+        knockback: 0,
+        // SOMET-610 (S7): tells World.tickCreatures' shots-drain loop to
+        // push the SKILL's own cast cue instead of the generic creature
+        // one for this shot -- see that loop's own comment.
+        skillName: skill.name,
+      });
+      // No sfx push here: World.tickCreatures' existing shots-drain loop
+      // pushes the cast sfx for every entry in `shots`, regardless of
+      // source -- pushing a second one here would double it up.
+      return;
+    }
+
+    if (skill.kind === 'summon') {
+      if (!skill.summonEntity || !this._skillCatalogRows) return;
+      const row = this._skillCatalogRows.get(skill.summonEntity);
+      if (!row) return; // unknown name: same no-op posture as an unknown vfx/aura binding
+      if (!c._skillSummonIds) c._skillSummonIds = new Set();
+      // Free any slot whose earlier summon has since died or been removed,
+      // so a later cast can refill it. This IS the cap/no-duplicates
+      // guarantee: each of the summonCount deterministic ids can hold at
+      // most one ALIVE creature at a time, and addCreatures is independently
+      // idempotent against the same id besides.
+      for (const sid of [...c._skillSummonIds]) {
+        if (!this.creatures.has(sid)) c._skillSummonIds.delete(sid);
+      }
+      for (let i = 0; i < skill.summonCount; i++) {
+        const sid = `skillsummon:${c.id}:${skill.id}:${i}`;
+        if (c._skillSummonIds.has(sid)) continue;
+        c._skillSummonIds.add(sid);
+        const [dx, dy] = summonOffset(i, skill.summonCount);
+        pendingSummons.push(hydrateCreatureRow(row, { id: sid, x: originX + dx, y: originY + dy }));
+      }
+      if (this.sfx) pushSfxEvent(this.sfx, creatureSkillSfx('skill_cast', skill.name, c, originX, originY));
+    }
   }
 
   // Player melee: damage creatures within `range` of (px,py); remove + return dead ids.
@@ -2240,8 +2944,7 @@ class CreatureSim {
     const hit = [], blocked = [];
     for (const [id, c] of this.creatures) {
       const cc = center(c);
-      const targetRadius = c.hitboxRadius || (c.width ? c.width / 2 : 24) || 24;
-      if (!inArc(ox, oy, nx, ny, cc.x, cc.y, reach, arcWidth, targetRadius)) continue;
+      if (!inArc(ox, oy, nx, ny, cc.x, cc.y, reach, arcWidth, hitRadius(c))) continue;
       // Terrain blocks the swing, exactly as it blocks a projectile.
       if (!hasLineOfSight(this.map, ox, oy, cc.x, cc.y)) continue;
       // SOMET-473: a pacified swing at the charmer's pet is reported as
@@ -2363,6 +3066,10 @@ class CreatureSim {
       const { cx, cy } = chunkOf(c.x, c.y, this.chunkSize);
       if (active.has(CHUNK_KEY(cx, cy))) continue;
       if (c.dirty) continue;
+      // SOMET-603: boss instances are never persisted, so there is nothing to
+      // reload them from -- their owner (the boss manager / debug paths)
+      // removes them. Phase minions carry no bossTier and stay prunable.
+      if (c.bossTier) continue;
       this.creatures.delete(id);
       dropped++;
     }
@@ -2457,6 +3164,15 @@ class CreatureSim {
       if (!known.has(c.id)) {
         row.type = c.type; row.color = c.color;
         row.maxHp = c.maxHp; row.level = c.level;
+        // SOMET-603: immutable too, and sent only when they say something, so
+        // an ordinary creature's intro is byte-identical to before.
+        if (c.bossTier) { row.bossTier = c.bossTier; row.name = c.name; }
+        if (c.element) row.element = c.element;
+        if (c.width !== CREATURE_SIZE) { row.width = c.width; row.height = c.height; }
+        // SOMET-606: aura NAMES, immutable for this instance (resolved at load).
+        // Sent once like bossTier; absent on a creature with none, so an
+        // ordinary intro stays byte-identical.
+        if (Array.isArray(c.auras) && c.auras.length > 0) row.auras = c.auras.map((a) => a.name);
       }
       out.push(row);
     }
@@ -2470,6 +3186,8 @@ class CreatureSim {
 
 module.exports = {
   CreatureSim, loadCreatureTypes, creatureMitigation,
+  // SOMET-603: the shared row -> creature hydration and its catalog SELECT.
+  hydrateCreatureRow, ENTITY_CATALOG_SELECT, BOSS_TIERS,
   CREATURE_SIZE, CREATURE_SPEED, REDIRECT_CHANCE,
   AGGRO_RADIUS, LEASH_RADIUS, CONTACT_RANGE, CREATURE_DAMAGE, CREATURE_ATTACK_COOLDOWN,
   GUARD_AGGRO_RADIUS, GUARD_LEASH_RADIUS, GUARD_DAMAGE, GUARD_HOME_EPSILON,
@@ -2511,8 +3229,14 @@ module.exports = {
   // join text as loadCreatureTypes above, rather than a second copy that can
   // drift.
   ABILITIES_LATERAL,
-  // SOMET-253 Task 5: exported so authority_creature_auras.test.js can pin
-  // the non-mutation/non-stacking rules directly against the buff map,
+  // SOMET-608 (S6): same reason, for server.js's CREATURE_JOINED_SELECT to
+  // carry a creature's skill repertoire.
+  SKILLS_LATERAL,
+  // SOMET-253 Task 5 / SOMET-604: exported so authority_creature_auras.test.js
+  // can pin the non-mutation/stacking rules directly against the buff map,
   // without needing a full tick() to observe them.
-  computeAuras,
+  applyAuras,
+  // SOMET-606 (S4): the enemies-side pass and the shared defense read, exported
+  // so world.js/projectiles.js use the SAME effectiveMit and tests pin the pass.
+  applyEnemyAuras, ENEMY_AURA_FLOOR, effectiveMit, NO_BUFF, __enemyAuraScratchGrowths, chargeAuraDots,
 };

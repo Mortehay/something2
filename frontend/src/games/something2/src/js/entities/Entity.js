@@ -1,5 +1,3 @@
-import { MAP_TILE_SIZE } from "../core/constants.js";
-
 export class Entity {
     constructor(x = 0, y = 0, width = 0, height = 0) {
         this.x = x;
@@ -21,7 +19,6 @@ export class Entity {
 
         // Base stats (overridden by subclasses like Player)
         this.speed = 0;
-        this.hitboxRadius = Math.max(width, height) > 0 ? (Math.max(width, height) / 2) : 24;
         this.damageMultiplier = 0;
         this.fireRateMultiplier = 0;
         this.speedMultiplier = 0;

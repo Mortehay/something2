@@ -3,11 +3,11 @@
 // way behaviorForm.js is: frontend vitest runs in a node environment with no
 // DOM, so this is the part that can actually be tested.
 
-// Mirrors the element CHECK constraint in migration 1714440083000 and
+// Mirrors the element CHECK constraint (migration 1714440083000, widened by 1714440672000) and
 // services/creatureBehaviors.js's ELEMENTS. `null` (not in this list) is
 // itself a legal value meaning "inherit the creature type's own element" --
 // see abilityToForm/abilityFormToPayload below.
-export const ELEMENTS = ["physical", "fire", "ice", "lightning"];
+export const ELEMENTS = ["physical", "arcane", "fire", "ice", "lightning"];
 
 // Defaults for a BRAND-NEW ability, mirroring the Line profile's attack
 // rather than 0. P2a's final review caught an Add-Behavior modal that

@@ -118,6 +118,13 @@ export function singleEnqueueMessage(json, what = 'Generate') {
   if (j.started === false && j.reason === 'no_provider') {
     return { ok: true, message: `${what} queued — no audio provider, press Start once one is active` };
   }
+  // SOMET-592 defect 2: this click's own scoped drain could not start
+  // because a DIFFERENT drain (scoped to someone else's batch) is already
+  // running and will never widen to reach this job. It is queued, not
+  // lost -- press Start (or try again) once the other drain finishes.
+  if (j.started === false && j.reason === 'drain_busy') {
+    return { ok: true, message: `${what} queued — another generation is running, press Start once it finishes` };
+  }
   return { ok: true, message: `${what} queued` };
 }
 
@@ -366,15 +373,28 @@ export function useAudioSlotJobs({ poll = false, pollWhen } = {}) {
 //
 // The request body is jobsRequestBody's, so a test can see exactly what one
 // chunk sends (items untouched -- force_prompt/prompt_only ride on them).
-export function jobsRequestBody(items, providerId) {
-  return { items, start: true, provider_id: Number.isInteger(providerId) ? providerId : undefined };
+//
+// `scoped` (SOMET-592 defect 2) is the explicit "confine the drain this
+// starts to what I just enqueued" signal: only enqueueSlotJob below sets
+// it. The batch panel's Queue/Start and "Generate All" keep draining the
+// WHOLE queue, exactly as before -- they call this with `scoped` left out.
+export function jobsRequestBody(items, providerId, { scoped } = {}) {
+  return {
+    items,
+    start: true,
+    provider_id: Number.isInteger(providerId) ? providerId : undefined,
+    scoped: scoped === true ? true : undefined,
+  };
 }
 
 // One slot card's Generate or Write with model: a single-item enqueue with
-// start:true. Resolves to the route's JSON; the card reads
-// singleEnqueueMessage(json) to report a rejected or already-live item.
+// start:true, SCOPED to this one click's own batch (SOMET-592 defect 2) --
+// the drain it starts never claims a different, already-queued job, even
+// one that would otherwise fit in the same sfx pack call. Resolves to the
+// route's JSON; the card reads singleEnqueueMessage(json) to report a
+// rejected, already-live, or drain_busy item.
 export async function enqueueSlotJob(item) {
-  const { res, json } = await post('/api/audio/admin/jobs', jobsRequestBody([item]));
+  const { res, json } = await post('/api/audio/admin/jobs', jobsRequestBody([item], undefined, { scoped: true }));
   if (!res.ok) throw new Error(json.error || 'Failed to queue the job');
   return json;
 }

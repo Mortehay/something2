@@ -8,7 +8,9 @@ const aiProviders = require('./aiProviders.js');
 const history = require('./artGenerations.js');
 const promptNotes = require('./artPromptNotes.js');
 const descriptions = require('./artPromptDescriptions.js');
+const subjectDescriber = require('./subjectDescriber.js');
 const failures = require('./artFailures.js');
+const localArt = require('./localArtGenerator.js');
 const {
   buildObjectPrompt, BACKDROP, CUTOUT_BACKDROP, OBJECT_NEGATIVES,
 } = require('./objectPrompt.js');
@@ -122,10 +124,14 @@ function subjectResolver(db, subjects = catalogSubjects) {
     if (!byKind.has(kind)) {
       const reg = subjects.registryFor(kind);
       if (!reg) throw new Error(`unknown subject kind: ${kind}`);
-      const list = await reg.list(db);
-      byKind.set(kind, new Map(list.map((s) => [s.key, s])));
+      // The PROMISE is cached, not the result: concurrent callers (the requeue
+      // check runs one per failed subject at once) would otherwise all miss
+      // and each run the full-catalogue query.
+      const loading = reg.list(db).then((list) => new Map(list.map((s) => [s.key, s])));
+      byKind.set(kind, loading);
+      loading.catch(() => byKind.delete(kind));
     }
-    return byKind.get(kind).get(key) || null;
+    return (await byKind.get(kind)).get(key) || null;
   };
 }
 
@@ -170,11 +176,16 @@ async function requestForSubject(db, job, subject, reg, provider) {
       db, job.subject_kind, job.subject_key, subject.basePrompt,
     );
 
-  const prompt = reg.composePrompt
-    ? await reg.composePrompt(db, subject)
-    : buildObjectPrompt(phrase, {
-      backdrop: backdropFor(provider), corrections,
-    });
+  // SOMET-535. The LOCAL backend gets the plain subject phrase: sprite-gen's
+  // build_object_prompt adds its own isolated-object framing and keys a WHITE
+  // backdrop, so the remote wrapper (magenta backdrop, "only X and nothing
+  // else") would double-frame it and name the wrong backdrop colour. A tile's
+  // composed biome prompt is what the interactive local path sends too.
+  const isLocal = Boolean(provider && provider.local);
+  let prompt;
+  if (reg.composePrompt) prompt = await reg.composePrompt(db, subject);
+  else if (isLocal) prompt = phrase;
+  else prompt = buildObjectPrompt(phrase, { backdrop: backdropFor(provider), corrections });
 
   const req = {
     subject: subject.name || subject.key,
@@ -197,7 +208,7 @@ async function requestForSubject(db, job, subject, reg, provider) {
   // isolated subject and does not tile-repeat the way an off-native object
   // does; forcing 1024 on the terrain provider would change working art for
   // no reason. Honoured only by a {{width}} template either way.
-  if (generationKind === 'object') {
+  if (generationKind === 'object' && !isLocal) {
     req.width = MIN_OBJECT_PX();
     req.height = MIN_OBJECT_PX();
   }
@@ -274,10 +285,14 @@ async function runOne(db, job, {
     const elapsed = Date.now() - startedAt;
     const refundAttempt = elapsed < queue.FAST_FAULT_MS()
       && failures.classify(message).retryable;
-    await queue.fail(db, job.id, new Error(message), { refundAttempt });
+    const row = await queue.fail(db, job.id, new Error(message), { refundAttempt });
     return {
       id: job.id, ok: false, error: message,
       subject: `${job.subject_kind}/${job.subject_key}`,
+      // SOMET-538. Whether this failure ENDED the job. A retryable one puts it
+      // back in `queued`, where the console still counts it as owed; counting
+      // it as failed too made the progress card double count it.
+      terminal: Boolean(row && row.state === 'failed'),
     };
   };
   // Only an OBJECT gets the cutout guards. A tile is legitimately opaque, and
@@ -299,6 +314,13 @@ async function runOne(db, job, {
     if (!reg) return fail(`unknown subject kind: ${job.subject_kind}`);
     req = await requestForSubject(db, job, subject, reg, provider);
     generationKind = reg.generationKind;
+  }
+
+  // A connector job with no provider to send it to (a local-only drain that
+  // met a connector row) fails with the reason instead of crashing inside the
+  // provider call.
+  if (!provider && !buildRequest) {
+    return fail(`no AI provider for this connector job -- start the batch with a provider`);
   }
 
   registryId = remote.createJob();
@@ -343,6 +365,35 @@ async function runOne(db, job, {
     id: job.id, ok: true, imageKey, result: doc.result,
     subject: `${job.subject_kind}/${job.subject_key}`,
   };
+}
+
+// Write a fresh model-authored subject phrase before image generation. Forced
+// batches use boxOnly: no CPU fallback, but any active text provider (the GPU
+// box, Ollama or an OpenAI-compatible one) may write it.
+async function writePromptForJob(db, job, {
+  subjects = catalogSubjects,
+  describer = subjectDescriber,
+  descriptionStore = descriptions,
+  resolveSubject = null,
+} = {}) {
+  const reg = subjects.registryFor(job.subject_kind);
+  if (!reg) throw new Error(`unknown subject kind: ${job.subject_kind}`);
+  if (!subjects.takesDescription(job.subject_kind)) {
+    throw new Error(`${job.subject_kind} builds its own prompt and cannot regenerate one`);
+  }
+  const getSubject = resolveSubject || subjectResolver(db, subjects);
+  const subject = await getSubject(job.subject_kind, job.subject_key);
+  if (!subject) {
+    throw new Error(`subject ${job.subject_kind}/${job.subject_key} is no longer in the catalogue`);
+  }
+  const written = await describer.describeSubject(db, subject, {
+    length: 'medium', boxOnly: true,
+  });
+  await descriptionStore.replace(db, job.subject_kind, job.subject_key, {
+    text: written.text, length: 'medium', model: written.model,
+    sourcePrompt: subject.basePrompt,
+  });
+  return written;
 }
 
 // Point the subject at its new image, through SOMET-535's registry -- items
@@ -423,21 +474,29 @@ async function objectSizeRefusal(db, provider, subjects = catalogSubjects, loadP
   // pin, so the provider a subject will use is not necessarily the one this
   // batch was started with.
   const { rows } = await db.query(
+    // Local rows are exempt: the 1024 rule is about SDXL on a remote provider,
+    // and sprite-gen picks its own size. Counting them would refuse -- or
+    // offer to delete -- local work against a provider it never touches.
     `SELECT subject_kind, provider_id, count(*)::int AS n
-       FROM art_jobs WHERE state = 'queued'
+       FROM art_jobs WHERE state = 'queued' AND backend <> 'local'
       GROUP BY subject_kind, provider_id ORDER BY subject_kind, provider_id`);
   // EVERY blocking group, not the first. The console offers to drop exactly
   // these rows so the rest of the queue can run, and a refusal that named one
   // group at a time would have the admin drop, retry and be refused again.
   const blocked = [];
-  let first = null;
+  // refusal text -> the kinds it blocks, so the message names EVERY blocked
+  // kind (SOMET-593: it named only the first row's kind, though skill was
+  // blocked alongside item).
+  const kindsByRefusal = new Map();
   for (const r of rows) {
     const reg = subjects.registryFor(r.subject_kind);
     if (!reg || reg.generationKind !== 'object') continue;   // tiles are exempt
     const p = await resolveJobProvider(db, r.provider_id, provider, loadProvider);
     const refusal = providerSizeRefusal(p);
     if (!refusal) continue;
-    if (!first) first = `${refusal} (queued ${r.subject_kind} jobs use it)`;
+    const kinds = kindsByRefusal.get(refusal) || [];
+    if (!kinds.includes(r.subject_kind)) kinds.push(r.subject_kind);
+    kindsByRefusal.set(refusal, kinds);
     blocked.push({
       kind: r.subject_kind,
       // The row's own value, NULL included: that is what a scoped clear has to
@@ -449,8 +508,11 @@ async function objectSizeRefusal(db, provider, subjects = catalogSubjects, loadP
       count: r.n,
     });
   }
-  if (!first) return null;
-  const err = new Error(first);
+  if (kindsByRefusal.size === 0) return null;
+  const message = [...kindsByRefusal]
+    .map(([refusal, kinds]) => `${refusal} (queued ${kinds.join(' and ')} jobs use it)`)
+    .join(' ');
+  const err = new Error(message);
   err.code = 'PROVIDER_TOO_SMALL';
   err.blocked = blocked;
   return err;
@@ -474,6 +536,63 @@ async function resolveJobProvider(db, providerId, batchProvider, loadProvider) {
   // row is gone), or that names the audio profile, degrades to the batch's rather than failing the job -- the
   // same choice resolveGenerationTarget makes for a dangling pin.
   return cache.get(providerId) || batchProvider;
+}
+
+// SOMET-544. Would a plain retry of this failed job send anything different?
+//
+// A content failure is refused a plain requeue because the seed is derived
+// from the subject, so the same request comes back as the same image. That
+// holds only while the REQUEST is unchanged -- and most of what goes into it is
+// code and provider config, not per-subject rows: the backdrop moved white ->
+// grey in SOMET-545 without touching a single subject, and every cutout that
+// failed on white was still refused a retry that would now succeed.
+//
+// So the question is answered by rebuilding the body this subject would be
+// sent now and comparing it with the one recorded when it failed
+// (art_generations, SOMET-547). Built through requestForSubject and
+// remote.buildBody -- the same two steps a real run takes -- so the comparison
+// cannot drift from what would actually be sent.
+//
+// Compared against the provider that drew the failure: whichever provider a
+// later drain picks is unknown here, and "the same provider would now get a
+// different request" is the claim that justifies spending a generation.
+//
+// Every "cannot tell" answers false -- no recorded attempt, a deleted provider,
+// a subject gone from the catalogue -- which keeps the 409 the caller already
+// had. The cost of a wrong true is a wasted generation; of a wrong false, only
+// that the operator uses reseed, as before.
+function stableJson(obj) {
+  return JSON.stringify(Object.keys(obj).sort().map((k) => [k, obj[k]]));
+}
+
+async function requestChangedSinceFailure(db, job, {
+  subjects = catalogSubjects,
+  loadProvider = aiProviders.loadImageProviderWithSecret,
+  resolveSubject = null,
+} = {}) {
+  const { rows } = await db.query(
+    `SELECT composed_prompt, provider_id, params FROM art_generations
+      WHERE art_job_id = $1 AND outcome = 'failed'
+      ORDER BY created_at DESC, id DESC LIMIT 1`,
+    [job.id],
+  );
+  const last = rows[0];
+  if (!last || last.composed_prompt == null || !Number.isInteger(last.provider_id)) return false;
+  const reg = subjects.registryFor(job.subject_kind);
+  if (!reg) return false;
+  const getSubject = resolveSubject || subjectResolver(db, subjects);
+  const subject = await getSubject(job.subject_kind, job.subject_key);
+  if (!subject) return false;
+  const provider = await loadProvider(db, last.provider_id);
+  // A local provider has no template and its failures record no sent body.
+  if (!provider || provider.local) return false;
+
+  const body = remote.buildBody(provider, await requestForSubject(db, job, subject, reg, provider));
+  // Both sides through paramsFrom's whitelist, and the prompt normalised the
+  // way record() stores it, so only a real difference can register.
+  const now = { prompt: body.prompt || null, ...history.paramsFrom(body) };
+  const then = { prompt: last.composed_prompt, ...history.paramsFrom(last.params || {}) };
+  return stableJson(now) !== stableJson(then);
 }
 
 // The longest a drain will sit waiting for a backoff to expire before looking
@@ -508,6 +627,8 @@ async function dispatch(db, {
   concurrency = DEFAULT_CONCURRENCY(),
   onResult = null,
   generate,
+  // SOMET-535. What draws a backend='local' job; injected by tests.
+  localGenerate = localArt.runGeneration,
   buildRequest,
   writeArt,
   subjects = catalogSubjects,
@@ -565,13 +686,24 @@ async function dispatch(db, {
       cursor += 1;
       if (i >= claimed.length) return;
       const job = claimed[i];
+      // SOMET-535. art_jobs.backend decides WHO draws it. A 'local' job goes
+      // to sprite-gen and is never resolved to the batch's remote provider --
+      // that fallback is how "Local" jobs used to be drawn remotely.
+      const isLocal = job.backend === 'local';
       // The job's own provider, not the batch's, when its type is pinned.
-      const jobProvider = buildRequest
-        ? provider
-        : await resolveJobProvider(db, job.provider_id, provider, loadProvider);
+      let jobProvider = provider;
+      if (isLocal) jobProvider = localArt.LOCAL_PROVIDER;
+      else if (!buildRequest) {
+        jobProvider = await resolveJobProvider(db, job.provider_id, provider, loadProvider);
+      }
       const result = await runOne(db, job, {
-        provider: jobProvider, generate, buildRequest, writeArt, resolveSubject,
-        subjects, deps,
+        provider: jobProvider,
+        generate: isLocal ? localGenerate : generate,
+        buildRequest,
+        writeArt,
+        resolveSubject,
+        subjects,
+        deps,
       });
       results.push(result);
       // Checked the instant a result lands, so the pass stops on the third
@@ -610,6 +742,8 @@ module.exports = {
   subjectResolver,
   backdropFor,
   resolveJobProvider,
+  writePromptForJob,
+  requestChangedSinceFailure,
 };
 
 // --- The drain ------------------------------------------------------------
@@ -634,6 +768,8 @@ function runStatus() {
     passes: run.passes,
     done: run.done,
     failed: run.failed,
+    phase: run.phase || null,
+    prompts_written: run.promptsWritten || 0,
     stopping: run.stopping,
     // null unless the drain is currently sitting out a retry backoff.
     waiting_until: run.waitingUntil || null,
@@ -671,18 +807,55 @@ function startDrain(db, opts = {}) {
   run = {
     running: true, stopping: false, startedAt: new Date().toISOString(),
     finishedAt: null, passes: 0, done: 0, failed: 0, error: null,
-    waitingUntil: null, blocked: [],
+    waitingUntil: null, blocked: [], phase: null, promptsWritten: 0,
   };
   // Distinct subjects that have failed on the PROVIDER since the last success.
   // A Set, not a counter: the same subject failing repeatedly says nothing
   // about the provider, and the attempt cap already ends that.
   const brokenSubjects = new Set();
   const self = run;
+  const promptSubjects = (opts.promptDeps && opts.promptDeps.subjects) || catalogSubjects;
+  const promptResolveSubject = subjectResolver(db, promptSubjects);
 
   (async () => {
     try {
       for (;;) {
         if (self.stopping) break;
+        // Prompt phase first across the whole queue, avoiding a text/image
+        // model swap for every individual subject.
+        self.phase = 'prompt';
+        for (;;) {
+          if (self.stopping) break;
+          const promptJob = await queue.claimPrompt(db);
+          if (promptJob) {
+            try {
+              await (opts.writePromptForJob || writePromptForJob)(db, promptJob, {
+                ...opts.promptDeps, resolveSubject: promptResolveSubject,
+              });
+              await queue.promptWritten(db, promptJob.id);
+              self.promptsWritten += 1;
+            } catch (err) {
+              const row = await queue.fail(db, promptJob.id, err, { refundAttempt: err && err.busy === true });
+              // Only a job this failure ENDED is failed; one back in `queued`
+              // is still owed and the console counts it there (SOMET-538).
+              if (row && row.state === 'failed') self.failed += 1;
+            }
+            continue;
+          }
+          const promptState = await queue.promptQueueState(db);
+          if (promptState.queued === 0) break;
+          if (promptState.ready > 0) continue;
+          if (!promptState.next) break;
+          const waitMs = Math.min(
+            Math.max(new Date(promptState.next).getTime() - Date.now(), 0),
+            MAX_IDLE_WAIT_MS(),
+          );
+          self.waitingUntil = new Date(promptState.next).toISOString();
+          await sleepUnlessStopping(waitMs, self);
+          self.waitingUntil = null;
+        }
+        if (self.stopping) break;
+        self.phase = 'image';
         // The breaker now runs as each result lands (SOMET-558), so a wedged
         // provider stops the pass at BREAKER_TRIP instead of after all `limit`
         // claimed jobs have been converted into failures.
@@ -692,6 +865,16 @@ function startDrain(db, opts = {}) {
         // operator went looking for a dead GPU box that was answering fine.
         let lastCause = null;
         const onResult = (r) => {
+          // Counted HERE, per job, not from dispatch()'s return value. The
+          // pass returns only after all `limit` claimed jobs, so a per-pass
+          // tally sat at 0 while ten subjects landed in the catalogue and the
+          // console's progress card read "0 of 41" beside a header showing 9
+          // new images (SOMET-538 re-validation, observed live).
+          // And failed counts only TERMINAL failures. A retryable one returns
+          // the job to `queued`, which batchProgress already counts as
+          // remaining -- counting it here as well read "2 of 4 · 50%" with
+          // nothing drawn and ended "2 drawn, 2 failed" when nothing failed.
+          if (r.ok) self.done += 1; else if (r.terminal) self.failed += 1;
           if (r.ok) { brokenSubjects.clear(); return null; }
           // Only PROVIDER-class failures count. A subject whose cutout keyed
           // away its own image says nothing about the provider's health, and
@@ -711,8 +894,6 @@ function startDrain(db, opts = {}) {
           shouldStop: () => self.stopping,
         });
         self.passes += 1;
-        self.done += out.done;
-        self.failed += out.failed;
 
         // THE CIRCUIT BREAKER fired inside the pass; this only reports it.
         if (tripped) {
@@ -756,6 +937,7 @@ function startDrain(db, opts = {}) {
     } catch (err) {
       self.error = err && err.message ? err.message : String(err);
     } finally {
+      self.phase = null;
       self.running = false;
       self.finishedAt = new Date().toISOString();
     }
@@ -773,11 +955,36 @@ function forgetBlocked(groups) {
   run.blocked = run.blocked.filter((b) => !gone.has(`${b.kind}|${b.provider_id ?? ''}`));
 }
 
+// run.blocked is a snapshot from the drain's last pass, and the console builds
+// its "Remove N blocked job(s)" offer from it. Rows can leave the queue without
+// a scoped clear -- the unscoped "Clear N pending", or by hand -- and a finished
+// drain never re-checks, so the offer outlived its rows and its button cleared
+// 0 of them. `queued` is the CURRENT queue as [{ kind, provider_id, count }]:
+// keep only the blocked groups still in it, at their current counts.
+function retainBlocked(queued) {
+  if (!run || !Array.isArray(run.blocked) || !Array.isArray(queued)) return;
+  const now = new Map(queued.map((g) => [`${g.kind}|${g.provider_id ?? ''}`, Number(g.count)]));
+  run.blocked = run.blocked
+    .filter((b) => now.get(`${b.kind}|${b.provider_id ?? ''}`) > 0)
+    .map((b) => ({ ...b, count: now.get(`${b.kind}|${b.provider_id ?? ''}`) }));
+}
+
 // Tests only: forget the run so one case cannot leave another looking busy.
-function __resetRun() { run = null; }
+//
+// It STOPS the run it forgets. Nulling `run` alone left the drain's loop going
+// untracked: stopDrain() reads `run`, so once it was null nothing could stop
+// that loop, and it kept claiming whatever the NEXT test queued (SOMET-538:
+// art_jobs_api_db's freshPool after-hook resets before the test's own
+// stopDrain runs -- t.after is FIFO -- and 'clear also takes claimed rows'
+// then saw a third row claimed by a previous case's orphaned drain).
+function __resetRun() {
+  if (run) run.stopping = true;
+  run = null;
+}
 
 module.exports.startDrain = startDrain;
 module.exports.stopDrain = stopDrain;
 module.exports.runStatus = runStatus;
 module.exports.forgetBlocked = forgetBlocked;
+module.exports.retainBlocked = retainBlocked;
 module.exports.__resetRun = __resetRun;

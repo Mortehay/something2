@@ -1,0 +1,106 @@
+{
+  "actions": [
+    {
+      "id": "attack",
+      "label": "Attack",
+      "max_frames": 6
+    },
+    {
+      "id": "cast",
+      "label": "Cast Spell",
+      "max_frames": 6
+    },
+    {
+      "id": "damage",
+      "label": "Receive Damage",
+      "max_frames": 6
+    },
+    {
+      "id": "idle",
+      "label": "Idle",
+      "max_frames": 6
+    },
+    {
+      "id": "sway",
+      "label": "Sway (Wind)",
+      "max_frames": 6
+    },
+    {
+      "id": "use",
+      "label": "Use / Interact",
+      "max_frames": 6
+    },
+    {
+      "id": "walk",
+      "label": "Walk",
+      "max_frames": 6
+    }
+  ],
+  "directions": [
+    {
+      "id": "s",
+      "family": "front"
+    },
+    {
+      "id": "se",
+      "family": "front"
+    },
+    {
+      "id": "e",
+      "family": "side"
+    },
+    {
+      "id": "ne",
+      "family": "back"
+    },
+    {
+      "id": "n",
+      "family": "back"
+    },
+    {
+      "id": "nw",
+      "family": "back"
+    },
+    {
+      "id": "w",
+      "family": "side"
+    },
+    {
+      "id": "sw",
+      "family": "front"
+    }
+  ],
+  "max_frames": 6,
+  "frames_by_action": {
+    "attack": 6,
+    "cast": 6,
+    "damage": 6,
+    "idle": 6,
+    "sway": 6,
+    "use": 6,
+    "walk": 6
+  },
+  "default_direction": "s",
+  "engine": {
+    "fixed": true,
+    "label": "Qwen-Image-Edit-2511 (GGUF)",
+    "transformer": "qwen-image-edit-2511-Q2_K.gguf",
+    "transformer_repo": "unsloth/Qwen-Image-Edit-2511-GGUF",
+    "encoder_repo": "ovedrive/Qwen-Image-Edit-2511-4bit",
+    "steps": 4,
+    "loras": [
+      {
+        "repo": "fal/Qwen-Image-Edit-2511-Multiple-Angles-LoRA",
+        "weight": "qwen-image-edit-2511-multiple-angles-lora.safetensors",
+        "role": "8 azimuths - the camera, and what pins framing"
+      },
+      {
+        "repo": "lightx2v/Qwen-Image-Edit-2511-Lightning",
+        "weight": "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+        "role": "step distillation - 4 steps at scale 0.7"
+      }
+    ],
+    "missing": [],
+    "concept_note": "The concept image comes from the Entity tab, which has its own model roster."
+  }
+}

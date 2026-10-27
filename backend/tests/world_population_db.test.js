@@ -17,7 +17,8 @@ const describeDb = URL ? test : test.skip;
 // finally. Never delete by an id captured mid-test: if the test fails before
 // the capture, the row leaks into the shared dev database forever.
 const FIXTURES = [
-  'zzPopHorde', 'zzPopDead', 'zzPopNoAllowlist', 'zzPopGuardFilter', 'zzPopRollback',
+  'zzPopHorde', 'zzPopDead', 'zzPopNoAllowlist', 'zzPopGuardFilter', 'zzPopRollback', 'zzPopBossFilter',
+  'zzPopMinibossAdmit',
 ];
 
 async function cleanup(pool) {
@@ -198,6 +199,70 @@ describeDb('populateWorld excludes guard-faction types from the wild-spawn pool'
       `SELECT count(*)::int AS n FROM world_creatures
        WHERE world_id = $1 AND type = 'Village Guard'`, [world.id]);
     assert.equal(guards.rows[0].n, 0, 'a guard-faction type must never enter the wild-spawn pool');
+  } finally {
+    await cleanup(pool);
+    await pool.end();
+  }
+});
+
+describeDb('populateWorld never places a boss-tier type as a wild spawn', async () => {
+  const pool = new Pool({ connectionString: URL });
+  try {
+    await cleanup(pool);
+    // biomes: [] for the same reason as the guard-filter test above: a biome
+    // intersection would exclude the boss by itself and make this vacuous.
+    const world = await makeWorld(pool, 'zzPopBossFilter', 'horde',
+      ['Ignis, the Magma Colossus', 'Skeleton'], []);
+    const client = await pool.connect();
+    let result;
+    try {
+      await client.query('BEGIN');
+      result = await populateWorld(client, world, { rngSeed: 23 });
+      await client.query('COMMIT');
+    } finally { client.release(); }
+
+    assert.ok(result.total > 0, 'fixture placed nothing -- the negative assertion below would be vacuous');
+    const skeletons = await pool.query(
+      `SELECT count(*)::int AS n FROM world_creatures WHERE world_id = $1 AND type = 'Skeleton'`, [world.id]);
+    assert.ok(skeletons.rows[0].n > 0, 'the allowed ordinary type must actually be placed');
+    const bosses = await pool.query(
+      `SELECT count(*)::int AS n FROM world_creatures WHERE world_id = $1 AND type = 'Ignis, the Magma Colossus'`,
+      [world.id]);
+    assert.equal(bosses.rows[0].n, 0, 'a boss-tier type must never enter the wild-spawn pool');
+  } finally {
+    await cleanup(pool);
+    await pool.end();
+  }
+});
+
+// SOMET-624 (S11): the opposite of the test above. Unlike world/dungeon
+// boss_tier rows (manager-owned, never scattered), 'miniboss' is DESIGNED to
+// come through this exact path -- the ticket's own acceptance is "at least
+// one miniboss observed spawning in its biome" via ordinary population. A
+// blanket `boss_tier IS NULL` filter stranded every miniboss (live-reproduced
+// 2026-10-12: 0/879 placed in a world that explicitly allowed one); this
+// pins the fix so it cannot regress back to that blanket exclusion.
+// 'Woodland Miniboss' is Deep Forest's generated miniboss (biomes.js), so the
+// default biomeNames=['Deep Forest'] admits it without widening the fixture.
+describeDb('populateWorld DOES place a miniboss-tier type as a wild spawn', async () => {
+  const pool = new Pool({ connectionString: URL });
+  try {
+    await cleanup(pool);
+    const world = await makeWorld(pool, 'zzPopMinibossAdmit', 'horde',
+      ['Woodland Miniboss', 'Skeleton']);
+    const client = await pool.connect();
+    let result;
+    try {
+      await client.query('BEGIN');
+      result = await populateWorld(client, world, { rngSeed: 23 });
+      await client.query('COMMIT');
+    } finally { client.release(); }
+
+    assert.ok(result.total > 0, 'fixture placed nothing -- the assertion below would be vacuous');
+    const minibosses = await pool.query(
+      `SELECT count(*)::int AS n FROM world_creatures WHERE world_id = $1 AND type = 'Woodland Miniboss'`,
+      [world.id]);
+    assert.ok(minibosses.rows[0].n > 0, 'a miniboss-tier type must be reachable via the ordinary wild-spawn pool');
   } finally {
     await cleanup(pool);
     await pool.end();

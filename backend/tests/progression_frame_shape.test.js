@@ -147,7 +147,7 @@ test('the join derives usesLifeCost once and hands it to both the sim and the wi
   assert.strictEqual(derivations.length, 1,
     'usesLifeCost is resolved in exactly one place in the authority');
   assert.match(src, /const usesLifeCost = character\.className === 'Cultist'/);
-  assert.match(src, /addPlayer\([^)]*usesLifeCost\)/,
+  assert.match(src, /addPlayer\([^)]*usesLifeCost\b/,
     'the joined player must carry the flag, or world.js can never spend life');
   assert.match(src, /^\s*usesLifeCost,$/m,
     'the joined frame must carry the flag, or the client draws a mana orb that never moves');

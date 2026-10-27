@@ -201,7 +201,7 @@ test('GET returns the derived bundle alongside the raw row', async (t) => {
     // The derived bundle alongside it, all literal expected values for a
     // fresh (all-base-stat) level-1 character.
     assert.equal(res.body.xpFloor, 0);
-    assert.equal(res.body.xpToNext, 18);   // round(18 * 1^1.33), hand-computed
+    assert.equal(res.body.xpToNext, 35);   // round(35 * 1^1.45), hand-computed
     assert.equal(res.body.respecCost, 50); // RESPEC_BASE(50) * level(1)
     assert.equal(res.body.stats.maxHp, 100);
     assert.equal(res.body.stats.maxMana, 100);

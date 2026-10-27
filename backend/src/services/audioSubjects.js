@@ -27,24 +27,41 @@ const ATTACK_KINDS = ['melee', 'ranged', 'magic'];
 // spec §4's slot -> cue table for attack_type, keyed by attack kind because
 // the cue genuinely differs per subject (melee `use` is not ranged `use`) --
 // unlike creature/world_point below, where the same map applies to every
-// subject of that kind. `hit` is `null` for whichever kind has no cue on the
-// box today (spec §4: "Three slots have no cue... a bow/throw release").
+// subject of that kind. SOMET-627: ranged `use` (a bow/throw release) was the
+// one slot here with no cue on the box; spec §4 flagged it as a gap and
+// suggested `shoot` as the cue name for when the box adds it, so that is what
+// is wired here. sfxRequestFor (audioGeneration.js) still cross-checks the
+// active provider's own discovered `models_cache` before ever calling the
+// box, so a registry entry for a cue the box has not actually reported yet
+// fails the same safe way ("upload only") instead of sending a request the
+// box would reject -- this entry is therefore correct to ship ahead of the
+// box itself gaining the cue.
 const ATTACK_TYPE_CUES = {
   melee: { use: 'slash', hit: 'hit' },
-  ranged: { use: null, hit: 'hit' },
+  ranged: { use: 'shoot', hit: 'hit' },
   magic: { use: 'spell', hit: 'hit' },
 };
 
 // entityPhrase's text for the attack_type kind, per (kind, slot) -- the spec
 // §4 table gives each slot its own phrase ("a steel sword" is a swing, "a
 // blade on a creature" is a hit; a `hit` cue sent "a steel sword" tends
-// toward a clang). ranged/use has no cue (upload only), so its phrase is
-// never sent; it reuses the ranged/hit phrase rather than inventing one.
+// toward a clang). ranged/use now has a cue (SOMET-627) and reuses the
+// ranged/hit phrase ("an arrow") rather than inventing a new one -- the two
+// slots already shared this phrase even while `use` was upload-only.
 const ATTACK_TYPE_PHRASE = {
   melee: { use: 'a steel sword', hit: 'a blade on a creature' },
   ranged: { use: 'an arrow', hit: 'an arrow' },
   magic: { use: 'a magic spell', hit: 'a magic blast' },
 };
+
+// SOMET-605 (spec §3.6): every creature carries the base slots; a row with a
+// boss_tier also carries BOSS_SLOTS. The kind's `slots` map below is the
+// VOCABULARY (every slot ANY creature can carry, so slotKind stays
+// subject-free); whether ONE creature carries a slot is answered by
+// exists(db, keys, slot) or subjectSlotNames -- never by `slots` alone.
+const CREATURE_BASE_SLOTS = Object.freeze(['nearby', 'attack', 'hurt', 'death']);
+const BOSS_SLOTS = Object.freeze(['spawn', 'presence', 'phase', 'enrage']);
+const BOSS_SLOT_SET = new Set(BOSS_SLOTS);
 
 const SUBJECT_KINDS = {
   world: {
@@ -65,23 +82,50 @@ const SUBJECT_KINDS = {
     label: 'Creatures',
     slots: {
       nearby: 'sfx', attack: 'sfx', hurt: 'sfx', death: 'sfx',
+      spawn: 'sfx', presence: 'sfx', phase: 'sfx', enrage: 'sfx',
     },
     // Fixed: the same cue applies to every creature (spec §4 table). `nearby`
-    // and `attack` have no cue on the box today -- upload only. Still used by
-    // cueFor directly; subjectCues below fans it out per listed creature.
+    // and `attack` (SOMET-627) now carry `idle`/`attack` -- the exact cue
+    // names spec §4 suggested for when the box gained them, so this is data
+    // only, not a new mechanism. As with ranged `use` above, sfxRequestFor
+    // still refuses as upload-only if the active provider's models_cache has
+    // not reported `cue:idle`/`cue:attack`, so shipping this ahead of the box
+    // cannot send it a cue it does not know. The four boss slots still have
+    // no cue (the box's documented vocabulary is slash/hit/pickup/spell/
+    // footstep/ui_click/miss/chest_open/death/waypoint, plus idle/attack/
+    // shoot once reported), so they stay upload only.
     cues: {
-      nearby: null, attack: null, hurt: 'hit', death: 'death',
+      nearby: 'idle', attack: 'attack', hurt: 'hit', death: 'death',
+      spawn: null, presence: null, phase: null, enrage: null,
     },
     list: async (db) => (await db.query(
       'SELECT name FROM entity_types WHERE is_creature ORDER BY name')).rows.map((r) => r.name),
-    exists: async (db, keys) => new Set((await db.query(
-      'SELECT name FROM entity_types WHERE is_creature AND name = ANY($1::text[])', [keys])).rows.map((r) => r.name)),
-    // subjectCues(db) -> { [name]: { [slot]: cue|null } }, one entry per
-    // listed creature -- see the module-level comment above SUBJECT_KINDS.
+    // `slot` (optional): a boss slot exists only on a boss_tier row. Omitted,
+    // this answers "is it a creature at all", exactly as before.
+    exists: async (db, keys, slot) => new Set((await db.query(
+      `SELECT name FROM entity_types
+        WHERE is_creature AND name = ANY($1::text[])
+          AND ($2::boolean IS FALSE OR boss_tier IS NOT NULL)`,
+      [keys, BOSS_SLOT_SET.has(slot)])).rows.map((r) => r.name)),
+    // { [name]: [slot, ...] } for the named creatures (all when keys is null),
+    // in vocabulary order. Unknown names are absent.
+    subjectSlotNames: async (db, keys = null) => {
+      const r = await db.query(
+        `SELECT name, boss_tier IS NOT NULL AS boss FROM entity_types
+          WHERE is_creature AND ($1::text[] IS NULL OR name = ANY($1::text[]))
+          ORDER BY name`, [keys]);
+      return Object.fromEntries(r.rows.map((row) => [
+        row.name, row.boss ? [...CREATURE_BASE_SLOTS, ...BOSS_SLOTS] : [...CREATURE_BASE_SLOTS],
+      ]));
+    },
+    // subjectCues(db) -> { [name]: { [slot]: cue|null } }, covering exactly
+    // the slots THAT creature carries (a boss row gets the boss slots too).
     subjectCues: async (db) => {
-      const names = await SUBJECT_KINDS.creature.list(db);
+      const bySubject = await SUBJECT_KINDS.creature.subjectSlotNames(db);
       const out = {};
-      for (const n of names) out[n] = { ...SUBJECT_KINDS.creature.cues };
+      for (const [n, slots] of Object.entries(bySubject)) {
+        out[n] = Object.fromEntries(slots.map((sl) => [sl, SUBJECT_KINDS.creature.cues[sl]]));
+      }
       return out;
     },
   },
@@ -132,6 +176,61 @@ const SUBJECT_KINDS = {
     // hoisted).
     subjectCues: async () => skillCues(),
   },
+  // SOMET-607 (S5, spec §3.6). `loop` is a continuous clip played
+  // presence-style (AudioEngine.tickNearby), same mechanism as a loopable
+  // world point or a boss's own `presence`. `pulse` is a periodic ambient
+  // bed too (no client trigger wired yet -- reserved for a future per-tick
+  // cue). Both are 'ambience' clipKind, NOT 'sfx': the box's sfx path is
+  // strictly cue-based (spec §4's fixed vocabulary -- slash/hit/death/...),
+  // and there is no such cue for "a generic magical aura", so registering
+  // them as 'sfx' made every generation attempt refuse with "upload only"
+  // before ever reaching the box (found live 2026-10-11, generating audio
+  // for S8's aura follow-up). 'ambience', like world/biome's own ambience
+  // slots, is free-text: it sends the slot's STORED PROMPT straight to the
+  // box with no cue at all -- exactly the path buildContext's 'aura' case
+  // (side/element phrasing) already feeds correctly.
+  // `apply` is a genuine one-shot sfx tied to a specific moment (the local
+  // player entering the aura) -- cue-shaped, same as creature nearby/attack
+  // or any boss slot. The box has no cue for it either, so it stays
+  // deliberately upload-only, same posture as those.
+  aura: {
+    label: 'Auras',
+    slots: { loop: 'ambience', pulse: 'ambience', apply: 'sfx' },
+    cues: { apply: null },
+    list: async (db) => (await db.query('SELECT name FROM aura_effects ORDER BY name')).rows.map((r) => r.name),
+    exists: async (db, keys) => new Set((await db.query(
+      'SELECT name FROM aura_effects WHERE name = ANY($1::text[])', [keys])).rows.map((r) => r.name)),
+    subjectCues: async (db) => {
+      const names = await SUBJECT_KINDS.aura.list(db);
+      const out = {};
+      for (const n of names) out[n] = { ...SUBJECT_KINDS.aura.cues };
+      return out;
+    },
+  },
+  // SOMET-610 (S7, spec §3.6). A creature SKILL's own telegraph/cast/hit
+  // moments -- keyed by skill NAME (creature_skills.name, unique, same
+  // shape `aura` keys on), never the caster's creature type: the same
+  // skill (e.g. Magma Slam) is bound to several different creatures at
+  // different power_scale, and its sound is a property of the SKILL, not
+  // of whoever is currently casting it. All three slots are genuine
+  // one-shot sfx (not a loop/ambience, unlike aura's `loop`/`pulse` --
+  // see the S5-era fix note on that), so this does NOT repeat that
+  // mistake; they stay upload-only (no box cue) by default, same posture
+  // as creature's own boss slots (spawn/presence/phase/enrage).
+  creature_skill: {
+    label: 'Creature Skills',
+    slots: { telegraph: 'sfx', use: 'sfx', hit: 'sfx' },
+    cues: { telegraph: null, use: null, hit: null },
+    list: async (db) => (await db.query('SELECT name FROM creature_skills ORDER BY name')).rows.map((r) => r.name),
+    exists: async (db, keys) => new Set((await db.query(
+      'SELECT name FROM creature_skills WHERE name = ANY($1::text[])', [keys])).rows.map((r) => r.name)),
+    subjectCues: async (db) => {
+      const names = await SUBJECT_KINDS.creature_skill.list(db);
+      const out = {};
+      for (const n of names) out[n] = { ...SUBJECT_KINDS.creature_skill.cues };
+      return out;
+    },
+  },
 };
 
 // Every kind whose bindings are global rather than scoped to one world/biome
@@ -158,15 +257,37 @@ function isKnownSlot(subjectKind, slot) {
 const MAX_SUBJECT_KEY = 200;
 
 // Does this subject exist in its catalogue (spec §3: unknown keys are
-// dropped)? One query for the whole list; returns the Set of keys that exist.
-async function existingSubjects(db, subjectKind, keys) {
+// dropped) -- and, when `slot` is given, does it CARRY that slot (spec §3.6:
+// boss slots only on boss rows)? Kinds whose slots do not vary per subject
+// ignore `slot`. One query for the whole list.
+async function existingSubjects(db, subjectKind, keys, slot) {
   if (!isKnownKind(subjectKind) || !keys.length) return new Set();
-  return SUBJECT_KINDS[subjectKind].exists(db, keys);
+  return SUBJECT_KINDS[subjectKind].exists(db, keys, slot);
 }
 
-async function subjectExists(db, subjectKind, key) {
+async function subjectExists(db, subjectKind, key, slot) {
   if (typeof key !== 'string' || !key || key.length > MAX_SUBJECT_KEY) return false;
-  return (await existingSubjects(db, subjectKind, [key])).has(key);
+  return (await existingSubjects(db, subjectKind, [key], slot)).has(key);
+}
+
+// The slots ONE subject carries, in vocabulary order. Kinds without
+// per-subject slots return the whole vocabulary, without checking that the
+// key exists -- the same answer GET /admin/prompts and /admin/slots always
+// gave, so their behaviour for those kinds is unchanged.
+async function slotNamesFor(db, subjectKind, key) {
+  if (!isKnownKind(subjectKind)) return [];
+  const def = SUBJECT_KINDS[subjectKind];
+  if (!def.subjectSlotNames) return Object.keys(def.slots);
+  return (await def.subjectSlotNames(db, [key]))[key] || [];
+}
+
+// { [key]: [slot, ...] } for every listed subject of a kind.
+async function slotsBySubject(db, subjectKind) {
+  if (!isKnownKind(subjectKind)) return {};
+  const def = SUBJECT_KINDS[subjectKind];
+  if (def.subjectSlotNames) return def.subjectSlotNames(db);
+  const all = Object.keys(def.slots);
+  return Object.fromEntries((await def.list(db)).map((k) => [k, [...all]]));
 }
 
 // An item's own attack kind (melee/ranged/magic), via the ONE definition
@@ -274,6 +395,9 @@ module.exports = {
   isKnownSlot,
   existingSubjects,
   subjectExists,
+  slotNamesFor,
+  slotsBySubject,
+  BOSS_SLOTS,
   cueFor,
   entityPhrase,
   itemCues,

@@ -3,9 +3,12 @@ const assert = require('node:assert');
 const { Pool } = require('pg');
 const { ownedCharacter } = require('../src/services/characters');
 
-// TEST_DATABASE_URL first: an unset variable would silently point these at the
-// SHARED dev database, which this suite inserts into.
-const pool = new Pool({ connectionString: process.env.TEST_DATABASE_URL || process.env.DATABASE_URL });
+// TEST_DATABASE_URL first; the explicit fallback matches the local development
+// stack. This suite inserts temporary rows and removes them in finally blocks.
+const DB_URL = process.env.TEST_DATABASE_URL
+  || process.env.DATABASE_URL
+  || 'postgres://user:password@localhost:15432/game_db';
+const pool = new Pool({ connectionString: DB_URL });
 
 test.after(async () => { await pool.end(); });
 

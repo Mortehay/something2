@@ -91,7 +91,7 @@ async function repriceBaseCatalog(pool, itemTypeId, value) {
   const upd = await pool.query(
     `UPDATE merchant_stock
         SET price = $2
-      WHERE item_type_id = $1 AND seller_user_id IS NULL`,
+      WHERE item_type_id = $1 AND seller_user_id IS NULL AND price <> $2`,
     [itemTypeId, price],
   );
   return upd.rowCount || 0;

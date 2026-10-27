@@ -76,3 +76,13 @@ compose/orangepi/secrets/
 # Python bytecode from the tools/ scripts
 __pycache__/
 *.pyc
+.lh
+.history
+.vscode-upload.json
+backend/src/restart-trigger.json
+
+# Seed/Export temp files (atomic write leftovers of a crashed export)
+backend/seeds/**/*.tmp
+
+# Host git-helper socket/token/pid/log (never commit, never ship to images)
+backend/run/

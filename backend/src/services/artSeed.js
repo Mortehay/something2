@@ -50,7 +50,10 @@ function safeName(name) {
 // Object-key prefix per kind. `objects/` is what storageKey writes for
 // generationKind 'object' subjects; entities are the exception (no prefix),
 // matching the creature path sprite-gen's storage.py has always used.
-const KEY_PREFIX = { tile: 'tiles/', entity: '', skill: 'objects/', passive_label: 'objects/', item: 'objects/' };
+const KEY_PREFIX = {
+  tile: 'tiles/', entity: '', character_appearance: 'objects/',
+  skill: 'objects/', passive_label: 'objects/', item: 'objects/',
+};
 
 function seededKey(bucket, kind, key) {
   if (!(kind in KEY_PREFIX)) throw new Error(`unknown kind: ${kind}`);
@@ -194,6 +197,27 @@ const SEED_POLICY = Object.freeze({
       );
     },
   },
+  character_appearance: {
+    kind: 'character_appearance',
+    dir: 'character-appearances',
+    manifest: 'character-appearances.json',
+    trim: 'object',
+    maxEdge: null,
+    async exportRows(db) {
+      const subjects = await SUBJECTS.character_appearance.list(db);
+      return subjects.filter((s) => s.row.image).map((s) => ({
+        key: s.key, name: s.name, image: s.row.image,
+      })).sort((a, b) => a.key.localeCompare(b.key));
+    },
+    async gate(db, entry, opts) {
+      const exists = (await SUBJECTS.character_appearance.list(db))
+        .some((s) => s.key === entry.key);
+      if (!exists) return { skip: 'missing-row' };
+      return catalogArtGate('character_appearance')(db, entry, opts);
+    },
+    link: catalogArtLink('character_appearance'),
+  },
+
 
   skill: {
     kind: 'skill',

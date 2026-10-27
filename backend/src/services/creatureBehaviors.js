@@ -11,11 +11,19 @@
 // a value rejected only in JS is a value that reaches the database, and a
 // value rejected only in SQL is a value that reaches the sim from a row
 // written before the constraint existed.
+// SOMET-608 (S6): a behaviour's SKILL repertoire, a sibling list to
+// `abilities` below -- normalised by its own module (creatureSkills.js) for
+// the same reason resolveAbility isn't duplicated here: one place owns one
+// normalisation.
+const { resolveSkills } = require('./creatureSkills');
+
 const ATTACK_KINDS = ['melee', 'ranged', 'cast'];
 const CHASE_STYLES = ['charge', 'kite', 'skirmish', 'hold', 'ambush', 'guard', 'skittish'];
 // Mirrors creature_abilities' element CHECK constraint (migration
-// 1714440083000), which additionally allows NULL -- see resolveAbility.
-const ELEMENTS = ['physical', 'fire', 'ice', 'lightning'];
+// 1714440083000, widened by 1714440672000 for 'arcane'), which additionally
+// allows NULL -- see resolveAbility. Also the entity_types.attack_element
+// list (1714440670000) and the list authority/damage.js uses.
+const ELEMENTS = ['physical', 'arcane', 'fire', 'ice', 'lightning'];
 
 // Today's hostile attack, and the fallback for a behaviour with no ability
 // rows. Must equal CONTACT_RANGE (60) and CREATURE_ATTACK_COOLDOWN (1.0) in
@@ -49,22 +57,18 @@ const DEFAULT_ABILITY = Object.freeze({
 const DEFAULT_BEHAVIOR = Object.freeze({
   name: 'Line',
   abilities: Object.freeze([DEFAULT_ABILITY]),
+  // SOMET-608 (S6): empty, not a default skill -- unlike an attack ability, a
+  // profile with no bound skill simply has none; there is no sensible
+  // fallback skill to hand out instead. Frozen for the same reason
+  // `abilities`' array is: this exact array reference is shared by every
+  // fallback creature in the process.
+  skills: Object.freeze([]),
   aggroRadius: 400,
   leashRadius: 800,
   chaseStyle: 'charge',
   preferredRange: 0,
   moveSpeedMult: 1,
   damageOverride: null,
-  // SOMET-253 Task 4: aura_radius 0 means "not a pack leader" -- Task 5's
-  // consumer never applies a buff/debuff within a zero-radius aura, so this
-  // is a true no-op until then. The three multipliers default to 1
-  // (neutral), never 0: a NULL aura_damage_mult resolving to Number(null)=0
-  // would make every buffed creature deal NOTHING, the same trap as the
-  // ability cooldown in Task 2.
-  auraRadius: 0,
-  auraDamageMult: 1,
-  auraDefenseMult: 1,
-  auraSpeedMult: 1,
   // Per-rung gold fallback (see loot.js, wired up in Task 5). 0 means "no
   // fallback range", matching the migration's column default.
   goldMin: 0,
@@ -132,6 +136,10 @@ function resolveBehavior(row) {
     // behaviour whose join returned no ability rows gets the single default
     // ability, which is exactly today's melee 60 / 1.0s contact attack.
     abilities: resolveAbilities(row.abilities),
+    // SOMET-608 (S6): a behaviour whose join returned no skill rows (the
+    // overwhelming majority, at least until S7's boss/scaled kits bind some)
+    // gets no skill at all -- never the default ATTACK ability repurposed.
+    skills: resolveSkills(row.skills),
     aggroRadius: num(row.aggro_radius, DEFAULT_BEHAVIOR.aggroRadius),
     leashRadius: num(row.leash_radius, DEFAULT_BEHAVIOR.leashRadius),
     chaseStyle: oneOf(row.chase_style, CHASE_STYLES, DEFAULT_BEHAVIOR.chaseStyle),
@@ -142,10 +150,6 @@ function resolveBehavior(row) {
     // falsy test.
     damageOverride: row.damage_override == null
       ? null : num(row.damage_override, null),
-    auraRadius: num(row.aura_radius, DEFAULT_BEHAVIOR.auraRadius),
-    auraDamageMult: num(row.aura_damage_mult, DEFAULT_BEHAVIOR.auraDamageMult),
-    auraDefenseMult: num(row.aura_defense_mult, DEFAULT_BEHAVIOR.auraDefenseMult),
-    auraSpeedMult: num(row.aura_speed_mult, DEFAULT_BEHAVIOR.auraSpeedMult),
     // Aliased `behavior_gold_min`/`behavior_gold_max`, not the bare
     // `gold_min`/`gold_max` entity_types already owns: loadCreatureTypes'
     // SELECT carries both e.gold_min (the entity type's own range, used by

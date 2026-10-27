@@ -290,14 +290,17 @@ test('the chunk creature load SELECTs the columns CreatureSim maps into `mit`/le
     assert.ok(new RegExp(`\\b${col}\\b`).test(sel),
       `the world_creatures load must SELECT ${col} — without it a creature's profile is inert in the running game`);
   }
-  // SOMET-253 Task 4: the pack-leader aura and per-rung gold fallback. Task 5
-  // has no consumer yet, but a column missing here now means Task 5's join
-  // is silently a no-op with nothing appearing broken -- same class of trap
-  // as every column above.
+  // SOMET-604: the behaviour-row aura columns were dropped by 1714440681000.
+  // Selecting one now would be a Postgres error at chunk activation, and
+  // re-adding them would recreate a second source of truth for the aura.
   for (const col of ['aura_radius', 'aura_damage_mult', 'aura_defense_mult', 'aura_speed_mult']) {
-    assert.ok(new RegExp(`\\b${col}\\b`).test(sel),
-      `the world_creatures load must SELECT ${col} — without it Task 5's aura consumer sees no leaders`);
+    assert.ok(!new RegExp(`\\bb\\.${col}\\b`).test(sel), `b.${col} was dropped by 1714440681000 and must not be selected`);
   }
+  // SOMET-604: the aura library. Missing any of these and every entity-bound
+  // aura is inert in the running game while every unit test stays green.
+  assert.match(sel, /et\.auras\s+AS\s+aura_names/i, 'the world_creatures load must SELECT et.auras AS aura_names');
+  assert.match(sel, /\bau\.aura_defs\b/, 'the world_creatures load must SELECT au.aura_defs');
+  assert.match(sel, /FROM aura_effects ae/, 'the aura lateral join must be part of THIS query');
   // gold_min/gold_max are checked as the exact aliased form: resolveBehavior
   // (shared with loadCreatureTypes, where e.gold_min/e.gold_max ALSO exist)
   // reads behavior_gold_min/behavior_gold_max unconditionally, so this query

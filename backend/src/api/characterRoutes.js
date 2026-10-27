@@ -19,6 +19,7 @@ const {
 
 const ERROR_STATUS = {
   bad_name: 400,
+  bad_appearance: 400,
   not_playable: 400,
   name_taken: 409,
   no_free_slot: 409,
@@ -53,7 +54,9 @@ module.exports = function characterRoutes(pool) {
   router.post('/', guard, async (req, res) => {
     try {
       const body = req.body || {};
-      const created = await createCharacter(pool, req.user.id, body.name, body.entity_type_id);
+      const created = await createCharacter(
+        pool, req.user.id, body.name, body.entity_type_id, body.appearance_variant,
+      );
       res.status(201).json(created);
     } catch (err) {
       if (err instanceof CharacterError) {

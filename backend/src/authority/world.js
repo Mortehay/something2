@@ -1,14 +1,14 @@
 const { resolveMove } = require('./collision');
-const { CreatureSim, CREATURE_SIZE, shoveCreature } = require('./creatures');
+const { CreatureSim, CREATURE_SIZE, shoveCreature, effectiveMit, NO_BUFF } = require('./creatures');
 const { shoveAwayFrom } = require('./knockback');
-const { normalizeAim, inArc, hasLineOfSight, weaponStaminaCost } = require('./weapons');
+const { normalizeAim, inArc, hasLineOfSight, weaponStaminaCost, hitRadius } = require('./weapons');
 const { resolveEffectName, momentForAttack, blockedImpact } = require('./vfx.js');
 const { attackLift, bodyLift } = require('./attackOrigin.js');
 const { ProjectileSim } = require('./projectiles');
 const {
-  weaponUse, weaponHit, creatureUse, creatureHurt, skillUse, skillAttackKind, attackKindOf, pushSfxEvent,
+  weaponUse, weaponHit, creatureUse, creatureHurt, creatureSkillSfx, skillUse, skillAttackKind, attackKindOf, pushSfxEvent,
 } = require('./sfxEvents.js');
-const { applyDamageWithEffects, drainMana, NO_MITIGATION, playerKey } = require('./damage');
+const { applyDamageWithEffects, drainMana, playerKey } = require('./damage');
 const {
   tickEffects, effectMagnitude, applyElementEffect, applyHitStatuses,
   canAct, clearInterrupt, activeEffectKeys,
@@ -77,6 +77,44 @@ const BASE_STATS = derivePlayerStats(DEFAULT_PROGRESSION);
 function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 function sign(v) { return v > 0.3 ? 1 : v < -0.3 ? -1 : 0; }
 
+// SOMET-606 (S4). The enemy-aura debuff a player is living with this tick,
+// stamped by CreatureSim.tick (p._buff, the same field and the same NO_BUFF
+// default creatures use). Two readers, ONE definition each:
+//  - playerSpeedMult: chill x aura. tick() moves with it and selfAuraFields
+//    sends it to the owning client, which predicts with it -- two copies is
+//    how prediction and authority drift into a rubber-band.
+//  - debuffDamageMult: every outgoing player damage number (weaponDamage, skills,
+//    and an augment stone's bonus packet).
+//
+// The 0.5 floor (ENEMY_AURA_FLOOR) is applied to the AURA product only, inside
+// applyEnemyAuras. Chill multiplies on top of the already-floored aura factor,
+// so chill x aura CAN go below 0.5 (e.g. a 0.5 aura with a 0.7 chill = 0.35).
+// That is accepted (controller ruling Q8); tuning is SOMET-613.
+function playerSpeedMult(p, now) {
+  const chill = effectMagnitude(p, CHILL, now);
+  return (chill || 1) * (p._buff || NO_BUFF).speedMult;
+}
+function debuffDamageMult(p) {
+  return (p._buff || NO_BUFF).damageMult;
+}
+
+// SOMET-606. The OWNER's aura state for its own `state` frame (server.js adds
+// it per socket). Never on the shared players[] rows: those go to every nearby
+// recipient by reference, and nobody but the owner has a use for them.
+// {} when clear, so a quiet frame costs no bytes and the client clears.
+function selfAuraFields(p, now) {
+  const out = {};
+  const b = p._buff;
+  if (b && Array.isArray(b.auras) && b.auras.length > 0) {
+    out.debuffs = b.auras.map((a) => (a.dotDps > 0
+      ? { n: a.name, d: a.damageMult, f: a.defenseMult, s: a.speedMult, dps: a.dotDps, el: a.dotElement }
+      : { n: a.name, d: a.damageMult, f: a.defenseMult, s: a.speedMult }));
+  }
+  const sm = playerSpeedMult(p, now);
+  if (sm !== 1) out.speedMult = sm;
+  return out;
+}
+
 // STR scales physical weapons, INT scales every other element. The split is
 // the weapon catalog's existing `element` column -- no new field, and it
 // gives the element system weight it currently lacks.
@@ -98,7 +136,7 @@ function weaponDamage(p, w) {
   //
   // Identity is 1, so every weapon with no shape node allocated is unmoved.
   const shape = w.kind === 'melee' ? (p.stats.rules.meleeDamageMult || 1) : 1;
-  return w.damage * mult * elementDamageMult(p.stats, w.element) * shape;
+  return w.damage * mult * elementDamageMult(p.stats, w.element) * shape * debuffDamageMult(p);
 }
 
 // SOMET-495. The passive tree's `damage` grants, as a PER-ELEMENT multiplier.
@@ -308,6 +346,13 @@ class World {
     // not worth the surface. Ordered by spawn time, which is what lets the
     // per-owner cap drop the STALEST wave rather than an arbitrary one.
     this.waves = [];
+    // SOMET-608 (S6). Active skill telegraphs, world-wide, same "plain array,
+    // no per-chunk identity" reasoning as waves above -- purely a client
+    // rendering aid (the actual damage resolves independently, inside
+    // CreatureSim, off the caster's own `_pendingSkill`). New ones are
+    // appended from CreatureSim.tick()'s own `telegraphs` output each tick;
+    // see snapshot() for the expiry-by-remaining-ms convention.
+    this.activeTelegraphs = [];
     this.groundItems = new GroundItemSim(chunkSize);
     // Game audio slice 3: the world's own `sfx` events (player swings, shots,
     // melee hits, skill casts). CreatureSim and ProjectileSim keep their own
@@ -357,7 +402,7 @@ class World {
   // player -- behaves exactly as before. HOW MUCH it costs is not here: that
   // is stats.lifeCostMultiplier, which the tree owns and applyDerivedStats
   // refreshes.
-  addPlayer(userId, spawn, inv = { items: [], equipment: {} }, respawn = spawn, gold = 0, stats = BASE_STATS, characterId = null, bind = null, classPools = null, usesLifeCost = false) {
+  addPlayer(userId, spawn, inv = { items: [], equipment: {} }, respawn = spawn, gold = 0, stats = BASE_STATS, characterId = null, bind = null, classPools = null, usesLifeCost = false, className = null, appearanceVariant = 1) {
     this.players.set(userId, {
       userId,
       characterId,
@@ -422,6 +467,8 @@ class World {
       // Strict boolean: a truthy string off the join path must not silently
       // enrol a Warrior in life casting.
       usesLifeCost: usesLifeCost === true,
+      className,
+      appearanceVariant: Number(appearanceVariant) || 1,
     });
   }
 
@@ -532,9 +579,15 @@ class World {
         // applier's userId for kill attribution already, so naming it here
         // costs nothing and keeps every damage site attributed rather than
         // leaving one that stamps "hit by nobody".
-        applyDamageWithEffects(t, m, BURN_ELEMENT, t.mit || NO_MITIGATION, this.now, playerKey(sourceId));
+        applyDamageWithEffects(t, m, BURN_ELEMENT, effectiveMit(t), this.now, playerKey(sourceId));
         return false;
       });
+      // SOMET-606: stepEffects set speed = base x chill; fold in the enemy-aura
+      // slow from the SAME function the client is told about. Recomputed from
+      // baseSpeed every tick, so it can never compound. p._buff was stamped by
+      // the PREVIOUS CreatureSim.tick (it runs after World.tick), so a new
+      // debuff slows movement from the next 50 ms tick (ruling G11, accepted).
+      p.speed = p.baseSpeed * playerSpeedMult(p, this.now);
     }
     // Snapshot: damageCreatureById deletes from the live map on a kill.
     for (const c of this.creatures.all()) {
@@ -700,7 +753,12 @@ class World {
   // Tick creatures with the live players (aggro/chase/contact damage). Death
   // resolution (respawn) now happens once for all damage sources in
   // resolveDeaths(), not here.
-  tickCreatures(dt, activeKeys) {
+  // `catalogRows` (SOMET-608, S6): name -> full entity_types row, so a
+  // `summon`-kind skill can hydrate its summon at resolve time -- see
+  // loadCreatureTypes's own comment on rowsByName. Optional; a tick with no
+  // catalog in hand simply cannot resolve a summon (same "unknown name is a
+  // no-op" trade-off entity_types.vfx/auras already carry).
+  tickCreatures(dt, activeKeys, catalogRows = null) {
     // `this.now` is threaded through so contact damage reads the same clock
     // every other damage site does — a shocked player must take +25% from a
     // creature's bite too, not only from weapons.
@@ -710,14 +768,29 @@ class World {
     // killed: [], shots: [] }` fallback here could never fire. Removed.
     const {
       killed: killedIds, killCredits, shots,
-      attacks: creatureAttacks, impacts: creatureImpacts,
-    } = this.creatures.tick(dt, activeKeys, [...this.players.values()], this.now);
+      attacks: creatureAttacks, impacts: creatureImpacts, telegraphs,
+    } = this.creatures.tick(dt, activeKeys, [...this.players.values()], this.now, catalogRows);
+    // SOMET-608: new telegraphs this tick are appended; expired ones are
+    // dropped here (nothing periodic needs to happen while one is active,
+    // unlike waves' per-second damage tick, so there is no separate
+    // _tickTelegraphs -- just prune-then-append, every tick).
+    this.activeTelegraphs = this.activeTelegraphs.filter((t) => this.now < t.expiresAt);
+    if (telegraphs && telegraphs.length > 0) {
+      for (const t of telegraphs) {
+        this.activeTelegraphs.push({ ...t, expiresAt: this.now + t.telegraphMs });
+      }
+    }
 
     for (const s of shots) {
       if (this.projectiles.countByOwnerKind('creature') >= MAX_CREATURE_PROJECTILES) break;
       // Game audio slice 3: the shot is heard only if it actually spawns --
-      // past the cap above, nothing leaves the creature.
-      pushSfxEvent(this.sfx, creatureUse({ id: s.ownerId, type: s.ownerType }, s.x, s.y));
+      // past the cap above, nothing leaves the creature. SOMET-610 (S7):
+      // a skill-sourced shot (CreatureSim._resolveSkill's projectile
+      // branch stamps `s.skillName`) plays that SKILL's own cast cue
+      // instead of the creature's generic attack sound.
+      pushSfxEvent(this.sfx, s.skillName
+        ? creatureSkillSfx('skill_cast', s.skillName, { id: s.ownerId }, s.x, s.y)
+        : creatureUse({ id: s.ownerId, type: s.ownerType }, s.x, s.y));
       this.projectiles.spawn({
         ownerId: s.ownerId,
         ownerKind: 'creature',
@@ -969,7 +1042,11 @@ class World {
     const augment = w.augment
       ? {
         ...w.augment,
-        bonusDamage: w.augment.bonusDamage * elementDamageMult(p.stats, w.augment.element),
+        // SOMET-606 (ruling Q3): the enemy-aura damage debuff lowers TOTAL
+        // outgoing damage, so the bonus packet is scaled here too -- once, for
+        // the same three consumers (creature arc, PvP branch, projectile).
+        bonusDamage: w.augment.bonusDamage * elementDamageMult(p.stats, w.augment.element)
+          * debuffDamageMult(p),
       }
       : null;
 
@@ -1115,10 +1192,9 @@ class World {
         // sparks off a target it did no damage to reads as a bug.
         if (pacifiedFrom != null && other.userId === pacifiedFrom) continue;
         const ocx = other.x + other.width / 2, ocy = other.y + other.height / 2;
-        const targetRadius = other.hitboxRadius || (other.width ? other.width / 2 : 32) || 32;
-        if (inArc(cx, cy, nx, ny, ocx, ocy, reach, arc, targetRadius)
+        if (inArc(cx, cy, nx, ny, ocx, ocy, reach, arc, hitRadius(other))
             && hasLineOfSight(this.map, cx, cy, ocx, ocy)) {
-          applyDamageWithEffects(other, weaponDamage(p, w), w.element, other.mit || NO_MITIGATION,
+          applyDamageWithEffects(other, weaponDamage(p, w), w.element, effectiveMit(other),
             this.now, playerKey(userId));
           applyElementEffect(other, w.element, this.now, userId);
           // SOMET-495: the tree's riders, applied ONCE per target per swing --
@@ -1134,7 +1210,7 @@ class World {
           // creatures would be a PvP balance bug nothing else would catch.
           if (augment && augment.bonusDamage > 0) {
             applyDamageWithEffects(other, augment.bonusDamage, augment.element,
-              other.mit || NO_MITIGATION, this.now, playerKey(userId));
+              effectiveMit(other), this.now, playerKey(userId));
             applyElementEffect(other, augment.element, this.now, userId);
           }
           playerHits++;
@@ -1335,17 +1411,63 @@ class World {
     }
     const req = checkGemRequirements(skill, p.stats, equippedWeapon);
     if (!req.weaponOk) {
+      p._channelSkillId = null;
+      p._channelTicks = 0;
       return { ok: false, kills: [], reason: 'weapon_mismatch', error: req.errors[0] };
     }
     if (!req.ok) {
+      p._channelSkillId = null;
+      p._channelTicks = 0;
       return { ok: false, kills: [], reason: 'requirements_unmet', error: req.errors[0] };
     }
 
+    // Channeled skills: track continuous ticks and calculate ramping intensity
+    let channelStack = 0;
+    if (skill.channeled) {
+      const now = this.now;
+      if (p._channelSkillId === skill.id && (now - (p._lastChannelAt || 0)) <= 600) {
+        p._channelTicks = (p._channelTicks || 0) + 1;
+      } else {
+        p._channelSkillId = skill.id;
+        p._channelTicks = 0;
+      }
+      p._lastChannelAt = now;
+      channelStack = Math.min(8, Math.floor(p._channelTicks / 2));
+    } else {
+      p._channelSkillId = null;
+      p._channelTicks = 0;
+    }
+
+    // Calculate resource cost (ramping for channeled skills)
+    const baseCost = Number(skill.cost) || 0;
+    let cost = baseCost;
+    if (skill.channeled && channelStack > 0) {
+      let maxPool = 100;
+      if (skill.costType === 'mana') maxPool = p.maxMana || 100;
+      else if (skill.costType === 'stamina') maxPool = p.maxStamina || 100;
+      else if (skill.costType === 'hp') maxPool = p.maxHp || 100;
+
+      const costMult = 1 + channelStack * 0.35;
+      const poolDrain = (maxPool * (channelStack * 0.0125)) / 4;
+      cost = Math.max(1, Math.round(baseCost * costMult + poolDrain));
+    }
+
     // Check resources on player
-    const cost = Number(skill.cost) || 0;
-    if (skill.costType === 'mana' && p.mana < cost) return { ok: false, kills: [], reason: 'mana' };
-    if (skill.costType === 'stamina' && p.stamina < cost) return { ok: false, kills: [], reason: 'stamina' };
-    if (skill.costType === 'hp' && p.hp <= cost) return { ok: false, kills: [], reason: 'hp' };
+    if (skill.costType === 'mana' && p.mana < cost) {
+      p._channelSkillId = null;
+      p._channelTicks = 0;
+      return { ok: false, kills: [], reason: 'mana' };
+    }
+    if (skill.costType === 'stamina' && p.stamina < cost) {
+      p._channelSkillId = null;
+      p._channelTicks = 0;
+      return { ok: false, kills: [], reason: 'stamina' };
+    }
+    if (skill.costType === 'hp' && p.hp <= cost) {
+      p._channelSkillId = null;
+      p._channelTicks = 0;
+      return { ok: false, kills: [], reason: 'hp' };
+    }
 
     // Deduct resource
     if (skill.costType === 'mana') p.mana = Math.max(0, p.mana - cost);
@@ -1398,7 +1520,8 @@ class World {
       baseDamage = Math.max(4, Math.min(28, baseDamage));
     }
 
-    const damage = Math.max(2, Math.round(baseDamage * baseMult * elemMult));
+    const intensityMult = skill.channeled ? (1 + channelStack * 0.15) : 1;
+    const damage = Math.max(2, Math.round(baseDamage * baseMult * elemMult * debuffDamageMult(p) * intensityMult));
     const element = skill.element || (skill.class === 'Mage' ? 'fire' : (skill.class === 'Druid' ? 'lightning' : (skill.class === 'Cultist' ? 'shadow' : 'physical')));
 
     const kills = [];
@@ -1423,7 +1546,8 @@ class World {
     if (skill.type === 'melee') {
       const { nx, ny } = normalizeAim(ax, ay, p.facing);
       const isSpin = skill.channeled || skill.id.includes('whirlwind') || skill.id.includes('spin') || skill.id.includes('crane');
-      const reach = isSpin ? 120 : Math.max(85, (Number(skill.range) || 85) * 1.25);
+      const reachScale = (skill.channeled && channelStack > 0) ? (1 + channelStack * 0.04) : 1;
+      const reach = (isSpin ? 120 : Math.max(90, (Number(skill.range) || 90) * 1.3)) * reachScale;
       const arc = isSpin ? (Math.PI * 2) : (Math.PI * 0.75);
       // The same target set applyMeleeArc resolves, read before it can
       // remove a kill.
@@ -1446,7 +1570,8 @@ class World {
         p.hp = Math.min(p.maxHp || 100, p.hp + leechAmount);
       }
     } else if (skill.type === 'magic' || skill.type === 'debuff') {
-      const aoeRadius = Math.max(90, (Number(skill.radius) || 80) * 1.5);
+      const aoeScale = (skill.channeled && channelStack > 0) ? (1 + channelStack * 0.04) : 1;
+      const aoeRadius = Math.max(90, (Number(skill.radius) || 80) * 1.5) * aoeScale;
       const isBarrage = skill.id === 'arc_barrage';
       const isBeam = skill.id.includes('beam') || skill.id.includes('ray');
       const isDirectionalShotgun = isBarrage || isBeam || skill.id.includes('multishot') || skill.id.includes('split_shot') || skill.id.includes('aimed_shot') || skill.id.includes('piercing');
@@ -1538,7 +1663,18 @@ class World {
 
       const isManaRestore = skill.id.includes('mana') || skill.id.includes('evocation') || desc.includes('мана') || desc.includes('ману');
       if (isManaRestore) {
-        p.mana = Math.min(p.maxMana, p.mana + 35);
+        let manaPct = 0.40;
+        const pctMatch = desc.match(/(\d+)%/);
+        if (pctMatch) {
+          manaPct = parseInt(pctMatch[1], 10) / 100;
+        }
+        const flatMatch = desc.match(/(\d+)\s*(?:MP|mana|мани)/i);
+        const maxMana = p.maxMana || 100;
+        let manaAmt = Math.max(35, Math.round(maxMana * manaPct));
+        if (flatMatch && !pctMatch) {
+          manaAmt = parseInt(flatMatch[1], 10);
+        }
+        p.mana = Math.min(maxMana, p.mana + manaAmt);
       }
 
       const isStaminaRestore = skill.id.includes('stamina') || skill.id.includes('adrenaline') || desc.includes('витривал');
@@ -1628,6 +1764,13 @@ class World {
         // effects.js — so dying cannot be used to shed it.
         clearInterrupt(p);
         p.effects.clear();
+        // SOMET-606 (Q5): the killer's aura debuff and its DoT clocks die with
+        // the player. The next creature tick re-stamps _buff anyway, but until
+        // then a respawned player must not move or defend at the debuffed
+        // value, and a stale clock must not suppress the entry charge if they
+        // walk straight back in.
+        p._buff = NO_BUFF;
+        p._auraDotAt = undefined;
       }
     }
     return died;
@@ -1657,6 +1800,8 @@ class World {
           hp: p.hp, maxHp: p.maxHp, mana: p.mana, maxMana: p.maxMana,
           stamina: p.stamina, maxStamina: p.maxStamina, equipment: p.inv ? p.inv.equipment : {},
           autoLoot: p.autoLoot,
+          className: p.className,
+          appearanceVariant: p.appearanceVariant,
         };
         // Effect KEYS only, and omitted entirely when nothing is active — see
         // activeEffectKeys. Read on the client as `p.effects || []`.
@@ -1704,6 +1849,24 @@ class World {
           ms: Math.max(0, Math.round(v.expiresAt - this.now)),
         })),
       } : {}),
+      // SOMET-608 (S6). Same "resolved geometry, remaining ms, omitted when
+      // empty" convention as waves above -- the client has no creature_skills
+      // catalog, so radius/telegraphMs travel resolved rather than as a name
+      // to look up.
+      ...(this.activeTelegraphs.length > 0 ? {
+        telegraphs: this.activeTelegraphs.map((t) => ({
+          creatureId: t.creatureId, skill: t.skill, x: t.x, y: t.y, radius: t.radius,
+          // SOMET-610 (S7): the vfx binding's resolved name -- see
+          // worldTelegraphs.js's own comment for why this is server-
+          // resolved rather than a raw binding.
+          v: t.v,
+          ms: Math.max(0, Math.round(t.expiresAt - this.now)),
+          // The ORIGINAL duration, not just what's left -- the client needs
+          // both to compute fill progress (elapsed/total), and has no clock
+          // synced to the moment the telegraph actually started.
+          telegraphMs: t.telegraphMs,
+        })),
+      } : {}),
     };
   }
 }
@@ -1715,4 +1878,5 @@ module.exports = {
   PLAYER_MAX_STAMINA, PLAYER_STAMINA_REGEN,
   weaponDamage, applyAttackCooldown, BASE_STATS,
   MAX_CREATURE_PROJECTILES,
+  playerSpeedMult, debuffDamageMult, selfAuraFields,
 };

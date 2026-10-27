@@ -1,7 +1,9 @@
 // frontend/src/games/something2/src/js/core/__tests__/skillsHotbar.test.js
 import { describe, it, expect, beforeEach } from "vitest";
 import { Game } from "../Game.js";
-import { getSkillById, getSkillPrice, getSkillLevelReq, SKILLS } from "../skillsData.js";
+import { getSkillById, getSkillPrice, getSkillLevelReq, SKILLS, resolveSkillDamage } from "../skillsData.js";
+import { createSkillVisual } from "../skillVisuals.js";
+import { CreatureManager } from "../../entities/CreatureManager.js";
 
 function makeTestGame() {
   const canvas = {
@@ -239,6 +241,20 @@ describe("Skills Panel & Hotbar Interactions", () => {
     expect(sent[0].skillId).toBe("dru_entangling_roots");
   });
 
+  it("a dispatched local skill cast notes a cast on 'self' (SOMET-656)", () => {
+    const noted = [];
+    g.entityAnim = { noteAttack: (...args) => noted.push(args) };
+    g.authorityClient = { sendCastSkill: () => {} };
+    g.camera = { screenX: 0, screenY: 0 };
+    g.localMana = 100;
+    g.hotbarSkills.set(3, getSkillById("dru_entangling_roots"));
+
+    g._keydownHandler({ key: "3", code: "Digit3", repeat: false, preventDefault: () => {} });
+    expect(noted.length).toBe(1);
+    expect(noted[0][0]).toBe("self");
+    expect(noted[0][2]).toBe(true);
+  });
+
   it("spawns distinct visual effects: Fireball launches projectile, Lightning strikes with branches", () => {
     g.localMana = 100;
     g.inventory = {
@@ -351,6 +367,28 @@ describe("Skills Panel & Hotbar Interactions", () => {
     expect(b.expiresAt).toBeGreaterThan(performance.now());
     expect(sent.length).toBe(1);
     expect(sent[0].skillId).toBe("war_steel_tempering");
+  });
+
+  it("activates Mana Surge, restores 40% of maximum mana locally, and dispatches to server", () => {
+    g.localMaxMana = 3277;
+    g.localMana = 327; // ~10%
+    g.player = { x: 100, y: 100, hp: 100, maxHp: 100, maxMana: 3277, mana: 327, className: "Mage" };
+
+    const sent = [];
+    g.authorityClient = { sendCastSkill: (skillId, tx, ty, nx, ny) => sent.push({ skillId, tx, ty, nx, ny }) };
+
+    const manaSurge = getSkillById("mag_mana_surge");
+    expect(manaSurge).toBeDefined();
+    g.hotbarSkills.set(2, manaSurge);
+    g.activeBuffs = new Map();
+
+    g._activateHotbarSkill(2);
+
+    // 40% of 3277 is 1311, so localMana becomes 327 + 1311 = 1638
+    expect(g.localMana).toBe(1638);
+    expect(g.player.mana).toBe(1638);
+    expect(g.activeBuffs.has("mag_mana_surge")).toBe(true);
+    expect(sent[0].skillId).toBe("mag_mana_surge");
   });
 
   it("spawns directional arrow projectiles for Archer / Ranger skills", () => {
@@ -774,6 +812,161 @@ describe("Skills Purchasing & Unlocking Mechanics", () => {
     // Keyup / stop should not alter or extend the cooldown expiration time
     g._stopChanneledSkill();
     expect(g.skillCooldowns.get("war_whirlwind")).toBe(initialCd);
+  });
+
+  it("ramps intensity stacks and scales resource cost for channeled skills", () => {
+    const blizzard = getSkillById("mag_blizzard");
+    expect(blizzard.channeled).toBe(true);
+    g.hotbarSkills.set(1, blizzard);
+    g.localMana = 3277;
+    g.localMaxMana = 3277;
+    g.player = { x: 100, y: 100, hp: 100, maxHp: 100, className: "Mage" };
+    g.progression = { strength: 50, dexterity: 50, constitution: 50, intelligence: 100, wisdom: 100, charisma: 50, level: 75 };
+    g.inventory = {
+      equipment: { main_hand: "item_staff" },
+      types: { item_staff: { id: "item_staff", name: "staff", kind: "weapon", category: "weapon" } }
+    };
+
+    // 1. Initial activation: Tick 0 (Stack 0)
+    g._activateHotbarSkill(1);
+    expect(g._channeledSlot).toBe(1);
+    expect(g._channelTicks).toBe(0);
+    // Base cost is 6, so localMana drops from 3277 to 3271
+    expect(g.localMana).toBe(3271);
+
+    // 2. Advance 16 ticks (reach stack 8)
+    for (let t = 1; t <= 16; t++) {
+      g._channelTicks = t;
+      g._activateHotbarSkill(1, true);
+    }
+    expect(g._channelTicks).toBe(16);
+    expect(g.activeBuffs.has('channel_focus')).toBe(true);
+    const focusBuff = g.activeBuffs.get('channel_focus');
+    expect(focusBuff.nameEn).toContain("8/8");
+    expect(focusBuff.nameEn).toContain("+120%");
+
+    // Next tick at stack 8 should cost 105 mana
+    const manaBefore = g.localMana;
+    g._channelTicks = 17; // still stack 8 (max)
+    g._activateHotbarSkill(1, true);
+    expect(manaBefore - g.localMana).toBe(105);
+
+    // 3. Stop channeling: resets channel ticks and removes focus buff
+    g._stopChanneledSkill();
+    expect(g._channelTicks).toBe(0);
+    expect(g.activeBuffs.has('channel_focus')).toBe(false);
+  });
+});
+
+describe("Combat Feedback & Floating Numbers", () => {
+  let g;
+  beforeEach(() => {
+    g = makeTestGame();
+  });
+
+  it("spawns floating text when activating Mana Surge (+1311 MP in cyan/blue)", () => {
+    g.localMaxMana = 3277;
+    g.localMana = 327;
+    g.player = { x: 150, y: 200, hp: 100, maxHp: 100, maxMana: 3277, mana: 327, className: "Mage" };
+    g.className = "Mage";
+
+    const manaSurge = getSkillById("mag_mana_surge");
+    expect(manaSurge).toBeDefined();
+    g.hotbarSkills.set(1, manaSurge);
+
+    expect(g.floatingTexts.length).toBe(0);
+    g._activateHotbarSkill(1);
+
+    // Floating text should be spawned with +1311 MP
+    expect(g.floatingTexts.length).toBeGreaterThan(0);
+    const ft = g.floatingTexts.find(f => f.text.includes("+1311 MP"));
+    expect(ft).toBeDefined();
+    expect(ft.color).toBe("#38bdf8");
+    expect(ft.x).toBe(150);
+  });
+
+  it("spawns floating text when activating healing and stamina skills", () => {
+    g.player = { x: 120, y: 160, hp: 50, maxHp: 200, className: "Paladin" };
+    g.className = "Paladin";
+
+    // Healing skill: Flash of Light
+    const healSkill = { id: "pal_flash_of_light", type: "buff", cost: 20, costType: "mana", descEn: "Heals 25% HP" };
+    g.hotbarSkills.set(2, healSkill);
+    g._activateHotbarSkill(2);
+
+    const healFt = g.floatingTexts.find(f => f.text.includes("+50 HP"));
+    expect(healFt).toBeDefined();
+    expect(healFt.color).toBe("#4ade80");
+
+    // Stamina skill
+    const stamSkill = { id: "war_second_wind", type: "buff", cost: 0, costType: "mana", descEn: "Restores stamina" };
+    g.localMaxStamina = 100;
+    g.localStamina = 20;
+    g.hotbarSkills.set(3, stamSkill);
+    g._activateHotbarSkill(3);
+
+    const stamFt = g.floatingTexts.find(f => f.text.includes("+30 SP"));
+    expect(stamFt).toBeDefined();
+    expect(stamFt.color).toBe("#fbbf24");
+  });
+
+  it("spawns damage floating numbers when a creature takes damage in CreatureManager", () => {
+    const cm = new CreatureManager();
+    let spawnedDamage = null;
+    cm.onCreatureDamage = (creature, dmg) => {
+      spawnedDamage = { id: creature.id, dmg };
+    };
+
+    // First snapshot registers creature at 100 HP
+    cm.applySnapshot([
+      { id: 42, x: 200, y: 300, hp: 100, maxHp: 100, type: "goblin" }
+    ]);
+    expect(spawnedDamage).toBeNull();
+
+    // Second snapshot has creature taking 35 damage (hp: 65)
+    cm.applySnapshot([
+      { id: 42, x: 200, y: 300, hp: 65, maxHp: 100, type: "goblin" }
+    ]);
+    expect(spawnedDamage).toEqual({ id: 42, dmg: 35 });
+  });
+
+  it("spawns damage floating numbers when local player takes damage in world snapshot", () => {
+    g.localUserId = "user-123";
+    g.player = { x: 100, y: 100, width: 32, height: 32, hp: 100, maxHp: 100 };
+    g._inputBuffer = [];
+    g.chunkedMap = null;
+
+    g._onWorldState({
+      tick: 10,
+      players: [
+        { id: "user-123", x: 100, y: 100, hp: 72, maxHp: 100 }
+      ]
+    });
+
+    const dmgFt = g.floatingTexts.find(f => f.text === "-28");
+    expect(dmgFt).toBeDefined();
+    expect(dmgFt.color).toBe("#ef4444");
+    expect(g.player.hp).toBe(72);
+  });
+
+  it("calculates live dynamic numbers in resolveSkillDamage tooltip based on playerPools", () => {
+    const manaSurge = getSkillById("mag_mana_surge");
+    const info = resolveSkillDamage(manaSurge, { maxMana: 3277 });
+    expect(info.text).toBe("Restores +40% MP (+1311 MP)");
+
+    const healSkill = { id: "dru_rejuvenation", type: "buff", descEn: "Heals 25% HP" };
+    const healInfo = resolveSkillDamage(healSkill, { maxHp: 448 });
+    expect(healInfo.text).toBe("Heal +25% HP (+112 HP)");
+  });
+
+  it("creates a dedicated mana_surge skill visual with shockwave parameters", () => {
+    const manaSurge = getSkillById("mag_mana_surge");
+    const vis = createSkillVisual(manaSurge, 100, 100, 100, 100, 0, 1000);
+    expect(vis).toBeDefined();
+    expect(vis.kind).toBe("mana_surge");
+    expect(vis.radius).toBe(110);
+    expect(vis.color).toBe("#38bdf8");
+    expect(vis.durationMs).toBe(750);
   });
 });
 

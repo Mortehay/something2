@@ -181,3 +181,63 @@ describe('SfxLimiter', () => {
     });
   });
 });
+
+describe('SfxLimiter boss tier (SOMET-605)', () => {
+  const fill = (l, priority, n, dist = (i) => i * 10) => {
+    const ids = [];
+    for (let i = 0; i < n; i += 1) ids.push(l.admit({ clipKey: `${priority}${i}`, priority, distance: dist(i) }).voiceId);
+    return ids;
+  };
+
+  it('boss bumps the farthest nearest voice unconditionally, even when itself farther', () => {
+    const { l } = limiter();
+    const ids = fill(l, 'nearest', 12);
+    const r = l.admit({ clipKey: 'b', priority: 'boss', distance: 5000 });
+    expect(r.ok).toBe(true);
+    expect(r.evict).toBe(ids[11]);
+  });
+
+  it('boss prefers a nearby voice over a farther nearest voice', () => {
+    const { l } = limiter();
+    fill(l, 'nearest', 11, () => 900);
+    const [nearbyId] = fill(l, 'nearby', 1, () => 10);
+    const r = l.admit({ clipKey: 'b', priority: 'boss', distance: 500 });
+    expect(r.evict).toBe(nearbyId);
+  });
+
+  it('boss never evicts own', () => {
+    const { l } = limiter();
+    fill(l, 'own', 12, () => 9000);
+    expect(l.admit({ clipKey: 'b', priority: 'boss', distance: 0 })).toEqual({ ok: false });
+  });
+
+  it('boss vs boss: nearer wins the farthest boss slot; a tie is refused', () => {
+    const { l } = limiter();
+    const ids = fill(l, 'boss', 12, (i) => 100 + i);
+    expect(l.admit({ clipKey: 'tie', priority: 'boss', distance: 111 })).toEqual({ ok: false });
+    const r = l.admit({ clipKey: 'near', priority: 'boss', distance: 50 });
+    expect(r.evict).toBe(ids[11]);
+  });
+
+  it('nearest and nearby can never evict a boss voice, however near', () => {
+    const { l } = limiter();
+    fill(l, 'boss', 12, () => 1500);
+    expect(l.admit({ clipKey: 'n', priority: 'nearest', distance: 0 })).toEqual({ ok: false });
+    expect(l.admit({ clipKey: 'y', priority: 'nearby', distance: 0 })).toEqual({ ok: false });
+  });
+
+  it('own bumps a boss voice only when no nearby or nearest voice is held', () => {
+    const { l } = limiter();
+    fill(l, 'own', 11);
+    const [bossId] = fill(l, 'boss', 1, () => 1);
+    const r = l.admit({ clipKey: 'o', priority: 'own', distance: 9999 });
+    expect(r.evict).toBe(bossId);
+  });
+
+  it('own still bumps nearest before boss', () => {
+    const { l } = limiter();
+    fill(l, 'boss', 11, () => 9000);
+    const [nearestId] = fill(l, 'nearest', 1, () => 1);
+    expect(l.admit({ clipKey: 'o', priority: 'own', distance: 0 }).evict).toBe(nearestId);
+  });
+});

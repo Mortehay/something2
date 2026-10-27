@@ -8,7 +8,8 @@
 // todo". Every case here therefore runs over creatures it picked at test time
 // as having NO audio_prompts row at all, narrowed with run()'s `keys` filter,
 // and deletes only those creatures' prompt rows afterwards. A creature is 4
-// slots: hurt/death have a cue (writable), nearby/attack are upload-only.
+// slots, all writable since SOMET-627 gave nearby/attack a cue too (idle/
+// attack) -- previously only hurt/death were, with nearby/attack upload-only.
 const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
@@ -52,15 +53,15 @@ const okWrite = (writes) => async (db, target, opts) => {
   return { ok: true, row: { via: 'box', text: `t${writes.length}`, style: null } };
 };
 
-test('dry run: only the chosen subjects, upload-only slots reported not written', { skip }, async (t) => {
+test('dry run: only the chosen subjects, every creature slot now writable (SOMET-627)', { skip }, async (t) => {
   const { pool, keys } = await setup(t);
   const writes = [];
   const logs = [];
   const dry = await run(pool, { kinds: ['creature'], keys, dryRun: true },
     { log: (l) => logs.push(l), write: okWrite(writes), loadStyles: noStyles });
   assert.equal(writes.length, 0, 'dry run writes nothing');
-  assert.equal(dry.todo, 6, '3 creatures x (hurt, death); nearby/attack have no cue');
-  assert.ok(logs.some((l) => /6 upload-only/.test(l)), `upload-only slots are reported: ${logs[0]}`);
+  assert.equal(dry.todo, 12, '3 creatures x (nearby, attack, hurt, death) -- nearby/attack have a cue now too');
+  assert.ok(logs.some((l) => /0 upload-only/.test(l)), `no creature slot is upload-only any more: ${logs[0]}`);
 });
 
 test('busy under --box-only waits and retries the SAME slot; cue and expectation passed', { skip }, async (t) => {
@@ -105,13 +106,16 @@ test('5 consecutive non-busy failures stop the run', { skip }, async (t) => {
   const write = async (db, target) => { calls.push(target); return { ok: false, busy: false, error: 'x' }; };
   const logs = [];
   await run(pool, { kinds: ['creature'], keys }, { log: (l) => logs.push(l), write, loadStyles: noStyles });
-  assert.equal(calls.length, 5, 'stops after the 5th consecutive failure, out of 6 writable slots');
+  assert.equal(calls.length, 5, 'stops after the 5th consecutive failure, out of 12 writable slots');
   assert.ok(logs.some((l) => /stopping: 5 failures in a row/.test(l)), 'the stop is logged');
 });
 
 test('a success in between resets the consecutive-failure counter', { skip }, async (t) => {
   const { pool, keys } = await setup(t);
-  const outcomes = ['fail', 'fail', 'ok', 'fail', 'fail', 'fail'];
+  // 12 writable slots now (3 creatures x nearby/attack/hurt/death, all four
+  // with a cue since SOMET-627); two 'ok' entries keep every run of fails
+  // under the limit so all 12 are reached.
+  const outcomes = ['fail', 'fail', 'fail', 'fail', 'ok', 'fail', 'fail', 'fail', 'fail', 'ok', 'fail', 'fail'];
   const calls = [];
   const write = async (db, target) => {
     const outcome = outcomes[calls.length];
@@ -121,14 +125,16 @@ test('a success in between resets the consecutive-failure counter', { skip }, as
       : { ok: false, busy: false, error: 'x' };
   };
   await run(pool, { kinds: ['creature'], keys }, { log: () => {}, write, loadStyles: noStyles });
-  assert.equal(calls.length, 6, 'the mid-run success resets the streak, so no run of 5 is ever reached');
+  assert.equal(calls.length, 12, 'the mid-run successes reset the streak, so no run of 5 is ever reached');
 });
 
 // Final review I1: the batch picks its todo list from ONE snapshot at the
 // start, and a full run lasts a day. A hand edit made after the snapshot
 // must survive the batch reaching that slot. Real writer and real store;
 // only the text model is faked. Every slot is hand-edited just before the
-// batch saves, so all 6 conflict -- which must NOT trip the 5-in-a-row stop.
+// batch saves, so all 12 conflict (3 creatures x nearby/attack/hurt/death,
+// all four writable since SOMET-627) -- which must NOT trip the 5-in-a-row
+// stop.
 test('a slot hand-edited after the snapshot keeps the hand edit', { skip }, async (t) => {
   const { pool, keys } = await setup(t);
   const tp = { complete: async () => ({ ok: true, json: { entity: 'a model-written beast' }, model: 'q', via: 'box' }) };
@@ -140,10 +146,10 @@ test('a slot hand-edited after the snapshot keeps the hand edit', { skip }, asyn
   };
   const logs = [];
   const sum = await run(pool, { kinds: ['creature'], keys }, { log: (l) => logs.push(l), write, loadStyles: noStyles });
-  assert.equal(handIds.size, 6);
+  assert.equal(handIds.size, 12);
   assert.deepEqual(
     { written: sum.creature.written, failed: sum.creature.failed, changedDuringRun: sum.creature.changedDuringRun },
-    { written: 0, failed: 0, changedDuringRun: 6 },
+    { written: 0, failed: 0, changedDuringRun: 12 },
   );
   assert.equal(logs.some((l) => /stopping/.test(l)), false, 'conflicts are skips, not failures');
   for (const [k, id] of handIds) {

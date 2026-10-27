@@ -34,22 +34,29 @@ test('text modality providers', { skip }, async (t) => {
   });
 
   const created = await request(app).post('/api/ai-providers').set('Authorization', auth)
-    .send({ name: tag, base_url: `http://127.0.0.1:${box.address().port}`, modality: 'text', auth_token: 'k' });
+    .send({ name: tag, base_url: `http://127.0.0.1:${box.address().port}`, modality: 'text', model: 'qwen-instruct', auth_token: 'k' });
   assert.equal(created.status, 201, JSON.stringify(created.body));
   assert.equal(created.body.modality, 'text');
 
   const bad = await request(app).post('/api/ai-providers').set('Authorization', auth)
     .send({ name: `${tag}-bad`, base_url: 'http://x', modality: 'video' });
   assert.equal(bad.status, 400);
-  assert.match(bad.body.error, /'image', 'audio' or 'text'/);
+  assert.match(bad.body.error, /modality must be one of image, audio, text, sprite, image_edit/);
 
   const refreshed = await request(app).post(`/api/ai-providers/${created.body.id}/refresh-models`).set('Authorization', auth);
   assert.deepEqual({ ok: refreshed.body.ok, models: refreshed.body.models }, { ok: true, models: ['qwen-instruct'] });
-  assert.equal(seen.at(-1).url, '/api/text/models');
-  assert.equal(seen.at(-1).auth, 'Bearer k', 'refresh must hit the authenticated text endpoint');
+  // Refresh also runs kind-aware discovery (other box endpoints), so look for
+  // the text call rather than assuming it was the last request.
+  const textCall = seen.find((r) => r.url === '/api/text/models');
+  assert.ok(textCall, 'refresh must hit the text endpoint');
+  assert.equal(textCall.auth, 'Bearer k', 'refresh must hit the authenticated text endpoint');
 
+  const textCallsBefore = seen.filter((r) => r.url === '/api/text/models').length;
   const tested = await request(app).post(`/api/ai-providers/${created.body.id}/test`).set('Authorization', auth);
   assert.equal(tested.body.ok, true);
-  assert.equal(seen.at(-1).url, '/api/text/models', 'test must not certify the unauthenticated root');
+  // Test also runs the model check (other box endpoints), so look for the text
+  // call rather than assuming it was the last request.
+  assert.ok(seen.filter((r) => r.url === '/api/text/models').length > textCallsBefore, 'test must hit the authenticated text endpoint');
+  assert.equal(seen.some((r) => r.url === '/' || r.url === ''), false, 'test must not certify the unauthenticated root');
   assert.equal(JSON.stringify(tested.body).includes('"k"'), false);
 });

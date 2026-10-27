@@ -10,6 +10,7 @@ import {
 } from './itemTypeForm.js';
 import { useWeaponCatalogs } from './useWeaponCatalogs.js';
 import AdminLoading from './AdminLoading.jsx';
+import { assetUrlVersioned } from './useTileSprites.js';
 
 const AdminContainer = styled.div`
   padding: 2rem;
@@ -77,6 +78,8 @@ const CategoryBadge = styled.div`
   font-weight: bold;
   text-transform: uppercase;
   background-color: ${props => props.$category === 'weapon' ? '#7f1d1d' : props.$category === 'ammo' ? '#14532d' : '#1e3a8a'}; /* s2-theme-exempt(#7f1d1d, #14532d, #1e3a8a): fixed category chip colour (weapon/ammo/armor) -- a data-style swatch, not a themed surface; stays constant across modes */
+  background-size: cover;
+  background-position: center;
   color: var(--s2-on-accent);
   border: 2px solid var(--s2-hairline);
 `;
@@ -447,8 +450,14 @@ function ItemTypesAdmin() {
           <EntityCard key={type.id}>
             <EntityHeader>
               <EntityInfo>
-                <CategoryBadge $category={type.category}>
-                  {type.category === 'weapon' ? 'W' : type.category === 'ammo' ? 'M' : type.category === 'currency' ? '¤' : 'A'}
+                {/* The icon the Art console wrote to item_types.icon; the
+                    category letter only stands in for an item with no art yet. */}
+                <CategoryBadge
+                  $category={type.category}
+                  title={type.category}
+                  style={type.icon ? { backgroundImage: `url(${assetUrlVersioned(type.icon, type.updated_at)})` } : undefined}
+                >
+                  {!type.icon && (type.category === 'weapon' ? 'W' : type.category === 'ammo' ? 'M' : type.category === 'currency' ? '¤' : 'A')}
                 </CategoryBadge>
                 <EntityName>{type.name}</EntityName>
               </EntityInfo>

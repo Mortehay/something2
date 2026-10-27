@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { it, expect } from 'vitest';
 import { ProjectileManager } from '../ProjectileManager.js';
 
 it('applySnapshot adds, updates, and drops projectiles by id', () => {

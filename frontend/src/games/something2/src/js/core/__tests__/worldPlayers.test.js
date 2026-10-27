@@ -39,7 +39,13 @@ describe('remotePlayerFromFrame', () => {
     });
     expect(p).toEqual({
       x: 1, y: 2, facing: 'ne', hp: 5, maxHp: 9, effects: ['burn'], aura: 0,
+      className: null, appearanceVariant: 1,
     });
+  });
+
+  it('carries class and appearance identity for remote player art', () => {
+    expect(remotePlayerFromFrame({ className: 'Archer', appearanceVariant: 4 }))
+      .toMatchObject({ className: 'Archer', appearanceVariant: 4 });
   });
 });
 
@@ -59,11 +65,18 @@ describe('remotePlayerFromFrame', () => {
 // mentioned it at all", which is precisely the failure that shipped.
 // ---------------------------------------------------------------------------
 describe('server player frame -> client contract', () => {
-  const worldPath = path.resolve(HERE, '../../../../../../../../backend/src/authority/world.js');
+  const candidates = [
+    '/backend/src/authority/world.js',
+    path.resolve(HERE, '../../../../../../../backend/src/authority/world.js'),
+    path.resolve(HERE, '../../../../../../../../backend/src/authority/world.js'),
+    path.resolve(process.cwd(), '../backend/src/authority/world.js'),
+    path.resolve(process.cwd(), 'backend/src/authority/world.js'),
+  ];
+  const worldPath = candidates.find((p) => fs.existsSync(p));
 
   it('every optional field snapshot() attaches is read by the client', () => {
-    if (!fs.existsSync(worldPath)) {
-      throw new Error(`cannot find the authority source at ${worldPath} -- `
+    if (!worldPath) {
+      throw new Error(`cannot find the authority source -- `
         + 'this guard is worthless if it silently skips, so it fails instead');
     }
     const world = fs.readFileSync(worldPath, 'utf8');

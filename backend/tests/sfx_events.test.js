@@ -161,3 +161,12 @@ test('pushSfxEvent caps the buffer and drops events with no position', () => {
   assert.equal(pushSfxEvent(small, null), false);
   assert.equal(small.length, 0);
 });
+
+test('SOMET-605: bossSfx builds spawn/phase/enrage on the creature channel; anything else is null', () => {
+  const { bossSfx } = require('../src/authority/sfxEvents.js');
+  assert.deepEqual(bossSfx('phase', { id: 'wb_1', type: 'zzTitan' }, 10.4, 20.6), { e: 'phase', c: 'zzTitan', a: 'c:wb_1', x: 10, y: 21 });
+  assert.deepEqual(bossSfx('spawn', { id: 7, type: 'zzTitan' }, 0, 0), { e: 'spawn', c: 'zzTitan', a: 'c:7', x: 0, y: 0 });
+  assert.equal(bossSfx('enrage', { id: 7, type: 'zzTitan' }, 1, 1).e, 'enrage');
+  assert.equal(bossSfx('death', { id: 7, type: 'zzTitan' }, 1, 1), null, 'death has its own builder');
+  assert.equal(bossSfx('phase', null, 1, 1), null);
+});

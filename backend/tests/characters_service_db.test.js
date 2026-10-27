@@ -174,7 +174,7 @@ test('characters service', { skip: !url ? 'no database URL' : false }, async (t)
 
   await t.test('the list carries level and class name', async () => {
     await withUser('zzSvcList', async (userId) => {
-      const c = await createCharacter(pool, userId, 'zzSvcListed', mage.id);
+      const c = await createCharacter(pool, userId, 'zzSvcListed', mage.id, 4);
       // UPDATE, not INSERT: createCharacter now writes the class-base
       // snapshot row itself (contract 6.1), so the row already exists and an
       // INSERT here would violate player_progression_pkey.
@@ -184,6 +184,9 @@ test('characters service', { skip: !url ? 'no database URL' : false }, async (t)
       assert.equal(row.name, 'zzSvcListed');
       assert.equal(row.className, 'Mage');
       assert.equal(row.level, 4);
+      assert.equal(row.appearanceVariant, 4);
+      assert.equal(row.appearance.image, mage.image,
+        'an ungenerated appearance slot falls back to its class image');
     });
   });
 

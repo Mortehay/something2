@@ -60,3 +60,33 @@ export function useSaveGraphPosition() {
     onError: (err) => toast.error(err.message),
   });
 }
+
+// SOMET-587/586: a portal doorway's art, set directly from the World Map
+// tab's "Selected link" panel. `id` is the map_links row id — EITHER the
+// departure row or its mirror arrival row, and which one determines which
+// spec field the write lands on (`art` vs `to_art`): the backend resolves
+// that purely from which physical row `id` addresses (see
+// specFileLocator.js's findLinkInSpecs), so this hook's call shape never
+// needs to say "which side" itself. Setting the other side of the same
+// portal pair is a second, independent call with that row's own id. A 422
+// means the locator could not find a single, unambiguous spec entry for
+// this portal — that message is surfaced VERBATIM via toast, not swallowed
+// or replaced with a generic "failed" string, since it is the one case the
+// admin needs to actually read (the edit did NOT happen, in either the
+// database or the spec file).
+export function useSetPortalArt() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, art_name }) => {
+      const res = await apiFetch(`${API_URL}/api/map-links/${id}/art`, {
+        method: "PUT",
+        headers: authHeaders(),
+        body: JSON.stringify({ art_name }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to save portal art");
+      return res.json();
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["worldGraph"] }); },
+    onError: (err) => toast.error(err.message),
+  });
+}

@@ -3,11 +3,11 @@ import { Outlet, useMatch } from 'react-router-dom';
 import styled from 'styled-components';
 import toast from 'react-hot-toast';
 import { Game } from "./src/js/main.js";
-import { useMapTiles, useMapConfig, useVfxEffects } from "./useMaps.js";
+import { useMapTiles, useMapConfig, useVfxEffects, useAuraEffects } from "./useMaps.js";
 import { useWorlds } from "./useWorlds";
 import { autoJoinTarget } from "./autoJoin.js";
 import CharacterSelect from "./CharacterSelect.jsx";
-import { useCharacters } from "./useCharacters.js";
+import { useCharacters, usePlayableClasses } from "./useCharacters.js";
 import {
   readActiveCharacterId, writeActiveCharacterId, clearActiveCharacterId, resolveActiveCharacter,
 } from "./characterSession.js";
@@ -206,6 +206,7 @@ export default function GameShell() {
 
   const { mapTiles } = useMapTiles();
   const { vfxEffects } = useVfxEffects();
+  const { auraEffects } = useAuraEffects();
   // Entity types keyed by name (same shape the legacy map path uses) — the
   // chunked renderer needs them to draw creatures with their approved sprite.
   const { mapConfig } = useMapConfig();
@@ -215,6 +216,7 @@ export default function GameShell() {
   // THIRD state, distinct from "no character": treating it as the latter
   // flashes the picker for a frame before the canvas on every reload.
   const { characters, maxCharacters, isLoadingCharacters } = useCharacters();
+  const { classes: playableClasses } = usePlayableClasses();
   const [activeCharacterId, setActiveCharacterId] = useState(() => readActiveCharacterId());
   const activeCharacter = resolveActiveCharacter(activeCharacterId, characters);
 
@@ -307,7 +309,6 @@ export default function GameShell() {
   // transient activation is still valid through the quick world join.
   useEffect(() => {
     if (isPlaying) enterGameFullscreen();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPlaying]);
 
   // Leaves the world and returns to the picker. autoJoinedRef is reset so the
@@ -428,6 +429,7 @@ export default function GameShell() {
     // and handleEnterRef below always points at the latest one, so this sees
     // the current character rather than the one active at mount.
     if (!activeCharacter) return false;
+    if (!Array.isArray(playableClasses) || playableClasses.length === 0) return false;
 
     try {
       const world = worlds?.find(w => w.id === worldId);
@@ -444,9 +446,12 @@ export default function GameShell() {
         // falls back to declaration order rather than throwing.
         className: activeCharacter.className || null,
         mainStat: activeCharacter.mainStat || null,
+        appearanceVariant: activeCharacter.appearanceVariant || 1,
+        characterClasses: playableClasses || [],
         chunkSize,
         tileTypes: mapTiles,
         vfxEffects: vfxEffects || null,
+        auraEffects: auraEffects || null,
         entityTypes: mapConfig?.entityTypes || null,
         spawnX: spawn,
         spawnY: spawn,
@@ -469,7 +474,7 @@ export default function GameShell() {
     }
   };
   // Keep the transition callback pointed at the current closure (fresh
-  // mapTiles/worlds/vfxEffects/mapConfig) — see handleEnterRef declaration above.
+  // mapTiles/worlds/vfxEffects/auraEffects/mapConfig) — see handleEnterRef declaration above.
   handleEnterRef.current = enterWorld;
 
   // MISMATCH fix: a logged-in player should spawn straight into the canonical
@@ -499,6 +504,7 @@ export default function GameShell() {
     // without a character. autoJoin.test.js passed the flag explicitly and
     // stayed green throughout. Caught in the browser.
     hasCharacter: !!activeCharacter,
+    appearanceCatalogReady: Array.isArray(playableClasses) && playableClasses.length > 0,
     // Where this character logged out. Read off activeCharacter, which is
     // also the effect's dependency, so a character switch re-evaluates the
     // target rather than resuming the previous character's world.
@@ -529,7 +535,7 @@ export default function GameShell() {
     // to become ready, and without it here the effect never re-runs after the
     // picker closes -- the player sits on the world list forever.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [worlds, mapTiles, mapConfig, isAdmin, isPlaying, isGameRoute, activeCharacter]);
+  }, [worlds, mapTiles, mapConfig, playableClasses, isAdmin, isPlaying, isGameRoute, activeCharacter]);
 
   return (
     <StyledGameContainer>

@@ -124,6 +124,20 @@ test('castSkill executes buff skills, restores resources, and applies player buf
   assert.equal(playerSnap.buffs[0].id, 'war_steel_tempering');
 });
 
+test('castSkill executes Mana Surge and restores 40% of maximum mana', () => {
+  const world = makeTestWorld({ id: 'item_staff', name: 'staff', category: 'weapon', kind: 'magic' });
+  const userId = 'u_mage';
+  const player = addTestPlayer(world, userId, { x: 100, y: 100 });
+  player.maxMana = 3277;
+  player.mana = 327; // ~10% mana
+
+  const res = world.castSkill(userId, 'mag_mana_surge', 100, 100, 0, 1);
+  assert.equal(res.ok, true);
+  // 40% of 3277 is 1311, so mana becomes 327 + 1311 = 1638
+  assert.equal(player.mana, 1638, 'Mana Surge restored 40% of max mana');
+  assert.equal(player.buffs.has('mag_mana_surge'), true, 'Buff registered in active buffs');
+});
+
 test('castSkill executes Barrage with individual arrow damage hits in shotgun cone', () => {
   const world = makeTestWorld({ id: 'item_bow', name: 'bow', category: 'weapon', kind: 'projectile' });
   const userId = 'u_archer';
@@ -270,5 +284,92 @@ test('castSkill validates weapon requirements for skill gems and rejects mismatc
   const meleeRes = world.castSkill(userId, 'war_crushing_blow', 140, 100, 1, 0);
   assert.equal(meleeRes.ok, false);
   assert.equal(meleeRes.reason, 'weapon_mismatch');
+});
+
+
+// SOMET-575 (D4): melee skill reach is max(90, range*1.3), measured to the
+// target's body edge. war_crushing_blow has range 80 -> reach 104.
+function crushingBlowHitsAt(d) {
+  const world = makeTestWorld({ id: 'item_sword', name: 'sword', category: 'weapon', kind: 'melee' });
+  const player = addTestPlayer(world, 'u_reach', { x: 100, y: 100 });
+  player.stamina = 100;
+  const pcx = player.x + player.width / 2, pcy = player.y + player.height / 2;
+  world.creatures.creatures.set('c_far', {
+    id: 'c_far', name: 'Goblin', x: pcx + d - 24, y: pcy - 24, width: 48, height: 48,
+    hp: 180, maxHp: 180, effects: new Map(), mit: { defense: 0, resists: {} },
+  });
+  const res = world.castSkill('u_reach', 'war_crushing_blow', pcx + d, pcy, 1, 0);
+  assert.equal(res.ok, true);
+  const c = world.creatures.get('c_far');
+  return !c || c.hp < 180;
+}
+
+test('SOMET-575 melee skill reach restored to max(90, range*1.3), edge-measured', () => {
+  // Centre 134 -> padded edge 134-32 = 102: inside 104, outside the 100 of the regression.
+  assert.equal(crushingBlowHitsAt(134), true);
+  // Centre 140 -> edge 108: beyond 104.
+  assert.equal(crushingBlowHitsAt(140), false);
+});
+
+test('castSkill executes channeled skills with ramping intensity, damage, and resource drain', () => {
+  const world = makeTestWorld({ id: 'item_staff', name: 'staff', category: 'weapon', kind: 'melee' });
+  const userId = 'u_channeled';
+  const player = addTestPlayer(world, userId, { x: 100, y: 100 });
+  player.mana = 3277;
+  player.maxMana = 3277;
+
+  // Add dummy high-hp target
+  world.creatures.creatures.set('c_boss', {
+    id: 'c_boss', name: 'Training Dummy', x: 200, y: 100, width: 48, height: 48,
+    hp: 100000, maxHp: 100000, effects: new Map(), mit: { defense: 0, resists: {} },
+  });
+
+  // Tick 0 (Stack 0): Base cost for mag_blizzard is 6.
+  const manaBefore0 = player.mana;
+  const hpBefore0 = world.creatures.get('c_boss').hp;
+  world.now = 1000;
+  const res0 = world.castSkill(userId, 'mag_blizzard', 200, 100, 1, 0);
+  assert.equal(res0.ok, true);
+  const cost0 = manaBefore0 - player.mana;
+  const dmg0 = hpBefore0 - world.creatures.get('c_boss').hp;
+  assert.equal(cost0, 6); // Stack 0: base cost exactly 6
+
+  // Fast forward 16 consecutive ticks (250ms interval) to reach Stack 8 (MAX)
+  // Stack increments every 2 ticks (every 0.5s)
+  for (let i = 1; i <= 16; i++) {
+    world.now += 250;
+    const res = world.castSkill(userId, 'mag_blizzard', 200, 100, 1, 0);
+    assert.equal(res.ok, true);
+  }
+
+  // At Stack 8:
+  // Base cost 6 * (1 + 8 * 0.35) = 6 * 3.8 = 22.8
+  // Pool drain: (3277 * (8 * 0.0125)) / 4 = (3277 * 0.10) / 4 = 81.925
+  // Total cost per tick = round(22.8 + 81.925) = 105
+  // Damage multiplier = 1 + 8 * 0.15 = 2.2x (+120% damage)
+  const manaBefore8 = player.mana;
+  const hpBefore8 = world.creatures.get('c_boss').hp;
+  world.now += 250;
+  const res8 = world.castSkill(userId, 'mag_blizzard', 200, 100, 1, 0);
+  assert.equal(res8.ok, true);
+  const cost8 = manaBefore8 - player.mana;
+  const dmg8 = hpBefore8 - world.creatures.get('c_boss').hp;
+  assert.equal(cost8, 105);
+  assert.equal(Math.round(dmg0 * 2.2), dmg8);
+
+  // If player pauses for > 600ms, channel ticks reset back to stack 0
+  world.now += 1000; // 1s pause
+  const manaBeforeReset = player.mana;
+  const hpBeforeReset = world.creatures.get('c_boss').hp;
+  const resReset = world.castSkill(userId, 'mag_blizzard', 200, 100, 1, 0);
+  assert.equal(resReset.ok, true);
+  assert.equal(manaBeforeReset - player.mana, 6); // Reset back to base cost
+  assert.equal(hpBeforeReset - world.creatures.get('c_boss').hp, dmg0); // Reset back to base damage
+
+  // If player runs low on mana and cannot afford the cost, cast is refused and channel resets
+  player.mana = 3; // base cost is 6
+  const resRefused = world.castSkill(userId, 'mag_blizzard', 200, 100, 1, 0);
+  assert.equal(resRefused.ok, false);
+  assert.equal(resRefused.reason, 'mana');
 });
 

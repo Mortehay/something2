@@ -47,7 +47,6 @@ function renderer(ctx) {
 }
 
 const fx = (over = {}) => ({
-  def: { shape: 'line', color: '#fff', width: 2, duration_ms: 200, ease: 'linear', fade: true },
   x: 100, y: 100, nx: 1, ny: 0, reach: 120, arc: 1, hit: true, startedAt: 0,
   ...over,
   def: { shape: 'line', color: '#fff', width: 2, duration_ms: 200, ease: 'linear', fade: true, ...(over.def || {}) },

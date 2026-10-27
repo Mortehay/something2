@@ -264,6 +264,30 @@ function decodeImage({ contentType, json, body }, pointer) {
   return { buffer };
 }
 
+// Reads a 2xx generation response down to image bytes, or { error }. Shared by
+// runGeneration and probeGeneration so the Test button decodes exactly the way
+// a real job does -- a probe with its own decoder could pass where jobs fail.
+async function readImageResponse(res, provider) {
+  const contentType = res.headers && res.headers.get ? res.headers.get('content-type') : null;
+  try {
+    if (contentType && /^image\//i.test(contentType)) {
+      // Streamed with a hard ceiling, so an enormous body is abandoned
+      // part-way instead of being buffered and only then measured.
+      const read = await readCapped(res, MAX_IMAGE_BYTES());
+      if (read.error) return { error: `provider response rejected: ${read.error}` };
+      return decodeImage({ contentType, body: read.buffer }, provider.response_image_pointer);
+    }
+    // Same ceiling for the JSON path. A base64 image inflates ~33%, so the
+    // JSON carrying it is legitimately larger than the image itself; the
+    // cap is applied to the transport bytes either way.
+    const read = await readJsonCapped(res, MAX_IMAGE_BYTES());
+    if (read.error) return { error: `provider response rejected: ${read.error}` };
+    return decodeImage({ contentType, json: read.json }, provider.response_image_pointer);
+  } catch (err) {
+    return { error: `could not read the provider response: ${err.message}` };
+  }
+}
+
 // --- Storage -------------------------------------------------------------
 
 // Mirrors sprite-gen's storage.py layout exactly:
@@ -335,12 +359,16 @@ function startGeneration(provider, req, deps = {}) {
   return { job_id: jobId, provider_id: provider.id, provider_name: provider.name };
 }
 
-async function runGeneration(jobId, provider, req, deps = {}) {
-  const { fetchImpl = fetch, store = assetStore } = deps;
-  const { subject, kind = 'object', prompt, seed = 0, frames = 1, negative = [] } = req;
-
-  setJob(jobId, { status: 'running' });
-
+// The request body exactly as it goes to the provider: the template with the
+// request's values substituted, plus the operator's negative terms.
+//
+// Pure, and separate from runGeneration, because SOMET-544 needs to rebuild it
+// WITHOUT sending it: "has anything changed since this subject failed?" is
+// answered by comparing the body that would be sent now with the one that was
+// recorded, and a second copy of this merge would be free to disagree with
+// the one actually used.
+function buildBody(provider, req) {
+  const { kind = 'object', prompt, seed = 0, frames = 1, negative = [] } = req;
   const size = defaultSize(kind);
   const frameCount = Math.max(1, Number(frames) || 1);
   // {{frames}} lets the template tell the REMOTE how many frames to draw. The
@@ -377,6 +405,17 @@ async function runGeneration(jobId, provider, req, deps = {}) {
     const existing = String(body.negative_prompt || '').trim();
     body.negative_prompt = [existing, ...extraNegative].filter(Boolean).join(', ');
   }
+  return body;
+}
+
+async function runGeneration(jobId, provider, req, deps = {}) {
+  const { fetchImpl = fetch, store = assetStore } = deps;
+  const { subject, kind = 'object', frames = 1 } = req;
+
+  setJob(jobId, { status: 'running' });
+
+  const frameCount = Math.max(1, Number(frames) || 1);
+  const body = buildBody(provider, req);
 
   // SOMET-547. Publish the FINAL payload on the registry entry so the history
   // can record what was actually sent. Until this existed the dispatcher only
@@ -430,33 +469,7 @@ async function runGeneration(jobId, provider, req, deps = {}) {
     return;
   }
 
-  const contentType = res.headers && res.headers.get ? res.headers.get('content-type') : null;
-  let decoded;
-  try {
-    if (contentType && /^image\//i.test(contentType)) {
-      // Streamed with a hard ceiling, so an enormous body is abandoned
-      // part-way instead of being buffered and only then measured.
-      const read = await readCapped(res, MAX_IMAGE_BYTES());
-      if (read.error) {
-        setJob(jobId, { status: 'error', error: `provider response rejected: ${read.error}` });
-        return;
-      }
-      decoded = decodeImage({ contentType, body: read.buffer }, provider.response_image_pointer);
-    } else {
-      // Same ceiling for the JSON path. A base64 image inflates ~33%, so the
-      // JSON carrying it is legitimately larger than the image itself; the
-      // cap is applied to the transport bytes either way.
-      const read = await readJsonCapped(res, MAX_IMAGE_BYTES());
-      if (read.error) {
-        setJob(jobId, { status: 'error', error: `provider response rejected: ${read.error}` });
-        return;
-      }
-      decoded = decodeImage({ contentType, json: read.json }, provider.response_image_pointer);
-    }
-  } catch (err) {
-    setJob(jobId, { status: 'error', error: `could not read the provider response: ${err.message}` });
-    return;
-  }
+  const decoded = await readImageResponse(res, provider);
   if (decoded.error) {
     setJob(jobId, { status: 'error', error: decoded.error });
     return;
@@ -531,10 +544,108 @@ async function runGeneration(jobId, provider, req, deps = {}) {
   }
 }
 
+// --- Generation probe (SOMET-542) ----------------------------------------
+
+// The Test button's budget. Far below GENERATE_TIMEOUT_MS: a 1-step 64px draw
+// takes about a second on a healthy box, and an admin is waiting on the click.
+// A box busy with a batch queues the probe behind it, which is why this is a
+// minute and not five seconds.
+const PROBE_TIMEOUT_MS = () => parseInt(process.env.AI_PROVIDER_PROBE_TIMEOUT_MS || '60000', 10);
+const PROBE_SIZE = 64;
+const PROBE_PROMPT = 'a red apple on a white background';
+
+// Magic bytes of the formats a provider plausibly returns. decodeImage only
+// proves "some bytes came back" -- Buffer.from(..., 'base64') turns an error
+// string into bytes without complaint -- so the probe checks for a picture.
+function looksLikeImage(buffer) {
+  if (!buffer || buffer.length < 12) return false;
+  const png = buffer[0] === 0x89 && buffer.toString('latin1', 1, 4) === 'PNG';
+  const jpeg = buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+  const gif = buffer.toString('latin1', 0, 4) === 'GIF8';
+  const webp = buffer.toString('latin1', 0, 4) === 'RIFF' && buffer.toString('latin1', 8, 12) === 'WEBP';
+  return png || jpeg || gif || webp;
+}
+
+// One real, minimal generation through the provider's OWN request_template.
+// A status or models endpoint is answered by the web server, which stays up
+// through a faulted CUDA context; only a draw touches the GPU. Always resolves.
+//
+// steps, width and height are forced only where the template already has the
+// key: adding one to a template that never had it could be rejected by a
+// strict endpoint and fail the probe for a reason real jobs never hit. The
+// size override is not redundant with the {{width}}/{{height}} variables --
+// real templates carry literal sizes (1024x1024), and a full-size draw is the
+// VRAM allocation that faults the box. Every other key, cutout included, is
+// sent as-is so the probe exercises the same pipeline a job does.
+async function probeGeneration(provider, { fetchImpl = fetch, now = Date.now } = {}) {
+  if (!provider.request_template || typeof provider.request_template !== 'object') {
+    return { ok: false, error: 'provider has no request_template, so a generation cannot be tested' };
+  }
+  const body = substituteTemplate(provider.request_template, {
+    prompt: PROBE_PROMPT,
+    model: provider.model || '',
+    seed: 0,
+    width: PROBE_SIZE,
+    height: PROBE_SIZE,
+    frames: 1,
+  });
+  const overrides = { steps: 1, width: PROBE_SIZE, height: PROBE_SIZE };
+  for (const [key, value] of Object.entries(overrides)) {
+    if (Object.prototype.hasOwnProperty.call(body, key)) body[key] = value;
+  }
+
+  const started = now();
+  let res;
+  try {
+    res = await safeFetch(provider.base_url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders(provider) },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS()),
+    }, { fetchImpl });
+  } catch (err) {
+    const timedOut = err && (err.name === 'TimeoutError' || err.name === 'AbortError');
+    return {
+      ok: false,
+      latency_ms: now() - started,
+      error: timedOut
+        ? `${redactUrl(provider.base_url)} did not produce an image within `
+          + `${Math.round(PROBE_TIMEOUT_MS() / 1000)}s (it may be busy with another job)`
+        : `could not reach ${redactUrl(provider.base_url)}: ${err.message}`,
+    };
+  }
+  if (!res.ok) {
+    const excerpt = await errorExcerpt(res, provider);
+    return {
+      ok: false,
+      status: res.status,
+      latency_ms: now() - started,
+      error: excerpt
+        ? `test generation failed: provider answered ${res.status}: ${excerpt}`
+        : `test generation failed: provider answered ${res.status}`,
+    };
+  }
+  const decoded = await readImageResponse(res, provider);
+  const latency = now() - started;
+  if (decoded.error) {
+    return { ok: false, status: res.status, latency_ms: latency, error: `test generation failed: ${decoded.error}` };
+  }
+  if (!looksLikeImage(decoded.buffer)) {
+    return {
+      ok: false,
+      status: res.status,
+      latency_ms: latency,
+      error: 'test generation failed: the provider returned data that is not a recognisable image',
+    };
+  }
+  return { ok: true, status: res.status, latency_ms: latency, error: null };
+}
+
 module.exports = {
   REMOTE_JOB_PREFIX,
   isRemoteJobId,
   substituteTemplate,
+  buildBody,
   decodeImage,
   stripDataUri,
   storageKey,
@@ -554,4 +665,8 @@ module.exports = {
   MAX_IMAGE_BYTES,
   errorExcerpt,
   MAX_ERROR_EXCERPT_CHARS,
+  readImageResponse,
+  probeGeneration,
+  looksLikeImage,
+  PROBE_TIMEOUT_MS,
 };

@@ -93,13 +93,13 @@ test('exactly five keystones per sector, all keys unique across the tree', () =>
 test('the two keystones the spec names by hand exist and grant what it says', () => {
   const bloodPact = KEYSTONES.constitution.find((k) => k.key === 'ks_con_blood_pact');
   assert.deepStrictEqual(bloodPact.grants,
-    [{ type: 'rule', rule: 'lifeCostMultiplier', value: 0.75 }]);
+    [{ type: 'rule', rule: 'lifeCostMultiplier', value: 0.85 }]);
   // SOMET-518 moved Beast Bond from a keystone to a CLUSTER hub, so the
   // keystone is gone and the charm rule now lives on the cluster. Pack Leader
   // (+3) stays as the intermediate step it always was.
   assert.strictEqual(KEYSTONES.charisma.find((k) => k.key === 'ks_cha_beast_bond'), undefined);
   const bond = CLUSTERS.find((c) => c.key === 'clu_cha_beast_bond');
-  assert.deepStrictEqual(bond.hubGrants, [{ type: 'rule', rule: 'treeCharmBonus', value: 5 }]);
+  assert.deepStrictEqual(bond.hubGrants, [{ type: 'rule', rule: 'treeCharmBonus', value: 3 }]);
 });
 
 test('one start node per sector, each naming a distinct class', () => {

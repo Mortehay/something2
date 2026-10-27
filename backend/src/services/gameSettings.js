@@ -102,4 +102,4 @@ async function setSetting(pool, key, value) {
   return r.rows[0];
 }
 
-module.exports = { DEFAULTS, getSetting, getSettings, setSetting };
+module.exports = { DEFAULTS, getSetting, getSettings, setSetting, assertValid, isKnownKey };

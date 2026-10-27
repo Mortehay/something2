@@ -1,7 +1,7 @@
 import { GAME_WIDTH, GAME_HEIGHT, ISO_TILE_H, ISO_TILE_W, MAP_TILE_SIZE } from "../core/constants.js";
 import { worldToScreen, depthKey } from "../core/iso.js";
-import { compareDrawables, wallRevealed, drawWall } from "./wallRenderer.js";
-import { drawLandmarks } from "./landmarkRenderer.js";
+import { compareDrawables, drawWall } from "./wallRenderer.js";
+import { drawLandmarks, landmarkColor } from "./landmarkRenderer.js";
 import { pointArtDef, pointBodyRef, pointStateTreatment, planLandmarkBodies } from "./pointArt.js";
 import { drawPlaceholder } from "./placeholderSprite.js";
 import { frameRect, staticFrameKey, animatedFrameKey, facingToDir, tileFrameKey, resolveTileVisual, stateFrameKey } from "./spriteAtlas.js";
@@ -13,27 +13,30 @@ import { createTextLabelCache, drawCachedLabel } from "./textLabelCache.js";
 // odd-looking import would be the worse trade.
 import { domCanvasFactory } from "./minimapTerrainLayer.js";
 import { chunkTileCells } from "../core/chunkTiles.js";
-import { SLOTS, typeOf, canEquipClient } from "../core/inventory.js";
 import { layoutInventory, drawInventory } from "./inventoryPanel.js";
 import { layoutPassiveTree, drawPassiveTree } from "./passiveTreePanel.js";
 import { layoutSkillsPanel, drawSkillsPanel } from "./skillsPanel.js";
 import { layoutGemShopPanel, drawGemShopPanel } from "./gemShopPanel.js";
+import { layoutQuestLog, drawQuestLog } from "./questLogPanel.js";
 import { isTransformationSkill, getRequiredForm, resolveSkillDamage, checkGemRequirements, getWeaponRequirementName } from "../core/skillsData.js";
 import {
   blastProgress, blastScreenRadiusX, elementColor, auraRingGeometry,
 } from "../core/blasts.js";
-import { effectProgress, effectAlpha, isoArcAngle, particlesAt, effectSeed, hash01 } from "../core/vfx.js";
+import { effectProgress, effectAlpha, isoArcAngle, effectSeed, hash01 } from "../core/vfx.js";
 import { anchorY } from "../core/attackAnchor.js";
 import { elementTint } from "../core/elements.js";
-import { normalizeEffects, effectColor, effectHudLine } from "../core/statusEffects.js";
+import { normalizeEffects, effectColor } from "../core/statusEffects.js";
 import {
   canvasToCameraPoint, pickDrawable, targetKey, describeTarget, layoutCard,
   drawableScreenRect, CARD,
 } from "./inspect.js";
 import { rarityGlowColor, withAlpha } from "../core/rarityColors.js";
 import { artIcon, drawIconFit } from "./gameArt.js";
+import { swayShear, swayPhaseSeed } from "./sway.js";
+import { boxDir, isBoxManifest, frameKeyFor, actionTimings, pickAction, DEFAULT_FPS } from "./sheetActions.js";
+import { shineBand, shineGeometry, SHINE_ALPHA } from "./shine.js";
 import {
-  rarityBorderColor, affixLine, clipToWidth, rowTextOffsets, AFFIX_FONT_PX,
+  rarityBorderColor, affixLine, clipToWidth, rowTextOffsets, AFFIX_FONT_PX, itemIcon,
 } from "./itemDisplay.js";
 
 // Read once from the layout module rather than restated, so the painter and
@@ -57,7 +60,6 @@ const WORLD_CHEST_PROMPT_R = 110;
 
 // Radius (world px) around an actor within which an occluding wall fades to
 // let the player see themselves/nearby creatures behind it.
-const WALL_REVEAL_R = 150;
 
 // SOMET-445. The level tag's full visual identity, in one place: it is both
 // what gets drawn and what the label cache keys on, so the two cannot drift.
@@ -70,8 +72,8 @@ const LEVEL_TAG_STYLE = {
   lineWidth: 2,
 };
 
-const XP_BASE = 18;
-const XP_EXPONENT = 1.33;
+const XP_BASE = 35;
+const XP_EXPONENT = 1.45;
 const MAX_LEVEL = 150;
 
 function levelWorth(level) {
@@ -158,6 +160,9 @@ export class RenderSystem {
     // Global render-mode override (dev toggle). null = use each entity's own
     // renderMode; a mode string forces every entity to that mode.
     this.renderModeOverride = null;
+    // SOMET-656: per-actor animation timing (systems/entityAnimState.js), set
+    // by Game. null = box sheets show their static frame, as before.
+    this.entityAnim = null;
     this.tileTexturesOff = false;
     this._tileCache = new TileDiamondCache();
     // SOMET-445: creature level tags, rasterised once per distinct string.
@@ -165,6 +170,12 @@ export class RenderSystem {
     // whole render trace -- together ~3x the entire minimap -- redrawing a
     // dozen identical strings once per creature per frame.
     this._labelCache = createTextLabelCache({ createCanvas: domCanvasFactory });
+    // Props v2 'shine' (see _drawShine): offscreen canvases come from here
+    // (tests swap in a recorder). Masks are cached per (image, size), the
+    // compositing scratch per size bucket -- nothing is allocated per frame.
+    this.createCanvas = domCanvasFactory;
+    this._shineMasks = new WeakMap();
+    this._shineScratch = new Map();
     // Hit-test rects for the inventory panel, recorded while drawing it and
     // read back by Game on click. Empty whenever the panel isn't open.
     this._invHitAreas = [];
@@ -186,6 +197,16 @@ export class RenderSystem {
     return override || entity.renderMode || entity.render_mode || "rect";
   }
 
+  // SOMET-603: the procedural boss colours, keyed on the catalog element --
+  // never guessed from the name. Unknown/absent element = the fire palette.
+  static bossPalette(element) {
+    if (element === "ice") return { baseColor: "#70a1ff", glowColor: "#e0f2fe", darkColor: "#1e293b", eyeColor: "#67e8f9" };
+    if (element === "arcane" || element === "void") return { baseColor: "#a55eea", glowColor: "#f3e8ff", darkColor: "#180a24", eyeColor: "#f472b6" };
+    if (element === "lightning") return { baseColor: "#ffd166", glowColor: "#ffffff", darkColor: "#261e0b", eyeColor: "#67e8f9" };
+    if (element === "physical") return { baseColor: "#d8d2c0", glowColor: "#f5f0e1", darkColor: "#2b2620", eyeColor: "#7dd3fc" };
+    return { baseColor: "#ff4757", glowColor: "#ffa502", darkColor: "#2f3542", eyeColor: "#ffeaa7" };
+  }
+
   // Dev cycle: none -> force rect -> force static -> force animated -> none.
   cycleRenderModeOverride() {
     const order = [null, "rect", "static", "animated"];
@@ -202,6 +223,23 @@ export class RenderSystem {
 
   // Pure, canvas-free: collect every world object into one list tagged with a
   // depth key, sorted back-to-front for the painter's algorithm.
+  // SOMET-656: the EntityAnimState key of a drawable's actor, or null for
+  // anything that does not play actions (decorations, props, point art).
+  // "entity" drawables are the creature list (see render()).
+  static animKeyFor(d) {
+    if (d.kind === "player") return "self";
+    if (d.kind === "remote") return d.userId != null ? `p:${d.userId}` : null;
+    if (d.kind === "entity") return d.ref && d.ref.id != null ? `c:${d.ref.id}` : null;
+    return null;
+  }
+
+  // SOMET-656: the anim state to play box-sheet actions with, or null. A
+  // 'static' or 'rect' global override (the dev toggle) freezes playback.
+  _playbackAnim() {
+    const o = this.renderModeOverride;
+    return o === "static" || o === "rect" ? null : this.entityAnim;
+  }
+
   static buildDrawables(player, map, remotePlayers) {
     const out = [];
     const entities = (map && map.entities) || [];
@@ -284,6 +322,9 @@ export class RenderSystem {
     // SOMET-528. Lingering melee waves; defaults to empty so every existing
     // caller and test renders exactly as before.
     waves = [],
+    // SOMET-608 (S6): active skill telegraphs -- resolved geometry +
+    // remaining/total ms, same contract waves already carries.
+    telegraphs = [],
     skillVisuals = [],
     merchants = [], shop = null, shopOpen = false, shopView = null, decoTypes = null,
     // SOMET-584 — name-keyed entity-type catalog, needed to resolve a world
@@ -295,6 +336,8 @@ export class RenderSystem {
     gemShopPage = 0, gemShopSelectedGemId = null,
     // Skill Trainer / Merchant
     skillMerchants = [],
+    // Dedicated Quest Giver / Elder NPC
+    questGivers = [],
     // SOMET-310. Same join-frame fixed-world-point shape as `merchants`.
     banks = [], bank = null, bankOpen = false, bankView = null,
     // SOMET-372 -- WORLD chests (guarded, lootable), not the account chest
@@ -314,6 +357,10 @@ export class RenderSystem {
     // Passed per frame rather than stashed at construction because the library
     // arrives asynchronously, after the renderer exists.
     vfxDefs = null,
+    // SOMET-607 (S5): the aura visual library, same "arrives async, passed
+    // per frame" contract as vfxDefs -- auraDefs[name] gives a creature's
+    // active aura its shape/color/radius/pulse.
+    auraDefs = null,
     progression = null,
     equippedWeapon = null, playerStats = null,
     // SOMET-493 — the inspect card. Shaped
@@ -335,17 +382,22 @@ export class RenderSystem {
     skillHoverSlot = null, playerClass = null, activeForm = null, flashSlot = null,
     skillCooldowns = null, activeBuffs = [], unlockedSkills = null,
     hoveredSkill = null, cursorX = null, cursorY = null, keybinds = null,
+    // Floating Combat & Resource text (Damage numbers, heals, mana/stamina surge)
+    floatingTexts = [],
+    // Quest Log (hotkey 'J')
+    questLogOpen = false, quests = [], activeQuestKey = null, legacyChoice = null, questScroll = 0, trackedQuestKey = null,
   }) {
     // SOMET-584. Set before anything below resolves art, including the
     // landmark body plan a few lines down.
     this.entityDefs = entityDefs;
     if (vfxDefs) this.vfxDefs = vfxDefs;
+    if (auraDefs) this.auraDefs = auraDefs;
     // While any full-screen panel is up the cursor is being used to click ITS
     // rows, so the inspect card must not follow it around over the top of the
     // panel — and, more importantly, must not hit-test the world hidden behind
     // one and let a click pin something the player cannot see.
     const panelOpen = (inventoryOpen && !!inventory) || (shopOpen && !!shop) || (bankOpen && !!bank)
-      || (passiveTreeOpen && !!passiveIndex) || skillsOpen || gemShopOpen;
+      || (passiveTreeOpen && !!passiveIndex) || skillsOpen || gemShopOpen || questLogOpen;
     this.ctx.fillStyle = "#0f3460";
     this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     // Timestamp for this frame; animated tile textures advance off it (unlike
@@ -403,7 +455,9 @@ export class RenderSystem {
     // legible. The pulse phase is this frame's timestamp, set above -- the
     // renderer never reads a clock itself.
     const landmarkPlan = this._readyLandmarkPlan(landmarks);
-    drawLandmarks(this.ctx, { landmarks, phase: this.nowMs, halfW, halfH, skipBody: landmarkPlan.skipBody });
+    drawLandmarks(this.ctx, {
+      landmarks, phase: this.nowMs, halfW, halfH, skipBody: landmarkPlan.skipBody, beamOverlay: landmarkPlan.beamOverlay,
+    });
     this.drawDoorways(doorways, chunkedMap, player);
 
     // SOMET-523. The leech aura's ground ring, drawn BEFORE the depth-sorted
@@ -416,6 +470,10 @@ export class RenderSystem {
     // same reason: they mark AREA, so they belong under every actor including
     // the creatures standing in them.
     this._drawWaves(waves);
+    // SOMET-608 (S6). A skill telegraph marks the ground that is ABOUT to
+    // hurt, same layer and same reason as waves -- the caster itself (still
+    // standing there, mid wind-up) must not occlude the warning.
+    this._drawTelegraphs(telegraphs);
 
     // Players + creatures + ground items + walls, all depth-sorted together
     // (Pass B) — ground items must join the same sort rather than being
@@ -449,6 +507,9 @@ export class RenderSystem {
     for (const sm of skillMerchants) {
       drawables.push({ kind: "skillMerchant", ref: sm, order: 0, depth: depthKey(sm.x, sm.y) });
     }
+    for (const qg of questGivers) {
+      drawables.push({ kind: "questGiver", ref: qg, order: 0, depth: depthKey(qg.x, qg.y) });
+    }
     // Bank posts are the same kind of fixed world point as merchants, and go
     // through the same depth sort — a chest one tile behind the merchant must
     // draw behind them, which a separate later pass would get wrong.
@@ -470,21 +531,21 @@ export class RenderSystem {
     for (const d of RenderSystem.collectDecorations(chunkedMap, camera, decoTypes)) drawables.push(d);
     drawables.sort(compareDrawables);
 
-    const actors = RenderSystem.collectActors(player, remotePlayers, creatures);
     for (const d of drawables) {
       if (d.kind === "wall") {
         drawWall(this.ctx, { s: d.s, def: d.def, visual: d.visual, H: d.H, alpha: 1, halfW, halfH, tileCache: this._tileCache });
-      } else if (d.kind === "player") this.drawCreature(d.ref, "player", 1);
-      else if (d.kind === "remote") this.drawCreature(d.ref, "player", 0.85, d.userId);
+      } else if (d.kind === "player") this.drawCreature(d.ref, d.ref.imageKey || "player", 1, null, "self");
+      else if (d.kind === "remote") this.drawCreature(d.ref, d.ref.imageKey || "player", 0.85, d.userId, RenderSystem.animKeyFor(d));
       else if (d.kind === "grounditem") this.drawGroundItem(d.ref, inventory, player);
       else if (d.kind === "merchant") this.drawMerchant(d.ref, player);
       else if (d.kind === "gem_merchant") this.drawGemMerchant(d.ref, player);
       else if (d.kind === "skillMerchant") this.drawSkillMerchant(d.ref, player);
+      else if (d.kind === "questGiver") this.drawQuestGiver(d.ref, player);
       else if (d.kind === "bank") this.drawBank(d.ref, player);
       else if (d.kind === "worldchest") this.drawWorldChest(d.ref, player);
       else if (d.kind === "pointart") this.drawPointBody(d.ref.def, d.ref.x, d.ref.y, d.ref.treatment);
       else if (d.kind === "decoration") this.drawEntity(d.ref);
-      else this.drawEntity(d.ref);
+      else this.drawEntity(d.ref, RenderSystem.animKeyFor(d));
     }
 
     // SOMET-584 review round 2 (T9 finding A). The pre-sort drawLandmarks call
@@ -494,7 +555,10 @@ export class RenderSystem {
     // tall body (a portal arch) permanently hides its own destination pill
     // behind itself. Same `phase: this.nowMs` as the first call -- the pulse
     // must read as one marker, not two out of sync.
-    drawLandmarks(this.ctx, { landmarks, phase: this.nowMs, halfW, halfH, skipBody: landmarkPlan.skipBody, overlayOnly: true });
+    drawLandmarks(this.ctx, {
+      landmarks, phase: this.nowMs, halfW, halfH, skipBody: landmarkPlan.skipBody,
+      beamOverlay: landmarkPlan.beamOverlay, overlayOnly: true,
+    });
 
     // SOMET-493. Resolved against the SAME `drawables` list that was just
     // painted, in the same frame, so the card can never name something that is
@@ -526,15 +590,21 @@ export class RenderSystem {
     this.drawBlasts(blasts);
     this.drawVfx(vfx, { player, remotePlayers, creatures, localUserId });
     this.drawSkillVisuals(skillVisuals);
+    if (floatingTexts && floatingTexts.length > 0) {
+      this.drawFloatingTexts(floatingTexts);
+    }
 
     camera.reset(this.ctx);
     this._skillSlotHitAreas = [];
+    const trackedQuest = (quests || []).find(q => q.key === trackedQuestKey) || (quests || []).find(q => q.status === "active");
+    const hasTrackedQuest = !!(trackedQuest && !panelOpen);
     this.renderHud({
-      player, remotePlayers, localUserId, mana, maxMana, showMana, stamina, maxStamina,
+      player, mana, maxMana, showMana, stamina, maxStamina,
       weaponName, ammo, noAmmoFlash, effects, gold, progression,
       skills: hotbarSkills, hitAreas: this._skillSlotHitAreas, hoverSlot: skillHoverSlot, drag: skillDrag,
       activeForm, flashSlot, skillCooldowns, activeBuffs,
       playerStats: playerStats || progression, equippedWeapon, keybinds,
+      hasTrackedQuest,
     });
     if (toast) this.renderToast(toast);
 
@@ -638,6 +708,24 @@ export class RenderSystem {
       }, this._passiveHitAreas);
     }
 
+    // Quest Log overlay (hotkey 'J')
+    this._questHitAreas = [];
+    this._questLayout = null;
+    if (questLogOpen) {
+      this._questLayout = this.renderQuestLog(this.ctx, {
+        quests: quests || [],
+        legacyChoice,
+        activeQuestKey,
+        questScroll,
+        trackedQuestKey,
+      }, this._questHitAreas);
+    }
+
+    // Quest Tracker HUD Widget & Waypoint Pointer
+    if (hasTrackedQuest) {
+      this._drawQuestTrackerHUD(this.ctx, trackedQuest, player, camera);
+    }
+
     // SOMET-493 — last of all, so the card sits on top of the HUD orbs and the
     // toast rather than being half-covered by them. `_inspectLayout` was
     // computed in the same frame, from the drawables that were actually drawn.
@@ -645,11 +733,13 @@ export class RenderSystem {
 
     // Skill rich tooltip on hover (over hotbar slots or skills panel)
     if (hoveredSkill && cursorX != null && cursorY != null) {
-      this._drawSkillTooltip(hoveredSkill, cursorX, cursorY, playerStats || progression, equippedWeapon, activeForm);
+      this._drawSkillTooltip(hoveredSkill, cursorX, cursorY, playerStats || progression, equippedWeapon, activeForm, {
+        mana, maxMana, maxHp: player && player.maxHp, hp: player && player.hp, stamina, maxStamina
+      });
     }
   }
 
-  _drawSkillTooltip(skill, cursorX, cursorY, playerStats = null, equippedWeapon = null, activeForm = null) {
+  _drawSkillTooltip(skill, cursorX, cursorY, playerStats = null, equippedWeapon = null, activeForm = null, playerPools = null) {
     if (!skill) return;
     const ctx = this.ctx;
     ctx.save();
@@ -714,7 +804,7 @@ export class RenderSystem {
     if (!isFormOk) unmetWarnings.push(`Requires ${reqForm.toUpperCase()} Form`);
 
     const reqBlockH = 34 + (unmetWarnings.length > 0 ? 18 : 0);
-    const cardH = 135 + reqBlockH + descH + (hasReqForm ? 20 : 0);
+    const cardH = 135 + reqBlockH + descH + (hasReqForm ? 20 : 0) + (skill.channeled ? 18 : 0);
 
     // Calculate positioning with screen bounds clamping
     let cardX = cursorX + 16;
@@ -770,9 +860,9 @@ export class RenderSystem {
     ctx.stroke();
 
     // 2. Metrics Grid: Damage, Cost, Cooldown, Range, Element
-    const dmgInfo = resolveSkillDamage(skill);
-    const costText = skill.channeled ? `${(skill.cost || 0) * 4}/s ${(skill.costType || 'mana').toUpperCase()}` : `${skill.cost || 0} ${(skill.costType || 'mana').toUpperCase()}`;
-    const cdText = skill.channeled ? 'Channeled' : (skill.cooldown ? `${skill.cooldown}s` : 'None');
+    const dmgInfo = resolveSkillDamage(skill, playerPools);
+    const costText = skill.channeled ? `${(skill.cost || 0) * 4}/s ${(skill.costType || 'mana').toUpperCase()} (Ramping)` : `${skill.cost || 0} ${(skill.costType || 'mana').toUpperCase()}`;
+    const cdText = skill.channeled ? 'Channeled (Focus x1–x8)' : (skill.cooldown ? `${skill.cooldown}s` : 'None');
     const rangeText = skill.range ? `${skill.range} px` : (skill.type === 'melee' ? 'Melee (80)' : 'Self');
     const elemText = (skill.element || (skill.class === 'Archer' ? 'Physical' : 'Arcane')).toUpperCase();
 
@@ -862,11 +952,18 @@ export class RenderSystem {
     }
 
     // 5. Form Requirement (if Druid form required)
+    let extraY = div3Y + 7 + descLines.length * 15 + 4;
     if (hasReqForm) {
-      const formY = div3Y + 7 + descLines.length * 15 + 4;
       ctx.font = 'bold 10px monospace';
       ctx.fillStyle = isFormOk ? '#34d399' : '#facc15';
-      ctx.fillText(`🔒 Requires: ${reqForm.toUpperCase()} FORM`, cardX + pad, formY);
+      ctx.fillText(`🔒 Requires: ${reqForm.toUpperCase()} FORM`, cardX + pad, extraY);
+      extraY += 16;
+    }
+
+    if (skill.channeled) {
+      ctx.font = 'italic 10px sans-serif';
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillText('⚡ Focus: +15% Dmg/stack (up to +120%), cost ramps over time', cardX + pad, extraY);
     }
 
     ctx.restore();
@@ -889,7 +986,7 @@ export class RenderSystem {
     if (!Number.isFinite(cx) || !Number.isFinite(cy) || !inspect.camera) return;
 
     const point = canvasToCameraPoint(cx, cy, inspect.camera);
-    const hover = pickDrawable(drawables, point);
+    const hover = pickDrawable(drawables, point, inspect.entityDefs);
     this._inspectHoverKey = targetKey(hover);
 
     // Hover wins over a pin: pointing at something new is an unambiguous
@@ -917,7 +1014,7 @@ export class RenderSystem {
     // pointer across the screen attached to nothing.
     let ax = cx, ay = cy;
     if (!hover) {
-      const r = drawableScreenRect(target);
+      const r = drawableScreenRect(target, inspect.entityDefs);
       if (r) {
         const off = canvasToCameraPoint(0, 0, inspect.camera);
         ax = r.x + r.w / 2 - off.x;
@@ -1101,6 +1198,48 @@ export class RenderSystem {
       this.ctx.ellipse(s.x, s.y, rx, rx / 2, 0, mid - half, mid + half);
       this.ctx.closePath();
       this.ctx.fill();
+    }
+    this.ctx.restore();
+  }
+
+  // SOMET-608 (S6). A creature skill's wind-up, filling in over
+  // `telegraphMs` before it lands -- "Browser: telegraph visible before a
+  // slam lands" is this ticket's own acceptance line. Combines two
+  // precedents already in this file rather than inventing a third
+  // projection: the "ring" VFX shape's grow-WITHOUT-fade progress math (it
+  // reads as a shockwave building up, not a detonation dying out -- exactly
+  // the feeling a warning should give) with `_drawWaves`'s FILLED geometry
+  // (a stroked outline alone reads as a boundary marker, not "this ground
+  // is about to hurt"). `ms`/`telegraphMs` travel resolved from the server,
+  // so no synchronised clock is needed to compute progress client-side.
+  _drawTelegraphs(telegraphs) {
+    if (!telegraphs || telegraphs.length === 0) return;
+    this.ctx.save();
+    for (const t of telegraphs) {
+      const s = worldToScreen(t.x, t.y);
+      if (!Number.isFinite(s.x) || !Number.isFinite(s.y)) continue;
+      const rx = blastScreenRadiusX(t.radius);
+      if (!(rx > 0)) continue; // also rejects NaN
+      const progress = Math.max(0, Math.min(1, 1 - t.ms / t.telegraphMs));
+      // Starts at 30% of full size (visible the instant it appears, not a
+      // zero-radius dot) and grows to 100% exactly as the cast lands.
+      const fillRx = rx * (0.3 + 0.7 * progress);
+      // SOMET-610 (S7): the skill's own vfx.telegraph binding tints the
+      // fill -- this geometry (a filled area that GROWS over telegraph_ms)
+      // has no equivalent among the 5 ordinary vfx_effects shapes
+      // (arc/line/ring/burst/bolt are all momentary swing effects), so the
+      // binding customises COLOR only; the fallback red keeps every
+      // existing/un-bound skill looking exactly as it did before this slice.
+      const color = (t.v && this.vfxDefs && this.vfxDefs[t.v] && this.vfxDefs[t.v].color) || "#ff4757";
+      this.ctx.beginPath();
+      this.ctx.ellipse(s.x, s.y, fillRx, fillRx / 2, 0, 0, Math.PI * 2);
+      this.ctx.fillStyle = color;
+      this.ctx.globalAlpha = 0.18 + 0.32 * progress;
+      this.ctx.fill();
+      this.ctx.strokeStyle = color;
+      this.ctx.lineWidth = 2;
+      this.ctx.globalAlpha = 0.5 + 0.4 * progress;
+      this.ctx.stroke();
     }
     this.ctx.restore();
   }
@@ -2117,6 +2256,61 @@ export class RenderSystem {
             }
           }
           this.ctx.restore();
+        } else if (v.kind === 'mana_surge') {
+          // Arcane tidal shockwave & ascending radiant mana motes
+          this.ctx.save();
+          this.ctx.globalAlpha = alpha;
+          const s = worldToScreen(v.x, v.y);
+          const maxR = blastScreenRadiusX(v.radius || 110);
+          const rx = maxR * Math.sqrt(progress);
+          const ry = rx / 2;
+
+          if (rx > 0) {
+            // Ground arcane aura glow
+            const groundGrad = this.ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, rx);
+            groundGrad.addColorStop(0, 'rgba(56, 189, 248, 0.35)');
+            groundGrad.addColorStop(0.6, 'rgba(14, 165, 233, 0.15)');
+            groundGrad.addColorStop(1, 'rgba(2, 132, 199, 0)');
+            this.ctx.fillStyle = groundGrad;
+            this.ctx.beginPath();
+            this.ctx.ellipse(s.x, s.y, rx, ry, 0, 0, Math.PI * 2);
+            this.ctx.fill();
+
+            // Outer sharp expanding mana crest ring
+            this.ctx.strokeStyle = '#38bdf8';
+            this.ctx.lineWidth = 3.5 * (1 - progress * 0.5);
+            this.ctx.beginPath();
+            this.ctx.ellipse(s.x, s.y, rx, ry, 0, 0, Math.PI * 2);
+            this.ctx.stroke();
+
+            // Inner harmonic ring
+            if (progress > 0.12) {
+              const innerRx = rx * 0.62;
+              this.ctx.strokeStyle = '#bae6fd';
+              this.ctx.lineWidth = 2 * (1 - progress);
+              this.ctx.beginPath();
+              this.ctx.ellipse(s.x, s.y, innerRx, innerRx / 2, 0, 0, Math.PI * 2);
+              this.ctx.stroke();
+            }
+
+            // Ascending mana motes floating upwards around the player
+            const sparkCount = 10;
+            for (let i = 0; i < sparkCount; i++) {
+              const angle = (Math.PI * 2 * i) / sparkCount + (i * 1.3);
+              const dist = rx * (0.3 + (i % 4) * 0.18);
+              const sparkX = s.x + Math.cos(angle) * dist;
+              const sparkGroundY = s.y + Math.sin(angle) * (dist / 2);
+              const rise = progress * (45 + (i % 3) * 20);
+              const sparkY = sparkGroundY - rise;
+              const sparkSize = Math.max(1.5, 3.5 * (1 - progress));
+
+              this.ctx.fillStyle = i % 2 === 0 ? '#38bdf8' : '#ffffff';
+              this.ctx.beginPath();
+              this.ctx.arc(sparkX, sparkY, sparkSize, 0, Math.PI * 2);
+              this.ctx.fill();
+            }
+          }
+          this.ctx.restore();
         } else if (v.kind === 'holy_pillar') {
           // Ascending vertical pillar of golden light
           this.ctx.save();
@@ -2184,7 +2378,6 @@ export class RenderSystem {
           if (v.slashStyle === 'crush_hammer') {
             // Heavy downward hammer power slam & forward ground crack
             const shockR = Math.min(24, Math.max(6, (rx * 0.3) * (0.4 + 0.6 * progress)));
-            const color = v.color || '#e2e8f0';
 
             // 1. Descending overhead power slam line (crashing down into ground)
             const dropDist = 32 * (1 - progress);
@@ -2395,6 +2588,68 @@ export class RenderSystem {
     }
   }
 
+  // Floating Combat & Resource Text (Damage numbers, Mana restore, Heals, Stamina)
+  // Drawn inside the camera transform right above world entities.
+  drawFloatingTexts(floatingTexts) {
+    if (!floatingTexts || floatingTexts.length === 0) return;
+    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
+    this.ctx.save();
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+
+    for (const ft of floatingTexts) {
+      if (!ft) continue;
+      const createdAt = ft.createdAt || now;
+      const elapsed = (now - createdAt) / 1000;
+      const duration = ft.duration || 1.1;
+      if (elapsed < 0 || elapsed > duration) continue;
+
+      const progress = Math.min(1, Math.max(0, elapsed / duration));
+      // Fade in quickly during first 15%, fade out smoothly during last 35%
+      let alpha = 1;
+      if (progress < 0.15) {
+        alpha = progress / 0.15;
+      } else if (progress > 0.65) {
+        alpha = Math.max(0, 1 - (progress - 0.65) / 0.35);
+      }
+
+      // Smooth rise upward: starts quick, rises upwards by ~38px
+      const riseY = Math.pow(progress, 0.75) * 38;
+
+      // Project world coordinate to screen under camera
+      const s = worldToScreen(ft.x, ft.y);
+      const drawX = s.x;
+      const drawY = s.y - riseY;
+
+      // Slight scale pop at spawn (scale 0.8 -> 1.12 -> 1.0)
+      const scale = progress < 0.15
+        ? (0.8 + (progress / 0.15) * 0.32)
+        : (1.12 - ((progress - 0.15) / 0.85) * 0.12);
+
+      this.ctx.save();
+      this.ctx.translate(drawX, drawY);
+      this.ctx.scale(scale, scale);
+      this.ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+
+      const fontSize = ft.size || 14;
+      this.ctx.font = `bold ${fontSize}px sans-serif`;
+
+      // Thick dark outline for high contrast against any terrain/spells
+      this.ctx.strokeStyle = 'rgba(0, 0, 0, 0.9)';
+      this.ctx.lineWidth = 3.5;
+      this.ctx.lineJoin = 'round';
+      this.ctx.strokeText(ft.text, 0, 0);
+
+      // Main vibrant fill text
+      this.ctx.fillStyle = ft.color || '#ffffff';
+      this.ctx.fillText(ft.text, 0, 0);
+
+      this.ctx.restore();
+    }
+
+    this.ctx.restore();
+  }
+
 
   // A small transient toast for server-rejected actions (e.g. "unequip it
   // first") — the server previously only reached console.error, so a
@@ -2522,7 +2777,10 @@ export class RenderSystem {
     this.ctx.save();
     if (treatment.ring) {
       this.ctx.globalAlpha = 0.9;
-      this.ctx.strokeStyle = "#7dd3fc";
+      // SOMET-588: was its own copy of the waypoint diamond's colour --
+      // shares landmarkColor so an unlit waypoint's ring and its diamond
+      // can never drift apart when the palette changes.
+      this.ctx.strokeStyle = landmarkColor("waypoint");
       this.ctx.lineWidth = 2;
       this.ctx.beginPath();
       this.ctx.ellipse(s.x, s.y, 28, 14, 0, 0, Math.PI * 2);
@@ -2530,16 +2788,15 @@ export class RenderSystem {
     }
     this.ctx.globalAlpha = treatment.alpha;
     const ref = pointBodyRef(def, x, y, { stateKey: treatment.stateKey });
-    this.drawEntity(ref);
+    // SOMET-584 review round 2 (T9 finding B) wanted the drawn body's on-screen
+    // height so a caption lifts above it rather than landing inside it.
+    // SOMET-588: drawEntity now returns the REAL fit-scaled height (not the
+    // catalog box) -- a width-constrained body (e.g. a wide arch capped by
+    // boxW) fits shorter than its box and used to over-lift the caption into
+    // the empty space above the art.
+    const drawnHeight = this.drawEntity(ref);
     this.ctx.restore();
-    // SOMET-584 review round 2 (T9 finding B): callers need the drawn body's
-    // on-screen height to lift a caption above it, or the caption lands
-    // inside the body (a "Merchant" label in the middle of a 100px arch).
-    // drawEntity fits the sprite INSIDE this box preserving aspect ratio, so
-    // the box height is a safe upper bound on the actual drawn pixel height
-    // -- never less than what was drawn -- without reaching into drawEntity's
-    // private fitSpriteRect math.
-    return ref.displayHeight || ref.height || 40;
+    return drawnHeight;
   }
 
   // A resolvable def (pointArtDef already checked render_mode/image/sprite
@@ -2749,6 +3006,84 @@ export class RenderSystem {
     this.ctx.restore();
   }
 
+  // Dedicated Quest Giver / Elder Eldrin NPC in village
+  drawQuestGiver(qg, player = null) {
+    const s = worldToScreen(qg.x, qg.y);
+    const dx = s.x, dy = s.y;
+    const r = 12;
+    this.ctx.save();
+
+    // Radiant amber/gold pulsing aura beneath NPC
+    const pulse = Math.sin(this.nowMs * 0.004) * 0.2 + 0.8;
+    this.ctx.beginPath();
+    this.ctx.ellipse(dx, dy + 2, r * 1.5, r * 0.75, 0, 0, Math.PI * 2);
+    this.ctx.fillStyle = `rgba(234, 179, 8, ${0.25 * pulse})`;
+    this.ctx.fill();
+
+    const drewArt = this._drawPointArtAt(qg.art, qg.x, qg.y, pointStateTreatment("quest_giver", qg));
+    if (!drewArt) {
+      // Golden diamond body
+      this.ctx.fillStyle = "#eab308";
+      this.ctx.strokeStyle = "rgba(0,0,0,0.7)";
+      this.ctx.lineWidth = 2;
+      this.ctx.beginPath();
+      this.ctx.moveTo(dx, dy - r);
+      this.ctx.lineTo(dx + r, dy);
+      this.ctx.lineTo(dx, dy + r);
+      this.ctx.lineTo(dx - r, dy);
+      this.ctx.closePath();
+      this.ctx.fill();
+      this.ctx.stroke();
+
+      // Inner jewel facet
+      this.ctx.fillStyle = "#fef08a";
+      this.ctx.beginPath();
+      this.ctx.moveTo(dx, dy - r * 0.5);
+      this.ctx.lineTo(dx + r * 0.5, dy);
+      this.ctx.lineTo(dx, dy + r * 0.5);
+      this.ctx.lineTo(dx - r * 0.5, dy);
+      this.ctx.closePath();
+      this.ctx.fill();
+    }
+
+    const lift = drewArt ? drewArt : r;
+
+    // Floating animated exclamation mark '!'
+    const bob = Math.sin(this.nowMs * 0.005) * 4;
+    const markY = dy - lift - 16 + bob;
+    this.ctx.font = "bold 16px sans-serif";
+    this.ctx.textAlign = "center";
+    this.ctx.textBaseline = "middle";
+    this.ctx.fillStyle = "#fef08a";
+    this.ctx.strokeStyle = "rgba(0,0,0,0.85)";
+    this.ctx.lineWidth = 3;
+    this.ctx.strokeText("!", dx, markY);
+    this.ctx.fillText("!", dx, markY);
+
+    // Label: "Elder Eldrin" or "Quest Giver"
+    this.ctx.font = "bold 12px sans-serif";
+    this.ctx.textBaseline = "alphabetic";
+    this.ctx.fillStyle = "#fef08a";
+    this.ctx.fillText(qg.name || "Elder Eldrin", dx, dy - lift - 2);
+
+    // Prompt [e] Quests when close
+    if (player) {
+      const pcx = player.x + (player.width || 0) / 2;
+      const pcy = player.y + (player.height || 0) / 2;
+      const d = Math.hypot(qg.x - pcx, qg.y - pcy);
+      if (d <= WORLD_CHEST_PROMPT_R) {
+        this.ctx.font = "bold 11px sans-serif";
+        this.ctx.fillStyle = "#facc15";
+        this.ctx.strokeStyle = "rgba(0,0,0,0.85)";
+        this.ctx.lineWidth = 2;
+        this.ctx.strokeText("[e] Quests", dx, dy + r + 14);
+        this.ctx.fillText("[e] Quests", dx, dy + r + 14);
+      }
+    }
+
+    this.ctx.restore();
+  }
+
   // SOMET-310 — the account chest's world marker, drawn beside the merchant it
   // shares a village with. Same diamond footprint and label placement as
   // drawMerchant above so the two read as a matched pair of village services;
@@ -2881,7 +3216,7 @@ export class RenderSystem {
   }
 
   // Draw doorway map transitions with destination names so players see where edges lead
-  drawDoorways(doorways, chunkedMap, player) {
+  drawDoorways(doorways, chunkedMap, _player) {
     if (!Array.isArray(doorways) || doorways.length === 0 || !chunkedMap) return;
     const W = chunkedMap.width, H = chunkedMap.height;
     if (!W || !H) return;
@@ -2990,6 +3325,45 @@ export class RenderSystem {
     this.ctx.restore();
   }
 
+  // SOMET-607 (S5). A creature's active auras (names in e.auras, resolved
+  // against the catalog auraDefs[name] carries) drawn on the ground plane,
+  // same 2:1 ellipse convention as every other ground ring here -- and
+  // BENEATH the actor, same ordering _drawEffectRings already uses, so the
+  // creature stands on top of its own aura rather than being hidden by it.
+  //
+  // shape='particles' falls back to the same ring stroke as 'ring': a true
+  // particle field is a later pass; the ring already tells the player
+  // "something is emanating from here", which is the acceptance bar for S5.
+  _drawAuraEffects(cx, feetY, auras) {
+    if (!this.auraDefs || !Array.isArray(auras) || auras.length === 0) return;
+    const now = this.nowMs || Date.now();
+    this.ctx.save();
+    for (const name of auras) {
+      const def = this.auraDefs[name];
+      if (!def) continue;
+      const rx = blastScreenRadiusX(def.radius);
+      if (!(rx > 0)) continue;
+      const pulseMs = Number(def.pulse_ms) || 0;
+      const pulse = pulseMs > 0 ? 1 + 0.08 * Math.sin((now * 2 * Math.PI) / pulseMs) : 1;
+      const r = rx * pulse;
+      this.ctx.strokeStyle = def.color || '#d4a017';
+      this.ctx.fillStyle = def.color || '#d4a017';
+      this.ctx.lineWidth = 2;
+      this.ctx.beginPath();
+      this.ctx.ellipse(cx, feetY, r, r / 2, 0, 0, Math.PI * 2);
+      if (def.shape === 'disc') {
+        this.ctx.globalAlpha = 0.25;
+        this.ctx.fill();
+        this.ctx.globalAlpha = 0.9;
+        this.ctx.stroke();
+      } else {
+        this.ctx.globalAlpha = 0.85;
+        this.ctx.stroke();
+      }
+    }
+    this.ctx.restore();
+  }
+
   // Colour pips above an affected actor, alongside the HP bar. The feet rings
   // can be occluded by a sprite standing in front; the pips sit above the head
   // where the HP bar already reads clearly, so an effect is never completely
@@ -3027,7 +3401,8 @@ export class RenderSystem {
   }
 
   // Draw a sprite so its feet sit on the tile center for its world (x,y).
-  drawCreature(obj, imageKey, alpha = 1, tag = null) {
+  // `animKey` (SOMET-656): the actor's EntityAnimState key ('self', 'p:<id>').
+  drawCreature(obj, imageKey, alpha = 1, tag = null, animKey = null) {
     const w = obj.width || 64;
     const h = obj.height || 64;
     // Anchor: project the actor's world box CENTER — the exact point movement
@@ -3050,9 +3425,17 @@ export class RenderSystem {
     // rather than being obscured by it. `drawY + h` is the feet line this same
     // method already computed — see _drawEffectRings on why not s.y.
     this._drawEffectRings(s.x, drawY + h, w, obj.effects);
+    this._drawAuraEffects(s.x, drawY + h, obj.auras);
     const img = this.imageManager.get(imageKey);
+    const resolved = RenderSystem.resolveSprite(
+      obj, this.imageManager, obj.renderMode || 'static', this.nowMs,
+      this._playbackAnim(), animKey,
+    );
     this.ctx.globalAlpha = alpha;
-    if (img) {
+    if (resolved) {
+      const r = fitSpriteRect(resolved.crop[2], resolved.crop[3], drawX, drawY, w, h);
+      this._drawSpriteFrame(resolved, r);
+    } else if (img) {
       // SOMET-569: fit, do not stretch. See fitSpriteRect.
       const r = fitSpriteRect(img.width, img.height, drawX, drawY, w, h);
       this.ctx.drawImage(img, r.dx, r.dy, r.dw, r.dh);
@@ -3076,14 +3459,54 @@ export class RenderSystem {
     }
   }
 
+  // Draw a resolved atlas frame into dest rect `r`. SOMET-659: a `flipX`
+  // frame (a western box-sheet row drawn as its mirrored eastern row) is
+  // mirrored about the rect's horizontal centre, so it covers exactly the same
+  // screen rect -- the feet anchor does not move. The mirror COMPOSES with
+  // the camera transform (translate/scale inside save/restore); setTransform
+  // would replace it. Only this drawImage is mirrored: shadows, rings, bars
+  // and labels are drawn by the callers outside it.
+  _drawSpriteFrame(sprite, r) {
+    const ctx = this.ctx;
+    const [sx, sy, sw, sh] = sprite.crop;
+    if (!sprite.flipX) {
+      ctx.drawImage(sprite.img, sx, sy, sw, sh, r.dx, r.dy, r.dw, r.dh);
+      return;
+    }
+    const cx = r.dx + r.dw / 2;
+    ctx.save();
+    ctx.translate(cx, 0);
+    ctx.scale(-1, 1);
+    // r.dx - cx (== -r.dw/2), not a literal: a non-finite rect stays
+    // non-finite, so Canvas drops the draw exactly as the unflipped path does
+    // instead of drawing at the origin after ignoring translate(NaN).
+    ctx.drawImage(sprite.img, sx, sy, sw, sh, r.dx - cx, r.dy, r.dw, r.dh);
+    ctx.restore();
+  }
+
   // Resolve the atlas image + source-crop rect for an entity in a sprite mode,
   // or null to fall through. Requires a loaded atlas and an attached manifest.
   // Animated mode cycles the facing's frames at timeMs; static shows one frame.
-  static resolveSprite(entity, imageManager, mode, timeMs = 0) {
+  //
+  // SOMET-656: with `anim` (an EntityAnimState) and `animKey`, a GPU-box sheet
+  // (manifest with `rows`) plays the actor's current action -- idle, walk,
+  // attack, cast, damage -- in either sprite mode. Legacy atlases ignore both.
+  // SOMET-659: the box result carries `flipX` (draw mirrored; see
+  // _drawSpriteFrame); legacy results never set it.
+  static resolveSprite(entity, imageManager, mode, timeMs = 0, anim = null, animKey = null) {
     if (mode === "rect" || !entity.sprite || !imageManager) return null;
     const atlas = imageManager.get(entity.sprite.atlas_key);
     const manifest = entity.sprite.manifest;
     if (!atlas || !manifest) return null;
+    if (anim && animKey && isBoxManifest(manifest) && !stateFrameKey(manifest, entity.stateKey)) {
+      const key = RenderSystem._actionKey(entity, manifest, timeMs, anim, animKey);
+      const rect = frameRect(manifest, key || staticFrameKey(entity.sprite, manifest));
+      if (!rect) return null;
+      // frameKeyFor wrote the flip onto the anim record; a null key means
+      // the static frame, which is never mirrored.
+      const st = key ? anim.stateFor(animKey) : null;
+      return { img: atlas, crop: rect, flipX: Boolean(st && st.flipX) };
+    }
     // Animated -> cycle the facing's frames; entity atlases generated through
     // the object/tile pipeline are FLAT (keys "0","1",… with no direction), so
     // fall back to the flat cycle before giving up on a single static frame.
@@ -3101,32 +3524,23 @@ export class RenderSystem {
     return rect ? { img: atlas, crop: rect } : null;
   }
 
+  // The box-sheet frame key for an actor's current action, or null.
+  static _actionKey(entity, manifest, now, anim, animKey) {
+    anim.observePosition(animKey, entity.x, entity.y, now, entity.tx, entity.ty);
+    const st = anim.stateFor(animKey);
+    if (!st) return null; // non-finite position: never tracked
+    const t = actionTimings(manifest, DEFAULT_FPS);
+    st.attackDurMs = t.attackDurMs;
+    st.castDurMs = t.castDurMs;
+    st.damageMs = t.damageMs;
+    const action = pickAction(st, now);
+    return frameKeyFor(manifest, boxDir(entity.facing), action, st.actionStartedAt, now, DEFAULT_FPS, st);
+  }
+
   _drawWorldBoss(e, drawX, drawY, w, h, s) {
     const ctx = this.ctx;
     const now = this.nowMs || Date.now();
-    const elem = e.bossElement || (e.type && e.type.includes('Magma') ? 'fire' : (e.type && e.type.includes('Frost') ? 'ice' : (e.type && e.type.includes('Void') ? 'arcane' : 'lightning')));
-
-    let baseColor = '#ff4757';
-    let glowColor = '#ffa502';
-    let darkColor = '#2f3542';
-    let eyeColor = '#ffeaa7';
-
-    if (elem === 'ice') {
-      baseColor = '#70a1ff';
-      glowColor = '#e0f2fe';
-      darkColor = '#1e293b';
-      eyeColor = '#67e8f9';
-    } else if (elem === 'arcane' || elem === 'void') {
-      baseColor = '#a55eea';
-      glowColor = '#f3e8ff';
-      darkColor = '#180a24';
-      eyeColor = '#f472b6';
-    } else if (elem === 'lightning') {
-      baseColor = '#ffd166';
-      glowColor = '#ffffff';
-      darkColor = '#261e0b';
-      eyeColor = '#67e8f9';
-    }
+    const { baseColor, glowColor, darkColor, eyeColor } = RenderSystem.bossPalette(e.element);
 
     ctx.save();
 
@@ -3217,67 +3631,180 @@ export class RenderSystem {
     ctx.fill();
 
     ctx.restore();
-
-    // 7. Boss Skull Nameplate Tag
-    const nameY = drawY - 24;
-    ctx.save();
-    ctx.font = 'bold 14px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillStyle = '#ffffff';
-    ctx.shadowColor = baseColor;
-    ctx.shadowBlur = 10;
-    ctx.fillText(`☠️ [WORLD BOSS] ${e.name || 'World Boss'}`, cx, nameY);
-    ctx.restore();
-
-    // 8. Always draw HP Bar for World Boss
-    this._drawHpBar(drawX, drawY - 6, w, e.hp != null ? e.hp : e.maxHp, e.maxHp || 10000);
   }
 
-  drawEntity(e) {
-    const isBoss = Boolean(e.isWorldBoss || (e.name && (e.name.includes('Colossus') || e.name.includes('Leviathan') || e.name.includes('Voidreaver') || e.name.includes('Titan'))));
-    const w = isBoss ? (e.width || 96) : (e.displayWidth || e.width || 40);
-    const h = isBoss ? (e.height || 96) : (e.displayHeight || e.height || 40);
+  // SOMET-603: nameplate + always-on HP bar, drawn for EVERY boss whether its
+  // body came from approved art or from the procedural fallback.
+  _drawBossPlate(e, drawX, drawY, w, s) {
+    const ctx = this.ctx;
+    const { baseColor } = RenderSystem.bossPalette(e.element);
+    // SOMET-625 (S12): a miniboss gets its own tag -- it is drawn through the
+    // same procedural-body/nameplate/HP-bar path every bossTier uses (that
+    // part already made it visually distinct from its own base creature),
+    // but a generic "[BOSS]" made it indistinguishable from a dungeon boss.
+    const tag = e.bossTier === "world" ? "[WORLD BOSS]" : e.bossTier === "miniboss" ? "[MINIBOSS]" : "[BOSS]";
+    ctx.save();
+    ctx.font = "bold 14px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#ffffff";
+    ctx.shadowColor = baseColor;
+    ctx.shadowBlur = 10;
+    ctx.fillText(`☠️ ${tag} ${e.name || e.type || "Boss"}`, s.x, drawY - 24);
+    ctx.restore();
+    const maxHp = e.maxHp || 1;
+    this._drawHpBar(drawX, drawY - 6, w, e.hp != null ? e.hp : maxHp, maxHp);
+  }
+
+  // The sprite-or-image half of drawEntity, shared by bosses and everything
+  // else. Returns the actual fit-scaled on-screen height when it drew (SOMET-588:
+  // the box passed in is an upper bound, not what a width-constrained sprite
+  // actually fills -- see fitSpriteRect), or `false` when the caller must supply
+  // its own fallback (a rectangle, or a boss's procedural body).
+  _drawEntityArt(e, drawX, drawY, w, h, animKey = null) {
+    const mode = RenderSystem.resolveRenderMode(e, this.renderModeOverride);
+    const sprite = RenderSystem.resolveSprite(e, this.imageManager, mode, this.nowMs, this._playbackAnim(), animKey);
+    if (sprite) {
+      // SOMET-569: the FRAME's dimensions decide the fit, not the atlas's.
+      const r = fitSpriteRect(sprite.crop[2], sprite.crop[3], drawX, drawY, w, h);
+      this._drawSpriteFrame(sprite, r);
+      return r.dh;
+    }
+    const img = mode !== "rect" && e.image && this.imageManager
+      ? this.imageManager.get(e.image)
+      : null;
+    if (!img) return false;
+    // SOMET-569: fit, do not stretch.
+    const r = fitSpriteRect(img.width, img.height, drawX, drawY, w, h);
+    if (e.idle_fx === "sway") {
+      // Props v2: a horizontal shear about the image's bottom-centre, phased
+      // per world position. ctx.transform MULTIPLIES into the camera
+      // transform already on the context; setTransform would replace it.
+      const bx = r.dx + r.dw / 2;
+      const by = r.dy + r.dh;
+      const k = swayShear(this.nowMs, swayPhaseSeed(e.x, e.y));
+      this.ctx.save();
+      this.ctx.translate(bx, by);
+      this.ctx.transform(1, 0, k, 1, 0, 0);
+      this.ctx.translate(-bx, -by);
+      this.ctx.drawImage(img, r.dx, r.dy, r.dw, r.dh);
+      this.ctx.restore();
+      return r.dh;
+    }
+    this.ctx.drawImage(img, r.dx, r.dy, r.dw, r.dh);
+    if (e.idle_fx === "shine") this._drawShine(img, r, e);
+    return r.dh;
+  }
+
+  // Props v2 'shine': a soft diagonal glint band sweeping across the sprite's
+  // opaque pixels. Draws NOTHING outside the sweep window (most frames). In
+  // it: on a reused scratch canvas, the cached sprite mask, then the band
+  // filled with 'source-in' (so it exists only over opaque pixels), then that
+  // scratch added onto the scene with 'lighter' at SHINE_ALPHA. Drawn in the
+  // same world-space rect as the image, so it composes with the camera
+  // transform already on the context (no setTransform); save/restore (in a
+  // finally) puts globalCompositeOperation and globalAlpha back. Mask and
+  // scratch draw with smoothing off, like the sprite itself (constructor), so
+  // the glint stays inside the on-screen silhouette; the glint pass inherits
+  // the main ctx's smoothing, the same the sprite drew with.
+  _drawShine(img, r, e) {
+    const band = shineBand(this.nowMs, swayPhaseSeed(e.x, e.y));
+    if (!band) return;
+    const w = Math.max(1, Math.ceil(r.dw));
+    const h = Math.max(1, Math.ceil(r.dh));
+    if (!Number.isFinite(w + h) || w > 2048 || h > 2048) return;
+    const mask = this._shineMask(img, w, h);
+    const scratch = this._shineScratchFor(w, h);
+    const sctx = scratch.getContext("2d");
+    sctx.globalCompositeOperation = "source-over";
+    sctx.imageSmoothingEnabled = false;
+    sctx.clearRect(0, 0, scratch.width, scratch.height);
+    sctx.drawImage(mask, 0, 0);
+    // The band runs along x+y (a 45-degree diagonal): shineGeometry.
+    const { m, half } = shineGeometry(band.t, w, h);
+    const grad = sctx.createLinearGradient(m - half, m - half, m + half, m + half);
+    grad.addColorStop(0, "rgba(255,255,255,0)");
+    grad.addColorStop(0.5, "rgba(255,255,240,0.95)");
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+    sctx.globalCompositeOperation = "source-in";
+    sctx.fillStyle = grad;
+    sctx.fillRect(0, 0, w, h);
+    sctx.globalCompositeOperation = "source-over";
+
+    const ctx = this.ctx;
+    ctx.save();
+    try {
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = ctx.globalAlpha * SHINE_ALPHA;
+      ctx.drawImage(scratch, 0, 0, w, h, r.dx, r.dy, r.dw, r.dh);
+    } finally {
+      ctx.restore();
+    }
+  }
+
+  // The sprite drawn once at w x h: what the band is masked against.
+  _shineMask(img, w, h) {
+    let bySize = this._shineMasks.get(img);
+    if (!bySize) { bySize = new Map(); this._shineMasks.set(img, bySize); }
+    const key = `${w}x${h}`;
+    let mask = bySize.get(key);
+    if (!mask) {
+      mask = this.createCanvas(w, h);
+      const mctx = mask.getContext("2d");
+      mctx.imageSmoothingEnabled = false;
+      mctx.drawImage(img, 0, 0, w, h);
+      bySize.set(key, mask);
+    }
+    return mask;
+  }
+
+  // One compositing scratch per 64-px size bucket, reused by every shining prop.
+  _shineScratchFor(w, h) {
+    const bw = Math.ceil(w / 64) * 64;
+    const bh = Math.ceil(h / 64) * 64;
+    const key = `${bw}x${bh}`;
+    let scratch = this._shineScratch.get(key);
+    if (!scratch) {
+      scratch = this.createCanvas(bw, bh);
+      this._shineScratch.set(key, scratch);
+    }
+    return scratch;
+  }
+
+  drawEntity(e, animKey = null) {
+    // SOMET-603: `bossTier` is the ONE boss flag; no name matching.
+    const isBoss = Boolean(e.bossTier);
+    const fallback = isBoss ? 96 : 40;
+    const dim = (...vals) => {
+      for (const v of vals) if (Number.isFinite(v) && v > 0) return v;
+      return fallback;
+    };
+    // Display size first (approved art), then the server box, then default.
+    const w = dim(e.displayWidth, e.width);
+    const h = dim(e.displayHeight, e.height);
     const s = worldToScreen(e.x + (e.width || w) / 2, e.y + (e.height || h) / 2);
     const drawX = s.x - w / 2;
     const drawY = s.y - h;
 
+    // Status rings (creatures render through this path in renderChunked).
+    this._drawEffectRings(s.x, drawY + h, w, e.effects);
+    this._drawAuraEffects(s.x, drawY + h, e.auras);
+
     if (isBoss) {
-      this._drawWorldBoss(e, drawX, drawY, w, h, s);
-      return;
+      const artH = this._drawEntityArt(e, drawX, drawY, w, h, animKey);
+      if (!artH) this._drawWorldBoss(e, drawX, drawY, w, h, s);
+      this._drawBossPlate(e, drawX, drawY, w, s);
+      this._drawEffectPips(drawX, drawY, e.effects);
+      return artH || h;
     }
 
-    // Creatures render through this path in renderChunked (buildDrawables'
-    // "entity" kind), so their status rings belong here too. Map decorations
-    // never carry `effects`, so this is a no-op for them.
-    this._drawEffectRings(s.x, drawY + h, w, e.effects);
-
-    const mode = RenderSystem.resolveRenderMode(e, this.renderModeOverride);
-    // Preferred sprite path: crop a frame out of the generated atlas.
-    const sprite = RenderSystem.resolveSprite(e, this.imageManager, mode, this.nowMs);
-    if (sprite) {
-      const [sx, sy, sw, sh] = sprite.crop;
-      // SOMET-569: the FRAME's dimensions decide the fit, not the atlas's. A
-      // sheet is a grid of cells and each cell is as aspect-sensitive as a
-      // standalone image; using the atlas size here would fit against the whole
-      // sheet and squash every frame in it.
-      const r = fitSpriteRect(sw, sh, drawX, drawY, w, h);
-      this.ctx.drawImage(sprite.img, sx, sy, sw, sh, r.dx, r.dy, r.dw, r.dh);
-    } else {
-      // Legacy single-image fallback (whole image) still honored in sprite modes;
-      // then degrade to a rectangle so a missing asset never leaves a hole.
-      const img = mode !== "rect" && e.image && this.imageManager
-        ? this.imageManager.get(e.image)
-        : null;
-      if (img) {
-        // SOMET-569: fit, do not stretch. This is the path the four
-        // non-square decorations take (pine_tree, dead_tree, Tree, rose_bush),
-        // which is why they had been rendering squashed to 0.61-0.67x.
-        const r = fitSpriteRect(img.width, img.height, drawX, drawY, w, h);
-        this.ctx.drawImage(img, r.dx, r.dy, r.dw, r.dh);
-      } else {
-        this.ctx.fillStyle = e.color || "#c0392b";
-        this.ctx.fillRect(drawX, drawY, w, h);
-      }
+    // SOMET-588: the caller (drawPointBody, for a caption's lift) needs the
+    // REAL drawn height, not this box -- a width-constrained sprite fits
+    // shorter than `h` and leaves empty space above it inside the box.
+    const artH = this._drawEntityArt(e, drawX, drawY, w, h, animKey);
+    if (!artH) {
+      // Degrade to a rectangle so a missing asset never leaves a hole.
+      this.ctx.fillStyle = e.color || "#c0392b";
+      this.ctx.fillRect(drawX, drawY, w, h);
     }
 
     // HP bar for damaged actors. Map decorations never carry hp/maxHp, so
@@ -3311,6 +3838,7 @@ export class RenderSystem {
       }
     }
     this._drawEffectPips(drawX, drawY, e.effects);
+    return artH || h;
   }
 
   _drawPoEOrb(cx, cy, radius, current, max, label, colorType) {
@@ -4049,12 +4577,162 @@ export class RenderSystem {
     return layout;
   }
 
-  _drawActiveBuffs(activeBuffs) {
+  renderQuestLog(ctx, state, hitAreas) {
+    const layout = layoutQuestLog(state);
+    if (layout && layout.hitAreas && Array.isArray(hitAreas)) {
+      for (const a of layout.hitAreas) hitAreas.push(a);
+    }
+    drawQuestLog(ctx, layout);
+    return layout;
+  }
+
+  _drawQuestTrackerHUD(ctx, trackedQuest, player, camera) {
+    if (!ctx || !trackedQuest) return;
+
+    const VILLAGE_COORDS = {
+      sunspire: { col: 32, row: 32, x: 1024, y: 1024, name: "Sunspire Valley" },
+      emberfall: { col: 120, row: 40, x: 3840, y: 1280, name: "Emberfall Volcanic Ridge" },
+      sylvan_haven: { col: 40, row: 120, x: 1280, y: 3840, name: "Sylvan Haven Redwood" },
+      abyssal_tideport: { col: 140, row: 140, x: 4480, y: 4480, name: "Abyssal Tideport" },
+      ashen_oasis: { col: 180, row: 60, x: 5760, y: 1920, name: "Ashen Oasis Ruins" },
+      blackfen: { col: 200, row: 200, x: 6400, y: 6400, name: "Blackfen Abyssal Marsh" },
+    };
+
+    const px = player ? (player.x || (player.col || 32) * 32) : 1024;
+    const py = player ? (player.y || (player.row || 32) * 32) : 1024;
+
+    const loc = VILLAGE_COORDS[trackedQuest.village_key] || VILLAGE_COORDS.sunspire;
+    const distM = Math.max(1, Math.floor(Math.hypot(loc.x - px, loc.y - py) / 32));
+
+    const w = 230;
+    const h = 78;
+    // Positioned in top-left corner with 16px margins, matching game UI button styling
+    const x = 16;
+    const y = 16;
+    const r = 10;
+
+    ctx.save();
+    // Dark glassmorphic card matching game UI panels (e.g. Minimap, HowToButton)
+    ctx.beginPath();
+    if (typeof ctx.roundRect === "function") {
+      ctx.roundRect(x, y, w, h, r);
+    } else {
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    }
+    ctx.fillStyle = "rgba(15, 15, 26, 0.85)";
+    ctx.fill();
+    ctx.strokeStyle = "#2e2e3e";
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+
+    // Left accent indicator bar
+    ctx.beginPath();
+    if (typeof ctx.roundRect === "function") {
+      ctx.roundRect(x, y, 4, h, [r, 0, 0, r]);
+    } else {
+      ctx.rect(x, y, 4, h);
+    }
+    ctx.fillStyle = "#38bdf8";
+    ctx.fill();
+
+    ctx.textBaseline = "top";
+
+    // Title label
+    ctx.fillStyle = "#fde047";
+    ctx.font = "bold 11px monospace";
+    ctx.fillText(`📌 TRACKED: Act ${trackedQuest.act}`, x + 12, y + 10);
+
+    // Quest Title
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 12px monospace";
+    const titleText = (ctx.measureText(trackedQuest.title).width > w - 24)
+      ? trackedQuest.title.slice(0, 20) + "…"
+      : trackedQuest.title;
+    ctx.fillText(titleText, x + 12, y + 26);
+
+    // Objective progress
+    const targetCnt = trackedQuest.target_count || 1;
+    const progCnt = trackedQuest.progress_count || 0;
+    ctx.fillStyle = "#60a5fa";
+    ctx.font = "11px monospace";
+    const objRaw = `🎯 ${trackedQuest.objective || trackedQuest.description} (${progCnt}/${targetCnt})`;
+    const objStr = (ctx.measureText(objRaw).width > w - 24)
+      ? objRaw.slice(0, 26) + "…"
+      : objRaw;
+    ctx.fillText(objStr, x + 12, y + 43);
+
+    // Distance and Location
+    ctx.fillStyle = "#a7f3d0";
+    ctx.font = "11px monospace";
+    ctx.fillText(`↗ ${distM}m • ${loc.name}`, x + 12, y + 59);
+
+    // Draw Screen Edge Compass Arrow pointing toward target
+    if (camera && player) {
+      const targetScreen = worldToScreen(loc.x, loc.y);
+      const camScreenX = targetScreen.x - camera.x;
+      const camScreenY = targetScreen.y - camera.y;
+
+      const isOffScreen = camScreenX < 40 || camScreenX > GAME_WIDTH - 40 || camScreenY < 40 || camScreenY > GAME_HEIGHT - 40;
+
+      if (isOffScreen) {
+        const cx = GAME_WIDTH / 2;
+        const cy = GAME_HEIGHT / 2;
+        const angle = Math.atan2(camScreenY - cy, camScreenX - cx);
+
+        const edgeX = cx + Math.cos(angle) * (GAME_WIDTH / 2 - 40);
+        const edgeY = cy + Math.sin(angle) * (GAME_HEIGHT / 2 - 40);
+
+        ctx.translate(edgeX, edgeY);
+        ctx.rotate(angle);
+
+        ctx.beginPath();
+        ctx.moveTo(14, 0);
+        ctx.lineTo(-10, -9);
+        ctx.lineTo(-4, 0);
+        ctx.lineTo(-10, 9);
+        ctx.closePath();
+        ctx.fillStyle = "#f59e0b";
+        ctx.fill();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        ctx.rotate(-angle);
+        ctx.fillStyle = "#fde047";
+        ctx.font = "bold 11px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText(`📌 ${distM}m`, 0, 18);
+      } else {
+        // Floating 3D Waypoint Pin on-screen
+        const pulse = 0.5 + 0.5 * Math.sin(Date.now() * 0.005);
+        ctx.beginPath();
+        ctx.arc(camScreenX, camScreenY - 30 - pulse * 6, 8, 0, Math.PI * 2);
+        ctx.fillStyle = "#f59e0b";
+        ctx.fill();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 10px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText("📌", camScreenX, camScreenY - 30 - pulse * 6);
+      }
+    }
+
+    ctx.restore();
+  }
+
+  _drawActiveBuffs(activeBuffs, startY = 18) {
     const ctx = this.ctx;
     if (!ctx || !Array.isArray(activeBuffs) || activeBuffs.length === 0) return;
 
     const startX = 18;
-    const startY = 18;
     const slotW = 145;
     const slotH = 34;
     const gapY = 6;
@@ -4068,9 +4746,10 @@ export class RenderSystem {
       const by = startY + i * (slotH + gapY);
 
       const dur = Number(b.durationMs) || 20000;
-      const remainingMs = Math.max(0, (b.expiresAt || (b.startedAt + dur)) - nowMs);
+      const persistent = b.persistent === true;
+      const remainingMs = persistent ? dur : Math.max(0, (b.expiresAt || (b.startedAt + dur)) - nowMs);
       const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
-      const frac = Math.max(0, Math.min(1, remainingMs / dur));
+      const frac = persistent ? 1 : Math.max(0, Math.min(1, remainingMs / dur));
 
       // 1. Sleek glassmorphic container
       ctx.beginPath();
@@ -4100,7 +4779,7 @@ export class RenderSystem {
       ctx.fill();
 
       // Buff Emoji Icon
-      const buffImg = artIcon(this.gameArt, "skill", b.id);
+      const buffImg = persistent ? null : artIcon(this.gameArt, "skill", b.id);
       if (buffImg) {
         drawIconFit(ctx, buffImg, iconBoxX + 2, iconBoxY + 2, iconBoxS - 4);
       } else {
@@ -4118,10 +4797,16 @@ export class RenderSystem {
       ctx.fillStyle = "#ffffff";
       ctx.fillText(title.length > 13 ? title.slice(0, 12) + "…" : title, bx + 36, by + 5);
 
-      // Timer readout
+      // Timer readout -- or, for an aura debuff (SOMET-606), what it does.
       ctx.font = "10px monospace";
-      ctx.fillStyle = remainingSec <= 3 ? "#f87171" : "#fde047";
-      ctx.fillText(`${remainingSec}s`, bx + 36, by + 18);
+      if (persistent) {
+        ctx.fillStyle = "#fca5a5";
+        const d = b.detail || "";
+        ctx.fillText(d.length > 17 ? d.slice(0, 16) + "…" : d, bx + 36, by + 18);
+      } else {
+        ctx.fillStyle = remainingSec <= 3 ? "#f87171" : "#fde047";
+        ctx.fillText(`${remainingSec}s`, bx + 36, by + 18);
+      }
 
       // 4. Mini progress duration bar at bottom of the slot
       const barX = bx + 36;
@@ -4137,11 +4822,11 @@ export class RenderSystem {
   }
 
   renderHud({
-    player, remotePlayers, localUserId, mana = null, maxMana = null, showMana = true,
-    stamina = null, maxStamina = null, weaponName = null, ammo = null, noAmmoFlash = false,
-    effects = null, gold = null, progression = null, skills = null, hitAreas = null,
+    player, mana = null, maxMana = null, showMana = true,
+    stamina = null, maxStamina = null, progression = null, skills = null, hitAreas = null,
     hoverSlot = null, drag = null, activeForm = null, flashSlot = null, skillCooldowns = null,
-    activeBuffs = [], playerStats = null, equippedWeapon = null, keybinds = null
+    activeBuffs = [], playerStats = null, equippedWeapon = null, keybinds = null,
+    hasTrackedQuest = false,
   }) {
     if (!player) return;
 
@@ -4171,8 +4856,9 @@ export class RenderSystem {
     // Skills panel (slots 1-9) right above the level bar
     this._drawSkillBar(skills, hitAreas, hoverSlot, drag, activeForm, flashSlot, skillCooldowns, playerStats, equippedWeapon, keybinds);
 
-    // Active buffs list panel in top-left
-    this._drawActiveBuffs(activeBuffs);
+    // Active buffs list panel in top-left (offset below quest tracker if visible)
+    const buffsStartY = hasTrackedQuest ? 104 : 18;
+    this._drawActiveBuffs(activeBuffs, buffsStartY);
 
     // Bottom XP bar connecting HP and MP orbs, with central level emblem
     this._drawXpBar(progression);
@@ -4209,7 +4895,7 @@ export class RenderSystem {
       // its single-writer progression row and this method stays a pass-through.
       character: v.character || null,
       modPage: v.modPage || 0,
-      playerImage: this.imageManager ? this.imageManager.get("player") : null,
+      playerImage: this.imageManager ? this.imageManager.get(v.playerImageKey || "player") : null,
     };
     const layout = layoutInventory(state);
     for (const a of layout.hitAreas) hitAreas.push(a);
@@ -4364,18 +5050,31 @@ export class RenderSystem {
       ctx.fillRect(leftX, y, colW, rowH);
       ctx.strokeStyle = rarityBorderColor(row.rarity, isBuyback ? "#caa24a" : "#3a3a4e");
       ctx.strokeRect(leftX, y, colW, rowH);
+
+      // SOMET-628: the same itemIcon lookup inventoryPanel.js uses for the
+      // carry grid. A type with no generated art draws nothing and the row
+      // keeps exactly the all-text layout it had before this existed.
+      const rowType = itemTypes && itemTypes.get ? itemTypes.get(row.itemTypeId) : null;
+      const rowIcon = itemIcon(this.gameArt, rowType);
+      const rowIconS = rowH - 8;
+      const rowTextShift = rowIcon ? rowIconS + 8 : 0;
+      const rowTextX = leftX + 8 + rowTextShift;
+      if (rowIcon) {
+        drawIconFit(ctx, rowIcon, leftX + 4, y + 4, rowIconS);
+      }
+
       ctx.fillStyle = "#e5e7eb";
       ctx.font = "12px monospace";
-      ctx.fillText(resolveName(row.itemTypeId), leftX + 8, y + at.name);
+      ctx.fillText(resolveName(row.itemTypeId), rowTextX, y + at.name);
       ctx.fillStyle = isBuyback ? "#caa24a" : "#9ca3af";
-      ctx.fillText(`${row.price} g`, leftX + 8, y + at.sub);
+      ctx.fillText(`${row.price} g`, rowTextX, y + at.sub);
       if (at.affix != null) {
         // Clipped to the gap left of the Buy button rather than measured: see
         // clipToWidth. Tinted with the grade so the caption and the border
         // agree at a glance, falling back to the ordinary subline grey.
         ctx.font = `${AFFIX_FONT_PX}px monospace`;
         ctx.fillStyle = rarityBorderColor(row.rarity, "#9ca3af");
-        ctx.fillText(clipToWidth(affixes, colW - 16 - buyW, AFFIX_FONT_PX), leftX + 8, y + at.affix);
+        ctx.fillText(clipToWidth(affixes, colW - 16 - buyW - rowTextShift, AFFIX_FONT_PX), rowTextX, y + at.affix);
         ctx.font = "12px monospace";
       }
 
@@ -4441,9 +5140,19 @@ export class RenderSystem {
       // player needs more than a restatement of the grade.
       ctx.strokeStyle = rarityBorderColor(item.rarity, "#3a3a4e");
       ctx.strokeRect(rightX, ry, rightW, rowH);
+
+      // SOMET-628: same icon lookup as the shelf opposite and the carry grid.
+      const sellIcon = itemIcon(this.gameArt, type);
+      const sellIconS = rowH - 8;
+      const sellTextShift = sellIcon ? sellIconS + 8 : 0;
+      const sellTextX = rightX + 8 + sellTextShift;
+      if (sellIcon) {
+        drawIconFit(ctx, sellIcon, rightX + 4, ry + 4, sellIconS);
+      }
+
       ctx.fillStyle = "#e5e7eb";
       ctx.font = "12px monospace";
-      ctx.fillText(type.name, rightX + 8, ry + 6);
+      ctx.fillText(type.name, sellTextX, ry + 6);
 
       // SOMET-317: bound instances refuse to sell (trade.js sellItem, the
       // SOMET-277 anti-faucet rule), and until now the only way to find that
@@ -4461,7 +5170,7 @@ export class RenderSystem {
       // (authority).
       if (item.soulbound === true) {
         ctx.fillStyle = "#caa24a";
-        ctx.fillText("bound", rightX + 8, ry + 22);
+        ctx.fillText("bound", sellTextX, ry + 22);
       }
 
       const sellX = rightX + rightW - 8 - sellW;

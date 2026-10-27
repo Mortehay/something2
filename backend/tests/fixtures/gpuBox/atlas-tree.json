@@ -1,0 +1,58 @@
+{
+  "cell": {
+    "w": 48,
+    "h": 64
+  },
+  "grid": {
+    "columns": 2,
+    "rows": 2
+  },
+  "directions": [
+    "s"
+  ],
+  "frames_per_action": 2,
+  "palette": [
+    "#d1c1b5",
+    "#9e948e",
+    "#827b74",
+    "#6d6355",
+    "#655039",
+    "#4b4d45",
+    "#4c3f32",
+    "#43342a",
+    "#373731",
+    "#2d3a30",
+    "#28342d",
+    "#242f29",
+    "#342825",
+    "#2b2523",
+    "#222624",
+    "#221f1f",
+    "#1a2822",
+    "#16221f",
+    "#141e1c",
+    "#181819",
+    "#111618",
+    "#0f1717",
+    "#0d1817",
+    "#0b1213"
+  ],
+  "rows": [
+    {
+      "row": 0,
+      "action": "idle",
+      "direction": "s"
+    },
+    {
+      "row": 1,
+      "action": "sway",
+      "direction": "s"
+    }
+  ],
+  "something2": {
+    "sprite_sheet": "flat",
+    "columns": 2,
+    "rows": 2
+  },
+  "image": "sheet_f84bb7e5-0092-4ae4-bac2-6029bd319ce8.png"
+}

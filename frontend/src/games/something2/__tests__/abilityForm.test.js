@@ -91,6 +91,6 @@ describe("abilityForm", () => {
   });
 
   it("exposes the same element set the backend enforces", () => {
-    expect(ELEMENTS).toEqual(["physical", "fire", "ice", "lightning"]);
+    expect(ELEMENTS).toEqual(["physical", "arcane", "fire", "ice", "lightning"]);
   });
 });

@@ -100,7 +100,7 @@ function fakePool({ savedX = PORTAL_X, savedY = PORTAL_Y } = {}) {
         to_name: 'Somewhere Else', from_x: PORTAL_X, from_y: PORTAL_Y, to_x: 500, to_y: 500,
       }] };
     }
-    if (/FROM villages WHERE/i.test(sql)) return { rows: [] };
+    if (/FROM villages v JOIN worlds/i.test(sql)) return { rows: [] }; // SOMET-588: matches the real JOIN shape (the old WHERE-only pattern never matched and only worked via fall-through)
     if (/FROM waypoints WHERE world_id/i.test(sql)) return { rows: [] };
     if (/FROM character_waypoints WHERE character_id/i.test(sql)) return { rows: [] };
     if (/FROM world_creatures wc/i.test(sql)) return { rows: [] };

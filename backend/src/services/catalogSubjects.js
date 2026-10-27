@@ -11,7 +11,7 @@ const { resolveGenerationTarget } = require('./generationTarget.js');
 // class skills, and passive-tree labels -- in one place, so adding a fourth is
 // an entry here rather than an edit in four files.
 //
-// SCOPE (widened by SOMET-538): all five kinds now live here. Tiles and
+// SCOPE (widened by SOMET-538): every art kind lives here. Tiles and
 // entities were deliberately left out at first -- their loaders carry biome
 // prompts and per-type provider pins that only the bulk tool used, and moving
 // them to prove a point would have risked ~300 working images for no behaviour
@@ -104,6 +104,35 @@ function skillPrompt(skill) {
   return bits.join(', ');
 }
 
+// Class identity is explicit because entity_types.prompt is optional and is empty
+// in the seeded playable classes. These are visible concepts already established
+// by each class's starter loadout and role, not image-model styling.
+const CHARACTER_IDENTITIES = Object.freeze({
+  Warrior: 'sturdy melee fighter in practical leather armor carrying one short sword',
+  Mage: 'arcane scholar in layered robes carrying one apprentice staff and a ward focus',
+  Monk: 'disciplined martial artist in simple wrapped robes carrying one quarterstaff',
+  Cultist: 'occult life-magic caster in hooded ritual robes carrying one crooked apprentice staff and a crimson talisman',
+  Archer: 'leather-clad ranged scout carrying one longbow and a visible quiver',
+  Druid: 'nature mystic in leaf-and-bark robes carrying one wooden club and an animal charm',
+});
+
+const APPEARANCE_DIRECTIONS = Object.freeze({
+  1: 'iconic class-defining adventurer with clean practical equipment',
+  2: 'battle-worn veteran with weathered, repaired equipment',
+  3: 'ceremonial noble version with clean ornate equipment',
+  4: 'ominous night-traveller with dark worn materials',
+  5: 'rugged wilderness exile with rough natural materials',
+});
+
+function appearancePrompt(row) {
+  const className = row.class_name || 'adventurer';
+  const identity = row.class_prompt || CHARACTER_IDENTITIES[className]
+    || 'fantasy adventurer with class-specific clothing and equipment';
+  const direction = APPEARANCE_DIRECTIONS[row.variant]
+    || 'distinct class-appropriate clothing and equipment';
+  return `a ${className} hero, ${identity}, ${direction}`;
+}
+
 const SUBJECTS = Object.freeze({
   // The merchant's goods. item_types.icon was empty on all 189 rows when this
   // registry was written; the icons exist now, and SOMET-572 exports and
@@ -131,6 +160,63 @@ const SUBJECTS = Object.freeze({
       const { rows } = await db.query(
         `SELECT name, icon AS image, updated_at FROM item_types
           WHERE icon IS NOT NULL AND icon <> ''`,
+      );
+      return indexArt(rows);
+    },
+  },
+
+  // Five independently generated portraits/stills for every playable class.
+  // The entity type's image remains the fallback until a slot gets its own
+  // art; it deliberately does not count as this subject's art, otherwise all
+  // 30 slots would disappear from the console's Missing art filter.
+  character_appearance: {
+    kind: 'character_appearance',
+    generationKind: 'object',
+    async list(db) {
+      const { rows } = await db.query(
+        `SELECT ca.entity_type_id, ca.variant, ca.label, ca.image, ca.sprite,
+                ca.render_mode, ca.updated_at, e.name AS class_name,
+                e.prompt AS class_prompt
+           FROM character_appearances ca
+           JOIN entity_types e ON e.id = ca.entity_type_id
+          WHERE e.is_playable = true
+          ORDER BY e.name, ca.variant`,
+      );
+      return rows.map((row) => {
+        const enriched = {
+          ...row,
+          class_identity: row.class_prompt || CHARACTER_IDENTITIES[row.class_name]
+            || 'fantasy adventurer with class-specific clothing and equipment',
+          variant_direction: APPEARANCE_DIRECTIONS[row.variant]
+            || 'distinct class-appropriate clothing and equipment',
+        };
+        return {
+          kind: 'character_appearance',
+          key: `${row.class_name}:${row.variant}`,
+          name: `${row.class_name} appearance ${row.variant}`,
+          basePrompt: appearancePrompt(row),
+          row: enriched,
+        };
+      });
+    },
+    async write(db, key, image) {
+      const { rows } = await db.query(
+        `UPDATE character_appearances ca
+            SET image = $1, sprite = NULL, render_mode = 'static', updated_at = now()
+           FROM entity_types e
+          WHERE e.id = ca.entity_type_id AND e.is_playable = true
+            AND e.name || ':' || ca.variant::text = $2
+          RETURNING ca.entity_type_id, ca.variant`,
+        [image, key],
+      );
+      return rows[0] || null;
+    },
+    async artIndex(db) {
+      const { rows } = await db.query(
+        `SELECT e.name || ':' || ca.variant::text AS name, ca.image, ca.updated_at
+           FROM character_appearances ca
+           JOIN entity_types e ON e.id = ca.entity_type_id
+          WHERE e.is_playable = true AND ca.image IS NOT NULL AND ca.image <> ''`,
       );
       return indexArt(rows);
     },
@@ -314,7 +400,14 @@ function indexArt(rows) {
 //
 // A key that is no longer in the catalogue is reported back rather than
 // dropped: "I selected 100 and 97 were queued" needs an explanation.
-async function subjectsForEnqueue(db, kind, keys, { active = null, fallbackProviderId = null } = {}) {
+//
+// SOMET-535: each subject also carries its BACKEND. A Local run makes every
+// subject a local job with no provider; in a connector run, a type pinned to
+// 'local' becomes a local job too, rather than a connector job with no
+// provider that the dispatcher would then hand to the batch's remote.
+async function subjectsForEnqueue(db, kind, keys, {
+  active = null, fallbackProviderId = null, backend = 'connector',
+} = {}) {
   const reg = registryFor(kind);
   if (!reg) throw new Error(`unknown subject kind: ${kind}`);
   const byKey = new Map((await reg.list(db)).map((s) => [s.key, s]));
@@ -324,7 +417,20 @@ async function subjectsForEnqueue(db, kind, keys, { active = null, fallbackProvi
   for (const key of keys) {
     const s = byKey.get(key);
     if (!s) { unknown.push(key); continue; }
-    subjects.push({ kind, key, providerId: pinnedProviderId(s, active, fallbackProviderId) });
+    if (backend === 'local') {
+      subjects.push({ kind, key, providerId: null, backend: 'local', pinned: false });
+      continue;
+    }
+    const row = s.row || {};
+    const providerId = pinnedProviderId(s, active, fallbackProviderId);
+    const pinnedLocal = providerId === null && row.ai_provider_mode === 'local';
+    subjects.push({
+      kind, key, providerId,
+      backend: pinnedLocal ? 'local' : 'connector',
+      // The type's own provider pin decided this, not the console's pick --
+      // which is what a refusal has to tell the admin to change (SOMET-594).
+      pinned: row.ai_provider_mode === 'provider' && Number.isInteger(row.ai_provider_id),
+    });
   }
   return { subjects, unknown };
 }
@@ -364,8 +470,14 @@ function subjectKinds() {
   return Object.keys(SUBJECTS);
 }
 
+// Own properties only: SUBJECTS is a plain object, so `constructor`,
+// `__proto__` or `toString` would otherwise resolve to an inherited function
+// and reach the routes as a "registry" (a 500 instead of a 400).
 function registryFor(kind) {
-  return SUBJECTS[kind] || null;
+  if (typeof kind !== 'string' || !Object.prototype.hasOwnProperty.call(SUBJECTS, kind)) {
+    return null;
+  }
+  return SUBJECTS[kind];
 }
 
 // Every subject of a kind, annotated with whether it already has art -- which
@@ -407,6 +519,7 @@ async function latestJobByKey(db, kind) {
 }
 
 module.exports = {
+  CHARACTER_IDENTITIES, APPEARANCE_DIRECTIONS, appearancePrompt,
   SUBJECTS, subjectKinds, registryFor, listWithArtState, takesDescription,
   subjectsForEnqueue, pinnedProviderId,
   deslug, article, labelSubject, itemPrompt, skillPrompt, writeCatalogArt,

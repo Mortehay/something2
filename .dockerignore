@@ -7,11 +7,15 @@ backend/node_modules
 # matters a great deal on the Pi's fallback build path over four A53 cores.
 .git
 docs
-engine
-sprite-gen
 tools
 **/__tests__
 **/*.test.js
+# The backend's test tree (helpers and fixtures, not just *.test.js) and the
+# Python reference the world-gen port is tested against (SOMET-644): neither
+# runs in an image. The dev image bind-mounts backend/ over /app, so dev
+# containers still see both.
+backend/tests
+backend/tools/world_gen_ref
 
 # Neither is COPYed by any Dockerfile today, but both would otherwise sit in
 # the build context uploaded to the daemon on the Pi. Excluded now, before
@@ -19,3 +23,6 @@ tools
 # planned home for a generated deploy key) exists.
 .env
 compose/orangepi/secrets/
+
+# Host git-helper socket/token (see tools/git-helper); also bind-mounted at runtime
+backend/run/

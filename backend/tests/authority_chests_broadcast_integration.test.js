@@ -42,7 +42,7 @@ const SPAWN = { x: 500, y: 500 };
 // `chests`: [{ id, x, y, kind, state, guardLevel?, guardCreatureIds? }] --
 // becomes the world-load fetchChests row set (world_chests shape), which
 // mapChestRow turns into entry.chests, exactly like a real chest row would.
-function makePool({ chests = [] } = {}) {
+function makePool({ chests = [], pointKindDefaults = [] } = {}) {
   const pool = {
     query: async (sql) => {
       if (/FROM worlds WHERE id/i.test(sql)) {
@@ -86,6 +86,10 @@ function makePool({ chests = [] } = {}) {
         };
       }
       if (/SELECT gold FROM users WHERE id/i.test(sql)) return { rows: [{ gold: 0 }] };
+      // loadPointKindDefaults (SOMET-582/588). Defaults to no rows, same as
+      // this fixture's fall-through did before this branch existed -- tests
+      // that don't pass pointKindDefaults keep getting art: null.
+      if (/FROM world_point_kinds/i.test(sql)) return { rows: pointKindDefaults };
       return { rows: [] };
     },
   };
@@ -110,6 +114,29 @@ test('a chest in entry.chests reaches a connected player on the live "chests" br
   // carries no art column, so resolvePointArt has neither an instance
   // binding nor a kind default to resolve.
   assert.deepEqual(msg.chests[0], { id: 'chest-1', x: SPAWN.x, y: SPAWN.y, kind: 'vault', state: 'locked', art: null });
+
+  ws.close(); handle.close(); server.close();
+});
+
+// SOMET-588: the sibling test above only covers "no default seeded" (art:
+// null). This covers the DEFAULT route itself -- chestPointKind maps the
+// chest's 'vault' kind onto the catalog's 'chest_vault' name, and
+// resolvePointArt falls through to that kind's default when the chest row
+// carries no instance binding of its own.
+test('a vault chest with no instance art resolves to the chest_vault kind default on the live broadcast', async () => {
+  const pool = makePool({
+    chests: [{ id: 'chest-1', x: SPAWN.x, y: SPAWN.y, kind: 'vault', state: 'locked', guardLevel: 5 }],
+    pointKindDefaults: [{ kind: 'chest_vault', name: 'treasure_chest' }],
+  });
+  const { url, handle, server } = await bootWith(pool);
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+
+  const msg = await nextMsg(ws, 'chests');
+  assert.equal(msg.chests.length, 1);
+  assert.equal(msg.chests[0].art, 'treasure_chest');
 
   ws.close(); handle.close(); server.close();
 });

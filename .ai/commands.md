@@ -13,6 +13,13 @@
 - `make shell-frontend` — exec `sh` in frontend container
 - `make db-shell` — psql into `game_db` as user `user`
 - `make redis-shell` — `redis-cli` into the redis container
+- `make seed` (or `make seed-all`) — run all seed targets in order (catalogs, passive tree, quests, art, audio, and starter map)
+- `make seed-catalogs` — seed catalog rows (tiles, biomes, decorations, creatures, loot, classes)
+- `make seed-passive-tree` — seed passive skill tree (supports `FORCE=1`)
+- `make seed-quests` — seed storyline quests
+- `make art-seed` — seed committed textures into MinIO + catalog rows
+- `make audio-seed` — seed committed audio clips into MinIO + bindings
+- `make seed-map SPEC=<name>` — seed a specific map (e.g. `SPEC=vale-region`)
 
 ## Backend — [backend/](backend/)
 

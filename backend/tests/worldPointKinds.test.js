@@ -38,6 +38,32 @@ test('PUT /api/world-point-kinds/:kind rejects a type of another kind', async ()
   assert.match(res.body.error, /point_kind "bank".*kind "portal"/);
 });
 
+test('PUT /api/world-point-kinds/:kind 400s an entity type id that does not exist', async () => {
+  __setPool({
+    query: withAuth(async (sql) => {
+      if (/SELECT point_kind FROM entity_types WHERE id/i.test(sql)) return { rows: [] };
+      throw new Error(`unexpected query: ${sql}`);
+    }),
+  });
+  const res = await request(app).put('/api/world-point-kinds/portal').set(...AUTH)
+    .send({ default_entity_type_id: 999 });
+  assert.strictEqual(res.status, 400);
+  assert.match(res.body.error, /unknown entity type 999/);
+});
+
+// SOMET-588: a body that omits the key entirely used to pass the `!= null`
+// check (undefined == null) and silently clear the default -- the same
+// mistake as sending an explicit null, but with no record of having asked
+// for it. Mandatory key, distinct from the "clears the default" test below.
+test('PUT /api/world-point-kinds/:kind 400s a body that omits default_entity_type_id', async () => {
+  __setPool({
+    query: withAuth(async (sql) => { throw new Error(`unexpected query: ${sql}`); }),
+  });
+  const res = await request(app).put('/api/world-point-kinds/portal').set(...AUTH).send({});
+  assert.strictEqual(res.status, 400);
+  assert.match(res.body.error, /default_entity_type_id is required/);
+});
+
 test('PUT /api/world-point-kinds/:kind writes the default and returns the row', async () => {
   const updates = [];
   __setPool({

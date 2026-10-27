@@ -75,12 +75,15 @@ test('generateForSlot: sfx', { skip }, async (t) => {
       return r;
     };
 
-    await t.test('an upload-only slot (no cue on the box today) is refused with no box call', async () => {
+    await t.test('an upload-only slot (no cue in the registry at all) is refused with no box call', async () => {
       const calls = [];
       const rap = { generateSfx: async (...args) => { calls.push(args); return oneClip(1); } };
-      // attack_type/ranged/use has no cue (ATTACK_TYPE_CUES.ranged.use = null).
+      // creature/*/presence (a boss-only slot) still has no cue at all --
+      // unlike creature nearby/attack and attack_type ranged/use, which
+      // gained one in SOMET-627. cueFor's creature branch is a pure lookup
+      // (no catalog read), so the subject key need not be a real boss row.
       const r = await gen.generateForSlot(pool, providerWithCues,
-        { subjectKind: 'attack_type', subjectKey: 'ranged', slot: 'use', clipKind: 'sfx', seed: 1 }, { rap, lib });
+        { subjectKind: 'creature', subjectKey: 'Ignis, the Magma Colossus', slot: 'presence', clipKind: 'sfx', seed: 1 }, { rap, lib });
       track(r);
       assert.equal(r.ok, false);
       assert.match(r.error, /upload only/i);
@@ -463,8 +466,8 @@ test('generateForSlot: sfx', { skip }, async (t) => {
 // Game audio slice 3, Task 4: the pack path. One sfx-pack request for many
 // queued jobs; result rows are matched back by the box-echoed (cue, entity),
 // never by position. Subjects are `creature` with made-up, tagged keys:
-// creature cues are fixed per slot (hurt->hit, death->death, nearby->none)
-// and entityPhrase is just the lowercased key. Those subjects do not exist,
+// creature cues are fixed per slot (hurt->hit, death->death, nearby->idle --
+// SOMET-627) and entityPhrase is just the lowercased key. Those subjects do not exist,
 // so bindClip would refuse them: storage goes through a RECORDING lib (the
 // real store/bind path is the same storeSfxVariants helper the single-cue
 // tests above run against the real library). nextSfxTake still reads the
@@ -500,7 +503,7 @@ test('generateSfxPackForJobs', { skip }, async (t) => {
     await t.test('maps rows back by (cue, entity), refuses upload-only, de-duplicates entities, stores a cached row new to its slot, and fails missing/error rows per job', async () => {
       const a = job('A', 'hurt');
       const b = job('B', 'death');
-      const c = job('C', 'nearby'); // no cue: upload only
+      const c = job('C', 'nearby'); // cue is 'idle' (SOMET-627), but not in this provider's models_cache -- still upload only
       const d1 = job('Dup', 'hurt');
       const d2 = job('DUP', 'hurt'); // same phrase once lowercased
       const e = job('E', 'hurt');   // the box returns no row for it

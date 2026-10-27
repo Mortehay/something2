@@ -16,11 +16,19 @@
 // ("{Line} Line", matching gen-p4-bestiary.js's "{Line} {Rung}" naming) --
 // every one of the 288 P4 creatures follows this exact naming, so this is
 // a real, already-seeded creature type name, not a placeholder.
+//
+// bosses names the dungeon's End/Elite boss rows (spine dungeons only: only the
+// spine skeleton has End/Elite rooms).
 const DUNGEONS = [
   {
     key: 'd1', name: 'The Catacombs', topology: 'spine', tierClamp: [1, 24],
     lines: [{ line: 'Undead', biome: 'Catacombs' }, { line: 'Cave', biome: 'Cavern' }],
     guardCreature: 'Undead Line',
+    // SOMET-609 (S9, spec §3.8): entity_types rows from seeds/data/dungeonBosses.js.
+    bosses: {
+      end: { entity: 'The Bone Regent', respawn_s: 900 },
+      elite: { entity: 'Ossuary Warden', respawn_s: 600 },
+    },
   },
   {
     key: 'd2', name: 'The Underdeep', topology: 'hub', tierClamp: [8, 24],
@@ -36,6 +44,11 @@ const DUNGEONS = [
     key: 'd4', name: 'The Emberhive', topology: 'spine', tierClamp: [8, 36],
     lines: [{ line: 'Ember', biome: 'Emberdepths' }, { line: 'Hive', biome: 'Hive Warrens' }],
     guardCreature: 'Ember Line',
+    // SOMET-609 (S9, spec §3.8): entity_types rows from seeds/data/dungeonBosses.js.
+    bosses: {
+      end: { entity: 'The Ember Queen', respawn_s: 900 },
+      elite: { entity: 'Cinder Matriarch', respawn_s: 600 },
+    },
   },
   {
     key: 'd5', name: 'The Frozen Vaults', topology: 'hub', tierClamp: [8, 36],
@@ -59,6 +72,11 @@ const DUNGEONS = [
       { line: 'Plague', biome: 'Pestilent Deep' },
     ],
     guardCreature: 'Umbral Line',
+    // SOMET-609 (S9, spec §3.8): entity_types rows from seeds/data/dungeonBosses.js.
+    bosses: {
+      end: { entity: 'The Umbral Gatekeeper', respawn_s: 900 },
+      elite: { entity: 'Shade Herald', respawn_s: 600 },
+    },
   },
   {
     key: 'd8', name: 'The Abyss', topology: 'hub', tierClamp: [32, 50],

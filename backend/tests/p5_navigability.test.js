@@ -101,3 +101,48 @@ test('every P5 world in the generated spec is navigable (offline, no DB)', () =>
 
   assert.deepEqual(allProblems, [], `${allProblems.length} navigability problem(s) across the P5 spec:\n  - ${allProblems.join('\n  - ')}`);
 });
+
+// SOMET-609 (S9) fix round 1. The test above is NOT decoration-aware: it passes
+// no decorationDefs, so a boss standing under a blocking Tree/Stone passes it.
+// seed-map.js's decoration-aware check only runs via the DB-gated seed tests,
+// which can skip. d1_elite / d1_end shipped a first draft with their post under
+// a blocking decoration that only `make seed-map` caught. This runs the same
+// check OFFLINE: generateChunkDecorations is deterministic, and the defs come
+// from checked-in data. Tree/Stone/IceRock are the three pre-seed rows of
+// migrations/1714440003000_create_environment_types.js (ids 1-3, so they sort
+// first, like loadDecorationDefs' ORDER BY id); the rest are NEW_DECORATIONS in
+// seed order. Judged road-free, like seed-map (noGeneratedRoads).
+const { NEW_DECORATIONS } = require('../seeds/data/decorationTypes.js');
+
+const DECORATION_DEFS = [
+  { name: 'Tree', walkable: false, spawn_tiles: ['earth', 'grass', 'leafs', 'dirt'], chance: 0.2 },
+  { name: 'Stone', walkable: false, spawn_tiles: ['earth', 'rocks', 'sand'], chance: 0.15 },
+  { name: 'IceRock', walkable: false, spawn_tiles: ['snow', 'ice'], chance: 0.25 },
+  ...NEW_DECORATIONS.map(({ name, walkable, spawn_tiles, chance }) => ({ name, walkable, spawn_tiles, chance })),
+];
+
+test('every dungeon boss post clears blocking decorations (offline, decoration-aware)', () => {
+  const spec = generateSpec();
+  const bossed = spec.worlds.filter((w) => w.boss);
+  assert.equal(bossed.length, 6, 'expected the six End/Elite boss worlds');
+  const problems = [];
+  for (const w of bossed) {
+    const doorways = doorwaysFor(w, spec);
+    const biomes = (w.biomes || []).map((n) => BIOMES_BY_NAME.get(n)).filter(Boolean);
+    const row = {
+      seed: w.seed, chunk_size: w.chunk_size, width: w.width, height: w.height,
+      entry_spawn: w.entry_spawn || null, biome_cell: w.biome_cell,
+      level_min: w.level_band ? w.level_band[0] : 1,
+      level_max: w.level_band ? w.level_band[1] : 1,
+    };
+    const cfg = {
+      ...buildWorldGenConfig({ row, tileTypes: TILE_TYPES, doorways, villages: villagesFor(w), biomes }),
+      noGeneratedRoads: true,
+    };
+    const required = requiredTilesFor(w, spec, row, doorways);
+    for (const p of assertNavigable(cfg, required, { decorationDefs: DECORATION_DEFS })) {
+      problems.push(`${w.key}: ${p}`);
+    }
+  }
+  assert.deepEqual(problems, [], `boss post(s) blocked:\n  - ${problems.join('\n  - ')}`);
+});

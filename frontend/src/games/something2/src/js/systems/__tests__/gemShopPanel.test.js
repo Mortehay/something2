@@ -1,6 +1,6 @@
 // frontend/src/games/something2/src/js/systems/__tests__/gemShopPanel.test.js
 import { describe, it, expect } from "vitest";
-import { layoutGemShopPanel, drawGemShopPanel, GEM_SHOP_W, GEM_SHOP_H, GEM_COLOR_TABS } from "../gemShopPanel.js";
+import { layoutGemShopPanel, GEM_SHOP_W, GEM_SHOP_H, GEM_COLOR_TABS } from "../gemShopPanel.js";
 import {
   SKILLS, getSkillById, checkGemRequirements,
   getWeaponCategory, isWeaponCompatible,

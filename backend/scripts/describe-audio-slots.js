@@ -20,9 +20,11 @@
 // is a 409 from the store, counted as "changed during run" and left alone --
 // a skip, not a failure, so it never feeds the 5-in-a-row stop.
 //
-// UPLOAD-ONLY SLOTS ARE SKIPPED. An sfx slot with no cue on the box (creature
-// nearby/attack, ranged use) can never be generated, so a prompt for it is
-// CPU time for a row nobody sees; they are counted, not written.
+// UPLOAD-ONLY SLOTS ARE SKIPPED. An sfx slot with no cue on the box (e.g. a
+// boss's own spawn/presence/phase/enrage slots -- creature nearby/attack and
+// attack_type ranged/use gained cues in SOMET-627) can never be generated, so
+// a prompt for it is CPU time for a row nobody sees; they are counted, not
+// written.
 //
 // DUPLICATES ARE REPORTED, NOT FIXED. The art epic measured 12 of 20 skills
 // collapsing to one generic weapon; the per-kind duplicate count is how that
@@ -40,7 +42,7 @@
 const path = require('path');
 const dotenv = require('dotenv');
 const { Pool } = require('pg');
-const { SUBJECT_KINDS, slotKind, cueFor } = require('../src/services/audioSubjects');
+const { SUBJECT_KINDS, slotKind, cueFor, slotsBySubject } = require('../src/services/audioSubjects');
 const audioPrompts = require('../src/services/audioPrompts');
 const { loadPromptCatalog, buildContext, isStale } = require('../src/services/audioPromptContext');
 const writer = require('../src/services/audioPromptWriter');
@@ -96,11 +98,11 @@ function summarize(results) {
 
 async function allSlots(db) {
   const out = [];
-  for (const [kind, def] of Object.entries(SUBJECT_KINDS)) {
+  for (const kind of Object.keys(SUBJECT_KINDS)) {
     // eslint-disable-next-line no-await-in-loop
-    const keys = await def.list(db);
-    for (const key of keys) {
-      for (const slot of Object.keys(def.slots)) out.push({ kind, key, slot, id: `${kind}/${key}/${slot}` });
+    const bySubject = await slotsBySubject(db, kind);
+    for (const [key, slots] of Object.entries(bySubject)) {
+      for (const slot of slots) out.push({ kind, key, slot, id: `${kind}/${key}/${slot}` });
     }
   }
   return out;
@@ -197,5 +199,5 @@ if (require.main === module) {
 }
 
 module.exports = {
-  selectSlots, summarize, run, parseArgs, BOX_ONLY_BUSY_WAIT_LIMIT,
+  selectSlots, summarize, run, parseArgs, allSlots, BOX_ONLY_BUSY_WAIT_LIMIT,
 };

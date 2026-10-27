@@ -186,6 +186,53 @@ describe("skill surfaces draw art when ready, emoji otherwise", () => {
   });
 });
 
+// The drag ghost (the 40px tile that follows the cursor while a skill is
+// dragged onto the hotbar) is drawn inline in renderChunked, not by a helper,
+// so it is exercised through a real frame: that also pins the frame actually
+// reaching it. Asserted by POSITION -- the ghost is centred on the cursor, so a
+// draw anywhere else (HUD, panels) can neither satisfy nor break these checks.
+describe("skill drag ghost (renderChunked)", () => {
+  const drag = { armed: true, skill: { id: "mag_fireball", nameEn: "Fireball", icon: "🔥" }, x: 300, y: 200 };
+
+  function frame(art, skillDrag = drag) {
+    const rec = recordingCtx();
+    const rs = new RenderSystem({ getContext: () => rec.ctx }, { get: () => null, load: () => Promise.resolve() });
+    rs.gameArt = art;
+    rs.renderChunked({
+      player: { x: 100, y: 100, width: 32, height: 32, hp: 10, maxHp: 10 },
+      camera: { apply() {}, reset() {}, screenX: 0, screenY: 0, width: 800, height: 600 },
+      chunkedMap: { chunkSize: 16, loadedKeys: () => [], getChunk: () => null, mapTiles: null },
+      remotePlayers: new Map(),
+      localUserId: 1,
+      skillDrag,
+    });
+    const ghostImages = rec.images.filter((d) => d.x === drag.x - 17 && d.y === drag.y - 17);
+    const ghostEmoji = rec.texts.filter((t) => t.x === drag.x && t.y === drag.y && t.t === "🔥");
+    return { ghostImages, ghostEmoji };
+  }
+
+  it("draws the skill's icon when its art is ready", () => {
+    const { ghostImages, ghostEmoji } = frame(artFor("mag_fireball"));
+    expect(ghostImages).toHaveLength(1);
+    expect(ghostImages[0]).toMatchObject({ img: IMG, w: 34, h: 34, smoothing: true });
+    expect(ghostEmoji).toHaveLength(0);
+  });
+
+  it("draws the emoji with no art", () => {
+    for (const art of [null, artFor("some_other_skill")]) {
+      const { ghostImages, ghostEmoji } = frame(art);
+      expect(ghostImages).toHaveLength(0);
+      expect(ghostEmoji).toHaveLength(1);
+    }
+  });
+
+  it("draws nothing before the drag is armed", () => {
+    const { ghostImages, ghostEmoji } = frame(artFor("mag_fireball"), { ...drag, armed: false });
+    expect(ghostImages).toHaveLength(0);
+    expect(ghostEmoji).toHaveLength(0);
+  });
+});
+
 // The panels are pure and take `art` as an argument, so every panel test above
 // would stay green if RenderSystem stopped passing it along -- a dead feature
 // under a green suite. These pin the hand-off itself.

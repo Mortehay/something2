@@ -156,3 +156,93 @@ test('boxOnly + box 500: ok:false, busy:false, no fallback call', async () => {
   assert.deepEqual({ ok: r.ok, busy: r.busy, via: r.via }, { ok: false, busy: false, via: 'box' });
   assert.equal(calls.length, 1);
 });
+
+// --- Task 5: non-box text providers (ollama / openai_compatible) ---
+
+const OLLAMA = {
+  id: 11, name: 'ollama', adapter: 'ollama', model: 'llama3:8b', base_url: 'http://o:11434', auth_header_name: null, auth_token: null, modality: 'text',
+};
+const chatOk = (content) => json(200, { choices: [{ message: { content } }] });
+
+test('ollama provider: POSTs /v1/chat/completions with its model, via provider', async () => {
+  const { calls, fetchImpl } = recorder([['/v1/chat/completions', () => chatOk('{"entity":"a wolf"}')]]);
+  const r = await tp.complete(fakeDb(OLLAMA), REQ, { fetchImpl });
+  assert.equal(r.ok, true, r.error);
+  assert.equal(r.via, 'provider');
+  assert.equal(r.text, '{"entity":"a wolf"}');
+  assert.deepEqual(r.json, { entity: 'a wolf' });
+  assert.equal(r.model, 'llama3:8b');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'http://o:11434/v1/chat/completions');
+  assert.equal(calls[0].body.model, 'llama3:8b');
+  assert.deepEqual(calls[0].body.messages, [{ role: 'system', content: 'sys' }, { role: 'user', content: 'describe wolf' }]);
+});
+
+test('openai provider: bearer token is sent', async () => {
+  const p = { ...OLLAMA, adapter: 'openai_compatible', base_url: 'http://api.test/', auth_token: 'sk-1' };
+  const { calls, fetchImpl } = recorder([['/v1/chat/completions', () => chatOk('hi')]]);
+  const r = await tp.complete(fakeDb(p), { ...REQ, jsonSchema: null }, { fetchImpl });
+  assert.equal(r.ok, true, r.error);
+  assert.equal(calls[0].headers.Authorization, 'Bearer sk-1');
+  assert.equal(calls[0].body.response_format, undefined);
+});
+
+test('NULL-adapter provider still POSTs /api/text with no model key (regression)', async () => {
+  const { calls, fetchImpl } = recorder([['/api/text', () => json(200, { text: 'x', model: 'm' })]]);
+  const r = await tp.complete(fakeDb({ ...BOX, adapter: null, model: 'qwen' }), REQ, { fetchImpl });
+  assert.equal(r.via, 'box');
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].url, /\/api\/text$/);
+  assert.equal('model' in calls[0].body, false);
+});
+
+test('openai provider answering 401: ok:false and NO fallback call', async () => {
+  const p = { ...OLLAMA, adapter: 'openai_compatible' };
+  const { calls, fetchImpl } = recorder([['/v1/chat/completions', () => json(401, { error: 'bad key' })]]);
+  const r = await tp.complete(fakeDb(p), REQ, { fetchImpl });
+  assert.deepEqual({ ok: r.ok, via: r.via, busy: r.busy }, { ok: false, via: 'provider', busy: false });
+  assert.match(r.error, /401/);
+  assert.equal(calls.length, 1, 'only the provider was asked');
+});
+
+test('ollama 503 falls back to the CPU model; boxOnly refuses to', async () => {
+  const routes = [['o:11434', () => json(503, {})], ['localhost:20434', () => chatOk('{"entity":"a"}')]];
+  const a = recorder(routes);
+  const r = await tp.complete(fakeDb(OLLAMA), REQ, { fetchImpl: a.fetchImpl });
+  assert.equal(r.via, 'fallback');
+  assert.equal(a.calls.length, 2);
+  const b = recorder(routes);
+  const rb = await tp.complete(fakeDb(OLLAMA), REQ, { fetchImpl: b.fetchImpl, boxOnly: true });
+  assert.deepEqual({ ok: rb.ok, busy: rb.busy, via: rb.via }, { ok: false, busy: true, via: 'provider' });
+  assert.equal(b.calls.length, 1);
+});
+
+test('ollama with a blank model: error, no network call, no fallback', async () => {
+  for (const model of ['', '  ', null]) {
+    const r = await tp.complete(fakeDb({ ...OLLAMA, model }), REQ, { fetchImpl: async () => { throw new Error('no call expected'); } });
+    assert.deepEqual({ ok: r.ok, error: r.error, via: r.via }, { ok: false, error: 'text provider has no model', via: 'provider' });
+  }
+});
+
+test('ollama malformed base_url: no fetch, no fallback', async () => {
+  const r = await tp.complete(fakeDb({ ...OLLAMA, base_url: 'not a url' }), REQ, { fetchImpl: async () => { throw new Error('no call expected'); } });
+  assert.deepEqual({ ok: r.ok, via: r.via }, { ok: false, via: 'provider' });
+  assert.match(r.error, /base_url/);
+});
+
+test('isBoxText: NULL/box adapters are box, ollama/openai are not', () => {
+  assert.equal(tp.isBoxText({ adapter: null }), true);
+  assert.equal(tp.isBoxText({}), true);
+  assert.equal(tp.isBoxText({ adapter: 'box' }), true);
+  assert.equal(tp.isBoxText({ adapter: 'ollama' }), false);
+  assert.equal(tp.isBoxText({ adapter: 'openai_compatible' }), false);
+});
+
+test('listTextModels by adapter: ollama /api/tags, openai /v1/models, box unchanged', async () => {
+  const o = recorder([['/api/tags', () => json(200, { models: [{ name: 'llama3:8b' }] })]]);
+  assert.deepEqual(await tp.listTextModels(OLLAMA, { fetchImpl: o.fetchImpl }), { ok: true, models: ['llama3:8b'] });
+  assert.match(o.calls[0].url, /\/api\/tags$/);
+  const a = recorder([['/v1/models', () => json(200, { data: [{ id: 'gpt-x' }] })]]);
+  assert.deepEqual(await tp.listTextModels({ ...OLLAMA, adapter: 'openai_compatible' }, { fetchImpl: a.fetchImpl }), { ok: true, models: ['gpt-x'] });
+  assert.match(a.calls[0].url, /\/v1\/models$/);
+});

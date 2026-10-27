@@ -6,6 +6,7 @@ describe('provenanceText', () => {
   it('names model and route, or a person', () => {
     expect(provenanceText({ model: 'qwen', via: 'box' })).toBe('written by qwen (GPU box)');
     expect(provenanceText({ model: 'qwen2.5-coder:7b', via: 'fallback' })).toBe('written by qwen2.5-coder:7b (CPU fallback)');
+    expect(provenanceText({ model: 'llama3:8b', via: 'provider' })).toBe('written by llama3:8b (text provider)');
     expect(provenanceText({ model: null, via: null, text: 'x' })).toBe('edited by hand');
     expect(provenanceText({ model: null, via: null, text: '' })).toBe('cleared by hand — generation ignores it');
     expect(provenanceText(null)).toBe('no stored prompt');

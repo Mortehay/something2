@@ -9,6 +9,7 @@ const { DEFAULT_TILE_TYPES } = require('../seeds/data/tileTypes.js');
 const { HOSTILE_CREATURES } = require('../seeds/data/entityTypes.js');
 const { BESTIARY_P4_CREATURES } = require('../seeds/data/bestiaryP4.js');
 const { POINT_TYPES } = require('../seeds/data/pointTypes.js');
+const { DUNGEON_BOSSES } = require('../seeds/data/dungeonBosses.js');
 
 const MAPS_DIR = path.join(__dirname, '..', 'seeds', 'maps');
 const BIOMES = new Set(STARTER_BIOMES.map((b) => b.name));
@@ -40,6 +41,7 @@ const BIOME_ROSTERS = new Map(STARTER_BIOMES.map((b) => [b.name, b.creature_type
 // specs (which carry no art fields yet) validate against the checked-in
 // catalog, not a live DB query.
 const POINT_ART_TYPES = new Map(POINT_TYPES.map((t) => [t.name, t.point_kind]));
+const BOSS_TIERS = new Map(DUNGEON_BOSSES.map((b) => [b.name, b.boss_tier]));
 
 const specFiles = () => fs.readdirSync(MAPS_DIR).filter((f) => f.endsWith('.map.json'));
 
@@ -164,7 +166,7 @@ test('every shipped spec validates against the live catalogs', () => {
     const spec = JSON.parse(fs.readFileSync(path.join(MAPS_DIR, f), 'utf8'));
     const errs = validateMapSpec(spec, {
       biomeNames: BIOMES, creatureTypeNames: CREATURES, biomeCreatureTypes: BIOME_ROSTERS,
-      pointArtTypes: POINT_ART_TYPES,
+      pointArtTypes: POINT_ART_TYPES, bossTiers: BOSS_TIERS,
     });
     assert.deepEqual(errs, [], `${f}: ${errs.join('; ')}`);
   }

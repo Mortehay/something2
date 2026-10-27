@@ -25,7 +25,8 @@ import { SKILLS_BY_CLASS } from './src/js/core/skillsData.js';
 import { SECTOR_HUES, nodeRadius, grantLine } from './src/js/systems/passiveTreePanel.js';
 import {
   indexArt, artFor, artCoverage, distinctLabels, onlyMissing,
-  treeBounds, zoomViewBox, panViewBox, artConsoleLink, dragStart, dragMove, dragEnd, dragClick,
+  treeBounds, panViewBox, wheelZoom, artConsoleLink, dragStart, dragMove, dragEnd, dragClick,
+  endPressOnRelease, shouldNavigate,
 } from './skillTreeView.js';
 import AdminLoading from './AdminLoading.jsx';
 
@@ -73,14 +74,18 @@ const Swatch = styled.span`
   display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 0.3rem;
   vertical-align: middle;
 `;
-const TreeRow = styled.div`display: grid; grid-template-columns: 1fr 260px; gap: 1rem; align-items: start;`;
+// The side card wraps BELOW the tree when the row is too narrow for both. A
+// fixed "1fr 260px" grid squeezed the tree's column to 0 px at phone width.
+const TreeRow = styled.div`display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-start;`;
 const TreeFrame = styled.div`
+  flex: 1 1 480px; min-width: 0;
   border: 1px solid var(--s2-border); border-radius: 8px; overflow: hidden;
   height: 640px; touch-action: none; user-select: none;
   svg { display: block; width: 100%; height: 100%; cursor: grab; }
   svg:active { cursor: grabbing; }
 `;
 const Side = styled.div`
+  flex: 0 1 260px; max-width: 100%;
   background: var(--s2-surface-raised); border: 1px solid var(--s2-border); border-radius: 8px;
   padding: 0.75rem; font-size: 0.85rem; min-height: 120px;
   h3 { margin: 0 0 0.4rem 0; font-size: 0.95rem; color: var(--s2-text-strong); }
@@ -92,7 +97,7 @@ const SideThumb = styled.div`
   margin: 0.5rem 0;
 `;
 const Grid = styled.div`
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 0.5rem;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); gap: 0.5rem;
 `;
 const Card = styled.button`
   display: flex; gap: 0.6rem; align-items: center; text-align: left;
@@ -117,6 +122,10 @@ const GAME_TREE_BG = 'rgba(10, 8, 6, 0.98)';
 const GAME_EDGE = '#3a3a4e';
 const GAME_NODE_FILL = 'rgba(30, 30, 45, 0.9)';
 const GAME_EMOJI = '#e5e7eb';
+// Not a sector hue: amber was charisma's, so a missing node in the Druid
+// sector read as an ordinary node. Near-white stands apart from all seven
+// hues on the dark tree background.
+const GAME_MISSING = '#f8fafc';
 const IconBox = styled.div`
   flex: 0 0 auto; width: ${SKILL_ICON_PX}px; height: ${SKILL_ICON_PX}px;
   background: ${GAME_ICON_BG}; border: 1.5px solid var(--icon-border, #a855f7);
@@ -154,52 +163,53 @@ function TreeGraph({ nodes, edges, art, dimLabels, onHover, onPick }) {
     const rect = el.getBoundingClientRect();
     return Math.max(view.w / rect.width, view.h / rect.height);
   };
-  const toWorld = (clientX, clientY) => {
-    const el = svgRef.current;
-    const rect = el.getBoundingClientRect();
-    const upp = unitsPerPx();
-    // With "meet", the box is centred in the element on the slack axis.
-    const cx = view.x + view.w / 2;
-    const cy = view.y + view.h / 2;
-    return {
-      x: cx + (clientX - (rect.left + rect.width / 2)) * upp,
-      y: cy + (clientY - (rect.top + rect.height / 2)) * upp,
-    };
-  };
 
   // React registers `wheel` passively, so preventDefault there is ignored and
   // the page scrolls under the cursor. A native non-passive listener is the
   // only way to zoom instead.
+  //
+  // The focus point is computed INSIDE the updater, from the box being zoomed.
+  // Computed from the last-rendered box instead, several wheel events landing
+  // before a render each used a stale box, and the point under the cursor
+  // drifted (~7 px over 12 steps, SOMET-571 validation).
   useEffect(() => {
     const el = frameRef.current;
     if (!el) return undefined;
     const onWheel = (e) => {
       e.preventDefault();
-      const focus = toWorld(e.clientX, e.clientY);
+      const rect = svgRef.current.getBoundingClientRect();
       const factor = e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
-      setBox((b) => zoomViewBox(b || bounds, factor, focus.x, focus.y));
+      const { clientX, clientY } = e;
+      setBox((b) => wheelZoom(b, bounds, rect, clientX, clientY, factor));
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-    // No dependency list on purpose: toWorld reads `view` through its closure,
-    // and re-binding on every render is what keeps the focus point correct.
-  });
+  }, [bounds]);
 
   // The press/move/release/click sequence is the drag gate in skillTreeView.js;
   // this only feeds it events. In particular pointerup does NOT forget the
   // press -- the click that follows a pan needs to know it was a pan.
+  //
+  // The pointer is captured only once the press has become a drag (so a pan
+  // that leaves the svg keeps panning). Capturing on pointerdown made Chrome
+  // retarget pointerup and click to the svg, and no node's onClick ever ran.
   const onPointerDown = (e) => {
     drag.current = dragStart(e.clientX, e.clientY);
-    e.currentTarget.setPointerCapture(e.pointerId);
   };
   const onPointerMove = (e) => {
-    const { state, dx, dy } = dragMove(drag.current, e.clientX, e.clientY);
+    const { state, dx, dy, capture } = dragMove(drag.current, e.clientX, e.clientY, e.buttons);
     drag.current = state;
     if (!state || !state.pressed) return;
+    if (capture) e.currentTarget.setPointerCapture(e.pointerId);
     const upp = unitsPerPx();
     setBox((b) => panViewBox(b || bounds, dx, dy, upp));
   };
   const onPointerUp = () => { drag.current = dragEnd(drag.current); };
+
+  // A press released OUTSIDE the svg never reaches onPointerUp above; the
+  // window ends it (endPressOnRelease). dragMove's buttons===0 check covers a
+  // release the window missed too (e.g. outside the browser window).
+  useEffect(() => endPressOnRelease(window, drag), []);
 
   const pick = (node) => {
     const { state, allow } = dragClick(drag.current);
@@ -269,6 +279,15 @@ function TreeGraph({ nodes, edges, art, dimLabels, onHover, onPick }) {
                 r={r} fill="none" stroke={hue} strokeWidth={a ? 2 : 1.5}
                 strokeDasharray={a ? undefined : `${Math.max(2, r / 2)} ${Math.max(2, r / 2)}`}
               />
+              {/* Missing art also gets a ring in SCREEN pixels: at whole-tree
+                  zoom a world-unit dashed stroke is sub-pixel and the gaps
+                  stopped reading at a glance. */}
+              {!a && (
+                <circle
+                  r={r} fill="none" stroke={GAME_MISSING} strokeWidth={2}
+                  vectorEffect="non-scaling-stroke"
+                />
+              )}
             </g>
           );
         })}
@@ -344,6 +363,9 @@ export default function SkillTreeAdmin() {
     () => new Set(onlyMissing(art, 'passive_label', labels, (l) => l)),
     [art, labels],
   );
+  // Missing-only with nothing missing would dim every node and say nothing,
+  // which reads as a broken tree. Say so, and leave the tree as it is.
+  const treeNothingMissing = treeMissingOnly && labelCoverage.missing === 0;
 
   const classSkills = SKILLS_BY_CLASS[cls] || [];
   const skillCoverage = artCoverage(art, 'skill', classSkills.map((s) => s.id));
@@ -351,8 +373,18 @@ export default function SkillTreeAdmin() {
     ? onlyMissing(art, 'skill', classSkills, (s) => s.id)
     : classSkills;
 
-  const openLabel = (node) => { if (node.label) navigate(artConsoleLink('passive_label', node.label)); };
-  const openSkill = (skill) => navigate(artConsoleLink('skill', skill.id));
+  // SOMET-571 rework 4: a fast double-click fires two click handlers before
+  // the route has changed between them, so each would push the router again
+  // and leave a second history entry for the page already being opened.
+  const lastNav = useRef(null);
+  const goToArtConsole = (link) => {
+    const now = Date.now();
+    if (!shouldNavigate(lastNav.current, link, now)) return;
+    lastNav.current = { link, at: now };
+    navigate(link);
+  };
+  const openLabel = (node) => { if (node.label) goToArtConsole(artConsoleLink('passive_label', node.label)); };
+  const openSkill = (skill) => goToArtConsole(artConsoleLink('skill', skill.id));
 
   return (
     <AdminContainer>
@@ -384,9 +416,13 @@ export default function SkillTreeAdmin() {
             {Object.entries(SECTOR_HUES).map(([sector, hue]) => (
               <span key={sector}><Swatch style={{ background: hue }} />{sector}</span>
             ))}
+            <span><Swatch style={{ background: GAME_TREE_BG, border: `2px solid ${GAME_MISSING}`, boxShadow: '0 0 0 1px var(--s2-swatch-border)' }} />no art</span>
           </Legend>
         </SectionHead>
         {treeError && <Err role="alert">{treeError.message}</Err>}
+        {treeNothingMissing && !isLoadingTree && !isLoadingSubjects && (
+          <Hint>Every passive label has art — nothing is missing.</Hint>
+        )}
         {isLoadingTree ? (
           <AdminLoading label="Loading passive tree…" inline size={16} />
         ) : (
@@ -395,7 +431,7 @@ export default function SkillTreeAdmin() {
               nodes={nodes}
               edges={edges}
               art={art}
-              dimLabels={treeMissingOnly ? missingLabels : null}
+              dimLabels={treeMissingOnly && !treeNothingMissing ? missingLabels : null}
               onHover={setHover}
               onPick={openLabel}
             />

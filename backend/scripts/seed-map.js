@@ -47,6 +47,7 @@ const { loadTileTypes } = require('../src/services/tileTypes.js');
 const { loadDecorationDefs } = require('../src/services/decorationDefs.js');
 const { loadBiomes } = require('../src/services/biomes.js');
 const { setEntryWorld } = require('../src/services/entryWorld.js');
+const { recordApplied } = require('../src/services/seedSync/mapSpecState.js');
 
 // Pixels per grid cell for the World Map tab's canvas coordinates. Deriving
 // graph_x/graph_y from the same grid the links were validated against is what
@@ -133,6 +134,12 @@ function requiredTilesFor(w, spec, row, doorwayEdges) {
   if (w.chest && Number.isFinite(w.chest.x) && Number.isFinite(w.chest.y)) {
     out.push({ row: Math.floor(w.chest.y / 100), col: Math.floor(w.chest.x / 100), what: 'vault chest' });
   }
+  // SOMET-609: a dungeon boss post is generated terrain too. A boss standing in
+  // a sealed pocket (or in a wall) is a boss nobody can fight; listing the post
+  // makes assertNavigable prove it is walkable AND reachable from the doorways.
+  if (w.boss && Number.isFinite(w.boss.x) && Number.isFinite(w.boss.y)) {
+    out.push({ row: Math.floor(w.boss.y / 100), col: Math.floor(w.boss.x / 100), what: 'dungeon boss' });
+  }
   for (const l of (spec.links || [])) {
     if (l.kind !== 'portal') continue;
     if (l.from === w.key) {
@@ -152,21 +159,53 @@ function requiredTilesFor(w, spec, row, doorwayEdges) {
   return out;
 }
 
-async function applyMapSpec(pool, spec) {
+// The validator's catalogs, read from the database. Exported for the seed-sync
+// Maps group (SOMET-641), which validates a spec before writing it to a file.
+async function loadSpecCatalogs(pool) {
   // One biome read, two catalog entries: biomeNames answers "does this biome
   // exist", biomeCreatureTypes answers "which creatures can actually spawn in
   // it" (SOMET-315). Deriving the name set from the same rows keeps them from
   // describing two different snapshots of the table.
   const biomeRows = (await pool.query('SELECT name, creature_types FROM biomes')).rows;
-  const catalogs = {
+  return {
     biomeNames: new Set(biomeRows.map((r) => r.name)),
     biomeCreatureTypes: new Map(
       biomeRows.map((r) => [r.name, Array.isArray(r.creature_types) ? r.creature_types : []])),
     creatureTypeNames: new Set(
       (await pool.query('SELECT name FROM entity_types WHERE is_creature = true')).rows.map((r) => r.name)),
     pointArtTypes: await loadPointTypeNames(pool),
+    // SOMET-609: boss tiers for the `boss` block's catalog check.
+    bossTiers: new Map((await pool.query(
+      'SELECT name, boss_tier FROM entity_types WHERE is_creature = true AND boss_tier IS NOT NULL',
+    )).rows.map((r) => [r.name, r.boss_tier])),
   };
-  const errors = validateMapSpec(spec, catalogs);
+}
+
+// `moveEntry: false` applies everything EXCEPT the is_entry hand-over (SOMET-534).
+//
+// The default -- the spec's declared entry world becomes THE entry world -- is
+// what `make seed-map` means and is unchanged. The option exists for a caller
+// that applies a spec for its own sake and would only put is_entry back
+// afterwards: seed_map_db.test.js's "every shipped spec applies cleanly".
+// The apply is one transaction, so peers see it all at COMMIT or not at all.
+// What they CAN see is the window between that COMMIT moving is_entry and the
+// caller moving it back -- and guarding that window is what made the test hold
+// the shared entry-world advisory key around the whole apply (60s idle,
+// 122-189s under suite load), starving every other holder. Not moving is_entry
+// in the first place leaves no window to guard.
+//
+// `keepSlots` (SOMET-641) are '<world name>:<edge>' compass slots that OTHER
+// specs declare. The prune spares them and their mirrors, so applying one spec
+// no longer deletes a cross-spec doorway another spec owns. Omitted, the prune
+// behaves exactly as before.
+//
+// `externallyReachable` (SOMET-641, Task 4) is the validator's option of the
+// same name: this spec's world keys another spec's links reach, so a world
+// reached only from outside is not "unreachable". Omitted, validation is
+// exactly as before.
+async function applyMapSpec(pool, spec, { moveEntry = true, keepSlots = [], externallyReachable = null } = {}) {
+  const catalogs = await loadSpecCatalogs(pool);
+  const errors = validateMapSpec(spec, externallyReachable ? { ...catalogs, externallyReachable } : catalogs);
   if (errors.length) {
     throw new Error(`invalid spec "${spec.name}":\n  - ${errors.join('\n  - ')}`);
   }
@@ -187,8 +226,34 @@ async function applyMapSpec(pool, spec) {
       + 'and a null are both read as 1-1.\n');
   }
 
+  // SOMET-641. Resolve every `to_name` (a world another spec owns) in ONE
+  // query, BEFORE the transaction: a missing target refuses the whole spec
+  // with nothing written, naming every missing world at once. A compass
+  // target must be bounded -- an unbounded world has no wall ring and so no
+  // doorway to arrive through.
+  const idByName = new Map();
+  const crossNames = [...new Set(spec.links.filter((l) => l.to_name !== undefined).map((l) => l.to_name))];
+  if (crossNames.length) {
+    const found = (await pool.query(
+      'SELECT id, name, width, height FROM worlds WHERE name = ANY($1::text[])', [crossNames])).rows;
+    for (const r of found) idByName.set(r.name, r);
+    const missing = crossNames.filter((n) => !idByName.has(n));
+    if (missing.length) {
+      throw new Error(`spec "${spec.name}" links to world(s) that do not exist: `
+        + `${missing.map((n) => `"${n}"`).join(', ')} -- apply the spec that owns them first`);
+    }
+    const unbounded = spec.links.filter((l) => l.to_name !== undefined && l.kind !== 'portal')
+      .map((l) => idByName.get(l.to_name))
+      .filter((r) => r.width == null || r.height == null);
+    if (unbounded.length) {
+      throw new Error(`spec "${spec.name}" has a compass link into unbounded world(s): `
+        + `${[...new Set(unbounded.map((r) => `"${r.name}"`))].join(', ')}`);
+    }
+  }
+
   const client = await pool.connect();
   const idByKey = new Map();
+  const targetId = (l) => (l.to_name !== undefined ? idByName.get(l.to_name).id : idByKey.get(l.to));
   try {
     await client.query('BEGIN');
 
@@ -215,15 +280,19 @@ async function applyMapSpec(pool, spec) {
       // position from -- graph_x/graph_y stay NULL, exactly the same NULL
       // the frontend already treats as "no stored position, use the layout
       // fallback" for any world an admin hasn't dragged yet.
-      const pos = w.grid ? graphPosition(w.grid) : { x: null, y: null };
+      //
+      // An explicit `graph` (SOMET-641) wins over the grid: it is a position an
+      // admin dragged in the World Map tab, written back into the spec.
+      const pos = w.graph ? { x: w.graph[0], y: w.graph[1] }
+        : w.grid ? graphPosition(w.grid) : { x: null, y: null };
       const r = await client.query(
         `INSERT INTO worlds (name, seed, chunk_size, width, height,
                              allowed_creature_types, entry_spawn, biomes, biome_cell,
                              graph_x, graph_y, level_min, level_max, density,
                              allows_fast_travel, safe_road_radius, safe_rects,
-                             authored_roads, pens)
+                             authored_roads, pens, dungeon_boss)
          VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,
-                 $18::jsonb,$19::jsonb)
+                 $18::jsonb,$19::jsonb,$20::jsonb)
          ON CONFLICT (name) DO UPDATE
            SET seed = EXCLUDED.seed, chunk_size = EXCLUDED.chunk_size,
                width = EXCLUDED.width, height = EXCLUDED.height,
@@ -252,7 +321,10 @@ async function applyMapSpec(pool, spec) {
                -- Editing a pen's box in a spec therefore moves the authored
                -- rectangle without moving the creatures already standing in it.
                authored_roads = EXCLUDED.authored_roads,
-               pens = EXCLUDED.pens
+               pens = EXCLUDED.pens,
+               -- SOMET-609: re-asserted like every authored column; removing
+               -- the key from a spec removes the boss.
+               dungeon_boss = EXCLUDED.dungeon_boss
          RETURNING id`,
         [w.name, w.seed, w.chunk_size ?? 64, w.width, w.height,
          JSON.stringify(w.allowed_creature_types ?? []),
@@ -266,7 +338,8 @@ async function applyMapSpec(pool, spec) {
          w.safe_road_radius ?? 0,
          JSON.stringify(w.safe_rects ?? []),
          JSON.stringify(w.roads ?? []),
-         JSON.stringify(w.pens ?? [])],
+         JSON.stringify(w.pens ?? []),
+         w.boss ? JSON.stringify(w.boss) : null],
       );
       idByKey.set(w.key, r.rows[0].id);
       worldsWritten += 1;
@@ -290,10 +363,10 @@ async function applyMapSpec(pool, spec) {
     for (const l of spec.links) {
       if (l.kind === 'portal') {
         const { id } = await setPortalLink(
-          client, idByKey.get(l.from), l.from_x, l.from_y, idByKey.get(l.to), l.to_x, l.to_y);
+          client, idByKey.get(l.from), l.from_x, l.from_y, targetId(l), l.to_x, l.to_y);
         portalLinkIds.set(`${l.from}:${l.from_x},${l.from_y}`, id);
       } else {
-        await setLink(client, idByKey.get(l.from), l.edge, idByKey.get(l.to));
+        await setLink(client, idByKey.get(l.from), l.edge, targetId(l));
       }
       linksWritten += 1;
     }
@@ -303,16 +376,20 @@ async function applyMapSpec(pool, spec) {
     // deleted and re-created, which would reset its created_at and lose the
     // only forensic record of how a row got there).
     //
-    // Both directions of every declared link go into keepSlots: setLink writes
+    // Both directions of every declared link go into ownSlots: setLink writes
     // the mirror itself, so a prune that only knew the forward rows would
     // delete every mirror it had just written.
-    const keepSlots = [];
+    //
+    // A to_name link's mirror leaves a world this spec does not own; it is in
+    // this keep set by id, and the prune's inbound pass honours that.
+    const ownSlots = [];
     for (const l of spec.links) {
       if (l.kind === 'portal') continue;
-      keepSlots.push(`${idByKey.get(l.from)}:${l.edge}`);
-      keepSlots.push(`${idByKey.get(l.to)}:${oppositeEdge(l.edge)}`);
+      ownSlots.push(`${idByKey.get(l.from)}:${l.edge}`);
+      ownSlots.push(`${targetId(l)}:${oppositeEdge(l.edge)}`);
     }
-    linksRemoved = await pruneCompassLinks(client, [...idByKey.values()], keepSlots);
+    linksRemoved = await pruneCompassLinks(
+      client, [...idByKey.values()], ownSlots, { keepNames: keepSlots });
 
     // Guard packs are a separate pass (after every portal link exists) and
     // are call-site-guarded the same way village guards are just below:
@@ -600,7 +677,9 @@ async function applyMapSpec(pool, spec) {
     for (const w of spec.worlds) {
       if (!w.chest) continue;
       const worldId = idByKey.get(w.key);
-      const existing = await client.query('SELECT id FROM world_chests WHERE world_id = $1', [worldId]);
+      // expires_at IS NULL: a transient boss-death chest (SOMET-611) is not
+      // the authored chest and must not make this reseed skip writing it.
+      const existing = await client.query('SELECT id FROM world_chests WHERE world_id = $1 AND expires_at IS NULL', [worldId]);
       if (existing.rowCount === 0) {   // idempotent: one authored chest per seeded world
         await insertVaultChest(client, worldId, {
           x: w.chest.x, y: w.chest.y,
@@ -801,7 +880,7 @@ async function applyMapSpec(pool, spec) {
     // LAST: setting is_entry clears it on every other world (index.js:1542),
     // so doing this mid-apply would fight itself as later worlds are written.
     const entry = spec.worlds.find((w) => w.is_entry);
-    if (entry) {
+    if (entry && moveEntry) {
       // One atomic statement via the shared writer (services/entryWorld.js).
       // This site was already safe -- it runs inside the apply transaction, so
       // its old clear-then-set pair could not be observed half-done -- but it
@@ -839,18 +918,63 @@ async function applyMapSpec(pool, spec) {
   }
 }
 
-module.exports = { applyMapSpec, GRID_SPACING, graphPosition, requiredTilesFor };
+// SEED_MAPS_DIR (SOMET-641): the maps dir the seed-sync Maps group reads;
+// tests point both at a temp dir.
+const defaultMapsDir = () => process.env.SEED_MAPS_DIR || path.resolve(__dirname, '../seeds/maps');
+
+// The other spec files in `dir` ([{ name, spec }], by file stem). A sibling
+// that cannot be read as a spec is skipped with a warning: it must not block
+// seeding this one.
+function siblingSpecs(dir, name) {
+  const out = [];
+  for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.map.json')).sort()) {
+    const stem = f.slice(0, -'.map.json'.length);
+    if (stem === name) continue;
+    try {
+      const spec = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+      if (!spec || !Array.isArray(spec.worlds)) throw new Error('not a map spec (no worlds)');
+      out.push({ name: stem, spec: { ...spec, links: Array.isArray(spec.links) ? spec.links : [] } });
+    } catch (e) {
+      console.warn(`WARNING: skipping ${f} for cross-spec doorways: ${e.message}`);
+    }
+  }
+  return out;
+}
+
+// `make seed-map`'s work: apply <dir>/<name>.map.json with the same
+// cross-spec inputs the seed-sync Maps group passes (SOMET-641) -- so the
+// prune keeps doorways a sibling spec declares (to_name) and a world reached
+// only from a sibling validates -- then record it as applied on this PC (the
+// Maps group's "applied here", same hash).
+async function seedSpecFromDir(pool, name, { dir = defaultMapsDir(), moveEntry = true } = {}) {
+  const spec = JSON.parse(fs.readFileSync(path.resolve(dir, `${name}.map.json`), 'utf8'));
+  // Lazy: mapsGroup requires this file lazily too.
+  const { crossSpecInputs } = require('../src/services/seedSync/mapsGroup.js');
+  const all = [{ name, spec }, ...siblingSpecs(dir, name)];
+  const n = await applyMapSpec(pool, spec, { moveEntry, ...crossSpecInputs(all, name) });
+  // A missing map_spec_state (migrations not run) must not fail a seed that
+  // already committed: warn and go on.
+  try {
+    await recordApplied(pool, name, spec);
+  } catch (e) {
+    console.warn(`WARNING: applied ${name}, but could not record it in map_spec_state (${e.message}); `
+      + 'the Seed/Export tab will not know this PC has it -- run migrations.');
+  }
+  return n;
+}
+
+module.exports = { applyMapSpec, loadSpecCatalogs, seedSpecFromDir, GRID_SPACING, graphPosition, requiredTilesFor };
 
 if (require.main === module) {
   const name = process.env.SPEC;
   if (!name) { console.error('SPEC is required, e.g. make seed-map SPEC=vale-region'); process.exit(1); }
-  const file = path.resolve(__dirname, '../seeds/maps', `${name}.map.json`);
+  const file = path.resolve(defaultMapsDir(), `${name}.map.json`);
   if (!fs.existsSync(file)) { console.error(`no such spec: ${file}`); process.exit(1); }
   const env = dotenv.config({ path: path.resolve(__dirname, '../../.env') }).parsed || {};
   const url = process.env.DATABASE_URL || env.DATABASE_URL;
   if (!url) { console.error('DATABASE_URL is not set in .env'); process.exit(1); }
   const pool = new Pool({ connectionString: url });
-  applyMapSpec(pool, JSON.parse(fs.readFileSync(file, 'utf8')))
+  seedSpecFromDir(pool, name)
     .then((n) => {
       console.log(
         `applied ${name}: ${n.worlds} worlds, ${n.links} links, `

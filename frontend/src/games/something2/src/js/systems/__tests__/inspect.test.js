@@ -71,6 +71,28 @@ describe("screen rects match what the renderer paints", () => {
     // creature standing in front of them.
     expect(drawableScreenRect({ kind: "wall", ref: { x: 0, y: 0 } })).toBeNull();
   });
+
+  // SOMET-588: a merchant/bank/worldchest whose `art` resolves to a catalog
+  // def draws a full art body (drawPointBody), not the 11px placeholder
+  // diamond -- the hit rect must grow to match, same anchor as drawEntity's
+  // bottom-aligned box, or most of a 100px body reads as empty terrain.
+  it("drawableScreenRect uses the art body's box, not the placeholder radius, once art resolves", () => {
+    const entityDefs = { stall: { render_mode: "static", image: "stall.png", displayWidth: 90, displayHeight: 120 } };
+    const d = { kind: "merchant", ref: { x: 700, y: 700, art: "stall" } };
+    const s = worldToScreen(700, 700);
+    expect(drawableScreenRect(d, entityDefs)).toEqual({ x: s.x - 45, y: s.y - 120, w: 90, h: 120 });
+  });
+
+  it("falls back to the placeholder radius when the art name does not resolve", () => {
+    const entityDefs = { stall: { render_mode: "static", image: "stall.png", displayWidth: 90, displayHeight: 120 } };
+    const d = { kind: "merchant", ref: { x: 700, y: 700, art: null } };
+    expect(drawableScreenRect(d, entityDefs)).toEqual(markerScreenRect(d.ref, 11));
+  });
+
+  it("falls back to the placeholder radius when no catalog is passed at all", () => {
+    const d = { kind: "merchant", ref: { x: 700, y: 700, art: "stall" } };
+    expect(drawableScreenRect(d)).toEqual(markerScreenRect(d.ref, 11));
+  });
 });
 
 describe("pickDrawable", () => {

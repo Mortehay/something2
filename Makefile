@@ -1,6 +1,7 @@
-.PHONY: up down build logs restart rebuild clean nuke shell-backend shell-frontend db-shell \
+.PHONY: git-helper git-helper-stop git-helper-status seed-sync-status seed-sync-export seed-sync-seed up down build logs restart rebuild clean nuke shell-backend shell-frontend db-shell \
         engine-build engine-test engine-up engine-down engine-logs engine-shell engine-rebuild \
         redis-shell admin-password admin-password-rotate seed-catalogs seed-map seed-passive-tree \
+        seed-quests seed-all seed \
         art-export art-seed audio-export audio-seed tiles-generate tiles-export tiles-seamless tiles-seed \
         entities-generate entities-export entities-cutout entities-seed \
         entities-restyle-prompts art-describe audio-describe \
@@ -236,6 +237,9 @@ admin-password-rotate:
 seed-catalogs:
 	$(COMPOSE) exec -T backend node scripts/seed-catalogs.js
 
+seed-quests:
+	$(COMPOSE) exec -T backend node scripts/seed-quests.js
+
 # --- Catalog art: export / seed (SOMET-572) ------------------------------
 #
 # Every generated image lives in MinIO with a job-scoped key in a catalog row;
@@ -258,6 +262,42 @@ art-export:
 art-seed:
 	$(COMPOSE) exec -T backend node scripts/seed-art.js \
 		$(if $(KIND),--kind="$(KIND)") $(if $(ONLY),--only="$(ONLY)") $(if $(FORCE),--force)
+
+# --- Seed/Export (SOMET-639) -----------------------------------------------
+#
+# Headless twin of the admin Seed/Export tab. GROUP=all = every group, in seed
+# order; export/seed refuse to run without an explicit GROUP. Exit 0 ok, 2 a group was refused, 1 error.
+#
+#   make seed-sync-status [GROUP=items]
+#   make seed-sync-export GROUP=items|all
+#   make seed-sync-seed   GROUP=items|all [RESOLVE=git|local]
+#
+# seed refuses (undecided) a group with rows edited here unless RESOLVE is set;
+# RESOLVE never overrides a blocked delete or a key clash (those stay local).
+# Validation is make-native (no shell sees GROUP/RESOLVE before it is checked).
+SEED_SYNC_GROUP_OK = $(and $(GROUP),$(if $(subst _,,$(subst a,,$(subst b,,$(subst c,,$(subst d,,$(subst e,,$(subst f,,$(subst g,,$(subst h,,$(subst i,,$(subst j,,$(subst k,,$(subst l,,$(subst m,,$(subst n,,$(subst o,,$(subst p,,$(subst q,,$(subst r,,$(subst s,,$(subst t,,$(subst u,,$(subst v,,$(subst w,,$(subst x,,$(subst y,,$(subst z,,$(GROUP)))))))))))))))))))))))))))),,ok))
+define SEED_SYNC_CHECK_GROUP_REQ
+$(if $(SEED_SYNC_GROUP_OK),:,echo 'GROUP=<group id>|all is required (lowercase letters and _ only)' >&2; exit 1)
+endef
+define SEED_SYNC_CHECK_GROUP_OPT
+$(if $(GROUP),$(if $(SEED_SYNC_GROUP_OK),:,echo 'GROUP must be lowercase letters and _ only' >&2; exit 1),:)
+endef
+define SEED_SYNC_CHECK_RESOLVE
+$(if $(RESOLVE),$(if $(filter git local,$(RESOLVE)),:,echo 'RESOLVE must be git or local' >&2; exit 1),:)
+endef
+
+seed-sync-status:
+	@$(call SEED_SYNC_CHECK_GROUP_OPT)
+	$(COMPOSE) exec -T backend node scripts/seed-sync.js status $(if $(GROUP),--group='$(GROUP)')
+
+seed-sync-export:
+	@$(call SEED_SYNC_CHECK_GROUP_REQ)
+	$(COMPOSE) exec -T backend node scripts/seed-sync.js export $(if $(filter all,$(GROUP)),--all,--group='$(GROUP)')
+
+seed-sync-seed:
+	@$(call SEED_SYNC_CHECK_GROUP_REQ)
+	@$(call SEED_SYNC_CHECK_RESOLVE)
+	$(COMPOSE) exec -T backend node scripts/seed-sync.js seed $(if $(filter all,$(GROUP)),--all,--group='$(GROUP)') $(if $(RESOLVE),--resolve='$(RESOLVE)')
 
 # --- Audio clips -----------------------------------------------------------
 #
@@ -439,6 +479,45 @@ reseed-map:
 	$(MAKE) seed-catalogs
 	$(MAKE) seed-map SPEC=$(SPEC)
 
+# --- Complete seed (runs all seed targets in dependency order) --------------
+#
+# Seeding order:
+#   1. seed-catalogs      (tiles, biomes, decorations, creatures, loot, classes)
+#   2. seed-passive-tree  (passive skill tree)
+#   3. seed-quests        (storyline quests)
+#   4. art-seed           (committed textures -> MinIO + catalog rows)
+#   5. audio-seed         (committed audio clips -> MinIO + bindings)
+#   6. seed-map           (default SPEC=vale-region, or pass SPEC=<name>; skip with NO_MAP=1)
+#
+# Flags passed through:
+#   SPEC=<name>           map spec to seed (default: vale-region)
+#   NO_MAP=1              skip seeding map
+#   FORCE=1               overwrite existing art and force-reseed passive tree
+#   KIND=<kinds>          limit art-seed and audio-seed to specific kinds
+#   ONLY=<subjects>       limit art-seed and audio-seed to specific subjects
+#
+seed-all:
+	@echo "==> [1/6] Seeding catalogs (tiles, biomes, creatures, decorations, classes)..."
+	@$(MAKE) --no-print-directory seed-catalogs
+	@echo "==> [2/6] Seeding passive skill tree..."
+	@$(MAKE) --no-print-directory seed-passive-tree $(if $(FORCE),FORCE=$(FORCE),)
+	@echo "==> [3/6] Seeding storyline quests..."
+	@$(MAKE) --no-print-directory seed-quests
+	@echo "==> [4/6] Seeding art textures (MinIO)..."
+	@$(MAKE) --no-print-directory art-seed $(if $(KIND),KIND=$(KIND),) $(if $(ONLY),ONLY=$(ONLY),) $(if $(FORCE),FORCE=$(FORCE),)
+	@echo "==> [5/6] Seeding audio clips (MinIO)..."
+	@$(MAKE) --no-print-directory audio-seed $(if $(KIND),KIND=$(KIND),) $(if $(ONLY),ONLY=$(ONLY),) $(if $(FORCE),FORCE=$(FORCE),)
+	@if [ -z "$(NO_MAP)$(NOMAP)" ]; then \
+		echo "==> [6/6] Seeding map ($(or $(SPEC),vale-region))..."; \
+		$(MAKE) --no-print-directory seed-map SPEC=$(or $(SPEC),vale-region); \
+	else \
+		echo "==> [6/6] Skipping map seeding (NO_MAP is set)"; \
+	fi
+	@echo
+	@echo "==> All seeds applied successfully!"
+
+seed: seed-all
+
 # --- Orange Pi production stack (SOMET-423) --------------------------------
 # compose/orangepi/ is the production-shaped stack: see the README's
 # "Production stack (local verification)" section for how to bring it up.
@@ -602,3 +681,38 @@ pi-db-shell:
 # Requires CONFIRM=<the board's address>. See compose/orangepi/scripts/reset.sh.
 pi-reset:
 	@bash compose/orangepi/scripts/reset.sh
+
+# --- Host git helper (Seed/Export git buttons) ------------------------------
+# Runs on the HOST as your user so it can use your git + SSH setup; the backend
+# container has no git and never sees a push key. See tools/git-helper/README.md.
+# Stopping goes by pid file, never by process name.
+GIT_HELPER_RUN = backend/run
+GIT_HELPER_PORT_ENV = $(if $(GIT_HELPER_PORT),GIT_HELPER_PORT=$(GIT_HELPER_PORT),)
+
+git-helper:
+	@mkdir -p $(GIT_HELPER_RUN) && chmod 700 $(GIT_HELPER_RUN)
+	@if [ -f $(GIT_HELPER_RUN)/git-helper.pid ] && kill -0 $$(cat $(GIT_HELPER_RUN)/git-helper.pid) 2>/dev/null; then \
+	  echo "git-helper already running (pid $$(cat $(GIT_HELPER_RUN)/git-helper.pid)); 'make git-helper-stop' first"; exit 1; fi
+	@$(GIT_HELPER_PORT_ENV) setsid nohup node tools/git-helper/server.js >$(GIT_HELPER_RUN)/git-helper.log 2>&1 </dev/null & echo $$! >$(GIT_HELPER_RUN)/git-helper.pid
+	@sleep 1
+	@if kill -0 $$(cat $(GIT_HELPER_RUN)/git-helper.pid) 2>/dev/null; then \
+	  cat $(GIT_HELPER_RUN)/git-helper.log; echo "pid $$(cat $(GIT_HELPER_RUN)/git-helper.pid), log $(GIT_HELPER_RUN)/git-helper.log"; \
+	else echo "git-helper failed to start:"; cat $(GIT_HELPER_RUN)/git-helper.log; rm -f $(GIT_HELPER_RUN)/git-helper.pid; exit 1; fi
+
+git-helper-stop:
+	@sock="$(abspath $(GIT_HELPER_RUN))/git-helper.sock"; \
+	if [ -f $(GIT_HELPER_RUN)/git-helper.pid ]; then \
+	  pid=$$(cat $(GIT_HELPER_RUN)/git-helper.pid); kill $$pid 2>/dev/null || true; \
+	  echo "git-helper: SIGTERM sent to pid $$pid, draining (up to 130s)"; \
+	  i=0; while kill -0 $$pid 2>/dev/null && [ $$i -lt 433 ]; do sleep 0.3; i=$$((i+1)); done; \
+	  if kill -0 $$pid 2>/dev/null; then echo "error: git-helper pid $$pid is still alive after 130s; pid file kept ($(GIT_HELPER_RUN)/git-helper.pid)"; exit 1; fi; \
+	  rm -f $(GIT_HELPER_RUN)/git-helper.pid; \
+	else echo "git-helper: no pid file, nothing to stop"; fi; \
+	if ss -xln 2>/dev/null | grep -F "$$sock"; then echo "error: something is still listening on $$sock"; exit 1; fi; \
+	$(if $(GIT_HELPER_PORT),if ss -tln 2>/dev/null | grep -E "127\.0\.0\.1:$(GIT_HELPER_PORT)[[:space:]]"; then echo "error: something is still listening on 127.0.0.1:$(GIT_HELPER_PORT)"; exit 1; fi; ,) \
+	echo "git-helper stopped (nothing listening on $$sock$(if $(GIT_HELPER_PORT), or 127.0.0.1:$(GIT_HELPER_PORT),))"
+
+git-helper-status:
+	@if [ -f $(GIT_HELPER_RUN)/git-helper.pid ] && kill -0 $$(cat $(GIT_HELPER_RUN)/git-helper.pid) 2>/dev/null; then \
+	  echo "git-helper running, pid $$(cat $(GIT_HELPER_RUN)/git-helper.pid)"; head -1 $(GIT_HELPER_RUN)/git-helper.log; \
+	else echo "git-helper not running (make git-helper)"; fi

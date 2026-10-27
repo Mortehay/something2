@@ -253,3 +253,40 @@ test('every village in every checked-in map spec fits the screen budget', () => 
   }
   assert.ok(seen >= 4, `expected the four authored villages, found ${seen} — the test is not exercising anything`);
 });
+
+// SOMET-534. The same "four DISTINCT tiles" rule villageScreenBudget_db.test.js
+// asserts against the live rows, checked here against the AUTHORED specs so it
+// needs no database and cannot be starved by a peer holding the entry key.
+//
+// That DB-side assertion skipped on most full runs for months (the entry key
+// was held for minutes by seed_map_db), and in that time Blackfen Sinks shipped
+// an N-gate village whose spawn was copied from the E-gate villages' shape and
+// landed on a guard post. Nothing noticed until the reader finally ran. A rule
+// that only lives in a test that rarely executes is not a rule.
+test('every authored village keeps spawn, merchant and both guard posts on four distinct tiles', () => {
+  const { villageMerchantPost, villageGatePosts } = require('../src/services/mapService.js');
+  const MAPS_DIR = path.join(__dirname, '..', 'seeds', 'maps');
+  const tileOf = (x, y) => `${Math.floor(y / 100)},${Math.floor(x / 100)}`;
+  let seen = 0;
+  for (const file of fs.readdirSync(MAPS_DIR).filter((f) => f.endsWith('.map.json'))) {
+    const spec = JSON.parse(fs.readFileSync(path.join(MAPS_DIR, file), 'utf8'));
+    for (const w of spec.worlds ?? []) {
+      for (const v of (w.village ? [w.village] : w.villages ?? [])) {
+        seen++;
+        const box = {
+          minRow: v.min_row, minCol: v.min_col, width: v.width, height: v.height, gateEdge: v.gate_edge,
+        };
+        const merchant = villageMerchantPost(box);
+        const tiles = [
+          tileOf(v.spawn_x, v.spawn_y),
+          tileOf(merchant.x, merchant.y),
+          ...villageGatePosts(box).map((p) => tileOf(p.x, p.y)),
+        ];
+        assert.equal(new Set(tiles).size, 4,
+          `${file} "${w.name}" village "${v.key}": spawn/merchant/guard posts collide -- `
+          + `tiles [spawn, merchant, guard, guard] = ${JSON.stringify(tiles)}`);
+      }
+    }
+  }
+  assert.ok(seen >= 5, `expected at least the five authored villages, found ${seen} -- the check is vacuous`);
+});

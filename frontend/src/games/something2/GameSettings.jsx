@@ -492,7 +492,7 @@ export default function GameSettings({ gameRef }) {
                         type="button"
                         $listening={isListening}
                         autoFocus={isListening}
-                        onClick={(e) => {
+                        onClick={() => {
                           if (!isListening) {
                             setListeningAction(def.key);
                           }

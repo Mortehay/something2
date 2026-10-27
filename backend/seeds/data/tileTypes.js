@@ -73,13 +73,13 @@ const DEFAULT_TILE_TYPES = [
   // From MAP_TILE_TYPES in 1714440027000_bounded_worlds.js. These tiles are
   // stamped (not WFC-placed), so valid_neighbors is '[]' in that migration —
   // an empty array here is correct and matches it.
-  { name: 'map_wall', color: '#2b2b2b', walkable: false, speed: 1.0, image: '', valid_neighbors: [], prompt: wall('mortared grey stone block wall') },
-  { name: 'map_doorway', color: '#6b4f2a', walkable: true, speed: 1.0, image: '', valid_neighbors: [], prompt: wall('heavy wooden door set in a stone frame') },
+  // Structural overlay tiles (stamped explicitly, not WFC-placed), so valid_neighbors is '[]'.
+  { name: 'map_wall', color: '#2b2b2b', walkable: false, speed: 1.0, image: '', valid_neighbors: [], prompt: wall('mortared grey stone block wall'), wall_height: 48 },
+  { name: 'map_doorway', color: '#6b4f2a', walkable: true, speed: 1.0, image: '', valid_neighbors: [], prompt: wall('heavy wooden door set in a stone frame'), wall_height: 24 },
 
-  // From VILLAGE_TILE_TYPES in 1714440029000_villages_and_binds.js. Also
-  // stamped, not WFC-placed, so valid_neighbors is '[]' there too.
-  { name: 'wooden_wall', color: '#6b4a2a', walkable: false, speed: 1.0, image: '', valid_neighbors: [], prompt: wall('vertical wooden plank wall') },
-  { name: 'village_gate', color: '#c9a24b', walkable: true, speed: 1.0, image: '', valid_neighbors: [], prompt: wall('heavy timber gate with iron bands') },
+  // From VILLAGE_TILE_TYPES in 1714440029000_villages_and_binds.js.
+  { name: 'wooden_wall', color: '#6b4a2a', walkable: false, speed: 1.0, image: '', valid_neighbors: [], prompt: wall('vertical wooden plank wall'), wall_height: 48 },
+  { name: 'village_gate', color: '#c9a24b', walkable: true, speed: 1.0, image: '', valid_neighbors: [], prompt: wall('heavy timber gate with iron bands'), wall_height: 24 },
 
   // --- P3 (SOMET-247): biome signature floors -----------------------------
   //

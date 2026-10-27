@@ -84,21 +84,34 @@ async function propose(provider, { context, kind }, { fetchImpl = fetch } = {}) 
 // group's model) instead of letting each call pull in its own model and
 // evict the other's.
 //
-// Which gateway model each drain group needs. Read 2026-10-03 (plan Task 0)
-// from GET /api/model-gateway, /api/text/models and the "requested <model>"
-// text of failed rows in the box's job log (GET /api/audio?limit=200):
+// Which gateway model each drain group needs now lives on the audio provider
+// row (ai_providers.models_by_group, keyed by drain group), edited in the
+// admin; modelForGroup reads it. GATEWAY_MODEL_FOR_GROUP below is only the
+// HISTORICAL value the migration backfilled existing audio rows with -- read
+// 2026-10-03 (plan Task 0) from GET /api/model-gateway and the "requested
+// <model>" text of failed rows in the box's job log:
 //   music     audio:ace-step      (11 failed rows named it)
 //   ambience  audio:stable-audio  (one failed row named it)
-// The sfx groups (sfx_realistic, sfx_retro) are UNKNOWN -- no refusal in the
-// log named one -- so they have no entry: the drain skips the up-front switch
-// for them and, when a call is refused, switches to the model the refusal
-// names (requestedModel). The text model is not here: it is
-// `brain:${textProvider.model}`, since /api/text/models lists ids without
-// the prefix.
+// The sfx groups had no known model, so they have no entry: a group with no
+// configured model skips the up-front switch and, when a call is refused,
+// switches to the model the refusal names (requestedModel). The text model
+// is not here: it is `brain:${textProvider.model}`, since /api/text/models
+// lists ids without the prefix. Nothing at runtime reads this constant.
 const GATEWAY_MODEL_FOR_GROUP = Object.freeze({
   music: 'audio:ace-step',
   ambience: 'audio:stable-audio',
 });
+
+// The gateway model for a drain group, or null (no up-front switch). A model
+// `learned` from a refusal in the current drain wins over the provider row:
+// it exists only after the box refused the configured one and named another,
+// so preferring the row would switch back to the refused model every claim.
+function modelForGroup(provider, group, learned) {
+  const l = learned && learned[group];
+  if (typeof l === 'string' && l) return l;
+  const c = provider && provider.models_by_group && provider.models_by_group[group];
+  return typeof c === 'string' && c ? c : null;
+}
 
 // The model a gateway refusal asked for -- "requested audio:ace-step, but
 // brain:... holds the card" -> 'audio:ace-step' -- or null. Trailing
@@ -339,5 +352,5 @@ async function generateSfxPack(provider, req, { fetchImpl = fetch } = {}) {
 }
 
 module.exports = {
-  listStyles, propose, generateTrack, generateSfx, generateSfxPack, switchModel, requestedModel, isGatewayRefusal, GATEWAY_MODEL_FOR_GROUP,
+  listStyles, propose, generateTrack, generateSfx, generateSfxPack, switchModel, requestedModel, isGatewayRefusal, GATEWAY_MODEL_FOR_GROUP, modelForGroup,
 };

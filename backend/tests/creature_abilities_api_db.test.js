@@ -305,3 +305,34 @@ test('slots are renumbered from 1 with no gaps', async (t) => {
     await dropUser(dbPool, admin && admin.id);
   }
 });
+
+// SOMET-603: 'arcane' must survive the validator AND the CHECK
+// (migration 1714440672000). The validator-passes/CHECK-500s shape is only
+// visible with a real insert.
+test('an arcane ability round-trips the database; an unknown element is a 400', async (t) => {
+  if (!dbReady(t, 'creates a zz behaviour with an arcane ability and reads it back')) return;
+  let admin;
+  try {
+    admin = await createTestAdmin(dbPool, 'arcane');
+    const ok = await request(app).post('/api/creature-behaviors').set(authHeaderFor(admin)).send({
+      ...FIXTURE_BODY,
+      name: 'zzApiArcane',
+      abilities: [abilityFixture({ name: 'Bolt', element: 'arcane' })],
+    });
+    assert.equal(ok.status, 201, JSON.stringify(ok.body));
+    const row = await dbPool.query(
+      `SELECT a.element FROM creature_abilities a JOIN creature_behaviors b ON b.id = a.behavior_id WHERE b.name = 'zzApiArcane'`);
+    assert.deepEqual(row.rows.map((r) => r.element), ['arcane']);
+
+    const bad = await request(app).post('/api/creature-behaviors').set(authHeaderFor(admin)).send({
+      ...FIXTURE_BODY,
+      name: 'zzApiPlasma',
+      abilities: [abilityFixture({ element: 'plasma' })],
+    });
+    assert.equal(bad.status, 400);
+  } finally {
+    await deleteBehaviorByName(dbPool, 'zzApiArcane');
+    await deleteBehaviorByName(dbPool, 'zzApiPlasma');
+    await dropUser(dbPool, admin?.id);
+  }
+});

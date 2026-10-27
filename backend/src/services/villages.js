@@ -1,6 +1,6 @@
 const {
   villageGatePosts, villageGatePoint, villageMerchantPost, villageBankPost, villageGemMerchantPost,
-  villageSkillMerchantPost,
+  villageSkillMerchantPost, villageQuestGiverPost,
 } = require('./mapService');
 const { seedBaseCatalog } = require('./merchantStock');
 const { MAP_TILE_SIZE } = require('../authority/coords');
@@ -283,7 +283,7 @@ function villageGeometryError(village) {
 async function fetchVillages(pool, worldId) {
   const r = await pool.query(
     `SELECT v.id, v.min_row, v.min_col, v.width, v.height, v.gate_edge, v.spawn_x, v.spawn_y,
-            v.merchant_x, v.merchant_y,
+            v.merchant_x, v.merchant_y, v.spec_key,
             ma.name AS merchant_art, ba.name AS bank_art,
             ga.name AS gem_merchant_art, sa.name AS skill_merchant_art
        FROM villages v
@@ -318,8 +318,13 @@ async function fetchVillages(pool, worldId) {
       geometry,
       merchantX == null || merchantY == null ? null : { x: merchantX, y: merchantY },
     );
+    const questGiver = villageQuestGiverPost(
+      geometry,
+      merchantX == null || merchantY == null ? null : { x: merchantX, y: merchantY },
+    );
     return {
       id: v.id,
+      specKey: v.spec_key,
       ...geometry,
       spawnX: v.spawn_x, spawnY: v.spawn_y,
       merchantX,
@@ -328,6 +333,7 @@ async function fetchVillages(pool, worldId) {
       gemMerchantX: null,
       gemMerchantY: null,
       skillMerchantX: skillMerchant.x, skillMerchantY: skillMerchant.y,
+      questGiverX: questGiver.x, questGiverY: questGiver.y,
       // SOMET-582: each post's own art binding (name), resolved against the
       // kind default by the caller's resolvePointArt.
       merchantArt: v.merchant_art ?? null,

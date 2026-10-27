@@ -9,36 +9,22 @@ const ENTRY_LOCK_KEY = 626526517;
 
 // How long a READER of this key should wait before giving up (SOMET-534).
 //
-// The 6s default is calibrated for a key whose holders are a handful of
-// queries. This one's holders each apply a whole map spec. A reader on the
-// default never got in: four whole-database invariants in
-// villageScreenBudget_db.test.js skipped on EVERY full run -- measured at 4
-// skips per run, for months.
+// HEADROOM NOW, NOT A BOUND ON A KNOWN SLOW HOLDER. Until the SOMET-534 rework,
+// seed_map_db.test.js held this key around every shipped-spec apply -- 61.6s
+// for one p5-descent apply idle, 122-219s under suite load -- and this number
+// was chasing that hold (45s lost, 90s lost under load). That test no longer
+// takes the key at all: it applies with `moveEntry: false`, so is_entry never
+// leaves its world and there is no window to guard. Re-measured afterwards
+// over the seven files that share the key, under host load ~35:
 //
-// THE NUMBER COMES FROM THE LONGEST SINGLE HOLD, measured rather than averaged:
+//     before   holds max 219374ms   reader skips 2   seed_map_db timed out
+//     after    holds max   1973ms   reader skips 0   seed_map_db passed
 //
-//     p5-descent   first 61.6s   second 58.8s
-//     vale-region  first 13.9s   second 11.4s
-//
-// The applies are NOT uniform -- p5-descent seeds 66 worlds and ~98k creatures
-// against vale-region's 34 and ~29k. Dividing the old 121s window by four
-// applies suggests ~30s and is wrong; a 45s wait was tried on that arithmetic
-// and still lost twice per run, because one apply alone exceeds it.
-//
-// 90s is ~1.5x the longest measured hold. It is NOT a budget for the file: a
-// reader can never wait longer than a writer actually holds, so the four
-// acquisitions together cannot exceed the ~146s of total holding -- comfortably
-// inside the runner's 420s per-file timeout. The cap only has to clear the
-// longest single hold, and it is stated as an absolute so that reading this
-// tells you what it does.
-//
-// This is only workable because the 121-SECOND single window in
-// seed_map_db.test.js has been split into one window per apply. Against that
-// hold no wait short of the file's whole budget would have worked, which is why
-// the ticket originally wrote off waiting as a dead end.
-//
-// IF p5-descent GROWS, this number has to grow with it. That coupling is the
-// real cost of the approach; the alternative is making seeding itself faster.
+// Every remaining holder applies a small zz* fixture spec. The 90s stays as
+// generous headroom for a loaded machine: a reader only ever waits as long as
+// some writer actually holds, so the cap costs nothing unless a slow holder
+// comes back -- and if one does, skips reappearing here is the signal, not a
+// reason to raise this number again. Shrink the hold instead.
 const ENTRY_LOCK_WAIT_MS = 90000;
 
 // Save whichever world is currently is_entry, run fn, restore it -- and hold a
@@ -140,6 +126,9 @@ async function withEntryPreserved(pool, fn) {
 //     SECONDS of a ~300s run. Nothing is deleted, so loadWorld succeeds and it
 //     is joinPolicy that refuses: `not-reachable`, on the wire as `you cannot
 //     travel there`.
+//     (Historical since SOMET-534: that test now applies with
+//     `moveEntry: false` and never borrows the flag. The zz* fixtures still
+//     do, so the reasoning below stands.)
 //
 // THE ADVISORY LOCK CANNOT FIX THIS ONE, and that is measured rather than
 // argued. withAdvisoryLock gives up after LOCK_WAIT_MS (6s) and runs the body

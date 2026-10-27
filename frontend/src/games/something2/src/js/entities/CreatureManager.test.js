@@ -21,6 +21,21 @@ describe('CreatureManager (render-only)', () => {
     expect(m.count()).toBe(1);
   });
 
+  it('onCreatureRemoved fires once per creature dropped from the snapshot (SOMET-656)', () => {
+    const m = new CreatureManager();
+    const removed = [];
+    m.onCreatureRemoved = (c) => removed.push(c.id);
+    m.applySnapshot([
+      { id: 'a', type: 'Wolf', x: 0, y: 0, facing: 'S', hp: 10 },
+      { id: 'b', type: 'Wolf', x: 0, y: 0, facing: 'S', hp: 10 },
+    ]);
+    expect(removed).toEqual([]);
+    m.applySnapshot([{ id: 'b', type: 'Wolf', x: 0, y: 0, facing: 'S', hp: 10 }]);
+    expect(removed).toEqual(['a']);
+    m.applySnapshot([]);
+    expect(removed).toEqual(['a', 'b']);
+  });
+
   it('interpolate moves x,y toward the target', () => {
     const m = new CreatureManager();
     m.applySnapshot([{ id: 'a', type: 'Wolf', x: 0, y: 0, facing: 'S', hp: 10, color: '#000' }]);

@@ -227,8 +227,13 @@ function composeStats({ base, passives = [], gear = [] } = {}) {
       sources[m.stat][m.source] += m.value;
     } else if (m.kind === 'rule' && Object.prototype.hasOwnProperty.call(RULE_COMBINE, m.rule)) {
       const mode = RULE_COMBINE[m.rule];
-      if (mode === 'product') rules[m.rule] = round4(rules[m.rule] * m.value);
-      else if (mode === 'sum') rules[m.rule] += m.value;
+      if (mode === 'product') {
+        if (m.value >= 1) {
+          rules[m.rule] = round4(rules[m.rule] + (m.value - 1));
+        } else {
+          rules[m.rule] = round4(Math.max(0.10, rules[m.rule] - (1 - m.value)));
+        }
+      } else if (mode === 'sum') rules[m.rule] += m.value;
       else rules[m.rule] = rules[m.rule] == null ? m.value : Math.min(rules[m.rule], m.value);
     } else if (m.kind === 'resource' && Object.prototype.hasOwnProperty.call(pools, m.pool)) {
       // FLAT, not percent: "+150 maximum life" is 150 hit points. Applied on

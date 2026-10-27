@@ -92,6 +92,28 @@ export function zoomViewBox(box, factor, fx, fy) {
   };
 }
 
+// A client (screen) point to world units for an svg showing `box` with
+// preserveAspectRatio "xMidYMid meet" inside `rect` (getBoundingClientRect):
+// the box is scaled to fit the tighter axis and centred on the slack one.
+export function clientToWorld(box, rect, clientX, clientY) {
+  const upp = Math.max(box.w / rect.width, box.h / rect.height);
+  return {
+    x: box.x + box.w / 2 + (clientX - (rect.left + rect.width / 2)) * upp,
+    y: box.y + box.h / 2 + (clientY - (rect.top + rect.height / 2)) * upp,
+  };
+}
+
+// One wheel step: zoom `box` (null = the tree's own bounds, i.e. never zoomed)
+// about the client point under the cursor. The focus is taken from the box
+// BEING zoomed. The component calls this inside its setBox updater, so wheel
+// events that land before a render chain correctly; a focus taken from the
+// last-rendered box zoomed about a stale point and drifted ~7 px over 12 steps.
+export function wheelZoom(box, bounds, rect, clientX, clientY, factor) {
+  const from = box || bounds;
+  const focus = clientToWorld(from, rect, clientX, clientY);
+  return zoomViewBox(from, factor, focus.x, focus.y);
+}
+
 // Drag by (dx, dy) screen pixels; `unitsPerPx` converts to world units. The
 // box moves opposite to the drag so the content follows the cursor.
 export function panViewBox(box, dx, dy, unitsPerPx) {
@@ -112,22 +134,57 @@ export function panViewBox(box, dx, dy, unitsPerPx) {
 const DRAG_THRESHOLD_PX = 3;
 
 export function dragStart(x, y) {
-  return { x, y, moved: false, pressed: true };
+  return { x, y, ox: x, oy: y, moved: false, pressed: true };
 }
 
 // The delta since the previous move, and the updated state. Nothing to report
 // when there is no press in progress.
-export function dragMove(state, x, y) {
-  if (!state || !state.pressed) return { state, dx: 0, dy: 0 };
+//
+// `moved` is measured from where the press STARTED, not per move: a slow pan
+// in 1 px steps never crosses the threshold one delta at a time, and its
+// trailing click would navigate.
+//
+// `capture` is true on exactly one move: the one that turns the press into a
+// drag. The component captures the pointer THEN, never on pointerdown. A
+// capture taken on the press makes Chrome retarget pointerup and click to the
+// svg, so a node's onClick never fires and a plain click on the tree
+// navigated nowhere (SOMET-571 validation, 2026-10-10).
+//
+// `buttons` is the event's PointerEvent.buttons. 0 means no button is held, so
+// the press's release happened somewhere the svg never heard about (a press
+// that left the svg before it became a drag is not captured yet). That move
+// ends the press and pans nothing; without it, hovering back over the tree
+// with the button up panned it (SOMET-571 re-validation). Omitted = held.
+export function dragMove(state, x, y, buttons) {
+  if (!state || !state.pressed) return { state, dx: 0, dy: 0, capture: false };
+  if (buttons === 0) return { state: dragEnd(state), dx: 0, dy: 0, capture: false };
   const dx = x - state.x;
   const dy = y - state.y;
-  const moved = state.moved || Math.abs(dx) + Math.abs(dy) >= DRAG_THRESHOLD_PX;
-  return { state: { ...state, x, y, moved }, dx, dy };
+  const far = Math.abs(x - state.ox) + Math.abs(y - state.oy) >= DRAG_THRESHOLD_PX;
+  const moved = state.moved || far;
+  return { state: { ...state, x, y, moved }, dx, dy, capture: moved && !state.moved };
 }
 
 export function dragEnd(state) {
   if (!state) return null;
   return { ...state, pressed: false };
+}
+
+// A press released OUTSIDE the svg before it became a drag (so before the
+// capture) never reaches the svg's onPointerUp. The window still hears it, so
+// the tree listens there too, on pointerup and pointercancel, and ends the
+// press in `dragRef` (a React ref). dragEnd is idempotent, so a release that
+// arrives both ways is harmless, and it keeps `moved`, so click gating is
+// unchanged. `target` is the window in the component and any EventTarget in a
+// test. Returns the cleanup, to hand straight back from a useEffect.
+export function endPressOnRelease(target, dragRef) {
+  const end = () => { dragRef.current = dragEnd(dragRef.current); };
+  target.addEventListener('pointerup', end);
+  target.addEventListener('pointercancel', end);
+  return () => {
+    target.removeEventListener('pointerup', end);
+    target.removeEventListener('pointercancel', end);
+  };
 }
 
 // Whether the click may act. A click after a moved press is the tail of the
@@ -141,7 +198,27 @@ export function dragClick(state) {
 
 // The console defaults to art=missing (the resume filter). A link to a subject
 // that HAS art must widen that, or the click lands on an empty table.
+//
+// The subject goes in `key=`, which the console matches EXACTLY. `q=` is the
+// search box's substring match: q=Mage opened 8 labels (Afterimage,
+// Pyromancy, ...), so 8 of the 128 label links landed on the wrong set.
 export function artConsoleLink(kind, key) {
-  const qs = new URLSearchParams({ kind, art: 'all', q: key });
+  const qs = new URLSearchParams({ kind, art: 'all', key });
   return `/game/art?${qs.toString()}`;
+}
+
+// A fast double-click fires two click handlers before react-router's location
+// has updated between them (SOMET-571 rework 4), so navigating straight off
+// each click pushed two history entries for the SAME destination -- one Back
+// press then landed back on the page it just left.
+//
+// Gated on TIME, not on "have we ever gone to this link": a real second visit
+// -- go back, then click the same node again on purpose -- is a deliberate
+// act well outside a double click's span, and must still navigate. `last` is
+// `{ link, at }` for the most recent navigation, or null before the first.
+export const DOUBLE_CLICK_GUARD_MS = 500;
+
+export function shouldNavigate(last, link, now) {
+  if (!last || last.link !== link) return true;
+  return now - last.at >= DOUBLE_CLICK_GUARD_MS;
 }

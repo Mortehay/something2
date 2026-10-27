@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-05
 **Tickets:** SOMET-547 (history), SOMET-548 (notes), SOMET-549 (region marking)
-**Status:** design approved; slice A in progress
+**Status:** shipped (slices A/B/C merged 2026-09-05; Plane tickets closed 2026-10-13)
 
 ## The problem
 

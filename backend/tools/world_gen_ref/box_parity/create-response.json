@@ -1,0 +1,355 @@
+{
+  "name": "parity-somet644",
+  "author": "biomes chosen deterministically",
+  "params": {
+    "name": "parity-somet644",
+    "worlds": 3,
+    "target_per_screen": 4,
+    "size": 64,
+    "chunk_size": 32,
+    "biome_cell": 32,
+    "theme": null,
+    "sfx_engine": null,
+    "author": "rules",
+    "biome_plan": null
+  },
+  "report": {
+    "worlds": [
+      {
+        "key": "parity_somet644_hub",
+        "name": "parity-somet644 Crossing",
+        "biomes": [
+          "Meadow"
+        ],
+        "density": "normal",
+        "per_screen": 4.1,
+        "creatures": 74,
+        "area": 4096,
+        "biome_multiplier": 0.5,
+        "flora": [
+          "bush",
+          "rose_bush",
+          "Tree",
+          "Stone"
+        ],
+        "creature_types": [
+          "Slime",
+          "Wolf",
+          "Beast Swarm",
+          "Beast Skirmisher",
+          "Beast Line"
+        ],
+        "variety": 5,
+        "leaders": 0,
+        "depth": "surface",
+        "socket_kib_s": 149.6,
+        "verdict": "ok"
+      },
+      {
+        "key": "parity_somet644_1",
+        "name": "parity-somet644 1",
+        "biomes": [
+          "Deep Forest",
+          "Frozen Waste"
+        ],
+        "density": "normal",
+        "per_screen": 4.1,
+        "creatures": 74,
+        "area": 4096,
+        "biome_multiplier": 1.05,
+        "flora": [
+          "Tree",
+          "pine_tree",
+          "dead_tree",
+          "bush",
+          "Stone",
+          "IceRock"
+        ],
+        "creature_types": [
+          "Wolf",
+          "Bat",
+          "Skeleton",
+          "Woodland Swarm",
+          "Woodland Skirmisher",
+          "Woodland Line",
+          "Tundra Swarm",
+          "Tundra Skirmisher",
+          "Tundra Line"
+        ],
+        "variety": 9,
+        "leaders": 0,
+        "depth": "surface",
+        "socket_kib_s": 149.6,
+        "verdict": "ok"
+      },
+      {
+        "key": "parity_somet644_2",
+        "name": "parity-somet644 2",
+        "biomes": [
+          "Catacombs",
+          "Crystal Hollows",
+          "Blightworks"
+        ],
+        "density": "normal",
+        "per_screen": 4.1,
+        "creatures": 74,
+        "area": 4096,
+        "biome_multiplier": 1.97,
+        "flora": [
+          "Stone",
+          "IceRock",
+          "dead_tree"
+        ],
+        "creature_types": [
+          "Undead Swarm",
+          "Undead Skirmisher",
+          "Undead Line",
+          "Crystal Swarm",
+          "Crystal Skirmisher",
+          "Crystal Line",
+          "Blight Swarm",
+          "Blight Skirmisher",
+          "Blight Line"
+        ],
+        "variety": 9,
+        "leaders": 0,
+        "depth": "deep",
+        "socket_kib_s": 149.6,
+        "verdict": "ok"
+      }
+    ],
+    "problems": [],
+    "caveats": [],
+    "ok": true,
+    "totals": {
+      "worlds": 3,
+      "creatures": 222,
+      "mean_per_screen": 4.1,
+      "min_per_screen": 4.1,
+      "max_per_screen": 4.1,
+      "empty_worlds": 0,
+      "creature_types": 22,
+      "leaders": 0
+    },
+    "notes": [
+      "Creature counts are scatter only; packs are not modelled, so every figure is a floor. See PACKS_NOT_MODELLED.",
+      "One screen is ~225 tiles at something2's fixed 1280x720 canvas."
+    ]
+  },
+  "spec_url": "/api/worlds/parity-somet644",
+  "preview_url": "/api/worlds/parity-somet644/preview.png",
+  "seed_with": "make seed-map SPEC=parity-somet644",
+  "spec": {
+    "name": "parity-somet644",
+    "topology": "region",
+    "worlds": [
+      {
+        "key": "parity_somet644_hub",
+        "name": "parity-somet644 Crossing",
+        "allows_fast_travel": true,
+        "grid": [
+          0,
+          0
+        ],
+        "seed": 7987,
+        "width": 64,
+        "height": 64,
+        "chunk_size": 32,
+        "biomes": [
+          "Meadow"
+        ],
+        "biome_cell": 32,
+        "allowed_creature_types": [
+          "Slime",
+          "Wolf",
+          "Beast Swarm",
+          "Beast Skirmisher",
+          "Beast Line"
+        ],
+        "density": "normal",
+        "is_entry": true,
+        "level_band": [
+          1,
+          2
+        ],
+        "entry_spawn": {
+          "x": 3250,
+          "y": 3250
+        },
+        "village": {
+          "key": "parity-somet644-crossing",
+          "min_row": 30,
+          "min_col": 29,
+          "width": 6,
+          "height": 4,
+          "gate_edge": "E",
+          "spawn_x": 3250,
+          "spawn_y": 3250
+        },
+        "roads": [
+          [
+            [
+              32,
+              32
+            ],
+            [
+              32,
+              62
+            ]
+          ]
+        ],
+        "safe_road_radius": 2,
+        "waypoints": [
+          {
+            "x": 3250,
+            "y": 3250,
+            "name": "parity-somet644 Crossing Waystone"
+          }
+        ]
+      },
+      {
+        "key": "parity_somet644_1",
+        "name": "parity-somet644 1",
+        "allows_fast_travel": false,
+        "grid": [
+          1,
+          0
+        ],
+        "seed": 49304,
+        "width": 64,
+        "height": 64,
+        "chunk_size": 32,
+        "biomes": [
+          "Deep Forest",
+          "Frozen Waste"
+        ],
+        "biome_cell": 32,
+        "allowed_creature_types": [
+          "Wolf",
+          "Bat",
+          "Skeleton",
+          "Woodland Swarm",
+          "Woodland Skirmisher",
+          "Woodland Line",
+          "Tundra Swarm",
+          "Tundra Skirmisher",
+          "Tundra Line"
+        ],
+        "density": "normal",
+        "is_entry": false,
+        "level_band": [
+          1,
+          2
+        ],
+        "roads": [
+          [
+            [
+              32,
+              32
+            ],
+            [
+              62,
+              32
+            ]
+          ],
+          [
+            [
+              32,
+              32
+            ],
+            [
+              32,
+              1
+            ]
+          ]
+        ],
+        "safe_road_radius": 2,
+        "waypoints": [
+          {
+            "x": 3250,
+            "y": 3250,
+            "name": "parity-somet644 1 Waystone"
+          }
+        ]
+      },
+      {
+        "key": "parity_somet644_2",
+        "name": "parity-somet644 2",
+        "allows_fast_travel": false,
+        "grid": [
+          1,
+          1
+        ],
+        "seed": 45036,
+        "width": 64,
+        "height": 64,
+        "chunk_size": 32,
+        "biomes": [
+          "Catacombs",
+          "Crystal Hollows",
+          "Blightworks"
+        ],
+        "biome_cell": 32,
+        "allowed_creature_types": [
+          "Undead Swarm",
+          "Undead Skirmisher",
+          "Undead Line",
+          "Crystal Swarm",
+          "Crystal Skirmisher",
+          "Crystal Line",
+          "Blight Swarm",
+          "Blight Skirmisher",
+          "Blight Line"
+        ],
+        "density": "normal",
+        "is_entry": false,
+        "level_band": [
+          3,
+          5
+        ],
+        "roads": [
+          [
+            [
+              32,
+              32
+            ],
+            [
+              1,
+              32
+            ]
+          ]
+        ],
+        "safe_road_radius": 2,
+        "waypoints": [
+          {
+            "x": 3250,
+            "y": 3250,
+            "name": "parity-somet644 2 Waystone"
+          }
+        ]
+      }
+    ],
+    "links": [
+      {
+        "from": "parity_somet644_hub",
+        "edge": "E",
+        "to": "parity_somet644_1"
+      },
+      {
+        "from": "parity_somet644_1",
+        "edge": "S",
+        "to": "parity_somet644_2"
+      },
+      {
+        "from": "parity_somet644_1",
+        "edge": "W",
+        "to": "parity_somet644_hub"
+      },
+      {
+        "from": "parity_somet644_2",
+        "edge": "N",
+        "to": "parity_somet644_1"
+      }
+    ]
+  }
+}

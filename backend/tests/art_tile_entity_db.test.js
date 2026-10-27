@@ -214,25 +214,34 @@ lockedTest('a pinned type keeps its own provider, an unpinned one takes the batc
     await pool.query(
       `UPDATE tile_types SET ai_provider_mode = 'provider', ai_provider_id = $1 WHERE name = $2`,
       [pinnedId, a.key]);
-    // The pin itself is restored by lockedTest's snapshot; only the extra
-    // provider row is this test's own to remove, and it must go AFTER the jobs
-    // that reference it.
-    t.after(async () => {
+    // b must be UNPINNED for "takes the batch default" to mean anything. A real
+    // catalogue pins tiles of its own, and this read another provider's id.
+    await pool.query(
+      `UPDATE tile_types SET ai_provider_mode = 'default', ai_provider_id = NULL WHERE name = $1`,
+      [b.key]);
+    // The pins are restored by lockedTest's snapshot; only the extra provider
+    // row is this test's own to remove, AFTER the jobs and the pin that
+    // reference it. In a finally, not a t.after: t.after runs outside the
+    // advisory lock, and its `DELETE FROM art_jobs` wiped a peer file's jobs.
+    try {
+      const { subjects } = await cs.subjectsForEnqueue(pool, 'tile', [a.key, b.key],
+        { active: null, fallbackProviderId: providerId });
+      await queue.enqueue(pool, subjects, { backend: 'connector', providerId });
+
+      const { rows } = await pool.query(
+        'SELECT subject_key, provider_id FROM art_jobs ORDER BY subject_key');
+      const byKey = new Map(rows.map((r) => [r.subject_key, r.provider_id]));
+      assert.equal(byKey.get(a.key), pinnedId,
+        'the pinned tile must keep its own provider, not the batch default');
+      assert.equal(byKey.get(b.key), providerId,
+        'an unpinned tile takes the batch default');
+    } finally {
       await pool.query('DELETE FROM art_jobs').catch(() => {});
+      await pool.query(
+        `UPDATE tile_types SET ai_provider_mode = 'default', ai_provider_id = NULL
+          WHERE ai_provider_id = $1`, [pinnedId]).catch(() => {});
       await pool.query('DELETE FROM ai_providers WHERE id = $1', [pinnedId]).catch(() => {});
-    });
-
-    const { subjects } = await cs.subjectsForEnqueue(pool, 'tile', [a.key, b.key],
-      { active: null, fallbackProviderId: providerId });
-    await queue.enqueue(pool, subjects, { backend: 'connector', providerId });
-
-    const { rows } = await pool.query(
-      'SELECT subject_key, provider_id FROM art_jobs ORDER BY subject_key');
-    const byKey = new Map(rows.map((r) => [r.subject_key, r.provider_id]));
-    assert.equal(byKey.get(a.key), pinnedId,
-      'the pinned tile must keep its own provider, not the batch default');
-    assert.equal(byKey.get(b.key), providerId,
-      'an unpinned tile takes the batch default');
+    }
   });
 
 // A type pinned to 'local' asked for the local service by name.

@@ -1,0 +1,95 @@
+{
+  "cell": {
+    "w": 48,
+    "h": 64
+  },
+  "grid": {
+    "columns": 2,
+    "rows": 8
+  },
+  "directions": [
+    "s",
+    "se",
+    "e",
+    "ne",
+    "n",
+    "nw",
+    "w",
+    "sw"
+  ],
+  "frames_per_action": 2,
+  "palette": [
+    "#eeeeed",
+    "#dddbd4",
+    "#dddbd3",
+    "#dcdbd3",
+    "#dddbd2",
+    "#dcdbd2",
+    "#dddbd1",
+    "#dadbd6",
+    "#dcdad2",
+    "#dcd9d2",
+    "#d6d5d1",
+    "#adafb8",
+    "#797e90",
+    "#5d6379",
+    "#55596f",
+    "#484f66",
+    "#383e54",
+    "#252d40",
+    "#191e2e",
+    "#101422",
+    "#050f15",
+    "#020d0f",
+    "#070910",
+    "#010608"
+  ],
+  "rows": [
+    {
+      "row": 0,
+      "action": "idle",
+      "direction": "s"
+    },
+    {
+      "row": 1,
+      "action": "idle",
+      "direction": "se"
+    },
+    {
+      "row": 2,
+      "action": "idle",
+      "direction": "e"
+    },
+    {
+      "row": 3,
+      "action": "idle",
+      "direction": "ne"
+    },
+    {
+      "row": 4,
+      "action": "idle",
+      "direction": "n"
+    },
+    {
+      "row": 5,
+      "action": "idle",
+      "direction": "nw"
+    },
+    {
+      "row": 6,
+      "action": "idle",
+      "direction": "w"
+    },
+    {
+      "row": 7,
+      "action": "idle",
+      "direction": "sw"
+    }
+  ],
+  "something2": {
+    "sprite_sheet": "flat",
+    "columns": 2,
+    "rows": 8
+  },
+  "image": "sheet_f841ec70-3d4e-4ede-9928-6b840a283d76.png"
+}

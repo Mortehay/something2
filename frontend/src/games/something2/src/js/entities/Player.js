@@ -46,7 +46,6 @@ export class Player extends Entity {
     constructor(){
         super(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, 64, 64);
         this.speed = 100;
-        this.hitboxRadius = 32;
         this.facing = "s";
         this.damageMultiplier = 1;
         this.fireRateMultiplier = 1;
@@ -80,7 +79,10 @@ export class Player extends Entity {
         }
         if ((dx === 0 && dy === 0) || !map || typeof map.isWalkable !== 'function') return;
 
-        const speed = this.speed * (this.speedMultiplier || 1);
+        // SOMET-606: the server's enemy-aura (x chill) multiplier, from the own
+        // state frame -- predicting at full speed while the server slows us is
+        // a snap-back every frame.
+        const speed = this.speed * (this.speedMultiplier || 1) * (this.debuffSpeedMult || 1);
         const r = resolveMove(map, { x: this.x, y: this.y, width: this.width, height: this.height, speed }, dx, dy, dt);
         this.x = r.x;
         this.y = r.y;

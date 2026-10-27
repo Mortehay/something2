@@ -15,6 +15,7 @@ import { getStoredToken, parseJwt } from "../net/auth.js";
 import { reconcile } from "../net/reconcile.js";
 import { inputVector, movementKeys, facingFromVector } from "../entities/Player.js";
 import { PLAYER_SPEED_EFFECTIVE } from "./constants.js";
+import { selfSpeedMult, debuffHudEntries, resetSelfAura, newlyAppliedAuraNames } from "./auraDebuffs.js";
 import { aimVector, cursorToWorld } from "./aim.js";
 import { createInventory, applyJoined, applyEquipment, canEquipClient, typeOf, addItem, removeItem } from "./inventory.js";
 import { resolveDrop } from '../systems/inventoryPanel.js';
@@ -27,7 +28,9 @@ import {
 import { resolveAmmoHud, applyAmmoCount } from "./ammo.js";
 import { chestsFromFrame, applyChestOpened } from "./worldChests.js";
 import { remotePlayerFromFrame } from './worldPlayers.js';
+import { appearanceImageKey, indexAppearanceVisuals } from './characterAppearance.js';
 import { wavesFromFrame } from './worldWaves.js';
+import { telegraphsFromFrame } from './worldTelegraphs.js';
 import { addBlasts, pruneBlasts } from "./blasts.js";
 import { indexEffects, addEffects, pruneEffects, capParticles } from "./vfx.js";
 import { assetUrl } from "../net/assets.js";
@@ -41,9 +44,10 @@ import { fetchProgression } from "../net/progressionClient.js";
 import { AudioEngine } from "../audio/AudioEngine.js";
 import { fetchWorldAudio } from "../audio/audioClient.js";
 import { loadVolumes } from "../audio/audioSettings.js";
+import { screenRadiusWorld } from "../audio/screenRadius.js";
 import {
-    getSkillById, getSkillsForClass, getRequiredForm, isTransformationSkill,
-    isDruidExclusiveSkill, resolveSkillVfx, checkGemRequirements, getWeaponCategory,
+    getSkillById, getRequiredForm, isTransformationSkill,
+    isDruidExclusiveSkill, resolveSkillVfx, checkGemRequirements,
     getSkillPrice, getSkillLevelReq,
 } from "./skillsData.js";
 import {
@@ -54,6 +58,9 @@ import { createSkillVisual, updateSkillVisuals, pruneSkillVisuals } from "./skil
 import { API_URL } from "../../../../../config.js";
 import { GameArt } from "../systems/gameArt.js";
 import { fetchGameArt } from "../net/gameArtClient.js";
+import { fetchAllQuests, fetchCharacterQuests, startQuest, completeQuest } from "../net/questsClient.js";
+import { findWorldBossCreature } from "./worldBossMatch.js";
+import { EntityAnimState, noteFrameEvents } from "../systems/entityAnimState.js";
 
 // How long the "out of ammo" HUD flash stays up after the server's `noammo`
 // frame arrives.
@@ -107,6 +114,7 @@ export const DEFAULT_KEYBINDS = {
     character: 'c',
     passiveTree: 'p',
     skills: 'k',
+    questLog: 'j',
     interact: 'e',
     bank: 'b',
     openChest: 'f',
@@ -129,6 +137,22 @@ export function matchesMouseKey(boundKey, button) {
     return names.includes(b);
 }
 
+// SOMET-622: the keydown listener sits on window, so it also hears keys typed
+// into admin form fields rendered alongside the game. Those belong to the field.
+// Non-text inputs (the in-game Settings checkboxes and volume sliders) keep
+// focus after a click but take no typing, so they must not block game keys.
+const NON_TEXT_INPUT_TYPES = new Set([
+    'checkbox', 'radio', 'range', 'button', 'submit', 'reset', 'color', 'image', 'file',
+]);
+
+function isEditableTarget(target) {
+    if (!target) return false;
+    if (target.isContentEditable) return true;
+    const tag = target.tagName;
+    if (tag === 'INPUT') return !NON_TEXT_INPUT_TYPES.has(String(target.type || 'text').toLowerCase());
+    return tag === 'TEXTAREA' || tag === 'SELECT';
+}
+
 export class Game {
     constructor() {
         console.log("Game constructor");
@@ -138,6 +162,12 @@ export class Game {
 
         this.player = new Player();
         this.camera = new Camera();
+        // SOMET-606: server aura multiplier / HUD debuff rows (own state frame).
+        this.selfSpeedMult = 1;
+        this.auraDebuffRows = [];
+        // SOMET-607 (S5): last frame's active debuff names, diffed every
+        // frame to synthesize the one-shot 'apply' sfx -- see auraDebuffs.js.
+        this.selfAuraNames = new Set();
 
         this.chunked = false;
         this.chunkedMap = null;
@@ -156,7 +186,11 @@ export class Game {
         this.engine = null;
         this.localUserId = null;
         this.remotePlayers = new NativeMap(); // user_id -> {x, y, hp}
+        // SOMET-656: per-actor animation timing for box sprite sheets;
+        // created per world in initChunked and shared with the renderer.
+        this.entityAnim = null;
         this.waves = [];              // SOMET-528, replaced by each world frame
+        this.telegraphs = [];         // SOMET-608, same replace-every-frame rule
         this.lastServerTick = 0;
 
         // Combat (Slice 3b): local mana state from `state`, and the
@@ -179,6 +213,9 @@ export class Game {
         // Live attack effects, and the library their names resolve against.
         this.vfx = [];
         this.vfxDefs = {};
+        // SOMET-607 (S5): the aura visual library (ring/disc/particles),
+        // indexed by name the same way vfxDefs is.
+        this.auraDefs = {};
 
         // Inventory / paper-doll (Slice 3b-2a). `inventory` mirrors the
         // account-wide item catalog + owned items + equipment; the server is
@@ -202,10 +239,18 @@ export class Game {
         this.hotbarSkills = new Map();
         this.unlockedSkills = new Set();
         this.skillVisuals = [];
+        this.floatingTexts = [];
+        this._inputBuffer = [];
         this.activeForm = null;
         this.hotbarFlashSlot = null;
         this.hotbarFlashUntil = 0;
         this.skillCooldowns = new Map();
+
+        // Quest Log (hotkey 'J') & Open World Storyline
+        this.questLogOpen = false;
+        this.allQuests = [];
+        this.activeQuestKey = null;
+        this.legacyChoice = null;
 
         // Ground items (Slice 3b-2b): render-only store of items on the
         // ground, plus a local mirror of the server-owned auto-loot flag.
@@ -296,6 +341,7 @@ export class Game {
         this.gemShopPage = 0;
         this.gemShopSelectedGemId = null;
         this.skillMerchants = [];
+        this.questGivers = [];
         // SOMET-297. Empty until a `joined` frame arrives, and reset here on
         // the same line merchants is -- both are per-world join payload.
         this.landmarks = [];
@@ -362,6 +408,20 @@ export class Game {
     // queueing; a newer toast simply replaces whatever was showing.
     _showToast(message, durationMs = 3000) {
         this.toast = { message, expiresAt: performance.now() + durationMs };
+    }
+
+    // Spawn floating combat / resource text (Damage numbers, Mana restore, Heals, Stamina)
+    spawnFloatingText(x, y, text, color = '#ffffff', options = {}) {
+        if (!this.floatingTexts) this.floatingTexts = [];
+        this.floatingTexts.push({
+            x,
+            y,
+            text,
+            color,
+            size: options.size || 15,
+            duration: options.duration || 1.1,
+            createdAt: performance.now(),
+        });
     }
 
     setEngineClient(engine, localUserId) {
@@ -496,11 +556,13 @@ export class Game {
         }
     }
 
-    async initChunked({ worldId, characterId, chunkSize, tileTypes, vfxEffects = null, entityTypes = null, spawnX = 0, spawnY = 0, className = null, mainStat = null }) {
+    async initChunked({ worldId, characterId, chunkSize, tileTypes, vfxEffects = null, auraEffects = null, entityTypes = null, className = null, mainStat = null, appearanceVariant = 1, characterClasses = [] }) {
         if (!this.canvas) {
             console.error("Canvas not found!");
             return;
         }
+        // SOMET-606: a world switch must not carry the old world's slow / rows.
+        resetSelfAura(this);
         // Re-entry guard: if initChunked runs twice on the same Game instance
         // (double-click, retry after join timeout, StrictMode double-invoke),
         // tear down the previous run's leakable resources before starting a
@@ -554,12 +616,18 @@ export class Game {
                 .catch((err) => console.warn('game art index unavailable, using fallback icons', err));
         }
         this.renderSystem.gameArt = this.gameArt;
+        // SOMET-656: fresh per world -- no old world's actor survives entry.
+        this.entityAnim = new EntityAnimState();
+        this.renderSystem.entityAnim = this.entityAnim;
         this.chunkedMap = new ChunkedMap(chunkSize, tileTypes);
         this._preloadTileAssets(tileTypes);
         // Names arrive on the wire already resolved; this is the only lookup
         // the client does. Empty until the fetch lands — effects then simply
         // do not draw, rather than throwing.
         this.vfxDefs = indexEffects(vfxEffects);
+        // SOMET-607 (S5): same contract, for the active-aura visuals (ring/
+        // disc/particles) RenderSystem draws beneath an entity.
+        this.auraDefs = indexEffects(auraEffects);
         // Approved entity images/atlases, so authority-driven creatures render
         // with their generated sprite rather than a colored box. Fire-and-forget
         // like the tile preload: until it resolves, rendering degrades to color.
@@ -567,6 +635,14 @@ export class Game {
         this.streamer = new ChunkStreamer(this.chunkedMap, makeChunkFetcher(worldId, API_URL), 1);
 
         this.creatures = new CreatureManager(entityTypes);
+        this.creatures.onCreatureDamage = (creature, dmg) => {
+            const cx = creature.tx != null ? creature.tx : creature.x;
+            const cy = creature.ty != null ? creature.ty : creature.y;
+            const jitterX = (Math.random() - 0.5) * 16;
+            const jitterY = (Math.random() - 0.5) * 8;
+            this.spawnFloatingText(cx + jitterX, cy - 25 + jitterY, `-${dmg}`, '#ef4444', { size: 15, bold: true });
+        };
+        this._bindCreatureAnim(this.creatures);
         this.projectiles = new ProjectileManager();
         // Non-creature entity types (map decorations: rocks, bushes, ...),
         // keyed by name for RenderSystem.collectDecorations. Built once here
@@ -609,7 +685,33 @@ export class Game {
         this._statsFromSocket = false;
         this.characterModPage = 0;
         this.characterId = characterId;
+        this.loadQuests();
         this.className = className || this.passiveStartClass || null;
+        this.appearanceVariant = Number(appearanceVariant) || 1;
+        this.appearanceVisuals = indexAppearanceVisuals(characterClasses);
+        this.player.className = this.className;
+        this.player.appearanceVariant = this.appearanceVariant;
+        this.player.imageKey = appearanceImageKey(this.className, this.appearanceVariant);
+        const localVisual = this.appearanceVisuals.get(this.player.imageKey);
+        if (localVisual) {
+            this.player.renderMode = localVisual.renderMode;
+            this.player.sprite = localVisual.sprite;
+        }
+        for (const [key, visual] of this.appearanceVisuals) {
+            if (visual.image) this.imageManager.load(key, assetUrl(API_URL, visual.image));
+            if (visual.sprite?.atlas_key) {
+                this.imageManager.load(
+                    visual.sprite.atlas_key,
+                    assetUrl(API_URL, visual.sprite.atlas_key),
+                );
+                if (visual.sprite.manifest_key && !visual.sprite.manifest) {
+                    fetch(assetUrl(API_URL, visual.sprite.manifest_key))
+                        .then((r) => r.ok ? r.json() : null)
+                        .then((manifest) => { if (manifest) visual.sprite.manifest = manifest; })
+                        .catch(() => undefined);
+                }
+            }
+        }
         if (className) this.passiveStartClass = className;
         this.mainStat = mainStat;
         this.hotbarSkills = loadHotbarForCharacter(characterId, this.className || className || 'Warrior');
@@ -618,8 +720,10 @@ export class Game {
         this._channeledSkillId = null;
         this._lastChannelTick = 0;
         this.skillVisuals = [];
+        this.floatingTexts = [];
         this.merchants = [];
         this.skillMerchants = [];
+        this.questGivers = [];
         // SOMET-297. Empty until a `joined` frame arrives, and reset here on
         // the same line merchants is -- both are per-world join payload.
         this.landmarks = [];
@@ -679,6 +783,7 @@ export class Game {
                     this.merchants = Array.isArray(msg.merchants) ? msg.merchants : [];
                     this.gemMerchants = Array.isArray(msg.gemMerchants) ? msg.gemMerchants : [];
                     this.skillMerchants = Array.isArray(msg.skillMerchants) ? msg.skillMerchants : [];
+                    this.questGivers = Array.isArray(msg.questGivers) ? msg.questGivers : [];
                     this.landmarks = Array.isArray(msg.landmarks) ? msg.landmarks : [];
                     this.doorways = Array.isArray(msg.doorways) ? msg.doorways : [];
                     this.banks = Array.isArray(msg.banks) ? msg.banks : [];
@@ -712,9 +817,7 @@ export class Game {
                 // open (panel currently closed) — otherwise buying row 3 of
                 // buyback page 2 would bounce the player back to catalog p1.
                 onShop: (msg) => {
-                    this.shop = { villageId: msg.villageId, catalog: msg.catalog || [], buyback: msg.buyback || [] };
-                    if (!this.shopOpen) this.shopView = { tab: 'catalog', page: 0 };
-                    this.shopOpen = true;
+                    this.openShop(msg);
                 },
                 // SOMET-310. The server sends the WHOLE chest on open and again
                 // after every deposit/withdraw, so this mirrors the frame and
@@ -727,13 +830,7 @@ export class Game {
                 // the carry tab must not bounce the player back to chest page 1
                 // on the refresh frame that follows it.
                 onBank: (msg) => {
-                    this.bank = {
-                        villageId: msg.villageId,
-                        items: Array.isArray(msg.items) ? msg.items : [],
-                        capacity: Number(msg.capacity) || 0,
-                    };
-                    if (!this.bankOpen) this.bankView = { tab: 'chest', page: 0 };
-                    this.bankOpen = true;
+                    this.openBank(msg);
                 },
                 // The chest half of a move arrives as the `bank` frame above;
                 // these two carry the INVENTORY half. Deliberately not folded
@@ -940,6 +1037,20 @@ export class Game {
             },
             creatures: (this.creatures ? this.creatures.all() : []).map((c) => ({ x: c.x, y: c.y, color: c.color })),
             worldBoss: this.worldBossStatus || null,
+            questGivers: (this.questGivers || []).map((qg) => ({
+                x: qg.x,
+                y: qg.y,
+                name: qg.name || 'Elder Eldrin',
+            })),
+            questMarkers: (this.allQuests || []).map((q) => ({
+                id: q.id,
+                key: q.key,
+                title: q.title,
+                act: q.act,
+                status: q.status || 'available',
+                npcKey: q.start_npc_key,
+                villageKey: q.village_key,
+            })),
         };
     }
 
@@ -1113,6 +1224,32 @@ export class Game {
         return true;
     }
 
+    // SOMET-656: a creature's hp drop plays its damage action (on top of
+    // whatever onCreatureDamage already does), and a creature that leaves the
+    // snapshot drops its animation record.
+    // Whether the client currently tracks the actor behind an anim key; the
+    // server broadcasts attacks/impacts/sfx world-wide, tracked or not.
+    _isTrackedActor(key) {
+        if (key === 'self') return true;
+        const id = key.slice(2);
+        const num = Number(id);
+        const has = (m) => !!m && (m.has(id) || (Number.isFinite(num) && m.has(num)));
+        if (key.startsWith('c:')) return has(this.creatures);
+        if (key.startsWith('p:')) return has(this.remotePlayers);
+        return false;
+    }
+
+    _bindCreatureAnim(manager) {
+        const prev = manager.onCreatureDamage;
+        manager.onCreatureDamage = (creature, dmg) => {
+            if (this.entityAnim) this.entityAnim.noteHit(`c:${creature.id}`, performance.now());
+            if (typeof prev === 'function') prev(creature, dmg);
+        };
+        manager.onCreatureRemoved = (creature) => {
+            if (this.entityAnim) this.entityAnim.forget(`c:${creature.id}`);
+        };
+    }
+
     // SOMET-494 -- send an attack toward wherever the cursor is NOW.
     //
     // The aim is recomputed per send rather than captured at mousedown, so a
@@ -1131,6 +1268,8 @@ export class Game {
         );
         this.authorityClient.sendAttack(nx, ny);
         this._lastAttackSentAt = performance.now();
+        // SOMET-656: the local swing plays at send time, not one round trip later.
+        if (this.entityAnim) this.entityAnim.noteAttack('self', this._lastAttackSentAt, false);
         if (this.player) {
             const f = facingFromVector(
                 Math.abs(nx) > 0.3 ? Math.sign(nx) : 0,
@@ -1181,6 +1320,8 @@ export class Game {
         }
         this._channeledSlot = null;
         this._channeledSkillId = null;
+        this._channelTicks = 0;
+        if (this.activeBuffs) this.activeBuffs.delete('channel_focus');
     }
 
     _isSlotHeld(slot) {
@@ -1253,6 +1394,7 @@ export class Game {
         const CHANNEL_INTERVAL_MS = 250;
         if (nowMs - (this._lastChannelTick || 0) >= CHANNEL_INTERVAL_MS) {
             this._lastChannelTick = nowMs;
+            this._channelTicks = (this._channelTicks || 0) + 1;
             this._activateHotbarSkill(this._channeledSlot, true);
         }
     }
@@ -1359,6 +1501,12 @@ export class Game {
             const cy = this.player.y + this.player.height / 2;
             if (this.audio) {
                 this.audio.tick(this.chunkedMap.biomeAt(cx, cy), performance.now());
+                // SOMET-605: half the viewport diagonal in world units, per
+                // tick (spec §4.4); the boss presence loop's in/out edge.
+                this.audio.setScreenRadius(screenRadiusWorld(
+                    (this.canvas && this.canvas.width) || GAME_WIDTH,
+                    (this.canvas && this.canvas.height) || GAME_HEIGHT,
+                ));
                 // Task 7 (game audio slice 3): creature/world-point "nearby"
                 // ambience. tickNearby is internally throttled to 250ms, so
                 // this passes a thunk (fix round 1, item 3) rather than
@@ -1374,6 +1522,7 @@ export class Game {
                     ...(this.merchants || []),
                     ...(this.gemMerchants || []),
                     ...(this.skillMerchants || []),
+                    ...(this.questGivers || []),
                     ...(this.banks || []),
                 ], { x: cx, y: cy });
             }
@@ -1422,6 +1571,10 @@ export class Game {
                 });
                 this.skillVisuals = pruneSkillVisuals(this.skillVisuals, nowMs);
             }
+            if (this.floatingTexts && this.floatingTexts.length > 0) {
+                const nowMs = performance.now();
+                this.floatingTexts = this.floatingTexts.filter(ft => (nowMs - ft.createdAt) < (ft.duration * 1000));
+            }
             this.creatures.interpolate(dt);
             if (this.projectiles) this.projectiles.interpolate(dt);
             this.camera.update(this.player);
@@ -1438,20 +1591,77 @@ export class Game {
         let mine = null;
         for (const p of (msg.players || [])) {
             if (p.id === this.localUserId) { mine = p; continue; }
+            const prevRemote = this.remotePlayers && this.remotePlayers.get(p.id);
+            if (prevRemote && prevRemote.hp !== undefined && p.hp !== undefined && p.hp < prevRemote.hp) {
+                const dmg = Math.round(prevRemote.hp - p.hp);
+                if (dmg > 0) {
+                    this.spawnFloatingText(p.x, p.y - 25, `-${dmg}`, '#ef4444', { size: 14, bold: true });
+                    if (this.entityAnim) this.entityAnim.noteHit(`p:${p.id}`, performance.now());
+                }
+            }
             // The field list lives in worldPlayers.js so a test can hold it:
             // this map is built from named fields, not a spread, so anything
             // the server sends and the list omits is dropped SILENTLY. See
             // that module's header for the bug that taught us.
-            next.set(p.id, remotePlayerFromFrame(p));
+            const remote = remotePlayerFromFrame(p);
+            remote.imageKey = appearanceImageKey(remote.className, remote.appearanceVariant);
+            const visual = this.appearanceVisuals && this.appearanceVisuals.get(remote.imageKey);
+            if (visual) {
+                remote.renderMode = visual.renderMode;
+                remote.sprite = visual.sprite;
+            }
+            next.set(p.id, remote);
+        }
+        // SOMET-656: a player who left this frame takes its anim record along.
+        if (this.entityAnim && this.remotePlayers) {
+            for (const id of this.remotePlayers.keys()) {
+                if (!next.has(id)) this.entityAnim.forget(`p:${id}`);
+            }
         }
         this.remotePlayers = next;
         if (mine) {
+            if (this.player && this.player.hp !== undefined && mine.hp !== undefined && mine.hp < this.player.hp) {
+                const dmg = Math.round(this.player.hp - mine.hp);
+                if (dmg > 0) {
+                    if (this.entityAnim) this.entityAnim.noteHit('self', performance.now());
+                    const jitterX = (Math.random() - 0.5) * 12;
+                    this.spawnFloatingText(this.player.x + jitterX, this.player.y - 25, `-${dmg}`, '#ef4444', { size: 16, bold: true });
+                }
+            } else if (this.player && this.player.hp !== undefined && mine.hp !== undefined && mine.hp > this.player.hp) {
+                const heal = Math.round(mine.hp - this.player.hp);
+                if (heal > 0) {
+                    const jitterX = (Math.random() - 0.5) * 12;
+                    this.spawnFloatingText(this.player.x + jitterX, this.player.y - 25, `+${heal} HP`, '#4ade80', { size: 16, bold: true });
+                }
+            }
             this.player.hp = mine.hp;
             this.player.maxHp = mine.maxHp;
             // Assigned on EVERY frame, including the (common) one where the
             // server omits the field — otherwise a `if (mine.effects)` guard
             // would leave the HUD reading "Burning" long after the burn ended.
             this.player.effects = mine.effects || null;
+            // SOMET-606. Both assigned EVERY frame (the server omits them when
+            // clear -- same reason as `effects` above).
+            this.selfSpeedMult = selfSpeedMult(msg);
+            this.player.debuffSpeedMult = this.selfSpeedMult;
+            this.auraDebuffRows = debuffHudEntries(msg.debuffs);
+            // SOMET-607 (S5, spec §4.4): "apply" plays when the LOCAL player
+            // enters an enemy aura. The server pushes the current debuff set
+            // every frame, not a one-shot "you just entered" event, so it is
+            // synthesized here by diffing against last frame's names.
+            const justApplied = newlyAppliedAuraNames(this.selfAuraNames, msg.debuffs);
+            this.selfAuraNames = new Set((msg.debuffs || []).filter(Boolean).map((d) => d.n).filter(Boolean));
+            if (justApplied.length && this.audio) {
+                this.audio.playSfxEvents(justApplied.map((n) => ({
+                    e: 'apply', c: n, a: `p:${this.localUserId}`, x: this.player.x, y: this.player.y,
+                })), {
+                    listener: {
+                        x: this.player.x + (this.player.width || 0) / 2,
+                        y: this.player.y + (this.player.height || 0) / 2,
+                    },
+                    ownActor: `p:${this.localUserId}`,
+                });
+            }
             // SOMET-523. Assigned on EVERY frame for the same reason `effects`
             // is one line up: the server OMITS the field entirely when the
             // player has no aura, so a guarded assignment would leave a ring
@@ -1472,7 +1682,7 @@ export class Game {
                 msg.ackSeq || 0,
                 this._inputBuffer,
                 this.chunkedMap,
-                { width: this.player.width, height: this.player.height, speed: PLAYER_SPEED_EFFECTIVE },
+                { width: this.player.width, height: this.player.height, speed: PLAYER_SPEED_EFFECTIVE * this.selfSpeedMult },
                 { dx, dy, dt: pendingDt }
             );
             const errX = out.x - this.player.x;
@@ -1486,6 +1696,9 @@ export class Game {
                 this.player.y += errY * 0.25;
             }
             this._inputBuffer = out.buffer.length > 50 ? out.buffer.slice(-30) : out.buffer;
+        } else {
+            // SOMET-606: no own entry this frame -> no stale slow / debuff rows.
+            resetSelfAura(this);
         }
         if (mine) {
             this.localMana = mine.mana;
@@ -1507,6 +1720,9 @@ export class Game {
         // The field list lives in worldWaves.js so a test can hold it -- see
         // that module's header for the bug that taught us to do this.
         this.waves = wavesFromFrame(msg);
+        // SOMET-608 (S6). Same "frame replaces the list every tick" rule
+        // waves uses -- the server re-sends every still-active telegraph.
+        this.telegraphs = telegraphsFromFrame(msg);
         // Detonations are present only on the tick they happened (the server
         // clears its stash after this broadcast), so they must be taken off
         // THIS frame — there is no snapshot to re-read them from later.
@@ -1519,6 +1735,11 @@ export class Game {
         if (msg.attacks && msg.attacks.length) {
             addEffects(this.vfx, msg.attacks, performance.now(), this.vfxDefs);
         }
+        // SOMET-656: the same single-shot attacks/impacts/sfx drive box-sheet
+        // action playback (attack, cast, damage) for every actor.
+        const animNow = performance.now();
+        noteFrameEvents(this.entityAnim, msg, animNow, this.localUserId, (k) => this._isTrackedActor(k));
+        if (this.entityAnim) this.entityAnim.sweep(animNow);
         // Slice C: impacts ride the same frame and are equally single-shot.
         // They go through addEffects too -- an impact IS an effect, just one
         // positioned on the target rather than the attacker -- so pruning,
@@ -1536,12 +1757,29 @@ export class Game {
         // this call -- a bad event is silence plus one warning, same
         // contract as every other clip lookup in that module.
         if (this.audio) {
-            this.audio.playSfxEvents(msg.sfx || [], {
+            const sfx = msg.sfx || [];
+            // SOMET-610 (S7): the live cross-reference sfxPriority needs to
+            // tell a boss's skill_telegraph/_cast/_hit from an ordinary
+            // creature's (those three event names are not boss-exclusive
+            // the way spawn/phase/enrage are -- see sfxResolve.js's own
+            // comment). Built only when there is something to resolve: a
+            // quiet tick (the overwhelming majority) never pays for it,
+            // unlike tickNearby's own `if (c.bossTier)` scan a few lines up,
+            // which already runs on its own 250ms cadence regardless.
+            let bossActorIds;
+            if (sfx.length > 0) {
+                bossActorIds = new Set();
+                for (const c of this.creatures.creatures.values()) {
+                    if (c.bossTier) bossActorIds.add(`c:${c.id}`);
+                }
+            }
+            this.audio.playSfxEvents(sfx, {
                 listener: {
                     x: this.player.x + (this.player.width || 0) / 2,
                     y: this.player.y + (this.player.height || 0) / 2,
                 },
                 ownActor: `p:${this.localUserId}`,
+                bossActorIds,
             });
         }
     }
@@ -1618,6 +1856,9 @@ export class Game {
             if (this.skillVisuals && this.skillVisuals.length > 0) {
                 this.skillVisuals = pruneSkillVisuals(this.skillVisuals, nowMs);
             }
+            if (this.floatingTexts && this.floatingTexts.length > 0) {
+                this.floatingTexts = this.floatingTexts.filter(ft => (nowMs - ft.createdAt) < (ft.duration * 1000));
+            }
             if (this.activeBuffs && this.activeBuffs.size > 0) {
                 for (const [id, b] of this.activeBuffs) {
                     if (nowMs >= b.expiresAt) this.activeBuffs.delete(id);
@@ -1672,7 +1913,7 @@ export class Game {
                 keybinds: this.keybinds,
                 inventoryGems: this.getInventoryGems(),
                 activeForm: this.activeForm,
-                activeBuffs: this.activeBuffs ? Array.from(this.activeBuffs.values()) : [],
+                activeBuffs: [...(this.activeBuffs ? Array.from(this.activeBuffs.values()) : []), ...this.auraDebuffRows],
                 flashSlot: (nowMs < this.hotbarFlashUntil) ? this.hotbarFlashSlot : null,
                 skillCooldowns: this.skillCooldowns,
                 unlockedSkills: this.unlockedSkills || loadUnlockedSkillsForCharacter(this.characterId),
@@ -1689,6 +1930,7 @@ export class Game {
                     hoverY: this._cursorY ?? null,
                     // SOMET-483. Built fresh, never cached -- see characterView.
                     character: this.characterView(),
+                    playerImageKey: this.player && this.player.imageKey,
                     modPage: this.characterModPage,
                 },
                 groundItems: this.groundItems.all(),
@@ -1704,6 +1946,7 @@ export class Game {
                 equippedWeapon: this._resolveEquippedWeapon(),
                 playerStats: this.characterView() || this.progression || null,
                 skillMerchants: this.skillMerchants,
+                questGivers: this.questGivers,
                 landmarks: this.landmarks,
                 doorways: this.doorways,
                 shop: this.shop,
@@ -1721,8 +1964,11 @@ export class Game {
                 blasts: this.blasts,
                 // SOMET-528. Empty until a wave-granting node is allocated.
                 waves: this.waves || [],
+                telegraphs: this.telegraphs || [],
                 vfx: this.vfx, vfxDefs: this.vfxDefs,
+                auraDefs: this.auraDefs,
                 skillVisuals: this.skillVisuals,
+                floatingTexts: this.floatingTexts,
                 // null whenever the equipped weapon needs no ammo — the HUD
                 // then draws no ammo line at all.
                 ammo: resolveAmmoHud(this.inventory),
@@ -1753,6 +1999,12 @@ export class Game {
                 passiveHoverY: this.passiveTreeOpen ? (this._cursorY ?? null) : null,
                 passiveSearchText: this.passiveSearchText,
                 passiveSearchFocused: this.passiveSearchFocused,
+                // Quests & Storyline (SOMET / Open World)
+                questLogOpen: this.questLogOpen,
+                quests: this.allQuests || [],
+                activeQuestKey: this.activeQuestKey,
+                legacyChoice: (this.progression && this.progression.legacyChoice) || this.legacyChoice || null,
+                questScroll: this.questLogScrollY || 0,
                 // SOMET-493. `enabled` false short-circuits the whole pass in
                 // RenderSystem, so a player who never turns it on pays one
                 // property read per frame.
@@ -1805,16 +2057,35 @@ export class Game {
         };
     }
 
+    closeAllPanels(except = null) {
+        if (except !== 'inventory') this.closeInventory();
+        if (except !== 'passiveTree') this.closePassiveTree();
+        if (except !== 'questLog') this.closeQuestLog();
+        if (except !== 'skills') this.skillsOpen = false;
+        if (except !== 'gemShop') this.gemShopOpen = false;
+        if (except !== 'shop') this.shopOpen = false;
+        if (except !== 'bank') this.bankOpen = false;
+    }
+
+    openInventory(tab = 'inventory') {
+        this.closeAllPanels('inventory');
+        this.inventoryOpen = true;
+        this.inventoryTab = tab;
+        if (tab === 'character') {
+            this.inventoryPage = 0;
+            this.characterModPage = 0;
+            this._refreshProgressionBundle();
+        }
+    }
+
     closeInventory() {
         this.inventoryOpen = false;
         this.inventorySelectedItemId = null;
         this.inventoryDrag = null;
     }
 
-    // The ONE way the passive tree opens, for the same reason closeInventory
-    // is the one way the inventory closes: the P toggle is the only caller
-    // today, but the fetch/centre pair must not be duplicated at a second one.
     openPassiveTree() {
+        this.closeAllPanels('passiveTree');
         this.passiveTreeOpen = true;
         // Recentred on every open: a player who panned into a far sector last
         // time should not reopen to an empty screen with no idea which way
@@ -1859,11 +2130,104 @@ export class Game {
             .catch(() => { this.passiveRespecCost = null; });
     }
 
+    async loadQuests() {
+        try {
+            const [quests, charQuests] = await Promise.all([
+                (this.allQuests && this.allQuests.length > 0) ? Promise.resolve(this.allQuests) : fetchAllQuests(),
+                this.characterId ? fetchCharacterQuests(this.characterId) : Promise.resolve({ quests: [], legacyChoice: null }),
+            ]);
+
+            const charQuestsList = Array.isArray(charQuests)
+                ? charQuests
+                : (charQuests && Array.isArray(charQuests.quests) ? charQuests.quests : []);
+
+            const legacyChoice = (charQuests && !Array.isArray(charQuests) && charQuests.legacyChoice)
+                ? charQuests.legacyChoice
+                : null;
+            if (legacyChoice) {
+                this.legacyChoice = legacyChoice;
+                if (this.progression) this.progression.legacyChoice = legacyChoice;
+            }
+
+            const statusMap = new Map();
+            for (const cq of charQuestsList) {
+                const idKey = cq.id || cq.quest_id || cq.questId || cq.key;
+                if (idKey != null) statusMap.set(idKey, cq);
+                if (cq.key) statusMap.set(cq.key, cq);
+            }
+
+            const rawQuests = Array.isArray(quests)
+                ? quests
+                : (quests && Array.isArray(quests.quests) ? quests.quests : []);
+
+            this.allQuests = rawQuests.map((q) => {
+                const cq = statusMap.get(q.id) || statusMap.get(q.key);
+                return {
+                    ...q,
+                    status: (cq && cq.status) ? cq.status : (q.status || 'available'),
+                    progress: cq ? cq.progress : (q.progress || {}),
+                };
+            });
+
+            if (!this.activeQuestKey && this.allQuests.length > 0) {
+                const activeQ = this.allQuests.find((q) => q.status === 'active') || this.allQuests[0];
+                this.activeQuestKey = activeQ.key;
+            }
+        } catch (err) {
+            if (this.showToast) this.showToast(`Quest Log: ${err.message}`);
+        }
+    }
+
+    openQuestLog() {
+        this.closeAllPanels('questLog');
+        this.questLogOpen = true;
+        return this.loadQuests();
+    }
+
+    closeQuestLog() {
+        this.questLogOpen = false;
+    }
+
+    openSkills() {
+        this.closeAllPanels('skills');
+        this.skillsOpen = true;
+        if (!this.className && !this.passiveStartClass) {
+            fetchStartClass().then((name) => { if (name) { this.className = name; this.passiveStartClass = name; } }).catch(() => {});
+        }
+    }
+
+    openGemShop() {
+        this.closeAllPanels('gemShop');
+        this.gemShopOpen = true;
+    }
+
+    openShop(msg = null) {
+        this.closeAllPanels('shop');
+        if (msg) {
+            this.shop = { villageId: msg.villageId, catalog: msg.catalog || [], buyback: msg.buyback || [] };
+        }
+        if (!this.shopOpen) this.shopView = { tab: 'catalog', page: 0 };
+        this.shopOpen = true;
+    }
+
+    openBank(msg = null) {
+        this.closeAllPanels('bank');
+        if (msg) {
+            this.bank = {
+                villageId: msg.villageId,
+                items: Array.isArray(msg.items) ? msg.items : [],
+                capacity: Number(msg.capacity) || 0,
+            };
+        }
+        if (!this.bankOpen) this.bankView = { tab: 'chest', page: 0 };
+        this.bankOpen = true;
+    }
+
     // A press inside the open tree. Either it lands on a chrome control (the
     // [X], the respec button) and is consumed here, or it ARMS a pan -- and
     // whether that was a pan or a click on a node is decided on mouseup by
     // `moved`, exactly as the inventory drag decides between a drag and a click.
-    _handlePassivePress(x, y, isRightClick = false, shiftKey = false) {
+    _handlePassivePress(x, y, isRightClick = false, _shiftKey = false) {
         const layout = this.renderSystem && this.renderSystem._passiveLayout;
         if (layout) {
             if (isRightClick) {
@@ -2159,7 +2523,21 @@ export class Game {
         }
 
         // 5. Check and deduct resource cost
-        const cost = s.cost || 0;
+        const baseCost = s.cost || 0;
+        const channelStack = s.channeled ? Math.min(8, Math.floor((this._channelTicks || 0) / 2)) : 0;
+
+        let maxPool = 100;
+        if (s.costType === 'mana') maxPool = this.localMaxMana != null ? this.localMaxMana : 100;
+        else if (s.costType === 'stamina') maxPool = this.localStamina != null ? this.localStamina : 100;
+        else if (s.costType === 'hp') maxPool = (this.player && this.player.maxHp != null) ? this.player.maxHp : 100;
+
+        let cost = baseCost;
+        if (s.channeled && channelStack > 0) {
+            const costMult = 1 + channelStack * 0.35;
+            const poolDrain = (maxPool * (channelStack * 0.0125)) / 4;
+            cost = Math.max(1, Math.round(baseCost * costMult + poolDrain));
+        }
+
         if (s.costType === 'mana' && cost > 0) {
             const currentMana = this.localMana != null ? this.localMana : 100;
             if (currentMana < cost) {
@@ -2197,6 +2575,7 @@ export class Game {
             this._channeledSlot = slotNum;
             this._channeledSkillId = s.id;
             this._lastChannelTick = nowMs;
+            this._channelTicks = 0;
         }
 
         // 6. Target resolution & Max Range enforcement (prevents casting across the whole screen)
@@ -2233,7 +2612,7 @@ export class Game {
                         aimAngle = Math.atan2(aim.ny, aim.nx);
                     }
                 }
-            } catch (_) {}
+            } catch (_) { /* malformed optional target; retain cursor aim */ }
         }
 
         const maxRange = Number(s.range) || (s.type === 'melee' ? 55 : (s.type === 'buff' ? 0 : 220));
@@ -2261,7 +2640,8 @@ export class Game {
         const ny = Math.sin(aimAngle);
         const vfxName = resolveSkillVfx(s);
         const isSpin = s.channeled && (s.id.includes('whirlwind') || s.id.includes('spin') || s.id.includes('crane') || s.id.includes('cyclone'));
-        const reach = isSpin ? 120 : (s.type === 'melee' ? (Number(s.range) || 90) : (Number(s.radius) || 80) * 1.5);
+        const reachScale = (s.channeled && channelStack > 0) ? (1 + channelStack * 0.04) : 1;
+        const reach = (isSpin ? 120 : (s.type === 'melee' ? (Number(s.range) || 90) : (Number(s.radius) || 80) * 1.5)) * reachScale;
         const arc = isSpin ? Math.PI * 2 : (s.type === 'melee' ? Math.PI * 0.75 : Math.PI * 2);
 
         if (visual) {
@@ -2333,17 +2713,36 @@ export class Game {
                            s.id.includes('flash_of_light') || s.id.includes('holy_light') || s.id.includes('unstoppable');
             if (isHeal && this.player) {
                 const maxHp = this.player.maxHp || 100;
-                this.player.hp = Math.min(maxHp, (this.player.hp || maxHp) + Math.max(15, Math.round(maxHp * 0.25)));
+                const healAmt = Math.max(15, Math.round(maxHp * 0.25));
+                const oldHp = this.player.hp || maxHp;
+                this.player.hp = Math.min(maxHp, oldHp + healAmt);
+                const actualHealed = this.player.hp - oldHp;
+                this.spawnFloatingText(px, py - 25, `+${actualHealed > 0 ? actualHealed : healAmt} HP`, '#4ade80', { size: 16, bold: true });
             }
 
             const isManaRestore = s.id.includes('mana') || s.id.includes('evocation') || desc.includes('мана') || desc.includes('ману');
             if (isManaRestore) {
-                this.localMana = Math.min(this.localMaxMana, this.localMana + 35);
+                let manaPct = 0.40;
+                const pctMatch = desc.match(/(\d+)%/);
+                if (pctMatch) {
+                    manaPct = parseInt(pctMatch[1], 10) / 100;
+                }
+                const flatMatch = desc.match(/(\d+)\s*(?:MP|mana|мани)/i);
+                const maxMana = this.localMaxMana || (this.player && this.player.maxMana) || 100;
+                let manaAmt = Math.max(35, Math.round(maxMana * manaPct));
+                if (flatMatch && !pctMatch) {
+                    manaAmt = parseInt(flatMatch[1], 10);
+                }
+                const curMana = this.localMana != null ? this.localMana : 0;
+                this.localMana = Math.min(maxMana, curMana + manaAmt);
+                if (this.player) this.player.mana = this.localMana;
+                this.spawnFloatingText(px, py - 25, `+${manaAmt} MP`, '#38bdf8', { size: 16, bold: true });
             }
 
-            const isStaminaRestore = s.id.includes('stamina') || s.id.includes('adrenaline') || desc.includes('витривал');
+            const isStaminaRestore = s.id.includes('stamina') || s.id.includes('adrenaline') || desc.toLowerCase().includes('stamina') || desc.includes('витривал');
             if (isStaminaRestore) {
                 this.localStamina = Math.min(this.localMaxStamina, this.localStamina + 30);
+                this.spawnFloatingText(px, py - 25, `+30 SP`, '#fbbf24', { size: 15, bold: true });
             }
 
             if (!this.activeBuffs) this.activeBuffs = new Map();
@@ -2361,9 +2760,25 @@ export class Game {
             });
         }
 
+        if (s.channeled && channelStack > 0) {
+            if (!this.activeBuffs) this.activeBuffs = new Map();
+            const dmgBonusPct = Math.round(channelStack * 15);
+            this.activeBuffs.set('channel_focus', {
+                id: 'channel_focus',
+                nameUk: `Фокус (${channelStack}/8): +${dmgBonusPct}% шкоди`,
+                nameEn: `Focus (${channelStack}/8): +${dmgBonusPct}% Damage`,
+                icon: '⚡',
+                iconColor: '#38bdf8',
+                startedAt: nowMs,
+                durationMs: 1200,
+                expiresAt: nowMs + 1200,
+            });
+        }
+
         // 8. Dispatch real skill cast to server so creatures take real damage and server deducts resources / applies buffs
         if (this.authorityClient && (s.type === 'melee' || s.type === 'magic' || s.type === 'debuff' || s.type === 'buff')) {
             this.authorityClient.sendCastSkill(s.id, targetX, targetY, nx, ny);
+            if (this.entityAnim) this.entityAnim.noteAttack('self', performance.now(), true);
         }
 
         // Skill cast toast
@@ -2381,7 +2796,7 @@ export class Game {
             KeyW: 'w', KeyA: 'a', KeyS: 's', KeyD: 'd',
             KeyI: 'i', KeyE: 'e', KeyB: 'b', KeyG: 'g',
             KeyF: 'f', KeyM: 'm', KeyT: 't', KeyC: 'c',
-            KeyR: 'r', KeyQ: 'q', KeyP: 'p', KeyK: 'k', Space: ' ',
+            KeyR: 'r', KeyQ: 'q', KeyP: 'p', KeyK: 'k', KeyJ: 'j', Space: ' ',
             ArrowUp: 'arrowup', ArrowDown: 'arrowdown', ArrowLeft: 'arrowleft', ArrowRight: 'arrowright',
             Escape: 'escape',
         };
@@ -2397,6 +2812,7 @@ export class Game {
             // that started suspended because initChunked ran without a fresh
             // gesture; any key is a valid user-activation to resume it.
             if (this.audio) this.audio.unlock();
+            if (isEditableTarget(e.target)) return;
             // First: if passive search is focused, intercept all keys and do NOT register movement or trigger hotkeys
             if (this.passiveTreeOpen && this.passiveSearchFocused) {
                 if (e.key === 'Escape' || e.key === 'Enter') {
@@ -2443,48 +2859,47 @@ export class Game {
             // Hotkey registry audit claims: isKey('i') isKey('c') isKey('p') isKey('k') isKey('e') isKey('b') isKey('f') isKey('g')
 
             // Inventory / paper-doll toggle
-            if (matchesBind('inventory', 'i') && this.state === 'playing' && this.chunked && !e.repeat && !this.shopOpen && !this.bankOpen
-                && !this.passiveTreeOpen) {
-                if (this.inventoryOpen) this.closeInventory();
-                else this.inventoryOpen = true;
+            if (matchesBind('inventory', 'i') && this.state === 'playing' && this.chunked && !e.repeat && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen) {
+                if (this.inventoryOpen) {
+                    this.closeInventory();
+                } else {
+                    this.openInventory('inventory');
+                }
             }
 
             // Character sheet (SOMET-483): C opens the inventory panel on its Character tab.
-            if (matchesBind('character', 'c') && this.state === 'playing' && this.chunked && !e.repeat
-                && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen) {
+            if (matchesBind('character', 'c') && this.state === 'playing' && this.chunked && !e.repeat && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen) {
                 if (this.inventoryOpen && this.inventoryTab === 'character') {
                     this.closeInventory();
                 } else {
-                    this.inventoryOpen = true;
-                    this.inventoryTab = 'character';
-                    this.inventoryPage = 0;
-                    this.characterModPage = 0;
-                    this._refreshProgressionBundle();
+                    this.openInventory('character');
                 }
             }
 
             // Passive tree (SOMET-476)
-            if (matchesBind('passiveTree', 'p') && this.state === 'playing' && this.chunked && !e.repeat
-                && !this.inventoryOpen && !this.shopOpen && !this.bankOpen) {
+            if (matchesBind('passiveTree', 'p') && this.state === 'playing' && this.chunked && !e.repeat && !this.inventoryOpen && !this.shopOpen && !this.bankOpen) {
                 if (this.passiveTreeOpen) { this.closePassiveTree(); return; }
                 this.openPassiveTree();
                 return;
             }
 
             // Skills panel ('k')
-            if (matchesBind('skills', 'k') && this.state === 'playing' && this.chunked && !e.repeat
-                && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen && !this.inventoryOpen) {
-                if (!this.className && !this.passiveStartClass) {
-                    fetchStartClass().then((name) => { if (name) { this.className = name; this.passiveStartClass = name; } }).catch(() => {});
-                }
-                this.skillsOpen = !this.skillsOpen;
+            if (matchesBind('skills', 'k') && this.state === 'playing' && this.chunked && !e.repeat && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen) {
+                if (this.skillsOpen) { this.skillsOpen = false; }
+                else { this.openSkills(); }
+            }
+
+            // Quest Log panel ('j')
+            if (matchesBind('questLog', 'j') && this.state === 'playing' && this.chunked && !e.repeat && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen) {
+                if (this.questLogOpen) this.closeQuestLog();
+                else this.openQuestLog();
             }
 
             // Hotbar keys (slot1..slot9)
             if (this.state === 'playing' && this.chunked && !e.repeat) {
                 for (let s = 1; s <= 9; s++) {
                     if (matchesBind(`slot${s}`, `${s}`)) {
-                        if (!this.skillsOpen && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen) {
+                        if (!this.skillsOpen && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen && !this.questLogOpen) {
                             this._activateHotbarSkill(s);
                             if (typeof e.preventDefault === 'function') e.preventDefault();
                             return;
@@ -2498,6 +2913,8 @@ export class Game {
                 console.log("Escape pressed, current state:", this.state);
                 if (this.gemShopOpen) {
                     this.gemShopOpen = false;
+                } else if (this.questLogOpen) {
+                    this.closeQuestLog();
                 } else if (this.skillsOpen) {
                     this.skillsOpen = false;
                 } else if (this.shopOpen) {
@@ -2512,7 +2929,7 @@ export class Game {
             }
 
             // Merchant shop / Gem Merchant / Skill Trainer ('e')
-            if (matchesBind('interact', 'e') && this.state === 'playing' && this.chunked && !e.repeat && !this.inventoryOpen && !this.bankOpen) {
+            if (matchesBind('interact', 'e') && this.state === 'playing' && this.chunked && !e.repeat) {
                 if (this.gemShopOpen) { this.gemShopOpen = false; return; }
                 if (this.shopOpen) { this.shopOpen = false; return; }
                 if (this.skillsOpen) { this.skillsOpen = false; return; }
@@ -2520,12 +2937,17 @@ export class Game {
                 const pcx = this.player ? this.player.x + (this.player.width || 64) / 2 : 0;
                 const pcy = this.player ? this.player.y + (this.player.height || 64) / 2 : 0;
 
+                const nearQuestGiver = (Array.isArray(this.questGivers) ? this.questGivers : [])
+                    .some((qg) => Math.hypot(qg.x - pcx, qg.y - pcy) <= 140);
+                if (nearQuestGiver) {
+                    this.openQuestLog();
+                    return;
+                }
                 const nearSkillMerchant = (Array.isArray(this.skillMerchants) ? this.skillMerchants : [])
                     .some((sm) => Math.hypot(sm.x - pcx, sm.y - pcy) <= 140);
                 const nearGm = Array.isArray(this.gemMerchants) && this.gemMerchants.find(gm => Math.hypot(gm.x - pcx, gm.y - pcy) <= 140);
                 if (nearSkillMerchant || nearGm) {
-                    this.gemShopOpen = true;
-                    this.skillsOpen = false;
+                    this.openGemShop();
                     return;
                 }
                 if (this.authorityClient) this.authorityClient.sendInteract();
@@ -2533,8 +2955,9 @@ export class Game {
             }
 
             // Account chest (SOMET-310) ('b')
-            if (matchesBind('bank', 'b') && this.state === 'playing' && this.chunked && !e.repeat && !this.inventoryOpen && !this.shopOpen) {
+            if (matchesBind('bank', 'b') && this.state === 'playing' && this.chunked && !e.repeat) {
                 if (this.bankOpen) { this.bankOpen = false; return; }
+                this.closeAllPanels('bank');
                 if (this.authorityClient) this.authorityClient.sendOpenBank();
                 return;
             }
@@ -2760,6 +3183,82 @@ export class Game {
                 return;
             }
 
+            // Quest Log Panel ('J')
+            if (this.questLogOpen) {
+                const x = this._cursorX ?? 0, y = this._cursorY ?? 0;
+                const areas = (this.renderSystem && this.renderSystem._questHitAreas) || [];
+                const hit = areas.find((a) => x >= a.x && x <= a.x + a.w && y >= a.y && y <= a.y + a.h);
+                if (hit) {
+                    if (hit.kind === 'questclose') {
+                        this.closeQuestLog();
+                        return;
+                    }
+                    if (hit.kind === 'selectquest') {
+                        this.activeQuestKey = hit.key;
+                        return;
+                    }
+                    if (hit.kind === 'quest_accept') {
+                        const targetId = hit.questId || hit.questKey;
+                        startQuest(this.characterId, targetId).then(() => {
+                            this.openQuestLog();
+                            if (this.showToast) this.showToast(`⚔️ Quest accepted! Objective updated.`);
+                        }).catch((err) => {
+                            if (this.showToast) this.showToast(`❌ ${err.message}`);
+                        });
+                        return;
+                    }
+                    if (hit.kind === 'quest_complete') {
+                        const targetId = hit.questId || hit.questKey;
+                        completeQuest(this.characterId, targetId).then((res) => {
+                            if (res && res.rewards) {
+                                const r = res.rewards;
+                                if (r.gold != null && this.gold != null) this.gold += r.gold;
+                                if (this.progression) {
+                                    if (r.exp != null) this.progression.experience = (this.progression.experience || 0) + r.exp;
+                                    if (r.passive_points != null) this.progression.passivePoints = (this.progression.passivePoints || 0) + r.passive_points;
+                                    if (r.newLevel != null) this.progression.level = r.newLevel;
+                                }
+                                let rewardMsg = `🎉 Quest completed!`;
+                                if (r.gold) rewardMsg += ` +${r.gold}g`;
+                                if (r.exp) rewardMsg += ` +${r.exp} EXP`;
+                                if (r.passive_points) rewardMsg += ` +${r.passive_points} Pt`;
+                                if (this.showToast) this.showToast(rewardMsg);
+                            } else {
+                                if (this.showToast) this.showToast(`🎉 Quest completed! Rewards collected!`);
+                            }
+                            this.openQuestLog();
+                        }).catch((err) => {
+                            if (this.showToast) this.showToast(`❌ ${err.message}`);
+                        });
+                        return;
+                    }
+                    if (hit.kind === 'quest_choice_city' || hit.kind === 'quest_choice_surge') {
+                        const choice = hit.kind === 'quest_choice_city' ? 'city_restoration' : 'elemental_surge';
+                        const targetId = hit.questId || hit.questKey;
+                        completeQuest(this.characterId, targetId, choice).then((res) => {
+                            if (res && res.rewards) {
+                                const r = res.rewards;
+                                if (r.gold != null && this.gold != null) this.gold += r.gold;
+                                if (this.progression) {
+                                    if (r.exp != null) this.progression.experience = (this.progression.experience || 0) + r.exp;
+                                    if (r.passive_points != null) this.progression.passivePoints = (this.progression.passivePoints || 0) + r.passive_points;
+                                    if (r.newLevel != null) this.progression.level = r.newLevel;
+                                }
+                            }
+                            this.legacyChoice = choice;
+                            if (this.progression) this.progression.legacyChoice = choice;
+                            this.openQuestLog();
+                            const desc = choice === 'city_restoration' ? '🏛️ City Restoration (-15% prices)' : '⚡ Elemental Surge (+15% MF / +20% Mining)';
+                            if (this.showToast) this.showToast(`👑 Permanent Legacy Chosen: ${desc}!`);
+                        }).catch((err) => {
+                            if (this.showToast) this.showToast(`❌ ${err.message}`);
+                        });
+                        return;
+                    }
+                }
+                return;
+            }
+
             // Skills Panel (Skill Gem Sockets 1-9 & Inventory Gems Board)
             if (this.skillsOpen) {
                 const x = this._cursorX ?? 0, y = this._cursorY ?? 0;
@@ -2906,33 +3405,35 @@ export class Game {
             }
 
             // 2. Check UI/Action mouse bindings
-            if (matchesThisMouse('inventory', 'i') && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen) {
-                if (this.inventoryOpen) this.closeInventory();
-                else this.inventoryOpen = true;
+            if (matchesThisMouse('inventory', 'i')) {
+                if (this.inventoryOpen && this.inventoryTab === 'inventory') this.closeInventory();
+                else this.openInventory('inventory');
                 return;
             }
-            if (matchesThisMouse('character', 'c') && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen) {
+            if (matchesThisMouse('character', 'c')) {
                 if (this.inventoryOpen && this.inventoryTab === 'character') {
                     this.closeInventory();
                 } else {
-                    this.inventoryOpen = true;
-                    this.inventoryTab = 'character';
-                    this.inventoryPage = 0;
-                    this.characterModPage = 0;
-                    this._refreshProgressionBundle();
+                    this.openInventory('character');
                 }
                 return;
             }
-            if (matchesThisMouse('passiveTree', 'p') && !this.inventoryOpen && !this.shopOpen && !this.bankOpen) {
+            if (matchesThisMouse('passiveTree', 'p')) {
                 if (this.passiveTreeOpen) this.closePassiveTree();
                 else this.openPassiveTree();
                 return;
             }
-            if (matchesThisMouse('skills', 'k') && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen && !this.inventoryOpen) {
-                this.skillsOpen = !this.skillsOpen;
+            if (matchesThisMouse('skills', 'k')) {
+                if (this.skillsOpen) this.skillsOpen = false;
+                else this.openSkills();
                 return;
             }
-            if (matchesThisMouse('interact', 'e') && !this.inventoryOpen && !this.bankOpen) {
+            if (matchesThisMouse('questLog', 'j')) {
+                if (this.questLogOpen) this.closeQuestLog();
+                else this.openQuestLog();
+                return;
+            }
+            if (matchesThisMouse('interact', 'e')) {
                 if (this.gemShopOpen) { this.gemShopOpen = false; return; }
                 if (this.shopOpen) { this.shopOpen = false; return; }
                 if (this.skillsOpen) { this.skillsOpen = false; return; }
@@ -2941,15 +3442,15 @@ export class Game {
                 const nearSkillMerchant = (Array.isArray(this.skillMerchants) ? this.skillMerchants : []).some((sm) => Math.hypot(sm.x - pcx, sm.y - pcy) <= 140);
                 const nearGm = Array.isArray(this.gemMerchants) && this.gemMerchants.find(gm => Math.hypot(gm.x - pcx, gm.y - pcy) <= 140);
                 if (nearSkillMerchant || nearGm) {
-                    this.gemShopOpen = true;
-                    this.skillsOpen = false;
+                    this.openGemShop();
                     return;
                 }
                 if (this.authorityClient) this.authorityClient.sendInteract();
                 return;
             }
-            if (matchesThisMouse('bank', 'b') && !this.inventoryOpen && !this.shopOpen) {
+            if (matchesThisMouse('bank', 'b')) {
                 if (this.bankOpen) { this.bankOpen = false; return; }
+                this.closeAllPanels('bank');
                 if (this.authorityClient) this.authorityClient.sendOpenBank();
                 return;
             }
@@ -3024,6 +3525,9 @@ export class Game {
                 const INTERACT_CLICK_R = 110;
                 const pointedAt = (t) => Math.hypot(t.x - w.x, t.y - w.y) <= MARKER_CLICK_R
                     && Math.hypot(t.x - pcx, t.y - pcy) <= INTERACT_CLICK_R;
+                for (const qg of (Array.isArray(this.questGivers) ? this.questGivers : [])) {
+                    if (pointedAt(qg)) { this.openQuestLog(); return; }
+                }
                 for (const sm of (Array.isArray(this.skillMerchants) ? this.skillMerchants : [])) {
                     if (pointedAt(sm)) { this.gemShopOpen = true; this.skillsOpen = false; return; }
                 }
@@ -3156,13 +3660,21 @@ export class Game {
         // preventDefault -- without it the browser scrolls the page behind the
         // canvas while the player is zooming the tree.
         this._wheelHandler = (e) => {
-            if (!this.passiveTreeOpen) return;
-            if (typeof e.preventDefault === 'function') e.preventDefault();
-            const pt = this._canvasPoint(e);
-            const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-            this.passiveView = zoomAbout(
-                this.passiveView, pt.x, pt.y, clampZoom(this.passiveView.zoom * factor),
-            );
+            if (this.passiveTreeOpen) {
+                if (typeof e.preventDefault === 'function') e.preventDefault();
+                const pt = this._canvasPoint(e);
+                const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+                this.passiveView = zoomAbout(
+                    this.passiveView, pt.x, pt.y, clampZoom(this.passiveView.zoom * factor),
+                );
+                return;
+            }
+            if (this.questLogOpen) {
+                if (typeof e.preventDefault === 'function') e.preventDefault();
+                const delta = e.deltaY < 0 ? -40 : 40;
+                this.questLogScrollY = Math.max(0, (this.questLogScrollY || 0) + delta);
+                return;
+            }
         };
 
         this._auxClickHandler = (e) => {
@@ -3286,12 +3798,7 @@ export class Game {
     getWorldBossStatus() {
         if (!this.worldBossStatus) return null;
         if (this.worldBossStatus.state === 'active' && this.creatures && this.creatures.all) {
-            const all = this.creatures.all();
-            const bossCreature = all.find(
-                (c) => c.isWorldBoss ||
-                       c.id === this.worldBossStatus.bossCreatureId ||
-                       (this.worldBossStatus.bossName && (c.name === this.worldBossStatus.bossName || c.type === this.worldBossStatus.bossName))
-            );
+            const bossCreature = findWorldBossCreature(this.creatures.all(), this.worldBossStatus);
             if (bossCreature) {
                 const curHp = bossCreature.hp !== undefined ? bossCreature.hp : this.worldBossStatus.currentHp;
                 if (curHp <= 0) {

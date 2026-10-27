@@ -52,12 +52,22 @@ const tileKey = (l) => `${Math.floor(l.y / MAP_TILE_SIZE)},${Math.floor(l.x / MA
 // signal of its activation state, so it keeps drawing beneath the gate's art
 // exactly as an art-less waypoint would. Skipping it there too would leave a
 // waypoint's lit/unlit state with no signal at all.
+//
+// Its beam + label are a different story (SOMET-588): drawn in the same flat
+// pass as the diamond, they land underneath the gate's taller body (painted
+// later, in the depth-sorted pass) and are never seen. `beamOverlay` names
+// exactly these landmarks so landmarkRenderer can defer JUST their beam/label
+// to the overlay pass, on top of the gate, while leaving the diamond alone in
+// the flat pass. No shipped spec has this combination yet.
 export function planLandmarkBodies(landmarks, entityDefs) {
   const bodies = [];
   const skipBody = new Set();
-  if (!Array.isArray(landmarks) || !entityDefs) return { bodies, skipBody };
+  const beamOverlay = new Set();
+  if (!Array.isArray(landmarks) || !entityDefs) return { bodies, skipBody, beamOverlay };
   const portalArtTiles = new Set(
-    landmarks.filter((l) => l && l.kind === "portal" && pointArtDef(l.art, entityDefs)).map(tileKey),
+    landmarks
+      .filter((l) => l && Number.isFinite(l.x) && Number.isFinite(l.y) && l.kind === "portal" && pointArtDef(l.art, entityDefs))
+      .map(tileKey),
   );
   for (const l of landmarks) {
     if (!l) continue;
@@ -71,10 +81,11 @@ export function planLandmarkBodies(landmarks, entityDefs) {
     const def = pointArtDef(l.art, entityDefs);
     if (!def) continue;
     if (l.kind === "waypoint" && portalArtTiles.has(tileKey(l))) {
+      beamOverlay.add(l);
       continue;
     }
     skipBody.add(l);
     bodies.push({ landmark: l, def, treatment: pointStateTreatment(l.kind, l) });
   }
-  return { bodies, skipBody };
+  return { bodies, skipBody, beamOverlay };
 }

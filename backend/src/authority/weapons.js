@@ -26,20 +26,37 @@ function normalizeAim(ax, ay, facing) {
   return vectorFromFacing(facing);
 }
 
-// True iff target center (tx,ty) is within `reach` (plus optional targetRadius)
-// of origin (ox,oy) AND the angle between the (already-normalized) aim vector (nx,ny)
-// and the origin→target direction is within arcWidth/2 (expanded by targetRadius angular span).
+// SOMET-575. Extra px added to every body's half-width when deciding whether a
+// hit connects, so a swing or shot does not need pixel-perfect aim at the
+// centre. ONE padding for creatures and players, melee and projectiles.
+const HIT_PADDING = 8;
+
+// The radius a hit is tested against: half the body width plus HIT_PADDING.
+// A record without a width (hand-built test stubs) falls back to a 48px body.
+function hitRadius(e) {
+  const w = e && Number(e.width) > 0 ? Number(e.width) : 48;
+  return w / 2 + HIT_PADDING;
+}
+
+// True iff a target centred at (tx,ty) with body radius `targetRadius` is hit
+// by a swing from origin (ox,oy) along the (already-normalized) aim (nx,ny):
+//   - its body EDGE is within `reach` (centre distance minus targetRadius), and
+//   - its body overlaps the origin (d <= targetRadius) -- hit at any bearing,
+//     because the bearing of an overlapping body is sub-pixel noise -- OR the
+//     origin->target direction is within arcWidth/2, widened by the angular
+//     span of the body (capped at PI/4).
+// targetRadius 0 is the bare centre-point rule.
 function inArc(ox, oy, nx, ny, tx, ty, reach, arcWidth, targetRadius = 0) {
+  const rad = Math.max(0, Number(targetRadius) || 0);
   const dx = tx - ox, dy = ty - oy;
   const d2 = dx * dx + dy * dy;
-  if (d2 > reach * reach) return false;
-  if (d2 === 0) return true;
+  const d = Math.sqrt(d2);
+  if (d - rad > reach) return false;
+  if (d <= rad) return true;
   const halfArc = arcWidth / 2;
   if (halfArc >= Math.PI) return true;
-  const d = Math.sqrt(d2);
   const dot = (dx / d) * nx + (dy / d) * ny; // cos(angle between aim and target)
-  const rad = Number(targetRadius) || 0;
-  if (rad > 0 && d > 0) {
+  if (rad > 0) {
     const angularPadding = Math.min(Math.PI / 4, Math.asin(Math.min(1, rad / d)));
     if (halfArc + angularPadding >= Math.PI) return true;
     return dot >= Math.cos(halfArc + angularPadding);
@@ -104,4 +121,4 @@ function weaponStaminaCost(w) {
   return Math.max(3, Math.min(10, Math.round((w.damage || 5) * 0.5)));
 }
 
-module.exports = { normalizeAim, inArc, vectorFromFacing, hasLineOfSight, weaponStaminaCost };
+module.exports = { normalizeAim, inArc, hitRadius, HIT_PADDING, vectorFromFacing, hasLineOfSight, weaponStaminaCost };

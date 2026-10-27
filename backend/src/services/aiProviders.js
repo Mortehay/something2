@@ -14,6 +14,18 @@
 // exception is loadActiveProviderWithSecret / loadProviderWithSecret, whose
 // names say what they hand back and whose callers are server-side only.
 
+// Modalities whose adapters are hand-written, so no request template.
+const TEMPLATELESS = new Set(['audio', 'text', 'sprite']);
+// image_edit is template-capable but the template is optional (the box adapter
+// needs none), so it is neither required nor defaulted away on create.
+const TEMPLATE_OPTIONAL = new Set(['image_edit']);
+
+const MODALITIES = Object.freeze(['image', 'audio', 'text', 'sprite', 'image_edit']);
+const ADAPTERS = Object.freeze(['box', 'a1111', 'openai_compatible', 'ollama', 'generic']);
+// Mirror of audioJobQueue.DRAIN_ORDER. Not required from there: audioJobQueue
+// -> audioGeneration -> aiProviders would be a require cycle.
+const AUDIO_GROUPS = Object.freeze(['music', 'ambience', 'sfx_realistic', 'sfx_retro']);
+
 // Columns an admin may write through create/PATCH. is_active is deliberately
 // absent -- activation is POST /activate, because it has a cross-row effect
 // (deactivating the previous holder) that a field assignment does not express.
@@ -30,11 +42,16 @@ const WRITABLE = [
   'models_pointer',
   'response_image_pointer',
   'enabled',
-  // 'image' (default), 'audio' (game audio slice 1) or 'text' (audio prompt
-  // writer). An audio profile talks to the box's fixed audio API through
+  // 'image' (default), 'audio' (game audio slice 1), 'text' (audio prompt
+  // writer) or 'sprite' (GPU-box sprite sheets, gpuBoxSprites.js). An audio profile talks to the box's fixed audio API through
   // remoteAudioProvider.js, a text profile to the box's /api/text through
-  // textProvider.js; neither uses the image template/pointer/sheet fields.
+  // textProvider.js; none uses the image template/pointer/sheet fields.
   'modality',
+  // Unified provider kinds: which wire dialect the service speaks, and the
+  // audio model chosen per drain group ({music: 'audio:ace-step', ...}).
+  // discovery_cache/discovery_fetched_at are discovery output, not writable.
+  'adapter',
+  'models_by_group',
   // SOMET-346: how to cut a multi-frame sheet the remote returns whole.
   'sheet_layout',
   'sheet_columns',
@@ -103,12 +120,34 @@ function providerFieldError(body, { partial = false } = {}) {
     if (bad) return bad;
   }
   const modality = has('modality') ? body.modality : undefined;
-  if (modality !== undefined && !['image', 'audio', 'text'].includes(modality)) {
-    return "modality must be 'image', 'audio' or 'text'";
+  if (modality !== undefined && !MODALITIES.includes(modality)) {
+    return `modality must be one of ${MODALITIES.join(', ')}`;
   }
-  // Neither audio nor text has a request template (both have hand-written
-  // adapters); only an image provider is template-driven.
-  const templateRequired = !partial && modality !== 'audio' && modality !== 'text';
+  if (has('adapter') && body.adapter !== null && !ADAPTERS.includes(body.adapter)) {
+    return `adapter must be one of ${ADAPTERS.join(', ')}`;
+  }
+  if (has('models_by_group') && body.models_by_group !== null) {
+    const m = body.models_by_group;
+    if (!isPlainObject(m)) return 'models_by_group must be an object or null';
+    // Only checkable when the body names the modality (always on create).
+    if (modality !== undefined && modality !== 'audio') {
+      return 'models_by_group is only an audio provider setting';
+    }
+    for (const [group, model] of Object.entries(m)) {
+      if (!AUDIO_GROUPS.includes(group)) return `unknown audio group '${group}'`;
+      if (typeof model !== 'string') return `models_by_group.${group} must be a string`;
+    }
+  }
+  // A text provider is useless without a model. On create this is checkable;
+  // on PATCH the stored row is not visible here, so only an explicit blank
+  // model together with modality 'text' is rejected.
+  if (modality === 'text' && body.enabled !== false) {
+    const blank = typeof body.model !== 'string' || !body.model.trim();
+    if (blank && (!partial || has('model'))) return 'a text provider needs a model';
+  }
+  // Only an image provider is template-driven; audio, text and sprite have
+  // hand-written adapters and no request template.
+  const templateRequired = !partial && !TEMPLATELESS.has(modality) && !TEMPLATE_OPTIONAL.has(modality);
   if (templateRequired || has('request_template')) {
     // The template becomes a POST body. An array or a bare string would be
     // accepted by jsonb and then fail at generate time against the remote
@@ -204,9 +243,9 @@ async function loadActiveProviderWithSecret(db, modality = 'image') {
   return r.rows[0] || null;
 }
 
-// Audio and text profiles have no template, but the column is NOT NULL.
+// Audio, text and sprite profiles have no template, but the column is NOT NULL.
 async function createProvider(db, body) {
-  const templateless = body.modality === 'audio' || body.modality === 'text';
+  const templateless = TEMPLATELESS.has(body.modality) || TEMPLATE_OPTIONAL.has(body.modality);
   const withDefaults = templateless && body.request_template === undefined
     ? { ...body, request_template: {} }
     : body;
@@ -300,6 +339,16 @@ async function saveModelsCache(db, id, models) {
   return serializeProvider(r.rows[0]);
 }
 
+// Stores the kind-aware discovery result (providerCatalog.discover().cache).
+async function saveDiscoveryCache(db, id, cache) {
+  const r = await db.query(
+    `UPDATE ai_providers SET discovery_cache = $1, discovery_fetched_at = now(), updated_at = now()
+     WHERE id = $2 RETURNING *`,
+    [JSON.stringify(cache), id],
+  );
+  return serializeProvider(r.rows[0]);
+}
+
 module.exports = {
   serializeProvider,
   serializeProviders,
@@ -316,5 +365,8 @@ module.exports = {
   deleteProvider,
   setActiveProvider,
   saveModelsCache,
+  saveDiscoveryCache,
   WRITABLE,
+  MODALITIES,
+  ADAPTERS,
 };

@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { bucketPlayersByChunk, playersNear } = require('../src/authority/playerAoi.js');
+const { bucketPlayersByChunk, playersNear, playersForRecipient } = require('../src/authority/playerAoi.js');
 const { chunkOf, MAP_TILE_SIZE } = require('../src/authority/coords.js');
 
 // SOMET-365. The player broadcast was the one AOI hole left: creatures, items
@@ -140,4 +140,39 @@ test('matches a brute-force neighbourhood filter over random positions', () => {
     assert.deepEqual(got, want,
       `trial ${trial}: viewer at ${viewer.x},${viewer.y} disagreed with brute force`);
   }
+});
+
+// playersForRecipient is what the tick loop calls per socket. It exists so that
+// the two decisions the loop used to make inline -- what a socket with no
+// placed player gets, and which row is its own -- are tested here instead of
+// living untested at the call site (validation of 2026-10-10: passing a null
+// own row at the server call site stayed green, and the no-player fallback
+// leaked every position during a join).
+const recipient = (userId, x, y) => ({ userId, x, y });
+
+test('a socket with no placed player gets NO list -- not the whole world', () => {
+  const a = row('a', 100, 100);
+  const far = row('far', 100 + CHUNK_PX * 5, 100);
+  const buckets = bucketPlayersByChunk([a, far], N);
+  const rowById = new Map([[a.id, a], [far.id, far]]);
+  assert.equal(playersForRecipient(buckets, rowById, null, N), null,
+    'a joining socket has no position to scope by, so it must receive no player list at all');
+  assert.equal(playersForRecipient(buckets, rowById, undefined, N), null);
+});
+
+test('the own row is found by userId even when the buckets lack it', () => {
+  const me = row('me', 500, 500);
+  const got = playersForRecipient(new Map(), new Map([['me', me]]), recipient('me', 500, 500), N);
+  assert.equal(got.length, 1, 'the recipient\'s own row must be looked up and included');
+  assert.equal(got[0], me, 'by reference: the row from the snapshot, not a copy');
+});
+
+test('playersForRecipient scopes by the recipient\'s position', () => {
+  const me = row('me', 100, 100);
+  const mate = row('mate', CHUNK_PX + 20, 100);
+  const far = row('far', 100 + CHUNK_PX * 5, 100);
+  const buckets = bucketPlayersByChunk([me, mate, far], N);
+  const rowById = new Map([[me.id, me], [mate.id, mate], [far.id, far]]);
+  const got = playersForRecipient(buckets, rowById, recipient('me', me.x, me.y), N).map((p) => p.id).sort();
+  assert.deepEqual(got, ['mate', 'me']);
 });

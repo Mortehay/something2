@@ -35,7 +35,7 @@ describe("Player.update chunked branch", () => {
     // place near east edge of chunk (0,0); a step east enters unloaded (1,0)
     p.x = N * T - 30; p.y = 50; p.width = 20; p.height = 20; p.speed = 100; p.speedMultiplier = 1;
     p.update(1, { d: true }, m); // big dt, tries to cross frontier
-    expect(p.x).toBeCloseTo(379.99, 2);
+    expect(p.x).toBeCloseTo(384.99, 2);
   });
 
   it("can move to negative world coordinates (no clamp to 0)", () => {

@@ -172,7 +172,7 @@ function fakePortalPool() {
         from_x: 1050, from_y: 1050, to_x: 550, to_y: 550,
       }] };
     }
-    if (/FROM villages WHERE/i.test(sql)) return { rows: [] };
+    if (/FROM villages v JOIN worlds/i.test(sql)) return { rows: [] }; // SOMET-588: matches the real JOIN shape (the old WHERE-only pattern never matched and only worked via fall-through)
     if (/FROM world_creatures wc/i.test(sql)) {
       return { rows: [{
         id: GUARD_ID, type: 'Orc', x: 1050, y: 1050, hp: guardHp, facing: 'S',
@@ -251,7 +251,7 @@ function fakeRacyPortalPool() {
         from_x: 1050, from_y: 1050, to_x: 550, to_y: 550,
       }] };
     }
-    if (/FROM villages WHERE/i.test(sql)) return { rows: [] };
+    if (/FROM villages v JOIN worlds/i.test(sql)) return { rows: [] }; // SOMET-588: matches the real JOIN shape (the old WHERE-only pattern never matched and only worked via fall-through)
     if (/FROM world_creatures wc/i.test(sql)) {
       // Deferred: does not resolve until releaseCreatureQuery() is called.
       // Gates EVERY chunk's creature query uniformly (the whole radius-1
@@ -335,7 +335,7 @@ function fakeAdjacentChunkGuardPool() {
         from_x: 850, from_y: 1050, to_x: 550, to_y: 550,
       }] };
     }
-    if (/FROM villages WHERE/i.test(sql)) return { rows: [] };
+    if (/FROM villages v JOIN worlds/i.test(sql)) return { rows: [] }; // SOMET-588: matches the real JOIN shape (the old WHERE-only pattern never matched and only worked via fall-through)
     if (/FROM world_creatures wc/i.test(sql)) {
       // params: [worldId, x1, x2, y1, y2]. The guard's chunk bounding box
       // (chunk (0,1)) is x in [0,800), y in [800,1600) -- the WEST neighbor
@@ -415,7 +415,7 @@ function fakeMirroredPortalPool() {
         strength: 5, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5 }] };
     }
     if (/FROM map_links ml JOIN worlds/i.test(sql)) return { rows: LINKS[params[0]] || [] };
-    if (/FROM villages WHERE/i.test(sql)) return { rows: [] };
+    if (/FROM villages v JOIN worlds/i.test(sql)) return { rows: [] }; // SOMET-588: matches the real JOIN shape (the old WHERE-only pattern never matched and only worked via fall-through)
     if (/FROM world_creatures wc/i.test(sql)) return { rows: [] }; // no guards -- pure ping-pong repro
     if (/FROM world_items/i.test(sql)) return { rows: [] };
     return { rows: [] };
@@ -665,7 +665,7 @@ function fakeBoundaryPortalPool(fromX, fromY) {
         from_x: fromX, from_y: fromY, to_x: 550, to_y: 550,
       }] };
     }
-    if (/FROM villages WHERE/i.test(sql)) return { rows: [] };
+    if (/FROM villages v JOIN worlds/i.test(sql)) return { rows: [] }; // SOMET-588: matches the real JOIN shape (the old WHERE-only pattern never matched and only worked via fall-through)
     if (/FROM world_creatures wc/i.test(sql)) return { rows: [] }; // no guard -- pure chunk-load-gate/anchor repro
     if (/FROM world_items/i.test(sql)) return { rows: [] };
     return { rows: [] };

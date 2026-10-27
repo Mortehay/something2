@@ -64,6 +64,7 @@ function mkCascadePool({ failOnBiomesUpdate = false } = {}) {
           ? { rows: [{ id: pending.world.id, name: pending.world.id }] }
           : { rows: [] };
       }
+      if (/FROM worlds WHERE dungeon_boss->>'entity'/i.test(s)) return { rows: [] };
       if (/SELECT 1 FROM world_creatures WHERE type/i.test(s)) {
         return pending.hasPlacedCreature ? { rows: [{ '?column?': 1 }] } : { rows: [] };
       }
@@ -117,7 +118,7 @@ test('a successful rename commits the entity_types row AND every cascaded refere
     .send({ name: 'Timber Wolf', color: '#0f0' });
   assert.equal(putRes.status, 200, JSON.stringify(putRes.body));
   assert.equal(putRes.body.name, 'Timber Wolf');
-  assert.deepEqual(putRes.body.renamedReferences, { worlds: 1, biomes: 1, hadPlacedCreatures: true });
+  assert.deepEqual(putRes.body.renamedReferences, { worlds: 1, biomes: 1, hadPlacedCreatures: true, dungeonBosses: 0 });
 
   const typesRes = await request(app).get('/api/entity-types');
   assert.equal(typesRes.status, 200);

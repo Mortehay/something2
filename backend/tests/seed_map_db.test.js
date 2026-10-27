@@ -213,6 +213,43 @@ test('applying a spec twice produces identical rows', async (t) => {
   } finally { await cleanup(pool); await pool.end(); }
 });
 
+// SOMET-534. `moveEntry: false` is what lets "every shipped spec applies
+// cleanly" below run WITHOUT the entry-world key: if the option were ignored,
+// that test would hand is_entry to p5-descent's entry world for the rest of
+// the run with nothing guarding it -- the SOMET-265 shape. So the option is
+// pinned here, on a fixture that declares is_entry: true, and checked against
+// whatever really was the entry world (read under the key, so no peer can be
+// mid-borrow when we look).
+test('moveEntry: false applies the spec but leaves is_entry where it was', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) {
+    const msg = `NO DATABASE at ${DB_URL} (${pool.unreachable}) — moveEntry is UNVERIFIED`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return;
+  }
+  try {
+    await cleanup(pool);
+    await withEntryPreserved(pool, async () => {
+      const entryNow = async () => (await pool.query(
+        'SELECT name FROM worlds WHERE is_entry = true ORDER BY name')).rows.map((r) => r.name);
+      const before = await entryNow();
+      assert.equal(before.length, 1,
+        `precondition: expected exactly one entry world to compare against, got ${JSON.stringify(before)} `
+        + '-- seed the maps (p5-descent, then vale-region LAST) before trusting this test');
+      assert.notEqual(before[0], 'zzTestAlpha', 'precondition: the fixture must not already be the entry world');
+
+      const result = await applyMapSpec(pool, spec(), { moveEntry: false });
+      assert.equal(result.worlds, 2, 'the rest of the spec must still be applied');
+      const alpha = await pool.query("SELECT 1 FROM worlds WHERE name = 'zzTestAlpha'");
+      assert.equal(alpha.rowCount, 1, 'the declared entry world itself must still be written');
+
+      assert.deepEqual(await entryNow(), before,
+        'moveEntry: false must leave is_entry exactly where it was, not hand it to the spec\'s entry world');
+    });
+  } finally { await cleanup(pool); await pool.end(); }
+});
+
 test('a spec that fails a DB constraint mid-apply rolls back completely', async (t) => {
   const pool = await openPool();
   if (pool.unreachable) {
@@ -311,11 +348,6 @@ test('a spec that fails validation writes nothing', async (t) => {
 // observation. IF YOU SEE THIS TEST NEAR 300s AGAIN, the specs have grown
 // another 60% and the fix is to split the loop into one subtest per spec (each
 // then gets its own budget) rather than to keep raising one number.
-// Long enough for a peer polling every 50ms to win the key, short enough that
-// four of them are noise against a ~150s test. See the call sites.
-const ENTRY_KEY_YIELD_MS = 300;
-const yieldEntryKey = () => new Promise((r) => { setTimeout(r, ENTRY_KEY_YIELD_MS); });
-
 test('every shipped spec applies cleanly', { timeout: 420000 }, async (t) => {
   // Gate ABOVE the CI check, not below it: a CI environment that sets
   // DATABASE_URL (so pool.unreachable would be false) but not
@@ -338,32 +370,36 @@ test('every shipped spec applies cleanly', { timeout: 420000 }, async (t) => {
   }
   const dir = path.join(__dirname, '..', 'seeds', 'maps');
   try {
-    // EVERY applyMapSpec here runs inside withEntryPreserved -- but ONE WINDOW
-    // PER APPLY, not one window across the whole loop (SOMET-534).
+    // NO applyMapSpec here holds the entry-world key, because none of them
+    // moves is_entry (`moveEntry: false`, SOMET-534).
     //
-    // Why it must be wrapped at all: applyMapSpec CLEARS is_entry everywhere
-    // before setting the spec's own. If it throws partway through, the clear
-    // lands and the set never does, and the run ends with ZERO entry worlds --
-    // auto-join then has nowhere to send a player with no last world, the "I
-    // can't log in to the map" symptom. Reproduced live on 2026-08-11: a full
-    // `npm test` left the shared dev database with no entry world, and
-    // `node scripts/dungeon/restore-entry.js "Old Trailhead"` put it back. The
-    // restore is in withEntryPreserved's `finally`, so it runs on the throwing
-    // path -- which is the only path that matters here.
+    // History, because each step was measured and each one plateaued. This
+    // loop used to apply every spec inside ONE withEntryPreserved window: a
+    // 121-SECOND hold on a key whose median hold is 199ms, so every peer that
+    // arrived inside it timed out and ran unguarded, and the four whole-database
+    // invariants in villageScreenBudget_db.test.js skipped on every full run.
+    // Splitting it into one window per apply, a 90s reader wait and a 300ms
+    // yield between applies (2fd03e5) took the skips from 4 to 0 on an idle
+    // machine -- and back to 1-2 under suite load, where ONE p5-descent apply
+    // held the key for 122-189s. The hold was split; it was never shrunk.
     //
-    // Why per apply rather than once around the loop: the single window was a
-    // 121-SECOND hold on a key whose median hold is 199ms, and every peer that
-    // arrived inside it timed out at 6s and ran unguarded. The measured cost
-    // was four whole-database invariants in villageScreenBudget_db.test.js
-    // skipping on EVERY full run -- not failing, starving. Splitting the window
-    // does not weaken the guarantee above: each apply still has its own
-    // snapshot -> apply -> restore, mutually exclusive with every peer's.
+    // What the key was actually guarding: applyMapSpec is ONE transaction, so a
+    // peer sees an apply all at once at COMMIT or not at all. The only window a
+    // peer could observe was COMMIT moving is_entry to the spec's entry world ->
+    // withEntryPreserved's finally moving it back -- milliseconds, guarded by a
+    // lock held for the whole minute-long apply before it. Not moving is_entry
+    // removes that window, and with it the reason to hold anything.
     //
-    // Releasing BETWEEN applies is safe because no concurrently-running peer
-    // touches these subjects. Peers apply their own zz* fixture specs, so
-    // neither the vale-region village pre-count below nor the first/second
-    // idempotency pair is contended -- and the post-loop assertions read
-    // vale-region's own named worlds, which nothing else writes.
+    // What that gives up, stated: on a database with NO entry world at all,
+    // this test used to leave the last spec's entry world in place (the
+    // withEntryPreserved "nothing to preserve" path). It no longer creates one.
+    // Seeding a database is `make seed-map`'s job, which still moves is_entry.
+    // applyMapSpec's default path is covered by "applying a spec twice produces
+    // identical rows" above, and the option itself by the moveEntry test.
+    //
+    // A throw partway through is still safe without the window: the
+    // transaction rolls back, and is_entry was never going to be touched.
+    //
     // This test intentionally never tears down what it seeds (see the note
     // above the test suite), so on a re-run against the same DB, hub-vale's
     // village will already exist -- the applier's `existing.rowCount === 0`
@@ -393,22 +429,8 @@ test('every shipped spec applies cleanly', { timeout: 420000 }, async (t) => {
     const results = {};
     for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.map.json'))) {
       const s = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
-      // One preservation window each, with a YIELD between them. See the note
-      // above the loop for why the window is split; the yield is why splitting
-      // it was not enough on its own.
-      //
-      // withAdvisoryLock polls pg_try_advisory_lock every 50ms and there is no
-      // queue, so releasing and re-acquiring in the same tick starves every
-      // waiter: p5-descent's two applies are 61.6s and 58.8s back to back, and
-      // a reader arriving just before them waits ~120s against a key that is
-      // free only for microseconds at a time. Measured: splitting the window
-      // alone took villageScreenBudget's skips from 4 per run to 2, and a 90s
-      // reader wait took it to 1 -- the last one lost to exactly this convoy.
-      // A deliberate gap gives any waiter ~6 poll attempts to win the key.
-      const first = await withEntryPreserved(pool, () => applyMapSpec(pool, s));   // must not throw
-      await yieldEntryKey();
-      const second = await withEntryPreserved(pool, () => applyMapSpec(pool, s));  // idempotent
-      await yieldEntryKey();
+      const first = await applyMapSpec(pool, s, { moveEntry: false });   // must not throw
+      const second = await applyMapSpec(pool, s, { moveEntry: false });  // idempotent
       results[s.name] = { spec: s, first, second };
       // NOT tautological: applyMapSpec (scripts/seed-map.js) counts
       // worlds/links from real loop iterations completed, not by echoing

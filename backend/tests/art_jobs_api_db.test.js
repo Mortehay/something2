@@ -33,6 +33,11 @@ function requireTestDb(t, why) {
   return true;
 }
 
+// Scratch providers a test creates beyond freshPool's own. freshPool's t.after
+// deletes them BEFORE it ends the pool: a t.after registered later by the test
+// itself runs after the pool is gone, fails silently and leaks the row.
+const extraProviders = new Set();
+
 async function freshPool(t) {
   const pool = new Pool({ connectionString: DB_URL, max: 6, connectionTimeoutMillis: 3000 });
   const { rows } = await pool.query(
@@ -52,7 +57,9 @@ async function freshPool(t) {
     // Not a blanket DELETE FROM art_jobs: t.after runs outside the advisory
     // lock, so it would wipe a peer file's in-flight jobs.
     dispatcher.__resetRun();
-    await pool.query('DELETE FROM ai_providers WHERE id = $1', [providerId]).catch(() => {});
+    const ids = [providerId, ...extraProviders];
+    extraProviders.clear();
+    await pool.query('DELETE FROM ai_providers WHERE id = ANY($1::int[])', [ids]).catch(() => {});
     await pool.end().catch(() => {});
   });
   return { pool, providerId };
@@ -92,6 +99,38 @@ lockedTest('GET /api/art-subjects pages the catalogue 100 at a time', async (t) 
   assert.equal(p4.body.subjects.length, 0, 'past the end is empty, not an error');
 });
 
+lockedTest('GET /api/art-subjects exposes every character appearance as missing art',
+  async (t, pool) => {
+    // The precondition is CREATED, not assumed: on a database where the slots
+    // already have art (any real one) "missing" is empty and this read 0 vs 30.
+    // Cleared and restored INSIDE the lock -- the peers that write appearance
+    // art (catalog_subjects_db, art_dispatcher_catalog_db) hold the same one.
+    const { rows: original } = await pool.query(
+      `SELECT entity_type_id, variant, image, updated_at FROM character_appearances`);
+    await pool.query('UPDATE character_appearances SET image = NULL');
+    try {
+      const res = await request(app)
+        .get('/api/art-subjects/character_appearance?missing_only=true&per_page=500')
+        .set(...AUTH);
+      assert.equal(res.status, 200);
+      assert.equal(res.body.total, 30);
+      assert.equal(res.body.subjects.length, 30);
+      assert.ok(res.body.subjects.every((s) => (
+        s.kind === 'character_appearance' && !s.has_art && s.takes_description
+      )));
+      assert.ok(res.body.subjects.some((s) => s.key === 'Warrior:1'));
+      assert.ok(res.body.subjects.some((s) => s.key === 'Druid:5'));
+    } finally {
+      for (const r of original) {
+        await pool.query(
+          `UPDATE character_appearances SET image = $1, updated_at = $2
+            WHERE entity_type_id = $3 AND variant = $4`,
+          [r.image, r.updated_at, r.entity_type_id, r.variant],
+        ).catch(() => {});
+      }
+    }
+  });
+
 // The response carries `row` internally -- the whole catalogue row. Shipping it
 // would send the catalog twice on every page.
 lockedTest('a page carries only the named fields, not the whole catalogue row', async (t) => {
@@ -108,7 +147,7 @@ lockedTest('an unknown subject kind is a 400 that names the valid ones', async (
   const res = await request(app).get('/api/art-subjects/nonsense').set(...AUTH);
   assert.equal(res.status, 400);
   assert.deepEqual(res.body.kinds.sort(),
-    ['entity', 'item', 'passive_label', 'skill', 'tile']);
+    ['character_appearance', 'entity', 'item', 'passive_label', 'skill', 'tile']);
 });
 
 // THE RESUME MECHANISM. A batch is resumable because the filter reads the
@@ -162,6 +201,78 @@ lockedTest('POST /api/art-jobs queues a selection and reports what was already l
     assert.equal(rows[0].n, 5, 'a duplicate enqueue must not double the batch');
   });
 
+// SOMET-538 re-validation: a provider_id that names no provider was a 500 from
+// the art_jobs foreign key. The key is REAL, so the 404 can only come from the
+// provider check -- an unknown key would have answered 201 with queued 0.
+lockedTest('queueing on a provider that does not exist is a 404 and queues nothing',
+  async (t, pool) => {
+    const [skill] = await cs.SUBJECTS.skill.list();
+    const { rows: [{ max }] } = await pool.query('SELECT COALESCE(max(id), 0)::int AS max FROM ai_providers');
+    const res = await request(app).post('/api/art-jobs').set(...AUTH)
+      .send({ kind: 'skill', keys: [skill.key], provider_id: max + 1000 });
+    assert.equal(res.status, 404);
+    assert.match(res.body.error, /provider \d+ not found/);
+    const { rows } = await pool.query('SELECT count(*)::int n FROM art_jobs');
+    assert.equal(rows[0].n, 0, 'nothing may be queued');
+  });
+
+// SOMET-538 rework 3. A provider_id the client SENT is either a usable id or a
+// 400 -- never a 500 and never silently replaced by the active provider.
+// Observed: 99999999999 passed Number.isInteger, overflowed int4 in the
+// existence SELECT and answered 500; 0 was read as "none given" and refused
+// with a false "no active provider is set"; '999999' and 1.5 were ignored and
+// the jobs went to the active provider. Asserted WITH an active provider, so a
+// value that falls through to it answers 201 and the test sees it.
+lockedTest('a malformed provider_id is a 400 naming the field, and queues nothing',
+  async (t, pool, providerId) => {
+    const prev = await pool.query("SELECT id FROM ai_providers WHERE is_active AND modality = 'image'");
+    await pool.query("UPDATE ai_providers SET is_active = false WHERE is_active AND modality = 'image'");
+    await pool.query('UPDATE ai_providers SET is_active = true WHERE id = $1', [providerId]);
+    try {
+      const [skill] = await cs.SUBJECTS.skill.list();
+      for (const bad of [99999999999, 2147483648, 0, -3, 1.5, '999999', String(providerId), true, {}]) {
+        // eslint-disable-next-line no-await-in-loop
+        const res = await request(app).post('/api/art-jobs').set(...AUTH)
+          .send({ kind: 'skill', keys: [skill.key], provider_id: bad });
+        assert.equal(res.status, 400, `provider_id ${JSON.stringify(bad)}: ${JSON.stringify(res.body)}`);
+        assert.match(res.body.error, /provider_id must be a positive integer/,
+          `provider_id ${JSON.stringify(bad)} must be refused as malformed, not as a missing provider`);
+      }
+      const { rows } = await pool.query('SELECT count(*)::int n FROM art_jobs');
+      assert.equal(rows[0].n, 0, 'nothing may be queued on a malformed provider_id');
+
+      // The boundary is the column's: the largest int4 is well-formed, so it
+      // gets the honest 404 rather than the 400.
+      const top = await request(app).post('/api/art-jobs').set(...AUTH)
+        .send({ kind: 'skill', keys: [skill.key], provider_id: 2147483647 });
+      assert.equal(top.status, 404, JSON.stringify(top.body));
+      // And null still means "the active provider", which is what the console
+      // sends for its default option.
+      const dflt = await request(app).post('/api/art-jobs').set(...AUTH)
+        .send({ kind: 'skill', keys: [skill.key], provider_id: null });
+      assert.equal(dflt.status, 201, JSON.stringify(dflt.body));
+    } finally {
+      await pool.query('UPDATE ai_providers SET is_active = false WHERE id = $1', [providerId])
+        .catch(() => {});
+      for (const r of prev.rows) {
+        // eslint-disable-next-line no-await-in-loop
+        await pool.query('UPDATE ai_providers SET is_active = true WHERE id = $1', [r.id])
+          .catch(() => {});
+      }
+    }
+  });
+
+// The same overflow on /dispatch: 99999999999 reached the provider SELECT and
+// answered 500.
+lockedTest('dispatch refuses a malformed provider_id with a 400, not a 500', async () => {
+  for (const bad of [99999999999, 0, 1.5, '7']) {
+    // eslint-disable-next-line no-await-in-loop
+    const res = await request(app).post('/api/art-jobs/dispatch').set(...AUTH)
+      .send({ provider_id: bad });
+    assert.equal(res.status, 400, `provider_id ${JSON.stringify(bad)}: ${JSON.stringify(res.body)}`);
+  }
+});
+
 lockedTest('queueing rejects an empty selection and an unknown kind', async (t, pool, providerId) => {
   const empty = await request(app).post('/api/art-jobs').set(...AUTH)
     .send({ kind: 'skill', keys: [], provider_id: providerId });
@@ -171,13 +282,25 @@ lockedTest('queueing rejects an empty selection and an unknown kind', async (t, 
     .send({ kind: 'nonsense', keys: ['x'], provider_id: providerId });
   assert.equal(bad.status, 400);
 
-  const noProvider = await request(app).post('/api/art-jobs').set(...AUTH)
-    .send({ kind: 'skill', keys: ['x'] });
-  assert.equal(noProvider.status, 400,
-    'the connector backend with no provider AND no active one would queue work nothing can run');
-  assert.match(noProvider.body.error, /no active provider/,
-    'the message must say WHICH thing is missing -- "provider_id is required" sends '
-    + 'the admin looking for a field they deliberately left on its default');
+  // "No active provider" is CREATED here, not assumed: a real database has
+  // one, the route then (correctly) falls back to it, and this read 201.
+  // Image modality only, restored in a finally -- see the next test for why
+  // not in a t.after.
+  const prev = await pool.query("SELECT id FROM ai_providers WHERE is_active AND modality = 'image'");
+  await pool.query("UPDATE ai_providers SET is_active = false WHERE is_active AND modality = 'image'");
+  try {
+    const noProvider = await request(app).post('/api/art-jobs').set(...AUTH)
+      .send({ kind: 'skill', keys: ['x'] });
+    assert.equal(noProvider.status, 400,
+      'the connector backend with no provider AND no active one would queue work nothing can run');
+    assert.match(noProvider.body.error, /no active provider/,
+      'the message must say WHICH thing is missing -- "provider_id is required" sends '
+      + 'the admin looking for a field they deliberately left on its default');
+  } finally {
+    for (const { id } of prev.rows) {
+      await pool.query('UPDATE ai_providers SET is_active = true WHERE id = $1', [id]).catch(() => {});
+    }
+  }
 });
 
 // Omitting provider_id means "the active provider", which is what the console's
@@ -245,9 +368,11 @@ lockedTest('dispatch refuses a below-native provider with an actionable 400',
     );
     const skills = (await cs.SUBJECTS.skill.list()).slice(0, 2);
     const [tile] = await cs.SUBJECTS.tile.list(pool);
+    const [item] = await cs.SUBJECTS.item.list(pool);
     await queue.enqueue(pool, [
       ...skills.map((s) => ({ kind: 'skill', key: s.key })),
       { kind: 'tile', key: tile.key },
+      { kind: 'item', key: item.key },
     ], { backend: 'connector', providerId });
 
     const res = await request(app).post('/api/art-jobs/dispatch').set(...AUTH)
@@ -255,11 +380,17 @@ lockedTest('dispatch refuses a below-native provider with an actionable 400',
     assert.equal(res.status, 400);
     assert.match(res.body.error, /1024px minimum/);
     assert.match(res.body.error, /request_template/, 'the message must say how to fix it');
+    // EVERY blocked kind is named, not just the first one the GROUP BY returns
+    // (SOMET-593 D5: the copy said "queued item jobs" while skill was blocked too).
+    assert.match(res.body.error, /queued item and skill jobs use it/);
     // WHICH rows block it, so the console can offer to drop exactly those.
     // The tile is exempt and must not be listed -- dropping it would lose
     // correct work.
     assert.deepEqual(res.body.blocked.map(({ kind, provider_id: pid, width, count }) =>
-      ({ kind, pid, width, count })), [{ kind: 'skill', pid: providerId, width: 512, count: 2 }]);
+      ({ kind, pid, width, count })), [
+      { kind: 'item', pid: providerId, width: 512, count: 1 },
+      { kind: 'skill', pid: providerId, width: 512, count: 2 },
+    ]);
     assert.equal(dispatcher.runStatus().running, false, 'nothing may have started');
   });
 
@@ -481,9 +612,16 @@ lockedTest('clear rejects malformed groups rather than clearing everything',
     const [skill] = await cs.SUBJECTS.skill.list();
     await queue.enqueue(pool, [{ kind: 'skill', key: skill.key }],
       { backend: 'connector', providerId });
-    for (const groups of [[], [{ kind: 'skill' }], [{ kind: 3, provider_id: 1 }]]) {
+    // A PRESENT but non-array `groups` used to read as "no scope" and take the
+    // clear-everything branch (SOMET-593 D1), and a provider_id beyond int4 got
+    // past Number.isInteger into the query and came back a 500 (D2).
+    for (const groups of [[], [{ kind: 'skill' }], [{ kind: 3, provider_id: 1 }],
+      'skill', { kind: 'skill', provider_id: providerId }, null, 7,
+      [{ kind: 'skill', provider_id: 99999999999 }],
+      [{ kind: 'skill', provider_id: -2147483649 }]]) {
       const res = await request(app).post('/api/art-jobs/clear').set(...AUTH).send({ groups });
       assert.equal(res.status, 400, JSON.stringify(groups));
+      assert.match(res.body.error, /groups must be/, JSON.stringify(groups));
     }
     const { rows } = await pool.query("SELECT count(*)::int n FROM art_jobs WHERE state='queued'");
     assert.equal(rows[0].n, 1, 'a bad request must delete nothing');
@@ -495,7 +633,7 @@ async function smallProvider(t, pool) {
     `INSERT INTO ai_providers (name, base_url, request_template, model)
      VALUES ($1, 'http://stub.invalid/sdapi/v1/txt2img', '{"width":512,"height":512}'::jsonb, 'stub')
      RETURNING id`, [`zzTestSmall ${process.pid} ${Date.now()}`]);
-  t.after(() => pool.query('DELETE FROM ai_providers WHERE id = $1', [rows[0].id]).catch(() => {}));
+  extraProviders.add(rows[0].id);        // deleted by freshPool's t.after
   return rows[0].id;
 }
 
@@ -593,6 +731,79 @@ lockedTest('a scoped clear is allowed while a batch runs, and un-reports the gro
     assert.equal(res.body.cleared, 1);
     assert.deepEqual(dispatcher.runStatus().blocked, [], 'removed groups stop being offered');
     assert.equal(dispatcher.runStatus().running, true, 'the batch keeps running');
+  });
+
+// SOMET-594 rework. run.blocked is a snapshot from the drain's last pass, and
+// the console offers "Remove N blocked job(s)" from it. Once those rows are
+// gone -- by an UNSCOPED clear or out of band -- the offer must go too, or the
+// button clears 0 rows (and used to start a batch).
+lockedTest('run.blocked forgets groups that no longer have queued rows',
+  async (t, pool, providerId) => {
+    const small = await smallProvider(t, pool);
+    const [good, bad] = (await cs.SUBJECTS.skill.list()).slice(0, 2);
+    const [item] = await cs.SUBJECTS.item.list(pool);
+    await queue.enqueue(pool, [{ kind: 'skill', key: good.key }], { backend: 'connector', providerId });
+    await queue.enqueue(pool, [{ kind: 'skill', key: bad.key }], { backend: 'connector', providerId: small });
+    await queue.enqueue(pool, [{ kind: 'item', key: item.key }], { backend: 'connector', providerId: small });
+
+    dispatcher.__resetRun();
+    dispatcher.startDrain(pool, {
+      provider: { id: providerId, name: 'big', request_template: { width: 1024, height: 1024 } },
+      generate: async (registryId) => {
+        remote.setJob(registryId, { status: 'done', result: { image_key: 'zzTest/x.png', frames: 1 } });
+      },
+      writeArt: async () => {},
+    });
+    t.after(() => { dispatcher.stopDrain(); dispatcher.__resetRun(); });
+    await drainOut();
+    await pool.query("DELETE FROM art_generations WHERE image_key = 'zzTest/x.png'").catch(() => {});
+    assert.equal(dispatcher.runStatus().running, false);
+    assert.deepEqual(dispatcher.runStatus().blocked.map((b) => b.kind).sort(), ['item', 'skill'],
+      'precondition: both groups were reported blocked');
+
+    // Out of band: the item row is deleted by hand. The listing must stop
+    // offering it, while the skill group (still queued) stays offered.
+    await pool.query("DELETE FROM art_jobs WHERE subject_kind = 'item'");
+    const list = await request(app).get('/api/art-jobs').set(...AUTH);
+    assert.equal(list.status, 200);
+    assert.deepEqual(list.body.run.blocked.map((b) => [b.kind, b.provider_id]), [['skill', small]]);
+
+    // The unscoped "Clear N pending" removes every queued row, so nothing
+    // blocked is left to offer -- in the run itself, not only in the listing.
+    const res = await request(app).post('/api/art-jobs/clear').set(...AUTH).send({});
+    assert.equal(res.status, 200);
+    assert.equal(res.body.cleared, 1);
+    assert.deepEqual(dispatcher.runStatus().blocked, [], 'an unscoped clear forgets run.blocked');
+    const after = await request(app).get('/api/art-jobs').set(...AUTH);
+    assert.deepEqual(after.body.run.blocked, []);
+  });
+
+// The size refusal must name the fix that applies. A type PINNED to a 512
+// provider ignores the console's pick, so "Pick X in the Provider list" sends
+// the admin to a control that is already set correctly.
+lockedTest('a refusal caused by a type pin says to change the pin, not the pick',
+  async (t, pool, providerId) => {
+    const small = await smallProvider(t, pool);
+    const [entity] = await cs.SUBJECTS.entity.list(pool);
+    const { rows: [prev] } = await pool.query(
+      'SELECT ai_provider_mode, ai_provider_id FROM entity_types WHERE name = $1', [entity.key]);
+    await pool.query(
+      "UPDATE entity_types SET ai_provider_mode = 'provider', ai_provider_id = $2 WHERE name = $1",
+      [entity.key, small]);
+    try {
+      const res = await request(app).post('/api/art-jobs').set(...AUTH)
+        .send({ kind: 'entity', keys: [entity.key], provider_id: providerId });
+      assert.equal(res.status, 400);
+      assert.equal(res.body.code, 'PROVIDER_TOO_SMALL');
+      assert.match(res.body.error, /pinned/);
+      assert.ok(res.body.error.includes(entity.key), 'the pinned subject is named');
+      assert.doesNotMatch(res.body.error, /in the Provider list/,
+        'the picked provider is already a 1024 one');
+    } finally {
+      await pool.query(
+        'UPDATE entity_types SET ai_provider_mode = $2, ai_provider_id = $3 WHERE name = $1',
+        [entity.key, prev.ai_provider_mode, prev.ai_provider_id]);
+    }
   });
 
 // Deleting a row a worker is mid-generation on would have the drain resolve a
@@ -704,6 +915,151 @@ lockedTest('a provider failure requeues plainly, keeping its seed', async (t, po
   assert.equal(after.rows[0].attempts, 0, 'a provider fault should not count against the subject');
   assert.equal(String(after.rows[0].seed), String(before.rows[0].seed),
     'a provider failure keeps its seed -- the image was never the problem');
+});
+
+// SOMET-544's known limitation, the part SOMET-551 left open. "A retry cannot
+// fix this" holds only while the REQUEST is unchanged, and most of the request
+// is code and provider config: the backdrop moved white -> grey (SOMET-545)
+// without touching any per-subject row, and every cutout that failed on white
+// was still refused a retry that would now work.
+//
+// The failure is produced through the REAL runOne path, with only the network
+// call stubbed, so the recorded history is exactly what a real failure writes.
+// The provider template wraps the prompt and adds steps and a negative prompt
+// on purpose: comparing our own req.prompt with the recorded SENT body would
+// call every templated provider "changed", and only a wrapping template shows
+// that.
+// ITEMS, from the END of the catalogue. describe_subjects_db.test.js writes
+// descriptions onto REAL skill subjects while this file runs, and a
+// description written after a subject failed is -- correctly -- a change, so a
+// skill here read "changed" in a full-suite run and passed alone.
+async function quietItems(pool, n) {
+  return (await cs.SUBJECTS.item.list(pool)).slice(-n);
+}
+
+const CUTOUT_ERR = 'provider answered 422: {"detail":"cutout removed 97.9% of the image"}';
+
+async function failThroughRunOne(pool, providerId, subjectKey) {
+  const [job] = await queue.enqueue(pool, [{ kind: 'item', key: subjectKey }],
+    { backend: 'connector', providerId });
+  const provider = (await pool.query('SELECT * FROM ai_providers WHERE id=$1', [providerId])).rows[0];
+  const out = await dispatcher.runOne(pool, job, {
+    provider,
+    resolveSubject: dispatcher.subjectResolver(pool),
+    generate: async (id, p, req) => {
+      remote.setJob(id, { sentBody: remote.buildBody(p, req), status: 'error', error: CUTOUT_ERR });
+    },
+  });
+  assert.equal(out.ok, false, 'setup: the stubbed generation must fail');
+  // Attempts are not the point here; the row just has to be terminally failed.
+  await pool.query("UPDATE art_jobs SET state='failed', attempts=3 WHERE id=$1", [job.id]);
+  return job;
+}
+
+async function withWrappingTemplate(pool, providerId, body) {
+  await pool.query(
+    `UPDATE ai_providers SET request_template = $2::jsonb WHERE id = $1`,
+    [providerId, JSON.stringify({
+      prompt: 'house style, {{prompt}}', seed: '{{seed}}', width: '{{width}}', height: '{{height}}',
+      steps: 30, negative_prompt: 'blurry',
+    })],
+  );
+  const jobIds = [];
+  try {
+    await body(jobIds);
+  } finally {
+    await pool.query('DELETE FROM art_generations WHERE art_job_id = ANY($1::bigint[])', [jobIds])
+      .catch(() => {});
+  }
+}
+
+lockedTest('an UNCHANGED request is still refused a plain requeue after a content failure',
+  async (t, pool, providerId) => {
+    const [item] = await quietItems(pool, 1);
+    await withWrappingTemplate(pool, providerId, async (jobIds) => {
+      const job = await failThroughRunOne(pool, providerId, item.key);
+      jobIds.push(job.id);
+      const gen = await pool.query('SELECT composed_prompt FROM art_generations WHERE art_job_id=$1', [job.id]);
+      assert.match(gen.rows[0].composed_prompt, /^house style, /,
+        'setup: the history must hold the SENT body, or this test proves nothing');
+
+      const res = await request(app).post('/api/art-jobs/requeue')
+        .set(...AUTH).send({ kind: 'content_cutout' });
+      assert.equal(res.status, 409,
+        `nothing changed, so the same image comes back -- must still refuse: ${JSON.stringify(res.body)}`);
+      const still = await pool.query('SELECT state FROM art_jobs WHERE id=$1', [job.id]);
+      assert.equal(still.rows[0].state, 'failed');
+    });
+  });
+
+lockedTest('after a backdrop change, a content failure requeues plainly and keeps its seed',
+  async (t, pool, providerId) => {
+    const [a, b] = await quietItems(pool, 2);
+    await withWrappingTemplate(pool, providerId, async (jobIds) => {
+      const changedJob = await failThroughRunOne(pool, providerId, a.key);
+      const sameJob = await failThroughRunOne(pool, providerId, b.key);
+      jobIds.push(changedJob.id, sameJob.id);
+
+      // The SOMET-545 shape: what the failure was sent is no longer what this
+      // code sends. Stated on the history row because the backdrop is a code
+      // constant; the row is the old code's record of what IT sent.
+      await pool.query(
+        `UPDATE art_generations SET composed_prompt = replace(composed_prompt, $2, 'flat solid white background')
+          WHERE art_job_id = $1`,
+        [changedJob.id, dispatcher.backdropFor({ request_template: {} })],
+      );
+      const rewritten = await pool.query('SELECT composed_prompt FROM art_generations WHERE art_job_id=$1',
+        [changedJob.id]);
+      assert.match(rewritten.rows[0].composed_prompt, /white background/, 'setup: the backdrop must differ');
+
+      const before = await pool.query('SELECT seed FROM art_jobs WHERE id=$1', [changedJob.id]);
+      const res = await request(app).post('/api/art-jobs/requeue')
+        .set(...AUTH).send({ kind: 'content_cutout' });
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      assert.equal(res.body.requeued, 1, 'only the subject whose request changed');
+      assert.equal(res.body.reseeded, false);
+      assert.equal(res.body.unchanged, 1, 'and SAY the other one was left, or "1 of 2" reads as a bug');
+
+      const { rows } = await pool.query('SELECT id, state, seed FROM art_jobs WHERE id = ANY($1::bigint[])',
+        [[changedJob.id, sameJob.id]]);
+      const byId = new Map(rows.map((r) => [String(r.id), r]));
+      assert.equal(byId.get(String(changedJob.id)).state, 'queued');
+      assert.equal(String(byId.get(String(changedJob.id)).seed), String(before.rows[0].seed),
+        'a plain requeue keeps the reproducible seed -- the request is what changed');
+      assert.equal(byId.get(String(sameJob.id)).state, 'failed',
+        'the unchanged subject would reproduce its failure and must stay put');
+    });
+  });
+
+lockedTest('a provider template edit counts as a change too', async (t, pool, providerId) => {
+  const [item] = await quietItems(pool, 1);
+  await withWrappingTemplate(pool, providerId, async (jobIds) => {
+    const job = await failThroughRunOne(pool, providerId, item.key);
+    jobIds.push(job.id);
+    await pool.query(
+      `UPDATE ai_providers SET request_template = request_template || '{"steps": 40}'::jsonb WHERE id=$1`,
+      [providerId],
+    );
+    const res = await request(app).post('/api/art-jobs/requeue')
+      .set(...AUTH).send({ kind: 'content_cutout' });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(res.body.requeued, 1, 'different steps draw a different image from the same seed');
+  });
+});
+
+lockedTest('a failure the request cannot be rebuilt for keeps the refusal', async (t, pool, providerId) => {
+  const [item] = await quietItems(pool, 1);
+  await withWrappingTemplate(pool, providerId, async (jobIds) => {
+    const job = await failThroughRunOne(pool, providerId, item.key);
+    jobIds.push(job.id);
+    await pool.query("UPDATE art_generations SET composed_prompt = 'anything else' WHERE art_job_id=$1",
+      [job.id]);
+    // The provider that drew it is gone: no way to say what it would be sent now.
+    await pool.query('UPDATE art_generations SET provider_id = -1 WHERE art_job_id=$1', [job.id]);
+    const res = await request(app).post('/api/art-jobs/requeue')
+      .set(...AUTH).send({ kind: 'content_cutout' });
+    assert.equal(res.status, 409, '"cannot tell" must not read as "changed"');
+  });
 });
 
 // SOMET-595. Every failed retry leaves its own row, so one subject can hold
@@ -831,7 +1187,7 @@ lockedTest('a description for a subject that is not in the catalogue is refused'
 lockedTest('the listing says which kinds take a description, and it matches the route',
   async (t) => {
     for (const [kind, expected] of [['skill', true], ['item', true],
-      ['passive_label', true], ['entity', true], ['tile', false]]) {
+      ['passive_label', true], ['entity', true], ['character_appearance', true], ['tile', false]]) {
       // eslint-disable-next-line no-await-in-loop
       const res = await request(app).get(`/api/art-subjects/${kind}?per_page=1`).set(...AUTH);
       assert.equal(res.status, 200);
@@ -893,3 +1249,19 @@ lockedTest('a failure its subject has since recovered from is neither listed nor
       { subject_key: 'rq_still_failed', state: 'queued' },
     ], 'the recovered subject must not be queued to draw over its art');
   });
+
+// SOMET-593 D3. LAST in the file on purpose: every earlier test's t.after hooks
+// have run by now. smallProvider's own t.after DELETE used to run after
+// freshPool's had ended the pool, failed silently, and leaked a 'zzTestSmall'
+// ai_providers row per use on every run.
+test('no scratch provider this file created outlives it', async (t) => {
+  if (!requireTestDb(t, 'reads ai_providers')) return;
+  const pool = new Pool({ connectionString: DB_URL, max: 1 });
+  try {
+    const { rows } = await pool.query(
+      "SELECT name FROM ai_providers WHERE name LIKE 'zzTest% ' || $1 || ' %'", [String(process.pid)]);
+    assert.deepEqual(rows.map((r) => r.name), []);
+  } finally {
+    await pool.end();
+  }
+});

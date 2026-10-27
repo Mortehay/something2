@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import CreatureBehaviorsAdmin from '../CreatureBehaviorsAdmin.jsx';
 import { CHASE_STYLES } from '../behaviorForm.js';
+import { KINDS as SKILL_KINDS } from '../creatureSkillForm.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const app = fs.readFileSync(path.join(here, '../../../App.jsx'), 'utf8');
@@ -63,5 +64,26 @@ describe('CreatureBehaviorsAdmin', () => {
     for (const style of CHASE_STYLES) {
       expect(admin).not.toContain(`<option value="${style}"`);
     }
+  });
+
+  // SOMET-608 (S6). Same drift-guard pattern as Chase Style above, for the
+  // Creature Skills catalog modal's own Kind dropdown.
+  it('builds the Kind dropdown from the shared creatureSkillForm KINDS list', () => {
+    expect(admin).toMatch(/\{SKILL_KINDS\.map\(\s*\(k\)\s*=>\s*<option key=\{k\} value=\{k\}>\{k\}<\/option>\)\}/);
+    expect(admin).toMatch(/import\s*\{[^}]*\bKINDS as SKILL_KINDS\b[^}]*\}\s*from\s*'\.\/creatureSkillForm\.js'/);
+  });
+
+  it('hardcodes no skill kind as an <option> of its own', () => {
+    for (const kind of SKILL_KINDS) {
+      expect(admin).not.toContain(`<option value="${kind}"`);
+    }
+  });
+
+  // SOMET-608: the kit editor picks an EXISTING catalog skill (a real
+  // skill_id), never a free-text name -- the whole point of normalizing
+  // skills into their own table instead of inline jsonb.
+  it('the kit editor binds skills from the CATALOG (a select over creatureSkills), never free text', () => {
+    expect(admin).toMatch(/creatureSkills \|\| \[\]\)\.map\(\s*\(s\)\s*=>/);
+    expect(admin).not.toMatch(/<input[^>]*value=\{binding\.skill/);
   });
 });

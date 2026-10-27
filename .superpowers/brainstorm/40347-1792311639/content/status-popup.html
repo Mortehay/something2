@@ -1,0 +1,55 @@
+<h2>Status badge → click opens a detail popup</h2>
+<p class="subtitle">Each badge explains itself: what's different, which rows, since when, and the one button that fixes it.</p>
+
+<style>
+  .ss { font: 13px/1.4 system-ui, sans-serif; color:#d6dbe4; background:#141a24; padding:14px; border-radius:8px; }
+  .ss button { background:#2b3546; color:#d6dbe4; border:1px solid #3a4659; border-radius:5px; padding:4px 9px; font-size:12px; }
+  .ss button.p { background:#5b4fd6; border-color:#6d62e8; color:#fff; }
+  .ss .m { color:#8a96a8; font-size:11px; }
+  .b { display:inline-block; padding:1px 7px; border-radius:9px; font-size:11px; font-weight:600; }
+  .warn { background:#45360f; color:#f2c14e; } .info { background:#1d3150; color:#7fb2ff; }
+  .pop { background:#1b2230; border:1px solid #3a4659; border-radius:8px; padding:12px; box-shadow:0 8px 24px #0008; }
+  .pop h4 { margin:0 0 4px; font-size:14px; display:flex; justify-content:space-between; }
+  .pop .why { margin:6px 0 10px; font-size:12px; }
+  .pop table { width:100%; border-collapse:collapse; font-size:12px; }
+  .pop td, .pop th { padding:4px 4px; border-bottom:1px solid #1f2735; text-align:left; }
+  .pop th { color:#8a96a8; font-weight:500; font-size:11px; }
+  .acts { display:flex; gap:6px; justify-content:flex-end; margin-top:10px; }
+</style>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">Entities · <span class="b warn">14 edits not exported</span> clicked</div>
+    <div class="mockup-body"><div class="ss"><div class="pop">
+      <h4>Entities: 14 edits not exported <span class="m">✕</span></h4>
+      <div class="why">These rows changed on <b>this PC</b> after the last export (Oct 10 18:22). The other PC won't see them until you export and push.</div>
+      <table>
+        <tr><th>Row</th><th>What</th><th>Changed</th></tr>
+        <tr><td>Goblin</td><td>hp, speed</td><td>Oct 16 14:02</td></tr>
+        <tr><td>Rat</td><td>damage</td><td>Oct 16 13:55</td></tr>
+        <tr><td>Frost Wolf</td><td>new row</td><td>Oct 15 20:11</td></tr>
+        <tr><td>Old Slime</td><td>deleted</td><td>Oct 14 09:40</td></tr>
+        <tr><td colspan="3" class="m">+ 10 more…</td></tr>
+      </table>
+      <div class="acts"><button>Show full diff</button><button class="p">Export Entities</button></div>
+    </div></div></div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">Items · <span class="b info">git is newer</span> clicked</div>
+    <div class="mockup-body"><div class="ss"><div class="pop">
+      <h4>Items: git is newer <span class="m">✕</span></h4>
+      <div class="why">The files in git were exported by <b>laptop</b> on Oct 16 09:12. This PC last seeded Items on Oct 02, so it's running older data.</div>
+      <table>
+        <tr><th></th><th></th></tr>
+        <tr><td>In git</td><td>210 items · exported Oct 16 09:12 · laptop</td></tr>
+        <tr><td>Differs from this PC</td><td>18 changed · 3 new · 1 only here</td></tr>
+        <tr><td>Edited here since last seed</td><td><b>2</b> (will need a choice)</td></tr>
+        <tr><td>Git commit</td><td class="m">a1b2c3d "export items" (did you git pull?)</td></tr>
+      </table>
+      <div class="acts"><button class="p">Seed Items (preview)…</button></div>
+    </div></div></div>
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top:14px">Same pattern for the rest: <b>never exported</b> → "nothing in git yet, Export to start"; <b>1 token missing</b> → lists the provider + a "Set token" link into AI Providers; <b>in sync</b> → the three timestamps and the counts.</p>

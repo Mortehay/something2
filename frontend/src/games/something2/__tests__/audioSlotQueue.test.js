@@ -39,6 +39,7 @@ describe('single Generate', () => {
         subject_kind: 'world', subject_key: 'Vale', slot: 'music', style: 'village', prompt: 'a lute', slots: { tempo: 'slow' },
       }],
       start: true,
+      scoped: true,
     });
   });
 
@@ -75,6 +76,7 @@ describe('Write with model', () => {
         subject_kind: 'world', subject_key: 'Vale', slot: 'ambience', prompt_only: true, force_prompt: true, hint: 'rain on stone',
       }],
       start: true,
+      scoped: true,
     });
   });
 
@@ -101,6 +103,15 @@ describe('what the card says after an enqueue', () => {
       .toEqual({ ok: true, message: 'Generate queued' });
     expect(singleEnqueueMessage({ queued: [{ id: '9' }], started: false, reason: 'no_provider' }, 'Generate'))
       .toEqual({ ok: true, message: 'Generate queued — no audio provider, press Start once one is active' });
+  });
+
+  // SOMET-592 defect 2: a scoped click can be queued but not started because
+  // a DIFFERENT drain is already running and will never reach it -- queued,
+  // not lost, and the admin is told to retry rather than seeing a silent
+  // success that never actually ran.
+  it('queued but drain_busy is ok, and says to retry once the other drain finishes', () => {
+    expect(singleEnqueueMessage({ queued: [{ id: '9' }], started: false, reason: 'drain_busy' }, 'Generate'))
+      .toEqual({ ok: true, message: 'Generate queued — another generation is running, press Start once it finishes' });
   });
 });
 

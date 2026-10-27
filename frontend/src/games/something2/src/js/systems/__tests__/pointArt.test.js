@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { pointArtDef, pointBodyRef, pointStateTreatment, planLandmarkBodies } from '../pointArt.js';
-import { RenderSystem } from '../RenderSystem.js';
 
 const DEFS = {
   portal: { id: 1, render_mode: 'static', image: 'sprites/portal.png', displayWidth: 110, displayHeight: 130 },
@@ -40,6 +39,19 @@ describe('pointStateTreatment', () => {
   it('is neutral for everything else', () => {
     expect(pointStateTreatment('merchant', {})).toEqual({ alpha: 1, ring: false, stateKey: null });
   });
+
+  // SOMET-588: the two defaulting expressions (`point && point.activated ===
+  // true`, `(point && point.state) || "locked"`) were only ever exercised
+  // with a fully-formed point -- a missing point, or a chest row with no
+  // `state` key at all, never hit the actual default branch.
+  it('defaults a missing waypoint point to unlit, not a thrown error', () => {
+    expect(pointStateTreatment('waypoint', null)).toEqual({ alpha: 0.45, ring: true, stateKey: 'unlit' });
+    expect(pointStateTreatment('waypoint', undefined)).toEqual({ alpha: 0.45, ring: true, stateKey: 'unlit' });
+  });
+  it('defaults a chest with no state key, or no point at all, to locked', () => {
+    expect(pointStateTreatment('chest', {})).toEqual({ alpha: 1, ring: false, stateKey: 'locked' });
+    expect(pointStateTreatment('chest', null)).toEqual({ alpha: 1, ring: false, stateKey: 'locked' });
+  });
 });
 
 describe('planLandmarkBodies', () => {
@@ -60,6 +72,10 @@ describe('planLandmarkBodies', () => {
     const plan = planLandmarkBodies([portal, wpSame], DEFS);
     expect(plan.bodies.map((b) => b.landmark)).toEqual([portal]);
     expect(plan.skipBody.has(wpSame)).toBe(false);
+    // SOMET-588: its beam/label still move to the overlay pass, so they land
+    // on top of the gate's body instead of underneath it in the flat pass.
+    expect(plan.beamOverlay.has(wpSame)).toBe(true);
+    expect(plan.beamOverlay.has(portal)).toBe(false);
   });
   it('tolerates a missing catalog', () => {
     const plan = planLandmarkBodies([portal], null);
@@ -78,16 +94,6 @@ describe('planLandmarkBodies', () => {
   });
 });
 
-describe('resolveSprite stateKey seam', () => {
-  const manifest = { frames: { 'S/0': [0, 0, 8, 8], opened: [8, 0, 8, 8] } };
-  const img = { width: 16, height: 8 };
-  const imageManager = { get: (k) => (k === 'atlas' ? img : null) };
-  const entity = { sprite: { atlas_key: 'atlas', manifest } };
-  it('uses the state frame when present', () => {
-    expect(RenderSystem.resolveSprite({ ...entity, stateKey: 'opened' }, imageManager, 'static', 0).crop).toEqual([8, 0, 8, 8]);
-  });
-  it('falls back to the static frame when the state frame is absent', () => {
-    expect(RenderSystem.resolveSprite({ ...entity, stateKey: 'locked' }, imageManager, 'static', 0).crop).toEqual([0, 0, 8, 8]);
-    expect(RenderSystem.resolveSprite(entity, imageManager, 'static', 0).crop).toEqual([0, 0, 8, 8]);
-  });
-});
+// The resolveSprite stateKey seam tests moved to spriteAtlas.test.js's
+// "RenderSystem.resolveSprite" describe (SOMET-588) -- that is resolveSprite's
+// own test home; this file only ever imported RenderSystem for them.

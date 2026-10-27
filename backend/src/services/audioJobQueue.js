@@ -141,15 +141,27 @@ async function enqueue(db, items, { batchId = null, providerId = null } = {}) {
 // default (the slot card's own count) -- never joins a pack, since a pack
 // asks for one variant count for all its items: when the head is solo it is
 // claimed alone, and otherwise only non-solo jobs are picked.
-async function claimBatch(db, n, { phase, group } = {}) {
+//
+// `batchIds` (SOMET-592 defect 2) restricts a claim to one click's own
+// enqueue(s): a single-slot card's Generate posts ONE item and must never
+// have its pack call sweep in a DIFFERENT, already-queued batch that
+// happens to sit in the same drain_group -- the exact bug reported (a click
+// on one creature's hurt sound pulled in 2 unrelated queued jobs). Every
+// batch gets a batch_id from enqueue() regardless, so this is a plain extra
+// WHERE term, never a caller-built fragment: null/absent keeps today's
+// whole-queue claim (a page-level "Generate All"/dispatch call never passes
+// it).
+async function claimBatch(db, n, { phase, group, batchIds } = {}) {
   const limit = Number.isInteger(n) && n > 0 ? n : 1;
   const only = phase === 'prompt' ? 1 : null;
+  const scope = Array.isArray(batchIds) && batchIds.length ? batchIds : null;
   const solo = (a) => `(${a}variants IS NOT NULL AND ${a}variants <> $6::int)`;
   const r = await db.query(
     `WITH first AS (
        SELECT id, drain_group, provider_id, ${solo('')} AS solo FROM audio_jobs
         WHERE state = 'queued' AND (not_before IS NULL OR not_before <= now())
           AND ${phaseFilter(phase)} AND ($4::text IS NULL OR drain_group = $4)
+          AND ($7::uuid[] IS NULL OR batch_id = ANY($7))
         ORDER BY array_position($1::text[], drain_group), id
         FOR UPDATE SKIP LOCKED LIMIT 1
      ), pick AS (
@@ -157,6 +169,7 @@ async function claimBatch(db, n, { phase, group } = {}) {
         WHERE j.state = 'queued' AND (j.not_before IS NULL OR j.not_before <= now())
           AND ${phaseFilter(phase, 'j')}
           AND j.drain_group = f.drain_group AND j.provider_id IS NOT DISTINCT FROM f.provider_id
+          AND ($7::uuid[] IS NULL OR j.batch_id = ANY($7))
           AND (CASE WHEN f.solo THEN j.id = f.id ELSE NOT ${solo('j.')} END)
         ORDER BY j.id
         LIMIT CASE WHEN $5::int IS NOT NULL THEN $5::int
@@ -166,21 +179,24 @@ async function claimBatch(db, n, { phase, group } = {}) {
      UPDATE audio_jobs SET state = 'running', attempts = attempts + 1, claimed_at = now(), updated_at = now()
       WHERE id IN (SELECT id FROM pick)
       RETURNING *`,
-    [DRAIN_ORDER, limit, PACKED_GROUPS, group || null, only, DEFAULT_SFX_VARIANTS],
+    [DRAIN_ORDER, limit, PACKED_GROUPS, group || null, only, DEFAULT_SFX_VARIANTS, scope],
   );
   return r.rows.sort((a, b) => Number(a.id) - Number(b.id));
 }
 
 // Whether `phase` (and `group`) has a job claimable right now. The drain asks
 // this before switching the box's model, so it never switches for a phase
-// or group that has nothing to run.
-async function hasClaimable(db, { phase, group } = {}) {
+// or group that has nothing to run. `batchIds`: same scope as claimBatch, so
+// a scoped drain's own idle/phase-skip decisions stay confined to its batch.
+async function hasClaimable(db, { phase, group, batchIds } = {}) {
+  const scope = Array.isArray(batchIds) && batchIds.length ? batchIds : null;
   const r = await db.query(
     `SELECT EXISTS (
        SELECT 1 FROM audio_jobs
         WHERE state = 'queued' AND (not_before IS NULL OR not_before <= now())
-          AND ${phaseFilter(phase)} AND ($1::text IS NULL OR drain_group = $1)) AS any`,
-    [group || null],
+          AND ${phaseFilter(phase)} AND ($1::text IS NULL OR drain_group = $1)
+          AND ($2::uuid[] IS NULL OR batch_id = ANY($2))) AS any`,
+    [group || null, scope],
   );
   return r.rows[0].any;
 }
@@ -258,13 +274,17 @@ async function requeueOrphans(db) {
   return r.rowCount;
 }
 
-// Same phase/group filter as claimBatch, so "nothing claimable yet" and
-// "nothing left" are told apart over exactly the rows a claim could take.
-async function nextClaimableAt(db, { phase, group } = {}) {
+// Same phase/group/batchIds filter as claimBatch, so "nothing claimable yet"
+// and "nothing left" are told apart over exactly the rows a claim could
+// take -- a scoped drain's idle wait must not be computed over the WHOLE
+// queue's backoffs when it can only ever claim its own batch.
+async function nextClaimableAt(db, { phase, group, batchIds } = {}) {
+  const scope = Array.isArray(batchIds) && batchIds.length ? batchIds : null;
   const r = await db.query(
     `SELECT min(COALESCE(not_before, now())) AS at FROM audio_jobs
-      WHERE state = 'queued' AND ${phaseFilter(phase)} AND ($1::text IS NULL OR drain_group = $1)`,
-    [group || null],
+      WHERE state = 'queued' AND ${phaseFilter(phase)} AND ($1::text IS NULL OR drain_group = $1)
+        AND ($2::uuid[] IS NULL OR batch_id = ANY($2))`,
+    [group || null, scope],
   );
   return r.rows[0].at;
 }

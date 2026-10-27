@@ -1,5 +1,21 @@
 [
   {
+    "name": "Abyssor, the Voidreaver",
+    "file": "Abyssor__the_Voidreaver.png",
+    "bytes": 788646,
+    "prompt": "A harbinger of the astral void who tears reality asunder.",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Arcane Elemental Guard",
+    "file": "Arcane_Elemental_Guard.png",
+    "bytes": 197232,
+    "prompt": "A hulking guardian of swirling arcane force summoned to defend a world boss.",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "Archer",
     "file": "Archer.png",
     "bytes": 212710,
@@ -68,6 +84,14 @@
     "file": "Beast_Line.png",
     "bytes": 311682,
     "prompt": "pixel art, a lean beast creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Beast Miniboss",
+    "file": "Beast_Miniboss.png",
+    "bytes": 504969,
+    "prompt": "pixel art boss creature, a powerful beast-themed miniboss, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
   },
@@ -144,6 +168,14 @@
     "cutout": true
   },
   {
+    "name": "Blight Miniboss",
+    "file": "Blight_Miniboss.png",
+    "bytes": 678374,
+    "prompt": "pixel art boss creature, a powerful blight-themed miniboss, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "Blight Ranged",
     "file": "Blight_Ranged.png",
     "bytes": 344679,
@@ -212,6 +244,14 @@
     "file": "Bonelord_Line.png",
     "bytes": 470514,
     "prompt": "pixel art, a lean ice-touched bonelord creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Bonelord Miniboss",
+    "file": "Bonelord_Miniboss.png",
+    "bytes": 585392,
+    "prompt": "pixel art boss creature, a powerful bonelord-themed miniboss, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
   },
@@ -296,6 +336,14 @@
     "cutout": true
   },
   {
+    "name": "Cave Miniboss",
+    "file": "Cave_Miniboss.png",
+    "bytes": 285361,
+    "prompt": "pixel art boss creature, a powerful cave-themed miniboss, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "Cave Ranged",
     "file": "Cave_Ranged.png",
     "bytes": 297605,
@@ -352,6 +400,14 @@
     "cutout": true
   },
   {
+    "name": "Chaos Elite Miniboss",
+    "file": "Chaos_Elite_Miniboss.png",
+    "bytes": 548024,
+    "prompt": "pixel art boss creature, a fearsome elite chaos-themed miniboss, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "Chaos Heavy",
     "file": "Chaos_Heavy.png",
     "bytes": 437130,
@@ -364,6 +420,14 @@
     "file": "Chaos_Line.png",
     "bytes": 425605,
     "prompt": "pixel art, a lean lightning-touched chaos creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Chaos Miniboss",
+    "file": "Chaos_Miniboss.png",
+    "bytes": 267844,
+    "prompt": "pixel art boss creature, a powerful chaos-themed miniboss, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
   },
@@ -405,6 +469,14 @@
     "bytes": 387708,
     "prompt": "pixel art, an ornate gilded treasure chest with heavy iron bands, single object, solid transparent background",
     "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "Cinder Matriarch",
+    "file": "Cinder_Matriarch.png",
+    "bytes": 317031,
+    "prompt": "A scorched brood mother insect trailing cinders, tending the burning hive cells.",
+    "is_creature": true,
     "cutout": true
   },
   {
@@ -452,6 +524,14 @@
     "file": "Construct_Line.png",
     "bytes": 400367,
     "prompt": "pixel art, a lean physical-touched construct creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Construct Miniboss",
+    "file": "Construct_Miniboss.png",
+    "bytes": 214049,
+    "prompt": "pixel art boss creature, a powerful construct-themed miniboss, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
   },
@@ -528,6 +608,14 @@
     "cutout": true
   },
   {
+    "name": "Crystal Miniboss",
+    "file": "Crystal_Miniboss.png",
+    "bytes": 510041,
+    "prompt": "pixel art boss creature, a powerful crystal-themed miniboss, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "Crystal Ranged",
     "file": "Crystal_Ranged.png",
     "bytes": 416711,
@@ -600,6 +688,14 @@
     "cutout": true
   },
   {
+    "name": "Demonic Elite Miniboss",
+    "file": "Demonic_Elite_Miniboss.png",
+    "bytes": 445441,
+    "prompt": "pixel art boss creature, a fearsome elite demonic-themed miniboss, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "Demonic Heavy",
     "file": "Demonic_Heavy.png",
     "bytes": 370238,
@@ -612,6 +708,14 @@
     "file": "Demonic_Line.png",
     "bytes": 371527,
     "prompt": "pixel art, a lean fire-touched demonic creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Demonic Miniboss",
+    "file": "Demonic_Miniboss.png",
+    "bytes": 509529,
+    "prompt": "pixel art boss creature, a powerful demonic-themed miniboss, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
   },
@@ -688,6 +792,14 @@
     "cutout": true
   },
   {
+    "name": "Desert Miniboss",
+    "file": "Desert_Miniboss.png",
+    "bytes": 192537,
+    "prompt": "pixel art boss creature, a powerful desert-themed miniboss, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "Desert Ranged",
     "file": "Desert_Ranged.png",
     "bytes": 356160,
@@ -760,6 +872,14 @@
     "cutout": true
   },
   {
+    "name": "Drowned Miniboss",
+    "file": "Drowned_Miniboss.png",
+    "bytes": 239057,
+    "prompt": "pixel art boss creature, a powerful drowned-themed miniboss, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "Drowned Ranged",
     "file": "Drowned_Ranged.png",
     "bytes": 365786,
@@ -824,6 +944,14 @@
     "cutout": true
   },
   {
+    "name": "Eldritch Elite Miniboss",
+    "file": "Eldritch_Elite_Miniboss.png",
+    "bytes": 383484,
+    "prompt": "pixel art boss creature, a fearsome elite eldritch-themed miniboss, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "Eldritch Heavy",
     "file": "Eldritch_Heavy.png",
     "bytes": 360235,
@@ -836,6 +964,14 @@
     "file": "Eldritch_Line.png",
     "bytes": 433567,
     "prompt": "pixel art, a lean physical-touched eldritch creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Eldritch Miniboss",
+    "file": "Eldritch_Miniboss.png",
+    "bytes": 744615,
+    "prompt": "pixel art boss creature, a powerful eldritch-themed miniboss, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
   },
@@ -912,6 +1048,14 @@
     "cutout": true
   },
   {
+    "name": "Ember Miniboss",
+    "file": "Ember_Miniboss.png",
+    "bytes": 274757,
+    "prompt": "pixel art boss creature, a powerful ember-themed miniboss, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "Ember Ranged",
     "file": "Ember_Ranged.png",
     "bytes": 370535,
@@ -968,6 +1112,14 @@
     "cutout": true
   },
   {
+    "name": "Fallen Elite Miniboss",
+    "file": "Fallen_Elite_Miniboss.png",
+    "bytes": 164184,
+    "prompt": "pixel art boss creature, a fearsome elite fallen-themed miniboss, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "Fallen Heavy",
     "file": "Fallen_Heavy.png",
     "bytes": 485533,
@@ -980,6 +1132,14 @@
     "file": "Fallen_Line.png",
     "bytes": 470138,
     "prompt": "pixel art, a lean ice-touched fallen creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Fallen Miniboss",
+    "file": "Fallen_Miniboss.png",
+    "bytes": 341528,
+    "prompt": "pixel art boss creature, a powerful fallen-themed miniboss, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
   },
@@ -1004,6 +1164,14 @@
     "file": "Fallen_Swarm.png",
     "bytes": 222674,
     "prompt": "pixel art, a tiny ice-touched fallen creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Fire Elemental Guard",
+    "file": "Fire_Elemental_Guard.png",
+    "bytes": 653097,
+    "prompt": "A hulking guardian of living flame summoned to defend a world boss.",
     "is_creature": true,
     "cutout": true
   },
@@ -1056,6 +1224,14 @@
     "cutout": true
   },
   {
+    "name": "Fungal Miniboss",
+    "file": "Fungal_Miniboss.png",
+    "bytes": 760124,
+    "prompt": "pixel art boss creature, a powerful fungal-themed miniboss, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "Fungal Ranged",
     "file": "Fungal_Ranged.png",
     "bytes": 334024,
@@ -1085,6 +1261,14 @@
     "bytes": 461768,
     "prompt": "pixel art, a jeweller's stall with a velvet tray of glowing gems, single object, solid transparent background",
     "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "Glacius, the Frost Leviathan",
+    "file": "Glacius__the_Frost_Leviathan.png",
+    "bytes": 822732,
+    "prompt": "An ancient dread beast encased in eternal permafrost.",
+    "is_creature": true,
     "cutout": true
   },
   {
@@ -1136,6 +1320,14 @@
     "cutout": true
   },
   {
+    "name": "Gloom Miniboss",
+    "file": "Gloom_Miniboss.png",
+    "bytes": 267321,
+    "prompt": "pixel art boss creature, a powerful gloom-themed miniboss, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "Gloom Ranged",
     "file": "Gloom_Ranged.png",
     "bytes": 412462,
@@ -1156,6 +1348,14 @@
     "file": "Gloom_Swarm.png",
     "bytes": 315069,
     "prompt": "pixel art, a tiny ice-touched gloom creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Gorgon, the Thunder Titan",
+    "file": "Gorgon__the_Thunder_Titan.png",
+    "bytes": 965983,
+    "prompt": "An electrified colossus crackling with tempest storms.",
     "is_creature": true,
     "cutout": true
   },
@@ -1204,6 +1404,14 @@
     "file": "Highland_Line.png",
     "bytes": 286425,
     "prompt": "pixel art, a lean physical-touched highland creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Highland Miniboss",
+    "file": "Highland_Miniboss.png",
+    "bytes": 194638,
+    "prompt": "pixel art boss creature, a powerful highland-themed miniboss, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
   },
@@ -1280,6 +1488,14 @@
     "cutout": true
   },
   {
+    "name": "Hive Miniboss",
+    "file": "Hive_Miniboss.png",
+    "bytes": 323402,
+    "prompt": "pixel art boss creature, a powerful hive-themed miniboss, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "Hive Ranged",
     "file": "Hive_Ranged.png",
     "bytes": 392446,
@@ -1304,11 +1520,27 @@
     "cutout": true
   },
   {
+    "name": "Ice Elemental Guard",
+    "file": "Ice_Elemental_Guard.png",
+    "bytes": 427058,
+    "prompt": "A hulking guardian of jagged ice summoned to defend a world boss.",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "IceRock",
     "file": "IceRock.png",
     "bytes": 263821,
     "prompt": "pixel art, a jagged pale blue ice boulder, single object, solid transparent background",
     "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "Ignis, the Magma Colossus",
+    "file": "Ignis__the_Magma_Colossus.png",
+    "bytes": 570909,
+    "prompt": "A titan forged from molten core and obsidian armor.",
+    "is_creature": true,
     "cutout": true
   },
   {
@@ -1360,6 +1592,14 @@
     "cutout": true
   },
   {
+    "name": "Jungle Miniboss",
+    "file": "Jungle_Miniboss.png",
+    "bytes": 586635,
+    "prompt": "pixel art boss creature, a powerful jungle-themed miniboss, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "Jungle Ranged",
     "file": "Jungle_Ranged.png",
     "bytes": 357509,
@@ -1380,6 +1620,14 @@
     "file": "Jungle_Swarm.png",
     "bytes": 262857,
     "prompt": "pixel art, a tiny lightning-touched jungle creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Lightning Elemental Guard",
+    "file": "Lightning_Elemental_Guard.png",
+    "bytes": 227069,
+    "prompt": "A hulking guardian of crackling lightning summoned to defend a world boss.",
     "is_creature": true,
     "cutout": true
   },
@@ -1440,6 +1688,14 @@
     "cutout": true
   },
   {
+    "name": "Nightmare Elite Miniboss",
+    "file": "Nightmare_Elite_Miniboss.png",
+    "bytes": 520098,
+    "prompt": "pixel art boss creature, a fearsome elite nightmare-themed miniboss, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "Nightmare Heavy",
     "file": "Nightmare_Heavy.png",
     "bytes": 371489,
@@ -1452,6 +1708,14 @@
     "file": "Nightmare_Line.png",
     "bytes": 337747,
     "prompt": "pixel art, a lean physical-touched nightmare creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Nightmare Miniboss",
+    "file": "Nightmare_Miniboss.png",
+    "bytes": 590281,
+    "prompt": "pixel art boss creature, a powerful nightmare-themed miniboss, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
   },
@@ -1476,6 +1740,14 @@
     "file": "Nightmare_Swarm.png",
     "bytes": 260174,
     "prompt": "pixel art, a tiny physical-touched nightmare creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Ossuary Warden",
+    "file": "Ossuary_Warden.png",
+    "bytes": 602331,
+    "prompt": "A towering armoured skeleton keeper wrapped in burial chains, guarding the ossuary.",
     "is_creature": true,
     "cutout": true
   },
@@ -1520,6 +1792,14 @@
     "cutout": true
   },
   {
+    "name": "Plague Elite Miniboss",
+    "file": "Plague_Elite_Miniboss.png",
+    "bytes": 490259,
+    "prompt": "pixel art boss creature, a fearsome elite plague-themed miniboss, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "Plague Heavy",
     "file": "Plague_Heavy.png",
     "bytes": 367229,
@@ -1532,6 +1812,14 @@
     "file": "Plague_Line.png",
     "bytes": 375229,
     "prompt": "pixel art, a lean fire-touched plague creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Plague Miniboss",
+    "file": "Plague_Miniboss.png",
+    "bytes": 753082,
+    "prompt": "pixel art boss creature, a powerful plague-themed miniboss, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
   },
@@ -1632,6 +1920,14 @@
     "cutout": true
   },
   {
+    "name": "Rime Miniboss",
+    "file": "Rime_Miniboss.png",
+    "bytes": 856481,
+    "prompt": "pixel art boss creature, a powerful rime-themed miniboss, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "Rime Ranged",
     "file": "Rime_Ranged.png",
     "bytes": 383637,
@@ -1712,6 +2008,14 @@
     "cutout": true
   },
   {
+    "name": "Ruin Miniboss",
+    "file": "Ruin_Miniboss.png",
+    "bytes": 251497,
+    "prompt": "pixel art boss creature, a powerful ruin-themed miniboss, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "Ruin Ranged",
     "file": "Ruin_Ranged.png",
     "bytes": 479578,
@@ -1732,6 +2036,14 @@
     "file": "Ruin_Swarm.png",
     "bytes": 344317,
     "prompt": "pixel art, a tiny ice-touched ruin creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Shade Herald",
+    "file": "Shade_Herald.png",
+    "bytes": 488746,
+    "prompt": "A hooded wraith herald with a tattered banner of shadow, announcing the Gatekeeper.",
     "is_creature": true,
     "cutout": true
   },
@@ -1816,6 +2128,14 @@
     "cutout": true
   },
   {
+    "name": "Stoneborn Miniboss",
+    "file": "Stoneborn_Miniboss.png",
+    "bytes": 186513,
+    "prompt": "pixel art boss creature, a powerful stoneborn-themed miniboss, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "Stoneborn Ranged",
     "file": "Stoneborn_Ranged.png",
     "bytes": 380985,
@@ -1884,6 +2204,14 @@
     "file": "Storm_Line.png",
     "bytes": 370139,
     "prompt": "pixel art, a lean lightning-touched storm creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Storm Miniboss",
+    "file": "Storm_Miniboss.png",
+    "bytes": 389937,
+    "prompt": "pixel art boss creature, a powerful storm-themed miniboss, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
   },
@@ -1960,6 +2288,14 @@
     "cutout": true
   },
   {
+    "name": "Swamp Miniboss",
+    "file": "Swamp_Miniboss.png",
+    "bytes": 264096,
+    "prompt": "pixel art boss creature, a powerful swamp-themed miniboss, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "Swamp Ranged",
     "file": "Swamp_Ranged.png",
     "bytes": 380144,
@@ -1980,6 +2316,30 @@
     "file": "Swamp_Swarm.png",
     "bytes": 192448,
     "prompt": "pixel art, a tiny physical-touched swamp creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "The Bone Regent",
+    "file": "The_Bone_Regent.png",
+    "bytes": 349770,
+    "prompt": "A crowned skeletal monarch on a throne of fused bones, ruling the deepest crypt of the Catacombs.",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "The Ember Queen",
+    "file": "The_Ember_Queen.png",
+    "bytes": 867739,
+    "prompt": "A vast molten hive queen with a glowing ember abdomen and wings of smouldering ash.",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "The Umbral Gatekeeper",
+    "file": "The_Umbral_Gatekeeper.png",
+    "bytes": 448712,
+    "prompt": "A colossal void sentinel of living shadow, its body a doorway into starless dark.",
     "is_creature": true,
     "cutout": true
   },
@@ -2016,6 +2376,14 @@
     "cutout": true
   },
   {
+    "name": "Titan Elite Miniboss",
+    "file": "Titan_Elite_Miniboss.png",
+    "bytes": 893600,
+    "prompt": "pixel art boss creature, a fearsome elite titan-themed miniboss, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "Titan Heavy",
     "file": "Titan_Heavy.png",
     "bytes": 475305,
@@ -2028,6 +2396,14 @@
     "file": "Titan_Line.png",
     "bytes": 392710,
     "prompt": "pixel art, a lean physical-touched titan creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Titan Miniboss",
+    "file": "Titan_Miniboss.png",
+    "bytes": 227402,
+    "prompt": "pixel art boss creature, a powerful titan-themed miniboss, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
   },
@@ -2112,6 +2488,14 @@
     "cutout": true
   },
   {
+    "name": "Tundra Miniboss",
+    "file": "Tundra_Miniboss.png",
+    "bytes": 432008,
+    "prompt": "pixel art boss creature, a powerful tundra-themed miniboss, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "Tundra Ranged",
     "file": "Tundra_Ranged.png",
     "bytes": 479025,
@@ -2168,6 +2552,14 @@
     "cutout": true
   },
   {
+    "name": "Umbral Elite Miniboss",
+    "file": "Umbral_Elite_Miniboss.png",
+    "bytes": 239417,
+    "prompt": "pixel art boss creature, a fearsome elite umbral-themed miniboss, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "Umbral Heavy",
     "file": "Umbral_Heavy.png",
     "bytes": 396761,
@@ -2180,6 +2572,14 @@
     "file": "Umbral_Line.png",
     "bytes": 337763,
     "prompt": "pixel art, a lean physical-touched umbral creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Umbral Miniboss",
+    "file": "Umbral_Miniboss.png",
+    "bytes": 629177,
+    "prompt": "pixel art boss creature, a powerful umbral-themed miniboss, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
   },
@@ -2256,6 +2656,14 @@
     "cutout": true
   },
   {
+    "name": "Undead Miniboss",
+    "file": "Undead_Miniboss.png",
+    "bytes": 304940,
+    "prompt": "pixel art boss creature, a powerful undead-themed miniboss, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "Undead Ranged",
     "file": "Undead_Ranged.png",
     "bytes": 363578,
@@ -2320,6 +2728,14 @@
     "cutout": true
   },
   {
+    "name": "Void Elite Miniboss",
+    "file": "Void_Elite_Miniboss.png",
+    "bytes": 545880,
+    "prompt": "pixel art boss creature, a fearsome elite void-themed miniboss, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "Void Heavy",
     "file": "Void_Heavy.png",
     "bytes": 378121,
@@ -2332,6 +2748,14 @@
     "file": "Void_Line.png",
     "bytes": 388983,
     "prompt": "pixel art, a lean physical-touched void creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Void Miniboss",
+    "file": "Void_Miniboss.png",
+    "bytes": 288007,
+    "prompt": "pixel art boss creature, a powerful void-themed miniboss, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
   },
@@ -2404,6 +2828,14 @@
     "file": "Volcanic_Line.png",
     "bytes": 360275,
     "prompt": "pixel art, a lean fire-touched volcanic creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Volcanic Miniboss",
+    "file": "Volcanic_Miniboss.png",
+    "bytes": 199354,
+    "prompt": "pixel art boss creature, a powerful volcanic-themed miniboss, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
   },
@@ -2500,6 +2932,14 @@
     "file": "Woodland_Line.png",
     "bytes": 301034,
     "prompt": "pixel art, a lean woodland creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Woodland Miniboss",
+    "file": "Woodland_Miniboss.png",
+    "bytes": 152509,
+    "prompt": "pixel art boss creature, a powerful woodland-themed miniboss, single object, solid transparent background",
     "is_creature": true,
     "cutout": true
   },

@@ -27,14 +27,13 @@ export const CHASE_STYLES = ["charge", "kite", "skirmish", "hold", "ambush", "gu
 // projectile_radius and attack_kind moved to abilityForm.js -- the attack is
 // nested under the behaviour as an `abilities` array now, not flat fields
 // here. This module covers the movement/aggro half only.
-// SOMET-253 Task 8: aura_radius/aura_damage_mult/aura_defense_mult/
-// aura_speed_mult and gold_min/gold_max, added to creature_behaviors by
-// Task 4's migration 1714440085000. This mirrors that migration's CHECK
-// constraint exactly (aura_radius/gold_min >= 0, the three aura multipliers
-// and gold_max > their floor).
+// SOMET-253 Task 8: gold_min/gold_max, added to creature_behaviors by
+// Task 4's migration 1714440085000. This mirrors that migration's gold CHECK
+// constraint exactly (gold_min >= 0, gold_max >= gold_min). The pack-leader
+// aura fields that migration also added moved to the aura library
+// (aura_effects + entity_types.auras) in SOMET-604.
 const NUMERIC = [
   "aggro_radius", "leash_radius", "preferred_range", "move_speed_mult",
-  "aura_radius", "aura_damage_mult", "aura_defense_mult", "aura_speed_mult",
   "gold_min", "gold_max",
 ];
 
@@ -48,23 +47,13 @@ const NUMERIC = [
 // genuine 0, which is legitimate for preferred_range -- must still round-trip
 // untouched.
 //
-// The three aura multipliers default to 1 (neutral), NOT 0, for the exact
-// same reason move_speed_mult does: aura_damage_mult/aura_defense_mult/
-// aura_speed_mult of 0 would make every creature the aura touches deal, take,
-// or move at zero the instant a leader stands near them -- silently, since
-// nothing here or in behaviorFieldError treats 0 as invalid input, only as a
-// bad DEFAULT. aura_radius correctly defaults to 0 ("not a leader"), matching
-// eleven of the twelve seeded profiles; gold_min/gold_max default to 0 (no
-// loot) since not every new profile needs a gold range.
+// gold_min/gold_max default to 0 (no loot) since not every new profile needs
+// a gold range.
 const NEW_ROW_DEFAULTS = {
   aggro_radius: 400,
   leash_radius: 800,
   preferred_range: 0,
   move_speed_mult: 1,
-  aura_radius: 0,
-  aura_damage_mult: 1,
-  aura_defense_mult: 1,
-  aura_speed_mult: 1,
   gold_min: 0,
   gold_max: 0,
 };

@@ -42,7 +42,53 @@ export function sfxChains(ev) {
       return c ? chain([`creature/${c}/hurt`]) : [];
     case 'death':
       return c ? chain([`creature/${c}/death`]) : [];
+    // SOMET-605: a boss's own moments (backend sfxEvents.bossSfx).
+    case 'spawn':
+    case 'phase':
+    case 'enrage':
+      return c ? chain([`creature/${c}/${e}`]) : [];
+    // SOMET-607 (S5, spec §4.4): "apply" plays when the LOCAL player enters
+    // an enemy aura, at 'own' -- a client-synthesized event (Game.js diffs
+    // its own debuffs frame to frame), not something the server pushes. `c`
+    // carries the aura NAME, same field the other cases reuse for a subject
+    // key. sfxPriority's existing ownActor check resolves this to 'own' as
+    // long as the caller sets `ev.a` to the local player's own id.
+    case 'apply':
+      return c ? chain([`aura/${c}/apply`]) : [];
+    // SOMET-610 (S7, spec §3.6/§4.4): a creature SKILL's own moments.
+    // Distinct wire names from the ordinary attack's use/hit (and from
+    // spawn/phase/enrage) so they resolve against the `creature_skill`
+    // audio kind -- keyed by skill NAME, which rides on `s` here (no
+    // `skill:` prefix needed: the event NAME already scopes it, unlike a
+    // player's own cast where `use`/`hit` are shared with every other
+    // attack kind).
+    case 'skill_telegraph':
+      return s ? chain([`creature_skill/${s}/telegraph`]) : [];
+    case 'skill_cast':
+      return s ? chain([`creature_skill/${s}/use`]) : [];
+    case 'skill_hit':
+      return s ? chain([`creature_skill/${s}/hit`]) : [];
     default:
       return [];
   }
+}
+
+// SOMET-605 (spec 4.4): which SfxLimiter tier a wire event plays at.
+const BOSS_EVENTS = new Set(['spawn', 'phase', 'enrage']);
+// SOMET-610 (S7, spec §4.4): a creature skill is 'nearest' normally, 'boss'
+// when the CASTER is a boss -- unlike spawn/phase/enrage, skill_telegraph/
+// _cast/_hit are not boss-exclusive event NAMES (an ordinary creature casts
+// them too, e.g. Fire Elemental Guard's scaled-down kit), so the event tuple
+// alone cannot answer "is this a boss". `bossActorIds` (optional: a Set of
+// `c:<id>` actor keys, built by the caller from its own live creature list --
+// see AudioEngine.playSfxEvents/Game.js) is the live cross-reference that
+// answers it; omitted, these three fall back to the base rule exactly like
+// any other creature event.
+const SKILL_EVENTS = new Set(['skill_telegraph', 'skill_cast', 'skill_hit']);
+export function sfxPriority(ev, ownActor, bossActorIds) {
+  if (ownActor && ev && ev.a === ownActor) return 'own';
+  if (!ev) return 'nearest';
+  if (BOSS_EVENTS.has(ev.e)) return 'boss';
+  if (SKILL_EVENTS.has(ev.e) && bossActorIds && bossActorIds.has(ev.a)) return 'boss';
+  return 'nearest';
 }

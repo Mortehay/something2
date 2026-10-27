@@ -21,6 +21,7 @@ const PY = (GAME_HEIGHT - PANEL_H) / 2;  // 80
 const LEFT_X = PX + 16;
 const COL_W = 340;
 const ROW_H = 40;
+const RIGHT_X = LEFT_X + COL_W + 24;
 
 // Recording 2D context: renderShop only ever writes to a context, so we
 // capture the geometry it draws (fillRect) and the labels (fillText) and
@@ -28,20 +29,25 @@ const ROW_H = 40;
 function stubCtx() {
   const fillRects = [];
   const texts = [];
+  const images = [];
   return {
     fillRects,
     texts,
+    images,
     save() {},
     restore() {},
     fillRect(x, y, w, h) { fillRects.push({ x, y, w, h }); },
     strokeRect() {},
     fillText(text, x, y) { texts.push({ text, x, y }); },
+    drawImage(img, x, y, w, h) { images.push({ img, x, y, w, h }); },
     set fillStyle(_v) {},
     set strokeStyle(_v) {},
     set lineWidth(_v) {},
     set font(_v) {},
     set textBaseline(_v) {},
     set textAlign(_v) {},
+    set imageSmoothingEnabled(_v) {},
+    set imageSmoothingQuality(_v) {},
   };
 }
 
@@ -293,5 +299,73 @@ describe("bound items in the sell column (SOMET-317)", () => {
       equipment: {},
     });
     expect(ctx.texts.some((t) => t.text === "bound")).toBe(false);
+  });
+});
+
+// SOMET-628 — the shelf (catalog/buyback) and the sell column drew every row
+// as plain text, unlike the carry grid, which has shown item icons since
+// SOMET-600. Same itemIcon/drawIconFit contract as inventoryPanel.js: a type
+// with no generated art keeps the pre-existing text-only row untouched.
+describe("item icons in the shop panel (SOMET-628)", () => {
+  const ICON = { naturalWidth: 256, naturalHeight: 256 };
+  // Art for item type 1 only — CATALOG row 0 (itemTypeId: 1) has art, the
+  // rest of the catalog does not.
+  const art = { icon: (kind, key) => (kind === "item" && Number(key) === 1 ? ICON : null) };
+  const iconDraws = (ctx) => ctx.images.filter((d) => d.img === ICON);
+  // Icons drawn at the sell column's left edge specifically — the catalog
+  // row for type 1 also has art, so an unscoped count would conflate the
+  // two columns.
+  const sellIconDraws = (ctx) => iconDraws(ctx).filter((d) => d.x === RIGHT_X + 4);
+
+  function renderWithArt(gameArt, inventory, view) {
+    const ctx = stubCtx();
+    const hitAreas = [];
+    const rs = renderer(ctx);
+    rs.gameArt = gameArt;
+    rs.renderShop(ctx, SHOP, inventory, ITEM_TYPES, 500, hitAreas, view);
+    return { ctx, hitAreas };
+  }
+
+  it("draws the catalog row's icon for the type that has art", () => {
+    const { ctx } = renderWithArt(art, INVENTORY, { tab: "catalog", page: 0 });
+    expect(iconDraws(ctx).length).toBeGreaterThan(0);
+  });
+
+  it("falls back to the original, unshifted text-only row when no art exists", () => {
+    const { ctx } = renderWithArt(null, INVENTORY, { tab: "catalog", page: 0 });
+    expect(iconDraws(ctx)).toHaveLength(0);
+    const nameText = ctx.texts.find((t) => t.text === "Item 1");
+    expect(nameText).toBeTruthy();
+    expect(nameText.x).toBe(LEFT_X + 8);
+  });
+
+  it("shifts the name/price/buy text clear of the icon when art exists, without moving the Buy control", () => {
+    const withIcon = renderWithArt(art, INVENTORY, { tab: "catalog", page: 0 });
+    const withoutIcon = renderWithArt(null, INVENTORY, { tab: "catalog", page: 0 });
+    const nameWithIcon = withIcon.ctx.texts.find((t) => t.text === "Item 1");
+    const nameWithoutIcon = withoutIcon.ctx.texts.find((t) => t.text === "Item 1");
+    expect(nameWithIcon.x).toBeGreaterThan(nameWithoutIcon.x);
+    // The Buy hit area is anchored to the row's right edge and must not move
+    // just because a row grew an icon on its left edge.
+    const buyWithIcon = withIcon.hitAreas.find((a) => a.kind === "buy" && a.id === 100);
+    const buyWithoutIcon = withoutIcon.hitAreas.find((a) => a.kind === "buy" && a.id === 100);
+    expect(buyWithIcon).toEqual(buyWithoutIcon);
+  });
+
+  it("draws the sell column's icon for an owned item whose type has art", () => {
+    const inventory = { items: [{ id: "x", typeId: 1, quantity: 1 }], types: ITEM_TYPES, equipment: {} };
+    const { ctx } = renderWithArt(art, inventory, { tab: "catalog", page: 0 });
+    expect(sellIconDraws(ctx)).toHaveLength(1);
+  });
+
+  it("falls back to text in the sell column for a type with no art", () => {
+    const inventory = { items: [{ id: "x", typeId: 2, quantity: 1 }], types: ITEM_TYPES, equipment: {} };
+    const { ctx } = renderWithArt(art, inventory, { tab: "catalog", page: 0 });
+    expect(sellIconDraws(ctx)).toHaveLength(0);
+    // The catalog also has a row named "Item 2" (itemTypeId 2), so pick the
+    // sell column's occurrence by x, not the first match.
+    const nameText = ctx.texts.find((t) => t.text === "Item 2" && t.x >= RIGHT_X);
+    expect(nameText).toBeTruthy();
+    expect(nameText.x).toBe(RIGHT_X + 8);
   });
 });

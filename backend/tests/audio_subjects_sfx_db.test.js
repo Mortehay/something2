@@ -111,9 +111,13 @@ test('audio subjects: creature/world_point/attack_type/item/skill', { skip }, as
       assert.deepEqual([...skillExists], [SKILL_MELEE]);
     });
 
-    await t.test('cueFor: creature (fixed, including upload-only nulls)', async () => {
-      assert.equal(await subjects.cueFor(pool, 'creature', CREATURE, 'nearby'), null, 'no cue on the box today');
-      assert.equal(await subjects.cueFor(pool, 'creature', CREATURE, 'attack'), null, 'no cue on the box today');
+    await t.test('cueFor: creature (fixed)', async () => {
+      // SOMET-627: nearby/attack now carry spec §4's suggested cue names
+      // (idle/attack) instead of upload-only null. sfxRequestFor still
+      // guards against the box not actually knowing a cue yet via the
+      // provider's own models_cache, so this is safe ahead of the box.
+      assert.equal(await subjects.cueFor(pool, 'creature', CREATURE, 'nearby'), 'idle');
+      assert.equal(await subjects.cueFor(pool, 'creature', CREATURE, 'attack'), 'attack');
       assert.equal(await subjects.cueFor(pool, 'creature', CREATURE, 'hurt'), 'hit');
       assert.equal(await subjects.cueFor(pool, 'creature', CREATURE, 'death'), 'death');
     });
@@ -122,10 +126,10 @@ test('audio subjects: creature/world_point/attack_type/item/skill', { skip }, as
       assert.equal(await subjects.cueFor(pool, 'world_point', WORLD_POINT, 'nearby'), 'waypoint');
     });
 
-    await t.test('cueFor: attack_type (per-subject, upload-only ranged/use)', async () => {
+    await t.test('cueFor: attack_type (per-subject; SOMET-627 gives ranged/use a cue too)', async () => {
       assert.equal(await subjects.cueFor(pool, 'attack_type', 'melee', 'use'), 'slash');
       assert.equal(await subjects.cueFor(pool, 'attack_type', 'melee', 'hit'), 'hit');
-      assert.equal(await subjects.cueFor(pool, 'attack_type', 'ranged', 'use'), null, 'no cue on the box today');
+      assert.equal(await subjects.cueFor(pool, 'attack_type', 'ranged', 'use'), 'shoot');
       assert.equal(await subjects.cueFor(pool, 'attack_type', 'ranged', 'hit'), 'hit');
       assert.equal(await subjects.cueFor(pool, 'attack_type', 'magic', 'use'), 'spell');
       assert.equal(await subjects.cueFor(pool, 'attack_type', 'magic', 'hit'), 'hit');
@@ -134,7 +138,7 @@ test('audio subjects: creature/world_point/attack_type/item/skill', { skip }, as
     await t.test('cueFor: item resolves through attackKindOf (melee/ranged/magic)', async () => {
       assert.equal(await subjects.cueFor(pool, 'item', ITEM_MELEE, 'use'), 'slash');
       assert.equal(await subjects.cueFor(pool, 'item', ITEM_MELEE, 'hit'), 'hit');
-      assert.equal(await subjects.cueFor(pool, 'item', ITEM_RANGED, 'use'), null, 'ranged use has no cue on the box today');
+      assert.equal(await subjects.cueFor(pool, 'item', ITEM_RANGED, 'use'), 'shoot', 'a ranged weapon inherits ranged/use (SOMET-627)');
       assert.equal(await subjects.cueFor(pool, 'item', ITEM_RANGED, 'hit'), 'hit');
       assert.equal(await subjects.cueFor(pool, 'item', ITEM_MAGIC, 'use'), 'spell');
       assert.equal(await subjects.cueFor(pool, 'item', ITEM_MAGIC, 'hit'), 'hit');
@@ -162,6 +166,7 @@ test('audio subjects: creature/world_point/attack_type/item/skill', { skip }, as
       assert.equal(subjects.entityPhrase(pool, 'attack_type', 'melee', 'use'), 'a steel sword');
       assert.equal(subjects.entityPhrase(pool, 'attack_type', 'melee', 'hit'), 'a blade on a creature');
       assert.equal(subjects.entityPhrase(pool, 'attack_type', 'ranged', 'hit'), 'an arrow');
+      assert.equal(subjects.entityPhrase(pool, 'attack_type', 'ranged', 'use'), 'an arrow', 'SOMET-627: now actually sent, not just defined');
       assert.equal(subjects.entityPhrase(pool, 'attack_type', 'magic', 'use'), 'a magic spell');
       assert.equal(subjects.entityPhrase(pool, 'attack_type', 'magic', 'hit'), 'a magic blast');
       assert.equal(subjects.entityPhrase(pool, 'attack_type', 'melee'), 'a steel sword', 'no slot: the use phrase');

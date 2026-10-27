@@ -14,6 +14,7 @@ import GameSettings from "./GameSettings.jsx";
 import PassivePointsNudge from "./PassivePointsNudge.jsx";
 import WorldBossHud from "./WorldBossHud.jsx";
 import WorldBossTestPanel from "./WorldBossTestPanel.jsx";
+import { showWorldBossTestPanel } from "./worldBossPanelGate";
 
 const UIOverlay = styled.div`
   position: absolute;
@@ -195,9 +196,9 @@ const Input = styled.input`
 
 export default function GameView() {
   const {
-    gameRef, isPlaying, isPaused, isFullscreen,
+    gameRef, isPlaying, isFullscreen,
     selectedWorldId, setSelectedWorldId,
-    enterWorld, retryJoin, resume, exitToMenu, changeCharacter, toggleFullscreen, openHelp,
+    enterWorld, retryJoin, changeCharacter, toggleFullscreen, openHelp,
     // The RESOLVED character, not the stored id: a stored id whose character
     // was deleted elsewhere resolves to null, and that is precisely the case
     // where entering a world must not be offered.
@@ -258,7 +259,7 @@ export default function GameView() {
       )}
       {isPlaying && <Minimap gameRef={gameRef} tileColors={tileColors} />}
       {isPlaying && <WorldBossHud gameRef={gameRef} />}
-      {isPlaying && <WorldBossTestPanel gameRef={gameRef} />}
+      {showWorldBossTestPanel({ isPlaying, isAdmin }) && <WorldBossTestPanel gameRef={gameRef} />}
       {/* SOMET-293. Mounted beside the other HUD panels rather than inside
           the canvas: it is a list of rows, and the canvas cannot render one.
           Keyed on the character, because activation is per character. */}

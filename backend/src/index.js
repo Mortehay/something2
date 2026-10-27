@@ -30,10 +30,17 @@ const { composeBiomePrompt } = require('./services/biomePrompt');
 const { buildWorldGenConfig } = require('./services/worldGenConfig');
 const { loadTileTypes } = require('./services/tileTypes');
 const { ATTACK_KINDS, CHASE_STYLES, ELEMENTS } = require('./services/creatureBehaviors');
-const { ABILITIES_LATERAL } = require('./authority/creatures');
+const { ABILITIES_LATERAL, SKILLS_LATERAL, BOSS_TIERS } = require('./authority/creatures');
+const { RARITIES } = require('./authority/rarity');
+const { MAX_LOOT_ROLLS } = require('./authority/bossLoot');
+// SOMET-587: needed above (for the `specDir` test seam, declared alongside
+// __setPool) ahead of where the rest of this feature's imports sit.
+const { DEFAULT_SPEC_DIR } = require('./services/specFileLocator.js');
 require('dotenv').config();
 
 const app = express();
+// SOMET-637: /api/seed-export/restart compares seed runs against this.
+const PROCESS_STARTED_AT = new Date();
 const port = process.env.PORT || 3101;
 
 // Who a request came from, when something else terminated the connection
@@ -137,6 +144,13 @@ let pool = new Pool({
 // Test seam: lets tests swap in a mock pool so routes don't need a live DB.
 const __setPool = (impl) => { pool = impl; };
 
+// Test seam, same shape as __setPool: lets tests point the SOMET-587 spec
+// locator at a throwaway fixture directory instead of the real, checked-in
+// backend/seeds/maps/ -- a test must never write to those files (see
+// specFileLocator.js's own header on why there is no caching to work around).
+let specDir = DEFAULT_SPEC_DIR;
+const __setSpecDir = (impl) => { specDir = impl; };
+
 // Guards and auth routes must see the CURRENT pool (tests swap it via
 // __setPool), so hand them a proxy that forwards to the live `pool` binding
 // rather than whatever value existed at module-load time. `connect` is
@@ -155,15 +169,34 @@ const authRouter = require('./auth/routes.js');
 const progressionRoutes = require('./api/progressionRoutes.js');
 const passiveTreeRoutes = require('./api/passiveTreeRoutes.js');
 const passiveNodesRoutes = require('./api/passiveNodesRoutes.js');
+const auraEffectsRoutes = require('./api/auraEffectsRoutes.js');
+const seedExportRoutes = require('./api/seedExportRoutes.js');
+const worldGenLocalRoutes = require('./api/worldGenLocalRoutes.js');
+const { markInterruptedRuns } = require('./services/seedSync/runs.js');
+const { cascadeEntityRename } = require('./services/seedSync/renameCascade.js');
+const creatureSkillsRoutes = require('./api/creatureSkillsRoutes.js');
 const characterRoutes = require('./api/characterRoutes.js');
+const { createQuestsRouter } = require('./routes/questsRoutes.js');
 const audioRoutes = require('./api/audioRoutes.js');
+const spriteBatchRoutes = require('./api/spriteBatchRoutes.js');
+const { createDispatcher: createSpriteDispatcher } = require('./services/spriteDispatcher.js');
 const remoteAudioProvider = require('./services/remoteAudioProvider');
 const textProvider = require('./services/textProvider');
+const gpuBoxSprites = require('./services/gpuBoxSprites');
 const { DEFAULTS: GAME_SETTING_DEFAULTS, getSettings, setSetting } = require('./services/gameSettings.js');
 const { ownedCharacter } = require('./services/characters.js');
 const { listVisited } = require('./services/visitedWorlds.js');
-const { listWaypointsForCharacter } = require('./services/waypoints.js');
+const { listWaypointsForCharacter, fetchWaypoints } = require('./services/waypoints.js');
 const { setEntryWorld } = require('./services/entryWorld.js');
+const { loadPointTypeNames } = require('./services/pointArt.js');
+const { VILLAGE_POST_KINDS, villageArtColumn } = require('../seeds/data/pointTypes.js');
+// SOMET-587: the reverse spec-locator for the World Map tab's per-instance
+// art picker. Pure/DB-free (see its own header comment) -- this file supplies
+// the live catalog it validates against.
+const {
+  findLinkInSpecs, findWaypointInSpecs, findChestInSpecs, findVillageInSpecs,
+  writeSpecFieldChange,
+} = require('./services/specFileLocator.js');
 // Single admin guard applied to every mutating admin route below.
 const adminGuard = requireAdmin(guardPool);
 // Authenticated-but-not-admin guard, for the player-facing routes declared
@@ -199,6 +232,16 @@ function isUniqueViolation(err) {
   return !!err && err.code === '23505';
 }
 
+// entity_types.point_kind FK violation (world_point_kinds), surfaced as a 400
+// naming the bad kind instead of the generic 500 catch-all. Shared by the
+// POST and PUT entity-types routes' catch blocks.
+function pointKindForeignKeyError(err, pointKind) {
+  if (err && err.code === '23503' && /point_kind/.test(err.constraint || '')) {
+    return `unknown point_kind "${pointKind}"`;
+  }
+  return null;
+}
+
 // A route param destined for an `id` (integer, serial-PK) column. Express
 // hands every :id through as a string with no type coercion, so a
 // non-numeric value (or a float like "1.5") used to reach Postgres as-is and
@@ -206,6 +249,18 @@ function isUniqueViolation(err) {
 // problem (SOMET-254, first fixed for /api/creature-behaviors).
 function invalidId(id) {
   return !/^[0-9]+$/.test(String(id));
+}
+
+// A provider_id from a JSON body (SOMET-538). Absent or null means "not
+// chosen"; anything else must be an id the int4 column can hold. Without the
+// range check 99999999999 passed Number.isInteger and answered 500 from the
+// query; without the type check a string or 1.5 was silently dropped and the
+// work went to the active provider instead of being refused.
+const MAX_INT4 = 2147483647;
+function bodyProviderId(value) {
+  if (value === undefined || value === null) return { id: null };
+  if (Number.isInteger(value) && value >= 1 && value <= MAX_INT4) return { id: value };
+  return { error: `provider_id must be a positive integer up to ${MAX_INT4}, or omitted` };
 }
 
 // Upper bound for PUT /api/worlds/:id creature_count (SOMET-188 / F-008).
@@ -302,7 +357,10 @@ function evictOrWarn(worldId) {
 
 // Sprite-gen HTTP bridge (mutable holder so tests can mock the outbound calls).
 const aiProviders = require('./services/aiProviders');
+const aiProviderTemplates = require('./services/aiProviderTemplates');
 const providerDiscovery = require('./services/providerDiscovery');
+const providerCatalog = require('./services/providerCatalog');
+const providerModelCheck = require('./services/providerModelCheck');
 const remoteImageProvider = require('./services/remoteImageProvider');
 const {
   resolveGenerationTarget, loadTypeOverride, typeTableForKind,
@@ -349,6 +407,14 @@ async function fetchJobDocument(jobId) {
 let spriteGen = require('./services/spriteGen');
 const __setSpriteGen = (impl) => { spriteGen = impl; };
 const assetStore = require('./services/assetStore');
+// The batch queue runs on the GPU box (active modality='sprite' provider);
+// the single-entity /api/sprite-jobs paths keep using spriteGen.
+const spriteDispatcher = createSpriteDispatcher({
+  db: guardPool,
+  box: require('./services/gpuBoxSprites'),
+  loadProvider: () => aiProviders.loadActiveProviderWithSecret(guardPool, 'sprite'),
+  store: assetStore,
+});
 
 // DI seam, same shape as __setPool/__setSpriteGen above: tests inject a fake
 // runner to exercise runMigrations()'s success/failure paths without hitting
@@ -478,6 +544,9 @@ async function getEntityTypesMap() {
       // showed up in game (tile_types has always exposed its equivalents).
       render_mode: row.render_mode,
       sprite: row.sprite,
+      // Props v2: the procedural idle effect the renderer gives an approved
+      // GPU-box prop's static image (systems/sway.js, systems/shine.js): none | sway | shine.
+      idle_fx: IDLE_FX.includes(row.idle_fx) ? row.idle_fx : 'none',
       prompt: row.prompt,
       // SOMET-493 -- what the inspect card's aggression badge is derived from.
       // Shipped as the raw catalog facts (faction + the behaviour's chase
@@ -522,15 +591,24 @@ app.use('/api/passive-tree', passiveTreeRoutes(guardPool));
 // under here is adminGuard'd, reads included, while /api/passive-tree is the
 // player's read-only view of the same table.
 app.use('/api/passive-nodes', passiveNodesRoutes(guardPool));
+app.use('/api/aura-effects', auraEffectsRoutes(guardPool));
+app.use('/api/seed-export', seedExportRoutes(guardPool, { processStartedAt: PROCESS_STARTED_AT }));
+app.use('/api/creature-skills', creatureSkillsRoutes(guardPool));
 
 // Character slots (SOMET-259): list / create / delete, plus the playable-class
 // catalog the creation form reads. Behind requireAuth, scoped to req.user.id.
 app.use('/api/characters', characterRoutes(guardPool));
+app.use('/api/quests', createQuestsRouter(guardPool));
 
 // Game audio (spec docs/superpowers/specs/2026-09-28-game-audio-design.md).
 // Player routes (world bundle, misses) and admin routes (/admin/*) share one
 // mount; each route carries its own guard.
 app.use('/api/audio', audioRoutes(guardPool));
+app.use('/api/sprite-admin', spriteBatchRoutes(guardPool, adminGuard, spriteDispatcher, {
+  box: gpuBoxSprites,
+  loadProvider: () => aiProviders.loadActiveProviderWithSecret(guardPool, 'sprite'),
+  store: assetStore,
+}));
 
 // The player's fog-of-war world map (SOMET-263). Read-only, and deliberately
 // NOT the payload the admin World Map tab reads from /api/world-graph: that one
@@ -708,7 +786,7 @@ app.get('/api/map/tiles', async (req, res) => {
 });
 
 // Mirrors the entity_types_attack_element_check CHECK constraint (migration
-// 1714440081000) so a bad value is a readable 400 rather than a raw 500 from
+// 1714440081000, widened to include 'arcane' by 1714440670000) so a bad value is a readable 400 rather than a raw 500 from
 // the constraint -- render_mode on these same two routes has no such check
 // (SOMET-254 leaves that pre-existing gap as-is; it is a free-form column
 // with no CHECK constraint to mirror). behavior_id is a real integer FK into
@@ -735,6 +813,9 @@ app.get('/api/map/tiles', async (req, res) => {
 // because `e.displayWidth || e.width || 40` treats 0 as falsy.
 const MAX_ENTITY_DISPLAY_PX = 400;
 
+// entity_types.idle_fx values (CHECK in migration 1714440824000).
+const IDLE_FX = ['none', 'sway', 'shine'];
+
 function entityTypeFieldError(body) {
   // SOMET-453. The pin rule lives in ONE place (services/providerPin.js) and is
   // reached from here, so every caller that asks "is this entity-type body
@@ -743,12 +824,54 @@ function entityTypeFieldError(body) {
   // unit test calling this function directly got null and threw on assert.match.
   const pinErr = providerPinFieldError(body);
   if (pinErr) return pinErr;
+  // Props v2: the renderer's procedural idle effect. NOT NULL in the DB, so
+  // a sent null is as wrong as an unknown name.
+  if (body.idle_fx !== undefined && !IDLE_FX.includes(body.idle_fx)) {
+    return `idle_fx must be one of ${IDLE_FX.join(', ')}`;
+  }
   if (body.attack_element != null && !ELEMENTS.includes(body.attack_element)) {
     return `attack_element must be one of ${ELEMENTS.join(', ')}`;
+  }
+  // SOMET-603: the boss fields. Each mirrors its DB constraint so a bad value
+  // is a readable 400 naming the field, never a raw 500.
+  if (body.boss_tier != null && !BOSS_TIERS.includes(body.boss_tier)) {
+    return `boss_tier must be one of ${BOSS_TIERS.join(', ')} or null`;
+  }
+  if (body.element != null && !ITEM_ELEMENTS.includes(body.element)) {
+    return `element must be one of ${ITEM_ELEMENTS.join(', ')} or null`;
+  }
+  if (body.hitbox_size != null && (!Number.isInteger(body.hitbox_size)
+      || body.hitbox_size < 1 || body.hitbox_size > MAX_ENTITY_DISPLAY_PX)) {
+    return `hitbox_size must be an integer between 1 and ${MAX_ENTITY_DISPLAY_PX}`;
+  }
+  if (body.xp_reward != null && (!Number.isInteger(body.xp_reward) || body.xp_reward < 0)) {
+    return 'xp_reward must be a non-negative integer';
+  }
+  if (body.base_damage != null && (typeof body.base_damage !== 'number'
+      || !Number.isFinite(body.base_damage) || body.base_damage < 0)) {
+    return 'base_damage must be a non-negative number';
   }
   if (body.behavior_id != null
       && (typeof body.behavior_id !== 'number' || !Number.isInteger(body.behavior_id))) {
     return 'behavior_id must be an integer';
+  }
+  // SOMET-611 (S10): the four boss loot overrides. Each mirrors its DB
+  // constraint, same posture as boss_tier/hitbox_size/xp_reward/base_damage
+  // just above -- a bad value is a readable 400, never a raw 500 from the
+  // CHECK constraint the migration added.
+  if (body.loot_rolls != null && (!Number.isInteger(body.loot_rolls)
+      || body.loot_rolls < 0 || body.loot_rolls > MAX_LOOT_ROLLS)) {
+    return `loot_rolls must be an integer between 0 and ${MAX_LOOT_ROLLS}`;
+  }
+  if (body.loot_min_rarity != null && !RARITIES.includes(body.loot_min_rarity)) {
+    return `loot_min_rarity must be one of ${RARITIES.join(', ')} or null`;
+  }
+  if (body.loot_rarity_bias != null && (typeof body.loot_rarity_bias !== 'number'
+      || !Number.isFinite(body.loot_rarity_bias) || body.loot_rarity_bias < 0 || body.loot_rarity_bias > 0.9)) {
+    return 'loot_rarity_bias must be a number between 0 and 0.9';
+  }
+  if (body.loot_chest != null && typeof body.loot_chest !== 'boolean') {
+    return 'loot_chest must be a boolean or null';
   }
   for (const field of ['display_width', 'display_height']) {
     const v = body[field];
@@ -773,6 +896,13 @@ function entityTypeFieldError(body) {
           || (Array.isArray(body.spawn_tiles) && body.spawn_tiles.length > 0))) {
     return 'a point-kind type cannot be a creature or have spawn tiles';
   }
+  // SOMET-604: entity_types.auras is a list of aura_effects NAMES (no FK).
+  // undefined = not sent (PUT leaves it alone), null = never authored, [] = none.
+  if (body.auras !== undefined && body.auras !== null) {
+    if (!Array.isArray(body.auras)) return 'auras must be an array of aura names or null';
+    if (body.auras.some((n) => typeof n !== 'string' || n.trim() === '')) return 'each aura must be a non-empty name';
+    if (new Set(body.auras).size !== body.auras.length) return 'auras must not repeat a name';
+  }
   return null;
 }
 
@@ -787,6 +917,16 @@ app.get('/api/entity-types', async (req, res) => {
   }
 });
 
+// The dropdown is the first defence; this is the second, for scripts and stale
+// tabs. Runs on the caller's db handle so PUT checks inside its transaction.
+async function unknownAuraError(db, auras) {
+  if (!Array.isArray(auras) || auras.length === 0) return null;
+  const r = await db.query('SELECT name FROM aura_effects WHERE name = ANY($1::text[])', [auras]);
+  const known = new Set(r.rows.map((x) => x.name));
+  const missing = auras.find((n) => !known.has(n));
+  return missing ? `unknown aura "${missing}"` : null;
+}
+
 app.post('/api/entity-types', adminGuard, async (req, res) => {
   try {
     const {
@@ -794,7 +934,9 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
       strength, dexterity, constitution, intelligence, wisdom, charisma,
       hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
       display_width, display_height, render_mode, is_creature, prompt, place_order,
-      behavior_id, attack_element, point_kind
+      behavior_id, attack_element, point_kind,
+      boss_tier, element, hitbox_size, xp_reward, base_damage,
+      loot_rolls, loot_min_rarity, loot_rarity_bias, loot_chest
     } = req.body;
     if (!name || !color) return res.status(400).json({ error: 'Name and color are required' });
     if (catalogNameTooLong(name)) {
@@ -822,6 +964,8 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
     // providerPinError above.
     const pinModalityErr = await providerPinModalityError(pool, pin);
     if (pinModalityErr) return res.status(400).json({ error: pinModalityErr });
+    const auraErr = await unknownAuraError(pool, req.body.auras);
+    if (auraErr) return res.status(400).json({ error: auraErr });
 
     const result = await pool.query(
       `INSERT INTO entity_types (
@@ -829,21 +973,26 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
         strength, dexterity, constitution, intelligence, wisdom, charisma,
         hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
         display_width, display_height, render_mode, is_creature, prompt, place_order,
-        behavior_id, attack_element, ai_provider_mode, ai_provider_id, point_kind
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29) RETURNING *`,
+        behavior_id, attack_element, ai_provider_mode, ai_provider_id, point_kind,
+        boss_tier, element, hitbox_size, xp_reward, base_damage, auras,
+        loot_rolls, loot_min_rarity, loot_rarity_bias, loot_chest, idle_fx
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35::jsonb, $36, $37, $38, $39, $40) RETURNING *`,
       [
         name, color, walkable ?? false, JSON.stringify(spawn_tiles || []), chance ?? 0.1,
         strength ?? 0, dexterity ?? 0, constitution ?? 0, intelligence ?? 0, wisdom ?? 0, charisma ?? 0,
         hp ?? 0, max_hp ?? 0, hp_regen_rate ?? 0, mana ?? 0, max_mana ?? 0, mana_regen_rate ?? 0, image,
         display_width, display_height, render_mode ?? 'rect', is_creature ?? false, prompt ?? '', Number(place_order) || 0,
-        behavior_id ?? null, attack_element || 'physical', pin.mode, pin.id, point_kind ?? null
+        behavior_id ?? null, attack_element || 'physical', pin.mode, pin.id, point_kind ?? null,
+        boss_tier ?? null, element ?? null, hitbox_size ?? null, xp_reward ?? null, base_damage ?? null,
+        req.body.auras == null ? null : JSON.stringify(req.body.auras),
+        loot_rolls ?? null, loot_min_rarity ?? null, loot_rarity_bias ?? null, loot_chest ?? null,
+        req.body.idle_fx ?? 'none'
       ]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    if (err.code === '23503' && /point_kind/.test(err.constraint || '')) {
-      return res.status(400).json({ error: `unknown point_kind "${req.body.point_kind}"` });
-    }
+    const pkErr = pointKindForeignKeyError(err, req.body.point_kind);
+    if (pkErr) return res.status(400).json({ error: pkErr });
     console.error(err);
     res.status(500).json({ error: 'Failed to create entity type' });
   }
@@ -856,7 +1005,9 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
     strength, dexterity, constitution, intelligence, wisdom, charisma,
     hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
     display_width, display_height, render_mode, is_creature, prompt, place_order,
-    behavior_id, attack_element, point_kind
+    behavior_id, attack_element, point_kind,
+    boss_tier, element, hitbox_size, xp_reward, base_damage,
+    loot_rolls, loot_min_rarity, loot_rarity_bias, loot_chest
   } = req.body;
   if (catalogNameTooLong(name)) {
     return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
@@ -893,6 +1044,9 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
   // legitimately sends point_kind: null, which a bare `?? null` COALESCE
   // would silently fail to apply.
   const pointKindProvided = 'point_kind' in req.body;
+  // SOMET-604: same present-in-body rule -- omitted leaves auras alone, null
+  // clears to NULL (never authored), [] stores an explicit none.
+  const aurasProvided = 'auras' in req.body;
 
   // SOMET-228: worlds.allowed_creature_types, world_creatures.type and
   // biomes.flora_types/creature_types reference entity_types by NAME (no
@@ -920,6 +1074,11 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: pinModalityErr });
     }
+    const auraErr = await unknownAuraError(client, req.body.auras);
+    if (auraErr) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: auraErr });
+    }
 
     let renamedReferences = null;
     if (name != null) {
@@ -930,81 +1089,11 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
       }
       const oldName = cur.rows[0].name;
       if (oldName !== name) {
-        // Sequential, not Promise.all: these three now run on the same
-        // transactional `client` (a single pg connection), not on `pool`
-        // (which hands each parallel query its own connection). A single pg
-        // Client can only run one query at a time -- concurrent client.query()
-        // calls are silently queued today but that queuing is deprecated as
-        // of pg 8.x and will be removed in pg 9, so this must be sequential.
-        const worldsRef = await client.query('SELECT id, name FROM worlds WHERE allowed_creature_types @> $1::jsonb', [JSON.stringify([oldName])]);
-        const creaturesRef = await client.query('SELECT 1 FROM world_creatures WHERE type = $1 LIMIT 1', [oldName]);
-        // biomes.flora_types / creature_types reference entity_types by name
-        // with no FK, exactly like allowed_creature_types above.
-        const biomesRef = await client.query(
-          'SELECT id, name FROM biomes WHERE flora_types @> $1::jsonb OR creature_types @> $1::jsonb',
-          [JSON.stringify([oldName])],
-        );
-        if (worldsRef.rows.length > 0 || creaturesRef.rows.length > 0 || biomesRef.rows.length > 0) {
-          // Rewrite the ONE matching element inside each jsonb array, not the
-          // whole array -- WITH ORDINALITY + `ORDER BY` keeps element order
-          // stable, and jsonb_agg's per-element CASE leaves every other
-          // element (including duplicates of a name that isn't oldName)
-          // untouched. WHERE ... @> guarantees the source array actually
-          // contains oldName, so jsonb_agg is never aggregating over zero
-          // rows here (which would collapse to NULL and wipe the column).
-          // Each cascade UPDATE only runs when its own reference check found
-          // a match -- the three reference sites are independent, and a
-          // rename referenced in only one of them shouldn't touch the other
-          // two tables at all.
-          let worldsCount = 0;
-          let biomesCount = 0;
-          if (worldsRef.rows.length > 0) {
-            const worldsResult = await client.query(
-              `UPDATE worlds
-               SET allowed_creature_types = (
-                 SELECT jsonb_agg(CASE WHEN elem.value = $1 THEN $2 ELSE elem.value END ORDER BY elem.ordinality)
-                 FROM jsonb_array_elements_text(allowed_creature_types) WITH ORDINALITY AS elem(value, ordinality)
-               )
-               WHERE allowed_creature_types @> $3::jsonb`,
-              [oldName, name, JSON.stringify([oldName])],
-            );
-            worldsCount = worldsResult.rowCount || 0;
-          }
-          if (creaturesRef.rows.length > 0) {
-            await client.query(
-              'UPDATE world_creatures SET type = $2 WHERE type = $1',
-              [oldName, name],
-            );
-          }
-          if (biomesRef.rows.length > 0) {
-            // biomes has TWO reference arrays on the same row. Guard each
-            // column's rewrite with its own containment check so a biome
-            // that matches via flora_types but has an empty/absent
-            // creature_types (or vice versa) doesn't have the untouched
-            // column dragged through jsonb_agg over zero rows and collapsed
-            // to NULL.
-            const biomesResult = await client.query(
-              `UPDATE biomes
-               SET
-                 flora_types = CASE WHEN flora_types @> $3::jsonb THEN (
-                   SELECT jsonb_agg(CASE WHEN elem.value = $1 THEN $2 ELSE elem.value END ORDER BY elem.ordinality)
-                   FROM jsonb_array_elements_text(flora_types) WITH ORDINALITY AS elem(value, ordinality)
-                 ) ELSE flora_types END,
-                 creature_types = CASE WHEN creature_types @> $3::jsonb THEN (
-                   SELECT jsonb_agg(CASE WHEN elem.value = $1 THEN $2 ELSE elem.value END ORDER BY elem.ordinality)
-                   FROM jsonb_array_elements_text(creature_types) WITH ORDINALITY AS elem(value, ordinality)
-                 ) ELSE creature_types END
-               WHERE flora_types @> $3::jsonb OR creature_types @> $3::jsonb`,
-              [oldName, name, JSON.stringify([oldName])],
-            );
-            biomesCount = biomesResult.rowCount || 0;
-          }
-          renamedReferences = {
-            worlds: worldsCount,
-            biomes: biomesCount,
-            hadPlacedCreatures: creaturesRef.rows.length > 0,
-          };
-        }
+        // SOMET-228: cascade-rewrite every name-based reference (worlds,
+        // world_creatures, biomes, dungeon bosses) in this same transaction;
+        // null when nothing referenced the old name. Shared with seed-sync
+        // apply (services/seedSync/renameCascade.js).
+        renamedReferences = await cascadeEntityRename(client, oldName, name);
       }
     }
 
@@ -1023,8 +1112,24 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
         ai_provider_mode = CASE WHEN $28::boolean THEN $29 ELSE entity_types.ai_provider_mode END,
         ai_provider_id = CASE WHEN $28::boolean THEN $30 ELSE entity_types.ai_provider_id END,
         point_kind = CASE WHEN $31::boolean THEN $32 ELSE entity_types.point_kind END,
+        boss_tier = CASE WHEN $33::boolean THEN $34::text ELSE entity_types.boss_tier END,
+        element = CASE WHEN $35::boolean THEN $36::text ELSE entity_types.element END,
+        hitbox_size = CASE WHEN $37::boolean THEN $38::integer ELSE entity_types.hitbox_size END,
+        xp_reward = CASE WHEN $39::boolean THEN $40::integer ELSE entity_types.xp_reward END,
+        base_damage = CASE WHEN $41::boolean THEN $42::real ELSE entity_types.base_damage END,
+        auras = CASE WHEN $43::boolean THEN $44::jsonb ELSE entity_types.auras END,
+        -- SOMET-611 (S10): same present-in-body rule as boss_tier/element/
+        -- etc. above -- the admin form clears a loot override back to "use
+        -- tier default" by sending null, which a bare COALESCE would eat.
+        loot_rolls = CASE WHEN $45::boolean THEN $46::integer ELSE entity_types.loot_rolls END,
+        loot_min_rarity = CASE WHEN $47::boolean THEN $48::text ELSE entity_types.loot_min_rarity END,
+        loot_rarity_bias = CASE WHEN $49::boolean THEN $50::numeric ELSE entity_types.loot_rarity_bias END,
+        loot_chest = CASE WHEN $51::boolean THEN $52::boolean ELSE entity_types.loot_chest END,
+        -- Props v2: omitted leaves the effect alone (entityTypeFieldError
+        -- already refused anything but none|sway|shine).
+        idle_fx = CASE WHEN $53::boolean THEN $54::text ELSE entity_types.idle_fx END,
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $33 RETURNING *`,
+      WHERE id = $55 RETURNING *`,
       [
         name, color, walkable, JSON.stringify(spawn_tiles), chance,
         strength, dexterity, constitution, intelligence, wisdom, charisma,
@@ -1053,7 +1158,26 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
         // pointKindProvided/point_kind sit here for the same reason
         // behaviorIdProvided/pinSent do: id must stay `params[params.length - 1]`
         // -- entityTypes.test.js asserts it on this exact route.
-        behaviorIdProvided, pinSent, pin.mode, pin.id, pointKindProvided, point_kind ?? null, id
+        behaviorIdProvided, pinSent, pin.mode, pin.id, pointKindProvided, point_kind ?? null,
+        // SOMET-603: present-in-body flags, same reason as pointKindProvided:
+        // the form clears a field by sending null, which a COALESCE would eat.
+        'boss_tier' in req.body, boss_tier ?? null,
+        'element' in req.body, element ?? null,
+        'hitbox_size' in req.body, hitbox_size ?? null,
+        'xp_reward' in req.body, xp_reward ?? null,
+        'base_damage' in req.body, base_damage ?? null,
+        // SOMET-604: auras, same present-in-body rule.
+        aurasProvided, req.body.auras == null ? null : JSON.stringify(req.body.auras),
+        // SOMET-611 (S10): the four loot overrides, same present-in-body
+        // rule, last before id for the same reason every other provided-flag
+        // pair above sits before it -- entityTypes.test.js asserts `id` is
+        // `params[params.length - 1]` on this exact route.
+        'loot_rolls' in req.body, loot_rolls ?? null,
+        'loot_min_rarity' in req.body, loot_min_rarity ?? null,
+        'loot_rarity_bias' in req.body, loot_rarity_bias ?? null,
+        'loot_chest' in req.body, loot_chest ?? null,
+        'idle_fx' in req.body, req.body.idle_fx ?? null,
+        id
       ]
     );
     if (result.rows.length === 0) {
@@ -1080,9 +1204,8 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
     res.json(body);
   } catch (err) {
     await client?.query('ROLLBACK').catch(() => {});
-    if (err.code === '23503' && /point_kind/.test(err.constraint || '')) {
-      return res.status(400).json({ error: `unknown point_kind "${req.body.point_kind}"` });
-    }
+    const pkErr = pointKindForeignKeyError(err, req.body.point_kind);
+    if (pkErr) return res.status(400).json({ error: pkErr });
     console.error(err);
     res.status(500).json({ error: 'Failed to update entity type' });
   } finally {
@@ -1105,20 +1228,27 @@ app.delete('/api/entity-types/:id', adminGuard, async (req, res) => {
     const cur = await pool.query('SELECT name FROM entity_types WHERE id = $1', [id]);
     if (cur.rows.length === 0) return res.status(404).json({ error: 'Entity type not found' });
     const name = cur.rows[0].name;
-    const [worldsRef, creaturesRef, biomesRef] = await Promise.all([
+    const [worldsRef, creaturesRef, biomesRef, bossRef] = await Promise.all([
       pool.query('SELECT id, name FROM worlds WHERE allowed_creature_types @> $1::jsonb', [JSON.stringify([name])]),
       pool.query('SELECT 1 FROM world_creatures WHERE type = $1 LIMIT 1', [name]),
       pool.query(
         'SELECT id, name FROM biomes WHERE flora_types @> $1::jsonb OR creature_types @> $1::jsonb',
         [JSON.stringify([name])],
       ),
+      // SOMET-609: a dungeon whose boss this is would go bossless silently.
+      pool.query("SELECT id, name FROM worlds WHERE dungeon_boss->>'entity' = $1 ORDER BY name", [name]),
     ]);
-    if (worldsRef.rows.length > 0 || creaturesRef.rows.length > 0 || biomesRef.rows.length > 0) {
+    if (worldsRef.rows.length > 0 || creaturesRef.rows.length > 0 || biomesRef.rows.length > 0
+      || bossRef.rows.length > 0) {
+      const bossNote = bossRef.rows.length > 0
+        ? ` (dungeon boss of: ${bossRef.rows.map((w) => w.name).join(', ')})`
+        : '';
       return res.status(409).json({
-        error: `Cannot delete '${name}': still referenced by allowed_creature_types, placed creatures, or a biome`,
+        error: `Cannot delete '${name}': still referenced by allowed_creature_types, placed creatures, a biome, or a dungeon boss${bossNote}`,
         referencing_worlds: worldsRef.rows.map((w) => ({ id: w.id, name: w.name })),
         referencing_biomes: biomesRef.rows.map((b) => ({ id: b.id, name: b.name })),
         has_placed_creatures: creaturesRef.rows.length > 0,
+        dungeon_boss_worlds: bossRef.rows.map((w) => ({ id: w.id, name: w.name })),
       });
     }
     const result = await pool.query('DELETE FROM entity_types WHERE id = $1 RETURNING id', [id]);
@@ -2141,7 +2271,7 @@ function behaviorFieldError(body) {
     return 'preferred_range must be 0 or greater';
   }
   // SOMET-254: damage_override has no DB CHECK constraint (it is nullable
-  // with no bound, unlike preferred_range/the aura fields below), so nothing
+  // with no bound, unlike preferred_range above), so nothing
   // else in this function was rejecting a non-numeric value here -- it used
   // to reach Postgres as a real-column cast error (raw 500) instead of a
   // 400. Any finite number is valid, including negative (a creature that
@@ -2150,25 +2280,12 @@ function behaviorFieldError(body) {
   if (body.damage_override != null && !Number.isFinite(Number(body.damage_override))) {
     return 'damage_override must be a number';
   }
-  // SOMET-253 Task 8: pack-leader aura + per-rung gold. Mirrors migration
-  // 1714440085000's two CHECK constraints exactly. All six fields are
-  // optional in the body -- most seeded profiles carry no aura fields at all
-  // and fall back to the column defaults (0/1/1/1/0/0), same convention
+  // SOMET-253 Task 8: per-rung gold. Mirrors migration 1714440085000's
+  // creature_behaviors_gold_check exactly. Both fields are optional in the
+  // body and fall back to the column defaults (0/0), same convention
   // preferred_range/damage_override already use -- so each rule only fires
-  // when the field is actually present.
-  //
-  // aura_radius 0 means "not a leader" and is the correct value for eleven of
-  // the twelve seeded profiles, so it is >= 0 like preferred_range. The three
-  // multipliers are a different kind of 0: an aura_damage_mult/
-  // aura_defense_mult/aura_speed_mult of 0 would make every creature the aura
-  // touches deal, take, or move at NOTHING the instant a leader stands near
-  // them -- silently. Strictly > 0, same class of rule as move_speed_mult.
-  if (body.aura_radius != null && !(Number(body.aura_radius) >= 0)) {
-    return 'aura_radius must be 0 or greater';
-  }
-  for (const field of ['aura_damage_mult', 'aura_defense_mult', 'aura_speed_mult']) {
-    if (body[field] != null && !(Number(body[field]) > 0)) return `${field} must be greater than 0`;
-  }
+  // when the field is actually present. (The pack-leader aura that shared
+  // this block moved to aura_effects in SOMET-604.)
   if (body.gold_min != null && !(Number(body.gold_min) >= 0)) {
     return 'gold_min must be 0 or greater';
   }
@@ -2229,6 +2346,52 @@ function behaviorAbilitiesError(body) {
   return null;
 }
 
+// SOMET-608 (S6). The skill twin of behaviorAbilitiesError -- except this one
+// cannot be a pure synchronous function the way that one is: an ability is
+// fully inline (nothing to look up), but a skill BINDING only carries
+// `skill_id` + `power_scale`, and whether that id names a real
+// creature_skills row can only be answered by the database. Checked inside
+// the SAME transaction POST/PUT already opens, so a skill deleted by another
+// admin between page-load and submit is caught here rather than surfacing as
+// a raw FK-violation 500 from replaceSkills below.
+async function behaviorSkillsError(client, body) {
+  const list = body.skills;
+  if (list == null) return null; // omitted entirely = "no skills", same as []
+  if (!Array.isArray(list)) return 'skills must be an array';
+  for (const s of list) {
+    if (!s || typeof s !== 'object') return 'each skill binding must be an object';
+    if (!Number.isInteger(s.skill_id)) return 'each skill binding needs an integer skill_id';
+    const scale = Number(s.power_scale ?? 1);
+    if (!(Number.isFinite(scale) && scale >= 0.1 && scale <= 1.5)) {
+      return 'power_scale must be between 0.1 and 1.5';
+    }
+  }
+  if (list.length === 0) return null;
+  const ids = list.map((s) => s.skill_id);
+  const found = await client.query('SELECT id FROM creature_skills WHERE id = ANY($1::int[])', [ids]);
+  const foundIds = new Set(found.rows.map((r) => r.id));
+  const missing = ids.filter((id) => !foundIds.has(id));
+  if (missing.length > 0) return `unknown skill_id: ${[...new Set(missing)].join(', ')}`;
+  return null;
+}
+
+// Replaces a behaviour's whole SKILL binding set, the same "DELETE then
+// reinsert, slot by array POSITION" shape replaceAbilities uses below --
+// kept as a sibling function rather than folded into it, since the columns
+// (skill_id + power_scale vs. 9 inline attack fields) do not overlap at all.
+async function replaceSkills(client, behaviorId, skills) {
+  await client.query('DELETE FROM creature_behavior_skills WHERE behavior_id = $1', [behaviorId]);
+  const list = Array.isArray(skills) ? skills : [];
+  for (let i = 0; i < list.length; i += 1) {
+    const s = list[i];
+    await client.query(
+      `INSERT INTO creature_behavior_skills (behavior_id, skill_id, slot, power_scale)
+       VALUES ($1,$2,$3,$4)`,
+      [behaviorId, s.skill_id, i + 1, s.power_scale ?? 1],
+    );
+  }
+}
+
 // Replaces a behaviour's whole ability set inside an open transaction: DELETE
 // every existing row, then reinsert `abilities` with slot renumbered 1..n BY
 // POSITION. Slot is never read from the client -- the admin editor implies it
@@ -2255,7 +2418,7 @@ async function replaceAbilities(client, behaviorId, abilities) {
 // transaction before COMMIT.
 async function loadBehaviorWithAbilities(db, id) {
   const r = await db.query(
-    `SELECT b.*, ab.abilities FROM creature_behaviors b${ABILITIES_LATERAL} WHERE b.id = $1`,
+    `SELECT b.*, ab.abilities, sk.skills FROM creature_behaviors b${ABILITIES_LATERAL}${SKILLS_LATERAL} WHERE b.id = $1`,
     [id],
   );
   return r.rows[0];
@@ -2264,7 +2427,7 @@ async function loadBehaviorWithAbilities(db, id) {
 app.get('/api/creature-behaviors', async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT b.*, ab.abilities FROM creature_behaviors b${ABILITIES_LATERAL} ORDER BY b.id ASC`,
+      `SELECT b.*, ab.abilities, sk.skills FROM creature_behaviors b${ABILITIES_LATERAL}${SKILLS_LATERAL} ORDER BY b.id ASC`,
     );
     res.json(result.rows);
   } catch (err) {
@@ -2292,6 +2455,12 @@ app.get('/api/world-point-kinds', async (req, res) => {
 
 app.put('/api/world-point-kinds/:kind', adminGuard, async (req, res) => {
   const { kind } = req.params;
+  // A body that omits the key entirely used to fall through `typeId != null`
+  // (undefined == null) and clear the default silently. The field is
+  // mandatory on this route -- use an explicit null to clear it.
+  if (!('default_entity_type_id' in req.body)) {
+    return res.status(400).json({ error: 'default_entity_type_id is required (use null to clear)' });
+  }
   const { default_entity_type_id: typeId } = req.body;
   if (typeId != null && !Number.isInteger(typeId)) {
     return res.status(400).json({ error: 'default_entity_type_id must be an integer or null' });
@@ -2337,26 +2506,30 @@ app.post('/api/creature-behaviors', adminGuard, async (req, res) => {
   try {
     client = await pool.connect();
     await client.query('BEGIN');
+    // SOMET-608 (S6): checked inside the transaction, not alongside the
+    // synchronous checks above -- validating a skill_id against the
+    // database is the one check in this route that cannot be synchronous.
+    const skillsBad = await behaviorSkillsError(client, b);
+    if (skillsBad) { await client.query('ROLLBACK'); return res.status(400).json({ error: skillsBad }); }
     const result = await client.query(
       `INSERT INTO creature_behaviors
         (name, aggro_radius, leash_radius, chase_style,
          preferred_range, move_speed_mult, damage_override,
-         aura_radius, aura_damage_mult, aura_defense_mult, aura_speed_mult,
          gold_min, gold_max)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
       [b.name, b.aggro_radius, b.leash_radius, b.chase_style,
        b.preferred_range ?? 0, b.move_speed_mult ?? 1,
        // damage_override is nullable and 0 is a real value ("hits for
        // nothing"), so this must be ?? not || -- 0 must survive.
        b.damage_override ?? null,
-       // SOMET-253 Task 8: same ?? convention as above -- aura_radius 0 and
-       // gold_min 0 are real values ("not a leader" / "no loot"), not absent
-       // ones, so a genuine 0 must survive rather than being coerced by ||.
-       b.aura_radius ?? 0, b.aura_damage_mult ?? 1, b.aura_defense_mult ?? 1,
-       b.aura_speed_mult ?? 1, b.gold_min ?? 0, b.gold_max ?? 0],
+       // SOMET-253 Task 8: same ?? convention as above -- gold_min 0 is a
+       // real value ("no loot"), not an absent one, so a genuine 0 must
+       // survive rather than being coerced by ||.
+       b.gold_min ?? 0, b.gold_max ?? 0],
     );
     const id = result.rows[0].id;
     await replaceAbilities(client, id, b.abilities);
+    await replaceSkills(client, id, b.skills);
     const row = await loadBehaviorWithAbilities(client, id);
     await client.query('COMMIT');
     res.status(201).json(row);
@@ -2386,19 +2559,19 @@ app.put('/api/creature-behaviors/:id', adminGuard, async (req, res) => {
   try {
     client = await pool.connect();
     await client.query('BEGIN');
+    const skillsBad = await behaviorSkillsError(client, b);
+    if (skillsBad) { await client.query('ROLLBACK'); return res.status(400).json({ error: skillsBad }); }
     const result = await client.query(
       `UPDATE creature_behaviors SET
          name = $1, aggro_radius = $2, leash_radius = $3, chase_style = $4,
          preferred_range = $5, move_speed_mult = $6, damage_override = $7,
-         aura_radius = $8, aura_damage_mult = $9, aura_defense_mult = $10,
-         aura_speed_mult = $11, gold_min = $12, gold_max = $13,
+         gold_min = $8, gold_max = $9,
          updated_at = CURRENT_TIMESTAMP
-       WHERE id = $14 RETURNING id`,
+       WHERE id = $10 RETURNING id`,
       [b.name, b.aggro_radius, b.leash_radius, b.chase_style,
        b.preferred_range ?? 0, b.move_speed_mult ?? 1,
        b.damage_override ?? null,
-       b.aura_radius ?? 0, b.aura_damage_mult ?? 1, b.aura_defense_mult ?? 1,
-       b.aura_speed_mult ?? 1, b.gold_min ?? 0, b.gold_max ?? 0, id],
+       b.gold_min ?? 0, b.gold_max ?? 0, id],
     );
     if (result.rows.length === 0) {
       await client.query('ROLLBACK');
@@ -2408,8 +2581,10 @@ app.put('/api/creature-behaviors/:id', adminGuard, async (req, res) => {
     // replaceAbilities) is scoped to this one behaviour's children and is the
     // intended way to replace its ability set -- it is not the destructive
     // catalog write the project's DB-safety rules forbid in a test or script,
-    // which is about wiping real catalog rows outright.
+    // which is about wiping real catalog rows outright. replaceSkills (S6)
+    // is scoped the same way, over creature_behavior_skills.
     await replaceAbilities(client, id, b.abilities);
+    await replaceSkills(client, id, b.skills);
     const row = await loadBehaviorWithAbilities(client, id);
     await client.query('COMMIT');
     res.json(row);
@@ -2785,6 +2960,78 @@ app.delete('/api/ai-providers/:id', adminGuard, async (req, res) => {
   }
 });
 
+// Provider templates: presets that pre-fill the Add-provider form. A template
+// never holds a token (templateFieldError), and save-as-template reads the
+// provider through the secret-free getProvider so the token is never in memory.
+const TEMPLATE_DUP = 'a template with that name exists';
+
+app.get('/api/ai-provider-templates', adminGuard, async (req, res) => {
+  try {
+    res.json(await aiProviderTemplates.listTemplates(pool));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch AI provider templates' });
+  }
+});
+
+app.post('/api/ai-provider-templates', adminGuard, async (req, res) => {
+  const bad = aiProviderTemplates.templateFieldError(req.body);
+  if (bad) return res.status(400).json({ error: bad });
+  try {
+    res.status(201).json(await aiProviderTemplates.createTemplate(pool, req.body));
+  } catch (err) {
+    if (isUniqueViolation(err)) return res.status(409).json({ error: TEMPLATE_DUP });
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create AI provider template' });
+  }
+});
+
+app.patch('/api/ai-provider-templates/:id', adminGuard, async (req, res) => {
+  const { id } = req.params;
+  if (invalidId(id)) return res.status(400).json({ error: 'id must be an integer' });
+  const bad = aiProviderTemplates.templateFieldError(req.body, { partial: true });
+  if (bad) return res.status(400).json({ error: bad });
+  try {
+    const row = await aiProviderTemplates.updateTemplate(pool, id, req.body);
+    if (!row) return res.status(404).json({ error: 'AI provider template not found' });
+    res.json(row);
+  } catch (err) {
+    if (isUniqueViolation(err)) return res.status(409).json({ error: TEMPLATE_DUP });
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update AI provider template' });
+  }
+});
+
+app.delete('/api/ai-provider-templates/:id', adminGuard, async (req, res) => {
+  const { id } = req.params;
+  if (invalidId(id)) return res.status(400).json({ error: 'id must be an integer' });
+  try {
+    const deleted = await aiProviderTemplates.deleteTemplate(pool, id);
+    if (!deleted) return res.status(404).json({ error: 'AI provider template not found' });
+    res.status(204).end();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete AI provider template' });
+  }
+});
+
+app.post('/api/ai-providers/:id/save-as-template', adminGuard, async (req, res) => {
+  const { id } = req.params;
+  if (invalidId(id)) return res.status(400).json({ error: 'id must be an integer' });
+  const name = req.body && req.body.name;
+  if (typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'name is required' });
+  try {
+    const provider = await aiProviders.getProvider(pool, id);
+    if (!provider) return res.status(404).json({ error: 'AI provider not found' });
+    const body = aiProviderTemplates.templateFromProvider(provider, name.trim());
+    res.status(201).json(await aiProviderTemplates.createTemplate(pool, body));
+  } catch (err) {
+    if (isUniqueViolation(err)) return res.status(409).json({ error: TEMPLATE_DUP });
+    console.error(err);
+    res.status(500).json({ error: 'Failed to save AI provider template' });
+  }
+});
+
 // Activation is its own endpoint rather than a PATCH field because it has a
 // cross-row effect: it deactivates whichever provider held the flag. Doing
 // that inside a general field update would make "rename this profile" capable
@@ -2814,6 +3061,19 @@ app.post('/api/ai-providers/:id/activate', adminGuard, async (req, res) => {
 app.post('/api/ai-providers/:id/refresh-models', adminGuard, async (req, res) => {
   const { id } = req.params;
   if (invalidId(id)) return res.status(400).json({ error: 'id must be an integer' });
+  // Kind-aware discovery rides along on success only. It must never change the
+  // ok/error outcome of the legacy refresh, so any failure here is swallowed.
+  const withDiscovery = async (provider, body) => {
+    try {
+      const d = await providerCatalog.discover(provider);
+      if (!d.ok) return body;
+      await aiProviders.saveDiscoveryCache(pool, id, d.cache);
+      return { ...body, discovery: d.cache };
+    } catch (err) {
+      console.error('provider discovery failed', err.message);
+      return body;
+    }
+  };
   try {
     const provider = await aiProviders.loadProviderWithSecret(pool, id);
     if (!provider) return res.status(404).json({ error: 'AI provider not found' });
@@ -2822,20 +3082,41 @@ app.post('/api/ai-providers/:id/refresh-models', adminGuard, async (req, res) =>
       if (!r.ok) return res.json({ ok: false, error: r.error, status: r.status ?? null });
       const models = [...r.styles.map((s) => s.value), ...r.cues.map((c) => `cue:${c.value}`)];
       await aiProviders.saveModelsCache(pool, id, models);
-      return res.json({ ok: true, models, styles: r.styles, cues: r.cues });
+      return res.json(await withDiscovery(provider, { ok: true, models, styles: r.styles, cues: r.cues }));
     }
     if (provider.modality === 'text') {
       const r = await textProvider.listTextModels(provider);
       if (!r.ok) return res.json({ ok: false, error: r.error, status: r.status ?? null });
       await aiProviders.saveModelsCache(pool, id, r.models);
-      return res.json({ ok: true, models: r.models });
+      return res.json(await withDiscovery(provider, { ok: true, models: r.models }));
+    }
+    // A sprite provider's models are the box's CONCEPT models (the sheet
+    // builder's model is fixed by the box). Blank model = the box's Qwen default.
+    if (provider.modality === 'sprite') {
+      const r = await gpuBoxSprites.listConceptModels(provider);
+      if (!r.ok) return res.json({ ok: false, error: r.error, status: r.status ?? null });
+      await aiProviders.saveModelsCache(pool, id, r.models);
+      return res.json(await withDiscovery(provider, { ok: true, models: r.models }));
+    }
+    // image_edit: the box's edit capabilities. models_cache carries their ids
+    // ('' = base model) so the existing dropdown plumbing works.
+    if (provider.modality === 'image_edit') {
+      // Read edit-capabilities directly: discover() succeeds when ANY box source
+      // answers, so a failing capabilities read would cache an empty list.
+      const r = await providerCatalog.editCapabilities(provider);
+      if (!r.ok) return res.json({ ok: false, error: r.error, status: r.status ?? null });
+      const models = r.entries.map((e) => e.id);
+      const discovery = { entries: r.entries, unsupported: [], source: 'per_kind' };
+      await aiProviders.saveModelsCache(pool, id, models);
+      await aiProviders.saveDiscoveryCache(pool, id, discovery);
+      return res.json({ ok: true, models, discovery });
     }
     const result = await providerDiscovery.fetchModels(provider);
     if (!result.ok) {
       return res.json({ ok: false, error: result.error, status: result.status ?? null });
     }
     await aiProviders.saveModelsCache(pool, id, result.models);
-    res.json({ ok: true, models: result.models });
+    res.json(await withDiscovery(provider, { ok: true, models: result.models }));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to refresh models' });
@@ -2846,6 +3127,26 @@ app.post('/api/ai-providers/:id/refresh-models', adminGuard, async (req, res) =>
 app.post('/api/ai-providers/:id/test', adminGuard, async (req, res) => {
   const { id } = req.params;
   if (invalidId(id)) return res.status(400).json({ error: 'id must be an integer' });
+  // After a passing reachability check, flag models the row names that the
+  // provider no longer offers. Only a positive "missing" result changes the
+  // outcome; a discovery failure leaves an ok Test ok. `known` skips a second
+  // fetch when the caller already holds the entries.
+  const withModelCheck = async (provider, body, known = null) => {
+    if (!body.ok) return body;
+    try {
+      let entries = known;
+      if (!entries) {
+        const d = await providerCatalog.discover(provider);
+        if (!d.ok) return body;
+        entries = d.cache.entries;
+      }
+      const missing = providerModelCheck.missingModels(provider, entries);
+      if (missing.length) return { ...body, ok: false, error: `provider no longer offers: ${missing.join(', ')}` };
+    } catch (err) {
+      console.error('provider model check failed', err.message);
+    }
+    return body;
+  };
   try {
     const provider = await aiProviders.loadProviderWithSecret(pool, id);
     if (!provider) return res.status(404).json({ error: 'AI provider not found' });
@@ -2861,9 +3162,9 @@ app.post('/api/ai-providers/:id/test', adminGuard, async (req, res) => {
       // Spread explicitly rather than returning `r`: nothing from the
       // provider row or an unrecognised field on `r` belongs in this
       // response, least of all auth_token.
-      res.json({
+      res.json(await withModelCheck(provider, {
         ok: r.ok, status: r.status ?? null, latency_ms: Date.now() - startedAt, error: r.error ?? null,
-      });
+      }));
       return;
     }
     // Same reasoning as audio: probe an AUTHENTICATED text endpoint, so a
@@ -2871,16 +3172,41 @@ app.post('/api/ai-providers/:id/test', adminGuard, async (req, res) => {
     if (provider.modality === 'text') {
       const startedAt = Date.now();
       const r = await textProvider.listTextModels(provider);
-      res.json({
+      res.json(await withModelCheck(provider, {
         ok: r.ok, status: r.status ?? null, latency_ms: Date.now() - startedAt, error: r.error ?? null,
-      });
+      }));
+      return;
+    }
+    // Sprite: the box serves GET /api/action-catalog WITHOUT auth, so on its
+    // own it would test green with a stale key. Prove the key with an
+    // authenticated read (GET /api/jobs?limit=1) first, then the catalog.
+    if (provider.modality === 'sprite') {
+      const startedAt = Date.now();
+      const authed = await gpuBoxSprites.checkAuth(provider);
+      const r = authed.ok ? await gpuBoxSprites.actionCatalog(provider) : authed;
+      res.json(await withModelCheck(provider, {
+        ok: r.ok, status: r.status ?? null, latency_ms: Date.now() - startedAt, error: r.error ?? null,
+        detail: r.ok ? `${r.catalog.actions.length} actions` : null,
+      }));
+      return;
+    }
+    // image_edit: an authenticated read of the box's edit capabilities.
+    if (provider.modality === 'image_edit') {
+      const startedAt = Date.now();
+      const r = await providerCatalog.editCapabilities(provider);
+      res.json(await withModelCheck(provider, {
+        ok: r.ok, status: r.status ?? null, latency_ms: Date.now() - startedAt, error: r.error ?? null,
+        detail: r.ok ? `${r.entries.length} edit capabilities` : null,
+      }, r.ok ? r.entries : null));
       return;
     }
     // Spread explicitly rather than returning the provider: nothing from the
     // row (least of all auth_token) belongs in this response.
-    const { ok, status = null, latency_ms = null, error = null } =
+    // For an image provider this is a real 1-step generation (SOMET-542), so
+    // ok means the box drew a picture, not merely that it answered HTTP.
+    const { ok, status = null, latency_ms = null, error = null, probe = null } =
       await providerDiscovery.testConnection(provider);
-    res.json({ ok, status, latency_ms, error });
+    res.json({ ok, status, latency_ms, error, probe });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to test AI provider' });
@@ -2903,18 +3229,50 @@ app.post('/api/ai-providers/:id/test', adminGuard, async (req, res) => {
 // pointing at the generator would either need the credential in a query string
 // or fail -- and a token in a URL ends up in history and logs.
 
-// The two catalog reads validateMapSpec needs, identical to the ones
-// scripts/seed-map.js's applyMapSpec performs. Kept here rather than imported
-// so this route does not depend on the seeding script for a read-only check.
-async function mapSpecCatalogs(db) {
-  const biomeRows = (await db.query('SELECT name, creature_types FROM biomes')).rows;
+// The catalogs validateMapSpec needs: services/mapSpecCatalogs.js.
+const { mapSpecCatalogs } = require('./services/mapSpecCatalogs.js');
+
+// SOMET-587: mapSpecCatalogs() above feeds the world-gen download/seed
+// routes and deliberately omits pointArtTypes/bossTiers (neither route edits
+// art or bosses, so there is no reason to widen what they validate against).
+// The per-instance art picker's write-back DOES need checkArt to actually
+// check something, so this adds the two catalogs scripts/seed-map.js's own
+// applyMapSpec loads, without changing mapSpecCatalogs() itself and
+// therefore without changing those two existing routes' behaviour.
+async function mapSpecCatalogsWithArt(db) {
+  const base = await mapSpecCatalogs(db);
   return {
-    biomeNames: new Set(biomeRows.map((r) => r.name)),
-    biomeCreatureTypes: new Map(
-      biomeRows.map((r) => [r.name, Array.isArray(r.creature_types) ? r.creature_types : []])),
-    creatureTypeNames: new Set(
-      (await db.query('SELECT name FROM entity_types WHERE is_creature = true')).rows.map((r) => r.name)),
+    ...base,
+    pointArtTypes: await loadPointTypeNames(db),
+    bossTiers: new Map((await db.query(
+      'SELECT name, boss_tier FROM entity_types WHERE is_creature = true AND boss_tier IS NOT NULL',
+    )).rows.map((r) => [r.name, r.boss_tier])),
   };
+}
+
+// Shared by all four art-picker PUT routes below. `body.art_name` must be
+// present (a non-empty string to set, or an explicit `null` to clear) --
+// an absent key is rejected rather than silently treated as either, since a
+// caller that forgot the field and one that means to clear look identical
+// otherwise. Resolves against the LIVE entity_types catalog and requires the
+// matched row's point_kind to equal `kind` exactly, the same rule
+// pointArt.js's applyPointArt enforces at seed time (idFor) -- so a name that
+// exists but is the wrong kind of point is a 400, not a silent wrong-looking
+// bind.
+async function resolvePointArtId(pool, body, kind) {
+  if (!body || !('art_name' in body)) {
+    return { ok: false, error: 'art_name is required (a non-empty string, or null to clear)' };
+  }
+  const name = body.art_name;
+  if (name === null) return { ok: true, id: null, name: null };
+  if (typeof name !== 'string' || name.trim() === '') {
+    return { ok: false, error: 'art_name must be a non-empty string, or null to clear' };
+  }
+  const r = await pool.query('SELECT id, point_kind FROM entity_types WHERE name = $1', [name]);
+  if (!r.rows[0] || r.rows[0].point_kind !== kind) {
+    return { ok: false, error: `"${name}" is not an entity type of point kind "${kind}"` };
+  }
+  return { ok: true, id: r.rows[0].id, name };
 }
 
 // One place that turns a WorldGenError into a response, so every route reports
@@ -2930,6 +3288,9 @@ function sendWorldGenError(res, err, fallback) {
   console.error(err);
   return res.status(500).json({ error: fallback });
 }
+
+// SOMET-644: the local rules-only fallback when the GPU box is unreachable.
+app.use('/api/world-gen/local', worldGenLocalRoutes(guardPool));
 
 app.get('/api/world-gen/worlds', adminGuard, async (req, res) => {
   try {
@@ -3209,9 +3570,11 @@ async function startGenerationJob(req, res, { subject, kind, defaultFrames, fail
       // history is one list rather than two. `backend` carries the provider
       // name, which is what an admin looking at an old row wants to know.
       const row = await pool.query(
-        `INSERT INTO sprite_sets (creature, backend, seed, frames, job_id, status)
-         VALUES ($1, $2, $3, $4, $5, 'queued') RETURNING *`,
-        [subject, `remote:${provider.name}`, seed, frames || defaultFrames, gen.job_id],
+        `INSERT INTO sprite_sets
+           (creature, backend, seed, frames, job_id, generation_kind, base_prompt, provider_id, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'queued') RETURNING *`,
+        [subject, `remote:${provider.name}`, seed, frames || defaultFrames, gen.job_id,
+          kind || 'creature', prompt, provider.id],
       );
       return res.status(201).json({ ...row.rows[0], job_id: gen.job_id, provider: provider.name });
     }
@@ -3228,9 +3591,10 @@ async function startGenerationJob(req, res, { subject, kind, defaultFrames, fail
     const chosenBackend = backend || (gen.recipe && gen.recipe.backend) || 'stub';
     const chosenFrames = frames || (gen.recipe && gen.recipe.frames) || defaultFrames;
     const row = await pool.query(
-      `INSERT INTO sprite_sets (creature, backend, seed, frames, job_id, status)
-       VALUES ($1, $2, $3, $4, $5, 'queued') RETURNING *`,
-      [subject, chosenBackend, seed, chosenFrames, gen.job_id]
+      `INSERT INTO sprite_sets
+         (creature, backend, seed, frames, job_id, generation_kind, base_prompt, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued') RETURNING *`,
+      [subject, chosenBackend, seed, chosenFrames, gen.job_id, kind || 'creature', prompt]
     );
     res.status(201).json({ ...row.rows[0], job_id: gen.job_id, recipe: gen.recipe });
   } catch (err) {
@@ -3518,7 +3882,7 @@ app.get('/api/art-subjects/:kind/:key/description', adminGuard, async (req, res)
 });
 
 // Write one, replacing whatever was active. `text` given writes it verbatim
-// (a human edit); omitted asks the local model for one.
+// (a human edit); omitted asks the active text provider for one.
 app.post('/api/art-subjects/:kind/:key/description', adminGuard, async (req, res) => {
   try {
     const { kind, key } = req.params;
@@ -3541,7 +3905,7 @@ app.post('/api/art-subjects/:kind/:key/description', adminGuard, async (req, res
     let text = req.body.text;
     let model = null;
     if (!text) {
-      const written = await subjectDescriber.describeSubject(subject, { length: req.body.length });
+      const written = await subjectDescriber.describeSubject(pool, subject, { length: req.body.length });
       text = written.text;
       model = written.model;
     }
@@ -3629,6 +3993,12 @@ app.post('/api/art-jobs', adminGuard, async (req, res) => {
     const keys = Array.isArray(req.body.keys) ? req.body.keys.filter((k) => typeof k === 'string') : [];
     if (keys.length === 0) return res.status(400).json({ error: 'keys must be a non-empty array' });
     const backend = req.body.backend === 'local' ? 'local' : 'connector';
+    const forcePrompt = req.body.force_prompt === true;
+    if (forcePrompt && !catalogSubjects.takesDescription(kind)) {
+      return res.status(409).json({
+        error: `${kind} builds its own prompt and cannot regenerate one with the text provider`,
+      });
+    }
 
     // Per-subject provider pins resolved HERE, at enqueue, so a pinned tile or
     // entity keeps its own provider instead of silently taking the batch's.
@@ -3639,17 +4009,30 @@ app.post('/api/art-jobs', adminGuard, async (req, res) => {
     // EITHER is this a bad request -- and then the message says so, because
     // "provider_id is required" sends the admin looking for a field they
     // deliberately left on its default.
-    const providerId = Number.isInteger(req.body.provider_id)
-      ? req.body.provider_id
-      : (active ? active.id : null);
+    //
+    // SOMET-535: never for a LOCAL run. Local jobs are drawn by sprite-gen, and
+    // recording the active provider on them is how "Local" was drawn remotely.
+    const chosen = bodyProviderId(req.body.provider_id);
+    if (chosen.error) return res.status(400).json({ error: chosen.error });
+    const providerId = backend === 'connector' ? (chosen.id || (active ? active.id : null)) : null;
     if (backend === 'connector' && !providerId) {
       return res.status(400).json({
         error: 'no provider chosen and no active provider is set -- pick one in the '
           + 'Provider list, or mark a provider active under AI Providers',
       });
     }
+    // A named provider must exist. Without this the enqueue hit the
+    // art_jobs.provider_id foreign key and answered a bare 500 (SOMET-538
+    // re-validation); /dispatch already answers the same mistake with a 404.
+    if (backend === 'connector' && chosen.id) {
+      const { rows: found } = await pool.query(
+        'SELECT 1 FROM ai_providers WHERE id = $1', [chosen.id]);
+      if (found.length === 0) {
+        return res.status(404).json({ error: `provider ${chosen.id} not found` });
+      }
+    }
     const { subjects, unknown } = await catalogSubjects.subjectsForEnqueue(
-      pool, kind, keys, { active, fallbackProviderId: providerId },
+      pool, kind, keys, { active, fallbackProviderId: providerId, backend },
     );
 
     // SOMET-594. Refuse at the SOURCE. An object queued on a provider that
@@ -3658,26 +4041,50 @@ app.post('/api/art-jobs', adminGuard, async (req, res) => {
     // stranded. Checked per subject's RESOLVED provider, since a pinned type
     // goes to its pin rather than to the one picked in the console.
     if (backend === 'connector' && catalogSubjects.registryFor(kind).generationKind === 'object') {
-      const ids = [...new Set(subjects.map((s) => s.providerId).filter(Number.isInteger))];
+      const ids = [...new Set(subjects.filter((s) => s.backend !== 'local')
+        .map((s) => s.providerId).filter(Number.isInteger))];
       const { rows: provs } = await pool.query(
         "SELECT id, name, request_template FROM ai_providers WHERE modality = 'image'");
       const tooSmall = provs.filter((p) => ids.includes(p.id) && artDispatcher.providerSizeRefusal(p));
       if (tooSmall.length) {
         const ok = provs.filter((p) => !artDispatcher.providerSizeRefusal(p)).map((p) => `"${p.name}"`);
+        const okList = ok.length ? ok.join(' or ') : null;
+        const small = new Set(tooSmall.map((p) => p.id));
+        const nameOf = (id) => `"${provs.find((p) => p.id === id).name}"`;
+        // A subject whose type is PINNED elsewhere ignores the console's pick,
+        // so "pick X in the Provider list" would point at a control that is
+        // not the cause. Name the pinned subjects and the pin instead.
+        const pinned = subjects.filter((s) => s.pinned && small.has(s.providerId));
+        const fixes = [];
+        if (pinned.length) {
+          const byProv = new Map();
+          for (const s of pinned) byProv.set(s.providerId, [...(byProv.get(s.providerId) || []), s.key]);
+          for (const [id, keys] of byProv) {
+            fixes.push(`${keys.map((k) => `"${k}"`).join(', ')} ${keys.length === 1 ? 'is' : 'are'} `
+              + `pinned to ${nameOf(id)} by its ${kind} type -- change that type's AI provider`
+              + `${okList ? ` to ${okList}` : ''}.`);
+          }
+        }
+        if (subjects.some((s) => !s.pinned && small.has(s.providerId))) {
+          fixes.push(okList ? `Pick ${okList} in the Provider list.`
+            : 'Set a provider\'s request_template width/height to 1024.');
+        }
         return res.status(400).json({
           error: `${kind} is drawn as an isolated object and needs a 1024px provider; `
             + `${tooSmall.map((p) => `"${p.name}"`).join(', ')} renders smaller. `
-            + (ok.length ? `Pick ${ok.join(' or ')} in the Provider list.`
-              : 'Set a provider\'s request_template width/height to 1024.'),
+            + fixes.join(' '),
           code: 'PROVIDER_TOO_SMALL',
         });
       }
     }
 
-    const rows = await artJobQueue.enqueue(pool, subjects, { backend, providerId });
+    const rows = await artJobQueue.enqueue(pool, subjects, {
+      backend, providerId, forcePrompt,
+    });
     res.status(201).json({
       requested: keys.length,
       queued: rows.length,
+      force_prompt: forcePrompt,
       // Each named rather than implied: "I asked for 100 and 3 were queued" is
       // confusing until you know the other 97 were already in flight, and a key
       // that has left the catalogue is a different thing again.
@@ -3719,6 +4126,13 @@ app.get('/api/art-jobs', adminGuard, async (req, res) => {
         WHERE f.state = 'failed' AND ${ART_FAILURE_UNRESOLVED}
         ORDER BY f.updated_at DESC`,
     );
+    // SOMET-594. Re-check the drain's blocked snapshot against the queue as it
+    // is NOW, so the console never offers to remove rows that are gone.
+    const { rows: queuedGroups } = await pool.query(
+      `SELECT subject_kind AS kind, provider_id, count(*)::int AS count
+         FROM art_jobs WHERE state = 'queued' GROUP BY subject_kind, provider_id`,
+    );
+    artDispatcher.retainBlocked(queuedGroups);
     res.json({
       stats: await artJobQueue.stats(pool),
       run: artDispatcher.runStatus(),
@@ -3743,22 +4157,56 @@ app.get('/api/art-jobs', adminGuard, async (req, res) => {
 // Start draining. Returns immediately; poll GET /api/art-jobs.
 app.post('/api/art-jobs/dispatch', adminGuard, async (req, res) => {
   try {
-    const providerId = Number.isInteger(req.body.provider_id) ? req.body.provider_id : null;
-    if (!providerId) return res.status(400).json({ error: 'provider_id is required' });
-    const provider = await aiProviders.loadImageProviderWithSecret(pool, providerId);
-    if (!provider) return res.status(404).json({ error: 'provider not found' });
+    const chosen = bodyProviderId(req.body.provider_id);
+    if (chosen.error) return res.status(400).json({ error: chosen.error });
+    const providerId = chosen.id;
+    // SOMET-535. A queue holding only LOCAL jobs needs no provider: sprite-gen
+    // draws them. Anything a connector would draw still needs one.
+    //
+    // A running batch is answered first: it has already CLAIMED its job, so
+    // the queue below can look empty and the provider-less checks would give
+    // a false reason (a double-click on Start under Local got "the queue
+    // holds connector jobs").
+    if (artDispatcher.runStatus().running) {
+      return res.status(409).json({
+        error: 'an art batch is already running', run: artDispatcher.runStatus(),
+      });
+    }
+    let provider = null;
+    if (providerId) {
+      provider = await aiProviders.loadImageProviderWithSecret(pool, providerId);
+      if (!provider) return res.status(404).json({ error: 'provider not found' });
+    } else {
+      const { rows: [mix] } = await pool.query(
+        `SELECT count(*) FILTER (WHERE backend = 'local')::int AS local,
+                count(*) FILTER (WHERE backend <> 'local')::int AS connector
+           FROM art_jobs WHERE state = 'queued'`);
+      if (mix.connector > 0) {
+        return res.status(400).json({
+          error: `provider_id is required -- the queue holds ${mix.connector} connector `
+            + 'job(s); only a queue of local jobs can start without one',
+        });
+      }
+      // Kept a refusal rather than a no-op drain, with the true reason.
+      if (mix.local === 0) {
+        return res.status(400).json({ error: 'nothing is queued -- queue subjects first' });
+      }
+    }
 
     // The resolution precondition, against WHAT IS QUEUED rather than the
     // batch provider alone: each job carries its own provider pin. `blocked`
     // lists every queued (kind, provider) group that would be drawn below the
     // object minimum, so the console can offer to drop exactly those rows.
-    if (!artDispatcher.runStatus().running) {
+    if (!artDispatcher.runStatus().running && provider) {
       const refusal = await artDispatcher.objectSizeRefusal(pool, provider);
       if (refusal) throw refusal;
     }
 
     const status = artDispatcher.startDrain(pool, {
       provider,
+      // The same sprite-gen client the interactive local path uses (and the
+      // one __setSpriteGen swaps in tests), for backend='local' jobs.
+      deps: { spriteGen },
       limit: Math.min(Math.max(parseInt(req.body.limit, 10) || 10, 1), 100),
       // Defaults to ONE. The remote card's effective headroom is under one
       // SDXL pipeline, so two concurrent generations ask the driver for memory
@@ -3814,7 +4262,7 @@ app.post('/api/art-jobs/requeue', adminGuard, async (req, res) => {
     // crash where the honest answer is "nothing to do, they are already
     // queued", and the operator cannot tell those apart from a real fault.
     const { rows: failed } = await pool.query(
-      `SELECT f.id, f.subject_kind, f.subject_key, f.last_error, f.updated_at,
+      `SELECT f.id, f.subject_kind, f.subject_key, f.seed, f.last_error, f.updated_at,
               EXISTS (SELECT 1 FROM art_jobs l
                        WHERE l.subject_kind = f.subject_kind
                          AND l.subject_key = f.subject_key
@@ -3852,6 +4300,7 @@ app.post('/api/art-jobs/requeue', adminGuard, async (req, res) => {
     }
 
     const { retryable, action } = artFailures.classify(mine[0].last_error);
+    let unchanged = 0;
     if (!retryable && !reseed) {
       // SOMET-551 lifts SOMET-544's known limitation. "A retry cannot fix this"
       // rests on the prompt being unchanged -- true when the only input was the
@@ -3860,22 +4309,46 @@ app.post('/api/art-jobs/requeue', adminGuard, async (req, res) => {
       // produce a different image from the same seed, so refusing that retry
       // would push the operator to reseed and throw away a reproducible seed
       // for no reason.
-      const changed = await Promise.all(mine.map(
-        (r) => artDescriptions.recipeChangedSince(pool, r.subject_kind, r.subject_key, r.updated_at),
-      ));
+      //
+      // SOMET-544 finishes the job: a description is only ONE input. The
+      // backdrop, the framing and the provider's template are code and config,
+      // and moving the backdrop off white (SOMET-545) changed every cutout
+      // subject's request without touching a row the check above reads. So a
+      // subject also qualifies when the request it would be sent NOW differs
+      // from the one recorded when it failed.
+      const changeCheck = artDispatcher.subjectResolver(pool);
+      const changed = await Promise.all(mine.map(async (r) => {
+        if (await artDescriptions.recipeChangedSince(pool, r.subject_kind, r.subject_key, r.updated_at)) {
+          return true;
+        }
+        // Content failures only. They always come back from a provider, so the
+        // recorded body is what was SENT; a config refusal can be raised before
+        // the call, records our own unmerged request, and would compare as
+        // "changed" with nothing fixed.
+        if (action !== 'reseed') return false;
+        try {
+          return await artDispatcher.requestChangedSinceFailure(pool, r, { resolveSubject: changeCheck });
+        } catch (err) {
+          // Cannot tell is not "changed": the refusal stands, as it did before.
+          console.error('art requeue: could not compare the request', err && err.message);
+          return false;
+        }
+      }));
       const eligible = mine.filter((_, i) => changed[i]);
       if (eligible.length === 0) {
         return res.status(409).json({
           error: action === 'reseed'
             ? 'these failed for a reason a retry cannot fix -- the seed is derived from the '
-              + 'subject, so the same image comes back. Rewrite the description, or pass '
-              + 'reseed:true for a different take.'
+              + 'subject and nothing in their request (description, prompt, backdrop, provider '
+              + 'settings) has changed since, so the same image comes back. Rewrite the '
+              + 'description, or retry with a new seed (reseed:true) for a different take.'
             : 'these failed for a reason a retry cannot fix -- change the configuration first.',
           action,
         });
       }
       // Only the subjects whose recipe actually changed. Requeueing the rest
       // would burn a generation to reproduce an image we already have.
+      unchanged = mine.length - eligible.length;
       mine = eligible;
     }
     if (!retryable && reseed && action !== 'reseed') {
@@ -3906,6 +4379,8 @@ app.post('/api/art-jobs/requeue', adminGuard, async (req, res) => {
       // requeued" reads as a bug until you know the other 5 were already on
       // their way.
       already_queued: alreadyQueued,
+      // SOMET-544. Left failed because a plain retry would reproduce them.
+      unchanged,
       stats: await artJobQueue.stats(pool),
     });
   } catch (err) {
@@ -3976,11 +4451,22 @@ app.post('/api/art-jobs/clear', adminGuard, async (req, res) => {
     // scoped: the admin is dropping work that has not started, and a claimed
     // row is a separate recovery (Rescue stranded jobs). provider_id null
     // matches unpinned rows, hence IS NOT DISTINCT FROM.
-    const groups = Array.isArray(req.body.groups) ? req.body.groups : null;
+    //
+    // FAILS CLOSED: a `groups` that is present but not an array is a malformed
+    // scope, and must be refused -- reading it as "no scope" would take the
+    // clear-everything branch below and wipe the queue (SOMET-593).
+    const body = req.body || {};
+    if ('groups' in body && !Array.isArray(body.groups)) {
+      return res.status(400).json({ error: 'groups must be [{ kind, provider_id }]' });
+    }
+    const groups = 'groups' in body ? body.groups : null;
     let rows;
     if (groups) {
+      // Bounded to int4: Number.isInteger alone let 99999999999 through to the
+      // $2::int[] cast, which threw and came back a 500 rather than a 400.
       const valid = groups.filter((g) => g && typeof g.kind === 'string'
-        && (g.provider_id === null || Number.isInteger(g.provider_id)));
+        && (g.provider_id === null || (Number.isInteger(g.provider_id)
+          && g.provider_id >= -2147483648 && g.provider_id <= 2147483647)));
       if (valid.length === 0 || valid.length !== groups.length) {
         return res.status(400).json({ error: 'groups must be [{ kind, provider_id }]' });
       }
@@ -4006,6 +4492,8 @@ app.post('/api/art-jobs/clear', adminGuard, async (req, res) => {
       ({ rows } = await pool.query(
         "DELETE FROM art_jobs WHERE state IN ('queued', 'running') RETURNING state",
       ));
+      // Nothing is queued any more, so nothing is blocked (SOMET-594).
+      artDispatcher.retainBlocked([]);
     }
     res.json({
       cleared: rows.length,
@@ -4562,7 +5050,11 @@ app.get('/api/world-graph', adminGuard, async (req, res) => {
         `SELECT id, name, width, height, is_entry, biomes, graph_x, graph_y
            FROM worlds ORDER BY created_at DESC`),
       pool.query(
-        `SELECT from_world_id, edge, to_world_id, from_x, from_y, to_x, to_y
+        // SOMET-587: `id` and `entity_type_id` added so the World Map tab's
+        // per-instance art picker (PUT /api/map-links/:id/art) can address a
+        // selected portal row and show what it currently carries. Additive
+        // only -- every column this route already returned is unchanged.
+        `SELECT id, from_world_id, edge, to_world_id, from_x, from_y, to_x, to_y, entity_type_id
            FROM map_links ORDER BY from_world_id, edge, from_x, from_y`),
     ]);
     res.json({ worlds: worldsRes.rows, links: linksRes.rows });
@@ -4783,7 +5275,15 @@ function validateVillageBody(body, worldRow, existing) {
 app.get('/api/worlds/:id/villages', adminGuard, async (req, res) => {
   try {
     const r = await pool.query(
-      `SELECT id, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y, merchant_x, merchant_y
+      // SOMET-587: spec_key and the four post entity_type_id columns added so
+      // the World Map tab's per-instance art picker can show each post's
+      // current binding and PUT /api/villages/:id/art can locate the right
+      // spec entry (via spec_key -- see specFileLocator.js's
+      // findVillageInSpecs). Additive only -- every column this route
+      // already returned is unchanged.
+      `SELECT id, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y, merchant_x, merchant_y,
+              spec_key, merchant_entity_type_id, bank_entity_type_id,
+              gem_merchant_entity_type_id, skill_merchant_entity_type_id
          FROM villages WHERE world_id = $1 ORDER BY created_at ASC`,
       [req.params.id],
     );
@@ -4873,6 +5373,226 @@ app.delete('/api/worlds/:id/villages/:villageId', adminGuard, async (req, res) =
     res.status(500).json({ error: 'Failed to delete village' });
   } finally {
     client?.release();
+  }
+});
+
+// SOMET-587. Read-side support for the World Map tab's per-instance art
+// picker: a world carries at most one waypoint (waypoints_world_unique,
+// 1714440270000) and at most one vault chest (seed-map's applyPointArt keys
+// its UPDATE on `WHERE world_id = $1 AND kind = 'vault'` with no further
+// disambiguator), so each of these answers with a single object (or null),
+// not a list. Reuses fetchWaypoints/fetchChests (the SAME readers the live
+// authority uses) rather than a second ad hoc query, so the art name this
+// admin view shows can never disagree with what a joining player actually
+// sees.
+app.get('/api/worlds/:id/waypoint', adminGuard, async (req, res) => {
+  try {
+    const rows = await fetchWaypoints(pool, req.params.id);
+    res.json(rows[0] || null);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load waypoint' });
+  }
+});
+
+app.get('/api/worlds/:id/chest', adminGuard, async (req, res) => {
+  try {
+    const rows = await fetchChests(pool, req.params.id);
+    // Only a vault chest is spec-authored (seed-map.js's applyPointArt only
+    // ever binds `WHERE kind = 'vault'`) -- a field chest is a runtime loot
+    // spawn with no spec entry, so there is nothing for this picker to edit.
+    // Same for a transient boss-death vault chest (SOMET-611, expiresAt set).
+    res.json(rows.find((c) => c.kind === 'vault' && c.expiresAt == null) || null);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load chest' });
+  }
+});
+
+// SOMET-587. Write-side of the per-instance art picker, four endpoints with
+// one shared shape: resolve the requested art name against the live
+// entity_types catalog (kind-checked), locate the ONE checked-in spec entry
+// this live row came from, write the spec file FIRST (validated, atomic,
+// no-op on failure), and only once that succeeds update the database row —
+// so a failed file write can never leave the database claiming a durability
+// the spec file does not actually have. A lookup that cannot find a unique
+// spec match refuses with 422 rather than writing only to the database (see
+// specFileLocator.js's header comment on why that would be unsafe).
+app.put('/api/map-links/:id/art', adminGuard, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const row = (await pool.query(
+      `SELECT ml.id, ml.from_world_id, ml.to_world_id, ml.edge, ml.from_x, ml.from_y, ml.to_x, ml.to_y,
+              w.name AS from_world_name
+         FROM map_links ml JOIN worlds w ON w.id = ml.from_world_id
+        WHERE ml.id = $1`,
+      [id],
+    )).rows[0];
+    if (!row) return res.status(404).json({ error: 'map link not found' });
+    if (row.edge !== 'PORTAL') {
+      return res.status(400).json({ error: 'only a portal link carries art — a compass doorway has none' });
+    }
+
+    const resolved = await resolvePointArtId(pool, req.body, 'portal');
+    if (!resolved.ok) return res.status(400).json({ error: resolved.error });
+
+    // The clicked row (`:id`) may be either the spec's declared departure
+    // side or the implicit mirror arrival side -- findLinkInSpecs matches
+    // whichever one this physical row is (by its OWN from_world_name/
+    // from_x/from_y, never the mirror's) and reports back which side matched
+    // as `located.side`, with `located.fieldPath` already resolved to `art`
+    // (departure) or `to_art` (arrival -- SOMET-586). There is no explicit
+    // "which side" request field: the row id already disambiguates it.
+    const located = findLinkInSpecs(row.from_world_name, { from_x: row.from_x, from_y: row.from_y }, specDir);
+    if (!located) {
+      return res.status(422).json({
+        error: 'No unique spec-file match for this portal — it is not safely editable from here. '
+          + 'Edit the map spec file directly instead; writing only to the database would be silently '
+          + 'wiped by the next `make seed-map`.',
+      });
+    }
+
+    const catalogs = await mapSpecCatalogsWithArt(pool);
+    // `siblingFallbackKey: 'art'` only on the arrival side -- setting to_art
+    // to the SAME name the departure `art` field already carries collapses
+    // back to no explicit to_art key (see writeSpecFieldChange's own
+    // comment), which is also what an explicit clear (art_name: null) always
+    // did. The departure side has no such sibling to collapse against.
+    const siblingFallbackKey = located.side === 'arrival' ? 'art' : null;
+    const write = writeSpecFieldChange(located, resolved.name, catalogs, [], siblingFallbackKey);
+    if (!write.ok) return res.status(write.status).json({ error: write.error });
+
+    // SOMET-586/587: the two doorway rows no longer necessarily share one
+    // entity type (to_art can override the arrival row), so this writes ONLY
+    // the single physical row `:id` addresses -- never its mirror. Setting
+    // the other side's art is a second PUT against that row's own id.
+    await pool.query('UPDATE map_links SET entity_type_id = $2 WHERE id = $1', [id, resolved.id]);
+
+    res.json({ art: resolved.name, entity_type_id: resolved.id, side: located.side });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update portal art' });
+  }
+});
+
+app.put('/api/waypoints/:id/art', adminGuard, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const row = (await pool.query(
+      `SELECT wp.id, wp.world_id, w.name AS world_name
+         FROM waypoints wp JOIN worlds w ON w.id = wp.world_id
+        WHERE wp.id = $1`,
+      [id],
+    )).rows[0];
+    if (!row) return res.status(404).json({ error: 'waypoint not found' });
+
+    const resolved = await resolvePointArtId(pool, req.body, 'waypoint');
+    if (!resolved.ok) return res.status(400).json({ error: resolved.error });
+
+    const located = findWaypointInSpecs(row.world_name, specDir);
+    if (!located) {
+      return res.status(422).json({
+        error: 'No unique spec-file match for this waypoint — it is not safely editable from here. '
+          + 'Edit the map spec file directly instead; writing only to the database would be silently '
+          + 'wiped by the next `make seed-map`.',
+      });
+    }
+
+    const catalogs = await mapSpecCatalogsWithArt(pool);
+    const write = writeSpecFieldChange(located, resolved.name, catalogs);
+    if (!write.ok) return res.status(write.status).json({ error: write.error });
+
+    await pool.query('UPDATE waypoints SET entity_type_id = $2 WHERE id = $1', [id, resolved.id]);
+    res.json({ art: resolved.name, entity_type_id: resolved.id });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update waypoint art' });
+  }
+});
+
+// Addressed by the chest's OWN id (world_chests.id), mirroring /api/map-links
+// and /api/waypoints -- GET /api/worlds/:id/chest above is what hands the
+// frontend this id in the first place, so there is no need to route this one
+// through the world id as well.
+app.put('/api/world-chests/:id/art', adminGuard, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const row = (await pool.query(
+      `SELECT c.id, c.world_id, c.kind, w.name AS world_name
+         FROM world_chests c JOIN worlds w ON w.id = c.world_id
+        WHERE c.id = $1`,
+      [id],
+    )).rows[0];
+    if (!row) return res.status(404).json({ error: 'chest not found' });
+    if (row.kind !== 'vault') {
+      return res.status(400).json({ error: 'only a vault chest is spec-authored — a field chest has no spec entry to edit' });
+    }
+
+    const resolved = await resolvePointArtId(pool, req.body, 'chest_vault');
+    if (!resolved.ok) return res.status(400).json({ error: resolved.error });
+
+    const located = findChestInSpecs(row.world_name, specDir);
+    if (!located) {
+      return res.status(422).json({
+        error: 'No unique spec-file match for this chest — it is not safely editable from here. '
+          + 'Edit the map spec file directly instead; writing only to the database would be silently '
+          + 'wiped by the next `make seed-map`.',
+      });
+    }
+
+    const catalogs = await mapSpecCatalogsWithArt(pool);
+    const write = writeSpecFieldChange(located, resolved.name, catalogs);
+    if (!write.ok) return res.status(write.status).json({ error: write.error });
+
+    await pool.query('UPDATE world_chests SET entity_type_id = $2 WHERE id = $1', [id, resolved.id]);
+    res.json({ art: resolved.name, entity_type_id: resolved.id });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update chest art' });
+  }
+});
+
+app.put('/api/villages/:id/art', adminGuard, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { slot } = req.body || {};
+    if (!VILLAGE_POST_KINDS.includes(slot)) {
+      return res.status(400).json({ error: `slot must be one of ${VILLAGE_POST_KINDS.join(', ')}` });
+    }
+
+    const row = (await pool.query(
+      `SELECT v.id, v.world_id, v.spec_key, w.name AS world_name
+         FROM villages v JOIN worlds w ON w.id = v.world_id
+        WHERE v.id = $1`,
+      [id],
+    )).rows[0];
+    if (!row) return res.status(404).json({ error: 'village not found' });
+
+    const resolved = await resolvePointArtId(pool, req.body, slot);
+    if (!resolved.ok) return res.status(400).json({ error: resolved.error });
+
+    // villages.spec_key is the identity a village row already carries for
+    // this exact "which spec entry" problem (SOMET-312/SOMET-591) -- a NULL
+    // here (a village created before specs existed, or since) correctly
+    // refuses rather than guessing which entry to touch.
+    const located = findVillageInSpecs(row.world_name, row.spec_key, specDir);
+    if (!located) {
+      return res.status(422).json({
+        error: 'No unique spec-file match for this village — it is not safely editable from here. '
+          + 'Edit the map spec file directly instead; writing only to the database would be silently '
+          + 'wiped by the next `make seed-map`.',
+      });
+    }
+
+    const catalogs = await mapSpecCatalogsWithArt(pool);
+    const write = writeSpecFieldChange(located, resolved.name, catalogs, [slot]);
+    if (!write.ok) return res.status(write.status).json({ error: write.error });
+
+    await pool.query(`UPDATE villages SET ${villageArtColumn(slot)} = $2 WHERE id = $1`, [id, resolved.id]);
+    res.json({ slot, art: resolved.name, entity_type_id: resolved.id });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update village post art' });
   }
 });
 
@@ -5130,6 +5850,15 @@ if (require.main === module) {
     // unreachable server.
     refreshWeaponCatalogCache();
 
+    // SOMET-640: seed/export jobs live in memory, so a run row still
+    // 'running' belongs to a process that is gone. Never blocks boot.
+    try {
+      const n = await markInterruptedRuns(pool);
+      if (n) console.log(`seed-sync: marked ${n} interrupted run(s) failed`);
+    } catch (err) {
+      console.error('seed-sync: could not mark interrupted runs:', err.message);
+    }
+
     const server = app.listen(port, () => {
       console.log(`Backend server running on port ${port}`);
     });
@@ -5140,6 +5869,6 @@ if (require.main === module) {
 
 module.exports = {
   app, __setSpriteGen, __setPool, __setAuthorityHandle, validateItemType, boundedCacheSet,
-  apiRateLimiter, behaviorFieldError, abilityFieldError, behaviorAbilitiesError,
-  entityTypeFieldError, shouldMigrateOnBoot, runMigrations, __setMigrationRunner,
+  apiRateLimiter, behaviorFieldError, abilityFieldError, behaviorAbilitiesError, behaviorSkillsError,
+  entityTypeFieldError, shouldMigrateOnBoot, runMigrations, __setMigrationRunner, __setSpecDir,
 };

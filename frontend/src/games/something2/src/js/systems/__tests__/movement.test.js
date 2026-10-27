@@ -34,9 +34,6 @@ describe("resolveMove", () => {
     // actor center near right edge of tile (0,0) so a small east step crosses into (0,1)
     const a = { x: T - 30, y: 10, width: 20, height: 20, speed: 100 };
     const r = resolveMove(m, a, 1, 0, 1);
-    // Centre 80, footprint half-extent 5 (20/2 * FOOTPRINT_SCALE): the east
-    // face 85 would reach 185, inside the water tile, so it clamps to 100-EPS
-    // and x advances 99.99-85 = 14.99 -> x = 70 + 14.99 = 84.99.
     expect(r.x).toBeCloseTo(84.99, 2);
   });
 

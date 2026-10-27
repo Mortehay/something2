@@ -152,6 +152,26 @@ export function shouldPollQueue(run, stats) {
   return Number(stats?.queued || 0) + Number(stats?.running || 0) > 0;
 }
 
+// Whether a run has just ended, so the catalogue must be read once more.
+//
+// The catalogue polls only while a run is going (15s). Art that landed after
+// its last poll was never fetched, so a finished 50-tile run showed "49 have
+// art" and kept 2 done tiles in the missing list until a manual reload
+// (SOMET-538 rework, found live).
+export function batchJustSettled(wasRunning, isRunning) {
+  return Boolean(wasRunning) && !isRunning;
+}
+
+// The refetch interval for the queue (SOMET-535 rework 3). Outstanding work
+// polls fast; an idle queue polls SLOWLY rather than never, because returning
+// `false` there meant a job queued from outside this page (the API, another
+// admin, the Skill Tree tab) stayed invisible until a reload.
+export const QUEUE_POLL_BUSY_MS = 2000;
+export const QUEUE_POLL_IDLE_MS = 15000;
+export function queuePollInterval(run, stats) {
+  return shouldPollQueue(run, stats) ? QUEUE_POLL_BUSY_MS : QUEUE_POLL_IDLE_MS;
+}
+
 // Which of the claimed jobs is actually ON the provider (SOMET-558).
 //
 // THE TRAP THIS EXISTS FOR. dispatch() claims `limit` jobs in ONE update --
@@ -235,5 +255,62 @@ export function blockedSummary(blocked) {
       return `${b.count} queued ${b.kind} on ${who}${size}`;
     }),
     groups: list.map((b) => ({ kind: b.kind, provider_id: b.provider_id ?? null })),
+  };
+}
+
+// A synchronous one-at-a-time gate for a click handler. A mutation's isPending
+// only flips on the next render, so a double-click's second click still sees
+// it false; this flag flips in the same tick the first click begins
+// (SOMET-593: two /clear requests 3ms apart).
+export function singleFlight() {
+  let busy = false;
+  return {
+    tryBegin() {
+      if (busy) return false;
+      busy = true;
+      return true;
+    },
+    end() { busy = false; },
+  };
+}
+
+// The Remove panel's whole decision (SOMET-594). Two sources:
+//  - the /dispatch REFUSAL (startError.blocked): the admin pressed Start, so
+//    removing the blocked groups and then starting is the action they asked
+//    for -- hence "& start", and it can be dismissed;
+//  - the drain's run.blocked: groups it is skipping (or skipped). Removing
+//    them NEVER starts anything. Gating "& start" on !run.running restarted a
+//    batch the admin had just stopped.
+// The run's list is the live one, so it wins when both exist. A refusal is
+// hidden once a batch is running: it described a Start that has since happened.
+//
+// `message` is only set for run.blocked (a refusal shows the server's own
+// text). Its second half reads the LIVE queue, not how the run ended: the old
+// "the rest of the batch was drawn" was printed after a manual Stop with 0
+// jobs done and 12 still queued. Blocked rows are queued rows, so the others
+// are queued + in flight minus the blocked total.
+export function blockedPanel({ run, startError, stats }) {
+  const fromRun = Boolean(run?.blocked?.length);
+  const s = blockedSummary(fromRun ? run.blocked : startError?.blocked);
+  const startAfter = !fromRun && !run?.running;
+  let message = null;
+  if (fromRun) {
+    const others = Math.max(0,
+      Number(stats?.queued || 0) + Number(stats?.running || 0) - s.total);
+    let rest;
+    if (run.running) rest = 'the rest of the batch is drawing.';
+    else if (others > 0) rest = `the batch stopped; ${others} other job(s) are still queued.`;
+    else rest = 'nothing else is queued.';
+    message = `${run.running ? 'Skipping' : 'Skipped'} ${s.total} queued job(s) that would render `
+      + `below 1024px -- ${rest} Remove them, or re-queue those subjects on a 1024 provider.`;
+  }
+  return {
+    ...s,
+    show: s.total > 0 && (fromRun || !run?.running),
+    fromRun,
+    startAfter,
+    dismissable: !fromRun,
+    message,
+    label: `Remove ${s.total} blocked job(s)${startAfter ? ' & start' : ''}`,
   };
 }

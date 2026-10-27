@@ -7,11 +7,6 @@ describe('MapGraphAdmin', () => {
   });
 
   it('dungeon tagging correctly tags worlds with and without portals', () => {
-    const worlds = [
-      { id: 'w1', name: 'Vale Crossing', is_entry: true },
-      { id: 'w2', name: 'Catacombs Entry', is_entry: false },
-      { id: 'w3', name: 'Highlands', is_entry: false },
-    ];
     const links = [
       { from_world_id: 'w1', to_world_id: 'w2', edge: 'PORTAL' },
       { from_world_id: 'w1', to_world_id: 'w3', edge: 'N' },

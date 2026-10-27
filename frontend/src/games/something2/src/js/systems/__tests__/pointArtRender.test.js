@@ -40,6 +40,26 @@ describe('drawPointBody', () => {
     expect(r.ctx.drawImage).toHaveBeenCalledTimes(1);
     expect(r.ctx.drawImage.mock.calls[0][0]).toBe(IMG);
   });
+
+  // SOMET-588: the ring and the alpha were set (lines next to each other in
+  // the source) but never actually asserted -- only drawImage was. Record
+  // globalAlpha live at each call, same technique drawSkillMerchant's
+  // textAlign test above uses for textAlign.
+  it('draws the unlit ring via ellipse at its own fixed alpha, then the body at pointStateTreatment\'s DIM (0.45)', () => {
+    const r = rs();
+    const seen = [];
+    r.ctx.ellipse = (...args) => seen.push({ name: 'ellipse', args, alpha: r.ctx.globalAlpha });
+    r.ctx.drawImage = () => seen.push({ name: 'drawImage', alpha: r.ctx.globalAlpha });
+    r.drawPointBody(DEFS.portal, 3250, 3450, { alpha: 0.45, ring: true, stateKey: 'unlit' });
+    const s = worldToScreen(3250, 3450);
+    const ring = seen.find((c) => c.name === 'ellipse');
+    expect(ring).toBeTruthy();
+    expect(ring.args).toEqual([s.x, s.y, 28, 14, 0, 0, Math.PI * 2]);
+    expect(ring.alpha).toBeCloseTo(0.9, 6);
+    const body = seen.find((c) => c.name === 'drawImage');
+    expect(body).toBeTruthy();
+    expect(body.alpha).toBeCloseTo(0.45, 6);
+  });
 });
 
 describe('_drawPointArtAt', () => {
@@ -74,8 +94,13 @@ describe('placeholder fallbacks keep drawing', () => {
   });
   it('drawWorldChest with art dims an opened chest and keeps the label', () => {
     const r = rs();
+    const seen = [];
+    r.ctx.drawImage = () => seen.push({ alpha: r.ctx.globalAlpha });
     r.drawWorldChest({ x: 450, y: 450, kind: 'vault', state: 'opened', art: 'portal' }, null);
-    expect(r.ctx.drawImage).toHaveBeenCalledTimes(1);
+    expect(seen.length).toBe(1);
+    // pointStateTreatment's DIM (0.45) -- "opened" is the chest half of the
+    // "0.45 unlit/opened" pair the waypoint ring test above covers.
+    expect(seen[0].alpha).toBeCloseTo(0.45, 6);
     expect(r.ctx.fillText).toHaveBeenCalledWith('Looted', expect.any(Number), expect.any(Number));
   });
 });
@@ -143,6 +168,30 @@ describe('caption lifts above the drawn body, not the placeholder radius', () =>
     const { y: dy } = worldToScreen(450, 450);
     const caption = seen.find((c) => c.text === 'Merchant');
     expect(caption).toBeTruthy();
+    // The portal def is 110x130 and IMG is a 64x64 square, so the fit is
+    // WIDTH-constrained: scale = 110/64, giving a drawn height of 110, not
+    // the catalog's 130. The old (box-height) lift placed the caption at
+    // dy - 130 - 6; pin the exact value so a regression back to the catalog
+    // height (over-lifting into the empty space above a narrower body) fails
+    // this test instead of only the loose bound below.
+    expect(caption.y).toBeCloseTo(dy - 110 - 6, 6);
     expect(caption.y).toBeLessThan(dy - 40);
+  });
+
+  // SOMET-588: the previous fix (T9 finding B) used the catalog box height
+  // (130 here) as the lift for EVERY body, including one whose fit is
+  // width-constrained and therefore draws shorter than that box -- the
+  // caption floated 20px above where the art visually ends.
+  it('a width-constrained body lifts the caption to its REAL drawn height, not the catalog box', () => {
+    const r = rs();
+    const seen = [];
+    r.ctx.fillText = (text, x, y) => seen.push({ text, x, y });
+    r.drawMerchant({ x: 450, y: 450, art: 'portal' });
+    const { y: dy } = worldToScreen(450, 450);
+    const caption = seen.find((c) => c.text === 'Merchant');
+    const catalogHeight = DEFS.portal.displayHeight; // 130
+    const realDrawnHeight = (IMG.height) * (DEFS.portal.displayWidth / IMG.width); // fit by width: 110
+    expect(realDrawnHeight).toBeLessThan(catalogHeight);
+    expect(caption.y).toBeCloseTo(dy - realDrawnHeight - 6, 6);
   });
 });

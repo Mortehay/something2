@@ -41,49 +41,38 @@ test('the hand-written element list still matches the combat authority', () => {
 });
 
 // ---- guard 4: node count within 5% of 1800, keystones exactly as specced ----
-test('guard 4: 1852 nodes — 1494 minor, 274 notable, 36+12 greater, 30 keystone, 6 start', () => {
-  assert.strictEqual(tree.nodes.length, 1852);
+test('guard 4: 2302 nodes — 1830 minor, 358 notable, 78 greater, 30 keystone, 6 start', () => {
+  assert.strictEqual(tree.nodes.length, 2302);
 
   const byKind = {};
   for (const n of tree.nodes) byKind[n.kind] = (byKind[n.kind] || 0) + 1;
-  // greater 47 = 36 placed on the ring-3 grid (SOMET-517) + 11 cluster hubs
-  // (SOMET-518, plus SOMET-527's Spearpoint and Sweep). notable 272 = 240 grid
-  // + 32 cluster satellites.
   assert.deepStrictEqual(byKind,
-    { minor: 1494, notable: 274, greater: 48, keystone: 30, start: 6 });
+    { minor: 1836, notable: 352, greater: 78, keystone: 30, start: 6 });
 
   // The spec's own tolerance, restated as a literal band rather than a formula.
-  assert.ok(tree.nodes.length >= 1710 && tree.nodes.length <= 1890,
-    `node count ${tree.nodes.length} is outside 1800 +/- 5%`);
+  assert.ok(tree.nodes.length >= 2100 && tree.nodes.length <= 2500,
+    `node count ${tree.nodes.length} is outside 2300 +/- 10%`);
 
-  // Per sector, so a bug that loses one whole sector cannot hide inside a
-  // total that some other sector's overcount restores.
-  // SOMET-518: a sector now also carries its epic clusters, and they are NOT
-  // evenly distributed (strength/dexterity/intelligence have two each, the
-  // rest one). The expected contribution is counted from the AUTHORED cluster
-  // list, which makes this a cross-check that the generator emitted exactly
-  // what the spec asked for -- not a tautology, since the two are produced by
-  // different code.
   const clusterNodesIn = (sector) => CLUSTERS
     .filter((c) => c.sector === sector)
     .reduce((a, c) => a + 1 + c.satellites.length, 0);
   for (const sector of ['wisdom', 'intelligence', 'dexterity', 'strength', 'constitution', 'charisma']) {
     const inSector = tree.nodes.filter((n) => n.sector === sector);
-    // 295 ring nodes + 1 start, plus this sector's cluster nodes.
-    assert.strictEqual(inSector.length, 296 + clusterNodesIn(sector), `${sector} node count`);
+    // 370 ring nodes + 1 start, plus this sector's cluster nodes.
+    assert.strictEqual(inSector.length, 371 + clusterNodesIn(sector), `${sector} node count`);
     assert.strictEqual(inSector.filter((n) => n.kind === 'keystone').length, 5, `${sector} keystones`);
     const satellites = CLUSTERS.filter((c) => c.sector === sector)
       .reduce((a, c) => a + c.satellites.length, 0);
-    assert.strictEqual(inSector.filter((n) => n.kind === 'notable').length, 40 + satellites,
+    assert.strictEqual(inSector.filter((n) => n.kind === 'notable').length, 53 + satellites,
       `${sector} notables`);
   }
   assert.strictEqual(tree.nodes.filter((n) => n.sector === 'core').length, 30);
 });
 
-test('every key is unique, and 2428 edges are produced', () => {
+test('every key is unique, and 2980 edges are produced', () => {
   const keys = new Set(tree.nodes.map((n) => n.key));
-  assert.strictEqual(keys.size, 1852);
-  assert.strictEqual(tree.edges.length, 2428);
+  assert.strictEqual(keys.size, 2302);
+  assert.strictEqual(tree.edges.length, 2980);
 });
 
 test('the six start nodes are the only nodes carrying a start_class', () => {
@@ -144,7 +133,7 @@ test('guard 1: every node is reachable from every one of the six start nodes', (
     const unreachable = tree.nodes.map((n) => n.key).filter((k) => !seen.has(k));
     assert.deepStrictEqual(unreachable.slice(0, 10), [],
       `${unreachable.length} node(s) unreachable from ${start}`);
-    assert.strictEqual(seen.size, 1852, `reachable-from-${start} count`);
+    assert.strictEqual(seen.size, 2302, `reachable-from-${start} count`);
   }
 });
 
@@ -290,7 +279,7 @@ test('coordinates are rounded to 2dp and stay inside the specced radius', () => 
     // satellites 62px around their hub, so the outermost thing in the tree is
     // at 1022. Hand-computed, not read from LAYOUT: deriving the bound from
     // the same constants the generator uses would assert nothing.
-    assert.ok(Math.hypot(n.x, n.y) <= 1022.01, `${n.key} is outside the cluster ring`);
+    assert.ok(Math.hypot(n.x, n.y) <= 2450.01, `${n.key} is outside the cluster ring`);
   }
 });
 

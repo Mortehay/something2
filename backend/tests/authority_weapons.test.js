@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { normalizeAim, inArc, hasLineOfSight } = require('../src/authority/weapons.js');
+const { normalizeAim, inArc, hasLineOfSight, hitRadius, HIT_PADDING } = require('../src/authority/weapons.js');
 const { MAX_SUB } = require('../src/authority/projectiles');
 
 test('normalizeAim normalizes a non-zero vector to unit length', () => {
@@ -116,4 +116,35 @@ test('hasLineOfSight is not self-blocked when the ORIGIN sits on a blocked tile'
 test('hasLineOfSight is not self-blocked when the TARGET sits on a blocked tile', () => {
   const map = wallMap(300, 300); // only the target's own tile is blocked
   assert.strictEqual(hasLineOfSight(map, 0, 0, 300, 0), true);
+});
+
+// --- SOMET-575: hit padding -------------------------------------------------
+// Reach is measured to the target's BODY EDGE (centre distance minus its hit
+// radius), and a body overlapping the attacker is hit at any bearing.
+
+test('SOMET-575 hitRadius pads half the body width, so a 48px creature is wider than its 24px half', () => {
+  assert.ok(HIT_PADDING > 0);
+  assert.equal(hitRadius({ width: 48, height: 48 }), 24 + HIT_PADDING);
+  assert.equal(hitRadius({ width: 64, height: 64 }), 32 + HIT_PADDING);
+  // A record without a width still gets a padded, finite radius.
+  assert.equal(hitRadius({}), 24 + HIT_PADDING);
+});
+
+test('SOMET-575 inArc: dead ahead with the body edge inside reach is a hit, beyond it a miss', () => {
+  // reach 55 (unarmed), radius 24: centre 70 -> edge 46, inside reach.
+  assert.equal(inArc(0, 0, 1, 0, 70, 0, 55, 0.5, 24), true);
+  // The validator's live whiff: centre 75.6, edge 51.6.
+  assert.equal(inArc(0, 0, 1, 0, 75.6, 0, 55, 0.5, 24), true);
+  // Edge 56 > reach 55: still a miss, the padding is bounded.
+  assert.equal(inArc(0, 0, 1, 0, 80, 0, 55, 0.5, 24), false);
+  // No radius: unchanged centre-distance rule.
+  assert.equal(inArc(0, 0, 1, 0, 70, 0, 55, 0.5), false);
+});
+
+test('SOMET-575 inArc: a target overlapping the attacker is hit at any bearing', () => {
+  // Centres 1px apart, target BEHIND the aim: the bearing is noise.
+  assert.equal(inArc(0, 0, 1, 0, -1, 0, 55, 0.5, 24), true);
+  assert.equal(inArc(0, 0, 1, 0, 0, 20, 55, 0.5, 24), true);
+  // Just outside the body (d 30 > r 24), behind: the arc decides again.
+  assert.equal(inArc(0, 0, 1, 0, -30, 0, 55, 0.5, 24), false);
 });

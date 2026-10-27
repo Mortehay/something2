@@ -257,15 +257,17 @@ test('audio routes', { skip }, async (t) => {
     assert.equal(byKind.biome.cues, undefined, 'biome has no sfx slots -- no cues field at all');
 
     assert.ok(byKind.creature.cues, 'creature group is missing cues');
+    // SOMET-627: nearby/attack now carry idle/attack (spec §4's own
+    // suggested cue names), not upload-only null.
     assert.deepEqual(byKind.creature.cues.Slime, {
-      nearby: null, attack: null, hurt: 'hit', death: 'death',
+      nearby: 'idle', attack: 'attack', hurt: 'hit', death: 'death',
     });
 
     assert.ok(byKind.attack_type.cues, 'attack_type group is missing cues');
-    assert.deepEqual(byKind.attack_type.cues.ranged, { use: null, hit: 'hit' });
+    assert.deepEqual(byKind.attack_type.cues.ranged, { use: 'shoot', hit: 'hit' });
 
     assert.ok(byKind.item.cues, 'item group is missing cues');
-    assert.deepEqual(byKind.item.cues['crude-bow'], { use: null, hit: 'hit' },
+    assert.deepEqual(byKind.item.cues['crude-bow'], { use: 'shoot', hit: 'hit' },
       'a gear-ladder bow (no ammo_type_id on the row) still resolves ranged via the name fallback');
 
     assert.ok(byKind.skill.cues, 'skill group is missing cues');
@@ -292,6 +294,34 @@ test('audio routes', { skip }, async (t) => {
     assert.deepEqual(res.body, { error: 'no prompt' });
     const calls = seen.slice(before).filter((s) => s.method === 'POST' && (s.url === '/api/audio/propose' || s.url === '/api/audio'));
     assert.deepEqual(calls, [], 'neither propose nor generate reached the box');
+  });
+
+  // SOMET-592 validation, defect 4: an upload-only sfx slot is the caller's
+  // mistake (or a provider that has not discovered the cue yet), not a box
+  // fault, so it is a 409 like "no prompt" -- never a 502. Both refusals
+  // happen before any box call.
+  await t.test('generate for an upload-only sfx slot is a 409, not a 502; the box is never called', async () => {
+    const before = seen.length;
+    // creature/*/presence (a boss-only slot) has no cue at all -- unlike
+    // attack_type/ranged/use and creature nearby/attack, which gained one in
+    // SOMET-627. 'Ignis, the Magma Colossus' is a real seeded boss_tier row
+    // (shared with audio_boss_slots_db.test.js), read-only here.
+    const noCue = await request(app).post('/api/audio/admin/generate').set('Authorization', bearer(admin))
+      .send({ subject_kind: 'creature', subject_key: 'Ignis, the Magma Colossus', slot: 'presence', provider_id: prov });
+    assert.equal(noCue.status, 409, JSON.stringify(noCue.body));
+    assert.match(noCue.body.error, /upload only/);
+    assert.equal(noCue.body.retryable, false);
+    // attack_type/melee/use has the cue 'slash', but a provider whose
+    // models_cache has never reported it (`prov` has, since the test above).
+    const fresh = (await pool.query(
+      `INSERT INTO ai_providers (name, base_url, request_template, modality, auth_token)
+       VALUES ($1, $2, '{}'::jsonb, 'audio', 'sk_route_fresh') RETURNING id`, [`audio-route-fresh-${tag}`, boxUrl])).rows[0].id;
+    made.providers.push(fresh);
+    const unknown = await request(app).post('/api/audio/admin/generate').set('Authorization', bearer(admin))
+      .send({ subject_kind: 'attack_type', subject_key: 'melee', slot: 'use', provider_id: fresh });
+    assert.equal(unknown.status, 409, JSON.stringify(unknown.body));
+    assert.match(unknown.body.error, /upload only: the provider has no cue 'slash'/);
+    assert.equal(seen.slice(before).filter((s) => s.url === '/api/audio/sfx').length, 0, 'no sfx call reached the box');
   });
 
   await t.test('a miss for a world that does not exist is dropped (accepted 0, no row)', async () => {

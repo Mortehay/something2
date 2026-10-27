@@ -17,6 +17,10 @@ const CAT = {
   items: new Map([['arbalest', { category: 'weapon', req_level: 12 }]]),
   skills: new Map([['war_whirlwind', { nameEn: 'Whirlwind', class: 'Warrior', type: 'melee' }]]),
   artDescriptions: new Map([['entity/Wolf', 'lean grey wolf with bared fangs'], ['skill/war_whirlwind', 'spinning greatsword']]),
+  auras: new Map([
+    ['pack_leader', { target_side: 'allies', dot_element: 'physical' }],
+    ['abyssor_void_rend', { target_side: 'enemies', dot_element: 'arcane' }],
+  ]),
 };
 
 test('stripImageStyling drops styling clauses, keeps the subject', () => {
@@ -27,6 +31,18 @@ test('stripImageStyling drops styling clauses, keeps the subject', () => {
 test('world context names biomes and level band', () => {
   assert.equal(buildContext(CAT, 'world', 'Vale', 'music'),
     'world "Vale"; type: overworld area; regions: Meadow, Deep Forest; levels 1-10; slot: music');
+});
+
+// SOMET-607 (S5): "prompt context (element, side)" per the ticket.
+test('aura context names side and element', () => {
+  assert.equal(buildContext(CAT, 'aura', 'pack_leader', 'loop'),
+    'magical aura "pack_leader"; side: allies; element: physical; slot: loop');
+  assert.equal(buildContext(CAT, 'aura', 'abyssor_void_rend', 'apply'),
+    'magical aura "abyssor_void_rend"; side: enemies; element: arcane; slot: apply');
+});
+
+test('aura context is null for an unknown aura, never a throw', () => {
+  assert.equal(buildContext(CAT, 'aura', 'zzNotReal', 'loop'), null);
 });
 
 // Live 2026-10-04: told only name/regions/levels, the model picked "dungeon"
@@ -93,4 +109,28 @@ test('isStale', () => {
   assert.equal(isStale({ source_input: null }, 'b'), false, 'hand-written is never stale');
   assert.equal(isStale(null, 'b'), false);
   assert.equal(isStale({ source_input: 'a' }, null), false, 'unknown subject is not stale');
+});
+
+test('SOMET-605: a boss creature row carries its tier and element; a boss slot says what it is for', () => {
+  const catalog = {
+    worlds: new Map(), biomes: new Map(), items: new Map(), skills: new Map(), artDescriptions: new Map(),
+    entities: new Map([
+      ['zzTitan', { name: 'zzTitan', prompt: 'a molten giant', boss_tier: 'world', element: 'fire' }],
+      ['zzSlime', { name: 'zzSlime', prompt: 'a green blob', boss_tier: null, element: null }],
+    ]),
+  };
+  assert.equal(buildContext(catalog, 'creature', 'zzTitan', 'presence'),
+    'creature "zzTitan"; boss tier: world; element: fire; looks like: a molten giant; slot: presence (a loop that plays while the boss is on screen)');
+  assert.equal(buildContext(catalog, 'creature', 'zzTitan', 'hurt', { cue: 'hit' }),
+    'creature "zzTitan"; boss tier: world; element: fire; looks like: a molten giant; slot: hurt; sound cue: hit');
+});
+
+test('SOMET-605: an ordinary creature context is byte-identical to before (no stale flood)', () => {
+  const catalog = {
+    worlds: new Map(), biomes: new Map(), items: new Map(), skills: new Map(), artDescriptions: new Map(),
+    entities: new Map([['zzSlime', { name: 'zzSlime', prompt: 'a green blob', boss_tier: null, element: 'fire' }]]),
+  };
+  // The literal is today's output, written out -- not recomputed.
+  assert.equal(buildContext(catalog, 'creature', 'zzSlime', 'hurt', { cue: 'hit' }),
+    'creature "zzSlime"; looks like: a green blob; slot: hurt; sound cue: hit');
 });

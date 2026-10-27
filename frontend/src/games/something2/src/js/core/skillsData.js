@@ -1221,7 +1221,7 @@ export const SKILLS = [
     descEn: 'Constructs a hulking golem from cultist blood to fight alongside.'
   },
   {
-    id: 'plague_globule', class: 'Cultist', type: 'magic',
+    id: 'cul_plague_globule', class: 'Cultist', type: 'magic',
     nameUk: 'Згусток чуми', nameEn: 'Plague Globule',
     costType: 'hp', cost: 25, cooldown: 4, range: 360, icon: '☣️', iconColor: '#15803d',
     descUk: 'Снаряд отрути та нежиті, що заражає ворогів інфекцією.',
@@ -2175,7 +2175,27 @@ export const SKILLS_BY_CLASS = {
 
 export const SKILLS_BY_ID = new Map(SKILLS.map(s => [s.id, s]));
 
+// SOMET-618. Every skill id on both sides is class-prefixed (war_, mag_,
+// mnk_, cul_, arc_, dru_); `plague_globule` was the one bare exception, drawn
+// from before the Cultist prefix convention was applied everywhere else, and
+// it drifted from the backend's `cul_plague_globule` (which keys catalog_art,
+// textures and the authority's skill lookups). The id itself was already
+// renamed to the convention-correct `cul_plague_globule` (SOMET-571); this
+// map exists only so a hotbar slot or an "unlocked skill" flag saved to a
+// player's localStorage under the OLD bare id before that rename still
+// resolves, instead of silently losing the assignment/ownership. Keyed by
+// the retired id, valued by the current one -- never the reverse.
+export const LEGACY_SKILL_ID_ALIASES = Object.freeze({
+  plague_globule: 'cul_plague_globule',
+});
 
+// Resolves a possibly-stale skill id (one a player's browser may still be
+// holding from before a rename) to the id the current catalog actually uses.
+// An id that is neither a known alias nor a current id is returned as-is --
+// callers that look it up in SKILLS_BY_ID will correctly find nothing.
+export function canonicalizeSkillId(id) {
+  return LEGACY_SKILL_ID_ALIASES[id] || id;
+}
 
 export function getSkillsForClass(className) {
   if (!className || className === 'all' || className === 'All') return SKILLS;
@@ -2183,7 +2203,7 @@ export function getSkillsForClass(className) {
 }
 
 export function getSkillById(id) {
-  return SKILLS_BY_ID.get(id) || null;
+  return SKILLS_BY_ID.get(canonicalizeSkillId(id)) || null;
 }
 
 export function getSkillIndexInClass(skill) {
@@ -2364,15 +2384,22 @@ export function resolveSkillVfx(skill) {
   return 'generic_slash';
 }
 
-export function resolveSkillDamage(skill) {
+export function resolveSkillDamage(skill, playerPools = null) {
   if (!skill) return { base: 12, hits: 1, text: '12 Damage' };
   if (skill.type === 'buff') {
     const desc = (skill.descEn || '') + ' ' + (skill.descUk || '');
     if (desc.includes('HP') || desc.includes('heal') || desc.includes('зцілює')) {
-      return { base: 0, hits: 0, text: 'Heal +25% HP' };
+      const maxHp = (playerPools && (playerPools.maxHp != null ? playerPools.maxHp : playerPools.hp)) || null;
+      const extra = maxHp ? ` (+${Math.max(15, Math.round(maxHp * 0.25))} HP)` : '';
+      return { base: 0, hits: 0, text: `Heal +25% HP${extra}` };
     }
     if (desc.includes('mana') || desc.includes('мана')) {
-      return { base: 0, hits: 0, text: 'Restores +35 MP' };
+      const pctMatch = desc.match(/(\d+)%/);
+      const pct = pctMatch ? parseInt(pctMatch[1], 10) : 40;
+      const pctStr = pctMatch ? `${pctMatch[1]}%` : '40%';
+      const maxMana = (playerPools && (playerPools.maxMana != null ? playerPools.maxMana : playerPools.mana)) || null;
+      const extra = maxMana ? ` (+${Math.max(35, Math.round(maxMana * (pct / 100)))} MP)` : '';
+      return { base: 0, hits: 0, text: `Restores +${pctStr} MP${extra}` };
     }
     if (desc.includes('stamina') || desc.includes('витривал')) {
       return { base: 0, hits: 0, text: 'Restores +30 SP' };
@@ -2414,7 +2441,7 @@ export function resolveSkillDamage(skill) {
 
   // Parse multiplier from description e.g. "250%" or "180%"
   const pctMatch = desc.match(/(\d+)%/);
-  let baseVal = 14;
+  let baseVal;
   if (pctMatch) {
     const pct = parseInt(pctMatch[1], 10);
     // Halved damage scaling for balanced combat
@@ -2448,7 +2475,7 @@ export function enrichSkillGems(list) {
     
     // Level requirement curve: Level 1 to 50
     // Starter skills (1..3) require Level 1 so players can immediately use them!
-    let reqLvl = 1;
+    let reqLvl;
     if (idx <= 3) reqLvl = 1;
     else if (idx <= 10) reqLvl = 2 + (idx - 4) * 2; // 2, 4, 6, 8, 10, 12, 14
     else if (idx <= 25) reqLvl = 16 + Math.floor((idx - 11) * 1.5); // 16..37

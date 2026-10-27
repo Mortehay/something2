@@ -13,7 +13,7 @@ import {
   useEnqueueSlotJob, useAudioJobs, useAudioSlotJobs, useSubjectRefresh,
   useAudioClips, useBindFromLibrary, loopEditable, useSetClipLoopable, useSavePrompt,
 } from './useAudioAdmin.js';
-import { shouldPoll } from './audioBatch.js';
+import { shouldPoll, slotJobText } from './audioBatch.js';
 import { draftText, isDirty } from './artDescriptionDraft.js';
 import {
   provenanceText, generatePromptFields, historyRows, restoreVars,
@@ -133,10 +133,12 @@ function generateTitle({ canGenerate, live, sfxDirty }) {
   return undefined;
 }
 
-function generateLabel(pending, job) {
+// A queued job with no drain running is not about to run (SOMET-592): the
+// label says so instead of the "Queued…" that suggests it is next.
+function generateLabel(pending, job, run) {
   if (pending) return 'Queuing…';
   if (job && job.status === 'running') return 'Generating…';
-  if (job && job.status === 'queued') return 'Queued…';
+  if (job && job.status === 'queued') return run && run.running ? 'Queued…' : 'Queued (drain stopped)';
   return 'Generate';
 }
 
@@ -596,7 +598,7 @@ function AudioSlotCard({
               title={generateTitle({ canGenerate, live, sfxDirty: isSfx && dirty })}
               onClick={onGenerate}
             >
-              {generateLabel(blockedFor(generate) && !live, job)}
+              {generateLabel(blockedFor(generate) && !live, job, run)}
             </Button>
           </>
         )}
@@ -628,7 +630,7 @@ function AudioSlotCard({
       </Controls>
       {job && (
         <Hint>
-          Job: {job.status}{job.status === 'failed' && job.error ? ` — ${job.error}` : ''}
+          {slotJobText(job, run)}
         </Hint>
       )}
       {enqueueNote && (enqueueNote.ok ? <Hint>{enqueueNote.message}</Hint> : <Err>{enqueueNote.message}</Err>)}

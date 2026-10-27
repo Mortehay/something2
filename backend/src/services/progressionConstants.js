@@ -138,8 +138,8 @@ const SELL_FRACTION_MAX = 0.9;
 // THIS IS NOT A game_settings KEY, deliberately (design doc section 3.5).
 // Changing it re-levels every character in the database on the next read; an
 // admin toggling a number in a form must not be able to do that.
-const XP_BASE = 18;
-const XP_EXPONENT = 1.33;
+const XP_BASE = 35;
+const XP_EXPONENT = 1.45;
 
 // Kill XP scales with the creature's A1 level RELATIVE to the player's, so
 // farming trivial creatures decays to literally zero (diff <= -5).

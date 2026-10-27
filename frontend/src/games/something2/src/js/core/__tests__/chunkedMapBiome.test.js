@@ -4,7 +4,7 @@ import { MAP_TILE_SIZE } from '../constants.js';
 
 const size = 64;
 const grid = Array.from({ length: size }, () => Array(size).fill('grass'));
-const biomes = Array.from({ length: 8 }, (_, r) => Array.from({ length: 8 }, (_, c) => (c < 4 ? 'forest' : 'desert')));
+const biomes = Array.from({ length: 8 }, (_, _r) => Array.from({ length: 8 }, (_, c) => (c < 4 ? 'forest' : 'desert')));
 
 describe('ChunkedMap.biomeAt', () => {
   it('reads the chunk biome grid at the 8-tile cell under a world position', () => {
@@ -30,7 +30,7 @@ describe('ChunkedMap.biomeAt', () => {
     const smallSize = 32;
     const smallGrid = Array.from({ length: smallSize }, () => Array(smallSize).fill('grass'));
     // 4x4 grid over a 32-tile chunk -> step = 8 tiles per cell.
-    const smallBiomes = Array.from({ length: 4 }, (_, r) => Array.from({ length: 4 }, (_, c) => (c < 2 ? 'forest' : 'desert')));
+    const smallBiomes = Array.from({ length: 4 }, (_, _r) => Array.from({ length: 4 }, (_, c) => (c < 2 ? 'forest' : 'desert')));
     const m = new ChunkedMap(smallSize);
     m.setChunk(0, 0, smallGrid, [], smallBiomes);
     expect(m.biomeAt(2 * MAP_TILE_SIZE, 0)).toBe('forest');   // tile col 2 -> cell 0

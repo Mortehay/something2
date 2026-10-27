@@ -168,5 +168,5 @@ test('DEFAULT_ABILITY is frozen, and so is DEFAULT_BEHAVIOR\'s array', () => {
 });
 
 test('the element set matches the database CHECK constraint', () => {
-  assert.deepEqual(ELEMENTS, ['physical', 'fire', 'ice', 'lightning']);
+  assert.deepEqual(ELEMENTS, ['physical', 'arcane', 'fire', 'ice', 'lightning']);
 });

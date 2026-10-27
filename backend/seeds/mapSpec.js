@@ -19,6 +19,7 @@
 // this file only for seeding) even though edgeOfDoorwayTile is the deeper
 // source of truth for the convention.
 const EDGE_DELTA = { N: [0, -1], S: [0, 1], E: [1, 0], W: [-1, 0] };
+const OPPOSITE_EDGE = { N: 'S', S: 'N', E: 'W', W: 'E' };
 
 // Single source of truth for village size limits, also imported by
 // validateVillageBody in src/index.js. Imported (not duplicated) here so a
@@ -123,7 +124,7 @@ function tileSlot(worldKey, x, y) {
 // far more useful error message a few lines below ("use density instead"), and
 // leaving it out here would bury that message under a generic one.
 const WORLD_KEYS = new Set([
-  'key', 'name', 'grid', 'seed', 'width', 'height', 'chunk_size',
+  'key', 'name', 'grid', 'graph', 'seed', 'width', 'height', 'chunk_size',
   'biomes', 'biome_cell', 'allowed_creature_types', 'is_entry', 'entry_spawn',
   'level_band', 'density', 'allows_fast_travel',
   'village', 'villages', 'chest',
@@ -131,14 +132,64 @@ const WORLD_KEYS = new Set([
   'roads',
   'pens',
   'waypoints',
+  'boss',
   'creature_count',
 ]);
 
 function validateMapSpec(spec, {
   biomeNames = null, creatureTypeNames = null, biomeCreatureTypes = null,
-  pointArtTypes = null,
+  pointArtTypes = null, bossTiers = null, externallyReachable = null,
 } = {}) {
   const errors = [];
+
+  // SOMET-609 (S9, spec §3.5). A dungeon boss placed at a fixed post. Walkability
+  // is NOT checked here (this module is pure and has no terrain): requiredTilesFor
+  // in seed-map.js lists the post, so assertNavigable proves it at seed time and
+  // tests/p5_navigability.test.js proves it offline. The End/Elite rule keys on
+  // the p5 generator's room naming ("<Dungeon>: End"); any other world may hold
+  // either dungeon tier.
+  const BOSS_KEYS = ['entity', 'x', 'y', 'respawn_s'];
+  const DUNGEON_BOSS_TIERS = ['dungeon_end', 'dungeon_elite'];
+  function checkBoss(w) {
+    const label = `world "${w.key}" boss`;
+    const b = w.boss;
+    if (!b || typeof b !== 'object' || Array.isArray(b)) {
+      errors.push(`${label} must be an object (got ${JSON.stringify(b)})`);
+      return;
+    }
+    for (const k of Object.keys(b)) {
+      if (!BOSS_KEYS.includes(k)) errors.push(`${label} has unknown key "${k}"`);
+    }
+    if (typeof b.entity !== 'string' || b.entity === '') {
+      errors.push(`${label} entity must be an entity type name (got ${JSON.stringify(b.entity)})`);
+    } else if (bossTiers) {
+      const tier = bossTiers.get(b.entity) ?? null;
+      const want = /: End$/.test(w.name ?? '') ? 'dungeon_end'
+        : /: Elite$/.test(w.name ?? '') ? 'dungeon_elite' : null;
+      if (!DUNGEON_BOSS_TIERS.includes(tier)) {
+        errors.push(`${label} entity "${b.entity}" is not a dungeon boss `
+          + `(boss_tier ${tier ?? 'NULL'}; needs dungeon_end or dungeon_elite)`);
+      } else if (want && tier !== want) {
+        errors.push(`${label} entity "${b.entity}" is ${tier}, but "${w.name}" needs ${want}`);
+      }
+    }
+    for (const f of ['x', 'y']) {
+      if (!Number.isInteger(b[f])) {
+        errors.push(`${label} ${f} must be an integer in world pixels (got ${JSON.stringify(b[f])})`);
+      }
+    }
+    const maxX = (w.width ?? 0) * SPEC_TILE_SIZE;
+    const maxY = (w.height ?? 0) * SPEC_TILE_SIZE;
+    if (Number.isInteger(b.x) && (b.x < 0 || b.x >= maxX)) {
+      errors.push(`${label} x ${b.x} is outside the world (0..${maxX - 1} px)`);
+    }
+    if (Number.isInteger(b.y) && (b.y < 0 || b.y >= maxY)) {
+      errors.push(`${label} y ${b.y} is outside the world (0..${maxY - 1} px)`);
+    }
+    if (!Number.isInteger(b.respawn_s) || b.respawn_s <= 0) {
+      errors.push(`${label} respawn_s must be a positive integer (got ${JSON.stringify(b.respawn_s)})`);
+    }
+  }
 
   // Art bindings (SOMET-580). `pointArtTypes` is Map<entity type name, point_kind>
   // from the live catalog (seed-map) or the checked-in POINT_TYPES (fixtures);
@@ -170,7 +221,16 @@ function validateMapSpec(spec, {
   };
   if (!spec || typeof spec !== 'object') return ['spec is not an object'];
   const worlds = Array.isArray(spec.worlds) ? spec.worlds : [];
-  const links = Array.isArray(spec.links) ? spec.links : [];
+  // SOMET-641. A `to_name` link targets a world owned by ANOTHER spec, by its
+  // database name -- this validator has no database, so only the shape is
+  // checked here and applyMapSpec resolves the name. Normalised to a `to` of
+  // `@<name>`, which can never be a spec key lookup hit, so every check below
+  // that keys tiles or slots by `to` stays distinct per foreign target, and
+  // every check that needs the target's own data (grid, villages) sees no
+  // world and skips. A link carrying BOTH keeps its raw `to`; the link loop
+  // reports the conflict.
+  const links = (Array.isArray(spec.links) ? spec.links : []).map((l) => (
+    l && l.to_name !== undefined && l.to === undefined ? { ...l, to: `@${l.to_name}` } : l));
   if (worlds.length === 0) return ['spec has no worlds'];
 
   const byKey = new Map();
@@ -289,6 +349,14 @@ function validateMapSpec(spec, {
       errors.push(`world "${w.key}" has unknown key(s) ${unknown.join(', ')} -- `
         + 'nothing reads them, so they would be silently ignored. Remove them, or '
         + 'add them to WORLD_KEYS in seeds/mapSpec.js once a reader exists.');
+    }
+
+    // Optional (SOMET-641). An explicit World Map position that wins over the
+    // grid-derived one at apply time, so a node an admin dragged survives a
+    // re-seed. graph_x/graph_y are double precision, so any finite number.
+    if (w.graph !== undefined && !(Array.isArray(w.graph) && w.graph.length === 2
+        && w.graph.every((n) => typeof n === 'number' && Number.isFinite(n)))) {
+      errors.push(`world "${w.key}" graph must be [x, y] finite numbers (got ${JSON.stringify(w.graph)})`);
     }
 
     const gridRequired = !portalConnectedKeys.has(w.key);
@@ -673,6 +741,8 @@ function validateMapSpec(spec, {
       }
     }
 
+    if (w.boss !== undefined) checkBoss(w);
+
     if (biomeNames) {
       for (const b of w.biomes ?? []) {
         if (!biomeNames.has(b)) errors.push(`world "${w.key}" references unknown biome "${b}"`);
@@ -812,11 +882,43 @@ function validateMapSpec(spec, {
   // must not be reported as a conflict.
   const usedPortalTiles = new Map();
   const adjacency = new Map(worlds.map((w) => [w.key, []]));
+  // A cross-spec (to_name) target is not a world of this spec, so it adds no
+  // adjacency: reachability is judged within the spec.
+  const connect = (l) => {
+    if (!adjacency.has(l.to)) return;
+    adjacency.get(l.from).push(l.to);
+    adjacency.get(l.to).push(l.from);
+  };
+  // Compass slots each link's MIRROR row will occupy (`to:opposite` -> from).
+  // A grid-consistent spec can never collide here (a cell has one neighbour
+  // per side), but a kind:'edge' or to_name link can: two of them landing on
+  // one mirror slot and setLink's ON CONFLICT silently keeps only the second,
+  // leaving the first doorway one-way.
+  const forwardTargets = new Map();
+  const mirrorTargets = new Map();
   for (const l of links) {
     const from = byKey.get(l.from);
-    const to = byKey.get(l.to);
     if (!from) { errors.push(`link references unknown world "${l.from}"`); continue; }
-    if (!to) { errors.push(`link references unknown world "${l.to}"`); continue; }
+    const crossSpec = l.to_name !== undefined;
+    if (crossSpec) {
+      if (typeof l.to_name !== 'string' || l.to_name === '') {
+        errors.push(`link from "${l.from}" to_name must be a non-empty world name `
+          + `(got ${JSON.stringify(l.to_name)})`);
+        continue;
+      }
+      if (l.to !== `@${l.to_name}`) {
+        errors.push(`link ${l.from}->${l.to} has both "to" and "to_name" -- use "to" for a world in `
+          + 'this spec, "to_name" for a world another spec owns');
+        continue;
+      }
+      if (seenNames.has(l.to_name)) {
+        errors.push(`link ${l.from}->${l.to} names "${l.to_name}", a world in this spec -- `
+          + 'use "to" with its key; to_name is only for a world another spec owns');
+        continue;
+      }
+    }
+    const to = crossSpec ? null : byKey.get(l.to);
+    if (!crossSpec && !to) { errors.push(`link references unknown world "${l.to}"`); continue; }
 
     if (l.kind === 'portal') {
       // Rejected rather than coerced, for exactly the reason allows_fast_travel
@@ -830,8 +932,12 @@ function validateMapSpec(spec, {
       }
       // Art bindings (SOMET-580): a portal's own art applies to both rows of
       // the pair (one entity type, two doorway rows), while waypoint_art is
-      // only meaningful once the staircase IS a waypoint.
+      // only meaningful once the staircase IS a waypoint. SOMET-586: to_art is
+      // the optional per-side override for the arrival/mirror row only -- same
+      // checkArt rule (entity-type-exists + point_kind-match) as art, since
+      // both name a portal-kind entity type.
       checkArt(l.art, 'portal', `portal link ${l.from}->${l.to} art`);
+      checkArt(l.to_art, 'portal', `portal link ${l.from}->${l.to} to_art`);
       if (l.waypoint_art !== undefined && l.is_waypoint !== true) {
         errors.push(`portal link ${l.from}->${l.to} waypoint_art requires is_waypoint: true`);
       } else {
@@ -841,8 +947,7 @@ function validateMapSpec(spec, {
       const badField = coordFields.find((f) => !Number.isInteger(l[f]));
       if (badField) {
         errors.push(`portal link ${l.from}->${l.to} ${badField} must be an integer`);
-        adjacency.get(l.from).push(l.to);
-        adjacency.get(l.to).push(l.from);
+        connect(l);
         continue;
       }
       // Departure side first, then the mirror this link implies, so the
@@ -905,8 +1010,7 @@ function validateMapSpec(spec, {
         });
       }
 
-      adjacency.get(l.from).push(l.to);
-      adjacency.get(l.to).push(l.from);
+      connect(l);
       continue;
     }
 
@@ -928,14 +1032,34 @@ function validateMapSpec(spec, {
     }
     usedEdges.add(slot);
 
+    const mirror = `${l.to}:${OPPOSITE_EDGE[l.edge]}`;
+    const mirrorPrior = forwardTargets.get(mirror) ?? mirrorTargets.get(mirror);
+    const forwardPrior = mirrorTargets.get(slot);
+    if ((mirrorPrior !== undefined && mirrorPrior !== l.from)
+        || (forwardPrior !== undefined && forwardPrior !== l.to)) {
+      errors.push(`link ${l.from}->${l.to} on edge ${l.edge}: its mirror slot ${mirror} (or its own `
+        + `slot) is already the mirror of another link -- "${l.to}" can hold one ${OPPOSITE_EDGE[l.edge]} `
+        + 'doorway, and the second write would leave the first one-way');
+    }
+    forwardTargets.set(slot, l.to);
+    mirrorTargets.set(mirror, l.from);
+
+    // SOMET-641. kind:'edge' is a compass doorway an admin drew by hand that
+    // the grid cannot express, and a to_name target has no grid in this spec.
+    // Both skip ONLY the grid-delta check below; they are stored as ordinary
+    // compass rows with their mirror, and count toward the slot checks above.
+    if (l.kind === 'edge' || crossSpec) {
+      connect(l);
+      continue;
+    }
+
     // A world with a malformed grid already produced a "grid must be two
     // integers" error in the world loop above; here we must not dereference
     // grid[0]/grid[1] on it (that throws instead of returning errors). Skip
     // the geometry check but still record adjacency, so an otherwise-valid
     // link doesn't also spuriously fail reachability.
     if (!hasValidGrid(from) || !hasValidGrid(to)) {
-      adjacency.get(l.from).push(l.to);
-      adjacency.get(l.to).push(l.from);
+      connect(l);
       continue;
     }
 
@@ -949,13 +1073,18 @@ function validateMapSpec(spec, {
         : `link ${l.from}->${l.to} declares edge ${l.edge} but the cells are not adjacent`);
     }
 
-    adjacency.get(l.from).push(l.to);
-    adjacency.get(l.to).push(l.from);   // links are bidirectional (setLink mirrors)
+    connect(l);   // links are bidirectional (setLink mirrors)
   }
 
+  // `externallyReachable` (SOMET-641) is a Set of this spec's world keys that
+  // another spec's links reach. Each one counts as reachable, and so does every
+  // world reachable from it. Omitted, reachability is judged from the entry
+  // alone, exactly as before.
   if (entries.length === 1) {
-    const seen = new Set([entries[0].key]);
-    const queue = [entries[0].key];
+    const starts = [entries[0].key,
+      ...[...(externallyReachable ?? [])].filter((k) => byKey.has(k))];
+    const seen = new Set(starts);
+    const queue = [...seen];
     while (queue.length) {
       for (const next of adjacency.get(queue.shift()) ?? []) {
         if (!seen.has(next)) { seen.add(next); queue.push(next); }

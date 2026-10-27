@@ -177,7 +177,6 @@ export function resolveProjectileType(skill) {
 export function resolveSlashStyle(skill) {
   if (!skill) return 'greatsword_cleave';
   const id = (skill.id || '').toLowerCase();
-  const nameEn = (skill.nameEn || '').toLowerCase();
 
   // Beast Claws (Druid Bear / Wolf / Hawk)
   if (id.includes('claw') || id.includes('maul') || id.includes('shred') || id.includes('bite') || id.includes('rend') || id.includes('talon') || id.includes('swipe')) {
@@ -304,6 +303,21 @@ export function createSkillVisual(skill, fromX, fromY, toX, toY, aimAngle, nowMs
       color: '#67e8f9',
       startedAt: nowMs,
       durationMs: 450,
+    };
+  }
+
+  // 4b. Mana Surge (Expanding arcane tidal shockwave + radiant rising mana motes)
+  if (id === 'mag_mana_surge' || id.includes('mana_surge') || id.includes('evocation') || id.includes('arcane_surge')) {
+    return {
+      kind: 'mana_surge',
+      id: `${id}_${Math.random()}`,
+      x: fromX,
+      y: fromY,
+      radius: 110,
+      element: 'arcane',
+      color: '#38bdf8',
+      startedAt: nowMs,
+      durationMs: 750,
     };
   }
 

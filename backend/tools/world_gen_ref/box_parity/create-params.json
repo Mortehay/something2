@@ -1,0 +1,9 @@
+{
+  "name": "parity-somet644",
+  "worlds": 3,
+  "target_per_screen": 4,
+  "size": 64,
+  "chunk_size": 32,
+  "biome_cell": 32,
+  "author": "rules"
+}

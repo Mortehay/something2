@@ -26,14 +26,16 @@ function stripImageStyling(prompt) {
 const ART_KIND = { creature: 'entity', world_point: 'entity', item: 'item', skill: 'skill' };
 
 async function loadPromptCatalog(db) {
-  const [worlds, biomes, entities, items, art] = await Promise.all([
+  const [worlds, biomes, entities, items, art, auras, creatureSkills] = await Promise.all([
     db.query(`SELECT w.name, w.biomes, w.level_min, w.level_max, w.allows_fast_travel, w.is_entry, w.width,
                      EXISTS (SELECT 1 FROM villages v WHERE v.world_id = w.id) AS has_village
                 FROM worlds w`),
     db.query('SELECT name, art_style FROM biomes'),
-    db.query('SELECT name, prompt FROM entity_types WHERE is_creature OR point_kind IS NOT NULL'),
+    db.query('SELECT name, prompt, boss_tier, element FROM entity_types WHERE is_creature OR point_kind IS NOT NULL'),
     db.query("SELECT name, category, req_level FROM item_types WHERE category = 'weapon'"),
     db.query("SELECT subject_kind, subject_key, text FROM art_prompt_descriptions WHERE active AND subject_kind IN ('entity', 'item', 'skill')"),
+    db.query('SELECT name, target_side, dot_element FROM aura_effects'),
+    db.query('SELECT name, kind, element FROM creature_skills'),
   ]);
   return {
     worlds: new Map(worlds.rows.map((r) => [r.name, r])),
@@ -42,6 +44,8 @@ async function loadPromptCatalog(db) {
     items: new Map(items.rows.map((r) => [r.name, r])),
     skills: new Map(SKILLS.map((s) => [s.id, s])),
     artDescriptions: new Map(art.rows.filter((r) => r.text).map((r) => [`${r.subject_kind}/${r.subject_key}`, r.text])),
+    auras: new Map(auras.rows.map((r) => [r.name, r])),
+    creatureSkills: new Map(creatureSkills.rows.map((r) => [r.name, r])),
   };
 }
 
@@ -81,8 +85,19 @@ function worldMusicStyle(w, name) {
   return MUSIC_STYLE_FOR_KIND[worldKind(w, name)] || null;
 }
 
+// SOMET-605: the boss slots are new words to the writer model; say what each
+// one is for. Only these four slots get a meaning, so every existing slot's
+// tail -- and therefore every stored prompt's source_input -- is unchanged.
+const BOSS_SLOT_MEANING = {
+  spawn: 'the boss appears',
+  presence: 'a loop that plays while the boss is on screen',
+  phase: 'the boss enters a new fight phase',
+  enrage: 'the boss becomes enraged',
+};
+
 function tail(slot, cue) {
-  return `; slot: ${slot}${cue ? `; sound cue: ${cue}` : ''}`;
+  const meaning = Object.hasOwn(BOSS_SLOT_MEANING, slot) ? ` (${BOSS_SLOT_MEANING[slot]})` : '';
+  return `; slot: ${slot}${meaning}${cue ? `; sound cue: ${cue}` : ''}`;
 }
 
 function buildContext(catalog, kind, key, slot, { cue = null } = {}) {
@@ -104,7 +119,11 @@ function buildContext(catalog, kind, key, slot, { cue = null } = {}) {
       const e = catalog.entities.get(key);
       if (!e) return null;
       const label = kind === 'creature' ? 'creature' : 'world point';
-      return `${label} "${key}"${looks(catalog, kind, key, stripImageStyling(e.prompt))}${tail(slot, cue)}`;
+      // SOMET-605: boss rows only, so an ordinary creature's string -- and its
+      // stored prompt's staleness -- does not move.
+      const boss = kind === 'creature' && e.boss_tier
+        ? `; boss tier: ${e.boss_tier}${e.element ? `; element: ${e.element}` : ''}` : '';
+      return `${label} "${key}"${boss}${looks(catalog, kind, key, stripImageStyling(e.prompt))}${tail(slot, cue)}`;
     }
     case 'item': {
       const it = catalog.items.get(key);
@@ -122,6 +141,26 @@ function buildContext(catalog, kind, key, slot, { cue = null } = {}) {
       if (!phrases) return null;
       const phrase = Object.hasOwn(phrases, slot) ? phrases[slot] : phrases.use;
       return `${key} attack: ${phrase}${tail(slot, cue)}`;
+    }
+    // SOMET-607 (S5): "prompt context (element, side)" per the ticket --
+    // dot_element is the closest catalog field to "element" an aura carries
+    // (not every aura is elemental; physical is the column's own default).
+    case 'aura': {
+      const a = catalog.auras.get(key);
+      if (!a) return null;
+      return `magical aura "${key}"; side: ${a.target_side}; element: ${a.dot_element}${tail(slot, cue)}`;
+    }
+    // SOMET-610 (S7). `kind` (slam/nova/summon/projectile) is the closest
+    // catalog field to "what does this sound like" a creature skill
+    // carries; element is null for a physical skill (Bone Crush), same
+    // "omit rather than force a value" rule aura's own element already
+    // follows via dot_element's non-null default -- the difference here is
+    // creature_skills.element really can be NULL (inherit the caster's).
+    case 'creature_skill': {
+      const s = catalog.creatureSkills.get(key);
+      if (!s) return null;
+      const el = s.element ? `; element: ${s.element}` : '';
+      return `creature skill "${key}"; kind: ${s.kind}${el}${tail(slot, cue)}`;
     }
     default: return null;
   }
