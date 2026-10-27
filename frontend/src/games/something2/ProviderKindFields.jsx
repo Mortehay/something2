@@ -5,7 +5,7 @@
 import { useState } from 'react';
 import styled from 'styled-components';
 import {
-  PLACEHOLDERS, parseTemplate, templateWarning, modelOptions, spriteModelOptions,
+  PLACEHOLDERS, parseTemplate, templateWarning, modelOptions, spriteModelOptions, SPRITE_SHEET_METHODS,
   editCapabilityOptions, editSettings, withEditSetting, ADAPTER_OPTIONS, AUDIO_GROUPS, KINDS,
 } from './providerForm.js';
 
@@ -284,12 +284,20 @@ export function KindFields({ form, set, models = [], discoveryCache = null }) {
     case 'sprite':
       // The CONCEPT model; the sheet builder's model is fixed by the box.
       return (
-        <Row>
-          <Label>Concept model</Label>
-          <Select aria-label="Concept model" value={form.model} onChange={e => set('model', e.target.value)}>
-            {spriteModelOptions(models, form.model).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </Select>
-        </Row>
+        <>
+          <Row>
+            <Label>Concept model</Label>
+            <Select aria-label="Concept model" value={form.model} onChange={e => set('model', e.target.value)}>
+              {spriteModelOptions(models, form.model).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </Select>
+          </Row>
+          <Row>
+            <Label>Directions</Label>
+            <Select aria-label="Directions" value={form.sheet_method} onChange={e => set('sheet_method', e.target.value)}>
+              {SPRITE_SHEET_METHODS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </Select>
+          </Row>
+        </>
       );
     default:
       return <ImageFields form={form} set={set} models={models} />;

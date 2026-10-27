@@ -326,3 +326,25 @@ describe("rowFor (western rows are mirrored eastern rows)", () => {
     expect(frameKeyFor(full, "w", "idle", 0, 0, DEFAULT_FPS)).toBe("idle/e/0");
   });
 });
+
+describe("unmirrored rows (3D turnaround)", () => {
+  const turned = { ...sheet(["idle", "walk"], ALL, 2), unmirrored: { idle: ALL } };
+  const out = { flipX: null };
+
+  it("draws a listed western idle row as itself, unflipped", () => {
+    expect(rowFor(turned, "idle", "w", out)).toBe("w");
+    expect(out.flipX).toBe(false);
+    expect(frameKeyFor(turned, "nw", "idle", 0, 0, DEFAULT_FPS, out)).toBe("idle/nw/0");
+    expect(out.flipX).toBe(false);
+  });
+
+  it("still mirrors actions the turnaround did not draw", () => {
+    expect(frameKeyFor(turned, "w", "walk", 0, 0, DEFAULT_FPS, out)).toBe("walk/e/0");
+    expect(out.flipX).toBe(true);
+  });
+
+  it("the idle fallback for a missing action uses the unmirrored row", () => {
+    expect(frameKeyFor(turned, "sw", "attack", 0, 0, DEFAULT_FPS, out)).toBe("idle/sw/0");
+    expect(out.flipX).toBe(false);
+  });
+});

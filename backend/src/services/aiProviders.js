@@ -25,6 +25,10 @@ const ADAPTERS = Object.freeze(['box', 'a1111', 'openai_compatible', 'ollama', '
 // Mirror of audioJobQueue.DRAIN_ORDER. Not required from there: audioJobQueue
 // -> audioGeneration -> aiProviders would be a require cycle.
 const AUDIO_GROUPS = Object.freeze(['music', 'ambience', 'sfx_realistic', 'sfx_retro']);
+// A sprite provider's only request_template key: how the eight directions are
+// drawn. '2d' (the default, also when absent) = the box sheet builder alone;
+// 'turnaround3d' = then the box's 3D turnaround redraws the idle rows.
+const SHEET_METHODS = Object.freeze(['2d', 'turnaround3d']);
 
 // Columns an admin may write through create/PATCH. is_active is deliberately
 // absent -- activation is POST /activate, because it has a cross-row effect
@@ -154,6 +158,10 @@ function providerFieldError(body, { partial = false } = {}) {
     // service, which is far away from the person who typed it.
     if (!isPlainObject(body.request_template)) {
       return 'request_template must be a JSON object';
+    }
+    const method = body.request_template.sheet_method;
+    if (modality === 'sprite' && method !== undefined && !SHEET_METHODS.includes(method)) {
+      return `sheet_method must be one of ${SHEET_METHODS.join(', ')}`;
     }
   }
   for (const k of ['auth_header_name', 'model', 'models_path', 'models_pointer',
@@ -350,6 +358,7 @@ async function saveDiscoveryCache(db, id, cache) {
 }
 
 module.exports = {
+  SHEET_METHODS,
   serializeProvider,
   serializeProviders,
   providerFieldError,

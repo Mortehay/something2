@@ -1096,3 +1096,77 @@ test('upsertKept throwing does not fail the row; the box job is already recorded
   assert.equal(queue.log.attached.length, 1);
   assert.equal(queue.log.completed.length, 1);
 });
+
+// --- sheet_method 'turnaround3d' -------------------------------------------
+const { turnaroundFor } = require('./helpers/turnaroundFixture.js');
+
+const PROVIDER_3D = { ...PROVIDER, request_template: { sheet_method: 'turnaround3d' } };
+
+// The 2D job is box-1 and done; the turnaround is box-t and walks `tStatuses`.
+function box3d({ tStatuses = [{ status: 'done' }], create = null, turn = turnaroundFor(DIRS) } = {}) {
+  let ti = 0;
+  const calls = { turnaround: [], cancelled: [] };
+  const box = fakeBox({
+    createTurnaround3d: create || (async (_p, source, opts) => { calls.turnaround.push({ source, ...opts }); return { ok: true, boxJobId: 'box-t' }; }),
+    getSheetJob: async (_p, id) => {
+      if (id !== 'box-t') return { ok: true, job: { status: 'done', progress: {} } };
+      const s = tStatuses[Math.min(ti, tStatuses.length - 1)];
+      ti += 1;
+      return { ok: true, job: { progress: {}, error: null, ...s } };
+    },
+    fetchSheet: async (_p, id) => ({ ok: true, png: id === 'box-t' ? turn.png : WOLF_SHEET }),
+    fetchAtlas: async (_p, id) => ({ ok: true, atlas: id === 'box-t' ? turn.atlas : WOLF_ATLAS }),
+    cancelSheetJob: async (_p, id) => { calls.cancelled.push(id); return { ok: true }; },
+  });
+  box.calls3d = calls;
+  return box;
+}
+
+test('3D: the turnaround of the finished 2D job replaces the idle rows', async () => {
+  const box = box3d();
+  const { d, queue, store } = dispatcherFor({ rows: [wolfRow()], box, provider: PROVIDER_3D });
+  await d.start();
+
+  assert.deepEqual(queue.log.failed, []);
+  assert.deepEqual(box.calls3d.turnaround, [{ source: 'box-1', cell: '48x64' }]);
+  const prefix = 'sprites/Grey_Wolf/row-1/';
+  assert.deepEqual(store.puts.map((p) => p.key), [
+    `${prefix}concept.png`, `${prefix}turnaround.png`, `${prefix}sheet.png`, `${prefix}sheet.json`,
+  ]);
+  const manifest = JSON.parse(store.puts[3].buf.toString('utf8'));
+  assert.deepEqual(manifest.unmirrored, { idle: DIRS });
+  assert.deepEqual(manifest.turnaround3d, { box_job_id: 'box-t' });
+  assert.notDeepEqual(store.puts[2].buf, WOLF_SHEET, 'the stored sheet carries the turnaround cells');
+  assert.deepEqual(queue.log.notes, []);
+});
+
+test('3D: a refused turnaround keeps the 2D sheet and notes why', async () => {
+  const box = box3d({ create: async () => ({ ok: false, error: 'GPU box answered 404 for POST /api/turnaround3d' }) });
+  const { d, queue, store } = dispatcherFor({ rows: [wolfRow()], box, provider: PROVIDER_3D });
+  await d.start();
+
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(queue.log.completed.length, 1);
+  assert.deepEqual(store.puts.find((p) => p.key.endsWith('sheet.png')).buf, WOLF_SHEET);
+  assert.match(queue.log.notes[0].note, /^3D turnaround skipped, kept the 2D sheet: GPU box answered 404/);
+  const manifest = JSON.parse(store.puts.find((p) => p.key.endsWith('sheet.json')).buf.toString('utf8'));
+  assert.equal(manifest.unmirrored, undefined);
+});
+
+test('3D: a turnaround the box never starts is cancelled after the short queue cap; the 2D sheet is kept', async () => {
+  const box = box3d({ tStatuses: [{ status: 'queued' }] });
+  const { d, queue, store } = dispatcherFor({ rows: [wolfRow()], box, provider: PROVIDER_3D, turnaroundQueueCapMs: 0 });
+  await d.start();
+
+  assert.deepEqual(queue.log.failed, []);
+  assert.deepEqual(box.calls3d.cancelled, ['box-t']);
+  assert.match(queue.log.notes[0].note, /3D worker did not start it/);
+  assert.deepEqual(store.puts.find((p) => p.key.endsWith('sheet.png')).buf, WOLF_SHEET);
+});
+
+test('2D (no sheet_method) never asks for a turnaround', async () => {
+  const box = box3d();
+  const { d } = dispatcherFor({ rows: [wolfRow()], box });
+  await d.start();
+  assert.deepEqual(box.calls3d.turnaround, []);
+});

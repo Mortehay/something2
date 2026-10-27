@@ -449,3 +449,22 @@ test('createSheetJob failure exposes the HTTP status', async () => {
   assert.equal(r.ok, false);
   assert.equal(r.status, 422);
 });
+
+test('createTurnaround3d posts the source job and cell, and returns the new job id', async () => {
+  const { fetchImpl, calls } = fakeBox({ 'POST /api/turnaround3d': () => json({ job_id: 'turn-1', status: 'queued' }, 202) });
+  const r = await box.createTurnaround3d(provider, 'sheet-1', { cell: '48x64', fetchImpl });
+  assert.deepEqual(r, { ok: true, boxJobId: 'turn-1' });
+  assert.equal(calls[0].headers['Content-Type'], 'application/json');
+  assert.deepEqual(JSON.parse(calls[0].body), { source_job: 'sheet-1', cell: '48x64' });
+});
+
+test('createTurnaround3d refuses an answer without a job id and surfaces box errors', async () => {
+  let { fetchImpl } = fakeBox({ 'POST /api/turnaround3d': () => json({}, 202) });
+  let r = await box.createTurnaround3d(provider, 'sheet-1', { fetchImpl });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /no job_id/);
+  ({ fetchImpl } = fakeBox({ 'POST /api/turnaround3d': () => json({ detail: 'source job is not done' }, 409) }));
+  r = await box.createTurnaround3d(provider, 'sheet-1', { fetchImpl });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /409.*source job is not done/);
+});

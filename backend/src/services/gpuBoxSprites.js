@@ -338,6 +338,22 @@ async function cancelSheetJob(provider, boxJobId, { fetchImpl = fetch } = {}) {
   return { ok: true };
 }
 
+// 3D turnaround (POST /api/turnaround3d {source_job, cell}): a STATIC
+// 8-direction turnaround rendered from a finished sheet job's views on the
+// box's CPU mesh worker. One cell per direction, no action frames. It is a
+// box job like any other: polled and cancelled at /api/jobs/{id}, sheet and
+// atlas at /api/jobs/{id}/sheet|atlas.
+async function createTurnaround3d(provider, sourceJobId, { cell = '48x64', fetchImpl = fetch } = {}) {
+  const r = await callJson(provider, 'POST', '/api/turnaround3d', {
+    body: JSON.stringify({ source_job: sourceJobId, cell }),
+    headers: { 'Content-Type': 'application/json' },
+    fetchImpl,
+  });
+  if (!r.ok) return r;
+  if (!r.json || !r.json.job_id) return { ok: false, error: 'GPU box accepted the 3D turnaround but returned no job_id', providerFault: true };
+  return { ok: true, boxJobId: r.json.job_id };
+}
+
 const fetchSheet = (provider, boxJobId, { fetchImpl = fetch } = {}) =>
   callPng(provider, `/api/jobs/${encodeURIComponent(boxJobId)}/sheet`, { fetchImpl });
 
@@ -348,5 +364,5 @@ async function fetchAtlas(provider, boxJobId, { fetchImpl = fetch } = {}) {
 }
 
 module.exports = {
-  STATUS_TERMINAL, actionCatalog, checkAuth, listConceptModels, generateConcept, txt2imgProp, PROP_NEGATIVE_PROMPT, createSheetJob, conceptAvailable, redrawFrames, getSheetJob, cancelSheetJob, fetchSheet, fetchAtlas,
+  STATUS_TERMINAL, actionCatalog, checkAuth, listConceptModels, generateConcept, txt2imgProp, PROP_NEGATIVE_PROMPT, createSheetJob, createTurnaround3d, conceptAvailable, redrawFrames, getSheetJob, cancelSheetJob, fetchSheet, fetchAtlas,
 };

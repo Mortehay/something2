@@ -4,12 +4,39 @@
     "exported_by": "unnamed-pc",
     "group": "ai_provider_templates",
     "row_counts": {
-      "ai_provider_templates": 10
+      "ai_provider_templates": 13
     },
     "schema_version": "1714440823000_ai_provider_kinds_templates"
   },
   "tables": {
     "ai_provider_templates": [
+      {
+        "adapter": "box",
+        "builtin": true,
+        "defaults": {
+          "base_url": "http://192.168.0.218:8001/sdapi/v1/txt2img",
+          "model": "gguf:qwen-image-2512-Q2_K+lightning8",
+          "models_path": "/sdapi/v1/sd-models",
+          "models_pointer": "$[*].model_name",
+          "request_template": {
+            "cfg_scale": 7,
+            "height": 512,
+            "negative_prompt": "sky, clouds, horizon, landscape, perspective, vignette, text, watermark, border",
+            "override_settings": {
+              "sd_model_checkpoint": "{{model}}"
+            },
+            "prompt": "{{prompt}}",
+            "seed": "{{seed}}",
+            "steps": 20,
+            "width": 512
+          },
+          "response_image_pointer": "images[0]"
+        },
+        "description": "Default. Qwen-Image-2512 Q2_K + Lightning on the GPU box: fits the 12 GB card, ~30 s per image.",
+        "modality": "image",
+        "name": "GPU box — Qwen-Image (default): fast, fits card",
+        "sync_uuid": "04ed2c3f-ca30-a132-4319-e29a5ee4e1a7"
+      },
       {
         "adapter": "box",
         "builtin": true,
@@ -32,10 +59,10 @@
           },
           "response_image_pointer": "images[0]"
         },
-        "description": "Qwen-Image on the GPU box (A1111-style txt2img).",
+        "description": "Qwen-Image-2512 Q3_K_M on the GPU box: does not fit the card and spills to host RAM, best quality, ~4 min per image.",
         "modality": "image",
-        "name": "GPU box — Qwen-Image",
-        "sync_uuid": "04ed2c3f-ca30-a132-4319-e29a5ee4e1a7"
+        "name": "GPU box — Qwen-Image best quality (larger than VRAM)",
+        "sync_uuid": "b9754954-37ed-1708-f809-66bdfcafdbf5"
       },
       {
         "adapter": "box",
@@ -113,12 +140,46 @@
         "adapter": "box",
         "builtin": true,
         "defaults": {
-          "base_url": "http://192.168.0.218:8001"
+          "base_url": "http://192.168.0.218:8001",
+          "model": "gguf:qwen-image-2512-Q2_K+lightning8",
+          "request_template": {
+            "sheet_method": "2d"
+          }
         },
-        "description": "Sprite sheet generation on the GPU box.",
+        "description": "Default. Concepts by Qwen-Image-2512 Q2_K + Lightning (fits the 12 GB card, ~30 s); the box sheet builder draws every direction.",
         "modality": "sprite",
-        "name": "GPU box — sprite sheets",
+        "name": "GPU box — sprites (default): Qwen fast, fits card",
         "sync_uuid": "755eb4b2-471e-6529-d1ea-599416b1db5a"
+      },
+      {
+        "adapter": "box",
+        "builtin": true,
+        "defaults": {
+          "base_url": "http://192.168.0.218:8001",
+          "model": "gguf:qwen-image-2512-Q2_K+lightning8",
+          "request_template": {
+            "sheet_method": "turnaround3d"
+          }
+        },
+        "description": "Qwen fast concept and 2D sheet, then the box renders a 3D turnaround (CPU mesh worker, ~3 min) that redraws the standing pose in all 8 directions correctly. Static: walk/attack stay 2D. If the turnaround fails the 2D sheet is kept.",
+        "modality": "sprite",
+        "name": "GPU box — sprites: 3D turnaround",
+        "sync_uuid": "3f549d9b-8a46-205a-0174-f52d5fa14f7f"
+      },
+      {
+        "adapter": "box",
+        "builtin": true,
+        "defaults": {
+          "base_url": "http://192.168.0.218:8001",
+          "model": "gguf:Qwen-Image-2512-Q3_K_M",
+          "request_template": {
+            "sheet_method": "2d"
+          }
+        },
+        "description": "Concepts by Qwen-Image-2512 Q3_K_M: does not fit the card and spills to host RAM, best quality, ~4 min per concept.",
+        "modality": "sprite",
+        "name": "GPU box — sprites: Qwen best quality (larger than VRAM)",
+        "sync_uuid": "14ad7faa-8d1a-96c7-bddf-581496305259"
       },
       {
         "adapter": "ollama",
