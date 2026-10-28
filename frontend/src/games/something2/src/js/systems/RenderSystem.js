@@ -32,7 +32,7 @@ import {
 } from "./inspect.js";
 import { rarityGlowColor, withAlpha } from "../core/rarityColors.js";
 import { artIcon, drawIconFit } from "./gameArt.js";
-import { swayShear, swayPhaseSeed } from "./sway.js";
+import { swayShear, swayPhaseSeed, SWAY_AMPLITUDE } from "./sway.js";
 import { boxDir, isBoxManifest, frameKeyFor, actionTimings, pickAction, DEFAULT_FPS } from "./sheetActions.js";
 import { shineBand, shineGeometry, SHINE_ALPHA } from "./shine.js";
 import {
@@ -272,14 +272,19 @@ export class RenderSystem {
 
   // Decorations from every loaded chunk in view -> drawables. worldX/worldY are
   // the tile TOP-LEFT (drawEntity centers via +width/2), matching creatures.
-  // Camera is accepted for interface symmetry with the other visible-chunk
-  // collectors, but every currently-loaded chunk is iterated (same as
-  // collectActors and the wall pass) rather than culled here — chunk
-  // streaming already keeps `chunkedMap` limited to the camera's
-  // neighborhood.
+  //
+  // SOMET-667: culled to the viewport when a camera is given. Chunk streaming
+  // keeps a neighbourhood loaded that is many screens wide, and without this
+  // every decoration in it (~1,480 on the entry world) went through the full
+  // drawEntity path each frame. The test is the rect drawEntity itself draws
+  // (centered on the tile, bottom on the tile center, displayWidth x
+  // displayHeight), widened sideways by the most wind sway can shear the top.
+  // No camera (tests, tools) means no culling.
   static collectDecorations(chunkedMap, camera, decoTypes) {
     const out = [];
     const N = chunkedMap.chunkSize;
+    const halfW = camera ? (camera.width || GAME_WIDTH) / 2 : 0;
+    const halfH = camera ? (camera.height || GAME_HEIGHT) / 2 : 0;
     for (const key of chunkedMap.loadedKeys()) {
       const [cx, cy] = key.split(",").map(Number);
       for (const d of chunkedMap.decorationsInChunk(cx, cy)) {
@@ -287,6 +292,15 @@ export class RenderSystem {
         if (!type) continue; // type/sprite not loaded yet -> skip (no hole)
         const x = (cx * N + d.col) * MAP_TILE_SIZE;
         const y = (cy * N + d.row) * MAP_TILE_SIZE;
+        if (camera) {
+          const w = type.displayWidth > 0 ? type.displayWidth : MAP_TILE_SIZE;
+          const h = type.displayHeight > 0 ? type.displayHeight : MAP_TILE_SIZE;
+          const s = worldToScreen(x + MAP_TILE_SIZE / 2, y + MAP_TILE_SIZE / 2);
+          const relX = s.x - camera.screenX;
+          const relY = s.y - camera.screenY;
+          const reachX = w / 2 + SWAY_AMPLITUDE * h;
+          if (relX + reachX < -halfW || relX - reachX > halfW || relY < -halfH || relY - h > halfH) continue;
+        }
         // width/height = MAP_TILE_SIZE anchors drawEntity's centering math
         // (worldToScreen(e.x + (e.width||40)/2, ...)) on the tile CENTER.
         // Backend entity types only ever carry displayWidth/displayHeight
