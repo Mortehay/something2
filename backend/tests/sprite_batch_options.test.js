@@ -76,7 +76,10 @@ test('prop options get ["s"]', () => {
   assert.deepEqual(options.directions, ['s']);
 });
 
-test('appearance options get 8 facings', () => {
-  const options = optionsForAppearance({ entity_type_id: 3, variant: 2, class_name: 'Mage', class_prompt: 'm' });
-  assert.deepEqual(options.directions, ['s', 'se', 'e', 'ne', 'n', 'nw', 'w', 'sw']);
+// SOMET-669: a literal, not SPRITE_DIRECTIONS, so a regression to eight rows
+// cannot pass by changing the constant both sides read.
+test('directional sheets are drawn front, right side and back only', () => {
+  assert.deepEqual(SPRITE_DIRECTIONS, ['s', 'e', 'n']);
+  const hero = optionsForAppearance({ entity_type_id: 3, variant: 1, class_name: 'Warrior', class_prompt: 'w' });
+  assert.deepEqual(hero.directions, ['s', 'e', 'n']);
 });

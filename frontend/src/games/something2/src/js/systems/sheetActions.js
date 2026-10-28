@@ -133,6 +133,8 @@ function frameIndex(n, startedAt, now, fps, loop) {
 
 // SOMET-659: western screen rows -> the eastern row drawn mirrored.
 const MIRROR_OF = { w: "e", nw: "ne", sw: "se" };
+// Diagonal -> whether its side-view stand-in (the "e" row) is drawn mirrored.
+const SIDE_FLIP = { se: false, ne: false, sw: true, nw: true };
 
 // The sheet row (direction) to draw `action` at screen direction `dir`, or
 // null when the sheet has no such action. Writes `out.flipX` (when `out` is
@@ -155,6 +157,15 @@ function pickRow(byDir, dir, out, asIs) {
     return east;
   }
   if (byDir.has(dir)) return dir;
+  // SOMET-669: a four-facing sheet (s / e / n) has no diagonals. Diagonal
+  // movement is sideways on screen, so it walks the side view -- the eastern
+  // row, mirrored on the western side -- not whichever of s / n / e the
+  // nearest search's tie-break happens to land on.
+  const side = SIDE_FLIP[dir];
+  if (side !== undefined && byDir.has("e")) {
+    if (out) out.flipX = side;
+    return "e";
+  }
   // The nearest fallback can land on a western row too (e.g. "n" missing ties
   // nw/ne); the same rule applies to it: its eastern twin, mirrored.
   const near = nearestDir(byDir, dir);

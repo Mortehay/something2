@@ -98,10 +98,11 @@ describe('sprite console action controls', () => {
   it('cellCount: a prop is one edit (1 cell) whatever the actions and frames', () => {
     const creature = { is_creature: true };
     const prop = { is_creature: false };
-    expect(cellCount([creature], ['idle', 'sway'], 4)).toBe(64);
+    // 3 facings (s, e, n -- SOMET-669) x 2 actions x 4 frames.
+    expect(cellCount([creature], ['idle', 'sway'], 4)).toBe(24);
     expect(cellCount([prop], ['idle', 'sway'], 4)).toBe(1);
     expect(cellCount([prop], ['idle'], 1)).toBe(1);
-    expect(cellCount([creature, prop], ['idle'], 2)).toBe(17);
+    expect(cellCount([creature, prop], ['idle'], 2)).toBe(7);
   });
 
   it('isBoxProp: a GPU-box object row without a sheet (Props v2)', () => {
