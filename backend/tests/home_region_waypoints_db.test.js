@@ -47,21 +47,23 @@ const tileOf = (x, y) => `${Math.floor(y / TILE)},${Math.floor(x / TILE)}`;
 function authoredWaypoints() {
   const byWorld = new Map();   // world name -> [{ x, y, name }]
   const worldNames = [];       // every world these specs own, waypoint or not
+  const villageWorldNames = []; // the subset that authors a village (dungeon rooms carry waypoints too, with no village to sit in)
   for (const specName of SPEC_NAMES) {
     const spec = JSON.parse(fs.readFileSync(path.join(MAPS_DIR, `${specName}.map.json`), 'utf8'));
     for (const w of spec.worlds) {
       worldNames.push(w.name);
+      if (w.village) villageWorldNames.push(w.name);
       if (Array.isArray(w.waypoints) && w.waypoints.length) byWorld.set(w.name, w.waypoints);
     }
   }
-  return { byWorld, worldNames };
+  return { byWorld, worldNames, villageWorldNames };
 }
 
 test('home region waypoints', { skip: !url ? 'no database URL' : false }, async (t) => {
   const pool = new Pool({ connectionString: url });
   t.after(() => pool.end());
 
-  const { byWorld, worldNames } = authoredWaypoints();
+  const { byWorld, worldNames, villageWorldNames } = authoredWaypoints();
 
   // Guards the test itself. Every assertion below is vacuously true against an
   // empty spec, and an empty spec is exactly what this slice started from -- so
@@ -108,7 +110,7 @@ test('home region waypoints', { skip: !url ? 'no database URL' : false }, async 
          JOIN worlds w ON w.id = wp.world_id
          LEFT JOIN villages v ON v.world_id = wp.world_id
         WHERE w.name = ANY($1::text[])`,
-      [worldNames],
+      [villageWorldNames],
     );
     assert.ok(r.rows.length >= 3, 'expected at least the three home-region waypoints');
 

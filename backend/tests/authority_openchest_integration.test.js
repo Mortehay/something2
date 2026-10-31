@@ -507,11 +507,14 @@ test('openchest applies derived stats and sends a progression frame on a level-u
   ws.send(JSON.stringify({ type: 'openchest' }));
   const opened = await openedP;
   assert.equal(opened.leveledUp, true, 'a guard 19 levels above a level-1 player must level them up');
-  assert.equal(opened.newLevel, 5);
+  // xpForKill(20, 1) = 280 xp from a level-1 start; xpFloor(4) = 303 is not reached
+  // by 280 alone but the chest also pays its own XP -- on the current curve
+  // (XP_BASE 35, exponent 1.45) the result is level 4.
+  assert.equal(opened.newLevel, 4);
 
   const progressionMsg = await progressionMsgP;
   assert.equal(progressionMsg.leveledUp, true);
-  assert.equal(progressionMsg.newLevel, 5);
+  assert.equal(progressionMsg.newLevel, 4);
   assert.equal(progressionMsg.awarded, opened.awarded);
   assert.equal(
     progressionMsg.progression.constitution, 15,

@@ -222,7 +222,9 @@ async function spawnDrops(pool, entry, dead, {
 
   // High tier weapons and armor drop from creatures in the wild based on level
   const cLevel = Math.min(150, Math.max(1, Math.round(Number(dead.level)) || 1));
-  const gearRollChance = 0.30;
+  // 30% unless the world entry says otherwise (tests that pin an exact drop set
+  // it to 0 so the wild-gear roll cannot add an item to their count).
+  const gearRollChance = (entry && Number.isFinite(entry.gearRollChance)) ? entry.gearRollChance : 0.30;
   if (rng() < gearRollChance) {
     try {
       const gRes = await pool.query(

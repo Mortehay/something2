@@ -116,7 +116,7 @@ test('a kill awards XP scaled by the creature level, not a flat per-kill amount'
   // a constant regardless of which creature died. 84 only comes out if BOTH
   // levels really feed xpForKill.
   const row = {
-    user_id: 'u1', experience: 150, level: 4, passive_points: 0,
+    user_id: 'u1', experience: 350, level: 4, passive_points: 0,
     strength: 5, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5,
   };
   const pool = scriptedPool([
@@ -129,12 +129,12 @@ test('a kill awards XP scaled by the creature level, not a flat per-kill amount'
   const result = await commitCreatureDeath(pool, entry, 'c1', { rng: always, ttlMs: 1000, killerUserId: 'u1' });
 
   assert.strictEqual(result.awarded, 84, 'must be the real xpForKill(6, 4) value');
-  // xpFloor(4) = 141, xpFloor(5) = 255 (hand-computed literals for the
-  // round(18 * L^1.33) curve) -- 150 and 150+84 = 234 both sit inside level
+  // xpFloor(4) = 303, xpFloor(5) = 564 (hand-computed literals for the
+  // per-level round(35 * k^1.45) curve) -- 350 and 350+84 = 434 both sit inside level
   // 4's own range, so this kill alone must not level the player up.
   assert.strictEqual(result.leveledUp, false);
   assert.strictEqual(result.newLevel, 4);
-  assert.strictEqual(result.progression.experience, 234);
+  assert.strictEqual(result.progression.experience, 434);
   assert.strictEqual(result.killerUserId, 'u1');
 
   // Finding 2/3: the transaction really is one client, and it's released.
@@ -468,9 +468,10 @@ test('a level-up moves the LIVE player pools (maxHp up, hp by the delta, never h
   assert.strictEqual(prog.leveledUp, true);
   // The wolf is level 10 against a level-2 player, so xpForKill(10, 2) is
   // clamped at XP_LEVEL_DIFF_MAX: round(10 * 10 * 2) = 200. From 290 that is
-  // 490, and xpFloor(6) = 408 / xpFloor(7) = 603, so the new level is 6.
+  // 490, and xpFloor(4) = 303 / xpFloor(5) = 564 (the XP_BASE=35, exponent 1.45
+  // curve), so the new level is 4.
   // Hand-computed floors, not derived from levelForXp.
-  assert.strictEqual(prog.newLevel, 6);
+  assert.strictEqual(prog.newLevel, 4);
   assert.strictEqual(prog.awarded, 200);
 
   let raised = false;
@@ -539,9 +540,10 @@ test('a player mid-death (hp <= 0, awaiting resolveDeaths) is not revived by the
   assert.strictEqual(prog.leveledUp, true);
   // The wolf is level 10 against a level-2 player, so xpForKill(10, 2) is
   // clamped at XP_LEVEL_DIFF_MAX: round(10 * 10 * 2) = 200. From 290 that is
-  // 490, and xpFloor(6) = 408 / xpFloor(7) = 603, so the new level is 6.
+  // 490, and xpFloor(4) = 303 / xpFloor(5) = 564 (the XP_BASE=35, exponent 1.45
+  // curve), so the new level is 4.
   // Hand-computed floors, not derived from levelForXp.
-  assert.strictEqual(prog.newLevel, 6);
+  assert.strictEqual(prog.newLevel, 4);
   assert.strictEqual(prog.awarded, 200);
 
   assert.strictEqual(player.hp, -5, 'a player mid-death must not be revived by their own kill leveling them up');

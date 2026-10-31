@@ -67,7 +67,7 @@
       ],
       "waypoints": [
         {
-          "x": 4650,
+          "x": 4550,
           "y": 4550,
           "name": "Vale Crossing Waypoint"
         }
@@ -181,7 +181,7 @@
       },
       "waypoints": [
         {
-          "x": 4650,
+          "x": 4550,
           "y": 4550,
           "name": "Sunscar Outpost Waypoint"
         }
@@ -221,7 +221,7 @@
       },
       "waypoints": [
         {
-          "x": 4650,
+          "x": 4550,
           "y": 4550,
           "name": "Rimehollow Haven Waypoint"
         }
@@ -262,7 +262,7 @@
       "waypoints": [
         {
           "x": 2550,
-          "y": 2650,
+          "y": 2550,
           "name": "Blackfen Refuge Waypoint"
         }
       ]
