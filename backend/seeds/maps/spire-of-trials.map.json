@@ -150,7 +150,14 @@
         "x": 4950,
         "y": 4850,
         "respawn_s": 600
-      }
+      },
+      "waypoints": [
+        {
+          "x": 4650,
+          "y": 4850,
+          "name": "Spire Checkpoint: Floor 5"
+        }
+      ]
     },
     {
       "key": "spire_f06",
@@ -296,7 +303,14 @@
         "x": 4950,
         "y": 4850,
         "respawn_s": 600
-      }
+      },
+      "waypoints": [
+        {
+          "x": 4650,
+          "y": 4850,
+          "name": "Spire Checkpoint: Floor 10"
+        }
+      ]
     },
     {
       "key": "spire_f11",
@@ -442,7 +456,14 @@
         "x": 4950,
         "y": 4850,
         "respawn_s": 600
-      }
+      },
+      "waypoints": [
+        {
+          "x": 4650,
+          "y": 4850,
+          "name": "Spire Checkpoint: Floor 15"
+        }
+      ]
     },
     {
       "key": "spire_f16",
@@ -588,7 +609,14 @@
         "x": 4950,
         "y": 4850,
         "respawn_s": 600
-      }
+      },
+      "waypoints": [
+        {
+          "x": 4650,
+          "y": 4850,
+          "name": "Spire Checkpoint: Floor 20"
+        }
+      ]
     },
     {
       "key": "spire_f21",
@@ -734,7 +762,1064 @@
         "x": 4950,
         "y": 4850,
         "respawn_s": 900
+      },
+      "waypoints": [
+        {
+          "x": 4650,
+          "y": 4850,
+          "name": "Spire Checkpoint: Floor 25"
+        }
+      ]
+    },
+    {
+      "key": "spire_f26",
+      "name": "Spire of Trials: Floor 26",
+      "grid": [
+        25,
+        40
+      ],
+      "seed": 7026,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Emberdepths",
+        "Infernal Gate"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Ember Swarm",
+        "Ember Skirmisher",
+        "Ember Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        52,
+        56
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "spire_f27",
+      "name": "Spire of Trials: Floor 27",
+      "grid": [
+        26,
+        40
+      ],
+      "seed": 8305,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Emberdepths",
+        "Infernal Gate"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Ember Swarm",
+        "Ember Skirmisher",
+        "Ember Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        54,
+        58
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "spire_f28",
+      "name": "Spire of Trials: Floor 28",
+      "grid": [
+        27,
+        40
+      ],
+      "seed": 7028,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Emberdepths",
+        "Infernal Gate"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Ember Swarm",
+        "Ember Skirmisher",
+        "Ember Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        56,
+        60
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "spire_f29",
+      "name": "Spire of Trials: Floor 29",
+      "grid": [
+        28,
+        40
+      ],
+      "seed": 7029,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Emberdepths",
+        "Infernal Gate"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Ember Swarm",
+        "Ember Skirmisher",
+        "Ember Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        58,
+        62
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "spire_f30",
+      "name": "Spire of Trials: Floor 30",
+      "grid": [
+        29,
+        40
+      ],
+      "seed": 9667,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Emberdepths",
+        "Infernal Gate"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Ember Swarm",
+        "Ember Skirmisher",
+        "Ember Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        60,
+        64
+      ],
+      "density": "dense",
+      "boss": {
+        "entity": "The Bone Regent",
+        "x": 4950,
+        "y": 4850,
+        "respawn_s": 900
+      },
+      "waypoints": [
+        {
+          "x": 4650,
+          "y": 4850,
+          "name": "Spire Checkpoint: Floor 30"
+        }
+      ]
+    },
+    {
+      "key": "spire_f31",
+      "name": "Spire of Trials: Floor 31",
+      "grid": [
+        30,
+        40
+      ],
+      "seed": 9669,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Infernal Gate",
+        "Emberdepths"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Demonic Swarm",
+        "Demonic Skirmisher",
+        "Demonic Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        62,
+        66
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "spire_f32",
+      "name": "Spire of Trials: Floor 32",
+      "grid": [
+        31,
+        40
+      ],
+      "seed": 7032,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Infernal Gate",
+        "Emberdepths"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Demonic Swarm",
+        "Demonic Skirmisher",
+        "Demonic Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        64,
+        68
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "spire_f33",
+      "name": "Spire of Trials: Floor 33",
+      "grid": [
+        32,
+        40
+      ],
+      "seed": 7033,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Infernal Gate",
+        "Emberdepths"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Demonic Swarm",
+        "Demonic Skirmisher",
+        "Demonic Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        66,
+        70
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "spire_f34",
+      "name": "Spire of Trials: Floor 34",
+      "grid": [
+        33,
+        40
+      ],
+      "seed": 7034,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Infernal Gate",
+        "Emberdepths"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Demonic Swarm",
+        "Demonic Skirmisher",
+        "Demonic Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        68,
+        72
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "spire_f35",
+      "name": "Spire of Trials: Floor 35",
+      "grid": [
+        34,
+        40
+      ],
+      "seed": 8358,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Infernal Gate",
+        "Emberdepths"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Demonic Swarm",
+        "Demonic Skirmisher",
+        "Demonic Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        70,
+        74
+      ],
+      "density": "dense",
+      "boss": {
+        "entity": "Ossuary Warden",
+        "x": 4950,
+        "y": 4850,
+        "respawn_s": 900
       }
+    },
+    {
+      "key": "spire_f36",
+      "name": "Spire of Trials: Floor 36",
+      "grid": [
+        35,
+        40
+      ],
+      "seed": 9490,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Shattered Vault",
+        "Deepvault"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Chaos Swarm",
+        "Chaos Skirmisher",
+        "Chaos Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        72,
+        76
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "spire_f37",
+      "name": "Spire of Trials: Floor 37",
+      "grid": [
+        36,
+        40
+      ],
+      "seed": 8189,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Shattered Vault",
+        "Deepvault"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Chaos Swarm",
+        "Chaos Skirmisher",
+        "Chaos Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        74,
+        78
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "spire_f38",
+      "name": "Spire of Trials: Floor 38",
+      "grid": [
+        37,
+        40
+      ],
+      "seed": 7038,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Shattered Vault",
+        "Deepvault"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Chaos Swarm",
+        "Chaos Skirmisher",
+        "Chaos Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        76,
+        80
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "spire_f39",
+      "name": "Spire of Trials: Floor 39",
+      "grid": [
+        38,
+        40
+      ],
+      "seed": 7039,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Shattered Vault",
+        "Deepvault"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Chaos Swarm",
+        "Chaos Skirmisher",
+        "Chaos Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        78,
+        82
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "spire_f40",
+      "name": "Spire of Trials: Floor 40",
+      "grid": [
+        39,
+        40
+      ],
+      "seed": 7040,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Shattered Vault",
+        "Deepvault"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Chaos Swarm",
+        "Chaos Skirmisher",
+        "Chaos Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        80,
+        84
+      ],
+      "density": "dense",
+      "boss": {
+        "entity": "Cinder Matriarch",
+        "x": 4950,
+        "y": 4850,
+        "respawn_s": 900
+      },
+      "waypoints": [
+        {
+          "x": 4650,
+          "y": 4850,
+          "name": "Spire Checkpoint: Floor 40"
+        }
+      ]
+    },
+    {
+      "key": "spire_f41",
+      "name": "Spire of Trials: Floor 41",
+      "grid": [
+        40,
+        40
+      ],
+      "seed": 7041,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Abyssal Rift",
+        "Shattered Vault"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Void Swarm",
+        "Void Skirmisher",
+        "Void Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        82,
+        86
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "spire_f42",
+      "name": "Spire of Trials: Floor 42",
+      "grid": [
+        41,
+        40
+      ],
+      "seed": 7042,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Abyssal Rift",
+        "Shattered Vault"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Void Swarm",
+        "Void Skirmisher",
+        "Void Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        84,
+        88
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "spire_f43",
+      "name": "Spire of Trials: Floor 43",
+      "grid": [
+        42,
+        40
+      ],
+      "seed": 8281,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Abyssal Rift",
+        "Shattered Vault"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Void Swarm",
+        "Void Skirmisher",
+        "Void Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        86,
+        90
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "spire_f44",
+      "name": "Spire of Trials: Floor 44",
+      "grid": [
+        43,
+        40
+      ],
+      "seed": 7044,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Abyssal Rift",
+        "Shattered Vault"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Void Swarm",
+        "Void Skirmisher",
+        "Void Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        88,
+        92
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "spire_f45",
+      "name": "Spire of Trials: Floor 45",
+      "grid": [
+        44,
+        40
+      ],
+      "seed": 8157,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Abyssal Rift",
+        "Shattered Vault"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Void Swarm",
+        "Void Skirmisher",
+        "Void Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        90,
+        94
+      ],
+      "density": "dense",
+      "boss": {
+        "entity": "Shade Herald",
+        "x": 4950,
+        "y": 4850,
+        "respawn_s": 900
+      }
+    },
+    {
+      "key": "spire_f46",
+      "name": "Spire of Trials: Floor 46",
+      "grid": [
+        45,
+        40
+      ],
+      "seed": 7046,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Dreaming Dark",
+        "Abyssal Rift"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Nightmare Swarm",
+        "Nightmare Skirmisher",
+        "Nightmare Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        92,
+        96
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "spire_f47",
+      "name": "Spire of Trials: Floor 47",
+      "grid": [
+        46,
+        40
+      ],
+      "seed": 7824,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Dreaming Dark",
+        "Abyssal Rift"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Nightmare Swarm",
+        "Nightmare Skirmisher",
+        "Nightmare Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        94,
+        98
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "spire_f48",
+      "name": "Spire of Trials: Floor 48",
+      "grid": [
+        47,
+        40
+      ],
+      "seed": 9568,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Dreaming Dark",
+        "Abyssal Rift"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Nightmare Swarm",
+        "Nightmare Skirmisher",
+        "Nightmare Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        96,
+        100
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "spire_f49",
+      "name": "Spire of Trials: Floor 49",
+      "grid": [
+        48,
+        40
+      ],
+      "seed": 7049,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Dreaming Dark",
+        "Abyssal Rift"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Nightmare Swarm",
+        "Nightmare Skirmisher",
+        "Nightmare Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        98,
+        102
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "spire_f50",
+      "name": "Spire of Trials: Floor 50",
+      "grid": [
+        49,
+        40
+      ],
+      "seed": 7050,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Dreaming Dark",
+        "Abyssal Rift"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Nightmare Swarm",
+        "Nightmare Skirmisher",
+        "Nightmare Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        100,
+        104
+      ],
+      "density": "dense",
+      "boss": {
+        "entity": "The Ember Queen",
+        "x": 4950,
+        "y": 4850,
+        "respawn_s": 900
+      },
+      "waypoints": [
+        {
+          "x": 4650,
+          "y": 4850,
+          "name": "Spire Checkpoint: Floor 50"
+        }
+      ]
+    },
+    {
+      "key": "spire_f51",
+      "name": "Spire of Trials: Floor 51",
+      "grid": [
+        50,
+        40
+      ],
+      "seed": 7051,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Grave of Titans",
+        "Deepvault"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Titan Swarm",
+        "Titan Skirmisher",
+        "Titan Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        102,
+        106
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "spire_f52",
+      "name": "Spire of Trials: Floor 52",
+      "grid": [
+        51,
+        40
+      ],
+      "seed": 10805,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Grave of Titans",
+        "Deepvault"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Titan Swarm",
+        "Titan Skirmisher",
+        "Titan Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        104,
+        108
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "spire_f53",
+      "name": "Spire of Trials: Floor 53",
+      "grid": [
+        52,
+        40
+      ],
+      "seed": 8508,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Grave of Titans",
+        "Deepvault"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Titan Swarm",
+        "Titan Skirmisher",
+        "Titan Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        106,
+        110
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "spire_f54",
+      "name": "Spire of Trials: Floor 54",
+      "grid": [
+        53,
+        40
+      ],
+      "seed": 7054,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Grave of Titans",
+        "Deepvault"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Titan Swarm",
+        "Titan Skirmisher",
+        "Titan Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        108,
+        112
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "spire_f55",
+      "name": "Spire of Trials: Floor 55",
+      "grid": [
+        54,
+        40
+      ],
+      "seed": 8207,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Grave of Titans",
+        "Deepvault"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Titan Swarm",
+        "Titan Skirmisher",
+        "Titan Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        110,
+        114
+      ],
+      "density": "dense",
+      "boss": {
+        "entity": "The Umbral Gatekeeper",
+        "x": 4950,
+        "y": 4850,
+        "respawn_s": 900
+      }
+    },
+    {
+      "key": "spire_f56",
+      "name": "Spire of Trials: Floor 56",
+      "grid": [
+        55,
+        40
+      ],
+      "seed": 8400,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Fallen Sanctum",
+        "Grave of Titans"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Fallen Swarm",
+        "Fallen Skirmisher",
+        "Fallen Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        112,
+        116
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "spire_f57",
+      "name": "Spire of Trials: Floor 57",
+      "grid": [
+        56,
+        40
+      ],
+      "seed": 7057,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Fallen Sanctum",
+        "Grave of Titans"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Fallen Swarm",
+        "Fallen Skirmisher",
+        "Fallen Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        114,
+        118
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "spire_f58",
+      "name": "Spire of Trials: Floor 58",
+      "grid": [
+        57,
+        40
+      ],
+      "seed": 8157,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Fallen Sanctum",
+        "Grave of Titans"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Fallen Swarm",
+        "Fallen Skirmisher",
+        "Fallen Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        116,
+        120
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "spire_f59",
+      "name": "Spire of Trials: Floor 59",
+      "grid": [
+        58,
+        40
+      ],
+      "seed": 9353,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Fallen Sanctum",
+        "Grave of Titans"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Fallen Swarm",
+        "Fallen Skirmisher",
+        "Fallen Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        118,
+        122
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "spire_f60",
+      "name": "Spire of Trials: Floor 60",
+      "grid": [
+        59,
+        40
+      ],
+      "seed": 8522,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Fallen Sanctum",
+        "Grave of Titans"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Fallen Swarm",
+        "Fallen Skirmisher",
+        "Fallen Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        120,
+        124
+      ],
+      "density": "dense",
+      "boss": {
+        "entity": "The Bone Regent",
+        "x": 4950,
+        "y": 4850,
+        "respawn_s": 900
+      },
+      "waypoints": [
+        {
+          "x": 4650,
+          "y": 4850,
+          "name": "Spire Checkpoint: Floor 60"
+        }
+      ]
     }
   ],
   "links": [
@@ -867,6 +1952,181 @@
       "from": "spire_f24",
       "edge": "E",
       "to": "spire_f25"
+    },
+    {
+      "from": "spire_f25",
+      "edge": "E",
+      "to": "spire_f26"
+    },
+    {
+      "from": "spire_f26",
+      "edge": "E",
+      "to": "spire_f27"
+    },
+    {
+      "from": "spire_f27",
+      "edge": "E",
+      "to": "spire_f28"
+    },
+    {
+      "from": "spire_f28",
+      "edge": "E",
+      "to": "spire_f29"
+    },
+    {
+      "from": "spire_f29",
+      "edge": "E",
+      "to": "spire_f30"
+    },
+    {
+      "from": "spire_f30",
+      "edge": "E",
+      "to": "spire_f31"
+    },
+    {
+      "from": "spire_f31",
+      "edge": "E",
+      "to": "spire_f32"
+    },
+    {
+      "from": "spire_f32",
+      "edge": "E",
+      "to": "spire_f33"
+    },
+    {
+      "from": "spire_f33",
+      "edge": "E",
+      "to": "spire_f34"
+    },
+    {
+      "from": "spire_f34",
+      "edge": "E",
+      "to": "spire_f35"
+    },
+    {
+      "from": "spire_f35",
+      "edge": "E",
+      "to": "spire_f36"
+    },
+    {
+      "from": "spire_f36",
+      "edge": "E",
+      "to": "spire_f37"
+    },
+    {
+      "from": "spire_f37",
+      "edge": "E",
+      "to": "spire_f38"
+    },
+    {
+      "from": "spire_f38",
+      "edge": "E",
+      "to": "spire_f39"
+    },
+    {
+      "from": "spire_f39",
+      "edge": "E",
+      "to": "spire_f40"
+    },
+    {
+      "from": "spire_f40",
+      "edge": "E",
+      "to": "spire_f41"
+    },
+    {
+      "from": "spire_f41",
+      "edge": "E",
+      "to": "spire_f42"
+    },
+    {
+      "from": "spire_f42",
+      "edge": "E",
+      "to": "spire_f43"
+    },
+    {
+      "from": "spire_f43",
+      "edge": "E",
+      "to": "spire_f44"
+    },
+    {
+      "from": "spire_f44",
+      "edge": "E",
+      "to": "spire_f45"
+    },
+    {
+      "from": "spire_f45",
+      "edge": "E",
+      "to": "spire_f46"
+    },
+    {
+      "from": "spire_f46",
+      "edge": "E",
+      "to": "spire_f47"
+    },
+    {
+      "from": "spire_f47",
+      "edge": "E",
+      "to": "spire_f48"
+    },
+    {
+      "from": "spire_f48",
+      "edge": "E",
+      "to": "spire_f49"
+    },
+    {
+      "from": "spire_f49",
+      "edge": "E",
+      "to": "spire_f50"
+    },
+    {
+      "from": "spire_f50",
+      "edge": "E",
+      "to": "spire_f51"
+    },
+    {
+      "from": "spire_f51",
+      "edge": "E",
+      "to": "spire_f52"
+    },
+    {
+      "from": "spire_f52",
+      "edge": "E",
+      "to": "spire_f53"
+    },
+    {
+      "from": "spire_f53",
+      "edge": "E",
+      "to": "spire_f54"
+    },
+    {
+      "from": "spire_f54",
+      "edge": "E",
+      "to": "spire_f55"
+    },
+    {
+      "from": "spire_f55",
+      "edge": "E",
+      "to": "spire_f56"
+    },
+    {
+      "from": "spire_f56",
+      "edge": "E",
+      "to": "spire_f57"
+    },
+    {
+      "from": "spire_f57",
+      "edge": "E",
+      "to": "spire_f58"
+    },
+    {
+      "from": "spire_f58",
+      "edge": "E",
+      "to": "spire_f59"
+    },
+    {
+      "from": "spire_f59",
+      "edge": "E",
+      "to": "spire_f60"
     }
   ]
 }
