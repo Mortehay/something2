@@ -67,6 +67,7 @@ function makePool({
 } = {}) {
   const calls = [];
   let chestState = chestSeed.state;
+  let personalOpened = false; // a vault chest is looted per character: this models that character's cooldown row
   const pool = {
     calls,
     matching(re) { return calls.filter((c) => re.test(c.sql)); },
@@ -194,6 +195,12 @@ function makePool({
         chestState = 'unlocked';
         return { rows: [], rowCount: 1 };
       }
+      if (/INSERT INTO character_chest_opens/i.test(sql)) {
+        if (personalOpened) return { rows: [], rowCount: 0 };
+        personalOpened = true;
+        return { rows: [{ opened_at: '2026-08-10T00:00:00.000Z' }], rowCount: 1 };
+      }
+      if (/SELECT GREATEST/i.test(sql)) return { rows: [{ ms: '1500000' }], rowCount: 1 };
       if (/UPDATE world_chests SET state = 'opened'/i.test(sql)) {
         if (chestState !== 'unlocked') return { rows: [], rowCount: 0 };
         chestState = 'opened';
@@ -307,7 +314,7 @@ test('openchest against a chest with a live guard sends an error frame mentionin
   ws.close(); handle.close(); server.close();
 });
 
-test('openchest against an unlocked chest in range sends chestOpened with items+XP, then a second attempt on the now-opened vault chest is refused', async () => {
+test('openchest against an unlocked chest in range sends chestOpened with items+XP, then a second attempt on the same vault chest is refused with the time left', async () => {
   const pool = makePool({
     chestSeed: {
       id: 'chest-1', x: SPAWN.x, y: SPAWN.y, kind: 'vault', state: 'unlocked', guardLevel: 5, guardCreatureIds: [],
@@ -330,9 +337,11 @@ test('openchest against an unlocked chest in range sends chestOpened with items+
 
   const entry = handle.worlds.get('w1');
   assert.equal(entry.chests.length, 1);
-  assert.equal(entry.chests[0].state, 'opened', 'the in-memory cache must reflect the DB write openChest committed');
-  assert.ok(entry.chests[0].openedAt, 'openedAt must be carried into the in-memory cache too, not just the DB row');
-  assert.equal(entry.chests[0].respawnAt, null, 'a vault chest never gets a respawn timer');
+  // A vault chest stays unlocked for the world; only this character gets a cooldown.
+  assert.equal(entry.chests[0].state, 'unlocked', 'a vault chest is looted per character, never globally');
+  assert.ok(opened.reopenInMs > 0, 'the open reports the personal cooldown');
+
+  assert.equal(entry.chests[0].respawnAt ?? null, null, 'a vault chest has no world respawn timer');
 
   // Final-review fix (SOMET-244 Important #2): the granted item must land
   // on the player's IN-MEMORY inventory too, mirroring claimItem's own
@@ -344,12 +353,12 @@ test('openchest against an unlocked chest in range sends chestOpened with items+
     'the chest-granted item must be pushed onto p.inv.items, matching claimItem\'s {id, typeId, quantity} shape',
   );
 
-  // A second attempt: nearestChest excludes an opened vault chest, so this
-  // never even reaches openChest / the DB again.
+  // A second attempt: the chest is still in reach but this character is on
+  // cooldown, so openChest refuses and says how long is left.
   const insertCallsBefore = pool.matching(/INSERT INTO player_items/i).length;
   ws.send(JSON.stringify({ type: 'openchest' }));
   const err = await nextMsg(ws, 'error');
-  assert.match(err.message, /no chest nearby/);
+  assert.match(err.message, /empty for you.*fills again in 25:00/);
   assert.equal(pool.matching(/INSERT INTO player_items/i).length, insertCallsBefore, 'no second loot grant');
 
   ws.close(); handle.close(); server.close();

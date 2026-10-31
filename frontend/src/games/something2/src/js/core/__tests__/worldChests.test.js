@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { chestsFromFrame, applyChestOpened } from '../worldChests.js';
+import { chestsFromFrame, applyChestOpened, chestView, formatCountdown } from '../worldChests.js';
 import { createInventory, typeOf } from '../inventory.js';
 
 // SOMET-372. The client had no world-chest code at all: `chests` frames fell
@@ -73,5 +73,41 @@ describe('applyChestOpened', () => {
     const progression = { level: 3, experience: 100 };
     applyChestOpened(inv, [], { chestId: 'c1', items: [], awarded: 50, leveledUp: true, newLevel: 4 });
     expect(progression).toEqual({ level: 3, experience: 100 });
+  });
+});
+
+describe('looted vault chests (per character)', () => {
+  it('a frame with reopenInMs becomes an absolute reopenAt on this client\'s clock', () => {
+    const [c] = chestsFromFrame({ chests: [{ id: 'a', state: 'opened', reopenInMs: 90000 }] }, 1000);
+    expect(c.reopenAt).toBe(91000);
+    const [plain] = chestsFromFrame({ chests: [{ id: 'b', state: 'unlocked' }] }, 1000);
+    expect(plain.reopenAt).toBeUndefined();
+  });
+
+  it('opening a vault chest starts its countdown at once', () => {
+    const chests = [{ id: 'a', state: 'unlocked' }];
+    applyChestOpened(invWithType(1), chests, { chestId: 'a', items: [], reopenInMs: 1800000 }, 5000);
+    expect(chests[0].state).toBe('opened');
+    expect(chests[0].reopenAt).toBe(1805000);
+  });
+
+  it('the label counts down, and flips back to Treasure by itself when it runs out', () => {
+    const c = { state: 'opened', reopenAt: 10000 + 872000 };
+    expect(chestView(c, 10000)).toEqual({ state: 'opened', label: 'Looted — opens again in 14:32', openable: false });
+    expect(chestView(c, 10000 + 871001).label).toBe('Looted — opens again in 0:01');
+    expect(chestView(c, 10000 + 872000)).toEqual({ state: 'unlocked', label: 'Treasure', openable: true });
+  });
+
+  it('a chest with no countdown keeps the old labels', () => {
+    expect(chestView({ state: 'opened' }).label).toBe('Looted');
+    expect(chestView({ state: 'unlocked' }).label).toBe('Treasure');
+    expect(chestView({ state: 'locked' }).label).toBe('Treasure (guarded)');
+    expect(chestView({}).openable).toBe(true);
+  });
+
+  it('formats minutes and seconds', () => {
+    expect(formatCountdown(0)).toBe('0:00');
+    expect(formatCountdown(59001)).toBe('1:00');
+    expect(formatCountdown(1800000)).toBe('30:00');
   });
 });

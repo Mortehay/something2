@@ -61,7 +61,9 @@ function mapChestRow(c) {
     guardEntityTypeId: c.guard_entity_type_id,
     guardLevel: c.guard_level,
     guardCreatureIds: c.guard_creature_ids || [],
-    state: c.state,
+    // A vault chest is looted per character, never globally: a legacy 'opened'
+    // row reads as unlocked (its guard was dead, or it could not have opened).
+    state: (c.kind === 'vault' && c.state === 'opened') ? 'unlocked' : c.state,
     openedAt: c.opened_at,
     respawnAt: c.respawn_at,
     // SOMET-582: the chest's own art binding (name). Defaults to null for a
@@ -171,7 +173,8 @@ async function spawnFieldChest(client, world, allowedGuardTypeNames, rngSeed) {
 function nearestChest(chests, cx, cy, radius) {
   let best = null; let bestDist = Infinity;
   for (const c of chests) {
-    if (c.state === 'opened' && c.kind === 'vault') continue; // permanently spent
+    // (vault chests are looted per character now, so they stay reachable; the
+    // server refuses a character whose cooldown is still running)
     const dx = c.x - cx;
     const dy = c.y - cy;
     const dist = Math.sqrt((dx * dx) + (dy * dy));

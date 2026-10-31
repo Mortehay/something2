@@ -19,6 +19,7 @@ import { layoutSkillsPanel, drawSkillsPanel } from "./skillsPanel.js";
 import { layoutGemShopPanel, drawGemShopPanel } from "./gemShopPanel.js";
 import { layoutQuestLog, drawQuestLog } from "./questLogPanel.js";
 import { drawQuestTracker } from "./questTracker.js";
+import { chestView } from "../core/worldChests.js";
 import { isTransformationSkill, getRequiredForm, resolveSkillDamage, checkGemRequirements, getWeaponRequirementName } from "../core/skillsData.js";
 import {
   blastProgress, blastScreenRadiusX, elementColor, auraRingGeometry,
@@ -3293,7 +3294,8 @@ export class RenderSystem {
   // second thing to keep in step, and being wrong here costs a hint, not an
   // action.
   drawWorldChest(c, player) {
-    const state = c.state || "locked";
+    const view = chestView(c);
+    const state = view.state;
     const s = worldToScreen(c.x, c.y);
     const dx = s.x, dy = s.y;
     const r = 13;
@@ -3338,7 +3340,7 @@ export class RenderSystem {
     this.ctx.fillStyle = "#fff";
     this.ctx.font = "12px sans-serif";
     this.ctx.textAlign = "center";
-    const label = state === "opened" ? "Looted" : state === "unlocked" ? "Treasure" : "Treasure (guarded)";
+    const label = view.label;
     this.ctx.fillText(label, dx, dy - lift - 6);
     // The hint, only when the player is plausibly close enough for the key to
     // do something, and never on a chest with nothing left in it.

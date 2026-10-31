@@ -1597,8 +1597,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
           const { cx: ccx, cy: ccy } = chunkOf(c.x, c.y, N);
           return keys.has(CHUNK_KEY(ccx, ccy));
         })
-        .map((c) => ({
-          id: c.id, x: c.x, y: c.y, kind: c.kind, state: c.state,
+        .map((c) => {
+          // A vault chest is looted per character: this player's own cooldown
+          // (p._chestOpens: chest id -> epoch ms it can be opened again) turns
+          // it 'opened' in THEIR frame only.
+          const until = c.kind === 'vault' && p._chestOpens ? p._chestOpens.get(c.id) : undefined;
+          const mine = until != null && until > Date.now();
+          return {
+          id: c.id, x: c.x, y: c.y, kind: c.kind, state: mine ? 'opened' : (c.state === 'opened' && c.kind === 'vault' ? 'unlocked' : c.state),
+          ...(mine ? { reopenInMs: until - Date.now() } : {}),
           // SOMET-582: chestPointKind maps 'vault'/'field' onto the point-kind
           // catalog's names ('chest_vault'/'chest_field'). It throws on any
           // other kind, but c.kind can never be one: world_chests has a
@@ -1606,7 +1613,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
           // to exactly these two values, so every row this loop sees already
           // satisfies chestPointKind's precondition.
           art: resolvePointArt(chestPointKind(c.kind), c.art, entry.pointArtDefaults),
-        }));
+          };
+        });
       send(ws, { type: 'chests', chests });
     }
   }
@@ -2008,6 +2016,14 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // Item rewards earned while out of a world (async: the join has finished
         // registering the player by the time the first query returns).
         deliverPendingRewardItems(ws.userId, character.id);
+        pool.query('SELECT chest_id, reopen_at FROM character_chest_opens WHERE character_id = $1 AND reopen_at > now()', [character.id])
+          .then((r) => {
+            const pl = entry.world.getPlayer(ws.userId);
+            if (!pl) return;
+            if (!pl._chestOpens) pl._chestOpens = new Map();
+            for (const row of (r && r.rows) || []) pl._chestOpens.set(row.chest_id, new Date(row.reopen_at).getTime());
+          })
+          .catch((e) => console.error('chest cooldown load failed:', e));
         bossGate.loadClearedBosses(pool, character.id).then((set) => { const pl = entry.world.getPlayer(ws.userId); if (pl) { if (!pl._bossCleared) pl._bossCleared = new Set(); for (const id of set) pl._bossCleared.add(id); } }).catch((e) => console.error('boss clears load failed:', e));
         loadLegacyChoice(pool, character.id).then((lc) => { const pl = entry.world.getPlayer(ws.userId); if (pl) pl.legacyChoice = lc; }).catch((e) => console.error('legacy choice load failed:', e));
         send(ws, {
@@ -2810,7 +2826,19 @@ function attachAuthority(httpServer, pool, opts = {}) {
           affixPool: entry.affixPool || [],
           itemTypes: entry.world.weapons,
         });
-        if (!result.ok) { send(ws, { type: 'error', message: result.reason }); return; }
+        if (!result.ok) {
+          const left = Number(result.reopenInMs);
+          if (left > 0 && chest.kind === 'vault') {
+            // Keep our copy of the cooldown honest too (it may predate this session).
+            if (!p._chestOpens) p._chestOpens = new Map();
+            p._chestOpens.set(chest.id, Date.now() + left);
+            const m = Math.floor(left / 60000), sec = Math.floor((left % 60000) / 1000);
+            send(ws, { type: 'error', message: `This chest is empty for you - it fills again in ${m}:${String(sec).padStart(2, '0')}` });
+          } else {
+            send(ws, { type: 'error', message: result.reason });
+          }
+          return;
+        }
 
         // Final-review fix (SOMET-244 Important #2): openChest now returns
         // full player_items rows ({id, item_type_id, quantity} each), not
@@ -2853,7 +2881,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // this, entry.chests would never show a respawn_at at all, and a
         // chest the sweep later relocks would look permanently 'opened' to
         // an already-connected player until a full world reload.
-        Object.assign(chest, { state: 'opened', openedAt: result.openedAt, respawnAt: result.respawnAt });
+        if (result.personal) {
+          // A vault chest stays as it is for the world; only THIS character's
+          // cooldown starts.
+          if (chest.state === 'locked' || chest.state === 'opened') chest.state = 'unlocked';
+          if (!p._chestOpens) p._chestOpens = new Map();
+          p._chestOpens.set(chest.id, Date.now() + result.reopenInMs);
+        } else {
+          Object.assign(chest, { state: 'opened', openedAt: result.openedAt, respawnAt: result.respawnAt });
+        }
         // openChest's own transaction may have flipped state locked ->
         // unlocked -> opened in one shot (the guard-dead check folds the
         // unlock into the same call) -- either way this chest's `state` on
@@ -2891,6 +2927,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         }
         send(ws, {
           type: 'chestOpened', chestId: chest.id, items: result.items,
+          ...(result.personal ? { reopenInMs: result.reopenInMs } : {}),
           awarded: result.awarded, leveledUp: result.leveledUp, newLevel: result.newLevel,
         });
         // Separate progression frame, matching the kill path's own frame

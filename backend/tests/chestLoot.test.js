@@ -141,7 +141,7 @@ test('openChest leaves respawn_at untouched for a vault chest', async () => {
       }],
       rowCount: 1,
     }],
-    [/UPDATE world_chests SET state = 'opened'/i, { rows: [{ id: 'c1', opened_at: '2026-08-10T00:00:00Z' }], rowCount: 1 }],
+    [/INSERT INTO character_chest_opens/i, { rows: [{ opened_at: '2026-08-10T00:00:00Z' }], rowCount: 1 }],
     [/FROM chest_loot/i, { rows: [], rowCount: 0 }],
     [/FROM player_progression/i, { rows: [{ level: 2, experience: 100 }], rowCount: 1 }],
     [/UPDATE player_progression/i, { rows: [{ level: 2, experience: 100 }], rowCount: 1 }],
@@ -151,4 +151,68 @@ test('openChest leaves respawn_at untouched for a vault chest', async () => {
   assert.equal(result.openedAt, '2026-08-10T00:00:00Z');
   assert.equal(result.respawnAt, null);
   assert.ok(!pool.calls.some((c) => /UPDATE world_chests SET respawn_at/i.test(c.sql)), 'vault chest open must not schedule a respawn');
+});
+
+// Vault chests are looted per character (character_chest_opens), not globally.
+const vaultRoutes = (extra = []) => [
+  [/SELECT .* FROM world_chests WHERE id = \$1 FOR UPDATE/i, {
+    rows: [{ id: 'c1', state: 'unlocked', kind: 'vault', guard_creature_ids: [], guard_level: 5 }], rowCount: 1,
+  }],
+  [/FROM chest_loot/i, { rows: [], rowCount: 0 }],
+  [/FROM player_progression/i, { rows: [{ level: 2, experience: 100 }], rowCount: 1 }],
+  [/UPDATE player_progression/i, { rows: [{ level: 2, experience: 100 }], rowCount: 1 }],
+  ...extra,
+];
+
+test('a vault chest open is a per-character CAS and never marks the chest opened for the world', async () => {
+  const pool = scriptedRoutePool(vaultRoutes([
+    [/INSERT INTO character_chest_opens/i, { rows: [{ opened_at: '2026-08-10T00:00:00Z' }], rowCount: 1 }],
+  ]));
+  const r = await openChest(pool, 'c1', 7, { rng: () => 0, vaultReopenMs: 60000 });
+  assert.equal(r.ok, true);
+  assert.equal(r.personal, true);
+  assert.equal(r.reopenInMs, 60000);
+  const ins = pool.calls.find((c) => /INSERT INTO character_chest_opens/i.test(c.sql));
+  assert.deepEqual(ins.params, [7, 'c1', 60000], 'keyed by character and chest, with the cooldown');
+  assert.match(ins.sql, /WHERE character_chest_opens\.reopen_at <= now\(\)/i, 'only lands when no cooldown is pending');
+  assert.ok(!pool.calls.some((c) => /UPDATE world_chests SET state = 'opened'/i.test(c.sql)), 'the world state must not change');
+});
+
+test('a vault chest still on cooldown for this character is refused, with the time left', async () => {
+  const pool = scriptedRoutePool(vaultRoutes([
+    [/INSERT INTO character_chest_opens/i, { rows: [], rowCount: 0 }],
+    [/SELECT GREATEST/i, { rows: [{ ms: '754000' }], rowCount: 1 }],
+  ]));
+  const r = await openChest(pool, 'c1', 7, { rng: () => 0 });
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, 'already opened');
+  assert.equal(r.reopenInMs, 754000);
+  assert.ok(pool.calls.some((c) => /ROLLBACK/i.test(c.sql)), 'the transaction is rolled back, no loot granted');
+  assert.ok(!pool.calls.some((c) => /INSERT INTO player_items/i.test(c.sql)));
+});
+
+test('a vault chest an older build left globally opened is treated as unlocked', async () => {
+  const pool = scriptedRoutePool([
+    [/SELECT .* FROM world_chests WHERE id = \$1 FOR UPDATE/i, {
+      rows: [{ id: 'c1', state: 'opened', kind: 'vault', guard_creature_ids: [], guard_level: 5 }], rowCount: 1,
+    }],
+    [/INSERT INTO character_chest_opens/i, { rows: [{ opened_at: 'x' }], rowCount: 1 }],
+    [/FROM chest_loot/i, { rows: [], rowCount: 0 }],
+    [/FROM player_progression/i, { rows: [{ level: 2, experience: 100 }], rowCount: 1 }],
+    [/UPDATE player_progression/i, { rows: [{ level: 2, experience: 100 }], rowCount: 1 }],
+  ]);
+  const r = await openChest(pool, 'c1', 7, { rng: () => 0 });
+  assert.equal(r.ok, true);
+});
+
+test('a FIELD chest keeps the global one-shot behaviour', async () => {
+  const pool = scriptedRoutePool([
+    [/SELECT .* FROM world_chests WHERE id = \$1 FOR UPDATE/i, {
+      rows: [{ id: 'c2', state: 'opened', kind: 'field', guard_creature_ids: [], guard_level: 5 }], rowCount: 1,
+    }],
+  ]);
+  const r = await openChest(pool, 'c2', 7);
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, 'already opened');
+  assert.ok(!pool.calls.some((c) => /character_chest_opens/i.test(c.sql)));
 });
