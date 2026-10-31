@@ -2,7 +2,7 @@ const express = require('express');
 const queue = require('../services/spriteJobQueue.js');
 const concepts = require('../services/spriteConcepts.js');
 const { safeName } = require('../services/spriteDispatcher.js');
-const { PROP_FX } = queue;
+const { PROP_FX, DEFAULT_PROP_FX } = queue;
 const { appearancePrompt } = require('../services/catalogSubjects.js');
 const { staticFrameFor } = require('../services/spriteSheetManifest.js');
 
@@ -285,8 +285,8 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       return res.status(400).json({ error: 'actions must be a non-empty list of action ids' });
     }
     // Props v2: a prop's in-game idle effect (copied to entity_types.idle_fx
-    // on approve). Omitted means none; anything else sent must be a known one.
-    const propFx = 'prop_fx' in req.body ? req.body.prop_fx : 'none';
+    // on approve). Omitted means drift (SOMET-677); anything sent must be a known one.
+    const propFx = 'prop_fx' in req.body ? req.body.prop_fx : DEFAULT_PROP_FX;
     if (!PROP_FX.includes(propFx)) {
       return res.status(400).json({ error: `prop_fx must be one of ${PROP_FX.join(', ')}` });
     }

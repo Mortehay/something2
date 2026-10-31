@@ -287,8 +287,8 @@ const propFxParam = (insert) => {
   return insert.params[9];
 };
 
-test('jobs stores prop_fx on prop rows only, defaulting to none', async () => {
-  for (const [sent, want] of [[undefined, 'none'], ['shine', 'shine'], ['sway', 'sway'], ['drift', 'drift'], ['none', 'none']]) {
+test('jobs stores prop_fx on prop rows only, defaulting to drift', async () => {
+  for (const [sent, want] of [[undefined, 'drift'], ['shine', 'shine'], ['sway', 'sway'], ['drift', 'drift'], ['none', 'none']]) {
     const calls = [];
     // eslint-disable-next-line no-await-in-loop
     const res = await request(routerApp(mixedPool(calls))).post('/api/sprite-admin/jobs')
