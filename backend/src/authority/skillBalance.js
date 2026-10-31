@@ -435,7 +435,8 @@ function mitigateIncoming(target, final, element, source) {
   const physical = element === 'physical';
   const m = target._buffMods;
 
-  if (m && source) {
+  // A burn or aura tick is not a blow: nothing to dodge, nothing to reflect.
+  if (m && source && !target._dotTick) {
     if (m.reflect > 0 || (physical && m.reflectPhys > 0)) {
       const share = Math.max(m.reflect, physical ? m.reflectPhys : 0);
       (target._pendingReflect || (target._pendingReflect = [])).push({ source, amount: final * share, element });
