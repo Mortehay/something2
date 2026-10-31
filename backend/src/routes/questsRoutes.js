@@ -19,6 +19,7 @@ const {
   startQuest,
   completeQuest,
   abandonQuest,
+  clearRewardPending,
 } = require('../services/questsService.js');
 
 function sendError(res, err, what) {
@@ -29,7 +30,11 @@ function sendError(res, err, what) {
   return res.status(500).json({ ok: false, error: `failed to ${what}` });
 }
 
-function createQuestsRouter(pool) {
+// `dropRewardItem(userId, itemName)` -> Promise<boolean>: puts the reward item
+// at the live player's feet. Defaults to "cannot", which leaves the item owed
+// (character_quests.reward_item_pending) for delivery at the next join, so a
+// router built without an authority (every test) never loses an item.
+function createQuestsRouter(pool, { dropRewardItem = async () => false } = {}) {
   const router = express.Router();
   const guard = requireAuth(pool);
 
@@ -86,7 +91,19 @@ function createQuestsRouter(pool) {
       const character = await characterOr403(req, res, characterId);
       if (!character) return;
       const result = await completeQuest(pool, character.id, questKey || questId, legacyChoice);
-      res.json({ ok: true, ...result });
+      // Item reward: drop it now if the player is in a world; either way it is
+      // owed until the drop succeeds (see migration 1714440832000).
+      let itemDelivered = false;
+      if (result.completed && result.rewards && result.rewards.item) {
+        try {
+          itemDelivered = await dropRewardItem(req.user.id, result.rewards.item);
+          if (itemDelivered) await clearRewardPending(pool, character.id, result.quest.id);
+        } catch (e) {
+          console.error('quests: reward item delivery failed (kept pending):', e);
+          itemDelivered = false;
+        }
+      }
+      res.json({ ok: true, ...result, itemDelivered });
     } catch (err) {
       sendError(res, err, 'complete quest');
     }

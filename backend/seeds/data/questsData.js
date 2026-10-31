@@ -555,4 +555,17 @@ QUESTS.push(
   }),
 );
 
-module.exports = { QUESTS, OBJECTIVES };
+// Milestone item rewards (item_types NAME), dropped at the player's feet on turn-in.
+const ITEM_REWARDS = {
+  act1_sunspire_reliquary: 'crude-signet',
+  act1_dire_wolfpack: 'iron-band',
+  act2_obsidian_drake: 'tempered-band',
+  act2_celestial_conjunction: 'steel-signet',
+  act3_nether_behemoth: 'obsidian-band',
+  act3_abyssal_crown: 'runed-signet',
+  act4_elemental_crucible: 'astral-band',
+  act4_primordial_sovereign: 'mythic-signet',
+};
+for (const q of QUESTS) q.item_reward = ITEM_REWARDS[q.key] || null;
+
+module.exports = { QUESTS, OBJECTIVES, ITEM_REWARDS };

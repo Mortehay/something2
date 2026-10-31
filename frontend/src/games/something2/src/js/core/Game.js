@@ -3309,6 +3309,8 @@ export class Game {
                                 if (r.gold) rewardMsg += ` +${r.gold}g`;
                                 if (r.exp) rewardMsg += ` +${r.exp} EXP`;
                                 if (r.passive_points) rewardMsg += ` +${r.passive_points} Pt`;
+                                if (res.itemDelivered === false && r.item) rewardMsg += ` (item ${r.item}: delivered at next join)`;
+                                else if (r.item) rewardMsg += ` +${r.item}`;
                                 if (this.showToast) this.showToast(rewardMsg);
                             } else {
                                 if (this.showToast) this.showToast(`🎉 Quest completed! Rewards collected!`);

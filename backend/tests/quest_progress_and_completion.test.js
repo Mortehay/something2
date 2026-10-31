@@ -189,3 +189,41 @@ test('choice quests refuse to complete without a legacy choice', async () => {
   );
   assert.ok(!log.some((q) => /UPDATE (users|player_progression)/.test(q)), 'nothing was paid');
 });
+
+test('every quest item reward names a real item type, and only milestones carry one', () => {
+  const items = JSON.parse(require('fs').readFileSync(require('path').join(__dirname, '..', 'seeds', 'sync', 'items.json'), 'utf8'));
+  const names = new Set();
+  (function walk(v) {
+    if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === 'object') { if (typeof v.name === 'string') names.add(v.name); Object.values(v).forEach(walk); }
+  }(items));
+  const rewarded = QUESTS.filter((q) => q.item_reward);
+  assert.ok(rewarded.length >= 4, 'milestone quests pay an item');
+  for (const q of rewarded) assert.ok(names.has(q.item_reward), `${q.key}: unknown item "${q.item_reward}"`);
+  assert.ok(rewarded.length <= 12, 'item rewards stay milestones, not every quest');
+});
+
+test('completeQuest marks the item reward as owed, and the ledger helpers are guarded', async () => {
+  const { pendingRewardItems, clearRewardPending } = require('../src/services/questsService.js');
+  const seen = [];
+  const client = {
+    async query(sql, params) {
+      seen.push({ sql: sql.replace(/\s+/g, ' ').trim(), params });
+      if (/^(BEGIN|COMMIT|ROLLBACK)/.test(sql.trim())) return { rows: [] };
+      if (/FROM quests WHERE key/.test(sql)) return { rows: [{ id: 5, key: 'k', title: 'T', act: 1, target_count: 1, objective_type: 'kill', gold_reward: 0, exp_reward: 0, passive_points_reward: 0, item_reward: 'iron-band' }] };
+      if (/FROM character_quests WHERE character_id/.test(sql)) return { rows: [{ status: 'active', progress_count: 1 }] };
+      if (/FROM player_progression/.test(sql)) return { rows: [{ experience: 0, level: 1, passive_points: 0 }] };
+      return { rows: [] };
+    },
+    release() {},
+  };
+  const res = await completeQuest({ connect: async () => client }, 1, 'k');
+  assert.strictEqual(res.rewards.item, 'iron-band');
+  const mark = seen.find((s) => /SET status = 'completed'/.test(s.sql));
+  assert.match(mark.sql, /reward_item_pending = \$3/);
+  assert.deepStrictEqual(mark.params, [1, 5, true]);
+
+  const pool = { async query(sql) { return /JOIN quests q/.test(sql) ? { rows: [{ quest_id: 5, key: 'k', item: 'iron-band' }] } : { rowCount: 1, rows: [] }; } };
+  assert.deepStrictEqual(await pendingRewardItems(pool, 1), [{ questId: 5, key: 'k', item: 'iron-band' }]);
+  assert.strictEqual(await clearRewardPending(pool, 1, 5), true);
+});

@@ -217,7 +217,7 @@ export function layoutQuestLog(state = {}) {
     quests: questItems, selectedQuest, legacyChoice, actionButtons,
     totalH, maxScroll, scrollY,
     header: {
-      titleText: "📜 Quest Log (Hotkey 'J')",
+      titleText: "📜 Quest Log (Hotkey 'J')" + (quests.filter((q) => q.status === "completed" && q.title_reward).length ? ` · 👑 ${quests.filter((q) => q.status === "completed" && q.title_reward).length}` : ""),
       choiceText: legacyChoice === "city_restoration"
         ? "✨ Legacy: City Restoration (-15% Vendor Prices)"
         : legacyChoice === "elemental_surge"
@@ -525,7 +525,10 @@ export function drawQuestLog(ctx, layout) {
       rewardItems.push({ text: `✨ +${selectedQuest.passive_points_reward} Passive Points`, color: "#a7f3d0" });
     }
     if (selectedQuest.title_reward) {
-      rewardItems.push({ text: `👑 Title: "${selectedQuest.title_reward}"`, color: "#c084fc" });
+      rewardItems.push({ text: `👑 Title${selectedQuest.status === "completed" ? " earned" : ""}: "${selectedQuest.title_reward}"`, color: "#c084fc" });
+    }
+    if (selectedQuest.item_reward) {
+      rewardItems.push({ text: `🎁 Item: ${selectedQuest.item_reward}`, color: "#fda4af" });
     }
 
     const rewardBoxY = dy;

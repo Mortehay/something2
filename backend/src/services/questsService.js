@@ -250,8 +250,8 @@ async function completeQuest(pool, characterId, questKeyOrId, legacyChoice = nul
     // Mark completed
     await client.query(
       `UPDATE character_quests
-       SET status = 'completed', completed_at = NOW()
-       WHERE character_id = $1 AND quest_id = $2`,
+       SET status = 'completed', completed_at = NOW(), reward_item_pending = $3
+      [characterId, quest.id, !!quest.item_reward],
       [characterId, quest.id],
     );
 
@@ -334,6 +334,7 @@ async function completeQuest(pool, characterId, questKeyOrId, legacyChoice = nul
         exp: quest.exp_reward,
         passive_points: quest.passive_points_reward,
         title: quest.title_reward,
+        item: quest.item_reward || null,
         newLevel: Math.max(curLevel, newLevel),
         leveledUp,
       },
@@ -490,3 +491,28 @@ module.exports = {
   completeQuest,
   incrementQuestProgress,
 };
+
+// Item rewards still owed to this character: [{ questId, key, item }].
+async function pendingRewardItems(pool, characterId) {
+  const { rows } = await pool.query(
+    `SELECT q.id AS quest_id, q.key, q.item_reward AS item
+       FROM character_quests cq JOIN quests q ON q.id = cq.quest_id
+      WHERE cq.character_id = $1 AND cq.reward_item_pending AND q.item_reward IS NOT NULL`,
+    [characterId],
+  );
+  return rows.map((r) => ({ questId: r.quest_id, key: r.key, item: r.item }));
+}
+
+// The item has been dropped for the player; stop owing it. Guarded on the flag
+// so two deliveries racing cannot both clear (or both believe they delivered).
+async function clearRewardPending(pool, characterId, questId) {
+  const r = await pool.query(
+    `UPDATE character_quests SET reward_item_pending = false
+      WHERE character_id = $1 AND quest_id = $2 AND reward_item_pending`,
+    [characterId, questId],
+  );
+  return r.rowCount === 1;
+}
+
+module.exports.pendingRewardItems = pendingRewardItems;
+module.exports.clearRewardPending = clearRewardPending;

@@ -44,7 +44,7 @@ const { knockbackPosition, knockbackWithFallback } = require('./knockback');
 const { buyStock, sellItem } = require('./trade');
 const { recordKill } = require('../services/questsService.js');
 const { vendorBuyPrice, loadLegacyChoice } = require('../services/legacyEffects.js');
-const { recordNode, doneNodeKeys, recordFloor, floorFromWorldName } = require('../services/questsService.js');
+const { pendingRewardItems, clearRewardPending, recordNode, doneNodeKeys, recordFloor, floorFromWorldName } = require('../services/questsService.js');
 const { worldQuestNodes, nearestQuestNode } = require('../services/questNodes.js');
 const { respawnDueCreatures, enqueueDeficit, CREATURE_SWEEP_MS } = require('../services/creatureRespawn');
 const { consumeAmmo, ammoCount } = require('./ammo');
@@ -965,6 +965,41 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // game (the exact defect A1's review caught).
   // Credits one kill to the killer's active quests and tells them. Best-effort
   // and detached: quest bookkeeping must never delay or fail a kill commit.
+  // Quest item reward: put the item (by item_types NAME) on the ground at the
+  // player's feet, where the normal pickup / auto-loot flow collects it. Resolves
+  // true only when it really landed; false means "still owed" to the caller,
+  // which keeps character_quests.reward_item_pending set.
+  async function dropQuestRewardItem(userId, itemName) {
+    const uid = String(userId);
+    const ws = sessionsByUser.get(uid);
+    if (!ws || !ws.worldId) return false;
+    const entry = worlds.get(ws.worldId);
+    if (!entry) return false;
+    const p = entry.world.getPlayer(uid);
+    if (!p) return false;
+    const type = [...entry.world.weapons.values()].find((t) => t && t.name === itemName);
+    if (!type) return false;
+    const cx = p.x + p.width / 2;
+    const cy = p.y + p.height / 2;
+    const landed = await spawnGroundItemTypes(pool, entry, [type.id], cx, cy, { ttlMs: groundItemTtlMs });
+    if (!landed || landed.length === 0) return false;
+    const sock = entry.sockets.get(uid);
+    if (sock) send(sock, { type: 'error', message: `Quest reward dropped at your feet: ${itemName}` });
+    return true;
+  }
+
+  // At join: pay any item rewards still owed (the player completed a quest while
+  // not in a world, or the drop failed). Best-effort and detached.
+  const deliverPendingRewardItems = (userId, characterId) => {
+    pendingRewardItems(pool, characterId)
+      .then(async (owed) => {
+        for (const o of owed) {
+          if (await dropQuestRewardItem(userId, o.item)) await clearRewardPending(pool, characterId, o.questId);
+        }
+      })
+      .catch((e) => console.error('quest reward delivery at join failed:', e));
+  };
+
   // The one wire shape for "these quests moved" (kills, nodes, floors).
   const sendQuestUpdates = (sock, updates) => {
     if (!sock || !updates || !updates.length) return;
@@ -1937,6 +1972,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
           .then((floor) => (floor ? recordFloor(pool, character.id, floor) : []))
           .then((updates) => sendQuestUpdates(ws, updates))
           .catch((e) => console.error('quest floor tracking failed:', e));
+        // Item rewards earned while out of a world (async: the join has finished
+        // registering the player by the time the first query returns).
+        deliverPendingRewardItems(ws.userId, character.id);
         send(ws, {
           type: 'joined', user_id: ws.userId, character_id: character.id, spawn, tickRate: 1000 / tickMs,
           itemTypes: [...entry.world.weapons.values()],
@@ -3927,6 +3965,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // 'pong' event (observable via `worlds.get(id).sockets`) between calls
     // rather than sleeping a guessed duration.
     _heartbeatSweep: heartbeatSweep,
+    // Quest item rewards (routes/questsRoutes.js): drop an item at a live player's feet.
+    dropRewardItem: dropQuestRewardItem,
     // Test seam, same reasoning as _heartbeatSweep above: run one field
     // chest respawn pass synchronously (and await its completion, unlike the
     // real itemSweepTimer's fire-and-forget call) instead of waiting for or
