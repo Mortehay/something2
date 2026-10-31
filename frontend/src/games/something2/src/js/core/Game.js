@@ -100,6 +100,11 @@ const DRAG_THRESHOLD_PX = 4;
 // work out how to dismiss.
 const INSPECT_PIN_MS = 6000;
 
+// Healing up to this many HP at once is passive regeneration noise: no floating
+// text. Anything above it (a potion, a heal spell) is shown.
+export const MIN_HEAL_TEXT = 5;
+export const shouldShowHealText = (heal) => heal > MIN_HEAL_TEXT;
+
 export const DEFAULT_KEYBINDS = {
     slot1: '1',
     slot2: '2',
@@ -1713,7 +1718,10 @@ export class Game {
                 }
             } else if (this.player && this.player.hp !== undefined && mine.hp !== undefined && mine.hp > this.player.hp) {
                 const heal = Math.round(mine.hp - this.player.hp);
-                if (heal > 0) {
+                // Passive regeneration arrives as a trickle of small gains every
+                // few ticks; only a substantial one (> MIN_HEAL_TEXT) is worth a
+                // floating number. HP bar and orb still move for every point.
+                if (shouldShowHealText(heal)) {
                     const jitterX = (Math.random() - 0.5) * 12;
                     this.spawnFloatingText(this.player.x + jitterX, this.player.y - 25, `+${heal} HP`, '#4ade80', { size: 16, bold: true });
                 }
