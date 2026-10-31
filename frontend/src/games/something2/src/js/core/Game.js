@@ -792,6 +792,7 @@ export class Game {
                     this.gemMerchants = Array.isArray(msg.gemMerchants) ? msg.gemMerchants : [];
                     this.skillMerchants = Array.isArray(msg.skillMerchants) ? msg.skillMerchants : [];
                     this.questGivers = Array.isArray(msg.questGivers) ? msg.questGivers : [];
+                    this.loadQuests({ silent: true });
                     this.landmarks = Array.isArray(msg.landmarks) ? msg.landmarks : [];
                     this.doorways = Array.isArray(msg.doorways) ? msg.doorways : [];
                     this.banks = Array.isArray(msg.banks) ? msg.banks : [];
@@ -2139,7 +2140,7 @@ export class Game {
             .catch(() => { this.passiveRespecCost = null; });
     }
 
-    async loadQuests() {
+    async loadQuests({ silent = false } = {}) {
         try {
             const [quests, charQuests] = await Promise.all([
                 (this.allQuests && this.allQuests.length > 0) ? Promise.resolve(this.allQuests) : fetchAllQuests(),
@@ -2188,9 +2189,23 @@ export class Game {
                 const activeQ = this.allQuests.find((q) => q.status === 'active') || this.allQuests[0];
                 this.activeQuestKey = activeQ.key;
             }
+            this._refreshQuestMarkers();
         } catch (err) {
-            if (this.showToast) this.showToast(`Quest Log: ${err.message}`);
+            if (!silent) this.showToast(`Quest Log: ${err.message}`);
         }
+    }
+
+    // "?" on the quest givers when something can be turned in, else "!" when a
+    // quest is open to take at the current level. One marker for every giver:
+    // quests carry a village_key string while givers carry a numeric villageId,
+    // so a per-giver match is not possible yet.
+    _refreshQuestMarkers() {
+        const quests = this.allQuests || [];
+        const level = (this.progression && this.progression.level) || 1;
+        const ready = quests.some((q) => q.status === "active" && (q.progress_count || 0) >= (q.target_count || 1));
+        const open = quests.some((q) => q.status === "available" && (q.required_level || 1) <= level);
+        const marker = ready ? "?" : (open ? "!" : null);
+        for (const qg of (this.questGivers || [])) qg.marker = marker;
     }
 
     // The server counted a kill toward one or more active quests. Patch the
@@ -2201,6 +2216,7 @@ export class Game {
         for (const u of updates) {
             const q = (this.allQuests || []).find((x) => x.key === u.key);
             if (q) q.progress_count = u.progress;
+            this._refreshQuestMarkers();
             if (u.progress >= u.target) {
                 this.showToast(`✔ Objective complete: ${u.title} — turn it in (J)`, 4000);
             } else if (u.progress === 1 || u.progress % 5 === 0) {

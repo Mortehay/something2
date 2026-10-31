@@ -43,6 +43,7 @@ const { commitCreatureDeath, claimItem, claimGold, dropItem, dropGraceActive, sp
 const { knockbackPosition, knockbackWithFallback } = require('./knockback');
 const { buyStock, sellItem } = require('./trade');
 const { recordKill } = require('../services/questsService.js');
+const { vendorBuyPrice, loadLegacyChoice } = require('../services/legacyEffects.js');
 const { respawnDueCreatures, enqueueDeficit, CREATURE_SWEEP_MS } = require('../services/creatureRespawn');
 const { consumeAmmo, ammoCount } = require('./ammo');
 const { PICKUP_RADIUS } = require('./groundItems');
@@ -2608,7 +2609,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // ws.userId, not ws.characterId: merchant_stock.seller_user_id is a
         // users.id and buyback is account-scoped (SOMET-280 — see fetchShop).
         const shop = await fetchShop(pool, village.id, ws.userId, ws.characterClassName);
-        send(ws, { type: 'shop', villageId: village.id, catalog: shop.catalog, buyback: shop.buyback });
+        // Show the price buyStock will actually charge (Act IV legacy discount).
+        const legacy = await loadLegacyChoice(pool, ws.characterId);
+        const priced = (rows) => (legacy ? rows.map((x) => ({ ...x, price: vendorBuyPrice(x.price, legacy) })) : rows);
+        send(ws, { type: 'shop', villageId: village.id, catalog: priced(shop.catalog), buyback: priced(shop.buyback) });
       });
     },
 

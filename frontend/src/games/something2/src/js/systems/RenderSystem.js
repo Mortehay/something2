@@ -3081,6 +3081,18 @@ export class RenderSystem {
       }
     }
 
+    // "!" a quest can be taken, "?" one is ready to turn in (set by Game._refreshQuestMarkers).
+    if (qg.marker) {
+      const bob = Math.sin(this.nowMs * 0.006) * 3;
+      this.ctx.textAlign = "center";
+      this.ctx.font = "bold 22px sans-serif";
+      this.ctx.strokeStyle = "rgba(0,0,0,0.9)";
+      this.ctx.lineWidth = 3;
+      this.ctx.fillStyle = qg.marker === "?" ? "#facc15" : "#fde047";
+      this.ctx.strokeText(qg.marker, dx, dy - r - 20 + bob);
+      this.ctx.fillText(qg.marker, dx, dy - r - 20 + bob);
+    }
+
     this.ctx.restore();
   }
 
