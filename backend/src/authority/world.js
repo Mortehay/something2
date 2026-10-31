@@ -12,7 +12,7 @@ const { applyDamageWithEffects, drainMana, playerKey } = require('./damage');
 const {
   tickEffects, effectMagnitude, applyElementEffect, applyHitStatuses,
   canAct, clearInterrupt, activeEffectKeys,
-  applyCharm, charmerOf,
+  applyCharm, charmerOf, applyEffect, applyStun, isStunned, MARKED,
   BURN, CHILL, SHOCK, SHOCK_MANA_DRAIN,
 } = require('./effects');
 const { activeWeaponType, mitigation, equip: equipItem, unequip: unequipItem } = require('./items');
@@ -28,6 +28,7 @@ const {
 } = require('../services/progressionConstants.js');
 const { lifeCostFor, canPayLife } = require('../services/lifeCost.js');
 const { getSkillById, checkGemRequirements } = require('../../seeds/data/skills.js');
+const skillBalance = require('./skillBalance.js');
 
 // Bounds concurrent creature-owned projectiles per world. A swarm-density
 // world can hold 12-creature packs; twelve Ranged creatures on a 1.8s cooldown
@@ -92,10 +93,10 @@ function sign(v) { return v > 0.3 ? 1 : v < -0.3 ? -1 : 0; }
 // That is accepted (controller ruling Q8); tuning is SOMET-613.
 function playerSpeedMult(p, now) {
   const chill = effectMagnitude(p, CHILL, now);
-  return (chill || 1) * (p._buff || NO_BUFF).speedMult;
+  return (chill || 1) * (p._buff || NO_BUFF).speedMult * (p._buffMods ? p._buffMods.speed : 1);
 }
 function debuffDamageMult(p) {
-  return (p._buff || NO_BUFF).damageMult;
+  return (p._buff || NO_BUFF).damageMult * (p._buffMods ? p._buffMods.dealt : 1);
 }
 
 // SOMET-606. The OWNER's aura state for its own `state` frame (server.js adds
@@ -136,7 +137,8 @@ function weaponDamage(p, w) {
   //
   // Identity is 1, so every weapon with no shape node allocated is unmoved.
   const shape = w.kind === 'melee' ? (p.stats.rules.meleeDamageMult || 1) : 1;
-  return w.damage * mult * elementDamageMult(p.stats, w.element) * shape * debuffDamageMult(p);
+  return w.damage * mult * elementDamageMult(p.stats, w.element) * shape * debuffDamageMult(p)
+    * skillBalance.rollCrit(p, { weapon: w });
 }
 
 // SOMET-495. The passive tree's `damage` grants, as a PER-ELEMENT multiplier.
@@ -198,7 +200,8 @@ function applyAttackCooldown(p, w) {
   const speed = w.kind === 'melee'
     ? p.stats.rules.attackSpeedMult
     : p.stats.rules.castSpeedMult;
-  const scaled = p.stats.cooldownMult / (speed > 0 ? speed : 1);
+  const buffRate = p._buffMods ? p._buffMods.atk : 1;
+  const scaled = p.stats.cooldownMult / ((speed > 0 ? speed : 1) * buffRate);
   // FLOORED HERE, not in derivePlayerStats. cooldownMult arrives already
   // floored, but `floor / speed` is unbounded below -- flooring one factor
   // does not bound a product, and a stack of speed nodes would otherwise drive
@@ -313,12 +316,8 @@ function stepEffects(target, dtMs, now, dealBurn) {
   const chill = effectMagnitude(target, CHILL, now);
   target.speed = chill ? target.baseSpeed * chill : target.baseSpeed;
 
-  // Prune expired player buffs
-  if (target.buffs) {
-    for (const [bid, b] of target.buffs) {
-      if (now >= b.expiresAt) target.buffs.delete(bid);
-    }
-  }
+  // Expire player buffs and pay out their over-time effects
+  skillBalance.tickBuffs(target, dtMs, now);
 
   return died;
 }
@@ -346,6 +345,10 @@ class World {
     // not worth the surface. Ordered by spawn time, which is what lets the
     // per-owner cap drop the STALEST wave rather than an arbitrary one.
     this.waves = [];
+    // Traps laid by Archer skills, and kills made outside a player attack
+    // (reflected damage, auras, traps) waiting to be handed to the next tick.
+    this.traps = [];
+    this._extraKills = [];
     // SOMET-608 (S6). Active skill telegraphs, world-wide, same "plain array,
     // no per-chunk identity" reasoning as waves above -- purely a client
     // rendering aid (the actual damage resolves independently, inside
@@ -482,14 +485,15 @@ class World {
   applyDerivedStats(userId, stats) {
     const p = this.players.get(userId);
     if (!p) return { hpDelta: 0, manaDelta: 0 };
-    const hpDelta = stats.maxHp - p.maxHp;
+    const buffHp = p._buffHpAdd || 0;
+    const hpDelta = stats.maxHp + buffHp - p.maxHp;
     const manaDelta = stats.maxMana - p.maxMana;
     // SOMET-495: stamina moves by the same DELTA rule as hp and mana, so
     // allocating a stamina node mid-fight is a bonus, not a refill. Guarded
     // with ?? for the same reason addPlayer is -- a hand-built bundle with no
     // maxStamina must leave the pool alone rather than NaN it.
     const staminaDelta = (stats.maxStamina ?? p.maxStamina) - p.maxStamina;
-    p.maxHp = stats.maxHp;
+    p.maxHp = stats.maxHp + buffHp;
     p.maxMana = stats.maxMana;
     p.maxStamina = stats.maxStamina ?? p.maxStamina;
     // Lower bound 1, not 0: a respec that shrinks CON must not kill the
@@ -698,7 +702,13 @@ class World {
           }
         }
       }
-      if (p.pendingInputs && p.pendingInputs.length > 0) {
+      if (isStunned(p, this.now)) {
+        // Stunned: input is consumed, nothing moves.
+        if (p.pendingInputs && p.pendingInputs.length > 0) {
+          p.ackSeq = p.pendingInputs[p.pendingInputs.length - 1].seq;
+          p.pendingInputs = [];
+        }
+      } else if (p.pendingInputs && p.pendingInputs.length > 0) {
         const inputs = p.pendingInputs;
         p.pendingInputs = [];
         for (const inp of inputs) {
@@ -747,7 +757,130 @@ class World {
     // persists. Their kills join the same list every other death uses, so
     // credit and cleanup need no special case.
     kills.push(...this._tickWaves(dt));
+    kills.push(...this._tickBuffEffects(dt));
+    if (this._extraKills.length > 0) kills.push(...this._extraKills.splice(0));
     return { kills };
+  }
+
+  // What buffs do in the world, once per tick: damage thrown back (Karma,
+  // Thorns, a dodge counter), the Immolation aura, and the traps on the ground.
+  // Returns the creatures these killed, credited to whoever caused it.
+  _tickBuffEffects(dt) {
+    const kills = [];
+    const credit = (ids, userId) => { for (const id of ids) kills.push({ id, killerUserId: userId }); };
+    for (const p of this.players.values()) {
+      if (p._pendingReflect && p._pendingReflect.length > 0) {
+        const queue = p._pendingReflect;
+        p._pendingReflect = [];
+        const dmg = new Map();
+        for (const r of queue) dmg.set(r.source, (dmg.get(r.source) || 0) + r.amount);
+        for (const [source, amount] of dmg) {
+          const hit = Math.max(1, Math.round(amount));
+          if (source.startsWith('c:')) {
+            if (this.creatures.damageCreatureById(source.slice(2), hit, 'physical', this.now, playerKey(p.userId))) {
+              kills.push({ id: source.slice(2), killerUserId: p.userId });
+            }
+          } else if (source.startsWith('p:')) {
+            const other = this.players.get(source.slice(2));
+            if (other && other !== p) applyDamageWithEffects(other, hit, 'physical', effectiveMit(other), this.now, playerKey(p.userId));
+          }
+        }
+      }
+      const aura = skillBalance.auraOf(p);
+      if (aura) {
+        p._auraBuffAcc = (p._auraBuffAcc || 0) + dt;
+        if (p._auraBuffAcc >= 1) {
+          p._auraBuffAcc -= 1;
+          const dmg = Math.max(1, Math.round(aura.dps * (p.stats.spellMult || 1)
+            * elementDamageMult(p.stats, aura.element) * debuffDamageMult(p)));
+          credit(this.creatures.applyMeleeArc(
+            p.x + p.width / 2, p.y + p.height / 2, 1, 0, aura.radius, Math.PI * 2,
+            dmg, aura.element, this.now, p.userId,
+          ), p.userId);
+        }
+      }
+    }
+    for (const k of this._tickTraps()) kills.push(k);
+    return kills.filter((k, i) => kills.findIndex((o) => o.id === k.id) === i);
+  }
+
+  // A trap springs when a creature walks within its trigger radius.
+  _tickTraps() {
+    if (this.traps.length === 0) return [];
+    const killed = [];
+    const alive = [];
+    const dist = (c, t) => Math.hypot(c.x + CREATURE_SIZE / 2 - t.x, c.y + CREATURE_SIZE / 2 - t.y);
+    for (const t of this.traps) {
+      if (this.now >= t.expiresAt) continue;
+      if (t.kind === 'tar') {
+        // A tar pool slows everything standing in it until it dries.
+        for (const c of this.creatures.all()) {
+          if (dist(c, t) <= t.radius) {
+            applyEffect(c, CHILL, { durationMs: 600, magnitude: 0.25, sourceId: t.ownerId, now: this.now });
+          }
+        }
+        alive.push(t);
+        continue;
+      }
+      const near = this.creatures.all().filter((c) => dist(c, t) <= t.triggerRadius);
+      if (near.length === 0) { alive.push(t); continue; }
+      const owner = this.players.get(t.ownerId);
+      const mult = owner ? (owner.stats.spellMult || 1) * debuffDamageMult(owner) : 1;
+      if (t.kind === 'bear') {
+        for (const c of near) {
+          applyStun(c, 4000, this.now);
+          if (this.creatures.damageCreatureById(c.id, Math.max(1, Math.round(t.damage * mult)), 'physical', this.now, playerKey(t.ownerId))) {
+            killed.push({ id: c.id, killerUserId: t.ownerId });
+          }
+        }
+      } else if (t.kind === 'explosive') {
+        const dmg = Math.max(1, Math.round(t.damage * mult * (owner ? elementDamageMult(owner.stats, 'fire') : 1)));
+        for (const id of this.creatures.applyMeleeArc(t.x, t.y, 1, 0, t.radius, Math.PI * 2, dmg, 'fire', this.now, t.ownerId)) {
+          killed.push({ id, killerUserId: t.ownerId });
+        }
+      }
+    }
+    this.traps = alive;
+    return killed;
+  }
+
+  // Skills that lay something on the ground, mark enemies or heal an ally.
+  _castSpecial(p, spec, targetX, targetY) {
+    if (spec.trap) {
+      const mine = this.traps.filter((t) => t.ownerId === p.userId);
+      if (mine.length >= 3) this.traps.splice(this.traps.indexOf(mine[0]), 1);
+      const base = { ownerId: p.userId, x: targetX, y: targetY, kind: spec.trap, expiresAt: this.now + 60000 };
+      if (spec.trap === 'bear') Object.assign(base, { triggerRadius: 60, damage: 30 });
+      else if (spec.trap === 'explosive') Object.assign(base, { triggerRadius: 60, radius: 130, damage: 45 });
+      else Object.assign(base, { radius: 120, expiresAt: this.now + 12000 });
+      this.traps.push(base);
+    }
+    if (spec.mark) {
+      const px = p.x + p.width / 2;
+      const py = p.y + p.height / 2;
+      for (const c of this.creatures.all()) {
+        if (Math.hypot(c.x + CREATURE_SIZE / 2 - px, c.y + CREATURE_SIZE / 2 - py) <= spec.mark.radius) {
+          applyEffect(c, MARKED, { durationMs: spec.mark.ms, magnitude: spec.mark.vuln, sourceId: p.userId, now: this.now });
+        }
+      }
+    }
+    if (spec.transfuse) {
+      // Life Transfusion: pay a share of your life to restore the nearest ally.
+      let best = null;
+      let bestD = 400;
+      for (const o of this.players.values()) {
+        if (o === p || o.hp <= 0) continue;
+        const d = Math.hypot(o.x - p.x, o.y - p.y);
+        if (d < bestD) { best = o; bestD = d; }
+      }
+      if (best) {
+        const price = Math.round(p.maxHp * spec.transfuse);
+        if (p.hp > price + 1) {
+          p.hp -= price;
+          best.hp = best.maxHp;
+        }
+      }
+    }
   }
 
   // Tick creatures with the live players (aggro/chase/contact damage). Death
@@ -1032,7 +1165,8 @@ class World {
     // resolved ONCE for the whole attack and threaded to every site the swing
     // or the shot can land — exactly like `pacifiedFrom` above, and for the
     // same reason: a shot snapshots what was true when it was fired.
-    const hitStatuses = p.stats.hitStatuses || null;
+    const hitStatuses = skillBalance.weaponHitStatuses(w, p.stats.hitStatuses || null);
+    skillBalance.noteAction(p, this.now);
     // SOMET-495: an augment stone's bonus is damage in the augment's OWN
     // element, so the tree's multiplier for THAT element applies to it. Scaled
     // once, here, rather than at each of the three sites that consume the
@@ -1076,7 +1210,8 @@ class World {
       // FLOORED (SOMET-527). The bonus is a `sum`, so a shape node can author a
       // NEGATIVE to trade reach away -- Sweep does. Without the floor, enough
       // negatives give a swing that reaches nothing at all.
-      const reach = Math.max(MIN_MELEE_REACH, w.reach + (p.stats.rules.meleeReachBonus || 0));
+      const reach = Math.max(MIN_MELEE_REACH, w.reach + (p.stats.rules.meleeReachBonus || 0))
+        * (p._buffMods ? p._buffMods.reach : 1);
       // Clamped at a full turn: past 2*PI a wider arc means nothing (inArc
       // compares against cos(arc/2), and half a turn already reaches behind
       // the attacker), but an unclamped value would keep growing and read as
@@ -1339,6 +1474,7 @@ class World {
       ...(augment === null ? w : { ...w, augment }),
       projectile_speed: w.projectile_speed * speedMult,
       pierce: w.pierce + pierceBonus,
+      range: w.range + (p._buffMods ? p._buffMods.range : 0),
     };
 
     // 1 + the tree's extra shots, fanned symmetrically about the aim vector so
@@ -1469,6 +1605,12 @@ class World {
       return { ok: false, kills: [], reason: 'hp' };
     }
 
+    // The cooldown lives here too: the client's timer is a courtesy, not the rule.
+    // Taken only once the cast is affordable, so a refused cast never locks the skill.
+    if (!skillBalance.takeCooldown(p, skill, this.now)) {
+      return { ok: false, kills: [], reason: 'cooldown' };
+    }
+
     // Deduct resource
     if (skill.costType === 'mana') p.mana = Math.max(0, p.mana - cost);
     else if (skill.costType === 'stamina') p.stamina = Math.max(0, p.stamina - cost);
@@ -1481,47 +1623,14 @@ class World {
     const elemMult = elementDamageMult(p.stats, skill.element);
     
     // Resolve base damage and hit counts (e.g. Barrage deals individual damage per arrow)
-    let baseDamage = Number(skill.damage) || 12;
-    let hitCount = 1;
-    if (skill.id === 'arc_barrage') {
-      baseDamage = 5; // Each of the 12 arrows deals its own damage
-      hitCount = 12;
-    } else if (skill.id === 'arc_fan_of_knives') {
-      baseDamage = 6;
-      hitCount = 8;
-    } else if (skill.id === 'mag_magic_missiles') {
-      baseDamage = 6;
-      hitCount = 5;
-    } else if (skill.id === 'mag_meteor_shower') {
-      baseDamage = 14;
-      hitCount = 4;
-    } else if (skill.id === 'arc_rain_of_arrows' || skill.id === 'arc_volley') {
-      baseDamage = 5;
-      hitCount = 14;
-    } else if (skill.id.includes('multishot') || skill.id.includes('triple')) {
-      baseDamage = 8;
-      hitCount = 3;
-    } else if (skill.id === 'war_flurry_of_steel') {
-      baseDamage = 7;
-      hitCount = 4;
-    } else if (skill.id === 'war_twin_slash') {
-      baseDamage = 8;
-      hitCount = 2;
-    } else {
-      // General skill damage rebalanced / halved to prevent instant kills
-      const desc = (skill.descEn || '') + ' ' + (skill.descUk || '');
-      const pctMatch = desc.match(/(\d+)%/);
-      if (pctMatch) {
-        const pct = parseInt(pctMatch[1], 10);
-        baseDamage = Math.round(10 * (pct / 100) * 0.55);
-      } else {
-        baseDamage = (skill.type === 'melee') ? 12 : 14;
-      }
-      baseDamage = Math.max(4, Math.min(28, baseDamage));
-    }
+    const { base: baseDamage, hits: hitCount } = skillBalance.baseDamageOf(skill);
 
     const intensityMult = skill.channeled ? (1 + channelStack * 0.15) : 1;
-    const damage = Math.max(2, Math.round(baseDamage * baseMult * elemMult * debuffDamageMult(p) * intensityMult));
+    const isSpell = skill.type === 'magic' || skill.type === 'debuff';
+    const critMult = skill.type === 'buff' ? 1 : skillBalance.rollCrit(p, { spell: isSpell });
+    const spellMult = isSpell ? skillBalance.takeSpellMult(p) : 1;
+    if (skill.type !== 'buff') skillBalance.noteAction(p, this.now);
+    const damage = Math.max(2, Math.round(baseDamage * baseMult * elemMult * debuffDamageMult(p) * intensityMult * critMult * spellMult));
     const element = skill.element || (skill.class === 'Mage' ? 'fire' : (skill.class === 'Druid' ? 'lightning' : (skill.class === 'Cultist' ? 'shadow' : 'physical')));
 
     const kills = [];
@@ -1547,7 +1656,8 @@ class World {
       const { nx, ny } = normalizeAim(ax, ay, p.facing);
       const isSpin = skill.channeled || skill.id.includes('whirlwind') || skill.id.includes('spin') || skill.id.includes('crane');
       const reachScale = (skill.channeled && channelStack > 0) ? (1 + channelStack * 0.04) : 1;
-      const reach = (isSpin ? 120 : Math.max(90, (Number(skill.range) || 90) * 1.3)) * reachScale;
+      const reach = (isSpin ? 120 : Math.max(90, (Number(skill.range) || 90) * 1.3)) * reachScale
+        * (p._buffMods ? p._buffMods.reach : 1);
       const arc = isSpin ? (Math.PI * 2) : (Math.PI * 0.75);
       // The same target set applyMeleeArc resolves, read before it can
       // remove a kill.
@@ -1564,11 +1674,7 @@ class World {
           if (!kills.some(k => k.id === kid)) kills.push({ id: kid, killerUserId: userId });
         }
       }
-      // Life leech for sacrificial / blood siphon / soul drain skills
-      if (skill.id.includes('soul_drain') || skill.id.includes('sacrificial') || skill.id.includes('siphon') || skill.id.includes('leech') || skill.id.includes('blood_harvest')) {
-        const leechAmount = Math.max(3, Math.round(damage * 0.35));
-        p.hp = Math.min(p.maxHp || 100, p.hp + leechAmount);
-      }
+      p.hp = Math.min(p.maxHp || 100, p.hp + skillBalance.leechHeal(p, skill, damage));
     } else if (skill.type === 'magic' || skill.type === 'debuff') {
       const aoeScale = (skill.channeled && channelStack > 0) ? (1 + channelStack * 0.04) : 1;
       const aoeRadius = Math.max(90, (Number(skill.radius) || 80) * 1.5) * aoeScale;
@@ -1645,57 +1751,14 @@ class World {
         }
       }
 
-      // Life leech for magic soul drain / siphon
-      if (skill.id.includes('soul_drain') || skill.id.includes('siphon') || skill.id.includes('leech')) {
-        const leechAmount = Math.max(3, Math.round(damage * 0.35));
-        p.hp = Math.min(p.maxHp || 100, p.hp + leechAmount);
-      }
+      p.hp = Math.min(p.maxHp || 100, p.hp + skillBalance.leechHeal(p, skill, damage));
     } else if (skill.type === 'buff') {
-      // 1. Instant recovery/heal effects
-      const desc = (skill.descUk || '') + ' ' + (skill.descEn || '');
-      const isHeal = desc.includes('HP') || desc.includes('зцілює') || desc.includes('відновлює') ||
-                     skill.id.includes('heal') || skill.id.includes('regrowth') || skill.id.includes('rejuvenation') ||
-                     skill.id.includes('flash_of_light') || skill.id.includes('holy_light') || skill.id.includes('unstoppable');
-      if (isHeal) {
-        const healAmt = Math.max(15, Math.round(p.maxHp * 0.25));
-        p.hp = Math.min(p.maxHp, p.hp + healAmt);
+      // What a buff does is data (skillBalance.BUFFS); a buff skill with no entry
+      // only registers a marker.
+      if (!skillBalance.castUnknownBuff(p, skill, this.now)) {
+        const special = skillBalance.castBuff(p, skill, this.now);
+        if (special) this._castSpecial(p, special, targetX, targetY);
       }
-
-      const isManaRestore = skill.id.includes('mana') || skill.id.includes('evocation') || desc.includes('мана') || desc.includes('ману');
-      if (isManaRestore) {
-        let manaPct = 0.40;
-        const pctMatch = desc.match(/(\d+)%/);
-        if (pctMatch) {
-          manaPct = parseInt(pctMatch[1], 10) / 100;
-        }
-        const flatMatch = desc.match(/(\d+)\s*(?:MP|mana|мани)/i);
-        const maxMana = p.maxMana || 100;
-        let manaAmt = Math.max(35, Math.round(maxMana * manaPct));
-        if (flatMatch && !pctMatch) {
-          manaAmt = parseInt(flatMatch[1], 10);
-        }
-        p.mana = Math.min(maxMana, p.mana + manaAmt);
-      }
-
-      const isStaminaRestore = skill.id.includes('stamina') || skill.id.includes('adrenaline') || desc.includes('витривал');
-      if (isStaminaRestore) {
-        p.stamina = Math.min(p.maxStamina, p.stamina + 30);
-      }
-
-      // 2. Active duration buff registration
-      if (!p.buffs) p.buffs = new Map();
-      const durSec = Number(skill.duration) || (skill.cooldown ? Math.max(8, Math.min(45, skill.cooldown * 1.5)) : 20);
-      const durMs = durSec * 1000;
-      p.buffs.set(skill.id, {
-        id: skill.id,
-        nameUk: skill.nameUk,
-        nameEn: skill.nameEn,
-        icon: skill.icon || '✨',
-        iconColor: skill.iconColor || '#fbbf24',
-        startedAt: this.now,
-        durationMs: durMs,
-        expiresAt: this.now + durMs,
-      });
     }
 
     // Game audio slice 3: a cast that got this far happened; heard at the
@@ -1747,6 +1810,16 @@ class World {
     const died = [];
     for (const p of this.players.values()) {
       if (p.hp <= 0) {
+        // Blood Rebirth: a death the buff catches is not a death.
+        const revive = skillBalance.takeRevive(p);
+        if (revive > 0) {
+          p.hp = Math.max(1, Math.round(p.maxHp * revive));
+          const blast = Math.max(1, Math.round(40 * (p.stats.spellMult || 1)));
+          for (const id of this.creatures.applyMeleeArc(
+            p.x + p.width / 2, p.y + p.height / 2, 1, 0, 160, Math.PI * 2, blast, 'shadow', this.now, p.userId,
+          )) this._extraKills.push({ id, killerUserId: p.userId });
+          continue;
+        }
         died.push(p.userId);
         // WHERE THE DEATH HAPPENED, kept because the snap on the next line
         // destroys it (SOMET-443). server.js's onPlayerDeath needs it to pick

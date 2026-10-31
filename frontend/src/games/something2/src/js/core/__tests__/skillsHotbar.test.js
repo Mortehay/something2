@@ -149,7 +149,10 @@ describe("Skills Panel & Hotbar Interactions", () => {
     expect(g.blasts.length).toBeGreaterThan(0);
     expect(g.hotbarFlashSlot).toBe(1);
 
-    // 2. Exit Bear Form
+    // 2. Exit Bear Form (a shape change obeys the skill's 2 s cooldown, like the server)
+    g._keydownHandler({ key: "1", code: "Digit1", repeat: false, preventDefault: () => {} });
+    expect(g.activeForm).toBe("bear");
+    g.skillCooldowns.clear();
     g._keydownHandler({ key: "1", code: "Digit1", repeat: false, preventDefault: () => {} });
     expect(g.activeForm).toBeNull();
     expect(lastToast).toContain("Exited BEAR Form");

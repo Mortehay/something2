@@ -61,6 +61,7 @@
 // 200ms dagger when SOMET-480 judged shock too dangerous for a debuff affix.
 
 const { PLAYER_CHARM_MS, PLAYER_CHARM_IMMUNITY_MS } = require('../services/charm.js');
+const skillBalance = require('./skillBalance.js');
 
 const BURN = 'burn';
 const CHILL = 'chill';
@@ -69,6 +70,8 @@ const SHOCK = 'shock';
 // creature is taken over outright by CreatureSim (faction flip + follow), and
 // never carries an effects entry. See applyCharm below.
 const CHARMED = 'charmed';
+// A creature marked by Hunter's Instinct: takes extra damage, like shock's vulnerability.
+const MARKED = 'marked';
 
 const BURN_DURATION_MS = 4000;
 const BURN_MAGNITUDE = 2;    // damage dealt per burn tick (pre-mitigation)
@@ -136,6 +139,9 @@ const TICK_INTERVAL_MS = { [BURN]: BURN_TICK_MS, [SHOCK]: SHOCK_TICK_MS };
 // resets the DOT cadence nor lets spamming the same weapon produce extra
 // ticks.
 function applyEffect(target, key, { durationMs, magnitude, sourceId, now }) {
+  // Iron Will / Zen Focus shrug off slows; Dark Blessing shrugs off burning and charm.
+  if (key === CHILL && skillBalance.hasBuffFlag(target, 'ccImmune')) return;
+  if ((key === BURN || key === CHARMED) && skillBalance.hasBuffFlag(target, 'curseImmune')) return;
   if (!target.effects) target.effects = new Map();
   const existing = target.effects.get(key);
   target.effects.set(key, {
@@ -260,9 +266,29 @@ function activeEffectKeys(target, now) {
 // `now` is passed in, never read from a clock, like every other function here.
 function applyShockInterrupt(target, now) {
   if (target._shockImmuneUntil > now) return false; // undefined > now is false
+  if (skillBalance.hasBuffFlag(target, 'ccImmune')) return false;
   target._interruptedUntil = now + SHOCK_INTERRUPT_MS;
   target._shockImmuneUntil = now + SHOCK_IMMUNITY_MS;
   return true;
+}
+
+// A stun: the target can neither act nor move for `ms`. It is the interrupt's
+// cousin and keeps its rule -- a window of immunity that is stamped once and never
+// refreshed, so a mace cannot chain-lock anything. World bosses cannot be stunned,
+// and Iron Will / Zen Focus make a player immune. Returns true when it landed.
+const STUN_IMMUNITY_MS = 3000;
+function applyStun(target, ms, now) {
+  if (skillBalance.hasBuffFlag(target, 'ccImmune')) return false;
+  if (target.stunImmune || target.damageTakenMult) return false;
+  if (target._stunImmuneUntil > now) return false;
+  target._stunnedUntil = now + ms;
+  target._interruptedUntil = Math.max(target._interruptedUntil || 0, now + ms);
+  target._stunImmuneUntil = now + ms + STUN_IMMUNITY_MS;
+  return true;
+}
+
+function isStunned(target, now) {
+  return target._stunnedUntil > now;
 }
 
 // True when `target` is free to act. Allocation-free, and safe on a target that
@@ -427,6 +453,13 @@ function applyHitStatuses(target, statuses, now, sourceId) {
   if (!statuses || statuses.length === 0) return null;
   let applied = null;
   for (const s of statuses) {
+    // A weapon's own rider: { status: 'stun', chance, ms }.
+    if (s && typeof s === 'object') {
+      if (s.status === 'stun' && skillBalance.roll() < s.chance && applyStun(target, s.ms, now)) {
+        (applied || (applied = [])).push('stun');
+      }
+      continue;
+    }
     const spec = STATUS_EFFECTS[s];
     // An unknown status is skipped, not defaulted: the tree's authored set is
     // validated at seed time, and silently substituting some other rider for a
@@ -464,6 +497,10 @@ module.exports = {
   SHOCK_MANA_DRAIN,
   SHOCK_TICK_MS,
   applyShockInterrupt,
+  applyStun,
+  isStunned,
+  STUN_IMMUNITY_MS,
+  MARKED,
   canAct,
   clearInterrupt,
   SHOCK_INTERRUPT_MS,

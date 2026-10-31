@@ -58,6 +58,7 @@ const SKILL_PROJECTILE_SPEED = 400;
 // time; CREATURE_DAMAGE stays live below (GUARD_DEFAULT_BEHAVIOR and the
 // no-profile hostile path both still read it directly).
 const AGGRO_RADIUS = 400;            // px: acquire nearest player within this
+const STEALTH_NOTICE = 90;           // px: a stealthed player is noticed only this close
 const LEASH_RADIUS = 800;            // px: drop a target beyond this
 const CONTACT_RANGE = 60;            // px: creature may hit its target within this
 const CREATURE_DAMAGE = 5;
@@ -1914,6 +1915,8 @@ class CreatureSim {
         }
         continue;
       }
+      // A stunned creature neither moves nor attacks (applyStun).
+      if (c._stunnedUntil > now) continue;
 
       const cc = center(c);
 
@@ -2294,6 +2297,8 @@ class CreatureSim {
         for (const p of players) {
           const pc = center(p);
           const d2 = dist2(cc.x, cc.y, pc.x, pc.y);
+          // A stealthed player (Camouflage) is only noticed from point-blank.
+          if (p._stealthed && d2 > STEALTH_NOTICE * STEALTH_NOTICE) continue;
           const provoker = retaliates && isProvokedBy(c, playerKey(p.userId), now);
           const reach = provoker ? Math.max(bh.aggroRadius, bh.leashRadius) : bh.aggroRadius;
           if (d2 > reach * reach) continue;
