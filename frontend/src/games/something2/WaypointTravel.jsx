@@ -3,7 +3,7 @@ import styled from 'styled-components';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { authHeaders, apiFetch } from './src/js/net/auth.js';
-import { buildTravelList, splitTravelTabs, REASON } from './waypointTravel.js';
+import { buildTravelList, splitTravelTabs, lastSpireCheckpoint, REASON } from './waypointTravel.js';
 import { shouldAutoOpen, portalTileOf } from './portalAutoOpen.js';
 import { API_URL } from '../../config.js';
 
@@ -78,6 +78,14 @@ const TabButton = styled.button`
   font: inherit;
   font-weight: 600;
   cursor: pointer;
+`;
+
+const LastButton = styled.button`
+  display: block; width: 100%; margin: 8px 0 4px; padding: 9px 12px;
+  border-radius: 6px; border: 1px solid var(--s2-accent);
+  background: var(--s2-accent); color: var(--s2-on-accent);
+  font: inherit; font-weight: 700; cursor: pointer;
+  &:disabled { opacity: 0.45; cursor: default; }
 `;
 
 const CloseButton = styled.button`
@@ -348,6 +356,8 @@ export default function WaypointTravel({ gameRef, characterId }) {
   const hasSpire = tabs.spire.length > 0;
   const activeTab = hasSpire ? tab : 'main';
   const shown = activeTab === 'spire' ? tabs.spire : tabs.main;
+  // One click to the highest lit Spire checkpoint, when it can be taken now.
+  const lastCheckpoint = activeTab === 'spire' ? lastSpireCheckpoint(tabs.spire) : null;
 
   return (
     <Backdrop onClick={() => setOpen(false)}>
@@ -370,6 +380,16 @@ export default function WaypointTravel({ gameRef, characterId }) {
               Spire of Trials
             </TabButton>
           </TabBar>
+        )}
+        {lastCheckpoint && (
+          <LastButton
+            type="button"
+            disabled={!lastCheckpoint.selectable}
+            onClick={() => lastCheckpoint.selectable && travel(lastCheckpoint.id)}
+            title={lastCheckpoint.selectable ? 'Go to your highest Spire checkpoint' : 'Cast a teleport (T) to use this'}
+          >
+            ⏎ Last checkpoint: Floor {lastCheckpoint.floor}
+          </LastButton>
         )}
         {shown.length === 0 && (
           <Empty>

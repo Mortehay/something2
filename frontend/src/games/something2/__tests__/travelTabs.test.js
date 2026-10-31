@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { splitTravelTabs } from '../waypointTravel.js';
+import { splitTravelTabs, lastSpireCheckpoint } from '../waypointTravel.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const g = (worldName) => ({ worldId: worldName, worldName, entries: [] });
@@ -25,6 +25,26 @@ describe('travel menu tabs', () => {
   it('no Spire floors means no Spire tab, and bad input is harmless', () => {
     expect(splitTravelTabs([g('Vale Crossing')]).spire).toEqual([]);
     expect(splitTravelTabs(undefined)).toEqual({ main: [], spire: [] });
+  });
+});
+
+describe('last Spire checkpoint', () => {
+  const grp = (worldName, activated) => ({
+    worldId: worldName, worldName, entries: [{ id: worldName, name: 'cp', activated, selectable: activated }],
+  });
+  it('is the highest lit floor, ignoring unlit ones and the rest of the world', () => {
+    const last = lastSpireCheckpoint([
+      grp('Spire of Trials: Floor 5', true),
+      grp('Spire of Trials: Floor 30', true),
+      grp('Spire of Trials: Floor 40', false),
+      grp('Spire of Trials: Floor 10', true),
+      grp('Vale Crossing', true),
+    ]);
+    expect(last.floor).toBe(30);
+  });
+  it('is null when no Spire checkpoint is lit', () => {
+    expect(lastSpireCheckpoint([grp('Spire of Trials: Floor 5', false), grp('Vale Crossing', true)])).toBeNull();
+    expect(lastSpireCheckpoint(undefined)).toBeNull();
   });
 });
 

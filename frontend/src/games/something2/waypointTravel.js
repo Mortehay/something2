@@ -52,6 +52,22 @@ export function splitTravelTabs(groups) {
   };
 }
 
+// The highest Spire floor the character has a lit checkpoint on, as the list
+// entry (or null). `groups` are the buildTravelList groups; only entries the
+// player has actually lit count.
+export function lastSpireCheckpoint(groups) {
+  let best = null;
+  let bestFloor = -1;
+  for (const g of Array.isArray(groups) ? groups : []) {
+    if (!String(g.worldName || '').startsWith(SPIRE_PREFIX)) continue;
+    const floor = floorNo(g.worldName);
+    for (const e of g.entries || []) {
+      if (e.activated && floor > bestFloor) { best = { ...e, floor }; bestFloor = floor; }
+    }
+  }
+  return best;
+}
+
 export function buildTravelList({ waypoints, currentWorldId, playerX, playerY, bossNearbyWaypointId, bossName, bossWorldId, teleportReady = false } = {}) {
   const list = Array.isArray(waypoints) ? waypoints : [];
 
