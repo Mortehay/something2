@@ -41,10 +41,12 @@ function needsPush(st) {
   return (isSkipped(v) ? v !== skippedMarker(st.exported_sha256) : v !== st.exported_sha256);
 }
 
+// The known token, plus any token-shaped value after "Bearer" (8+ chars with
+// a digit, or 20+): plain prose such as "its bearer token." survives.
 function scrub(text, token) {
   let out = String(text);
   if (token) out = out.split(token).join('[token]');
-  return out.replace(/bearer\s+\S+/gi, '[token]');
+  return out.replace(/\bbearer\s+(?:\[token\]|(?=\S*\d)\S{8,}|\S{20,})/gi, '[token]');
 }
 function errorText(err, token) {
   const code = (err && err.code && typeof err.code === 'string') ? err.code : 'error';
@@ -190,5 +192,5 @@ function problemsNote(results) {
 }
 
 module.exports = {
-  pushToBox, boxNote, boxProblems, problemsNote, needsPush, UNREACHABLE_NOTE,
+  pushToBox, boxNote, boxProblems, problemsNote, needsPush, scrub, UNREACHABLE_NOTE,
 };

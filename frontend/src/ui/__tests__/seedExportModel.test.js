@@ -692,3 +692,23 @@ describe('git edge states (SOMET-649)', () => {
     expect(gitDialogAfterStatus(null, st())).toBeNull();
   });
 });
+
+import { submitOnce } from '../../games/something2/seedExportModel.js';
+
+// SOMET-641: a fast double click on Apply sent two seeds; the second was
+// refused busy and left the dialog open on that error after the first won.
+describe('submitOnce', () => {
+  it('runs once until settled, then allows the next submit', () => {
+    const flag = { current: false };
+    let settle;
+    const start = (done) => { settle = done; };
+    let calls = 0;
+    const run = (d) => { calls += 1; start(d); };
+    expect(submitOnce(flag, run)).toBe(true);
+    expect(submitOnce(flag, run)).toBe(false);
+    expect(calls).toBe(1);
+    settle();
+    expect(submitOnce(flag, run)).toBe(true);
+    expect(calls).toBe(2);
+  });
+});

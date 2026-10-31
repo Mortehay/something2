@@ -2,12 +2,12 @@
 // export file, one section per group in registry (= dependency) order, one
 // Apply. Sections reuse PreviewSection; decisions live here, per group, keyed
 // to the preview's signature so a reloaded diff resets only that group.
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import styled from 'styled-components';
 import { useSeedPreviews, useApplyAll } from './useSeedExport.js';
 import {
   initialDecisions, previewSignature, seedRequestBody, seedAllGate, applyGate, pluralize, separateNote, BUSY_TEXT,
-  DISCARD_CONFIRM, hasChoices,
+  DISCARD_CONFIRM, hasChoices, submitOnce,
 } from './seedExportModel.js';
 import { Btn, Muted, Modal } from './seedUi.jsx';
 import PreviewSection from './SeedPreviewSection.jsx';
@@ -81,7 +81,8 @@ export default function SeedAllModal({ groups, onClose, binaryGroups = [], onSee
   const sections = live.map(({ g, q }) => ({ rows: q.data.rows || [], decisions: decisionsOf(g, q) }));
   const gate = seedAllGate(sections);
 
-  const submit = () => {
+  const inFlight = useRef(false);
+  const submit = () => submitOnce(inFlight, (settled) => {
     const items = live.filter(({ q }) => (q.data.rows || []).length > 0).map(({ g, q }) => ({
       id: g.id, label: g.label, body: seedRequestBody(decisionsOf(g, q), q.data),
     }));
@@ -95,8 +96,9 @@ export default function SeedAllModal({ groups, onClose, binaryGroups = [], onSee
           if (i >= 0) queries[i].refetch();
         });
       },
+      onSettled: settled,
     });
-  };
+  });
 
   // Opening Art / Audio's own preview closes this modal: confirm first when
   // the admin already made choices here.
