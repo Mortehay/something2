@@ -5,6 +5,9 @@
 const { levelForXp } = require('./playerStats.js');
 const { getSetting } = require('./gameSettings.js');
 
+// Act IV permanent legacy choices (player_progression.legacy_choice).
+const LEGACY_CHOICES = ['city_restoration', 'elemental_surge'];
+
 // A refusal the caller can act on (locked quest, level too low, unknown quest),
 // as opposed to a database failure. The route maps `status` to HTTP and hides
 // the message of anything that is NOT a QuestError, so a pg error text never
@@ -98,7 +101,7 @@ async function getCharacterQuests(pool, characterId) {
       status,
       // A manual objective is met by turning it in, so an accepted one shows
       // as done and the log offers Complete (completeQuest applies the same rule).
-      progress_count: q.objective_type === 'manual' && status === 'active'
+      progress_count: (q.objective_type === 'manual' || q.objective_type === 'choice') && status === 'active'
         ? (q.target_count || 1)
         : Number(q.progress_count) || 0,
       target_count: q.target_count || 1,
@@ -223,9 +226,23 @@ async function completeQuest(pool, characterId, questKeyOrId, legacyChoice = nul
     const targetCount = Number(quest.target_count) || 1;
     // `manual` objectives have no in-game tracker yet, so the turn-in itself
     // is the proof (see migration 1714440827000).
-    const currentProg = quest.objective_type === 'manual'
+    const isTurnIn = quest.objective_type === 'manual' || quest.objective_type === 'choice';
+    const currentProg = isTurnIn
       ? targetCount
       : Number(cqRes.rows[0].progress_count) || 0;
+
+    // `choice`: the turn-in IS the decision. Take the legacy asked for now, or
+    // the one already stored (a character that chose through an older build);
+    // with neither there is nothing to turn in.
+    if (quest.objective_type === 'choice' && !LEGACY_CHOICES.includes(legacyChoice)) {
+      const had = await client.query(
+        'SELECT legacy_choice FROM player_progression WHERE character_id = $1',
+        [characterId],
+      );
+      if (!(had.rows[0] && LEGACY_CHOICES.includes(had.rows[0].legacy_choice))) {
+        throw new QuestError('Choose a legacy to complete this quest.');
+      }
+    }
     if (currentProg < targetCount) {
       throw new QuestError(`Quest objective not completed yet (${currentProg}/${targetCount})`);
     }
@@ -293,8 +310,8 @@ async function completeQuest(pool, characterId, questKeyOrId, legacyChoice = nul
     // second request used to be echoed back as if it had been applied.
     let appliedLegacyChoice = null;
     if (quest.act === 4 && legacyChoice) {
-      const allowedChoices = ['city_restoration', 'elemental_surge'];
-      if (allowedChoices.includes(legacyChoice)) {
+
+      if (LEGACY_CHOICES.includes(legacyChoice)) {
         const lc = await client.query(
           `UPDATE player_progression
            SET legacy_choice = COALESCE(legacy_choice, $2)
@@ -375,6 +392,76 @@ async function recordKill(pool, characterId, { typeName = null, isBoss = false }
   return rows;
 }
 
+// SERVER-INTERNAL. The character used a quest node (see services/questNodes.js).
+// Credits every ACTIVE `interact` quest on that group, once per node per quest,
+// in one statement: the node row is the proof, so pressing E ten times on one
+// herb advances nothing after the first. Empty array = no active quest needed
+// this node, or it was already used for them.
+async function recordNode(pool, characterId, group, nodeKey) {
+  const { rows } = await pool.query(
+    `WITH eligible AS (
+       SELECT cq.character_id, cq.quest_id, q.key, q.title, q.target_count
+         FROM character_quests cq
+         JOIN quests q ON q.id = cq.quest_id
+        WHERE cq.character_id = $1 AND cq.status = 'active'
+          AND q.objective_type = 'interact' AND q.target_key = $2
+          AND cq.progress_count < q.target_count
+     ), fresh AS (
+       INSERT INTO character_quest_nodes (character_id, quest_id, node_key)
+       SELECT character_id, quest_id, $3::text FROM eligible
+       ON CONFLICT DO NOTHING
+       RETURNING quest_id
+     )
+     UPDATE character_quests cq
+        SET progress_count = LEAST(e.target_count, cq.progress_count + 1)
+       FROM eligible e JOIN fresh f ON f.quest_id = e.quest_id
+      WHERE cq.character_id = e.character_id AND cq.quest_id = e.quest_id
+  RETURNING e.key, e.title, e.target_count, cq.progress_count`,
+    [characterId, group, nodeKey],
+  );
+  return rows;
+}
+
+// Node keys this character has spent on a quest that is still active, so the
+// client can dim them.
+async function doneNodeKeys(pool, characterId) {
+  const { rows } = await pool.query(
+    `SELECT DISTINCT n.node_key
+       FROM character_quest_nodes n
+       JOIN character_quests cq
+         ON cq.character_id = n.character_id AND cq.quest_id = n.quest_id
+      WHERE n.character_id = $1 AND cq.status = 'active'`,
+    [characterId],
+  );
+  return rows.map((r) => r.node_key);
+}
+
+// "Spire of Trials: Floor 7" -> 7, anything else -> null.
+function floorFromWorldName(name) {
+  const m = /^Spire of Trials: Floor (\d+)$/.exec(String(name || ''));
+  return m ? Number(m[1]) : null;
+}
+
+// SERVER-INTERNAL. The character is standing on floor N of the Spire. Progress
+// is the DEEPEST floor reached (GREATEST), never a count of entries, so going
+// in and out of a floor farms nothing.
+async function recordFloor(pool, characterId, floor) {
+  const f = Math.floor(Number(floor));
+  if (!Number.isFinite(f) || f < 1) return [];
+  const { rows } = await pool.query(
+    `UPDATE character_quests cq
+        SET progress_count = LEAST(q.target_count, $2::int)
+       FROM quests q
+      WHERE q.id = cq.quest_id
+        AND cq.character_id = $1 AND cq.status = 'active'
+        AND q.objective_type = 'floor'
+        AND cq.progress_count < LEAST(q.target_count, $2::int)
+  RETURNING q.key, q.title, q.target_count, cq.progress_count`,
+    [characterId, f],
+  );
+  return rows;
+}
+
 // Give up an ACTIVE quest: the row (and its progress) is dropped so the quest
 // is offered again from zero. A completed quest is never touched.
 async function abandonQuest(pool, characterId, questKeyOrId) {
@@ -389,6 +476,10 @@ async function abandonQuest(pool, characterId, questKeyOrId) {
 }
 
 module.exports = {
+  recordNode,
+  doneNodeKeys,
+  recordFloor,
+  floorFromWorldName,
   dailyDue,
   recordKill,
   abandonQuest,

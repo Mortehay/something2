@@ -338,6 +338,7 @@ export class RenderSystem {
     skillMerchants = [],
     // Dedicated Quest Giver / Elder NPC
     questGivers = [],
+    questNodes = [],
     // SOMET-310. Same join-frame fixed-world-point shape as `merchants`.
     banks = [], bank = null, bankOpen = false, bankView = null,
     // SOMET-372 -- WORLD chests (guarded, lootable), not the account chest
@@ -510,6 +511,9 @@ export class RenderSystem {
     for (const qg of questGivers) {
       drawables.push({ kind: "questGiver", ref: qg, order: 0, depth: depthKey(qg.x, qg.y) });
     }
+    for (const qn of questNodes) {
+      drawables.push({ kind: "questNode", ref: qn, order: 0, depth: depthKey(qn.x, qn.y) });
+    }
     // Bank posts are the same kind of fixed world point as merchants, and go
     // through the same depth sort — a chest one tile behind the merchant must
     // draw behind them, which a separate later pass would get wrong.
@@ -541,6 +545,7 @@ export class RenderSystem {
       else if (d.kind === "gem_merchant") this.drawGemMerchant(d.ref, player);
       else if (d.kind === "skillMerchant") this.drawSkillMerchant(d.ref, player);
       else if (d.kind === "questGiver") this.drawQuestGiver(d.ref, player);
+      else if (d.kind === "questNode") this.drawQuestNode(d.ref, player);
       else if (d.kind === "bank") this.drawBank(d.ref, player);
       else if (d.kind === "worldchest") this.drawWorldChest(d.ref, player);
       else if (d.kind === "pointart") this.drawPointBody(d.ref.def, d.ref.x, d.ref.y, d.ref.treatment);
@@ -3004,6 +3009,49 @@ export class RenderSystem {
       }
     }
     this.ctx.restore();
+  }
+
+  // A quest node (herb, tendril, obelisk, crystal, ...): a glowing marker the
+  // player walks up to and presses E on. Spent nodes are dimmed and quiet.
+  drawQuestNode(qn, player = null) {
+    const s = worldToScreen(qn.x, qn.y);
+    const dx = s.x, dy = s.y;
+    const ctx = this.ctx;
+    const pulse = Math.sin(this.nowMs * 0.005 + qn.x * 0.01) * 0.25 + 0.75;
+    const done = !!qn.done;
+    ctx.save();
+    ctx.globalAlpha = done ? 0.35 : 1;
+    ctx.beginPath();
+    ctx.ellipse(dx, dy + 2, 16, 8, 0, 0, Math.PI * 2);
+    ctx.fillStyle = done ? "rgba(148,163,184,0.25)" : `rgba(56,189,248,${0.35 * pulse})`;
+    ctx.fill();
+    ctx.fillStyle = done ? "#94a3b8" : "#7dd3fc";
+    ctx.strokeStyle = "rgba(0,0,0,0.75)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(dx, dy - 14);
+    ctx.lineTo(dx + 9, dy - 4);
+    ctx.lineTo(dx, dy + 6);
+    ctx.lineTo(dx - 9, dy - 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    if (player && !done) {
+      const pcx = player.x + (player.width || 0) / 2;
+      const pcy = player.y + (player.height || 0) / 2;
+      if (Math.hypot(qn.x - pcx, qn.y - pcy) <= WORLD_CHEST_PROMPT_R) {
+        ctx.globalAlpha = 1;
+        ctx.textAlign = "center";
+        ctx.font = "bold 11px sans-serif";
+        ctx.fillStyle = "#7dd3fc";
+        ctx.strokeStyle = "rgba(0,0,0,0.85)";
+        ctx.lineWidth = 2;
+        const label = `[e] ${qn.name || "Interact"}`;
+        ctx.strokeText(label, dx, dy + 24);
+        ctx.fillText(label, dx, dy + 24);
+      }
+    }
+    ctx.restore();
   }
 
   // Dedicated Quest Giver / Elder Eldrin NPC in village

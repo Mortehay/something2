@@ -111,3 +111,81 @@ test('abandonQuest only drops an active quest', async () => {
   assert.ok((await abandonQuest(mk(1), 1, 'k')).quest);
   await assert.rejects(() => abandonQuest(mk(0), 1, 'k'), (e) => e instanceof QuestError && e.status === 409);
 });
+
+test('no main-story quest is left on the turn-in-only "manual" type', () => {
+  const left = QUESTS.filter((q) => !q.is_side && q.objective_type === 'manual').map((q) => q.key);
+  assert.deepStrictEqual(left, [], `still manual: ${left.join(', ')}`);
+});
+
+test('interact quests name a node group that exists, and the world offers enough nodes', () => {
+  const { GROUPS, CATALOG } = require('../src/services/questNodes.js');
+  const supply = new Map();
+  for (const hosts of Object.values(CATALOG)) {
+    for (const [group, count] of hosts) supply.set(group, (supply.get(group) || 0) + count);
+  }
+  for (const q of QUESTS.filter((x) => x.objective_type === 'interact')) {
+    assert.ok(GROUPS[q.target_key], `${q.key}: unknown node group ${q.target_key}`);
+    assert.ok((supply.get(q.target_key) || 0) >= q.target_count,
+      `${q.key}: needs ${q.target_count} ${q.target_key} nodes, catalog hosts ${supply.get(q.target_key) || 0}`);
+  }
+});
+
+test('the floor quest asks for no more floors than the Spire spec has', () => {
+  const spec = require('../seeds/maps/spire-of-trials.map.json');
+  const floors = spec.worlds.filter((w) => /^Spire of Trials: Floor \d+$/.test(w.name));
+  assert.strictEqual(floors.length, spec.worlds.length);
+  const q = QUESTS.find((x) => x.objective_type === 'floor');
+  assert.ok(q && q.target_count <= floors.length);
+  assert.strictEqual(spec.worlds.filter((w) => w.is_entry).length, 1);
+});
+
+test('floorFromWorldName reads only Spire floors', () => {
+  const { floorFromWorldName } = require('../src/services/questsService.js');
+  assert.strictEqual(floorFromWorldName('Spire of Trials: Floor 12'), 12);
+  assert.strictEqual(floorFromWorldName('The Catacombs: Entry'), null);
+  assert.strictEqual(floorFromWorldName(null), null);
+});
+
+test('villageQuestNodes places distinct tiles, skips post tiles, and hosts only catalogued villages', () => {
+  const { villageQuestNodes } = require('../src/services/questNodes.js');
+  const v = {
+    specKey: 'ashen_oasis', minCol: 10, minRow: 10, width: 6, height: 4,
+    merchantX: 1250, merchantY: 1150, spawnX: 1350, spawnY: 1150,
+  };
+  const nodes = villageQuestNodes(v);
+  assert.strictEqual(nodes.length, 8, 'crystal + 3 prisms + 4 obelisks');
+  const tiles = new Set(nodes.map((n) => `${Math.floor(n.x / 100)},${Math.floor(n.y / 100)}`));
+  assert.strictEqual(tiles.size, nodes.length, 'no two nodes share a tile');
+  assert.ok(!tiles.has('12,11'), 'not on the merchant tile');
+  assert.strictEqual(new Set(nodes.map((n) => n.key)).size, nodes.length, 'keys are unique');
+  assert.deepStrictEqual(villageQuestNodes({ ...v, specKey: 'sunspire' }), []);
+});
+
+test('recordNode is one atomic statement carrying group and node key', async () => {
+  const { recordNode } = require('../src/services/questsService.js');
+  const seen = [];
+  const pool = { async query(sql, params) { seen.push({ sql, params }); return { rows: [] }; } };
+  assert.deepStrictEqual(await recordNode(pool, 3, 'obelisk', 'ashen_oasis:obelisk:0'), []);
+  assert.strictEqual(seen.length, 1);
+  assert.deepStrictEqual(seen[0].params, [3, 'obelisk', 'ashen_oasis:obelisk:0']);
+  assert.match(seen[0].sql, /ON CONFLICT DO NOTHING/);
+});
+
+test('choice quests refuse to complete without a legacy choice', async () => {
+  const log = [];
+  const client = {
+    async query(sql) {
+      log.push(sql.replace(/\s+/g, ' ').trim());
+      if (/FROM quests WHERE key/.test(sql)) return { rows: [{ id: 9, title: 'New Dawn', act: 4, objective_type: 'choice', target_count: 1 }] };
+      if (/FROM character_quests WHERE character_id/.test(sql)) return { rows: [{ status: 'active', progress_count: 0 }] };
+      return { rows: [] }; // no stored legacy choice
+    },
+    release() {},
+  };
+  const pool = { connect: async () => client };
+  await assert.rejects(
+    () => completeQuest(pool, 1, 'act4_new_dawn', null),
+    (e) => e instanceof QuestError && /Choose a legacy/.test(e.message),
+  );
+  assert.ok(!log.some((q) => /UPDATE (users|player_progression)/.test(q)), 'nothing was paid');
+});

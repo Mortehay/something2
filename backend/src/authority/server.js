@@ -44,6 +44,8 @@ const { knockbackPosition, knockbackWithFallback } = require('./knockback');
 const { buyStock, sellItem } = require('./trade');
 const { recordKill } = require('../services/questsService.js');
 const { vendorBuyPrice, loadLegacyChoice } = require('../services/legacyEffects.js');
+const { recordNode, doneNodeKeys, recordFloor, floorFromWorldName } = require('../services/questsService.js');
+const { worldQuestNodes, nearestQuestNode } = require('../services/questNodes.js');
 const { respawnDueCreatures, enqueueDeficit, CREATURE_SWEEP_MS } = require('../services/creatureRespawn');
 const { consumeAmmo, ammoCount } = require('./ammo');
 const { PICKUP_RADIUS } = require('./groundItems');
@@ -227,6 +229,7 @@ function planPortalTransition({
 }
 
 const INTERACT_RADIUS = 120; // px: how close a player must stand to trade
+const QUEST_NODE_RADIUS = 110; // px: how close to stand to use a quest node
 
 // The village whose post named by (xKey,yKey) is nearest to (cx,cy) within
 // `radius`, or null. Villages without that post are skipped.
@@ -962,6 +965,18 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // game (the exact defect A1's review caught).
   // Credits one kill to the killer's active quests and tells them. Best-effort
   // and detached: quest bookkeeping must never delay or fail a kill commit.
+  // The one wire shape for "these quests moved" (kills, nodes, floors).
+  const sendQuestUpdates = (sock, updates) => {
+    if (!sock || !updates || !updates.length) return;
+    send(sock, {
+      type: 'questProgress',
+      updates: updates.map((u) => ({
+        key: u.key, title: u.title,
+        progress: Number(u.progress_count), target: Number(u.target_count),
+      })),
+    });
+  };
+
   const trackQuestKill = (entry, killerUserId, typeName, isBoss) => {
     if (killerUserId == null) return;
     const killer = entry.world.getPlayer(killerUserId);
@@ -969,16 +984,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
     if (characterId == null) return;
     recordKill(pool, characterId, { typeName, isBoss })
       .then((updates) => {
-        const sock = entry.sockets.get(killerUserId);
-        if (sock && updates.length) {
-          send(sock, {
-            type: 'questProgress',
-            updates: updates.map((u) => ({
-              key: u.key, title: u.title,
-              progress: Number(u.progress_count), target: Number(u.target_count),
-            })),
-          });
-        }
+        sendQuestUpdates(entry.sockets.get(killerUserId), updates);
       })
       .catch((err) => console.error('quest kill tracking failed:', err));
   };
@@ -1916,6 +1922,21 @@ function attachAuthority(httpServer, pool, opts = {}) {
         } catch (e) {
           console.error('landmarks: reading activations failed', e);
         }
+        // Quest nodes (services/questNodes.js): derived from this world's villages,
+        // with the ones this character already spent on an active quest marked done.
+        entry.questNodes = entry.questNodes || worldQuestNodes(entry.villages);
+        let questNodeDone = [];
+        try {
+          questNodeDone = await doneNodeKeys(pool, character.id);
+        } catch (e) {
+          console.error('quest nodes: reading done set failed', e);
+        }
+        // Spire of Trials: arriving on floor N credits the deepest-floor quest.
+        pool.query('SELECT name FROM worlds WHERE id = $1', [entry.worldId])
+          .then((r) => floorFromWorldName(r.rows[0] && r.rows[0].name))
+          .then((floor) => (floor ? recordFloor(pool, character.id, floor) : []))
+          .then((updates) => sendQuestUpdates(ws, updates))
+          .catch((e) => console.error('quest floor tracking failed:', e));
         send(ws, {
           type: 'joined', user_id: ws.userId, character_id: character.id, spawn, tickRate: 1000 / tickMs,
           itemTypes: [...entry.world.weapons.values()],
@@ -2005,6 +2026,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
             artDefaults: entry.pointArtDefaults,
           }),
           doorways: entry.compassDoorways || [],
+          questNodes: entry.questNodes.map((n) => ({ ...n, done: questNodeDone.includes(n.key) })),
         });
         send(ws, {
           type: 'world_boss_status',
@@ -2605,6 +2627,27 @@ function attachAuthority(httpServer, pool, opts = {}) {
         if (!p) return;
         const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
         const village = nearestMerchantVillage(entry.villages, cx, cy, INTERACT_RADIUS);
+
+        // A quest node (herb, obelisk, leader's crystal...) wins when it is
+        // within reach and at least as close as the merchant post, so a node
+        // standing inside a village is not shadowed by the stall next to it.
+        entry.questNodes = entry.questNodes || worldQuestNodes(entry.villages);
+        const near = nearestQuestNode(entry.questNodes, cx, cy, QUEST_NODE_RADIUS);
+        if (near) {
+          const mDist = village && village.merchantX != null
+            ? Math.hypot(village.merchantX - cx, village.merchantY - cy) : Infinity;
+          if (near.distance <= mDist) {
+            const updates = await recordNode(pool, ws.characterId, near.node.group, near.node.key);
+            if (updates.length) {
+              send(ws, { type: 'questNode', key: near.node.key, done: true, name: near.node.name });
+              sendQuestUpdates(ws, updates);
+            } else {
+              send(ws, { type: 'error', message: `${near.node.name}: nothing to do here right now (no active quest needs it, or you already used it).` });
+            }
+            return;
+          }
+        }
+
         if (!village) { send(ws, { type: 'error', message: 'no merchant nearby' }); return; }
         // ws.userId, not ws.characterId: merchant_stock.seller_user_id is a
         // users.id and buyback is account-scoped (SOMET-280 — see fetchShop).

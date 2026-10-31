@@ -125,7 +125,7 @@ export function layoutQuestLog(state = {}) {
       // used to show from the moment the quest was accepted (a click then just
       // failed on the server), and kept showing on act4_new_dawn after the
       // choice was made, next to a key ("act4_primordial_core") that no quest has.
-      if (selectedQuest.act === 4 && !legacyChoice && isObjectiveComplete) {
+      if (selectedQuest.objective_type === "choice" && !legacyChoice && isObjectiveComplete) {
         const halfW = Math.floor((detailArea.w - 36) / 2);
         const cityBtn = {
           kind: "quest_choice_city",
@@ -180,7 +180,7 @@ export function layoutQuestLog(state = {}) {
       }
       // Give up the quest (progress is lost). Not offered next to the Act IV
       // choice buttons, which occupy that row.
-      if (!(selectedQuest.act === 4 && !legacyChoice && isObjectiveComplete)) {
+      if (!(selectedQuest.objective_type === "choice" && !legacyChoice && isObjectiveComplete)) {
         const abandonBtn = {
           kind: "quest_abandon",
           questId: selectedQuest.id,

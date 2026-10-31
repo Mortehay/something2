@@ -5,7 +5,7 @@
  * {seq,dx,dy,dt} for client-side reconciliation.
  */
 export class WorldAuthorityClient {
-  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onNoAmmo, onAttackRefused, onAmmo, onTransition, onWaypointActivated, onWallet, onShop, onBought, onSold, onBank, onDeposited, onWithdrawn, onProgression, onQuestProgress, onChests, onChestOpened, onVfx, onWorldBossStatus, onAnnouncement, inputIntervalMs = 50, now = () => performance.now() }) {
+  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onNoAmmo, onAttackRefused, onAmmo, onTransition, onWaypointActivated, onWallet, onShop, onBought, onSold, onBank, onDeposited, onWithdrawn, onProgression, onQuestProgress, onQuestNode, onChests, onChestOpened, onVfx, onWorldBossStatus, onAnnouncement, inputIntervalMs = 50, now = () => performance.now() }) {
     this.url = url;
     this.token = token;
     this.onJoined = onJoined || (() => {});
@@ -57,6 +57,7 @@ export class WorldAuthorityClient {
     // `gold` (joined) vs `wallet` (onWallet) above.
     this.onProgression = onProgression || (() => {});
     this.onQuestProgress = onQuestProgress || (() => {});
+    this.onQuestNode = onQuestNode || (() => {});
     this.inputIntervalMs = inputIntervalMs;
     this.now = now;
 
@@ -151,6 +152,7 @@ export class WorldAuthorityClient {
       case 'waypointActivated': this.onWaypointActivated(msg); break;
       case 'progression': this.onProgression(msg); break;
       case 'questProgress': this.onQuestProgress(msg); break;
+      case 'questNode': this.onQuestNode(msg); break;
       case 'chests': this.onChests(msg); break;
       case 'chestOpened': this.onChestOpened(msg); break;
       case 'vfx': this.onVfx(msg); break;

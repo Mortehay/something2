@@ -84,6 +84,7 @@ describe("layoutQuestLog", () => {
       id: 4,
       key: "act4_primordial_core",
       act: 4,
+      objective_type: "choice",
       title: "Первинне Ядро",
       description: "Вирішіть долю стародавнього Ядра.",
       required_level: 40,
@@ -105,7 +106,7 @@ describe("layoutQuestLog", () => {
 
   it("does not offer the Act IV legacy choice before the objective is done or once chosen", () => {
     const base = {
-      id: 4, key: "act4_elemental_crucible", act: 4, title: "Crucible",
+      id: 4, key: "act4_elemental_crucible", act: 4, objective_type: "floor", title: "Crucible",
       description: "d", required_level: 52, status: "active", target_count: 25,
     };
     const inProgress = layoutQuestLog({

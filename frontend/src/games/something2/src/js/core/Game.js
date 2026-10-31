@@ -342,6 +342,7 @@ export class Game {
         this.gemShopSelectedGemId = null;
         this.skillMerchants = [];
         this.questGivers = [];
+        this.questNodes = [];
         // SOMET-297. Empty until a `joined` frame arrives, and reset here on
         // the same line merchants is -- both are per-world join payload.
         this.landmarks = [];
@@ -732,6 +733,7 @@ export class Game {
         this.merchants = [];
         this.skillMerchants = [];
         this.questGivers = [];
+        this.questNodes = [];
         // SOMET-297. Empty until a `joined` frame arrives, and reset here on
         // the same line merchants is -- both are per-world join payload.
         this.landmarks = [];
@@ -792,6 +794,7 @@ export class Game {
                     this.gemMerchants = Array.isArray(msg.gemMerchants) ? msg.gemMerchants : [];
                     this.skillMerchants = Array.isArray(msg.skillMerchants) ? msg.skillMerchants : [];
                     this.questGivers = Array.isArray(msg.questGivers) ? msg.questGivers : [];
+                    this.questNodes = Array.isArray(msg.questNodes) ? msg.questNodes : [];
                     this.loadQuests({ silent: true });
                     this.landmarks = Array.isArray(msg.landmarks) ? msg.landmarks : [];
                     this.doorways = Array.isArray(msg.doorways) ? msg.doorways : [];
@@ -857,6 +860,7 @@ export class Game {
                 // whole body is Game._applyProgressionFrame -- see there.
                 onProgression: (msg) => this._applyProgressionFrame(msg),
                 onQuestProgress: (msg) => this._applyQuestProgress(msg),
+                onQuestNode: (msg) => this._applyQuestNode(msg),
                 // SOMET-372. Both handlers are one line each on purpose: the
                 // rules they carry (whole-list replacement, and the item-shape
                 // mapping openChest needs) live in core/worldChests.js, where
@@ -1957,6 +1961,7 @@ export class Game {
                 playerStats: this.characterView() || this.progression || null,
                 skillMerchants: this.skillMerchants,
                 questGivers: this.questGivers,
+                questNodes: this.questNodes,
                 landmarks: this.landmarks,
                 doorways: this.doorways,
                 shop: this.shop,
@@ -2221,6 +2226,13 @@ export class Game {
         const open = quests.some((q) => q.status === "available" && (q.required_level || 1) <= level);
         const marker = ready ? "?" : (open ? "!" : null);
         for (const qg of (this.questGivers || [])) qg.marker = marker;
+    }
+
+    // The server accepted a use of a quest node: dim it so the player can see
+    // it is spent (the progress toast arrives as a separate questProgress).
+    _applyQuestNode(msg) {
+        const node = (this.questNodes || []).find((n) => n.key === (msg && msg.key));
+        if (node) node.done = true;
     }
 
     // The server counted a kill toward one or more active quests. Patch the
