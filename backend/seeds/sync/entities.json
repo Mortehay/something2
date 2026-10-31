@@ -5437,7 +5437,7 @@
         "charisma": 0,
         "color": "#a55eea",
         "constitution": 0,
-        "defense": 1500,
+        "defense": 10,
         "dexterity": 0,
         "element": "arcane",
         "faction": "hostile",
@@ -5465,8 +5465,8 @@
           "physical": 0.3,
           "fire": 0.3,
           "ice": 0.3,
-          "arcane": 0.6,
-          "lightning": 0
+          "lightning": 0,
+          "arcane": 0
         },
         "spawn_tiles": [],
         "strength": 0,
@@ -12438,7 +12438,7 @@
         "charisma": 0,
         "color": "#70a1ff",
         "constitution": 0,
-        "defense": 1800,
+        "defense": 10,
         "dexterity": 0,
         "element": "ice",
         "faction": "hostile",
@@ -12464,10 +12464,10 @@
         "point_kind": null,
         "resistances": {
           "physical": 0.3,
-          "arcane": 0.3,
           "lightning": 0.3,
           "ice": 0.6,
-          "fire": 0
+          "fire": 0,
+          "arcane": 0
         },
         "spawn_tiles": [],
         "strength": 0,
@@ -12952,7 +12952,7 @@
         "charisma": 0,
         "color": "#ffd166",
         "constitution": 0,
-        "defense": 1400,
+        "defense": 10,
         "dexterity": 0,
         "element": "lightning",
         "faction": "hostile",
@@ -14011,7 +14011,7 @@
         "charisma": 0,
         "color": "#ff4757",
         "constitution": 0,
-        "defense": 1500,
+        "defense": 10,
         "dexterity": 0,
         "element": "fire",
         "faction": "hostile",
@@ -14037,10 +14037,10 @@
         "point_kind": null,
         "resistances": {
           "physical": 0.3,
-          "arcane": 0.3,
           "lightning": 0.3,
           "fire": 0.6,
-          "ice": 0
+          "ice": 0,
+          "arcane": 0
         },
         "spawn_tiles": [],
         "strength": 0,

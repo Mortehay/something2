@@ -132,7 +132,11 @@ function applyDamage(target, raw, element, mit = NO_MITIGATION, now = undefined,
   const resist = Number.isFinite(rawResist)
     ? Math.min(RESIST_CAP, Math.max(RESIST_FLOOR, rawResist)) : 0;
   const candidate = raw2 * (1 - resist);
-  const final = Math.max(MIN_DAMAGE, Number.isFinite(candidate) ? candidate : MIN_DAMAGE);
+  let final = Math.max(MIN_DAMAGE, Number.isFinite(candidate) ? candidate : MIN_DAMAGE);
+  // The hide of a world boss (bossBalance.DAMAGE_TAKEN): a share of every hit that
+  // survives defense and resistance. Only that boss's creature carries the field.
+  const taken = target.damageTakenMult;
+  if (Number.isFinite(taken) && taken > 0 && taken < 1) final = Math.max(MIN_DAMAGE, final * taken);
   // A shield (world bosses gain one on entering a phase, see worldBoss.js)
   // soaks damage before HP does. Only the shield's owner has the field, so for
   // every player and ordinary creature this is a no-op. The attacker is still

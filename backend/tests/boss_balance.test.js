@@ -132,3 +132,32 @@ test('a Spire floor may post a world boss; no other map may', () => {
   assert.strictEqual(spire.length, 0);
   assert.strictEqual(other.length, 1);
 });
+
+// The project's own element rules (authority_elements_invariants.test.js), checked
+// here against the TABLE so a bad tuning fails before it reaches the database.
+test('no boss resists arcane, and every resistance still shows on a catalog-level hit', () => {
+  const CATALOG_HIT = 15; // the weakest elemental weapon in the catalog
+  for (const [name, boss] of Object.entries(bal.WORLD_BOSSES)) {
+    assert.ok(!(boss.resistances.arcane > 0), `${name} resists arcane`);
+    for (const [el, v] of Object.entries(boss.resistances)) {
+      if (!(v > 0)) continue;
+      const raw = el === 'physical' ? 116 : CATALOG_HIT;
+      const unresisted = Math.max(1, raw - boss.defense);
+      const resisted = Math.max(1, (raw - boss.defense) * (1 - v));
+      assert.ok(unresisted - resisted >= 1, `${name}'s ${el} resistance is invisible against defense ${boss.defense}`);
+    }
+  }
+});
+
+test('the hide cuts every hit that gets through, only on the creature that carries it', () => {
+  const mit = { defense: 0, resistances: {} };
+  const boss = { hp: 1000, damageTakenMult: bal.DAMAGE_TAKEN };
+  applyDamage(boss, 100, 'physical', mit, 0, null);
+  assert.strictEqual(boss.hp, 1000 - 100 * bal.DAMAGE_TAKEN);
+  const plain = { hp: 1000 };
+  applyDamage(plain, 100, 'physical', mit, 0, null);
+  assert.strictEqual(plain.hp, 900);
+  const odd = { hp: 1000, damageTakenMult: 5 }; // a multiplier above 1 is ignored, never a heal-or-amplify hole
+  applyDamage(odd, 100, 'physical', mit, 0, null);
+  assert.strictEqual(odd.hp, 900);
+});

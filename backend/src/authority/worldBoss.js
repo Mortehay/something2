@@ -711,6 +711,7 @@ class WorldBossManager {
       // addCreatures takes maxHp from hp; a re-placed boss keeps its real max.
       placed.maxHp = this.currentBoss.maxHp;
       placed.shield = this.currentBoss.shield || 0;
+      placed.damageTakenMult = balance.DAMAGE_TAKEN;
       if (this.currentBoss._playerDamage) placed._playerDamage = this.currentBoss._playerDamage;
     }
     return placed;

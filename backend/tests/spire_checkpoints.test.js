@@ -49,3 +49,17 @@ test('Floor 60 is held by a WORLD boss, and Floor 61 (the endgame floor) has no 
   assert.ok(f61 && !f61.boss, 'floor 61 has no gate of its own');
   assert.ok(f61.level_band[0] > spec.worlds.find((w) => w.key === 'spire_f60').level_band[1], 'tougher than floor 60');
 });
+
+// Decision (kept as-is): checkpoints are lit by walking onto them, and teleporting
+// (T) only reaches lit ones. That is safe by construction as long as every floor
+// below a checkpoint that has a gate boss really has it: you cannot have stood on
+// the checkpoint without passing each of those gates. This pins the "as long as".
+test('no checkpoint can be reached without passing every gate boss below it', () => {
+  const bossFloors = new Set(spec.worlds.filter((w) => w.boss).map(floorOf));
+  for (const w of spec.worlds.filter((x) => x.waypoints)) {
+    const f = floorOf(w);
+    for (let g = 5; g < f; g += 5) {
+      assert.ok(bossFloors.has(g), `floor ${g} lies below checkpoint ${f} but has no gate boss`);
+    }
+  }
+});

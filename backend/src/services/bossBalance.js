@@ -3,9 +3,17 @@
 //
 // DESIGN TARGET. A character in top-end gear must need at least
 // MIN_FIGHT_SECONDS (2.5 minutes now, see below) of real fighting to kill a world boss. The
-// fight is not a DPS check: HP, flat defense and elemental resistance are all
-// high, phases add shields, and a ward refills the shield on a timer so damage
-// has to come in bursts that break it, not as a slow trickle.
+// fight is not a DPS check: HP and elemental resistance are high, the hide
+// (DAMAGE_TAKEN) cuts every hit, phases add shields, and a ward refills the
+// shield on a timer so damage has to come in bursts that break it, not as a
+// slow trickle.
+//
+// WHY NOT HIGH FLAT DEFENSE. authority_elements_invariants.test.js requires every
+// seeded resistance to move a catalog-level hit (15 damage) by at least one
+// point, and defense is subtracted before resistance, so a boss with defense in
+// the hundreds makes its own resistances invisible. Defense therefore stays low
+// here; the toughness comes from HP, resistance and DAMAGE_TAKEN. The same test
+// says arcane is never resisted, so no boss resists it.
 //
 // THE MODEL (expectedFightSeconds) is deliberately simple and conservative; the
 // test boss_balance.test.js pins the tuning against it, so changing a number
@@ -43,22 +51,28 @@ const SHIELD_CAP_FRACTION = 0.08; // the shield never exceeds this share of max 
 // party has a reason to bring the right damage type.
 const WORLD_BOSSES = Object.freeze({
   'Ignis, the Magma Colossus': {
-    hp: 440000, defense: 1500, baseDamage: 420,
-    resistances: { physical: 0.3, arcane: 0.3, lightning: 0.3, fire: 0.6, ice: 0 },
+    hp: 440000, defense: 10, baseDamage: 420,
+    resistances: { physical: 0.3, lightning: 0.3, fire: 0.6, ice: 0, arcane: 0 },
   },
   'Glacius, the Frost Leviathan': {
-    hp: 390000, defense: 1800, baseDamage: 350,
-    resistances: { physical: 0.3, arcane: 0.3, lightning: 0.3, ice: 0.6, fire: 0 },
+    hp: 390000, defense: 10, baseDamage: 350,
+    resistances: { physical: 0.3, lightning: 0.3, ice: 0.6, fire: 0, arcane: 0 },
   },
   'Gorgon, the Thunder Titan': {
-    hp: 450000, defense: 1400, baseDamage: 450,
+    hp: 450000, defense: 10, baseDamage: 450,
     resistances: { physical: 0.3, fire: 0.3, ice: 0.3, lightning: 0.6, arcane: 0 },
   },
+  // Arcane is never resisted, so the Voidreaver's own element is its open flank.
   'Abyssor, the Voidreaver': {
-    hp: 500000, defense: 1500, baseDamage: 520,
-    resistances: { physical: 0.3, fire: 0.3, ice: 0.3, arcane: 0.6, lightning: 0 },
+    hp: 500000, defense: 10, baseDamage: 520,
+    resistances: { physical: 0.3, fire: 0.3, ice: 0.3, lightning: 0, arcane: 0 },
   },
 });
+
+// The hide: after defense and resistance, a world boss takes this share of every
+// hit (damage.js applyDamage reads creature.damageTakenMult). Set on the boss
+// creature when it is placed, never stored on the catalog row.
+const DAMAGE_TAKEN = 0.6;
 
 // Damage one reference hit does to a boss, through the engine's own rule
 // (damage.js applyDamage): flat defense is subtracted first, then the element's
@@ -66,7 +80,7 @@ const WORLD_BOSSES = Object.freeze({
 function hitAgainst(boss, element = 'physical') {
   const raw = REFERENCE.hit - boss.defense;
   const resist = Math.min(0.8, Math.max(-1, (boss.resistances && boss.resistances[element]) || 0));
-  return Math.max(1, raw * (1 - resist));
+  return Math.max(1, Math.max(1, raw * (1 - resist)) * DAMAGE_TAKEN);
 }
 
 // Total damage the boss can soak over the fight: its HP plus every shield it
@@ -126,6 +140,6 @@ function enduranceStep(state, creature, now) {
 
 module.exports = {
   phaseForRatio, addShield, enduranceStep,
-  REFERENCE, MIN_FIGHT_SECONDS, PHASE_SHIELD, WARD_INTERVAL_MS, WARD_FRACTION, SHIELD_CAP_FRACTION,
+  REFERENCE, MIN_FIGHT_SECONDS, DAMAGE_TAKEN, PHASE_SHIELD, WARD_INTERVAL_MS, WARD_FRACTION, SHIELD_CAP_FRACTION,
   WORLD_BOSSES, hitAgainst, totalToughness, expectedFightSeconds,
 };

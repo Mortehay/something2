@@ -86,7 +86,7 @@ function makePool({ bounded = true, userItems = [], safeRoadRadius = 0, safeRect
       calls.push({ sql, params });
       if (/FROM worlds WHERE id/i.test(sql)) {
         return { rows: [projectWorldRow(sql, {
-          id: 'w1', seed: '1', chunk_size: 64,
+          id: 'w1', name: 'Test World', seed: '1', chunk_size: 64,
           width: bounded ? 10 : null, height: bounded ? 10 : null,
           is_entry: null, entry_spawn: null, biomes: [], biome_cell: null,
           level_min: 1, level_max: 5,

@@ -204,6 +204,8 @@ class DungeonBossManager {
     if (quiet) hydrated.quietSpawn = true;
     sim.addCreatures([hydrated]);
     const creature = sim.get(id) || null;
+    // A world-tier post boss carries the same hide as the world boss event.
+    if (creature && row.boss_tier === 'world') creature.damageTakenMult = balance.DAMAGE_TAKEN;
     this.records.set(worldId, { creatureId: id, deadUntil: null, creature, row, spec, endurance: { phase: 1, lastWardAt: null } });
     // SOMET-626 (S13). Fresh placement only, same as the boss above -- never
     // re-summons a minion that is just on its own (short) cooldown.
