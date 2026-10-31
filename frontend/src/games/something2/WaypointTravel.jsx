@@ -3,7 +3,7 @@ import styled from 'styled-components';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { authHeaders, apiFetch } from './src/js/net/auth.js';
-import { buildTravelList, REASON } from './waypointTravel.js';
+import { buildTravelList, splitTravelTabs, REASON } from './waypointTravel.js';
 import { shouldAutoOpen, portalTileOf } from './portalAutoOpen.js';
 import { API_URL } from '../../config.js';
 
@@ -62,6 +62,22 @@ const Card = styled.div`
     margin: 16px 0 6px; font-size: 0.8rem; text-transform: uppercase;
     letter-spacing: 0.06em; color: var(--s2-text-dim);
   }
+`;
+
+const TabBar = styled.div`
+  display: flex; gap: 6px; margin: 8px 0 4px;
+`;
+
+const TabButton = styled.button`
+  flex: 1;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid ${(p) => (p.$active ? 'var(--s2-accent)' : 'var(--s2-border)')};
+  background: ${(p) => (p.$active ? 'var(--s2-accent)' : 'transparent')};
+  color: ${(p) => (p.$active ? 'var(--s2-on-accent)' : 'var(--s2-text-secondary)')};
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
 `;
 
 const CloseButton = styled.button`
@@ -172,6 +188,7 @@ function useWaypoints(characterId) {
 export default function WaypointTravel({ gameRef, characterId }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState(null);
+  const [tab, setTab] = useState('main'); // 'main' | 'spire'
   const data = useWaypoints(characterId);
   const queryClient = useQueryClient();
 
@@ -236,11 +253,27 @@ export default function WaypointTravel({ gameRef, characterId }) {
   // The latch lives in a ref, not in state: it changes on almost every reading
   // and re-rendering the panel for it would be pure waste.
   const prevTileRef = useRef(null);
+  const prevWorldRef = useRef(null);
+  // Set when the player picks a destination: the arrival that follows is the
+  // result of a teleport, not of stepping onto a portal, so it must not pop the
+  // list open again at the other end.
+  const suppressUntilRef = useRef(0);
   useEffect(() => {
     const read = () => {
       const g = gameRef.current;
       const snap = g && g.getWaypointSnapshot ? g.getWaypointSnapshot() : null;
       const tile = portalTileOf(snap ? { x: snap.playerX, y: snap.playerY } : null);
+      // Arriving in a different world is never "stepping onto" its portal: the
+      // old world's tile means nothing there, so forget it and relatch.
+      const worldNow = snap ? snap.worldId : null;
+      if (worldNow !== prevWorldRef.current) {
+        prevWorldRef.current = worldNow;
+        prevTileRef.current = null;
+      }
+      if (Date.now() < suppressUntilRef.current) {
+        prevTileRef.current = tile;
+        return;
+      }
       // The portal of the world the player is standing in, from the list the
       // popup already fetches -- not a second source of truth.
       const portal = (data && Array.isArray(data.waypoints) && snap)
@@ -288,6 +321,8 @@ export default function WaypointTravel({ gameRef, characterId }) {
     // still open across that reads as having failed. A refusal arrives as the
     // authority's own error toast, which is visible with the panel shut.
     setOpen(false);
+    setTeleportUntil(0); // the server spends its ticket on this trip
+    suppressUntilRef.current = Date.now() + 8000;
     g.travelToWaypoint(waypointId);
   }, [gameRef]);
 
@@ -307,6 +342,13 @@ export default function WaypointTravel({ gameRef, characterId }) {
 
   if (!open) return null;
 
+  // The Spire's checkpoints live on their own tab so they do not push every
+  // other portal off the screen.
+  const tabs = splitTravelTabs(groups);
+  const hasSpire = tabs.spire.length > 0;
+  const activeTab = hasSpire ? tab : 'main';
+  const shown = activeTab === 'spire' ? tabs.spire : tabs.main;
+
   return (
     <Backdrop onClick={() => setOpen(false)}>
       <Card onClick={(e) => e.stopPropagation()}>
@@ -319,10 +361,24 @@ export default function WaypointTravel({ gameRef, characterId }) {
               ? 'Choose a portal you have lit.'
               : 'Stand on a portal you have lit to travel from it, or press T to cast a teleport.'}
         </p>
-        {groups.length === 0 && (
-          <Empty>You have not found any portals yet. Walk onto one to light it.</Empty>
+        {hasSpire && (
+          <TabBar role="tablist">
+            <TabButton type="button" role="tab" aria-selected={activeTab === 'main'} $active={activeTab === 'main'} onClick={() => setTab('main')}>
+              Portals
+            </TabButton>
+            <TabButton type="button" role="tab" aria-selected={activeTab === 'spire'} $active={activeTab === 'spire'} onClick={() => setTab('spire')}>
+              Spire of Trials
+            </TabButton>
+          </TabBar>
         )}
-        {groups.map((g) => (
+        {shown.length === 0 && (
+          <Empty>
+            {activeTab === 'spire'
+              ? 'No Spire checkpoints lit yet.'
+              : 'You have not found any portals yet. Walk onto one to light it.'}
+          </Empty>
+        )}
+        {shown.map((g) => (
           <div key={g.worldId}>
             <h3>{g.worldName}</h3>
             {g.entries.map((e) => (

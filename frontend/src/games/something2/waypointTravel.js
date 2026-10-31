@@ -33,6 +33,25 @@ const tileKey = (x, y) => `${Math.floor(y / MAP_TILE_SIZE)},${Math.floor(x / MAP
 // `playerX`/`playerY` are the player's CENTRE, which is what the authority uses
 // too -- a player is a 64px box placed by its top-left corner, so keying on the
 // corner would light the wrong tile near a boundary.
+const SPIRE_PREFIX = 'Spire of Trials';
+const floorNo = (name) => {
+  const m = /Floor (\d+)/.exec(String(name || ''));
+  return m ? Number(m[1]) : 0;
+};
+
+// The Spire's floors would swamp the ordinary list (up to 9 checkpoints), so
+// they get their own tab: `main` is everything else in the endpoint's order,
+// `spire` is the Spire floors by floor number (not alphabetically, which
+// would put Floor 10 before Floor 5).
+export function splitTravelTabs(groups) {
+  const list = Array.isArray(groups) ? groups : [];
+  const isSpire = (g) => String(g.worldName || '').startsWith(SPIRE_PREFIX);
+  return {
+    main: list.filter((g) => !isSpire(g)),
+    spire: list.filter(isSpire).sort((a, b) => floorNo(a.worldName) - floorNo(b.worldName)),
+  };
+}
+
 export function buildTravelList({ waypoints, currentWorldId, playerX, playerY, bossNearbyWaypointId, bossName, bossWorldId, teleportReady = false } = {}) {
   const list = Array.isArray(waypoints) ? waypoints : [];
 
