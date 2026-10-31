@@ -80,6 +80,9 @@ export function emptyProviderForm(modality = 'image') {
     // Audio only: per-group gateway model ({music, ambience, sfx_realistic,
     // sfx_retro}). Blank values are dropped at save.
     models_by_group: {},
+    // Sprite only: how the eight directions are drawn (SPRITE_SHEET_METHODS),
+    // stored as request_template.sheet_method.
+    sheet_method: '2d',
     // Never populated from the server -- it cannot be. Tracks whether a token
     // exists so the UI can say so without knowing its value.
     has_token: false,
@@ -87,6 +90,27 @@ export function emptyProviderForm(modality = 'image') {
     // "untouched" from "cleared".
     token_touched: false,
   };
+}
+
+// The GPU box's two Qwen concept models, in plain words. The fast one fits the
+// 12 GB card and is the box's own UI default (and so what a blank model
+// resolves to); the other is larger than VRAM and spills to host RAM.
+export const QWEN_FAST = 'gguf:qwen-image-2512-Q2_K+lightning8';
+export const QWEN_QUALITY = 'gguf:Qwen-Image-2512-Q3_K_M';
+const SPRITE_MODEL_LABELS = {
+  [QWEN_FAST]: 'Qwen fast — fits the card, ~30 s',
+  [QWEN_QUALITY]: 'Qwen best quality — larger than VRAM, ~4 min',
+};
+
+// Sprite providers: how the eight directions of a sheet are drawn.
+export const SPRITE_SHEET_METHODS = [
+  { value: '2d', label: '2D — the box sheet builder draws every direction' },
+  { value: 'turnaround3d', label: '3D turnaround — standing pose in 8 correct directions (static; slower)' },
+];
+
+function sheetMethodOf(template) {
+  const m = template && template.sheet_method;
+  return SPRITE_SHEET_METHODS.some((o) => o.value === m) ? m : '2d';
 }
 
 export function providerToForm(row) {
@@ -110,6 +134,7 @@ export function providerToForm(row) {
     modality: row.modality || 'image',
     adapter: row.adapter || '',
     models_by_group: { ...(row.models_by_group || {}) },
+    sheet_method: sheetMethodOf(row.request_template),
     has_token: Boolean(row.has_token),
     token_touched: false,
   };
@@ -132,6 +157,7 @@ function defaultsToForm(defaults) {
   }
   if ('request_template' in d) out.request_template = JSON.stringify(d.request_template ?? {}, null, 2);
   if ('models_by_group' in d) out.models_by_group = { ...(d.models_by_group || {}) };
+  if ('request_template' in d) out.sheet_method = sheetMethodOf(d.request_template);
   return out;
 }
 
@@ -228,8 +254,10 @@ export function validateProviderForm(form) {
 // default is SDXL, which is never used implicitly. A saved model the box no
 // longer lists stays selectable, so opening the form cannot silently change it.
 export function spriteModelOptions(models, current) {
-  const entries = (models || []).map((id) => ({ kind: 'sprite', id }));
-  return [{ value: '', label: 'Box default (Qwen)' }, ...modelOptions({ entries }, 'sprite', current)];
+  const entries = (models || []).map((id) => ({ kind: 'sprite', id, label: SPRITE_MODEL_LABELS[id] }));
+  const options = modelOptions({ entries }, 'sprite', current)
+    .map((o) => ({ ...o, label: SPRITE_MODEL_LABELS[o.value] || o.label }));
+  return [{ value: '', label: 'Box default (Qwen fast — fits the card)' }, ...options];
 }
 
 export function templateWarning(text) {
@@ -274,6 +302,7 @@ export function providerFormToPayload(form) {
     const text = form.request_template || '';
     payload.request_template = text.trim() ? (parseTemplate(text).template ?? {}) : {};
   }
+  if (modality === 'sprite') payload.request_template = { sheet_method: sheetMethodOf({ sheet_method: form.sheet_method }) };
   if (modality === 'image') {
     const parsed = parseTemplate(form.request_template);
     payload.request_template = parsed.template;
@@ -327,6 +356,7 @@ export function templateToPayload(form) {
     }
     if (Object.keys(byGroup).length) defaults.models_by_group = byGroup;
   }
+  if (form.modality === 'sprite') defaults.request_template = { sheet_method: sheetMethodOf({ sheet_method: form.sheet_method }) };
   return {
     name: (form.name || '').trim(),
     modality: KIND_VALUES.has(form.modality) ? form.modality : 'image',

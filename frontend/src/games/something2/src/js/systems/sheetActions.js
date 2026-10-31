@@ -19,7 +19,9 @@ const DIR_INDEX = new Map(DIR_ORDER.map((d, i) => [d, i]));
 // straight up, so the sheet row is the world facing turned 45 degrees.
 // The box's WESTERN rows (w, nw, sw) are unreliable (humanoid "w" is a near
 // copy of "e", the wolf's a near-frontal 3/4), so rowFor draws them as the
-// mirrored eastern row instead (SOMET-659).
+// mirrored eastern row instead (SOMET-659) -- unless the manifest's
+// `unmirrored` lists that row: those were drawn by the box's 3D turnaround,
+// where a direction is a camera position, so the western rows are real.
 const WORLD_TO_SCREEN = {
   e: "se", se: "s", s: "sw", sw: "w", w: "nw", nw: "n", n: "ne", ne: "e",
 };
@@ -55,7 +57,15 @@ function entryFor(manifest) {
     if (!byDir) { byDir = new Map(); idx.set(r.action, byDir); }
     byDir.set(r.direction, Math.floor(n));
   }
-  entry = { byAction: idx, timings: null, timingsFps: NaN };
+  // action -> Set of directions drawn as-is (manifest.unmirrored).
+  const unmirrored = new Map();
+  const um = manifest.unmirrored;
+  if (um && typeof um === "object") {
+    for (const [action, dirs] of Object.entries(um)) {
+      if (Array.isArray(dirs)) unmirrored.set(action, new Set(dirs));
+    }
+  }
+  entry = { byAction: idx, unmirrored, timings: null, timingsFps: NaN };
   indexCache.set(manifest, entry);
   return entry;
 }
@@ -123,6 +133,8 @@ function frameIndex(n, startedAt, now, fps, loop) {
 
 // SOMET-659: western screen rows -> the eastern row drawn mirrored.
 const MIRROR_OF = { w: "e", nw: "ne", sw: "se" };
+// Diagonal -> whether its side-view stand-in (the "e" row) is drawn mirrored.
+const SIDE_FLIP = { se: false, ne: false, sw: true, nw: true };
 
 // The sheet row (direction) to draw `action` at screen direction `dir`, or
 // null when the sheet has no such action. Writes `out.flipX` (when `out` is
@@ -132,17 +144,28 @@ const MIRROR_OF = { w: "e", nw: "ne", sw: "se" };
 export function rowFor(manifest, action, dir, out) {
   if (out) out.flipX = false;
   if (!isBoxManifest(manifest)) return null;
-  return pickRow(rowIndex(manifest).get(action), dir, out);
+  const entry = entryFor(manifest);
+  return pickRow(entry.byAction.get(action), dir, out, entry.unmirrored.get(action));
 }
 
-function pickRow(byDir, dir, out) {
+function pickRow(byDir, dir, out, asIs) {
   if (!byDir) return null;
+  if (asIs && asIs.has(dir) && byDir.has(dir)) return dir;
   const east = MIRROR_OF[dir];
   if (east !== undefined && byDir.has(east)) {
     if (out) out.flipX = true;
     return east;
   }
   if (byDir.has(dir)) return dir;
+  // SOMET-669: a four-facing sheet (s / e / n) has no diagonals. Diagonal
+  // movement is sideways on screen, so it walks the side view -- the eastern
+  // row, mirrored on the western side -- not whichever of s / n / e the
+  // nearest search's tie-break happens to land on.
+  const side = SIDE_FLIP[dir];
+  if (side !== undefined && byDir.has("e")) {
+    if (out) out.flipX = side;
+    return "e";
+  }
   // The nearest fallback can land on a western row too (e.g. "n" missing ties
   // nw/ne); the same rule applies to it: its eastern twin, mirrored.
   const near = nearestDir(byDir, dir);
@@ -164,13 +187,14 @@ export function frameKeyFor(manifest, dir, action, startedAt, now, fps, out) {
 function keyFor(manifest, dir, action, startedAt, now, fps, loop, out) {
   if (out) out.flipX = false;
   if (!isBoxManifest(manifest)) return null;
-  const idx = rowIndex(manifest);
+  const entry = entryFor(manifest);
+  const idx = entry.byAction;
   let useAction = action;
-  let d = pickRow(idx.get(action), dir, out);
+  let d = pickRow(idx.get(action), dir, out, entry.unmirrored.get(action));
   let looped = loop !== undefined ? loop : LOOPED.has(action);
   if (d === null && action !== "idle") {
     useAction = "idle";
-    d = pickRow(idx.get("idle"), dir, out);
+    d = pickRow(idx.get("idle"), dir, out, entry.unmirrored.get("idle"));
     looped = true;
   }
   if (d === null) return null;

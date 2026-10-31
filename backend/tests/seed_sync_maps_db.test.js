@@ -170,7 +170,7 @@ dbTest('fresh PC: new specs seed and land in sync', async (ctx) => {
     { table: a.table, key: a.key, syncUuid: a.syncUuid, kind: a.kind, defaultDecision: a.defaultDecision, blockedReason: a.blockedReason },
     { table: 'map_specs', key: 'sx-m4-a', syncUuid: uuidOf('sx-m4-a'), kind: 'new', defaultDecision: 'git', blockedReason: null });
   assert.deepStrictEqual(a.allowedDecisions, ['git']);
-  assert.deepStrictEqual(a.fields.map((f) => f.name), [`${P}a`, `${P}b`]);
+  assert.deepStrictEqual(a.fields, [`${P}a`, `${P}b`].map((name) => ({ name, local: 'not here', git: 'changed in git' })));
 
   const res = await seed(pool);
   assert.ok(Number.isInteger(res.runId));
@@ -206,7 +206,7 @@ dbTest('admin edit → edited_here → export writes spec → other PC git_newer
   const row = rowOf(await previewSeed(pool, 'maps'), 'sx-m4-a');
   assert.strictEqual(row.kind, 'edited_here');
   assert.strictEqual(row.defaultDecision, 'local');
-  assert.deepStrictEqual(row.fields.map((f) => f.name), [`${P}b`]);
+  assert.deepStrictEqual(row.fields, [{ name: `${P}b`, local: 'edited here', git: 'unchanged' }]);
 
   const ex = await exportGroup(pool, 'maps');
   assert.ok(Number.isInteger(ex.runId));
@@ -232,7 +232,8 @@ dbTest('admin edit → edited_here → export writes spec → other PC git_newer
   const g = rowOf(await previewSeed(pool, 'maps'), 'sx-m4-a');
   assert.strictEqual(g.kind, 'git_newer');
   assert.strictEqual(g.defaultDecision, 'git');
-  assert.deepStrictEqual(g.fields.map((f) => f.name), [`${P}b`]);
+  // Never null: the preview prints a field side as text ("null").
+  assert.deepStrictEqual(g.fields, [{ name: `${P}b`, local: 'unchanged', git: 'changed in git' }]);
   await assert.rejects(exportGroup(pool, 'maps'), (e) => e instanceof SyncRefused && e.code === 'git_newer');
 
   const res = await seed(pool);

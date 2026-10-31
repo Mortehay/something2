@@ -100,9 +100,10 @@ async function withRolledBackClient(fn) {
 
 const FREE_ENTITY = `NOT EXISTS (SELECT 1 FROM sprite_sets s
                       WHERE s.entity_type_id = e.id AND s.status IN ('queued','running'))`;
-const EIGHT = ['s', 'se', 'e', 'ne', 'n', 'nw', 'w', 'sw'];
+// SOMET-669: directional sheets are drawn front, right side and back only.
+const FACINGS = ['s', 'e', 'n'];
 
-test('enqueue stores actions, frames and 8 facings for a creature', { skip }, async () => {
+test('enqueue stores actions, frames and the facings for a creature', { skip }, async () => {
   await withRolledBackClient(async (client) => {
     const { rows: [e] } = await client.query(
       `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
@@ -113,7 +114,7 @@ test('enqueue stores actions, frames and 8 facings for a creature', { skip }, as
       { actions: ['idle', 'walk'], framesPerAction: 6 });
 
     assert.deepEqual(row.actions, ['idle', 'walk']);
-    assert.deepEqual(row.directions, EIGHT);
+    assert.deepEqual(row.directions, FACINGS);
     assert.equal(row.frames_per_action, 6);
     assert.equal(row.frames, 6);
     assert.equal(row.backend, 'gpu-box');
@@ -171,6 +172,29 @@ test('an update detaches a rescued row from its box job only when the sheet chan
   });
 });
 
+test('re-queuing a row queued under the old eight facings re-draws it in the current set (SOMET-669)', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [a] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    assert.ok(a, 'precondition: a creature with no live sprite job');
+    const { rows: [row] } = await queue.enqueue(client, [{ entityId: a.id }], { actions: ['idle'], framesPerAction: 4 });
+    // As a row queued before SOMET-669 was stored, with a resumable box job.
+    await client.query(
+      `UPDATE sprite_sets SET directions = ARRAY['s','se','e','ne','n','nw','w','sw'], box_job_id = 'box-old'
+        WHERE id = $1`,
+      [row.id],
+    );
+
+    const again = await queue.enqueue(client, [{ entityId: a.id }], { actions: ['idle'], framesPerAction: 4 });
+
+    assert.equal(again.updated[0].id, row.id, 'same row, same place in line');
+    assert.deepEqual(again.updated[0].directions, FACINGS);
+    assert.equal(again.updated[0].box_job_id, null, 'the old job draws eight facings, so it is detached');
+    assert.equal(again.updated[0].dropped_box_job_id, 'box-old');
+  });
+});
+
 test('requeueHalted puts a running row back detached, and leaves other states alone', { skip }, async () => {
   await withRolledBackClient(async (client) => {
     const { rows: [e] } = await client.query(
@@ -206,7 +230,7 @@ test('enqueue gives props one facing', { skip }, async () => {
       { actions: ['idle', 'sway'], framesPerAction: 4 });
 
     const byEntity = new Map(rows.map((r) => [r.entity_type_id, r]));
-    assert.deepEqual(byEntity.get(creature.id).directions, EIGHT);
+    assert.deepEqual(byEntity.get(creature.id).directions, FACINGS);
     assert.deepEqual(byEntity.get(prop.id).directions, ['s']);
     assert.deepEqual(byEntity.get(prop.id).actions, ['idle', 'sway']);
     // Props v2: no propFx means none on the prop row; creatures carry NULL.

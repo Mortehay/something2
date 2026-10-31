@@ -1,11 +1,11 @@
 // SOMET-638. The seed preview: every difference between git and this PC, one
 // decision per row. Nothing is written until Apply; Apply always posts the
 // FULL decision map (defaults included) so the server never guesses.
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import styled from 'styled-components';
 import { useSeedPreview, useApplySeed } from './useSeedExport.js';
 import {
-  initialDecisions, applyGate, pluralize, previewSignature, seedRequestBody, seedAllGate, BUSY_TEXT,
+  initialDecisions, applyGate, pluralize, previewSignature, seedRequestBody, seedAllGate, BUSY_TEXT, submitOnce,
 } from './seedExportModel.js';
 import { Btn, Muted, Modal } from './seedUi.jsx';
 import PreviewSection from './SeedPreviewSection.jsx';
@@ -51,14 +51,18 @@ function PreviewBody({ group, data, onClose, reload, busy }) {
 
   // A binary group answers 202 { job }: the modal closes and the group's row
   // shows the job. A busy refusal keeps it open (the decisions survive).
-  const submit = () => apply.mutate(
+  // A double click sends one request (submitOnce), not a second one that is
+  // refused busy while the first succeeds.
+  const inFlight = useRef(false);
+  const submit = () => submitOnce(inFlight, (done) => apply.mutate(
     { groupId: group.id, label: group.label, body: seedRequestBody(decisions, data) },
     {
       onSuccess: onClose,
       // The diff moved under the preview: show the fresh one.
       onError: (err) => { if (err.code === 'stale_preview') reload(); },
+      onSettled: done,
     },
-  );
+  ));
 
   return (
     // A stray backdrop click must not throw away the admin's decisions:

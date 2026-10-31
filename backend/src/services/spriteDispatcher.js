@@ -10,6 +10,7 @@
 const defaultQueue = require('./spriteJobQueue.js');
 const defaultConcepts = require('./spriteConcepts.js');
 const { buildBoxSheetManifest } = require('./spriteSheetManifest.js');
+const { applyTurnaround } = require('./spriteTurnaround.js');
 // The Art pipeline's trim (SOMET-563): a prop is stored cropped to its opaque
 // content, so the renderer's fit fills the display box and a bottom-anchored
 // idle effect pivots at the real base, not in empty canvas.
@@ -98,6 +99,23 @@ function mayStillRun(message) {
   return err;
 }
 
+// The box itself ended the job (failed, cancelled, missing): nothing to cancel.
+function boxEnded(message) {
+  const err = new Error(message);
+  err.boxEnded = true;
+  return err;
+}
+
+// The provider's sheet method (aiProviders.SHEET_METHODS); absent = '2d'.
+const sheetMethod = (provider) => (provider && provider.request_template && provider.request_template.sheet_method) || '2d';
+
+// A 3D turnaround measured 2m42s on the box. It runs on the box's CPU mesh
+// worker, which has been seen not consuming its queue at all, so the wait is
+// capped short: the 2D sheet is kept and the row is not held for hours.
+const TURNAROUND_DEADLINE_MS = 15 * 60 * 1000;
+const TURNAROUND_QUEUE_CAP_MS = 20 * 60 * 1000;
+const turnaroundNote = (why) => `3D turnaround skipped, kept the 2D sheet: ${why}`.slice(0, 500);
+
 const BOX_JOB_GONE = "The GPU box no longer has this sheet's job. Queue the whole sheet again.";
 
 // A box client result -> its value, or an Error carrying the box's words.
@@ -117,6 +135,8 @@ function createDispatcher({
   stallMs = 20 * 60 * 1000,
   queueCapMs = QUEUE_CAP_MS,
   cellTimeoutMs = 120000,
+  turnaroundDeadlineMs = TURNAROUND_DEADLINE_MS,
+  turnaroundQueueCapMs = TURNAROUND_QUEUE_CAP_MS,
 }) {
   let run = null;
 
@@ -146,7 +166,9 @@ function createDispatcher({
   // failing the row outright. Resolves to the time of the first `running`
   // observation (ms epoch) when `measure` is set and one was seen, else null.
   // `queueCapMessage(hours)` overrides the queue-cap failure text.
-  async function pollToDone(provider, boxJobId, deadlineMs, { measure = true, onPoll = null, queueCapMessage = null } = {}) {
+  async function pollToDone(provider, boxJobId, deadlineMs, {
+    measure = true, onPoll = null, queueCapMessage = null, capMs = queueCapMs,
+  } = {}) {
     const queueStart = Date.now();
     let startedAt = queueStart;
     let lastSig = null;
@@ -175,16 +197,18 @@ function createDispatcher({
         if (onPoll) onPoll(status, progress);
         if (status === 'done') return runningAt;
         if (!RESUMABLE.has(status)) {
-          throw new Error(`box job ${status}${error ? `: ${error}` : ''}`);
+          throw boxEnded(`box job ${status}${error ? `: ${error}` : ''}`);
         }
         if (status === 'queued' && !sawRunning) {
           startedAt = now;
           lastChange = now;
           lastSig = null;
-          if (now - queueStart >= queueCapMs) {
-            const hours = Number((queueCapMs / 3600000).toFixed(2));
-            throw mayStillRun(queueCapMessage ? queueCapMessage(hours)
+          if (now - queueStart >= capMs) {
+            const hours = Number((capMs / 3600000).toFixed(2));
+            const capped = mayStillRun(queueCapMessage ? queueCapMessage(hours)
               : `still waiting behind other box jobs after ${hours} h — the box job ${boxJobId} may still run; re-queue to resume it`);
+            capped.queueCapped = true;
+            throw capped;
           }
         } else {
           if (status === 'running' && !sawRunning) {
@@ -210,6 +234,30 @@ function createDispatcher({
       }
       // eslint-disable-next-line no-await-in-loop
       await wait(pollMs);
+    }
+  }
+
+  // SOMET-665: asks the box to stop a sheet job this row abandoned, so it does
+  // not keep the shared box busy for nothing. Best effort: a refused or failed
+  // cancel is logged and never replaces the row's own error.
+  async function cancelAbandoned(provider, boxJobId, row) {
+    try {
+      const c = await box.cancelSheetJob(provider, boxJobId);
+      if (c && c.ok) return;
+      console.error(`sprite: could not cancel box job ${boxJobId} for ${row.id}: ${c && c.error}`);
+    } catch (err) {
+      console.error(`sprite: could not cancel box job ${boxJobId} for ${row.id}: ${err.message}`);
+    }
+  }
+
+  // Records the box job on the row; if that write fails the job would run with
+  // nothing pointing at it, so it is cancelled before the error propagates.
+  async function attachOrCancel(provider, row, job, conceptKey) {
+    try {
+      await queue.attachBox(db, row.id, { boxJobId: job.boxJobId, conceptKey, providerId: provider.id });
+    } catch (err) {
+      await cancelAbandoned(provider, job.boxJobId, row);
+      throw err;
     }
   }
 
@@ -257,7 +305,7 @@ function createDispatcher({
           if (run && run.halting) throw haltedError();
           const reused = await box.createSheetJob(provider, sheetSpec(row, kept.box_concept_path));
           if (reused.ok) {
-            await queue.attachBox(db, row.id, { boxJobId: reused.boxJobId, conceptKey, providerId: provider.id });
+            await attachOrCancel(provider, row, reused, conceptKey);
             return { boxJobId: reused.boxJobId, conceptKey, cells: reused.cells, estimatedSeconds: reused.estimatedSeconds };
           }
           const refused = reused.status >= 400 && reused.status < 500 && !reused.retryable
@@ -272,13 +320,19 @@ function createDispatcher({
       if (cur) cur.message = KEPT_CONCEPT_NOTE;
     }
 
-    const concept = must(await box.generateConcept(provider, { prompt: row.base_prompt }));
+    // The concept may wait a long time behind other box work (SOMET-664), so a
+    // halt ends its poll. The box has no cancel for a concept task: one that
+    // was given up on (halt, queue cap, run timeout) may still run there.
+    const generated = await box.generateConcept(provider, { prompt: row.base_prompt }, {
+      shouldStop: () => Boolean(run && run.halting),
+    });
+    if (generated && generated.halted) throw haltedError();
+    const concept = must(generated);
     await store.putObject(conceptKey, concept.png, 'image/png');
-    // The concept call cannot be interrupted; a halt during it lands here,
-    // before a sheet job is ever created.
+    // A halt that lands after the concept finished, before a sheet job exists.
     if (run && run.halting) throw haltedError();
     const job = must(await box.createSheetJob(provider, sheetSpec(row, concept.conceptPath)));
-    await queue.attachBox(db, row.id, { boxJobId: job.boxJobId, conceptKey, providerId: provider.id });
+    await attachOrCancel(provider, row, job, conceptKey);
     // Best effort: a missed keep only costs a re-draw next time.
     try {
       await concepts.upsertKept(db, {
@@ -345,6 +399,50 @@ function createDispatcher({
     await store.putObject(keys.atlas_key, sheet.png, 'image/png');
     await store.putObject(keys.manifest_key, Buffer.from(JSON.stringify(built.manifest)), 'application/json');
     return keys;
+  }
+
+  // The 3D sheet method: after the 2D sheet is built, the box renders a static
+  // 8-direction turnaround from that sheet job and its cells replace the idle
+  // rows (spriteTurnaround.js). Best effort -- any failure keeps the 2D sheet
+  // and says why in the row's note; only a halt propagates. Not resumable: a
+  // restart mid-turnaround resumes the 2D job and asks for a new turnaround.
+  // Resolves { png, manifest, turnaroundPng } or { note }.
+  async function turnaround(provider, row, sourceJobId, sheetPng, manifest, cur) {
+    cur.phase = 'running';
+    cur.pct = 0;
+    cur.message = '3D turnaround';
+    const created = await box.createTurnaround3d(provider, sourceJobId, { cell: `${manifest.cell[0]}x${manifest.cell[1]}` });
+    if (!created.ok) return { note: turnaroundNote(created.error) };
+    try {
+      await pollToDone(provider, created.boxJobId, turnaroundDeadlineMs, {
+        measure: false,
+        capMs: turnaroundQueueCapMs,
+        queueCapMessage: (hours) => `the box's 3D worker did not start it within ${hours} h`,
+        onPoll: (status, progress) => {
+          const pct = Number(progress.pct);
+          if (Number.isFinite(pct)) cur.pct = Math.max(0, Math.min(100, pct));
+          cur.message = `3D turnaround: ${progress.message || status}`;
+        },
+      });
+      const sheet = must(await box.fetchSheet(provider, created.boxJobId));
+      const atlas = must(await box.fetchAtlas(provider, created.boxJobId));
+      const merged = applyTurnaround({
+        sheetPng, manifest, turnaroundPng: sheet.png, turnaroundAtlas: atlas.atlas,
+      });
+      if (!merged.ok) return { note: turnaroundNote(merged.error) };
+      return {
+        png: merged.png,
+        manifest: { ...merged.manifest, turnaround3d: { box_job_id: created.boxJobId } },
+        turnaroundPng: sheet.png,
+      };
+    } catch (err) {
+      if (err.halted) throw err;
+      if (err.taskMayRun) {
+        const c = await box.cancelSheetJob(provider, created.boxJobId);
+        if (!c || !c.ok) console.error(`sprite 3D: could not cancel box job ${created.boxJobId} for ${row.id}: ${c && c.error}`);
+      }
+      return { note: turnaroundNote(err.message) };
+    }
   }
 
   // Frame redraw (row.redraw_of). The box redraw contract is [ASSUMED]:
@@ -441,15 +539,25 @@ function createDispatcher({
     const plannedCells = (row.actions || []).length * (row.directions || []).length * (row.frames_per_action || 0);
     const cells = Number(job.cells) || plannedCells;
     const deadlineMs = Math.max(cells * cellTimeoutMs, (Number(job.estimatedSeconds) || 0) * 3 * 1000);
-    const runningAt = await pollToDone(provider, job.boxJobId, deadlineMs, {
-      measure,
-      onPoll: (status, progress) => {
-        cur.phase = status === 'queued' ? 'queued' : status === 'done' ? 'storing' : 'running';
-        const pct = status === 'done' ? 100 : Number(progress.pct);
-        cur.pct = Number.isFinite(pct) ? Math.max(0, Math.min(100, pct)) : (status === 'queued' ? 0 : cur.pct);
-        cur.message = progress.message || '';
-      },
-    });
+    // A poll that gives up while the job may still run is cancelled on the box
+    // (SOMET-665) -- except at the queue cap, where the job is kept so that
+    // re-queuing the row resumes its place in the box queue. A halt has
+    // already cancelled it; a job the box ended needs nothing.
+    let runningAt;
+    try {
+      runningAt = await pollToDone(provider, job.boxJobId, deadlineMs, {
+        measure,
+        onPoll: (status, progress) => {
+          cur.phase = status === 'queued' ? 'queued' : status === 'done' ? 'storing' : 'running';
+          const pct = status === 'done' ? 100 : Number(progress.pct);
+          cur.pct = Number.isFinite(pct) ? Math.max(0, Math.min(100, pct)) : (status === 'queued' ? 0 : cur.pct);
+          cur.message = progress.message || '';
+        },
+      });
+    } catch (err) {
+      if (!err.halted && !err.boxEnded && !err.queueCapped) await cancelAbandoned(provider, job.boxJobId, row);
+      throw err;
+    }
     cur.phase = 'storing';
     cur.pct = 100;
     const sheetSeconds = runningAt == null ? null : (Date.now() - runningAt) / 1000;
@@ -468,10 +576,25 @@ function createDispatcher({
     });
     if (!built.ok) throw new Error(`box sheet rejected: ${built.error}`);
 
+    let sheetPng = sheet.png;
+    let { manifest } = built;
+    if (sheetMethod(provider) === 'turnaround3d') {
+      const t = await turnaround(provider, row, job.boxJobId, sheetPng, manifest, cur);
+      cur.phase = 'storing';
+      cur.pct = 100;
+      if (t.note) {
+        await queue.setNote(db, row.id, t.note);
+      } else {
+        sheetPng = t.png;
+        ({ manifest } = t);
+        await store.putObject(`${prefix}turnaround.png`, t.turnaroundPng, 'image/png');
+      }
+    }
+
     const sheetKey = `${prefix}sheet.png`;
     const manifestKey = `${prefix}sheet.json`;
-    await store.putObject(sheetKey, sheet.png, 'image/png');
-    await store.putObject(manifestKey, Buffer.from(JSON.stringify(built.manifest)), 'application/json');
+    await store.putObject(sheetKey, sheetPng, 'image/png');
+    await store.putObject(manifestKey, Buffer.from(JSON.stringify(manifest)), 'application/json');
     await queue.complete(db, row.id, {
       atlas_key: sheetKey,
       manifest_key: manifestKey,

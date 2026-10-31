@@ -482,6 +482,8 @@ reseed-map:
 # --- Complete seed (runs all seed targets in dependency order) --------------
 #
 # Seeding order:
+#   0. AI provider templates (seeds/sync/ai_provider_templates.json; rows edited
+#      on this PC are kept, new/changed presets come from git)
 #   1. seed-catalogs      (tiles, biomes, decorations, creatures, loot, classes)
 #   2. seed-passive-tree  (passive skill tree)
 #   3. seed-quests        (storyline quests)
@@ -497,6 +499,8 @@ reseed-map:
 #   ONLY=<subjects>       limit art-seed and audio-seed to specific subjects
 #
 seed-all:
+	@echo "==> [0/6] Seeding AI provider templates (GPU box presets)..."
+	@$(MAKE) --no-print-directory seed-sync-seed GROUP=ai_provider_templates RESOLVE=local
 	@echo "==> [1/6] Seeding catalogs (tiles, biomes, creatures, decorations, classes)..."
 	@$(MAKE) --no-print-directory seed-catalogs
 	@echo "==> [2/6] Seeding passive skill tree..."

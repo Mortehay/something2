@@ -68,8 +68,15 @@ describe('KindFields', () => {
   it('sprite: the concept-model select is unchanged (box default first)', () => {
     const html = render({ ...emptyProviderForm('sprite'), model: 'core-b' }, { models: ['core-a', 'core-b'] });
     const sel = selectNamed(html, 'Concept model');
-    expect(sel).toMatch(/^<option value="">Box default \(Qwen\)<\/option>/);
+    expect(sel).toMatch(/^<option value="">Box default \(Qwen fast — fits the card\)<\/option>/);
     expect(sel).toContain('<option value="core-b" selected="">core-b</option>');
+  });
+
+  it('sprite: the Directions select offers 2D and the 3D turnaround', () => {
+    const html = render({ ...emptyProviderForm('sprite'), sheet_method: 'turnaround3d' }, { models: [] });
+    const sel = selectNamed(html, 'Directions');
+    expect(sel).toMatch(/^<option value="2d">2D/);
+    expect(sel).toContain('<option value="turnaround3d" selected="">3D turnaround');
   });
 
   it('image: request template textarea and the models_cache dropdown', () => {

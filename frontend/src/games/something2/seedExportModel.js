@@ -303,6 +303,17 @@ export const jobRunning = (job) => Boolean(job) && job.status === 'running';
 // useSeedJob's refetchInterval: poll every second only while a job runs.
 export const jobPollInterval = (job) => (jobRunning(job) ? 1000 : false);
 
+// SOMET-641: Apply's isPending only disables the button after a re-render, so
+// a fast double click sent a second seed, refused busy, and left the preview
+// open on that error. `flag` is a ref set synchronously; `run(done)` starts
+// the request and calls done once it settles. Returns whether it started.
+export function submitOnce(flag, run) {
+  if (flag.current) return false;
+  flag.current = true;
+  run(() => { flag.current = false; });
+  return true;
+}
+
 // Seed all: leaving for a binary group's own preview discards the choices
 // made in this modal. `states` holds a group only once the admin changed a
 // decision there, so any entry means there is something to lose.

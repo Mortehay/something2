@@ -181,7 +181,8 @@ function SpriteConsoleAdmin() {
   const [previewId, setPreviewId] = useState(null);
   const { catalog, isLoading: catalogLoading, error: catalogError } = useActionCatalog();
   const [chosenActions, setChosenActions] = useState(null);
-  const [chosenFrames, setChosenFrames] = useState(4);
+  // SOMET-669: 8 by default; `frames` below clamps it to the box's own cap.
+  const [chosenFrames, setChosenFrames] = useState(8);
   // Props v2: the idle effect selected props get in game (prop_fx).
   const [propFx, setPropFx] = useState('none');
   const queue = useQueueSprites();
@@ -317,8 +318,8 @@ function SpriteConsoleAdmin() {
         ) : (
           <>
             <Field as="div">
-              Actions ({actions.length} of {catalog?.actions?.length ?? 0}) · each drawn in
-              all {catalog?.directions?.length ?? 8} directions
+              Actions ({actions.length} of {catalog?.actions?.length ?? 0}) · each drawn
+              front, side and back (the game mirrors the other side)
               <ActionChips>
                 {(catalog?.actions || []).map((action) => (
                   <Check key={action.id}>

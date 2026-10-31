@@ -1,8 +1,13 @@
 const { appearancePrompt } = require('./catalogSubjects.js');
 
-// The eight facings a creature, class or appearance variant is drawn in. Props
+// The facings a creature, class or appearance variant is drawn in. Props
 // (kind 'object') are drawn from one angle only.
-const SPRITE_DIRECTIONS = ['s', 'se', 'e', 'ne', 'n', 'nw', 'w', 'sw'];
+//
+// SOMET-669: front, right side and back only. The game draws w as the e row
+// mirrored (SOMET-659 -- the box's western rows were broken anyway) and every
+// diagonal as the side view, so drawing the other five rows spent 5/8 of each
+// sheet's GPU time on rows nothing showed.
+const SPRITE_DIRECTIONS = ['s', 'e', 'n'];
 
 // Batch sprite jobs go to the GPU box (Qwen sheet generation). These options
 // describe WHAT to draw per entity or appearance variant: subject, prompt,

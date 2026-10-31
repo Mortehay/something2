@@ -76,8 +76,9 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = 'none' 
   const rowFrames = (o) => (Number.isInteger(framesPerAction) ? framesPerAction : o.frames);
   const rowActions = (o) => (chosenActions || DEFAULT_ACTIONS[o.kind] || DEFAULT_ACTIONS.creature).join(',');
   const rowPropFx = (o) => (o.kind === 'object' ? propFx : null);
-  // A target that already has a QUEUED job gets this call's actions, frames and
-  // prop effect instead of a second row (the live-job index forbids one), so a
+  // A target that already has a QUEUED job gets this call's actions, frames,
+  // facings (SOMET-669: a row queued under the old eight is re-drawn in the
+  // current set) and prop effect instead of a second row (the live-job index forbids one), so a
   // mistaken queue is fixed in place. `status = 'queued'` is re-checked after
   // claim()'s row lock, so a job the dispatcher just took is left alone; the
   // INSERT below then conflicts on it and it counts as skipped.
@@ -97,12 +98,14 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = 'none' 
   const { rows: updated } = await db.query(
     `UPDATE sprite_sets s
         SET actions = string_to_array(t.actions, ','), frames = t.frames, frames_per_action = t.frames,
+            directions = string_to_array(t.directions, ','),
             prop_fx = t.prop_fx, updated_at = now(),
             box_job_id = CASE WHEN s.actions IS DISTINCT FROM string_to_array(t.actions, ',')
                                 OR s.frames_per_action IS DISTINCT FROM t.frames
+                                OR s.directions IS DISTINCT FROM string_to_array(t.directions, ',')
                               THEN NULL ELSE s.box_job_id END
-       FROM unnest($1::int[], $2::smallint[], $3::int[], $4::text[], $5::text[])
-         AS t(entity_id, variant, frames, actions, prop_fx),
+       FROM unnest($1::int[], $2::smallint[], $3::int[], $4::text[], $5::text[], $6::text[])
+         AS t(entity_id, variant, frames, actions, prop_fx, directions),
             sprite_sets o
       WHERE s.entity_type_id = t.entity_id
         AND COALESCE(s.appearance_variant, 0) = COALESCE(t.variant, 0)
@@ -111,6 +114,7 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = 'none' 
     [
       opts.map((o) => o.entityTypeId), opts.map((o) => o.appearanceVariant),
       opts.map(rowFrames), opts.map(rowActions), opts.map(rowPropFx),
+      opts.map((o) => o.directions.join(',')),
     ],
   );
   const { rows } = await db.query(

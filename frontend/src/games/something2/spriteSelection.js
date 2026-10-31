@@ -67,7 +67,9 @@ export function isSpritePageSelected(selected, pageRows) {
 
 // --- Box action catalog helpers ---------------------------------------------
 
-const FACINGS = { directional: 8 };
+// Rows a directional sheet is drawn with: s, e, n (SOMET-669; the backend's
+// SPRITE_DIRECTIONS). w and the diagonals reuse them in game.
+const FACINGS = { directional: 3 };
 
 export function framesCap(catalog, actions) {
   const caps = (catalog?.actions || [])

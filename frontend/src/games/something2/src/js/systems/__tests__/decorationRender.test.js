@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { RenderSystem } from "../RenderSystem.js";
-import { depthKey } from "../../core/iso.js";
-import { MAP_TILE_SIZE } from "../../core/constants.js";
+import { depthKey, worldToScreen } from "../../core/iso.js";
+import { MAP_TILE_SIZE, GAME_WIDTH, GAME_HEIGHT } from "../../core/constants.js";
 
 // Minimal ChunkedMap stub: only the interface collectDecorations consumes
 // (chunkSize, loadedKeys(), decorationsInChunk(cx,cy)) — no need for the real
@@ -79,5 +79,67 @@ describe("RenderSystem.collectDecorations", () => {
     const out = RenderSystem.collectDecorations(chunkedMap, null, decoTypes);
     const names = out.map((d) => d.ref.name).sort();
     expect(names).toEqual(["Bush", "Rock"]);
+  });
+
+  // SOMET-667. Every loaded chunk is far larger than the viewport, so without
+  // this every decoration in the streamed neighbourhood (~1,480 on the entry
+  // world) went through drawEntity every frame.
+  describe("with a camera", () => {
+    // A camera looking at the screen projection of `cell`'s tile center.
+    function cameraOn(col, row) {
+      const s = worldToScreen(col * MAP_TILE_SIZE + MAP_TILE_SIZE / 2, row * MAP_TILE_SIZE + MAP_TILE_SIZE / 2);
+      return { screenX: s.x, screenY: s.y, width: GAME_WIDTH, height: GAME_HEIGHT };
+    }
+    const decoTypes = new Map([
+      ["Rock", { name: "Rock", displayWidth: 64, displayHeight: 96 }],
+      // Taller than the whole viewport: its base is off-screen below while
+      // its crown is still in view.
+      ["Tree", { name: "Tree", displayWidth: 200, displayHeight: 900 }],
+    ]);
+
+    it("drops a decoration whose drawn sprite is fully off-screen", () => {
+      const chunkedMap = stubMap(64, {
+        "0,0": [
+          { name: "Rock", row: 10, col: 10, blocking: true },
+          { name: "Rock", row: 40, col: 40, blocking: true },
+        ],
+      });
+      const out = RenderSystem.collectDecorations(chunkedMap, cameraOn(10, 10), decoTypes);
+      expect(out.map((d) => [d.ref.x, d.ref.y])).toEqual([[10 * MAP_TILE_SIZE, 10 * MAP_TILE_SIZE]]);
+    });
+
+    // Screen offsets from tile (10,10)'s center: each +1 col moves a tile
+    // center +64 px right and +32 px down; each +1 row moves it -64 px right
+    // and +32 px down (iso.js, ISO_K = 0.64 per world px).
+    it("keeps a tall sprite whose base is off-screen but whose crown is in view", () => {
+      // (+8, +8): base 512 px below center, past the 360 px bottom edge; a
+      // 900 px sprite reaches up to -388, i.e. into view.
+      const chunkedMap = stubMap(64, {
+        "0,0": [{ name: "Tree", row: 18, col: 18, blocking: true }],
+      });
+      const cam = cameraOn(10, 10);
+      const base = worldToScreen(18 * MAP_TILE_SIZE + MAP_TILE_SIZE / 2, 18 * MAP_TILE_SIZE + MAP_TILE_SIZE / 2);
+      expect(base.y - cam.screenY).toBe(512);
+      const out = RenderSystem.collectDecorations(chunkedMap, cam, decoTypes);
+      expect(out).toHaveLength(1);
+    });
+
+    it("keeps a sprite straddling the left edge and drops one just past it", () => {
+      // Camera nudged 15 px right so (row 10, col 0) is centred at x = -655:
+      // past the -640 edge, but a 64 px-wide rock still reaches -623. Col -1
+      // is centred at -719; its right side, at -687, is fully off-screen.
+      const cam = cameraOn(10, 10);
+      cam.screenX += 15;
+      const chunkedMap = stubMap(64, {
+        "0,0": [
+          { name: "Rock", row: 10, col: 0, blocking: true },
+          { name: "Rock", row: 10, col: -1, blocking: true },
+        ],
+      });
+      const s = worldToScreen(0 * MAP_TILE_SIZE + MAP_TILE_SIZE / 2, 10 * MAP_TILE_SIZE + MAP_TILE_SIZE / 2);
+      expect(s.x - cam.screenX).toBe(-655);
+      const out = RenderSystem.collectDecorations(chunkedMap, cam, decoTypes);
+      expect(out.map((d) => d.ref.x)).toEqual([0]);
+    });
   });
 });

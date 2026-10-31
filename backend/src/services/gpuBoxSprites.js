@@ -7,7 +7,7 @@
 // stored URL usually points at a txt2img path, which is irrelevant here.
 //
 // Every function takes `provider` first and an options bag last
-// ({ fetchImpl, sleep, pollMs, timeoutMs }) and returns { ok: true, ... } or
+// ({ fetchImpl, sleep, pollMs, timeoutMs, queueCapMs, shouldStop }) and returns { ok: true, ... } or
 // { ok: false, error, retryable? } like remoteAudioProvider.callJson.
 const { safeFetch, readCapped, readJsonCapped, redactUrl, errorDetail } = require('./safeFetch');
 const { authHeaders, resolveUrl } = require('./providerDiscovery');
@@ -17,6 +17,9 @@ const SHEET_CAP = () => Number(process.env.GPU_BOX_SHEET_MAX_BYTES) || 32 * 1024
 const REQUEST_TIMEOUT_MS = () => Number(process.env.GPU_BOX_REQUEST_TIMEOUT_MS) || 60 * 1000;
 const POLL_MS = () => Number(process.env.GPU_BOX_POLL_MS) || 3000;
 const CONCEPT_TIMEOUT_MS = () => Number(process.env.GPU_BOX_CONCEPT_TIMEOUT_MS) || 15 * 60 * 1000;
+// Longest a concept task may wait PENDING behind other work on the shared box
+// (a full sheet job is ~25 min) before the row gives up on it.
+const CONCEPT_QUEUE_CAP_MS = () => Number(process.env.GPU_BOX_CONCEPT_QUEUE_CAP_MS) || 6 * 60 * 60 * 1000;
 const realSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // A box job in one of these will never change again.
@@ -128,11 +131,39 @@ async function resolveConceptModel(provider, opts = {}) {
 // the image THIS task's result.url names -- never the newest asset, which a
 // concurrent run (or another user of the box) can own. `label` names the task
 // in errors ("concept"). Resolves { ok, path, png, result }.
+//
+// SOMET-664: timeoutMs bounds only the time the task RUNS; time queued behind
+// other work on the shared box is bounded by queueCapMs instead. The box
+// answers PENDING on task-status for the whole wait AND the whole run (seen
+// live 2026-10-31: PENDING, then SUCCESS; never STARTED or PROGRESS), so the
+// run clock starts at the first STARTED/PROGRESS or the first poll where
+// taskState() sees the task picked up -- or seen queued and then gone from
+// the gateway's list while still PENDING (lost: the run timeout bounds it).
+// PENDING also means an unknown or expired id, and a new task is listed at
+// once, so one the list never shows (or a box without the list) fails at the
+// run timeout as lost rather than waiting out the queue cap. `shouldStop()` true ends the poll
+// with { ok: false, halted: true } (the box has no cancel for these tasks, so
+// it may still run there).
+// 'running', 'queued' or 'absent', from the box's model gateway: its
+// `pending` list holds every unfinished task, with `running: true` once a
+// worker has it (seen live 2026-10-31: listed without `running` while queued,
+// then running, then gone at SUCCESS). A failed read counts as absent.
+async function taskState(provider, taskId, fetchImpl) {
+  const r = await callJson(provider, 'GET', '/api/model-gateway', { fetchImpl });
+  const pending = r.ok && r.json && Array.isArray(r.json.pending) ? r.json.pending : [];
+  const t = pending.find((x) => x && x.task_id === taskId);
+  if (!t) return 'absent';
+  return t.running === true ? 'running' : 'queued';
+}
+
 async function pollTaskImage(provider, taskId, label, {
-  fetchImpl, sleep, pollMs, timeoutMs,
+  fetchImpl, sleep, pollMs, timeoutMs, queueCapMs, shouldStop,
 }) {
-  const deadline = Date.now() + timeoutMs;
+  const queuedSince = Date.now();
+  let runningSince = null;
+  let listed = false;
   for (;;) {
+    if (shouldStop && shouldStop()) return { ok: false, halted: true, error: 'halted' };
     // eslint-disable-next-line no-await-in-loop
     const st = await callJson(provider, 'GET', `/api/task-status/${encodeURIComponent(taskId)}`, { fetchImpl });
     if (!st.ok) return st;
@@ -160,8 +191,27 @@ async function pollTaskImage(provider, taskId, label, {
       const why = r && (r.error || r.message || (typeof r === 'string' ? r : ''));
       return { ok: false, error: `GPU box ${label} task ended ${status || 'UNKNOWN'}${why ? `: ${why}` : ''}` };
     }
-    if (Date.now() >= deadline) {
-      return { ok: false, error: `GPU box ${label} task timed out after ${Math.round(timeoutMs / 1000)}s`, retryable: true };
+    let queued = false;
+    if (runningSince === null && status === 'PENDING') {
+      // eslint-disable-next-line no-await-in-loop
+      const state = await taskState(provider, taskId, fetchImpl);
+      if (state === 'queued') listed = true;
+      queued = state === 'queued' || (state === 'absent' && !listed);
+      if (state === 'absent' && !listed && Date.now() - queuedSince >= timeoutMs) {
+        return { ok: false, error: `GPU box ${label} task is not in the box's queue after ${Math.round(timeoutMs / 1000)}s; it may be lost`, retryable: true };
+      }
+    }
+    const now = Date.now();
+    if (queued) {
+      if (now - queuedSince >= queueCapMs) {
+        const hours = Number((queueCapMs / 3600000).toFixed(2));
+        return { ok: false, error: `GPU box ${label} task still waiting behind other box work after ${hours} h`, retryable: true };
+      }
+    } else {
+      if (runningSince === null) runningSince = now;
+      if (now - runningSince >= timeoutMs) {
+        return { ok: false, error: `GPU box ${label} task ran for over ${Math.round(timeoutMs / 1000)}s without finishing`, retryable: true };
+      }
     }
     // eslint-disable-next-line no-await-in-loop
     await sleep(pollMs);
@@ -184,11 +234,12 @@ async function submitTask(provider, path, form, label, opts) {
 // Submits a concept task, polls it to a terminal state, downloads the image.
 async function generateConcept(provider, { prompt }, {
   fetchImpl = fetch, sleep = realSleep, pollMs = POLL_MS(), timeoutMs = CONCEPT_TIMEOUT_MS(),
+  queueCapMs = CONCEPT_QUEUE_CAP_MS(), shouldStop = null,
 } = {}) {
   const model = await resolveConceptModel(provider, { fetchImpl });
   if (!model.ok) return model;
   const r = await submitTask(provider, '/api/generate_core', { prompt, llm_name: model.model }, 'concept', {
-    fetchImpl, sleep, pollMs, timeoutMs,
+    fetchImpl, sleep, pollMs, timeoutMs, queueCapMs, shouldStop,
   });
   return r.ok ? { ok: true, conceptPath: r.path, png: r.png } : r;
 }
@@ -338,6 +389,22 @@ async function cancelSheetJob(provider, boxJobId, { fetchImpl = fetch } = {}) {
   return { ok: true };
 }
 
+// 3D turnaround (POST /api/turnaround3d {source_job, cell}): a STATIC
+// 8-direction turnaround rendered from a finished sheet job's views on the
+// box's CPU mesh worker. One cell per direction, no action frames. It is a
+// box job like any other: polled and cancelled at /api/jobs/{id}, sheet and
+// atlas at /api/jobs/{id}/sheet|atlas.
+async function createTurnaround3d(provider, sourceJobId, { cell = '48x64', fetchImpl = fetch } = {}) {
+  const r = await callJson(provider, 'POST', '/api/turnaround3d', {
+    body: JSON.stringify({ source_job: sourceJobId, cell }),
+    headers: { 'Content-Type': 'application/json' },
+    fetchImpl,
+  });
+  if (!r.ok) return r;
+  if (!r.json || !r.json.job_id) return { ok: false, error: 'GPU box accepted the 3D turnaround but returned no job_id', providerFault: true };
+  return { ok: true, boxJobId: r.json.job_id };
+}
+
 const fetchSheet = (provider, boxJobId, { fetchImpl = fetch } = {}) =>
   callPng(provider, `/api/jobs/${encodeURIComponent(boxJobId)}/sheet`, { fetchImpl });
 
@@ -348,5 +415,5 @@ async function fetchAtlas(provider, boxJobId, { fetchImpl = fetch } = {}) {
 }
 
 module.exports = {
-  STATUS_TERMINAL, actionCatalog, checkAuth, listConceptModels, generateConcept, txt2imgProp, PROP_NEGATIVE_PROMPT, createSheetJob, conceptAvailable, redrawFrames, getSheetJob, cancelSheetJob, fetchSheet, fetchAtlas,
+  STATUS_TERMINAL, actionCatalog, checkAuth, listConceptModels, generateConcept, txt2imgProp, PROP_NEGATIVE_PROMPT, createSheetJob, createTurnaround3d, conceptAvailable, redrawFrames, getSheetJob, cancelSheetJob, fetchSheet, fetchAtlas,
 };

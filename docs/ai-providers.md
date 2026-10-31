@@ -212,6 +212,51 @@ Sheets must be **PNG** (the dimensions are read from the PNG header).
 
 ---
 
+## GPU-box sprite options (Sprite sheets providers)
+
+A **Sprite sheets** provider has two settings that pick one of the box's three
+ways to draw a creature. Each has a built-in template under Settings → AI
+Providers → Templates:
+
+| Template | Concept model | Directions | Notes |
+|---|---|---|---|
+| **GPU box — sprites (default): Qwen fast, fits card** | `gguf:qwen-image-2512-Q2_K+lightning8` | 2D | Fits the box's 12 GB RTX 3060, ~30 s per concept. A blank concept model resolves to this one too (it is the box UI's default). |
+| GPU box — sprites: Qwen best quality (larger than VRAM) | `gguf:Qwen-Image-2512-Q3_K_M` | 2D | Does not fit the card and spills to host RAM: best quality, ~4 min per concept. |
+| GPU box — sprites: 3D turnaround | fast Qwen | 3D turnaround | After the 2D sheet, `POST /api/turnaround3d` renders the subject from 8 camera positions on the box's CPU mesh worker (~3 min). Its cells replace every `idle` frame, so the standing pose is right in all 8 directions, west included (the 2D builder's western rows are flipped eastern rows). Static only: walk/attack/cast stay 2D. |
+
+**Directions** is stored as `request_template.sheet_method` (`2d` or
+`turnaround3d`); it is the only key a sprite provider's request template holds.
+A 3D sheet's `sheet.json` gains `unmirrored: {idle: [...]}`, which tells the
+renderer to draw those western rows as they are instead of mirroring the
+eastern ones, and the raw turnaround is kept as `turnaround.png` next to it.
+
+The 3D step is best effort. If the box refuses it, its 3D worker does not start
+it within 20 minutes, it runs past 15 minutes, or its output cannot be read,
+the 2D sheet is stored unchanged and the row's note says
+`3D turnaround skipped, kept the 2D sheet: <why>`.
+
+A frame **redraw** of a 3D sheet rebuilds it from the box's 2D sheet, so the
+redrawn sheet's idle rows are 2D again; re-queue the whole sheet to get the
+turnaround back.
+
+**Unverified:** when this was built (2026-10-27) the box's mesh worker was not
+consuming its queue (a turnaround sat `queued` for 11+ minutes, an earlier one
+was stranded), so no turnaround had ever finished. The atlas shape is assumed to
+match a sheet atlas (`{cell:{w,h}, rows:[{row, direction}]}`, column 0). If
+3D rows come back skipped with "missing cell or rows" once the worker runs,
+adjust `backend/src/services/spriteTurnaround.js` to the real atlas.
+
+### Taking the templates to another PC
+
+Templates live in git (`backend/seeds/sync/ai_provider_templates.json`) and
+never hold a token. On another PC: pull, `make up`, `make seed` (step 0 seeds
+the templates and keeps any you edited locally; or just
+`make seed-sync-seed GROUP=ai_provider_templates RESOLVE=local`). Then add a
+provider from a template and type the box's API key yourself. If that PC
+reaches the box at a different address, change the Base URL. To share
+templates you edited, export them (Seed/Export tab or
+`make seed-sync-export GROUP=ai_provider_templates`) and commit the JSON.
+
 ## Worked examples
 
 ### Automatic1111 — static tile

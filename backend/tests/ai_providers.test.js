@@ -409,3 +409,13 @@ test('provider kinds: image_edit, adapter, models_by_group and text model rules'
   assert.equal(providerFieldError({ modality: 'text', model: ' ' }, { partial: true }), 'a text provider needs a model');
   assert.equal(providerFieldError({ modality: 'text', enabled: false }, { partial: true }), null);
 });
+
+test('a sprite provider\'s request_template.sheet_method is 2d or turnaround3d', () => {
+  const base = { name: 's', base_url: 'http://box:8001', modality: 'sprite' };
+  assert.strictEqual(providerFieldError({ ...base, request_template: {} }), null);
+  assert.strictEqual(providerFieldError({ ...base, request_template: { sheet_method: '2d' } }), null);
+  assert.strictEqual(providerFieldError({ ...base, request_template: { sheet_method: 'turnaround3d' } }), null);
+  assert.match(providerFieldError({ ...base, request_template: { sheet_method: '3d' } }), /sheet_method must be one of 2d, turnaround3d/);
+  // Only a sprite row reads it; an image template may carry any keys.
+  assert.strictEqual(providerFieldError({ ...base, modality: 'image', request_template: { sheet_method: 'x', prompt: '{{prompt}}' } }), null);
+});
