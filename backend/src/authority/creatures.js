@@ -1439,7 +1439,9 @@ function chargeAuraDots(players, now) {
       if (due !== undefined && now < due) continue;
       const tickMs = dotTickMs(a.tickMs);
       (at || (p._auraDotAt = new Map())).set(a.name, now + tickMs);
+      p._dotTick = true;
       applyDamageWithEffects(p, a.dotDps * tickMs / 1000, a.dotElement, effectiveMit(p), now, creatureKey(a.sourceId));
+      p._dotTick = false;
       if (!(p.hp > 0)) break;
     }
   }
@@ -2258,6 +2260,15 @@ class CreatureSim {
       if (c._target) {
         const tp = byId.get(c._target);
         if (!tp || dist2(cc.x, cc.y, center(tp).x, center(tp).y) > bh.leashRadius * bh.leashRadius) c._target = null;
+      }
+      // Camouflage: a creature chasing a player who has since vanished loses them
+      // unless it is right on top of them.
+      if (c._target && c._targetKind === 'player') {
+        const prey = byId.get(c._target);
+        if (prey && prey._stealthed) {
+          const pc = center(prey);
+          if (dist2(cc.x, cc.y, pc.x, pc.y) > STEALTH_NOTICE * STEALTH_NOTICE) c._target = null;
+        }
       }
       if (!c._target) {
         // SOMET-290 — a SKITTISH creature's PROVOKER is acquirable out to the
