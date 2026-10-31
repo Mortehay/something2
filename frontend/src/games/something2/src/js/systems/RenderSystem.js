@@ -3096,19 +3096,8 @@ export class RenderSystem {
 
     const lift = drewArt ? drewArt : r;
 
-    // Floating animated exclamation mark '!'
-    const bob = Math.sin(this.nowMs * 0.005) * 4;
-    const markY = dy - lift - 16 + bob;
-    this.ctx.font = "bold 16px sans-serif";
-    this.ctx.textAlign = "center";
-    this.ctx.textBaseline = "middle";
-    this.ctx.fillStyle = "#fef08a";
-    this.ctx.strokeStyle = "rgba(0,0,0,0.85)";
-    this.ctx.lineWidth = 3;
-    this.ctx.strokeText("!", dx, markY);
-    this.ctx.fillText("!", dx, markY);
-
     // Label: "Elder Eldrin" or "Quest Giver"
+    this.ctx.textAlign = "center";
     this.ctx.font = "bold 12px sans-serif";
     this.ctx.textBaseline = "alphabetic";
     this.ctx.fillStyle = "#fef08a";
@@ -3137,8 +3126,11 @@ export class RenderSystem {
       this.ctx.strokeStyle = "rgba(0,0,0,0.9)";
       this.ctx.lineWidth = 3;
       this.ctx.fillStyle = qg.marker === "?" ? "#facc15" : "#fde047";
-      this.ctx.strokeText(qg.marker, dx, dy - r - 20 + bob);
-      this.ctx.fillText(qg.marker, dx, dy - r - 20 + bob);
+      // One marker, above the name label (the label sits at dy - lift - 2).
+      const markY = dy - lift - 20 + bob;
+      this.ctx.textBaseline = "alphabetic";
+      this.ctx.strokeText(qg.marker, dx, markY);
+      this.ctx.fillText(qg.marker, dx, markY);
     }
 
     this.ctx.restore();
