@@ -4,6 +4,8 @@ const http = require('node:http');
 const jwt = require('jsonwebtoken');
 const WebSocket = require('ws');
 const { attachAuthority } = require('../src/authority/server.js');
+const { xpForChest } = require('../src/authority/chestLoot.js');
+const { levelForXp } = require('../src/services/playerStats.js');
 
 // Harness follows authority_use_field_chest_integration.test.js exactly (same
 // fakePool shape, same bootWith/nextMsg/connect helpers) -- that file is
@@ -16,12 +18,18 @@ const SECRET = 'test-secret';
 
 function token(u) { return jwt.sign({ user_id: u, tv: 1 }, SECRET, { algorithm: 'HS256' }); }
 function connect(url, uid) { return new WebSocket(`${url}?token=${encodeURIComponent(token(uid))}`); }
-function bootWith(pool, opts = {}) {
+// SOMET-615: teardown is registered with t.after, never written as the last
+// line of a test body. A failed assertion throws past an inline
+// `handle.close(); server.close()`, the listening server keeps the event loop
+// alive, and the whole file dies as testTimeoutFailure instead of reporting
+// the one real failure.
+function bootWith(t, pool, opts = {}) {
   return new Promise((resolve) => {
     const server = http.createServer();
     const handle = attachAuthority(server, pool, {
       jwtSecret: SECRET, tickMs: 20, creatureBroadcastEvery: 2, creatureFlushMs: 100, ...opts,
     });
+    t.after(() => { handle.close(); server.close(); });
     server.listen(0, () => resolve({ url: `ws://127.0.0.1:${server.address().port}/authority`, handle, server }));
   });
 }
@@ -256,22 +264,23 @@ function makePool({
   return pool;
 }
 
-async function joinAndGetPlayer(url) {
+async function joinAndGetPlayer(t, url) {
   const ws = connect(url, 1);
+  t.after(() => ws.close());
   await new Promise((r) => ws.on('open', r));
   ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
   return ws;
 }
 
-test('openchest with no chest in range sends an error frame', async () => {
+test('openchest with no chest in range sends an error frame', async (t) => {
   const pool = makePool({
     chestSeed: {
       id: 'chest-1', x: 5000, y: 5000, kind: 'vault', state: 'locked', guardLevel: 5, guardCreatureIds: [],
     },
   });
-  const { url, handle, server } = await bootWith(pool);
-  const ws = await joinAndGetPlayer(url);
+  const { url, handle } = await bootWith(t, pool);
+  const ws = await joinAndGetPlayer(t, url);
 
   ws.send(JSON.stringify({ type: 'openchest' }));
   const err = await nextMsg(ws, 'error');
@@ -285,36 +294,32 @@ test('openchest with no chest in range sends an error frame', async () => {
   // produced an identical empty result. Without a check that the branch FIRES,
   // the same rot is undetectable by construction.
   assert.ok(pool.inventoryLoads > 0, 'loadInventory was never answered by the fixture branch');
-
-  ws.close(); handle.close(); server.close();
 });
 
-test('openchest against a chest with a live guard sends an error frame mentioning the guard', async () => {
+test('openchest against a chest with a live guard sends an error frame mentioning the guard', async (t) => {
   const pool = makePool({
     chestSeed: {
       id: 'chest-1', x: SPAWN.x, y: SPAWN.y, kind: 'vault', state: 'locked', guardLevel: 5, guardCreatureIds: ['guard-1'],
     },
     guardAlive: true,
   });
-  const { url, handle, server } = await bootWith(pool);
-  const ws = await joinAndGetPlayer(url);
+  const { url, handle } = await bootWith(t, pool);
+  const ws = await joinAndGetPlayer(t, url);
 
   ws.send(JSON.stringify({ type: 'openchest' }));
   const err = await nextMsg(ws, 'error');
   assert.match(err.message, /guard/i);
   assert.equal(handle.worlds.get('w1').chests[0].state, 'locked', 'a refused open must not flip the in-memory cache');
-
-  ws.close(); handle.close(); server.close();
 });
 
-test('openchest against an unlocked chest in range sends chestOpened with items+XP, then a second attempt on the now-opened vault chest is refused', async () => {
+test('openchest against an unlocked chest in range sends chestOpened with items+XP, then a second attempt on the now-opened vault chest is refused', async (t) => {
   const pool = makePool({
     chestSeed: {
       id: 'chest-1', x: SPAWN.x, y: SPAWN.y, kind: 'vault', state: 'unlocked', guardLevel: 5, guardCreatureIds: [],
     },
   });
-  const { url, handle, server } = await bootWith(pool);
-  const ws = await joinAndGetPlayer(url);
+  const { url, handle } = await bootWith(t, pool);
+  const ws = await joinAndGetPlayer(t, url);
 
   ws.send(JSON.stringify({ type: 'openchest' }));
   const opened = await nextMsg(ws, 'chestOpened');
@@ -351,18 +356,16 @@ test('openchest against an unlocked chest in range sends chestOpened with items+
   const err = await nextMsg(ws, 'error');
   assert.match(err.message, /no chest nearby/);
   assert.equal(pool.matching(/INSERT INTO player_items/i).length, insertCallsBefore, 'no second loot grant');
-
-  ws.close(); handle.close(); server.close();
 });
 
-test('openchest against a field chest carries respawnAt into the in-memory cache, not just the DB row', async () => {
+test('openchest against a field chest carries respawnAt into the in-memory cache, not just the DB row', async (t) => {
   const pool = makePool({
     chestSeed: {
       id: 'chest-1', x: SPAWN.x, y: SPAWN.y, kind: 'field', state: 'unlocked', guardLevel: 5, guardCreatureIds: [],
     },
   });
-  const { url, handle, server } = await bootWith(pool);
-  const ws = await joinAndGetPlayer(url);
+  const { url, handle } = await bootWith(t, pool);
+  const ws = await joinAndGetPlayer(t, url);
 
   ws.send(JSON.stringify({ type: 'openchest' }));
   const opened = await nextMsg(ws, 'chestOpened');
@@ -376,8 +379,6 @@ test('openchest against a field chest carries respawnAt into the in-memory cache
     'a field chest open must carry respawnAt into the in-memory cache, or a chest the respawn sweep later relocks would look permanently opened to an already-connected player',
   );
   assert.ok(pool.matching(/UPDATE world_chests SET respawn_at/i).length > 0, 'field chest open must schedule a respawn in the DB');
-
-  ws.close(); handle.close(); server.close();
 });
 
 // Regression test for a review finding on this task's own sweep wiring: an
@@ -390,7 +391,7 @@ test('openchest against a field chest carries respawnAt into the in-memory cache
 // (Object.assign, driven by respawnDueFieldChests' onReset), so this test
 // proves BOTH that the due chest gets reset AND that an unrelated,
 // just-opened chest's object is neither reverted nor reallocated.
-test('the chest respawn sweep patches only the reset chest in place, leaving a concurrently-opened UNRELATED chest untouched', async () => {
+test('the chest respawn sweep patches only the reset chest in place, leaving a concurrently-opened UNRELATED chest untouched', async (t) => {
   const pool = makePool({
     chestSeed: {
       id: 'chest-near', x: SPAWN.x, y: SPAWN.y, kind: 'field', state: 'unlocked', guardLevel: 5, guardCreatureIds: [],
@@ -401,8 +402,8 @@ test('the chest respawn sweep patches only the reset chest in place, leaving a c
       },
     ],
   });
-  const { url, handle, server } = await bootWith(pool);
-  const ws = await joinAndGetPlayer(url);
+  const { url, handle } = await bootWith(t, pool);
+  const ws = await joinAndGetPlayer(t, url);
 
   // Open the near (in-range) field chest first -- nearestChest picks it
   // over the far, already-opened one regardless.
@@ -428,8 +429,6 @@ test('the chest respawn sweep patches only the reset chest in place, leaving a c
   assert.equal(far.openedAt, null);
   assert.equal(far.respawnAt, null);
   assert.deepEqual(far.guardCreatureIds, ['respawned-guard-1']);
-
-  ws.close(); handle.close(); server.close();
 });
 
 // Final-review fix (SOMET-244 Critical #1), respawn-sweep half. The `use`
@@ -442,7 +441,7 @@ test('the chest respawn sweep patches only the reset chest in place, leaving a c
 // DB fits inside one player's 3x3 neighborhood), so activateChunk never
 // re-fires to pick up this row -- the respawned guard stayed invisible and
 // unkillable for the rest of the session.
-test('the chest respawn sweep injects the freshly-respawned guard into entry.world.creatures, not just the DB', async () => {
+test('the chest respawn sweep injects the freshly-respawned guard into entry.world.creatures, not just the DB', async (t) => {
   const pool = makePool({
     chestSeed: {
       id: 'chest-near', x: SPAWN.x, y: SPAWN.y, kind: 'field', state: 'unlocked', guardLevel: 5, guardCreatureIds: [],
@@ -453,8 +452,8 @@ test('the chest respawn sweep injects the freshly-respawned guard into entry.wor
       },
     ],
   });
-  const { url, handle, server } = await bootWith(pool);
-  const ws = await joinAndGetPlayer(url);
+  const { url, handle } = await bootWith(t, pool);
+  const ws = await joinAndGetPlayer(t, url);
 
   const entry = handle.worlds.get('w1');
   assert.equal(entry.world.creatures.creatures.has('respawned-guard-1'), false, 'not present before the sweep');
@@ -465,8 +464,6 @@ test('the chest respawn sweep injects the freshly-respawned guard into entry.wor
     entry.world.creatures.creatures.has('respawned-guard-1'), true,
     'the respawn sweep must inject the new guard into the live sim, or openchest can never see it die',
   );
-
-  ws.close(); handle.close(); server.close();
 });
 
 // Final-review fix (SOMET-244 Important #3). Mirrors the kill path's own
@@ -476,21 +473,31 @@ test('the chest respawn sweep injects the freshly-respawned guard into entry.wor
 // DB. guardLevel 20 vs. a level-1 player guarantees xpForChest's XP-diff
 // factor is capped at its max (guard 19+ levels above the player), so
 // xpForChest(20, 1) = round(10 * 20 * 2) = 400 -- one award that crosses
-// FOUR level thresholds at once. Under the round(18 * L^1.33) curve
-// xpFloor(5) = 255 and xpFloor(6) = 408 (hand-computed literals), so 400
-// lands the player on level 5.
-test('openchest applies derived stats and sends a progression frame on a level-up', async () => {
+// several level thresholds at once.
+//
+// SOMET-615: the landing level is DERIVED from the live curve, never
+// hand-computed. This test pinned `level 5` against round(18 * L^1.33)
+// (xpFloor(5) = 255); bb456f09 moved the curve to round(35 * L^1.45), where
+// xpFloor(5) = 564 and 400 XP is level 4, and the literal went stale. The
+// curve is a tuning knob -- it will move again.
+const LEVEL_UP_AWARD = xpForChest(20, 1);
+const LEVEL_UP_LEVEL = levelForXp(LEVEL_UP_AWARD);
+test('openchest applies derived stats and sends a progression frame on a level-up', async (t) => {
+  // Without this the test goes vacuous the day a curve change makes the award
+  // too small to level: leveledUp:false would fail below, but a "level 1 == 1"
+  // pass on newLevel would not tell anyone why.
+  assert.ok(LEVEL_UP_LEVEL >= 3, `fixture premise: a guard-20 chest must cross several levels (got level ${LEVEL_UP_LEVEL} from ${LEVEL_UP_AWARD} XP)`);
   const pool = makePool({
     chestSeed: {
       id: 'chest-1', x: SPAWN.x, y: SPAWN.y, kind: 'vault', state: 'unlocked', guardLevel: 20, guardCreatureIds: [],
     },
     progressionAfter: {
-      user_id: '1', experience: 400, level: 5, passive_points: 4,
+      user_id: '1', experience: LEVEL_UP_AWARD, level: LEVEL_UP_LEVEL, passive_points: LEVEL_UP_LEVEL - 1,
       strength: 5, dexterity: 5, constitution: 15, intelligence: 5, wisdom: 5, charisma: 5,
     },
   });
-  const { url, handle, server } = await bootWith(pool);
-  const ws = await joinAndGetPlayer(url);
+  const { url, handle } = await bootWith(t, pool);
+  const ws = await joinAndGetPlayer(t, url);
 
   const entry = handle.worlds.get('w1');
   const p = entry.world.getPlayer('1');
@@ -507,11 +514,11 @@ test('openchest applies derived stats and sends a progression frame on a level-u
   ws.send(JSON.stringify({ type: 'openchest' }));
   const opened = await openedP;
   assert.equal(opened.leveledUp, true, 'a guard 19 levels above a level-1 player must level them up');
-  assert.equal(opened.newLevel, 5);
+  assert.equal(opened.newLevel, LEVEL_UP_LEVEL);
 
   const progressionMsg = await progressionMsgP;
   assert.equal(progressionMsg.leveledUp, true);
-  assert.equal(progressionMsg.newLevel, 5);
+  assert.equal(progressionMsg.newLevel, LEVEL_UP_LEVEL);
   assert.equal(progressionMsg.awarded, opened.awarded);
   assert.equal(
     progressionMsg.progression.constitution, 15,
@@ -522,6 +529,4 @@ test('openchest applies derived stats and sends a progression frame on a level-u
   // maxHp would still read 100 here -- correct in the DB (constitution:
   // 15), invisible in the running game until reconnect.
   assert.equal(p.maxHp, 200, 'applyDerivedStats must raise the running player\'s maxHp on a chest-open level-up');
-
-  ws.close(); handle.close(); server.close();
 });
