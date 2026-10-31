@@ -292,12 +292,14 @@ function changedWorlds(from, to) {
   return out;
 }
 
-function fieldsOf(localNames, gitNames, order) {
+// A side with no change reads `idle` ("unchanged"; "not here" for a spec
+// this DB has none of), never null: the preview prints each side as text.
+function fieldsOf(localNames, gitNames, order, idle = 'unchanged') {
   const all = [...new Set([...order.filter((n) => localNames.includes(n) || gitNames.includes(n)), ...localNames, ...gitNames])];
   return all.map((name) => ({
     name,
-    local: localNames.includes(name) ? 'edited here' : null,
-    git: gitNames.includes(name) ? 'changed in git' : null,
+    local: localNames.includes(name) ? 'edited here' : idle,
+    git: gitNames.includes(name) ? 'changed in git' : 'unchanged',
   }));
 }
 
@@ -414,7 +416,7 @@ async function specStatus(db, g, st, inputs) {
     const w = await specFromDb(db, g.spec, inputs);
     const matched = w.matchedWorlds.length;
     if (!tracked && matched === 0) {
-      return { kind: 'new', fields: fieldsOf([], worldNames, worldNames), notes: [], outNames: [] };
+      return { kind: 'new', fields: fieldsOf([], worldNames, worldNames, 'not here'), notes: [], outNames: [] };
     }
     // Equal -> in sync (adopt); different -> both sides may have changed, a
     // conflict with no default. Some of its worlds missing is a conflict too
