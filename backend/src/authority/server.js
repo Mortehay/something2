@@ -1975,6 +1975,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // Item rewards earned while out of a world (async: the join has finished
         // registering the player by the time the first query returns).
         deliverPendingRewardItems(ws.userId, character.id);
+        loadLegacyChoice(pool, character.id).then((lc) => { const pl = entry.world.getPlayer(ws.userId); if (pl) pl.legacyChoice = lc; }).catch((e) => console.error('legacy choice load failed:', e));
         send(ws, {
           type: 'joined', user_id: ws.userId, character_id: character.id, spawn, tickRate: 1000 / tickMs,
           itemTypes: [...entry.world.weapons.values()],
@@ -3967,6 +3968,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
     _heartbeatSweep: heartbeatSweep,
     // Quest item rewards (routes/questsRoutes.js): drop an item at a live player's feet.
     dropRewardItem: dropQuestRewardItem,
+    setPlayerLegacy: (userId, choice) => { const e = [...worlds.values()].find((w) => w.world.getPlayer(String(userId))); const p = e && e.world.getPlayer(String(userId)); if (p) p.legacyChoice = choice || null; return !!p; },
     // Test seam, same reasoning as _heartbeatSweep above: run one field
     // chest respawn pass synchronously (and await its completion, unlike the
     // real itemSweepTimer's fire-and-forget call) instead of waiting for or

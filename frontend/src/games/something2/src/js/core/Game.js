@@ -2283,7 +2283,8 @@ export class Game {
             const q = (this.allQuests || []).find((x) => x.key === u.key);
             if (q) q.progress_count = u.progress;
             this._refreshQuestMarkers();
-            this._refreshQuestRoute();
+            // Hunting grounds drift as creatures die: re-ask every 5 kills, and when done.
+            this._refreshQuestRoute(u.progress % 5 === 0 || u.progress >= u.target);
             if (u.progress >= u.target) {
                 this.showToast(`✔ Objective complete: ${u.title} — turn it in (J)`, 4000);
             } else if (u.progress === 1 || u.progress % 5 === 0) {

@@ -205,7 +205,8 @@ module.exports = { shortestRoute, routeToTargets, edgeExit, arrivalAfter, clearR
 //   accept   -> the quest giver, to take it
 //   gather   -> the nodes (villages that host the group) while collecting
 //   turn_in  -> the quest giver, once the objective is met
-//   field    -> nowhere: the objective is "kill things out there"
+//   hunt     -> where the targets are: clusters of the creature, of any creature, or the bosses
+//   climb    -> the next Spire floor
 //   done     -> nothing
 function questTarget(quest, cq) {
   if (cq && cq.status === 'completed') return { mode: 'done' };
@@ -221,7 +222,93 @@ function questTarget(quest, cq) {
       .map(([spec]) => spec);
     return { mode: 'gather', specKeys: hosts, nodeGroup: quest.target_key };
   }
-  return { mode: 'field' };
+  if (quest.objective_type === 'floor') return { mode: 'climb', nextFloor: Math.min(Number(quest.target_count) || 25, (Number(cq.progress_count) || 0) + 1) };
+  // kill / kill_any / boss: no fixed place, but there ARE places where it can be done.
+  return { mode: 'hunt', kind: quest.objective_type, key: quest.target_key || null };
 }
 
 module.exports.questTarget = questTarget;
+
+// --- Hunting and climbing -------------------------------------------------
+
+const CELL_PX = 1600; // 16 tiles: a "hunting ground" is a cluster this big
+
+// Where creatures actually are, as cluster centres (world_creatures). `type`
+// null = any creature. A cluster needs `minCount` creatures so a lone straggler
+// does not become a destination.
+async function creatureClusters(pool, type, minCount) {
+  return cached(`clusters|${type}|${minCount}`, 60000, async () => {
+    const r = await pool.query(
+      `SELECT c.world_id, round(avg(c.x))::int AS x, round(avg(c.y))::int AS y, count(*)::int AS n
+         FROM world_creatures c
+        WHERE ($1::text IS NULL OR c.type = $1) AND c.home_x IS NULL
+        GROUP BY c.world_id, floor(c.x / ${CELL_PX}), floor(c.y / ${CELL_PX})
+       HAVING count(*) >= $2`,
+      [type, minCount],
+    );
+    return r.rows;
+  });
+}
+
+async function bossPosts(pool) {
+  return cached('bossPosts', 60000, async () => {
+    const fixed = await pool.query(
+      `SELECT id AS world_id, (dungeon_boss->>'x')::int AS x, (dungeon_boss->>'y')::int AS y,
+              dungeon_boss->>'entity' AS label
+         FROM worlds WHERE dungeon_boss IS NOT NULL`,
+    );
+    const roaming = await pool.query(
+      `SELECT c.world_id, round(avg(c.x))::int AS x, round(avg(c.y))::int AS y, max(c.type) AS label
+         FROM world_creatures c JOIN entity_types e ON e.name = c.type
+        WHERE e.boss_tier IS NOT NULL GROUP BY c.world_id`,
+    );
+    return [...fixed.rows, ...roaming.rows];
+  });
+}
+
+// Targets for a `hunt` or `climb` target descriptor (see questTarget).
+async function huntTargets(pool, target) {
+  const { worlds } = await loadGraph(pool);
+  const nameOf = (id) => (worlds.get(id) || {}).name || 'somewhere';
+  if (target.mode === 'climb') {
+    const row = [...worlds.values()].find((w) => w.name === `Spire of Trials: Floor ${target.nextFloor}`);
+    if (!row) return { targets: [], label: 'the Spire of Trials' };
+    return {
+      targets: [{ worldId: row.id, x: Math.floor((row.width || 96) / 2) * TILE + TILE / 2, y: Math.floor((row.height || 96) / 2) * TILE + TILE / 2, label: row.name }],
+      label: `Spire floor ${target.nextFloor}`,
+    };
+  }
+  if (target.kind === 'boss') {
+    const posts = await bossPosts(pool);
+    return { targets: posts.map((p) => ({ worldId: p.world_id, x: p.x, y: p.y, label: nameOf(p.world_id) })), label: 'boss' };
+  }
+  const type = target.kind === 'kill' ? target.key : null;
+  let rows = await creatureClusters(pool, type, type ? 1 : 8);
+  if (rows.length === 0 && !type) rows = await creatureClusters(pool, null, 1);
+  return {
+    targets: rows.map((r) => ({ worldId: r.world_id, x: r.x, y: r.y, label: nameOf(r.world_id), n: r.n })),
+    label: type || 'creatures',
+  };
+}
+
+async function routeToHunt(pool, from, target) {
+  const { worlds, links } = await loadGraph(pool);
+  const { targets, label } = await huntTargets(pool, target);
+  const route = targets.length ? shortestRoute({ worlds, links, from, targets }) : null;
+  if (!route) return { found: false, huntLabel: label };
+  return {
+    found: true,
+    sameWorld: route.sameWorld,
+    first: route.first,
+    restPx: route.restPx,
+    totalPx: route.totalPx,
+    hops: route.hops,
+    placeName: route.target.label || route.hops[route.hops.length - 1],
+    huntLabel: label,
+    // How many creatures live at the destination, for "(12 here)" style hints.
+    count: route.target.n || null,
+  };
+}
+
+module.exports.routeToHunt = routeToHunt;
+module.exports.creatureClusters = creatureClusters;

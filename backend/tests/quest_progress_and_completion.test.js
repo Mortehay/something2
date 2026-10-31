@@ -228,3 +228,15 @@ test('completeQuest marks the item reward as owed, and the ledger helpers are gu
   assert.deepStrictEqual(await pendingRewardItems(pool, 1), [{ questId: 5, key: 'k', item: 'iron-band' }]);
   assert.strictEqual(await clearRewardPending(pool, 1, 5), true);
 });
+
+test('a `kill` quest names a hostile creature that exists, never a player class', () => {
+  // "Cultist" is a playable class, not a creature: a quest that asked for 25 of
+  // them could never be completed.
+  const { HOSTILE_CREATURES, PLAYABLE_CLASSES } = require('../seeds/data/entityTypes.js');
+  const hostile = new Set(HOSTILE_CREATURES.map((c) => c.name));
+  const classes = new Set(PLAYABLE_CLASSES.map((c) => c.name));
+  for (const q of QUESTS.filter((x) => x.objective_type === 'kill')) {
+    assert.ok(!classes.has(q.target_key), `${q.key}: ${q.target_key} is a player class`);
+    assert.ok(hostile.has(q.target_key), `${q.key}: ${q.target_key} is not a seeded hostile creature`);
+  }
+});

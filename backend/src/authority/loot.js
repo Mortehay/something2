@@ -4,7 +4,7 @@
 const { CREATURE_SIZE } = require('./creatures');
 const { hasFreeSlot } = require('./items');
 const { rollRarity } = require('./rarity.js');
-const { loadLegacyChoice, legacyMagicFind, legacyGoldAmount } = require('../services/legacyEffects.js');
+const { legacyMagicFind, legacyGoldAmount } = require('../services/legacyEffects.js');
 const { rollItemInstance } = require('./affixes.js');
 const { awardXp, loadProgression } = require('../services/progressionStore.js');
 const { xpForKill } = require('../services/playerStats.js');
@@ -151,12 +151,11 @@ async function commitCreatureDeath(pool, entry, creatureId, {
       awarded = award.awarded;
     }
 
-    // The killer's Act IV legacy (Elemental Surge: magic find + gold). Only
-    // read for a kill a player earned, so a guard kill still issues no
-    // player_progression query at all.
-    const legacy = killerCharacterId != null
-      ? await loadLegacyChoice(client, killerCharacterId)
-      : null;
+    // The killer's Act IV legacy (Elemental Surge: magic find + gold), read off
+    // the LIVE player: it is loaded at join and updated when a quest sets it, so
+    // a kill costs no extra query (progression_kill_xp pins the statement count).
+    const killer = killerUserId == null ? null : entry.world.getPlayer(killerUserId);
+    const legacy = (killer && killer.legacyChoice) || null;
     await spawnDrops(client, entry, dead, {
       rng, ttlMs, rarityAnchors, affixPool, legacy,
     });

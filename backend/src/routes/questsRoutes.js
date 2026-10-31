@@ -22,7 +22,7 @@ const {
   clearRewardPending,
   findQuest,
 } = require('../services/questsService.js');
-const { routeToTargets, questTarget } = require('../services/questRoute.js');
+const { routeToTargets, routeToHunt, questTarget } = require('../services/questRoute.js');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -38,7 +38,7 @@ function sendError(res, err, what) {
 // at the live player's feet. Defaults to "cannot", which leaves the item owed
 // (character_quests.reward_item_pending) for delivery at the next join, so a
 // router built without an authority (every test) never loses an item.
-function createQuestsRouter(pool, { dropRewardItem = async () => false } = {}) {
+function createQuestsRouter(pool, { dropRewardItem = async () => false, onLegacyChosen = () => false } = {}) {
   const router = express.Router();
   const guard = requireAuth(pool);
 
@@ -82,10 +82,14 @@ function createQuestsRouter(pool, { dropRewardItem = async () => false } = {}) {
         [character.id, quest.id],
       );
       const target = questTarget(quest, cqRes.rows[0] || null);
-      if (target.mode === 'field' || target.mode === 'done') {
+      if (target.mode === 'done') {
         return res.json({ ok: true, found: false, mode: target.mode });
       }
-      const route = await routeToTargets(pool, { worldId, x, y }, target);
+      // hunt / climb: where the targets ARE (creature clusters, bosses, the next
+      // Spire floor); everything else points at a quest giver or node village.
+      const route = (target.mode === 'hunt' || target.mode === 'climb')
+        ? await routeToHunt(pool, { worldId, x, y }, target)
+        : await routeToTargets(pool, { worldId, x, y }, target);
       res.json({ ok: true, mode: target.mode, ...route });
     } catch (err) {
       sendError(res, err, 'route to quest');
@@ -136,6 +140,8 @@ function createQuestsRouter(pool, { dropRewardItem = async () => false } = {}) {
           itemDelivered = false;
         }
       }
+      // The kill path reads the legacy off the live player, so tell it now.
+      if (result.completed && result.legacyChoice) onLegacyChosen(req.user.id, result.legacyChoice);
       res.json({ ok: true, ...result, itemDelivered });
     } catch (err) {
       sendError(res, err, 'complete quest');

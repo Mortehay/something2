@@ -4660,15 +4660,23 @@ export class RenderSystem {
     let loc = null;      // compass point in THIS world (px)
     let distM = null;    // total walking distance, tiles ("m")
     let whereLine = "";
+    let routeMaps = 0;   // maps crossed on the way
     if (route && route.found && route.first) {
       loc = route.first;
       const totalPx = Math.hypot(route.first.x - pcx, route.first.y - pcy) + (route.restPx || 0);
       distM = Math.max(1, Math.round(totalPx / 100));
-      const verb = route.mode === "turn_in" ? "Turn in" : route.mode === "gather" ? "Gather" : "Start";
-      const maps = Math.max(0, (route.hops ? route.hops.length : 1) - 1);
-      whereLine = `${verb}: ${route.placeName || "?"}${maps > 0 ? ` (+${maps} map${maps > 1 ? "s" : ""})` : ""}`;
-    } else if (route && route.mode === "field") {
-      whereLine = "Hunt in the field";
+      const verb = { turn_in: "Turn in", gather: "Gather", hunt: "Hunt", climb: "Climb" }[route.mode] || "Start";
+      routeMaps = Math.max(0, (route.hops ? route.hops.length : 1) - 1);
+      const what = (route.mode === "hunt" || route.mode === "climb") && route.huntLabel ? ` ${route.huntLabel}` : "";
+      whereLine = `${verb}${what}: ${route.placeName || "?"}`;
+      // Already standing in the hunting grounds: say so instead of a 3m arrow.
+      if ((route.mode === "hunt") && route.sameWorld && totalPx < 900) {
+        whereLine = `Hunt${what}: you are in the right place`;
+        distM = null;
+        loc = null;
+      }
+    } else if (route && route.found === false && route.huntLabel) {
+      whereLine = `No ${route.huntLabel} found yet — explore`;
     } else if (route && route.found === false) {
       whereLine = "Destination unknown";
     }
@@ -4680,7 +4688,8 @@ export class RenderSystem {
     };
 
     const w = 262;
-    const h = 78;
+    // A third info line (where/what) once a distance is shown above it.
+    const h = distM != null ? 94 : 78;
     // Positioned in top-left corner with 16px margins, matching game UI button styling
     const x = 16;
     const y = 16;
@@ -4739,8 +4748,11 @@ export class RenderSystem {
     // Distance (summed over every map on the way) and where to go
     ctx.fillStyle = "#a7f3d0";
     ctx.font = "11px monospace";
-    const distLine = distM != null ? `↗ ${distM}m • ${whereLine}` : (whereLine ? `• ${whereLine}` : "");
+    // Two lines: how far (summed over every map on the way) and where/what.
+    const mapsNote = routeMaps > 0 ? ` • +${routeMaps} map${routeMaps > 1 ? "s" : ""}` : "";
+    const distLine = distM != null ? `↗ ${distM}m${mapsNote}` : "";
     if (distLine) ctx.fillText(fit(distLine, w - 24), x + 12, y + 59);
+    if (whereLine) ctx.fillText(fit(whereLine, w - 24), x + 12, distLine ? y + 74 : y + 59);
 
     // Draw Screen Edge Compass Arrow pointing toward the next point to walk to
     // (the doorway out of this map, or the destination itself when it is here)

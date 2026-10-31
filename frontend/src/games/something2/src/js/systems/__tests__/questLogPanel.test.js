@@ -176,3 +176,52 @@ describe("layoutQuestLog", () => {
   });
 });
 
+
+describe("quest tracker HUD destination line", () => {
+  function draw(route, quest = { key: "q1", act: 1, title: "Slime Swarm", objective: "Slay 50 Slimes", target_count: 50, progress_count: 3 }) {
+    const texts = [];
+    const ctx = {
+      save: () => {}, restore: () => {}, beginPath: () => {}, roundRect: () => {}, rect: () => {},
+      moveTo: () => {}, lineTo: () => {}, arcTo: () => {}, closePath: () => {}, fill: () => {}, stroke: () => {},
+      translate: () => {}, rotate: () => {}, arc: () => {},
+      fillText: (t) => texts.push(t),
+      measureText: (t) => ({ width: String(t).length * 6 }),
+    };
+    const rs = Object.create(RenderSystem.prototype);
+    rs.questRoute = route && { questKey: quest.key, ...route };
+    rs._drawQuestTrackerHUD(ctx, quest, { x: 1000, y: 1000, width: 64, height: 64 }, null);
+    return texts;
+  }
+
+  it("a hunt route says what to hunt, where, over how many maps, and the SUMMED distance", () => {
+    // First leg: player (1032,1032) -> doorway (1032, 5032) = 4000px = 40m; plus 1500px beyond.
+    const t = draw({ found: true, mode: "hunt", huntLabel: "Slime", placeName: "Thornbriar Reach", first: { x: 1032, y: 5032 }, restPx: 1500, hops: ["A", "B", "C"], sameWorld: false });
+    expect(t.some((s) => s.includes("Hunt Slime: Thornbriar Reach"))).toBe(true);
+    expect(t.some((s) => s.includes("+2 maps"))).toBe(true);
+    expect(t.some((s) => s.includes("55m"))).toBe(true);
+    expect(t.some((s) => s.includes("Hunt in the field"))).toBe(false);
+  });
+
+  it("standing in the hunting grounds says so instead of showing a tiny arrow", () => {
+    const t = draw({ found: true, mode: "hunt", huntLabel: "Slime", placeName: "Vale Crossing", first: { x: 1100, y: 1100 }, restPx: 0, hops: ["Vale Crossing"], sameWorld: true });
+    expect(t.some((s) => s.includes("you are in the right place"))).toBe(true);
+    expect(t.some((s) => /↗/.test(s))).toBe(false);
+  });
+
+  it("climb and turn-in use their own verbs; an empty search is explained", () => {
+    expect(draw({ found: true, mode: "climb", huntLabel: "Spire floor 5", placeName: "Spire of Trials: Floor 5", first: { x: 1032, y: 3032 }, restPx: 0, hops: ["X", "Y"], sameWorld: false })
+      .some((s) => s.includes("Climb Spire floor 5"))).toBe(true);
+    expect(draw({ found: true, mode: "turn_in", placeName: "Vale Crossing", first: { x: 1032, y: 3032 }, restPx: 0, hops: ["Vale Crossing"], sameWorld: true })
+      .some((s) => s.includes("Turn in: Vale Crossing"))).toBe(true);
+    expect(draw({ found: false, mode: "hunt", huntLabel: "boss" }).some((s) => s.includes("No boss found yet"))).toBe(true);
+  });
+
+  it("a route fetched for a different quest is ignored", () => {
+    const rs = Object.create(RenderSystem.prototype);
+    rs.questRoute = { questKey: "other", found: true, mode: "hunt", huntLabel: "Slime", placeName: "Elsewhere", first: { x: 1, y: 1 }, restPx: 0, hops: ["A"] };
+    const texts = [];
+    const ctx = { save() {}, restore() {}, beginPath() {}, roundRect() {}, rect() {}, moveTo() {}, lineTo() {}, arcTo() {}, closePath() {}, fill() {}, stroke() {}, translate() {}, rotate() {}, arc() {}, fillText: (t) => texts.push(t), measureText: (t) => ({ width: String(t).length * 6 }) };
+    rs._drawQuestTrackerHUD(ctx, { key: "q1", act: 1, title: "T", objective: "o", target_count: 1 }, { x: 0, y: 0, width: 64, height: 64 }, null);
+    expect(texts.some((s) => s.includes("Elsewhere"))).toBe(false);
+  });
+});

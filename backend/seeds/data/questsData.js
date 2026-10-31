@@ -483,11 +483,11 @@ const QUESTS = [
 // legacy. No main quest is `manual` any more.
 const OBJECTIVES = {
   act1_core_whisper: { objective_type: 'kill', target_key: 'Skeleton' },
-  act1_dustroad_bandits: { objective_type: 'kill', target_key: 'Cultist' },
+  act1_dustroad_bandits: { objective_type: 'kill_any' },
   act1_slime_cull: { objective_type: 'kill', target_key: 'Slime' },
-  act1_bandit_slayer: { objective_type: 'kill', target_key: 'Cultist' },
+  act1_bandit_slayer: { objective_type: 'kill_any' },
   act1_sunspire_reliquary: { objective_type: 'boss' },
-  act1_dire_wolfpack: { objective_type: 'kill', target_key: 'Wolf' },
+  act1_dire_wolfpack: { objective_type: 'kill_any', target_count: 10, objective: 'Hunt 10 wild creatures to draw out the Alpha Packmaster' },
   act2_elemental_seals: { objective_type: 'interact', target_key: 'elemental_crystal' },
   act2_beast_slayer: { objective_type: 'kill_any' },
   quest_thorn_smeltery: { objective_type: 'kill_any' },

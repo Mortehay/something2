@@ -602,6 +602,7 @@ app.use('/api/quests', createQuestsRouter(guardPool, {
   // The live authority puts the reward item at the player's feet; absent (tests,
   // boot) it answers false and the item stays owed until the next join.
   dropRewardItem: (userId, itemName) => authorityHandle?.dropRewardItem?.(userId, itemName) ?? false,
+  onLegacyChosen: (userId, choice) => authorityHandle?.setPlayerLegacy?.(userId, choice) ?? false,
 }));
 
 // Game audio (spec docs/superpowers/specs/2026-09-28-game-audio-design.md).

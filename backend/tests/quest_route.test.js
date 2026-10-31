@@ -58,10 +58,12 @@ test('picks the cheaper of several targets; unreachable gives null', () => {
   assert.strictEqual(shortestRoute({ worlds, links, from: { worldId: 'a', x: 0, y: 0 }, targets: [{ worldId: 'z', x: 0, y: 0 }] }), null);
 });
 
-test('questTarget: accept, gather, turn_in, field, done', () => {
+test('questTarget: accept, gather, turn_in, hunt, climb, done', () => {
   const q = { village_key: 'sunspire', target_count: 5, objective_type: 'kill', target_key: 'Slime' };
   assert.deepStrictEqual(questTarget(q, null), { mode: 'accept', specKeys: ['sunspire'] });
-  assert.strictEqual(questTarget(q, { status: 'active', progress_count: 2 }).mode, 'field');
+  assert.deepStrictEqual(questTarget(q, { status: 'active', progress_count: 2 }), { mode: 'hunt', kind: 'kill', key: 'Slime' });
+  assert.deepStrictEqual(questTarget({ ...q, objective_type: 'floor', target_count: 25, target_key: 'spire' }, { status: 'active', progress_count: 4 }), { mode: 'climb', nextFloor: 5 });
+  assert.strictEqual(questTarget({ ...q, objective_type: 'floor', target_count: 25 }, { status: 'active', progress_count: 25 }).mode, 'turn_in');
   assert.strictEqual(questTarget(q, { status: 'active', progress_count: 5 }).mode, 'turn_in');
   assert.strictEqual(questTarget(q, { status: 'completed', progress_count: 5 }).mode, 'done');
   const g = questTarget({ ...q, objective_type: 'interact', target_key: 'obelisk' }, { status: 'active', progress_count: 1 });
