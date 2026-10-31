@@ -204,14 +204,33 @@ test('generateConcept: queued past the queue cap fails with its own message', as
   assert.match(r.error, /^GPU box concept task still waiting behind other box work after [\d.]+ h$/);
 });
 
-test('generateConcept: a task missing from the recent list, or a failing list, counts as queued', async () => {
+// Review finding: an unknown/expired id also reads PENDING, so a task the box
+// never lists (lost in a restart, or a box without /api/tasks/recent) must
+// not wait out the long queue cap -- it fails at the run timeout, as before.
+test('generateConcept: a task the box never lists, or a failing list, fails at the run timeout as lost', async () => {
   for (const recent of [() => json([{ task_id: 'other', progress_pct: 50, progress_msg: 'x' }]), () => json({ detail: 'boom' }, 500)]) {
     const routes = { ...timedConceptRoutes([['queued', 1]]), 'GET /api/tasks/recent': recent };
     const { fetchImpl } = fakeBox(routes);
+    const t = Date.now();
     // eslint-disable-next-line no-await-in-loop
-    const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, timeoutMs: 10, pollMs: 5, queueCapMs: 60 });
-    assert.match(r.error, /still waiting behind other box work/);
+    const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, timeoutMs: 40, pollMs: 5, queueCapMs: 60000 });
+    assert.match(r.error, /^GPU box concept task is not in the box's task list after \d+s; it may be lost$/);
+    assert.ok(Date.now() - t < 5000, 'did not wait for the queue cap');
   }
+});
+
+test('generateConcept: a task seen queued that then drops out of the list counts as running', async () => {
+  let n = 0;
+  const routes = {
+    ...timedConceptRoutes([['queued', 1]]),
+    'GET /api/tasks/recent': () => {
+      n += 1;
+      return json(n <= 3 ? [{ task_id: TASK, progress_pct: 0, progress_msg: 'Waiting in queue...' }] : []);
+    },
+  };
+  const { fetchImpl } = fakeBox(routes);
+  const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, timeoutMs: 40, pollMs: 5, queueCapMs: 60000 });
+  assert.match(r.error, /^GPU box concept task ran for over \d+s without finishing$/);
 });
 
 test('generateConcept stops reading the recent list once the task runs', async () => {
