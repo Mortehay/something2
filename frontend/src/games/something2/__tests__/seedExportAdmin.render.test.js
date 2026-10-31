@@ -61,3 +61,22 @@ describe('GroupRow GPU box note (SOMET-641)', () => {
     expect(row(quests, null)).not.toContain('role="note"');
   });
 });
+
+describe('GroupRow bad_file Fix button', () => {
+  const bad = { ...quests, status: 'bad_file', error: 'quests.json: header row_counts.quests 1 but 2 rows', file: 'quests.json', inGit: null };
+  const rowWith = (g, job, extra) => renderToStaticMarkup(h('table', null, h('tbody', null, h(GroupRow, {
+    g, job, onExport: () => {}, onSeed: () => {}, onBadge: () => {}, onCancel: () => {}, onRepair: () => {}, ...extra,
+  }))));
+  it('a bad_file row offers an enabled Fix', () => {
+    const html = rowWith(bad, null);
+    expect(btn(html, 'Fix')).toBeTruthy();
+    expect(btn(html, 'Fix')).not.toContain('disabled');
+  });
+  it('Fix is disabled while a job runs or a repair is pending', () => {
+    expect(btn(rowWith(bad, running), 'Fix')).toContain(BUSY);
+    expect(btn(rowWith(bad, null, { repairing: true }), 'Fix')).toContain('disabled');
+  });
+  it('a healthy row has no Fix', () => {
+    expect(btn(rowWith(quests, null), 'Fix')).toBe('');
+  });
+});
