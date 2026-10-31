@@ -403,6 +403,20 @@ export class Game {
         // feedback at all. {message, expiresAt} in performance.now() units;
         // null when nothing is showing. See _showToast / onError below.
         this.toast = null;
+        // Arrival banner: {name, levelText, startedAt, expiresAt} (performance.now()).
+        this.locationBanner = null;
+    }
+
+    // "Thornbriar Reach / Monsters: level 3-9" for a few seconds on entering a world.
+    _announceLocation(loc) {
+        if (!loc || !loc.name) { this.locationBanner = null; return; }
+        const lo = Number.isFinite(loc.levelMin) ? loc.levelMin : null;
+        const hi = Number.isFinite(loc.levelMax) ? loc.levelMax : null;
+        let levelText = null;
+        if (lo != null && hi != null) levelText = lo === hi ? `Monsters: level ${lo}` : `Monsters: level ${lo}-${hi}`;
+        else if (lo != null) levelText = `Monsters: level ${lo}+`;
+        const now = performance.now();
+        this.locationBanner = { name: String(loc.name), levelText, startedAt: now, expiresAt: now + 5000 };
     }
 
     // Show `message` for `durationMs`, then let it clear on its own — no
@@ -795,6 +809,7 @@ export class Game {
                     this.merchants = Array.isArray(msg.merchants) ? msg.merchants : [];
                     this.gemMerchants = Array.isArray(msg.gemMerchants) ? msg.gemMerchants : [];
                     this.skillMerchants = Array.isArray(msg.skillMerchants) ? msg.skillMerchants : [];
+                    this._announceLocation(msg.location);
                     this.questGivers = Array.isArray(msg.questGivers) ? msg.questGivers : [];
                     this.questNodes = Array.isArray(msg.questNodes) ? msg.questNodes : [];
                     this.loadQuests({ silent: true });
@@ -1866,6 +1881,7 @@ export class Game {
             // Expire the toast here (once per frame) rather than on a timer,
             // consistent with how the rest of Game drives state off the loop.
             if (this.toast && performance.now() >= this.toast.expiresAt) this.toast = null;
+            if (this.locationBanner && performance.now() >= this.locationBanner.expiresAt) this.locationBanner = null;
             // Expire finished blasts once per frame, on the same clock the
             // ring animation reads.
             const nowMs = performance.now();
@@ -1978,6 +1994,7 @@ export class Game {
                 // art name to a drawable def inside renderChunked.
                 entityDefs: this.entityDefs,
                 toast: this.toast,
+                locationBanner: this.locationBanner,
                 blasts: this.blasts,
                 // SOMET-528. Empty until a wave-granting node is allocated.
                 waves: this.waves || [],

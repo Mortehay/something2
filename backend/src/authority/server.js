@@ -663,7 +663,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // silently enqueue 0 for every real world, forever, with no error.
         // dungeon_boss (SOMET-609): read by DungeonBossManager.place below;
         // omitting it would silently place no boss anywhere.
-        const wr = await pool.query('SELECT id, seed, chunk_size, width, height, is_entry, entry_spawn, biomes, biome_cell, level_min, level_max, safe_road_radius, safe_rects, authored_roads, density, allowed_creature_types, dungeon_boss FROM worlds WHERE id = $1', [worldId]);
+        const wr = await pool.query('SELECT id, name, seed, chunk_size, width, height, is_entry, entry_spawn, biomes, biome_cell, level_min, level_max, safe_road_radius, safe_rects, authored_roads, density, allowed_creature_types, dungeon_boss FROM worlds WHERE id = $1', [worldId]);
         if (wr.rows.length === 0) return null;
         const row = wr.rows[0];
         // Postgres uuid input is case-insensitive and also accepts braced /
@@ -1978,6 +1978,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
         loadLegacyChoice(pool, character.id).then((lc) => { const pl = entry.world.getPlayer(ws.userId); if (pl) pl.legacyChoice = lc; }).catch((e) => console.error('legacy choice load failed:', e));
         send(ws, {
           type: 'joined', user_id: ws.userId, character_id: character.id, spawn, tickRate: 1000 / tickMs,
+          // Shown as an arrival banner: the place name and the creature level
+          // band authored for this world (null when the world has no band).
+          location: {
+            name: (entry.row && entry.row.name) || null,
+            levelMin: entry.row && Number.isFinite(Number(entry.row.level_min)) ? Number(entry.row.level_min) : null,
+            levelMax: entry.row && Number.isFinite(Number(entry.row.level_max)) ? Number(entry.row.level_max) : null,
+          },
           itemTypes: [...entry.world.weapons.values()],
           // SOMET-329: the element palette. The ONE catalog the client needs —
           // it draws projectiles, trails, blast rings, status tints and impact

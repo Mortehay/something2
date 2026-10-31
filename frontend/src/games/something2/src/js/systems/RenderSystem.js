@@ -317,7 +317,7 @@ export class RenderSystem {
     creatures = [], projectiles = [], mana = null, maxMana = null, showMana = true,
     stamina = null, maxStamina = null,
     weaponName = null, inventory = null, inventoryOpen = false, selectedItemId = null, inventoryView = null,
-    groundItems = [], gold = null, toast = null,
+    groundItems = [], gold = null, toast = null, locationBanner = null,
     blasts = [], ammo = null, noAmmoFlash = false, effects = null, vfx = [],
     // SOMET-528. Lingering melee waves; defaults to empty so every existing
     // caller and test renders exactly as before.
@@ -612,6 +612,7 @@ export class RenderSystem {
       hasTrackedQuest,
     });
     if (toast) this.renderToast(toast);
+    if (locationBanner) this.renderLocationBanner(locationBanner);
 
     // Inventory panel overlay (drawn last, on top of the HUD, in raw canvas
     // pixel space — same space Game hit-tests clicks against).
@@ -2690,6 +2691,38 @@ export class RenderSystem {
     this.ctx.textBaseline = "middle";
     this.ctx.fillText(text, GAME_WIDTH / 2, boxY + boxH / 2 + 1);
     this.ctx.restore();
+  }
+
+  // Arrival banner: place name and the monster level band, top-centre, fading
+  // in and out. `banner` is {name, levelText, startedAt, expiresAt} in
+  // performance.now() units; Game clears it once expired.
+  renderLocationBanner(banner) {
+    const FADE_MS = 700;
+    const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : 0;
+    const remaining = banner.expiresAt - now;
+    const age = now - banner.startedAt;
+    if (remaining <= 0) return;
+    const alpha = Math.max(0, Math.min(1, remaining / FADE_MS, age / FADE_MS));
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "rgba(0,0,0,0.85)";
+    ctx.fillStyle = "#f8fafc";
+    ctx.font = "bold 28px serif";
+    ctx.lineWidth = 5;
+    ctx.strokeText(banner.name, GAME_WIDTH / 2, 92);
+    ctx.fillText(banner.name, GAME_WIDTH / 2, 92);
+    if (banner.levelText) {
+      ctx.font = "bold 15px monospace";
+      ctx.lineWidth = 4;
+      ctx.fillStyle = "#fbbf24";
+      ctx.strokeText(banner.levelText, GAME_WIDTH / 2, 116);
+      ctx.fillText(banner.levelText, GAME_WIDTH / 2, 116);
+    }
+    ctx.restore();
   }
 
   // A small diamond, coloured by the item type's category. The name is drawn
