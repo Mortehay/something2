@@ -25,6 +25,12 @@ const TUNNEL_HOST = process.env.TUNNEL_HOST || ''
 export default defineConfig({
   plugins: [react()],
   server: {
+    // The source is bind-mounted from a Windows (or macOS) host. Change events from
+    // the host side do not reach inotify inside the container there, so without
+    // polling Vite keeps serving a stale transform until it is restarted (an
+    // import fix in App.jsx was invisible for exactly that reason). Polling is
+    // cheap at this size; set CHOKIDAR_USEPOLLING=false to turn it off.
+    watch: { usePolling: process.env.CHOKIDAR_USEPOLLING !== 'false', interval: 400 },
     proxy: {
       '/api': { target: BACKEND, changeOrigin: true },
       // ws: true is what makes vite forward the HTTP Upgrade rather than

@@ -219,7 +219,7 @@ export default function PlayerWorldMap() {
     const cy = cyRef.current;
     if (!cy || cy.destroyed()) return;
     cy.resize();
-    if (cy.elements().length) cy.fit(undefined, 40);
+    frameGraph(cy);
   };
   useEffect(() => {
     // After the card has its size (next frame), not during render.
@@ -285,7 +285,7 @@ export default function PlayerWorldMap() {
         autounselectify={true}
         // The cy instance, for the badge pulse above. react-cytoscapejs calls
         // this once with the instance on mount.
-        cy={(cy) => { cyRef.current = cy; requestAnimationFrame(() => { if (!cy.destroyed()) { cy.resize(); cy.fit(undefined, 40); } }); }}
+        cy={(cy) => { cyRef.current = cy; requestAnimationFrame(() => { if (!cy.destroyed()) { cy.resize(); frameGraph(cy); } }); }}
       />
     );
   }
@@ -309,4 +309,21 @@ export default function PlayerWorldMap() {
       </Inner>
     </Page>
   );
+}
+
+// The first view. Fitting EVERY visited world into the box is right while they
+// are few and close together, but a character who has climbed the Spire has
+// worlds thousands of units apart, and a whole-graph fit then shrinks the lot
+// into unreadable specks. Below MIN_FIT_ZOOM we frame the world the character is
+// standing in instead (the yellow one), at a zoom where labels can be read; the
+// rest is a pan away.
+export const MIN_FIT_ZOOM = 0.45;
+export const FRAMED_ZOOM = 0.9;
+function frameGraph(cy) {
+  if (!cy || cy.destroyed() || cy.elements().length === 0) return;
+  cy.fit(undefined, 40);
+  if (cy.zoom() >= MIN_FIT_ZOOM) return;
+  const here = cy.nodes('[current = "true"]');
+  cy.zoom(FRAMED_ZOOM);
+  cy.center(here.length ? here : cy.nodes().first());
 }

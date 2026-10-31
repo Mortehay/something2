@@ -22,7 +22,10 @@ import MapGraphAdmin from "./games/something2/MapGraphAdmin";
 import WorldGenAdmin from "./games/something2/WorldGenAdmin";
 import SeedExportAdmin from "./games/something2/SeedExportAdmin";
 import SettingsAdmin from "./games/something2/SettingsAdmin";
-import PlayerWorldMap from "./games/something2/PlayerWorldMap";
+// Explicit extension on purpose: playerWorldMap.js sits next to PlayerWorldMap.jsx, and on a
+// case-insensitive filesystem (Windows) an extension-less import resolved to the .js file, so
+// the World Map tab mounted a pure function and rendered nothing.
+import PlayerWorldMap from "./games/something2/PlayerWorldMap.jsx";
 import CreatureBehaviorsAdmin from "./games/something2/CreatureBehaviorsAdmin";
 import VfxEffectsAdmin from './games/something2/VfxEffectsAdmin.jsx';
 import AuraEffectsAdmin from './games/something2/AuraEffectsAdmin.jsx';
