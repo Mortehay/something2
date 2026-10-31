@@ -258,7 +258,7 @@ test('enqueue stores the chosen prop effect on prop rows only', { skip }, async 
     assert.equal(byEntity.get(creature.id).prop_fx, null);
     await assert.rejects(
       queue.enqueue(client, [{ entityId: prop.id }], { actions: ['idle'], propFx: 'glow' }),
-      /propFx must be one of none, sway, shine/,
+      /propFx must be one of none, sway, shine, drift/,
     );
   });
 });

@@ -14,10 +14,10 @@ const { seedFor } = require('./artJobQueue.js');
 // frames_per_action so older readers of `frames` still see the frame count.
 // For a prop ('object') row the actions are not drawn (Props v2: one edited
 // static image, no sheet); its in-game idle effect is `propFx` (none | sway |
-// shine), stored as prop_fx on prop rows only and copied to
+// shine | drift), stored as prop_fx on prop rows only and copied to
 // entity_types.idle_fx on approve. Creature rows get NULL.
 const DEFAULT_ACTIONS = { creature: ['idle', 'walk'], object: ['idle'] };
-const PROP_FX = ['none', 'sway', 'shine'];
+const PROP_FX = ['none', 'sway', 'shine', 'drift'];
 
 async function enqueue(db, targets, { actions, framesPerAction, propFx = 'none' } = {}) {
   if (!PROP_FX.includes(propFx)) throw new Error(`propFx must be one of ${PROP_FX.join(', ')}`);

@@ -114,8 +114,10 @@ describe('sprite console action controls', () => {
 
   // Props v2: a prop's in-game idle effect is chosen explicitly (prop_fx),
   // not derived from the action checkboxes.
-  it('PROP_FX_OPTIONS / propFxLabel: None (default), Sway, Shine', () => {
-    expect(PROP_FX_OPTIONS.map((o) => [o.id, o.label])).toEqual([['none', 'None'], ['sway', 'Sway'], ['shine', 'Shine']]);
+  it('PROP_FX_OPTIONS / propFxLabel: None (default), Sway, Shine, Drift', () => {
+    expect(PROP_FX_OPTIONS.map((o) => [o.id, o.label])).toEqual([['none', 'None'], ['sway', 'Sway'], ['shine', 'Shine'], ['drift', 'Drift']]);
+    expect(propFxLabel('drift')).toBe('Drift');
+    expect(propEffect({ prop_fx: 'drift' })).toBe('drift');
     expect(propFxLabel('shine')).toBe('Shine');
     expect(propFxLabel('sway')).toBe('Sway');
     expect(propFxLabel('none')).toBe('None');

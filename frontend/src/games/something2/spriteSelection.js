@@ -178,6 +178,7 @@ export const PROP_FX_OPTIONS = [
   { id: 'none', label: 'None' },
   { id: 'sway', label: 'Sway' },
   { id: 'shine', label: 'Shine' },
+  { id: 'drift', label: 'Drift' },
 ];
 const PROP_FX_IDS = new Set(PROP_FX_OPTIONS.map((o) => o.id));
 

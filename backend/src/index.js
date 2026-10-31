@@ -822,8 +822,8 @@ app.get('/api/map/tiles', async (req, res) => {
 // because `e.displayWidth || e.width || 40` treats 0 as falsy.
 const MAX_ENTITY_DISPLAY_PX = 400;
 
-// entity_types.idle_fx values (CHECK in migration 1714440824000).
-const IDLE_FX = ['none', 'sway', 'shine'];
+// entity_types.idle_fx values (CHECK in migrations 1714440824000, 1714440844000).
+const IDLE_FX = ['none', 'sway', 'shine', 'drift'];
 
 function entityTypeFieldError(body) {
   // SOMET-453. The pin rule lives in ONE place (services/providerPin.js) and is
