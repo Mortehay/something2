@@ -133,7 +133,17 @@ function applyDamage(target, raw, element, mit = NO_MITIGATION, now = undefined,
     ? Math.min(RESIST_CAP, Math.max(RESIST_FLOOR, rawResist)) : 0;
   const candidate = raw2 * (1 - resist);
   const final = Math.max(MIN_DAMAGE, Number.isFinite(candidate) ? candidate : MIN_DAMAGE);
-  target.hp -= final;
+  // A shield (world bosses gain one on entering a phase, see worldBoss.js)
+  // soaks damage before HP does. Only the shield's owner has the field, so for
+  // every player and ordinary creature this is a no-op. The attacker is still
+  // credited the full amount below: breaking a shield is real work.
+  let toHp = final;
+  if (target.shield > 0) {
+    const absorbed = Math.min(target.shield, final);
+    target.shield -= absorbed;
+    toHp = final - absorbed;
+  }
+  target.hp -= toHp;
   if (source && typeof source === 'string' && source.startsWith('p:')) {
     const pUid = source.slice(2);
     if (!target._playerDamage) target._playerDamage = new Map();

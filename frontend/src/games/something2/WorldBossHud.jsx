@@ -102,6 +102,38 @@ const BossHpFill = styled.div`
   transition: width 0.15s ease-out;
 `;
 
+// The boss's shield, drawn as a thin bar under the HP bar: while it is up, hits
+// land on it first.
+const ShieldTrack = styled.div`
+  position: relative;
+  width: 100%;
+  height: 8px;
+  margin-top: 4px;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid rgba(125, 211, 252, 0.35);
+`;
+
+const ShieldFill = styled.div`
+  height: 100%;
+  width: ${(p) => p.$pct}%;
+  background: linear-gradient(90deg, #38bdf8, #bae6fd);
+  transition: width 0.15s ease-out;
+`;
+
+const ShieldLabel = styled.div`
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.55rem;
+  font-weight: 700;
+  color: #e0f2fe;
+  text-shadow: 0 0 3px #000;
+`;
+
 const HpLabel = styled.div`
   position: absolute;
   inset: 0;
@@ -263,6 +295,13 @@ export default function WorldBossHud({ gameRef }) {
               {Math.round(status.currentHp || 0)} / {status.maxHp} ({Math.round(hpPct)}%)
             </HpLabel>
           </BossHpTrack>
+
+          {status.shield > 0 && status.shieldMax > 0 && (
+            <ShieldTrack title="Ward shield: break it before the boss takes damage">
+              <ShieldFill $pct={Math.min(100, (status.shield / status.shieldMax) * 100)} />
+              <ShieldLabel>🛡 Shield {status.shield.toLocaleString()}</ShieldLabel>
+            </ShieldTrack>
+          )}
 
           {status.phaseBonus && (
             <PhaseBonusRow>

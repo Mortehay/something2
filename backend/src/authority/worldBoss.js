@@ -16,10 +16,13 @@ const {
 } = require('./creatures.js');
 const { pushSfxEvent, bossSfx } = require('./sfxEvents.js');
 const { resolveLootProfile, spawnBossLootItems, spawnBossChest } = require('./bossLoot.js');
+const balance = require('../services/bossBalance.js');
 
 const BOSS_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes between boss spawns
 const BOSS_WARNING_MS = 2 * 60 * 1000;    // 2 minutes warning before spawn
-const BOSS_LIFETIME_MS = 20 * 60 * 1000;  // 20 minutes max lifetime before despawning
+// 30 minutes: a world boss is tuned so top-end gear needs 5+ minutes and ordinary
+// gear far longer (services/bossBalance.js), so 20 would despawn most fights.
+const BOSS_LIFETIME_MS = 30 * 60 * 1000;  // 30 minutes max lifetime before despawning
 // SOMET-605 (spec §4.3): enrage at < 10% HP or in the last minute of the
 // boss's lifetime. "Near the lifetime limit" is not quantified by the spec;
 // 60 s is this slice's reading (plan decision D2).
@@ -355,15 +358,37 @@ class WorldBossManager {
       phaseName: phaseInfo.name,
       phaseBonus: phaseInfo.bonus,
       hpRatio,
+      shield: this.currentBoss ? Math.round(this.currentBoss.shield || 0) : 0,
+      shieldMax: this.currentBoss ? Math.round(this.currentBoss.maxHp * balance.SHIELD_CAP_FRACTION) : 0,
       enraged: Boolean(this.currentBoss && this.currentBoss.enraged),
       topDamagers: this.getTopDamagers(3),
     };
   }
 
+  // Adds `fraction` of max HP as shield, never above the cap. The shield lives on
+  // the creature (damage.js applyDamage spends it before HP).
+  _addShield(creature, fraction) {
+    if (!creature || !(fraction > 0)) return;
+    const maxHp = creature.maxHp || (this.currentBoss && this.currentBoss.maxHp) || 0;
+    const cap = maxHp * balance.SHIELD_CAP_FRACTION;
+    creature.shield = Math.min(cap, (creature.shield || 0) + maxHp * fraction);
+  }
+
+  // The Ward: from phase 2 on, the shield is topped up on a timer, so damage has
+  // to arrive in bursts that break it rather than as a slow trickle.
+  _tickWard(creature, now) {
+    const boss = this.currentBoss;
+    if (!boss || (boss.phase || 1) < 2) return;
+    if (boss.lastWardAt == null) boss.lastWardAt = now;
+    if (now - boss.lastWardAt < balance.WARD_INTERVAL_MS) return;
+    boss.lastWardAt = now;
+    this._addShield(creature, balance.WARD_FRACTION);
+  }
+
   _calculatePhase(hpRatio) {
-    if (hpRatio <= 0.25) return { phase: 4, name: 'Frenzy Overload', bonus: '+50% Damage & Catastrophic Blasts' };
-    if (hpRatio <= 0.50) return { phase: 3, name: 'Elemental Nova', bonus: '+25% Defense & Minion Summons' };
-    if (hpRatio <= 0.75) return { phase: 2, name: 'Enraged Surge', bonus: '+20% Speed & Shockwave' };
+    if (hpRatio <= 0.25) return { phase: 4, name: 'Frenzy Overload', bonus: '+50% Damage, Catastrophic Blasts & Ward Shield' };
+    if (hpRatio <= 0.50) return { phase: 3, name: 'Elemental Nova', bonus: '+25% Defense, Minions & Ward Shield' };
+    if (hpRatio <= 0.75) return { phase: 2, name: 'Enraged Surge', bonus: '+20% Speed, Shockwave & Ward Shield' };
     return { phase: 1, name: 'Standard', bonus: 'Base Stats' };
   }
 
@@ -376,6 +401,9 @@ class WorldBossManager {
     if (phaseInfo.phase > currentPhase) {
       this.currentBoss.phase = phaseInfo.phase;
       creature.phase = phaseInfo.phase;
+      // Each new phase arrives behind a fresh shield that has to be broken.
+      this._addShield(creature, balance.PHASE_SHIELD[phaseInfo.phase] || 0);
+      this.currentBoss.lastWardAt = Date.now();
 
       // Apply stat boosts per phase
       if (phaseInfo.phase === 2) {
@@ -575,6 +603,8 @@ class WorldBossManager {
             if (c._playerDamage) {
               this.currentBoss._playerDamage = c._playerDamage;
             }
+            this._tickWard(c, now);
+            this.currentBoss.shield = Math.max(0, c.shield || 0);
             this._checkPhaseTransition(c, entry, broadcastFn);
             this._checkEnrage(c, entry, now, broadcastFn); // SOMET-605
             // Auto-broadcast if HP changed or periodically every 1500ms
@@ -680,6 +710,7 @@ class WorldBossManager {
     if (placed) {
       // addCreatures takes maxHp from hp; a re-placed boss keeps its real max.
       placed.maxHp = this.currentBoss.maxHp;
+      placed.shield = this.currentBoss.shield || 0;
       if (this.currentBoss._playerDamage) placed._playerDamage = this.currentBoss._playerDamage;
     }
     return placed;
