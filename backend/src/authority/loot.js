@@ -156,6 +156,8 @@ async function commitCreatureDeath(pool, entry, creatureId, {
     await client.query('COMMIT');
     return {
       awarded, leveledUp, newLevel, progression, killerUserId,
+      // What died and who earned it, for quest tracking (server.js).
+      type: dead.type, killerCharacterId,
     };
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});

@@ -42,6 +42,7 @@ const { buildWorldGenConfig } = require('../services/worldGenConfig');
 const { commitCreatureDeath, claimItem, claimGold, dropItem, dropGraceActive, spawnGroundItemTypes } = require('./loot');
 const { knockbackPosition, knockbackWithFallback } = require('./knockback');
 const { buyStock, sellItem } = require('./trade');
+const { recordKill } = require('../services/questsService.js');
 const { respawnDueCreatures, enqueueDeficit, CREATURE_SWEEP_MS } = require('../services/creatureRespawn');
 const { consumeAmmo, ammoCount } = require('./ammo');
 const { PICKUP_RADIUS } = require('./groundItems');
@@ -958,13 +959,37 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // becomes a LIVE consequence: without moving the session's pools here, a
   // level-up would raise max HP in the database and nothing in the running
   // game (the exact defect A1's review caught).
+  // Credits one kill to the killer's active quests and tells them. Best-effort
+  // and detached: quest bookkeeping must never delay or fail a kill commit.
+  const trackQuestKill = (entry, killerUserId, typeName, isBoss) => {
+    if (killerUserId == null) return;
+    const killer = entry.world.getPlayer(killerUserId);
+    const characterId = killer && killer.characterId;
+    if (characterId == null) return;
+    recordKill(pool, characterId, { typeName, isBoss })
+      .then((updates) => {
+        const sock = entry.sockets.get(killerUserId);
+        if (sock && updates.length) {
+          send(sock, {
+            type: 'questProgress',
+            updates: updates.map((u) => ({
+              key: u.key, title: u.title,
+              progress: Number(u.progress_count), target: Number(u.target_count),
+            })),
+          });
+        }
+      })
+      .catch((err) => console.error('quest kill tracking failed:', err));
+  };
+
   const onCreatureDeath = (entry, id, killerUserId) => {
     // SOMET-609: a dungeon boss has ONE respawn owner. It has no
     // world_creatures row (commitCreatureDeath's uuid DELETE would throw on a
     // `boss:` id) and is not a world boss, so it never reaches either path.
     // Routed by id (ruling G10): the creature is already out of the sim here.
     if (dungeonBosses.isBoss(entry.worldId, id)) {
-      dungeonBosses.onDeath(entry, id, killerUserId);
+      const kill = dungeonBosses.onDeath(entry, id, killerUserId);
+      if (kill) trackQuestKill(entry, killerUserId, kill.entityName, true);
       return Promise.resolve(null);
     }
     // SOMET-626 (S13): same reasoning as the boss above -- a dungeon-boss
@@ -994,6 +1019,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
     return commitCreatureDeath(pool, entry, id, { rng, ttlMs: groundItemTtlMs, killerUserId })
       .then((result) => {
         if (!result || result.killerUserId == null) return; // no commit, or no player to credit
+        trackQuestKill(entry, result.killerUserId, result.type, !!(deadCreature && deadCreature.bossTier));
         const { progression, leveledUp, newLevel, awarded } = result;
         if (leveledUp) {
           const p = entry.world.getPlayer(result.killerUserId);

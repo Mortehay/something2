@@ -103,6 +103,24 @@ describe("layoutQuestLog", () => {
     expect(surgeBtn).toBeDefined();
   });
 
+  it("does not offer the Act IV legacy choice before the objective is done or once chosen", () => {
+    const base = {
+      id: 4, key: "act4_elemental_crucible", act: 4, title: "Crucible",
+      description: "d", required_level: 52, status: "active", target_count: 25,
+    };
+    const inProgress = layoutQuestLog({
+      quests: [{ ...base, progress_count: 3 }], legacyChoice: null, activeQuestKey: base.key,
+    });
+    expect(inProgress.actionButtons.find(b => b.kind === "quest_choice_city")).toBeUndefined();
+    expect(inProgress.actionButtons.some(b => b.type === "banner_in_progress")).toBe(true);
+
+    const chosen = layoutQuestLog({
+      quests: [{ ...base, progress_count: 25 }], legacyChoice: "city_restoration", activeQuestKey: base.key,
+    });
+    expect(chosen.actionButtons.find(b => b.kind === "quest_choice_city")).toBeUndefined();
+    expect(chosen.actionButtons.find(b => b.kind === "quest_complete")).toBeDefined();
+  });
+
   it("handles locked quest status and displays locked banner", () => {
     const lockedQuest = {
       id: 5,

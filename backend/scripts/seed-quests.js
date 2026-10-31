@@ -22,8 +22,8 @@ async function seedQuests() {
     let count = 0;
     for (const q of QUESTS) {
       await pool.query(
-        `INSERT INTO quests (key, act, title, description, objective, target_count, prerequisite_key, village_key, npc_key, required_level, exp_reward, gold_reward, passive_points_reward, title_reward)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        `INSERT INTO quests (key, act, title, description, objective, target_count, prerequisite_key, village_key, npc_key, required_level, exp_reward, gold_reward, passive_points_reward, title_reward, objective_type, target_key)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
          ON CONFLICT (key) DO UPDATE SET
            act = EXCLUDED.act,
            title = EXCLUDED.title,
@@ -37,12 +37,15 @@ async function seedQuests() {
            exp_reward = EXCLUDED.exp_reward,
            gold_reward = EXCLUDED.gold_reward,
            passive_points_reward = EXCLUDED.passive_points_reward,
-           title_reward = EXCLUDED.title_reward`,
+           title_reward = EXCLUDED.title_reward,
+           objective_type = EXCLUDED.objective_type,
+           target_key = EXCLUDED.target_key`,
         [
           q.key, q.act, q.title, q.description,
           q.objective || q.description, q.target_count || 1, q.prerequisite_key || null,
           q.village_key, q.npc_key,
           q.required_level, q.exp_reward, q.gold_reward, q.passive_points_reward, q.title_reward,
+          q.objective_type, q.target_key,
         ],
       );
       count += 1;

@@ -58,7 +58,7 @@ import { createSkillVisual, updateSkillVisuals, pruneSkillVisuals } from "./skil
 import { API_URL } from "../../../../../config.js";
 import { GameArt } from "../systems/gameArt.js";
 import { fetchGameArt } from "../net/gameArtClient.js";
-import { fetchAllQuests, fetchCharacterQuests, startQuest, completeQuest } from "../net/questsClient.js";
+import { fetchAllQuests, fetchCharacterQuests, startQuest, completeQuest, abandonQuest } from "../net/questsClient.js";
 import { findWorldBossCreature } from "./worldBossMatch.js";
 import { EntityAnimState, noteFrameEvents } from "../systems/entityAnimState.js";
 
@@ -408,6 +408,14 @@ export class Game {
     // queueing; a newer toast simply replaces whatever was showing.
     _showToast(message, durationMs = 3000) {
         this.toast = { message, expiresAt: performance.now() + durationMs };
+    }
+
+    // ~40 call sites (quest log, skills, shops, gems) call `this.showToast`
+    // behind an `if (this.showToast)` guard, but only `_showToast` existed, so
+    // none of those messages ever appeared. Tests still override this per
+    // instance, which keeps working.
+    showToast(message, durationMs) {
+        this._showToast(message, durationMs);
     }
 
     // Spawn floating combat / resource text (Damage numbers, Mana restore, Heals, Stamina)
@@ -847,6 +855,7 @@ export class Game {
                 // Kill XP / level-up / death / allocate / respec pushes. The
                 // whole body is Game._applyProgressionFrame -- see there.
                 onProgression: (msg) => this._applyProgressionFrame(msg),
+                onQuestProgress: (msg) => this._applyQuestProgress(msg),
                 // SOMET-372. Both handlers are one line each on purpose: the
                 // rules they carry (whole-list replacement, and the item-shape
                 // mapping openChest needs) live in core/worldChests.js, where
@@ -1048,7 +1057,7 @@ export class Game {
                 title: q.title,
                 act: q.act,
                 status: q.status || 'available',
-                npcKey: q.start_npc_key,
+                npcKey: q.npc_key || q.start_npc_key,
                 villageKey: q.village_key,
             })),
         };
@@ -2162,9 +2171,15 @@ export class Game {
 
             this.allQuests = rawQuests.map((q) => {
                 const cq = statusMap.get(q.id) || statusMap.get(q.key);
+                // progress_count / target_count come from the character's rows;
+                // the shared catalog has neither, so dropping them left every
+                // quest at 0/N and the Complete button never appeared.
                 return {
                     ...q,
                     status: (cq && cq.status) ? cq.status : (q.status || 'available'),
+                    progress_count: cq && cq.progress_count != null ? cq.progress_count : (q.progress_count || 0),
+                    target_count: (cq && cq.target_count) || q.target_count || 1,
+                    objective: (cq && cq.objective) || q.objective,
                     progress: cq ? cq.progress : (q.progress || {}),
                 };
             });
@@ -2175,6 +2190,22 @@ export class Game {
             }
         } catch (err) {
             if (this.showToast) this.showToast(`Quest Log: ${err.message}`);
+        }
+    }
+
+    // The server counted a kill toward one or more active quests. Patch the
+    // cached list in place (so an open log moves live) and tell the player
+    // when an objective is met, which is the moment they can turn it in.
+    _applyQuestProgress(msg) {
+        const updates = (msg && Array.isArray(msg.updates)) ? msg.updates : [];
+        for (const u of updates) {
+            const q = (this.allQuests || []).find((x) => x.key === u.key);
+            if (q) q.progress_count = u.progress;
+            if (u.progress >= u.target) {
+                this.showToast(`✔ Objective complete: ${u.title} — turn it in (J)`, 4000);
+            } else if (u.progress === 1 || u.progress % 5 === 0) {
+                this.showToast(`${u.title}: ${u.progress}/${u.target}`, 1800);
+            }
         }
     }
 
@@ -3207,6 +3238,13 @@ export class Game {
                         });
                         return;
                     }
+                    if (hit.kind === 'quest_abandon') {
+                        abandonQuest(this.characterId, hit.questId || hit.questKey).then(() => {
+                            this.openQuestLog();
+                            this.showToast('Quest abandoned.');
+                        }).catch((err) => this.showToast(`❌ ${err.message}`));
+                        return;
+                    }
                     if (hit.kind === 'quest_complete') {
                         const targetId = hit.questId || hit.questKey;
                         completeQuest(this.characterId, targetId).then((res) => {
@@ -3226,6 +3264,9 @@ export class Game {
                             } else {
                                 if (this.showToast) this.showToast(`🎉 Quest completed! Rewards collected!`);
                             }
+                            // The server paid XP / passive points straight to the
+                            // database; re-read the bundle so the HUD and sheet agree.
+                            this._refreshProgressionBundle();
                             this.openQuestLog();
                         }).catch((err) => {
                             if (this.showToast) this.showToast(`❌ ${err.message}`);

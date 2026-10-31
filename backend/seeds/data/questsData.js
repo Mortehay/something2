@@ -476,6 +476,44 @@ const QUESTS = [
   },
 ];
 
-module.exports = { QUESTS };
+// How each quest's progress is earned (see migration 1714440827000). `kill`
+// names a creature type that exists in the bestiary seed; quests whose text
+// names content that does not exist yet fall back to kill_any / boss, and
+// gather / reach / choose quests are `manual` until a tracker exists.
+const OBJECTIVES = {
+  act1_core_whisper: { objective_type: 'kill', target_key: 'Skeleton' },
+  act1_dustroad_bandits: { objective_type: 'kill', target_key: 'Cultist' },
+  act1_slime_cull: { objective_type: 'kill', target_key: 'Slime' },
+  act1_bandit_slayer: { objective_type: 'kill', target_key: 'Cultist' },
+  act1_sunspire_reliquary: { objective_type: 'boss' },
+  act1_dire_wolfpack: { objective_type: 'kill', target_key: 'Wolf' },
+  act2_elemental_seals: { objective_type: 'manual' },
+  act2_beast_slayer: { objective_type: 'kill_any' },
+  quest_thorn_smeltery: { objective_type: 'kill_any' },
+  act2_molten_anvil: { objective_type: 'boss' },
+  quest_elyona_purification: { objective_type: 'manual' },
+  act2_obsidian_drake: { objective_type: 'boss' },
+  act2_drake_hatchlings: { objective_type: 'kill_any' },
+  act2_corrupted_blossom: { objective_type: 'manual' },
+  quest_valdor_sunken_cargo: { objective_type: 'manual' },
+  act2_crimson_corsairs: { objective_type: 'boss' },
+  quest_zahir_astrolabe: { objective_type: 'manual' },
+  act2_sunken_crypt: { objective_type: 'boss' },
+  act2_celestial_conjunction: { objective_type: 'manual' },
+  act3_poisoned_fen: { objective_type: 'boss' },
+  act3_void_purge: { objective_type: 'kill_any' },
+  act3_dark_generals: { objective_type: 'boss' },
+  act3_void_rift: { objective_type: 'boss' },
+  act3_nether_behemoth: { objective_type: 'boss' },
+  act3_abyssal_crown: { objective_type: 'manual' },
+  act4_new_dawn: { objective_type: 'manual' },
+  act4_primordial_cleansing: { objective_type: 'kill_any' },
+  act4_elemental_crucible: { objective_type: 'manual' },
+  act4_primordial_sovereign: { objective_type: 'boss' },
+};
+for (const q of QUESTS) {
+  Object.assign(q, { objective_type: 'manual', target_key: null }, OBJECTIVES[q.key]);
+  if (q.target_key === undefined) q.target_key = null;
+}
 
-module.exports = { QUESTS };
+module.exports = { QUESTS, OBJECTIVES };

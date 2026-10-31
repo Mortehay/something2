@@ -120,7 +120,12 @@ export function layoutQuestLog(state = {}) {
       const targetCnt = selectedQuest.target_count || 1;
       const isObjectiveComplete = progCnt >= targetCnt;
 
-      if (selectedQuest.act === 4 && (!legacyChoice || selectedQuest.key === "act4_new_dawn" || selectedQuest.key === "act4_primordial_core")) {
+      // The permanent choice rides on completing an Act IV quest, so it is
+      // offered only once the objective is done and nothing is chosen yet. It
+      // used to show from the moment the quest was accepted (a click then just
+      // failed on the server), and kept showing on act4_new_dawn after the
+      // choice was made, next to a key ("act4_primordial_core") that no quest has.
+      if (selectedQuest.act === 4 && !legacyChoice && isObjectiveComplete) {
         const halfW = Math.floor((detailArea.w - 36) / 2);
         const cityBtn = {
           kind: "quest_choice_city",
@@ -172,6 +177,23 @@ export function layoutQuestLog(state = {}) {
         };
         actionButtons.push(completeBtn);
         hitAreas.push(completeBtn);
+      }
+      // Give up the quest (progress is lost). Not offered next to the Act IV
+      // choice buttons, which occupy that row.
+      if (!(selectedQuest.act === 4 && !legacyChoice && isObjectiveComplete)) {
+        const abandonBtn = {
+          kind: "quest_abandon",
+          questId: selectedQuest.id,
+          questKey: selectedQuest.key,
+          x: detailArea.x + detailArea.w - 124,
+          y: btnY - 26,
+          w: 110,
+          h: 20,
+          text: "✖ Abandon",
+          color: "#f87171",
+        };
+        actionButtons.push(abandonBtn);
+        hitAreas.push(abandonBtn);
       }
     } else {
       const acceptBtn = {
@@ -558,6 +580,17 @@ export function drawQuestLog(ctx, layout) {
           ctx.fillStyle = btn.color;
           ctx.font = "bold 11px monospace";
           ctx.fillText(btn.text, btn.x + 12, btn.y + 7);
+        } else if (btn.kind === "quest_abandon") {
+          drawRoundedRect(ctx, btn.x, btn.y, btn.w, btn.h, 6);
+          ctx.fillStyle = "rgba(127, 29, 29, 0.35)";
+          ctx.fill();
+          ctx.strokeStyle = btn.color;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+
+          ctx.fillStyle = btn.color;
+          ctx.font = "bold 11px monospace";
+          ctx.fillText(btn.text, btn.x + 12, btn.y + 5);
         } else if (btn.kind === "quest_choice_city" || btn.kind === "quest_choice_surge") {
           drawRoundedRect(ctx, btn.x, btn.y, btn.w, btn.h, 8);
           ctx.fillStyle = btn.kind === "quest_choice_city" ? "rgba(56, 189, 248, 0.18)" : "rgba(245, 158, 11, 0.18)";
