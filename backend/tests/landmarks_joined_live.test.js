@@ -217,3 +217,10 @@ test('fetchLinks still selects the destination name a portal label is built from
   assert.match(select.slice(0, 600), /w\.name AS to_name/,
     'fetchLinks must select w.name AS to_name -- without it every portal is labelled "Portal"');
 });
+
+test('the joined frame carries the arrival location (name and level band, null when the world has none)', async () => {
+  const { joined } = await join(fakeLandmarkPool());
+  assert.ok(joined.location && typeof joined.location === 'object', 'joined must carry a location');
+  assert.ok(joined.location.levelMin === null || Number.isFinite(joined.location.levelMin));
+  assert.ok(joined.location.levelMax === null || Number.isFinite(joined.location.levelMax));
+});

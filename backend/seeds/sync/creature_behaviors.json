@@ -7,7 +7,7 @@
       "behavior_drops": 11,
       "chest_loot": 41,
       "creature_abilities": 28,
-      "creature_behavior_skills": 11,
+      "creature_behavior_skills": 15,
       "creature_behaviors": 24
     },
     "schema_version": "1714440812000_quests_objective_columns"
@@ -945,6 +945,34 @@
         "skill_id": "98736345-3bd6-e0b6-0b5d-ef12afd89dc2",
         "slot": 1,
         "sync_uuid": "9f1873ea-523d-b6ee-82f6-1a139e41cdf2"
+      },
+      {
+        "behavior_id": "0cfe5d84-c65c-89ad-68a9-ef083306fe4c",
+        "power_scale": 1,
+        "skill_id": "3f5a442a-b828-52d8-a1d5-fca1083e2bb0",
+        "slot": 2,
+        "sync_uuid": "a488f6d8-4881-5514-9d25-a0f53106f894"
+      },
+      {
+        "behavior_id": "7c42ef45-8f01-1cf8-4982-c1402c14d714",
+        "power_scale": 1,
+        "skill_id": "78f84aa6-1d1d-5d75-8879-bcd66ec07ac8",
+        "slot": 2,
+        "sync_uuid": "a2609fc5-7b6c-5a90-b1c2-1601be8323e4"
+      },
+      {
+        "behavior_id": "d0b13b17-0983-1397-ed85-483212880c40",
+        "power_scale": 1,
+        "skill_id": "e3d34ce7-47df-5724-b720-4a8506c97031",
+        "slot": 2,
+        "sync_uuid": "bdedb6d0-78da-53d1-b405-4f1ce0eb988f"
+      },
+      {
+        "behavior_id": "c3296591-cd68-059c-382d-eb67705b171b",
+        "power_scale": 1,
+        "skill_id": "3d799976-e067-53a5-89ee-541b82af57cd",
+        "slot": 2,
+        "sync_uuid": "6e3dcc61-6ca8-5eef-9c36-5088c8ca0cdc"
       }
     ],
     "creature_behaviors": [

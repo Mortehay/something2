@@ -6,6 +6,7 @@
 const { sellPriceFor, insertBuyback, BUYBACK_DAYS } = require('../services/merchantStock');
 const { ejectSocketedStone } = require('../services/stoneEject');
 const { hasFreeSlot } = require('./items');
+const { vendorBuyPrice, loadLegacyChoice } = require('../services/legacyEffects');
 
 async function buyStock(pool, entry, userId, characterId, stockId, villageId) {
   const p = entry.world.getPlayer(userId);
@@ -64,7 +65,14 @@ async function buyStock(pool, entry, userId, characterId, stockId, villageId) {
       return { ok: false, reason: 'that item is no longer for sale' };
     }
 
-    const price = Number(stock.price) || 0;
+    let price = Number(stock.price) || 0;
+
+    // Act IV legacy "City Restoration": -15% on everything bought from a
+    // merchant. Read inside the purchase transaction so the price the gold
+    // guard below charges is the price the player was entitled to.
+    if (price > 0) {
+      price = vendorBuyPrice(price, await loadLegacyChoice(client, characterId));
+    }
 
     // Overdraft-safe: the WHERE guard makes "not enough gold" a 0-row result
     // rather than a negative balance.

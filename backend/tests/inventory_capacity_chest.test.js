@@ -24,6 +24,9 @@ function stubPool({ rolled }) {
       if (s.startsWith("UPDATE world_chests SET state = 'opened'")) {
         return { rowCount: 1, rows: [{ id: 'chest-1', opened_at: '2026-08-23T00:00:00Z' }] };
       }
+      if (s.startsWith('INSERT INTO character_chest_opens')) {
+        return { rowCount: 1, rows: [{ opened_at: '2026-08-23T00:00:00Z' }] };
+      }
       if (s.startsWith('SELECT item_type_id, chance')) {
         return {
           rowCount: rolled.length,

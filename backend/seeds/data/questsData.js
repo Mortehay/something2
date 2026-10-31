@@ -476,6 +476,100 @@ const QUESTS = [
   },
 ];
 
-module.exports = { QUESTS };
+// How each quest's progress is earned (see migrations 1714440827000 / 31).
+// kill: a creature type that exists in the bestiary seed; kill_any / boss for
+// quests whose text names content that does not exist; interact: a quest node
+// (services/questNodes.js); floor: deepest Spire floor; choice: the Act IV
+// legacy. No main quest is `manual` any more.
+const OBJECTIVES = {
+  act1_core_whisper: { objective_type: 'kill', target_key: 'Skeleton' },
+  act1_dustroad_bandits: { objective_type: 'kill_any' },
+  act1_slime_cull: { objective_type: 'kill', target_key: 'Slime' },
+  act1_bandit_slayer: { objective_type: 'kill_any' },
+  act1_sunspire_reliquary: { objective_type: 'boss' },
+  act1_dire_wolfpack: { objective_type: 'kill', target_key: 'Wolf', target_count: 10, objective: 'Slay 10 Wolves in Thornbriar Reach to draw out the Alpha Packmaster' },
+  act2_elemental_seals: { objective_type: 'interact', target_key: 'elemental_crystal' },
+  act2_beast_slayer: { objective_type: 'kill_any' },
+  quest_thorn_smeltery: { objective_type: 'kill_any' },
+  act2_molten_anvil: { objective_type: 'boss' },
+  quest_elyona_purification: { objective_type: 'interact', target_key: 'luminous_herb', target_count: 3, objective: 'Gather 3 luminous herbs to cleanse blighted sequoia roots' },
+  act2_obsidian_drake: { objective_type: 'boss' },
+  act2_drake_hatchlings: { objective_type: 'kill_any' },
+  act2_corrupted_blossom: { objective_type: 'interact', target_key: 'corrupted_tendril', target_count: 3, objective: 'Sever 3 tendrils of corrupted lotus in Heartwood Glen' },
+  quest_valdor_sunken_cargo: { objective_type: 'interact', target_key: 'sunken_cargo' },
+  act2_crimson_corsairs: { objective_type: 'boss' },
+  quest_zahir_astrolabe: { objective_type: 'interact', target_key: 'starlight_prism', target_count: 3, objective: 'Collect 3 starlight prisms to calibrate Bronze Astrolabe' },
+  act2_sunken_crypt: { objective_type: 'boss' },
+  act2_celestial_conjunction: { objective_type: 'interact', target_key: 'obelisk' },
+  act3_poisoned_fen: { objective_type: 'boss' },
+  act3_void_purge: { objective_type: 'kill_any' },
+  act3_dark_generals: { objective_type: 'boss' },
+  act3_void_rift: { objective_type: 'boss' },
+  act3_nether_behemoth: { objective_type: 'boss' },
+  act3_abyssal_crown: { objective_type: 'interact', target_key: 'abyssal_diadem' },
+  act4_new_dawn: { objective_type: 'choice' },
+  act4_primordial_cleansing: { objective_type: 'kill_any' },
+  act4_elemental_crucible: { objective_type: 'floor', target_key: 'spire' },
+  act4_primordial_sovereign: { objective_type: 'boss' },
+};
+for (const q of QUESTS) {
+  Object.assign(q, { objective_type: 'manual', target_key: null }, OBJECTIVES[q.key]);
+  if (q.target_key === undefined) q.target_key = null;
+  q.is_side = false;
+  q.repeat_kind = 'none';
+}
 
-module.exports = { QUESTS };
+// Side quests: outside the main chain (is_side), no prerequisite, level-gated
+// only. Dailies reset when the UTC day rolls over (see migration 1714440828000).
+// Appended AFTER the main chain so QUESTS[0..28] stay the storyline.
+const side = (q) => ({
+  prerequisite_key: null, village_key: 'sunspire', npc_key: 'elder_sunspire',
+  passive_points_reward: 0, title_reward: null, target_key: null,
+  is_side: true, repeat_kind: 'none', ...q,
+});
+QUESTS.push(
+  side({
+    key: 'side_slime_patrol', act: 1, title: 'Slime Patrol',
+    description: 'The farmers want the fields clear again. Cull slimes around Sunspire Valley.',
+    objective: 'Slay 15 Slimes', objective_type: 'kill', target_key: 'Slime', target_count: 15,
+    required_level: 1, exp_reward: 900, gold_reward: 120,
+  }),
+  side({
+    key: 'side_skeleton_sweep', act: 1, title: 'Bone Sweep',
+    description: 'Restless skeletons wander the old ruins. Put ten of them back to rest.',
+    objective: 'Slay 10 Skeletons', objective_type: 'kill', target_key: 'Skeleton', target_count: 10,
+    required_level: 3, exp_reward: 1400, gold_reward: 200,
+  }),
+  side({
+    key: 'daily_pest_control', act: 1, title: 'Daily: Pest Control',
+    description: 'The guard captain posts a fresh pest bounty every dawn. Defeat 20 creatures of any kind.',
+    objective: 'Defeat 20 creatures', objective_type: 'kill_any', target_count: 20,
+    required_level: 1, exp_reward: 1500, gold_reward: 250, repeat_kind: 'daily',
+  }),
+  side({
+    key: 'daily_champion_hunt', act: 2, title: 'Daily: Champion Hunt',
+    description: 'A named foe is terrorising the roads. Bring down one boss today.',
+    objective: 'Defeat 1 boss', objective_type: 'boss', target_count: 1,
+    required_level: 15, exp_reward: 9000, gold_reward: 1500, repeat_kind: 'daily',
+    village_key: 'emberfall', npc_key: 'lord_thorn',
+  }),
+);
+
+// Milestone item rewards (item_types NAME), dropped at the player's feet on turn-in.
+const ITEM_REWARDS = {
+  quest_zahir_astrolabe: 'warbound-circlet',
+  act3_void_rift: 'gilded-fists',
+  act4_primordial_cleansing: 'stormlight-mantle',
+  act1_core_whisper: 'power-tinders',
+  act1_sunspire_reliquary: 'crude-signet',
+  act1_dire_wolfpack: 'iron-band',
+  act2_obsidian_drake: 'tempered-band',
+  act2_celestial_conjunction: 'steel-signet',
+  act3_nether_behemoth: 'obsidian-band',
+  act3_abyssal_crown: 'runed-signet',
+  act4_elemental_crucible: 'astral-band',
+  act4_primordial_sovereign: 'mythic-signet',
+};
+for (const q of QUESTS) q.item_reward = ITEM_REWARDS[q.key] || null;
+
+module.exports = { QUESTS, OBJECTIVES, ITEM_REWARDS };

@@ -107,6 +107,7 @@ async function armEntry(pool, fx, extra = {}) {
       world,
       claiming: new Set(),
       creatureTypeIds: new Map(),
+      gearRollChance: 0, // exact drop counts: keep the wild-gear roll out of it
       ...extra,
     },
     itemTypes,

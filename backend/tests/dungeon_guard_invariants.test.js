@@ -50,6 +50,10 @@ function reachableWithoutGuards(spec) {
   const adjacency = new Map(spec.worlds.map((w) => [w.key, []]));
   for (const l of spec.links) {
     if (isGuardedPortal(l)) continue;
+    // A cross-spec link (`to: "@<world name>"`, e.g. the Spire's portal back to
+    // Vale Crossing) leaves this spec: its far end is another spec's world, so it
+    // adds nothing to THIS spec's reachability.
+    if (l.to_name !== undefined || !adjacency.has(l.to) || !adjacency.has(l.from)) continue;
     adjacency.get(l.from).push(l.to);
     adjacency.get(l.to).push(l.from);   // links are bidirectional; setLink mirrors
   }

@@ -4,7 +4,7 @@
     "exported_by": "linux-dev",
     "group": "attack_effects",
     "row_counts": {
-      "creature_skills": 5,
+      "creature_skills": 9,
       "vfx_effects": 70
     },
     "schema_version": "1714440812000_quests_objective_columns"
@@ -27,6 +27,41 @@
           "cast": "hammer_smash",
           "impact": "crushing_blow",
           "telegraph": "hammer_smash"
+        }
+      },
+      {
+        "cooldown_ms": 30000,
+        "damage_mult": 1,
+        "element": "fire",
+        "kind": "summon",
+        "name": "Cinder Brood",
+        "radius": 0,
+        "range": 350,
+        "summon_count": 2,
+        "summon_entity": "Ember Skirmisher",
+        "sync_uuid": "3f5a442a-b828-52d8-a1d5-fca1083e2bb0",
+        "telegraph_ms": 1500,
+        "vfx": {
+          "cast": "fireball_blast",
+          "telegraph": "fireball_blast"
+        }
+      },
+      {
+        "cooldown_ms": 9000,
+        "damage_mult": 2.6,
+        "element": "ice",
+        "kind": "projectile",
+        "name": "Glacial Lance",
+        "radius": 20,
+        "range": 700,
+        "summon_count": 1,
+        "summon_entity": null,
+        "sync_uuid": "78f84aa6-1d1d-5d75-8879-bcd66ec07ac8",
+        "telegraph_ms": 1500,
+        "vfx": {
+          "cast": "frost_nova",
+          "impact": "ice_shard",
+          "telegraph": "frost_nova"
         }
       },
       {
@@ -63,6 +98,42 @@
           "cast": "frost_nova",
           "impact": "ice_shard",
           "telegraph": "frost_nova"
+        }
+      },
+      {
+        "cooldown_ms": 9000,
+        "damage_mult": 2,
+        "element": "arcane",
+        "kind": "slam",
+        "name": "Rift Collapse",
+        "radius": 300,
+        "range": 350,
+        "summon_count": 1,
+        "summon_entity": null,
+        "sync_uuid": "3d799976-e067-53a5-89ee-541b82af57cd",
+        "telegraph_ms": 600,
+        "vfx": {
+          "cast": "void_bolt",
+          "impact": "curse_blast",
+          "telegraph": "void_bolt"
+        }
+      },
+      {
+        "cooldown_ms": 14000,
+        "damage_mult": 2.4,
+        "element": "lightning",
+        "kind": "nova",
+        "name": "Static Pulse",
+        "radius": 380,
+        "range": 300,
+        "summon_count": 1,
+        "summon_entity": null,
+        "sync_uuid": "e3d34ce7-47df-5724-b720-4a8506c97031",
+        "telegraph_ms": 2200,
+        "vfx": {
+          "cast": "ball_lightning",
+          "impact": "thunder_clap",
+          "telegraph": "ball_lightning"
         }
       },
       {

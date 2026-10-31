@@ -17,6 +17,11 @@ const { awardXp, loadProgression } = require('../services/progressionStore.js');
 // caller) can reference the exact duration rather than re-deriving it.
 const FIELD_CHEST_RESPAWN_MS = 2 * 60 * 60 * 1000;
 
+// A vault chest is looted PER CHARACTER (character_chest_opens): after opening
+// one, that character has to wait this long before opening it again. Everyone
+// else's view of the chest is unaffected.
+const VAULT_REOPEN_MS = 30 * 60 * 1000;
+
 async function rollChestLoot(pool, guardLevel, rng = Math.random) {
   const r = await pool.query(
     'SELECT item_type_id, chance, min_qty, max_qty FROM chest_loot WHERE level_min <= $1 AND level_max >= $1',
@@ -52,6 +57,7 @@ function xpForChest(guardLevel, playerLevel) {
 async function openChest(pool, chestId, characterId, {
   rng = Math.random, freeSlots = Infinity,
   rarityAnchors = null, affixPool = [], itemTypes = null,
+  vaultReopenMs = VAULT_REOPEN_MS,
 } = {}) {
   const client = await pool.connect();
   try {
@@ -65,9 +71,17 @@ async function openChest(pool, chestId, characterId, {
       return { ok: false, reason: 'chest not found' };
     }
     const chest = cr.rows[0];
-    if (chest.state === 'opened') {
+    // Vault chests have no global "opened" state any more (it is per character,
+    // below). A vault row an older build left 'opened' counts as unlocked: its
+    // guard was dead or it could not have been opened.
+    const personal = chest.kind === 'vault';
+    if (chest.state === 'opened' && !personal) {
       await client.query('ROLLBACK');
       return { ok: false, reason: 'already opened' };
+    }
+    if (chest.state === 'opened' && personal) {
+      await client.query("UPDATE world_chests SET state = 'unlocked' WHERE id = $1", [chestId]);
+      chest.state = 'unlocked';
     }
     if (chest.state === 'locked') {
       // guard_creature_ids is a jsonb column: pg already hands this back as
@@ -87,15 +101,40 @@ async function openChest(pool, chestId, characterId, {
       await client.query("UPDATE world_chests SET state = 'unlocked' WHERE id = $1", [chestId]);
     }
 
-    const cas = await client.query(
-      "UPDATE world_chests SET state = 'opened', opened_at = now() WHERE id = $1 AND state = 'unlocked' RETURNING id, opened_at",
-      [chestId],
-    );
-    if (cas.rowCount !== 1) {
-      await client.query('ROLLBACK');
-      return { ok: false, reason: 'already opened' };
+    let openedAt;
+    if (personal) {
+      // The per-character CAS: the upsert only lands when this character has no
+      // pending cooldown on this chest, exactly one concurrent open wins.
+      const pr = await client.query(
+        `INSERT INTO character_chest_opens (character_id, chest_id, reopen_at)
+         VALUES ($1, $2, now() + ($3::int * interval '1 millisecond'))
+         ON CONFLICT (character_id, chest_id) DO UPDATE
+           SET opened_at = now(), reopen_at = EXCLUDED.reopen_at
+         WHERE character_chest_opens.reopen_at <= now()
+         RETURNING opened_at`,
+        [characterId, chestId, vaultReopenMs],
+      );
+      if (pr.rowCount !== 1) {
+        const left = await client.query(
+          `SELECT GREATEST(0, EXTRACT(EPOCH FROM (reopen_at - now())) * 1000)::bigint AS ms
+             FROM character_chest_opens WHERE character_id = $1 AND chest_id = $2`,
+          [characterId, chestId],
+        );
+        await client.query('ROLLBACK');
+        return { ok: false, reason: 'already opened', reopenInMs: Number((left.rows[0] || {}).ms) || 0 };
+      }
+      openedAt = pr.rows[0].opened_at;
+    } else {
+      const cas = await client.query(
+        "UPDATE world_chests SET state = 'opened', opened_at = now() WHERE id = $1 AND state = 'unlocked' RETURNING id, opened_at",
+        [chestId],
+      );
+      if (cas.rowCount !== 1) {
+        await client.query('ROLLBACK');
+        return { ok: false, reason: 'already opened' };
+      }
+      openedAt = cas.rows[0].opened_at;
     }
-    const openedAt = cas.rows[0].opened_at;
 
     // Field chests get a respawn timer; vault chests never do (queried once
     // more here via `RETURNING respawn_at` -- rather than computed in JS from
@@ -222,6 +261,10 @@ async function openChest(pool, chestId, characterId, {
       // (entry.chests wouldn't show a respawn_at at all until a full reload).
       openedAt,
       respawnAt,
+      // Vault chests: this character's own cooldown. The caller keeps the world
+      // state as it is and remembers the cooldown against the character.
+      personal,
+      reopenInMs: personal ? vaultReopenMs : null,
     };
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -232,5 +275,5 @@ async function openChest(pool, chestId, characterId, {
 }
 
 module.exports = {
-  rollChestLoot, xpForChest, openChest, FIELD_CHEST_RESPAWN_MS,
+  rollChestLoot, xpForChest, openChest, FIELD_CHEST_RESPAWN_MS, VAULT_REOPEN_MS,
 };

@@ -171,7 +171,7 @@ test('a due boss in an unloaded world waits; the next load places it', async () 
 });
 
 test('a missing, renamed or untiered boss row places nothing and warns once', async () => {
-  for (const row of [null, { ...ROW, boss_tier: null }, { ...ROW, boss_tier: 'world' }]) {
+  for (const row of [null, { ...ROW, boss_tier: null }, { ...ROW, boss_tier: 'miniboss' }]) {
     const h = harness({ row: row ?? { ...ROW, name: 'zzOther' } });
     const e = h.newEntry();
     assert.equal(await h.mgr.place(e), null);
@@ -338,4 +338,13 @@ test('world-load placement is quiet, a due sweep respawn plays exactly one spawn
   assert.equal(spawns.length, 1, 'a sweep respawn emits exactly one spawn sfx');
   assert.equal(spawns[0].a, 'c:boss:w-1');
   assert.equal('quietSpawn' in e.world.creatures.get('boss:w-1'), false, 'never stored on a respawn either');
+});
+
+test('a world-tier boss may hold a post (the Spire Floor 60 gate) and is placed like any post boss', async () => {
+  const h = harness({ row: { ...ROW, boss_tier: 'world' } });
+  const e = h.newEntry();
+  const c = await h.mgr.place(e);
+  assert.ok(c, 'placed');
+  assert.equal(bosses(e).length, 1);
+  assert.equal(h.warnings.length, 0);
 });

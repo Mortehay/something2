@@ -89,7 +89,8 @@ const KNOWN_EXCLUSIVE = new Set();
 // entry is checked to bind Escape and to claim no letter.
 //   ArtConsoleAdmin -- closes the image preview (SOMET-546 rework).
 //   seedUi (Modal) -- closes the Seed / Export popup, preview and confirm (SOMET-638).
-const ESCAPE_ONLY = new Set(['games/something2/ArtConsoleAdmin.jsx', 'games/something2/seedUi.jsx']);
+//   WaypointTravel -- closes the destination list; T itself moved to Game.js (teleport cast).
+const ESCAPE_ONLY = new Set(['games/something2/ArtConsoleAdmin.jsx', 'games/something2/seedUi.jsx', 'games/something2/WaypointTravel.jsx']);
 
 function claimsIn(source) {
   const plain = new Set();
@@ -158,13 +159,19 @@ describe('window keydown hotkeys', () => {
     }
   });
 
-  it('leaves plain T to the travel popup and the dev texture toggle on Shift+T', () => {
+  it('gives plain T to the teleport cast in Game.js (a rebindable action) and keeps Shift+T for the dev texture toggle', () => {
     const byFile = Object.fromEntries(listeners.map((l) => [l.file, l]));
     const game = byFile['games/something2/src/js/core/Game.js'];
     const travel = byFile['games/something2/WaypointTravel.jsx'];
-    expect([...travel.plain]).toContain('t');
+    // The popup no longer listens for T: two handlers on one key is the collision
+    // this whole file exists to prevent.
+    expect([...travel.plain]).not.toContain('t');
     expect([...game.modified]).toContain('t');
     expect([...game.plain]).not.toContain('t');
+    // The teleport binding is an action bind, guarded against Shift.
+    const src = fs.readFileSync(path.join(SRC, 'games/something2/src/js/core/Game.js'), 'utf8');
+    expect(src).toMatch(/matchesBind\('teleport', 't'\)/);
+    expect(src).toMatch(/isTeleportKey && !e\.shiftKey/);
   });
 
   it('gives no unmodified letter to two handlers', () => {

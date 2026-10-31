@@ -5,7 +5,9 @@
 import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
 
 export const QUEST_PANEL_W = 760;
-export const QUEST_PANEL_H = 520;
+// 22px taller than the lists need: the bottom strip carries the Spire progress line.
+const FOOTER_H = 22;
+export const QUEST_PANEL_H = 542;
 const TITLE_H = 40;
 
 function truncateText(ctx, text, maxWidth) {
@@ -33,12 +35,22 @@ function drawRoundedRect(ctx, x, y, w, h, r = 0) {
   }
 }
 
+// "Spire: floor 12/61 · next boss: floor 15" for the log's footer, or null when
+// the server sent no progress (the footer is then simply not drawn).
+export function spireLine(p) {
+  if (!p || !Number.isFinite(p.maxFloor) || p.maxFloor <= 0) return null;
+  const floor = p.highestFloor > 0 ? `floor ${p.highestFloor}/${p.maxFloor}` : "not entered yet";
+  const boss = p.nextBossFloor == null ? "all gate bosses defeated" : `next boss: floor ${p.nextBossFloor}`;
+  return `🗼 Spire: ${floor} · ${boss}`;
+}
+
 export function layoutQuestLog(state = {}) {
   const {
     quests = [],
     legacyChoice = null,
     activeQuestKey = null,
     questScroll = 0,
+    spireProgress = null,
   } = state;
 
   const px = (GAME_WIDTH - QUEST_PANEL_W) / 2;
@@ -50,8 +62,8 @@ export function layoutQuestLog(state = {}) {
 
   const hitAreas = [{ ...close, kind: "questclose", id: null }];
 
-  const listArea = { x: px + 14, y: py + TITLE_H + 12, w: 260, h: QUEST_PANEL_H - TITLE_H - 26 };
-  const detailArea = { x: px + 288, y: py + TITLE_H + 12, w: QUEST_PANEL_W - 302, h: QUEST_PANEL_H - TITLE_H - 26 };
+  const listArea = { x: px + 14, y: py + TITLE_H + 12, w: 260, h: QUEST_PANEL_H - TITLE_H - 26 - FOOTER_H };
+  const detailArea = { x: px + 288, y: py + TITLE_H + 12, w: QUEST_PANEL_W - 302, h: QUEST_PANEL_H - TITLE_H - 26 - FOOTER_H };
 
   const itemH = 44;
   const itemGap = 6;
@@ -120,7 +132,12 @@ export function layoutQuestLog(state = {}) {
       const targetCnt = selectedQuest.target_count || 1;
       const isObjectiveComplete = progCnt >= targetCnt;
 
-      if (selectedQuest.act === 4 && (!legacyChoice || selectedQuest.key === "act4_new_dawn" || selectedQuest.key === "act4_primordial_core")) {
+      // The permanent choice rides on completing an Act IV quest, so it is
+      // offered only once the objective is done and nothing is chosen yet. It
+      // used to show from the moment the quest was accepted (a click then just
+      // failed on the server), and kept showing on act4_new_dawn after the
+      // choice was made, next to a key ("act4_primordial_core") that no quest has.
+      if (selectedQuest.objective_type === "choice" && !legacyChoice && isObjectiveComplete) {
         const halfW = Math.floor((detailArea.w - 36) / 2);
         const cityBtn = {
           kind: "quest_choice_city",
@@ -143,7 +160,7 @@ export function layoutQuestLog(state = {}) {
           w: halfW,
           h: 56,
           title: "⚡ Elemental Surge",
-          sub: "+15% MF / +20% Yield (Primal Might)",
+          sub: "+15% Magic Find / +20% Gold (Primal Might)",
           color: "#f59e0b",
         };
         actionButtons.push(cityBtn, surgeBtn);
@@ -173,6 +190,23 @@ export function layoutQuestLog(state = {}) {
         actionButtons.push(completeBtn);
         hitAreas.push(completeBtn);
       }
+      // Give up the quest (progress is lost). Not offered next to the Act IV
+      // choice buttons, which occupy that row.
+      if (!(selectedQuest.objective_type === "choice" && !legacyChoice && isObjectiveComplete)) {
+        const abandonBtn = {
+          kind: "quest_abandon",
+          questId: selectedQuest.id,
+          questKey: selectedQuest.key,
+          x: detailArea.x + detailArea.w - 124,
+          y: btnY - 26,
+          w: 110,
+          h: 20,
+          text: "✖ Abandon",
+          color: "#f87171",
+        };
+        actionButtons.push(abandonBtn);
+        hitAreas.push(abandonBtn);
+      }
     } else {
       const acceptBtn = {
         kind: "quest_accept",
@@ -195,11 +229,12 @@ export function layoutQuestLog(state = {}) {
     quests: questItems, selectedQuest, legacyChoice, actionButtons,
     totalH, maxScroll, scrollY,
     header: {
-      titleText: "📜 Quest Log (Hotkey 'J')",
+      spireText: spireLine(spireProgress),
+      titleText: "📜 Quest Log (Hotkey 'J')" + (quests.filter((q) => q.status === "completed" && q.title_reward).length ? ` · 👑 ${quests.filter((q) => q.status === "completed" && q.title_reward).length}` : ""),
       choiceText: legacyChoice === "city_restoration"
         ? "✨ Legacy: City Restoration (-15% Vendor Prices)"
         : legacyChoice === "elemental_surge"
-          ? "⚡ Legacy: Elemental Surge (+15% MF / +20% Yield)"
+          ? "⚡ Legacy: Elemental Surge (+15% MF / +20% Gold)"
           : "⏳ Unchosen Legacy (Act IV)",
     },
   };
@@ -262,6 +297,13 @@ export function drawQuestLog(ctx, layout) {
 
     ctx.fillStyle = "#34d399";
     ctx.fillText(choiceStr, badgeX + 8, badgeY + 4);
+  }
+
+  // Spire progress, in the panel's bottom margin.
+  if (header.spireText) {
+    ctx.font = "11px monospace";
+    ctx.fillStyle = "#93c5fd";
+    ctx.fillText(header.spireText, panel.x + 16, panel.y + panel.h - 18);
   }
 
   // Close Button (Sleek red glass button)
@@ -503,7 +545,10 @@ export function drawQuestLog(ctx, layout) {
       rewardItems.push({ text: `✨ +${selectedQuest.passive_points_reward} Passive Points`, color: "#a7f3d0" });
     }
     if (selectedQuest.title_reward) {
-      rewardItems.push({ text: `👑 Title: "${selectedQuest.title_reward}"`, color: "#c084fc" });
+      rewardItems.push({ text: `👑 Title${selectedQuest.status === "completed" ? " earned" : ""}: "${selectedQuest.title_reward}"`, color: "#c084fc" });
+    }
+    if (selectedQuest.item_reward) {
+      rewardItems.push({ text: `🎁 Item: ${selectedQuest.item_reward}`, color: "#fda4af" });
     }
 
     const rewardBoxY = dy;
@@ -558,6 +603,17 @@ export function drawQuestLog(ctx, layout) {
           ctx.fillStyle = btn.color;
           ctx.font = "bold 11px monospace";
           ctx.fillText(btn.text, btn.x + 12, btn.y + 7);
+        } else if (btn.kind === "quest_abandon") {
+          drawRoundedRect(ctx, btn.x, btn.y, btn.w, btn.h, 6);
+          ctx.fillStyle = "rgba(127, 29, 29, 0.35)";
+          ctx.fill();
+          ctx.strokeStyle = btn.color;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+
+          ctx.fillStyle = btn.color;
+          ctx.font = "bold 11px monospace";
+          ctx.fillText(btn.text, btn.x + 12, btn.y + 5);
         } else if (btn.kind === "quest_choice_city" || btn.kind === "quest_choice_surge") {
           drawRoundedRect(ctx, btn.x, btn.y, btn.w, btn.h, 8);
           ctx.fillStyle = btn.kind === "quest_choice_city" ? "rgba(56, 189, 248, 0.18)" : "rgba(245, 158, 11, 0.18)";

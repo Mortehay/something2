@@ -5,7 +5,9 @@ const request = require('supertest');
 const { Pool } = require('pg');
 const { app, __setPool } = require('../src/index.js');
 const { QUESTS } = require('../seeds/data/questsData.js');
-const { levelForXp } = require('../src/services/playerStats.js');
+const { levelForXp, xpFloor } = require('../src/services/playerStats.js');
+const { signToken } = require('../src/auth/tokens.js');
+const { incrementQuestProgress } = require('../src/services/questsService.js');
 
 // This file inserts users/characters, so it must never fall back to the
 // default DATABASE_URL: no TEST_DATABASE_URL, no run (a CI run must fail).
@@ -46,6 +48,10 @@ test('POST /api/quests start/progress/complete follows the prerequisite chain an
       [prefix]
     );
     userId = userRes.rows[0].id;
+    const tv = await pool.query('SELECT token_version FROM users WHERE id = $1', [userId]);
+    const auth = { Authorization: `Bearer ${signToken({
+      userId, username: prefix, role: 'player', tokenVersion: tv.rows[0].token_version,
+    })}` };
     const charRes = await pool.query(
       `INSERT INTO characters (user_id, name, slot, entity_type_id)
        VALUES ($1, $2, 1, (SELECT id FROM entity_types WHERE is_playable = true LIMIT 1)) RETURNING id`,
@@ -54,8 +60,9 @@ test('POST /api/quests start/progress/complete follows the prerequisite chain an
     charId = charRes.rows[0].id;
 
     const startPassive = 5;
-    const startXp = 50000;
-    const startLevel = 40;
+    // act4_new_dawn requires level 50, which questsService now enforces.
+    const startLevel = 50;
+    const startXp = xpFloor(startLevel);
     await pool.query(
       `INSERT INTO player_progression (character_id, level, experience, passive_points, legacy_choice)
        VALUES ($1, $2, $3, $4, NULL)`,
@@ -73,7 +80,7 @@ test('POST /api/quests start/progress/complete follows the prerequisite chain an
     assert.ok(act4Id, 'act4_new_dawn not in quests table: seed quests first (node scripts/seed-quests.js)');
 
     // Fresh character: the server must refuse Act IV while its prerequisite is open.
-    const locked = await request(app).post('/api/quests/start').send({ characterId: charId, questId: act4Id });
+    const locked = await request(app).post('/api/quests/start').set(auth).send({ characterId: charId, questId: act4Id });
     assert.strictEqual(locked.status, 400);
     assert.match(locked.body.error, /locked/);
 
@@ -91,20 +98,33 @@ test('POST /api/quests start/progress/complete follows the prerequisite chain an
       [charId, chain]
     );
 
-    const startRes = await request(app).post('/api/quests/start').send({ characterId: charId, questId: act4Id });
+    const startRes = await request(app).post('/api/quests/start').set(auth).send({ characterId: charId, questId: act4Id });
     assert.strictEqual(startRes.status, 200, JSON.stringify(startRes.body));
     assert.strictEqual(startRes.body.questState.status, 'active');
 
-    const progRes0 = await request(app).post('/api/quests/progress')
+    // There is no HTTP progress route: a client-writable counter let a player
+    // award themselves any quest. The game earns progress server-side.
+    const noRoute = await request(app).post('/api/quests/progress').set(auth)
       .send({ characterId: charId, questId: act4Id, amount: seedAct4.target_count });
-    assert.strictEqual(progRes0.status, 200, JSON.stringify(progRes0.body));
-    assert.strictEqual(Number(progRes0.body.progressState.progress_count), seedAct4.target_count);
+    assert.strictEqual(noRoute.status, 404);
+    const progressed = await incrementQuestProgress(pool, charId, act4Id, seedAct4.target_count + 5);
+    assert.strictEqual(Number(progressed.progress_count), seedAct4.target_count, 'clamped to the target');
 
-    const completeRes = await request(app).post('/api/quests/complete')
+    // Anonymous callers are refused; so is an account that does not own the character.
+    const anon = await request(app).post('/api/quests/complete')
+      .send({ characterId: charId, questId: act4Id });
+    assert.strictEqual(anon.status, 401);
+
+    const completeRes = await request(app).post('/api/quests/complete').set(auth)
       .send({ characterId: charId, questId: act4Id, legacyChoice: 'city_restoration' });
     assert.strictEqual(completeRes.status, 200, JSON.stringify(completeRes.body));
     assert.strictEqual(completeRes.body.status, 'completed');
     assert.strictEqual(completeRes.body.legacyChoice, 'city_restoration');
+
+    // Completing again, even concurrently, pays out once.
+    const again = await Promise.all([1, 2].map(() => request(app).post('/api/quests/complete')
+      .set(auth).send({ characterId: charId, questId: act4Id, legacyChoice: 'elemental_surge' })));
+    for (const r of again) assert.strictEqual(r.body.alreadyCompleted, true);
 
     // Only Act IV is completed through the service, so the arithmetic is its
     // own reward plus one point per level gained.

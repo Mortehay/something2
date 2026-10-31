@@ -77,8 +77,19 @@ function interpolateWeights(itemLevel, anchors) {
 // weight, never simply "the last grade". That is what keeps criterion 4
 // (a level-1 creature can never drop foxy, whose anchor weight is 0) true even
 // when floating-point accumulation leaves the cumulative a hair under 1.
-function rollRarity(itemLevel, anchors, rng = Math.random) {
-  const w = interpolateWeights(itemLevel, anchors);
+// Magic find (Act IV Elemental Surge): every grade above white has its weight
+// multiplied by (1 + magicFind) and the table is renormalised. 0 (the default)
+// returns the table untouched, so every existing caller and fixture is unmoved.
+function withMagicFind(weights, magicFind) {
+  const mf = Number(magicFind);
+  if (!(mf > 0)) return weights;
+  const raw = {};
+  for (const grade of RARITIES) raw[grade] = grade === 'white' ? weights[grade] : weights[grade] * (1 + mf);
+  return normalise(raw);
+}
+
+function rollRarity(itemLevel, anchors, rng = Math.random, magicFind = 0) {
+  const w = withMagicFind(interpolateWeights(itemLevel, anchors), magicFind);
   const r = Number(rng());
   const roll = Number.isFinite(r) ? r : 0;
   let acc = 0;
@@ -91,4 +102,4 @@ function rollRarity(itemLevel, anchors, rng = Math.random) {
   return last;
 }
 
-module.exports = { interpolateWeights, rollRarity, RARITIES };
+module.exports = { interpolateWeights, rollRarity, withMagicFind, RARITIES };

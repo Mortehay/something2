@@ -144,16 +144,16 @@ describe("Quest Log Panel & Storyline Interactions", () => {
   });
 
   it("reports quest markers in getMinimapSnapshot()", () => {
+    // An unfinished active quest shows nothing; a finished one is "?" (turn in).
     g.allQuests = [
-      { id: 1, key: "act1", title: "Act 1", act: 1, status: "active", start_npc_key: "npc_thorn", village_key: "oakhaven" }
+      { id: 1, key: "act1", title: "Act 1", act: 1, status: "active", progress_count: 1, target_count: 1, start_npc_key: "npc_thorn", village_key: "oakhaven" },
+      { id: 2, key: "act2", title: "Act 2", act: 1, status: "active", progress_count: 0, target_count: 5, village_key: "elsewhere" },
     ];
     g.questGivers = [{ x: 120, y: 120, name: "Elder Eldrin" }];
     const snap = g.getMinimapSnapshot();
     expect(snap).not.toBeNull();
     expect(snap.questMarkers).toBeDefined();
-    expect(snap.questMarkers.length).toBe(1);
-    expect(snap.questMarkers[0].key).toBe("act1");
-    expect(snap.questMarkers[0].status).toBe("active");
+    expect(snap.questMarkers).toEqual([{ villageKey: "oakhaven", marker: "?" }]);
     expect(snap.questGivers).toBeDefined();
     expect(snap.questGivers.length).toBe(1);
     expect(snap.questGivers[0].name).toBe("Elder Eldrin");

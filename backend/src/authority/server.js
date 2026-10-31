@@ -26,6 +26,8 @@ const { chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint, villageConta
 const { fetchLinks } = require('../services/mapLinks');
 const { fetchVillages } = require('../services/villages');
 const { fetchWaypoints, activateWaypoint, waypointTileKey } = require('../services/waypoints');
+const teleportCast = require('./teleportCast.js');
+const bossGate = require('../services/bossGate.js');
 const { buildLandmarks } = require('../services/landmarks');
 const { loadPointKindDefaults, resolvePointArt, chestPointKind } = require('../services/pointArt');
 const {
@@ -42,6 +44,10 @@ const { buildWorldGenConfig } = require('../services/worldGenConfig');
 const { commitCreatureDeath, claimItem, claimGold, dropItem, dropGraceActive, spawnGroundItemTypes } = require('./loot');
 const { knockbackPosition, knockbackWithFallback } = require('./knockback');
 const { buyStock, sellItem } = require('./trade');
+const { recordKill } = require('../services/questsService.js');
+const { vendorBuyPrice, loadLegacyChoice } = require('../services/legacyEffects.js');
+const { pendingRewardItems, clearRewardPending, recordNode, doneNodeKeys, recordFloor, floorFromWorldName } = require('../services/questsService.js');
+const { worldQuestNodes, nearestQuestNode } = require('../services/questNodes.js');
 const { respawnDueCreatures, enqueueDeficit, CREATURE_SWEEP_MS } = require('../services/creatureRespawn');
 const { consumeAmmo, ammoCount } = require('./ammo');
 const { PICKUP_RADIUS } = require('./groundItems');
@@ -225,6 +231,7 @@ function planPortalTransition({
 }
 
 const INTERACT_RADIUS = 120; // px: how close a player must stand to trade
+const QUEST_NODE_RADIUS = 110; // px: how close to stand to use a quest node
 
 // The village whose post named by (xKey,yKey) is nearest to (cx,cy) within
 // `radius`, or null. Villages without that post are skipped.
@@ -658,7 +665,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // silently enqueue 0 for every real world, forever, with no error.
         // dungeon_boss (SOMET-609): read by DungeonBossManager.place below;
         // omitting it would silently place no boss anywhere.
-        const wr = await pool.query('SELECT id, seed, chunk_size, width, height, is_entry, entry_spawn, biomes, biome_cell, level_min, level_max, safe_road_radius, safe_rects, authored_roads, density, allowed_creature_types, dungeon_boss FROM worlds WHERE id = $1', [worldId]);
+        const wr = await pool.query('SELECT id, name, seed, chunk_size, width, height, is_entry, entry_spawn, biomes, biome_cell, level_min, level_max, safe_road_radius, safe_rects, authored_roads, density, allowed_creature_types, dungeon_boss FROM worlds WHERE id = $1', [worldId]);
         if (wr.rows.length === 0) return null;
         const row = wr.rows[0];
         // Postgres uuid input is case-insensitive and also accepts braced /
@@ -958,13 +965,106 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // becomes a LIVE consequence: without moving the session's pools here, a
   // level-up would raise max HP in the database and nothing in the running
   // game (the exact defect A1's review caught).
+  // Credits one kill to the killer's active quests and tells them. Best-effort
+  // and detached: quest bookkeeping must never delay or fail a kill commit.
+  // Quest item reward: put the item (by item_types NAME) on the ground at the
+  // player's feet, where the normal pickup / auto-loot flow collects it. Resolves
+  // true only when it really landed; false means "still owed" to the caller,
+  // which keeps character_quests.reward_item_pending set.
+  async function dropQuestRewardItem(userId, itemName) {
+    const uid = String(userId);
+    const ws = sessionsByUser.get(uid);
+    if (!ws || !ws.worldId) return false;
+    const entry = worlds.get(ws.worldId);
+    if (!entry) return false;
+    const p = entry.world.getPlayer(uid);
+    if (!p) return false;
+    const type = [...entry.world.weapons.values()].find((t) => t && t.name === itemName);
+    if (!type) return false;
+    const cx = p.x + p.width / 2;
+    const cy = p.y + p.height / 2;
+    const landed = await spawnGroundItemTypes(pool, entry, [type.id], cx, cy, { ttlMs: groundItemTtlMs });
+    if (!landed || landed.length === 0) return false;
+    const sock = entry.sockets.get(uid);
+    if (sock) send(sock, { type: 'error', message: `Quest reward dropped at your feet: ${itemName}` });
+    return true;
+  }
+
+  // At join: pay any item rewards still owed (the player completed a quest while
+  // not in a world, or the drop failed). Best-effort and detached.
+  const deliverPendingRewardItems = (userId, characterId) => {
+    pendingRewardItems(pool, characterId)
+      .then(async (owed) => {
+        for (const o of owed) {
+          if (await dropQuestRewardItem(userId, o.item)) await clearRewardPending(pool, characterId, o.questId);
+        }
+      })
+      .catch((e) => console.error('quest reward delivery at join failed:', e));
+  };
+
+  // The one wire shape for "these quests moved" (kills, nodes, floors).
+  const sendQuestUpdates = (sock, updates) => {
+    if (!sock || !updates || !updates.length) return;
+    send(sock, {
+      type: 'questProgress',
+      updates: updates.map((u) => ({
+        key: u.key, title: u.title,
+        progress: Number(u.progress_count), target: Number(u.target_count),
+      })),
+    });
+  };
+
+  const trackQuestKill = (entry, killerUserId, typeName, isBoss) => {
+    if (killerUserId == null) return;
+    const killer = entry.world.getPlayer(killerUserId);
+    const characterId = killer && killer.characterId;
+    if (characterId == null) return;
+    recordKill(pool, characterId, { typeName, isBoss })
+      .then((updates) => {
+        sendQuestUpdates(entry.sockets.get(killerUserId), updates);
+      })
+      .catch((err) => console.error('quest kill tracking failed:', err));
+  };
+
   const onCreatureDeath = (entry, id, killerUserId) => {
     // SOMET-609: a dungeon boss has ONE respawn owner. It has no
     // world_creatures row (commitCreatureDeath's uuid DELETE would throw on a
     // `boss:` id) and is not a world boss, so it never reaches either path.
     // Routed by id (ruling G10): the creature is already out of the sim here.
     if (dungeonBosses.isBoss(entry.worldId, id)) {
-      dungeonBosses.onDeath(entry, id, killerUserId);
+      const kill = dungeonBosses.onDeath(entry, id, killerUserId);
+      if (kill) trackQuestKill(entry, killerUserId, kill.entityName, true);
+      // A Spire gate boss opens the way forward for the killer and anyone close.
+      if (kill && bossGate.isGatedWorld(entry.row)) {
+        for (const p of bossGate.clearBeneficiaries(entry.world.players.values(), killerUserId, kill.x, kill.y)) {
+          if (!p._bossCleared) p._bossCleared = new Set();
+          if (p._bossCleared.has(entry.worldId)) continue;
+          p._bossCleared.add(entry.worldId);
+          const bws = entry.sockets.get(p.userId);
+          if (bws) send(bws, { type: 'announcement', text: bossGate.openedMessage(entry.row) });
+          // First clear of this boss pays gold (once per character); the wallet
+          // frame and a second notice follow once the write lands.
+          const reward = bossGate.firstClearGold(floorFromWorldName(entry.row.name));
+          bossGate.recordBossClear(pool, p.characterId, entry.worldId)
+            .then((first) => {
+              // The clear is committed. Paying gold is a separate step with its
+              // own failure handling: a failed payout must never close the door
+              // again (the in-memory entry stays), it is only logged.
+              if (!first || !reward) return;
+              bossGate.awardGold(pool, p.characterId, reward)
+                .then((gold) => {
+                  const sock = entry.sockets.get(p.userId);
+                  if (sock && gold != null) {
+                    send(sock, { type: 'wallet', gold });
+                    send(sock, { type: 'announcement', text: `First clear reward: +${reward.toLocaleString('en-US')} gold` });
+                  }
+                })
+                .catch((e) => console.error('first-clear gold award failed:', e));
+            })
+            // Only a failure to RECORD the clear takes the in-memory entry back.
+            .catch((e) => { p._bossCleared.delete(entry.worldId); console.error('recordBossClear', e); });
+        }
+      }
       return Promise.resolve(null);
     }
     // SOMET-626 (S13): same reasoning as the boss above -- a dungeon-boss
@@ -994,6 +1094,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
     return commitCreatureDeath(pool, entry, id, { rng, ttlMs: groundItemTtlMs, killerUserId })
       .then((result) => {
         if (!result || result.killerUserId == null) return; // no commit, or no player to credit
+        trackQuestKill(entry, result.killerUserId, result.type, !!(deadCreature && deadCreature.bossTier));
         const { progression, leveledUp, newLevel, awarded } = result;
         if (leveledUp) {
           const p = entry.world.getPlayer(result.killerUserId);
@@ -1496,8 +1597,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
           const { cx: ccx, cy: ccy } = chunkOf(c.x, c.y, N);
           return keys.has(CHUNK_KEY(ccx, ccy));
         })
-        .map((c) => ({
-          id: c.id, x: c.x, y: c.y, kind: c.kind, state: c.state,
+        .map((c) => {
+          // A vault chest is looted per character: this player's own cooldown
+          // (p._chestOpens: chest id -> epoch ms it can be opened again) turns
+          // it 'opened' in THEIR frame only.
+          const until = c.kind === 'vault' && p._chestOpens ? p._chestOpens.get(c.id) : undefined;
+          const mine = until != null && until > Date.now();
+          return {
+          id: c.id, x: c.x, y: c.y, kind: c.kind, state: mine ? 'opened' : (c.state === 'opened' && c.kind === 'vault' ? 'unlocked' : c.state),
+          ...(mine ? { reopenInMs: until - Date.now() } : {}),
           // SOMET-582: chestPointKind maps 'vault'/'field' onto the point-kind
           // catalog's names ('chest_vault'/'chest_field'). It throws on any
           // other kind, but c.kind can never be one: world_chests has a
@@ -1505,7 +1613,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
           // to exactly these two values, so every row this loop sees already
           // satisfies chestPointKind's precondition.
           art: resolvePointArt(chestPointKind(c.kind), c.art, entry.pointArtDefaults),
-        }));
+          };
+        });
       send(ws, { type: 'chests', chests });
     }
   }
@@ -1889,8 +1998,43 @@ function attachAuthority(httpServer, pool, opts = {}) {
         } catch (e) {
           console.error('landmarks: reading activations failed', e);
         }
+        // Quest nodes (services/questNodes.js): derived from this world's villages,
+        // with the ones this character already spent on an active quest marked done.
+        entry.questNodes = entry.questNodes || worldQuestNodes(entry.villages);
+        let questNodeDone = [];
+        try {
+          questNodeDone = await doneNodeKeys(pool, character.id);
+        } catch (e) {
+          console.error('quest nodes: reading done set failed', e);
+        }
+        // Spire of Trials: arriving on floor N credits the deepest-floor quest.
+        pool.query('SELECT name FROM worlds WHERE id = $1', [entry.worldId])
+          .then((r) => floorFromWorldName(r.rows[0] && r.rows[0].name))
+          .then((floor) => (floor ? recordFloor(pool, character.id, floor) : []))
+          .then((updates) => sendQuestUpdates(ws, updates))
+          .catch((e) => console.error('quest floor tracking failed:', e));
+        // Item rewards earned while out of a world (async: the join has finished
+        // registering the player by the time the first query returns).
+        deliverPendingRewardItems(ws.userId, character.id);
+        pool.query('SELECT chest_id, reopen_at FROM character_chest_opens WHERE character_id = $1 AND reopen_at > now()', [character.id])
+          .then((r) => {
+            const pl = entry.world.getPlayer(ws.userId);
+            if (!pl) return;
+            if (!pl._chestOpens) pl._chestOpens = new Map();
+            for (const row of (r && r.rows) || []) pl._chestOpens.set(row.chest_id, new Date(row.reopen_at).getTime());
+          })
+          .catch((e) => console.error('chest cooldown load failed:', e));
+        bossGate.loadClearedBosses(pool, character.id).then((set) => { const pl = entry.world.getPlayer(ws.userId); if (pl) { if (!pl._bossCleared) pl._bossCleared = new Set(); for (const id of set) pl._bossCleared.add(id); } }).catch((e) => console.error('boss clears load failed:', e));
+        loadLegacyChoice(pool, character.id).then((lc) => { const pl = entry.world.getPlayer(ws.userId); if (pl) pl.legacyChoice = lc; }).catch((e) => console.error('legacy choice load failed:', e));
         send(ws, {
           type: 'joined', user_id: ws.userId, character_id: character.id, spawn, tickRate: 1000 / tickMs,
+          // Shown as an arrival banner: the place name and the creature level
+          // band authored for this world (null when the world has no band).
+          location: {
+            name: (entry.row && entry.row.name) || null,
+            levelMin: entry.row && Number.isFinite(Number(entry.row.level_min)) ? Number(entry.row.level_min) : null,
+            levelMax: entry.row && Number.isFinite(Number(entry.row.level_max)) ? Number(entry.row.level_max) : null,
+          },
           itemTypes: [...entry.world.weapons.values()],
           // SOMET-329: the element palette. The ONE catalog the client needs —
           // it draws projectiles, trails, blast rings, status tints and impact
@@ -1958,7 +2102,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
               else if (v.specKey === 'ashen_oasis') name = 'Astronomer Zahir';
               else if (v.specKey === 'blackfen') name = 'Shadow Hunter';
               return {
-                villageId: v.id, x: v.questGiverX, y: v.questGiverY,
+                villageId: v.id, villageKey: v.specKey || null, x: v.questGiverX, y: v.questGiverY,
                 name,
                 art: 'quest_giver',
               };
@@ -1978,6 +2122,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
             artDefaults: entry.pointArtDefaults,
           }),
           doorways: entry.compassDoorways || [],
+          questNodes: entry.questNodes.map((n) => ({ ...n, done: questNodeDone.includes(n.key) })),
         });
         send(ws, {
           type: 'world_boss_status',
@@ -2032,8 +2177,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // shortcut: it reaches mayJoin as standingOnActivatedWaypoint === false,
         // the same fact standing on an unlit waypoint produces. Refusing here
         // instead would put half the rule outside joinPolicy.js.
-        const travel = await waypointTravelFacts(
+        const travelFacts = await waypointTravelFacts(
           pool, characterId, origin ? origin.id : null, msg.waypointId);
+        // A completed teleport cast stands in for "standing on a lit portal" for
+        // one trip. The ticket only exists server-side (teleportCast.checkCast
+        // issues it), so a forged travel frame cannot supply it.
+        const usedTicket = teleportCast.ticketValid(p, Date.now());
+        const travel = usedTicket && travelFacts.destination
+          ? { ...travelFacts, standingOnActivatedWaypoint: true }
+          : travelFacts;
         const dest = travel.destination;
         // Generic on the wire, and identical to the join refusal below it on
         // purpose: distinguishing "that is not a waypoint" from "you have not
@@ -2056,6 +2208,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
           worldId: dest.worldId, facts, travel,
         });
         if (!verdict.allowed) { refuse(verdict.reason); return; }
+        if (usedTicket) teleportCast.consumeTicket(p);
 
         // The destination waypoint's own pixels, so the player lands on that
         // TILE rather than at a world spawn -- the whole difference between this
@@ -2087,6 +2240,38 @@ function attachAuthority(httpServer, pool, opts = {}) {
         recordVisit(pool, characterId, dest.worldId)
           .catch((e) => console.error('recordVisit (waypoint travel)', e));
       });
+    },
+
+    // Teleport cast (T). The frame carries nothing: whether it may start, how
+    // long it runs and whether it finishes are all decided here. Refusals use
+    // the ordinary error frame (the client shows it as a toast).
+    teleportCast(ws) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      chainOp(ws, 'teleportCast', async () => {
+        const p = entry.world.getPlayer(ws.userId);
+        if (ws.characterId == null || !p) return;
+        if (teleportCast.isCasting(p)) return;
+        const lit = await pool.query(
+          'SELECT 1 FROM character_waypoints WHERE character_id = $1 LIMIT 1', [ws.characterId]);
+        if (lit.rowCount === 0) {
+          send(ws, { type: 'error', message: teleportCast.NO_SAVED_POINT });
+          return;
+        }
+        const poor = teleportCast.resourceRefusal(p);
+        if (poor) {
+          send(ws, { type: 'error', message: poor === 'life' ? 'Not enough life to teleport!' : 'Not enough mana to teleport!' });
+          return;
+        }
+        teleportCast.beginCast(p, Date.now());
+        send(ws, { type: 'teleportCastStarted', durationMs: teleportCast.CAST_MS });
+      });
+    },
+
+    teleportCancel(ws) {
+      const entry = worlds.get(ws.worldId);
+      const p = entry && entry.world.getPlayer(ws.userId);
+      if (p && teleportCast.cancelCast(p)) send(ws, { type: 'teleportCancelled', reason: 'input' });
     },
 
     input(ws, msg) {
@@ -2578,11 +2763,35 @@ function attachAuthority(httpServer, pool, opts = {}) {
         if (!p) return;
         const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
         const village = nearestMerchantVillage(entry.villages, cx, cy, INTERACT_RADIUS);
+
+        // A quest node (herb, obelisk, leader's crystal...) wins when it is
+        // within reach and at least as close as the merchant post, so a node
+        // standing inside a village is not shadowed by the stall next to it.
+        entry.questNodes = entry.questNodes || worldQuestNodes(entry.villages);
+        const near = nearestQuestNode(entry.questNodes, cx, cy, QUEST_NODE_RADIUS);
+        if (near) {
+          const mDist = village && village.merchantX != null
+            ? Math.hypot(village.merchantX - cx, village.merchantY - cy) : Infinity;
+          if (near.distance <= mDist) {
+            const updates = await recordNode(pool, ws.characterId, near.node.group, near.node.key);
+            if (updates.length) {
+              send(ws, { type: 'questNode', key: near.node.key, done: true, name: near.node.name });
+              sendQuestUpdates(ws, updates);
+            } else {
+              send(ws, { type: 'error', message: `${near.node.name}: nothing to do here right now (no active quest needs it, or you already used it).` });
+            }
+            return;
+          }
+        }
+
         if (!village) { send(ws, { type: 'error', message: 'no merchant nearby' }); return; }
         // ws.userId, not ws.characterId: merchant_stock.seller_user_id is a
         // users.id and buyback is account-scoped (SOMET-280 — see fetchShop).
         const shop = await fetchShop(pool, village.id, ws.userId, ws.characterClassName);
-        send(ws, { type: 'shop', villageId: village.id, catalog: shop.catalog, buyback: shop.buyback });
+        // Show the price buyStock will actually charge (Act IV legacy discount).
+        const legacy = await loadLegacyChoice(pool, ws.characterId);
+        const priced = (rows) => (legacy ? rows.map((x) => ({ ...x, price: vendorBuyPrice(x.price, legacy) })) : rows);
+        send(ws, { type: 'shop', villageId: village.id, catalog: priced(shop.catalog), buyback: priced(shop.buyback) });
       });
     },
 
@@ -2617,7 +2826,19 @@ function attachAuthority(httpServer, pool, opts = {}) {
           affixPool: entry.affixPool || [],
           itemTypes: entry.world.weapons,
         });
-        if (!result.ok) { send(ws, { type: 'error', message: result.reason }); return; }
+        if (!result.ok) {
+          const left = Number(result.reopenInMs);
+          if (left > 0 && chest.kind === 'vault') {
+            // Keep our copy of the cooldown honest too (it may predate this session).
+            if (!p._chestOpens) p._chestOpens = new Map();
+            p._chestOpens.set(chest.id, Date.now() + left);
+            const m = Math.floor(left / 60000), sec = Math.floor((left % 60000) / 1000);
+            send(ws, { type: 'error', message: `This chest is empty for you - it fills again in ${m}:${String(sec).padStart(2, '0')}` });
+          } else {
+            send(ws, { type: 'error', message: result.reason });
+          }
+          return;
+        }
 
         // Final-review fix (SOMET-244 Important #2): openChest now returns
         // full player_items rows ({id, item_type_id, quantity} each), not
@@ -2660,7 +2881,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // this, entry.chests would never show a respawn_at at all, and a
         // chest the sweep later relocks would look permanently 'opened' to
         // an already-connected player until a full world reload.
-        Object.assign(chest, { state: 'opened', openedAt: result.openedAt, respawnAt: result.respawnAt });
+        if (result.personal) {
+          // A vault chest stays as it is for the world; only THIS character's
+          // cooldown starts.
+          if (chest.state === 'locked' || chest.state === 'opened') chest.state = 'unlocked';
+          if (!p._chestOpens) p._chestOpens = new Map();
+          p._chestOpens.set(chest.id, Date.now() + result.reopenInMs);
+        } else {
+          Object.assign(chest, { state: 'opened', openedAt: result.openedAt, respawnAt: result.respawnAt });
+        }
         // openChest's own transaction may have flipped state locked ->
         // unlocked -> opened in one shot (the guard-dead check folds the
         // unlock into the same call) -- either way this chest's `state` on
@@ -2698,6 +2927,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         }
         send(ws, {
           type: 'chestOpened', chestId: chest.id, items: result.items,
+          ...(result.personal ? { reopenInMs: result.reopenInMs } : {}),
           awarded: result.awarded, leveledUp: result.leveledUp, newLevel: result.newLevel,
         });
         // Separate progression frame, matching the kill path's own frame
@@ -3205,6 +3435,18 @@ function attachAuthority(httpServer, pool, opts = {}) {
             worldRow: entry.row, links: entry.links, now, cdUntil: p._doorwayCdUntil,
           });
           if (t) {
+            // Spire boss gate: the east door of a boss floor stays shut until
+            // that boss is beaten. Blocked here, before anything is committed.
+            const fws = entry.sockets.get(p.userId);
+            const fwd = entry.links && entry.links.get('E');
+            if (!bossGate.mayPass({
+              gated: bossGate.isGatedWorld(entry.row), worldId: entry.worldId, toWorldId: t.toWorldId,
+              forwardTo: fwd ? fwd.toWorldId : null, cleared: p._bossCleared, isAdmin: !!(fws && fws.role === 'admin'),
+            })) {
+              p._doorwayCdUntil = now + 1500;
+              if (fws) send(fws, { type: 'announcement', text: bossGate.sealedMessage(entry.row) });
+              continue;
+            }
             p._doorwayCdUntil = now + 1500;                       // suppress duplicate sends during reconnect
             pendingArrivals.set(p.characterId, {
               worldId: t.toWorldId, x: t.arriveX, y: t.arriveY,
@@ -3323,6 +3565,20 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // session per waypoint re-walked. That is cheaper than the query priming
       // would need, and character_waypoints' composite primary key -- not this
       // latch -- is what actually makes a repeat harmless.
+      // Post bosses of world tier (the Spire's Floor 60 gate): phase shields + ward.
+      dungeonBosses.tickEndurance(entry.worldId, Date.now());
+      // Teleport casts in progress: interrupt on movement or damage, finish at
+      // 2.5s. Runs for every player each tick; a player with no cast costs one
+      // property read.
+      for (const p of entry.world.players.values()) {
+        if (!p._teleportCast) continue;
+        const outcome = teleportCast.checkCast(p, Date.now());
+        if (!outcome) continue;
+        const tws = entry.sockets.get(p.userId);
+        if (!tws) continue;
+        if (outcome === 'ready') send(tws, { type: 'teleportReady', ticketMs: teleportCast.TICKET_MS });
+        else send(tws, { type: 'teleportCancelled', reason: outcome });
+      }
       if (entry.waypoints && entry.waypoints.size) {
         for (const p of entry.world.players.values()) {
           const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
@@ -3854,6 +4110,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // 'pong' event (observable via `worlds.get(id).sockets`) between calls
     // rather than sleeping a guessed duration.
     _heartbeatSweep: heartbeatSweep,
+    // Quest item rewards (routes/questsRoutes.js): drop an item at a live player's feet.
+    dropRewardItem: dropQuestRewardItem,
+    setPlayerLegacy: (userId, choice) => { const e = [...worlds.values()].find((w) => w.world.getPlayer(String(userId))); const p = e && e.world.getPlayer(String(userId)); if (p) p.legacyChoice = choice || null; return !!p; },
     // Test seam, same reasoning as _heartbeatSweep above: run one field
     // chest respawn pass synchronously (and await its completion, unlike the
     // real itemSweepTimer's fire-and-forget call) instead of waiting for or

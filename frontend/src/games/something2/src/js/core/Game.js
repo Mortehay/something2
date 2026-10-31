@@ -58,9 +58,11 @@ import { createSkillVisual, updateSkillVisuals, pruneSkillVisuals } from "./skil
 import { API_URL } from "../../../../../config.js";
 import { GameArt } from "../systems/gameArt.js";
 import { fetchGameArt } from "../net/gameArtClient.js";
-import { fetchAllQuests, fetchCharacterQuests, startQuest, completeQuest } from "../net/questsClient.js";
+import { fetchAllQuests, fetchCharacterQuests, startQuest, completeQuest, abandonQuest, fetchQuestRoute } from "../net/questsClient.js";
 import { findWorldBossCreature } from "./worldBossMatch.js";
 import { EntityAnimState, noteFrameEvents } from "../systems/entityAnimState.js";
+import { loadUiPrefs, saveUiPrefs, normalizeUiPrefs } from "./uiPrefs.js";
+import { questMarkerFor, villageMarkers } from "./questMarkers.js";
 
 // How long the "out of ammo" HUD flash stays up after the server's `noammo`
 // frame arrives.
@@ -100,6 +102,12 @@ const DRAG_THRESHOLD_PX = 4;
 // work out how to dismiss.
 const INSPECT_PIN_MS = 6000;
 
+// Healing up to this many HP at once is passive regeneration noise: no floating
+// text. Anything above it (a potion, a heal spell) is shown.
+export const MIN_HEAL_TEXT = 5;
+// `threshold` is the player's own setting (uiPrefs.minHealText); 5 by default.
+export const shouldShowHealText = (heal, threshold = MIN_HEAL_TEXT) => heal > threshold;
+
 export const DEFAULT_KEYBINDS = {
     slot1: '1',
     slot2: '2',
@@ -119,6 +127,7 @@ export const DEFAULT_KEYBINDS = {
     bank: 'b',
     openChest: 'f',
     pickup: 'g',
+    teleport: 't',
 };
 
 export function getMouseKeyNames(button) {
@@ -342,6 +351,7 @@ export class Game {
         this.gemShopSelectedGemId = null;
         this.skillMerchants = [];
         this.questGivers = [];
+        this.questNodes = [];
         // SOMET-297. Empty until a `joined` frame arrives, and reset here on
         // the same line merchants is -- both are per-world join payload.
         this.landmarks = [];
@@ -402,12 +412,46 @@ export class Game {
         // feedback at all. {message, expiresAt} in performance.now() units;
         // null when nothing is showing. See _showToast / onError below.
         this.toast = null;
+        // Arrival banner: {name, levelText, startedAt, expiresAt} (performance.now()).
+        this.locationBanner = null;
+        // Display preferences (settings tab): banner on/off, heal-text threshold, tracker width.
+        this.uiPrefs = loadUiPrefs();
+        // Teleport cast in progress: {startedAt, durationMs} (performance.now()).
+        this.teleportCast = null;
+        this.teleportPending = null;
+    }
+
+    // Settings tab: apply and persist display preferences.
+    setUiPrefs(next) {
+        this.uiPrefs = normalizeUiPrefs(next);
+        saveUiPrefs(this.uiPrefs);
+        if (!this.uiPrefs.showLocationBanner) this.locationBanner = null;
+    }
+
+    // "Thornbriar Reach / Monsters: level 3-9" for a few seconds on entering a world.
+    _announceLocation(loc) {
+        if (!loc || !loc.name || (this.uiPrefs && this.uiPrefs.showLocationBanner === false)) { this.locationBanner = null; return; }
+        const lo = Number.isFinite(loc.levelMin) ? loc.levelMin : null;
+        const hi = Number.isFinite(loc.levelMax) ? loc.levelMax : null;
+        let levelText = null;
+        if (lo != null && hi != null) levelText = lo === hi ? `Monsters: level ${lo}` : `Monsters: level ${lo}-${hi}`;
+        else if (lo != null) levelText = `Monsters: level ${lo}+`;
+        const now = performance.now();
+        this.locationBanner = { name: String(loc.name), levelText, startedAt: now, expiresAt: now + 5000 };
     }
 
     // Show `message` for `durationMs`, then let it clear on its own — no
     // queueing; a newer toast simply replaces whatever was showing.
     _showToast(message, durationMs = 3000) {
         this.toast = { message, expiresAt: performance.now() + durationMs };
+    }
+
+    // ~40 call sites (quest log, skills, shops, gems) call `this.showToast`
+    // behind an `if (this.showToast)` guard, but only `_showToast` existed, so
+    // none of those messages ever appeared. Tests still override this per
+    // instance, which keeps working.
+    showToast(message, durationMs) {
+        this._showToast(message, durationMs);
     }
 
     // Spawn floating combat / resource text (Damage numbers, Mana restore, Heals, Stamina)
@@ -444,6 +488,70 @@ export class Game {
     // broken at exactly the moment it worked.
     setOnWaypointActivated(cb) {
         this.onWaypointActivated = cb;
+    }
+
+    // WaypointTravel.jsx registers this to open its list when a teleport cast
+    // completes (the server then lets ONE trip start from anywhere).
+    setOnTeleportReady(cb) {
+        this.onTeleportReady = cb;
+    }
+
+    // T: ask the server to start the 2.5s teleport cast. The bar only starts when
+    // the server confirms (teleportCastStarted); a refusal ("no saved point", not
+    // enough mana) arrives as an ordinary error toast.
+    startTeleportCast() {
+        if (!this.authorityClient || this.teleportCast || this.teleportPending) return false;
+        if (this._otherPanelOpen()) return false;
+        this.teleportPending = performance.now();
+        return this.authorityClient.sendTeleportCast() !== false;
+    }
+
+    // Fades out the rising cast sound, if one is playing.
+    _stopCastCue() {
+        if (this._castStop) { try { this._castStop(); } catch { /* already stopped */ } }
+        this._castStop = null;
+    }
+
+    cancelTeleportCast() {
+        const was = !!this.teleportCast || !!this.teleportPending;
+        if (this.teleportCast) {
+            this._stopCastCue();
+            if (this.audio) this.audio.playCue('cast-cancel');
+        }
+        // A cancel that beats the server's "started" answer is replayed when it
+        // arrives (the server handles start on a chain and cancel immediately).
+        this._teleportAborted = !!this.teleportPending && !this.teleportCast;
+        this.teleportCast = null;
+        this.teleportPending = null;
+        if (was && this.authorityClient) this.authorityClient.sendTeleportCancel();
+    }
+
+    _onTeleportFrame(msg) {
+        this.teleportPending = null;
+        if (msg.type === 'teleportCastStarted' && this._teleportAborted) {
+            this._teleportAborted = false;
+            if (this.authorityClient) this.authorityClient.sendTeleportCancel();
+            return;
+        }
+        this._teleportAborted = false;
+        if (msg.type === 'teleportCastStarted') {
+            const now = performance.now();
+            this.teleportCast = { startedAt: now, durationMs: Number(msg.durationMs) || 2500 };
+            this._stopCastCue();
+            this._castStop = this.audio ? this.audio.playCue('cast-start') : null;
+        } else if (msg.type === 'teleportReady') {
+            this.teleportCast = null;
+            this._stopCastCue();
+            if (this.audio) this.audio.playCue('cast-ready');
+            if (this.onTeleportReady) this.onTeleportReady(msg);
+        } else if (msg.type === 'teleportCancelled') {
+            const had = !!this.teleportCast;
+            this.teleportCast = null;
+            this._stopCastCue();
+            if (had && this.audio) this.audio.playCue('cast-cancel');
+            const why = { moved: 'you moved', hurt: 'you took damage', poor: 'not enough mana', input: null }[msg.reason];
+            if (had && why) this._showToast(`Teleport interrupted: ${why}`);
+        }
     }
 
     // Ask the authority to move this character to a waypoint. Returns whether
@@ -583,6 +691,8 @@ export class Game {
         this.state = "playing";
         this.chunked = true;
         this.worldId = worldId;
+        this.questRoute = null; this._questRouteSig = null;
+        if (this.renderSystem) this.renderSystem.questRoute = null;
         // Game audio (spec §3). One engine per Game; a re-entry (new world)
         // swaps its world rather than building a second AudioContext.
         if (!this.audio) {
@@ -724,6 +834,7 @@ export class Game {
         this.merchants = [];
         this.skillMerchants = [];
         this.questGivers = [];
+        this.questNodes = [];
         // SOMET-297. Empty until a `joined` frame arrives, and reset here on
         // the same line merchants is -- both are per-world join payload.
         this.landmarks = [];
@@ -783,7 +894,10 @@ export class Game {
                     this.merchants = Array.isArray(msg.merchants) ? msg.merchants : [];
                     this.gemMerchants = Array.isArray(msg.gemMerchants) ? msg.gemMerchants : [];
                     this.skillMerchants = Array.isArray(msg.skillMerchants) ? msg.skillMerchants : [];
+                    this._announceLocation(msg.location);
                     this.questGivers = Array.isArray(msg.questGivers) ? msg.questGivers : [];
+                    this.questNodes = Array.isArray(msg.questNodes) ? msg.questNodes : [];
+                    this.loadQuests({ silent: true });
                     this.landmarks = Array.isArray(msg.landmarks) ? msg.landmarks : [];
                     this.doorways = Array.isArray(msg.doorways) ? msg.doorways : [];
                     this.banks = Array.isArray(msg.banks) ? msg.banks : [];
@@ -847,6 +961,8 @@ export class Game {
                 // Kill XP / level-up / death / allocate / respec pushes. The
                 // whole body is Game._applyProgressionFrame -- see there.
                 onProgression: (msg) => this._applyProgressionFrame(msg),
+                onQuestProgress: (msg) => this._applyQuestProgress(msg),
+                onQuestNode: (msg) => this._applyQuestNode(msg),
                 // SOMET-372. Both handlers are one line each on purpose: the
                 // rules they carry (whole-list replacement, and the item-shape
                 // mapping openChest needs) live in core/worldChests.js, where
@@ -935,7 +1051,8 @@ export class Game {
                     this.setState('kicked');
                     if (this.authorityClient) this.authorityClient.disconnect();
                 },
-                onTransition: (msg) => { if (this.onTransition) this.onTransition(msg); },
+                onTransition: (msg) => { this.teleportCast = null; this.teleportPending = null; if (this.onTransition) this.onTransition(msg); },
+                onTeleport: (msg) => this._onTeleportFrame(msg),
                 onWaypointActivated: (msg) => {
                     // Light the marker on the ground the moment the server says
                     // so (SOMET-297). Without this the outline only becomes a
@@ -1042,15 +1159,10 @@ export class Game {
                 y: qg.y,
                 name: qg.name || 'Elder Eldrin',
             })),
-            questMarkers: (this.allQuests || []).map((q) => ({
-                id: q.id,
-                key: q.key,
-                title: q.title,
-                act: q.act,
-                status: q.status || 'available',
-                npcKey: q.start_npc_key,
-                villageKey: q.village_key,
-            })),
+            // One entry per village with something to do: { villageKey, marker }
+            // where marker is "?" (turn in) or "!" (open to take at this level),
+            // by the same rule as the markers above the quest givers.
+            questMarkers: villageMarkers(this.allQuests, (this.progression && this.progression.level) || 1),
         };
     }
 
@@ -1629,7 +1741,10 @@ export class Game {
                 }
             } else if (this.player && this.player.hp !== undefined && mine.hp !== undefined && mine.hp > this.player.hp) {
                 const heal = Math.round(mine.hp - this.player.hp);
-                if (heal > 0) {
+                // Passive regeneration arrives as a trickle of small gains every
+                // few ticks; only a substantial one (> MIN_HEAL_TEXT) is worth a
+                // floating number. HP bar and orb still move for every point.
+                if (shouldShowHealText(heal, this.uiPrefs.minHealText)) {
                     const jitterX = (Math.random() - 0.5) * 12;
                     this.spawnFloatingText(this.player.x + jitterX, this.player.y - 25, `+${heal} HP`, '#4ade80', { size: 16, bold: true });
                 }
@@ -1850,6 +1965,11 @@ export class Game {
             // Expire the toast here (once per frame) rather than on a timer,
             // consistent with how the rest of Game drives state off the loop.
             if (this.toast && performance.now() >= this.toast.expiresAt) this.toast = null;
+            if (this.locationBanner && performance.now() >= this.locationBanner.expiresAt) this.locationBanner = null;
+            // Safety nets for a lost server frame: a bar that outlives its cast by
+            // 2s, or a start request never answered, is dropped.
+            if (this.teleportCast && performance.now() > this.teleportCast.startedAt + this.teleportCast.durationMs + 2000) this.teleportCast = null;
+            if (this.teleportPending && performance.now() - this.teleportPending > 3000) this.teleportPending = null;
             // Expire finished blasts once per frame, on the same clock the
             // ring animation reads.
             const nowMs = performance.now();
@@ -1947,6 +2067,7 @@ export class Game {
                 playerStats: this.characterView() || this.progression || null,
                 skillMerchants: this.skillMerchants,
                 questGivers: this.questGivers,
+                questNodes: this.questNodes,
                 landmarks: this.landmarks,
                 doorways: this.doorways,
                 shop: this.shop,
@@ -1961,6 +2082,9 @@ export class Game {
                 // art name to a drawable def inside renderChunked.
                 entityDefs: this.entityDefs,
                 toast: this.toast,
+                locationBanner: this.locationBanner,
+                trackerWidth: this.uiPrefs.trackerWidth,
+                teleportCast: this.teleportCast,
                 blasts: this.blasts,
                 // SOMET-528. Empty until a wave-granting node is allocated.
                 waves: this.waves || [],
@@ -2005,6 +2129,8 @@ export class Game {
                 activeQuestKey: this.activeQuestKey,
                 legacyChoice: (this.progression && this.progression.legacyChoice) || this.legacyChoice || null,
                 questScroll: this.questLogScrollY || 0,
+                spireProgress: this.spireProgress || null,
+                trackedQuestKey: this.trackedQuestKey || null,
                 // SOMET-493. `enabled` false short-circuits the whole pass in
                 // RenderSystem, so a player who never turns it on pays one
                 // property read per frame.
@@ -2057,6 +2183,19 @@ export class Game {
         };
     }
 
+    // True when a window OTHER than `except` is open. Windows do not stack or
+    // replace each other: while one is open the others refuse to open, so the
+    // player closes it first (Esc, its hotkey, or its X).
+    _otherPanelOpen(except = null) {
+        return (except !== "inventory" && !!this.inventoryOpen)
+            || (except !== "passiveTree" && !!this.passiveTreeOpen)
+            || (except !== "questLog" && !!this.questLogOpen)
+            || (except !== "skills" && !!this.skillsOpen)
+            || (except !== "gemShop" && !!this.gemShopOpen)
+            || (except !== "shop" && !!this.shopOpen)
+            || (except !== "bank" && !!this.bankOpen);
+    }
+
     closeAllPanels(except = null) {
         if (except !== 'inventory') this.closeInventory();
         if (except !== 'passiveTree') this.closePassiveTree();
@@ -2068,6 +2207,7 @@ export class Game {
     }
 
     openInventory(tab = 'inventory') {
+        if (this._otherPanelOpen('inventory')) return;
         this.closeAllPanels('inventory');
         this.inventoryOpen = true;
         this.inventoryTab = tab;
@@ -2085,6 +2225,7 @@ export class Game {
     }
 
     openPassiveTree() {
+        if (this._otherPanelOpen('passiveTree')) return;
         this.closeAllPanels('passiveTree');
         this.passiveTreeOpen = true;
         // Recentred on every open: a player who panned into a far sector last
@@ -2130,7 +2271,7 @@ export class Game {
             .catch(() => { this.passiveRespecCost = null; });
     }
 
-    async loadQuests() {
+    async loadQuests({ silent = false } = {}) {
         try {
             const [quests, charQuests] = await Promise.all([
                 (this.allQuests && this.allQuests.length > 0) ? Promise.resolve(this.allQuests) : fetchAllQuests(),
@@ -2148,6 +2289,8 @@ export class Game {
                 this.legacyChoice = legacyChoice;
                 if (this.progression) this.progression.legacyChoice = legacyChoice;
             }
+            // Spire progress for the quest log footer (highest floor, next boss).
+            this.spireProgress = (charQuests && !Array.isArray(charQuests) && charQuests.spire) || this.spireProgress || null;
 
             const statusMap = new Map();
             for (const cq of charQuestsList) {
@@ -2162,9 +2305,15 @@ export class Game {
 
             this.allQuests = rawQuests.map((q) => {
                 const cq = statusMap.get(q.id) || statusMap.get(q.key);
+                // progress_count / target_count come from the character's rows;
+                // the shared catalog has neither, so dropping them left every
+                // quest at 0/N and the Complete button never appeared.
                 return {
                     ...q,
                     status: (cq && cq.status) ? cq.status : (q.status || 'available'),
+                    progress_count: cq && cq.progress_count != null ? cq.progress_count : (q.progress_count || 0),
+                    target_count: (cq && cq.target_count) || q.target_count || 1,
+                    objective: (cq && cq.objective) || q.objective,
                     progress: cq ? cq.progress : (q.progress || {}),
                 };
             });
@@ -2173,12 +2322,85 @@ export class Game {
                 const activeQ = this.allQuests.find((q) => q.status === 'active') || this.allQuests[0];
                 this.activeQuestKey = activeQ.key;
             }
+            this._refreshQuestMarkers();
+            this._refreshQuestRoute();
         } catch (err) {
-            if (this.showToast) this.showToast(`Quest Log: ${err.message}`);
+            if (!silent) this.showToast(`Quest Log: ${err.message}`);
+        }
+    }
+
+    // "?" over a quest giver when one of ITS village's quests can be turned in, else
+    // "!" when one is open to take at the current level.
+    _refreshQuestMarkers() {
+        const all = this.allQuests || [];
+        const level = (this.progression && this.progression.level) || 1;
+        const markerFor = (quests) => questMarkerFor(quests, level);
+        for (const qg of (this.questGivers || [])) {
+            // A giver speaks for the quests of its own village; when none are
+            // authored for it (a village the quest catalogue does not name) it
+            // falls back to the whole list rather than going silent.
+            const mine = qg.villageKey ? all.filter((q) => q.village_key === qg.villageKey) : [];
+            qg.marker = markerFor(mine.length ? mine : all);
+        }
+    }
+
+    // Ask the server how far the tracked quest's destination is (summed over
+    // every map on the way). Re-asked only when something that changes the answer
+    // changes (quest, its state, the world), never per frame; the HUD keeps the
+    // live total itself from the player's position.
+    _refreshQuestRoute(force = false) {
+        const quests = this.allQuests || [];
+        const q = quests.find((x) => x.key === this.trackedQuestKey)
+            || quests.find((x) => x.status === 'active');
+        const setRoute = (route) => {
+            this.questRoute = route;
+            if (this.renderSystem) this.renderSystem.questRoute = route;
+        };
+        if (!q || !this.characterId || !this.worldId || !this.player) {
+            this._questRouteSig = null;
+            setRoute(null);
+            return;
+        }
+        const met = (q.progress_count || 0) >= (q.target_count || 1);
+        const sig = `${q.key}|${q.status}|${met}|${this.worldId}`;
+        if (!force && sig === this._questRouteSig) return;
+        this._questRouteSig = sig;
+        const cx = (this.player.x || 0) + (this.player.width || 0) / 2;
+        const cy = (this.player.y || 0) + (this.player.height || 0) / 2;
+        fetchQuestRoute(this.characterId, q.key, this.worldId, cx, cy).then((route) => {
+            if (this._questRouteSig !== sig) return; // superseded while in flight
+            setRoute(route && route.ok !== false ? { ...route, questKey: q.key } : null);
+        });
+    }
+
+    // The server accepted a use of a quest node: dim it so the player can see
+    // it is spent (the progress toast arrives as a separate questProgress).
+    _applyQuestNode(msg) {
+        const node = (this.questNodes || []).find((n) => n.key === (msg && msg.key));
+        if (node) node.done = true;
+    }
+
+    // The server counted a kill toward one or more active quests. Patch the
+    // cached list in place (so an open log moves live) and tell the player
+    // when an objective is met, which is the moment they can turn it in.
+    _applyQuestProgress(msg) {
+        const updates = (msg && Array.isArray(msg.updates)) ? msg.updates : [];
+        for (const u of updates) {
+            const q = (this.allQuests || []).find((x) => x.key === u.key);
+            if (q) q.progress_count = u.progress;
+            this._refreshQuestMarkers();
+            // Hunting grounds drift as creatures die: re-ask every 5 kills, and when done.
+            this._refreshQuestRoute(u.progress % 5 === 0 || u.progress >= u.target);
+            if (u.progress >= u.target) {
+                this.showToast(`✔ Objective complete: ${u.title} — turn it in (J)`, 4000);
+            } else if (u.progress === 1 || u.progress % 5 === 0) {
+                this.showToast(`${u.title}: ${u.progress}/${u.target}`, 1800);
+            }
         }
     }
 
     openQuestLog() {
+        if (this._otherPanelOpen('questLog')) return;
         this.closeAllPanels('questLog');
         this.questLogOpen = true;
         return this.loadQuests();
@@ -2189,6 +2411,7 @@ export class Game {
     }
 
     openSkills() {
+        if (this._otherPanelOpen('skills')) return;
         this.closeAllPanels('skills');
         this.skillsOpen = true;
         if (!this.className && !this.passiveStartClass) {
@@ -2197,11 +2420,13 @@ export class Game {
     }
 
     openGemShop() {
+        if (this._otherPanelOpen('gemShop')) return;
         this.closeAllPanels('gemShop');
         this.gemShopOpen = true;
     }
 
     openShop(msg = null) {
+        if (this._otherPanelOpen('shop')) return;
         this.closeAllPanels('shop');
         if (msg) {
             this.shop = { villageId: msg.villageId, catalog: msg.catalog || [], buyback: msg.buyback || [] };
@@ -2211,6 +2436,7 @@ export class Game {
     }
 
     openBank(msg = null) {
+        if (this._otherPanelOpen('bank')) return;
         this.closeAllPanels('bank');
         if (msg) {
             this.bank = {
@@ -2434,7 +2660,7 @@ export class Game {
             if (!this.className && !this.passiveStartClass) {
                 fetchStartClass().then((name) => { if (name) { this.className = name; this.passiveStartClass = name; } }).catch(() => {});
             }
-            this.skillsOpen = true;
+            if (!this._otherPanelOpen("skills")) this.skillsOpen = true;
             if (this.showToast) this.showToast(`Slot ${slotNum} is empty — select a skill`);
             return;
         }
@@ -2957,6 +3183,7 @@ export class Game {
             // Account chest (SOMET-310) ('b')
             if (matchesBind('bank', 'b') && this.state === 'playing' && this.chunked && !e.repeat) {
                 if (this.bankOpen) { this.bankOpen = false; return; }
+                if (this._otherPanelOpen('bank')) return;
                 this.closeAllPanels('bank');
                 if (this.authorityClient) this.authorityClient.sendOpenBank();
                 return;
@@ -2966,6 +3193,19 @@ export class Game {
             if (matchesBind('openChest', 'f') && this.state === 'playing' && this.chunked && !e.repeat
                 && !this.inventoryOpen && !this.shopOpen && !this.bankOpen) {
                 if (this.authorityClient) this.authorityClient.sendOpenChest();
+                return;
+            }
+
+            // Teleport cast. T starts it; ANY other (non-modifier) key interrupts it,
+            // movement keys included. The server enforces the same rules on its
+            // own (movement, damage, 2.5s clock) -- this is just the immediate
+            // half of "pressing other keys cancels".
+            const isModifierKey = key === 'shift' || key === 'control' || key === 'alt' || key === 'meta';
+            const isTeleportKey = matchesBind('teleport', 't');
+            if (this.teleportCast && !isModifierKey && !isTeleportKey) this.cancelTeleportCast();
+            if (isTeleportKey && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat
+                && this.state === 'playing' && this.chunked) {
+                this.startTeleportCast();
                 return;
             }
 
@@ -3078,6 +3318,8 @@ export class Game {
             // See the same call in _keydownHandler: a click is also a valid
             // user-activation to resume a still-suspended AudioContext.
             if (this.audio) this.audio.unlock();
+            // Any click (attack, skill, UI) interrupts a teleport cast.
+            if (this.teleportCast) this.cancelTeleportCast();
             if (e.button !== 0 && e.button !== 1 && e.button !== 2) return;
             if (this.state !== 'playing' || !this.chunked || !this.authorityClient) return;
             // Locate the press by its own event and keep the tracked cursor in
@@ -3193,6 +3435,12 @@ export class Game {
                         this.closeQuestLog();
                         return;
                     }
+                    if (hit.kind === 'quest_toggle_track') {
+                        this.trackedQuestKey = hit.questKey;
+                        this._refreshQuestRoute(true);
+                        this.showToast('📌 Tracking: ' + (((this.allQuests || []).find((q) => q.key === hit.questKey) || {}).title || hit.questKey));
+                        return;
+                    }
                     if (hit.kind === 'selectquest') {
                         this.activeQuestKey = hit.key;
                         return;
@@ -3205,6 +3453,13 @@ export class Game {
                         }).catch((err) => {
                             if (this.showToast) this.showToast(`❌ ${err.message}`);
                         });
+                        return;
+                    }
+                    if (hit.kind === 'quest_abandon') {
+                        abandonQuest(this.characterId, hit.questId || hit.questKey).then(() => {
+                            this.openQuestLog();
+                            this.showToast('Quest abandoned.');
+                        }).catch((err) => this.showToast(`❌ ${err.message}`));
                         return;
                     }
                     if (hit.kind === 'quest_complete') {
@@ -3222,10 +3477,15 @@ export class Game {
                                 if (r.gold) rewardMsg += ` +${r.gold}g`;
                                 if (r.exp) rewardMsg += ` +${r.exp} EXP`;
                                 if (r.passive_points) rewardMsg += ` +${r.passive_points} Pt`;
+                                if (res.itemDelivered === false && r.item) rewardMsg += ` (item ${r.item}: delivered at next join)`;
+                                else if (r.item) rewardMsg += ` +${r.item}`;
                                 if (this.showToast) this.showToast(rewardMsg);
                             } else {
                                 if (this.showToast) this.showToast(`🎉 Quest completed! Rewards collected!`);
                             }
+                            // The server paid XP / passive points straight to the
+                            // database; re-read the bundle so the HUD and sheet agree.
+                            this._refreshProgressionBundle();
                             this.openQuestLog();
                         }).catch((err) => {
                             if (this.showToast) this.showToast(`❌ ${err.message}`);
@@ -3248,7 +3508,7 @@ export class Game {
                             this.legacyChoice = choice;
                             if (this.progression) this.progression.legacyChoice = choice;
                             this.openQuestLog();
-                            const desc = choice === 'city_restoration' ? '🏛️ City Restoration (-15% prices)' : '⚡ Elemental Surge (+15% MF / +20% Mining)';
+                            const desc = choice === 'city_restoration' ? '🏛️ City Restoration (-15% prices)' : '⚡ Elemental Surge (+15% MF / +20% Gold)';
                             if (this.showToast) this.showToast(`👑 Permanent Legacy Chosen: ${desc}!`);
                         }).catch((err) => {
                             if (this.showToast) this.showToast(`❌ ${err.message}`);
@@ -3450,6 +3710,7 @@ export class Game {
             }
             if (matchesThisMouse('bank', 'b')) {
                 if (this.bankOpen) { this.bankOpen = false; return; }
+                if (this._otherPanelOpen('bank')) return;
                 this.closeAllPanels('bank');
                 if (this.authorityClient) this.authorityClient.sendOpenBank();
                 return;

@@ -4,6 +4,7 @@
 const { CREATURE_SIZE } = require('./creatures');
 const { hasFreeSlot } = require('./items');
 const { rollRarity } = require('./rarity.js');
+const { legacyMagicFind, legacyGoldAmount } = require('../services/legacyEffects.js');
 const { rollItemInstance } = require('./affixes.js');
 const { awardXp, loadProgression } = require('../services/progressionStore.js');
 const { xpForKill } = require('../services/playerStats.js');
@@ -150,12 +151,19 @@ async function commitCreatureDeath(pool, entry, creatureId, {
       awarded = award.awarded;
     }
 
+    // The killer's Act IV legacy (Elemental Surge: magic find + gold), read off
+    // the LIVE player: it is loaded at join and updated when a quest sets it, so
+    // a kill costs no extra query (progression_kill_xp pins the statement count).
+    const killer = killerUserId == null ? null : entry.world.getPlayer(killerUserId);
+    const legacy = (killer && killer.legacyChoice) || null;
     await spawnDrops(client, entry, dead, {
-      rng, ttlMs, rarityAnchors, affixPool,
+      rng, ttlMs, rarityAnchors, affixPool, legacy,
     });
     await client.query('COMMIT');
     return {
       awarded, leveledUp, newLevel, progression, killerUserId,
+      // What died and who earned it, for quest tracking (server.js).
+      type: dead.type, killerCharacterId,
     };
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -175,6 +183,7 @@ async function spawnDrops(pool, entry, dead, {
   rng = Math.random, ttlMs = 180000,
   rarityAnchors = (entry && entry.rarityAnchors) || null,
   affixPool = (entry && entry.affixPool) || [],
+  legacy = null,
 } = {}) {
   // world_creatures.type stores the entity type NAME; creature_drops keys on
   // entity_type_id. entry.creatureTypeIds is built at world load, so this costs
@@ -213,7 +222,9 @@ async function spawnDrops(pool, entry, dead, {
 
   // High tier weapons and armor drop from creatures in the wild based on level
   const cLevel = Math.min(150, Math.max(1, Math.round(Number(dead.level)) || 1));
-  const gearRollChance = 0.30;
+  // 30% unless the world entry says otherwise (tests that pin an exact drop set
+  // it to 0 so the wild-gear roll cannot add an item to their count).
+  const gearRollChance = (entry && Number.isFinite(entry.gearRollChance)) ? entry.gearRollChance : 0.30;
   if (rng() < gearRollChance) {
     try {
       const gRes = await pool.query(
@@ -286,7 +297,9 @@ async function spawnDrops(pool, entry, dead, {
     for (const typeId of droppedItemTypeIds) {
       // No anchors at all -> white, and NO rng consumed: an entry without a
       // weight table must produce byte-identical drops to the pre-T13 code.
-      const rarity = rarityAnchors ? rollRarity(itemLevel, rarityAnchors, rng) : 'white';
+      const rarity = rarityAnchors
+        ? rollRarity(itemLevel, rarityAnchors, rng, legacyMagicFind(legacy))
+        : 'white';
       const itemType = entry.world && entry.world.weapons
         ? entry.world.weapons.get(typeId) : null;
       const rolled = rollItemInstance({ itemType, itemLevel, rarity, affixPool }, rng);
@@ -327,7 +340,7 @@ async function spawnDrops(pool, entry, dead, {
   // creatures with no gold range of their own.
   const typeRange = (entry.creatureGold && entry.creatureGold.get(dead.type)) || { min: 0, max: 0 };
   const rungRange = (entry.behaviorGold && entry.behaviorGold.get(dead.type)) || { min: 0, max: 0 };
-  const goldAmt = rollGold(typeRange.max > 0 ? typeRange : rungRange, rng);
+  const goldAmt = legacyGoldAmount(rollGold(typeRange.max > 0 ? typeRange : rungRange, rng), legacy);
   if (goldAmt > 0 && entry.goldItemTypeId != null) {
     const gi = await pool.query(
       `INSERT INTO world_items (world_id, item_type_id, x, y, expires_at, quantity)

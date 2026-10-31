@@ -460,7 +460,7 @@ seed-passive-tree:
 #make seed-map SPEC=p5-descent
 seed-map:
 	$(require-spec)
-	$(COMPOSE) exec -T backend sh -c "SPEC=$(SPEC) node scripts/seed-map.js"
+	$(COMPOSE) exec -T backend sh -c "SPEC=$(SPEC) KEEP_ENTRY=$(KEEP_ENTRY) node scripts/seed-map.js"
 
 clear-maps:
 	$(COMPOSE) exec backend node scripts/clear-maps.js
@@ -637,13 +637,13 @@ pi-seed-catalogs:
 
 pi-seed-map:
 	$(require-spec)
-	@bash compose/orangepi/scripts/remote.sh backend sh -c "SPEC=$(SPEC) node scripts/seed-map.js"
+	@bash compose/orangepi/scripts/remote.sh backend sh -c "SPEC=$(SPEC) KEEP_ENTRY=$(KEEP_ENTRY) node scripts/seed-map.js"
 
 pi-reseed-map:
 	$(require-spec)
 	@bash compose/orangepi/scripts/remote.sh backend sh -c "RESEED_SPEC=$(SPEC) node scripts/clear-maps.js"
 	@bash compose/orangepi/scripts/remote.sh backend node scripts/seed-catalogs.js
-	@bash compose/orangepi/scripts/remote.sh backend sh -c "SPEC=$(SPEC) node scripts/seed-map.js"
+	@bash compose/orangepi/scripts/remote.sh backend sh -c "SPEC=$(SPEC) KEEP_ENTRY=$(KEEP_ENTRY) node scripts/seed-map.js"
 
 # --- Interactive -----------------------------------------------------------
 

@@ -204,13 +204,19 @@ test('full vault-chest flow: seed -> guard blocks open -> kill guard -> open gra
       assert.equal(Number(progression.rows[0].experience), opened.awarded, 'the persisted XP must match the amount openChest reported');
 
       const chestState = await pool.query('SELECT state FROM world_chests WHERE id = $1', [chestId]);
-      assert.equal(chestState.rows[0].state, 'opened');
+      // A vault chest is looted PER CHARACTER: the world row is not marked opened,
+      // this character gets a cooldown row instead.
+      assert.equal(chestState.rows[0].state, 'unlocked');
+      const cooldown = await pool.query('SELECT reopen_at > now() AS pending FROM character_chest_opens WHERE character_id = $1 AND chest_id = $2', [characterId, chestId]);
+      assert.equal(cooldown.rowCount, 1, 'the open must record the character cooldown');
+      assert.equal(cooldown.rows[0].pending, true);
 
       // --- Step: a second open of the same, now-opened chest must be
       // rejected -- and must not grant a second round of items/XP. ---
       const second = await openChest(pool, chestId, characterId);
       assert.equal(second.ok, false);
       assert.equal(second.reason, 'already opened');
+      assert.ok(second.reopenInMs > 0, 'a refused vault open reports how long is left');
 
       const itemsAfterSecond = await pool.query('SELECT count(*)::int AS n FROM player_items WHERE character_id = $1', [characterId]);
       assert.equal(itemsAfterSecond.rows[0].n, 2, 'a rejected second open must not grant any additional items');

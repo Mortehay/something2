@@ -41,7 +41,11 @@ const BIOME_ROSTERS = new Map(STARTER_BIOMES.map((b) => [b.name, b.creature_type
 // specs (which carry no art fields yet) validate against the checked-in
 // catalog, not a live DB query.
 const POINT_ART_TYPES = new Map(POINT_TYPES.map((t) => [t.name, t.point_kind]));
-const BOSS_TIERS = new Map(DUNGEON_BOSSES.map((b) => [b.name, b.boss_tier]));
+// World bosses (boss_tier 'world') may hold a Spire post; bossBalance is their source of truth.
+const BOSS_TIERS = new Map([
+  ...DUNGEON_BOSSES.map((b) => [b.name, b.boss_tier]),
+  ...Object.keys(require('../src/services/bossBalance.js').WORLD_BOSSES).map((n) => [n, 'world']),
+]);
 
 const specFiles = () => fs.readdirSync(MAPS_DIR).filter((f) => f.endsWith('.map.json'));
 

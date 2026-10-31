@@ -90,6 +90,7 @@ async function loadEntry(pool, worldId, goldItemTypeId = null) {
       worldId,
       goldItemTypeId,
       creatureTypeIds,
+      gearRollChance: 0, // exact drop counts: keep the wild-gear roll out of it
       creatureGold,
       behaviorGold,
       behaviorDrops,

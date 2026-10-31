@@ -3,7 +3,7 @@ import styled from 'styled-components';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { authHeaders, apiFetch } from './src/js/net/auth.js';
-import { buildTravelList, REASON } from './waypointTravel.js';
+import { buildTravelList, splitTravelTabs, lastSpireCheckpoint, REASON } from './waypointTravel.js';
 import { shouldAutoOpen, portalTileOf } from './portalAutoOpen.js';
 import { API_URL } from '../../config.js';
 
@@ -62,6 +62,30 @@ const Card = styled.div`
     margin: 16px 0 6px; font-size: 0.8rem; text-transform: uppercase;
     letter-spacing: 0.06em; color: var(--s2-text-dim);
   }
+`;
+
+const TabBar = styled.div`
+  display: flex; gap: 6px; margin: 8px 0 4px;
+`;
+
+const TabButton = styled.button`
+  flex: 1;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid ${(p) => (p.$active ? 'var(--s2-accent)' : 'var(--s2-border)')};
+  background: ${(p) => (p.$active ? 'var(--s2-accent)' : 'transparent')};
+  color: ${(p) => (p.$active ? 'var(--s2-on-accent)' : 'var(--s2-text-secondary)')};
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+`;
+
+const LastButton = styled.button`
+  display: block; width: 100%; margin: 8px 0 4px; padding: 9px 12px;
+  border-radius: 6px; border: 1px solid var(--s2-accent);
+  background: var(--s2-accent); color: var(--s2-on-accent);
+  font: inherit; font-weight: 700; cursor: pointer;
+  &:disabled { opacity: 0.45; cursor: default; }
 `;
 
 const CloseButton = styled.button`
@@ -172,24 +196,31 @@ function useWaypoints(characterId) {
 export default function WaypointTravel({ gameRef, characterId }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState(null);
+  const [tab, setTab] = useState('main'); // 'main' | 'spire'
   const data = useWaypoints(characterId);
   const queryClient = useQueryClient();
 
-  // T opens the panel. Same guards as the minimap's M: no modifiers (they belong
-  // to other bindings) and never while focus is in a text field.
+  // T no longer opens this panel: it starts the teleport cast (Game.js). The
+  // panel opens when that cast COMPLETES (setOnTeleportReady below), or on
+  // stepping onto a portal (auto-open further down).
   const openRef = useRef(open);
   useEffect(() => { openRef.current = open; });
+
+  // After a completed cast the server lets one trip start from anywhere, so
+  // every lit portal is selectable for a while. The client only mirrors that to
+  // draw the rows; the server re-checks its own ticket on the travel frame.
+  const [teleportUntil, setTeleportUntil] = useState(0);
   useEffect(() => {
-    const onKey = (e) => {
-      const isT = (e.key || '').toLowerCase() === 't' || e.code === 'KeyT';
-      if (!isT || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
-      const tag = (e.target && e.target.tagName) || '';
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      setOpen(!openRef.current);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
+    const g = gameRef.current;
+    if (!g || !g.setOnTeleportReady) return undefined;
+    g.setOnTeleportReady((msg) => {
+      setTeleportUntil(Date.now() + (Number(msg && msg.ticketMs) || 60000));
+      setPos(g.getWaypointSnapshot ? g.getWaypointSnapshot() : null);
+      setOpen(true);
+    });
+    return () => g.setOnTeleportReady(null);
+  }, [gameRef]);
+  const teleportReady = teleportUntil > Date.now();
 
   // Esc closes the panel instead of pausing the game. Capture phase, so it wins
   // over Game's own window keydown handler (bubble) -- copied from Minimap.jsx's
@@ -230,11 +261,27 @@ export default function WaypointTravel({ gameRef, characterId }) {
   // The latch lives in a ref, not in state: it changes on almost every reading
   // and re-rendering the panel for it would be pure waste.
   const prevTileRef = useRef(null);
+  const prevWorldRef = useRef(null);
+  // Set when the player picks a destination: the arrival that follows is the
+  // result of a teleport, not of stepping onto a portal, so it must not pop the
+  // list open again at the other end.
+  const suppressUntilRef = useRef(0);
   useEffect(() => {
     const read = () => {
       const g = gameRef.current;
       const snap = g && g.getWaypointSnapshot ? g.getWaypointSnapshot() : null;
       const tile = portalTileOf(snap ? { x: snap.playerX, y: snap.playerY } : null);
+      // Arriving in a different world is never "stepping onto" its portal: the
+      // old world's tile means nothing there, so forget it and relatch.
+      const worldNow = snap ? snap.worldId : null;
+      if (worldNow !== prevWorldRef.current) {
+        prevWorldRef.current = worldNow;
+        prevTileRef.current = null;
+      }
+      if (Date.now() < suppressUntilRef.current) {
+        prevTileRef.current = tile;
+        return;
+      }
       // The portal of the world the player is standing in, from the list the
       // popup already fetches -- not a second source of truth.
       const portal = (data && Array.isArray(data.waypoints) && snap)
@@ -282,6 +329,8 @@ export default function WaypointTravel({ gameRef, characterId }) {
     // still open across that reads as having failed. A refusal arrives as the
     // authority's own error toast, which is visible with the panel shut.
     setOpen(false);
+    setTeleportUntil(0); // the server spends its ticket on this trip
+    suppressUntilRef.current = Date.now() + 8000;
     g.travelToWaypoint(waypointId);
   }, [gameRef]);
 
@@ -296,9 +345,19 @@ export default function WaypointTravel({ gameRef, characterId }) {
     bossNearbyWaypointId: bossStatus ? bossStatus.nearestWaypointId : null,
     bossName: bossStatus ? bossStatus.bossName : null,
     bossWorldId: bossStatus ? bossStatus.worldId : null,
+    teleportReady,
   });
 
   if (!open) return null;
+
+  // The Spire's checkpoints live on their own tab so they do not push every
+  // other portal off the screen.
+  const tabs = splitTravelTabs(groups);
+  const hasSpire = tabs.spire.length > 0;
+  const activeTab = hasSpire ? tab : 'main';
+  const shown = activeTab === 'spire' ? tabs.spire : tabs.main;
+  // One click to the highest lit Spire checkpoint, when it can be taken now.
+  const lastCheckpoint = activeTab === 'spire' ? lastSpireCheckpoint(tabs.spire) : null;
 
   return (
     <Backdrop onClick={() => setOpen(false)}>
@@ -306,14 +365,40 @@ export default function WaypointTravel({ gameRef, characterId }) {
         <CloseButton aria-label="Close travel" onClick={() => setOpen(false)}>×</CloseButton>
         <h2>Portals</h2>
         <p className="sub">
-          {standingOnActivated
-            ? 'Choose a portal you have lit.'
-            : 'Stand on a portal you have lit to travel from it.'}
+          {teleportReady
+            ? 'Teleport ready — choose where to go.'
+            : standingOnActivated
+              ? 'Choose a portal you have lit.'
+              : 'Stand on a portal you have lit to travel from it, or press T to cast a teleport.'}
         </p>
-        {groups.length === 0 && (
-          <Empty>You have not found any portals yet. Walk onto one to light it.</Empty>
+        {hasSpire && (
+          <TabBar role="tablist">
+            <TabButton type="button" role="tab" aria-selected={activeTab === 'main'} $active={activeTab === 'main'} onClick={() => setTab('main')}>
+              Portals
+            </TabButton>
+            <TabButton type="button" role="tab" aria-selected={activeTab === 'spire'} $active={activeTab === 'spire'} onClick={() => setTab('spire')}>
+              Spire of Trials
+            </TabButton>
+          </TabBar>
         )}
-        {groups.map((g) => (
+        {lastCheckpoint && (
+          <LastButton
+            type="button"
+            disabled={!lastCheckpoint.selectable}
+            onClick={() => lastCheckpoint.selectable && travel(lastCheckpoint.id)}
+            title={lastCheckpoint.selectable ? 'Go to your highest Spire checkpoint' : 'Cast a teleport (T) to use this'}
+          >
+            ⏎ Last checkpoint: Floor {lastCheckpoint.floor}
+          </LastButton>
+        )}
+        {shown.length === 0 && (
+          <Empty>
+            {activeTab === 'spire'
+              ? 'No Spire checkpoints lit yet.'
+              : 'You have not found any portals yet. Walk onto one to light it.'}
+          </Empty>
+        )}
+        {shown.map((g) => (
           <div key={g.worldId}>
             <h3>{g.worldName}</h3>
             {g.entries.map((e) => (

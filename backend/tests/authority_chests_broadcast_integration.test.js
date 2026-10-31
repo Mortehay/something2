@@ -42,7 +42,7 @@ const SPAWN = { x: 500, y: 500 };
 // `chests`: [{ id, x, y, kind, state, guardLevel?, guardCreatureIds? }] --
 // becomes the world-load fetchChests row set (world_chests shape), which
 // mapChestRow turns into entry.chests, exactly like a real chest row would.
-function makePool({ chests = [], pointKindDefaults = [] } = {}) {
+function makePool({ chests = [], pointKindDefaults = [], cooldowns = [] } = {}) {
   const pool = {
     query: async (sql) => {
       if (/FROM worlds WHERE id/i.test(sql)) {
@@ -85,6 +85,7 @@ function makePool({ chests = [], pointKindDefaults = [] } = {}) {
           })),
         };
       }
+      if (/FROM character_chest_opens/i.test(sql)) return { rows: cooldowns };
       if (/SELECT gold FROM users WHERE id/i.test(sql)) return { rows: [{ gold: 0 }] };
       // loadPointKindDefaults (SOMET-582/588). Defaults to no rows, same as
       // this fixture's fall-through did before this branch existed -- tests
@@ -184,6 +185,52 @@ test('a chest state mutated on entry.chests (in place) is reflected on the next 
 
   const next = await nextMsg(ws, 'chests');
   assert.equal(next.chests[0].state, 'unlocked');
+
+  ws.close(); handle.close(); server.close();
+});
+
+// A vault chest is looted per character: the frame a player receives shows it
+// 'opened' (with the time left) only while THEIR cooldown runs.
+test('a vault chest on this character\'s cooldown reads opened in their frame, with the time left', async () => {
+  const reopenAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+  const pool = makePool({
+    chests: [{ id: 'chest-1', x: SPAWN.x, y: SPAWN.y, kind: 'vault', state: 'unlocked', guardLevel: 5 }],
+    cooldowns: [{ chest_id: 'chest-1', reopen_at: reopenAt }],
+  });
+  const { url, handle, server } = await bootWith(pool);
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+
+  // the cooldown is loaded asynchronously after the join; wait for a frame that has it
+  let chest = null;
+  for (let i = 0; i < 20 && !(chest && chest.state === 'opened'); i++) {
+    const msg = await nextMsg(ws, 'chests');
+    chest = msg.chests[0];
+  }
+  assert.equal(chest.state, 'opened');
+  assert.ok(chest.reopenInMs > 9 * 60 * 1000 && chest.reopenInMs <= 10 * 60 * 1000, `reopenInMs ${chest.reopenInMs}`);
+  // the WORLD's copy is untouched
+  assert.equal(handle.worlds.get('w1').chests[0].state, 'unlocked');
+
+  ws.close(); handle.close(); server.close();
+});
+
+test('a vault chest with no cooldown for this character is not opened, and an expired cooldown is ignored', async () => {
+  const expired = new Date(Date.now() - 1000).toISOString();
+  const pool = makePool({
+    chests: [{ id: 'chest-1', x: SPAWN.x, y: SPAWN.y, kind: 'vault', state: 'unlocked', guardLevel: 5 }],
+    cooldowns: [{ chest_id: 'chest-1', reopen_at: expired }],
+  });
+  const { url, handle, server } = await bootWith(pool);
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+  const msg = await nextMsg(ws, 'chests');
+  assert.equal(msg.chests[0].state, 'unlocked');
+  assert.equal(msg.chests[0].reopenInMs, undefined);
 
   ws.close(); handle.close(); server.close();
 });

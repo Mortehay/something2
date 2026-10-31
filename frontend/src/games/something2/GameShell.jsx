@@ -145,7 +145,7 @@ const HELP_SECTIONS = [
     rows: [
       { k: [['E']], d: 'Trade with a village merchant — stand next to the merchant and press E to open the market' },
       { k: [['M']], d: 'Toggle the minimap (top-right corner); click the minimap to expand it' },
-      { k: [['T']], d: 'Travel — while standing on a waypoint you have lit, opens the list of other lit waypoints. Walk onto a waypoint once to light it; ones you have not found are shown but cannot be chosen' },
+      { k: [['T']], d: 'Teleport — hold still for a 2.5s cast (moving, taking damage or pressing another key cancels it; costs mana), then pick any waypoint you have lit. Walk onto a waypoint once to light it' },
     ],
   },
   {

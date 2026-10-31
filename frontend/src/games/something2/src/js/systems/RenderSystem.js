@@ -18,6 +18,8 @@ import { layoutPassiveTree, drawPassiveTree } from "./passiveTreePanel.js";
 import { layoutSkillsPanel, drawSkillsPanel } from "./skillsPanel.js";
 import { layoutGemShopPanel, drawGemShopPanel } from "./gemShopPanel.js";
 import { layoutQuestLog, drawQuestLog } from "./questLogPanel.js";
+import { drawQuestTracker } from "./questTracker.js";
+import { chestView } from "../core/worldChests.js";
 import { isTransformationSkill, getRequiredForm, resolveSkillDamage, checkGemRequirements, getWeaponRequirementName } from "../core/skillsData.js";
 import {
   blastProgress, blastScreenRadiusX, elementColor, auraRingGeometry,
@@ -331,7 +333,7 @@ export class RenderSystem {
     creatures = [], projectiles = [], mana = null, maxMana = null, showMana = true,
     stamina = null, maxStamina = null,
     weaponName = null, inventory = null, inventoryOpen = false, selectedItemId = null, inventoryView = null,
-    groundItems = [], gold = null, toast = null,
+    groundItems = [], gold = null, toast = null, locationBanner = null, teleportCast = null, trackerWidth = 300,
     blasts = [], ammo = null, noAmmoFlash = false, effects = null, vfx = [],
     // SOMET-528. Lingering melee waves; defaults to empty so every existing
     // caller and test renders exactly as before.
@@ -352,6 +354,7 @@ export class RenderSystem {
     skillMerchants = [],
     // Dedicated Quest Giver / Elder NPC
     questGivers = [],
+    questNodes = [],
     // SOMET-310. Same join-frame fixed-world-point shape as `merchants`.
     banks = [], bank = null, bankOpen = false, bankView = null,
     // SOMET-372 -- WORLD chests (guarded, lootable), not the account chest
@@ -399,7 +402,7 @@ export class RenderSystem {
     // Floating Combat & Resource text (Damage numbers, heals, mana/stamina surge)
     floatingTexts = [],
     // Quest Log (hotkey 'J')
-    questLogOpen = false, quests = [], activeQuestKey = null, legacyChoice = null, questScroll = 0, trackedQuestKey = null,
+    questLogOpen = false, quests = [], activeQuestKey = null, legacyChoice = null, questScroll = 0, trackedQuestKey = null, spireProgress = null,
   }) {
     // SOMET-584. Set before anything below resolves art, including the
     // landmark body plan a few lines down.
@@ -524,6 +527,9 @@ export class RenderSystem {
     for (const qg of questGivers) {
       drawables.push({ kind: "questGiver", ref: qg, order: 0, depth: depthKey(qg.x, qg.y) });
     }
+    for (const qn of questNodes) {
+      drawables.push({ kind: "questNode", ref: qn, order: 0, depth: depthKey(qn.x, qn.y) });
+    }
     // Bank posts are the same kind of fixed world point as merchants, and go
     // through the same depth sort — a chest one tile behind the merchant must
     // draw behind them, which a separate later pass would get wrong.
@@ -555,12 +561,17 @@ export class RenderSystem {
       else if (d.kind === "gem_merchant") this.drawGemMerchant(d.ref, player);
       else if (d.kind === "skillMerchant") this.drawSkillMerchant(d.ref, player);
       else if (d.kind === "questGiver") this.drawQuestGiver(d.ref, player);
+      else if (d.kind === "questNode") this.drawQuestNode(d.ref, player);
       else if (d.kind === "bank") this.drawBank(d.ref, player);
       else if (d.kind === "worldchest") this.drawWorldChest(d.ref, player);
       else if (d.kind === "pointart") this.drawPointBody(d.ref.def, d.ref.x, d.ref.y, d.ref.treatment);
       else if (d.kind === "decoration") this.drawEntity(d.ref);
       else this.drawEntity(d.ref, RenderSystem.animKeyFor(d));
     }
+
+    // Teleport cast bar above the local player's head (drawn after the sorted
+    // pass so nothing in the world can cover it).
+    if (teleportCast && player) this.drawTeleportCastBar(teleportCast, player);
 
     // SOMET-584 review round 2 (T9 finding A). The pre-sort drawLandmarks call
     // above (line ~402) drew NOTHING for a `skipBody` landmark -- its art body
@@ -621,6 +632,7 @@ export class RenderSystem {
       hasTrackedQuest,
     });
     if (toast) this.renderToast(toast);
+    if (locationBanner) this.renderLocationBanner(locationBanner);
 
     // Inventory panel overlay (drawn last, on top of the HUD, in raw canvas
     // pixel space — same space Game hit-tests clicks against).
@@ -731,12 +743,14 @@ export class RenderSystem {
         legacyChoice,
         activeQuestKey,
         questScroll,
+        spireProgress,
         trackedQuestKey,
       }, this._questHitAreas);
     }
 
     // Quest Tracker HUD Widget & Waypoint Pointer
     if (hasTrackedQuest) {
+      this.trackerWidth = trackerWidth;
       this._drawQuestTrackerHUD(this.ctx, trackedQuest, player, camera);
     }
 
@@ -2701,6 +2715,84 @@ export class RenderSystem {
     this.ctx.restore();
   }
 
+  // Cast bar over the player's head: fills from 0 to 1 across the cast.
+  // `cast` is {startedAt, durationMs} in performance.now() units. The server
+  // decides when the cast really completes; this is the visual only.
+  drawTeleportCastBar(cast, player) {
+    const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : 0;
+    const frac = Math.max(0, Math.min(1, (now - cast.startedAt) / (cast.durationMs || 2500)));
+    const s = worldToScreen(player.x + (player.width || 0) / 2, player.y + (player.height || 0) / 2);
+    const w = 60, h = 8;
+    const x = Math.round(s.x - w / 2);
+    const y = Math.round(s.y - 78);
+    const ctx = this.ctx;
+    ctx.save();
+    // A glow on the ground that tightens and brightens as the cast fills: a
+    // ring closing in on the caster, plus a soft violet pool under the feet.
+    if (typeof ctx.ellipse === "function") {
+      const ringR = 62 - 34 * frac;
+      const pulse = 0.65 + 0.35 * Math.sin(now * 0.012);
+      ctx.beginPath();
+      ctx.ellipse(s.x, s.y + 26, ringR, ringR * 0.5, 0, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(167, 139, 250, ${0.35 + 0.5 * frac})`;
+      ctx.lineWidth = 2 + 2 * frac;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.ellipse(s.x, s.y + 26, 30, 15, 0, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(139, 92, 246, ${(0.12 + 0.28 * frac) * pulse})`;
+      ctx.fill();
+    }
+    ctx.fillStyle = "rgba(10, 10, 24, 0.85)";
+    ctx.fillRect(x - 1, y - 1, w + 2, h + 2);
+    ctx.fillStyle = "#8b5cf6";
+    ctx.fillRect(x, y, Math.round(w * frac), h);
+    ctx.strokeStyle = "#ddd6fe";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x - 0.5, y - 0.5, w + 1, h + 1);
+    ctx.font = "bold 10px monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "rgba(0,0,0,0.85)";
+    ctx.fillStyle = "#ede9fe";
+    const label = `Teleport ${(frac * (cast.durationMs || 2500) / 1000).toFixed(1)}s`;
+    ctx.strokeText(label, s.x, y - 4);
+    ctx.fillText(label, s.x, y - 4);
+    ctx.restore();
+  }
+
+  // Arrival banner: place name and the monster level band, top-centre, fading
+  // in and out. `banner` is {name, levelText, startedAt, expiresAt} in
+  // performance.now() units; Game clears it once expired.
+  renderLocationBanner(banner) {
+    const FADE_MS = 700;
+    const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : 0;
+    const remaining = banner.expiresAt - now;
+    const age = now - banner.startedAt;
+    if (remaining <= 0) return;
+    const alpha = Math.max(0, Math.min(1, remaining / FADE_MS, age / FADE_MS));
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "rgba(0,0,0,0.85)";
+    ctx.fillStyle = "#f8fafc";
+    ctx.font = "bold 28px serif";
+    ctx.lineWidth = 5;
+    ctx.strokeText(banner.name, GAME_WIDTH / 2, 92);
+    ctx.fillText(banner.name, GAME_WIDTH / 2, 92);
+    if (banner.levelText) {
+      ctx.font = "bold 15px monospace";
+      ctx.lineWidth = 4;
+      ctx.fillStyle = "#fbbf24";
+      ctx.strokeText(banner.levelText, GAME_WIDTH / 2, 116);
+      ctx.fillText(banner.levelText, GAME_WIDTH / 2, 116);
+    }
+    ctx.restore();
+  }
+
   // A small diamond, coloured by the item type's category. The name is drawn
   // only when the player is close enough to actually loot it, so a busy field
   // of drops does not become a wall of text.
@@ -3020,6 +3112,49 @@ export class RenderSystem {
     this.ctx.restore();
   }
 
+  // A quest node (herb, tendril, obelisk, crystal, ...): a glowing marker the
+  // player walks up to and presses E on. Spent nodes are dimmed and quiet.
+  drawQuestNode(qn, player = null) {
+    const s = worldToScreen(qn.x, qn.y);
+    const dx = s.x, dy = s.y;
+    const ctx = this.ctx;
+    const pulse = Math.sin(this.nowMs * 0.005 + qn.x * 0.01) * 0.25 + 0.75;
+    const done = !!qn.done;
+    ctx.save();
+    ctx.globalAlpha = done ? 0.35 : 1;
+    ctx.beginPath();
+    ctx.ellipse(dx, dy + 2, 16, 8, 0, 0, Math.PI * 2);
+    ctx.fillStyle = done ? "rgba(148,163,184,0.25)" : `rgba(56,189,248,${0.35 * pulse})`;
+    ctx.fill();
+    ctx.fillStyle = done ? "#94a3b8" : "#7dd3fc";
+    ctx.strokeStyle = "rgba(0,0,0,0.75)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(dx, dy - 14);
+    ctx.lineTo(dx + 9, dy - 4);
+    ctx.lineTo(dx, dy + 6);
+    ctx.lineTo(dx - 9, dy - 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    if (player && !done) {
+      const pcx = player.x + (player.width || 0) / 2;
+      const pcy = player.y + (player.height || 0) / 2;
+      if (Math.hypot(qn.x - pcx, qn.y - pcy) <= WORLD_CHEST_PROMPT_R) {
+        ctx.globalAlpha = 1;
+        ctx.textAlign = "center";
+        ctx.font = "bold 11px sans-serif";
+        ctx.fillStyle = "#7dd3fc";
+        ctx.strokeStyle = "rgba(0,0,0,0.85)";
+        ctx.lineWidth = 2;
+        const label = `[e] ${qn.name || "Interact"}`;
+        ctx.strokeText(label, dx, dy + 24);
+        ctx.fillText(label, dx, dy + 24);
+      }
+    }
+    ctx.restore();
+  }
+
   // Dedicated Quest Giver / Elder Eldrin NPC in village
   drawQuestGiver(qg, player = null) {
     const s = worldToScreen(qg.x, qg.y);
@@ -3062,19 +3197,8 @@ export class RenderSystem {
 
     const lift = drewArt ? drewArt : r;
 
-    // Floating animated exclamation mark '!'
-    const bob = Math.sin(this.nowMs * 0.005) * 4;
-    const markY = dy - lift - 16 + bob;
-    this.ctx.font = "bold 16px sans-serif";
-    this.ctx.textAlign = "center";
-    this.ctx.textBaseline = "middle";
-    this.ctx.fillStyle = "#fef08a";
-    this.ctx.strokeStyle = "rgba(0,0,0,0.85)";
-    this.ctx.lineWidth = 3;
-    this.ctx.strokeText("!", dx, markY);
-    this.ctx.fillText("!", dx, markY);
-
     // Label: "Elder Eldrin" or "Quest Giver"
+    this.ctx.textAlign = "center";
     this.ctx.font = "bold 12px sans-serif";
     this.ctx.textBaseline = "alphabetic";
     this.ctx.fillStyle = "#fef08a";
@@ -3093,6 +3217,21 @@ export class RenderSystem {
         this.ctx.strokeText("[e] Quests", dx, dy + r + 14);
         this.ctx.fillText("[e] Quests", dx, dy + r + 14);
       }
+    }
+
+    // "!" a quest can be taken, "?" one is ready to turn in (set by Game._refreshQuestMarkers).
+    if (qg.marker) {
+      const bob = Math.sin(this.nowMs * 0.006) * 3;
+      this.ctx.textAlign = "center";
+      this.ctx.font = "bold 22px sans-serif";
+      this.ctx.strokeStyle = "rgba(0,0,0,0.9)";
+      this.ctx.lineWidth = 3;
+      this.ctx.fillStyle = qg.marker === "?" ? "#facc15" : "#fde047";
+      // One marker, above the name label (the label sits at dy - lift - 2).
+      const markY = dy - lift - 20 + bob;
+      this.ctx.textBaseline = "alphabetic";
+      this.ctx.strokeText(qg.marker, dx, markY);
+      this.ctx.fillText(qg.marker, dx, markY);
     }
 
     this.ctx.restore();
@@ -3169,7 +3308,8 @@ export class RenderSystem {
   // second thing to keep in step, and being wrong here costs a hint, not an
   // action.
   drawWorldChest(c, player) {
-    const state = c.state || "locked";
+    const view = chestView(c);
+    const state = view.state;
     const s = worldToScreen(c.x, c.y);
     const dx = s.x, dy = s.y;
     const r = 13;
@@ -3214,7 +3354,7 @@ export class RenderSystem {
     this.ctx.fillStyle = "#fff";
     this.ctx.font = "12px sans-serif";
     this.ctx.textAlign = "center";
-    const label = state === "opened" ? "Looted" : state === "unlocked" ? "Treasure" : "Treasure (guarded)";
+    const label = view.label;
     this.ctx.fillText(label, dx, dy - lift - 6);
     // The hint, only when the player is plausibly close enough for the key to
     // do something, and never on a chest with nothing left in it.
@@ -4600,146 +4740,9 @@ export class RenderSystem {
     return layout;
   }
 
+  // The tracker lives in questTracker.js; this keeps the RenderSystem entry point.
   _drawQuestTrackerHUD(ctx, trackedQuest, player, camera) {
-    if (!ctx || !trackedQuest) return;
-
-    const VILLAGE_COORDS = {
-      sunspire: { col: 32, row: 32, x: 1024, y: 1024, name: "Sunspire Valley" },
-      emberfall: { col: 120, row: 40, x: 3840, y: 1280, name: "Emberfall Volcanic Ridge" },
-      sylvan_haven: { col: 40, row: 120, x: 1280, y: 3840, name: "Sylvan Haven Redwood" },
-      abyssal_tideport: { col: 140, row: 140, x: 4480, y: 4480, name: "Abyssal Tideport" },
-      ashen_oasis: { col: 180, row: 60, x: 5760, y: 1920, name: "Ashen Oasis Ruins" },
-      blackfen: { col: 200, row: 200, x: 6400, y: 6400, name: "Blackfen Abyssal Marsh" },
-    };
-
-    const px = player ? (player.x || (player.col || 32) * 32) : 1024;
-    const py = player ? (player.y || (player.row || 32) * 32) : 1024;
-
-    const loc = VILLAGE_COORDS[trackedQuest.village_key] || VILLAGE_COORDS.sunspire;
-    const distM = Math.max(1, Math.floor(Math.hypot(loc.x - px, loc.y - py) / 32));
-
-    const w = 230;
-    const h = 78;
-    // Positioned in top-left corner with 16px margins, matching game UI button styling
-    const x = 16;
-    const y = 16;
-    const r = 10;
-
-    ctx.save();
-    // Dark glassmorphic card matching game UI panels (e.g. Minimap, HowToButton)
-    ctx.beginPath();
-    if (typeof ctx.roundRect === "function") {
-      ctx.roundRect(x, y, w, h, r);
-    } else {
-      ctx.moveTo(x + r, y);
-      ctx.arcTo(x + w, y, x + w, y + h, r);
-      ctx.arcTo(x + w, y + h, x, y + h, r);
-      ctx.arcTo(x, y + h, x, y, r);
-      ctx.arcTo(x, y, x + w, y, r);
-      ctx.closePath();
-    }
-    ctx.fillStyle = "rgba(15, 15, 26, 0.85)";
-    ctx.fill();
-    ctx.strokeStyle = "#2e2e3e";
-    ctx.lineWidth = 1.2;
-    ctx.stroke();
-
-    // Left accent indicator bar
-    ctx.beginPath();
-    if (typeof ctx.roundRect === "function") {
-      ctx.roundRect(x, y, 4, h, [r, 0, 0, r]);
-    } else {
-      ctx.rect(x, y, 4, h);
-    }
-    ctx.fillStyle = "#38bdf8";
-    ctx.fill();
-
-    ctx.textBaseline = "top";
-
-    // Title label
-    ctx.fillStyle = "#fde047";
-    ctx.font = "bold 11px monospace";
-    ctx.fillText(`📌 TRACKED: Act ${trackedQuest.act}`, x + 12, y + 10);
-
-    // Quest Title
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 12px monospace";
-    const titleText = (ctx.measureText(trackedQuest.title).width > w - 24)
-      ? trackedQuest.title.slice(0, 20) + "…"
-      : trackedQuest.title;
-    ctx.fillText(titleText, x + 12, y + 26);
-
-    // Objective progress
-    const targetCnt = trackedQuest.target_count || 1;
-    const progCnt = trackedQuest.progress_count || 0;
-    ctx.fillStyle = "#60a5fa";
-    ctx.font = "11px monospace";
-    const objRaw = `🎯 ${trackedQuest.objective || trackedQuest.description} (${progCnt}/${targetCnt})`;
-    const objStr = (ctx.measureText(objRaw).width > w - 24)
-      ? objRaw.slice(0, 26) + "…"
-      : objRaw;
-    ctx.fillText(objStr, x + 12, y + 43);
-
-    // Distance and Location
-    ctx.fillStyle = "#a7f3d0";
-    ctx.font = "11px monospace";
-    ctx.fillText(`↗ ${distM}m • ${loc.name}`, x + 12, y + 59);
-
-    // Draw Screen Edge Compass Arrow pointing toward target
-    if (camera && player) {
-      const targetScreen = worldToScreen(loc.x, loc.y);
-      const camScreenX = targetScreen.x - camera.x;
-      const camScreenY = targetScreen.y - camera.y;
-
-      const isOffScreen = camScreenX < 40 || camScreenX > GAME_WIDTH - 40 || camScreenY < 40 || camScreenY > GAME_HEIGHT - 40;
-
-      if (isOffScreen) {
-        const cx = GAME_WIDTH / 2;
-        const cy = GAME_HEIGHT / 2;
-        const angle = Math.atan2(camScreenY - cy, camScreenX - cx);
-
-        const edgeX = cx + Math.cos(angle) * (GAME_WIDTH / 2 - 40);
-        const edgeY = cy + Math.sin(angle) * (GAME_HEIGHT / 2 - 40);
-
-        ctx.translate(edgeX, edgeY);
-        ctx.rotate(angle);
-
-        ctx.beginPath();
-        ctx.moveTo(14, 0);
-        ctx.lineTo(-10, -9);
-        ctx.lineTo(-4, 0);
-        ctx.lineTo(-10, 9);
-        ctx.closePath();
-        ctx.fillStyle = "#f59e0b";
-        ctx.fill();
-        ctx.strokeStyle = "#ffffff";
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-
-        ctx.rotate(-angle);
-        ctx.fillStyle = "#fde047";
-        ctx.font = "bold 11px monospace";
-        ctx.textAlign = "center";
-        ctx.fillText(`📌 ${distM}m`, 0, 18);
-      } else {
-        // Floating 3D Waypoint Pin on-screen
-        const pulse = 0.5 + 0.5 * Math.sin(Date.now() * 0.005);
-        ctx.beginPath();
-        ctx.arc(camScreenX, camScreenY - 30 - pulse * 6, 8, 0, Math.PI * 2);
-        ctx.fillStyle = "#f59e0b";
-        ctx.fill();
-        ctx.strokeStyle = "#ffffff";
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 10px monospace";
-        ctx.textAlign = "center";
-        ctx.fillText("📌", camScreenX, camScreenY - 30 - pulse * 6);
-      }
-    }
-
-    ctx.restore();
+    drawQuestTracker(ctx, trackedQuest, player, camera, { questRoute: this.questRoute, width: this.trackerWidth });
   }
 
   _drawActiveBuffs(activeBuffs, startY = 18) {

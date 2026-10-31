@@ -4,6 +4,7 @@
 // independently, or the two paths drift.
 
 const { effectMagnitude, SHOCK } = require('./effects');
+const { shieldFactor } = require('../services/bossBalance.js');
 
 const MIN_DAMAGE = 1;    // damage floor: nothing is ever fully negated
 const RESIST_CAP = 0.8;  // resistance ceiling: nothing is ever immune
@@ -132,8 +133,31 @@ function applyDamage(target, raw, element, mit = NO_MITIGATION, now = undefined,
   const resist = Number.isFinite(rawResist)
     ? Math.min(RESIST_CAP, Math.max(RESIST_FLOOR, rawResist)) : 0;
   const candidate = raw2 * (1 - resist);
-  const final = Math.max(MIN_DAMAGE, Number.isFinite(candidate) ? candidate : MIN_DAMAGE);
-  target.hp -= final;
+  let final = Math.max(MIN_DAMAGE, Number.isFinite(candidate) ? candidate : MIN_DAMAGE);
+  // The hide of a world boss (bossBalance.DAMAGE_TAKEN): a share of every hit that
+  // survives defense and resistance. Only that boss's creature carries the field.
+  const taken = target.damageTakenMult;
+  if (Number.isFinite(taken) && taken > 0 && taken < 1) final = Math.max(MIN_DAMAGE, final * taken);
+  // A shield (world bosses gain one on entering a phase, see worldBoss.js)
+  // soaks damage before HP does. Only the shield's owner has the field, so for
+  // every player and ordinary creature this is a no-op. The attacker is still
+  // credited the full amount below: breaking a shield is real work.
+  let toHp = final;
+  if (target.shield > 0) {
+    // A boss's shield may be element-locked (shieldWeakTo): the shield "feels"
+    // the hit scaled by shieldFactor, and whatever it cannot absorb spills to HP
+    // in real (unscaled) damage.
+    const f = shieldFactor(target.shieldWeakTo, el);
+    const felt = final * f;
+    if (felt <= target.shield) {
+      target.shield -= felt;
+      toHp = 0;
+    } else {
+      toHp = final - target.shield / f;
+      target.shield = 0;
+    }
+  }
+  target.hp -= toHp;
   if (source && typeof source === 'string' && source.startsWith('p:')) {
     const pUid = source.slice(2);
     if (!target._playerDamage) target._playerDamage = new Map();

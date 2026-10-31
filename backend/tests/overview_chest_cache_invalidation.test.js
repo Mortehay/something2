@@ -101,7 +101,7 @@ function makePool() {
       if (/FROM world_chests c[\s\S]*WHERE c\.world_id = \$1/i.test(sql)) {
         return {
           rows: [{
-            id: 'chest-1', x: SPAWN.x, y: SPAWN.y, kind: 'vault',
+            id: 'chest-1', x: SPAWN.x, y: SPAWN.y, kind: 'field', // field: its open changes the WORLD state (vault chests are per character)
             guard_entity_type_id: 1, guard_level: 5, guard_creature_ids: [],
             state: chestState, opened_at: null, respawn_at: null,
           }],
@@ -110,7 +110,7 @@ function makePool() {
       // openChest's own locked/unlocked read (chestLoot.js).
       if (/FROM world_chests WHERE id = \$1 FOR UPDATE/i.test(sql)) {
         return {
-          rows: [{ id: 'chest-1', state: chestState, kind: 'vault', guard_creature_ids: [], guard_level: 5 }],
+          rows: [{ id: 'chest-1', state: chestState, kind: 'field', guard_creature_ids: [], guard_level: 5 }],
           rowCount: 1,
         };
       }

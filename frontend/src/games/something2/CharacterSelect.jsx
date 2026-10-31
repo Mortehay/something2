@@ -21,8 +21,11 @@ const Panel = styled.div`
      gate was visible and unusable. */
   z-index: 250;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  /* NOT align-items/justify-content: center. Centring a flex item taller than
+     its scroll container pushes the overflow off the TOP edge, where no scrolling
+     can reach it: with a character already listed above the new-character form,
+     the existing character was cut off and unreachable. margin:auto on the card
+     centres it when there is room and pins it to the top when there is not. */
   padding: 2rem;
   overflow-y: auto;
   background: var(--s2-surface, var(--color-grey-50));
@@ -31,6 +34,7 @@ const Panel = styled.div`
 const Card = styled.div`
   width: 100%;
   max-width: 46rem;
+  margin: auto;
   background: var(--color-grey-0);
   border: 1px solid var(--color-grey-200);
   border-radius: 8px;

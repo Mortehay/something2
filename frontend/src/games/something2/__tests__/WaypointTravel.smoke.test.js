@@ -60,12 +60,13 @@ describe('WaypointTravel', () => {
     // binding this component registers.
     const shell = fs.readFileSync(path.join(here, '../GameShell.jsx'), 'utf8');
     expect(shell).toMatch(/\[\['T'\]\]/);
-    // The binding is layout-independent since bfd67ab: it accepts the letter
-    // from e.key OR the physical key from e.code, so a layout where e.key is
-    // not 't' still opens the popup the help panel promises. Both halves are
-    // asserted -- matching only one would let half the binding be deleted
-    // while the help text kept claiming T works.
-    expect(source).toMatch(/\(e\.key \|\| ''\)\.toLowerCase\(\) === 't'/);
-    expect(source).toMatch(/e\.code === 'KeyT'/);
+    // T now starts the teleport cast in Game.js (rebindable, default 't', and
+    // layout-independent through Game's own key matching). This panel opens when
+    // the cast completes, so it must no longer toggle itself on T.
+    const game = fs.readFileSync(path.join(here, '../src/js/core/Game.js'), 'utf8');
+    expect(game).toMatch(/teleport: 't'/);
+    expect(game).toMatch(/matchesBind\('teleport', 't'\)/);
+    expect(source).not.toMatch(/=== 't'/);
+    expect(source).toMatch(/setOnTeleportReady/);
   });
 });

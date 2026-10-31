@@ -974,7 +974,9 @@ if (require.main === module) {
   const url = process.env.DATABASE_URL || env.DATABASE_URL;
   if (!url) { console.error('DATABASE_URL is not set in .env'); process.exit(1); }
   const pool = new Pool({ connectionString: url });
-  seedSpecFromDir(pool, name)
+  // KEEP_ENTRY=1 applies the spec without handing the entry world to it, e.g. for
+  // map packs (the Spire) that are reached from the world, not started in.
+  seedSpecFromDir(pool, name, { moveEntry: process.env.KEEP_ENTRY !== '1' })
     .then((n) => {
       console.log(
         `applied ${name}: ${n.worlds} worlds, ${n.links} links, `

@@ -43,9 +43,31 @@
         "guard_creature_type": "Slime",
         "level": 2
       },
+      "roads": [
+        [
+          [
+            43,
+            58
+          ],
+          [
+            46,
+            58
+          ]
+        ],
+        [
+          [
+            43,
+            57
+          ],
+          [
+            43,
+            59
+          ]
+        ]
+      ],
       "waypoints": [
         {
-          "x": 4650,
+          "x": 4550,
           "y": 4550,
           "name": "Vale Crossing Waypoint"
         }
@@ -70,7 +92,8 @@
       "biome_cell": 16,
       "allowed_creature_types": [
         "Bat",
-        "Skeleton"
+        "Skeleton",
+        "Wolf"
       ],
       "is_entry": false,
       "village": {
@@ -158,7 +181,7 @@
       },
       "waypoints": [
         {
-          "x": 4650,
+          "x": 4550,
           "y": 4550,
           "name": "Sunscar Outpost Waypoint"
         }
@@ -198,7 +221,7 @@
       },
       "waypoints": [
         {
-          "x": 4650,
+          "x": 4550,
           "y": 4550,
           "name": "Rimehollow Haven Waypoint"
         }
@@ -239,7 +262,7 @@
       "waypoints": [
         {
           "x": 2550,
-          "y": 2650,
+          "y": 2550,
           "name": "Blackfen Refuge Waypoint"
         }
       ]
