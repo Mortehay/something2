@@ -368,10 +368,9 @@ class WorldBossManager {
   // Adds `fraction` of max HP as shield, never above the cap. The shield lives on
   // the creature (damage.js applyDamage spends it before HP).
   _addShield(creature, fraction) {
-    if (!creature || !(fraction > 0)) return;
-    const maxHp = creature.maxHp || (this.currentBoss && this.currentBoss.maxHp) || 0;
-    const cap = maxHp * balance.SHIELD_CAP_FRACTION;
-    creature.shield = Math.min(cap, (creature.shield || 0) + maxHp * fraction);
+    if (!creature) return;
+    if (!creature.maxHp && this.currentBoss) creature.maxHp = this.currentBoss.maxHp;
+    balance.addShield(creature, fraction);
   }
 
   // The Ward: from phase 2 on, the shield is topped up on a timer, so damage has
@@ -386,9 +385,9 @@ class WorldBossManager {
   }
 
   _calculatePhase(hpRatio) {
-    if (hpRatio <= 0.25) return { phase: 4, name: 'Frenzy Overload', bonus: '+50% Damage, Catastrophic Blasts & Ward Shield' };
-    if (hpRatio <= 0.50) return { phase: 3, name: 'Elemental Nova', bonus: '+25% Defense, Minions & Ward Shield' };
-    if (hpRatio <= 0.75) return { phase: 2, name: 'Enraged Surge', bonus: '+20% Speed, Shockwave & Ward Shield' };
+    if (balance.phaseForRatio(hpRatio) === 4) return { phase: 4, name: 'Frenzy Overload', bonus: '+50% Damage, Catastrophic Blasts & Ward Shield' };
+    if (balance.phaseForRatio(hpRatio) === 3) return { phase: 3, name: 'Elemental Nova', bonus: '+25% Defense, Minions & Ward Shield' };
+    if (balance.phaseForRatio(hpRatio) === 2) return { phase: 2, name: 'Enraged Surge', bonus: '+20% Speed, Shockwave & Ward Shield' };
     return { phase: 1, name: 'Standard', bonus: 'Base Stats' };
   }
 

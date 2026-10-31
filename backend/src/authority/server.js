@@ -1046,15 +1046,22 @@ function attachAuthority(httpServer, pool, opts = {}) {
           // frame and a second notice follow once the write lands.
           const reward = bossGate.firstClearGold(floorFromWorldName(entry.row.name));
           bossGate.recordBossClear(pool, p.characterId, entry.worldId)
-            .then(async (first) => {
+            .then((first) => {
+              // The clear is committed. Paying gold is a separate step with its
+              // own failure handling: a failed payout must never close the door
+              // again (the in-memory entry stays), it is only logged.
               if (!first || !reward) return;
-              const gold = await bossGate.awardGold(pool, p.characterId, reward);
-              const sock = entry.sockets.get(p.userId);
-              if (sock && gold != null) {
-                send(sock, { type: 'wallet', gold });
-                send(sock, { type: 'announcement', text: `First clear reward: +${reward.toLocaleString('en-US')} gold` });
-              }
+              bossGate.awardGold(pool, p.characterId, reward)
+                .then((gold) => {
+                  const sock = entry.sockets.get(p.userId);
+                  if (sock && gold != null) {
+                    send(sock, { type: 'wallet', gold });
+                    send(sock, { type: 'announcement', text: `First clear reward: +${reward.toLocaleString('en-US')} gold` });
+                  }
+                })
+                .catch((e) => console.error('first-clear gold award failed:', e));
             })
+            // Only a failure to RECORD the clear takes the in-memory entry back.
             .catch((e) => { p._bossCleared.delete(entry.worldId); console.error('recordBossClear', e); });
         }
       }
@@ -2001,7 +2008,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // Item rewards earned while out of a world (async: the join has finished
         // registering the player by the time the first query returns).
         deliverPendingRewardItems(ws.userId, character.id);
-        bossGate.loadClearedBosses(pool, character.id).then((set) => { const pl = entry.world.getPlayer(ws.userId); if (pl) pl._bossCleared = set; }).catch((e) => console.error('boss clears load failed:', e));
+        bossGate.loadClearedBosses(pool, character.id).then((set) => { const pl = entry.world.getPlayer(ws.userId); if (pl) { if (!pl._bossCleared) pl._bossCleared = new Set(); for (const id of set) pl._bossCleared.add(id); } }).catch((e) => console.error('boss clears load failed:', e));
         loadLegacyChoice(pool, character.id).then((lc) => { const pl = entry.world.getPlayer(ws.userId); if (pl) pl.legacyChoice = lc; }).catch((e) => console.error('legacy choice load failed:', e));
         send(ws, {
           type: 'joined', user_id: ws.userId, character_id: character.id, spawn, tickRate: 1000 / tickMs,

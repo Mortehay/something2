@@ -5,6 +5,10 @@
 // HP, flat defense, elemental resistance and base damage are raised; every boss
 // keeps one weak element at 0 resistance.
 //
+// SUPERSEDED in part: defense and resistances below broke the element invariants and
+// were replaced by 1714440839000_world_boss_hide_and_resists.js (HP by ...837000).
+// Do not copy these numbers; bossBalance.WORLD_BOSSES is the source of truth.
+//
 // The numbers are written out here on purpose (a migration is a record of what
 // was applied then); boss_balance.test.js checks they still match
 // bossBalance.WORLD_BOSSES, so the two cannot drift apart silently.

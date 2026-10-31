@@ -421,7 +421,6 @@ export class Game {
         this.teleportPending = null;
     }
 
-    // "Thornbriar Reach / Monsters: level 3-9" for a few seconds on entering a world.
     // Settings tab: apply and persist display preferences.
     setUiPrefs(next) {
         this.uiPrefs = normalizeUiPrefs(next);
@@ -429,6 +428,7 @@ export class Game {
         if (!this.uiPrefs.showLocationBanner) this.locationBanner = null;
     }
 
+    // "Thornbriar Reach / Monsters: level 3-9" for a few seconds on entering a world.
     _announceLocation(loc) {
         if (!loc || !loc.name || (this.uiPrefs && this.uiPrefs.showLocationBanner === false)) { this.locationBanner = null; return; }
         const lo = Number.isFinite(loc.levelMin) ? loc.levelMin : null;
