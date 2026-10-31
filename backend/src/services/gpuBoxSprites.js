@@ -138,22 +138,22 @@ async function resolveConceptModel(provider, opts = {}) {
 // live 2026-10-31: PENDING, then SUCCESS; never STARTED or PROGRESS), so the
 // run clock starts at the first STARTED/PROGRESS or the first poll where
 // taskState() sees the task picked up -- or seen queued and then gone from
-// the list (pushed out of the window, or lost: the run timeout bounds it).
+// the gateway's list while still PENDING (lost: the run timeout bounds it).
 // PENDING also means an unknown or expired id, and a new task is listed at
 // once, so one the list never shows (or a box without the list) fails at the
 // run timeout as lost rather than waiting out the queue cap. `shouldStop()` true ends the poll
 // with { ok: false, halted: true } (the box has no cancel for these tasks, so
 // it may still run there).
-// 'running', 'queued' or 'absent', from the box's task history (newest 12),
-// whose progress_msg is "Waiting in queue..." until a worker picks the task
-// up. A failed read counts as absent.
+// 'running', 'queued' or 'absent', from the box's model gateway: its
+// `pending` list holds every unfinished task, with `running: true` once a
+// worker has it (seen live 2026-10-31: listed without `running` while queued,
+// then running, then gone at SUCCESS). A failed read counts as absent.
 async function taskState(provider, taskId, fetchImpl) {
-  const r = await callJson(provider, 'GET', '/api/tasks/recent', { fetchImpl });
-  if (!r.ok || !Array.isArray(r.json)) return 'absent';
-  const t = r.json.find((x) => x && x.task_id === taskId);
+  const r = await callJson(provider, 'GET', '/api/model-gateway', { fetchImpl });
+  const pending = r.ok && r.json && Array.isArray(r.json.pending) ? r.json.pending : [];
+  const t = pending.find((x) => x && x.task_id === taskId);
   if (!t) return 'absent';
-  const running = Number(t.progress_pct) > 0 || Boolean(t.progress_msg && !/waiting in queue/i.test(t.progress_msg));
-  return running ? 'running' : 'queued';
+  return t.running === true ? 'running' : 'queued';
 }
 
 async function pollTaskImage(provider, taskId, label, {
@@ -198,7 +198,7 @@ async function pollTaskImage(provider, taskId, label, {
       if (state === 'queued') listed = true;
       queued = state === 'queued' || (state === 'absent' && !listed);
       if (state === 'absent' && !listed && Date.now() - queuedSince >= timeoutMs) {
-        return { ok: false, error: `GPU box ${label} task is not in the box's task list after ${Math.round(timeoutMs / 1000)}s; it may be lost`, retryable: true };
+        return { ok: false, error: `GPU box ${label} task is not in the box's queue after ${Math.round(timeoutMs / 1000)}s; it may be lost`, retryable: true };
       }
     }
     const now = Date.now();
