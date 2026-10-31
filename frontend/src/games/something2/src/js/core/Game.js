@@ -31,6 +31,7 @@ import { remotePlayerFromFrame } from './worldPlayers.js';
 import { appearanceImageKey, indexAppearanceVisuals } from './characterAppearance.js';
 import { wavesFromFrame } from './worldWaves.js';
 import { telegraphsFromFrame } from './worldTelegraphs.js';
+import { trapsFromFrame } from './worldTraps.js';
 import { addBlasts, pruneBlasts } from "./blasts.js";
 import { indexEffects, addEffects, pruneEffects, capParticles } from "./vfx.js";
 import { assetUrl } from "../net/assets.js";
@@ -1838,6 +1839,7 @@ export class Game {
         // SOMET-608 (S6). Same "frame replaces the list every tick" rule
         // waves uses -- the server re-sends every still-active telegraph.
         this.telegraphs = telegraphsFromFrame(msg);
+        this.traps = trapsFromFrame(msg);
         // Detonations are present only on the tick they happened (the server
         // clears its stash after this broadcast), so they must be taken off
         // THIS frame — there is no snapshot to re-read them from later.
@@ -2089,6 +2091,7 @@ export class Game {
                 // SOMET-528. Empty until a wave-granting node is allocated.
                 waves: this.waves || [],
                 telegraphs: this.telegraphs || [],
+                traps: this.traps || [],
                 vfx: this.vfx, vfxDefs: this.vfxDefs,
                 auraDefs: this.auraDefs,
                 skillVisuals: this.skillVisuals,

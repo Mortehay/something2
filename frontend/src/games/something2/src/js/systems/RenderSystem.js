@@ -37,6 +37,7 @@ import { artIcon, drawIconFit } from "./gameArt.js";
 import { swayShear, swayPhaseSeed, SWAY_AMPLITUDE } from "./sway.js";
 import { boxDir, isBoxManifest, frameKeyFor, actionTimings, pickAction, DEFAULT_FPS } from "./sheetActions.js";
 import { shineBand, shineGeometry, SHINE_ALPHA } from "./shine.js";
+import { TRAP_STYLE } from "../core/worldTraps.js";
 import {
   rarityBorderColor, affixLine, clipToWidth, rowTextOffsets, AFFIX_FONT_PX, itemIcon,
 } from "./itemDisplay.js";
@@ -341,6 +342,8 @@ export class RenderSystem {
     // SOMET-608 (S6): active skill telegraphs -- resolved geometry +
     // remaining/total ms, same contract waves already carries.
     telegraphs = [],
+    // Archer traps lying on the ground (worldTraps.js).
+    traps = [],
     skillVisuals = [],
     merchants = [], shop = null, shopOpen = false, shopView = null, decoTypes = null,
     // SOMET-584 — name-keyed entity-type catalog, needed to resolve a world
@@ -491,6 +494,7 @@ export class RenderSystem {
     // hurt, same layer and same reason as waves -- the caster itself (still
     // standing there, mid wind-up) must not occlude the warning.
     this._drawTelegraphs(telegraphs);
+    this._drawTraps(traps);
 
     // Players + creatures + ground items + walls, all depth-sorted together
     // (Pass B) — ground items must join the same sort rather than being
@@ -1240,6 +1244,39 @@ export class RenderSystem {
   // (a stroked outline alone reads as a boundary marker, not "this ground
   // is about to hurt"). `ms`/`telegraphMs` travel resolved from the server,
   // so no synchronised clock is needed to compute progress client-side.
+  // Traps lying on the ground: a small disc (a tar pool is a wide dark one) with a
+  // pulsing ring and a glyph, so a trap you laid can be seen.
+  _drawTraps(traps) {
+    if (!traps || traps.length === 0) return;
+    this.ctx.save();
+    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 300);
+    for (const t of traps) {
+      const s = worldToScreen(t.x, t.y);
+      if (!Number.isFinite(s.x) || !Number.isFinite(s.y)) continue;
+      const style = TRAP_STYLE[t.kind] || TRAP_STYLE.bear;
+      const rx = t.kind === 'tar' ? blastScreenRadiusX(t.radius) : Math.max(10, blastScreenRadiusX(t.radius) * 0.35);
+      if (!(rx > 0)) continue;
+      this.ctx.beginPath();
+      this.ctx.ellipse(s.x, s.y, rx, rx / 2, 0, 0, Math.PI * 2);
+      this.ctx.fillStyle = style.color;
+      this.ctx.globalAlpha = t.kind === 'tar' ? 0.55 : 0.35;
+      this.ctx.fill();
+      this.ctx.strokeStyle = style.color;
+      this.ctx.lineWidth = 2;
+      this.ctx.globalAlpha = 0.4 + 0.4 * pulse;
+      this.ctx.stroke();
+      if (style.glyph) {
+        this.ctx.globalAlpha = 0.9;
+        this.ctx.fillStyle = style.color;
+        this.ctx.font = '14px sans-serif';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        this.ctx.fillText(style.glyph, s.x, s.y);
+      }
+    }
+    this.ctx.restore();
+  }
+
   _drawTelegraphs(telegraphs) {
     if (!telegraphs || telegraphs.length === 0) return;
     this.ctx.save();
