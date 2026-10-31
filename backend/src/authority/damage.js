@@ -4,6 +4,7 @@
 // independently, or the two paths drift.
 
 const { effectMagnitude, SHOCK } = require('./effects');
+const { shieldFactor } = require('../services/bossBalance.js');
 
 const MIN_DAMAGE = 1;    // damage floor: nothing is ever fully negated
 const RESIST_CAP = 0.8;  // resistance ceiling: nothing is ever immune
@@ -143,9 +144,18 @@ function applyDamage(target, raw, element, mit = NO_MITIGATION, now = undefined,
   // credited the full amount below: breaking a shield is real work.
   let toHp = final;
   if (target.shield > 0) {
-    const absorbed = Math.min(target.shield, final);
-    target.shield -= absorbed;
-    toHp = final - absorbed;
+    // A boss's shield may be element-locked (shieldWeakTo): the shield "feels"
+    // the hit scaled by shieldFactor, and whatever it cannot absorb spills to HP
+    // in real (unscaled) damage.
+    const f = shieldFactor(target.shieldWeakTo, el);
+    const felt = final * f;
+    if (felt <= target.shield) {
+      target.shield -= felt;
+      toHp = 0;
+    } else {
+      toHp = final - target.shield / f;
+      target.shield = 0;
+    }
   }
   target.hp -= toHp;
   if (source && typeof source === 'string' && source.startsWith('p:')) {

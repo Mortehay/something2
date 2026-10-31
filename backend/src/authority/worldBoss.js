@@ -360,6 +360,7 @@ class WorldBossManager {
       hpRatio,
       shield: this.currentBoss ? Math.round(this.currentBoss.shield || 0) : 0,
       shieldMax: this.currentBoss ? Math.round(this.currentBoss.maxHp * balance.SHIELD_CAP_FRACTION) : 0,
+      shieldWeakTo: this.currentBoss && balance.WORLD_BOSSES[this.currentBoss.name] ? balance.WORLD_BOSSES[this.currentBoss.name].shieldWeakTo : null,
       enraged: Boolean(this.currentBoss && this.currentBoss.enraged),
       topDamagers: this.getTopDamagers(3),
     };
@@ -711,6 +712,8 @@ class WorldBossManager {
       placed.maxHp = this.currentBoss.maxHp;
       placed.shield = this.currentBoss.shield || 0;
       placed.damageTakenMult = balance.DAMAGE_TAKEN;
+      const tuning = balance.WORLD_BOSSES[this.currentBoss.name];
+      placed.shieldWeakTo = tuning ? tuning.shieldWeakTo : null;
       if (this.currentBoss._playerDamage) placed._playerDamage = this.currentBoss._playerDamage;
     }
     return placed;

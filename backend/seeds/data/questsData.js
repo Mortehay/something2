@@ -557,6 +557,9 @@ QUESTS.push(
 
 // Milestone item rewards (item_types NAME), dropped at the player's feet on turn-in.
 const ITEM_REWARDS = {
+  quest_zahir_astrolabe: 'warbound-circlet',
+  act3_void_rift: 'gilded-fists',
+  act4_primordial_cleansing: 'stormlight-mantle',
   act1_core_whisper: 'power-tinders',
   act1_sunspire_reliquary: 'crude-signet',
   act1_dire_wolfpack: 'iron-band',

@@ -299,7 +299,7 @@ export default function WorldBossHud({ gameRef }) {
           {status.shield > 0 && status.shieldMax > 0 && (
             <ShieldTrack title="Ward shield: break it before the boss takes damage">
               <ShieldFill $pct={Math.min(100, (status.shield / status.shieldMax) * 100)} />
-              <ShieldLabel>🛡 Shield {status.shield.toLocaleString()}</ShieldLabel>
+              <ShieldLabel>🛡 Shield {status.shield.toLocaleString()}{status.shieldWeakTo ? ` · weak to ${status.shieldWeakTo}` : ""}</ShieldLabel>
             </ShieldTrack>
           )}
 

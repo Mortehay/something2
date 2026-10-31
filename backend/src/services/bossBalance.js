@@ -35,9 +35,9 @@ const REFERENCE = Object.freeze({
   uptime: 0.6,
 });
 
-// Was 300 (5 min). Halved with the HP: top-end gear now needs at least 2.5 minutes, about
-// 3 against the boss's weak element and 4 to 9 against anything else.
-const MIN_FIGHT_SECONDS = 150;
+// Was 300 (5 min), then 150. The element-locked shield lets the RIGHT element break wards
+// twice as fast, so the best case is a little over 2 minutes; anything else takes 3 to 11.
+const MIN_FIGHT_SECONDS = 120;
 
 // Shield granted on entering a phase, as a fraction of max HP, and the ward
 // that tops it back up on a timer in phases 2+.
@@ -51,20 +51,20 @@ const SHIELD_CAP_FRACTION = 0.08; // the shield never exceeds this share of max 
 // party has a reason to bring the right damage type.
 const WORLD_BOSSES = Object.freeze({
   'Ignis, the Magma Colossus': {
-    hp: 440000, defense: 10, baseDamage: 420,
+    hp: 440000, defense: 10, baseDamage: 420, shieldWeakTo: 'ice',
     resistances: { physical: 0.3, lightning: 0.3, fire: 0.6, ice: 0, arcane: 0 },
   },
   'Glacius, the Frost Leviathan': {
-    hp: 390000, defense: 10, baseDamage: 350,
+    hp: 390000, defense: 10, baseDamage: 350, shieldWeakTo: 'fire',
     resistances: { physical: 0.3, lightning: 0.3, ice: 0.6, fire: 0, arcane: 0 },
   },
   'Gorgon, the Thunder Titan': {
-    hp: 450000, defense: 10, baseDamage: 450,
+    hp: 450000, defense: 10, baseDamage: 450, shieldWeakTo: 'arcane',
     resistances: { physical: 0.3, fire: 0.3, ice: 0.3, lightning: 0.6, arcane: 0 },
   },
   // Arcane is never resisted, so the Voidreaver's own element is its open flank.
   'Abyssor, the Voidreaver': {
-    hp: 500000, defense: 10, baseDamage: 520,
+    hp: 500000, defense: 10, baseDamage: 520, shieldWeakTo: 'lightning',
     resistances: { physical: 0.3, fire: 0.3, ice: 0.3, lightning: 0, arcane: 0 },
   },
 });
@@ -73,6 +73,18 @@ const WORLD_BOSSES = Object.freeze({
 // hit (damage.js applyDamage reads creature.damageTakenMult). Set on the boss
 // creature when it is placed, never stored on the catalog row.
 const DAMAGE_TAKEN = 0.6;
+
+// The shield is element-locked: each boss's shield is brittle to ONE element (its
+// weak one, the same one its body does not resist) and tough against the rest.
+// A shield hit by its weak element loses SHIELD_WEAK_MULT times the damage; any
+// other element loses SHIELD_RESIST_MULT times. A party that brings the right
+// element breaks wards fast; one that does not grinds.
+const SHIELD_WEAK_MULT = 2;
+const SHIELD_RESIST_MULT = 0.5;
+function shieldFactor(weakTo, element) {
+  if (!weakTo) return 1;
+  return element === weakTo ? SHIELD_WEAK_MULT : SHIELD_RESIST_MULT;
+}
 
 // Damage one reference hit does to a boss, through the engine's own rule
 // (damage.js applyDamage): flat defense is subtracted first, then the element's
@@ -85,18 +97,20 @@ function hitAgainst(boss, element = 'physical') {
 
 // Total damage the boss can soak over the fight: its HP plus every shield it
 // will have: the three phase shields and the wards over a fight of that length.
-function totalToughness(boss, seconds) {
+function totalToughness(boss, seconds, element = 'physical') {
   const phaseShields = Object.values(PHASE_SHIELD).reduce((a, f) => a + f * boss.hp, 0);
   const wards = Math.floor((seconds * 1000) / WARD_INTERVAL_MS) * WARD_FRACTION * boss.hp;
-  return boss.hp + phaseShields + wards;
+  // The shield feels each hit scaled by shieldFactor (see above): brittle to the
+  // boss's weak element, tough against the rest.
+  return boss.hp + (phaseShields + wards) / shieldFactor(boss.shieldWeakTo, element);
 }
 
 // Seconds a reference player needs. Wards depend on the fight length, so this
 // iterates to a fixed point (it converges in a couple of rounds).
 function expectedFightSeconds(boss, element = 'physical') {
   const dps = hitAgainst(boss, element) * REFERENCE.attacksPerSecond * REFERENCE.uptime;
-  let seconds = totalToughness(boss, 0) / dps;
-  for (let i = 0; i < 8; i++) seconds = totalToughness(boss, seconds) / dps;
+  let seconds = totalToughness(boss, 0, element) / dps;
+  for (let i = 0; i < 8; i++) seconds = totalToughness(boss, seconds, element) / dps;
   return seconds;
 }
 
@@ -140,6 +154,6 @@ function enduranceStep(state, creature, now) {
 
 module.exports = {
   phaseForRatio, addShield, enduranceStep,
-  REFERENCE, MIN_FIGHT_SECONDS, DAMAGE_TAKEN, PHASE_SHIELD, WARD_INTERVAL_MS, WARD_FRACTION, SHIELD_CAP_FRACTION,
+  REFERENCE, MIN_FIGHT_SECONDS, DAMAGE_TAKEN, SHIELD_WEAK_MULT, SHIELD_RESIST_MULT, shieldFactor, PHASE_SHIELD, WARD_INTERVAL_MS, WARD_FRACTION, SHIELD_CAP_FRACTION,
   WORLD_BOSSES, hitAgainst, totalToughness, expectedFightSeconds,
 };
