@@ -22,3 +22,24 @@ test('loadLegacyChoice reads the stored choice and tolerates no character / no r
     'city_restoration',
   );
 });
+
+test('elemental_surge: +15% magic find on the rarity roll, +20% gold, nothing for other choices', () => {
+  const { legacyMagicFind, legacyGoldAmount } = require('../src/services/legacyEffects.js');
+  const { withMagicFind, interpolateWeights, rollRarity } = require('../src/authority/rarity.js');
+  assert.strictEqual(legacyMagicFind('elemental_surge'), 0.15);
+  assert.strictEqual(legacyMagicFind('city_restoration'), 0);
+  assert.strictEqual(legacyMagicFind(null), 0);
+  assert.strictEqual(legacyGoldAmount(100, 'elemental_surge'), 120);
+  assert.strictEqual(legacyGoldAmount(100, null), 100);
+
+  const anchors = [{ item_level: 1, white: 70, blue: 25, yellow: 5, foxy: 0 }];
+  const base = interpolateWeights(10, anchors);
+  assert.strictEqual(withMagicFind(base, 0), base, 'zero magic find returns the table untouched');
+  const boosted = withMagicFind(base, 0.15);
+  const sum = Object.values(boosted).reduce((a, b) => a + b, 0);
+  assert.ok(Math.abs(sum - 1) < 1e-9, 'still a distribution');
+  assert.ok(boosted.white < base.white && boosted.blue > base.blue && boosted.yellow > base.yellow);
+  assert.strictEqual(boosted.foxy, 0, 'a grade with no weight stays unreachable');
+  // Default rollRarity (no magic find) is unchanged.
+  assert.strictEqual(rollRarity(10, anchors, () => 0.5), rollRarity(10, anchors, () => 0.5, 0));
+});

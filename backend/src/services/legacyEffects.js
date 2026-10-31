@@ -26,3 +26,21 @@ async function loadLegacyChoice(db, characterId) {
 }
 
 module.exports = { vendorBuyPrice, loadLegacyChoice, CITY_RESTORATION_PRICE_MULT };
+
+// Elemental Surge. The game has no mining, so the "yield" half of the bonus is
+// gold dropped by creatures; the other half is magic find, applied to the
+// rarity roll of every item the character's kills drop.
+const ELEMENTAL_SURGE_MAGIC_FIND = 0.15;
+const ELEMENTAL_SURGE_GOLD_MULT = 1.2;
+
+function legacyMagicFind(legacyChoice) {
+  return legacyChoice === 'elemental_surge' ? ELEMENTAL_SURGE_MAGIC_FIND : 0;
+}
+
+function legacyGoldAmount(amount, legacyChoice) {
+  const a = Number(amount) || 0;
+  return legacyChoice === 'elemental_surge' ? Math.round(a * ELEMENTAL_SURGE_GOLD_MULT) : a;
+}
+
+module.exports.legacyMagicFind = legacyMagicFind;
+module.exports.legacyGoldAmount = legacyGoldAmount;

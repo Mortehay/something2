@@ -29,6 +29,7 @@
     { "key": "spire_f25", "name": "Spire of Trials: Floor 25", "grid": [24, 40], "seed": 7025, "width": 96, "height": 96, "chunk_size": 32, "biomes": ["Catacombs", "Cavern"], "biome_cell": 16, "allowed_creature_types": ["Construct Swarm", "Construct Skirmisher", "Construct Line"], "is_entry": false, "level_band": [50, 55], "density": "dense", "boss": { "entity": "The Umbral Gatekeeper", "x": 4950, "y": 4850, "respawn_s": 900 } }
   ],
   "links": [
+    { "kind": "portal", "from": "spire_f01", "from_x": 4550, "from_y": 4550, "to": "@Vale Crossing", "to_name": "Vale Crossing", "to_x": 5850, "to_y": 4350 },
     { "from": "spire_f01", "edge": "E", "to": "spire_f02" },
     { "from": "spire_f02", "edge": "E", "to": "spire_f03" },
     { "from": "spire_f03", "edge": "E", "to": "spire_f04" },

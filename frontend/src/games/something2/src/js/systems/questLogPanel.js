@@ -148,7 +148,7 @@ export function layoutQuestLog(state = {}) {
           w: halfW,
           h: 56,
           title: "⚡ Elemental Surge",
-          sub: "+15% MF / +20% Yield (Primal Might)",
+          sub: "+15% Magic Find / +20% Gold (Primal Might)",
           color: "#f59e0b",
         };
         actionButtons.push(cityBtn, surgeBtn);
@@ -221,7 +221,7 @@ export function layoutQuestLog(state = {}) {
       choiceText: legacyChoice === "city_restoration"
         ? "✨ Legacy: City Restoration (-15% Vendor Prices)"
         : legacyChoice === "elemental_surge"
-          ? "⚡ Legacy: Elemental Surge (+15% MF / +20% Yield)"
+          ? "⚡ Legacy: Elemental Surge (+15% MF / +20% Gold)"
           : "⏳ Unchosen Legacy (Act IV)",
     },
   };

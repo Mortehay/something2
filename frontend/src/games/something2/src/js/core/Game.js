@@ -3338,7 +3338,7 @@ export class Game {
                             this.legacyChoice = choice;
                             if (this.progression) this.progression.legacyChoice = choice;
                             this.openQuestLog();
-                            const desc = choice === 'city_restoration' ? '🏛️ City Restoration (-15% prices)' : '⚡ Elemental Surge (+15% MF / +20% Mining)';
+                            const desc = choice === 'city_restoration' ? '🏛️ City Restoration (-15% prices)' : '⚡ Elemental Surge (+15% MF / +20% Gold)';
                             if (this.showToast) this.showToast(`👑 Permanent Legacy Chosen: ${desc}!`);
                         }).catch((err) => {
                             if (this.showToast) this.showToast(`❌ ${err.message}`);
