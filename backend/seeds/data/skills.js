@@ -245,8 +245,8 @@ const SKILLS = [
     id: 'war_bloodlust_stance', class: 'Warrior', type: 'buff',
     nameUk: 'Жага крові', nameEn: 'Bloodlust Stance',
     costType: 'stamina', cost: 0, cooldown: 5, range: 0, icon: '🩸', iconColor: '#dc2626',
-    descUk: 'Стійка: кожна атака дає +3% до швидкості атаки (стакається до 10 разів).',
-    descEn: 'Stance: each hit grants +3% attack speed (stacks up to 10 times).'
+    descUk: 'Стійка на 30 сек: кожен удар чи заклинання дає +3% до швидкості атаки (до 10 разів, спадає після 4 сек без атак).',
+    descEn: 'Stance for 30s: each swing or cast grants +3% attack speed (stacks up to 10 times, resets after 4s idle).'
   },
   {
     id: 'war_colossus_stance', class: 'Warrior', type: 'buff',
@@ -280,8 +280,8 @@ const SKILLS = [
     id: 'war_duelist_focus', class: 'Warrior', type: 'buff',
     nameUk: 'Стійка дуеліста', nameEn: 'Duelist Focus',
     costType: 'stamina', cost: 15, cooldown: 25, range: 0, icon: '🎯', iconColor: '#a855f7',
-    descUk: 'Збільшує шанс парирування на 25% та силу критичного удару на 50%.',
-    descEn: 'Grants +25% parry chance and +50% critical damage for 12s.'
+    descUk: 'Парирування 25%, шанс криту +10% та сила критичного удару +50% на 12 сек.',
+    descEn: 'Grants 25% parry, +10% crit chance and +50% critical damage for 12s.'
   },
   {
     id: 'war_banner_of_victory', class: 'Warrior', type: 'buff',
@@ -1304,8 +1304,8 @@ const SKILLS = [
     id: 'cul_blood_pact', class: 'Cultist', type: 'buff',
     nameUk: 'Кривавий договір', nameEn: 'Blood Pact',
     costType: 'hp', cost: 0, cooldown: 0, range: 0, icon: '📜', iconColor: '#b91c1c',
-    descUk: 'Збільшує максимальний запас здоров\'я на 40% та силу заклинань темряви на 25%.',
-    descEn: 'Passive aura increasing max HP by 40% and dark spell power by 25%.'
+    descUk: 'Угода на 60 с: +25% до завданої шкоди та -10% до отриманої.',
+    descEn: 'Pact for 60s: +25% damage dealt and 10% less damage taken.'
   },
   {
     id: 'cul_bone_armor', class: 'Cultist', type: 'buff',
@@ -1339,8 +1339,8 @@ const SKILLS = [
     id: 'cul_dark_blessing', class: 'Cultist', type: 'buff',
     nameUk: 'Чорне благословення', nameEn: 'Dark Blessing',
     costType: 'hp', cost: 20, cooldown: 40, range: 0, icon: '✨', iconColor: '#6b21a8',
-    descUk: 'Дає імунітет до проклять та отрут на 30 сек.',
-    descEn: 'Grants immunity to curses and poison effects for 30s.'
+    descUk: 'Дає імунітет до підпалу та підкорення (чарів) на 30 сек.',
+    descEn: 'Grants immunity to burning and charm for 30s.'
   },
   {
     id: 'cul_martyrdom_aura', class: 'Cultist', type: 'buff',
@@ -1353,8 +1353,8 @@ const SKILLS = [
     id: 'cul_life_transfusion', class: 'Cultist', type: 'buff',
     nameUk: 'Переливання життя', nameEn: 'Life Transfusion',
     costType: 'hp', cost: 50, cooldown: 15, range: 280, icon: '💉', iconColor: '#be123c',
-    descUk: 'Культист жертвує 20% свого HP, щоб повністю зцілити обраного союзника.',
-    descEn: 'Transfuses 20% cultist HP to completely heal selected ally.'
+    descUk: 'Культист жертвує 20% свого HP, щоб повністю зцілити найближчого союзника.',
+    descEn: 'Transfuses 20% cultist HP to completely heal the nearest ally.'
   },
   {
     id: 'cul_abyssal_cloak', class: 'Cultist', type: 'buff',
@@ -1713,8 +1713,8 @@ const SKILLS = [
     id: 'arc_hunters_instinct', class: 'Archer', type: 'buff',
     nameUk: 'Мисливський інстинкт', nameEn: 'Hunter\'s Instinct',
     costType: 'stamina', cost: 15, cooldown: 40, range: 0, icon: '🐾', iconColor: '#a855f7',
-    descUk: 'Лучник бачить невидимих ворогів та ворогів крізь туман війни на 20 сек.',
-    descEn: 'Reveals stealth units and illuminates targets through fog of war.'
+    descUk: 'Позначає ворогів у радіусі 6 клітинок: вони отримують на 15% більше шкоди 20 сек.',
+    descEn: 'Marks enemies within 6 tiles: they take 15% more damage for 20s.'
   },
   {
     id: 'arc_tailwind_aura', class: 'Archer', type: 'buff',
@@ -2046,8 +2046,8 @@ const SKILLS = [
     id: 'dru_mark_of_the_wild', class: 'Druid', type: 'buff',
     nameUk: 'Знак дикої природи', nameEn: 'Mark of the Wild',
     costType: 'mana', cost: 35, cooldown: 60, range: 240, icon: '🐾', iconColor: '#10b981',
-    descUk: 'Збільшує всі основні характеристики друїда та його групи на 15% на 30 хв.',
-    descEn: 'Buffs all primary attributes of druid and party by 15% for 30m.'
+    descUk: 'Збільшує завдану шкоду та максимальне здоров’я друїда на 15% на 30 хв.',
+    descEn: 'Increases damage dealt and max HP by 15% for 30 minutes.'
   },
   {
     id: 'dru_rejuvenation', class: 'Druid', type: 'buff',
@@ -2081,8 +2081,8 @@ const SKILLS = [
     id: 'dru_natures_swiftness', class: 'Druid', type: 'buff',
     nameUk: 'Природне відновлення', nameEn: 'Nature\'s Swiftness',
     costType: 'mana', cost: 15, cooldown: 45, range: 0, icon: '⚡', iconColor: '#facc15',
-    descUk: 'Наступне заклинання кастується миттєво і має подвійну силу.',
-    descEn: 'Makes next nature spell instant-cast and 100% more effective.'
+    descUk: 'Наступне заклинання має подвійну силу.',
+    descEn: 'Makes your next spell 100% more effective.'
   },
   {
     id: 'dru_healing_touch', class: 'Druid', type: 'buff',
@@ -2165,6 +2165,20 @@ const SKILLS = [
   }
 ];
 
+putDruidFormsFirst(SKILLS);
+
+// The druid's shapes open the class: they take the first three druid slots (level 1,
+// no attributes) and the skills that used to open it move to the shapes' old slots.
+const DRUID_FORM_IDS = ['dru_bear_form', 'dru_hawk_form', 'dru_wolf_form'];
+function putDruidFormsFirst(list) {
+  const first = [];
+  list.forEach((s, i) => { if (s.class === 'Druid' && first.length < 3) first.push(i); });
+  ['dru_bear_form', 'dru_hawk_form', 'dru_wolf_form'].forEach((id, k) => {
+    const at = list.findIndex((s) => s.id === id);
+    if (at > first[k]) { const t = list[first[k]]; list[first[k]] = list[at]; list[at] = t; }
+  });
+}
+
 function enrichSkillGems(list) {
   const classCounters = {};
   for (const s of list) {
@@ -2242,11 +2256,15 @@ function enrichSkillGems(list) {
       s.reqCha = 0;
       const isTransform = s.id.includes('form') || s.id.includes('shapeshift') || s.id.includes('bear') || s.id.includes('wolf') || s.id.includes('hawk');
       s.reqWeapon = isTransform ? 'any' : (s.type === 'magic' ? 'staff_wand' : 'any');
+      // The three shapes are the druid's opening skills: no attribute needed.
+      if (DRUID_FORM_IDS.includes(s.id)) { s.reqStr = 0; s.reqDex = 0; s.reqCon = 0; s.reqWis = 0; }
     }
 
     // Gem Price in Gold for Gem Merchant (Starter gems 100g; subsequent gems scaled up from 350g to 7000g)
     const basePrice = Math.max(100, Math.round(100 + reqLvl * 25 + (idx - 1) * 30));
     s.gemPrice = idx === 1 ? 100 : Math.round(basePrice * 2.5);
+    // The three druid shapes cost the same.
+    if (DRUID_FORM_IDS.includes(s.id)) s.gemPrice = 100;
 
     // Gem Tags
     const tags = [];

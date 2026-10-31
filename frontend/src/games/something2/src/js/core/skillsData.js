@@ -2164,6 +2164,8 @@ export const SKILLS = [
   }
 ];
 
+putDruidFormsFirst(SKILLS);
+
 export const SKILLS_BY_CLASS = {
   Warrior: SKILLS.filter(s => s.class === 'Warrior'),
   Mage: SKILLS.filter(s => s.class === 'Mage'),
@@ -2466,6 +2468,18 @@ export function resolveSkillDamage(skill, playerPools = null) {
   };
 }
 
+// The druid's shapes open the class: they take the first three druid slots (level 1,
+// no attributes) and the skills that used to open it move to the shapes' old slots.
+const DRUID_FORM_IDS = ['dru_bear_form', 'dru_hawk_form', 'dru_wolf_form'];
+function putDruidFormsFirst(list) {
+  const first = [];
+  list.forEach((s, i) => { if (s.class === 'Druid' && first.length < 3) first.push(i); });
+  ['dru_bear_form', 'dru_hawk_form', 'dru_wolf_form'].forEach((id, k) => {
+    const at = list.findIndex((s) => s.id === id);
+    if (at > first[k]) { const t = list[first[k]]; list[first[k]] = list[at]; list[at] = t; }
+  });
+}
+
 export function enrichSkillGems(list) {
   const classCounters = {};
   for (const s of list) {
@@ -2543,11 +2557,15 @@ export function enrichSkillGems(list) {
       s.reqCha = 0;
       const isTransform = s.id.includes('form') || s.id.includes('shapeshift') || s.id.includes('bear') || s.id.includes('wolf') || s.id.includes('hawk');
       s.reqWeapon = isTransform ? 'any' : (s.type === 'magic' ? 'staff_wand' : 'any');
+      // The three shapes are the druid's opening skills: no attribute needed.
+      if (DRUID_FORM_IDS.includes(s.id)) { s.reqStr = 0; s.reqDex = 0; s.reqCon = 0; s.reqWis = 0; }
     }
 
     // Gem Price in Gold for Gem Merchant (Starter gems 100g; subsequent gems scaled up from 350g to 7000g)
     const basePrice = Math.max(100, Math.round(100 + reqLvl * 25 + (idx - 1) * 30));
     s.gemPrice = idx === 1 ? 100 : Math.round(basePrice * 2.5);
+    // The three druid shapes cost the same.
+    if (DRUID_FORM_IDS.includes(s.id)) s.gemPrice = 100;
 
     // Gem Tags
     const tags = [];

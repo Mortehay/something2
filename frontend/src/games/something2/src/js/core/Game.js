@@ -2706,6 +2706,18 @@ export class Game {
 
         const transformForm = isTransformationSkill(s);
         if (transformForm) {
+            // The server owns shapes now (their bonuses are real there), so a shape
+            // change obeys the same cooldown and mana it enforces.
+            const formReadyAt = this.skillCooldowns.get(s.id) || 0;
+            if (nowMs < formReadyAt) return;
+            const formCost = s.cost || 0;
+            if (formCost > 0 && (this.localMana != null ? this.localMana : 100) < formCost) {
+                if (this.showToast) this.showToast(`⚠️ Not enough Mana! (Need ${formCost} MP)`);
+                return;
+            }
+            if (formCost > 0) this.localMana = Math.max(0, (this.localMana != null ? this.localMana : 100) - formCost);
+            this.skillCooldowns.set(s.id, nowMs + (s.cooldown || 1) * 1000);
+            if (this.authorityClient) this.authorityClient.sendCastSkill(s.id, px, py, 0, 1);
             if (this.activeForm === transformForm) {
                 this.activeForm = null;
                 addBlasts(this.blasts, [{ x: px, y: py, radius: 50, element: 'physical' }], nowMs);

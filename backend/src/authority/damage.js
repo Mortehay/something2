@@ -3,8 +3,9 @@
 // (projectiles.js) must call this — they must never compute damage
 // independently, or the two paths drift.
 
-const { effectMagnitude, SHOCK } = require('./effects');
+const { effectMagnitude, SHOCK, MARKED } = require('./effects');
 const { shieldFactor } = require('../services/bossBalance.js');
+const skillBalance = require('./skillBalance.js');
 
 const MIN_DAMAGE = 1;    // damage floor: nothing is ever fully negated
 const RESIST_CAP = 0.8;  // resistance ceiling: nothing is ever immune
@@ -142,6 +143,8 @@ function applyDamage(target, raw, element, mit = NO_MITIGATION, now = undefined,
   // soaks damage before HP does. Only the shield's owner has the field, so for
   // every player and ordinary creature this is a no-op. The attacker is still
   // credited the full amount below: breaking a shield is real work.
+  // Player buffs (Shield Wall, Mana Shield, Bone Armor ...) soften what is left.
+  if (target.buffs && target.buffs.size > 0) final = skillBalance.mitigateIncoming(target, final, el, source);
   let toHp = final;
   if (target.shield > 0) {
     // A boss's shield may be element-locked (shieldWeakTo): the shield "feels"
@@ -158,6 +161,7 @@ function applyDamage(target, raw, element, mit = NO_MITIGATION, now = undefined,
     }
   }
   target.hp -= toHp;
+  if (target.hp < 1 && skillBalance.hasHpFloor(target)) target.hp = 1;
   if (source && typeof source === 'string' && source.startsWith('p:')) {
     const pUid = source.slice(2);
     if (!target._playerDamage) target._playerDamage = new Map();
@@ -187,7 +191,7 @@ function applyDamage(target, raw, element, mit = NO_MITIGATION, now = undefined,
 // so every damage site passes it explicitly; see the call sites in world.js,
 // creatures.js and projectiles.js.
 function shockVulnerability(target, now) {
-  return effectMagnitude(target, SHOCK, now) || 0;
+  return (effectMagnitude(target, SHOCK, now) || 0) + (effectMagnitude(target, MARKED, now) || 0);
 }
 
 function applyDamageWithEffects(target, raw, element, mit = NO_MITIGATION, now, source = null) {
