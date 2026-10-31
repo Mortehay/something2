@@ -82,7 +82,7 @@ function fakeConcepts(kept = null) {
 // A box fake. `statuses` is the sequence getSheetJob walks through (the last
 // one repeats); everything else answers like the captured Wolf job.
 function fakeBox({ statuses = [{ status: 'done' }], ...over } = {}) {
-  const calls = { concept: [], create: [], avail: [], redraw: [], get: [], sheet: 0, atlas: 0 };
+  const calls = { concept: [], create: [], avail: [], redraw: [], get: [], cancel: [], sheet: 0, atlas: 0 };
   let i = 0;
   const box = {
     calls,
@@ -108,6 +108,7 @@ function fakeBox({ statuses = [{ status: 'done' }], ...over } = {}) {
     },
     fetchSheet: async () => { calls.sheet += 1; return { ok: true, png: WOLF_SHEET }; },
     fetchAtlas: async () => { calls.atlas += 1; return { ok: true, atlas: WOLF_ATLAS }; },
+    cancelSheetJob: async (_p, id) => { calls.cancel.push(id); return { ok: true }; },
     ...over,
   };
   return box;
@@ -356,6 +357,7 @@ test('queue wait beyond the queue cap fails with a resumable message', async () 
   assert.equal(queue.log.failed.length, 1);
   assert.match(queue.log.failed[0].message,
     /^still waiting behind other box jobs after [\d.]+ h — the box job box-1 may still run; re-queue to resume it$/);
+  assert.deepEqual(box.calls.cancel, [], 'the queued box job is kept so a re-queue resumes its place in line');
 });
 
 test('default queue cap is 6 hours', () => {
@@ -1169,4 +1171,123 @@ test('2D (no sheet_method) never asks for a turnaround', async () => {
   const { d } = dispatcherFor({ rows: [wolfRow()], box });
   await d.start();
   assert.deepEqual(box.calls3d.turnaround, []);
+});
+
+// SOMET-665: a row that fails after the box accepted its sheet job asks the
+// box to cancel that job (best effort), so it does not run on for nothing and
+// hold up everything queued after it. Not when the box itself ended the job,
+// and not at the queue cap (that job is kept for a re-queue to resume).
+const RUNNING = { status: 'running', progress: { pct: 30, message: 'cell 5/16' } };
+for (const [name, boxOver, opts, message] of [
+  ['stall', { statuses: [RUNNING] }, { stallMs: 20 }, /^box stalled/],
+  ['run deadline', {
+    createSheetJob: async () => ({ ok: true, boxJobId: 'box-1', cells: 1, estimatedSeconds: 0 }),
+    getSheetJob: (() => { let n = 0; return async () => ({ ok: true, job: { status: 'running', progress: { pct: (n += 1) } } }); })(),
+  }, { cellTimeoutMs: 10 }, /timed out/],
+  ['non-retryable poll error', { statuses: [RUNNING, { ok: false, status: 401, error: 'GPU box answered 401' }] }, {}, /401/],
+  ['5xx poll error', { statuses: [{ ok: false, status: 500, error: 'GPU box answered 500' }] }, {}, /500/],
+]) {
+  test(`a sheet job that fails on ${name} is cancelled on the box`, async () => {
+    const box = fakeBox(boxOver);
+    const { d, queue } = dispatcherFor({ rows: [wolfRow()], box, ...opts });
+    await d.start();
+    assert.equal(queue.log.failed.length, 1);
+    assert.match(queue.log.failed[0].message, message);
+    assert.deepEqual(box.calls.cancel, ['box-1']);
+  });
+}
+
+test('attachBox failing after the box accepted the sheet job cancels that job', async () => {
+  const box = fakeBox();
+  const { d, queue } = dispatcherFor({ rows: [wolfRow()], box });
+  queue.attachBox = async () => { throw new Error('insert or update on table "sprite_sets" violates foreign key constraint'); };
+  await d.start();
+  assert.match(queue.log.failed[0].message, /foreign key/);
+  assert.deepEqual(box.calls.cancel, ['box-1']);
+});
+
+test('attachBox failing on a reused-concept sheet job cancels that job', async () => {
+  const kept = {
+    concept_key: 'sprites/Grey_Wolf/old/concept.png', box_concept_path: 'images/kept.png', provider_id: 9, box_origin: 'http://box.test:8001',
+  };
+  const box = fakeBox();
+  const { d, queue } = dispatcherFor({
+    rows: [wolfRow()], box, concepts: fakeConcepts(kept), store: fakeStore({ [kept.concept_key]: CONCEPT_PNG }),
+  });
+  queue.attachBox = async () => { throw new Error('db gone'); };
+  await d.start();
+  assert.equal(box.calls.concept.length, 0, 'the kept concept was reused');
+  assert.match(queue.log.failed[0].message, /db gone/);
+  assert.deepEqual(box.calls.cancel, ['box-1']);
+});
+
+test('a manifest the dispatcher rejects after the job is done is not cancelled', async () => {
+  const box = fakeBox({ fetchAtlas: async () => ({ ok: true, atlas: { nonsense: true } }) });
+  const { d, queue } = dispatcherFor({ rows: [wolfRow()], box });
+  await d.start();
+  assert.match(queue.log.failed[0].message, /^box sheet rejected/);
+  assert.deepEqual(box.calls.cancel, []);
+});
+
+test('a job the box failed is not cancelled', async () => {
+  const box = fakeBox({ statuses: [RUNNING, { status: 'failed', error: 'OOM' }] });
+  const { d, queue } = dispatcherFor({ rows: [wolfRow()], box });
+  await d.start();
+  assert.equal(queue.log.failed[0].message, 'box job failed: OOM');
+  assert.deepEqual(box.calls.cancel, []);
+});
+
+test('a completed row cancels nothing', async () => {
+  const box = fakeBox();
+  const { d, queue } = dispatcherFor({ rows: [wolfRow()], box });
+  await d.start();
+  assert.equal(queue.log.completed.length, 1);
+  assert.deepEqual(box.calls.cancel, []);
+});
+
+for (const [name, cancelSheetJob] of [
+  ['answers an error', async () => ({ ok: false, error: 'box down', retryable: true })],
+  ['throws', async () => { throw new Error('socket hang up'); }],
+]) {
+  test(`a cancel that ${name} is logged and the row keeps its own error`, async () => {
+    const box = fakeBox({ statuses: [RUNNING], cancelSheetJob });
+    const { d, queue } = dispatcherFor({ rows: [wolfRow()], box, stallMs: 20 });
+    const logged = [];
+    const orig = console.error;
+    console.error = (m) => logged.push(String(m));
+    try { await d.start(); } finally { console.error = orig; }
+    assert.match(queue.log.failed[0].message, /^box stalled/);
+    assert.equal(d.status().failed, 1);
+    assert.ok(logged.some((m) => /could not cancel box job box-1/.test(m)), logged.join('\n'));
+  });
+}
+
+test('a concept failure has no sheet job to cancel', async () => {
+  const box = fakeBox({
+    generateConcept: async () => ({ ok: false, error: 'GPU box concept task ran for over 900s without finishing', retryable: true }),
+  });
+  const { d, queue } = dispatcherFor({ rows: [wolfRow()], box });
+  await d.start();
+  assert.match(queue.log.failed[0].message, /^GPU box concept task ran for over 900s/);
+  assert.deepEqual(box.calls.create, []);
+  assert.deepEqual(box.calls.cancel, []);
+});
+
+// SOMET-664: a concept may now wait hours behind other box work, so Halt must
+// reach into its poll instead of waiting for it.
+test('halt while the concept waits on the box requeues the row without a sheet job', async () => {
+  let d;
+  const box = fakeBox({
+    generateConcept: async (_p, _args, { shouldStop }) => {
+      d.halt();
+      assert.equal(shouldStop(), true);
+      return { ok: false, halted: true, error: 'halted' };
+    },
+  });
+  const made = dispatcherFor({ rows: [wolfRow()], box });
+  d = made.d;
+  await d.start();
+  assert.deepEqual(box.calls.create, []);
+  assert.deepEqual(made.queue.log.requeued, ['row-1']);
+  assert.deepEqual(made.queue.log.failed, []);
 });
