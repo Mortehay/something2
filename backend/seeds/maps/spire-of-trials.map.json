@@ -1808,16 +1808,51 @@
       ],
       "density": "dense",
       "boss": {
-        "entity": "The Bone Regent",
+        "entity": "Gorgon, the Thunder Titan",
         "x": 4950,
         "y": 4850,
-        "respawn_s": 900
+        "respawn_s": 1800
       },
       "waypoints": [
         {
           "x": 4650,
           "y": 4850,
           "name": "Spire Checkpoint: Floor 60"
+        }
+      ]
+    },
+    {
+      "key": "spire_f61",
+      "name": "Spire of Trials: Floor 61",
+      "grid": [
+        60,
+        40
+      ],
+      "seed": 8317,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Pestilent Deep",
+        "Fallen Sanctum"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Plague Swarm",
+        "Plague Skirmisher",
+        "Plague Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        130,
+        140
+      ],
+      "density": "dense",
+      "waypoints": [
+        {
+          "x": 4650,
+          "y": 4850,
+          "name": "Spire Checkpoint: Floor 61"
         }
       ]
     }
@@ -2127,6 +2162,11 @@
       "from": "spire_f59",
       "edge": "E",
       "to": "spire_f60"
+    },
+    {
+      "from": "spire_f60",
+      "edge": "E",
+      "to": "spire_f61"
     }
   ]
 }

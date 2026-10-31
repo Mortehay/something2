@@ -94,3 +94,41 @@ test('the ward refills the shield on a timer, only from phase 2', () => {
   p1._tickWard(c1, bal.WARD_INTERVAL_MS * 5);
   assert.strictEqual(c1.shield, 0, 'no ward in phase 1');
 });
+
+test('post bosses get phase shields and the ward from the same rules and numbers', () => {
+  const state = { phase: 1, lastWardAt: null };
+  const c = { hp: 1000000, maxHp: 1000000 };
+  assert.deepStrictEqual(bal.enduranceStep(state, c, 0), { phase: 1, phaseChanged: false, warded: false });
+  assert.strictEqual(c.shield, undefined);
+  c.hp = 700000; // below 75%
+  const r = bal.enduranceStep(state, c, 1000);
+  assert.strictEqual(r.phaseChanged, true);
+  assert.strictEqual(c.shield, 1000000 * bal.PHASE_SHIELD[2]);
+  assert.strictEqual(bal.enduranceStep(state, c, 1000 + bal.WARD_INTERVAL_MS - 1).warded, false);
+  const w = bal.enduranceStep(state, c, 1000 + bal.WARD_INTERVAL_MS);
+  assert.strictEqual(w.warded, true);
+  assert.strictEqual(c.shield, 1000000 * (bal.PHASE_SHIELD[2] + bal.WARD_FRACTION));
+});
+
+test('the Floor 60 gate speaks of the World Boss; other gates keep the plain wording', () => {
+  const g = require('../src/services/bossGate.js');
+  const f60 = { name: 'Spire of Trials: Floor 60', dungeon_boss: {} };
+  const f5 = { name: 'Spire of Trials: Floor 5', dungeon_boss: {} };
+  assert.match(g.sealedMessage(f60), /World Boss.*Floor 61/);
+  assert.match(g.openedMessage(f60), /passage to Floor 61/);
+  assert.match(g.sealedMessage(f5), /floor boss/);
+});
+
+test('a Spire floor may post a world boss; no other map may', () => {
+  const { validateMapSpec } = require('../seeds/mapSpec.js');
+  const mk = (name) => ({
+    name: 't', topology: 'x',
+    worlds: [{ key: 'a', name, grid: [0, 0], seed: 1, width: 96, height: 96, chunk_size: 32, biomes: ['Meadow'], biome_cell: 16, is_entry: true, level_band: [1, 5], density: 'sparse', boss: { entity: 'Ignis, the Magma Colossus', x: 4950, y: 4850, respawn_s: 600 } }],
+    links: [],
+  });
+  const tiers = new Map([['Ignis, the Magma Colossus', 'world']]);
+  const spire = (validateMapSpec(mk('Spire of Trials: Floor 60'), { bossTiers: tiers }) || []).filter((e) => /not a dungeon boss/.test(e));
+  const other = (validateMapSpec(mk('Some Other Place'), { bossTiers: tiers }) || []).filter((e) => /not a dungeon boss/.test(e));
+  assert.strictEqual(spire.length, 0);
+  assert.strictEqual(other.length, 1);
+});

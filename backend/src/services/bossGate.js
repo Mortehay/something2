@@ -52,4 +52,21 @@ function clearBeneficiaries(players, killerUserId, x, y) {
   return out;
 }
 
-module.exports = { isGatedWorld, mayPass, loadClearedBosses, recordBossClear, clearBeneficiaries, SHARE_RADIUS_PX };
+// What to tell a player at a sealed door / after the clear. The Floor 60 gate is
+// the endgame one: a world boss guards the way into Floor 61.
+function isWorldBossGate(row) {
+  return !!(row && row.dungeon_boss && /^Spire of Trials: Floor 60$/.test(String(row.name || '')));
+}
+function sealedMessage(row) {
+  return isWorldBossGate(row)
+    ? 'A World Boss guards the passage to Floor 61 — defeat it to enter.'
+    : 'The door is sealed — defeat the floor boss to go on.';
+}
+function openedMessage(row) {
+  return isWorldBossGate(row)
+    ? 'The World Boss falls — the passage to Floor 61 is open!'
+    : 'Floor boss defeated — the way forward is open!';
+}
+
+module.exports = {
+  isWorldBossGate, sealedMessage, openedMessage, isGatedWorld, mayPass, loadClearedBosses, recordBossClear, clearBeneficiaries, SHARE_RADIUS_PX };

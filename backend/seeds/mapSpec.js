@@ -166,7 +166,9 @@ function validateMapSpec(spec, {
       const tier = bossTiers.get(b.entity) ?? null;
       const want = /: End$/.test(w.name ?? '') ? 'dungeon_end'
         : /: Elite$/.test(w.name ?? '') ? 'dungeon_elite' : null;
-      if (!DUNGEON_BOSS_TIERS.includes(tier)) {
+      // The Spire's Floor 60 may post a WORLD boss: it guards the way to Floor 61.
+      const worldBossPost = tier === 'world' && /^Spire of Trials: Floor \d+$/.test(w.name ?? '');
+      if (!DUNGEON_BOSS_TIERS.includes(tier) && !worldBossPost) {
         errors.push(`${label} entity "${b.entity}" is not a dungeon boss `
           + `(boss_tier ${tier ?? 'NULL'}; needs dungeon_end or dungeon_elite)`);
       } else if (want && tier !== want) {

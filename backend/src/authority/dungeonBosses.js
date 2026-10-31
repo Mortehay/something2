@@ -12,6 +12,10 @@ const { hydrateCreatureRow, ENTITY_CATALOG_SELECT, CREATURE_SIZE } = require('./
 const { isClearOfPlayers, RESPAWN_MIN_PLAYER_DISTANCE } = require('../services/creatureRespawn.js');
 
 const DUNGEON_BOSS_TIERS = Object.freeze(['dungeon_end', 'dungeon_elite']);
+// A post may also hold a WORLD boss (the Spire's gate to Floor 61). It is placed
+// like any post boss but fights like a world boss: huge HP, phase shields, ward.
+const POST_TIERS = Object.freeze([...DUNGEON_BOSS_TIERS, 'world']);
+const balance = require('../services/bossBalance.js');
 const ID_PREFIX = 'boss:';
 
 function bossCreatureId(worldId) {
@@ -85,7 +89,7 @@ function parseDungeonBoss(raw) {
 function dungeonBossLevel(tier, levelMin, levelMax) {
   const lo = Number.isInteger(levelMin) && levelMin >= 1 ? levelMin : 1;
   const hi = Number.isInteger(levelMax) && levelMax >= lo ? levelMax : lo;
-  if (tier === 'dungeon_end') return hi;
+  if (tier === 'dungeon_end' || tier === 'world') return hi;
   return Math.min(hi, Math.ceil((lo + hi) / 2) + 1);
 }
 
@@ -95,7 +99,7 @@ async function loadDungeonBossRow(pool, name) {
   const r = await pool.query(
     `${ENTITY_CATALOG_SELECT}
       WHERE et.name = $1 AND et.is_creature = true AND et.boss_tier = ANY($2::text[])`,
-    [name, DUNGEON_BOSS_TIERS],
+    [name, POST_TIERS],
   );
   return r.rows[0] || null;
 }
@@ -166,7 +170,7 @@ class DungeonBossManager {
     if (existing) return existing;
 
     const row = await this.loadRow(spec.entity);
-    if (!row || !DUNGEON_BOSS_TIERS.includes(row.boss_tier)) {
+    if (!row || !POST_TIERS.includes(row.boss_tier)) {
       this._warnOnce(`row:${worldId}:${spec.entity}`,
         `dungeon boss: "${spec.entity}" (world ${worldId}) is not a dungeon_end/dungeon_elite creature; no boss placed`);
       return null;
@@ -200,7 +204,7 @@ class DungeonBossManager {
     if (quiet) hydrated.quietSpawn = true;
     sim.addCreatures([hydrated]);
     const creature = sim.get(id) || null;
-    this.records.set(worldId, { creatureId: id, deadUntil: null, creature, row, spec });
+    this.records.set(worldId, { creatureId: id, deadUntil: null, creature, row, spec, endurance: { phase: 1, lastWardAt: null } });
     // SOMET-626 (S13). Fresh placement only, same as the boss above -- never
     // re-summons a minion that is just on its own (short) cooldown.
     await this._placeMinions(entry, worldId, row, spec, quiet);
@@ -274,6 +278,18 @@ class DungeonBossManager {
       }
     }
     return kill;
+  }
+
+  // World-tier post bosses: enter each phase behind a shield and refill it with
+  // the ward on a timer (same rules and numbers as WorldBossManager, from
+  // services/bossBalance.js). Cheap enough for the 20 Hz tick: one Map lookup per
+  // world that has a post.
+  tickEndurance(worldId, now = this.clock()) {
+    const rec = this.records.get(worldId);
+    if (!rec || rec.deadUntil != null || !rec.creature || rec.row.boss_tier !== 'world') return null;
+    const c = rec.creature;
+    if (!(c.hp > 0)) return null;
+    return balance.enduranceStep(rec.endurance, c, now);
   }
 
   // A minion died (already out of the sim). Starts ITS OWN short respawn

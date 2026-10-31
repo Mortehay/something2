@@ -2,7 +2,7 @@
 // they hold.
 //
 // DESIGN TARGET. A character in top-end gear must need at least
-// MIN_FIGHT_SECONDS (5 minutes) of real fighting to kill a world boss. The
+// MIN_FIGHT_SECONDS (2.5 minutes now, see below) of real fighting to kill a world boss. The
 // fight is not a DPS check: HP, flat defense and elemental resistance are all
 // high, phases add shields, and a ward refills the shield on a timer so damage
 // has to come in bursts that break it, not as a slow trickle.
@@ -27,7 +27,9 @@ const REFERENCE = Object.freeze({
   uptime: 0.6,
 });
 
-const MIN_FIGHT_SECONDS = 300;
+// Was 300 (5 min). Halved with the HP: top-end gear now needs at least 2.5 minutes, about
+// 3 against the boss's weak element and 4 to 9 against anything else.
+const MIN_FIGHT_SECONDS = 150;
 
 // Shield granted on entering a phase, as a fraction of max HP, and the ward
 // that tops it back up on a timer in phases 2+.
@@ -41,19 +43,19 @@ const SHIELD_CAP_FRACTION = 0.08; // the shield never exceeds this share of max 
 // party has a reason to bring the right damage type.
 const WORLD_BOSSES = Object.freeze({
   'Ignis, the Magma Colossus': {
-    hp: 880000, defense: 1500, baseDamage: 420,
+    hp: 440000, defense: 1500, baseDamage: 420,
     resistances: { physical: 0.3, arcane: 0.3, lightning: 0.3, fire: 0.6, ice: 0 },
   },
   'Glacius, the Frost Leviathan': {
-    hp: 780000, defense: 1800, baseDamage: 350,
+    hp: 390000, defense: 1800, baseDamage: 350,
     resistances: { physical: 0.3, arcane: 0.3, lightning: 0.3, ice: 0.6, fire: 0 },
   },
   'Gorgon, the Thunder Titan': {
-    hp: 900000, defense: 1400, baseDamage: 450,
+    hp: 450000, defense: 1400, baseDamage: 450,
     resistances: { physical: 0.3, fire: 0.3, ice: 0.3, lightning: 0.6, arcane: 0 },
   },
   'Abyssor, the Voidreaver': {
-    hp: 1000000, defense: 1500, baseDamage: 520,
+    hp: 500000, defense: 1500, baseDamage: 520,
     resistances: { physical: 0.3, fire: 0.3, ice: 0.3, arcane: 0.6, lightning: 0 },
   },
 });
@@ -84,7 +86,46 @@ function expectedFightSeconds(boss, element = 'physical') {
   return seconds;
 }
 
+// Which phase an HP ratio is in (75 / 50 / 25 %), the same thresholds the world
+// boss event uses.
+function phaseForRatio(ratio) {
+  if (ratio <= 0.25) return 4;
+  if (ratio <= 0.5) return 3;
+  if (ratio <= 0.75) return 2;
+  return 1;
+}
+
+function addShield(creature, fraction) {
+  if (!creature || !(fraction > 0)) return;
+  const cap = creature.maxHp * SHIELD_CAP_FRACTION;
+  creature.shield = Math.min(cap, (creature.shield || 0) + creature.maxHp * fraction);
+}
+
+// One step of the endurance rules for a boss that is NOT managed by the world
+// boss event (a post boss). `state` is { phase, lastWardAt } kept by the owner.
+// Returns { phase, phaseChanged, warded } so the caller can announce.
+function enduranceStep(state, creature, now) {
+  const phase = phaseForRatio(creature.hp / (creature.maxHp || 1));
+  let phaseChanged = false;
+  let warded = false;
+  if (phase > state.phase) {
+    state.phase = phase;
+    phaseChanged = true;
+    addShield(creature, PHASE_SHIELD[phase] || 0);
+    state.lastWardAt = now;
+  } else if (state.phase >= 2) {
+    if (state.lastWardAt == null) state.lastWardAt = now;
+    if (now - state.lastWardAt >= WARD_INTERVAL_MS) {
+      state.lastWardAt = now;
+      addShield(creature, WARD_FRACTION);
+      warded = true;
+    }
+  }
+  return { phase: state.phase, phaseChanged, warded };
+}
+
 module.exports = {
+  phaseForRatio, addShield, enduranceStep,
   REFERENCE, MIN_FIGHT_SECONDS, PHASE_SHIELD, WARD_INTERVAL_MS, WARD_FRACTION, SHIELD_CAP_FRACTION,
   WORLD_BOSSES, hitAgainst, totalToughness, expectedFightSeconds,
 };

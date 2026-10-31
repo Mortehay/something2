@@ -1043,7 +1043,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
           bossGate.recordBossClear(pool, p.characterId, entry.worldId)
             .catch((e) => { p._bossCleared.delete(entry.worldId); console.error('recordBossClear', e); });
           const bws = entry.sockets.get(p.userId);
-          if (bws) send(bws, { type: 'announcement', text: 'Floor boss defeated — the way forward is open!' });
+          if (bws) send(bws, { type: 'announcement', text: bossGate.openedMessage(entry.row) });
         }
       }
       return Promise.resolve(null);
@@ -3388,7 +3388,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
               forwardTo: fwd ? fwd.toWorldId : null, cleared: p._bossCleared, isAdmin: !!(fws && fws.role === 'admin'),
             })) {
               p._doorwayCdUntil = now + 1500;
-              if (fws) send(fws, { type: 'announcement', text: 'The door is sealed — defeat the floor boss to go on.' });
+              if (fws) send(fws, { type: 'announcement', text: bossGate.sealedMessage(entry.row) });
               continue;
             }
             p._doorwayCdUntil = now + 1500;                       // suppress duplicate sends during reconnect
@@ -3509,6 +3509,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // session per waypoint re-walked. That is cheaper than the query priming
       // would need, and character_waypoints' composite primary key -- not this
       // latch -- is what actually makes a repeat harmless.
+      // Post bosses of world tier (the Spire's Floor 60 gate): phase shields + ward.
+      dungeonBosses.tickEndurance(entry.worldId, Date.now());
       // Teleport casts in progress: interrupt on movement or damage, finish at
       // 2.5s. Runs for every player each tick; a player with no cast costs one
       // property read.
