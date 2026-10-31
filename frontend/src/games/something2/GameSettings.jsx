@@ -43,7 +43,9 @@ const Panel = styled.div`
   right: 16px;
   z-index: 25;
   width: 360px;
-  max-height: 520px;
+  /* Never taller than the room under its anchor (top 338px + the 60px app header
+     + a 16px margin), so the new rows scroll inside instead of running off screen. */
+  max-height: max(240px, min(520px, calc(100vh - 414px)));
   display: flex;
   flex-direction: column;
   padding: 14px 16px 14px;
@@ -95,7 +97,8 @@ const TabButton = styled.button`
 const TabContent = styled.div`
   overflow-y: auto;
   padding-right: 4px;
-  max-height: 380px;
+  flex: 1 1 auto;
+  min-height: 0;
 
   &::-webkit-scrollbar {
     width: 6px;

@@ -5,7 +5,9 @@
 import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
 
 export const QUEST_PANEL_W = 760;
-export const QUEST_PANEL_H = 520;
+// 22px taller than the lists need: the bottom strip carries the Spire progress line.
+const FOOTER_H = 22;
+export const QUEST_PANEL_H = 542;
 const TITLE_H = 40;
 
 function truncateText(ctx, text, maxWidth) {
@@ -60,8 +62,8 @@ export function layoutQuestLog(state = {}) {
 
   const hitAreas = [{ ...close, kind: "questclose", id: null }];
 
-  const listArea = { x: px + 14, y: py + TITLE_H + 12, w: 260, h: QUEST_PANEL_H - TITLE_H - 26 };
-  const detailArea = { x: px + 288, y: py + TITLE_H + 12, w: QUEST_PANEL_W - 302, h: QUEST_PANEL_H - TITLE_H - 26 };
+  const listArea = { x: px + 14, y: py + TITLE_H + 12, w: 260, h: QUEST_PANEL_H - TITLE_H - 26 - FOOTER_H };
+  const detailArea = { x: px + 288, y: py + TITLE_H + 12, w: QUEST_PANEL_W - 302, h: QUEST_PANEL_H - TITLE_H - 26 - FOOTER_H };
 
   const itemH = 44;
   const itemGap = 6;
