@@ -2044,7 +2044,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
               else if (v.specKey === 'ashen_oasis') name = 'Astronomer Zahir';
               else if (v.specKey === 'blackfen') name = 'Shadow Hunter';
               return {
-                villageId: v.id, x: v.questGiverX, y: v.questGiverY,
+                villageId: v.id, villageKey: v.specKey || null, x: v.questGiverX, y: v.questGiverY,
                 name,
                 art: 'quest_giver',
               };

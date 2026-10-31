@@ -4649,22 +4649,37 @@ export class RenderSystem {
   _drawQuestTrackerHUD(ctx, trackedQuest, player, camera) {
     if (!ctx || !trackedQuest) return;
 
-    const VILLAGE_COORDS = {
-      sunspire: { col: 32, row: 32, x: 1024, y: 1024, name: "Sunspire Valley" },
-      emberfall: { col: 120, row: 40, x: 3840, y: 1280, name: "Emberfall Volcanic Ridge" },
-      sylvan_haven: { col: 40, row: 120, x: 1280, y: 3840, name: "Sylvan Haven Redwood" },
-      abyssal_tideport: { col: 140, row: 140, x: 4480, y: 4480, name: "Abyssal Tideport" },
-      ashen_oasis: { col: 180, row: 60, x: 5760, y: 1920, name: "Ashen Oasis Ruins" },
-      blackfen: { col: 200, row: 200, x: 6400, y: 6400, name: "Blackfen Abyssal Marsh" },
+    // Where to go comes from the SERVER (questsClient.fetchQuestRoute ->
+    // services/questRoute.js): the distance is the walking distance across every
+    // map on the way, not just the one on screen. The hardcoded village table
+    // that used to live here held coordinates for maps that do not exist.
+    const route = this.questRoute && this.questRoute.questKey === trackedQuest.key
+      ? this.questRoute : null;
+    const pcx = player ? (player.x || 0) + (player.width || 0) / 2 : 0;
+    const pcy = player ? (player.y || 0) + (player.height || 0) / 2 : 0;
+    let loc = null;      // compass point in THIS world (px)
+    let distM = null;    // total walking distance, tiles ("m")
+    let whereLine = "";
+    if (route && route.found && route.first) {
+      loc = route.first;
+      const totalPx = Math.hypot(route.first.x - pcx, route.first.y - pcy) + (route.restPx || 0);
+      distM = Math.max(1, Math.round(totalPx / 100));
+      const verb = route.mode === "turn_in" ? "Turn in" : route.mode === "gather" ? "Gather" : "Start";
+      const maps = Math.max(0, (route.hops ? route.hops.length : 1) - 1);
+      whereLine = `${verb}: ${route.placeName || "?"}${maps > 0 ? ` (+${maps} map${maps > 1 ? "s" : ""})` : ""}`;
+    } else if (route && route.mode === "field") {
+      whereLine = "Hunt in the field";
+    } else if (route && route.found === false) {
+      whereLine = "Destination unknown";
+    }
+    const fit = (text, maxW) => {
+      if (ctx.measureText(text).width <= maxW) return text;
+      let s = text;
+      while (s.length > 1 && ctx.measureText(`${s}…`).width > maxW) s = s.slice(0, -1);
+      return `${s}…`;
     };
 
-    const px = player ? (player.x || (player.col || 32) * 32) : 1024;
-    const py = player ? (player.y || (player.row || 32) * 32) : 1024;
-
-    const loc = VILLAGE_COORDS[trackedQuest.village_key] || VILLAGE_COORDS.sunspire;
-    const distM = Math.max(1, Math.floor(Math.hypot(loc.x - px, loc.y - py) / 32));
-
-    const w = 230;
+    const w = 262;
     const h = 78;
     // Positioned in top-left corner with 16px margins, matching game UI button styling
     const x = 16;
@@ -4710,9 +4725,7 @@ export class RenderSystem {
     // Quest Title
     ctx.fillStyle = "#ffffff";
     ctx.font = "bold 12px monospace";
-    const titleText = (ctx.measureText(trackedQuest.title).width > w - 24)
-      ? trackedQuest.title.slice(0, 20) + "…"
-      : trackedQuest.title;
+    const titleText = fit(trackedQuest.title, w - 24);
     ctx.fillText(titleText, x + 12, y + 26);
 
     // Objective progress
@@ -4721,18 +4734,17 @@ export class RenderSystem {
     ctx.fillStyle = "#60a5fa";
     ctx.font = "11px monospace";
     const objRaw = `🎯 ${trackedQuest.objective || trackedQuest.description} (${progCnt}/${targetCnt})`;
-    const objStr = (ctx.measureText(objRaw).width > w - 24)
-      ? objRaw.slice(0, 26) + "…"
-      : objRaw;
-    ctx.fillText(objStr, x + 12, y + 43);
+    ctx.fillText(fit(objRaw, w - 24), x + 12, y + 43);
 
-    // Distance and Location
+    // Distance (summed over every map on the way) and where to go
     ctx.fillStyle = "#a7f3d0";
     ctx.font = "11px monospace";
-    ctx.fillText(`↗ ${distM}m • ${loc.name}`, x + 12, y + 59);
+    const distLine = distM != null ? `↗ ${distM}m • ${whereLine}` : (whereLine ? `• ${whereLine}` : "");
+    if (distLine) ctx.fillText(fit(distLine, w - 24), x + 12, y + 59);
 
-    // Draw Screen Edge Compass Arrow pointing toward target
-    if (camera && player) {
+    // Draw Screen Edge Compass Arrow pointing toward the next point to walk to
+    // (the doorway out of this map, or the destination itself when it is here)
+    if (camera && player && loc) {
       const targetScreen = worldToScreen(loc.x, loc.y);
       const camScreenX = targetScreen.x - camera.x;
       const camScreenY = targetScreen.y - camera.y;

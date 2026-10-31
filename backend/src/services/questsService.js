@@ -477,6 +477,7 @@ async function abandonQuest(pool, characterId, questKeyOrId) {
 }
 
 module.exports = {
+  findQuest,
   recordNode,
   doneNodeKeys,
   recordFloor,

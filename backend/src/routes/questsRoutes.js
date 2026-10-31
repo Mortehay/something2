@@ -20,7 +20,11 @@ const {
   completeQuest,
   abandonQuest,
   clearRewardPending,
+  findQuest,
 } = require('../services/questsService.js');
+const { routeToTargets, questTarget } = require('../services/questRoute.js');
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function sendError(res, err, what) {
   if (err instanceof QuestError) {
@@ -56,6 +60,35 @@ function createQuestsRouter(pool, { dropRewardItem = async () => false } = {}) {
       res.json({ ok: true, quests });
     } catch (err) {
       sendError(res, err, 'list quests');
+    }
+  });
+
+  // GET /api/quests/route?characterId=&questKey=&worldId=&x=&y=
+  // Where the tracker should point, as a distance across the whole world graph
+  // (see services/questRoute.js). Position and world come from the client: the
+  // answer is only a navigation hint, and nothing is granted by it.
+  router.get('/route', guard, async (req, res) => {
+    try {
+      const character = await characterOr403(req, res, req.query.characterId);
+      if (!character) return;
+      const x = Number(req.query.x), y = Number(req.query.y);
+      const worldId = String(req.query.worldId || '');
+      if (!UUID.test(worldId) || !Number.isFinite(x) || !Number.isFinite(y)) {
+        return res.status(400).json({ ok: false, error: 'worldId, x and y are required' });
+      }
+      const quest = await findQuest(pool, req.query.questKey);
+      const cqRes = await pool.query(
+        'SELECT status, progress_count FROM character_quests WHERE character_id = $1 AND quest_id = $2',
+        [character.id, quest.id],
+      );
+      const target = questTarget(quest, cqRes.rows[0] || null);
+      if (target.mode === 'field' || target.mode === 'done') {
+        return res.json({ ok: true, found: false, mode: target.mode });
+      }
+      const route = await routeToTargets(pool, { worldId, x, y }, target);
+      res.json({ ok: true, mode: target.mode, ...route });
+    } catch (err) {
+      sendError(res, err, 'route to quest');
     }
   });
 

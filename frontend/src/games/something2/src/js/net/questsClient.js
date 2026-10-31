@@ -59,3 +59,20 @@ export async function completeQuest(characterId, questKey, legacyChoice = null) 
   if (!res.ok) throw await failure(res, 'complete quest');
   return await res.json();
 }
+
+// Where the tracker should point: walking distance across the whole world
+// graph (every map on the way), computed by the server. Resolves to the route
+// object, or null when the request fails -- a missing hint must never break play.
+export async function fetchQuestRoute(characterId, questKey, worldId, x, y) {
+  if (!characterId || !questKey || !worldId) return null;
+  const qs = new URLSearchParams({
+    characterId: String(characterId), questKey, worldId, x: String(Math.round(x)), y: String(Math.round(y)),
+  });
+  try {
+    const res = await fetch(`/api/quests/route?${qs}`, { headers: authHeaders() });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}

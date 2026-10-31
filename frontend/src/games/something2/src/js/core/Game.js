@@ -58,7 +58,7 @@ import { createSkillVisual, updateSkillVisuals, pruneSkillVisuals } from "./skil
 import { API_URL } from "../../../../../config.js";
 import { GameArt } from "../systems/gameArt.js";
 import { fetchGameArt } from "../net/gameArtClient.js";
-import { fetchAllQuests, fetchCharacterQuests, startQuest, completeQuest, abandonQuest } from "../net/questsClient.js";
+import { fetchAllQuests, fetchCharacterQuests, startQuest, completeQuest, abandonQuest, fetchQuestRoute } from "../net/questsClient.js";
 import { findWorldBossCreature } from "./worldBossMatch.js";
 import { EntityAnimState, noteFrameEvents } from "../systems/entityAnimState.js";
 
@@ -592,6 +592,8 @@ export class Game {
         this.state = "playing";
         this.chunked = true;
         this.worldId = worldId;
+        this.questRoute = null; this._questRouteSig = null;
+        if (this.renderSystem) this.renderSystem.questRoute = null;
         // Game audio (spec §3). One engine per Game; a re-entry (new world)
         // swaps its world rather than building a second AudioContext.
         if (!this.audio) {
@@ -2020,6 +2022,7 @@ export class Game {
                 activeQuestKey: this.activeQuestKey,
                 legacyChoice: (this.progression && this.progression.legacyChoice) || this.legacyChoice || null,
                 questScroll: this.questLogScrollY || 0,
+                trackedQuestKey: this.trackedQuestKey || null,
                 // SOMET-493. `enabled` false short-circuits the whole pass in
                 // RenderSystem, so a player who never turns it on pays one
                 // property read per frame.
@@ -2210,22 +2213,58 @@ export class Game {
                 this.activeQuestKey = activeQ.key;
             }
             this._refreshQuestMarkers();
+            this._refreshQuestRoute();
         } catch (err) {
             if (!silent) this.showToast(`Quest Log: ${err.message}`);
         }
     }
 
-    // "?" on the quest givers when something can be turned in, else "!" when a
-    // quest is open to take at the current level. One marker for every giver:
-    // quests carry a village_key string while givers carry a numeric villageId,
-    // so a per-giver match is not possible yet.
+    // "?" over a quest giver when one of ITS village's quests can be turned in, else
+    // "!" when one is open to take at the current level.
     _refreshQuestMarkers() {
-        const quests = this.allQuests || [];
+        const all = this.allQuests || [];
         const level = (this.progression && this.progression.level) || 1;
-        const ready = quests.some((q) => q.status === "active" && (q.progress_count || 0) >= (q.target_count || 1));
-        const open = quests.some((q) => q.status === "available" && (q.required_level || 1) <= level);
-        const marker = ready ? "?" : (open ? "!" : null);
-        for (const qg of (this.questGivers || [])) qg.marker = marker;
+        const markerFor = (quests) => {
+            const ready = quests.some((q) => q.status === "active" && (q.progress_count || 0) >= (q.target_count || 1));
+            const open = quests.some((q) => q.status === "available" && (q.required_level || 1) <= level);
+            return ready ? "?" : (open ? "!" : null);
+        };
+        for (const qg of (this.questGivers || [])) {
+            // A giver speaks for the quests of its own village; when none are
+            // authored for it (a village the quest catalogue does not name) it
+            // falls back to the whole list rather than going silent.
+            const mine = qg.villageKey ? all.filter((q) => q.village_key === qg.villageKey) : [];
+            qg.marker = markerFor(mine.length ? mine : all);
+        }
+    }
+
+    // Ask the server how far the tracked quest's destination is (summed over
+    // every map on the way). Re-asked only when something that changes the answer
+    // changes (quest, its state, the world), never per frame; the HUD keeps the
+    // live total itself from the player's position.
+    _refreshQuestRoute(force = false) {
+        const quests = this.allQuests || [];
+        const q = quests.find((x) => x.key === this.trackedQuestKey)
+            || quests.find((x) => x.status === 'active');
+        const setRoute = (route) => {
+            this.questRoute = route;
+            if (this.renderSystem) this.renderSystem.questRoute = route;
+        };
+        if (!q || !this.characterId || !this.worldId || !this.player) {
+            this._questRouteSig = null;
+            setRoute(null);
+            return;
+        }
+        const met = (q.progress_count || 0) >= (q.target_count || 1);
+        const sig = `${q.key}|${q.status}|${met}|${this.worldId}`;
+        if (!force && sig === this._questRouteSig) return;
+        this._questRouteSig = sig;
+        const cx = (this.player.x || 0) + (this.player.width || 0) / 2;
+        const cy = (this.player.y || 0) + (this.player.height || 0) / 2;
+        fetchQuestRoute(this.characterId, q.key, this.worldId, cx, cy).then((route) => {
+            if (this._questRouteSig !== sig) return; // superseded while in flight
+            setRoute(route && route.ok !== false ? { ...route, questKey: q.key } : null);
+        });
     }
 
     // The server accepted a use of a quest node: dim it so the player can see
@@ -2244,6 +2283,7 @@ export class Game {
             const q = (this.allQuests || []).find((x) => x.key === u.key);
             if (q) q.progress_count = u.progress;
             this._refreshQuestMarkers();
+            this._refreshQuestRoute();
             if (u.progress >= u.target) {
                 this.showToast(`✔ Objective complete: ${u.title} — turn it in (J)`, 4000);
             } else if (u.progress === 1 || u.progress % 5 === 0) {
@@ -3271,6 +3311,12 @@ export class Game {
                 if (hit) {
                     if (hit.kind === 'questclose') {
                         this.closeQuestLog();
+                        return;
+                    }
+                    if (hit.kind === 'quest_toggle_track') {
+                        this.trackedQuestKey = hit.questKey;
+                        this._refreshQuestRoute(true);
+                        this.showToast('📌 Tracking: ' + (((this.allQuests || []).find((q) => q.key === hit.questKey) || {}).title || hit.questKey));
                         return;
                     }
                     if (hit.kind === 'selectquest') {
