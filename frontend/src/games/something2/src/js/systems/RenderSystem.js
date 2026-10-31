@@ -4672,16 +4672,54 @@ export class RenderSystem {
     } else if (route && route.found === false) {
       whereLine = "Destination unknown";
     }
-    const fit = (text, maxW) => {
-      if (ctx.measureText(text).width <= maxW) return text;
-      let s = text;
-      while (s.length > 1 && ctx.measureText(`${s}…`).width > maxW) s = s.slice(0, -1);
-      return `${s}…`;
+    const w = 300;
+    const textW = w - 24;
+    // Word-wrap into at most `maxLines` lines; only the very last line is ever
+    // cut with an ellipsis, so the player reads the whole objective instead of
+    // "Slay 25 Rogue Bandits near Sunspir…".
+    const wrap = (text, font, maxLines) => {
+      ctx.font = font;
+      const words = String(text || "").split(/\s+/).filter(Boolean);
+      const lines = [];
+      let cur = "";
+      const cut = (s) => {
+        if (ctx.measureText(s).width <= textW) return s;
+        let t = s;
+        while (t.length > 1 && ctx.measureText(`${t}…`).width > textW) t = t.slice(0, -1);
+        return `${t}…`;
+      };
+      for (const word of words) {
+        const next = cur ? `${cur} ${word}` : word;
+        if (cur && ctx.measureText(next).width > textW) { lines.push(cur); cur = word; } else cur = next;
+      }
+      if (cur) lines.push(cur);
+      if (lines.length > maxLines) {
+        const kept = lines.slice(0, maxLines);
+        kept[maxLines - 1] = cut(`${kept[maxLines - 1]} ${lines.slice(maxLines).join(" ")}`);
+        return kept;
+      }
+      return lines.map(cut);
     };
 
-    const w = 262;
-    // A third info line (where/what) once a distance is shown above it.
-    const h = distM != null ? 94 : 78;
+    const TITLE_FONT = "bold 12px monospace";
+    const BODY_FONT = "11px monospace";
+    const targetCnt = trackedQuest.target_count || 1;
+    const progCnt = Math.min(trackedQuest.progress_count || 0, targetCnt);
+    const left = Math.max(0, targetCnt - progCnt);
+    const titleLines = wrap(trackedQuest.title, TITLE_FONT, 2);
+    const objLines = wrap(`🎯 ${trackedQuest.objective || trackedQuest.description || ""}`, BODY_FONT, 3);
+    // What is left to do, in one short line.
+    const progressLine = targetCnt > 1
+      ? (left > 0 ? `Progress ${progCnt}/${targetCnt} • ${left} left` : `Progress ${progCnt}/${targetCnt} • done`)
+      : (left > 0 ? "Not done yet" : "Objective done");
+    const distLine = distM != null
+      ? `${distM}m${routeMaps > 0 ? ` • +${routeMaps} map${routeMaps > 1 ? "s" : ""}` : ""}`
+      : "";
+    const whereLines = whereLine ? wrap(whereLine, BODY_FONT, 2) : [];
+
+    const LH = 15;
+    const h = 10 + 14 + titleLines.length * LH + 2 + objLines.length * 14 + 16
+      + (distLine ? 17 : 0) + whereLines.length * 14 + 10;
     // Positioned in top-left corner with 16px margins, matching game UI button styling
     const x = 16;
     const y = 16;
@@ -4723,28 +4761,53 @@ export class RenderSystem {
     ctx.font = "bold 11px monospace";
     ctx.fillText(`📌 TRACKED: Act ${trackedQuest.act}`, x + 12, y + 10);
 
-    // Quest Title
+    // Quest title (wrapped)
+    let ty = y + 24;
     ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 12px monospace";
-    const titleText = fit(trackedQuest.title, w - 24);
-    ctx.fillText(titleText, x + 12, y + 26);
+    ctx.font = TITLE_FONT;
+    for (const line of titleLines) { ctx.fillText(line, x + 12, ty); ty += LH; }
 
-    // Objective progress
-    const targetCnt = trackedQuest.target_count || 1;
-    const progCnt = trackedQuest.progress_count || 0;
+    // Objective (wrapped) and what is left
+    ty += 2;
     ctx.fillStyle = "#60a5fa";
-    ctx.font = "11px monospace";
-    const objRaw = `🎯 ${trackedQuest.objective || trackedQuest.description} (${progCnt}/${targetCnt})`;
-    ctx.fillText(fit(objRaw, w - 24), x + 12, y + 43);
+    ctx.font = BODY_FONT;
+    for (const line of objLines) { ctx.fillText(line, x + 12, ty); ty += 14; }
+    ctx.fillStyle = left > 0 ? "#fbbf24" : "#4ade80";
+    ctx.font = "bold 11px monospace";
+    ctx.fillText(progressLine, x + 12, ty);
+    ty += 16;
 
-    // Distance (summed over every map on the way) and where to go
+    // Distance (summed over every map on the way) behind an arrow that turns
+    // toward the next point to walk to, then where/what to do there.
     ctx.fillStyle = "#a7f3d0";
-    ctx.font = "11px monospace";
-    // Two lines: how far (summed over every map on the way) and where/what.
-    const mapsNote = routeMaps > 0 ? ` • +${routeMaps} map${routeMaps > 1 ? "s" : ""}` : "";
-    const distLine = distM != null ? `↗ ${distM}m${mapsNote}` : "";
-    if (distLine) ctx.fillText(fit(distLine, w - 24), x + 12, y + 59);
-    if (whereLine) ctx.fillText(fit(whereLine, w - 24), x + 12, distLine ? y + 74 : y + 59);
+    ctx.font = BODY_FONT;
+    if (distLine) {
+      if (loc && player) {
+        // Heading on screen (the world is isometric): player -> next point.
+        const a = worldToScreen(pcx, pcy);
+        const b = worldToScreen(loc.x, loc.y);
+        const heading = Math.atan2(b.y - a.y, b.x - a.x);
+        ctx.save();
+        ctx.translate(x + 19, ty + 6);
+        ctx.rotate(heading);
+        ctx.beginPath();
+        ctx.moveTo(8, 0);
+        ctx.lineTo(-6, -6);
+        ctx.lineTo(-3, 0);
+        ctx.lineTo(-6, 6);
+        ctx.closePath();
+        ctx.fillStyle = "#f59e0b";
+        ctx.fill();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.restore();
+      }
+      ctx.fillStyle = "#a7f3d0";
+      ctx.fillText(distLine, x + 34, ty);
+      ty += 17;
+    }
+    for (const line of whereLines) { ctx.fillText(line, x + 12, ty); ty += 14; }
 
     // Draw Screen Edge Compass Arrow pointing toward the next point to walk to
     // (the doorway out of this map, or the destination itself when it is here)

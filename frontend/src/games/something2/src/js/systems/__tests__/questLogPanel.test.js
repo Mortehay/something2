@@ -172,7 +172,7 @@ describe("layoutQuestLog", () => {
     expect(filledCard).not.toBeNull();
     expect(filledCard.x).toBe(16);
     expect(filledCard.y).toBe(16);
-    expect(filledCard.w).toBe(262);
+    expect(filledCard.w).toBe(300);
   });
 });
 
@@ -214,6 +214,32 @@ describe("quest tracker HUD destination line", () => {
     expect(draw({ found: true, mode: "turn_in", placeName: "Vale Crossing", first: { x: 1032, y: 3032 }, restPx: 0, hops: ["Vale Crossing"], sameWorld: true })
       .some((s) => s.includes("Turn in: Vale Crossing"))).toBe(true);
     expect(draw({ found: false, mode: "hunt", huntLabel: "boss" }).some((s) => s.includes("No boss found yet"))).toBe(true);
+  });
+
+  it("long objectives wrap instead of being cut, and the remaining count is shown", () => {
+    const quest = { key: "q1", act: 1, title: "Bandit Encampment Cull", objective: "Slay 25 Rogue Bandits near Sunspire Crossing and the old watchtower", target_count: 25, progress_count: 3 };
+    const t = draw(null, quest);
+    expect(t.some((s) => s.includes("…"))).toBe(false);
+    const objective = t.filter((s) => /Slay|Sunspire|watchtower|old/.test(s)).join(" ");
+    expect(objective).toContain("watchtower");
+    expect(t.some((s) => s.includes("Progress 3/25 • 22 left"))).toBe(true);
+  });
+
+  it("the arrow turns toward the next point: opposite targets give opposite headings", () => {
+    const headings = [];
+    const run = (first) => {
+      const ctx = {
+        save() {}, restore() {}, beginPath() {}, roundRect() {}, rect() {}, moveTo() {}, lineTo() {}, arcTo() {}, closePath() {}, fill() {}, stroke() {}, translate() {}, arc() {},
+        rotate: (a) => headings.push(a), fillText() {}, measureText: (t) => ({ width: String(t).length * 6 }),
+      };
+      const rs = Object.create(RenderSystem.prototype);
+      rs.questRoute = { questKey: "q1", found: true, mode: "turn_in", placeName: "Vale Crossing", first, restPx: 0, hops: ["Vale Crossing"], sameWorld: true };
+      rs._drawQuestTrackerHUD(ctx, { key: "q1", act: 1, title: "T", objective: "o", target_count: 1 }, { x: 5000, y: 5000, width: 0, height: 0 }, null);
+    };
+    run({ x: 9000, y: 5000 });
+    run({ x: 1000, y: 5000 });
+    expect(headings.length).toBe(2);
+    expect(Math.abs(headings[0] - headings[1])).toBeGreaterThan(2);
   });
 
   it("a route fetched for a different quest is ignored", () => {
