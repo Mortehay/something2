@@ -61,6 +61,7 @@ import { fetchGameArt } from "../net/gameArtClient.js";
 import { fetchAllQuests, fetchCharacterQuests, startQuest, completeQuest, abandonQuest, fetchQuestRoute } from "../net/questsClient.js";
 import { findWorldBossCreature } from "./worldBossMatch.js";
 import { EntityAnimState, noteFrameEvents } from "../systems/entityAnimState.js";
+import { loadUiPrefs, saveUiPrefs, normalizeUiPrefs } from "./uiPrefs.js";
 
 // How long the "out of ammo" HUD flash stays up after the server's `noammo`
 // frame arrives.
@@ -103,7 +104,8 @@ const INSPECT_PIN_MS = 6000;
 // Healing up to this many HP at once is passive regeneration noise: no floating
 // text. Anything above it (a potion, a heal spell) is shown.
 export const MIN_HEAL_TEXT = 5;
-export const shouldShowHealText = (heal) => heal > MIN_HEAL_TEXT;
+// `threshold` is the player's own setting (uiPrefs.minHealText); 5 by default.
+export const shouldShowHealText = (heal, threshold = MIN_HEAL_TEXT) => heal > threshold;
 
 export const DEFAULT_KEYBINDS = {
     slot1: '1',
@@ -411,14 +413,23 @@ export class Game {
         this.toast = null;
         // Arrival banner: {name, levelText, startedAt, expiresAt} (performance.now()).
         this.locationBanner = null;
+        // Display preferences (settings tab): banner on/off, heal-text threshold, tracker width.
+        this.uiPrefs = loadUiPrefs();
         // Teleport cast in progress: {startedAt, durationMs} (performance.now()).
         this.teleportCast = null;
         this.teleportPending = null;
     }
 
     // "Thornbriar Reach / Monsters: level 3-9" for a few seconds on entering a world.
+    // Settings tab: apply and persist display preferences.
+    setUiPrefs(next) {
+        this.uiPrefs = normalizeUiPrefs(next);
+        saveUiPrefs(this.uiPrefs);
+        if (!this.uiPrefs.showLocationBanner) this.locationBanner = null;
+    }
+
     _announceLocation(loc) {
-        if (!loc || !loc.name) { this.locationBanner = null; return; }
+        if (!loc || !loc.name || (this.uiPrefs && this.uiPrefs.showLocationBanner === false)) { this.locationBanner = null; return; }
         const lo = Number.isFinite(loc.levelMin) ? loc.levelMin : null;
         const hi = Number.isFinite(loc.levelMax) ? loc.levelMax : null;
         let levelText = null;
@@ -1721,7 +1732,7 @@ export class Game {
                 // Passive regeneration arrives as a trickle of small gains every
                 // few ticks; only a substantial one (> MIN_HEAL_TEXT) is worth a
                 // floating number. HP bar and orb still move for every point.
-                if (shouldShowHealText(heal)) {
+                if (shouldShowHealText(heal, this.uiPrefs.minHealText)) {
                     const jitterX = (Math.random() - 0.5) * 12;
                     this.spawnFloatingText(this.player.x + jitterX, this.player.y - 25, `+${heal} HP`, '#4ade80', { size: 16, bold: true });
                 }
@@ -2060,6 +2071,7 @@ export class Game {
                 entityDefs: this.entityDefs,
                 toast: this.toast,
                 locationBanner: this.locationBanner,
+                trackerWidth: this.uiPrefs.trackerWidth,
                 teleportCast: this.teleportCast,
                 blasts: this.blasts,
                 // SOMET-528. Empty until a wave-granting node is allocated.
@@ -2105,6 +2117,7 @@ export class Game {
                 activeQuestKey: this.activeQuestKey,
                 legacyChoice: (this.progression && this.progression.legacyChoice) || this.legacyChoice || null,
                 questScroll: this.questLogScrollY || 0,
+                spireProgress: this.spireProgress || null,
                 trackedQuestKey: this.trackedQuestKey || null,
                 // SOMET-493. `enabled` false short-circuits the whole pass in
                 // RenderSystem, so a player who never turns it on pays one
@@ -2264,6 +2277,8 @@ export class Game {
                 this.legacyChoice = legacyChoice;
                 if (this.progression) this.progression.legacyChoice = legacyChoice;
             }
+            // Spire progress for the quest log footer (highest floor, next boss).
+            this.spireProgress = (charQuests && !Array.isArray(charQuests) && charQuests.spire) || this.spireProgress || null;
 
             const statusMap = new Map();
             for (const cq of charQuestsList) {

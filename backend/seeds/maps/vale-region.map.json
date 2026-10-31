@@ -92,7 +92,8 @@
       "biome_cell": 16,
       "allowed_creature_types": [
         "Bat",
-        "Skeleton"
+        "Skeleton",
+        "Wolf"
       ],
       "is_entry": false,
       "village": {

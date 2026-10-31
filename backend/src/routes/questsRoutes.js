@@ -23,6 +23,7 @@ const {
   findQuest,
 } = require('../services/questsService.js');
 const { routeToTargets, routeToHunt, questTarget } = require('../services/questRoute.js');
+const { spireProgress } = require('../services/spireProgress.js');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -102,7 +103,11 @@ function createQuestsRouter(pool, { dropRewardItem = async () => false, onLegacy
       const character = await characterOr403(req, res, req.params.characterId);
       if (!character) return;
       const data = await getCharacterQuests(pool, character.id);
-      res.json({ ok: true, ...data });
+      // Spire progress rides along for the quest log; a failure here must not
+      // take the quest list down with it.
+      let spire = null;
+      try { spire = await spireProgress(pool, character.id); } catch (e) { console.error('quests: spire progress failed:', e.message); }
+      res.json({ ok: true, ...data, spire });
     } catch (err) {
       sendError(res, err, 'load character quests');
     }

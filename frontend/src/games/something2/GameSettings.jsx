@@ -6,6 +6,7 @@ import styled from 'styled-components';
 import { HiOutlineCog6Tooth } from 'react-icons/hi2';
 import { DEFAULT_KEYBINDS } from './src/js/core/Game.js';
 import { loadVolumes, saveVolumes, applyVolumeChange } from './src/js/audio/audioSettings.js';
+import { loadUiPrefs, saveUiPrefs, normalizeUiPrefs, HEAL_TEXT_CHOICES, TRACKER_WIDTHS } from './src/js/core/uiPrefs.js';
 
 const LS_INSPECT = 'something2.settings.inspect';
 const LS_CONSTANT_ATTACK = 'something2.settings.constantAttack';
@@ -295,6 +296,15 @@ export default function GameSettings({ gameRef }) {
   const [keybinds, setKeybinds] = useState(() => readKeybinds());
   const [listeningAction, setListeningAction] = useState(null);
   const [volumes, setVolumesState] = useState(() => loadVolumes());
+  // Display preferences: location banner, heal-number threshold, tracker width.
+  const [uiPrefs, setUiPrefsState] = useState(() => loadUiPrefs());
+  const changeUiPref = useCallback((patch) => {
+    const next = normalizeUiPrefs({ ...uiPrefs, ...patch });
+    setUiPrefsState(next);
+    saveUiPrefs(next);
+    const game = gameRef.current;
+    if (game && game.setUiPrefs) game.setUiPrefs(next);
+  }, [uiPrefs, gameRef]);
 
   const inspectRef = useRef(inspect);
   useEffect(() => { inspectRef.current = inspect; });
@@ -473,6 +483,50 @@ export default function GameSettings({ gameRef }) {
                     <span className="hint">
                       Hold attack or skill buttons to keep attacking and casting skills continuously.
                     </span>
+                  </span>
+                </Row>
+
+                <Row>
+                  <input
+                    type="checkbox"
+                    checked={uiPrefs.showLocationBanner}
+                    onChange={(e) => changeUiPref({ showLocationBanner: e.target.checked })}
+                  />
+                  <span className="label">
+                    Location banner
+                    <span className="hint">
+                      Show the place name and monster level range when you enter a world.
+                    </span>
+                  </span>
+                </Row>
+
+                <Row as="div">
+                  <span className="label">
+                    Heal numbers
+                    <span className="hint">
+                      Small heals (passive regeneration) can be left without a floating number.
+                    </span>
+                    <select
+                      aria-label="Heal numbers"
+                      value={uiPrefs.minHealText}
+                      onChange={(e) => changeUiPref({ minHealText: Number(e.target.value) })}
+                    >
+                      {HEAL_TEXT_CHOICES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                    </select>
+                  </span>
+                </Row>
+
+                <Row as="div">
+                  <span className="label">
+                    Quest tracker width
+                    <span className="hint">The tracked quest card in the top-left corner.</span>
+                    <select
+                      aria-label="Quest tracker width"
+                      value={uiPrefs.trackerWidth}
+                      onChange={(e) => changeUiPref({ trackerWidth: Number(e.target.value) })}
+                    >
+                      {TRACKER_WIDTHS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                    </select>
                   </span>
                 </Row>
               </>

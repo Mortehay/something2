@@ -251,3 +251,15 @@ describe("quest tracker HUD destination line", () => {
     expect(texts.some((s) => s.includes("Elsewhere"))).toBe(false);
   });
 });
+
+describe("quest log Spire footer", () => {
+  it("shows the highest floor and the next boss", async () => {
+    const { spireLine, layoutQuestLog } = await import("../questLogPanel.js");
+    expect(spireLine({ highestFloor: 12, maxFloor: 61, nextBossFloor: 15 })).toBe("🗼 Spire: floor 12/61 · next boss: floor 15");
+    expect(spireLine({ highestFloor: 0, maxFloor: 61, nextBossFloor: 5 })).toContain("not entered yet");
+    expect(spireLine({ highestFloor: 61, maxFloor: 61, nextBossFloor: null })).toContain("all gate bosses defeated");
+    expect(spireLine(null)).toBeNull();
+    const layout = layoutQuestLog({ quests: [], spireProgress: { highestFloor: 3, maxFloor: 61, nextBossFloor: 5 } });
+    expect(layout.header.spireText).toContain("floor 3/61");
+  });
+});

@@ -33,12 +33,22 @@ function drawRoundedRect(ctx, x, y, w, h, r = 0) {
   }
 }
 
+// "Spire: floor 12/61 · next boss: floor 15" for the log's footer, or null when
+// the server sent no progress (the footer is then simply not drawn).
+export function spireLine(p) {
+  if (!p || !Number.isFinite(p.maxFloor) || p.maxFloor <= 0) return null;
+  const floor = p.highestFloor > 0 ? `floor ${p.highestFloor}/${p.maxFloor}` : "not entered yet";
+  const boss = p.nextBossFloor == null ? "all gate bosses defeated" : `next boss: floor ${p.nextBossFloor}`;
+  return `🗼 Spire: ${floor} · ${boss}`;
+}
+
 export function layoutQuestLog(state = {}) {
   const {
     quests = [],
     legacyChoice = null,
     activeQuestKey = null,
     questScroll = 0,
+    spireProgress = null,
   } = state;
 
   const px = (GAME_WIDTH - QUEST_PANEL_W) / 2;
@@ -217,6 +227,7 @@ export function layoutQuestLog(state = {}) {
     quests: questItems, selectedQuest, legacyChoice, actionButtons,
     totalH, maxScroll, scrollY,
     header: {
+      spireText: spireLine(spireProgress),
       titleText: "📜 Quest Log (Hotkey 'J')" + (quests.filter((q) => q.status === "completed" && q.title_reward).length ? ` · 👑 ${quests.filter((q) => q.status === "completed" && q.title_reward).length}` : ""),
       choiceText: legacyChoice === "city_restoration"
         ? "✨ Legacy: City Restoration (-15% Vendor Prices)"
@@ -284,6 +295,13 @@ export function drawQuestLog(ctx, layout) {
 
     ctx.fillStyle = "#34d399";
     ctx.fillText(choiceStr, badgeX + 8, badgeY + 4);
+  }
+
+  // Spire progress, in the panel's bottom margin.
+  if (header.spireText) {
+    ctx.font = "11px monospace";
+    ctx.fillStyle = "#93c5fd";
+    ctx.fillText(header.spireText, panel.x + 16, panel.y + panel.h - 18);
   }
 
   // Close Button (Sleek red glass button)

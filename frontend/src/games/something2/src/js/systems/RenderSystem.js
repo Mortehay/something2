@@ -317,7 +317,7 @@ export class RenderSystem {
     creatures = [], projectiles = [], mana = null, maxMana = null, showMana = true,
     stamina = null, maxStamina = null,
     weaponName = null, inventory = null, inventoryOpen = false, selectedItemId = null, inventoryView = null,
-    groundItems = [], gold = null, toast = null, locationBanner = null, teleportCast = null,
+    groundItems = [], gold = null, toast = null, locationBanner = null, teleportCast = null, trackerWidth = 300,
     blasts = [], ammo = null, noAmmoFlash = false, effects = null, vfx = [],
     // SOMET-528. Lingering melee waves; defaults to empty so every existing
     // caller and test renders exactly as before.
@@ -386,7 +386,7 @@ export class RenderSystem {
     // Floating Combat & Resource text (Damage numbers, heals, mana/stamina surge)
     floatingTexts = [],
     // Quest Log (hotkey 'J')
-    questLogOpen = false, quests = [], activeQuestKey = null, legacyChoice = null, questScroll = 0, trackedQuestKey = null,
+    questLogOpen = false, quests = [], activeQuestKey = null, legacyChoice = null, questScroll = 0, trackedQuestKey = null, spireProgress = null,
   }) {
     // SOMET-584. Set before anything below resolves art, including the
     // landmark body plan a few lines down.
@@ -727,12 +727,14 @@ export class RenderSystem {
         legacyChoice,
         activeQuestKey,
         questScroll,
+        spireProgress,
         trackedQuestKey,
       }, this._questHitAreas);
     }
 
     // Quest Tracker HUD Widget & Waypoint Pointer
     if (hasTrackedQuest) {
+      this.trackerWidth = trackerWidth;
       this._drawQuestTrackerHUD(this.ctx, trackedQuest, player, camera);
     }
 
@@ -4740,7 +4742,7 @@ export class RenderSystem {
     } else if (route && route.found === false) {
       whereLine = "Destination unknown";
     }
-    const w = 300;
+    const w = this.trackerWidth || 300;
     const textW = w - 24;
     // Word-wrap into at most `maxLines` lines; only the very last line is ever
     // cut with an ellipsis, so the player reads the whole objective instead of
