@@ -38,7 +38,7 @@
         "exp_reward": 2500,
         "gold_reward": 350,
         "is_side": false,
-        "item_reward": null,
+        "item_reward": "power-tinders",
         "key": "act1_core_whisper",
         "npc_key": "elder_sunspire",
         "objective": "Investigate ruins & defeat Corrupted Earth Elemental",
