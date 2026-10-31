@@ -514,6 +514,44 @@ const OBJECTIVES = {
 for (const q of QUESTS) {
   Object.assign(q, { objective_type: 'manual', target_key: null }, OBJECTIVES[q.key]);
   if (q.target_key === undefined) q.target_key = null;
+  q.is_side = false;
+  q.repeat_kind = 'none';
 }
+
+// Side quests: outside the main chain (is_side), no prerequisite, level-gated
+// only. Dailies reset when the UTC day rolls over (see migration 1714440828000).
+// Appended AFTER the main chain so QUESTS[0..28] stay the storyline.
+const side = (q) => ({
+  prerequisite_key: null, village_key: 'sunspire', npc_key: 'elder_sunspire',
+  passive_points_reward: 0, title_reward: null, target_key: null,
+  is_side: true, repeat_kind: 'none', ...q,
+});
+QUESTS.push(
+  side({
+    key: 'side_slime_patrol', act: 1, title: 'Slime Patrol',
+    description: 'The farmers want the fields clear again. Cull slimes around Sunspire Valley.',
+    objective: 'Slay 15 Slimes', objective_type: 'kill', target_key: 'Slime', target_count: 15,
+    required_level: 1, exp_reward: 900, gold_reward: 120,
+  }),
+  side({
+    key: 'side_skeleton_sweep', act: 1, title: 'Bone Sweep',
+    description: 'Restless skeletons wander the old ruins. Put ten of them back to rest.',
+    objective: 'Slay 10 Skeletons', objective_type: 'kill', target_key: 'Skeleton', target_count: 10,
+    required_level: 3, exp_reward: 1400, gold_reward: 200,
+  }),
+  side({
+    key: 'daily_pest_control', act: 1, title: 'Daily: Pest Control',
+    description: 'The guard captain posts a fresh pest bounty every dawn. Defeat 20 creatures of any kind.',
+    objective: 'Defeat 20 creatures', objective_type: 'kill_any', target_count: 20,
+    required_level: 1, exp_reward: 1500, gold_reward: 250, repeat_kind: 'daily',
+  }),
+  side({
+    key: 'daily_champion_hunt', act: 2, title: 'Daily: Champion Hunt',
+    description: 'A named foe is terrorising the roads. Bring down one boss today.',
+    objective: 'Defeat 1 boss', objective_type: 'boss', target_count: 1,
+    required_level: 15, exp_reward: 9000, gold_reward: 1500, repeat_kind: 'daily',
+    village_key: 'emberfall', npc_key: 'lord_thorn',
+  }),
+);
 
 module.exports = { QUESTS, OBJECTIVES };

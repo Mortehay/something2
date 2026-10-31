@@ -77,8 +77,15 @@ async function getCharacterQuests(pool, characterId) {
   // - locked: prerequisite quest not completed yet
   const quests = rawQuests.map((q, idx) => {
     let status = q.raw_status;
+    // A daily finished before today is offered again from zero.
+    if (status === 'completed' && dailyDue(q, q.completed_at)) {
+      status = 'available';
+      q = { ...q, progress_count: 0 };
+    }
     if (!status) {
-      const prereqKey = q.prerequisite_key || (idx > 0 ? rawQuests[idx - 1].key : null);
+      // A side quest has no implicit "previous quest" prerequisite.
+      const prereqKey = q.prerequisite_key
+        || (!q.is_side && idx > 0 ? rawQuests[idx - 1].key : null);
       if (!prereqKey || completedKeys.has(prereqKey)) {
         status = 'available';
       } else {
@@ -105,9 +112,16 @@ async function getCharacterQuests(pool, characterId) {
   };
 }
 
+// A repeat_kind 'daily' quest that was completed on an earlier UTC day.
+function dailyDue(quest, completedAt, now = new Date()) {
+  if (quest.repeat_kind !== 'daily' || !completedAt) return false;
+  const startOfToday = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  return new Date(completedAt).getTime() < startOfToday;
+}
+
 async function checkPrerequisiteCompleted(pool, characterId, quest) {
   let prereqKey = quest.prerequisite_key;
-  if (!prereqKey) {
+  if (!prereqKey && !quest.is_side) {
     const prevRes = await pool.query(
       'SELECT key FROM quests WHERE (act < $1 OR (act = $1 AND id < $2)) ORDER BY act DESC, id DESC LIMIT 1',
       [quest.act, quest.id],
@@ -137,7 +151,21 @@ async function startQuest(pool, characterId, questKeyOrId) {
     'SELECT * FROM character_quests WHERE character_id = $1 AND quest_id = $2',
     [characterId, quest.id],
   );
-  if (existing.rows.length > 0) return existing.rows[0];
+  if (existing.rows.length > 0) {
+    const row = existing.rows[0];
+    if (row.status === 'completed' && dailyDue(quest, row.completed_at)) {
+      // Guarded on status so a double click resets once, not twice.
+      const reset = await pool.query(
+        `UPDATE character_quests
+            SET status = 'active', progress_count = 0, completed_at = NULL
+          WHERE character_id = $1 AND quest_id = $2 AND status = 'completed'
+          RETURNING *`,
+        [characterId, quest.id],
+      );
+      if (reset.rows[0]) return reset.rows[0];
+    }
+    return row;
+  }
 
   // Enforce sequential unlocking and the level gate.
   await checkPrerequisiteCompleted(pool, characterId, quest);
@@ -361,6 +389,7 @@ async function abandonQuest(pool, characterId, questKeyOrId) {
 }
 
 module.exports = {
+  dailyDue,
   recordKill,
   abandonQuest,
   QuestError,
