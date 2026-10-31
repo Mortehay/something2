@@ -55,6 +55,16 @@ flush). Cross-process traffic is then limited to:
 - **Routing**: a join for world W reaches the owner. The client already
   reconnects on world transitions, so the join handshake answers "connect to
   process X" instead of the authority proxying frames. No frame-level relay.
+  (Verified: on a `transition` frame, `GameShell.jsx` re-runs `enterWorld`,
+  which closes the old connection and opens a new one.)
+- **Arrival hand-off**: `pendingArrivals` (`server.js`) is a Map local to the
+  process. It carries the arrival point **and the player's hp/mana/stamina** from
+  the world they leave to the world they join. Across processes it has to move
+  with them. It is player state, so it goes in **Postgres** (one row per
+  transition, written before the `transition` frame and consumed by the
+  destination join), not in a TTL'd Redis key. If that hand-off were lost, the
+  join would fall back to the persisted spawn with full vitals, which is a free
+  heal on every portal.
 - **Session registry**: today's single-session kick is a local Map. Across
   processes it becomes `authority:user:<id>:session` plus a pub/sub "kick"
   message to the process holding the old session.
@@ -158,6 +168,6 @@ Until then, keep `ammo.js`'s "Why not Redis" note and this doc as the answer to
 - **Now, Redis-independent (recommended ticket):** awaited SIGTERM/SIGINT drain
   in `index.js` → authority `close()`; closes the "KNOWN GAP" in `server.js`.
 - **On trigger:** (0) audit count-then-act paths that assume one process (starting with `creatureRespawn.enqueueDeficit`); (a) Redis client + `REDIS_URL` for backend in both compose
-  files; (b) world-ownership lease + self-evict; (c) join routing to the owner;
+  files; (b) world-ownership lease + self-evict; (c) join routing to the owner + Postgres arrival hand-off;
   (d) cross-process session registry + kick; (e) pub/sub invalidation; (f) global
   scheduler lease. Each is a separate ticket, in that order.
