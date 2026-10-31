@@ -231,6 +231,70 @@ test('generateConcept: a task seen queued that then drops out of the gateway cou
   assert.match(r.error, /^GPU box concept task ran for over \d+s without finishing$/);
 });
 
+// Review finding (SOMET-664 rework): a failed gateway READ is not evidence the
+// task left the queue. One blip mid-queue must not start the run clock.
+test('generateConcept: one gateway 5xx while queued does not start the run clock', async () => {
+  const base = timedConceptRoutes([['queued', 120], ['running', 10], ['done', 1]]);
+  let n = 0;
+  const routes = {
+    ...base,
+    'GET /api/model-gateway': (...a) => { n += 1; return n === 3 ? json({ detail: 'blip' }, 502) : base['GET /api/model-gateway'](...a); },
+  };
+  const { fetchImpl } = fakeBox(routes);
+  const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, timeoutMs: 40, pollMs: 5, queueCapMs: 5000 });
+  assert.equal(r.ok, true, r.error);
+  assert.ok(n > 3, 'the gateway was read again after the blip');
+});
+
+test('generateConcept: a gateway that keeps failing after the task was listed falls back to the run timeout', async () => {
+  let n = 0;
+  const routes = {
+    ...timedConceptRoutes([['queued', 1]]),
+    'GET /api/model-gateway': () => {
+      n += 1;
+      return n <= 2 ? json({ pending: [{ task_id: TASK }] }) : json({ detail: 'down' }, 500);
+    },
+  };
+  const { fetchImpl } = fakeBox(routes);
+  const t = Date.now();
+  const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, timeoutMs: 40, pollMs: 5, queueCapMs: 60000 });
+  assert.match(r.error, /^GPU box concept task ran for over \d+s without finishing$/);
+  assert.ok(Date.now() - t < 5000, 'did not wait for the queue cap');
+});
+
+test('generateConcept: a transient task-status failure mid-poll is retried, not fatal', async () => {
+  for (const blip of [() => json({ detail: 'bad gateway' }, 502), () => { throw new Error('ECONNRESET'); }]) {
+    const base = timedConceptRoutes([['queued', 60], ['running', 10], ['done', 1]]);
+    let n = 0;
+    const key = `GET /api/task-status/${TASK}`;
+    const routes = { ...base, [key]: (...a) => { n += 1; return n === 3 ? blip() : base[key](...a); } };
+    const { fetchImpl } = fakeBox(routes);
+    // eslint-disable-next-line no-await-in-loop
+    const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, timeoutMs: 40, pollMs: 5, queueCapMs: 5000 });
+    assert.equal(r.ok, true, r.error);
+  }
+});
+
+test('generateConcept: task-status failing for the whole run timeout gives up with the box error', async () => {
+  const routes = { ...timedConceptRoutes([['queued', 1]]), [`GET /api/task-status/${TASK}`]: () => json({ detail: 'down' }, 502) };
+  const { fetchImpl } = fakeBox(routes);
+  const t = Date.now();
+  const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, timeoutMs: 40, pollMs: 5, queueCapMs: 60000 });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /502/);
+  assert.equal(r.retryable, true);
+  assert.ok(Date.now() - t < 5000, 'did not wait for the queue cap');
+});
+
+test('generateConcept: a 4xx from task-status still fails at once', async () => {
+  let n = 0;
+  const routes = { ...timedConceptRoutes([['queued', 1]]), [`GET /api/task-status/${TASK}`]: () => { n += 1; return json({ detail: 'no' }, 401); } };
+  const { fetchImpl } = fakeBox(routes);
+  const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, timeoutMs: 40, pollMs: 5, queueCapMs: 60000 });
+  assert.match(r.error, /401/);
+  assert.equal(n, 1);
+});
+
 test('generateConcept stops reading the gateway once the task runs', async () => {
   const gatewayCalls = [];
   const { fetchImpl } = fakeBox(timedConceptRoutes([['queued', 30], ['running', 60], ['done', 1]], { gatewayCalls }));

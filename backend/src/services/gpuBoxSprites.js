@@ -144,13 +144,18 @@ async function resolveConceptModel(provider, opts = {}) {
 // run timeout as lost rather than waiting out the queue cap. `shouldStop()` true ends the poll
 // with { ok: false, halted: true } (the box has no cancel for these tasks, so
 // it may still run there).
-// 'running', 'queued' or 'absent', from the box's model gateway: its
+// A failed read is not evidence either way: a transient task-status failure
+// (network, 5xx, 409/429) is polled through, and a failed gateway read keeps a
+// listed task queued -- each only until it has lasted a whole timeoutMs, so a
+// box or gateway that stays down still fails instead of waiting out the cap.
+// 'running', 'queued', 'absent' or 'unknown', from the box's model gateway: its
 // `pending` list holds every unfinished task, with `running: true` once a
 // worker has it (seen live 2026-10-31: listed without `running` while queued,
-// then running, then gone at SUCCESS). A failed read counts as absent.
+// then running, then gone at SUCCESS). A failed read is 'unknown'.
 async function taskState(provider, taskId, fetchImpl) {
   const r = await callJson(provider, 'GET', '/api/model-gateway', { fetchImpl });
-  const pending = r.ok && r.json && Array.isArray(r.json.pending) ? r.json.pending : [];
+  if (!r.ok) return 'unknown';
+  const pending = r.json && Array.isArray(r.json.pending) ? r.json.pending : [];
   const t = pending.find((x) => x && x.task_id === taskId);
   if (!t) return 'absent';
   return t.running === true ? 'running' : 'queued';
@@ -162,11 +167,21 @@ async function pollTaskImage(provider, taskId, label, {
   const queuedSince = Date.now();
   let runningSince = null;
   let listed = false;
+  let statusFailSince = null;
+  let gatewayFailSince = null;
   for (;;) {
     if (shouldStop && shouldStop()) return { ok: false, halted: true, error: 'halted' };
     // eslint-disable-next-line no-await-in-loop
     const st = await callJson(provider, 'GET', `/api/task-status/${encodeURIComponent(taskId)}`, { fetchImpl });
-    if (!st.ok) return st;
+    if (!st.ok) {
+      if (!(st.retryable || st.status >= 500)) return st;
+      if (statusFailSince === null) statusFailSince = Date.now();
+      if (Date.now() - statusFailSince >= timeoutMs) return { ...st, retryable: true };
+      // eslint-disable-next-line no-await-in-loop
+      await sleep(pollMs);
+      continue; // eslint-disable-line no-continue
+    }
+    statusFailSince = null;
     const status = String(st.json && st.json.status || '').toUpperCase();
     if (status === 'SUCCESS') {
       const url = st.json.result && st.json.result.url;
@@ -195,9 +210,13 @@ async function pollTaskImage(provider, taskId, label, {
     if (runningSince === null && status === 'PENDING') {
       // eslint-disable-next-line no-await-in-loop
       const state = await taskState(provider, taskId, fetchImpl);
+      if (state !== 'unknown') gatewayFailSince = null;
+      else if (gatewayFailSince === null) gatewayFailSince = Date.now();
       if (state === 'queued') listed = true;
-      queued = state === 'queued' || (state === 'absent' && !listed);
-      if (state === 'absent' && !listed && Date.now() - queuedSince >= timeoutMs) {
+      const unseen = !listed && (state === 'absent' || state === 'unknown');
+      const blip = listed && state === 'unknown' && Date.now() - gatewayFailSince < timeoutMs;
+      queued = state === 'queued' || unseen || blip;
+      if (unseen && Date.now() - queuedSince >= timeoutMs) {
         return { ok: false, error: `GPU box ${label} task is not in the box's queue after ${Math.round(timeoutMs / 1000)}s; it may be lost`, retryable: true };
       }
     }
