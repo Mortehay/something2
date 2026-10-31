@@ -32,12 +32,35 @@ async function loadClearedBosses(pool, characterId) {
   return new Set(r.rows.map((x) => x.world_id));
 }
 
+// Resolves true when this is the character's FIRST clear of that boss.
 async function recordBossClear(pool, characterId, worldId) {
-  await pool.query(
+  const r = await pool.query(
     `INSERT INTO character_boss_clears (character_id, world_id) VALUES ($1, $2)
      ON CONFLICT DO NOTHING`,
     [characterId, worldId],
   );
+  return r.rowCount > 0;
+}
+
+// First-clear reward: gold, a thousand per floor (Floor 5 pays 5,000; Floor 60
+// pays 60,000). Paid once per character per boss, with the clear itself.
+const GOLD_PER_FLOOR = 1000;
+function firstClearGold(floor) {
+  return Number.isInteger(floor) && floor > 0 ? floor * GOLD_PER_FLOOR : 0;
+}
+
+// Gold is an account balance (users.gold), the same one quest rewards pay into.
+// Resolves the new balance, or null when the character does not exist.
+async function awardGold(pool, characterId, amount) {
+  if (!(amount > 0)) return null;
+  const r = await pool.query(
+    `UPDATE users SET gold = gold + $2
+       FROM characters c
+      WHERE c.id = $1 AND users.id = c.user_id
+      RETURNING users.gold`,
+    [characterId, amount],
+  );
+  return r.rows[0] ? Number(r.rows[0].gold) : null;
 }
 
 // Who gets credit for a boss death at (x, y): the killer plus everyone close.
@@ -69,4 +92,5 @@ function openedMessage(row) {
 }
 
 module.exports = {
+  firstClearGold, awardGold, GOLD_PER_FLOOR,
   isWorldBossGate, sealedMessage, openedMessage, isGatedWorld, mayPass, loadClearedBosses, recordBossClear, clearBeneficiaries, SHARE_RADIUS_PX };

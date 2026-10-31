@@ -1040,10 +1040,22 @@ function attachAuthority(httpServer, pool, opts = {}) {
           if (!p._bossCleared) p._bossCleared = new Set();
           if (p._bossCleared.has(entry.worldId)) continue;
           p._bossCleared.add(entry.worldId);
-          bossGate.recordBossClear(pool, p.characterId, entry.worldId)
-            .catch((e) => { p._bossCleared.delete(entry.worldId); console.error('recordBossClear', e); });
           const bws = entry.sockets.get(p.userId);
           if (bws) send(bws, { type: 'announcement', text: bossGate.openedMessage(entry.row) });
+          // First clear of this boss pays gold (once per character); the wallet
+          // frame and a second notice follow once the write lands.
+          const reward = bossGate.firstClearGold(floorFromWorldName(entry.row.name));
+          bossGate.recordBossClear(pool, p.characterId, entry.worldId)
+            .then(async (first) => {
+              if (!first || !reward) return;
+              const gold = await bossGate.awardGold(pool, p.characterId, reward);
+              const sock = entry.sockets.get(p.userId);
+              if (sock && gold != null) {
+                send(sock, { type: 'wallet', gold });
+                send(sock, { type: 'announcement', text: `First clear reward: +${reward.toLocaleString('en-US')} gold` });
+              }
+            })
+            .catch((e) => { p._bossCleared.delete(entry.worldId); console.error('recordBossClear', e); });
         }
       }
       return Promise.resolve(null);

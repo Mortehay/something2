@@ -74,12 +74,12 @@ export function drawMinimap(ctx, {
       const q = questMarkers.find(
         (m) => m.villageKey === v.key || (v.name && m.villageKey && v.name.toLowerCase().includes(m.villageKey.toLowerCase()))
       );
-      if (q && q.status !== 'completed') {
+      if (q && q.marker) {
         ctx.save();
-        ctx.fillStyle = q.status === 'active' ? '#60a5fa' : '#f59e0b';
+        ctx.fillStyle = q.marker === '?' ? '#60a5fa' : '#f59e0b';
         ctx.font = 'bold 11px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText(q.status === 'active' ? '?' : '!', x, y - 6);
+        ctx.fillText(q.marker, x, y - 6);
         ctx.restore();
       }
     }

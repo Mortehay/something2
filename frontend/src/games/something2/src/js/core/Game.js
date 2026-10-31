@@ -62,6 +62,7 @@ import { fetchAllQuests, fetchCharacterQuests, startQuest, completeQuest, abando
 import { findWorldBossCreature } from "./worldBossMatch.js";
 import { EntityAnimState, noteFrameEvents } from "../systems/entityAnimState.js";
 import { loadUiPrefs, saveUiPrefs, normalizeUiPrefs } from "./uiPrefs.js";
+import { questMarkerFor, villageMarkers } from "./questMarkers.js";
 
 // How long the "out of ammo" HUD flash stays up after the server's `noammo`
 // frame arrives.
@@ -505,8 +506,18 @@ export class Game {
         return this.authorityClient.sendTeleportCast() !== false;
     }
 
+    // Fades out the rising cast sound, if one is playing.
+    _stopCastCue() {
+        if (this._castStop) { try { this._castStop(); } catch { /* already stopped */ } }
+        this._castStop = null;
+    }
+
     cancelTeleportCast() {
         const was = !!this.teleportCast || !!this.teleportPending;
+        if (this.teleportCast) {
+            this._stopCastCue();
+            if (this.audio) this.audio.playCue('cast-cancel');
+        }
         // A cancel that beats the server's "started" answer is replayed when it
         // arrives (the server handles start on a chain and cancel immediately).
         this._teleportAborted = !!this.teleportPending && !this.teleportCast;
@@ -526,12 +537,18 @@ export class Game {
         if (msg.type === 'teleportCastStarted') {
             const now = performance.now();
             this.teleportCast = { startedAt: now, durationMs: Number(msg.durationMs) || 2500 };
+            this._stopCastCue();
+            this._castStop = this.audio ? this.audio.playCue('cast-start') : null;
         } else if (msg.type === 'teleportReady') {
             this.teleportCast = null;
+            this._stopCastCue();
+            if (this.audio) this.audio.playCue('cast-ready');
             if (this.onTeleportReady) this.onTeleportReady(msg);
         } else if (msg.type === 'teleportCancelled') {
             const had = !!this.teleportCast;
             this.teleportCast = null;
+            this._stopCastCue();
+            if (had && this.audio) this.audio.playCue('cast-cancel');
             const why = { moved: 'you moved', hurt: 'you took damage', poor: 'not enough mana', input: null }[msg.reason];
             if (had && why) this._showToast(`Teleport interrupted: ${why}`);
         }
@@ -1142,15 +1159,10 @@ export class Game {
                 y: qg.y,
                 name: qg.name || 'Elder Eldrin',
             })),
-            questMarkers: (this.allQuests || []).map((q) => ({
-                id: q.id,
-                key: q.key,
-                title: q.title,
-                act: q.act,
-                status: q.status || 'available',
-                npcKey: q.npc_key || q.start_npc_key,
-                villageKey: q.village_key,
-            })),
+            // One entry per village with something to do: { villageKey, marker }
+            // where marker is "?" (turn in) or "!" (open to take at this level),
+            // by the same rule as the markers above the quest givers.
+            questMarkers: villageMarkers(this.allQuests, (this.progression && this.progression.level) || 1),
         };
     }
 
@@ -2322,11 +2334,7 @@ export class Game {
     _refreshQuestMarkers() {
         const all = this.allQuests || [];
         const level = (this.progression && this.progression.level) || 1;
-        const markerFor = (quests) => {
-            const ready = quests.some((q) => q.status === "active" && (q.progress_count || 0) >= (q.target_count || 1));
-            const open = quests.some((q) => q.status === "available" && (q.required_level || 1) <= level);
-            return ready ? "?" : (open ? "!" : null);
-        };
+        const markerFor = (quests) => questMarkerFor(quests, level);
         for (const qg of (this.questGivers || [])) {
             // A giver speaks for the quests of its own village; when none are
             // authored for it (a village the quest catalogue does not name) it

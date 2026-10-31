@@ -13,6 +13,7 @@ import { BiomeTracker } from './biomeTracker.js';
 import { MissLog } from './missLog.js';
 import { DEFAULT_VOLUMES } from './audioSettings.js';
 import { postMisses as defaultPostMisses } from './audioClient.js';
+import { playCue } from './castCues.js';
 
 const FADE_S = 2;
 const BIOME_SAMPLE_MS = 500;
@@ -134,6 +135,13 @@ export class AudioEngine {
   }
 
   setVolumes(v) { this.vol = { ...this.vol, ...v }; this._ensureCtx(); this._applyGains(); }
+
+  // A synthesised UI cue (see castCues.js) on the SFX bus, so the SFX/master
+  // volume and mute settings apply. Returns a stop() or null.
+  playCue(name) {
+    const ctx = this._ensureCtx();
+    return ctx && this.bus ? playCue(ctx, this.bus.sfx, name) : null;
+  }
   volumes() { return { ...this.vol }; }
 
   // Fix (review round 1, SOMET-590): unlock() ONLY creates/resumes the

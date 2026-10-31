@@ -37,7 +37,7 @@ test('recording is idempotent and loading returns the world ids', async () => {
   const rows = new Map();
   const pool = {
     query: async (sql, params) => {
-      if (/INSERT INTO character_boss_clears/.test(sql)) { rows.set(`${params[0]}:${params[1]}`, params[1]); return { rowCount: 1 }; }
+      if (/INSERT INTO character_boss_clears/.test(sql)) { const k = `${params[0]}:${params[1]}`; const had = rows.has(k); rows.set(k, params[1]); return { rowCount: had ? 0 : 1 }; }
       if (/SELECT world_id FROM character_boss_clears/.test(sql)) {
         return { rows: [...rows.entries()].filter(([k]) => k.startsWith(`${params[0]}:`)).map(([, w]) => ({ world_id: w })) };
       }
@@ -48,4 +48,26 @@ test('recording is idempotent and loading returns the world ids', async () => {
   await g.recordBossClear(pool, 7, 'w5');
   assert.deepStrictEqual([...await g.loadClearedBosses(pool, 7)], ['w5']);
   assert.strictEqual((await g.loadClearedBosses(pool, 8)).size, 0);
+});
+
+test('the first clear reports true, a repeat false', async () => {
+  const seen = new Set();
+  const pool = { query: async (sql, p) => { const k = `${p[0]}:${p[1]}`; const had = seen.has(k); seen.add(k); return { rowCount: had ? 0 : 1 }; } };
+  assert.strictEqual(await g.recordBossClear(pool, 1, 'w5'), true);
+  assert.strictEqual(await g.recordBossClear(pool, 1, 'w5'), false);
+  assert.strictEqual(await g.recordBossClear(pool, 2, 'w5'), true, 'per character');
+});
+
+test('first-clear gold is a thousand per floor and paid onto the account', async () => {
+  assert.strictEqual(g.firstClearGold(5), 5000);
+  assert.strictEqual(g.firstClearGold(60), 60000);
+  assert.strictEqual(g.firstClearGold(null), 0);
+  assert.strictEqual(g.firstClearGold(0), 0);
+  const calls = [];
+  const pool = { query: async (sql, p) => { calls.push({ sql, p }); return { rows: [{ gold: '12500' }] }; } };
+  assert.strictEqual(await g.awardGold(pool, 9, 5000), 12500);
+  assert.match(calls[0].sql, /UPDATE users SET gold = gold \+ \$2/);
+  assert.deepStrictEqual(calls[0].p, [9, 5000]);
+  assert.strictEqual(await g.awardGold(pool, 9, 0), null, 'no query for nothing');
+  assert.strictEqual(calls.length, 1);
 });

@@ -2711,6 +2711,21 @@ export class RenderSystem {
     const y = Math.round(s.y - 78);
     const ctx = this.ctx;
     ctx.save();
+    // A glow on the ground that tightens and brightens as the cast fills: a
+    // ring closing in on the caster, plus a soft violet pool under the feet.
+    if (typeof ctx.ellipse === "function") {
+      const ringR = 62 - 34 * frac;
+      const pulse = 0.65 + 0.35 * Math.sin(now * 0.012);
+      ctx.beginPath();
+      ctx.ellipse(s.x, s.y + 26, ringR, ringR * 0.5, 0, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(167, 139, 250, ${0.35 + 0.5 * frac})`;
+      ctx.lineWidth = 2 + 2 * frac;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.ellipse(s.x, s.y + 26, 30, 15, 0, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(139, 92, 246, ${(0.12 + 0.28 * frac) * pulse})`;
+      ctx.fill();
+    }
     ctx.fillStyle = "rgba(10, 10, 24, 0.85)";
     ctx.fillRect(x - 1, y - 1, w + 2, h + 2);
     ctx.fillStyle = "#8b5cf6";
