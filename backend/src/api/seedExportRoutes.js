@@ -155,7 +155,10 @@ module.exports = function seedExportRoutes(pool, { processStartedAt, store, boxD
     try { res.json(await repairGroup(groupId)); } finally { release(); }
   }));
 
-  router.post('/groups/:id/seed', withGroup(async (req, res) => {
+  // One decision per previewed row: audio alone is ~10k rows, past the app's
+  // global 256kb. index.js skips that parser for this path; this one runs
+  // after the router's requireAdmin.
+  router.post('/groups/:id/seed', express.json({ limit: '8mb' }), withGroup(async (req, res) => {
     const decisions = req.body && req.body.decisions;
     if (!validDecisions(decisions)) {
       return res.status(400).json({ error: 'decisions must be an object of row uuid -> decision string' });

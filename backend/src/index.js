@@ -130,11 +130,15 @@ app.use(apiRateLimiter(300, 60 * 1000, { skip: isAssetRequest }));
 // body) was fully buffered and parsed before the 404 was produced, and
 // backend RSS jumped from ~37MiB to ~181MiB for that one request.
 //
-// 256kb comfortably covers every route's legitimate payload. A path-scoped
-// override used to run ahead of this for the map-entities bulk upload route
-// (SOMET-233 removed that route as dead legacy-flat-map surface, so the
-// override went with it).
-app.use(express.json({ limit: '256kb' }));
+// 256kb comfortably covers every route's legitimate payload but one: the
+// seed/export apply (POST /api/seed-export/groups/:id/seed) carries one
+// decision per previewed row, and the audio group alone previews ~10k rows
+// (~550kb). That route is skipped here and parses its own larger body inside
+// seedExportRoutes, AFTER requireAdmin -- so the bigger ceiling is never
+// reachable unauthenticated.
+const SEED_APPLY_PATH = /^\/api\/seed-export\/groups\/[^/]+\/seed$/;
+const globalJson = express.json({ limit: '256kb' });
+app.use((req, res, next) => (SEED_APPLY_PATH.test(req.path) ? next() : globalJson(req, res, next)));
 app.use(express.urlencoded({ limit: '256kb', extended: true }));
 
 // Database setup
