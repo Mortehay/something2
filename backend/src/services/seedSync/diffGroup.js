@@ -653,5 +653,5 @@ async function diffGroup(db, groupId) {
 }
 
 module.exports = {
-  diffGroup, computeDiff, validateDoc, tableOf, gitOf, localByKeyOf, KINDS, DEFAULTS, OWNER_MISSING,
+  diffGroup, computeDiff, validateDoc, UUID_RE, tableOf, gitOf, localByKeyOf, KINDS, DEFAULTS, OWNER_MISSING,
 };

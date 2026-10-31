@@ -547,3 +547,36 @@ dbTest('GET /groups forwards the maps box note', async ({ pool, admin, dir }) =>
     await pool.query("DELETE FROM map_spec_state WHERE spec_name = 'sx-routes-note'");
   }
 });
+
+dbTest('POST repair fixes a stale row_counts header; a duplicate key is refused and the file left alone', async ({ pool, admin }) => {
+  await pool.query("INSERT INTO quests (key, title, act, description) VALUES ('sx_r1', 'sx t', 1, 'sx d')");
+  await exportGroup(pool, 'quests');
+  const file = fileFor('quests');
+  const doc = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const n = doc.tables.quests.length;
+  // A hand-added row: the header still says the old count.
+  doc.tables.quests.push({ ...doc.tables.quests.find((r) => r.key === 'sx_r1'), key: 'sx_r2', sync_uuid: 'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA' });
+  fs.writeFileSync(file, JSON.stringify(doc, null, 2));
+  const app = appFor(pool);
+  const h = { Authorization: admin.auth };
+  const before = await request(app).get('/api/seed-export/groups').set(h);
+  assert.strictEqual(before.body.find((g) => g.id === 'quests').status, 'bad_file');
+
+  const fix = await request(app).post('/api/seed-export/groups/quests/repair').set(h);
+  assert.strictEqual(fix.status, 200, JSON.stringify(fix.body));
+  assert.strictEqual(fix.body.fixes.length, 2);
+  const fixed = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.strictEqual(fixed.header.row_counts.quests, n + 1);
+  assert.strictEqual(fixed.tables.quests.find((r) => r.key === 'sx_r2').sync_uuid, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+  const after = await request(app).get('/api/seed-export/groups').set(h);
+  assert.notStrictEqual(after.body.find((g) => g.id === 'quests').status, 'bad_file');
+
+  fixed.tables.quests.find((r) => r.key === 'sx_r2').key = 'sx_r1';
+  const text = JSON.stringify(fixed, null, 2);
+  fs.writeFileSync(file, text);
+  const refused = await request(app).post('/api/seed-export/groups/quests/repair').set(h);
+  assert.strictEqual(refused.status, 422);
+  assert.strictEqual(refused.body.code, 'bad_file');
+  assert.match(refused.body.error, /^Can't fix automatically: .*duplicate key/);
+  assert.strictEqual(fs.readFileSync(file, 'utf8'), text);
+});

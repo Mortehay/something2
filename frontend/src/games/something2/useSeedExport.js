@@ -178,6 +178,15 @@ export const useExportGroup = () => useInvalidating(
   SEED_DATA_KEY,
 );
 
+// "Fix" of a bad_file group: the server repairs what has one right answer
+// (header counts, sync_uuids) or answers 422 with what needs a person.
+export const useRepairGroup = () => useInvalidating(
+  ({ groupId }) => call(`/groups/${encodeURIComponent(groupId)}/repair`, { method: "POST" }),
+  (r) => toast.success(r.fixes && r.fixes.length ? `Fixed ${r.file}:\n${r.fixes.join("\n")}` : `${r.file} needed no fix`,
+    { style: { whiteSpace: "pre-line" }, duration: 8000 }),
+  SEED_DATA_KEY,
+);
+
 export const useSeedMeta = () => useQuery({
   queryKey: ["seed-meta"],
   queryFn: () => call("/meta"),

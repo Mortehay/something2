@@ -15,6 +15,7 @@ const { GROUPS, getGroup } = require('../services/seedSync/registry.js');
 const { diffGroup } = require('../services/seedSync/diffGroup.js');
 const { previewSeed, applySeed } = require('../services/seedSync/applySeed.js');
 const { exportGroup } = require('../services/seedSync/exportGroup.js');
+const { repairGroup } = require('../services/seedSync/repairFile.js');
 const { lastRuns, recentRuns, pcLabel, pcLabelSet, startRun, finishRun } = require('../services/seedSync/runs.js');
 const { SyncRefused, SyncFileError } = require('../services/seedSync/errors.js');
 const jobs = require('../services/seedSync/jobs.js');
@@ -143,6 +144,15 @@ module.exports = function seedExportRoutes(pool, { processStartedAt, store, boxD
     }
     const release = holdSync(`export ${groupId}`);
     try { res.json(await exportGroup(pool, groupId)); } finally { release(); }
+  }));
+
+  // A bad_file group's "Fix": repairs header counts / sync_uuids in the export
+  // file (repairFile.js); anything needing a choice answers 422 bad_file.
+  router.post('/groups/:id/repair', withGroup(async (req, res) => {
+    const groupId = req.params.id;
+    refuseIfBusy();
+    const release = holdSync(`repair ${groupId}`);
+    try { res.json(await repairGroup(groupId)); } finally { release(); }
   }));
 
   router.post('/groups/:id/seed', withGroup(async (req, res) => {
