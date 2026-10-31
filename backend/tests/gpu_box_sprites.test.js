@@ -130,11 +130,110 @@ test('generateConcept fails on SUCCESS without result.url', async () => {
   assert.match(r.error, /result\.url|no image/);
 });
 
-test('generateConcept gives up at the timeout', async () => {
-  const { fetchImpl } = fakeBox(conceptRoutes([{ task_id: 't', status: 'PENDING' }]));
+test('generateConcept gives up when the task runs past the timeout', async () => {
+  const { fetchImpl } = fakeBox(conceptRoutes([{ task_id: 't', status: 'PROGRESS' }]));
   const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, timeoutMs: 20, pollMs: 5 });
   assert.equal(r.ok, false);
-  assert.match(r.error, /timed out/);
+  assert.match(r.error, /^GPU box concept task ran for over \d+s without finishing$/);
+});
+
+// SOMET-664: only time the concept task RUNS counts toward the timeout. The
+// real box answers PENDING on /api/task-status for the whole wait AND the
+// whole run (observed live 2026-10-31: PENDING, then SUCCESS), so "running"
+// is read from the task's /api/tasks/recent record, whose progress_msg is
+// "Waiting in queue..." until a worker picks it up. `phases` is
+// [[phase, ms], ...] by wall time since the first poll; the last repeats.
+// Phases: 'queued' / 'running' (box-style, PENDING + recent record),
+// 'PROGRESS' (Celery-style state), 'done'.
+const TASK = 'ac408fbf-9f39-4488-8b06-95dcd0fce8c9';
+function timedConceptRoutes(phases, { recentCalls = [] } = {}) {
+  let t0 = null;
+  const phase = () => {
+    if (t0 === null) t0 = Date.now();
+    let el = Date.now() - t0;
+    for (const [name, ms] of phases) {
+      if (el < ms) return name;
+      el -= ms;
+    }
+    return phases[phases.length - 1][0];
+  };
+  return {
+    ...conceptRoutes([]),
+    [`GET /api/task-status/${TASK}`]: () => {
+      const ph = phase();
+      if (ph === 'done') return json(fx('task-status-done.json'));
+      return json({ task_id: TASK, status: ph === 'PROGRESS' ? 'PROGRESS' : 'PENDING', result: null });
+    },
+    'GET /api/tasks/recent': () => {
+      recentCalls.push(Date.now());
+      const ph = phase();
+      const mine = ph === 'running'
+        ? { task_id: TASK, progress_pct: 25, progress_msg: 'Qwen: loading model' }
+        : { task_id: TASK, progress_pct: 0, progress_msg: 'Waiting in queue...' };
+      return json([{ task_id: 'someone-else', progress_pct: 60, progress_msg: 'Qwen: denoising' }, mine]);
+    },
+  };
+}
+
+test('generateConcept: queued longer than the timeout, then quick to run, succeeds', async () => {
+  const { fetchImpl } = fakeBox(timedConceptRoutes([['queued', 80], ['running', 10], ['done', 1]]));
+  const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, timeoutMs: 40, pollMs: 5, queueCapMs: 5000 });
+  assert.equal(r.ok, true, r.error);
+  assert.equal(r.conceptPath, 'images/core_23e329cdf09d.png');
+});
+
+test('generateConcept: queued, then stuck running (box-style PENDING), fails on the run timeout', async () => {
+  const { fetchImpl } = fakeBox(timedConceptRoutes([['queued', 60], ['running', 1]]));
+  const t = Date.now();
+  const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, timeoutMs: 40, pollMs: 5, queueCapMs: 5000 });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /^GPU box concept task ran for over \d+s without finishing$/);
+  assert.ok(Date.now() - t >= 100, 'the deadline started at the first running poll, not at submit');
+});
+
+test('generateConcept: a Celery-style PROGRESS state also starts the run clock', async () => {
+  const { fetchImpl } = fakeBox(timedConceptRoutes([['queued', 60], ['PROGRESS', 1]]));
+  const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, timeoutMs: 40, pollMs: 5, queueCapMs: 5000 });
+  assert.match(r.error, /^GPU box concept task ran for over \d+s without finishing$/);
+});
+
+test('generateConcept: queued past the queue cap fails with its own message', async () => {
+  const { fetchImpl } = fakeBox(timedConceptRoutes([['queued', 1]]));
+  const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, timeoutMs: 10, pollMs: 5, queueCapMs: 40 });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /^GPU box concept task still waiting behind other box work after [\d.]+ h$/);
+});
+
+test('generateConcept: a task missing from the recent list, or a failing list, counts as queued', async () => {
+  for (const recent of [() => json([{ task_id: 'other', progress_pct: 50, progress_msg: 'x' }]), () => json({ detail: 'boom' }, 500)]) {
+    const routes = { ...timedConceptRoutes([['queued', 1]]), 'GET /api/tasks/recent': recent };
+    const { fetchImpl } = fakeBox(routes);
+    // eslint-disable-next-line no-await-in-loop
+    const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, timeoutMs: 10, pollMs: 5, queueCapMs: 60 });
+    assert.match(r.error, /still waiting behind other box work/);
+  }
+});
+
+test('generateConcept stops reading the recent list once the task runs', async () => {
+  const recentCalls = [];
+  const { fetchImpl } = fakeBox(timedConceptRoutes([['queued', 30], ['running', 60], ['done', 1]], { recentCalls }));
+  const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, timeoutMs: 5000, pollMs: 5, queueCapMs: 5000 });
+  assert.equal(r.ok, true, r.error);
+  const seenRunning = recentCalls.filter((t) => t - recentCalls[0] >= 30).length;
+  assert.ok(seenRunning <= 1, `recent list read ${seenRunning} times after the task started`);
+});
+
+test('generateConcept: shouldStop ends the poll without failing', async () => {
+  let polls = 0;
+  const routes = conceptRoutes([{ task_id: 't', status: 'PENDING' }]);
+  const inner = routes['GET /api/task-status/ac408fbf-9f39-4488-8b06-95dcd0fce8c9'];
+  routes['GET /api/task-status/ac408fbf-9f39-4488-8b06-95dcd0fce8c9'] = (...a) => { polls += 1; return inner(...a); };
+  const { fetchImpl } = fakeBox(routes);
+  const r = await box.generateConcept(provider, { prompt: 'x' }, {
+    fetchImpl, sleep, queueCapMs: 60000, shouldStop: () => polls >= 2,
+  });
+  assert.deepEqual(r, { ok: false, halted: true, error: 'halted' });
+  assert.equal(polls, 2);
 });
 
 test('createSheetJob posts the JobSpec as JSON and accepts 202', async () => {
