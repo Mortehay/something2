@@ -2067,6 +2067,19 @@ export class Game {
         };
     }
 
+    // True when a window OTHER than `except` is open. Windows do not stack or
+    // replace each other: while one is open the others refuse to open, so the
+    // player closes it first (Esc, its hotkey, or its X).
+    _otherPanelOpen(except = null) {
+        return (except !== "inventory" && !!this.inventoryOpen)
+            || (except !== "passiveTree" && !!this.passiveTreeOpen)
+            || (except !== "questLog" && !!this.questLogOpen)
+            || (except !== "skills" && !!this.skillsOpen)
+            || (except !== "gemShop" && !!this.gemShopOpen)
+            || (except !== "shop" && !!this.shopOpen)
+            || (except !== "bank" && !!this.bankOpen);
+    }
+
     closeAllPanels(except = null) {
         if (except !== 'inventory') this.closeInventory();
         if (except !== 'passiveTree') this.closePassiveTree();
@@ -2078,6 +2091,7 @@ export class Game {
     }
 
     openInventory(tab = 'inventory') {
+        if (this._otherPanelOpen('inventory')) return;
         this.closeAllPanels('inventory');
         this.inventoryOpen = true;
         this.inventoryTab = tab;
@@ -2095,6 +2109,7 @@ export class Game {
     }
 
     openPassiveTree() {
+        if (this._otherPanelOpen('passiveTree')) return;
         this.closeAllPanels('passiveTree');
         this.passiveTreeOpen = true;
         // Recentred on every open: a player who panned into a far sector last
@@ -2226,6 +2241,7 @@ export class Game {
     }
 
     openQuestLog() {
+        if (this._otherPanelOpen('questLog')) return;
         this.closeAllPanels('questLog');
         this.questLogOpen = true;
         return this.loadQuests();
@@ -2236,6 +2252,7 @@ export class Game {
     }
 
     openSkills() {
+        if (this._otherPanelOpen('skills')) return;
         this.closeAllPanels('skills');
         this.skillsOpen = true;
         if (!this.className && !this.passiveStartClass) {
@@ -2244,11 +2261,13 @@ export class Game {
     }
 
     openGemShop() {
+        if (this._otherPanelOpen('gemShop')) return;
         this.closeAllPanels('gemShop');
         this.gemShopOpen = true;
     }
 
     openShop(msg = null) {
+        if (this._otherPanelOpen('shop')) return;
         this.closeAllPanels('shop');
         if (msg) {
             this.shop = { villageId: msg.villageId, catalog: msg.catalog || [], buyback: msg.buyback || [] };
@@ -2258,6 +2277,7 @@ export class Game {
     }
 
     openBank(msg = null) {
+        if (this._otherPanelOpen('bank')) return;
         this.closeAllPanels('bank');
         if (msg) {
             this.bank = {
@@ -2481,7 +2501,7 @@ export class Game {
             if (!this.className && !this.passiveStartClass) {
                 fetchStartClass().then((name) => { if (name) { this.className = name; this.passiveStartClass = name; } }).catch(() => {});
             }
-            this.skillsOpen = true;
+            if (!this._otherPanelOpen("skills")) this.skillsOpen = true;
             if (this.showToast) this.showToast(`Slot ${slotNum} is empty — select a skill`);
             return;
         }
@@ -3004,6 +3024,7 @@ export class Game {
             // Account chest (SOMET-310) ('b')
             if (matchesBind('bank', 'b') && this.state === 'playing' && this.chunked && !e.repeat) {
                 if (this.bankOpen) { this.bankOpen = false; return; }
+                if (this._otherPanelOpen('bank')) return;
                 this.closeAllPanels('bank');
                 if (this.authorityClient) this.authorityClient.sendOpenBank();
                 return;
@@ -3507,6 +3528,7 @@ export class Game {
             }
             if (matchesThisMouse('bank', 'b')) {
                 if (this.bankOpen) { this.bankOpen = false; return; }
+                if (this._otherPanelOpen('bank')) return;
                 this.closeAllPanels('bank');
                 if (this.authorityClient) this.authorityClient.sendOpenBank();
                 return;
