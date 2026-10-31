@@ -27,6 +27,9 @@ function mkPool(handlers) {
       if (/^BEGIN$/i.test(sql.trim())) return {};
       if (/^COMMIT$/i.test(sql.trim())) { committed = true; return {}; }
       if (/^ROLLBACK$/i.test(sql.trim())) { rolledBack = true; return {}; }
+      // buyStock reads the buyer's Act IV legacy for the City Restoration
+      // discount (services/legacyEffects.js). No row = no legacy = full price.
+      if (/legacy_choice FROM player_progression/.test(sql)) return { rows: [] };
       for (const [re, fn] of handlers) {
         if (re.test(sql)) return fn(sql, params);
       }

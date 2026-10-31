@@ -48,9 +48,11 @@ describe("layoutQuestLog", () => {
     expect(layout.selectedQuest.key).toBe("act1_core_whisper");
     expect(layout.legacyChoice).toBe("city_restoration");
     expect(layout.header.choiceText).toContain("City Restoration");
-    expect(layout.actionButtons.length).toBe(2);
+    // Track, Complete, and the Abandon button an accepted quest carries.
+    expect(layout.actionButtons.length).toBe(3);
     expect(layout.actionButtons[0].kind).toBe("quest_toggle_track");
     expect(layout.actionButtons[1].kind).toBe("quest_complete");
+    expect(layout.actionButtons[2].kind).toBe("quest_abandon");
   });
 
   it("adds quest_toggle_track button for active quests and supports trackedQuestKey", () => {
@@ -170,7 +172,7 @@ describe("layoutQuestLog", () => {
     expect(filledCard).not.toBeNull();
     expect(filledCard.x).toBe(16);
     expect(filledCard.y).toBe(16);
-    expect(filledCard.w).toBe(230);
+    expect(filledCard.w).toBe(262);
   });
 });
 

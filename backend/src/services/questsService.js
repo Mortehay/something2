@@ -251,8 +251,8 @@ async function completeQuest(pool, characterId, questKeyOrId, legacyChoice = nul
     await client.query(
       `UPDATE character_quests
        SET status = 'completed', completed_at = NOW(), reward_item_pending = $3
+       WHERE character_id = $1 AND quest_id = $2`,
       [characterId, quest.id, !!quest.item_reward],
-      [characterId, quest.id],
     );
 
     // Award Gold

@@ -73,11 +73,12 @@ test('incrementQuestProgress ignores non-positive or non-numeric amounts', async
 });
 
 test('every seeded quest has a valid objective type, and kill quests name a creature', () => {
-  const TYPES = ['kill', 'kill_any', 'boss', 'manual'];
+  const TYPES = ['kill', 'kill_any', 'boss', 'manual', 'interact', 'floor', 'choice'];
+  const KEYED = ['kill', 'interact', 'floor']; // these name WHAT counts
   for (const q of QUESTS) {
     assert.ok(TYPES.includes(q.objective_type), `${q.key}: bad objective_type ${q.objective_type}`);
-    if (q.objective_type === 'kill') assert.ok(q.target_key, `${q.key}: kill needs a target_key`);
-    else assert.strictEqual(q.target_key, null, `${q.key}: only kill quests carry a target_key`);
+    if (KEYED.includes(q.objective_type)) assert.ok(q.target_key, `${q.key}: ${q.objective_type} needs a target_key`);
+    else assert.strictEqual(q.target_key, null, `${q.key}: ${q.objective_type} must not carry a target_key`);
   }
   assert.ok(QUESTS.some(q => q.objective_type === 'kill'), 'at least one real kill quest');
 });
