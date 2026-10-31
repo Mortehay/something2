@@ -27,6 +27,7 @@ const { fetchLinks } = require('../services/mapLinks');
 const { fetchVillages } = require('../services/villages');
 const { fetchWaypoints, activateWaypoint, waypointTileKey } = require('../services/waypoints');
 const teleportCast = require('./teleportCast.js');
+const bossGate = require('../services/bossGate.js');
 const { buildLandmarks } = require('../services/landmarks');
 const { loadPointKindDefaults, resolvePointArt, chestPointKind } = require('../services/pointArt');
 const {
@@ -1033,6 +1034,18 @@ function attachAuthority(httpServer, pool, opts = {}) {
     if (dungeonBosses.isBoss(entry.worldId, id)) {
       const kill = dungeonBosses.onDeath(entry, id, killerUserId);
       if (kill) trackQuestKill(entry, killerUserId, kill.entityName, true);
+      // A Spire gate boss opens the way forward for the killer and anyone close.
+      if (kill && bossGate.isGatedWorld(entry.row)) {
+        for (const p of bossGate.clearBeneficiaries(entry.world.players.values(), killerUserId, kill.x, kill.y)) {
+          if (!p._bossCleared) p._bossCleared = new Set();
+          if (p._bossCleared.has(entry.worldId)) continue;
+          p._bossCleared.add(entry.worldId);
+          bossGate.recordBossClear(pool, p.characterId, entry.worldId)
+            .catch((e) => { p._bossCleared.delete(entry.worldId); console.error('recordBossClear', e); });
+          const bws = entry.sockets.get(p.userId);
+          if (bws) send(bws, { type: 'announcement', text: 'Floor boss defeated — the way forward is open!' });
+        }
+      }
       return Promise.resolve(null);
     }
     // SOMET-626 (S13): same reasoning as the boss above -- a dungeon-boss
@@ -1976,6 +1989,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // Item rewards earned while out of a world (async: the join has finished
         // registering the player by the time the first query returns).
         deliverPendingRewardItems(ws.userId, character.id);
+        bossGate.loadClearedBosses(pool, character.id).then((set) => { const pl = entry.world.getPlayer(ws.userId); if (pl) pl._bossCleared = set; }).catch((e) => console.error('boss clears load failed:', e));
         loadLegacyChoice(pool, character.id).then((lc) => { const pl = entry.world.getPlayer(ws.userId); if (pl) pl.legacyChoice = lc; }).catch((e) => console.error('legacy choice load failed:', e));
         send(ws, {
           type: 'joined', user_id: ws.userId, character_id: character.id, spawn, tickRate: 1000 / tickMs,
@@ -3365,6 +3379,18 @@ function attachAuthority(httpServer, pool, opts = {}) {
             worldRow: entry.row, links: entry.links, now, cdUntil: p._doorwayCdUntil,
           });
           if (t) {
+            // Spire boss gate: the east door of a boss floor stays shut until
+            // that boss is beaten. Blocked here, before anything is committed.
+            const fws = entry.sockets.get(p.userId);
+            const fwd = entry.links && entry.links.get('E');
+            if (!bossGate.mayPass({
+              gated: bossGate.isGatedWorld(entry.row), worldId: entry.worldId, toWorldId: t.toWorldId,
+              forwardTo: fwd ? fwd.toWorldId : null, cleared: p._bossCleared, isAdmin: !!(fws && fws.role === 'admin'),
+            })) {
+              p._doorwayCdUntil = now + 1500;
+              if (fws) send(fws, { type: 'announcement', text: 'The door is sealed — defeat the floor boss to go on.' });
+              continue;
+            }
             p._doorwayCdUntil = now + 1500;                       // suppress duplicate sends during reconnect
             pendingArrivals.set(p.characterId, {
               worldId: t.toWorldId, x: t.arriveX, y: t.arriveY,

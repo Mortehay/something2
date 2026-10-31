@@ -157,29 +157,6 @@ function formatTime(ms) {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
-const TeleportButton = styled.button`
-  background: rgba(45, 152, 218, 0.25);
-  border: 1px solid rgba(45, 152, 218, 0.7);
-  color: #70a1ff;
-  font-size: 0.75rem;
-  font-weight: 700;
-  padding: 3px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  transition: all 0.2s;
-  pointer-events: auto;
-
-  &:hover {
-    background: rgba(45, 152, 218, 0.5);
-    color: #ffffff;
-    border-color: #70a1ff;
-    transform: scale(1.04);
-  }
-`;
-
 const PhaseBadge = styled.span`
   font-size: 0.72rem;
   text-transform: uppercase;
@@ -271,17 +248,6 @@ export default function WorldBossHud({ gameRef }) {
               <PhaseBadge $phase={phase}>
                 Phase {phase}/4: {phaseName}
               </PhaseBadge>
-              <TeleportButton
-                title="Instantly teleport to this World Boss"
-                onClick={() => {
-                  const g = gameRef.current;
-                  if (g && g.debugWorldBoss) {
-                    g.debugWorldBoss('teleport_to_boss');
-                  }
-                }}
-              >
-                🚀 Teleport
-              </TeleportButton>
               <ElementBadge $color={elem.color} $bg={elem.bg}>
                 {elem.icon}
               </ElementBadge>
