@@ -1,13 +1,13 @@
 {
   "header": {
-    "exported_at": "2026-10-20T20:11:29.576Z",
-    "exported_by": "linux-dev",
+    "exported_at": "2026-10-31T21:45:03.147Z",
+    "exported_by": "unnamed-pc",
     "group": "skill_tree",
     "row_counts": {
       "passive_edges": 2428,
-      "passive_nodes": 1852
+      "passive_nodes": 1862
     },
-    "schema_version": "1714440812000_quests_objective_columns"
+    "schema_version": "1714440843000_world_boss_second_skills"
   },
   "tables": {
     "passive_edges": [
@@ -42823,6 +42823,201 @@
         "sync_uuid": "7c9281c5-db19-9205-ee11-90a981e115ee",
         "x": -230.33,
         "y": 716.92
+      },
+      {
+        "grants": [
+          {
+            "stat": "strength",
+            "type": "stat",
+            "value": 2
+          }
+        ],
+        "key": "strength-r4-0-3",
+        "kind": "minor",
+        "label": "Sinew",
+        "ring": 4,
+        "sector": "strength",
+        "start_class": null,
+        "sync_uuid": "73b45733-e546-4bcf-9399-5ddaad8d8e58",
+        "x": 608.96,
+        "y": 1640.63
+      },
+      {
+        "grants": [
+          {
+            "stat": "strength",
+            "type": "stat",
+            "value": 2
+          }
+        ],
+        "key": "strength-r4-0-4",
+        "kind": "minor",
+        "label": "Sinew",
+        "ring": 4,
+        "sector": "strength",
+        "start_class": null,
+        "sync_uuid": "0691a72d-11fb-48ae-83d0-d1996365d264",
+        "x": 535.5,
+        "y": 1666.06
+      },
+      {
+        "grants": [
+          {
+            "stat": "strength",
+            "type": "stat",
+            "value": 2
+          }
+        ],
+        "key": "strength-r4-0-5",
+        "kind": "minor",
+        "label": "Sinew",
+        "ring": 4,
+        "sector": "strength",
+        "start_class": null,
+        "sync_uuid": "70ea6d81-9800-4918-acdc-3f77d0ef6031",
+        "x": 460.97,
+        "y": 1688.2
+      },
+      {
+        "grants": [
+          {
+            "stat": "strength",
+            "type": "stat",
+            "value": 2
+          }
+        ],
+        "key": "strength-r4-0-6",
+        "kind": "minor",
+        "label": "Sinew",
+        "ring": 4,
+        "sector": "strength",
+        "start_class": null,
+        "sync_uuid": "c0e49a84-f274-41c0-81e2-fdaca0e9874f",
+        "x": 385.54,
+        "y": 1707
+      },
+      {
+        "grants": [
+          {
+            "stat": "strength",
+            "type": "stat",
+            "value": 2
+          },
+          {
+            "pool": "mana",
+            "type": "resource",
+            "value": 6
+          }
+        ],
+        "key": "strength-r4-1-0",
+        "kind": "minor",
+        "label": "Insight",
+        "ring": 4,
+        "sector": "strength",
+        "start_class": null,
+        "sync_uuid": "780e2826-5454-4474-a79c-435ce59d6150",
+        "x": 682.3,
+        "y": 1751.82
+      },
+      {
+        "grants": [
+          {
+            "stat": "strength",
+            "type": "stat",
+            "value": 2
+          },
+          {
+            "pool": "stamina",
+            "type": "resource",
+            "value": 5
+          }
+        ],
+        "key": "strength-r4-1-1",
+        "kind": "minor",
+        "label": "Wind",
+        "ring": 4,
+        "sector": "strength",
+        "start_class": null,
+        "sync_uuid": "6311b285-c447-4077-93f2-5eeee58cc84f",
+        "x": 665.61,
+        "y": 1708.96
+      },
+      {
+        "grants": [
+          {
+            "stat": "dexterity",
+            "type": "stat",
+            "value": 3
+          }
+        ],
+        "key": "strength-r4-1-13",
+        "kind": "minor",
+        "label": "Breadth",
+        "ring": 4,
+        "sector": "strength",
+        "start_class": null,
+        "sync_uuid": "376b6efd-cd8d-4045-b05c-98c3b644936f",
+        "x": 465.44,
+        "y": 2053.92
+      },
+      {
+        "grants": [
+          {
+            "stat": "strength",
+            "type": "stat",
+            "value": 2
+          },
+          {
+            "pool": "stamina",
+            "type": "resource",
+            "value": 5
+          }
+        ],
+        "key": "strength-r4-1-4",
+        "kind": "minor",
+        "label": "Wind",
+        "ring": 4,
+        "sector": "strength",
+        "start_class": null,
+        "sync_uuid": "a9e53d3c-facb-459e-a37b-4d2d5e8ac432",
+        "x": 715.94,
+        "y": 1783.2
+      },
+      {
+        "grants": [
+          {
+            "stat": "dexterity",
+            "type": "stat",
+            "value": 2
+          }
+        ],
+        "key": "strength-r4-1-8",
+        "kind": "minor",
+        "label": "Versatility",
+        "ring": 4,
+        "sector": "strength",
+        "start_class": null,
+        "sync_uuid": "f4645a65-5b31-4ae9-ade4-bf917b354c71",
+        "x": 455.27,
+        "y": 2009.06
+      },
+      {
+        "grants": [
+          {
+            "stat": "constitution",
+            "type": "stat",
+            "value": 2
+          }
+        ],
+        "key": "strength-r4-1-9",
+        "kind": "minor",
+        "label": "Versatility",
+        "ring": 4,
+        "sector": "strength",
+        "start_class": null,
+        "sync_uuid": "1444d06b-131d-444f-89e5-001f9a7ffd17",
+        "x": 445.1,
+        "y": 1964.2
       },
       {
         "grants": [
