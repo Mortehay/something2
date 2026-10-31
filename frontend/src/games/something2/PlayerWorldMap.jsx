@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { Component, useEffect, useMemo, useRef } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import styled from 'styled-components';
 import CytoscapeComponent from 'react-cytoscapejs';
@@ -34,10 +34,17 @@ import { API_URL } from '../../config.js';
 // unconditionally; pointing this component at it would render a complete map
 // and defeat the whole feature while every other test still passed.
 
+/* Fills its (position:relative) content area by absolute inset rather than
+   `height: 100%`: a percentage height needs a definite parent height, and when
+   the chain above this page had none the whole page collapsed to zero height
+   and the tab rendered as an empty rectangle. The colour fallbacks keep the
+   text readable if a theme token is missing. */
 const Page = styled.div`
-  padding: 2rem; color: var(--s2-text); max-width: 1400px; margin: 0 auto;
-  height: 100%; overflow-y: auto; background-color: var(--s2-surface);
+  position: absolute; inset: 0; box-sizing: border-box;
+  padding: 2rem; color: var(--s2-text, #e5e7eb); overflow-y: auto;
+  background-color: var(--s2-surface, #12121f);
 `;
+const Inner = styled.div`max-width: 1400px; margin: 0 auto;`;
 const Header = styled.div`margin-bottom: 1rem;`;
 const Title = styled.h2`margin: 0 0 0.25rem 0;`;
 const Dim = styled.div`color: var(--s2-text-dim); font-size: 0.9em;`;
@@ -47,7 +54,9 @@ const Dim = styled.div`color: var(--s2-text-dim); font-size: 0.9em;`;
 // canvas literal for the reasons the CanvasCard comment gives.
 const HereKey = styled.span`color: #facc15; font-weight: 600;`;
 const CanvasCard = styled.div`
-  height: 600px;
+  /* A definite height of its own: cytoscape sizes its canvas to this box, and a
+     box that is 0px tall draws nothing. */
+  height: max(420px, calc(100vh - 260px)); min-height: 420px; position: relative;
   /* s2-theme-exempt(#12121f): the graph surface stays dark in both modes, like
      the game canvas. Cytoscape draws to a canvas and cannot read CSS custom
      properties, so its node label colour has to be a literal; against the light
@@ -68,10 +77,42 @@ const Empty = styled.div`
 // Same posture as the admin graph's own query hook: this one surfaces its error rather
 // than trusting the call site to opt in, with a fixed toast id so a retrying
 // query produces one message rather than a stack.
+const Retry = styled.button`
+  margin-top: 0.75rem; padding: 6px 14px; border-radius: 6px; cursor: pointer;
+  border: 1px solid #4a9eff; background: transparent; color: #4a9eff; font: inherit;
+`;
+const Spinner = styled.div`
+  width: 28px; height: 28px; margin: 0 auto 0.75rem; border-radius: 50%;
+  border: 3px solid #374151; border-top-color: #4a9eff;
+  animation: pwm-spin 0.8s linear infinite;
+  @keyframes pwm-spin { to { transform: rotate(360deg); } }
+`;
+
 export const PLAYER_MAP_ERROR_TOAST_ID = 'player-world-map-error';
 
+// A throw while drawing the graph must not blank the tab: show what happened.
+class MapBoundary extends Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error) { console.error('[world map] render failed:', error); }
+  render() {
+    if (this.state.error) {
+      return (
+        <Empty>
+          <div>
+            <div>The map could not be drawn.</div>
+            <Dim>{String(this.state.error && this.state.error.message || this.state.error)}</Dim>
+            <Retry type="button" onClick={() => this.setState({ error: null })}>Try again</Retry>
+          </div>
+        </Empty>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function usePlayerWorldMap(characterId) {
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     // Keyed by character: the fog is per character, so switching characters
     // must not show the previous one's map out of cache.
     queryKey: ['playerWorldMap', characterId],
@@ -88,7 +129,7 @@ function usePlayerWorldMap(characterId) {
   useEffect(() => {
     if (error) toast.error(error.message, { id: PLAYER_MAP_ERROR_TOAST_ID });
   }, [error]);
-  return { data, isLoading, error };
+  return { data, isLoading, error, refetch };
 }
 
 /* s2-theme-exempt:start — cytoscape renders to canvas and cannot read CSS custom
@@ -166,8 +207,32 @@ export default function PlayerWorldMap() {
   // being re-read from localStorage here, which would be a second source of
   // truth free to disagree with the one the game canvas is using.
   const { activeCharacterId } = useOutletContext() || {};
-  const { data, isLoading } = usePlayerWorldMap(activeCharacterId);
+  const { data, isLoading, error, refetch } = usePlayerWorldMap(activeCharacterId);
   const elements = useMemo(() => toCytoscapeElements(data), [data]);
+
+  // Redraw hooks. Cytoscape measures its container once, when it is created;
+  // opened on a tab that was laid out a moment later (or after a window resize)
+  // it kept a 0x0 canvas and drew nothing. So: re-measure and fit the whole
+  // graph when the data arrives, and again whenever the box changes size.
+  const boxRef = useRef(null);
+  const refit = () => {
+    const cy = cyRef.current;
+    if (!cy || cy.destroyed()) return;
+    cy.resize();
+    if (cy.elements().length) cy.fit(undefined, 40);
+  };
+  useEffect(() => {
+    // After the card has its size (next frame), not during render.
+    const id = requestAnimationFrame(refit);
+    return () => cancelAnimationFrame(id);
+  }, [elements]);
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(() => refit());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // SOMET-298. Cytoscape has no keyframe animation, so the badge pulses by
   // toggling a class on a timer. Half of PULSE_PERIOD_MS, so this surface beats
@@ -190,7 +255,16 @@ export default function PlayerWorldMap() {
   if (activeCharacterId == null) {
     body = <Empty>Choose a character to see the places it has been.</Empty>;
   } else if (isLoading) {
-    body = <Empty>Loading…</Empty>;
+    body = <Empty><div><Spinner />Loading the world map…</div></Empty>;
+  } else if (error) {
+    body = (
+      <Empty>
+        <div>
+          <div>The world map could not be loaded.</div>
+          <Retry type="button" onClick={() => refetch()}>Try again</Retry>
+        </div>
+      </Empty>
+    );
   } else if (elements.length === 0) {
     body = <Empty>You have not been anywhere yet. Enter a world and it will appear here.</Empty>;
   } else {
@@ -211,13 +285,14 @@ export default function PlayerWorldMap() {
         autounselectify={true}
         // The cy instance, for the badge pulse above. react-cytoscapejs calls
         // this once with the instance on mount.
-        cy={(cy) => { cyRef.current = cy; }}
+        cy={(cy) => { cyRef.current = cy; requestAnimationFrame(() => { if (!cy.destroyed()) { cy.resize(); cy.fit(undefined, 40); } }); }}
       />
     );
   }
 
   return (
     <Page>
+      <Inner>
       <Header>
         <Title>World Map</Title>
         <Dim>
@@ -230,7 +305,8 @@ export default function PlayerWorldMap() {
           portals you have lit (step onto one, or press <code>T</code>).
         </Dim>
       </Header>
-      <CanvasCard>{body}</CanvasCard>
+      <CanvasCard ref={boxRef}><MapBoundary>{body}</MapBoundary></CanvasCard>
+      </Inner>
     </Page>
   );
 }
