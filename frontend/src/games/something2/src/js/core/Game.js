@@ -119,6 +119,7 @@ export const DEFAULT_KEYBINDS = {
     bank: 'b',
     openChest: 'f',
     pickup: 'g',
+    teleport: 't',
 };
 
 export function getMouseKeyNames(button) {
@@ -405,6 +406,9 @@ export class Game {
         this.toast = null;
         // Arrival banner: {name, levelText, startedAt, expiresAt} (performance.now()).
         this.locationBanner = null;
+        // Teleport cast in progress: {startedAt, durationMs} (performance.now()).
+        this.teleportCast = null;
+        this.teleportPending = null;
     }
 
     // "Thornbriar Reach / Monsters: level 3-9" for a few seconds on entering a world.
@@ -467,6 +471,54 @@ export class Game {
     // broken at exactly the moment it worked.
     setOnWaypointActivated(cb) {
         this.onWaypointActivated = cb;
+    }
+
+    // WaypointTravel.jsx registers this to open its list when a teleport cast
+    // completes (the server then lets ONE trip start from anywhere).
+    setOnTeleportReady(cb) {
+        this.onTeleportReady = cb;
+    }
+
+    // T: ask the server to start the 2.5s teleport cast. The bar only starts when
+    // the server confirms (teleportCastStarted); a refusal ("no saved point", not
+    // enough mana) arrives as an ordinary error toast.
+    startTeleportCast() {
+        if (!this.authorityClient || this.teleportCast || this.teleportPending) return false;
+        if (this._otherPanelOpen()) return false;
+        this.teleportPending = performance.now();
+        return this.authorityClient.sendTeleportCast() !== false;
+    }
+
+    cancelTeleportCast() {
+        const was = !!this.teleportCast || !!this.teleportPending;
+        // A cancel that beats the server's "started" answer is replayed when it
+        // arrives (the server handles start on a chain and cancel immediately).
+        this._teleportAborted = !!this.teleportPending && !this.teleportCast;
+        this.teleportCast = null;
+        this.teleportPending = null;
+        if (was && this.authorityClient) this.authorityClient.sendTeleportCancel();
+    }
+
+    _onTeleportFrame(msg) {
+        this.teleportPending = null;
+        if (msg.type === 'teleportCastStarted' && this._teleportAborted) {
+            this._teleportAborted = false;
+            if (this.authorityClient) this.authorityClient.sendTeleportCancel();
+            return;
+        }
+        this._teleportAborted = false;
+        if (msg.type === 'teleportCastStarted') {
+            const now = performance.now();
+            this.teleportCast = { startedAt: now, durationMs: Number(msg.durationMs) || 2500 };
+        } else if (msg.type === 'teleportReady') {
+            this.teleportCast = null;
+            if (this.onTeleportReady) this.onTeleportReady(msg);
+        } else if (msg.type === 'teleportCancelled') {
+            const had = !!this.teleportCast;
+            this.teleportCast = null;
+            const why = { moved: 'you moved', hurt: 'you took damage', poor: 'not enough mana', input: null }[msg.reason];
+            if (had && why) this._showToast(`Teleport interrupted: ${why}`);
+        }
     }
 
     // Ask the authority to move this character to a waypoint. Returns whether
@@ -966,7 +1018,8 @@ export class Game {
                     this.setState('kicked');
                     if (this.authorityClient) this.authorityClient.disconnect();
                 },
-                onTransition: (msg) => { if (this.onTransition) this.onTransition(msg); },
+                onTransition: (msg) => { this.teleportCast = null; this.teleportPending = null; if (this.onTransition) this.onTransition(msg); },
+                onTeleport: (msg) => this._onTeleportFrame(msg),
                 onWaypointActivated: (msg) => {
                     // Light the marker on the ground the moment the server says
                     // so (SOMET-297). Without this the outline only becomes a
@@ -1882,6 +1935,10 @@ export class Game {
             // consistent with how the rest of Game drives state off the loop.
             if (this.toast && performance.now() >= this.toast.expiresAt) this.toast = null;
             if (this.locationBanner && performance.now() >= this.locationBanner.expiresAt) this.locationBanner = null;
+            // Safety nets for a lost server frame: a bar that outlives its cast by
+            // 2s, or a start request never answered, is dropped.
+            if (this.teleportCast && performance.now() > this.teleportCast.startedAt + this.teleportCast.durationMs + 2000) this.teleportCast = null;
+            if (this.teleportPending && performance.now() - this.teleportPending > 3000) this.teleportPending = null;
             // Expire finished blasts once per frame, on the same clock the
             // ring animation reads.
             const nowMs = performance.now();
@@ -1995,6 +2052,7 @@ export class Game {
                 entityDefs: this.entityDefs,
                 toast: this.toast,
                 locationBanner: this.locationBanner,
+                teleportCast: this.teleportCast,
                 blasts: this.blasts,
                 // SOMET-528. Empty until a wave-granting node is allocated.
                 waves: this.waves || [],
@@ -3107,6 +3165,19 @@ export class Game {
                 return;
             }
 
+            // Teleport cast. T starts it; ANY other (non-modifier) key interrupts it,
+            // movement keys included. The server enforces the same rules on its
+            // own (movement, damage, 2.5s clock) -- this is just the immediate
+            // half of "pressing other keys cancels".
+            const isModifierKey = key === 'shift' || key === 'control' || key === 'alt' || key === 'meta';
+            const isTeleportKey = matchesBind('teleport', 't');
+            if (this.teleportCast && !isModifierKey && !isTeleportKey) this.cancelTeleportCast();
+            if (isTeleportKey && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat
+                && this.state === 'playing' && this.chunked) {
+                this.startTeleportCast();
+                return;
+            }
+
             if (matchesBind('pickup', 'g') && this.state === 'playing' && this.chunked) {
                 if (!e.repeat && this.authorityClient && !this.inventoryOpen && !this.bankOpen) this.authorityClient.sendPickup();
             }
@@ -3216,6 +3287,8 @@ export class Game {
             // See the same call in _keydownHandler: a click is also a valid
             // user-activation to resume a still-suspended AudioContext.
             if (this.audio) this.audio.unlock();
+            // Any click (attack, skill, UI) interrupts a teleport cast.
+            if (this.teleportCast) this.cancelTeleportCast();
             if (e.button !== 0 && e.button !== 1 && e.button !== 2) return;
             if (this.state !== 'playing' || !this.chunked || !this.authorityClient) return;
             // Locate the press by its own event and keep the tracked cursor in

@@ -26,6 +26,7 @@ const { chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint, villageConta
 const { fetchLinks } = require('../services/mapLinks');
 const { fetchVillages } = require('../services/villages');
 const { fetchWaypoints, activateWaypoint, waypointTileKey } = require('../services/waypoints');
+const teleportCast = require('./teleportCast.js');
 const { buildLandmarks } = require('../services/landmarks');
 const { loadPointKindDefaults, resolvePointArt, chestPointKind } = require('../services/pointArt');
 const {
@@ -2127,8 +2128,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // shortcut: it reaches mayJoin as standingOnActivatedWaypoint === false,
         // the same fact standing on an unlit waypoint produces. Refusing here
         // instead would put half the rule outside joinPolicy.js.
-        const travel = await waypointTravelFacts(
+        const travelFacts = await waypointTravelFacts(
           pool, characterId, origin ? origin.id : null, msg.waypointId);
+        // A completed teleport cast stands in for "standing on a lit portal" for
+        // one trip. The ticket only exists server-side (teleportCast.checkCast
+        // issues it), so a forged travel frame cannot supply it.
+        const usedTicket = teleportCast.ticketValid(p, Date.now());
+        const travel = usedTicket && travelFacts.destination
+          ? { ...travelFacts, standingOnActivatedWaypoint: true }
+          : travelFacts;
         const dest = travel.destination;
         // Generic on the wire, and identical to the join refusal below it on
         // purpose: distinguishing "that is not a waypoint" from "you have not
@@ -2151,6 +2159,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
           worldId: dest.worldId, facts, travel,
         });
         if (!verdict.allowed) { refuse(verdict.reason); return; }
+        if (usedTicket) teleportCast.consumeTicket(p);
 
         // The destination waypoint's own pixels, so the player lands on that
         // TILE rather than at a world spawn -- the whole difference between this
@@ -2182,6 +2191,38 @@ function attachAuthority(httpServer, pool, opts = {}) {
         recordVisit(pool, characterId, dest.worldId)
           .catch((e) => console.error('recordVisit (waypoint travel)', e));
       });
+    },
+
+    // Teleport cast (T). The frame carries nothing: whether it may start, how
+    // long it runs and whether it finishes are all decided here. Refusals use
+    // the ordinary error frame (the client shows it as a toast).
+    teleportCast(ws) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      chainOp(ws, 'teleportCast', async () => {
+        const p = entry.world.getPlayer(ws.userId);
+        if (ws.characterId == null || !p) return;
+        if (teleportCast.isCasting(p)) return;
+        const lit = await pool.query(
+          'SELECT 1 FROM character_waypoints WHERE character_id = $1 LIMIT 1', [ws.characterId]);
+        if (lit.rowCount === 0) {
+          send(ws, { type: 'error', message: teleportCast.NO_SAVED_POINT });
+          return;
+        }
+        const poor = teleportCast.resourceRefusal(p);
+        if (poor) {
+          send(ws, { type: 'error', message: poor === 'life' ? 'Not enough life to teleport!' : 'Not enough mana to teleport!' });
+          return;
+        }
+        teleportCast.beginCast(p, Date.now());
+        send(ws, { type: 'teleportCastStarted', durationMs: teleportCast.CAST_MS });
+      });
+    },
+
+    teleportCancel(ws) {
+      const entry = worlds.get(ws.worldId);
+      const p = entry && entry.world.getPlayer(ws.userId);
+      if (p && teleportCast.cancelCast(p)) send(ws, { type: 'teleportCancelled', reason: 'input' });
     },
 
     input(ws, msg) {
@@ -3442,6 +3483,18 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // session per waypoint re-walked. That is cheaper than the query priming
       // would need, and character_waypoints' composite primary key -- not this
       // latch -- is what actually makes a repeat harmless.
+      // Teleport casts in progress: interrupt on movement or damage, finish at
+      // 2.5s. Runs for every player each tick; a player with no cast costs one
+      // property read.
+      for (const p of entry.world.players.values()) {
+        if (!p._teleportCast) continue;
+        const outcome = teleportCast.checkCast(p, Date.now());
+        if (!outcome) continue;
+        const tws = entry.sockets.get(p.userId);
+        if (!tws) continue;
+        if (outcome === 'ready') send(tws, { type: 'teleportReady', ticketMs: teleportCast.TICKET_MS });
+        else send(tws, { type: 'teleportCancelled', reason: outcome });
+      }
       if (entry.waypoints && entry.waypoints.size) {
         for (const p of entry.world.players.values()) {
           const cx = p.x + p.width / 2, cy = p.y + p.height / 2;

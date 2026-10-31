@@ -175,21 +175,27 @@ export default function WaypointTravel({ gameRef, characterId }) {
   const data = useWaypoints(characterId);
   const queryClient = useQueryClient();
 
-  // T opens the panel. Same guards as the minimap's M: no modifiers (they belong
-  // to other bindings) and never while focus is in a text field.
+  // T no longer opens this panel: it starts the teleport cast (Game.js). The
+  // panel opens when that cast COMPLETES (setOnTeleportReady below), or on
+  // stepping onto a portal (auto-open further down).
   const openRef = useRef(open);
   useEffect(() => { openRef.current = open; });
+
+  // After a completed cast the server lets one trip start from anywhere, so
+  // every lit portal is selectable for a while. The client only mirrors that to
+  // draw the rows; the server re-checks its own ticket on the travel frame.
+  const [teleportUntil, setTeleportUntil] = useState(0);
   useEffect(() => {
-    const onKey = (e) => {
-      const isT = (e.key || '').toLowerCase() === 't' || e.code === 'KeyT';
-      if (!isT || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
-      const tag = (e.target && e.target.tagName) || '';
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      setOpen(!openRef.current);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
+    const g = gameRef.current;
+    if (!g || !g.setOnTeleportReady) return undefined;
+    g.setOnTeleportReady((msg) => {
+      setTeleportUntil(Date.now() + (Number(msg && msg.ticketMs) || 60000));
+      setPos(g.getWaypointSnapshot ? g.getWaypointSnapshot() : null);
+      setOpen(true);
+    });
+    return () => g.setOnTeleportReady(null);
+  }, [gameRef]);
+  const teleportReady = teleportUntil > Date.now();
 
   // Esc closes the panel instead of pausing the game. Capture phase, so it wins
   // over Game's own window keydown handler (bubble) -- copied from Minimap.jsx's
@@ -296,6 +302,7 @@ export default function WaypointTravel({ gameRef, characterId }) {
     bossNearbyWaypointId: bossStatus ? bossStatus.nearestWaypointId : null,
     bossName: bossStatus ? bossStatus.bossName : null,
     bossWorldId: bossStatus ? bossStatus.worldId : null,
+    teleportReady,
   });
 
   if (!open) return null;
@@ -306,9 +313,11 @@ export default function WaypointTravel({ gameRef, characterId }) {
         <CloseButton aria-label="Close travel" onClick={() => setOpen(false)}>×</CloseButton>
         <h2>Portals</h2>
         <p className="sub">
-          {standingOnActivated
-            ? 'Choose a portal you have lit.'
-            : 'Stand on a portal you have lit to travel from it.'}
+          {teleportReady
+            ? 'Teleport ready — choose where to go.'
+            : standingOnActivated
+              ? 'Choose a portal you have lit.'
+              : 'Stand on a portal you have lit to travel from it, or press T to cast a teleport.'}
         </p>
         {groups.length === 0 && (
           <Empty>You have not found any portals yet. Walk onto one to light it.</Empty>

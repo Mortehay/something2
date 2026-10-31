@@ -33,7 +33,7 @@ const tileKey = (x, y) => `${Math.floor(y / MAP_TILE_SIZE)},${Math.floor(x / MAP
 // `playerX`/`playerY` are the player's CENTRE, which is what the authority uses
 // too -- a player is a 64px box placed by its top-left corner, so keying on the
 // corner would light the wrong tile near a boundary.
-export function buildTravelList({ waypoints, currentWorldId, playerX, playerY, bossNearbyWaypointId, bossName, bossWorldId } = {}) {
+export function buildTravelList({ waypoints, currentWorldId, playerX, playerY, bossNearbyWaypointId, bossName, bossWorldId, teleportReady = false } = {}) {
   const list = Array.isArray(waypoints) ? waypoints : [];
 
   // Where the player is standing, if it is a waypoint at all. Scoped to the
@@ -50,7 +50,9 @@ export function buildTravelList({ waypoints, currentWorldId, playerX, playerY, b
   // lit. Unlit is the transient state between stepping on and the server's
   // activation write landing, and it is also what a character that has never
   // been here sees.
-  const standingOnActivated = here != null && here.activated === true;
+  // A completed teleport cast (teleportReady) stands in for standing on one:
+  // the server issues a one-trip ticket and applies the same substitution.
+  const standingOnActivated = (here != null && here.activated === true) || teleportReady === true;
 
   // Insertion-ordered, so the endpoint's own ORDER BY (world name, then
   // waypoint name) survives to the screen rather than being re-sorted here into

@@ -5,7 +5,7 @@
  * {seq,dx,dy,dt} for client-side reconciliation.
  */
 export class WorldAuthorityClient {
-  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onNoAmmo, onAttackRefused, onAmmo, onTransition, onWaypointActivated, onWallet, onShop, onBought, onSold, onBank, onDeposited, onWithdrawn, onProgression, onQuestProgress, onQuestNode, onChests, onChestOpened, onVfx, onWorldBossStatus, onAnnouncement, inputIntervalMs = 50, now = () => performance.now() }) {
+  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onNoAmmo, onAttackRefused, onAmmo, onTransition, onWaypointActivated, onTeleport, onWallet, onShop, onBought, onSold, onBank, onDeposited, onWithdrawn, onProgression, onQuestProgress, onQuestNode, onChests, onChestOpened, onVfx, onWorldBossStatus, onAnnouncement, inputIntervalMs = 50, now = () => performance.now() }) {
     this.url = url;
     this.token = token;
     this.onJoined = onJoined || (() => {});
@@ -52,6 +52,9 @@ export class WorldAuthorityClient {
     // travel popup never heard about, so the list kept saying "not discovered"
     // until a reload.
     this.onWaypointActivated = onWaypointActivated || (() => {});
+    // Teleport cast frames (teleportCastStarted / teleportReady / teleportCancelled),
+    // all delivered as one callback with the raw frame.
+    this.onTeleport = onTeleport || (() => {});
     // Pushed on XP gain, level-up and death (SOMET-242); the join payload's
     // own `progression` field arrives on `onJoined` instead, same split as
     // `gold` (joined) vs `wallet` (onWallet) above.
@@ -150,6 +153,9 @@ export class WorldAuthorityClient {
       case 'ammo': this.onAmmo(msg); break;
       case 'transition': this.onTransition(msg); break;
       case 'waypointActivated': this.onWaypointActivated(msg); break;
+      case 'teleportCastStarted':
+      case 'teleportReady':
+      case 'teleportCancelled': this.onTeleport(msg); break;
       case 'progression': this.onProgression(msg); break;
       case 'questProgress': this.onQuestProgress(msg); break;
       case 'questNode': this.onQuestNode(msg); break;
@@ -269,6 +275,11 @@ export class WorldAuthorityClient {
   // The reply is either an `error` or a `transition`, both of which already have
   // handlers -- travel needs no arrival path of its own.
   sendTravel(waypointId) { return this._send({ type: 'travel', waypointId }); }
+
+  // Teleport cast: start (T) and cancel. Neither carries data; the server owns
+  // the clock, the interrupt rules and the resource check.
+  sendTeleportCast() { return this._send({ type: 'teleportCast' }); }
+  sendTeleportCancel() { return this._send({ type: 'teleportCancel' }); }
 
   disconnect() {
     // Mark closed BEFORE close() so any frame still queued on the socket is

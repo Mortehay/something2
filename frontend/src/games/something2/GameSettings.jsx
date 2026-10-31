@@ -283,6 +283,7 @@ const KEYBIND_DEFINITIONS = [
   { key: 'bank', name: 'Bank / Stash', desc: 'Open Account Chest' },
   { key: 'openChest', name: 'Open Chest', desc: 'Open nearest world chest' },
   { key: 'pickup', name: 'Pick Up', desc: 'Pick up items from ground' },
+  { key: 'teleport', name: 'Teleport', desc: '2.5s cast, then choose a lit waypoint' },
 ];
 
 export default function GameSettings({ gameRef }) {

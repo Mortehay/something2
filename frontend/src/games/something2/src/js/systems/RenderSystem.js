@@ -317,7 +317,7 @@ export class RenderSystem {
     creatures = [], projectiles = [], mana = null, maxMana = null, showMana = true,
     stamina = null, maxStamina = null,
     weaponName = null, inventory = null, inventoryOpen = false, selectedItemId = null, inventoryView = null,
-    groundItems = [], gold = null, toast = null, locationBanner = null,
+    groundItems = [], gold = null, toast = null, locationBanner = null, teleportCast = null,
     blasts = [], ammo = null, noAmmoFlash = false, effects = null, vfx = [],
     // SOMET-528. Lingering melee waves; defaults to empty so every existing
     // caller and test renders exactly as before.
@@ -552,6 +552,10 @@ export class RenderSystem {
       else if (d.kind === "decoration") this.drawEntity(d.ref);
       else this.drawEntity(d.ref, RenderSystem.animKeyFor(d));
     }
+
+    // Teleport cast bar above the local player's head (drawn after the sorted
+    // pass so nothing in the world can cover it).
+    if (teleportCast && player) this.drawTeleportCastBar(teleportCast, player);
 
     // SOMET-584 review round 2 (T9 finding A). The pre-sort drawLandmarks call
     // above (line ~402) drew NOTHING for a `skipBody` landmark -- its art body
@@ -2691,6 +2695,37 @@ export class RenderSystem {
     this.ctx.textBaseline = "middle";
     this.ctx.fillText(text, GAME_WIDTH / 2, boxY + boxH / 2 + 1);
     this.ctx.restore();
+  }
+
+  // Cast bar over the player's head: fills from 0 to 1 across the cast.
+  // `cast` is {startedAt, durationMs} in performance.now() units. The server
+  // decides when the cast really completes; this is the visual only.
+  drawTeleportCastBar(cast, player) {
+    const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : 0;
+    const frac = Math.max(0, Math.min(1, (now - cast.startedAt) / (cast.durationMs || 2500)));
+    const s = worldToScreen(player.x + (player.width || 0) / 2, player.y + (player.height || 0) / 2);
+    const w = 60, h = 8;
+    const x = Math.round(s.x - w / 2);
+    const y = Math.round(s.y - 78);
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.fillStyle = "rgba(10, 10, 24, 0.85)";
+    ctx.fillRect(x - 1, y - 1, w + 2, h + 2);
+    ctx.fillStyle = "#8b5cf6";
+    ctx.fillRect(x, y, Math.round(w * frac), h);
+    ctx.strokeStyle = "#ddd6fe";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x - 0.5, y - 0.5, w + 1, h + 1);
+    ctx.font = "bold 10px monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "rgba(0,0,0,0.85)";
+    ctx.fillStyle = "#ede9fe";
+    const label = `Teleport ${(frac * (cast.durationMs || 2500) / 1000).toFixed(1)}s`;
+    ctx.strokeText(label, s.x, y - 4);
+    ctx.fillText(label, s.x, y - 4);
+    ctx.restore();
   }
 
   // Arrival banner: place name and the monster level band, top-centre, fading
