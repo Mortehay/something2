@@ -26,7 +26,7 @@ const WHY = {
 };
 
 // busy: a background job (SOMET-640) is running; Export and Seed wait for it.
-export default function SeedStatusPopup({ group, onClose, onExport, onSeed, exporting, busy, hints }) {
+export default function SeedStatusPopup({ group, onClose, onExport, onSeed, onRepair, repairing, exporting, busy, hints }) {
   const badge = statusBadge(group);
   const wantsRows = group.status === 'local_edits' || group.status === 'git_newer';
   const preview = useSeedPreview(group.id, wantsRows);
@@ -48,6 +48,7 @@ export default function SeedStatusPopup({ group, onClose, onExport, onSeed, expo
           <>
             <Err>{group.error}</Err>
             <Muted>{group.file}</Muted>
+            <p style={{ fontSize: '1.4rem' }}>Fix repairs header row counts and sync_uuids. Duplicate rows or keys, a missing table or broken JSON must be fixed in the file by hand.</p>
           </>
         ) : (
           <p style={{ fontSize: '1.4rem' }}>{(WHY[group.status] || WHY.in_sync)(group)}</p>
@@ -95,6 +96,10 @@ export default function SeedStatusPopup({ group, onClose, onExport, onSeed, expo
           {group.inGit && wantsRows && (
             <Btn $primary={group.status === 'git_newer'} disabled={Boolean(seedWhy)} title={seedWhy || undefined}
               onClick={onSeed}>Seed {group.label} (preview)…</Btn>
+          )}
+          {group.status === 'bad_file' && onRepair && (
+            <Btn $primary disabled={busy || Boolean(repairing)} title={busy ? BUSY_TEXT : undefined}
+              onClick={onRepair}>Fix {group.file || 'export file'}</Btn>
           )}
           {group.status !== 'bad_file' && (
             <Btn $primary={!exportWhy} disabled={Boolean(exportWhy) || exporting}

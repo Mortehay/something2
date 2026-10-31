@@ -7,7 +7,7 @@ import styled from 'styled-components';
 import { useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
-  useSeedGroups, useRestartStatus, useExportGroup, useExportAll, useRestartBackend, useSeedMeta,
+  useSeedGroups, useRestartStatus, useExportGroup, useRepairGroup, useExportAll, useRestartBackend, useSeedMeta,
   useSeedJob, useCancelSeedJob, useGitStatus,
 } from './useSeedExport.js';
 import {
@@ -78,7 +78,7 @@ export function JobStatus({ job, label, onCancel, cancelling }) {
 
 // One group's table row. `job` is the current job (any group, or null):
 // while it runs every Export / Seed is disabled with BUSY_TEXT.
-export function GroupRow({ g, job, exporting, onExport, onSeed, onBadge, onCancel, cancelling }) {
+export function GroupRow({ g, job, exporting, onExport, onSeed, onBadge, onCancel, cancelling, onRepair, repairing }) {
   const badge = statusBadge(g);
   const busy = jobRunning(job);
   const exportWhy = busy ? BUSY_TEXT : exportBlockReason(g);
@@ -98,6 +98,10 @@ export function GroupRow({ g, job, exporting, onExport, onSeed, onBadge, onCance
         {own && <JobStatus job={own} label={g.label} onCancel={onCancel} cancelling={cancelling} />}
       </td>
       <td><Acts>
+        {g.status === 'bad_file' && onRepair && (
+          <Btn $primary disabled={busy || Boolean(repairing)} title={busy ? BUSY_TEXT : `Repair ${g.file || 'the export file'}`}
+            onClick={onRepair}>Fix</Btn>
+        )}
         <Btn disabled={Boolean(exportWhy) || Boolean(exporting)}
           title={exportWhy || undefined}
           onClick={onExport}>Export</Btn>
@@ -113,6 +117,7 @@ export default function SeedExportAdmin() {
   const restart = useRestartStatus();
   const meta = useSeedMeta();
   const exportGroup = useExportGroup();
+  const repairGroup = useRepairGroup();
   const exportAll = useExportAll();
   const restartBackend = useRestartBackend();
   const jobQuery = useSeedJob();
@@ -134,6 +139,7 @@ export default function SeedExportAdmin() {
   const popup = byId(popupId);
   const preview = byId(previewId);
   const doExport = (g) => exportGroup.mutate({ groupId: g.id });
+  const doRepair = (g) => repairGroup.mutate({ groupId: g.id });
   const plan = exportAllPlan(list);
   const seedable = seedAllGroups(list);
   const binary = binaryGroups(list);
@@ -196,7 +202,8 @@ export default function SeedExportAdmin() {
           {list.map((g) => (
             <GroupRow key={g.id} g={g} job={job} exporting={exportGroup.isPending}
               onExport={() => doExport(g)} onSeed={() => setPreviewId(g.id)} onBadge={() => setPopupId(g.id)}
-              onCancel={() => cancelJob.mutate()} cancelling={cancelJob.isPending} />
+              onCancel={() => cancelJob.mutate()} cancelling={cancelJob.isPending}
+              onRepair={() => doRepair(g)} repairing={repairGroup.isPending} />
           ))}
         </tbody>
       </Table>
@@ -206,7 +213,8 @@ export default function SeedExportAdmin() {
         <SeedStatusPopup group={popup} hints={[...(gitHints(git.data, list)[popup.id] || []), ...(unpushedNote(git.data) ? [unpushedNote(git.data)] : [])]} exporting={exportGroup.isPending} busy={busy}
           onClose={() => setPopupId(null)}
           onExport={() => { doExport(popup); setPopupId(null); }}
-          onSeed={() => { setPreviewId(popup.id); setPopupId(null); }} />
+          onSeed={() => { setPreviewId(popup.id); setPopupId(null); }}
+          onRepair={() => doRepair(popup)} repairing={repairGroup.isPending} />
       )}
       {seedAllOpen && (
         <SeedAllModal groups={seedable} binaryGroups={binary} busy={busy} onClose={() => setSeedAllOpen(false)}

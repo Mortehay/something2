@@ -1,12 +1,12 @@
 {
   "header": {
-    "exported_at": "2026-10-21T10:27:16.643Z",
-    "exported_by": "unnamed-pc",
+    "exported_at": "2026-10-31T20:52:55.237Z",
+    "exported_by": "linux-dev",
     "group": "ai_providers",
     "row_counts": {
-      "ai_providers": 4
+      "ai_providers": 5
     },
-    "schema_version": "1714440823000_ai_provider_kinds_templates"
+    "schema_version": "1714440843000_world_boss_second_skills"
   },
   "tables": {
     "ai_providers": [
@@ -92,6 +92,25 @@
         "sheet_layout": null,
         "sheet_rows": null,
         "sync_uuid": "b4eecb7a-9840-a607-3ae5-1949ebfc9bd7"
+      },
+      {
+        "adapter": null,
+        "auth_header_name": null,
+        "base_url": "http://192.168.0.218:8001",
+        "enabled": true,
+        "modality": "sprite",
+        "model": null,
+        "models_by_group": null,
+        "models_path": null,
+        "models_pointer": null,
+        "name": "gpu-box-sprites",
+        "request_template": {},
+        "response_image_pointer": null,
+        "sheet_columns": null,
+        "sheet_directions": null,
+        "sheet_layout": null,
+        "sheet_rows": null,
+        "sync_uuid": "93e11a53-2c08-45db-94f5-874620657fc4"
       },
       {
         "adapter": null,

@@ -1,6 +1,6 @@
 {
   "header": {
-    "exported_at": "2026-10-20T20:12:03.526Z",
+    "exported_at": "2026-10-31T21:07:42.185Z",
     "exported_by": "linux-dev",
     "group": "art",
     "row_counts": {
@@ -9,10 +9,10 @@
       "catalog_art": 428,
       "character_appearances": 30,
       "entity_types": 371,
-      "item_types": 279,
+      "item_types": 283,
       "tile_types": 50
     },
-    "schema_version": "1714440812000_quests_objective_columns"
+    "schema_version": "1714440843000_world_boss_second_skills"
   },
   "tables": {
     "art_prompt_descriptions": [
@@ -4795,7 +4795,17 @@
         },
         "label": "Appearance 1",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Cultist_1.atlas.png",
+            "sha256": "691c01283e7cb7fc4b9735829b44466a2c92ce04d763cb1658103b2fe7c94fde"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Cultist_1.manifest.json",
+            "sha256": "ec500771089bcdc3ea7412a44aa3657285c4e8fbd15c8df64b55d7c0fa563e85"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "aa605df3-ca6d-24ca-5fa0-070c57af06ce",
         "variant": 1
       },
@@ -4807,7 +4817,17 @@
         },
         "label": "Appearance 2",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Cultist_2.atlas.png",
+            "sha256": "5cd9bf19a7227ae3f6695b7fd608ffb27975b2f913884fe13bad81553c9257b1"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Cultist_2.manifest.json",
+            "sha256": "47d332d92f82ebbd1bed30d659c3d2c400006f81dd80ea1166d32ce9706bfcb2"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "133404b0-4a81-95ae-457b-52b55c85d125",
         "variant": 2
       },
@@ -4915,7 +4935,17 @@
         },
         "label": "Appearance 1",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Warrior_1.atlas.png",
+            "sha256": "0783c50ebe9d893cf9777e03545fdc5654b80073d75ecbcfcb3623a311339fc5"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Warrior_1.manifest.json",
+            "sha256": "28fa21f9a183d6609b7a2f05449d12f25b1572a4324c84f31a9a9b93d0ebba45"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "3ebe6c81-66bf-e5c6-fb0c-5d0389de869e",
         "variant": 1
       },
@@ -5142,7 +5172,17 @@
         "name": "Bat",
         "prompt": "pixel art, a small brown cave bat, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Bat.atlas.png",
+            "sha256": "c63eecc9ac8d4b2db310c5d94bf65481d534c451eaada7a34c29c5b048a02cc9"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Bat.manifest.json",
+            "sha256": "20f60f0c1ca0fcab1c4da52220e889fdd5602c3cfc0ac07c122cf864013a23c1"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "c58865fa-e739-5212-47c0-2741d279cbc5"
       },
       {
@@ -5548,7 +5588,17 @@
         "name": "Bonelord Skirmisher",
         "prompt": "pixel art, a small ice-touched bonelord creature, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Bonelord_Skirmisher.atlas.png",
+            "sha256": "a9460e031c7f122097e7cfce38b1566ab6ed691ca57833e17fed88e2cd1f01eb"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Bonelord_Skirmisher.manifest.json",
+            "sha256": "d479bfbd50d68bbde9e76a538141965924036b09a84fc62bb228b1037d6be5f0"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "2577f95f-516b-f60e-687d-80881c7ba23c"
       },
       {
@@ -5646,7 +5696,17 @@
         "name": "Cave Line",
         "prompt": "pixel art, a lean physical-touched cave creature, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Cave_Line.atlas.png",
+            "sha256": "62ae77ed57fd05b6974e658ec7c5ae96a6743a7e8b9f9c0e75b2c06ba09ee5cd"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Cave_Line.manifest.json",
+            "sha256": "07c49dbc3638ec9fd5e75fc6924379ae9d54d4f4e11564742f1992ff149a16c7"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "39268252-5d5c-d88e-7368-14da090edaa1"
       },
       {
@@ -5702,7 +5762,17 @@
         "name": "Cave Swarm",
         "prompt": "pixel art, a tiny physical-touched cave creature, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Cave_Swarm.atlas.png",
+            "sha256": "8c58657709dad3f05e33ee0581d7a6aa9d811b70b6668e6bf3de6deaa8ffed57"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Cave_Swarm.manifest.json",
+            "sha256": "ef02056cf30306e623a2b985b431e4d600656494b770504824b4bd687549e199"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "752cb53b-1686-2c61-19ed-2bf53d64a671"
       },
       {
@@ -6276,7 +6346,17 @@
         "name": "Demonic Miniboss",
         "prompt": "pixel art boss creature, a powerful demonic-themed miniboss, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Demonic_Miniboss.atlas.png",
+            "sha256": "f34666b5c90660da3bcd2e49a83ffc936b42837ac4c530c2aa423e4e215a5d53"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Demonic_Miniboss.manifest.json",
+            "sha256": "a647c198b0dabd2e8937aa322345b64e1b54468ebe00d57641c5e559f468a407"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "d24d7ba6-8ba6-d728-008e-8005e395475a"
       },
       {
@@ -6598,7 +6678,17 @@
         "name": "Drowned Swarm",
         "prompt": "pixel art, a tiny ice-touched drowned creature, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Drowned_Swarm.atlas.png",
+            "sha256": "895a853d675b4c5d3c4d677562fc2961585ba048a7bb24290e17464e74bbbcfc"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Drowned_Swarm.manifest.json",
+            "sha256": "b8ef8306076f2b0789f37bc3243b0df76ac17f687d44b441e1f6b0787a3b84f5"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "ccabc622-3282-b134-f029-9d062984901c"
       },
       {
@@ -7158,7 +7248,17 @@
         "name": "Fungal Line",
         "prompt": "pixel art, a lean lightning-touched fungal creature, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Fungal_Line.atlas.png",
+            "sha256": "d2d17a1840db97707bcd489b6515915f254f839bf149d8cc0fb8d31a121ea942"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Fungal_Line.manifest.json",
+            "sha256": "ac438dab903585409f4ca2f8fee7db69b3fc4f79b1fb65491da5056b24b7f102"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "a5d16621-e04d-c7a5-568a-cf41bbb88c6e"
       },
       {
@@ -7200,7 +7300,17 @@
         "name": "Fungal Skirmisher",
         "prompt": "pixel art, a small lightning-touched fungal creature, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Fungal_Skirmisher.atlas.png",
+            "sha256": "cf405310d4117f92f959149c7227369bc789686fd7016d032a8750cc0ed95e0c"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Fungal_Skirmisher.manifest.json",
+            "sha256": "461de2abb319963efc72022f98e5faac0b642a1c3a83b5d3e22524ce19db13b9"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "67c02f84-4497-28ce-aa9c-0dd7fff752e8"
       },
       {
@@ -8376,7 +8486,17 @@
         "name": "Rime Swarm",
         "prompt": "pixel art, a tiny ice-touched rime creature, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Rime_Swarm.atlas.png",
+            "sha256": "25d465fd3c402b29ca4cfddadd9831d555fff7749b33a71edc50722a187bdc0d"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Rime_Swarm.manifest.json",
+            "sha256": "4d5a5000dc501d3642bfa04e2e09b19cd4e67bb5d4cdc02bbd68776da89e6934"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "445b5ad6-9447-6ce8-d94f-14a90261fa03"
       },
       {
@@ -8558,7 +8678,17 @@
         "name": "Slime",
         "prompt": "pixel art, a translucent green slime blob, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Slime.atlas.png",
+            "sha256": "a970351c3d73847c94f82ca1c2e3fe147041ea3af137eaa929c94002cc1e8411"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Slime.manifest.json",
+            "sha256": "df7da678449220d945a060c9f711a2b206fe2feb6d250e5293572de945ec2c7d"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "6aae50fb-b761-d53b-7d68-b8c5ac0076ea"
       },
       {
@@ -10118,7 +10248,7 @@
       {
         "display_height": 100,
         "display_width": 80,
-        "idle_fx": "none",
+        "idle_fx": "shine",
         "image": {
           "file": "textures/entities/bank_post.png",
           "sha256": "fcc07ef9a82c782674df6174f8fca184ed229fac9cb383350fbe9bdef16a414e"
@@ -10132,7 +10262,7 @@
       {
         "display_height": 40,
         "display_width": 40,
-        "idle_fx": "none",
+        "idle_fx": "shine",
         "image": {
           "file": "textures/entities/bush.png",
           "sha256": "f66f74218dcaa7d8380dd387b6ca06b1910e38b1d02f3763124be3302aac1fa0"
@@ -10146,7 +10276,7 @@
       {
         "display_height": 50,
         "display_width": 60,
-        "idle_fx": "none",
+        "idle_fx": "shine",
         "image": {
           "file": "textures/entities/chest_field.png",
           "sha256": "9cd09bda3dfc0278492d9983eccc33589305dd2979937887c59abdb86ab127f0"
@@ -10160,7 +10290,7 @@
       {
         "display_height": 60,
         "display_width": 70,
-        "idle_fx": "none",
+        "idle_fx": "shine",
         "image": {
           "file": "textures/entities/chest_vault.png",
           "sha256": "3bc1d36825766e7254fa5520386b7bdbd1cab047e478391172707a6b335c46f7"
@@ -10174,7 +10304,7 @@
       {
         "display_height": 92,
         "display_width": 56,
-        "idle_fx": "none",
+        "idle_fx": "shine",
         "image": {
           "file": "textures/entities/dead_tree.png",
           "sha256": "3faa306b752bb592efa8b330871ce79367b6ffea71e090aadf76dd56857b115f"
@@ -10202,7 +10332,7 @@
       {
         "display_height": 100,
         "display_width": 80,
-        "idle_fx": "none",
+        "idle_fx": "shine",
         "image": {
           "file": "textures/entities/merchant_post.png",
           "sha256": "995e1f5018833c331c9efe3409918f8cdf78c20fc0125e113bc6df4b9341f82a"
@@ -10216,7 +10346,7 @@
       {
         "display_height": 104,
         "display_width": 64,
-        "idle_fx": "none",
+        "idle_fx": "shine",
         "image": {
           "file": "textures/entities/pine_tree.png",
           "sha256": "af5f1bbc744b99d658f4313c4a521eb5d03344ff03c7ef3006d44be082519335"
@@ -10230,7 +10360,7 @@
       {
         "display_height": 130,
         "display_width": 110,
-        "idle_fx": "none",
+        "idle_fx": "shine",
         "image": {
           "file": "textures/entities/portal.png",
           "sha256": "21186e1b1f0bd9cfdd9492352139a4da01ac1e7b64d81df5fe4431d92856e753"
@@ -10244,7 +10374,7 @@
       {
         "display_height": 44,
         "display_width": 40,
-        "idle_fx": "none",
+        "idle_fx": "shine",
         "image": {
           "file": "textures/entities/rose_bush.png",
           "sha256": "27dbe86ba18ee8db94f5c481a194b31bab8e29e56722f9409112edfa7c6fce4f"
@@ -10258,7 +10388,7 @@
       {
         "display_height": 100,
         "display_width": 80,
-        "idle_fx": "none",
+        "idle_fx": "shine",
         "image": {
           "file": "textures/entities/skill_merchant_post.png",
           "sha256": "4f4fb8a63cd452e9727526a31b5adf856a1d7e9c632b93450050370c90d91e77"
@@ -10959,6 +11089,14 @@
       },
       {
         "icon": {
+          "file": "textures/items/gilded-fists.png",
+          "sha256": "3bdd8ad367123d84ae2b65432d5be053dbeb068e280f86dfd487f587fe37280e"
+        },
+        "name": "gilded-fists",
+        "sync_uuid": "24a2ab28-2fdc-5783-a45d-b9507b8eac23"
+      },
+      {
+        "icon": {
           "file": "textures/items/gold.png",
           "sha256": "fd6c40a315245a9d31f80778e9584d2bc0e505b7730c72bc2ddcb0f44810ae90"
         },
@@ -11615,6 +11753,14 @@
       },
       {
         "icon": {
+          "file": "textures/items/power-tinders.png",
+          "sha256": "ecece048e84762d162055d293297d14d2ed8a9007a566e656984f1867f083b3d"
+        },
+        "name": "power-tinders",
+        "sync_uuid": "29a089de-31d1-54fb-b52e-3b5cc693c8af"
+      },
+      {
+        "icon": {
           "file": "textures/items/quarterstaff.png",
           "sha256": "e2fa6d30681f6ca07185e04017977ad01b8b112feb60ba21a4dd79c51f062315"
         },
@@ -12119,6 +12265,14 @@
       },
       {
         "icon": {
+          "file": "textures/items/stormlight-mantle.png",
+          "sha256": "51bff9f6815428c4014c5e23a04a7ef93134de7f824746b7706ec8d389ad4b2c"
+        },
+        "name": "stormlight-mantle",
+        "sync_uuid": "765b105d-1d06-5a7d-8673-858fd7da0716"
+      },
+      {
+        "icon": {
           "file": "textures/items/tempered-axe.png",
           "sha256": "220df6d6656abaf56c73925c98f5f6dfc68a98a5b9917d31ff69b708530b30a6"
         },
@@ -12516,6 +12670,14 @@
         },
         "name": "void-wand",
         "sync_uuid": "da5dce6e-add9-fbd5-8a63-df1f5f8fe950"
+      },
+      {
+        "icon": {
+          "file": "textures/items/warbound-circlet.png",
+          "sha256": "5ce6fc55d162609597a0d0e075c8464f5331da22b21e884df6ad60f2ab1b1793"
+        },
+        "name": "warbound-circlet",
+        "sync_uuid": "5717774b-88aa-5f4c-84be-03e4b404b562"
       }
     ],
     "tile_types": [
