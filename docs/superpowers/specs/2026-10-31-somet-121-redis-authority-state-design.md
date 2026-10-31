@@ -19,7 +19,7 @@ Date: 2026-10-31. Supersedes nothing; extends the "Why not Redis" section of
 
 ## Facts this rests on (verified 2026-10-31 against `origin/main` e0ca0226)
 
-- One backend process; `attachAuthority` is called once (`backend/src/index.js:5865`).
+- One backend process; `attachAuthority` is called once, in `backend/src/index.js`.
   The whole world lives in its `worlds` Map, keyed by world id.
 - The Node backend has no Redis client and no `REDIS_URL`. In
   `compose/develop/docker-compose.yml` `REDIS_URL` is set only on `game-engine`
