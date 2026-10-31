@@ -23,7 +23,7 @@ describe("PoE Skill Gems Data & Requirements", () => {
       expect(typeof gem.reqInt).toBe("number");
       expect(typeof gem.reqWis).toBe("number");
       expect(typeof gem.reqCha).toBe("number");
-      if (idx === 1) {
+      if (idx === 1 || ["dru_bear_form", "dru_hawk_form", "dru_wolf_form"].includes(gem.id)) {
         expect(gem.gemPrice).toBe(100);
       } else {
         expect(gem.gemPrice).toBeGreaterThanOrEqual(250);

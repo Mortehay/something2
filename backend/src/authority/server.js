@@ -3780,6 +3780,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // SOMET-608 (S6): same silent-loss risk this hop already has a named
         // comment for -- added here explicitly rather than trusting a spread.
         if (snap.telegraphs) frame.telegraphs = snap.telegraphs;
+        if (snap.traps) frame.traps = snap.traps;
         if (hasDets) frame.detonations = dets;
         if (hasAtks) frame.attacks = atks;
         // Omitted entirely when nothing was hit, exactly as detonations and

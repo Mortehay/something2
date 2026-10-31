@@ -583,7 +583,9 @@ class World {
         // applier's userId for kill attribution already, so naming it here
         // costs nothing and keeps every damage site attributed rather than
         // leaving one that stamps "hit by nobody".
+        t._dotTick = true;
         applyDamageWithEffects(t, m, BURN_ELEMENT, effectiveMit(t), this.now, playerKey(sourceId));
+        t._dotTick = false;
         return false;
       });
       // SOMET-606: stepEffects set speed = base x chill; fold in the enemy-aura
@@ -1920,6 +1922,13 @@ class World {
           // Milliseconds left, so the client can fade it out without needing a
           // synchronised clock.
           ms: Math.max(0, Math.round(v.expiresAt - this.now)),
+        })),
+      } : {}),
+      // Archer traps on the ground; omitted when there are none.
+      ...(this.traps.length > 0 ? {
+        traps: this.traps.map((t) => ({
+          k: t.kind, x: t.x, y: t.y, r: t.radius || t.triggerRadius,
+          ms: Math.max(0, Math.round(t.expiresAt - this.now)),
         })),
       } : {}),
       // SOMET-608 (S6). Same "resolved geometry, remaining ms, omitted when
