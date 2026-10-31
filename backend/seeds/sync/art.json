@@ -1,6 +1,6 @@
 {
   "header": {
-    "exported_at": "2026-10-31T20:55:10.953Z",
+    "exported_at": "2026-10-31T21:07:42.185Z",
     "exported_by": "linux-dev",
     "group": "art",
     "row_counts": {
@@ -11088,7 +11088,10 @@
         "sync_uuid": "3967fe15-bcfe-433b-f9d2-1281fe573cb2"
       },
       {
-        "icon": null,
+        "icon": {
+          "file": "textures/items/gilded-fists.png",
+          "sha256": "3bdd8ad367123d84ae2b65432d5be053dbeb068e280f86dfd487f587fe37280e"
+        },
         "name": "gilded-fists",
         "sync_uuid": "24a2ab28-2fdc-5783-a45d-b9507b8eac23"
       },
@@ -11749,7 +11752,10 @@
         "sync_uuid": "7b41b109-4fb3-f56e-6e72-b46434fb173b"
       },
       {
-        "icon": null,
+        "icon": {
+          "file": "textures/items/power-tinders.png",
+          "sha256": "ecece048e84762d162055d293297d14d2ed8a9007a566e656984f1867f083b3d"
+        },
         "name": "power-tinders",
         "sync_uuid": "29a089de-31d1-54fb-b52e-3b5cc693c8af"
       },
@@ -12258,7 +12264,10 @@
         "sync_uuid": "d0f3912a-c770-5ae5-dd41-1cf97bb431d4"
       },
       {
-        "icon": null,
+        "icon": {
+          "file": "textures/items/stormlight-mantle.png",
+          "sha256": "51bff9f6815428c4014c5e23a04a7ef93134de7f824746b7706ec8d389ad4b2c"
+        },
         "name": "stormlight-mantle",
         "sync_uuid": "765b105d-1d06-5a7d-8673-858fd7da0716"
       },
@@ -12663,7 +12672,10 @@
         "sync_uuid": "da5dce6e-add9-fbd5-8a63-df1f5f8fe950"
       },
       {
-        "icon": null,
+        "icon": {
+          "file": "textures/items/warbound-circlet.png",
+          "sha256": "5ce6fc55d162609597a0d0e075c8464f5331da22b21e884df6ad60f2ab1b1793"
+        },
         "name": "warbound-circlet",
         "sync_uuid": "5717774b-88aa-5f4c-84be-03e4b404b562"
       }
