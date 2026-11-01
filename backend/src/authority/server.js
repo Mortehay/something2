@@ -45,6 +45,9 @@ const { buildWorldGenConfig } = require('../services/worldGenConfig');
 const { commitCreatureDeath, claimItem, claimGold, dropItem, dropGraceActive, spawnGroundItemTypes } = require('./loot');
 const { knockbackPosition, knockbackWithFallback } = require('./knockback');
 const { buyStock, sellItem } = require('./trade');
+const { enchantItem, upgradeSkill, loadSkillLevels } = require('./enchantOps');
+const { publicEnchantConfig } = require('../services/enchant.js');
+const { publicSkillLevelingConfig } = require('../services/skillLeveling.js');
 const { recordKill } = require('../services/questsService.js');
 const { vendorBuyPrice, loadLegacyChoice } = require('../services/legacyEffects.js');
 const { loadCompletedQuests } = require('../services/questsService.js');
@@ -1713,6 +1716,23 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // equip/unequip share one handler (as they did as a combined if-branch
   // before): only which World method runs, and the fallback error message,
   // differ by msg.type.
+  // Re-fold the player's gear-dependent stats after the paper doll or a weapon
+  // changed (an item's rolled affixes are a per-session overlay, so they must be
+  // re-derived the moment the gear does). The hp > 0 guard is not optional --
+  // applyDerivedStats clamps current hp to a floor of 1, so running it on a player
+  // sitting at <= 0 awaiting resolveDeaths() would cancel their death.
+  async function refreshDerivedStats(ws, entry) {
+    const p = entry.world.getPlayer(ws.userId);
+    if (!p || p.hp <= 0) return;
+    const currentProgression = await loadProgression(pool, p.characterId);
+    const f = framed(entry, ws.userId, currentProgression);
+    entry.world.applyDerivedStats(ws.userId, f.stats);
+    send(ws, {
+      type: 'progression', progression: f.progression, stats: f.stats,
+      leveledUp: false, newLevel: currentProgression.level, awarded: 0,
+    });
+  }
+
   function equipOrUnequip(ws, msg) {
     const entry = worlds.get(ws.worldId);
     if (!entry) return;
@@ -2060,6 +2080,16 @@ function attachAuthority(httpServer, pool, opts = {}) {
         loadCompletedQuests(pool, character.id).then((done) => { const pl = entry.world.getPlayer(ws.userId); if (pl) { pl._completedQuests = done.keys; pl._questTitles = done.titles; } }).catch((e) => console.error('completed quests load failed:', e));
         bossGate.loadClearedBosses(pool, character.id).then((set) => { const pl = entry.world.getPlayer(ws.userId); if (pl) { if (!pl._bossCleared) pl._bossCleared = new Set(); for (const id of set) pl._bossCleared.add(id); } }).catch((e) => console.error('boss clears load failed:', e));
         loadLegacyChoice(pool, character.id).then((lc) => { const pl = entry.world.getPlayer(ws.userId); if (pl) pl.legacyChoice = lc; }).catch((e) => console.error('legacy choice load failed:', e));
+        // Paid skill levels. Awaited (unlike the loads above) because the joined frame
+        // carries them, and a skills panel that first showed level 0 and then jumped
+        // would invite a player to pay twice for a level they already own. A failed
+        // read joins with no levels rather than refusing the join; the player simply
+        // sees their skills unlevelled until the next login.
+        const joinedSkillLevels = await loadSkillLevels(pool, character.id).catch((e) => {
+          console.error('skill levels load failed:', e);
+          return new Map();
+        });
+        entry.world.getPlayer(ws.userId).skillLevels = joinedSkillLevels;
         send(ws, {
           type: 'joined', user_id: ws.userId, character_id: character.id, spawn, tickRate: 1000 / tickMs,
           // Shown as an arrival banner: the place name and the creature level
@@ -2078,6 +2108,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
           elements: elementsForWire(entry.catalogs),
           items: inv.items,
           equipment: inv.equipment,
+          // Weapon enchanting and paid skill levels: the odds, the damage per level
+          // and the price list, so the panels show the server's numbers instead of a
+          // copy of them. DISPLAY ONLY -- every rule is enforced server-side.
+          enchant: publicEnchantConfig(),
+          skillLeveling: publicSkillLevelingConfig(),
+          skillLevels: Object.fromEntries(joinedSkillLevels),
           // The panel renders used/capacity in its title bar. Nothing in play
           // changes the cap, so it rides the join frame only. DISPLAY ONLY:
           // the rule that refuses an item runs server-side, against this same
@@ -2595,6 +2631,38 @@ function attachAuthority(httpServer, pool, opts = {}) {
            ON CONFLICT (character_id, creature_type, level) DO NOTHING`,
           [character.id, c.type, c.level]);
         send(ws, { type: 'charmed', creatureId: msg.creature_id, expiresAt });
+      });
+    },
+
+    // Spend an enchant scroll on a weapon. { type: 'enchant', scrollId, itemId }.
+    // Replies 'enchanted' with the outcome and the new state; a refusal is an 'error'.
+    // The outcome is rolled here and only here -- the client never sees the dice.
+    enchant(ws, msg) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      if (typeof msg.scrollId !== 'string' || typeof msg.itemId !== 'string') return;
+      chainOp(ws, 'enchant', async () => {
+        const r = await enchantItem(pool, entry, ws.userId, ws.characterId, msg.scrollId, msg.itemId);
+        if (!r.ok) { send(ws, { type: 'error', message: r.reason }); return; }
+        send(ws, {
+          type: 'enchanted', outcome: r.outcome, itemId: r.itemId, level: r.level,
+          destroyed: r.destroyed, scrollId: r.scrollId, scrollsLeft: r.scrollsLeft,
+        });
+        // A weapon that changed or burnt while held changes the gear stats too.
+        if (r.wasEquipped) await refreshDerivedStats(ws, entry);
+      });
+    },
+
+    // Buy the next level of a skill. { type: 'upgradeSkill', skillId }.
+    upgradeSkill(ws, msg) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      if (typeof msg.skillId !== 'string') return;
+      chainOp(ws, 'upgradeSkill', async () => {
+        const r = await upgradeSkill(pool, entry, ws.userId, ws.characterId, msg.skillId);
+        if (!r.ok) { send(ws, { type: 'error', message: r.reason }); return; }
+        send(ws, { type: 'skillUpgraded', skillId: r.skillId, level: r.level, cost: r.cost, gold: r.gold });
+        send(ws, { type: 'wallet', gold: r.gold });
       });
     },
 

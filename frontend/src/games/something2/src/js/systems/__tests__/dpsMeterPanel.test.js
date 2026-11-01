@@ -54,3 +54,14 @@ describe("damageLine", () => {
     }
   });
 });
+
+describe("scalesWithLine", () => {
+  it("names the skill's attribute, and says nothing for a buff or an unknown attribute", async () => {
+    const { scalesWithLine } = await import("../skillDamageLine.js");
+    expect(scalesWithLine({ type: "melee", attribute: "strength" })).toBe("Scales with STR");
+    expect(scalesWithLine({ type: "magic", attribute: "charisma" })).toBe("Scales with CHA");
+    expect(scalesWithLine({ type: "buff", attribute: "strength" })).toBeNull();
+    expect(scalesWithLine({ type: "melee" })).toBeNull();
+    expect(scalesWithLine(null)).toBeNull();
+  });
+});

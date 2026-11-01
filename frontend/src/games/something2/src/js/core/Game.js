@@ -20,6 +20,9 @@ import { aimVector, cursorToWorld } from "./aim.js";
 import { createInventory, applyJoined, applyEquipment, canEquipClient, typeOf, addItem, removeItem } from "./inventory.js";
 import { resolveDrop } from '../systems/inventoryPanel.js';
 import {
+    enchantPlan, needsConfirm, applyEnchantResult, enchantResultMessage, ENCHANT_CONFIRM_MS, skillUpgradePlan,
+} from '../systems/enchantUi.js';
+import {
     buildTreeIndex, hitNodeAt, clampZoom, zoomAbout, DEFAULT_ZOOM,
 } from '../systems/passiveTreePanel.js';
 import {
@@ -242,6 +245,13 @@ export class Game {
         this.skillHoverSlot = null;
         this.hotbarSkills = new Map();
         this.unlockedSkills = new Set();
+        // Weapon enchanting + paid skill levels (server config and the character's levels).
+        this.enchantCfg = null;
+        this.skillLevelingCfg = null;
+        this.skillLevels = {};
+        this._enchantArmed = null;       // { itemId, until } -- the second click of a dangerous enchant
+        this._lastEnchantSentAt = 0;
+        this._lastUpgradeSentAt = 0;
         this.skillVisuals = [];
         this.floatingTexts = [];
         this._inputBuffer = [];
@@ -896,6 +906,12 @@ export class Game {
                     this.doorways = Array.isArray(msg.doorways) ? msg.doorways : [];
                     this.banks = Array.isArray(msg.banks) ? msg.banks : [];
                     this.progression = msg.progression || null;
+                    // The server's enchant odds / skill price list, and this character's
+                    // purchased skill levels. Display only: the server enforces all of it.
+                    this.enchantCfg = msg.enchant || null;
+                    this.skillLevelingCfg = msg.skillLeveling || null;
+                    this.skillLevels = { ...(msg.skillLevels || {}) };
+                    this._enchantArmed = null;
                     this._refreshProgressionBundle();
                     // SOMET-472 -- a Cultist pays every mana cost in HP, so
                     // the mana orb would be a bar that never moves. Server-
@@ -917,6 +933,8 @@ export class Game {
                 // never sends a `picked` frame for it, only this wallet
                 // balance (see onPicked above — items only).
                 onWallet: (msg) => { this.gold = Number(msg.gold) || 0; },
+                onEnchanted: (msg) => this._onEnchanted(msg),
+                onSkillUpgraded: (msg) => this._onSkillUpgraded(msg),
                 // Interacting near a merchant opens the panel with its
                 // current stock; the server is the sole source of truth for
                 // catalog/buyback/prices, so this simply mirrors the frame.
@@ -1225,6 +1243,19 @@ export class Game {
     // Everything the Character pane renders, assembled fresh each frame from
     // the single-writer row plus the extras above. Not cached: a kill that
     // levels the player up must move the bar on the very next frame.
+    // A skill's cooldown in seconds. Damaging skills are hasted by the server's
+    // own number (derived stats `skillCooldownMult`, playerStats.js), so the
+    // hotbar timer matches the server's gate instead of being a second copy of
+    // the rule. Before the first stats frame the base cooldown stands.
+    _skillCooldownSec(s) {
+        const base = s.cooldown || 1;
+        const view = this.characterView();
+        const m = view && view.stats && view.stats.skillCooldownMult;
+        if (!m) return base;
+        const k = s.type === 'melee' ? m.melee : (s.type === 'magic' ? m.spell : 1);
+        return base * (Number(k) > 0 ? Number(k) : 1);
+    }
+
     characterView() {
         return buildCharacterView({
             progression: this.progression,
@@ -1732,6 +1763,8 @@ export class Game {
             // server omits the field — otherwise a `if (mine.effects)` guard
             // would leave the HUD reading "Burning" long after the burn ended.
             this.player.effects = mine.effects || null;
+            // The +N of the weapon in hand (omitted by the server below +1): drives the aura.
+            this.player.enchant = Number(mine.enchant) || 0;
             // SOMET-606. Both assigned EVERY frame (the server omits them when
             // clear -- same reason as `effects` above).
             this.selfSpeedMult = selfSpeedMult(msg);
@@ -1997,6 +2030,9 @@ export class Game {
                 maxStamina: this.localMaxStamina,
                 weaponName: this._resolveWeaponName(),
                 inventory: this.inventory,
+                enchantCfg: this.enchantCfg,
+                skillLevels: this.skillLevels,
+                skillLevelingCfg: this.skillLevelingCfg,
                 inventoryOpen: this.inventoryOpen,
                 selectedItemId: this.inventorySelectedItemId,
                 // Skills & Hotbar
@@ -2023,6 +2059,10 @@ export class Game {
                     tab: this.inventoryTab,
                     page: this.inventoryPage,
                     gold: this.gold,
+                    // The Enchant button's inputs: the server's odds, and which weapon (if any)
+                    // has its dangerous enchant armed for the confirming second click.
+                    enchantCfg: this.enchantCfg,
+                    enchantArmedItemId: (this._enchantArmed && performance.now() <= this._enchantArmed.until) ? this._enchantArmed.itemId : null,
                     drag: this.inventoryDrag,
                     hoverX: this._cursorX ?? null,
                     hoverY: this._cursorY ?? null,
@@ -2572,6 +2612,72 @@ export class Game {
             if (this.authorityClient) this.authorityClient.sendDrop(hit.id);
             return;
         }
+
+        if (hit.kind === 'enchant') { this._onEnchantClick(hit.id); return; }
+    }
+
+    // The Enchant button. A SAFE level (+1..+3) goes straight to the server; a level
+    // that can burn the weapon needs a second click within ENCHANT_CONFIRM_MS, so a
+    // stray click cannot cost a +14 sword. The server re-checks everything and owns
+    // the dice; this only decides whether to ask.
+    _onEnchantClick(itemId) {
+        const plan = enchantPlan(this.inventory, itemId, this.enchantCfg);
+        if (!plan.ok) {
+            if (this.showToast && plan.reason) this.showToast(`🔒 ${plan.reason}`);
+            return;
+        }
+        if (!this.authorityClient) return;
+        const now = performance.now();
+        if (needsConfirm(plan)) {
+            const armed = this._enchantArmed;
+            if (!armed || armed.itemId !== itemId || now > armed.until) {
+                this._enchantArmed = { itemId, until: now + ENCHANT_CONFIRM_MS };
+                if (this.showToast) this.showToast(`⚠️ ${plan.chancePct}% to reach +${plan.nextLevel}. On a miss the weapon BURNS. Click again to confirm.`);
+                return;
+            }
+        }
+        this._enchantArmed = null;
+        // One request at a time: a double-click must not spend two scrolls.
+        if (now - this._lastEnchantSentAt < 600) return;
+        this._lastEnchantSentAt = now;
+        this.authorityClient.sendEnchant(plan.scrollId, itemId);
+    }
+
+    _onEnchanted(msg) {
+        const name = applyEnchantResult(this.inventory, msg);
+        this._enchantArmed = null;
+        if (msg.destroyed && this.inventorySelectedItemId === msg.itemId) this.inventorySelectedItemId = null;
+        const text = enchantResultMessage(msg, name);
+        if (text && this.showToast) this.showToast(text);
+        const px = (this.player && this.player.x) || 0;
+        const py = (this.player && this.player.y) || 0;
+        const element = msg.outcome === 'success' ? 'holy' : (msg.destroyed ? 'fire' : 'physical');
+        addBlasts(this.blasts, [{ x: px, y: py, radius: msg.destroyed ? 80 : 60, element }], performance.now());
+    }
+
+    // The Upgrade button on a skill. Refused locally (no message sent) when the skill is
+    // at the cap or the wallet is short; the server checks both again.
+    _onSkillUpgradeClick(skillId) {
+        const plan = skillUpgradePlan(this.skillLevels, skillId, this.gold, this.skillLevelingCfg);
+        if (plan.maxed) { if (this.showToast) this.showToast(`⭐ Already at the maximum level (${plan.max})`); return; }
+        if (!plan.canAfford) {
+            if (this.showToast) this.showToast(`🪙 Not enough gold! Needs ${plan.cost.toLocaleString()}g (you have ${(this.gold || 0).toLocaleString()}g)`);
+            return;
+        }
+        if (!this.authorityClient) return;
+        const now = performance.now();
+        if (now - this._lastUpgradeSentAt < 400) return;   // a double-click must not buy two levels
+        this._lastUpgradeSentAt = now;
+        this.authorityClient.sendUpgradeSkill(skillId);
+    }
+
+    _onSkillUpgraded(msg) {
+        this.skillLevels = { ...this.skillLevels, [msg.skillId]: Number(msg.level) || 0 };
+        if (Number.isFinite(Number(msg.gold))) this.gold = Number(msg.gold);
+        if (this.showToast) this.showToast(`⭐ Skill upgraded to level ${msg.level} (-${Number(msg.cost).toLocaleString()}g)`);
+        const px = (this.player && this.player.x) || 0;
+        const py = (this.player && this.player.y) || 0;
+        addBlasts(this.blasts, [{ x: px, y: py, radius: 50, element: 'holy' }], performance.now());
     }
 
     // Hit-test the shop panel's buy/sell/close rects RenderSystem recorded
@@ -2881,7 +2987,7 @@ export class Game {
 
         // 6. Set cooldown
         if (!s.channeled) {
-            const cdSec = s.cooldown || 1;
+            const cdSec = this._skillCooldownSec(s);
             this.skillCooldowns.set(s.id, nowMs + cdSec * 1000);
         }
 
@@ -3568,6 +3674,10 @@ export class Game {
             if (this.skillsOpen) {
                 const x = this._cursorX ?? 0, y = this._cursorY ?? 0;
                 const areas = (this.renderSystem && this.renderSystem._skillsHitAreas) || [];
+
+                // 0. Level-up button on a skill
+                const upgradeHit = areas.find((a) => a.kind === 'skills_upgrade' && x >= a.box.x && x <= a.box.x + a.box.w && y >= a.box.y && y <= a.box.y + a.box.h);
+                if (upgradeHit) { this._onSkillUpgradeClick(upgradeHit.skillId); return; }
 
                 // 1. Buy button clicks
                 const buyHit = areas.find((a) => a.kind === 'skills_buy' && x >= a.box.x && x <= a.box.x + a.box.w && y >= a.box.y && y <= a.box.y + a.box.h);

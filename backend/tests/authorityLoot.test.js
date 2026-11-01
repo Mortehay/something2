@@ -333,7 +333,7 @@ test('a successful claim adds the instance to the in-memory inventory', async ()
   // nothing until the player reconnected. This scripted row omits every new
   // column, so the values below are the defaults a partial row falls back to.
   assert.deepStrictEqual(entry.world.getPlayer('u1').inv.items, [{
-    id: 'inst-1', typeId: 7, quantity: 1, rarity: 'white', itemLevel: 1, soulbound: false, affixes: [],
+    id: 'inst-1', typeId: 7, quantity: 1, rarity: 'white', itemLevel: 1, enchantLevel: 0, soulbound: false, affixes: [],
   }]);
 });
 
@@ -347,14 +347,14 @@ test('a successful claim carries the ground row\'s rarity, level, bound flag and
     [CLAIM_RE, {
       rows: [{
         id: 'inst-9', item_type_id: 7, quantity: 1,
-        rarity: 'foxy', item_level: 88, soulbound: true, affixes: rolled,
+        rarity: 'foxy', item_level: 88, soulbound: true, affixes: rolled, enchant_level: 9,
       }],
       rowCount: 1,
     }],
   ]);
   await claimItem(pool, entry, 'u1', 31, 'g1');
   assert.deepStrictEqual(entry.world.getPlayer('u1').inv.items, [{
-    id: 'inst-9', typeId: 7, quantity: 1, rarity: 'foxy', itemLevel: 88, soulbound: true, affixes: rolled,
+    id: 'inst-9', typeId: 7, quantity: 1, rarity: 'foxy', itemLevel: 88, enchantLevel: 9, soulbound: true, affixes: rolled,
   }]);
 });
 

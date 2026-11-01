@@ -4,6 +4,7 @@
 // any world. Gold is the exception and stays on users -- it is account-wide.
 
 const { isCompatible, stoneKind, rollDestroy } = require('../services/stones.js');
+const { levelOf: enchantLevelOf, damageMultiplier: enchantDamageMultiplier } = require('../services/enchant.js');
 
 // SOMET-509. The weapon a character holding nothing fights with.
 //
@@ -256,7 +257,7 @@ async function loadInventory(pool, characterId) {
   // entry would then be summed as 0 by every consumer instead of being absent.
   const ir = await pool.query(
     `SELECT pi.id, pi.item_type_id, pi.quantity, pi.soulbound, pi.rarity, pi.item_level,
-            pi.created_at,
+            pi.created_at, pi.enchant_level,
             COALESCE(jsonb_agg(
               jsonb_build_object('affixTypeId', pia.affix_type_id, 'key', at.key,
                                  'label', at.label,
@@ -311,6 +312,9 @@ async function loadInventory(pool, characterId) {
     // second query on the equip path.
     rarity: r.rarity || 'white',
     itemLevel: Number(r.item_level ?? 1),
+    // Weapon enchanting (services/enchant.js): +0..+15. Carried on the instance so
+    // the panel can draw "+N" and activeWeaponType can scale the weapon's damage.
+    enchantLevel: Number(r.enchant_level ?? 0),
     affixes: Array.isArray(r.affixes) ? r.affixes : [],
   }));
   const byId = new Map(items.map((it) => [it.id, it]));
@@ -646,7 +650,24 @@ function mitigation(inv, itemTypes, extraResistances = null) {
 // behavior change from pre-socket baked-in magic, called out explicitly in
 // the design doc: it only matters once a player unsockets a converted
 // weapon's spell stone and leaves the weapon bare.
+// The weapon a character fights with, ENCHANT INCLUDED: the equipped instance's
+// +N scales the damage of whatever the base resolution below returns (the plain
+// weapon, a replace-mode stone's spell, an augment's second packet). An unenchanted
+// weapon is returned untouched, so the hot path allocates only for a +1 or better.
 function activeWeaponType(inv, itemTypes, defaultWeaponId) {
+  const w = baseActiveWeaponType(inv, itemTypes, defaultWeaponId);
+  const itemId = inv.equipment.main_hand;
+  if (!w || !itemId) return w;
+  const item = findItem(inv, itemId);
+  const level = enchantLevelOf(item);
+  if (level <= 0 || w.category !== 'weapon') return w;
+  const mult = enchantDamageMultiplier(level);
+  const scaled = { ...w, damage: w.damage * mult, enchantLevel: level };
+  if (w.augment) scaled.augment = { ...w.augment, bonusDamage: w.augment.bonusDamage * mult };
+  return scaled;
+}
+
+function baseActiveWeaponType(inv, itemTypes, defaultWeaponId) {
   const itemId = inv.equipment.main_hand;
   if (itemId) {
     const item = findItem(inv, itemId);

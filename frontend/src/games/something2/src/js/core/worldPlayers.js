@@ -27,5 +27,7 @@ export function remotePlayerFromFrame(p) {
     aura: p.aura || 0,
     className: p.className || null,
     appearanceVariant: Number(p.appearanceVariant) || 1,
+    // The +N of the weapon in hand; the server omits it below +1. Drives the aura.
+    enchant: Number(p.enchant) || 0,
   };
 }

@@ -460,11 +460,11 @@ async function claimItem(pool, entry, userId, characterId, groundItemId, { now =
     // would make the two carry paths disagree about what idx means.
     const r = await pool.query(
       `WITH d AS (DELETE FROM world_items WHERE id = $1
-                  RETURNING item_type_id, quantity, rarity, item_level, affixes, soulbound),
+                  RETURNING item_type_id, quantity, rarity, item_level, affixes, soulbound, enchant_level),
             ins AS (INSERT INTO player_items
-                      (character_id, item_type_id, quantity, rarity, item_level, soulbound)
-                    SELECT $2, item_type_id, quantity, rarity, item_level, soulbound FROM d
-                    RETURNING id, item_type_id, quantity, rarity, item_level, soulbound),
+                      (character_id, item_type_id, quantity, rarity, item_level, soulbound, enchant_level)
+                    SELECT $2, item_type_id, quantity, rarity, item_level, soulbound, enchant_level FROM d
+                    RETURNING id, item_type_id, quantity, rarity, item_level, soulbound, enchant_level),
             aff AS (INSERT INTO player_item_affixes (player_item_id, idx, affix_type_id, value)
                     SELECT ins.id, (a.ord - 1)::smallint,
                            live.id, (a.elem->>'value')::double precision
@@ -473,7 +473,7 @@ async function claimItem(pool, entry, userId, characterId, groundItemId, { now =
                                    JOIN affix_types live
                                      ON live.id = (a.elem->>'affixTypeId')::int
                     RETURNING idx, affix_type_id, value)
-       SELECT ins.id, ins.item_type_id, ins.quantity, ins.rarity, ins.item_level, ins.soulbound,
+       SELECT ins.id, ins.item_type_id, ins.quantity, ins.rarity, ins.item_level, ins.soulbound, ins.enchant_level,
               COALESCE((SELECT jsonb_agg(jsonb_build_object(
                                  'affixTypeId', aff.affix_type_id, 'key', at.key,
                                  'label', at.label,
@@ -499,7 +499,7 @@ async function claimItem(pool, entry, userId, characterId, groundItemId, { now =
     }
     const {
       id: instanceId, item_type_id: typeId, quantity,
-      rarity, item_level: itemLevel, soulbound, affixes,
+      rarity, item_level: itemLevel, soulbound, affixes, enchant_level: enchantLevel,
       orphaned_affix_type_ids: orphaned,
     } = r.rows[0];
     // SOMET-501: the loud half of the tolerance above. Reaching this line means
@@ -545,6 +545,8 @@ async function claimItem(pool, entry, userId, characterId, groundItemId, { now =
         quantity: qty,
         rarity: rarity || 'white',
         itemLevel: Number(itemLevel ?? 1),
+        // A weapon keeps its +N across the ground: dropItem wrote it onto the row.
+        enchantLevel: Number(enchantLevel ?? 0),
         soulbound: soulbound === true,
         affixes: Array.isArray(affixes) ? affixes : [],
       });
@@ -766,7 +768,7 @@ async function dropItem(pool, entry, userId, characterId, itemId, { ttlMs = 1800
   // aggregate would reshuffle a player's affix indices on every drop.
   const r = await pool.query(
     `WITH d AS (DELETE FROM player_items WHERE id = $1 AND character_id = $2
-                RETURNING id, item_type_id, quantity, rarity, item_level, soulbound),
+                RETURNING id, item_type_id, quantity, rarity, item_level, soulbound, enchant_level),
           snap AS (SELECT d.id,
                           COALESCE(jsonb_agg(
                             jsonb_build_object('affixTypeId', pia.affix_type_id, 'value', pia.value)
@@ -776,11 +778,11 @@ async function dropItem(pool, entry, userId, characterId, itemId, { ttlMs = 1800
                     GROUP BY d.id),
           eject AS (UPDATE stone_instances SET socketed_into_id = NULL FROM d WHERE stone_instances.socketed_into_id = $1)
      INSERT INTO world_items (world_id, item_type_id, x, y, expires_at, quantity,
-                              rarity, item_level, affixes, soulbound)
+                              rarity, item_level, affixes, soulbound, enchant_level)
      SELECT $3, d.item_type_id, $4, $5, now() + ($6::int * interval '1 millisecond'), d.quantity,
-            d.rarity, d.item_level, snap.affixes, d.soulbound
+            d.rarity, d.item_level, snap.affixes, d.soulbound, d.enchant_level
        FROM d JOIN snap ON snap.id = d.id
-     RETURNING id, item_type_id, x, y, expires_at, quantity, rarity, item_level, affixes, soulbound`,
+     RETURNING id, item_type_id, x, y, expires_at, quantity, rarity, item_level, affixes, soulbound, enchant_level`,
     [itemId, characterId, entry.worldId, cx, cy, ttlMs],
   );
   if (r.rowCount !== 1) return { ok: false, reason: 'you do not own that item' };

@@ -86,17 +86,17 @@ const RULE_KEYS = {
   // client draws the same arc the server hit-tested.
   meleeReachBonus: {
     combine: 'sum',
-    consumer: 'backend/src/authority/world.js — attack(), melee branch `reach` (pixels)',
+    consumer: 'backend/src/authority/world.js — attack(), melee branch `reach` (pixels); castSkill(), melee skills',
   },
   meleeArcBonus: {
     combine: 'sum',
-    consumer: 'backend/src/authority/world.js — attack(), melee branch `arc` (radians, clamped at TAU)',
+    consumer: 'backend/src/authority/world.js — attack(), melee branch `arc` (radians, clamped at TAU); castSkill(), melee skills',
   },
   // SOMET-521. The volley. Cost and cooldown are paid once per volley, not per
   // projectile -- see attack()'s projectile branch.
   projectileCount: {
     combine: 'sum',
-    consumer: 'backend/src/authority/world.js — attack(), projectile branch spawns 1 + this, fanned',
+    consumer: 'backend/src/authority/world.js — attack(), projectile branch spawns 1 + this, fanned; castSkill(), extra hits for skill.projectile skills',
   },
   projectileSpeedMult: {
     combine: 'product',
@@ -118,12 +118,12 @@ const RULE_KEYS = {
   // SOMET-527. The price a wide swing pays.
   meleeDamageMult: {
     combine: 'product',
-    consumer: 'backend/src/authority/world.js — weaponDamage(), melee branch only',
+    consumer: 'backend/src/authority/world.js — weaponDamage(), melee branch; castSkill(), melee skills',
   },
   // SOMET-528. Above zero means a swing leaves a lingering wave.
   meleeWaveShare: {
     combine: 'sum',
-    consumer: 'backend/src/authority/world.js — attack() spawns the wave, tick() damages through it',
+    consumer: 'backend/src/authority/world.js — attack() and castSkill() (melee skills) spawn the wave, tick() damages through it',
   },
   hpRegen: {
     combine: 'sum',
@@ -145,6 +145,39 @@ const RULE_KEYS = {
     combine: 'sum',
     consumer: 'backend/src/authority/skillBalance.js — resolveEffects(), scales the bonuses of a druid form at cast time',
   },
+
+  // --- Skill rules (the second wave: skills are the main way to fight) --------
+  // Damage a SKILL deals, by the attribute the skill names (skill.attribute).
+  // One rule per attribute, `sum`: +0.04 is +4% for every skill on that
+  // attribute, added to the others and multiplied against the skill.
+  strengthSkillDamage: { combine: 'sum', consumer: 'backend/src/authority/world.js — castSkill(), skills whose attribute is strength' },
+  dexteritySkillDamage: { combine: 'sum', consumer: 'backend/src/authority/world.js — castSkill(), skills whose attribute is dexterity' },
+  constitutionSkillDamage: { combine: 'sum', consumer: 'backend/src/authority/world.js — castSkill(), skills whose attribute is constitution' },
+  intelligenceSkillDamage: { combine: 'sum', consumer: 'backend/src/authority/world.js — castSkill(), skills whose attribute is intelligence' },
+  wisdomSkillDamage: { combine: 'sum', consumer: 'backend/src/authority/world.js — castSkill(), skills whose attribute is wisdom' },
+  charismaSkillDamage: { combine: 'sum', consumer: 'backend/src/authority/world.js — castSkill(), skills whose attribute is charisma' },
+  // A flat multiplier on every skill's damage. `product`, and the keystones that
+  // raise it also pay for it (a cost multiplier or lost life).
+  skillDamageMult: { combine: 'product', consumer: 'backend/src/authority/world.js — castSkill(), every damaging skill' },
+  // Extra skill damage while the caster is under 35% life / holds 80%+ of their mana.
+  lowLifeDamage: { combine: 'sum', consumer: 'backend/src/authority/world.js — castSkill(), skill damage while hp < 35% of max' },
+  fullManaDamage: { combine: 'sum', consumer: 'backend/src/authority/world.js — castSkill(), skill damage while mana >= 80% of max' },
+  // Critical strikes. critChance is a fraction added to the weapon family's and
+  // the buffs'; critDamage is added to the 1.5 base multiplier.
+  critChance: { combine: 'sum', consumer: 'backend/src/authority/skillBalance.js — rollCrit(), weapon attacks and skills' },
+  critDamage: { combine: 'sum', consumer: 'backend/src/authority/skillBalance.js — rollCrit(), weapon attacks and skills' },
+  // What a skill costs and how fast it recharges. `product`; below 1 is cheaper / faster.
+  manaCostMult: { combine: 'product', consumer: 'backend/src/authority/world.js — castSkill(), mana-cost skills' },
+  staminaCostMult: { combine: 'product', consumer: 'backend/src/authority/world.js — castSkill(), stamina-cost skills' },
+  skillCooldownMult: { combine: 'product', consumer: 'backend/src/services/playerStats.js — skillCooldownMults(), damaging skills (floored)' },
+  // Sustain and control.
+  skillLeech: { combine: 'sum', consumer: 'backend/src/authority/skillBalance.js — leechHeal(), share of a skill\'s damage healed' },
+  killHeal: { combine: 'sum', consumer: 'backend/src/authority/world.js — castSkill(), share of max life restored per creature killed' },
+  stunChance: { combine: 'sum', consumer: 'backend/src/authority/world.js — attack() and castSkill(), stun rider on every hit' },
+  dodgeChance: { combine: 'sum', consumer: 'backend/src/authority/skillBalance.js — mitigateIncoming(), capped at 50%' },
+  reflectShare: { combine: 'sum', consumer: 'backend/src/authority/skillBalance.js — mitigateIncoming(), share of a blow sent back' },
+  aoeRadiusMult: { combine: 'product', consumer: 'backend/src/authority/world.js — castSkill(), area skills' },
+  manaPerWisdom: { combine: 'sum', consumer: 'backend/src/services/playerStats.js — derivePlayerStats(), max mana per point of wisdom above base' },
 };
 
 // Clockwise from straight up, matching the spec §5.2 diagram exactly. ORDER IS
@@ -270,6 +303,9 @@ const TEMPLATES = [
   // Strength (Warrior) - HP Regen & Melee Fortitude
   { key: 'min_regrowth', kind: 'minor', sectors: ['strength'], rings: [1, 2, 3], weight: 2, label: 'Regrowth', grants: [{ type: 'rule', rule: 'hpRegen', value: 1.0 }, { type: 'resource', pool: 'hp', value: 15 }] },
   { key: 'min_enduring_flesh', kind: 'minor', sectors: ['strength'], rings: [1, 2, 3], weight: 2, label: 'Enduring Flesh', grants: [{ type: 'rule', rule: 'hpRegen', value: 1.5 }, { type: 'resist', element: 'physical', value: 2 }] },
+  // 41 of the Warrior's 50 skills cost stamina, yet this sector had no stamina
+  // regeneration of its own -- only the Archer's did.
+  { key: 'min_battle_breath', kind: 'minor', sectors: ['strength'], rings: [1, 2, 3], weight: 2, label: 'Battle Breath', grants: [{ type: 'rule', rule: 'staminaRegen', value: 3.0 }, { type: 'resource', pool: 'stamina', value: 10 }] },
   // Intelligence (Mage) - Mana Regen & Elemental Spark
   { key: 'min_arcane_recovery', kind: 'minor', sectors: ['intelligence'], rings: [1, 2, 3], weight: 2, label: 'Arcane Recovery', grants: [{ type: 'rule', rule: 'manaRegen', value: 3.0 }, { type: 'resource', pool: 'mana', value: 15 }] },
   { key: 'min_meditation_spark', kind: 'minor', sectors: ['intelligence'], rings: [1, 2, 3], weight: 2, label: 'Meditation Spark', grants: [{ type: 'rule', rule: 'manaRegen', value: 2.5 }, { type: 'damage', element: 'arcane', value: 4 }] },
@@ -299,6 +335,7 @@ const TEMPLATES = [
   // Sector-themed notables:
   { key: 'not_sanguine_spring', kind: 'notable', sectors: ['constitution'], rings: [1, 2, 3], label: 'Sanguine Spring', grants: [{ type: 'rule', rule: 'hpRegen', value: 2.5 }, { type: 'resource', pool: 'hp', value: 35 }] },
   { key: 'not_iron_recovery', kind: 'notable', sectors: ['strength'], rings: [1, 2, 3], label: 'Iron Recovery', grants: [{ type: 'rule', rule: 'hpRegen', value: 2.0 }, { type: 'resource', pool: 'hp', value: 30 }] },
+  { key: 'not_unflagging', kind: 'notable', sectors: ['strength'], rings: [1, 2, 3], label: 'Unflagging', grants: [{ type: 'rule', rule: 'staminaRegen', value: 5.0 }, { type: 'resource', pool: 'stamina', value: 20 }] },
   { key: 'not_font_of_power', kind: 'notable', sectors: ['intelligence'], rings: [1, 2, 3], label: 'Font of Power', grants: [{ type: 'rule', rule: 'manaRegen', value: 4.0 }, { type: 'resource', pool: 'mana', value: 25 }] },
   { key: 'not_tranquil_flow', kind: 'notable', sectors: ['wisdom'], rings: [1, 2, 3], label: 'Tranquil Flow', grants: [{ type: 'rule', rule: 'hpRegen', value: 1.5 }, { type: 'rule', rule: 'manaRegen', value: 3.0 }, { type: 'resist', element: 'arcane', value: 5 }] },
   { key: 'not_fleeting_rest', kind: 'notable', sectors: ['dexterity'], rings: [1, 2, 3], label: 'Fleeting Rest', grants: [{ type: 'rule', rule: 'staminaRegen', value: 5.0 }, { type: 'resource', pool: 'stamina', value: 15 }, { type: 'rule', rule: 'hpRegen', value: 0.8 }] },
@@ -331,6 +368,56 @@ const TEMPLATES = [
   { key: 'grt_paragon', kind: 'greater', sectors: '*', rings: [3], weight: 2, label: 'Paragon', grants: [{ type: 'stat', stat: '@sector', value: 20 }] },
   { key: 'grt_wanderers_gift', kind: 'greater', sectors: '*', rings: [3], weight: 2, label: "Wanderer's Gift", grants: [{ type: 'stat', stat: '@other', value: 18 }] },
   { key: 'grt_apostasy', kind: 'greater', sectors: '*', rings: [3], weight: 1, label: 'Apostasy', grants: [{ type: 'stat', stat: '@other', value: 20 }] },
+
+  // --- skill nodes (skills are the main way to fight) --------------------------
+  //
+  // ATTRIBUTE FOCUS. Every skill names the attribute its damage grows with, so a
+  // sector can pay out in damage for the skills of ITS attribute, not only in the
+  // attribute itself. One notable and one greater per attribute; they are
+  // sector-locked because the rule they grant is named after the attribute.
+  { key: 'not_martial_focus', kind: 'notable', sectors: ['strength'], rings: [1, 2, 3], weight: 2, label: 'Martial Focus', grants: [{ type: 'rule', rule: 'strengthSkillDamage', value: 0.04 }] },
+  { key: 'not_marksmans_focus', kind: 'notable', sectors: ['dexterity'], rings: [1, 2, 3], weight: 2, label: "Marksman's Focus", grants: [{ type: 'rule', rule: 'dexteritySkillDamage', value: 0.04 }] },
+  { key: 'not_sanguine_focus', kind: 'notable', sectors: ['constitution'], rings: [1, 2, 3], weight: 2, label: 'Sanguine Focus', grants: [{ type: 'rule', rule: 'constitutionSkillDamage', value: 0.04 }] },
+  { key: 'not_arcane_focus', kind: 'notable', sectors: ['intelligence'], rings: [1, 2, 3], weight: 2, label: 'Arcane Focus', grants: [{ type: 'rule', rule: 'intelligenceSkillDamage', value: 0.04 }] },
+  { key: 'not_inner_focus', kind: 'notable', sectors: ['wisdom'], rings: [1, 2, 3], weight: 2, label: 'Inner Focus', grants: [{ type: 'rule', rule: 'wisdomSkillDamage', value: 0.04 }] },
+  { key: 'not_wild_focus', kind: 'notable', sectors: ['charisma'], rings: [1, 2, 3], weight: 2, label: 'Wild Focus', grants: [{ type: 'rule', rule: 'charismaSkillDamage', value: 0.04 }] },
+  { key: 'grt_martial_mastery', kind: 'greater', sectors: ['strength'], rings: [3], label: 'Martial Mastery', grants: [{ type: 'rule', rule: 'strengthSkillDamage', value: 0.10 }] },
+  { key: 'grt_marksmans_mastery', kind: 'greater', sectors: ['dexterity'], rings: [3], label: "Marksman's Mastery", grants: [{ type: 'rule', rule: 'dexteritySkillDamage', value: 0.10 }] },
+  { key: 'grt_sanguine_mastery', kind: 'greater', sectors: ['constitution'], rings: [3], label: 'Sanguine Mastery', grants: [{ type: 'rule', rule: 'constitutionSkillDamage', value: 0.10 }] },
+  { key: 'grt_arcane_mastery', kind: 'greater', sectors: ['intelligence'], rings: [3], label: 'Arcane Mastery', grants: [{ type: 'rule', rule: 'intelligenceSkillDamage', value: 0.10 }] },
+  { key: 'grt_inner_mastery', kind: 'greater', sectors: ['wisdom'], rings: [3], label: 'Inner Mastery', grants: [{ type: 'rule', rule: 'wisdomSkillDamage', value: 0.10 }] },
+  { key: 'grt_wild_mastery', kind: 'greater', sectors: ['charisma'], rings: [3], label: 'Wild Mastery', grants: [{ type: 'rule', rule: 'charismaSkillDamage', value: 0.10 }] },
+
+  // Archer: critical strikes. critChance is a fraction added to the weapon family's
+  // (a bow already has 10%); critDamage is added to the 1.5 base multiplier.
+  { key: 'min_keen_eye', kind: 'minor', sectors: ['dexterity'], rings: [1, 2, 3], weight: 4, label: 'Keen Eye', grants: [{ type: 'rule', rule: 'critChance', value: 0.01 }] },
+  { key: 'not_deadly_aim', kind: 'notable', sectors: ['dexterity'], rings: [1, 2, 3], label: 'Deadly Aim', grants: [{ type: 'rule', rule: 'critChance', value: 0.03 }, { type: 'rule', rule: 'critDamage', value: 0.1 }] },
+  { key: 'not_hunters_reflexes', kind: 'notable', sectors: ['dexterity'], rings: [2, 3], label: "Hunter's Reflexes", grants: [{ type: 'rule', rule: 'dodgeChance', value: 0.03 }] },
+  // Stamina skills: the Warrior's and the Archer's whole kit.
+  { key: 'min_light_step', kind: 'minor', sectors: ['strength', 'dexterity'], rings: [1, 2, 3], weight: 2, label: 'Light Step', grants: [{ type: 'rule', rule: 'staminaCostMult', value: 0.97 }] },
+
+  // Warrior: control and bite-back.
+  { key: 'min_heavy_hand', kind: 'minor', sectors: ['strength'], rings: [1, 2, 3], weight: 2, label: 'Heavy Hand', grants: [{ type: 'rule', rule: 'stunChance', value: 0.01 }] },
+  { key: 'not_concussive_force', kind: 'notable', sectors: ['strength'], rings: [1, 2, 3], label: 'Concussive Force', grants: [{ type: 'rule', rule: 'stunChance', value: 0.04 }] },
+  { key: 'not_spiked_hide', kind: 'notable', sectors: ['strength'], rings: [2, 3], label: 'Spiked Hide', grants: [{ type: 'rule', rule: 'reflectShare', value: 0.05 }, { type: 'resist', element: 'physical', value: 3 }] },
+  { key: 'not_berserkers_fury', kind: 'notable', sectors: ['strength'], rings: [2, 3], label: "Berserker's Fury", grants: [{ type: 'rule', rule: 'lowLifeDamage', value: 0.15 }] },
+
+  // Mage: reach of area spells and the cost of casting.
+  { key: 'min_efficient_casting', kind: 'minor', sectors: ['intelligence'], rings: [1, 2, 3], weight: 2, label: 'Efficient Casting', grants: [{ type: 'rule', rule: 'manaCostMult', value: 0.97 }] },
+  { key: 'not_wide_casting', kind: 'notable', sectors: ['intelligence'], rings: [1, 2, 3], label: 'Wide Casting', grants: [{ type: 'rule', rule: 'aoeRadiusMult', value: 1.08 }] },
+
+  // Monk: wisdom as a pool, a thrifty cost, and power while the mana is full.
+  { key: 'min_ki_flow', kind: 'minor', sectors: ['wisdom'], rings: [1, 2, 3], weight: 2, label: 'Ki Flow', grants: [{ type: 'rule', rule: 'manaPerWisdom', value: 0.5 }] },
+  { key: 'min_economy_of_motion', kind: 'minor', sectors: ['wisdom'], rings: [1, 2, 3], weight: 2, label: 'Economy of Motion', grants: [{ type: 'rule', rule: 'manaCostMult', value: 0.97 }] },
+  { key: 'not_overflowing_spirit', kind: 'notable', sectors: ['wisdom'], rings: [1, 2, 3], label: 'Overflowing Spirit', grants: [{ type: 'rule', rule: 'fullManaDamage', value: 0.08 }] },
+
+  // Cultist: life as a weapon.
+  { key: 'min_open_wounds', kind: 'minor', sectors: ['constitution'], rings: [1, 2, 3], weight: 2, label: 'Open Wounds', grants: [{ type: 'rule', rule: 'killHeal', value: 0.005 }] },
+  { key: 'not_blood_hunger', kind: 'notable', sectors: ['constitution'], rings: [1, 2, 3], label: 'Blood Hunger', grants: [{ type: 'rule', rule: 'skillLeech', value: 0.04 }] },
+  { key: 'not_gallows_humour', kind: 'notable', sectors: ['constitution'], rings: [2, 3], label: 'Gallows Humour', grants: [{ type: 'rule', rule: 'lowLifeDamage', value: 0.15 }] },
+
+  // Every sector: a little recharge speed for the skills it casts.
+  { key: 'not_quick_hands', kind: 'notable', sectors: '*', rings: [2, 3], label: 'Quick Hands', grants: [{ type: 'rule', rule: 'skillCooldownMult', value: 0.97 }] },
 ];
 
 // --- Keystones -------------------------------------------------------------
@@ -345,34 +432,34 @@ const KEYSTONES = {
     { key: 'ks_wis_inner_flame', label: 'Inner Flame — +20 WIS', grants: [{ type: 'stat', stat: 'wisdom', value: 20 }] },
     { key: 'ks_wis_meditation', label: 'Meditation — +70 max mana, +2.0 mana regen/s, +5% life share from mana regen', grants: [{ type: 'resource', pool: 'mana', value: 70 }, { type: 'rule', rule: 'manaRegen', value: 2 }, { type: 'rule', rule: 'regenLifeShare', value: 0.05 }] },
     { key: 'ks_wis_spirit_ward', label: 'Spirit Ward — +12% arcane resistance, +0.8 HP regen/s', grants: [{ type: 'resist', element: 'arcane', value: 12 }, { type: 'rule', rule: 'hpRegen', value: 0.8 }] },
-    { key: 'ks_wis_iron_body', label: 'Iron Body — +15 WIS and +15 CON', grants: [{ type: 'stat', stat: 'wisdom', value: 15 }, { type: 'stat', stat: 'constitution', value: 15 }] },
+    { key: 'ks_wis_ki_overflow', label: 'Ki Overflow — +30% skill damage while mana is nearly full, +2 max mana per WIS, skills cost 15% more mana', grants: [{ type: 'rule', rule: 'fullManaDamage', value: 0.3 }, { type: 'rule', rule: 'manaPerWisdom', value: 2 }, { type: 'rule', rule: 'manaCostMult', value: 1.15 }] },
     { key: 'ks_wis_transcendence', label: 'Transcendence — +25 WIS and +18 INT', grants: [{ type: 'stat', stat: 'wisdom', value: 25 }, { type: 'stat', stat: 'intelligence', value: 18 }] },
   ],
   intelligence: [
     { key: 'ks_int_pyromancy', label: 'Pyromancy — +20% fire damage, and your hits burn', grants: [{ type: 'damage', element: 'fire', value: 20 }, { type: 'status', status: 'burn', value: 1 }] },
     { key: 'ks_int_storm_caller', label: 'Storm Caller — +20% lightning damage, and your hits shock', grants: [{ type: 'damage', element: 'lightning', value: 20 }, { type: 'status', status: 'shock', value: 1 }] },
     { key: 'ks_int_cryomancy', label: 'Cryomancy — +20% ice damage, and your hits chill', grants: [{ type: 'damage', element: 'ice', value: 20 }, { type: 'status', status: 'chill', value: 1 }] },
-    { key: 'ks_int_deep_well', label: 'Deep Well — +25 INT', grants: [{ type: 'stat', stat: 'intelligence', value: 25 }] },
+    { key: 'ks_int_glass_cannon', label: 'Glass Cannon — every skill hits 35% harder and costs 25% more mana, -80 max life', grants: [{ type: 'rule', rule: 'skillDamageMult', value: 1.35 }, { type: 'rule', rule: 'manaCostMult', value: 1.25 }, { type: 'resource', pool: 'hp', value: -80 }] },
     { key: 'ks_int_arcane_conduit', label: 'Arcane Conduit — +15 INT, +35 max mana, +3.0 mana regen/s', grants: [{ type: 'stat', stat: 'intelligence', value: 15 }, { type: 'resource', pool: 'mana', value: 35 }, { type: 'rule', rule: 'manaRegen', value: 3 }] },
   ],
   dexterity: [
     { key: 'ks_dex_deadeye', label: 'Deadeye — +20 DEX and +1 Extra Arrow', grants: [{ type: 'stat', stat: 'dexterity', value: 20 }, { type: 'rule', rule: 'projectileCount', value: 1 }] },
     { key: 'ks_dex_windrunner', label: 'Windrunner — +15 DEX, +40 max stamina, +5 stamina regen/s', grants: [{ type: 'stat', stat: 'dexterity', value: 15 }, { type: 'resource', pool: 'stamina', value: 40 }, { type: 'rule', rule: 'staminaRegen', value: 5 }] },
-    { key: 'ks_dex_piercing_shot', label: 'Piercing Shot — +15% physical damage and +1 Pierce', grants: [{ type: 'damage', element: 'physical', value: 15 }, { type: 'rule', rule: 'pierceBonus', value: 1 }] },
-    { key: 'ks_dex_evasion', label: 'Evasion — +6% resistance to every element', grants: [{ type: 'resist', element: 'physical', value: 6 }, { type: 'resist', element: 'arcane', value: 6 }, { type: 'resist', element: 'fire', value: 6 }, { type: 'resist', element: 'ice', value: 6 }, { type: 'resist', element: 'lightning', value: 6 }] },
+    { key: 'ks_dex_deadly_precision', label: 'Deadly Precision — +12% crit chance and +35% crit damage, -50 max life', grants: [{ type: 'rule', rule: 'critChance', value: 0.12 }, { type: 'rule', rule: 'critDamage', value: 0.35 }, { type: 'resource', pool: 'hp', value: -50 }] },
+    { key: 'ks_dex_phantom_step', label: 'Phantom Step — 15% chance to dodge a blow outright, +20 max stamina', grants: [{ type: 'rule', rule: 'dodgeChance', value: 0.15 }, { type: 'resource', pool: 'stamina', value: 20 }] },
     { key: 'ks_dex_fleet', label: 'Fleet — your cooldown floor drops from 0.40 to 0.35', grants: [{ type: 'rule', rule: 'cooldownFloor', value: 0.35 }] },
   ],
   strength: [
     { key: 'ks_str_executioner', label: 'Executioner — +15% physical damage and +12 melee reach', grants: [{ type: 'damage', element: 'physical', value: 15 }, { type: 'rule', rule: 'meleeReachBonus', value: 12 }] },
     { key: 'ks_str_iron_hide', label: 'Iron Hide — +140 maximum life and +1.2 HP regen/s', grants: [{ type: 'resource', pool: 'hp', value: 140 }, { type: 'rule', rule: 'hpRegen', value: 1.2 }] },
-    { key: 'ks_str_bulwark', label: 'Bulwark — +15 CON and +6% physical resistance', grants: [{ type: 'stat', stat: 'constitution', value: 15 }, { type: 'resist', element: 'physical', value: 6 }] },
+    { key: 'ks_str_berserker', label: 'Berserker — +30% skill damage while below 35% life, +8% stun chance, -60 max life', grants: [{ type: 'rule', rule: 'lowLifeDamage', value: 0.3 }, { type: 'rule', rule: 'stunChance', value: 0.08 }, { type: 'resource', pool: 'hp', value: -60 }] },
     { key: 'ks_str_reckless_swing', label: 'Reckless Swing — +25% physical damage, -10% ice resistance', grants: [{ type: 'damage', element: 'physical', value: 25 }, { type: 'resist', element: 'ice', value: -10 }] },
     { key: 'ks_str_unbreakable', label: 'Unbreakable — +20 STR and +100 maximum life', grants: [{ type: 'stat', stat: 'strength', value: 20 }, { type: 'resource', pool: 'hp', value: 100 }] },
   ],
   constitution: [
     { key: 'ks_con_pain_ward', label: 'Pain Ward — +10% physical and +10% fire resistance, +1.2 HP regen/s', grants: [{ type: 'resist', element: 'physical', value: 10 }, { type: 'resist', element: 'fire', value: 10 }, { type: 'rule', rule: 'hpRegen', value: 1.2 }] },
-    { key: 'ks_con_undying', label: 'Undying — +25 CON', grants: [{ type: 'stat', stat: 'constitution', value: 25 }] },
-    { key: 'ks_con_vital_surge', label: 'Vital Surge — +180 maximum life', grants: [{ type: 'resource', pool: 'hp', value: 180 }] },
+    { key: 'ks_con_crimson_bargain', label: 'Crimson Bargain — every skill hits 40% harder, but costs 30% more life', grants: [{ type: 'rule', rule: 'skillDamageMult', value: 1.4 }, { type: 'rule', rule: 'lifeCostMultiplier', value: 1.3 }] },
+    { key: 'ks_con_vampiric_rite', label: 'Vampiric Rite — skills heal 12% of the damage they deal, +2% max life per kill', grants: [{ type: 'rule', rule: 'skillLeech', value: 0.12 }, { type: 'rule', rule: 'killHeal', value: 0.02 }] },
     { key: 'ks_con_sanguine_rite', label: 'Sanguine Rite — life costs are reduced a further 12%', grants: [{ type: 'rule', rule: 'lifeCostMultiplier', value: 0.88 }] },
     { key: 'ks_con_blood_pact', label: 'Blood Pact — life costs are reduced 15%', grants: [{ type: 'rule', rule: 'lifeCostMultiplier', value: 0.85 }] },
   ],
@@ -401,10 +488,10 @@ const CLUSTERS = [
       { type: 'rule', rule: 'meleeDamageMult', value: 0.8 },
     ],
     satellites: [
-      { label: 'Momentum', grants: [{ type: 'rule', rule: 'attackSpeedMult', value: 1.05 }] },
-      { label: 'Follow-Through', grants: [{ type: 'rule', rule: 'attackSpeedMult', value: 1.05 }] },
-      { label: 'Whirling Step', grants: [{ type: 'rule', rule: 'attackSpeedMult', value: 1.05 }] },
-      { label: 'Unending Swing', grants: [{ type: 'rule', rule: 'attackSpeedMult', value: 1.05 }] },
+      { label: 'Momentum', grants: [{ type: 'rule', rule: 'attackSpeedMult', value: 1.08 }] },
+      { label: 'Follow-Through', grants: [{ type: 'rule', rule: 'attackSpeedMult', value: 1.08 }] },
+      { label: 'Whirling Step', grants: [{ type: 'rule', rule: 'attackSpeedMult', value: 1.08 }] },
+      { label: 'Unending Swing', grants: [{ type: 'rule', rule: 'attackSpeedMult', value: 1.08 }] },
     ],
   },
   {
@@ -493,6 +580,52 @@ const CLUSTERS = [
       { label: 'Open Palm', grants: [{ type: 'rule', rule: 'regenLifeShare', value: 0.02 }] },
     ],
   },
+  // --- skill clusters: the five sectors that had one cluster or none of their own ---
+  {
+    key: 'clu_str_concussion', sector: 'strength', hubLabel: 'Concussion',
+    hubGrants: [{ type: 'rule', rule: 'stunChance', value: 0.05 }],
+    satellites: [
+      { label: 'Ringing Blow', grants: [{ type: 'rule', rule: 'stunChance', value: 0.015 }] },
+      { label: 'Dazed Foe', grants: [{ type: 'rule', rule: 'stunChance', value: 0.015 }] },
+      { label: 'Stagger', grants: [{ type: 'rule', rule: 'stunChance', value: 0.015 }] },
+    ],
+  },
+  {
+    key: 'clu_dex_deadeye', sector: 'dexterity', hubLabel: 'Deadeye Focus',
+    hubGrants: [{ type: 'rule', rule: 'critChance', value: 0.04 }],
+    satellites: [
+      { label: 'Steady Breath', grants: [{ type: 'rule', rule: 'critDamage', value: 0.06 }] },
+      { label: 'Vital Mark', grants: [{ type: 'rule', rule: 'critDamage', value: 0.06 }] },
+      { label: 'Killing Line', grants: [{ type: 'rule', rule: 'critDamage', value: 0.06 }] },
+    ],
+  },
+  {
+    key: 'clu_int_wide_arcana', sector: 'intelligence', hubLabel: 'Wide Arcana',
+    hubGrants: [{ type: 'rule', rule: 'aoeRadiusMult', value: 1.10 }],
+    satellites: [
+      { label: 'Spreading Light', grants: [{ type: 'rule', rule: 'aoeRadiusMult', value: 1.04 }] },
+      { label: 'Rolling Thunder', grants: [{ type: 'rule', rule: 'aoeRadiusMult', value: 1.04 }] },
+      { label: 'Unbound Frost', grants: [{ type: 'rule', rule: 'aoeRadiusMult', value: 1.04 }] },
+    ],
+  },
+  {
+    key: 'clu_wis_overflow', sector: 'wisdom', hubLabel: 'Overflow',
+    hubGrants: [{ type: 'rule', rule: 'fullManaDamage', value: 0.06 }],
+    satellites: [
+      { label: 'Deep Reservoir', grants: [{ type: 'rule', rule: 'manaPerWisdom', value: 0.5 }] },
+      { label: 'Brimming Cup', grants: [{ type: 'rule', rule: 'manaPerWisdom', value: 0.5 }] },
+      { label: 'Frugal Hands', grants: [{ type: 'rule', rule: 'manaCostMult', value: 0.96 }] },
+    ],
+  },
+  {
+    key: 'clu_con_bloodletting', sector: 'constitution', hubLabel: 'Bloodletting',
+    hubGrants: [{ type: 'rule', rule: 'killHeal', value: 0.01 }],
+    satellites: [
+      { label: 'Red Harvest', grants: [{ type: 'rule', rule: 'skillLeech', value: 0.02 }] },
+      { label: 'Feeding Frenzy', grants: [{ type: 'rule', rule: 'skillLeech', value: 0.02 }] },
+      { label: 'Last Gasp', grants: [{ type: 'rule', rule: 'lowLifeDamage', value: 0.08 }] },
+    ],
+  },
   {
     key: 'clu_cha_beast_bond', sector: 'charisma', hubLabel: 'Wild Heart',
     hubGrants: [{ type: 'rule', rule: 'formPower', value: 0.10 }],
@@ -542,14 +675,14 @@ const CLUSTERS = [
 //
 //   Warrior  strength      +3 physical damage       == min_edge, the yardstick
 //   Mage     intelligence  +3 arcane damage         == min_edge, other element
-//   Archer   dexterity     cooldownFloor 0.40->0.38   (ks_dex_fleet goes 0.32)
-//   Monk     wisdom        regenLifeShare 0.1         (ks_wis_clarity gives 0.2)
-//   Cultist  constitution  lifeCostMultiplier 0.9     (ks_con_blood_pact 0.75)
-//   Druid    charisma      treeCharmBonus +1          (ks_cha_pack_leader +3)
+//   Archer   dexterity     cooldownFloor 0.40->0.38   (ks_dex_fleet goes 0.35)
+//   Monk     wisdom        regenLifeShare 0.1         (clu_wis_clarity adds 0.18, ks_wis_meditation 0.05)
+//   Cultist  constitution  lifeCostMultiplier 0.9     (ks_con_blood_pact 0.85, ks_con_sanguine_rite 0.88)
+//   Druid    charisma      formPower +0.03            (clu_cha_beast_bond adds 0.18, the keystones 0.12-0.25)
 //
 // Each grant is the SECTOR'S OWN identity as declared in SECTORS above:
 // Warrior melee damage, Mage spell damage, Archer attack speed, Monk mana
-// regeneration, Cultist life-cost casting, Druid charm power. The Mage's other
+// regeneration, Cultist life-cost casting, Druid shapeshifting. The Mage's other
 // declared identity is "maximum mana" -- deliberately NOT granted here,
 // because that is a pool, and pools are option 1's.
 //

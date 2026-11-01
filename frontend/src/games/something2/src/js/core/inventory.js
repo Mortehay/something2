@@ -65,6 +65,9 @@ export function applyJoined(inv, msg) {
   // both the column default and the grade that draws no highlight at all.
   inv.items = (msg.items || []).map((i) => ({
     id: i.id, typeId: i.typeId, quantity: qtyOf(i), soulbound: i.soulbound === true,
+    // Weapon enchant level (+0..+15). Named here because this map drops every
+    // field it does not list, and the panel + the aura both read it.
+    enchantLevel: Number(i.enchantLevel) || 0,
     rarity: i.rarity || 'white',
   }));
   inv.equipment = { ...(msg.equipment || {}) };
@@ -100,6 +103,7 @@ export function addItem(inv, item) {
   // account chest must keep its marker.
   inv.items.push({
     id: item.id, typeId: item.typeId, quantity: qtyOf(item), soulbound: item.soulbound === true,
+    enchantLevel: Number(item.enchantLevel) || 0,
     rarity: item.rarity || 'white',
   });
   forgetAmmoCount(inv, item.typeId);

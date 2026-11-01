@@ -32,6 +32,11 @@ test('with no passives and no gear the base passes straight through', () => {
     projectileCount: 0, pierceBonus: 0, projectileSpeedMult: 1,
     auraLeech: 0, auraRadius: 0, meleeDamageMult: 1, meleeWaveShare: 0,
     hpRegen: 0, manaRegen: 0, staminaRegen: 0, formPower: 0,
+    strengthSkillDamage: 0, dexteritySkillDamage: 0, constitutionSkillDamage: 0,
+    intelligenceSkillDamage: 0, wisdomSkillDamage: 0, charismaSkillDamage: 0,
+    skillDamageMult: 1, lowLifeDamage: 0, fullManaDamage: 0, critChance: 0, critDamage: 0,
+    manaCostMult: 1, staminaCostMult: 1, skillCooldownMult: 1, skillLeech: 0, killHeal: 0,
+    stunChance: 0, dodgeChance: 0, reflectShare: 0, aoeRadiusMult: 1, manaPerWisdom: 0,
   });
 });
 

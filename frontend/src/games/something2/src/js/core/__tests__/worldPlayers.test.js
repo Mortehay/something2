@@ -39,8 +39,14 @@ describe('remotePlayerFromFrame', () => {
     });
     expect(p).toEqual({
       x: 1, y: 2, facing: 'ne', hp: 5, maxHp: 9, effects: ['burn'], aura: 0,
-      className: null, appearanceVariant: 1,
+      className: null, appearanceVariant: 1, enchant: 0,
     });
+  });
+
+  it('carries the enchant level of the held weapon for the aura, defaulting to 0', () => {
+    expect(remotePlayerFromFrame({ enchant: 11 }).enchant).toBe(11);
+    expect(remotePlayerFromFrame({}).enchant).toBe(0);
+    expect(remotePlayerFromFrame({ enchant: 'x' }).enchant).toBe(0);
   });
 
   it('carries class and appearance identity for remote player art', () => {

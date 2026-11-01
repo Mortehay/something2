@@ -57,3 +57,10 @@ describe('skill damage preview matches the backend formula', () => {
     }
   });
 });
+
+describe('per-skill element, attribute and projectile flag match the backend', () => {
+  it('has the same three fields on every skill', () => {
+    const sig = (list) => list.map((s) => `${s.id}:${s.element || ''}:${s.attribute || ''}:${!!s.projectile}`).sort();
+    expect(sig(SKILLS)).toEqual(sig(backend.SKILLS));
+  });
+});

@@ -108,7 +108,7 @@ async function buyStock(pool, entry, userId, characterId, stockId, villageId) {
     const moved = await client.query(
       `UPDATE player_items SET character_id = $2, merchant_stock_id = NULL
         WHERE merchant_stock_id = $1
-        RETURNING id, item_type_id, quantity, rarity, item_level, soulbound`,
+        RETURNING id, item_type_id, quantity, rarity, item_level, soulbound, enchant_level`,
       [stockId, characterId],
     );
 
@@ -118,7 +118,7 @@ async function buyStock(pool, entry, userId, characterId, stockId, villageId) {
     } else {
       const ins = await client.query(
         `INSERT INTO player_items (character_id, item_type_id, quantity) VALUES ($1, $2, 1)
-         RETURNING id, item_type_id, quantity, rarity, item_level, soulbound`,
+         RETURNING id, item_type_id, quantity, rarity, item_level, soulbound, enchant_level`,
         [characterId, stock.item_type_id],
       );
       row = ins.rows[0];
@@ -178,6 +178,7 @@ async function buyStock(pool, entry, userId, characterId, stockId, villageId) {
       quantity: Number(row.quantity) || 1,
       rarity: row.rarity || 'white',
       itemLevel: Number(row.item_level ?? 1),
+      enchantLevel: Number(row.enchant_level ?? 0),
       soulbound: row.soulbound === true,
       affixes: affr.rows.map((a) => ({
         affixTypeId: a.affix_type_id,

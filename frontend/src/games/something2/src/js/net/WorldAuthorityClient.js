@@ -5,7 +5,7 @@
  * {seq,dx,dy,dt} for client-side reconciliation.
  */
 export class WorldAuthorityClient {
-  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onAttackRefused, onTransition, onWaypointActivated, onTeleport, onWallet, onShop, onBought, onSold, onBank, onDeposited, onWithdrawn, onProgression, onQuestProgress, onQuestNode, onChests, onChestOpened, onVfx, onWorldBossStatus, onAnnouncement, onDps, inputIntervalMs = 50, now = () => performance.now() }) {
+  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onAttackRefused, onTransition, onWaypointActivated, onTeleport, onWallet, onShop, onBought, onSold, onBank, onDeposited, onWithdrawn, onProgression, onQuestProgress, onQuestNode, onChests, onChestOpened, onVfx, onEnchanted, onSkillUpgraded, onWorldBossStatus, onAnnouncement, onDps, inputIntervalMs = 50, now = () => performance.now() }) {
     this.url = url;
     this.token = token;
     this.onJoined = onJoined || (() => {});
@@ -18,6 +18,10 @@ export class WorldAuthorityClient {
     this.onPicked = onPicked || (() => {});
     this.onDropped = onDropped || (() => {});
     this.onWallet = onWallet || (() => {});
+    // Weapon enchanting: the result of a scroll (`enchanted`), and a bought skill level
+    // (`skillUpgraded`). Both are one-off replies to a request this client sent.
+    this.onEnchanted = onEnchanted || (() => {});
+    this.onSkillUpgraded = onSkillUpgraded || (() => {});
     this.onShop = onShop || (() => {});
     this.onBought = onBought || (() => {});
     this.onSold = onSold || (() => {});
@@ -130,6 +134,8 @@ export class WorldAuthorityClient {
       case 'picked': this.onPicked(msg); break;
       case 'dropped': this.onDropped(msg); break;
       case 'wallet': this.onWallet(msg); break;
+      case 'enchanted': this.onEnchanted(msg); break;
+      case 'skillUpgraded': this.onSkillUpgraded(msg); break;
       case 'shop': this.onShop(msg); break;
       case 'bought': this.onBought(msg); break;
       case 'sold': this.onSold(msg); break;
@@ -238,6 +244,11 @@ export class WorldAuthorityClient {
 
   sendPickup() { this._send({ type: 'pickup' }); }
   sendDrop(itemId) { this._send({ type: 'drop', itemId }); }
+  // Spend one enchant scroll (`scrollId`, a player_items id) on a weapon (`itemId`).
+  // The server rolls the dice; the answer arrives as an `enchanted` frame.
+  sendEnchant(scrollId, itemId) { return this._send({ type: 'enchant', scrollId, itemId }); }
+  // Buy the next level of a skill with gold; answered by `skillUpgraded`.
+  sendUpgradeSkill(skillId) { return this._send({ type: 'upgradeSkill', skillId }); }
   sendAutoLoot(on) { return this._send({ type: 'autoloot', on: on === true }); }
   sendInteract() { this._send({ type: 'interact' }); }
   sendBuy(stockId) { this._send({ type: 'buy', stockId }); }

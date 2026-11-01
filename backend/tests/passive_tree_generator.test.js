@@ -32,6 +32,11 @@ const RULES = [
   'projectileCount', 'projectileSpeedMult', 'pierceBonus',
   'auraLeech', 'auraRadius', 'meleeDamageMult', 'meleeWaveShare',
   'hpRegen', 'manaRegen', 'staminaRegen', 'formPower',
+  'strengthSkillDamage', 'dexteritySkillDamage', 'constitutionSkillDamage',
+  'intelligenceSkillDamage', 'wisdomSkillDamage', 'charismaSkillDamage',
+  'skillDamageMult', 'lowLifeDamage', 'fullManaDamage', 'critChance', 'critDamage',
+  'manaCostMult', 'staminaCostMult', 'skillCooldownMult', 'skillLeech', 'killHeal',
+  'stunChance', 'dodgeChance', 'reflectShare', 'aoeRadiusMult', 'manaPerWisdom',
 ];
 
 const tree = generatePassiveTree(PASSIVE_TREE_SPEC);
@@ -41,13 +46,13 @@ test('the hand-written element list still matches the combat authority', () => {
 });
 
 // ---- guard 4: node count within 5% of 1800, keystones exactly as specced ----
-test('guard 4: 2302 nodes — 1830 minor, 358 notable, 78 greater, 30 keystone, 6 start', () => {
-  assert.strictEqual(tree.nodes.length, 2302);
+test('guard 4: 2322 nodes — 1836 minor, 367 notable, 83 greater, 30 keystone, 6 start', () => {
+  assert.strictEqual(tree.nodes.length, 2322);
 
   const byKind = {};
   for (const n of tree.nodes) byKind[n.kind] = (byKind[n.kind] || 0) + 1;
   assert.deepStrictEqual(byKind,
-    { minor: 1836, notable: 352, greater: 78, keystone: 30, start: 6 });
+    { minor: 1836, notable: 367, greater: 83, keystone: 30, start: 6 });
 
   // The spec's own tolerance, restated as a literal band rather than a formula.
   assert.ok(tree.nodes.length >= 2100 && tree.nodes.length <= 2500,
@@ -69,10 +74,10 @@ test('guard 4: 2302 nodes — 1830 minor, 358 notable, 78 greater, 30 keystone, 
   assert.strictEqual(tree.nodes.filter((n) => n.sector === 'core').length, 30);
 });
 
-test('every key is unique, and 2980 edges are produced', () => {
+test('every key is unique, and 3000 edges are produced', () => {
   const keys = new Set(tree.nodes.map((n) => n.key));
-  assert.strictEqual(keys.size, 2302);
-  assert.strictEqual(tree.edges.length, 2980);
+  assert.strictEqual(keys.size, 2322);
+  assert.strictEqual(tree.edges.length, 3000);
 });
 
 test('the six start nodes are the only nodes carrying a start_class', () => {
@@ -133,7 +138,7 @@ test('guard 1: every node is reachable from every one of the six start nodes', (
     const unreachable = tree.nodes.map((n) => n.key).filter((k) => !seen.has(k));
     assert.deepStrictEqual(unreachable.slice(0, 10), [],
       `${unreachable.length} node(s) unreachable from ${start}`);
-    assert.strictEqual(seen.size, 2302, `reachable-from-${start} count`);
+    assert.strictEqual(seen.size, 2322, `reachable-from-${start} count`);
   }
 });
 

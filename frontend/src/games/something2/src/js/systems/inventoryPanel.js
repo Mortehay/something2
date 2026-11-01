@@ -7,6 +7,9 @@ import { SLOTS, typeOf, canEquipClient } from "../core/inventory.js";
 import { rarityBorderColor, affixModifier, clipToWidth, itemIcon } from "./itemDisplay.js";
 import { drawIconFit } from "./gameArt.js";
 import { layoutCharacterTab, drawCharacterTab, formatModifier, STAT_ABBR } from "./characterTab.js";
+import {
+  enchantPlan, enchantButtonLabel, enchantLevelOf, enchantedName, enchantedDamage, damageBonusPercent,
+} from "./enchantUi.js";
 
 export const STAT_NAMES = {
   strength: "Strength",
@@ -104,6 +107,10 @@ export function layoutInventory(state) {
     drag = null,
     character = null,
     modPage = 0,
+    // Weapon enchanting: the server's odds, and the weapon whose dangerous enchant is
+    // armed for its confirming second click.
+    enchantCfg = null,
+    enchantArmedItemId = null,
   } = state;
 
   // What the paperdoll's greying answers "can THIS go here?" about. An ARMED
@@ -204,6 +211,23 @@ export function layoutInventory(state) {
     hitAreas.push({ ...drop, kind: "drop", id: selectedItemId });
   }
 
+  // The Enchant button, for a selected weapon. It sits in the footer beside the grid
+  // column, and is present (disabled, saying why) even with no scroll in the bag, so
+  // the feature is discoverable before the first scroll is bought. A disabled button
+  // gets no hit area: a click on it must do nothing.
+  let enchant = null;
+  if (selectedItemId != null && enchantCfg) {
+    const plan = enchantPlan(inventory, selectedItemId, enchantCfg);
+    if (plan.maxed || plan.nextLevel > 0) {
+      const armed = enchantArmedItemId != null && enchantArmedItemId === selectedItemId;
+      enchant = {
+        x: colX + LEFT_W + 14, y: footerY, w: 270, h: 26,
+        plan, armed, label: enchantButtonLabel(plan, armed), enabled: plan.ok,
+      };
+      if (plan.ok) hitAreas.push({ x: enchant.x, y: enchant.y, w: enchant.w, h: enchant.h, kind: "enchant", id: selectedItemId });
+    }
+  }
+
   // The Character pane (SOMET-483, spec §10.2) occupies exactly the rectangle
   // the item grid and its page arrows would have. Built here rather than in the
   // draw so its geometry and its strings are testable without a context, and so
@@ -228,7 +252,7 @@ export function layoutInventory(state) {
     cells,
     character: characterPane,
     pages: { count: pageCount, page: pageIdx, prev, next, arrowY, x: rightX },
-    footer: { gold, y: footerY, drop },
+    footer: { gold, y: footerY, drop, enchant },
     used: usedSlotsClient(inventory),
     capacity: capacityOf(inventory),
     hitAreas,
@@ -258,12 +282,13 @@ export function statLine(type) {
   return `def ${type.defense ?? 0}${res.length ? "  " + res.map(([el, v]) => `${el} ${v}`).join(", ") : ""}`;
 }
 
-export function formatItemTooltipLines(item, type) {
+export function formatItemTooltipLines(item, type, enchantCfg = null) {
   if (!type) return [];
   const lines = [];
 
   // 1. Name & Quantity
-  const name = type.name || "Unknown Item";
+  const enchantLevel = enchantLevelOf(item);
+  const name = enchantedName(type.name || "Unknown Item", enchantLevel);
   const qty = item && item.quantity > 1 ? ` (x${item.quantity})` : "";
   lines.push({
     text: `${name}${qty}`,
@@ -295,12 +320,21 @@ export function formatItemTooltipLines(item, type) {
 
   // 3. Core Combat / Defense / Consumable Stats
   if (type.category === "weapon") {
-    const dps = (type.damage > 0 && type.cooldown > 0) ? ` (${(type.damage / type.cooldown).toFixed(1)} DPS)` : "";
+    // An enchanted weapon shows the damage it actually does, with the bonus spelled out.
+    const effective = enchantedDamage(type.damage, enchantLevel, enchantCfg);
+    const dps = (effective > 0 && type.cooldown > 0) ? ` (${(effective / type.cooldown).toFixed(1)} DPS)` : "";
     lines.push({
-      text: `dmg ${type.damage}  cd ${type.cooldown}s${type.two_handed ? "  (2H)" : ""}${dps}`,
+      text: `dmg ${effective}  cd ${type.cooldown}s${type.two_handed ? "  (2H)" : ""}${dps}`,
       color: "#e5e7eb",
       font: "11px monospace",
     });
+    if (enchantLevel > 0 && enchantCfg) {
+      lines.push({
+        text: `Enchant +${enchantLevel}: +${damageBonusPercent(enchantLevel, enchantCfg)}% damage`,
+        color: enchantLevel >= (enchantCfg.glowFireLevel || 10) ? "#f87171" : "#67e8f9",
+        font: "11px monospace",
+      });
+    }
     if (type.element && type.element !== "physical") {
       lines.push({ text: `Element: ${type.element}`, color: RESIST_COLORS[type.element] || "#e5e7eb", font: "11px monospace" });
     }
@@ -574,6 +608,13 @@ export function drawInventory(ctx, layout, state, art = null) {
           ctx.fillStyle = "#fde68a";
           ctx.fillText(String(c.item.quantity), c.x + c.w - 16, c.y + c.h - 12);
         }
+        // An enchanted weapon wears its level: red from +10 (the fire aura), blue below.
+        const enchantLevel = enchantLevelOf(c.item);
+        if (enchantLevel > 0) {
+          ctx.font = "bold 10px monospace";
+          ctx.fillStyle = enchantLevel >= ((state && state.enchantCfg && state.enchantCfg.glowFireLevel) || 10) ? "#f87171" : "#67e8f9";
+          ctx.fillText(`+${enchantLevel}`, c.x + 3, c.y + c.h - 12);
+        }
       }
       ctx.globalAlpha = 1;
     }
@@ -605,6 +646,22 @@ export function drawInventory(ctx, layout, state, art = null) {
     ctx.fillStyle = "#e5e7eb";
     ctx.fillText("Drop selected", f.drop.x + 8, f.drop.y + 7);
   }
+  if (f.enchant) {
+    const e = f.enchant;
+    // Safe = calm green, dangerous = amber, armed = alarm red, unavailable = grey.
+    const fill = !e.enabled ? "rgba(60,60,70,0.85)" : e.armed ? "rgba(185,28,28,0.92)" : e.plan.danger ? "rgba(146,94,12,0.88)" : "rgba(21,101,52,0.88)";
+    const edge = !e.enabled ? "#6b7280" : e.armed ? "#fecaca" : e.plan.danger ? "#fbbf24" : "#4ade80";
+    ctx.fillStyle = fill;
+    ctx.fillRect(e.x, e.y, e.w, e.h);
+    ctx.strokeStyle = edge;
+    ctx.strokeRect(e.x, e.y, e.w, e.h);
+    ctx.fillStyle = e.enabled ? "#f9fafb" : "#9ca3af";
+    ctx.fillText(e.label, e.x + 8, e.y + 7, e.w - 16);
+    if (e.plan.scrolls > 0) {
+      ctx.fillStyle = "#9ca3af";
+      ctx.fillText(`scrolls: ${e.plan.scrolls}`, e.x + e.w + 8, e.y + 7);
+    }
+  }
   ctx.fillStyle = "#fde68a";
   ctx.fillText(`Gold: ${f.gold ?? 0}`, layout.panel.x + layout.panel.w - 200, f.y + 7);
 
@@ -627,7 +684,7 @@ export function drawInventory(ctx, layout, state, art = null) {
     }
 
     if (hoveredType) {
-      const lines = formatItemTooltipLines(hoveredItem, hoveredType);
+      const lines = formatItemTooltipLines(hoveredItem, hoveredType, state && state.enchantCfg);
       if (lines.length > 0) {
         let maxW = 120;
         for (const line of lines) {

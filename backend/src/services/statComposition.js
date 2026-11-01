@@ -74,6 +74,28 @@ const RULE_COMBINE = {
   staminaRegen: 'sum',
   // The Druid's shapeshift power: every form's bonus is scaled by 1 + this.
   formPower: 'sum',
+  // Skill rules. See RULE_KEYS in seeds/data/passiveTree.js for each consumer.
+  strengthSkillDamage: 'sum',
+  dexteritySkillDamage: 'sum',
+  constitutionSkillDamage: 'sum',
+  intelligenceSkillDamage: 'sum',
+  wisdomSkillDamage: 'sum',
+  charismaSkillDamage: 'sum',
+  skillDamageMult: 'product',
+  lowLifeDamage: 'sum',
+  fullManaDamage: 'sum',
+  critChance: 'sum',
+  critDamage: 'sum',
+  manaCostMult: 'product',
+  staminaCostMult: 'product',
+  skillCooldownMult: 'product',
+  skillLeech: 'sum',
+  killHeal: 'sum',
+  stunChance: 'sum',
+  dodgeChance: 'sum',
+  reflectShare: 'sum',
+  aoeRadiusMult: 'product',
+  manaPerWisdom: 'sum',
 };
 const RULE_IDENTITY = { product: 1, sum: 0, min: null };
 

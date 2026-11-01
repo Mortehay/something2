@@ -21,7 +21,8 @@ import { layoutQuestLog, drawQuestLog } from "./questLogPanel.js";
 import { drawQuestTracker } from "./questTracker.js";
 import { drawDpsMeter } from "./dpsMeterPanel.js";
 import { isTrainingDummy, drawTrainingDummy } from "./trainingDummyArt.js";
-import { damageLine } from "./skillDamageLine.js";
+import { damageLine, scalesWithLine } from "./skillDamageLine.js";
+import { drawWeaponGlow, handOffset } from "./weaponGlow.js";
 import { chestView } from "../core/worldChests.js";
 import { isTransformationSkill, getRequiredForm, resolveSkillDamage, checkGemRequirements, getWeaponRequirementName } from "../core/skillsData.js";
 import {
@@ -338,6 +339,10 @@ export class RenderSystem {
     creatures = [], projectiles = [], mana = null, maxMana = null, showMana = true,
     stamina = null, maxStamina = null,
     weaponName = null, inventory = null, inventoryOpen = false, selectedItemId = null, inventoryView = null,
+    // The server's enchant config (thresholds for the weapon aura); null draws the defaults.
+    enchantCfg = null,
+    // Paid skill levels: { skillId: level } and the server's price list.
+    skillLevels = null, skillLevelingCfg = null,
     groundItems = [], gold = null, toast = null, locationBanner = null, teleportCast = null, trackerWidth = 300,
     blasts = [], ammo = null, noAmmoFlash = false, effects = null, vfx = [],
     // SOMET-528. Lingering melee waves; defaults to empty so every existing
@@ -583,6 +588,10 @@ export class RenderSystem {
     // pass so nothing in the world can cover it).
     if (teleportCast && player) this.drawTeleportCastBar(teleportCast, player);
 
+    // The aura of an enchanted weapon (+4 and up), for the local player and everyone
+    // in view. Additive, drawn after the sorted pass so no wall or creature dulls it.
+    this._drawWeaponGlows(player, remotePlayers, enchantCfg);
+
     // SOMET-584 review round 2 (T9 finding A). The pre-sort drawLandmarks call
     // above (line ~402) drew NOTHING for a `skipBody` landmark -- its art body
     // just painted, in the loop above, as a `pointart` drawable. Now that the
@@ -669,6 +678,8 @@ export class RenderSystem {
         playerGold: gold ?? 0,
         playerLevel: (progression && progression.level) || 1,
         unlockedSkills,
+        skillLevels,
+        skillLevelingCfg,
       }, this._skillsHitAreas);
     }
 
@@ -948,6 +959,13 @@ export class RenderSystem {
     ctx.fillStyle = '#f8fafc';
     ctx.fillText(rangeText, cardX + pad + 48, mY3);
 
+    // The attribute this skill's damage grows with, in the free half of the Range row.
+    const scalesText = scalesWithLine(skill);
+    if (scalesText) {
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillText(scalesText, col2X, mY3);
+    }
+
     let mYEnd = mY3;
     if (dmgLineText) {
       mYEnd = mY3 + 15;
@@ -1194,6 +1212,32 @@ export class RenderSystem {
       this.ctx.stroke();
     }
     this.ctx.restore();
+  }
+
+  // The glow around the weapon in an enchanted hand. The game draws no weapon sprite,
+  // so the aura is anchored at the weapon hand: the body's centre shifted toward the
+  // side the player faces. One drawImage plus a few sparks per player (weaponGlow.js),
+  // so a crowded room costs a handful of blits.
+  _drawWeaponGlows(player, remotePlayers, cfg) {
+    const opts = {
+      minLevel: cfg && cfg.glowMinLevel, fireLevel: cfg && cfg.glowFireLevel, maxLevel: cfg && cfg.maxLevel,
+      // No screen-bounds cull here: these coordinates are in world-projection space
+      // (the camera transform is applied to the context), so canvas pixels would cull
+      // the wrong things. Only players holding a +N weapon get here at all.
+    };
+    const draw = (p, phase) => {
+      const level = p && p.enchant;
+      if (!(level > 0)) return;                     // the overwhelming common case: nothing to do
+      const s = worldToScreen(p.x, p.y);
+      if (!s || !Number.isFinite(s.x) || !Number.isFinite(s.y)) return;
+      const hand = handOffset(p.facing);
+      drawWeaponGlow(this.ctx, s.x + hand.dx, s.y - 22 + hand.dy, level, this.nowMs, { ...opts, phase });
+    };
+    draw(player, 0);
+    if (remotePlayers) {
+      let i = 1;
+      for (const [, p] of remotePlayers) draw(p, i++ * 1.3);   // out of phase, so a crowd does not pulse as one
+    }
   }
 
   // SOMET-523. The leech aura's ground ring, for the local player and for any
@@ -4985,6 +5029,9 @@ export class RenderSystem {
       // its single-writer progression row and this method stays a pass-through.
       character: v.character || null,
       modPage: v.modPage || 0,
+      // The Enchant button's inputs (server odds; the weapon armed for its second click).
+      enchantCfg: v.enchantCfg || null,
+      enchantArmedItemId: v.enchantArmedItemId ?? null,
       playerImage: this.imageManager ? this.imageManager.get(v.playerImageKey || "player") : null,
     };
     const layout = layoutInventory(state);

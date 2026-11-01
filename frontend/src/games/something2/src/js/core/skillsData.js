@@ -2166,6 +2166,43 @@ export const SKILLS = [
 
 putDruidFormsFirst(SKILLS);
 
+// The server's per-skill element, attribute and projectile flag, mirrored so the
+// tooltip can say what a skill is made of and what it grows with. The BACKEND
+// (seeds/data/skills.js) is the authority; skillsCatalogParity.test.js compares
+// every skill's three fields against it, so a change on one side fails here.
+const MAGE_ELEMENTS = {
+  ice: ['mag_frost_rapier', 'mag_frostbolt', 'mag_frost_nova', 'mag_blizzard', 'mag_deep_comet', 'mag_ice_armor', 'mag_deep_chill'],
+  lightning: ['mag_static_palm', 'mag_chain_lightning', 'mag_ball_lightning', 'mag_thunderstorm', 'mag_overload_discharge', 'mag_static_charge'],
+  arcane: [
+    'mag_arcane_dagger', 'mag_point_blank_burst', 'mag_mana_blades', 'mag_staff_shock', 'mag_mana_tap',
+    'mag_arcane_sweep', 'mag_illusionary_jab', 'mag_arcane_beam', 'mag_magic_missiles', 'mag_gravity_singularity',
+    'mag_prismatic_burst', 'mag_mirror_image', 'mag_disintegrate', 'mag_mana_burn',
+  ],
+};
+const CLASS_MAIN_ATTRIBUTE = {
+  Warrior: 'strength', Mage: 'intelligence', Archer: 'dexterity',
+  Monk: 'wisdom', Cultist: 'constitution', Druid: 'charisma',
+};
+const ATTRIBUTE_OVERRIDES = {
+  arc_lightning_arrow: 'intelligence', arc_explosive_arrow: 'intelligence',
+  arc_frost_arrow: 'intelligence', arc_starfall_arrow: 'intelligence',
+};
+const PROJECTILE_SKILL_IDS = [
+  'mag_fireball', 'mag_frostbolt', 'mag_magic_missiles',
+  'cul_blood_orb', 'cul_blood_lance', 'cul_bone_spear', 'cul_plague_globule',
+];
+for (const s of SKILLS) {
+  if (s.class === 'Cultist') s.element = 'arcane';
+  s.attribute = ATTRIBUTE_OVERRIDES[s.id] || CLASS_MAIN_ATTRIBUTE[s.class];
+  if ((s.class === 'Archer' && s.type === 'magic') || PROJECTILE_SKILL_IDS.includes(s.id)) s.projectile = true;
+}
+for (const [element, ids] of Object.entries(MAGE_ELEMENTS)) {
+  for (const id of ids) {
+    const s = SKILLS.find((k) => k.id === id);
+    if (s) s.element = element;
+  }
+}
+
 export const SKILLS_BY_CLASS = {
   Warrior: SKILLS.filter(s => s.class === 'Warrior'),
   Mage: SKILLS.filter(s => s.class === 'Mage'),

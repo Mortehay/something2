@@ -2473,6 +2473,74 @@ function checkGemRequirements(gem, playerProgression, equippedWeapon, ctx = null
   };
 }
 
+// The Mage's skill elements. The catalog above carries no `element` field, and
+// skillElementOf (skillBalance.js) defaults every Mage skill to fire -- so a
+// frostbolt was boosted by fire nodes and ignored the ice, lightning and arcane
+// ones (Cryomancy, Storm Caller, the Mage's own arcane start node). Fire is
+// still the default, so only the other elements are listed.
+const MAGE_ELEMENTS = {
+  ice: ['mag_frost_rapier', 'mag_frostbolt', 'mag_frost_nova', 'mag_blizzard', 'mag_deep_comet', 'mag_ice_armor', 'mag_deep_chill'],
+  lightning: ['mag_static_palm', 'mag_chain_lightning', 'mag_ball_lightning', 'mag_thunderstorm', 'mag_overload_discharge', 'mag_static_charge'],
+  arcane: [
+    'mag_arcane_dagger', 'mag_point_blank_burst', 'mag_mana_blades', 'mag_staff_shock', 'mag_mana_tap',
+    'mag_arcane_sweep', 'mag_illusionary_jab', 'mag_arcane_beam', 'mag_magic_missiles', 'mag_gravity_singularity',
+    'mag_prismatic_burst', 'mag_mirror_image', 'mag_disintegrate', 'mag_mana_burn',
+  ],
+};
+for (const [element, ids] of Object.entries(MAGE_ELEMENTS)) {
+  for (const id of ids) {
+    const skill = SKILLS.find(s => s.id === id);
+    if (!skill) throw new Error(`MAGE_ELEMENTS names an unknown skill: ${id}`);
+    skill.element = element;
+  }
+}
+
+// The Cultist's skills are arcane: 'shadow' had no damage nodes and silently
+// borrowed the physical multiplier (so the Warrior's nodes boosted Cultist
+// spells), while arcane has the Resonance notable and is never resisted.
+for (const skill of SKILLS) {
+  if (skill.class === 'Cultist') skill.element = 'arcane';
+}
+
+// --- the skill's attribute ----------------------------------------------------
+// EVERY skill names the attribute its damage grows with (strength, dexterity,
+// constitution, intelligence, wisdom or charisma): 1 + SKILL_PER_MAIN_STAT per
+// point above base, read by skillBalance.skillStatMult. A skill with no entry in
+// SKILL_ATTRIBUTE_OVERRIDES takes its class's main attribute, so a class is
+// coherent by default and a hybrid skill is one line here. The Druid has no
+// overrides: charisma is the main attribute of all of her skills.
+const { CLASS_MAIN_STAT } = require('../../src/services/progressionConstants.js');
+const SKILL_ATTRIBUTE_OVERRIDES = {
+  // Elemental arrows are magic delivered by a bow: they grow with INT, so an
+  // Archer who wants them has to invest outside the dexterity sector.
+  intelligence: ['arc_lightning_arrow', 'arc_explosive_arrow', 'arc_frost_arrow', 'arc_starfall_arrow'],
+};
+for (const [attribute, ids] of Object.entries(SKILL_ATTRIBUTE_OVERRIDES)) {
+  for (const id of ids) {
+    const skill = SKILLS.find(s => s.id === id);
+    if (!skill) throw new Error(`SKILL_ATTRIBUTE_OVERRIDES names an unknown skill: ${id}`);
+    skill.attribute = attribute;
+  }
+}
+for (const skill of SKILLS) {
+  if (!skill.attribute) skill.attribute = CLASS_MAIN_STAT[skill.class];
+}
+
+// --- skills that fire projectiles ---------------------------------------------
+// A skill hits instantly (an arc, a cone or an area), so the tree's "+1
+// projectile" cannot spawn a projectile for it. It adds one more hit instead,
+// and only to skills that are fired: every Archer magic skill (they are all
+// arrows) plus the bolts, darts and lances of the other classes.
+const PROJECTILE_SKILL_IDS = [
+  'mag_fireball', 'mag_frostbolt', 'mag_magic_missiles',
+  'cul_blood_orb', 'cul_blood_lance', 'cul_bone_spear', 'cul_plague_globule',
+];
+for (const skill of SKILLS) {
+  if ((skill.class === 'Archer' && skill.type === 'magic') || PROJECTILE_SKILL_IDS.includes(skill.id)) {
+    skill.projectile = true;
+  }
+}
+
 const SKILLS_BY_CLASS = {
   Warrior: SKILLS.filter(s => s.class === 'Warrior'),
   Mage: SKILLS.filter(s => s.class === 'Mage'),

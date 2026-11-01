@@ -402,7 +402,7 @@ async function withdrawItem(pool, entry, userId, characterId, accountItemId) {
     const moved = await client.query(
       `UPDATE player_items SET character_id = $2, account_item_id = NULL
         WHERE account_item_id = $1
-        RETURNING id, item_type_id, quantity, rarity, item_level, soulbound`,
+        RETURNING id, item_type_id, quantity, rarity, item_level, soulbound, enchant_level`,
       [accountItemId, characterId],
     );
     if (moved.rowCount !== 1) {
@@ -456,6 +456,7 @@ async function withdrawItem(pool, entry, userId, characterId, accountItemId) {
       soulbound: row.soulbound === true,
       rarity: row.rarity || 'white',
       itemLevel: Number(row.item_level ?? 1),
+      enchantLevel: Number(row.enchant_level ?? 0),
       affixes,
     };
     p.inv.items.push(item);

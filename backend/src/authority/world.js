@@ -26,8 +26,10 @@ const {
   MIN_MELEE_REACH, MIN_MELEE_ARC,
   WAVE_DURATION_S, WAVE_MAX_STACKS, WAVE_INTERVAL_S,
 } = require('../services/progressionConstants.js');
-const { lifeCostFor, canPayLife } = require('../services/lifeCost.js');
+const { lifeCostFor, skillLifeCostFor, canPayLife } = require('../services/lifeCost.js');
 const { getSkillById, checkGemRequirements } = require('../../seeds/data/skills.js');
+const skillLeveling = require('../services/skillLeveling.js');
+const { levelOf: enchantLevelOf } = require('../services/enchant.js');
 const skillBalance = require('./skillBalance.js');
 
 // Bounds concurrent creature-owned projectiles per world. A swarm-density
@@ -124,6 +126,24 @@ function selfAuraFields(p, now) {
 // projectile spawn. The projectile takes its value once, at launch (see
 // projectiles.js `spawn`), so a respec mid-flight cannot change a shot
 // already in the air.
+// The enchant level (+N) of the weapon a player holds in their main hand, 0 for
+// none. Reads the live inventory, so a scroll's result shows on the very next frame.
+function equippedEnchantLevel(p) {
+  const id = p.inv && p.inv.equipment && p.inv.equipment.main_hand;
+  if (!id) return 0;
+  const item = p.inv.items.find((it) => it.id === id);
+  return enchantLevelOf(item);
+}
+
+// The stun a `stunChance` node adds to every hit: the same rider shape a mace
+// carries ({ status, chance, ms }), so applyHitStatuses needs no new branch.
+const TREE_STUN_MS = 700;
+function withStunRider(statuses, chance) {
+  const c = Number(chance);
+  if (!(c > 0)) return statuses;
+  return [...(statuses || []), { status: 'stun', chance: Math.min(1, c), ms: TREE_STUN_MS }];
+}
+
 function weaponDamage(p, w) {
   const mult = (w.element && w.element !== 'physical') ? p.stats.spellMult : p.stats.meleeMult;
   // SOMET-527. THE CONSUMER of `meleeDamageMult`: the price a shape node pays
@@ -1075,8 +1095,12 @@ class World {
   // refused: a player who keeps swinging keeps their newest ground, but never
   // holds more than the cap. Refusing the new one instead would make a fast
   // attacker's later swings silently free of effect, which reads as a bug.
-  _spawnWave(p, cx, cy, nx, ny, reach, arc, w) {
-    const damage = waveTickDamage(p, w);
+  //
+  // `override` ({ damage, element }) is how a melee SKILL lays the same wave: its
+  // damage is a share of the skill hit instead of a share of the weapon swing.
+  // Everything after that line -- the cap, the lifetime, the ticking -- is shared.
+  _spawnWave(p, cx, cy, nx, ny, reach, arc, w, override = null) {
+    const damage = override ? override.damage : waveTickDamage(p, w);
     if (!(damage > 0)) return;                       // no node allocated: no wave
     const mine = this.waves.filter((v) => v.ownerId === p.userId);
     if (mine.length >= WAVE_MAX_STACKS) {
@@ -1088,7 +1112,7 @@ class World {
       ownerId: p.userId,
       x: cx, y: cy, nx, ny, reach, arc,
       damage,
-      element: w.element || null,
+      element: override ? override.element : (w.element || null),
       expiresAt: this.now + WAVE_DURATION_S * 1000,
       acc: 0,
     });
@@ -1167,7 +1191,7 @@ class World {
     // resolved ONCE for the whole attack and threaded to every site the swing
     // or the shot can land — exactly like `pacifiedFrom` above, and for the
     // same reason: a shot snapshots what was true when it was fired.
-    const hitStatuses = skillBalance.weaponHitStatuses(w, p.stats.hitStatuses || null);
+    const hitStatuses = withStunRider(skillBalance.weaponHitStatuses(w, p.stats.hitStatuses || null), p.stats.rules && p.stats.rules.stunChance);
     skillBalance.noteAction(p, this.now);
     // SOMET-495: an augment stone's bonus is damage in the augment's OWN
     // element, so the tree's multiplier for THAT element applies to it. Scaled
@@ -1593,6 +1617,17 @@ class World {
       cost = Math.max(1, Math.round(baseCost * costMult + poolDrain));
     }
 
+    // A life-cost skill takes the passive tree's lifeCostMultiplier (Cultist
+    // start node, Bloodflow, Sanguine Rite, Blood Pact). Applied after the
+    // channel ramp so a channelled skill is discounted per tick too.
+    if (skill.costType === 'hp') cost = skillLifeCostFor(cost, p.stats.lifeCostMultiplier);
+    // The tree's mana / stamina cost nodes. Rounded up and never below 1 for a
+    // skill that costs anything, so a stack of discounts cannot make it free.
+    const costRules = p.stats.rules || {};
+    const costMultOfType = { mana: costRules.manaCostMult, stamina: costRules.staminaCostMult };
+    const costMult = Number(costMultOfType[skill.costType]) > 0 ? Number(costMultOfType[skill.costType]) : 1;
+    if (cost > 0 && costMult !== 1) cost = Math.max(1, Math.ceil(cost * costMult));
+
     // Check resources on player
     if (skill.costType === 'mana' && p.mana < cost) {
       p._channelSkillId = null;
@@ -1616,6 +1651,10 @@ class World {
       return { ok: false, kills: [], reason: 'cooldown' };
     }
 
+    // The conditional damage nodes read the pools as they were BEFORE this cast paid
+    // for itself: "mana nearly full" must not be defeated by the cast's own cost.
+    const hpFractionBefore = p.maxHp > 0 ? p.hp / p.maxHp : 1;
+    const manaFractionBefore = p.maxMana > 0 ? p.mana / p.maxMana : 0;
     // Deduct resource
     if (skill.costType === 'mana') p.mana = Math.max(0, p.mana - cost);
     else if (skill.costType === 'stamina') p.stamina = Math.max(0, p.stamina - cost);
@@ -1624,11 +1663,9 @@ class World {
     const px = p.x + p.width / 2;
     const py = p.y + p.height / 2;
 
-    // A Druid's skills grow with charisma, her main attribute; every other class
-    // keeps STR for melee skills and INT for the rest.
-    const baseMult = skill.class === 'Druid'
-      ? (p.stats.charismaMult || 1)
-      : ((skill.type === 'melee') ? (p.stats.meleeMult || 1) : (p.stats.spellMult || 1));
+    // A skill grows with its class's MAIN attribute (Druid CHA, Archer DEX, Monk
+    // WIS, Cultist CON, Warrior STR, Mage INT) -- see skillStatMult.
+    const baseMult = skillBalance.skillStatMult(p.stats, skill);
     const element = skillBalance.skillElementOf(skill);
     const elemMult = skillBalance.skillElementMult(p.stats, element);
     
@@ -1646,7 +1683,26 @@ class World {
     const critMult = skill.type === 'buff' ? 1 : skillBalance.rollCrit(p, { spell: isSpell });
     const spellMult = isSpell ? skillBalance.takeSpellMult(p) : 1;
     if (skill.type !== 'buff') skillBalance.noteAction(p, this.now);
-    const damage = Math.max(2, Math.round(baseDamage * baseMult * elemMult * debuffDamageMult(p) * intensityMult * critMult * spellMult));
+    // The tree's shape rules reach skills too, not only the equipped weapon's swing:
+    // a wide-arc node's price (meleeDamageMult) is paid by melee skills as well,
+    // so a skill is not a way round the trade.
+    const rules = p.stats.rules || {};
+    const shape = skill.type === 'melee' ? (rules.meleeDamageMult || 1) : 1;
+    // The skill-damage nodes: the skill's own attribute, the flat multiplier, and
+    // the two conditional ones (badly wounded / mana nearly full).
+    const attrRule = skillBalance.skillAttributeDamageBonus(p.stats, skill);
+    const lowLife = hpFractionBefore < 0.35 ? (rules.lowLifeDamage || 0) : 0;
+    const fullMana = manaFractionBefore >= 0.8 ? (rules.fullManaDamage || 0) : 0;
+    // Paid skill levels (services/skillLeveling.js): +1% power per level bought.
+    const skillLevel = (p.skillLevels && p.skillLevels.get(skill.id)) || 0;
+    const levelMult = skillLeveling.powerMultiplier(skillLevel);
+    const nodeMult = (1 + attrRule) * (rules.skillDamageMult || 1) * (1 + lowLife) * (1 + fullMana) * levelMult;
+    // Every hit a skill lands carries the tree's on-hit statuses (Pyromancy's burn,
+    // Cryomancy's chill, ...) and the stun rider. Spells used to carry NONE of
+    // them -- only melee arcs and weapon shots did -- so a Mage's elemental
+    // keystones never applied their status to a spell.
+    const skillHitStatuses = withStunRider(p.stats.hitStatuses || null, rules.stunChance);
+    const damage = Math.max(2, Math.round(baseDamage * baseMult * elemMult * shape * nodeMult * debuffDamageMult(p) * intensityMult * critMult * spellMult));
 
     const kills = [];
     const pacifiedFrom = charmerOf(p, this.now);
@@ -1671,9 +1727,14 @@ class World {
       const { nx, ny } = normalizeAim(ax, ay, p.facing);
       const isSpin = skill.channeled || skill.id.includes('whirlwind') || skill.id.includes('spin') || skill.id.includes('crane');
       const reachScale = (skill.channeled && channelStack > 0) ? (1 + channelStack * 0.04) : 1;
-      const reach = (isSpin ? 120 : Math.max(90, (Number(skill.range) || 90) * 1.3)) * reachScale
+      // The tree's reach and arc nodes apply to a melee SKILL exactly as they do to
+      // the weapon swing -- same pixels, same radians, same floors -- so Cleaving
+      // Reach lengthens Crushing Blow and Sweep widens it.
+      const baseReach = isSpin ? 120 : Math.max(90, (Number(skill.range) || 90) * 1.3);
+      const reach = Math.max(MIN_MELEE_REACH, baseReach + (rules.meleeReachBonus || 0)) * reachScale
         * (p._buffMods ? p._buffMods.reach : 1);
-      const arc = isSpin ? (Math.PI * 2) : (Math.PI * 0.75);
+      const arc = Math.min(TAU, Math.max(MIN_MELEE_ARC,
+        (isSpin ? TAU : Math.PI * 0.75) + (rules.meleeArcBonus || 0)));
       // The same target set applyMeleeArc resolves, read before it can
       // remove a kill.
       for (const id of this.creatures.meleeArcTargets(px, py, nx, ny, reach, arc, pacifiedFrom)) {
@@ -1683,16 +1744,27 @@ class World {
       for (let h = 0; h < hitCount; h++) {
         const killed = this.creatures.applyMeleeArc(
           px, py, nx, ny, reach, arc, damage, element, this.now + h * 40, userId,
-          null, pacifiedFrom, p.stats.hitStatuses || null
+          null, pacifiedFrom, skillHitStatuses
         );
         for (const kid of killed) {
           if (!kills.some(k => k.id === kid)) kills.push({ id: kid, killerUserId: userId });
         }
       }
+      // The lingering wave (Afterimage): a melee skill leaves the ground it swept
+      // burning for a short while, like the weapon swing does. A channel is
+      // excluded -- it casts every 200ms and would only churn the wave cap.
+      if (!skill.channeled && rules.meleeWaveShare > 0) {
+        this._spawnWave(p, px, py, nx, ny, reach, arc, null, {
+          damage: damage * rules.meleeWaveShare, element,
+        });
+      }
       p.hp = Math.min(p.maxHp || 100, p.hp + skillBalance.leechHeal(p, skill, damage));
     } else if (skill.type === 'magic' || skill.type === 'debuff') {
+      // "+N projectiles" cannot spawn a projectile for an instant skill, so for a
+      // skill that is fired (skill.projectile) it is N more hits of the same size.
+      const volleyHits = hitCount + (skill.projectile ? Math.max(0, Math.floor(rules.projectileCount || 0)) : 0);
       const aoeScale = (skill.channeled && channelStack > 0) ? (1 + channelStack * 0.04) : 1;
-      const aoeRadius = Math.max(90, (Number(skill.radius) || 80) * 1.5) * aoeScale;
+      const aoeRadius = Math.max(90, (Number(skill.radius) || 80) * 1.5) * aoeScale * (rules.aoeRadiusMult > 0 ? rules.aoeRadiusMult : 1);
       const isBarrage = skill.id === 'arc_barrage';
       const isBeam = skill.id.includes('beam') || skill.id.includes('ray');
       const isDirectionalShotgun = isBarrage || isBeam || skill.id.includes('multishot') || skill.id.includes('split_shot') || skill.id.includes('aimed_shot') || skill.id.includes('piercing');
@@ -1735,13 +1807,16 @@ class World {
             // In cone (within +/- 40 deg) OR point-blank in front of caster (dist <= 85)
             if (angleDiff <= 0.70 || dist <= 85) {
               struck.push(strike(c));
-              for (let h = 0; h < hitCount; h++) {
+              let diedHere = false;
+              for (let h = 0; h < volleyHits; h++) {
                 const died = this.creatures.damageCreatureById(c.id, damage, element, this.now + h * 30, playerKey(userId));
                 if (died && !kills.some(k => k.id === c.id)) {
                   kills.push({ id: c.id, killerUserId: userId });
+                  diedHere = true;
                   break;
                 }
               }
+              if (!diedHere) applyHitStatuses(c, skillHitStatuses, this.now, userId);
             }
           }
         }
@@ -1751,7 +1826,7 @@ class World {
         const aoeCenterY = isCasterCentered ? py : targetY;
         aoeCentre = { x: aoeCenterX, y: aoeCenterY };
 
-        for (let h = 0; h < hitCount; h++) {
+        for (let h = 0; h < volleyHits; h++) {
           for (const c of this.creatures.all()) {
             const cx = c.x + CREATURE_SIZE / 2;
             const cy = c.y + CREATURE_SIZE / 2;
@@ -1761,6 +1836,8 @@ class World {
               const died = this.creatures.damageCreatureById(c.id, damage, element, this.now + h * 40, playerKey(userId));
               if (died && !kills.some(k => k.id === c.id)) {
                 kills.push({ id: c.id, killerUserId: userId });
+              } else if (!died && h === 0) {
+                applyHitStatuses(c, skillHitStatuses, this.now, userId);
               }
             }
           }
@@ -1772,13 +1849,18 @@ class World {
       // What a buff does is data (skillBalance.BUFFS); a buff skill with no entry
       // only registers a marker.
       if (!skillBalance.castUnknownBuff(p, skill, this.now)) {
-        const special = skillBalance.castBuff(p, skill, this.now);
+        const special = skillBalance.castBuff(p, skill, this.now, levelMult);
         if (special) this._castSpecial(p, special, targetX, targetY);
       }
     }
 
     // Game audio slice 3: a cast that got this far happened; heard at the
     // caster's position when it began (px/py, before any blink moved them).
+    // killHeal: each creature this cast killed restores a share of max life.
+    const killHeal = Number(rules.killHeal) || 0;
+    if (killHeal > 0 && kills.length > 0) {
+      p.hp = Math.min(p.maxHp || 100, p.hp + (p.maxHp || 100) * killHeal * kills.length);
+    }
     pushSfxEvent(this.sfx, skillUse(skill, userId, px, py));
     // SOMET-592 (I3): the landing and the victims' pain, after the cast's own
     // `use`. A radial AoE is ONE `hit` at its centre (the detonation rule); a
@@ -1892,6 +1974,10 @@ class World {
           className: p.className,
           appearanceVariant: p.appearanceVariant,
         };
+        // The +N of the weapon in hand, so every client can draw its aura. Omitted
+        // below the first level, which is every player most of the time.
+        const enchantLevel = equippedEnchantLevel(p);
+        if (enchantLevel > 0) out.enchant = enchantLevel;
         // Effect KEYS only, and omitted entirely when nothing is active — see
         // activeEffectKeys. Read on the client as `p.effects || []`.
         const fx = activeEffectKeys(p, this.now);

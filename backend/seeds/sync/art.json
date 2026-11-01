@@ -1,13 +1,13 @@
 {
   "header": {
-    "exported_at": "2026-11-01T14:08:30.674Z",
+    "exported_at": "2026-11-01T14:58:40.877Z",
     "exported_by": "unnamed-pc",
     "group": "art",
     "row_counts": {
       "art_prompt_descriptions": 44,
       "art_prompt_notes": 3,
       "catalog_art": 428,
-      "character_appearances": 30,
+      "character_appearances": 35,
       "entity_types": 379,
       "item_types": 280,
       "tile_types": 50
@@ -4865,6 +4865,51 @@
         "render_mode": "static",
         "sprite": null,
         "sync_uuid": "aaa2b245-1b2b-bc3a-113f-8de687539d86",
+        "variant": 5
+      },
+      {
+        "entity_type_id": "6219a668-2644-81f1-903f-e2631b4c062d",
+        "image": null,
+        "label": "Appearance 1",
+        "render_mode": null,
+        "sprite": null,
+        "sync_uuid": "44d9eaea-67e8-4762-26b9-ba2373804246",
+        "variant": 1
+      },
+      {
+        "entity_type_id": "6219a668-2644-81f1-903f-e2631b4c062d",
+        "image": null,
+        "label": "Appearance 2",
+        "render_mode": null,
+        "sprite": null,
+        "sync_uuid": "1775e55c-eacc-be45-b0f8-c387203055f3",
+        "variant": 2
+      },
+      {
+        "entity_type_id": "6219a668-2644-81f1-903f-e2631b4c062d",
+        "image": null,
+        "label": "Appearance 3",
+        "render_mode": null,
+        "sprite": null,
+        "sync_uuid": "5b057814-9542-78e3-cf43-dbdbe93d8152",
+        "variant": 3
+      },
+      {
+        "entity_type_id": "6219a668-2644-81f1-903f-e2631b4c062d",
+        "image": null,
+        "label": "Appearance 4",
+        "render_mode": null,
+        "sprite": null,
+        "sync_uuid": "9657b937-734c-15e3-54de-03a0c34ccfab",
+        "variant": 4
+      },
+      {
+        "entity_type_id": "6219a668-2644-81f1-903f-e2631b4c062d",
+        "image": null,
+        "label": "Appearance 5",
+        "render_mode": null,
+        "sprite": null,
+        "sync_uuid": "bf8b4227-1014-ba80-8ad5-f5c90f8a311c",
         "variant": 5
       },
       {

@@ -31,6 +31,11 @@ export const RULE_KEYS = [
   'projectileCount', 'projectileSpeedMult', 'pierceBonus',
   'auraLeech', 'auraRadius', 'meleeDamageMult', 'meleeWaveShare',
   'hpRegen', 'manaRegen', 'staminaRegen', 'formPower',
+  'strengthSkillDamage', 'dexteritySkillDamage', 'constitutionSkillDamage',
+  'intelligenceSkillDamage', 'wisdomSkillDamage', 'charismaSkillDamage',
+  'skillDamageMult', 'lowLifeDamage', 'fullManaDamage', 'critChance', 'critDamage',
+  'manaCostMult', 'staminaCostMult', 'skillCooldownMult', 'skillLeech', 'killHeal',
+  'stunChance', 'dodgeChance', 'reflectShare', 'aoeRadiusMult', 'manaPerWisdom',
 ];
 
 // `field` is the extra key this grant type carries, and `options` is what the

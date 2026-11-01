@@ -196,8 +196,31 @@ function cooldownFloorOf(progression) {
 // there is deliberately no second per-class term anywhere else (contract
 // §6.11: start nodes grant RULES, never raw pool bonuses, so class identity
 // cannot be counted twice).
+// The cooldown multiplier of a damaging SKILL, as a share (SKILL_HASTE_SHARE) of
+// the weapon-attack haste: DEX, the speed rule for that skill's kind (melee ->
+// attackSpeedMult, magic -> castSpeedMult) and the cooldownFloor. Computed here
+// and sent to the client with the rest of the bundle, so the client's hotbar
+// timer and the server's cooldown gate cannot be two copies of the rule.
+function skillCooldownMults(progression, dexMult, floor) {
+  const rules = rulesOf(progression);
+  const speed = (k) => (Number(rules[k]) > 0 ? Number(rules[k]) : 1);
+  // The tree's own skillCooldownMult (product, below 1 = faster) stacks on top of
+  // the haste share, with a floor so a stack of them cannot make a skill free.
+  const own = Number(rules.skillCooldownMult) > 0 ? Number(rules.skillCooldownMult) : 1;
+  const share = (speedRule) => {
+    const full = Math.max(floor, dexMult / speedRule);
+    const hasted = Math.min(1, 1 - (1 - full) * C.SKILL_HASTE_SHARE);
+    return round4(Math.max(C.SKILL_MIN_COOLDOWN_MULT, hasted * own));
+  };
+  return { melee: share(speed('attackSpeedMult')), spell: share(speed('castSpeedMult')) };
+}
+
 function derivePlayerStats(progression, classPools = null) {
   const above = (key) => stat(progression, key) - C.BASE_STAT;
+  const cooldownMult = Math.max(
+    cooldownFloorOf(progression),
+    round4(1 / (1 + C.HASTE_PER_DEX * above('dexterity'))),
+  );
   return {
     // SOMET-495: class base, then the stat scaling, then the tree's flat
     // grant -- in that order and all three, which is the whole content of
@@ -207,7 +230,7 @@ function derivePlayerStats(progression, classPools = null) {
     maxHp: Math.max(1, poolBase(classPools, 'maxHp', C.HP_BASE)
       + C.HP_PER_CON * above('constitution') + poolGrant(progression, 'hp')),
     maxMana: Math.max(0, poolBase(classPools, 'maxMana', C.MANA_BASE)
-      + C.MANA_PER_INT * above('intelligence') + poolGrant(progression, 'mana')),
+      + C.MANA_PER_INT * above('intelligence') + (Number(rulesOf(progression).manaPerWisdom) || 0) * above('wisdom') + poolGrant(progression, 'mana')),
     // Stamina has no stat that scales it and no per-class base -- it is the one
     // pool the tree alone moves. It was a bare constant in world.js until
     // SOMET-495; it lives here now so every re-derive path refreshes it by the
@@ -223,10 +246,10 @@ function derivePlayerStats(progression, classPools = null) {
     // supplies one, and C.MIN_COOLDOWN_MULT otherwise. Until this ticket it
     // was always the constant, which is what made the Archer's start node and
     // ks_dex_fleet inert.
-    cooldownMult: Math.max(
-      cooldownFloorOf(progression),
-      round4(1 / (1 + C.HASTE_PER_DEX * above('dexterity'))),
-    ),
+    cooldownMult,
+    // The same haste, as it applies to a damaging skill's cooldown (see
+    // skillCooldownMults). { melee, spell }, each in (0, 1].
+    skillCooldownMult: skillCooldownMults(progression, cooldownMult, cooldownFloorOf(progression)),
     // SOMET-519. The RESOLVED floor, carried so the authority can bound the
     // cooldown AFTER it has applied attackSpeedMult/castSpeedMult.
     //

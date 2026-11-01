@@ -87,7 +87,9 @@ function skillWorld() {
     new Map([[sword.id, sword]]), sword.id);
   const stats = {
     meleeMult: 1, spellMult: 1, level: 100,
-    strength: 100, dexterity: 100, constitution: 100, intelligence: 100, wisdom: 100, charisma: 100,
+    // The attributes are at BASE (5) so the bundle agrees with meleeMult 1: skills now read
+    // the class main attribute, not meleeMult, and the baseline below is a literal 10.
+    strength: 5, dexterity: 100, constitution: 100, intelligence: 100, wisdom: 100, charisma: 100,
     damageMult: { physical: 1, arcane: 1, fire: 1, ice: 1, lightning: 1, shadow: 1, holy: 1 },
     resists: {}, rules: {},
     sources: Object.fromEntries(['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma']

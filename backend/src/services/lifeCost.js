@@ -17,7 +17,7 @@ const LIFE_COST_RATIO = 0.6;
 // `composeStats(...).rules.lifeCostMultiplier`, i.e. the product of every
 // passive-tree rule grant the character holds. The Cultist's tree START node
 // already grants 0.9 (SOMET-471 / contract §6.11), and the CON keystones
-// "Blood Pact" (0.75) and "Sanguine Rite" (0.8) lower it further.
+// "Blood Pact" (0.85) and "Sanguine Rite" (0.88) lower it further.
 //
 // Anything non-finite or non-positive resolves to 1: a NULL arriving from a
 // character whose tree row is missing must mean "no discount", never "no cost".
@@ -27,6 +27,20 @@ function lifeCostFor(manaCost, lifeCostMultiplier = 1) {
   const raw = Number(lifeCostMultiplier);
   const mult = Number.isFinite(raw) && raw > 0 ? raw : 1;
   return Math.ceil(cost * LIFE_COST_RATIO * mult);
+}
+
+// A SKILL that costs life (costType 'hp') is authored directly in HP, so it
+// takes the tree's multiplier but NOT the mana->life ratio above. Skills used
+// to subtract their raw cost, which left every lifeCostMultiplier node (the
+// Cultist start node, Bloodflow, Sanguine Rite, Blood Pact) doing nothing for
+// the Cultist's 50 hp-cost skills. Rounded up like lifeCostFor, and never
+// below 1 for a skill that costs anything.
+function skillLifeCostFor(hpCost, lifeCostMultiplier = 1) {
+  const cost = Number(hpCost);
+  if (!Number.isFinite(cost) || cost <= 0) return 0;
+  const raw = Number(lifeCostMultiplier);
+  const mult = Number.isFinite(raw) && raw > 0 ? raw : 1;
+  return Math.max(1, Math.ceil(cost * mult));
 }
 
 // A cast that would leave the cultist below 1 HP is REFUSED, not lethal
@@ -48,4 +62,4 @@ function canPayLife(currentHp, cost) {
   return hp - c >= 1;
 }
 
-module.exports = { LIFE_COST_RATIO, lifeCostFor, canPayLife };
+module.exports = { LIFE_COST_RATIO, lifeCostFor, skillLifeCostFor, canPayLife };
