@@ -4,8 +4,8 @@
     "exported_by": "linux-dev",
     "group": "creature_behaviors",
     "row_counts": {
-      "behavior_drops": 11,
-      "chest_loot": 41,
+      "behavior_drops": 9,
+      "chest_loot": 33,
       "creature_abilities": 28,
       "creature_behavior_skills": 15,
       "creature_behaviors": 24
@@ -14,14 +14,6 @@
   },
   "tables": {
     "behavior_drops": [
-      {
-        "behavior_id": "21b19aa7-69b8-a891-9abb-d1a988033775",
-        "chance": 0.25,
-        "item_type_id": "f7235c0a-b9d6-530c-4712-8f4ea047c208",
-        "max_qty": 1,
-        "min_qty": 1,
-        "sync_uuid": "bc2f82f2-980e-51d1-9ed4-6cdfa7a8d720"
-      },
       {
         "behavior_id": "418de594-7134-c047-8bd8-f968028e594e",
         "chance": 0.1,
@@ -79,14 +71,6 @@
         "sync_uuid": "54451712-e548-1c65-b632-a013875bdd33"
       },
       {
-        "behavior_id": "a8774e5b-3788-d760-b0da-970f3f5d9d9d",
-        "chance": 0.3,
-        "item_type_id": "166ef576-31ae-842e-c36b-c1000410ee87",
-        "max_qty": 1,
-        "min_qty": 1,
-        "sync_uuid": "39e7e6f8-c4c5-42fd-690d-8d4941c908f4"
-      },
-      {
         "behavior_id": "d756f5a0-c8cd-9fa8-21a4-c99536c0666a",
         "chance": 0.15,
         "item_type_id": "bcc9f027-a023-22a8-2018-4958f6e0a8e9",
@@ -104,15 +88,6 @@
       }
     ],
     "chest_loot": [
-      {
-        "chance": 0.55,
-        "item_type_id": "166ef576-31ae-842e-c36b-c1000410ee87",
-        "level_max": 4,
-        "level_min": 1,
-        "max_qty": 8,
-        "min_qty": 3,
-        "sync_uuid": "f1089354-4d47-c99c-254b-7d16524b4d22"
-      },
       {
         "chance": 0.15,
         "item_type_id": "17851287-aa87-97f0-b8f3-909b32117b1a",
@@ -139,15 +114,6 @@
         "max_qty": 1,
         "min_qty": 1,
         "sync_uuid": "3da27019-2963-ddb3-18c9-bea4f01d4859"
-      },
-      {
-        "chance": 0.45,
-        "item_type_id": "f7235c0a-b9d6-530c-4712-8f4ea047c208",
-        "level_max": 4,
-        "level_min": 1,
-        "max_qty": 8,
-        "min_qty": 3,
-        "sync_uuid": "86bf75a7-c058-5302-eb5e-57f2642c3952"
       },
       {
         "chance": 0.18,
@@ -184,15 +150,6 @@
         "max_qty": 1,
         "min_qty": 1,
         "sync_uuid": "6f9debc3-6ad8-cc20-cb46-e7cbea95a64c"
-      },
-      {
-        "chance": 0.45,
-        "item_type_id": "6f1a3b5d-495b-5853-c2de-1dd444ed7810",
-        "level_max": 19,
-        "level_min": 10,
-        "max_qty": 12,
-        "min_qty": 5,
-        "sync_uuid": "424eda21-2dbd-73f8-751d-0b671e15ee0d"
       },
       {
         "chance": 0.22,
@@ -249,15 +206,6 @@
         "sync_uuid": "4913747a-2c1c-d14b-688e-5e285ccc68d4"
       },
       {
-        "chance": 0.4,
-        "item_type_id": "6f1a3b5d-495b-5853-c2de-1dd444ed7810",
-        "level_max": 39,
-        "level_min": 20,
-        "max_qty": 14,
-        "min_qty": 6,
-        "sync_uuid": "4aaf918b-d327-2db3-0fd4-7418da97b39c"
-      },
-      {
         "chance": 0.2,
         "item_type_id": "bcc9f027-a023-22a8-2018-4958f6e0a8e9",
         "level_max": 39,
@@ -310,15 +258,6 @@
         "max_qty": 1,
         "min_qty": 1,
         "sync_uuid": "f16560db-659c-34b9-cb48-f3e8e1062e4d"
-      },
-      {
-        "chance": 0.35,
-        "item_type_id": "6f1a3b5d-495b-5853-c2de-1dd444ed7810",
-        "level_max": 79,
-        "level_min": 40,
-        "max_qty": 16,
-        "min_qty": 8,
-        "sync_uuid": "c829b8d8-5ca1-22cf-1bf2-9aec2c1877e1"
       },
       {
         "chance": 0.16,
@@ -375,15 +314,6 @@
         "sync_uuid": "eefd3182-aad7-e37a-b0ef-c6b11459a796"
       },
       {
-        "chance": 0.35,
-        "item_type_id": "6f1a3b5d-495b-5853-c2de-1dd444ed7810",
-        "level_max": 9,
-        "level_min": 5,
-        "max_qty": 10,
-        "min_qty": 4,
-        "sync_uuid": "5c4fa4aa-b8a1-ad37-e526-f3677308fe85"
-      },
-      {
         "chance": 0.2,
         "item_type_id": "9db3acff-3f0b-f63f-d755-cebd8f528a20",
         "level_max": 9,
@@ -400,15 +330,6 @@
         "max_qty": 1,
         "min_qty": 1,
         "sync_uuid": "9638244b-d9f4-a26c-6260-6ac8331107f3"
-      },
-      {
-        "chance": 0.5,
-        "item_type_id": "f7235c0a-b9d6-530c-4712-8f4ea047c208",
-        "level_max": 9,
-        "level_min": 5,
-        "max_qty": 10,
-        "min_qty": 4,
-        "sync_uuid": "f91bbdd8-5e9b-af07-c22c-ee656977c583"
       },
       {
         "chance": 0.28,
@@ -445,15 +366,6 @@
         "max_qty": 1,
         "min_qty": 1,
         "sync_uuid": "a7b092f9-75d5-d891-ad40-25d61865460c"
-      },
-      {
-        "chance": 0.35,
-        "item_type_id": "6f1a3b5d-495b-5853-c2de-1dd444ed7810",
-        "level_max": 150,
-        "level_min": 80,
-        "max_qty": 20,
-        "min_qty": 10,
-        "sync_uuid": "a0b63717-e27c-5381-bb6d-5fe28db1e16e"
       },
       {
         "chance": 0.16,

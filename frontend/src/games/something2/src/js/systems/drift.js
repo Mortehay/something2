@@ -5,12 +5,12 @@
 // transform, no offscreen canvas, so it costs what a plain prop costs. Pure.
 //
 // x and y run on different periods (4:3), tracing a slow Lissajous loop that
-// repeats every 15.6 s, so the motion does not read as a mechanical bob.
+// repeats every 31.2 s, so the motion does not read as a mechanical bob.
 
-export const DRIFT_X_PX = 1.5;
+export const DRIFT_X_PX = 1;
 export const DRIFT_Y_PX = 1;
-export const DRIFT_X_PERIOD_MS = 5200;
-export const DRIFT_Y_PERIOD_MS = 3900;
+export const DRIFT_X_PERIOD_MS = 10400;
+export const DRIFT_Y_PERIOD_MS = 7800;
 
 const TWO_PI = Math.PI * 2;
 

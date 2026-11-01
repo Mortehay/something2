@@ -25,7 +25,6 @@ import {
 import {
     fetchPassiveTree, allocatePassive, unallocatePassive, respecPassives, fetchRespecQuote, fetchStartClass,
 } from '../net/passiveTreeClient.js';
-import { resolveAmmoHud, applyAmmoCount } from "./ammo.js";
 import { chestsFromFrame, applyChestOpened } from "./worldChests.js";
 import { remotePlayerFromFrame } from './worldPlayers.js';
 import { appearanceImageKey, indexAppearanceVisuals } from './characterAppearance.js';
@@ -64,10 +63,6 @@ import { findWorldBossCreature } from "./worldBossMatch.js";
 import { EntityAnimState, noteFrameEvents } from "../systems/entityAnimState.js";
 import { loadUiPrefs, saveUiPrefs, normalizeUiPrefs } from "./uiPrefs.js";
 import { questMarkerFor, villageMarkers } from "./questMarkers.js";
-
-// How long the "out of ammo" HUD flash stays up after the server's `noammo`
-// frame arrives.
-const NO_AMMO_FLASH_MS = 600;
 
 // Fallback weapon name shown when nothing is equipped in main_hand yet
 // (mirrors the server's DEFAULT_WEAPON_NAME in authority/items.js).
@@ -214,11 +209,10 @@ export class Game {
         this.localMaxStamina = null;
         this.projectiles = null;
 
-        // AoE (Slice 3b-3b): active blast rings, and the "out of ammo" flash.
+        // AoE (Slice 3b-3b): active blast rings.
         // Detonations ride a single `state` frame and are never repeated, so
         // they are copied into this list on arrival and animated locally.
         this.blasts = [];
-        this.noAmmoUntil = 0;
 
         // Live attack effects, and the library their names resolve against.
         this.vfx = [];
@@ -854,7 +848,6 @@ export class Game {
         this.bankView = { tab: 'chest', page: 0 };
         this.blasts = [];
         this.vfx = [];
-        this.noAmmoUntil = 0;
         // SOMET-476. The GRAPH is world-independent and deliberately survives a
         // join (it is ~1800 rows and identical everywhere), but the open state,
         // the pan and any in-flight drag belong to the world being left.
@@ -995,25 +988,7 @@ export class Game {
                     removeItem(this.inventory, msg.itemId);
                     if (this.inventorySelectedItemId === msg.itemId) this.inventorySelectedItemId = null;
                 },
-                // A refusal is authoritative information, not just a cue to
-                // flash: the server has stated it found no stack of this type
-                // left, so the displayed count goes to 0 too. Flashing without
-                // correcting the number left the HUD insisting "arrow: 1"
-                // while every shot was being refused. The count comes from the
-                // frame, never computed locally.
-                onNoAmmo: (msg) => {
-                    this.noAmmoUntil = performance.now() + NO_AMMO_FLASH_MS;
-                    applyAmmoCount(this.inventory, msg && msg.item_type_id, 0);
-                    // SOMET-494: an empty quiver is "the thing the attack
-                    // depends on ran out" exactly as much as an empty mana
-                    // pool is, so it ends a held attack too. It arrives on its
-                    // own frame rather than through `attackrefused` because
-                    // ammo is refused later, after the spend, and carries the
-                    // item type the HUD has to zero.
-                    this._stopConstantAttack();
-                },
                 onAttackRefused: (msg) => this._onAttackRefused(msg),
-                onAmmo: (msg) => applyAmmoCount(this.inventory, msg.item_type_id, msg.count),
                 onWorldBossStatus: (msg) => {
                     this.worldBossStatus = msg.status || null;
                     if (this._onWorldBossStatusChange) {
@@ -2096,10 +2071,6 @@ export class Game {
                 auraDefs: this.auraDefs,
                 skillVisuals: this.skillVisuals,
                 floatingTexts: this.floatingTexts,
-                // null whenever the equipped weapon needs no ammo — the HUD
-                // then draws no ammo line at all.
-                ammo: resolveAmmoHud(this.inventory),
-                noAmmoFlash: nowMs < this.noAmmoUntil,
                 // The local player's own effects, for the HUD line. The rings
                 // at their feet come from this.player.effects via drawCreature.
                 effects: this.player.effects || null,

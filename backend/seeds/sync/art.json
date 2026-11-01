@@ -9,7 +9,7 @@
       "catalog_art": 428,
       "character_appearances": 30,
       "entity_types": 371,
-      "item_types": 283,
+      "item_types": 280,
       "tile_types": 50
     },
     "schema_version": "1714440843000_world_boss_second_skills"
@@ -10248,7 +10248,7 @@
       {
         "display_height": 100,
         "display_width": 80,
-        "idle_fx": "drift",
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/bank_post.png",
           "sha256": "fcc07ef9a82c782674df6174f8fca184ed229fac9cb383350fbe9bdef16a414e"
@@ -10262,7 +10262,7 @@
       {
         "display_height": 40,
         "display_width": 40,
-        "idle_fx": "drift",
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/bush.png",
           "sha256": "f66f74218dcaa7d8380dd387b6ca06b1910e38b1d02f3763124be3302aac1fa0"
@@ -10276,7 +10276,7 @@
       {
         "display_height": 50,
         "display_width": 60,
-        "idle_fx": "drift",
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/chest_field.png",
           "sha256": "9cd09bda3dfc0278492d9983eccc33589305dd2979937887c59abdb86ab127f0"
@@ -10290,7 +10290,7 @@
       {
         "display_height": 60,
         "display_width": 70,
-        "idle_fx": "drift",
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/chest_vault.png",
           "sha256": "3bc1d36825766e7254fa5520386b7bdbd1cab047e478391172707a6b335c46f7"
@@ -10332,7 +10332,7 @@
       {
         "display_height": 100,
         "display_width": 80,
-        "idle_fx": "drift",
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/merchant_post.png",
           "sha256": "995e1f5018833c331c9efe3409918f8cdf78c20fc0125e113bc6df4b9341f82a"
@@ -10360,7 +10360,7 @@
       {
         "display_height": 130,
         "display_width": 110,
-        "idle_fx": "drift",
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/portal.png",
           "sha256": "21186e1b1f0bd9cfdd9492352139a4da01ac1e7b64d81df5fe4431d92856e753"
@@ -10374,7 +10374,7 @@
       {
         "display_height": 44,
         "display_width": 40,
-        "idle_fx": "drift",
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/rose_bush.png",
           "sha256": "27dbe86ba18ee8db94f5c481a194b31bab8e29e56722f9409112edfa7c6fce4f"
@@ -10388,7 +10388,7 @@
       {
         "display_height": 100,
         "display_width": 80,
-        "idle_fx": "drift",
+        "idle_fx": "none",
         "image": {
           "file": "textures/entities/skill_merchant_post.png",
           "sha256": "4f4fb8a63cd452e9727526a31b5adf856a1d7e9c632b93450050370c90d91e77"
@@ -10446,14 +10446,6 @@
         },
         "name": "archmage staff",
         "sync_uuid": "59336d74-51ec-b2be-e0d9-1961cc960a0e"
-      },
-      {
-        "icon": {
-          "file": "textures/items/arrow.png",
-          "sha256": "4150f2ac844e59f977dc6c95c2e152bf0058563a22fd8f82db54cb68fa24fc20"
-        },
-        "name": "arrow",
-        "sync_uuid": "f7235c0a-b9d6-530c-4712-8f4ea047c208"
       },
       {
         "icon": {
@@ -10646,14 +10638,6 @@
         },
         "name": "astral-wand",
         "sync_uuid": "512522a6-8692-f04d-ada7-3b950b85110c"
-      },
-      {
-        "icon": {
-          "file": "textures/items/bolt.png",
-          "sha256": "c0e121c62935395672d960b57ba92a94143dac8650c8a16b481ec1189a6c3541"
-        },
-        "name": "bolt",
-        "sync_uuid": "6f1a3b5d-495b-5853-c2de-1dd444ed7810"
       },
       {
         "icon": {
@@ -12182,14 +12166,6 @@
         },
         "name": "stick",
         "sync_uuid": "ac9df944-d0e9-a80e-633d-1fc0f3e29d98"
-      },
-      {
-        "icon": {
-          "file": "textures/items/stone.png",
-          "sha256": "6d01b388888a9a47d1c5bacaa2489246aeb8326296cbf67fe104974517f89a46"
-        },
-        "name": "stone",
-        "sync_uuid": "166ef576-31ae-842e-c36b-c1000410ee87"
       },
       {
         "icon": {

@@ -1170,59 +1170,6 @@ async function mkAttackHarness(opts = {}) {
   };
 }
 
-// Nothing else binds AMMO_UPDATE_RE to production code. If the CTE in
-// ammo.js is reworded (e.g. the UPDATE clause's column list or spacing
-// changes), this mock's branch falls through silently to the generic
-// /FROM player_items/ branch further down, `spent` reads `undefined`, and
-// every test using mkAttackHarness fails on a misleading *cooldown*
-// assertion with no hint that the mock — not consumeAmmo — is the liar. This
-// is exactly the failure mode that cost a full round of misdiagnosis earlier
-// in this slice. Asserting against the real source text turns that into a
-// loud, correctly-attributed failure right here instead.
-test('mkAttackHarness ammo regex actually matches the real consumeAmmo SQL in ammo.js', () => {
-  const src = fs.readFileSync(path.join(__dirname, '../src/authority/ammo.js'), 'utf8');
-  assert.match(src, AMMO_UPDATE_RE,
-    'AMMO_UPDATE_RE no longer matches src/authority/ammo.js — the consumeAmmo CTE was reworded. '
-    + 'Update AMMO_UPDATE_RE in this file to match the new SQL, or mkAttackHarness will silently '
-    + 'fall through to a generic branch and every test using it will fail on the wrong assertion.');
-});
-
-test('an attack refused for cooldown does not consume ammo', async () => {
-  const spent = [];
-  const h = await mkAttackHarness({ onConsume: () => { spent.push(1); return true; } });
-  h.player._attackCd = 1; // cooldown running
-  await h.sendAttack(1, 0);
-  assert.equal(spent.length, 0,
-    'ammo was spent on an attack that was refused for cooldown — the consume must come AFTER canAttack');
-  h.close();
-});
-
-test('an attack refused for stamina does not consume ammo', async () => {
-  const spent = [];
-  const h = await mkAttackHarness({ onConsume: () => { spent.push(1); return true; } });
-  h.player.stamina = 0;
-  await h.sendAttack(1, 0);
-  assert.equal(spent.length, 0, 'ammo was spent on an attack refused for stamina');
-  h.close();
-});
-
-test('firing with no ammo sends noammo and leaves the cooldown untouched', async () => {
-  const h = await mkAttackHarness({ onConsume: () => false });
-  await h.sendAttack(1, 0);
-  assert.equal(h.player._attackCd, 0,
-    'an ammo denial must not consume the cooldown, matching the mana/stamina rule');
-  const noammo = h.sent.find((m) => m.type === 'noammo');
-  assert.ok(noammo, 'the client is told it is out of ammo');
-  // The refusal must name the ammo type. It is the client's only authoritative
-  // signal that this type is at zero — without it the HUD keeps rendering its
-  // last believed count while every shot is being refused, and the client
-  // would have to guess the type from equipment state that may already have
-  // moved on.
-  assert.equal(noammo.item_type_id, AMMO_TYPE_ID,
-    'noammo must carry the ammo type it refused, so the client can zero exactly that count');
-  h.close();
-});
-
 // SOMET-494 -- "Constant attack" holds the button down, so the client has to
 // tell "still on cooldown" (keep holding) from "you have run out" (stop). Both
 // of these run the REAL handler over a live socket, because the whole point is
@@ -1269,85 +1216,11 @@ test('a successful attack announces no refusal at all', async () => {
   h.close();
 });
 
-test('a weapon with no ammo_type_id never touches player_items', async () => {
-  let consumed = false;
-  const h = await mkAttackHarness({
-    weapon: { kind: 'melee', reach: 80, arc_width: 1, damage: 5, cooldown: 0.3 },
-    onConsume: () => { consumed = true; return true; },
-  });
-  await h.sendAttack(1, 0);
-  assert.equal(consumed, false, 'the ammo-free hot path must not hit the DB');
-  h.close();
-});
-
-test('a successful ammo attack spends exactly one unit and fires', async () => {
-  let count = 0;
-  const h = await mkAttackHarness({ onConsume: () => { count += 1; return true; } });
-  await h.sendAttack(1, 0);
-  assert.equal(count, 1);
-  assert.ok(h.player._attackCd > 0, 'a successful attack starts the cooldown');
-  h.close();
-});
-
-test('two attack frames in one batch spend only one unit', async () => {
-  // Both frames are parsed (and would both be gated) before either chained
-  // callback runs, so a gate captured at parse time is already stale by the
-  // time the second consume happens: the second shot would burn a unit and
-  // then be refused by attack() for the cooldown the first one started. The
-  // handler must re-gate inside the chain, immediately before consuming.
-  let count = 0;
-  const h = await mkAttackHarness({ onConsume: () => { count += 1; return true; } });
-  await h.sendAttack(1, 0, 2);
-  assert.equal(count, 1, 'the cooldown-refused second shot must not consume a unit');
-  h.close();
-});
-
 // ---------------------------------------------------------------------------
 // The 'ammo' push frame: the HUD's whole reason for existing. consumeAmmo
 // succeeding is not enough — the shooter must actually be told the new
 // count, or the number on screen freezes after the first shot.
 // ---------------------------------------------------------------------------
-
-test('a successful ammo attack sends an ammo frame with the correct summed count', async () => {
-  // 43 stands in for two real, never-merged stacks (12 + 31) — ammoCount()
-  // sums across all of them, so the pushed number must reflect that sum
-  // minus the one unit this shot just spent, not a single row's quantity.
-  let remaining = 43;
-  const h = await mkAttackHarness({
-    onConsume: () => { remaining -= 1; return true; },
-    ammoCountFn: () => remaining,
-  });
-  await h.sendAttack(1, 0);
-  const frame = h.sent.find((m) => m.type === 'ammo');
-  assert.ok(frame, 'a successful shot must push an ammo frame to the shooter');
-  assert.equal(frame.item_type_id, AMMO_TYPE_ID);
-  assert.equal(frame.count, 42, 'the pushed count must be the post-consume summed total');
-  h.close();
-});
-
-test('firing twice reports a decreasing count', async () => {
-  let remaining = 10;
-  const h = await mkAttackHarness({
-    onConsume: () => { remaining -= 1; return true; },
-    ammoCountFn: () => remaining,
-  });
-  await h.sendAttack(1, 0);
-  h.player._attackCd = 0; // clear the cooldown so the second shot is not refused
-  await h.sendAttack(1, 0);
-  const frames = h.sent.filter((m) => m.type === 'ammo');
-  assert.equal(frames.length, 2, 'each successful shot pushes its own ammo frame');
-  assert.equal(frames[0].count, 9);
-  assert.equal(frames[1].count, 8);
-  assert.ok(frames[1].count < frames[0].count, 'the count must decrease, not stay frozen');
-  h.close();
-});
-
-test('firing with no ammo does not push an ammo frame', async () => {
-  const h = await mkAttackHarness({ onConsume: () => false });
-  await h.sendAttack(1, 0);
-  assert.ok(!h.sent.some((m) => m.type === 'ammo'), 'a refused shot spends nothing, so there is no new count to push');
-  h.close();
-});
 
 // ---------------------------------------------------------------------------
 // AoE: detonations must actually reach a connected client

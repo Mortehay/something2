@@ -5,7 +5,7 @@
  * {seq,dx,dy,dt} for client-side reconciliation.
  */
 export class WorldAuthorityClient {
-  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onNoAmmo, onAttackRefused, onAmmo, onTransition, onWaypointActivated, onTeleport, onWallet, onShop, onBought, onSold, onBank, onDeposited, onWithdrawn, onProgression, onQuestProgress, onQuestNode, onChests, onChestOpened, onVfx, onWorldBossStatus, onAnnouncement, inputIntervalMs = 50, now = () => performance.now() }) {
+  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onAttackRefused, onTransition, onWaypointActivated, onTeleport, onWallet, onShop, onBought, onSold, onBank, onDeposited, onWithdrawn, onProgression, onQuestProgress, onQuestNode, onChests, onChestOpened, onVfx, onWorldBossStatus, onAnnouncement, inputIntervalMs = 50, now = () => performance.now() }) {
     this.url = url;
     this.token = token;
     this.onJoined = onJoined || (() => {});
@@ -43,9 +43,7 @@ export class WorldAuthorityClient {
     // one costs a puff and nothing more. Unlike onItems/onCreatures there is no
     // "full list" contract to keep in step.
     this.onVfx = onVfx || (() => {});
-    this.onNoAmmo = onNoAmmo || (() => {});
     this.onAttackRefused = onAttackRefused || (() => {});
-    this.onAmmo = onAmmo || (() => {});
     this.onTransition = onTransition || (() => {});
     // SOMET-292 sends this frame; SOMET-293 is the first thing to listen. Without
     // a case here it fell through to the `default` warn -- a lit waypoint that the
@@ -137,20 +135,12 @@ export class WorldAuthorityClient {
       case 'bank': this.onBank(msg); break;
       case 'deposited': this.onDeposited(msg); break;
       case 'withdrawn': this.onWithdrawn(msg); break;
-      // Sent to this socket alone when a shot was refused for an empty ammo
-      // stack. The server consumed NO cooldown, so this is purely a cue to
-      // the player — nothing local needs rolling back.
-      case 'noammo': this.onNoAmmo(msg); break;
       // SOMET-494. Sent to this socket alone when an attack was refused because
       // the player cannot PAY for it (mana / life / stamina) -- never for a
       // cooldown, which under a held button would arrive many times a second
       // and means nothing more than "not yet". Nothing local needs rolling
-      // back: like `noammo`, the server spent nothing and consumed no cooldown.
+      // back: the server spent nothing and consumed no cooldown.
       case 'attackrefused': this.onAttackRefused(msg); break;
-      // The authoritative ammo count for one type after a successful shot.
-      // The server's number always wins — never merge it with a
-      // locally-derived count or decrement on send, see core/ammo.js.
-      case 'ammo': this.onAmmo(msg); break;
       case 'transition': this.onTransition(msg); break;
       case 'waypointActivated': this.onWaypointActivated(msg); break;
       case 'teleportCastStarted':

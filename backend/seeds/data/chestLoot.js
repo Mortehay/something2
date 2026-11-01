@@ -38,22 +38,17 @@
 // nothing.
 const CHEST_LOOT = [
   // --- 1-4: a first chest. Ammo and a starter weapon. ------------------
-  { level_min: 1, level_max: 4, item: 'stone', chance: 0.55, min_qty: 3, max_qty: 8 },
-  { level_min: 1, level_max: 4, item: 'arrow', chance: 0.45, min_qty: 3, max_qty: 8 },
   { level_min: 1, level_max: 4, item: 'knife', chance: 0.30, min_qty: 1, max_qty: 1 },
   { level_min: 1, level_max: 4, item: 'dagger', chance: 0.20, min_qty: 1, max_qty: 1 },
   { level_min: 1, level_max: 4, item: 'leather-vest', chance: 0.15, min_qty: 1, max_qty: 1 },
 
   // --- 5-9: the first real weapon tier. --------------------------------
-  { level_min: 5, level_max: 9, item: 'arrow', chance: 0.50, min_qty: 4, max_qty: 10 },
-  { level_min: 5, level_max: 9, item: 'bolt', chance: 0.35, min_qty: 4, max_qty: 10 },
   { level_min: 5, level_max: 9, item: 'short sword', chance: 0.25, min_qty: 1, max_qty: 1 },
   { level_min: 5, level_max: 9, item: 'sling', chance: 0.20, min_qty: 1, max_qty: 1 },
   { level_min: 5, level_max: 9, item: 'leather-vest', chance: 0.25, min_qty: 1, max_qty: 1 },
   { level_min: 5, level_max: 9, item: 'club', chance: 0.20, min_qty: 1, max_qty: 1 },
 
   // --- 10-19: sockets become useful; staves appear. ---------------------
-  { level_min: 10, level_max: 19, item: 'bolt', chance: 0.45, min_qty: 5, max_qty: 12 },
   { level_min: 10, level_max: 19, item: 'long sword', chance: 0.22, min_qty: 1, max_qty: 1 },
   { level_min: 10, level_max: 19, item: 'bow', chance: 0.22, min_qty: 1, max_qty: 1 },
   { level_min: 10, level_max: 19, item: 'apprentice staff', chance: 0.18, min_qty: 1, max_qty: 1 },
@@ -62,7 +57,6 @@ const CHEST_LOOT = [
   { level_min: 10, level_max: 19, item: 'loot_map', chance: 0.08, min_qty: 1, max_qty: 1 },
 
   // --- 20-39: heavy weapons and elemental sockets. ----------------------
-  { level_min: 20, level_max: 39, item: 'bolt', chance: 0.40, min_qty: 6, max_qty: 14 },
   { level_min: 20, level_max: 39, item: 'morning star', chance: 0.20, min_qty: 1, max_qty: 1 },
   { level_min: 20, level_max: 39, item: 'halberd', chance: 0.18, min_qty: 1, max_qty: 1 },
   { level_min: 20, level_max: 39, item: 'frost staff', chance: 0.15, min_qty: 1, max_qty: 1 },
@@ -72,7 +66,6 @@ const CHEST_LOOT = [
   { level_min: 20, level_max: 39, item: 'loot_map', chance: 0.10, min_qty: 1, max_qty: 1 },
 
   // --- 40-79: top of the authored weapon ladder. ------------------------
-  { level_min: 40, level_max: 79, item: 'bolt', chance: 0.35, min_qty: 8, max_qty: 16 },
   { level_min: 40, level_max: 79, item: 'two-handed sword', chance: 0.18, min_qty: 1, max_qty: 1 },
   { level_min: 40, level_max: 79, item: 'scythe', chance: 0.16, min_qty: 1, max_qty: 1 },
   { level_min: 40, level_max: 79, item: 'arbalest', chance: 0.16, min_qty: 1, max_qty: 1 },
@@ -86,7 +79,6 @@ const CHEST_LOOT = [
   // 150 is the ceiling because it is the highest level a live world produces
   // today (world_creatures max). If a spec ever authors deeper, the band test
   // fails rather than silently handing those chests an empty table.
-  { level_min: 80, level_max: 150, item: 'bolt', chance: 0.35, min_qty: 10, max_qty: 20 },
   { level_min: 80, level_max: 150, item: 'archmage staff', chance: 0.16, min_qty: 1, max_qty: 1 },
   { level_min: 80, level_max: 150, item: 'two-handed sword', chance: 0.16, min_qty: 1, max_qty: 1 },
   { level_min: 80, level_max: 150, item: 'stone_of_archmage staff', chance: 0.14, min_qty: 1, max_qty: 1 },

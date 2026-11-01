@@ -5,7 +5,7 @@
     "group": "entities",
     "row_counts": {
       "class_loadouts": 0,
-      "creature_drops": 676,
+      "creature_drops": 675,
       "entity_types": 371,
       "world_point_kinds": 8
     },
@@ -4351,14 +4351,6 @@
         "sync_uuid": "8175f10b-ef7c-200b-d3cb-1001a2a16411"
       },
       {
-        "chance": 0.35,
-        "entity_type_id": "c58865fa-e739-5212-47c0-2741d279cbc5",
-        "item_type_id": "166ef576-31ae-842e-c36b-c1000410ee87",
-        "max_qty": 1,
-        "min_qty": 1,
-        "sync_uuid": "eac2078d-7c7c-51ae-0a57-cba652d97321"
-      },
-      {
         "chance": 0.22,
         "entity_type_id": "c608a950-1e79-6d1a-d7d4-b6c422422aa9",
         "item_type_id": "2ed9aae5-7d4e-35f3-e028-ae9006c4270b",
@@ -5462,11 +5454,11 @@
         "place_order": 0,
         "point_kind": null,
         "resistances": {
-          "physical": 0.3,
+          "arcane": 0,
           "fire": 0.3,
           "ice": 0.3,
           "lightning": 0,
-          "arcane": 0
+          "physical": 0.3
         },
         "spawn_tiles": [],
         "strength": 0,
@@ -12463,11 +12455,11 @@
         "place_order": 0,
         "point_kind": null,
         "resistances": {
-          "physical": 0.3,
-          "lightning": 0.3,
-          "ice": 0.6,
+          "arcane": 0,
           "fire": 0,
-          "arcane": 0
+          "ice": 0.6,
+          "lightning": 0.3,
+          "physical": 0.3
         },
         "spawn_tiles": [],
         "strength": 0,
@@ -12977,11 +12969,11 @@
         "place_order": 0,
         "point_kind": null,
         "resistances": {
-          "physical": 0.3,
+          "arcane": 0,
           "fire": 0.3,
           "ice": 0.3,
           "lightning": 0.6,
-          "arcane": 0
+          "physical": 0.3
         },
         "spawn_tiles": [],
         "strength": 0,
@@ -14036,11 +14028,11 @@
         "place_order": 0,
         "point_kind": null,
         "resistances": {
-          "physical": 0.3,
-          "lightning": 0.3,
+          "arcane": 0,
           "fire": 0.6,
           "ice": 0,
-          "arcane": 0
+          "lightning": 0.3,
+          "physical": 0.3
         },
         "spawn_tiles": [],
         "strength": 0,

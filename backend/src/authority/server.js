@@ -49,7 +49,6 @@ const { vendorBuyPrice, loadLegacyChoice } = require('../services/legacyEffects.
 const { pendingRewardItems, clearRewardPending, recordNode, doneNodeKeys, recordFloor, floorFromWorldName } = require('../services/questsService.js');
 const { worldQuestNodes, nearestQuestNode } = require('../services/questNodes.js');
 const { respawnDueCreatures, enqueueDeficit, CREATURE_SWEEP_MS } = require('../services/creatureRespawn');
-const { consumeAmmo, ammoCount } = require('./ammo');
 const { PICKUP_RADIUS } = require('./groundItems');
 const { WorldBossManager, dropLegendaryItemForPlayer } = require('./worldBoss');
 const { DungeonBossManager } = require('./dungeonBosses');
@@ -2289,82 +2288,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
       const gate = entry.world.canAttack(ws.userId);
       if (!gate.ok) { refuseAttack(ws, gate); return; }
 
-      // Ammo-free weapons (all melee, all staves, darts) keep the fully
-      // synchronous path: no DB round trip on the hot path.
-      if (gate.weapon.ammo_type_id == null) {
-        const { kills, attacks, impacts, stoneHit } = entry.world.attack(ws.userId, ax, ay);
-        pushAttacks(entry, attacks);
-        pushImpacts(entry, impacts);
-        for (const k of dedupeKillsById(kills)) onCreatureDeath(entry, k.id, k.killerUserId);
-        // Magic Stones (SOMET-245) Task 7: a landed melee spell-stone hit is
-        // known synchronously (world.js's attack() already confirmed the
-        // swing connected) -- fire-and-forget the award the same way kills
-        // are, just off a single flag rather than a list.
-        if (stoneHit) onStoneHit(stoneHit.stoneItemId);
-        return;
-      }
-
-      // Ammo is spent LAST, after every other gate has passed, so a refused
-      // attack can never destroy a unit. Serialized on chainOp for the same
-      // reason as equip/pickup/drop; `notify: false` since a refused shot
-      // sends its own `noammo` frame below, not a generic error.
-      chainOp(ws, 'attack/ammo', async () => {
-        // Everything is re-read INSIDE the chain. The `entry`/`gate`
-        // captured above were computed when the frame was parsed, which
-        // can be arbitrarily long before this callback runs — and the
-        // stale gate is exactly the bug that loses arrows. Two attack
-        // frames in one socket read are both parsed (and both gated)
-        // before either chained callback runs, so both would see
-        // _attackCd === 0; the second would then consume a unit and hand
-        // it to an attack() that refuses for the cooldown the first one
-        // just started. Re-gating here keeps canAttack → consume →
-        // attack a true sequence under every interleaving. The world
-        // entry can also have been swapped/evicted (rejoin, world
-        // teardown) across the await, so re-read that too.
-        const cur = worlds.get(ws.worldId);
-        if (!cur) return;
-        const g = cur.world.canAttack(ws.userId);
-        if (!g.ok) { refuseAttack(ws, g); return; } // nothing spent
-        // The equipped weapon may have changed too (an equip frame can be
-        // chained between the two): always spend the CURRENT weapon's
-        // ammo, and fall back to the sync path if it now needs none.
-        const ammoTypeId = g.weapon.ammo_type_id;
-        if (ammoTypeId != null && !(await consumeAmmo(pool, ws.characterId, ammoTypeId))) {
-          // The type id is carried so the client can zero ITS displayed
-          // count for exactly this ammo type. Without it the HUD keeps
-          // rendering whatever it last believed while the server refuses
-          // every shot, and the client would have to guess which type was
-          // refused from its own equipment state — which can already have
-          // moved on. A refusal is the server stating there is none of
-          // this type left; say which type.
-          send(ws, { type: 'noammo', item_type_id: ammoTypeId }); // no cooldown consumed
-          return;
-        }
-        const { kills, attacks, impacts, stoneHit } = cur.world.attack(ws.userId, ax, ay);
-        pushAttacks(cur, attacks);
-        pushImpacts(cur, impacts);
-        for (const k of dedupeKillsById(kills)) onCreatureDeath(cur, k.id, k.killerUserId);
-        // Same fire-and-forget award as the ammo-free branch above -- always
-        // null on THIS path in practice (ammo-gated weapons are projectile
-        // weapons, whose stoneHit only resolves later via tickProjectiles),
-        // but wired identically for shape consistency and so this stays
-        // correct if a melee weapon ever legitimately carries an ammo cost.
-        if (stoneHit) onStoneHit(stoneHit.stoneItemId);
-        // The shot is already committed above (ammo spent, kills
-        // resolved) — pushing the client its new count is best-effort on
-        // top of that, not a condition of it. Isolated in its own
-        // try/catch so a failed COUNT query can never look like a failed
-        // attack, and placed after attack()/onCreatureDeath so it cannot
-        // delay or skip the resolution that already succeeded.
-        if (ammoTypeId != null) {
-          try {
-            const count = await ammoCount(pool, ws.characterId, ammoTypeId);
-            send(ws, { type: 'ammo', item_type_id: ammoTypeId, count });
-          } catch (err) {
-            console.error('ammoCount failed:', err);
-          }
-        }
-      }, { notify: false });
+      const { kills, attacks, impacts, stoneHit } = entry.world.attack(ws.userId, ax, ay);
+      pushAttacks(entry, attacks);
+      pushImpacts(entry, impacts);
+      for (const k of dedupeKillsById(kills)) onCreatureDeath(entry, k.id, k.killerUserId);
+      // Magic Stones (SOMET-245) Task 7: a landed melee spell-stone hit is
+      // known synchronously (world.js's attack() already confirmed the
+      // swing connected) -- fire-and-forget the award the same way kills
+      // are, just off a single flag rather than a list.
+      if (stoneHit) onStoneHit(stoneHit.stoneItemId);
     },
 
     castSkill(ws, msg) {
