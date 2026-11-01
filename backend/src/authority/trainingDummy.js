@@ -108,6 +108,8 @@ function placeDummy(entry) {
   const c = sim.get(`dummy:${entry.worldId}`);
   if (!c) return null;
   c.isDummy = true;
+  c.postX = c.x; // where it stands; the tick puts it back if anything ever moves it
+  c.postY = c.y;
   c.hp = c.maxHp = DUMMY_MAX_HP;
   c.dirty = false;
   return c;

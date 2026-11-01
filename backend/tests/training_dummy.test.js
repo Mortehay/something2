@@ -45,6 +45,22 @@ test('it takes player damage without losing hp, and counts it', () => {
   assert.ok(world.creatures.get(d.id), 'still standing');
 });
 
+test('knockback and pulls cannot move it, and the tick puts it back', () => {
+  const { entry, world } = boot();
+  const d = dummyMod.placeDummy(entry);
+  const { shoveCreature } = require('../src/authority/creatures.js');
+  const { chunkOf, CHUNK_KEY } = require('../src/authority/coords.js');
+  const at = [d.x, d.y];
+  shoveCreature(world.map, d.x - 50, d.y, d, 300);
+  assert.deepStrictEqual([d.x, d.y], at, 'a shove does nothing');
+  // Some other displacement: the tick still returns it to its post.
+  d.x += 120; d.y -= 80;
+  const { cx, cy } = chunkOf(at[0], at[1], world.creatures.chunkSize);
+  world.creatures.tick(0.05, new Set([CHUNK_KEY(cx, cy)]), [], 1000);
+  assert.deepStrictEqual([d.x, d.y], at, 'back on its post');
+  assert.strictEqual(d.hp, d.maxHp);
+});
+
 test('stats: dps window, average, max, and a session resets after a pause', () => {
   const dummy = { isDummy: true };
   dummyMod.recordHit(dummy, 10, 'a', 1000);

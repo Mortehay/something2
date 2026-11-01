@@ -1698,6 +1698,7 @@ class World {
       // Singularity: Pull nearby creatures towards the center
       if (isSingularity) {
         for (const c of this.creatures.all()) {
+          if (c.isDummy) continue; // the practice dummy is never pulled
           const cx = c.x + CREATURE_SIZE / 2;
           const cy = c.y + CREATURE_SIZE / 2;
           const dist = Math.hypot(cx - targetX, cy - targetY);
