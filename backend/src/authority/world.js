@@ -1624,7 +1624,11 @@ class World {
     const px = p.x + p.width / 2;
     const py = p.y + p.height / 2;
 
-    const baseMult = (skill.type === 'melee') ? (p.stats.meleeMult || 1) : (p.stats.spellMult || 1);
+    // A Druid's skills grow with charisma, her main attribute; every other class
+    // keeps STR for melee skills and INT for the rest.
+    const baseMult = skill.class === 'Druid'
+      ? (p.stats.charismaMult || 1)
+      : ((skill.type === 'melee') ? (p.stats.meleeMult || 1) : (p.stats.spellMult || 1));
     const element = skillBalance.skillElementOf(skill);
     const elemMult = skillBalance.skillElementMult(p.stats, element);
     

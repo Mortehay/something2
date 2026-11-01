@@ -45,3 +45,16 @@ test('without quest context the check stays level/attribute only (older callers,
   assert.ok(!r.errors.some((e) => /quest/i.test(e)));
   assert.strictEqual(r.message, '');
 });
+
+test('Druid gems are gated by charisma (her main attribute), not STR/DEX', () => {
+  const druid = SKILLS.filter((s) => s.class === 'Druid');
+  const forms = new Set(['dru_bear_form', 'dru_hawk_form', 'dru_wolf_form']);
+  for (const s of druid) {
+    if (forms.has(s.id)) { assert.strictEqual(s.reqCha, 0); continue; }
+    assert.ok(s.reqCha > 0, `${s.id} needs charisma`);
+    assert.strictEqual(s.reqStr, 0, `${s.id} no STR gate`);
+    assert.strictEqual(s.reqDex, 0, `${s.id} no DEX gate`);
+  }
+  const top = druid.reduce((a, b) => (b.reqLvl > a.reqLvl ? b : a));
+  assert.ok(top.reqCha >= 30, 'the top Druid gem asks for a lot of charisma');
+});

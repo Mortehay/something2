@@ -366,3 +366,13 @@ test('manaRegen rule boosts mana regen on top of wisdom scaling', () => {
   // Base 10 + 0.5 * 5 (above 5) + 4.5 = 17
   assert.equal(s.manaRegen, 17);
 });
+
+// --- charisma is the Druid's skill stat ------------------------------------
+test('charismaMult grows 5% per CHA above base, and is 1 at base', () => {
+  const C = require('../src/services/progressionConstants.js');
+  const { derivePlayerStats } = require('../src/services/playerStats.js');
+  const at = (cha) => derivePlayerStats({ charisma: cha, strength: C.BASE_STAT, dexterity: C.BASE_STAT, constitution: C.BASE_STAT, intelligence: C.BASE_STAT, wisdom: C.BASE_STAT, rules: {} }, { maxHp: 100, maxMana: 100 });
+  assert.strictEqual(at(C.BASE_STAT).charismaMult, 1);
+  assert.strictEqual(at(C.BASE_STAT + 20).charismaMult, 2);
+  assert.strictEqual(at(C.BASE_STAT + 20).spellMult, 1, 'charisma does not touch the INT multiplier');
+});

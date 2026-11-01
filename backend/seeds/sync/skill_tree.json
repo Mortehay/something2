@@ -52439,14 +52439,14 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r1-0-0",
         "kind": "minor",
-        "label": "Sinew (WIS)",
+        "label": "Sinew (CHA)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -52457,14 +52457,14 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r1-0-1",
         "kind": "minor",
-        "label": "Sinew (CON)",
+        "label": "Sinew (CHA)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -52475,14 +52475,14 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r1-0-2",
         "kind": "minor",
-        "label": "Sinew (STR)",
+        "label": "Sinew (CHA)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -52493,14 +52493,14 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r1-0-3",
         "kind": "minor",
-        "label": "Sinew (DEX)",
+        "label": "Sinew (CHA)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -52511,14 +52511,14 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r1-0-4",
         "kind": "minor",
-        "label": "Sinew (WIS)",
+        "label": "Sinew (CHA)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -52529,14 +52529,14 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r1-0-5",
         "kind": "minor",
-        "label": "Sinew (CON)",
+        "label": "Sinew (CHA)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -52547,14 +52547,14 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r1-0-6",
         "kind": "minor",
-        "label": "Sinew (STR)",
+        "label": "Sinew (CHA)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -52565,14 +52565,14 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "charisma",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r1-0-7",
         "kind": "minor",
-        "label": "Focus (DEX)",
+        "label": "Focus (CHA)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -52583,14 +52583,14 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "constitution",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r1-0-8",
         "kind": "minor",
-        "label": "Focus (INT)",
+        "label": "Focus (CON)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -52601,14 +52601,14 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "wisdom",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r1-1-0",
         "kind": "minor",
-        "label": "Focus (INT)",
+        "label": "Focus (WIS)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -52619,14 +52619,14 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "strength",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r1-1-1",
         "kind": "minor",
-        "label": "Focus (WIS)",
+        "label": "Focus (STR)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -52637,14 +52637,14 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "dexterity",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r1-1-2",
         "kind": "minor",
-        "label": "Focus (CON)",
+        "label": "Focus (DEX)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -52655,14 +52655,14 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "intelligence",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r1-1-3",
         "kind": "minor",
-        "label": "Focus (STR)",
+        "label": "Focus (INT)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -52673,14 +52673,14 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "charisma",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r1-1-4",
         "kind": "minor",
-        "label": "Focus (DEX)",
+        "label": "Focus (CHA)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -52691,7 +52691,7 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -52703,7 +52703,7 @@
         ],
         "key": "charisma-r1-1-5",
         "kind": "minor",
-        "label": "Vigour (WIS)",
+        "label": "Vigour (CHA)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -52714,7 +52714,7 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -52726,7 +52726,7 @@
         ],
         "key": "charisma-r1-1-6",
         "kind": "minor",
-        "label": "Vigour (CON)",
+        "label": "Vigour (CHA)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -52755,7 +52755,7 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -52767,7 +52767,7 @@
         ],
         "key": "charisma-r1-1-8",
         "kind": "minor",
-        "label": "Vigour (STR)",
+        "label": "Vigour (CHA)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -52778,7 +52778,7 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -52790,7 +52790,7 @@
         ],
         "key": "charisma-r1-1-9",
         "kind": "minor",
-        "label": "Vigour (DEX)",
+        "label": "Vigour (CHA)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -52801,7 +52801,7 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -52813,7 +52813,7 @@
         ],
         "key": "charisma-r1-1-10",
         "kind": "minor",
-        "label": "Insight (INT)",
+        "label": "Insight (CHA)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -52824,7 +52824,7 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -52836,7 +52836,7 @@
         ],
         "key": "charisma-r1-1-11",
         "kind": "minor",
-        "label": "Insight (INT)",
+        "label": "Insight (CHA)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -52847,7 +52847,7 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -52859,7 +52859,7 @@
         ],
         "key": "charisma-r1-1-12",
         "kind": "minor",
-        "label": "Insight (WIS)",
+        "label": "Insight (CHA)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -52893,7 +52893,7 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "wisdom",
             "type": "stat",
             "value": 2
           },
@@ -52905,77 +52905,13 @@
         ],
         "key": "charisma-r1-1-14",
         "kind": "minor",
-        "label": "Insight (STR)",
+        "label": "Insight (WIS)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
         "sync_uuid": "e9e26f16-d936-d9c9-0e2c-703f9e402a0d",
         "x": -610.47,
         "y": -172.51
-      },
-      {
-        "grants": [
-          {
-            "stat": "dexterity",
-            "type": "stat",
-            "value": 2
-          },
-          {
-            "pool": "stamina",
-            "type": "resource",
-            "value": 5
-          }
-        ],
-        "key": "charisma-r1-1-15",
-        "kind": "minor",
-        "label": "Wind (DEX)",
-        "ring": 1,
-        "sector": "charisma",
-        "start_class": null,
-        "sync_uuid": "61947100-0751-a79f-1724-f813e3ccf6d0",
-        "x": -600.94,
-        "y": -203.22
-      },
-      {
-        "grants": [
-          {
-            "stat": "wisdom",
-            "type": "stat",
-            "value": 6
-          }
-        ],
-        "key": "charisma-r1-1-16",
-        "kind": "notable",
-        "label": "Great Sinew (WIS)",
-        "ring": 1,
-        "sector": "charisma",
-        "start_class": null,
-        "sync_uuid": "c6e5221c-d7b7-ef5f-5936-aae8331c7cee",
-        "x": -573.91,
-        "y": -220.62
-      },
-      {
-        "grants": [
-          {
-            "stat": "constitution",
-            "type": "stat",
-            "value": 2
-          },
-          {
-            "pool": "stamina",
-            "type": "resource",
-            "value": 5
-          }
-        ],
-        "key": "charisma-r1-2-0",
-        "kind": "minor",
-        "label": "Wind (CON)",
-        "ring": 1,
-        "sector": "charisma",
-        "start_class": null,
-        "sync_uuid": "ee829585-3dd5-772f-6c39-00beef971adb",
-        "x": -542.01,
-        "y": -216.57
       },
       {
         "grants": [
@@ -52990,9 +52926,73 @@
             "value": 5
           }
         ],
-        "key": "charisma-r1-2-1",
+        "key": "charisma-r1-1-15",
         "kind": "minor",
         "label": "Wind (STR)",
+        "ring": 1,
+        "sector": "charisma",
+        "start_class": null,
+        "sync_uuid": "61947100-0751-a79f-1724-f813e3ccf6d0",
+        "x": -600.94,
+        "y": -203.22
+      },
+      {
+        "grants": [
+          {
+            "stat": "dexterity",
+            "type": "stat",
+            "value": 6
+          }
+        ],
+        "key": "charisma-r1-1-16",
+        "kind": "notable",
+        "label": "Great Sinew (DEX)",
+        "ring": 1,
+        "sector": "charisma",
+        "start_class": null,
+        "sync_uuid": "c6e5221c-d7b7-ef5f-5936-aae8331c7cee",
+        "x": -573.91,
+        "y": -220.62
+      },
+      {
+        "grants": [
+          {
+            "stat": "intelligence",
+            "type": "stat",
+            "value": 2
+          },
+          {
+            "pool": "stamina",
+            "type": "resource",
+            "value": 5
+          }
+        ],
+        "key": "charisma-r1-2-0",
+        "kind": "minor",
+        "label": "Wind (INT)",
+        "ring": 1,
+        "sector": "charisma",
+        "start_class": null,
+        "sync_uuid": "ee829585-3dd5-772f-6c39-00beef971adb",
+        "x": -542.01,
+        "y": -216.57
+      },
+      {
+        "grants": [
+          {
+            "stat": "charisma",
+            "type": "stat",
+            "value": 2
+          },
+          {
+            "pool": "stamina",
+            "type": "resource",
+            "value": 5
+          }
+        ],
+        "key": "charisma-r1-2-1",
+        "kind": "minor",
+        "label": "Wind (CHA)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -53003,7 +53003,7 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -53015,7 +53015,7 @@
         ],
         "key": "charisma-r1-2-2",
         "kind": "minor",
-        "label": "Wind (DEX)",
+        "label": "Wind (CHA)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -53393,7 +53393,7 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -53405,7 +53405,7 @@
         ],
         "key": "charisma-r1-3-5",
         "kind": "minor",
-        "label": "Temper (INT)",
+        "label": "Temper (CHA)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -53577,14 +53577,14 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r1-3-13",
         "kind": "minor",
-        "label": "Sinew (INT)",
+        "label": "Sinew (CHA)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -53595,14 +53595,14 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r1-3-14",
         "kind": "minor",
-        "label": "Sinew (WIS)",
+        "label": "Sinew (CHA)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -53613,14 +53613,14 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r1-3-15",
         "kind": "minor",
-        "label": "Sinew (CON)",
+        "label": "Sinew (CHA)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -53631,14 +53631,14 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r1-3-16",
         "kind": "minor",
-        "label": "Sinew (STR)",
+        "label": "Sinew (CHA)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -53649,14 +53649,14 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r1-4-0",
         "kind": "minor",
-        "label": "Sinew (DEX)",
+        "label": "Sinew (CHA)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -53690,14 +53690,14 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "constitution",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r1-4-2",
         "kind": "minor",
-        "label": "Sinew (WIS)",
+        "label": "Sinew (CON)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -53708,14 +53708,14 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "wisdom",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r1-4-3",
         "kind": "minor",
-        "label": "Focus (CON)",
+        "label": "Focus (WIS)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -53798,14 +53798,14 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r2-0-0",
         "kind": "minor",
-        "label": "Sinew (INT)",
+        "label": "Sinew (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -53816,14 +53816,14 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r2-0-1",
         "kind": "minor",
-        "label": "Sinew (WIS)",
+        "label": "Sinew (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -53834,14 +53834,14 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r2-0-2",
         "kind": "minor",
-        "label": "Sinew (CON)",
+        "label": "Sinew (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -53852,14 +53852,14 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r2-0-3",
         "kind": "minor",
-        "label": "Sinew (STR)",
+        "label": "Sinew (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -53870,14 +53870,14 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r2-0-4",
         "kind": "minor",
-        "label": "Sinew (DEX)",
+        "label": "Sinew (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -53888,14 +53888,14 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r2-0-5",
         "kind": "minor",
-        "label": "Sinew (WIS)",
+        "label": "Sinew (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -53906,14 +53906,14 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r2-0-6",
         "kind": "minor",
-        "label": "Sinew (CON)",
+        "label": "Sinew (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -53924,14 +53924,14 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "charisma",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r2-0-7",
         "kind": "minor",
-        "label": "Focus (STR)",
+        "label": "Focus (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -53942,14 +53942,14 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "constitution",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r2-0-8",
         "kind": "minor",
-        "label": "Focus (DEX)",
+        "label": "Focus (CON)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -53960,14 +53960,14 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "wisdom",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r2-0-9",
         "kind": "minor",
-        "label": "Focus (INT)",
+        "label": "Focus (WIS)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -53978,14 +53978,14 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "strength",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r2-0-10",
         "kind": "minor",
-        "label": "Focus (INT)",
+        "label": "Focus (STR)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -53996,14 +53996,14 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "dexterity",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r2-0-11",
         "kind": "minor",
-        "label": "Focus (WIS)",
+        "label": "Focus (DEX)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -54014,14 +54014,14 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "intelligence",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r2-0-12",
         "kind": "minor",
-        "label": "Focus (CON)",
+        "label": "Focus (INT)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -54032,14 +54032,14 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "charisma",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r2-0-13",
         "kind": "minor",
-        "label": "Focus (STR)",
+        "label": "Focus (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -54050,7 +54050,7 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -54062,7 +54062,7 @@
         ],
         "key": "charisma-r2-0-14",
         "kind": "minor",
-        "label": "Vigour (DEX)",
+        "label": "Vigour (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -54073,7 +54073,7 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -54085,7 +54085,7 @@
         ],
         "key": "charisma-r2-1-0",
         "kind": "minor",
-        "label": "Vigour (WIS)",
+        "label": "Vigour (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -54096,7 +54096,7 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -54108,7 +54108,7 @@
         ],
         "key": "charisma-r2-1-1",
         "kind": "minor",
-        "label": "Vigour (CON)",
+        "label": "Vigour (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -54119,7 +54119,7 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -54131,7 +54131,7 @@
         ],
         "key": "charisma-r2-1-2",
         "kind": "minor",
-        "label": "Vigour (STR)",
+        "label": "Vigour (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -54142,7 +54142,7 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -54154,7 +54154,7 @@
         ],
         "key": "charisma-r2-1-3",
         "kind": "minor",
-        "label": "Vigour (DEX)",
+        "label": "Vigour (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -54165,7 +54165,7 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -54177,7 +54177,7 @@
         ],
         "key": "charisma-r2-1-4",
         "kind": "minor",
-        "label": "Insight (INT)",
+        "label": "Insight (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -54188,7 +54188,7 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -54200,13 +54200,36 @@
         ],
         "key": "charisma-r2-1-5",
         "kind": "minor",
-        "label": "Insight (INT)",
+        "label": "Insight (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
         "sync_uuid": "11951d0c-4811-e830-e74a-d42c4ca1ed8b",
         "x": -859.94,
         "y": -153.06
+      },
+      {
+        "grants": [
+          {
+            "stat": "constitution",
+            "type": "stat",
+            "value": 2
+          },
+          {
+            "pool": "mana",
+            "type": "resource",
+            "value": 6
+          }
+        ],
+        "key": "charisma-r2-1-6",
+        "kind": "minor",
+        "label": "Insight (CON)",
+        "ring": 2,
+        "sector": "charisma",
+        "start_class": null,
+        "sync_uuid": "324380b0-518a-223d-0c00-46f5bbc48206",
+        "x": -818.43,
+        "y": -125.53
       },
       {
         "grants": [
@@ -54221,32 +54244,9 @@
             "value": 6
           }
         ],
-        "key": "charisma-r2-1-6",
-        "kind": "minor",
-        "label": "Insight (WIS)",
-        "ring": 2,
-        "sector": "charisma",
-        "start_class": null,
-        "sync_uuid": "324380b0-518a-223d-0c00-46f5bbc48206",
-        "x": -818.43,
-        "y": -125.53
-      },
-      {
-        "grants": [
-          {
-            "stat": "constitution",
-            "type": "stat",
-            "value": 2
-          },
-          {
-            "pool": "mana",
-            "type": "resource",
-            "value": 6
-          }
-        ],
         "key": "charisma-r2-1-7",
         "kind": "minor",
-        "label": "Insight (CON)",
+        "label": "Insight (WIS)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -54321,7 +54321,7 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "intelligence",
             "type": "stat",
             "value": 2
           },
@@ -54333,7 +54333,7 @@
         ],
         "key": "charisma-r2-1-11",
         "kind": "minor",
-        "label": "Wind (WIS)",
+        "label": "Wind (INT)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -54344,7 +54344,7 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -54356,7 +54356,7 @@
         ],
         "key": "charisma-r2-1-12",
         "kind": "minor",
-        "label": "Wind (CON)",
+        "label": "Wind (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -54593,14 +54593,14 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "charisma",
             "type": "stat",
             "value": 8
           }
         ],
         "key": "charisma-r2-1-25",
         "kind": "notable",
-        "label": "Mastery (STR)",
+        "label": "Mastery (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -54767,7 +54767,7 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -54779,7 +54779,7 @@
         ],
         "key": "charisma-r2-2-4",
         "kind": "minor",
-        "label": "Temper (DEX)",
+        "label": "Temper (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -54808,14 +54808,14 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "charisma",
             "type": "stat",
             "value": 4
           }
         ],
         "key": "charisma-r2-2-6",
         "kind": "minor",
-        "label": "Discipline (INT)",
+        "label": "Discipline (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -54826,14 +54826,14 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "charisma",
             "type": "stat",
             "value": 4
           }
         ],
         "key": "charisma-r2-2-7",
         "kind": "minor",
-        "label": "Discipline (INT)",
+        "label": "Discipline (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -54844,14 +54844,14 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "charisma",
             "type": "stat",
             "value": 4
           }
         ],
         "key": "charisma-r2-2-8",
         "kind": "minor",
-        "label": "Discipline (WIS)",
+        "label": "Discipline (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -54862,14 +54862,14 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "charisma",
             "type": "stat",
             "value": 4
           }
         ],
         "key": "charisma-r2-2-9",
         "kind": "minor",
-        "label": "Discipline (CON)",
+        "label": "Discipline (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -54880,14 +54880,14 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "charisma",
             "type": "stat",
             "value": 4
           }
         ],
         "key": "charisma-r2-2-10",
         "kind": "minor",
-        "label": "Discipline (STR)",
+        "label": "Discipline (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -55067,14 +55067,14 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "constitution",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r2-2-19",
         "kind": "minor",
-        "label": "Sinew (DEX)",
+        "label": "Sinew (CON)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -55103,14 +55103,14 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "strength",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r2-2-21",
         "kind": "minor",
-        "label": "Sinew (CON)",
+        "label": "Sinew (STR)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -55121,14 +55121,14 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "dexterity",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r2-2-22",
         "kind": "minor",
-        "label": "Sinew (STR)",
+        "label": "Sinew (DEX)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -55139,14 +55139,14 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "intelligence",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r2-2-23",
         "kind": "minor",
-        "label": "Sinew (DEX)",
+        "label": "Sinew (INT)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -55157,14 +55157,14 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r2-2-24",
         "kind": "minor",
-        "label": "Sinew (INT)",
+        "label": "Sinew (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -55175,14 +55175,14 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r2-2-25",
         "kind": "minor",
-        "label": "Sinew (INT)",
+        "label": "Sinew (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -55193,14 +55193,14 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "charisma",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r2-2-26",
         "kind": "minor",
-        "label": "Focus (WIS)",
+        "label": "Focus (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -55211,14 +55211,14 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "charisma",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r2-2-27",
         "kind": "minor",
-        "label": "Focus (CON)",
+        "label": "Focus (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -55229,14 +55229,14 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "charisma",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r2-2-28",
         "kind": "minor",
-        "label": "Focus (STR)",
+        "label": "Focus (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -55247,14 +55247,14 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "charisma",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r2-3-0",
         "kind": "minor",
-        "label": "Focus (DEX)",
+        "label": "Focus (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -55265,14 +55265,14 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "charisma",
             "type": "stat",
             "value": 8
           }
         ],
         "key": "charisma-r2-3-1",
         "kind": "notable",
-        "label": "Mastery (WIS)",
+        "label": "Mastery (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -55283,14 +55283,14 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "charisma",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r2-3-2",
         "kind": "minor",
-        "label": "Focus (CON)",
+        "label": "Focus (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -55301,14 +55301,14 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "constitution",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r2-3-3",
         "kind": "minor",
-        "label": "Focus (STR)",
+        "label": "Focus (CON)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -55319,7 +55319,7 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "wisdom",
             "type": "stat",
             "value": 2
           },
@@ -55331,7 +55331,7 @@
         ],
         "key": "charisma-r2-3-4",
         "kind": "minor",
-        "label": "Vigour (DEX)",
+        "label": "Vigour (WIS)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -55360,7 +55360,7 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "strength",
             "type": "stat",
             "value": 2
           },
@@ -55372,7 +55372,7 @@
         ],
         "key": "charisma-r2-3-6",
         "kind": "minor",
-        "label": "Vigour (INT)",
+        "label": "Vigour (STR)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -55383,7 +55383,7 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "dexterity",
             "type": "stat",
             "value": 2
           },
@@ -55395,7 +55395,7 @@
         ],
         "key": "charisma-r2-3-7",
         "kind": "minor",
-        "label": "Vigour (INT)",
+        "label": "Vigour (DEX)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -55406,7 +55406,7 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "intelligence",
             "type": "stat",
             "value": 2
           },
@@ -55418,7 +55418,7 @@
         ],
         "key": "charisma-r2-3-8",
         "kind": "minor",
-        "label": "Vigour (WIS)",
+        "label": "Vigour (INT)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -55429,7 +55429,7 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -55441,7 +55441,7 @@
         ],
         "key": "charisma-r2-3-9",
         "kind": "minor",
-        "label": "Insight (CON)",
+        "label": "Insight (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -55452,7 +55452,7 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -55464,7 +55464,7 @@
         ],
         "key": "charisma-r2-3-10",
         "kind": "minor",
-        "label": "Insight (STR)",
+        "label": "Insight (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -55475,7 +55475,7 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -55487,7 +55487,7 @@
         ],
         "key": "charisma-r2-3-11",
         "kind": "minor",
-        "label": "Insight (DEX)",
+        "label": "Insight (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -55498,7 +55498,7 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -55510,7 +55510,7 @@
         ],
         "key": "charisma-r2-3-12",
         "kind": "minor",
-        "label": "Insight (WIS)",
+        "label": "Insight (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -55521,7 +55521,7 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -55533,7 +55533,7 @@
         ],
         "key": "charisma-r2-3-13",
         "kind": "minor",
-        "label": "Insight (CON)",
+        "label": "Insight (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -55544,7 +55544,7 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -55556,7 +55556,7 @@
         ],
         "key": "charisma-r2-3-14",
         "kind": "minor",
-        "label": "Wind (STR)",
+        "label": "Wind (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -55567,7 +55567,7 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -55579,7 +55579,7 @@
         ],
         "key": "charisma-r2-3-15",
         "kind": "minor",
-        "label": "Wind (DEX)",
+        "label": "Wind (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -55590,7 +55590,7 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -55602,7 +55602,7 @@
         ],
         "key": "charisma-r2-3-16",
         "kind": "minor",
-        "label": "Wind (INT)",
+        "label": "Wind (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -55613,7 +55613,7 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "constitution",
             "type": "stat",
             "value": 2
           },
@@ -55625,7 +55625,7 @@
         ],
         "key": "charisma-r2-3-17",
         "kind": "minor",
-        "label": "Wind (INT)",
+        "label": "Wind (CON)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -55967,14 +55967,14 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "strength",
             "type": "stat",
             "value": 8
           }
         ],
         "key": "charisma-r2-4-6",
         "kind": "notable",
-        "label": "Mastery (CON)",
+        "label": "Mastery (STR)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -56041,7 +56041,7 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "dexterity",
             "type": "stat",
             "value": 2
           },
@@ -56053,7 +56053,7 @@
         ],
         "key": "charisma-r2-4-9",
         "kind": "minor",
-        "label": "Temper (STR)",
+        "label": "Temper (DEX)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -56082,14 +56082,14 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "intelligence",
             "type": "stat",
             "value": 4
           }
         ],
         "key": "charisma-r2-4-11",
         "kind": "minor",
-        "label": "Discipline (DEX)",
+        "label": "Discipline (INT)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -56118,14 +56118,14 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "charisma",
             "type": "stat",
             "value": 4
           }
         ],
         "key": "charisma-r2-4-13",
         "kind": "minor",
-        "label": "Discipline (WIS)",
+        "label": "Discipline (CHA)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -56136,14 +56136,14 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r3-0-0",
         "kind": "minor",
-        "label": "Sinew (CON)",
+        "label": "Sinew (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -56154,14 +56154,14 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r3-0-1",
         "kind": "minor",
-        "label": "Sinew (STR)",
+        "label": "Sinew (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -56172,14 +56172,14 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r3-0-2",
         "kind": "minor",
-        "label": "Sinew (DEX)",
+        "label": "Sinew (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -56190,14 +56190,14 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r3-0-3",
         "kind": "minor",
-        "label": "Sinew (INT)",
+        "label": "Sinew (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -56208,14 +56208,14 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r3-0-4",
         "kind": "minor",
-        "label": "Sinew (INT)",
+        "label": "Sinew (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -56226,14 +56226,14 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r3-0-5",
         "kind": "minor",
-        "label": "Sinew (WIS)",
+        "label": "Sinew (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -56244,14 +56244,14 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r3-0-6",
         "kind": "minor",
-        "label": "Sinew (CON)",
+        "label": "Sinew (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -56262,14 +56262,14 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "constitution",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r3-0-7",
         "kind": "minor",
-        "label": "Focus (STR)",
+        "label": "Focus (CON)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -56280,14 +56280,14 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "wisdom",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r3-0-8",
         "kind": "minor",
-        "label": "Focus (DEX)",
+        "label": "Focus (WIS)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -56298,14 +56298,14 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "strength",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r3-0-9",
         "kind": "minor",
-        "label": "Focus (WIS)",
+        "label": "Focus (STR)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -56316,14 +56316,14 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "dexterity",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r3-0-10",
         "kind": "minor",
-        "label": "Focus (CON)",
+        "label": "Focus (DEX)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -56334,14 +56334,14 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "intelligence",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r3-0-11",
         "kind": "minor",
-        "label": "Focus (STR)",
+        "label": "Focus (INT)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -56352,14 +56352,14 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "charisma",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r3-0-12",
         "kind": "minor",
-        "label": "Focus (DEX)",
+        "label": "Focus (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -56370,14 +56370,14 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "charisma",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r3-0-13",
         "kind": "minor",
-        "label": "Focus (INT)",
+        "label": "Focus (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -56388,7 +56388,7 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -56400,7 +56400,7 @@
         ],
         "key": "charisma-r3-0-14",
         "kind": "minor",
-        "label": "Vigour (INT)",
+        "label": "Vigour (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -56411,7 +56411,7 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -56423,7 +56423,7 @@
         ],
         "key": "charisma-r3-0-15",
         "kind": "minor",
-        "label": "Vigour (WIS)",
+        "label": "Vigour (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -56434,7 +56434,7 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -56446,7 +56446,7 @@
         ],
         "key": "charisma-r3-0-16",
         "kind": "minor",
-        "label": "Vigour (CON)",
+        "label": "Vigour (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -56457,7 +56457,7 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -56469,7 +56469,7 @@
         ],
         "key": "charisma-r3-0-17",
         "kind": "minor",
-        "label": "Vigour (STR)",
+        "label": "Vigour (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -56480,7 +56480,7 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -56492,7 +56492,7 @@
         ],
         "key": "charisma-r3-0-18",
         "kind": "minor",
-        "label": "Vigour (DEX)",
+        "label": "Vigour (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -56503,7 +56503,7 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -56515,7 +56515,7 @@
         ],
         "key": "charisma-r3-1-0",
         "kind": "minor",
-        "label": "Insight (WIS)",
+        "label": "Insight (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -56549,7 +56549,7 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "wisdom",
             "type": "stat",
             "value": 2
           },
@@ -56561,13 +56561,36 @@
         ],
         "key": "charisma-r3-1-2",
         "kind": "minor",
-        "label": "Insight (STR)",
+        "label": "Insight (WIS)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
         "sync_uuid": "f8a46f3e-eddf-2a0e-73b6-df10ad5c95d0",
         "x": -1330.85,
         "y": -182.96
+      },
+      {
+        "grants": [
+          {
+            "stat": "strength",
+            "type": "stat",
+            "value": 2
+          },
+          {
+            "pool": "mana",
+            "type": "resource",
+            "value": 6
+          }
+        ],
+        "key": "charisma-r3-1-3",
+        "kind": "minor",
+        "label": "Insight (STR)",
+        "ring": 3,
+        "sector": "charisma",
+        "start_class": null,
+        "sync_uuid": "7dd13384-570c-dca6-bcb4-09cbe6323d75",
+        "x": -1353.95,
+        "y": -194.59
       },
       {
         "grants": [
@@ -56582,32 +56605,9 @@
             "value": 6
           }
         ],
-        "key": "charisma-r3-1-3",
-        "kind": "minor",
-        "label": "Insight (DEX)",
-        "ring": 3,
-        "sector": "charisma",
-        "start_class": null,
-        "sync_uuid": "7dd13384-570c-dca6-bcb4-09cbe6323d75",
-        "x": -1353.95,
-        "y": -194.59
-      },
-      {
-        "grants": [
-          {
-            "stat": "intelligence",
-            "type": "stat",
-            "value": 2
-          },
-          {
-            "pool": "mana",
-            "type": "resource",
-            "value": 6
-          }
-        ],
         "key": "charisma-r3-1-4",
         "kind": "minor",
-        "label": "Insight (INT)",
+        "label": "Insight (DEX)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -56641,7 +56641,7 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -56653,7 +56653,7 @@
         ],
         "key": "charisma-r3-1-6",
         "kind": "minor",
-        "label": "Wind (WIS)",
+        "label": "Wind (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -56664,7 +56664,7 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -56676,7 +56676,7 @@
         ],
         "key": "charisma-r3-1-7",
         "kind": "minor",
-        "label": "Wind (CON)",
+        "label": "Wind (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -56705,7 +56705,7 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -56717,7 +56717,7 @@
         ],
         "key": "charisma-r3-1-9",
         "kind": "minor",
-        "label": "Wind (STR)",
+        "label": "Wind (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -56733,7 +56733,7 @@
             "value": 15
           },
           {
-            "stat": "dexterity",
+            "stat": "charisma",
             "type": "stat",
             "value": 15
           },
@@ -56750,7 +56750,7 @@
         ],
         "key": "charisma-r3-1-10",
         "kind": "keystone",
-        "label": "Wolf Aspect — +15 STR, +15 DEX, +12% physical damage, forms 12% stronger",
+        "label": "Wolf Aspect — +15 STR, +15 CHA, +12% physical damage, forms 12% stronger",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -56815,7 +56815,7 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "charisma",
             "type": "stat",
             "value": 6
           },
@@ -56827,7 +56827,7 @@
         ],
         "key": "charisma-r3-1-14",
         "kind": "notable",
-        "label": "Ox Blood (DEX)",
+        "label": "Ox Blood (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57002,14 +57002,14 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "charisma",
             "type": "stat",
             "value": 6
           }
         ],
         "key": "charisma-r3-1-23",
         "kind": "notable",
-        "label": "Great Sinew (WIS)",
+        "label": "Great Sinew (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57079,14 +57079,14 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "charisma",
             "type": "stat",
             "value": 8
           }
         ],
         "key": "charisma-r3-1-27",
         "kind": "notable",
-        "label": "Mastery (CON)",
+        "label": "Mastery (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57115,7 +57115,7 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -57127,7 +57127,7 @@
         ],
         "key": "charisma-r3-1-29",
         "kind": "minor",
-        "label": "Temper (STR)",
+        "label": "Temper (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57156,14 +57156,14 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "charisma",
             "type": "stat",
             "value": 4
           }
         ],
         "key": "charisma-r3-1-31",
         "kind": "minor",
-        "label": "Discipline (DEX)",
+        "label": "Discipline (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57174,14 +57174,14 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "constitution",
             "type": "stat",
             "value": 4
           }
         ],
         "key": "charisma-r3-1-32",
         "kind": "minor",
-        "label": "Discipline (INT)",
+        "label": "Discipline (CON)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57192,14 +57192,14 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "wisdom",
             "type": "stat",
             "value": 4
           }
         ],
         "key": "charisma-r3-1-33",
         "kind": "minor",
-        "label": "Discipline (INT)",
+        "label": "Discipline (WIS)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57210,14 +57210,14 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "strength",
             "type": "stat",
             "value": 4
           }
         ],
         "key": "charisma-r3-1-34",
         "kind": "minor",
-        "label": "Discipline (WIS)",
+        "label": "Discipline (STR)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57228,14 +57228,14 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "dexterity",
             "type": "stat",
             "value": 4
           }
         ],
         "key": "charisma-r3-1-35",
         "kind": "minor",
-        "label": "Discipline (CON)",
+        "label": "Discipline (DEX)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57415,14 +57415,14 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "intelligence",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r3-2-7",
         "kind": "minor",
-        "label": "Sinew (STR)",
+        "label": "Sinew (INT)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57456,14 +57456,14 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r3-2-9",
         "kind": "minor",
-        "label": "Sinew (DEX)",
+        "label": "Sinew (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57474,14 +57474,14 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r3-2-10",
         "kind": "minor",
-        "label": "Sinew (WIS)",
+        "label": "Sinew (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57492,14 +57492,14 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r3-2-11",
         "kind": "minor",
-        "label": "Sinew (CON)",
+        "label": "Sinew (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57510,14 +57510,14 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r3-2-12",
         "kind": "minor",
-        "label": "Sinew (STR)",
+        "label": "Sinew (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57528,14 +57528,14 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r3-2-13",
         "kind": "minor",
-        "label": "Sinew (DEX)",
+        "label": "Sinew (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57546,14 +57546,14 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "charisma",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r3-2-14",
         "kind": "minor",
-        "label": "Focus (INT)",
+        "label": "Focus (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57564,14 +57564,14 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "charisma",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r3-2-15",
         "kind": "minor",
-        "label": "Focus (INT)",
+        "label": "Focus (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57582,14 +57582,14 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "charisma",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r3-2-16",
         "kind": "minor",
-        "label": "Focus (WIS)",
+        "label": "Focus (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57636,14 +57636,14 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "charisma",
             "type": "stat",
-            "value": 20
+            "value": 30
           },
           {
-            "stat": "strength",
+            "stat": "wisdom",
             "type": "stat",
-            "value": 20
+            "value": 10
           },
           {
             "rule": "hpRegen",
@@ -57663,7 +57663,7 @@
         ],
         "key": "charisma-r3-2-19",
         "kind": "keystone",
-        "label": "Primal Form Mastery — +20 WIS, +20 STR, +1.5 HP regen/s, +3.0 stamina regen/s, forms 25% stronger",
+        "label": "Primal Form Mastery — +30 CHA, +10 WIS, +1.5 HP regen/s, +3.0 stamina regen/s, forms 25% stronger",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57674,14 +57674,14 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "wisdom",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r3-2-20",
         "kind": "minor",
-        "label": "Focus (STR)",
+        "label": "Focus (WIS)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57710,7 +57710,7 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "strength",
             "type": "stat",
             "value": 2
           },
@@ -57722,7 +57722,7 @@
         ],
         "key": "charisma-r3-2-22",
         "kind": "minor",
-        "label": "Vigour (DEX)",
+        "label": "Vigour (STR)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57733,7 +57733,7 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "dexterity",
             "type": "stat",
             "value": 2
           },
@@ -57745,7 +57745,7 @@
         ],
         "key": "charisma-r3-2-23",
         "kind": "minor",
-        "label": "Vigour (WIS)",
+        "label": "Vigour (DEX)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57756,7 +57756,7 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "intelligence",
             "type": "stat",
             "value": 2
           },
@@ -57768,7 +57768,7 @@
         ],
         "key": "charisma-r3-2-24",
         "kind": "minor",
-        "label": "Vigour (CON)",
+        "label": "Vigour (INT)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57779,7 +57779,7 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -57791,7 +57791,7 @@
         ],
         "key": "charisma-r3-2-25",
         "kind": "minor",
-        "label": "Vigour (STR)",
+        "label": "Vigour (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57802,7 +57802,7 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -57814,7 +57814,7 @@
         ],
         "key": "charisma-r3-2-26",
         "kind": "minor",
-        "label": "Insight (DEX)",
+        "label": "Insight (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57825,7 +57825,7 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -57837,7 +57837,7 @@
         ],
         "key": "charisma-r3-2-27",
         "kind": "minor",
-        "label": "Insight (INT)",
+        "label": "Insight (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57848,7 +57848,7 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -57860,7 +57860,7 @@
         ],
         "key": "charisma-r3-2-28",
         "kind": "minor",
-        "label": "Insight (INT)",
+        "label": "Insight (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57871,7 +57871,7 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -57883,7 +57883,7 @@
         ],
         "key": "charisma-r3-2-29",
         "kind": "minor",
-        "label": "Insight (WIS)",
+        "label": "Insight (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57894,7 +57894,7 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -57906,7 +57906,7 @@
         ],
         "key": "charisma-r3-2-30",
         "kind": "minor",
-        "label": "Insight (CON)",
+        "label": "Insight (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57917,7 +57917,7 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -57929,7 +57929,7 @@
         ],
         "key": "charisma-r3-2-31",
         "kind": "minor",
-        "label": "Wind (STR)",
+        "label": "Wind (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57940,20 +57940,43 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "charisma",
             "type": "stat",
             "value": 8
           }
         ],
         "key": "charisma-r3-2-32",
         "kind": "notable",
-        "label": "Mastery (DEX)",
+        "label": "Mastery (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
         "sync_uuid": "8269e870-ffbb-155a-eb71-9c31d7cf020d",
         "x": -1019.19,
         "y": -872.96
+      },
+      {
+        "grants": [
+          {
+            "stat": "constitution",
+            "type": "stat",
+            "value": 2
+          },
+          {
+            "pool": "stamina",
+            "type": "resource",
+            "value": 5
+          }
+        ],
+        "key": "charisma-r3-2-33",
+        "kind": "minor",
+        "label": "Wind (CON)",
+        "ring": 3,
+        "sector": "charisma",
+        "start_class": null,
+        "sync_uuid": "e65948e5-a7f5-13b0-06c5-4dc2b2f692ad",
+        "x": -1040.72,
+        "y": -901.29
       },
       {
         "grants": [
@@ -57968,32 +57991,9 @@
             "value": 5
           }
         ],
-        "key": "charisma-r3-2-33",
-        "kind": "minor",
-        "label": "Wind (WIS)",
-        "ring": 3,
-        "sector": "charisma",
-        "start_class": null,
-        "sync_uuid": "e65948e5-a7f5-13b0-06c5-4dc2b2f692ad",
-        "x": -1040.72,
-        "y": -901.29
-      },
-      {
-        "grants": [
-          {
-            "stat": "constitution",
-            "type": "stat",
-            "value": 2
-          },
-          {
-            "pool": "stamina",
-            "type": "resource",
-            "value": 5
-          }
-        ],
         "key": "charisma-r3-2-34",
         "kind": "minor",
-        "label": "Wind (CON)",
+        "label": "Wind (WIS)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -58289,9 +58289,9 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "charisma",
             "type": "stat",
-            "value": 20
+            "value": 25
           },
           {
             "stat": "constitution",
@@ -58316,7 +58316,7 @@
         ],
         "key": "charisma-r3-3-13",
         "kind": "keystone",
-        "label": "Menagerie — Aspect of the Wild (+20 WIS, +15 CON, +30 max mana, +2.0 mana regen/s, forms 15% stronger)",
+        "label": "Menagerie — Aspect of the Wild (+25 CHA, +15 CON, +30 max mana, +2.0 mana regen/s, forms 15% stronger)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -58327,14 +58327,14 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "charisma",
             "type": "stat",
             "value": 20
           }
         ],
         "key": "charisma-r3-3-14",
         "kind": "greater",
-        "label": "Paragon (INT)",
+        "label": "Paragon (CHA)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -58409,14 +58409,14 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r4-0-0",
         "kind": "minor",
-        "label": "Sinew (WIS)",
+        "label": "Sinew (CHA)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -58427,14 +58427,14 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r4-0-1",
         "kind": "minor",
-        "label": "Sinew (CON)",
+        "label": "Sinew (CHA)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -58445,14 +58445,14 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r4-0-2",
         "kind": "minor",
-        "label": "Sinew (STR)",
+        "label": "Sinew (CHA)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -58463,14 +58463,14 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r4-0-3",
         "kind": "minor",
-        "label": "Sinew (DEX)",
+        "label": "Sinew (CHA)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -58481,14 +58481,14 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r4-0-4",
         "kind": "minor",
-        "label": "Sinew (WIS)",
+        "label": "Sinew (CHA)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -58499,14 +58499,14 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r4-0-5",
         "kind": "minor",
-        "label": "Sinew (CON)",
+        "label": "Sinew (CHA)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -58517,14 +58517,14 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r4-0-6",
         "kind": "minor",
-        "label": "Sinew (STR)",
+        "label": "Sinew (CHA)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -58535,14 +58535,14 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "constitution",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r4-0-7",
         "kind": "minor",
-        "label": "Focus (DEX)",
+        "label": "Focus (CON)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -58553,14 +58553,14 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "wisdom",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r4-0-8",
         "kind": "minor",
-        "label": "Focus (INT)",
+        "label": "Focus (WIS)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -58571,14 +58571,14 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "strength",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r4-0-9",
         "kind": "minor",
-        "label": "Focus (INT)",
+        "label": "Focus (STR)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -58589,14 +58589,14 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "dexterity",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r4-0-10",
         "kind": "minor",
-        "label": "Focus (WIS)",
+        "label": "Focus (DEX)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -58607,14 +58607,14 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "intelligence",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r4-0-11",
         "kind": "minor",
-        "label": "Focus (CON)",
+        "label": "Focus (INT)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -58625,14 +58625,14 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "charisma",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r4-0-12",
         "kind": "minor",
-        "label": "Focus (STR)",
+        "label": "Focus (CHA)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -58643,14 +58643,14 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "charisma",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r4-0-13",
         "kind": "minor",
-        "label": "Focus (DEX)",
+        "label": "Focus (CHA)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -58661,7 +58661,7 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -58673,7 +58673,7 @@
         ],
         "key": "charisma-r4-0-14",
         "kind": "minor",
-        "label": "Vigour (WIS)",
+        "label": "Vigour (CHA)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -58684,7 +58684,7 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -58696,7 +58696,7 @@
         ],
         "key": "charisma-r4-0-15",
         "kind": "minor",
-        "label": "Vigour (CON)",
+        "label": "Vigour (CHA)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -58707,7 +58707,7 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -58719,7 +58719,7 @@
         ],
         "key": "charisma-r4-0-16",
         "kind": "minor",
-        "label": "Vigour (STR)",
+        "label": "Vigour (CHA)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -58730,7 +58730,7 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -58742,7 +58742,7 @@
         ],
         "key": "charisma-r4-0-17",
         "kind": "minor",
-        "label": "Vigour (DEX)",
+        "label": "Vigour (CHA)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -58753,7 +58753,7 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -58765,7 +58765,7 @@
         ],
         "key": "charisma-r4-0-18",
         "kind": "minor",
-        "label": "Vigour (INT)",
+        "label": "Vigour (CHA)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -58776,7 +58776,7 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -58788,13 +58788,36 @@
         ],
         "key": "charisma-r4-0-19",
         "kind": "minor",
-        "label": "Insight (INT)",
+        "label": "Insight (CHA)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
         "sync_uuid": "3261d264-47a0-2d6a-ff1d-d06a68dbf6a9",
         "x": -1116.35,
         "y": -1347.69
+      },
+      {
+        "grants": [
+          {
+            "stat": "constitution",
+            "type": "stat",
+            "value": 2
+          },
+          {
+            "pool": "mana",
+            "type": "resource",
+            "value": 6
+          }
+        ],
+        "key": "charisma-r4-0-20",
+        "kind": "minor",
+        "label": "Insight (CON)",
+        "ring": 4,
+        "sector": "charisma",
+        "start_class": null,
+        "sync_uuid": "aab5b8ce-025a-bbd1-9d19-7aafb90e613d",
+        "x": -1055.39,
+        "y": -1395.94
       },
       {
         "grants": [
@@ -58809,32 +58832,9 @@
             "value": 6
           }
         ],
-        "key": "charisma-r4-0-20",
-        "kind": "minor",
-        "label": "Insight (WIS)",
-        "ring": 4,
-        "sector": "charisma",
-        "start_class": null,
-        "sync_uuid": "aab5b8ce-025a-bbd1-9d19-7aafb90e613d",
-        "x": -1055.39,
-        "y": -1395.94
-      },
-      {
-        "grants": [
-          {
-            "stat": "constitution",
-            "type": "stat",
-            "value": 2
-          },
-          {
-            "pool": "mana",
-            "type": "resource",
-            "value": 6
-          }
-        ],
         "key": "charisma-r4-0-21",
         "kind": "minor",
-        "label": "Insight (CON)",
+        "label": "Insight (WIS)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -58891,7 +58891,7 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "intelligence",
             "type": "stat",
             "value": 2
           },
@@ -58903,7 +58903,7 @@
         ],
         "key": "charisma-r4-1-1",
         "kind": "minor",
-        "label": "Wind (WIS)",
+        "label": "Wind (INT)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -58937,7 +58937,7 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -58949,7 +58949,7 @@
         ],
         "key": "charisma-r4-1-3",
         "kind": "minor",
-        "label": "Wind (CON)",
+        "label": "Wind (CHA)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -58960,7 +58960,7 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -58972,7 +58972,7 @@
         ],
         "key": "charisma-r4-1-4",
         "kind": "minor",
-        "label": "Wind (STR)",
+        "label": "Wind (CHA)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -58983,7 +58983,7 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -58995,7 +58995,7 @@
         ],
         "key": "charisma-r4-1-5",
         "kind": "minor",
-        "label": "Wind (DEX)",
+        "label": "Wind (CHA)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -59278,14 +59278,14 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "charisma",
             "type": "stat",
             "value": 6
           }
         ],
         "key": "charisma-r4-1-20",
         "kind": "notable",
-        "label": "Great Sinew (INT)",
+        "label": "Great Sinew (CHA)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -59350,14 +59350,14 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "charisma",
             "type": "stat",
             "value": 8
           }
         ],
         "key": "charisma-r4-1-24",
         "kind": "notable",
-        "label": "Mastery (INT)",
+        "label": "Mastery (CHA)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -59368,7 +59368,7 @@
       {
         "grants": [
           {
-            "stat": "wisdom",
+            "stat": "charisma",
             "type": "stat",
             "value": 2
           },
@@ -59380,7 +59380,7 @@
         ],
         "key": "charisma-r4-2-0",
         "kind": "minor",
-        "label": "Temper (WIS)",
+        "label": "Temper (CHA)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -59409,14 +59409,14 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "charisma",
             "type": "stat",
             "value": 4
           }
         ],
         "key": "charisma-r4-2-2",
         "kind": "minor",
-        "label": "Discipline (CON)",
+        "label": "Discipline (CHA)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -59427,14 +59427,14 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "charisma",
             "type": "stat",
             "value": 12
           }
         ],
         "key": "charisma-r4-2-3",
         "kind": "notable",
-        "label": "Apotheosis (STR)",
+        "label": "Apotheosis (CHA)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -59445,14 +59445,14 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "constitution",
             "type": "stat",
             "value": 4
           }
         ],
         "key": "charisma-r4-2-4",
         "kind": "minor",
-        "label": "Discipline (DEX)",
+        "label": "Discipline (CON)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -59683,14 +59683,14 @@
       {
         "grants": [
           {
-            "stat": "constitution",
+            "stat": "strength",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r4-2-15",
         "kind": "minor",
-        "label": "Sinew (CON)",
+        "label": "Sinew (STR)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -59724,14 +59724,14 @@
       {
         "grants": [
           {
-            "stat": "strength",
+            "stat": "dexterity",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r4-2-17",
         "kind": "minor",
-        "label": "Sinew (STR)",
+        "label": "Sinew (DEX)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -59765,14 +59765,14 @@
       {
         "grants": [
           {
-            "stat": "dexterity",
+            "stat": "intelligence",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r4-2-19",
         "kind": "minor",
-        "label": "Sinew (DEX)",
+        "label": "Sinew (INT)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -59855,14 +59855,14 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "charisma",
             "type": "stat",
             "value": 18
           }
         ],
         "key": "charisma-r4-2-24",
         "kind": "greater",
-        "label": "Ascendance (INT)",
+        "label": "Ascendance (CHA)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -59891,14 +59891,14 @@
       {
         "grants": [
           {
-            "stat": "intelligence",
+            "stat": "charisma",
             "type": "stat",
             "value": 18
           }
         ],
         "key": "charisma-r4-3-1",
         "kind": "greater",
-        "label": "Ascendance (INT)",
+        "label": "Ascendance (CHA)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,

@@ -317,17 +317,16 @@ function statGrantsBySector() {
 
 // The Druid's home sector pays out in the stats her skills need (WIS/CON/STR/DEX)
 // instead of charisma, which buys only merchant prices and charm budget.
-test('a sector with ownStats pays out in them, and charisma is a small share for the Druid', () => {
+test('a sector with ownStats pays out in them: charisma is the Druid main stat', () => {
   assert.ok(OWN_STATS_SECTORS.has('charisma'));
   const sector = PASSIVE_TREE_SPEC.sectors.find((s) => s.key === 'charisma');
   const per = statGrantsBySector().get('charisma');
   const byStat = new Map(per.off);
   byStat.set('charisma', per.own);
   const total = [...byStat.values()].reduce((a, b) => a + b, 0);
-  // Never schedule a stat the Druid has no use for as the dominant one.
-  assert.ok(per.own / total <= 0.25, `charisma share ${(per.own / total * 100).toFixed(1)}% is too high for the Druid`);
-  for (const s of ['wisdom', 'constitution', 'strength', 'dexterity']) {
-    assert.ok(byStat.get(s) / total >= 0.15, `${s} must be a main stat of the Druid sector`);
+  assert.ok(per.own / total >= 0.40, `charisma share ${(per.own / total * 100).toFixed(1)}% is too low for the Druid main stat`);
+  for (const s of ['wisdom', 'constitution', 'strength', 'dexterity', 'intelligence']) {
+    assert.ok(byStat.get(s) / total >= 0.04, `${s} must still appear in the Druid sector`);
   }
   assert.ok(sector.ownStats.every((s) => STATS.includes(s)));
 });

@@ -1,18 +1,18 @@
 {
   "header": {
-    "exported_at": "2026-10-31T21:07:42.185Z",
-    "exported_by": "linux-dev",
+    "exported_at": "2026-11-01T14:08:30.674Z",
+    "exported_by": "unnamed-pc",
     "group": "art",
     "row_counts": {
       "art_prompt_descriptions": 44,
       "art_prompt_notes": 3,
       "catalog_art": 428,
       "character_appearances": 30,
-      "entity_types": 371,
+      "entity_types": 379,
       "item_types": 280,
       "tile_types": 50
     },
-    "schema_version": "1714440843000_world_boss_second_skills"
+    "schema_version": "1714440849000_quest_giver_point_kind"
   },
   "tables": {
     "art_prompt_descriptions": [
@@ -5148,6 +5148,17 @@
         "sync_uuid": "a10f4fb2-2fd4-197e-9de9-159f4b3ec8aa"
       },
       {
+        "display_height": 96,
+        "display_width": 64,
+        "idle_fx": "none",
+        "image": null,
+        "name": "Arch-Druid Elyona",
+        "prompt": "pixel art, an elven druid in leaf-green robes with an antlered wooden staff, single object, solid transparent background",
+        "render_mode": "rect",
+        "sprite": null,
+        "sync_uuid": "bd56ffae-5f99-d3ed-3e09-7e4b1a9502d5"
+      },
+      {
         "display_height": null,
         "display_width": null,
         "idle_fx": "none",
@@ -5160,6 +5171,28 @@
         "render_mode": "static",
         "sprite": null,
         "sync_uuid": "d9a253f3-9c76-2a1c-c089-136014893350"
+      },
+      {
+        "display_height": 96,
+        "display_width": 64,
+        "idle_fx": "none",
+        "image": null,
+        "name": "Archon Aether",
+        "prompt": "pixel art, a tall ethereal mage in flowing blue robes with floating runes, single object, solid transparent background",
+        "render_mode": "rect",
+        "sprite": null,
+        "sync_uuid": "2fe29e65-9172-b972-e3f8-a2a7c49cb0c8"
+      },
+      {
+        "display_height": 96,
+        "display_width": 64,
+        "idle_fx": "none",
+        "image": null,
+        "name": "Astronomer Zahir",
+        "prompt": "pixel art, a desert astronomer in sand-coloured robes holding a brass astrolabe, single object, solid transparent background",
+        "render_mode": "rect",
+        "sprite": null,
+        "sync_uuid": "eebb659b-5277-ec33-d453-e2a6ca55a87c"
       },
       {
         "display_height": null,
@@ -5614,6 +5647,17 @@
         "render_mode": "static",
         "sprite": null,
         "sync_uuid": "a60b7547-1d33-35a2-168e-a0ddfa04b1da"
+      },
+      {
+        "display_height": 96,
+        "display_width": 64,
+        "idle_fx": "none",
+        "image": null,
+        "name": "Captain Valdor",
+        "prompt": "pixel art, a weathered sea captain in a navy coat and tricorn hat, single object, solid transparent background",
+        "render_mode": "rect",
+        "sprite": null,
+        "sync_uuid": "e272764f-62f3-7741-3849-a07ea349eb7f"
       },
       {
         "display_height": null,
@@ -6704,6 +6748,28 @@
         "render_mode": "static",
         "sprite": null,
         "sync_uuid": "64424cba-3828-0fe6-f406-071d1e0e092a"
+      },
+      {
+        "display_height": 96,
+        "display_width": 64,
+        "idle_fx": "none",
+        "image": null,
+        "name": "Elder Eldrin",
+        "prompt": "pixel art, a white-bearded village elder in grey robes leaning on a carved staff, single object, solid transparent background",
+        "render_mode": "rect",
+        "sprite": null,
+        "sync_uuid": "e13b19e5-e640-34dc-3c18-cf5f2117c5e4"
+      },
+      {
+        "display_height": 96,
+        "display_width": 64,
+        "idle_fx": "none",
+        "image": null,
+        "name": "Elder Sunspire",
+        "prompt": "pixel art, an old sun priest in gold and white robes holding a radiant staff, single object, solid transparent background",
+        "render_mode": "rect",
+        "sprite": null,
+        "sync_uuid": "b7d8b951-4c79-3baa-5f7c-f43cb073dcf9"
       },
       {
         "display_height": null,
@@ -7972,6 +8038,17 @@
         "sync_uuid": "fb78bdd5-4e6d-2869-d9fa-c17edaa24bf3"
       },
       {
+        "display_height": 96,
+        "display_width": 64,
+        "idle_fx": "none",
+        "image": null,
+        "name": "Lord Thorn",
+        "prompt": "pixel art, a stern armoured lord in a crimson cloak with a thorned circlet, single object, solid transparent background",
+        "render_mode": "rect",
+        "sprite": null,
+        "sync_uuid": "d273e1e5-a2e2-0cff-e6ff-7345f315034a"
+      },
+      {
         "display_height": null,
         "display_width": null,
         "idle_fx": "none",
@@ -8652,6 +8729,17 @@
         "render_mode": "static",
         "sprite": null,
         "sync_uuid": "ffefbb87-13ad-68d7-ab1f-4f331d2d972a"
+      },
+      {
+        "display_height": 96,
+        "display_width": 64,
+        "idle_fx": "none",
+        "image": null,
+        "name": "Shadow Hunter",
+        "prompt": "pixel art, a hooded swamp hunter in dark leathers with a longbow, single object, solid transparent background",
+        "render_mode": "rect",
+        "sprite": null,
+        "sync_uuid": "4d8fa27d-a832-d312-76bb-8acc7e787777"
       },
       {
         "display_height": null,

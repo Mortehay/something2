@@ -215,6 +215,9 @@ function derivePlayerStats(progression, classPools = null) {
     maxStamina: Math.max(1, C.STAMINA_BASE + poolGrant(progression, 'stamina')),
     meleeMult: round4(1 + C.MELEE_PER_STR * above('strength')),
     spellMult: round4(1 + C.SPELL_PER_INT * above('intelligence')),
+    // The Druid's skills scale with charisma (world.js castSkill uses this for
+    // class Druid instead of meleeMult/spellMult).
+    charismaMult: round4(1 + C.SKILL_PER_CHA * above('charisma')),
     // Lower is faster. Floored so attack rate stays bounded.
     // SOMET-514: the floor is the tree's `cooldownFloor` rule when a node
     // supplies one, and C.MIN_COOLDOWN_MULT otherwise. Until this ticket it

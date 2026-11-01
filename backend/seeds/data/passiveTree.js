@@ -158,15 +158,13 @@ const SECTORS = [
   { key: 'dexterity', className: 'Archer', identity: 'attack speed' },
   { key: 'strength', className: 'Warrior', identity: 'melee damage' },
   { key: 'constitution', className: 'Cultist', identity: 'maximum life, which is also their casting resource' },
-  // The Druid's skills need WIS/CON/STR/DEX (never CHA), and charisma itself only
-  // buys merchant prices and charm budget. So the home sector pays out mostly in
-  // the stats her skills need, with a little INT (spell power) and CHA (charm).
-  // `ownStats` is the rotation `@sector` follows: 2/10 each WIS, CON, STR, DEX
-  // and INT. Charisma is not in it: the game has no charm mechanic, and CHA
-  // alone buys only merchant prices.
+  // Charisma is the Druid's main attribute: her skills scale with it and her
+  // gems are gated by it. `ownStats` is the rotation `@sector` follows: 8/13
+  // CHA, and one each of CON, WIS, STR, DEX and INT for the survivability and
+  // casting her kit also leans on.
   {
-    key: 'charisma', className: 'Druid', identity: 'shapeshifting and primal endurance',
-    ownStats: ['wisdom', 'constitution', 'strength', 'dexterity', 'wisdom', 'constitution', 'strength', 'dexterity', 'intelligence', 'intelligence'],
+    key: 'charisma', className: 'Druid', identity: 'shapeshifting and skill power through charisma',
+    ownStats: ['charisma', 'charisma', 'charisma', 'charisma', 'charisma', 'charisma', 'charisma', 'charisma', 'constitution', 'wisdom', 'strength', 'dexterity', 'intelligence'],
   },
 ];
 
@@ -381,9 +379,9 @@ const KEYSTONES = {
   charisma: [
     { key: 'ks_cha_eternal_bear', label: 'Bear Aspect — +20 STR, +120 HP, +1.5 HP regen/s, +5% physical resistance, forms 12% stronger', grants: [{ type: 'stat', stat: 'strength', value: 20 }, { type: 'resource', pool: 'hp', value: 120 }, { type: 'rule', rule: 'hpRegen', value: 1.5 }, { type: 'resist', element: 'physical', value: 5 }, { type: 'rule', rule: 'formPower', value: 0.12 }] },
     { key: 'ks_cha_eternal_hawk', label: 'Hawk Aspect — +20 DEX, +40 max stamina, +4 stamina regen/s, +8% attack speed, forms 12% stronger', grants: [{ type: 'stat', stat: 'dexterity', value: 20 }, { type: 'resource', pool: 'stamina', value: 40 }, { type: 'rule', rule: 'staminaRegen', value: 4 }, { type: 'rule', rule: 'attackSpeedMult', value: 1.08 }, { type: 'rule', rule: 'formPower', value: 0.12 }] },
-    { key: 'ks_cha_eternal_wolf', label: 'Wolf Aspect — +15 STR, +15 DEX, +12% physical damage, forms 12% stronger', grants: [{ type: 'stat', stat: 'strength', value: 15 }, { type: 'stat', stat: 'dexterity', value: 15 }, { type: 'damage', element: 'physical', value: 12 }, { type: 'rule', rule: 'formPower', value: 0.12 }] },
-    { key: 'ks_cha_primal_mastery', label: 'Primal Form Mastery — +20 WIS, +20 STR, +1.5 HP regen/s, +3.0 stamina regen/s, forms 25% stronger', grants: [{ type: 'stat', stat: 'wisdom', value: 20 }, { type: 'stat', stat: 'strength', value: 20 }, { type: 'rule', rule: 'hpRegen', value: 1.5 }, { type: 'rule', rule: 'staminaRegen', value: 3 }, { type: 'rule', rule: 'formPower', value: 0.25 }] },
-    { key: 'ks_cha_menagerie', label: 'Menagerie — Aspect of the Wild (+20 WIS, +15 CON, +30 max mana, +2.0 mana regen/s, forms 15% stronger)', grants: [{ type: 'stat', stat: 'wisdom', value: 20 }, { type: 'stat', stat: 'constitution', value: 15 }, { type: 'resource', pool: 'mana', value: 30 }, { type: 'rule', rule: 'manaRegen', value: 2 }, { type: 'rule', rule: 'formPower', value: 0.15 }] },
+    { key: 'ks_cha_eternal_wolf', label: 'Wolf Aspect — +15 STR, +15 CHA, +12% physical damage, forms 12% stronger', grants: [{ type: 'stat', stat: 'strength', value: 15 }, { type: 'stat', stat: 'charisma', value: 15 }, { type: 'damage', element: 'physical', value: 12 }, { type: 'rule', rule: 'formPower', value: 0.12 }] },
+    { key: 'ks_cha_primal_mastery', label: 'Primal Form Mastery — +30 CHA, +10 WIS, +1.5 HP regen/s, +3.0 stamina regen/s, forms 25% stronger', grants: [{ type: 'stat', stat: 'charisma', value: 30 }, { type: 'stat', stat: 'wisdom', value: 10 }, { type: 'rule', rule: 'hpRegen', value: 1.5 }, { type: 'rule', rule: 'staminaRegen', value: 3 }, { type: 'rule', rule: 'formPower', value: 0.25 }] },
+    { key: 'ks_cha_menagerie', label: 'Menagerie — Aspect of the Wild (+25 CHA, +15 CON, +30 max mana, +2.0 mana regen/s, forms 15% stronger)', grants: [{ type: 'stat', stat: 'charisma', value: 25 }, { type: 'stat', stat: 'constitution', value: 15 }, { type: 'resource', pool: 'mana', value: 30 }, { type: 'rule', rule: 'manaRegen', value: 2 }, { type: 'rule', rule: 'formPower', value: 0.15 }] },
   ],
 };
 

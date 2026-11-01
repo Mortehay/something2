@@ -49,6 +49,10 @@ const STAMINA_BASE = 100;
 // weapon's existing `element` column; no new field.
 const MELEE_PER_STR = 0.05;
 const SPELL_PER_INT = 0.05;
+// CHA -> the Druid's skill power. Charisma is the Druid's main attribute, the
+// way STR is the Warrior's: every Druid skill (shapes, claws and spells alike)
+// is multiplied by 1 + this x (CHA above base).
+const SKILL_PER_CHA = 0.05;
 
 // DEX -> attack speed, as a cooldown MULTIPLIER (lower is faster). The floor
 // exists because the multiplier is 1/(1+k*n): without it a high enough DEX
@@ -178,7 +182,7 @@ const RESPEC_BASE = 50;
 module.exports = {
   BASE_STAT, STAT_KEYS, MAX_LEVEL,
   HP_BASE, HP_PER_CON, HP_REGEN_BASE, HP_REGEN_PER_CON, MANA_BASE, MANA_PER_INT, STAMINA_BASE, STAMINA_REGEN_BASE,
-  MELEE_PER_STR, SPELL_PER_INT, HASTE_PER_DEX, MIN_COOLDOWN_MULT,
+  MELEE_PER_STR, SPELL_PER_INT, SKILL_PER_CHA, HASTE_PER_DEX, MIN_COOLDOWN_MULT,
   PROJECTILE_FAN_RAD, AURA_BASE_RADIUS, AURA_MAX_TARGETS, AURA_INTERVAL_S,
   MIN_MELEE_REACH, MIN_MELEE_ARC,
   WAVE_DURATION_S, WAVE_MAX_STACKS, WAVE_INTERVAL_S,

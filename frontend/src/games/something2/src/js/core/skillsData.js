@@ -2564,16 +2564,18 @@ export function enrichSkillGems(list) {
       s.reqWeapon = s.type === 'buff' ? 'any' : 'unarmed';
     } else if (cls === 'Druid') {
       s.gemColor = 'hybrid';
-      s.reqWis = idx <= 3 ? 5 + idx : Math.round(5 + reqLvl * 0.4);
-      s.reqCon = idx <= 3 ? 4 + idx : Math.round(4 + reqLvl * 0.35);
-      s.reqStr = idx <= 3 ? 3 : Math.round(3 + reqLvl * 0.25);
-      s.reqDex = idx <= 3 ? 2 : Math.round(2 + reqLvl * 0.2);
+      // Charisma is the Druid's main attribute: her gems are gated by it (and
+      // scale with it, see playerStats charismaMult), with a little CON and WIS.
+      s.reqCha = idx <= 3 ? 5 + idx : Math.round(5 + reqLvl * 0.5);
+      s.reqCon = idx <= 3 ? 3 : Math.round(3 + reqLvl * 0.25);
+      s.reqWis = idx <= 3 ? 3 : Math.round(3 + reqLvl * 0.2);
+      s.reqStr = 0;
+      s.reqDex = 0;
       s.reqInt = 0;
-      s.reqCha = 0;
       const isTransform = s.id.includes('form') || s.id.includes('shapeshift') || s.id.includes('bear') || s.id.includes('wolf') || s.id.includes('hawk');
       s.reqWeapon = isTransform ? 'any' : (s.type === 'magic' ? 'staff_wand' : 'any');
       // The three shapes are the druid's opening skills: no attribute needed.
-      if (DRUID_FORM_IDS.includes(s.id)) { s.reqStr = 0; s.reqDex = 0; s.reqCon = 0; s.reqWis = 0; }
+      if (DRUID_FORM_IDS.includes(s.id)) { s.reqStr = 0; s.reqDex = 0; s.reqCon = 0; s.reqWis = 0; s.reqCha = 0; }
     }
 
     // Gem Price in Gold for Gem Merchant (Starter gems 100g; subsequent gems scaled up from 350g to 7000g)

@@ -96,3 +96,21 @@ test('unequipping the weapon drops the bonus on the very next cast', () => {
   const second = 100000 - world.creatures.get('c').hp;
   assert.ok(second < first, `unarmed (${second}) should hit softer than armed (${first})`);
 });
+
+test('a Druid skill is multiplied by charismaMult, not meleeMult/spellMult', () => {
+  const hitWith = (mods) => {
+    const { world } = setup(0, false);
+    const p = world.getPlayer('u');
+    Object.assign(p.stats, mods);
+    p.mana = 100; p.maxMana = 100;
+    world.creatures.get('c').hp = 100000;
+    const res = world.castSkill('u', 'dru_maul', 140, 100, 1, 0);
+    assert.strictEqual(res.ok, true, 'cast ok');
+    return 100000 - world.creatures.get('c').hp;
+  };
+  const plain = hitWith({ meleeMult: 1, spellMult: 1, charismaMult: 1 });
+  const strong = hitWith({ meleeMult: 1, spellMult: 1, charismaMult: 3 });
+  const meleeOnly = hitWith({ meleeMult: 3, spellMult: 3, charismaMult: 1 });
+  assert.ok(strong > plain * 2, `CHA tripled: ${plain} -> ${strong}`);
+  assert.strictEqual(meleeOnly, plain, 'STR/INT no longer move a Druid skill');
+});
