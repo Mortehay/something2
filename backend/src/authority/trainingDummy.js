@@ -18,7 +18,9 @@ const DUMMY_TYPE = 'Training Dummy';
 const DUMMY_MAX_HP = 1000000;
 const IDLE_RESET_MS = 6000;   // a pause this long ends a session
 const WINDOW_MS = 5000;       // "current DPS" looks at the last 5 seconds
-const SPAWN_OFFSETS = [[300, 0], [-300, 0], [0, 300], [0, -300], [450, 150], [-450, 150], [150, 450], [-150, -450]];
+// First choice: on the flat stone strip north-east of the Vale Crossing spawn
+// (picked on a screenshot); the rest are fallbacks for worlds where it is blocked.
+const SPAWN_OFFSETS = [[296, -384], [300, 0], [-300, 0], [0, 300], [0, -300], [450, 150], [-450, 150], [150, 450], [-150, -450]];
 
 function newSession(now) {
   return { start: now, last: now, total: 0, hits: 0, max: 0, recent: [] };

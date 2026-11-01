@@ -23,6 +23,7 @@ test('placed once, only in an entry world, and never persisted or pruned', () =>
   const { entry, world } = boot();
   const d = dummyMod.placeDummy(entry);
   assert.ok(d && d.isDummy);
+  assert.deepStrictEqual([d.x, d.y], [100 + 296, 100 - 384], 'preferred spot when it is walkable');
   assert.strictEqual(dummyMod.placeDummy(entry), d, 'idempotent');
   assert.strictEqual(world.creatures.getDirty().length, 0);
   d.dirty = true;
