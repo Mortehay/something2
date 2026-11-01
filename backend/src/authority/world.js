@@ -1628,7 +1628,13 @@ class World {
     const elemMult = elementDamageMult(p.stats, skill.element);
     
     // Resolve base damage and hit counts (e.g. Barrage deals individual damage per arrow)
-    const { base: baseDamage, hits: hitCount } = skillBalance.baseDamageOf(skill);
+    // Skill damage = the skill's own base + a share of the EQUIPPED weapon's damage.
+    // Read per cast, so changing or removing the weapon changes the next hit; with
+    // nothing in the main hand the weapon share is 0 (activeWeaponType would hand
+    // back the default fists row, which must not count).
+    const mainHand = p.inv && p.inv.equipment ? p.inv.equipment.main_hand : null;
+    const weaponDmg = mainHand && equippedWeapon ? Number(equippedWeapon.damage) || 0 : 0;
+    const { base: baseDamage, hits: hitCount } = skillBalance.skillHitDamage(skill, weaponDmg);
 
     const intensityMult = skill.channeled ? (1 + channelStack * 0.15) : 1;
     const isSpell = skill.type === 'magic' || skill.type === 'debuff';

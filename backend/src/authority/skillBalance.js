@@ -54,6 +54,28 @@ function baseDamageOf(skill) {
   return { base: Math.max(4, Math.min(30, Math.round(d))), hits: 1 };
 }
 
+// ---- weapon scaling --------------------------------------------------------
+// A skill's damage is its own fixed number PLUS a share of the equipped weapon's
+// damage:   total = skillBase + weaponDamage * scaling
+// e.g. base 10, weapon 50, scaling 10% -> 10 + 50 * 0.10 = 15. Nothing in hand
+// (or a weapon with no damage) adds nothing. It is read from the weapon at the
+// moment of the cast, so swapping or removing a weapon takes effect at once.
+// A skill can set its own `weaponScaling` (a fraction); the rest use the default.
+const DEFAULT_WEAPON_SCALING = 0.10;
+
+function weaponScalingOf(skill) {
+  const s = Number(skill && skill.weaponScaling);
+  return Number.isFinite(s) && s >= 0 ? s : DEFAULT_WEAPON_SCALING;
+}
+
+// { base, hits, bonus }: `base` already includes the weapon share, per hit.
+function skillHitDamage(skill, weaponDamage) {
+  const { base, hits } = baseDamageOf(skill);
+  const wd = Number(weaponDamage);
+  const bonus = Number.isFinite(wd) && wd > 0 ? wd * weaponScalingOf(skill) : 0;
+  return { base: base + bonus, hits, bonus };
+}
+
 // ---- life leech ------------------------------------------------------------
 // Heals a share of one cast's damage, once per cast, and never more than a small
 // slice of max HP: a channel drains many times a second.
@@ -518,6 +540,7 @@ function auraOf(p) {
 module.exports = {
   COOLDOWN_SLACK, CHANNEL_GAP_MS, LEECH_SKILL_SHARE, LEECH_CAP_FRACTION,
   BUFFS, MULTI_HIT, LOW_HP, WEAPON_TRAITS, BASE_CRIT_DMG, FORM_DUR,
+  DEFAULT_WEAPON_SCALING, weaponScalingOf, skillHitDamage,
   minGapMs, takeCooldown, baseDamageOf, leechHeal,
   weaponTraits, weaponHitStatuses, setRng, roll, rollCrit,
   castBuff, castUnknownBuff, refreshBuffMods, removeBuff, noteAction, takeSpellMult,
