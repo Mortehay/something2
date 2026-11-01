@@ -7,8 +7,8 @@
 // x and y run on different periods (4:3), tracing a slow Lissajous loop that
 // repeats every 31.2 s, so the motion does not read as a mechanical bob.
 
-export const DRIFT_X_PX = 1;
-export const DRIFT_Y_PX = 1;
+export const DRIFT_X_PX = 0.3;
+export const DRIFT_Y_PX = 0.3;
 export const DRIFT_X_PERIOD_MS = 10400;
 export const DRIFT_Y_PERIOD_MS = 7800;
 
