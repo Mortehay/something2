@@ -4066,8 +4066,20 @@ app.post('/api/art-jobs', adminGuard, async (req, res) => {
     // accepting it only defers the error to a batch that then leaves it
     // stranded. Checked per subject's RESOLVED provider, since a pinned type
     // goes to its pin rather than to the one picked in the console.
+    //
+    // Only subjects this call would actually ADD. One already queued or
+    // running is answered as already_live and left untouched, so refusing over
+    // it blocked nothing and told the admin to fix a provider that had nothing
+    // to do with it ("Queued 0 of 1 -- 1 already in flight" under a red error).
+    const { rows: liveRows } = await pool.query(
+      `SELECT subject_key FROM art_jobs
+        WHERE subject_kind = $1 AND subject_key = ANY($2::text[])
+          AND state IN ('queued', 'running')`,
+      [kind, subjects.map((s) => s.key)]);
+    const live = new Set(liveRows.map((r) => r.subject_key));
+    const fresh = subjects.filter((s) => !live.has(s.key));
     if (backend === 'connector' && catalogSubjects.registryFor(kind).generationKind === 'object') {
-      const ids = [...new Set(subjects.filter((s) => s.backend !== 'local')
+      const ids = [...new Set(fresh.filter((s) => s.backend !== 'local')
         .map((s) => s.providerId).filter(Number.isInteger))];
       const { rows: provs } = await pool.query(
         "SELECT id, name, request_template FROM ai_providers WHERE modality = 'image'");
@@ -4080,7 +4092,7 @@ app.post('/api/art-jobs', adminGuard, async (req, res) => {
         // A subject whose type is PINNED elsewhere ignores the console's pick,
         // so "pick X in the Provider list" would point at a control that is
         // not the cause. Name the pinned subjects and the pin instead.
-        const pinned = subjects.filter((s) => s.pinned && small.has(s.providerId));
+        const pinned = fresh.filter((s) => s.pinned && small.has(s.providerId));
         const fixes = [];
         if (pinned.length) {
           const byProv = new Map();
@@ -4091,7 +4103,7 @@ app.post('/api/art-jobs', adminGuard, async (req, res) => {
               + `${okList ? ` to ${okList}` : ''}.`);
           }
         }
-        if (subjects.some((s) => !s.pinned && small.has(s.providerId))) {
+        if (fresh.some((s) => !s.pinned && small.has(s.providerId))) {
           fixes.push(okList ? `Pick ${okList} in the Provider list.`
             : 'Set a provider\'s request_template width/height to 1024.');
         }

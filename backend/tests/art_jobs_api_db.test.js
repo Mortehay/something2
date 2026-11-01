@@ -701,6 +701,30 @@ lockedTest('queueing an object kind on a 512 provider is refused; a tile is not'
     assert.equal(big.status, 201);
   });
 
+// Only what the call would ADD is size-checked. A subject already queued on a
+// 1024 provider is answered as already_live; refusing over it blocked nothing
+// and named the wrong fix ("Queued 0 of 1 -- 1 already in flight" in red).
+lockedTest('re-queueing an in-flight object under a 512 provider is not refused',
+  async (t, pool, providerId) => {
+    const small = await smallProvider(t, pool);
+    const [a, b] = await cs.SUBJECTS.item.list(pool);
+    await queue.enqueue(pool, [{ kind: 'item', key: a.key }], { backend: 'connector', providerId });
+
+    const res = await request(app).post('/api/art-jobs').set(...AUTH)
+      .send({ kind: 'item', keys: [a.key], provider_id: small });
+    assert.equal(res.status, 201, res.body.error);
+    assert.equal(res.body.queued, 0);
+    assert.equal(res.body.already_live, 1);
+    const { rows } = await pool.query('SELECT provider_id FROM art_jobs');
+    assert.deepEqual(rows.map((r) => r.provider_id), [providerId], 'the live job keeps its provider');
+
+    // A NEW subject in the same call is still refused.
+    const mixed = await request(app).post('/api/art-jobs').set(...AUTH)
+      .send({ kind: 'item', keys: [a.key, b.key], provider_id: small });
+    assert.equal(mixed.status, 400);
+    assert.equal(mixed.body.code, 'PROVIDER_TOO_SMALL');
+  });
+
 // The skipped groups can be removed WITHOUT stopping the batch: the drain never
 // claims them, so a scoped clear touches nothing a worker holds.
 lockedTest('a scoped clear is allowed while a batch runs, and un-reports the group',
