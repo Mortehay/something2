@@ -87,6 +87,12 @@ test('buy scrolls and enchant a weapon at the village smith', { skip: !DB_URL ? 
     for (const b of joined.blacksmiths) {
       assert.ok(Number.isFinite(b.x) && Number.isFinite(b.y));
       assert.ok('villageId' in b);
+      // The smith is an entity like the quest givers: its name is the bound entity's name.
+      assert.equal(typeof b.name, 'string');
+      assert.equal(b.name, b.art || 'Blacksmith');
+    }
+    if (joined.blacksmiths.length) {
+      assert.equal(joined.blacksmiths[0].art, 'Village Blacksmith', 'the kind default is the Village Blacksmith entity');
     }
     assert.equal(joined.enchant.scrollPrice, PRICE);
     assert.equal(joined.enchant.maxScrollPurchase, enchant.ENCHANT_CONFIG.maxScrollPurchase);

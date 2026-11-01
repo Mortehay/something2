@@ -3213,7 +3213,7 @@ export class RenderSystem {
     this.ctx.textAlign = "center";
     this.ctx.fillStyle = "#fff";
     const lift = drewArt ? drewArt : r + 4;
-    this.ctx.fillText("Blacksmith", dx, dy - lift - 6);
+    this.ctx.fillText(bs.name || "Blacksmith", dx, dy - lift - 6);
     if (player) {
       const pcx = player.x + (player.width || 0) / 2;
       const pcy = player.y + (player.height || 0) / 2;

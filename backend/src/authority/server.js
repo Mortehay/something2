@@ -2179,6 +2179,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
             .map((v) => ({
               villageId: v.id, x: v.blacksmithX, y: v.blacksmithY,
               art: resolvePointArt('blacksmith', v.blacksmithArt, entry.pointArtDefaults),
+              name: resolvePointArt('blacksmith', v.blacksmithArt, entry.pointArtDefaults) || 'Blacksmith',
             })),
           gemMerchants: (entry.villages || [])
             .filter((v) => v.gemMerchantX != null && v.gemMerchantY != null)

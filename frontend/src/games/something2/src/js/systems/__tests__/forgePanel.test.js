@@ -464,6 +464,21 @@ describe("the blacksmith in the world", () => {
     expect(draw({ x: 1000, y: 1000, width: 64, height: 64 })).toContain("[e] Enchant");
     expect(draw({ x: 9000, y: 9000, width: 64, height: 64 })).not.toContain("[e] Enchant");
   });
+
+  it("is labelled with its entity's name, and falls back to \"Blacksmith\"", async () => {
+    const { RenderSystem } = await import("../RenderSystem.js");
+    const label = (bs) => {
+      const ctx = fakeCtx();
+      const rs = Object.create(RenderSystem.prototype);
+      rs.ctx = ctx;
+      rs._drawPointArtAt = () => false;
+      rs.drawBlacksmith(bs, null);
+      return ctx.texts.join("\n");
+    };
+    expect(label({ x: 1, y: 1, art: "Village Blacksmith", name: "Village Blacksmith" })).toContain("Village Blacksmith");
+    expect(label({ x: 1, y: 1, art: "Old Garr", name: "Old Garr" })).toContain("Old Garr");
+    expect(label({ x: 1, y: 1, art: null })).toContain("Blacksmith");
+  });
 });
 
 describe("the smith sells two scrolls", () => {

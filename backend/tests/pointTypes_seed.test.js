@@ -59,3 +59,17 @@ test('village post kinds map to their villages column', () => {
   assert.strictEqual(villageArtColumn('skill_merchant'), 'skill_merchant_entity_type_id');
   assert.throws(() => villageArtColumn('portal'), /not a village post kind/);
 });
+
+test('the blacksmith is a named entity like the quest givers, and is the blacksmith kind\'s default', () => {
+  const smiths = POINT_TYPES.filter((t) => t.point_kind === 'blacksmith');
+  assert.strictEqual(smiths.length, 1);
+  assert.strictEqual(smiths[0].name, 'Village Blacksmith');
+  assert.strictEqual(smiths[0].is_creature, false);
+  assert.strictEqual(smiths[0].walkable, true);
+  assert.match(smiths[0].prompt, /blacksmith/i);
+  // The migration inserts the same row the seed converges on.
+  const m = require('fs').readFileSync(require('path').join(__dirname, '../migrations/1714440856000_blacksmith_entity.js'), 'utf8');
+  assert.match(m, /POINT_TYPES\.find\(\(t\) => t\.point_kind === 'blacksmith'\)/);
+  assert.match(m, /default_entity_type_id IS NULL/, 'the kind default is only filled when empty');
+  assert.match(m, /ON CONFLICT \(name\) DO NOTHING/, 'fill-only, like the quest givers');
+});

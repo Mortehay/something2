@@ -46,7 +46,8 @@ const POINT_TYPES = [
   pointType('gem_merchant_post',   'gem_merchant',   '#c084fc',  80, 100, 'a jeweller\'s stall with a velvet tray of glowing gems'),
   pointType('skill_merchant_post', 'skill_merchant', '#c084fc',  80, 100, 'a scholar\'s lectern stacked with open spellbooks and scrolls'),
   // The village smith, who enchants weapons. Stands in the village cottage.
-  pointType('blacksmith_post',     'blacksmith',     '#f97316',  90, 110, 'a burly village blacksmith in a leather apron beside an anvil and a glowing forge'),
+  // A person, like the quest givers: its name is the in-game label.
+  pointType('Village Blacksmith',  'blacksmith',     '#f97316',  64,  96, 'a burly village blacksmith in a leather apron beside an anvil and a glowing forge'),
   pointType('chest_vault',         'chest_vault',    '#e0b64e',  70,  60, 'an ornate gilded treasure chest with heavy iron bands'),
   pointType('chest_field',         'chest_field',    '#8a8f98',  60,  50, 'a small weathered wooden chest half sunk in grass'),
   // SOMET-678. Quest givers are the one kind with several types: one entity
