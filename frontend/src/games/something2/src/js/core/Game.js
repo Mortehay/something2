@@ -15,7 +15,6 @@ import { getStoredToken, parseJwt } from "../net/auth.js";
 import { reconcile } from "../net/reconcile.js";
 import { inputVector, movementKeys, facingFromVector } from "../entities/Player.js";
 import { PLAYER_SPEED_EFFECTIVE } from "./constants.js";
-import { buildFormBar, formFromBuffs } from "./formBar.js";
 import { selfSpeedMult, debuffHudEntries, resetSelfAura, newlyAppliedAuraNames } from "./auraDebuffs.js";
 import { aimVector, cursorToWorld } from "./aim.js";
 import { createInventory, applyJoined, applyEquipment, canEquipClient, typeOf, addItem, removeItem } from "./inventory.js";
@@ -1519,7 +1518,7 @@ export class Game {
         const nowMs = performance.now();
         for (let slot = 1; slot <= 9; slot++) {
             if (this._isSlotHeld(slot)) {
-                const s = this._effectiveHotbar().get(slot);
+                const s = this.hotbarSkills.get(slot);
                 if (!s) continue;
                 if (s.channeled || isTransformationSkill(s)) continue;
 
@@ -1537,7 +1536,7 @@ export class Game {
             this._stopChanneledSkill();
             return;
         }
-        const s = this._effectiveHotbar().get(this._channeledSlot);
+        const s = this.hotbarSkills.get(this._channeledSlot);
         if (!s || !s.channeled || s.id !== this._channeledSkillId) {
             this._stopChanneledSkill();
             return;
@@ -1806,7 +1805,6 @@ export class Game {
             }
             this.player.hp = mine.hp;
             this.player.maxHp = mine.maxHp;
-            this.activeForm = formFromBuffs(mine.buffs); // server-authoritative form (null when no form buff / field omitted)
             // Assigned on EVERY frame, including the (common) one where the
             // server omits the field — otherwise a `if (mine.effects)` guard
             // would leave the HUD reading "Burning" long after the burn ended.
@@ -2149,7 +2147,6 @@ export class Game {
                 equippedWeapon: this._resolveEquippedWeapon(),
                 dpsMeter: this.dpsMeter || null,
                 synergyFx: this.synergyFx || null,
-                formBar: this.activeForm ? this._formBar() : null,
                 playerStats: this.characterView() || this.progression || null,
                 skillMerchants: this.skillMerchants,
                 questGivers: this.questGivers,
@@ -3035,12 +3032,8 @@ export class Game {
         return list;
     }
 
-    // While shapeshifted keys 1-9 / the skill bar show the form bar (core/formBar.js).
-    _formBar() { return buildFormBar({ activeForm: this.activeForm, ownedSkills: this.getInventoryGems().concat([...(this.unlockedSkills || [])].map((id) => getSkillById(id)).filter(Boolean)), formSkillId: `dru_${this.activeForm}_form` }); }
-    _effectiveHotbar() { return this.activeForm ? this._formBar() : this.hotbarSkills; }
-
     _activateHotbarSkill(slotNum, isContinuous = false) {
-        const s = this._effectiveHotbar().get(slotNum);
+        const s = this.hotbarSkills.get(slotNum);
         if (!s) {
             if (!this.className && !this.passiveStartClass) {
                 fetchStartClass().then((name) => { if (name) { this.className = name; this.passiveStartClass = name; } }).catch(() => {});
@@ -4024,7 +4017,6 @@ export class Game {
             const slotHit = slotAreas.find((a) => x >= a.box.x && x <= a.box.x + a.box.w && y >= a.box.y && y <= a.box.y + a.box.h);
             if (slotHit) {
                 if (e.button === 2) {
-                    if (this.activeForm) return; // the form bar is not editable
                     this.hotbarSkills.delete(slotHit.slot);
                     this.saveHotbar();
                     if (this.showToast) this.showToast(`Slot ${slotHit.slot} cleared`);

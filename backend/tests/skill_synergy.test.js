@@ -59,26 +59,3 @@ test('a buff primes and chains but never carries a damage multiplier', () => {
   const hit = syn.onCast(p, skill('war_crushing_blow'), 500);
   assert.strictEqual(hit.name, 'Empowered Strike');
 });
-
-test('druid forms: a form skill needs its form, spells are refused in animal form', () => {
-  assert.strictEqual(syn.formOfSkill(skill('dru_bear_slam')), 'bear');
-  assert.strictEqual(syn.formOfSkill(skill('dru_hawk_dive_slash')), 'hawk');
-  assert.strictEqual(syn.formOfSkill(skill('dru_wolf_pounce')), 'wolf');
-  assert.strictEqual(syn.formOfSkill(skill('dru_maul')), 'bear');
-  assert.strictEqual(syn.formOfSkill(skill('dru_feral_bite')), 'wolf');
-  assert.strictEqual(syn.formOfSkill(skill('dru_bear_form')), null, 'the form itself is not gated');
-  assert.strictEqual(syn.formOfSkill(skill('war_whirlwind')), null);
-  assert.strictEqual(syn.formGate(skill('dru_bear_slam'), null).reason, 'form');
-  assert.strictEqual(syn.formGate(skill('dru_bear_slam'), 'wolf').reason, 'form');
-  assert.strictEqual(syn.formGate(skill('dru_bear_slam'), 'bear'), null);
-  assert.strictEqual(syn.formGate(skill('dru_moonfire'), 'bear').reason, 'form_spell');
-  assert.strictEqual(syn.formGate(skill('dru_moonfire'), null), null);
-  assert.strictEqual(syn.formGate(skill('dru_rejuvenation'), 'bear'), null, 'buffs stay castable');
-  assert.strictEqual(syn.formGate(skill('mag_fireball'), 'bear'), null, 'only a Druid is gated');
-});
-
-test('every druid form has skills to use', () => {
-  for (const f of ['bear', 'hawk', 'wolf']) {
-    assert.ok(SKILLS.filter((s) => syn.formOfSkill(s) === f).length >= 4, f);
-  }
-});

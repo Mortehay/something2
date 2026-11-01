@@ -748,13 +748,3 @@ export function synergyHints(skill) {
   return { primes, finishes };
 }
 
-const FORM_SKILL_OVERRIDES = { dru_maul: 'bear', dru_ursocs_wrath: 'bear', dru_feral_bite: 'wolf' };
-export const FORM_LABELS = { bear: 'Bear Form', hawk: 'Hawk Form', wolf: 'Wolf Form' };
-
-// 'bear' | 'hawk' | 'wolf' for a skill that only works in that form, else null.
-export function formOfSkill(skill) {
-  if (!skill || skill.class !== 'Druid') return null;
-  if (FORM_SKILL_OVERRIDES[skill.id]) return FORM_SKILL_OVERRIDES[skill.id];
-  const m = /^dru_(bear|hawk|wolf)_(?!form$)/.exec(skill.id);
-  return m ? m[1] : null;
-}

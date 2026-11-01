@@ -90,14 +90,13 @@ describe('the client catalog is generated from the server catalog', () => {
   });
 });
 
-describe('skill synergies and forms match the backend', () => {
-  it('computes the same tags, form and synergy table for every skill', async () => {
+describe('skill synergies match the backend', () => {
+  it('computes the same tags and synergy table for every skill', async () => {
     const client = await import('../skillsData.js');
     const syn = require(path.resolve(__dirname, '../../../../../../../../backend/src/authority/skillSynergy.js'));
     expect(client.SYNERGIES).toEqual(syn.SYNERGIES);
     for (const s of backend.SKILLS) {
       expect([...client.skillTags(s)].sort()).toEqual([...syn.skillTags(s)].sort());
-      expect(client.formOfSkill(s)).toBe(syn.formOfSkill(s));
     }
   });
 });

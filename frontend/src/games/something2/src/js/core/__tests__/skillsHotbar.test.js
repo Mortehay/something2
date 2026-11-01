@@ -153,8 +153,7 @@ describe("Skills Panel & Hotbar Interactions", () => {
     g._keydownHandler({ key: "1", code: "Digit1", repeat: false, preventDefault: () => {} });
     expect(g.activeForm).toBe("bear");
     g.skillCooldowns.clear();
-    // In a form the bar shows the form's skills; the form skill itself is the LAST slot (9).
-    g._keydownHandler({ key: "9", code: "Digit9", repeat: false, preventDefault: () => {} });
+    g._keydownHandler({ key: "1", code: "Digit1", repeat: false, preventDefault: () => {} });
     expect(g.activeForm).toBeNull();
     expect(lastToast).toContain("Exited BEAR Form");
   });
@@ -174,8 +173,7 @@ describe("Skills Panel & Hotbar Interactions", () => {
 
     // Transform into Bear form
     g.activeForm = "bear";
-    const mSlot = [...g._formBar().entries()].find(([, sk]) => sk.id === "dru_maul")[0];
-    g._keydownHandler({ key: String(mSlot), code: `Digit${mSlot}`, repeat: false, preventDefault: () => {} });
+    g._keydownHandler({ key: "2", code: "Digit2", repeat: false, preventDefault: () => {} });
     expect(lastToast).toContain("Cast: Bear Maul");
     expect(g.blasts.length).toBeGreaterThan(0);
   });

@@ -418,7 +418,7 @@ export class RenderSystem {
     selectedSkillId = null, skillDrag = null, hotbarSkills = null, inventoryGems = [],
     skillHoverSlot = null, playerClass = null, activeForm = null, flashSlot = null,
     skillCooldowns = null, activeBuffs = [], unlockedSkills = null,
-    dpsMeter = null, synergyFx = null, formBar = null, hoveredSkill = null, cursorX = null, cursorY = null, keybinds = null,
+    dpsMeter = null, synergyFx = null, hoveredSkill = null, cursorX = null, cursorY = null, keybinds = null,
     // Floating Combat & Resource text (Damage numbers, heals, mana/stamina surge)
     floatingTexts = [],
     // Quest Log (hotkey 'J')
@@ -657,7 +657,7 @@ export class RenderSystem {
     this.renderHud({
       player, mana, maxMana, showMana, stamina, maxStamina,
       weaponName, ammo, noAmmoFlash, effects, gold, progression,
-      skills: (activeForm && formBar) ? formBar : hotbarSkills, hitAreas: this._skillSlotHitAreas, hoverSlot: skillHoverSlot, drag: skillDrag,
+      skills: hotbarSkills, hitAreas: this._skillSlotHitAreas, hoverSlot: skillHoverSlot, drag: skillDrag,
       activeForm, flashSlot, skillCooldowns, activeBuffs,
       playerStats: playerStats || progression, equippedWeapon, keybinds,
       hasTrackedQuest,
@@ -4716,7 +4716,7 @@ export class RenderSystem {
     borderGrad.addColorStop(0.5, "rgba(76, 29, 149, 0.8)");
     borderGrad.addColorStop(1, "rgba(147, 112, 219, 0.6)");
     ctx.lineWidth = 1.5;
-    ctx.strokeStyle = activeForm ? (activeForm === 'bear' ? '#ea580c' : (activeForm === 'hawk' ? '#0284c7' : '#7c3aed')) : borderGrad;
+    ctx.strokeStyle = borderGrad;
     ctx.stroke();
 
     // Top highlight rim on panel

@@ -2411,7 +2411,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // The refusals a player can act on are told to them; cooldown / resource
       // refusals stay silent (the client already shows those, and a held button
       // would flood the socket).
-      if (!ok && error && ['form', 'form_spell', 'requirements_unmet', 'weapon_mismatch'].includes(reason)) {
+      if (!ok && error && ['requirements_unmet', 'weapon_mismatch'].includes(reason)) {
         send(ws, { type: 'skillRefused', skillId: msg.skillId, reason, error });
       }
       // A synergy or a chain link earned by this cast.
