@@ -151,7 +151,7 @@ const PROP_JOB = {
 };
 
 test('approve of a box prop sets the static image, clears the sprite and sets idle_fx from prop_fx', async () => {
-  for (const [propFx, want] of [['shine', 'shine'], ['sway', 'sway'], ['none', 'none'], [null, 'none'], [undefined, 'none']]) {
+  for (const [propFx, want] of [['drift', 'drift'], ['shine', 'shine'], ['sway', 'sway'], ['none', 'none'], [null, 'none'], [undefined, 'none']]) {
     const calls = [];
     const store = { getObjectStream: async () => { throw new Error('a prop approve must not read a manifest'); } };
     // 'sway' in actions must NOT decide the effect any more.

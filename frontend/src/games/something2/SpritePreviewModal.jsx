@@ -2,7 +2,7 @@
 // generated sheet at x2 (right), every sheet row labelled from sheet.json.
 // A GPU-box prop (Props v2) has no sheet: the right side is the generated
 // (trimmed) cutout image, previewed with a CSS stand-in for the idle effect it will
-// get in game on approve (prop_fx: none | sway | shine).
+// get in game on approve (prop_fx: none | sway | shine | drift).
 import { useEffect, useRef, useState } from 'react';
 import styled, { keyframes } from 'styled-components';
 import { useQuery } from '@tanstack/react-query';
@@ -41,11 +41,25 @@ const shineKeys = keyframes`
   0% { background-position: 150% 0; }
   13.3%, 100% { background-position: -50% 0; }
 `;
+// The CSS stand-in for systems/drift.js: a slow few-pixel float, x and y on
+// different periods (5.2 s / 3.9 s) like the renderer's Lissajous loop.
+const driftXKeys = keyframes`
+  0%, 100% { translate: -1.5px 0; }
+  50% { translate: 1.5px 0; }
+`;
+const driftYKeys = keyframes`
+  0%, 100% { top: -1px; }
+  50% { top: 1px; }
+`;
 const FxFrame = styled.span`
   position: relative; display: inline-block; max-width: 100%; line-height: 0;
   & > img { transform-origin: bottom center; }
   &[data-fx='sway'] > img { animation: ${swayKeys} 2.8s ease-in-out infinite; }
-  @media (prefers-reduced-motion: reduce) { &[data-fx='sway'] > img { animation: none; } }
+  &[data-fx='drift'] > img {
+    position: relative;
+    animation: ${driftXKeys} 5.2s ease-in-out infinite, ${driftYKeys} 3.9s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce) { &[data-fx='sway'] > img, &[data-fx='drift'] > img { animation: none; } }
 `;
 const Glint = styled.span`
   position: absolute; inset: 1px; pointer-events: none;

@@ -37,6 +37,7 @@ import { artIcon, drawIconFit } from "./gameArt.js";
 import { swayShear, swayPhaseSeed, SWAY_AMPLITUDE } from "./sway.js";
 import { boxDir, isBoxManifest, frameKeyFor, actionTimings, pickAction, DEFAULT_FPS } from "./sheetActions.js";
 import { shineBand, shineGeometry, SHINE_ALPHA } from "./shine.js";
+import { driftX, driftY } from "./drift.js";
 import { TRAP_STYLE } from "../core/worldTraps.js";
 import {
   rarityBorderColor, affixLine, clipToWidth, rowTextOffsets, AFFIX_FONT_PX, itemIcon,
@@ -3879,6 +3880,12 @@ export class RenderSystem {
       this.ctx.translate(-bx, -by);
       this.ctx.drawImage(img, r.dx, r.dy, r.dw, r.dh);
       this.ctx.restore();
+      return r.dh;
+    }
+    if (e.idle_fx === "drift") {
+      // SOMET-677: the same single draw, shifted a few px in slow motion.
+      const seed = swayPhaseSeed(e.x, e.y);
+      this.ctx.drawImage(img, r.dx + driftX(this.nowMs, seed), r.dy + driftY(this.nowMs, seed), r.dw, r.dh);
       return r.dh;
     }
     this.ctx.drawImage(img, r.dx, r.dy, r.dw, r.dh);

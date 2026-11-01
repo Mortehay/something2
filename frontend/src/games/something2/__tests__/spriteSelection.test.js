@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   filterSpriteSubjects, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   targetsForSprites, framesCap, cellCount, estimateLabel, defaultActionsFor, rowLabels,
-  isBoxProp, PROP_FX_OPTIONS, propFxLabel, propEffect, selectionKinds, queueButtonLabel, queuePayload, conceptImageOf, sheetImageOf, sheetManifestOf, jobStateLabel, conceptLabelOf, lastUpdateLabel, deleteConfirmText,
+  isBoxProp, DEFAULT_PROP_FX, PROP_FX_OPTIONS, propFxLabel, propEffect, selectionKinds, queueButtonLabel, queuePayload, conceptImageOf, sheetImageOf, sheetManifestOf, jobStateLabel, conceptLabelOf, lastUpdateLabel, deleteConfirmText,
   isPropSubject, nextConceptCaption, newConceptConfirmText,
   batchProgress, currentProgressLabel, rowProgressLabel, queueIsLive, runJustEnded,
 } from '../spriteSelection.js';
@@ -114,8 +114,10 @@ describe('sprite console action controls', () => {
 
   // Props v2: a prop's in-game idle effect is chosen explicitly (prop_fx),
   // not derived from the action checkboxes.
-  it('PROP_FX_OPTIONS / propFxLabel: None (default), Sway, Shine', () => {
-    expect(PROP_FX_OPTIONS.map((o) => [o.id, o.label])).toEqual([['none', 'None'], ['sway', 'Sway'], ['shine', 'Shine']]);
+  it('PROP_FX_OPTIONS / propFxLabel: None (default), Sway, Shine, Drift', () => {
+    expect(PROP_FX_OPTIONS.map((o) => [o.id, o.label])).toEqual([['none', 'None'], ['sway', 'Sway'], ['shine', 'Shine'], ['drift', 'Drift']]);
+    expect(propFxLabel('drift')).toBe('Drift');
+    expect(propEffect({ prop_fx: 'drift' })).toBe('drift');
     expect(propFxLabel('shine')).toBe('Shine');
     expect(propFxLabel('sway')).toBe('Sway');
     expect(propFxLabel('none')).toBe('None');
@@ -177,10 +179,11 @@ describe('sprite console action controls', () => {
       });
     });
 
-    it('mixed: creature actions/frames plus prop_fx (default none)', () => {
+    it('mixed: creature actions/frames plus prop_fx (default drift, SOMET-677)', () => {
+      expect(DEFAULT_PROP_FX).toBe('drift');
       expect(queuePayload(catalog, [wolf, prop], { actions: ['idle'], frames: 4 })).toEqual({
         targets: [{ entity_id: 4, variant: null }, { entity_id: 12, variant: null }],
-        actions: ['idle'], frames: 4, prop_fx: 'none',
+        actions: ['idle'], frames: 4, prop_fx: 'drift',
       });
     });
   });

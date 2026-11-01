@@ -287,8 +287,8 @@ const propFxParam = (insert) => {
   return insert.params[9];
 };
 
-test('jobs stores prop_fx on prop rows only, defaulting to none', async () => {
-  for (const [sent, want] of [[undefined, 'none'], ['shine', 'shine'], ['sway', 'sway'], ['none', 'none']]) {
+test('jobs stores prop_fx on prop rows only, defaulting to drift', async () => {
+  for (const [sent, want] of [[undefined, 'drift'], ['shine', 'shine'], ['sway', 'sway'], ['drift', 'drift'], ['none', 'none']]) {
     const calls = [];
     // eslint-disable-next-line no-await-in-loop
     const res = await request(routerApp(mixedPool(calls))).post('/api/sprite-admin/jobs')
@@ -308,7 +308,7 @@ for (const bad of ['glow', '', 'SHINE', 3, null]) {
     const res = await request(routerApp(mixedPool(calls))).post('/api/sprite-admin/jobs')
       .send({ targets: [{ entity_id: 12 }], actions: ['idle'], frames: 1, prop_fx: bad });
     assert.equal(res.status, 400);
-    assert.match(res.body.error, /prop_fx must be one of none, sway, shine/);
+    assert.match(res.body.error, /prop_fx must be one of none, sway, shine, drift/);
     assert.ok(!calls.some((c) => /INSERT/i.test(c.sql)));
   });
 }

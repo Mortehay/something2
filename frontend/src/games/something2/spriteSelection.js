@@ -178,7 +178,10 @@ export const PROP_FX_OPTIONS = [
   { id: 'none', label: 'None' },
   { id: 'sway', label: 'Sway' },
   { id: 'shine', label: 'Shine' },
+  { id: 'drift', label: 'Drift' },
 ];
+// SOMET-677: what a newly queued prop gets unless the admin picks another.
+export const DEFAULT_PROP_FX = 'drift';
 const PROP_FX_IDS = new Set(PROP_FX_OPTIONS.map((o) => o.id));
 
 export function propFxLabel(fx) {
@@ -199,7 +202,7 @@ export function selectionKinds(rows) {
 // Selected rows + controls -> POST /jobs body. A props-only selection has no
 // actions or frames to choose (the route still wants a valid action, so idle
 // x1 stands in); prop_fx travels whenever a prop is selected.
-export function queuePayload(catalog, rows, { actions, frames, propFx = 'none' }) {
+export function queuePayload(catalog, rows, { actions, frames, propFx = DEFAULT_PROP_FX }) {
   const { props, propsOnly } = selectionKinds(rows);
   const ids = (catalog?.actions || []).map((action) => action.id);
   const body = propsOnly

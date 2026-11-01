@@ -10248,7 +10248,7 @@
       {
         "display_height": 100,
         "display_width": 80,
-        "idle_fx": "shine",
+        "idle_fx": "drift",
         "image": {
           "file": "textures/entities/bank_post.png",
           "sha256": "fcc07ef9a82c782674df6174f8fca184ed229fac9cb383350fbe9bdef16a414e"
@@ -10262,7 +10262,7 @@
       {
         "display_height": 40,
         "display_width": 40,
-        "idle_fx": "shine",
+        "idle_fx": "drift",
         "image": {
           "file": "textures/entities/bush.png",
           "sha256": "f66f74218dcaa7d8380dd387b6ca06b1910e38b1d02f3763124be3302aac1fa0"
@@ -10276,7 +10276,7 @@
       {
         "display_height": 50,
         "display_width": 60,
-        "idle_fx": "shine",
+        "idle_fx": "drift",
         "image": {
           "file": "textures/entities/chest_field.png",
           "sha256": "9cd09bda3dfc0278492d9983eccc33589305dd2979937887c59abdb86ab127f0"
@@ -10290,7 +10290,7 @@
       {
         "display_height": 60,
         "display_width": 70,
-        "idle_fx": "shine",
+        "idle_fx": "drift",
         "image": {
           "file": "textures/entities/chest_vault.png",
           "sha256": "3bc1d36825766e7254fa5520386b7bdbd1cab047e478391172707a6b335c46f7"
@@ -10304,7 +10304,7 @@
       {
         "display_height": 92,
         "display_width": 56,
-        "idle_fx": "shine",
+        "idle_fx": "drift",
         "image": {
           "file": "textures/entities/dead_tree.png",
           "sha256": "3faa306b752bb592efa8b330871ce79367b6ffea71e090aadf76dd56857b115f"
@@ -10332,7 +10332,7 @@
       {
         "display_height": 100,
         "display_width": 80,
-        "idle_fx": "shine",
+        "idle_fx": "drift",
         "image": {
           "file": "textures/entities/merchant_post.png",
           "sha256": "995e1f5018833c331c9efe3409918f8cdf78c20fc0125e113bc6df4b9341f82a"
@@ -10346,7 +10346,7 @@
       {
         "display_height": 104,
         "display_width": 64,
-        "idle_fx": "shine",
+        "idle_fx": "drift",
         "image": {
           "file": "textures/entities/pine_tree.png",
           "sha256": "af5f1bbc744b99d658f4313c4a521eb5d03344ff03c7ef3006d44be082519335"
@@ -10360,7 +10360,7 @@
       {
         "display_height": 130,
         "display_width": 110,
-        "idle_fx": "shine",
+        "idle_fx": "drift",
         "image": {
           "file": "textures/entities/portal.png",
           "sha256": "21186e1b1f0bd9cfdd9492352139a4da01ac1e7b64d81df5fe4431d92856e753"
@@ -10374,7 +10374,7 @@
       {
         "display_height": 44,
         "display_width": 40,
-        "idle_fx": "shine",
+        "idle_fx": "drift",
         "image": {
           "file": "textures/entities/rose_bush.png",
           "sha256": "27dbe86ba18ee8db94f5c481a194b31bab8e29e56722f9409112edfa7c6fce4f"
@@ -10388,7 +10388,7 @@
       {
         "display_height": 100,
         "display_width": 80,
-        "idle_fx": "shine",
+        "idle_fx": "drift",
         "image": {
           "file": "textures/entities/skill_merchant_post.png",
           "sha256": "4f4fb8a63cd452e9727526a31b5adf856a1d7e9c632b93450050370c90d91e77"

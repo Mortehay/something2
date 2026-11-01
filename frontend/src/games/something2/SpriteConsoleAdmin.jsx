@@ -9,7 +9,7 @@ import {
 } from './useSpriteConsole.js';
 import {
   cellCount, conceptImageOf, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, batchProgress, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
-  PROP_FX_OPTIONS, propFxLabel, queueButtonLabel, queuePayload, queueIsLive, selectionKinds, spriteShape, toggleSpriteSubject,
+  DEFAULT_PROP_FX, PROP_FX_OPTIONS, propFxLabel, queueButtonLabel, queuePayload, queueIsLive, selectionKinds, spriteShape, toggleSpriteSubject,
 } from './spriteSelection.js';
 
 const Wrap = styled.div`
@@ -183,8 +183,8 @@ function SpriteConsoleAdmin() {
   const [chosenActions, setChosenActions] = useState(null);
   // SOMET-669: 8 by default; `frames` below clamps it to the box's own cap.
   const [chosenFrames, setChosenFrames] = useState(8);
-  // Props v2: the idle effect selected props get in game (prop_fx).
-  const [propFx, setPropFx] = useState('none');
+  // Props v2: the idle effect selected props get in game (prop_fx); drift by default.
+  const [propFx, setPropFx] = useState(DEFAULT_PROP_FX);
   const queue = useQueueSprites();
   const start = useStartSpriteBatch();
   const stop = useStopSpriteBatch();

@@ -14,12 +14,14 @@ const { seedFor } = require('./artJobQueue.js');
 // frames_per_action so older readers of `frames` still see the frame count.
 // For a prop ('object') row the actions are not drawn (Props v2: one edited
 // static image, no sheet); its in-game idle effect is `propFx` (none | sway |
-// shine), stored as prop_fx on prop rows only and copied to
+// shine | drift), stored as prop_fx on prop rows only and copied to
 // entity_types.idle_fx on approve. Creature rows get NULL.
 const DEFAULT_ACTIONS = { creature: ['idle', 'walk'], object: ['idle'] };
-const PROP_FX = ['none', 'sway', 'shine'];
+const PROP_FX = ['none', 'sway', 'shine', 'drift'];
+// SOMET-677: a prop queued without an effect drifts.
+const DEFAULT_PROP_FX = 'drift';
 
-async function enqueue(db, targets, { actions, framesPerAction, propFx = 'none' } = {}) {
+async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT_PROP_FX } = {}) {
   if (!PROP_FX.includes(propFx)) throw new Error(`propFx must be one of ${PROP_FX.join(', ')}`);
   if (!Array.isArray(targets) || targets.length === 0) return { rows: [], updated: [], unknown: [] };
   const normalized = targets
@@ -423,4 +425,4 @@ async function queueView(db) {
   return { stats: counts, jobs: active.rows };
 }
 
-module.exports = { enqueue, claim, attach, attachBox, complete, fail, requeueStale, requeueHalted, createRedraw, attachRedrawTask, recordRedrawSheet, discardRedraw, deleteGeneratedRows, setNote, lastSecondsPerCell, queuedCells, stats, queueView, PROP_FX };
+module.exports = { enqueue, claim, attach, attachBox, complete, fail, requeueStale, requeueHalted, createRedraw, attachRedrawTask, recordRedrawSheet, discardRedraw, deleteGeneratedRows, setNote, lastSecondsPerCell, queuedCells, stats, queueView, PROP_FX, DEFAULT_PROP_FX };

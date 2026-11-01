@@ -233,8 +233,8 @@ test('enqueue gives props one facing', { skip }, async () => {
     assert.deepEqual(byEntity.get(creature.id).directions, FACINGS);
     assert.deepEqual(byEntity.get(prop.id).directions, ['s']);
     assert.deepEqual(byEntity.get(prop.id).actions, ['idle', 'sway']);
-    // Props v2: no propFx means none on the prop row; creatures carry NULL.
-    assert.equal(byEntity.get(prop.id).prop_fx, 'none');
+    // Props v2: no propFx means drift (SOMET-677) on the prop row; creatures carry NULL.
+    assert.equal(byEntity.get(prop.id).prop_fx, 'drift');
     assert.equal(byEntity.get(creature.id).prop_fx, null);
   });
 });
@@ -258,7 +258,7 @@ test('enqueue stores the chosen prop effect on prop rows only', { skip }, async 
     assert.equal(byEntity.get(creature.id).prop_fx, null);
     await assert.rejects(
       queue.enqueue(client, [{ entityId: prop.id }], { actions: ['idle'], propFx: 'glow' }),
-      /propFx must be one of none, sway, shine/,
+      /propFx must be one of none, sway, shine, drift/,
     );
   });
 });

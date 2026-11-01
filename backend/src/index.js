@@ -549,7 +549,7 @@ async function getEntityTypesMap() {
       render_mode: row.render_mode,
       sprite: row.sprite,
       // Props v2: the procedural idle effect the renderer gives an approved
-      // GPU-box prop's static image (systems/sway.js, systems/shine.js): none | sway | shine.
+      // GPU-box prop's static image (systems/sway.js, systems/shine.js, systems/drift.js): none | sway | shine | drift.
       idle_fx: IDLE_FX.includes(row.idle_fx) ? row.idle_fx : 'none',
       prompt: row.prompt,
       // SOMET-493 -- what the inspect card's aggression badge is derived from.
@@ -822,8 +822,8 @@ app.get('/api/map/tiles', async (req, res) => {
 // because `e.displayWidth || e.width || 40` treats 0 as falsy.
 const MAX_ENTITY_DISPLAY_PX = 400;
 
-// entity_types.idle_fx values (CHECK in migration 1714440824000).
-const IDLE_FX = ['none', 'sway', 'shine'];
+// entity_types.idle_fx values (CHECK in migrations 1714440824000, 1714440844000).
+const IDLE_FX = ['none', 'sway', 'shine', 'drift'];
 
 function entityTypeFieldError(body) {
   // SOMET-453. The pin rule lives in ONE place (services/providerPin.js) and is
@@ -1135,7 +1135,7 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
         loot_rarity_bias = CASE WHEN $49::boolean THEN $50::numeric ELSE entity_types.loot_rarity_bias END,
         loot_chest = CASE WHEN $51::boolean THEN $52::boolean ELSE entity_types.loot_chest END,
         -- Props v2: omitted leaves the effect alone (entityTypeFieldError
-        -- already refused anything but none|sway|shine).
+        -- already refused anything but none|sway|shine|drift).
         idle_fx = CASE WHEN $53::boolean THEN $54::text ELSE entity_types.idle_fx END,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = $55 RETURNING *`,
