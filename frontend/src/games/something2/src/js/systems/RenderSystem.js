@@ -17,6 +17,7 @@ import { layoutInventory, drawInventory } from "./inventoryPanel.js";
 import { layoutPassiveTree, drawPassiveTree } from "./passiveTreePanel.js";
 import { layoutSkillsPanel, drawSkillsPanel } from "./skillsPanel.js";
 import { layoutGemShopPanel, drawGemShopPanel } from "./gemShopPanel.js";
+import { layoutForgePanel, drawForgePanel } from "./forgePanel.js";
 import { layoutQuestLog, drawQuestLog } from "./questLogPanel.js";
 import { drawQuestTracker } from "./questTracker.js";
 import { drawDpsMeter } from "./dpsMeterPanel.js";
@@ -365,6 +366,8 @@ export class RenderSystem {
     gemQuestCtx = null, ownedGemIds = null, gemPlayerLevel = 1,
     // Skill Trainer / Merchant
     skillMerchants = [],
+    // The village blacksmith (enchanting) and his menu: `forgeState` is the panel's whole input.
+    blacksmiths = [], forgeOpen = false, forgeState = null,
     // Dedicated Quest Giver / Elder NPC
     questGivers = [],
     questNodes = [],
@@ -428,7 +431,7 @@ export class RenderSystem {
     // panel — and, more importantly, must not hit-test the world hidden behind
     // one and let a click pin something the player cannot see.
     const panelOpen = (inventoryOpen && !!inventory) || (shopOpen && !!shop) || (bankOpen && !!bank)
-      || (passiveTreeOpen && !!passiveIndex) || skillsOpen || gemShopOpen || questLogOpen;
+      || (passiveTreeOpen && !!passiveIndex) || skillsOpen || gemShopOpen || forgeOpen || questLogOpen;
     this.ctx.fillStyle = "#0f3460";
     this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     // Timestamp for this frame; animated tile textures advance off it (unlike
@@ -539,6 +542,9 @@ export class RenderSystem {
     for (const sm of skillMerchants) {
       drawables.push({ kind: "skillMerchant", ref: sm, order: 0, depth: depthKey(sm.x, sm.y) });
     }
+    for (const bs of blacksmiths) {
+      drawables.push({ kind: "blacksmith", ref: bs, order: 0, depth: depthKey(bs.x, bs.y) });
+    }
     for (const qg of questGivers) {
       drawables.push({ kind: "questGiver", ref: qg, order: 0, depth: depthKey(qg.x, qg.y) });
     }
@@ -575,6 +581,7 @@ export class RenderSystem {
       else if (d.kind === "merchant") this.drawMerchant(d.ref, player);
       else if (d.kind === "gem_merchant") this.drawGemMerchant(d.ref, player);
       else if (d.kind === "skillMerchant") this.drawSkillMerchant(d.ref, player);
+      else if (d.kind === "blacksmith") this.drawBlacksmith(d.ref, player);
       else if (d.kind === "questGiver") this.drawQuestGiver(d.ref, player);
       else if (d.kind === "questNode") this.drawQuestNode(d.ref, player);
       else if (d.kind === "bank") this.drawBank(d.ref, player);
@@ -721,6 +728,17 @@ export class RenderSystem {
         ownedGemIds,
         playerLevel: gemPlayerLevel,
       }, this._gemShopHitAreas);
+    }
+
+    // The blacksmith's enchanting menu. Raw canvas space like every panel; its hit areas are
+    // rebuilt each frame and only exist while it is open.
+    this._forgeHitAreas = [];
+    this._forgeLayout = null;
+    if (forgeOpen && forgeState) {
+      const forgeLayout = layoutForgePanel(forgeState);
+      for (const a of forgeLayout.hitAreas) this._forgeHitAreas.push(a);
+      drawForgePanel(this.ctx, forgeLayout, forgeState, this.nowMs || 0);
+      this._forgeLayout = forgeLayout;
     }
 
     // Shop panel overlay (Slice D) — same overlay convention as the
@@ -3159,6 +3177,58 @@ export class RenderSystem {
 
   // Skill Merchant / Trainer: fixed world marker opposite the bank chest.
   // Azure/cyan diamond (#38bdf8) with star symbol and "[e] Skills" prompt.
+  // The village blacksmith. Until an admin binds art to the kind he is a forge-orange anvil
+  // marker with a label, like the other posts' placeholders.
+  drawBlacksmith(bs, player = null) {
+    const s = worldToScreen(bs.x, bs.y);
+    const dx = s.x, dy = s.y;
+    const r = 12;
+    this.ctx.save();
+    const drewArt = this._drawPointArtAt(bs.art, bs.x, bs.y, pointStateTreatment("blacksmith", bs));
+    if (!drewArt) {
+      // An anvil: a flat top on a narrow waist and a base.
+      this.ctx.fillStyle = "#f97316";
+      this.ctx.strokeStyle = "rgba(0,0,0,0.65)";
+      this.ctx.lineWidth = 2;
+      this.ctx.beginPath();
+      this.ctx.moveTo(dx - r, dy - 6);
+      this.ctx.lineTo(dx + r, dy - 6);
+      this.ctx.lineTo(dx + r - 5, dy);
+      this.ctx.lineTo(dx + 4, dy);
+      this.ctx.lineTo(dx + 7, dy + 8);
+      this.ctx.lineTo(dx - 7, dy + 8);
+      this.ctx.lineTo(dx - 4, dy);
+      this.ctx.lineTo(dx - r + 5, dy);
+      this.ctx.closePath();
+      this.ctx.fill();
+      this.ctx.stroke();
+      this.ctx.fillStyle = "#fff7ed";
+      this.ctx.font = "bold 10px sans-serif";
+      this.ctx.textAlign = "center";
+      this.ctx.textBaseline = "middle";
+      this.ctx.fillText("🔨", dx, dy - 12);
+    }
+    this.ctx.font = "12px sans-serif";
+    this.ctx.textBaseline = "alphabetic";
+    this.ctx.textAlign = "center";
+    this.ctx.fillStyle = "#fff";
+    const lift = drewArt ? drewArt : r + 4;
+    this.ctx.fillText("Blacksmith", dx, dy - lift - 6);
+    if (player) {
+      const pcx = player.x + (player.width || 0) / 2;
+      const pcy = player.y + (player.height || 0) / 2;
+      if (Math.hypot(bs.x - pcx, bs.y - pcy) <= WORLD_CHEST_PROMPT_R) {
+        this.ctx.font = "bold 11px sans-serif";
+        this.ctx.fillStyle = "#fb923c";
+        this.ctx.strokeStyle = "rgba(0,0,0,0.85)";
+        this.ctx.lineWidth = 2;
+        this.ctx.strokeText("[e] Enchant", dx, dy + r + 14);
+        this.ctx.fillText("[e] Enchant", dx, dy + r + 14);
+      }
+    }
+    this.ctx.restore();
+  }
+
   drawSkillMerchant(sm, player = null) {
     const s = worldToScreen(sm.x, sm.y);
     const dx = s.x, dy = s.y;
@@ -5029,9 +5099,8 @@ export class RenderSystem {
       // its single-writer progression row and this method stays a pass-through.
       character: v.character || null,
       modPage: v.modPage || 0,
-      // The Enchant button's inputs (server odds; the weapon armed for its second click).
+      // The server's enchant odds, for the tooltip's real-damage line.
       enchantCfg: v.enchantCfg || null,
-      enchantArmedItemId: v.enchantArmedItemId ?? null,
       playerImage: this.imageManager ? this.imageManager.get(v.playerImageKey || "player") : null,
     };
     const layout = layoutInventory(state);

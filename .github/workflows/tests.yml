@@ -1,0 +1,80 @@
+# The test suites, on every push to main and every pull request.
+#
+# The backend suite runs against a database built FROM NOTHING by scripts/testdb.js (every
+# migration, then the database-only seeds), not against a long-lived shared one. That is
+# the point: it proves a clean install works, and one stale row or hand-applied column on
+# somebody's dev database can neither hide a broken migration nor fail an unrelated test.
+#
+# NOT VERIFIED IN CI YET: this file was written alongside the script and rehearsed only as
+# `make test-clean` against the dev Postgres. Expect to adjust it on its first real run
+# (Redis, MinIO and the compose-file tests are the likeliest to need attention -- those
+# tests are failing on a local clean run too, for environment reasons, not code reasons).
+
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: game_db
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U user -d game_db"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+    env:
+      # scripts/testdb.js derives game_test from this and never touches game_db itself.
+      DATABASE_URL: postgres://user:password@localhost:5432/game_db
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: ci-only-secret-not-used-anywhere-else-0123456789abcdef
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - name: Backend tests on a freshly migrated, seeded database
+        # `node --test` exits non-zero on a failed OR timed-out subtest. Trust the exit
+        # code, not the summary line (see AGENTS.md, "Reading a test run").
+        run: node scripts/testdb.js run
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: The generated skill catalog is current
+        run: npm run skills:check
+      - name: Frontend tests
+        run: npx vitest run

@@ -194,7 +194,7 @@ export function layoutSkillsPanel(state) {
     // area so the click can say why nothing happened.
     let upgrade = null;
     if (isOwned && skillLevelingCfg) {
-      const plan = skillUpgradePlan(skillLevels, gem.id, playerGold, skillLevelingCfg);
+      const plan = skillUpgradePlan(skillLevels, gem.id, playerGold, skillLevelingCfg, gem.tier);
       const quickStart = rowBox.x + rowBox.w - 9 * (18 + 2) - 4;
       upgrade = { x: quickStart - 156, y: gy + 4, w: 150, h: 20, plan };
       if (!plan.maxed) gemHitAreas.push({ kind: "skills_upgrade", skillId: gem.id, box: upgrade });

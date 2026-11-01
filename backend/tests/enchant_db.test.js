@@ -319,7 +319,7 @@ test('buying the scroll from a shelf gives an unenchanted scroll for the listed 
   if (pool.unreachable) { t.skip(pool.unreachable); return; }
   let fx = null;
   t.after(async () => { await cleanup(pool, fx); await pool.end().catch(() => {}); });
-  fx = await fixture(pool, 'shop', { gold: 1000 });
+  fx = await fixture(pool, 'shop', { gold: 5000 });
   const { seedBaseCatalog } = require('../src/services/merchantStock.js');
   await seedBaseCatalog(pool, fx.worldId, fx.villageId);
   const stype = await scrollTypeId(pool);
@@ -330,7 +330,7 @@ test('buying the scroll from a shelf gives an unenchanted scroll for the listed 
   p.gold = 1000;
   const bought = await buyStock(pool, entry, uid(fx), fx.characterId, shelf.rows[0].id, fx.villageId);
   assert.strictEqual(bought.ok, true, bought.reason);
-  assert.strictEqual(bought.gold, 1000 - Number(shelf.rows[0].price));
+  assert.strictEqual(bought.gold, 5000 - Number(shelf.rows[0].price));
   assert.strictEqual(bought.item.typeId, stype);
   assert.strictEqual(bought.item.enchantLevel, 0);
 });

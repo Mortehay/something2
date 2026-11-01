@@ -35,6 +35,8 @@ const EXCLUDED = {
   invite_codes: 'account invite codes',
   characters: 'player characters',
   character_passives: 'player progression state',
+  character_gems: 'player-owned skill gems (bought, or claimed once from the old browser list)',
+  character_skill_levels: 'player-purchased skill levels',
   character_quests: 'player quest progress',
   character_reputation: 'player village standing',
   character_summons: 'player runtime summons',

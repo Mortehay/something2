@@ -201,18 +201,22 @@ function cooldownFloorOf(progression) {
 // attackSpeedMult, magic -> castSpeedMult) and the cooldownFloor. Computed here
 // and sent to the client with the rest of the bundle, so the client's hotbar
 // timer and the server's cooldown gate cannot be two copies of the rule.
-function skillCooldownMults(progression, dexMult, floor) {
+// `shares` is injectable so a test can give melee and spell different haste shares.
+function skillCooldownMults(progression, dexMult, floor, shares = C.SKILL_HASTE_SHARE_BY_KIND) {
   const rules = rulesOf(progression);
   const speed = (k) => (Number(rules[k]) > 0 ? Number(rules[k]) : 1);
   // The tree's own skillCooldownMult (product, below 1 = faster) stacks on top of
   // the haste share, with a floor so a stack of them cannot make a skill free.
   const own = Number(rules.skillCooldownMult) > 0 ? Number(rules.skillCooldownMult) : 1;
-  const share = (speedRule) => {
+  const share = (speedRule, kindShare) => {
     const full = Math.max(floor, dexMult / speedRule);
-    const hasted = Math.min(1, 1 - (1 - full) * C.SKILL_HASTE_SHARE);
+    const hasted = Math.min(1, 1 - (1 - full) * kindShare);
     return round4(Math.max(C.SKILL_MIN_COOLDOWN_MULT, hasted * own));
   };
-  return { melee: share(speed('attackSpeedMult')), spell: share(speed('castSpeedMult')) };
+  return {
+    melee: share(speed('attackSpeedMult'), shares.melee),
+    spell: share(speed('castSpeedMult'), shares.spell),
+  };
 }
 
 function derivePlayerStats(progression, classPools = null) {
@@ -393,6 +397,6 @@ function applyDeathPenalty(experience, level, unit) {
 }
 
 module.exports = {
-  derivePlayerStats, xpFloor, xpToNext, levelForXp, xpForKill,
+  derivePlayerStats, skillCooldownMults, xpFloor, xpToNext, levelForXp, xpForKill,
   applyDeathPenalty, DEFAULT_PROGRESSION,
 };

@@ -56,9 +56,9 @@ test('only weapons can be enchanted', () => {
 
 test('each level adds a fixed share of the base damage', () => {
   assert.equal(enchant.damageMultiplier(0), 1);
-  assert.equal(enchant.damageMultiplier(1), 1.08);
-  assert.equal(enchant.damageMultiplier(15), 2.2);
-  assert.equal(enchant.damageMultiplier(99), 2.2, 'clamped at the cap');
+  assert.equal(enchant.damageMultiplier(1), 1.24);
+  assert.equal(enchant.damageMultiplier(15), 4.6);
+  assert.equal(enchant.damageMultiplier(99), 4.6, 'clamped at the cap');
   assert.equal(enchant.damageMultiplier(-3), 1);
 });
 
@@ -471,7 +471,7 @@ test('the equipped weapon\'s damage is scaled by its enchant level', () => {
   assert.equal(type(0).damage, 10);
   assert.equal(type(0).enchantLevel, undefined, 'an unenchanted weapon is returned as is');
   assert.equal(type(5).damage, 10 * enchant.damageMultiplier(5));
-  assert.equal(type(15).damage, 10 * 2.2);
+  assert.equal(type(15).damage, 10 * enchant.damageMultiplier(15));
   assert.equal(type(15).enchantLevel, 15);
 });
 

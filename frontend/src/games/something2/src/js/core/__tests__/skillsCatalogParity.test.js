@@ -64,3 +64,28 @@ describe('per-skill element, attribute and projectile flag match the backend', (
     expect(sig(SKILLS)).toEqual(sig(backend.SKILLS));
   });
 });
+
+// The client's catalog is no longer a hand-kept copy: it is GENERATED from the
+// server's by scripts/generate-skills-catalog.mjs. Two guards keep that true.
+describe('the client catalog is generated from the server catalog', () => {
+  it('is deeply identical to the server catalog, field for field', () => {
+    // Order aside (the client floats the Druid forms first), every skill matches in
+    // every field -- name, description, cost, cooldown, element, attribute, flags.
+    const byId = new Map(backend.SKILLS.map((s) => [s.id, s]));
+    expect(SKILLS.length).toBe(backend.SKILLS.length);
+    for (const s of SKILLS) expect(s).toEqual(byId.get(s.id));
+  });
+
+  it('skillsCatalog.generated.js is up to date with the server file', async () => {
+    const { renderCatalog, loadServerSkills, OUT_FILE } = await import('../../../../../../../scripts/generate-skills-catalog.mjs');
+    const fs = await import('node:fs');
+    expect(fs.readFileSync(OUT_FILE, 'utf8')).toBe(renderCatalog(loadServerSkills()));
+  });
+
+  it('no hand-written copy of the catalog is left in skillsData.js', async () => {
+    const fs = await import('node:fs');
+    const src = fs.readFileSync(path.resolve(__dirname, '../skillsData.js'), 'utf8');
+    expect(src).toContain('skillsCatalog.generated.js');
+    expect(src).not.toMatch(/id: 'war_crushing_blow'/);
+  });
+});

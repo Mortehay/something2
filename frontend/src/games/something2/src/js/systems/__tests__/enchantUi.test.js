@@ -152,39 +152,14 @@ describe("the inventory mirror keeps the enchant level", () => {
 });
 
 describe("inventory panel", () => {
-  const view = (level, scrolls, armed = null) => {
+  it("no longer offers an Enchant button: enchanting happens at the blacksmith", () => {
     const inventory = inventoryWith([
-      { id: "w", typeId: 1, quantity: 1, enchantLevel: level },
-      ...(scrolls ? [{ id: "s", typeId: 2, quantity: scrolls }] : []),
+      { id: "w", typeId: 1, quantity: 1, enchantLevel: 2 },
+      { id: "s", typeId: 2, quantity: 3 },
     ], [SWORD, SCROLL]);
-    return layoutInventory({ inventory, selectedItemId: "w", enchantCfg: CFG, enchantArmedItemId: armed });
-  };
-
-  it("shows an Enchant button for a selected weapon, clickable only when usable", () => {
-    const ok = view(2, 1);
-    expect(ok.footer.enchant).toBeTruthy();
-    expect(ok.hitAreas.some((a) => a.kind === "enchant" && a.id === "w")).toBe(true);
-
-    const noScroll = view(2, 0);
-    expect(noScroll.footer.enchant.enabled).toBe(false);
-    expect(noScroll.hitAreas.some((a) => a.kind === "enchant")).toBe(false);
-
-    const maxed = view(15, 3);
-    expect(maxed.footer.enchant.plan.maxed).toBe(true);
-    expect(maxed.hitAreas.some((a) => a.kind === "enchant")).toBe(false);
-  });
-
-  it("is armed for the confirming click on a dangerous level", () => {
-    const l = view(5, 1, "w");
-    expect(l.footer.enchant.armed).toBe(true);
-    expect(l.footer.enchant.label).toContain("BURNS");
-  });
-
-  it("has no button for armor or without a config", () => {
-    const inventory = inventoryWith([{ id: "v", typeId: 3, quantity: 1 }], [VEST]);
-    expect(layoutInventory({ inventory, selectedItemId: "v", enchantCfg: CFG }).footer.enchant).toBeNull();
-    const inv2 = inventoryWith([{ id: "w", typeId: 1, quantity: 1 }], [SWORD]);
-    expect(layoutInventory({ inventory: inv2, selectedItemId: "w" }).footer.enchant).toBeNull();
+    const layout = layoutInventory({ inventory, selectedItemId: "w", enchantCfg: CFG });
+    expect(layout.footer.enchant).toBeUndefined();
+    expect(layout.hitAreas.some((a) => a.kind === "enchant")).toBe(false);
   });
 
   it("the tooltip names the level and shows the real damage", () => {

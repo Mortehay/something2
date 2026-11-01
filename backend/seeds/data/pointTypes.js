@@ -17,13 +17,13 @@ const { styleEntityPrompt } = require('./spritePrompt.js');
 
 const POINT_KINDS = [
   'portal', 'waypoint', 'merchant', 'bank', 'gem_merchant', 'skill_merchant',
-  'chest_vault', 'chest_field', 'quest_giver',
+  'chest_vault', 'chest_field', 'quest_giver', 'blacksmith',
 ];
 
 // The posts that hang off ONE villages row (fetchVillages derives all but the
 // merchant from merchant_x/merchant_y and the village box). Order matters
 // nowhere; the column mapping does.
-const VILLAGE_POST_KINDS = ['merchant', 'bank', 'gem_merchant', 'skill_merchant', 'quest_giver'];
+const VILLAGE_POST_KINDS = ['merchant', 'bank', 'gem_merchant', 'skill_merchant', 'quest_giver', 'blacksmith'];
 
 function villageArtColumn(kind) {
   if (!VILLAGE_POST_KINDS.includes(kind)) throw new Error(`${kind} is not a village post kind`);
@@ -45,6 +45,8 @@ const POINT_TYPES = [
   pointType('bank_post',           'bank',           '#c084fc',  80, 100, 'a sturdy iron-bound strongbox on a stone pedestal'),
   pointType('gem_merchant_post',   'gem_merchant',   '#c084fc',  80, 100, 'a jeweller\'s stall with a velvet tray of glowing gems'),
   pointType('skill_merchant_post', 'skill_merchant', '#c084fc',  80, 100, 'a scholar\'s lectern stacked with open spellbooks and scrolls'),
+  // The village smith, who enchants weapons. Stands in the village cottage.
+  pointType('blacksmith_post',     'blacksmith',     '#f97316',  90, 110, 'a burly village blacksmith in a leather apron beside an anvil and a glowing forge'),
   pointType('chest_vault',         'chest_vault',    '#e0b64e',  70,  60, 'an ornate gilded treasure chest with heavy iron bands'),
   pointType('chest_field',         'chest_field',    '#8a8f98',  60,  50, 'a small weathered wooden chest half sunk in grass'),
   // SOMET-678. Quest givers are the one kind with several types: one entity

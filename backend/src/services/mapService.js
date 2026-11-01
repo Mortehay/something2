@@ -1627,6 +1627,17 @@ function villageCottage(v) {
   };
 }
 
+// Blacksmith post: stands inside the village cottage -- the building that used to house
+// nobody. The post is DERIVED from the village box (nothing is stored), so every village that
+// already exists has a smith with no backfill. The cottage is the SMITHY now; the function
+// keeps its old name because the stamping, collision and guard code all call it by that name.
+function villageBlacksmithPost(v) {
+  const house = villageCottage(v);
+  const row = house.minRow + 1;
+  const col = house.minCol + 1;
+  return { x: col * 100 + 50, y: row * 100 + 50 };
+}
+
 // Village Tavern / Common Lodge.
 function villageTavern(v) {
   const w = 5, h = 4;
@@ -2005,6 +2016,7 @@ module.exports = {
     villageBankPost,
     villageGemMerchantPost,
     villageSkillMerchantPost,
+    villageBlacksmithPost,
     villageSkillHouse,
     villageQuestHouse,
     villageQuestGiverPost,

@@ -7,6 +7,7 @@
 const { rollDrops } = require('./loot.js');
 const { rollRarity } = require('./rarity.js');
 const { rollItemInstance } = require('./affixes.js');
+const { appendChestScrolls } = require('./scrollDrops.js');
 const { xpForKill } = require('../services/playerStats.js');
 const { awardXp, loadProgression } = require('../services/progressionStore.js');
 
@@ -58,6 +59,8 @@ async function openChest(pool, chestId, characterId, {
   rng = Math.random, freeSlots = Infinity,
   rarityAnchors = null, affixPool = [], itemTypes = null,
   vaultReopenMs = VAULT_REOPEN_MS,
+  // OPT-IN (see scrollDrops.js): the live world entry's scrollRng; fixtures pass nothing.
+  scrollRng = null,
 } = {}) {
   const client = await pool.connect();
   try {
@@ -151,6 +154,9 @@ async function openChest(pool, chestId, characterId, {
     }
 
     const itemTypeIds = await rollChestLoot(client, chest.guard_level, rng);
+    // An enchant scroll, sometimes. Appended AFTER the gear roll so it can never change what
+    // the gear roll produced.
+    const chestScrollId = appendChestScrolls(itemTypeIds, itemTypes, scrollRng);
     const items = [];
     // The chest has already been CAS'd open above and can never be re-opened,
     // so refusing here would DESTROY the loot. Grant what fits and hand the
@@ -182,16 +188,18 @@ async function openChest(pool, chestId, characterId, {
       // an out-of-band guard_level cannot make the grant throw and cost the
       // player loot the chest has already been CAS'd open to give them.
       const itemLevel = Math.min(150, Math.max(1, Math.round(Number(chest.guard_level)) || 1));
-      const rarity = rarityAnchors ? rollRarity(itemLevel, rarityAnchors, rng) : 'white';
-      const rolled = rollItemInstance(
-        {
-          itemType: itemTypes ? itemTypes.get(itemTypeId) : null,
-          itemLevel,
-          rarity,
-          affixPool,
-        },
-        rng,
-      );
+      // A scroll is a plain white item with nothing rolled on it, and takes no random numbers.
+      const rolled = itemTypeId === chestScrollId
+        ? { rarity: 'white', itemLevel: 1, affixes: [] }
+        : rollItemInstance(
+          {
+            itemType: itemTypes ? itemTypes.get(itemTypeId) : null,
+            itemLevel,
+            rarity: rarityAnchors ? rollRarity(itemLevel, rarityAnchors, rng) : 'white',
+            affixPool,
+          },
+          rng,
+        );
       const ins = await client.query(
         `INSERT INTO player_items (character_id, item_type_id, quantity, rarity, item_level)
          VALUES ($1,$2,1,$3,$4) RETURNING id, item_type_id, quantity, rarity, item_level`,

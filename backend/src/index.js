@@ -5293,7 +5293,8 @@ app.get('/api/worlds/:id/villages', adminGuard, async (req, res) => {
       // already returned is unchanged.
       `SELECT id, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y, merchant_x, merchant_y,
               spec_key, merchant_entity_type_id, bank_entity_type_id,
-              gem_merchant_entity_type_id, skill_merchant_entity_type_id, quest_giver_entity_type_id
+              gem_merchant_entity_type_id, skill_merchant_entity_type_id, quest_giver_entity_type_id,
+              blacksmith_entity_type_id
          FROM villages WHERE world_id = $1 ORDER BY created_at ASC`,
       [req.params.id],
     );

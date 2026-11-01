@@ -60,6 +60,9 @@
 // USAGE
 //   node scripts/repair-migration-order.js              # dry run, prints the plan
 //   node scripts/repair-migration-order.js --apply      # writes, inside one transaction
+//   node scripts/repair-migration-order.js --prune-stale [--apply]
+//                                                       # also drops the OLD name of a renumbered
+//                                                       # migration whose new name is recorded too
 //
 // Reads DATABASE_URL (or TEST_DATABASE_URL), defaulting to the local dev
 // database.
@@ -88,8 +91,12 @@ function suffixOf(name) {
 //            when the order is already correct
 //   unrun    names of files that have genuinely never run (left for migrate:up)
 //   orphans  recorded names with no file and no rename partner (left alone)
+//   stale    the subset of those that are the OLD NAME of a migration whose
+//            renumbered file is ALSO recorded -- the same migration counted twice.
+//            With `prune` they are dropped from the ledger; without it they are
+//            only reported, exactly as orphans always were.
 //   blocked  reasons the repair must NOT proceed at all
-function planRepair({ recorded, files }) {
+function planRepair({ recorded, files, prune = false }) {
   const blocked = [];
   const recordedNames = recorded.map((r) => r.name);
 
@@ -132,9 +139,36 @@ function planRepair({ recorded, files }) {
   const unrun = fileOnly.filter((f) => !matchedFiles.has(f));
   const orphans = recordedOnly.filter((r) => !matchedRecorded.has(r));
 
-  // The ledger as it would read after the renames.
+  // STALE DUPLICATES. A migration renumbered AFTER it ran on a shared database
+  // leaves its old name behind, and when the new name has run too (the database
+  // saw both branches) the ledger counts one migration twice. The old name is
+  // then an orphan whose suffix belongs to exactly one name that has a file AND
+  // a ledger row -- the file's migration has demonstrably run under its new
+  // name, so the old row carries no information and, with no file, can only
+  // break node-pg-migrate's positional order check.
+  //
+  // Deliberately narrow: exactly one live sibling per suffix, and only a name
+  // with NO file. An orphan with no sibling is a genuinely unmerged migration
+  // and is never touched.
+  const liveBySuffix = new Map();
+  for (const n of recordedNames) {
+    if (!fileSet.has(n)) continue;
+    const sfx = suffixOf(n);
+    if (!sfx) continue;
+    if (!liveBySuffix.has(sfx)) liveBySuffix.set(sfx, []);
+    liveBySuffix.get(sfx).push(n);
+  }
+  const stale = orphans.filter((o) => {
+    const sfx = suffixOf(o);
+    return sfx && (liveBySuffix.get(sfx) || []).length === 1;
+  });
+  const staleSet = new Set(prune ? stale : []);
+
+  // The ledger as it would read after the renames (and, with prune, the removal).
   const renameMap = new Map(renames.map(({ from, to }) => [from, to]));
-  const afterRename = recorded.map((r) => ({ ...r, name: renameMap.get(r.name) || r.name }));
+  const afterRename = recorded
+    .filter((r) => !staleSet.has(r.name))
+    .map((r) => ({ ...r, name: renameMap.get(r.name) || r.name }));
 
   // Current order is what node-pg-migrate reads: ORDER BY run_on, id.
   const currentOrder = [...afterRename].sort(
@@ -172,6 +206,8 @@ function planRepair({ recorded, files }) {
     reorder,
     unrun,
     orphans,
+    stale,
+    pruned: [...staleSet],
     blocked,
     ok: blocked.length === 0,
     alreadyOrdered,
@@ -186,6 +222,7 @@ function readMigrationFiles(dir = MIGRATIONS_DIR) {
 async function main() {
   const { Pool } = require('pg');
   const apply = process.argv.includes('--apply');
+  const prune = process.argv.includes('--prune-stale');
   const url = process.env.DATABASE_URL || process.env.TEST_DATABASE_URL
     || 'postgres://user:password@localhost:15432/game_db';
   const pool = new Pool({ connectionString: url, connectionTimeoutMillis: 5000 });
@@ -217,13 +254,17 @@ async function main() {
       (await pool.query('SELECT id, name, run_on FROM pgmigrations ORDER BY id')).rows, null, 2,
     ));
 
-    const plan = planRepair({ recorded, files });
+    const plan = planRepair({ recorded, files, prune });
     console.log(`recorded: ${recorded.length}   files: ${files.length}`);
     console.log(`backup:   ${backup}`);
 
     for (const r of plan.renames) console.log(`RENAME    ${r.from}  ->  ${r.to}`);
     for (const u of plan.unrun) console.log(`UNRUN     ${u}  (left for migrate:up -- this script never applies migrations)`);
-    for (const o of plan.orphans) console.log(`ORPHAN    ${o}  (recorded but no file -- applied from an unmerged branch; left alone)`);
+    for (const o of plan.orphans) {
+      console.log(plan.stale.includes(o)
+        ? `STALE     ${o}  (old name of a renumbered migration whose new name is also recorded; ${prune ? 'will be removed' : 'rerun with --prune-stale to remove'})`
+        : `ORPHAN    ${o}  (recorded but no file -- applied from an unmerged branch; left alone)`);
+    }
     for (const b of plan.blocked) console.log(`BLOCKED   ${b}`);
 
     if (!plan.ok) {
@@ -231,7 +272,7 @@ async function main() {
       process.exitCode = 1;
       return;
     }
-    if (plan.alreadyOrdered && plan.renames.length === 0) {
+    if (plan.alreadyOrdered && plan.renames.length === 0 && plan.pruned.length === 0) {
       console.log('\nLedger already agrees with the files -- nothing to do.');
       return;
     }
@@ -249,6 +290,9 @@ async function main() {
       await client.query('BEGIN');
       for (const { from, to } of plan.renames) {
         await client.query('UPDATE pgmigrations SET name = $2 WHERE name = $1', [from, to]);
+      }
+      if (plan.pruned.length) {
+        await client.query('DELETE FROM pgmigrations WHERE name = ANY($1::text[])', [plan.pruned]);
       }
       if (plan.reorder.length) {
         // Two passes: ids are the primary key, so they are parked in a
@@ -275,8 +319,9 @@ async function main() {
       if (withFiles.some((n, i) => n !== sorted[i])) {
         throw new Error('post-condition failed: ledger is still out of order after the repair');
       }
-      if (after.length !== recorded.length) {
-        throw new Error(`post-condition failed: row count changed ${recorded.length} -> ${after.length}`);
+      const kept = recorded.filter((r) => !plan.pruned.includes(r.name));
+      if (after.length !== kept.length) {
+        throw new Error(`post-condition failed: row count ${recorded.length} -> ${after.length}, expected ${kept.length}`);
       }
       // The reorder PERMUTES ids and run_on values; it must never alter one.
       // This is the assertion that would have caught the to_timestamp timezone
@@ -287,10 +332,10 @@ async function main() {
       const afterVals = (await client.query(
         `SELECT id, to_char(run_on, 'YYYY-MM-DD HH24:MI:SS.US') AS run_on_text FROM pgmigrations`,
       )).rows;
-      if (bag(afterVals.map((r) => Number(r.id))) !== bag(recorded.map((r) => r.id))) {
+      if (bag(afterVals.map((r) => Number(r.id))) !== bag(kept.map((r) => r.id))) {
         throw new Error('post-condition failed: the set of ids changed, it must only be permuted');
       }
-      if (bag(afterVals.map((r) => r.run_on_text)) !== bag(recorded.map((r) => r.run_on_text))) {
+      if (bag(afterVals.map((r) => r.run_on_text)) !== bag(kept.map((r) => r.run_on_text))) {
         throw new Error('post-condition failed: run_on values were altered, they must only be permuted');
       }
       await client.query('COMMIT');

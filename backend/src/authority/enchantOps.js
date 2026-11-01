@@ -12,6 +12,8 @@
 const enchant = require('../services/enchant.js');
 const leveling = require('../services/skillLeveling.js');
 const { getSkillById } = require('../../seeds/data/skills.js');
+const { hasFreeSlot } = require('./items.js');
+const { scrollTypeId } = require('./scrollDrops.js');
 
 // -- weapon enchanting --------------------------------------------------------
 
@@ -115,6 +117,78 @@ async function enchantItem(pool, entry, userId, characterId, scrollId, itemId, {
   }
 }
 
+// -- buying scrolls from the smith ----------------------------------------------
+
+// Buys `quantity` enchant scrolls for `quantity x scrollPrice` gold, adding them to the
+// character's existing scroll stack (or opening a new one).
+//
+// Returns { ok: true, item, added, price, gold } -- `item` is the WHOLE stack as it now stands
+// -- or { ok: false, reason }. One transaction: the gold debit and the scrolls commit together.
+async function buyScrolls(pool, entry, userId, characterId, quantity, { cfg = enchant.ENCHANT_CONFIG } = {}) {
+  const p = entry.world.getPlayer(userId);
+  if (!p || !p.inv) return { ok: false, reason: 'no player' };
+  const qty = Number(quantity);
+  if (!Number.isInteger(qty) || qty < 1) return { ok: false, reason: 'choose how many scrolls to buy' };
+  if (qty > cfg.maxScrollPurchase) return { ok: false, reason: `you can buy at most ${cfg.maxScrollPurchase} scrolls at a time` };
+  const weapons = entry.world.weapons;
+  const typeId = scrollTypeId(weapons, cfg);
+  if (typeId == null) return { ok: false, reason: 'the smith has no scrolls right now' };
+
+  // A new stack needs a free slot; adding to one does not. Checked before any money moves.
+  const cached = p.inv.items.find((it) => it.typeId === typeId);
+  if (!cached && !hasFreeSlot(p.inv, weapons)) return { ok: false, reason: 'Inventory full' };
+
+  const price = qty * cfg.scrollPrice;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // Overdraft-safe: "not enough gold" is a zero-row result, never a negative balance.
+    const gr = await client.query(
+      'UPDATE users SET gold = gold - $2 WHERE id = $1 AND gold >= $2 RETURNING gold',
+      [userId, price],
+    );
+    if (gr.rowCount !== 1) { await client.query('ROLLBACK'); return { ok: false, reason: 'not enough gold', price }; }
+
+    const stack = await client.query(
+      `SELECT id, quantity FROM player_items
+        WHERE character_id = $1 AND item_type_id = $2 AND enchant_level = 0
+        ORDER BY quantity DESC, id LIMIT 1 FOR UPDATE`,
+      [characterId, typeId],
+    );
+    let id; let total;
+    if (stack.rowCount === 1) {
+      id = stack.rows[0].id;
+      const up = await client.query('UPDATE player_items SET quantity = quantity + $2 WHERE id = $1 RETURNING quantity', [id, qty]);
+      total = Number(up.rows[0].quantity);
+    } else {
+      const ins = await client.query(
+        'INSERT INTO player_items (character_id, item_type_id, quantity) VALUES ($1, $2, $3) RETURNING id, quantity',
+        [characterId, typeId, qty],
+      );
+      id = ins.rows[0].id;
+      total = Number(ins.rows[0].quantity);
+    }
+    await client.query('COMMIT');
+
+    const gold = Number(gr.rows[0].gold) || 0;
+    p.gold = gold;
+    let item = p.inv.items.find((it) => it.id === id);
+    if (item) item.quantity = total;
+    else {
+      item = {
+        id, typeId, quantity: total, soulbound: false, rarity: 'white', itemLevel: 1, enchantLevel: 0, affixes: [],
+      };
+      p.inv.items.push(item);
+    }
+    return { ok: true, item, added: qty, price, gold };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 // -- skill leveling -----------------------------------------------------------
 
 async function loadSkillLevels(pool, characterId) {
@@ -144,8 +218,12 @@ async function upgradeSkill(pool, entry, userId, characterId, skillId, { cfg = l
   // for something the character can never cast.
   if (p.className && skill.class !== p.className) return { ok: false, reason: 'that skill is not for your class' };
 
+  // A stronger skill (higher tier) costs more at every level.
+  const tier = skill.tier;
+  // Only a skill the character has learned can be levelled (when ownership is loaded).
+  if (p.ownedGems instanceof Set && !p.ownedGems.has(skillId)) return { ok: false, reason: 'learn that skill first' };
   const current = (p.skillLevels && p.skillLevels.get(skillId)) || 0;
-  const pre = leveling.checkUpgrade(current, p.gold, cfg);
+  const pre = leveling.checkUpgrade(current, p.gold, cfg, tier);
   if (!pre.ok) return pre;
 
   const client = await pool.connect();
@@ -161,7 +239,7 @@ async function upgradeSkill(pool, entry, userId, characterId, skillId, { cfg = l
     const level = cur.rowCount === 1 ? Number(cur.rows[0].level) : 0;
     // The gold figure is irrelevant here (the UPDATE below is the real guard); only
     // the level cap and the cost matter.
-    const gate = leveling.checkUpgrade(level, Number.MAX_SAFE_INTEGER, cfg);
+    const gate = leveling.checkUpgrade(level, Number.MAX_SAFE_INTEGER, cfg, tier);
     if (!gate.ok) { await client.query('ROLLBACK'); return { ok: false, reason: gate.reason }; }
 
     const gr = await client.query(
@@ -210,4 +288,4 @@ async function upgradeSkill(pool, entry, userId, characterId, skillId, { cfg = l
   }
 }
 
-module.exports = { enchantItem, upgradeSkill, loadSkillLevels };
+module.exports = { enchantItem, buyScrolls, upgradeSkill, loadSkillLevels };

@@ -1562,6 +1562,12 @@ class World {
     const p = this.players.get(userId);
     if (!p) return { ok: false, kills: [] };
     const skill = getSkillById(skillId);
+    // A skill must be LEARNED. ownedGems is the server's record of what this character
+    // bought (loaded at join); a player without it loaded (a test, a failed read) is not
+    // locked out, so a database hiccup cannot take every skill away.
+    if (skill && p.ownedGems instanceof Set && !p.ownedGems.has(skill.id)) {
+      return { ok: false, kills: [], reason: 'not_learned', error: 'You have not learned that skill' };
+    }
     if (!skill) return { ok: false, kills: [] };
 
     // Weapon and Stat requirements verification for Skill Gems

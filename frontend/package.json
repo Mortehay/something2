@@ -10,7 +10,9 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "skills:generate": "node scripts/generate-skills-catalog.mjs",
+    "skills:check": "node scripts/generate-skills-catalog.mjs --check"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.100.6",

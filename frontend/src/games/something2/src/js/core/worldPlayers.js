@@ -12,15 +12,17 @@
 // server was verified to send the field, and nothing was drawn on screen.
 // Pulling the mapping out here makes the field list a thing a test can hold.
 
-// The fields a remote player carries into the renderer. Adding a field the
-// server sends means adding it HERE and to the list in worldPlayers.test.js.
+// What a remote player carries into the renderer: everything the server sent, plus
+// the defaults below. A new server field needs no edit here (it is spread through);
+// worldPlayers.test.js holds the contract that NO field is ever dropped.
 export function remotePlayerFromFrame(p) {
   return {
-    x: p.x,
-    y: p.y,
-    facing: p.facing,
-    hp: p.hp,
-    maxHp: p.maxHp,
+    // The frame is SPREAD first, so a field the server adds reaches the renderer
+    // without anyone remembering to name it here (the original bug: a named list
+    // dropped `aura` and the ring never drew). The entries below are only the
+    // fields that need a default or a coercion -- the server OMITS a key when it
+    // has nothing to say, and the renderer reads these as numbers.
+    ...p,
     effects: p.effects || null,
     // Defaulted to 0 rather than null: auraRingGeometry reads it as a number,
     // and the server OMITS the key entirely for a player with no aura.

@@ -27,15 +27,24 @@ const DEFAULT_ENCHANT_CONFIG = Object.freeze({
     4: 60, 5: 50, 6: 40, 7: 30, 8: 20, 9: 15, 10: 10, 11: 7, 12: 5, 13: 3, 14: 2, 15: 1,
   }),
   // Every level adds this fraction of the weapon's BASE damage (linear, not
-  // compounding): +10 is +80%, +15 is +120% with the default of 0.08.
-  damagePerLevel: 0.08,
+  // compounding): +5 is +120%, +10 is +240%, +15 is +360% with the default of 0.24.
+  damagePerLevel: 0.24,
   // The visual aura starts at this level (client + snapshot both read it).
   glowMinLevel: 4,
   // From +10 the aura turns from blue to fire red.
   glowFireLevel: 10,
   // The catalog item the scroll is, and what a merchant asks for it.
   scrollItemName: 'enchant_scroll',
-  scrollPrice: 400,
+  scrollPrice: 2000,
+  // Scrolls also DROP. Each source rolls `max` independent times at `chance`: ordinary
+  // creatures rarely, a chest more often, a boss most of all (and up to twice).
+  scrollDrops: Object.freeze({
+    creature: Object.freeze({ chance: 0.005, max: 1 }),
+    chest: Object.freeze({ chance: 0.03, max: 1 }),
+    boss: Object.freeze({ chance: 0.125, max: 2 }),
+  }),
+  // The most scrolls one purchase at the smith may buy.
+  maxScrollPurchase: 20,
 });
 
 class EnchantConfigError extends Error {}
@@ -58,6 +67,15 @@ function validateEnchantConfig(cfg) {
   if (!Number.isInteger(glowFireLevel) || glowFireLevel < glowMinLevel || glowFireLevel > maxLevel) fail('glowFireLevel must be an integer in glowMinLevel..maxLevel');
   if (typeof scrollItemName !== 'string' || scrollItemName === '') fail('scrollItemName must be a non-empty string');
   if (!Number.isInteger(scrollPrice) || scrollPrice < 0) fail('scrollPrice must be an integer >= 0');
+  const drops = cfg.scrollDrops;
+  if (!drops || typeof drops !== 'object') fail('scrollDrops must be an object keyed by source');
+  for (const kind of ['creature', 'chest', 'boss']) {
+    const d = drops[kind];
+    if (!d || typeof d !== 'object') fail(`scrollDrops.${kind} must be { chance, max }`);
+    if (typeof d.chance !== 'number' || !Number.isFinite(d.chance) || d.chance < 0 || d.chance > 1) fail(`scrollDrops.${kind}.chance must be a number in 0..1`);
+    if (!Number.isInteger(d.max) || d.max < 0 || d.max > 10) fail(`scrollDrops.${kind}.max must be an integer in 0..10`);
+  }
+  if (!Number.isInteger(cfg.maxScrollPurchase) || cfg.maxScrollPurchase < 1 || cfg.maxScrollPurchase > 99) fail('maxScrollPurchase must be an integer in 1..99');
   return cfg;
 }
 
@@ -67,13 +85,23 @@ function buildEnchantConfig(overrides = {}) {
   if (overrides == null || typeof overrides !== 'object' || Array.isArray(overrides)) {
     throw new EnchantConfigError('overrides must be an object');
   }
+  const od = overrides.scrollDrops || {};
+  const scrollDrops = {};
+  for (const kind of ['creature', 'chest', 'boss']) {
+    scrollDrops[kind] = { ...DEFAULT_ENCHANT_CONFIG.scrollDrops[kind], ...(od[kind] || {}) };
+  }
   const merged = {
     ...DEFAULT_ENCHANT_CONFIG,
     ...overrides,
     chances: { ...DEFAULT_ENCHANT_CONFIG.chances, ...(overrides.chances || {}) },
+    scrollDrops,
   };
   validateEnchantConfig(merged);
-  return Object.freeze({ ...merged, chances: Object.freeze({ ...merged.chances }) });
+  const frozenDrops = {};
+  for (const kind of Object.keys(scrollDrops)) frozenDrops[kind] = Object.freeze({ ...scrollDrops[kind] });
+  return Object.freeze({
+    ...merged, chances: Object.freeze({ ...merged.chances }), scrollDrops: Object.freeze(frozenDrops),
+  });
 }
 
 // The config the server runs with: defaults, plus ENCHANT_CONFIG_JSON if set and
@@ -152,6 +180,8 @@ function publicEnchantConfig(cfg = ENCHANT_CONFIG) {
     glowMinLevel: cfg.glowMinLevel,
     glowFireLevel: cfg.glowFireLevel,
     scrollItemName: cfg.scrollItemName,
+    scrollPrice: cfg.scrollPrice,
+    maxScrollPurchase: cfg.maxScrollPurchase,
   };
 }
 

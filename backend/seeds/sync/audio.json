@@ -1,14 +1,14 @@
 {
   "header": {
-    "exported_at": "2026-10-20T20:12:13.493Z",
-    "exported_by": "linux-dev",
+    "exported_at": "2026-11-01T18:40:37.247Z",
+    "exported_by": "unnamed-pc",
     "group": "audio",
     "row_counts": {
       "audio_bindings": 4944,
       "audio_clips": 4944,
       "audio_prompts": 1825
     },
-    "schema_version": "1714440812000_quests_objective_columns"
+    "schema_version": "1714440851000_character_gems"
   },
   "tables": {
     "audio_bindings": [

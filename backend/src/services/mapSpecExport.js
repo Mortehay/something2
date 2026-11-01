@@ -167,13 +167,15 @@ async function readState(db, worlds, otherNames, notes) {
     const villages = (await q.query(
       `SELECT v.world_id, v.spec_key, v.min_row, v.min_col, v.width, v.height, v.gate_edge,
               v.spawn_x, v.spawn_y, m.name AS merchant, b.name AS bank,
-              g.name AS gem_merchant, s.name AS skill_merchant, qg.name AS quest_giver
+              g.name AS gem_merchant, s.name AS skill_merchant, qg.name AS quest_giver,
+              bs.name AS blacksmith
          FROM villages v
          LEFT JOIN entity_types m ON m.id = v.merchant_entity_type_id
          LEFT JOIN entity_types b ON b.id = v.bank_entity_type_id
          LEFT JOIN entity_types g ON g.id = v.gem_merchant_entity_type_id
          LEFT JOIN entity_types s ON s.id = v.skill_merchant_entity_type_id
          LEFT JOIN entity_types qg ON qg.id = v.quest_giver_entity_type_id
+         LEFT JOIN entity_types bs ON bs.id = v.blacksmith_entity_type_id
         WHERE v.world_id = ANY($1::uuid[]) ORDER BY v.created_at, v.id`, [ids])).rows;
     // expires_at IS NULL: a boss-death chest (SOMET-611) is not the authored one.
     const chests = (await q.query(

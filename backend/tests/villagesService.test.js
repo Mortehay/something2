@@ -32,11 +32,13 @@ test('fetchVillages maps snake_case columns to camelCase', async () => {
     gemMerchantX: null, gemMerchantY: null,
     skillMerchantX: 1750, skillMerchantY: 650,
     questGiverX: 350, questGiverY: 650,
+    blacksmithX: 850, blacksmithY: 350, // the cottage post, derived from the box
     // SOMET-582: no *_art column in this fixture's row, so all four default
     // to null -- this exhaustive comparison is exactly where a silently
     // added/dropped join column would be caught.
     merchantArt: null, bankArt: null, gemMerchantArt: null, skillMerchantArt: null,
     questGiverArt: null, // SOMET-678
+    blacksmithArt: null,
   }]);
 });
 

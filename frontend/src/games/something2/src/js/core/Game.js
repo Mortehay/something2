@@ -22,6 +22,7 @@ import { resolveDrop } from '../systems/inventoryPanel.js';
 import {
     enchantPlan, needsConfirm, applyEnchantResult, enchantResultMessage, ENCHANT_CONFIRM_MS, skillUpgradePlan,
 } from '../systems/enchantUi.js';
+import { forgeWeapons } from '../systems/forgePanel.js';
 import {
     buildTreeIndex, hitNodeAt, clampZoom, zoomAbout, DEFAULT_ZOOM,
 } from '../systems/passiveTreePanel.js';
@@ -51,11 +52,11 @@ import { screenRadiusWorld } from "../audio/screenRadius.js";
 import {
     getSkillById, getRequiredForm, isTransformationSkill,
     isDruidExclusiveSkill, resolveSkillVfx, checkGemRequirements,
-    getSkillPrice, getSkillLevelReq,
+    getSkillPrice,
 } from "./skillsData.js";
 import {
     loadHotbarForCharacter, saveHotbarForCharacter,
-    loadUnlockedSkillsForCharacter, unlockSkillForCharacter, isSkillUnlocked,
+    loadUnlockedSkillsForCharacter,
 } from "./hotbarStorage.js";
 import { createSkillVisual, updateSkillVisuals, pruneSkillVisuals } from "./skillVisuals.js";
 import { API_URL } from "../../../../../config.js";
@@ -350,6 +351,13 @@ export class Game {
         // Dedicated Skill Gem Merchant in settlement
         this.gemMerchants = [];
         this.gemShopOpen = false;
+        // The blacksmith's enchanting menu.
+        this.blacksmiths = [];
+        this.forgeOpen = false;
+        this.forgePage = 0;
+        this.forgeSelectedId = null;
+        this.forgeResult = null;       // { outcome, level, at } -- drives the result animation
+        this._lastBuyScrollsAt = 0;
         this.gemShopColorFilter = 'all';
         this.gemShopClassFilter = 'all';
         this.gemShopPage = 0;
@@ -830,7 +838,10 @@ export class Game {
         if (className) this.passiveStartClass = className;
         this.mainStat = mainStat;
         this.hotbarSkills = loadHotbarForCharacter(characterId, this.className || className || 'Warrior');
-        this.unlockedSkills = loadUnlockedSkillsForCharacter(characterId);
+        // Ownership is the SERVER's (joined.gems). What this browser remembers is only the
+        // legacy list from before that, kept to be offered once for import.
+        this.unlockedSkills = new Set();
+        this._legacyGemIds = [...loadUnlockedSkillsForCharacter(characterId)];
         this._channeledSlot = null;
         this._channeledSkillId = null;
         this._lastChannelTick = 0;
@@ -909,8 +920,17 @@ export class Game {
                     // The server's enchant odds / skill price list, and this character's
                     // purchased skill levels. Display only: the server enforces all of it.
                     this.enchantCfg = msg.enchant || null;
+                    this.blacksmiths = Array.isArray(msg.blacksmiths) ? msg.blacksmiths : [];
+                    this.forgeOpen = false;
+                    this.forgeResult = null;
                     this.skillLevelingCfg = msg.skillLeveling || null;
                     this.skillLevels = { ...(msg.skillLevels || {}) };
+                    // The gems this character owns, from the server. A character that has
+                    // not yet claimed the gems its browser used to keep sends them once.
+                    this.unlockedSkills = new Set(msg.gems || []);
+                    this._gemsSettled = msg.gemsImported !== false || !(this._legacyGemIds && this._legacyGemIds.length);
+                    if (!this._gemsSettled && this.authorityClient) this.authorityClient.sendImportGems(this._legacyGemIds);
+                    this._reconcileGems();
                     this._enchantArmed = null;
                     this._refreshProgressionBundle();
                     // SOMET-472 -- a Cultist pays every mana cost in HP, so
@@ -935,6 +955,9 @@ export class Game {
                 onWallet: (msg) => { this.gold = Number(msg.gold) || 0; },
                 onEnchanted: (msg) => this._onEnchanted(msg),
                 onSkillUpgraded: (msg) => this._onSkillUpgraded(msg),
+                onGemBought: (msg) => this._onGemBought(msg),
+                onScrollsBought: (msg) => this._onScrollsBought(msg),
+                onGemsImported: (msg) => this._onGemsImported(msg),
                 // Interacting near a merchant opens the panel with its
                 // current stock; the server is the sole source of truth for
                 // catalog/buyback/prices, so this simply mirrors the frame.
@@ -1707,6 +1730,15 @@ export class Game {
     // remote players for the renderer.
     _onWorldState(msg) {
         this.lastServerTick = msg.tick || 0;
+        // Walk away from the smith and his menu closes: the server only enchants within reach, so an
+        // open menu out of range would just answer every click with a refusal.
+        if (this.forgeOpen && this.player) {
+            const fx = this.player.x + (this.player.width || 64) / 2;
+            const fy = this.player.y + (this.player.height || 64) / 2;
+            const near = (Array.isArray(this.blacksmiths) ? this.blacksmiths : [])
+                .some((bs) => Math.hypot(bs.x - fx, bs.y - fy) <= 220);
+            if (!near) this.forgeOpen = false;
+        }
         const next = new NativeMap();
         let mine = null;
         for (const p of (msg.players || [])) {
@@ -2050,7 +2082,7 @@ export class Game {
                 activeBuffs: [...(this.activeBuffs ? Array.from(this.activeBuffs.values()) : []), ...this.auraDebuffRows],
                 flashSlot: (nowMs < this.hotbarFlashUntil) ? this.hotbarFlashSlot : null,
                 skillCooldowns: this.skillCooldowns,
-                unlockedSkills: this.unlockedSkills || loadUnlockedSkillsForCharacter(this.characterId),
+                unlockedSkills: this.unlockedSkills || new Set(),
                 playerClass: this.className || this.passiveStartClass || (this.player && this.player.className) || "Druid",
                 hoveredSkill,
                 cursorX: this._cursorX,
@@ -2059,10 +2091,8 @@ export class Game {
                     tab: this.inventoryTab,
                     page: this.inventoryPage,
                     gold: this.gold,
-                    // The Enchant button's inputs: the server's odds, and which weapon (if any)
-                    // has its dangerous enchant armed for the confirming second click.
+                    // The server's odds, for the +N tooltip and the real-damage line.
                     enchantCfg: this.enchantCfg,
-                    enchantArmedItemId: (this._enchantArmed && performance.now() <= this._enchantArmed.until) ? this._enchantArmed.itemId : null,
                     drag: this.inventoryDrag,
                     hoverX: this._cursorX ?? null,
                     hoverY: this._cursorY ?? null,
@@ -2077,6 +2107,9 @@ export class Game {
                 merchants: this.merchants,
                 gemMerchants: this.gemMerchants,
                 gemShopOpen: this.gemShopOpen,
+                blacksmiths: this.blacksmiths,
+                forgeOpen: this.forgeOpen,
+                forgeState: this.forgeOpen ? this._forgeState() : null,
                 gemShopColorFilter: this.gemShopColorFilter,
                 gemShopClassFilter: this.gemShopClassFilter,
                 gemShopPage: this.gemShopPage,
@@ -2215,6 +2248,7 @@ export class Game {
             || (except !== "questLog" && !!this.questLogOpen)
             || (except !== "skills" && !!this.skillsOpen)
             || (except !== "gemShop" && !!this.gemShopOpen)
+            || (except !== "forge" && !!this.forgeOpen)
             || (except !== "shop" && !!this.shopOpen)
             || (except !== "bank" && !!this.bankOpen);
     }
@@ -2225,6 +2259,7 @@ export class Game {
         if (except !== 'questLog') this.closeQuestLog();
         if (except !== 'skills') this.skillsOpen = false;
         if (except !== 'gemShop') this.gemShopOpen = false;
+        if (except !== 'forge') this.forgeOpen = false;
         if (except !== 'shop') this.shopOpen = false;
         if (except !== 'bank') this.bankOpen = false;
     }
@@ -2613,7 +2648,71 @@ export class Game {
             return;
         }
 
-        if (hit.kind === 'enchant') { this._onEnchantClick(hit.id); return; }
+    }
+
+    // ---- the blacksmith's menu ----------------------------------------------------
+
+    // Opens the enchanting menu. Windows do not stack, so it refuses while another is open.
+    openForge() {
+        if (this._otherPanelOpen('forge')) return;
+        this.closeAllPanels('forge');
+        this.forgeOpen = true;
+        this.forgePage = 0;
+        this._enchantArmed = null;
+        // Start on the weapon in hand, or the best one carried.
+        const weapons = forgeWeapons(this.inventory);
+        const keep = weapons.find((w) => w.item.id === this.forgeSelectedId);
+        this.forgeSelectedId = keep ? keep.item.id : (weapons[0] ? weapons[0].item.id : null);
+    }
+
+    // Everything the panel draws, built fresh each frame (it is cheap and never stale).
+    _forgeState() {
+        const armed = this._enchantArmed && performance.now() <= this._enchantArmed.until ? this._enchantArmed.itemId : null;
+        return {
+            inventory: this.inventory, enchantCfg: this.enchantCfg, gold: this.gold || 0,
+            selectedItemId: this.forgeSelectedId, page: this.forgePage, armedItemId: armed,
+            result: this.forgeResult,
+        };
+    }
+
+    _onForgeHit(hit) {
+        if (hit.kind === 'forge_close') { this.forgeOpen = false; return; }
+        if (hit.kind === 'forge_weapon') {
+            if (this.forgeSelectedId !== hit.id) this._enchantArmed = null;   // a new weapon needs its own confirmation
+            this.forgeSelectedId = hit.id;
+            return;
+        }
+        if (hit.kind === 'forge_page') { this.forgePage = Math.max(0, this.forgePage + hit.delta); return; }
+        if (hit.kind === 'forge_enchant') { this._onEnchantClick(hit.id); return; }
+        if (hit.kind === 'forge_buy') { this._onBuyScrollsClick(hit.quantity); return; }
+    }
+
+    // The Buy button. Refused locally when the purse is short; the server checks again.
+    _onBuyScrollsClick(quantity) {
+        const cfg = this.enchantCfg;
+        if (!cfg) return;
+        const cost = quantity * (Number(cfg.scrollPrice) || 0);
+        if ((this.gold || 0) < cost) {
+            if (this.showToast) this.showToast(`🪙 Not enough gold! ${quantity} scroll${quantity === 1 ? '' : 's'} cost ${cost.toLocaleString()}g (you have ${(this.gold || 0).toLocaleString()}g)`);
+            return;
+        }
+        if (!this.authorityClient) return;
+        const now = performance.now();
+        if (now - this._lastBuyScrollsAt < 400) return;    // a double-click must not buy twice
+        this._lastBuyScrollsAt = now;
+        this.authorityClient.sendBuyScrolls(quantity);
+    }
+
+    // The server sold scrolls: it sends the whole stack, so this REPLACES rather than adds.
+    _onScrollsBought(msg) {
+        if (Number.isFinite(Number(msg.gold))) this.gold = Number(msg.gold);
+        const item = msg.item;
+        if (item && item.id != null && this.inventory && Array.isArray(this.inventory.items)) {
+            const have = this.inventory.items.find((i) => i.id === item.id);
+            if (have) have.quantity = Number(item.quantity) || have.quantity;
+            else addItem(this.inventory, item);
+        }
+        if (this.showToast) this.showToast(`📜 +${msg.added} enchant scroll${msg.added === 1 ? '' : 's'} (-${Number(msg.price).toLocaleString()}g)`);
     }
 
     // The Enchant button. A SAFE level (+1..+3) goes straight to the server; a level
@@ -2645,6 +2744,12 @@ export class Game {
 
     _onEnchanted(msg) {
         const name = applyEnchantResult(this.inventory, msg);
+        // The menu plays the result; a burnt weapon leaves the list, so move the selection off it.
+        this.forgeResult = { outcome: msg.outcome, level: msg.level, at: performance.now() };
+        if (msg.destroyed && this.forgeSelectedId === msg.itemId) {
+            const rest = forgeWeapons(this.inventory);
+            this.forgeSelectedId = rest[0] ? rest[0].item.id : null;
+        }
         this._enchantArmed = null;
         if (msg.destroyed && this.inventorySelectedItemId === msg.itemId) this.inventorySelectedItemId = null;
         const text = enchantResultMessage(msg, name);
@@ -2658,7 +2763,8 @@ export class Game {
     // The Upgrade button on a skill. Refused locally (no message sent) when the skill is
     // at the cap or the wallet is short; the server checks both again.
     _onSkillUpgradeClick(skillId) {
-        const plan = skillUpgradePlan(this.skillLevels, skillId, this.gold, this.skillLevelingCfg);
+        const skill = getSkillById(skillId);
+        const plan = skillUpgradePlan(this.skillLevels, skillId, this.gold, this.skillLevelingCfg, skill && skill.tier);
         if (plan.maxed) { if (this.showToast) this.showToast(`⭐ Already at the maximum level (${plan.max})`); return; }
         if (!plan.canAfford) {
             if (this.showToast) this.showToast(`🪙 Not enough gold! Needs ${plan.cost.toLocaleString()}g (you have ${(this.gold || 0).toLocaleString()}g)`);
@@ -2669,6 +2775,75 @@ export class Game {
         if (now - this._lastUpgradeSentAt < 400) return;   // a double-click must not buy two levels
         this._lastUpgradeSentAt = now;
         this.authorityClient.sendUpgradeSkill(skillId);
+    }
+
+    // Rebuild what the client believes it owns from the server's list, and drop hotbar
+    // entries the character never bought (a hotbar saved in this browser can outlive a
+    // gem the server does not know). Held back until the legacy import has been answered,
+    // so a character about to claim its old gems does not lose its bar in the meantime.
+    _reconcileGems() {
+        const owned = this.unlockedSkills instanceof Set ? this.unlockedSkills : new Set();
+        this.ownedGems = new Map();
+        for (const id of owned) {
+            const gem = getSkillById(id);
+            if (gem) this.ownedGems.set(id, gem);
+        }
+        if (!this._gemsSettled || !this.hotbarSkills) return;
+        let changed = false;
+        for (const [slot, gem] of [...this.hotbarSkills.entries()]) {
+            if (gem && !owned.has(gem.id)) { this.hotbarSkills.delete(slot); changed = true; }
+        }
+        if (changed && this.saveHotbar) this.saveHotbar();
+    }
+
+    // The server confirmed a purchase: gold and ownership have already changed there.
+    _onGemBought(msg) {
+        const gem = getSkillById(msg.skillId);
+        if (!gem) return;
+        if (Number.isFinite(Number(msg.gold))) this.gold = Number(msg.gold);
+        this.unlockedSkills = new Set([...(this.unlockedSkills || []), gem.id]);
+        this._reconcileGems();
+
+        // The physical gem in the bag (display only: ownership is the server's row).
+        if (!this.inventory) this.inventory = { items: [], types: new Map(), equipment: {} };
+        if (!Array.isArray(this.inventory.items)) this.inventory.items = [];
+        this.inventory.items.push({
+            id: `gem_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            typeId: 9000,
+            category: 'stone',
+            kind: 'skill_gem',
+            isGem: true,
+            name: gem.nameEn || gem.nameUk,
+            skillId: gem.id,
+            gem,
+            gemColor: gem.gemColor,
+            icon: gem.icon,
+            quantity: 1,
+            rarity: 'rare',
+        });
+
+        // Socket it into the first free hotbar slot (slot 1 if all are taken).
+        let targetSlot = 1;
+        for (let i = 1; i <= 9; i++) {
+            if (!this.hotbarSkills.has(i)) { targetSlot = i; break; }
+        }
+        this.hotbarSkills.set(targetSlot, gem);
+        this.saveHotbar();
+        if (this.showToast) {
+            this.showToast(`💎 Acquired ${gem.nameEn || gem.nameUk} & socketed into Slot ${targetSlot} (🪙 -${Number(msg.price).toLocaleString()}g)!`);
+        }
+    }
+
+    // The answer to the one-time claim of the gems this browser used to keep.
+    _onGemsImported(msg) {
+        const granted = Array.isArray(msg.granted) ? msg.granted : [];
+        this.unlockedSkills = new Set([...(this.unlockedSkills || []), ...granted]);
+        this._gemsSettled = true;
+        this._legacyGemIds = [];
+        this._reconcileGems();
+        if (granted.length > 0 && this.showToast) {
+            this.showToast(`💎 Restored ${granted.length} skill gem${granted.length === 1 ? '' : 's'} to your character`);
+        }
     }
 
     _onSkillUpgraded(msg) {
@@ -2731,7 +2906,10 @@ export class Game {
                 if (gem) this.ownedGems.set(gem.id, gem);
             }
         }
-        this.unlockedSkills = loadUnlockedSkillsForCharacter(characterId);
+        // Ownership is the SERVER's (joined.gems). What this browser remembers is only the
+        // legacy list from before that, kept to be offered once for import.
+        this.unlockedSkills = new Set();
+        this._legacyGemIds = [...loadUnlockedSkillsForCharacter(characterId)];
     }
 
     getInventoryGems() {
@@ -2786,7 +2964,6 @@ export class Game {
         }
 
         const unlocked = (this.unlockedSkills && this.unlockedSkills.has(s.id))
-            || isSkillUnlocked(this.characterId, s.id)
             || this.hotbarSkills.has(slotNum)
             || (this.ownedGems && this.ownedGems.has(s.id))
             || (this.getInventoryGems && this.getInventoryGems().some(g => g.id === s.id));
@@ -3269,7 +3446,9 @@ export class Game {
             if (isKey('escape')) {
                 if (typeof e.preventDefault === 'function') e.preventDefault();
                 console.log("Escape pressed, current state:", this.state);
-                if (this.gemShopOpen) {
+                if (this.forgeOpen) {
+                    this.forgeOpen = false;
+                } else if (this.gemShopOpen) {
                     this.gemShopOpen = false;
                 } else if (this.questLogOpen) {
                     this.closeQuestLog();
@@ -3288,6 +3467,7 @@ export class Game {
 
             // Merchant shop / Gem Merchant / Skill Trainer ('e')
             if (matchesBind('interact', 'e') && this.state === 'playing' && this.chunked && !e.repeat) {
+                if (this.forgeOpen) { this.forgeOpen = false; return; }
                 if (this.gemShopOpen) { this.gemShopOpen = false; return; }
                 if (this.shopOpen) { this.shopOpen = false; return; }
                 if (this.skillsOpen) { this.skillsOpen = false; return; }
@@ -3299,6 +3479,12 @@ export class Game {
                     .some((qg) => Math.hypot(qg.x - pcx, qg.y - pcy) <= 140);
                 if (nearQuestGiver) {
                     this.openQuestLog();
+                    return;
+                }
+                const nearSmith = (Array.isArray(this.blacksmiths) ? this.blacksmiths : [])
+                    .some((bs) => Math.hypot(bs.x - pcx, bs.y - pcy) <= 140);
+                if (nearSmith) {
+                    this.openForge();
                     return;
                 }
                 const nearSkillMerchant = (Array.isArray(this.skillMerchants) ? this.skillMerchants : [])
@@ -3471,6 +3657,15 @@ export class Game {
                 return;
             }
 
+            // The blacksmith's menu. Every click on it is spent here: the world behind it is not clicked.
+            if (this.forgeOpen) {
+                const x = this._cursorX ?? 0, y = this._cursorY ?? 0;
+                const areas = (this.renderSystem && this.renderSystem._forgeHitAreas) || [];
+                const hit = areas.find((a) => x >= a.box.x && x <= a.box.x + a.box.w && y >= a.box.y && y <= a.box.y + a.box.h);
+                if (hit) this._onForgeHit(hit);
+                return;
+            }
+
             // Gem Shop Panel Hit Areas
             if (this.gemShopOpen) {
                 const x = this._cursorX ?? 0, y = this._cursorY ?? 0;
@@ -3518,48 +3713,10 @@ export class Game {
                             if (this.showToast) this.showToast(`⚠️ Not enough Gold! Need 🪙 ${price}`);
                             return;
                         }
-                        this.gold = Math.max(0, (this.gold || 0) - price);
-
-                        // 1. Add physical Skill Gem item to inventory
-                        if (!this.inventory) this.inventory = { items: [], types: new Map(), equipment: {} };
-                        if (!Array.isArray(this.inventory.items)) this.inventory.items = [];
-
-                        const gemItem = {
-                            id: `gem_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-                            typeId: 9000,
-                            category: 'stone',
-                            kind: 'skill_gem',
-                            isGem: true,
-                            name: hit.gem.nameEn || hit.gem.nameUk,
-                            skillId: hit.gem.id,
-                            gem: hit.gem,
-                            gemColor: hit.gem.gemColor,
-                            icon: hit.gem.icon,
-                            quantity: 1,
-                            rarity: 'rare',
-                        };
-                        this.inventory.items.push(gemItem);
-
-                        if (!this.ownedGems) this.ownedGems = new Map();
-                        this.ownedGems.set(hit.gem.id, hit.gem);
-
-                        unlockSkillForCharacter(this.characterId, hit.gem.id);
-                        if (!this.unlockedSkills) this.unlockedSkills = new Set();
-                        this.unlockedSkills.add(hit.gem.id);
-
-                        // 2. Socket into first available hotbar slot or slot 1
-                        let targetSlot = 1;
-                        for (let i = 1; i <= 9; i++) {
-                            if (!this.hotbarSkills.has(i)) {
-                                targetSlot = i;
-                                break;
-                            }
-                        }
-                        this.hotbarSkills.set(targetSlot, hit.gem);
-                        this.saveHotbar();
-                        if (this.showToast) {
-                            this.showToast(`💎 Acquired ${hit.gem.nameEn || hit.gem.nameUk} in inventory & socketed into Slot ${targetSlot} (🪙 -${price}g)!`);
-                        }
+                        // The SERVER owns the purchase: it re-checks the merchant, the requirements
+                        // and the wallet, and charges gold and records ownership in one transaction.
+                        // Nothing changes here until it answers (see _onGemBought).
+                        if (this.authorityClient) this.authorityClient.sendBuyGem(hit.gem.id);
                         return;
                     }
                 }
@@ -3679,34 +3836,6 @@ export class Game {
                 const upgradeHit = areas.find((a) => a.kind === 'skills_upgrade' && x >= a.box.x && x <= a.box.x + a.box.w && y >= a.box.y && y <= a.box.y + a.box.h);
                 if (upgradeHit) { this._onSkillUpgradeClick(upgradeHit.skillId); return; }
 
-                // 1. Buy button clicks
-                const buyHit = areas.find((a) => a.kind === 'skills_buy' && x >= a.box.x && x <= a.box.x + a.box.w && y >= a.box.y && y <= a.box.y + a.box.h);
-                if (buyHit) {
-                    const price = buyHit.price ?? getSkillPrice(buyHit.skill);
-                    const lvlReq = buyHit.levelReq ?? getSkillLevelReq(buyHit.skill);
-                    const playerLvl = (this.progression && this.progression.level) || 1;
-                    if (playerLvl < lvlReq) {
-                        if (this.showToast) this.showToast(`🔒 Level too low! Requires Lvl ${lvlReq} (you are Lvl ${playerLvl})`);
-                        return;
-                    }
-                    if ((this.gold || 0) < price) {
-                        if (this.showToast) this.showToast(`🪙 Not enough gold! Requires ${price.toLocaleString()}g (you have ${(this.gold || 0).toLocaleString()}g)`);
-                        return;
-                    }
-                    this.gold -= price;
-                    unlockSkillForCharacter(this.characterId, buyHit.skillId);
-                    if (!this.unlockedSkills) this.unlockedSkills = new Set();
-                    this.unlockedSkills.add(buyHit.skillId);
-
-                    const px = (this.player && this.player.x) || 0;
-                    const py = (this.player && this.player.y) || 0;
-                    const nowMs = performance.now();
-                    addBlasts(this.blasts, [{ x: px, y: py, radius: 60, element: 'holy' }], nowMs);
-                    addEffects(this.vfx, [{ shape: 'sparkle', x: px, y: py, reach: 45, element: 'holy' }], nowMs);
-                    if (this.showToast) this.showToast(`✨ Learned: ${buyHit.skill.nameEn || buyHit.skill.nameUk} (-${price.toLocaleString()}g)`);
-                    return;
-                }
-
                 const hit = areas.find((a) => x >= a.box.x && x <= a.box.x + a.box.w && y >= a.box.y && y <= a.box.y + a.box.h);
                 if (hit) {
                     if (hit.kind === 'skills_close') {
@@ -3755,7 +3884,7 @@ export class Game {
                             return;
                         }
                         this.selectedSkillId = hit.skillId;
-                        const unlocked = (this.unlockedSkills && this.unlockedSkills.has(hit.skillId)) || isSkillUnlocked(this.characterId, hit.skillId);
+                        const unlocked = (this.unlockedSkills && this.unlockedSkills.has(hit.skillId));
                         if (!unlocked) {
                             const price = getSkillPrice(hit.skill);
                             if (this.showToast) this.showToast(`🔒 Buy this skill from the Skill Trainer first for ${price.toLocaleString()}g!`);
@@ -3947,6 +4076,9 @@ export class Game {
                 for (const sm of (Array.isArray(this.skillMerchants) ? this.skillMerchants : [])) {
                     if (pointedAt(sm)) { this.gemShopOpen = true; this.skillsOpen = false; return; }
                 }
+                for (const bs of (Array.isArray(this.blacksmiths) ? this.blacksmiths : [])) {
+                    if (pointedAt(bs)) { this.openForge(); return; }
+                }
                 for (const gm of (Array.isArray(this.gemMerchants) ? this.gemMerchants : [])) {
                     if (pointedAt(gm)) { this.gemShopOpen = true; this.skillsOpen = false; return; }
                 }
@@ -4017,7 +4149,7 @@ export class Game {
                 if (targetSlot) {
                     const s = sDrag.skill || getSkillById(sDrag.skillId) || (this.ownedGems && this.ownedGems.get(sDrag.skillId));
                     if (s) {
-                        const unlocked = (this.unlockedSkills && this.unlockedSkills.has(s.id)) || isSkillUnlocked(this.characterId, s.id);
+                        const unlocked = (this.unlockedSkills && this.unlockedSkills.has(s.id));
                         if (!unlocked) {
                             if (this.showToast) this.showToast(`🔒 Skill is locked! Buy it from Skill Trainer first.`);
                             return;

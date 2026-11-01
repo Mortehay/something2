@@ -144,7 +144,10 @@ export function skillLevelOf(levels, skillId) {
 //   { level, max, maxed, cost, canAfford, disabled, label, bonusPct }
 //
 // `disabled` is true at the cap (button blocked) and when the gold is short.
-export function skillUpgradePlan(levels, skillId, gold, cfg) {
+// `tier` is the skill's tier (1..5, carried on every catalog skill): a stronger skill
+// has a dearer price table. The tables come from the server (`costsByTier`), so this
+// never computes a price; an older config with only `costs` prices every skill alike.
+export function skillUpgradePlan(levels, skillId, gold, cfg, tier = 1) {
   if (!cfg) return { level: 0, max: 0, maxed: false, cost: 0, canAfford: false, disabled: true, label: "", bonusPct: 0 };
   const level = skillLevelOf(levels, skillId);
   const max = cfg.maxLevel;
@@ -152,7 +155,8 @@ export function skillUpgradePlan(levels, skillId, gold, cfg) {
   if (level >= max) {
     return { level, max, maxed: true, cost: 0, canAfford: false, disabled: true, label: `MAX Lv ${max}`, bonusPct };
   }
-  const cost = Number(cfg.costs[level]) || 0;      // costs[i] is the price of level i+1
+  const table = (cfg.costsByTier && cfg.costsByTier[tier]) || cfg.costs || [];
+  const cost = Number(table[level]) || 0;          // table[i] is the price of level i+1
   const canAfford = (Number(gold) || 0) >= cost;
   return {
     level, max, maxed: false, cost, canAfford, disabled: !canAfford,

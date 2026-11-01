@@ -13,6 +13,7 @@
 const { rollDrops, rollGold } = require('./loot.js');
 const { rollRarity, RARITIES } = require('./rarity.js');
 const { rollItemInstance } = require('./affixes.js');
+const { scrollTypeId, scrollRollCount } = require('./scrollDrops.js');
 const { mapChestRow } = require('../services/chests.js');
 const { clearOverviewCache } = require('../services/overviewCache.js');
 
@@ -166,6 +167,8 @@ async function spawnBossLootItems(pool, entry, {
   rarityAnchors = (entry && entry.rarityAnchors) || null,
   affixPool = (entry && entry.affixPool) || [],
   rng = Math.random, ttlMs = 180000,
+  // OPT-IN (see scrollDrops.js): taken from the live world entry; a fixture entry has none.
+  scrollRng = (entry && entry.scrollRng) || null,
 }) {
   const dr = includeOwnDrops && entityTypeId != null
     ? await pool.query(
@@ -181,14 +184,28 @@ async function spawnBossLootItems(pool, entry, {
     : { rows: [] };
   const ownDropIds = [...rollDrops(dr.rows, rng), ...rollDrops(br.rows, rng)];
   const extraIds = await rollBossGearItemTypeIds(pool, profile.rolls, itemLevel, rng);
-  const allIds = [...ownDropIds, ...extraIds];
+  const gearIds = [...ownDropIds, ...extraIds];
+  // A boss is the most generous source of scrolls. They ride the same insert as the gear but are
+  // NEVER rolled for rarity or affixes: a scroll is a plain white stack-of-one, whatever grade
+  // the boss's own loot profile happens to be biased toward.
+  const scrollTypeIdHere = scrollRng ? scrollTypeId(entry.world && entry.world.weapons) : null;
+  const scrollIds = scrollTypeIdHere == null
+    ? []
+    : Array.from({ length: scrollRollCount('boss', scrollRng) }, () => scrollTypeIdHere);
+  const allIds = [...gearIds, ...scrollIds];
   if (allIds.length === 0) return [];
 
   const lvl = Math.min(150, Math.max(1, Math.round(Number(itemLevel)) || 1));
   const rarities = [];
   const itemLevels = [];
   const affixJson = [];
-  for (const typeId of allIds) {
+  for (const [i, typeId] of allIds.entries()) {
+    if (i >= gearIds.length) {            // a scroll
+      rarities.push('white');
+      itemLevels.push(1);
+      affixJson.push('[]');
+      continue;
+    }
     const rarity = rollBossRarity(lvl, rarityAnchors, profile, rng);
     const itemType = entry.world && entry.world.weapons ? entry.world.weapons.get(typeId) : null;
     const rolled = rollItemInstance({

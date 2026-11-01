@@ -6,6 +6,7 @@ const { hasFreeSlot } = require('./items');
 const { rollRarity } = require('./rarity.js');
 const { legacyMagicFind, legacyGoldAmount } = require('../services/legacyEffects.js');
 const { rollItemInstance } = require('./affixes.js');
+const { scrollRollCount, spawnScrollsOnGround } = require('./scrollDrops.js');
 const { awardXp, loadProgression } = require('../services/progressionStore.js');
 const { xpForKill } = require('../services/playerStats.js');
 const { RESPAWN_DELAY_MS } = require('../services/creatureRespawn');
@@ -78,6 +79,9 @@ function rollGold(range, rng = Math.random) {
 // of mutating the entry.
 async function commitCreatureDeath(pool, entry, creatureId, {
   rng = Math.random, ttlMs = 180000, killerUserId = null,
+  // OPT-IN scroll drops (see scrollDrops.js): the production world entry carries scrollRng
+  // (server.js); a hand-built fixture entry has none, so it rolls none.
+  scrollRng = (entry && entry.scrollRng) || null,
   rarityAnchors = (entry && entry.rarityAnchors) || null,
   affixPool = (entry && entry.affixPool) || [],
 } = {}) {
@@ -159,6 +163,12 @@ async function commitCreatureDeath(pool, entry, creatureId, {
     await spawnDrops(client, entry, dead, {
       rng, ttlMs, rarityAnchors, affixPool, legacy,
     });
+    // An enchant scroll, rarely. Inside the same transaction as the rest of the loot, so a
+    // kill's drops stand or fall together; at the corpse's centre like every other drop.
+    if (scrollRng) {
+      await spawnScrollsOnGround(client, entry, scrollRollCount('creature', scrollRng),
+        dead.x + CREATURE_SIZE / 2, dead.y + CREATURE_SIZE / 2, { ttlMs });
+    }
     await client.query('COMMIT');
     return {
       awarded, leveledUp, newLevel, progression, killerUserId,

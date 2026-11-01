@@ -20,6 +20,31 @@ function qtyOf(item) {
 // heard of and came back "drop failed". `items` holds real server instances
 // and nothing else; anything the UI sends back on the wire therefore has an
 // id the server issued. See core/ammo.js for how the two are reconciled.
+// The ONE place a server item instance becomes a client one (a join snapshot, a
+// pickup, a purchase, a chest withdrawal all come through here).
+//
+// It SPREADS the server's object and then normalises the few fields whose absence
+// must read as a safe default. This used to be an explicit field list, and an
+// explicit list silently DROPS everything it does not name: a field the server
+// started sending (a rolled affix list, an item level, an enchant level) simply
+// never reached the panel, and nothing failed -- the feature was live on the wire
+// and dead on screen. With the spread a new server field arrives by default, and
+// the normalised ones below are the exceptions that need a rule:
+//   quantity     defaulted to 1, so a partial frame contributes one unit, not zero
+//   soulbound    a real boolean, so a later `!== false` test cannot invert on old frames
+//   rarity       'white' when absent (the column default, and the grade with no highlight)
+//   enchantLevel a non-negative integer, 0 when absent
+function normalizeItem(i) {
+  const enchant = Number(i.enchantLevel);
+  return {
+    ...i,
+    quantity: qtyOf(i),
+    soulbound: i.soulbound === true,
+    rarity: i.rarity || 'white',
+    enchantLevel: Number.isInteger(enchant) && enchant > 0 ? enchant : 0,
+  };
+}
+
 export function createInventory() {
   return { types: new Map(), items: [], equipment: {}, ammoCounts: new Map() };
 }
@@ -63,13 +88,7 @@ export function applyJoined(inv, msg) {
   // passed through, for the same reason `soulbound` is normalised above: an
   // older frame that omits the field must read as "ordinary", and 'white' is
   // both the column default and the grade that draws no highlight at all.
-  inv.items = (msg.items || []).map((i) => ({
-    id: i.id, typeId: i.typeId, quantity: qtyOf(i), soulbound: i.soulbound === true,
-    // Weapon enchant level (+0..+15). Named here because this map drops every
-    // field it does not list, and the panel + the aura both read it.
-    enchantLevel: Number(i.enchantLevel) || 0,
-    rarity: i.rarity || 'white',
-  }));
+  inv.items = (msg.items || []).map(normalizeItem);
   inv.equipment = { ...(msg.equipment || {}) };
   // A join snapshot is the whole truth about every stack the player holds, so
   // every cached ammo count is now stale by definition.
@@ -101,11 +120,7 @@ export function addItem(inv, item) {
   // Same normalization as applyJoined — this is the path a withdrawn item
   // arrives on (`withdrawn` -> addItem), and a bound item taken back out of the
   // account chest must keep its marker.
-  inv.items.push({
-    id: item.id, typeId: item.typeId, quantity: qtyOf(item), soulbound: item.soulbound === true,
-    enchantLevel: Number(item.enchantLevel) || 0,
-    rarity: item.rarity || 'white',
-  });
+  inv.items.push(normalizeItem(item));
   forgetAmmoCount(inv, item.typeId);
 }
 

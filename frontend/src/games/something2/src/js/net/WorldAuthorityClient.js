@@ -5,7 +5,7 @@
  * {seq,dx,dy,dt} for client-side reconciliation.
  */
 export class WorldAuthorityClient {
-  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onAttackRefused, onTransition, onWaypointActivated, onTeleport, onWallet, onShop, onBought, onSold, onBank, onDeposited, onWithdrawn, onProgression, onQuestProgress, onQuestNode, onChests, onChestOpened, onVfx, onEnchanted, onSkillUpgraded, onWorldBossStatus, onAnnouncement, onDps, inputIntervalMs = 50, now = () => performance.now() }) {
+  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onAttackRefused, onTransition, onWaypointActivated, onTeleport, onWallet, onShop, onBought, onSold, onBank, onDeposited, onWithdrawn, onProgression, onQuestProgress, onQuestNode, onChests, onChestOpened, onVfx, onEnchanted, onSkillUpgraded, onGemBought, onGemsImported, onScrollsBought, onWorldBossStatus, onAnnouncement, onDps, inputIntervalMs = 50, now = () => performance.now() }) {
     this.url = url;
     this.token = token;
     this.onJoined = onJoined || (() => {});
@@ -22,6 +22,12 @@ export class WorldAuthorityClient {
     // (`skillUpgraded`). Both are one-off replies to a request this client sent.
     this.onEnchanted = onEnchanted || (() => {});
     this.onSkillUpgraded = onSkillUpgraded || (() => {});
+    // Skill gems are owned by the server: `gemBought` answers a purchase, `gemsImported`
+    // answers the one-time claim of the gems this browser used to keep for itself.
+    this.onGemBought = onGemBought || (() => {});
+    this.onGemsImported = onGemsImported || (() => {});
+    // The smith sold scrolls: the whole stack as it now stands, plus what it cost.
+    this.onScrollsBought = onScrollsBought || (() => {});
     this.onShop = onShop || (() => {});
     this.onBought = onBought || (() => {});
     this.onSold = onSold || (() => {});
@@ -136,6 +142,9 @@ export class WorldAuthorityClient {
       case 'wallet': this.onWallet(msg); break;
       case 'enchanted': this.onEnchanted(msg); break;
       case 'skillUpgraded': this.onSkillUpgraded(msg); break;
+      case 'gemBought': this.onGemBought(msg); break;
+      case 'gemsImported': this.onGemsImported(msg); break;
+      case 'scrollsBought': this.onScrollsBought(msg); break;
       case 'shop': this.onShop(msg); break;
       case 'bought': this.onBought(msg); break;
       case 'sold': this.onSold(msg); break;
@@ -249,6 +258,12 @@ export class WorldAuthorityClient {
   sendEnchant(scrollId, itemId) { return this._send({ type: 'enchant', scrollId, itemId }); }
   // Buy the next level of a skill with gold; answered by `skillUpgraded`.
   sendUpgradeSkill(skillId) { return this._send({ type: 'upgradeSkill', skillId }); }
+  // Buy a skill gem from the merchant next to you; answered by `gemBought` (or an error).
+  sendBuyGem(skillId) { return this._send({ type: 'buyGem', skillId }); }
+  // Buy `quantity` enchant scrolls from the village smith next to you; answered by `scrollsBought`.
+  sendBuyScrolls(quantity) { return this._send({ type: 'buyScrolls', quantity }); }
+  // Claim, once, the gems this browser remembered from before the server owned them.
+  sendImportGems(skillIds) { return this._send({ type: 'importGems', skillIds }); }
   sendAutoLoot(on) { return this._send({ type: 'autoloot', on: on === true }); }
   sendInteract() { this._send({ type: 'interact' }); }
   sendBuy(stockId) { this._send({ type: 'buy', stockId }); }

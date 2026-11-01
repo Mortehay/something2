@@ -45,7 +45,8 @@ const { buildWorldGenConfig } = require('../services/worldGenConfig');
 const { commitCreatureDeath, claimItem, claimGold, dropItem, dropGraceActive, spawnGroundItemTypes } = require('./loot');
 const { knockbackPosition, knockbackWithFallback } = require('./knockback');
 const { buyStock, sellItem } = require('./trade');
-const { enchantItem, upgradeSkill, loadSkillLevels } = require('./enchantOps');
+const { enchantItem, buyScrolls, upgradeSkill, loadSkillLevels } = require('./enchantOps');
+const { buyGem, importLegacyGems, loadOwnedGems, loadGemsImported } = require('./gems');
 const { publicEnchantConfig } = require('../services/enchant.js');
 const { publicSkillLevelingConfig } = require('../services/skillLeveling.js');
 const { recordKill } = require('../services/questsService.js');
@@ -782,6 +783,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
           chunkLoads: new Set(),     // in-flight activation guard per chunk key
           loadedChunks: new Set(),   // chunk keys whose creatures have been successfully loaded
           claiming: new Set(),       // ground item ids with a claim in flight (avoids wasted queries)
+          // Enchant scrolls drop from creatures, chests and bosses in a LIVE world only: loot code
+          // rolls them with this, and a hand-built test entry has none (see scrollDrops.js).
+          scrollRng: Math.random,
         };
         worlds.set(canonicalId, entry);
         // A practice target by the entry spawn, for checking your own DPS.
@@ -2090,6 +2094,20 @@ function attachAuthority(httpServer, pool, opts = {}) {
           return new Map();
         });
         entry.world.getPlayer(ws.userId).skillLevels = joinedSkillLevels;
+        // The gems this character has bought. Awaited for the same reason as the levels:
+        // the joined frame carries them, and a skills panel that first showed no gems and
+        // then filled in would invite a second purchase. A failed read joins with none
+        // (and without enforcement -- see world.castSkill) rather than refusing the join.
+        let joinedGems = null;
+        let joinedGemsImported = true;
+        try {
+          [joinedGems, joinedGemsImported] = await Promise.all([
+            loadOwnedGems(pool, character.id), loadGemsImported(pool, character.id),
+          ]);
+          entry.world.getPlayer(ws.userId).ownedGems = joinedGems;
+        } catch (e) {
+          console.error('gems load failed:', e);
+        }
         send(ws, {
           type: 'joined', user_id: ws.userId, character_id: character.id, spawn, tickRate: 1000 / tickMs,
           // Shown as an arrival banner: the place name and the creature level
@@ -2114,6 +2132,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
           enchant: publicEnchantConfig(),
           skillLeveling: publicSkillLevelingConfig(),
           skillLevels: Object.fromEntries(joinedSkillLevels),
+          // Server-owned skill gems, and whether this character has already claimed the
+          // gems it used to keep only in its browser (the client sends them once if not).
+          gems: joinedGems ? [...joinedGems] : [],
+          gemsImported: joinedGemsImported,
           // The panel renders used/capacity in its title bar. Nothing in play
           // changes the cap, so it rides the join frame only. DISPLAY ONLY:
           // the rule that refuses an item runs server-side, against this same
@@ -2149,6 +2171,14 @@ function attachAuthority(httpServer, pool, opts = {}) {
             .map((v) => ({
               villageId: v.id, x: v.bankX, y: v.bankY,
               art: resolvePointArt('bank', v.bankArt, entry.pointArtDefaults),
+            })),
+          // The village smith (the enchanting menu). Derived for every village, delivered at
+          // join like the other posts; art falls back to the kind default.
+          blacksmiths: (entry.villages || [])
+            .filter((v) => v.blacksmithX != null && v.blacksmithY != null)
+            .map((v) => ({
+              villageId: v.id, x: v.blacksmithX, y: v.blacksmithY,
+              art: resolvePointArt('blacksmith', v.blacksmithArt, entry.pointArtDefaults),
             })),
           gemMerchants: (entry.villages || [])
             .filter((v) => v.gemMerchantX != null && v.gemMerchantY != null)
@@ -2634,6 +2664,41 @@ function attachAuthority(httpServer, pool, opts = {}) {
       });
     },
 
+    // Buy a skill gem from a gem merchant. { type: 'buyGem', skillId }. The merchant
+    // must be within reach (a gem merchant OR a skill trainer post), the server re-checks
+    // the requirements, and gold and ownership change in one transaction.
+    buyGem(ws, msg) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      if (typeof msg.skillId !== 'string') return;
+      chainOp(ws, 'buyGem', async () => {
+        const p = entry.world.getPlayer(ws.userId);
+        if (!p) return;
+        const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
+        const nearGem = nearestVillagePost(entry.villages, cx, cy, INTERACT_RADIUS, 'gemMerchantX', 'gemMerchantY')
+          || nearestVillagePost(entry.villages, cx, cy, INTERACT_RADIUS, 'skillMerchantX', 'skillMerchantY');
+        if (!nearGem) { send(ws, { type: 'error', message: 'no gem merchant nearby' }); return; }
+        const r = await buyGem(pool, entry, ws.userId, ws.characterId, msg.skillId);
+        if (!r.ok) { send(ws, { type: 'error', message: r.reason }); return; }
+        send(ws, { type: 'gemBought', skillId: r.skillId, price: r.price, gold: r.gold });
+        send(ws, { type: 'wallet', gold: r.gold });
+      });
+    },
+
+    // The one-time claim of gems a character kept in its browser before the server owned
+    // them. { type: 'importGems', skillIds: [...] }. Answered with 'gemsImported'.
+    importGems(ws, msg) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      if (!Array.isArray(msg.skillIds)) return;
+      chainOp(ws, 'importGems', async () => {
+        const r = await importLegacyGems(pool, entry, ws.userId, ws.characterId, msg.skillIds);
+        // 'already imported' is the normal answer to a replay, not an error worth a toast.
+        if (!r.ok) { send(ws, { type: 'gemsImported', granted: [], refused: r.reason }); return; }
+        send(ws, { type: 'gemsImported', granted: r.granted });
+      }, { notify: false });
+    },
+
     // Spend an enchant scroll on a weapon. { type: 'enchant', scrollId, itemId }.
     // Replies 'enchanted' with the outcome and the new state; a refusal is an 'error'.
     // The outcome is rolled here and only here -- the client never sees the dice.
@@ -2642,6 +2707,14 @@ function attachAuthority(httpServer, pool, opts = {}) {
       if (!entry) return;
       if (typeof msg.scrollId !== 'string' || typeof msg.itemId !== 'string') return;
       chainOp(ws, 'enchant', async () => {
+        // Weapons are enchanted at the village smith, not in the field. The server re-resolves the
+        // smith from its own copy of the player's position on every request.
+        const sp = entry.world.getPlayer(ws.userId);
+        if (!sp) return;
+        if (!nearestVillagePost(entry.villages, sp.x + sp.width / 2, sp.y + sp.height / 2, INTERACT_RADIUS, 'blacksmithX', 'blacksmithY')) {
+          send(ws, { type: 'error', message: 'no blacksmith nearby' });
+          return;
+        }
         const r = await enchantItem(pool, entry, ws.userId, ws.characterId, msg.scrollId, msg.itemId);
         if (!r.ok) { send(ws, { type: 'error', message: r.reason }); return; }
         send(ws, {
@@ -2650,6 +2723,26 @@ function attachAuthority(httpServer, pool, opts = {}) {
         });
         // A weapon that changed or burnt while held changes the gear stats too.
         if (r.wasEquipped) await refreshDerivedStats(ws, entry);
+      });
+    },
+
+    // Buy enchant scrolls from the village smith. { type: 'buyScrolls', quantity }. Answered with
+    // 'scrollsBought' (the whole stack as it now stands) and a wallet update.
+    buyScrolls(ws, msg) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      if (!Number.isInteger(msg.quantity)) return;
+      chainOp(ws, 'buyScrolls', async () => {
+        const p = entry.world.getPlayer(ws.userId);
+        if (!p) return;
+        if (!nearestVillagePost(entry.villages, p.x + p.width / 2, p.y + p.height / 2, INTERACT_RADIUS, 'blacksmithX', 'blacksmithY')) {
+          send(ws, { type: 'error', message: 'no blacksmith nearby' });
+          return;
+        }
+        const r = await buyScrolls(pool, entry, ws.userId, ws.characterId, msg.quantity);
+        if (!r.ok) { send(ws, { type: 'error', message: r.reason }); return; }
+        send(ws, { type: 'scrollsBought', item: r.item, added: r.added, price: r.price, gold: r.gold });
+        send(ws, { type: 'wallet', gold: r.gold });
       });
     },
 
@@ -2846,6 +2939,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // allowed_slots filter apply to a chest grant at all -- without it
         // every slot-restricted affix would be eligible on every chest item.
         const result = await openChest(pool, chest.id, ws.characterId, {
+          scrollRng: entry.scrollRng,
           freeSlots: room,
           rarityAnchors: entry.rarityAnchors || null,
           affixPool: entry.affixPool || [],

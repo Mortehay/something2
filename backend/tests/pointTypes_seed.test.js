@@ -8,7 +8,7 @@ const { QUESTS, EXPANSION_QUESTS } = require('../seeds/data/questsData.js');
 
 test('every point kind has exactly one seeded placeholder type, except quest givers', () => {
   assert.deepStrictEqual([...POINT_KINDS].sort(), [
-    'bank', 'chest_field', 'chest_vault', 'gem_merchant', 'merchant',
+    'bank', 'blacksmith', 'chest_field', 'chest_vault', 'gem_merchant', 'merchant',
     'portal', 'quest_giver', 'skill_merchant', 'waypoint',
   ]);
   const byKind = new Map();
@@ -52,7 +52,8 @@ test('seeded point types are never decorations or creatures', () => {
 });
 
 test('village post kinds map to their villages column', () => {
-  assert.deepStrictEqual(VILLAGE_POST_KINDS, ['merchant', 'bank', 'gem_merchant', 'skill_merchant', 'quest_giver']);
+  assert.deepStrictEqual(VILLAGE_POST_KINDS, ['merchant', 'bank', 'gem_merchant', 'skill_merchant', 'quest_giver', 'blacksmith']);
+  assert.strictEqual(villageArtColumn('blacksmith'), 'blacksmith_entity_type_id');
   assert.strictEqual(villageArtColumn('quest_giver'), 'quest_giver_entity_type_id');
   assert.strictEqual(villageArtColumn('merchant'), 'merchant_entity_type_id');
   assert.strictEqual(villageArtColumn('skill_merchant'), 'skill_merchant_entity_type_id');

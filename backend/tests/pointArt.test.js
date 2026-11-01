@@ -126,7 +126,7 @@ test('applyPointArt binds waypoints by name (both authoring routes)', async () =
   assert.deepStrictEqual(wps, [['Gate A', null], ['Stone A', 2]]);
 });
 
-test('applyPointArt writes all five village columns keyed by spec_key, and the vault chest', async () => {
+test('applyPointArt writes all six village columns keyed by spec_key, and the vault chest', async () => {
   const client = capturingClient(TYPE_ROWS);
   const spec = { worlds: [
     { key: 'a', village: { key: 'v1', art: { merchant: 'merchant_post' } }, chest: { x: 1, y: 1, art: 'chest_vault' } },
@@ -135,8 +135,8 @@ test('applyPointArt writes all five village columns keyed by spec_key, and the v
   const n = await applyPointArt(client, spec, idByKey);
   assert.deepStrictEqual({ villages: n.villages, chests: n.chests }, { villages: 2, chests: 2 });
   const vil = client.writes.filter((w) => /UPDATE villages/.test(w.sql));
-  assert.match(vil[0].sql, /merchant_entity_type_id = \$3, bank_entity_type_id = \$4, gem_merchant_entity_type_id = \$5, skill_merchant_entity_type_id = \$6, quest_giver_entity_type_id = \$7 WHERE world_id = \$1 AND spec_key = \$2/);
-  assert.deepStrictEqual(vil.map((w) => w.params), [['wid-a', 'v1', 3, null, null, null, null], ['wid-b', 'v2', null, null, null, null, null]]);
+  assert.match(vil[0].sql, /merchant_entity_type_id = \$3, bank_entity_type_id = \$4, gem_merchant_entity_type_id = \$5, skill_merchant_entity_type_id = \$6, quest_giver_entity_type_id = \$7, blacksmith_entity_type_id = \$8 WHERE world_id = \$1 AND spec_key = \$2/);
+  assert.deepStrictEqual(vil.map((w) => w.params), [['wid-a', 'v1', 3, null, null, null, null, null], ['wid-b', 'v2', null, null, null, null, null, null]]);
   const ch = client.writes.filter((w) => /UPDATE world_chests/.test(w.sql));
   assert.match(ch[0].sql, /WHERE world_id = \$1 AND kind = 'vault'/);
   assert.deepStrictEqual(ch.map((w) => w.params), [['wid-a', 4], ['wid-b', null]]);

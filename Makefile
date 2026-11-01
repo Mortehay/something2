@@ -720,3 +720,25 @@ git-helper-status:
 	@if [ -f $(GIT_HELPER_RUN)/git-helper.pid ] && kill -0 $$(cat $(GIT_HELPER_RUN)/git-helper.pid) 2>/dev/null; then \
 	  echo "git-helper running, pid $$(cat $(GIT_HELPER_RUN)/git-helper.pid)"; head -1 $(GIT_HELPER_RUN)/git-helper.log; \
 	else echo "git-helper not running (make git-helper)"; fi
+
+# The client's skill catalog is GENERATED from the server's (backend/seeds/data/skills.js).
+# Run this after editing that file; `make skills-check` is the CI form.
+.PHONY: skills-sync skills-check
+skills-sync:
+	$(COMPOSE) exec -T frontend npm run skills:generate
+
+skills-check:
+	$(COMPOSE) exec -T frontend npm run skills:check
+
+# A throwaway, freshly migrated AND seeded database for the whole backend suite (see
+# backend/scripts/testdb.js): proves a clean install works and keeps tests off the dev
+# database. ARGS passes files through, e.g. make test-clean ARGS="tests/gems_db.test.js".
+.PHONY: test-clean test-db-reset test-db-drop
+test-clean:
+	$(COMPOSE) exec -T backend node scripts/testdb.js run $(if $(ARGS),-- $(ARGS),)
+
+test-db-reset:
+	$(COMPOSE) exec -T backend node scripts/testdb.js reset
+
+test-db-drop:
+	$(COMPOSE) exec -T backend node scripts/testdb.js drop

@@ -1,16 +1,16 @@
 {
   "header": {
-    "exported_at": "2026-10-20T20:11:21.959Z",
-    "exported_by": "linux-dev",
+    "exported_at": "2026-11-01T17:42:55.906Z",
+    "exported_by": "unnamed-pc",
     "group": "creature_behaviors",
     "row_counts": {
       "behavior_drops": 9,
-      "chest_loot": 33,
+      "chest_loot": 36,
       "creature_abilities": 28,
       "creature_behavior_skills": 15,
       "creature_behaviors": 24
     },
-    "schema_version": "1714440812000_quests_objective_columns"
+    "schema_version": "1714440850000_weapon_enchant_and_skill_levels"
   },
   "tables": {
     "behavior_drops": [
@@ -105,6 +105,24 @@
         "max_qty": 1,
         "min_qty": 1,
         "sync_uuid": "030757ee-0563-c731-70cf-33c5fa1d2937"
+      },
+      {
+        "chance": 0.15,
+        "item_type_id": "5d06cc4a-f2cb-b35b-4376-3d8bc46824c8",
+        "level_max": 4,
+        "level_min": 1,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "3860ccf3-98bc-455b-8e26-4db3d6dd7288"
+      },
+      {
+        "chance": 0.25,
+        "item_type_id": "9db3acff-3f0b-f63f-d755-cebd8f528a20",
+        "level_max": 4,
+        "level_min": 1,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "9c0116ce-ffea-46f0-bb3f-8a36c215f7ee"
       },
       {
         "chance": 0.3,
@@ -303,6 +321,15 @@
         "max_qty": 1,
         "min_qty": 1,
         "sync_uuid": "07a5f612-af8a-f63e-ac2e-cc977de86465"
+      },
+      {
+        "chance": 0.2,
+        "item_type_id": "2476ecee-b177-b2f3-5b42-82e515ad38b3",
+        "level_max": 9,
+        "level_min": 5,
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "ae210758-df16-4093-891d-ef3fc87a50a3"
       },
       {
         "chance": 0.25,
@@ -789,6 +816,13 @@
         "sync_uuid": "687dced5-8562-e810-a335-1ad114ac9ddf"
       },
       {
+        "behavior_id": "0cfe5d84-c65c-89ad-68a9-ef083306fe4c",
+        "power_scale": 1,
+        "skill_id": "3f5a442a-b828-52d8-a1d5-fca1083e2bb0",
+        "slot": 2,
+        "sync_uuid": "a488f6d8-4881-5514-9d25-a0f53106f894"
+      },
+      {
         "behavior_id": "0fc40feb-7f9f-bfba-de67-3c49bdf119d0",
         "power_scale": 0.5,
         "skill_id": "77a28553-bb12-2d2e-1b2a-daa3f68d76ac",
@@ -831,6 +865,13 @@
         "sync_uuid": "e1a142c7-a626-df66-3b3c-9421a84a9f47"
       },
       {
+        "behavior_id": "7c42ef45-8f01-1cf8-4982-c1402c14d714",
+        "power_scale": 1,
+        "skill_id": "78f84aa6-1d1d-5d75-8879-bcd66ec07ac8",
+        "slot": 2,
+        "sync_uuid": "a2609fc5-7b6c-5a90-b1c2-1601be8323e4"
+      },
+      {
         "behavior_id": "7cc76df8-d5a3-f3d3-686e-6276a035caf7",
         "power_scale": 0.7,
         "skill_id": "44512583-b4de-032f-23c9-e499189d7ae7",
@@ -852,6 +893,13 @@
         "sync_uuid": "a52350af-6876-200b-4340-7babf617590d"
       },
       {
+        "behavior_id": "c3296591-cd68-059c-382d-eb67705b171b",
+        "power_scale": 1,
+        "skill_id": "3d799976-e067-53a5-89ee-541b82af57cd",
+        "slot": 2,
+        "sync_uuid": "6e3dcc61-6ca8-5eef-9c36-5088c8ca0cdc"
+      },
+      {
         "behavior_id": "d0b13b17-0983-1397-ed85-483212880c40",
         "power_scale": 1,
         "skill_id": "98736345-3bd6-e0b6-0b5d-ef12afd89dc2",
@@ -859,32 +907,11 @@
         "sync_uuid": "9f1873ea-523d-b6ee-82f6-1a139e41cdf2"
       },
       {
-        "behavior_id": "0cfe5d84-c65c-89ad-68a9-ef083306fe4c",
-        "power_scale": 1,
-        "skill_id": "3f5a442a-b828-52d8-a1d5-fca1083e2bb0",
-        "slot": 2,
-        "sync_uuid": "a488f6d8-4881-5514-9d25-a0f53106f894"
-      },
-      {
-        "behavior_id": "7c42ef45-8f01-1cf8-4982-c1402c14d714",
-        "power_scale": 1,
-        "skill_id": "78f84aa6-1d1d-5d75-8879-bcd66ec07ac8",
-        "slot": 2,
-        "sync_uuid": "a2609fc5-7b6c-5a90-b1c2-1601be8323e4"
-      },
-      {
         "behavior_id": "d0b13b17-0983-1397-ed85-483212880c40",
         "power_scale": 1,
         "skill_id": "e3d34ce7-47df-5724-b720-4a8506c97031",
         "slot": 2,
         "sync_uuid": "bdedb6d0-78da-53d1-b405-4f1ce0eb988f"
-      },
-      {
-        "behavior_id": "c3296591-cd68-059c-382d-eb67705b171b",
-        "power_scale": 1,
-        "skill_id": "3d799976-e067-53a5-89ee-541b82af57cd",
-        "slot": 2,
-        "sync_uuid": "6e3dcc61-6ca8-5eef-9c36-5088c8ca0cdc"
       }
     ],
     "creature_behaviors": [
