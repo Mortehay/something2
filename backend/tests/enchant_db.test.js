@@ -403,3 +403,84 @@ test('levels are per character and the table cascades away with the character', 
   const gone = await pool.query('SELECT 1 FROM character_skill_levels WHERE character_id = $1', [fx.characterId]);
   assert.strictEqual(gone.rowCount, 0);
 });
+
+// ---------------------------------------------------------------- the blessed scroll and the sale bonus
+
+test('the blessed scroll exists, costs its configured price and is on every village shelf', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) { t.skip(pool.unreachable); return; }
+  t.after(() => pool.end().catch(() => {}));
+  const cfg = enchant.ENCHANT_CONFIG;
+  const s = await pool.query('SELECT category, stackable, value FROM item_types WHERE name = $1', [cfg.blessedScrollItemName]);
+  assert.strictEqual(s.rowCount, 1, 'the migration must have created the blessed scroll');
+  assert.deepStrictEqual(
+    { category: s.rows[0].category, stackable: s.rows[0].stackable, value: Number(s.rows[0].value) },
+    { category: 'consumable', stackable: true, value: cfg.blessedScrollPrice },
+  );
+  const old = await pool.query("SELECT 1 FROM item_types WHERE name = 'enchant_scroll_basic'");
+  assert.strictEqual(old.rowCount, 0, 'the basic scroll is gone');
+  const missing = await pool.query(
+    `SELECT v.id FROM villages v
+      WHERE NOT EXISTS (SELECT 1 FROM merchant_stock ms JOIN item_types it ON it.id = ms.item_type_id
+                         WHERE ms.village_id = v.id AND it.name = $1 AND ms.seller_user_id IS NULL)`, [cfg.blessedScrollItemName]);
+  assert.deepStrictEqual(missing.rows, [], 'a village without the blessed scroll on its shelf');
+});
+
+test('through Postgres a blessed miss sends the weapon back to +3 alive, and the scroll is refused at +2', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) { t.skip(pool.unreachable); return; }
+  let fx = null;
+  t.after(async () => { await cleanup(pool, fx); await pool.end().catch(() => {}); });
+  fx = await fixture(pool, 'blessed');
+  const wtype = await ownWeapon(pool, fx, 'blessed');
+  const blessed = await pool.query('SELECT id FROM item_types WHERE name = $1', [enchant.ENCHANT_CONFIG.blessedScrollItemName]);
+  const sword = await give(pool, fx, wtype, { enchantLevel: 8 });
+  const low = await give(pool, fx, wtype, { enchantLevel: 2 });
+  const scrolls = await give(pool, fx, blessed.rows[0].id, { quantity: 3 });
+  const { entry, p } = await armEntry(pool, fx);
+  assert.ok(p.inv.items.some((i) => i.id === scrolls));
+
+  const miss = await enchantItem(pool, entry, uid(fx), fx.characterId, scrolls, sword, { rng: always(0.9999) });
+  assert.strictEqual(miss.ok, true, miss.reason);
+  assert.strictEqual(miss.outcome, 'reset');
+  assert.strictEqual(miss.level, 3);
+  assert.strictEqual(miss.destroyed, false);
+  const row = await pool.query('SELECT enchant_level FROM player_items WHERE id = $1', [sword]);
+  assert.strictEqual(row.rowCount, 1, 'the weapon survived');
+  assert.strictEqual(row.rows[0].enchant_level, 3);
+  assert.strictEqual(p.inv.items.find((i) => i.id === sword).enchantLevel, 3);
+
+  const refused = await enchantItem(pool, entry, uid(fx), fx.characterId, scrolls, low, { rng: always(0) });
+  assert.strictEqual(refused.ok, false);
+  assert.match(refused.reason, /blessed scroll only works past \+3/);
+  const left = await pool.query('SELECT quantity FROM player_items WHERE id = $1', [scrolls]);
+  assert.strictEqual(Number(left.rows[0].quantity), 2, 'only the used scroll was spent');
+});
+
+test('a merchant pays more for an enchanted weapon, and the buyback asks exactly what was paid', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) { t.skip(pool.unreachable); return; }
+  let fx = null;
+  t.after(async () => { await cleanup(pool, fx); await pool.end().catch(() => {}); });
+  fx = await fixture(pool, 'sale', { gold: 0 });
+  const wtype = await ownWeapon(pool, fx, 'sale');          // value 50
+  const plain = await give(pool, fx, wtype, { enchantLevel: 0 });
+  const forged = await give(pool, fx, wtype, { enchantLevel: 7 });
+  const { entry, p } = await armEntry(pool, fx);
+  const mult = p.stats.priceMult;
+
+  const a = await sellItem(pool, entry, uid(fx), fx.characterId, fx.villageId, plain);
+  assert.strictEqual(a.ok, true, a.reason);
+  assert.strictEqual(a.price, Math.floor(50 * mult), 'an unenchanted weapon sells for its value alone');
+
+  const b = await sellItem(pool, entry, uid(fx), fx.characterId, fx.villageId, forged);
+  assert.strictEqual(b.ok, true, b.reason);
+  assert.strictEqual(b.price, Math.floor((50 + enchant.sellBonus(7)) * mult));
+  assert.ok(b.price > a.price);
+
+  const shelf = await pool.query(
+    'SELECT price FROM merchant_stock WHERE id = (SELECT merchant_stock_id FROM player_items WHERE id = $1)', [forged]);
+  assert.strictEqual(Number(shelf.rows[0].price), b.price, 'the buyback row asks what the merchant paid');
+  const kept = await pool.query('SELECT enchant_level FROM player_items WHERE id = $1', [forged]);
+  assert.strictEqual(kept.rows[0].enchant_level, 7, 'the merchant holds the very same enchanted instance');
+});

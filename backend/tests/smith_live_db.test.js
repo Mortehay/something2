@@ -188,4 +188,23 @@ test('buy scrolls and enchant a weapon at the village smith', { skip: !DB_URL ? 
     const stack = await pool.query('SELECT quantity FROM player_items WHERE id = $1', [stackId]);
     assert.equal(Number(stack.rows[0].quantity), 4, 'nothing was spent');
   });
+
+  await t.test('the blessed scroll is its own stack at its own price, and an unknown kind is treated as standard', async () => {
+    const blessedType = await pool.query('SELECT id FROM item_types WHERE name = $1', [enchant.ENCHANT_CONFIG.blessedScrollItemName]);
+    const BLESSED = enchant.ENCHANT_CONFIG.blessedScrollPrice;
+    await pool.query('UPDATE users SET gold = 50000 WHERE id = $1', [userId]);
+    const before = await goldInDb();
+    send({ type: 'buyScrolls', quantity: 2, kind: 'blessed' });
+    const r = await nextOf(ws, 'scrollsBought');
+    assert.equal(r.type, 'scrollsBought', `refused: ${r.message}`);
+    assert.equal(r.price, 2 * BLESSED);
+    assert.equal(r.item.typeId, blessedType.rows[0].id);
+    assert.notEqual(r.item.id, stackId, 'a different stack from the standard scrolls');
+    assert.equal(await goldInDb(), before - 2 * BLESSED);
+
+    send({ type: 'buyScrolls', quantity: 1, kind: 'bogus' });
+    const s = await nextOf(ws, 'scrollsBought');
+    assert.equal(s.price, PRICE, 'a kind the server does not know buys the standard scroll');
+    assert.equal(s.item.id, stackId);
+  });
 });

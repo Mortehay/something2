@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
-  enchantLevelOf, enchantedName, damageBonusPercent, enchantedDamage, findScroll, scrollCount,
+  enchantLevelOf, enchantedName, damageBonusPercent, enchantedDamage, findScroll, scrollCount, scrollFitsLevel, usableScrollCount,
   enchantPlan, enchantButtonLabel, needsConfirm, enchantResultMessage, applyEnchantResult,
   skillLevelOf, skillUpgradePlan,
 } from "../enchantUi.js";
@@ -315,5 +315,69 @@ describe("weapon glow", () => {
       expect(Number.isFinite(handOffset("nonsense").dx)).toBe(true);
       expect(Number.isFinite(handOffset(undefined).dy)).toBe(true);
     });
+  });
+});
+
+describe("the two scrolls", () => {
+  const CFG2 = { ...CFG, scrollPrice: 2000, blessedScrollItemName: "enchant_scroll_blessed", blessedScrollPrice: 6000 };
+  const BLESSED = { id: 5, name: "enchant_scroll_blessed", category: "consumable" };
+  const inv = (level, { std = 0, blessed = 0 } = {}) => inventoryWith([
+    { id: "w", typeId: 1, quantity: 1, enchantLevel: level },
+    ...(std ? [{ id: "std", typeId: 2, quantity: std }] : []),
+    ...(blessed ? [{ id: "bls", typeId: 5, quantity: blessed }] : []),
+  ], [SWORD, SCROLL, BLESSED]);
+
+  it("the blessed scroll fits only once the next level is past the safe zone", () => {
+    expect([0, 1, 2, 3, 4].map((l) => scrollFitsLevel("blessed", l, CFG2))).toEqual([false, false, false, true, true]);
+    expect([0, 3, 14].map((l) => scrollFitsLevel("standard", l, CFG2))).toEqual([true, true, true]);
+    expect(scrollFitsLevel("sword", 0, CFG2)).toBe(false);
+  });
+
+  it("never spends a blessed scroll unless asked to", () => {
+    const both = inv(5, { std: 3, blessed: 2 });
+    expect(findScroll(both, CFG2, 5).id).toBe("std");
+    expect(findScroll(both, CFG2, 5, { blessed: true }).id).toBe("bls");
+    expect(enchantPlan(both, "w", CFG2)).toMatchObject({ ok: true, scrollId: "std", blessed: false, scrolls: 3 });
+    expect(enchantPlan(both, "w", CFG2, { blessed: true })).toMatchObject({ ok: true, scrollId: "bls", blessed: true, scrolls: 2, danger: true });
+  });
+
+  it("the blessed choice is ignored inside the safe zone, where the standard scroll is used", () => {
+    const both = inv(1, { std: 3, blessed: 2 });
+    expect(findScroll(both, CFG2, 1, { blessed: true })).toBeNull();
+    expect(enchantPlan(both, "w", CFG2, { blessed: true })).toMatchObject({ ok: true, scrollId: "std", blessed: false });
+  });
+
+  it("asking for a blessed scroll without owning one says so", () => {
+    const plan = enchantPlan(inv(5, { std: 4 }), "w", CFG2, { blessed: true });
+    expect(plan.ok).toBe(false);
+    expect(plan.reason).toBe("No blessed scroll");
+    expect(enchantPlan(inv(5, { blessed: 2 }), "w", CFG2).reason).toBe("No enchant scroll");
+  });
+
+  it("counts each kind, and all of them together", () => {
+    const both = inv(0, { std: 3, blessed: 2 });
+    expect(scrollCount(both, CFG2)).toBe(5);
+    expect(scrollCount(both, CFG2, "standard")).toBe(3);
+    expect(scrollCount(both, CFG2, "blessed")).toBe(2);
+    expect(usableScrollCount(both, CFG2, 5)).toBe(3);
+    expect(usableScrollCount(both, CFG2, 5, { blessed: true })).toBe(2);
+    expect(usableScrollCount(both, CFG2, 1, { blessed: true })).toBe(0);
+  });
+
+  it("labels the blessed enchant and says a miss drops the weapon, not burns it", () => {
+    const plan = enchantPlan(inv(5, { blessed: 1 }), "w", CFG2, { blessed: true });
+    expect(enchantButtonLabel(plan)).toContain("Blessed enchant +6");
+    expect(enchantButtonLabel(plan, true)).toContain("back to +3");
+    expect(enchantButtonLabel(plan, true)).not.toContain("BURNS");
+    expect(needsConfirm(plan)).toBe(true);
+  });
+
+  it("a blessed miss keeps the weapon and sets its new level", () => {
+    const bag = inv(9, { blessed: 2 });
+    const msg = { outcome: "reset", level: 3, itemId: "w", scrollId: "bls", scrollsLeft: 1, destroyed: false };
+    expect(applyEnchantResult(bag, msg)).toBe("sword");
+    expect(bag.items.find((x) => x.id === "w").enchantLevel).toBe(3);
+    expect(bag.items.find((x) => x.id === "bls").quantity).toBe(1);
+    expect(enchantResultMessage(msg, "sword")).toContain("fell back to +3");
   });
 });

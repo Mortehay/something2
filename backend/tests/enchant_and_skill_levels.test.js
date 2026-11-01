@@ -14,8 +14,8 @@ const sb = require('../src/authority/skillBalance.js');
 
 // ---------------------------------------------------------------- enchant rules
 
-test('the default odds are the brief\'s table, 100% through +3 then 60% falling to 1%', () => {
-  const want = { 1: 100, 2: 100, 3: 100, 4: 60, 5: 50, 6: 40, 7: 30, 8: 20, 9: 15, 10: 10, 11: 7, 12: 5, 13: 3, 14: 2, 15: 1 };
+test('the default odds follow Lineage 2: 100% through +3, then one flat 66% for every step', () => {
+  const want = { 1: 100, 2: 100, 3: 100, 4: 66, 5: 66, 6: 66, 7: 66, 8: 66, 9: 66, 10: 66, 11: 66, 12: 66, 13: 66, 14: 66, 15: 66 };
   for (const [lvl, pct] of Object.entries(want)) assert.equal(enchant.successChance(Number(lvl)), pct / 100, `+${lvl}`);
   assert.equal(enchant.ENCHANT_CONFIG.maxLevel, 15);
   assert.equal(enchant.ENCHANT_CONFIG.safeMaxLevel, 3);
@@ -75,7 +75,7 @@ test('a bad config is rejected with a reason, and a bad override falls back loud
   assert.throws(() => enchant.buildEnchantConfig({ glowFireLevel: 2 }), /glowFireLevel/);
   const logged = [];
   const cfg = enchant.loadEnchantConfig({ ENCHANT_CONFIG_JSON: '{"chances":{"4":-5}}' }, (m) => logged.push(m));
-  assert.equal(cfg.chances[4], 60, 'defaults kept');
+  assert.equal(cfg.chances[4], 66, 'defaults kept');
   assert.equal(logged.length, 1);
   assert.match(logged[0], /ENCHANT_CONFIG_JSON ignored/);
   const garbage = enchant.loadEnchantConfig({ ENCHANT_CONFIG_JSON: 'not json' }, (m) => logged.push(m));
@@ -83,7 +83,7 @@ test('a bad config is rejected with a reason, and a bad override falls back loud
   const tuned = enchant.loadEnchantConfig({ ENCHANT_CONFIG_JSON: '{"damagePerLevel":0.1,"chances":{"4":75}}' });
   assert.equal(tuned.damagePerLevel, 0.1);
   assert.equal(tuned.chances[4], 75);
-  assert.equal(tuned.chances[5], 50, 'unspecified levels keep their default');
+  assert.equal(tuned.chances[5], 66, 'unspecified levels keep their default');
 });
 
 // --------------------------------------------------------- skill leveling rules
@@ -202,18 +202,18 @@ const SWORD_TYPE = 71;
 const ARMOR_TYPE = 72;
 const CHAR = 5;
 
-function enchantFixture({ level = 0, scrolls = 3, equipped = false } = {}) {
+function enchantFixture({ level = 0, scrolls = 3, equipped = false, scrollName = 'enchant_scroll' } = {}) {
   const state = {
     gold: 10000,
     levels: new Map(),
     items: new Map([
-      ['scroll', { character_id: CHAR, quantity: scrolls, enchant_level: 0, name: 'enchant_scroll', category: 'consumable' }],
+      ['scroll', { character_id: CHAR, quantity: scrolls, enchant_level: 0, name: scrollName, category: 'consumable' }],
       ['sword', { character_id: CHAR, quantity: 1, enchant_level: level, name: 'sword', category: 'weapon' }],
       ['vest', { character_id: CHAR, quantity: 1, enchant_level: 0, name: 'vest', category: 'armor' }],
     ]),
   };
   const weapons = new Map([
-    [SCROLL_TYPE, { id: SCROLL_TYPE, name: 'enchant_scroll', category: 'consumable' }],
+    [SCROLL_TYPE, { id: SCROLL_TYPE, name: scrollName, category: 'consumable' }],
     [SWORD_TYPE, { id: SWORD_TYPE, name: 'sword', category: 'weapon', kind: 'melee', damage: 10, cooldown: 1 }],
     [ARMOR_TYPE, { id: ARMOR_TYPE, name: 'vest', category: 'armor' }],
   ]);
@@ -339,7 +339,7 @@ test('a database failure rolls back, releases the connection and propagates', as
   assert.equal(f.db.client.released, true);
 });
 
-test('the odds hold over many scrolls (+4 is 60%)', async () => {
+test('the odds hold over many scrolls (+4 is 66%)', async () => {
   let wins = 0;
   const n = 2000;
   let seed = 12345;
@@ -348,7 +348,7 @@ test('the odds hold over many scrolls (+4 is 60%)', async () => {
     const r = enchant.rollEnchant(3, rng);
     if (r.outcome === 'success') wins += 1;
   }
-  assert.ok(Math.abs(wins / n - 0.6) < 0.04, `observed ${(wins / n).toFixed(3)}`);
+  assert.ok(Math.abs(wins / n - 0.66) < 0.04, `observed ${(wins / n).toFixed(3)}`);
 });
 
 // ------------------------------------------------------------- skill upgrade ops
@@ -569,7 +569,8 @@ test('every path that moves a weapon between tables carries its enchant level', 
 });
 
 test('merchants sell the scroll', () => {
-  assert.match(read('services/merchantStock.js'), /name = 'enchant_scroll'/);
+  assert.match(read('services/merchantStock.js'), /'enchant_scroll'/);
+  assert.match(read('services/merchantStock.js'), /'enchant_scroll_blessed'/);
 });
 
 test('an enchanted weapon scales skills through the weapon share, not just basic attacks', () => {
@@ -577,4 +578,140 @@ test('an enchanted weapon scales skills through the weapon share, not just basic
   const f = enchantFixture({ level: 10, equipped: true });
   const w = activeWeaponType(f.player.inv, f.entry.world.weapons, SWORD_TYPE);
   assert.equal(w.damage, 10 * enchant.damageMultiplier(10));
+});
+
+// ---------------------------------------------------------------- the blessed scroll, the sale bonus, the cost model
+
+test('the blessed scroll is dearer, and the config rejects nonsense for it and for the sale share', () => {
+  const cfg = enchant.ENCHANT_CONFIG;
+  assert.ok(cfg.blessedScrollPrice > cfg.scrollPrice);
+  assert.notEqual(cfg.blessedScrollItemName, cfg.scrollItemName);
+  const bad = (o, re) => assert.throws(() => enchant.buildEnchantConfig(o), re);
+  bad({ blessedScrollPrice: cfg.scrollPrice - 1 }, /blessedScrollPrice/);
+  bad({ blessedScrollItemName: cfg.scrollItemName }, /blessedScrollItemName/);
+  bad({ sellBackShare: 0.9 }, /sellBackShare/);
+  bad({ sellBackShare: -0.1 }, /sellBackShare/);
+  bad({ blessedDrops: { boss: { chance: 2 } } }, /blessedDrops\.boss\.chance/);
+  const pub = enchant.publicEnchantConfig();
+  assert.equal(pub.blessedScrollPrice, cfg.blessedScrollPrice);
+  assert.equal(pub.blessedScrollItemName, cfg.blessedScrollItemName);
+});
+
+test('the blessed scroll fits only a target PAST the safe zone; the standard one fits everywhere', () => {
+  const cfg = enchant.ENCHANT_CONFIG;
+  assert.equal(enchant.scrollKindOf(cfg.scrollItemName), 'standard');
+  assert.equal(enchant.scrollKindOf(cfg.blessedScrollItemName), 'blessed');
+  assert.equal(enchant.scrollKindOf('sword'), null);
+  for (let lvl = 0; lvl < cfg.maxLevel; lvl += 1) {
+    assert.equal(enchant.scrollFits(cfg.blessedScrollItemName, lvl), lvl + 1 > cfg.safeMaxLevel, `blessed at +${lvl}`);
+    assert.equal(enchant.scrollFits(cfg.scrollItemName, lvl), true, `standard at +${lvl}`);
+  }
+  assert.equal(enchant.scrollFits('sword', 0), false);
+});
+
+test('a blessed miss drops the weapon to the top of the safe zone instead of burning it', () => {
+  const cfg = enchant.ENCHANT_CONFIG;
+  for (let lvl = cfg.safeMaxLevel; lvl < cfg.maxLevel; lvl += 1) {
+    const chance = enchant.successChance(lvl + 1);
+    assert.deepEqual(enchant.rollEnchant(lvl, () => chance - 1e-9, cfg, { blessed: true }), { outcome: 'success', level: lvl + 1 });
+    assert.deepEqual(enchant.rollEnchant(lvl, () => chance, cfg, { blessed: true }), { outcome: 'reset', level: cfg.safeMaxLevel });
+    assert.deepEqual(enchant.rollEnchant(lvl, () => chance, cfg), { outcome: 'destroyed', level: lvl }, 'a standard scroll still burns it');
+  }
+});
+
+test('a blessed scroll saves the weapon in the fixture: level back to +3, the scroll spent, nothing burnt', async () => {
+  const name = enchant.ENCHANT_CONFIG.blessedScrollItemName;
+  const f = enchantFixture({ level: 9, scrollName: name });
+  const r = await enchantItem(f.db, f.entry, 'u', CHAR, 'scroll', 'sword', { rng: always(0.9999) });
+  assert.equal(r.ok, true);
+  assert.equal(r.outcome, 'reset');
+  assert.equal(r.level, 3);
+  assert.equal(r.destroyed, false);
+  assert.equal(r.scrollsLeft, 2);
+  assert.equal(f.state.items.get('sword').enchant_level, 3, 'the database follows');
+  assert.equal(f.player.inv.items.find((i) => i.id === 'sword').enchantLevel, 3, 'so does the live inventory');
+
+  const hit = enchantFixture({ level: 9, scrollName: name });
+  const win = await enchantItem(hit.db, hit.entry, 'u', CHAR, 'scroll', 'sword', { rng: always(0) });
+  assert.equal(win.outcome, 'success');
+  assert.equal(win.level, 10);
+});
+
+test('a blessed scroll is refused -- and not spent -- inside the safe zone, where it could do nothing', async () => {
+  const name = enchant.ENCHANT_CONFIG.blessedScrollItemName;
+  const f = enchantFixture({ level: 2, scrollName: name });
+  const refused = await enchantItem(f.db, f.entry, 'u', CHAR, 'scroll', 'sword', { rng: always(0) });
+  assert.equal(refused.ok, false);
+  assert.match(refused.reason, /blessed scroll only works past \+3/);
+  assert.equal(f.state.items.get('scroll').quantity, 3, 'the scroll was not spent');
+  assert.equal(f.state.items.get('sword').enchant_level, 2, 'the weapon is untouched');
+});
+
+test('the sale bonus grows per level, is zero at +0 and stays far below what the scrolls cost', () => {
+  const cfg = enchant.ENCHANT_CONFIG;
+  assert.equal(enchant.sellBonus(0), 0);
+  let prev = 0;
+  for (let lvl = 1; lvl <= cfg.maxLevel; lvl += 1) {
+    const bonus = enchant.sellBonus(lvl);
+    assert.ok(bonus > prev, `+${lvl} sells for more than +${lvl - 1}`);
+    prev = bonus;
+    const spent = enchant.expectedCost(lvl).gold;
+    assert.ok(bonus < spent, `+${lvl}: bonus ${bonus} < spent ${spent}`);
+  }
+  assert.equal(enchant.sellBonus(99), enchant.sellBonus(cfg.maxLevel), 'clamped at the cap');
+});
+
+test('the cost model: the safe zone is exact, the danger zone only gets dearer, blessed spends blessed scrolls there', () => {
+  const cfg = enchant.ENCHANT_CONFIG;
+  const c3 = enchant.expectedCost(3);
+  assert.equal(c3.standard, 3);
+  assert.equal(c3.blessed, 0);
+  assert.equal(c3.gold, 3 * cfg.scrollPrice);
+  // +4 at 66% burning on a miss: 1/0.66 attempts, and each burn redoes the three safe steps (all standard).
+  const c4 = enchant.expectedCost(4);
+  assert.ok(Math.abs(c4.standard - 4 / 0.66) < 1e-9);
+  // With blessed scrolls the three safe steps are bought once, and the danger step costs 1/0.66 blessed.
+  const b4 = enchant.expectedCost(4, cfg, { blessed: true });
+  assert.ok(Math.abs(b4.standard - 3) < 1e-9);
+  assert.ok(Math.abs(b4.blessed - 1 / 0.66) < 1e-9);
+  assert.ok(Math.abs(b4.gold - (3 * cfg.scrollPrice + cfg.blessedScrollPrice / 0.66)) < 1e-6);
+  // Inside the safe zone the strategy makes no difference.
+  assert.deepEqual(enchant.expectedCost(2, cfg, { blessed: true }), enchant.expectedCost(2));
+  let prev = 0;
+  let prevB = 0;
+  for (let lvl = 1; lvl <= cfg.maxLevel; lvl += 1) {
+    const c = enchant.expectedCost(lvl);
+    const b = enchant.expectedCost(lvl, cfg, { blessed: true });
+    assert.ok(c.gold > prev, `+${lvl} costs more than +${lvl - 1}`);
+    assert.ok(b.gold > prevB, `blessed +${lvl} costs more than +${lvl - 1}`);
+    prev = c.gold;
+    prevB = b.gold;
+  }
+  assert.equal(enchant.expectedCost(0).gold, 0);
+  const never = enchant.buildEnchantConfig({ chances: { 5: 0 } });
+  assert.equal(enchant.expectedCost(5, never).gold, Infinity);
+  assert.equal(enchant.expectedCost(5, never, { blessed: true }).gold, Infinity);
+});
+
+test('the cost model agrees with a simulation of the same rules, both strategies', () => {
+  const cfg = enchant.ENCHANT_CONFIG;
+  const goal = 6;
+  const runs = 20000;
+  for (const blessed of [false, true]) {
+    let seed = 12345;
+    const rng = () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; };
+    let gold = 0;
+    for (let i = 0; i < runs; i += 1) {
+      let level = 0;
+      while (level < goal) {
+        const danger = level + 1 > cfg.safeMaxLevel;
+        gold += blessed && danger ? cfg.blessedScrollPrice : cfg.scrollPrice;
+        const r = enchant.rollEnchant(level, rng, cfg, { blessed: blessed && danger });
+        level = r.outcome === 'destroyed' ? 0 : r.level;
+      }
+    }
+    const mean = gold / runs;
+    const model = enchant.expectedCost(goal, cfg, { blessed }).gold;
+    assert.ok(Math.abs(mean - model) / model < 0.05, `blessed=${blessed}: simulated ${mean.toFixed(0)} vs modelled ${model.toFixed(0)}`);
+  }
 });

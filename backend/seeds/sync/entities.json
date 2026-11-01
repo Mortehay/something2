@@ -1,15 +1,15 @@
 {
   "header": {
-    "exported_at": "2026-11-01T14:07:49.041Z",
+    "exported_at": "2026-11-01T19:21:40.550Z",
     "exported_by": "unnamed-pc",
     "group": "entities",
     "row_counts": {
       "class_loadouts": 0,
       "creature_drops": 675,
       "entity_types": 379,
-      "world_point_kinds": 9
+      "world_point_kinds": 10
     },
-    "schema_version": "1714440849000_quest_giver_point_kind"
+    "schema_version": "1714440853000_enchant_scroll_price"
   },
   "tables": {
     "class_loadouts": [],
@@ -22853,6 +22853,11 @@
         "default_entity_type_id": "58b92b05-c781-5041-a951-cd500e9b1557",
         "kind": "bank",
         "sync_uuid": "633159e5-2ade-d8a6-dea5-f0bac1114920"
+      },
+      {
+        "default_entity_type_id": null,
+        "kind": "blacksmith",
+        "sync_uuid": "f637f9dd-c264-4c87-bff9-a2c3515d045d"
       },
       {
         "default_entity_type_id": "88083606-5f7b-8863-968f-52467b1e0575",

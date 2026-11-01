@@ -1,7 +1,7 @@
 // Weapon enchanting: the rules for upgrading a weapon with an enchant scroll.
 // PURE -- no database, no clock; the caller owns the dice (`rng`) and the state.
 //
-// THE RULES (the product brief):
+// THE RULES (after Lineage 2: sure safe zone, flat odds, a miss destroys the weapon):
 //   * a weapon runs from +0 to +15;
 //   * +1..+3 is the SAFE zone: it always succeeds, and a failure (should the
 //     config ever allow one) costs the scroll and leaves the weapon untouched;
@@ -20,11 +20,12 @@ const DEFAULT_ENCHANT_CONFIG = Object.freeze({
   maxLevel: 15,
   // Levels up to and including this one cannot destroy the weapon.
   safeMaxLevel: 3,
-  // The chance (percent, 0..100) that a scroll takes a weapon FROM level N-1 TO
-  // level N, keyed by the TARGET level N. +4 starts at 60% and falls to 1% at +15.
+  // The chance (percent, 0..100) that a scroll takes a weapon FROM level N-1 TO level N, keyed by the
+  // TARGET level N. Modelled on Lineage 2: a sure thing through the safe zone, then ONE flat chance
+  // for every step (66%), so a long climb is a run of luck, not a wall that grows steeper each level.
   chances: Object.freeze({
     1: 100, 2: 100, 3: 100,
-    4: 60, 5: 50, 6: 40, 7: 30, 8: 20, 9: 15, 10: 10, 11: 7, 12: 5, 13: 3, 14: 2, 15: 1,
+    4: 66, 5: 66, 6: 66, 7: 66, 8: 66, 9: 66, 10: 66, 11: 66, 12: 66, 13: 66, 14: 66, 15: 66,
   }),
   // Every level adds this fraction of the weapon's BASE damage (linear, not
   // compounding): +5 is +120%, +10 is +240%, +15 is +360% with the default of 0.24.
@@ -36,12 +37,26 @@ const DEFAULT_ENCHANT_CONFIG = Object.freeze({
   // The catalog item the scroll is, and what a merchant asks for it.
   scrollItemName: 'enchant_scroll',
   scrollPrice: 2000,
+  // The BLESSED scroll (after Lineage 2): it can only be spent past the safe zone, and when it
+  // fails the weapon is NOT burnt -- it falls back to the top of the safe zone instead.
+  blessedScrollItemName: 'enchant_scroll_blessed',
+  blessedScrollPrice: 6000,
+  // A merchant pays back this share of the standard scroll price per enchant level, ON TOP
+  // of the weapon's base value. Every level cost at least one scroll, so this stays far below
+  // what was spent and enchanting cannot become a gold faucet.
+  sellBackShare: 0.1,
   // Scrolls also DROP. Each source rolls `max` independent times at `chance`: ordinary
   // creatures rarely, a chest more often, a boss most of all (and up to twice).
   scrollDrops: Object.freeze({
     creature: Object.freeze({ chance: 0.005, max: 1 }),
     chest: Object.freeze({ chance: 0.03, max: 1 }),
     boss: Object.freeze({ chance: 0.125, max: 2 }),
+  }),
+  // Blessed scrolls drop far less often than standard ones, and never from ordinary creatures.
+  blessedDrops: Object.freeze({
+    creature: Object.freeze({ chance: 0, max: 0 }),
+    chest: Object.freeze({ chance: 0.005, max: 1 }),
+    boss: Object.freeze({ chance: 0.04, max: 1 }),
   }),
   // The most scrolls one purchase at the smith may buy.
   maxScrollPurchase: 20,
@@ -67,13 +82,18 @@ function validateEnchantConfig(cfg) {
   if (!Number.isInteger(glowFireLevel) || glowFireLevel < glowMinLevel || glowFireLevel > maxLevel) fail('glowFireLevel must be an integer in glowMinLevel..maxLevel');
   if (typeof scrollItemName !== 'string' || scrollItemName === '') fail('scrollItemName must be a non-empty string');
   if (!Number.isInteger(scrollPrice) || scrollPrice < 0) fail('scrollPrice must be an integer >= 0');
-  const drops = cfg.scrollDrops;
-  if (!drops || typeof drops !== 'object') fail('scrollDrops must be an object keyed by source');
-  for (const kind of ['creature', 'chest', 'boss']) {
-    const d = drops[kind];
-    if (!d || typeof d !== 'object') fail(`scrollDrops.${kind} must be { chance, max }`);
-    if (typeof d.chance !== 'number' || !Number.isFinite(d.chance) || d.chance < 0 || d.chance > 1) fail(`scrollDrops.${kind}.chance must be a number in 0..1`);
-    if (!Number.isInteger(d.max) || d.max < 0 || d.max > 10) fail(`scrollDrops.${kind}.max must be an integer in 0..10`);
+  if (typeof cfg.blessedScrollItemName !== 'string' || cfg.blessedScrollItemName === '' || cfg.blessedScrollItemName === scrollItemName) fail('blessedScrollItemName must be a non-empty string different from scrollItemName');
+  if (!Number.isInteger(cfg.blessedScrollPrice) || cfg.blessedScrollPrice < scrollPrice) fail('blessedScrollPrice must be an integer >= scrollPrice');
+  if (typeof cfg.sellBackShare !== 'number' || !Number.isFinite(cfg.sellBackShare) || cfg.sellBackShare < 0 || cfg.sellBackShare > 0.5) fail('sellBackShare must be a number in 0..0.5');
+  for (const table of ['scrollDrops', 'blessedDrops']) {
+    const drops = cfg[table];
+    if (!drops || typeof drops !== 'object') fail(`${table} must be an object keyed by source`);
+    for (const kind of ['creature', 'chest', 'boss']) {
+      const d = drops[kind];
+      if (!d || typeof d !== 'object') fail(`${table}.${kind} must be { chance, max }`);
+      if (typeof d.chance !== 'number' || !Number.isFinite(d.chance) || d.chance < 0 || d.chance > 1) fail(`${table}.${kind}.chance must be a number in 0..1`);
+      if (!Number.isInteger(d.max) || d.max < 0 || d.max > 10) fail(`${table}.${kind}.max must be an integer in 0..10`);
+    }
   }
   if (!Number.isInteger(cfg.maxScrollPurchase) || cfg.maxScrollPurchase < 1 || cfg.maxScrollPurchase > 99) fail('maxScrollPurchase must be an integer in 1..99');
   return cfg;
@@ -85,22 +105,34 @@ function buildEnchantConfig(overrides = {}) {
   if (overrides == null || typeof overrides !== 'object' || Array.isArray(overrides)) {
     throw new EnchantConfigError('overrides must be an object');
   }
-  const od = overrides.scrollDrops || {};
-  const scrollDrops = {};
-  for (const kind of ['creature', 'chest', 'boss']) {
-    scrollDrops[kind] = { ...DEFAULT_ENCHANT_CONFIG.scrollDrops[kind], ...(od[kind] || {}) };
-  }
+  const mergeDrops = (table) => {
+    const od = overrides[table] || {};
+    const out = {};
+    for (const kind of ['creature', 'chest', 'boss']) {
+      out[kind] = { ...DEFAULT_ENCHANT_CONFIG[table][kind], ...(od[kind] || {}) };
+    }
+    return out;
+  };
+  const scrollDrops = mergeDrops('scrollDrops');
+  const blessedDrops = mergeDrops('blessedDrops');
   const merged = {
     ...DEFAULT_ENCHANT_CONFIG,
     ...overrides,
     chances: { ...DEFAULT_ENCHANT_CONFIG.chances, ...(overrides.chances || {}) },
     scrollDrops,
+    blessedDrops,
   };
   validateEnchantConfig(merged);
-  const frozenDrops = {};
-  for (const kind of Object.keys(scrollDrops)) frozenDrops[kind] = Object.freeze({ ...scrollDrops[kind] });
+  const freezeDrops = (drops) => {
+    const out = {};
+    for (const kind of Object.keys(drops)) out[kind] = Object.freeze({ ...drops[kind] });
+    return Object.freeze(out);
+  };
   return Object.freeze({
-    ...merged, chances: Object.freeze({ ...merged.chances }), scrollDrops: Object.freeze(frozenDrops),
+    ...merged,
+    chances: Object.freeze({ ...merged.chances }),
+    scrollDrops: freezeDrops(scrollDrops),
+    blessedDrops: freezeDrops(blessedDrops),
   });
 }
 
@@ -149,16 +181,18 @@ function checkEnchantable(item, itemType, cfg = ENCHANT_CONFIG) {
 //   { outcome: 'success', level }   the weapon is now `level`
 //   { outcome: 'safe_fail', level } the scroll is spent, the weapon is unchanged
 //   { outcome: 'destroyed', level } the scroll is spent and the weapon is gone
+//   { outcome: 'reset', level }     a BLESSED scroll failed: the weapon survives at the top of the safe zone
 // A weapon already at the cap is an error in the CALLER (checkEnchantable comes
 // first), so it throws here rather than quietly returning something plausible.
-function rollEnchant(level, rng = Math.random, cfg = ENCHANT_CONFIG) {
+function rollEnchant(level, rng = Math.random, cfg = ENCHANT_CONFIG, { blessed = false } = {}) {
   const current = Math.max(0, Math.floor(Number(level) || 0));
   if (current >= cfg.maxLevel) throw new RangeError(`cannot enchant past +${cfg.maxLevel}`);
   const target = current + 1;
   const roll = rng();
   if (roll < successChance(target, cfg)) return { outcome: 'success', level: target };
-  return target <= cfg.safeMaxLevel
-    ? { outcome: 'safe_fail', level: current }
+  if (target <= cfg.safeMaxLevel) return { outcome: 'safe_fail', level: current };
+  return blessed
+    ? { outcome: 'reset', level: cfg.safeMaxLevel }
     : { outcome: 'destroyed', level: current };
 }
 
@@ -168,6 +202,81 @@ function glowTier(level, cfg = ENCHANT_CONFIG) {
   const n = Math.floor(Number(level) || 0);
   if (n < cfg.glowMinLevel) return 0;
   return n >= cfg.glowFireLevel ? 2 : 1;
+}
+
+// -- scrolls: which one fits which level, and what a sale is worth -------------------------
+
+// 'standard' | 'blessed' | null for a catalog item name.
+function scrollKindOf(name, cfg = ENCHANT_CONFIG) {
+  if (name === cfg.scrollItemName) return 'standard';
+  if (name === cfg.blessedScrollItemName) return 'blessed';
+  return null;
+}
+
+// Can a scroll called `name` be spent on a weapon that is at `level` now? The standard scroll
+// works everywhere; the blessed one only for a target level PAST the safe zone, where a miss would
+// otherwise burn the weapon (inside the safe zone it could not do anything and would just be wasted).
+function scrollFits(name, level, cfg = ENCHANT_CONFIG) {
+  const kind = scrollKindOf(name, cfg);
+  if (kind === 'standard') return true;
+  if (kind === 'blessed') return levelOf({ enchantLevel: level }) + 1 > cfg.safeMaxLevel;
+  return false;
+}
+
+// What a scroll of this kind costs at the smith.
+function scrollPriceOf(kind, cfg = ENCHANT_CONFIG) {
+  return kind === 'blessed' ? cfg.blessedScrollPrice : cfg.scrollPrice;
+}
+
+// Gold a merchant ADDS to the sale price of a weapon for its enchant level. A share of the
+// standard scroll price per level, so it is a fixed sum no matter how strong the weapon is.
+function sellBonus(level, cfg = ENCHANT_CONFIG) {
+  const n = Math.max(0, Math.min(cfg.maxLevel, Math.floor(Number(level) || 0)));
+  return Math.floor(n * cfg.scrollPrice * cfg.sellBackShare);
+}
+
+// The expected cost of taking a fresh +0 weapon to `target`. The replacement WEAPON itself is not priced in.
+//   * default: a standard scroll for every step; a miss in the danger zone burns the weapon and the
+//     climb starts again from +0;
+//   * { blessed: true }: standard scrolls through the safe zone, a blessed scroll for every danger-zone
+//     step; a miss drops the weapon to the top of the safe zone and the climb resumes from there.
+//   { scrolls, standard, blessed, gold }   (expected counts; fractional; Infinity when a step can never succeed)
+function expectedCost(target, cfg = ENCHANT_CONFIG, { blessed = false } = {}) {
+  const goal = Math.max(0, Math.min(cfg.maxLevel, Math.floor(Number(target) || 0)));
+  // Past the safe zone only: a goal inside it cannot fail, so both strategies cost the same.
+  const useBlessed = blessed && goal > cfg.safeMaxLevel;
+  const restart = useBlessed ? cfg.safeMaxLevel : 0;
+  // T_k = expected cost from level k, written a_k + b_k * X where X = T_restart closes the loop of
+  // "missed, go back to the restart level". Solved from the goal down to the restart level, then X is
+  // known and the rest (a sure climb through the safe zone) is walked down numerically.
+  const solve = (weight) => {
+    let a = 0; let b = 0;                      // at the goal nothing is left to buy
+    for (let k = goal - 1; k >= restart; k -= 1) {
+      const p = successChance(k + 1, cfg);
+      const w = weight(k + 1);
+      if (p <= 0) return Infinity;
+      if (k + 1 <= cfg.safeMaxLevel) { a = (w + p * a) / p; /* b unchanged: a safe miss stays put */ } else {
+        const na = w + p * a;
+        const nb = p * b + (1 - p);
+        a = na; b = nb;
+      }
+    }
+    if (b >= 1) return Infinity;
+    let t = a / (1 - b);                       // T_restart
+    for (let k = restart - 1; k >= 0; k -= 1) {
+      const p = successChance(k + 1, cfg);
+      if (p <= 0) return Infinity;
+      t = (weight(k + 1) + p * t) / p;
+    }
+    return t;
+  };
+  const danger = (lvl) => lvl > cfg.safeMaxLevel;
+  const blessedCount = useBlessed ? solve((lvl) => (danger(lvl) ? 1 : 0)) : 0;
+  const standard = solve((lvl) => (useBlessed && danger(lvl) ? 0 : 1));
+  return {
+    scrolls: standard + blessedCount, standard, blessed: blessedCount,
+    gold: standard * cfg.scrollPrice + blessedCount * cfg.blessedScrollPrice,
+  };
 }
 
 // What the client needs to draw the enchant UI and the odds, nothing more.
@@ -181,6 +290,9 @@ function publicEnchantConfig(cfg = ENCHANT_CONFIG) {
     glowFireLevel: cfg.glowFireLevel,
     scrollItemName: cfg.scrollItemName,
     scrollPrice: cfg.scrollPrice,
+    blessedScrollItemName: cfg.blessedScrollItemName,
+    blessedScrollPrice: cfg.blessedScrollPrice,
+    sellBackShare: cfg.sellBackShare,
     maxScrollPurchase: cfg.maxScrollPurchase,
   };
 }
@@ -189,4 +301,5 @@ module.exports = {
   DEFAULT_ENCHANT_CONFIG, ENCHANT_CONFIG, EnchantConfigError,
   validateEnchantConfig, buildEnchantConfig, loadEnchantConfig,
   levelOf, successChance, damageMultiplier, checkEnchantable, rollEnchant, glowTier, publicEnchantConfig,
+  scrollKindOf, scrollFits, scrollPriceOf, sellBonus, expectedCost,
 };

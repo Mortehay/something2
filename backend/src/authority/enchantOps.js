@@ -42,8 +42,11 @@ async function enchantItem(pool, entry, userId, characterId, scrollId, itemId, {
   if (!cachedItem) return { ok: false, reason: 'you do not own that weapon' };
   const weapons = entry.world.weapons;
   const scrollType = weapons.get(cachedScroll.typeId);
-  if (!scrollType || scrollType.name !== cfg.scrollItemName) return { ok: false, reason: 'that is not an enchant scroll' };
+  if (!scrollType || enchant.scrollKindOf(scrollType.name, cfg) == null) return { ok: false, reason: 'that is not an enchant scroll' };
   const pre = enchant.checkEnchantable(cachedItem, weapons.get(cachedItem.typeId), cfg);
+  if (pre.ok && !enchant.scrollFits(scrollType.name, enchant.levelOf(cachedItem), cfg)) {
+    return { ok: false, reason: 'a blessed scroll only works past +' + cfg.safeMaxLevel };
+  }
   if (!pre.ok) return pre;
 
   const client = await pool.connect();
@@ -64,11 +67,15 @@ async function enchantItem(pool, entry, userId, characterId, scrollId, itemId, {
     const target = rows.rows.find((r) => r.id === itemId);
     if (!scroll || Number(scroll.quantity) < 1) { await client.query('ROLLBACK'); return { ok: false, reason: 'you do not own that scroll' }; }
     if (!target) { await client.query('ROLLBACK'); return { ok: false, reason: 'you do not own that weapon' }; }
-    if (scroll.name !== cfg.scrollItemName) { await client.query('ROLLBACK'); return { ok: false, reason: 'that is not an enchant scroll' }; }
+    if (enchant.scrollKindOf(scroll.name, cfg) == null) { await client.query('ROLLBACK'); return { ok: false, reason: 'that is not an enchant scroll' }; }
     const check = enchant.checkEnchantable(
       { enchantLevel: Number(target.enchant_level) }, { category: target.category }, cfg,
     );
     if (!check.ok) { await client.query('ROLLBACK'); return check; }
+    if (!enchant.scrollFits(scroll.name, Number(target.enchant_level), cfg)) {
+      await client.query('ROLLBACK');
+      return { ok: false, reason: 'a blessed scroll only works past +' + cfg.safeMaxLevel };
+    }
 
     // The scroll goes first and unconditionally: once the dice are rolled it is
     // spent whatever they say.
@@ -79,8 +86,9 @@ async function enchantItem(pool, entry, userId, characterId, scrollId, itemId, {
       await client.query('DELETE FROM player_items WHERE id = $1', [scrollId]);
     }
 
-    const result = enchant.rollEnchant(Number(target.enchant_level), rng, cfg);
-    if (result.outcome === 'success') {
+    const result = enchant.rollEnchant(Number(target.enchant_level), rng, cfg, { blessed: enchant.scrollKindOf(scroll.name, cfg) === 'blessed' });
+    if (result.outcome === 'success' || result.outcome === 'reset') {
+      // 'reset': a blessed scroll missed, the weapon survives at the top of the safe zone.
       await client.query('UPDATE player_items SET enchant_level = $2 WHERE id = $1', [itemId, result.level]);
     } else if (result.outcome === 'destroyed') {
       // Equipment rows and an inserted stone's socket reference both cascade / null
@@ -102,7 +110,7 @@ async function enchantItem(pool, entry, userId, characterId, scrollId, itemId, {
       for (const [slot, id] of Object.entries(p.inv.equipment || {})) {
         if (id === itemId) delete p.inv.equipment[slot];
       }
-    } else if (result.outcome === 'success') {
+    } else if (result.outcome === 'success' || result.outcome === 'reset') {
       cachedItem.enchantLevel = result.level;
     }
     return {
@@ -119,26 +127,28 @@ async function enchantItem(pool, entry, userId, characterId, scrollId, itemId, {
 
 // -- buying scrolls from the smith ----------------------------------------------
 
-// Buys `quantity` enchant scrolls for `quantity x scrollPrice` gold, adding them to the
+// Buys `quantity` enchant scrolls of `kind` ('standard', or the dearer 'blessed', which only works past
+// the safe zone and spares the weapon on a miss) for `quantity x` that kind's price in gold, adding them to the
 // character's existing scroll stack (or opening a new one).
 //
 // Returns { ok: true, item, added, price, gold } -- `item` is the WHOLE stack as it now stands
 // -- or { ok: false, reason }. One transaction: the gold debit and the scrolls commit together.
-async function buyScrolls(pool, entry, userId, characterId, quantity, { cfg = enchant.ENCHANT_CONFIG } = {}) {
+async function buyScrolls(pool, entry, userId, characterId, quantity, { cfg = enchant.ENCHANT_CONFIG, kind = 'standard' } = {}) {
+  if (kind !== 'standard' && kind !== 'blessed') return { ok: false, reason: 'choose which scroll to buy' };
   const p = entry.world.getPlayer(userId);
   if (!p || !p.inv) return { ok: false, reason: 'no player' };
   const qty = Number(quantity);
   if (!Number.isInteger(qty) || qty < 1) return { ok: false, reason: 'choose how many scrolls to buy' };
   if (qty > cfg.maxScrollPurchase) return { ok: false, reason: `you can buy at most ${cfg.maxScrollPurchase} scrolls at a time` };
   const weapons = entry.world.weapons;
-  const typeId = scrollTypeId(weapons, cfg);
+  const typeId = scrollTypeId(weapons, cfg, kind);
   if (typeId == null) return { ok: false, reason: 'the smith has no scrolls right now' };
 
   // A new stack needs a free slot; adding to one does not. Checked before any money moves.
   const cached = p.inv.items.find((it) => it.typeId === typeId);
   if (!cached && !hasFreeSlot(p.inv, weapons)) return { ok: false, reason: 'Inventory full' };
 
-  const price = qty * cfg.scrollPrice;
+  const price = qty * enchant.scrollPriceOf(kind, cfg);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');

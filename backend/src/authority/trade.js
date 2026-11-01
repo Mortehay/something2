@@ -4,6 +4,7 @@
 // against fresh state.
 
 const { sellPriceFor, insertBuyback, BUYBACK_DAYS } = require('../services/merchantStock');
+const { sellBonus } = require('../services/enchant');
 const { ejectSocketedStone } = require('../services/stoneEject');
 const { hasFreeSlot } = require('./items');
 const { vendorBuyPrice, loadLegacyChoice } = require('../services/legacyEffects');
@@ -255,7 +256,7 @@ async function sellItem(pool, entry, userId, characterId, villageId, itemId) {
     //
     // The character_id predicate IS the ownership check.
     const del = await client.query(
-      'SELECT item_type_id, quantity, soulbound FROM player_items WHERE id = $1 AND character_id = $2 FOR UPDATE',
+      'SELECT item_type_id, quantity, soulbound, enchant_level FROM player_items WHERE id = $1 AND character_id = $2 FOR UPDATE',
       [itemId, characterId],
     );
     if (del.rowCount !== 1) {
@@ -342,7 +343,9 @@ async function sellItem(pool, entry, userId, characterId, villageId, itemId) {
     // player's -- p was resolved from userId above, so this is the same
     // player the DELETE just proved owns the item. See progressionConstants
     // .js SELL_FRACTION_MAX for why this can never reach or exceed 1.0.
-    const price = sellPriceFor(value, p.stats.priceMult);
+    // An enchanted weapon is worth more: the merchant adds a fixed sum per enchant level (see
+    // enchant.sellBonus for why it is far below what the scrolls cost).
+    const price = sellPriceFor(value + sellBonus(del.rows[0].enchant_level), p.stats.priceMult);
 
     const gr = await client.query(
       'UPDATE users SET gold = gold + $2 WHERE id = $1 RETURNING gold',

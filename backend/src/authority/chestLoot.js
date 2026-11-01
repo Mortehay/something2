@@ -156,7 +156,7 @@ async function openChest(pool, chestId, characterId, {
     const itemTypeIds = await rollChestLoot(client, chest.guard_level, rng);
     // An enchant scroll, sometimes. Appended AFTER the gear roll so it can never change what
     // the gear roll produced.
-    const chestScrollId = appendChestScrolls(itemTypeIds, itemTypes, scrollRng);
+    const chestScrollIds = appendChestScrolls(itemTypeIds, itemTypes, scrollRng);
     const items = [];
     // The chest has already been CAS'd open above and can never be re-opened,
     // so refusing here would DESTROY the loot. Grant what fits and hand the
@@ -189,7 +189,7 @@ async function openChest(pool, chestId, characterId, {
       // player loot the chest has already been CAS'd open to give them.
       const itemLevel = Math.min(150, Math.max(1, Math.round(Number(chest.guard_level)) || 1));
       // A scroll is a plain white item with nothing rolled on it, and takes no random numbers.
-      const rolled = itemTypeId === chestScrollId
+      const rolled = chestScrollIds && chestScrollIds.has(itemTypeId)
         ? { rarity: 'white', itemLevel: 1, affixes: [] }
         : rollItemInstance(
           {

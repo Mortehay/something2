@@ -1,13 +1,13 @@
 {
   "header": {
-    "exported_at": "2026-11-01T17:42:54.622Z",
+    "exported_at": "2026-11-01T19:21:45.989Z",
     "exported_by": "unnamed-pc",
     "group": "items",
     "row_counts": {
       "affix_types": 12,
       "item_types": 281
     },
-    "schema_version": "1714440850000_weapon_enchant_and_skill_levels"
+    "schema_version": "1714440853000_enchant_scroll_price"
   },
   "tables": {
     "affix_types": [
@@ -3745,7 +3745,7 @@
         "sync_uuid": "7efdd00c-bc65-4fa0-b23f-b2ba9d1aae6d",
         "tier": 1,
         "two_handed": false,
-        "value": 400,
+        "value": 2000,
         "vfx": null
       },
       {

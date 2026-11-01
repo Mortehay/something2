@@ -35,6 +35,7 @@
 ## Frontend — [frontend/](frontend/)
 
 - `make skills-sync` / `make skills-check` — regenerate / verify the client's skill catalog (`skillsCatalog.generated.js`), which is GENERATED from [backend/seeds/data/skills.js](backend/seeds/data/skills.js); never edit it by hand
+- `make enchant-cost` — expected gold/scrolls to enchant a fresh weapon to each level (odds, both scroll prices, burn-and-restart), for tuning the economy
 
 - `npm run dev` — vite dev server
 - `npm run build` — production build

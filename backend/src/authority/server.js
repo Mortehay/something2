@@ -2726,7 +2726,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
       });
     },
 
-    // Buy enchant scrolls from the village smith. { type: 'buyScrolls', quantity }. Answered with
+    // Buy enchant scrolls from the village smith. { type: 'buyScrolls', quantity, kind? } where kind is
+    // 'blessed' (spares the weapon on a miss) or omitted for the standard scroll. Answered with
     // 'scrollsBought' (the whole stack as it now stands) and a wallet update.
     buyScrolls(ws, msg) {
       const entry = worlds.get(ws.worldId);
@@ -2739,7 +2740,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
           send(ws, { type: 'error', message: 'no blacksmith nearby' });
           return;
         }
-        const r = await buyScrolls(pool, entry, ws.userId, ws.characterId, msg.quantity);
+        const r = await buyScrolls(pool, entry, ws.userId, ws.characterId, msg.quantity, { kind: msg.kind === 'blessed' ? 'blessed' : 'standard' });
         if (!r.ok) { send(ws, { type: 'error', message: r.reason }); return; }
         send(ws, { type: 'scrollsBought', item: r.item, added: r.added, price: r.price, gold: r.gold });
         send(ws, { type: 'wallet', gold: r.gold });

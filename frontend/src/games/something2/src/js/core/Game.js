@@ -21,6 +21,7 @@ import { createInventory, applyJoined, applyEquipment, canEquipClient, typeOf, a
 import { resolveDrop } from '../systems/inventoryPanel.js';
 import {
     enchantPlan, needsConfirm, applyEnchantResult, enchantResultMessage, ENCHANT_CONFIRM_MS, skillUpgradePlan,
+    enchantedDamage, enchantLevelOf,
 } from '../systems/enchantUi.js';
 import { forgeWeapons } from '../systems/forgePanel.js';
 import {
@@ -356,6 +357,7 @@ export class Game {
         this.forgeOpen = false;
         this.forgePage = 0;
         this.forgeSelectedId = null;
+        this.forgeBlessed = false;     // spend a BLESSED scroll (a miss drops the weapon to +3 instead of burning it)
         this.forgeResult = null;       // { outcome, level, at } -- drives the result animation
         this._lastBuyScrollsAt = 0;
         this.gemShopColorFilter = 'all';
@@ -1953,7 +1955,20 @@ export class Game {
         return DEFAULT_WEAPON_NAME;
     }
 
+    // The weapon in hand AS THE PLAYER HAS IT: the catalog row, but with the damage the enchant
+    // level really gives. Reading the bare catalog row made a +6 staff show the same skill damage
+    // as a +0 one, because the level lives on the owned item, not on its type.
     _resolveEquippedWeapon() {
+        const type = this._resolveEquippedWeaponType();
+        const id = this.inventory && this.inventory.equipment ? this.inventory.equipment.main_hand : null;
+        if (!type || id == null || typeof id === "object" || !Array.isArray(this.inventory.items)) return type;
+        const item = this.inventory.items.find((i) => i.id === id);
+        const level = enchantLevelOf(item);
+        if (!(level > 0) || !this.enchantCfg) return type;
+        return { ...type, damage: enchantedDamage(type.damage, level, this.enchantCfg), enchantLevel: level };
+    }
+
+    _resolveEquippedWeaponType() {
         if (!this.inventory || !this.inventory.equipment) return null;
         const mainHandId = this.inventory.equipment.main_hand;
         if (mainHandId == null) return null;
@@ -2671,7 +2686,7 @@ export class Game {
         return {
             inventory: this.inventory, enchantCfg: this.enchantCfg, gold: this.gold || 0,
             selectedItemId: this.forgeSelectedId, page: this.forgePage, armedItemId: armed,
-            result: this.forgeResult,
+            result: this.forgeResult, blessed: this.forgeBlessed,
         };
     }
 
@@ -2682,25 +2697,27 @@ export class Game {
             this.forgeSelectedId = hit.id;
             return;
         }
+        if (hit.kind === 'forge_blessed') { this.forgeBlessed = !this.forgeBlessed; this._enchantArmed = null; return; }
         if (hit.kind === 'forge_page') { this.forgePage = Math.max(0, this.forgePage + hit.delta); return; }
         if (hit.kind === 'forge_enchant') { this._onEnchantClick(hit.id); return; }
-        if (hit.kind === 'forge_buy') { this._onBuyScrollsClick(hit.quantity); return; }
+        if (hit.kind === 'forge_buy') { this._onBuyScrollsClick(hit.quantity, hit.scroll); return; }
     }
 
     // The Buy button. Refused locally when the purse is short; the server checks again.
-    _onBuyScrollsClick(quantity) {
+    _onBuyScrollsClick(quantity, kind = 'standard') {
         const cfg = this.enchantCfg;
         if (!cfg) return;
-        const cost = quantity * (Number(cfg.scrollPrice) || 0);
+        const unit = Number(kind === 'blessed' ? cfg.blessedScrollPrice : cfg.scrollPrice) || 0;
+        const cost = quantity * unit;
         if ((this.gold || 0) < cost) {
-            if (this.showToast) this.showToast(`🪙 Not enough gold! ${quantity} scroll${quantity === 1 ? '' : 's'} cost ${cost.toLocaleString()}g (you have ${(this.gold || 0).toLocaleString()}g)`);
+            if (this.showToast) this.showToast(`🪙 Not enough gold! ${quantity} ${kind === 'blessed' ? 'blessed ' : ''}scroll${quantity === 1 ? '' : 's'} cost ${cost.toLocaleString()}g (you have ${(this.gold || 0).toLocaleString()}g)`);
             return;
         }
         if (!this.authorityClient) return;
         const now = performance.now();
         if (now - this._lastBuyScrollsAt < 400) return;    // a double-click must not buy twice
         this._lastBuyScrollsAt = now;
-        this.authorityClient.sendBuyScrolls(quantity);
+        this.authorityClient.sendBuyScrolls(quantity, kind === 'blessed' ? 'blessed' : 'standard');
     }
 
     // The server sold scrolls: it sends the whole stack, so this REPLACES rather than adds.
@@ -2720,7 +2737,7 @@ export class Game {
     // stray click cannot cost a +14 sword. The server re-checks everything and owns
     // the dice; this only decides whether to ask.
     _onEnchantClick(itemId) {
-        const plan = enchantPlan(this.inventory, itemId, this.enchantCfg);
+        const plan = enchantPlan(this.inventory, itemId, this.enchantCfg, { blessed: this.forgeBlessed });
         if (!plan.ok) {
             if (this.showToast && plan.reason) this.showToast(`🔒 ${plan.reason}`);
             return;
@@ -2731,7 +2748,7 @@ export class Game {
             const armed = this._enchantArmed;
             if (!armed || armed.itemId !== itemId || now > armed.until) {
                 this._enchantArmed = { itemId, until: now + ENCHANT_CONFIRM_MS };
-                if (this.showToast) this.showToast(`⚠️ ${plan.chancePct}% to reach +${plan.nextLevel}. On a miss the weapon BURNS. Click again to confirm.`);
+                if (this.showToast) this.showToast(`⚠️ ${plan.chancePct}% to reach +${plan.nextLevel}. On a miss ${plan.blessed ? `the weapon falls back to +${this.enchantCfg.safeMaxLevel}` : 'the weapon BURNS'}. Click again to confirm.`);
                 return;
             }
         }

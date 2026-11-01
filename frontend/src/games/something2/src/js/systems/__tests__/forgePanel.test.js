@@ -225,7 +225,7 @@ describe("drawForgePanel", () => {
     expect(all).toContain("+12 axe");
     expect(all).toContain("60%");
     expect(all).toContain("the weapon burns the weapon".replace("the weapon ", ""));
-    expect(all).toContain("Scrolls: 4");
+    expect(all).toContain("Standard: 4");
     expect(all).toContain("Buy 1 · 400g");
     expect(all).toContain("5,000");
     expect(all).toContain("IN HAND");
@@ -291,7 +291,7 @@ function makeGame() {
   g.sent = [];
   g.authorityClient = {
     sendEnchant: (s, i) => g.sent.push(["enchant", s, i]),
-    sendBuyScrolls: (q) => g.sent.push(["buyScrolls", q]),
+    sendBuyScrolls: (q, kind) => g.sent.push(["buyScrolls", q, kind]),
     sendInteract: () => {},
   };
   return g;
@@ -382,7 +382,7 @@ describe("the smith's menu in the game", () => {
   it("Buy sends the quantity, is refused when the purse is short, and a double-click buys once", () => {
     const g = makeGame();
     g._onForgeHit({ kind: "forge_buy", quantity: 5 });
-    expect(g.sent).toEqual([["buyScrolls", 5]]);
+    expect(g.sent).toEqual([["buyScrolls", 5, "standard"]]);
     g._onForgeHit({ kind: "forge_buy", quantity: 5 });
     expect(g.sent).toHaveLength(1);
 
@@ -463,5 +463,138 @@ describe("the blacksmith in the world", () => {
     expect(draw(null)).toContain("Blacksmith");
     expect(draw({ x: 1000, y: 1000, width: 64, height: 64 })).toContain("[e] Enchant");
     expect(draw({ x: 9000, y: 9000, width: 64, height: 64 })).not.toContain("[e] Enchant");
+  });
+});
+
+describe("the smith sells two scrolls", () => {
+  const CFG2 = { ...CFG, scrollPrice: 2000, blessedScrollItemName: "enchant_scroll_blessed", blessedScrollPrice: 6000 };
+  const BLESSED = { id: 5, name: "enchant_scroll_blessed", category: "consumable" };
+  const st = (over = {}) => {
+    const inv = createInventory();
+    for (const t of [SWORD, AXE, SCROLL, VEST, BLESSED]) inv.types.set(t.id, t);
+    inv.items = [W("a", 1, 5), { id: "s", typeId: 2, quantity: 4 }, { id: "b", typeId: 5, quantity: 7 }];
+    inv.equipment = { main_hand: "a" };
+    return { inventory: inv, enchantCfg: CFG2, gold: 100000, selectedItemId: "a", page: 0, armedItemId: null, result: null, ...over };
+  };
+
+  it("has a row per scroll, each priced from its own number", () => {
+    const l = layoutForgePanel(st());
+    expect(l.shop.rows.map((r) => [r.kind, r.price, r.count])).toEqual([["standard", 2000, 4], ["blessed", 6000, 7]]);
+    const costs = l.shop.buttons.map((b) => [b.kind, b.quantity, b.cost]);
+    expect(costs).toEqual([
+      ["standard", 1, 2000], ["standard", 5, 10000], ["blessed", 1, 6000], ["blessed", 5, 30000],
+    ]);
+  });
+
+  it("each buy hit area names the scroll it buys", () => {
+    const l = layoutForgePanel(st());
+    const areas = l.hitAreas.filter((a) => a.kind === "forge_buy");
+    expect(areas.map((a) => [a.scroll, a.quantity])).toEqual([["standard", 1], ["standard", 5], ["blessed", 1], ["blessed", 5]]);
+  });
+
+  it("the Enchant button sits below both rows and nothing overlaps or leaves the panel", () => {
+    const l = layoutForgePanel(st());
+    const lastBuy = Math.max(...l.shop.buttons.map((b) => b.box.y + b.box.h));
+    expect(l.enchant.box.y).toBeGreaterThanOrEqual(lastBuy);
+    expect(l.enchant.box.y + l.enchant.box.h).toBeLessThanOrEqual(l.panel.y + l.panel.h);
+    for (const a of l.hitAreas) {
+      expect(a.box.x + a.box.w).toBeLessThanOrEqual(l.panel.x + l.panel.w);
+      expect(a.box.y + a.box.h).toBeLessThanOrEqual(l.panel.y + l.panel.h);
+    }
+  });
+
+  it("without the blessed scroll in the config the panel is as before: one row", () => {
+    const l = layoutForgePanel(st({ enchantCfg: CFG }));
+    expect(l.shop.rows.map((r) => r.kind)).toEqual(["standard"]);
+  });
+
+  it("offers the blessed toggle only in the danger zone and only when one is owned", () => {
+    const danger = layoutForgePanel(st());                         // +5 -> +6
+    expect(danger.blessedToggle).toMatchObject({ on: false, count: 7 });
+    expect(danger.hitAreas.some((a) => a.kind === "forge_blessed")).toBe(true);
+
+    const safeInv = st();
+    safeInv.inventory.items[0] = W("a", 1, 1);                     // +1 -> +2: safe
+    expect(layoutForgePanel(safeInv).blessedToggle).toBeNull();
+
+    const none = st();
+    none.inventory.items = none.inventory.items.filter((i) => i.id !== "b");
+    expect(layoutForgePanel(none).blessedToggle).toBeNull();
+  });
+
+  it("the toggle switches the plan to the blessed scroll and the forecast to 'drops back'", () => {
+    const off = layoutForgePanel(st());
+    expect(off.plan.scrollId).toBe("s");
+    expect(off.forecast.failure).toBe("burns the weapon");
+
+    const on = layoutForgePanel(st({ blessed: true }));
+    expect(on.plan).toMatchObject({ scrollId: "b", blessed: true });
+    expect(on.forecast.failure).toBe("drops back to +3");
+    expect(on.blessedToggle.on).toBe(true);
+  });
+
+  it("draws both rows, the toggle and their prices", () => {
+    const ctx = fakeCtx();
+    const s = st({ blessed: true });
+    drawForgePanel(ctx, layoutForgePanel(s), s, 5000);
+    const all = ctx.texts.join("\n");
+    expect(all).toContain("Standard: 4");
+    expect(all).toContain("Blessed: 7");
+    expect(all).toContain("Blessed scroll: ON (7)");
+    expect(all).toContain("Buy 1 · 6,000g");
+    expect(all).toContain("Buy 5 · 30,000g");
+  });
+
+  it("plays the blessed-miss animation without throwing", () => {
+    const ctx = fakeCtx();
+    const s = st({ result: { outcome: "reset", level: 3, at: 1000 } });
+    drawForgePanel(ctx, layoutForgePanel(s), s, 1500);
+    expect(ctx.texts.join("\n")).toContain("back to +3");
+  });
+
+  it("the game sends the kind it was asked for, and prices the refusal from that kind", () => {
+    const g = makeGame();
+    g.enchantCfg = CFG2;
+    g.gold = 100000;
+    g._onForgeHit({ kind: "forge_buy", quantity: 5, scroll: "blessed" });
+    expect(g.sent).toEqual([["buyScrolls", 5, "blessed"]]);
+    const poor = makeGame();
+    poor.enchantCfg = CFG2;
+    poor.gold = 1000;
+    poor._onForgeHit({ kind: "forge_buy", quantity: 5, scroll: "blessed" });
+    expect(poor.sent).toEqual([]);
+    expect(poor.toasts.join(" ")).toMatch(/5 blessed scrolls cost 30,000g/);
+  });
+
+  it("the toggle flips in the game and disarms a pending confirmation", () => {
+    const g = makeGame();
+    g.enchantCfg = CFG2;
+    g._enchantArmed = { itemId: "a", until: performance.now() + 5000 };
+    g._onForgeHit({ kind: "forge_blessed" });
+    expect(g.forgeBlessed).toBe(true);
+    expect(g._enchantArmed).toBeNull();
+    expect(g._forgeState().blessed).toBe(true);
+    g._onForgeHit({ kind: "forge_blessed" });
+    expect(g.forgeBlessed).toBe(false);
+  });
+});
+
+describe("the weapon the skill tooltips read", () => {
+  it("carries the enchant level's damage, so a +6 staff shows more than a +0 one", () => {
+    const STAFF = { id: 7, name: "staff", category: "weapon", damage: 6.6, cooldown: 1, kind: "ranged" };
+    const g = makeGame();
+    g.inventory.types.set(STAFF.id, STAFF);
+    g.inventory.items = [W("plain", 7, 0), W("forged", 7, 6)];
+
+    g.inventory.equipment = { main_hand: "plain" };
+    expect(g._resolveEquippedWeapon().damage).toBe(6.6);
+
+    g.inventory.equipment = { main_hand: "forged" };
+    const w = g._resolveEquippedWeapon();
+    expect(w.damage).toBeCloseTo(6.6 * (1 + CFG.damagePerLevel * 6), 2);
+    expect(w.damage).toBeGreaterThan(6.6);
+    expect(w.enchantLevel).toBe(6);
+    expect(w.name).toBe("staff");
+    expect(STAFF.damage).toBe(6.6);              // the shared catalog row is never mutated
   });
 });

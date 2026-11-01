@@ -261,7 +261,7 @@ export class WorldAuthorityClient {
   // Buy a skill gem from the merchant next to you; answered by `gemBought` (or an error).
   sendBuyGem(skillId) { return this._send({ type: 'buyGem', skillId }); }
   // Buy `quantity` enchant scrolls from the village smith next to you; answered by `scrollsBought`.
-  sendBuyScrolls(quantity) { return this._send({ type: 'buyScrolls', quantity }); }
+  sendBuyScrolls(quantity, kind = 'standard') { return this._send({ type: 'buyScrolls', quantity, kind }); }
   // Claim, once, the gems this browser remembered from before the server owned them.
   sendImportGems(skillIds) { return this._send({ type: 'importGems', skillIds }); }
   sendAutoLoot(on) { return this._send({ type: 'autoloot', on: on === true }); }

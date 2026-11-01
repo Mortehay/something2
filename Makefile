@@ -742,3 +742,8 @@ test-db-reset:
 
 test-db-drop:
 	$(COMPOSE) exec -T backend node scripts/testdb.js drop
+
+# What a weapon costs, on average, to enchant to each level (odds x scroll prices); tune against it.
+.PHONY: enchant-cost
+enchant-cost:
+	$(COMPOSE) exec -T backend node scripts/enchant-cost.js

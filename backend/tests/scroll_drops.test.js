@@ -4,16 +4,21 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const enchant = require('../src/services/enchant.js');
 const {
-  scrollTypeId, scrollRollCount, appendChestScrolls, spawnScrollsOnGround,
+  scrollTypeId, scrollRollCount, scrollDropTypeIds, appendChestScrolls, spawnScrollsOnGround,
 } = require('../src/authority/scrollDrops.js');
 const { commitCreatureDeath } = require('../src/authority/loot.js');
 const { spawnBossLootItems } = require('../src/authority/bossLoot.js');
 const { CREATURE_SIZE } = require('../src/authority/creatures.js');
 
 const SCROLL_ID = 77;
+const BLESSED_ID = 78;
 const catalog = () => new Map([
   [1, { id: 1, name: 'sword', category: 'weapon' }],
   [SCROLL_ID, { id: SCROLL_ID, name: 'enchant_scroll', category: 'consumable' }],
+]);
+const catalogBoth = () => new Map([
+  ...catalog(),
+  [BLESSED_ID, { id: BLESSED_ID, name: 'enchant_scroll_blessed', category: 'consumable' }],
 ]);
 
 // A tiny seeded generator so the distribution tests are deterministic.
@@ -93,8 +98,8 @@ test('the scroll\'s type id is found by name, and a catalog without it yields nu
 
 test('a chest appends scrolls after its gear, and tells the caller which id they are', () => {
   const ids = [1, 1];
-  const scrollId = appendChestScrolls(ids, catalog(), () => 0);
-  assert.equal(scrollId, SCROLL_ID);
+  const scrollIds = appendChestScrolls(ids, catalog(), () => 0);
+  assert.deepEqual([...scrollIds], [SCROLL_ID]);
   assert.deepEqual(ids, [1, 1, SCROLL_ID], 'gear first, untouched; one scroll after it');
 });
 
@@ -257,4 +262,53 @@ test('only a live world carries scrollRng, and every loot path reads it from the
   assert.match(read('server.js'), /scrollRng: entry\.scrollRng,/, 'the chest opener gets it from the entry');
   assert.match(read('loot.js'), /scrollRng = \(entry && entry\.scrollRng\) \|\| null/);
   assert.match(read('bossLoot.js'), /scrollRng = \(entry && entry\.scrollRng\) \|\| null/);
+});
+
+// ----------------------------------------------------------- the blessed scroll
+
+test('blessed scrolls are far rarer than standard ones, and never drop from ordinary creatures', () => {
+  const std = enchant.ENCHANT_CONFIG.scrollDrops;
+  const bl = enchant.ENCHANT_CONFIG.blessedDrops;
+  assert.equal(bl.creature.max === 0 || bl.creature.chance === 0, true, 'no blessed scrolls from mobs');
+  assert.ok(bl.chest.chance < std.chest.chance, 'rarer than the standard scroll in a chest');
+  assert.ok(bl.boss.chance < std.boss.chance, 'rarer than the standard scroll from a boss');
+  assert.ok(bl.chest.chance < bl.boss.chance, 'a boss beats a chest');
+  for (let i = 0; i < 200; i += 1) assert.equal(scrollRollCount('creature', () => 0, undefined, 'blessed'), 0);
+});
+
+test('a source rolls standard and blessed scrolls separately, standard first', () => {
+  assert.equal(scrollRollCount('boss', () => 0, undefined, 'blessed'), 1);
+  assert.equal(scrollRollCount('boss', () => 0.5, undefined, 'blessed'), 0);
+  // Every roll succeeds: a boss gives its two standard scrolls, then its one blessed.
+  assert.deepEqual(scrollDropTypeIds('boss', () => 0, catalogBoth()), [SCROLL_ID, SCROLL_ID, BLESSED_ID]);
+  // Nothing succeeds: nothing drops.
+  assert.deepEqual(scrollDropTypeIds('boss', () => 0.99, catalogBoth()), []);
+  // A mob never gives a blessed one even when every roll succeeds.
+  assert.deepEqual(scrollDropTypeIds('creature', () => 0, catalogBoth()), [SCROLL_ID]);
+  // A catalog without the blessed scroll just skips it; no rng drops nothing.
+  assert.deepEqual(scrollDropTypeIds('boss', () => 0, catalog()), [SCROLL_ID, SCROLL_ID]);
+  assert.deepEqual(scrollDropTypeIds('boss', null, catalogBoth()), []);
+});
+
+test('a chest can hold either scroll, and reports both ids so neither gets rarity or affixes', () => {
+  const ids = [1];
+  const set = appendChestScrolls(ids, catalogBoth(), () => 0);
+  assert.deepEqual(ids, [1, SCROLL_ID, BLESSED_ID]);
+  assert.deepEqual([...set].sort(), [SCROLL_ID, BLESSED_ID].sort());
+});
+
+test('the blessed scroll is found by name', () => {
+  assert.equal(scrollTypeId(catalogBoth(), enchant.ENCHANT_CONFIG, 'blessed'), BLESSED_ID);
+  assert.equal(scrollTypeId(catalog(), enchant.ENCHANT_CONFIG, 'blessed'), null);
+  assert.equal(scrollTypeId(catalogBoth(), enchant.ENCHANT_CONFIG, 'standard'), SCROLL_ID);
+});
+
+test('spawning accepts a list of type ids (mixed kinds) as well as a plain count', async () => {
+  const inserted = [];
+  const db = { query: async (_sql, params) => { inserted.push(params[4]); return { rows: params[4].map((t, i) => ({ id: i, item_type_id: t, x: 0, y: 0, quantity: 1 })) }; } };
+  const entry = { worldId: 1, world: { weapons: catalogBoth(), groundItems: { add() {} } } };
+  await spawnScrollsOnGround(db, entry, [SCROLL_ID, BLESSED_ID], 10, 10);
+  await spawnScrollsOnGround(db, entry, 2, 10, 10);
+  await spawnScrollsOnGround(db, entry, [], 10, 10);
+  assert.deepEqual(inserted, [[SCROLL_ID, BLESSED_ID], [SCROLL_ID, SCROLL_ID]]);
 });

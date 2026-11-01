@@ -47,7 +47,7 @@ export function forgeWeapons(inventory) {
 }
 
 // What the panel shows for one selected weapon, or null.
-export function forgeForecast(row, cfg) {
+export function forgeForecast(row, cfg, { blessed = false } = {}) {
   if (!row || !cfg) return null;
   const base = Number(row.type.damage) || 0;
   const level = row.level;
@@ -65,7 +65,8 @@ export function forgeForecast(row, cfg) {
     bonusNowPct: damageBonusPercent(level, cfg),
     bonusAfterPct: damageBonusPercent(nextLevel, cfg),
     // The honest read of a miss: the weapon is lost, or only the scroll is.
-    failure: maxed ? "" : (danger ? "burns the weapon" : "only the scroll is lost"),
+    blessed: !maxed && danger && blessed,
+    failure: maxed ? "" : (danger ? (blessed ? `drops back to +${cfg.safeMaxLevel}` : "burns the weapon") : "only the scroll is lost"),
   };
 }
 
@@ -81,7 +82,7 @@ export function forgeAnimation(result, now, durationMs = FORGE_ANIM_MS) {
 export function layoutForgePanel(state) {
   const {
     inventory = null, enchantCfg = null, gold = 0,
-    selectedItemId = null, page = 0, armedItemId = null,
+    selectedItemId = null, page = 0, armedItemId = null, blessed = false,
   } = state;
 
   const px = Math.round((GAME_WIDTH - FORGE_W) / 2);
@@ -109,8 +110,8 @@ export function layoutForgePanel(state) {
 
   // ---- the selected weapon (right) ----
   const selected = all.find((r) => r.item.id === selectedItemId) || null;
-  const forecast = forgeForecast(selected, enchantCfg);
-  const plan = selected ? enchantPlan(inventory, selected.item.id, enchantCfg) : null;
+  const forecast = forgeForecast(selected, enchantCfg, { blessed });
+  const plan = selected ? enchantPlan(inventory, selected.item.id, enchantCfg, { blessed }) : null;
   const scrolls = enchantCfg ? scrollCount(inventory, enchantCfg) : 0;
 
   const rx = px + PAD + LEFT_W + 22;
@@ -119,19 +120,38 @@ export function layoutForgePanel(state) {
   const stage = { x: rx, y: card.y + card.h + 10, w: rw, h: 110 };
   const shopY = stage.y + stage.h + 10;
 
-  // ---- scrolls for sale ----
-  const price = enchantCfg ? Number(enchantCfg.scrollPrice) || 0 : 0;
+  // ---- scrolls for sale: one row per kind (standard first, then the cheap safe-zone scroll) ----
   const maxBuy = enchantCfg ? Number(enchantCfg.maxScrollPurchase) || 1 : 1;
-  const buyButtons = BUY_QUANTITIES.filter((q) => q <= maxBuy).map((q, i) => {
-    const cost = q * price;
-    const box = { x: rx + 150 + i * 150, y: shopY, w: 142, h: 28 };
-    return { quantity: q, cost, box, canAfford: gold >= cost };
+  const priceOf = (kind) => {
+    if (!enchantCfg) return 0;
+    return Number(kind === "blessed" ? enchantCfg.blessedScrollPrice : enchantCfg.scrollPrice) || 0;
+  };
+  const kinds = enchantCfg && enchantCfg.blessedScrollItemName ? ["standard", "blessed"] : ["standard"];
+  const SHOP_ROW_H = 34;
+  const buyButtons = [];
+  const shopRows = kinds.map((kind, row) => {
+    const y = shopY + row * SHOP_ROW_H;
+    const price = priceOf(kind);
+    BUY_QUANTITIES.filter((q) => q <= maxBuy).forEach((q, i) => {
+      const cost = q * price;
+      const box = { x: rx + 150 + i * 150, y, w: 142, h: 28 };
+      buyButtons.push({ kind, quantity: q, cost, box, canAfford: gold >= cost });
+    });
+    return { kind, y, price, count: enchantCfg ? scrollCount(inventory, enchantCfg, kind) : 0 };
   });
-  for (const b of buyButtons) hitAreas.push({ kind: "forge_buy", quantity: b.quantity, box: b.box });
+  for (const b of buyButtons) hitAreas.push({ kind: "forge_buy", scroll: b.kind, quantity: b.quantity, box: b.box });
+  const price = priceOf("standard");
+
+  // ---- the blessed toggle: only where a miss would burn the weapon and the player owns a blessed scroll ----
+  const blessedCount = enchantCfg ? scrollCount(inventory, enchantCfg, "blessed") : 0;
+  const blessedToggle = forecast && forecast.danger && blessedCount > 0
+    ? { box: { x: card.x + card.w - 196, y: card.y + 34, w: 182, h: 26 }, on: !!blessed, count: blessedCount }
+    : null;
+  if (blessedToggle) hitAreas.push({ kind: "forge_blessed", box: blessedToggle.box });
 
   // ---- the Enchant button ----
   const armed = !!selected && armedItemId != null && armedItemId === selected.item.id;
-  const enchantBox = { x: rx, y: shopY + 38, w: rw, h: 44 };
+  const enchantBox = { x: rx, y: shopY + kinds.length * SHOP_ROW_H + 4, w: rw, h: 44 };
   const enchant = {
     box: enchantBox, plan, armed,
     label: plan ? enchantButtonLabel(plan, armed) : "Select a weapon",
@@ -143,8 +163,8 @@ export function layoutForgePanel(state) {
   return {
     panel, close, title: { x: px, y: py, w: FORGE_W, h: TITLE_H },
     rows, total: all.length, pages: { count: pageCount, page: pageIdx, prev, next, y: pagerY },
-    selected, forecast, plan, scrolls, price,
-    card, stage, shop: { y: shopY, buttons: buyButtons, price }, enchant,
+    selected, forecast, plan, scrolls, price, blessedToggle,
+    card, stage, shop: { y: shopY, buttons: buyButtons, rows: shopRows, price }, enchant,
     hitAreas,
   };
 }
@@ -311,11 +331,13 @@ export function drawForgePanel(ctx, layout, state, now = 0) {
   drawStage(ctx, layout, enchantCfg, now, state.result);
 
   // ---- scrolls ----
-  const sy = layout.shop.y;
   ctx.textAlign = "left";
-  ctx.font = "bold 13px sans-serif";
-  ctx.fillStyle = "#fde68a";
-  ctx.fillText(`📜 Scrolls: ${layout.scrolls}`, layout.card.x, sy + 15);
+  for (const row of layout.shop.rows) {
+    ctx.font = "bold 12px sans-serif";
+    ctx.fillStyle = "#fde68a";
+    const label = row.kind === "blessed" ? `🛡 Blessed: ${row.count}` : `📜 Standard: ${row.count}`;
+    ctx.fillText(label, layout.card.x, row.y + 18, 146);
+  }
   for (const b of layout.shop.buttons) {
     ctx.fillStyle = b.canAfford ? "rgba(21, 128, 61, 0.92)" : "rgba(87, 83, 78, 0.85)";
     rr(ctx, b.box.x, b.box.y, b.box.w, b.box.h, 4);
@@ -326,6 +348,22 @@ export function drawForgePanel(ctx, layout, state, now = 0) {
     ctx.textAlign = "center";
     ctx.fillStyle = b.canAfford ? "#f0fdf4" : "#a8a29e";
     ctx.fillText(`Buy ${b.quantity} · ${b.cost.toLocaleString()}g`, b.box.x + b.box.w / 2, b.box.y + b.box.h / 2 + 1, b.box.w - 8);
+  }
+
+  // ---- the blessed toggle ----
+  const bt = layout.blessedToggle;
+  if (bt) {
+    ctx.fillStyle = bt.on ? "rgba(30, 64, 175, 0.92)" : "rgba(41, 37, 36, 0.92)";
+    rr(ctx, bt.box.x, bt.box.y, bt.box.w, bt.box.h, 4);
+    ctx.fill();
+    ctx.strokeStyle = bt.on ? "#93c5fd" : "#78716c";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.font = "bold 12px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = bt.on ? "#eff6ff" : "#d6d3d1";
+    ctx.fillText(`🛡 Blessed scroll: ${bt.on ? "ON" : "off"} (${bt.count})`, bt.box.x + bt.box.w / 2, bt.box.y + bt.box.h / 2 + 1, bt.box.w - 8);
+    ctx.textAlign = "left";
   }
 
   // ---- the Enchant button ----
@@ -413,6 +451,17 @@ function drawResult(ctx, anim, cx, cy, s, fireLevel, cfg, now) {
     ctx.font = `bold ${Math.round(26 + 12 * Math.sin(Math.PI * t))}px sans-serif`;
     ctx.fillStyle = `rgba(255, 247, 237, ${Math.min(1, 1.6 - t)})`;
     ctx.fillText(`+${level}!`, cx, cy);
+  } else if (kind === "reset") {
+    // A blessed scroll missed: a blue shield flares round the weapon, which falls back but lives.
+    const a = Math.max(0, 1 - t);
+    ctx.strokeStyle = `rgba(96, 165, 250, ${a})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 24 + 40 * t, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.font = "bold 22px sans-serif";
+    ctx.fillStyle = `rgba(191, 219, 254, ${Math.min(1, 1.7 - t)})`;
+    ctx.fillText(`SAVED · back to +${level}`, cx, cy);
   } else if (kind === "destroyed") {
     // Flames climbing off a dying weapon, and a shaking caption.
     for (let i = 0; i < 18; i += 1) {

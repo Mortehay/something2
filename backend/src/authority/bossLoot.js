@@ -13,7 +13,7 @@
 const { rollDrops, rollGold } = require('./loot.js');
 const { rollRarity, RARITIES } = require('./rarity.js');
 const { rollItemInstance } = require('./affixes.js');
-const { scrollTypeId, scrollRollCount } = require('./scrollDrops.js');
+const { scrollDropTypeIds } = require('./scrollDrops.js');
 const { mapChestRow } = require('../services/chests.js');
 const { clearOverviewCache } = require('../services/overviewCache.js');
 
@@ -188,10 +188,7 @@ async function spawnBossLootItems(pool, entry, {
   // A boss is the most generous source of scrolls. They ride the same insert as the gear but are
   // NEVER rolled for rarity or affixes: a scroll is a plain white stack-of-one, whatever grade
   // the boss's own loot profile happens to be biased toward.
-  const scrollTypeIdHere = scrollRng ? scrollTypeId(entry.world && entry.world.weapons) : null;
-  const scrollIds = scrollTypeIdHere == null
-    ? []
-    : Array.from({ length: scrollRollCount('boss', scrollRng) }, () => scrollTypeIdHere);
+  const scrollIds = scrollRng ? scrollDropTypeIds('boss', scrollRng, entry.world && entry.world.weapons) : [];
   const allIds = [...gearIds, ...scrollIds];
   if (allIds.length === 0) return [];
 

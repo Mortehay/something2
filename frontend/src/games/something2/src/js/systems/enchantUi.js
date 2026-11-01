@@ -33,32 +33,58 @@ export function enchantedDamage(baseDamage, level, cfg) {
   return Math.round(base * (1 + cfg.damagePerLevel * level) * 100) / 100;
 }
 
-// The first enchant scroll stack the player carries, or null.
-export function findScroll(inventory, cfg) {
+// 'standard' | 'blessed' | null: which enchant scroll a catalog name is.
+function scrollKindOf(name, cfg) {
+  if (!cfg) return null;
+  if (name === cfg.scrollItemName) return "standard";
+  if (cfg.blessedScrollItemName && name === cfg.blessedScrollItemName) return "blessed";
+  return null;
+}
+
+// Can a scroll of `kind` be spent on a weapon that is at `level`? The standard scroll always;
+// the blessed one only once the NEXT level is past the safe zone (inside it a miss cannot hurt).
+export function scrollFitsLevel(kind, level, cfg) {
+  if (kind === "standard") return true;
+  return kind === "blessed" && level + 1 > cfg.safeMaxLevel;
+}
+
+// The scroll stack to spend on a weapon at `level`, or null. The blessed scroll is only ever used when
+// asked for ({ blessed: true }) -- it is dear, and it must never be spent by accident.
+export function findScroll(inventory, cfg, level = 0, { blessed = false } = {}) {
   if (!inventory || !cfg) return null;
+  const want = blessed ? "blessed" : "standard";
+  if (!scrollFitsLevel(want, level, cfg)) return null;
   for (const it of inventory.items || []) {
     const type = inventory.types && inventory.types.get(it.typeId);
-    if (type && type.name === cfg.scrollItemName && (it.quantity || 1) > 0) return it;
+    if (!type || !((it.quantity || 1) > 0)) continue;
+    if (scrollKindOf(type.name, cfg) === want) return it;
   }
   return null;
 }
 
-// Total scrolls across every stack.
-export function scrollCount(inventory, cfg) {
+// Scrolls carried: of one `kind` ('standard' | 'blessed'), or of every kind when omitted.
+export function scrollCount(inventory, cfg, kind = null) {
   if (!inventory || !cfg) return 0;
   let n = 0;
   for (const it of inventory.items || []) {
     const type = inventory.types && inventory.types.get(it.typeId);
-    if (type && type.name === cfg.scrollItemName) n += Math.max(1, it.quantity || 1);
+    const k = type && scrollKindOf(type.name, cfg);
+    if (k && (kind == null || kind === k)) n += Math.max(1, it.quantity || 1);
   }
   return n;
+}
+
+// Scrolls of the kind in use that would actually work on a weapon at `level`.
+export function usableScrollCount(inventory, cfg, level, { blessed = false } = {}) {
+  const kind = blessed ? "blessed" : "standard";
+  return scrollFitsLevel(kind, level, cfg) ? scrollCount(inventory, cfg, kind) : 0;
 }
 
 // What pressing "Enchant" on `itemId` would do. `ok` says whether the button may be
 // pressed; when it may not, `reason` says why (and is shown on the disabled button).
 //
 //   { ok, reason, itemId, scrollId, scrolls, level, nextLevel, chancePct, danger, maxed }
-export function enchantPlan(inventory, itemId, cfg) {
+export function enchantPlan(inventory, itemId, cfg, { blessed = false } = {}) {
   const none = { ok: false, reason: "", itemId, scrollId: null, scrolls: 0, level: 0, nextLevel: 0, chancePct: 0, danger: false, maxed: false };
   if (!cfg || !inventory || itemId == null) return none;
   const item = (inventory.items || []).find((i) => i.id === itemId);
@@ -73,10 +99,12 @@ export function enchantPlan(inventory, itemId, cfg) {
   const nextLevel = level + 1;
   const chancePct = Number(cfg.chances[nextLevel]) || 0;
   const danger = nextLevel > cfg.safeMaxLevel;
-  const scroll = findScroll(inventory, cfg);
-  const scrolls = scrollCount(inventory, cfg);
-  const plan = { ...base, nextLevel, chancePct, danger, scrolls, scrollId: scroll ? scroll.id : null };
-  if (!scroll) return { ...plan, reason: "No enchant scroll" };
+  // A blessed scroll only means something where a miss would burn the weapon.
+  const useBlessed = blessed && danger;
+  const scroll = findScroll(inventory, cfg, level, { blessed: useBlessed });
+  const scrolls = usableScrollCount(inventory, cfg, level, { blessed: useBlessed });
+  const plan = { ...base, nextLevel, chancePct, danger, blessed: useBlessed, scrolls, scrollId: scroll ? scroll.id : null };
+  if (!scroll) return { ...plan, reason: useBlessed ? "No blessed scroll" : "No enchant scroll" };
   return { ...plan, ok: true };
 }
 
@@ -85,6 +113,11 @@ export function enchantButtonLabel(plan, armed = false) {
   if (!plan) return "";
   if (plan.maxed) return plan.reason;
   if (!plan.ok) return plan.reason || "Enchant";
+  if (plan.danger && plan.blessed) {
+    return armed
+      ? `Click again: ${plan.chancePct}% or back to +3`
+      : `Blessed enchant +${plan.nextLevel} (${plan.chancePct}%) 🛡`;
+  }
   if (plan.danger) {
     return armed
       ? `Click again: ${plan.chancePct}% or it BURNS`
@@ -101,6 +134,7 @@ export function enchantResultMessage(msg, weaponName = "weapon") {
   if (!msg) return "";
   if (msg.outcome === "success") return `✨ ${weaponName} is now +${msg.level}!`;
   if (msg.outcome === "destroyed") return `🔥 The scroll failed — your ${weaponName} burned to ash.`;
+  if (msg.outcome === "reset") return `🛡 The blessed scroll failed — your ${weaponName} fell back to +${msg.level}.`;
   if (msg.outcome === "safe_fail") return `The scroll fizzled. ${weaponName} is unchanged.`;
   return "";
 }
@@ -126,7 +160,7 @@ export function applyEnchantResult(inventory, msg) {
     for (const [slot, id] of Object.entries(inventory.equipment || {})) {
       if (id === msg.itemId) delete inventory.equipment[slot];
     }
-  } else if (msg.outcome === "success" && weapon) {
+  } else if ((msg.outcome === "success" || msg.outcome === "reset") && weapon) {
     weapon.enchantLevel = Number(msg.level) || 0;
   }
   return name;

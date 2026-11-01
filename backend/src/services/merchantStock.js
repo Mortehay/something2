@@ -52,7 +52,7 @@ async function seedBaseCatalog(pool, worldId, villageId) {
     `INSERT INTO merchant_stock (world_id, village_id, item_type_id, price, seller_user_id, expires_at, quantity)
      SELECT $1, $2, id, value, NULL, NULL, 1
        FROM item_types
-      WHERE (category IN ('weapon','armor') OR name = 'enchant_scroll') AND value > 0
+      WHERE (category IN ('weapon','armor') OR name IN ('enchant_scroll', 'enchant_scroll_blessed')) AND value > 0
         AND (tier IS NULL OR tier = 1)
         AND NOT EXISTS (
           SELECT 1 FROM merchant_stock ms
