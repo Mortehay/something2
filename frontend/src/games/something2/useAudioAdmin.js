@@ -488,6 +488,23 @@ export function useRetryAudioFailures() {
   });
 }
 
+// The by-cause panel's "Delete these N": only failed jobs among `ids` go.
+export function useDeleteFailedAudioJobs() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (ids) => {
+      const { res, json } = await post('/api/audio/admin/jobs/delete-failed', { ids });
+      if (!res.ok) throw new Error(json.error || 'Failed to delete the failed jobs');
+      return json;
+    },
+    onSuccess: ({ deleted }) => {
+      toast.success(deleted ? `Deleted ${deleted} failed job(s)` : 'Nothing to delete');
+      qc.invalidateQueries({ queryKey: JOBS_KEY });
+    },
+    onError: (err) => toast.error(err.message),
+  });
+}
+
 // `states` defaults to undefined -- the server's own default clears
 // queued+failed+done, which the route already refuses (409) while a drain is
 // running. The panel's "Clear finished" button passes ['done', 'failed']

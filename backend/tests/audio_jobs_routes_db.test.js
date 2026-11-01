@@ -143,6 +143,7 @@ test('audio job routes', { skip }, async (t) => {
           ['post', '/api/audio/admin/jobs/stop'],
           ['post', '/api/audio/admin/jobs/retry-failed'],
           ['post', '/api/audio/admin/jobs/clear'],
+          ['post', '/api/audio/admin/jobs/delete-failed'],
         ];
         for (const [method, path] of calls) {
           // eslint-disable-next-line no-await-in-loop
@@ -433,6 +434,29 @@ test('audio job routes', { skip }, async (t) => {
         assert.deepEqual(await sentinels(), sentinelsBefore, "another file's failed row was not re-queued");
         await pool.query('DELETE FROM audio_jobs WHERE subject_key = $1', [failKey]);
       });
+      await t.test('delete-failed removes only the failed jobs among the ids', async () => {
+        const key = `audio-jobs-delfail-${tag}`;
+        const ids = (await pool.query(
+          `INSERT INTO audio_jobs (batch_id, subject_kind, subject_key, slot, clip_kind, drain_group, state, attempts, last_error, not_before)
+           VALUES (gen_random_uuid(), 'world', $1, 'music', 'music', 'music', 'failed', 3, 'dup', NULL),
+                  (gen_random_uuid(), 'world', $1, 'ambience', 'ambience', 'ambience', 'queued', 0, NULL, now() + interval '1 hour')
+           RETURNING id, state`, [key],
+        )).rows;
+        const res = await request(app).post('/api/audio/admin/jobs/delete-failed').set('Authorization', bearer(admin))
+          .send({ ids: ids.map((r) => r.id) });
+        assert.equal(res.status, 200, JSON.stringify(res.body));
+        assert.equal(res.body.deleted, 1);
+        const left = (await pool.query('SELECT state FROM audio_jobs WHERE subject_key = $1', [key])).rows.map((r) => r.state);
+        assert.deepEqual(left, ['queued'], 'the queued job among the ids stays');
+        assert.deepEqual(await sentinels(), sentinelsBefore, 'a failed job outside the ids stays');
+        for (const body of [{}, { ids: [] }, { ids: ['x'] }, { ids: [-1] }]) {
+          // eslint-disable-next-line no-await-in-loop
+          const bad = await request(app).post('/api/audio/admin/jobs/delete-failed').set('Authorization', bearer(admin)).send(body);
+          assert.equal(bad.status, 400, JSON.stringify(body));
+        }
+        await pool.query('DELETE FROM audio_jobs WHERE subject_key = $1', [key]);
+      });
+
       // Plan 2026-10-03: "Force regenerate prompt" and "Write with model"
       // ride on the item. Both are strict booleans -- a truthy string must
       // not quietly force a rewrite over someone's hand-written prompt.

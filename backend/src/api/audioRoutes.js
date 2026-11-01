@@ -633,6 +633,18 @@ module.exports = function audioRoutes(pool) {
     catch (err) { sendError(res, err); }
   });
 
+  // Deletes the given FAILED jobs (the by-cause panel's "Delete these N").
+  // Allowed while a drain runs -- the drain never touches a failed row -- and
+  // an id that is not a failed job is ignored; `deleted` says how many went.
+  router.post('/admin/jobs/delete-failed', admin, async (req, res) => {
+    const { ids } = req.body || {};
+    if (!(Array.isArray(ids) && ids.length > 0 && ids.length <= 10000 && ids.every(isJobId))) {
+      return res.status(400).json({ error: 'ids must be a non-empty array of job ids (positive integers)' });
+    }
+    try { res.json({ deleted: await audioJobQueue.deleteFailed(pool, ids.map(String)) }); }
+    catch (err) { sendError(res, err); }
+  });
+
   // Refused while a drain runs: deleting a queued row out from under a live
   // drain would race its claim (the same reason art's /api/art-jobs/clear
   // refuses), and audioJobQueue.clear's own default states include 'queued'.

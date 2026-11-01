@@ -446,6 +446,16 @@ async function clear(db, { states = ['queued', 'failed', 'done'] } = {}) {
   return (await db.query('DELETE FROM audio_jobs WHERE state = ANY($1)', [allowed])).rowCount;
 }
 
+// The by-cause panel's "Delete these N": removes only FAILED rows among
+// `ids`. A failed row is never claimed, so this is safe while a drain runs;
+// an id that is queued, running or done is left alone.
+async function deleteFailed(db, ids) {
+  if (!ids.length) return 0;
+  return (await db.query(
+    "DELETE FROM audio_jobs WHERE state = 'failed' AND id = ANY($1::bigint[])", [ids],
+  )).rowCount;
+}
+
 module.exports = {
   DRAIN_ORDER,
   PACKED_GROUPS,
@@ -466,6 +476,7 @@ module.exports = {
   stats,
   recent,
   retryFailed,
+  deleteFailed,
   slotJobs,
   clear,
 };

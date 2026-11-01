@@ -120,7 +120,8 @@ export function batchProgress({ run, stats } = {}) {
     queued: t.queued,
     running: t.running,
     total,
-    pct: total > 0 ? Math.round(((t.done + t.failed) / total) * 100) : 0,
+    // floor, not round: 2642 of 2651 rounded to "100%" with 9 jobs left.
+    pct: total > 0 ? Math.floor(((t.done + t.failed) / total) * 100) : 0,
     group: currentGroup(stats),
     backoff: Number((stats && stats.backoff) || 0),
   };
