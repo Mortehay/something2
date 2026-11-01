@@ -327,3 +327,56 @@ describe("quest expansion layout helpers", () => {
     expect(l.actionButtons[0].text).toContain("Standing 30 needed");
   });
 });
+
+describe("quest log category tabs", () => {
+  const mk = (key, extra = {}) => ({ key, title: key, status: "available", is_side: false, repeat_kind: "none", target_count: 1, progress_count: 0, ...extra });
+  const SET = [
+    mk("m1", { status: "completed" }),
+    mk("m2", { status: "active" }),
+    mk("s1", { is_side: true }),
+    mk("d1", { is_side: true, repeat_kind: "daily" }),
+    mk("w1", { is_side: true, repeat_kind: "weekly", status: "active" }),
+    mk("c1", { is_side: true, required_class: "Mage", status: "locked" }),
+  ];
+
+  it("splits quests into tabs, a quest may sit in several", async () => {
+    const { filterQuests } = await import("../questLogPanel.js");
+    const keys = (tab) => filterQuests(SET, tab).map((q) => q.key);
+    expect(keys("all")).toHaveLength(6);
+    expect(keys("main").sort()).toEqual(["m1", "m2"]);
+    expect(keys("side")).toEqual(["s1"]);
+    expect(keys("repeat")).toEqual(["d1", "w1"]); // dailies before weeklies
+    expect(keys("class")).toEqual(["c1"]);
+    expect(keys("done")).toEqual(["m1"]);
+    expect(keys("active").sort()).toEqual(["m2", "w1"]);
+  });
+
+  it("lists actionable quests first outside the storyline tab", async () => {
+    const { filterQuests } = await import("../questLogPanel.js");
+    const order = filterQuests(SET, "all").map((q) => q.key);
+    expect(order.indexOf("m2")).toBeLessThan(order.indexOf("s1"));
+    expect(order.indexOf("s1")).toBeLessThan(order.indexOf("c1"));
+    expect(order[order.length - 1]).toBe("m1");
+    // the storyline keeps its authored order
+    expect(filterQuests(SET, "main").map((q) => q.key)).toEqual(["m1", "m2"]);
+  });
+
+  it("layout only lists the selected tab and exposes clickable tabs with counts", () => {
+    const l = layoutQuestLog({ quests: SET, questTab: "repeat" });
+    expect(l.quests.map((q) => q.key)).toEqual(["d1", "w1"]);
+    expect(l.tab).toBe("repeat");
+    const tabHits = l.hitAreas.filter((h) => h.kind === "questtab");
+    expect(tabHits.map((h) => h.tab)).toEqual(["all", "active", "main", "side", "repeat", "class", "done"]);
+    expect(tabHits.find((h) => h.tab === "repeat").count).toBe(2);
+    expect(tabHits.find((h) => h.tab === "repeat").selected).toBe(true);
+    for (const t of tabHits) {
+      expect(l.listArea.y).toBeGreaterThanOrEqual(t.y + t.h);
+    }
+  });
+
+  it("falls back to All for an unknown tab and selects within the tab", () => {
+    expect(layoutQuestLog({ quests: SET, questTab: "bogus" }).tab).toBe("all");
+    const l = layoutQuestLog({ quests: SET, questTab: "class", activeQuestKey: "m2" });
+    expect(l.selectedQuest.key).toBe("c1");
+  });
+});

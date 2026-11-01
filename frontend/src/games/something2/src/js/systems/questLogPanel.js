@@ -115,9 +115,61 @@ export function choiceRewardText(c) {
   return parts.join(" · ");
 }
 
+// --- Category tabs -------------------------------------------------------
+// The list used to be one long scroll; tabs split it so a daily or a class
+// trial is one click away. A quest can belong to several tabs.
+export const QUEST_TABS = [
+  { key: "all", label: "All" },
+  { key: "active", label: "Active" },
+  { key: "main", label: "Main" },
+  { key: "side", label: "Side" },
+  { key: "repeat", label: "Repeat" },
+  { key: "class", label: "Class" },
+  { key: "done", label: "Done" },
+];
+const TAB_ROWS = [["all", "active", "main", "side"], ["repeat", "class", "done"]];
+const TAB_H = 22;
+const TAB_GAP = 4;
+const TABS_AREA_H = TAB_H * 2 + TAB_GAP;
+
+export function inQuestTab(q, tab) {
+  switch (tab) {
+    case "active": return q.status === "active";
+    case "main": return !q.is_side;
+    case "side": return !!q.is_side && q.repeat_kind !== "daily" && q.repeat_kind !== "weekly" && !q.required_class;
+    case "repeat": return q.repeat_kind === "daily" || q.repeat_kind === "weekly";
+    case "class": return !!q.required_class;
+    case "done": return q.status === "completed";
+    default: return true;
+  }
+}
+
+const STATUS_RANK = { active: 0, available: 1, locked: 2, completed: 3 };
+
+// The quests a tab shows, in display order: the storyline keeps its authored
+// order; every other tab lists what you can act on first (active, then
+// available, locked, completed), dailies before weeklies in "Repeat".
+export function filterQuests(quests, tab) {
+  const list = (quests || []).filter((q) => inQuestTab(q, tab));
+  if (tab === "main") return list;
+  const rep = (q) => (q.repeat_kind === "daily" ? 0 : q.repeat_kind === "weekly" ? 1 : 2);
+  return list
+    .map((q, i) => ({ q, i }))
+    .sort((a, b) => (tab === "repeat" ? rep(a.q) - rep(b.q) : 0)
+      || (STATUS_RANK[a.q.status] ?? 4) - (STATUS_RANK[b.q.status] ?? 4)
+      || a.i - b.i)
+    .map((x) => x.q);
+}
+
+export function questTabCounts(quests) {
+  const out = {};
+  for (const t of QUEST_TABS) out[t.key] = (quests || []).filter((q) => inQuestTab(q, t.key)).length;
+  return out;
+}
+
 export function layoutQuestLog(state = {}) {
   const {
-    quests = [],
+    quests: allQuests = [],
     legacyChoice = null,
     activeQuestKey = null,
     questScroll = 0,
@@ -125,8 +177,11 @@ export function layoutQuestLog(state = {}) {
     reputation = [],
     characterClass = null,
     pickChoices = {},
+    questTab = "all",
     now = Date.now(),
   } = state;
+  const tab = QUEST_TABS.some((t) => t.key === questTab) ? questTab : "all";
+  const quests = filterQuests(allQuests, tab);
 
   const px = (GAME_WIDTH - QUEST_PANEL_W) / 2;
   const py = (GAME_HEIGHT - QUEST_PANEL_H) / 2;
@@ -137,7 +192,25 @@ export function layoutQuestLog(state = {}) {
 
   const hitAreas = [{ ...close, kind: "questclose", id: null }];
 
-  const listArea = { x: px + 14, y: py + TITLE_H + 12, w: 260, h: QUEST_PANEL_H - TITLE_H - 26 - FOOTER_H };
+  // Category tabs sit above the list; the list takes what is left.
+  const tabsTop = py + TITLE_H + 12;
+  const counts = questTabCounts(allQuests);
+  const tabs = [];
+  TAB_ROWS.forEach((row, r) => {
+    const gap = 4;
+    const w = Math.floor((260 - gap * (row.length - 1)) / row.length);
+    row.forEach((key, c) => {
+      const def = QUEST_TABS.find((t) => t.key === key);
+      const rect = { x: px + 14 + c * (w + gap), y: tabsTop + r * (TAB_H + TAB_GAP), w, h: TAB_H };
+      const t = { ...rect, kind: "questtab", tab: key, label: def.label, count: counts[key], selected: key === tab };
+      tabs.push(t);
+      hitAreas.push(t);
+    });
+  });
+  const listArea = {
+    x: px + 14, y: tabsTop + TABS_AREA_H + 6, w: 260,
+    h: QUEST_PANEL_H - TITLE_H - 26 - FOOTER_H - TABS_AREA_H - 6,
+  };
   const detailArea = { x: px + 288, y: py + TITLE_H + 12, w: QUEST_PANEL_W - 302, h: QUEST_PANEL_H - TITLE_H - 26 - FOOTER_H };
 
   const itemH = 44;
@@ -158,7 +231,7 @@ export function layoutQuestLog(state = {}) {
     }
   }
 
-  const trackedQuestKey = state.trackedQuestKey || (quests.find(q => q.status === "active")?.key || activeQuestKey);
+  const trackedQuestKey = state.trackedQuestKey || (allQuests.find(q => q.status === "active")?.key || activeQuestKey);
   const selectedQuest = quests.find(q => q.key === activeQuestKey) || quests[0] || null;
 
   let actionButtons = [];
@@ -328,12 +401,12 @@ export function layoutQuestLog(state = {}) {
 
   return {
     panel, title, close, hitAreas, listArea, detailArea,
-    quests: questItems, selectedQuest, legacyChoice, actionButtons, now,
+    quests: questItems, selectedQuest, legacyChoice, actionButtons, now, tabs, tab,
     totalH, maxScroll, scrollY,
     header: {
       spireText: spireLine(spireProgress),
       reputationText: [reputationLine(reputation), characterClass ? `Class: ${characterClass}` : null].filter(Boolean).join(" · ") || null,
-      titleText: "📜 Quest Log (Hotkey 'J')" + (quests.filter((q) => q.status === "completed" && q.title_reward).length ? ` · 👑 ${quests.filter((q) => q.status === "completed" && q.title_reward).length}` : ""),
+      titleText: "📜 Quest Log (Hotkey 'J')" + (allQuests.filter((q) => q.status === "completed" && q.title_reward).length ? ` · 👑 ${allQuests.filter((q) => q.status === "completed" && q.title_reward).length}` : ""),
       choiceText: legacyChoice === "city_restoration"
         ? "✨ Legacy: City Restoration (-15% Vendor Prices)"
         : legacyChoice === "elemental_surge"
@@ -444,6 +517,26 @@ export function drawQuestLog(ctx, layout) {
   ctx.strokeStyle = "#252538";
   ctx.lineWidth = 1;
   ctx.stroke();
+
+  // Category tabs
+  ctx.font = "bold 10px monospace";
+  for (const t of layout.tabs || []) {
+    drawRoundedRect(ctx, t.x, t.y, t.w, t.h, 6);
+    ctx.fillStyle = t.selected ? "rgba(56, 189, 248, 0.22)" : "rgba(30, 30, 48, 0.8)";
+    ctx.fill();
+    ctx.strokeStyle = t.selected ? "#38bdf8" : "#2e2e3e";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = t.selected ? "#e0f2fe" : t.count > 0 ? "#94a3b8" : "#475569";
+    ctx.textAlign = "center";
+    ctx.fillText(`${t.label} ${t.count}`, t.x + t.w / 2, t.y + 6);
+  }
+  ctx.textAlign = "left";
+  if (quests.length === 0) {
+    ctx.font = "11px monospace";
+    ctx.fillStyle = "#64748b";
+    ctx.fillText("Nothing here yet.", listArea.x + 14, listArea.y + 16);
+  }
 
   // Draw Quest List (clipped to listArea)
   ctx.save();

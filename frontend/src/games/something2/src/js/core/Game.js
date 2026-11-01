@@ -2107,6 +2107,7 @@ export class Game {
                 reputation: this.questReputation || [],
                 characterClass: this.characterClass || null,
                 pickChoices: this.questPickChoices || {},
+                questTab: this.questTab || 'all',
                 trackedQuestKey: this.trackedQuestKey || null,
                 // SOMET-493. `enabled` false short-circuits the whole pass in
                 // RenderSystem, so a player who never turns it on pays one
@@ -3449,6 +3450,11 @@ export class Game {
                     }
                     if (hit.kind === 'quest_pick_choice') {
                         this.questPickChoices = { ...(this.questPickChoices || {}), [hit.questKey]: hit.choiceKey };
+                        return;
+                    }
+                    if (hit.kind === 'questtab') {
+                        this.questTab = hit.tab;
+                        this.questLogScrollY = 0;
                         return;
                     }
                     if (hit.kind === 'selectquest') {
