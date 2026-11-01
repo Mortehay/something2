@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { StatusHead, PcLabelHint, backdropClick } from '../seedUi.jsx';
+import { StatusHead, PcLabelHint, backdropClick, MigrationsButton } from '../seedUi.jsx';
 
 // Final-review fixes of the Seed / Export tab (SOMET-638).
 
@@ -40,5 +40,36 @@ describe('preview modal backdrop', () => {
     }
     const ui = fs.readFileSync(path.join(__dirname, '..', 'seedUi.jsx'), 'utf8');
     expect(ui).toContain('<Backdrop onClick={backdropClick(onClose, closeOnBackdrop)}>');
+  });
+});
+
+describe('MigrationsButton', () => {
+  const html = (migrations, extra = {}) => renderToStaticMarkup(h(MigrationsButton, { migrations, onClick: () => {}, ...extra }));
+
+  it('is disabled with no count when every migration is applied', () => {
+    const out = html({ pending: [], appliesOnRestart: true });
+    expect(out).toContain('disabled');
+    expect(out).toContain('>Update migrations<');
+    expect(out).toContain('all migrations applied');
+  });
+
+  it('is enabled with the count and lists the pending files', () => {
+    const out = html({ pending: ['1_a', '2_b'], appliesOnRestart: true });
+    expect(out).not.toContain('disabled');
+    expect(out).toContain('Update migrations (2)');
+    expect(out).toContain('1_a');
+    expect(out).toContain('2_b');
+  });
+
+  it('stays disabled when a restart would not run them (no boot migration)', () => {
+    const out = html({ pending: ['1_a'], appliesOnRestart: false });
+    expect(out).toContain('disabled');
+    expect(out).toContain('Update migrations (1)');
+    expect(out).toContain('migrations run at deploy');
+  });
+
+  it('is disabled while unknown or while a restart is in flight', () => {
+    expect(html(undefined)).toContain('disabled');
+    expect(html({ pending: ['1_a'], appliesOnRestart: true }, { busy: true })).toContain('disabled');
   });
 });

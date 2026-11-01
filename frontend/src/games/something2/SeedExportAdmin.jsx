@@ -7,14 +7,14 @@ import styled from 'styled-components';
 import { useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
-  useSeedGroups, useRestartStatus, useExportGroup, useRepairGroup, useExportAll, useRestartBackend, useSeedMeta,
+  useSeedGroups, useRestartStatus, useExportGroup, useRepairGroup, useExportAll, useRestartBackend, useSeedMeta, useMigrations,
   useSeedJob, useCancelSeedJob, useGitStatus,
 } from './useSeedExport.js';
 import {
   statusBadge, exportBlockReason, seedBlockReason, seedButtonLabel, exportAllPlan, seedAllGroups, exportAllMessage,
   binaryGroups, separateNote, BUSY_TEXT, jobRunning, jobProgressText, jobErrorRowsText, groupNoteLines, gitHints, unpushedNote,
 } from './seedExportModel.js';
-import { Btn, Badge, Muted, Modal, fmtTime, StatusHead, PcLabelHint } from './seedUi.jsx';
+import { Btn, Badge, Muted, Modal, fmtTime, StatusHead, PcLabelHint, MigrationsButton } from './seedUi.jsx';
 import AdminLoading from './AdminLoading.jsx';
 import SeedStatusPopup from './SeedStatusPopup.jsx';
 import SeedPreviewModal from './SeedPreviewModal.jsx';
@@ -115,6 +115,7 @@ export function GroupRow({ g, job, exporting, onExport, onSeed, onBadge, onCance
 export default function SeedExportAdmin() {
   const groups = useSeedGroups();
   const restart = useRestartStatus();
+  const migrations = useMigrations();
   const meta = useSeedMeta();
   const exportGroup = useExportGroup();
   const repairGroup = useRepairGroup();
@@ -159,6 +160,13 @@ export default function SeedExportAdmin() {
       <Muted>Export writes this PC's data to the seed files in git. Seed reads them back after a pull, with a preview.</Muted>
       <PcLabelHint meta={meta.data} />
       <SeedGitStrip busy={busy} />
+      <AllBar>
+        <MigrationsButton migrations={migrations.data} busy={restartBackend.isPending}
+          onClick={() => setConfirmRestart(true)} />
+        {migrations.data?.pending?.length > 0 && migrations.data.appliesOnRestart && (
+          <Muted>New migrations are applied when the backend restarts.</Muted>
+        )}
+      </AllBar>
 
       {restart.data?.required && (
         <Banner>

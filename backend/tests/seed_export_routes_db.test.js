@@ -130,7 +130,7 @@ function holdBusy() {
 
 const ROUTES = [
   ['get', '/groups'], ['get', '/groups/quests/preview'], ['post', '/groups/quests/export'],
-  ['post', '/groups/quests/seed'], ['get', '/runs'], ['get', '/restart'], ['post', '/restart'], ['get', '/meta'],
+  ['post', '/groups/quests/seed'], ['get', '/runs'], ['get', '/restart'], ['post', '/restart'], ['get', '/meta'], ['get', '/migrations'],
   ['post', '/groups/audio/export'], ['post', '/groups/art/seed'], ['get', '/jobs/current'], ['post', '/jobs/cancel'],
 ];
 
@@ -338,6 +338,29 @@ dbTest('restart required after seed; POST /restart writes the trigger', async ({
   const r = await request(app).post('/api/seed-export/restart').set(h);
   assert.deepStrictEqual(r.body, { ok: true });
   assert.ok(!Number.isNaN(Date.parse(JSON.parse(fs.readFileSync(trigger, 'utf8')).at)));
+});
+
+dbTest('GET /migrations lists .js files with no pgmigrations row, oldest first', async ({ pool, admin, dir }) => {
+  const h = { Authorization: admin.auth };
+  const applied = (await pool.query('SELECT name FROM pgmigrations ORDER BY id DESC LIMIT 1')).rows[0].name;
+  const migDir = path.join(dir, 'migrations');
+  fs.mkdirSync(migDir);
+  for (const f of [`${applied}.js`, '9999999999999_sx_b.js', '9999999999998_sx_a.js', 'readme.md']) {
+    fs.writeFileSync(path.join(migDir, f), '');
+  }
+  const app = (migrateOnBoot) => {
+    const a = express();
+    a.use('/api/seed-export', seedExportRoutes(pool, { store: emptyStore(), migrationsDir: migDir, migrateOnBoot }));
+    return a;
+  };
+  const r = await request(app(true)).get('/api/seed-export/migrations').set(h);
+  assert.strictEqual(r.status, 200, r.text);
+  assert.deepStrictEqual(r.body, { pending: ['9999999999998_sx_a', '9999999999999_sx_b'], appliesOnRestart: true });
+  const off = await request(app(false)).get('/api/seed-export/migrations').set(h);
+  assert.strictEqual(off.body.appliesOnRestart, false, 'no boot migration: a restart applies nothing');
+  fs.rmSync(path.join(migDir, '9999999999998_sx_a.js'));
+  fs.rmSync(path.join(migDir, '9999999999999_sx_b.js'));
+  assert.deepStrictEqual((await request(app(true)).get('/api/seed-export/migrations').set(h)).body.pending, []);
 });
 
 dbTest('POST seed with a stale signature -> 409 stale_preview, nothing written', async ({ pool, admin }) => {
