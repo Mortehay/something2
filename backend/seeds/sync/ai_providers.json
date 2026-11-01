@@ -1,12 +1,12 @@
 {
   "header": {
-    "exported_at": "2026-10-31T20:52:55.237Z",
+    "exported_at": "2026-11-01T23:29:36.965Z",
     "exported_by": "linux-dev",
     "group": "ai_providers",
     "row_counts": {
       "ai_providers": 5
     },
-    "schema_version": "1714440843000_world_boss_second_skills"
+    "schema_version": "1714440858000_achievements"
   },
   "tables": {
     "ai_providers": [
@@ -46,7 +46,7 @@
         "base_url": "http://192.168.0.218:8001/sdapi/v1/txt2img",
         "enabled": true,
         "modality": "image",
-        "model": "stabilityai/stable-diffusion-xl-base-1.0+Muapi/soft-pixel-art-xl",
+        "model": "gguf:qwen-image-2512-Q2_K+lightning8",
         "models_by_group": null,
         "models_path": "/sdapi/v1/sd-models",
         "models_pointer": "$[*].model_name",

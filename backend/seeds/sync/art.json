@@ -1,18 +1,18 @@
 {
   "header": {
-    "exported_at": "2026-11-01T21:07:54.395Z",
+    "exported_at": "2026-11-01T23:30:09.661Z",
     "exported_by": "linux-dev",
     "group": "art",
     "row_counts": {
-      "art_prompt_descriptions": 52,
+      "art_prompt_descriptions": 214,
       "art_prompt_notes": 3,
-      "catalog_art": 428,
+      "catalog_art": 587,
       "character_appearances": 30,
       "entity_types": 380,
       "item_types": 282,
       "tile_types": 50
     },
-    "schema_version": "1714440856000_blacksmith_entity"
+    "schema_version": "1714440858000_achievements"
   },
   "tables": {
     "art_prompt_descriptions": [
@@ -379,6 +379,15 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "source_prompt": "pixel art, a burly village blacksmith in a leather apron beside an anvil and a glowing forge, single object, solid transparent background",
+        "subject_key": "Village Blacksmith",
+        "subject_kind": "entity",
+        "sync_uuid": "15c9dd4e-122b-2534-cf67-cce1671e67ae",
+        "text": "rusty iron hammer with a charred wooden handle"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
         "source_prompt": "pixel art, an armed woodland creature, single object, solid transparent background",
         "subject_key": "Woodland Ranged",
         "subject_kind": "entity",
@@ -414,6 +423,582 @@
       },
       {
         "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "an enchant scroll, a fantasy consumable",
+        "subject_key": "enchant_scroll",
+        "subject_kind": "item",
+        "sync_uuid": "83c64979-e926-b04b-170b-7d3b84be5713",
+        "text": "crinkled parchment scroll sealed with glowing wax"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "an enchant scroll blessed, a fantasy consumable",
+        "subject_key": "enchant_scroll_blessed",
+        "subject_kind": "item",
+        "sync_uuid": "ce27950b-3d38-5a31-a20f-9ea1d8fe93c5",
+        "text": "parchment scroll sealed with golden wax"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Apostasy",
+        "subject_key": "Apostasy",
+        "subject_kind": "passive_label",
+        "sync_uuid": "1e8a647b-481d-0f49-88ec-9b7811cd67dd",
+        "text": "twin-bladed dagger"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Apotheosis",
+        "subject_key": "Apotheosis",
+        "subject_kind": "passive_label",
+        "sync_uuid": "a563f1cf-5ed3-d471-73e6-bf515732531c",
+        "text": "golden laurel wreath"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Apotheosis (CHA)",
+        "subject_key": "Apotheosis (CHA)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "8dfbad97-3851-e350-5da3-e75c4d2ec446",
+        "text": "golden laurel wreath"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Arcane Conduit",
+        "subject_key": "Arcane Conduit — +15 INT, +35 max mana, +3.0 mana regen/s",
+        "subject_kind": "passive_label",
+        "sync_uuid": "6cc5c375-3535-57f0-f703-689b04519e7f",
+        "text": "glowing blue crystal orb"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Arcane Focus",
+        "subject_key": "Arcane Focus",
+        "subject_kind": "passive_label",
+        "sync_uuid": "faebc069-feb3-e82b-16a3-236c504f9089",
+        "text": "glowing blue crystal orb"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Arcane Mastery",
+        "subject_key": "Arcane Mastery",
+        "subject_kind": "passive_label",
+        "sync_uuid": "268532d3-9667-95d5-4c29-259fa0f32b2c",
+        "text": "glowing blue crystal orb"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Arcane Recovery",
+        "subject_key": "Arcane Recovery",
+        "subject_kind": "passive_label",
+        "sync_uuid": "efe748c0-6483-21c8-1ff8-dc7e3fd0d287",
+        "text": "glowing blue mana crystal"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Ascendance (CHA)",
+        "subject_key": "Ascendance (CHA)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "fb679a1c-0bd6-4b27-7243-26bdf01022a5",
+        "text": "golden laurel wreath"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Battle Breath",
+        "subject_key": "Battle Breath",
+        "subject_kind": "passive_label",
+        "sync_uuid": "85ea96ea-a469-2ee1-8a15-e4a524aff8a3",
+        "text": "bronze lung-shaped medallion"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Bear Aspect",
+        "subject_key": "Bear Aspect — +20 STR, +120 HP, +1.5 HP regen/s, +5% physical resistance, forms 12% stronger",
+        "subject_kind": "passive_label",
+        "sync_uuid": "502ef543-0f8f-d007-afd0-94b7911bbaf2",
+        "text": "iron-rimmed bear claw"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Berserker",
+        "subject_key": "Berserker — +30% skill damage while below 35% life, +8% stun chance, -60 max life",
+        "subject_kind": "passive_label",
+        "sync_uuid": "58021486-a2c4-e2e2-17ee-8b31b9bfb933",
+        "text": "cracked iron shield"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Blood Hunger",
+        "subject_key": "Blood Hunger",
+        "subject_kind": "passive_label",
+        "sync_uuid": "13e9fa05-7c16-1390-d2dc-fa9ef2f8a19c",
+        "text": "crimson goblet overflowing with dark liquid"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Blood Pact",
+        "subject_key": "Blood Pact — life costs are reduced 15%",
+        "subject_kind": "passive_label",
+        "sync_uuid": "747d0cb6-ea44-dd00-914f-ddbc1974875f",
+        "text": "crimson vial with a silver stopper"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Bloodflow",
+        "subject_key": "Bloodflow",
+        "subject_kind": "passive_label",
+        "sync_uuid": "b1a37fda-7da2-bcc0-8d6e-1b3f2ebbb6b2",
+        "text": "crimson vial with a silver stopper"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Bloodletting",
+        "subject_key": "Bloodletting",
+        "subject_kind": "passive_label",
+        "sync_uuid": "d4328d4b-5942-6801-2f01-28c774bac53e",
+        "text": "dripping blood drop"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Brimming Cup",
+        "subject_key": "Brimming Cup",
+        "subject_kind": "passive_label",
+        "sync_uuid": "8f24e3ab-7199-d2e7-c404-018d3ba92c11",
+        "text": "ceramic chalice overflowing with blue liquid"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Concussion",
+        "subject_key": "Concussion",
+        "subject_kind": "passive_label",
+        "sync_uuid": "9281be55-d552-bfd2-0b9d-fcfb6ebc39dd",
+        "text": "cracked stone sphere"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Concussive Force",
+        "subject_key": "Concussive Force",
+        "subject_kind": "passive_label",
+        "sync_uuid": "003d2d29-5151-e954-6c2f-efa000c42ff3",
+        "text": "cracked stone hammer"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Crimson Bargain",
+        "subject_key": "Crimson Bargain — every skill hits 40% harder, but costs 30% more life",
+        "subject_kind": "passive_label",
+        "sync_uuid": "fa4ea8c0-288d-d89f-aa3b-844968ff0086",
+        "text": "crimson vial with a cracked stopper"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Cryomancy",
+        "subject_key": "Cryomancy — +20% ice damage, and your hits chill",
+        "subject_kind": "passive_label",
+        "sync_uuid": "e2d90192-b9a4-16c9-8f90-4a531c7400cf",
+        "text": "frost-encrusted dagger"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Dazed Foe",
+        "subject_key": "Dazed Foe",
+        "subject_kind": "passive_label",
+        "sync_uuid": "0c1f89ef-8a5e-797d-8b2a-f3895ea6e435",
+        "text": "cracked stone head"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Deadeye Focus",
+        "subject_key": "Deadeye Focus",
+        "subject_kind": "passive_label",
+        "sync_uuid": "d003c14d-f066-39c8-6969-a24968951a92",
+        "text": "crimson eye with a golden crosshair"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Deadeye",
+        "subject_key": "Deadeye — +20 DEX and +1 Extra Arrow",
+        "subject_kind": "passive_label",
+        "sync_uuid": "365b8cc1-f7f7-b173-42c6-73fb92c3b1fa",
+        "text": "crimson feathered arrowhead"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Deadly Aim",
+        "subject_key": "Deadly Aim",
+        "subject_kind": "passive_label",
+        "sync_uuid": "22523b3e-3d88-defe-a058-1640523b290d",
+        "text": "crimson arrowhead piercing a target"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Deadly Precision",
+        "subject_key": "Deadly Precision — +12% crit chance and +35% crit damage, -50 max life",
+        "subject_kind": "passive_label",
+        "sync_uuid": "8e337791-7ab5-7763-43a9-652f22748288",
+        "text": "crimson dagger piercing a black target"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Deep Reservoir",
+        "subject_key": "Deep Reservoir",
+        "subject_kind": "passive_label",
+        "sync_uuid": "96b4bc38-c9db-8642-6f54-63edd76c23e5",
+        "text": "cracked clay amphora"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Discipline (CHA)",
+        "subject_key": "Discipline (CHA)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "b2e3a40d-3f58-14d3-59ac-6f891a7da054",
+        "text": "golden laurel wreath"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Discipline (CON)",
+        "subject_key": "Discipline (CON)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "86cc59b2-4218-75db-dc9a-6a578df51714",
+        "text": "iron-rimmed shield"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Discipline (DEX)",
+        "subject_key": "Discipline (DEX)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "e64879eb-9099-8f96-2872-3ed79619527a",
+        "text": "silver agility charm"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Discipline (INT)",
+        "subject_key": "Discipline (INT)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "3d3b97fd-1114-0c0f-b8f7-112dd833feff",
+        "text": "silver brain encased in a glass orb"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Discipline (STR)",
+        "subject_key": "Discipline (STR)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "8839404c-b151-05bb-fdc3-602e998d5080",
+        "text": "iron dumbbell"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Discipline (WIS)",
+        "subject_key": "Discipline (WIS)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "23dbc6b5-ffe4-91f2-f08c-05b26337bd7c",
+        "text": "golden eye within a silver circle"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Economy of Motion",
+        "subject_key": "Economy of Motion",
+        "subject_kind": "passive_label",
+        "sync_uuid": "61511726-9aa2-978d-6fb9-d45d52912e28",
+        "text": "crystal vial with a silver stopper"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Efficient Casting",
+        "subject_key": "Efficient Casting",
+        "subject_kind": "passive_label",
+        "sync_uuid": "49aacff3-9a94-d728-5d65-533d8a1579e9",
+        "text": "crystal vial with a silver stopper"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Enduring Flesh",
+        "subject_key": "Enduring Flesh",
+        "subject_kind": "passive_label",
+        "sync_uuid": "4fd67f1d-2731-feb8-cf71-5a65eafb893f",
+        "text": "knotted muscle fiber"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Executioner",
+        "subject_key": "Executioner — +15% physical damage and +12 melee reach",
+        "subject_kind": "passive_label",
+        "sync_uuid": "98e58a55-d83a-02fb-dc50-0852d5e107e6",
+        "text": "rusted executioner's axe"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Feeding Frenzy",
+        "subject_key": "Feeding Frenzy",
+        "subject_kind": "passive_label",
+        "sync_uuid": "5f665a3a-687c-c4e4-7dba-afaf0a7a28a9",
+        "text": "crimson toothed maw"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Feral Edge",
+        "subject_key": "Feral Edge",
+        "subject_kind": "passive_label",
+        "sync_uuid": "656c2489-8369-5a84-5166-01e809804463",
+        "text": "bloodstained wolf fang"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Feral Surge",
+        "subject_key": "Feral Surge",
+        "subject_kind": "passive_label",
+        "sync_uuid": "5db77345-b799-84b7-1738-46babb13b6a5",
+        "text": "clawed beast emblem"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Fleet",
+        "subject_key": "Fleet — your cooldown floor drops from 0.40 to 0.35",
+        "subject_kind": "passive_label",
+        "sync_uuid": "54fd8512-cef4-2f6f-ab75-8ddc1529ea05",
+        "text": "cracked hourglass"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Fleeting Rest",
+        "subject_key": "Fleeting Rest",
+        "subject_kind": "passive_label",
+        "sync_uuid": "67067829-c805-dddc-0352-286804f99296",
+        "text": "silver hourglass with glowing sand"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Focus (CHA)",
+        "subject_key": "Focus (CHA)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "67a2c8df-8417-18e6-cf58-0efadf9329f1",
+        "text": "golden medallion with a smiling face"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Focus (CON)",
+        "subject_key": "Focus (CON)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "e008dd68-6d23-1f4c-3763-a94e0e07e072",
+        "text": "iron dumbbell"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Focus (DEX)",
+        "subject_key": "Focus (DEX)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "9eea5113-033f-d5f5-58e7-227dec746ebb",
+        "text": "silver dart"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Focus (INT)",
+        "subject_key": "Focus (INT)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "da3bf053-257f-5fff-6ef6-43d05b15ab28",
+        "text": "glowing blue crystal"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Focus (STR)",
+        "subject_key": "Focus (STR)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "62bd51d7-f804-16f3-aa96-1aac51e84ce4",
+        "text": "iron dumbbell"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Focus (WIS)",
+        "subject_key": "Focus (WIS)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "3c181a12-895b-fa88-ff59-a31fa5127359",
+        "text": "glowing crystal orb"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Font of Power",
+        "subject_key": "Font of Power",
+        "subject_kind": "passive_label",
+        "sync_uuid": "54229b4f-4521-0155-9857-0e0b284b92fa",
+        "text": "glowing blue mana crystal"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Frugal Hands",
+        "subject_key": "Frugal Hands",
+        "subject_kind": "passive_label",
+        "sync_uuid": "fdd368bc-4ba9-b387-795f-dd6e77a8a64e",
+        "text": "cracked coin purse"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Gallows Humour",
+        "subject_key": "Gallows Humour",
+        "subject_kind": "passive_label",
+        "sync_uuid": "8a08c09c-2360-e50c-4c2f-c356f4c49ec3",
+        "text": "rusted gallows noose"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Glass Cannon",
+        "subject_key": "Glass Cannon — every skill hits 35% harder and costs 25% more mana, -80 max life",
+        "subject_kind": "passive_label",
+        "sync_uuid": "58404ba9-b38e-2aa7-6a98-c81480fe981e",
+        "text": "cracked glass cannon"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Great Sinew (CHA)",
+        "subject_key": "Great Sinew (CHA)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "8b4a80be-b5ac-f868-8d06-0c188881cd86",
+        "text": "golden ribbon tied in a bow"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Great Sinew (CON)",
+        "subject_key": "Great Sinew (CON)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "108aaecf-c092-ea20-0ee8-01d89a01c0fd",
+        "text": "knotted muscle fiber"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Great Sinew (DEX)",
+        "subject_key": "Great Sinew (DEX)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "c95dcc12-62da-d1be-4949-97b45317852d",
+        "text": "braided sinew cord"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Great Sinew (INT)",
+        "subject_key": "Great Sinew (INT)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "7e3ea89f-e99e-6766-3176-37663fca23f9",
+        "text": "silver brain encased in glass"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Hawk Aspect",
+        "subject_key": "Hawk Aspect — +20 DEX, +40 max stamina, +4 stamina regen/s, +8% attack speed, forms 12% stronger",
+        "subject_kind": "passive_label",
+        "sync_uuid": "4a0ed898-1289-4865-299c-b09deb087da3",
+        "text": "feathered talon clutching a glowing orb"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Heavy Hand",
+        "subject_key": "Heavy Hand",
+        "subject_kind": "passive_label",
+        "sync_uuid": "34148fdc-213b-5a33-8c43-9189cd2c20af",
+        "text": "iron gauntlet"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Hunter's Reflexes",
+        "subject_key": "Hunter's Reflexes",
+        "subject_kind": "passive_label",
+        "sync_uuid": "e3b56035-013e-2c0e-4439-cbbd83b17aaa",
+        "text": "silver reflex arc"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Inner Flame",
+        "subject_key": "Inner Flame — +20 WIS",
+        "subject_kind": "passive_label",
+        "sync_uuid": "78a508ee-87d7-894a-ed47-7282114026d4",
+        "text": "glowing ember pendant"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Inner Focus",
+        "subject_key": "Inner Focus",
+        "subject_kind": "passive_label",
+        "sync_uuid": "4fe4c8c6-0f32-4422-c8dc-6ed7739fa5a6",
+        "text": "obsidian eye carved from a single stone"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Inner Harmony",
+        "subject_key": "Inner Harmony",
+        "subject_kind": "passive_label",
+        "sync_uuid": "00798424-9bcf-64ed-6653-ada6ae71731c",
+        "text": "interlocking silver and blue rings"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Inner Mastery",
+        "subject_key": "Inner Mastery",
+        "subject_kind": "passive_label",
+        "sync_uuid": "563db6cc-b500-b6af-23ad-5994ba9600f2",
+        "text": "glowing crystal orb"
+      },
+      {
+        "length": "medium",
         "model": "qwen2.5-coder:7b",
         "source_prompt": null,
         "subject_key": "Insight",
@@ -423,12 +1008,885 @@
       },
       {
         "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Insight (CHA)",
+        "subject_key": "Insight (CHA)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "bc2405ba-e701-4fe3-f9bb-aee6724e93dd",
+        "text": "glowing blue gemstone"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Insight (CON)",
+        "subject_key": "Insight (CON)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "44be208c-dd77-fc9e-a830-ed585d262fe8",
+        "text": "glowing blue gemstone"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Insight (DEX)",
+        "subject_key": "Insight (DEX)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "454e3ebf-0e19-3e03-c827-f5d7c6cf4307",
+        "text": "silver eye pendant"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Insight (INT)",
+        "subject_key": "Insight (INT)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "d0a8c4a4-9163-e9fe-416f-9aa71a9e3ba1",
+        "text": "glowing blue gemstone"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Insight (STR)",
+        "subject_key": "Insight (STR)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "bdaf7a37-4aa8-2db9-04ec-d05cefb8bfa3",
+        "text": "silver eye etched on a bronze coin"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Insight (WIS)",
+        "subject_key": "Insight (WIS)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "b113a35a-0034-c7a6-d0e5-14ffedc6d22d",
+        "text": "glowing blue gemstone"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Iron Hide",
+        "subject_key": "Iron Hide — +140 maximum life and +1.2 HP regen/s",
+        "subject_kind": "passive_label",
+        "sync_uuid": "e8d6ca40-8ad7-e233-5fda-944b3980343b",
+        "text": "thick iron shield"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Iron Recovery",
+        "subject_key": "Iron Recovery",
+        "subject_kind": "passive_label",
+        "sync_uuid": "501ec9aa-ad7c-7c99-d264-b65233255e08",
+        "text": "cracked iron shield"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Jarring Blows",
+        "subject_key": "Jarring Blows",
+        "subject_kind": "passive_label",
+        "sync_uuid": "5f8a95f4-8fa6-62e7-85fa-46dbcc3b3edc",
+        "text": "cracked iron bell"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Keen Eye",
+        "subject_key": "Keen Eye",
+        "subject_kind": "passive_label",
+        "sync_uuid": "3bf88eee-56a0-1a7a-caab-fdab665da961",
+        "text": "crystal lens etched with a crosshair"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Ki Flow",
+        "subject_key": "Ki Flow",
+        "subject_kind": "passive_label",
+        "sync_uuid": "c73dd4a1-1e3a-8642-10c7-d46f2e2a474e",
+        "text": "glowing jade teardrop"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Ki Overflow",
+        "subject_key": "Ki Overflow — +30% skill damage while mana is nearly full, +2 max mana per WIS, skills cost 15% more mana",
+        "subject_kind": "passive_label",
+        "sync_uuid": "4d92cad8-1675-8690-459b-992292d00535",
+        "text": "cracked jade orb overflowing with blue liquid"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Killing Line",
+        "subject_key": "Killing Line",
+        "subject_kind": "passive_label",
+        "sync_uuid": "b82093f1-05e5-4b5e-42ab-98ebdbbc5e92",
+        "text": "crimson dagger"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Last Gasp",
+        "subject_key": "Last Gasp",
+        "subject_kind": "passive_label",
+        "sync_uuid": "5721679c-709f-27f1-aa2e-fa35ddf1c1c4",
+        "text": "cracked red heart"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Light Step",
+        "subject_key": "Light Step",
+        "subject_kind": "passive_label",
+        "sync_uuid": "8a374af2-838d-54b4-12ad-b7890e9dd4c4",
+        "text": "silver feather"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Marksman's Focus",
+        "subject_key": "Marksman's Focus",
+        "subject_kind": "passive_label",
+        "sync_uuid": "2c48ad1e-3703-a362-b626-1d83a7b964b7",
+        "text": "crosshair etched into a bronze disc"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Marksman's Mastery",
+        "subject_key": "Marksman's Mastery",
+        "subject_kind": "passive_label",
+        "sync_uuid": "f7821abe-7571-244a-3c3c-4a2387cea595",
+        "text": "crimson arrowhead"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Martial Focus",
+        "subject_key": "Martial Focus",
+        "subject_kind": "passive_label",
+        "sync_uuid": "7417775e-3813-1434-fc00-ef2b2ef571d3",
+        "text": "iron knuckle duster"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Martial Mastery",
+        "subject_key": "Martial Mastery",
+        "subject_kind": "passive_label",
+        "sync_uuid": "0e907942-3371-7355-9ae8-90540fa83ed6",
+        "text": "iron gauntlet"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Mastery (CHA)",
+        "subject_key": "Mastery (CHA)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "5996fc60-de18-810e-d0ce-10cfa8ea96ce",
+        "text": "golden laurel wreath"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Mastery (STR)",
+        "subject_key": "Mastery (STR)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "20ac5b53-1874-c02b-9d74-1d28c14af452",
+        "text": "iron dumbbell"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Meditation Spark",
+        "subject_key": "Meditation Spark",
+        "subject_kind": "passive_label",
+        "sync_uuid": "2c3f5fdf-c088-7449-2139-065f0ac56d2c",
+        "text": "glowing blue mana gem"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Meditation",
+        "subject_key": "Meditation — +70 max mana, +2.0 mana regen/s, +5% life share from mana regen",
+        "subject_kind": "passive_label",
+        "sync_uuid": "8fcee738-e32c-2a10-8e1e-9aba967eba22",
+        "text": "glowing blue lotus"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Menagerie",
+        "subject_key": "Menagerie — Aspect of the Wild (+25 CHA, +15 CON, +30 max mana, +2.0 mana regen/s, forms 15% stronger)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "605a267c-7121-b8d8-4038-043d873ad985",
+        "text": "emerald pendant shaped like a howling wolf"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Mending",
+        "subject_key": "Mending",
+        "subject_kind": "passive_label",
+        "sync_uuid": "542c2b0a-a49f-e238-76cd-b00cd227058b",
+        "text": "green leaf with golden veins"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Natural Vigour",
+        "subject_key": "Natural Vigour",
+        "subject_kind": "passive_label",
+        "sync_uuid": "984702a9-d942-8639-c739-36ce4387fe6f",
+        "text": "glowing green leaf"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Nimble Flow",
+        "subject_key": "Nimble Flow",
+        "subject_kind": "passive_label",
+        "sync_uuid": "b475f648-4e07-a282-b51a-41b62d3e68f6",
+        "text": "interlocking silver rings"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Null Field",
+        "subject_key": "Null Field",
+        "subject_kind": "passive_label",
+        "sync_uuid": "c54b4b44-e1e3-5498-d5ee-78fe43932b65",
+        "text": "black hexagonal shield"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Numbing Blows",
+        "subject_key": "Numbing Blows",
+        "subject_kind": "passive_label",
+        "sync_uuid": "66ea7218-79a8-726c-665f-3baca82ae08f",
+        "text": "frost-covered iron gauntlet"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Open Wounds",
+        "subject_key": "Open Wounds",
+        "subject_kind": "passive_label",
+        "sync_uuid": "21b2c481-a4fa-af47-193e-3e748d3fba5a",
+        "text": "crimson bandage wrapped around a bone"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Overflow",
+        "subject_key": "Overflow",
+        "subject_kind": "passive_label",
+        "sync_uuid": "cea32d3b-1fc9-9da6-911e-f5e0b236e0e2",
+        "text": "cracked mana vial"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Overflowing Spirit",
+        "subject_key": "Overflowing Spirit",
+        "subject_kind": "passive_label",
+        "sync_uuid": "42df5f12-f535-1b68-6447-5f0640cc5bb6",
+        "text": "cracked crystal brimming with blue liquid"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Ox Blood (CHA)",
+        "subject_key": "Ox Blood (CHA)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "e68a14f0-57be-ea6d-f6b0-b61719a15fa6",
+        "text": "crimson ox skull"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Pain Ward",
+        "subject_key": "Pain Ward — +10% physical and +10% fire resistance, +1.2 HP regen/s",
+        "subject_kind": "passive_label",
+        "sync_uuid": "10bd0083-4eb3-bf64-3b76-f30e5d3f1731",
+        "text": "crimson shield etched with a white cross"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Paragon (CHA)",
+        "subject_key": "Paragon (CHA)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "055b98c0-5257-dd6b-fc52-3056f8ed918b",
+        "text": "golden laurel wreath"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Phantom Step",
+        "subject_key": "Phantom Step — 15% chance to dodge a blow outright, +20 max stamina",
+        "subject_kind": "passive_label",
+        "sync_uuid": "a92640e4-ce95-86a6-04a6-5c44162069f6",
+        "text": "ghostly silver boot"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Primal Form Mastery",
+        "subject_key": "Primal Form Mastery — +30 CHA, +10 WIS, +1.5 HP regen/s, +3.0 stamina regen/s, forms 25% stronger",
+        "subject_kind": "passive_label",
+        "sync_uuid": "044361b9-40be-5849-cf5e-62f777affbad",
+        "text": "glowing fang"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Primal Instinct",
+        "subject_key": "Primal Instinct",
+        "subject_kind": "passive_label",
+        "sync_uuid": "b5b343e0-c120-36b4-c71d-759998d7ef10",
+        "text": "torn wolf pelt"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Pyromancy",
+        "subject_key": "Pyromancy — +20% fire damage, and your hits burn",
+        "subject_kind": "passive_label",
+        "sync_uuid": "121e6241-27ee-09e9-ee08-e7f7ee60410c",
+        "text": "burning coal"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Quick Hands",
+        "subject_key": "Quick Hands",
+        "subject_kind": "passive_label",
+        "sync_uuid": "cfd1521c-4d15-363d-bfe1-34d908b2e4df",
+        "text": "ticking pocket watch"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Quick Recovery",
+        "subject_key": "Quick Recovery",
+        "subject_kind": "passive_label",
+        "sync_uuid": "59acdf0a-4279-0f35-771f-50b9c452d632",
+        "text": "green leaf resting on a smooth stone"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Reckless Swing",
+        "subject_key": "Reckless Swing — +25% physical damage, -10% ice resistance",
+        "subject_kind": "passive_label",
+        "sync_uuid": "0796eb46-4f5c-2fbd-2ae6-1c10b9f8c91e",
+        "text": "cracked ice axe"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Red Harvest",
+        "subject_key": "Red Harvest",
+        "subject_kind": "passive_label",
+        "sync_uuid": "f2519ebd-1051-cd94-1487-1b6c9e6bffae",
+        "text": "crimson chalice overflowing with dark liquid"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Regrowth",
+        "subject_key": "Regrowth",
+        "subject_kind": "passive_label",
+        "sync_uuid": "6cc67070-d256-d538-4345-15538d7e87d3",
+        "text": "green leaf sprouting from a silver band"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Rejuvenation",
+        "subject_key": "Rejuvenation",
+        "subject_kind": "passive_label",
+        "sync_uuid": "8b40f644-db96-7209-3210-89e12f29b976",
+        "text": "glowing green leaf"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Ringing Blow",
+        "subject_key": "Ringing Blow",
+        "subject_kind": "passive_label",
+        "sync_uuid": "c688d291-151f-cd7c-602e-94af0420117e",
+        "text": "cracked bronze bell"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Rolling Thunder",
+        "subject_key": "Rolling Thunder",
+        "subject_kind": "passive_label",
+        "sync_uuid": "efc1171f-00ae-c22a-48a9-206339af9bec",
+        "text": "cracked stone sphere"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Sanguine Focus",
+        "subject_key": "Sanguine Focus",
+        "subject_kind": "passive_label",
+        "sync_uuid": "05ef4518-d809-9a7e-6bf2-9acf0014b7c8",
+        "text": "crimson heart-shaped gemstone"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Sanguine Mastery",
+        "subject_key": "Sanguine Mastery",
+        "subject_kind": "passive_label",
+        "sync_uuid": "c2081eb5-bdca-3138-c29f-1bb8dec7655e",
+        "text": "crimson heart-shaped gemstone"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Sanguine Rite",
+        "subject_key": "Sanguine Rite — life costs are reduced a further 12%",
+        "subject_kind": "passive_label",
+        "sync_uuid": "ce1b0742-02c8-ae5e-7bd2-f442d9366d4c",
+        "text": "crimson vial with a silver stopper"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Sanguine Spring",
+        "subject_key": "Sanguine Spring",
+        "subject_kind": "passive_label",
+        "sync_uuid": "b79f2705-2ad0-5dc1-104e-c8201b3b9461",
+        "text": "crimson spring coiled around a silver vial"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Serenity",
+        "subject_key": "Serenity",
+        "subject_kind": "passive_label",
+        "sync_uuid": "019f6718-c79e-e96a-8613-d6b90e20426d",
+        "text": "glowing white lotus"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Sinew (CHA)",
+        "subject_key": "Sinew (CHA)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "98888203-a5f7-9b73-6afc-74df0184c27c",
+        "text": "knotted sinew cord"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Sinew (CON)",
+        "subject_key": "Sinew (CON)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "7dedf21f-5dbc-e077-e327-471e650d1eaa",
+        "text": "knotted muscle fiber"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Sinew (DEX)",
+        "subject_key": "Sinew (DEX)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "29e90463-e5e8-cfcf-0dd1-5056c8878a28",
+        "text": "knotted sinew cord"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Sinew (INT)",
+        "subject_key": "Sinew (INT)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "a56600f8-7453-21b9-326b-90e6241095f8",
+        "text": "silver brain-shaped medallion"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Sinew (STR)",
+        "subject_key": "Sinew (STR)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "f1a3cbcc-9835-ef2e-3464-dfa3c4c65a93",
+        "text": "knotted muscle fiber"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Sinew (WIS)",
+        "subject_key": "Sinew (WIS)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "2c83c1c1-de83-7c08-3344-17780209458c",
+        "text": "knotted sinew cord"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Spiked Hide",
+        "subject_key": "Spiked Hide",
+        "subject_kind": "passive_label",
+        "sync_uuid": "f2531902-b68d-a9a8-a4b3-44f16622cdc7",
+        "text": "barbed iron scale"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Spirit Ward",
+        "subject_key": "Spirit Ward — +12% arcane resistance, +0.8 HP regen/s",
+        "subject_kind": "passive_label",
+        "sync_uuid": "5d4dc2a3-f10d-c14a-92e8-46359fdf8844",
+        "text": "glowing green rune stone"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Spreading Light",
+        "subject_key": "Spreading Light",
+        "subject_kind": "passive_label",
+        "sync_uuid": "c2c800a1-f939-09df-b7d2-37f78d87cf72",
+        "text": "radiant sunburst"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Stagger",
+        "subject_key": "Stagger",
+        "subject_kind": "passive_label",
+        "sync_uuid": "868606d4-683b-616b-088b-d1ff0f2814e2",
+        "text": "cracked stone pillar"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Steady Breath",
+        "subject_key": "Steady Breath",
+        "subject_kind": "passive_label",
+        "sync_uuid": "53d01ef4-e98a-fcf7-4a66-72149616fb51",
+        "text": "bronze lung-shaped medallion"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Storm Caller",
+        "subject_key": "Storm Caller — +20% lightning damage, and your hits shock",
+        "subject_kind": "passive_label",
+        "sync_uuid": "81441d83-3373-92d2-6204-8760ce7cce38",
+        "text": "cracked obsidian shard crackling with blue lightning"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Temper (CHA)",
+        "subject_key": "Temper (CHA)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "250b0d44-0494-0100-168c-11c0dc97ab82",
+        "text": "tempered steel shield"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Temper (CON)",
+        "subject_key": "Temper (CON)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "ccf1a77c-6459-6325-e9e1-69893451fadc",
+        "text": "iron-reinforced leather cuirass"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Temper (DEX)",
+        "subject_key": "Temper (DEX)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "5ce99bb4-c562-e551-089a-4a94a0019839",
+        "text": "silver tempered dagger"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Temper (WIS)",
+        "subject_key": "Temper (WIS)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "03538a79-19a3-dd84-77c6-3e7b025c9998",
+        "text": "bronze tempering hammer"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Thick Pelt",
+        "subject_key": "Thick Pelt",
+        "subject_kind": "passive_label",
+        "sync_uuid": "ed0b9f21-7414-60bf-0b77-63b87c553299",
+        "text": "thick brown fur pelt"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Thick Skin",
+        "subject_key": "Thick Skin",
+        "subject_kind": "passive_label",
+        "sync_uuid": "33159363-b216-ef4b-d1ee-3091b8914cf9",
+        "text": "thick iron plate"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Thorn Hide",
+        "subject_key": "Thorn Hide",
+        "subject_kind": "passive_label",
+        "sync_uuid": "fe6d69df-96a6-9d10-2b30-294dfbed3008",
+        "text": "barbed iron scale"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Tranquil Flow",
+        "subject_key": "Tranquil Flow",
+        "subject_kind": "passive_label",
+        "sync_uuid": "9d3ffe29-c84f-49dd-0c50-6fe08c90ccd8",
+        "text": "smooth blue river stone"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Transcendence",
+        "subject_key": "Transcendence — +25 WIS and +18 INT",
+        "subject_kind": "passive_label",
+        "sync_uuid": "fba2e2e2-3afc-8d0b-6d81-425692f5df63",
+        "text": "glowing silver eye"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Unbound Frost",
+        "subject_key": "Unbound Frost",
+        "subject_kind": "passive_label",
+        "sync_uuid": "c1023a7d-17f0-9c8a-1d3e-2bedd1413f1e",
+        "text": "cracked ice shard"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Unbreakable",
+        "subject_key": "Unbreakable — +20 STR and +100 maximum life",
+        "subject_kind": "passive_label",
+        "sync_uuid": "194f68ab-e375-7813-2e6f-a18e021ab5b9",
+        "text": "iron shield with riveted edges"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Unflagging",
+        "subject_key": "Unflagging",
+        "subject_kind": "passive_label",
+        "sync_uuid": "07af03be-30d9-ca71-e13f-96f085e23f45",
+        "text": "iron stamina flask"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Vampiric Rite",
+        "subject_key": "Vampiric Rite — skills heal 12% of the damage they deal, +2% max life per kill",
+        "subject_kind": "passive_label",
+        "sync_uuid": "98d83aee-99dc-b81b-1d11-9ba2f692101b",
+        "text": "crimson chalice overflowing with dark blood"
+      },
+      {
+        "length": "medium",
         "model": "qwen2.5-coder:7b",
         "source_prompt": null,
         "subject_key": "Versatility",
         "subject_kind": "passive_label",
         "sync_uuid": "45ad0ed6-bac8-bd83-a4f4-026550a9b8c8",
         "text": "gear shift"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Vigour (CHA)",
+        "subject_key": "Vigour (CHA)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "cb785139-3706-3cb4-24f5-d392d1420a3b",
+        "text": "red heart-shaped gemstone"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Vigour (CON)",
+        "subject_key": "Vigour (CON)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "d6d055e5-5aeb-adaa-3ec1-a929d4286657",
+        "text": "crimson heart encased in iron"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Vigour (INT)",
+        "subject_key": "Vigour (INT)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "0c188391-061b-e748-2b20-75e662f3988a",
+        "text": "glowing blue heart"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Vigour (STR)",
+        "subject_key": "Vigour (STR)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "2cebdc41-bd5e-9382-e3aa-ae57631c5fb4",
+        "text": "crimson heart encased in iron"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Vigour (WIS)",
+        "subject_key": "Vigour (WIS)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "ed08721f-ccc7-2d5b-f5bb-d4a68cd81bbc",
+        "text": "green leaf encased in amber"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Vital Mark",
+        "subject_key": "Vital Mark",
+        "subject_kind": "passive_label",
+        "sync_uuid": "27139e9d-0e16-3a17-ac8a-d0074ec3169c",
+        "text": "crimson heart-shaped gemstone"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Wide Arcana",
+        "subject_key": "Wide Arcana",
+        "subject_kind": "passive_label",
+        "sync_uuid": "f9038317-e568-c637-3e65-ddf1c7b0a9b9",
+        "text": "expanding rune circle"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Wide Casting",
+        "subject_key": "Wide Casting",
+        "subject_kind": "passive_label",
+        "sync_uuid": "f07969a5-68c0-e286-119d-423539bfc1f4",
+        "text": "expanding ripple ring"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Wild Bloom",
+        "subject_key": "Wild Bloom",
+        "subject_kind": "passive_label",
+        "sync_uuid": "eabf8922-bc94-7a18-af78-96eddcd4c4c8",
+        "text": "glowing green lotus flower"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Wild Focus",
+        "subject_key": "Wild Focus",
+        "subject_kind": "passive_label",
+        "sync_uuid": "51d6c40a-0fff-89fb-9937-73b8562116e0",
+        "text": "glowing amber gemstone"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Wild Heart",
+        "subject_key": "Wild Heart",
+        "subject_kind": "passive_label",
+        "sync_uuid": "7ec2e304-b7b3-be2c-66e1-fee4bee4e68f",
+        "text": "beast skull carved from dark wood"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Wild Mastery",
+        "subject_key": "Wild Mastery",
+        "subject_kind": "passive_label",
+        "sync_uuid": "dd1d508b-5596-f5ca-118c-d4872e4c4c17",
+        "text": "golden lion head"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Wind (CHA)",
+        "subject_key": "Wind (CHA)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "a43e63da-1248-7227-c8da-1d715cd6f00d",
+        "text": "silver wind chime"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Wind (CON)",
+        "subject_key": "Wind (CON)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "c32810fe-d20b-429f-07de-ef19a941a3f0",
+        "text": "bronze wind chime"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Wind (DEX)",
+        "subject_key": "Wind (DEX)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "ad845100-ab78-f1eb-55eb-fbaa85754003",
+        "text": "silver feather"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Wind (INT)",
+        "subject_key": "Wind (INT)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "25c59a41-d725-f43f-8c6f-f93c600791d1",
+        "text": "silver wind chime"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Wind (STR)",
+        "subject_key": "Wind (STR)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "a504229c-b1a3-f7c6-18d9-28ee17b032ab",
+        "text": "bronze wind chime"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Wind (WIS)",
+        "subject_key": "Wind (WIS)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "99a84109-9798-1ef3-63dc-498cc4cbfb26",
+        "text": "silver wind chime"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Windrunner",
+        "subject_key": "Windrunner — +15 DEX, +40 max stamina, +5 stamina regen/s",
+        "subject_kind": "passive_label",
+        "sync_uuid": "4cebf3a2-a479-22a4-53ea-cf90a7282b73",
+        "text": "feathered quill"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Wolf Aspect",
+        "subject_key": "Wolf Aspect — +15 STR, +15 CHA, +12% physical damage, forms 12% stronger",
+        "subject_kind": "passive_label",
+        "sync_uuid": "317bb143-01fe-edd1-a415-29b63a2cbc8a",
+        "text": "iron wolf head"
       },
       {
         "length": "medium",
@@ -529,6 +1987,46 @@
       },
       {
         "image": {
+          "file": "textures/passives/Apostasy.png",
+          "sha256": "86253f94ab13555efbafff6ef573d8761e7c956fe85c4e3c6476dc3f6d7abea7"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Apostasy",
+        "subject_kind": "passive_label",
+        "sync_uuid": "c34d887d-600f-4089-a53e-2843068e3703"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Apotheosis.png",
+          "sha256": "f8e10eab34b808b9c4916071dc09c4b30c6a9ec46818bf5f9689322077011784"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Apotheosis",
+        "subject_kind": "passive_label",
+        "sync_uuid": "c1d35284-dbdf-4df4-9de1-c2f99992c9b8"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Apotheosis__CHA_.png",
+          "sha256": "cdbf506ec5a524fd201472d295ae5c957fb71d2b7c2c83a3367d2df054e54ac9"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Apotheosis (CHA)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "9f100382-c7c8-4726-94da-710f55714336"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Arcane_Conduit____15_INT___35_max_mana___3_0_mana_regen_s.png",
+          "sha256": "4d44414df565166ac6328c9ce1c6f9df959ce3135b58cb0d5379dd93e9a59d31"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Arcane Conduit — +15 INT, +35 max mana, +3.0 mana regen/s",
+        "subject_kind": "passive_label",
+        "sync_uuid": "8665e1f0-829b-4004-a791-fd8f6c71c13c"
+      },
+      {
+        "image": {
           "file": "textures/passives/Arcane_Conduit____20_INT_and__60_maximum_mana.png",
           "sha256": "bb4b07acb6eef554ebce0a3fed32ea64c0149d74520137d60c524019e4a6b34c"
         },
@@ -536,6 +2034,36 @@
         "subject_key": "Arcane Conduit — +20 INT and +60 maximum mana",
         "subject_kind": "passive_label",
         "sync_uuid": "fbd13623-beb5-48c4-3c8f-977930034d01"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Arcane_Focus.png",
+          "sha256": "561af9476513e45cc84967452f32d86aa05372c15d1a31f231ff8ac08e762a14"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Arcane Focus",
+        "subject_kind": "passive_label",
+        "sync_uuid": "f1a2cb1f-5b16-44a6-a1e1-444178243c2d"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Arcane_Mastery.png",
+          "sha256": "29ffce7ba3a60e52a3ff6c54a2bc9a392603c4768ef25710cfd0ee8572af9905"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Arcane Mastery",
+        "subject_kind": "passive_label",
+        "sync_uuid": "5d4a1229-e564-4b45-9af0-220cd0a91342"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Arcane_Recovery.png",
+          "sha256": "d176a510d355a5a5e0321e9cf858cff3c8dd454c48bca5c1a5055cd0c7276c84"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Arcane Recovery",
+        "subject_kind": "passive_label",
+        "sync_uuid": "2a5554db-95a9-423f-b6b9-93ac2a6b6f23"
       },
       {
         "image": {
@@ -559,6 +2087,16 @@
       },
       {
         "image": {
+          "file": "textures/passives/Ascendance__CHA_.png",
+          "sha256": "7def622c32ed2de5af06e8c40e3f2c572c40a62e62ddf918b40c59e1c9e70c6a"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Ascendance (CHA)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "b70e892f-b035-4ba5-8d6d-3f4be15648b9"
+      },
+      {
+        "image": {
           "file": "textures/passives/Attunement.png",
           "sha256": "8be09caaa4eb03fc9ee357f97df54883e9db24e52597b4e29cfb708589b8e2c2"
         },
@@ -566,6 +2104,26 @@
         "subject_key": "Attunement",
         "subject_kind": "passive_label",
         "sync_uuid": "d6034590-e89a-1795-6a82-4ca6ef04af7f"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Battle_Breath.png",
+          "sha256": "5029ddf5d5ee1e8f051e485d248a80989ce7e636bc0918cf97c1fc5b1f70639a"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Battle Breath",
+        "subject_kind": "passive_label",
+        "sync_uuid": "0c29ffed-b70c-4ce8-84cd-fdf1099cafb7"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Bear_Aspect____20_STR___120_HP___1_5_HP_regen_s___5__physical_resistance__forms_12__stronger.png",
+          "sha256": "77c9012646f09e5f00259b9d06521eaff7aa97ad7412039bdc4ba105ae6e861d"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Bear Aspect — +20 STR, +120 HP, +1.5 HP regen/s, +5% physical resistance, forms 12% stronger",
+        "subject_kind": "passive_label",
+        "sync_uuid": "1a62e81a-b87b-4cf8-8399-876c1d2ddc78"
       },
       {
         "image": {
@@ -579,6 +2137,36 @@
       },
       {
         "image": {
+          "file": "textures/passives/Berserker____30__skill_damage_while_below_35__life___8__stun_chance__-60_max_life.png",
+          "sha256": "8770d872b58b190c27f000b3d829a44b30afc0b1716c6ec9cec61cba2b490e9c"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Berserker — +30% skill damage while below 35% life, +8% stun chance, -60 max life",
+        "subject_kind": "passive_label",
+        "sync_uuid": "b7578fd4-0e7d-4f74-b4c7-fdff96120175"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Blood_Hunger.png",
+          "sha256": "e222221e0fba2b662d55b21f31bf21535d3b62eb2cbfe13964fa3580a32c7f42"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Blood Hunger",
+        "subject_kind": "passive_label",
+        "sync_uuid": "1575f9f7-ffb6-4f03-a7aa-914d534ed9d0"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Blood_Pact___life_costs_are_reduced_15_.png",
+          "sha256": "be36658c2c8970134af54c0d1b1289440387df9f34371f14ae096903644166e0"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Blood Pact — life costs are reduced 15%",
+        "subject_kind": "passive_label",
+        "sync_uuid": "9c5a97ab-1d64-4adf-bcd7-926683d2f9e0"
+      },
+      {
+        "image": {
           "file": "textures/passives/Blood_Pact___life_costs_are_reduced_25_.png",
           "sha256": "cd27b0fb50ee144419b646ee737595cb6aa43104747104f25cc57b95b99dc7cc"
         },
@@ -589,6 +2177,26 @@
       },
       {
         "image": {
+          "file": "textures/passives/Bloodflow.png",
+          "sha256": "99310fc6b6391b8e5e333f9cefe21037170dad84689a7f4af991cd61c9fd2b12"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Bloodflow",
+        "subject_kind": "passive_label",
+        "sync_uuid": "344f3711-aef0-47c7-beb3-085817eaf27a"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Bloodletting.png",
+          "sha256": "67198a5ce0f7d0734e018284584fd06357d6021f1d552d3463e01d4122e1827d"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Bloodletting",
+        "subject_kind": "passive_label",
+        "sync_uuid": "d69a715b-b690-42c6-af77-99577def1bbf"
+      },
+      {
+        "image": {
           "file": "textures/passives/Breadth.png",
           "sha256": "19b933b740981273660ea18a4900ccd97f85909e1ffac5be69aeee776cac6ac8"
         },
@@ -596,6 +2204,16 @@
         "subject_key": "Breadth",
         "subject_kind": "passive_label",
         "sync_uuid": "2faa7eb5-b977-eafd-4ced-f01396d8026a"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Brimming_Cup.png",
+          "sha256": "41be6644814e178825c478f10c1c570bdd95e7c656a44ec7c66d54f702398460"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Brimming Cup",
+        "subject_kind": "passive_label",
+        "sync_uuid": "39061c9f-be8a-4589-8e9c-4cf43d7e8da5"
       },
       {
         "image": {
@@ -669,6 +2287,26 @@
       },
       {
         "image": {
+          "file": "textures/passives/Concussion.png",
+          "sha256": "4d59922a79796cb5da3227953588c12f3cb75586d08a10541e748ffc42bb0139"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Concussion",
+        "subject_kind": "passive_label",
+        "sync_uuid": "6c2f206a-3873-4f18-b4a3-b791d956430c"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Concussive_Force.png",
+          "sha256": "4f39ff22288c3507d10088d746594c8ca04185b1db6551e2d4ef425e676b9f38"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Concussive Force",
+        "subject_kind": "passive_label",
+        "sync_uuid": "8c1e7e32-a1be-4bd8-8b60-ca1158566dfc"
+      },
+      {
+        "image": {
           "file": "textures/passives/Constitution.png",
           "sha256": "614304b4cb8f9f3f6cef74dc99778ec98e321b97b9851f84d2bead965c892ad4"
         },
@@ -676,6 +2314,16 @@
         "subject_key": "Constitution",
         "subject_kind": "passive_label",
         "sync_uuid": "935c3ef6-b70c-7180-806a-b0003660cf9a"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Crimson_Bargain___every_skill_hits_40__harder__but_costs_30__more_life.png",
+          "sha256": "b04bf224e4c19ad66ff96b7b0539c43369e1d6b3da75b9117150a474d139b56a"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Crimson Bargain — every skill hits 40% harder, but costs 30% more life",
+        "subject_kind": "passive_label",
+        "sync_uuid": "fd01657d-3da0-45e3-9db7-edefd05626c9"
       },
       {
         "image": {
@@ -696,6 +2344,16 @@
         "subject_key": "Cross-Training",
         "subject_kind": "passive_label",
         "sync_uuid": "2bd30b27-66c6-bb10-0b9e-062e26fdd281"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Cryomancy____20__ice_damage__and_your_hits_chill.png",
+          "sha256": "7517d4a9ac05bb2fb4f53b7f8ac10302640ae8a5d778e775b4f3e9154c309ecd"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Cryomancy — +20% ice damage, and your hits chill",
+        "subject_kind": "passive_label",
+        "sync_uuid": "615598c1-259d-4a2e-b1f7-37611fdcfc22"
       },
       {
         "image": {
@@ -729,6 +2387,36 @@
       },
       {
         "image": {
+          "file": "textures/passives/Dazed_Foe.png",
+          "sha256": "a567873e7ce42aa8f18c0f2d41df3a535fe087cdb9c550a0e50439651c051a00"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Dazed Foe",
+        "subject_kind": "passive_label",
+        "sync_uuid": "73408dcc-3943-4709-8525-baf874b97849"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Deadeye_Focus.png",
+          "sha256": "22bff433fb5d22556e2f6e65365622cf55454418eef85ae9c0a686229e9e7205"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Deadeye Focus",
+        "subject_kind": "passive_label",
+        "sync_uuid": "281fcee6-129d-4ab0-b9b3-6abb399cb300"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Deadeye____20_DEX_and__1_Extra_Arrow.png",
+          "sha256": "86ad1ba48cd605b89370c7447d2f73a6529dd60c1617f6ff9373c10c03b1b1cf"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Deadeye — +20 DEX and +1 Extra Arrow",
+        "subject_kind": "passive_label",
+        "sync_uuid": "d06e5896-a715-4710-bba9-9b3eff1bd608"
+      },
+      {
+        "image": {
           "file": "textures/passives/Deadeye____30_DEX.png",
           "sha256": "7e964ee258c69bd1a508a8734d42c7c528dbc6485b1a3345f0332e7ef0f4c248"
         },
@@ -739,6 +2427,26 @@
       },
       {
         "image": {
+          "file": "textures/passives/Deadly_Aim.png",
+          "sha256": "10686d844ecbc827628058956cbeafa123e228c043a55e43dcd2e20f1cace4f4"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Deadly Aim",
+        "subject_kind": "passive_label",
+        "sync_uuid": "9d79f6d1-b3c6-4912-b321-e2e9fefea9fa"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Deadly_Precision____12__crit_chance_and__35__crit_damage__-50_max_life.png",
+          "sha256": "4702caa853f5461f90e866bd8f7e9d62a325ee99d0efd7feb8b8ca1473726588"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Deadly Precision — +12% crit chance and +35% crit damage, -50 max life",
+        "subject_kind": "passive_label",
+        "sync_uuid": "17116d06-9392-4b9c-821a-17244bb73500"
+      },
+      {
+        "image": {
           "file": "textures/passives/Deep_Reserve.png",
           "sha256": "e59304eeddb9a90a42efa490aea7128050858842bca4288f8926991fa62f92a9"
         },
@@ -746,6 +2454,16 @@
         "subject_key": "Deep Reserve",
         "subject_kind": "passive_label",
         "sync_uuid": "a42221d6-de2b-af27-ef22-a20151012e21"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Deep_Reservoir.png",
+          "sha256": "f3b20dd9351bb433a1ee0ce1afc4f17c7c806e75da72cf155877c11ab7546a24"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Deep Reservoir",
+        "subject_kind": "passive_label",
+        "sync_uuid": "14596577-0a99-43a7-8a7e-3ba4ce337114"
       },
       {
         "image": {
@@ -779,6 +2497,66 @@
       },
       {
         "image": {
+          "file": "textures/passives/Discipline__CHA_.png",
+          "sha256": "671722c6806a2bf31ae06a16b0c1232d4bd51bd503b1ab73256a8d7fdcf253a8"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Discipline (CHA)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "494be4d0-ab0c-4288-8170-346e8e2b770b"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Discipline__CON_.png",
+          "sha256": "3df4831b0d7642adb3faa2c05eee682f5bdef82de44c73a88726c826be87f8fa"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Discipline (CON)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "68d2eb3f-ec36-4f05-b4be-a18ef4c6362a"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Discipline__DEX_.png",
+          "sha256": "d35bae959c5dcdf981e919e25720e3b6f0417f1e4d6f22b4a1d7febfc58985ea"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Discipline (DEX)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "e1dba409-4a6b-48fb-961d-cf6ad13424b0"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Discipline__INT_.png",
+          "sha256": "e4180a032d7b77b0823cba30359e9a9865b3bb5f84eb6ef54eb4807ac39bcb49"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Discipline (INT)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "7d78ef3f-17a6-4959-9cfb-602ee47074c0"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Discipline__STR_.png",
+          "sha256": "9f80f71f3825e692408e7683efbd6cf8d8580da27f25e52866778ab16fd6f467"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Discipline (STR)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "dfa4f8a2-ddb1-4dd6-bf7f-8fcef2614c6c"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Discipline__WIS_.png",
+          "sha256": "b5040cf25c2f5852eab2647ac8bf09928ff96a1fb686c4d3879b0926544fb421"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Discipline (WIS)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "f958be23-7931-4453-b932-c680a5e201f8"
+      },
+      {
+        "image": {
           "file": "textures/passives/Draw_Weight.png",
           "sha256": "859012c36a2af2a625fdd732b7b67cf1939a0dc38392ca22586916981d549c16"
         },
@@ -799,6 +2577,16 @@
       },
       {
         "image": {
+          "file": "textures/passives/Economy_of_Motion.png",
+          "sha256": "659935a5b39eddbba121ba795a5dec712c4a4f07438ecdc39291642a1f19acac"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Economy of Motion",
+        "subject_kind": "passive_label",
+        "sync_uuid": "4bd0c2af-76b5-4951-bbfd-60d42a157baa"
+      },
+      {
+        "image": {
           "file": "textures/passives/Edge.png",
           "sha256": "2637de4ae1feb00327448f973821d8f4a37e9248d89f73af6f566e2a63e69ce2"
         },
@@ -809,6 +2597,16 @@
       },
       {
         "image": {
+          "file": "textures/passives/Efficient_Casting.png",
+          "sha256": "d4f8b76c154667afc131aba844a7d7f385587591e74e508dc115ecda5169b17a"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Efficient Casting",
+        "subject_kind": "passive_label",
+        "sync_uuid": "df8833b8-17b1-4ea0-8bc0-69b79a78eeef"
+      },
+      {
+        "image": {
           "file": "textures/passives/Endurance.png",
           "sha256": "413649f64ae3db6f4a357aa6bb731c92bd08a77f2e4285ad8c57eb59993b23bf"
         },
@@ -816,6 +2614,16 @@
         "subject_key": "Endurance",
         "subject_kind": "passive_label",
         "sync_uuid": "3cdb5260-4bfb-5edf-11c4-9b25ac17d553"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Enduring_Flesh.png",
+          "sha256": "4fe9588db10cbe2bb4aa3af0c2f15fde13b821750131b4cf353ec6d8fab0880f"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Enduring Flesh",
+        "subject_kind": "passive_label",
+        "sync_uuid": "1a4dc95c-528b-4abb-a935-1f6d82049cac"
       },
       {
         "image": {
@@ -869,6 +2677,16 @@
       },
       {
         "image": {
+          "file": "textures/passives/Executioner____15__physical_damage_and__12_melee_reach.png",
+          "sha256": "0171e474d387ecbdef5c6a15e0fed4972dbf0d06202badedac8a65674fad5ed9"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Executioner — +15% physical damage and +12 melee reach",
+        "subject_kind": "passive_label",
+        "sync_uuid": "3ccdd24d-0b87-4f3a-bf40-8af25e250b17"
+      },
+      {
+        "image": {
           "file": "textures/passives/Executioner____25__physical_damage.png",
           "sha256": "2da1d41b10bcb9f73cfb9a7191ca00f9d6fd3f7c893b3bf4355b97df6314e76e"
         },
@@ -886,6 +2704,36 @@
         "subject_key": "Extended Guard",
         "subject_kind": "passive_label",
         "sync_uuid": "afa6514a-7272-065d-2aaf-fee6ce55dcd9"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Feeding_Frenzy.png",
+          "sha256": "5a5961e5396d1b03128f281d3070ce8c3ae59b4c9cd9940372d0750c51f73dbd"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Feeding Frenzy",
+        "subject_kind": "passive_label",
+        "sync_uuid": "b01872fc-fc87-451b-9ae5-1eba6ea07487"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Feral_Edge.png",
+          "sha256": "b24a9bf4ef136876752c0ae256670813233261916d0c04d5351750d637b40a22"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Feral Edge",
+        "subject_kind": "passive_label",
+        "sync_uuid": "9f93deb7-3b9c-4e77-8152-160a2fbac454"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Feral_Surge.png",
+          "sha256": "c08acd5362cfcd85ad6c47c9724ae4df58f4ab6d5e2db425fc03ab7a3452b330"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Feral Surge",
+        "subject_kind": "passive_label",
+        "sync_uuid": "e0460664-1ca3-4f53-a20a-9b5268fbe30d"
       },
       {
         "image": {
@@ -909,6 +2757,26 @@
       },
       {
         "image": {
+          "file": "textures/passives/Fleet___your_cooldown_floor_drops_from_0_40_to_0_35.png",
+          "sha256": "1c486d303f42b3b9d6140ccb7a7c797aa0a5a1a13d8f754d02ffbff005cade30"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Fleet — your cooldown floor drops from 0.40 to 0.35",
+        "subject_kind": "passive_label",
+        "sync_uuid": "40d8e02b-311b-4224-a3d7-f980f1683aa8"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Fleeting_Rest.png",
+          "sha256": "b98571d3faf089fea386347643dd4ae0fc472436eec59fbea64a8911a7a628bf"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Fleeting Rest",
+        "subject_kind": "passive_label",
+        "sync_uuid": "3380745a-2b0b-40d8-8632-61fe564fd874"
+      },
+      {
+        "image": {
           "file": "textures/passives/Fletching.png",
           "sha256": "bae4c7179f169191ddd6f0fee07c0c46da2f8fd37b55376e21c2a8fce4176b1e"
         },
@@ -929,6 +2797,66 @@
       },
       {
         "image": {
+          "file": "textures/passives/Focus__CHA_.png",
+          "sha256": "c22c22332d995f3fae980f48192676fa9978e3cea2e957519b0f58adcd786e2e"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Focus (CHA)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "120ffbaf-4c6a-4ef4-ba98-4c1d11eef946"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Focus__CON_.png",
+          "sha256": "c24af1a8e0c7ec9a306e3db0b3fa7f64677c991f3a4e6eea50a5fdc36bb958c5"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Focus (CON)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "5e0deadd-210c-4950-a203-b5578efbec54"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Focus__DEX_.png",
+          "sha256": "841d5310cab90895ee8ed5d334e78d8d9e7ed31e440dc18dee3d2419295e1797"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Focus (DEX)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "b7d530d9-ee36-45fb-be3e-863e8d41b618"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Focus__INT_.png",
+          "sha256": "f9c2329c38cba618182d783d3da5e7d92863b26c846c67edb9cc089170757e04"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Focus (INT)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "e8886e0b-33db-473d-90ee-be1b562ba236"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Focus__STR_.png",
+          "sha256": "4d5bc374d33afa9f30062c5130034f87868eca2e596c14edf8a3005329ab3f55"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Focus (STR)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "550fa83b-1b50-4fe1-a687-0c1899c604df"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Focus__WIS_.png",
+          "sha256": "17aa935b31ab79fcc4110f7db9bfd3974c4309aaad685cdfd6416fc8079f44cf"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Focus (WIS)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "46f76c03-ad23-4e7e-9103-b41114bc73a5"
+      },
+      {
+        "image": {
           "file": "textures/passives/Follow-Through.png",
           "sha256": "fc3e5fca134510015e7ca0d8dbef9f1703af82520283a0438c1aaf75e360b964"
         },
@@ -936,6 +2864,16 @@
         "subject_key": "Follow-Through",
         "subject_kind": "passive_label",
         "sync_uuid": "46452c23-3ef5-05ad-952f-1b35340b8380"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Font_of_Power.png",
+          "sha256": "1366fda85a9c9e0f6077dee3e3fcf3e7e40921991d661c4a097e3848fb52f7be"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Font of Power",
+        "subject_kind": "passive_label",
+        "sync_uuid": "6a988ac8-5a6a-41ba-adca-4770b5c909cf"
       },
       {
         "image": {
@@ -949,6 +2887,36 @@
       },
       {
         "image": {
+          "file": "textures/passives/Frugal_Hands.png",
+          "sha256": "2e58f2f52c021cf8825176cb7c3500a1d343acf3ed58ea42a8e8c5c4180d071e"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Frugal Hands",
+        "subject_kind": "passive_label",
+        "sync_uuid": "0857df95-da8d-4998-a457-4663601b470d"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Gallows_Humour.png",
+          "sha256": "791bc1904de60e7e25d880591beeb6f72d3e542c01cfccb9262617d0799cd744"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Gallows Humour",
+        "subject_kind": "passive_label",
+        "sync_uuid": "b871ed2d-67d0-45d7-badc-21ebb071a9bd"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Glass_Cannon___every_skill_hits_35__harder_and_costs_25__more_mana__-80_max_life.png",
+          "sha256": "25b5e6e8594a5155731a10dcc41f246f9f5ca0ea53c88db837797b6302f93789"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Glass Cannon — every skill hits 35% harder and costs 25% more mana, -80 max life",
+        "subject_kind": "passive_label",
+        "sync_uuid": "e2dd2d18-adb9-4080-b1bc-0abfa62cae2a"
+      },
+      {
+        "image": {
           "file": "textures/passives/Great_Sinew.png",
           "sha256": "32c48331f5ef3bee592256f35b79e875cf67b66433b5d933fda133ce0ae492b8"
         },
@@ -956,6 +2924,46 @@
         "subject_key": "Great Sinew",
         "subject_kind": "passive_label",
         "sync_uuid": "89690a30-8e56-2a78-f883-7acb7ffc81ac"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Great_Sinew__CHA_.png",
+          "sha256": "aee8a3fa8068e7ad427ad8562e220ad64ff5f947a4e77b0803d1574c33aa2eda"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Great Sinew (CHA)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "38dd62b2-e29d-47d9-807f-46d0e18d42fe"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Great_Sinew__CON_.png",
+          "sha256": "fb85e064df9f1af87e82f88c39f58f071162bb4bc8467eb03e9038468c920154"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Great Sinew (CON)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "e74fc3da-78cb-4846-af12-7d491601809a"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Great_Sinew__DEX_.png",
+          "sha256": "6a40cea6928e84b974659793d9516b6adc136205326bf1cb1462cf30d32b4ee1"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Great Sinew (DEX)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "64e0f893-55b0-4af2-8f78-cea401f3fad1"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Great_Sinew__INT_.png",
+          "sha256": "be3fdc9fbf77a80db6d9250970742a05427c258854815fb5014af2df62afb115"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Great Sinew (INT)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "7da35dfa-55b5-4fc4-81aa-97e7bf7fe213"
       },
       {
         "image": {
@@ -979,6 +2987,26 @@
       },
       {
         "image": {
+          "file": "textures/passives/Hawk_Aspect____20_DEX___40_max_stamina___4_stamina_regen_s___8__attack_speed__forms_12__stronger.png",
+          "sha256": "3f22a3ee516bda1d80dc1f015cddb6aee22cc1e06aa3288d86d2b67b6de21f8c"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Hawk Aspect — +20 DEX, +40 max stamina, +4 stamina regen/s, +8% attack speed, forms 12% stronger",
+        "subject_kind": "passive_label",
+        "sync_uuid": "8fc5e378-a9ea-474b-bb24-79e4ecbfa566"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Heavy_Hand.png",
+          "sha256": "53b62981c24fce8e9ec18bbf23d411648df757ab9f7b8abd854ab92e4d31f135"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Heavy Hand",
+        "subject_kind": "passive_label",
+        "sync_uuid": "83ecf1b6-2d85-4a80-9717-36ff53b543bd"
+      },
+      {
+        "image": {
           "file": "textures/passives/Honed.png",
           "sha256": "5ebc6b6b665f1da9e97d11119bbb640b4380b2391b5e06f0fd5a91852b0382b6"
         },
@@ -986,6 +3014,26 @@
         "subject_key": "Honed",
         "subject_kind": "passive_label",
         "sync_uuid": "3782f75a-df5b-21bf-da85-27071477aa44"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Hunter_s_Reflexes.png",
+          "sha256": "23cbea931038733c714b692b6c636629822dd5201152c051f02326f69fa15c8c"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Hunter's Reflexes",
+        "subject_kind": "passive_label",
+        "sync_uuid": "4dea42d3-d064-46c3-8446-64594404a1cd"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Inner_Flame____20_WIS.png",
+          "sha256": "6cad8732b1912b14305d799e8bb43f9b2a699e5030f0607bb30aafb786be93f4"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Inner Flame — +20 WIS",
+        "subject_kind": "passive_label",
+        "sync_uuid": "87f7a653-95b7-4c30-aa35-ebc07183b6e6"
       },
       {
         "image": {
@@ -999,6 +3047,36 @@
       },
       {
         "image": {
+          "file": "textures/passives/Inner_Focus.png",
+          "sha256": "b98754922378c72529ec1e439a16c09b5e9bef12d48419d21c29df78ff822056"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Inner Focus",
+        "subject_kind": "passive_label",
+        "sync_uuid": "090b5210-fc8b-4542-896b-5fc72510ab6a"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Inner_Harmony.png",
+          "sha256": "899a9989188817f600ad14959e720059e45df60484eafb3788cd2672caa94bd3"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Inner Harmony",
+        "subject_kind": "passive_label",
+        "sync_uuid": "818c7f75-03d5-4e0b-a2d7-4891eeb117e4"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Inner_Mastery.png",
+          "sha256": "f5d61fe386b1b33cd2b6b6bd8f1d0c71032d05edba3f9450ad2f8c437d5e47ae"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Inner Mastery",
+        "subject_kind": "passive_label",
+        "sync_uuid": "35170003-f823-43f3-a147-acd4267ff956"
+      },
+      {
+        "image": {
           "file": "textures/passives/Insight.png",
           "sha256": "c7d8e698ab714a167a1295d90175bd91581749a9c35b805c3cd8aa92d99556cd"
         },
@@ -1006,6 +3084,66 @@
         "subject_key": "Insight",
         "subject_kind": "passive_label",
         "sync_uuid": "bd819670-29b0-1619-a29e-6a81ef4ea999"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Insight__CHA_.png",
+          "sha256": "c5ebf2bd2d52a05e8dfb76b16498658e8ac51bd1702359566c0a11726eb43dd2"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Insight (CHA)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "7df9e286-ea9f-43fe-a153-bc7b57ffad16"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Insight__CON_.png",
+          "sha256": "ad01179e630ae97aae8dabafada3e56619344982af677190da37f34ff1a06c07"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Insight (CON)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "38b70d77-7ec6-45f1-843f-28a2d9ca12de"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Insight__DEX_.png",
+          "sha256": "fa42e60542ea8490600c6281fbb2b041caaff7bec55ad50bf231e1d7db0113b6"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Insight (DEX)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "25d8af31-cf4e-4863-82e8-280836e19204"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Insight__INT_.png",
+          "sha256": "eaa932364585636d7bb91111d1e7cb734a46f10c736e6e6ff79f3e67d4d67a4b"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Insight (INT)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "962075ed-11e4-4a61-bda5-d6d194225a6f"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Insight__STR_.png",
+          "sha256": "5579e09997dd0e82c8fb09567f069cd3277fbb906f2116adf63ceab2bc709722"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Insight (STR)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "53dcac54-5c60-40d9-b681-b87ba7fa79e0"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Insight__WIS_.png",
+          "sha256": "f4f68c60c5ecfdc32e11e67693da0ebceb135ebf9d4ec4e9a9700cfc52740611"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Insight (WIS)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "a7ec6f33-1cae-41d3-85fe-233e7c980ae4"
       },
       {
         "image": {
@@ -1019,6 +3157,16 @@
       },
       {
         "image": {
+          "file": "textures/passives/Iron_Hide____140_maximum_life_and__1_2_HP_regen_s.png",
+          "sha256": "c748e88e7becc2987127c6f5fefaf16f2cf54d8ea48e3f58c6d6e30a9b9d71a7"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Iron Hide — +140 maximum life and +1.2 HP regen/s",
+        "subject_kind": "passive_label",
+        "sync_uuid": "ebacad2e-b52f-48e4-bb03-8e07aa8da792"
+      },
+      {
+        "image": {
           "file": "textures/passives/Iron_Hide____250_maximum_life.png",
           "sha256": "707f919572094ccd6fef4dc4ebb2eb14e351b9d4f74843d3fc512ecc69b3a74b"
         },
@@ -1026,6 +3174,66 @@
         "subject_key": "Iron Hide — +250 maximum life",
         "subject_kind": "passive_label",
         "sync_uuid": "ad4c5cc9-abf9-b8c6-a7a5-1dd21ec19bf3"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Iron_Recovery.png",
+          "sha256": "63754a6cd6553feee3a125ef9114353e3569534471fad1e848a05d201f2952e6"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Iron Recovery",
+        "subject_kind": "passive_label",
+        "sync_uuid": "07573877-8608-42a5-8b20-89f65a4cd198"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Jarring_Blows.png",
+          "sha256": "29b15c380fae95ee976145967b8830eb48d77d1672b01933f6ccf511e719bbfc"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Jarring Blows",
+        "subject_kind": "passive_label",
+        "sync_uuid": "f239a921-0567-473c-b561-c61d18c70ad1"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Keen_Eye.png",
+          "sha256": "a8447fb0540bd98e73e5bad0846a7676cf2cc7a7ff4b1161a8f8ee9fc3aa5330"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Keen Eye",
+        "subject_kind": "passive_label",
+        "sync_uuid": "b8d25094-e1a1-4b40-bf23-6f4edb418b07"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Ki_Flow.png",
+          "sha256": "6c77a9ed0f865573a1d3911c02ff111618ba91cdd7cae38477964a1910da073e"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Ki Flow",
+        "subject_kind": "passive_label",
+        "sync_uuid": "6b89b1f7-5915-4b45-be47-4eb3abf115d5"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Ki_Overflow____30__skill_damage_while_mana_is_nearly_full___2_max_mana_per_WIS__skills_cost_15__more_mana.png",
+          "sha256": "ebec9889d9635d301a70f5009092a11a4417df496db8d48fbddef1b1450b5108"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Ki Overflow — +30% skill damage while mana is nearly full, +2 max mana per WIS, skills cost 15% more mana",
+        "subject_kind": "passive_label",
+        "sync_uuid": "81cb3f55-56ea-4b6b-81c6-239e6dd9d915"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Killing_Line.png",
+          "sha256": "5d08d15a9e87a16d6f970edc4efab8e0ccf7a85aa646617d43ca3ec875dc0b55"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Killing Line",
+        "subject_kind": "passive_label",
+        "sync_uuid": "1654ef28-ccc5-4d16-abe6-f06acc710b59"
       },
       {
         "image": {
@@ -1046,6 +3254,26 @@
         "subject_key": "Kindred Call",
         "subject_kind": "passive_label",
         "sync_uuid": "98e12c60-142f-1e3e-d6d1-c4e166ccadd0"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Last_Gasp.png",
+          "sha256": "f5227a57feeaad706fb5f952b488922caca8c8c5545fb26e9293323e63266608"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Last Gasp",
+        "subject_kind": "passive_label",
+        "sync_uuid": "bb449798-3dc5-48ba-857d-0d2c44ac30da"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Light_Step.png",
+          "sha256": "9b7e379e5f64db13e3a833458c650c23dd94f50a43da564df455c60c8b1a211f"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Light Step",
+        "subject_kind": "passive_label",
+        "sync_uuid": "22caa4ad-073a-4c96-851c-d132e97950c9"
       },
       {
         "image": {
@@ -1099,6 +3327,46 @@
       },
       {
         "image": {
+          "file": "textures/passives/Marksman_s_Focus.png",
+          "sha256": "d27da172f1d75d2488dc68856e2b7216ec6037d3a049f31ab1a5a7de62ce3307"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Marksman's Focus",
+        "subject_kind": "passive_label",
+        "sync_uuid": "a0ffa27e-fae5-474e-a710-eb4c4a9b2ee0"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Marksman_s_Mastery.png",
+          "sha256": "64cbe1e8d4060a98b296ac5a616eb1e534b7b7bfb39ae1233b82fe124039fc74"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Marksman's Mastery",
+        "subject_kind": "passive_label",
+        "sync_uuid": "c3e08e3e-965d-4a66-ba5b-7eebbf9de1cd"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Martial_Focus.png",
+          "sha256": "b3106228c35c4bea770d5aa13565af13de56800f74c6f5b3213a9a69c614520b"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Martial Focus",
+        "subject_kind": "passive_label",
+        "sync_uuid": "f4ea0ccd-305c-4ca2-ab45-466b3c53f5ce"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Martial_Mastery.png",
+          "sha256": "5c7b7ccfae602a69e525c5da90f400a948929fc1a531b1fe87073c19330d03b9"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Martial Mastery",
+        "subject_kind": "passive_label",
+        "sync_uuid": "47fde0f3-d4cb-441b-b90d-ca640fc729d5"
+      },
+      {
+        "image": {
           "file": "textures/passives/Mastery.png",
           "sha256": "51aad09bfee55c5efafe5dfb587f7ea64e66f0a5d15d402fdb829cd5240de96e"
         },
@@ -1106,6 +3374,36 @@
         "subject_key": "Mastery",
         "subject_kind": "passive_label",
         "sync_uuid": "b687c128-f3e4-8ff8-d682-0b0629efc3cc"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Mastery__CHA_.png",
+          "sha256": "237afdf388e61e27c335dae7a05ac2ee16c2a1c42f78f5416d6c458ec14a002c"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Mastery (CHA)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "294ae266-f72c-491f-9a74-79202c42ba18"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Mastery__STR_.png",
+          "sha256": "69bc3f4833d5eeb5a06b982f6fb36f32844048e00295db98477ecb51bf1e91b6"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Mastery (STR)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "245eec65-d2ff-4565-a615-87b5e1ff63bf"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Meditation_Spark.png",
+          "sha256": "b7b12e10278709118f1aa9c1cbe0c94ea809c64a09f5bb0dfea444f4eec1c342"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Meditation Spark",
+        "subject_kind": "passive_label",
+        "sync_uuid": "3470d10e-b130-4a73-ab3c-b5fe8c39ef84"
       },
       {
         "image": {
@@ -1119,6 +3417,16 @@
       },
       {
         "image": {
+          "file": "textures/passives/Meditation____70_max_mana___2_0_mana_regen_s___5__life_share_from_mana_regen.png",
+          "sha256": "f1f26733b1fedb561554f58e6effabe93d462e47c30a5a344b87a3227fc8a80f"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Meditation — +70 max mana, +2.0 mana regen/s, +5% life share from mana regen",
+        "subject_kind": "passive_label",
+        "sync_uuid": "80451c88-95e7-4dec-8095-a4adcdc889bd"
+      },
+      {
+        "image": {
           "file": "textures/passives/Menagerie____35_CHA_and__25_CON.png",
           "sha256": "6ceb99299edc4f3c5995cabb44b3493b0bea954a8f9c04d61fad8a80f710660e"
         },
@@ -1126,6 +3434,26 @@
         "subject_key": "Menagerie — +35 CHA and +25 CON",
         "subject_kind": "passive_label",
         "sync_uuid": "ab33a4a3-b067-07ef-8d24-ecac16c0a192"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Menagerie___Aspect_of_the_Wild___25_CHA___15_CON___30_max_mana___2_0_mana_regen_s__forms_15__stronger_.png",
+          "sha256": "f68c11a8ef0498d123bde7ad0bf03bf0d81684c06dd9aa72f3f12fc7e30e0f96"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Menagerie — Aspect of the Wild (+25 CHA, +15 CON, +30 max mana, +2.0 mana regen/s, forms 15% stronger)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "8fcefc1f-fbe7-414b-a59d-7a3fcf22ae5a"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Mending.png",
+          "sha256": "145f404fa582d143cbaa78111175a5695bbb85050e54c476414e97d78ff06366"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Mending",
+        "subject_kind": "passive_label",
+        "sync_uuid": "53b04a13-5d5b-4fd6-87de-aadbc5f17622"
       },
       {
         "image": {
@@ -1149,6 +3477,46 @@
       },
       {
         "image": {
+          "file": "textures/passives/Natural_Vigour.png",
+          "sha256": "16867574cbe80e04fa58f66eeab6b99c3e15295cd06d77e404ddb4501df5cbdf"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Natural Vigour",
+        "subject_kind": "passive_label",
+        "sync_uuid": "51a6d5b7-055a-4917-9b60-853f7dac01c5"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Nimble_Flow.png",
+          "sha256": "94ab80da90c12c213ab7339ea0bd2c8062be1e4d8e4290ca858525e7150159a8"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Nimble Flow",
+        "subject_kind": "passive_label",
+        "sync_uuid": "9059a915-4155-4e72-8293-70025236f961"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Null_Field.png",
+          "sha256": "d5db6fa8ee050fc0ade1225ae1d1bb832abb9eea4cf08c622040f360b5e73f0e"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Null Field",
+        "subject_kind": "passive_label",
+        "sync_uuid": "4b767941-3a4f-4303-8c6e-105c6e86cb63"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Numbing_Blows.png",
+          "sha256": "e50b1f1d7dc8867fabae2cdd7db284dd10faea61b94483abc675bb0f7764840f"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Numbing Blows",
+        "subject_kind": "passive_label",
+        "sync_uuid": "071ebd17-6e03-45d7-aa7d-29aabf5956c3"
+      },
+      {
+        "image": {
           "file": "textures/passives/Open_Palm.png",
           "sha256": "532c30fbae913f520a1373826d9ef621073326320cb85c2e6ce2aed82cb0ac98"
         },
@@ -1156,6 +3524,36 @@
         "subject_key": "Open Palm",
         "subject_kind": "passive_label",
         "sync_uuid": "b09582b8-a584-e2ba-caf0-cc8f3cfd0f2f"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Open_Wounds.png",
+          "sha256": "f510f908184e1c1c22194e9c27668113b2af7e31a7c7a930acbf9fff38817473"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Open Wounds",
+        "subject_kind": "passive_label",
+        "sync_uuid": "502d1157-fbee-419a-871d-4ffd36ecd1b3"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Overflow.png",
+          "sha256": "370fc3f971598af50df16f8f51bbb7017a92cdbc4647658090b520875ff0c12a"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Overflow",
+        "subject_kind": "passive_label",
+        "sync_uuid": "dbcc5a9f-a2d6-4277-a489-311324bf7999"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Overflowing_Spirit.png",
+          "sha256": "c2626425ce0d53bb3ecfd08bfddbffd579a193a411085d4c97bce06ca667ce71"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Overflowing Spirit",
+        "subject_kind": "passive_label",
+        "sync_uuid": "f3c4d00a-a13a-40a6-8f25-276fe0f4bfdc"
       },
       {
         "image": {
@@ -1169,6 +3567,16 @@
       },
       {
         "image": {
+          "file": "textures/passives/Ox_Blood__CHA_.png",
+          "sha256": "4b2b954a161f62c44f6f95b8fccb6fa6eb61f01cfbc6876a4916eff044323bb1"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Ox Blood (CHA)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "953403b3-88c4-4235-8c35-830abd031167"
+      },
+      {
+        "image": {
           "file": "textures/passives/Pack_Leader____3_to_your_charm_budget.png",
           "sha256": "20a23b28f860a458ac9ea0cc23f6ecb58e0188a3768b84a48048941916e86d51"
         },
@@ -1176,6 +3584,16 @@
         "subject_key": "Pack Leader — +3 to your charm budget",
         "subject_kind": "passive_label",
         "sync_uuid": "279f8668-89ac-ac66-ac27-a3665607a605"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Pain_Ward____10__physical_and__10__fire_resistance___1_2_HP_regen_s.png",
+          "sha256": "7fd952f156e5cf4a27e4b599aaa5ce92bccd0236890d34de68bd50e0370ed8a9"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Pain Ward — +10% physical and +10% fire resistance, +1.2 HP regen/s",
+        "subject_kind": "passive_label",
+        "sync_uuid": "e389643a-303b-4e7a-b2a5-84eac40c8084"
       },
       {
         "image": {
@@ -1196,6 +3614,26 @@
         "subject_key": "Paragon",
         "subject_kind": "passive_label",
         "sync_uuid": "24964fca-3e8a-e082-f091-22fe163f5402"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Paragon__CHA_.png",
+          "sha256": "7c7487e33e2c02168fda338cf7c03f01b74d732888c5aa300bcd62e150179574"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Paragon (CHA)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "e44593bf-e3bf-4cce-8f17-bc7faf2b7350"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Phantom_Step___15__chance_to_dodge_a_blow_outright___20_max_stamina.png",
+          "sha256": "4fedfffe148d4ab49d47f14b902fa4420d2cb5c9fa1528fbc0c5da010b672db6"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Phantom Step — 15% chance to dodge a blow outright, +20 max stamina",
+        "subject_kind": "passive_label",
+        "sync_uuid": "046dde0c-a19d-4ca8-ad49-6d02e89f825b"
       },
       {
         "image": {
@@ -1249,6 +3687,36 @@
       },
       {
         "image": {
+          "file": "textures/passives/Primal_Form_Mastery____30_CHA___10_WIS___1_5_HP_regen_s___3_0_stamina_regen_s__forms_25__stronger.png",
+          "sha256": "f339e6c9f2ec58acc97a603e1aded1f698268d7d6d03dfb19529afc228460d4a"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Primal Form Mastery — +30 CHA, +10 WIS, +1.5 HP regen/s, +3.0 stamina regen/s, forms 25% stronger",
+        "subject_kind": "passive_label",
+        "sync_uuid": "44979403-e986-4975-9c9a-d7085fc4b960"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Primal_Instinct.png",
+          "sha256": "85e00fc7194120811f3ac3caa4dc5d82bb596b318b94d63255ca21b4a473c7c8"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Primal Instinct",
+        "subject_kind": "passive_label",
+        "sync_uuid": "9037b27d-c8ba-490b-af5b-164b98513cce"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Pyromancy____20__fire_damage__and_your_hits_burn.png",
+          "sha256": "7a994da8d7e10acaf2a61a45f148ae1cb79c49be2dbe5c1d8990a42594e14eba"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Pyromancy — +20% fire damage, and your hits burn",
+        "subject_kind": "passive_label",
+        "sync_uuid": "97725c70-4f6d-48d1-8915-2a8bcff9d7c7"
+      },
+      {
+        "image": {
           "file": "textures/passives/Pyromancy____35__fire_damage.png",
           "sha256": "87951098fcacac1435be6428c71006d8bb64682f3922b94f30415935ce2cb796"
         },
@@ -1256,6 +3724,26 @@
         "subject_key": "Pyromancy — +35% fire damage",
         "subject_kind": "passive_label",
         "sync_uuid": "60089da5-ca80-7e3c-795c-1833e7139ebb"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Quick_Hands.png",
+          "sha256": "4dff9618c3668012a272ccdf4495628bfff6e29d99a01d3267737184770736dc"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Quick Hands",
+        "subject_kind": "passive_label",
+        "sync_uuid": "f89e5d18-7dac-4eff-a118-76c2cc5ce425"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Quick_Recovery.png",
+          "sha256": "7858f9907660a1d4a2b7f3045397ce76ec665767e3bbaaa69a26078a656c8e10"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Quick Recovery",
+        "subject_kind": "passive_label",
+        "sync_uuid": "741292fd-2654-4c30-9677-6420090782b8"
       },
       {
         "image": {
@@ -1289,6 +3777,16 @@
       },
       {
         "image": {
+          "file": "textures/passives/Reckless_Swing____25__physical_damage__-10__ice_resistance.png",
+          "sha256": "7402dbffe924075264ec0c7ef02a0ebedb3c56ff5a62d8360c0ecdd5ce60e1e2"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Reckless Swing — +25% physical damage, -10% ice resistance",
+        "subject_kind": "passive_label",
+        "sync_uuid": "b62973f4-7d22-4716-8a56-2caaa8fe4946"
+      },
+      {
+        "image": {
           "file": "textures/passives/Reckless_Swing____40__physical_damage__-15__ice_resistance.png",
           "sha256": "144014407eb90ff9b751678d8effd180c6a548789148ad037cca867f91e8d370"
         },
@@ -1296,6 +3794,36 @@
         "subject_key": "Reckless Swing — +40% physical damage, -15% ice resistance",
         "subject_kind": "passive_label",
         "sync_uuid": "8d340e06-6a65-bcb5-8fb0-472b3d588958"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Red_Harvest.png",
+          "sha256": "2174d46a1776707f6a48a33eea327a590915a05e00d532fcdc6ff7614d89ad0b"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Red Harvest",
+        "subject_kind": "passive_label",
+        "sync_uuid": "f70635e8-52e7-403d-b9d5-8ed463c60a20"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Regrowth.png",
+          "sha256": "2da98b5f52c6de8630e30142f7069c7d41bcbd4e46fa15d30d540eb25272489c"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Regrowth",
+        "subject_kind": "passive_label",
+        "sync_uuid": "1c206243-5601-4c62-a44d-9bed831e1789"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Rejuvenation.png",
+          "sha256": "f08f7da2379da7ffc9863ca017ec5cb3625fba82409ea131bbd0f9cf7dce8632"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Rejuvenation",
+        "subject_kind": "passive_label",
+        "sync_uuid": "2c15dc88-cd3c-4107-bb57-ade91dcebdf8"
       },
       {
         "image": {
@@ -1339,6 +3867,26 @@
       },
       {
         "image": {
+          "file": "textures/passives/Ringing_Blow.png",
+          "sha256": "0274e55ca7b648b2b50de46bfc57f1a5cc11559719dfddfd941f4f734ac9ddad"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Ringing Blow",
+        "subject_kind": "passive_label",
+        "sync_uuid": "d718b036-170f-4487-9ba3-031454ae112f"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Rolling_Thunder.png",
+          "sha256": "f50f2804050f77979acc2a93d534c4fd9a73715e55c4632857dcb35d646ba93f"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Rolling Thunder",
+        "subject_kind": "passive_label",
+        "sync_uuid": "a781a180-a690-46a6-aa30-bbe945a2ab30"
+      },
+      {
+        "image": {
           "file": "textures/passives/Sanguine_Aura.png",
           "sha256": "51c0a35b48a55d05711baa5774ff6ee12a6fb32e5e448d54a97960588650e63d"
         },
@@ -1349,6 +3897,36 @@
       },
       {
         "image": {
+          "file": "textures/passives/Sanguine_Focus.png",
+          "sha256": "a69c3813c76729b176648386247161bec6c8749638a27d42b2370f0b9cb22a51"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Sanguine Focus",
+        "subject_kind": "passive_label",
+        "sync_uuid": "7ea5f6b4-94a6-4a23-a233-8f697257d83c"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Sanguine_Mastery.png",
+          "sha256": "afdda0dd18681366ed370929f5e231570cd2bfc328b149895425741e88581aa7"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Sanguine Mastery",
+        "subject_kind": "passive_label",
+        "sync_uuid": "033ec37c-ca4f-49f8-8cb8-813f4c7b0304"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Sanguine_Rite___life_costs_are_reduced_a_further_12_.png",
+          "sha256": "3bc67e1ef88e7a154208f2ef4fe291e3d0d65ae76d22e2a6254384f1bc4183ee"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Sanguine Rite — life costs are reduced a further 12%",
+        "subject_kind": "passive_label",
+        "sync_uuid": "b7fc3138-6df5-4859-b369-af705ad08030"
+      },
+      {
+        "image": {
           "file": "textures/passives/Sanguine_Rite___life_costs_are_reduced_a_further_20_.png",
           "sha256": "12d69bd298da3fb84d3d4b8cb442eeeb65979d9fad05e8d18d65b10ba221ed6f"
         },
@@ -1356,6 +3934,16 @@
         "subject_key": "Sanguine Rite — life costs are reduced a further 20%",
         "subject_kind": "passive_label",
         "sync_uuid": "818ce0b1-b431-d585-2d6f-d9541c014582"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Sanguine_Spring.png",
+          "sha256": "f653f8eac15ed684dbfbfd7b50048645506f2392554fbeee5b9c1b659596f44d"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Sanguine Spring",
+        "subject_kind": "passive_label",
+        "sync_uuid": "ac3fe2b1-3996-449a-a519-090df8dc3ada"
       },
       {
         "image": {
@@ -1409,6 +3997,16 @@
       },
       {
         "image": {
+          "file": "textures/passives/Serenity.png",
+          "sha256": "dd23593e6a497ee2cf0948d2f774be5bb50a03d3c26dae0fe39c190bb762efc3"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Serenity",
+        "subject_kind": "passive_label",
+        "sync_uuid": "5ecf48e9-6d00-4392-bfdd-78925ca316f8"
+      },
+      {
+        "image": {
           "file": "textures/passives/Sharp_Syllables.png",
           "sha256": "fafd44a65c151cfa1fc2be26f3123b4ec472c0ba04a6eb72e78acd04fe74cb97"
         },
@@ -1426,6 +4024,66 @@
         "subject_key": "Sinew",
         "subject_kind": "passive_label",
         "sync_uuid": "cb8d2b25-747b-13f4-5457-3b8667f1fc53"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Sinew__CHA_.png",
+          "sha256": "a30e6957b750e387c769d146c692cd846a31089f92155fe6c84fd3c0aeb5d3a9"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Sinew (CHA)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "74c170d7-c5e1-4f1d-9fcb-7263346692bb"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Sinew__CON_.png",
+          "sha256": "f36c850848d80b62f515b46f7df03b07eba783d8d1093ce9cd59765eb2fa61bf"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Sinew (CON)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "7058485e-9dec-41fd-be13-34601c8a0a6b"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Sinew__DEX_.png",
+          "sha256": "f656456174bfb8875ed3dc69e759818913d4ed1de2fa92de99160bca8699e16a"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Sinew (DEX)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "0ca00763-3bdb-4138-9b3c-a752b81cdc4b"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Sinew__INT_.png",
+          "sha256": "f309671ad8ce914233bc67f56a2724aaa2b8b196e89222ec428f027db402f1e3"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Sinew (INT)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "e1e5f0e1-c2f7-43bc-984a-c4bb6fedbcf2"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Sinew__STR_.png",
+          "sha256": "92944453806b59a1a2950887a03d6d48270ed7a09050b39d7f06376364a0c1c7"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Sinew (STR)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "9f51f886-87bf-4854-9349-5d936a1b65d0"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Sinew__WIS_.png",
+          "sha256": "7831d36217f93b35a2d06193929140f8814641401ebf47df5f1b6999a5096020"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Sinew (WIS)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "04806570-d533-4076-b654-31b5151a7e45"
       },
       {
         "image": {
@@ -1459,6 +4117,26 @@
       },
       {
         "image": {
+          "file": "textures/passives/Spiked_Hide.png",
+          "sha256": "9f37f11776355cdebec8093e4c8c418e740a79d389c424b38542cb7ac37acda4"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Spiked Hide",
+        "subject_kind": "passive_label",
+        "sync_uuid": "c2bb28b1-fea5-48cb-92f6-ff7d2a66a0a0"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Spirit_Ward____12__arcane_resistance___0_8_HP_regen_s.png",
+          "sha256": "78058ae1af4649484d162f2bfb0693e676655ab6387953937c4ff0aa96988b21"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Spirit Ward — +12% arcane resistance, +0.8 HP regen/s",
+        "subject_kind": "passive_label",
+        "sync_uuid": "6aab2368-ec96-4b68-9875-173bc40db2d1"
+      },
+      {
+        "image": {
           "file": "textures/passives/Spirit_Ward____20__arcane_resistance.png",
           "sha256": "1471a956c7992c5177db886a10dfd50dfb7db32292b909c238b51a56439bf2e3"
         },
@@ -1479,6 +4157,16 @@
       },
       {
         "image": {
+          "file": "textures/passives/Spreading_Light.png",
+          "sha256": "b768eb406ddb590e81553ab6f09779e881a2c447f0c6e1812af93cddb8d5508f"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Spreading Light",
+        "subject_kind": "passive_label",
+        "sync_uuid": "5958f68b-aff9-4317-a58f-9d211c40f8e3"
+      },
+      {
+        "image": {
           "file": "textures/passives/Spreading_Stain.png",
           "sha256": "7ff93ff3bd210121a078a90cca34d840db97892262a2aaeb9e71cb1705f5a2ba"
         },
@@ -1486,6 +4174,16 @@
         "subject_key": "Spreading Stain",
         "subject_kind": "passive_label",
         "sync_uuid": "4351ce4f-1831-89d7-7eb8-1e5d90604c6e"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Stagger.png",
+          "sha256": "0a030866fdde363f57d51125eeec2391d0d74e7b5c5635ea66df495175defc78"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Stagger",
+        "subject_kind": "passive_label",
+        "sync_uuid": "5db9c391-4f27-4948-8b8d-d6092d8f9b2d"
       },
       {
         "image": {
@@ -1499,6 +4197,16 @@
       },
       {
         "image": {
+          "file": "textures/passives/Steady_Breath.png",
+          "sha256": "b7b2717e707f4057f135e851ee19c0f31a91f79942a341f189289f6e6a9ecfdb"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Steady Breath",
+        "subject_kind": "passive_label",
+        "sync_uuid": "b660eb1b-332f-417d-95d6-48070cefa8de"
+      },
+      {
+        "image": {
           "file": "textures/passives/Still_Water.png",
           "sha256": "0b38dab176804c854365649da317a0aebc6766fbeb3e27d863da10e53cac81a5"
         },
@@ -1506,6 +4214,16 @@
         "subject_key": "Still Water",
         "subject_kind": "passive_label",
         "sync_uuid": "6a12fafe-f13b-c89d-1006-3bd9616fa310"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Storm_Caller____20__lightning_damage__and_your_hits_shock.png",
+          "sha256": "81dbe65a5563b905ef08817dc7ad9246d14f6428b2a83891ac02246c55d7b4b3"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Storm Caller — +20% lightning damage, and your hits shock",
+        "subject_kind": "passive_label",
+        "sync_uuid": "cbdd7308-c0f0-44d0-b859-75aeb8de1cd6"
       },
       {
         "image": {
@@ -1569,6 +4287,76 @@
       },
       {
         "image": {
+          "file": "textures/passives/Temper__CHA_.png",
+          "sha256": "0565c62316370f703a91dc373c25233150a58746882fc1e760712db2c5bb26ce"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Temper (CHA)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "7bbf0057-ed2b-41c3-8c0d-cb03fcdf5f08"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Temper__CON_.png",
+          "sha256": "5f37709d16de70eaa8c684a594e035ba60f29c25f6061c9dee0f19c5722f698d"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Temper (CON)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "ef1f19a8-40c4-4e2d-98a4-1cc4451b234c"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Temper__DEX_.png",
+          "sha256": "78941e715f98cefad674e06b275421e9efa238ea4419a2e6dca4fbbb0cc76ca9"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Temper (DEX)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "2bee6b78-efb1-46a8-8b0c-a22e857e3e18"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Temper__WIS_.png",
+          "sha256": "9f8a90b07a2dfcdbbfa9e8aa548a6ec618d3d60e089462682b4f3d2edc529e7e"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Temper (WIS)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "31a2c65e-b428-4613-8b29-2e5cbae9f1b2"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Thick_Pelt.png",
+          "sha256": "51a5286542d9aa0e662191093374283cbb0ab96b2c3e9de55b9f00cf37b0390e"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Thick Pelt",
+        "subject_kind": "passive_label",
+        "sync_uuid": "938b2a08-91b4-4df6-829e-f0fa31f60f68"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Thick_Skin.png",
+          "sha256": "9ac14c0f782bf825e63bff36054d113148b57692e132437e1d215688fafb42b4"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Thick Skin",
+        "subject_kind": "passive_label",
+        "sync_uuid": "0fc3cfe8-b0d6-43b3-8ede-818d61ddba67"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Thorn_Hide.png",
+          "sha256": "be2e014ad05ae4e2c5ec7b34e4ee250b372efadb88527a8af2f4c2f4971b23c6"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Thorn Hide",
+        "subject_kind": "passive_label",
+        "sync_uuid": "dc6099b1-d3cc-4699-b583-81aa483de47a"
+      },
+      {
+        "image": {
           "file": "textures/passives/Thoughtform.png",
           "sha256": "31774bf86a1ffba3948506d77125e2f76765f6b5b4e5bf89b3d3a32f3c1a4a12"
         },
@@ -1589,6 +4377,26 @@
       },
       {
         "image": {
+          "file": "textures/passives/Tranquil_Flow.png",
+          "sha256": "954f531f827318f3c9d0912aa094fb7f27c56730aee1ab6a29711859b25c5cac"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Tranquil Flow",
+        "subject_kind": "passive_label",
+        "sync_uuid": "a5ee3a03-b52e-4271-ac74-7d74831fb25e"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Transcendence____25_WIS_and__18_INT.png",
+          "sha256": "bb18c95873ee23fe06e24f99c42b761a0100586d529a5b55fa31563f3aaec0ab"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Transcendence — +25 WIS and +18 INT",
+        "subject_kind": "passive_label",
+        "sync_uuid": "69ba98fe-ff8a-40e8-9e49-62ec337ccd14"
+      },
+      {
+        "image": {
           "file": "textures/passives/Transcendence____35_WIS_and__25_INT.png",
           "sha256": "7b95d1e73df2b1a8120711f6757789f3fd5a1ec7da670ea6674dbf959fb01231"
         },
@@ -1596,6 +4404,26 @@
         "subject_key": "Transcendence — +35 WIS and +25 INT",
         "subject_kind": "passive_label",
         "sync_uuid": "7555bdda-bfb4-3d69-85f0-089107260cb7"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Unbound_Frost.png",
+          "sha256": "b0e8defa72b9650013b3cb054a062453fab5461748f3909cbe9ff3bb6ce079f6"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Unbound Frost",
+        "subject_kind": "passive_label",
+        "sync_uuid": "fb3ad1c4-cd96-4f46-88ce-84fbed0c74e9"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Unbreakable____20_STR_and__100_maximum_life.png",
+          "sha256": "0da7457d2d332ef5a63f46cf01e094f9f477268bb8a747eb4cf6c106076cabc9"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Unbreakable — +20 STR and +100 maximum life",
+        "subject_kind": "passive_label",
+        "sync_uuid": "6ac63628-10d9-4548-be2a-4fcf14f75bb1"
       },
       {
         "image": {
@@ -1629,6 +4457,16 @@
       },
       {
         "image": {
+          "file": "textures/passives/Unflagging.png",
+          "sha256": "63d5d5234356f3789576460264b968c3acf2a7462104376115e714914951533b"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Unflagging",
+        "subject_kind": "passive_label",
+        "sync_uuid": "0adcfa16-460f-4ba4-b26d-d1987c2f4f86"
+      },
+      {
+        "image": {
           "file": "textures/passives/Unspent_Force.png",
           "sha256": "2b4325b07e485657241332daf1706c4f361c146b5a6bbad06f951ab224f391a7"
         },
@@ -1636,6 +4474,16 @@
         "subject_key": "Unspent Force",
         "subject_kind": "passive_label",
         "sync_uuid": "9c53e934-bd20-9705-3125-c38b3c103999"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Vampiric_Rite___skills_heal_12__of_the_damage_they_deal___2__max_life_per_kill.png",
+          "sha256": "b30acedefb0c34a7ccba5abefe156c24e26549824b52a23a656662ce2ccbdaa3"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Vampiric Rite — skills heal 12% of the damage they deal, +2% max life per kill",
+        "subject_kind": "passive_label",
+        "sync_uuid": "e70288dc-c504-4822-ae7e-4a95becefda2"
       },
       {
         "image": {
@@ -1656,6 +4504,66 @@
         "subject_key": "Vigour",
         "subject_kind": "passive_label",
         "sync_uuid": "129b15f1-dd45-f770-e053-a72a5965c7cb"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Vigour__CHA_.png",
+          "sha256": "9202c27ca2fdacf2087fdb67e634e637fbd5c671841d68a34447c9eceefbee46"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Vigour (CHA)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "ccf2e6b3-249e-4ba3-b689-7db58fb8e663"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Vigour__CON_.png",
+          "sha256": "92e6bf2b0b6c1e00d2259656fabb79c6ed406eeaa72117756bf983d2d86c5ea4"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Vigour (CON)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "c065ea12-c07a-4c4a-a349-1161760f511d"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Vigour__INT_.png",
+          "sha256": "1dc29d6f5f83b7705ab8c01ec750a8837ff11aea91d8d2aaf2edb2d460390658"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Vigour (INT)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "04b13391-3ee2-41cb-83af-b3d03249ed1a"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Vigour__STR_.png",
+          "sha256": "ebd62c3da442c69f9cf24cca2262d78c2e0a548beedf2d9c15fa56e26a3abd94"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Vigour (STR)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "adb1f4af-344b-4b5e-9636-708fa941445e"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Vigour__WIS_.png",
+          "sha256": "78dd1cebfdbf547d173e19686b3bf31f44f5ff48fbd276b777f8174b208f1f5c"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Vigour (WIS)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "2bc864cc-e1cc-4a84-b679-75fe38910715"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Vital_Mark.png",
+          "sha256": "53522d1fbbedefe0f75efe6950d23fb21a2d59592d2161e37f498ac73392d96b"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Vital Mark",
+        "subject_kind": "passive_label",
+        "sync_uuid": "84cce4e6-ef85-46f1-8bbe-7d9c2940ea0f"
       },
       {
         "image": {
@@ -1749,6 +4657,26 @@
       },
       {
         "image": {
+          "file": "textures/passives/Wide_Arcana.png",
+          "sha256": "634fed89e60d456e6dcabf0806d93a45cdb61a1437283a4c00be48bfbfbe2b14"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Wide Arcana",
+        "subject_kind": "passive_label",
+        "sync_uuid": "be23abf0-a9d7-4967-96a7-6e5d880c8541"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Wide_Casting.png",
+          "sha256": "67bd77b5672fa208f79b967d43a8e238d6072173c27b91075fc6d346dd647e96"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Wide Casting",
+        "subject_kind": "passive_label",
+        "sync_uuid": "cf741aab-92cf-44b1-8fba-6483144ec84c"
+      },
+      {
+        "image": {
           "file": "textures/passives/Wide_Communion.png",
           "sha256": "918c927af7c8a6ebd7e53a70d67a4a227c4030051eff9e09f3d20aaf757ef94a"
         },
@@ -1779,6 +4707,46 @@
       },
       {
         "image": {
+          "file": "textures/passives/Wild_Bloom.png",
+          "sha256": "0a13ba03bf681ddb31b926828fc32dbc67360067a20edbdab9ee3457f8b6efc5"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Wild Bloom",
+        "subject_kind": "passive_label",
+        "sync_uuid": "22be6a6a-20fa-4ba0-bc4c-92dcde5f2d6a"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Wild_Focus.png",
+          "sha256": "154e0ffa0593d197dd3b6fc4cbfc46a3a610ca0945907ad7ea1792ca82755a14"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Wild Focus",
+        "subject_kind": "passive_label",
+        "sync_uuid": "b747dac5-a348-4dbe-971d-150f7a7cfcf1"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Wild_Heart.png",
+          "sha256": "6bcd37f977515aac01024301319552d49bb13879a3422089f16cb60c98564e2e"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Wild Heart",
+        "subject_kind": "passive_label",
+        "sync_uuid": "a2d3b250-0919-4942-b0c3-aaf855fe3175"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Wild_Mastery.png",
+          "sha256": "73997931a0e5e1ca5964a4e3fb5f997db74ccc69c11d5fbebcbc4fc58334fc0c"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Wild Mastery",
+        "subject_kind": "passive_label",
+        "sync_uuid": "106ea355-1ee2-4626-8fca-616c59c80b1a"
+      },
+      {
+        "image": {
           "file": "textures/passives/Wind.png",
           "sha256": "27908c6c26cffa7fc3757e8d020d1ea56837b4dbd46d618fcc35a45095f4c299"
         },
@@ -1789,6 +4757,76 @@
       },
       {
         "image": {
+          "file": "textures/passives/Wind__CHA_.png",
+          "sha256": "3ea737bb331542703165d005c601f27164952f5916059fbc403f57bd220bf3b9"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Wind (CHA)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "2e28f6e3-4b13-4db8-bcd7-d4ecdacdd5e1"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Wind__CON_.png",
+          "sha256": "102c20fe41b2343a3deba9e5371be3b047b50339c97055bf63451160a8f3d36a"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Wind (CON)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "81429580-f42b-4a5d-a474-8293c17f7a6b"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Wind__DEX_.png",
+          "sha256": "3c76d3b9e46baed1314a17b294f5341aa62016610d25ec40aa58d497b518670f"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Wind (DEX)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "417e8845-489e-4b84-bb6d-dd5a16de3336"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Wind__INT_.png",
+          "sha256": "10410b4b9f6be1aca677dc9d3a92f21c14a9afc7f3b898ccfa27ff6a8263f4c8"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Wind (INT)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "c5cad654-7a56-4e20-a557-2b9855c4c841"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Wind__STR_.png",
+          "sha256": "f7c94e59ed94ffaa0643b4652a24a4bd5ceabd75c02c4d8c2928fed35450e297"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Wind (STR)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "02b8b19f-5fb6-4c5f-9781-1b87023eb77b"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Wind__WIS_.png",
+          "sha256": "e1ae82c988d8f2dc3e37fb3e3d20e6be06107c3bdcee3cd44f7b695934cf370a"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Wind (WIS)",
+        "subject_kind": "passive_label",
+        "sync_uuid": "cbaa8057-dea6-4923-a681-034a0a64b820"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Windrunner____15_DEX___40_max_stamina___5_stamina_regen_s.png",
+          "sha256": "6756585e11c5f4911f262217ba67aa94b881a20af70d019559a615bfe74663db"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Windrunner — +15 DEX, +40 max stamina, +5 stamina regen/s",
+        "subject_kind": "passive_label",
+        "sync_uuid": "f6a587a4-2bea-4b19-be33-9022f268de3a"
+      },
+      {
+        "image": {
           "file": "textures/passives/Windrunner____20_DEX_and__80_maximum_stamina.png",
           "sha256": "0e281d2fa1c38295ef4b12588aecbe53716f1e7613e47b313285e0150d020eab"
         },
@@ -1796,6 +4834,16 @@
         "subject_key": "Windrunner — +20 DEX and +80 maximum stamina",
         "subject_kind": "passive_label",
         "sync_uuid": "b38ff106-6841-9a9c-688c-f0eedf96979d"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Wolf_Aspect____15_STR___15_CHA___12__physical_damage__forms_12__stronger.png",
+          "sha256": "4cd441c95c653aeed4ea5a01468cd8e39da1dc26c4f9a3936c9667e59e514763"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Wolf Aspect — +15 STR, +15 CHA, +12% physical damage, forms 12% stronger",
+        "subject_kind": "passive_label",
+        "sync_uuid": "c76e580f-dd73-4ab5-9d4b-cdf3ed7a0858"
       },
       {
         "image": {
@@ -9957,10 +13005,13 @@
         "display_height": 96,
         "display_width": 64,
         "idle_fx": "none",
-        "image": null,
+        "image": {
+          "file": "textures/entities/Village_Blacksmith.png",
+          "sha256": "842e3760fce3d28dd595d235885a2c911b7c9c2a094a68a740c02f5af1670617"
+        },
         "name": "Village Blacksmith",
         "prompt": "pixel art, a burly village blacksmith in a leather apron beside an anvil and a glowing forge, single object, solid transparent background",
-        "render_mode": "rect",
+        "render_mode": "static",
         "sprite": null,
         "sync_uuid": "2b9c9e9f-0aa6-5d59-e770-9aea702f871e"
       },
@@ -11251,12 +14302,18 @@
         "sync_uuid": "d5b77e1a-d8ac-8a8e-e8d2-f32e73868f61"
       },
       {
-        "icon": null,
+        "icon": {
+          "file": "textures/items/enchant_scroll.png",
+          "sha256": "3afebf5b17276d7b2687656844b88e4b5d5206ff5fd33f2bbb3ec902cd6e2c24"
+        },
         "name": "enchant_scroll",
         "sync_uuid": "7efdd00c-bc65-4fa0-b23f-b2ba9d1aae6d"
       },
       {
-        "icon": null,
+        "icon": {
+          "file": "textures/items/enchant_scroll_blessed.png",
+          "sha256": "af8d23b5aaabc717d0a9209d51692331e39ad3fdbbb91bc5b1a6abe95e7feaa3"
+        },
         "name": "enchant_scroll_blessed",
         "sync_uuid": "2357e027-416d-44c7-b972-48014af4f093"
       },
