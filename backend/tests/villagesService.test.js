@@ -36,6 +36,7 @@ test('fetchVillages maps snake_case columns to camelCase', async () => {
     // to null -- this exhaustive comparison is exactly where a silently
     // added/dropped join column would be caught.
     merchantArt: null, bankArt: null, gemMerchantArt: null, skillMerchantArt: null,
+    questGiverArt: null, // SOMET-678
   }]);
 });
 
