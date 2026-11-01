@@ -338,6 +338,7 @@ export function useAudioJobs() {
     run: data?.run || null,
     stats: data?.stats || { groups: {}, backoff: 0 },
     recent: data?.recent || [],
+    failureReasons: data?.failure_reasons || [],
     isLoadingJobs: isLoading,
     jobsError: error || null,
   };
@@ -481,6 +482,23 @@ export function useRetryAudioFailures() {
     },
     onSuccess: ({ requeued }) => {
       toast.success(requeued ? `${requeued} job(s) returned to the queue` : 'Nothing to retry');
+      qc.invalidateQueries({ queryKey: JOBS_KEY });
+    },
+    onError: (err) => toast.error(err.message),
+  });
+}
+
+// The by-cause panel's "Delete these N": only failed jobs among `ids` go.
+export function useDeleteFailedAudioJobs() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (ids) => {
+      const { res, json } = await post('/api/audio/admin/jobs/delete-failed', { ids });
+      if (!res.ok) throw new Error(json.error || 'Failed to delete the failed jobs');
+      return json;
+    },
+    onSuccess: ({ deleted }) => {
+      toast.success(deleted ? `Deleted ${deleted} failed job(s)` : 'Nothing to delete');
       qc.invalidateQueries({ queryKey: JOBS_KEY });
     },
     onError: (err) => toast.error(err.message),

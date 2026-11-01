@@ -325,6 +325,20 @@ async function recent(db, limit = 50) {
   )).rows;
 }
 
+// Failed jobs counted by reason, most common first. `recent` shows only the
+// newest rows, so a few late failures hid hundreds of older ones with a
+// different cause (721 "no cue" behind 9 duplicates). Take numbers are
+// folded out so one reason is one row.
+async function failureReasons(db, limit = 8) {
+  return (await db.query(
+    `SELECT regexp_replace(COALESCE(last_error, 'no detail'), '\\(takes? [0-9-]+\\)', '(take N)', 'g') AS reason,
+            count(*)::int AS n
+       FROM audio_jobs WHERE state = 'failed'
+      GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT $1`,
+    [limit],
+  )).rows;
+}
+
 // "Latest job of a slot", stated once for slotJobs and retryFailed: a live
 // (queued/running) row first -- that is what is happening to the slot now --
 // then the most recently UPDATED row, then the highest id. updated_at, not
@@ -432,6 +446,16 @@ async function clear(db, { states = ['queued', 'failed', 'done'] } = {}) {
   return (await db.query('DELETE FROM audio_jobs WHERE state = ANY($1)', [allowed])).rowCount;
 }
 
+// The by-cause panel's "Delete these N": removes only FAILED rows among
+// `ids`. A failed row is never claimed, so this is safe while a drain runs;
+// an id that is queued, running or done is left alone.
+async function deleteFailed(db, ids) {
+  if (!ids.length) return 0;
+  return (await db.query(
+    "DELETE FROM audio_jobs WHERE state = 'failed' AND id = ANY($1::bigint[])", [ids],
+  )).rowCount;
+}
+
 module.exports = {
   DRAIN_ORDER,
   PACKED_GROUPS,
@@ -439,6 +463,7 @@ module.exports = {
   MAX_ATTEMPTS,
   drainGroupFor,
   backoffMs,
+  failureReasons,
   enqueue,
   claimBatch,
   hasClaimable,
@@ -451,6 +476,7 @@ module.exports = {
   stats,
   recent,
   retryFailed,
+  deleteFailed,
   slotJobs,
   clear,
 };

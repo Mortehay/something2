@@ -34,12 +34,17 @@ function subjectSlotId(kind, key, slot) {
 // field so the slot table (audioSelection.audioSlotRows) can mark them
 // without a second request. A kind with no `cues` at all (world, biome -- music/ambience have
 // no cue concept) simply contributes nothing.
+//
+// Also upload-only: a slot whose cue is in the group's `unofferedCues` --
+// mapped in the registry, but the active provider does not offer it, so a
+// job for it can only fail (it is refused at enqueue too).
 export function uploadOnlySlotIds(subjectsResponse) {
   const out = new Set();
   for (const group of subjectsResponse || []) {
+    const unoffered = new Set(group.unofferedCues || []);
     for (const [key, bySlot] of Object.entries(group.cues || {})) {
       for (const [slot, cue] of Object.entries(bySlot || {})) {
-        if (cue === null) out.add(subjectSlotId(group.kind, key, slot));
+        if (cue === null || unoffered.has(cue)) out.add(subjectSlotId(group.kind, key, slot));
       }
     }
   }
@@ -120,7 +125,8 @@ export function batchProgress({ run, stats } = {}) {
     queued: t.queued,
     running: t.running,
     total,
-    pct: total > 0 ? Math.round(((t.done + t.failed) / total) * 100) : 0,
+    // floor, not round: 2642 of 2651 rounded to "100%" with 9 jobs left.
+    pct: total > 0 ? Math.floor(((t.done + t.failed) / total) * 100) : 0,
     group: currentGroup(stats),
     backoff: Number((stats && stats.backoff) || 0),
   };

@@ -384,18 +384,26 @@ export function uploadOnlyCount(rows) {
 }
 
 const SAMPLES = 12;
+// A group whose raw texts differ in this many ways or fewer lists each one
+// with its count; more (e.g. a job id in every message) shows the first.
+const MAX_VARIANTS = 5;
 
 // Failed jobs grouped by normalized cause, biggest group first. Each group
 // carries every job id (for "Retry these N"), the first raw error text (the
 // provider's own words), and up to 12 sample slot ids plus how many more.
+// `variants` ([{text, count}], biggest first) is set when the raw texts
+// differ in only a few ways: normalizing blanks quoted names, so "no cue
+// 'attack'" and "no cue 'idle'" share a group, and showing only the first
+// text labelled all 721 jobs with one cue (the 25-job 'shoot').
 // Takes /admin/jobs/slots rows; anything not failed is ignored.
 export function failedByCause(jobRows) {
   const groups = new Map();
   for (const j of jobRows || []) {
     if (j.status !== 'failed') continue;
     const cause = normalizeCause(j.error);
-    if (!groups.has(cause)) groups.set(cause, { cause, text: j.error || '', ids: [], slots: [] });
+    if (!groups.has(cause)) groups.set(cause, { cause, text: j.error || '', ids: [], slots: [], texts: new Map() });
     const g = groups.get(cause);
+    g.texts.set(j.error || '', (g.texts.get(j.error || '') || 0) + 1);
     g.ids.push(j.id);
     g.slots.push(slotId(j.subject_kind, j.subject_key, j.slot));
   }
@@ -407,6 +415,9 @@ export function failedByCause(jobRows) {
       ids: g.ids,
       samples: g.slots.slice(0, SAMPLES),
       more: Math.max(0, g.slots.length - SAMPLES),
+      variants: g.texts.size > 1 && g.texts.size <= MAX_VARIANTS
+        ? [...g.texts].map(([text, count]) => ({ text, count })).sort((a, b) => b.count - a.count || a.text.localeCompare(b.text))
+        : null,
     }))
     .sort((a, b) => b.count - a.count || a.cause.localeCompare(b.cause));
 }

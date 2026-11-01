@@ -735,3 +735,31 @@ describe('parseVariants', () => {
     }
   });
 });
+
+describe('failedByCause variants', () => {
+  const job = (id, error) => ({
+    id, subject_kind: 'creature', subject_key: `c${id}`, slot: 'attack', status: 'failed', error,
+  });
+
+  it('lists each raw text with its count when a group differs only in a quoted name', () => {
+    const rows = [
+      job('1', "upload only: the provider has no cue 'shoot' registered"),
+      job('2', "upload only: the provider has no cue 'attack' registered"),
+      job('3', "upload only: the provider has no cue 'attack' registered"),
+      job('4', "upload only: the provider has no cue 'idle' registered"),
+    ];
+    const [g] = failedByCause(rows);
+    expect(g.count).toBe(4);
+    expect(g.variants).toEqual([
+      { text: "upload only: the provider has no cue 'attack' registered", count: 2 },
+      { text: "upload only: the provider has no cue 'idle' registered", count: 1 },
+      { text: "upload only: the provider has no cue 'shoot' registered", count: 1 },
+    ]);
+  });
+
+  it('has no variants for one text, or for many (a job id in every message)', () => {
+    expect(failedByCause([job('1', 'boom'), job('2', 'boom')])[0].variants).toBeNull();
+    const many = Array.from({ length: 6 }, (_, i) => job(String(i), `service answered 503 (job ${5000 + i})`));
+    expect(failedByCause(many)[0].variants).toBeNull();
+  });
+});

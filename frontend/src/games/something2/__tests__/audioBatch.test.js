@@ -31,6 +31,12 @@ describe('audioBatch', () => {
     expect(uploadOnlySlotIds(subjects).size).toBe(0);
     expect(uploadOnlySlotIds(undefined).size).toBe(0);
   });
+  it('uploadOnlySlotIds also marks slots whose cue the provider does not offer', () => {
+    const withUnoffered = subjectsWithSfx.map((g) => (g.kind === 'creature' ? { ...g, unofferedCues: ['death'] } : g));
+    const ids = uploadOnlySlotIds(withUnoffered);
+    expect(ids.has('creature/Slime/death')).toBe(true);
+    expect(ids.has('creature/Slime/hurt')).toBe(false);
+  });
   it('reports progress and the group being drained', () => {
     const stats = { groups: { music: { queued: 0, running: 1, done: 2, failed: 0 }, ambience: { queued: 3, running: 0, done: 0, failed: 1 } }, backoff: 0 };
     const p = batchProgress({ run: { running: true }, stats });

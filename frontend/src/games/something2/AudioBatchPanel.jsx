@@ -93,7 +93,7 @@ const GROUP_LABEL = {
 const NO_PROVIDER_TITLE = 'No audio provider — add one under AI Providers';
 
 function AudioBatchPanel({
-  run, stats, recent, canGenerate = true,
+  run, stats, recent, failureReasons, canGenerate = true,
 }) {
   const start = useStartAudioDrain();
   const stop = useStopAudioDrain();
@@ -208,6 +208,20 @@ function AudioBatchPanel({
       </Controls>
 
       {stopWarning && <Warn>{stopWarning}</Warn>}
+
+      {/* Every failed job by cause: the list below is only the newest ten,
+          and those can all share one rare cause while hundreds of older
+          failures have another. */}
+      {(failureReasons || []).length > 0 && (
+        <Failures>
+          <h4>Failed jobs by reason</h4>
+          <ul>
+            {failureReasons.map((r) => (
+              <li key={r.reason}><b>{r.n}</b> × {r.reason}</li>
+            ))}
+          </ul>
+        </Failures>
+      )}
 
       {failed.length > 0 && (
         <Failures>

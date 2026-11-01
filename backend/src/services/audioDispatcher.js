@@ -64,6 +64,21 @@ const BREAKER_TRIP = () => envInt('AUDIO_BREAKER_TRIP', 3);
 // How many sfx jobs one sfx-pack request carries (spec §2 "Packing").
 const SFX_PACK_SIZE = () => envInt('AUDIO_SFX_PACK_SIZE', 12);
 
+// The highest take a duplicate answer may step to without spending an
+// attempt. The prompt writer gives many subjects the SAME entity text (seven
+// creatures' death slots share "a colossal stone titan crumbling into dust"),
+// and each sibling already used takes 0..k of it -- so a job can meet several
+// duplicate takes in a row through no fault of its own. Spending one of its
+// MAX_ATTEMPTS per take failed it at take 2. A duplicate is the box's cache
+// answering, not the job being bad, so the attempt is refunded up to this
+// take; past it the attempts budget applies again, which bounds the loop.
+const MAX_FREE_DUPLICATE_TAKE = () => envInt('AUDIO_MAX_FREE_DUPLICATE_TAKE', 16);
+
+function duplicateRefund(result) {
+  return result.duplicate && Number.isInteger(result.take) && result.take < MAX_FREE_DUPLICATE_TAKE()
+    ? { refundAttempt: true } : {};
+}
+
 // The longest the drain will sit waiting for a backoff to expire before
 // looking again. Not a cap on the backoff itself (fail() computes that) --
 // only on how long a single wait goes without rechecking for a stop request
@@ -760,7 +775,7 @@ function startDrain(db, opts = {}) {
         refused.push({ job, result });
       } else {
         // eslint-disable-next-line no-await-in-loop
-        await failJob(job, result);
+        await failJob(job, result, duplicateRefund(result));
         if (isProviderFault(result)) anyFault = true;
       }
     }
