@@ -325,6 +325,20 @@ async function recent(db, limit = 50) {
   )).rows;
 }
 
+// Failed jobs counted by reason, most common first. `recent` shows only the
+// newest rows, so a few late failures hid hundreds of older ones with a
+// different cause (721 "no cue" behind 9 duplicates). Take numbers are
+// folded out so one reason is one row.
+async function failureReasons(db, limit = 8) {
+  return (await db.query(
+    `SELECT regexp_replace(COALESCE(last_error, 'no detail'), '\\(takes? [0-9-]+\\)', '(take N)', 'g') AS reason,
+            count(*)::int AS n
+       FROM audio_jobs WHERE state = 'failed'
+      GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT $1`,
+    [limit],
+  )).rows;
+}
+
 // "Latest job of a slot", stated once for slotJobs and retryFailed: a live
 // (queued/running) row first -- that is what is happening to the slot now --
 // then the most recently UPDATED row, then the highest id. updated_at, not
@@ -439,6 +453,7 @@ module.exports = {
   MAX_ATTEMPTS,
   drainGroupFor,
   backoffMs,
+  failureReasons,
   enqueue,
   claimBatch,
   hasClaimable,

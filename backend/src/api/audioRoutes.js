@@ -582,6 +582,7 @@ module.exports = function audioRoutes(pool) {
         run: audioDispatcher.runStatus(),
         stats: await audioJobQueue.stats(pool),
         recent: await audioJobQueue.recent(pool),
+        failure_reasons: await audioJobQueue.failureReasons(pool),
       });
     } catch (err) { sendError(res, err); }
   });

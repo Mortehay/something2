@@ -338,6 +338,7 @@ export function useAudioJobs() {
     run: data?.run || null,
     stats: data?.stats || { groups: {}, backoff: 0 },
     recent: data?.recent || [],
+    failureReasons: data?.failure_reasons || [],
     isLoadingJobs: isLoading,
     jobsError: error || null,
   };

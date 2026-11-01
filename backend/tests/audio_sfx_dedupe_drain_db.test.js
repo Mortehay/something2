@@ -194,11 +194,52 @@ test('sfx drain: cached is not a duplicate; a duplicate is retryable', { skip },
         assert.deepEqual(packCalls, [[`${useText} (take 1)`], [`${useText} (take 2)`]],
           'the retry moves past the duplicated take');
         const row = (await pool.query('SELECT state, attempts FROM audio_jobs WHERE id = $1', [job.id])).rows[0];
-        assert.deepEqual([row.state, row.attempts], ['done', 2]);
+        assert.deepEqual([row.state, row.attempts], ['done', 1], 'a duplicate take spends no attempt');
         const bound = await boundTo('use');
         for (const x of bound) if (x.clip_id !== own.id) { bindingIds.push(x.binding_id); clipIds.push(x.clip_id); }
         assert.deepEqual(bound.map((x) => x.sha1).sort(), [lib.sha1Of(variant(50)), lib.sha1Of(variant(51))].sort(),
           'the duplicate was not stored twice');
+      });
+
+      // Siblings sharing one prompt text used takes 0..k of it, so a job can
+      // meet more duplicate takes in a row than it has attempts (MAX_ATTEMPTS
+      // 3). It used to fail at the third; it must reach a fresh take.
+      await t.test('more duplicate takes in a row than attempts still ends done', async () => {
+        d.__resetRun();
+        const { queued: [job] } = await q.enqueue(pool, [{
+          subject_kind: 'skill', subject_key: SKILL, slot: 'use', clip_kind: 'sfx', engine: 'realistic',
+        }], {});
+        jobIds.push(job.id);
+        packCalls.length = 0;
+        d.startDrain(pool, { deps: depsFor((n) => (n <= 4 ? variant(50) : variant(52))) });
+        const st = await waitIdle();
+        assert.equal(st.done, 1, st.error);
+        assert.equal(st.retried, 4);
+        assert.equal(packCalls.length, 5);
+        const row = (await pool.query('SELECT state, attempts FROM audio_jobs WHERE id = $1', [job.id])).rows[0];
+        assert.deepEqual([row.state, row.attempts], ['done', 1]);
+        for (const x of await boundTo('use')) if (!clipIds.includes(x.clip_id) && x.sha1 === lib.sha1Of(variant(52))) { bindingIds.push(x.binding_id); clipIds.push(x.clip_id); }
+      });
+
+      await t.test('past AUDIO_MAX_FREE_DUPLICATE_TAKE duplicates spend attempts again, so the loop ends', async () => {
+        d.__resetRun();
+        const prevCap = process.env.AUDIO_MAX_FREE_DUPLICATE_TAKE;
+        // The slot's next take is past this cap already, so every duplicate counts.
+        process.env.AUDIO_MAX_FREE_DUPLICATE_TAKE = '1';
+        try {
+          const { queued: [job] } = await q.enqueue(pool, [{
+            subject_kind: 'skill', subject_key: SKILL, slot: 'use', clip_kind: 'sfx', engine: 'realistic',
+          }], {});
+          jobIds.push(job.id);
+          packCalls.length = 0;
+          d.startDrain(pool, { deps: depsFor(() => variant(50)) });
+          const st = await waitIdle();
+          assert.equal(st.done, 0);
+          assert.equal(st.failed, 1);
+          assert.equal(packCalls.length, 3, 'MAX_ATTEMPTS sends, then failed');
+        } finally {
+          if (prevCap === undefined) delete process.env.AUDIO_MAX_FREE_DUPLICATE_TAKE; else process.env.AUDIO_MAX_FREE_DUPLICATE_TAKE = prevCap;
+        }
       });
     } finally {
       if (prevBase === undefined) delete process.env.AUDIO_JOB_RETRY_BASE_MS; else process.env.AUDIO_JOB_RETRY_BASE_MS = prevBase;
