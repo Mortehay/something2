@@ -47,6 +47,7 @@ const { buyStock, sellItem } = require('./trade');
 const { recordKill } = require('../services/questsService.js');
 const { vendorBuyPrice, loadLegacyChoice } = require('../services/legacyEffects.js');
 const { loadCompletedQuests } = require('../services/questsService.js');
+const trainingDummy = require('./trainingDummy.js');
 const { pendingRewardItems, clearRewardPending, recordNode, doneNodeKeys, recordFloor, floorFromWorldName, recordItem, recordChest, recordReach } = require('../services/questsService.js');
 const { worldQuestNodes, nearestQuestNode } = require('../services/questNodes.js');
 const { respawnDueCreatures, enqueueDeficit, CREATURE_SWEEP_MS } = require('../services/creatureRespawn');
@@ -779,6 +780,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
           claiming: new Set(),       // ground item ids with a claim in flight (avoids wasted queries)
         };
         worlds.set(canonicalId, entry);
+        // A practice target by the entry spawn, for checking your own DPS.
+        try { trainingDummy.placeDummy(entry); } catch (e) { console.error('training dummy placement failed:', e); }
 
         // SOMET-481: prime the rarity inputs NOW rather than waiting for the
         // first item sweep. Without this a freshly loaded world drops nothing
@@ -1552,6 +1555,17 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // and already has its own richer `noammo` frame carrying the item type.
   function refuseAttack(ws, gate) {
     if (gate && gate.reason === 'resource') send(ws, { type: 'attackrefused', reason: 'resource' });
+  }
+
+  // The practice dummy's DPS numbers go to the player who is hitting it, only
+  // while their session is live (the client keeps the last frame on screen).
+  function sendDpsMeters(entry) {
+    const dummy = trainingDummy.findDummy(entry.world.creatures);
+    if (!dummy || !dummy.sessions) return;
+    for (const [userId, stats] of trainingDummy.liveSessions(dummy, entry.world.now)) {
+      const sock = entry.sockets.get(userId);
+      if (sock) send(sock, { type: 'dps', active: true, ...stats });
+    }
   }
 
   function broadcastCreatures(entry) {
@@ -3752,6 +3766,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       if (tick % creatureBroadcastEvery === 0) {
         recomputeActive(entry);
         broadcastCreatures(entry);
+        sendDpsMeters(entry);
         broadcastItems(entry);
         broadcastChests(entry);
       }

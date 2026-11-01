@@ -13,17 +13,28 @@ test('total = skill base + weapon damage x scaling (the 10 + 50 x 10% = 15 examp
   assert.strictEqual(r.bonus, 5);
 });
 
+test('a multi-hit skill spreads the weapon share across its hits', () => {
+  const barrage = { ...SKILL, id: 'arc_barrage', weaponScaling: 0.1 }; // 4 x 5 hits
+  const r = sb.skillHitDamage(barrage, 100);
+  assert.strictEqual(r.hits, 5);
+  assert.strictEqual(r.bonus, 10);
+  assert.ok(Math.abs(r.base * r.hits - (4 * 5 + 10)) < 1e-9, 'the whole cast gets the bonus once');
+});
+
 test('no weapon (or damage 0 / junk) adds nothing', () => {
   const plain = sb.baseDamageOf(SKILL).base;
   for (const w of [0, null, undefined, -5, NaN, 'abc']) assert.strictEqual(sb.skillHitDamage(SKILL, w).base, plain);
 });
 
-test('default scaling is 10% and a skill can override it', () => {
+test('scaling depends on the skill type, with an optional per-skill override', () => {
   assert.strictEqual(sb.DEFAULT_WEAPON_SCALING, 0.1);
-  assert.strictEqual(sb.weaponScalingOf(SKILL), 0.1);
+  assert.strictEqual(sb.weaponScalingOf({ type: 'melee' }), 0.15);
+  assert.strictEqual(sb.weaponScalingOf({ type: 'magic' }), 0.1);
+  assert.strictEqual(sb.weaponScalingOf({ type: 'debuff' }), 0.05);
+  assert.strictEqual(sb.weaponScalingOf({ type: 'whatever' }), 0.1);
   assert.strictEqual(sb.weaponScalingOf({ weaponScaling: 0.25 }), 0.25);
   assert.strictEqual(sb.weaponScalingOf({ weaponScaling: 0 }), 0);
-  assert.strictEqual(sb.weaponScalingOf({ weaponScaling: -1 }), 0.1);
+  assert.strictEqual(sb.weaponScalingOf({ weaponScaling: -1, type: 'magic' }), 0.1);
   assert.strictEqual(sb.skillHitDamage({ ...SKILL, weaponScaling: 0 }, 80).bonus, 0);
 });
 

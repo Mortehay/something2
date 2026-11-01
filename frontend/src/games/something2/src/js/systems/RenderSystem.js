@@ -19,6 +19,9 @@ import { layoutSkillsPanel, drawSkillsPanel } from "./skillsPanel.js";
 import { layoutGemShopPanel, drawGemShopPanel } from "./gemShopPanel.js";
 import { layoutQuestLog, drawQuestLog } from "./questLogPanel.js";
 import { drawQuestTracker } from "./questTracker.js";
+import { drawDpsMeter } from "./dpsMeterPanel.js";
+import { isTrainingDummy, drawTrainingDummy } from "./trainingDummyArt.js";
+import { damageLine } from "./skillDamageLine.js";
 import { chestView } from "../core/worldChests.js";
 import { isTransformationSkill, getRequiredForm, resolveSkillDamage, checkGemRequirements, getWeaponRequirementName } from "../core/skillsData.js";
 import {
@@ -403,7 +406,7 @@ export class RenderSystem {
     selectedSkillId = null, skillDrag = null, hotbarSkills = null, inventoryGems = [],
     skillHoverSlot = null, playerClass = null, activeForm = null, flashSlot = null,
     skillCooldowns = null, activeBuffs = [], unlockedSkills = null,
-    hoveredSkill = null, cursorX = null, cursorY = null, keybinds = null,
+    dpsMeter = null, hoveredSkill = null, cursorX = null, cursorY = null, keybinds = null,
     // Floating Combat & Resource text (Damage numbers, heals, mana/stamina surge)
     floatingTexts = [],
     // Quest Log (hotkey 'J')
@@ -768,6 +771,8 @@ export class RenderSystem {
       this._drawQuestTrackerHUD(this.ctx, trackedQuest, player, camera);
     }
 
+    if (dpsMeter) drawDpsMeter(this.ctx, dpsMeter, performance.now());
+
     // SOMET-493 — last of all, so the card sits on top of the HUD orbs and the
     // toast rather than being half-covered by them. `_inspectLayout` was
     // computed in the same frame, from the drawables that were actually drawn.
@@ -846,7 +851,8 @@ export class RenderSystem {
     if (!isFormOk) unmetWarnings.push(`Requires ${reqForm.toUpperCase()} Form`);
 
     const reqBlockH = 34 + (unmetWarnings.length > 0 ? 18 : 0);
-    const cardH = 135 + reqBlockH + descH + (hasReqForm ? 20 : 0) + (skill.channeled ? 18 : 0);
+    const dmgLineText = damageLine(skill, (equippedWeapon && Number(equippedWeapon.damage)) || 0);
+    const cardH = 135 + (dmgLineText ? 15 : 0) + reqBlockH + descH + (hasReqForm ? 20 : 0) + (skill.channeled ? 18 : 0);
 
     // Calculate positioning with screen bounds clamping
     let cardX = cursorX + 16;
@@ -942,8 +948,15 @@ export class RenderSystem {
     ctx.fillStyle = '#f8fafc';
     ctx.fillText(rangeText, cardX + pad + 48, mY3);
 
+    let mYEnd = mY3;
+    if (dmgLineText) {
+      mYEnd = mY3 + 15;
+      ctx.fillStyle = '#fbbf24';
+      ctx.fillText(dmgLineText, cardX + pad, mYEnd, cardW - pad * 2);
+    }
+
     // Divider 2
-    const div2Y = mY3 + 16;
+    const div2Y = mYEnd + 16;
     ctx.strokeStyle = 'rgba(168, 85, 247, 0.3)';
     ctx.beginPath();
     ctx.moveTo(cardX + pad, div2Y);
@@ -3979,6 +3992,13 @@ export class RenderSystem {
 
   drawEntity(e, animKey = null) {
     // SOMET-603: `bossTier` is the ONE boss flag; no name matching.
+    if (isTrainingDummy(e)) {
+      const dw = Number(e.width) > 0 ? e.width : 64;
+      const dh = Number(e.height) > 0 ? e.height : 64;
+      const ds = worldToScreen(e.x + dw / 2, e.y + dh / 2);
+      drawTrainingDummy(this.ctx, ds.x - dw / 2, ds.y - dh, dw, dh);
+      return dh;
+    }
     const isBoss = Boolean(e.bossTier);
     const fallback = isBoss ? 96 : 40;
     const dim = (...vals) => {

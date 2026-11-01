@@ -995,6 +995,7 @@ export class Game {
                         this._onWorldBossStatusChange(this.worldBossStatus);
                     }
                 },
+                onDps: (msg) => { this.dpsMeter = { ...msg, at: performance.now() }; },
                 onAnnouncement: (msg) => {
                     if (msg && msg.text) {
                         this._showToast(msg.text);
@@ -2044,6 +2045,7 @@ export class Game {
                 ownedGemIds: new Set(this.getInventoryGems().map((g) => g.id)),
                 gemPlayerLevel: (this.progression && this.progression.level) || 1,
                 equippedWeapon: this._resolveEquippedWeapon(),
+                dpsMeter: this.dpsMeter || null,
                 playerStats: this.characterView() || this.progression || null,
                 skillMerchants: this.skillMerchants,
                 questGivers: this.questGivers,

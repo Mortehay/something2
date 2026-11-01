@@ -40,3 +40,20 @@ describe('gem story gates match the backend', () => {
     expect(sig(SKILLS)).toEqual(sig(backend.SKILLS));
   });
 });
+
+describe('skill damage preview matches the backend formula', () => {
+  it('gives the same per-hit base and weapon share for every skill', async () => {
+    const { skillDamagePreview } = await import('../skillsData.js');
+    const sb = require(path.resolve(__dirname, '../../../../../../../../backend/src/authority/skillBalance.js'));
+    for (const s of backend.SKILLS) {
+      if (s.type === 'buff') { expect(skillDamagePreview(s, 50)).toBeNull(); continue; }
+      for (const wd of [0, 50, 333]) {
+        const server = sb.skillHitDamage(s, wd);
+        const client = skillDamagePreview(s, wd);
+        expect(client.hits).toBe(server.hits);
+        expect(client.bonus).toBeCloseTo(server.bonus, 9);
+        expect(client.total).toBeCloseTo(server.base * server.hits, 6);
+      }
+    }
+  });
+});

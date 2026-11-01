@@ -1887,6 +1887,7 @@ class CreatureSim {
     for (const c of this.creatures.values()) {
       const { cx, cy } = chunkOf(c.x, c.y, this.chunkSize);
       if (!active.has(CHUNK_KEY(cx, cy))) continue; // frozen (out of active set)
+      if (c.isDummy) { c.hp = c.maxHp; continue; } // the practice dummy has no AI
       // SOMET-254: `c.behavior` (not `|| DEFAULT_BEHAVIOR`) is enough here --
       // every entry in `this.creatures` was populated by addCreatures, which
       // always stamps `behavior: resolveInstanceBehavior(c)`, and every
@@ -3060,7 +3061,7 @@ class CreatureSim {
   getDirty() {
     const out = [];
     for (const c of this.creatures.values()) {
-      if (c.dirty) out.push({ id: c.id, x: c.x, y: c.y, facing: c.facing });
+      if (c.dirty && !c.isDummy) out.push({ id: c.id, x: c.x, y: c.y, facing: c.facing });
     }
     return out;
   }
@@ -3085,7 +3086,7 @@ class CreatureSim {
       // SOMET-603: boss instances are never persisted, so there is nothing to
       // reload them from -- their owner (the boss manager / debug paths)
       // removes them. Phase minions carry no bossTier and stay prunable.
-      if (c.bossTier) continue;
+      if (c.bossTier || c.isDummy) continue;
       this.creatures.delete(id);
       dropped++;
     }
@@ -3183,6 +3184,7 @@ class CreatureSim {
         // SOMET-603: immutable too, and sent only when they say something, so
         // an ordinary creature's intro is byte-identical to before.
         if (c.bossTier) { row.bossTier = c.bossTier; row.name = c.name; }
+        if (c.isDummy) { row.name = c.name; row.dummy = 1; }
         if (c.element) row.element = c.element;
         if (c.width !== CREATURE_SIZE) { row.width = c.width; row.height = c.height; }
         // SOMET-606: aura NAMES, immutable for this instance (resolved at load).

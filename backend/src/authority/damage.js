@@ -6,6 +6,7 @@
 const { effectMagnitude, SHOCK, MARKED } = require('./effects');
 const { shieldFactor } = require('../services/bossBalance.js');
 const skillBalance = require('./skillBalance.js');
+const trainingDummy = require('./trainingDummy.js');
 
 const MIN_DAMAGE = 1;    // damage floor: nothing is ever fully negated
 const RESIST_CAP = 0.8;  // resistance ceiling: nothing is ever immune
@@ -139,6 +140,14 @@ function applyDamage(target, raw, element, mit = NO_MITIGATION, now = undefined,
   // survives defense and resistance. Only that boss's creature carries the field.
   const taken = target.damageTakenMult;
   if (Number.isFinite(taken) && taken > 0 && taken < 1) final = Math.max(MIN_DAMAGE, final * taken);
+  // The practice dummy (trainingDummy.js): a player's hit is counted for the DPS
+  // meter and then thrown away - it never loses hp, never provokes, never dies.
+  // Anything that is not a player's hit is ignored outright.
+  if (target.isDummy) {
+    if (typeof source === 'string' && source.startsWith('p:')) trainingDummy.recordHit(target, final, source.slice(2), now);
+    target.hp = target.maxHp;
+    return final;
+  }
   // A shield (world bosses gain one on entering a phase, see worldBoss.js)
   // soaks damage before HP does. Only the shield's owner has the field, so for
   // every player and ordinary creature this is a no-op. The attacker is still

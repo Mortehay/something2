@@ -2798,3 +2798,51 @@ export function checkGemRequirements(gem, playerProgression, equippedWeapon, ctx
 }
 
 
+
+// --- Skill damage preview (mirror of backend authority/skillBalance.js) --------
+// The server owns the real number; this reproduces its formula so a tooltip can
+// say what a skill hits for with the weapon in hand:
+//   cast damage = hits x per-hit base + weaponDamage x scaling
+// (the weapon share is spread across the hits). A parity test pins it to the
+// backend. Multipliers (stats, element, crits) are applied on top by the server.
+const MULTI_HIT_PREVIEW = {
+  arc_barrage: { base: 4, hits: 5 },
+  arc_fan_of_knives: { base: 6, hits: 6 },
+  mag_magic_missiles: { base: 6, hits: 5 },
+  mag_meteor_shower: { base: 14, hits: 4 },
+  arc_rain_of_arrows: { base: 5, hits: 10 },
+  arc_volley: { base: 5, hits: 10 },
+  war_flurry_of_steel: { base: 5, hits: 4 },
+  war_twin_slash: { base: 8, hits: 2 },
+};
+const WEAPON_SCALING_BY_TYPE_PREVIEW = { melee: 0.15, magic: 0.10, debuff: 0.05 };
+const DEFAULT_WEAPON_SCALING_PREVIEW = 0.10;
+
+export function skillBaseDamage(skill) {
+  const multi = MULTI_HIT_PREVIEW[skill.id] || (/multishot|triple/.test(skill.id) ? { base: 8, hits: 3 } : null);
+  if (multi) return { base: multi.base, hits: multi.hits };
+  const lvl = Number(skill.reqLvl) || 1;
+  const cd = Math.max(1, Number(skill.cooldown) || 1);
+  let d = (6 + lvl * 0.12) * (1 + 0.45 * Math.log(cd));
+  if (skill.channeled) d *= 0.6;
+  return { base: Math.max(4, Math.min(30, Math.round(d))), hits: 1 };
+}
+
+export function skillWeaponScaling(skill) {
+  const own = Number(skill && skill.weaponScaling);
+  if (skill && skill.weaponScaling != null && Number.isFinite(own) && own >= 0) return own;
+  const byType = skill && WEAPON_SCALING_BY_TYPE_PREVIEW[skill.type];
+  return byType != null ? byType : DEFAULT_WEAPON_SCALING_PREVIEW;
+}
+
+// null for a skill that does no damage (a buff). `weaponDamage` is the equipped
+// weapon's damage, 0/undefined with nothing in hand.
+export function skillDamagePreview(skill, weaponDamage = 0) {
+  if (!skill || skill.type === 'buff') return null;
+  const { base, hits } = skillBaseDamage(skill);
+  const wd = Number(weaponDamage);
+  const scaling = skillWeaponScaling(skill);
+  const bonus = Number.isFinite(wd) && wd > 0 ? wd * scaling : 0;
+  const total = base * hits + bonus;
+  return { base, hits, scaling, weaponDamage: Number.isFinite(wd) && wd > 0 ? wd : 0, bonus, total, perHit: total / hits };
+}

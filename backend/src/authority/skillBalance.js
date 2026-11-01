@@ -62,18 +62,25 @@ function baseDamageOf(skill) {
 // moment of the cast, so swapping or removing a weapon takes effect at once.
 // A skill can set its own `weaponScaling` (a fraction); the rest use the default.
 const DEFAULT_WEAPON_SCALING = 0.10;
+// Weapon skills lean on the weapon more than spells do; a curse barely at all.
+const WEAPON_SCALING_BY_TYPE = { melee: 0.15, magic: 0.10, debuff: 0.05 };
 
 function weaponScalingOf(skill) {
-  const s = Number(skill && skill.weaponScaling);
-  return Number.isFinite(s) && s >= 0 ? s : DEFAULT_WEAPON_SCALING;
+  const own = Number(skill && skill.weaponScaling);
+  if (skill && skill.weaponScaling != null && Number.isFinite(own) && own >= 0) return own;
+  const byType = skill && WEAPON_SCALING_BY_TYPE[skill.type];
+  return byType != null ? byType : DEFAULT_WEAPON_SCALING;
 }
 
-// { base, hits, bonus }: `base` already includes the weapon share, per hit.
+// { base, hits, bonus }. `bonus` is the weapon's share for the WHOLE cast
+// (weaponDamage x scaling); a multi-hit skill spreads it across its hits so a
+// ten-arrow volley is not ten times as weapon-hungry as a single blow. `base`
+// is the per-hit damage with that share already added.
 function skillHitDamage(skill, weaponDamage) {
   const { base, hits } = baseDamageOf(skill);
   const wd = Number(weaponDamage);
   const bonus = Number.isFinite(wd) && wd > 0 ? wd * weaponScalingOf(skill) : 0;
-  return { base: base + bonus, hits, bonus };
+  return { base: base + bonus / Math.max(1, hits), hits, bonus };
 }
 
 // ---- life leech ------------------------------------------------------------
@@ -540,7 +547,7 @@ function auraOf(p) {
 module.exports = {
   COOLDOWN_SLACK, CHANNEL_GAP_MS, LEECH_SKILL_SHARE, LEECH_CAP_FRACTION,
   BUFFS, MULTI_HIT, LOW_HP, WEAPON_TRAITS, BASE_CRIT_DMG, FORM_DUR,
-  DEFAULT_WEAPON_SCALING, weaponScalingOf, skillHitDamage,
+  DEFAULT_WEAPON_SCALING, WEAPON_SCALING_BY_TYPE, weaponScalingOf, skillHitDamage,
   minGapMs, takeCooldown, baseDamageOf, leechHeal,
   weaponTraits, weaponHitStatuses, setRng, roll, rollCrit,
   castBuff, castUnknownBuff, refreshBuffMods, removeBuff, noteAction, takeSpellMult,

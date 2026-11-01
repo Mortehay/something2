@@ -5,7 +5,7 @@
  * {seq,dx,dy,dt} for client-side reconciliation.
  */
 export class WorldAuthorityClient {
-  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onAttackRefused, onTransition, onWaypointActivated, onTeleport, onWallet, onShop, onBought, onSold, onBank, onDeposited, onWithdrawn, onProgression, onQuestProgress, onQuestNode, onChests, onChestOpened, onVfx, onWorldBossStatus, onAnnouncement, inputIntervalMs = 50, now = () => performance.now() }) {
+  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onAttackRefused, onTransition, onWaypointActivated, onTeleport, onWallet, onShop, onBought, onSold, onBank, onDeposited, onWithdrawn, onProgression, onQuestProgress, onQuestNode, onChests, onChestOpened, onVfx, onWorldBossStatus, onAnnouncement, onDps, inputIntervalMs = 50, now = () => performance.now() }) {
     this.url = url;
     this.token = token;
     this.onJoined = onJoined || (() => {});
@@ -23,6 +23,7 @@ export class WorldAuthorityClient {
     this.onSold = onSold || (() => {});
     this.onWorldBossStatus = onWorldBossStatus || (() => {});
     this.onAnnouncement = onAnnouncement || (() => {});
+    this.onDps = onDps || (() => {});
     // SOMET-310 — the account chest. `onBank` is the whole chest (the server
     // re-sends it after every move, so the panel never reconciles a delta);
     // `onDeposited`/`onWithdrawn` update the INVENTORY mirror instead, and are
@@ -154,6 +155,7 @@ export class WorldAuthorityClient {
       case 'vfx': this.onVfx(msg); break;
       case 'world_boss_status': this.onWorldBossStatus(msg); break;
       case 'announcement': this.onAnnouncement(msg); break;
+      case 'dps': this.onDps(msg); break;
       case 'error': {
         // Tag so callers can tell a server-issued protocol rejection (e.g.
         // "unequip it first") apart from a raw transport failure below —
