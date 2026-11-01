@@ -577,7 +577,6 @@ for (const q of QUESTS) q.item_reward = ITEM_REWARDS[q.key] || null;
 // quests so every earlier index is unchanged. New objective types:
 //   collect  pick up items (target_key = item_types name, '*' = any item)
 //   chest    open chests
-//   skill    cast skills (target_key = skill id, null = any)
 //   reach    enter a world whose name starts with target_key
 //   pick     turn-in is a choice between `choices` rewards
 // plus required_class, reputation, time limits, weekly repeats and a rotating
@@ -593,7 +592,7 @@ const sideX = (q) => side({
 const DAILY_BOARD = [
   ['daily_scavenger', 'Daily: Scavenger', 'The quartermaster pays for anything useful. Pick up 8 items from the ground.', 'Pick up 8 items', { objective_type: 'collect', target_key: '*', target_count: 8, exp_reward: 1200, gold_reward: 220 }],
   ['daily_chest_breaker', 'Daily: Chest Breaker', 'Caches and strongboxes are scattered across the wilds. Open three of them.', 'Open 3 chests', { objective_type: 'chest', target_count: 3, exp_reward: 1800, gold_reward: 300 }],
-  ['daily_spellwork', 'Daily: Drills', 'Keep your skills sharp. Use your skills 30 times.', 'Use skills 30 times', { objective_type: 'skill', target_count: 30, exp_reward: 1300, gold_reward: 200 }],
+  ['daily_spellwork', 'Daily: Field Drills', 'Keep your edge. Defeat 30 creatures of any kind.', 'Defeat 30 creatures', { objective_type: 'kill_any', target_count: 30, exp_reward: 1300, gold_reward: 200 }],
   ['daily_wolf_cull', 'Daily: Wolf Cull', 'Wolves are thinning the herds again. Put down eight of them.', 'Slay 8 Wolves', { objective_type: 'kill', target_key: 'Wolf', target_count: 8, exp_reward: 1600, gold_reward: 260 }],
   ['daily_skeleton_purge', 'Daily: Grave Watch', 'Something keeps the dead restless. Lay twelve skeletons to rest.', 'Slay 12 Skeletons', { objective_type: 'kill', target_key: 'Skeleton', target_count: 12, exp_reward: 1500, gold_reward: 240 }],
   ['daily_slime_cleanup', 'Daily: Slime Cleanup', 'The cisterns are fouled by slimes. Clear fifteen.', 'Slay 15 Slimes', { objective_type: 'kill', target_key: 'Slime', target_count: 15, exp_reward: 1100, gold_reward: 180 }],
@@ -694,11 +693,11 @@ QUESTS.push(
   // --- Class trials: only the matching class can take these. ---
   ...[
     ['class_warrior_trial', "Warrior's Trial", 'The drillmaster has one lesson: stand and fight. Defeat 40 creatures.', 'Warrior', 'Defeat 40 creatures', { objective_type: 'kill_any', target_count: 40 }],
-    ['class_mage_practice', "Mage's Practice", 'Magic is a muscle. Cast your skills 50 times.', 'Mage', 'Use skills 50 times', { objective_type: 'skill', target_count: 50 }],
+    ['class_mage_practice', "Mage's Practice", 'Magic is a muscle. Test your spells on 25 slimes.', 'Mage', 'Slay 25 Slimes', { objective_type: 'kill', target_key: 'Slime', target_count: 25 }],
     ['class_archer_marksman', "Marksman's Test", 'Hit what you aim at. Lay 20 skeletons to rest from afar.', 'Archer', 'Slay 20 Skeletons', { objective_type: 'kill', target_key: 'Skeleton', target_count: 20 }],
-    ['class_cultist_rite', "Cultist's Rite", 'The rite demands repetition. Use your skills 40 times.', 'Cultist', 'Use skills 40 times', { objective_type: 'skill', target_count: 40 }],
+    ['class_cultist_rite', "Cultist's Rite", 'The rite demands offerings from forgotten caches. Open four chests.', 'Cultist', 'Open 4 chests', { objective_type: 'chest', target_count: 4 }],
     ['class_druid_pack', "Druid's Pack", 'Learn the ways of the hunt. Put down 12 wolves.', 'Druid', 'Slay 12 Wolves', { objective_type: 'kill', target_key: 'Wolf', target_count: 12 }],
-    ['class_monk_discipline', "Monk's Discipline", 'Calm the mind, repeat the form. Use your skills 60 times.', 'Monk', 'Use skills 60 times', { objective_type: 'skill', target_count: 60 }],
+    ['class_monk_discipline', "Monk's Discipline", 'A monk wastes nothing. Gather 15 items from the ground.', 'Monk', 'Pick up 15 items', { objective_type: 'collect', target_key: '*', target_count: 15 }],
   ].map(([key, title, description, cls, objective, extra]) => sideX({
     key, act: 1, title, description, objective, required_class: cls, required_level: 3,
     exp_reward: 4000, gold_reward: 600, passive_points_reward: 1, reputation_reward: 5, ...extra,

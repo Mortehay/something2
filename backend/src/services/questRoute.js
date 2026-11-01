@@ -224,9 +224,9 @@ function questTarget(quest, cq) {
   }
   // reach: walk into a named place (any world whose name starts with target_key).
   if (quest.objective_type === 'reach') return { mode: 'travel', place: quest.target_key };
-  // collect / chest / skill have no fixed place; the creature grounds are where
+  // collect / chest have no fixed place; the creature grounds are where
   // drops, chests' guards and practice targets are.
-  if (['collect', 'chest', 'skill'].includes(quest.objective_type)) return { mode: 'hunt', kind: 'kill_any', key: null };
+  if (['collect', 'chest'].includes(quest.objective_type)) return { mode: 'hunt', kind: 'kill_any', key: null };
   if (quest.objective_type === 'floor') return { mode: 'climb', nextFloor: Math.min(Number(quest.target_count) || 25, (Number(cq.progress_count) || 0) + 1) };
   // kill / kill_any / boss: no fixed place, but there ARE places where it can be done.
   return { mode: 'hunt', kind: quest.objective_type, key: quest.target_key || null };

@@ -46,7 +46,7 @@ const { knockbackPosition, knockbackWithFallback } = require('./knockback');
 const { buyStock, sellItem } = require('./trade');
 const { recordKill } = require('../services/questsService.js');
 const { vendorBuyPrice, loadLegacyChoice } = require('../services/legacyEffects.js');
-const { pendingRewardItems, clearRewardPending, recordNode, doneNodeKeys, recordFloor, floorFromWorldName, recordItem, recordChest, recordSkillUse, recordReach } = require('../services/questsService.js');
+const { pendingRewardItems, clearRewardPending, recordNode, doneNodeKeys, recordFloor, floorFromWorldName, recordItem, recordChest, recordReach } = require('../services/questsService.js');
 const { worldQuestNodes, nearestQuestNode } = require('../services/questNodes.js');
 const { respawnDueCreatures, enqueueDeficit, CREATURE_SWEEP_MS } = require('../services/creatureRespawn');
 const { PICKUP_RADIUS } = require('./groundItems');
@@ -2332,9 +2332,6 @@ function attachAuthority(httpServer, pool, opts = {}) {
         for (const k of dedupeKillsById(kills)) {
           onCreatureDeath(entry, k.id, k.killerUserId);
         }
-      }
-      if (ok && ws.characterId != null) {
-        pushQuestUpdates(entry, ws.userId, recordSkillUse(pool, ws.characterId, msg.skillId), 'skill');
       }
     },
 

@@ -3,7 +3,11 @@ const assert = require('node:assert');
 const { QUESTS, EXPANSION_QUESTS } = require('../seeds/data/questsData.js');
 const svc = require('../src/services/questsService.js');
 
-const TYPES = ['collect', 'chest', 'skill', 'reach', 'pick'];
+const TYPES = ['collect', 'chest', 'reach', 'pick'];
+
+test('no quest uses the removed skill objective', () => {
+  assert.ok(!QUESTS.some((q) => q.objective_type === 'skill'));
+});
 
 test('the expansion covers every new objective type, class trials, weekly and a daily pool', () => {
   for (const t of TYPES) assert.ok(EXPANSION_QUESTS.some((q) => q.objective_type === t), `a ${t} quest exists`);
@@ -63,9 +67,8 @@ test('the new recorders ignore empty input and carry the challenge clock', async
   assert.strictEqual(seen.length, 0, 'no query for nothing');
   await svc.recordItem(pool, 1, 'loot_map', 2);
   await svc.recordChest(pool, 1);
-  await svc.recordSkillUse(pool, 1, 'fireball');
   await svc.recordReach(pool, 1, 'The Catacombs: Deep');
-  assert.strictEqual(seen.length, 4);
+  assert.strictEqual(seen.length, 3);
   for (const s of seen) assert.match(s.sql, /time_limit_sec IS NULL/, 'time-limited quests only advance inside the clock');
   assert.deepStrictEqual(seen[0].params, [1, 'loot_map', 2]);
 });

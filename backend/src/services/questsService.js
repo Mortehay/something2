@@ -683,23 +683,6 @@ async function recordChest(pool, characterId) {
   return rows;
 }
 
-// SERVER-INTERNAL. The character cast a skill. target_key NULL counts any skill.
-async function recordSkillUse(pool, characterId, skillId) {
-  const { rows } = await pool.query(
-    `UPDATE character_quests cq
-        SET progress_count = LEAST(q.target_count, cq.progress_count + 1)
-       FROM quests q
-      WHERE q.id = cq.quest_id AND cq.character_id = $1 AND cq.status = 'active'
-        AND q.objective_type = 'skill'
-        AND (q.target_key IS NULL OR lower(q.target_key) = lower($2::text))
-        AND cq.progress_count < q.target_count
-        ${TL}
-  RETURNING q.key, q.title, q.target_count, cq.progress_count`,
-    [characterId, String(skillId == null ? '' : skillId)],
-  );
-  return rows;
-}
-
 // SERVER-INTERNAL. The character is in the world called `worldName`. Credits
 // `reach` quests whose target_key is a prefix of the name ("The Catacombs"
 // matches "The Catacombs: Deep"). One-shot: progress goes straight to target.
@@ -777,7 +760,6 @@ async function clearRewardPending(pool, characterId, questId) {
 module.exports.pendingRewardItems = pendingRewardItems;
 module.exports.recordItem = recordItem;
 module.exports.recordChest = recordChest;
-module.exports.recordSkillUse = recordSkillUse;
 module.exports.recordReach = recordReach;
 module.exports.dailyPoolKeys = dailyPoolKeys;
 module.exports.reputationTier = reputationTier;
