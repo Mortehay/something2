@@ -607,6 +607,7 @@ app.use('/api/quests', createQuestsRouter(guardPool, {
   // boot) it answers false and the item stays owed until the next join.
   dropRewardItem: (userId, itemName) => authorityHandle?.dropRewardItem?.(userId, itemName) ?? false,
   onLegacyChosen: (userId, choice) => authorityHandle?.setPlayerLegacy?.(userId, choice) ?? false,
+  onQuestCompleted: (userId, questKey) => authorityHandle?.markQuestCompleted?.(userId, questKey) ?? false,
 }));
 
 // Game audio (spec docs/superpowers/specs/2026-09-28-game-audio-design.md).

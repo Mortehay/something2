@@ -2480,6 +2480,21 @@ function putDruidFormsFirst(list) {
   });
 }
 
+// Story gates for gems. A gem past the early game also needs a landmark boss
+// quest done (on top of its level and attributes); the late, rare ones are
+// "secret" - invisible in the merchant until those conditions are met.
+// Quest KEYS (seeds/data/questsData.js); the client resolves titles for messages.
+const GEM_GATE_QUESTS = [
+  { minLvl: 52, quest: 'act4_primordial_sovereign' },
+  { minLvl: 40, quest: 'act3_nether_behemoth' },
+  { minLvl: 28, quest: 'act2_obsidian_drake' },
+  { minLvl: 16, quest: 'act1_sunspire_reliquary' },
+];
+function gemQuestGate(reqLvl) {
+  const g = GEM_GATE_QUESTS.find((x) => reqLvl >= x.minLvl);
+  return g ? [g.quest] : [];
+}
+
 export function enrichSkillGems(list) {
   const classCounters = {};
   for (const s of list) {
@@ -2586,6 +2601,8 @@ export function enrichSkillGems(list) {
     if (s.reqWeapon === 'unarmed') tags.push('Martial');
 
     s.gemTags = tags;
+    s.reqQuests = gemQuestGate(reqLvl);
+    s.secretGem = idx >= 31;
   }
 }
 
@@ -2664,7 +2681,25 @@ function getStatValue(prog, fullKey, shortKey) {
   return val;
 }
 
-export function checkGemRequirements(gem, playerProgression, equippedWeapon) {
+// How a gem presents to a player:
+//   unlocked   already owned
+//   available  level, attributes and story gates are met - it can be obtained
+//   locked     known, but something is missing (req.message says what)
+//   hidden     a sealed slot: a secret gem whose story gate is closed, or one
+//              far beyond the player's level - not listed at all
+// Weapon fit is an equip-time condition, not an availability one.
+export const GEM_REVEAL_LEVELS_AHEAD = 10;
+export function gemVisibility(gem, req, owned, playerLevel = 1) {
+  if (owned) return 'unlocked';
+  if (!gem || !req) return 'locked';
+  const obtainable = req.levelOk && req.strOk && req.dexOk && req.conOk && req.intOk && req.wisOk && req.chaOk && req.questsOk;
+  if (obtainable) return 'available';
+  if (gem.secretGem && !req.questsOk) return 'hidden';
+  if ((gem.reqLvl || 1) > (Number(playerLevel) || 1) + GEM_REVEAL_LEVELS_AHEAD) return 'hidden';
+  return 'locked';
+}
+
+export function checkGemRequirements(gem, playerProgression, equippedWeapon, ctx = null) {
   if (!gem) return { ok: true, errors: [] };
   const lvl = playerProgression?.level ?? playerProgression?.lvl ?? 1;
   const str = getStatValue(playerProgression, 'strength', 'str');
@@ -2710,9 +2745,38 @@ export function checkGemRequirements(gem, playerProgression, equippedWeapon) {
     errors.push(`Requires ${gem.reqCha} Charisma (You have ${cha})`);
   }
 
+  // Story requirements. Only enforced when the caller knows the player's
+  // completed quests (ctx.completedQuests); questTitles maps key -> title.
+  const needQuests = Array.isArray(gem.reqQuests) ? gem.reqQuests : [];
+  const doneQuests = ctx && ctx.completedQuests
+    ? (ctx.completedQuests instanceof Set ? ctx.completedQuests : new Set(ctx.completedQuests))
+    : null;
+  const missingQuests = doneQuests ? needQuests.filter((k) => !doneQuests.has(k)) : [];
+  const questsOk = missingQuests.length === 0;
+  for (const k of missingQuests) {
+    const title = (ctx.questTitles && ctx.questTitles[k]) || k;
+    errors.push(`Requires completing quest "${title}"`);
+  }
+  // One readable line naming everything that is missing.
+  const missing = [];
+  if (!levelOk) missing.push(`Level ${gem.reqLvl}`);
+  for (const [ok, need, name] of [[strOk, gem.reqStr, 'Strength'], [dexOk, gem.reqDex, 'Dexterity'], [conOk, gem.reqCon, 'Constitution'],
+    [intOk, gem.reqInt, 'Intelligence'], [wisOk, gem.reqWis, 'Wisdom'], [chaOk, gem.reqCha, 'Charisma']]) {
+    if (!ok) missing.push(`${need} ${name}`);
+  }
+  const questNames = missingQuests.map((k) => `"${(ctx.questTitles && ctx.questTitles[k]) || k}"`);
+  let message = '';
+  if (missing.length || questNames.length) {
+    message = `Requires ${missing.join(', ')}`;
+    if (questNames.length) message += `${missing.length ? ' and completing ' : 'completing '}${questNames.length > 1 ? 'quests' : 'quest'} ${questNames.join(', ')}`;
+  }
+
   return {
     ok: errors.length === 0,
     weaponOk,
+    questsOk,
+    missingQuests,
+    message,
     levelOk,
     strOk,
     dexOk,

@@ -33,3 +33,10 @@ describe('frontend skill catalog matches the backend catalog', () => {
     }
   });
 });
+
+describe('gem story gates match the backend', () => {
+  it('has the same reqQuests and secret flags per gem', () => {
+    const sig = (list) => list.map((s) => `${s.id}:${(s.reqQuests || []).join('+')}:${!!s.secretGem}`).sort();
+    expect(sig(SKILLS)).toEqual(sig(backend.SKILLS));
+  });
+});

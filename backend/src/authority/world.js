@@ -1547,7 +1547,10 @@ class World {
     } else {
       equippedWeapon = activeWeaponType(p.inv, this.weapons, this.defaultWeaponId);
     }
-    const req = checkGemRequirements(skill, p.stats, equippedWeapon);
+    // Story gates: enforced once the player's completed quests are loaded (join);
+    // until then the check stays level/attribute/weapon only.
+    const gemCtx = p._completedQuests ? { completedQuests: p._completedQuests, questTitles: p._questTitles || null } : null;
+    const req = checkGemRequirements(skill, p.stats, equippedWeapon, gemCtx);
     if (!req.weaponOk) {
       p._channelSkillId = null;
       p._channelTicks = 0;
@@ -1556,7 +1559,7 @@ class World {
     if (!req.ok) {
       p._channelSkillId = null;
       p._channelTicks = 0;
-      return { ok: false, kills: [], reason: 'requirements_unmet', error: req.errors[0] };
+      return { ok: false, kills: [], reason: 'requirements_unmet', error: req.message || req.errors[0] };
     }
 
     // Channeled skills: track continuous ticks and calculate ramping intensity

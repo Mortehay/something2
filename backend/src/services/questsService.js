@@ -758,6 +758,22 @@ async function clearRewardPending(pool, characterId, questId) {
 }
 
 module.exports.pendingRewardItems = pendingRewardItems;
+// Completed quest keys (and a key -> title map for messages) for gem unlock gates.
+let titleCache = null;
+async function loadCompletedQuests(pool, characterId) {
+  if (!titleCache) {
+    const t = await pool.query('SELECT key, title FROM quests');
+    titleCache = {};
+    for (const r of t.rows) titleCache[r.key] = r.title;
+  }
+  const r = await pool.query(
+    `SELECT q.key FROM character_quests cq JOIN quests q ON q.id = cq.quest_id
+      WHERE cq.character_id = $1 AND cq.status = 'completed'`,
+    [characterId],
+  );
+  return { keys: new Set(r.rows.map((x) => x.key)), titles: titleCache };
+}
+module.exports.loadCompletedQuests = loadCompletedQuests;
 module.exports.recordItem = recordItem;
 module.exports.recordChest = recordChest;
 module.exports.recordReach = recordReach;

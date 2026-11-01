@@ -39,7 +39,7 @@ function sendError(res, err, what) {
 // at the live player's feet. Defaults to "cannot", which leaves the item owed
 // (character_quests.reward_item_pending) for delivery at the next join, so a
 // router built without an authority (every test) never loses an item.
-function createQuestsRouter(pool, { dropRewardItem = async () => false, onLegacyChosen = () => false } = {}) {
+function createQuestsRouter(pool, { dropRewardItem = async () => false, onLegacyChosen = () => false, onQuestCompleted = () => false } = {}) {
   const router = express.Router();
   const guard = requireAuth(pool);
 
@@ -147,6 +147,8 @@ function createQuestsRouter(pool, { dropRewardItem = async () => false, onLegacy
       }
       // The kill path reads the legacy off the live player, so tell it now.
       if (result.completed && result.legacyChoice) onLegacyChosen(req.user.id, result.legacyChoice);
+      // Gems gated on this quest open for the live player at once.
+      if (result.completed && result.quest) onQuestCompleted(req.user.id, result.quest.key);
       res.json({ ok: true, ...result, itemDelivered });
     } catch (err) {
       sendError(res, err, 'complete quest');

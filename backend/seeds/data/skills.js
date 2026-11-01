@@ -2179,6 +2179,21 @@ function putDruidFormsFirst(list) {
   });
 }
 
+// Story gates for gems. A gem past the early game also needs a landmark boss
+// quest done (on top of its level and attributes); the late, rare ones are
+// "secret" - invisible in the merchant until those conditions are met.
+// Quest KEYS (seeds/data/questsData.js); the client resolves titles for messages.
+const GEM_GATE_QUESTS = [
+  { minLvl: 52, quest: 'act4_primordial_sovereign' },
+  { minLvl: 40, quest: 'act3_nether_behemoth' },
+  { minLvl: 28, quest: 'act2_obsidian_drake' },
+  { minLvl: 16, quest: 'act1_sunspire_reliquary' },
+];
+function gemQuestGate(reqLvl) {
+  const g = GEM_GATE_QUESTS.find((x) => reqLvl >= x.minLvl);
+  return g ? [g.quest] : [];
+}
+
 function enrichSkillGems(list) {
   const classCounters = {};
   for (const s of list) {
@@ -2285,6 +2300,8 @@ function enrichSkillGems(list) {
     if (s.reqWeapon === 'unarmed') tags.push('Martial');
 
     s.gemTags = tags;
+    s.reqQuests = gemQuestGate(reqLvl);
+    s.secretGem = idx >= 31;
   }
 }
 
@@ -2363,7 +2380,7 @@ function getStatValue(prog, fullKey, shortKey) {
   return val;
 }
 
-function checkGemRequirements(gem, playerProgression, equippedWeapon) {
+function checkGemRequirements(gem, playerProgression, equippedWeapon, ctx = null) {
   if (!gem) return { ok: true, errors: [] };
   const lvl = playerProgression?.level ?? playerProgression?.lvl ?? 1;
   const str = getStatValue(playerProgression, 'strength', 'str');
@@ -2409,9 +2426,38 @@ function checkGemRequirements(gem, playerProgression, equippedWeapon) {
     errors.push(`Requires ${gem.reqCha} Charisma (You have ${cha})`);
   }
 
+  // Story requirements. Only enforced when the caller knows the player's
+  // completed quests (ctx.completedQuests); questTitles maps key -> title.
+  const needQuests = Array.isArray(gem.reqQuests) ? gem.reqQuests : [];
+  const doneQuests = ctx && ctx.completedQuests
+    ? (ctx.completedQuests instanceof Set ? ctx.completedQuests : new Set(ctx.completedQuests))
+    : null;
+  const missingQuests = doneQuests ? needQuests.filter((k) => !doneQuests.has(k)) : [];
+  const questsOk = missingQuests.length === 0;
+  for (const k of missingQuests) {
+    const title = (ctx.questTitles && ctx.questTitles[k]) || k;
+    errors.push(`Requires completing quest "${title}"`);
+  }
+  // One readable line naming everything that is missing.
+  const missing = [];
+  if (!levelOk) missing.push(`Level ${gem.reqLvl}`);
+  for (const [ok, need, name] of [[strOk, gem.reqStr, 'Strength'], [dexOk, gem.reqDex, 'Dexterity'], [conOk, gem.reqCon, 'Constitution'],
+    [intOk, gem.reqInt, 'Intelligence'], [wisOk, gem.reqWis, 'Wisdom'], [chaOk, gem.reqCha, 'Charisma']]) {
+    if (!ok) missing.push(`${need} ${name}`);
+  }
+  const questNames = missingQuests.map((k) => `"${(ctx.questTitles && ctx.questTitles[k]) || k}"`);
+  let message = '';
+  if (missing.length || questNames.length) {
+    message = `Requires ${missing.join(', ')}`;
+    if (questNames.length) message += `${missing.length ? ' and completing ' : 'completing '}${questNames.length > 1 ? 'quests' : 'quest'} ${questNames.join(', ')}`;
+  }
+
   return {
     ok: errors.length === 0,
     weaponOk,
+    questsOk,
+    missingQuests,
+    message,
     levelOk,
     strOk,
     dexOk,

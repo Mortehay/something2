@@ -354,6 +354,7 @@ export class RenderSystem {
     // Dedicated Skill Gem Merchant
     gemMerchants = [], gemShopOpen = false, gemShopColorFilter = "all", gemShopClassFilter = "all",
     gemShopPage = 0, gemShopSelectedGemId = null,
+    gemQuestCtx = null, ownedGemIds = null, gemPlayerLevel = 1,
     // Skill Trainer / Merchant
     skillMerchants = [],
     // Dedicated Quest Giver / Elder NPC
@@ -702,6 +703,9 @@ export class RenderSystem {
         playerStats,
         equippedWeapon,
         selectedGemId: gemShopSelectedGemId,
+        questCtx: gemQuestCtx,
+        ownedGemIds,
+        playerLevel: gemPlayerLevel,
       }, this._gemShopHitAreas);
     }
 

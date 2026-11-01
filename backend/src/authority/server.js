@@ -46,6 +46,7 @@ const { knockbackPosition, knockbackWithFallback } = require('./knockback');
 const { buyStock, sellItem } = require('./trade');
 const { recordKill } = require('../services/questsService.js');
 const { vendorBuyPrice, loadLegacyChoice } = require('../services/legacyEffects.js');
+const { loadCompletedQuests } = require('../services/questsService.js');
 const { pendingRewardItems, clearRewardPending, recordNode, doneNodeKeys, recordFloor, floorFromWorldName, recordItem, recordChest, recordReach } = require('../services/questsService.js');
 const { worldQuestNodes, nearestQuestNode } = require('../services/questNodes.js');
 const { respawnDueCreatures, enqueueDeficit, CREATURE_SWEEP_MS } = require('../services/creatureRespawn');
@@ -2041,6 +2042,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
             for (const row of (r && r.rows) || []) pl._chestOpens.set(row.chest_id, new Date(row.reopen_at).getTime());
           })
           .catch((e) => console.error('chest cooldown load failed:', e));
+        loadCompletedQuests(pool, character.id).then((done) => { const pl = entry.world.getPlayer(ws.userId); if (pl) { pl._completedQuests = done.keys; pl._questTitles = done.titles; } }).catch((e) => console.error('completed quests load failed:', e));
         bossGate.loadClearedBosses(pool, character.id).then((set) => { const pl = entry.world.getPlayer(ws.userId); if (pl) { if (!pl._bossCleared) pl._bossCleared = new Set(); for (const id of set) pl._bossCleared.add(id); } }).catch((e) => console.error('boss clears load failed:', e));
         loadLegacyChoice(pool, character.id).then((lc) => { const pl = entry.world.getPlayer(ws.userId); if (pl) pl.legacyChoice = lc; }).catch((e) => console.error('legacy choice load failed:', e));
         send(ws, {
@@ -4070,6 +4072,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
     _heartbeatSweep: heartbeatSweep,
     // Quest item rewards (routes/questsRoutes.js): drop an item at a live player's feet.
     dropRewardItem: dropQuestRewardItem,
+    // A quest was completed over HTTP: unlock the gems it gates for the live player.
+    markQuestCompleted: (userId, questKey) => { const e = [...worlds.values()].find((w) => w.world.getPlayer(String(userId))); const p = e && e.world.getPlayer(String(userId)); if (p && p._completedQuests) p._completedQuests.add(questKey); return !!p; },
     setPlayerLegacy: (userId, choice) => { const e = [...worlds.values()].find((w) => w.world.getPlayer(String(userId))); const p = e && e.world.getPlayer(String(userId)); if (p) p.legacyChoice = choice || null; return !!p; },
     // Test seam, same reasoning as _heartbeatSweep above: run one field
     // chest respawn pass synchronously (and await its completion, unlike the

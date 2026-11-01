@@ -4,7 +4,7 @@
 
 import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
 import { artIcon, drawIconFit } from "./gameArt.js";
-import { getSkillsForClass, SKILLS, checkGemRequirements, getWeaponRequirementName } from "../core/skillsData.js";
+import { getSkillsForClass, SKILLS, checkGemRequirements, getWeaponRequirementName, gemVisibility } from "../core/skillsData.js";
 
 export const GEM_SHOP_W = 780;
 export const GEM_SHOP_H = 530;
@@ -43,7 +43,11 @@ export function layoutGemShopPanel(state) {
     playerStats = null,
     equippedWeapon = null,
     selectedGemId = null,
+    questCtx = null,
+    ownedGemIds = null,
+    playerLevel = 1,
   } = state;
+  const owned = ownedGemIds instanceof Set ? ownedGemIds : new Set(ownedGemIds || []);
 
   const px = Math.round((GAME_WIDTH - GEM_SHOP_W) / 2);
   const py = Math.round((GAME_HEIGHT - GEM_SHOP_H) / 2);
@@ -112,6 +116,19 @@ export function layoutGemShopPanel(state) {
     else pool = pool.filter(s => s.gemColor === colorFilter);
   }
 
+  // Three access states (see gemVisibility): sealed gems are not listed, only
+  // counted; the rest sort so what can be obtained now comes first.
+  const STATE_RANK = { available: 0, locked: 1, unlocked: 2 };
+  let sealedCount = 0;
+  pool = pool
+    .map((gem) => {
+      const req = checkGemRequirements(gem, playerStats, equippedWeapon, questCtx);
+      return { gem, req, state: gemVisibility(gem, req, owned.has(gem.id), playerLevel) };
+    })
+    .filter((e) => { if (e.state === "hidden") { sealedCount += 1; return false; } return true; })
+    .map((e, i) => ({ ...e, i }))
+    .sort((a, b) => STATE_RANK[a.state] - STATE_RANK[b.state] || a.i - b.i);
+
   const totalPages = Math.max(1, Math.ceil(pool.length / ITEMS_PER_PAGE));
   const currentPage = Math.max(0, Math.min(page, totalPages - 1));
   const startIdx = currentPage * ITEMS_PER_PAGE;
@@ -121,18 +138,17 @@ export function layoutGemShopPanel(state) {
   const listY = cly + FILTER_TAB_H + 8;
   const rows = [];
   for (let i = 0; i < visible.length; i++) {
-    const gem = visible[i];
+    const { gem, req, state: gemState } = visible[i];
     const ry = listY + i * (ITEM_H + 6);
     const price = gem.gemPrice || 35;
-    const canAfford = playerGold >= price;
-    const req = checkGemRequirements(gem, playerStats, equippedWeapon);
+    const canAfford = gemState === "available" && playerGold >= price;
 
     const buyBtn = {
       x: px + GEM_SHOP_W - PAD - 110,
       y: ry + 16,
       w: 100,
       h: 36,
-      label: `Buy 🪙${price}`,
+      label: gemState === "unlocked" ? "Owned ✔" : gemState === "locked" ? "🔒 Locked" : `Buy 🪙${price}`,
       canAfford,
       gemId: gem.id,
     };
@@ -146,6 +162,7 @@ export function layoutGemShopPanel(state) {
       price,
       canAfford,
       req,
+      state: gemState,
       buyBtn,
       selected: selectedGemId === gem.id,
     });
@@ -164,7 +181,7 @@ export function layoutGemShopPanel(state) {
     { kind: "gem_shop_close", box: close },
     ...colorTabs.map(c => ({ kind: "gem_shop_color_filter", key: c.key, box: c })),
     ...classTabs.map(c => ({ kind: "gem_shop_class_filter", key: c.key, box: c })),
-    ...rows.map(r => ({ kind: "gem_shop_buy", gemId: r.gem.id, gem: r.gem, price: r.price, canAfford: r.canAfford, box: r.buyBtn })),
+    ...rows.map(r => ({ kind: "gem_shop_buy", gemId: r.gem.id, gem: r.gem, price: r.price, canAfford: r.canAfford, state: r.state, message: r.req.message, box: r.buyBtn })),
     ...rows.map(r => ({ kind: "gem_shop_item", gemId: r.gem.id, gem: r.gem, box: r })),
   ];
   if (prevBtn) hitAreas.push({ kind: "gem_shop_page_prev", box: prevBtn });
@@ -183,6 +200,7 @@ export function layoutGemShopPanel(state) {
     currentPage,
     totalPages,
     totalCount: pool.length,
+    sealedCount,
     playerGold,
     hitAreas,
   };
@@ -192,7 +210,7 @@ export function layoutGemShopPanel(state) {
 export function drawGemShopPanel(ctx, layout, state, art = null) {
   const {
     panel, title, close, colorTabs, classTabs, rows,
-    prevBtn, nextBtn, footerY, currentPage, totalPages, totalCount, playerGold,
+    prevBtn, nextBtn, footerY, currentPage, totalPages, totalCount, playerGold, sealedCount,
   } = layout;
 
   ctx.save();
@@ -365,7 +383,7 @@ export function drawGemShopPanel(ctx, layout, state, art = null) {
     if (s.reqCha > 0) reqString += ` · ${s.reqCha} CHA`;
     reqString += ` · ${getWeaponRequirementName(s.reqWeapon || 'any')}`;
 
-    ctx.fillStyle = r.req.ok ? "#34d399" : "#fb7185";
+    ctx.fillStyle = r.state === "locked" ? "#fb7185" : "#34d399";
     ctx.fillText(reqString, textX, r.y + 25);
 
     // Line 3: Cost, Cooldown, Type & Description
@@ -374,7 +392,13 @@ export function drawGemShopPanel(ctx, layout, state, art = null) {
     const maxDescW = r.w - (textX - r.x) - 120;
     const costText = s.channeled ? `${(s.cost || 0) * 4}/s ${s.costType.toUpperCase()}` : `${s.cost} ${s.costType.toUpperCase()}`;
     const cdText = s.channeled ? 'Channeled' : `${s.cooldown}s CD`;
-    ctx.fillText(`${costText} · ${cdText} — ${s.descEn || s.descUk}`, textX, r.y + 45, maxDescW);
+    if (r.state === "locked" && r.req.message) {
+      // Say exactly what is missing instead of the description.
+      ctx.fillStyle = "#fda4af";
+      ctx.fillText(`🔒 ${r.req.message}`, textX, r.y + 45, maxDescW);
+    } else {
+      ctx.fillText(`${costText} · ${cdText} — ${s.descEn || s.descUk}`, textX, r.y + 45, maxDescW);
+    }
 
     // Buy Button
     const b = r.buyBtn;
@@ -413,7 +437,12 @@ export function drawGemShopPanel(ctx, layout, state, art = null) {
   // Page info
   ctx.font = "bold 11px monospace";
   ctx.fillStyle = "#94a3b8";
-  ctx.fillText(`Page ${currentPage + 1} of ${totalPages} (${totalCount} gems available)`, panel.x + panel.w / 2, footerY + 14);
+  ctx.fillText(`Page ${currentPage + 1} of ${totalPages} (${totalCount} gems shown)`, panel.x + panel.w / 2, footerY + 14);
+  if (sealedCount > 0) {
+    ctx.font = "11px sans-serif";
+    ctx.fillStyle = "#a78bfa";
+    ctx.fillText(`🔒 ${sealedCount} sealed gem${sealedCount === 1 ? "" : "s"} — level up and finish story quests to reveal them`, panel.x + panel.w / 2, footerY + 30);
+  }
 
   // Pagination Buttons
   if (prevBtn) {

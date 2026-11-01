@@ -2040,6 +2040,9 @@ export class Game {
                 gemShopClassFilter: this.gemShopClassFilter,
                 gemShopPage: this.gemShopPage,
                 gemShopSelectedGemId: this.gemShopSelectedGemId,
+                gemQuestCtx: this._gemQuestCtx(),
+                ownedGemIds: new Set(this.getInventoryGems().map((g) => g.id)),
+                gemPlayerLevel: (this.progression && this.progression.level) || 1,
                 equippedWeapon: this._resolveEquippedWeapon(),
                 playerStats: this.characterView() || this.progression || null,
                 skillMerchants: this.skillMerchants,
@@ -2414,6 +2417,20 @@ export class Game {
         }
     }
 
+    // Completed quests + titles for the gem story gates. null until the quest
+    // list has loaded, so a slow fetch never locks every gated gem by mistake.
+    _gemQuestCtx() {
+        const quests = this.allQuests;
+        if (!Array.isArray(quests) || quests.length === 0) return null;
+        const completedQuests = new Set();
+        const questTitles = {};
+        for (const q of quests) {
+            questTitles[q.key] = q.title;
+            if (q.status === 'completed') completedQuests.add(q.key);
+        }
+        return { completedQuests, questTitles };
+    }
+
     openGemShop() {
         if (this._otherPanelOpen('gemShop')) return;
         this.closeAllPanels('gemShop');
@@ -2680,9 +2697,9 @@ export class Game {
         // 0. PoE Skill Gem Requirements (Weapon, Level, Attributes)
         const equippedWeapon = this._resolveEquippedWeapon();
         const playerStats = this.characterView() || this.progression || null;
-        const gemReq = checkGemRequirements(s, playerStats, equippedWeapon);
+        const gemReq = checkGemRequirements(s, playerStats, equippedWeapon, this._gemQuestCtx());
         if (!gemReq.ok) {
-            const firstErr = gemReq.errors[0] || "Недостатньо характеристик або непідходяща зброя";
+            const firstErr = gemReq.message || gemReq.errors[0] || "Недостатньо характеристик або непідходяща зброя";
             if (this.showToast) {
                 this.showToast(`❌ ${s.nameUk || s.nameEn}: ${firstErr}`);
             }
@@ -3379,6 +3396,15 @@ export class Game {
                         return;
                     }
                     if (hit.kind === 'gem_shop_buy') {
+                        // Locked / owned gems cannot be bought; say exactly what is missing.
+                        if (hit.state === 'unlocked') {
+                            if (this.showToast) this.showToast(`💎 You already own ${hit.gem.nameEn || hit.gem.nameUk}.`);
+                            return;
+                        }
+                        if (hit.state === 'locked') {
+                            if (this.showToast) this.showToast(`🔒 ${hit.gem.nameEn || hit.gem.nameUk}: ${hit.message || 'requirements not met'}`);
+                            return;
+                        }
                         const price = hit.price || 35;
                         if ((this.gold || 0) < price) {
                             if (this.showToast) this.showToast(`⚠️ Not enough Gold! Need 🪙 ${price}`);
