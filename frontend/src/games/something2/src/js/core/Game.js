@@ -1134,7 +1134,7 @@ export class Game {
             questGivers: (this.questGivers || []).map((qg) => ({
                 x: qg.x,
                 y: qg.y,
-                name: qg.name || 'Elder Eldrin',
+                name: qg.name || 'Quest Giver',
             })),
             // One entry per village with something to do: { villageKey, marker }
             // where marker is "?" (turn in) or "!" (open to take at this level),

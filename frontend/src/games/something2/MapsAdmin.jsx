@@ -105,14 +105,15 @@ const PickerOption = styled.button`
 const VILLAGE_DEFAULT_W = 5;
 const VILLAGE_DEFAULT_H = 5;
 
-// SOMET-587. The four posts one villages row carries (merchant_entity_type_id
+// SOMET-587. The posts one villages row carries (SOMET-678 added quest_giver) (merchant_entity_type_id
 // etc. on the DB side -- see backend/seeds/data/pointTypes.js's
 // VILLAGE_POST_KINDS, which this list mirrors; not imported directly since
 // that module lives on the backend side of the repo split and nothing else
 // here crosses it). Each slot name doubles as its own point_kind.
-const VILLAGE_POST_SLOTS = ['merchant', 'bank', 'gem_merchant', 'skill_merchant'];
+const VILLAGE_POST_SLOTS = ['merchant', 'bank', 'gem_merchant', 'skill_merchant', 'quest_giver'];
 const VILLAGE_POST_LABELS = {
   merchant: 'Merchant', bank: 'Bank', gem_merchant: 'Gem merchant', skill_merchant: 'Skill merchant',
+  quest_giver: 'Quest giver',
 };
 // villages row field name for a slot's current binding, matching the GET
 // /api/worlds/:id/villages column names added for this ticket.

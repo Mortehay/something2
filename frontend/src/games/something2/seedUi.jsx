@@ -72,3 +72,20 @@ export function PcLabelHint({ meta }) {
   if (!meta || meta.pcLabelSet !== false) return null;
   return <p><Muted>{PC_LABEL_HINT}</Muted></p>;
 }
+
+// Migration files the database has not run (GET /migrations). A pull brings
+// them in but nothing applies them until the backend boots again, so the
+// button is a restart -- and is only offered where a restart runs them
+// (MIGRATE_ON_BOOT; the Orange Pi migrates as a deploy step instead).
+export function MigrationsButton({ migrations, onClick, busy = false }) {
+  const pending = migrations?.pending || [];
+  let why = null;
+  if (!migrations) why = 'checking migrations…';
+  else if (pending.length === 0) why = 'all migrations applied';
+  else if (!migrations.appliesOnRestart) why = 'migrations run at deploy on this server';
+  const label = pending.length ? `Update migrations (${pending.length})` : 'Update migrations';
+  const title = [why, pending.length ? `Not applied:\n${pending.join('\n')}` : null].filter(Boolean).join('\n\n');
+  return (
+    <Btn $primary={!why} disabled={Boolean(why) || busy} title={title} onClick={onClick}>{label}</Btn>
+  );
+}

@@ -26,18 +26,18 @@ test('fetchWaypoints maps art', async () => {
   assert.strictEqual(w.art, null);
 });
 
-test('fetchVillages maps the four post art names', async () => {
+test('fetchVillages maps the five post art names', async () => {
   const pool = { query: async (sql) => {
-    for (const c of ['merchant_entity_type_id', 'bank_entity_type_id', 'gem_merchant_entity_type_id', 'skill_merchant_entity_type_id']) {
+    for (const c of ['merchant_entity_type_id', 'bank_entity_type_id', 'gem_merchant_entity_type_id', 'skill_merchant_entity_type_id', 'quest_giver_entity_type_id']) {
       assert.match(sql, new RegExp(c));
     }
     return { rows: [{ id: 'v', min_row: 0, min_col: 0, width: 8, height: 8, gate_edge: 'S', spawn_x: 1, spawn_y: 1,
-      merchant_x: 450, merchant_y: 450, merchant_art: 'merchant_post', bank_art: null, gem_merchant_art: null, skill_merchant_art: 'lectern' }] };
+      merchant_x: 450, merchant_y: 450, merchant_art: 'merchant_post', bank_art: null, gem_merchant_art: null, skill_merchant_art: 'lectern', quest_giver_art: 'Shadow Hunter' }] };
   } };
   const [v] = await fetchVillages(pool, 'w');
   assert.deepStrictEqual(
-    { m: v.merchantArt, b: v.bankArt, g: v.gemMerchantArt, s: v.skillMerchantArt },
-    { m: 'merchant_post', b: null, g: null, s: 'lectern' },
+    { m: v.merchantArt, b: v.bankArt, g: v.gemMerchantArt, s: v.skillMerchantArt, q: v.questGiverArt },
+    { m: 'merchant_post', b: null, g: null, s: 'lectern', q: 'Shadow Hunter' },
   );
 });
 

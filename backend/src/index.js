@@ -596,7 +596,7 @@ app.use('/api/passive-tree', passiveTreeRoutes(guardPool));
 // player's read-only view of the same table.
 app.use('/api/passive-nodes', passiveNodesRoutes(guardPool));
 app.use('/api/aura-effects', auraEffectsRoutes(guardPool));
-app.use('/api/seed-export', seedExportRoutes(guardPool, { processStartedAt: PROCESS_STARTED_AT }));
+app.use('/api/seed-export', seedExportRoutes(guardPool, { processStartedAt: PROCESS_STARTED_AT, migrateOnBoot: shouldMigrateOnBoot() }));
 app.use('/api/creature-skills', creatureSkillsRoutes(guardPool));
 
 // Character slots (SOMET-259): list / create / delete, plus the playable-class
@@ -5293,7 +5293,7 @@ app.get('/api/worlds/:id/villages', adminGuard, async (req, res) => {
       // already returned is unchanged.
       `SELECT id, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y, merchant_x, merchant_y,
               spec_key, merchant_entity_type_id, bank_entity_type_id,
-              gem_merchant_entity_type_id, skill_merchant_entity_type_id
+              gem_merchant_entity_type_id, skill_merchant_entity_type_id, quest_giver_entity_type_id
          FROM villages WHERE world_id = $1 ORDER BY created_at ASC`,
       [req.params.id],
     );

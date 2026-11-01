@@ -3215,7 +3215,7 @@ export class RenderSystem {
     ctx.restore();
   }
 
-  // Dedicated Quest Giver / Elder Eldrin NPC in village
+  // Village quest giver NPC (SOMET-678: name + art are its bound entity)
   drawQuestGiver(qg, player = null) {
     const s = worldToScreen(qg.x, qg.y);
     const dx = s.x, dy = s.y;
@@ -3257,12 +3257,12 @@ export class RenderSystem {
 
     const lift = drewArt ? drewArt : r;
 
-    // Label: "Elder Eldrin" or "Quest Giver"
+    // Label: the giver entity name sent by the server
     this.ctx.textAlign = "center";
     this.ctx.font = "bold 12px sans-serif";
     this.ctx.textBaseline = "alphabetic";
     this.ctx.fillStyle = "#fef08a";
-    this.ctx.fillText(qg.name || "Elder Eldrin", dx, dy - lift - 2);
+    this.ctx.fillText(qg.name || "Quest Giver", dx, dy - lift - 2);
 
     // Prompt [e] Quests when close
     if (player) {

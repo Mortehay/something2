@@ -30,6 +30,7 @@ const teleportCast = require('./teleportCast.js');
 const bossGate = require('../services/bossGate.js');
 const { buildLandmarks } = require('../services/landmarks');
 const { loadPointKindDefaults, resolvePointArt, chestPointKind } = require('../services/pointArt');
+const { buildQuestGivers } = require('../services/questGivers');
 const {
   fetchChests, spawnFieldChest, nearestChest, respawnDueFieldChests, purgeExpiredChests,
 } = require('../services/chests.js');
@@ -2125,21 +2126,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
               villageId: v.id, x: v.skillMerchantX, y: v.skillMerchantY,
               art: resolvePointArt('skill_merchant', v.skillMerchantArt, entry.pointArtDefaults),
             })),
-          questGivers: (entry.villages || [])
-            .filter((v) => v.questGiverX != null && v.questGiverY != null)
-            .map((v) => {
-              let name = 'Elder Eldrin';
-              if (v.specKey === 'emberfall') name = 'Lord Thorn';
-              else if (v.specKey === 'sylvan_haven') name = 'Arch-Druid Elyona';
-              else if (v.specKey === 'abyssal_tideport') name = 'Captain Valdor';
-              else if (v.specKey === 'ashen_oasis') name = 'Astronomer Zahir';
-              else if (v.specKey === 'blackfen') name = 'Shadow Hunter';
-              return {
-                villageId: v.id, villageKey: v.specKey || null, x: v.questGiverX, y: v.questGiverY,
-                name,
-                art: 'quest_giver',
-              };
-            }),
+          // SOMET-678: name and art are the village's bound quest giver entity.
+          questGivers: buildQuestGivers(entry.villages, entry.pointArtDefaults),
           // SOMET-297. Built from the Maps loadWorld already holds, plus one
           // per-join read of this character's activations -- no second loader.
           //

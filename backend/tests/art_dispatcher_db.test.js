@@ -700,3 +700,165 @@ lockedTest('a prompt failure that exhausts the job IS counted as failed',
     assert.equal(generated, 0);
     assert.equal(final.failed, 1);
   });
+
+// --- SOMET-680: the model gateway ------------------------------------------
+//
+// The prompt phase runs on the box's text model, and the box then holds the
+// card for 300 s. Every image call after it came back 503 "Model gateway:
+// requested <image model>, but brain:... holds the card", the breaker counted
+// three of them and stopped the drain saying the provider "looks down". The
+// box was answering fine; the batch had locked itself out.
+const IMAGE_MODEL = 'stabilityai/stable-diffusion-xl-base-1.0+Muapi/soft-pixel-art-xl';
+const GATEWAY_503 = 'provider answered 503: {"detail":"Model gateway: requested '
+  + `${IMAGE_MODEL}, but brain:qwen3.6-35b-a3b was selected in the UI and holds the card `
+  + 'until 300s idle (299s left). Active model: brain:qwen3.6-35b-a3b."}';
+
+async function drainOut(ms = 50, rounds = 120) {
+  for (let i = 0; i < rounds && dispatcher.runStatus().running; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((r) => { setTimeout(r, ms); });
+  }
+  return dispatcher.runStatus();
+}
+
+lockedTest('a gateway refusal switches the box to the image model and the drain carries on',
+  async (t, pool, providerId) => {
+    for (let i = 60; i <= 63; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await queue.enqueue(pool, [S(i)], { backend: 'connector', providerId });
+    }
+    dispatcher.__resetRun();
+    t.after(() => { dispatcher.stopDrain(); dispatcher.__resetRun(); });
+    // The box holds the card for the text model until someone switches it.
+    let active = 'brain:qwen3.6-35b-a3b';
+    const switches = [];
+    const draw = succeed();
+    dispatcher.startDrain(pool, {
+      provider: PROVIDER(providerId),
+      generate: async (registryId, ...rest) => {
+        if (active !== IMAGE_MODEL) return failWith(GATEWAY_503)(registryId);
+        return draw(registryId, ...rest);
+      },
+      switchModel: async (provider, model) => {
+        switches.push({ providerId: provider && provider.id, model });
+        active = model;
+        return { ok: true, json: {} };
+      },
+      buildRequest,
+      limit: 4,
+      concurrency: 1,
+    });
+    const final = await drainOut();
+    assert.equal(final.running, false, 'precondition: the drain must finish');
+    assert.equal(final.error, null,
+      `a busy card is not a dead provider and must not stop the batch: ${final.error}`);
+    assert.deepEqual(switches, [{ providerId, model: IMAGE_MODEL }],
+      'exactly one switch, to the model the refusal named, on the refused job\'s provider');
+    assert.equal(final.done, 4,
+      'every subject draws, the refused one included -- it is released, not sent to backoff');
+
+    const { rows } = await pool.query(
+      "SELECT state, attempts, fault_refunds FROM art_jobs WHERE subject_key LIKE 'sk_6%' ORDER BY id",
+    );
+    assert.deepEqual(rows.map((r) => r.state), ['done', 'done', 'done', 'done']);
+    assert.equal(rows[0].fault_refunds, 0,
+      'a refusal is not a fault: spending the capped refund on it would strand the subject later');
+  });
+
+lockedTest('a box that keeps refusing after the switch stops the drain as BUSY, not down',
+  async (t, pool, providerId) => {
+    for (let i = 70; i <= 75; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await queue.enqueue(pool, [S(i)], { backend: 'connector', providerId });
+    }
+    dispatcher.__resetRun();
+    t.after(() => { dispatcher.stopDrain(); dispatcher.__resetRun(); });
+    let generations = 0;
+    let switches = 0;
+    dispatcher.startDrain(pool, {
+      provider: PROVIDER(providerId),
+      // Someone else keeps the card: the switch "works" and nothing changes.
+      // No "(Ns left)" here, so there is nothing finite to wait out.
+      generate: async (registryId) => {
+        generations += 1;
+        return failWith(GATEWAY_503.replace(' (299s left)', ''))(registryId);
+      },
+      switchModel: async () => { switches += 1; return { ok: true, json: {} }; },
+      buildRequest,
+      limit: 6,
+      concurrency: 1,
+    });
+    const final = await drainOut();
+    assert.equal(final.running, false, 'a refusing box must not spin the drain forever');
+    assert.equal(switches, 1, 'one switch per model until something draws -- no switch loop');
+    assert.ok(generations <= 2, `each refusal ends its pass; ${generations} calls were made`);
+    assert.match(final.error || '', /busy|holds the card/i, 'the stop must say the box is busy');
+    assert.doesNotMatch(final.error || '', /looks down/i,
+      'the box answered; saying it looks down sends the operator the wrong way');
+    const { rows } = await pool.query(
+      "SELECT count(*)::int AS n FROM art_jobs WHERE state = 'queued' AND subject_key LIKE 'sk_7%'",
+    );
+    assert.equal(rows[0].n, 6, 'every subject is still queued');
+  });
+
+lockedTest('a busy switch answer is waited out, and Stop still ends the wait',
+  async (t, pool, providerId) => {
+    await queue.enqueue(pool, [S(80), S(81)], { backend: 'connector', providerId });
+    dispatcher.__resetRun();
+    t.after(() => { dispatcher.stopDrain(); dispatcher.__resetRun(); });
+    let switchCalls = 0;
+    dispatcher.startDrain(pool, {
+      provider: PROVIDER(providerId),
+      generate: failWith(GATEWAY_503),
+      // The box answers 409 to a normal-mode switch while it is busy.
+      switchModel: async () => {
+        switchCalls += 1;
+        return { ok: false, status: 409, retryable: true, error: 'busy' };
+      },
+      buildRequest,
+      limit: 2,
+      concurrency: 1,
+    });
+    for (let i = 0; i < 40 && switchCalls < 1; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((r) => { setTimeout(r, 25); });
+    }
+    assert.ok(switchCalls >= 1, 'precondition: the drain asked to switch');
+    assert.equal(dispatcher.runStatus().running, true, 'a busy box is waited for, not given up on');
+    assert.equal(dispatcher.stopDrain(), true);
+    const final = await drainOut();
+    assert.equal(final.running, false, 'Stop must end the wait');
+  });
+
+// The reported batch, end to end: "Regenerate prompts with GPU box" ticked, so
+// the prompt phase loads the text model, which then holds the card. Each prompt
+// written hands the card to the text model on purpose -- so a refusal after
+// it is a new one that earns its own switch, not proof the last switch failed.
+lockedTest('prompt phase on the text model, then image refusals, still draws every subject',
+  async (t, pool, providerId) => {
+    await queue.enqueue(pool, [S(90), S(91), S(92)], { backend: 'connector', providerId });
+    await pool.query("UPDATE art_jobs SET needs_prompt = true WHERE subject_key LIKE 'sk_9%'");
+    dispatcher.__resetRun();
+    t.after(() => { dispatcher.stopDrain(); dispatcher.__resetRun(); });
+    let active = 'brain:qwen3.6-35b-a3b';
+    const switches = [];
+    const draw = succeed();
+    dispatcher.startDrain(pool, {
+      provider: PROVIDER(providerId),
+      writePromptForJob: async () => { active = 'brain:qwen3.6-35b-a3b'; },
+      generate: async (registryId, ...rest) => {
+        if (active !== IMAGE_MODEL) return failWith(GATEWAY_503)(registryId);
+        return draw(registryId, ...rest);
+      },
+      switchModel: async (provider, model) => { switches.push(model); active = model; return { ok: true, json: {} }; },
+      buildRequest,
+      limit: 3,
+      concurrency: 1,
+    });
+    const final = await drainOut();
+    assert.equal(final.running, false, 'precondition: the drain must finish');
+    assert.equal(final.error, null, `the batch must not stop: ${final.error}`);
+    assert.equal(final.prompts_written, 3);
+    assert.equal(final.done, 3, 'every subject is drawn after the one switch');
+    assert.deepEqual(switches, [IMAGE_MODEL]);
+  });

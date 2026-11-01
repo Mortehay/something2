@@ -11,6 +11,7 @@ const descriptions = require('./artPromptDescriptions.js');
 const subjectDescriber = require('./subjectDescriber.js');
 const failures = require('./artFailures.js');
 const localArt = require('./localArtGenerator.js');
+const rap = require('./remoteAudioProvider.js');
 const {
   buildObjectPrompt, BACKDROP, CUTOUT_BACKDROP, OBJECT_NEGATIVES,
 } = require('./objectPrompt.js');
@@ -282,13 +283,26 @@ async function runOne(db, job, {
     // cost one. Gated on the failure being PROVIDER-class as well as fast: a
     // subject whose own cutout keyed it away is a real attempt however quickly
     // it came back, and refunding that would retry a hopeless subject forever.
+    const subject = `${job.subject_kind}/${job.subject_key}`;
+    // SOMET-680. The box's model gateway refused the call because another
+    // model holds the card. Not an attempt at the subject and not a backoff:
+    // the drain switches the box and the subject goes straight back. Released
+    // rather than refunded, because refunds are capped and a batch can meet
+    // this once per prompt phase.
+    if (rap.isGatewayRefusal(message)) {
+      await queue.release(db, [job.id], { lastError: message });
+      return {
+        id: job.id, ok: false, error: message, subject, terminal: false,
+        gatewayRefusal: true, providerId: job.provider_id,
+      };
+    }
     const elapsed = Date.now() - startedAt;
     const refundAttempt = elapsed < queue.FAST_FAULT_MS()
       && failures.classify(message).retryable;
     const row = await queue.fail(db, job.id, new Error(message), { refundAttempt });
     return {
       id: job.id, ok: false, error: message,
-      subject: `${job.subject_kind}/${job.subject_key}`,
+      subject,
       // SOMET-538. Whether this failure ENDED the job. A retryable one puts it
       // back in `queued`, where the console still counts it as owed; counting
       // it as failed too made the progress card double count it.
@@ -599,6 +613,9 @@ async function requestChangedSinceFailure(db, job, {
 // again. Not a cap on the backoff itself -- the loop re-checks and waits again
 // -- only on how long it goes without noticing a stop request or new work.
 const MAX_IDLE_WAIT_MS = () => parseInt(process.env.ART_DRAIN_MAX_WAIT_MS || '60000', 10);
+// First wait after the box answers a model switch with busy (409/503); doubles
+// up to MAX_IDLE_WAIT_MS. Same default as the audio drain's.
+const SWITCH_WAIT_MS = () => parseInt(process.env.ART_SWITCH_WAIT_MS || '5000', 10);
 
 // Sleep that a stop request cuts short. Polled rather than timer-cancelled
 // because stopDrain only flips a flag -- it has no handle to clear, and a
@@ -813,7 +830,43 @@ function startDrain(db, opts = {}) {
   // A Set, not a counter: the same subject failing repeatedly says nothing
   // about the provider, and the attempt cap already ends that.
   const brokenSubjects = new Set();
+  // SOMET-680. The model a gateway refusal named in the current pass, and the
+  // model the drain last switched the box to because of one without seeing a
+  // success since. A second refusal for that same model stops the drain as
+  // "busy": the switch did not take, and switching again would spin.
+  let refusal = null;
+  let refusalSwitch = null;
+  const switchModel = opts.switchModel || rap.switchModel;
   const self = run;
+  // Makes `model` the box's active model through its gateway. Normal mode
+  // only -- never force, which would cut off whatever else the box is doing.
+  // A busy answer (409/503) is waited out with a doubling backoff that Stop
+  // cuts short; any other answer goes ahead, and the next generation reports
+  // whatever is actually wrong. False only when the drain was stopped.
+  async function switchBoxTo(provider, model) {
+    if (!provider) return true;
+    let delay = SWITCH_WAIT_MS();
+    for (;;) {
+      if (self.stopping) return false;
+      let r;
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        r = await switchModel(provider, model);
+      } catch (err) {
+        r = { ok: false, error: err && err.message ? err.message : String(err) };
+      }
+      const busy = !r.ok && r.retryable && (r.status === 409 || r.status === 503);
+      if (!busy) {
+        if (!r.ok) console.warn(`art drain: switching the box to ${model} failed, going ahead: ${r.error}`);
+        self.waitingUntil = null;
+        return true;
+      }
+      self.waitingUntil = new Date(Date.now() + delay).toISOString();
+      // eslint-disable-next-line no-await-in-loop
+      await sleepUnlessStopping(delay, self);
+      delay = Math.min(delay * 2, MAX_IDLE_WAIT_MS());
+    }
+  }
   const promptSubjects = (opts.promptDeps && opts.promptDeps.subjects) || catalogSubjects;
   const promptResolveSubject = subjectResolver(db, promptSubjects);
 
@@ -834,6 +887,10 @@ function startDrain(db, opts = {}) {
               });
               await queue.promptWritten(db, promptJob.id);
               self.promptsWritten += 1;
+              // The text model just took the card ON PURPOSE, so the next
+              // gateway refusal is a fresh one that deserves its own switch,
+              // not proof that the last switch failed (SOMET-680).
+              refusalSwitch = null;
             } catch (err) {
               const row = await queue.fail(db, promptJob.id, err, { refundAttempt: err && err.busy === true });
               // Only a job this failure ENDED is failed; one back in `queued`
@@ -875,7 +932,13 @@ function startDrain(db, opts = {}) {
           // remaining -- counting it here as well read "2 of 4 · 50%" with
           // nothing drawn and ended "2 drawn, 2 failed" when nothing failed.
           if (r.ok) self.done += 1; else if (r.terminal) self.failed += 1;
-          if (r.ok) { brokenSubjects.clear(); return null; }
+          if (r.ok) { brokenSubjects.clear(); refusalSwitch = null; return null; }
+          // Ends the pass at once: every subject behind it would be refused
+          // the same way, and the switch has to happen before the next claim.
+          if (r.gatewayRefusal) {
+            if (!refusal) refusal = { model: rap.requestedModel(r.error), error: r.error, providerId: r.providerId };
+            return 'stop';
+          }
           // Only PROVIDER-class failures count. A subject whose cutout keyed
           // away its own image says nothing about the provider's health, and
           // tripping on it would stop a perfectly good batch -- exactly the
@@ -894,6 +957,21 @@ function startDrain(db, opts = {}) {
           shouldStop: () => self.stopping,
         });
         self.passes += 1;
+
+        if (refusal) {
+          const { model, error, providerId } = refusal;
+          refusal = null;
+          if (!model || refusalSwitch === model) {
+            self.error = `stopped: the GPU box is busy with another model -- it refused ${model || 'the image model'} `
+              + `again after the batch switched to it (${error}). Nothing was lost: the subjects are still `
+              + 'queued. Start the batch again once the box is free.';
+            break;
+          }
+          refusalSwitch = model;
+          const target = await resolveJobProvider(db, providerId, opts.provider, opts.loadProvider);
+          if (!(await switchBoxTo(target, model))) break;
+          continue;
+        }
 
         // THE CIRCUIT BREAKER fired inside the pass; this only reports it.
         if (tripped) {
