@@ -17,7 +17,7 @@
 import styled from 'styled-components';
 import {
   batchProgress, DRAIN_GROUPS_LABEL, queuedToDiscard, runStopWarning, groupRunningText,
-  drainPhaseText, waitingText,
+  drainPhaseText, waitingText, drainActivity,
 } from './audioBatch.js';
 import {
   useStartAudioDrain, useStopAudioDrain, useRetryAudioFailures, useClearAudioJobs,
@@ -51,6 +51,10 @@ const GroupPill = styled.div`
 const Current = styled.p`
   margin: 0 0 0.5rem; font-size: 0.85rem; color: var(--s2-text);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+`;
+const Activity = styled.div`
+  margin: 0 0 0.5rem; font-size: 0.8rem; color: var(--s2-text-muted);
+  p { margin: 0 0 0.2rem; }
 `;
 const Waiting = styled.p`
   margin: 0 0 0.5rem; font-size: 0.85rem; color: var(--s2-warning, var(--s2-text));
@@ -102,6 +106,7 @@ function AudioBatchPanel({
   const stopWarning = runStopWarning(run);
   const phaseText = drainPhaseText(run);
   const waiting = waitingText(run);
+  const activity = drainActivity({ run, stats });
 
   return (
     <Panel>
@@ -138,7 +143,7 @@ function AudioBatchPanel({
           };
           return (
             <GroupPill key={name} $active={progress.group === name}>
-              {label}: <b>{g.done}</b> done · {g.queued} queued · {groupRunningText(run, g.running)}{g.failed ? ` · ${g.failed} failed` : ''}
+              {label}: <b>{g.done}</b> done · {g.queued} queued{g.prompts ? ` (${g.prompts} need a prompt)` : ''} · {groupRunningText(run, g.running)}{g.failed ? ` · ${g.failed} failed` : ''}
             </GroupPill>
           );
         })}
@@ -153,10 +158,14 @@ function AudioBatchPanel({
         </Waiting>
       )}
 
-      {run && run.current && (
-        <Current>
-          drawing {run.current.subject_kind}/{run.current.subject_key} · {run.current.slot}
-        </Current>
+      {activity && activity.step && (
+        <Activity role="status"><p>{activity.step}</p></Activity>
+      )}
+
+      {activity && activity.current && <Current>{activity.current}</Current>}
+
+      {activity && activity.last && (
+        <Activity><p>{activity.last}</p></Activity>
       )}
 
       <Controls>

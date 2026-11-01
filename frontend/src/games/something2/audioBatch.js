@@ -257,3 +257,57 @@ export function waitingText(run) {
     : '';
   return { line: `Waiting for box: ${w.model || 'unknown model'}${since}`, reason: w.reason || null };
 }
+
+// "1m 05s" / "42s" / "2h 03m" for a non-negative millisecond span.
+export function formatSpan(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${String(s % 60).padStart(2, '0')}s`;
+  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
+}
+
+function ageText(iso, now) {
+  const t = iso ? new Date(iso).getTime() : NaN;
+  return Number.isNaN(t) ? null : formatSpan(now - t);
+}
+
+// What the running drain is doing, in words (the bar alone counts finished
+// clips only). During the PROMPT phase every job whose prompt is written goes
+// back to 'queued' for the audio phase, so done -- and the bar -- stand still
+// until the last prompt is written; without these lines that reads as a hang.
+//   step     -- which phase, and how many prompts are left / written;
+//   current  -- the job in hand, with the right verb and how long it has run;
+//   last     -- how long since any job last finished (the liveness signal).
+// null while no drain runs.
+export function drainActivity({ run, stats } = {}, now = Date.now()) {
+  if (!run || !run.running) return null;
+  const groups = (stats && stats.groups) || {};
+  const promptsLeft = Object.values(groups).reduce((n, g) => n + Number(g.prompts || 0), 0);
+  const written = Number(run.prompts_written || 0);
+
+  let step = null;
+  if (run.phase === 'prompt') {
+    step = `Step 1 of 2 — writing text prompts: ${promptsLeft} left, ${written} written this run. `
+      + 'Audio (the bar) starts after the last prompt.';
+  } else if (run.phase === 'audio') {
+    step = `Step 2 of 2 — generating audio${promptsLeft ? ` (${promptsLeft} prompts wait for the next cycle)` : ''}.`;
+  }
+
+  let current = null;
+  const c = run.current;
+  if (c) {
+    const verb = c.task === 'prompt' ? 'writing prompt for' : 'generating';
+    const pack = c.pack_size > 1 ? ` (+${c.pack_size - 1} more in this pack)` : '';
+    const age = ageText(c.started_at, now);
+    current = `${verb} ${c.subject_kind}/${c.subject_key} · ${c.slot}${pack}${age ? ` — ${age}` : ''}`;
+  }
+
+  const lastAge = ageText(run.last_progress_at, now);
+  const startAge = ageText(run.started_at, now);
+  let last;
+  if (lastAge) last = `last job finished ${lastAge} ago`;
+  else last = startAge ? `no job finished yet (started ${startAge} ago)` : null;
+
+  return { step, current, last };
+}
