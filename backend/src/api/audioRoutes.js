@@ -115,6 +115,19 @@ async function unknownStyle(pool, style) {
   return known.length > 0 && !known.includes(style);
 }
 
+// The cues a provider offers ("cue:<name>" entries its Refresh wrote into
+// models_cache), or null when it lists none -- no provider, or one never
+// refreshed: then there is nothing to check against and nothing is refused,
+// the same box-less rule as unknownStyle above. A registry cue the box does
+// not offer (SOMET-627 mapped attack/idle/shoot before the box had them)
+// can only fail, so such slots are upload-only until the box adds the cue
+// and the provider is refreshed.
+function offeredCues(provider) {
+  const cache = provider && Array.isArray(provider.models_cache) ? provider.models_cache : [];
+  const cues = cache.filter((m) => typeof m === 'string' && m.startsWith('cue:')).map((m) => m.slice(4));
+  return cues.length ? new Set(cues) : null;
+}
+
 module.exports = function audioRoutes(pool) {
   const router = express.Router();
   const admin = requireAdmin(pool);
@@ -156,7 +169,10 @@ module.exports = function audioRoutes(pool) {
       // Prompt coverage (spec 2026-09-30 §7): one read of every active prompt
       // and one catalog snapshot, never a query per slot. Stale needs the cue
       // for sfx slots; those come from the kind's subjectCues, loaded below.
-      const [activePrompts, promptCatalog] = await Promise.all([audioPrompts.listAllActive(pool), loadPromptCatalog(pool)]);
+      const [activePrompts, promptCatalog, activeProvider] = await Promise.all([
+        audioPrompts.listAllActive(pool), loadPromptCatalog(pool), resolveAudioProvider(pool, null),
+      ]);
+      const offered = offeredCues(activeProvider);
       const out = [];
       for (const [kind, def] of Object.entries(SUBJECT_KINDS)) {
         const entry = {
@@ -168,6 +184,16 @@ module.exports = function audioRoutes(pool) {
         };
         // eslint-disable-next-line no-await-in-loop
         if (def.subjectCues) entry.cues = await def.subjectCues(pool);
+        // The registry cues this group uses that the active provider does
+        // not offer -- the slot table and slot cards treat those slots as
+        // upload-only. Absent when nothing is missing or nothing is known.
+        if (entry.cues && offered) {
+          const missing = new Set();
+          for (const bySlot of Object.values(entry.cues)) {
+            for (const cue of Object.values(bySlot || {})) if (cue && !offered.has(cue)) missing.add(cue);
+          }
+          if (missing.size) entry.unofferedCues = [...missing].sort();
+        }
         // SOMET-605: which slots each subject carries, for kinds where that
         // varies (creature: boss slots only on boss rows). Absent = every
         // subject carries every slot in `slots`.
@@ -488,6 +514,8 @@ module.exports = function audioRoutes(pool) {
       }
       const rejected = [];
       const valid = [];
+      // The provider these jobs will run on (the pin, else the active one).
+      const offered = offeredCues(await resolveAudioProvider(pool, providerId));
       for (const item of b.items) {
         const it = item && typeof item === 'object' ? item : {};
         // eslint-disable-next-line no-await-in-loop
@@ -505,8 +533,13 @@ module.exports = function audioRoutes(pool) {
         // (realistic when absent) and picks the drain group.
         if (clipKind === 'sfx') {
           // eslint-disable-next-line no-await-in-loop
-          if (!(await cueFor(pool, it.subject_kind, it.subject_key, it.slot))) {
+          const cue = await cueFor(pool, it.subject_kind, it.subject_key, it.slot);
+          if (!cue) {
             rejected.push({ item, error: 'upload only: no cue on the provider' });
+            continue;
+          }
+          if (offered && !offered.has(cue)) {
+            rejected.push({ item, error: `upload only: the provider has no cue '${cue}' registered` });
             continue;
           }
           if (it.engine !== undefined && !audioJobQueue.SFX_ENGINES.includes(it.engine)) {

@@ -228,6 +228,34 @@ test('audio job routes', { skip }, async (t) => {
         }
       });
 
+      // A cue mapped in the registry but not offered by the provider (the box
+      // had no 'shoot' when SOMET-627 mapped ranged/use to it) can only fail,
+      // so it is refused at enqueue -- while a provider that lists no cues at
+      // all (never refreshed) refuses nothing, as the test above relies on.
+      await t.test('enqueue: a cue the pinned provider does not offer is refused as upload only', async () => {
+        await pool.query(`UPDATE ai_providers SET models_cache = '["cue:slash", "cue:hit"]'::jsonb WHERE id = $1`, [providerId]);
+        let res;
+        try {
+          res = await request(app).post('/api/audio/admin/jobs').set('Authorization', bearer(admin)).send({
+            provider_id: providerId,
+            start: false,
+            items: [
+              { subject_kind: 'attack_type', subject_key: 'melee', slot: 'use' },
+              { subject_kind: 'attack_type', subject_key: 'ranged', slot: 'use' },
+            ],
+          });
+          assert.equal(res.status, 201, JSON.stringify(res.body));
+          assert.deepEqual(res.body.queued.map((j) => `${j.subject_key}/${j.slot}`), ['melee/use']);
+          assert.deepEqual(res.body.rejected.map((r) => [r.item.subject_key, r.error]), [
+            ['ranged', "upload only: the provider has no cue 'shoot' registered"],
+          ]);
+        } finally {
+          await pool.query(`UPDATE ai_providers SET models_cache = '[]'::jsonb WHERE id = $1`, [providerId]);
+          const ids = ((res && res.body.queued) || []).map((j) => j.id);
+          if (ids.length) await pool.query('DELETE FROM audio_jobs WHERE id = ANY($1)', [ids]);
+        }
+      });
+
       await t.test('a provider_id that does not resolve to an active audio provider is a 400', async () => {
         const res = await request(app).post('/api/audio/admin/jobs').set('Authorization', bearer(admin)).send({
           items: [{ subject_kind: 'world', subject_key: worldName, slot: 'ambience' }],

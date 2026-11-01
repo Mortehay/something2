@@ -74,6 +74,8 @@ function SubjectSounds({
   // same way as "not sfx, ignore this prop".
   const group = (subjects || []).find((g) => g.kind === kind);
   const cues = (group && group.cues && group.cues[subjectKey]) || {};
+  // A cue the active provider does not offer reads as no cue: upload only.
+  const unoffered = new Set((group && group.unofferedCues) || []);
 
   return (
     <Wrap>
@@ -98,7 +100,7 @@ function SubjectSounds({
           onPlay={preview.play}
           onStop={preview.stop}
           canGenerate={canGenerate}
-          cue={cues[s.slot]}
+          cue={cues[s.slot] && unoffered.has(cues[s.slot]) ? null : cues[s.slot]}
           prompt={prompts[s.slot]}
         />
       ))}
