@@ -1593,6 +1593,15 @@ class World {
       return { ok: false, kills: [], reason: 'requirements_unmet', error: req.message || req.errors[0] };
     }
 
+    // Druid forms: a form skill needs its own form, and a shapeshifted Druid casts
+    // no spells (see skillSynergy.formGate).
+    const formBlock = skillSynergy.formGate(skill, skillBalance.activeForm(p));
+    if (formBlock) {
+      p._channelSkillId = null;
+      p._channelTicks = 0;
+      return { ok: false, kills: [], reason: formBlock.reason, error: formBlock.error };
+    }
+
     // Channeled skills: track continuous ticks and calculate ramping intensity
     let channelStack = 0;
     if (skill.channeled) {

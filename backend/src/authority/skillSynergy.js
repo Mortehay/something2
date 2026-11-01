@@ -11,6 +11,9 @@
 // DIFFERENT skill within a short gap of the last cast builds a chain, +6% a
 // link up to +18%, so rotating skills beats spamming one.
 //
+// FORMS. A Druid's bear / hawk / wolf skills only work in their own form, and
+// the spells (magic / debuff skills) are refused while shapeshifted.
+//
 // The client mirrors skillTags / SYNERGIES in core/skillsData.js (a parity test
 // pins them) so a tooltip can name what a skill pairs with.
 
@@ -106,7 +109,41 @@ function onCast(p, skill, now) {
   };
 }
 
+// ---- druid forms ------------------------------------------------------------
+const FORM_SKILLS = {
+  dru_maul: 'bear',
+  dru_ursocs_wrath: 'bear',
+  dru_feral_bite: 'wolf',
+};
+
+// 'bear' | 'hawk' | 'wolf' for a skill that needs that form, else null.
+function formOfSkill(skill) {
+  if (!skill || skill.class !== 'Druid') return null;
+  if (FORM_SKILLS[skill.id]) return FORM_SKILLS[skill.id];
+  const m = /^dru_(bear|hawk|wolf)_(?!form$)/.exec(skill.id);
+  return m ? m[1] : null;
+}
+
+const FORM_NAMES = { bear: 'Bear Form', hawk: 'Hawk Form', wolf: 'Wolf Form' };
+
+// null when the cast is allowed, else { reason, error }.
+//   - a form skill needs its own form;
+//   - while shapeshifted a Druid cannot cast spells (magic / debuff skills).
+// `activeForm` is 'bear' | 'hawk' | 'wolf' | null.
+function formGate(skill, activeForm) {
+  const need = formOfSkill(skill);
+  if (need && activeForm !== need) {
+    return { reason: 'form', error: `Requires ${FORM_NAMES[need]}` };
+  }
+  if (activeForm && skill.class === 'Druid' && !need
+      && (skill.type === 'magic' || skill.type === 'debuff')) {
+    return { reason: 'form_spell', error: 'Cannot cast spells in animal form' };
+  }
+  return null;
+}
+
 module.exports = {
   PRIMER_MS, CHAIN_WINDOW_MS, CHAIN_STEP, CHAIN_MAX,
   TAG_RULES, SYNERGIES, skillTags, onCast,
+  formOfSkill, formGate, FORM_NAMES,
 };
