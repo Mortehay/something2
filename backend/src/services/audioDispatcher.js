@@ -300,6 +300,8 @@ function runStatus() {
       requeued_orphans: 0,
       phase: null,
       waiting: null,
+      prompts_written: 0,
+      last_progress_at: null,
       scope: null,
     };
   }
@@ -319,6 +321,11 @@ function runStatus() {
     phase: run.phase || null,
     // { model, reason, since } while the box refuses a model switch.
     waiting: run.waiting ? { ...run.waiting } : null,
+    // Liveness for the panel: prompts this run wrote (the done count does
+    // not move during the prompt phase) and when a job last finished in any
+    // way -- done, prompt written, retried or failed.
+    prompts_written: run.promptsWritten,
+    last_progress_at: run.lastProgressAt || null,
     // SOMET-592 defect 2: null means an UNSCOPED drain (today's whole-queue
     // behaviour -- a page-level "Generate All"/dispatch call, or any batch
     // POST /admin/jobs with no scope requested), which claims across every
@@ -415,6 +422,8 @@ function startDrain(db, opts = {}) {
     requeuedOrphans: 0,
     phase: null,
     waiting: null,
+    promptsWritten: 0,
+    lastProgressAt: null,
     batchIds: opts.batchId ? [opts.batchId] : null,
   };
   const self = run;
@@ -525,6 +534,7 @@ function startDrain(db, opts = {}) {
     })) {
       if (outcome === 'retry') self.retried += 1; else self.failed += 1;
       self.error = String(result.error);
+      self.lastProgressAt = new Date().toISOString();
     }
   }
 
@@ -532,6 +542,7 @@ function startDrain(db, opts = {}) {
   async function completeJob(job, result) {
     if (!(await bookkeep(db, deps, self, job, () => deps.queue.complete(db, job.id, result.clip.id)))) return false;
     self.done += 1;
+    self.lastProgressAt = new Date().toISOString();
     refusalSwitch = null;
     return true;
   }
@@ -549,6 +560,8 @@ function startDrain(db, opts = {}) {
       subject_key: job.subject_key,
       slot: job.slot,
       drain_group: job.drain_group,
+      task: 'prompt',
+      started_at: new Date().toISOString(),
     };
     let r;
     try {
@@ -579,6 +592,8 @@ function startDrain(db, opts = {}) {
       let state;
       if (await bookkeep(db, deps, self, job, async () => { state = await deps.queue.promptWritten(db, job.id); })) {
         if (state === 'done') self.done += 1;
+        self.promptsWritten += 1;
+        self.lastProgressAt = new Date().toISOString();
       }
       return undefined;
     }
@@ -605,6 +620,8 @@ function startDrain(db, opts = {}) {
       subject_key: job.subject_key,
       slot: job.slot,
       drain_group: job.drain_group,
+      task: 'audio',
+      started_at: new Date().toISOString(),
     };
 
     // A thrown exception anywhere in resolving the provider or generating
@@ -684,6 +701,8 @@ function startDrain(db, opts = {}) {
       slot: head.slot,
       drain_group: head.drain_group,
       pack_size: jobs.length,
+      task: 'audio',
+      started_at: new Date().toISOString(),
     };
 
     const live = [];
