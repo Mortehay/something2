@@ -1,15 +1,15 @@
 {
   "header": {
-    "exported_at": "2026-11-01T19:21:40.550Z",
-    "exported_by": "unnamed-pc",
+    "exported_at": "2026-11-01T21:07:12.335Z",
+    "exported_by": "linux-dev",
     "group": "entities",
     "row_counts": {
       "class_loadouts": 0,
       "creature_drops": 675,
-      "entity_types": 379,
+      "entity_types": 380,
       "world_point_kinds": 10
     },
-    "schema_version": "1714440853000_enchant_scroll_price"
+    "schema_version": "1714440856000_blacksmith_entity"
   },
   "tables": {
     "class_loadouts": [],
@@ -20744,6 +20744,50 @@
         "xp_reward": null
       },
       {
+        "ai_provider_id": null,
+        "attack_element": "physical",
+        "auras": null,
+        "base_damage": null,
+        "behavior_id": null,
+        "boss_tier": null,
+        "chance": 0,
+        "charisma": 0,
+        "color": "#f97316",
+        "constitution": 0,
+        "defense": 0,
+        "dexterity": 0,
+        "element": null,
+        "faction": "hostile",
+        "gold_max": 0,
+        "gold_min": 0,
+        "hitbox_size": null,
+        "hp": 0,
+        "hp_regen_rate": 0,
+        "intelligence": 0,
+        "is_creature": false,
+        "is_playable": false,
+        "loot_chest": null,
+        "loot_min_rarity": null,
+        "loot_rarity_bias": null,
+        "loot_rolls": null,
+        "main_stat": null,
+        "mana": 0,
+        "mana_regen_rate": 0,
+        "max_hp": 0,
+        "max_mana": 0,
+        "name": "Village Blacksmith",
+        "place_order": 0,
+        "point_kind": "blacksmith",
+        "resistances": {},
+        "spawn_tiles": [],
+        "strength": 0,
+        "sync_uuid": "2b9c9e9f-0aa6-5d59-e770-9aea702f871e",
+        "vfx": null,
+        "walkable": true,
+        "wisdom": 0,
+        "xp_reward": null
+      },
+      {
         "ai_provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
         "attack_element": "physical",
         "auras": null,
@@ -22855,7 +22899,7 @@
         "sync_uuid": "633159e5-2ade-d8a6-dea5-f0bac1114920"
       },
       {
-        "default_entity_type_id": null,
+        "default_entity_type_id": "2b9c9e9f-0aa6-5d59-e770-9aea702f871e",
         "kind": "blacksmith",
         "sync_uuid": "f637f9dd-c264-4c87-bff9-a2c3515d045d"
       },

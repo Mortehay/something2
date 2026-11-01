@@ -1,18 +1,18 @@
 {
   "header": {
-    "exported_at": "2026-11-01T14:08:30.674Z",
-    "exported_by": "unnamed-pc",
+    "exported_at": "2026-11-01T21:07:54.395Z",
+    "exported_by": "linux-dev",
     "group": "art",
     "row_counts": {
       "art_prompt_descriptions": 52,
       "art_prompt_notes": 3,
       "catalog_art": 428,
       "character_appearances": 30,
-      "entity_types": 379,
-      "item_types": 280,
+      "entity_types": 380,
+      "item_types": 282,
       "tile_types": 50
     },
-    "schema_version": "1714440849000_quest_giver_point_kind"
+    "schema_version": "1714440856000_blacksmith_entity"
   },
   "tables": {
     "art_prompt_descriptions": [
@@ -9954,6 +9954,17 @@
         "sync_uuid": "4205e289-01dd-d217-619b-67397b5970f9"
       },
       {
+        "display_height": 96,
+        "display_width": 64,
+        "idle_fx": "none",
+        "image": null,
+        "name": "Village Blacksmith",
+        "prompt": "pixel art, a burly village blacksmith in a leather apron beside an anvil and a glowing forge, single object, solid transparent background",
+        "render_mode": "rect",
+        "sprite": null,
+        "sync_uuid": "2b9c9e9f-0aa6-5d59-e770-9aea702f871e"
+      },
+      {
         "display_height": null,
         "display_width": null,
         "idle_fx": "none",
@@ -11238,6 +11249,16 @@
         },
         "name": "dragon-wand",
         "sync_uuid": "d5b77e1a-d8ac-8a8e-e8d2-f32e73868f61"
+      },
+      {
+        "icon": null,
+        "name": "enchant_scroll",
+        "sync_uuid": "7efdd00c-bc65-4fa0-b23f-b2ba9d1aae6d"
+      },
+      {
+        "icon": null,
+        "name": "enchant_scroll_blessed",
+        "sync_uuid": "2357e027-416d-44c7-b972-48014af4f093"
       },
       {
         "icon": {
